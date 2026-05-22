@@ -1,0 +1,26 @@
+[
+  {
+    "repo": "you/commander",
+    "name": "Commander",
+    "icon": "ti-cpu",
+    "color": "blue",
+    "active_sprints": {
+      "1": {
+        "started_at": "2026-05-22",
+        "theme": "Sprint board + UAT flow"
+      }
+    }
+  },
+  {
+    "repo": "you/fitness-tracker",
+    "name": "Fitness Tracker",
+    "icon": "ti-run",
+    "color": "green",
+    "active_sprints": {
+      "2": {
+        "started_at": "2026-05-15",
+        "theme": "Workout logging v2"
+      }
+    }
+  }
+]

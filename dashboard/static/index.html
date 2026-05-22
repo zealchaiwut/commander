@@ -1,0 +1,592 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Commander</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.30.0/dist/tabler-icons.min.css">
+  <style>
+    /* ── Variables ── */
+    :root {
+      --bg:           #f9fafb;
+      --surface:      #ffffff;
+      --surface-2:    #f3f4f6;
+      --surface-hover:#f5f6f8;
+      --border:       #e5e7eb;
+      --text:         #111827;
+      --text-muted:   #6b7280;
+      --text-sub:     #9ca3af;
+      --green:        #16a34a;
+      --green-bg:     #dcfce7;
+      --amber:        #d97706;
+      --amber-bg:     #fef3c7;
+      --red:          #dc2626;
+      --red-bg:       #fee2e2;
+      --blue:         #2563eb;
+      --blue-bg:      #dbeafe;
+      --purple:       #7c3aed;
+      --purple-bg:    #ede9fe;
+      --mono: 'SF Mono','Fira Code','Cascadia Code',monospace;
+    }
+
+    [data-theme="dark"] {
+      --bg:           #0d0d0d;
+      --surface:      #161616;
+      --surface-2:    #1e1e1e;
+      --surface-hover:#222222;
+      --border:       #2a2a2a;
+      --text:         #e5e7eb;
+      --text-muted:   #9ca3af;
+      --text-sub:     #6b7280;
+      --green:        #22c55e;
+      --green-bg:     rgba(34,197,94,.13);
+      --amber:        #eab308;
+      --amber-bg:     rgba(234,179,8,.13);
+      --red:          #f87171;
+      --red-bg:       rgba(239,68,68,.13);
+      --blue:         #60a5fa;
+      --blue-bg:      rgba(96,165,250,.13);
+      --purple:       #a78bfa;
+      --purple-bg:    rgba(167,139,250,.13);
+    }
+
+    /* ── Reset ── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; font-size: 14px; min-height: 100dvh; }
+    button { font-family: inherit; cursor: pointer; }
+    a { color: inherit; }
+    .hidden { display: none !important; }
+
+    /* ── Header ── */
+    .header {
+      position: sticky; top: 0; z-index: 20;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 14px 24px;
+      display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    }
+    .header-left { display: flex; align-items: center; gap: 12px; min-width: 0; }
+    .live-dot {
+      width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0;
+      background: var(--green); box-shadow: 0 0 0 3px var(--green-bg);
+      animation: glow 2s ease-in-out infinite;
+    }
+    .live-dot.off { background: var(--text-sub); box-shadow: none; animation: none; }
+    @keyframes glow {
+      0%,100% { box-shadow: 0 0 0 3px var(--green-bg); }
+      50%      { box-shadow: 0 0 0 5px var(--green-bg); }
+    }
+    .header-title    { font-size: 15px; font-weight: 700; letter-spacing: -.02em; line-height: 1.2; }
+    .header-subtitle { font-size: 11px; color: var(--text-muted); line-height: 1.3; }
+    .header-right    { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+
+    .btn-ghost {
+      padding: 6px 12px; border: 1px solid var(--border); border-radius: 6px;
+      background: none; color: var(--text-muted); font-size: 12px; font-weight: 500;
+      transition: background .15s, color .15s;
+    }
+    .btn-ghost:hover { background: var(--surface-2); color: var(--text); }
+    .btn-primary {
+      padding: 6px 14px; border: none; border-radius: 6px;
+      background: var(--text); color: var(--surface); font-size: 12px; font-weight: 600;
+      transition: opacity .15s;
+    }
+    .btn-primary:hover { opacity: .82; }
+    .btn-icon {
+      width: 32px; height: 32px; display: flex; align-items: center; justify-content: center;
+      border: 1px solid var(--border); border-radius: 6px; background: none;
+      color: var(--text-muted); font-size: 15px; transition: background .15s, color .15s;
+    }
+    .btn-icon:hover { background: var(--surface-2); color: var(--text); }
+
+    /* ── Main tabs ── */
+    .main-tabs {
+      display: flex; background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 0 24px;
+    }
+    .mtab {
+      padding: 10px 0; margin-right: 24px;
+      background: none; border: none; border-bottom: 2px solid transparent;
+      color: var(--text-muted); font-size: 13px; font-weight: 500;
+      transition: color .15s, border-color .15s;
+    }
+    .mtab.active { color: var(--text); border-bottom-color: var(--blue); }
+    .mtab:hover:not(.active) { color: var(--text); }
+
+    /* ── Metrics row ── */
+    .metrics-row {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+    }
+    .metric-card {
+      padding: 20px 24px;
+      border-right: 1px solid var(--border);
+      display: flex; flex-direction: column; gap: 3px;
+      transition: background .15s;
+    }
+    .metric-card:last-child { border-right: none; }
+    .metric-label { font-size: 10px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: .08em; }
+    .metric-value { font-size: 30px; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; }
+    .metric-sub   { font-size: 11px; color: var(--text-muted); }
+    .metric-card.uat-alert { background: var(--amber-bg); }
+    .metric-card.uat-alert .metric-value { color: var(--amber); }
+
+    @media (max-width: 600px) {
+      .metrics-row { grid-template-columns: 1fr 1fr; }
+      .metric-card:nth-child(2) { border-right: none; }
+      .metric-card { padding: 14px 16px; }
+      .metric-value { font-size: 24px; }
+    }
+
+    /* ── Filter bar ── */
+    .filter-bar {
+      display: flex; align-items: center; gap: 4px;
+      padding: 10px 24px; background: var(--surface);
+      border-bottom: 1px solid var(--border);
+    }
+    .ftab {
+      padding: 4px 12px; border: none; border-radius: 20px;
+      background: none; color: var(--text-muted); font-size: 12px; font-weight: 500;
+      transition: background .15s, color .15s;
+    }
+    .ftab:hover   { background: var(--surface-2); color: var(--text); }
+    .ftab.active  { background: var(--surface-2); color: var(--text); font-weight: 600; }
+
+    /* ── Project rows ── */
+    .project-list { background: var(--bg); }
+
+    .project-block { }
+
+    .project-row {
+      display: grid;
+      grid-template-columns: 2fr 1.2fr 0.8fr 0.9fr 40px;
+      grid-template-areas: "name progress eta agents chevron";
+      align-items: center;
+      gap: 0 20px;
+      padding: 16px 24px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      cursor: pointer;
+      user-select: none;
+      transition: background .15s;
+    }
+    .project-row:hover   { background: var(--surface-hover); }
+    .project-row.expanded { background: var(--surface-hover); }
+
+    .proj-col-name     { grid-area: name;     min-width: 0; display: flex; align-items: center; gap: 12px; }
+    .proj-col-progress { grid-area: progress; min-width: 0; }
+    .proj-col-eta      { grid-area: eta;      min-width: 0; }
+    .proj-col-agents   { grid-area: agents;   min-width: 0; display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+    .proj-col-chevron  { grid-area: chevron;  display: flex; justify-content: flex-end; align-items: center; }
+
+    .chevron-icon { color: var(--text-sub); transition: transform .2s ease; font-size: 16px; }
+    .project-row.expanded .chevron-icon { transform: rotate(180deg); }
+
+    /* Project icon */
+    .proj-icon {
+      width: 32px; height: 32px; border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0; font-size: 16px; color: #fff;
+    }
+
+    /* Project info */
+    .proj-info { min-width: 0; }
+    .proj-title { font-size: 14px; font-weight: 500; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .proj-sprint-line { display: flex; align-items: center; gap: 6px; margin-top: 2px; flex-wrap: wrap; }
+    .sprint-tag {
+      font-size: 10px; font-weight: 600; padding: 1px 6px; border-radius: 4px;
+      background: var(--blue-bg); color: var(--blue); white-space: nowrap;
+    }
+    .sprint-theme { font-size: 11px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .no-sprint-text { font-size: 11px; color: var(--text-sub); font-style: italic; }
+
+    /* Progress */
+    .prog-header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 5px; }
+    .prog-lbl    { font-size: 10px; color: var(--text-muted); }
+    .prog-pct    { font-size: 11px; font-weight: 600; color: var(--text-muted); }
+    .prog-track  { height: 4px; background: var(--surface-2); border-radius: 2px; overflow: hidden; }
+    .prog-fill   { height: 100%; border-radius: 2px; transition: width .4s ease; }
+    .prog-fill.good    { background: var(--green); }
+    .prog-fill.warning { background: var(--amber); }
+    .prog-fill.late    { background: var(--red); }
+    .prog-fill.idle    { background: var(--text-sub); }
+
+    /* ETA */
+    .eta-val { font-size: 13px; font-weight: 600; display: block; }
+    .eta-sub { font-size: 11px; color: var(--text-muted); display: block; margin-top: 1px; }
+    .eta-val.warning, .eta-sub.warning { color: var(--amber); }
+    .eta-val.late,    .eta-sub.late    { color: var(--red); }
+    .eta-val.idle,    .eta-sub.idle    { color: var(--text-sub); }
+
+    /* Agent pills */
+    .agent-pill {
+      font-size: 10px; font-weight: 500; padding: 2px 8px; border-radius: 12px;
+      white-space: nowrap; display: inline-flex; align-items: center;
+    }
+    .agent-pill.working  { background: var(--blue-bg);   color: var(--blue); }
+    .agent-pill.waiting  { background: var(--amber-bg);  color: var(--amber); }
+    .agent-pill.done     { background: var(--green-bg);  color: var(--green); }
+    .agent-pill.idle,
+    .agent-pill.no-agent,
+    .agent-pill.overflow { background: var(--surface-2); color: var(--text-sub); border: 1px solid var(--border); }
+
+    /* Mobile project rows */
+    @media (max-width: 600px) {
+      .project-row {
+        grid-template-columns: 1fr auto;
+        grid-template-rows: auto auto auto;
+        grid-template-areas:
+          "name chevron"
+          "progress eta"
+          "agents agents";
+        gap: 8px 12px;
+        padding: 12px 16px;
+      }
+      .proj-col-agents { grid-area: agents; }
+      .prog-lbl { display: none; }
+      .eta-sub  { display: none; }
+    }
+
+    /* ── Expand panel ── */
+    .proj-expand {
+      background: var(--surface-2);
+      border-bottom: 2px solid var(--border);
+    }
+    .expand-inner {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      padding: 20px 24px;
+    }
+    .expand-col { min-width: 0; }
+    .expand-col + .expand-col {
+      border-left: 1px solid var(--border);
+      padding-left: 24px;
+      margin-left: 4px;
+    }
+    .expand-hdr {
+      display: flex; justify-content: space-between; align-items: center;
+      margin-bottom: 12px;
+    }
+    .expand-hdr-title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .07em; color: var(--text-muted); }
+    .view-all { font-size: 11px; color: var(--blue); text-decoration: none; }
+    .view-all:hover { text-decoration: underline; }
+    .expand-loading { padding: 32px; text-align: center; color: var(--text-muted); font-size: 13px; }
+
+    @media (max-width: 600px) {
+      .expand-inner {
+        grid-template-columns: 1fr;
+        padding: 16px;
+        gap: 0;
+      }
+      .expand-col + .expand-col {
+        border-left: none; border-top: 1px solid var(--border);
+        padding-left: 0; margin-left: 0;
+        padding-top: 16px; margin-top: 16px;
+      }
+    }
+
+    /* ── Ticket cards ── */
+    .ticket-card {
+      padding: 10px 12px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      margin-bottom: 6px;
+    }
+    .ticket-card:last-child { margin-bottom: 0; }
+    .ticket-top { display: flex; align-items: flex-start; gap: 6px; margin-bottom: 4px; }
+    .ticket-num {
+      font-family: var(--mono); font-size: 11px; color: var(--text-muted);
+      text-decoration: none; flex-shrink: 0; line-height: 1.6;
+    }
+    .ticket-num:hover { color: var(--blue); }
+    .ticket-title { font-size: 12px; font-weight: 500; line-height: 1.4; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+    .ticket-meta { font-size: 11px; color: var(--text-muted); margin-top: 4px; }
+    .sign-off { color: var(--amber); font-weight: 500; }
+    .ticket-actions { display: flex; gap: 6px; margin-top: 8px; }
+    .btn-approve-sm {
+      flex: 1; padding: 5px; border: 1px solid rgba(22,163,74,.3); border-radius: 5px;
+      background: var(--green-bg); color: var(--green); font-size: 11px; font-weight: 600;
+      transition: opacity .15s;
+    }
+    .btn-approve-sm:hover { opacity: .8; }
+    .btn-approve-sm:disabled { opacity: .4; cursor: not-allowed; }
+    .btn-reject-sm {
+      flex: 1; padding: 5px; border: 1px solid rgba(220,38,38,.3); border-radius: 5px;
+      background: var(--red-bg); color: var(--red); font-size: 11px; font-weight: 600;
+      transition: opacity .15s;
+    }
+    .btn-reject-sm:hover { opacity: .8; }
+    .reject-inline { margin-top: 8px; }
+    .reject-inline textarea {
+      width: 100%; padding: 7px 9px;
+      background: var(--surface); border: 1px solid var(--border); border-radius: 5px;
+      color: var(--text); font-size: 12px; font-family: inherit; resize: vertical;
+      outline: none; margin-bottom: 6px;
+    }
+    .reject-inline textarea:focus { border-color: var(--red); }
+    .reject-row { display: flex; gap: 6px; }
+    .btn-send-sm {
+      flex: 1; padding: 5px; border: 1px solid rgba(220,38,38,.3); border-radius: 5px;
+      background: var(--red-bg); color: var(--red); font-size: 11px; font-weight: 600;
+    }
+    .btn-cancel-sm {
+      padding: 5px 10px; border: 1px solid var(--border); border-radius: 5px;
+      background: none; color: var(--text-muted); font-size: 11px;
+    }
+    .btn-cancel-sm:hover { color: var(--text); }
+
+    /* Status badges */
+    .sbadge {
+      font-size: 9px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: .06em; padding: 2px 6px; border-radius: 4px;
+      white-space: nowrap; flex-shrink: 0;
+    }
+    .sbadge.blue   { background: var(--blue-bg);   color: var(--blue); }
+    .sbadge.amber  { background: var(--amber-bg);  color: var(--amber); }
+    .sbadge.purple { background: var(--purple-bg); color: var(--purple); }
+    .sbadge.red    { background: var(--red-bg);    color: var(--red); }
+    .sbadge.gray   { background: var(--surface-2); color: var(--text-muted); border: 1px solid var(--border); }
+
+    /* ── Agent detail cards ── */
+    .agent-detail-card {
+      padding: 10px 12px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      margin-bottom: 6px;
+    }
+    .agent-detail-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 4px; }
+    .agent-detail-name { font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .agent-badge { font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; padding: 2px 7px; border-radius: 4px; flex-shrink: 0; }
+    .agent-badge.working { background: var(--blue-bg);   color: var(--blue); }
+    .agent-badge.waiting { background: var(--amber-bg);  color: var(--amber); }
+    .agent-badge.done    { background: var(--green-bg);  color: var(--green); }
+    .agent-detail-tool { font-size: 11px; color: var(--text-muted); margin-bottom: 2px; }
+    .agent-detail-meta { font-size: 11px; color: var(--text-sub); font-family: var(--mono); }
+
+    /* ── Inline test report (UAT ticket expand) ── */
+    .uat-report {
+      margin-top: 10px;
+      padding-top: 10px;
+      border-top: 1px solid var(--border);
+    }
+    .tr-loading { font-size: 11px; color: var(--text-muted); padding: 2px 0; font-style: italic; }
+    .tr-section-title {
+      font-size: 10px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: .07em; color: var(--text-muted); margin-bottom: 5px;
+    }
+    .tr-section-title + .tr-section-title { margin-top: 10px; }
+    .tr-row {
+      display: flex; align-items: flex-start; gap: 5px;
+      font-size: 12px; line-height: 1.4; padding: 2px 0;
+    }
+    .tr-icon   { flex-shrink: 0; width: 16px; font-style: normal; }
+    .tr-text   { flex: 1; color: var(--text-muted); }
+    .tr-text.fail { color: var(--red); }
+    .tr-manual-wrap { display: flex; flex-direction: column; gap: 3px; flex: 1; }
+    .tr-manual-check {
+      display: flex; align-items: center; gap: 5px;
+      margin-top: 3px;
+    }
+    .tr-manual-check input[type=checkbox] {
+      width: 13px; height: 13px; cursor: pointer;
+      accent-color: var(--green); flex-shrink: 0;
+    }
+    .tr-manual-check label {
+      font-size: 11px; color: var(--text-muted); cursor: pointer; user-select: none;
+    }
+    .tr-summary {
+      margin-top: 8px; padding: 5px 8px; border-radius: 4px;
+      background: var(--surface-2); font-size: 11px; color: var(--text-muted);
+    }
+    .tr-summary.ready   { color: var(--green); }
+    .tr-summary.blocked { color: var(--red); }
+
+    /* Prominent Approve button — shown when all manual steps are verified */
+    .btn-approve-sm.prominent {
+      flex: 2;
+      background: var(--green);
+      color: #fff;
+      border-color: var(--green);
+      font-size: 12px;
+      font-weight: 700;
+      box-shadow: 0 1px 4px rgba(22,163,74,.35);
+    }
+
+    /* ── Empty states ── */
+    .empty-projects, .empty-small, .empty {
+      padding: 32px 24px; text-align: center;
+      color: var(--text-muted); font-size: 13px;
+    }
+    .empty-small { padding: 16px 0; font-size: 12px; }
+
+    /* ── Agents view ── */
+    .agent-summary {
+      display: flex; background: var(--surface);
+      border-bottom: 1px solid var(--border);
+    }
+    .sum-item {
+      flex: 1; padding: 16px 24px;
+      border-right: 1px solid var(--border);
+      display: flex; flex-direction: column; gap: 2px;
+    }
+    .sum-item:last-child { border-right: none; }
+    .sum-count { font-size: 26px; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; }
+    .sum-label { font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .07em; }
+
+    .section-pad { padding: 20px 24px; }
+    .section-label { font-size: 10px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: .08em; margin-bottom: 14px; }
+
+    .agents-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px,1fr)); gap: 10px; }
+    .agent-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px; }
+    .agent-card.working { border-left: 3px solid var(--green); }
+    .agent-card.waiting { border-left: 3px solid var(--amber); }
+    .agent-card.done    { border-left: 3px solid var(--border); opacity: .7; }
+    .card-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+    .agent-name  { font-weight: 600; font-size: 15px; }
+    .badge { font-size: 9px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; padding: 3px 8px; border-radius: 5px; }
+    .badge-working { background: var(--green-bg);  color: var(--green); }
+    .badge-waiting { background: var(--amber-bg);  color: var(--amber); }
+    .badge-done    { background: var(--surface-2); color: var(--text-muted); border: 1px solid var(--border); }
+
+    /* Role badges */
+    .role-badge { font-size: 9px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; padding: 2px 7px; border-radius: 4px; }
+    .role-coder  { background: var(--blue-bg);   color: var(--blue); }
+    .role-tester { background: var(--purple-bg); color: var(--purple); }
+    .role-ba     { background: var(--green-bg);  color: var(--green); }
+    .role-agent  { background: var(--surface-2); color: var(--text-muted); border: 1px solid var(--border); }
+
+    .agent-context { font-size: 12px; font-weight: 500; color: var(--text); margin-bottom: 4px; }
+    .agent-branch  { font-size: 11px; color: var(--text-muted); margin-bottom: 4px; font-family: var(--mono); }
+    .agent-sess    { font-size: 11px; color: var(--text-sub);   font-family: var(--mono); }
+    .agent-dir  { font-family: var(--mono); font-size: 10px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-bottom: 8px; }
+    .agent-tool { font-size: 12px; }
+    .agent-tool .lbl { color: var(--text-muted); }
+    .agent-time { font-size: 11px; color: var(--text-muted); margin-top: 6px; font-family: var(--mono); }
+
+    /* ── Activity view ── */
+    .activity-list { display: flex; flex-direction: column; }
+    .activity-row {
+      display: grid; grid-template-columns: 72px 110px 1fr;
+      gap: 10px; align-items: baseline;
+      padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 12px;
+    }
+    .activity-row:last-child { border-bottom: none; }
+    .act-time  { font-family: var(--mono); color: var(--text-muted); }
+    .act-agent { color: var(--blue); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .act-desc  { color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    @media (max-width: 400px) { .activity-row { grid-template-columns: 60px 90px 1fr; gap: 6px; } }
+
+    @media (max-width: 600px) {
+      .header { padding: 12px 16px; }
+      .main-tabs { padding: 0 16px; }
+      .filter-bar { padding: 8px 16px; }
+      .project-row { padding: 12px 16px; }
+      .section-pad { padding: 16px; }
+      .agent-summary .sum-item { padding: 12px 16px; }
+      .sum-count { font-size: 22px; }
+    }
+  </style>
+</head>
+<body>
+
+<header class="header">
+  <div class="header-left">
+    <div class="live-dot off" id="live-dot"></div>
+    <div>
+      <div class="header-title">Commander</div>
+      <div class="header-subtitle" id="header-subtitle">Loading…</div>
+    </div>
+  </div>
+  <div class="header-right">
+    <button class="btn-ghost">Filters</button>
+    <button class="btn-primary">+ New project</button>
+    <button class="btn-icon" id="theme-btn" onclick="toggleTheme()" title="Toggle theme">
+      <i class="ti ti-moon" id="theme-icon"></i>
+    </button>
+  </div>
+</header>
+
+<nav class="main-tabs">
+  <button class="mtab active" id="mtab-projects"  onclick="switchMain('projects')">Projects</button>
+  <button class="mtab"        id="mtab-agents"    onclick="switchMain('agents')">Agents</button>
+  <button class="mtab"        id="mtab-activity"  onclick="switchMain('activity')">Activity log</button>
+</nav>
+
+<!-- ── Projects view ── -->
+<div id="view-projects">
+  <div class="metrics-row">
+    <div class="metric-card">
+      <span class="metric-label">Active Sprints</span>
+      <span class="metric-value" id="m-sprints">—</span>
+      <span class="metric-sub" id="m-sprints-sub">across projects</span>
+    </div>
+    <div class="metric-card">
+      <span class="metric-label">Open Tickets</span>
+      <span class="metric-value" id="m-tickets">—</span>
+      <span class="metric-sub">in tracked projects</span>
+    </div>
+    <div class="metric-card" id="m-uat-card">
+      <span class="metric-label">Awaiting UAT</span>
+      <span class="metric-value" id="m-uat">—</span>
+      <span class="metric-sub">needs your review</span>
+    </div>
+    <div class="metric-card">
+      <span class="metric-label">Tokens Today</span>
+      <span class="metric-value">—</span>
+      <span class="metric-sub">~$0.00 est.</span>
+    </div>
+  </div>
+
+  <div class="filter-bar">
+    <button class="ftab active" id="ftab-all"    onclick="setFilter('all')">All</button>
+    <button class="ftab"        id="ftab-active"  onclick="setFilter('active')">Active</button>
+    <button class="ftab"        id="ftab-review"  onclick="setFilter('review')">Needs review</button>
+  </div>
+
+  <div class="project-list" id="project-list">
+    <div class="empty-projects">Loading projects…</div>
+  </div>
+</div>
+
+<!-- ── Agents view ── -->
+<div id="view-agents" class="hidden">
+  <div class="agent-summary">
+    <div class="sum-item">
+      <span class="sum-count" id="cnt-working">—</span>
+      <span class="sum-label">Working</span>
+    </div>
+    <div class="sum-item">
+      <span class="sum-count" id="cnt-waiting">—</span>
+      <span class="sum-label">Waiting</span>
+    </div>
+    <div class="sum-item">
+      <span class="sum-count" id="cnt-done">—</span>
+      <span class="sum-label">Done</span>
+    </div>
+  </div>
+  <div class="section-pad">
+    <div class="section-label">Active agents</div>
+    <div class="agents-grid" id="agents-grid">
+      <div class="empty">No active agents</div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Activity view ── -->
+<div id="view-activity" class="hidden">
+  <div class="section-pad">
+    <div class="section-label">Activity log</div>
+    <div class="activity-list" id="activity-list">
+      <div class="empty">No activity yet</div>
+    </div>
+  </div>
+</div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

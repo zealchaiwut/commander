@@ -1,9 +1,20 @@
 import json
 import sqlite3
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 DB_PATH = Path(__file__).parent / "dashboard.db"
+
+# Asia/Bangkok is UTC+7 (no DST)
+_BKK_OFFSET = timezone(timedelta(hours=7))
+
+
+def _bkk_midnight_utc() -> str:
+    """Return the ISO-8601 UTC timestamp of midnight Asia/Bangkok today."""
+    now_bkk  = datetime.now(_BKK_OFFSET)
+    midnight  = now_bkk.replace(hour=0, minute=0, second=0, microsecond=0)
+    utc_mid   = midnight.astimezone(timezone.utc)
+    return utc_mid.strftime("%Y-%m-%dT%H:%M:%S")
 
 
 def get_conn() -> sqlite3.Connection:
@@ -32,6 +43,16 @@ def init_db():
                 event_type  TEXT NOT NULL,
                 data        TEXT NOT NULL,
                 created_at  TEXT NOT NULL
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS token_usage (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id    TEXT NOT NULL,
+                project       TEXT NOT NULL,
+                input_tokens  INTEGER NOT NULL,
+                output_tokens INTEGER NOT NULL,
+                recorded_at   TEXT NOT NULL
             )
         """)
         conn.commit()
@@ -92,3 +113,45 @@ def get_recent_events(limit: int = 50) -> list[dict]:
         d["data"] = json.loads(d["data"])
         result.append(d)
     return result
+
+
+# ── Token usage ───────────────────────────────────────────────────────────────
+
+def record_token_usage(session_id: str, project: str,
+                       input_tokens: int, output_tokens: int) -> None:
+    now = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S")
+    with get_conn() as conn:
+        conn.execute(
+            """INSERT INTO token_usage
+               (session_id, project, input_tokens, output_tokens, recorded_at)
+               VALUES (?, ?, ?, ?, ?)""",
+            (session_id, project, input_tokens, output_tokens, now),
+        )
+        conn.commit()
+
+
+def get_tokens_today(project: str | None = None) -> dict:
+    """Return total input_tokens, output_tokens since midnight Asia/Bangkok.
+
+    If *project* is given, filter to that project only.
+    Returns {"input_tokens": int, "output_tokens": int}.
+    """
+    cutoff = _bkk_midnight_utc()
+    with get_conn() as conn:
+        if project:
+            row = conn.execute(
+                """SELECT COALESCE(SUM(input_tokens),0)  AS inp,
+                          COALESCE(SUM(output_tokens),0) AS out
+                   FROM token_usage
+                   WHERE project = ? AND recorded_at >= ?""",
+                (project, cutoff),
+            ).fetchone()
+        else:
+            row = conn.execute(
+                """SELECT COALESCE(SUM(input_tokens),0)  AS inp,
+                          COALESCE(SUM(output_tokens),0) AS out
+                   FROM token_usage
+                   WHERE recorded_at >= ?""",
+                (cutoff,),
+            ).fetchone()
+    return {"input_tokens": row["inp"], "output_tokens": row["out"]}

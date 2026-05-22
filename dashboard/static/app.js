@@ -97,6 +97,18 @@ function renderMetrics(metrics) {
   const uatCard = document.getElementById('m-uat-card');
   uatCard.classList.toggle('uat-alert', (metrics.awaiting_uat ?? 0) > 0);
 
+  // Tokens Today
+  const tokVal = metrics.tokens_today;
+  const tokEl  = document.getElementById('m-tokens');
+  const subEl  = document.getElementById('m-tokens-sub');
+  if (tokEl) {
+    tokEl.textContent = tokVal != null ? tokVal.toLocaleString() : '—';
+  }
+  if (subEl) {
+    const cost = metrics.cost_today_usd;
+    subEl.textContent = cost != null ? `~$${cost.toFixed(2)} est.` : '~$0.00 est.';
+  }
+
   const working = metrics.working_agents ?? 0;
   document.getElementById('header-subtitle').textContent = working > 0
     ? `${working} agent${working !== 1 ? 's' : ''} working · ${metrics.open_tickets ?? 0} open tickets`
@@ -292,6 +304,10 @@ function ticketCardHtml(ticket, repo) {
       </div>`;
   }
 
+  const branchChip = ticket.feature_branch
+    ? `<div class="ticket-branch"><i class="ti ti-git-branch"></i>${escapeHtml(ticket.feature_branch)}</div>`
+    : '';
+
   return `
     <div class="ticket-card">
       <div class="ticket-top">
@@ -300,6 +316,7 @@ function ticketCardHtml(ticket, repo) {
         <span class="sbadge ${color}">${escapeHtml(ticket.status)}</span>
       </div>
       <div class="ticket-meta">${assignee}${sep}${updated}</div>
+      ${branchChip}
       ${actionsHtml}
     </div>`;
 }
@@ -346,6 +363,17 @@ function renderExpandPanel(id, data, repo) {
     ? agents.map(agentDetailCardHtml).join('')
     : '<div class="empty-small">No agents on this project</div>';
 
+  // Tokens today line for this project
+  const tokTotal = data.tokens_today;
+  const tokCost  = data.cost_today_usd;
+  let tokLine = '';
+  if (tokTotal != null && tokTotal > 0) {
+    const costStr = tokCost != null ? ` · ~$${tokCost.toFixed(2)}` : '';
+    tokLine = `<div class="agent-detail-meta" style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border)">Tokens today: ${tokTotal.toLocaleString()}${escapeHtml(costStr)}</div>`;
+  } else {
+    tokLine = `<div class="agent-detail-meta" style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border)">Tokens today: —</div>`;
+  }
+
   el.innerHTML = `
     <div class="expand-col">
       <div class="expand-hdr">
@@ -359,6 +387,7 @@ function renderExpandPanel(id, data, repo) {
         <span class="expand-hdr-title">Agents</span>
       </div>
       ${agentsHtml}
+      ${tokLine}
     </div>`;
 
   // kick off test-report loads for UAT tickets

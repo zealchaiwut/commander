@@ -55,6 +55,16 @@ class AgentEvent(BaseModel):
         return self
 
 
+class TokenUsageEvent(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    session_id:    Optional[str] = None
+    event_type:    str = "token_usage"
+    working_dir:   str = "unknown"
+    input_tokens:  int = 0
+    output_tokens: int = 0
+
+
 class RejectBody(BaseModel):
     reason: str
 
@@ -107,6 +117,17 @@ def health_check() -> HealthResponse:
 async def receive_event(event: AgentEvent):
     db.upsert_agent(event.session_id, event.working_dir, event.status, event.tool_name, event.name)
     db.add_event(event.session_id, event.event_type, event.model_dump())
+    await broadcast({"type": "update", "event": event.model_dump()})
+    return {"ok": True}
+
+
+@app.post("/api/token-usage")
+async def receive_token_usage(event: TokenUsageEvent):
+    if not event.input_tokens and not event.output_tokens:
+        return {"ok": True}
+    project = Path(event.working_dir).name if event.working_dir != "unknown" else "unknown"
+    session_id = event.session_id or "unknown"
+    db.record_token_usage(session_id, project, event.input_tokens, event.output_tokens)
     await broadcast({"type": "update", "event": event.model_dump()})
     return {"ok": True}
 

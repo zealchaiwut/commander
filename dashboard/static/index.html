@@ -305,6 +305,13 @@
     .ticket-num:hover { color: var(--blue); }
     .ticket-title { font-size: 12px; font-weight: 500; line-height: 1.4; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
     .ticket-meta { font-size: 11px; color: var(--text-muted); margin-top: 4px; }
+    .ticket-branch {
+      display: inline-flex; align-items: center; gap: 3px;
+      font-size: 10px; font-family: var(--mono); color: var(--text-sub);
+      background: var(--surface-2); border: 1px solid var(--border);
+      border-radius: 4px; padding: 1px 6px; margin-top: 5px;
+      max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
     .sign-off { color: var(--amber); font-weight: 500; }
     .ticket-actions { display: flex; gap: 6px; margin-top: 8px; }
     .btn-approve-sm {
@@ -537,8 +544,8 @@
     </div>
     <div class="metric-card">
       <span class="metric-label">Tokens Today</span>
-      <span class="metric-value">—</span>
-      <span class="metric-sub">~$0.00 est.</span>
+      <span class="metric-value" id="m-tokens">—</span>
+      <span class="metric-sub" id="m-tokens-sub">~$0.00 est.</span>
     </div>
   </div>
 

@@ -246,8 +246,9 @@ def add_project(repo: str, icon: str = "ti-folder", color: str = "gray") -> dict
 def get_all_projects(agents: list[dict]) -> dict:
     projects = load_projects()
     result   = []
-    total_open = 0
-    total_uat  = 0
+    total_open   = 0
+    total_active = 0
+    total_uat    = 0
     active_sprint_set: set[str] = set()
 
     for proj in projects:
@@ -268,14 +269,16 @@ def get_all_projects(agents: list[dict]) -> dict:
             except Exception:
                 pass
 
-        open_i = [i for i in issues if i.get("state") == "open"]
-        uat_i  = [i for i in issues if any(l["name"] == "UAT" for l in i.get("labels", []))]
+        open_i   = [i for i in issues if i.get("state") == "open"]
+        active_i = [i for i in open_i if _ticket_status(i) in ("in-progress", "SIT", "UAT")]
+        uat_i    = [i for i in issues if any(l["name"] == "UAT" for l in i.get("labels", []))]
 
         if sprint_num and open_i:
             active_sprint_set.add(f"{repo}:sprint-{sprint_num}")
 
-        total_open += len(open_i)
-        total_uat  += len(uat_i)
+        total_open   += len(open_i)
+        total_active += len(active_i)
+        total_uat    += len(uat_i)
 
         eta      = _compute_eta(issues, sprint_info)
         progress = _compute_progress(issues)
@@ -310,7 +313,7 @@ def get_all_projects(agents: list[dict]) -> dict:
         "projects": result,
         "metrics": {
             "active_sprints":  len(active_sprint_set),
-            "open_tickets":    total_open,
+            "active_tickets":  total_active,
             "awaiting_uat":    total_uat,
             "tokens_today":    global_total,
             "cost_today_usd":  _cost_usd(global_tok["input_tokens"], global_tok["output_tokens"]),

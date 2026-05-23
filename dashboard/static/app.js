@@ -714,14 +714,88 @@ function connectSSE() {
   };
 }
 
+// ── Plan Usage card ───────────────────────────────────────────────────────────
+
+function _fmtSecondsRemaining(seconds) {
+  if (seconds <= 0) return null;
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  if (h > 0) return `${h}h ${m}m left`;
+  return `${m}m left`;
+}
+
+async function loadPlanUsage() {
+  try {
+    const res = await fetch('/api/plan-usage');
+    if (res.status === 404) {
+      // Not configured — keep card hidden (AC-1)
+      return;
+    }
+    if (!res.ok) throw new Error(await res.text());
+    const d = await res.json();
+    renderPlanUsage(d);
+  } catch {
+    // Silently suppress — card stays hidden
+  }
+}
+
+function renderPlanUsage(d) {
+  const card    = document.getElementById('m-plan-card');
+  const pctEl   = document.getElementById('m-plan-pct');
+  const barEl   = document.getElementById('m-plan-bar');
+  const timeEl  = document.getElementById('m-plan-time');
+  const slowEl  = document.getElementById('m-plan-slow');
+  const row     = document.querySelector('.metrics-row');
+  if (!card) return;
+
+  // Show card and expand metrics row
+  card.classList.remove('hidden');
+  if (row) row.classList.add('has-plan');
+
+  const pct    = d.window_pct ?? 0;
+  const status = d.status;
+
+  // AC-7: approx label already in HTML; show percentage
+  pctEl.textContent = pct.toFixed(1) + '%';
+
+  // AC-5: color the bar
+  barEl.style.width = Math.min(pct, 100) + '%';
+  barEl.className   = 'plan-bar-fill';
+  if      (pct > 80) barEl.classList.add('plan-red');
+  else if (pct >= 50) barEl.classList.add('plan-amber');
+  else               barEl.classList.add('plan-green');
+
+  // AC-6: time remaining or ready label
+  if (status === 'active') {
+    const timeStr = _fmtSecondsRemaining(d.seconds_remaining);
+    // AC-7: note "(approx)" on token count in time sub-line
+    const tokenStr = d.window_tokens != null
+      ? `${d.window_tokens.toLocaleString()} / ${d.window_limit.toLocaleString()} tokens (approx)`
+      : '';
+    timeEl.textContent = timeStr
+      ? `${timeStr} · ${tokenStr}`
+      : tokenStr;
+  } else {
+    // no_activity or expired
+    timeEl.textContent = 'ready · new window starts on next agent activity';
+  }
+
+  // AC-5: "Slow down" hint when > 80%
+  slowEl.classList.toggle('hidden', pct <= 80);
+}
+
 // ── Periodic refresh ──────────────────────────────────────────────────────────
 setInterval(() => {
-  if (!document.getElementById('view-projects').classList.contains('hidden')) loadProjects();
+  if (!document.getElementById('view-projects').classList.contains('hidden')) {
+    loadProjects();
+    loadPlanUsage();
+  }
 }, 60_000);
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 (function init() {
   initTheme();
   loadProjects();
+  loadPlanUsage();
   connectSSE();
 })();

@@ -21,6 +21,7 @@ import projects as projects_module
 load_dotenv(Path(__file__).parent / ".env")
 
 STATIC_DIR = Path(__file__).parent / "static"
+ENVIRONMENT = os.environ.get("ENVIRONMENT", "prd").lower()
 
 _subscribers: list[asyncio.Queue] = []
 _start_time: float = 0.0
@@ -135,6 +136,12 @@ def health_check() -> HealthResponse:
         uptime_seconds=uptime,
         database=DatabaseStatus(reachable=db_reachable, path=str(db.DB_PATH)),
     )
+
+
+@app.get("/api/environment")
+def get_environment():
+    """Return the current runtime environment (prd or uat)."""
+    return {"environment": ENVIRONMENT}
 
 
 @app.post("/api/agent-event")

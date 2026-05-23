@@ -10,6 +10,13 @@ import httpx
 BASE_URL = os.environ.get("TEST_BASE_URL", "http://localhost:8000")
 
 
+def pytest_configure(config):
+    config.addinivalue_line(
+        "markers",
+        "live: mark test as requiring a running dashboard server (deselected by default)",
+    )
+
+
 @pytest.fixture(scope="session")
 def base_url() -> str:
     return BASE_URL

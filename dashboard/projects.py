@@ -262,6 +262,11 @@ def get_all_projects(agents: list[dict]) -> dict:
                 issues = github_client.list_issues(sprint_num, repo_name=repo)
             except Exception:
                 pass
+        else:
+            try:
+                issues = github_client.list_open_issues(repo_name=repo, limit=100)
+            except Exception:
+                pass
 
         open_i = [i for i in issues if i.get("state") == "open"]
         uat_i  = [i for i in issues if any(l["name"] == "UAT" for l in i.get("labels", []))]

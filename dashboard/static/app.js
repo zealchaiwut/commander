@@ -91,9 +91,9 @@ function setFilter(filter) {
 
 // ── Metrics ───────────────────────────────────────────────────────────────────
 function renderMetrics(metrics) {
-  document.getElementById('m-sprints').textContent = metrics.active_sprints ?? '—';
-  document.getElementById('m-tickets').textContent = metrics.open_tickets   ?? '—';
-  document.getElementById('m-uat').textContent     = metrics.awaiting_uat   ?? '—';
+  document.getElementById('m-sprints').textContent = metrics.active_sprints  ?? '—';
+  document.getElementById('m-tickets').textContent = metrics.active_tickets  ?? '—';
+  document.getElementById('m-uat').textContent     = metrics.awaiting_uat    ?? '—';
 
   const uatCard = document.getElementById('m-uat-card');
   uatCard.classList.toggle('uat-alert', (metrics.awaiting_uat ?? 0) > 0);
@@ -112,8 +112,8 @@ function renderMetrics(metrics) {
 
   const working = metrics.working_agents ?? 0;
   document.getElementById('header-subtitle').textContent = working > 0
-    ? `${working} agent${working !== 1 ? 's' : ''} working · ${metrics.open_tickets ?? 0} open tickets`
-    : `${metrics.open_tickets ?? 0} open tickets · ${metrics.active_sprints ?? 0} active sprint${metrics.active_sprints !== 1 ? 's' : ''}`;
+    ? `${working} agent${working !== 1 ? 's' : ''} working · ${metrics.active_tickets ?? 0} active tickets`
+    : `${metrics.active_tickets ?? 0} active tickets · ${metrics.active_sprints ?? 0} active sprint${metrics.active_sprints !== 1 ? 's' : ''}`;
 }
 
 // ── Project list ──────────────────────────────────────────────────────────────
@@ -314,13 +314,21 @@ function ticketCardHtml(ticket, repo) {
     <div class="ticket-card">
       <div class="ticket-top">
         <a class="ticket-num" href="${escapeHtml(ticket.url)}" target="_blank" rel="noopener">#${ticket.number}</a>
-        <span class="ticket-title">${escapeHtml(ticket.title)}</span>
+        <a class="ticket-title ticket-title-link" href="${escapeHtml(ticket.url)}" target="_blank" rel="noopener">${escapeHtml(ticket.title)}</a>
         <span class="sbadge ${color}">${escapeHtml(ticket.status)}</span>
       </div>
       <div class="ticket-meta">${assignee}${sep}${updated}</div>
       ${branchChip}
       ${actionsHtml}
     </div>`;
+}
+
+function _ticketGroupHtml(label, tickets, repo) {
+  if (tickets.length === 0) return '';
+  return `<div class="ticket-group">
+    <div class="expand-hdr-title ticket-group-hdr">${escapeHtml(label)} · ${tickets.length}</div>
+    ${tickets.map(t => ticketCardHtml(t, repo)).join('')}
+  </div>`;
 }
 
 function agentDetailCardHtml(agent) {
@@ -357,10 +365,20 @@ function renderExpandPanel(id, data, repo) {
   const agents  = data.agents  || [];
   const ghUrl   = data.github_url || `https://github.com/${repo}/issues`;
 
-  // AC-1: active tickets from GitHub (open only, already filtered by server)
-  const ticketsHtml = tickets.length
-    ? tickets.map(t => ticketCardHtml(t, repo)).join('')
-    : '<div class="empty-small">No open tickets</div>';
+  // Group tickets by workflow stage; only render non-empty sections
+  let ticketsHtml;
+  if (tickets.length === 0) {
+    ticketsHtml = '<div class="empty-small">No open tickets</div>';
+  } else {
+    const sitT   = tickets.filter(t => t.status === 'SIT');
+    const uatT   = tickets.filter(t => t.status === 'UAT');
+    const otherT = tickets.filter(t => !['SIT', 'UAT'].includes(t.status));
+    ticketsHtml  = [
+      _ticketGroupHtml('SIT',    sitT,   repo),
+      _ticketGroupHtml('UAT',    uatT,   repo),
+      _ticketGroupHtml('Others', otherT, repo),
+    ].join('');
+  }
 
   // AC-2: separate working vs done agents; respect toggle state (AC-2d)
   const workingAgents = agents.filter(a => a.status === 'working');

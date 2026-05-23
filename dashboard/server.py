@@ -22,8 +22,25 @@ load_dotenv(Path(__file__).parent / ".env")
 
 STATIC_DIR = Path(__file__).parent / "static"
 
+# Configurable via .env: how long (seconds) a 'working' agent can be silent before
+# it is marked 'timed_out'.  Default: 300 s (5 minutes).
+AGENT_IDLE_TIMEOUT_SECONDS: int = int(os.environ.get("AGENT_IDLE_TIMEOUT_SECONDS", "300"))
+_TIMEOUT_CHECK_INTERVAL: int = 60  # run the check every 60 seconds
+
 _subscribers: list[asyncio.Queue] = []
 _start_time: float = 0.0
+
+
+async def _timeout_loop() -> None:
+    """Background task: mark stale 'working' agents as 'timed_out' every 60 s."""
+    while True:
+        await asyncio.sleep(_TIMEOUT_CHECK_INTERVAL)
+        try:
+            count = db.timeout_idle_agents(AGENT_IDLE_TIMEOUT_SECONDS)
+            if count:
+                await broadcast({"type": "update", "event": {"event_type": "agent_timeout", "count": count}})
+        except Exception:
+            pass  # never crash the background task
 
 
 @asynccontextmanager
@@ -31,7 +48,13 @@ async def lifespan(app: FastAPI):
     global _start_time
     _start_time = time.monotonic()
     db.init_db()
+    task = asyncio.create_task(_timeout_loop())
     yield
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
 
 
 app = FastAPI(lifespan=lifespan)

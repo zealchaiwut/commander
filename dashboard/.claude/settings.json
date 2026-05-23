@@ -11,6 +11,17 @@
         ]
       }
     ],
+    "PostToolUse": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/commander/dashboard/venv/bin/python3 $HOME/commander/dashboard/hooks/post_tool_used.py"
+          }
+        ]
+      }
+    ],
     "Stop": [
       {
         "hooks": [

@@ -204,7 +204,8 @@ python3 ~/commander/dashboard/scripts/post_test_report.py \
 
 If `READY_FOR_UAT`:
 ```bash
-python3 ~/commander/dashboard/scripts/update_ticket.py --issue <N> --status uat
+# Merges to develop, pushes, labels UAT, deletes branch — all in one step
+cd ~/commander && python3 dashboard/scripts/finish_feature.py --issue <N>
 ```
 
 If `NEEDS_FIXES`, leave the ticket in SIT (do not move it). Say which tests failed and what the likely fix is.

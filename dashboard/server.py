@@ -1,8 +1,10 @@
 import asyncio
 import json
+import os
 import subprocess
 import time
 from contextlib import asynccontextmanager
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -253,6 +255,140 @@ def get_project_details(repo: str):
         raise _gh_error(e)
     except ValueError as e:
         raise HTTPException(400, detail=str(e))
+
+
+# ── plan usage endpoint ───────────────────────────────────────────────────────
+
+def _plan_config() -> tuple[int | None, int | None, float]:
+    """Return (window_token_limit, weekly_token_limit, window_hours) from env.
+
+    Returns (None, None, 5.0) when WINDOW_TOKEN_LIMIT or PLAN_TYPE is unset.
+    """
+    plan_type = os.environ.get("PLAN_TYPE", "").strip()
+    window_limit_raw = os.environ.get("WINDOW_TOKEN_LIMIT", "").strip()
+    if not plan_type or not window_limit_raw:
+        return None, None, 5.0
+
+    try:
+        window_limit = int(window_limit_raw)
+    except ValueError:
+        return None, None, 5.0
+
+    weekly_raw = os.environ.get("WEEKLY_TOKEN_LIMIT", "").strip()
+    weekly_limit: int | None = None
+    if weekly_raw:
+        try:
+            weekly_limit = int(weekly_raw)
+        except ValueError:
+            pass
+
+    window_hours_raw = os.environ.get("WINDOW_DURATION_HOURS", "5").strip()
+    try:
+        window_hours = float(window_hours_raw)
+    except ValueError:
+        window_hours = 5.0
+
+    return window_limit, weekly_limit, window_hours
+
+
+@app.get("/api/plan-usage")
+def get_plan_usage():
+    """Return Plan Usage data for the rolling token window.
+
+    AC-1: Hidden (404 with detail) when WINDOW_TOKEN_LIMIT or PLAN_TYPE is unset.
+    AC-3: Returns window_tokens, window_limit, window_pct, window_start,
+           window_resets_at, seconds_remaining, weekly_tokens, weekly_limit, status.
+    AC-4: Window start = earliest token_usage row after previous window expiry.
+    """
+    window_limit, weekly_limit, window_hours = _plan_config()
+    if window_limit is None:
+        raise HTTPException(status_code=404, detail="Plan usage not configured")
+
+    window_duration = timedelta(hours=window_hours)
+    now_utc = datetime.now(timezone.utc)
+
+    # --- AC-4: Determine window start via rolling-window logic ---
+    # Start from the absolute earliest row ever and walk forward through
+    # expired windows until we find the active one or conclude there's none.
+    earliest_ts_str = db.get_earliest_token_row_after(None)
+
+    if earliest_ts_str is None:
+        # No rows at all → no_activity
+        return {
+            "window_tokens":    0,
+            "window_limit":     window_limit,
+            "window_pct":       0.0,
+            "window_start":     None,
+            "window_resets_at": None,
+            "seconds_remaining": 0,
+            "weekly_tokens":    None,
+            "weekly_limit":     weekly_limit,
+            "status":           "no_activity",
+        }
+
+    # Parse earliest timestamp (stored without timezone → treat as UTC)
+    def _parse_utc(ts: str) -> datetime:
+        if ts.endswith("Z"):
+            ts = ts[:-1]
+        return datetime.fromisoformat(ts).replace(tzinfo=timezone.utc)
+
+    window_start = _parse_utc(earliest_ts_str)
+
+    # Walk forward: find the current window by advancing past expired ones
+    while True:
+        window_end = window_start + window_duration
+        if window_end > now_utc:
+            # This window is still active
+            break
+        # Window expired — look for the next activity after this window ended
+        window_end_str = window_end.strftime("%Y-%m-%dT%H:%M:%S")
+        next_ts_str = db.get_earliest_token_row_after(window_end_str)
+        if next_ts_str is None:
+            # No activity after last window expiry → expired status
+            window_tokens_str = window_start.strftime("%Y-%m-%dT%H:%M:%S")
+            window_tokens = db.get_window_usage(window_tokens_str)
+            window_pct = round(min(window_tokens / window_limit * 100, 100.0), 2)
+            weekly_tokens: int | None = None
+            if weekly_limit is not None:
+                # Sum last 7 days
+                week_start = (now_utc - timedelta(days=7)).strftime("%Y-%m-%dT%H:%M:%S")
+                weekly_tokens = db.get_window_usage(week_start)
+            return {
+                "window_tokens":    window_tokens,
+                "window_limit":     window_limit,
+                "window_pct":       window_pct,
+                "window_start":     window_start.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "window_resets_at": window_end.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "seconds_remaining": 0,
+                "weekly_tokens":    weekly_tokens,
+                "weekly_limit":     weekly_limit,
+                "status":           "expired",
+            }
+        window_start = _parse_utc(next_ts_str)
+
+    # Active window found
+    window_end = window_start + window_duration
+    window_start_str = window_start.strftime("%Y-%m-%dT%H:%M:%S")
+    window_tokens = db.get_window_usage(window_start_str)
+    window_pct = round(min(window_tokens / window_limit * 100, 100.0), 2)
+    seconds_remaining = max(0, int((window_end - now_utc).total_seconds()))
+
+    weekly_tokens = None
+    if weekly_limit is not None:
+        week_start = (now_utc - timedelta(days=7)).strftime("%Y-%m-%dT%H:%M:%S")
+        weekly_tokens = db.get_window_usage(week_start)
+
+    return {
+        "window_tokens":    window_tokens,
+        "window_limit":     window_limit,
+        "window_pct":       window_pct,
+        "window_start":     window_start.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "window_resets_at": window_end.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "seconds_remaining": seconds_remaining,
+        "weekly_tokens":    weekly_tokens,
+        "weekly_limit":     weekly_limit,
+        "status":           "active",
+    }
 
 
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")

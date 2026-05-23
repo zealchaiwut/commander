@@ -130,6 +130,41 @@ def record_token_usage(session_id: str, project: str,
         conn.commit()
 
 
+def get_earliest_token_row_after(after_utc: str | None = None) -> str | None:
+    """Return the recorded_at of the earliest token_usage row after *after_utc*.
+
+    If *after_utc* is None, returns the earliest row ever.
+    Returns None if no rows exist.
+    """
+    with get_conn() as conn:
+        if after_utc is None:
+            row = conn.execute(
+                "SELECT MIN(recorded_at) AS ts FROM token_usage"
+            ).fetchone()
+        else:
+            row = conn.execute(
+                "SELECT MIN(recorded_at) AS ts FROM token_usage WHERE recorded_at > ?",
+                (after_utc,),
+            ).fetchone()
+    return row["ts"] if row and row["ts"] else None
+
+
+def get_window_usage(window_start_utc: str) -> int:
+    """Sum input_tokens + output_tokens for all rows with recorded_at >= window_start_utc.
+
+    Covers all sessions and projects.
+    Returns the total token count as an integer.
+    """
+    with get_conn() as conn:
+        row = conn.execute(
+            """SELECT COALESCE(SUM(input_tokens + output_tokens), 0) AS total
+               FROM token_usage
+               WHERE recorded_at >= ?""",
+            (window_start_utc,),
+        ).fetchone()
+    return int(row["total"])
+
+
 def get_tokens_today(project: str | None = None) -> dict:
     """Return total input_tokens, output_tokens since midnight Asia/Bangkok.
 

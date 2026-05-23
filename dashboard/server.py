@@ -1,8 +1,10 @@
 import asyncio
 import json
+import os
 import subprocess
 import time
 from contextlib import asynccontextmanager
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -19,9 +21,37 @@ import projects as projects_module
 load_dotenv(Path(__file__).parent / ".env")
 
 STATIC_DIR = Path(__file__).parent / "static"
+ENVIRONMENT = os.environ.get("ENVIRONMENT", "prd").lower()
+
+# Configurable via .env: how long (seconds) a 'working' agent can be silent before
+# it is marked 'timed_out'.  Default: 300 s (5 minutes).
+AGENT_IDLE_TIMEOUT_SECONDS: int = int(os.environ.get("AGENT_IDLE_TIMEOUT_SECONDS", "300"))
+_TIMEOUT_CHECK_INTERVAL: int = 60  # run the check every 60 seconds
 
 _subscribers: list[asyncio.Queue] = []
 _start_time: float = 0.0
+
+
+async def _cache_refresh_loop():
+    """Periodically re-fetch GitHub data and broadcast an update so clients refresh."""
+    while True:
+        await asyncio.sleep(30)
+        try:
+            await broadcast({"type": "update", "event": {"event_type": "cache_refresh"}})
+        except Exception:
+            pass
+
+
+async def _timeout_loop() -> None:
+    """Background task: mark stale 'working' agents as 'timed_out' every 60 s."""
+    while True:
+        await asyncio.sleep(_TIMEOUT_CHECK_INTERVAL)
+        try:
+            count = db.timeout_idle_agents(AGENT_IDLE_TIMEOUT_SECONDS)
+            if count:
+                await broadcast({"type": "update", "event": {"event_type": "agent_timeout", "count": count}})
+        except Exception:
+            pass  # never crash the background task
 
 
 @asynccontextmanager
@@ -29,7 +59,16 @@ async def lifespan(app: FastAPI):
     global _start_time
     _start_time = time.monotonic()
     db.init_db()
+    task1 = asyncio.create_task(_cache_refresh_loop())
+    task2 = asyncio.create_task(_timeout_loop())
     yield
+    task1.cancel()
+    task2.cancel()
+    for t in (task1, task2):
+        try:
+            await t
+        except asyncio.CancelledError:
+            pass
 
 
 app = FastAPI(lifespan=lifespan)
@@ -55,8 +94,24 @@ class AgentEvent(BaseModel):
         return self
 
 
+class TokenUsageEvent(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    session_id:    Optional[str] = None
+    event_type:    str = "token_usage"
+    working_dir:   str = "unknown"
+    input_tokens:  int = 0
+    output_tokens: int = 0
+
+
 class RejectBody(BaseModel):
     reason: str
+
+
+class NewProjectBody(BaseModel):
+    repo_url: str
+    icon: Optional[str] = "ti-folder"
+    color: Optional[str] = "gray"
 
 
 class DatabaseStatus(BaseModel):
@@ -103,10 +158,27 @@ def health_check() -> HealthResponse:
     )
 
 
+@app.get("/api/environment")
+def get_environment():
+    """Return the current runtime environment (prd or uat)."""
+    return {"environment": ENVIRONMENT}
+
+
 @app.post("/api/agent-event")
 async def receive_event(event: AgentEvent):
     db.upsert_agent(event.session_id, event.working_dir, event.status, event.tool_name, event.name)
     db.add_event(event.session_id, event.event_type, event.model_dump())
+    await broadcast({"type": "update", "event": event.model_dump()})
+    return {"ok": True}
+
+
+@app.post("/api/token-usage")
+async def receive_token_usage(event: TokenUsageEvent):
+    if not event.input_tokens and not event.output_tokens:
+        return {"ok": True}
+    project = Path(event.working_dir).name if event.working_dir != "unknown" else "unknown"
+    session_id = event.session_id or "unknown"
+    db.record_token_usage(session_id, project, event.input_tokens, event.output_tokens)
     await broadcast({"type": "update", "event": event.model_dump()})
     return {"ok": True}
 
@@ -223,6 +295,23 @@ def get_projects():
         raise HTTPException(400, detail=str(e))
 
 
+@app.post("/api/projects", status_code=201)
+def add_project(body: NewProjectBody):
+    try:
+        new_proj = projects_module.add_project(
+            repo=body.repo_url,
+            icon=body.icon or "ti-folder",
+            color=body.color or "gray",
+        )
+        return new_proj
+    except FileExistsError as e:
+        raise HTTPException(409, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(422, detail=str(e))
+    except subprocess.CalledProcessError as e:
+        raise _gh_error(e)
+
+
 @app.get("/api/project-details")
 def get_project_details(repo: str):
     try:
@@ -232,6 +321,140 @@ def get_project_details(repo: str):
         raise _gh_error(e)
     except ValueError as e:
         raise HTTPException(400, detail=str(e))
+
+
+# ── plan usage endpoint ───────────────────────────────────────────────────────
+
+def _plan_config() -> tuple[int | None, int | None, float]:
+    """Return (window_token_limit, weekly_token_limit, window_hours) from env.
+
+    Returns (None, None, 5.0) when WINDOW_TOKEN_LIMIT or PLAN_TYPE is unset.
+    """
+    plan_type = os.environ.get("PLAN_TYPE", "").strip()
+    window_limit_raw = os.environ.get("WINDOW_TOKEN_LIMIT", "").strip()
+    if not plan_type or not window_limit_raw:
+        return None, None, 5.0
+
+    try:
+        window_limit = int(window_limit_raw)
+    except ValueError:
+        return None, None, 5.0
+
+    weekly_raw = os.environ.get("WEEKLY_TOKEN_LIMIT", "").strip()
+    weekly_limit: int | None = None
+    if weekly_raw:
+        try:
+            weekly_limit = int(weekly_raw)
+        except ValueError:
+            pass
+
+    window_hours_raw = os.environ.get("WINDOW_DURATION_HOURS", "5").strip()
+    try:
+        window_hours = float(window_hours_raw)
+    except ValueError:
+        window_hours = 5.0
+
+    return window_limit, weekly_limit, window_hours
+
+
+@app.get("/api/plan-usage")
+def get_plan_usage():
+    """Return Plan Usage data for the rolling token window.
+
+    AC-1: Hidden (404 with detail) when WINDOW_TOKEN_LIMIT or PLAN_TYPE is unset.
+    AC-3: Returns window_tokens, window_limit, window_pct, window_start,
+           window_resets_at, seconds_remaining, weekly_tokens, weekly_limit, status.
+    AC-4: Window start = earliest token_usage row after previous window expiry.
+    """
+    window_limit, weekly_limit, window_hours = _plan_config()
+    if window_limit is None:
+        raise HTTPException(status_code=404, detail="Plan usage not configured")
+
+    window_duration = timedelta(hours=window_hours)
+    now_utc = datetime.now(timezone.utc)
+
+    # --- AC-4: Determine window start via rolling-window logic ---
+    # Start from the absolute earliest row ever and walk forward through
+    # expired windows until we find the active one or conclude there's none.
+    earliest_ts_str = db.get_earliest_token_row_after(None)
+
+    if earliest_ts_str is None:
+        # No rows at all → no_activity
+        return {
+            "window_tokens":    0,
+            "window_limit":     window_limit,
+            "window_pct":       0.0,
+            "window_start":     None,
+            "window_resets_at": None,
+            "seconds_remaining": 0,
+            "weekly_tokens":    None,
+            "weekly_limit":     weekly_limit,
+            "status":           "no_activity",
+        }
+
+    # Parse earliest timestamp (stored without timezone → treat as UTC)
+    def _parse_utc(ts: str) -> datetime:
+        if ts.endswith("Z"):
+            ts = ts[:-1]
+        return datetime.fromisoformat(ts).replace(tzinfo=timezone.utc)
+
+    window_start = _parse_utc(earliest_ts_str)
+
+    # Walk forward: find the current window by advancing past expired ones
+    while True:
+        window_end = window_start + window_duration
+        if window_end > now_utc:
+            # This window is still active
+            break
+        # Window expired — look for the next activity after this window ended
+        window_end_str = window_end.strftime("%Y-%m-%dT%H:%M:%S")
+        next_ts_str = db.get_earliest_token_row_after(window_end_str)
+        if next_ts_str is None:
+            # No activity after last window expiry → expired status
+            window_tokens_str = window_start.strftime("%Y-%m-%dT%H:%M:%S")
+            window_tokens = db.get_window_usage(window_tokens_str)
+            window_pct = round(min(window_tokens / window_limit * 100, 100.0), 2)
+            weekly_tokens: int | None = None
+            if weekly_limit is not None:
+                # Sum last 7 days
+                week_start = (now_utc - timedelta(days=7)).strftime("%Y-%m-%dT%H:%M:%S")
+                weekly_tokens = db.get_window_usage(week_start)
+            return {
+                "window_tokens":    window_tokens,
+                "window_limit":     window_limit,
+                "window_pct":       window_pct,
+                "window_start":     window_start.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "window_resets_at": window_end.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "seconds_remaining": 0,
+                "weekly_tokens":    weekly_tokens,
+                "weekly_limit":     weekly_limit,
+                "status":           "expired",
+            }
+        window_start = _parse_utc(next_ts_str)
+
+    # Active window found
+    window_end = window_start + window_duration
+    window_start_str = window_start.strftime("%Y-%m-%dT%H:%M:%S")
+    window_tokens = db.get_window_usage(window_start_str)
+    window_pct = round(min(window_tokens / window_limit * 100, 100.0), 2)
+    seconds_remaining = max(0, int((window_end - now_utc).total_seconds()))
+
+    weekly_tokens = None
+    if weekly_limit is not None:
+        week_start = (now_utc - timedelta(days=7)).strftime("%Y-%m-%dT%H:%M:%S")
+        weekly_tokens = db.get_window_usage(week_start)
+
+    return {
+        "window_tokens":    window_tokens,
+        "window_limit":     window_limit,
+        "window_pct":       window_pct,
+        "window_start":     window_start.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "window_resets_at": window_end.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "seconds_remaining": seconds_remaining,
+        "weekly_tokens":    weekly_tokens,
+        "weekly_limit":     weekly_limit,
+        "status":           "active",
+    }
 
 
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")

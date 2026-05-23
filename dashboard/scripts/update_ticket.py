@@ -6,6 +6,7 @@ Usage:
   python3 scripts/update_ticket.py --issue 42 --status sit
   python3 scripts/update_ticket.py --issue 42 --status uat
   python3 scripts/update_ticket.py --issue 42 --status blocked
+  python3 scripts/update_ticket.py --issue 42 --status uat-approved
 
 Prints:  #<number> <url>
 """
@@ -22,18 +23,27 @@ STATUS_MAP = {
     "in-progress": {
         "add":    ["in-progress"],
         "remove": ["SIT", "UAT", "needs-rework", "blocked"],
+        "close":  None,
     },
     "sit": {
         "add":    ["SIT"],
         "remove": ["in-progress", "UAT", "needs-rework", "blocked"],
+        "close":  None,
     },
     "uat": {
         "add":    ["UAT"],
         "remove": ["in-progress", "SIT", "needs-rework", "blocked"],
+        "close":  None,
     },
     "blocked": {
         "add":    ["blocked"],
         "remove": [],
+        "close":  None,
+    },
+    "uat-approved": {
+        "add":    ["UAT-approved"],
+        "remove": ["UAT"],
+        "close":  "completed",
     },
 }
 
@@ -72,6 +82,15 @@ def main():
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
         sys.exit(f"Error: {result.stderr.strip()}")
+
+    if mapping["close"]:
+        close_result = subprocess.run(
+            ["gh", "issue", "close", str(args.issue), "--repo", repo,
+             "--reason", mapping["close"]],
+            capture_output=True, text=True,
+        )
+        if close_result.returncode != 0:
+            sys.exit(f"Error closing issue: {close_result.stderr.strip()}")
 
     url = f"https://github.com/{repo}/issues/{args.issue}"
     print(f"#{args.issue} {url}")

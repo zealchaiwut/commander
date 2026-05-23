@@ -76,6 +76,8 @@
       0%,100% { box-shadow: 0 0 0 3px var(--green-bg); }
       50%      { box-shadow: 0 0 0 5px var(--green-bg); }
     }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .spinning { animation: spin 0.8s linear infinite; transform-origin: center; }
     .header-title    { font-size: 15px; font-weight: 700; letter-spacing: -.02em; line-height: 1.2; }
     .header-subtitle { font-size: 11px; color: var(--text-muted); line-height: 1.3; }
     .header-right    { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
@@ -99,6 +101,14 @@
     }
     .btn-icon:hover { background: var(--surface-2); color: var(--text); }
 
+    /* ── Environment badge ── */
+    .env-badge {
+      font-size: 10px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase;
+      padding: 3px 8px; border-radius: 5px; flex-shrink: 0;
+    }
+    .env-badge.prd { background: var(--green-bg); color: var(--green); border: 1px solid rgba(22,163,74,.25); }
+    .env-badge.uat { background: var(--blue-bg);  color: var(--blue);  border: 1px solid rgba(37,99,235,.25); }
+
     /* ── Main tabs ── */
     .main-tabs {
       display: flex; background: var(--surface);
@@ -121,6 +131,7 @@
       background: var(--surface);
       border-bottom: 1px solid var(--border);
     }
+    .metrics-row.has-plan { grid-template-columns: repeat(5, 1fr); }
     .metric-card {
       padding: 20px 24px;
       border-right: 1px solid var(--border);
@@ -134,11 +145,41 @@
     .metric-card.uat-alert { background: var(--amber-bg); }
     .metric-card.uat-alert .metric-value { color: var(--amber); }
 
+    /* ── Plan Usage card ── */
+    .plan-bar-track { height: 5px; background: var(--surface-2); border-radius: 3px; overflow: hidden; margin-top: 6px; }
+    .plan-bar-fill  { height: 100%; border-radius: 3px; transition: width .5s ease, background .3s ease; }
+    .plan-bar-fill.plan-green  { background: var(--green); }
+    .plan-bar-fill.plan-amber  { background: var(--amber); }
+    .plan-bar-fill.plan-red    { background: var(--red); }
+    .plan-pct-row { display: flex; align-items: baseline; gap: 4px; }
+    .plan-pct-val { font-size: 30px; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; }
+    .plan-pct-approx { font-size: 10px; color: var(--text-muted); font-weight: 500; }
+    .plan-time { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+    .plan-slow-hint {
+      display: inline-flex; align-items: center; gap: 4px;
+      font-size: 10px; font-weight: 600; color: var(--red);
+      cursor: help; margin-top: 3px;
+    }
+    .plan-slow-hint .ti { font-size: 11px; }
+    /* Tooltip */
+    [data-tooltip] { position: relative; }
+    [data-tooltip]::after {
+      content: attr(data-tooltip);
+      position: absolute; bottom: calc(100% + 5px); left: 50%; transform: translateX(-50%);
+      background: #1a1a1a; color: #f0f0f0; font-size: 11px; font-weight: 400;
+      padding: 5px 8px; border-radius: 5px; white-space: nowrap; max-width: 240px;
+      white-space: normal; text-align: center; pointer-events: none;
+      opacity: 0; transition: opacity .15s; z-index: 100; line-height: 1.4;
+    }
+    [data-tooltip]:hover::after { opacity: 1; }
+
     @media (max-width: 600px) {
       .metrics-row { grid-template-columns: 1fr 1fr; }
+      .metrics-row.has-plan { grid-template-columns: 1fr 1fr; }
       .metric-card:nth-child(2) { border-right: none; }
       .metric-card { padding: 14px 16px; }
       .metric-value { font-size: 24px; }
+      .plan-pct-val { font-size: 24px; }
     }
 
     /* ── Filter bar ── */
@@ -195,6 +236,8 @@
     /* Project info */
     .proj-info { min-width: 0; }
     .proj-title { font-size: 14px; font-weight: 500; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .proj-title-link { text-decoration: none; color: inherit; }
+    .proj-title-link:hover { color: var(--blue); }
     .proj-sprint-line { display: flex; align-items: center; gap: 6px; margin-top: 2px; flex-wrap: wrap; }
     .sprint-tag {
       font-size: 10px; font-weight: 600; padding: 1px 6px; border-radius: 4px;
@@ -305,6 +348,13 @@
     .ticket-num:hover { color: var(--blue); }
     .ticket-title { font-size: 12px; font-weight: 500; line-height: 1.4; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
     .ticket-meta { font-size: 11px; color: var(--text-muted); margin-top: 4px; }
+    .ticket-branch {
+      display: inline-flex; align-items: center; gap: 3px;
+      font-size: 10px; font-family: var(--mono); color: var(--text-sub);
+      background: var(--surface-2); border: 1px solid var(--border);
+      border-radius: 4px; padding: 1px 6px; margin-top: 5px;
+      max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
     .sign-off { color: var(--amber); font-weight: 500; }
     .ticket-actions { display: flex; gap: 6px; margin-top: 8px; }
     .btn-approve-sm {
@@ -443,15 +493,17 @@
 
     .agents-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px,1fr)); gap: 10px; }
     .agent-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px; }
-    .agent-card.working { border-left: 3px solid var(--green); }
-    .agent-card.waiting { border-left: 3px solid var(--amber); }
-    .agent-card.done    { border-left: 3px solid var(--border); opacity: .7; }
+    .agent-card.working   { border-left: 3px solid var(--green); }
+    .agent-card.waiting   { border-left: 3px solid var(--amber); }
+    .agent-card.done      { border-left: 3px solid var(--border); opacity: .7; }
+    .agent-card.timed_out { border-left: 3px solid #9ca3af; opacity: .75; }
     .card-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
     .agent-name  { font-weight: 600; font-size: 15px; }
     .badge { font-size: 9px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; padding: 3px 8px; border-radius: 5px; }
-    .badge-working { background: var(--green-bg);  color: var(--green); }
-    .badge-waiting { background: var(--amber-bg);  color: var(--amber); }
-    .badge-done    { background: var(--surface-2); color: var(--text-muted); border: 1px solid var(--border); }
+    .badge-working   { background: var(--green-bg);  color: var(--green); }
+    .badge-waiting   { background: var(--amber-bg);  color: var(--amber); }
+    .badge-done      { background: var(--surface-2); color: var(--text-muted); border: 1px solid var(--border); }
+    .badge-timed-out { background: #9ca3af; color: #fff; }
 
     /* Role badges */
     .role-badge { font-size: 9px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; padding: 2px 7px; border-radius: 4px; }
@@ -503,13 +555,22 @@
     </div>
   </div>
   <div class="header-right">
+    <span class="env-badge hidden" id="env-badge"></span>
     <button class="btn-ghost">Filters</button>
-    <button class="btn-primary">+ New project</button>
+    <button class="btn-primary" onclick="openNewProjectModal()">+ New Project</button>
+    <button id="btn-refresh" class="btn-icon" title="Refresh dashboard" aria-label="Refresh">
+      <svg id="refresh-icon" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M13.5 2.5A7 7 0 1 0 14.5 9"/>
+        <polyline points="14.5 2 14.5 6 10.5 6"/>
+      </svg>
+    </button>
     <button class="btn-icon" id="theme-btn" onclick="toggleTheme()" title="Toggle theme">
       <i class="ti ti-moon" id="theme-icon"></i>
     </button>
   </div>
 </header>
+
+<div id="toast-error" style="display:none;position:fixed;top:12px;right:12px;z-index:9999;background:#ef4444;color:#fff;padding:8px 14px;border-radius:6px;font-size:13px;max-width:320px;box-shadow:0 2px 8px rgba(0,0,0,.2)"></div>
 
 <nav class="main-tabs">
   <button class="mtab active" id="mtab-projects"  onclick="switchMain('projects')">Projects</button>
@@ -537,8 +598,23 @@
     </div>
     <div class="metric-card">
       <span class="metric-label">Tokens Today</span>
-      <span class="metric-value">—</span>
-      <span class="metric-sub">~$0.00 est.</span>
+      <span class="metric-value" id="m-tokens">—</span>
+      <span class="metric-sub" id="m-tokens-sub">~$0.00 est.</span>
+    </div>
+    <div class="metric-card hidden" id="m-plan-card">
+      <span class="metric-label">Plan Usage</span>
+      <div class="plan-pct-row">
+        <span class="plan-pct-val" id="m-plan-pct">—</span>
+        <span class="plan-pct-approx">(approx)</span>
+      </div>
+      <div class="plan-bar-track">
+        <div class="plan-bar-fill plan-green" id="m-plan-bar" style="width:0%"></div>
+      </div>
+      <div class="plan-time" id="m-plan-time"></div>
+      <div class="plan-slow-hint hidden" id="m-plan-slow"
+           data-tooltip="Token limit is a rough estimate; Anthropic adjusts these numbers.">
+        <i class="ti ti-alert-triangle"></i> Slow down
+      </div>
     </div>
   </div>
 
@@ -586,6 +662,64 @@
     </div>
   </div>
 </div>
+
+<!-- ── New Project Modal ── -->
+<div class="modal-backdrop hidden" id="new-project-backdrop" onclick="closeNewProjectModal()"></div>
+<div class="modal hidden" id="new-project-modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+  <div class="modal-header">
+    <span class="modal-title" id="modal-title">New Project</span>
+    <button class="modal-close" onclick="closeNewProjectModal()" aria-label="Close">&times;</button>
+  </div>
+  <form id="new-project-form" onsubmit="submitNewProject(event)">
+    <div class="modal-field">
+      <label class="modal-label" for="np-repo">GitHub Repo URL <span class="modal-required">*</span></label>
+      <input class="modal-input" id="np-repo" type="text" placeholder="https://github.com/owner/repo" autocomplete="off" required>
+      <div class="modal-error hidden" id="np-repo-error"></div>
+    </div>
+    <div class="modal-field">
+      <label class="modal-label" for="np-icon">Icon <span class="modal-hint">(Tabler icon class, default: ti-folder)</span></label>
+      <input class="modal-input" id="np-icon" type="text" placeholder="ti-folder">
+    </div>
+    <div class="modal-field">
+      <label class="modal-label" for="np-color">Color <span class="modal-hint">(blue, green, purple, amber, red, pink, cyan, gray)</span></label>
+      <input class="modal-input" id="np-color" type="text" placeholder="gray">
+    </div>
+    <div class="modal-footer">
+      <button type="button" class="btn-ghost" onclick="closeNewProjectModal()">Cancel</button>
+      <button type="submit" class="btn-primary" id="np-submit">Add Project</button>
+    </div>
+  </form>
+</div>
+
+<style>
+  .modal-backdrop {
+    position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 100;
+  }
+  .modal {
+    position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    z-index: 101; background: var(--surface); border: 1px solid var(--border);
+    border-radius: 10px; padding: 24px; width: min(480px, calc(100vw - 32px));
+    box-shadow: 0 8px 32px rgba(0,0,0,.18);
+  }
+  .modal-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
+  .modal-title  { font-size: 16px; font-weight: 700; }
+  .modal-close  { background: none; border: none; font-size: 20px; color: var(--text-muted); line-height: 1; padding: 2px 6px; border-radius: 4px; }
+  .modal-close:hover { background: var(--surface-2); color: var(--text); }
+  .modal-field  { margin-bottom: 16px; }
+  .modal-label  { display: block; font-size: 12px; font-weight: 600; color: var(--text); margin-bottom: 5px; }
+  .modal-hint   { font-size: 11px; font-weight: 400; color: var(--text-muted); }
+  .modal-required { color: var(--red); }
+  .modal-input  {
+    width: 100%; padding: 8px 10px;
+    background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px;
+    color: var(--text); font-size: 13px; font-family: inherit; outline: none;
+    transition: border-color .15s;
+  }
+  .modal-input:focus { border-color: var(--blue); background: var(--surface); }
+  .modal-input.error { border-color: var(--red); }
+  .modal-error  { font-size: 12px; color: var(--red); margin-top: 5px; }
+  .modal-footer { display: flex; gap: 8px; justify-content: flex-end; margin-top: 20px; }
+</style>
 
 <script src="/static/app.js"></script>
 </body>

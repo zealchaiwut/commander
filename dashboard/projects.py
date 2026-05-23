@@ -10,6 +10,7 @@ from datetime import date, timedelta
 from pathlib import Path
 from typing import Optional
 
+import db
 import github_client
 
 PROJECTS_FILE = Path(__file__).parent / "projects.json"
@@ -182,7 +183,65 @@ def _ticket_status(issue: dict) -> str:
     return "backlog"
 
 
+# ── Token cost helpers ─────────────────────────────────────────────────────────
+
+_INPUT_COST_PER_M  = 3.0   # USD per million input tokens (Claude Sonnet)
+_OUTPUT_COST_PER_M = 15.0  # USD per million output tokens (Claude Sonnet)
+
+
+def _cost_usd(input_tokens: int, output_tokens: int) -> float:
+    return round(
+        (input_tokens * _INPUT_COST_PER_M + output_tokens * _OUTPUT_COST_PER_M) / 1_000_000,
+        2,
+    )
+
+
 # ── public API ────────────────────────────────────────────────────────────────
+
+def add_project(repo: str, icon: str = "ti-folder", color: str = "gray") -> dict:
+    """Validate and append a new project to projects.json. Returns the new project dict."""
+    import subprocess as _sp
+    projects = load_projects()
+
+    # Normalise owner/repo format
+    repo = repo.strip().rstrip("/")
+    if repo.startswith("https://github.com/"):
+        repo = repo[len("https://github.com/"):]
+    elif repo.startswith("github.com/"):
+        repo = repo[len("github.com/"):]
+    if repo.endswith(".git"):
+        repo = repo[:-4]
+
+    parts = repo.split("/")
+    if len(parts) != 2 or not parts[0] or not parts[1]:
+        raise ValueError(f"Invalid repo format: {repo!r}. Expected owner/repo.")
+
+    # Check for duplicates
+    if any(p["repo"] == repo for p in projects):
+        raise FileExistsError(f"Project already added: {repo}")
+
+    # Verify repo exists via gh CLI
+    r = _sp.run(
+        ["gh", "repo", "view", repo],
+        capture_output=True, text=True,
+    )
+    if r.returncode != 0:
+        raise ValueError(f"GitHub repo not found: {repo}")
+
+    # Derive display name
+    name = parts[1].replace("-", " ").replace("_", " ").title()
+
+    new_proj = {
+        "repo": repo,
+        "name": name,
+        "icon": icon or "ti-folder",
+        "color": color or "gray",
+        "active_sprints": {},
+    }
+    projects.append(new_proj)
+    PROJECTS_FILE.write_text(json.dumps(projects, indent=2))
+    return new_proj
+
 
 def get_all_projects(agents: list[dict]) -> dict:
     projects = load_projects()
@@ -201,6 +260,11 @@ def get_all_projects(agents: list[dict]) -> dict:
         if sprint_num:
             try:
                 issues = github_client.list_issues(sprint_num, repo_name=repo)
+            except Exception:
+                pass
+        else:
+            try:
+                issues = github_client.list_open_issues(repo_name=repo, limit=100)
             except Exception:
                 pass
 
@@ -237,13 +301,19 @@ def get_all_projects(agents: list[dict]) -> dict:
         })
 
     working_agents = sum(1 for a in agents if a.get("status") == "working")
+
+    # Global token totals for today
+    global_tok = db.get_tokens_today()
+    global_total = global_tok["input_tokens"] + global_tok["output_tokens"]
+
     return {
         "projects": result,
         "metrics": {
             "active_sprints":  len(active_sprint_set),
             "open_tickets":    total_open,
             "awaiting_uat":    total_uat,
-            "tokens_today":    None,
+            "tokens_today":    global_total,
+            "cost_today_usd":  _cost_usd(global_tok["input_tokens"], global_tok["output_tokens"]),
             "working_agents":  working_agents,
         },
     }
@@ -265,30 +335,38 @@ def get_project_details(repo: str, agents: list[dict]) -> dict:
         except Exception:
             pass
 
-    # For no-sprint projects, show recent closed tickets
-    if not sprint_num:
-        try:
-            issues = github_client.list_recent_closed(repo_name=repo, limit=5)
-        except Exception:
-            pass
-
     # Sort by updatedAt desc; show open tickets first (up to 5)
     open_issues = sorted(
         [i for i in issues if i.get("state") == "open"],
         key=lambda i: i.get("updatedAt", ""), reverse=True
     )[:5]
 
+    # For no-sprint projects, fall back to all open issues
+    if not sprint_num:
+        try:
+            all_open = github_client.list_open_issues(repo_name=repo, limit=20)
+            open_issues = sorted(all_open, key=lambda i: i.get("updatedAt", ""), reverse=True)[:5]
+        except Exception:
+            pass
+
+    feature_branches: dict[int, str] = {}
+    try:
+        feature_branches = github_client.list_feature_branches(repo_name=repo)
+    except Exception:
+        pass
+
     tickets = []
     for issue in open_issues:
         status = _ticket_status(issue)
         tickets.append({
-            "number":     issue["number"],
-            "title":      issue["title"],
-            "status":     status,
-            "url":        issue["url"],
-            "assignee":   (issue.get("assignees") or [{}])[0].get("login"),
-            "updated_at": issue.get("updatedAt", ""),
-            "is_uat":     status == "UAT",
+            "number":         issue["number"],
+            "title":          issue["title"],
+            "status":         status,
+            "url":            issue["url"],
+            "assignee":       (issue.get("assignees") or [{}])[0].get("login"),
+            "updated_at":     issue.get("updatedAt", ""),
+            "is_uat":         status == "UAT",
+            "feature_branch": feature_branches.get(issue["number"]),
         })
 
     proj_agents = _project_agents(proj, agents)
@@ -308,4 +386,16 @@ def get_project_details(repo: str, agents: list[dict]) -> dict:
         f"https://github.com/{repo}/issues?q=is:open+label:sprint-{sprint_num}"
         if sprint_num else f"https://github.com/{repo}/issues"
     )
-    return {"tickets": tickets, "agents": agent_details, "github_url": github_url}
+
+    # Per-project token data (keyed by repo basename to match what the hook stores)
+    proj_name = repo.split("/")[-1]
+    proj_tok  = db.get_tokens_today(project=proj_name)
+    proj_total = proj_tok["input_tokens"] + proj_tok["output_tokens"]
+
+    return {
+        "tickets":       tickets,
+        "agents":        agent_details,
+        "github_url":    github_url,
+        "tokens_today":  proj_total,
+        "cost_today_usd": _cost_usd(proj_tok["input_tokens"], proj_tok["output_tokens"]),
+    }

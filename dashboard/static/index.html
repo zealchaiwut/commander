@@ -121,6 +121,7 @@
       background: var(--surface);
       border-bottom: 1px solid var(--border);
     }
+    .metrics-row.has-plan { grid-template-columns: repeat(5, 1fr); }
     .metric-card {
       padding: 20px 24px;
       border-right: 1px solid var(--border);
@@ -134,11 +135,41 @@
     .metric-card.uat-alert { background: var(--amber-bg); }
     .metric-card.uat-alert .metric-value { color: var(--amber); }
 
+    /* ── Plan Usage card ── */
+    .plan-bar-track { height: 5px; background: var(--surface-2); border-radius: 3px; overflow: hidden; margin-top: 6px; }
+    .plan-bar-fill  { height: 100%; border-radius: 3px; transition: width .5s ease, background .3s ease; }
+    .plan-bar-fill.plan-green  { background: var(--green); }
+    .plan-bar-fill.plan-amber  { background: var(--amber); }
+    .plan-bar-fill.plan-red    { background: var(--red); }
+    .plan-pct-row { display: flex; align-items: baseline; gap: 4px; }
+    .plan-pct-val { font-size: 30px; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; }
+    .plan-pct-approx { font-size: 10px; color: var(--text-muted); font-weight: 500; }
+    .plan-time { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+    .plan-slow-hint {
+      display: inline-flex; align-items: center; gap: 4px;
+      font-size: 10px; font-weight: 600; color: var(--red);
+      cursor: help; margin-top: 3px;
+    }
+    .plan-slow-hint .ti { font-size: 11px; }
+    /* Tooltip */
+    [data-tooltip] { position: relative; }
+    [data-tooltip]::after {
+      content: attr(data-tooltip);
+      position: absolute; bottom: calc(100% + 5px); left: 50%; transform: translateX(-50%);
+      background: #1a1a1a; color: #f0f0f0; font-size: 11px; font-weight: 400;
+      padding: 5px 8px; border-radius: 5px; white-space: nowrap; max-width: 240px;
+      white-space: normal; text-align: center; pointer-events: none;
+      opacity: 0; transition: opacity .15s; z-index: 100; line-height: 1.4;
+    }
+    [data-tooltip]:hover::after { opacity: 1; }
+
     @media (max-width: 600px) {
       .metrics-row { grid-template-columns: 1fr 1fr; }
+      .metrics-row.has-plan { grid-template-columns: 1fr 1fr; }
       .metric-card:nth-child(2) { border-right: none; }
       .metric-card { padding: 14px 16px; }
       .metric-value { font-size: 24px; }
+      .plan-pct-val { font-size: 24px; }
     }
 
     /* ── Filter bar ── */
@@ -546,6 +577,21 @@
       <span class="metric-label">Tokens Today</span>
       <span class="metric-value" id="m-tokens">—</span>
       <span class="metric-sub" id="m-tokens-sub">~$0.00 est.</span>
+    </div>
+    <div class="metric-card hidden" id="m-plan-card">
+      <span class="metric-label">Plan Usage</span>
+      <div class="plan-pct-row">
+        <span class="plan-pct-val" id="m-plan-pct">—</span>
+        <span class="plan-pct-approx">(approx)</span>
+      </div>
+      <div class="plan-bar-track">
+        <div class="plan-bar-fill plan-green" id="m-plan-bar" style="width:0%"></div>
+      </div>
+      <div class="plan-time" id="m-plan-time"></div>
+      <div class="plan-slow-hint hidden" id="m-plan-slow"
+           data-tooltip="Token limit is a rough estimate; Anthropic adjusts these numbers.">
+        <i class="ti ti-alert-triangle"></i> Slow down
+      </div>
     </div>
   </div>
 

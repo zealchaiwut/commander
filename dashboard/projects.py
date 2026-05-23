@@ -198,6 +198,51 @@ def _cost_usd(input_tokens: int, output_tokens: int) -> float:
 
 # ── public API ────────────────────────────────────────────────────────────────
 
+def add_project(repo: str, icon: str = "ti-folder", color: str = "gray") -> dict:
+    """Validate and append a new project to projects.json. Returns the new project dict."""
+    import subprocess as _sp
+    projects = load_projects()
+
+    # Normalise owner/repo format
+    repo = repo.strip().rstrip("/")
+    if repo.startswith("https://github.com/"):
+        repo = repo[len("https://github.com/"):]
+    elif repo.startswith("github.com/"):
+        repo = repo[len("github.com/"):]
+    if repo.endswith(".git"):
+        repo = repo[:-4]
+
+    parts = repo.split("/")
+    if len(parts) != 2 or not parts[0] or not parts[1]:
+        raise ValueError(f"Invalid repo format: {repo!r}. Expected owner/repo.")
+
+    # Check for duplicates
+    if any(p["repo"] == repo for p in projects):
+        raise FileExistsError(f"Project already added: {repo}")
+
+    # Verify repo exists via gh CLI
+    r = _sp.run(
+        ["gh", "repo", "view", repo],
+        capture_output=True, text=True,
+    )
+    if r.returncode != 0:
+        raise ValueError(f"GitHub repo not found: {repo}")
+
+    # Derive display name
+    name = parts[1].replace("-", " ").replace("_", " ").title()
+
+    new_proj = {
+        "repo": repo,
+        "name": name,
+        "icon": icon or "ti-folder",
+        "color": color or "gray",
+        "active_sprints": {},
+    }
+    projects.append(new_proj)
+    PROJECTS_FILE.write_text(json.dumps(projects, indent=2))
+    return new_proj
+
+
 def get_all_projects(agents: list[dict]) -> dict:
     projects = load_projects()
     result   = []
@@ -285,18 +330,19 @@ def get_project_details(repo: str, agents: list[dict]) -> dict:
         except Exception:
             pass
 
-    # For no-sprint projects, show recent closed tickets
-    if not sprint_num:
-        try:
-            issues = github_client.list_recent_closed(repo_name=repo, limit=5)
-        except Exception:
-            pass
-
     # Sort by updatedAt desc; show open tickets first (up to 5)
     open_issues = sorted(
         [i for i in issues if i.get("state") == "open"],
         key=lambda i: i.get("updatedAt", ""), reverse=True
     )[:5]
+
+    # For no-sprint projects, fall back to all open issues
+    if not sprint_num:
+        try:
+            all_open = github_client.list_open_issues(repo_name=repo, limit=20)
+            open_issues = sorted(all_open, key=lambda i: i.get("updatedAt", ""), reverse=True)[:5]
+        except Exception:
+            pass
 
     feature_branches: dict[int, str] = {}
     try:

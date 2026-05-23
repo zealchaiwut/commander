@@ -24,12 +24,28 @@ _subscribers: list[asyncio.Queue] = []
 _start_time: float = 0.0
 
 
+async def _cache_refresh_loop():
+    """Periodically re-fetch GitHub data and broadcast an update so clients refresh."""
+    while True:
+        await asyncio.sleep(30)
+        try:
+            await broadcast({"type": "update", "event": {"event_type": "cache_refresh"}})
+        except Exception:
+            pass
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global _start_time
     _start_time = time.monotonic()
     db.init_db()
+    task = asyncio.create_task(_cache_refresh_loop())
     yield
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
 
 
 app = FastAPI(lifespan=lifespan)
@@ -67,6 +83,12 @@ class TokenUsageEvent(BaseModel):
 
 class RejectBody(BaseModel):
     reason: str
+
+
+class NewProjectBody(BaseModel):
+    repo_url: str
+    icon: Optional[str] = "ti-folder"
+    color: Optional[str] = "gray"
 
 
 class DatabaseStatus(BaseModel):
@@ -242,6 +264,23 @@ def get_projects():
         raise _gh_error(e)
     except ValueError as e:
         raise HTTPException(400, detail=str(e))
+
+
+@app.post("/api/projects", status_code=201)
+def add_project(body: NewProjectBody):
+    try:
+        new_proj = projects_module.add_project(
+            repo=body.repo_url,
+            icon=body.icon or "ti-folder",
+            color=body.color or "gray",
+        )
+        return new_proj
+    except FileExistsError as e:
+        raise HTTPException(409, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(422, detail=str(e))
+    except subprocess.CalledProcessError as e:
+        raise _gh_error(e)
 
 
 @app.get("/api/project-details")

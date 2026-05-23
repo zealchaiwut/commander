@@ -111,6 +111,40 @@ def list_issues(sprint: int, repo_name: str | None = None) -> list[dict]:
     return _cached(key, fetch)
 
 
+def list_open_issues(repo_name: str | None = None, limit: int = 20) -> list[dict]:
+    """List open issues for a repo, regardless of sprint label."""
+    r = _r(repo_name)
+    key = f"open_issues:{r}"
+    def fetch():
+        return _json(
+            "issue", "list", "--repo", r,
+            "--state", "open",
+            "--json", "number,title,labels,assignees,state,url,createdAt,updatedAt",
+            "--limit", str(limit),
+        )
+    return _cached(key, fetch)
+
+
+def list_feature_branches(repo_name: str | None = None) -> dict[int, str]:
+    """Return a mapping of issue_number -> branch_name for feature branches."""
+    r = _r(repo_name)
+    key = f"feature_branches:{r}"
+    def fetch():
+        result = subprocess.run(
+            ["git", "branch", "-r"],
+            capture_output=True, text=True,
+        )
+        mapping: dict[int, str] = {}
+        import re as _re
+        for line in result.stdout.splitlines():
+            line = line.strip().replace("origin/", "")
+            m = _re.match(r"feature/(\d+)-", line)
+            if m:
+                mapping[int(m.group(1))] = line
+        return mapping
+    return _cached(key, fetch)
+
+
 def list_recent_closed(repo_name: str | None = None, limit: int = 5) -> list[dict]:
     r = _r(repo_name)
     key = f"recent_closed:{r}"
@@ -183,6 +217,7 @@ def approve_issue(issue_id: int, repo_name: str | None = None):
     invalidate(f"issues:{r}:")
     invalidate(f"latest_sprint:{r}")
     invalidate(f"recent_closed:{r}")
+    invalidate(f"open_issues:{r}")
 
 
 def reject_issue(issue_id: int, reason: str, repo_name: str | None = None):
@@ -195,6 +230,7 @@ def reject_issue(issue_id: int, reason: str, repo_name: str | None = None):
          "--body", f"❌ **Rejected:** {reason}")
     invalidate(f"issues:{r}:")
     invalidate(f"recent_closed:{r}")
+    invalidate(f"open_issues:{r}")
 
 
 def create_issue(title: str, body: str, labels: list[str],

@@ -226,6 +226,8 @@
     /* Project info */
     .proj-info { min-width: 0; }
     .proj-title { font-size: 14px; font-weight: 500; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .proj-title-link { text-decoration: none; color: inherit; }
+    .proj-title-link:hover { color: var(--blue); }
     .proj-sprint-line { display: flex; align-items: center; gap: 6px; margin-top: 2px; flex-wrap: wrap; }
     .sprint-tag {
       font-size: 10px; font-weight: 600; padding: 1px 6px; border-radius: 4px;
@@ -542,7 +544,7 @@
   </div>
   <div class="header-right">
     <button class="btn-ghost">Filters</button>
-    <button class="btn-primary">+ New project</button>
+    <button class="btn-primary" onclick="openNewProjectModal()">+ New Project</button>
     <button class="btn-icon" id="theme-btn" onclick="toggleTheme()" title="Toggle theme">
       <i class="ti ti-moon" id="theme-icon"></i>
     </button>
@@ -639,6 +641,64 @@
     </div>
   </div>
 </div>
+
+<!-- ── New Project Modal ── -->
+<div class="modal-backdrop hidden" id="new-project-backdrop" onclick="closeNewProjectModal()"></div>
+<div class="modal hidden" id="new-project-modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+  <div class="modal-header">
+    <span class="modal-title" id="modal-title">New Project</span>
+    <button class="modal-close" onclick="closeNewProjectModal()" aria-label="Close">&times;</button>
+  </div>
+  <form id="new-project-form" onsubmit="submitNewProject(event)">
+    <div class="modal-field">
+      <label class="modal-label" for="np-repo">GitHub Repo URL <span class="modal-required">*</span></label>
+      <input class="modal-input" id="np-repo" type="text" placeholder="https://github.com/owner/repo" autocomplete="off" required>
+      <div class="modal-error hidden" id="np-repo-error"></div>
+    </div>
+    <div class="modal-field">
+      <label class="modal-label" for="np-icon">Icon <span class="modal-hint">(Tabler icon class, default: ti-folder)</span></label>
+      <input class="modal-input" id="np-icon" type="text" placeholder="ti-folder">
+    </div>
+    <div class="modal-field">
+      <label class="modal-label" for="np-color">Color <span class="modal-hint">(blue, green, purple, amber, red, pink, cyan, gray)</span></label>
+      <input class="modal-input" id="np-color" type="text" placeholder="gray">
+    </div>
+    <div class="modal-footer">
+      <button type="button" class="btn-ghost" onclick="closeNewProjectModal()">Cancel</button>
+      <button type="submit" class="btn-primary" id="np-submit">Add Project</button>
+    </div>
+  </form>
+</div>
+
+<style>
+  .modal-backdrop {
+    position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 100;
+  }
+  .modal {
+    position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    z-index: 101; background: var(--surface); border: 1px solid var(--border);
+    border-radius: 10px; padding: 24px; width: min(480px, calc(100vw - 32px));
+    box-shadow: 0 8px 32px rgba(0,0,0,.18);
+  }
+  .modal-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
+  .modal-title  { font-size: 16px; font-weight: 700; }
+  .modal-close  { background: none; border: none; font-size: 20px; color: var(--text-muted); line-height: 1; padding: 2px 6px; border-radius: 4px; }
+  .modal-close:hover { background: var(--surface-2); color: var(--text); }
+  .modal-field  { margin-bottom: 16px; }
+  .modal-label  { display: block; font-size: 12px; font-weight: 600; color: var(--text); margin-bottom: 5px; }
+  .modal-hint   { font-size: 11px; font-weight: 400; color: var(--text-muted); }
+  .modal-required { color: var(--red); }
+  .modal-input  {
+    width: 100%; padding: 8px 10px;
+    background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px;
+    color: var(--text); font-size: 13px; font-family: inherit; outline: none;
+    transition: border-color .15s;
+  }
+  .modal-input:focus { border-color: var(--blue); background: var(--surface); }
+  .modal-input.error { border-color: var(--red); }
+  .modal-error  { font-size: 12px; color: var(--red); margin-top: 5px; }
+  .modal-footer { display: flex; gap: 8px; justify-content: flex-end; margin-top: 20px; }
+</style>
 
 <script src="/static/app.js"></script>
 </body>

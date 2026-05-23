@@ -74,6 +74,21 @@ def upsert_agent(session_id: str, working_dir: str, status: str,
         conn.commit()
 
 
+def timeout_idle_agents(threshold_seconds: int) -> int:
+    """Mark 'working' agents with last_seen older than threshold as 'timed_out'.
+
+    Returns the count of agents updated.
+    """
+    cutoff = (datetime.utcnow() - timedelta(seconds=threshold_seconds)).isoformat()
+    with get_conn() as conn:
+        cur = conn.execute(
+            "UPDATE agents SET status='timed_out' WHERE status='working' AND last_seen < ?",
+            (cutoff,),
+        )
+        conn.commit()
+        return cur.rowcount
+
+
 def add_event(session_id: str, event_type: str, data: dict):
     now = datetime.utcnow().isoformat()
     with get_conn() as conn:

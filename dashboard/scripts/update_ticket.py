@@ -59,13 +59,81 @@ def _load_env():
             os.environ.setdefault(k.strip(), v.strip())
 
 
+def _find_feature_branch(issue: int) -> str | None:
+    """Return the feature/<N>-* branch name if it exists locally or on origin."""
+    pattern = f"feature/{issue}-*"
+
+    r = subprocess.run(["git", "branch", "--list", pattern], capture_output=True, text=True)
+    for line in r.stdout.splitlines():
+        name = line.strip().lstrip("*+ ").strip()
+        if name:
+            return name
+
+    r = subprocess.run(["git", "branch", "-r", "--list", f"origin/{pattern}"], capture_output=True, text=True)
+    for line in r.stdout.splitlines():
+        name = line.strip().removeprefix("origin/").strip()
+        if name:
+            return name
+
+    return None
+
+
+def _branch_merged_into_develop(branch: str) -> bool:
+    """Return True if branch tip is an ancestor of origin/develop."""
+    subprocess.run(["git", "fetch", "--quiet", "origin", "develop"], capture_output=True)
+
+    for ref in (f"origin/{branch}", branch):
+        r = subprocess.run(["git", "rev-parse", ref], capture_output=True, text=True)
+        if r.returncode == 0:
+            tip = r.stdout.strip()
+            ancestor = subprocess.run(
+                ["git", "merge-base", "--is-ancestor", tip, "origin/develop"],
+                capture_output=True,
+            )
+            return ancestor.returncode == 0
+
+    return False
+
+
+def _check_uat_safeguard(issue: int, force: bool) -> None:
+    """Enforce feature-branch-merged gate before UAT label is applied."""
+    branch = _find_feature_branch(issue)
+
+    if branch is None:
+        msg = (
+            f"UAT safeguard: no branch matching 'feature/{issue}-*' found locally "
+            f"or on origin. Merge the feature branch into develop first, "
+            f"or use --force to override."
+        )
+        if force:
+            print(f"WARNING: {msg}", file=sys.stderr)
+        else:
+            sys.exit(msg)
+        return
+
+    if not _branch_merged_into_develop(branch):
+        msg = (
+            f"UAT safeguard: branch '{branch}' exists but has not been merged into "
+            f"develop. Merge it first, or use --force to override."
+        )
+        if force:
+            print(f"WARNING: {msg}", file=sys.stderr)
+        else:
+            sys.exit(msg)
+
+
 def main():
     _load_env()
 
     parser = argparse.ArgumentParser(description="Update issue status")
     parser.add_argument("--issue",  type=int, required=True)
     parser.add_argument("--status", required=True, choices=list(STATUS_MAP))
+    parser.add_argument("--force",  action="store_true",
+                        help="Skip UAT merge safeguard (prints warning to stderr)")
     args = parser.parse_args()
+
+    if args.status == "uat":
+        _check_uat_safeguard(args.issue, args.force)
 
     try:
         repo = github_client.repo()

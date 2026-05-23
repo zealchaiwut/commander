@@ -145,6 +145,9 @@
     .metric-card.uat-alert { background: var(--amber-bg); }
     .metric-card.uat-alert .metric-value { color: var(--amber); }
 
+    /* Active Tickets — larger value than other metric cards */
+    #m-tickets-card .metric-value { font-size: 36px; }
+
     /* ── Plan Usage card ── */
     .plan-bar-track { height: 5px; background: var(--surface-2); border-radius: 3px; overflow: hidden; margin-top: 6px; }
     .plan-bar-fill  { height: 100%; border-radius: 3px; transition: width .5s ease, background .3s ease; }
@@ -347,6 +350,12 @@
     }
     .ticket-num:hover { color: var(--blue); }
     .ticket-title { font-size: 12px; font-weight: 500; line-height: 1.4; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+    .ticket-title-link { text-decoration: none; color: inherit; }
+    .ticket-title-link:hover { color: var(--blue); text-decoration: underline; }
+
+    /* Ticket group sections in expand panel */
+    .ticket-group + .ticket-group { margin-top: 14px; }
+    .ticket-group-hdr { margin-bottom: 8px; }
     .ticket-meta { font-size: 11px; color: var(--text-muted); margin-top: 4px; }
     .ticket-branch {
       display: inline-flex; align-items: center; gap: 3px;
@@ -586,10 +595,10 @@
       <span class="metric-value" id="m-sprints">—</span>
       <span class="metric-sub" id="m-sprints-sub">across projects</span>
     </div>
-    <div class="metric-card">
-      <span class="metric-label">Open Tickets</span>
+    <div class="metric-card" id="m-tickets-card">
+      <span class="metric-label">Active Tickets</span>
       <span class="metric-value" id="m-tickets">—</span>
-      <span class="metric-sub">in tracked projects</span>
+      <span class="metric-sub">in-progress · SIT · UAT</span>
     </div>
     <div class="metric-card" id="m-uat-card">
       <span class="metric-label">Awaiting UAT</span>

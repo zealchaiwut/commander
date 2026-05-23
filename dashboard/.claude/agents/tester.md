@@ -11,6 +11,63 @@ Input will be in the form: `verify issue <N>`
 
 Extract the issue number N and follow the workflow below.
 
+## Test Volume Policy
+
+Scale the number of tests written per acceptance criterion to the ticket's 
+risk level. Over-testing wastes time, tokens, and reviewer attention.
+
+### Risk levels
+
+**LOW** — 1 test per criterion (smoke test only)
+Applies to: doc changes, config updates, simple constant/string changes, 
+single-line bug fixes, UI label/copy changes, adding optional params with 
+safe defaults.
+
+**MEDIUM** — 1–2 tests per criterion (happy path + 1 obvious edge)
+Applies to: new API endpoints with simple logic, new UI components, adding 
+fields to existing models, wiring up existing functions, most enhancement 
+tickets.
+
+**HIGH** — 2–3 tests per criterion (happy path + edge + error path)
+Applies to: auth/authorization changes, DB schema migrations, data 
+deletion/destructive operations, payment/financial logic, security-related 
+changes, breaking API changes.
+
+### Risk classification
+
+Before writing tests, run this checklist against the ticket:
+
+1. How many files changed? (1 file → low/medium; 5+ files → medium/high)
+2. Does it touch auth, data deletion, or destructive operations? → high
+3. Is it easily reversible? → lower risk
+4. Does it carry the `bug` label? → usually low/medium
+5. Does it carry the `security` label? → high
+6. If unclear → default to MEDIUM
+
+State the derived risk level explicitly before writing any tests, e.g.: 
+`Risk: MEDIUM → up to 2 tests per criterion`.
+
+### What not to test
+
+Skip these unless the ticket specifically asks:
+- Framework behavior (FastAPI routing, stdlib defaults)
+- Things outside the ticket scope
+- Type checking that Python handles natively
+- Default behavior of standard libraries
+- Code already covered by existing tests
+
+### Examples
+
+| Ticket description | Risk | Tests |
+|---|---|---|
+| Fix typo in dashboard header | LOW | 1 test (verify new text appears) |
+| Add /api/health endpoint with status + uptime | MEDIUM | 2-3 tests (200 response, correct fields, edge case) |
+| Add JWT authentication to all endpoints | HIGH | 6-9 tests (login, invalid creds, expired token, missing token, signature tampering, edge cases) |
+
+### Report summary includes risk
+
+The `## Summary` section of the test report must include a `Risk:` line:
+
 ## Workflow
 
 ### Step 1 — Fetch the ticket
@@ -147,7 +204,8 @@ python3 ~/commander/dashboard/scripts/post_test_report.py \
 
 If `READY_FOR_UAT`:
 ```bash
-python3 ~/commander/dashboard/scripts/update_ticket.py --issue <N> --status uat
+# Merges to develop, pushes, labels UAT, deletes branch — all in one step
+cd ~/commander && python3 dashboard/scripts/finish_feature.py --issue <N>
 ```
 
 If `NEEDS_FIXES`, leave the ticket in SIT (do not move it). Say which tests failed and what the likely fix is.

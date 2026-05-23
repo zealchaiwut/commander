@@ -601,21 +601,16 @@ function _refreshAfterAction(repo) {
   delete detailsCache[repo];
   Object.keys(testReportCache).forEach(k => { if (k.startsWith(`${repo}#`)) delete testReportCache[k]; });
   loadProjectDetails(_projId(repo), repo);
-  loadProjects();
+  loadProjects().catch(() => {});
 }
 
 // ── Load projects ─────────────────────────────────────────────────────────────
 async function loadProjects() {
-  try {
-    const res = await fetch('/api/projects');
-    if (!res.ok) throw new Error(await res.text());
-    const data = await res.json();
-    renderMetrics(data.metrics   || {});
-    renderProjects(data.projects || []);
-  } catch (e) {
-    document.getElementById('project-list').innerHTML =
-      `<div class="empty-projects">Failed to load projects: ${escapeHtml(e.message)}</div>`;
-  }
+  const res = await fetch('/api/projects');
+  if (!res.ok) throw new Error(await res.text());
+  const data = await res.json();
+  renderMetrics(data.metrics   || {});
+  renderProjects(data.projects || []);
 }
 
 // ── Agents view ───────────────────────────────────────────────────────────────
@@ -708,7 +703,7 @@ function connectSSE() {
     try {
       const msg = JSON.parse(ev.data);
       if (msg.type !== 'update') return;
-      if (!document.getElementById('view-projects').classList.contains('hidden')) loadProjects();
+      if (!document.getElementById('view-projects').classList.contains('hidden')) loadProjects().catch(() => {});
       if (!document.getElementById('view-agents').classList.contains('hidden'))   fetchAgents();
     } catch { /* ignore */ }
   };
@@ -725,18 +720,14 @@ function _fmtSecondsRemaining(seconds) {
 }
 
 async function loadPlanUsage() {
-  try {
-    const res = await fetch('/api/plan-usage');
-    if (res.status === 404) {
-      // Not configured — keep card hidden (AC-1)
-      return;
-    }
-    if (!res.ok) throw new Error(await res.text());
-    const d = await res.json();
-    renderPlanUsage(d);
-  } catch {
-    // Silently suppress — card stays hidden
+  const res = await fetch('/api/plan-usage');
+  if (res.status === 404) {
+    // Not configured — keep card hidden
+    return;
   }
+  if (!res.ok) throw new Error(await res.text());
+  const d = await res.json();
+  renderPlanUsage(d);
 }
 
 function renderPlanUsage(d) {
@@ -784,18 +775,55 @@ function renderPlanUsage(d) {
   slowEl.classList.toggle('hidden', pct <= 80);
 }
 
+// ── Manual refresh ────────────────────────────────────────────────────────────
+async function manualRefresh() {
+  const btn  = document.getElementById('btn-refresh');
+  const icon = document.getElementById('refresh-icon');
+  if (!btn || btn.disabled) return;
+  btn.disabled = true;
+  icon.classList.add('spinning');
+  hideToast();
+  try {
+    await Promise.all([loadProjects(), loadPlanUsage()]);
+  } catch {
+    showToast('Refresh failed — server may be unreachable');
+  } finally {
+    setTimeout(() => {
+      btn.disabled = false;
+      icon.classList.remove('spinning');
+    }, 500);
+  }
+}
+
+function showToast(msg) {
+  const t = document.getElementById('toast-error');
+  if (!t) return;
+  t.textContent = msg;
+  t.style.display = 'block';
+  setTimeout(() => { t.style.display = 'none'; }, 5000);
+}
+
+function hideToast() {
+  const t = document.getElementById('toast-error');
+  if (t) t.style.display = 'none';
+}
+
 // ── Periodic refresh ──────────────────────────────────────────────────────────
 setInterval(() => {
   if (!document.getElementById('view-projects').classList.contains('hidden')) {
-    loadProjects();
-    loadPlanUsage();
+    loadProjects().catch(() => {});
+    loadPlanUsage().catch(() => {});
   }
 }, 60_000);
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 (function init() {
   initTheme();
-  loadProjects();
-  loadPlanUsage();
+  loadProjects().catch(e => {
+    document.getElementById('project-list').innerHTML =
+      `<div class="empty-projects">Failed to load projects: ${escapeHtml(e.message)}</div>`;
+  });
+  loadPlanUsage().catch(() => {});
   connectSSE();
+  document.getElementById('btn-refresh')?.addEventListener('click', manualRefresh);
 })();

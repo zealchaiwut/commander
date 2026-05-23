@@ -4,6 +4,7 @@ let allProjects      = [];
 let expandedProjects = new Set(); // repos currently expanded
 let detailsCache     = {};        // repo → detail data
 let testReportCache  = {};        // `${repo}#${issueNum}` → report data
+let doneAgentsVisible = {};       // repo → bool (toggle state for DONE agents, AC-2d)
 
 // ── Agent name parser ────────────────────────────────────────────────────────
 // New format: "role·repo·branch·#short"   (4 parts, · separator)
@@ -121,17 +122,18 @@ function _projId(repo) {
 }
 
 function agentPillsHtml(agents) {
-  if (!agents || agents.length === 0) {
+  // AC-2a: show only WORKING agents in row summary pills
+  const working = (agents || []).filter(a => a.status === 'working');
+  if (working.length === 0) {
     return '<span class="agent-pill no-agent">no agents</span>';
   }
   const MAX     = 2;
-  const visible = agents.slice(0, MAX);
-  const extra   = agents.length - MAX;
+  const visible = working.slice(0, MAX);
+  const extra   = working.length - MAX;
   let html = visible.map(a => {
-    const s      = a.status === 'working' ? 'working' : a.status === 'done' ? 'done' : 'waiting';
     const parsed = _parseAgentName(a.name);
     const label  = parsed.isNew ? parsed.role : parsed.repo;
-    return `<span class="agent-pill ${s}">${escapeHtml(label)}</span>`;
+    return `<span class="agent-pill working">${escapeHtml(label)}</span>`;
   }).join('');
   if (extra > 0) html += `<span class="agent-pill overflow">+${extra}</span>`;
   return html;
@@ -179,7 +181,7 @@ function projectRowHtml(proj) {
             <i class="ti ${escapeHtml(proj.icon || 'ti-folder')}"></i>
           </div>
           <div class="proj-info">
-            <span class="proj-title">${escapeHtml(proj.name)}</span>
+            <a class="proj-title proj-title-link" href="https://github.com/${escapeHtml(proj.repo)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${escapeHtml(proj.name)}</a>
             ${sprintLine}
           </div>
         </div>
@@ -355,13 +357,33 @@ function renderExpandPanel(id, data, repo) {
   const agents  = data.agents  || [];
   const ghUrl   = data.github_url || `https://github.com/${repo}/issues`;
 
+  // AC-1: active tickets from GitHub (open only, already filtered by server)
   const ticketsHtml = tickets.length
     ? tickets.map(t => ticketCardHtml(t, repo)).join('')
     : '<div class="empty-small">No open tickets</div>';
 
-  const agentsHtml = agents.length
-    ? agents.map(agentDetailCardHtml).join('')
-    : '<div class="empty-small">No agents on this project</div>';
+  // AC-2: separate working vs done agents; respect toggle state (AC-2d)
+  const workingAgents = agents.filter(a => a.status === 'working');
+  const doneAgents    = agents.filter(a => a.status === 'done');
+  const nWorking      = workingAgents.length;
+  const nDone         = doneAgents.length;
+  const showDone      = !!doneAgentsVisible[repo]; // AC-2d: per-project toggle
+
+  // AC-2b: summary header
+  const doneToggleStyle = nDone > 0 ? 'cursor:pointer;text-decoration:underline dotted;' : '';
+  const doneLabel = `<span id="done-toggle-${id}" style="${doneToggleStyle}" onclick="${nDone > 0 ? `toggleDoneAgents('${id}','${escapeHtml(repo)}')` : ''}" title="${nDone > 0 ? 'Click to toggle' : ''}">done (${nDone})</span>`;
+  const agentsHeader = `AGENTS · working (${nWorking}) · ${doneLabel}`;
+
+  // AC-2a: show only working by default; AC-2c: toggle shows done
+  let agentsListHtml = '';
+  if (nWorking === 0 && !showDone) {
+    agentsListHtml = '<div class="empty-small">No active agents</div>';
+  } else {
+    agentsListHtml = workingAgents.map(agentDetailCardHtml).join('');
+  }
+  if (showDone && nDone > 0) {
+    agentsListHtml += doneAgents.map(agentDetailCardHtml).join('');
+  }
 
   // Tokens today line for this project
   const tokTotal = data.tokens_today;
@@ -384,14 +406,22 @@ function renderExpandPanel(id, data, repo) {
     </div>
     <div class="expand-col">
       <div class="expand-hdr">
-        <span class="expand-hdr-title">Agents</span>
+        <span class="expand-hdr-title">${agentsHeader}</span>
       </div>
-      ${agentsHtml}
+      ${agentsListHtml}
       ${tokLine}
     </div>`;
 
   // kick off test-report loads for UAT tickets
   tickets.filter(t => t.is_uat).forEach(t => loadTestReport(t.number, repo));
+}
+
+// AC-2c: toggle done agents visibility per project
+function toggleDoneAgents(id, repo) {
+  doneAgentsVisible[repo] = !doneAgentsVisible[repo];
+  if (detailsCache[repo]) {
+    renderExpandPanel(id, detailsCache[repo], repo);
+  }
 }
 
 // ── Test report (inline in UAT card) ─────────────────────────────────────────
@@ -708,11 +738,106 @@ function connectSSE() {
     try {
       const msg = JSON.parse(ev.data);
       if (msg.type !== 'update') return;
-      if (!document.getElementById('view-projects').classList.contains('hidden')) loadProjects();
-      if (!document.getElementById('view-agents').classList.contains('hidden'))   fetchAgents();
+      if (!document.getElementById('view-projects').classList.contains('hidden')) {
+        loadProjects();
+        // AC-1d: when cache refreshes, also refresh details for expanded projects
+        expandedProjects.forEach(repo => {
+          delete detailsCache[repo];
+          loadProjectDetails(_projId(repo), repo);
+        });
+      }
+      if (!document.getElementById('view-agents').classList.contains('hidden')) fetchAgents();
     } catch { /* ignore */ }
   };
 }
+
+// ── New Project Modal (AC-4) ──────────────────────────────────────────────────
+function openNewProjectModal() {
+  document.getElementById('new-project-backdrop').classList.remove('hidden');
+  document.getElementById('new-project-modal').classList.remove('hidden');
+  document.getElementById('np-repo').value  = '';
+  document.getElementById('np-icon').value  = '';
+  document.getElementById('np-color').value = '';
+  _npClearError();
+  document.getElementById('np-repo').focus();
+}
+
+function closeNewProjectModal() {
+  document.getElementById('new-project-backdrop').classList.add('hidden');
+  document.getElementById('new-project-modal').classList.add('hidden');
+}
+
+function _npClearError() {
+  const errEl = document.getElementById('np-repo-error');
+  const input = document.getElementById('np-repo');
+  errEl.textContent = '';
+  errEl.classList.add('hidden');
+  input.classList.remove('error');
+}
+
+function _npShowError(msg) {
+  const errEl = document.getElementById('np-repo-error');
+  const input = document.getElementById('np-repo');
+  errEl.textContent = msg;
+  errEl.classList.remove('hidden');
+  input.classList.add('error');
+}
+
+async function submitNewProject(event) {
+  event.preventDefault();
+  _npClearError();
+
+  const repoUrl = document.getElementById('np-repo').value.trim();
+  const icon    = document.getElementById('np-icon').value.trim()  || 'ti-folder';
+  const color   = document.getElementById('np-color').value.trim() || 'gray';
+
+  if (!repoUrl) {
+    _npShowError('GitHub repo URL is required.');
+    return;
+  }
+
+  const submitBtn = document.getElementById('np-submit');
+  submitBtn.disabled = true;
+  submitBtn.textContent = 'Adding…';
+
+  try {
+    const res = await fetch('/api/projects', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ repo_url: repoUrl, icon, color }),
+    });
+
+    if (res.status === 409) {
+      const data = await res.json();
+      _npShowError(data.detail || 'Project already added.');
+      return;
+    }
+    if (res.status === 422) {
+      const data = await res.json();
+      _npShowError(data.detail || 'Invalid repo or repo not found on GitHub.');
+      return;
+    }
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      _npShowError(data.detail || `Error ${res.status}`);
+      return;
+    }
+
+    // AC-4c: success — close modal and reload project list
+    closeNewProjectModal();
+    loadProjects();
+  } catch (e) {
+    _npShowError('Network error: ' + e.message);
+  } finally {
+    submitBtn.disabled = false;
+    submitBtn.textContent = 'Add Project';
+  }
+}
+
+// Close modal on Escape key
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') closeNewProjectModal();
+});
 
 // ── Periodic refresh ──────────────────────────────────────────────────────────
 setInterval(() => {

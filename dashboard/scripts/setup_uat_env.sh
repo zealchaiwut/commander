@@ -28,11 +28,20 @@ git -C "$UAT_DIR" pull origin develop
 
 # ── 3. Python venv ────────────────────────────────────────────────────────────
 VENV_DIR="$UAT_DASHBOARD/venv"
-if [ -d "$VENV_DIR" ]; then
+if [ -d "$VENV_DIR" ] && [ -x "$VENV_DIR/bin/pip" ]; then
     echo "[3/5] venv already exists at $VENV_DIR — skipping creation."
 else
-    echo "[3/5] Creating Python venv at $VENV_DIR …"
-    python3.12 -m venv "$VENV_DIR" || python3 -m venv "$VENV_DIR"
+    if [ -d "$VENV_DIR" ]; then
+        echo "[3/5] venv directory exists but is broken (bin/pip missing or not executable) — removing and recreating …"
+        rm -rf "$VENV_DIR"
+    else
+        echo "[3/5] Creating Python venv at $VENV_DIR …"
+    fi
+    if ! python3.12 -m venv "$VENV_DIR" 2>/dev/null && ! python3 -m venv "$VENV_DIR" 2>/dev/null; then
+        echo "ERROR: Failed to create Python venv at $VENV_DIR." >&2
+        echo "       Ensure python3.12 or python3 is available and try again." >&2
+        exit 1
+    fi
 fi
 
 echo "      Installing/upgrading requirements …"

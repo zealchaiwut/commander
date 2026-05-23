@@ -719,9 +719,26 @@ setInterval(() => {
   if (!document.getElementById('view-projects').classList.contains('hidden')) loadProjects();
 }, 60_000);
 
+// ── Environment badge ─────────────────────────────────────────────────────────
+async function fetchEnvironment() {
+  try {
+    const res  = await fetch('/api/environment');
+    if (!res.ok) return;
+    const data = await res.json();
+    const env  = (data.environment || '').toLowerCase();
+    const el   = document.getElementById('env-badge');
+    if (!el) return;
+    if (env === 'prd' || env === 'uat') {
+      el.textContent = env.toUpperCase();
+      el.className   = `env-badge ${env}`;
+    }
+  } catch { /* ignore — badge is optional */ }
+}
+
 // ── Init ──────────────────────────────────────────────────────────────────────
 (function init() {
   initTheme();
+  fetchEnvironment();
   loadProjects();
   connectSSE();
 })();

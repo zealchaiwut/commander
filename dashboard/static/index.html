@@ -99,6 +99,14 @@
     }
     .btn-icon:hover { background: var(--surface-2); color: var(--text); }
 
+    /* ── Environment badge ── */
+    .env-badge {
+      font-size: 10px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase;
+      padding: 3px 8px; border-radius: 5px; flex-shrink: 0;
+    }
+    .env-badge.prd { background: var(--green-bg); color: var(--green); border: 1px solid rgba(22,163,74,.25); }
+    .env-badge.uat { background: var(--blue-bg);  color: var(--blue);  border: 1px solid rgba(37,99,235,.25); }
+
     /* ── Main tabs ── */
     .main-tabs {
       display: flex; background: var(--surface);
@@ -510,6 +518,7 @@
     </div>
   </div>
   <div class="header-right">
+    <span class="env-badge hidden" id="env-badge"></span>
     <button class="btn-ghost">Filters</button>
     <button class="btn-primary">+ New project</button>
     <button class="btn-icon" id="theme-btn" onclick="toggleTheme()" title="Toggle theme">

@@ -638,7 +638,11 @@ function renderAgents(agents) {
   }
 
   grid.innerHTML = agents.map(a => {
-    const badgeCls = a.status === 'working' ? 'badge-working' : a.status === 'waiting' ? 'badge-waiting' : 'badge-done';
+    let badgeCls, badgeLabel;
+    if (a.status === 'working')        { badgeCls = 'badge-working';    badgeLabel = 'working'; }
+    else if (a.status === 'waiting')   { badgeCls = 'badge-waiting';    badgeLabel = 'waiting'; }
+    else if (a.status === 'timed_out') { badgeCls = 'badge-timed-out';  badgeLabel = 'Timed Out'; }
+    else                               { badgeCls = 'badge-done';       badgeLabel = a.status; }
     const dir      = (a.working_dir || '').replace(/^\/Users\/[^/]+\//, '~/');
     const toolLine = a.last_tool
       ? `<div class="agent-tool"><span class="lbl">Using </span>${escapeHtml(a.last_tool)}</div>`
@@ -654,7 +658,7 @@ function renderAgents(agents) {
       <div class="agent-card ${a.status}">
         <div class="card-top">
           <span class="role-badge ${_roleBadgeClass(p.role)}">${escapeHtml(p.role)}</span>
-          <span class="badge ${badgeCls}">${a.status}</span>
+          <span class="badge ${badgeCls}">${badgeLabel}</span>
         </div>
         ${context}
         <div class="agent-dir">${escapeHtml(dir)}</div>

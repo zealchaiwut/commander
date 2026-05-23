@@ -481,15 +481,17 @@
 
     .agents-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px,1fr)); gap: 10px; }
     .agent-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px; }
-    .agent-card.working { border-left: 3px solid var(--green); }
-    .agent-card.waiting { border-left: 3px solid var(--amber); }
-    .agent-card.done    { border-left: 3px solid var(--border); opacity: .7; }
+    .agent-card.working   { border-left: 3px solid var(--green); }
+    .agent-card.waiting   { border-left: 3px solid var(--amber); }
+    .agent-card.done      { border-left: 3px solid var(--border); opacity: .7; }
+    .agent-card.timed_out { border-left: 3px solid #9ca3af; opacity: .75; }
     .card-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
     .agent-name  { font-weight: 600; font-size: 15px; }
     .badge { font-size: 9px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; padding: 3px 8px; border-radius: 5px; }
-    .badge-working { background: var(--green-bg);  color: var(--green); }
-    .badge-waiting { background: var(--amber-bg);  color: var(--amber); }
-    .badge-done    { background: var(--surface-2); color: var(--text-muted); border: 1px solid var(--border); }
+    .badge-working   { background: var(--green-bg);  color: var(--green); }
+    .badge-waiting   { background: var(--amber-bg);  color: var(--amber); }
+    .badge-done      { background: var(--surface-2); color: var(--text-muted); border: 1px solid var(--border); }
+    .badge-timed-out { background: #9ca3af; color: #fff; }
 
     /* Role badges */
     .role-badge { font-size: 9px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; padding: 2px 7px; border-radius: 4px; }

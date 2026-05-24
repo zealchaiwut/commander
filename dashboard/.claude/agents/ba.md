@@ -99,7 +99,7 @@ After showing the proposal, ask exactly this question (no other text on that lin
 On approval, run:
 
 ```bash
-python3 ~/commander/dashboard/scripts/create_ticket.py \
+python3 $(git rev-parse --show-toplevel)/dashboard/scripts/create_ticket.py \
   --title "<title>" \
   --body "<body>" \
   --sprint <N> \

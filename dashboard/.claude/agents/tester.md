@@ -80,7 +80,7 @@ the most common source of false-negative test failures.
 ### Step 1 — Fetch the ticket
 
 ```bash
-gh issue view <N> --repo $(cd ~/commander/dashboard && python3 -c "import github_client; print(github_client.repo())") \
+gh issue view <N> --repo $(cd "$(git rev-parse --show-toplevel)/dashboard" && python3 -c "import github_client; print(github_client.repo())") \
   --json number,title,body,labels
 ```
 
@@ -100,14 +100,14 @@ Test file name: `tests/test_{slug}__{N}.py`
 
 ### Step 3 — Read the relevant code
 
-Use `codedb_search` and `codedb_tree` to find the code that implements (or will implement) the feature. Read the relevant source files in `~/commander/dashboard/` to understand:
+Use `codedb_search` and `codedb_tree` to find the code that implements (or will implement) the feature. Read the relevant source files in `$(git rev-parse --show-toplevel)/dashboard/` to understand:
 - Which endpoints are involved
 - What data shapes are used
 - What success/failure responses look like
 
 ### Step 4 — Write the test file
 
-Create `~/commander/dashboard/tests/test_{slug}__{N}.py`.
+Create `$(git rev-parse --show-toplevel)/dashboard/tests/test_{slug}__{N}.py`.
 
 **Naming convention:** one test function per AC criterion.  
 Function name: `test_{slug}__{criterion_slug}` (double underscore)  
@@ -154,7 +154,7 @@ Rules:
 ### Step 5 — Run the tests
 
 ```bash
-cd ~/commander/dashboard && source venv/bin/activate && \
+cd "$(git rev-parse --show-toplevel)/dashboard" && source venv/bin/activate && \
   pytest tests/test_{slug}__{N}.py -v --tb=short 2>&1
 ```
 
@@ -202,7 +202,7 @@ Rules for the report format (the dashboard parses these):
 ### Step 9 — Post the report
 
 ```bash
-python3 ~/commander/dashboard/scripts/post_test_report.py \
+python3 $(git rev-parse --show-toplevel)/dashboard/scripts/post_test_report.py \
   --issue <N> \
   --report-file /tmp/test_report_{N}.md
 ```
@@ -212,7 +212,7 @@ python3 ~/commander/dashboard/scripts/post_test_report.py \
 If `READY_FOR_UAT`:
 ```bash
 # Merges to develop, pushes, labels UAT, deletes branch — all in one step
-cd ~/commander && python3 dashboard/scripts/finish_feature.py --issue <N>
+cd "$(git rev-parse --show-toplevel)" && python3 dashboard/scripts/finish_feature.py --issue <N>
 ```
 
 If `NEEDS_FIXES`, leave the ticket in SIT (do not move it). Say which tests failed and what the likely fix is.

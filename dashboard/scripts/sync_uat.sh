@@ -5,7 +5,11 @@
 
 set -euo pipefail
 
-UAT_DIR="$HOME/commander/dashboard-uat"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DASHBOARD_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+COMMANDER_ROOT="$(cd "$DASHBOARD_DIR/.." && pwd)"
+
+UAT_DIR="$COMMANDER_ROOT/dashboard-uat"
 
 echo "=== Syncing UAT environment with develop ==="
 

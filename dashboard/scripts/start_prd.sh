@@ -6,7 +6,11 @@
 
 set -euo pipefail
 
-PRD_DIR="$HOME/commander/dashboard"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DASHBOARD_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+COMMANDER_ROOT="$(cd "$DASHBOARD_DIR/.." && pwd)"
+
+PRD_DIR="$DASHBOARD_DIR"
 VENV="$PRD_DIR/venv"
 PID_FILE="$PRD_DIR/prd.pid"
 LOG_FILE="$PRD_DIR/prd.log"

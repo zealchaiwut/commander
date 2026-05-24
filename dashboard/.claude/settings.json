@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "$HOME/commander/dashboard/venv/bin/python3 $HOME/commander/dashboard/hooks/tool_used.py"
+            "command": "bash .claude/hooks/run_tool_used.sh"
           }
         ]
       }
@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "$HOME/commander/dashboard/venv/bin/python3 $HOME/commander/dashboard/hooks/post_tool_used.py"
+            "command": "bash .claude/hooks/run_post_tool_used.sh"
           }
         ]
       }
@@ -27,7 +27,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "$HOME/commander/dashboard/venv/bin/python3 $HOME/commander/dashboard/hooks/agent_finished.py"
+            "command": "bash .claude/hooks/run_agent_finished.sh"
           }
         ]
       }

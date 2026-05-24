@@ -207,6 +207,23 @@ def list_events():
     return db.get_recent_events()
 
 
+@app.delete("/api/events/test")
+def clear_test_events():
+    """Remove test/debug events and agents from the database and clear test alerts from memory."""
+    events_deleted = db.delete_test_events()
+    agents_deleted = db.delete_test_agents()
+    # Also purge in-memory test alerts (patterns: 'test_', 'Test-', 'Test alert')
+    import re as _re
+    _test_pat = _re.compile(r"(test_|Test-|Test alert|\[CRASH\])", _re.IGNORECASE)
+    before = len(_alerts)
+    _alerts[:] = [
+        a for a in _alerts
+        if not (_test_pat.search(a.get("title", "")) or _test_pat.search(a.get("body", "")))
+    ]
+    alerts_cleared = before - len(_alerts)
+    return {"ok": True, "events_deleted": events_deleted, "agents_deleted": agents_deleted, "alerts_cleared": alerts_cleared}
+
+
 @app.get("/events")
 async def sse_stream(request: Request):
     queue: asyncio.Queue = asyncio.Queue()
@@ -259,8 +276,10 @@ def get_sprints():
 
 
 @app.get("/api/issues")
-def get_issues(sprint: int):
+def get_issues(sprint: Optional[int] = None):
     try:
+        if sprint is None:
+            return github_client.list_all_open_issues()
         return github_client.list_issues(sprint)
     except subprocess.CalledProcessError as e:
         raise _gh_error(e)

@@ -68,6 +68,13 @@ Skip these unless the ticket specifically asks:
 
 The `## Summary` section of the test report must include a `Risk:` line:
 
+## Pre-test checks
+
+Before writing tests, grep the codebase for similar strings to align with 
+existing conventions. If the function produces "| Total Tokens |", your 
+test should assert "Total Tokens", not "Total tokens". Mismatched case is 
+the most common source of false-negative test failures.
+
 ## Workflow
 
 ### Step 1 — Fetch the ticket

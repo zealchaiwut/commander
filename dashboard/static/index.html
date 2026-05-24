@@ -551,6 +551,65 @@
       .agent-summary .sum-item { padding: 12px 16px; }
       .sum-count { font-size: 22px; }
     }
+
+    /* ── Sprint History view (AC-5) ── */
+    .history-stats-row {
+      display: flex; background: var(--surface);
+      border-bottom: 1px solid var(--border);
+    }
+    .history-stat-card {
+      flex: 1; padding: 16px 24px;
+      border-right: 1px solid var(--border);
+      display: flex; flex-direction: column; gap: 3px;
+    }
+    .history-stat-card:last-child { border-right: none; }
+    .history-stat-label { font-size: 10px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: .08em; }
+    .history-stat-value { font-size: 24px; font-weight: 800; line-height: 1.2; }
+
+    .history-row {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      cursor: pointer; user-select: none;
+      transition: background .15s;
+    }
+    .history-row:hover { background: var(--surface-hover); }
+    .history-row-header {
+      display: grid;
+      grid-template-columns: 80px 110px 120px 90px 90px 40px;
+      align-items: center; gap: 16px;
+      padding: 14px 24px;
+    }
+    .history-sprint-num { font-weight: 700; font-size: 14px; }
+    .history-date       { font-size: 12px; color: var(--text-muted); font-family: var(--mono); }
+    .history-shipped    { font-size: 13px; font-weight: 600; color: var(--green); }
+    .history-skipped    { font-size: 13px; font-weight: 600; color: var(--amber); }
+    .history-chevron    { display: flex; justify-content: flex-end; color: var(--text-sub); font-size: 16px; transition: transform .2s ease; }
+    .history-row.expanded .history-chevron { transform: rotate(180deg); }
+
+    .history-expand-panel {
+      display: none;
+      border-top: 1px solid var(--border);
+      background: var(--surface-2);
+      padding: 16px 24px;
+    }
+    .history-row.expanded .history-expand-panel { display: block; }
+    .history-summary-pre {
+      font-family: var(--mono); font-size: 12px; line-height: 1.5;
+      white-space: pre-wrap; word-break: break-word;
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 6px; padding: 12px 14px;
+      max-height: 400px; overflow-y: auto;
+      margin-bottom: 10px;
+    }
+    .history-gh-link {
+      font-size: 12px; color: var(--blue); text-decoration: none;
+      display: inline-flex; align-items: center; gap: 4px;
+    }
+    .history-gh-link:hover { text-decoration: underline; }
+    @media (max-width: 600px) {
+      .history-row-header { grid-template-columns: 60px 90px 1fr 40px; }
+      .history-date, .history-shipped, .history-skipped { display: none; }
+    }
   </style>
 </head>
 <body>
@@ -581,14 +640,39 @@
 
 <div id="toast-error" style="display:none;position:fixed;top:12px;right:12px;z-index:9999;background:#ef4444;color:#fff;padding:8px 14px;border-radius:6px;font-size:13px;max-width:320px;box-shadow:0 2px 8px rgba(0,0,0,.2)"></div>
 
+<!-- ── Alert banners (AC-3a) ── -->
+<div id="alert-banners" style="padding:0 16px;"></div>
+
 <nav class="main-tabs">
-  <button class="mtab active" id="mtab-projects"  onclick="switchMain('projects')">Projects</button>
-  <button class="mtab"        id="mtab-agents"    onclick="switchMain('agents')">Agents</button>
-  <button class="mtab"        id="mtab-activity"  onclick="switchMain('activity')">Activity log</button>
+  <button class="mtab active" id="mtab-projects"     onclick="switchMain('projects')">Projects</button>
+  <button class="mtab"        id="mtab-agents"       onclick="switchMain('agents')">Agents</button>
+  <button class="mtab"        id="mtab-activity"     onclick="switchMain('activity')">Activity log</button>
+  <button class="mtab"        id="mtab-history"      onclick="switchMain('history')">Sprint History</button>
+  <button class="mtab"        id="mtab-sprint-plan"  onclick="switchMain('sprint-plan')">Sprint Planning</button>
 </nav>
 
 <!-- ── Projects view ── -->
 <div id="view-projects">
+
+  <!-- ── Sprint panel (AC-6) ── -->
+  <div id="sprint-panel" class="hidden" style="margin:12px 16px 0;padding:14px 16px;background:var(--surface);border:1px solid var(--border);border-radius:10px;">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+      <span id="sprint-panel-title" style="font-weight:600;font-size:13px;">Sprint</span>
+      <button id="btn-retry-skipped" style="display:none;font-size:11px;padding:4px 10px;background:var(--amber);color:#fff;border:none;border-radius:5px;cursor:pointer;"
+        onclick="retrySkippedIssues()">Retry skipped</button>
+    </div>
+    <div style="margin-bottom:6px;">
+      <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--text-muted);margin-bottom:4px;">
+        <span id="sprint-progress-label">0 of 0 issues complete</span>
+        <span id="sprint-progress-pct">0%</span>
+      </div>
+      <div style="height:6px;background:var(--border);border-radius:3px;overflow:hidden;">
+        <div id="sprint-progress-bar" style="height:100%;width:0%;border-radius:3px;transition:width .3s;background:var(--blue);"></div>
+      </div>
+    </div>
+    <div id="sprint-skipped-list"></div>
+  </div>
+
   <div class="metrics-row">
     <div class="metric-card">
       <span class="metric-label">Active Sprints</span>
@@ -650,15 +734,23 @@
       <span class="sum-label">Waiting</span>
     </div>
     <div class="sum-item">
+      <span class="sum-count" id="cnt-timed-out">—</span>
+      <span class="sum-label">Timed Out</span>
+    </div>
+    <div class="sum-item">
       <span class="sum-count" id="cnt-done">—</span>
       <span class="sum-label">Done</span>
     </div>
   </div>
   <div class="section-pad">
-    <div class="section-label">Active agents</div>
-    <div class="agents-grid" id="agents-grid">
+    <div class="section-label" id="agents-active-label">ACTIVE · 0</div>
+    <div class="agents-grid" id="agents-grid-active">
       <div class="empty">No active agents</div>
     </div>
+  </div>
+  <div class="section-pad" id="agents-inactive-section">
+    <div class="section-label" id="agents-inactive-label">INACTIVE · 0</div>
+    <div class="agents-grid" id="agents-grid-inactive"></div>
   </div>
 </div>
 
@@ -671,6 +763,174 @@
     </div>
   </div>
 </div>
+
+<!-- ── Sprint History view (AC-5) ── -->
+<div id="view-history" class="hidden">
+  <!-- Quick-stats row (AC-5a) -->
+  <div class="history-stats-row" id="history-stats-row">
+    <div class="history-stat-card">
+      <span class="history-stat-label">Avg Sprint Duration</span>
+      <span class="history-stat-value" id="h-avg-duration">—</span>
+    </div>
+    <div class="history-stat-card">
+      <span class="history-stat-label">Total Tokens This Month</span>
+      <span class="history-stat-value" id="h-tokens-month">—</span>
+    </div>
+  </div>
+  <!-- Sprint list (AC-5b) -->
+  <div id="history-list">
+    <div class="empty" id="history-empty" style="display:none;">No sprints recorded yet.</div>
+    <div id="history-rows"></div>
+  </div>
+</div>
+
+
+<!-- ── Sprint Planning view ── -->
+<div id="view-sprint-plan" class="hidden">
+  <div class="sp-toolbar">
+    <div class="sp-toolbar-left">
+      <span class="sp-label">Sprint:</span>
+      <select id="sp-sprint-select" onchange="onSprintSelect()" class="sp-select">
+        <option value="">Loading…</option>
+      </select>
+    </div>
+    <div class="sp-toolbar-right">
+      <button id="sp-apply-btn" class="btn-primary" onclick="applySprintChanges()" style="display:none">Apply ✓</button>
+    </div>
+  </div>
+
+  <div class="sp-columns">
+    <div class="sp-col" id="sp-col-unassigned"
+         ondragover="event.preventDefault()" ondrop="onDrop(event,'unassigned')"
+         data-col="unassigned">
+      <div class="sp-col-header">
+        <span class="sp-col-title" id="sp-unassigned-title">Unassigned</span>
+      </div>
+      <div class="sp-cards" id="sp-cards-unassigned">
+        <div class="sp-empty">Loading…</div>
+      </div>
+    </div>
+
+    <div class="sp-col" id="sp-col-sprint"
+         ondragover="event.preventDefault()" ondrop="onDrop(event,'sprint')"
+         data-col="sprint">
+      <div class="sp-col-header">
+        <span class="sp-col-title" id="sp-sprint-title">Sprint</span>
+      </div>
+      <div class="sp-cards" id="sp-cards-sprint">
+        <div class="sp-empty">Select a sprint</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="sp-footer" id="sp-footer"></div>
+</div>
+
+<style>
+  /* ── Sprint Planning tab ── */
+  .sp-toolbar {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 24px; background: var(--surface);
+    border-bottom: 1px solid var(--border); gap: 12px;
+  }
+  .sp-toolbar-left { display: flex; align-items: center; gap: 8px; }
+  .sp-toolbar-right { display: flex; align-items: center; gap: 8px; }
+  .sp-label { font-size: 12px; font-weight: 600; color: var(--text-muted); }
+  .sp-select {
+    padding: 5px 8px; border: 1px solid var(--border); border-radius: 6px;
+    background: var(--surface-2); color: var(--text); font-size: 13px; font-family: inherit;
+    outline: none; cursor: pointer;
+  }
+  .sp-select:focus { border-color: var(--blue); }
+
+  .sp-columns {
+    display: grid; grid-template-columns: 1fr 1fr;
+    gap: 0; min-height: calc(100dvh - 200px);
+  }
+  .sp-col {
+    border-right: 1px solid var(--border);
+    display: flex; flex-direction: column;
+    background: var(--bg);
+  }
+  .sp-col:last-child { border-right: none; }
+  .sp-col-header {
+    padding: 14px 20px 10px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    font-size: 12px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: .07em; color: var(--text-muted);
+  }
+  .sp-col-title { }
+  .sp-cards {
+    flex: 1; padding: 12px; display: flex; flex-direction: column; gap: 6px;
+    min-height: 100px;
+  }
+  .sp-empty {
+    padding: 24px 12px; text-align: center;
+    color: var(--text-sub); font-size: 12px; font-style: italic;
+  }
+
+  /* Issue cards in sprint planning */
+  .sp-card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
+    padding: 9px 11px; cursor: grab; user-select: none;
+    transition: box-shadow .15s, border-color .15s, transform .15s;
+    display: flex; flex-direction: column; gap: 5px;
+  }
+  .sp-card:active { cursor: grabbing; }
+  .sp-card:hover { border-color: var(--blue); box-shadow: 0 2px 8px rgba(37,99,235,.1); }
+  .sp-card.dragging { opacity: .4; transform: scale(.97); }
+  .sp-card.drag-over-target { border-color: var(--blue); background: var(--blue-bg); }
+  .sp-card.error-flash {
+    animation: error-flash .5s ease;
+    border-color: var(--red);
+  }
+  @keyframes error-flash {
+    0%,100% { border-color: var(--border); }
+    25%,75%  { border-color: var(--red); background: var(--red-bg); }
+  }
+  .sp-card-top { display: flex; align-items: flex-start; gap: 6px; }
+  .sp-card-num {
+    font-family: var(--mono); font-size: 11px; color: var(--text-muted);
+    text-decoration: none; flex-shrink: 0; line-height: 1.5;
+  }
+  .sp-card-num:hover { color: var(--blue); }
+  .sp-card-size {
+    font-size: 9px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: .06em; padding: 2px 5px; border-radius: 3px;
+    background: var(--surface-2); color: var(--text-muted);
+    border: 1px solid var(--border); flex-shrink: 0; margin-top: 1px;
+  }
+  .sp-card-title {
+    font-size: 12px; font-weight: 500; line-height: 1.4; flex: 1;
+    overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+  }
+  .sp-card-meta {
+    display: flex; gap: 5px; align-items: center; flex-wrap: wrap;
+  }
+  .sp-card-error {
+    font-size: 11px; color: var(--red); margin-top: 2px;
+    animation: fadeIn .2s ease;
+  }
+  @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+  .sp-footer {
+    padding: 10px 20px; background: var(--surface);
+    border-top: 1px solid var(--border);
+    font-size: 12px; color: var(--text-muted);
+    min-height: 36px;
+  }
+
+  /* Mobile */
+  @media (max-width: 600px) {
+    .sp-columns {
+      grid-template-columns: 1fr;
+    }
+    .sp-col { border-right: none; border-bottom: 1px solid var(--border); min-height: 200px; }
+    .sp-toolbar { padding: 10px 16px; }
+  }
+</style>
 
 <!-- ── New Project Modal ── -->
 <div class="modal-backdrop hidden" id="new-project-backdrop" onclick="closeNewProjectModal()"></div>
@@ -728,6 +988,21 @@
   .modal-input.error { border-color: var(--red); }
   .modal-error  { font-size: 12px; color: var(--red); margin-top: 5px; }
   .modal-footer { display: flex; gap: 8px; justify-content: flex-end; margin-top: 20px; }
+
+  /* ── Alert banners (AC-3a) ── */
+  .alert-banner {
+    display: flex; align-items: flex-start; justify-content: space-between;
+    gap: 10px; padding: 10px 14px; margin-bottom: 6px;
+    background: var(--red-bg, #fef2f2); border: 1px solid var(--red, #ef4444);
+    border-radius: 8px; font-size: 13px;
+  }
+  .alert-banner-body { flex: 1; min-width: 0; }
+  .alert-banner-title { font-weight: 600; color: var(--text); }
+  .alert-banner-msg   { color: var(--text-muted); margin-top: 2px; font-size: 12px; }
+  .alert-dismiss {
+    flex-shrink: 0; background: none; border: none; cursor: pointer;
+    font-size: 16px; color: var(--red, #ef4444); line-height: 1; padding: 0 2px;
+  }
 </style>
 
 <script src="/static/app.js"></script>

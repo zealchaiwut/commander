@@ -40,7 +40,7 @@ def find_branch(issue_num: int) -> str | None:
     """Find feature/<N>-* locally first, then on remote."""
     ok, out = _try("git", "branch", "--list", f"feature/{issue_num}-*")
     if ok and out.strip():
-        return out.strip().splitlines()[0].strip().lstrip("* ")
+        return out.strip().splitlines()[0].strip().lstrip("*+ ")
 
     ok, out = _try("git", "branch", "-r", "--list", f"origin/feature/{issue_num}-*")
     if ok and out.strip():

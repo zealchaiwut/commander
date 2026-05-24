@@ -20,18 +20,21 @@ and merges to `develop` if they pass. You then review the feature on the UAT
 server (port 8001) and approve it from the dashboard. After approval you merge
 `develop` to `master` and restart PRD.
 
+For full sprints, the **Sprint Manager** (`sprint_manager.py`) automates the
+Coder → Tester → gate → merge loop for every issue in the sprint, runs quality
+gates, and generates an executive summary — replacing manual per-ticket
+orchestration. See section 5.
+
 Use this platform when a feature benefits from a written contract, automated
 regression tests, and a UAT gate. For a one-line tweak you can verify in five
 seconds, just edit directly.
 
 ### Flow diagram
 
-The diagram below shows every handoff in the BA→Coder→Tester→UAT loop.
+The diagram shows every handoff in the BA→Coder→Tester→UAT loop.
 
-![Commander workflow diagram](commander-workflow.excalidraw)
-
-> Source: [`docs/commander-workflow.excalidraw`](commander-workflow.excalidraw).
-> Open at [excalidraw.com](https://excalidraw.com) for an interactive view.
+> **[Open diagram — commander-workflow.excalidraw](commander-workflow.excalidraw)**
+> Open the file at [excalidraw.com](https://excalidraw.com) (File → Open) for an interactive view.
 
 ---
 
@@ -250,7 +253,93 @@ The endpoint is now live at `http://localhost:8000/api/health`.
 
 ---
 
-## 5. Best practices
+## 5. Sprint Manager — automated sprint runs
+
+The Sprint Manager (`dashboard/scripts/sprint_manager.py`) replaces the
+manual coder → tester → approve loop. Given a sprint label, it works through
+every open backlog issue sequentially: dispatches the Coder agent, dispatches
+the Tester, runs three quality gates (pytest → ruff lint → merge preview), and
+merges passing tickets to `develop`. When the sprint finishes it writes an
+executive summary and optionally records learnings.
+
+### Run a sprint
+
+```bash
+cd ~/commander
+python3 dashboard/scripts/sprint_manager.py sprint-3
+```
+
+For each backlog issue the manager:
+
+1. Dispatches the Coder → implements the feature on a worktree branch
+2. Dispatches the Tester → writes pytest tests for each AC, runs them
+3. Runs quality gates: **pytest**, **ruff lint**, **merge-preview**
+4. Gate pass → merges to `develop`, labels ticket `UAT`
+5. Gate fail → labels ticket back to `SIT`, posts a structured failure comment
+
+### Common flags
+
+```bash
+# Dry run — shows what would happen, no agents dispatched
+python3 dashboard/scripts/sprint_manager.py sprint-3 --dry-run
+
+# Skip all gates (faster, less safe)
+python3 dashboard/scripts/sprint_manager.py sprint-3 --skip-gates
+
+# Skip only the pytest gate
+python3 dashboard/scripts/sprint_manager.py sprint-3 --gate-pytest=false
+
+# Resume after a crash or manual stop
+python3 dashboard/scripts/sprint_manager.py sprint-3 --resume
+
+# Retry tickets that previously failed
+python3 dashboard/scripts/sprint_manager.py sprint-3 --retry-failed
+
+# Send alerts to dashboard banner and a log file
+python3 dashboard/scripts/sprint_manager.py sprint-3 --alert-mode dashboard-banner,file
+```
+
+### Executive summary and Sprint History tab
+
+After the sprint loop finishes, the manager writes a Markdown summary to
+`dashboard/sprints/sprint-N-summary-YYYY-MM-DD.md` and creates a GitHub issue
+for permanent record. If run interactively (TTY) you'll see:
+
+```
+Sprint 3 done. Want to add learnings to the summary? (y/n)
+```
+
+Type `y` and your `$EDITOR` opens. Learnings are appended to the summary and
+synced to the GitHub issue body.
+
+The **Sprint History** tab on the dashboard shows all past summaries with
+quick-stats (shipped · skipped · token count) and inline expand to read the
+full Markdown.
+
+### Failure categories
+
+When a ticket fails its quality gates the manager posts a comment labelling
+the failure as one of:
+
+| Category | Meaning |
+|----------|---------|
+| `CRASH` | Coder or Tester subprocess exited non-zero |
+| `HANG` | No log output for the hang-kill timeout; process was killed |
+| `GATE_FAIL` | pytest or ruff gate returned non-zero |
+| `TESTER_REJECTED` | Tester marked the ticket as needs-rework |
+
+The ticket moves back to `SIT` and the sprint moves on to the next issue.
+
+### Sprint Planning tab
+
+The **Sprint Planning** tab on the dashboard provides a conversational CLI
+planner and visual drag-and-drop interface for choosing which backlog issues to
+include before running sprint_manager. Open it at `http://localhost:8000`, pick
+issues, and use "Start sprint" to launch the manager directly from the UI.
+
+---
+
+## 6. Best practices
 
 ### a. Write acceptance criteria before any code — the BA ticket is the contract
 

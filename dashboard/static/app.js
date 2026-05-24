@@ -72,12 +72,16 @@ function _syncThemeIcon(theme) {
 
 // ── Tab navigation ────────────────────────────────────────────────────────────
 function switchMain(tab) {
-  ['projects', 'agents', 'activity'].forEach(t => {
-    document.getElementById(`view-${t}`).classList.toggle('hidden', t !== tab);
-    document.getElementById(`mtab-${t}`).classList.toggle('active', t === tab);
+  ['projects', 'agents', 'activity', 'history', 'sprint-plan'].forEach(t => {
+    const viewId = t === 'sprint-plan' ? 'view-sprint-plan' : `view-${t}`;
+    const tabId  = `mtab-${t}`;
+    document.getElementById(viewId)?.classList.toggle('hidden', t !== tab);
+    document.getElementById(tabId)?.classList.toggle('active', t === tab);
   });
-  if (tab === 'agents')   fetchAgents();
-  if (tab === 'activity') fetchEvents();
+  if (tab === 'agents')      fetchAgents();
+  if (tab === 'activity')    fetchEvents();
+  if (tab === 'history')     loadSprintHistory().catch(() => {});
+  if (tab === 'sprint-plan') loadSprintPlanning();
 }
 
 // ── Filter ────────────────────────────────────────────────────────────────────
@@ -669,46 +673,61 @@ async function fetchAgents() {
   } catch { /* silent */ }
 }
 
+function _renderAgentCard(a) {
+  let badgeCls, badgeLabel;
+  if (a.status === 'working')        { badgeCls = 'badge-working';    badgeLabel = 'working'; }
+  else if (a.status === 'waiting')   { badgeCls = 'badge-waiting';    badgeLabel = 'waiting'; }
+  else if (a.status === 'timed_out') { badgeCls = 'badge-timed-out';  badgeLabel = 'Timed Out'; }
+  else                               { badgeCls = 'badge-done';       badgeLabel = a.status; }
+  const dir      = (a.working_dir || '').replace(/^\/Users\/[^/]+\//, '~/');
+  const toolLine = a.last_tool
+    ? `<div class="agent-tool"><span class="lbl">Using </span>${escapeHtml(a.last_tool)}</div>`
+    : '';
+  const p        = _parseAgentName(a.name);
+  const context  = p.isNew
+    ? `<div class="agent-context">${escapeHtml(p.repo)}${p.branch ? ` · ${escapeHtml(p.branch)}` : ''}</div>`
+    : `<div class="agent-context">${escapeHtml(p.repo)}</div>`;
+  const sessLine = p.isNew && p.shortSess
+    ? `<div class="agent-sess">${escapeHtml(p.shortSess)} · ${timeAgo(a.last_seen)}</div>`
+    : `<div class="agent-time">${timeAgo(a.last_seen)}</div>`;
+  return `
+    <div class="agent-card ${a.status}">
+      <div class="card-top">
+        <span class="role-badge ${_roleBadgeClass(p.role)}">${escapeHtml(p.role)}</span>
+        <span class="badge ${badgeCls}">${badgeLabel}</span>
+      </div>
+      ${context}
+      <div class="agent-dir">${escapeHtml(dir)}</div>
+      ${toolLine}
+      ${sessLine}
+    </div>`;
+}
+
 function renderAgents(agents) {
-  document.getElementById('cnt-working').textContent = agents.filter(a => a.status === 'working').length;
-  document.getElementById('cnt-waiting').textContent = agents.filter(a => a.status === 'waiting').length;
-  document.getElementById('cnt-done').textContent    = agents.filter(a => a.status === 'done').length;
+  const active   = agents.filter(a => a.status === 'working' || a.status === 'waiting');
+  const inactive = agents.filter(a => a.status === 'done'    || a.status === 'timed_out');
 
-  const grid = document.getElementById('agents-grid');
-  if (agents.length === 0) {
-    grid.innerHTML = '<div class="empty">No active agents</div>';
-    return;
+  document.getElementById('cnt-working').textContent  = agents.filter(a => a.status === 'working').length;
+  document.getElementById('cnt-waiting').textContent  = agents.filter(a => a.status === 'waiting').length;
+  document.getElementById('cnt-timed-out').textContent = agents.filter(a => a.status === 'timed_out').length;
+  document.getElementById('cnt-done').textContent     = agents.filter(a => a.status === 'done').length;
+
+  // Active section — always visible; shows empty-state when no active agents
+  document.getElementById('agents-active-label').textContent = `ACTIVE · ${active.length}`;
+  const activeGrid = document.getElementById('agents-grid-active');
+  activeGrid.innerHTML = active.length
+    ? active.map(_renderAgentCard).join('')
+    : '<div class="empty">No active agents</div>';
+
+  // Inactive section — hidden entirely when there are no inactive agents
+  const inactiveSection = document.getElementById('agents-inactive-section');
+  if (inactive.length === 0) {
+    inactiveSection.style.display = 'none';
+  } else {
+    inactiveSection.style.display = '';
+    document.getElementById('agents-inactive-label').textContent = `INACTIVE · ${inactive.length}`;
+    document.getElementById('agents-grid-inactive').innerHTML = inactive.map(_renderAgentCard).join('');
   }
-
-  grid.innerHTML = agents.map(a => {
-    let badgeCls, badgeLabel;
-    if (a.status === 'working')        { badgeCls = 'badge-working';    badgeLabel = 'working'; }
-    else if (a.status === 'waiting')   { badgeCls = 'badge-waiting';    badgeLabel = 'waiting'; }
-    else if (a.status === 'timed_out') { badgeCls = 'badge-timed-out';  badgeLabel = 'Timed Out'; }
-    else                               { badgeCls = 'badge-done';       badgeLabel = a.status; }
-    const dir      = (a.working_dir || '').replace(/^\/Users\/[^/]+\//, '~/');
-    const toolLine = a.last_tool
-      ? `<div class="agent-tool"><span class="lbl">Using </span>${escapeHtml(a.last_tool)}</div>`
-      : '';
-    const p        = _parseAgentName(a.name);
-    const context  = p.isNew
-      ? `<div class="agent-context">${escapeHtml(p.repo)}${p.branch ? ` · ${escapeHtml(p.branch)}` : ''}</div>`
-      : `<div class="agent-context">${escapeHtml(p.repo)}</div>`;
-    const sessLine = p.isNew && p.shortSess
-      ? `<div class="agent-sess">${escapeHtml(p.shortSess)} · ${timeAgo(a.last_seen)}</div>`
-      : `<div class="agent-time">${timeAgo(a.last_seen)}</div>`;
-    return `
-      <div class="agent-card ${a.status}">
-        <div class="card-top">
-          <span class="role-badge ${_roleBadgeClass(p.role)}">${escapeHtml(p.role)}</span>
-          <span class="badge ${badgeCls}">${badgeLabel}</span>
-        </div>
-        ${context}
-        <div class="agent-dir">${escapeHtml(dir)}</div>
-        ${toolLine}
-        ${sessLine}
-      </div>`;
-  }).join('');
 }
 
 // ── Activity view ─────────────────────────────────────────────────────────────
@@ -754,6 +773,20 @@ function connectSSE() {
   es.onmessage = ev => {
     try {
       const msg = JSON.parse(ev.data);
+
+      // Sprint alert banner push (AC-3a)
+      if (msg.type === 'alert') {
+        loadAlerts().catch(() => {});
+        return;
+      }
+
+      // Sprint status push (AC-6d)
+      if (msg.type === 'sprint_update' && msg.sprint) {
+        _sprintState = msg.sprint;
+        renderSprintPanel(msg.sprint);
+        return;
+      }
+
       if (msg.type !== 'update') return;
       if (!document.getElementById('view-projects').classList.contains('hidden')) {
         loadProjects().catch(() => {});
@@ -764,6 +797,10 @@ function connectSSE() {
         });
       }
       if (!document.getElementById('view-agents').classList.contains('hidden')) fetchAgents();
+      if (!document.getElementById('view-history')?.classList.contains('hidden')) {
+        loadSprintHistory().catch(() => {});
+      }
+      if (msg.event && msg.event.event_type === 'sprint_plan_update') _handleSprintPlanSSE();
     } catch { /* ignore */ }
   };
 }
@@ -931,7 +968,11 @@ async function manualRefresh() {
   icon.classList.add('spinning');
   hideToast();
   try {
-    await Promise.all([loadProjects(), loadPlanUsage()]);
+    const tasks = [loadProjects(), loadPlanUsage()];
+    if (!document.getElementById('view-history')?.classList.contains('hidden')) {
+      tasks.push(loadSprintHistory());
+    }
+    await Promise.all(tasks);
   } catch {
     showToast('Refresh failed — server may be unreachable');
   } finally {
@@ -955,13 +996,132 @@ function hideToast() {
   if (t) t.style.display = 'none';
 }
 
+// ── Sprint alert banners (AC-3a) ──────────────────────────────────────────────
+
+let _alertsCache = [];
+
+async function loadAlerts() {
+  try {
+    const res = await fetch('/api/alerts');
+    if (!res.ok) return;
+    _alertsCache = await res.json();
+    renderAlertBanners(_alertsCache);
+  } catch { /* silent */ }
+}
+
+function renderAlertBanners(alerts) {
+  const container = document.getElementById('alert-banners');
+  if (!container) return;
+  if (!alerts || alerts.length === 0) {
+    container.innerHTML = '';
+    return;
+  }
+  container.innerHTML = alerts.map((a, idx) => `
+    <div class="alert-banner" id="alert-${idx}">
+      <div class="alert-banner-body">
+        <div class="alert-banner-title">${escapeHtml(a.title)}${a.category ? ` [${escapeHtml(a.category)}]` : ''}</div>
+        <div class="alert-banner-msg">${escapeHtml(a.body || '')}</div>
+      </div>
+      <button class="alert-dismiss" onclick="dismissAlert(${idx})" title="Dismiss">&times;</button>
+    </div>`).join('');
+}
+
+async function dismissAlert(idx) {
+  try {
+    await fetch(`/api/alerts/${idx}`, { method: 'DELETE' });
+    _alertsCache.splice(idx, 1);
+    renderAlertBanners(_alertsCache);
+  } catch { /* silent */ }
+}
+
+// ── Sprint status panel (AC-6) ────────────────────────────────────────────────
+
+let _sprintState = null;
+
+async function loadSprintStatus() {
+  try {
+    const res = await fetch('/api/sprint-status');
+    if (res.status === 404) {
+      // No active sprint — hide panel
+      document.getElementById('sprint-panel')?.classList.add('hidden');
+      return;
+    }
+    if (!res.ok) return;
+    _sprintState = await res.json();
+    renderSprintPanel(_sprintState);
+  } catch { /* silent */ }
+}
+
+function renderSprintPanel(state) {
+  const panel = document.getElementById('sprint-panel');
+  if (!panel) return;
+
+  const issues  = state.issues || [];
+  const done    = issues.filter(i => i.status === 'done').length;
+  const total   = issues.length;
+  const pct     = total > 0 ? Math.round(done / total * 100) : 0;
+  const skipped = issues.filter(i => i.status === 'skipped');
+
+  // Title
+  const titleEl = document.getElementById('sprint-panel-title');
+  if (titleEl) titleEl.textContent = `Sprint: ${escapeHtml(state.sprint_label || '')}`;
+
+  // Progress bar
+  const lblEl = document.getElementById('sprint-progress-label');
+  const pctEl = document.getElementById('sprint-progress-pct');
+  const barEl = document.getElementById('sprint-progress-bar');
+  if (lblEl) lblEl.textContent = `${done} of ${total} issues complete`;
+  if (pctEl) pctEl.textContent = `${pct}%`;
+  if (barEl) {
+    barEl.style.width = pct + '%';
+    barEl.style.background = pct === 100 ? 'var(--green)' : pct >= 50 ? 'var(--blue)' : 'var(--amber)';
+  }
+
+  // Retry button — show if there are skipped issues
+  const retryBtn = document.getElementById('btn-retry-skipped');
+  if (retryBtn) retryBtn.style.display = skipped.length > 0 ? '' : 'none';
+
+  // Skipped issues list
+  const listEl = document.getElementById('sprint-skipped-list');
+  if (listEl) {
+    if (skipped.length === 0) {
+      listEl.innerHTML = '';
+    } else {
+      listEl.innerHTML = `
+        <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);margin-bottom:6px;">Skipped Issues</div>
+        ${skipped.map(i => `
+          <div style="display:flex;align-items:flex-start;gap:6px;font-size:12px;margin-bottom:4px;padding:6px 8px;background:var(--red-bg);border-radius:5px;">
+            <span style="font-family:var(--mono);color:var(--text-muted);flex-shrink:0;">#${i.number}</span>
+            <span style="flex:1;color:var(--text);">${escapeHtml(i.title || '')}</span>
+            <span style="font-size:10px;font-weight:700;color:var(--red);white-space:nowrap;">${escapeHtml(i.category || 'UNKNOWN')}</span>
+          </div>`).join('')}`;
+    }
+  }
+
+  panel.classList.remove('hidden');
+}
+
+// AC-6c: Retry skipped button — opens instructions (actual retry requires CLI)
+function retrySkipped() {
+  alert('To retry skipped issues, re-run the sprint manager with:\n\npython3 dashboard/scripts/sprint_manager.py <label> --retry-failed');
+}
+
 // ── Periodic refresh ──────────────────────────────────────────────────────────
 setInterval(() => {
   if (!document.getElementById('view-projects').classList.contains('hidden')) {
     loadProjects().catch(() => {});
     loadPlanUsage().catch(() => {});
   }
+  if (!document.getElementById('view-history')?.classList.contains('hidden')) {
+    loadSprintHistory().catch(() => {});
+  }
 }, 60_000);
+
+// Sprint status polls every 30s (AC-6d)
+setInterval(() => {
+  loadSprintStatus().catch(() => {});
+  loadAlerts().catch(() => {});
+}, 30_000);
 
 // ── Environment badge ─────────────────────────────────────────────────────────
 async function fetchEnvironment() {
@@ -979,6 +1139,616 @@ async function fetchEnvironment() {
   } catch { /* ignore — badge is optional */ }
 }
 
+// ── Sprint History view (AC-5) ────────────────────────────────────────────────
+
+let _sprintHistoryData = [];
+
+async function loadSprintHistory() {
+  try {
+    const res = await fetch('/api/sprint-history');
+    if (!res.ok) throw new Error(await res.text());
+    _sprintHistoryData = await res.json();
+    renderSprintHistory(_sprintHistoryData);
+  } catch {
+    // silently leave existing content
+  }
+}
+
+function _statusBadgeHtml(status) {
+  const map = {
+    complete:   ['green',  'complete'],
+    stopped:    ['amber',  'stopped'],
+    'budget-hit': ['red', 'budget-hit'],
+    unknown:    ['gray',   'unknown'],
+  };
+  const [color, label] = map[status] || ['gray', status || 'unknown'];
+  return `<span class="sbadge ${color}">${escapeHtml(label)}</span>`;
+}
+
+function renderSprintHistory(data) {
+  const emptyEl = document.getElementById('history-empty');
+  const rowsEl  = document.getElementById('history-rows');
+  const statsRow = document.getElementById('history-stats-row');
+  if (!rowsEl) return;
+
+  if (!data || data.length === 0) {
+    if (emptyEl) emptyEl.style.display = '';
+    rowsEl.innerHTML = '';
+    // Quick-stats: zero
+    const avgEl   = document.getElementById('h-avg-duration');
+    const tokEl   = document.getElementById('h-tokens-month');
+    if (avgEl) avgEl.textContent = '—';
+    if (tokEl) tokEl.textContent = '—';
+    return;
+  }
+
+  if (emptyEl) emptyEl.style.display = 'none';
+
+  // AC-5a: quick-stats
+  _renderHistoryStats(data);
+
+  // AC-5b: sprint rows
+  rowsEl.innerHTML = data.map((sprint, idx) => _sprintRowHtml(sprint, idx)).join('');
+}
+
+function _renderHistoryStats(data) {
+  // Avg sprint duration: not directly stored, so we skip if no duration data
+  // (sprint_manager doesn't store wall_clock in summary files currently — show count)
+  const avgEl  = document.getElementById('h-avg-duration');
+  const tokEl  = document.getElementById('h-tokens-month');
+
+  if (avgEl) {
+    if (data.length > 0) {
+      avgEl.textContent = `${data.length} sprint${data.length !== 1 ? 's' : ''} recorded`;
+    } else {
+      avgEl.textContent = '—';
+    }
+  }
+
+  // Total tokens this calendar month
+  const now        = new Date();
+  const thisMonth  = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  let monthTokens  = 0;
+  data.forEach(s => {
+    if (s.date && s.date.startsWith(thisMonth)) {
+      monthTokens += s.total_tokens || 0;
+    }
+  });
+  if (tokEl) {
+    tokEl.textContent = monthTokens > 0 ? monthTokens.toLocaleString() : '—';
+  }
+}
+
+function _sprintRowHtml(sprint, idx) {
+  const n       = sprint.sprint_num != null ? sprint.sprint_num : '?';
+  const date    = sprint.date || '—';
+  const status  = sprint.status || 'unknown';
+  const shipped = sprint.shipped_count ?? 0;
+  const skipped = sprint.skipped_count ?? 0;
+
+  return `
+    <div class="history-row" id="history-row-${idx}" onclick="toggleHistoryRow(${idx})">
+      <div class="history-row-header">
+        <span class="history-sprint-num">Sprint ${escapeHtml(String(n))}</span>
+        <span class="history-date">${escapeHtml(date)}</span>
+        <span class="history-status">${_statusBadgeHtml(status)}</span>
+        <span class="history-shipped">&#10003; ${shipped} shipped</span>
+        <span class="history-skipped">${skipped > 0 ? skipped + ' skipped' : '—'}</span>
+        <span class="history-chevron"><i class="ti ti-chevron-down"></i></span>
+      </div>
+      <div class="history-expand-panel" id="history-expand-${idx}">
+        <div id="history-content-${idx}">Loading…</div>
+      </div>
+    </div>`;
+}
+
+// ── Sprint Planning (issue #26) ───────────────────────────────────────────────
+
+let _spData = null;          // last-fetched { sprints, issues }
+let _spSelectedSprint = null; // currently selected sprint number (int or null)
+let _spPendingChanges = {};  // issueNum -> { from: 'unassigned'|'sprint', to: ... }
+let _spDragSrc = null;       // { card, issueNum, fromCol }
+let _spDragGhost = null;     // pointer-event drag ghost element
+
+// ── fetch / render ────────────────────────────────────────────────────────────
+
+async function loadSprintPlanning() {
+  try {
+    const res = await fetch('/api/sprint-planning/issues');
+    if (!res.ok) throw new Error(await res.text());
+    _spData = await res.json();
+    _renderSprintPlanning();
+  } catch (e) {
+    document.getElementById('sp-cards-unassigned').innerHTML =
+      `<div class="sp-empty">Failed to load: ${escapeHtml(e.message)}</div>`;
+  }
+}
+
+function _renderSprintPlanning() {
+  if (!_spData) return;
+
+  const { sprints, issues } = _spData;
+
+  // Build sprint selector
+  const sel = document.getElementById('sp-sprint-select');
+  const prevVal = sel.value;
+  sel.innerHTML = '';
+
+  sprints.forEach(n => {
+    const opt = document.createElement('option');
+    opt.value = n;
+    opt.textContent = `sprint-${n}`;
+    sel.appendChild(opt);
+  });
+
+  // + New sprint option
+  const newOpt = document.createElement('option');
+  newOpt.value = 'new';
+  newOpt.textContent = '+ New sprint';
+  sel.appendChild(newOpt);
+
+  // Restore or set default
+  if (_spSelectedSprint !== null && sprints.includes(_spSelectedSprint)) {
+    sel.value = String(_spSelectedSprint);
+  } else if (prevVal && prevVal !== 'new' && sprints.includes(Number(prevVal))) {
+    sel.value = prevVal;
+    _spSelectedSprint = Number(prevVal);
+  } else if (sprints.length > 0) {
+    _spSelectedSprint = sprints[sprints.length - 1];
+    sel.value = String(_spSelectedSprint);
+  }
+
+  _renderColumns(issues);
+}
+
+function _renderColumns(issues) {
+  const sprint = _spSelectedSprint;
+
+  // Apply pending changes
+  const effectiveIssues = issues.map(iss => {
+    const pending = _spPendingChanges[iss.number];
+    if (!pending) return iss;
+    const newSprint = pending.to === 'sprint' ? sprint : null;
+    return { ...iss, sprint: newSprint };
+  });
+
+  const unassigned = effectiveIssues.filter(iss => iss.sprint === null || iss.sprint === undefined);
+  const inSprint   = effectiveIssues.filter(iss => iss.sprint === sprint);
+
+  const unassignedTitle = document.getElementById('sp-unassigned-title');
+  const sprintTitle     = document.getElementById('sp-sprint-title');
+  if (unassignedTitle) unassignedTitle.textContent = `Unassigned (${unassigned.length})`;
+  if (sprintTitle)     sprintTitle.textContent     = `Sprint ${sprint ?? '?'} (${inSprint.length})`;
+
+  document.getElementById('sp-cards-unassigned').innerHTML =
+    unassigned.length === 0
+      ? '<div class="sp-empty">No unassigned issues</div>'
+      : unassigned.map(iss => _spCardHtml(iss)).join('');
+
+  document.getElementById('sp-cards-sprint').innerHTML =
+    sprint === null
+      ? '<div class="sp-empty">Select a sprint</div>'
+      : inSprint.length === 0
+        ? '<div class="sp-empty">No issues in this sprint</div>'
+        : inSprint.map(iss => _spCardHtml(iss)).join('');
+
+  _bindDragEvents();
+  _renderSpFooter(inSprint);
+
+  // Show/hide Apply button if there are pending changes
+  const applyBtn = document.getElementById('sp-apply-btn');
+  if (applyBtn) {
+    const hasPending = Object.keys(_spPendingChanges).length > 0;
+    applyBtn.style.display = hasPending ? '' : 'none';
+  }
+}
+
+function _spCardHtml(iss) {
+  const statusColor = { 'in-progress': 'blue', 'SIT': 'amber', 'UAT': 'purple', 'backlog': 'gray', 'blocked': 'red' };
+  const color = statusColor[iss.status] || 'gray';
+  const title = escapeHtml(iss.title || '');
+  return `
+    <div class="sp-card" id="sp-card-${iss.number}"
+         draggable="true"
+         data-issue="${iss.number}" data-sprint="${iss.sprint ?? ''}" data-size="${escapeHtml(iss.size || '?')}">
+      <div class="sp-card-top">
+        <a class="sp-card-num" href="${escapeHtml(iss.url || '#')}" target="_blank" rel="noopener"
+           onclick="event.stopPropagation()">#${iss.number}</a>
+        <span class="sp-card-size">${escapeHtml(iss.size || '?')}</span>
+        <span class="sp-card-title">${title}</span>
+      </div>
+      <div class="sp-card-meta">
+        <span class="sbadge ${color}">${escapeHtml(iss.status)}</span>
+      </div>
+    </div>`;
+}
+
+function toggleHistoryRow(idx) {
+  const row    = document.getElementById(`history-row-${idx}`);
+  const panel  = document.getElementById(`history-expand-${idx}`);
+  if (!row || !panel) return;
+
+  const isExpanded = row.classList.contains('expanded');
+  if (isExpanded) {
+    row.classList.remove('expanded');
+  } else {
+    row.classList.add('expanded');
+    _loadHistoryRowContent(idx);
+  }
+}
+
+async function _loadHistoryRowContent(idx) {
+  const contentEl = document.getElementById(`history-content-${idx}`);
+  if (!contentEl) return;
+
+  const sprint = _sprintHistoryData[idx];
+  if (!sprint) {
+    contentEl.innerHTML = '<div class="empty-small">No data.</div>';
+    return;
+  }
+
+  // Fetch the summary file content via the existing /api/sprint-summary endpoint
+  // or parse from the sprint data. Since we don't have per-sprint content endpoint
+  // we embed file_path and read from sprint-history.
+  // The API returns file_path — fetch the content from /api/sprint-summary only for latest.
+  // For history items we show whatever the server returned; content is in the summary file.
+  // We'll make a best-effort request to read via a dedicated per-sprint path.
+  let summaryContent = null;
+  try {
+    // Try /api/sprint-summary-file?path=<encoded>
+    // (We'll add this endpoint below, or fallback gracefully.)
+    const res = await fetch(
+      `/api/sprint-history-content?idx=${idx}&sprint_num=${encodeURIComponent(sprint.sprint_num ?? '')}`
+    );
+    if (res.ok) {
+      const d = await res.json();
+      summaryContent = d.content;
+    }
+  } catch { /* ignore */ }
+
+  const ghLink = sprint.github_issue_url
+    ? `<a class="history-gh-link" href="${escapeHtml(sprint.github_issue_url)}" target="_blank" rel="noopener">
+         <i class="ti ti-brand-github"></i> View on GitHub
+       </a>`
+    : '';
+
+  const contentHtml = summaryContent
+    ? `<pre class="history-summary-pre">${escapeHtml(summaryContent)}</pre>`
+    : `<div class="empty-small" style="margin-bottom:8px;">Summary content not available in this view.</div>`;
+
+  contentEl.innerHTML = contentHtml + ghLink;
+}
+
+function _renderSpFooter(inSprintIssues) {
+  const footer = document.getElementById('sp-footer');
+  if (!footer) return;
+  if (_spSelectedSprint === null || inSprintIssues.length === 0) {
+    footer.textContent = '';
+    return;
+  }
+
+  const sizeHours = { S: 1, M: 2, L: 4, XL: 8 };
+  const counts = {};
+  let total = 0;
+  for (const iss of inSprintIssues) {
+    const s = iss.size || 'M';
+    counts[s] = (counts[s] || 0) + 1;
+    total += (sizeHours[s] || 2);
+  }
+
+  const sizeOrder = ['S', 'M', 'L', 'XL'];
+  const parts = sizeOrder.filter(s => counts[s]).map(s => `${counts[s]}${s}`);
+  footer.textContent = `Sprint ${_spSelectedSprint} size: ${parts.join(' + ')} · est ${total}h`;
+}
+
+// ── Sprint selector ───────────────────────────────────────────────────────────
+
+async function onSprintSelect() {
+  const sel = document.getElementById('sp-sprint-select');
+  const val = sel.value;
+
+  if (val === 'new') {
+    // Auto-increment sprint number
+    const sprints = (_spData && _spData.sprints) || [];
+    const next = sprints.length > 0 ? Math.max(...sprints) + 1 : 1;
+    // Create the label via assign endpoint — use a dummy "no-op" call to trigger label creation
+    try {
+      await fetch('/api/sprint-planning/issues'); // ensure data is loaded
+      // Create label by calling ensure via a dry-run assign on a non-existent issue
+      // Instead, we hit the assign endpoint with the new sprint for any existing issue
+      // Actually, we just set the sprint selector to the new number and let it render
+      _spSelectedSprint = next;
+      _spPendingChanges = {};
+
+      // Add to local sprints list
+      if (_spData) {
+        if (!_spData.sprints.includes(next)) _spData.sprints.push(next);
+        sel.value = String(next); // will be wrong until re-render
+        _renderSprintPlanning();
+      }
+    } catch (e) {
+      sel.value = _spSelectedSprint ? String(_spSelectedSprint) : '';
+    }
+    return;
+  }
+
+  _spSelectedSprint = Number(val);
+  _spPendingChanges = {};
+  if (_spData) _renderColumns(_spData.issues);
+}
+
+// ── Apply pending changes ─────────────────────────────────────────────────────
+
+async function applySprintChanges() {
+  const changes = Object.entries(_spPendingChanges);
+  if (changes.length === 0) return;
+
+  const btn = document.getElementById('sp-apply-btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Applying…'; }
+
+  let failed = false;
+  for (const [issNum, change] of changes) {
+    const sprintVal = change.to === 'sprint' ? _spSelectedSprint : null;
+    try {
+      const res = await fetch('/api/sprint-planning/assign', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ issue: Number(issNum), sprint: sprintVal }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+    } catch (e) {
+      failed = true;
+      const card = document.getElementById(`sp-card-${issNum}`);
+      if (card) {
+        card.classList.add('error-flash');
+        let errEl = card.querySelector('.sp-card-error');
+        if (!errEl) { errEl = document.createElement('div'); errEl.className = 'sp-card-error'; card.appendChild(errEl); }
+        errEl.textContent = 'Apply failed: ' + e.message;
+        setTimeout(() => card.classList.remove('error-flash'), 600);
+      }
+    }
+  }
+
+  if (!failed) {
+    _spPendingChanges = {};
+  }
+
+  if (btn) { btn.disabled = false; btn.textContent = 'Apply ✓'; }
+
+  // Reload fresh data
+  await loadSprintPlanning();
+}
+
+// ── Drag & drop (HTML5 native) ────────────────────────────────────────────────
+
+function _bindDragEvents() {
+  document.querySelectorAll('.sp-card').forEach(card => {
+    card.addEventListener('dragstart', _onDragStart);
+    card.addEventListener('dragend',   _onDragEnd);
+  });
+}
+
+function _onDragStart(e) {
+  const card = e.currentTarget;
+  _spDragSrc = {
+    card,
+    issueNum: Number(card.dataset.issue),
+    fromCol: card.closest('.sp-col')?.dataset.col,
+  };
+  card.classList.add('dragging');
+  e.dataTransfer.effectAllowed = 'move';
+  e.dataTransfer.setData('text/plain', card.dataset.issue);
+}
+
+function _onDragEnd(e) {
+  e.currentTarget.classList.remove('dragging');
+  _spDragSrc = null;
+}
+
+function onDrop(e, targetCol) {
+  e.preventDefault();
+  if (!_spDragSrc) return;
+
+  const { card, issueNum, fromCol } = _spDragSrc;
+
+  if (fromCol === targetCol) {
+    // Reorder within sprint column (client-side only)
+    return;
+  }
+
+  // Optimistic UI: move card immediately
+  const targetCards = document.getElementById(`sp-cards-${targetCol}`);
+  const fromCards   = document.getElementById(`sp-cards-${fromCol}`);
+  if (!targetCards || !fromCards) return;
+
+  // Remove empty placeholder if present
+  targetCards.querySelectorAll('.sp-empty').forEach(el => el.remove());
+
+  // Move card
+  fromCards.removeChild(card);
+  targetCards.appendChild(card);
+
+  // If source is now empty, add empty placeholder
+  if (fromCards.querySelectorAll('.sp-card').length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'sp-empty';
+    empty.textContent = fromCol === 'sprint' ? 'No issues in this sprint' : 'No unassigned issues';
+    fromCards.appendChild(empty);
+  }
+
+  // Track pending change
+  const pendingPrev = _spPendingChanges[issueNum];
+  if (pendingPrev && pendingPrev.from === targetCol) {
+    // Moving back to original — cancel pending
+    delete _spPendingChanges[issueNum];
+  } else {
+    _spPendingChanges[issueNum] = { from: fromCol, to: targetCol };
+  }
+
+  // Update Apply button visibility
+  const applyBtn = document.getElementById('sp-apply-btn');
+  if (applyBtn) {
+    applyBtn.style.display = Object.keys(_spPendingChanges).length > 0 ? '' : 'none';
+  }
+
+  // Re-compute footer from current DOM state
+  _recomputeFooterFromDOM();
+
+  // Immediately apply (no "Apply" button required for single drags)
+  _applyOneDrop(issueNum, targetCol);
+}
+
+async function _applyOneDrop(issueNum, targetCol) {
+  const sprintVal = targetCol === 'sprint' ? _spSelectedSprint : null;
+  const card = document.getElementById(`sp-card-${issueNum}`);
+  const fromCol = targetCol === 'sprint' ? 'unassigned' : 'sprint';
+
+  try {
+    const res = await fetch('/api/sprint-planning/assign', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ issue: issueNum, sprint: sprintVal }),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    // Success — remove from pending
+    delete _spPendingChanges[issueNum];
+    const applyBtn = document.getElementById('sp-apply-btn');
+    if (applyBtn) applyBtn.style.display = Object.keys(_spPendingChanges).length > 0 ? '' : 'none';
+  } catch (e) {
+    // Rollback: move card back
+    if (card) {
+      const targetCards = document.getElementById(`sp-cards-${targetCol}`);
+      const fromCards   = document.getElementById(`sp-cards-${fromCol}`);
+      if (targetCards && fromCards) {
+        targetCards.removeChild(card);
+        fromCards.querySelectorAll('.sp-empty').forEach(el => el.remove());
+        fromCards.appendChild(card);
+        if (targetCards.querySelectorAll('.sp-card').length === 0) {
+          const empty = document.createElement('div');
+          empty.className = 'sp-empty';
+          empty.textContent = targetCol === 'sprint' ? 'No issues in this sprint' : 'No unassigned issues';
+          targetCards.appendChild(empty);
+        }
+      }
+      // Flash error on card
+      card.classList.add('error-flash');
+      let errEl = card.querySelector('.sp-card-error');
+      if (!errEl) { errEl = document.createElement('div'); errEl.className = 'sp-card-error'; card.appendChild(errEl); }
+      errEl.textContent = 'Failed: ' + e.message;
+      setTimeout(() => {
+        card.classList.remove('error-flash');
+        if (errEl) errEl.remove();
+      }, 3000);
+    }
+    delete _spPendingChanges[issueNum];
+    _recomputeFooterFromDOM();
+  }
+}
+
+function _recomputeFooterFromDOM() {
+  const footer = document.getElementById('sp-footer');
+  if (!footer || _spSelectedSprint === null) return;
+
+  const sizeHours = { S: 1, M: 2, L: 4, XL: 8 };
+  const counts = {};
+  let total = 0;
+
+  document.querySelectorAll('#sp-cards-sprint .sp-card').forEach(card => {
+    const s = card.dataset.size || 'M';
+    counts[s] = (counts[s] || 0) + 1;
+    total += (sizeHours[s] || 2);
+  });
+
+  if (Object.keys(counts).length === 0) {
+    footer.textContent = '';
+    return;
+  }
+
+  const sizeOrder = ['S', 'M', 'L', 'XL'];
+  const parts = sizeOrder.filter(s => counts[s]).map(s => `${counts[s]}${s}`);
+  footer.textContent = `Sprint ${_spSelectedSprint} size: ${parts.join(' + ')} · est ${total}h`;
+}
+
+// ── Mobile touch/pointer drag ─────────────────────────────────────────────────
+
+(function _initPointerDrag() {
+  // We use event delegation on the sp-columns container (added after render)
+  document.addEventListener('pointerdown', _spPointerDown, { passive: false });
+  document.addEventListener('pointermove', _spPointerMove, { passive: false });
+  document.addEventListener('pointerup',   _spPointerUp,   { passive: false });
+})();
+
+let _spTouchDrag = null; // { card, issueNum, fromCol, ghost, startX, startY }
+
+function _spPointerDown(e) {
+  // Only act on touch/pen on sp-card elements
+  if (e.pointerType === 'mouse') return;
+  const card = e.target.closest('.sp-card');
+  if (!card) return;
+
+  e.preventDefault();
+  const rect = card.getBoundingClientRect();
+
+  // Create ghost
+  const ghost = card.cloneNode(true);
+  ghost.style.cssText = `
+    position: fixed; left: ${rect.left}px; top: ${rect.top}px;
+    width: ${rect.width}px; opacity: 0.8; pointer-events: none;
+    z-index: 9999; box-shadow: 0 4px 16px rgba(0,0,0,.2);
+    transition: none;
+  `;
+  document.body.appendChild(ghost);
+  _spDragGhost = ghost;
+
+  _spTouchDrag = {
+    card,
+    issueNum: Number(card.dataset.issue),
+    fromCol: card.closest('.sp-col')?.dataset.col,
+    ghost,
+    startX: e.clientX,
+    startY: e.clientY,
+    offsetX: e.clientX - rect.left,
+    offsetY: e.clientY - rect.top,
+  };
+  card.classList.add('dragging');
+}
+
+function _spPointerMove(e) {
+  if (!_spTouchDrag) return;
+  e.preventDefault();
+  const { ghost, offsetX, offsetY } = _spTouchDrag;
+  ghost.style.left = (e.clientX - offsetX) + 'px';
+  ghost.style.top  = (e.clientY - offsetY) + 'px';
+}
+
+function _spPointerUp(e) {
+  if (!_spTouchDrag) return;
+  const { card, issueNum, fromCol, ghost } = _spTouchDrag;
+
+  ghost.style.display = 'none';
+  const el = document.elementFromPoint(e.clientX, e.clientY);
+  ghost.remove();
+  _spDragGhost = null;
+  card.classList.remove('dragging');
+
+  const targetCol = el?.closest('.sp-col')?.dataset.col;
+  _spTouchDrag = null;
+
+  if (targetCol && targetCol !== fromCol) {
+    _spDragSrc = { card, issueNum, fromCol };
+    onDrop({ preventDefault: () => {} }, targetCol);
+  }
+}
+
+// ── SSE handler for sprint_plan_update ────────────────────────────────────────
+
+function _handleSprintPlanSSE() {
+  // Re-fetch and re-render if the Sprint Planning tab is active
+  if (!document.getElementById('view-sprint-plan').classList.contains('hidden')) {
+    loadSprintPlanning();
+  }
+}
+
 // ── Init ──────────────────────────────────────────────────────────────────────
 (function init() {
   initTheme();
@@ -988,6 +1758,8 @@ async function fetchEnvironment() {
       `<div class="empty-projects">Failed to load projects: ${escapeHtml(e.message)}</div>`;
   });
   loadPlanUsage().catch(() => {});
+  loadAlerts().catch(() => {});
+  loadSprintStatus().catch(() => {});
   connectSSE();
   document.getElementById('btn-refresh')?.addEventListener('click', manualRefresh);
 })();

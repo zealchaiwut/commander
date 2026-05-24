@@ -4,8 +4,12 @@
 
 set -uo pipefail
 
-PRD_DIR="$HOME/commander/dashboard"
-UAT_DIR="$HOME/commander/dashboard-uat"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DASHBOARD_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+COMMANDER_ROOT="$(cd "$DASHBOARD_DIR/.." && pwd)"
+
+PRD_DIR="$DASHBOARD_DIR"
+UAT_DIR="$COMMANDER_ROOT/dashboard-uat"
 
 _status_port() {
     local port="$1"

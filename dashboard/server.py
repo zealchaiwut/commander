@@ -159,12 +159,6 @@ def health_check() -> HealthResponse:
     )
 
 
-@app.get("/api/now")
-def get_now():
-    """Return the current UTC timestamp as an ISO-8601 string."""
-    return {"now": datetime.now(timezone.utc).isoformat()}
-
-
 @app.get("/api/environment")
 def get_environment():
     """Return the current runtime environment (prd or uat)."""

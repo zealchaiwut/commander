@@ -673,46 +673,61 @@ async function fetchAgents() {
   } catch { /* silent */ }
 }
 
+function _renderAgentCard(a) {
+  let badgeCls, badgeLabel;
+  if (a.status === 'working')        { badgeCls = 'badge-working';    badgeLabel = 'working'; }
+  else if (a.status === 'waiting')   { badgeCls = 'badge-waiting';    badgeLabel = 'waiting'; }
+  else if (a.status === 'timed_out') { badgeCls = 'badge-timed-out';  badgeLabel = 'Timed Out'; }
+  else                               { badgeCls = 'badge-done';       badgeLabel = a.status; }
+  const dir      = (a.working_dir || '').replace(/^\/Users\/[^/]+\//, '~/');
+  const toolLine = a.last_tool
+    ? `<div class="agent-tool"><span class="lbl">Using </span>${escapeHtml(a.last_tool)}</div>`
+    : '';
+  const p        = _parseAgentName(a.name);
+  const context  = p.isNew
+    ? `<div class="agent-context">${escapeHtml(p.repo)}${p.branch ? ` · ${escapeHtml(p.branch)}` : ''}</div>`
+    : `<div class="agent-context">${escapeHtml(p.repo)}</div>`;
+  const sessLine = p.isNew && p.shortSess
+    ? `<div class="agent-sess">${escapeHtml(p.shortSess)} · ${timeAgo(a.last_seen)}</div>`
+    : `<div class="agent-time">${timeAgo(a.last_seen)}</div>`;
+  return `
+    <div class="agent-card ${a.status}">
+      <div class="card-top">
+        <span class="role-badge ${_roleBadgeClass(p.role)}">${escapeHtml(p.role)}</span>
+        <span class="badge ${badgeCls}">${badgeLabel}</span>
+      </div>
+      ${context}
+      <div class="agent-dir">${escapeHtml(dir)}</div>
+      ${toolLine}
+      ${sessLine}
+    </div>`;
+}
+
 function renderAgents(agents) {
-  document.getElementById('cnt-working').textContent = agents.filter(a => a.status === 'working').length;
-  document.getElementById('cnt-waiting').textContent = agents.filter(a => a.status === 'waiting').length;
-  document.getElementById('cnt-done').textContent    = agents.filter(a => a.status === 'done').length;
+  const active   = agents.filter(a => a.status === 'working' || a.status === 'waiting');
+  const inactive = agents.filter(a => a.status === 'done'    || a.status === 'timed_out');
 
-  const grid = document.getElementById('agents-grid');
-  if (agents.length === 0) {
-    grid.innerHTML = '<div class="empty">No active agents</div>';
-    return;
+  document.getElementById('cnt-working').textContent  = agents.filter(a => a.status === 'working').length;
+  document.getElementById('cnt-waiting').textContent  = agents.filter(a => a.status === 'waiting').length;
+  document.getElementById('cnt-timed-out').textContent = agents.filter(a => a.status === 'timed_out').length;
+  document.getElementById('cnt-done').textContent     = agents.filter(a => a.status === 'done').length;
+
+  // Active section — always visible; shows empty-state when no active agents
+  document.getElementById('agents-active-label').textContent = `ACTIVE · ${active.length}`;
+  const activeGrid = document.getElementById('agents-grid-active');
+  activeGrid.innerHTML = active.length
+    ? active.map(_renderAgentCard).join('')
+    : '<div class="empty">No active agents</div>';
+
+  // Inactive section — hidden entirely when there are no inactive agents
+  const inactiveSection = document.getElementById('agents-inactive-section');
+  if (inactive.length === 0) {
+    inactiveSection.style.display = 'none';
+  } else {
+    inactiveSection.style.display = '';
+    document.getElementById('agents-inactive-label').textContent = `INACTIVE · ${inactive.length}`;
+    document.getElementById('agents-grid-inactive').innerHTML = inactive.map(_renderAgentCard).join('');
   }
-
-  grid.innerHTML = agents.map(a => {
-    let badgeCls, badgeLabel;
-    if (a.status === 'working')        { badgeCls = 'badge-working';    badgeLabel = 'working'; }
-    else if (a.status === 'waiting')   { badgeCls = 'badge-waiting';    badgeLabel = 'waiting'; }
-    else if (a.status === 'timed_out') { badgeCls = 'badge-timed-out';  badgeLabel = 'Timed Out'; }
-    else                               { badgeCls = 'badge-done';       badgeLabel = a.status; }
-    const dir      = (a.working_dir || '').replace(/^\/Users\/[^/]+\//, '~/');
-    const toolLine = a.last_tool
-      ? `<div class="agent-tool"><span class="lbl">Using </span>${escapeHtml(a.last_tool)}</div>`
-      : '';
-    const p        = _parseAgentName(a.name);
-    const context  = p.isNew
-      ? `<div class="agent-context">${escapeHtml(p.repo)}${p.branch ? ` · ${escapeHtml(p.branch)}` : ''}</div>`
-      : `<div class="agent-context">${escapeHtml(p.repo)}</div>`;
-    const sessLine = p.isNew && p.shortSess
-      ? `<div class="agent-sess">${escapeHtml(p.shortSess)} · ${timeAgo(a.last_seen)}</div>`
-      : `<div class="agent-time">${timeAgo(a.last_seen)}</div>`;
-    return `
-      <div class="agent-card ${a.status}">
-        <div class="card-top">
-          <span class="role-badge ${_roleBadgeClass(p.role)}">${escapeHtml(p.role)}</span>
-          <span class="badge ${badgeCls}">${badgeLabel}</span>
-        </div>
-        ${context}
-        <div class="agent-dir">${escapeHtml(dir)}</div>
-        ${toolLine}
-        ${sessLine}
-      </div>`;
-  }).join('');
 }
 
 // ── Activity view ─────────────────────────────────────────────────────────────

@@ -72,12 +72,13 @@ function _syncThemeIcon(theme) {
 
 // ── Tab navigation ────────────────────────────────────────────────────────────
 function switchMain(tab) {
-  ['projects', 'agents', 'activity'].forEach(t => {
-    document.getElementById(`view-${t}`).classList.toggle('hidden', t !== tab);
-    document.getElementById(`mtab-${t}`).classList.toggle('active', t === tab);
+  ['projects', 'agents', 'activity', 'history'].forEach(t => {
+    document.getElementById(`view-${t}`)?.classList.toggle('hidden', t !== tab);
+    document.getElementById(`mtab-${t}`)?.classList.toggle('active', t === tab);
   });
   if (tab === 'agents')   fetchAgents();
   if (tab === 'activity') fetchEvents();
+  if (tab === 'history')  loadSprintHistory().catch(() => {});
 }
 
 // ── Filter ────────────────────────────────────────────────────────────────────
@@ -764,6 +765,9 @@ function connectSSE() {
         });
       }
       if (!document.getElementById('view-agents').classList.contains('hidden')) fetchAgents();
+      if (!document.getElementById('view-history')?.classList.contains('hidden')) {
+        loadSprintHistory().catch(() => {});
+      }
     } catch { /* ignore */ }
   };
 }
@@ -931,7 +935,11 @@ async function manualRefresh() {
   icon.classList.add('spinning');
   hideToast();
   try {
-    await Promise.all([loadProjects(), loadPlanUsage()]);
+    const tasks = [loadProjects(), loadPlanUsage()];
+    if (!document.getElementById('view-history')?.classList.contains('hidden')) {
+      tasks.push(loadSprintHistory());
+    }
+    await Promise.all(tasks);
   } catch {
     showToast('Refresh failed — server may be unreachable');
   } finally {
@@ -961,6 +969,9 @@ setInterval(() => {
     loadProjects().catch(() => {});
     loadPlanUsage().catch(() => {});
   }
+  if (!document.getElementById('view-history')?.classList.contains('hidden')) {
+    loadSprintHistory().catch(() => {});
+  }
 }, 60_000);
 
 // ── Environment badge ─────────────────────────────────────────────────────────
@@ -977,6 +988,165 @@ async function fetchEnvironment() {
       el.className   = `env-badge ${env}`;
     }
   } catch { /* ignore — badge is optional */ }
+}
+
+// ── Sprint History view (AC-5) ────────────────────────────────────────────────
+
+let _sprintHistoryData = [];
+
+async function loadSprintHistory() {
+  try {
+    const res = await fetch('/api/sprint-history');
+    if (!res.ok) throw new Error(await res.text());
+    _sprintHistoryData = await res.json();
+    renderSprintHistory(_sprintHistoryData);
+  } catch {
+    // silently leave existing content
+  }
+}
+
+function _statusBadgeHtml(status) {
+  const map = {
+    complete:   ['green',  'complete'],
+    stopped:    ['amber',  'stopped'],
+    'budget-hit': ['red', 'budget-hit'],
+    unknown:    ['gray',   'unknown'],
+  };
+  const [color, label] = map[status] || ['gray', status || 'unknown'];
+  return `<span class="sbadge ${color}">${escapeHtml(label)}</span>`;
+}
+
+function renderSprintHistory(data) {
+  const emptyEl = document.getElementById('history-empty');
+  const rowsEl  = document.getElementById('history-rows');
+  const statsRow = document.getElementById('history-stats-row');
+  if (!rowsEl) return;
+
+  if (!data || data.length === 0) {
+    if (emptyEl) emptyEl.style.display = '';
+    rowsEl.innerHTML = '';
+    // Quick-stats: zero
+    const avgEl   = document.getElementById('h-avg-duration');
+    const tokEl   = document.getElementById('h-tokens-month');
+    if (avgEl) avgEl.textContent = '—';
+    if (tokEl) tokEl.textContent = '—';
+    return;
+  }
+
+  if (emptyEl) emptyEl.style.display = 'none';
+
+  // AC-5a: quick-stats
+  _renderHistoryStats(data);
+
+  // AC-5b: sprint rows
+  rowsEl.innerHTML = data.map((sprint, idx) => _sprintRowHtml(sprint, idx)).join('');
+}
+
+function _renderHistoryStats(data) {
+  // Avg sprint duration: not directly stored, so we skip if no duration data
+  // (sprint_manager doesn't store wall_clock in summary files currently — show count)
+  const avgEl  = document.getElementById('h-avg-duration');
+  const tokEl  = document.getElementById('h-tokens-month');
+
+  if (avgEl) {
+    if (data.length > 0) {
+      avgEl.textContent = `${data.length} sprint${data.length !== 1 ? 's' : ''} recorded`;
+    } else {
+      avgEl.textContent = '—';
+    }
+  }
+
+  // Total tokens this calendar month
+  const now        = new Date();
+  const thisMonth  = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  let monthTokens  = 0;
+  data.forEach(s => {
+    if (s.date && s.date.startsWith(thisMonth)) {
+      monthTokens += s.total_tokens || 0;
+    }
+  });
+  if (tokEl) {
+    tokEl.textContent = monthTokens > 0 ? monthTokens.toLocaleString() : '—';
+  }
+}
+
+function _sprintRowHtml(sprint, idx) {
+  const n       = sprint.sprint_num != null ? sprint.sprint_num : '?';
+  const date    = sprint.date || '—';
+  const status  = sprint.status || 'unknown';
+  const shipped = sprint.shipped_count ?? 0;
+  const skipped = sprint.skipped_count ?? 0;
+
+  return `
+    <div class="history-row" id="history-row-${idx}" onclick="toggleHistoryRow(${idx})">
+      <div class="history-row-header">
+        <span class="history-sprint-num">Sprint ${escapeHtml(String(n))}</span>
+        <span class="history-date">${escapeHtml(date)}</span>
+        <span class="history-status">${_statusBadgeHtml(status)}</span>
+        <span class="history-shipped">&#10003; ${shipped} shipped</span>
+        <span class="history-skipped">${skipped > 0 ? skipped + ' skipped' : '—'}</span>
+        <span class="history-chevron"><i class="ti ti-chevron-down"></i></span>
+      </div>
+      <div class="history-expand-panel" id="history-expand-${idx}">
+        <div id="history-content-${idx}">Loading…</div>
+      </div>
+    </div>`;
+}
+
+function toggleHistoryRow(idx) {
+  const row    = document.getElementById(`history-row-${idx}`);
+  const panel  = document.getElementById(`history-expand-${idx}`);
+  if (!row || !panel) return;
+
+  const isExpanded = row.classList.contains('expanded');
+  if (isExpanded) {
+    row.classList.remove('expanded');
+  } else {
+    row.classList.add('expanded');
+    _loadHistoryRowContent(idx);
+  }
+}
+
+async function _loadHistoryRowContent(idx) {
+  const contentEl = document.getElementById(`history-content-${idx}`);
+  if (!contentEl) return;
+
+  const sprint = _sprintHistoryData[idx];
+  if (!sprint) {
+    contentEl.innerHTML = '<div class="empty-small">No data.</div>';
+    return;
+  }
+
+  // Fetch the summary file content via the existing /api/sprint-summary endpoint
+  // or parse from the sprint data. Since we don't have per-sprint content endpoint
+  // we embed file_path and read from sprint-history.
+  // The API returns file_path — fetch the content from /api/sprint-summary only for latest.
+  // For history items we show whatever the server returned; content is in the summary file.
+  // We'll make a best-effort request to read via a dedicated per-sprint path.
+  let summaryContent = null;
+  try {
+    // Try /api/sprint-summary-file?path=<encoded>
+    // (We'll add this endpoint below, or fallback gracefully.)
+    const res = await fetch(
+      `/api/sprint-history-content?idx=${idx}&sprint_num=${encodeURIComponent(sprint.sprint_num ?? '')}`
+    );
+    if (res.ok) {
+      const d = await res.json();
+      summaryContent = d.content;
+    }
+  } catch { /* ignore */ }
+
+  const ghLink = sprint.github_issue_url
+    ? `<a class="history-gh-link" href="${escapeHtml(sprint.github_issue_url)}" target="_blank" rel="noopener">
+         <i class="ti ti-brand-github"></i> View on GitHub
+       </a>`
+    : '';
+
+  const contentHtml = summaryContent
+    ? `<pre class="history-summary-pre">${escapeHtml(summaryContent)}</pre>`
+    : `<div class="empty-small" style="margin-bottom:8px;">Summary content not available in this view.</div>`;
+
+  contentEl.innerHTML = contentHtml + ghLink;
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────

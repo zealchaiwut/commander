@@ -51,26 +51,31 @@ echo "      Installing/upgrading requirements …"
 # ── 4. Write .env ─────────────────────────────────────────────────────────────
 ENV_FILE="$UAT_DASHBOARD/.env"
 if [ -f "$ENV_FILE" ]; then
-    echo "[4/5] .env already exists — leaving it unchanged."
-    echo "      (Edit $ENV_FILE manually if you need to change settings.)"
+    echo "[4/5] .env already exists — ensuring DB_PATH is set …"
+    if ! grep -q '^DB_PATH=' "$ENV_FILE"; then
+        echo "DB_PATH=./commander-uat.db" >> "$ENV_FILE"
+        echo "      Added DB_PATH=./commander-uat.db to $ENV_FILE."
+    fi
 else
     echo "[4/5] Writing $ENV_FILE …"
     cat > "$ENV_FILE" <<'ENVEOF'
 PORT=8001
 ENVIRONMENT=uat
+DB_PATH=./commander-uat.db
 ENVEOF
 fi
 
 # ── 5. Initialise the UAT database ───────────────────────────────────────────
-DB_PATH="$UAT_DIR/commander.db"
-if [ -f "$DB_PATH" ]; then
-    echo "[5/5] UAT database already exists at $DB_PATH — skipping init."
+DB_PATH_VAL="./commander-uat.db"
+DB_ABS="$UAT_DASHBOARD/commander-uat.db"
+if [ -f "$DB_ABS" ]; then
+    echo "[5/5] UAT database already exists at $DB_ABS — skipping init."
 else
-    echo "[5/5] Initialising UAT database at $DB_PATH …"
-    # Run init_db() from the UAT dashboard directory so db.py uses the right path
+    echo "[5/5] Initialising UAT database at $DB_ABS …"
+    # Run init_db() from the UAT dashboard directory so relative DB_PATH resolves correctly
     (
         cd "$UAT_DASHBOARD"
-        DB_PATH="$DB_PATH" "$VENV_DIR/bin/python" -c "import db; db.init_db()"
+        DB_PATH="$DB_PATH_VAL" "$VENV_DIR/bin/python" -c "import db; db.init_db()"
     )
     echo "      Database created."
 fi
@@ -80,6 +85,6 @@ echo "=== UAT environment ready ==="
 echo "  Directory : $UAT_DIR"
 echo "  Branch    : develop"
 echo "  Port      : 8001"
-echo "  Database  : $DB_PATH"
+echo "  Database  : $DB_ABS"
 echo ""
 echo "Start with: bash ~/commander/work-coder/dashboard/scripts/start_uat.sh"

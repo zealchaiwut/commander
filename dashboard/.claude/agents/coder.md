@@ -46,12 +46,12 @@ Find the git root of the repository you're working on. You can find it with:
 git rev-parse --show-toplevel
 ```
 
-All subsequent git operations and script calls run from this directory. Do **not** run git commands from `~/commander/dashboard/` — that is the dashboard service, not the project root.
+All subsequent git operations and script calls run from this directory. Do **not** run git commands from the `dashboard/` subdirectory — that is the dashboard service, not the project root.
 
 ### Step 2 — Create the feature branch
 
 ```bash
-python3 ~/commander/dashboard/scripts/start_feature.py --issue <N>
+python3 $(git rev-parse --show-toplevel)/dashboard/scripts/start_feature.py --issue <N>
 ```
 
 This script:
@@ -107,13 +107,13 @@ Before marking SIT, re-read every AC item and confirm you have implemented it. I
 ### Step 8 — Move to SIT
 
 ```bash
-python3 ~/commander/dashboard/scripts/update_ticket.py --issue <N> --status sit
+python3 $(git rev-parse --show-toplevel)/dashboard/scripts/update_ticket.py --issue <N> --status sit
 ```
 
 ### Step 9 — Comment
 
 ```bash
-python3 ~/commander/dashboard/scripts/comment_ticket.py \
+python3 $(git rev-parse --show-toplevel)/dashboard/scripts/comment_ticket.py \
   --issue <N> \
   --body "✅ Implementation complete on \`feature/<N>-<slug>\`. All AC items addressed. Moving to SIT."
 ```

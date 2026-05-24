@@ -745,18 +745,47 @@ def _gate_lint(
     worktester_dashboard: Path,
     skip: bool,
     repo_name: Optional[str] = None,
+    target_branch: str = "develop",
 ) -> GateResult:
-    """Gate 2 -- run ruff check . inside the tester worktree dashboard."""
+    """Gate 2 -- run ruff check on only the Python files changed by this feature branch.
+
+    Scopes lint to files modified relative to ``target_branch`` (default: develop)
+    so that pre-existing lint errors in unrelated files do not block a clean PR.
+    """
     if skip:
         print("  [gate:lint] skipped")
         return GateResult(gate="lint", passed=True, skipped=True)
 
     _post_agent_event("gate:lint")
-    print("  [gate:lint] running ruff check . ...")
 
-    # ruff is optional -- if not found, log warning and treat as passed
-    ok, ruff_path, _ = _try("which", "ruff")
-    if not ok:
+    # --- Determine which Python files this branch changed ---
+    ok_diff, diff_out, diff_err = _try(
+        "git", "diff", "--name-only", target_branch,
+        cwd=worktester_dashboard,
+    )
+    if not ok_diff:
+        # Fallback: if git diff fails (e.g. branch not found), fall back to full check
+        print(f"  [gate:lint] WARNING -- could not run git diff --name-only {target_branch}: "
+              f"{diff_err}; falling back to ruff check .")
+        changed_py_files: list[str] = []
+        fallback = True
+    else:
+        changed_files = [line.strip() for line in diff_out.splitlines() if line.strip()]
+        # Filter to .py files that still exist on disk (git diff may list deleted files)
+        changed_py_files = [
+            f for f in changed_files
+            if f.endswith(".py") and (worktester_dashboard / f).exists()
+        ]
+        fallback = False
+
+    if not fallback and not changed_py_files:
+        print("  [gate:lint] PASS (no Python files changed)")
+        return GateResult(gate="lint", passed=True,
+                          output="No Python files changed -- lint gate skipped")
+
+    # --- Resolve ruff binary ---
+    ok_ruff, ruff_path, _ = _try("which", "ruff")
+    if not ok_ruff:
         # Try inside dashboard venv
         venv_ruff = worktester_dashboard / ".." / "venv" / "bin" / "ruff"
         if venv_ruff.exists():
@@ -768,7 +797,21 @@ def _gate_lint(
     else:
         ruff_bin = ruff_path
 
-    rc, stdout, stderr = _run_timed(ruff_bin, "check", ".", cwd=worktester_dashboard)
+    if fallback or not changed_py_files:
+        # Fallback path: check entire dashboard directory
+        print("  [gate:lint] running ruff check . ...")
+        rc, stdout, stderr = _run_timed(ruff_bin, "check", ".", cwd=worktester_dashboard)
+    else:
+        files_display = " ".join(changed_py_files[:5])
+        if len(changed_py_files) > 5:
+            files_display += f" ... ({len(changed_py_files)} files total)"
+        print(f"  [gate:lint] running ruff check on {len(changed_py_files)} changed file(s): "
+              f"{files_display}")
+        rc, stdout, stderr = _run_timed(
+            ruff_bin, "check", *changed_py_files,
+            cwd=worktester_dashboard,
+        )
+
     combined = stdout + stderr
     if rc == 0:
         print("  [gate:lint] PASS")
@@ -871,6 +914,7 @@ def _run_quality_gates(
         worktester_dashboard,
         skip=(skip_all or not gate_lint),
         repo_name=repo_name,
+        target_branch=target_branch,
     )
     results.append(r2)
     if not r2.passed:

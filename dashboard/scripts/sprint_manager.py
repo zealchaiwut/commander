@@ -1645,6 +1645,7 @@ def run_sprint(
     retry_failed: bool = False,
     target_branch: Optional[str] = None,
     cfg: Optional["SprintConfig"] = None,
+    preflight_approved: Optional[list[int]] = None,
 ) -> tuple[SprintSummary, SprintState]:
     """Main sprint loop -- processes backlog issues sequentially.
 
@@ -1653,6 +1654,10 @@ def run_sprint(
 
     target_branch: branch to merge feature branches into. Defaults to
     sprint/<label>. Pass 'develop' to restore legacy behaviour.
+
+    preflight_approved: optional list of issue numbers approved by the pre-flight
+    review. When provided, only issues in this list are dispatched; others are
+    skipped with reason 'preflight-skipped'.
     """
     if alert_modes is None:
         alert_modes = [AlertMode.DASHBOARD_BANNER]
@@ -1744,6 +1749,16 @@ def run_sprint(
 
         print(f"\n--- Issue #{num}: {title} ---")
         summary.processed.append(f"#{num}")
+
+        # Preflight filter: skip issues not approved by pre-flight review
+        if preflight_approved is not None and num not in preflight_approved:
+            print("  [preflight] skipped by pre-flight review")
+            issue_state.status      = "skipped"
+            issue_state.skip_reason = "preflight-skipped"
+            summary.skipped.append(f"#{num} (preflight-skipped)")
+            state.save(state_path)
+            _post_sprint_status(state, api_url=api_url)
+            continue
 
         if dry_run:
             print("  [dry-run] would dispatch coder + tester")
@@ -1929,6 +1944,17 @@ def main() -> None:
         ),
     )
 
+    # Pre-flight review
+    p.add_argument(
+        "--preflight",
+        action="store_true",
+        default=False,
+        help=(
+            "Run sprint_review.py pre-flight BA check before dispatching any issues. "
+            "Aborts the sprint run (exit 1) if the user quits from the prompt."
+        ),
+    )
+
     args = p.parse_args()
 
     # ── Config resolution (AC-4 + AC-5 + AC-6) ───────────────────────────────
@@ -1964,19 +1990,35 @@ def main() -> None:
     # --repo flag overrides config (explicit always wins)
     eff_repo = args.repo or (cfg.repo_name if cfg else None)
 
+    # ── Pre-flight review (AC-1 of issue #33) ────────────────────────────────
+    preflight_approved: Optional[list] = None  # None = no preflight, list = approved numbers
+    if args.preflight:
+        from sprint_review import run_preflight  # lazy import — only needed with --preflight
+        sprints_dir = cfg.sprints_dir if cfg else SPRINTS_DIR
+        _all_results, approved = run_preflight(
+            sprint_label = args.label,
+            repo_name    = eff_repo,
+            sprints_dir  = sprints_dir,
+            interactive  = True,
+        )
+        # run_preflight exits(1) if user chose Q — if we reach here, proceed
+        preflight_approved = [r.number for r in approved]
+        print(f"[preflight] Approved {len(preflight_approved)} issue(s) for this run.")
+
     summary, state = run_sprint(
-        label              = args.label,
-        skip_gates         = args.skip_gates,
-        gate_pytest        = args.gate_pytest,
-        gate_lint          = args.gate_lint,
-        gate_merge_preview = args.gate_merge_preview,
-        alert_modes        = alert_modes,
-        repo_name          = eff_repo,
-        dry_run            = args.dry_run,
-        resume             = args.resume,
-        retry_failed       = args.retry_failed,
-        target_branch      = args.target_branch,
-        cfg                = cfg,
+        label                = args.label,
+        skip_gates           = args.skip_gates,
+        gate_pytest          = args.gate_pytest,
+        gate_lint            = args.gate_lint,
+        gate_merge_preview   = args.gate_merge_preview,
+        alert_modes          = alert_modes,
+        repo_name            = eff_repo,
+        dry_run              = args.dry_run,
+        resume               = args.resume,
+        retry_failed         = args.retry_failed,
+        target_branch        = args.target_branch,
+        cfg                  = cfg,
+        preflight_approved   = preflight_approved,
     )
 
     # Derive sprint_branch for summary (mirrors run_sprint logic)

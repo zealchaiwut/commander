@@ -227,3 +227,33 @@ def get_tokens_today(project: str | None = None) -> dict:
                 (cutoff,),
             ).fetchone()
     return {"input_tokens": row["inp"], "output_tokens": row["out"]}
+
+
+def get_debug_token_usage() -> dict:
+    """Return diagnostic info about the token_usage table.
+
+    Returns:
+        row_count        — total number of rows in token_usage
+        latest_recorded_at — ISO-8601 string of the most recent recorded_at, or None
+        tokens_today     — total tokens (input + output) since Bangkok midnight
+    """
+    cutoff = _bkk_midnight_utc()
+    with get_conn() as conn:
+        count_row = conn.execute(
+            "SELECT COUNT(*) AS cnt FROM token_usage"
+        ).fetchone()
+        latest_row = conn.execute(
+            "SELECT MAX(recorded_at) AS ts FROM token_usage"
+        ).fetchone()
+        today_row = conn.execute(
+            """SELECT COALESCE(SUM(input_tokens + output_tokens), 0) AS total
+               FROM token_usage
+               WHERE recorded_at >= ?""",
+            (cutoff,),
+        ).fetchone()
+
+    return {
+        "row_count":          int(count_row["cnt"]),
+        "latest_recorded_at": latest_row["ts"] if latest_row and latest_row["ts"] else None,
+        "tokens_today":       int(today_row["total"]),
+    }

@@ -186,6 +186,17 @@ async def receive_token_usage(event: TokenUsageEvent):
     return {"ok": True}
 
 
+@app.get("/api/debug/token-usage")
+def debug_token_usage():
+    """AC-2: Diagnostic endpoint for the token_usage pipeline.
+
+    Returns row_count (int), latest_recorded_at (ISO-8601 or null),
+    and tokens_today (int) so operators can confirm pipeline health
+    without querying SQLite directly.
+    """
+    return db.get_debug_token_usage()
+
+
 @app.get("/api/agents")
 def list_agents():
     return db.get_agents()

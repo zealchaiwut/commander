@@ -125,6 +125,79 @@ def list_open_issues(repo_name: str | None = None, limit: int = 20) -> list[dict
     return _cached(key, fetch)
 
 
+def list_open_issues_with_body(repo_name: str | None = None, limit: int = 200) -> list[dict]:
+    """List open issues including body field — needed for size estimation."""
+    r = _r(repo_name)
+    key = f"open_issues_body:{r}"
+    def fetch():
+        return _json(
+            "issue", "list", "--repo", r,
+            "--state", "open",
+            "--json", "number,title,labels,assignees,state,url,body,createdAt,updatedAt",
+            "--limit", str(limit),
+        )
+    return _cached(key, fetch)
+
+
+def get_issue(issue_number: int, repo_name: str | None = None) -> dict:
+    """Fetch a single issue by number including body."""
+    r = _r(repo_name)
+    return _json(
+        "issue", "view", str(issue_number), "--repo", r,
+        "--json", "number,title,labels,assignees,state,url,body,createdAt,updatedAt",
+    )
+
+
+def ensure_sprint_label(sprint_num: int, repo_name: str | None = None) -> None:
+    """Create sprint-N label if it doesn't exist (colour #0075ca)."""
+    r = _r(repo_name)
+    label_name = f"sprint-{sprint_num}"
+    try:
+        _run("label", "create", label_name, "--repo", r,
+             "--color", "0075ca", "--description", f"Sprint {sprint_num} issues")
+    except subprocess.CalledProcessError:
+        # Label already exists — that's fine
+        pass
+    invalidate(f"sprints:{r}")
+
+
+def assign_sprint(issue_id: int, sprint_num: int | None, repo_name: str | None = None) -> None:
+    """Assign (or remove) a sprint-N label on an issue.
+
+    If sprint_num is None, removes all sprint-* labels.
+    If sprint_num is set, ensures the label exists, removes other sprint-* labels,
+    then adds sprint-N.
+    """
+    r = _r(repo_name)
+
+    # Find existing sprint labels on the issue
+    issue = get_issue(issue_id, repo_name=repo_name)
+    current_sprint_labels = [
+        lbl["name"] for lbl in issue.get("labels", [])
+        if SPRINT_RE.match(lbl["name"])
+    ]
+
+    if sprint_num is None:
+        # Remove all sprint labels
+        if current_sprint_labels:
+            cmd = ["issue", "edit", str(issue_id), "--repo", r]
+            for lbl in current_sprint_labels:
+                cmd += ["--remove-label", lbl]
+            _run(*cmd)
+    else:
+        ensure_sprint_label(sprint_num, repo_name=repo_name)
+        target_label = f"sprint-{sprint_num}"
+        add_labels = [target_label]
+        remove_labels = [lbl for lbl in current_sprint_labels if lbl != target_label]
+        update_labels(issue_id, add=add_labels, remove=remove_labels, repo_name=repo_name)
+
+    invalidate(f"issues:{r}:")
+    invalidate(f"open_issues:{r}")
+    invalidate(f"open_issues_body:{r}")
+    invalidate(f"sprints:{r}")
+    invalidate(f"latest_sprint:{r}")
+
+
 def list_feature_branches(repo_name: str | None = None) -> dict[int, str]:
     """Return a mapping of issue_number -> branch_name for feature branches."""
     r = _r(repo_name)

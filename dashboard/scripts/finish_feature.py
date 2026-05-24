@@ -50,10 +50,16 @@ def find_branch(issue_num: int) -> str | None:
 
 
 def main():
-    p = argparse.ArgumentParser(description="Merge feature branch into develop after tests pass")
+    p = argparse.ArgumentParser(description="Merge feature branch into target branch after tests pass")
     p.add_argument("--issue", type=int, required=True, help="Issue number")
     p.add_argument("--repo",  default=None,            help="owner/repo override")
+    p.add_argument(
+        "--target-branch",
+        default="develop",
+        help="Branch to merge the feature branch into (default: develop)",
+    )
     args = p.parse_args()
+    target = args.target_branch
 
     # Fetch so remote-only branches are visible
     print("Fetching from origin…")
@@ -76,12 +82,17 @@ def main():
         _run("git", "checkout", branch)
         _try("git", "pull", "origin", branch)
 
-    print(f"Merging {branch} → develop…")
+    print(f"Merging {branch} → {target}…")
 
-    _run("git", "checkout", "develop")
-    _run("git", "pull", "origin", "develop")
+    # Ensure target branch is available locally
+    ok, _ = _try("git", "show-ref", "--verify", "--quiet", f"refs/heads/{target}")
+    if ok:
+        _run("git", "checkout", target)
+        _run("git", "pull", "origin", target)
+    else:
+        _run("git", "checkout", "--track", f"origin/{target}")
 
-    merge_msg = f"Merge {branch} into develop (issue #{args.issue})"
+    merge_msg = f"Merge {branch} into {target} (issue #{args.issue})"
     result = subprocess.run(
         ["git", "merge", "--no-ff", branch, "-m", merge_msg],
         capture_output=True, text=True,
@@ -90,14 +101,14 @@ def main():
     if result.returncode != 0:
         _try("git", "merge", "--abort")
         conflict_comment = (
-            f"❌ **Merge conflict** — could not merge `{branch}` into `develop` automatically.\n\n"
+            f"❌ **Merge conflict** — could not merge `{branch}` into `{target}` automatically.\n\n"
             f"Resolve manually:\n"
             f"```bash\n"
-            f"git checkout develop\n"
+            f"git checkout {target}\n"
             f"git merge {branch}\n"
             f"# fix conflicts, then:\n"
             f"git add . && git commit\n"
-            f"git push origin develop\n"
+            f"git push origin {target}\n"
             f"git branch -d {branch}\n"
             f"git push origin --delete {branch}\n"
             f"```"
@@ -109,8 +120,8 @@ def main():
             pass
         sys.exit(1)
 
-    _run("git", "push", "origin", "develop")
-    print("Pushed develop.")
+    _run("git", "push", "origin", target)
+    print(f"Pushed {target}.")
 
     # Apply UAT label before deleting the branch so the safeguard can verify
     # the merge-base check (it needs the branch ref to still exist on origin).
@@ -128,7 +139,7 @@ def main():
     _try("git", "branch", "-d", branch)
     _try("git", "push", "origin", "--delete", branch)
 
-    print(f"✅  Merged {branch} into develop")
+    print(f"✅  Merged {branch} into {target}")
     print(f"    Feature branch deleted locally and on origin")
 
 

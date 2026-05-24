@@ -1,9 +1,22 @@
 import json
+import logging
+import os
 import sqlite3
+import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-DB_PATH = Path(__file__).parent / "dashboard.db"
+# ── DB_PATH resolution ────────────────────────────────────────────────────────
+_db_path_raw = os.environ.get("DB_PATH", "").strip()
+if not _db_path_raw:
+    logging.basicConfig(level=logging.ERROR)
+    logging.error(
+        "DB_PATH environment variable is not set or is blank. "
+        "Set DB_PATH in your .env file (e.g. DB_PATH=./commander.db) before starting the server."
+    )
+    sys.exit(1)
+
+DB_PATH = Path(_db_path_raw)
 
 # Asia/Bangkok is UTC+7 (no DST)
 _BKK_OFFSET = timezone(timedelta(hours=7))
@@ -24,6 +37,15 @@ def get_conn() -> sqlite3.Connection:
 
 
 def init_db():
+    # Write-access guard: verify the path is writable before attempting DDL.
+    try:
+        with open(DB_PATH, "a"):
+            pass
+    except OSError as exc:
+        raise RuntimeError(
+            f"DB_PATH '{DB_PATH.resolve()}' is not writable: {exc}"
+        ) from exc
+
     with get_conn() as conn:
         conn.execute("""
             CREATE TABLE IF NOT EXISTS agents (

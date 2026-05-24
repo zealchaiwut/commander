@@ -1,0 +1,29 @@
+# macOS
+.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+venv/
+.venv/
+.pytest_cache/
+
+# Claude Code — local/generated files
+.claude/settings.local.json
+**/.claude/settings.local.json
+.claude/worktrees/
+
+# Generated code-navigation snapshot
+codedb.snapshot
+
+# Live environment clones (managed outside git)
+dashboard-uat/
+
+# Git worktrees (linked via .git/worktrees)
+work-*/
+
+# Runtime
+*.pid
+*.log
+logs/
+sprints/

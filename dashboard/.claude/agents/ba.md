@@ -68,7 +68,12 @@ Only use labels from the **approved vocabulary**: `enhancement`, `bug`, `backlog
 Apply labels as follows:
 1. **Type:** use `enhancement` for new features or improvements; use `bug` for defects or broken behaviour.
 2. **Status:** always add `backlog` (issues start in the backlog).
-3. **Sprint:** always add the active sprint label (e.g. `sprint-1`). Read `~/commander/dashboard/projects.json` to find `active_sprints` for the relevant repo and use the highest sprint number. If no active sprint exists, use `sprint-1`.
+3. **Sprint:** do NOT assign a sprint label. Sprint assignment is a 
+   planning decision made by the human or sprint planner — not at ticket 
+   creation time. New tickets live in the backlog until planned into a 
+   sprint.
+
+Pass only the type + backlog labels in `--labels`. Do NOT pass --sprint.
 
 Pass the type + backlog labels in `--labels`. The sprint label is added automatically by `create_ticket.py` via `--sprint N`.
 

@@ -9,14 +9,15 @@ Live status dashboard for Claude Code agents, with a GitHub Issues sprint board 
 1. [Prerequisites](#prerequisites)
 2. [First-time setup](#first-time-setup)
 3. [Configuration reference](#configuration-reference)
-4. [Running the dashboard](#running-the-dashboard)
-5. [Using the dashboard](#using-the-dashboard)
-6. [Agent hooks](#agent-hooks)
-7. [GitHub sprint board](#github-sprint-board)
-8. [Quality gates flow](#quality-gates-flow)
-9. [Agent helper scripts](#agent-helper-scripts)
-10. [API reference](#api-reference)
-11. [Migrating to another machine](#migrating-to-another-machine)
+4. [PRD / UAT workflow](#prd--uat-workflow)
+5. [Running the dashboard](#running-the-dashboard)
+6. [Using the dashboard](#using-the-dashboard)
+7. [Agent hooks](#agent-hooks)
+8. [GitHub sprint board](#github-sprint-board)
+9. [Quality gates flow](#quality-gates-flow)
+10. [Agent helper scripts](#agent-helper-scripts)
+11. [API reference](#api-reference)
+12. [Migrating to another machine](#migrating-to-another-machine)
 
 ---
 
@@ -83,12 +84,72 @@ All settings live in `dashboard/.env`. Copy `.env.example` as a starting point.
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
+| `DB_PATH` | **Yes** | *(none — server exits if absent)* | Path to the SQLite database file. PRD: `./commander.db`. UAT: `./commander-uat.db`. |
 | `TRACKED_REPOS` | No | auto-detected from `git remote` | Comma-separated `owner/repo` list shown on the Projects tab. Example: `zealchaiwut/commander,zealchaiwut/other-project` |
 | `GITHUB_REPO` | No | auto-detected from `git remote` | Override for a single repo. Rarely needed if `TRACKED_REPOS` is set. |
 | `GITHUB_DEFAULT_BRANCH` | No | `main` | Used when linking to GitHub for new PRs. |
 | `SPRINT_DURATION_DAYS` | No | `14` | Length of a sprint in days, used to compute ETA. |
 
 `GITHUB_REPO` and `TRACKED_REPOS` are auto-detected from the `origin` remote of the `dashboard/` directory. You only need to set them if auto-detection fails or you want to override.
+
+---
+
+## PRD / UAT workflow
+
+Two isolated server environments run side-by-side so you can develop on `develop`
+(UAT) while `master` (PRD) stays stable.
+
+| | PRD | UAT |
+|---|---|---|
+| Directory | `~/commander/dashboard/` | `~/commander/dashboard-uat/dashboard/` |
+| Branch | `master` | `develop` |
+| Port | **8000** | **8001** |
+| Database | `commander.db` | `commander-uat.db` |
+| `ENVIRONMENT` | `prd` | `uat` |
+| `DB_PATH` | `./commander.db` | `./commander-uat.db` |
+
+### Shell shortcuts
+
+Install the `~/.commander.zsh` functions once, then add `source ~/.commander.zsh` to your
+`~/.zshrc`. These functions delegate to the existing scripts in `dashboard/scripts/`:
+
+| Function | What it does |
+|---|---|
+| `start-prd` | Start PRD server on port 8000 |
+| `start-uat` | Start UAT server on port 8001 |
+| `stop-prd` | Stop the PRD server |
+| `stop-uat` | Stop the UAT server |
+| `stop-all` | Stop both servers |
+| `cmdr-status` | Show running status + branch for each port |
+| `restart-prd` | Stop PRD, wait 1 s, start it again |
+| `restart-uat` | Stop UAT, wait 1 s, start it again |
+
+> `cmdr-status` uses the `cmdr-` prefix to avoid shadowing the macOS `/usr/bin/stat` binary.
+
+### Which environment should I use?
+
+- **PRD** — `master` branch, port 8000. Use this to monitor live agent activity.
+- **UAT** — `develop` branch, port 8001. Use this to test new features before merging.
+
+### Setting up UAT for the first time
+
+```bash
+bash ~/commander/dashboard/scripts/setup_uat_env.sh
+```
+
+This clones the repo into `~/commander/dashboard-uat/`, checks out `develop`, creates a venv,
+writes `.env` with `DB_PATH=./commander-uat.db`, and initialises the database.
+
+### First-time database migration (PRD)
+
+If you have live data in `dashboard.db`, migrate it to `commander.db` before updating
+`dashboard/.env`:
+
+```bash
+python3 ~/commander/dashboard/scripts/migrate_to_separate_dbs.py
+```
+
+Then ensure `dashboard/.env` contains `DB_PATH=./commander.db`.
 
 ---
 

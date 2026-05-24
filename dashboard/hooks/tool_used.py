@@ -65,9 +65,12 @@ def main():
     }
 
     try:
+        target = os.environ.get(
+            "HOOK_POST_TARGET", "http://localhost:8000/api/agent-event"
+        )
         data = json.dumps(event).encode()
         req  = urllib.request.Request(
-            "http://localhost:8000/api/agent-event",
+            target,
             data=data,
             headers={"Content-Type": "application/json"},
             method="POST",

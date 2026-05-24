@@ -44,9 +44,12 @@ def main():
     }
 
     try:
+        # Derive the token-usage URL from HOOK_POST_TARGET (swap the path) or use the default.
+        base = os.environ.get("HOOK_POST_TARGET", "http://localhost:8000/api/agent-event")
+        target = base.replace("/api/agent-event", "/api/token-usage")
         data = json.dumps(event).encode()
         req  = urllib.request.Request(
-            "http://localhost:8000/api/token-usage",
+            target,
             data=data,
             headers={"Content-Type": "application/json"},
             method="POST",

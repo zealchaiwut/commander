@@ -551,6 +551,65 @@
       .agent-summary .sum-item { padding: 12px 16px; }
       .sum-count { font-size: 22px; }
     }
+
+    /* ── Sprint History view (AC-5) ── */
+    .history-stats-row {
+      display: flex; background: var(--surface);
+      border-bottom: 1px solid var(--border);
+    }
+    .history-stat-card {
+      flex: 1; padding: 16px 24px;
+      border-right: 1px solid var(--border);
+      display: flex; flex-direction: column; gap: 3px;
+    }
+    .history-stat-card:last-child { border-right: none; }
+    .history-stat-label { font-size: 10px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: .08em; }
+    .history-stat-value { font-size: 24px; font-weight: 800; line-height: 1.2; }
+
+    .history-row {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      cursor: pointer; user-select: none;
+      transition: background .15s;
+    }
+    .history-row:hover { background: var(--surface-hover); }
+    .history-row-header {
+      display: grid;
+      grid-template-columns: 80px 110px 120px 90px 90px 40px;
+      align-items: center; gap: 16px;
+      padding: 14px 24px;
+    }
+    .history-sprint-num { font-weight: 700; font-size: 14px; }
+    .history-date       { font-size: 12px; color: var(--text-muted); font-family: var(--mono); }
+    .history-shipped    { font-size: 13px; font-weight: 600; color: var(--green); }
+    .history-skipped    { font-size: 13px; font-weight: 600; color: var(--amber); }
+    .history-chevron    { display: flex; justify-content: flex-end; color: var(--text-sub); font-size: 16px; transition: transform .2s ease; }
+    .history-row.expanded .history-chevron { transform: rotate(180deg); }
+
+    .history-expand-panel {
+      display: none;
+      border-top: 1px solid var(--border);
+      background: var(--surface-2);
+      padding: 16px 24px;
+    }
+    .history-row.expanded .history-expand-panel { display: block; }
+    .history-summary-pre {
+      font-family: var(--mono); font-size: 12px; line-height: 1.5;
+      white-space: pre-wrap; word-break: break-word;
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 6px; padding: 12px 14px;
+      max-height: 400px; overflow-y: auto;
+      margin-bottom: 10px;
+    }
+    .history-gh-link {
+      font-size: 12px; color: var(--blue); text-decoration: none;
+      display: inline-flex; align-items: center; gap: 4px;
+    }
+    .history-gh-link:hover { text-decoration: underline; }
+    @media (max-width: 600px) {
+      .history-row-header { grid-template-columns: 60px 90px 1fr 40px; }
+      .history-date, .history-shipped, .history-skipped { display: none; }
+    }
   </style>
 </head>
 <body>
@@ -585,6 +644,7 @@
   <button class="mtab active" id="mtab-projects"  onclick="switchMain('projects')">Projects</button>
   <button class="mtab"        id="mtab-agents"    onclick="switchMain('agents')">Agents</button>
   <button class="mtab"        id="mtab-activity"  onclick="switchMain('activity')">Activity log</button>
+  <button class="mtab"        id="mtab-history"   onclick="switchMain('history')">Sprint History</button>
 </nav>
 
 <!-- ── Projects view ── -->
@@ -669,6 +729,26 @@
     <div class="activity-list" id="activity-list">
       <div class="empty">No activity yet</div>
     </div>
+  </div>
+</div>
+
+<!-- ── Sprint History view (AC-5) ── -->
+<div id="view-history" class="hidden">
+  <!-- Quick-stats row (AC-5a) -->
+  <div class="history-stats-row" id="history-stats-row">
+    <div class="history-stat-card">
+      <span class="history-stat-label">Avg Sprint Duration</span>
+      <span class="history-stat-value" id="h-avg-duration">—</span>
+    </div>
+    <div class="history-stat-card">
+      <span class="history-stat-label">Total Tokens This Month</span>
+      <span class="history-stat-value" id="h-tokens-month">—</span>
+    </div>
+  </div>
+  <!-- Sprint list (AC-5b) -->
+  <div id="history-list">
+    <div class="empty" id="history-empty" style="display:none;">No sprints recorded yet.</div>
+    <div id="history-rows"></div>
   </div>
 </div>
 

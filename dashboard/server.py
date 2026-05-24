@@ -1,6 +1,7 @@
 import asyncio
 import json
 import os
+import re
 import subprocess
 import time
 from contextlib import asynccontextmanager
@@ -455,6 +456,176 @@ def get_plan_usage():
         "weekly_limit":     weekly_limit,
         "status":           "active",
     }
+
+
+# ── sprint summary / history endpoints (AC-4 / AC-6 from #24) ────────────────
+
+SPRINTS_DIR = Path(__file__).parent / "sprints"
+
+
+@app.get("/api/sprint-summary")
+def get_sprint_summary():
+    """Return the path and markdown content of the most recent summary file."""
+    if not SPRINTS_DIR.exists():
+        raise HTTPException(status_code=404, detail="No sprint summaries found")
+
+    summaries = sorted(
+        SPRINTS_DIR.glob("*-summary-*.md"),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+    if not summaries:
+        raise HTTPException(status_code=404, detail="No sprint summaries found")
+
+    latest = summaries[0]
+    content = latest.read_text(encoding="utf-8")
+    return {"path": str(latest), "content": content}
+
+
+def _parse_summary_file(path: Path) -> dict:
+    """Parse metadata from a sprint summary markdown file.
+
+    Extracts: sprint_num, date, status, shipped_count, skipped_count, total_tokens.
+    """
+    # Filename: sprint-<N>-summary-<YYYY-MM-DD>.md
+    name = path.stem  # sprint-3-summary-2026-05-24
+    m = re.match(r"sprint-(\d+)-summary-(\d{4}-\d{2}-\d{2})", name)
+    sprint_num = int(m.group(1)) if m else None
+    date       = m.group(2)      if m else ""
+
+    content = path.read_text(encoding="utf-8")
+
+    # Status from header: ## Sprint N — <status>
+    status_m = re.search(r"^## Sprint \S+ — (\S+)", content, re.MULTILINE)
+    status   = status_m.group(1) if status_m else "unknown"
+
+    # Count shipped rows (rows in What Shipped table, skip header + empty rows)
+    shipped_count = 0
+    in_shipped = False
+    for line in content.splitlines():
+        if line.startswith("## What Shipped"):
+            in_shipped = True
+            continue
+        if in_shipped and line.startswith("## "):
+            break
+        if in_shipped and line.startswith("|") and not line.startswith("| Issue") and "|---|" not in line:
+            cell = line.split("|")[1].strip()
+            if cell and cell != "—":
+                shipped_count += 1
+
+    # Count didn't-ship rows
+    skipped_count = 0
+    in_skipped = False
+    for line in content.splitlines():
+        if line.startswith("## What Didn't Ship"):
+            in_skipped = True
+            continue
+        if in_skipped and line.startswith("## "):
+            break
+        if in_skipped and line.startswith("|") and not line.startswith("| Issue") and "|---|" not in line:
+            cell = line.split("|")[1].strip()
+            if cell and cell != "—":
+                skipped_count += 1
+
+    # Total tokens from Stats table
+    total_tokens = 0
+    tok_m = re.search(r"\|\s*Total tokens\s*\|\s*(\d+)\s*\|", content)
+    if tok_m:
+        total_tokens = int(tok_m.group(1))
+
+    return {
+        "sprint_num":    sprint_num,
+        "date":          date,
+        "status":        status,
+        "shipped_count": shipped_count,
+        "skipped_count": skipped_count,
+        "total_tokens":  total_tokens,
+    }
+
+
+@app.get("/api/sprint-history")
+def get_sprint_history():
+    """AC-4: Return a JSON array of all past summaries, newest first.
+
+    Each entry:
+      sprint_num, date, status, file_path, github_issue_url,
+      shipped_count, skipped_count, total_tokens
+    """
+    if not SPRINTS_DIR.exists():
+        return []
+
+    summary_files = sorted(
+        SPRINTS_DIR.glob("*-summary-*.md"),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+    if not summary_files:
+        return []
+
+    results: list[dict] = []
+    for path in summary_files:
+        try:
+            meta = _parse_summary_file(path)
+        except Exception:
+            meta = {"sprint_num": None, "date": "", "status": "unknown",
+                    "shipped_count": 0, "skipped_count": 0, "total_tokens": 0}
+
+        # Look for matching state file to get summary_issue_url
+        sprint_num   = meta.get("sprint_num")
+        issue_url    = None
+        if sprint_num is not None:
+            state_file = SPRINTS_DIR / f"sprint-{sprint_num}-state.json"
+            if state_file.exists():
+                try:
+                    state_data = json.loads(state_file.read_text())
+                    issue_url  = state_data.get("summary_issue_url")
+                except Exception:
+                    pass
+
+        results.append({
+            "sprint_num":       meta["sprint_num"],
+            "date":             meta["date"],
+            "status":           meta["status"],
+            "file_path":        str(path),
+            "github_issue_url": issue_url,
+            "shipped_count":    meta["shipped_count"],
+            "skipped_count":    meta["skipped_count"],
+            "total_tokens":     meta["total_tokens"],
+        })
+
+    return results
+
+
+@app.get("/api/sprint-history-content")
+def get_sprint_history_content(sprint_num: Optional[int] = None, idx: Optional[int] = None):
+    """Return markdown content of a specific sprint summary file.
+
+    Looks up by sprint_num first; falls back to position idx in sorted list.
+    """
+    if not SPRINTS_DIR.exists():
+        raise HTTPException(status_code=404, detail="No sprint summaries found")
+
+    summary_files = sorted(
+        SPRINTS_DIR.glob("*-summary-*.md"),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+    if not summary_files:
+        raise HTTPException(status_code=404, detail="No sprint summaries found")
+
+    target = None
+    if sprint_num is not None:
+        for path in summary_files:
+            if re.match(rf"sprint-{sprint_num}-summary-", path.stem):
+                target = path
+                break
+    if target is None and idx is not None and 0 <= idx < len(summary_files):
+        target = summary_files[idx]
+
+    if target is None:
+        raise HTTPException(status_code=404, detail="Sprint summary not found")
+
+    return {"path": str(target), "content": target.read_text(encoding="utf-8")}
 
 
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")

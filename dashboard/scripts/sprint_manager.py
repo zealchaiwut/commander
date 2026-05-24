@@ -6,6 +6,11 @@ Quality gates (pytest → lint → merge-preview) run after a tester subprocess
 exits 0 and the issue has advanced to the UAT label. Any gate failure reverts
 the issue to SIT with a detailed comment.
 
+After sprint completion a rich executive summary is written to
+~/commander/dashboard/sprints/sprint-<N>-summary-<YYYY-MM-DD>.md, a GitHub
+issue is created for permanent record, and an optional interactive learnings
+prompt is shown when stdout is a TTY.
+
 Usage:
     python3 ~/commander/dashboard/scripts/sprint_manager.py <label> [options]
 
@@ -24,8 +29,10 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 import time
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -44,6 +51,114 @@ WORKTESTER_ROOT = Path(os.environ.get("WORKTESTER_ROOT", Path.home() / "commande
 WORKTESTER_DASHBOARD = WORKTESTER_ROOT / "dashboard"
 FINISH_FEATURE_SCRIPT = DASHBOARD_DIR / "scripts" / "finish_feature.py"
 DASHBOARD_API_URL = os.environ.get("DASHBOARD_API_URL", "http://localhost:8000")
+SPRINTS_DIR = DASHBOARD_DIR / "sprints"
+
+
+def _utcnow() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _sprint_number(label: str) -> Optional[int]:
+    m = re.search(r"(\d+)", label)
+    return int(m.group(1)) if m else None
+
+
+def _state_path(sprint_number: Optional[int], sprint_label: str) -> Path:
+    SPRINTS_DIR.mkdir(parents=True, exist_ok=True)
+    n = sprint_number if sprint_number is not None else sprint_label
+    return SPRINTS_DIR / f"sprint-{n}-state.json"
+
+
+def _summary_path(sprint_number: Optional[int], sprint_label: str) -> Path:
+    SPRINTS_DIR.mkdir(parents=True, exist_ok=True)
+    n   = sprint_number if sprint_number is not None else sprint_label
+    day = datetime.now().strftime("%Y-%m-%d")
+    return SPRINTS_DIR / f"sprint-{n}-summary-{day}.md"
+
+
+# ── failure categories ────────────────────────────────────────────────────────
+
+class FailureCategory:
+    HANG             = "HANG"
+    CRASH            = "CRASH"
+    GATE_FAIL        = "GATE_FAIL"
+    TESTER_REJECTED  = "TESTER_REJECTED"
+    RETRY_EXHAUSTED  = "RETRY_EXHAUSTED"
+
+
+# ── sprint issue state ────────────────────────────────────────────────────────
+
+@dataclass
+class IssueState:
+    number:      int
+    title:       str
+    status:      str              = "pending"   # pending | done | skipped
+    skip_reason: Optional[str]   = None
+    category:    Optional[str]   = None         # FailureCategory value
+    tokens_in:   int             = 0
+    tokens_out:  int             = 0
+
+    def to_dict(self) -> dict:
+        return {
+            "number":      self.number,
+            "title":       self.title,
+            "status":      self.status,
+            "skip_reason": self.skip_reason,
+            "category":    self.category,
+            "tokens_in":   self.tokens_in,
+            "tokens_out":  self.tokens_out,
+        }
+
+    @staticmethod
+    def from_dict(d: dict) -> "IssueState":
+        return IssueState(
+            number      = d["number"],
+            title       = d["title"],
+            status      = d.get("status", "pending"),
+            skip_reason = d.get("skip_reason"),
+            category    = d.get("category"),
+            tokens_in   = d.get("tokens_in", 0),
+            tokens_out  = d.get("tokens_out", 0),
+        )
+
+
+@dataclass
+class SprintState:
+    sprint_label:     str
+    sprint_number:    Optional[int]
+    issues:           list[IssueState]  = field(default_factory=list)
+    start_timestamp:  str              = ""
+    total_tokens_in:  int              = 0
+    total_tokens_out: int              = 0
+    wall_clock_secs:  float            = 0.0
+
+    def to_dict(self) -> dict:
+        return {
+            "sprint_label":     self.sprint_label,
+            "sprint_number":    self.sprint_number,
+            "issues":           [i.to_dict() for i in self.issues],
+            "start_timestamp":  self.start_timestamp,
+            "total_tokens_in":  self.total_tokens_in,
+            "total_tokens_out": self.total_tokens_out,
+            "wall_clock_secs":  self.wall_clock_secs,
+        }
+
+    @staticmethod
+    def from_dict(d: dict) -> "SprintState":
+        s = SprintState(
+            sprint_label     = d["sprint_label"],
+            sprint_number    = d.get("sprint_number"),
+            start_timestamp  = d.get("start_timestamp", ""),
+            total_tokens_in  = d.get("total_tokens_in", 0),
+            total_tokens_out = d.get("total_tokens_out", 0),
+            wall_clock_secs  = d.get("wall_clock_secs", 0.0),
+        )
+        s.issues = [IssueState.from_dict(i) for i in d.get("issues", [])]
+        return s
+
+    def save(self, path: Path) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(self.to_dict(), indent=2))
 
 
 # ── data structures ───────────────────────────────────────────────────────────
@@ -468,6 +583,369 @@ def _call_finish_feature(
         print(f"  finish_feature.py completed successfully")
 
 
+# ── sprint summary report (AC-1, AC-2, AC-3) ─────────────────────────────────
+
+LEARNINGS_STUB = (
+    "_TODO: replace this stub with your retrospective notes._\n\n"
+    "What went well? What should we do differently next sprint?"
+)
+
+
+def _follow_up_action(category: Optional[str]) -> str:
+    mapping = {
+        FailureCategory.HANG:            "Investigate subprocess logs; check for infinite loops or network waits. Retry manually.",
+        FailureCategory.CRASH:           "Examine the coder/tester log for the exception. Fix the underlying issue and retry.",
+        FailureCategory.GATE_FAIL:       "Review the gate output in the GitHub comment. Fix failing tests or linting errors.",
+        FailureCategory.TESTER_REJECTED: "The tester did not advance the issue to UAT. Review the tester log and re-run tester.",
+        FailureCategory.RETRY_EXHAUSTED: "Max retries reached. Manually investigate and fix the issue.",
+    }
+    return mapping.get(category or "", "Review the issue manually.")
+
+
+def generate_sprint_summary(
+    state: SprintState,
+    elapsed_secs: float,
+    end_reason: str = "complete",
+    open_issues: Optional[list[dict]] = None,
+    repo_name: Optional[str] = None,
+) -> str:
+    """Generate a richly-formatted executive summary markdown string.
+
+    Section order per AC-1:
+      ## Sprint <N> — <status>
+      ## What Shipped
+      ## What Didn't Ship
+      ## Stats
+      ## Carried Over
+      ## Key Learnings
+      ## Links
+      Footer
+    """
+    n = state.sprint_number if state.sprint_number is not None else state.sprint_label
+
+    start_ts = state.start_timestamp or _utcnow()
+    end_ts   = _utcnow()
+
+    h, rem   = divmod(int(elapsed_secs), 3600)
+    m_int, s = divmod(rem, 60)
+    duration_str = f"{h}h {m_int}m {s}s"
+
+    completed = [i for i in state.issues if i.status == "done"]
+    skipped   = [i for i in state.issues if i.status == "skipped"]
+    pending   = [i for i in state.issues if i.status == "pending"]
+
+    total_tokens     = state.total_tokens_in + state.total_tokens_out
+    avg_ticket_secs  = (elapsed_secs / len(completed)) if completed else 0
+    avg_h, avg_r     = divmod(int(avg_ticket_secs), 3600)
+    avg_m, avg_s     = divmod(avg_r, 60)
+    avg_ticket_str   = f"{avg_h}h {avg_m}m {avg_s}s" if completed else "—"
+
+    tester_rejections = sum(
+        1 for i in state.issues
+        if i.category == FailureCategory.TESTER_REJECTED
+    )
+    merge_conflicts = sum(
+        1 for i in state.issues
+        if i.category == FailureCategory.GATE_FAIL
+        and "conflict" in (i.skip_reason or "").lower()
+    )
+    gate_total    = len([i for i in state.issues if i.status in ("done", "skipped")])
+    gate_passed   = len(completed)
+    gate_pass_rate = round(gate_passed / gate_total * 100, 1) if gate_total else 0.0
+
+    r = _r(repo_name)
+    sprint_filter_url = f"https://github.com/{r}/issues?q=label%3A{state.sprint_label}"
+
+    lines: list[str] = []
+
+    # ── Header section ──
+    lines += [
+        f"## Sprint {n} — {end_reason}",
+        "",
+        "| Field | Value |",
+        "|---|---|",
+        f"| Sprint number | {n} |",
+        f"| Start | {start_ts} |",
+        f"| End | {end_ts} |",
+        f"| Duration | {duration_str} |",
+        f"| End reason | {end_reason} |",
+        "",
+    ]
+
+    # ── What Shipped ──
+    lines += [
+        "## What Shipped",
+        "",
+        "| Issue # | Title | Time taken | Outcome | Size |",
+        "|---|---|---|---|---|",
+    ]
+    if completed:
+        for issue in completed:
+            lines.append(f"| #{issue.number} | {issue.title} | — | UAT-approved / closed | — |")
+    else:
+        lines.append("| — | No issues shipped | — | — | — |")
+    lines.append("")
+
+    # ── What Didn't Ship ──
+    lines += [
+        "## What Didn't Ship",
+        "",
+        "| Issue # | Title | Failure category | Reason |",
+        "|---|---|---|---|",
+    ]
+    if skipped:
+        for issue in skipped:
+            cat    = issue.category or "unknown"
+            reason = (issue.skip_reason or "no reason recorded").replace("|", "/")
+            lines.append(f"| #{issue.number} | {issue.title} | {cat} | {reason} |")
+    else:
+        lines.append("| — | All issues shipped | — | — |")
+    lines.append("")
+
+    # ── Stats ──
+    lines += [
+        "## Stats",
+        "",
+        "| Metric | Value |",
+        "|---|---|",
+        f"| Total tokens | {total_tokens} |",
+        f"| Avg ticket time | {avg_ticket_str} |",
+        f"| Quality-gate pass rate | {gate_pass_rate}% |",
+        f"| Tester rejections | {tester_rejections} |",
+        f"| Merge conflicts | {merge_conflicts} |",
+        "",
+    ]
+
+    # ── Carried Over ──
+    lines += ["## Carried Over", ""]
+    carried_items: list[str] = []
+    for issue in pending:
+        carried_items.append(f"- #{issue.number} {issue.title} — candidate for next sprint")
+    for issue in (open_issues or []):
+        num   = issue.get("number", "?")
+        title = issue.get("title", "")
+        carried_items.append(f"- #{num} {title} — candidate for next sprint")
+    if carried_items:
+        lines.extend(carried_items)
+    else:
+        lines.append("No issues carried over.")
+    lines.append("")
+
+    # ── Key Learnings ──
+    lines += [
+        "## Key Learnings",
+        "",
+        LEARNINGS_STUB,
+        "",
+    ]
+
+    # ── Links ──
+    all_links: list[str] = [
+        f"- [Sprint {n} issues on GitHub]({sprint_filter_url})",
+    ]
+    for issue in state.issues:
+        link = f"https://github.com/{r}/issues/{issue.number}"
+        all_links.append(f"- [Issue #{issue.number} — {issue.title[:50]}]({link})")
+
+    lines += ["## Links", ""]
+    if len(all_links) > 3:
+        lines.append("<details>")
+        lines.append(f"<summary>{len(all_links)} links — click to expand</summary>")
+        lines.append("")
+        lines.extend(all_links)
+        lines.append("")
+        lines.append("</details>")
+    else:
+        lines.extend(all_links)
+    lines.append("")
+
+    # ── Footer ──
+    lines.append(f"_Generated by sprint-manager v1.0 on {_utcnow()}_")
+
+    return "\n".join(lines)
+
+
+def _ensure_github_labels(labels: list[str], repo_name: Optional[str] = None) -> None:
+    """Create GitHub labels if they don't exist (best-effort, AC-2)."""
+    r = _r(repo_name)
+    for label in labels:
+        try:
+            subprocess.run(
+                ["gh", "label", "create", label, "--repo", r, "--force"],
+                capture_output=True, text=True, check=False,
+            )
+        except Exception:
+            pass
+
+
+def create_summary_github_issue(
+    content: str,
+    sprint_number: Optional[int],
+    sprint_label: str,
+    repo_name: Optional[str] = None,
+) -> tuple[Optional[int], Optional[str]]:
+    """AC-2: Create a GitHub issue with the summary markdown as the body.
+
+    Labels: 'docs', 'sprint-<N>' (created if missing).
+    Returns (issue_number, issue_url) or (None, None) on failure.
+    """
+    n      = sprint_number if sprint_number is not None else sprint_label
+    title  = f"Sprint {n} Executive Summary"
+    labels = ["docs", f"sprint-{n}"]
+
+    _ensure_github_labels(labels, repo_name=repo_name)
+
+    try:
+        issue_num, url = github_client.create_issue(
+            title=title, body=content, labels=labels, repo_name=repo_name
+        )
+        print(f"  Summary GitHub issue created: {url}")
+        return issue_num, url
+    except Exception as e:
+        print(f"  Warning: failed to create summary GitHub issue — {e}", file=sys.stderr)
+        return None, None
+
+
+def _prompt_learnings(
+    content: str,
+    path: Path,
+    sprint_number: Optional[int],
+    sprint_label: str,
+    summary_issue_num: Optional[int],
+    repo_name: Optional[str] = None,
+) -> str:
+    """AC-3: Interactive learnings prompt.
+
+    If stdout is a TTY, ask the user whether to fill in Key Learnings.
+    'y' → open $EDITOR (fallback: nano) with the stub pre-populated.
+    On close, replace the stub in both the local file and the GitHub issue.
+    'n' or non-interactive → leave stub in place.
+    Returns the (possibly updated) content string.
+    """
+    n = sprint_number if sprint_number is not None else sprint_label
+    if not sys.stdout.isatty():
+        return content  # non-interactive: leave stub in place
+
+    try:
+        answer = input(f"\nSprint {n} done. Want to add learnings to the summary? (y/n) ").strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        return content
+
+    if answer != "y":
+        return content
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False,
+                                     encoding="utf-8") as tf:
+        tmp_path = Path(tf.name)
+        tf.write(LEARNINGS_STUB + "\n")
+
+    editor = os.environ.get("EDITOR", "nano")
+    try:
+        subprocess.run([editor, str(tmp_path)], check=False)
+        new_learnings = tmp_path.read_text(encoding="utf-8").strip()
+    except Exception as e:
+        print(f"  Warning: editor failed — {e}", file=sys.stderr)
+        new_learnings = ""
+    finally:
+        try:
+            tmp_path.unlink()
+        except Exception:
+            pass
+
+    if not new_learnings or new_learnings == LEARNINGS_STUB.strip():
+        print("  No learnings entered; keeping placeholder.")
+        return content
+
+    updated = content.replace(LEARNINGS_STUB, new_learnings)
+
+    path.write_text(updated, encoding="utf-8")
+    print(f"  Key Learnings updated in {path}")
+
+    if summary_issue_num is not None:
+        r = _r(repo_name)
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False,
+                                         encoding="utf-8") as tf2:
+            tmp2 = Path(tf2.name)
+            tf2.write(updated)
+        try:
+            subprocess.run(
+                ["gh", "issue", "edit", str(summary_issue_num),
+                 "--repo", r, "--body-file", str(tmp2)],
+                capture_output=True, text=True, check=False,
+            )
+            print(f"  GitHub issue #{summary_issue_num} body updated with learnings.")
+        except Exception as e:
+            print(f"  Warning: failed to update GitHub issue body — {e}", file=sys.stderr)
+        finally:
+            try:
+                tmp2.unlink()
+            except Exception:
+                pass
+
+    return updated
+
+
+def write_sprint_summary(
+    state: SprintState,
+    elapsed_secs: float,
+    end_reason: str = "complete",
+    open_issues: Optional[list[dict]] = None,
+    repo_name: Optional[str] = None,
+) -> Path:
+    """Write summary file, create GitHub issue, prompt for learnings (AC-1/2/3)."""
+    content = generate_sprint_summary(
+        state,
+        elapsed_secs,
+        end_reason=end_reason,
+        open_issues=open_issues,
+        repo_name=repo_name,
+    )
+    path = _summary_path(state.sprint_number, state.sprint_label)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
+    print(f"  Sprint summary written to {path}")
+
+    # AC-2: Create GitHub issue (best-effort — errors must not crash the sprint)
+    try:
+        summary_issue_num, summary_issue_url = create_summary_github_issue(
+            content=content,
+            sprint_number=state.sprint_number,
+            sprint_label=state.sprint_label,
+            repo_name=repo_name,
+        )
+    except Exception as exc:
+        print(f"  Warning: create_summary_github_issue raised — {exc}", file=sys.stderr)
+        summary_issue_num, summary_issue_url = None, None
+
+    # Store summary_issue_url in state JSON
+    if summary_issue_url:
+        state_path = _state_path(state.sprint_number, state.sprint_label)
+        try:
+            if state_path.exists():
+                state_dict = json.loads(state_path.read_text())
+            else:
+                state_dict = state.to_dict()
+            state_dict["summary_issue_url"] = summary_issue_url
+            state_path.write_text(json.dumps(state_dict, indent=2))
+        except Exception as e:
+            print(
+                f"  Warning: could not update state file with summary_issue_url — {e}",
+                file=sys.stderr,
+            )
+
+    # AC-3: Interactive learnings prompt
+    _prompt_learnings(
+        content=content,
+        path=path,
+        sprint_number=state.sprint_number,
+        sprint_label=state.sprint_label,
+        summary_issue_num=summary_issue_num,
+        repo_name=repo_name,
+    )
+
+    return path
+
+
 # ── sprint loop ────────────────────────────────────────────────────────────────
 
 def list_backlog_issues(label: str, repo_name: Optional[str] = None) -> list[dict]:
@@ -519,27 +997,41 @@ def run_sprint(
     gate_merge_preview: bool,
     repo_name: Optional[str] = None,
     dry_run: bool = False,
-) -> SprintSummary:
-    """Main sprint loop — processes backlog issues sequentially."""
+) -> tuple[SprintSummary, SprintState]:
+    """Main sprint loop — processes backlog issues sequentially.
+
+    Returns (SprintSummary, SprintState) for backward compat + extended summary.
+    """
     summary = SprintSummary()
+    sprint_num = _sprint_number(label)
+    state = SprintState(
+        sprint_label=label,
+        sprint_number=sprint_num,
+        start_timestamp=_utcnow(),
+    )
 
     print(f"\n=== Sprint Manager: label={label} ===")
     issues = list_backlog_issues(label, repo_name=repo_name)
 
     if not issues:
         print("No backlog issues found for this label.")
-        return summary
+        return summary, state
 
     print(f"Found {len(issues)} backlog issue(s): {[i['number'] for i in issues]}")
+    state.issues = [IssueState(number=i["number"], title=i["title"]) for i in issues]
 
-    for issue in issues:
-        num = issue["number"]
-        title = issue["title"]
+    start_time = time.monotonic()
+
+    for issue_state in state.issues:
+        num   = issue_state.number
+        title = issue_state.title
         print(f"\n--- Issue #{num}: {title} ---")
         summary.processed.append(f"#{num}")
 
         if dry_run:
             print("  [dry-run] would dispatch coder + tester")
+            issue_state.status = "skipped"
+            issue_state.skip_reason = "dry-run"
             summary.skipped.append(f"#{num} (dry-run)")
             continue
 
@@ -548,6 +1040,9 @@ def run_sprint(
         coder_ok = _dispatch_agent("coder", num)
         if not coder_ok:
             print(f"  Coder failed for #{num} — skipping to next issue")
+            issue_state.status      = "skipped"
+            issue_state.skip_reason = "Coder failed"
+            issue_state.category    = FailureCategory.CRASH
             summary.skipped.append(f"#{num} (coder failed)")
             continue
 
@@ -570,11 +1065,19 @@ def run_sprint(
         print(f"  {summary_line}")
 
         if merged:
+            issue_state.status = "done"
             summary.merged.append(f"#{num}")
-        elif "gate failed" in summary_line:
-            summary.gate_failures.append(summary_line)
+        else:
+            issue_state.status      = "skipped"
+            issue_state.skip_reason = summary_line
+            if "gate failed" in summary_line:
+                issue_state.category = FailureCategory.GATE_FAIL
+                summary.gate_failures.append(summary_line)
+            else:
+                issue_state.category = FailureCategory.TESTER_REJECTED
 
-    return summary
+    state.wall_clock_secs = time.monotonic() - start_time
+    return summary, state
 
 
 def _dispatch_agent(agent_type: str, issue_num: int) -> bool:
@@ -638,7 +1141,7 @@ def main() -> None:
 
     args = p.parse_args()
 
-    summary = run_sprint(
+    summary, state = run_sprint(
         label=args.label,
         skip_gates=args.skip_gates,
         gate_pytest=args.gate_pytest,
@@ -647,6 +1150,18 @@ def main() -> None:
         repo_name=args.repo,
         dry_run=args.dry_run,
     )
+
+    # AC-1/2/3: write extended summary, create GitHub issue, prompt for learnings
+    if state.issues:
+        end_reason = "complete" if not summary.skipped else "stopped"
+        summary_path = write_sprint_summary(
+            state=state,
+            elapsed_secs=state.wall_clock_secs,
+            end_reason=end_reason,
+            repo_name=args.repo,
+        )
+    else:
+        summary_path = None
 
     print("\n=== Sprint Summary ===")
     print(f"Processed: {', '.join(summary.processed) or 'none'}")
@@ -657,6 +1172,8 @@ def main() -> None:
             print(f"  {line}")
     if summary.skipped:
         print(f"Skipped:   {', '.join(summary.skipped)}")
+    if summary_path:
+        print(f"Summary:   {summary_path}")
 
 
 if __name__ == "__main__":

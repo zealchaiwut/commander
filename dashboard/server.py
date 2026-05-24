@@ -15,11 +15,13 @@ from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, model_validator
 
+# Load .env before importing local modules so that DB_PATH and other env vars
+# are available when db.py executes its module-level startup checks.
+load_dotenv(Path(__file__).parent / ".env")
+
 import db
 import github_client
 import projects as projects_module
-
-load_dotenv(Path(__file__).parent / ".env")
 
 STATIC_DIR = Path(__file__).parent / "static"
 ENVIRONMENT = os.environ.get("ENVIRONMENT", "prd").lower()

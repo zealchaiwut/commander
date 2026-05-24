@@ -43,8 +43,18 @@ All development work happens in **worktrees** (e.g. `~/commander/work-coder/`, `
 
 ### Hook behaviour
 
-All hooks in `.claude/hooks/` (and `dashboard/hooks/`) always POST to **`localhost:8000`** (PRD).
-They must never be changed to post to port 8001.
+All three hook scripts (`hooks/tool_used.py`, `hooks/agent_finished.py`,
+`hooks/post_tool_used.py`) read the target URL from the `HOOK_POST_TARGET`
+environment variable, defaulting to `http://localhost:8000/api/agent-event`.
+
+- **PRD agents** (worktrees for `master`-targeting work): no override needed —
+  the default routes to port 8000.
+- **UAT agents** (worktrees for `develop`-targeting work): set
+  `HOOK_POST_TARGET=http://localhost:8001/api/agent-event` in the project's
+  `.claude/settings.json` `env` block. `setup_uat_env.sh` does this
+  automatically when setting up `dashboard-uat/`.
+
+Do NOT hard-code port numbers inside the hook scripts themselves.
 
 ## Dashboard (FastAPI)
 

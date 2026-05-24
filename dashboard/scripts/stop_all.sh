@@ -1,5 +1,10 @@
 #!/usr/bin/env bash
-# stop_all.sh — Terminate any processes bound to ports 8000 and 8001.
+# stop_all.sh — Terminate processes bound to port 8000 (PRD), 8001 (UAT), or both.
+#
+# Usage:
+#   stop_all.sh          — stop both PRD and UAT
+#   stop_all.sh prd      — stop PRD only (port 8000)
+#   stop_all.sh uat      — stop UAT only (port 8001)
 #
 # Also cleans up PID files if present.
 
@@ -7,6 +12,9 @@ set -uo pipefail
 
 PRD_PID_FILE="$HOME/commander/dashboard/prd.pid"
 UAT_PID_FILE="$HOME/commander/dashboard-uat/dashboard/uat.pid"
+
+# Parse optional argument: prd | uat | (none = both)
+TARGET="${1:-all}"
 
 _kill_port() {
     local port="$1"
@@ -53,6 +61,16 @@ _kill_port() {
 }
 
 echo "=== Stopping Commander servers ==="
-_kill_port 8000 "PRD" "$PRD_PID_FILE"
-_kill_port 8001 "UAT" "$UAT_PID_FILE"
+case "$TARGET" in
+    prd)
+        _kill_port 8000 "PRD" "$PRD_PID_FILE"
+        ;;
+    uat)
+        _kill_port 8001 "UAT" "$UAT_PID_FILE"
+        ;;
+    *)
+        _kill_port 8000 "PRD" "$PRD_PID_FILE"
+        _kill_port 8001 "UAT" "$UAT_PID_FILE"
+        ;;
+esac
 echo "=== Done ==="

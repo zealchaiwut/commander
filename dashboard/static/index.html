@@ -711,15 +711,23 @@
       <span class="sum-label">Waiting</span>
     </div>
     <div class="sum-item">
+      <span class="sum-count" id="cnt-timed-out">—</span>
+      <span class="sum-label">Timed Out</span>
+    </div>
+    <div class="sum-item">
       <span class="sum-count" id="cnt-done">—</span>
       <span class="sum-label">Done</span>
     </div>
   </div>
   <div class="section-pad">
-    <div class="section-label">Active agents</div>
-    <div class="agents-grid" id="agents-grid">
+    <div class="section-label" id="agents-active-label">ACTIVE · 0</div>
+    <div class="agents-grid" id="agents-grid-active">
       <div class="empty">No active agents</div>
     </div>
+  </div>
+  <div class="section-pad" id="agents-inactive-section">
+    <div class="section-label" id="agents-inactive-label">INACTIVE · 0</div>
+    <div class="agents-grid" id="agents-grid-inactive"></div>
   </div>
 </div>
 

@@ -165,6 +165,26 @@ def get_now():
     return {"now": datetime.now(timezone.utc).isoformat()}
 
 
+@app.get("/api/version")
+def get_version():
+    """Return the current git HEAD short SHA (7 chars).
+
+    Returns {"version": "<sha>"} on success, or {"version": "unknown"} if
+    git is unavailable or the command fails (always HTTP 200).
+    """
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        sha = result.stdout.strip()
+    except Exception:
+        sha = "unknown"
+    return {"version": sha}
+
+
 @app.get("/api/environment")
 def get_environment():
     """Return the current runtime environment (prd or uat)."""

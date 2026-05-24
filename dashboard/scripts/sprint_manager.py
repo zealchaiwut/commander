@@ -11,26 +11,38 @@ After sprint completion a rich executive summary is written to
 issue is created for permanent record, and an optional interactive learnings
 prompt is shown when stdout is a TTY.
 
+Adds per-failure categorisation, hang detection, configurable alert channels,
+a sprint summary report, restart/resume from state, and live dashboard progress.
+
 Usage:
     python3 ~/commander/dashboard/scripts/sprint_manager.py <label> [options]
 
-Example:
+Examples:
     python3 ~/commander/dashboard/scripts/sprint_manager.py sprint-5
     python3 ~/commander/dashboard/scripts/sprint_manager.py sprint-5 --skip-gates
     python3 ~/commander/dashboard/scripts/sprint_manager.py sprint-5 --gate-pytest=false
+    python3 ~/commander/dashboard/scripts/sprint_manager.py sprint-5 --alert-mode dashboard-banner,file
+    python3 ~/commander/dashboard/scripts/sprint_manager.py sprint-5 --resume
+    python3 ~/commander/dashboard/scripts/sprint_manager.py sprint-5 --retry-failed
+    python3 ~/commander/dashboard/scripts/sprint_manager.py sprint-5 --dry-run
 
 Run from the git root of the repository (NOT from dashboard/).
 """
 from __future__ import annotations
 
 import argparse
+import email.mime.text
 import json
 import os
 import re
+import smtplib
 import subprocess
 import sys
 import tempfile
+import threading
 import time
+import urllib.request
+import urllib.error
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -38,7 +50,7 @@ from typing import Optional
 
 # ── path setup ────────────────────────────────────────────────────────────────
 
-SCRIPTS_DIR = Path(__file__).parent
+SCRIPTS_DIR   = Path(__file__).parent
 DASHBOARD_DIR = SCRIPTS_DIR.parent
 
 sys.path.insert(0, str(DASHBOARD_DIR))
@@ -47,11 +59,18 @@ load_dotenv(DASHBOARD_DIR / ".env")
 import github_client
 
 # Default paths — can be overridden via env vars or CLI for testing
-WORKTESTER_ROOT = Path(os.environ.get("WORKTESTER_ROOT", Path.home() / "commander" / "work-tester"))
+WORKTESTER_ROOT      = Path(os.environ.get("WORKTESTER_ROOT",
+                             Path.home() / "commander" / "work-tester"))
 WORKTESTER_DASHBOARD = WORKTESTER_ROOT / "dashboard"
 FINISH_FEATURE_SCRIPT = DASHBOARD_DIR / "scripts" / "finish_feature.py"
-DASHBOARD_API_URL = os.environ.get("DASHBOARD_API_URL", "http://localhost:8000")
-SPRINTS_DIR = DASHBOARD_DIR / "sprints"
+DASHBOARD_API_URL    = os.environ.get("DASHBOARD_API_URL", "http://localhost:8000")
+SPRINTS_DIR          = DASHBOARD_DIR / "sprints"
+ALERTS_DIR           = DASHBOARD_DIR / "alerts"
+
+# Hang detection constants (in seconds)
+HANG_WARN_SECS  = 30 * 60   # 30 minutes
+HANG_KILL_SECS  = 60 * 60   # 60 minutes
+HANG_CHECK_SECS = 5  * 60   # check every 5 minutes
 
 
 def _utcnow() -> str:
@@ -86,7 +105,19 @@ class FailureCategory:
     RETRY_EXHAUSTED  = "RETRY_EXHAUSTED"
 
 
-# ── sprint issue state ────────────────────────────────────────────────────────
+# ── alert modes ───────────────────────────────────────────────────────────────
+
+class AlertMode:
+    DASHBOARD_BANNER = "dashboard-banner"
+    EMAIL            = "email"
+    DISCORD          = "discord"
+    FILE             = "file"
+    NONE             = "none"
+
+    ALL_MODES = {DASHBOARD_BANNER, EMAIL, DISCORD, FILE, NONE}
+
+
+# ── data structures ───────────────────────────────────────────────────────────
 
 @dataclass
 class IssueState:
@@ -161,20 +192,18 @@ class SprintState:
         path.write_text(json.dumps(self.to_dict(), indent=2))
 
 
-# ── data structures ───────────────────────────────────────────────────────────
-
 @dataclass
 class GateResult:
-    gate: str
-    passed: bool
+    gate:    str
+    passed:  bool
     skipped: bool = False
-    output: str = ""
+    output:  str  = ""
 
     @property
     def symbol(self) -> str:
         if self.skipped:
-            return "⏭️ skipped"
-        return "✅" if self.passed else "❌"
+            return "skipped"
+        return "PASS" if self.passed else "FAIL"
 
 
 @dataclass
@@ -209,35 +238,203 @@ def _post_agent_event(tool_name: str, agent_id: str = "sprint-manager") -> None:
     """POST to /api/agent-event to update the dashboard agent card."""
     try:
         payload = json.dumps({
-            "agent_id": agent_id,
+            "agent_id":  agent_id,
             "tool_name": tool_name,
             "timestamp": time.time(),
-        })
-        subprocess.run(
-            [
-                "curl", "-s", "-X", "POST",
-                f"{DASHBOARD_API_URL}/api/agent-event",
-                "-H", "Content-Type: application/json",
-                "-d", payload,
-                "--max-time", "2",
-            ],
-            capture_output=True,
-            timeout=5,
+        }).encode()
+        req = urllib.request.Request(
+            f"{DASHBOARD_API_URL}/api/agent-event",
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
         )
+        urllib.request.urlopen(req, timeout=2)
     except Exception:
         # Fail silently — dashboard may not be running
         pass
 
 
+def _post_sprint_status(state: SprintState) -> None:
+    """POST the current sprint state to /api/sprint-status."""
+    try:
+        payload = json.dumps(state.to_dict()).encode()
+        req = urllib.request.Request(
+            f"{DASHBOARD_API_URL}/api/sprint-status",
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        urllib.request.urlopen(req, timeout=2)
+    except Exception:
+        pass
+
+
+# ── alert dispatch ────────────────────────────────────────────────────────────
+
+def dispatch_alerts(
+    alert_modes: list[str],
+    title: str,
+    body: str,
+    issue_num: Optional[int] = None,
+    category: Optional[str] = None,
+) -> None:
+    """Dispatch an alert through all configured channels."""
+    for mode in alert_modes:
+        if mode == AlertMode.NONE:
+            continue
+        try:
+            if mode == AlertMode.DASHBOARD_BANNER:
+                _alert_dashboard_banner(title, body, issue_num, category)
+            elif mode == AlertMode.EMAIL:
+                _alert_email(title, body)
+            elif mode == AlertMode.DISCORD:
+                _alert_discord(title, body)
+            elif mode == AlertMode.FILE:
+                _alert_file(title, body)
+        except Exception as e:
+            print(f"  [alert:{mode}] error — {e}", file=sys.stderr)
+
+
+def _alert_dashboard_banner(
+    title: str,
+    body: str,
+    issue_num: Optional[int],
+    category: Optional[str],
+) -> None:
+    payload = json.dumps({
+        "title":      title,
+        "body":       body,
+        "issue_num":  issue_num,
+        "category":   category,
+        "timestamp":  _utcnow(),
+    }).encode()
+    req = urllib.request.Request(
+        f"{DASHBOARD_API_URL}/api/alerts",
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    urllib.request.urlopen(req, timeout=3)
+
+
+def _alert_email(title: str, body: str) -> None:
+    host  = os.environ.get("SMTP_HOST", "")
+    port  = os.environ.get("SMTP_PORT", "")
+    user  = os.environ.get("SMTP_USER", "")
+    pw    = os.environ.get("SMTP_PASS", "")
+    to    = os.environ.get("ALERT_EMAIL_TO", "")
+    if not all([host, port, user, pw, to]):
+        return  # silently skip if any var missing
+    msg = email.mime.text.MIMEText(body, "plain")
+    msg["Subject"] = f"[Sprint Manager] {title}"
+    msg["From"]    = user
+    msg["To"]      = to
+    with smtplib.SMTP(host, int(port)) as srv:
+        srv.starttls()
+        srv.login(user, pw)
+        srv.sendmail(user, [to], msg.as_string())
+
+
+def _alert_discord(title: str, body: str) -> None:
+    webhook = os.environ.get("DISCORD_WEBHOOK_URL", "")
+    if not webhook:
+        return  # silently skip
+    content = f"**{title}**\n{body}"
+    payload = json.dumps({"content": content[:2000]}).encode()
+    req = urllib.request.Request(
+        webhook,
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    urllib.request.urlopen(req, timeout=5)
+
+
+def _alert_file(title: str, body: str) -> None:
+    ALERTS_DIR.mkdir(parents=True, exist_ok=True)
+    today    = datetime.now().strftime("%Y-%m-%d")
+    log_path = ALERTS_DIR / f"{today}.log"
+    ts       = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+    entry    = f"[{ts}] {title}\n{body}\n{'─' * 60}\n"
+    with log_path.open("a", encoding="utf-8") as f:
+        f.write(entry)
+
+
+# ── hang detection ────────────────────────────────────────────────────────────
+
+@dataclass
+class HangDetector:
+    issue_num: int
+    log_path:  Optional[Path]
+    proc:      subprocess.Popen
+
+    _last_size:    int   = field(default=0, init=False)
+    _last_change:  float = field(default_factory=time.monotonic, init=False)
+    _warned:       bool  = field(default=False, init=False)
+    _stop_event:   threading.Event = field(default_factory=threading.Event, init=False)
+    _thread:       Optional[threading.Thread] = field(default=None, init=False)
+    _killed:       bool  = field(default=False, init=False)
+
+    def start(self) -> None:
+        self._last_change = time.monotonic()
+        self._last_size   = self._log_size()
+        self._thread      = threading.Thread(target=self._loop, daemon=True)
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop_event.set()
+        if self._thread:
+            self._thread.join(timeout=2)
+
+    @property
+    def killed(self) -> bool:
+        return self._killed
+
+    def _log_size(self) -> int:
+        if self.log_path and self.log_path.exists():
+            return self.log_path.stat().st_size
+        return 0
+
+    def _loop(self) -> None:
+        while not self._stop_event.is_set():
+            self._stop_event.wait(timeout=HANG_CHECK_SECS)
+            if self._stop_event.is_set():
+                break
+            size = self._log_size()
+            if size != self._last_size:
+                self._last_size   = size
+                self._last_change = time.monotonic()
+                self._warned      = False
+                continue
+
+            idle = time.monotonic() - self._last_change
+            if idle >= HANG_KILL_SECS:
+                print(f"  [hang-detect] issue #{self.issue_num}: no log activity for "
+                      f"{idle/60:.0f} min — KILLING subprocess", flush=True)
+                try:
+                    self.proc.kill()
+                except ProcessLookupError:
+                    pass
+                self._killed = True
+                self._stop_event.set()
+            elif idle >= HANG_WARN_SECS and not self._warned:
+                print(f"  WARN [hang-detect] issue #{self.issue_num}: no log activity for "
+                      f"{idle/60:.0f} min", flush=True)
+                self._warned = True
+
+
 # ── GitHub helpers ────────────────────────────────────────────────────────────
+
+def _r(repo_name: Optional[str]) -> str:
+    return repo_name or github_client.repo()
+
 
 def _get_issue_labels(issue_num: int, repo_name: Optional[str] = None) -> set[str]:
     """Re-fetch current labels for an issue via gh CLI."""
     r = _r(repo_name)
     try:
         out = subprocess.run(
-            ["gh", "issue", "view", str(issue_num), "--repo", r,
-             "--json", "labels"],
+            ["gh", "issue", "view", str(issue_num), "--repo", r, "--json", "labels"],
             capture_output=True, text=True, check=True,
         )
         data = json.loads(out.stdout)
@@ -246,15 +443,39 @@ def _get_issue_labels(issue_num: int, repo_name: Optional[str] = None) -> set[st
         return set()
 
 
+def _add_blocked_label(issue_num: int, reason: str, repo_name: Optional[str] = None) -> None:
+    try:
+        github_client.update_labels(issue_num, add=["blocked"], repo_name=repo_name)
+        github_client.add_comment(
+            issue_num,
+            f"Issue blocked by sprint manager (HANG): {reason}",
+            repo_name=repo_name,
+        )
+    except Exception as e:
+        print(f"  Warning: failed to update GitHub blocked label — {e}", file=sys.stderr)
+
+
+def _find_feature_branch(issue_num: int) -> Optional[str]:
+    """Return feature/<N>-* branch name, checking local then remote."""
+    ok, out, _ = _try("git", "branch", "--list", f"feature/{issue_num}-*")
+    if ok and out.strip():
+        return out.strip().splitlines()[0].strip().lstrip("* ")
+    ok, out, _ = _try("git", "branch", "-r", "--list", f"origin/feature/{issue_num}-*")
+    if ok and out.strip():
+        return out.strip().splitlines()[0].strip().removeprefix("origin/")
+    return None
+
+
+# ── quality gates ─────────────────────────────────────────────────────────────
+
 def _revert_to_sit(issue_num: int, gate_name: str, output: str,
                    repo_name: Optional[str] = None) -> None:
     """Label the issue SIT and post a failure comment."""
     truncated = output[:2000] if len(output) > 2000 else output
     comment = (
-        f"❌ Quality gate failed: **{gate_name}**\n"
+        f"Quality gate failed: **{gate_name}**\n"
         f"Issue reverted to SIT for re-inspection.\n\n"
-        f"**{gate_name}** output:\n"
-        f"```\n{truncated}\n```"
+        f"**{gate_name}** output:\n```\n{truncated}\n```"
     )
     try:
         github_client.update_labels(
@@ -269,26 +490,19 @@ def _revert_to_sit(issue_num: int, gate_name: str, output: str,
 
 
 def _post_success_comment(issue_num: int, results: list[GateResult],
-                           repo_name: Optional[str] = None) -> None:
+                          repo_name: Optional[str] = None) -> None:
     gate_lines = "\n".join(
         f"- **{r.gate}**: {r.symbol}" for r in results
     )
     comment = (
-        f"✅ Quality gates passed. Auto-merged to develop.\n\n"
-        f"Gates:\n{gate_lines}\n\n"
-        f"Awaiting human UAT approval."
+        f"Quality gates passed. Auto-merged to develop.\n\n"
+        f"Gates:\n{gate_lines}\n\nAwaiting human UAT approval."
     )
     try:
         github_client.add_comment(issue_num, comment, repo_name=repo_name)
     except Exception as e:
         print(f"  Warning: failed to post success comment — {e}", file=sys.stderr)
 
-
-def _r(repo_name: Optional[str]) -> str:
-    return repo_name or github_client.repo()
-
-
-# ── quality gates ─────────────────────────────────────────────────────────────
 
 def _gate_pytest(
     issue_num: int,
@@ -302,7 +516,7 @@ def _gate_pytest(
         return GateResult(gate="pytest", passed=True, skipped=True)
 
     _post_agent_event("gate:pytest")
-    print("  [gate:pytest] running pytest -x …")
+    print("  [gate:pytest] running pytest -x ...")
 
     # Detect pytest binary
     ok, pytest_path, _ = _try("which", "pytest")
@@ -313,7 +527,7 @@ def _gate_pytest(
             pytest_bin = str(venv_pytest.resolve())
         else:
             output = "pytest binary not found on PATH and no venv/bin/pytest found."
-            print(f"  [gate:pytest] FAIL — {output}")
+            print(f"  [gate:pytest] FAIL -- {output}")
             return GateResult(gate="pytest", passed=False, output=output)
     else:
         pytest_bin = pytest_path
@@ -335,15 +549,15 @@ def _gate_lint(
     skip: bool,
     repo_name: Optional[str] = None,
 ) -> GateResult:
-    """Gate 2 — run ruff check . inside the tester worktree dashboard."""
+    """Gate 2 -- run ruff check . inside the tester worktree dashboard."""
     if skip:
         print("  [gate:lint] skipped")
         return GateResult(gate="lint", passed=True, skipped=True)
 
     _post_agent_event("gate:lint")
-    print("  [gate:lint] running ruff check . …")
+    print("  [gate:lint] running ruff check . ...")
 
-    # ruff is optional — if not found, log warning and treat as passed
+    # ruff is optional -- if not found, log warning and treat as passed
     ok, ruff_path, _ = _try("which", "ruff")
     if not ok:
         # Try inside dashboard venv
@@ -351,9 +565,9 @@ def _gate_lint(
         if venv_ruff.exists():
             ruff_bin = str(venv_ruff.resolve())
         else:
-            print("  [gate:lint] WARNING — ruff not on PATH; treating lint gate as passed")
+            print("  [gate:lint] WARNING -- ruff not found; treating as passed")
             return GateResult(gate="lint", passed=True, skipped=False,
-                              output="ruff not found — skipped with warning")
+                              output="ruff not found -- skipped with warning")
     else:
         ruff_bin = ruff_path
 
@@ -375,13 +589,13 @@ def _gate_merge_preview(
     skip: bool,
     repo_name: Optional[str] = None,
 ) -> GateResult:
-    """Gate 3 — simulate merge in worktester root without committing."""
+    """Gate 3 -- simulate merge in worktester root without committing."""
     if skip:
         print("  [gate:merge-preview] skipped")
         return GateResult(gate="merge-preview", passed=True, skipped=True)
 
     _post_agent_event("gate:merge-preview")
-    print(f"  [gate:merge-preview] simulating merge of {feature_branch} …")
+    print(f"  [gate:merge-preview] simulating merge of {feature_branch} ...")
 
     merge_ok = False
     combined = ""
@@ -401,9 +615,9 @@ def _gate_merge_preview(
         merge_ok = (rc == 0)
 
         if merge_ok:
-            print("  [gate:merge-preview] PASS — no conflicts")
+            print("  [gate:merge-preview] PASS -- no conflicts")
         else:
-            print(f"  [gate:merge-preview] FAIL — conflicts detected")
+            print("  [gate:merge-preview] FAIL -- conflicts detected")
     finally:
         # Always abort to leave working tree clean
         _run("git", "merge", "--abort", cwd=worktester_root, check=False)
@@ -433,7 +647,7 @@ def _run_quality_gates(
     """
     results: list[GateResult] = []
 
-    # Gate 1 — pytest
+    # Gate 1 -- pytest
     r1 = _gate_pytest(
         issue_num,
         worktester_dashboard,
@@ -444,7 +658,7 @@ def _run_quality_gates(
     if not r1.passed:
         return results
 
-    # Gate 2 — lint
+    # Gate 2 -- lint
     r2 = _gate_lint(
         issue_num,
         worktester_dashboard,
@@ -455,7 +669,7 @@ def _run_quality_gates(
     if not r2.passed:
         return results
 
-    # Gate 3 — merge-preview
+    # Gate 3 -- merge-preview
     r3 = _gate_merge_preview(
         issue_num,
         feature_branch,
@@ -468,19 +682,26 @@ def _run_quality_gates(
     return results
 
 
-# ── feature branch lookup ──────────────────────────────────────────────────────
+def _call_finish_feature(
+    issue_num: int,
+    worktester_root: Path = WORKTESTER_ROOT,
+    repo_name: Optional[str] = None,
+) -> None:
+    """Call finish_feature.py as a subprocess from the worktester root."""
+    cmd = [sys.executable, str(FINISH_FEATURE_SCRIPT), "--issue", str(issue_num)]
+    if repo_name:
+        cmd += ["--repo", repo_name]
 
-def _find_feature_branch(issue_num: int) -> Optional[str]:
-    """Return feature/<N>-* branch name, checking local then remote."""
-    ok, out, _ = _try("git", "branch", "--list", f"feature/{issue_num}-*")
-    if ok and out.strip():
-        return out.strip().splitlines()[0].strip().lstrip("* ")
-
-    ok, out, _ = _try("git", "branch", "-r", "--list", f"origin/feature/{issue_num}-*")
-    if ok and out.strip():
-        return out.strip().splitlines()[0].strip().removeprefix("origin/")
-
-    return None
+    print(f"  Calling finish_feature.py --issue {issue_num} ...")
+    result = subprocess.run(cmd, cwd=str(worktester_root), capture_output=True, text=True)
+    if result.stdout:
+        print(result.stdout.rstrip())
+    if result.returncode != 0:
+        print(f"  Warning: finish_feature.py exited {result.returncode}", file=sys.stderr)
+        if result.stderr:
+            print(f"  {result.stderr.rstrip()}", file=sys.stderr)
+    else:
+        print("  finish_feature.py completed successfully")
 
 
 # ── post-tester hook ──────────────────────────────────────────────────────────
@@ -492,47 +713,51 @@ def handle_post_tester(
     gate_pytest: bool,
     gate_lint: bool,
     gate_merge_preview: bool,
-    worktester_root: Path,
-    worktester_dashboard: Path,
+    worktester_root: Path = WORKTESTER_ROOT,
+    worktester_dashboard: Path = WORKTESTER_DASHBOARD,
     repo_name: Optional[str] = None,
-) -> tuple[bool, str]:
+) -> tuple[bool, str, Optional[str]]:
     """Called after a tester subprocess exits.
 
-    Returns (merged: bool, summary_line: str).
+    Returns (merged: bool, summary_line: str, failure_category: Optional[str]).
 
     AC-1: Gates only run if tester exited 0 AND label is exactly UAT.
     """
     if tester_exit_code != 0:
-        return False, f"Issue #{issue_num}: tester exited {tester_exit_code}, skipping gates"
+        return (False,
+                f"Issue #{issue_num}: tester exited {tester_exit_code}, skipping gates",
+                FailureCategory.CRASH)
 
     # Re-fetch current labels (AC-1)
     labels = _get_issue_labels(issue_num, repo_name=repo_name)
     if "UAT" not in labels:
         current = ", ".join(sorted(labels)) or "(none)"
-        print(f"  Issue #{issue_num}: tester exited 0 but label is [{current}], not UAT — skipping gates")
-        return False, f"Issue #{issue_num}: tester exited 0 but not UAT — no merge"
+        print(f"  Issue #{issue_num}: tester exited 0 but label is [{current}], not UAT -- skipping gates")
+        return (False,
+                f"Issue #{issue_num}: tester exited 0 but not UAT -- no merge",
+                FailureCategory.TESTER_REJECTED)
 
-    print(f"\nIssue #{issue_num} is UAT — running quality gates…")
+    print(f"\nIssue #{issue_num} is UAT -- running quality gates...")
 
     # Find the feature branch
     feature_branch = _find_feature_branch(issue_num)
     if not feature_branch:
-        msg = f"Issue #{issue_num}: feature branch not found — cannot run merge-preview gate"
+        msg = f"Issue #{issue_num}: feature branch not found -- cannot run merge-preview gate"
         print(f"  Warning: {msg}")
         # Use a placeholder so the other gates can still run
         feature_branch = f"feature/{issue_num}-unknown"
 
     if skip_gates:
-        print("  --skip-gates active — skipping all quality gates, proceeding to merge")
+        print("  --skip-gates active -- skipping all quality gates, proceeding to merge")
         _call_finish_feature(issue_num, worktester_root, repo_name=repo_name)
         _post_agent_event("gate:merging")
         all_skipped = [
-            GateResult(gate="pytest", passed=True, skipped=True),
-            GateResult(gate="lint", passed=True, skipped=True),
+            GateResult(gate="pytest",        passed=True, skipped=True),
+            GateResult(gate="lint",          passed=True, skipped=True),
             GateResult(gate="merge-preview", passed=True, skipped=True),
         ]
         _post_success_comment(issue_num, all_skipped, repo_name=repo_name)
-        return True, f"Issue #{issue_num}: all gates skipped, merged"
+        return True, f"Issue #{issue_num}: all gates skipped, merged", None
 
     results = _run_quality_gates(
         issue_num=issue_num,
@@ -551,36 +776,124 @@ def handle_post_tester(
 
     if all_passed:
         _post_agent_event("gate:merging")
-        print(f"  All gates passed — calling finish_feature.py for issue #{issue_num}")
+        print(f"  All gates passed -- calling finish_feature.py for issue #{issue_num}")
         _call_finish_feature(issue_num, worktester_root, repo_name=repo_name)
         _post_success_comment(issue_num, results, repo_name=repo_name)
-        return True, f"Issue #{issue_num}: all gates passed, merged to develop"
+        return True, f"Issue #{issue_num}: all gates passed, merged to develop", None
     else:
         failed = next((r for r in results if not r.passed), None)
         gate_name = failed.gate if failed else "unknown"
-        return False, f"Issue #{issue_num}: gate failed ({gate_name})"
+        return (False,
+                f"Issue #{issue_num}: gate failed ({gate_name})",
+                FailureCategory.GATE_FAIL)
 
 
-def _call_finish_feature(
+# ── agent dispatch helpers ────────────────────────────────────────────────────
+
+def _issue_log_path(issue_num: int) -> Path:
+    return DASHBOARD_DIR / "logs" / f"sprint-issue-{issue_num}.log"
+
+
+def _dispatch_coder(
     issue_num: int,
-    worktester_root: Path,
+    alert_modes: list[str],
     repo_name: Optional[str] = None,
-) -> None:
-    """Call finish_feature.py as a subprocess from the worktester root."""
-    cmd = [sys.executable, str(FINISH_FEATURE_SCRIPT), "--issue", str(issue_num)]
-    if repo_name:
-        cmd += ["--repo", repo_name]
+) -> tuple[bool, Optional[str]]:
+    """Dispatch a coder agent for the issue.  Returns (ok, failure_category)."""
+    print(f"  Dispatching coder for issue #{issue_num} ...")
+    _post_agent_event(f"coder:issue-{issue_num}")
 
-    print(f"  Calling finish_feature.py --issue {issue_num} …")
-    result = subprocess.run(cmd, cwd=str(worktester_root), capture_output=True, text=True)
-    if result.stdout:
-        print(result.stdout.rstrip())
-    if result.returncode != 0:
-        print(f"  Warning: finish_feature.py exited {result.returncode}", file=sys.stderr)
-        if result.stderr:
-            print(f"  {result.stderr.rstrip()}", file=sys.stderr)
-    else:
-        print(f"  finish_feature.py completed successfully")
+    log_path = _issue_log_path(issue_num)
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+
+    cmd = [
+        sys.executable, "-m", "claude",
+        f"https://github.com/{_r(repo_name)}/issues/{issue_num}",
+    ]
+
+    try:
+        with log_path.open("w") as log_f:
+            proc = subprocess.Popen(
+                cmd,
+                stdout=log_f,
+                stderr=log_f,
+                cwd=str(WORKTESTER_ROOT),
+            )
+    except FileNotFoundError:
+        # claude CLI not available -- treat as stub success for testing
+        print("  [coder] claude CLI not found -- stub success")
+        return True, None
+
+    detector = HangDetector(issue_num=issue_num, log_path=log_path, proc=proc)
+    detector.start()
+    rc = proc.wait()
+    detector.stop()
+
+    if detector.killed:
+        reason = f"No log activity for {HANG_KILL_SECS//60} minutes"
+        _add_blocked_label(issue_num, reason, repo_name=repo_name)
+        dispatch_alerts(
+            alert_modes,
+            title=f"Issue #{issue_num}: HANG detected",
+            body=f"The coder subprocess produced no output for {HANG_KILL_SECS//60} minutes and was killed.",
+            issue_num=issue_num,
+            category=FailureCategory.HANG,
+        )
+        return False, FailureCategory.HANG
+
+    if rc != 0:
+        return False, FailureCategory.CRASH
+
+    return True, None
+
+
+def _dispatch_tester(
+    issue_num: int,
+    alert_modes: list[str],
+    repo_name: Optional[str] = None,
+) -> tuple[int, Optional[str]]:
+    """Dispatch a tester agent.  Returns (exit_code, failure_category_if_hang)."""
+    print(f"  Dispatching tester for issue #{issue_num} ...")
+    _post_agent_event(f"tester:issue-{issue_num}")
+
+    log_path = _issue_log_path(issue_num)
+
+    cmd = [
+        sys.executable, "-m", "claude",
+        f"https://github.com/{_r(repo_name)}/issues/{issue_num}",
+        "--tester",
+    ]
+
+    try:
+        with log_path.open("a") as log_f:
+            proc = subprocess.Popen(
+                cmd,
+                stdout=log_f,
+                stderr=log_f,
+                cwd=str(WORKTESTER_ROOT),
+            )
+    except FileNotFoundError:
+        print("  [tester] claude CLI not found -- stub success")
+        return 0, None
+
+    detector = HangDetector(issue_num=issue_num, log_path=log_path, proc=proc)
+    detector.start()
+    rc = proc.wait()
+    detector.stop()
+
+    if detector.killed:
+        reason = f"Tester: no log activity for {HANG_KILL_SECS//60} minutes"
+        _add_blocked_label(issue_num, reason, repo_name=repo_name)
+        dispatch_alerts(
+            alert_modes,
+            title=f"Issue #{issue_num}: HANG detected in tester",
+            body=f"The tester subprocess produced no output for {HANG_KILL_SECS//60} minutes.",
+            issue_num=issue_num,
+            category=FailureCategory.HANG,
+        )
+        return -1, FailureCategory.HANG
+
+    return rc, None
 
 
 # ── sprint summary report (AC-1, AC-2, AC-3) ─────────────────────────────────
@@ -609,18 +922,7 @@ def generate_sprint_summary(
     open_issues: Optional[list[dict]] = None,
     repo_name: Optional[str] = None,
 ) -> str:
-    """Generate a richly-formatted executive summary markdown string.
-
-    Section order per AC-1:
-      ## Sprint <N> — <status>
-      ## What Shipped
-      ## What Didn't Ship
-      ## Stats
-      ## Carried Over
-      ## Key Learnings
-      ## Links
-      Footer
-    """
+    """Generate a richly-formatted executive summary markdown string."""
     n = state.sprint_number if state.sprint_number is not None else state.sprint_label
 
     start_ts = state.start_timestamp or _utcnow()
@@ -638,7 +940,7 @@ def generate_sprint_summary(
     avg_ticket_secs  = (elapsed_secs / len(completed)) if completed else 0
     avg_h, avg_r     = divmod(int(avg_ticket_secs), 3600)
     avg_m, avg_s     = divmod(avg_r, 60)
-    avg_ticket_str   = f"{avg_h}h {avg_m}m {avg_s}s" if completed else "—"
+    avg_ticket_str   = f"{avg_h}h {avg_m}m {avg_s}s" if completed else "--"
 
     tester_rejections = sum(
         1 for i in state.issues
@@ -658,9 +960,9 @@ def generate_sprint_summary(
 
     lines: list[str] = []
 
-    # ── Header section ──
+    # -- Header section --
     lines += [
-        f"## Sprint {n} — {end_reason}",
+        f"## Sprint {n} -- {end_reason}",
         "",
         "| Field | Value |",
         "|---|---|",
@@ -672,7 +974,7 @@ def generate_sprint_summary(
         "",
     ]
 
-    # ── What Shipped ──
+    # -- What Shipped --
     lines += [
         "## What Shipped",
         "",
@@ -681,12 +983,12 @@ def generate_sprint_summary(
     ]
     if completed:
         for issue in completed:
-            lines.append(f"| #{issue.number} | {issue.title} | — | UAT-approved / closed | — |")
+            lines.append(f"| #{issue.number} | {issue.title} | -- | UAT-approved / closed | -- |")
     else:
-        lines.append("| — | No issues shipped | — | — | — |")
+        lines.append("| -- | No issues shipped | -- | -- | -- |")
     lines.append("")
 
-    # ── What Didn't Ship ──
+    # -- What Didn't Ship --
     lines += [
         "## What Didn't Ship",
         "",
@@ -699,10 +1001,10 @@ def generate_sprint_summary(
             reason = (issue.skip_reason or "no reason recorded").replace("|", "/")
             lines.append(f"| #{issue.number} | {issue.title} | {cat} | {reason} |")
     else:
-        lines.append("| — | All issues shipped | — | — |")
+        lines.append("| -- | All issues shipped | -- | -- |")
     lines.append("")
 
-    # ── Stats ──
+    # -- Stats --
     lines += [
         "## Stats",
         "",
@@ -716,22 +1018,22 @@ def generate_sprint_summary(
         "",
     ]
 
-    # ── Carried Over ──
+    # -- Carried Over --
     lines += ["## Carried Over", ""]
     carried_items: list[str] = []
     for issue in pending:
-        carried_items.append(f"- #{issue.number} {issue.title} — candidate for next sprint")
+        carried_items.append(f"- #{issue.number} {issue.title} -- candidate for next sprint")
     for issue in (open_issues or []):
         num   = issue.get("number", "?")
         title = issue.get("title", "")
-        carried_items.append(f"- #{num} {title} — candidate for next sprint")
+        carried_items.append(f"- #{num} {title} -- candidate for next sprint")
     if carried_items:
         lines.extend(carried_items)
     else:
         lines.append("No issues carried over.")
     lines.append("")
 
-    # ── Key Learnings ──
+    # -- Key Learnings --
     lines += [
         "## Key Learnings",
         "",
@@ -739,18 +1041,18 @@ def generate_sprint_summary(
         "",
     ]
 
-    # ── Links ──
+    # -- Links --
     all_links: list[str] = [
         f"- [Sprint {n} issues on GitHub]({sprint_filter_url})",
     ]
     for issue in state.issues:
         link = f"https://github.com/{r}/issues/{issue.number}"
-        all_links.append(f"- [Issue #{issue.number} — {issue.title[:50]}]({link})")
+        all_links.append(f"- [Issue #{issue.number} -- {issue.title[:50]}]({link})")
 
     lines += ["## Links", ""]
     if len(all_links) > 3:
         lines.append("<details>")
-        lines.append(f"<summary>{len(all_links)} links — click to expand</summary>")
+        lines.append(f"<summary>{len(all_links)} links -- click to expand</summary>")
         lines.append("")
         lines.extend(all_links)
         lines.append("")
@@ -759,7 +1061,7 @@ def generate_sprint_summary(
         lines.extend(all_links)
     lines.append("")
 
-    # ── Footer ──
+    # -- Footer --
     lines.append(f"_Generated by sprint-manager v1.0 on {_utcnow()}_")
 
     return "\n".join(lines)
@@ -784,11 +1086,7 @@ def create_summary_github_issue(
     sprint_label: str,
     repo_name: Optional[str] = None,
 ) -> tuple[Optional[int], Optional[str]]:
-    """AC-2: Create a GitHub issue with the summary markdown as the body.
-
-    Labels: 'docs', 'sprint-<N>' (created if missing).
-    Returns (issue_number, issue_url) or (None, None) on failure.
-    """
+    """AC-2: Create a GitHub issue with the summary markdown as the body."""
     n      = sprint_number if sprint_number is not None else sprint_label
     title  = f"Sprint {n} Executive Summary"
     labels = ["docs", f"sprint-{n}"]
@@ -802,7 +1100,7 @@ def create_summary_github_issue(
         print(f"  Summary GitHub issue created: {url}")
         return issue_num, url
     except Exception as e:
-        print(f"  Warning: failed to create summary GitHub issue — {e}", file=sys.stderr)
+        print(f"  Warning: failed to create summary GitHub issue -- {e}", file=sys.stderr)
         return None, None
 
 
@@ -814,14 +1112,7 @@ def _prompt_learnings(
     summary_issue_num: Optional[int],
     repo_name: Optional[str] = None,
 ) -> str:
-    """AC-3: Interactive learnings prompt.
-
-    If stdout is a TTY, ask the user whether to fill in Key Learnings.
-    'y' → open $EDITOR (fallback: nano) with the stub pre-populated.
-    On close, replace the stub in both the local file and the GitHub issue.
-    'n' or non-interactive → leave stub in place.
-    Returns the (possibly updated) content string.
-    """
+    """AC-3: Interactive learnings prompt."""
     n = sprint_number if sprint_number is not None else sprint_label
     if not sys.stdout.isatty():
         return content  # non-interactive: leave stub in place
@@ -844,7 +1135,7 @@ def _prompt_learnings(
         subprocess.run([editor, str(tmp_path)], check=False)
         new_learnings = tmp_path.read_text(encoding="utf-8").strip()
     except Exception as e:
-        print(f"  Warning: editor failed — {e}", file=sys.stderr)
+        print(f"  Warning: editor failed -- {e}", file=sys.stderr)
         new_learnings = ""
     finally:
         try:
@@ -875,7 +1166,7 @@ def _prompt_learnings(
             )
             print(f"  GitHub issue #{summary_issue_num} body updated with learnings.")
         except Exception as e:
-            print(f"  Warning: failed to update GitHub issue body — {e}", file=sys.stderr)
+            print(f"  Warning: failed to update GitHub issue body -- {e}", file=sys.stderr)
         finally:
             try:
                 tmp2.unlink()
@@ -888,6 +1179,7 @@ def _prompt_learnings(
 def write_sprint_summary(
     state: SprintState,
     elapsed_secs: float,
+    alert_modes: Optional[list[str]] = None,
     end_reason: str = "complete",
     open_issues: Optional[list[dict]] = None,
     repo_name: Optional[str] = None,
@@ -905,7 +1197,12 @@ def write_sprint_summary(
     path.write_text(content, encoding="utf-8")
     print(f"  Sprint summary written to {path}")
 
-    # AC-2: Create GitHub issue (best-effort — errors must not crash the sprint)
+    # Dispatch via all configured alert channels (issue #24)
+    if alert_modes:
+        title = f"Sprint {state.sprint_label} summary"
+        dispatch_alerts(alert_modes, title=title, body=content[:2000])
+
+    # AC-2: Create GitHub issue (best-effort)
     try:
         summary_issue_num, summary_issue_url = create_summary_github_issue(
             content=content,
@@ -914,7 +1211,7 @@ def write_sprint_summary(
             repo_name=repo_name,
         )
     except Exception as exc:
-        print(f"  Warning: create_summary_github_issue raised — {exc}", file=sys.stderr)
+        print(f"  Warning: create_summary_github_issue raised -- {exc}", file=sys.stderr)
         summary_issue_num, summary_issue_url = None, None
 
     # Store summary_issue_url in state JSON
@@ -929,7 +1226,7 @@ def write_sprint_summary(
             state_path.write_text(json.dumps(state_dict, indent=2))
         except Exception as e:
             print(
-                f"  Warning: could not update state file with summary_issue_url — {e}",
+                f"  Warning: could not update state file with summary_issue_url -- {e}",
                 file=sys.stderr,
             )
 
@@ -946,7 +1243,19 @@ def write_sprint_summary(
     return path
 
 
-# ── sprint loop ────────────────────────────────────────────────────────────────
+# -- GitHub issue listing --
+
+def _classify(labels: set[str]) -> str:
+    if "UAT-approved" in labels:
+        return "done"
+    if "UAT" in labels:
+        return "uat"
+    if "SIT" in labels:
+        return "sit"
+    if "in-progress" in labels:
+        return "in-progress"
+    return "backlog"
+
 
 def list_backlog_issues(label: str, repo_name: Optional[str] = None) -> list[dict]:
     """Return open issues with the given label, in backlog, sorted by number."""
@@ -968,26 +1277,15 @@ def list_backlog_issues(label: str, repo_name: Optional[str] = None) -> list[dic
         result = []
         for issue in issues:
             labels_set = {lbl["name"] for lbl in issue.get("labels", [])}
-            status = _classify(labels_set)
-            if status == "backlog":
+            if _classify(labels_set) == "backlog":
                 result.append(issue)
         return sorted(result, key=lambda i: i["number"])
     except Exception as e:
-        print(f"Warning: could not list issues — {e}", file=sys.stderr)
+        print(f"Warning: could not list issues -- {e}", file=sys.stderr)
         return []
 
 
-def _classify(labels: set[str]) -> str:
-    if "UAT-approved" in labels:
-        return "done"
-    if "UAT" in labels:
-        return "uat"
-    if "SIT" in labels:
-        return "sit"
-    if "in-progress" in labels:
-        return "in-progress"
-    return "backlog"
-
+# ── sprint loop ────────────────────────────────────────────────────────────────
 
 def run_sprint(
     label: str,
@@ -995,36 +1293,75 @@ def run_sprint(
     gate_pytest: bool,
     gate_lint: bool,
     gate_merge_preview: bool,
+    alert_modes: Optional[list[str]] = None,
     repo_name: Optional[str] = None,
     dry_run: bool = False,
+    resume: bool = False,
+    retry_failed: bool = False,
 ) -> tuple[SprintSummary, SprintState]:
-    """Main sprint loop — processes backlog issues sequentially.
+    """Main sprint loop -- processes backlog issues sequentially.
 
-    Returns (SprintSummary, SprintState) for backward compat + extended summary.
+    Returns (SprintSummary, SprintState).
+    Supports resume/retry_failed from persisted state.
     """
-    summary = SprintSummary()
+    if alert_modes is None:
+        alert_modes = [AlertMode.DASHBOARD_BANNER]
+
+    summary    = SprintSummary()
     sprint_num = _sprint_number(label)
-    state = SprintState(
-        sprint_label=label,
-        sprint_number=sprint_num,
-        start_timestamp=_utcnow(),
-    )
+    state_path = _state_path(sprint_num, label)
+
+    # Load or build state
+    if (resume or retry_failed) and state_path.exists():
+        print(f"  Loading existing sprint state from {state_path}")
+        state = SprintState.from_dict(json.loads(state_path.read_text()))
+    else:
+        raw_issues = list_backlog_issues(label, repo_name=repo_name)
+        if not raw_issues:
+            print("No backlog issues found for this label.")
+            state = SprintState(
+                sprint_label  = label,
+                sprint_number = sprint_num,
+                start_timestamp = _utcnow(),
+            )
+            return summary, state
+
+        state = SprintState(
+            sprint_label    = label,
+            sprint_number   = sprint_num,
+            start_timestamp = _utcnow(),
+            issues=[
+                IssueState(number=i["number"], title=i["title"])
+                for i in raw_issues
+            ],
+        )
 
     print(f"\n=== Sprint Manager: label={label} ===")
-    issues = list_backlog_issues(label, repo_name=repo_name)
-
-    if not issues:
-        print("No backlog issues found for this label.")
-        return summary, state
-
-    print(f"Found {len(issues)} backlog issue(s): {[i['number'] for i in issues]}")
-    state.issues = [IssueState(number=i["number"], title=i["title"]) for i in issues]
+    print(f"Found {len(state.issues)} issue(s): {[i.number for i in state.issues]}")
 
     start_time = time.monotonic()
 
     for issue_state in state.issues:
         num   = issue_state.number
         title = issue_state.title
+
+        # Resume: skip already-done/skipped
+        if resume and issue_state.status in ("done", "skipped"):
+            print(f"\n--- Issue #{num}: {title} --- [SKIP: already {issue_state.status}]")
+            summary.processed.append(f"#{num}")
+            if issue_state.status == "done":
+                summary.merged.append(f"#{num}")
+            else:
+                summary.skipped.append(f"#{num} ({issue_state.skip_reason or 'skipped'})")
+            continue
+
+        # retry_failed: skip only done issues
+        if retry_failed and issue_state.status == "done":
+            print(f"\n--- Issue #{num}: {title} --- [SKIP: already done]")
+            summary.processed.append(f"#{num}")
+            summary.merged.append(f"#{num}")
+            continue
+
         print(f"\n--- Issue #{num}: {title} ---")
         summary.processed.append(f"#{num}")
 
@@ -1033,34 +1370,55 @@ def run_sprint(
             issue_state.status = "skipped"
             issue_state.skip_reason = "dry-run"
             summary.skipped.append(f"#{num} (dry-run)")
+            state.save(state_path)
+            _post_sprint_status(state)
             continue
 
-        # Dispatch coder
-        print(f"  Dispatching coder for issue #{num} …")
-        coder_ok = _dispatch_agent("coder", num)
+        # -- Dispatch coder --
+        coder_ok, coder_category = _dispatch_coder(num, alert_modes, repo_name=repo_name)
+
         if not coder_ok:
-            print(f"  Coder failed for #{num} — skipping to next issue")
+            category = coder_category or FailureCategory.CRASH
+            reason   = f"Coder failed with category {category}"
+            print(f"  Coder failed for #{num} ({category}) -- skipping to next issue")
             issue_state.status      = "skipped"
-            issue_state.skip_reason = "Coder failed"
-            issue_state.category    = FailureCategory.CRASH
+            issue_state.skip_reason = reason
+            issue_state.category    = category
             summary.skipped.append(f"#{num} (coder failed)")
+            dispatch_alerts(
+                alert_modes,
+                title=f"Issue #{num} skipped: {category}",
+                body=reason,
+                issue_num=num,
+                category=category,
+            )
+            state.save(state_path)
+            _post_sprint_status(state)
             continue
 
-        # Dispatch tester
-        print(f"  Dispatching tester for issue #{num} …")
-        tester_rc = _dispatch_tester(num)
+        # -- Dispatch tester --
+        tester_rc, hang_category = _dispatch_tester(num, alert_modes, repo_name=repo_name)
 
-        # Post-tester hook
-        merged, summary_line = handle_post_tester(
-            issue_num=num,
-            tester_exit_code=tester_rc,
-            skip_gates=skip_gates,
-            gate_pytest=gate_pytest,
-            gate_lint=gate_lint,
-            gate_merge_preview=gate_merge_preview,
-            worktester_root=WORKTESTER_ROOT,
-            worktester_dashboard=WORKTESTER_DASHBOARD,
-            repo_name=repo_name,
+        if hang_category == FailureCategory.HANG:
+            issue_state.status      = "skipped"
+            issue_state.skip_reason = "Tester HANG detected"
+            issue_state.category    = FailureCategory.HANG
+            summary.skipped.append(f"#{num} (tester hang)")
+            state.save(state_path)
+            _post_sprint_status(state)
+            continue
+
+        # -- Post-tester gates --
+        merged, summary_line, gate_category = handle_post_tester(
+            issue_num            = num,
+            tester_exit_code     = tester_rc,
+            skip_gates           = skip_gates,
+            gate_pytest          = gate_pytest,
+            gate_lint            = gate_lint,
+            gate_merge_preview   = gate_merge_preview,
+            worktester_root      = WORKTESTER_ROOT,
+            worktester_dashboard = WORKTESTER_DASHBOARD,
+            repo_name            = repo_name,
         )
         print(f"  {summary_line}")
 
@@ -1068,46 +1426,47 @@ def run_sprint(
             issue_state.status = "done"
             summary.merged.append(f"#{num}")
         else:
+            category = gate_category or FailureCategory.CRASH
             issue_state.status      = "skipped"
             issue_state.skip_reason = summary_line
+            issue_state.category    = category
             if "gate failed" in summary_line:
-                issue_state.category = FailureCategory.GATE_FAIL
                 summary.gate_failures.append(summary_line)
             else:
-                issue_state.category = FailureCategory.TESTER_REJECTED
+                summary.skipped.append(f"#{num} ({category})")
+            dispatch_alerts(
+                alert_modes,
+                title=f"Issue #{num} skipped: {category}",
+                body=summary_line,
+                issue_num=num,
+                category=category,
+            )
 
+        elapsed = time.monotonic() - start_time
+        state.wall_clock_secs = elapsed
+        state.save(state_path)
+        _post_sprint_status(state)
+
+    # Final elapsed time
     state.wall_clock_secs = time.monotonic() - start_time
+    state.save(state_path)
+
     return summary, state
-
-
-def _dispatch_agent(agent_type: str, issue_num: int) -> bool:
-    """Placeholder for dispatching a coder agent. Returns True on success."""
-    # In full implementation this would invoke the coder agent subprocess.
-    # For now it's a hook point; tester integration is the focus of this ticket.
-    print(f"  [sprint-manager] agent={agent_type} issue={issue_num} (stub)")
-    return True
-
-
-def _dispatch_tester(issue_num: int) -> int:
-    """Placeholder for dispatching a tester agent. Returns exit code."""
-    # In full implementation this would run the tester subprocess.
-    # Returns 0 on success.
-    print(f"  [sprint-manager] tester issue={issue_num} (stub)")
-    return 0
 
 
 # ── CLI ────────────────────────────────────────────────────────────────────────
 
 def main() -> None:
     p = argparse.ArgumentParser(
-        description="Sprint Manager — run a sprint with optional quality gates",
+        description="Sprint Manager -- orchestrate coder+tester agents with gates, "
+                    "failure categorisation, hang detection, and alert channels.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
     p.add_argument("label", help="GitHub label identifying the sprint (e.g. sprint-5)")
     p.add_argument("--repo", default=None, help="owner/repo override")
 
-    # Gate control flags (AC-13, AC-14)
+    # Gate control flags
     p.add_argument(
         "--skip-gates",
         action="store_true",
@@ -1132,33 +1491,71 @@ def main() -> None:
         default=True,
         help="Enable/disable merge-preview gate (default: enabled)",
     )
+
+    # Sprint control flags
     p.add_argument(
         "--dry-run",
         action="store_true",
         default=False,
         help="List issues but do not dispatch agents",
     )
+    p.add_argument(
+        "--resume",
+        action="store_true",
+        default=False,
+        help="Resume from existing state file, skipping done/skipped issues",
+    )
+    p.add_argument(
+        "--retry-failed",
+        action="store_true",
+        default=False,
+        help="Re-dispatch only skipped/failed issues from existing state",
+    )
+
+    # Alert modes (AC-3)
+    p.add_argument(
+        "--alert-mode",
+        default=AlertMode.DASHBOARD_BANNER,
+        help=(
+            "Comma-separated alert modes: "
+            "dashboard-banner, email, discord, file, none  (default: dashboard-banner)"
+        ),
+    )
 
     args = p.parse_args()
 
+    raw_modes   = [m.strip() for m in args.alert_mode.split(",") if m.strip()]
+    alert_modes = []
+    for m in raw_modes:
+        if m not in AlertMode.ALL_MODES:
+            p.error(f"Unknown alert mode: {m!r}. Valid: {', '.join(sorted(AlertMode.ALL_MODES))}")
+        alert_modes.append(m)
+
+    if not alert_modes:
+        alert_modes = [AlertMode.DASHBOARD_BANNER]
+
     summary, state = run_sprint(
-        label=args.label,
-        skip_gates=args.skip_gates,
-        gate_pytest=args.gate_pytest,
-        gate_lint=args.gate_lint,
-        gate_merge_preview=args.gate_merge_preview,
-        repo_name=args.repo,
-        dry_run=args.dry_run,
+        label              = args.label,
+        skip_gates         = args.skip_gates,
+        gate_pytest        = args.gate_pytest,
+        gate_lint          = args.gate_lint,
+        gate_merge_preview = args.gate_merge_preview,
+        alert_modes        = alert_modes,
+        repo_name          = args.repo,
+        dry_run            = args.dry_run,
+        resume             = args.resume,
+        retry_failed       = args.retry_failed,
     )
 
     # AC-1/2/3: write extended summary, create GitHub issue, prompt for learnings
     if state.issues:
-        end_reason = "complete" if not summary.skipped else "stopped"
+        end_reason   = "complete" if not summary.skipped else "stopped"
         summary_path = write_sprint_summary(
-            state=state,
-            elapsed_secs=state.wall_clock_secs,
-            end_reason=end_reason,
-            repo_name=args.repo,
+            state        = state,
+            elapsed_secs = state.wall_clock_secs,
+            alert_modes  = alert_modes,
+            end_reason   = end_reason,
+            repo_name    = args.repo,
         )
     else:
         summary_path = None

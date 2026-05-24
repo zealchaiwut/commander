@@ -1,24 +1,19 @@
 ---
-description: Sprint Status — show all open issues grouped by status. Usage: /sprint-status <repo URL>
+description: Show current sprint status — open issues grouped by workflow stage
 ---
-Show the current sprint status by reading GitHub issues for the given repository.
 
-Repository: $ARGUMENTS
+Run the following command to fetch all open issues for this repo, then display the results grouped by workflow stage:
 
-Extract the owner/repo from the URL (e.g. from https://github.com/zealchaiwut/commander/ extract zealchaiwut/commander).
+```bash
+gh issue list --state open --json number,title,labels,assignees --limit 100
+```
 
-Run this bash command (substitute <owner/repo> with the extracted value):
+Present the results in this grouped order, showing issue number, title, and assignee for each:
 
-    gh issue list --repo <owner/repo> --state open --json number,title,labels --limit 50
+1. **blocked** — label `blocked`
+2. **UAT** — label `UAT` (awaiting sign-off)
+3. **SIT** — label `SIT` (in testing)
+4. **in-progress** — label `in-progress`
+5. **backlog** — open issues with no status label
 
-Then organize the output into a table with these columns:
-- Stage (backlog, in-progress, SIT, UAT, blocked)
-- Issues in that stage with their numbers and titles
-
-Group by sprint label (sprint-1, sprint-2, sprint-3, etc.).
-
-Also show any unlabeled / no-stage issues separately at the bottom under "Unlabeled / no-stage issues".
-
-Total open issue count at the top.
-
-If no repository URL provided, show usage and exit.
+At the end, show a one-line summary: total open, and count per stage.

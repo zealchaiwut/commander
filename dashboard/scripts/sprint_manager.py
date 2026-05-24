@@ -784,6 +784,7 @@ def _gate_merge_preview(
     feature_branch: str,
     worktester_root: Path,
     skip: bool,
+    target_branch: str = "develop",
     repo_name: Optional[str] = None,
 ) -> GateResult:
     """Gate 3 -- simulate merge in worktester root without committing."""
@@ -792,16 +793,24 @@ def _gate_merge_preview(
         return GateResult(gate="merge-preview", passed=True, skipped=True)
 
     _post_agent_event("gate:merge-preview")
-    print(f"  [gate:merge-preview] simulating merge of {feature_branch} ...")
+    print(f"  [gate:merge-preview] simulating merge of {feature_branch} into {target_branch} ...")
 
     merge_ok = False
     combined = ""
 
     try:
-        # Fetch + update develop
+        # Fetch + update target branch
         _run("git", "fetch", "origin", cwd=worktester_root, check=False)
-        _run("git", "checkout", "develop", cwd=worktester_root, check=False)
-        _run("git", "pull", "origin", "develop", cwd=worktester_root, check=False)
+
+        # Ensure target branch exists locally
+        ok, _, _ = _try("git", "show-ref", "--verify", "--quiet",
+                         f"refs/heads/{target_branch}", cwd=worktester_root)
+        if ok:
+            _run("git", "checkout", target_branch, cwd=worktester_root, check=False)
+            _run("git", "pull", "origin", target_branch, cwd=worktester_root, check=False)
+        else:
+            _run("git", "checkout", "--track", f"origin/{target_branch}",
+                 cwd=worktester_root, check=False)
 
         # Attempt dry-run merge
         rc, stdout, stderr = _run_timed(
@@ -814,7 +823,7 @@ def _gate_merge_preview(
         if merge_ok:
             print("  [gate:merge-preview] PASS -- no conflicts")
         else:
-            print("  [gate:merge-preview] FAIL -- conflicts detected")
+            print(f"  [gate:merge-preview] FAIL -- conflicts detected merging into {target_branch}")
     finally:
         # Always abort to leave working tree clean
         _run("git", "merge", "--abort", cwd=worktester_root, check=False)
@@ -835,6 +844,7 @@ def _run_quality_gates(
     gate_pytest: bool,
     gate_lint: bool,
     gate_merge_preview: bool,
+    target_branch: str = "develop",
     repo_name: Optional[str] = None,
 ) -> list[GateResult]:
     """Run the three quality gates sequentially. Returns list of GateResult.
@@ -872,6 +882,7 @@ def _run_quality_gates(
         feature_branch,
         worktester_root,
         skip=(skip_all or not gate_merge_preview),
+        target_branch=target_branch,
         repo_name=repo_name,
     )
     results.append(r3)
@@ -879,9 +890,41 @@ def _run_quality_gates(
     return results
 
 
+def _create_sprint_branch(sprint_branch: str) -> None:
+    """Create sprint/<label> off develop and push to origin (idempotent)."""
+    # Check if branch already exists on remote
+    ok, _, _ = _try("git", "ls-remote", "--exit-code", "origin", f"refs/heads/{sprint_branch}")
+    if ok:
+        print(f"  Sprint branch {sprint_branch!r} already exists on origin — skipping creation.")
+        return
+
+    # Check if branch already exists locally
+    ok, _, _ = _try("git", "show-ref", "--verify", "--quiet", f"refs/heads/{sprint_branch}")
+    if ok:
+        print(f"  Sprint branch {sprint_branch!r} already exists locally — pushing to origin.")
+        _run("git", "push", "-u", "origin", sprint_branch)
+        return
+
+    print(f"  Creating sprint branch {sprint_branch!r} off develop…")
+    # Fetch latest develop
+    _run("git", "fetch", "origin")
+    # Get develop SHA from remote to avoid checking out develop (which may be in a worktree)
+    ok, develop_sha, _ = _try("git", "rev-parse", "origin/develop")
+    if not ok or not develop_sha:
+        # fallback: try local develop
+        ok, develop_sha, _ = _try("git", "rev-parse", "develop")
+    if not ok or not develop_sha:
+        print("  Warning: could not resolve develop SHA — using HEAD for sprint branch", file=sys.stderr)
+        develop_sha = "HEAD"
+    _run("git", "branch", sprint_branch, develop_sha)
+    _run("git", "push", "-u", "origin", sprint_branch)
+    print(f"  Sprint branch {sprint_branch!r} created and pushed.")
+
+
 def _call_finish_feature(
     issue_num: int,
     worktester_root: Optional[Path] = None,
+    target_branch: str = "develop",
     repo_name: Optional[str] = None,
     cfg: Optional["SprintConfig"] = None,
 ) -> None:
@@ -893,11 +936,15 @@ def _call_finish_feature(
         finish_script = FINISH_FEATURE_SCRIPT
         wt_root = worktester_root or WORKTESTER_ROOT
 
-    cmd = [sys.executable, str(finish_script), "--issue", str(issue_num)]
+    cmd = [
+        sys.executable, str(finish_script),
+        "--issue", str(issue_num),
+        "--target-branch", target_branch,
+    ]
     if repo_name:
         cmd += ["--repo", repo_name]
 
-    print(f"  Calling finish_feature.py --issue {issue_num} ...")
+    print(f"  Calling finish_feature.py --issue {issue_num} --target-branch {target_branch} ...")
     result = subprocess.run(cmd, cwd=str(wt_root), capture_output=True, text=True)
     if result.stdout:
         print(result.stdout.rstrip())
@@ -920,6 +967,7 @@ def handle_post_tester(
     gate_merge_preview: bool,
     worktester_root: Optional[Path] = None,
     worktester_dashboard: Optional[Path] = None,
+    target_branch: str = "develop",
     repo_name: Optional[str] = None,
     cfg: Optional["SprintConfig"] = None,
 ) -> tuple[bool, str, Optional[str]]:
@@ -967,7 +1015,7 @@ def handle_post_tester(
 
     if skip_gates:
         print("  --skip-gates active -- skipping all quality gates, proceeding to merge")
-        _call_finish_feature(issue_num, wt_root, repo_name=eff_repo, cfg=cfg)
+        _call_finish_feature(issue_num, wt_root, target_branch=target_branch, repo_name=eff_repo, cfg=cfg)
         _post_agent_event("gate:merging", api_url=api_url)
         all_skipped = [
             GateResult(gate="pytest",        passed=True, skipped=True),
@@ -975,7 +1023,7 @@ def handle_post_tester(
             GateResult(gate="merge-preview", passed=True, skipped=True),
         ]
         _post_success_comment(issue_num, all_skipped, repo_name=eff_repo)
-        return True, f"Issue #{issue_num}: all gates skipped, merged", None
+        return True, f"Issue #{issue_num}: all gates skipped, merged into {target_branch}", None
 
     results = _run_quality_gates(
         issue_num=issue_num,
@@ -986,6 +1034,7 @@ def handle_post_tester(
         gate_pytest=gate_pytest,
         gate_lint=gate_lint,
         gate_merge_preview=gate_merge_preview,
+        target_branch=target_branch,
         repo_name=eff_repo,
     )
 
@@ -995,9 +1044,9 @@ def handle_post_tester(
     if all_passed:
         _post_agent_event("gate:merging", api_url=api_url)
         print(f"  All gates passed -- calling finish_feature.py for issue #{issue_num}")
-        _call_finish_feature(issue_num, wt_root, repo_name=eff_repo, cfg=cfg)
+        _call_finish_feature(issue_num, wt_root, target_branch=target_branch, repo_name=eff_repo, cfg=cfg)
         _post_success_comment(issue_num, results, repo_name=eff_repo)
-        return True, f"Issue #{issue_num}: all gates passed, merged to develop", None
+        return True, f"Issue #{issue_num}: all gates passed, merged into {target_branch}", None
     else:
         failed = next((r for r in results if not r.passed), None)
         gate_name = failed.gate if failed else "unknown"
@@ -1016,6 +1065,7 @@ def _issue_log_path(issue_num: int, cfg: Optional["SprintConfig"] = None) -> Pat
 def _dispatch_coder(
     issue_num: int,
     alert_modes: list[str],
+    sprint_branch: str = "develop",
     repo_name: Optional[str] = None,
     cfg: Optional["SprintConfig"] = None,
 ) -> tuple[bool, Optional[str]]:
@@ -1045,7 +1095,13 @@ def _dispatch_coder(
         "claude",
         "--dangerously-skip-permissions",
         "-p",
-        prompt,
+        prompt + (
+            f" IMPORTANT: pass --base-branch {sprint_branch} to start_feature.py"
+            f" so that the feature branch is based off {sprint_branch!r} instead of develop."
+            if sprint_branch not in ("develop",)
+            and not (cfg and cfg.coder_prompt_template)
+            else ""
+        ),
     ]
 
     try:
@@ -1177,6 +1233,7 @@ def generate_sprint_summary(
     end_reason: str = "complete",
     open_issues: Optional[list[dict]] = None,
     repo_name: Optional[str] = None,
+    sprint_branch: Optional[str] = None,
 ) -> str:
     """Generate a richly-formatted executive summary markdown string."""
     n = state.sprint_number if state.sprint_number is not None else state.sprint_label
@@ -1279,7 +1336,7 @@ def generate_sprint_summary(
         "",
         "| Metric | Value |",
         "|---|---|",
-        f"| Total tokens | {total_tokens} |",
+        f"| Total Tokens | {total_tokens} |",
         f"| Avg ticket time | {avg_ticket_str} |",
         f"| Quality-gate pass rate | {gate_pass_rate}% |",
         f"| Tester rejections | {tester_rejections} |",
@@ -1329,6 +1386,21 @@ def generate_sprint_summary(
     else:
         lines.extend(all_links)
     lines.append("")
+
+    # -- Next Step (sprint branch PR instructions) --
+    effective_sprint_branch = sprint_branch or f"sprint/{state.sprint_label}"
+    r = _r(repo_name)
+    lines += [
+        "## Next Step",
+        "",
+        f"The sprint branch `{effective_sprint_branch}` is ready for review.",
+        "When UAT is complete, open a PR to promote it to `develop`:",
+        "",
+        f"```bash",
+        f"gh pr create --base develop --head {effective_sprint_branch} --repo {r}",
+        f"```",
+        "",
+    ]
 
     # -- Footer --
     lines.append(f"_Generated by sprint-manager v1.0 on {_utcnow()}_")
@@ -1452,6 +1524,7 @@ def write_sprint_summary(
     end_reason: str = "complete",
     open_issues: Optional[list[dict]] = None,
     repo_name: Optional[str] = None,
+    sprint_branch: Optional[str] = None,
     cfg: Optional["SprintConfig"] = None,
 ) -> Path:
     """Write summary file, create GitHub issue, prompt for learnings (AC-1/2/3)."""
@@ -1462,6 +1535,7 @@ def write_sprint_summary(
         end_reason=end_reason,
         open_issues=open_issues,
         repo_name=eff_repo,
+        sprint_branch=sprint_branch,
     )
     path = _summary_path(state.sprint_number, state.sprint_label, cfg=cfg)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -1569,12 +1643,16 @@ def run_sprint(
     dry_run: bool = False,
     resume: bool = False,
     retry_failed: bool = False,
+    target_branch: Optional[str] = None,
     cfg: Optional["SprintConfig"] = None,
 ) -> tuple[SprintSummary, SprintState]:
     """Main sprint loop -- processes backlog issues sequentially.
 
     Returns (SprintSummary, SprintState).
     Supports resume/retry_failed from persisted state.
+
+    target_branch: branch to merge feature branches into. Defaults to
+    sprint/<label>. Pass 'develop' to restore legacy behaviour.
     """
     if alert_modes is None:
         alert_modes = [AlertMode.DASHBOARD_BANNER]
@@ -1597,6 +1675,11 @@ def run_sprint(
         print(f"  logs-dir:     {cfg.logs_dir}")
         print(f"  sprints-dir:  {cfg.sprints_dir}")
         print(f"  api-url:      {cfg.api_url}")
+
+    # Determine the sprint branch name and effective merge target
+    sprint_branch = f"sprint/{label}"
+    if target_branch is None:
+        target_branch = sprint_branch
 
     # Load or build state
     if (resume or retry_failed) and state_path.exists():
@@ -1624,7 +1707,17 @@ def run_sprint(
         )
 
     print(f"\n=== Sprint Manager: label={label} ===")
+    print(f"Target branch: {target_branch}")
     print(f"Found {len(state.issues)} issue(s): {[i.number for i in state.issues]}")
+
+    # AC-1: Create sprint branch off develop (idempotent)
+    if target_branch == sprint_branch:
+        if dry_run:
+            print(f"  [dry-run] would create sprint branch {sprint_branch!r} off develop")
+        else:
+            _create_sprint_branch(sprint_branch)
+    else:
+        print(f"  Using custom target branch {target_branch!r} — sprint branch creation skipped.")
 
     start_time = time.monotonic()
 
@@ -1663,7 +1756,7 @@ def run_sprint(
 
         # -- Dispatch coder --
         coder_ok, coder_category = _dispatch_coder(
-            num, alert_modes, repo_name=eff_repo, cfg=cfg,
+            num, alert_modes, sprint_branch=target_branch, repo_name=eff_repo, cfg=cfg,
         )
 
         if not coder_ok:
@@ -1708,6 +1801,7 @@ def run_sprint(
             gate_pytest        = gate_pytest,
             gate_lint          = gate_lint,
             gate_merge_preview = gate_merge_preview,
+            target_branch      = target_branch,
             repo_name          = eff_repo,
             cfg                = cfg,
         )
@@ -1815,6 +1909,15 @@ def main() -> None:
         default=False,
         help="Re-dispatch only skipped/failed issues from existing state",
     )
+    p.add_argument(
+        "--target-branch",
+        default=None,
+        help=(
+            "Branch to merge feature branches into. "
+            "Defaults to sprint/<label>. "
+            "Pass 'develop' to restore legacy behaviour."
+        ),
+    )
 
     # Alert modes (AC-3)
     p.add_argument(
@@ -1872,19 +1975,25 @@ def main() -> None:
         dry_run            = args.dry_run,
         resume             = args.resume,
         retry_failed       = args.retry_failed,
+        target_branch      = args.target_branch,
         cfg                = cfg,
     )
+
+    # Derive sprint_branch for summary (mirrors run_sprint logic)
+    sprint_branch = f"sprint/{args.label}"
+    effective_target = args.target_branch or sprint_branch
 
     # AC-1/2/3: write extended summary, create GitHub issue, prompt for learnings
     if state.issues:
         end_reason   = "complete" if not summary.skipped else "stopped"
         summary_path = write_sprint_summary(
-            state        = state,
-            elapsed_secs = state.wall_clock_secs,
-            alert_modes  = alert_modes,
-            end_reason   = end_reason,
-            repo_name    = eff_repo,
-            cfg          = cfg,
+            state         = state,
+            elapsed_secs  = state.wall_clock_secs,
+            alert_modes   = alert_modes,
+            end_reason    = end_reason,
+            repo_name     = eff_repo,
+            cfg           = cfg,
+            sprint_branch = effective_target,
         )
     else:
         summary_path = None

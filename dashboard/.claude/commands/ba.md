@@ -1,17 +1,13 @@
 ---
-description: Business Analyst — plan and file a new GitHub issue from a feature description. Usage: /ba <feature description>
+description: Plan a feature with the BA agent — clarifying questions, acceptance criteria, UAT steps, GitHub issue
 ---
-Use the BA subagent to plan and create a GitHub issue for the following feature request.
 
-Feature description: $ARGUMENTS
+Use the BA subagent to plan this feature: $ARGUMENTS
 
-Delegate this task to the **BA** subagent. Pass the feature description exactly as given above.
-
-The BA subagent will:
-1. Ask clarifying questions if needed (user, success condition, edge cases)
-2. Generate a structured issue body with Acceptance Criteria and UAT Test Steps
-3. Determine the active sprint number from `~/commander/dashboard/projects.json`
-4. Create the issue via `scripts/create_ticket.py`
-5. Report back with the issue number, URL, and AC count
-
-Repo: zealchaiwut/commander
+The BA agent must:
+1. Read the relevant source files to understand the current codebase before writing anything
+2. Ask clarifying questions if anything is ambiguous
+3. Write numbered, verifiable acceptance criteria
+4. Write numbered UAT test steps with explicit Expected outcomes
+5. Present the full proposed ticket (title + body) and wait for the user to type "Approve"
+6. Only after approval: create the GitHub issue with `gh issue create`

@@ -1,0 +1,116 @@
+# Commander Platform — Agent Instructions
+
+You are working on Commander, a personal AI agent platform for solo 
+development with Claude Code. This file contains project-wide instructions 
+that apply to all agents (BA, Coder, Tester, and any direct Claude Code 
+sessions).
+
+## Confirmation Policy — STRICT (All Agents)
+
+Agents may ONLY pause for confirmation for: (1) ambiguous requirements where a wrong guess wastes significant work; (2) destructive actions without clear precedent (`git push --force`, `git reset --hard`, touching `master`, deleting issues); (3) role-specific gate — BA shows the ticket body once before creating it on GitHub, Coder never pauses, Tester never pauses. Everything else — branch creation, commits, pushes, label updates, running tests, calling workflow scripts — executes immediately with a one-line status update. Default is **execute**, not ask.
+
+## Project Overview
+
+Commander is:
+- A FastAPI web dashboard that tracks Claude Code agents in real time
+- - A GitHub Issues-based sprint board (BA → Coder → Tester → UAT flow)
+- - Mobile-accessible via Tailscale
+- - The repo is github.com/zealchaiwut/commander
+-
+- ## Tech Stack
+-
+- - Python 3.12, FastAPI, Uvicorn
+- - SQLite for agent event history
+- - Plain HTML + vanilla JS (no React, no build step)
+- - Server-Sent Events for live updates
+- - GitHub CLI (`gh`) for issue management
+- - Pytest + httpx for tests
+-
+- ## Branching Workflow
+-
+- This project uses a three-tier branching model:
+-
+- - `master` — production, signed-off code only. Only I (the human) merge here.
+- - `develop` — integration branch. SIT-passed code lives here. Tester merges 
+-   feature branches into this after tests pass.
+-   - `feature/<issue-N>-<slug>` — short-lived branches for individual features.
+-     Coders create these off `develop`. Naming: kebab-case, includes issue number.
+-
+-     DO NOT commit directly to `master`. DO NOT merge feature branches to master.
+-
+-     ## Roles
+-
+-     - **BA** writes acceptance criteria + UAT steps, creates GitHub issues using 
+-       `scripts/create_ticket.py`. Uses `.github/ISSUE_TEMPLATE/feature.md`.
+-
+-       - **Coder** creates a feature branch off develop, implements the feature, 
+-         pushes the branch, updates label to SIT. Does NOT merge.
+-
+-         - **Tester** checks out feature branch, writes pytest tests for each 
+-           acceptance criterion, runs them, posts structured test report, merges 
+-             to develop if tests pass and moves label to UAT.
+-
+-             - **The human** signs off on UAT from the dashboard, then merges develop 
+-               to master manually.
+-
+-               ## Code Conventions
+-
+-               - Test files in `tests/` named `test_<feature>__<criterion>.py`
+-               - Helper scripts in `scripts/` are pure Python, args via argparse
+-               - Hook scripts in `hooks/` POST to localhost:8000, fail silently if server down
+-               - No new Python dependencies without adding to requirements.txt
+-               - No new frontend frameworks — keep static HTML + JS minimal
+-
+-               ## MCP Servers (available in all sessions)
+-
+-               Three MCP servers are installed at user scope — prefer them over shell fallbacks:
+-
+-               | Server | Tools prefix | Use for |
+-               |--------|-------------|---------|
+-               | **codedb** | `mcp__codedb__*` | Code navigation, symbol search, file reads (faster than Bash+Read) |
+-               | **github** | `mcp__github__*` | List/view/create/edit issues, create PRs, check workflow runs. Prefer over shelling out to `gh`. |
+-               | **sqlite** | `mcp__sqlite__*` | Query `dashboard.db` (tables: `agents`, `events`, `token_usage`). Use for debugging DB state instead of `sqlite3` via Bash. |
+-
+-               **Tool preference rules:**
+-               - To read/search code → `mcp__codedb__*` over `Read`/`Bash grep`
+-               - To work with GitHub issues/PRs → `mcp__github__*` over `gh` CLI in Bash (existing scripts like `create_ticket.py` / `update_ticket.py` may still use `gh` internally — do not refactor them)
+-               - To inspect live DB state → `mcp__sqlite__*` over `sqlite3` in Bash
+-
+-               ## When Working on This Project
+-
+-               - Always run agents with CLAUDE_AGENT_ROLE env var set (ba, coder, tester)
+-               - The dashboard runs at localhost:8000 — assume it's already running
+-               - Use codedb MCP tools for code navigation when available (faster than Read)
+-               - Read the issue body carefully before implementing — acceptance criteria 
+-                 is the contract
+-
+-                 ## Useful Scripts
+-
+-                 - `scripts/create_ticket.py` — file a new issue with template
+-                 - `scripts/update_ticket.py` — change labels (in-progress, sit, uat, blocked)
+-                 - `scripts/comment_ticket.py` — add comment to issue
+-                 - `scripts/post_test_report.py` — tester uses this for structured reports
+-                 - `scripts/start_feature.py` — coder uses this to create feature branch
+-                 - `scripts/finish_feature.py` — tester uses this to merge to develop
+-
+-                 ## Out of Scope
+-
+-                 - DO NOT add Discord, Slack, or other notification systems (separate sprint)
+-                 - DO NOT add auth (single-user, local only for now)
+-                 - DO NOT add caching layers beyond the existing 30s GitHub cache
+-
+-                 ## When in Doubt
+-
+-                 Default is **execute**, not ask. Only stop for genuine ambiguity or destructive actions. See "Confirmation Policy — STRICT" at the top of this file.
+
+## String literal conventions
+
+For any displayed text in markdown reports, error messages, or user-facing 
+output:
+
+- Section headings: Title Case (## Sprint Review, ## What Shipped)
+- Table column headers: Sentence case (| Total tokens |, | Avg ticket time |)
+- Inline labels: Sentence case (timeout, gate failed)
+
+Be consistent. If you see "Total Tokens" somewhere and "Total tokens" 
+elsewhere, that's a bug — flag it.

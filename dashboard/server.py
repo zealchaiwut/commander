@@ -458,6 +458,67 @@ def get_plan_usage():
     }
 
 
+# ── alert banner endpoints (AC-3a from #24) ──────────────────────────────────
+
+_alerts: list[dict] = []
+
+
+class AlertPayload(BaseModel):
+    title: str = ""
+    body: str = ""
+    issue_num: Optional[int] = None
+    category: Optional[str] = None
+
+
+@app.post("/api/alerts", status_code=201)
+def receive_alert(payload: AlertPayload):
+    _alerts.append(payload.model_dump())
+    return {"ok": True, "count": len(_alerts)}
+
+
+@app.get("/api/alerts")
+def get_alerts():
+    return _alerts
+
+
+@app.delete("/api/alerts/{idx}")
+def dismiss_alert(idx: int):
+    if 0 <= idx < len(_alerts):
+        _alerts.pop(idx)
+    return {"ok": True, "count": len(_alerts)}
+
+
+# ── sprint status endpoint (AC-6 from #24) ───────────────────────────────────
+
+_sprint_status: Optional[dict] = None
+
+
+class SprintStatusPayload(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    sprint_label: str = ""
+    sprint_number: Optional[int] = None
+    issues: list[dict] = []
+    start_timestamp: Optional[str] = None
+    total_tokens_in: int = 0
+    total_tokens_out: int = 0
+    wall_clock_secs: float = 0.0
+
+
+@app.post("/api/sprint-status")
+def set_sprint_status(payload: SprintStatusPayload):
+    global _sprint_status
+    _sprint_status = payload.model_dump()
+    return {"ok": True}
+
+
+@app.get("/api/sprint-status")
+def get_sprint_status():
+    if _sprint_status is None:
+        raise HTTPException(status_code=404, detail="No active sprint")
+    return _sprint_status
+
+
 # ── sprint summary / history endpoints (AC-4 / AC-6 from #24) ────────────────
 
 SPRINTS_DIR = Path(__file__).parent / "sprints"

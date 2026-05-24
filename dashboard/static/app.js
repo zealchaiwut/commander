@@ -773,6 +773,20 @@ function connectSSE() {
   es.onmessage = ev => {
     try {
       const msg = JSON.parse(ev.data);
+
+      // Sprint alert banner push (AC-3a)
+      if (msg.type === 'alert') {
+        loadAlerts().catch(() => {});
+        return;
+      }
+
+      // Sprint status push (AC-6d)
+      if (msg.type === 'sprint_update' && msg.sprint) {
+        _sprintState = msg.sprint;
+        renderSprintPanel(msg.sprint);
+        return;
+      }
+
       if (msg.type !== 'update') return;
       if (!document.getElementById('view-projects').classList.contains('hidden')) {
         loadProjects().catch(() => {});
@@ -982,6 +996,116 @@ function hideToast() {
   if (t) t.style.display = 'none';
 }
 
+// ── Sprint alert banners (AC-3a) ──────────────────────────────────────────────
+
+let _alertsCache = [];
+
+async function loadAlerts() {
+  try {
+    const res = await fetch('/api/alerts');
+    if (!res.ok) return;
+    _alertsCache = await res.json();
+    renderAlertBanners(_alertsCache);
+  } catch { /* silent */ }
+}
+
+function renderAlertBanners(alerts) {
+  const container = document.getElementById('alert-banners');
+  if (!container) return;
+  if (!alerts || alerts.length === 0) {
+    container.innerHTML = '';
+    return;
+  }
+  container.innerHTML = alerts.map((a, idx) => `
+    <div class="alert-banner" id="alert-${idx}">
+      <div class="alert-banner-body">
+        <div class="alert-banner-title">${escapeHtml(a.title)}${a.category ? ` [${escapeHtml(a.category)}]` : ''}</div>
+        <div class="alert-banner-msg">${escapeHtml(a.body || '')}</div>
+      </div>
+      <button class="alert-dismiss" onclick="dismissAlert(${idx})" title="Dismiss">&times;</button>
+    </div>`).join('');
+}
+
+async function dismissAlert(idx) {
+  try {
+    await fetch(`/api/alerts/${idx}`, { method: 'DELETE' });
+    _alertsCache.splice(idx, 1);
+    renderAlertBanners(_alertsCache);
+  } catch { /* silent */ }
+}
+
+// ── Sprint status panel (AC-6) ────────────────────────────────────────────────
+
+let _sprintState = null;
+
+async function loadSprintStatus() {
+  try {
+    const res = await fetch('/api/sprint-status');
+    if (res.status === 404) {
+      // No active sprint — hide panel
+      document.getElementById('sprint-panel')?.classList.add('hidden');
+      return;
+    }
+    if (!res.ok) return;
+    _sprintState = await res.json();
+    renderSprintPanel(_sprintState);
+  } catch { /* silent */ }
+}
+
+function renderSprintPanel(state) {
+  const panel = document.getElementById('sprint-panel');
+  if (!panel) return;
+
+  const issues  = state.issues || [];
+  const done    = issues.filter(i => i.status === 'done').length;
+  const total   = issues.length;
+  const pct     = total > 0 ? Math.round(done / total * 100) : 0;
+  const skipped = issues.filter(i => i.status === 'skipped');
+
+  // Title
+  const titleEl = document.getElementById('sprint-panel-title');
+  if (titleEl) titleEl.textContent = `Sprint: ${escapeHtml(state.sprint_label || '')}`;
+
+  // Progress bar
+  const lblEl = document.getElementById('sprint-progress-label');
+  const pctEl = document.getElementById('sprint-progress-pct');
+  const barEl = document.getElementById('sprint-progress-bar');
+  if (lblEl) lblEl.textContent = `${done} of ${total} issues complete`;
+  if (pctEl) pctEl.textContent = `${pct}%`;
+  if (barEl) {
+    barEl.style.width = pct + '%';
+    barEl.style.background = pct === 100 ? 'var(--green)' : pct >= 50 ? 'var(--blue)' : 'var(--amber)';
+  }
+
+  // Retry button — show if there are skipped issues
+  const retryBtn = document.getElementById('btn-retry-skipped');
+  if (retryBtn) retryBtn.style.display = skipped.length > 0 ? '' : 'none';
+
+  // Skipped issues list
+  const listEl = document.getElementById('sprint-skipped-list');
+  if (listEl) {
+    if (skipped.length === 0) {
+      listEl.innerHTML = '';
+    } else {
+      listEl.innerHTML = `
+        <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);margin-bottom:6px;">Skipped Issues</div>
+        ${skipped.map(i => `
+          <div style="display:flex;align-items:flex-start;gap:6px;font-size:12px;margin-bottom:4px;padding:6px 8px;background:var(--red-bg);border-radius:5px;">
+            <span style="font-family:var(--mono);color:var(--text-muted);flex-shrink:0;">#${i.number}</span>
+            <span style="flex:1;color:var(--text);">${escapeHtml(i.title || '')}</span>
+            <span style="font-size:10px;font-weight:700;color:var(--red);white-space:nowrap;">${escapeHtml(i.category || 'UNKNOWN')}</span>
+          </div>`).join('')}`;
+    }
+  }
+
+  panel.classList.remove('hidden');
+}
+
+// AC-6c: Retry skipped button — opens instructions (actual retry requires CLI)
+function retrySkipped() {
+  alert('To retry skipped issues, re-run the sprint manager with:\n\npython3 dashboard/scripts/sprint_manager.py <label> --retry-failed');
+}
+
 // ── Periodic refresh ──────────────────────────────────────────────────────────
 setInterval(() => {
   if (!document.getElementById('view-projects').classList.contains('hidden')) {
@@ -992,6 +1116,12 @@ setInterval(() => {
     loadSprintHistory().catch(() => {});
   }
 }, 60_000);
+
+// Sprint status polls every 30s (AC-6d)
+setInterval(() => {
+  loadSprintStatus().catch(() => {});
+  loadAlerts().catch(() => {});
+}, 30_000);
 
 // ── Environment badge ─────────────────────────────────────────────────────────
 async function fetchEnvironment() {
@@ -1628,6 +1758,8 @@ function _handleSprintPlanSSE() {
       `<div class="empty-projects">Failed to load projects: ${escapeHtml(e.message)}</div>`;
   });
   loadPlanUsage().catch(() => {});
+  loadAlerts().catch(() => {});
+  loadSprintStatus().catch(() => {});
   connectSSE();
   document.getElementById('btn-refresh')?.addEventListener('click', manualRefresh);
 })();

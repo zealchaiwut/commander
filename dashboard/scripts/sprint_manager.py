@@ -48,6 +48,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
+try:
+    import yaml  # PyYAML — already in requirements.txt
+except ImportError:  # pragma: no cover
+    yaml = None  # type: ignore[assignment]
+
 # ── path setup ────────────────────────────────────────────────────────────────
 
 SCRIPTS_DIR   = Path(__file__).parent
@@ -67,6 +72,176 @@ DASHBOARD_API_URL    = os.environ.get("DASHBOARD_API_URL", "http://localhost:800
 SPRINTS_DIR          = DASHBOARD_DIR / "sprints"
 ALERTS_DIR           = DASHBOARD_DIR / "alerts"
 
+
+# ── SprintConfig dataclass + loader ──────────────────────────────────────────
+
+@dataclass
+class SprintConfig:
+    """All runtime paths and settings for a sprint.
+
+    Replaces the six module-level path constants.  When no config file is
+    present the class is populated with the same env-var + hardcoded defaults
+    that existed before this ticket, so backward compatibility is preserved.
+    """
+    repo_name:             Optional[str]  = None
+    worktree_coder:        Path           = field(default_factory=lambda: Path.home() / "commander" / "work-coder")
+    worktree_tester:       Path           = field(default_factory=lambda: WORKTESTER_ROOT)
+    tester_app_subdir:     str            = "dashboard"
+    scripts_dir:           Path           = field(default_factory=lambda: DASHBOARD_DIR / "scripts")
+    logs_dir:              Path           = field(default_factory=lambda: DASHBOARD_DIR / "logs")
+    sprints_dir:           Path           = field(default_factory=lambda: SPRINTS_DIR)
+    alerts_dir:            Path           = field(default_factory=lambda: ALERTS_DIR)
+    api_url:               str            = field(default_factory=lambda: DASHBOARD_API_URL)
+    coder_prompt_template:  Optional[str] = None
+    tester_prompt_template: Optional[str] = None
+
+    @property
+    def worktree_tester_app(self) -> Path:
+        """Resolved path where tests/app lives inside the tester worktree."""
+        if self.tester_app_subdir:
+            return self.worktree_tester / self.tester_app_subdir
+        return self.worktree_tester
+
+    @property
+    def finish_feature_script(self) -> Path:
+        return self.scripts_dir / "finish_feature.py"
+
+
+def _resolve_path(raw: str, base_dir: Path) -> Path:
+    """Expand ~ and resolve relative paths against base_dir."""
+    p = Path(raw).expanduser()
+    if p.is_absolute():
+        return p
+    return (base_dir / p).resolve()
+
+
+def load_config(path: Path) -> "SprintConfig":
+    """Parse .commander/sprint.yaml and return a SprintConfig.
+
+    Relative paths in paths.* are resolved relative to the YAML file's
+    directory.  Raises SystemExit on validation errors.
+    """
+    if yaml is None:
+        sys.exit("PyYAML is not installed. Install it with: pip install pyyaml")
+
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as e:
+        sys.exit(f"Cannot read config file {path}: {e}")
+
+    try:
+        data = yaml.safe_load(text) or {}
+    except yaml.YAMLError as e:
+        sys.exit(f"YAML parse error in {path}: {e}")
+
+    base_dir = path.parent  # directory containing sprint.yaml
+
+    # ── required fields ───────────────────────────────────────────────────────
+    missing = []
+    repo_name = (data.get("repo_name") or "").strip()
+    if not repo_name:
+        missing.append("repo_name")
+
+    wt = data.get("worktrees") or {}
+    coder_raw  = (wt.get("coder") or "").strip()
+    tester_raw = (wt.get("tester") or "").strip()
+    if not coder_raw:
+        missing.append("worktrees.coder")
+    if not tester_raw:
+        missing.append("worktrees.tester")
+
+    if missing:
+        sys.exit(
+            f"Config file {path} is missing required field(s): "
+            + ", ".join(missing)
+        )
+
+    worktree_coder  = _resolve_path(coder_raw, base_dir)
+    worktree_tester = _resolve_path(tester_raw, base_dir)
+    tester_app_subdir = (wt.get("tester_app_subdir") or "")
+
+    # ── validate worktree paths ────────────────────────────────────────────────
+    path_errors = []
+    if not worktree_coder.exists():
+        path_errors.append(f"worktrees.coder path does not exist: {worktree_coder}")
+    if not worktree_tester.exists():
+        path_errors.append(f"worktrees.tester path does not exist: {worktree_tester}")
+    if path_errors:
+        sys.exit("Config validation error:\n  " + "\n  ".join(path_errors))
+
+    # ── optional paths ────────────────────────────────────────────────────────
+    paths = data.get("paths") or {}
+
+    scripts_raw = (paths.get("scripts_dir") or "").strip()
+    scripts_dir = _resolve_path(scripts_raw, base_dir) if scripts_raw else DASHBOARD_DIR / "scripts"
+
+    logs_raw  = (paths.get("logs_dir") or "").strip()
+    logs_dir  = _resolve_path(logs_raw, base_dir) if logs_raw else base_dir / "logs"
+
+    sprints_raw  = (paths.get("sprints_dir") or "").strip()
+    sprints_dir  = _resolve_path(sprints_raw, base_dir) if sprints_raw else base_dir / "sprints"
+
+    alerts_raw  = (paths.get("alerts_dir") or "").strip()
+    alerts_dir  = _resolve_path(alerts_raw, base_dir) if alerts_raw else base_dir / "alerts"
+
+    # ── dashboard section ─────────────────────────────────────────────────────
+    dashboard = data.get("dashboard") or {}
+    api_url   = (dashboard.get("api_url") or DASHBOARD_API_URL).strip()
+
+    # ── agents section ────────────────────────────────────────────────────────
+    agents = data.get("agents") or {}
+    coder_prompt   = agents.get("coder_prompt_template") or None
+    tester_prompt  = agents.get("tester_prompt_template") or None
+
+    return SprintConfig(
+        repo_name             = repo_name,
+        worktree_coder        = worktree_coder,
+        worktree_tester       = worktree_tester,
+        tester_app_subdir     = tester_app_subdir,
+        scripts_dir           = scripts_dir,
+        logs_dir              = logs_dir,
+        sprints_dir           = sprints_dir,
+        alerts_dir            = alerts_dir,
+        api_url               = api_url,
+        coder_prompt_template = coder_prompt,
+        tester_prompt_template= tester_prompt,
+    )
+
+
+def discover_config(start_dir: Optional[Path] = None) -> Optional[Path]:
+    """Walk up from start_dir looking for .commander/sprint.yaml.
+
+    Returns the Path if found, None otherwise.
+    """
+    if start_dir is None:
+        start_dir = Path.cwd()
+    current = start_dir.resolve()
+    while True:
+        candidate = current / ".commander" / "sprint.yaml"
+        if candidate.exists():
+            return candidate
+        parent = current.parent
+        if parent == current:  # reached filesystem root
+            break
+        current = parent
+    return None
+
+
+def _default_config() -> "SprintConfig":
+    """Build a SprintConfig from env-vars + hardcoded defaults (backward compat)."""
+    return SprintConfig(
+        repo_name         = None,  # will use github_client.repo()
+        worktree_coder    = Path.home() / "commander" / "work-coder",
+        worktree_tester   = WORKTESTER_ROOT,
+        tester_app_subdir = "dashboard",
+        scripts_dir       = DASHBOARD_DIR / "scripts",
+        logs_dir          = DASHBOARD_DIR / "logs",
+        sprints_dir       = SPRINTS_DIR,
+        alerts_dir        = ALERTS_DIR,
+        api_url           = DASHBOARD_API_URL,
+    )
+
+
 # Hang detection constants (in seconds)
 HANG_WARN_SECS  = 30 * 60   # 30 minutes
 HANG_KILL_SECS  = 60 * 60   # 60 minutes
@@ -82,17 +257,27 @@ def _sprint_number(label: str) -> Optional[int]:
     return int(m.group(1)) if m else None
 
 
-def _state_path(sprint_number: Optional[int], sprint_label: str) -> Path:
-    SPRINTS_DIR.mkdir(parents=True, exist_ok=True)
+def _state_path(
+    sprint_number: Optional[int],
+    sprint_label: str,
+    cfg: Optional["SprintConfig"] = None,
+) -> Path:
+    sprints_dir = cfg.sprints_dir if cfg is not None else SPRINTS_DIR
+    sprints_dir.mkdir(parents=True, exist_ok=True)
     n = sprint_number if sprint_number is not None else sprint_label
-    return SPRINTS_DIR / f"sprint-{n}-state.json"
+    return sprints_dir / f"sprint-{n}-state.json"
 
 
-def _summary_path(sprint_number: Optional[int], sprint_label: str) -> Path:
-    SPRINTS_DIR.mkdir(parents=True, exist_ok=True)
+def _summary_path(
+    sprint_number: Optional[int],
+    sprint_label: str,
+    cfg: Optional["SprintConfig"] = None,
+) -> Path:
+    sprints_dir = cfg.sprints_dir if cfg is not None else SPRINTS_DIR
+    sprints_dir.mkdir(parents=True, exist_ok=True)
     n   = sprint_number if sprint_number is not None else sprint_label
     day = datetime.now().strftime("%Y-%m-%d")
-    return SPRINTS_DIR / f"sprint-{n}-summary-{day}.md"
+    return sprints_dir / f"sprint-{n}-summary-{day}.md"
 
 
 # ── failure categories ────────────────────────────────────────────────────────
@@ -234,8 +419,13 @@ def _run_timed(*cmd, cwd: Optional[Path] = None) -> tuple[int, str, str]:
 
 # ── dashboard integration ─────────────────────────────────────────────────────
 
-def _post_agent_event(tool_name: str, agent_id: str = "sprint-manager") -> None:
+def _post_agent_event(
+    tool_name: str,
+    agent_id: str = "sprint-manager",
+    api_url: Optional[str] = None,
+) -> None:
     """POST to /api/agent-event to update the dashboard agent card."""
+    base = api_url or DASHBOARD_API_URL
     try:
         payload = json.dumps({
             "agent_id":  agent_id,
@@ -243,7 +433,7 @@ def _post_agent_event(tool_name: str, agent_id: str = "sprint-manager") -> None:
             "timestamp": time.time(),
         }).encode()
         req = urllib.request.Request(
-            f"{DASHBOARD_API_URL}/api/agent-event",
+            f"{base}/api/agent-event",
             data=payload,
             headers={"Content-Type": "application/json"},
             method="POST",
@@ -254,12 +444,13 @@ def _post_agent_event(tool_name: str, agent_id: str = "sprint-manager") -> None:
         pass
 
 
-def _post_sprint_status(state: SprintState) -> None:
+def _post_sprint_status(state: "SprintState", api_url: Optional[str] = None) -> None:
     """POST the current sprint state to /api/sprint-status."""
+    base = api_url or DASHBOARD_API_URL
     try:
         payload = json.dumps(state.to_dict()).encode()
         req = urllib.request.Request(
-            f"{DASHBOARD_API_URL}/api/sprint-status",
+            f"{base}/api/sprint-status",
             data=payload,
             headers={"Content-Type": "application/json"},
             method="POST",
@@ -277,20 +468,23 @@ def dispatch_alerts(
     body: str,
     issue_num: Optional[int] = None,
     category: Optional[str] = None,
+    cfg: Optional["SprintConfig"] = None,
 ) -> None:
     """Dispatch an alert through all configured channels."""
+    api_url    = cfg.api_url    if cfg is not None else None
+    alerts_dir = cfg.alerts_dir if cfg is not None else None
     for mode in alert_modes:
         if mode == AlertMode.NONE:
             continue
         try:
             if mode == AlertMode.DASHBOARD_BANNER:
-                _alert_dashboard_banner(title, body, issue_num, category)
+                _alert_dashboard_banner(title, body, issue_num, category, api_url=api_url)
             elif mode == AlertMode.EMAIL:
                 _alert_email(title, body)
             elif mode == AlertMode.DISCORD:
                 _alert_discord(title, body)
             elif mode == AlertMode.FILE:
-                _alert_file(title, body)
+                _alert_file(title, body, alerts_dir=alerts_dir)
         except Exception as e:
             print(f"  [alert:{mode}] error — {e}", file=sys.stderr)
 
@@ -300,7 +494,9 @@ def _alert_dashboard_banner(
     body: str,
     issue_num: Optional[int],
     category: Optional[str],
+    api_url: Optional[str] = None,
 ) -> None:
+    base = api_url or DASHBOARD_API_URL
     payload = json.dumps({
         "title":      title,
         "body":       body,
@@ -309,7 +505,7 @@ def _alert_dashboard_banner(
         "timestamp":  _utcnow(),
     }).encode()
     req = urllib.request.Request(
-        f"{DASHBOARD_API_URL}/api/alerts",
+        f"{base}/api/alerts",
         data=payload,
         headers={"Content-Type": "application/json"},
         method="POST",
@@ -350,10 +546,11 @@ def _alert_discord(title: str, body: str) -> None:
     urllib.request.urlopen(req, timeout=5)
 
 
-def _alert_file(title: str, body: str) -> None:
-    ALERTS_DIR.mkdir(parents=True, exist_ok=True)
+def _alert_file(title: str, body: str, alerts_dir: Optional[Path] = None) -> None:
+    d = alerts_dir if alerts_dir is not None else ALERTS_DIR
+    d.mkdir(parents=True, exist_ok=True)
     today    = datetime.now().strftime("%Y-%m-%d")
-    log_path = ALERTS_DIR / f"{today}.log"
+    log_path = d / f"{today}.log"
     ts       = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
     entry    = f"[{ts}] {title}\n{body}\n{'─' * 60}\n"
     with log_path.open("a", encoding="utf-8") as f:
@@ -726,13 +923,21 @@ def _create_sprint_branch(sprint_branch: str) -> None:
 
 def _call_finish_feature(
     issue_num: int,
-    worktester_root: Path = WORKTESTER_ROOT,
+    worktester_root: Optional[Path] = None,
     target_branch: str = "develop",
     repo_name: Optional[str] = None,
+    cfg: Optional["SprintConfig"] = None,
 ) -> None:
     """Call finish_feature.py as a subprocess from the worktester root."""
+    if cfg is not None:
+        finish_script = cfg.finish_feature_script
+        wt_root = worktester_root or cfg.worktree_tester
+    else:
+        finish_script = FINISH_FEATURE_SCRIPT
+        wt_root = worktester_root or WORKTESTER_ROOT
+
     cmd = [
-        sys.executable, str(FINISH_FEATURE_SCRIPT),
+        sys.executable, str(finish_script),
         "--issue", str(issue_num),
         "--target-branch", target_branch,
     ]
@@ -740,7 +945,7 @@ def _call_finish_feature(
         cmd += ["--repo", repo_name]
 
     print(f"  Calling finish_feature.py --issue {issue_num} --target-branch {target_branch} ...")
-    result = subprocess.run(cmd, cwd=str(worktester_root), capture_output=True, text=True)
+    result = subprocess.run(cmd, cwd=str(wt_root), capture_output=True, text=True)
     if result.stdout:
         print(result.stdout.rstrip())
     if result.returncode != 0:
@@ -760,10 +965,11 @@ def handle_post_tester(
     gate_pytest: bool,
     gate_lint: bool,
     gate_merge_preview: bool,
-    worktester_root: Path = WORKTESTER_ROOT,
-    worktester_dashboard: Path = WORKTESTER_DASHBOARD,
+    worktester_root: Optional[Path] = None,
+    worktester_dashboard: Optional[Path] = None,
     target_branch: str = "develop",
     repo_name: Optional[str] = None,
+    cfg: Optional["SprintConfig"] = None,
 ) -> tuple[bool, str, Optional[str]]:
     """Called after a tester subprocess exits.
 
@@ -771,13 +977,25 @@ def handle_post_tester(
 
     AC-1: Gates only run if tester exited 0 AND label is exactly UAT.
     """
+    # Resolve paths: prefer cfg, then explicit args, then globals
+    if cfg is not None:
+        wt_root      = worktester_root      or cfg.worktree_tester
+        wt_dashboard = worktester_dashboard or cfg.worktree_tester_app
+        eff_repo     = repo_name            or cfg.repo_name
+        api_url      = cfg.api_url
+    else:
+        wt_root      = worktester_root      or WORKTESTER_ROOT
+        wt_dashboard = worktester_dashboard or WORKTESTER_DASHBOARD
+        eff_repo     = repo_name
+        api_url      = None
+
     if tester_exit_code != 0:
         return (False,
                 f"Issue #{issue_num}: tester exited {tester_exit_code}, skipping gates",
                 FailureCategory.CRASH)
 
     # Re-fetch current labels (AC-1)
-    labels = _get_issue_labels(issue_num, repo_name=repo_name)
+    labels = _get_issue_labels(issue_num, repo_name=eff_repo)
     if "UAT" not in labels:
         current = ", ".join(sorted(labels)) or "(none)"
         print(f"  Issue #{issue_num}: tester exited 0 but label is [{current}], not UAT -- skipping gates")
@@ -797,37 +1015,37 @@ def handle_post_tester(
 
     if skip_gates:
         print("  --skip-gates active -- skipping all quality gates, proceeding to merge")
-        _call_finish_feature(issue_num, worktester_root, target_branch=target_branch, repo_name=repo_name)
-        _post_agent_event("gate:merging")
+        _call_finish_feature(issue_num, wt_root, target_branch=target_branch, repo_name=eff_repo, cfg=cfg)
+        _post_agent_event("gate:merging", api_url=api_url)
         all_skipped = [
             GateResult(gate="pytest",        passed=True, skipped=True),
             GateResult(gate="lint",          passed=True, skipped=True),
             GateResult(gate="merge-preview", passed=True, skipped=True),
         ]
-        _post_success_comment(issue_num, all_skipped, repo_name=repo_name)
+        _post_success_comment(issue_num, all_skipped, repo_name=eff_repo)
         return True, f"Issue #{issue_num}: all gates skipped, merged into {target_branch}", None
 
     results = _run_quality_gates(
         issue_num=issue_num,
         feature_branch=feature_branch,
-        worktester_root=worktester_root,
-        worktester_dashboard=worktester_dashboard,
+        worktester_root=wt_root,
+        worktester_dashboard=wt_dashboard,
         skip_all=False,
         gate_pytest=gate_pytest,
         gate_lint=gate_lint,
         gate_merge_preview=gate_merge_preview,
         target_branch=target_branch,
-        repo_name=repo_name,
+        repo_name=eff_repo,
     )
 
     # Check if all gates passed
     all_passed = all(r.passed for r in results)
 
     if all_passed:
-        _post_agent_event("gate:merging")
+        _post_agent_event("gate:merging", api_url=api_url)
         print(f"  All gates passed -- calling finish_feature.py for issue #{issue_num}")
-        _call_finish_feature(issue_num, worktester_root, target_branch=target_branch, repo_name=repo_name)
-        _post_success_comment(issue_num, results, repo_name=repo_name)
+        _call_finish_feature(issue_num, wt_root, target_branch=target_branch, repo_name=eff_repo, cfg=cfg)
+        _post_success_comment(issue_num, results, repo_name=eff_repo)
         return True, f"Issue #{issue_num}: all gates passed, merged into {target_branch}", None
     else:
         failed = next((r for r in results if not r.passed), None)
@@ -839,8 +1057,9 @@ def handle_post_tester(
 
 # ── agent dispatch helpers ────────────────────────────────────────────────────
 
-def _issue_log_path(issue_num: int) -> Path:
-    return DASHBOARD_DIR / "logs" / f"sprint-issue-{issue_num}.log"
+def _issue_log_path(issue_num: int, cfg: Optional["SprintConfig"] = None) -> Path:
+    logs_dir = cfg.logs_dir if cfg is not None else (DASHBOARD_DIR / "logs")
+    return logs_dir / f"sprint-issue-{issue_num}.log"
 
 
 def _dispatch_coder(
@@ -848,23 +1067,41 @@ def _dispatch_coder(
     alert_modes: list[str],
     sprint_branch: str = "develop",
     repo_name: Optional[str] = None,
+    cfg: Optional["SprintConfig"] = None,
 ) -> tuple[bool, Optional[str]]:
     """Dispatch a coder agent for the issue.  Returns (ok, failure_category)."""
-    print(f"  Dispatching coder for issue #{issue_num} ...")
-    _post_agent_event(f"coder:issue-{issue_num}")
+    eff_repo = repo_name or (cfg.repo_name if cfg else None)
+    api_url  = cfg.api_url if cfg else None
+    cwd_path = cfg.worktree_coder if cfg else WORKTESTER_DASHBOARD
 
-    log_path = _issue_log_path(issue_num)
+    print(f"  Dispatching coder for issue #{issue_num} ...")
+    _post_agent_event(f"coder:issue-{issue_num}", api_url=api_url)
+
+    log_path = _issue_log_path(issue_num, cfg=cfg)
     log_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Build prompt
+    if cfg and cfg.coder_prompt_template:
+        issue_url = f"https://github.com/{_r(eff_repo)}/issues/{issue_num}"
+        prompt = cfg.coder_prompt_template.format(issue_url=issue_url)
+    else:
+        prompt = (
+            f"Read the issue at https://github.com/{_r(eff_repo)}/issues/{issue_num} "
+            "and implement it following the project's branching workflow. "
+            "Use the BA/coder/tester workflow defined in CLAUDE.md."
+        )
 
     cmd = [
         "claude",
         "--dangerously-skip-permissions",
         "-p",
-        (f"Read the issue at https://github.com/{_r(repo_name)}/issues/{issue_num} "
-         "and implement it following the project's branching workflow. "
-         "Use the BA/coder/tester workflow defined in CLAUDE.md. "
-         f"IMPORTANT: pass --base-branch {sprint_branch} to start_feature.py "
-         f"so that the feature branch is based off {sprint_branch!r} instead of develop."),
+        prompt + (
+            f" IMPORTANT: pass --base-branch {sprint_branch} to start_feature.py"
+            f" so that the feature branch is based off {sprint_branch!r} instead of develop."
+            if sprint_branch not in ("develop",)
+            and not (cfg and cfg.coder_prompt_template)
+            else ""
+        ),
     ]
 
     try:
@@ -873,7 +1110,7 @@ def _dispatch_coder(
                 cmd,
                 stdout=log_f,
                 stderr=log_f,
-                cwd=str(WORKTESTER_DASHBOARD),
+                cwd=str(cwd_path),
             )
     except FileNotFoundError:
         # claude CLI not available -- treat as stub success for testing
@@ -887,13 +1124,14 @@ def _dispatch_coder(
 
     if detector.killed:
         reason = f"No log activity for {HANG_KILL_SECS//60} minutes"
-        _add_blocked_label(issue_num, reason, repo_name=repo_name)
+        _add_blocked_label(issue_num, reason, repo_name=eff_repo)
         dispatch_alerts(
             alert_modes,
             title=f"Issue #{issue_num}: HANG detected",
             body=f"The coder subprocess produced no output for {HANG_KILL_SECS//60} minutes and was killed.",
             issue_num=issue_num,
             category=FailureCategory.HANG,
+            cfg=cfg,
         )
         return False, FailureCategory.HANG
 
@@ -907,20 +1145,34 @@ def _dispatch_tester(
     issue_num: int,
     alert_modes: list[str],
     repo_name: Optional[str] = None,
+    cfg: Optional["SprintConfig"] = None,
 ) -> tuple[int, Optional[str]]:
     """Dispatch a tester agent.  Returns (exit_code, failure_category_if_hang)."""
-    print(f"  Dispatching tester for issue #{issue_num} ...")
-    _post_agent_event(f"tester:issue-{issue_num}")
+    eff_repo = repo_name or (cfg.repo_name if cfg else None)
+    api_url  = cfg.api_url if cfg else None
+    cwd_path = cfg.worktree_tester_app if cfg else WORKTESTER_DASHBOARD
 
-    log_path = _issue_log_path(issue_num)
+    print(f"  Dispatching tester for issue #{issue_num} ...")
+    _post_agent_event(f"tester:issue-{issue_num}", api_url=api_url)
+
+    log_path = _issue_log_path(issue_num, cfg=cfg)
+
+    # Build prompt
+    if cfg and cfg.tester_prompt_template:
+        issue_url = f"https://github.com/{_r(eff_repo)}/issues/{issue_num}"
+        prompt = cfg.tester_prompt_template.format(issue_url=issue_url)
+    else:
+        prompt = (
+            f"Read the issue at https://github.com/{_r(eff_repo)}/issues/{issue_num} "
+            "and verify it as a tester following the project's testing workflow. "
+            "Use the BA/coder/tester workflow defined in CLAUDE.md."
+        )
 
     cmd = [
         "claude",
         "--dangerously-skip-permissions",
         "-p",
-        (f"Read the issue at https://github.com/{_r(repo_name)}/issues/{issue_num} "
-         "and verify it as a tester following the project's testing workflow. "
-         "Use the BA/coder/tester workflow defined in CLAUDE.md."),
+        prompt,
     ]
 
     try:
@@ -929,7 +1181,7 @@ def _dispatch_tester(
                 cmd,
                 stdout=log_f,
                 stderr=log_f,
-                cwd=str(WORKTESTER_DASHBOARD),
+                cwd=str(cwd_path),
             )
     except FileNotFoundError:
         print("  [tester] claude CLI not found -- stub success")
@@ -942,13 +1194,14 @@ def _dispatch_tester(
 
     if detector.killed:
         reason = f"Tester: no log activity for {HANG_KILL_SECS//60} minutes"
-        _add_blocked_label(issue_num, reason, repo_name=repo_name)
+        _add_blocked_label(issue_num, reason, repo_name=eff_repo)
         dispatch_alerts(
             alert_modes,
             title=f"Issue #{issue_num}: HANG detected in tester",
             body=f"The tester subprocess produced no output for {HANG_KILL_SECS//60} minutes.",
             issue_num=issue_num,
             category=FailureCategory.HANG,
+            cfg=cfg,
         )
         return -1, FailureCategory.HANG
 
@@ -1272,17 +1525,19 @@ def write_sprint_summary(
     open_issues: Optional[list[dict]] = None,
     repo_name: Optional[str] = None,
     sprint_branch: Optional[str] = None,
+    cfg: Optional["SprintConfig"] = None,
 ) -> Path:
     """Write summary file, create GitHub issue, prompt for learnings (AC-1/2/3)."""
+    eff_repo = repo_name or (cfg.repo_name if cfg else None)
     content = generate_sprint_summary(
         state,
         elapsed_secs,
         end_reason=end_reason,
         open_issues=open_issues,
-        repo_name=repo_name,
+        repo_name=eff_repo,
         sprint_branch=sprint_branch,
     )
-    path = _summary_path(state.sprint_number, state.sprint_label)
+    path = _summary_path(state.sprint_number, state.sprint_label, cfg=cfg)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
     print(f"  Sprint summary written to {path}")
@@ -1290,7 +1545,7 @@ def write_sprint_summary(
     # Dispatch via all configured alert channels (issue #24)
     if alert_modes:
         title = f"Sprint {state.sprint_label} summary"
-        dispatch_alerts(alert_modes, title=title, body=content[:2000])
+        dispatch_alerts(alert_modes, title=title, body=content[:2000], cfg=cfg)
 
     # AC-2: Create GitHub issue (best-effort)
     try:
@@ -1298,7 +1553,7 @@ def write_sprint_summary(
             content=content,
             sprint_number=state.sprint_number,
             sprint_label=state.sprint_label,
-            repo_name=repo_name,
+            repo_name=eff_repo,
         )
     except Exception as exc:
         print(f"  Warning: create_summary_github_issue raised -- {exc}", file=sys.stderr)
@@ -1306,7 +1561,7 @@ def write_sprint_summary(
 
     # Store summary_issue_url in state JSON
     if summary_issue_url:
-        state_path = _state_path(state.sprint_number, state.sprint_label)
+        state_path = _state_path(state.sprint_number, state.sprint_label, cfg=cfg)
         try:
             if state_path.exists():
                 state_dict = json.loads(state_path.read_text())
@@ -1327,7 +1582,7 @@ def write_sprint_summary(
         sprint_number=state.sprint_number,
         sprint_label=state.sprint_label,
         summary_issue_num=summary_issue_num,
-        repo_name=repo_name,
+        repo_name=eff_repo,
     )
 
     return path
@@ -1389,6 +1644,7 @@ def run_sprint(
     resume: bool = False,
     retry_failed: bool = False,
     target_branch: Optional[str] = None,
+    cfg: Optional["SprintConfig"] = None,
 ) -> tuple[SprintSummary, SprintState]:
     """Main sprint loop -- processes backlog issues sequentially.
 
@@ -1401,9 +1657,24 @@ def run_sprint(
     if alert_modes is None:
         alert_modes = [AlertMode.DASHBOARD_BANNER]
 
+    # Effective repo: explicit arg > config > github_client
+    eff_repo   = repo_name or (cfg.repo_name if cfg else None)
+    api_url    = cfg.api_url if cfg else None
+
     summary    = SprintSummary()
     sprint_num = _sprint_number(label)
-    state_path = _state_path(sprint_num, label)
+    state_path = _state_path(sprint_num, label, cfg=cfg)
+
+    # Log config info when running against a second repo
+    if cfg and cfg.repo_name:
+        print(f"\n=== SprintConfig ===")
+        print(f"  repo:         {cfg.repo_name}")
+        print(f"  coder-wt:     {cfg.worktree_coder}")
+        print(f"  tester-wt:    {cfg.worktree_tester}")
+        print(f"  tester-app:   {cfg.worktree_tester_app}")
+        print(f"  logs-dir:     {cfg.logs_dir}")
+        print(f"  sprints-dir:  {cfg.sprints_dir}")
+        print(f"  api-url:      {cfg.api_url}")
 
     # Determine the sprint branch name and effective merge target
     sprint_branch = f"sprint/{label}"
@@ -1415,7 +1686,7 @@ def run_sprint(
         print(f"  Loading existing sprint state from {state_path}")
         state = SprintState.from_dict(json.loads(state_path.read_text()))
     else:
-        raw_issues = list_backlog_issues(label, repo_name=repo_name)
+        raw_issues = list_backlog_issues(label, repo_name=eff_repo)
         if not raw_issues:
             print("No backlog issues found for this label.")
             state = SprintState(
@@ -1480,12 +1751,12 @@ def run_sprint(
             issue_state.skip_reason = "dry-run"
             summary.skipped.append(f"#{num} (dry-run)")
             state.save(state_path)
-            _post_sprint_status(state)
+            _post_sprint_status(state, api_url=api_url)
             continue
 
         # -- Dispatch coder --
         coder_ok, coder_category = _dispatch_coder(
-            num, alert_modes, sprint_branch=target_branch, repo_name=repo_name,
+            num, alert_modes, sprint_branch=target_branch, repo_name=eff_repo, cfg=cfg,
         )
 
         if not coder_ok:
@@ -1502,13 +1773,16 @@ def run_sprint(
                 body=reason,
                 issue_num=num,
                 category=category,
+                cfg=cfg,
             )
             state.save(state_path)
-            _post_sprint_status(state)
+            _post_sprint_status(state, api_url=api_url)
             continue
 
         # -- Dispatch tester --
-        tester_rc, hang_category = _dispatch_tester(num, alert_modes, repo_name=repo_name)
+        tester_rc, hang_category = _dispatch_tester(
+            num, alert_modes, repo_name=eff_repo, cfg=cfg,
+        )
 
         if hang_category == FailureCategory.HANG:
             issue_state.status      = "skipped"
@@ -1516,21 +1790,20 @@ def run_sprint(
             issue_state.category    = FailureCategory.HANG
             summary.skipped.append(f"#{num} (tester hang)")
             state.save(state_path)
-            _post_sprint_status(state)
+            _post_sprint_status(state, api_url=api_url)
             continue
 
         # -- Post-tester gates --
         merged, summary_line, gate_category = handle_post_tester(
-            issue_num            = num,
-            tester_exit_code     = tester_rc,
-            skip_gates           = skip_gates,
-            gate_pytest          = gate_pytest,
-            gate_lint            = gate_lint,
-            gate_merge_preview   = gate_merge_preview,
-            worktester_root      = WORKTESTER_ROOT,
-            worktester_dashboard = WORKTESTER_DASHBOARD,
-            target_branch        = target_branch,
-            repo_name            = repo_name,
+            issue_num          = num,
+            tester_exit_code   = tester_rc,
+            skip_gates         = skip_gates,
+            gate_pytest        = gate_pytest,
+            gate_lint          = gate_lint,
+            gate_merge_preview = gate_merge_preview,
+            target_branch      = target_branch,
+            repo_name          = eff_repo,
+            cfg                = cfg,
         )
         print(f"  {summary_line}")
 
@@ -1552,12 +1825,13 @@ def run_sprint(
                 body=summary_line,
                 issue_num=num,
                 category=category,
+                cfg=cfg,
             )
 
         elapsed = time.monotonic() - start_time
         state.wall_clock_secs = elapsed
         state.save(state_path)
-        _post_sprint_status(state)
+        _post_sprint_status(state, api_url=api_url)
 
     # Final elapsed time
     state.wall_clock_secs = time.monotonic() - start_time
@@ -1577,6 +1851,18 @@ def main() -> None:
     )
     p.add_argument("label", help="GitHub label identifying the sprint (e.g. sprint-5)")
     p.add_argument("--repo", default=None, help="owner/repo override")
+
+    # Config file (AC-4)
+    p.add_argument(
+        "--config",
+        default=None,
+        metavar="PATH",
+        help=(
+            "Path to .commander/sprint.yaml config file.  "
+            "When provided, all path/repo settings are read from it.  "
+            "Incompatible with env-var fallback path."
+        ),
+    )
 
     # Gate control flags
     p.add_argument(
@@ -1645,6 +1931,26 @@ def main() -> None:
 
     args = p.parse_args()
 
+    # ── Config resolution (AC-4 + AC-5 + AC-6) ───────────────────────────────
+    cfg: Optional[SprintConfig] = None
+
+    if args.config:
+        # Explicit --config flag (AC-4)
+        config_path = Path(args.config).expanduser().resolve()
+        if not config_path.exists():
+            p.error(f"Config file not found: {config_path}")
+        print(f"  Using config: {config_path}")
+        cfg = load_config(config_path)
+    else:
+        # Auto-discovery: walk up from CWD (AC-5)
+        discovered = discover_config()
+        if discovered:
+            print(f"  Auto-discovered config: {discovered}")
+            cfg = load_config(discovered)
+        else:
+            # Backward-compatible default (AC-6)
+            cfg = None
+
     raw_modes   = [m.strip() for m in args.alert_mode.split(",") if m.strip()]
     alert_modes = []
     for m in raw_modes:
@@ -1655,6 +1961,9 @@ def main() -> None:
     if not alert_modes:
         alert_modes = [AlertMode.DASHBOARD_BANNER]
 
+    # --repo flag overrides config (explicit always wins)
+    eff_repo = args.repo or (cfg.repo_name if cfg else None)
+
     summary, state = run_sprint(
         label              = args.label,
         skip_gates         = args.skip_gates,
@@ -1662,11 +1971,12 @@ def main() -> None:
         gate_lint          = args.gate_lint,
         gate_merge_preview = args.gate_merge_preview,
         alert_modes        = alert_modes,
-        repo_name          = args.repo,
+        repo_name          = eff_repo,
         dry_run            = args.dry_run,
         resume             = args.resume,
         retry_failed       = args.retry_failed,
         target_branch      = args.target_branch,
+        cfg                = cfg,
     )
 
     # Derive sprint_branch for summary (mirrors run_sprint logic)
@@ -1681,7 +1991,8 @@ def main() -> None:
             elapsed_secs  = state.wall_clock_secs,
             alert_modes   = alert_modes,
             end_reason    = end_reason,
-            repo_name     = args.repo,
+            repo_name     = eff_repo,
+            cfg           = cfg,
             sprint_branch = effective_target,
         )
     else:

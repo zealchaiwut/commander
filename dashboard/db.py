@@ -202,6 +202,44 @@ def get_window_usage(window_start_utc: str) -> int:
     return int(row["total"])
 
 
+def delete_test_events() -> int:
+    """Delete events whose session_id or data looks like a test/debug entry.
+
+    Matches patterns: session_id starting with 'test_' or 'Test-', or
+    event_type == 'test', or data containing 'Test alert' or 'Test-'.
+    Returns the count of rows deleted.
+    """
+    with get_conn() as conn:
+        cur = conn.execute(
+            """DELETE FROM events WHERE
+               session_id LIKE 'test_%'
+               OR session_id LIKE 'Test-%'
+               OR event_type = 'test'
+               OR data LIKE '%Test alert%'
+               OR data LIKE '%Test-%'
+               OR data LIKE '%-test-%'""",
+        )
+        conn.commit()
+        return cur.rowcount
+
+
+def delete_test_agents() -> int:
+    """Delete agents whose session_id or name looks like a test/debug entry.
+
+    Returns the count of rows deleted.
+    """
+    with get_conn() as conn:
+        cur = conn.execute(
+            """DELETE FROM agents WHERE
+               session_id LIKE 'test_%'
+               OR session_id LIKE 'Test-%'
+               OR name LIKE 'test_%'
+               OR name LIKE 'Test-%'""",
+        )
+        conn.commit()
+        return cur.rowcount
+
+
 def get_tokens_today(project: str | None = None) -> dict:
     """Return total input_tokens, output_tokens since midnight Asia/Bangkok.
 

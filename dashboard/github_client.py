@@ -125,6 +125,21 @@ def list_open_issues(repo_name: str | None = None, limit: int = 20) -> list[dict
     return _cached(key, fetch)
 
 
+def list_all_open_issues(repo_name: str | None = None, limit: int = 200) -> list[dict]:
+    """List all open issues with column classification (no sprint filter)."""
+    r = _r(repo_name)
+    key = f"all_open_issues:{r}"
+    def fetch():
+        issues = _json(
+            "issue", "list", "--repo", r,
+            "--state", "open",
+            "--json", "number,title,labels,assignees,state,url,createdAt,updatedAt",
+            "--limit", str(limit),
+        )
+        return [{"column": classify_issue(i), **i} for i in issues]
+    return _cached(key, fetch)
+
+
 def list_open_issues_with_body(repo_name: str | None = None, limit: int = 200) -> list[dict]:
     """List open issues including body field — needed for size estimation."""
     r = _r(repo_name)

@@ -757,7 +757,10 @@
 <!-- ── Activity view ── -->
 <div id="view-activity" class="hidden">
   <div class="section-pad">
-    <div class="section-label">Activity log</div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+      <div class="section-label" style="margin-bottom:0">Activity log</div>
+      <button class="btn-ghost" id="btn-clear-test-data" onclick="clearTestData()" style="font-size:11px;padding:4px 10px;" title="Remove test/debug entries from the activity log">Clear test data</button>
+    </div>
     <div class="activity-list" id="activity-list">
       <div class="empty">No activity yet</div>
     </div>

@@ -144,35 +144,49 @@ function agentPillsHtml(agents) {
 }
 
 function projectRowHtml(proj) {
-  const id       = _projId(proj.repo);
-  const colorHex = proj.color || '#6b7280';
-  const progress = proj.progress    || { closed: 0, total: 0, pct: 0 };
-  const eta      = proj.eta         || { value: 'TBD', sub: 'no data', status: 'idle' };
-  const bar      = proj.bar_status  || 'idle';
-  const etaSt    = eta.status       || 'idle';
+  const id            = _projId(proj.repo);
+  const colorHex      = proj.color || '#6b7280';
+  const hasActiveSprint = proj.has_active_sprint === true;
+  const progress      = proj.progress    || { closed: 0, total: 0, pct: 0 };
+  const eta           = proj.eta         || { value: 'TBD', sub: 'no data', status: 'idle' };
+  const bar           = proj.bar_status  || 'idle';
+  const etaSt         = eta.status       || 'idle';
+  const openCount     = proj.openCount   || 0;
 
   const sprintLine = proj.current_sprint
     ? `<div class="proj-sprint-line">
          <span class="sprint-tag">Sprint ${proj.current_sprint}</span>
          ${proj.sprint_theme ? `<span class="sprint-theme">${escapeHtml(proj.sprint_theme)}</span>` : ''}
        </div>`
-    : '<div class="proj-sprint-line"><span class="no-sprint-text">No active sprint</span></div>';
-
-  const progHtml = progress.total > 0
-    ? `<div class="proj-col-progress">
-         <div class="prog-header">
-           <span class="prog-lbl">${progress.closed}/${progress.total} closed</span>
-           <span class="prog-pct">${progress.pct}%</span>
-         </div>
-         <div class="prog-track"><div class="prog-fill ${bar}" style="width:${progress.pct}%"></div></div>
-       </div>`
-    : `<div class="proj-col-progress">
-         <div class="prog-header">
-           <span class="prog-lbl">No tickets</span>
-           <span class="prog-pct">—</span>
-         </div>
-         <div class="prog-track"><div class="prog-fill idle" style="width:0%"></div></div>
+    : `<div class="proj-sprint-line">
+         <span class="no-sprint-text">${openCount} open ticket${openCount !== 1 ? 's' : ''}</span>
        </div>`;
+
+  // Only show progress bar and ETA when a sprint is active
+  const progHtml = hasActiveSprint
+    ? (progress.total > 0
+        ? `<div class="proj-col-progress">
+             <div class="prog-header">
+               <span class="prog-lbl">${progress.closed}/${progress.total} closed</span>
+               <span class="prog-pct">${progress.pct}%</span>
+             </div>
+             <div class="prog-track"><div class="prog-fill ${bar}" style="width:${progress.pct}%"></div></div>
+           </div>`
+        : `<div class="proj-col-progress">
+             <div class="prog-header">
+               <span class="prog-lbl">No sprint tickets</span>
+               <span class="prog-pct">—</span>
+             </div>
+             <div class="prog-track"><div class="prog-fill idle" style="width:0%"></div></div>
+           </div>`)
+    : `<div class="proj-col-progress"></div>`;
+
+  const etaHtml = hasActiveSprint
+    ? `<div class="proj-col-eta">
+         <span class="eta-val ${etaSt}">${escapeHtml(eta.value)}</span>
+         <span class="eta-sub ${etaSt}">${escapeHtml(eta.sub)}</span>
+       </div>`
+    : `<div class="proj-col-eta"></div>`;
 
   // use data attributes to avoid quoting issues in onclick
   return `
@@ -190,10 +204,7 @@ function projectRowHtml(proj) {
           </div>
         </div>
         ${progHtml}
-        <div class="proj-col-eta">
-          <span class="eta-val ${etaSt}">${escapeHtml(eta.value)}</span>
-          <span class="eta-sub ${etaSt}">${escapeHtml(eta.sub)}</span>
-        </div>
+        ${etaHtml}
         <div class="proj-col-agents">${agentPillsHtml(proj.agents)}</div>
         <div class="proj-col-chevron"><i class="ti ti-chevron-down chevron-icon"></i></div>
       </div>
@@ -369,18 +380,20 @@ function renderExpandPanel(id, data, repo) {
   const agents  = data.agents  || [];
   const ghUrl   = data.github_url || `https://github.com/${repo}/issues`;
 
-  // Group tickets by workflow stage; only render non-empty sections
+  // Group tickets by workflow stage in priority order: SIT → UAT → in-progress → backlog
   let ticketsHtml;
   if (tickets.length === 0) {
     ticketsHtml = '<div class="empty-small">No open tickets</div>';
   } else {
-    const sitT   = tickets.filter(t => t.status === 'SIT');
-    const uatT   = tickets.filter(t => t.status === 'UAT');
-    const otherT = tickets.filter(t => !['SIT', 'UAT'].includes(t.status));
+    const sitT      = tickets.filter(t => t.status === 'SIT');
+    const uatT      = tickets.filter(t => t.status === 'UAT');
+    const activeT   = tickets.filter(t => t.status === 'in-progress' || t.status === 'blocked');
+    const backlogT  = tickets.filter(t => t.status === 'backlog');
     ticketsHtml  = [
-      _ticketGroupHtml('SIT',    sitT,   repo),
-      _ticketGroupHtml('UAT',    uatT,   repo),
-      _ticketGroupHtml('Others', otherT, repo),
+      _ticketGroupHtml('SIT',         sitT,     repo),
+      _ticketGroupHtml('UAT',         uatT,     repo),
+      _ticketGroupHtml('In progress', activeT,  repo),
+      _ticketGroupHtml('Backlog',     backlogT, repo),
     ].join('');
   }
 
@@ -958,6 +971,22 @@ async function submitNewProject(event) {
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape') closeNewProjectModal();
 });
+
+// ── Clear test data ───────────────────────────────────────────────────────────
+async function clearTestData() {
+  const btn = document.getElementById('btn-clear-test-data');
+  if (btn) { btn.disabled = true; btn.textContent = 'Clearing…'; }
+  try {
+    const res = await fetch('/api/events/test', { method: 'DELETE' });
+    if (!res.ok) throw new Error(await res.text());
+    fetchEvents();
+    loadAlerts().catch(() => {});
+  } catch (e) {
+    showToast('Clear test data failed: ' + e.message);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Clear test data'; }
+  }
+}
 
 // ── Manual refresh ────────────────────────────────────────────────────────────
 async function manualRefresh() {

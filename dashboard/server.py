@@ -457,4 +457,155 @@ def get_plan_usage():
     }
 
 
+# ── sprint planning endpoints (issue #26) ────────────────────────────────────
+
+def _sprint_estimate_size(issue: dict) -> str:
+    """Estimate issue size from body content and labels (same heuristic as sprint_planner.py).
+
+    Sizing table:
+    | AC + UAT | File mentions | Base size |
+    |----------|---------------|-----------|
+    | <= 3     | <= 1          | S         |
+    | 4-7      | 2-3           | M         |
+    | 8-12     | 4-6           | L         |
+    | > 12     | > 6           | XL        |
+
+    Label modifier: bug -> -1 level; enhancement -> +1 level
+    """
+    import re as _re
+    body = issue.get("body") or ""
+    labels = {lbl["name"] for lbl in issue.get("labels", [])}
+
+    ac_count = 0
+    in_ac = False
+    for line in body.splitlines():
+        if _re.match(r"^#+\s+Acceptance Criteria", line, _re.IGNORECASE):
+            in_ac = True
+            continue
+        if in_ac and _re.match(r"^#+\s+", line):
+            in_ac = False
+        if in_ac and _re.match(r"^\s*-\s+\[[ x]\]", line):
+            ac_count += 1
+
+    uat_count = 0
+    in_uat = False
+    for line in body.splitlines():
+        if _re.match(r"^#+\s+UAT Test Steps", line, _re.IGNORECASE):
+            in_uat = True
+            continue
+        if in_uat and _re.match(r"^#+\s+", line):
+            in_uat = False
+        if in_uat and _re.match(r"^\s*\d+\.\s+", line):
+            uat_count += 1
+
+    file_pattern = _re.compile(r"\b[\w_-]+\.(?:py|js|ts|html|css|sh|json|md|yaml|yml|txt|env)\b")
+    file_mentions = len(set(file_pattern.findall(body)))
+
+    total = ac_count + uat_count
+    _sizes = ["S", "M", "L", "XL"]
+    _size_idx = {s: i for i, s in enumerate(_sizes)}
+
+    if total <= 3:
+        _size_by_total = "S"
+    elif total <= 7:
+        _size_by_total = "M"
+    elif total <= 12:
+        _size_by_total = "L"
+    else:
+        _size_by_total = "XL"
+
+    if file_mentions <= 1:
+        _size_by_files = "S"
+    elif file_mentions <= 3:
+        _size_by_files = "M"
+    elif file_mentions <= 6:
+        _size_by_files = "L"
+    else:
+        _size_by_files = "XL"
+
+    base = _sizes[min(_size_idx[_size_by_total], _size_idx[_size_by_files])]
+
+    idx = _size_idx[base]
+    if "bug" in labels:
+        idx = max(0, idx - 1)
+    if "enhancement" in labels:
+        idx = min(len(_sizes) - 1, idx + 1)
+
+    return _sizes[idx]
+
+
+class SprintAssignBody(BaseModel):
+    issue: int
+    sprint: Optional[int] = None  # None = remove all sprint labels
+
+
+@app.get("/api/sprint-planning/issues")
+def get_sprint_planning_issues():
+    """Return all open issues with sprint assignment and size estimate.
+
+    Cache TTL: 30s. Cache is invalidated after label mutations via POST /assign.
+    """
+    try:
+        issues = github_client.list_open_issues_with_body(limit=200)
+        sprints = github_client.list_sprints()
+    except subprocess.CalledProcessError as e:
+        raise _gh_error(e)
+    except ValueError as e:
+        raise HTTPException(400, detail=str(e))
+
+    sprint_re_local = re.compile(r"^sprint-(\d+)$")
+
+    result_issues = []
+    for iss in issues:
+        sprint_num = None
+        for lbl in iss.get("labels", []):
+            m = sprint_re_local.match(lbl["name"])
+            if m:
+                sprint_num = int(m.group(1))
+                break
+
+        size = _sprint_estimate_size(iss)
+        status = github_client.classify_issue(iss)
+
+        result_issues.append({
+            "number": iss["number"],
+            "title": iss["title"],
+            "labels": iss.get("labels", []),
+            "sprint": sprint_num,
+            "size": size,
+            "status": status,
+            "url": iss.get("url", ""),
+        })
+
+    return {
+        "sprints": sprints,
+        "issues": result_issues,
+    }
+
+
+@app.post("/api/sprint-planning/assign")
+async def assign_sprint_label(body: SprintAssignBody):
+    """Assign or remove a sprint label on an issue.
+
+    Body: {"issue": 21, "sprint": 3} — assigns sprint-3, removes other sprint-* labels
+    Body: {"issue": 21, "sprint": null} — removes all sprint-* labels
+
+    On success: invalidates cache, broadcasts SSE sprint_plan_update, returns {"ok": true}.
+    Creates sprint-N label if it doesn't exist.
+    """
+    try:
+        github_client.assign_sprint(body.issue, body.sprint)
+        # Invalidate open_issues_body cache so next GET reflects the change
+        github_client.invalidate("open_issues_body:")
+        github_client.invalidate("open_issues:")
+        github_client.invalidate("sprints:")
+    except subprocess.CalledProcessError as e:
+        raise _gh_error(e)
+    except ValueError as e:
+        raise HTTPException(400, detail=str(e))
+
+    await broadcast({"type": "update", "event": {"event_type": "sprint_plan_update"}})
+    return {"ok": True}
+
+
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")

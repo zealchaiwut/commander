@@ -72,12 +72,15 @@ function _syncThemeIcon(theme) {
 
 // ── Tab navigation ────────────────────────────────────────────────────────────
 function switchMain(tab) {
-  ['projects', 'agents', 'activity'].forEach(t => {
-    document.getElementById(`view-${t}`).classList.toggle('hidden', t !== tab);
-    document.getElementById(`mtab-${t}`).classList.toggle('active', t === tab);
+  ['projects', 'agents', 'activity', 'sprint-plan'].forEach(t => {
+    const viewId = t === 'sprint-plan' ? 'view-sprint-plan' : `view-${t}`;
+    const tabId  = `mtab-${t}`;
+    document.getElementById(viewId)?.classList.toggle('hidden', t !== tab);
+    document.getElementById(tabId)?.classList.toggle('active', t === tab);
   });
-  if (tab === 'agents')   fetchAgents();
-  if (tab === 'activity') fetchEvents();
+  if (tab === 'agents')      fetchAgents();
+  if (tab === 'activity')    fetchEvents();
+  if (tab === 'sprint-plan') loadSprintPlanning();
 }
 
 // ── Filter ────────────────────────────────────────────────────────────────────
@@ -764,6 +767,7 @@ function connectSSE() {
         });
       }
       if (!document.getElementById('view-agents').classList.contains('hidden')) fetchAgents();
+      if (msg.event && msg.event.event_type === 'sprint_plan_update') _handleSprintPlanSSE();
     } catch { /* ignore */ }
   };
 }
@@ -977,6 +981,457 @@ async function fetchEnvironment() {
       el.className   = `env-badge ${env}`;
     }
   } catch { /* ignore — badge is optional */ }
+}
+
+// ── Sprint Planning (issue #26) ───────────────────────────────────────────────
+
+let _spData = null;          // last-fetched { sprints, issues }
+let _spSelectedSprint = null; // currently selected sprint number (int or null)
+let _spPendingChanges = {};  // issueNum -> { from: 'unassigned'|'sprint', to: ... }
+let _spDragSrc = null;       // { card, issueNum, fromCol }
+let _spDragGhost = null;     // pointer-event drag ghost element
+
+// ── fetch / render ────────────────────────────────────────────────────────────
+
+async function loadSprintPlanning() {
+  try {
+    const res = await fetch('/api/sprint-planning/issues');
+    if (!res.ok) throw new Error(await res.text());
+    _spData = await res.json();
+    _renderSprintPlanning();
+  } catch (e) {
+    document.getElementById('sp-cards-unassigned').innerHTML =
+      `<div class="sp-empty">Failed to load: ${escapeHtml(e.message)}</div>`;
+  }
+}
+
+function _renderSprintPlanning() {
+  if (!_spData) return;
+
+  const { sprints, issues } = _spData;
+
+  // Build sprint selector
+  const sel = document.getElementById('sp-sprint-select');
+  const prevVal = sel.value;
+  sel.innerHTML = '';
+
+  sprints.forEach(n => {
+    const opt = document.createElement('option');
+    opt.value = n;
+    opt.textContent = `sprint-${n}`;
+    sel.appendChild(opt);
+  });
+
+  // + New sprint option
+  const newOpt = document.createElement('option');
+  newOpt.value = 'new';
+  newOpt.textContent = '+ New sprint';
+  sel.appendChild(newOpt);
+
+  // Restore or set default
+  if (_spSelectedSprint !== null && sprints.includes(_spSelectedSprint)) {
+    sel.value = String(_spSelectedSprint);
+  } else if (prevVal && prevVal !== 'new' && sprints.includes(Number(prevVal))) {
+    sel.value = prevVal;
+    _spSelectedSprint = Number(prevVal);
+  } else if (sprints.length > 0) {
+    _spSelectedSprint = sprints[sprints.length - 1];
+    sel.value = String(_spSelectedSprint);
+  }
+
+  _renderColumns(issues);
+}
+
+function _renderColumns(issues) {
+  const sprint = _spSelectedSprint;
+
+  // Apply pending changes
+  const effectiveIssues = issues.map(iss => {
+    const pending = _spPendingChanges[iss.number];
+    if (!pending) return iss;
+    const newSprint = pending.to === 'sprint' ? sprint : null;
+    return { ...iss, sprint: newSprint };
+  });
+
+  const unassigned = effectiveIssues.filter(iss => iss.sprint === null || iss.sprint === undefined);
+  const inSprint   = effectiveIssues.filter(iss => iss.sprint === sprint);
+
+  const unassignedTitle = document.getElementById('sp-unassigned-title');
+  const sprintTitle     = document.getElementById('sp-sprint-title');
+  if (unassignedTitle) unassignedTitle.textContent = `Unassigned (${unassigned.length})`;
+  if (sprintTitle)     sprintTitle.textContent     = `Sprint ${sprint ?? '?'} (${inSprint.length})`;
+
+  document.getElementById('sp-cards-unassigned').innerHTML =
+    unassigned.length === 0
+      ? '<div class="sp-empty">No unassigned issues</div>'
+      : unassigned.map(iss => _spCardHtml(iss)).join('');
+
+  document.getElementById('sp-cards-sprint').innerHTML =
+    sprint === null
+      ? '<div class="sp-empty">Select a sprint</div>'
+      : inSprint.length === 0
+        ? '<div class="sp-empty">No issues in this sprint</div>'
+        : inSprint.map(iss => _spCardHtml(iss)).join('');
+
+  _bindDragEvents();
+  _renderSpFooter(inSprint);
+
+  // Show/hide Apply button if there are pending changes
+  const applyBtn = document.getElementById('sp-apply-btn');
+  if (applyBtn) {
+    const hasPending = Object.keys(_spPendingChanges).length > 0;
+    applyBtn.style.display = hasPending ? '' : 'none';
+  }
+}
+
+function _spCardHtml(iss) {
+  const statusColor = { 'in-progress': 'blue', 'SIT': 'amber', 'UAT': 'purple', 'backlog': 'gray', 'blocked': 'red' };
+  const color = statusColor[iss.status] || 'gray';
+  const title = escapeHtml(iss.title || '');
+  return `
+    <div class="sp-card" id="sp-card-${iss.number}"
+         draggable="true"
+         data-issue="${iss.number}" data-sprint="${iss.sprint ?? ''}" data-size="${escapeHtml(iss.size || '?')}">
+      <div class="sp-card-top">
+        <a class="sp-card-num" href="${escapeHtml(iss.url || '#')}" target="_blank" rel="noopener"
+           onclick="event.stopPropagation()">#${iss.number}</a>
+        <span class="sp-card-size">${escapeHtml(iss.size || '?')}</span>
+        <span class="sp-card-title">${title}</span>
+      </div>
+      <div class="sp-card-meta">
+        <span class="sbadge ${color}">${escapeHtml(iss.status)}</span>
+      </div>
+    </div>`;
+}
+
+function _renderSpFooter(inSprintIssues) {
+  const footer = document.getElementById('sp-footer');
+  if (!footer) return;
+  if (_spSelectedSprint === null || inSprintIssues.length === 0) {
+    footer.textContent = '';
+    return;
+  }
+
+  const sizeHours = { S: 1, M: 2, L: 4, XL: 8 };
+  const counts = {};
+  let total = 0;
+  for (const iss of inSprintIssues) {
+    const s = iss.size || 'M';
+    counts[s] = (counts[s] || 0) + 1;
+    total += (sizeHours[s] || 2);
+  }
+
+  const sizeOrder = ['S', 'M', 'L', 'XL'];
+  const parts = sizeOrder.filter(s => counts[s]).map(s => `${counts[s]}${s}`);
+  footer.textContent = `Sprint ${_spSelectedSprint} size: ${parts.join(' + ')} · est ${total}h`;
+}
+
+// ── Sprint selector ───────────────────────────────────────────────────────────
+
+async function onSprintSelect() {
+  const sel = document.getElementById('sp-sprint-select');
+  const val = sel.value;
+
+  if (val === 'new') {
+    // Auto-increment sprint number
+    const sprints = (_spData && _spData.sprints) || [];
+    const next = sprints.length > 0 ? Math.max(...sprints) + 1 : 1;
+    // Create the label via assign endpoint — use a dummy "no-op" call to trigger label creation
+    try {
+      await fetch('/api/sprint-planning/issues'); // ensure data is loaded
+      // Create label by calling ensure via a dry-run assign on a non-existent issue
+      // Instead, we hit the assign endpoint with the new sprint for any existing issue
+      // Actually, we just set the sprint selector to the new number and let it render
+      _spSelectedSprint = next;
+      _spPendingChanges = {};
+
+      // Add to local sprints list
+      if (_spData) {
+        if (!_spData.sprints.includes(next)) _spData.sprints.push(next);
+        sel.value = String(next); // will be wrong until re-render
+        _renderSprintPlanning();
+      }
+    } catch (e) {
+      sel.value = _spSelectedSprint ? String(_spSelectedSprint) : '';
+    }
+    return;
+  }
+
+  _spSelectedSprint = Number(val);
+  _spPendingChanges = {};
+  if (_spData) _renderColumns(_spData.issues);
+}
+
+// ── Apply pending changes ─────────────────────────────────────────────────────
+
+async function applySprintChanges() {
+  const changes = Object.entries(_spPendingChanges);
+  if (changes.length === 0) return;
+
+  const btn = document.getElementById('sp-apply-btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Applying…'; }
+
+  let failed = false;
+  for (const [issNum, change] of changes) {
+    const sprintVal = change.to === 'sprint' ? _spSelectedSprint : null;
+    try {
+      const res = await fetch('/api/sprint-planning/assign', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ issue: Number(issNum), sprint: sprintVal }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+    } catch (e) {
+      failed = true;
+      const card = document.getElementById(`sp-card-${issNum}`);
+      if (card) {
+        card.classList.add('error-flash');
+        let errEl = card.querySelector('.sp-card-error');
+        if (!errEl) { errEl = document.createElement('div'); errEl.className = 'sp-card-error'; card.appendChild(errEl); }
+        errEl.textContent = 'Apply failed: ' + e.message;
+        setTimeout(() => card.classList.remove('error-flash'), 600);
+      }
+    }
+  }
+
+  if (!failed) {
+    _spPendingChanges = {};
+  }
+
+  if (btn) { btn.disabled = false; btn.textContent = 'Apply ✓'; }
+
+  // Reload fresh data
+  await loadSprintPlanning();
+}
+
+// ── Drag & drop (HTML5 native) ────────────────────────────────────────────────
+
+function _bindDragEvents() {
+  document.querySelectorAll('.sp-card').forEach(card => {
+    card.addEventListener('dragstart', _onDragStart);
+    card.addEventListener('dragend',   _onDragEnd);
+  });
+}
+
+function _onDragStart(e) {
+  const card = e.currentTarget;
+  _spDragSrc = {
+    card,
+    issueNum: Number(card.dataset.issue),
+    fromCol: card.closest('.sp-col')?.dataset.col,
+  };
+  card.classList.add('dragging');
+  e.dataTransfer.effectAllowed = 'move';
+  e.dataTransfer.setData('text/plain', card.dataset.issue);
+}
+
+function _onDragEnd(e) {
+  e.currentTarget.classList.remove('dragging');
+  _spDragSrc = null;
+}
+
+function onDrop(e, targetCol) {
+  e.preventDefault();
+  if (!_spDragSrc) return;
+
+  const { card, issueNum, fromCol } = _spDragSrc;
+
+  if (fromCol === targetCol) {
+    // Reorder within sprint column (client-side only)
+    return;
+  }
+
+  // Optimistic UI: move card immediately
+  const targetCards = document.getElementById(`sp-cards-${targetCol}`);
+  const fromCards   = document.getElementById(`sp-cards-${fromCol}`);
+  if (!targetCards || !fromCards) return;
+
+  // Remove empty placeholder if present
+  targetCards.querySelectorAll('.sp-empty').forEach(el => el.remove());
+
+  // Move card
+  fromCards.removeChild(card);
+  targetCards.appendChild(card);
+
+  // If source is now empty, add empty placeholder
+  if (fromCards.querySelectorAll('.sp-card').length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'sp-empty';
+    empty.textContent = fromCol === 'sprint' ? 'No issues in this sprint' : 'No unassigned issues';
+    fromCards.appendChild(empty);
+  }
+
+  // Track pending change
+  const pendingPrev = _spPendingChanges[issueNum];
+  if (pendingPrev && pendingPrev.from === targetCol) {
+    // Moving back to original — cancel pending
+    delete _spPendingChanges[issueNum];
+  } else {
+    _spPendingChanges[issueNum] = { from: fromCol, to: targetCol };
+  }
+
+  // Update Apply button visibility
+  const applyBtn = document.getElementById('sp-apply-btn');
+  if (applyBtn) {
+    applyBtn.style.display = Object.keys(_spPendingChanges).length > 0 ? '' : 'none';
+  }
+
+  // Re-compute footer from current DOM state
+  _recomputeFooterFromDOM();
+
+  // Immediately apply (no "Apply" button required for single drags)
+  _applyOneDrop(issueNum, targetCol);
+}
+
+async function _applyOneDrop(issueNum, targetCol) {
+  const sprintVal = targetCol === 'sprint' ? _spSelectedSprint : null;
+  const card = document.getElementById(`sp-card-${issueNum}`);
+  const fromCol = targetCol === 'sprint' ? 'unassigned' : 'sprint';
+
+  try {
+    const res = await fetch('/api/sprint-planning/assign', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ issue: issueNum, sprint: sprintVal }),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    // Success — remove from pending
+    delete _spPendingChanges[issueNum];
+    const applyBtn = document.getElementById('sp-apply-btn');
+    if (applyBtn) applyBtn.style.display = Object.keys(_spPendingChanges).length > 0 ? '' : 'none';
+  } catch (e) {
+    // Rollback: move card back
+    if (card) {
+      const targetCards = document.getElementById(`sp-cards-${targetCol}`);
+      const fromCards   = document.getElementById(`sp-cards-${fromCol}`);
+      if (targetCards && fromCards) {
+        targetCards.removeChild(card);
+        fromCards.querySelectorAll('.sp-empty').forEach(el => el.remove());
+        fromCards.appendChild(card);
+        if (targetCards.querySelectorAll('.sp-card').length === 0) {
+          const empty = document.createElement('div');
+          empty.className = 'sp-empty';
+          empty.textContent = targetCol === 'sprint' ? 'No issues in this sprint' : 'No unassigned issues';
+          targetCards.appendChild(empty);
+        }
+      }
+      // Flash error on card
+      card.classList.add('error-flash');
+      let errEl = card.querySelector('.sp-card-error');
+      if (!errEl) { errEl = document.createElement('div'); errEl.className = 'sp-card-error'; card.appendChild(errEl); }
+      errEl.textContent = 'Failed: ' + e.message;
+      setTimeout(() => {
+        card.classList.remove('error-flash');
+        if (errEl) errEl.remove();
+      }, 3000);
+    }
+    delete _spPendingChanges[issueNum];
+    _recomputeFooterFromDOM();
+  }
+}
+
+function _recomputeFooterFromDOM() {
+  const footer = document.getElementById('sp-footer');
+  if (!footer || _spSelectedSprint === null) return;
+
+  const sizeHours = { S: 1, M: 2, L: 4, XL: 8 };
+  const counts = {};
+  let total = 0;
+
+  document.querySelectorAll('#sp-cards-sprint .sp-card').forEach(card => {
+    const s = card.dataset.size || 'M';
+    counts[s] = (counts[s] || 0) + 1;
+    total += (sizeHours[s] || 2);
+  });
+
+  if (Object.keys(counts).length === 0) {
+    footer.textContent = '';
+    return;
+  }
+
+  const sizeOrder = ['S', 'M', 'L', 'XL'];
+  const parts = sizeOrder.filter(s => counts[s]).map(s => `${counts[s]}${s}`);
+  footer.textContent = `Sprint ${_spSelectedSprint} size: ${parts.join(' + ')} · est ${total}h`;
+}
+
+// ── Mobile touch/pointer drag ─────────────────────────────────────────────────
+
+(function _initPointerDrag() {
+  // We use event delegation on the sp-columns container (added after render)
+  document.addEventListener('pointerdown', _spPointerDown, { passive: false });
+  document.addEventListener('pointermove', _spPointerMove, { passive: false });
+  document.addEventListener('pointerup',   _spPointerUp,   { passive: false });
+})();
+
+let _spTouchDrag = null; // { card, issueNum, fromCol, ghost, startX, startY }
+
+function _spPointerDown(e) {
+  // Only act on touch/pen on sp-card elements
+  if (e.pointerType === 'mouse') return;
+  const card = e.target.closest('.sp-card');
+  if (!card) return;
+
+  e.preventDefault();
+  const rect = card.getBoundingClientRect();
+
+  // Create ghost
+  const ghost = card.cloneNode(true);
+  ghost.style.cssText = `
+    position: fixed; left: ${rect.left}px; top: ${rect.top}px;
+    width: ${rect.width}px; opacity: 0.8; pointer-events: none;
+    z-index: 9999; box-shadow: 0 4px 16px rgba(0,0,0,.2);
+    transition: none;
+  `;
+  document.body.appendChild(ghost);
+  _spDragGhost = ghost;
+
+  _spTouchDrag = {
+    card,
+    issueNum: Number(card.dataset.issue),
+    fromCol: card.closest('.sp-col')?.dataset.col,
+    ghost,
+    startX: e.clientX,
+    startY: e.clientY,
+    offsetX: e.clientX - rect.left,
+    offsetY: e.clientY - rect.top,
+  };
+  card.classList.add('dragging');
+}
+
+function _spPointerMove(e) {
+  if (!_spTouchDrag) return;
+  e.preventDefault();
+  const { ghost, offsetX, offsetY } = _spTouchDrag;
+  ghost.style.left = (e.clientX - offsetX) + 'px';
+  ghost.style.top  = (e.clientY - offsetY) + 'px';
+}
+
+function _spPointerUp(e) {
+  if (!_spTouchDrag) return;
+  const { card, issueNum, fromCol, ghost } = _spTouchDrag;
+
+  ghost.style.display = 'none';
+  const el = document.elementFromPoint(e.clientX, e.clientY);
+  ghost.remove();
+  _spDragGhost = null;
+  card.classList.remove('dragging');
+
+  const targetCol = el?.closest('.sp-col')?.dataset.col;
+  _spTouchDrag = null;
+
+  if (targetCol && targetCol !== fromCol) {
+    _spDragSrc = { card, issueNum, fromCol };
+    onDrop({ preventDefault: () => {} }, targetCol);
+  }
+}
+
+// ── SSE handler for sprint_plan_update ────────────────────────────────────────
+
+function _handleSprintPlanSSE() {
+  // Re-fetch and re-render if the Sprint Planning tab is active
+  if (!document.getElementById('view-sprint-plan').classList.contains('hidden')) {
+    loadSprintPlanning();
+  }
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────

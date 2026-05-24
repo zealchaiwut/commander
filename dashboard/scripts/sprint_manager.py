@@ -417,6 +417,22 @@ def _run_timed(*cmd, cwd: Optional[Path] = None) -> tuple[int, str, str]:
     return r.returncode, r.stdout, r.stderr
 
 
+def _changed_py_files(base_branch: str, cwd: Path) -> list[str]:
+    """Return .py files added/modified in HEAD relative to base_branch.
+
+    Uses git diff <base_branch> --name-only --diff-filter=ACM to find files
+    that were Added, Copied, or Modified relative to base_branch.
+    Returns a list of relative paths (e.g. ['server.py', 'tests/test_foo.py']).
+    """
+    rc, out, _ = _run_timed(
+        "git", "diff", base_branch, "--name-only", "--diff-filter=ACM",
+        cwd=cwd,
+    )
+    if rc != 0:
+        return []
+    return [f for f in out.splitlines() if f.endswith(".py")]
+
+
 # ── dashboard integration ─────────────────────────────────────────────────────
 
 def _post_agent_event(
@@ -706,14 +722,19 @@ def _gate_pytest(
     worktester_dashboard: Path,
     skip: bool,
     repo_name: Optional[str] = None,
+    base_branch: str = "develop",
+    gate_scope: str = "changed",
 ) -> GateResult:
-    """Gate 1 — run pytest -x inside the tester worktree dashboard."""
+    """Gate 1 — run pytest -x inside the tester worktree dashboard.
+
+    gate_scope='changed' (default): only run test files changed relative to
+    base_branch. gate_scope='full': run full pytest suite (legacy behaviour).
+    """
     if skip:
         print("  [gate:pytest] skipped")
         return GateResult(gate="pytest", passed=True, skipped=True)
 
     _post_agent_event("gate:pytest")
-    print("  [gate:pytest] running pytest -x ...")
 
     # Detect pytest binary
     ok, pytest_path, _ = _try("which", "pytest")
@@ -729,7 +750,20 @@ def _gate_pytest(
     else:
         pytest_bin = pytest_path
 
-    rc, stdout, stderr = _run_timed(pytest_bin, "-x", cwd=worktester_dashboard)
+    # Determine which test files to run based on gate_scope
+    if gate_scope == "full":
+        print("  [gate:pytest] running pytest -x (full scope) ...")
+        rc, stdout, stderr = _run_timed(pytest_bin, "-x", cwd=worktester_dashboard)
+    else:
+        # changed scope: only run test files changed relative to base_branch
+        changed = _changed_py_files(base_branch, cwd=worktester_dashboard)
+        test_files = [f for f in changed if f.startswith("tests/")]
+        if not test_files:
+            print("  [gate:pytest] no test files changed — skipped")
+            return GateResult(gate="pytest", passed=True, output="no test files changed")
+        print(f"  [gate:pytest] checking {len(test_files)} file(s): {', '.join(test_files)}")
+        rc, stdout, stderr = _run_timed(pytest_bin, "-x", *test_files, cwd=worktester_dashboard)
+
     combined = stdout + stderr
     if rc == 0:
         print("  [gate:pytest] PASS")
@@ -745,14 +779,19 @@ def _gate_lint(
     worktester_dashboard: Path,
     skip: bool,
     repo_name: Optional[str] = None,
+    base_branch: str = "develop",
+    gate_scope: str = "changed",
 ) -> GateResult:
-    """Gate 2 -- run ruff check . inside the tester worktree dashboard."""
+    """Gate 2 -- run ruff check inside the tester worktree dashboard.
+
+    gate_scope='changed' (default): only lint .py files changed relative to
+    base_branch. gate_scope='full': run ruff check . (legacy behaviour).
+    """
     if skip:
         print("  [gate:lint] skipped")
         return GateResult(gate="lint", passed=True, skipped=True)
 
     _post_agent_event("gate:lint")
-    print("  [gate:lint] running ruff check . ...")
 
     # ruff is optional -- if not found, log warning and treat as passed
     ok, ruff_path, _ = _try("which", "ruff")
@@ -768,7 +807,19 @@ def _gate_lint(
     else:
         ruff_bin = ruff_path
 
-    rc, stdout, stderr = _run_timed(ruff_bin, "check", ".", cwd=worktester_dashboard)
+    # Determine which files to lint based on gate_scope
+    if gate_scope == "full":
+        print("  [gate:lint] running ruff check . (full scope) ...")
+        rc, stdout, stderr = _run_timed(ruff_bin, "check", ".", cwd=worktester_dashboard)
+    else:
+        # changed scope: only lint .py files changed relative to base_branch
+        py_files = _changed_py_files(base_branch, cwd=worktester_dashboard)
+        if not py_files:
+            print("  [gate:lint] no Python files changed — skipped")
+            return GateResult(gate="lint", passed=True, output="no Python files changed")
+        print(f"  [gate:lint] checking {len(py_files)} file(s): {', '.join(py_files)}")
+        rc, stdout, stderr = _run_timed(ruff_bin, "check", *py_files, cwd=worktester_dashboard)
+
     combined = stdout + stderr
     if rc == 0:
         print("  [gate:lint] PASS")
@@ -846,11 +897,17 @@ def _run_quality_gates(
     gate_merge_preview: bool,
     target_branch: str = "develop",
     repo_name: Optional[str] = None,
+    base_branch: str = "develop",
+    gate_scope: str = "changed",
 ) -> list[GateResult]:
     """Run the three quality gates sequentially. Returns list of GateResult.
 
     Stops early on first failure (remaining gates are not run).
     If skip_all is True, all gates are skipped.
+
+    base_branch: branch to diff against when gate_scope='changed' (default: 'develop').
+    gate_scope: 'changed' (default) scopes gates to changed files only;
+                'full' restores legacy full-codebase behaviour.
     """
     results: list[GateResult] = []
 
@@ -860,6 +917,8 @@ def _run_quality_gates(
         worktester_dashboard,
         skip=(skip_all or not gate_pytest),
         repo_name=repo_name,
+        base_branch=base_branch,
+        gate_scope=gate_scope,
     )
     results.append(r1)
     if not r1.passed:
@@ -871,6 +930,8 @@ def _run_quality_gates(
         worktester_dashboard,
         skip=(skip_all or not gate_lint),
         repo_name=repo_name,
+        base_branch=base_branch,
+        gate_scope=gate_scope,
     )
     results.append(r2)
     if not r2.passed:
@@ -970,12 +1031,18 @@ def handle_post_tester(
     target_branch: str = "develop",
     repo_name: Optional[str] = None,
     cfg: Optional["SprintConfig"] = None,
+    base_branch: str = "develop",
+    gate_scope: str = "changed",
 ) -> tuple[bool, str, Optional[str]]:
     """Called after a tester subprocess exits.
 
     Returns (merged: bool, summary_line: str, failure_category: Optional[str]).
 
     AC-1: Gates only run if tester exited 0 AND label is exactly UAT.
+
+    base_branch: branch to diff against when gate_scope='changed' (default: 'develop').
+    gate_scope: 'changed' (default) scopes gates to changed files only;
+                'full' restores legacy full-codebase behaviour.
     """
     # Resolve paths: prefer cfg, then explicit args, then globals
     if cfg is not None:
@@ -1036,6 +1103,8 @@ def handle_post_tester(
         gate_merge_preview=gate_merge_preview,
         target_branch=target_branch,
         repo_name=eff_repo,
+        base_branch=base_branch,
+        gate_scope=gate_scope,
     )
 
     # Check if all gates passed
@@ -1645,6 +1714,7 @@ def run_sprint(
     retry_failed: bool = False,
     target_branch: Optional[str] = None,
     cfg: Optional["SprintConfig"] = None,
+    gate_scope: str = "changed",
 ) -> tuple[SprintSummary, SprintState]:
     """Main sprint loop -- processes backlog issues sequentially.
 
@@ -1653,6 +1723,8 @@ def run_sprint(
 
     target_branch: branch to merge feature branches into. Defaults to
     sprint/<label>. Pass 'develop' to restore legacy behaviour.
+    gate_scope: 'changed' (default) scopes pytest/lint gates to files changed
+    relative to the base branch; 'full' restores legacy full-codebase behaviour.
     """
     if alert_modes is None:
         alert_modes = [AlertMode.DASHBOARD_BANNER]
@@ -1804,6 +1876,8 @@ def run_sprint(
             target_branch      = target_branch,
             repo_name          = eff_repo,
             cfg                = cfg,
+            base_branch        = target_branch or "develop",
+            gate_scope         = gate_scope,
         )
         print(f"  {summary_line}")
 
@@ -1919,6 +1993,18 @@ def main() -> None:
         ),
     )
 
+    # Gate scope (AC-9)
+    p.add_argument(
+        "--gate-scope",
+        default="changed",
+        choices=["changed", "full"],
+        help=(
+            "Scope for pytest and lint gates. "
+            "'changed' (default): only check files changed relative to the base branch. "
+            "'full': run pytest -x and ruff check . against the whole codebase (legacy behaviour)."
+        ),
+    )
+
     # Alert modes (AC-3)
     p.add_argument(
         "--alert-mode",
@@ -1977,6 +2063,7 @@ def main() -> None:
         retry_failed       = args.retry_failed,
         target_branch      = args.target_branch,
         cfg                = cfg,
+        gate_scope         = args.gate_scope,
     )
 
     # Derive sprint_branch for summary (mirrors run_sprint logic)

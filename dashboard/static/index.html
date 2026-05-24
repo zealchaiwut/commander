@@ -640,6 +640,9 @@
 
 <div id="toast-error" style="display:none;position:fixed;top:12px;right:12px;z-index:9999;background:#ef4444;color:#fff;padding:8px 14px;border-radius:6px;font-size:13px;max-width:320px;box-shadow:0 2px 8px rgba(0,0,0,.2)"></div>
 
+<!-- ── Alert banners (AC-3a) ── -->
+<div id="alert-banners" style="padding:0 16px;"></div>
+
 <nav class="main-tabs">
   <button class="mtab active" id="mtab-projects"  onclick="switchMain('projects')">Projects</button>
   <button class="mtab"        id="mtab-agents"    onclick="switchMain('agents')">Agents</button>
@@ -649,6 +652,26 @@
 
 <!-- ── Projects view ── -->
 <div id="view-projects">
+
+  <!-- ── Sprint panel (AC-6) ── -->
+  <div id="sprint-panel" class="hidden" style="margin:12px 16px 0;padding:14px 16px;background:var(--surface);border:1px solid var(--border);border-radius:10px;">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+      <span id="sprint-panel-title" style="font-weight:600;font-size:13px;">Sprint</span>
+      <button id="btn-retry-skipped" style="display:none;font-size:11px;padding:4px 10px;background:var(--amber);color:#fff;border:none;border-radius:5px;cursor:pointer;"
+        onclick="retrySkippedIssues()">Retry skipped</button>
+    </div>
+    <div style="margin-bottom:6px;">
+      <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--text-muted);margin-bottom:4px;">
+        <span id="sprint-progress-label">0 of 0 issues complete</span>
+        <span id="sprint-progress-pct">0%</span>
+      </div>
+      <div style="height:6px;background:var(--border);border-radius:3px;overflow:hidden;">
+        <div id="sprint-progress-bar" style="height:100%;width:0%;border-radius:3px;transition:width .3s;background:var(--blue);"></div>
+      </div>
+    </div>
+    <div id="sprint-skipped-list"></div>
+  </div>
+
   <div class="metrics-row">
     <div class="metric-card">
       <span class="metric-label">Active Sprints</span>
@@ -808,6 +831,21 @@
   .modal-input.error { border-color: var(--red); }
   .modal-error  { font-size: 12px; color: var(--red); margin-top: 5px; }
   .modal-footer { display: flex; gap: 8px; justify-content: flex-end; margin-top: 20px; }
+
+  /* ── Alert banners (AC-3a) ── */
+  .alert-banner {
+    display: flex; align-items: flex-start; justify-content: space-between;
+    gap: 10px; padding: 10px 14px; margin-bottom: 6px;
+    background: var(--red-bg, #fef2f2); border: 1px solid var(--red, #ef4444);
+    border-radius: 8px; font-size: 13px;
+  }
+  .alert-banner-body { flex: 1; min-width: 0; }
+  .alert-banner-title { font-weight: 600; color: var(--text); }
+  .alert-banner-msg   { color: var(--text-muted); margin-top: 2px; font-size: 12px; }
+  .alert-dismiss {
+    flex-shrink: 0; background: none; border: none; cursor: pointer;
+    font-size: 16px; color: var(--red, #ef4444); line-height: 1; padding: 0 2px;
+  }
 </style>
 
 <script src="/static/app.js"></script>

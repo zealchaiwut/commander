@@ -961,6 +961,7 @@ def generate_sprint_summary(
     lines: list[str] = []
 
     # -- Header section --
+    attempted = len(completed) + len(skipped)
     lines += [
         f"## Sprint {n} -- {end_reason}",
         "",
@@ -971,6 +972,10 @@ def generate_sprint_summary(
         f"| End | {end_ts} |",
         f"| Duration | {duration_str} |",
         f"| End reason | {end_reason} |",
+        f"| Attempted | {attempted} |",
+        f"| Completed | {len(completed)} |",
+        f"| Skipped | {len(skipped)} |",
+        f"| Failed | {len(skipped)} |",
         "",
     ]
 
@@ -1004,13 +1009,21 @@ def generate_sprint_summary(
         lines.append("| -- | All issues shipped | -- | -- |")
     lines.append("")
 
+    # -- Suggested follow-up actions --
+    if skipped:
+        lines += ["## Suggested Follow-up Actions", ""]
+        for issue in skipped:
+            action = _follow_up_action(issue.category)
+            lines.append(f"- **#{issue.number} {issue.title}** ({issue.category or 'unknown'}): {action}")
+        lines.append("")
+
     # -- Stats --
     lines += [
         "## Stats",
         "",
         "| Metric | Value |",
         "|---|---|",
-        f"| Total tokens | {total_tokens} |",
+        f"| Total Tokens | {total_tokens} |",
         f"| Avg ticket time | {avg_ticket_str} |",
         f"| Quality-gate pass rate | {gate_pass_rate}% |",
         f"| Tester rejections | {tester_rejections} |",

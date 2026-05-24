@@ -807,8 +807,12 @@ def _dispatch_coder(
     log_path.parent.mkdir(parents=True, exist_ok=True)
 
     cmd = [
-        sys.executable, "-m", "claude",
-        f"https://github.com/{_r(repo_name)}/issues/{issue_num}",
+        "claude",
+        "--dangerously-skip-permissions",
+        "-p",
+        (f"Read the issue at https://github.com/{_r(repo_name)}/issues/{issue_num} "
+         "and implement it following the project's branching workflow. "
+         "Use the BA/coder/tester workflow defined in CLAUDE.md."),
     ]
 
     try:
@@ -817,7 +821,7 @@ def _dispatch_coder(
                 cmd,
                 stdout=log_f,
                 stderr=log_f,
-                cwd=str(WORKTESTER_ROOT),
+                cwd=str(WORKTESTER_DASHBOARD),
             )
     except FileNotFoundError:
         # claude CLI not available -- treat as stub success for testing
@@ -859,9 +863,12 @@ def _dispatch_tester(
     log_path = _issue_log_path(issue_num)
 
     cmd = [
-        sys.executable, "-m", "claude",
-        f"https://github.com/{_r(repo_name)}/issues/{issue_num}",
-        "--tester",
+        "claude",
+        "--dangerously-skip-permissions",
+        "-p",
+        (f"Read the issue at https://github.com/{_r(repo_name)}/issues/{issue_num} "
+         "and verify it as a tester following the project's testing workflow. "
+         "Use the BA/coder/tester workflow defined in CLAUDE.md."),
     ]
 
     try:
@@ -870,7 +877,7 @@ def _dispatch_tester(
                 cmd,
                 stdout=log_f,
                 stderr=log_f,
-                cwd=str(WORKTESTER_ROOT),
+                cwd=str(WORKTESTER_DASHBOARD),
             )
     except FileNotFoundError:
         print("  [tester] claude CLI not found -- stub success")
@@ -1023,7 +1030,7 @@ def generate_sprint_summary(
         "",
         "| Metric | Value |",
         "|---|---|",
-        f"| Total Tokens | {total_tokens} |",
+        f"| Total tokens | {total_tokens} |",
         f"| Avg ticket time | {avg_ticket_str} |",
         f"| Quality-gate pass rate | {gate_pass_rate}% |",
         f"| Tester rejections | {tester_rejections} |",

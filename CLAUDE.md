@@ -84,6 +84,23 @@ Commander is:
 -               - Read the issue body carefully before implementing — acceptance criteria 
 -                 is the contract
 -
+-                 ## Standard Project Layout
+-
+-                 When `init_project.py` onboards a new project it creates four clones:
+-
+-                 ```
+-                 ~/dev/<project>/          # main clone — master branch
+-                 ~/dev/<project>/uat/      # UAT clone — develop branch
+-                 ~/dev/<project>-coder/    # coder agent clone — develop branch
+-                 ~/dev/<project>-tester/   # tester agent clone — develop branch
+-                 ~/dev/<project>/.commander/sprint.yaml   # includes uat: section
+-                 ```
+-
+-                 The `uat/` clone uses a separate database (`<project>-uat.db`) and its own
+-                 port, fully isolated from PRD. Use `--skip-uat` at init time to omit it
+-                 (sets `uat.enabled: false` in `sprint.yaml`). To add UAT to an existing
+-                 project: `scripts/migrate_add_uat.py <repo-name>`.
+-
 -                 ## Useful Scripts
 -
 -                 - `scripts/create_ticket.py` — file a new issue with template
@@ -92,6 +109,8 @@ Commander is:
 -                 - `scripts/post_test_report.py` — tester uses this for structured reports
 -                 - `scripts/start_feature.py` — coder uses this to create feature branch
 -                 - `scripts/finish_feature.py` — tester uses this to merge to develop
+-                 - `scripts/init_project.py` — onboard a new project (creates 4 clones: main, uat, coder, tester)
+-                 - `scripts/migrate_add_uat.py` — add UAT clone to an existing project
 -
 -                 ## Out of Scope
 -

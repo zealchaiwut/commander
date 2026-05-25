@@ -321,6 +321,27 @@ def reject_issue(issue_id: int, reason: str, repo_name: str | None = None):
     invalidate(f"open_issues:{r}")
 
 
+def search_issues_by_title(title: str, repo_name: str | None = None) -> list[dict]:
+    """Search for issues matching *title* exactly (open or closed).
+
+    Uses ``gh issue list --search <title> --state all`` as specified by AC-6.
+    Returns a (possibly empty) list of matching issue dicts.
+    """
+    r = _r(repo_name)
+    try:
+        results = _json(
+            "issue", "list", "--repo", r,
+            "--search", title,
+            "--state", "all",
+            "--json", "number,title,url,state",
+            "--limit", "50",
+        )
+        # Exact-title filter: gh --search is fuzzy, so we narrow to exact matches
+        return [i for i in results if i.get("title") == title]
+    except subprocess.CalledProcessError:
+        return []
+
+
 def create_issue(title: str, body: str, labels: list[str],
                  repo_name: str | None = None) -> tuple[int, str]:
     r = _r(repo_name)

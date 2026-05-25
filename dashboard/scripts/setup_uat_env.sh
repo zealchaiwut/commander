@@ -1,32 +1,34 @@
 #!/usr/bin/env bash
-# setup_uat_env.sh — Clones the repo into <project_dir>/uat/<repo_name>, checks
+# setup_uat_env.sh — Clones the repo into <commander-root>/uat, checks
 # out develop, installs a Python venv, writes .env, configures
 # .claude/settings.json with the UAT hook target, and initialises the UAT
 # database.
 #
-# Paths are derived from this script's location via git rev-parse — no
-# hardcoded paths.
+# Paths are derived from this script's location via two-level directory
+# traversal (no git commands):
+#   SCRIPT_DIR  = <commander-root>/dashboard/scripts/
+#   PRD_DIR     = <commander-root>/dashboard/
+#   COMMANDER_ROOT = <commander-root>/
+#   UAT_DIR     = <commander-root>/uat
+#   UAT_DASHBOARD = <commander-root>/uat/dashboard
 #
 # Standard layout:
-#   ~/dev/<project>/               ← PROJECT_DIR
-#     <repo_name>/                 ← MAIN_REPO  (PRD clone, master branch)
-#       dashboard/scripts/         ← this script lives here
-#     uat/
-#       <repo_name>/               ← UAT_DIR (UAT clone, develop branch)
-#         dashboard/               ← UAT_DASHBOARD
+#   ~/dev/commander/               ← COMMANDER_ROOT
+#     dashboard/                   ← PRD_DIR  (PRD clone, master branch)
+#       scripts/                   ← SCRIPT_DIR (this script lives here)
+#     uat/                         ← UAT_DIR (UAT clone, develop branch)
+#       dashboard/                 ← UAT_DASHBOARD
 #
 # Run this once to set up the UAT environment.  Safe to re-run (idempotent).
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-MAIN_REPO="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel)"
-PROJECT_DIR="$(dirname "$MAIN_REPO")"
-REPO_NAME="$(basename "$MAIN_REPO")"
-PRD_DIR="$MAIN_REPO/dashboard"
+PRD_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+COMMANDER_ROOT="$(cd "$PRD_DIR/.." && pwd)"
 
 REPO_URL="https://github.com/zealchaiwut/commander.git"
-UAT_DIR="$PROJECT_DIR/uat/$REPO_NAME"
+UAT_DIR="$COMMANDER_ROOT/uat"
 UAT_DASHBOARD="$UAT_DIR/dashboard"
 
 echo "=== Commander UAT environment setup ==="

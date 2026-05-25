@@ -1,18 +1,19 @@
 #!/usr/bin/env bash
 # start_uat.sh — Start the UAT dashboard on port 8001.
 #
-# UAT_DIR is derived from this script's location via git rev-parse:
-#   <project_dir>/uat/<repo_name>/dashboard
-# where <project_dir> is the parent of the main repo clone and
-# <repo_name> is the basename of the main repo root.
+# UAT_DIR is derived from this script's location via two-level directory
+# traversal (no git commands):
+#   SCRIPT_DIR  = <commander-root>/dashboard/scripts/
+#   PRD_DIR     = <commander-root>/dashboard/
+#   COMMANDER_ROOT = <commander-root>/
+#   UAT_DIR     = <commander-root>/uat/dashboard
 #
 # Standard layout:
-#   ~/dev/<project>/               ← PROJECT_DIR
-#     <repo_name>/                 ← MAIN_REPO  (PRD clone, master branch)
-#       dashboard/scripts/         ← this script lives here
+#   ~/dev/commander/               ← COMMANDER_ROOT
+#     dashboard/                   ← PRD_DIR  (PRD clone, master branch)
+#       scripts/                   ← SCRIPT_DIR (this script lives here)
 #     uat/
-#       <repo_name>/               ← UAT clone  (develop branch)
-#         dashboard/               ← UAT_DIR
+#       dashboard/                 ← UAT_DIR
 #
 # Writes a PID file to <UAT_DIR>/uat.pid.
 # Logs are written to <UAT_DIR>/uat.log.
@@ -20,11 +21,10 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-MAIN_REPO="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel)"
-PROJECT_DIR="$(dirname "$MAIN_REPO")"
-REPO_NAME="$(basename "$MAIN_REPO")"
+PRD_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+COMMANDER_ROOT="$(cd "$PRD_DIR/.." && pwd)"
 
-UAT_DIR="$PROJECT_DIR/uat/$REPO_NAME/dashboard"
+UAT_DIR="$COMMANDER_ROOT/uat/dashboard"
 VENV="$UAT_DIR/venv"
 PID_FILE="$UAT_DIR/uat.pid"
 LOG_FILE="$UAT_DIR/uat.log"
@@ -35,7 +35,7 @@ echo "=== Starting UAT dashboard (port $PORT) ==="
 # ── Sanity checks ─────────────────────────────────────────────────────────────
 if [ ! -d "$UAT_DIR" ]; then
     echo "ERROR: UAT directory not found at $UAT_DIR. Create it via:"
-    echo "  cd $PROJECT_DIR && git clone https://github.com/zealchaiwut/commander.git uat/$REPO_NAME && cd uat/$REPO_NAME && git checkout develop"
+    echo "  cd $COMMANDER_ROOT && git clone https://github.com/zealchaiwut/commander.git uat && cd uat && git checkout develop"
     exit 1
 fi
 

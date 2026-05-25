@@ -1342,16 +1342,16 @@ def _dispatch_coder(
     sub_env = os.environ.copy()
     if sprint_branch not in ("develop",):
         sub_env["COMMANDER_MERGE_TARGET"] = sprint_branch
-        if not (cfg and cfg.coder_prompt_template):
-            # Append belt-and-suspenders instruction for non-custom prompts (AC3, AC4)
-            cmd[-1] = (
-                prompt
-                + f" IMPORTANT: The env var COMMANDER_MERGE_TARGET is set to {sprint_branch!r}."
-                f" Create the feature branch off {sprint_branch!r} by passing"
-                f" --base-branch {sprint_branch} to start_feature.py."
-                f" This is SPRINT MODE: do NOT open a PR after pushing —"
-                f" the sprint manager will create the single PR at sprint end."
-            )
+        # Always append sprint-mode instructions regardless of whether a custom
+        # coder_prompt_template is configured (issue #72 regression fix).
+        sprint_hint = (
+            f" IMPORTANT: The env var COMMANDER_MERGE_TARGET is set to {sprint_branch!r}."
+            f" Create the feature branch off {sprint_branch!r} by passing"
+            f" --base-branch {sprint_branch!r} to start_feature.py."
+            f" This is SPRINT MODE: do NOT open a PR after pushing —"
+            f" the sprint manager will create the single PR at sprint end."
+        )
+        cmd[-1] = cmd[-1] + sprint_hint
     if chosen_port is not None:
         sub_env["COMMANDER_APP_PORT"] = str(chosen_port)
         print(f"  [port] COMMANDER_APP_PORT={chosen_port} injected into coder env")
@@ -1453,13 +1453,14 @@ def _dispatch_tester(
     sub_env = os.environ.copy()
     if sprint_branch not in ("develop",):
         sub_env["COMMANDER_MERGE_TARGET"] = sprint_branch
-        # Inject target-branch instruction into prompt regardless of custom template.
-        cmd[-1] = (
-            cmd[-1]
-            + f" IMPORTANT: The env var COMMANDER_MERGE_TARGET is set to {sprint_branch!r}."
-            f" When running finish_feature.py, pass --target-branch {sprint_branch}"
+        # Always append sprint-mode instructions regardless of whether a custom
+        # tester_prompt_template is configured (issue #72 regression fix).
+        sprint_hint = (
+            f" IMPORTANT: The env var COMMANDER_MERGE_TARGET is set to {sprint_branch!r}."
+            f" When running finish_feature.py, pass --target-branch {sprint_branch!r}"
             f" so that the feature branch merges into {sprint_branch!r} instead of develop."
         )
+        cmd[-1] = cmd[-1] + sprint_hint
     if chosen_port is not None:
         sub_env["COMMANDER_APP_PORT"] = str(chosen_port)
         print(f"  [port] COMMANDER_APP_PORT={chosen_port} injected into tester env")

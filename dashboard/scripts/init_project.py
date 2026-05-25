@@ -197,6 +197,39 @@ def _project_in_json(full_repo: str) -> bool:
     return any(p.get("repo") == full_repo for p in _load_projects_json())
 
 
+def _find_all_projects_jsons() -> list[Path]:
+    """Return all projects.json paths to keep in sync.
+
+    Walks 4 levels up from this script to the Commander home directory
+    (scripts/ -> dashboard/ -> uat|prd/ -> commander_home/) then checks for
+    prd/dashboard/projects.json and uat/dashboard/projects.json siblings.
+    Writes to each sibling file that already exists.
+    Falls back to the script's own dashboard/projects.json if neither sibling
+    is found (single-dashboard install or fresh setup).
+    """
+    own = Path(__file__).parent.parent / "projects.json"
+    commander_home = Path(__file__).parent.parent.parent.parent
+    found: list[Path] = []
+    for variant in ("prd", "uat"):
+        candidate = commander_home / variant / "dashboard" / "projects.json"
+        if candidate.exists():
+            found.append(candidate)
+
+    if not found:
+        return [own]
+
+    # Deduplicate by resolved path — own equals the uat sibling when running
+    # from the uat clone, so both point to the same file.
+    seen: set[Path] = set()
+    result: list[Path] = []
+    for p in found:
+        rp = p.resolve()
+        if rp not in seen:
+            seen.add(rp)
+            result.append(p)
+    return result
+
+
 def _get_api_url() -> str:
     cfg = _load_machine_config()
     return cfg.get("api_url", "http://localhost:8000").rstrip("/")
@@ -562,14 +595,8 @@ agents:
 
 
 def step6_register_project(owner: str, repo_name: str, icon: str, color: str) -> None:
-    """AC8: Register project in dashboard/projects.json."""
+    """AC8: Register project in all discovered dashboard/projects.json files."""
     full_repo = f"{owner}/{repo_name}"
-
-    if _project_in_json(full_repo):
-        info(f"{full_repo} already in projects.json — skipping")
-        return
-
-    projects = _load_projects_json()
     name = repo_name.replace("-", " ").replace("_", " ").title()
     new_proj = {
         "repo": full_repo,
@@ -578,9 +605,22 @@ def step6_register_project(owner: str, repo_name: str, icon: str, color: str) ->
         "color": color or "gray",
         "active_sprints": {},
     }
-    projects.append(new_proj)
-    _save_projects_json(projects)
-    info(f"registered {full_repo} in projects.json")
+
+    targets = _find_all_projects_jsons()
+    any_written = False
+    for path in targets:
+        projects: list = json.loads(path.read_text()) if path.exists() else []
+        if any(p.get("repo") == full_repo for p in projects):
+            info(f"{full_repo} already in {path} — skipping")
+            continue
+        projects.append(new_proj)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(projects, indent=2) + "\n")
+        info(f"registered {full_repo} in {path}")
+        any_written = True
+
+    if not any_written:
+        info(f"{full_repo} already registered in all target files")
 
 
 def step7_tracked_repos(owner: str, repo_name: str) -> None:
@@ -738,15 +778,16 @@ def rollback(owner: str, repo_name: str, projects_dir: Path, confirm_delete: boo
             else:
                 print(f"  {d} does not exist — skipping")
 
-    # Remove from projects.json
-    projects = _load_projects_json()
-    new_projects = [p for p in projects if p.get("repo") != full_repo]
-    if len(new_projects) < len(projects):
-        _save_projects_json(new_projects)
-        removed.append("projects.json entry")
-        print(f"  Removed {full_repo} from projects.json")
-    else:
-        print(f"  {full_repo} not found in projects.json — skipping")
+    # Remove from all projects.json files
+    for path in _find_all_projects_jsons():
+        projects = json.loads(path.read_text()) if path.exists() else []
+        new_projects = [p for p in projects if p.get("repo") != full_repo]
+        if len(new_projects) < len(projects):
+            path.write_text(json.dumps(new_projects, indent=2) + "\n")
+            removed.append(f"projects.json entry ({path})")
+            print(f"  Removed {full_repo} from {path}")
+        else:
+            print(f"  {full_repo} not found in {path} — skipping")
 
     # Optionally delete GitHub repo
     if confirm_delete:

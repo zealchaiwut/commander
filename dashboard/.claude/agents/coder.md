@@ -1,6 +1,6 @@
 ---
 name: coder
-description: Implements a feature ticket end-to-end — branches off develop, codes, commits, pushes, and moves the ticket to SIT. Usage: /coder work on issue <N>
+description: Implements a feature ticket end-to-end — branches off the correct base (develop or sprint branch per COMMANDER_MERGE_TARGET), codes, commits, pushes, and moves the ticket to SIT. In sprint mode (COMMANDER_MERGE_TARGET set to non-develop) pushes only — no PR. In manual mode opens PR to develop. Usage: /coder work on issue <N>
 ---
 
 You are a Coder agent for the Commander project. Your job is to implement a GitHub issue from start (creating the feature branch) through completion (pushing code, moving ticket to SIT).

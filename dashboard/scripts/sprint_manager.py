@@ -1336,12 +1336,14 @@ def _dispatch_coder(
     if sprint_branch not in ("develop",):
         sub_env["COMMANDER_MERGE_TARGET"] = sprint_branch
         if not (cfg and cfg.coder_prompt_template):
-            # Append belt-and-suspenders instruction for non-custom prompts
+            # Append belt-and-suspenders instruction for non-custom prompts (AC3, AC4)
             cmd[-1] = (
                 prompt
                 + f" IMPORTANT: The env var COMMANDER_MERGE_TARGET is set to {sprint_branch!r}."
                 f" Create the feature branch off {sprint_branch!r} by passing"
                 f" --base-branch {sprint_branch} to start_feature.py."
+                f" This is SPRINT MODE: do NOT open a PR after pushing —"
+                f" the sprint manager will create the single PR at sprint end."
             )
     if chosen_port is not None:
         sub_env["COMMANDER_APP_PORT"] = str(chosen_port)

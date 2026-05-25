@@ -74,6 +74,7 @@ def main():
 
     print(f"Issue #{short}: {title}")
     print(f"Branch:         {branch}")
+    print(f"Base:           {base}")
 
     ensure_develop(args.repo)
 
@@ -116,11 +117,11 @@ def main():
     )
     github_client.add_comment(
         short,
-        f"🌿 Started work on branch `{branch}`",
+        f"🌿 Started work on branch `{branch}` (based off `{base}`)",
         repo_name=args.repo,
     )
 
-    print(f"✅  Created and pushed {branch}")
+    print(f"✅  Created and pushed {branch} (based off {base})")
     print(f"    Label updated to: in-progress")
     print(branch)   # last line: branch name for scripts that capture output
 

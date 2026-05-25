@@ -1427,10 +1427,18 @@ def _dispatch_tester(
             f"Read the issue at https://github.com/{_r(eff_repo)}/issues/{issue_num} "
             "and verify it as a tester following the project's testing workflow. "
             "Use the BA/coder/tester workflow defined in CLAUDE.md. "
-            "When verdict is READY_FOR_UAT, execute Step 10 (finish_feature.py) without asking. "
-            "Apply the UAT label to the issue automatically via `gh issue edit`. "
-            "Do NOT output language like 'let me know if you want me to...' — "
-            "complete the full workflow autonomously including finish_feature.py and label update."
+        )
+
+    # Always inject autonomous enforcement — custom templates omit this, so append
+    # unconditionally unless the template already references finish_feature.
+    if "finish_feature" not in prompt:
+        prompt += (
+            " IMPORTANT — autonomous sprint mode: when your verdict is READY_FOR_UAT"
+            " you MUST immediately run `python3 dashboard/scripts/finish_feature.py"
+            f" --issue {issue_num}` from the repo root without asking."
+            " Apply the UAT label to the issue automatically via `gh issue edit`."
+            " Do NOT output language like 'let me know if you want me to...' —"
+            " complete the full workflow autonomously including finish_feature.py and label update."
         )
 
     cmd = [
@@ -1445,13 +1453,13 @@ def _dispatch_tester(
     sub_env = os.environ.copy()
     if sprint_branch not in ("develop",):
         sub_env["COMMANDER_MERGE_TARGET"] = sprint_branch
-        if not (cfg and cfg.tester_prompt_template):
-            cmd[-1] = (
-                prompt
-                + f" IMPORTANT: The env var COMMANDER_MERGE_TARGET is set to {sprint_branch!r}."
-                f" When running finish_feature.py, pass --target-branch {sprint_branch}"
-                f" so that the feature branch merges into {sprint_branch!r} instead of develop."
-            )
+        # Inject target-branch instruction into prompt regardless of custom template.
+        cmd[-1] = (
+            cmd[-1]
+            + f" IMPORTANT: The env var COMMANDER_MERGE_TARGET is set to {sprint_branch!r}."
+            f" When running finish_feature.py, pass --target-branch {sprint_branch}"
+            f" so that the feature branch merges into {sprint_branch!r} instead of develop."
+        )
     if chosen_port is not None:
         sub_env["COMMANDER_APP_PORT"] = str(chosen_port)
         print(f"  [port] COMMANDER_APP_PORT={chosen_port} injected into tester env")

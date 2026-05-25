@@ -280,3 +280,119 @@ class TestAC7OutputMentionsBaseBranch:
         content = START_SCRIPT.read_text()
         assert 'print(f"Base:' in content or "Base:" in content, \
             "start_feature.py must print the base branch name before creating the feature branch"
+
+
+# ---------------------------------------------------------------------------
+# Regression — issue #72: sprint hints injected even when coder_prompt_template set
+# ---------------------------------------------------------------------------
+
+class TestIssue72RegressionCustomTemplate:
+    """Regression tests for the bug where a custom coder_prompt_template caused
+    sprint-mode instructions to be skipped (issue #72)."""
+
+    def _make_cfg(self, sm, template: str):
+        """Build a minimal SprintConfig-like object with a custom prompt template."""
+        # SprintConfig is a dataclass; instantiate it normally then override fields.
+        cfg = sm.SprintConfig(
+            repo_name             = "zealchaiwut/commander",
+            coder_prompt_template = template,
+            tester_prompt_template= "Tester: {issue_url}",
+        )
+        return cfg
+
+    def test_coder_sprint_hint_injected_with_custom_template(self):
+        """When cfg.coder_prompt_template is set AND sprint_branch != develop,
+        the dispatched prompt must still contain COMMANDER_MERGE_TARGET and --base-branch.
+        """
+        sm = _import_sprint_manager()
+        cfg = self._make_cfg(sm, "Coder: please fix {issue_url}")
+
+        captured_cmds = []
+
+        def fake_popen(cmd, **kwargs):
+            captured_cmds.append(list(cmd))
+            raise FileNotFoundError("claude not found")
+
+        with mock.patch("subprocess.Popen", side_effect=fake_popen):
+            sm._dispatch_coder(
+                issue_num=72,
+                alert_modes=[],
+                sprint_branch="sprint/sprint-5",
+                cfg=cfg,
+            )
+
+        assert captured_cmds, "subprocess.Popen must have been called"
+        prompt_arg = captured_cmds[0][-1]
+        assert "COMMANDER_MERGE_TARGET" in prompt_arg, (
+            "Sprint-mode hint with COMMANDER_MERGE_TARGET must be appended to coder prompt "
+            "even when cfg.coder_prompt_template is set (issue #72 regression)"
+        )
+        assert "--base-branch" in prompt_arg, (
+            "--base-branch instruction must appear in coder prompt "
+            "even when cfg.coder_prompt_template is set (issue #72 regression)"
+        )
+        assert "sprint/sprint-5" in prompt_arg, (
+            "Sprint branch name must appear in injected coder prompt"
+        )
+
+    def test_coder_sprint_hint_still_present_after_template_formatting(self):
+        """The template base text and the sprint hint must both appear in the final prompt."""
+        sm = _import_sprint_manager()
+        cfg = self._make_cfg(sm, "Custom coder prompt for {issue_url}")
+
+        captured_cmds = []
+
+        def fake_popen(cmd, **kwargs):
+            captured_cmds.append(list(cmd))
+            raise FileNotFoundError("claude not found")
+
+        with mock.patch("subprocess.Popen", side_effect=fake_popen):
+            sm._dispatch_coder(
+                issue_num=72,
+                alert_modes=[],
+                sprint_branch="sprint/alpha",
+                cfg=cfg,
+            )
+
+        prompt_arg = captured_cmds[0][-1]
+        # Original template content must still be there
+        assert "Custom coder prompt" in prompt_arg, \
+            "The custom template body must be preserved in the final prompt"
+        # Sprint hint must be appended on top
+        assert "do NOT open a PR" in prompt_arg, \
+            "'do NOT open a PR' sprint instruction must be appended even with custom template"
+
+    def test_tester_sprint_hint_injected_with_custom_template(self):
+        """When cfg.tester_prompt_template is set AND sprint_branch != develop,
+        the dispatched tester prompt must still contain COMMANDER_MERGE_TARGET and --target-branch.
+        """
+        sm = _import_sprint_manager()
+        cfg = self._make_cfg(sm, "Coder: {issue_url}")
+        cfg.tester_prompt_template = "Tester: custom {issue_url}"
+
+        captured_cmds = []
+
+        def fake_popen(cmd, **kwargs):
+            captured_cmds.append(list(cmd))
+            raise FileNotFoundError("claude not found")
+
+        with mock.patch("subprocess.Popen", side_effect=fake_popen):
+            sm._dispatch_tester(
+                issue_num=72,
+                alert_modes=[],
+                sprint_branch="sprint/sprint-5",
+                cfg=cfg,
+            )
+
+        assert captured_cmds, "subprocess.Popen must have been called"
+        prompt_arg = captured_cmds[0][-1]
+        assert "COMMANDER_MERGE_TARGET" in prompt_arg, (
+            "Sprint-mode hint with COMMANDER_MERGE_TARGET must be appended to tester prompt "
+            "even when cfg.tester_prompt_template is set (issue #72 regression)"
+        )
+        assert "--target-branch" in prompt_arg, (
+            "--target-branch instruction must appear in tester prompt "
+            "even when cfg.tester_prompt_template is set (issue #72 regression)"
+        )
+        assert "Tester: custom" in prompt_arg, \
+            "The custom tester template body must be preserved in the final prompt"

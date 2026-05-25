@@ -87,6 +87,13 @@ DASHBOARD_API_URL    = os.environ.get("DASHBOARD_API_URL", "http://localhost:800
 SPRINTS_DIR          = DASHBOARD_DIR / "sprints"
 ALERTS_DIR           = DASHBOARD_DIR / "alerts"
 
+# ── API cost pricing (USD per million tokens) ─────────────────────────────────
+# sprint_review.py uses Haiku 4.5 for raw API calls.  Coder/tester agents run
+# via Claude Code CLI (subscription-funded) so their tokens are free on the API.
+# Rates as of 2025: https://www.anthropic.com/pricing
+_HAIKU_INPUT_COST_PER_M  = 0.80   # claude-haiku-4-5-20251001 input
+_HAIKU_OUTPUT_COST_PER_M = 4.00   # claude-haiku-4-5-20251001 output
+
 
 # ── SprintConfig dataclass + loader ──────────────────────────────────────────
 
@@ -1525,6 +1532,17 @@ def generate_sprint_summary(
     pending   = [i for i in state.issues if i.status == "pending"]
 
     total_tokens     = state.total_tokens_in + state.total_tokens_out
+    # cost_estimate: only sprint_review.py uses raw API (Haiku 4.5); coder/tester
+    # run via Claude Code CLI which is subscription-funded (no API charges).
+    # We estimate preflight API cost based on issues reviewed × avg input tokens.
+    # The token split is roughly 95% input (long prompts), 5% output (short JSON).
+    reviewed_issues = len(state.issues)
+    _preflight_in_tokens  = reviewed_issues * 40_000  # TOKENS_PER_ISSUE from sprint_review
+    _preflight_out_tokens = reviewed_issues * 256       # max_tokens per issue call
+    cost_estimate_usd = (
+        _preflight_in_tokens  / 1_000_000 * _HAIKU_INPUT_COST_PER_M
+        + _preflight_out_tokens / 1_000_000 * _HAIKU_OUTPUT_COST_PER_M
+    )
     avg_ticket_secs  = (elapsed_secs / len(completed)) if completed else 0
     avg_h, avg_r     = divmod(int(avg_ticket_secs), 3600)
     avg_m, avg_s     = divmod(avg_r, 60)
@@ -1606,6 +1624,7 @@ def generate_sprint_summary(
         lines.append("")
 
     # -- Stats --
+    cost_str = f"~${cost_estimate_usd:.4f} (preflight API only; coder/tester via Claude Code subscription)"
     lines += [
         "## Stats",
         "",
@@ -1616,6 +1635,7 @@ def generate_sprint_summary(
         f"| Quality-gate pass rate | {gate_pass_rate}% |",
         f"| Tester rejections | {tester_rejections} |",
         f"| Merge conflicts | {merge_conflicts} |",
+        f"| Cost estimate | {cost_str} |",
         "",
     ]
 

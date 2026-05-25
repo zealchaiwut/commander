@@ -1169,7 +1169,7 @@ def handle_post_tester(
                 f"Issue #{issue_num}: tester exited 0 but not UAT -- no merge",
                 FailureCategory.TESTER_REJECTED)
 
-    print(f"\nIssue #{issue_num} is UAT -- running quality gates...")
+    print(f"\nTester promoted issue #{issue_num} to UAT -- running quality gates...")
 
     # Find the feature branch
     feature_branch = _find_feature_branch(issue_num)
@@ -1189,7 +1189,7 @@ def handle_post_tester(
             GateResult(gate="merge-preview", passed=True, skipped=True),
         ]
         _post_success_comment(issue_num, all_skipped, repo_name=eff_repo)
-        return True, f"Issue #{issue_num}: all gates skipped, merged into {target_branch}", None
+        return True, f"Tester promoted issue #{issue_num} to UAT; all gates skipped, merged into {target_branch}", None
 
     results = _run_quality_gates(
         issue_num=issue_num,
@@ -1214,7 +1214,7 @@ def handle_post_tester(
         print(f"  All gates passed -- calling finish_feature.py for issue #{issue_num}")
         _call_finish_feature(issue_num, wt_root, target_branch=target_branch, repo_name=eff_repo, cfg=cfg)
         _post_success_comment(issue_num, results, repo_name=eff_repo)
-        return True, f"Issue #{issue_num}: all gates passed, merged into {target_branch}", None
+        return True, f"Tester promoted issue #{issue_num} to UAT; all gates passed, merged into {target_branch}", None
     else:
         failed = next((r for r in results if not r.passed), None)
         gate_name = failed.gate if failed else "unknown"
@@ -1414,9 +1414,14 @@ def _dispatch_tester(
         prompt = cfg.tester_prompt_template.format(issue_url=issue_url)
     else:
         prompt = (
+            f"You are running in autonomous sprint mode. "
             f"Read the issue at https://github.com/{_r(eff_repo)}/issues/{issue_num} "
             "and verify it as a tester following the project's testing workflow. "
-            "Use the BA/coder/tester workflow defined in CLAUDE.md."
+            "Use the BA/coder/tester workflow defined in CLAUDE.md. "
+            "When verdict is READY_FOR_UAT, execute Step 10 (finish_feature.py) without asking. "
+            "Apply the UAT label to the issue automatically via `gh issue edit`. "
+            "Do NOT output language like 'let me know if you want me to...' — "
+            "complete the full workflow autonomously including finish_feature.py and label update."
         )
 
     cmd = [

@@ -344,6 +344,7 @@ def get_all_projects(agents: list[dict]) -> dict:
             "icon":             proj.get("icon", "ti-folder"),
             "color":            _color_hex(proj),
             "current_sprint":   sprint_num,
+            "sprint_label":     f"sprint-{sprint_num}" if sprint_num else "",
             "sprint_theme":     (sprint_info or {}).get("theme", ""),
             "has_active_sprint": sprint_num is not None,
             "progress":         progress,
@@ -353,9 +354,10 @@ def get_all_projects(agents: list[dict]) -> dict:
                 {"name": a["name"], "status": a["status"], "session_id": a["session_id"]}
                 for a in proj_agents
             ],
-            "uatCount":  len(uat_i),
-            "openCount": len(open_i),
-            "app_port":  app_port,
+            "uatCount":    len(uat_i),
+            "activeCount": len(active_i),
+            "openCount":   len(open_i),
+            "app_port":    app_port,
         })
 
     working_agents = sum(1 for a in agents if a.get("status") == "working")
@@ -368,8 +370,10 @@ def get_all_projects(agents: list[dict]) -> dict:
         "projects": result,
         "metrics": {
             "active_sprints":  len(active_sprint_set),
+            "active_projects": sum(1 for p in result if p["has_active_sprint"]),
             "active_tickets":  total_active,
             "awaiting_uat":    total_uat,
+            "open_tickets":    total_open,
             "tokens_today":    global_total,
             "cost_today_usd":  _cost_usd(global_tok["input_tokens"], global_tok["output_tokens"]),
             "working_agents":  working_agents,

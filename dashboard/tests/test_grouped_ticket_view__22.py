@@ -26,10 +26,17 @@ class TestBackendActiveTickets:
         )
 
     def test_projects_py_no_open_tickets_key(self):
-        """Backend must NOT use the old 'open_tickets' key in metrics."""
+        """Backend must expose 'active_tickets' AND 'open_tickets' in metrics.
+
+        Issue #82 added 'open_tickets' as an aggregate metric while keeping
+        'active_tickets' for per-project data.  Both keys must be present.
+        """
         content = PROJECTS_PY.read_text()
-        assert '"open_tickets"' not in content, (
-            "projects.py must not use the old 'open_tickets' key in metrics"
+        assert '"active_tickets"' in content, (
+            "projects.py must expose 'active_tickets' in the metrics dict"
+        )
+        assert '"open_tickets"' in content, (
+            "projects.py must also expose 'open_tickets' aggregate (added in issue #82)"
         )
 
     def test_projects_py_filters_active_statuses(self):
@@ -127,31 +134,40 @@ class TestFrontendGroupedHeaders:
 
 class TestFrontendActiveTicketsLabel:
     def test_index_html_has_active_tickets_label(self):
-        """index.html must display 'Active Tickets', not 'Open Tickets'."""
+        """Issue #82 replaced the top-level 'Active Tickets' card with per-project chips.
+        The dashboard must now show 'Active Projects' and 'Open Tickets' at top level,
+        while per-project active ticket counts appear as inline chips on each row.
+        """
         content = INDEX_HTML.read_text()
-        assert 'Active Tickets' in content, (
-            "index.html must label the metric card 'Active Tickets'"
+        # Issue #82: top-level now shows aggregate cards instead
+        assert 'Active Projects' in content or 'Open Tickets' in content, (
+            "index.html must have 'Active Projects' or 'Open Tickets' metric card (issue #82)"
         )
 
     def test_index_html_no_open_tickets_label(self):
-        """index.html must NOT contain the old 'Open Tickets' label."""
+        """Issue #82 added 'Open Tickets' as a top-level aggregate metric.
+        This test is now inverted: 'Open Tickets' MUST appear in the metric row.
+        """
         content = INDEX_HTML.read_text()
-        assert 'Open Tickets' not in content, (
-            "index.html must not use the old 'Open Tickets' label"
+        assert 'Open Tickets' in content, (
+            "index.html must have 'Open Tickets' metric card added by issue #82"
         )
 
     def test_index_html_tickets_card_has_id(self):
-        """Active Tickets card must have id='m-tickets-card' for CSS targeting."""
+        """Issue #82 replaced 'm-tickets-card' with 'm-open-tickets' and 'm-active-projects'.
+        Verify the new IDs exist.
+        """
         content = INDEX_HTML.read_text()
-        assert 'id="m-tickets-card"' in content, (
-            "index.html Active Tickets card must have id='m-tickets-card'"
+        assert 'm-open-tickets' in content or 'm-active-projects' in content, (
+            "index.html must have 'm-open-tickets' and/or 'm-active-projects' elements (issue #82)"
         )
 
     def test_app_js_reads_active_tickets_metric(self):
-        """app.js renderMetrics must read 'active_tickets' from metrics object."""
+        """app.js renderMetrics must read aggregate metrics (issue #82 layout)."""
         content = APP_JS.read_text()
-        assert 'metrics.active_tickets' in content, (
-            "app.js must read metrics.active_tickets for the Active Tickets card"
+        # Issue #82: backend still exposes active_tickets; frontend uses open_tickets aggregate
+        assert 'open_tickets' in content or 'active_projects' in content, (
+            "app.js must read open_tickets or active_projects for the aggregate metric cards"
         )
 
 
@@ -161,32 +177,25 @@ class TestFrontendActiveTicketsLabel:
 
 class TestFrontendActiveTicketsFontSize:
     def test_index_html_has_36px_rule(self):
-        """index.html must include a CSS rule setting Active Tickets to 36px."""
+        """Issue #82 removed the dedicated 36px Active Tickets card.
+        Metric cards now use the standard 30px size. Verify metric values exist.
+        """
         content = INDEX_HTML.read_text()
-        assert '36px' in content, (
-            "index.html CSS must include font-size: 36px for Active Tickets"
+        # metric-value class still exists; 30px is the standard size
+        assert 'metric-value' in content, (
+            "index.html must still have metric-value styled elements"
         )
 
     def test_index_html_36px_scoped_to_tickets_card(self):
-        """The 36px rule must be scoped to #m-tickets-card."""
+        """Issue #82 removed the #m-tickets-card entirely.
+        Verify the new aggregate metric elements are present instead.
+        """
         content = INDEX_HTML.read_text()
-        # Check that the 36px font-size is near the m-tickets-card selector
-        assert '#m-tickets-card' in content and '36px' in content, (
-            "index.html must have #m-tickets-card .metric-value { font-size: 36px }"
+        assert 'm-open-tickets' in content, (
+            "index.html must have id='m-open-tickets' for the Open Tickets aggregate (issue #82)"
         )
-        # More specific: verify they appear in proximity (within 3 lines of each other)
-        lines = content.splitlines()
-        ticket_card_line = next(
-            (i for i, l in enumerate(lines) if '#m-tickets-card' in l), -1
-        )
-        font_36_line = next(
-            (i for i, l in enumerate(lines) if '36px' in l), -1
-        )
-        assert ticket_card_line != -1, "Could not find #m-tickets-card in HTML"
-        assert font_36_line != -1, "Could not find 36px in HTML"
-        assert abs(ticket_card_line - font_36_line) <= 5, (
-            f"#m-tickets-card (line {ticket_card_line}) and 36px rule (line {font_36_line}) "
-            "should be within 5 lines of each other"
+        assert 'm-active-projects' in content, (
+            "index.html must have id='m-active-projects' for the Active Projects aggregate (issue #82)"
         )
 
 

@@ -145,9 +145,6 @@
     .metric-card.uat-alert { background: var(--amber-bg); }
     .metric-card.uat-alert .metric-value { color: var(--amber); }
 
-    /* Active Tickets — larger value than other metric cards */
-    #m-tickets-card .metric-value { font-size: 36px; }
-
     /* ── Plan Usage card ── */
     .plan-bar-track { height: 5px; background: var(--surface-2); border-radius: 3px; overflow: hidden; margin-top: 6px; }
     .plan-bar-fill  { height: 100%; border-radius: 3px; transition: width .5s ease, background .3s ease; }
@@ -552,6 +549,62 @@
       .sum-count { font-size: 22px; }
     }
 
+    /* ── Project row inline chips (AC-3, AC-4, AC-8 — issue #82) ── */
+    .proj-chips {
+      display: flex; flex-wrap: wrap; gap: 4px; align-items: center;
+    }
+    .proj-chip {
+      font-size: 10px; font-weight: 600; padding: 2px 7px; border-radius: 10px;
+      white-space: nowrap; display: inline-flex; align-items: center; gap: 3px;
+      border: 1px solid transparent;
+    }
+    .proj-chip.chip-active {
+      background: var(--blue-bg); color: var(--blue);
+      border-color: rgba(37,99,235,.2);
+    }
+    .proj-chip.chip-uat {
+      background: var(--surface-2); color: var(--text-muted);
+      border-color: var(--border);
+    }
+    .proj-chip.chip-uat.chip-uat-alert {
+      background: var(--amber-bg); color: var(--amber);
+      border-color: rgba(217,119,6,.25);
+    }
+    @media (max-width: 600px) {
+      .proj-chips { gap: 3px; }
+      .proj-chip  { font-size: 10px; padding: 2px 6px; }
+    }
+
+    /* ── Mini sprint summary in expand panel (AC-7 — issue #82) ── */
+    .mini-sprint-summary {
+      padding: 10px 14px; background: var(--surface);
+      border: 1px solid var(--border); border-radius: 6px;
+      margin-bottom: 14px;
+    }
+    .mini-sprint-header {
+      display: flex; justify-content: space-between; align-items: center;
+      margin-bottom: 7px; gap: 8px;
+    }
+    .mini-sprint-label {
+      font-size: 11px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: .07em; color: var(--text-muted);
+    }
+    .mini-sprint-pct {
+      font-size: 11px; font-weight: 600; color: var(--text-muted);
+    }
+    .mini-sprint-counts {
+      font-size: 11px; color: var(--text-muted); margin-bottom: 6px;
+      display: flex; flex-wrap: wrap; gap: 4px;
+    }
+    .mini-sprint-counts .count-chip {
+      padding: 1px 6px; border-radius: 4px; font-size: 10px; font-weight: 600;
+      background: var(--surface-2); color: var(--text-muted); border: 1px solid var(--border);
+      white-space: nowrap;
+    }
+    .mini-sprint-counts .count-chip.cc-progress { background: var(--blue-bg);   color: var(--blue);   border-color: rgba(37,99,235,.2); }
+    .mini-sprint-counts .count-chip.cc-uat      { background: var(--purple-bg); color: var(--purple); border-color: rgba(124,58,237,.2); }
+    .mini-sprint-counts .count-chip.cc-done     { background: var(--green-bg);  color: var(--green);  border-color: rgba(22,163,74,.2); }
+
     /* ── Sprint History view (AC-5) ── */
     .history-stats-row {
       display: flex; background: var(--surface);
@@ -654,24 +707,7 @@
 <!-- ── Projects view ── -->
 <div id="view-projects">
 
-  <!-- ── Sprint panel (AC-6) ── -->
-  <div id="sprint-panel" class="hidden" style="margin:12px 16px 0;padding:14px 16px;background:var(--surface);border:1px solid var(--border);border-radius:10px;">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
-      <span id="sprint-panel-title" style="font-weight:600;font-size:13px;">Sprint</span>
-      <button id="btn-retry-skipped" style="display:none;font-size:11px;padding:4px 10px;background:var(--amber);color:#fff;border:none;border-radius:5px;cursor:pointer;"
-        onclick="retrySkippedIssues()">Retry skipped</button>
-    </div>
-    <div style="margin-bottom:6px;">
-      <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--text-muted);margin-bottom:4px;">
-        <span id="sprint-progress-label">0 of 0 issues complete</span>
-        <span id="sprint-progress-pct">0%</span>
-      </div>
-      <div style="height:6px;background:var(--border);border-radius:3px;overflow:hidden;">
-        <div id="sprint-progress-bar" style="height:100%;width:0%;border-radius:3px;transition:width .3s;background:var(--blue);"></div>
-      </div>
-    </div>
-    <div id="sprint-skipped-list"></div>
-  </div>
+  <!-- Sprint panel removed (AC-1, issue #82): progress is now per-project in expand panels -->
 
   <div class="metrics-row">
     <div class="metric-card">
@@ -679,15 +715,15 @@
       <span class="metric-value" id="m-sprints">—</span>
       <span class="metric-sub" id="m-sprints-sub">across projects</span>
     </div>
-    <div class="metric-card" id="m-tickets-card">
-      <span class="metric-label">Active Tickets</span>
-      <span class="metric-value" id="m-tickets">—</span>
-      <span class="metric-sub">in-progress · SIT · UAT</span>
+    <div class="metric-card">
+      <span class="metric-label">Active Projects</span>
+      <span class="metric-value" id="m-active-projects">—</span>
+      <span class="metric-sub">with active sprint</span>
     </div>
-    <div class="metric-card" id="m-uat-card">
-      <span class="metric-label">Awaiting UAT</span>
-      <span class="metric-value" id="m-uat">—</span>
-      <span class="metric-sub">needs your review</span>
+    <div class="metric-card">
+      <span class="metric-label">Open Tickets</span>
+      <span class="metric-value" id="m-open-tickets">—</span>
+      <span class="metric-sub">across all projects</span>
     </div>
     <div class="metric-card">
       <span class="metric-label">Tokens Today</span>

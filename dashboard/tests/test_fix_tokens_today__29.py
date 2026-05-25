@@ -4,23 +4,30 @@ AC-1: /api/debug/token-usage returns row_count, latest_recorded_at, tokens_today
 AC-2: Endpoint shape is correct (integer row_count, ISO-8601 or null, integer).
 AC-3: tokens_today in /api/projects metrics matches debug endpoint value.
 AC-4: post_tool_used.py logs to stderr when discarding a payload with no tokens.
-AC-5: _extract_usage() correctly parses the Claude Code PostToolUse payload.
+AC-5: _read_last_usage_from_transcript() correctly parses the JSONL transcript.
+
+Root cause: Claude Code does NOT include token usage fields in PostToolUse hook
+payloads. Token data is in the JSONL transcript file written by Claude Code to
+~/.claude/projects/<project>/<session>.jsonl under assistant entries'
+message.usage field. The hook reads that file via the transcript_path payload
+field to get real token counts.
 """
-import io
 import json
 import subprocess
 import sys
-import types
+import tempfile
+import os
 import pytest
+from pathlib import Path
+
 
 # ---------------------------------------------------------------------------
-# AC-5: Unit-test _extract_usage() from the hook module
+# Helpers
 # ---------------------------------------------------------------------------
 
 def _import_hook_module():
     """Import post_tool_used without executing main()."""
     import importlib.util
-    from pathlib import Path
 
     hook_path = Path(__file__).parent.parent / "hooks" / "post_tool_used.py"
     spec = importlib.util.spec_from_file_location("post_tool_used", hook_path)
@@ -29,78 +36,112 @@ def _import_hook_module():
     return mod
 
 
-class TestExtractUsage:
-    """AC-5: _extract_usage() correctly reads the PostToolUse payload."""
+def _make_transcript_line(input_tokens: int, output_tokens: int,
+                          cache_read: int = 0, session_id: str = "abc123") -> str:
+    """Return a JSONL line simulating a Claude Code assistant transcript entry."""
+    entry = {
+        "type": "assistant",
+        "sessionId": session_id,
+        "cwd": "/tmp",
+        "timestamp": "2026-05-25T00:00:00.000Z",
+        "message": {
+            "usage": {
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+                "cache_read_input_tokens": cache_read,
+                "cache_creation_input_tokens": 0,
+            }
+        }
+    }
+    return json.dumps(entry)
+
+
+# ---------------------------------------------------------------------------
+# AC-5: Unit-test _read_last_usage_from_transcript() from the hook module
+# ---------------------------------------------------------------------------
+
+class TestReadLastUsageFromTranscript:
+    """AC-5: _read_last_usage_from_transcript() correctly reads JSONL transcripts."""
 
     @pytest.fixture(scope="class")
     def hook(self):
         return _import_hook_module()
 
-    def test_reads_top_level_usage_key(self, hook):
-        """Standard payload with top-level 'usage' key is parsed correctly."""
-        payload = {
-            "session_id": "abc123",
-            "tool_name": "Bash",
-            "cwd": "/tmp",
-            "usage": {
-                "input_tokens": 500,
-                "output_tokens": 150,
-                "cache_read_input_tokens": 0,
-                "cache_creation_input_tokens": 0,
-            },
-        }
-        inp, out = hook._extract_usage(payload)
+    def test_reads_token_counts_from_jsonl(self, hook, tmp_path):
+        """Reads input_tokens + cache_read and output_tokens from a transcript."""
+        transcript = tmp_path / "session.jsonl"
+        transcript.write_text(
+            _make_transcript_line(input_tokens=500, output_tokens=150) + "\n"
+        )
+        inp, out = hook._read_last_usage_from_transcript(str(transcript))
+        # input_tokens(500) + cache_read(0) = 500
         assert inp == 500
         assert out == 150
 
-    def test_reads_tool_result_usage_fallback(self, hook):
-        """Fallback to tool_result.usage when top-level usage is absent."""
-        payload = {
-            "session_id": "abc123",
-            "tool_name": "Bash",
-            "cwd": "/tmp",
-            "tool_result": {
-                "usage": {
-                    "input_tokens": 200,
-                    "output_tokens": 80,
-                }
-            },
-        }
-        inp, out = hook._extract_usage(payload)
-        assert inp == 200
-        assert out == 80
+    def test_cache_read_tokens_added_to_input(self, hook, tmp_path):
+        """cache_read_input_tokens are included in the returned input count."""
+        transcript = tmp_path / "session.jsonl"
+        transcript.write_text(
+            _make_transcript_line(input_tokens=100, output_tokens=50, cache_read=200) + "\n"
+        )
+        inp, out = hook._read_last_usage_from_transcript(str(transcript))
+        assert inp == 300  # 100 + 200
+        assert out == 50
 
-    def test_returns_zeros_when_no_usage(self, hook):
-        """Returns (0, 0) when neither usage path has token data."""
-        payload = {"session_id": "abc123", "tool_name": "Bash", "cwd": "/tmp"}
-        inp, out = hook._extract_usage(payload)
+    def test_returns_most_recent_entry(self, hook, tmp_path):
+        """Returns usage from the last assistant entry, not the first."""
+        transcript = tmp_path / "session.jsonl"
+        lines = [
+            _make_transcript_line(input_tokens=10, output_tokens=5),
+            _make_transcript_line(input_tokens=999, output_tokens=888),
+        ]
+        transcript.write_text("\n".join(lines) + "\n")
+        inp, out = hook._read_last_usage_from_transcript(str(transcript))
+        assert inp == 999
+        assert out == 888
+
+    def test_returns_zeros_for_missing_file(self, hook, tmp_path):
+        """Returns (0, 0) when the transcript file does not exist."""
+        inp, out = hook._read_last_usage_from_transcript(str(tmp_path / "nonexistent.jsonl"))
         assert inp == 0
         assert out == 0
 
-    def test_top_level_usage_takes_precedence_over_tool_result(self, hook):
-        """Top-level usage key wins when both paths have values."""
-        payload = {
-            "session_id": "abc123",
-            "usage": {"input_tokens": 300, "output_tokens": 100},
-            "tool_result": {"usage": {"input_tokens": 999, "output_tokens": 999}},
-        }
-        inp, out = hook._extract_usage(payload)
+    def test_returns_zeros_for_empty_transcript(self, hook, tmp_path):
+        """Returns (0, 0) when the transcript has no assistant entries."""
+        transcript = tmp_path / "session.jsonl"
+        non_assistant = json.dumps({"type": "user", "message": "hello"})
+        transcript.write_text(non_assistant + "\n")
+        inp, out = hook._read_last_usage_from_transcript(str(transcript))
+        assert inp == 0
+        assert out == 0
+
+    def test_skips_entries_with_zero_usage(self, hook, tmp_path):
+        """Skips entries where both token counts are zero; finds next valid one."""
+        transcript = tmp_path / "session.jsonl"
+        lines = [
+            _make_transcript_line(input_tokens=300, output_tokens=100),
+            _make_transcript_line(input_tokens=0, output_tokens=0),
+        ]
+        transcript.write_text("\n".join(lines) + "\n")
+        inp, out = hook._read_last_usage_from_transcript(str(transcript))
+        # zero-usage entry is skipped, falls back to the previous valid entry
         assert inp == 300
         assert out == 100
 
-    def test_none_values_treated_as_zero(self, hook):
-        """None token values in usage dict are treated as 0."""
-        payload = {
-            "usage": {"input_tokens": None, "output_tokens": None}
-        }
-        inp, out = hook._extract_usage(payload)
-        assert inp == 0
-        assert out == 0
+    def test_handles_malformed_json_lines(self, hook, tmp_path):
+        """Malformed JSON lines in the transcript are skipped without crashing."""
+        transcript = tmp_path / "session.jsonl"
+        transcript.write_text(
+            "not-json\n" +
+            _make_transcript_line(input_tokens=200, output_tokens=75) + "\n"
+        )
+        inp, out = hook._read_last_usage_from_transcript(str(transcript))
+        assert inp == 200
+        assert out == 75
 
-    def test_missing_usage_keys_default_to_zero(self, hook):
-        """Missing input_tokens / output_tokens within usage default to 0."""
-        payload = {"usage": {}}
-        inp, out = hook._extract_usage(payload)
+    def test_empty_string_path_returns_zeros(self, hook):
+        """Empty transcript_path returns (0, 0) without error."""
+        inp, out = hook._read_last_usage_from_transcript("")
         assert inp == 0
         assert out == 0
 
@@ -113,10 +154,7 @@ class TestHookStderrLogging:
     """AC-4: hook logs to stderr when it discards a no-token payload."""
 
     def test_empty_payload_logs_to_stderr(self):
-        """Running the hook with an empty-token payload emits a stderr line."""
-        import subprocess
-        from pathlib import Path
-
+        """Hook with no transcript_path emits a stderr skip message."""
         hook_path = str(Path(__file__).parent.parent / "hooks" / "post_tool_used.py")
         payload = json.dumps({"session_id": "test", "tool_use": {}})
 
@@ -131,15 +169,19 @@ class TestHookStderrLogging:
             f"Expected skip message in stderr, got: {result.stderr!r}"
         )
 
-    def test_valid_token_payload_does_not_log_skip(self):
-        """Hook does NOT emit skip message when token data is present."""
-        from pathlib import Path
-
+    def test_valid_transcript_does_not_log_skip(self, tmp_path):
+        """Hook does NOT emit skip message when transcript has token data."""
         hook_path = str(Path(__file__).parent.parent / "hooks" / "post_tool_used.py")
+
+        transcript = tmp_path / "session.jsonl"
+        transcript.write_text(
+            _make_transcript_line(input_tokens=100, output_tokens=50) + "\n"
+        )
+
         payload = json.dumps({
             "session_id": "test",
             "cwd": "/tmp",
-            "usage": {"input_tokens": 10, "output_tokens": 5},
+            "transcript_path": str(transcript),
         })
 
         result = subprocess.run(
@@ -149,7 +191,9 @@ class TestHookStderrLogging:
             text=True,
         )
         # Hook may fail to POST (no running server), but must not log "skipped"
-        assert "skipped" not in result.stderr
+        assert "skipped" not in result.stderr, (
+            f"Unexpected 'skipped' in stderr: {result.stderr!r}"
+        )
 
 
 # ---------------------------------------------------------------------------

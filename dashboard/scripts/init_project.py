@@ -1,0 +1,646 @@
+#!/usr/bin/env python3
+"""init_project.py — Single command to onboard a new project onto Commander.
+
+Usage:
+    python3 scripts/init_project.py <repo-name>
+            [--owner <owner>]           # default: default_owner from machine config
+            [--visibility public]       # default: public
+            [--name "Display Name"]     # default: title-cased repo-name
+            [--icon ti-folder]          # default: ti-folder
+            [--color blue]              # default: cycled by project count
+            [--projects-dir ~/dev]      # default: ~/dev
+            [--tester-app-subdir ""]    # default: "" (no subdir)
+
+    python3 scripts/init_project.py --rollback <repo-name>
+            [--confirm-delete]          # required to also delete the GitHub repo
+            [--owner <owner>]
+
+Onboards a new project in 10 sequential steps:
+  1. Create ~/dev/<project>/ (git init, README, .gitignore, first commit, gh repo create, push)
+  2. Create and push develop branch
+  3. Create standard GitHub labels
+  4. Clone repo into ~/dev/<project>-coder and ~/dev/<project>-tester; checkout develop
+  5. Write <project>/.commander/sprint.yaml; create log dirs; commit + push
+  6. Register project in dashboard/projects.json via projects_module.add_project()
+  7. Append repo to TRACKED_REPOS env var if in use
+  8. Restart PRD dashboard via scripts/stop_all.sh prd + scripts/start_prd.sh
+  9. Verify via GET /api/projects that the new project appears
+ 10. Print "ready" summary with repo URL and next-step instructions
+"""
+
+import argparse
+import json
+import os
+import shutil
+import subprocess
+import sys
+import time
+import urllib.request
+import urllib.error
+from pathlib import Path
+from typing import Optional
+
+# ── Constants ─────────────────────────────────────────────────────────────────
+
+MACHINE_CONFIG_PATH = Path.home() / ".commander" / "config.yaml"
+DEFAULT_PROJECTS_DIR = Path.home() / "dev"
+STANDARD_LABELS = [
+    ("backlog",      "#C6D2D9"),
+    ("in-progress",  "#C6D2D9"),
+    ("SIT",          "#C6D2D9"),
+    ("UAT",          "#C6D2D9"),
+    ("UAT-approved", "#C6D2D9"),
+    ("blocked",      "#C6D2D9"),
+    ("needs-rework", "#C6D2D9"),
+    ("enhancement",  "#A2EAF6"),
+    ("bug",          "#D73A4A"),
+    ("sprint-1",     "#1D76DB"),
+]
+COLOR_CYCLE = ["blue", "purple", "green", "amber", "pink", "cyan"]
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+def _run(*cmd, cwd: Optional[Path] = None, check: bool = True) -> subprocess.CompletedProcess:
+    """Run a command, raising on failure by default."""
+    return subprocess.run(
+        list(cmd),
+        capture_output=True,
+        text=True,
+        check=check,
+        cwd=str(cwd) if cwd else None,
+    )
+
+
+def _try_run(*cmd, cwd: Optional[Path] = None) -> tuple[bool, str, str]:
+    """Run a command, returning (success, stdout, stderr)."""
+    r = subprocess.run(
+        list(cmd),
+        capture_output=True,
+        text=True,
+        cwd=str(cwd) if cwd else None,
+    )
+    return r.returncode == 0, r.stdout.strip(), r.stderr.strip()
+
+
+def step(n: int, total: int, msg: str) -> None:
+    """Print a step prefix."""
+    print(f"[{n}/{total}] {msg}")
+
+
+def warn(msg: str) -> None:
+    print(f"  WARNING: {msg}", file=sys.stderr)
+
+
+def info(msg: str) -> None:
+    print(f"  {msg}")
+
+
+# ── Machine config ─────────────────────────────────────────────────────────────
+
+def _load_machine_config() -> dict:
+    """Load ~/.commander/config.yaml. Returns empty dict if absent."""
+    if not MACHINE_CONFIG_PATH.exists():
+        return {}
+    try:
+        import yaml  # type: ignore
+        return yaml.safe_load(MACHINE_CONFIG_PATH.read_text()) or {}
+    except ImportError:
+        # Parse minimal YAML manually (key: value lines)
+        cfg: dict = {}
+        for line in MACHINE_CONFIG_PATH.read_text().splitlines():
+            line = line.strip()
+            if line and not line.startswith("#") and ": " in line:
+                k, _, v = line.partition(": ")
+                cfg[k.strip()] = v.strip()
+        return cfg
+
+
+def _bootstrap_machine_config(commander_home: Path, api_url: str = "http://localhost:8000") -> None:
+    """Create ~/.commander/config.yaml with sensible defaults."""
+    MACHINE_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    content = (
+        f"commander_home: {commander_home}\n"
+        f"api_url: {api_url}\n"
+    )
+    MACHINE_CONFIG_PATH.write_text(content)
+    print(f"Created ~/.commander/config.yaml — review and adjust if needed")
+
+
+# ── projects.json helpers ──────────────────────────────────────────────────────
+
+def _find_projects_json() -> Path:
+    """Locate dashboard/projects.json relative to this script."""
+    return Path(__file__).parent.parent / "projects.json"
+
+
+def _load_projects_json() -> list:
+    p = _find_projects_json()
+    if p.exists():
+        return json.loads(p.read_text())
+    return []
+
+
+def _save_projects_json(projects: list) -> None:
+    _find_projects_json().write_text(json.dumps(projects, indent=2) + "\n")
+
+
+def _project_in_json(full_repo: str) -> bool:
+    return any(p.get("repo") == full_repo for p in _load_projects_json())
+
+
+def _get_api_url() -> str:
+    cfg = _load_machine_config()
+    return cfg.get("api_url", "http://localhost:8000").rstrip("/")
+
+
+# ── Pre-flight ─────────────────────────────────────────────────────────────────
+
+def preflight(owner: str, repo_name: str, projects_dir: Path) -> None:
+    """AC1: Validate environment before creating anything."""
+    errors = []
+
+    # gh authenticated?
+    ok, _, err = _try_run("gh", "auth", "status")
+    if not ok:
+        errors.append(f"gh is not authenticated: {err}")
+
+    # projects_dir exists?
+    if not projects_dir.exists():
+        errors.append(f"Projects directory does not exist: {projects_dir}")
+
+    # local directory already exists?
+    local_path = projects_dir / repo_name
+    if local_path.exists():
+        # This is fine for idempotent re-runs; don't error here.
+        pass
+
+    # GitHub repo already exists?
+    full_repo = f"{owner}/{repo_name}"
+    ok, _, _ = _try_run("gh", "repo", "view", full_repo)
+    if ok:
+        # Repo exists — idempotent re-run is OK; not an error.
+        pass
+
+    if errors:
+        for e in errors:
+            print(f"ERROR: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
+# ── Step implementations ───────────────────────────────────────────────────────
+
+def step1_init_repo(owner: str, repo_name: str, projects_dir: Path, visibility: str) -> Path:
+    """AC3: Create local repo + push to GitHub."""
+    repo_dir = projects_dir / repo_name
+    full_repo = f"{owner}/{repo_name}"
+
+    if repo_dir.exists():
+        info(f"already exists — skipping")
+        return repo_dir
+
+    repo_dir.mkdir(parents=True)
+
+    _run("git", "init", cwd=repo_dir)
+
+    # Write minimal README.md
+    (repo_dir / "README.md").write_text(f"# {repo_name}\n")
+
+    # Write minimal .gitignore
+    (repo_dir / ".gitignore").write_text(
+        "__pycache__/\n*.pyc\n.env\n*.log\nvenv/\n.DS_Store\n"
+    )
+
+    _run("git", "add", ".", cwd=repo_dir)
+    _run("git", "commit", "-m", "chore: initial commit", cwd=repo_dir)
+
+    # Create GitHub repo and push
+    _run(
+        "gh", "repo", "create", full_repo,
+        f"--{visibility}",
+        "--source=.",
+        "--remote=origin",
+        "--push",
+        cwd=repo_dir,
+    )
+
+    return repo_dir
+
+
+def step2_develop_branch(repo_dir: Path) -> None:
+    """AC4: Create and push develop branch."""
+    # Check if develop already exists remotely
+    ok, _, _ = _try_run("git", "ls-remote", "--exit-code", "origin", "refs/heads/develop", cwd=repo_dir)
+    if ok:
+        info("develop branch already exists remotely — skipping")
+        return
+
+    # Determine default branch
+    ok, default_branch, _ = _try_run("git", "symbolic-ref", "--short", "HEAD", cwd=repo_dir)
+    if not ok:
+        default_branch = "main"
+
+    _run("git", "checkout", "-b", "develop", cwd=repo_dir)
+    _run("git", "push", "-u", "origin", "develop", cwd=repo_dir)
+    _run("git", "checkout", default_branch, cwd=repo_dir)
+
+
+def step3_labels(owner: str, repo_name: str) -> None:
+    """AC5: Create standard labels. Skip existing ones."""
+    full_repo = f"{owner}/{repo_name}"
+
+    # Fetch existing labels
+    ok, out, _ = _try_run("gh", "label", "list", "--repo", full_repo, "--json", "name", "--limit", "100")
+    existing: set[str] = set()
+    if ok and out:
+        try:
+            existing = {l["name"] for l in json.loads(out)}
+        except (json.JSONDecodeError, KeyError):
+            pass
+
+    for label_name, color in STANDARD_LABELS:
+        if label_name in existing:
+            info(f"label '{label_name}' already exists — skipping")
+            continue
+        ok, _, err = _try_run(
+            "gh", "label", "create", label_name,
+            "--repo", full_repo,
+            "--color", color.lstrip("#"),
+        )
+        if ok:
+            info(f"created label '{label_name}'")
+        else:
+            # May fail if already exists due to race; non-fatal
+            info(f"label '{label_name}' skipped ({err})")
+
+
+def step4_clones(owner: str, repo_name: str, projects_dir: Path) -> None:
+    """AC6: Clone repo into <project>-coder and <project>-tester worktrees."""
+    full_repo = f"{owner}/{repo_name}"
+    repo_url = f"https://github.com/{full_repo}.git"
+
+    for suffix in ("coder", "tester"):
+        clone_dir = projects_dir / f"{repo_name}-{suffix}"
+        if clone_dir.exists():
+            info(f"{clone_dir} already exists — skipping")
+            continue
+
+        _run("git", "clone", repo_url, str(clone_dir))
+        # Checkout develop
+        ok, _, _ = _try_run("git", "checkout", "develop", cwd=clone_dir)
+        if not ok:
+            # develop might need to be fetched
+            _run("git", "fetch", "origin", cwd=clone_dir)
+            _try_run("git", "checkout", "--track", "origin/develop", cwd=clone_dir)
+
+        info(f"cloned into {clone_dir}")
+
+
+def step5_sprint_config(
+    owner: str,
+    repo_name: str,
+    repo_dir: Path,
+    projects_dir: Path,
+    tester_app_subdir: str,
+) -> None:
+    """AC7: Write .commander/sprint.yaml with project-specific fields only."""
+    commander_dir = repo_dir / ".commander"
+    sprint_yaml_path = commander_dir / "sprint.yaml"
+
+    if sprint_yaml_path.exists():
+        info("sprint.yaml already exists — skipping")
+        return
+
+    commander_dir.mkdir(parents=True, exist_ok=True)
+
+    # Create subdirectories
+    for subdir in ("logs", "sprints", "alerts"):
+        (commander_dir / subdir).mkdir(parents=True, exist_ok=True)
+        (commander_dir / subdir / ".gitkeep").touch()
+
+    coder_dir = projects_dir / f"{repo_name}-coder"
+    tester_dir = projects_dir / f"{repo_name}-tester"
+
+    sprint_yaml_content = f"""repo_name: {owner}/{repo_name}
+
+worktrees:
+  coder:             {coder_dir}
+  tester:            {tester_dir}
+  tester_app_subdir: "{tester_app_subdir}"
+
+paths:
+  logs_dir:     .commander/logs/
+  sprints_dir:  .commander/sprints/
+  alerts_dir:   .commander/alerts/
+
+agents:
+  coder_prompt_template: |
+    Read the issue at {{issue_url}} and implement it following the
+    project's branching workflow. Use the workflow defined in CLAUDE.md.
+  tester_prompt_template: |
+    Read the issue at {{issue_url}} and verify it as a tester following
+    the project's testing workflow. Use the workflow defined in CLAUDE.md.
+"""
+    sprint_yaml_path.write_text(sprint_yaml_content)
+
+    # Update .gitignore to exclude .commander/logs/, sprints/, alerts/ contents but keep dirs
+    gitignore_path = repo_dir / ".gitignore"
+    gitignore_additions = "\n# Commander runtime dirs\n.commander/logs/*\n!.commander/logs/.gitkeep\n.commander/sprints/*\n!.commander/sprints/.gitkeep\n.commander/alerts/*\n!.commander/alerts/.gitkeep\n"
+    if gitignore_path.exists():
+        existing = gitignore_path.read_text()
+        if ".commander/logs/" not in existing:
+            gitignore_path.write_text(existing + gitignore_additions)
+    else:
+        gitignore_path.write_text(gitignore_additions)
+
+    # Commit and push
+    _run("git", "add", ".commander", ".gitignore", cwd=repo_dir)
+    _run("git", "commit", "-m", "chore: add .commander sprint config", cwd=repo_dir)
+    _run("git", "push", "origin", "HEAD", cwd=repo_dir)
+
+    info(f"written and pushed .commander/sprint.yaml")
+
+
+def step6_register_project(owner: str, repo_name: str, icon: str, color: str) -> None:
+    """AC8: Register project in dashboard/projects.json."""
+    full_repo = f"{owner}/{repo_name}"
+
+    if _project_in_json(full_repo):
+        info(f"{full_repo} already in projects.json — skipping")
+        return
+
+    projects = _load_projects_json()
+    name = repo_name.replace("-", " ").replace("_", " ").title()
+    new_proj = {
+        "repo": full_repo,
+        "name": name,
+        "icon": icon or "ti-folder",
+        "color": color or "gray",
+        "active_sprints": {},
+    }
+    projects.append(new_proj)
+    _save_projects_json(projects)
+    info(f"registered {full_repo} in projects.json")
+
+
+def step7_tracked_repos(owner: str, repo_name: str) -> None:
+    """AC (step 7): Append to TRACKED_REPOS env var if in use."""
+    tracked = os.environ.get("TRACKED_REPOS", "").strip()
+    if not tracked:
+        info("TRACKED_REPOS not set — skipping")
+        return
+
+    full_repo = f"{owner}/{repo_name}"
+    repos = [r.strip() for r in tracked.split(",") if r.strip()]
+    if full_repo in repos:
+        info(f"{full_repo} already in TRACKED_REPOS — skipping")
+        return
+
+    repos.append(full_repo)
+    new_val = ",".join(repos)
+    info(f"Note: TRACKED_REPOS updated in this process only. Add to your shell profile: export TRACKED_REPOS={new_val}")
+    os.environ["TRACKED_REPOS"] = new_val
+
+
+def step8_restart_dashboard() -> None:
+    """AC9: Restart PRD dashboard."""
+    scripts_dir = Path(__file__).parent
+
+    stop_script = scripts_dir / "stop_all.sh"
+    start_script = scripts_dir / "start_prd.sh"
+
+    if not stop_script.exists() or not start_script.exists():
+        warn("stop_all.sh or start_prd.sh not found — skipping dashboard restart")
+        return
+
+    ok, _, err = _try_run("bash", str(stop_script), "prd")
+    if not ok:
+        warn(f"stop_all.sh failed (continuing): {err}")
+
+    time.sleep(1)
+
+    ok, _, err = _try_run("bash", str(start_script))
+    if not ok:
+        warn(f"start_prd.sh failed (dashboard may not be restarted): {err}")
+    else:
+        info("dashboard restarted")
+
+
+def step9_verify(owner: str, repo_name: str) -> None:
+    """AC10: Verify project appears in /api/projects."""
+    api_url = _get_api_url()
+    full_repo = f"{owner}/{repo_name}"
+    url = f"{api_url}/api/projects"
+
+    time.sleep(2)  # Give dashboard a moment to come up
+
+    try:
+        req = urllib.request.Request(url, headers={"Accept": "application/json"})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode())
+
+        projects = data.get("projects", [])
+        found = any(p.get("repo") == full_repo for p in projects)
+
+        if found:
+            info(f"project confirmed at {api_url}/api/projects")
+        else:
+            warn(f"{full_repo} not found in GET /api/projects response yet (may need a moment)")
+
+    except (urllib.error.URLError, OSError) as e:
+        warn(f"API unreachable ({e}) — skipping verification")
+
+
+def step10_summary(owner: str, repo_name: str, projects_dir: Path) -> None:
+    """Print ready summary."""
+    full_repo = f"{owner}/{repo_name}"
+    print()
+    print("=" * 60)
+    print(f"  Project '{repo_name}' is ready!")
+    print(f"  GitHub:  https://github.com/{full_repo}")
+    print(f"  Coder:   {projects_dir}/{repo_name}-coder")
+    print(f"  Tester:  {projects_dir}/{repo_name}-tester")
+    print()
+    print("  Next steps:")
+    print(f"    1. cd {projects_dir}/{repo_name} && open CLAUDE.md (add your conventions)")
+    print(f"    2. python3 dashboard/scripts/sprint_init.py --repo {full_repo}")
+    print(f"    3. Open dashboard at http://localhost:8000 to see the project card")
+    print("=" * 60)
+
+
+# ── Rollback ───────────────────────────────────────────────────────────────────
+
+def rollback(owner: str, repo_name: str, projects_dir: Path, confirm_delete: bool) -> None:
+    """AC12: Remove local dirs, projects.json entry, optionally GitHub repo."""
+    full_repo = f"{owner}/{repo_name}"
+    removed = []
+
+    for suffix in ("", "-coder", "-tester"):
+        d = projects_dir / f"{repo_name}{suffix}"
+        if d.exists():
+            shutil.rmtree(d)
+            removed.append(str(d))
+            print(f"  Removed {d}")
+        else:
+            print(f"  {d} does not exist — skipping")
+
+    # Remove from projects.json
+    projects = _load_projects_json()
+    new_projects = [p for p in projects if p.get("repo") != full_repo]
+    if len(new_projects) < len(projects):
+        _save_projects_json(new_projects)
+        removed.append("projects.json entry")
+        print(f"  Removed {full_repo} from projects.json")
+    else:
+        print(f"  {full_repo} not found in projects.json — skipping")
+
+    # Optionally delete GitHub repo
+    if confirm_delete:
+        ok, _, err = _try_run("gh", "repo", "delete", full_repo, "--yes")
+        if ok:
+            removed.append(f"GitHub repo {full_repo}")
+            print(f"  Deleted GitHub repo {full_repo}")
+        else:
+            warn(f"Failed to delete GitHub repo: {err}")
+
+    print()
+    print("Rollback summary:")
+    for item in removed:
+        print(f"  - {item}")
+
+
+# ── Main ───────────────────────────────────────────────────────────────────────
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Onboard a new project onto Commander"
+    )
+    parser.add_argument("repo_name", nargs="?", help="Repository name (slug)")
+    parser.add_argument("--rollback", metavar="REPO_NAME", help="Remove a previously onboarded project")
+    parser.add_argument("--confirm-delete", action="store_true", help="Also delete GitHub repo during rollback")
+    parser.add_argument("--owner", default=None, help="GitHub owner (default: from machine config)")
+    parser.add_argument("--visibility", default="public", choices=["public", "private"], help="Repo visibility")
+    parser.add_argument("--name", default=None, help="Display name for dashboard (default: title-cased repo-name)")
+    parser.add_argument("--icon", default="ti-folder", help="Icon class (default: ti-folder)")
+    parser.add_argument("--color", default=None, help="Color (default: cycled by project count)")
+    parser.add_argument("--projects-dir", default=str(DEFAULT_PROJECTS_DIR), help="Base projects directory (default: ~/dev)")
+    parser.add_argument("--tester-app-subdir", default="", help="Tester app subdirectory (default: '')")
+
+    args = parser.parse_args()
+
+    projects_dir = Path(args.projects_dir).expanduser()
+
+    # ── Rollback mode ─────────────────────────────────────────────────────────
+    if args.rollback:
+        repo_name = args.rollback
+
+        # Resolve owner
+        cfg = _load_machine_config()
+        owner = args.owner or cfg.get("default_owner")
+        if not owner:
+            print("ERROR: --owner is required (or set default_owner in ~/.commander/config.yaml)", file=sys.stderr)
+            sys.exit(1)
+
+        print(f"Rolling back project '{repo_name}' for owner '{owner}'...")
+        rollback(owner, repo_name, projects_dir, args.confirm_delete)
+        return
+
+    # ── Normal onboarding mode ─────────────────────────────────────────────────
+    if not args.repo_name:
+        parser.print_help()
+        sys.exit(1)
+
+    repo_name = args.repo_name
+
+    # ── AC2: Machine config bootstrap ─────────────────────────────────────────
+    cfg = _load_machine_config()
+    if not MACHINE_CONFIG_PATH.exists():
+        commander_home = Path(__file__).parent.parent.parent
+        _bootstrap_machine_config(commander_home)
+        cfg = _load_machine_config()
+
+    # ── Resolve owner ──────────────────────────────────────────────────────────
+    # AC13: use default_owner from config if --owner not passed
+    owner = args.owner or cfg.get("default_owner")
+    if not owner:
+        if MACHINE_CONFIG_PATH.exists() and "default_owner" not in cfg:
+            print(
+                "ERROR: ~/.commander/config.yaml exists but lacks 'default_owner'. "
+                "Pass --owner explicitly.",
+                file=sys.stderr,
+            )
+        else:
+            print(
+                "ERROR: --owner is required (or set default_owner in ~/.commander/config.yaml)",
+                file=sys.stderr,
+            )
+        sys.exit(1)
+
+    # ── AC14: Color cycling ────────────────────────────────────────────────────
+    color = args.color
+    if not color:
+        projects = _load_projects_json()
+        color = COLOR_CYCLE[len(projects) % len(COLOR_CYCLE)]
+
+    TOTAL_STEPS = 10
+
+    print(f"Onboarding '{owner}/{repo_name}' onto Commander...")
+    print()
+
+    # ── AC1: Pre-flight validation (runs before step 1) ───────────────────────
+    print("[pre-flight] Validating environment...")
+    preflight(owner, repo_name, projects_dir)
+    info("pre-flight passed")
+    print()
+
+    # ── Step 1: Create local repo + GitHub (AC3) ──────────────────────────────
+    step(1, TOTAL_STEPS, f"Creating local repo and GitHub repo for {owner}/{repo_name}...")
+    repo_dir = step1_init_repo(owner, repo_name, projects_dir, args.visibility)
+    info("done")
+
+    # ── Step 2: develop branch (AC4) ──────────────────────────────────────────
+    step(2, TOTAL_STEPS, "Creating develop branch...")
+    step2_develop_branch(repo_dir)
+    info("done")
+
+    # ── Step 3: Standard labels (AC5) ─────────────────────────────────────────
+    step(3, TOTAL_STEPS, "Creating standard GitHub labels...")
+    step3_labels(owner, repo_name)
+    info("done")
+
+    # ── Step 4: Clone coder + tester (AC6) ────────────────────────────────────
+    step(4, TOTAL_STEPS, "Cloning coder and tester worktrees...")
+    step4_clones(owner, repo_name, projects_dir)
+    info("done")
+
+    # ── Step 5: sprint.yaml (AC7) ─────────────────────────────────────────────
+    step(5, TOTAL_STEPS, "Writing .commander/sprint.yaml...")
+    step5_sprint_config(owner, repo_name, repo_dir, projects_dir, args.tester_app_subdir)
+    info("done")
+
+    # ── Step 6: Register in projects.json (AC8) ───────────────────────────────
+    step(6, TOTAL_STEPS, "Registering project in dashboard/projects.json...")
+    step6_register_project(owner, repo_name, args.icon, color)
+    info("done")
+
+    # ── Step 7: TRACKED_REPOS (AC step 7) ────────────────────────────────────
+    step(7, TOTAL_STEPS, "Checking TRACKED_REPOS environment variable...")
+    step7_tracked_repos(owner, repo_name)
+    info("done")
+
+    # ── Step 8: Restart dashboard (AC9) ───────────────────────────────────────
+    step(8, TOTAL_STEPS, "Restarting PRD dashboard...")
+    step8_restart_dashboard()
+    info("done")
+
+    # ── Step 9: Verify via API (AC10) ─────────────────────────────────────────
+    step(9, TOTAL_STEPS, "Verifying project appears in /api/projects...")
+    step9_verify(owner, repo_name)
+    info("done")
+
+    # ── Step 10: Print summary (AC15) ─────────────────────────────────────────
+    step(10, TOTAL_STEPS, "Printing ready summary...")
+    step10_summary(owner, repo_name, projects_dir)
+
+
+if __name__ == "__main__":
+    main()

@@ -63,6 +63,21 @@ from dotenv import load_dotenv
 load_dotenv(DASHBOARD_DIR / ".env")
 import github_client
 
+# Import failure-parsing helpers from post_test_report (no circular deps)
+try:
+    from scripts.post_test_report import (  # type: ignore[import]
+        parse_failures,
+        build_failure_block,
+        write_sidecar,
+        sidecar_path,
+    )
+    _FAILURE_PARSING_AVAILABLE = True
+except ImportError:
+    _FAILURE_PARSING_AVAILABLE = False
+
+# Repo root — one level above DASHBOARD_DIR (e.g. ~/commander/)
+REPO_ROOT = DASHBOARD_DIR.parent
+
 # Default paths — can be overridden via env vars or CLI for testing
 WORKTESTER_ROOT      = Path(os.environ.get("WORKTESTER_ROOT",
                              Path.home() / "commander" / "work-tester"))
@@ -746,14 +761,34 @@ def _find_feature_branch(issue_num: int) -> Optional[str]:
 # ── quality gates ─────────────────────────────────────────────────────────────
 
 def _revert_to_sit(issue_num: int, gate_name: str, output: str,
-                   repo_name: Optional[str] = None) -> None:
-    """Label the issue SIT and post a failure comment."""
+                   repo_name: Optional[str] = None,
+                   repo_root: Optional[Path] = None) -> None:
+    """Label the issue SIT and post a structured failure comment.
+
+    When failure-parsing helpers are available:
+    - Appends a ## Failure Summary table, ## Recommended Fix prose, and
+      ## Files to Inspect bulleted list to the GitHub comment.
+    - Writes a machine-readable JSON sidecar at
+      <repo-root>/.commander/runtime/last-failure-<issue>.json
+    """
     truncated = output[:2000] if len(output) > 2000 else output
     comment = (
         f"Quality gate failed: **{gate_name}**\n"
         f"Issue reverted to SIT for re-inspection.\n\n"
         f"**{gate_name}** output:\n```\n{truncated}\n```"
     )
+
+    if _FAILURE_PARSING_AVAILABLE:
+        try:
+            effective_root = repo_root or REPO_ROOT
+            failures = parse_failures(gate_name, output)
+            comment += build_failure_block(gate_name, failures)
+            sidecar = write_sidecar(issue_num, gate_name, failures,
+                                    repo_root=effective_root)
+            print(f"  Wrote failure sidecar: {sidecar}")
+        except Exception as e:
+            print(f"  Warning: failure parsing/sidecar failed — {e}", file=sys.stderr)
+
     try:
         github_client.update_labels(
             issue_num,
@@ -1190,6 +1225,59 @@ def handle_post_tester(
 
 # ── agent dispatch helpers ────────────────────────────────────────────────────
 
+def _build_failure_suffix(issue_num: int, repo_root: Optional[Path] = None) -> str:
+    """Read the JSON failure sidecar for issue_num and return a prompt suffix.
+
+    Returns an empty string when:
+    - failure-parsing helpers are not available
+    - the sidecar does not exist (backward-compat: no error, just generic prompt)
+
+    Logs a note when the sidecar is not found.
+    """
+    if not _FAILURE_PARSING_AVAILABLE:
+        return ""
+
+    effective_root = repo_root or REPO_ROOT
+    sc_path = sidecar_path(issue_num, repo_root=effective_root)
+
+    if not sc_path.exists():
+        print(f"  [retry] failure sidecar not found at {sc_path} — using generic prompt")
+        return ""
+
+    try:
+        data = json.loads(sc_path.read_text(encoding="utf-8"))
+    except Exception as e:
+        print(f"  Warning: could not read failure sidecar {sc_path}: {e}", file=sys.stderr)
+        return ""
+
+    gate      = data.get("gate", "unknown")
+    failures  = data.get("failures", [])
+    files_to_inspect = data.get("files_to_inspect", [])
+
+    if not failures:
+        return ""
+
+    lines = [
+        f"\n\nPrevious gate '{gate}' failed. Fix the following before re-submitting:"
+    ]
+    for f in failures[:10]:  # cap at 10 to keep prompt concise
+        loc   = f.get("location", "")
+        ftype = f.get("type", "")
+        msg   = f.get("issue", "")
+        test  = f.get("test", "")
+        entry = f"- {ftype} at {loc}: {msg}"
+        if test:
+            entry += f" (test: {test})"
+        lines.append(entry)
+
+    if files_to_inspect:
+        lines.append("\nFiles requiring changes:")
+        for fi in files_to_inspect[:10]:
+            lines.append(f"  {fi}")
+
+    return "\n".join(lines)
+
+
 def _issue_log_path(issue_num: int, cfg: Optional["SprintConfig"] = None) -> Path:
     logs_dir = cfg.logs_dir if cfg is not None else (DASHBOARD_DIR / "logs")
     return logs_dir / f"sprint-issue-{issue_num}.log"
@@ -1224,6 +1312,11 @@ def _dispatch_coder(
             "and implement it following the project's branching workflow. "
             "Use the BA/coder/tester workflow defined in CLAUDE.md."
         )
+
+    # Inject failure context from sidecar if available (AC: sprint manager reads sidecar)
+    failure_suffix = _build_failure_suffix(issue_num)
+    if failure_suffix:
+        prompt = prompt + failure_suffix
 
     cmd = [
         "claude",

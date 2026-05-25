@@ -373,6 +373,44 @@ If `NEEDS_FIXES`, leave the ticket in SIT (do not move it). Say which tests fail
 `#<N> <STATUS> passed=<P> failed=<F> manual=<M> promoted=<yes|no>`
 The full per-issue detail is already on GitHub via Step 9; no need to repeat it back into the orchestrator's context.
 
+## Structured Failure Output
+
+When the quality gates (pytest or ruff) reject a ticket back to SIT, the GitHub
+comment posted by `sprint_manager.py` (`_revert_to_sit`) automatically includes
+a structured failure context block with three required sections:
+
+### Required sections (appended to every gate-failure comment)
+
+```markdown
+## Failure Summary
+
+| Type | Location | Issue |
+|------|----------|-------|
+| AssertionError | tests/test_foo.py:42 | Expected 200, got 404 |
+| LintError E741 | server.py:17 | Ambiguous variable name `l` |
+
+## Recommended Fix
+
+Inspect tests/test_foo.py, server.py at the line numbers shown in the table above. Fix the pytest failures before re-submitting.
+
+## Files to Inspect
+
+- `server.py:17`
+- `tests/test_foo.py:42`
+```
+
+### JSON sidecar
+
+A machine-readable sidecar is written alongside the comment to:
+
+```
+<repo-root>/.commander/runtime/last-failure-<issue-N>.json
+```
+
+Schema: `{ "issue", "gate", "timestamp", "failures": [{ "type", "location", "issue", "file", "line" }], "files_to_inspect" }`
+
+The sprint manager reads this sidecar when dispatching a coder retry and injects exact file:line locations and test names into the coder prompt. If the sidecar is absent, sprint manager falls back to the generic retry prompt without error.
+
 ## Notes
 
 - The UAT server must be running at `$UAT_BASE_URL` for HTTP tests to pass. If Step 0's curl check warned the server wasn't responding, and all tests then fail with connection errors, say so clearly rather than marking them all as real failures.

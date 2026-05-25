@@ -978,7 +978,44 @@
     <span class="modal-title" id="modal-title">New Project</span>
     <button class="modal-close" onclick="closeNewProjectModal()" aria-label="Close">&times;</button>
   </div>
-  <form id="new-project-form" onsubmit="submitNewProject(event)">
+  <!-- Tab switcher -->
+  <div class="modal-tabs">
+    <button class="modal-tab active" id="np-tab-init" onclick="switchModalTab('init')">Create new project</button>
+    <button class="modal-tab" id="np-tab-add" onclick="switchModalTab('add')">Add existing repo</button>
+  </div>
+
+  <!-- ── Init Project tab ── -->
+  <form id="np-init-form" onsubmit="submitInitProject(event)">
+    <div class="modal-field">
+      <label class="modal-label" for="np-name">Project name <span class="modal-required">*</span></label>
+      <input class="modal-input" id="np-name" type="text" placeholder="my-app" autocomplete="off">
+      <div class="modal-error hidden" id="np-name-error"></div>
+    </div>
+    <div class="modal-field">
+      <label class="modal-label" for="np-projects-dir">Projects directory <span class="modal-required">*</span></label>
+      <input class="modal-input" id="np-projects-dir" type="text" placeholder="~/dev" value="~/dev" autocomplete="off">
+    </div>
+    <div class="modal-field modal-field-row">
+      <label class="modal-check-label">
+        <input type="checkbox" id="np-nested"> Nested layout (--nested)
+      </label>
+      <label class="modal-check-label">
+        <input type="checkbox" id="np-skip-uat"> Skip UAT clone (--skip-uat)
+      </label>
+    </div>
+    <!-- Live log area (hidden until run starts) -->
+    <div class="modal-log-wrap hidden" id="np-log-wrap">
+      <pre class="modal-log" id="np-log"></pre>
+    </div>
+    <div class="modal-error hidden" id="np-init-error"></div>
+    <div class="modal-footer">
+      <button type="button" class="btn-ghost" onclick="closeNewProjectModal()">Cancel</button>
+      <button type="submit" class="btn-primary" id="np-init-submit">Create</button>
+    </div>
+  </form>
+
+  <!-- ── Add existing repo tab ── -->
+  <form id="new-project-form" class="hidden" onsubmit="submitNewProject(event)">
     <div class="modal-field">
       <label class="modal-label" for="np-repo">GitHub Repo URL <span class="modal-required">*</span></label>
       <input class="modal-input" id="np-repo" type="text" placeholder="https://github.com/owner/repo" autocomplete="off" required>
@@ -1027,6 +1064,35 @@
   .modal-input.error { border-color: var(--red); }
   .modal-error  { font-size: 12px; color: var(--red); margin-top: 5px; }
   .modal-footer { display: flex; gap: 8px; justify-content: flex-end; margin-top: 20px; }
+
+  /* ── Modal tab switcher ── */
+  .modal-tabs {
+    display: flex; gap: 0; margin-bottom: 18px;
+    border-bottom: 1px solid var(--border);
+  }
+  .modal-tab {
+    background: none; border: none; border-bottom: 2px solid transparent;
+    padding: 8px 14px; font-size: 13px; font-weight: 500; color: var(--text-muted);
+    cursor: pointer; margin-bottom: -1px;
+  }
+  .modal-tab:hover { color: var(--text); }
+  .modal-tab.active { color: var(--blue); border-bottom-color: var(--blue); }
+
+  /* ── Checkbox row ── */
+  .modal-field-row { display: flex; gap: 20px; align-items: center; }
+  .modal-check-label { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text); cursor: pointer; }
+  .modal-check-label input[type="checkbox"] { cursor: pointer; }
+
+  /* ── Live log area ── */
+  .modal-log-wrap {
+    margin-bottom: 12px; border: 1px solid var(--border); border-radius: 6px;
+    background: var(--surface-2); max-height: 180px; overflow: hidden;
+  }
+  .modal-log {
+    margin: 0; padding: 10px; font-size: 11px; font-family: var(--mono, monospace);
+    color: var(--text); white-space: pre-wrap; word-break: break-all;
+    max-height: 180px; overflow-y: auto; overflow-x: hidden;
+  }
 
   /* ── Alert banners (AC-3a) ── */
   .alert-banner {

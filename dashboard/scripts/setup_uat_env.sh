@@ -1,18 +1,21 @@
 #!/usr/bin/env bash
-# setup_uat_env.sh — Clones the repo into ~/commander/dashboard-uat, checks out
+# setup_uat_env.sh — Clones the repo into <commander_root>/uat, checks out
 # develop, installs a Python venv, writes .env, configures .claude/settings.json
 # with the UAT hook target, and initialises the UAT database.
+#
+# <commander_root> is derived from this script's location — two levels up from
+# the scripts/ directory (i.e. the parent of the PRD clone).
 #
 # Run this once to set up the UAT environment.  Safe to re-run (idempotent).
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DASHBOARD_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-COMMANDER_ROOT="$(cd "$DASHBOARD_DIR/.." && pwd)"
+PRD_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+COMMANDER_ROOT="$(cd "$PRD_DIR/.." && pwd)"
 
 REPO_URL="https://github.com/zealchaiwut/commander.git"
-UAT_DIR="$COMMANDER_ROOT/dashboard-uat"
+UAT_DIR="$COMMANDER_ROOT/uat"
 UAT_DASHBOARD="$UAT_DIR/dashboard"
 
 echo "=== Commander UAT environment setup ==="
@@ -82,7 +85,7 @@ if [ -f "$SETTINGS_FILE" ] && grep -q '"HOOK_POST_TARGET"' "$SETTINGS_FILE"; the
 else
     echo "[5/6] Writing UAT .claude/settings.json with HOOK_POST_TARGET …"
     # Use python3 to merge the env block into existing settings (or create fresh)
-    PRD_SETTINGS="$DASHBOARD_DIR/.claude/settings.json"
+    PRD_SETTINGS="$PRD_DIR/.claude/settings.json"
     python3 - "$PRD_SETTINGS" "$SETTINGS_FILE" <<'PYEOF'
 import json, sys, os
 

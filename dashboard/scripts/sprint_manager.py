@@ -1695,11 +1695,36 @@ def create_summary_github_issue(
     sprint_label: str,
     repo_name: Optional[str] = None,
 ) -> tuple[Optional[int], Optional[str]]:
-    """AC-2: Create a GitHub issue with the summary markdown as the body."""
+    """AC-2: Create a GitHub issue with the summary markdown as the body.
+
+    AC-1/AC-6: Before creating, searches GitHub (open + closed) for an issue
+    with the exact title.  If one already exists, logs its URL and returns
+    without creating a duplicate (AC-2).  If none exists, creates the issue
+    exactly as before (AC-3).
+    """
     n      = sprint_number if sprint_number is not None else sprint_label
     title  = f"Sprint {n} Executive Summary"
     labels = ["docs", f"sprint-{n}"]
 
+    # AC-1 / AC-6: deduplication check — search both open and closed states
+    try:
+        existing = github_client.search_issues_by_title(title, repo_name=repo_name)
+    except Exception as e:
+        print(f"  Warning: deduplication search failed -- {e}", file=sys.stderr)
+        existing = []
+
+    if existing:
+        # AC-2: skip creation, return details of the first match
+        found = existing[0]
+        existing_num = found.get("number")
+        existing_url = found.get("url", "")
+        print(
+            f"  [summary] Issue already exists: #{existing_num} {existing_url}"
+            f" (state={found.get('state', '?')}) — skipping creation."
+        )
+        return existing_num, existing_url
+
+    # AC-3: no duplicate found — create as normal
     _ensure_github_labels(labels, repo_name=repo_name)
 
     try:
@@ -1794,8 +1819,13 @@ def write_sprint_summary(
     repo_name: Optional[str] = None,
     sprint_branch: Optional[str] = None,
     cfg: Optional["SprintConfig"] = None,
+    dry_run: bool = False,
 ) -> Path:
-    """Write summary file, create GitHub issue, prompt for learnings (AC-1/2/3)."""
+    """Write summary file, create GitHub issue, prompt for learnings (AC-1/2/3).
+
+    AC-5: When dry_run=True the function writes the local summary file and
+    prints a dry-run notice, but does NOT create or search GitHub issues.
+    """
     eff_repo = repo_name or (cfg.repo_name if cfg else None)
     content = generate_sprint_summary(
         state,
@@ -1815,7 +1845,12 @@ def write_sprint_summary(
         title = f"Sprint {state.sprint_label} summary"
         dispatch_alerts(alert_modes, title=title, body=content[:2000], cfg=cfg)
 
-    # AC-2: Create GitHub issue (best-effort)
+    # AC-5: skip GitHub issue creation entirely for dry runs
+    if dry_run:
+        print("  [dry-run] would create summary GitHub issue")
+        return path
+
+    # AC-2: Create GitHub issue (best-effort); deduplication handled inside
     try:
         summary_issue_num, summary_issue_url = create_summary_github_issue(
             content=content,
@@ -2411,6 +2446,7 @@ def main() -> None:
             repo_name     = eff_repo,
             cfg           = cfg,
             sprint_branch = effective_target,
+            dry_run       = args.dry_run,
         )
     else:
         summary_path = None

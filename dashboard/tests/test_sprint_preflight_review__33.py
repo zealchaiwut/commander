@@ -571,11 +571,11 @@ def test_ac10_sprint_manager_preflight_approved_filter():
     dispatched = []
 
     def fake_dispatch_coder(issue_num, alert_modes, sprint_branch="develop",
-                            repo_name=None, cfg=None):
+                            repo_name=None, cfg=None, **kwargs):
         dispatched.append(issue_num)
         return True, None
 
-    def fake_dispatch_tester(issue_num, alert_modes, repo_name=None, cfg=None):
+    def fake_dispatch_tester(issue_num, alert_modes, repo_name=None, cfg=None, **kwargs):
         return 0, None
 
     def fake_handle_post_tester(*args, **kwargs):
@@ -611,3 +611,84 @@ def test_ac10_sprint_manager_preflight_approved_filter():
     issue_20 = next(i for i in final_state.issues if i.number == 20)
     assert issue_20.status == "skipped"
     assert "preflight" in (issue_20.skip_reason or "")
+
+
+# ── Regression tests for UAT-reported bugs ───────────────────────────────────
+
+def test_bug2_api_failure_does_not_default_to_ok():
+    """Bug 2 regression: API failure must NOT produce status='ok'/suggested_action='proceed'.
+
+    Previously, any exception in _call_anthropic caused the issue to be
+    silently marked as status='ok', suggested_action='proceed' — which meant
+    un-reviewed tickets would appear approved in the report.
+    """
+    sr = _import_sprint_review()
+    issue = {
+        "number": 42,
+        "title":  "Test issue",
+        "body":   "## Acceptance Criteria\n- [ ] item 1\n- [ ] item 2\n",
+    }
+    all_issues = [issue]
+
+    # _pre_classify returns ("", "") → falls through to API call
+    with mock.patch.object(sr, "_pre_classify", return_value=("", "")), \
+         mock.patch.object(sr, "_call_anthropic", side_effect=Exception("SSL error")):
+        result = sr.review_issue(issue, all_issues, api_key="fake", repo_name=None)
+
+    # Must NOT be ok/proceed after API failure
+    assert result.status != "ok", (
+        "API failure must not produce status='ok' — issue would appear approved"
+    )
+    assert result.suggested_action != "proceed", (
+        "API failure must not produce suggested_action='proceed'"
+    )
+    # Must be flagged so the user notices
+    assert result.status == "missing-info"
+    assert result.suggested_action == "skip"
+    assert "API review failed" in result.notes
+
+
+def test_bug2_api_failure_includes_error_in_notes():
+    """Bug 2 regression: API failure notes must include the exception text."""
+    sr = _import_sprint_review()
+    issue = {
+        "number": 7,
+        "title":  "Another issue",
+        "body":   "## Acceptance Criteria\n- [ ] item 1\n- [ ] item 2\n",
+    }
+    all_issues = [issue]
+
+    with mock.patch.object(sr, "_pre_classify", return_value=("", "")), \
+         mock.patch.object(sr, "_call_anthropic",
+                           side_effect=Exception("CERTIFICATE_VERIFY_FAILED")):
+        result = sr.review_issue(issue, all_issues, api_key="fake", repo_name=None)
+
+    assert "CERTIFICATE_VERIFY_FAILED" in result.notes
+
+
+def test_bug1_sprints_dir_passed_to_write_preflight_json(tmp_path, monkeypatch):
+    """Bug 1 regression: write_preflight_json must use sprints_dir when provided.
+
+    When run from a project directory that has a .commander/sprint.yaml,
+    the preflight JSON must be written to that project's sprints_dir,
+    NOT to commander's own dashboard/sprints/ folder.
+    """
+    sr = _import_sprint_review()
+    project_sprints = tmp_path / "project" / ".commander" / "sprints"
+    project_sprints.mkdir(parents=True)
+
+    results = [
+        sr.ReviewResult(1, "Some issue", "ok", "all clear", "proceed"),
+    ]
+
+    # write_preflight_json should write to the provided sprints_dir
+    out_path = sr.write_preflight_json("sprint-1", results, sprints_dir=project_sprints)
+
+    # File must be inside project_sprints, NOT in SPRINTS_DIR (commander's own dir)
+    assert out_path.parent == project_sprints, (
+        f"Preflight JSON written to {out_path.parent!r}, expected {project_sprints!r}. "
+        "Bug 1: JSON must go to the project's sprints directory, not commander's."
+    )
+
+    data = json.loads(out_path.read_text())
+    assert data["sprint_label"] == "sprint-1"

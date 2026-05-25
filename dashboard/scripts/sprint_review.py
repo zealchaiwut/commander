@@ -344,13 +344,20 @@ def review_issue(
             suggested_action = result["suggested_action"],
         )
     except Exception as exc:
-        # On API failure, default to ok so the sprint can proceed
+        # On API failure, do NOT default to ok/proceed — that would be dangerous.
+        # Mark as missing-info/skip so the issue is flagged for manual review.
+        err_note = f"API review failed: {exc}"
+        print(
+            f"\n  WARNING: Anthropic API failed for #{number} — defaulting to skip.\n"
+            f"           {exc}",
+            file=sys.stderr,
+        )
         return ReviewResult(
             number           = number,
             title            = title,
-            status           = "ok",
-            notes            = f"API review failed: {exc}",
-            suggested_action = "proceed",
+            status           = "missing-info",
+            notes            = err_note,
+            suggested_action = "skip",
         )
 
 
@@ -374,13 +381,20 @@ def run_reviews(
             try:
                 results[num] = future.result()
             except Exception as exc:
-                # Should not normally reach here since review_issue catches internally
+                # Should not normally reach here since review_issue catches internally.
+                # Still, do NOT default to ok/proceed on unexpected errors.
+                err_note = f"review error: {exc}"
+                print(
+                    f"\n  WARNING: Unexpected review error for #{num} — defaulting to skip.\n"
+                    f"           {exc}",
+                    file=sys.stderr,
+                )
                 results[num] = ReviewResult(
                     number           = num,
                     title            = next(i["title"] for i in issues if i["number"] == num),
-                    status           = "ok",
-                    notes            = f"review error: {exc}",
-                    suggested_action = "proceed",
+                    status           = "missing-info",
+                    notes            = err_note,
+                    suggested_action = "skip",
                 )
 
     # Return in original issue order
@@ -650,12 +664,67 @@ def main() -> None:
         metavar="owner/repo",
         help="GitHub repo override (default: auto-detect from git remote)",
     )
+    p.add_argument(
+        "--config",
+        default=None,
+        metavar="PATH",
+        help=(
+            "Path to .commander/sprint.yaml config file.  "
+            "When provided, sprints_dir and repo are read from it.  "
+            "Overrides auto-discovery."
+        ),
+    )
 
     args = p.parse_args()
 
+    # ── Resolve sprints_dir from SprintConfig (Bug 1 fix) ────────────────────
+    # Import lazily to avoid a circular dependency (sprint_manager imports us).
+    sprints_dir: Optional[Path] = None
+    repo_name: Optional[str] = args.repo
+
+    try:
+        from sprint_manager import discover_config, load_config  # noqa: PLC0415
+        _sm_available = True
+    except Exception:
+        _sm_available = False
+
+    def _try_load_config(path: Path) -> Optional[object]:
+        """Load config without calling sys.exit on validation errors."""
+        try:
+            return load_config(path)  # type: ignore[possibly-undefined]
+        except SystemExit as e:
+            print(
+                f"  Warning: could not load config {path} — {e}; "
+                "using commander default sprints directory.",
+                file=sys.stderr,
+            )
+            return None
+
+    if _sm_available:
+        if args.config:
+            config_path = Path(args.config).expanduser().resolve()
+            if not config_path.exists():
+                p.error(f"Config file not found: {config_path}")
+            print(f"  Using config: {config_path}")
+            cfg = _try_load_config(config_path)
+            if cfg is not None:
+                sprints_dir = cfg.sprints_dir
+                if not repo_name:
+                    repo_name = cfg.repo_name
+        else:
+            discovered = discover_config()  # type: ignore[possibly-undefined]
+            if discovered:
+                print(f"  Auto-discovered config: {discovered}")
+                cfg = _try_load_config(discovered)
+                if cfg is not None:
+                    sprints_dir = cfg.sprints_dir
+                    if not repo_name:
+                        repo_name = cfg.repo_name
+
     run_preflight(
         sprint_label = args.sprint_label,
-        repo_name    = args.repo,
+        repo_name    = repo_name,
+        sprints_dir  = sprints_dir,
         interactive  = True,
     )
 

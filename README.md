@@ -82,6 +82,38 @@ commander/
 └── venv/                # Root-level Python 3.14 venv
 ```
 
+## Per-project Layout (created by init_project.py)
+
+When `init_project.py` onboards a new project it creates four clones:
+
+```
+~/dev/<project>/
+├── main/         # primary clone — master branch (the repo root itself)
+├── uat/          # UAT clone — develop branch  ← created by init_project.py
+│   └── .env      # PORT=<uat_port>, ENVIRONMENT=uat, DB_PATH=./<project>-uat.db
+├── .commander/
+│   └── sprint.yaml   # includes uat: section (enabled, auto_sync, db_path)
+~/dev/<project>-coder/   # coder agent clone — develop branch
+~/dev/<project>-tester/  # tester agent clone — develop branch
+```
+
+The `uat/` clone uses a separate database (`<project>-uat.db`) and a distinct port,
+so it is fully isolated from the PRD environment.
+
+### Adding UAT to an existing project
+
+```bash
+python3 dashboard/scripts/migrate_add_uat.py <repo-name> [--uat-port 8001]
+```
+
+### Skipping UAT at init time
+
+```bash
+python3 dashboard/scripts/init_project.py <repo-name> --skip-uat
+```
+
+This sets `uat.enabled: false` in `sprint.yaml` and skips the `uat/` clone.
+
 ## Hook Behaviour
 
 Hook scripts (`hooks/tool_used.py`, `hooks/agent_finished.py`, `hooks/post_tool_used.py`) read the target URL from the `HOOK_POST_TARGET` environment variable, defaulting to `http://localhost:8000/api/agent-event`.

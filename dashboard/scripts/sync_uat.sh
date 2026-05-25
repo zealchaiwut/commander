@@ -1,21 +1,25 @@
 #!/usr/bin/env bash
-# sync_uat.sh — Pull the latest develop commits into ~/commander/dashboard-uat.
+# sync_uat.sh — Pull the latest develop commits into the UAT clone.
+#
+# UAT_DIR is derived from this script's location:
+#   <commander_root>/uat
+# where <commander_root> is two levels up from the scripts/ directory.
 #
 # Run this to bring the UAT environment up to date with origin/develop.
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DASHBOARD_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-COMMANDER_ROOT="$(cd "$DASHBOARD_DIR/.." && pwd)"
+PRD_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+COMMANDER_ROOT="$(cd "$PRD_DIR/.." && pwd)"
 
-UAT_DIR="$COMMANDER_ROOT/dashboard-uat"
+UAT_DIR="$COMMANDER_ROOT/uat"
 
 echo "=== Syncing UAT environment with develop ==="
 
 if [ ! -d "$UAT_DIR/.git" ]; then
-    echo "ERROR: UAT directory not found or not a git repo: $UAT_DIR"
-    echo "Run setup_uat_env.sh first."
+    echo "ERROR: UAT directory not found at $UAT_DIR. Create it via:"
+    echo "  cd $COMMANDER_ROOT && git clone https://github.com/zealchaiwut/commander.git uat && cd uat && git checkout develop"
     exit 1
 fi
 

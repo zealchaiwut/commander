@@ -11,11 +11,11 @@
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DASHBOARD_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-COMMANDER_ROOT="$(cd "$DASHBOARD_DIR/.." && pwd)"
+PRD_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+COMMANDER_ROOT="$(cd "$PRD_DIR/.." && pwd)"
 
-PRD_PID_FILE="$DASHBOARD_DIR/prd.pid"
-UAT_PID_FILE="$COMMANDER_ROOT/dashboard-uat/dashboard/uat.pid"
+PRD_PID_FILE="$PRD_DIR/prd.pid"
+UAT_PID_FILE="$COMMANDER_ROOT/uat/dashboard/uat.pid"
 
 # Parse optional argument: prd | uat | (none = both)
 TARGET="${1:-all}"

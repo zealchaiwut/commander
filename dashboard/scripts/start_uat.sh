@@ -1,28 +1,32 @@
 #!/usr/bin/env bash
-# start_uat.sh — Start the UAT dashboard on port 8001 using ~/commander/dashboard-uat (develop branch).
+# start_uat.sh — Start the UAT dashboard on port 8001.
 #
-# Writes a PID file to ~/commander/dashboard-uat/dashboard/uat.pid.
-# Logs are written to ~/commander/dashboard-uat/dashboard/uat.log.
+# UAT_DIR is derived from this script's location:
+#   <commander_root>/uat/dashboard
+# where <commander_root> is two levels up from the scripts/ directory
+# (i.e. the sibling directory of the PRD clone).
+#
+# Writes a PID file to <UAT_DIR>/uat.pid.
+# Logs are written to <UAT_DIR>/uat.log.
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DASHBOARD_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-COMMANDER_ROOT="$(cd "$DASHBOARD_DIR/.." && pwd)"
+PRD_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+COMMANDER_ROOT="$(cd "$PRD_DIR/.." && pwd)"
 
-UAT_DIR="$COMMANDER_ROOT/dashboard-uat"
-UAT_DASHBOARD="$UAT_DIR/dashboard"
-VENV="$UAT_DASHBOARD/venv"
-PID_FILE="$UAT_DASHBOARD/uat.pid"
-LOG_FILE="$UAT_DASHBOARD/uat.log"
+UAT_DIR="$COMMANDER_ROOT/uat/dashboard"
+VENV="$UAT_DIR/venv"
+PID_FILE="$UAT_DIR/uat.pid"
+LOG_FILE="$UAT_DIR/uat.log"
 PORT=8001
 
 echo "=== Starting UAT dashboard (port $PORT) ==="
 
 # ── Sanity checks ─────────────────────────────────────────────────────────────
 if [ ! -d "$UAT_DIR" ]; then
-    echo "ERROR: UAT directory not found: $UAT_DIR"
-    echo "Run setup_uat_env.sh first."
+    echo "ERROR: UAT directory not found at $UAT_DIR. Create it via:"
+    echo "  cd $COMMANDER_ROOT && git clone https://github.com/zealchaiwut/commander.git uat && cd uat && git checkout develop"
     exit 1
 fi
 
@@ -44,7 +48,7 @@ if [ -f "$PID_FILE" ]; then
 fi
 
 # ── Launch uvicorn in background ──────────────────────────────────────────────
-cd "$UAT_DASHBOARD"
+cd "$UAT_DIR"
 ENVIRONMENT=uat "$VENV/bin/uvicorn" server:app --host 0.0.0.0 --port "$PORT" \
     >> "$LOG_FILE" 2>&1 &
 

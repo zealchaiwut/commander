@@ -94,6 +94,9 @@ class SprintConfig:
     api_url:               str            = field(default_factory=lambda: DASHBOARD_API_URL)
     coder_prompt_template:  Optional[str] = None
     tester_prompt_template: Optional[str] = None
+    # Port detection (issue #62)
+    app_default_port:      Optional[int]  = None
+    app_port_strategy:     str            = "prefer_default"
 
     @property
     def worktree_tester_app(self) -> Path:
@@ -193,6 +196,25 @@ def load_config(path: Path) -> "SprintConfig":
     coder_prompt   = agents.get("coder_prompt_template") or None
     tester_prompt  = agents.get("tester_prompt_template") or None
 
+    # ── app section (issue #62: per-project port detection) ───────────────────
+    app_section = data.get("app") or {}
+    app_default_port: Optional[int] = None
+    app_port_strategy: str = "prefer_default"
+    if app_section:
+        raw_port = app_section.get("default_port")
+        if raw_port is not None:
+            try:
+                app_default_port = int(raw_port)
+            except (TypeError, ValueError):
+                sys.exit(f"Config error: app.default_port must be an integer, got {raw_port!r}")
+        raw_strategy = (app_section.get("port_strategy") or "prefer_default").strip()
+        if raw_strategy not in ("prefer_default", "always_random"):
+            sys.exit(
+                f"Config error: app.port_strategy must be 'prefer_default' or 'always_random', "
+                f"got {raw_strategy!r}"
+            )
+        app_port_strategy = raw_strategy
+
     return SprintConfig(
         repo_name             = repo_name,
         worktree_coder        = worktree_coder,
@@ -205,6 +227,8 @@ def load_config(path: Path) -> "SprintConfig":
         api_url               = api_url,
         coder_prompt_template = coder_prompt,
         tester_prompt_template= tester_prompt,
+        app_default_port      = app_default_port,
+        app_port_strategy     = app_port_strategy,
     )
 
 
@@ -415,6 +439,46 @@ def _run_timed(*cmd, cwd: Optional[Path] = None) -> tuple[int, str, str]:
     """Run a command and return (returncode, stdout, stderr)."""
     r = subprocess.run(cmd, capture_output=True, text=True, cwd=cwd)
     return r.returncode, r.stdout, r.stderr
+
+
+# ── port detection (issue #62) ───────────────────────────────────────────────
+
+def _detect_port(cfg: "SprintConfig") -> Optional[int]:
+    """Call find_port.py and return the chosen port, or None if no app section.
+
+    AC-5: Called before coder is dispatched when app_default_port is set.
+    """
+    if cfg.app_default_port is None:
+        return None  # non-server project: skip port detection
+
+    find_port_script = cfg.scripts_dir / "find_port.py"
+    cmd = [
+        sys.executable, str(find_port_script),
+        "--prefer", str(cfg.app_default_port),
+        "--strategy", cfg.app_port_strategy,
+    ]
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        port_str = result.stdout.strip()
+        chosen_port = int(port_str)
+        print(f"  [port] chosen port: {chosen_port} "
+              f"(preferred: {cfg.app_default_port}, strategy: {cfg.app_port_strategy})")
+        return chosen_port
+    except (subprocess.CalledProcessError, ValueError) as e:
+        print(f"  Warning: find_port.py failed ({e}) -- skipping port detection", file=sys.stderr)
+        return None
+
+
+def _write_runtime_port(worktree_coder: Path, port: int) -> None:
+    """Write chosen port to <coder_worktree>/.commander/runtime/port.
+
+    AC-6: Creates parent dirs as needed.
+    """
+    runtime_dir = worktree_coder / ".commander" / "runtime"
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+    port_file = runtime_dir / "port"
+    port_file.write_text(str(port), encoding="utf-8")
+    print(f"  [port] wrote {port} to {port_file}")
 
 
 # ── dashboard integration ─────────────────────────────────────────────────────
@@ -1112,6 +1176,7 @@ def _dispatch_coder(
     sprint_branch: str = "develop",
     repo_name: Optional[str] = None,
     cfg: Optional["SprintConfig"] = None,
+    chosen_port: Optional[int] = None,
 ) -> tuple[bool, Optional[str]]:
     """Dispatch a coder agent for the issue.  Returns (ok, failure_category)."""
     eff_repo = repo_name or (cfg.repo_name if cfg else None)
@@ -1148,6 +1213,12 @@ def _dispatch_coder(
         ),
     ]
 
+    # AC-7: inject COMMANDER_APP_PORT if a port was chosen
+    proc_env: Optional[dict] = None
+    if chosen_port is not None:
+        proc_env = {**os.environ, "COMMANDER_APP_PORT": str(chosen_port)}
+        print(f"  [port] COMMANDER_APP_PORT={chosen_port} injected into coder env")
+
     try:
         with log_path.open("w") as log_f:
             proc = subprocess.Popen(
@@ -1155,6 +1226,7 @@ def _dispatch_coder(
                 stdout=log_f,
                 stderr=log_f,
                 cwd=str(cwd_path),
+                env=proc_env,
             )
     except FileNotFoundError:
         # claude CLI not available -- treat as stub success for testing
@@ -1190,6 +1262,7 @@ def _dispatch_tester(
     alert_modes: list[str],
     repo_name: Optional[str] = None,
     cfg: Optional["SprintConfig"] = None,
+    chosen_port: Optional[int] = None,
 ) -> tuple[int, Optional[str]]:
     """Dispatch a tester agent.  Returns (exit_code, failure_category_if_hang)."""
     eff_repo = repo_name or (cfg.repo_name if cfg else None)
@@ -1219,6 +1292,12 @@ def _dispatch_tester(
         prompt,
     ]
 
+    # AC-7: inject COMMANDER_APP_PORT if a port was chosen
+    proc_env: Optional[dict] = None
+    if chosen_port is not None:
+        proc_env = {**os.environ, "COMMANDER_APP_PORT": str(chosen_port)}
+        print(f"  [port] COMMANDER_APP_PORT={chosen_port} injected into tester env")
+
     try:
         with log_path.open("a") as log_f:
             proc = subprocess.Popen(
@@ -1226,6 +1305,7 @@ def _dispatch_tester(
                 stdout=log_f,
                 stderr=log_f,
                 cwd=str(cwd_path),
+                env=proc_env,
             )
     except FileNotFoundError:
         print("  [tester] claude CLI not found -- stub success")
@@ -1813,9 +1893,17 @@ def run_sprint(
             _post_sprint_status(state, api_url=api_url)
             continue
 
+        # -- Port detection (issue #62, AC-5/6/7/8) --
+        chosen_port: Optional[int] = None
+        if cfg is not None and cfg.app_default_port is not None:
+            chosen_port = _detect_port(cfg)
+            if chosen_port is not None:
+                _write_runtime_port(cfg.worktree_coder, chosen_port)
+
         # -- Dispatch coder --
         coder_ok, coder_category = _dispatch_coder(
             num, alert_modes, sprint_branch=target_branch, repo_name=eff_repo, cfg=cfg,
+            chosen_port=chosen_port,
         )
 
         if not coder_ok:
@@ -1841,6 +1929,7 @@ def run_sprint(
         # -- Dispatch tester --
         tester_rc, hang_category = _dispatch_tester(
             num, alert_modes, repo_name=eff_repo, cfg=cfg,
+            chosen_port=chosen_port,
         )
 
         if hang_category == FailureCategory.HANG:

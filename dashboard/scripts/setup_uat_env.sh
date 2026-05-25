@@ -1,10 +1,23 @@
 #!/usr/bin/env bash
-# setup_uat_env.sh — Clones the repo into <commander_root>/uat, checks out
-# develop, installs a Python venv, writes .env, configures .claude/settings.json
-# with the UAT hook target, and initialises the UAT database.
+# setup_uat_env.sh — Clones the repo into <commander-root>/uat, checks
+# out develop, installs a Python venv, writes .env, configures
+# .claude/settings.json with the UAT hook target, and initialises the UAT
+# database.
 #
-# <commander_root> is derived from this script's location — two levels up from
-# the scripts/ directory (i.e. the parent of the PRD clone).
+# Paths are derived from this script's location via two-level directory
+# traversal (no git commands):
+#   SCRIPT_DIR  = <commander-root>/dashboard/scripts/
+#   PRD_DIR     = <commander-root>/dashboard/
+#   COMMANDER_ROOT = <commander-root>/
+#   UAT_DIR     = <commander-root>/uat
+#   UAT_DASHBOARD = <commander-root>/uat/dashboard
+#
+# Standard layout:
+#   ~/dev/commander/               ← COMMANDER_ROOT
+#     dashboard/                   ← PRD_DIR  (PRD clone, master branch)
+#       scripts/                   ← SCRIPT_DIR (this script lives here)
+#     uat/                         ← UAT_DIR (UAT clone, develop branch)
+#       dashboard/                 ← UAT_DASHBOARD
 #
 # Run this once to set up the UAT environment.  Safe to re-run (idempotent).
 

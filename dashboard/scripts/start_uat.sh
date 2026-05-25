@@ -1,10 +1,19 @@
 #!/usr/bin/env bash
 # start_uat.sh — Start the UAT dashboard on port 8001.
 #
-# UAT_DIR is derived from this script's location:
-#   <commander_root>/uat/dashboard
-# where <commander_root> is two levels up from the scripts/ directory
-# (i.e. the sibling directory of the PRD clone).
+# UAT_DIR is derived from this script's location via two-level directory
+# traversal (no git commands):
+#   SCRIPT_DIR  = <commander-root>/dashboard/scripts/
+#   PRD_DIR     = <commander-root>/dashboard/
+#   COMMANDER_ROOT = <commander-root>/
+#   UAT_DIR     = <commander-root>/uat/dashboard
+#
+# Standard layout:
+#   ~/dev/commander/               ← COMMANDER_ROOT
+#     dashboard/                   ← PRD_DIR  (PRD clone, master branch)
+#       scripts/                   ← SCRIPT_DIR (this script lives here)
+#     uat/
+#       dashboard/                 ← UAT_DIR
 #
 # Writes a PID file to <UAT_DIR>/uat.pid.
 # Logs are written to <UAT_DIR>/uat.log.

@@ -16,7 +16,8 @@ import subprocess
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
+_DASHBOARD_DIR = Path(__file__).parent.parent / "apps" / "dashboard"
+sys.path.insert(0, str(_DASHBOARD_DIR))
 import github_client
 
 STATUS_MAP = {
@@ -49,7 +50,7 @@ STATUS_MAP = {
 
 
 def _load_env():
-    env = Path(__file__).parent.parent / ".env"
+    env = _DASHBOARD_DIR / ".env"
     if not env.exists():
         return
     for line in env.read_text().splitlines():

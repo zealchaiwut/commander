@@ -4,35 +4,34 @@
 # .claude/settings.json with the UAT hook target, and initialises the UAT
 # database.
 #
-# Paths are derived from this script's location via three-level directory
-# traversal (no git commands):
-#   SCRIPT_DIR   = <project-dir>/prd/dashboard/scripts/
-#   DASHBOARD_DIR= <project-dir>/prd/dashboard/
+# Paths are derived from this script's location:
+#   SCRIPT_DIR   = <project-dir>/prd/scripts/
 #   REPO_ROOT    = <project-dir>/prd/
+#   DASHBOARD_DIR= <project-dir>/prd/apps/dashboard/
 #   PROJECT_DIR  = <project-dir>/
 #   UAT_DIR      = <project-dir>/uat
-#   UAT_DASHBOARD= <project-dir>/uat/dashboard
+#   UAT_DASHBOARD= <project-dir>/uat/apps/dashboard
 #
 # Standard layout:
 #   ~/dev/commander/               ← PROJECT_DIR
 #     prd/                         ← PRD clone (REPO_ROOT)
-#       dashboard/                 ← DASHBOARD_DIR
-#         scripts/                 ← SCRIPT_DIR (this script lives here)
+#       scripts/                   ← SCRIPT_DIR (this script lives here)
+#       apps/dashboard/            ← DASHBOARD_DIR
 #     uat/                         ← UAT_DIR (UAT clone, develop branch)
-#       dashboard/                 ← UAT_DASHBOARD
+#       apps/dashboard/            ← UAT_DASHBOARD
 #
 # Run this once to set up the UAT environment.  Safe to re-run (idempotent).
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DASHBOARD_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-REPO_ROOT="$(cd "$DASHBOARD_DIR/.." && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+DASHBOARD_DIR="$REPO_ROOT/apps/dashboard"
 PROJECT_DIR="$(cd "$REPO_ROOT/.." && pwd)"
 
 REPO_URL="https://github.com/zealchaiwut/commander.git"
 UAT_DIR="$PROJECT_DIR/uat"
-UAT_DASHBOARD="$UAT_DIR/dashboard"
+UAT_DASHBOARD="$UAT_DIR/apps/dashboard"
 
 echo "=== Commander UAT environment setup ==="
 
@@ -92,7 +91,7 @@ ENVEOF
 fi
 
 # ── 5. Configure .claude/settings.json with UAT hook target ──────────────────
-CLAUDE_DIR="$UAT_DASHBOARD/.claude"
+CLAUDE_DIR="$UAT_DIR/.claude"
 SETTINGS_FILE="$CLAUDE_DIR/settings.json"
 mkdir -p "$CLAUDE_DIR"
 
@@ -101,7 +100,7 @@ if [ -f "$SETTINGS_FILE" ] && grep -q '"HOOK_POST_TARGET"' "$SETTINGS_FILE"; the
 else
     echo "[5/6] Writing UAT .claude/settings.json with HOOK_POST_TARGET …"
     # Use python3 to merge the env block into existing settings (or create fresh)
-    PRD_SETTINGS="$DASHBOARD_DIR/.claude/settings.json"
+    PRD_SETTINGS="$REPO_ROOT/.claude/settings.json"
     python3 - "$PRD_SETTINGS" "$SETTINGS_FILE" <<'PYEOF'
 import json, sys, os
 

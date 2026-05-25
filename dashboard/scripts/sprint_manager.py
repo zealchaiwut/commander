@@ -1291,7 +1291,12 @@ def _dispatch_coder(
     cfg: Optional["SprintConfig"] = None,
     chosen_port: Optional[int] = None,
 ) -> tuple[bool, Optional[str]]:
-    """Dispatch a coder agent for the issue.  Returns (ok, failure_category)."""
+    """Dispatch a coder agent for the issue.  Returns (ok, failure_category).
+
+    When sprint_branch is not 'develop', sets COMMANDER_MERGE_TARGET in the
+    subprocess environment so the coder agent creates the feature branch off
+    the sprint branch instead of develop (AC2, AC3).
+    """
     eff_repo = repo_name or (cfg.repo_name if cfg else None)
     api_url  = cfg.api_url if cfg else None
     cwd_path = cfg.worktree_coder if cfg else WORKTESTER_DASHBOARD
@@ -1322,13 +1327,7 @@ def _dispatch_coder(
         "claude",
         "--dangerously-skip-permissions",
         "-p",
-        prompt + (
-            f" IMPORTANT: pass --base-branch {sprint_branch} to start_feature.py"
-            f" so that the feature branch is based off {sprint_branch!r} instead of develop."
-            if sprint_branch not in ("develop",)
-            and not (cfg and cfg.coder_prompt_template)
-            else ""
-        ),
+        prompt,
     ]
 
     # AC-7: inject COMMANDER_APP_PORT if a port was chosen
@@ -1378,11 +1377,17 @@ def _dispatch_coder(
 def _dispatch_tester(
     issue_num: int,
     alert_modes: list[str],
+    sprint_branch: str = "develop",
     repo_name: Optional[str] = None,
     cfg: Optional["SprintConfig"] = None,
     chosen_port: Optional[int] = None,
 ) -> tuple[int, Optional[str]]:
-    """Dispatch a tester agent.  Returns (exit_code, failure_category_if_hang)."""
+    """Dispatch a tester agent.  Returns (exit_code, failure_category_if_hang).
+
+    When sprint_branch is not 'develop', sets COMMANDER_MERGE_TARGET in the
+    subprocess environment so the tester agent merges the feature branch into
+    the sprint branch instead of develop (AC2, AC4).
+    """
     eff_repo = repo_name or (cfg.repo_name if cfg else None)
     api_url  = cfg.api_url if cfg else None
     cwd_path = cfg.worktree_tester_app if cfg else WORKTESTER_DASHBOARD
@@ -1828,6 +1833,85 @@ def write_sprint_summary(
     )
 
     return path
+
+
+# ── sprint branch PR creation (AC6, AC7) ─────────────────────────────────────
+
+def _create_sprint_pr(
+    sprint_branch: str,
+    sprint_label: str,
+    sprint_number: Optional[int],
+    state: "SprintState",
+    repo_name: Optional[str] = None,
+) -> Optional[str]:
+    """Create a PR from sprint_branch → develop at the end of a sprint.
+
+    Returns the PR URL string, or None if creation failed (best-effort).
+    """
+    r = _r(repo_name)
+    n = sprint_number if sprint_number is not None else sprint_label
+    shipped = [i for i in state.issues if i.status == "done"]
+
+    ticket_lines = "\n".join(
+        f"- #{i.number} {i.title}" for i in shipped
+    ) or "No tickets shipped."
+
+    skipped = [i for i in state.issues if i.status == "skipped"]
+    skipped_lines = "\n".join(
+        f"- #{i.number} {i.title} ({i.category or 'unknown'})" for i in skipped
+    ) or "None."
+
+    body = (
+        f"## Sprint {n} — auto-generated PR\n\n"
+        f"This PR promotes `{sprint_branch}` into `develop` after all sprint issues "
+        f"have been processed.\n\n"
+        f"### Shipped ({len(shipped)} tickets)\n\n"
+        f"{ticket_lines}\n\n"
+        f"### Skipped / Failed ({len(skipped)} tickets)\n\n"
+        f"{skipped_lines}\n\n"
+        f"### Stats\n\n"
+        f"| Metric | Value |\n"
+        f"|---|---|\n"
+        f"| Total tokens in | {state.total_tokens_in} |\n"
+        f"| Total tokens out | {state.total_tokens_out} |\n"
+        f"| Wall clock | {state.wall_clock_secs:.0f}s |\n\n"
+        f"_Review and merge when UAT is complete._"
+    )
+
+    title = f"Sprint {n} — {len(shipped)} ticket(s) shipped"
+
+    print(f"  Creating PR: {sprint_branch} → develop ...")
+    try:
+        result = subprocess.run(
+            [
+                "gh", "pr", "create",
+                "--repo", r,
+                "--base", "develop",
+                "--head", sprint_branch,
+                "--title", title,
+                "--body", body,
+            ],
+            capture_output=True, text=True, check=False,
+        )
+        if result.returncode == 0:
+            pr_url = result.stdout.strip()
+            print(f"  Sprint PR created: {pr_url}")
+            return pr_url
+        else:
+            stderr = result.stderr.strip()
+            # If a PR already exists for this branch, gh will print its URL in stderr
+            if "already exists" in stderr or "already have" in stderr.lower():
+                # Extract URL from stderr (gh prints "a pull request for branch ... already exists: <url>")
+                m = re.search(r"https://github\.com/\S+", stderr)
+                if m:
+                    pr_url = m.group(0)
+                    print(f"  Sprint PR already exists: {pr_url}")
+                    return pr_url
+            print(f"  Warning: failed to create sprint PR -- {stderr}", file=sys.stderr)
+            return None
+    except Exception as e:
+        print(f"  Warning: exception creating sprint PR -- {e}", file=sys.stderr)
+        return None
 
 
 # -- GitHub issue listing --
@@ -2310,6 +2394,23 @@ def main() -> None:
     else:
         summary_path = None
 
+    # AC6, AC7: auto-create PR sprint/sprint-N → develop at sprint end,
+    # but only when we were running in sprint-branch mode (not manual 'develop' override)
+    sprint_pr_url: Optional[str] = None
+    if (
+        state.issues
+        and not args.dry_run
+        and effective_target != "develop"
+        and effective_target == sprint_branch  # only for auto sprint branches, not custom --target-branch
+    ):
+        sprint_pr_url = _create_sprint_pr(
+            sprint_branch  = effective_target,
+            sprint_label   = args.label,
+            sprint_number  = _sprint_number(args.label),
+            state          = state,
+            repo_name      = eff_repo,
+        )
+
     print("\n=== Sprint Summary ===")
     print(f"Processed: {', '.join(summary.processed) or 'none'}")
     print(f"Merged:    {', '.join(summary.merged) or 'none'}")
@@ -2321,6 +2422,8 @@ def main() -> None:
         print(f"Skipped:   {', '.join(summary.skipped)}")
     if summary_path:
         print(f"Summary:   {summary_path}")
+    if sprint_pr_url:
+        print(f"Sprint PR: {sprint_pr_url}")
 
 
 if __name__ == "__main__":

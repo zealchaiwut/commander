@@ -1308,7 +1308,7 @@ def _dispatch_coder(
     api_url  = cfg.api_url if cfg else None
     cwd_path = cfg.worktree_coder if cfg else WORKTESTER_DASHBOARD
 
-    print(f"  Dispatching coder for issue #{issue_num} ...")
+    print(f"  Dispatching coder for issue #{issue_num} ...", flush=True)
     _post_agent_event(f"coder:issue-{issue_num}", api_url=api_url)
 
     log_path = _issue_log_path(issue_num, cfg=cfg)
@@ -1332,6 +1332,7 @@ def _dispatch_coder(
 
     cmd = [
         "claude",
+        "--model", "claude-sonnet-4-6",
         "--dangerously-skip-permissions",
         "-p",
         prompt,
@@ -1340,6 +1341,7 @@ def _dispatch_coder(
     # Build subprocess environment: inherit current env, set COMMANDER_MERGE_TARGET
     # when in sprint mode (AC2), and COMMANDER_APP_PORT if a port was chosen (issue #62).
     sub_env = os.environ.copy()
+    sub_env.pop("ANTHROPIC_API_KEY", None)
     if sprint_branch not in ("develop",):
         sub_env["COMMANDER_MERGE_TARGET"] = sprint_branch
         # Always append sprint-mode instructions regardless of whether a custom
@@ -1412,7 +1414,7 @@ def _dispatch_tester(
     api_url  = cfg.api_url if cfg else None
     cwd_path = cfg.worktree_tester_app if cfg else WORKTESTER_DASHBOARD
 
-    print(f"  Dispatching tester for issue #{issue_num} ...")
+    print(f"  Dispatching tester for issue #{issue_num} ...", flush=True)
     _post_agent_event(f"tester:issue-{issue_num}", api_url=api_url)
 
     log_path = _issue_log_path(issue_num, cfg=cfg)
@@ -1434,15 +1436,16 @@ def _dispatch_tester(
     if "finish_feature" not in prompt:
         prompt += (
             " IMPORTANT — autonomous sprint mode: when your verdict is READY_FOR_UAT"
-            " you MUST immediately run `python3 dashboard/scripts/finish_feature.py"
-            f" --issue {issue_num}` from the repo root without asking."
+            f" you MUST immediately run `python3 dashboard/scripts/finish_feature.py --issue {issue_num}`"
+            " from the repo root without asking. The script reads COMMANDER_MERGE_TARGET from its"
+            " own env to pick the merge target — do not override with --target-branch."
             " Apply the UAT label to the issue automatically via `gh issue edit`."
             " Do NOT output language like 'let me know if you want me to...' —"
             " complete the full workflow autonomously including finish_feature.py and label update."
         )
-
     cmd = [
         "claude",
+        "--model", "claude-sonnet-4-6",
         "--dangerously-skip-permissions",
         "-p",
         prompt,
@@ -1451,6 +1454,7 @@ def _dispatch_tester(
     # Build subprocess environment: inherit current env, set COMMANDER_MERGE_TARGET
     # when in sprint mode (AC2), and COMMANDER_APP_PORT if a port was chosen (issue #62).
     sub_env = os.environ.copy()
+    sub_env.pop("ANTHROPIC_API_KEY", None)
     if sprint_branch not in ("develop",):
         sub_env["COMMANDER_MERGE_TARGET"] = sprint_branch
         # Always append sprint-mode instructions regardless of whether a custom

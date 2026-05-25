@@ -17,6 +17,7 @@ Usage:
 Run from the git root of the repository (NOT from dashboard/).
 """
 import argparse
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -55,8 +56,8 @@ def main():
     p.add_argument("--repo",  default=None,            help="owner/repo override")
     p.add_argument(
         "--target-branch",
-        default="develop",
-        help="Branch to merge the feature branch into (default: develop)",
+        default=os.environ.get("COMMANDER_MERGE_TARGET", "develop"),
+        help="Branch to merge into (default: COMMANDER_MERGE_TARGET env var or 'develop')",
     )
     args = p.parse_args()
     target = args.target_branch

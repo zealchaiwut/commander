@@ -11,12 +11,19 @@ payloads. Token data is in the JSONL transcript file written by Claude Code to
 ~/.claude/projects/<project>/<session>.jsonl under assistant entries'
 message.usage field. The hook reads that file via the transcript_path payload
 field to get real token counts.
+
+Server-endpoint tests (AC-1/AC-2/AC-3) use a local subprocess server started
+from the worktree code so they are self-contained and do NOT require the live
+PRD server to be running or on a specific branch.
 """
 import json
+import os
+import signal
+import socket
 import subprocess
 import sys
 import tempfile
-import os
+import time
 import pytest
 from pathlib import Path
 
@@ -54,6 +61,91 @@ def _make_transcript_line(input_tokens: int, output_tokens: int,
         }
     }
     return json.dumps(entry)
+
+
+def _free_port() -> int:
+    """Return an OS-assigned free TCP port."""
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+# ---------------------------------------------------------------------------
+# Fixture: self-contained server from the worktree code
+# ---------------------------------------------------------------------------
+
+@pytest.fixture(scope="module")
+def worktree_server():
+    """Start the dashboard server from the worktree code on a random port.
+
+    Uses a temporary SQLite DB so the test is fully isolated from the live
+    PRD/UAT databases. Yields the base URL (e.g. 'http://127.0.0.1:58000').
+    Kills the server process on teardown.
+    """
+    import httpx
+
+    port = _free_port()
+    dashboard_dir = Path(__file__).parent.parent
+
+    # Resolve venv python — try worktree-local first, then fall back to the
+    # shared ~/commander venv that all hooks and tests use.
+    venv_python = dashboard_dir / "venv" / "bin" / "python3"
+    if not venv_python.exists():
+        venv_python = Path.home() / "commander" / "dashboard" / "venv" / "bin" / "python3"
+
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tmp_db:
+        db_path = tmp_db.name
+
+    env = {
+        **os.environ,
+        "DB_PATH": db_path,
+        "ENVIRONMENT": "test",
+        "TRACKED_REPOS": "zealchaiwut/commander",
+        "GITHUB_DEFAULT_BRANCH": "master",
+        # Suppress optional env vars that may cause startup errors
+        "PLAN_TYPE": "",
+        "WINDOW_TOKEN_LIMIT": "",
+    }
+
+    proc = subprocess.Popen(
+        [str(venv_python), "-m", "uvicorn", "server:app",
+         "--host", "127.0.0.1", "--port", str(port), "--log-level", "error"],
+        cwd=str(dashboard_dir),
+        env=env,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+    base_url = f"http://127.0.0.1:{port}"
+    # Wait for the server to be ready (up to 10s)
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        try:
+            with httpx.Client(base_url=base_url, timeout=1.0) as c:
+                c.get("/api/health")
+            break
+        except Exception:
+            time.sleep(0.2)
+
+    yield base_url
+
+    proc.terminate()
+    try:
+        proc.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+    try:
+        os.unlink(db_path)
+    except OSError:
+        pass
+
+
+@pytest.fixture(scope="module")
+def server_client(worktree_server):
+    """httpx client pointed at the self-contained worktree server."""
+    import httpx
+    with httpx.Client(base_url=worktree_server, timeout=10.0) as c:
+        yield c
 
 
 # ---------------------------------------------------------------------------
@@ -198,94 +290,123 @@ class TestHookStderrLogging:
 
 # ---------------------------------------------------------------------------
 # AC-1 & AC-2: GET /api/debug/token-usage endpoint shape
+# Uses `server_client` — a self-contained worktree server, not the live PRD.
 # ---------------------------------------------------------------------------
 
 class TestDebugTokenUsageEndpoint:
     """AC-1 & AC-2: /api/debug/token-usage exists and returns the correct shape."""
 
-    def test_endpoint_returns_200(self, client):
+    def test_endpoint_returns_200(self, server_client):
         """GET /api/debug/token-usage returns HTTP 200."""
-        res = client.get("/api/debug/token-usage")
+        res = server_client.get("/api/debug/token-usage")
         assert res.status_code == 200
 
-    def test_response_is_json(self, client):
+    def test_response_is_json(self, server_client):
         """Response body is valid JSON."""
-        res = client.get("/api/debug/token-usage")
+        res = server_client.get("/api/debug/token-usage")
         data = res.json()
         assert isinstance(data, dict)
 
-    def test_required_keys_present(self, client):
+    def test_required_keys_present(self, server_client):
         """AC-2: response contains row_count, latest_recorded_at, tokens_today."""
-        res = client.get("/api/debug/token-usage")
+        res = server_client.get("/api/debug/token-usage")
         data = res.json()
         assert "row_count" in data, "Missing 'row_count'"
         assert "latest_recorded_at" in data, "Missing 'latest_recorded_at'"
         assert "tokens_today" in data, "Missing 'tokens_today'"
 
-    def test_row_count_is_integer(self, client):
+    def test_row_count_is_integer(self, server_client):
         """row_count is an integer >= 0."""
-        res = client.get("/api/debug/token-usage")
+        res = server_client.get("/api/debug/token-usage")
         data = res.json()
         assert isinstance(data["row_count"], int)
         assert data["row_count"] >= 0
 
-    def test_tokens_today_is_integer(self, client):
+    def test_tokens_today_is_integer(self, server_client):
         """tokens_today is an integer >= 0."""
-        res = client.get("/api/debug/token-usage")
+        res = server_client.get("/api/debug/token-usage")
         data = res.json()
         assert isinstance(data["tokens_today"], int)
         assert data["tokens_today"] >= 0
 
-    def test_latest_recorded_at_is_string_or_null(self, client):
+    def test_latest_recorded_at_is_string_or_null(self, server_client):
         """latest_recorded_at is an ISO-8601 string or null."""
-        res = client.get("/api/debug/token-usage")
+        res = server_client.get("/api/debug/token-usage")
         data = res.json()
         val = data["latest_recorded_at"]
         assert val is None or isinstance(val, str), (
             f"latest_recorded_at must be string or null, got {type(val)}"
         )
 
-    def test_tokens_today_lte_row_count_implies_rows(self, client):
+    def test_tokens_today_lte_row_count_implies_rows(self, server_client):
         """tokens_today > 0 implies row_count > 0."""
-        res = client.get("/api/debug/token-usage")
+        res = server_client.get("/api/debug/token-usage")
         data = res.json()
         if data["tokens_today"] > 0:
             assert data["row_count"] > 0, (
                 "tokens_today > 0 but row_count is 0 — inconsistent state"
             )
 
+    def test_token_usage_pipeline_end_to_end(self, server_client, tmp_path, worktree_server):
+        """AC-1: POST to /api/token-usage then GET /api/debug/token-usage shows row_count > 0."""
+        # Write a token row directly via the API
+        import httpx
+        payload = {
+            "session_id": "ac1-test",
+            "event_type": "token_usage",
+            "working_dir": "/tmp/test-project",
+            "input_tokens": 111,
+            "output_tokens": 222,
+        }
+        post_res = server_client.post("/api/token-usage", json=payload)
+        assert post_res.status_code == 200
+
+        debug_res = server_client.get("/api/debug/token-usage")
+        assert debug_res.status_code == 200
+        data = debug_res.json()
+        assert data["row_count"] > 0, (
+            "row_count should be > 0 after posting a token usage event"
+        )
+        assert data["tokens_today"] > 0, (
+            "tokens_today should be > 0 after posting token usage for today"
+        )
+        assert data["latest_recorded_at"] is not None, (
+            "latest_recorded_at should not be null after posting a row"
+        )
+
 
 # ---------------------------------------------------------------------------
 # AC-3: tokens_today in /api/projects metrics matches debug endpoint
+# Uses `server_client` — a self-contained worktree server, not the live PRD.
 # ---------------------------------------------------------------------------
 
 class TestTokensTodayConsistency:
     """AC-3: Tokens Today card value is consistent with the debug endpoint."""
 
-    def test_projects_metrics_has_tokens_today(self, client):
+    def test_projects_metrics_has_tokens_today(self, server_client):
         """GET /api/projects returns metrics.tokens_today."""
-        res = client.get("/api/projects")
+        res = server_client.get("/api/projects")
         assert res.status_code == 200
         data = res.json()
         assert "metrics" in data
         assert "tokens_today" in data["metrics"]
 
-    def test_tokens_today_is_non_negative(self, client):
+    def test_tokens_today_is_non_negative(self, server_client):
         """metrics.tokens_today is an integer >= 0."""
-        res = client.get("/api/projects")
+        res = server_client.get("/api/projects")
         data = res.json()
         val = data["metrics"]["tokens_today"]
         assert isinstance(val, int)
         assert val >= 0
 
-    def test_tokens_today_consistent_with_debug_endpoint(self, client):
+    def test_tokens_today_consistent_with_debug_endpoint(self, server_client):
         """metrics.tokens_today from /api/projects matches /api/debug/token-usage.tokens_today.
 
         Both endpoints read from the same DB column so they should agree
         (within a small window, since two HTTP calls are made).
         """
-        proj_res  = client.get("/api/projects")
-        debug_res = client.get("/api/debug/token-usage")
+        proj_res  = server_client.get("/api/projects")
+        debug_res = server_client.get("/api/debug/token-usage")
 
         assert proj_res.status_code == 200
         assert debug_res.status_code == 200

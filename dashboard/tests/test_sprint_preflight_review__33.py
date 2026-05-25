@@ -692,3 +692,45 @@ def test_bug1_sprints_dir_passed_to_write_preflight_json(tmp_path, monkeypatch):
 
     data = json.loads(out_path.read_text())
     assert data["sprint_label"] == "sprint-1"
+
+
+def test_bug1b_resolve_sprints_dir_fixes_double_commander(tmp_path):
+    """Bug 1b regression: _resolve_sprints_dir must correct double .commander paths.
+
+    When a sprint.yaml generated with the old flat-layout template is used in a
+    nested-layout project, load_config resolves sprints_dir to
+    .commander/.commander/sprints (double-prefix). _resolve_sprints_dir must detect
+    this and return .commander/sprints instead.
+    """
+    sr = _import_sprint_review()
+
+    # Simulate the bad resolution: project/.commander/.commander/sprints
+    project_root   = tmp_path / "myproject"
+    commander_dir  = project_root / ".commander"
+    double_bad     = commander_dir / ".commander" / "sprints"
+    double_bad.mkdir(parents=True)
+
+    corrected = sr._resolve_sprints_dir(double_bad, commander_dir)
+
+    # Must correct to .commander/sprints, not .commander/.commander/sprints
+    assert ".commander/.commander" not in str(corrected), (
+        f"Double .commander not corrected: {corrected}"
+    )
+    assert corrected == commander_dir / "sprints", (
+        f"Expected {commander_dir / 'sprints'}, got {corrected}"
+    )
+
+
+def test_bug1b_resolve_sprints_dir_leaves_correct_path_unchanged(tmp_path):
+    """_resolve_sprints_dir must NOT modify a correctly resolved sprints_dir."""
+    sr = _import_sprint_review()
+
+    project_root  = tmp_path / "myproject"
+    commander_dir = project_root / ".commander"
+    correct_dir   = commander_dir / "sprints"
+    correct_dir.mkdir(parents=True)
+
+    result = sr._resolve_sprints_dir(correct_dir, commander_dir)
+    assert result == correct_dir.resolve(), (
+        f"Correct path was unexpectedly modified: {result}"
+    )

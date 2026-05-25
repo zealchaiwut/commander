@@ -382,18 +382,26 @@ def step4b_uat_clone(
     repo_name: str,
     repo_dir: Path,
     uat_port: int,
+    base_dir: Optional[Path] = None,
 ) -> Path:
     """AC1/AC2/AC3/AC4: Clone repo into <project>/uat/ and checkout develop.
 
-    Creates the UAT clone as a subdirectory of the project root so it lives at:
-        ~/dev/<project>/uat/
+    Creates the UAT clone as a subdirectory of base_dir (defaults to repo_dir).
+
+    Flat layout:   uat/ lives inside the main clone (repo_dir/uat/)
+    Nested layout: uat/ lives at the project root (base_dir/uat/) as a sibling
+                   of main/, coder/, and tester/ — NOT inside main/.
+
+    Pass base_dir=projects_dir/repo_name when using nested layout so that the
+    UAT clone lands at <project_root>/uat/ instead of <main>/uat/.
 
     Also creates a separate UAT database file (never shared with PRD) and
     writes a .env file so the UAT server uses its own port and DB.
     """
     full_repo = f"{owner}/{repo_name}"
     repo_url = f"https://github.com/{full_repo}.git"
-    uat_dir = repo_dir / "uat"
+    clone_base = base_dir if base_dir is not None else repo_dir
+    uat_dir = clone_base / "uat"
 
     if uat_dir.exists():
         info(f"{uat_dir} already exists — skipping UAT clone")
@@ -474,9 +482,26 @@ def step5_sprint_config(
     if tester_dir is None:
         tester_dir = projects_dir / f"{repo_name}-tester"
 
-    uat_dir = repo_dir / "uat"
+    if nested:
+        # In nested layout, uat/ is a sibling of main/, coder/, tester/ at project root
+        uat_dir = projects_dir / repo_name / "uat"
+    else:
+        uat_dir = repo_dir / "uat"
     db_filename = f"{repo_name}-uat.db"
     uat_enabled = "false" if skip_uat else "true"
+
+    if nested:
+        # base_dir for load_config() is the .commander/ directory itself, so
+        # relative paths must NOT include the .commander/ prefix — they are
+        # resolved relative to .commander/, e.g. "logs/" → .commander/logs/
+        logs_path    = "logs/"
+        sprints_path = "sprints/"
+        alerts_path  = "alerts/"
+    else:
+        # Flat layout: base_dir is the main clone root, so paths need .commander/ prefix
+        logs_path    = ".commander/logs/"
+        sprints_path = ".commander/sprints/"
+        alerts_path  = ".commander/alerts/"
 
     sprint_yaml_content = f"""repo_name: {owner}/{repo_name}
 
@@ -486,9 +511,9 @@ worktrees:
   tester_app_subdir: "{tester_app_subdir}"
 
 paths:
-  logs_dir:     .commander/logs/
-  sprints_dir:  .commander/sprints/
-  alerts_dir:   .commander/alerts/
+  logs_dir:     {logs_path}
+  sprints_dir:  {sprints_path}
+  alerts_dir:   {alerts_path}
 
 app:
   prd_port: {prd_port}
@@ -894,7 +919,10 @@ def main() -> None:
     if args.skip_uat:
         info("--skip-uat set — skipping UAT clone creation")
     else:
-        step4b_uat_clone(owner, repo_name, repo_dir, uat_port)
+        # In nested layout, UAT clone must land at <project_root>/uat/ (sibling of
+        # main/, coder/, tester/), not inside main/.  Pass base_dir accordingly.
+        uat_base_dir = projects_dir / repo_name if nested else None
+        step4b_uat_clone(owner, repo_name, repo_dir, uat_port, base_dir=uat_base_dir)
     info("done")
 
     # ── Step 5: sprint.yaml ───────────────────────────────────────────────────

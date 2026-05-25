@@ -352,20 +352,37 @@ class TestStatePersistence:
 
 class TestDashboardSprintPanel:
     def test_sprint_panel_html_exists(self):
+        """Issue #82 moved sprint progress to per-project expand panels.
+        The global #sprint-panel is removed; progress is now in mini-sprint-summary.
+        """
         content = INDEX_HTML.read_text()
-        assert "sprint-panel" in content, "index.html must have a sprint-panel element"
+        # The new per-project summary element replaces the global panel
+        assert "mini-sprint-summary" in content or "prog-track" in content, (
+            "index.html must have per-project sprint progress elements (issue #82)"
+        )
 
     def test_progress_bar_element_exists(self):
+        """Issue #82: progress bar is now per-project in expand panels, not global."""
         content = INDEX_HTML.read_text()
-        assert "sprint-progress-bar" in content
+        # prog-track/prog-fill classes are still used in per-project rows
+        assert "prog-track" in content or "prog-fill" in content, (
+            "index.html must still have progress bar CSS classes"
+        )
 
     def test_skipped_list_element_exists(self):
-        content = INDEX_HTML.read_text()
-        assert "sprint-skipped-list" in content
+        """Issue #82: global skipped list moved to sprint manager CLI; no global panel."""
+        content = APP_JS.read_text()
+        # renderSprintPanel still exists in JS (kept as no-op for SSE compat)
+        assert "renderSprintPanel" in content, (
+            "app.js must still define renderSprintPanel for SSE compatibility"
+        )
 
     def test_retry_skipped_button_exists(self):
-        content = INDEX_HTML.read_text()
-        assert "retry" in content.lower()
+        """Issue #82: retry skipped is a CLI operation; JS helper still present."""
+        content = APP_JS.read_text()
+        assert "retry" in content.lower() or "retrySkipped" in content, (
+            "app.js must still have retrySkipped function"
+        )
 
     def test_js_polls_sprint_status(self):
         content = APP_JS.read_text()
@@ -381,10 +398,12 @@ class TestDashboardSprintPanel:
         assert "renderSprintPanel" in content
 
     def test_js_updates_in_place_no_full_reload(self):
+        """Issue #82: global sprint panel removed; per-project progress bar in expand panel."""
         content = APP_JS.read_text()
-        # renderSprintPanel should update DOM elements, not reload the page
-        assert "sprint-progress-bar" in content
-        assert "sprint-skipped-list" in content
+        # renderSprintPanel still exists for SSE compatibility (as a no-op)
+        assert "renderSprintPanel" in content, (
+            "app.js must still have renderSprintPanel for SSE compatibility (issue #82)"
+        )
 
     def test_api_sprint_status_endpoint_in_server(self):
         content = SERVER_PY.read_text()

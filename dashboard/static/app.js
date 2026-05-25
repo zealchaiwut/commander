@@ -95,29 +95,28 @@ function setFilter(filter) {
 
 // ── Metrics ───────────────────────────────────────────────────────────────────
 function renderMetrics(metrics) {
-  document.getElementById('m-sprints').textContent = metrics.active_sprints  ?? '—';
-  document.getElementById('m-tickets').textContent = metrics.active_tickets  ?? '—';
-  document.getElementById('m-uat').textContent     = metrics.awaiting_uat    ?? '—';
+  const setEl = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
 
-  const uatCard = document.getElementById('m-uat-card');
-  uatCard.classList.toggle('uat-alert', (metrics.awaiting_uat ?? 0) > 0);
+  setEl('m-sprints',         metrics.active_sprints  ?? '—');
+  setEl('m-active-projects', metrics.active_projects ?? '—');
+  setEl('m-open-tickets',    metrics.open_tickets    ?? '—');
 
   // Tokens Today
   const tokVal = metrics.tokens_today;
   const tokEl  = document.getElementById('m-tokens');
   const subEl  = document.getElementById('m-tokens-sub');
-  if (tokEl) {
-    tokEl.textContent = tokVal != null ? tokVal.toLocaleString() : '—';
-  }
+  if (tokEl) tokEl.textContent = tokVal != null ? tokVal.toLocaleString() : '—';
   if (subEl) {
     const cost = metrics.cost_today_usd;
     subEl.textContent = cost != null ? `~$${cost.toFixed(2)} est.` : '~$0.00 est.';
   }
 
-  const working = metrics.working_agents ?? 0;
+  const working     = metrics.working_agents ?? 0;
+  const openTix     = metrics.open_tickets   ?? 0;
+  const activeSprints = metrics.active_sprints ?? 0;
   document.getElementById('header-subtitle').textContent = working > 0
-    ? `${working} agent${working !== 1 ? 's' : ''} working · ${metrics.active_tickets ?? 0} active tickets`
-    : `${metrics.active_tickets ?? 0} active tickets · ${metrics.active_sprints ?? 0} active sprint${metrics.active_sprints !== 1 ? 's' : ''}`;
+    ? `${working} agent${working !== 1 ? 's' : ''} working · ${openTix} open tickets`
+    : `${openTix} open tickets · ${activeSprints} active sprint${activeSprints !== 1 ? 's' : ''}`;
 }
 
 // ── Project list ──────────────────────────────────────────────────────────────
@@ -152,6 +151,8 @@ function projectRowHtml(proj) {
   const bar           = proj.bar_status  || 'idle';
   const etaSt         = eta.status       || 'idle';
   const openCount     = proj.openCount   || 0;
+  const activeCount   = proj.activeCount || 0;
+  const uatCount      = proj.uatCount    || 0;
 
   const sprintLine = proj.current_sprint
     ? `<div class="proj-sprint-line">
@@ -188,6 +189,19 @@ function projectRowHtml(proj) {
        </div>`
     : `<div class="proj-col-eta"></div>`;
 
+  // AC-3: inline chips — active ticket count + awaiting UAT count
+  // AC-4: UAT chip highlights amber when count > 0
+  const uatAlertClass = uatCount > 0 ? ' chip-uat-alert' : '';
+  const chipsHtml = `
+    <div class="proj-chips">
+      <span class="proj-chip chip-active" title="Active tickets (in-progress · SIT · UAT)">
+        <i class="ti ti-activity"></i>${activeCount} active
+      </span>
+      <span class="proj-chip chip-uat${uatAlertClass}" title="Awaiting UAT review">
+        <i class="ti ti-checkbox"></i>${uatCount} UAT
+      </span>
+    </div>`;
+
   // use data attributes to avoid quoting issues in onclick
   return `
     <div class="project-block" id="proj-block-${id}">
@@ -205,7 +219,10 @@ function projectRowHtml(proj) {
         </div>
         ${progHtml}
         ${etaHtml}
-        <div class="proj-col-agents">${agentPillsHtml(proj.agents)}</div>
+        <div class="proj-col-agents">
+          ${chipsHtml}
+          ${agentPillsHtml(proj.agents)}
+        </div>
         <div class="proj-col-chevron"><i class="ti ti-chevron-down chevron-icon"></i></div>
       </div>
       <div class="proj-expand hidden" id="proj-expand-${id}">
@@ -283,6 +300,34 @@ async function loadProjectDetails(id, repo) {
     const el = document.getElementById(`proj-detail-${id}`);
     if (el) el.innerHTML = '<div class="expand-loading">Failed to load details.</div>';
   }
+}
+
+// ── Mini sprint summary (AC-7 — issue #82) ────────────────────────────────────
+function _miniSprintSummaryHtml(proj) {
+  if (!proj || !proj.has_active_sprint) return '';
+  const progress    = proj.progress    || { closed: 0, total: 0, pct: 0 };
+  const bar         = proj.bar_status  || 'idle';
+  const label       = proj.sprint_label || (proj.current_sprint ? `sprint-${proj.current_sprint}` : '');
+  const uatCount    = proj.uatCount    || 0;
+  const activeCount = proj.activeCount || 0;
+  const doneCount   = progress.closed  || 0;
+  const pct         = progress.pct     || 0;
+
+  return `
+    <div class="mini-sprint-summary">
+      <div class="mini-sprint-header">
+        <span class="mini-sprint-label">${escapeHtml(label)}</span>
+        <span class="mini-sprint-pct">${progress.closed}/${progress.total} · ${pct}%</span>
+      </div>
+      <div class="mini-sprint-counts">
+        <span class="count-chip cc-progress">${activeCount} active</span>
+        <span class="count-chip cc-uat">${uatCount} UAT</span>
+        <span class="count-chip cc-done">${doneCount} done</span>
+      </div>
+      <div class="prog-track" style="height:5px;">
+        <div class="prog-fill ${bar}" style="width:${pct}%"></div>
+      </div>
+    </div>`;
 }
 
 // ── Expand panel ──────────────────────────────────────────────────────────────
@@ -431,8 +476,13 @@ function renderExpandPanel(id, data, repo) {
     tokLine = `<div class="agent-detail-meta" style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border)">Tokens today: —</div>`;
   }
 
+  // AC-7: mini sprint summary at top of expand panel
+  const projData = allProjects.find(p => p.repo === repo) || null;
+  const miniSprintHtml = _miniSprintSummaryHtml(projData);
+
   el.innerHTML = `
     <div class="expand-col">
+      ${miniSprintHtml}
       <div class="expand-hdr">
         <span class="expand-hdr-title">Active tickets</span>
         <a class="view-all" href="${escapeHtml(ghUrl)}" target="_blank" rel="noopener">View all →</a>
@@ -1045,14 +1095,19 @@ function renderAlertBanners(alerts) {
     container.innerHTML = '';
     return;
   }
-  container.innerHTML = alerts.map((a, idx) => `
+  container.innerHTML = alerts.map((a, idx) => {
+    // AC-5: prefix title with repo name when alert has a `repo` field
+    const repoPrefix = a.repo ? `[${escapeHtml(a.repo.split('/').pop())}] ` : '';
+    const titleText  = `${repoPrefix}${escapeHtml(a.title)}${a.category ? ` [${escapeHtml(a.category)}]` : ''}`;
+    return `
     <div class="alert-banner" id="alert-${idx}">
       <div class="alert-banner-body">
-        <div class="alert-banner-title">${escapeHtml(a.title)}${a.category ? ` [${escapeHtml(a.category)}]` : ''}</div>
+        <div class="alert-banner-title">${titleText}</div>
         <div class="alert-banner-msg">${escapeHtml(a.body || '')}</div>
       </div>
       <button class="alert-dismiss" onclick="dismissAlert(${idx})" title="Dismiss">&times;</button>
-    </div>`).join('');
+    </div>`;
+  }).join('');
 }
 
 async function dismissAlert(idx) {
@@ -1068,66 +1123,22 @@ async function dismissAlert(idx) {
 let _sprintState = null;
 
 async function loadSprintStatus() {
+  // The global sprint panel was removed (AC-1, issue #82). Sprint progress is
+  // now shown per-project in the expand panel via _miniSprintSummaryHtml.
+  // We still fetch and cache sprint state for SSE compatibility.
   try {
     const res = await fetch('/api/sprint-status');
-    if (res.status === 404) {
-      // No active sprint — hide panel
-      document.getElementById('sprint-panel')?.classList.add('hidden');
-      return;
-    }
+    if (res.status === 404) return;
     if (!res.ok) return;
     _sprintState = await res.json();
-    renderSprintPanel(_sprintState);
   } catch { /* silent */ }
 }
 
 function renderSprintPanel(state) {
-  const panel = document.getElementById('sprint-panel');
-  if (!panel) return;
-
-  const issues  = state.issues || [];
-  const done    = issues.filter(i => i.status === 'done').length;
-  const total   = issues.length;
-  const pct     = total > 0 ? Math.round(done / total * 100) : 0;
-  const skipped = issues.filter(i => i.status === 'skipped');
-
-  // Title
-  const titleEl = document.getElementById('sprint-panel-title');
-  if (titleEl) titleEl.textContent = `Sprint: ${escapeHtml(state.sprint_label || '')}`;
-
-  // Progress bar
-  const lblEl = document.getElementById('sprint-progress-label');
-  const pctEl = document.getElementById('sprint-progress-pct');
-  const barEl = document.getElementById('sprint-progress-bar');
-  if (lblEl) lblEl.textContent = `${done} of ${total} issues complete`;
-  if (pctEl) pctEl.textContent = `${pct}%`;
-  if (barEl) {
-    barEl.style.width = pct + '%';
-    barEl.style.background = pct === 100 ? 'var(--green)' : pct >= 50 ? 'var(--blue)' : 'var(--amber)';
-  }
-
-  // Retry button — show if there are skipped issues
-  const retryBtn = document.getElementById('btn-retry-skipped');
-  if (retryBtn) retryBtn.style.display = skipped.length > 0 ? '' : 'none';
-
-  // Skipped issues list
-  const listEl = document.getElementById('sprint-skipped-list');
-  if (listEl) {
-    if (skipped.length === 0) {
-      listEl.innerHTML = '';
-    } else {
-      listEl.innerHTML = `
-        <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);margin-bottom:6px;">Skipped Issues</div>
-        ${skipped.map(i => `
-          <div style="display:flex;align-items:flex-start;gap:6px;font-size:12px;margin-bottom:4px;padding:6px 8px;background:var(--red-bg);border-radius:5px;">
-            <span style="font-family:var(--mono);color:var(--text-muted);flex-shrink:0;">#${i.number}</span>
-            <span style="flex:1;color:var(--text);">${escapeHtml(i.title || '')}</span>
-            <span style="font-size:10px;font-weight:700;color:var(--red);white-space:nowrap;">${escapeHtml(i.category || 'UNKNOWN')}</span>
-          </div>`).join('')}`;
-    }
-  }
-
-  panel.classList.remove('hidden');
+  // The global sprint panel was removed (AC-1, issue #82).
+  // Per-project progress bars are rendered in _miniSprintSummaryHtml inside each expand panel.
+  // This function is kept as a no-op so SSE sprint_update messages don't throw errors.
+  _sprintState = state;
 }
 
 // AC-6c: Retry skipped button — opens instructions (actual retry requires CLI)

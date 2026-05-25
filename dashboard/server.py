@@ -519,6 +519,7 @@ class AlertPayload(BaseModel):
     body: str = ""
     issue_num: Optional[int] = None
     category: Optional[str] = None
+    repo: Optional[str] = None  # AC-5 (issue #82): owner/repo for per-project prefix in banners
 
 
 @app.post("/api/alerts", status_code=201)

@@ -10,16 +10,18 @@ Usage:
             [--color blue]              # default: cycled by project count
             [--projects-dir ~/dev]      # default: ~/dev
             [--tester-app-subdir ""]    # default: "" (no subdir)
+            [--skip-uat]               # skip UAT clone creation (sets uat.enabled: false)
 
     python3 scripts/init_project.py --rollback <repo-name>
             [--confirm-delete]          # required to also delete the GitHub repo
             [--owner <owner>]
 
-Onboards a new project in 10 sequential steps:
+Onboards a new project in 11 sequential steps:
   1. Create ~/dev/<project>/ (git init, README, .gitignore, first commit, gh repo create, push)
   2. Create and push develop branch
   3. Create standard GitHub labels
   4. Clone repo into ~/dev/<project>-coder and ~/dev/<project>-tester; checkout develop
+  4b. Clone repo into ~/dev/<project>/uat/; checkout develop (skipped with --skip-uat)
   5. Write <project>/.commander/sprint.yaml; create log dirs; commit + push
   6. Register project in dashboard/projects.json via projects_module.add_project()
   7. Append repo to TRACKED_REPOS env var if in use
@@ -32,6 +34,7 @@ import argparse
 import json
 import os
 import shutil
+import socket
 import subprocess
 import sys
 import time
@@ -44,6 +47,8 @@ from typing import Optional
 
 MACHINE_CONFIG_PATH = Path.home() / ".commander" / "config.yaml"
 DEFAULT_PROJECTS_DIR = Path.home() / "dev"
+DEFAULT_PRD_PORT = 8000
+DEFAULT_UAT_PORT = 8001
 STANDARD_LABELS = [
     ("backlog",      "#C6D2D9"),
     ("in-progress",  "#C6D2D9"),
@@ -93,6 +98,41 @@ def warn(msg: str) -> None:
 
 def info(msg: str) -> None:
     print(f"  {msg}")
+
+
+# ── Port detection ────────────────────────────────────────────────────────────
+
+def _is_port_free(port: int) -> bool:
+    """Return True if the port can be bound."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            s.bind(("", port))
+            return True
+        except OSError:
+            return False
+
+
+def _get_free_port() -> int:
+    """Ask the OS for a free ephemeral port."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("", 0))
+        return s.getsockname()[1]
+
+
+def _find_free_port(prefer: int, strategy: str = "prefer_default") -> int:
+    """Return a free port using the given strategy.
+
+    Args:
+        prefer:   The preferred port number.
+        strategy: "prefer_default" tries the preferred port first;
+                  "always_random" always returns an OS-assigned port.
+    """
+    if strategy == "always_random":
+        return _get_free_port()
+    if _is_port_free(prefer):
+        return prefer
+    return _get_free_port()
 
 
 # ── Machine config ─────────────────────────────────────────────────────────────
@@ -295,14 +335,72 @@ def step4_clones(owner: str, repo_name: str, projects_dir: Path) -> None:
         info(f"cloned into {clone_dir}")
 
 
+def step4b_uat_clone(
+    owner: str,
+    repo_name: str,
+    repo_dir: Path,
+    uat_port: int,
+) -> Path:
+    """AC1/AC2/AC3/AC4: Clone repo into <project>/uat/ and checkout develop.
+
+    Creates the UAT clone as a subdirectory of the project root so it lives at:
+        ~/dev/<project>/uat/
+
+    Also creates a separate UAT database file (never shared with PRD) and
+    writes a .env file so the UAT server uses its own port and DB.
+    """
+    full_repo = f"{owner}/{repo_name}"
+    repo_url = f"https://github.com/{full_repo}.git"
+    uat_dir = repo_dir / "uat"
+
+    if uat_dir.exists():
+        info(f"{uat_dir} already exists — skipping UAT clone")
+        return uat_dir
+
+    info(f"cloning UAT clone into {uat_dir} ...")
+    _run("git", "clone", repo_url, str(uat_dir))
+
+    # AC2: checkout develop
+    ok, _, _ = _try_run("git", "checkout", "develop", cwd=uat_dir)
+    if not ok:
+        _run("git", "fetch", "origin", cwd=uat_dir)
+        _try_run("git", "checkout", "--track", "origin/develop", cwd=uat_dir)
+
+    # AC3: write .env with separate DB path and UAT port — never shared with PRD
+    db_filename = f"{repo_name}-uat.db"
+    env_content = (
+        f"PORT={uat_port}\n"
+        f"ENVIRONMENT=uat\n"
+        f"DB_PATH=./{db_filename}\n"
+    )
+    uat_dashboard = uat_dir / "dashboard"
+    if uat_dashboard.exists():
+        # If the project has a dashboard/ subdirectory, write .env there
+        env_path = uat_dashboard / ".env"
+    else:
+        env_path = uat_dir / ".env"
+    env_path.write_text(env_content)
+    info(f"wrote {env_path} (port={uat_port}, db={db_filename})")
+
+    info(f"UAT clone ready at {uat_dir} (branch: develop)")
+    return uat_dir
+
+
 def step5_sprint_config(
     owner: str,
     repo_name: str,
     repo_dir: Path,
     projects_dir: Path,
     tester_app_subdir: str,
+    skip_uat: bool = False,
+    prd_port: int = DEFAULT_PRD_PORT,
+    uat_port: int = DEFAULT_UAT_PORT,
+    port_strategy: str = "prefer_default",
 ) -> None:
-    """AC7: Write .commander/sprint.yaml with project-specific fields only."""
+    """AC5/AC7: Write .commander/sprint.yaml with project-specific fields only.
+
+    Includes a uat: section (AC5). Sets uat.enabled: false when skip_uat=True (AC6).
+    """
     commander_dir = repo_dir / ".commander"
     sprint_yaml_path = commander_dir / "sprint.yaml"
 
@@ -319,6 +417,10 @@ def step5_sprint_config(
 
     coder_dir = projects_dir / f"{repo_name}-coder"
     tester_dir = projects_dir / f"{repo_name}-tester"
+    uat_dir = repo_dir / "uat"
+    db_filename = f"{repo_name}-uat.db"
+
+    uat_enabled = "false" if skip_uat else "true"
 
     sprint_yaml_content = f"""repo_name: {owner}/{repo_name}
 
@@ -331,6 +433,16 @@ paths:
   logs_dir:     .commander/logs/
   sprints_dir:  .commander/sprints/
   alerts_dir:   .commander/alerts/
+
+app:
+  prd_port: {prd_port}
+  uat_port: {uat_port}
+  port_strategy: {port_strategy}
+
+uat:
+  enabled: {uat_enabled}
+  auto_sync: false
+  db_path: {db_filename}
 
 agents:
   coder_prompt_template: |
@@ -450,29 +562,53 @@ def step9_verify(owner: str, repo_name: str) -> None:
         warn(f"API unreachable ({e}) — skipping verification")
 
 
-def step10_summary(owner: str, repo_name: str, projects_dir: Path) -> None:
+def step10_summary(
+    owner: str,
+    repo_name: str,
+    projects_dir: Path,
+    repo_dir: Path,
+    skip_uat: bool,
+    uat_port: int,
+) -> None:
     """Print ready summary."""
     full_repo = f"{owner}/{repo_name}"
+    uat_dir = repo_dir / "uat"
     print()
     print("=" * 60)
     print(f"  Project '{repo_name}' is ready!")
     print(f"  GitHub:  https://github.com/{full_repo}")
     print(f"  Coder:   {projects_dir}/{repo_name}-coder")
     print(f"  Tester:  {projects_dir}/{repo_name}-tester")
+    if skip_uat:
+        print(f"  UAT:     skipped (--skip-uat)")
+    else:
+        print(f"  UAT:     {uat_dir}  (port {uat_port}, branch: develop)")
     print()
     print("  Next steps:")
-    print(f"    1. cd {projects_dir}/{repo_name} && open CLAUDE.md (add your conventions)")
+    print(f"    1. cd {repo_dir} && open CLAUDE.md (add your conventions)")
     print(f"    2. python3 dashboard/scripts/sprint_init.py --repo {full_repo}")
     print(f"    3. Open dashboard at http://localhost:8000 to see the project card")
+    if not skip_uat:
+        print(f"    4. Start UAT with: bash dashboard/scripts/start_uat.sh")
     print("=" * 60)
 
 
 # ── Rollback ───────────────────────────────────────────────────────────────────
 
 def rollback(owner: str, repo_name: str, projects_dir: Path, confirm_delete: bool) -> None:
-    """AC12: Remove local dirs, projects.json entry, optionally GitHub repo."""
+    """AC7: Remove local dirs (including uat/), projects.json entry, optionally GitHub repo."""
     full_repo = f"{owner}/{repo_name}"
     removed = []
+
+    # AC7: also remove <project>/uat/ nested inside the project root
+    repo_dir = projects_dir / repo_name
+    uat_dir = repo_dir / "uat"
+    if uat_dir.exists():
+        shutil.rmtree(uat_dir)
+        removed.append(str(uat_dir))
+        print(f"  Removed {uat_dir}")
+    else:
+        print(f"  {uat_dir} does not exist — skipping")
 
     for suffix in ("", "-coder", "-tester"):
         d = projects_dir / f"{repo_name}{suffix}"
@@ -524,6 +660,29 @@ def main() -> None:
     parser.add_argument("--color", default=None, help="Color (default: cycled by project count)")
     parser.add_argument("--projects-dir", default=str(DEFAULT_PROJECTS_DIR), help="Base projects directory (default: ~/dev)")
     parser.add_argument("--tester-app-subdir", default="", help="Tester app subdirectory (default: '')")
+    parser.add_argument(
+        "--skip-uat",
+        action="store_true",
+        help="Skip UAT clone creation and set uat.enabled: false in sprint.yaml",
+    )
+    parser.add_argument(
+        "--prd-port",
+        type=int,
+        default=DEFAULT_PRD_PORT,
+        help=f"Preferred PRD port (default: {DEFAULT_PRD_PORT})",
+    )
+    parser.add_argument(
+        "--uat-port",
+        type=int,
+        default=DEFAULT_UAT_PORT,
+        help=f"Preferred UAT port (default: {DEFAULT_UAT_PORT}; auto-detected if occupied)",
+    )
+    parser.add_argument(
+        "--port-strategy",
+        default="prefer_default",
+        choices=["prefer_default", "always_random"],
+        help="Port selection strategy (default: prefer_default)",
+    )
 
     args = parser.parse_args()
 
@@ -581,9 +740,22 @@ def main() -> None:
         projects = _load_projects_json()
         color = COLOR_CYCLE[len(projects) % len(COLOR_CYCLE)]
 
-    TOTAL_STEPS = 10
+    # ── AC4: Auto-detect UAT port (distinct from PRD) ─────────────────────────
+    prd_port = _find_free_port(prefer=args.prd_port, strategy=args.port_strategy)
+    # UAT port must be distinct from PRD port
+    uat_port_pref = args.uat_port if args.uat_port != prd_port else args.uat_port + 1
+    uat_port = _find_free_port(prefer=uat_port_pref, strategy=args.port_strategy)
+    if uat_port == prd_port:
+        # Fallback: get any other free port
+        uat_port = _get_free_port()
+
+    TOTAL_STEPS = 11
 
     print(f"Onboarding '{owner}/{repo_name}' onto Commander...")
+    if not args.skip_uat:
+        print(f"  UAT clone: enabled (port {uat_port})")
+    else:
+        print(f"  UAT clone: skipped (--skip-uat)")
     print()
 
     # ── AC1: Pre-flight validation (runs before step 1) ───────────────────────
@@ -612,34 +784,52 @@ def main() -> None:
     step4_clones(owner, repo_name, projects_dir)
     info("done")
 
-    # ── Step 5: sprint.yaml (AC7) ─────────────────────────────────────────────
-    step(5, TOTAL_STEPS, "Writing .commander/sprint.yaml...")
-    step5_sprint_config(owner, repo_name, repo_dir, projects_dir, args.tester_app_subdir)
+    # ── Step 4b: UAT clone (AC1/AC2/AC3/AC4) ─────────────────────────────────
+    step(5, TOTAL_STEPS, "Setting up UAT clone...")
+    if args.skip_uat:
+        info("--skip-uat set — skipping UAT clone creation")
+    else:
+        step4b_uat_clone(owner, repo_name, repo_dir, uat_port)
+    info("done")
+
+    # ── Step 5: sprint.yaml (AC5/AC7) ────────────────────────────────────────
+    step(6, TOTAL_STEPS, "Writing .commander/sprint.yaml...")
+    step5_sprint_config(
+        owner,
+        repo_name,
+        repo_dir,
+        projects_dir,
+        args.tester_app_subdir,
+        skip_uat=args.skip_uat,
+        prd_port=prd_port,
+        uat_port=uat_port,
+        port_strategy=args.port_strategy,
+    )
     info("done")
 
     # ── Step 6: Register in projects.json (AC8) ───────────────────────────────
-    step(6, TOTAL_STEPS, "Registering project in dashboard/projects.json...")
+    step(7, TOTAL_STEPS, "Registering project in dashboard/projects.json...")
     step6_register_project(owner, repo_name, args.icon, color)
     info("done")
 
     # ── Step 7: TRACKED_REPOS (AC step 7) ────────────────────────────────────
-    step(7, TOTAL_STEPS, "Checking TRACKED_REPOS environment variable...")
+    step(8, TOTAL_STEPS, "Checking TRACKED_REPOS environment variable...")
     step7_tracked_repos(owner, repo_name)
     info("done")
 
     # ── Step 8: Restart dashboard (AC9) ───────────────────────────────────────
-    step(8, TOTAL_STEPS, "Restarting PRD dashboard...")
+    step(9, TOTAL_STEPS, "Restarting PRD dashboard...")
     step8_restart_dashboard()
     info("done")
 
     # ── Step 9: Verify via API (AC10) ─────────────────────────────────────────
-    step(9, TOTAL_STEPS, "Verifying project appears in /api/projects...")
+    step(10, TOTAL_STEPS, "Verifying project appears in /api/projects...")
     step9_verify(owner, repo_name)
     info("done")
 
     # ── Step 10: Print summary (AC15) ─────────────────────────────────────────
-    step(10, TOTAL_STEPS, "Printing ready summary...")
-    step10_summary(owner, repo_name, projects_dir)
+    step(11, TOTAL_STEPS, "Printing ready summary...")
+    step10_summary(owner, repo_name, projects_dir, repo_dir, args.skip_uat, uat_port)
 
 
 if __name__ == "__main__":

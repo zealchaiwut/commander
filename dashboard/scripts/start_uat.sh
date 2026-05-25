@@ -1,10 +1,18 @@
 #!/usr/bin/env bash
 # start_uat.sh — Start the UAT dashboard on port 8001.
 #
-# UAT_DIR is derived from this script's location:
-#   <commander_root>/uat/dashboard
-# where <commander_root> is two levels up from the scripts/ directory
-# (i.e. the sibling directory of the PRD clone).
+# UAT_DIR is derived from this script's location via git rev-parse:
+#   <project_dir>/uat/<repo_name>/dashboard
+# where <project_dir> is the parent of the main repo clone and
+# <repo_name> is the basename of the main repo root.
+#
+# Standard layout:
+#   ~/dev/<project>/               ← PROJECT_DIR
+#     <repo_name>/                 ← MAIN_REPO  (PRD clone, master branch)
+#       dashboard/scripts/         ← this script lives here
+#     uat/
+#       <repo_name>/               ← UAT clone  (develop branch)
+#         dashboard/               ← UAT_DIR
 #
 # Writes a PID file to <UAT_DIR>/uat.pid.
 # Logs are written to <UAT_DIR>/uat.log.
@@ -12,10 +20,11 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PRD_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-COMMANDER_ROOT="$(cd "$PRD_DIR/.." && pwd)"
+MAIN_REPO="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel)"
+PROJECT_DIR="$(dirname "$MAIN_REPO")"
+REPO_NAME="$(basename "$MAIN_REPO")"
 
-UAT_DIR="$COMMANDER_ROOT/uat/dashboard"
+UAT_DIR="$PROJECT_DIR/uat/$REPO_NAME/dashboard"
 VENV="$UAT_DIR/venv"
 PID_FILE="$UAT_DIR/uat.pid"
 LOG_FILE="$UAT_DIR/uat.log"
@@ -26,7 +35,7 @@ echo "=== Starting UAT dashboard (port $PORT) ==="
 # ── Sanity checks ─────────────────────────────────────────────────────────────
 if [ ! -d "$UAT_DIR" ]; then
     echo "ERROR: UAT directory not found at $UAT_DIR. Create it via:"
-    echo "  cd $COMMANDER_ROOT && git clone https://github.com/zealchaiwut/commander.git uat && cd uat && git checkout develop"
+    echo "  cd $PROJECT_DIR && git clone https://github.com/zealchaiwut/commander.git uat/$REPO_NAME && cd uat/$REPO_NAME && git checkout develop"
     exit 1
 fi
 

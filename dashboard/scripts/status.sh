@@ -5,10 +5,12 @@
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PRD_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-COMMANDER_ROOT="$(cd "$PRD_DIR/.." && pwd)"
+MAIN_REPO="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel)"
+PROJECT_DIR="$(dirname "$MAIN_REPO")"
+REPO_NAME="$(basename "$MAIN_REPO")"
 
-UAT_DIR="$COMMANDER_ROOT/uat/dashboard"
+PRD_DIR="$MAIN_REPO/dashboard"
+UAT_DIR="$PROJECT_DIR/uat/$REPO_NAME/dashboard"
 
 _status_port() {
     local port="$1"
@@ -52,7 +54,7 @@ _status_port 8000 "PRD" "$PRD_DIR"      "$PRD_DIR/prd.pid"
 if [ ! -d "$UAT_DIR" ]; then
     printf "%-6s (port %s): " "UAT" "8001"
     echo "NOT CONFIGURED (UAT directory not found at $UAT_DIR)"
-    echo "  Create it via: cd $COMMANDER_ROOT && git clone https://github.com/zealchaiwut/commander.git uat && cd uat && git checkout develop"
+    echo "  Create it via: cd $PROJECT_DIR && git clone https://github.com/zealchaiwut/commander.git uat/$REPO_NAME && cd uat/$REPO_NAME && git checkout develop"
 else
     _status_port 8001 "UAT" "$UAT_DIR"      "$UAT_DIR/uat.pid"
 fi

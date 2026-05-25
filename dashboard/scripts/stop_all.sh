@@ -11,11 +11,12 @@
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PRD_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-COMMANDER_ROOT="$(cd "$PRD_DIR/.." && pwd)"
+MAIN_REPO="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel)"
+PROJECT_DIR="$(dirname "$MAIN_REPO")"
+REPO_NAME="$(basename "$MAIN_REPO")"
 
-PRD_PID_FILE="$PRD_DIR/prd.pid"
-UAT_PID_FILE="$COMMANDER_ROOT/uat/dashboard/uat.pid"
+PRD_PID_FILE="$MAIN_REPO/dashboard/prd.pid"
+UAT_PID_FILE="$PROJECT_DIR/uat/$REPO_NAME/dashboard/uat.pid"
 
 # Parse optional argument: prd | uat | (none = both)
 TARGET="${1:-all}"

@@ -51,7 +51,7 @@ All subsequent git operations and script calls run from this directory. Do **not
 ### Step 2 — Create the feature branch
 
 ```bash
-python3 $(git rev-parse --show-toplevel)/dashboard/scripts/start_feature.py --issue <N>
+python3 $(git rev-parse --show-toplevel)/dashboard/scripts/start_feature.py --issue <N> --base-branch "${COMMANDER_MERGE_TARGET:-develop}"
 ```
 
 This script:

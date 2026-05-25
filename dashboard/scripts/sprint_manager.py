@@ -1332,6 +1332,7 @@ def _dispatch_coder(
 
     cmd = [
         "claude",
+        "--model", "claude-sonnet-4-6",
         "--dangerously-skip-permissions",
         "-p",
         prompt,
@@ -1340,6 +1341,7 @@ def _dispatch_coder(
     # Build subprocess environment: inherit current env, set COMMANDER_MERGE_TARGET
     # when in sprint mode (AC2), and COMMANDER_APP_PORT if a port was chosen (issue #62).
     sub_env = os.environ.copy()
+    sub_env.pop("ANTHROPIC_API_KEY", None)
     if sprint_branch not in ("develop",):
         sub_env["COMMANDER_MERGE_TARGET"] = sprint_branch
         # Always append sprint-mode instructions regardless of whether a custom
@@ -1443,6 +1445,7 @@ def _dispatch_tester(
 
     cmd = [
         "claude",
+        "--model", "claude-sonnet-4-6",
         "--dangerously-skip-permissions",
         "-p",
         prompt,
@@ -1451,6 +1454,7 @@ def _dispatch_tester(
     # Build subprocess environment: inherit current env, set COMMANDER_MERGE_TARGET
     # when in sprint mode (AC2), and COMMANDER_APP_PORT if a port was chosen (issue #62).
     sub_env = os.environ.copy()
+    sub_env.pop("ANTHROPIC_API_KEY", None)
     if sprint_branch not in ("develop",):
         sub_env["COMMANDER_MERGE_TARGET"] = sprint_branch
         # Always append sprint-mode instructions regardless of whether a custom

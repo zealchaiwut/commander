@@ -645,6 +645,34 @@ def _write_and_log(
     return out_path
 
 
+# ── CLI helpers ──────────────────────────────────────────────────────────────
+
+def _resolve_sprints_dir(cfg_sprints_dir: Path, commander_dir: Path) -> Path:
+    """Return the correct sprints directory for a project, avoiding double .commander paths.
+
+    load_config() resolves paths relative to the .commander/ directory (commander_dir).
+    If the sprint.yaml was generated with the old flat-layout template it uses
+    '.commander/sprints/' as the value, which resolves to
+    .commander/.commander/sprints/ — a double-prefix that is always wrong.
+
+    Fix: when the resolved path contains a '.commander/.commander' segment, fall back
+    to the canonical 'commander_dir / sprints' (i.e. .commander/sprints/).
+    """
+    resolved = cfg_sprints_dir.resolve()
+    # Detect double .commander (e.g. .commander/.commander/sprints)
+    parts = resolved.parts
+    for i, part in enumerate(parts):
+        if part == ".commander" and i + 1 < len(parts) and parts[i + 1] == ".commander":
+            canonical = commander_dir / "sprints"
+            print(
+                f"  [preflight] Corrected double .commander path in sprints_dir: "
+                f"{resolved} → {canonical}",
+                file=sys.stderr,
+            )
+            return canonical
+    return resolved
+
+
 # ── CLI ────────────────────────────────────────────────────────────────────────
 
 def main() -> None:
@@ -708,7 +736,7 @@ def main() -> None:
             print(f"  Using config: {config_path}")
             cfg = _try_load_config(config_path)
             if cfg is not None:
-                sprints_dir = cfg.sprints_dir
+                sprints_dir = _resolve_sprints_dir(cfg.sprints_dir, config_path.parent)
                 if not repo_name:
                     repo_name = cfg.repo_name
         else:
@@ -717,7 +745,7 @@ def main() -> None:
                 print(f"  Auto-discovered config: {discovered}")
                 cfg = _try_load_config(discovered)
                 if cfg is not None:
-                    sprints_dir = cfg.sprints_dir
+                    sprints_dir = _resolve_sprints_dir(cfg.sprints_dir, discovered.parent)
                     if not repo_name:
                         repo_name = cfg.repo_name
 

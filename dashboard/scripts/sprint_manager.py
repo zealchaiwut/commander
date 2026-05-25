@@ -1434,15 +1434,16 @@ def _dispatch_tester(
     # Always inject autonomous enforcement — custom templates omit this, so append
     # unconditionally unless the template already references finish_feature.
     if "finish_feature" not in prompt:
+        # Build the finish_feature.py command with target branch (in sprint mode, target is the sprint branch; else develop)
+        target_arg = f" --target-branch {sprint_branch!r}" if sprint_branch != "develop" else ""
         prompt += (
             " IMPORTANT — autonomous sprint mode: when your verdict is READY_FOR_UAT"
             " you MUST immediately run `python3 dashboard/scripts/finish_feature.py"
-            f" --issue {issue_num}` from the repo root without asking."
+            f" --issue {issue_num}{target_arg}` from the repo root without asking."
             " Apply the UAT label to the issue automatically via `gh issue edit`."
             " Do NOT output language like 'let me know if you want me to...' —"
             " complete the full workflow autonomously including finish_feature.py and label update."
         )
-
     cmd = [
         "claude",
         "--model", "claude-sonnet-4-6",

@@ -13,6 +13,9 @@ from typing import Optional
 import db
 import github_client
 
+# Base directory for commander worktrees (can be overridden via env var for testing)
+_COMMANDER_BASE = Path(os.environ.get("COMMANDER_BASE", Path.home() / "commander"))
+
 PROJECTS_FILE = Path(__file__).parent / "projects.json"
 SPRINT_RE = re.compile(r"^sprint-(\d+)$")
 
@@ -196,6 +199,48 @@ def _cost_usd(input_tokens: int, output_tokens: int) -> float:
     )
 
 
+# ── port detection helpers (issue #62) ────────────────────────────────────────
+
+def _read_runtime_port(worktree_path: Path) -> Optional[int]:
+    """Read <worktree>/.commander/runtime/port and return the port as int, or None.
+
+    AC-9: Returns None when the file does not exist (non-server project).
+    """
+    port_file = worktree_path / ".commander" / "runtime" / "port"
+    if not port_file.exists():
+        return None
+    try:
+        return int(port_file.read_text(encoding="utf-8").strip())
+    except (ValueError, OSError):
+        return None
+
+
+def _worktree_path_for_repo(repo: str) -> Optional[Path]:
+    """Guess the coder worktree path for a given repo.
+
+    Looks for the most recently written .commander/runtime/port across
+    known worktree names (work-coder, coder) under COMMANDER_BASE.
+    Returns the first matching worktree directory that contains the runtime
+    port file, or None.
+
+    The worktree layout expected:
+        ~/commander/work-coder/.commander/runtime/port
+        ~/commander/coder/.commander/runtime/port
+    """
+    repo_slug = repo.split("/")[-1].lower()
+    candidates = [
+        _COMMANDER_BASE / "work-coder",
+        _COMMANDER_BASE / "coder",
+        _COMMANDER_BASE / f"work-{repo_slug}",
+        _COMMANDER_BASE / repo_slug,
+    ]
+    for candidate in candidates:
+        port_file = candidate / ".commander" / "runtime" / "port"
+        if port_file.exists():
+            return candidate
+    return None
+
+
 # ── public API ────────────────────────────────────────────────────────────────
 
 def add_project(repo: str, icon: str = "ti-folder", color: str = "gray") -> dict:
@@ -288,6 +333,10 @@ def get_all_projects(agents: list[dict]) -> dict:
         progress = _compute_progress(sprint_issues) if sprint_num else {"closed": 0, "total": 0, "pct": 0}
         proj_agents = _project_agents(proj, agents)
 
+        # AC-9: read app_port from runtime/port file in the coder worktree
+        worktree = _worktree_path_for_repo(repo)
+        app_port = _read_runtime_port(worktree) if worktree else None
+
         result.append({
             "repo":             repo,
             "id":               _repo_id(repo),
@@ -306,6 +355,7 @@ def get_all_projects(agents: list[dict]) -> dict:
             ],
             "uatCount":  len(uat_i),
             "openCount": len(open_i),
+            "app_port":  app_port,
         })
 
     working_agents = sum(1 for a in agents if a.get("status") == "working")

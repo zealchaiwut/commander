@@ -84,6 +84,40 @@ Commander is:
 -               - Read the issue body carefully before implementing — acceptance criteria 
 -                 is the contract
 -
+-                 ## Standard Project Layout
+-
+-                 Two layouts are supported. Use `--nested` with `init_project.py` for new projects.
+-
+-                 **Nested layout** (`--nested`, recommended for new projects):
+-                 ```
+-                 ~/dev/<project>/
+-                   main/              # primary working clone (master branch)
+-                   coder/             # coder agent clone (develop branch)
+-                   tester/            # tester agent clone (develop branch)
+-                   uat/               # UAT clone (develop branch) — optional
+-                   .commander/        # sprint config at project root, outside any clone
+-                     sprint.yaml
+-                     logs/
+-                     sprints/
+-                     alerts/
+-                 ```
+-
+-                 **Flat layout** (default, backward compatible):
+-                 ```
+-                 ~/dev/<project>/          # main clone — master branch
+-                 ~/dev/<project>/uat/      # UAT clone — develop branch
+-                 ~/dev/<project>-coder/    # coder agent clone — develop branch
+-                 ~/dev/<project>-tester/   # tester agent clone — develop branch
+-                 ~/dev/<project>/.commander/sprint.yaml   # inside main clone
+-                 ```
+-
+-                 The sprint manager auto-discovers `.commander/sprint.yaml` by walking UP
+-                 from the current working directory, so it works from inside any clone in
+-                 both layouts.
+-
+-                 To migrate an existing flat project to nested:
+-                 `scripts/migrate_project_layout.py <project-name>`
+-
 -                 ## Useful Scripts
 -
 -                 - `scripts/create_ticket.py` — file a new issue with template
@@ -92,6 +126,9 @@ Commander is:
 -                 - `scripts/post_test_report.py` — tester uses this for structured reports
 -                 - `scripts/start_feature.py` — coder uses this to create feature branch
 -                 - `scripts/finish_feature.py` — tester uses this to merge to develop
+-                 - `scripts/init_project.py` — onboard a new project (`--nested` for nested layout)
+-                 - `scripts/migrate_project_layout.py` — migrate flat project to nested layout
+-                 - `scripts/migrate_add_uat.py` — add UAT clone to an existing project
 -
 -                 ## Out of Scope
 -
@@ -102,6 +139,40 @@ Commander is:
 -                 ## When in Doubt
 -
 -                 Default is **execute**, not ask. Only stop for genuine ambiguity or destructive actions. See "Confirmation Policy — STRICT" at the top of this file.
+
+## API Cost and Model Selection
+
+There are two pricing surfaces. Always prefer the cheaper option.
+
+### Pricing surfaces
+
+| Surface | Funded by | When used |
+|---|---|---|
+| **Claude Code CLI** (`claude` subprocess) | Claude.ai subscription (free up to limits) | Coder and tester agents dispatched by sprint_manager.py |
+| **Raw Anthropic API** (`api.anthropic.com`) | ANTHROPIC_API_KEY — charged per token | `sprint_review.py` preflight calls |
+
+### Default models per agent
+
+| Agent | Default model | Rationale |
+|---|---|---|
+| BA | `claude-sonnet-4-6` | Ticket writing benefits from quality reasoning; Opus is overkill |
+| Coder | `claude-sonnet-4-6` (via Claude Code) | Solid coding quality; subscription-funded |
+| Tester | `claude-haiku-4-5` (via Claude Code) | Mostly mechanical verification; cheapest capable model |
+| sprint_review.py | `claude-haiku-4-5-20251001` (raw API) | Already optimized; keep as-is |
+
+### How to choose a model
+
+- Use Sonnet 4.6 as the default for BA and Coder work.
+- Use Haiku 4.5 for mechanical/verification work (Tester, preflight).
+- Use Opus only when a task genuinely requires it (complex architecture decisions, ambiguous multi-constraint problems). Override per-invocation, not by changing the default.
+- Never use Opus as the default for any agent role — the cost is disproportionate.
+
+### Cost visibility
+
+- Token usage is tracked in the `token_usage` table with `agent_role` and `model_name` columns.
+- Sprint summaries include a `cost_estimate` row in the Stats table showing estimated API spend.
+- Raw API spend (sprint_review.py) uses Haiku 4.5 rates: $0.80/M input, $4.00/M output.
+- Audit per-agent/model spend: `GET /api/debug/token-usage/by-agent-model`
 
 ## String literal conventions
 

@@ -2,8 +2,15 @@
   {
     "repo": "zealchaiwut/commander",
     "name": "Commander",
-    "icon": "ti-cpu",
-    "color": "blue",
+    "icon": "ti-rocket",
+    "color": "purple",
+    "active_sprints": {}
+  },
+  {
+    "repo": "zealchaiwut/test-sprint-v3",
+    "name": "Test Sprint V3",
+    "icon": "ti-flask",
+    "color": "amber",
     "active_sprints": {}
   }
 ]

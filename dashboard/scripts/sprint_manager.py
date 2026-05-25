@@ -63,6 +63,21 @@ from dotenv import load_dotenv
 load_dotenv(DASHBOARD_DIR / ".env")
 import github_client
 
+# Import failure-parsing helpers from post_test_report (no circular deps)
+try:
+    from scripts.post_test_report import (  # type: ignore[import]
+        parse_failures,
+        build_failure_block,
+        write_sidecar,
+        sidecar_path,
+    )
+    _FAILURE_PARSING_AVAILABLE = True
+except ImportError:
+    _FAILURE_PARSING_AVAILABLE = False
+
+# Repo root — one level above DASHBOARD_DIR (e.g. ~/commander/)
+REPO_ROOT = DASHBOARD_DIR.parent
+
 # Default paths — can be overridden via env vars or CLI for testing
 WORKTESTER_ROOT      = Path(os.environ.get("WORKTESTER_ROOT",
                              Path.home() / "commander" / "work-tester"))
@@ -71,6 +86,13 @@ FINISH_FEATURE_SCRIPT = DASHBOARD_DIR / "scripts" / "finish_feature.py"
 DASHBOARD_API_URL    = os.environ.get("DASHBOARD_API_URL", "http://localhost:8000")
 SPRINTS_DIR          = DASHBOARD_DIR / "sprints"
 ALERTS_DIR           = DASHBOARD_DIR / "alerts"
+
+# ── API cost pricing (USD per million tokens) ─────────────────────────────────
+# sprint_review.py uses Haiku 4.5 for raw API calls.  Coder/tester agents run
+# via Claude Code CLI (subscription-funded) so their tokens are free on the API.
+# Rates as of 2025: https://www.anthropic.com/pricing
+_HAIKU_INPUT_COST_PER_M  = 0.80   # claude-haiku-4-5-20251001 input
+_HAIKU_OUTPUT_COST_PER_M = 4.00   # claude-haiku-4-5-20251001 output
 
 
 # ── SprintConfig dataclass + loader ──────────────────────────────────────────
@@ -94,6 +116,9 @@ class SprintConfig:
     api_url:               str            = field(default_factory=lambda: DASHBOARD_API_URL)
     coder_prompt_template:  Optional[str] = None
     tester_prompt_template: Optional[str] = None
+    # Port detection (issue #62)
+    app_default_port:      Optional[int]  = None
+    app_port_strategy:     str            = "prefer_default"
 
     @property
     def worktree_tester_app(self) -> Path:
@@ -193,6 +218,25 @@ def load_config(path: Path) -> "SprintConfig":
     coder_prompt   = agents.get("coder_prompt_template") or None
     tester_prompt  = agents.get("tester_prompt_template") or None
 
+    # ── app section (issue #62: per-project port detection) ───────────────────
+    app_section = data.get("app") or {}
+    app_default_port: Optional[int] = None
+    app_port_strategy: str = "prefer_default"
+    if app_section:
+        raw_port = app_section.get("default_port")
+        if raw_port is not None:
+            try:
+                app_default_port = int(raw_port)
+            except (TypeError, ValueError):
+                sys.exit(f"Config error: app.default_port must be an integer, got {raw_port!r}")
+        raw_strategy = (app_section.get("port_strategy") or "prefer_default").strip()
+        if raw_strategy not in ("prefer_default", "always_random"):
+            sys.exit(
+                f"Config error: app.port_strategy must be 'prefer_default' or 'always_random', "
+                f"got {raw_strategy!r}"
+            )
+        app_port_strategy = raw_strategy
+
     return SprintConfig(
         repo_name             = repo_name,
         worktree_coder        = worktree_coder,
@@ -205,6 +249,8 @@ def load_config(path: Path) -> "SprintConfig":
         api_url               = api_url,
         coder_prompt_template = coder_prompt,
         tester_prompt_template= tester_prompt,
+        app_default_port      = app_default_port,
+        app_port_strategy     = app_port_strategy,
     )
 
 
@@ -415,6 +461,62 @@ def _run_timed(*cmd, cwd: Optional[Path] = None) -> tuple[int, str, str]:
     """Run a command and return (returncode, stdout, stderr)."""
     r = subprocess.run(cmd, capture_output=True, text=True, cwd=cwd)
     return r.returncode, r.stdout, r.stderr
+
+
+# ── port detection (issue #62) ───────────────────────────────────────────────
+
+def _detect_port(cfg: "SprintConfig") -> Optional[int]:
+    """Call find_port.py and return the chosen port, or None if no app section.
+
+    AC-5: Called before coder is dispatched when app_default_port is set.
+    """
+    if cfg.app_default_port is None:
+        return None  # non-server project: skip port detection
+
+    find_port_script = cfg.scripts_dir / "find_port.py"
+    cmd = [
+        sys.executable, str(find_port_script),
+        "--prefer", str(cfg.app_default_port),
+        "--strategy", cfg.app_port_strategy,
+    ]
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        port_str = result.stdout.strip()
+        chosen_port = int(port_str)
+        print(f"  [port] chosen port: {chosen_port} "
+              f"(preferred: {cfg.app_default_port}, strategy: {cfg.app_port_strategy})")
+        return chosen_port
+    except (subprocess.CalledProcessError, ValueError) as e:
+        print(f"  Warning: find_port.py failed ({e}) -- skipping port detection", file=sys.stderr)
+        return None
+
+
+def _write_runtime_port(worktree_coder: Path, port: int) -> None:
+    """Write chosen port to <coder_worktree>/.commander/runtime/port.
+
+    AC-6: Creates parent dirs as needed.
+    """
+    runtime_dir = worktree_coder / ".commander" / "runtime"
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+    port_file = runtime_dir / "port"
+    port_file.write_text(str(port), encoding="utf-8")
+    print(f"  [port] wrote {port} to {port_file}")
+
+
+def _changed_py_files(base_branch: str, cwd: Path) -> list[str]:
+    """Return .py files added/modified in HEAD relative to base_branch.
+
+    Uses git diff <base_branch> --name-only --diff-filter=ACM to find files
+    that were Added, Copied, or Modified relative to base_branch.
+    Returns a list of relative paths (e.g. ['server.py', 'tests/test_foo.py']).
+    """
+    rc, out, _ = _run_timed(
+        "git", "diff", base_branch, "--name-only", "--diff-filter=ACM",
+        cwd=cwd,
+    )
+    if rc != 0:
+        return []
+    return [f for f in out.splitlines() if f.endswith(".py")]
 
 
 # ── dashboard integration ─────────────────────────────────────────────────────
@@ -666,14 +768,34 @@ def _find_feature_branch(issue_num: int) -> Optional[str]:
 # ── quality gates ─────────────────────────────────────────────────────────────
 
 def _revert_to_sit(issue_num: int, gate_name: str, output: str,
-                   repo_name: Optional[str] = None) -> None:
-    """Label the issue SIT and post a failure comment."""
+                   repo_name: Optional[str] = None,
+                   repo_root: Optional[Path] = None) -> None:
+    """Label the issue SIT and post a structured failure comment.
+
+    When failure-parsing helpers are available:
+    - Appends a ## Failure Summary table, ## Recommended Fix prose, and
+      ## Files to Inspect bulleted list to the GitHub comment.
+    - Writes a machine-readable JSON sidecar at
+      <repo-root>/.commander/runtime/last-failure-<issue>.json
+    """
     truncated = output[:2000] if len(output) > 2000 else output
     comment = (
         f"Quality gate failed: **{gate_name}**\n"
         f"Issue reverted to SIT for re-inspection.\n\n"
         f"**{gate_name}** output:\n```\n{truncated}\n```"
     )
+
+    if _FAILURE_PARSING_AVAILABLE:
+        try:
+            effective_root = repo_root or REPO_ROOT
+            failures = parse_failures(gate_name, output)
+            comment += build_failure_block(gate_name, failures)
+            sidecar = write_sidecar(issue_num, gate_name, failures,
+                                    repo_root=effective_root)
+            print(f"  Wrote failure sidecar: {sidecar}")
+        except Exception as e:
+            print(f"  Warning: failure parsing/sidecar failed — {e}", file=sys.stderr)
+
     try:
         github_client.update_labels(
             issue_num,
@@ -706,14 +828,19 @@ def _gate_pytest(
     worktester_dashboard: Path,
     skip: bool,
     repo_name: Optional[str] = None,
+    base_branch: str = "develop",
+    gate_scope: str = "changed",
 ) -> GateResult:
-    """Gate 1 — run pytest -x inside the tester worktree dashboard."""
+    """Gate 1 — run pytest -x inside the tester worktree dashboard.
+
+    gate_scope='changed' (default): only run test files changed relative to
+    base_branch. gate_scope='full': run full pytest suite (legacy behaviour).
+    """
     if skip:
         print("  [gate:pytest] skipped")
         return GateResult(gate="pytest", passed=True, skipped=True)
 
     _post_agent_event("gate:pytest")
-    print("  [gate:pytest] running pytest -x ...")
 
     # Detect pytest binary
     ok, pytest_path, _ = _try("which", "pytest")
@@ -729,7 +856,20 @@ def _gate_pytest(
     else:
         pytest_bin = pytest_path
 
-    rc, stdout, stderr = _run_timed(pytest_bin, "-x", cwd=worktester_dashboard)
+    # Determine which test files to run based on gate_scope
+    if gate_scope == "full":
+        print("  [gate:pytest] running pytest -x (full scope) ...")
+        rc, stdout, stderr = _run_timed(pytest_bin, "-x", cwd=worktester_dashboard)
+    else:
+        # changed scope: only run test files changed relative to base_branch
+        changed = _changed_py_files(base_branch, cwd=worktester_dashboard)
+        test_files = [f for f in changed if f.startswith("tests/")]
+        if not test_files:
+            print("  [gate:pytest] no test files changed — skipped")
+            return GateResult(gate="pytest", passed=True, output="no test files changed")
+        print(f"  [gate:pytest] checking {len(test_files)} file(s): {', '.join(test_files)}")
+        rc, stdout, stderr = _run_timed(pytest_bin, "-x", *test_files, cwd=worktester_dashboard)
+
     combined = stdout + stderr
     if rc == 0:
         print("  [gate:pytest] PASS")
@@ -745,18 +885,23 @@ def _gate_lint(
     worktester_dashboard: Path,
     skip: bool,
     repo_name: Optional[str] = None,
+    base_branch: str = "develop",
+    gate_scope: str = "changed",
 ) -> GateResult:
-    """Gate 2 -- run ruff check . inside the tester worktree dashboard."""
+    """Gate 2 -- run ruff check inside the tester worktree dashboard.
+
+    gate_scope='changed' (default): only lint .py files changed relative to
+    base_branch. gate_scope='full': run ruff check . (legacy behaviour).
+    """
     if skip:
         print("  [gate:lint] skipped")
         return GateResult(gate="lint", passed=True, skipped=True)
 
     _post_agent_event("gate:lint")
-    print("  [gate:lint] running ruff check . ...")
 
     # ruff is optional -- if not found, log warning and treat as passed
-    ok, ruff_path, _ = _try("which", "ruff")
-    if not ok:
+    ok_ruff, ruff_path, _ = _try("which", "ruff")
+    if not ok_ruff:
         # Try inside dashboard venv
         venv_ruff = worktester_dashboard / ".." / "venv" / "bin" / "ruff"
         if venv_ruff.exists():
@@ -768,7 +913,19 @@ def _gate_lint(
     else:
         ruff_bin = ruff_path
 
-    rc, stdout, stderr = _run_timed(ruff_bin, "check", ".", cwd=worktester_dashboard)
+    # Determine which files to lint based on gate_scope
+    if gate_scope == "full":
+        print("  [gate:lint] running ruff check . (full scope) ...")
+        rc, stdout, stderr = _run_timed(ruff_bin, "check", ".", cwd=worktester_dashboard)
+    else:
+        # changed scope: only lint .py files changed relative to base_branch
+        py_files = _changed_py_files(base_branch, cwd=worktester_dashboard)
+        if not py_files:
+            print("  [gate:lint] no Python files changed — skipped")
+            return GateResult(gate="lint", passed=True, output="no Python files changed")
+        print(f"  [gate:lint] checking {len(py_files)} file(s): {', '.join(py_files)}")
+        rc, stdout, stderr = _run_timed(ruff_bin, "check", *py_files, cwd=worktester_dashboard)
+
     combined = stdout + stderr
     if rc == 0:
         print("  [gate:lint] PASS")
@@ -846,11 +1003,17 @@ def _run_quality_gates(
     gate_merge_preview: bool,
     target_branch: str = "develop",
     repo_name: Optional[str] = None,
+    base_branch: str = "develop",
+    gate_scope: str = "changed",
 ) -> list[GateResult]:
     """Run the three quality gates sequentially. Returns list of GateResult.
 
     Stops early on first failure (remaining gates are not run).
     If skip_all is True, all gates are skipped.
+
+    base_branch: branch to diff against when gate_scope='changed' (default: 'develop').
+    gate_scope: 'changed' (default) scopes gates to changed files only;
+                'full' restores legacy full-codebase behaviour.
     """
     results: list[GateResult] = []
 
@@ -860,6 +1023,8 @@ def _run_quality_gates(
         worktester_dashboard,
         skip=(skip_all or not gate_pytest),
         repo_name=repo_name,
+        base_branch=base_branch,
+        gate_scope=gate_scope,
     )
     results.append(r1)
     if not r1.passed:
@@ -871,6 +1036,8 @@ def _run_quality_gates(
         worktester_dashboard,
         skip=(skip_all or not gate_lint),
         repo_name=repo_name,
+        base_branch=base_branch,
+        gate_scope=gate_scope,
     )
     results.append(r2)
     if not r2.passed:
@@ -970,12 +1137,18 @@ def handle_post_tester(
     target_branch: str = "develop",
     repo_name: Optional[str] = None,
     cfg: Optional["SprintConfig"] = None,
+    base_branch: str = "develop",
+    gate_scope: str = "changed",
 ) -> tuple[bool, str, Optional[str]]:
     """Called after a tester subprocess exits.
 
     Returns (merged: bool, summary_line: str, failure_category: Optional[str]).
 
     AC-1: Gates only run if tester exited 0 AND label is exactly UAT.
+
+    base_branch: branch to diff against when gate_scope='changed' (default: 'develop').
+    gate_scope: 'changed' (default) scopes gates to changed files only;
+                'full' restores legacy full-codebase behaviour.
     """
     # Resolve paths: prefer cfg, then explicit args, then globals
     if cfg is not None:
@@ -1003,7 +1176,7 @@ def handle_post_tester(
                 f"Issue #{issue_num}: tester exited 0 but not UAT -- no merge",
                 FailureCategory.TESTER_REJECTED)
 
-    print(f"\nIssue #{issue_num} is UAT -- running quality gates...")
+    print(f"\nTester promoted issue #{issue_num} to UAT -- running quality gates...")
 
     # Find the feature branch
     feature_branch = _find_feature_branch(issue_num)
@@ -1023,7 +1196,7 @@ def handle_post_tester(
             GateResult(gate="merge-preview", passed=True, skipped=True),
         ]
         _post_success_comment(issue_num, all_skipped, repo_name=eff_repo)
-        return True, f"Issue #{issue_num}: all gates skipped, merged into {target_branch}", None
+        return True, f"Tester promoted issue #{issue_num} to UAT; all gates skipped, merged into {target_branch}", None
 
     results = _run_quality_gates(
         issue_num=issue_num,
@@ -1036,6 +1209,8 @@ def handle_post_tester(
         gate_merge_preview=gate_merge_preview,
         target_branch=target_branch,
         repo_name=eff_repo,
+        base_branch=base_branch,
+        gate_scope=gate_scope,
     )
 
     # Check if all gates passed
@@ -1046,7 +1221,7 @@ def handle_post_tester(
         print(f"  All gates passed -- calling finish_feature.py for issue #{issue_num}")
         _call_finish_feature(issue_num, wt_root, target_branch=target_branch, repo_name=eff_repo, cfg=cfg)
         _post_success_comment(issue_num, results, repo_name=eff_repo)
-        return True, f"Issue #{issue_num}: all gates passed, merged into {target_branch}", None
+        return True, f"Tester promoted issue #{issue_num} to UAT; all gates passed, merged into {target_branch}", None
     else:
         failed = next((r for r in results if not r.passed), None)
         gate_name = failed.gate if failed else "unknown"
@@ -1056,6 +1231,59 @@ def handle_post_tester(
 
 
 # ── agent dispatch helpers ────────────────────────────────────────────────────
+
+def _build_failure_suffix(issue_num: int, repo_root: Optional[Path] = None) -> str:
+    """Read the JSON failure sidecar for issue_num and return a prompt suffix.
+
+    Returns an empty string when:
+    - failure-parsing helpers are not available
+    - the sidecar does not exist (backward-compat: no error, just generic prompt)
+
+    Logs a note when the sidecar is not found.
+    """
+    if not _FAILURE_PARSING_AVAILABLE:
+        return ""
+
+    effective_root = repo_root or REPO_ROOT
+    sc_path = sidecar_path(issue_num, repo_root=effective_root)
+
+    if not sc_path.exists():
+        print(f"  [retry] failure sidecar not found at {sc_path} — using generic prompt")
+        return ""
+
+    try:
+        data = json.loads(sc_path.read_text(encoding="utf-8"))
+    except Exception as e:
+        print(f"  Warning: could not read failure sidecar {sc_path}: {e}", file=sys.stderr)
+        return ""
+
+    gate      = data.get("gate", "unknown")
+    failures  = data.get("failures", [])
+    files_to_inspect = data.get("files_to_inspect", [])
+
+    if not failures:
+        return ""
+
+    lines = [
+        f"\n\nPrevious gate '{gate}' failed. Fix the following before re-submitting:"
+    ]
+    for f in failures[:10]:  # cap at 10 to keep prompt concise
+        loc   = f.get("location", "")
+        ftype = f.get("type", "")
+        msg   = f.get("issue", "")
+        test  = f.get("test", "")
+        entry = f"- {ftype} at {loc}: {msg}"
+        if test:
+            entry += f" (test: {test})"
+        lines.append(entry)
+
+    if files_to_inspect:
+        lines.append("\nFiles requiring changes:")
+        for fi in files_to_inspect[:10]:
+            lines.append(f"  {fi}")
+
+    return "\n".join(lines)
+
 
 def _issue_log_path(issue_num: int, cfg: Optional["SprintConfig"] = None) -> Path:
     logs_dir = cfg.logs_dir if cfg is not None else (DASHBOARD_DIR / "logs")
@@ -1068,13 +1296,19 @@ def _dispatch_coder(
     sprint_branch: str = "develop",
     repo_name: Optional[str] = None,
     cfg: Optional["SprintConfig"] = None,
+    chosen_port: Optional[int] = None,
 ) -> tuple[bool, Optional[str]]:
-    """Dispatch a coder agent for the issue.  Returns (ok, failure_category)."""
+    """Dispatch a coder agent for the issue.  Returns (ok, failure_category).
+
+    When sprint_branch is not 'develop', sets COMMANDER_MERGE_TARGET in the
+    subprocess environment so the coder agent creates the feature branch off
+    the sprint branch instead of develop (AC2, AC3).
+    """
     eff_repo = repo_name or (cfg.repo_name if cfg else None)
     api_url  = cfg.api_url if cfg else None
     cwd_path = cfg.worktree_coder if cfg else WORKTESTER_DASHBOARD
 
-    print(f"  Dispatching coder for issue #{issue_num} ...")
+    print(f"  Dispatching coder for issue #{issue_num} ...", flush=True)
     _post_agent_event(f"coder:issue-{issue_num}", api_url=api_url)
 
     log_path = _issue_log_path(issue_num, cfg=cfg)
@@ -1091,18 +1325,38 @@ def _dispatch_coder(
             "Use the BA/coder/tester workflow defined in CLAUDE.md."
         )
 
+    # Inject failure context from sidecar if available (AC: sprint manager reads sidecar)
+    failure_suffix = _build_failure_suffix(issue_num)
+    if failure_suffix:
+        prompt = prompt + failure_suffix
+
     cmd = [
         "claude",
+        "--model", "claude-sonnet-4-6",
         "--dangerously-skip-permissions",
         "-p",
-        prompt + (
-            f" IMPORTANT: pass --base-branch {sprint_branch} to start_feature.py"
-            f" so that the feature branch is based off {sprint_branch!r} instead of develop."
-            if sprint_branch not in ("develop",)
-            and not (cfg and cfg.coder_prompt_template)
-            else ""
-        ),
+        prompt,
     ]
+
+    # Build subprocess environment: inherit current env, set COMMANDER_MERGE_TARGET
+    # when in sprint mode (AC2), and COMMANDER_APP_PORT if a port was chosen (issue #62).
+    sub_env = os.environ.copy()
+    sub_env.pop("ANTHROPIC_API_KEY", None)
+    if sprint_branch not in ("develop",):
+        sub_env["COMMANDER_MERGE_TARGET"] = sprint_branch
+        # Always append sprint-mode instructions regardless of whether a custom
+        # coder_prompt_template is configured (issue #72 regression fix).
+        sprint_hint = (
+            f" IMPORTANT: The env var COMMANDER_MERGE_TARGET is set to {sprint_branch!r}."
+            f" Create the feature branch off {sprint_branch!r} by passing"
+            f" --base-branch {sprint_branch!r} to start_feature.py."
+            f" This is SPRINT MODE: do NOT open a PR after pushing —"
+            f" the sprint manager will create the single PR at sprint end."
+        )
+        cmd[-1] = cmd[-1] + sprint_hint
+    if chosen_port is not None:
+        sub_env["COMMANDER_APP_PORT"] = str(chosen_port)
+        print(f"  [port] COMMANDER_APP_PORT={chosen_port} injected into coder env")
 
     try:
         with log_path.open("w") as log_f:
@@ -1111,6 +1365,7 @@ def _dispatch_coder(
                 stdout=log_f,
                 stderr=log_f,
                 cwd=str(cwd_path),
+                env=sub_env,
             )
     except FileNotFoundError:
         # claude CLI not available -- treat as stub success for testing
@@ -1144,15 +1399,22 @@ def _dispatch_coder(
 def _dispatch_tester(
     issue_num: int,
     alert_modes: list[str],
+    sprint_branch: str = "develop",
     repo_name: Optional[str] = None,
     cfg: Optional["SprintConfig"] = None,
+    chosen_port: Optional[int] = None,
 ) -> tuple[int, Optional[str]]:
-    """Dispatch a tester agent.  Returns (exit_code, failure_category_if_hang)."""
+    """Dispatch a tester agent.  Returns (exit_code, failure_category_if_hang).
+
+    When sprint_branch is not 'develop', sets COMMANDER_MERGE_TARGET in the
+    subprocess environment so the tester agent merges the feature branch into
+    the sprint branch instead of develop (AC2, AC4).
+    """
     eff_repo = repo_name or (cfg.repo_name if cfg else None)
     api_url  = cfg.api_url if cfg else None
     cwd_path = cfg.worktree_tester_app if cfg else WORKTESTER_DASHBOARD
 
-    print(f"  Dispatching tester for issue #{issue_num} ...")
+    print(f"  Dispatching tester for issue #{issue_num} ...", flush=True)
     _post_agent_event(f"tester:issue-{issue_num}", api_url=api_url)
 
     log_path = _issue_log_path(issue_num, cfg=cfg)
@@ -1163,17 +1425,49 @@ def _dispatch_tester(
         prompt = cfg.tester_prompt_template.format(issue_url=issue_url)
     else:
         prompt = (
+            f"You are running in autonomous sprint mode. "
             f"Read the issue at https://github.com/{_r(eff_repo)}/issues/{issue_num} "
             "and verify it as a tester following the project's testing workflow. "
-            "Use the BA/coder/tester workflow defined in CLAUDE.md."
+            "Use the BA/coder/tester workflow defined in CLAUDE.md. "
         )
 
+    # Always inject autonomous enforcement — custom templates omit this, so append
+    # unconditionally unless the template already references finish_feature.
+    if "finish_feature" not in prompt:
+        prompt += (
+            " IMPORTANT — autonomous sprint mode: when your verdict is READY_FOR_UAT"
+            f" you MUST immediately run `python3 dashboard/scripts/finish_feature.py --issue {issue_num}`"
+            " from the repo root without asking. The script reads COMMANDER_MERGE_TARGET from its"
+            " own env to pick the merge target — do not override with --target-branch."
+            " Apply the UAT label to the issue automatically via `gh issue edit`."
+            " Do NOT output language like 'let me know if you want me to...' —"
+            " complete the full workflow autonomously including finish_feature.py and label update."
+        )
     cmd = [
         "claude",
+        "--model", "claude-sonnet-4-6",
         "--dangerously-skip-permissions",
         "-p",
         prompt,
     ]
+
+    # Build subprocess environment: inherit current env, set COMMANDER_MERGE_TARGET
+    # when in sprint mode (AC2), and COMMANDER_APP_PORT if a port was chosen (issue #62).
+    sub_env = os.environ.copy()
+    sub_env.pop("ANTHROPIC_API_KEY", None)
+    if sprint_branch not in ("develop",):
+        sub_env["COMMANDER_MERGE_TARGET"] = sprint_branch
+        # Always append sprint-mode instructions regardless of whether a custom
+        # tester_prompt_template is configured (issue #72 regression fix).
+        sprint_hint = (
+            f" IMPORTANT: The env var COMMANDER_MERGE_TARGET is set to {sprint_branch!r}."
+            f" When running finish_feature.py, pass --target-branch {sprint_branch!r}"
+            f" so that the feature branch merges into {sprint_branch!r} instead of develop."
+        )
+        cmd[-1] = cmd[-1] + sprint_hint
+    if chosen_port is not None:
+        sub_env["COMMANDER_APP_PORT"] = str(chosen_port)
+        print(f"  [port] COMMANDER_APP_PORT={chosen_port} injected into tester env")
 
     try:
         with log_path.open("a") as log_f:
@@ -1182,6 +1476,7 @@ def _dispatch_tester(
                 stdout=log_f,
                 stderr=log_f,
                 cwd=str(cwd_path),
+                env=sub_env,
             )
     except FileNotFoundError:
         print("  [tester] claude CLI not found -- stub success")
@@ -1250,6 +1545,17 @@ def generate_sprint_summary(
     pending   = [i for i in state.issues if i.status == "pending"]
 
     total_tokens     = state.total_tokens_in + state.total_tokens_out
+    # cost_estimate: only sprint_review.py uses raw API (Haiku 4.5); coder/tester
+    # run via Claude Code CLI which is subscription-funded (no API charges).
+    # We estimate preflight API cost based on issues reviewed × avg input tokens.
+    # The token split is roughly 95% input (long prompts), 5% output (short JSON).
+    reviewed_issues = len(state.issues)
+    _preflight_in_tokens  = reviewed_issues * 40_000  # TOKENS_PER_ISSUE from sprint_review
+    _preflight_out_tokens = reviewed_issues * 256       # max_tokens per issue call
+    cost_estimate_usd = (
+        _preflight_in_tokens  / 1_000_000 * _HAIKU_INPUT_COST_PER_M
+        + _preflight_out_tokens / 1_000_000 * _HAIKU_OUTPUT_COST_PER_M
+    )
     avg_ticket_secs  = (elapsed_secs / len(completed)) if completed else 0
     avg_h, avg_r     = divmod(int(avg_ticket_secs), 3600)
     avg_m, avg_s     = divmod(avg_r, 60)
@@ -1331,6 +1637,7 @@ def generate_sprint_summary(
         lines.append("")
 
     # -- Stats --
+    cost_str = f"~${cost_estimate_usd:.4f} (preflight API only; coder/tester via Claude Code subscription)"
     lines += [
         "## Stats",
         "",
@@ -1341,6 +1648,7 @@ def generate_sprint_summary(
         f"| Quality-gate pass rate | {gate_pass_rate}% |",
         f"| Tester rejections | {tester_rejections} |",
         f"| Merge conflicts | {merge_conflicts} |",
+        f"| Cost estimate | {cost_str} |",
         "",
     ]
 
@@ -1588,6 +1896,85 @@ def write_sprint_summary(
     return path
 
 
+# ── sprint branch PR creation (AC6, AC7) ─────────────────────────────────────
+
+def _create_sprint_pr(
+    sprint_branch: str,
+    sprint_label: str,
+    sprint_number: Optional[int],
+    state: "SprintState",
+    repo_name: Optional[str] = None,
+) -> Optional[str]:
+    """Create a PR from sprint_branch → develop at the end of a sprint.
+
+    Returns the PR URL string, or None if creation failed (best-effort).
+    """
+    r = _r(repo_name)
+    n = sprint_number if sprint_number is not None else sprint_label
+    shipped = [i for i in state.issues if i.status == "done"]
+
+    ticket_lines = "\n".join(
+        f"- #{i.number} {i.title}" for i in shipped
+    ) or "No tickets shipped."
+
+    skipped = [i for i in state.issues if i.status == "skipped"]
+    skipped_lines = "\n".join(
+        f"- #{i.number} {i.title} ({i.category or 'unknown'})" for i in skipped
+    ) or "None."
+
+    body = (
+        f"## Sprint {n} — auto-generated PR\n\n"
+        f"This PR promotes `{sprint_branch}` into `develop` after all sprint issues "
+        f"have been processed.\n\n"
+        f"### Shipped ({len(shipped)} tickets)\n\n"
+        f"{ticket_lines}\n\n"
+        f"### Skipped / Failed ({len(skipped)} tickets)\n\n"
+        f"{skipped_lines}\n\n"
+        f"### Stats\n\n"
+        f"| Metric | Value |\n"
+        f"|---|---|\n"
+        f"| Total tokens in | {state.total_tokens_in} |\n"
+        f"| Total tokens out | {state.total_tokens_out} |\n"
+        f"| Wall clock | {state.wall_clock_secs:.0f}s |\n\n"
+        f"_Review and merge when UAT is complete._"
+    )
+
+    title = f"Sprint {n} — {len(shipped)} ticket(s) shipped"
+
+    print(f"  Creating PR: {sprint_branch} → develop ...")
+    try:
+        result = subprocess.run(
+            [
+                "gh", "pr", "create",
+                "--repo", r,
+                "--base", "develop",
+                "--head", sprint_branch,
+                "--title", title,
+                "--body", body,
+            ],
+            capture_output=True, text=True, check=False,
+        )
+        if result.returncode == 0:
+            pr_url = result.stdout.strip()
+            print(f"  Sprint PR created: {pr_url}")
+            return pr_url
+        else:
+            stderr = result.stderr.strip()
+            # If a PR already exists for this branch, gh will print its URL in stderr
+            if "already exists" in stderr or "already have" in stderr.lower():
+                # Extract URL from stderr (gh prints "a pull request for branch ... already exists: <url>")
+                m = re.search(r"https://github\.com/\S+", stderr)
+                if m:
+                    pr_url = m.group(0)
+                    print(f"  Sprint PR already exists: {pr_url}")
+                    return pr_url
+            print(f"  Warning: failed to create sprint PR -- {stderr}", file=sys.stderr)
+            return None
+    except Exception as e:
+        print(f"  Warning: exception creating sprint PR -- {e}", file=sys.stderr)
+        return None
+
+
 # -- GitHub issue listing --
 
 def _classify(labels: set[str]) -> str:
@@ -1645,6 +2032,8 @@ def run_sprint(
     retry_failed: bool = False,
     target_branch: Optional[str] = None,
     cfg: Optional["SprintConfig"] = None,
+    preflight_approved: Optional[list[int]] = None,
+    gate_scope: str = "changed",
 ) -> tuple[SprintSummary, SprintState]:
     """Main sprint loop -- processes backlog issues sequentially.
 
@@ -1653,6 +2042,13 @@ def run_sprint(
 
     target_branch: branch to merge feature branches into. Defaults to
     sprint/<label>. Pass 'develop' to restore legacy behaviour.
+
+    preflight_approved: optional list of issue numbers approved by the pre-flight
+    review. When provided, only issues in this list are dispatched; others are
+    skipped with reason 'preflight-skipped'.
+
+    gate_scope: 'changed' (default) scopes pytest/lint gates to files changed
+    relative to the base branch; 'full' restores legacy full-codebase behaviour.
     """
     if alert_modes is None:
         alert_modes = [AlertMode.DASHBOARD_BANNER]
@@ -1745,6 +2141,16 @@ def run_sprint(
         print(f"\n--- Issue #{num}: {title} ---")
         summary.processed.append(f"#{num}")
 
+        # Preflight filter: skip issues not approved by pre-flight review
+        if preflight_approved is not None and num not in preflight_approved:
+            print("  [preflight] skipped by pre-flight review")
+            issue_state.status      = "skipped"
+            issue_state.skip_reason = "preflight-skipped"
+            summary.skipped.append(f"#{num} (preflight-skipped)")
+            state.save(state_path)
+            _post_sprint_status(state, api_url=api_url)
+            continue
+
         if dry_run:
             print("  [dry-run] would dispatch coder + tester")
             issue_state.status = "skipped"
@@ -1754,9 +2160,17 @@ def run_sprint(
             _post_sprint_status(state, api_url=api_url)
             continue
 
+        # -- Port detection (issue #62, AC-5/6/7/8) --
+        chosen_port: Optional[int] = None
+        if cfg is not None and cfg.app_default_port is not None:
+            chosen_port = _detect_port(cfg)
+            if chosen_port is not None:
+                _write_runtime_port(cfg.worktree_coder, chosen_port)
+
         # -- Dispatch coder --
         coder_ok, coder_category = _dispatch_coder(
             num, alert_modes, sprint_branch=target_branch, repo_name=eff_repo, cfg=cfg,
+            chosen_port=chosen_port,
         )
 
         if not coder_ok:
@@ -1782,6 +2196,7 @@ def run_sprint(
         # -- Dispatch tester --
         tester_rc, hang_category = _dispatch_tester(
             num, alert_modes, repo_name=eff_repo, cfg=cfg,
+            chosen_port=chosen_port,
         )
 
         if hang_category == FailureCategory.HANG:
@@ -1804,6 +2219,8 @@ def run_sprint(
             target_branch      = target_branch,
             repo_name          = eff_repo,
             cfg                = cfg,
+            base_branch        = target_branch or "develop",
+            gate_scope         = gate_scope,
         )
         print(f"  {summary_line}")
 
@@ -1919,6 +2336,18 @@ def main() -> None:
         ),
     )
 
+    # Gate scope (AC-9)
+    p.add_argument(
+        "--gate-scope",
+        default="changed",
+        choices=["changed", "full"],
+        help=(
+            "Scope for pytest and lint gates. "
+            "'changed' (default): only check files changed relative to the base branch. "
+            "'full': run pytest -x and ruff check . against the whole codebase (legacy behaviour)."
+        ),
+    )
+
     # Alert modes (AC-3)
     p.add_argument(
         "--alert-mode",
@@ -1926,6 +2355,17 @@ def main() -> None:
         help=(
             "Comma-separated alert modes: "
             "dashboard-banner, email, discord, file, none  (default: dashboard-banner)"
+        ),
+    )
+
+    # Pre-flight review
+    p.add_argument(
+        "--preflight",
+        action="store_true",
+        default=False,
+        help=(
+            "Run sprint_review.py pre-flight BA check before dispatching any issues. "
+            "Aborts the sprint run (exit 1) if the user quits from the prompt."
         ),
     )
 
@@ -1964,19 +2404,36 @@ def main() -> None:
     # --repo flag overrides config (explicit always wins)
     eff_repo = args.repo or (cfg.repo_name if cfg else None)
 
+    # ── Pre-flight review (AC-1 of issue #33) ────────────────────────────────
+    preflight_approved: Optional[list] = None  # None = no preflight, list = approved numbers
+    if args.preflight:
+        from sprint_review import run_preflight  # lazy import — only needed with --preflight
+        sprints_dir = cfg.sprints_dir if cfg else SPRINTS_DIR
+        _all_results, approved = run_preflight(
+            sprint_label = args.label,
+            repo_name    = eff_repo,
+            sprints_dir  = sprints_dir,
+            interactive  = True,
+        )
+        # run_preflight exits(1) if user chose Q — if we reach here, proceed
+        preflight_approved = [r.number for r in approved]
+        print(f"[preflight] Approved {len(preflight_approved)} issue(s) for this run.")
+
     summary, state = run_sprint(
-        label              = args.label,
-        skip_gates         = args.skip_gates,
-        gate_pytest        = args.gate_pytest,
-        gate_lint          = args.gate_lint,
-        gate_merge_preview = args.gate_merge_preview,
-        alert_modes        = alert_modes,
-        repo_name          = eff_repo,
-        dry_run            = args.dry_run,
-        resume             = args.resume,
-        retry_failed       = args.retry_failed,
-        target_branch      = args.target_branch,
-        cfg                = cfg,
+        label                = args.label,
+        skip_gates           = args.skip_gates,
+        gate_pytest          = args.gate_pytest,
+        gate_lint            = args.gate_lint,
+        gate_merge_preview   = args.gate_merge_preview,
+        alert_modes          = alert_modes,
+        repo_name            = eff_repo,
+        dry_run              = args.dry_run,
+        resume               = args.resume,
+        retry_failed         = args.retry_failed,
+        target_branch        = args.target_branch,
+        cfg                  = cfg,
+        preflight_approved   = preflight_approved,
+        gate_scope           = args.gate_scope,
     )
 
     # Derive sprint_branch for summary (mirrors run_sprint logic)
@@ -1998,6 +2455,23 @@ def main() -> None:
     else:
         summary_path = None
 
+    # AC6, AC7: auto-create PR sprint/sprint-N → develop at sprint end,
+    # but only when we were running in sprint-branch mode (not manual 'develop' override)
+    sprint_pr_url: Optional[str] = None
+    if (
+        state.issues
+        and not args.dry_run
+        and effective_target != "develop"
+        and effective_target == sprint_branch  # only for auto sprint branches, not custom --target-branch
+    ):
+        sprint_pr_url = _create_sprint_pr(
+            sprint_branch  = effective_target,
+            sprint_label   = args.label,
+            sprint_number  = _sprint_number(args.label),
+            state          = state,
+            repo_name      = eff_repo,
+        )
+
     print("\n=== Sprint Summary ===")
     print(f"Processed: {', '.join(summary.processed) or 'none'}")
     print(f"Merged:    {', '.join(summary.merged) or 'none'}")
@@ -2009,6 +2483,8 @@ def main() -> None:
         print(f"Skipped:   {', '.join(summary.skipped)}")
     if summary_path:
         print(f"Summary:   {summary_path}")
+    if sprint_pr_url:
+        print(f"Sprint PR: {sprint_pr_url}")
 
 
 if __name__ == "__main__":

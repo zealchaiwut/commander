@@ -1,28 +1,44 @@
 #!/usr/bin/env bash
-# start_uat.sh — Start the UAT dashboard on port 8001 using ~/commander/dashboard-uat (develop branch).
+# start_uat.sh — Start the UAT dashboard on port 8001.
 #
-# Writes a PID file to ~/commander/dashboard-uat/dashboard/uat.pid.
-# Logs are written to ~/commander/dashboard-uat/dashboard/uat.log.
+# UAT_DIR is derived from this script's location via three-level directory
+# traversal (no git commands):
+#   SCRIPT_DIR   = <project-dir>/prd/dashboard/scripts/
+#   DASHBOARD_DIR= <project-dir>/prd/dashboard/
+#   REPO_ROOT    = <project-dir>/prd/
+#   PROJECT_DIR  = <project-dir>/
+#   UAT_DIR      = <project-dir>/uat/dashboard
+#
+# Standard layout:
+#   ~/dev/commander/               ← PROJECT_DIR
+#     prd/                         ← PRD clone (REPO_ROOT)
+#       dashboard/                 ← DASHBOARD_DIR
+#         scripts/                 ← SCRIPT_DIR (this script lives here)
+#     uat/
+#       dashboard/                 ← UAT_DIR
+#
+# Writes a PID file to <UAT_DIR>/uat.pid.
+# Logs are written to <UAT_DIR>/uat.log.
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DASHBOARD_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-COMMANDER_ROOT="$(cd "$DASHBOARD_DIR/.." && pwd)"
+REPO_ROOT="$(cd "$DASHBOARD_DIR/.." && pwd)"
+PROJECT_DIR="$(cd "$REPO_ROOT/.." && pwd)"
 
-UAT_DIR="$COMMANDER_ROOT/dashboard-uat"
-UAT_DASHBOARD="$UAT_DIR/dashboard"
-VENV="$UAT_DASHBOARD/venv"
-PID_FILE="$UAT_DASHBOARD/uat.pid"
-LOG_FILE="$UAT_DASHBOARD/uat.log"
+UAT_DIR="$PROJECT_DIR/uat/dashboard"
+VENV="$UAT_DIR/venv"
+PID_FILE="$UAT_DIR/uat.pid"
+LOG_FILE="$UAT_DIR/uat.log"
 PORT=8001
 
 echo "=== Starting UAT dashboard (port $PORT) ==="
 
 # ── Sanity checks ─────────────────────────────────────────────────────────────
 if [ ! -d "$UAT_DIR" ]; then
-    echo "ERROR: UAT directory not found: $UAT_DIR"
-    echo "Run setup_uat_env.sh first."
+    echo "ERROR: UAT directory not found at $UAT_DIR. Create it via:"
+    echo "  cd $PROJECT_DIR && git clone https://github.com/zealchaiwut/commander.git uat && cd uat && git checkout develop"
     exit 1
 fi
 
@@ -44,7 +60,7 @@ if [ -f "$PID_FILE" ]; then
 fi
 
 # ── Launch uvicorn in background ──────────────────────────────────────────────
-cd "$UAT_DASHBOARD"
+cd "$UAT_DIR"
 ENVIRONMENT=uat "$VENV/bin/uvicorn" server:app --host 0.0.0.0 --port "$PORT" \
     >> "$LOG_FILE" 2>&1 &
 

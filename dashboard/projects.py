@@ -13,6 +13,9 @@ from typing import Optional
 import db
 import github_client
 
+# Base directory for commander worktrees (can be overridden via env var for testing)
+_COMMANDER_BASE = Path(os.environ.get("COMMANDER_BASE", Path.home() / "commander"))
+
 PROJECTS_FILE = Path(__file__).parent / "projects.json"
 SPRINT_RE = re.compile(r"^sprint-(\d+)$")
 
@@ -196,6 +199,48 @@ def _cost_usd(input_tokens: int, output_tokens: int) -> float:
     )
 
 
+# ── port detection helpers (issue #62) ────────────────────────────────────────
+
+def _read_runtime_port(worktree_path: Path) -> Optional[int]:
+    """Read <worktree>/.commander/runtime/port and return the port as int, or None.
+
+    AC-9: Returns None when the file does not exist (non-server project).
+    """
+    port_file = worktree_path / ".commander" / "runtime" / "port"
+    if not port_file.exists():
+        return None
+    try:
+        return int(port_file.read_text(encoding="utf-8").strip())
+    except (ValueError, OSError):
+        return None
+
+
+def _worktree_path_for_repo(repo: str) -> Optional[Path]:
+    """Guess the coder worktree path for a given repo.
+
+    Looks for the most recently written .commander/runtime/port across
+    known worktree names (work-coder, coder) under COMMANDER_BASE.
+    Returns the first matching worktree directory that contains the runtime
+    port file, or None.
+
+    The worktree layout expected:
+        ~/commander/work-coder/.commander/runtime/port
+        ~/commander/coder/.commander/runtime/port
+    """
+    repo_slug = repo.split("/")[-1].lower()
+    candidates = [
+        _COMMANDER_BASE / "work-coder",
+        _COMMANDER_BASE / "coder",
+        _COMMANDER_BASE / f"work-{repo_slug}",
+        _COMMANDER_BASE / repo_slug,
+    ]
+    for candidate in candidates:
+        port_file = candidate / ".commander" / "runtime" / "port"
+        if port_file.exists():
+            return candidate
+    return None
+
+
 # ── public API ────────────────────────────────────────────────────────────────
 
 def add_project(repo: str, icon: str = "ti-folder", color: str = "gray") -> dict:
@@ -257,21 +302,24 @@ def get_all_projects(agents: list[dict]) -> dict:
         sprint_num  = max((int(k) for k in as_map), default=None)
         sprint_info = as_map.get(str(sprint_num)) if sprint_num else None
 
-        issues: list[dict] = []
+        # Always fetch all open issues for accurate open-ticket count
+        all_open: list[dict] = []
+        try:
+            all_open = github_client.list_open_issues(repo_name=repo, limit=200)
+        except Exception:
+            pass
+
+        # For sprint-specific metrics (progress, ETA), fetch sprint-scoped issues
+        sprint_issues: list[dict] = []
         if sprint_num:
             try:
-                issues = github_client.list_issues(sprint_num, repo_name=repo)
-            except Exception:
-                pass
-        else:
-            try:
-                issues = github_client.list_open_issues(repo_name=repo, limit=100)
+                sprint_issues = github_client.list_issues(sprint_num, repo_name=repo)
             except Exception:
                 pass
 
-        open_i   = [i for i in issues if i.get("state") == "open"]
+        open_i   = all_open  # all open issues for this repo
         active_i = [i for i in open_i if _ticket_status(i) in ("in-progress", "SIT", "UAT")]
-        uat_i    = [i for i in issues if any(l["name"] == "UAT" for l in i.get("labels", []))]
+        uat_i    = [i for i in open_i if any(l["name"] == "UAT" for l in i.get("labels", []))]
 
         if sprint_num and open_i:
             active_sprint_set.add(f"{repo}:sprint-{sprint_num}")
@@ -280,27 +328,34 @@ def get_all_projects(agents: list[dict]) -> dict:
         total_active += len(active_i)
         total_uat    += len(uat_i)
 
-        eta      = _compute_eta(issues, sprint_info)
-        progress = _compute_progress(issues)
+        # ETA and progress are sprint-scoped; only meaningful when a sprint is active
+        eta      = _compute_eta(sprint_issues, sprint_info) if sprint_num else {"value": "TBD", "sub": "no active sprint", "status": "idle"}
+        progress = _compute_progress(sprint_issues) if sprint_num else {"closed": 0, "total": 0, "pct": 0}
         proj_agents = _project_agents(proj, agents)
 
+        # AC-9: read app_port from runtime/port file in the coder worktree
+        worktree = _worktree_path_for_repo(repo)
+        app_port = _read_runtime_port(worktree) if worktree else None
+
         result.append({
-            "repo":          repo,
-            "id":            _repo_id(repo),
-            "name":          proj.get("name", repo.split("/")[-1]),
-            "icon":          proj.get("icon", "ti-folder"),
-            "color":         _color_hex(proj),
-            "current_sprint": sprint_num,
-            "sprint_theme":  (sprint_info or {}).get("theme", ""),
-            "progress":      progress,
-            "bar_status":    _bar_status(sprint_info, eta["status"]),
-            "eta":           eta,
-            "agents":        [
+            "repo":             repo,
+            "id":               _repo_id(repo),
+            "name":             proj.get("name", repo.split("/")[-1]),
+            "icon":             proj.get("icon", "ti-folder"),
+            "color":            _color_hex(proj),
+            "current_sprint":   sprint_num,
+            "sprint_theme":     (sprint_info or {}).get("theme", ""),
+            "has_active_sprint": sprint_num is not None,
+            "progress":         progress,
+            "bar_status":       _bar_status(sprint_info, eta["status"]) if sprint_num else "idle",
+            "eta":              eta,
+            "agents":           [
                 {"name": a["name"], "status": a["status"], "session_id": a["session_id"]}
                 for a in proj_agents
             ],
             "uatCount":  len(uat_i),
             "openCount": len(open_i),
+            "app_port":  app_port,
         })
 
     working_agents = sum(1 for a in agents if a.get("status") == "working")
@@ -331,26 +386,18 @@ def get_project_details(repo: str, agents: list[dict]) -> dict:
     as_map     = proj.get("active_sprints", {})
     sprint_num = max((int(k) for k in as_map), default=None)
 
-    issues: list[dict] = []
-    if sprint_num:
-        try:
-            issues = github_client.list_issues(sprint_num, repo_name=repo)
-        except Exception:
-            pass
+    # Always fetch all open issues (no sprint filter) — sorted by status priority then updatedAt
+    try:
+        all_open = github_client.list_open_issues(repo_name=repo, limit=100)
+    except Exception:
+        all_open = []
 
-    # Sort by updatedAt desc; show open tickets first (up to 5)
-    open_issues = sorted(
-        [i for i in issues if i.get("state") == "open"],
-        key=lambda i: i.get("updatedAt", ""), reverse=True
-    )[:5]
-
-    # For no-sprint projects, fall back to all open issues
-    if not sprint_num:
-        try:
-            all_open = github_client.list_open_issues(repo_name=repo, limit=20)
-            open_issues = sorted(all_open, key=lambda i: i.get("updatedAt", ""), reverse=True)[:5]
-        except Exception:
-            pass
+    # Sort by status priority (SIT > UAT > in-progress > blocked > backlog),
+    # then most-recently-updated first within each group.
+    # Python's sort is stable: sort by updatedAt desc first, then by priority asc.
+    _status_order = {"SIT": 0, "UAT": 1, "in-progress": 2, "blocked": 3, "backlog": 4}
+    open_issues = sorted(all_open, key=lambda i: i.get("updatedAt") or "", reverse=True)
+    open_issues = sorted(open_issues, key=lambda i: _status_order.get(_ticket_status(i), 99))
 
     feature_branches: dict[int, str] = {}
     try:

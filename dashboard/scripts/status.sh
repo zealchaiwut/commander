@@ -6,10 +6,10 @@ set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DASHBOARD_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-COMMANDER_ROOT="$(cd "$DASHBOARD_DIR/.." && pwd)"
+REPO_ROOT="$(cd "$DASHBOARD_DIR/.." && pwd)"
+PROJECT_DIR="$(cd "$REPO_ROOT/.." && pwd)"
 
-PRD_DIR="$DASHBOARD_DIR"
-UAT_DIR="$COMMANDER_ROOT/dashboard-uat"
+UAT_DIR="$PROJECT_DIR/uat/dashboard"
 
 _status_port() {
     local port="$1"
@@ -48,6 +48,13 @@ _status_port() {
 }
 
 echo "=== Commander server status ==="
-_status_port 8000 "PRD" "$PRD_DIR"      "$PRD_DIR/prd.pid"
-_status_port 8001 "UAT" "$UAT_DIR"      "$UAT_DIR/dashboard/uat.pid"
+_status_port 8000 "PRD" "$DASHBOARD_DIR"      "$DASHBOARD_DIR/prd.pid"
+
+if [ ! -d "$UAT_DIR" ]; then
+    printf "%-6s (port %s): " "UAT" "8001"
+    echo "NOT CONFIGURED (UAT directory not found at $UAT_DIR)"
+    echo "  Create it via: cd $PROJECT_DIR && git clone https://github.com/zealchaiwut/commander.git uat && cd uat && git checkout develop"
+else
+    _status_port 8001 "UAT" "$UAT_DIR"      "$UAT_DIR/uat.pid"
+fi
 echo "================================"

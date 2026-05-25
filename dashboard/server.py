@@ -105,6 +105,8 @@ class TokenUsageEvent(BaseModel):
     working_dir:   str = "unknown"
     input_tokens:  int = 0
     output_tokens: int = 0
+    agent_role:    Optional[str] = None
+    model_name:    Optional[str] = None
 
 
 class RejectBody(BaseModel):
@@ -181,9 +183,37 @@ async def receive_token_usage(event: TokenUsageEvent):
         return {"ok": True}
     project = Path(event.working_dir).name if event.working_dir != "unknown" else "unknown"
     session_id = event.session_id or "unknown"
-    db.record_token_usage(session_id, project, event.input_tokens, event.output_tokens)
+    db.record_token_usage(
+        session_id,
+        project,
+        event.input_tokens,
+        event.output_tokens,
+        agent_role=event.agent_role,
+        model_name=event.model_name,
+    )
     await broadcast({"type": "update", "event": event.model_dump()})
     return {"ok": True}
+
+
+@app.get("/api/debug/token-usage/by-agent-model")
+def debug_token_usage_by_agent_model(since: Optional[str] = None):
+    """Return token usage grouped by agent_role and model_name.
+
+    Useful for auditing which agents/models are consuming tokens.
+    Optional query param: since=<ISO-8601> to restrict to a time window.
+    """
+    return db.get_token_usage_by_agent_model(window_start_utc=since)
+
+
+@app.get("/api/debug/token-usage")
+def debug_token_usage():
+    """AC-2: Diagnostic endpoint for the token_usage pipeline.
+
+    Returns row_count (int), latest_recorded_at (ISO-8601 or null),
+    and tokens_today (int) so operators can confirm pipeline health
+    without querying SQLite directly.
+    """
+    return db.get_debug_token_usage()
 
 
 @app.get("/api/agents")
@@ -194,6 +224,23 @@ def list_agents():
 @app.get("/api/events")
 def list_events():
     return db.get_recent_events()
+
+
+@app.delete("/api/events/test")
+def clear_test_events():
+    """Remove test/debug events and agents from the database and clear test alerts from memory."""
+    events_deleted = db.delete_test_events()
+    agents_deleted = db.delete_test_agents()
+    # Also purge in-memory test alerts (patterns: 'test_', 'Test-', 'Test alert')
+    import re as _re
+    _test_pat = _re.compile(r"(test_|Test-|Test alert|\[CRASH\])", _re.IGNORECASE)
+    before = len(_alerts)
+    _alerts[:] = [
+        a for a in _alerts
+        if not (_test_pat.search(a.get("title", "")) or _test_pat.search(a.get("body", "")))
+    ]
+    alerts_cleared = before - len(_alerts)
+    return {"ok": True, "events_deleted": events_deleted, "agents_deleted": agents_deleted, "alerts_cleared": alerts_cleared}
 
 
 @app.get("/events")
@@ -248,8 +295,10 @@ def get_sprints():
 
 
 @app.get("/api/issues")
-def get_issues(sprint: int):
+def get_issues(sprint: Optional[int] = None):
     try:
+        if sprint is None:
+            return github_client.list_all_open_issues()
         return github_client.list_issues(sprint)
     except subprocess.CalledProcessError as e:
         raise _gh_error(e)

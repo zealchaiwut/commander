@@ -74,9 +74,17 @@ def init_db():
                 project       TEXT NOT NULL,
                 input_tokens  INTEGER NOT NULL,
                 output_tokens INTEGER NOT NULL,
-                recorded_at   TEXT NOT NULL
+                recorded_at   TEXT NOT NULL,
+                agent_role    TEXT,
+                model_name    TEXT
             )
         """)
+        # Migrate existing token_usage tables that lack the new columns (backward compat)
+        for col, coltype in [("agent_role", "TEXT"), ("model_name", "TEXT")]:
+            try:
+                conn.execute(f"ALTER TABLE token_usage ADD COLUMN {col} {coltype}")
+            except Exception:
+                pass  # column already exists — ignore
         conn.commit()
 
 
@@ -154,15 +162,21 @@ def get_recent_events(limit: int = 50) -> list[dict]:
 
 # ── Token usage ───────────────────────────────────────────────────────────────
 
-def record_token_usage(session_id: str, project: str,
-                       input_tokens: int, output_tokens: int) -> None:
+def record_token_usage(
+    session_id: str,
+    project: str,
+    input_tokens: int,
+    output_tokens: int,
+    agent_role: str | None = None,
+    model_name: str | None = None,
+) -> None:
     now = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S")
     with get_conn() as conn:
         conn.execute(
             """INSERT INTO token_usage
-               (session_id, project, input_tokens, output_tokens, recorded_at)
-               VALUES (?, ?, ?, ?, ?)""",
-            (session_id, project, input_tokens, output_tokens, now),
+               (session_id, project, input_tokens, output_tokens, recorded_at, agent_role, model_name)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (session_id, project, input_tokens, output_tokens, now, agent_role, model_name),
         )
         conn.commit()
 
@@ -202,6 +216,44 @@ def get_window_usage(window_start_utc: str) -> int:
     return int(row["total"])
 
 
+def delete_test_events() -> int:
+    """Delete events whose session_id or data looks like a test/debug entry.
+
+    Matches patterns: session_id starting with 'test_' or 'Test-', or
+    event_type == 'test', or data containing 'Test alert' or 'Test-'.
+    Returns the count of rows deleted.
+    """
+    with get_conn() as conn:
+        cur = conn.execute(
+            """DELETE FROM events WHERE
+               session_id LIKE 'test_%'
+               OR session_id LIKE 'Test-%'
+               OR event_type = 'test'
+               OR data LIKE '%Test alert%'
+               OR data LIKE '%Test-%'
+               OR data LIKE '%-test-%'""",
+        )
+        conn.commit()
+        return cur.rowcount
+
+
+def delete_test_agents() -> int:
+    """Delete agents whose session_id or name looks like a test/debug entry.
+
+    Returns the count of rows deleted.
+    """
+    with get_conn() as conn:
+        cur = conn.execute(
+            """DELETE FROM agents WHERE
+               session_id LIKE 'test_%'
+               OR session_id LIKE 'Test-%'
+               OR name LIKE 'test_%'
+               OR name LIKE 'Test-%'""",
+        )
+        conn.commit()
+        return cur.rowcount
+
+
 def get_tokens_today(project: str | None = None) -> dict:
     """Return total input_tokens, output_tokens since midnight Asia/Bangkok.
 
@@ -227,3 +279,59 @@ def get_tokens_today(project: str | None = None) -> dict:
                 (cutoff,),
             ).fetchone()
     return {"input_tokens": row["inp"], "output_tokens": row["out"]}
+
+
+def get_token_usage_by_agent_model(window_start_utc: str | None = None) -> list[dict]:
+    """Return token usage grouped by agent_role and model_name.
+
+    Each row contains agent_role, model_name, total_input, total_output, total_tokens.
+    If window_start_utc is provided, restricts to rows recorded on or after that timestamp.
+    Rows without agent_role or model_name are grouped as 'unknown'.
+    """
+    cutoff_clause = "WHERE recorded_at >= ?" if window_start_utc else ""
+    params = (window_start_utc,) if window_start_utc else ()
+    with get_conn() as conn:
+        rows = conn.execute(
+            f"""SELECT
+                  COALESCE(agent_role, 'unknown') AS agent_role,
+                  COALESCE(model_name, 'unknown') AS model_name,
+                  COALESCE(SUM(input_tokens), 0)  AS total_input,
+                  COALESCE(SUM(output_tokens), 0) AS total_output,
+                  COALESCE(SUM(input_tokens + output_tokens), 0) AS total_tokens
+               FROM token_usage
+               {cutoff_clause}
+               GROUP BY agent_role, model_name
+               ORDER BY total_tokens DESC""",
+            params,
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_debug_token_usage() -> dict:
+    """Return diagnostic info about the token_usage table.
+
+    Returns:
+        row_count        — total number of rows in token_usage
+        latest_recorded_at — ISO-8601 string of the most recent recorded_at, or None
+        tokens_today     — total tokens (input + output) since Bangkok midnight
+    """
+    cutoff = _bkk_midnight_utc()
+    with get_conn() as conn:
+        count_row = conn.execute(
+            "SELECT COUNT(*) AS cnt FROM token_usage"
+        ).fetchone()
+        latest_row = conn.execute(
+            "SELECT MAX(recorded_at) AS ts FROM token_usage"
+        ).fetchone()
+        today_row = conn.execute(
+            """SELECT COALESCE(SUM(input_tokens + output_tokens), 0) AS total
+               FROM token_usage
+               WHERE recorded_at >= ?""",
+            (cutoff,),
+        ).fetchone()
+
+    return {
+        "row_count":          int(count_row["cnt"]),
+        "latest_recorded_at": latest_row["ts"] if latest_row and latest_row["ts"] else None,
+        "tokens_today":       int(today_row["total"]),
+    }

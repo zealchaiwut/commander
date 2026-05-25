@@ -89,7 +89,7 @@ class TestFrontendGroupedHeaders:
         )
 
     def test_app_js_renders_sit_uat_others_groups(self):
-        """app.js renderExpandPanel must group tickets into SIT, UAT, Others."""
+        """app.js renderExpandPanel must group tickets into SIT, UAT, In progress, Backlog."""
         content = APP_JS.read_text()
         assert "'SIT'" in content or '"SIT"' in content, (
             "app.js must reference the 'SIT' group label"
@@ -97,8 +97,9 @@ class TestFrontendGroupedHeaders:
         assert "'UAT'" in content or '"UAT"' in content, (
             "app.js must reference the 'UAT' group label"
         )
-        assert "'Others'" in content or '"Others"' in content, (
-            "app.js must reference the 'Others' group label"
+        # Issue #53: 'Others' was replaced with 'In progress' and 'Backlog' for clearer grouping
+        assert "'In progress'" in content or '"In progress"' in content or "'Backlog'" in content or '"Backlog"' in content, (
+            "app.js must reference 'In progress' and/or 'Backlog' group labels (replaced 'Others')"
         )
 
     def test_app_js_group_header_format(self):

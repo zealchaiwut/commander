@@ -1,7 +1,25 @@
 #!/usr/bin/env bash
-# setup_uat_env.sh — Clones the repo into ~/commander/dashboard-uat, checks out
-# develop, installs a Python venv, writes .env, configures .claude/settings.json
-# with the UAT hook target, and initialises the UAT database.
+# setup_uat_env.sh — Clones the repo into <commander-root>/uat, checks
+# out develop, installs a Python venv, writes .env, configures
+# .claude/settings.json with the UAT hook target, and initialises the UAT
+# database.
+#
+# Paths are derived from this script's location via three-level directory
+# traversal (no git commands):
+#   SCRIPT_DIR   = <project-dir>/prd/dashboard/scripts/
+#   DASHBOARD_DIR= <project-dir>/prd/dashboard/
+#   REPO_ROOT    = <project-dir>/prd/
+#   PROJECT_DIR  = <project-dir>/
+#   UAT_DIR      = <project-dir>/uat
+#   UAT_DASHBOARD= <project-dir>/uat/dashboard
+#
+# Standard layout:
+#   ~/dev/commander/               ← PROJECT_DIR
+#     prd/                         ← PRD clone (REPO_ROOT)
+#       dashboard/                 ← DASHBOARD_DIR
+#         scripts/                 ← SCRIPT_DIR (this script lives here)
+#     uat/                         ← UAT_DIR (UAT clone, develop branch)
+#       dashboard/                 ← UAT_DASHBOARD
 #
 # Run this once to set up the UAT environment.  Safe to re-run (idempotent).
 
@@ -9,10 +27,11 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DASHBOARD_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-COMMANDER_ROOT="$(cd "$DASHBOARD_DIR/.." && pwd)"
+REPO_ROOT="$(cd "$DASHBOARD_DIR/.." && pwd)"
+PROJECT_DIR="$(cd "$REPO_ROOT/.." && pwd)"
 
 REPO_URL="https://github.com/zealchaiwut/commander.git"
-UAT_DIR="$COMMANDER_ROOT/dashboard-uat"
+UAT_DIR="$PROJECT_DIR/uat"
 UAT_DASHBOARD="$UAT_DIR/dashboard"
 
 echo "=== Commander UAT environment setup ==="

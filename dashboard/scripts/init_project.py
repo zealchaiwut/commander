@@ -11,23 +11,32 @@ Usage:
             [--projects-dir ~/dev]      # default: ~/dev
             [--tester-app-subdir ""]    # default: "" (no subdir)
             [--skip-uat]               # skip UAT clone creation (sets uat.enabled: false)
+            [--nested]                 # use nested layout (main/, coder/, tester/ under project root)
 
     python3 scripts/init_project.py --rollback <repo-name>
             [--confirm-delete]          # required to also delete the GitHub repo
             [--owner <owner>]
 
 Onboards a new project in 11 sequential steps:
-  1. Create ~/dev/<project>/ (git init, README, .gitignore, first commit, gh repo create, push)
-  2. Create and push develop branch
-  3. Create standard GitHub labels
-  4. Clone repo into ~/dev/<project>-coder and ~/dev/<project>-tester; checkout develop
-  4b. Clone repo into ~/dev/<project>/uat/; checkout develop (skipped with --skip-uat)
-  5. Write <project>/.commander/sprint.yaml; create log dirs; commit + push
-  6. Register project in dashboard/projects.json via projects_module.add_project()
-  7. Append repo to TRACKED_REPOS env var if in use
-  8. Restart PRD dashboard via scripts/stop_all.sh prd + scripts/start_prd.sh
-  9. Verify via GET /api/projects that the new project appears
- 10. Print "ready" summary with repo URL and next-step instructions
+  Flat layout (default):
+    1. Create ~/dev/<project>/ (git init, README, .gitignore, first commit, gh repo create, push)
+    4. Clone repo into ~/dev/<project>-coder and ~/dev/<project>-tester; checkout develop
+    5. Write <project>/.commander/sprint.yaml (inside the main clone)
+
+  Nested layout (--nested):
+    1. Create ~/dev/<project>/main/ (git init inside nested dir, push)
+    4. Clone repo into ~/dev/<project>/coder/ and ~/dev/<project>/tester/
+    5. Write ~/dev/<project>/.commander/sprint.yaml (at project root, outside any clone)
+
+  Common steps (both layouts):
+    2. Create and push develop branch
+    3. Create standard GitHub labels
+    4b. Clone repo into <main>/uat/; checkout develop (skipped with --skip-uat)
+    6. Register project in dashboard/projects.json
+    7. Append repo to TRACKED_REPOS env var if in use
+    8. Restart PRD dashboard via scripts/stop_all.sh prd + scripts/start_prd.sh
+    9. Verify via GET /api/projects that the new project appears
+   10. Print "ready" summary with repo URL and next-step instructions
 """
 
 import argparse
@@ -195,8 +204,8 @@ def _get_api_url() -> str:
 
 # ── Pre-flight ─────────────────────────────────────────────────────────────────
 
-def preflight(owner: str, repo_name: str, projects_dir: Path) -> None:
-    """AC1: Validate environment before creating anything."""
+def preflight(owner: str, repo_name: str, projects_dir: Path, nested: bool = False) -> None:
+    """Validate environment before creating anything."""
     errors = []
 
     # gh authenticated?
@@ -229,10 +238,25 @@ def preflight(owner: str, repo_name: str, projects_dir: Path) -> None:
 
 # ── Step implementations ───────────────────────────────────────────────────────
 
-def step1_init_repo(owner: str, repo_name: str, projects_dir: Path, visibility: str) -> Path:
-    """AC3: Create local repo + push to GitHub."""
-    repo_dir = projects_dir / repo_name
+def step1_init_repo(
+    owner: str,
+    repo_name: str,
+    projects_dir: Path,
+    visibility: str,
+    nested: bool = False,
+) -> Path:
+    """Create local repo + push to GitHub.
+
+    Flat layout:  repo lives at projects_dir/repo_name/
+    Nested layout: repo lives at projects_dir/repo_name/main/
+    Returns the path of the git working directory (main clone).
+    """
     full_repo = f"{owner}/{repo_name}"
+    if nested:
+        project_root = projects_dir / repo_name
+        repo_dir = project_root / "main"
+    else:
+        repo_dir = projects_dir / repo_name
 
     if repo_dir.exists():
         info(f"already exists — skipping")
@@ -313,26 +337,44 @@ def step3_labels(owner: str, repo_name: str) -> None:
             info(f"label '{label_name}' skipped ({err})")
 
 
-def step4_clones(owner: str, repo_name: str, projects_dir: Path) -> None:
-    """AC6: Clone repo into <project>-coder and <project>-tester worktrees."""
+def step4_clones(
+    owner: str,
+    repo_name: str,
+    projects_dir: Path,
+    nested: bool = False,
+) -> tuple[Path, Path]:
+    """Clone repo into coder and tester worktrees.
+
+    Flat layout:   ~/dev/<project>-coder/  and  ~/dev/<project>-tester/
+    Nested layout: ~/dev/<project>/coder/  and  ~/dev/<project>/tester/
+
+    Returns (coder_dir, tester_dir).
+    """
     full_repo = f"{owner}/{repo_name}"
     repo_url = f"https://github.com/{full_repo}.git"
 
-    for suffix in ("coder", "tester"):
-        clone_dir = projects_dir / f"{repo_name}-{suffix}"
+    if nested:
+        project_root = projects_dir / repo_name
+        coder_dir  = project_root / "coder"
+        tester_dir = project_root / "tester"
+    else:
+        coder_dir  = projects_dir / f"{repo_name}-coder"
+        tester_dir = projects_dir / f"{repo_name}-tester"
+
+    for clone_dir in (coder_dir, tester_dir):
         if clone_dir.exists():
             info(f"{clone_dir} already exists — skipping")
             continue
 
         _run("git", "clone", repo_url, str(clone_dir))
-        # Checkout develop
         ok, _, _ = _try_run("git", "checkout", "develop", cwd=clone_dir)
         if not ok:
-            # develop might need to be fetched
             _run("git", "fetch", "origin", cwd=clone_dir)
             _try_run("git", "checkout", "--track", "origin/develop", cwd=clone_dir)
 
         info(f"cloned into {clone_dir}")
+
+    return coder_dir, tester_dir
 
 
 def step4b_uat_clone(
@@ -396,12 +438,24 @@ def step5_sprint_config(
     prd_port: int = DEFAULT_PRD_PORT,
     uat_port: int = DEFAULT_UAT_PORT,
     port_strategy: str = "prefer_default",
+    nested: bool = False,
+    coder_dir: Optional[Path] = None,
+    tester_dir: Optional[Path] = None,
 ) -> None:
-    """AC5/AC7: Write .commander/sprint.yaml with project-specific fields only.
+    """Write .commander/sprint.yaml with project-specific fields.
 
-    Includes a uat: section (AC5). Sets uat.enabled: false when skip_uat=True (AC6).
+    Flat layout:   .commander/ lives inside the main clone (repo_dir/.commander/)
+    Nested layout: .commander/ lives at the project root (projects_dir/repo_name/.commander/)
+                   outside any git clone, so it is never accidentally committed.
+
+    Sets uat.enabled: false when skip_uat=True.
     """
-    commander_dir = repo_dir / ".commander"
+    if nested:
+        # .commander at project root, outside the main/ clone
+        commander_dir = projects_dir / repo_name / ".commander"
+    else:
+        commander_dir = repo_dir / ".commander"
+
     sprint_yaml_path = commander_dir / "sprint.yaml"
 
     if sprint_yaml_path.exists():
@@ -410,16 +464,18 @@ def step5_sprint_config(
 
     commander_dir.mkdir(parents=True, exist_ok=True)
 
-    # Create subdirectories
     for subdir in ("logs", "sprints", "alerts"):
         (commander_dir / subdir).mkdir(parents=True, exist_ok=True)
         (commander_dir / subdir / ".gitkeep").touch()
 
-    coder_dir = projects_dir / f"{repo_name}-coder"
-    tester_dir = projects_dir / f"{repo_name}-tester"
+    # Resolve worktree paths
+    if coder_dir is None:
+        coder_dir = projects_dir / f"{repo_name}-coder"
+    if tester_dir is None:
+        tester_dir = projects_dir / f"{repo_name}-tester"
+
     uat_dir = repo_dir / "uat"
     db_filename = f"{repo_name}-uat.db"
-
     uat_enabled = "false" if skip_uat else "true"
 
     sprint_yaml_content = f"""repo_name: {owner}/{repo_name}
@@ -454,22 +510,30 @@ agents:
 """
     sprint_yaml_path.write_text(sprint_yaml_content)
 
-    # Update .gitignore to exclude .commander/logs/, sprints/, alerts/ contents but keep dirs
-    gitignore_path = repo_dir / ".gitignore"
-    gitignore_additions = "\n# Commander runtime dirs\n.commander/logs/*\n!.commander/logs/.gitkeep\n.commander/sprints/*\n!.commander/sprints/.gitkeep\n.commander/alerts/*\n!.commander/alerts/.gitkeep\n"
-    if gitignore_path.exists():
-        existing = gitignore_path.read_text()
-        if ".commander/logs/" not in existing:
-            gitignore_path.write_text(existing + gitignore_additions)
+    if nested:
+        # .commander is at the project root (not inside a git repo), so no git
+        # commit is needed here. Just log the location.
+        info(f"written {sprint_yaml_path} (at project root, outside git clones)")
     else:
-        gitignore_path.write_text(gitignore_additions)
+        # Update .gitignore inside the main clone to exclude runtime dirs
+        gitignore_path = repo_dir / ".gitignore"
+        gitignore_additions = (
+            "\n# Commander runtime dirs\n"
+            ".commander/logs/*\n!.commander/logs/.gitkeep\n"
+            ".commander/sprints/*\n!.commander/sprints/.gitkeep\n"
+            ".commander/alerts/*\n!.commander/alerts/.gitkeep\n"
+        )
+        if gitignore_path.exists():
+            existing = gitignore_path.read_text()
+            if ".commander/logs/" not in existing:
+                gitignore_path.write_text(existing + gitignore_additions)
+        else:
+            gitignore_path.write_text(gitignore_additions)
 
-    # Commit and push
-    _run("git", "add", ".commander", ".gitignore", cwd=repo_dir)
-    _run("git", "commit", "-m", "chore: add .commander sprint config", cwd=repo_dir)
-    _run("git", "push", "origin", "HEAD", cwd=repo_dir)
-
-    info(f"written and pushed .commander/sprint.yaml")
+        _run("git", "add", ".commander", ".gitignore", cwd=repo_dir)
+        _run("git", "commit", "-m", "chore: add .commander sprint config", cwd=repo_dir)
+        _run("git", "push", "origin", "HEAD", cwd=repo_dir)
+        info(f"written and pushed .commander/sprint.yaml")
 
 
 def step6_register_project(owner: str, repo_name: str, icon: str, color: str) -> None:
@@ -569,20 +633,34 @@ def step10_summary(
     repo_dir: Path,
     skip_uat: bool,
     uat_port: int,
+    nested: bool = False,
+    coder_dir: Optional[Path] = None,
+    tester_dir: Optional[Path] = None,
 ) -> None:
     """Print ready summary."""
     full_repo = f"{owner}/{repo_name}"
     uat_dir = repo_dir / "uat"
+    if coder_dir is None:
+        coder_dir = projects_dir / f"{repo_name}-coder"
+    if tester_dir is None:
+        tester_dir = projects_dir / f"{repo_name}-tester"
+
     print()
     print("=" * 60)
     print(f"  Project '{repo_name}' is ready!")
     print(f"  GitHub:  https://github.com/{full_repo}")
-    print(f"  Coder:   {projects_dir}/{repo_name}-coder")
-    print(f"  Tester:  {projects_dir}/{repo_name}-tester")
+    if nested:
+        project_root = projects_dir / repo_name
+        print(f"  Layout:  nested ({project_root}/)")
+        print(f"  Main:    {repo_dir}")
+    print(f"  Coder:   {coder_dir}")
+    print(f"  Tester:  {tester_dir}")
     if skip_uat:
         print(f"  UAT:     skipped (--skip-uat)")
     else:
         print(f"  UAT:     {uat_dir}  (port {uat_port}, branch: develop)")
+    if nested:
+        print(f"  Config:  {projects_dir / repo_name / '.commander' / 'sprint.yaml'}")
     print()
     print("  Next steps:")
     print(f"    1. cd {repo_dir} && open CLAUDE.md (add your conventions)")
@@ -596,28 +674,44 @@ def step10_summary(
 # ── Rollback ───────────────────────────────────────────────────────────────────
 
 def rollback(owner: str, repo_name: str, projects_dir: Path, confirm_delete: bool) -> None:
-    """AC7: Remove local dirs (including uat/), projects.json entry, optionally GitHub repo."""
+    """Remove local dirs, projects.json entry, and optionally the GitHub repo.
+
+    Handles both flat and nested layouts automatically.
+    """
     full_repo = f"{owner}/{repo_name}"
     removed = []
 
-    # AC7: also remove <project>/uat/ nested inside the project root
-    repo_dir = projects_dir / repo_name
-    uat_dir = repo_dir / "uat"
-    if uat_dir.exists():
-        shutil.rmtree(uat_dir)
-        removed.append(str(uat_dir))
-        print(f"  Removed {uat_dir}")
-    else:
-        print(f"  {uat_dir} does not exist — skipping")
+    project_root = projects_dir / repo_name
 
-    for suffix in ("", "-coder", "-tester"):
-        d = projects_dir / f"{repo_name}{suffix}"
-        if d.exists():
-            shutil.rmtree(d)
-            removed.append(str(d))
-            print(f"  Removed {d}")
+    # Detect layout
+    nested = (project_root / "main").exists() and (project_root / "main" / ".git").exists()
+
+    if nested:
+        # Remove entire project root (contains main/, coder/, tester/, .commander/)
+        if project_root.exists():
+            shutil.rmtree(project_root)
+            removed.append(str(project_root))
+            print(f"  Removed {project_root} (nested layout)")
         else:
-            print(f"  {d} does not exist — skipping")
+            print(f"  {project_root} does not exist — skipping")
+    else:
+        # Flat layout: also remove <project>/uat/ nested inside the project root
+        uat_dir = project_root / "uat"
+        if uat_dir.exists():
+            shutil.rmtree(uat_dir)
+            removed.append(str(uat_dir))
+            print(f"  Removed {uat_dir}")
+        else:
+            print(f"  {uat_dir} does not exist — skipping")
+
+        for suffix in ("", "-coder", "-tester"):
+            d = projects_dir / f"{repo_name}{suffix}"
+            if d.exists():
+                shutil.rmtree(d)
+                removed.append(str(d))
+                print(f"  Removed {d}")
+            else:
+                print(f"  {d} does not exist — skipping")
 
     # Remove from projects.json
     projects = _load_projects_json()
@@ -682,6 +776,15 @@ def main() -> None:
         default="prefer_default",
         choices=["prefer_default", "always_random"],
         help="Port selection strategy (default: prefer_default)",
+    )
+    parser.add_argument(
+        "--nested",
+        action="store_true",
+        help=(
+            "Use nested layout: main/, coder/, tester/ under a single project root; "
+            ".commander/ lives at the project root outside any git clone. "
+            "Default is flat layout (backward compatible)."
+        ),
     )
 
     args = parser.parse_args()
@@ -750,41 +853,43 @@ def main() -> None:
         uat_port = _get_free_port()
 
     TOTAL_STEPS = 11
+    nested = args.nested
 
     print(f"Onboarding '{owner}/{repo_name}' onto Commander...")
+    print(f"  Layout:    {'nested (--nested)' if nested else 'flat (default)'}")
     if not args.skip_uat:
         print(f"  UAT clone: enabled (port {uat_port})")
     else:
         print(f"  UAT clone: skipped (--skip-uat)")
     print()
 
-    # ── AC1: Pre-flight validation (runs before step 1) ───────────────────────
+    # ── Pre-flight validation ─────────────────────────────────────────────────
     print("[pre-flight] Validating environment...")
-    preflight(owner, repo_name, projects_dir)
+    preflight(owner, repo_name, projects_dir, nested=nested)
     info("pre-flight passed")
     print()
 
-    # ── Step 1: Create local repo + GitHub (AC3) ──────────────────────────────
+    # ── Step 1: Create local repo + GitHub ────────────────────────────────────
     step(1, TOTAL_STEPS, f"Creating local repo and GitHub repo for {owner}/{repo_name}...")
-    repo_dir = step1_init_repo(owner, repo_name, projects_dir, args.visibility)
+    repo_dir = step1_init_repo(owner, repo_name, projects_dir, args.visibility, nested=nested)
     info("done")
 
-    # ── Step 2: develop branch (AC4) ──────────────────────────────────────────
+    # ── Step 2: develop branch ────────────────────────────────────────────────
     step(2, TOTAL_STEPS, "Creating develop branch...")
     step2_develop_branch(repo_dir)
     info("done")
 
-    # ── Step 3: Standard labels (AC5) ─────────────────────────────────────────
+    # ── Step 3: Standard labels ───────────────────────────────────────────────
     step(3, TOTAL_STEPS, "Creating standard GitHub labels...")
     step3_labels(owner, repo_name)
     info("done")
 
-    # ── Step 4: Clone coder + tester (AC6) ────────────────────────────────────
+    # ── Step 4: Clone coder + tester ──────────────────────────────────────────
     step(4, TOTAL_STEPS, "Cloning coder and tester worktrees...")
-    step4_clones(owner, repo_name, projects_dir)
+    coder_dir, tester_dir = step4_clones(owner, repo_name, projects_dir, nested=nested)
     info("done")
 
-    # ── Step 4b: UAT clone (AC1/AC2/AC3/AC4) ─────────────────────────────────
+    # ── Step 4b: UAT clone ────────────────────────────────────────────────────
     step(5, TOTAL_STEPS, "Setting up UAT clone...")
     if args.skip_uat:
         info("--skip-uat set — skipping UAT clone creation")
@@ -792,7 +897,7 @@ def main() -> None:
         step4b_uat_clone(owner, repo_name, repo_dir, uat_port)
     info("done")
 
-    # ── Step 5: sprint.yaml (AC5/AC7) ────────────────────────────────────────
+    # ── Step 5: sprint.yaml ───────────────────────────────────────────────────
     step(6, TOTAL_STEPS, "Writing .commander/sprint.yaml...")
     step5_sprint_config(
         owner,
@@ -804,32 +909,38 @@ def main() -> None:
         prd_port=prd_port,
         uat_port=uat_port,
         port_strategy=args.port_strategy,
+        nested=nested,
+        coder_dir=coder_dir,
+        tester_dir=tester_dir,
     )
     info("done")
 
-    # ── Step 6: Register in projects.json (AC8) ───────────────────────────────
+    # ── Step 6: Register in projects.json ─────────────────────────────────────
     step(7, TOTAL_STEPS, "Registering project in dashboard/projects.json...")
     step6_register_project(owner, repo_name, args.icon, color)
     info("done")
 
-    # ── Step 7: TRACKED_REPOS (AC step 7) ────────────────────────────────────
+    # ── Step 7: TRACKED_REPOS ─────────────────────────────────────────────────
     step(8, TOTAL_STEPS, "Checking TRACKED_REPOS environment variable...")
     step7_tracked_repos(owner, repo_name)
     info("done")
 
-    # ── Step 8: Restart dashboard (AC9) ───────────────────────────────────────
+    # ── Step 8: Restart dashboard ─────────────────────────────────────────────
     step(9, TOTAL_STEPS, "Restarting PRD dashboard...")
     step8_restart_dashboard()
     info("done")
 
-    # ── Step 9: Verify via API (AC10) ─────────────────────────────────────────
+    # ── Step 9: Verify via API ─────────────────────────────────────────────────
     step(10, TOTAL_STEPS, "Verifying project appears in /api/projects...")
     step9_verify(owner, repo_name)
     info("done")
 
-    # ── Step 10: Print summary (AC15) ─────────────────────────────────────────
+    # ── Step 10: Print summary ────────────────────────────────────────────────
     step(11, TOTAL_STEPS, "Printing ready summary...")
-    step10_summary(owner, repo_name, projects_dir, repo_dir, args.skip_uat, uat_port)
+    step10_summary(
+        owner, repo_name, projects_dir, repo_dir, args.skip_uat, uat_port,
+        nested=nested, coder_dir=coder_dir, tester_dir=tester_dir,
+    )
 
 
 if __name__ == "__main__":

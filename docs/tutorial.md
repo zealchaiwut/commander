@@ -356,21 +356,74 @@ untested merges) the safety net breaks. Use `start_feature.py` and
 `finish_feature.py` through the agents — do not do manual git operations that
 bypass the workflow.
 
-### c. Sign off on your phone — mobile UAT keeps you honest about UX
+### c. Project layout — flat vs. nested
+
+Commander supports two directory layouts per project:
+
+**Nested layout** (`--nested`, recommended for new projects):
+
+```
+~/dev/<project>/
+  main/              # primary working clone (master branch)
+  coder/             # coder agent clone (develop branch)
+  tester/            # tester agent clone (develop branch)
+  uat/               # UAT clone (develop branch) — optional
+  .commander/        # sprint config — at project root, outside any git clone
+    sprint.yaml
+    logs/
+    sprints/
+    alerts/
+```
+
+Benefits: all three clones live under one folder; `.commander/` can never be
+accidentally committed because it sits outside any git working tree.
+
+**Flat layout** (default, backward compatible):
+
+```
+~/dev/<project>/          # main clone (master branch)
+~/dev/<project>-coder/    # coder agent clone (develop branch)
+~/dev/<project>-tester/   # tester agent clone (develop branch)
+~/dev/<project>/uat/      # UAT clone (develop branch) — optional
+~/dev/<project>/.commander/sprint.yaml   # inside the main clone
+```
+
+**Onboard a new project with the nested layout:**
+
+```bash
+cd ~/dev/commander/prd/dashboard
+source venv/bin/activate
+python3 scripts/init_project.py <repo-name> --nested
+```
+
+**Migrate an existing flat project to nested:**
+
+```bash
+python3 scripts/migrate_project_layout.py <project-name>
+
+# Dry-run first to preview changes:
+python3 scripts/migrate_project_layout.py <project-name> --dry-run
+```
+
+The sprint manager auto-discovers `.commander/sprint.yaml` by walking up from
+the current working directory, so it works from inside any clone in both
+layouts — no need to `cd` to a specific directory first.
+
+### d. Sign off on your phone — mobile UAT keeps you honest about UX
 
 A feature that looks fine on a 27-inch monitor can be unusable on a 6-inch
 screen. Reviewing UAT via Tailscale on your phone catches layout, tap-target,
 and readability regressions before they reach production. Make mobile review
 a non-negotiable step.
 
-### d. Use auto-mode for Coder and Tester, never for BA
+### e. Use auto-mode for Coder and Tester, never for BA
 
 Coder and Tester follow deterministic workflows with no ambiguity to resolve,
 so auto-mode is appropriate. BA makes creative decisions — what ACs are correct?
 is the scope right? — that need your review before a GitHub issue is filed. Run
 BA interactively and approve the ticket body before it is created.
 
-### e. CLAUDE.md is the source of truth — all project-wide rules go there
+### f. CLAUDE.md is the source of truth — all project-wide rules go there
 
 Rules scattered across agent prompts, hook scripts, and docs drift. `CLAUDE.md`
 is the one file every agent reads at startup. When you change a convention —

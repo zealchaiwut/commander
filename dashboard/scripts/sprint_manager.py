@@ -1308,7 +1308,7 @@ def _dispatch_coder(
     api_url  = cfg.api_url if cfg else None
     cwd_path = cfg.worktree_coder if cfg else WORKTESTER_DASHBOARD
 
-    print(f"  Dispatching coder for issue #{issue_num} ...")
+    print(f"  Dispatching coder for issue #{issue_num} ...", flush=True)
     _post_agent_event(f"coder:issue-{issue_num}", api_url=api_url)
 
     log_path = _issue_log_path(issue_num, cfg=cfg)
@@ -1414,7 +1414,7 @@ def _dispatch_tester(
     api_url  = cfg.api_url if cfg else None
     cwd_path = cfg.worktree_tester_app if cfg else WORKTESTER_DASHBOARD
 
-    print(f"  Dispatching tester for issue #{issue_num} ...")
+    print(f"  Dispatching tester for issue #{issue_num} ...", flush=True)
     _post_agent_event(f"tester:issue-{issue_num}", api_url=api_url)
 
     log_path = _issue_log_path(issue_num, cfg=cfg)

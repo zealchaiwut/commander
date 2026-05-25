@@ -355,7 +355,7 @@ python3 "$MAIN_REPO/dashboard/scripts/post_test_report.py" \
 If `READY_FOR_UAT`:
 ```bash
 # Merges to develop, pushes, labels UAT, deletes branch — all in one step
-cd "$MAIN_REPO" && python3 dashboard/scripts/finish_feature.py --issue <N>
+cd "$MAIN_REPO" && python3 dashboard/scripts/finish_feature.py --issue <N> --target-branch "${COMMANDER_MERGE_TARGET:-develop}"
 ```
 
 If `NEEDS_FIXES`, leave the ticket in SIT (do not move it). Say which tests failed and what the likely fix is.

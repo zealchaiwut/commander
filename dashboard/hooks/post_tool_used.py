@@ -117,12 +117,20 @@ def main():
         or "unknown"
     )
 
+    # AC-4: capture agent role and model name for per-agent, per-model tracking
+    # CLAUDE_AGENT_ROLE is set by the launcher (e.g. ba, coder, tester)
+    # CLAUDE_MODEL is set by Claude Code when a model is configured
+    agent_role = os.environ.get("CLAUDE_AGENT_ROLE") or None
+    model_name = os.environ.get("CLAUDE_MODEL") or None
+
     event = {
         "session_id":    session_id,
         "event_type":    "token_usage",
         "working_dir":   working_dir,
         "input_tokens":  input_tokens,
         "output_tokens": output_tokens,
+        "agent_role":    agent_role,
+        "model_name":    model_name,
     }
 
     try:

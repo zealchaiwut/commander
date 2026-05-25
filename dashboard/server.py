@@ -105,6 +105,8 @@ class TokenUsageEvent(BaseModel):
     working_dir:   str = "unknown"
     input_tokens:  int = 0
     output_tokens: int = 0
+    agent_role:    Optional[str] = None
+    model_name:    Optional[str] = None
 
 
 class RejectBody(BaseModel):
@@ -181,9 +183,26 @@ async def receive_token_usage(event: TokenUsageEvent):
         return {"ok": True}
     project = Path(event.working_dir).name if event.working_dir != "unknown" else "unknown"
     session_id = event.session_id or "unknown"
-    db.record_token_usage(session_id, project, event.input_tokens, event.output_tokens)
+    db.record_token_usage(
+        session_id,
+        project,
+        event.input_tokens,
+        event.output_tokens,
+        agent_role=event.agent_role,
+        model_name=event.model_name,
+    )
     await broadcast({"type": "update", "event": event.model_dump()})
     return {"ok": True}
+
+
+@app.get("/api/debug/token-usage/by-agent-model")
+def debug_token_usage_by_agent_model(since: Optional[str] = None):
+    """Return token usage grouped by agent_role and model_name.
+
+    Useful for auditing which agents/models are consuming tokens.
+    Optional query param: since=<ISO-8601> to restrict to a time window.
+    """
+    return db.get_token_usage_by_agent_model(window_start_utc=since)
 
 
 @app.get("/api/debug/token-usage")

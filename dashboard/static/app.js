@@ -884,15 +884,25 @@ function renderPlanUsage(d) {
   slowEl.classList.toggle('hidden', pct <= 80);
 }
 
-// ── New Project Modal (AC-4) ──────────────────────────────────────────────────
+// ── New Project Modal ─────────────────────────────────────────────────────────
+
+let _npActiveTab = 'init'; // 'init' | 'add'
+
 function openNewProjectModal() {
   document.getElementById('new-project-backdrop').classList.remove('hidden');
   document.getElementById('new-project-modal').classList.remove('hidden');
-  document.getElementById('np-repo').value  = '';
-  document.getElementById('np-icon').value  = '';
-  document.getElementById('np-color').value = '';
+  // Reset both tabs
+  document.getElementById('np-repo').value         = '';
+  document.getElementById('np-icon').value         = '';
+  document.getElementById('np-color').value        = '';
+  document.getElementById('np-name').value         = '';
+  document.getElementById('np-projects-dir').value = '~/dev';
+  document.getElementById('np-nested').checked     = false;
+  document.getElementById('np-skip-uat').checked   = false;
   _npClearError();
-  document.getElementById('np-repo').focus();
+  _npClearInitError();
+  _npResetLog();
+  switchModalTab(_npActiveTab);
 }
 
 function closeNewProjectModal() {
@@ -900,6 +910,29 @@ function closeNewProjectModal() {
   document.getElementById('new-project-modal').classList.add('hidden');
 }
 
+function switchModalTab(tab) {
+  _npActiveTab = tab;
+  const initForm = document.getElementById('np-init-form');
+  const addForm  = document.getElementById('new-project-form');
+  const tabInit  = document.getElementById('np-tab-init');
+  const tabAdd   = document.getElementById('np-tab-add');
+
+  if (tab === 'init') {
+    initForm.classList.remove('hidden');
+    addForm.classList.add('hidden');
+    tabInit.classList.add('active');
+    tabAdd.classList.remove('active');
+    document.getElementById('np-name').focus();
+  } else {
+    addForm.classList.remove('hidden');
+    initForm.classList.add('hidden');
+    tabAdd.classList.add('active');
+    tabInit.classList.remove('active');
+    document.getElementById('np-repo').focus();
+  }
+}
+
+// ── Add existing repo tab helpers ─────────────────────────────────────────────
 function _npClearError() {
   const errEl = document.getElementById('np-repo-error');
   const input = document.getElementById('np-repo');
@@ -956,7 +989,7 @@ async function submitNewProject(event) {
       return;
     }
 
-    // AC-4c: success — close modal and reload project list
+    // Success — close modal and reload project list
     closeNewProjectModal();
     loadProjects();
   } catch (e) {
@@ -964,6 +997,146 @@ async function submitNewProject(event) {
   } finally {
     submitBtn.disabled = false;
     submitBtn.textContent = 'Add Project';
+  }
+}
+
+// ── Init Project tab helpers ──────────────────────────────────────────────────
+
+function _npClearInitError() {
+  const errEl = document.getElementById('np-init-error');
+  const input = document.getElementById('np-name');
+  errEl.textContent = '';
+  errEl.classList.add('hidden');
+  input.classList.remove('error');
+}
+
+function _npShowInitError(msg) {
+  const errEl = document.getElementById('np-init-error');
+  errEl.textContent = msg;
+  errEl.classList.remove('hidden');
+  const input = document.getElementById('np-name');
+  input.classList.add('error');
+}
+
+function _npResetLog() {
+  const logWrap = document.getElementById('np-log-wrap');
+  const logEl   = document.getElementById('np-log');
+  logWrap.classList.add('hidden');
+  if (logEl) logEl.textContent = '';
+}
+
+function _npAppendLog(line) {
+  const logWrap = document.getElementById('np-log-wrap');
+  const logEl   = document.getElementById('np-log');
+  logWrap.classList.remove('hidden');
+  if (logEl) {
+    logEl.textContent += line + '\n';
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+}
+
+async function submitInitProject(event) {
+  event.preventDefault();
+  _npClearInitError();
+  _npResetLog();
+
+  const repoName    = document.getElementById('np-name').value.trim();
+  const projectsDir = document.getElementById('np-projects-dir').value.trim() || '~/dev';
+  const nested      = document.getElementById('np-nested').checked;
+  const skipUat     = document.getElementById('np-skip-uat').checked;
+
+  // AC4: client-side validation
+  if (!repoName) {
+    _npShowInitError('Project name is required.');
+    document.getElementById('np-name').focus();
+    return;
+  }
+  if (repoName.includes('/') || repoName.includes('\\')) {
+    _npShowInitError('Project name must not contain path separators (/ or \\).');
+    document.getElementById('np-name').focus();
+    return;
+  }
+
+  const submitBtn = document.getElementById('np-init-submit');
+  submitBtn.disabled = true;
+  submitBtn.textContent = 'Creating…';
+
+  try {
+    const res = await fetch('/api/projects/init', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({
+        repo_name:    repoName,
+        projects_dir: projectsDir,
+        nested,
+        skip_uat: skipUat,
+      }),
+    });
+
+    // AC4 / AC5: server-side validation errors (non-streaming 400/409)
+    if (res.status === 400 || res.status === 409 || res.status === 422) {
+      const data = await res.json().catch(() => ({}));
+      _npShowInitError(data.detail || `Error ${res.status}`);
+      return;
+    }
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      _npShowInitError(data.detail || `Server error ${res.status}`);
+      return;
+    }
+
+    // AC6: read SSE stream and append log lines
+    const reader  = res.body.getReader();
+    const decoder = new TextDecoder();
+    let   buffer  = '';
+    let   success = false;
+    let   lastErrorMsg = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+
+      // Parse SSE chunks: split on double newline
+      const chunks = buffer.split('\n\n');
+      buffer = chunks.pop(); // keep incomplete last chunk
+
+      for (const chunk of chunks) {
+        const lines = chunk.split('\n');
+        let eventType = 'log';
+        let dataLine  = '';
+        for (const l of lines) {
+          if (l.startsWith('event: ')) eventType = l.slice(7).trim();
+          if (l.startsWith('data: '))  dataLine  = l.slice(6).trim();
+        }
+        if (!dataLine) continue;
+
+        let payload = dataLine;
+        try { payload = JSON.parse(dataLine); } catch { /* use raw */ }
+
+        if (eventType === 'log') {
+          _npAppendLog(payload);
+        } else if (eventType === 'done') {
+          success = true;
+        } else if (eventType === 'error') {
+          lastErrorMsg = payload;
+        }
+      }
+    }
+
+    if (success) {
+      // AC7: close modal, refresh project list
+      closeNewProjectModal();
+      loadProjects().catch(() => {});
+    } else {
+      // AC8: stay open, show error
+      _npShowInitError(lastErrorMsg || 'init_project.py failed. Check the log above.');
+    }
+  } catch (e) {
+    _npShowInitError('Network error: ' + e.message);
+  } finally {
+    submitBtn.disabled = false;
+    submitBtn.textContent = 'Create';
   }
 }
 

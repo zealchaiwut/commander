@@ -119,6 +119,13 @@ class NewProjectBody(BaseModel):
     color: Optional[str] = "gray"
 
 
+class InitProjectBody(BaseModel):
+    repo_name: str
+    projects_dir: str = "~/dev"
+    nested: bool = False
+    skip_uat: bool = False
+
+
 class DatabaseStatus(BaseModel):
     reachable: bool
     path: str
@@ -362,6 +369,85 @@ def add_project(body: NewProjectBody):
         raise HTTPException(422, detail=str(e))
     except subprocess.CalledProcessError as e:
         raise _gh_error(e)
+
+
+@app.post("/api/projects/init")
+async def init_project(body: InitProjectBody):
+    """Spawn init_project.py and stream its stdout back as SSE (text/event-stream).
+
+    AC1  — accepts repo_name, projects_dir, nested, skip_uat
+    AC2  — spawns init_project.py as subprocess, streams output line by line
+    AC3  — resolves ~ in projects_dir via Path.expanduser()
+    AC4  — HTTP 400 if repo_name is empty or contains / or \\
+    AC5  — HTTP 409 if repo_name already exists in projects.json
+    AC6  — streams live log lines as SSE events
+    AC7  — sends 'done' SSE event on success (exit code 0)
+    AC8  — sends 'error' SSE event on failure (non-zero exit code)
+    """
+    repo_name = (body.repo_name or "").strip()
+    if not repo_name or "/" in repo_name or "\\" in repo_name:
+        raise HTTPException(
+            status_code=400,
+            detail="repo_name must be non-empty and must not contain path separators (/ or \\).",
+        )
+
+    # AC5: check projects.json for existing entry
+    existing = projects_module.load_projects()
+    for p in existing:
+        slug = p.get("repo", "").split("/")[-1]
+        if slug.lower() == repo_name.lower():
+            raise HTTPException(
+                status_code=409,
+                detail=f"A project named '{repo_name}' already exists in projects.json.",
+            )
+
+    # AC3: expand ~ in projects_dir
+    projects_dir = Path(body.projects_dir or "~/dev").expanduser()
+
+    # Build subprocess command
+    script_path = Path(__file__).parent / "scripts" / "init_project.py"
+    cmd = [
+        "python3",
+        str(script_path),
+        repo_name,
+        "--projects-dir", str(projects_dir),
+    ]
+    if body.nested:
+        cmd.append("--nested")
+    if body.skip_uat:
+        cmd.append("--skip-uat")
+
+    async def _stream():
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+
+        last_line = ""
+        try:
+            while True:
+                line_bytes = await proc.stdout.readline()
+                if not line_bytes:
+                    break
+                line = line_bytes.decode("utf-8", errors="replace").rstrip("\n")
+                last_line = line
+                yield f"event: log\ndata: {json.dumps(line)}\n\n"
+        except Exception as exc:
+            yield f"event: error\ndata: {json.dumps(str(exc))}\n\n"
+            return
+
+        await proc.wait()
+        if proc.returncode == 0:
+            yield f"event: done\ndata: {json.dumps('ok')}\n\n"
+        else:
+            yield f"event: error\ndata: {json.dumps(last_line or 'init_project.py failed')}\n\n"
+
+    return StreamingResponse(
+        _stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @app.get("/api/project-details")

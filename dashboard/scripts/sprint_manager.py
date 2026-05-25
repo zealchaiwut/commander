@@ -1330,10 +1330,21 @@ def _dispatch_coder(
         prompt,
     ]
 
-    # AC-7: inject COMMANDER_APP_PORT if a port was chosen
-    proc_env: Optional[dict] = None
+    # Build subprocess environment: inherit current env, set COMMANDER_MERGE_TARGET
+    # when in sprint mode (AC2), and COMMANDER_APP_PORT if a port was chosen (issue #62).
+    sub_env = os.environ.copy()
+    if sprint_branch not in ("develop",):
+        sub_env["COMMANDER_MERGE_TARGET"] = sprint_branch
+        if not (cfg and cfg.coder_prompt_template):
+            # Append belt-and-suspenders instruction for non-custom prompts
+            cmd[-1] = (
+                prompt
+                + f" IMPORTANT: The env var COMMANDER_MERGE_TARGET is set to {sprint_branch!r}."
+                f" Create the feature branch off {sprint_branch!r} by passing"
+                f" --base-branch {sprint_branch} to start_feature.py."
+            )
     if chosen_port is not None:
-        proc_env = {**os.environ, "COMMANDER_APP_PORT": str(chosen_port)}
+        sub_env["COMMANDER_APP_PORT"] = str(chosen_port)
         print(f"  [port] COMMANDER_APP_PORT={chosen_port} injected into coder env")
 
     try:
@@ -1343,7 +1354,7 @@ def _dispatch_coder(
                 stdout=log_f,
                 stderr=log_f,
                 cwd=str(cwd_path),
-                env=proc_env,
+                env=sub_env,
             )
     except FileNotFoundError:
         # claude CLI not available -- treat as stub success for testing
@@ -1415,10 +1426,20 @@ def _dispatch_tester(
         prompt,
     ]
 
-    # AC-7: inject COMMANDER_APP_PORT if a port was chosen
-    proc_env: Optional[dict] = None
+    # Build subprocess environment: inherit current env, set COMMANDER_MERGE_TARGET
+    # when in sprint mode (AC2), and COMMANDER_APP_PORT if a port was chosen (issue #62).
+    sub_env = os.environ.copy()
+    if sprint_branch not in ("develop",):
+        sub_env["COMMANDER_MERGE_TARGET"] = sprint_branch
+        if not (cfg and cfg.tester_prompt_template):
+            cmd[-1] = (
+                prompt
+                + f" IMPORTANT: The env var COMMANDER_MERGE_TARGET is set to {sprint_branch!r}."
+                f" When running finish_feature.py, pass --target-branch {sprint_branch}"
+                f" so that the feature branch merges into {sprint_branch!r} instead of develop."
+            )
     if chosen_port is not None:
-        proc_env = {**os.environ, "COMMANDER_APP_PORT": str(chosen_port)}
+        sub_env["COMMANDER_APP_PORT"] = str(chosen_port)
         print(f"  [port] COMMANDER_APP_PORT={chosen_port} injected into tester env")
 
     try:
@@ -1428,7 +1449,7 @@ def _dispatch_tester(
                 stdout=log_f,
                 stderr=log_f,
                 cwd=str(cwd_path),
-                env=proc_env,
+                env=sub_env,
             )
     except FileNotFoundError:
         print("  [tester] claude CLI not found -- stub success")

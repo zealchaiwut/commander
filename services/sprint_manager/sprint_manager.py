@@ -294,6 +294,12 @@ HANG_WARN_SECS  = 30 * 60   # 30 minutes
 HANG_KILL_SECS  = 60 * 60   # 60 minutes
 HANG_CHECK_SECS = 5  * 60   # check every 5 minutes
 
+# Rate-limit retry constants
+_RATE_LIMIT_MAX_RETRIES     = 3
+_RATE_LIMIT_BACKOFF_DELAYS  = [30, 60, 120]   # seconds per attempt
+_RATE_LIMIT_SIGNALS         = ["429", "rate limit", "too many requests",
+                                "subscription rate limit", "rate_limit"]
+
 
 def _utcnow() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -319,6 +325,19 @@ def _to_bangkok(utc_str: str) -> str:
 def _sprint_number(label: str) -> Optional[int]:
     m = re.search(r"(\d+)", label)
     return int(m.group(1)) if m else None
+
+
+def _is_rate_limit_error(output: str) -> tuple[bool, Optional[int]]:
+    """Return (is_rate_limit, retry_after_secs) by inspecting subprocess output.
+
+    Checks for 429 / rate-limit signals and an optional Retry-After value.
+    """
+    lower = output.lower()
+    if not any(sig in lower for sig in _RATE_LIMIT_SIGNALS):
+        return False, None
+    m = re.search(r"retry.?after[:\s]+(\d+)", output, re.IGNORECASE)
+    retry_after = int(m.group(1)) if m else None
+    return True, retry_after
 
 
 def _state_path(
@@ -404,23 +423,25 @@ class IssueState:
 
 @dataclass
 class SprintState:
-    sprint_label:     str
-    sprint_number:    Optional[int]
-    issues:           list[IssueState]  = field(default_factory=list)
-    start_timestamp:  str              = ""
-    total_tokens_in:  int              = 0
-    total_tokens_out: int              = 0
-    wall_clock_secs:  float            = 0.0
+    sprint_label:       str
+    sprint_number:      Optional[int]
+    issues:             list[IssueState]  = field(default_factory=list)
+    start_timestamp:    str              = ""
+    total_tokens_in:    int              = 0
+    total_tokens_out:   int              = 0
+    wall_clock_secs:    float            = 0.0
+    rate_limit_events:  list[dict]       = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return {
-            "sprint_label":     self.sprint_label,
-            "sprint_number":    self.sprint_number,
-            "issues":           [i.to_dict() for i in self.issues],
-            "start_timestamp":  self.start_timestamp,
-            "total_tokens_in":  self.total_tokens_in,
-            "total_tokens_out": self.total_tokens_out,
-            "wall_clock_secs":  self.wall_clock_secs,
+            "sprint_label":      self.sprint_label,
+            "sprint_number":     self.sprint_number,
+            "issues":            [i.to_dict() for i in self.issues],
+            "start_timestamp":   self.start_timestamp,
+            "total_tokens_in":   self.total_tokens_in,
+            "total_tokens_out":  self.total_tokens_out,
+            "wall_clock_secs":   self.wall_clock_secs,
+            "rate_limit_events": self.rate_limit_events,
         }
 
     @staticmethod
@@ -433,7 +454,8 @@ class SprintState:
             total_tokens_out = d.get("total_tokens_out", 0),
             wall_clock_secs  = d.get("wall_clock_secs", 0.0),
         )
-        s.issues = [IssueState.from_dict(i) for i in d.get("issues", [])]
+        s.issues            = [IssueState.from_dict(i) for i in d.get("issues", [])]
+        s.rate_limit_events = d.get("rate_limit_events", [])
         return s
 
     def save(self, path: Path) -> None:
@@ -1315,12 +1337,16 @@ def _dispatch_coder(
     repo_name: Optional[str] = None,
     cfg: Optional["SprintConfig"] = None,
     chosen_port: Optional[int] = None,
+    rate_limit_events: Optional[list] = None,
 ) -> tuple[bool, Optional[str]]:
     """Dispatch a coder agent for the issue.  Returns (ok, failure_category).
 
     When sprint_branch is not 'develop', sets COMMANDER_MERGE_TARGET in the
     subprocess environment so the coder agent creates the feature branch off
     the sprint branch instead of develop (AC2, AC3).
+
+    Retries up to _RATE_LIMIT_MAX_RETRIES times on 429/rate-limit errors with
+    exponential backoff.  Appends events to rate_limit_events when provided.
     """
     eff_repo = repo_name or (cfg.repo_name if cfg else None)
     api_url  = cfg.api_url if cfg else None
@@ -1376,42 +1402,85 @@ def _dispatch_coder(
         sub_env["COMMANDER_APP_PORT"] = str(chosen_port)
         print(f"  [port] COMMANDER_APP_PORT={chosen_port} injected into coder env")
 
-    try:
-        with log_path.open("w") as log_f:
-            proc = subprocess.Popen(
-                cmd,
-                stdout=log_f,
-                stderr=log_f,
-                cwd=str(cwd_path),
-                env=sub_env,
+    for attempt in range(_RATE_LIMIT_MAX_RETRIES + 1):
+        open_mode = "w" if attempt == 0 else "a"
+        try:
+            with log_path.open(open_mode) as log_f:
+                proc = subprocess.Popen(
+                    cmd,
+                    stdout=log_f,
+                    stderr=log_f,
+                    cwd=str(cwd_path),
+                    env=sub_env,
+                )
+        except FileNotFoundError:
+            # claude CLI not available -- treat as stub success for testing
+            print("  [coder] claude CLI not found -- stub success")
+            return True, None
+
+        detector = HangDetector(issue_num=issue_num, log_path=log_path, proc=proc)
+        detector.start()
+        rc = proc.wait()
+        detector.stop()
+
+        if detector.killed:
+            reason = f"No log activity for {HANG_KILL_SECS//60} minutes"
+            _add_blocked_label(issue_num, reason, repo_name=eff_repo)
+            dispatch_alerts(
+                alert_modes,
+                title=f"Issue #{issue_num}: HANG detected",
+                body=f"The coder subprocess produced no output for {HANG_KILL_SECS//60} minutes and was killed.",
+                issue_num=issue_num,
+                category=FailureCategory.HANG,
+                cfg=cfg,
             )
-    except FileNotFoundError:
-        # claude CLI not available -- treat as stub success for testing
-        print("  [coder] claude CLI not found -- stub success")
-        return True, None
+            return False, FailureCategory.HANG
 
-    detector = HangDetector(issue_num=issue_num, log_path=log_path, proc=proc)
-    detector.start()
-    rc = proc.wait()
-    detector.stop()
+        if rc == 0:
+            return True, None
 
-    if detector.killed:
-        reason = f"No log activity for {HANG_KILL_SECS//60} minutes"
-        _add_blocked_label(issue_num, reason, repo_name=eff_repo)
-        dispatch_alerts(
-            alert_modes,
-            title=f"Issue #{issue_num}: HANG detected",
-            body=f"The coder subprocess produced no output for {HANG_KILL_SECS//60} minutes and was killed.",
-            issue_num=issue_num,
-            category=FailureCategory.HANG,
-            cfg=cfg,
-        )
-        return False, FailureCategory.HANG
+        # Non-zero exit: inspect log for rate-limit signal
+        log_content = ""
+        if log_path.exists():
+            try:
+                log_content = log_path.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                pass
 
-    if rc != 0:
+        is_rl, retry_after = _is_rate_limit_error(log_content)
+
+        if is_rl and attempt < _RATE_LIMIT_MAX_RETRIES:
+            delay = retry_after if retry_after is not None else _RATE_LIMIT_BACKOFF_DELAYS[attempt]
+            retry_num = attempt + 1
+            print(f"  Rate limit hit, retrying in {delay} seconds (attempt {retry_num}/{_RATE_LIMIT_MAX_RETRIES})", flush=True)
+            if rate_limit_events is not None:
+                rate_limit_events.append({
+                    "issue_num": issue_num,
+                    "role": "coder",
+                    "attempt": retry_num,
+                    "delay_secs": delay,
+                    "timestamp": _utcnow(),
+                })
+            time.sleep(delay)
+            continue
+
+        if is_rl:
+            print(f"  Subscription rate limit exhausted for coder issue #{issue_num} after {_RATE_LIMIT_MAX_RETRIES} retries", flush=True)
+            if rate_limit_events is not None:
+                rate_limit_events.append({
+                    "issue_num": issue_num,
+                    "role": "coder",
+                    "attempt": _RATE_LIMIT_MAX_RETRIES,
+                    "delay_secs": 0,
+                    "exhausted": True,
+                    "timestamp": _utcnow(),
+                })
+            return False, FailureCategory.RETRY_EXHAUSTED
+
         return False, FailureCategory.CRASH
 
-    return True, None
+    # Should not be reached, but satisfy the type checker
+    return False, FailureCategory.CRASH
 
 
 def _dispatch_tester(
@@ -1421,12 +1490,16 @@ def _dispatch_tester(
     repo_name: Optional[str] = None,
     cfg: Optional["SprintConfig"] = None,
     chosen_port: Optional[int] = None,
+    rate_limit_events: Optional[list] = None,
 ) -> tuple[int, Optional[str]]:
     """Dispatch a tester agent.  Returns (exit_code, failure_category_if_hang).
 
     When sprint_branch is not 'develop', sets COMMANDER_MERGE_TARGET in the
     subprocess environment so the tester agent merges the feature branch into
     the sprint branch instead of develop (AC2, AC4).
+
+    Retries up to _RATE_LIMIT_MAX_RETRIES times on 429/rate-limit errors with
+    exponential backoff.  Appends events to rate_limit_events when provided.
     """
     eff_repo = repo_name or (cfg.repo_name if cfg else None)
     api_url  = cfg.api_url if cfg else None
@@ -1489,37 +1562,82 @@ def _dispatch_tester(
         sub_env["COMMANDER_APP_PORT"] = str(chosen_port)
         print(f"  [port] COMMANDER_APP_PORT={chosen_port} injected into tester env")
 
-    try:
-        with log_path.open("a") as log_f:
-            proc = subprocess.Popen(
-                cmd,
-                stdout=log_f,
-                stderr=log_f,
-                cwd=str(cwd_path),
-                env=sub_env,
+    for attempt in range(_RATE_LIMIT_MAX_RETRIES + 1):
+        try:
+            with log_path.open("a") as log_f:
+                proc = subprocess.Popen(
+                    cmd,
+                    stdout=log_f,
+                    stderr=log_f,
+                    cwd=str(cwd_path),
+                    env=sub_env,
+                )
+        except FileNotFoundError:
+            print("  [tester] claude CLI not found -- stub success")
+            return 0, None
+
+        detector = HangDetector(issue_num=issue_num, log_path=log_path, proc=proc)
+        detector.start()
+        rc = proc.wait()
+        detector.stop()
+
+        if detector.killed:
+            reason = f"Tester: no log activity for {HANG_KILL_SECS//60} minutes"
+            _add_blocked_label(issue_num, reason, repo_name=eff_repo)
+            dispatch_alerts(
+                alert_modes,
+                title=f"Issue #{issue_num}: HANG detected in tester",
+                body=f"The tester subprocess produced no output for {HANG_KILL_SECS//60} minutes.",
+                issue_num=issue_num,
+                category=FailureCategory.HANG,
+                cfg=cfg,
             )
-    except FileNotFoundError:
-        print("  [tester] claude CLI not found -- stub success")
-        return 0, None
+            return -1, FailureCategory.HANG
 
-    detector = HangDetector(issue_num=issue_num, log_path=log_path, proc=proc)
-    detector.start()
-    rc = proc.wait()
-    detector.stop()
+        if rc == 0:
+            return 0, None
 
-    if detector.killed:
-        reason = f"Tester: no log activity for {HANG_KILL_SECS//60} minutes"
-        _add_blocked_label(issue_num, reason, repo_name=eff_repo)
-        dispatch_alerts(
-            alert_modes,
-            title=f"Issue #{issue_num}: HANG detected in tester",
-            body=f"The tester subprocess produced no output for {HANG_KILL_SECS//60} minutes.",
-            issue_num=issue_num,
-            category=FailureCategory.HANG,
-            cfg=cfg,
-        )
-        return -1, FailureCategory.HANG
+        # Non-zero exit: inspect log for rate-limit signal
+        log_content = ""
+        if log_path.exists():
+            try:
+                log_content = log_path.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                pass
 
+        is_rl, retry_after = _is_rate_limit_error(log_content)
+
+        if is_rl and attempt < _RATE_LIMIT_MAX_RETRIES:
+            delay = retry_after if retry_after is not None else _RATE_LIMIT_BACKOFF_DELAYS[attempt]
+            retry_num = attempt + 1
+            print(f"  Rate limit hit, retrying in {delay} seconds (attempt {retry_num}/{_RATE_LIMIT_MAX_RETRIES})", flush=True)
+            if rate_limit_events is not None:
+                rate_limit_events.append({
+                    "issue_num": issue_num,
+                    "role": "tester",
+                    "attempt": retry_num,
+                    "delay_secs": delay,
+                    "timestamp": _utcnow(),
+                })
+            time.sleep(delay)
+            continue
+
+        if is_rl:
+            print(f"  Subscription rate limit exhausted for tester issue #{issue_num} after {_RATE_LIMIT_MAX_RETRIES} retries", flush=True)
+            if rate_limit_events is not None:
+                rate_limit_events.append({
+                    "issue_num": issue_num,
+                    "role": "tester",
+                    "attempt": _RATE_LIMIT_MAX_RETRIES,
+                    "delay_secs": 0,
+                    "exhausted": True,
+                    "timestamp": _utcnow(),
+                })
+            return rc, FailureCategory.RETRY_EXHAUSTED
+
+        return rc, None
+
+    # Should not be reached
     return rc, None
 
 
@@ -1671,6 +1789,25 @@ def generate_sprint_summary(
         f"| Cost estimate | {cost_str} |",
         "",
     ]
+
+    # -- Rate Limit Events --
+    if state.rate_limit_events:
+        lines += ["## Rate Limit Events", ""]
+        lines += [
+            "| Issue # | Role | Attempt | Delay (s) | Exhausted | Timestamp |",
+            "|---|---|---|---|---|---|",
+        ]
+        for ev in state.rate_limit_events:
+            exhausted = "Yes" if ev.get("exhausted") else "No"
+            lines.append(
+                f"| #{ev.get('issue_num', '?')} "
+                f"| {ev.get('role', '?')} "
+                f"| {ev.get('attempt', '?')}/{_RATE_LIMIT_MAX_RETRIES} "
+                f"| {ev.get('delay_secs', '?')} "
+                f"| {exhausted} "
+                f"| {ev.get('timestamp', '?')} |"
+            )
+        lines.append("")
 
     # -- Carried Over --
     lines += ["## Carried Over", ""]
@@ -2344,7 +2481,7 @@ def run_sprint(
         _coder_t0 = time.monotonic()
         coder_ok, coder_category = _dispatch_coder(
             num, alert_modes, sprint_branch=target_branch, repo_name=eff_repo, cfg=cfg,
-            chosen_port=chosen_port,
+            chosen_port=chosen_port, rate_limit_events=state.rate_limit_events,
         )
         _coder_elapsed = time.monotonic() - _coder_t0
         _coder_m, _coder_s = divmod(int(_coder_elapsed), 60)
@@ -2352,7 +2489,10 @@ def run_sprint(
 
         if not coder_ok:
             category = coder_category or FailureCategory.CRASH
-            reason   = f"Coder failed with category {category}"
+            if category == FailureCategory.RETRY_EXHAUSTED:
+                reason = "Subscription rate limit exhausted"
+            else:
+                reason = f"Coder failed with category {category}"
             print(f"  Coder failed for #{num} ({category}) -- skipping to next issue")
             issue_state.status      = "skipped"
             issue_state.skip_reason = reason
@@ -2374,7 +2514,7 @@ def run_sprint(
         _tester_t0 = time.monotonic()
         tester_rc, hang_category = _dispatch_tester(
             num, alert_modes, repo_name=eff_repo, cfg=cfg,
-            chosen_port=chosen_port,
+            chosen_port=chosen_port, rate_limit_events=state.rate_limit_events,
         )
         _tester_elapsed = time.monotonic() - _tester_t0
         _tester_m, _tester_s = divmod(int(_tester_elapsed), 60)
@@ -2385,6 +2525,15 @@ def run_sprint(
             issue_state.skip_reason = "Tester HANG detected"
             issue_state.category    = FailureCategory.HANG
             summary.skipped.append(f"#{num} (tester hang)")
+            state.save(state_path)
+            _post_sprint_status(state, api_url=api_url)
+            continue
+
+        if hang_category == FailureCategory.RETRY_EXHAUSTED:
+            issue_state.status      = "skipped"
+            issue_state.skip_reason = "Subscription rate limit exhausted"
+            issue_state.category    = FailureCategory.RETRY_EXHAUSTED
+            summary.skipped.append(f"#{num} (rate limit exhausted)")
             state.save(state_path)
             _post_sprint_status(state, api_url=api_url)
             continue

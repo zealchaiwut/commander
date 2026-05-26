@@ -11,7 +11,7 @@ Steps to follow before delegating:
 2. Pass to the **coder** subagent with the instruction: `work on issue <N>` where `<N>` is the extracted issue number
 
 The coder subagent will:
-- Ensure it is working from the correct git root (not `~/commander/dashboard/`)
+- Ensure it is working from the correct git root (not `~/commander/apps/dashboard/`)
 - Run `scripts/start_feature.py --issue <N>` to create `feature/<N>-<slug>` off `develop`
 - Read the ticket's Acceptance Criteria and implement exactly what is specified
 - Commit in logical chunks, push the feature branch, then label the ticket SIT

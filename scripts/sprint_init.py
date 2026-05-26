@@ -7,7 +7,7 @@ the gh CLI can access the specified GitHub repo, and prints next-step
 instructions.
 
 Usage:
-    python3 ~/commander/dashboard/scripts/sprint_init.py \\
+    python3 ~/commander/scripts/sprint_init.py \\
         --repo zealchaiwut/fitness-tracker \\
         --repo-root ~/fitness-tracker \\
         --coder-worktree ~/fitness-tracker-coder \\

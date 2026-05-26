@@ -25,15 +25,16 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
+_DASHBOARD_DIR = Path(__file__).parent.parent / "apps" / "dashboard"
+sys.path.insert(0, str(_DASHBOARD_DIR))
 
 from dotenv import load_dotenv
-load_dotenv(Path(__file__).parent.parent / ".env")
+load_dotenv(_DASHBOARD_DIR / ".env")
 
 import github_client
 
-# ── repo root (two levels up from this script: dashboard/scripts/ → dashboard/ → root) ──
-_REPO_ROOT = Path(__file__).parent.parent.parent
+# ── repo root (one level up from this script: scripts/ → root) ──
+_REPO_ROOT = Path(__file__).parent.parent
 
 
 # ── failure parsing ───────────────────────────────────────────────────────────

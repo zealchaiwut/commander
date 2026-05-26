@@ -12,7 +12,7 @@ Call this after tests pass. It:
 On merge conflict: aborts cleanly, posts a comment, exits non-zero.
 
 Usage:
-    python3 ~/commander/dashboard/scripts/finish_feature.py --issue 42
+    python3 ~/commander/scripts/finish_feature.py --issue 42
 
 Run from the git root of the repository (NOT from dashboard/).
 """
@@ -22,9 +22,10 @@ import subprocess
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
+_DASHBOARD_DIR = Path(__file__).parent.parent / "apps" / "dashboard"
+sys.path.insert(0, str(_DASHBOARD_DIR))
 from dotenv import load_dotenv
-load_dotenv(Path(__file__).parent.parent / ".env")
+load_dotenv(_DASHBOARD_DIR / ".env")
 import github_client
 
 

@@ -10,7 +10,7 @@ Commander runs two isolated environments side-by-side:
 |---|---|---|
 | Branch | `master` | `develop` |
 | Port | **8000** | **8001** |
-| Database | `~/commander/dashboard/commander.db` | `~/commander/dashboard-uat/dashboard/commander-uat.db` |
+| Database | `~/commander/apps/dashboard/commander.db` | `~/commander/uat/apps/dashboard/commander-uat.db` |
 | `.env` key | `DB_PATH=./commander.db` | `DB_PATH=./commander-uat.db` |
 | Use when | Releasing tested features to production | Verifying features on the develop branch |
 
@@ -40,8 +40,8 @@ Source `~/.commander.zsh` (add `source ~/.commander.zsh` to your `~/.zshrc`) to 
 
 | Environment | File | Notes |
 |---|---|---|
-| PRD | `~/commander/dashboard/commander.db` | Written by the PRD server (port 8000) only |
-| UAT | `~/commander/dashboard-uat/dashboard/commander-uat.db` | Written by the UAT server (port 8001) only |
+| PRD | `~/commander/apps/dashboard/commander.db` | Written by the PRD server (port 8000) only |
+| UAT | `~/commander/uat/apps/dashboard/commander-uat.db` | Written by the UAT server (port 8001) only |
 
 Events posted to port 8000 appear **only** in the PRD dashboard; events posted to port 8001 appear **only** in the UAT dashboard. The two databases are fully isolated.
 
@@ -49,13 +49,13 @@ Events posted to port 8000 appear **only** in the PRD dashboard; events posted t
 
 ```bash
 # 1. Set up the UAT environment (first time only)
-bash ~/commander/dashboard/scripts/setup_uat_env.sh
+bash ~/commander/scripts/setup_uat_env.sh
 
 # 2. Migrate existing data to the new database files
-python3 ~/commander/dashboard/scripts/migrate_to_separate_dbs.py
+python3 ~/commander/scripts/migrate_to_separate_dbs.py
 
 # 3. Install shell shortcuts
-bash ~/commander/dashboard/scripts/install_shell_shortcuts.sh
+bash ~/commander/scripts/install_shell_shortcuts.sh
 # Then add the following line to ~/.zshrc:
 #   source ~/.commander.zsh
 
@@ -71,15 +71,18 @@ cmdr-status
 
 ```
 commander/
-├── dashboard/           # FastAPI app (Python 3.12) — PRD environment
-│   ├── scripts/         # Management scripts (start/stop/status/migrate)
-│   ├── hooks/           # Claude Code hooks (tool_used, agent_finished, post_tool_used)
-│   └── commander.db     # PRD SQLite database
-├── dashboard-uat/       # UAT clone (created by setup_uat_env.sh, branch: develop)
-│   └── dashboard/
-│       └── commander-uat.db  # UAT SQLite database
+├── apps/
+│   └── dashboard/       # FastAPI app (Python 3.12) — PRD environment
+│       └── commander.db # PRD SQLite database
+├── services/
+│   └── sprint_manager/  # Sprint manager service
+├── scripts/             # Shared CLI tools (create_ticket.py, setup_uat_env.sh, etc.)
+├── hooks/               # Claude Code hooks (tool_used, agent_finished, post_tool_used)
+├── docs/                # Documentation
 ├── projects/            # Project data / configs
-└── venv/                # Root-level Python 3.14 venv
+├── .claude/             # Claude Code configuration (commands, agents, hooks, settings)
+├── CLAUDE.md            # Project-wide agent instructions
+└── README.md            # This file
 ```
 
 ## Per-project Layout (created by init_project.py)
@@ -103,13 +106,13 @@ so it is fully isolated from the PRD environment.
 ### Adding UAT to an existing project
 
 ```bash
-python3 dashboard/scripts/migrate_add_uat.py <repo-name> [--uat-port 8001]
+python3 scripts/migrate_add_uat.py <repo-name> [--uat-port 8001]
 ```
 
 ### Skipping UAT at init time
 
 ```bash
-python3 dashboard/scripts/init_project.py <repo-name> --skip-uat
+python3 scripts/init_project.py <repo-name> --skip-uat
 ```
 
 This sets `uat.enabled: false` in `sprint.yaml` and skips the `uat/` clone.

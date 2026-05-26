@@ -32,7 +32,8 @@ from typing import Optional
 # ── path setup ────────────────────────────────────────────────────────────────
 
 SCRIPTS_DIR   = Path(__file__).parent
-DASHBOARD_DIR = SCRIPTS_DIR.parent
+REPO_ROOT     = SCRIPTS_DIR.parent
+DASHBOARD_DIR = REPO_ROOT / "apps" / "dashboard"
 SPRINTS_DIR   = DASHBOARD_DIR / "sprints"
 
 sys.path.insert(0, str(DASHBOARD_DIR))

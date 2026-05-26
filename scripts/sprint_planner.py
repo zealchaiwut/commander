@@ -7,7 +7,7 @@ Usage:
     sprint-plan --dry-run         # propose plan, print it, apply nothing
 
 Add to ~/.commander.zsh:
-    function sprint-plan() { python3 ~/commander/dashboard/scripts/sprint_planner.py "$@"; }
+    function sprint-plan() { python3 ~/commander/scripts/sprint_planner.py "$@"; }
 """
 from __future__ import annotations
 
@@ -20,7 +20,8 @@ from typing import Optional
 # ── path setup ────────────────────────────────────────────────────────────────
 
 SCRIPTS_DIR = Path(__file__).parent
-DASHBOARD_DIR = SCRIPTS_DIR.parent
+REPO_ROOT = SCRIPTS_DIR.parent
+DASHBOARD_DIR = REPO_ROOT / "apps" / "dashboard"
 
 sys.path.insert(0, str(DASHBOARD_DIR))
 from dotenv import load_dotenv

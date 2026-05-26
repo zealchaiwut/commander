@@ -7,7 +7,7 @@ exits 0 and the issue has advanced to the UAT label. Any gate failure reverts
 the issue to SIT with a detailed comment.
 
 After sprint completion a rich executive summary is written to
-~/commander/dashboard/sprints/sprint-<N>-summary-<YYYY-MM-DD>.md, a GitHub
+~/commander/apps/dashboard/sprints/sprint-<N>-summary-<YYYY-MM-DD>.md, a GitHub
 issue is created for permanent record, and an optional interactive learnings
 prompt is shown when stdout is a TTY.
 
@@ -15,18 +15,18 @@ Adds per-failure categorisation, hang detection, configurable alert channels,
 a sprint summary report, restart/resume from state, and live dashboard progress.
 
 Usage:
-    python3 ~/commander/dashboard/scripts/sprint_manager.py <label> [options]
+    python3 ~/commander/services/sprint_manager/sprint_manager.py <label> [options]
 
 Examples:
-    python3 ~/commander/dashboard/scripts/sprint_manager.py sprint-5
-    python3 ~/commander/dashboard/scripts/sprint_manager.py sprint-5 --skip-gates
-    python3 ~/commander/dashboard/scripts/sprint_manager.py sprint-5 --gate-pytest=false
-    python3 ~/commander/dashboard/scripts/sprint_manager.py sprint-5 --alert-mode dashboard-banner,file
-    python3 ~/commander/dashboard/scripts/sprint_manager.py sprint-5 --resume
-    python3 ~/commander/dashboard/scripts/sprint_manager.py sprint-5 --retry-failed
-    python3 ~/commander/dashboard/scripts/sprint_manager.py sprint-5 --dry-run
+    python3 ~/commander/services/sprint_manager/sprint_manager.py sprint-5
+    python3 ~/commander/services/sprint_manager/sprint_manager.py sprint-5 --skip-gates
+    python3 ~/commander/services/sprint_manager/sprint_manager.py sprint-5 --gate-pytest=false
+    python3 ~/commander/services/sprint_manager/sprint_manager.py sprint-5 --alert-mode dashboard-banner,file
+    python3 ~/commander/services/sprint_manager/sprint_manager.py sprint-5 --resume
+    python3 ~/commander/services/sprint_manager/sprint_manager.py sprint-5 --retry-failed
+    python3 ~/commander/services/sprint_manager/sprint_manager.py sprint-5 --dry-run
 
-Run from the git root of the repository (NOT from dashboard/).
+Run from the git root of the repository.
 """
 from __future__ import annotations
 
@@ -55,8 +55,11 @@ except ImportError:  # pragma: no cover
 
 # ── path setup ────────────────────────────────────────────────────────────────
 
-SCRIPTS_DIR   = Path(__file__).parent
-DASHBOARD_DIR = SCRIPTS_DIR.parent
+# This file lives at services/sprint_manager/sprint_manager.py
+# Repo root is three levels up: sprint_manager/ → services/ → repo_root
+REPO_ROOT     = Path(__file__).parent.parent.parent
+DASHBOARD_DIR = REPO_ROOT / "apps" / "dashboard"
+SCRIPTS_DIR   = REPO_ROOT / "scripts"
 
 sys.path.insert(0, str(DASHBOARD_DIR))
 from dotenv import load_dotenv
@@ -65,7 +68,8 @@ import github_client
 
 # Import failure-parsing helpers from post_test_report (no circular deps)
 try:
-    from scripts.post_test_report import (  # type: ignore[import]
+    sys.path.insert(0, str(SCRIPTS_DIR))
+    from post_test_report import (  # type: ignore[import]
         parse_failures,
         build_failure_block,
         write_sidecar,
@@ -75,14 +79,11 @@ try:
 except ImportError:
     _FAILURE_PARSING_AVAILABLE = False
 
-# Repo root — one level above DASHBOARD_DIR (e.g. ~/commander/)
-REPO_ROOT = DASHBOARD_DIR.parent
-
 # Default paths — can be overridden via env vars or CLI for testing
 WORKTESTER_ROOT      = Path(os.environ.get("WORKTESTER_ROOT",
                              Path.home() / "commander" / "work-tester"))
-WORKTESTER_DASHBOARD = WORKTESTER_ROOT / "dashboard"
-FINISH_FEATURE_SCRIPT = DASHBOARD_DIR / "scripts" / "finish_feature.py"
+WORKTESTER_DASHBOARD = WORKTESTER_ROOT / "apps" / "dashboard"
+FINISH_FEATURE_SCRIPT = SCRIPTS_DIR / "finish_feature.py"
 DASHBOARD_API_URL    = os.environ.get("DASHBOARD_API_URL", "http://localhost:8000")
 SPRINTS_DIR          = DASHBOARD_DIR / "sprints"
 ALERTS_DIR           = DASHBOARD_DIR / "alerts"
@@ -108,8 +109,8 @@ class SprintConfig:
     repo_name:             Optional[str]  = None
     worktree_coder:        Path           = field(default_factory=lambda: Path.home() / "commander" / "work-coder")
     worktree_tester:       Path           = field(default_factory=lambda: WORKTESTER_ROOT)
-    tester_app_subdir:     str            = "dashboard"
-    scripts_dir:           Path           = field(default_factory=lambda: DASHBOARD_DIR / "scripts")
+    tester_app_subdir:     str            = "apps/dashboard"
+    scripts_dir:           Path           = field(default_factory=lambda: SCRIPTS_DIR)
     logs_dir:              Path           = field(default_factory=lambda: DASHBOARD_DIR / "logs")
     sprints_dir:           Path           = field(default_factory=lambda: SPRINTS_DIR)
     alerts_dir:            Path           = field(default_factory=lambda: ALERTS_DIR)
@@ -198,7 +199,7 @@ def load_config(path: Path) -> "SprintConfig":
     paths = data.get("paths") or {}
 
     scripts_raw = (paths.get("scripts_dir") or "").strip()
-    scripts_dir = _resolve_path(scripts_raw, base_dir) if scripts_raw else DASHBOARD_DIR / "scripts"
+    scripts_dir = _resolve_path(scripts_raw, base_dir) if scripts_raw else SCRIPTS_DIR
 
     logs_raw  = (paths.get("logs_dir") or "").strip()
     logs_dir  = _resolve_path(logs_raw, base_dir) if logs_raw else base_dir / "logs"
@@ -279,8 +280,8 @@ def _default_config() -> "SprintConfig":
         repo_name         = None,  # will use github_client.repo()
         worktree_coder    = Path.home() / "commander" / "work-coder",
         worktree_tester   = WORKTESTER_ROOT,
-        tester_app_subdir = "dashboard",
-        scripts_dir       = DASHBOARD_DIR / "scripts",
+        tester_app_subdir = "apps/dashboard",
+        scripts_dir       = SCRIPTS_DIR,
         logs_dir          = DASHBOARD_DIR / "logs",
         sprints_dir       = SPRINTS_DIR,
         alerts_dir        = ALERTS_DIR,

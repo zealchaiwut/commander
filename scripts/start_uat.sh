@@ -1,21 +1,18 @@
 #!/usr/bin/env bash
 # start_uat.sh — Start the UAT dashboard on port 8001.
 #
-# UAT_DIR is derived from this script's location via three-level directory
-# traversal (no git commands):
-#   SCRIPT_DIR   = <project-dir>/prd/dashboard/scripts/
-#   DASHBOARD_DIR= <project-dir>/prd/dashboard/
+# UAT_DIR is derived from this script's location:
+#   SCRIPT_DIR   = <project-dir>/prd/scripts/
 #   REPO_ROOT    = <project-dir>/prd/
 #   PROJECT_DIR  = <project-dir>/
-#   UAT_DIR      = <project-dir>/uat/dashboard
+#   UAT_DIR      = <project-dir>/uat/apps/dashboard
 #
 # Standard layout:
 #   ~/dev/commander/               ← PROJECT_DIR
 #     prd/                         ← PRD clone (REPO_ROOT)
-#       dashboard/                 ← DASHBOARD_DIR
-#         scripts/                 ← SCRIPT_DIR (this script lives here)
+#       scripts/                   ← SCRIPT_DIR (this script lives here)
 #     uat/
-#       dashboard/                 ← UAT_DIR
+#       apps/dashboard/            ← UAT_DIR
 #
 # Writes a PID file to <UAT_DIR>/uat.pid.
 # Logs are written to <UAT_DIR>/uat.log.
@@ -23,11 +20,10 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DASHBOARD_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-REPO_ROOT="$(cd "$DASHBOARD_DIR/.." && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 PROJECT_DIR="$(cd "$REPO_ROOT/.." && pwd)"
 
-UAT_DIR="$PROJECT_DIR/uat/dashboard"
+UAT_DIR="$PROJECT_DIR/uat/apps/dashboard"
 VENV="$UAT_DIR/venv"
 PID_FILE="$UAT_DIR/uat.pid"
 LOG_FILE="$UAT_DIR/uat.log"

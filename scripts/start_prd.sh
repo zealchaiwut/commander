@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
-# start_prd.sh — Start the PRD dashboard on port 8000 using ~/commander/dashboard (master branch).
+# start_prd.sh — Start the PRD dashboard on port 8000 using apps/dashboard/ (master branch).
 #
-# Writes a PID file to ~/commander/dashboard/prd.pid.
-# Logs are written to ~/commander/dashboard/prd.log.
+# Writes a PID file to apps/dashboard/prd.pid.
+# Logs are written to apps/dashboard/prd.log.
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DASHBOARD_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-COMMANDER_ROOT="$(cd "$DASHBOARD_DIR/.." && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+DASHBOARD_DIR="$REPO_ROOT/apps/dashboard"
+COMMANDER_ROOT="$REPO_ROOT"
 
 PRD_DIR="$DASHBOARD_DIR"
 VENV="$PRD_DIR/venv"

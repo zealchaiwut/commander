@@ -425,15 +425,18 @@ class IssueState:
 class SprintState:
     sprint_label:       str
     sprint_number:      Optional[int]
+    project:            str              = ""
     issues:             list[IssueState]  = field(default_factory=list)
     start_timestamp:    str              = ""
     total_tokens_in:    int              = 0
     total_tokens_out:   int              = 0
     wall_clock_secs:    float            = 0.0
+    token_budget:       int              = 0
     rate_limit_events:  list[dict]       = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return {
+            "project":           self.project,
             "sprint_label":      self.sprint_label,
             "sprint_number":     self.sprint_number,
             "issues":            [i.to_dict() for i in self.issues],
@@ -441,6 +444,7 @@ class SprintState:
             "total_tokens_in":   self.total_tokens_in,
             "total_tokens_out":  self.total_tokens_out,
             "wall_clock_secs":   self.wall_clock_secs,
+            "token_budget":      self.token_budget,
             "rate_limit_events": self.rate_limit_events,
         }
 
@@ -449,10 +453,12 @@ class SprintState:
         s = SprintState(
             sprint_label     = d["sprint_label"],
             sprint_number    = d.get("sprint_number"),
+            project          = d.get("project", ""),
             start_timestamp  = d.get("start_timestamp", ""),
             total_tokens_in  = d.get("total_tokens_in", 0),
             total_tokens_out = d.get("total_tokens_out", 0),
             wall_clock_secs  = d.get("wall_clock_secs", 0.0),
+            token_budget     = d.get("token_budget", 0),
         )
         s.issues            = [IssueState.from_dict(i) for i in d.get("issues", [])]
         s.rate_limit_events = d.get("rate_limit_events", [])

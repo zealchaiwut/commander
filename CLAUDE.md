@@ -130,7 +130,31 @@ Commander is:
 -                 - `scripts/migrate_project_layout.py` — migrate flat project to nested layout
 -                 - `scripts/migrate_add_uat.py` — add UAT clone to an existing project
 -
--                 ## Out of Scope
+-                 ## Issue Estimator
+
+The Issue Estimator agent reads a ticket after it is created and produces structured sizing metadata: size estimate, confidence, files likely affected, dependency graph, and risk flags.
+
+**When to run it:**
+- After BA creates a ticket and you want sizing data before sprint planning
+- From the CLI: `python3 services/sprint_manager/estimate_issue.py --issue <N> [--repo owner/repo] [--save-comment] [--save-label] [--force]`
+- As a slash command: `/estimate <issue-url>`
+
+**Output saved to:** `<project>/.commander/estimates/issue-<N>.json`
+
+**Size scale:** S=<1hr, M=1–3hr, L=3–8hr, XL=>8hr
+
+**Caching:** estimates are cached — re-running without `--force` returns the cached result instantly.
+
+**Sprint manager integration:** when `sprint_manager.py` dispatches tickets, it reads cached estimates (if present) and:
+- Logs size, estimated hours, and confidence for each ticket
+- Warns on serious risk flags (`touches-db-schema`, `security-sensitive`, `breaks-tests`)
+- Warns when two pending tickets share files in `files_likely_affected`
+
+**Model:** Haiku 4.5 (cheaper; the task is structured and well-defined — no Sonnet needed).
+
+**Agent definition:** `apps/dashboard/.claude/agents/estimator.md`
+
+## Out of Scope
 -
 -                 - DO NOT add Discord, Slack, or other notification systems (separate sprint)
 -                 - DO NOT add auth (single-user, local only for now)
@@ -158,6 +182,7 @@ There are two pricing surfaces. Always prefer the cheaper option.
 | BA | `claude-sonnet-4-6` | Ticket writing benefits from quality reasoning; Opus is overkill |
 | Coder | `claude-sonnet-4-6` (via Claude Code) | Solid coding quality; subscription-funded |
 | Tester | `claude-haiku-4-5` (via Claude Code) | Mostly mechanical verification; cheapest capable model |
+| Estimator | `claude-haiku-4-5-20251001` (via Claude Code) | Structured JSON output; no Sonnet needed |
 | sprint_review.py | `claude-haiku-4-5-20251001` (raw API) | Already optimized; keep as-is |
 
 ### How to choose a model

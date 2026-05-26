@@ -31,10 +31,12 @@ Run from the git root of the repository.
 from __future__ import annotations
 
 import argparse
+import atexit
 import email.mime.text
 import json
 import os
 import re
+import signal
 import smtplib
 import subprocess
 import sys
@@ -287,6 +289,71 @@ def _default_config() -> "SprintConfig":
         alerts_dir        = ALERTS_DIR,
         api_url           = DASHBOARD_API_URL,
     )
+
+
+# ── per-project PID lock ──────────────────────────────────────────────────────
+
+def _pid_file_path(sprint_label: str, cfg: Optional["SprintConfig"] = None) -> Path:
+    """Return the per-(project, sprint_label) PID file path."""
+    if cfg is not None:
+        sprints_dir = cfg.sprints_dir
+    else:
+        sprints_dir = REPO_ROOT / ".commander" / "sprints"
+    sprints_dir.mkdir(parents=True, exist_ok=True)
+    return sprints_dir / f"{sprint_label}-pid"
+
+
+def _acquire_pid_lock(sprint_label: str, project: str,
+                      cfg: Optional["SprintConfig"] = None) -> Path:
+    """Write a PID file scoped to (project, sprint_label).
+
+    If another process holds the lock and is still alive, exits with an error.
+    If the PID file is stale (process dead), logs a warning and cleans it up.
+    Returns the path so the caller can release it on exit.
+    """
+    pid_path = _pid_file_path(sprint_label, cfg)
+
+    if pid_path.exists():
+        stale_pid: Optional[int] = None
+        try:
+            stale_pid = int(pid_path.read_text().strip())
+        except (ValueError, OSError):
+            pass
+
+        alive = False
+        if stale_pid is not None:
+            try:
+                os.kill(stale_pid, 0)
+                alive = True
+            except ProcessLookupError:
+                alive = False
+            except PermissionError:
+                alive = True  # process exists but is owned by another user
+
+        if alive:
+            sys.exit(
+                f"Sprint {sprint_label} is already running on {project} (PID {stale_pid})"
+            )
+        else:
+            print(
+                f"  [pid-lock] Stale lock from PID {stale_pid} cleaned up",
+                file=sys.stderr,
+            )
+            try:
+                pid_path.unlink()
+            except OSError:
+                pass
+
+    pid_path.write_text(str(os.getpid()))
+    return pid_path
+
+
+def _release_pid_lock(pid_path: Path) -> None:
+    """Remove the PID file; idempotent."""
+    try:
+        pid_path.unlink()
+    except OSError:
+        pass
 
 
 # Hang detection constants (in seconds)
@@ -1357,9 +1424,12 @@ def _dispatch_coder(
     ]
 
     # Build subprocess environment: inherit current env, set COMMANDER_MERGE_TARGET
-    # when in sprint mode (AC2), and COMMANDER_APP_PORT if a port was chosen (issue #62).
+    # when in sprint mode (AC2), COMMANDER_APP_PORT if a port was chosen (issue #62),
+    # and COMMANDER_PROJECT so log output is tagged by project (issue #122).
     sub_env = os.environ.copy()
     sub_env.pop("ANTHROPIC_API_KEY", None)
+    if eff_repo:
+        sub_env["COMMANDER_PROJECT"] = eff_repo
     if sprint_branch not in ("develop",):
         sub_env["COMMANDER_MERGE_TARGET"] = sprint_branch
         # Always append sprint-mode instructions regardless of whether a custom
@@ -1472,9 +1542,12 @@ def _dispatch_tester(
     ]
 
     # Build subprocess environment: inherit current env, set COMMANDER_MERGE_TARGET
-    # when in sprint mode (AC2), and COMMANDER_APP_PORT if a port was chosen (issue #62).
+    # when in sprint mode (AC2), COMMANDER_APP_PORT if a port was chosen (issue #62),
+    # and COMMANDER_PROJECT so log output is tagged by project (issue #122).
     sub_env = os.environ.copy()
     sub_env.pop("ANTHROPIC_API_KEY", None)
+    if eff_repo:
+        sub_env["COMMANDER_PROJECT"] = eff_repo
     if sprint_branch not in ("develop",):
         sub_env["COMMANDER_MERGE_TARGET"] = sprint_branch
         # Always append sprint-mode instructions regardless of whether a custom
@@ -2595,6 +2668,24 @@ def main() -> None:
 
     # --repo flag overrides config (explicit always wins)
     eff_repo = args.repo or (cfg.repo_name if cfg else None)
+
+    # ── Per-project PID lock (issue #122) ────────────────────────────────────
+    _project_id = eff_repo or _r(None)
+    _pid_path = _acquire_pid_lock(args.label, _project_id, cfg=cfg)
+
+    def _cleanup_pid() -> None:
+        _release_pid_lock(_pid_path)
+
+    atexit.register(_cleanup_pid)
+
+    _orig_sigterm = signal.getsignal(signal.SIGTERM)
+
+    def _sigterm_handler(signum: int, frame: object) -> None:
+        _cleanup_pid()
+        signal.signal(signal.SIGTERM, _orig_sigterm or signal.SIG_DFL)
+        os.kill(os.getpid(), signal.SIGTERM)
+
+    signal.signal(signal.SIGTERM, _sigterm_handler)
 
     # ── Pre-flight review (AC-1 of issue #33) ────────────────────────────────
     preflight_approved: Optional[list] = None  # None = no preflight, list = approved numbers

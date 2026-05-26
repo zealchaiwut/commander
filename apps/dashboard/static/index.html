@@ -2058,6 +2058,35 @@
     flex-shrink: 0; background: none; border: none; cursor: pointer;
     font-size: 16px; color: var(--red, #ef4444); line-height: 1; padding: 0 2px;
   }
+
+  /* ── Approve all UAT button in expand panel ── */
+  .btn-approve-all-uat {
+    margin-left: auto; padding: 3px 10px;
+    background: var(--green); color: #fff; border: none; border-radius: 5px;
+    font-size: 11px; font-weight: 600; cursor: pointer;
+    display: inline-flex; align-items: center; gap: 4px;
+    transition: opacity .15s;
+  }
+  .btn-approve-all-uat:hover { opacity: .82; }
+  .btn-approve-all-uat:disabled { opacity: .45; cursor: not-allowed; }
+
+  /* ── Approve all UAT modal ── */
+  .aua-ticket-list {
+    margin: 12px 0; padding: 0; list-style: none;
+    max-height: 240px; overflow-y: auto;
+  }
+  .aua-ticket-list li {
+    padding: 5px 0; font-size: 13px; color: var(--text);
+    border-bottom: 1px solid var(--border);
+  }
+  .aua-ticket-list li:last-child { border-bottom: none; }
+  .aua-confirm-btn {
+    padding: 6px 16px; border: none; border-radius: 6px;
+    background: var(--green); color: #fff; font-size: 13px; font-weight: 600;
+    cursor: pointer; transition: opacity .15s;
+  }
+  .aua-confirm-btn:hover { opacity: .82; }
+  .aua-confirm-btn:disabled { opacity: .45; cursor: not-allowed; }
 </style>
 
 <!-- ── Draft Ticket Modal (issue #94) ── -->
@@ -2168,6 +2197,20 @@
   }
   .btn-secondary:hover { background: var(--surface); }
 </style>
+
+<!-- ── Approve all UAT confirmation modal ── -->
+<div class="modal-backdrop hidden" id="aua-modal-backdrop" onclick="closeApproveAllUatModal()"></div>
+<div class="modal hidden" id="aua-modal" role="dialog" aria-modal="true" aria-labelledby="aua-modal-title">
+  <div class="modal-header">
+    <span class="modal-title" id="aua-modal-title">Approve UAT tickets?</span>
+    <button class="modal-close" onclick="closeApproveAllUatModal()" aria-label="Close">&times;</button>
+  </div>
+  <ul class="aua-ticket-list" id="aua-modal-list"></ul>
+  <div class="modal-footer">
+    <button class="btn-ghost" onclick="closeApproveAllUatModal()">Cancel</button>
+    <button class="aua-confirm-btn" id="aua-modal-confirm" onclick="confirmApproveAllUat()"><i class="ti ti-checks"></i> Confirm</button>
+  </div>
+</div>
 
 <script src="/static/app.js"></script>
 </body>

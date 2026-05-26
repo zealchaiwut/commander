@@ -1561,8 +1561,8 @@ async function loadSprintStatus() {
     const res = await fetch('/api/sprint-status');
     if (!res.ok) return;
     const data = await res.json();
-    if (!data.active) return;
-    _sprintState = data;
+    const sprints = data.running_sprints || [];
+    _sprintState = sprints.length > 0 ? sprints[0] : null;
   } catch { /* silent */ }
 }
 
@@ -2904,7 +2904,10 @@ async function smgmtPollRunStatus() {
     let sprintStatus = null;
     if (statusRes.ok) {
       const statusData = await statusRes.json();
-      if (statusData.active) sprintStatus = statusData;
+      const sprints = statusData.running_sprints || [];
+      const runLabel = _smgmtRunningInfo?.sprint_label || null;
+      const runProj  = _smgmtRunningInfo?.project || null;
+      sprintStatus = sprints.find(s => s.sprint_label === runLabel && s.project === runProj) || null;
     }
     smgmtApplyRunState(sprintStatus);
   } catch { /* ignore poll errors */ }

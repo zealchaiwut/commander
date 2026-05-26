@@ -564,11 +564,18 @@ def _post_agent_event(
         pass
 
 
-def _post_sprint_status(state: "SprintState", api_url: Optional[str] = None) -> None:
+def _post_sprint_status(
+    state: "SprintState",
+    api_url: Optional[str] = None,
+    project: Optional[str] = None,
+) -> None:
     """POST the current sprint state to /api/sprint-status."""
     base = api_url or DASHBOARD_API_URL
     try:
-        payload = json.dumps(state.to_dict()).encode()
+        data = state.to_dict()
+        if project:
+            data["project"] = project
+        payload = json.dumps(data).encode()
         req = urllib.request.Request(
             f"{base}/api/sprint-status",
             data=payload,
@@ -2264,7 +2271,7 @@ def run_sprint(
             issue_state.skip_reason = "preflight-skipped"
             summary.skipped.append(f"#{num} (preflight-skipped)")
             state.save(state_path)
-            _post_sprint_status(state, api_url=api_url)
+            _post_sprint_status(state, api_url=api_url, project=eff_repo)
             continue
 
         if dry_run:
@@ -2273,7 +2280,7 @@ def run_sprint(
             issue_state.skip_reason = "dry-run"
             summary.skipped.append(f"#{num} (dry-run)")
             state.save(state_path)
-            _post_sprint_status(state, api_url=api_url)
+            _post_sprint_status(state, api_url=api_url, project=eff_repo)
             continue
 
         # -- Port detection (issue #62, AC-5/6/7/8) --
@@ -2310,7 +2317,7 @@ def run_sprint(
                 cfg=cfg,
             )
             state.save(state_path)
-            _post_sprint_status(state, api_url=api_url)
+            _post_sprint_status(state, api_url=api_url, project=eff_repo)
             continue
 
         # -- Dispatch tester --
@@ -2329,7 +2336,7 @@ def run_sprint(
             issue_state.category    = FailureCategory.HANG
             summary.skipped.append(f"#{num} (tester hang)")
             state.save(state_path)
-            _post_sprint_status(state, api_url=api_url)
+            _post_sprint_status(state, api_url=api_url, project=eff_repo)
             continue
 
         # -- Post-tester gates --

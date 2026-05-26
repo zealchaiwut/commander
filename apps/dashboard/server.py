@@ -702,12 +702,14 @@ def dismiss_alert(idx: int):
 
 # ── sprint status endpoint (AC-6 from #24) ───────────────────────────────────
 
-_sprint_status: Optional[dict] = None
+# Keyed by (project, sprint_label); populated by POST /api/sprint-status from sprint_manager.py
+_sprint_statuses: dict[tuple, dict] = {}
 
 
 class SprintStatusPayload(BaseModel):
     model_config = ConfigDict(extra="allow")
 
+    project: str = ""
     sprint_label: str = ""
     sprint_number: Optional[int] = None
     issues: list[dict] = []
@@ -719,16 +721,33 @@ class SprintStatusPayload(BaseModel):
 
 @app.post("/api/sprint-status")
 def set_sprint_status(payload: SprintStatusPayload):
-    global _sprint_status
-    _sprint_status = payload.model_dump()
+    global _sprint_statuses
+    key = (payload.project, payload.sprint_label)
+    _sprint_statuses[key] = payload.model_dump()
     return {"ok": True}
 
 
 @app.get("/api/sprint-status")
-def get_sprint_status():
-    if _sprint_status is None:
-        return {"active": False}
-    return {**_sprint_status, "active": True}
+def get_sprint_status(project: Optional[str] = None):
+    running = _all_sprints_running()
+    if project:
+        running = [r for r in running if r["project"] == project]
+    result = []
+    for r in running:
+        key = (r["project"], r["sprint_label"])
+        status = _sprint_statuses.get(key, {})
+        issues = status.get("issues", [])
+        closed = sum(1 for i in issues if i.get("status") in ("done", "skipped"))
+        result.append({
+            "project":        r["project"],
+            "sprint_label":   r["sprint_label"],
+            "pid":            r.get("pid"),
+            "issues":         issues,
+            "progress":       {"closed": closed, "total": len(issues)},
+            "started_at":     status.get("start_timestamp"),
+            "wall_clock_secs": status.get("wall_clock_secs", 0.0),
+        })
+    return {"running_sprints": result}
 
 
 # ── sprint summary / history endpoints (AC-4 / AC-6 from #24) ────────────────
@@ -1212,8 +1231,9 @@ def _is_sprint_running(project_root: Path, sprint_label: str) -> bool:
         return False
 
 
-def _any_sprint_running() -> Optional[dict]:
-    """Scan all projects for a running sprint. Returns {project, sprint_label} or None."""
+def _all_sprints_running() -> list[dict]:
+    """Scan all projects for running sprints. Returns list of {project, sprint_label, pid}."""
+    result = []
     projects = projects_module.load_projects()
     for proj in projects:
         root = _project_root_path(proj["repo"])
@@ -1221,10 +1241,20 @@ def _any_sprint_running() -> Optional[dict]:
         if not sprints_dir.exists():
             continue
         for pid_file in sprints_dir.glob("*-pid"):
-            label = pid_file.stem  # e.g. "sprint-2"
+            label = pid_file.stem
             if _is_sprint_running(root, label):
-                return {"project": proj["repo"], "sprint_label": label}
-    return None
+                try:
+                    pid = int(pid_file.read_text(encoding="utf-8").strip())
+                except (ValueError, OSError):
+                    pid = None
+                result.append({"project": proj["repo"], "sprint_label": label, "pid": pid})
+    return result
+
+
+def _any_sprint_running() -> Optional[dict]:
+    """Scan all projects for a running sprint. Returns first found or None."""
+    running = _all_sprints_running()
+    return running[0] if running else None
 
 
 class SprintMgmtRunBody(BaseModel):
@@ -1365,14 +1395,12 @@ def run_sprint_managed(body: SprintMgmtRunBody):
     if not SPRINT_MANAGER_PATH.exists():
         raise HTTPException(502, detail=f"sprint_manager.py not found at {SPRINT_MANAGER_PATH}")
 
-    running = _any_sprint_running()
-    if running:
+    project_root = _project_root_path(body.project)
+    if _is_sprint_running(project_root, body.sprint_label):
         raise HTTPException(
             409,
-            detail=f"Sprint {running['sprint_label']} is already running for {running['project']}",
+            detail=f"Sprint {body.sprint_label} is already running on {body.project}",
         )
-
-    project_root = _project_root_path(body.project)
     coder_path   = _coder_clone_path(project_root)
     commander    = _commander_dir(project_root)
 

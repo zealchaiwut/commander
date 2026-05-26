@@ -849,6 +849,7 @@
   <div class="header-right">
     <span class="env-badge hidden" id="env-badge"></span>
     <button class="btn-ghost">Filters</button>
+    <button class="btn-secondary" onclick="openDraftTicketModal()">+ New Ticket</button>
     <button class="btn-primary" onclick="openNewProjectModal()">+ New Project</button>
     <button id="btn-refresh" class="btn-icon" title="Refresh dashboard" aria-label="Refresh">
       <svg id="refresh-icon" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -2057,6 +2058,115 @@
     flex-shrink: 0; background: none; border: none; cursor: pointer;
     font-size: 16px; color: var(--red, #ef4444); line-height: 1; padding: 0 2px;
   }
+</style>
+
+<!-- ── Draft Ticket Modal (issue #94) ── -->
+<div class="modal-backdrop hidden" id="dt-backdrop" onclick="closeDraftTicketModal()"></div>
+<div class="modal dt-modal hidden" id="dt-modal" role="dialog" aria-modal="true" aria-labelledby="dt-modal-title">
+  <div class="modal-header">
+    <span class="modal-title" id="dt-modal-title">New Ticket</span>
+    <button class="modal-close" onclick="closeDraftTicketModal()" aria-label="Close">&times;</button>
+  </div>
+
+  <form id="dt-form" onsubmit="generateDraft(event)">
+    <div class="modal-field">
+      <label class="modal-label" for="dt-project">Project <span class="modal-required">*</span></label>
+      <select class="modal-input" id="dt-project"></select>
+    </div>
+    <div class="modal-field">
+      <label class="modal-label" for="dt-sprint">Sprint label</label>
+      <input class="modal-input" id="dt-sprint" type="text" placeholder="sprint-7" autocomplete="off">
+    </div>
+    <div class="modal-field">
+      <label class="modal-label" for="dt-description">Description <span class="modal-required">*</span></label>
+      <textarea class="modal-input dt-textarea" id="dt-description" placeholder="Describe the feature or bug you want to file…" rows="4"></textarea>
+    </div>
+    <div class="modal-field">
+      <label class="modal-label">Attachments <span class="modal-hint">(images, .md, .txt, .json, .py, .js, .html, .css)</span></label>
+      <div class="dt-dropzone" id="dt-dropzone"
+           ondragover="event.preventDefault(); this.classList.add('drag-over')"
+           ondragleave="this.classList.remove('drag-over')"
+           ondrop="_dtOnDrop(event)"
+           onclick="_dtPickFiles()">
+        <span class="dt-dropzone-hint">Drop files here or click to browse</span>
+        <input type="file" id="dt-file-input" multiple accept=".png,.jpg,.jpeg,.gif,.webp,.md,.txt,.json,.py,.js,.html,.css" style="display:none" onchange="_dtOnFileInput(event)">
+      </div>
+      <div class="dt-previews" id="dt-previews"></div>
+    </div>
+
+    <div class="modal-error hidden" id="dt-error"></div>
+
+    <div class="modal-footer">
+      <button type="button" class="btn-ghost" onclick="closeDraftTicketModal()">Cancel</button>
+      <button type="submit" class="btn-primary" id="dt-generate-btn">Generate Draft</button>
+    </div>
+  </form>
+
+  <!-- Draft review section (hidden until generated) -->
+  <div id="dt-draft-section" class="hidden">
+    <div class="dt-draft-divider"></div>
+    <div class="modal-field">
+      <label class="modal-label" for="dt-title">Title</label>
+      <input class="modal-input" id="dt-title" type="text" autocomplete="off">
+    </div>
+    <div class="modal-field">
+      <label class="modal-label" for="dt-body">Body <span class="modal-hint">(edit before posting)</span></label>
+      <textarea class="modal-input dt-body-textarea" id="dt-body" rows="10"></textarea>
+    </div>
+    <div class="modal-footer">
+      <button type="button" class="btn-ghost" onclick="closeDraftTicketModal()">Cancel</button>
+      <button type="button" class="btn-primary" id="dt-post-btn" onclick="postDraftToGitHub()">Post to GitHub</button>
+    </div>
+  </div>
+</div>
+
+<style>
+  /* ── Draft Ticket Modal ── */
+  .dt-modal { width: min(560px, calc(100vw - 32px)); max-height: calc(100vh - 48px); overflow-y: auto; }
+  .dt-textarea { resize: vertical; min-height: 80px; }
+  .dt-body-textarea { resize: vertical; min-height: 200px; font-family: var(--mono, monospace); font-size: 12px; }
+
+  .dt-dropzone {
+    border: 2px dashed var(--border); border-radius: 6px;
+    padding: 20px; text-align: center; cursor: pointer;
+    background: var(--surface-2); transition: border-color .15s, background .15s;
+  }
+  .dt-dropzone:hover, .dt-dropzone.drag-over {
+    border-color: var(--blue); background: var(--surface);
+  }
+  .dt-dropzone-hint { font-size: 12px; color: var(--text-muted); pointer-events: none; }
+
+  .dt-previews { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+  .dt-preview-item {
+    position: relative; width: 72px; text-align: center; font-size: 10px; color: var(--text-muted);
+  }
+  .dt-preview-img { width: 64px; height: 64px; object-fit: cover; border-radius: 4px; border: 1px solid var(--border); display: block; margin: 0 auto 2px; }
+  .dt-preview-icon { width: 64px; height: 64px; border-radius: 4px; border: 1px solid var(--border); background: var(--surface-2); display: flex; align-items: center; justify-content: center; font-size: 24px; margin: 0 auto 2px; }
+  .dt-preview-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 72px; }
+  .dt-preview-remove {
+    position: absolute; top: -4px; right: 2px;
+    background: var(--red); color: #fff; border: none; border-radius: 50%;
+    width: 16px; height: 16px; font-size: 11px; line-height: 16px; text-align: center;
+    cursor: pointer; padding: 0;
+  }
+  .dt-preview-remove:hover { opacity: .8; }
+
+  .dt-draft-divider { border-top: 1px solid var(--border); margin: 20px 0; }
+
+  .dt-spinner {
+    display: inline-block; width: 12px; height: 12px; margin-right: 6px;
+    border: 2px solid rgba(255,255,255,.4); border-top-color: #fff;
+    border-radius: 50%; animation: dt-spin .6s linear infinite; vertical-align: middle;
+  }
+  @keyframes dt-spin { to { transform: rotate(360deg); } }
+
+  /* ── Secondary button ── */
+  .btn-secondary {
+    padding: 6px 14px; border: 1px solid var(--border); border-radius: 6px;
+    background: var(--surface-2); color: var(--text); font-size: 12px; font-weight: 600;
+    transition: background .15s; cursor: pointer;
+  }
+  .btn-secondary:hover { background: var(--surface); }
 </style>
 
 <script src="/static/app.js"></script>

@@ -2,16 +2,18 @@ import asyncio
 import json
 import os
 import re
+import shutil
 import signal
 import subprocess
 import time
+import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, model_validator
@@ -1655,6 +1657,157 @@ def rerun_sprint(sprint_label: str, project: str, body: SprintRerunBody):
     if errors:
         result["errors"] = errors
     return result
+
+
+# ── Draft Ticket endpoints (issue #94) ───────────────────────────────────────
+
+_DRAFT_UPLOAD_DIR = Path(__file__).parent / "runtime" / "draft-uploads"
+_ALLOWED_UPLOAD_EXTS = {
+    ".png", ".jpg", ".jpeg", ".gif", ".webp",
+    ".md", ".txt", ".json", ".py", ".js", ".html", ".css",
+}
+
+
+def _parse_ba_draft(output: str) -> tuple[str, str]:
+    """Extract title and body from BA agent JSON output."""
+    # Strip markdown code fence if present
+    clean = re.sub(r"^```(?:json)?\s*", "", output.strip(), flags=re.MULTILINE)
+    clean = re.sub(r"\s*```\s*$", "", clean.strip(), flags=re.MULTILINE)
+    clean = clean.strip()
+
+    try:
+        data = json.loads(clean)
+        return str(data.get("title", "")), str(data.get("body", ""))
+    except json.JSONDecodeError:
+        pass
+
+    # Find outermost {...} block
+    start = clean.find("{")
+    end = clean.rfind("}")
+    if start >= 0 and end > start:
+        try:
+            data = json.loads(clean[start : end + 1])
+            return str(data.get("title", "")), str(data.get("body", ""))
+        except json.JSONDecodeError:
+            pass
+
+    first_line = output.split("\n")[0].strip()[:80]
+    return first_line or "Draft Ticket", output
+
+
+@app.post("/api/tickets/draft")
+async def create_ticket_draft(
+    description: str = Form(...),
+    project: str = Form(default=""),
+    sprint_label: str = Form(default=""),
+    files: list[UploadFile] = File(default=[]),
+):
+    description = description.strip()
+    if not description:
+        raise HTTPException(400, detail="Description is required")
+
+    draft_id = str(uuid.uuid4())
+    upload_dir = _DRAFT_UPLOAD_DIR / draft_id
+    upload_dir.mkdir(parents=True, exist_ok=True)
+
+    saved_paths: list[str] = []
+    for f in files:
+        if not f.filename:
+            continue
+        ext = Path(f.filename).suffix.lower()
+        if ext not in _ALLOWED_UPLOAD_EXTS:
+            continue
+        dest = upload_dir / f.filename
+        content = await f.read()
+        dest.write_bytes(content)
+        saved_paths.append(str(dest))
+
+    file_list = (
+        "\n".join(f"  - {p}" for p in saved_paths) if saved_paths else "  (none)"
+    )
+    prompt = (
+        "You are a BA (Business Analyst) agent writing a GitHub issue.\n\n"
+        f"User description: {description}\n\n"
+        "Write a complete GitHub issue with these sections:\n"
+        "  - Title (short, imperative, 5-10 words)\n"
+        "  - ## What & Why (1-3 sentences)\n"
+        "  - ## Acceptance Criteria (checkbox list, specific and testable)\n"
+        "  - ## UAT Test Steps (numbered, each with Expected: line)\n"
+        "  - ## Out of Scope (brief list)\n\n"
+        f"Reference files — read them and incorporate relevant details:\n{file_list}\n\n"
+        'Output ONLY valid JSON with exactly two string fields: "title" and "body".\n'
+        "The body field must be GitHub-flavored markdown. No text outside the JSON."
+    )
+
+    cmd = [
+        "claude",
+        "--model", "claude-sonnet-4-6",
+        "--dangerously-skip-permissions",
+        "-p", prompt,
+    ]
+
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            cwd=str(upload_dir),
+        )
+        try:
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=180.0)
+        except asyncio.TimeoutError:
+            proc.kill()
+            raise HTTPException(504, detail="BA agent timed out after 180s")
+    except FileNotFoundError:
+        shutil.rmtree(upload_dir, ignore_errors=True)
+        raise HTTPException(503, detail="claude CLI not found")
+
+    if proc.returncode != 0:
+        err = stderr.decode("utf-8", errors="replace").strip()
+        raise HTTPException(502, detail=f"BA agent failed: {err[:300]}")
+
+    output = stdout.decode("utf-8", errors="replace").strip()
+    title, body = _parse_ba_draft(output)
+    return {"draft_id": draft_id, "title": title, "body": body}
+
+
+class CreateTicketBody(BaseModel):
+    draft_id: str = ""
+    title: str
+    body: str = ""
+    project: str = ""
+    sprint_label: str = ""
+
+
+@app.post("/api/tickets/create", status_code=201)
+def create_ticket_from_draft(req: CreateTicketBody):
+    title = req.title.strip()
+    if not title:
+        raise HTTPException(400, detail="Title is required")
+
+    labels: list[str] = ["backlog"]
+    if req.sprint_label:
+        labels.append(req.sprint_label)
+
+    try:
+        number, url = github_client.create_issue(
+            title=title,
+            body=req.body,
+            labels=labels,
+            repo_name=req.project or None,
+        )
+    except subprocess.CalledProcessError as e:
+        raise HTTPException(502, detail=f"gh CLI failed: {e.stderr.strip()[:300]}")
+
+    if req.draft_id:
+        upload_dir = _DRAFT_UPLOAD_DIR / req.draft_id
+        if upload_dir.exists():
+            shutil.rmtree(upload_dir, ignore_errors=True)
+
+    github_client.invalidate(f"open_issues_body:")
+    github_client.invalidate(f"open_issues:")
+    github_client.invalidate(f"issues:")
+    return {"number": number, "url": url}
 
 
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")

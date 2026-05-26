@@ -422,6 +422,20 @@ async def remove_project(owner: str, repo_name: str, body: RemoveProjectBody):
     return {"ok": True, "removed": removed}
 
 
+@app.post("/api/projects/{owner}/{repo_name}/approve-batch")
+def approve_batch(owner: str, repo_name: str):
+    repo = f"{owner}/{repo_name}"
+    try:
+        issues = github_client.list_open_uat_issues(repo_name=repo)
+        approved = []
+        for issue in issues:
+            github_client.approve_issue(issue["number"], repo_name=repo)
+            approved.append(issue["number"])
+        return {"approved": approved, "count": len(approved)}
+    except subprocess.CalledProcessError as e:
+        raise _gh_error(e)
+
+
 @app.post("/api/projects/init")
 async def init_project(body: InitProjectBody):
     """Spawn init_project.py and stream its stdout back as SSE (text/event-stream).

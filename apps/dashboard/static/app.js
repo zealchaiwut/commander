@@ -386,8 +386,13 @@ function ticketCardHtml(ticket, repo) {
 
 function _ticketGroupHtml(label, tickets, repo) {
   if (tickets.length === 0) return '';
+  const r = escapeHtml(repo);
+  const approveAllBtn = label === 'UAT'
+    ? ` <button class="btn-approve-sm" style="margin-left:auto;font-size:11px;padding:2px 8px;" onclick="approveAllUat('${r}', this)">Approve all UAT</button>`
+    : '';
+  const hdrStyle = label === 'UAT' ? ' style="display:flex;align-items:center;"' : '';
   return `<div class="ticket-group">
-    <div class="expand-hdr-title ticket-group-hdr">${escapeHtml(label)} · ${tickets.length}</div>
+    <div class="expand-hdr-title ticket-group-hdr"${hdrStyle}>${escapeHtml(label)} · ${tickets.length}${approveAllBtn}</div>
     ${tickets.map(t => ticketCardHtml(t, repo)).join('')}
   </div>`;
 }
@@ -682,6 +687,21 @@ async function approveIssue(issueNum, repo, btnEl) {
     _refreshAfterAction(repo);
   } catch (e) {
     alert('Approve failed: ' + e.message);
+    if (btnEl) btnEl.disabled = false;
+  }
+}
+
+async function approveAllUat(repo, btnEl) {
+  if (btnEl) btnEl.disabled = true;
+  try {
+    const res = await fetch(
+      `/api/projects/${repo}/approve-batch`,
+      { method: 'POST' }
+    );
+    if (!res.ok) throw new Error(await res.text());
+    _refreshAfterAction(repo);
+  } catch (e) {
+    alert('Batch approve failed: ' + e.message);
     if (btnEl) btnEl.disabled = false;
   }
 }

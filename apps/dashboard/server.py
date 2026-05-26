@@ -1269,7 +1269,12 @@ def save_sprint_goal(body: SprintGoalBody):
 
 @app.get("/api/sprint-management/issues")
 def get_sprint_management_issues(repo: str):
-    """Return all open issues + sprint list + display order for a project."""
+    """Return all open issues + sprint list + display order for a project.
+
+    Also returns:
+    - empty_sprint_labels: sprint labels that have 0 open tickets (stale/ghost sprints)
+    - placeholder_sprint: the next sprint number to show as a drop target (max+1)
+    """
     try:
         issues = github_client.list_open_issues_with_body(repo_name=repo, limit=200)
         sprints = github_client.list_sprints(repo_name=repo)
@@ -1280,6 +1285,8 @@ def get_sprint_management_issues(repo: str):
 
     sprint_re_local = re.compile(r"^sprint-(\d+)$")
     result_issues = []
+    # Count open tickets per sprint label
+    sprint_ticket_counts: dict[int, int] = {n: 0 for n in sprints}
     for iss in issues:
         sprint_num = None
         for lbl in iss.get("labels", []):
@@ -1295,14 +1302,29 @@ def get_sprint_management_issues(repo: str):
             "status": github_client.classify_issue(iss),
             "url": iss.get("url", ""),
         })
+        if sprint_num is not None and sprint_num in sprint_ticket_counts:
+            sprint_ticket_counts[sprint_num] += 1
 
+    # Sprint labels with 0 tickets are "empty" — these are stale/ghost labels
+    empty_sprint_labels = [
+        f"sprint-{n}" for n in sorted(sprint_ticket_counts.keys())
+        if sprint_ticket_counts[n] == 0
+    ]
+
+    # Build order only from sprints that have tickets (non-empty)
+    non_empty_sprints = [n for n in sprints if sprint_ticket_counts.get(n, 0) > 0]
     project_root = _project_root_path(repo)
-    order = _load_sprint_order(project_root, sprints)
+    order = _load_sprint_order(project_root, non_empty_sprints)
+
+    # Placeholder sprint = max existing sprint + 1 (or 1 if no sprints)
+    placeholder_sprint = (max(sprints) if sprints else 0) + 1
 
     return {
         "sprints": sprints,
         "order": order,
         "issues": result_issues,
+        "empty_sprint_labels": empty_sprint_labels,
+        "placeholder_sprint": placeholder_sprint,
     }
 
 
@@ -1403,6 +1425,50 @@ async def create_sprint_label(body: SprintCreateBody):
     except ValueError as e:
         raise HTTPException(400, detail=str(e))
     return {"ok": True, "sprint_label": f"sprint-{next_num}"}
+
+
+class SprintDeleteBody(BaseModel):
+    labels: list[str]  # list of sprint-N label names to delete
+    project: str
+
+
+@app.post("/api/sprints/delete-empty")
+async def delete_empty_sprints(body: SprintDeleteBody):
+    """Delete empty sprint labels from GitHub. Only allows deleting sprint-N labels with 0 tickets."""
+    # Validate all labels are sprint-N pattern
+    for label in body.labels:
+        if not _SPRINT_LABEL_RE.match(label):
+            raise HTTPException(400, detail=f"Invalid sprint label: {label!r}")
+
+    # Verify each label has 0 tickets before deleting
+    try:
+        issues = github_client.list_open_issues_with_body(repo_name=body.project, limit=200)
+    except subprocess.CalledProcessError as e:
+        raise _gh_error(e)
+
+    label_set = set(body.labels)
+    for iss in issues:
+        for lbl in iss.get("labels", []):
+            if lbl["name"] in label_set:
+                raise HTTPException(
+                    400,
+                    detail=f"Label {lbl['name']!r} still has open tickets — cannot delete",
+                )
+
+    deleted = []
+    errors = []
+    for label in body.labels:
+        try:
+            github_client.delete_label(label, repo_name=body.project)
+            deleted.append(label)
+        except subprocess.CalledProcessError as e:
+            errors.append(f"{label}: {e.stderr.strip() if e.stderr else str(e)}")
+
+    github_client.invalidate("sprints:")
+    result: dict = {"ok": True, "deleted": deleted}
+    if errors:
+        result["errors"] = errors
+    return result
 
 
 _RERUN_STRIP_LABELS = {"UAT", "UAT-approved", "released", "SIT", "in-progress", "needs-rework"}

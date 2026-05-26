@@ -1230,6 +1230,7 @@ def _any_sprint_running() -> Optional[dict]:
 class SprintMgmtRunBody(BaseModel):
     project: str
     sprint_label: str
+    migrate_from: list[int] = []
 
 
 class SprintOrderBody(BaseModel):
@@ -1351,6 +1352,9 @@ def save_sprint_order(project: str, body: SprintOrderBody):
     return {"ok": True}
 
 
+_MIGRATION_STATUS_LABELS = {"UAT", "UAT-approved", "SIT", "in-progress", "needs-rework"}
+
+
 @app.post("/api/sprints/run", status_code=202)
 def run_sprint_managed(body: SprintMgmtRunBody):
     """Spawn sprint_manager.py for the given project + sprint.
@@ -1359,6 +1363,8 @@ def run_sprint_managed(body: SprintMgmtRunBody):
     - ANTHROPIC_API_KEY stripped from subprocess env
     - stdout/stderr → .commander/logs/sprint-run-<label>-<ts>.log
     - PID → .commander/sprints/<label>-pid
+    - migrate_from: list of sprint numbers whose open tickets are moved to target sprint
+      before dispatch; rollback on any failure.
     """
     if not _SPRINT_LABEL_RE.match(body.sprint_label):
         raise HTTPException(400, detail=f"Invalid sprint label: {body.sprint_label!r}")
@@ -1375,6 +1381,81 @@ def run_sprint_managed(body: SprintMgmtRunBody):
     project_root = _project_root_path(body.project)
     coder_path   = _coder_clone_path(project_root)
     commander    = _commander_dir(project_root)
+
+    # ── Migration: move open tickets from earlier sprints to target ───────────
+    migration_log_lines: list[str] = []
+    migrated_count = 0
+    if body.migrate_from:
+        target_label = body.sprint_label
+        ts_mig = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
+        mig_log_dir = commander / "logs"
+        mig_log_dir.mkdir(parents=True, exist_ok=True)
+        mig_log_path = mig_log_dir / f"sprint-migration-{ts_mig}.log"
+
+        try:
+            all_issues = github_client.list_open_issues_with_body(repo_name=body.project, limit=200)
+        except subprocess.CalledProcessError as e:
+            raise _gh_error(e)
+
+        # Collect pending changes: (issue_num, from_label, labels_to_remove)
+        pending: list[tuple[int, str, list[str]]] = []
+        for src_num in body.migrate_from:
+            src_label = f"sprint-{src_num}"
+            src_issues = [
+                iss for iss in all_issues
+                if any(lbl["name"] == src_label for lbl in iss.get("labels", []))
+            ]
+            for iss in src_issues:
+                current_labels = {lbl["name"] for lbl in iss.get("labels", [])}
+                status_to_remove = list(current_labels & _MIGRATION_STATUS_LABELS)
+                pending.append((iss["number"], src_label, status_to_remove))
+
+        # Apply changes with rollback on failure
+        applied: list[tuple[int, str, list[str]]] = []
+        try:
+            for issue_num, src_label, status_to_remove in pending:
+                remove_labels = [src_label] + status_to_remove
+                add_labels = [target_label]
+                github_client.update_labels(
+                    issue_num,
+                    add=add_labels,
+                    remove=remove_labels,
+                    repo_name=body.project,
+                )
+                applied.append((issue_num, src_label, status_to_remove))
+                migration_log_lines.append(
+                    f"Moved #{issue_num} from {src_label} to {target_label}"
+                    + (f"; stripped status: {status_to_remove}" if status_to_remove else "")
+                )
+                migrated_count += 1
+        except subprocess.CalledProcessError as rollback_err:
+            # Rollback applied changes
+            rollback_errors: list[str] = []
+            for issue_num, src_label, status_to_remove in reversed(applied):
+                try:
+                    github_client.update_labels(
+                        issue_num,
+                        add=[src_label] + status_to_remove,
+                        remove=[target_label],
+                        repo_name=body.project,
+                    )
+                    migration_log_lines.append(f"ROLLBACK #{issue_num}: restored {src_label}")
+                except subprocess.CalledProcessError as rb_e:
+                    rollback_errors.append(f"#{issue_num}: {rb_e.stderr.strip()}")
+                    migration_log_lines.append(f"ROLLBACK FAILED #{issue_num}")
+
+            mig_log_path.write_text("\n".join(migration_log_lines) + "\n", encoding="utf-8")
+            detail = f"Migration failed on #{pending[len(applied)][0]}: {rollback_err.stderr.strip()}"
+            if rollback_errors:
+                detail += f"; rollback errors: {'; '.join(rollback_errors)}"
+            raise HTTPException(500, detail=detail)
+
+        mig_log_path.write_text("\n".join(migration_log_lines) + "\n", encoding="utf-8")
+
+        # Invalidate caches after migration
+        github_client.invalidate("open_issues_body:")
+        github_client.invalidate("open_issues:")
+        github_client.invalidate("issues:")
 
     log_dir = commander / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
@@ -1401,7 +1482,14 @@ def run_sprint_managed(body: SprintMgmtRunBody):
     )
 
     pid_path.write_text(str(proc.pid), encoding="utf-8")
-    return {"ok": True, "sprint_label": body.sprint_label, "pid": proc.pid, "log": str(log_path)}
+    return {
+        "ok": True,
+        "sprint_label": body.sprint_label,
+        "pid": proc.pid,
+        "log": str(log_path),
+        "migrated_count": migrated_count,
+        "migrate_from": body.migrate_from,
+    }
 
 
 @app.get("/api/sprints/running")

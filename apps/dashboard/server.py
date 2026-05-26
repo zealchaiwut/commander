@@ -11,7 +11,7 @@ from typing import Optional
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, model_validator
 
@@ -159,6 +159,9 @@ async def root():
 
 @app.get("/projects/{path:path}")
 async def spa_project_route(path: str):
+    if path.endswith("/plan-sprint"):
+        new_path = path[: -len("plan-sprint")] + "sprint-mgmt"
+        return RedirectResponse(url=f"/projects/{new_path}", status_code=308)
     return FileResponse(STATIC_DIR / "index.html")
 
 
@@ -1164,6 +1167,10 @@ def _sprint_order_path(project_root: Path) -> Path:
     return _commander_dir(project_root) / "sprint-order.json"
 
 
+def _sprint_goal_path(project_root: Path, sprint_label: str) -> Path:
+    return _commander_dir(project_root) / "sprints" / f"{sprint_label}-goal.txt"
+
+
 def _load_sprint_order(project_root: Path, all_sprints: list[int]) -> list[str]:
     """Load sprint order from file; fill missing/new sprints in ascending order."""
     order_path = _sprint_order_path(project_root)
@@ -1229,6 +1236,34 @@ class SprintOrderBody(BaseModel):
 
 class SprintCreateBody(BaseModel):
     project: str
+
+
+class SprintGoalBody(BaseModel):
+    project: str
+    sprint_label: str
+    goal: str
+
+
+@app.get("/api/sprints/goal")
+def get_sprint_goal(project: str, sprint: str):
+    """Return the persisted sprint goal for a project/sprint."""
+    project_root = _project_root_path(project)
+    goal_path = _sprint_goal_path(project_root, sprint)
+    if goal_path.exists():
+        return {"goal": goal_path.read_text(encoding="utf-8").strip()}
+    return {"goal": ""}
+
+
+@app.post("/api/sprints/goal")
+def save_sprint_goal(body: SprintGoalBody):
+    """Persist sprint goal to .commander/sprints/<label>-goal.txt."""
+    if not _SPRINT_LABEL_RE.match(body.sprint_label):
+        raise HTTPException(400, detail=f"Invalid sprint label: {body.sprint_label!r}")
+    project_root = _project_root_path(body.project)
+    goal_path = _sprint_goal_path(project_root, body.sprint_label)
+    goal_path.parent.mkdir(parents=True, exist_ok=True)
+    goal_path.write_text(body.goal, encoding="utf-8")
+    return {"ok": True}
 
 
 @app.get("/api/sprint-management/issues")
@@ -1327,6 +1362,9 @@ def run_sprint_managed(body: SprintMgmtRunBody):
     pid_path = pid_dir / f"{body.sprint_label}-pid"
 
     stripped_env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
+    goal_path = _sprint_goal_path(project_root, body.sprint_label)
+    if goal_path.exists():
+        stripped_env["SPRINT_GOAL"] = goal_path.read_text(encoding="utf-8").strip()
 
     log_fh = open(log_path, "w")
     proc = subprocess.Popen(

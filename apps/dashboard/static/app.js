@@ -2241,12 +2241,15 @@ async function _loadHistoryRowContent(idx) {
 
 // ── Sprint Management (issue #95) ─────────────────────────────────────────────
 
-let _smgmtCurrentRepo  = null;   // "owner/repo" currently displayed
-let _smgmtData         = null;   // { sprints, order, issues } from API
-let _smgmtDragSprint   = null;   // sprint label currently being drag-reordered
-let _smgmtDragTicket   = null;   // { number, fromSprint } being dragged
-let _smgmtRunningInfo  = null;   // { running, project, sprint_label } from /api/sprints/running
-let _smgmtPollTimer    = null;
+let _smgmtCurrentRepo    = null;   // "owner/repo" currently displayed
+let _smgmtData           = null;   // { sprints, order, issues } from API
+let _smgmtDragSprint     = null;   // sprint label currently being drag-reordered
+let _smgmtDragTicket     = null;   // { number, fromSprint } being dragged
+let _smgmtRunningInfo    = null;   // { running, project, sprint_label } from /api/sprints/running
+let _smgmtPollTimer      = null;
+let _smgmtGoals          = {};     // sprint_label -> goal string
+let _smgmtGoalSaveTimers = {};     // sprint_label -> debounce timer id
+let _smgmtBacklogFilter  = '';     // label name filter for backlog, '' = all
 
 async function smgmtInit() {
   // Legacy: called with no repo; use current project or first project
@@ -2284,6 +2287,8 @@ async function smgmtInitForProject(repo) {
 async function smgmtSelectProject(repo) {
   if (!repo) return;
   _smgmtCurrentRepo = repo;
+  _smgmtGoals = {};
+  _smgmtBacklogFilter = '';
   smgmtShowError('');
   const bodyEl = document.getElementById('smgmt-body');
   if (bodyEl) bodyEl.innerHTML = '<div class="smgmt-loading">Loading sprints…</div>';
@@ -2296,6 +2301,8 @@ async function smgmtSelectProject(repo) {
     smgmtShowError('Failed to load sprints: ' + e.message);
     return;
   }
+
+  await smgmtLoadGoals();
   smgmtRender();
 }
 
@@ -2331,17 +2338,17 @@ function smgmtRender() {
     ).join('');
   }
 
-  // Render unassigned tickets
-  smgmtRenderUnassigned(unassigned);
+  smgmtRenderBacklog(unassigned);
   smgmtApplyRunState();
 }
 
 function smgmtSprintBlockHtml(label, tickets, isNext) {
   const n = parseInt(label.split('-')[1], 10);
-  const nextBadge = isNext
-    ? '<span class="smgmt-next-badge">NEXT UP</span>'
-    : '';
-  const runBtnId = `smgmt-run-btn-${label.replace('-', '_')}`;
+  const nextBadge = isNext ? '<span class="smgmt-next-badge">NEXT UP</span>' : '';
+  const runBtnId  = `smgmt-run-btn-${label.replace('-', '_')}`;
+  const goalId    = `smgmt-goal-${label.replace('-', '_')}`;
+  const savedGoal = _smgmtGoals[label] || '';
+  const goalValid = savedGoal.length >= 10;
 
   const ticketsHtml = tickets.length > 0
     ? tickets.map(t => smgmtTicketCardHtml(t, label)).join('')
@@ -2362,8 +2369,16 @@ function smgmtSprintBlockHtml(label, tickets, isNext) {
         <span class="smgmt-sprint-count">${tickets.length} ticket${tickets.length !== 1 ? 's' : ''}</span>
         ${isNext
           ? `<button class="smgmt-run-btn" id="${runBtnId}"
+                     title="${goalValid ? '' : 'Set a sprint goal first'}"
+                     ${goalValid ? '' : 'disabled'}
                      onclick="smgmtRunSprint('${label}')">Run sprint</button>`
           : ''}
+      </div>
+      <div class="smgmt-sprint-goal-row">
+        <input class="smgmt-goal-input" id="${goalId}" type="text"
+               placeholder="Sprint goal (required to run) — e.g. Dashboard UX cleanup"
+               value="${escapeHtml(savedGoal)}"
+               oninput="smgmtGoalInput('${label}', this.value)" />
       </div>
       <div class="smgmt-sprint-tickets" id="smgmt-tickets-${label}">
         ${ticketsHtml}
@@ -2396,13 +2411,152 @@ function smgmtTicketCardHtml(ticket, currentSprint) {
     </div>`;
 }
 
-function smgmtRenderUnassigned(tickets) {
-  const el = document.getElementById('smgmt-unassigned-tickets');
-  if (!el) return;
-  if (tickets.length === 0) {
-    el.innerHTML = '<div class="smgmt-drop-hint">Drop tickets here to remove sprint label</div>';
+function smgmtRenderBacklog(tickets) {
+  const labelEl    = document.getElementById('smgmt-backlog-label');
+  const filterEl   = document.getElementById('smgmt-backlog-filter');
+  const ticketsEl  = document.getElementById('smgmt-backlog-tickets');
+  if (!ticketsEl) return;
+
+  // Populate label filter options from unique labels across all backlog tickets
+  if (filterEl) {
+    const labelSet = new Set();
+    for (const t of tickets) {
+      for (const l of (t.labels || [])) labelSet.add(l.name);
+    }
+    const existing = new Set([...filterEl.options].slice(1).map(o => o.value));
+    for (const name of [...labelSet].sort()) {
+      if (!existing.has(name)) {
+        const opt = document.createElement('option');
+        opt.value = name;
+        opt.textContent = name;
+        filterEl.appendChild(opt);
+      }
+    }
+    // Keep current filter selection
+    filterEl.value = _smgmtBacklogFilter;
+  }
+
+  // Apply filter
+  const filtered = _smgmtBacklogFilter
+    ? tickets.filter(t => (t.labels || []).some(l => l.name === _smgmtBacklogFilter))
+    : tickets;
+
+  if (labelEl) {
+    labelEl.textContent = `Backlog · ${tickets.length} ticket${tickets.length !== 1 ? 's' : ''} · unassigned to any sprint`;
+  }
+
+  const sprintLabels = _smgmtData?.order || [];
+  if (filtered.length === 0) {
+    ticketsEl.innerHTML = '<div class="smgmt-drop-hint">Drop tickets here to remove sprint label</div>';
   } else {
-    el.innerHTML = tickets.map(t => smgmtTicketCardHtml(t, null)).join('');
+    ticketsEl.innerHTML = filtered.map(t => smgmtBacklogTicketHtml(t, sprintLabels)).join('');
+  }
+}
+
+function smgmtBacklogTicketHtml(ticket, sprintLabels) {
+  const sprintOptions = sprintLabels.map(label => {
+    const n = label.split('-')[1];
+    return `<option value="${label}">Sprint ${n}</option>`;
+  }).join('');
+
+  const sizeLabel = (ticket.labels || []).find(l => /^size-/.test(l.name));
+  const sizeChip  = sizeLabel
+    ? `<span class="smgmt-size-chip">${escapeHtml(sizeLabel.name.replace('size-', ''))}</span>`
+    : '';
+
+  return `
+    <div class="smgmt-ticket" id="smgmt-ticket-${ticket.number}"
+         draggable="true"
+         data-issue="${ticket.number}"
+         data-sprint=""
+         ondragstart="smgmtTicketDragStart(event, ${ticket.number}, null)"
+         ondragend="smgmtTicketDragEnd(event)">
+      <i class="ti ti-grip-vertical smgmt-ticket-grip"></i>
+      <a class="smgmt-ticket-num" href="${escapeHtml(ticket.url || '#')}" target="_blank"
+         rel="noopener" onclick="event.stopPropagation()">#${ticket.number}</a>
+      <span class="smgmt-ticket-title" title="${escapeHtml(ticket.title)}">${escapeHtml(ticket.title)}</span>
+      ${sizeChip}
+      <select class="smgmt-move-to" onchange="smgmtMoveTicketTo(${ticket.number}, this.value)"
+              onclick="event.stopPropagation()">
+        <option value="">Move to...</option>
+        ${sprintOptions}
+      </select>
+    </div>`;
+}
+
+function smgmtBacklogFilter(label) {
+  _smgmtBacklogFilter = label;
+  if (!_smgmtData) return;
+  const unassigned = _smgmtData.issues.filter(i => i.sprint == null);
+  smgmtRenderBacklog(unassigned);
+}
+
+async function smgmtMoveTicketTo(issueNum, sprintLabel) {
+  if (!sprintLabel) return;
+  const sprintNum = parseInt(sprintLabel.split('-')[1], 10);
+
+  const iss = _smgmtData.issues.find(i => i.number === issueNum);
+  if (iss) iss.sprint = sprintNum;
+  smgmtRender();
+
+  try {
+    const res = await fetch('/api/sprint-planning/assign', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ issue: issueNum, sprint: sprintNum }),
+    });
+    if (!res.ok) throw new Error(await res.text());
+  } catch (e) {
+    const iss2 = _smgmtData.issues.find(i => i.number === issueNum);
+    if (iss2) iss2.sprint = null;
+    smgmtRender();
+    smgmtShowError(`Failed to move ticket #${issueNum}: ${e.message}`);
+  }
+}
+
+async function smgmtLoadGoals() {
+  if (!_smgmtCurrentRepo || !_smgmtData) return;
+  const repo = _smgmtCurrentRepo;
+  await Promise.all(_smgmtData.order.map(async (label) => {
+    try {
+      const res = await fetch(
+        `/api/sprints/goal?project=${encodeURIComponent(repo)}&sprint=${encodeURIComponent(label)}`
+      );
+      if (res.ok) {
+        const data = await res.json();
+        _smgmtGoals[label] = data.goal || '';
+      } else {
+        _smgmtGoals[label] = '';
+      }
+    } catch (e) {
+      _smgmtGoals[label] = '';
+    }
+  }));
+}
+
+function smgmtGoalInput(label, value) {
+  _smgmtGoals[label] = value;
+  const runBtnId = `smgmt-run-btn-${label.replace('-', '_')}`;
+  const btn = document.getElementById(runBtnId);
+  if (btn) {
+    const valid = value.length >= 10;
+    btn.disabled = !valid;
+    btn.title = valid ? '' : 'Set a sprint goal first';
+  }
+  if (_smgmtGoalSaveTimers[label]) clearTimeout(_smgmtGoalSaveTimers[label]);
+  _smgmtGoalSaveTimers[label] = setTimeout(() => smgmtSaveGoal(label, value), 800);
+}
+
+async function smgmtSaveGoal(label, goal) {
+  if (!_smgmtCurrentRepo) return;
+  try {
+    await fetch('/api/sprints/goal', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ project: _smgmtCurrentRepo, sprint_label: label, goal }),
+    });
+  } catch (e) {
+    smgmtShowError('Failed to save sprint goal: ' + e.message);
   }
 }
 
@@ -2446,7 +2600,7 @@ function smgmtTicketDragEnd(event) {
   }
   _smgmtDragTicket = null;
   // Clear all hover states
-  document.querySelectorAll('.smgmt-sprint-block, .smgmt-unassigned').forEach(el => {
+  document.querySelectorAll('.smgmt-sprint-block, .smgmt-backlog').forEach(el => {
     el.classList.remove('drag-over-sprint', 'drag-over-zone');
   });
 }
@@ -2470,12 +2624,12 @@ function smgmtDragOverZone(event, sprintLabel) {
   if (_smgmtDragTicket) {
     if (sprintLabel) {
       document.querySelectorAll('.smgmt-sprint-block').forEach(b => b.classList.remove('drag-over-sprint'));
-      document.querySelectorAll('.smgmt-unassigned').forEach(b => b.classList.remove('drag-over-zone'));
+      document.querySelectorAll('.smgmt-backlog').forEach(b => b.classList.remove('drag-over-zone'));
       const target = document.getElementById(`smgmt-block-${sprintLabel}`);
       if (target) target.classList.add('drag-over-sprint');
     } else {
       document.querySelectorAll('.smgmt-sprint-block').forEach(b => b.classList.remove('drag-over-sprint'));
-      document.getElementById('smgmt-unassigned')?.classList.add('drag-over-zone');
+      document.getElementById('smgmt-backlog')?.classList.add('drag-over-zone');
     }
   }
 }
@@ -2489,7 +2643,7 @@ function smgmtDragLeave(event) {
 
 async function smgmtDropOnSprint(event, targetSprintLabel) {
   event.preventDefault();
-  document.querySelectorAll('.smgmt-sprint-block, .smgmt-unassigned').forEach(el => {
+  document.querySelectorAll('.smgmt-sprint-block, .smgmt-backlog').forEach(el => {
     el.classList.remove('drag-over-sprint', 'drag-over-zone');
   });
 
@@ -2569,6 +2723,11 @@ async function smgmtReorderSprints(fromLabel, toLabel) {
 
 async function smgmtRunSprint(sprintLabel) {
   if (!_smgmtCurrentRepo) return;
+  const goal = _smgmtGoals[sprintLabel] || '';
+  if (goal.length < 10) {
+    smgmtShowError('Set a sprint goal (at least 10 characters) before running.');
+    return;
+  }
   const runBtnId = `smgmt-run-btn-${sprintLabel.replace('-', '_')}`;
   const btn = document.getElementById(runBtnId);
   if (btn) { btn.disabled = true; btn.textContent = 'Starting…'; }
@@ -2583,7 +2742,11 @@ async function smgmtRunSprint(sprintLabel) {
     smgmtPollRunStatus();
   } catch (e) {
     smgmtShowError('Failed to start sprint: ' + e.message);
-    if (btn) { btn.disabled = false; btn.textContent = 'Run sprint'; }
+    if (btn) {
+      const goalValid = ((_smgmtGoals[sprintLabel] || '').length >= 10);
+      btn.disabled = !goalValid;
+      btn.textContent = 'Run sprint';
+    }
   }
 }
 
@@ -2612,7 +2775,10 @@ function smgmtApplyRunState(sprintStatus) {
     const btnLabel = btn.id.replace('smgmt-run-btn-', '').replace('_', '-');
 
     if (!running) {
-      btn.disabled = false;
+      const goal = _smgmtGoals[btnLabel] || '';
+      const goalValid = goal.length >= 10;
+      btn.disabled = !goalValid;
+      btn.title = goalValid ? '' : 'Set a sprint goal first';
       btn.textContent = 'Run sprint';
       return;
     }

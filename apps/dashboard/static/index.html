@@ -810,12 +810,22 @@
     <div class="smgmt-body" id="smgmt-body">
       <div class="smgmt-loading" id="smgmt-loading">Select a project to view sprints.</div>
     </div>
-    <div class="smgmt-unassigned" id="smgmt-unassigned"
+    <div class="smgmt-backlog" id="smgmt-backlog"
          ondragover="smgmtDragOverZone(event, null)"
          ondragleave="smgmtDragLeave(event)"
          ondrop="smgmtDropOnSprint(event, null)">
-      <div class="smgmt-unassigned-label"><i class="ti ti-inbox"></i> Unassigned</div>
-      <div class="smgmt-unassigned-tickets" id="smgmt-unassigned-tickets">
+      <div class="smgmt-backlog-header">
+        <div class="smgmt-backlog-title">
+          <i class="ti ti-inbox"></i>
+          <span id="smgmt-backlog-label">Backlog</span>
+        </div>
+        <select class="smgmt-backlog-filter" id="smgmt-backlog-filter"
+                onchange="smgmtBacklogFilter(this.value)"
+                onclick="event.stopPropagation()">
+          <option value="">All labels</option>
+        </select>
+      </div>
+      <div class="smgmt-backlog-tickets" id="smgmt-backlog-tickets">
         <div class="smgmt-drop-hint">Drop tickets here to remove sprint label</div>
       </div>
     </div>
@@ -1383,29 +1393,67 @@
   .smgmt-status-uat      { background: var(--purple-bg); color: var(--purple); }
   .smgmt-status-done     { background: var(--green-bg); color: var(--green); }
 
-  /* Unassigned zone */
-  .smgmt-unassigned {
+  /* Sprint goal input row */
+  .smgmt-sprint-goal-row {
+    padding: 8px 14px; border-bottom: 1px solid var(--border);
+    background: var(--surface);
+  }
+  .smgmt-goal-input {
+    width: 100%; box-sizing: border-box;
+    padding: 6px 10px; font-size: 12px; font-family: inherit;
+    border: 1px solid var(--border); border-radius: 5px;
+    background: var(--surface-2); color: var(--text);
+    outline: none; transition: border-color .15s;
+  }
+  .smgmt-goal-input:focus { border-color: var(--blue); }
+
+  /* Backlog section */
+  .smgmt-backlog {
     margin: 0 24px 24px;
     border: 2px dashed var(--border); border-radius: 8px;
     background: var(--surface); transition: border-color .15s, background .15s;
   }
-  .smgmt-unassigned.drag-over-zone {
+  .smgmt-backlog.drag-over-zone {
     border-color: var(--blue); background: var(--blue-bg);
   }
-  .smgmt-unassigned-label {
-    display: flex; align-items: center; gap: 6px;
-    padding: 8px 14px; font-size: 12px; font-weight: 600;
-    color: var(--text-muted); border-bottom: 1px dashed var(--border);
+  .smgmt-backlog-header {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    padding: 8px 14px; border-bottom: 1px dashed var(--border);
   }
-  .smgmt-unassigned-tickets {
+  .smgmt-backlog-title {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 12px; font-weight: 600; color: var(--text-muted);
+  }
+  .smgmt-backlog-filter {
+    padding: 3px 6px; font-size: 11px; font-family: inherit;
+    border: 1px solid var(--border); border-radius: 5px;
+    background: var(--surface-2); color: var(--text);
+    outline: none; cursor: pointer;
+  }
+  .smgmt-backlog-tickets {
     padding: 8px 14px; min-height: 48px;
     display: flex; flex-direction: column; gap: 6px;
+  }
+
+  /* Size chip on backlog tickets */
+  .smgmt-size-chip {
+    font-size: 10px; font-weight: 600; padding: 2px 5px; border-radius: 3px;
+    flex-shrink: 0; background: var(--surface); border: 1px solid var(--border);
+    color: var(--text-muted); text-transform: uppercase;
+  }
+
+  /* "Move to..." dropdown */
+  .smgmt-move-to {
+    padding: 2px 5px; font-size: 11px; font-family: inherit;
+    border: 1px solid var(--border); border-radius: 4px;
+    background: var(--surface-2); color: var(--text);
+    outline: none; cursor: pointer; flex-shrink: 0;
   }
 
   @media (max-width: 600px) {
     .smgmt-header { padding: 10px 12px; }
     .smgmt-body   { padding: 12px; }
-    .smgmt-unassigned { margin: 0 12px 16px; }
+    .smgmt-backlog { margin: 0 12px 16px; }
   }
 </style>
 

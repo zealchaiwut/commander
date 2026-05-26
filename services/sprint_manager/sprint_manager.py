@@ -2231,13 +2231,15 @@ def run_sprint(
 
     start_time = time.monotonic()
 
-    for issue_state in state.issues:
+    total_issues = len(state.issues)
+    for idx, issue_state in enumerate(state.issues, start=1):
         num   = issue_state.number
         title = issue_state.title
+        progress = f"[{idx}/{total_issues}]"
 
         # Resume: skip already-done/skipped
         if resume and issue_state.status in ("done", "skipped"):
-            print(f"\n--- Issue #{num}: {title} --- [SKIP: already {issue_state.status}]")
+            print(f"\n--- {progress} Issue #{num}: {title} --- [SKIP: already {issue_state.status}]")
             summary.processed.append(f"#{num}")
             if issue_state.status == "done":
                 summary.merged.append(f"#{num}")
@@ -2247,12 +2249,12 @@ def run_sprint(
 
         # retry_failed: skip only done issues
         if retry_failed and issue_state.status == "done":
-            print(f"\n--- Issue #{num}: {title} --- [SKIP: already done]")
+            print(f"\n--- {progress} Issue #{num}: {title} --- [SKIP: already done]")
             summary.processed.append(f"#{num}")
             summary.merged.append(f"#{num}")
             continue
 
-        print(f"\n--- Issue #{num}: {title} ---")
+        print(f"\n--- {progress} Issue #{num}: {title} ---")
         summary.processed.append(f"#{num}")
 
         # Preflight filter: skip issues not approved by pre-flight review
@@ -2282,10 +2284,14 @@ def run_sprint(
                 _write_runtime_port(cfg.worktree_coder, chosen_port)
 
         # -- Dispatch coder --
+        _coder_t0 = time.monotonic()
         coder_ok, coder_category = _dispatch_coder(
             num, alert_modes, sprint_branch=target_branch, repo_name=eff_repo, cfg=cfg,
             chosen_port=chosen_port,
         )
+        _coder_elapsed = time.monotonic() - _coder_t0
+        _coder_m, _coder_s = divmod(int(_coder_elapsed), 60)
+        print(f"  Total time used on coder dispatch: {_coder_m}m {_coder_s}s")
 
         if not coder_ok:
             category = coder_category or FailureCategory.CRASH
@@ -2308,10 +2314,14 @@ def run_sprint(
             continue
 
         # -- Dispatch tester --
+        _tester_t0 = time.monotonic()
         tester_rc, hang_category = _dispatch_tester(
             num, alert_modes, repo_name=eff_repo, cfg=cfg,
             chosen_port=chosen_port,
         )
+        _tester_elapsed = time.monotonic() - _tester_t0
+        _tester_m, _tester_s = divmod(int(_tester_elapsed), 60)
+        print(f"  Total time used on tester dispatch: {_tester_m}m {_tester_s}s")
 
         if hang_category == FailureCategory.HANG:
             issue_state.status      = "skipped"

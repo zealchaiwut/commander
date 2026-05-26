@@ -522,4 +522,28 @@ class TestLiveSprintStatus:
         client.post("/api/sprint-status", json=payload)
         res = client.get("/api/sprint-status")
         assert res.status_code == 200
-        assert res.json()["sprint_label"] == "sprint-99"
+        data = res.json()
+        assert data["active"] is True
+        # Multi-sprint format: sprint status is returned under "statuses" list
+        assert "statuses" in data
+        sprint_labels = [s["sprint_label"] for s in data["statuses"]]
+        assert "sprint-99" in sprint_labels
+
+    def test_get_sprint_status_with_project_filter(self, client):
+        payload = {
+            "project": "owner/repo-test",
+            "sprint_label": "sprint-88",
+            "sprint_number": 88,
+            "issues": [],
+            "start_timestamp": "2026-01-01T00:00:00Z",
+            "total_tokens_in": 0,
+            "total_tokens_out": 0,
+            "wall_clock_secs": 0.0,
+        }
+        client.post("/api/sprint-status", json=payload)
+        # Filter by project returns single-status format
+        res = client.get("/api/sprint-status", params={"project": "owner/repo-test"})
+        assert res.status_code == 200
+        data = res.json()
+        assert data["active"] is True
+        assert data["sprint_label"] == "sprint-88"

@@ -2925,22 +2925,34 @@ async function smgmtPollRunStatus() {
       _smgmtAllRunning = newMap;
     }
 
-    // Sprint status for progress text (one sprint at a time from /api/sprint-status)
-    let sprintStatus = null;
+    // Sprint status for progress text — build a map of sprint_label -> status data.
+    // Supports both the new multi-sprint format {statuses: [...]} and the legacy
+    // single-sprint format {sprint_label, issues, ...}.
+    let sprintStatusMap = {};  // sprint_label -> status object
     if (statusRes.ok) {
       const statusData = await statusRes.json();
-      if (statusData.active) sprintStatus = statusData;
+      if (statusData.statuses) {
+        // New multi-sprint format
+        for (const s of statusData.statuses) {
+          if (s.sprint_label) sprintStatusMap[s.sprint_label] = s;
+        }
+      } else if (statusData.active && statusData.sprint_label) {
+        // Legacy single-sprint format
+        sprintStatusMap[statusData.sprint_label] = statusData;
+      }
     }
 
-    smgmtApplyRunState(sprintStatus);
+    smgmtApplyRunState(sprintStatusMap);
     _updateRunningBanner();
     _updateOverviewRunningBadges();
   } catch { /* ignore poll errors */ }
 }
 
-function smgmtApplyRunState(sprintStatus) {
+function smgmtApplyRunState(sprintStatusMap) {
   // Per-#123: each sprint card checks its own (project, sprint_label) key independently.
   // Multiple cards can be in RUNNING state simultaneously.
+  // sprintStatusMap: { sprint_label -> status_object } built from /api/sprint-status
+  if (!sprintStatusMap) sprintStatusMap = {};
 
   // Clear running state from all blocks first
   document.querySelectorAll('.smgmt-sprint-block').forEach(block => {
@@ -2981,9 +2993,10 @@ function smgmtApplyRunState(sprintStatus) {
       hdr.appendChild(runBadge);
     }
 
-    // Build progress text (from /api/sprint-status which tracks one sprint at a time)
+    // Build progress text from per-sprint status map
     let progressText = '';
-    if (sprintStatus && sprintStatus.sprint_label === runLabel) {
+    const sprintStatus = sprintStatusMap[runLabel];
+    if (sprintStatus) {
       const total = (sprintStatus.issues || []).length;
       const done  = (sprintStatus.issues || []).filter(i =>
         i.status === 'done' || i.status === 'skipped'

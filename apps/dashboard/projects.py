@@ -243,6 +243,38 @@ def _worktree_path_for_repo(repo: str) -> Optional[Path]:
 
 # ── public API ────────────────────────────────────────────────────────────────
 
+def _find_all_projects_jsons() -> list[Path]:
+    """Return all projects.json paths in this and sibling dashboard clones.
+
+    Looks for sibling clones (prd, uat, main, tester) at the same level as
+    the current clone root (3 directories above projects.json).
+    """
+    own = PROJECTS_FILE
+    clone_root = own.parent.parent.parent  # apps/dashboard -> apps -> clone root
+    project_root = clone_root.parent       # parent of clone root (nested layout)
+
+    found = [own]
+    for variant in ("prd", "uat", "main", "tester"):
+        candidate = project_root / variant / "apps" / "dashboard" / "projects.json"
+        if candidate.resolve() != own.resolve() and candidate.exists():
+            found.append(candidate)
+    return found
+
+
+def remove_project(repo: str) -> list[str]:
+    """Remove a project from all projects.json copies. Returns list of removed file paths."""
+    removed = []
+    for path in _find_all_projects_jsons():
+        if not path.exists():
+            continue
+        projects = json.loads(path.read_text())
+        new_projects = [p for p in projects if p.get("repo") != repo]
+        if len(new_projects) < len(projects):
+            path.write_text(json.dumps(new_projects, indent=2))
+            removed.append(str(path))
+    return removed
+
+
 def add_project(repo: str, icon: str = "ti-folder", color: str = "gray") -> dict:
     """Validate and append a new project to projects.json. Returns the new project dict."""
     import subprocess as _sp

@@ -480,6 +480,8 @@ function renderExpandPanel(id, data, repo) {
   const projData = allProjects.find(p => p.repo === repo) || null;
   const miniSprintHtml = _miniSprintSummaryHtml(projData);
 
+  const projName = escapeHtml(projData?.name || repo);
+
   el.innerHTML = `
     <div class="expand-col">
       ${miniSprintHtml}
@@ -495,6 +497,14 @@ function renderExpandPanel(id, data, repo) {
       </div>
       ${agentsListHtml}
       ${tokLine}
+    </div>
+    <div class="expand-remove-row">
+      <button class="btn-danger"
+        data-repo="${escapeHtml(repo)}"
+        data-name="${projName}"
+        onclick="openRemoveProjectDialog(this.dataset.repo, this.dataset.name)">
+        <i class="ti ti-trash" style="margin-right:4px;"></i>Remove Project
+      </button>
     </div>`;
 
   // kick off test-report loads for UAT tickets
@@ -1994,6 +2004,74 @@ function _handleSprintPlanSSE() {
   }
 }
 
+// ── Remove Project Dialog ─────────────────────────────────────────────────────
+
+let _rpRepo = null;
+
+function openRemoveProjectDialog(repo, name) {
+  _rpRepo = repo;
+  document.getElementById('rp-project-name').textContent = name;
+  document.getElementById('rp-delete-folders').checked = false;
+  document.getElementById('rp-delete-github').checked = false;
+  const errEl = document.getElementById('rp-error');
+  errEl.textContent = '';
+  errEl.classList.add('hidden');
+  const btn = document.getElementById('rp-confirm-btn');
+  btn.disabled = false;
+  btn.textContent = 'Confirm Remove';
+  document.getElementById('remove-project-backdrop').classList.remove('hidden');
+  document.getElementById('remove-project-modal').classList.remove('hidden');
+}
+
+function closeRemoveProjectDialog() {
+  _rpRepo = null;
+  document.getElementById('remove-project-backdrop').classList.add('hidden');
+  document.getElementById('remove-project-modal').classList.add('hidden');
+}
+
+async function confirmRemoveProject() {
+  if (!_rpRepo) return;
+  const repo          = _rpRepo;
+  const deleteLocal   = document.getElementById('rp-delete-folders').checked;
+  const deleteGithub  = document.getElementById('rp-delete-github').checked;
+
+  const btn   = document.getElementById('rp-confirm-btn');
+  const errEl = document.getElementById('rp-error');
+  btn.disabled = true;
+  btn.textContent = 'Removing…';
+  errEl.textContent = '';
+  errEl.classList.add('hidden');
+
+  try {
+    const parts = repo.split('/');
+    const url = `/api/projects/${encodeURIComponent(parts[0])}/${encodeURIComponent(parts[1])}`;
+    const res = await fetch(url, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ delete_local_folders: deleteLocal, delete_github_repo: deleteGithub }),
+    });
+
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      errEl.textContent = data.detail || `Error ${res.status}`;
+      errEl.classList.remove('hidden');
+      btn.disabled = false;
+      btn.textContent = 'Confirm Remove';
+      return;
+    }
+
+    closeRemoveProjectDialog();
+    expandedProjects.delete(repo);
+    delete detailsCache[repo];
+    loadProjects();
+  } catch {
+    errEl.textContent = 'Network error. Please try again.';
+    errEl.classList.remove('hidden');
+    btn.disabled = false;
+    btn.textContent = 'Confirm Remove';
+  }
+}
+
 // ── Init ──────────────────────────────────────────────────────────────────────
 (function init() {
   initTheme();
@@ -2007,4 +2085,7 @@ function _handleSprintPlanSSE() {
   loadSprintStatus().catch(() => {});
   connectSSE();
   document.getElementById('btn-refresh')?.addEventListener('click', manualRefresh);
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && _rpRepo !== null) closeRemoveProjectDialog();
+  });
 })();

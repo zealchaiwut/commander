@@ -126,6 +126,11 @@ class InitProjectBody(BaseModel):
     skip_uat: bool = False
 
 
+class RemoveProjectBody(BaseModel):
+    delete_local_folders: bool = False
+    delete_github_repo: bool = False
+
+
 class DatabaseStatus(BaseModel):
     reachable: bool
     path: str
@@ -369,6 +374,52 @@ def add_project(body: NewProjectBody):
         raise HTTPException(422, detail=str(e))
     except subprocess.CalledProcessError as e:
         raise _gh_error(e)
+
+
+@app.delete("/api/projects/{owner}/{repo_name}")
+async def remove_project(owner: str, repo_name: str, body: RemoveProjectBody):
+    import shutil
+
+    repo = f"{owner}/{repo_name}"
+
+    if not any(p["repo"] == repo for p in projects_module.load_projects()):
+        raise HTTPException(404, detail="Project not found")
+
+    removed: list[str] = []
+
+    # Remove from all projects.json copies first (not rolled back on subsequent errors)
+    removed.extend(projects_module.remove_project(repo))
+
+    if body.delete_local_folders:
+        projects_dir = Path.home() / "dev"
+        project_root = projects_dir / repo_name
+        nested = (project_root / "main").exists() and (project_root / "main" / ".git").exists()
+        if nested:
+            if project_root.exists():
+                shutil.rmtree(project_root)
+                removed.append(str(project_root))
+        else:
+            uat_dir = project_root / "uat"
+            if uat_dir.exists():
+                shutil.rmtree(uat_dir)
+                removed.append(str(uat_dir))
+            for suffix in ("", "-coder", "-tester"):
+                d = projects_dir / f"{repo_name}{suffix}"
+                if d.exists():
+                    shutil.rmtree(d)
+                    removed.append(str(d))
+
+    if body.delete_github_repo:
+        result = subprocess.run(
+            ["gh", "repo", "delete", repo, "--yes"],
+            capture_output=True, text=True,
+        )
+        if result.returncode != 0:
+            err = result.stderr.strip() or result.stdout.strip() or "unknown error"
+            raise HTTPException(502, detail=f"Failed to delete GitHub repository: {err}")
+        removed.append(f"GitHub repo {repo}")
+
+    return {"ok": True, "removed": removed}
 
 
 @app.post("/api/projects/init")

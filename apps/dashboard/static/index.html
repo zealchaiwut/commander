@@ -1189,6 +1189,33 @@
   </form>
 </div>
 
+<!-- ── Remove Project Confirmation Dialog ── -->
+<div class="modal-backdrop hidden" id="remove-project-backdrop"></div>
+<div class="modal hidden" id="remove-project-modal" role="dialog" aria-modal="true" aria-labelledby="rp-modal-title">
+  <div class="modal-header">
+    <span class="modal-title" id="rp-modal-title">Remove Project</span>
+    <button class="modal-close" onclick="closeRemoveProjectDialog()" aria-label="Close">&times;</button>
+  </div>
+  <div class="rp-dialog-body">
+    <p style="margin:0 0 16px;font-size:13px;">Remove <strong id="rp-project-name"></strong> from the dashboard?</p>
+    <div class="modal-field">
+      <label class="modal-check-label">
+        <input type="checkbox" id="rp-delete-folders"> Delete local folders (worktrees / clones)
+      </label>
+    </div>
+    <div class="modal-field">
+      <label class="modal-check-label">
+        <input type="checkbox" id="rp-delete-github"> Delete GitHub repository
+      </label>
+    </div>
+    <div class="modal-error hidden" id="rp-error"></div>
+  </div>
+  <div class="modal-footer">
+    <button class="btn-ghost" onclick="closeRemoveProjectDialog()">Cancel</button>
+    <button class="btn-danger" id="rp-confirm-btn" onclick="confirmRemoveProject()">Confirm Remove</button>
+  </div>
+</div>
+
 <style>
   .modal-backdrop {
     position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 100;
@@ -1245,6 +1272,28 @@
     margin: 0; padding: 10px; font-size: 11px; font-family: var(--mono, monospace);
     color: var(--text); white-space: pre-wrap; word-break: break-all;
     max-height: 180px; overflow-y: auto; overflow-x: hidden;
+  }
+
+  /* ── Danger button ── */
+  .btn-danger {
+    padding: 6px 14px; border: none; border-radius: 6px;
+    background: var(--red); color: #fff; font-size: 12px; font-weight: 600;
+    transition: opacity .15s; cursor: pointer;
+  }
+  .btn-danger:hover { opacity: .82; }
+  .btn-danger:disabled { opacity: .5; cursor: not-allowed; }
+
+  /* ── Remove project dialog body ── */
+  .rp-dialog-body { padding: 0 0 4px; font-size: 13px; }
+  .rp-dialog-body .modal-field { margin-bottom: 10px; }
+
+  /* ── Remove project button in expand panel ── */
+  .expand-remove-row {
+    grid-column: 1 / -1;
+    padding: 12px 0 0;
+    border-top: 1px solid var(--border);
+    display: flex;
+    justify-content: flex-end;
   }
 
   /* ── Alert banners (AC-3a) ── */

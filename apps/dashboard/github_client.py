@@ -177,7 +177,7 @@ def get_issue(issue_number: int, repo_name: str | None = None) -> dict:
     r = _r(repo_name)
     return _json(
         "issue", "view", str(issue_number), "--repo", r,
-        "--json", "number,title,labels,assignees,state,url,body,createdAt,updatedAt",
+        "--json", "number,title,labels,assignees,state,stateReason,url,body,createdAt,updatedAt",
     )
 
 
@@ -412,6 +412,30 @@ def close_issue(issue_id: int, repo_name: str | None = None):
     _run("issue", "close", str(issue_id), "--repo", r)
     invalidate(f"issues:{r}:")
     invalidate(f"latest_sprint:{r}")
+
+
+def reopen_issue(issue_id: int, repo_name: str | None = None):
+    r = _r(repo_name)
+    _run("issue", "reopen", str(issue_id), "--repo", r)
+    invalidate(f"issues:{r}:")
+    invalidate(f"latest_sprint:{r}")
+
+
+def update_issue_body(issue_id: int, body: str, repo_name: str | None = None):
+    import tempfile
+    r = _r(repo_name)
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False,
+                                     encoding="utf-8") as tf:
+        tmp = Path(tf.name)
+        tf.write(body)
+    try:
+        _run("issue", "edit", str(issue_id), "--repo", r, "--body-file", str(tmp))
+    finally:
+        try:
+            tmp.unlink()
+        except Exception:
+            pass
+    invalidate(f"issues:{r}:")
 
 
 # ── test report ───────────────────────────────────────────────────────────────

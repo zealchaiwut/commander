@@ -1730,18 +1730,38 @@ def _ensure_github_labels(labels: list[str], repo_name: Optional[str] = None) ->
             pass
 
 
+def _is_stale_summary(body: str, state_reason: Optional[str]) -> tuple[bool, str]:
+    """Return (is_stale, reason) for an existing summary issue body."""
+    if state_reason == "not_planned":
+        return True, "closed as not_planned"
+
+    has_stopped    = "| End reason | stopped |" in body
+    has_zero_dur   = bool(re.search(r"\| Duration \| 0h 0m \d+s \|", body))
+    has_rejected   = "TESTER_REJECTED" in body
+    no_shipped     = "No issues shipped" in body
+
+    if has_stopped and has_zero_dur and has_rejected and no_shipped:
+        return True, "stub-mode run (stopped, zero duration, all TESTER_REJECTED, nothing shipped)"
+
+    if has_stopped and has_rejected and no_shipped:
+        return True, "failed-run summary (stopped, all TESTER_REJECTED, nothing shipped)"
+
+    return False, ""
+
+
 def create_summary_github_issue(
     content: str,
     sprint_number: Optional[int],
     sprint_label: str,
     repo_name: Optional[str] = None,
+    force_summary: bool = False,
 ) -> tuple[Optional[int], Optional[str]]:
     """AC-2: Create a GitHub issue with the summary markdown as the body.
 
     AC-1/AC-6: Before creating, searches GitHub (open + closed) for an issue
-    with the exact title.  If one already exists, logs its URL and returns
-    without creating a duplicate (AC-2).  If none exists, creates the issue
-    exactly as before (AC-3).
+    with the exact title.  If one already exists and is stale (or force_summary
+    is set), updates it in place.  Otherwise skips creation (AC-2).
+    If none exists, creates the issue (AC-3).
     """
     n      = sprint_number if sprint_number is not None else sprint_label
     title  = f"Sprint {n} Executive Summary"
@@ -1755,13 +1775,50 @@ def create_summary_github_issue(
         existing = []
 
     if existing:
-        # AC-2: skip creation, return details of the first match
-        found = existing[0]
+        found       = existing[0]
         existing_num = found.get("number")
         existing_url = found.get("url", "")
+        existing_state = found.get("state", "")
+
+        # Fetch full issue to get body and stateReason for staleness check
+        full_issue: dict = {}
+        try:
+            full_issue = github_client.get_issue(existing_num, repo_name=repo_name)
+        except Exception as e:
+            print(f"  Warning: could not fetch existing summary issue body -- {e}", file=sys.stderr)
+
+        is_stale, stale_reason = _is_stale_summary(
+            body         = full_issue.get("body", ""),
+            state_reason = full_issue.get("stateReason"),
+        )
+
+        if force_summary or is_stale:
+            action = "--force-summary" if force_summary else f"stale ({stale_reason})"
+            print(f"  [summary] Existing issue #{existing_num} is {action} — updating in place.")
+            try:
+                github_client.update_issue_body(existing_num, content, repo_name=repo_name)
+            except Exception as e:
+                print(f"  Warning: failed to update summary issue body -- {e}", file=sys.stderr)
+            if existing_state == "closed":
+                try:
+                    github_client.reopen_issue(existing_num, repo_name=repo_name)
+                    print(f"  [summary] Reopened issue #{existing_num}.")
+                except Exception as e:
+                    print(f"  Warning: failed to reopen summary issue -- {e}", file=sys.stderr)
+            comment = (
+                f"Summary updated after fresh sprint run on {_utcnow()}. "
+                f"Previous content was from a failed run."
+            )
+            try:
+                github_client.add_comment(existing_num, comment, repo_name=repo_name)
+            except Exception as e:
+                print(f"  Warning: failed to add update comment -- {e}", file=sys.stderr)
+            return existing_num, existing_url
+
+        # Valid existing summary — skip creation
         print(
             f"  [summary] Issue already exists: #{existing_num} {existing_url}"
-            f" (state={found.get('state', '?')}) — skipping creation."
+            f" (state={existing_state}) — skipping creation."
         )
         return existing_num, existing_url
 
@@ -1861,6 +1918,7 @@ def write_sprint_summary(
     sprint_branch: Optional[str] = None,
     cfg: Optional["SprintConfig"] = None,
     dry_run: bool = False,
+    force_summary: bool = False,
 ) -> Path:
     """Write summary file, create GitHub issue, prompt for learnings (AC-1/2/3).
 
@@ -1898,6 +1956,7 @@ def write_sprint_summary(
             sprint_number=state.sprint_number,
             sprint_label=state.sprint_label,
             repo_name=eff_repo,
+            force_summary=force_summary,
         )
     except Exception as exc:
         print(f"  Warning: create_summary_github_issue raised -- {exc}", file=sys.stderr)
@@ -2405,6 +2464,17 @@ def main() -> None:
         ),
     )
 
+    # Summary override
+    p.add_argument(
+        "--force-summary",
+        action="store_true",
+        default=False,
+        help=(
+            "Always update the sprint summary GitHub issue regardless of whether an "
+            "existing issue is detected as valid or stale."
+        ),
+    )
+
     args = p.parse_args()
 
     # ── Config resolution (AC-4 + AC-5 + AC-6) ───────────────────────────────
@@ -2488,6 +2558,7 @@ def main() -> None:
             cfg           = cfg,
             sprint_branch = effective_target,
             dry_run       = args.dry_run,
+            force_summary = args.force_summary,
         )
     else:
         summary_path = None

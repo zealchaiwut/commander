@@ -3330,5 +3330,176 @@ async function confirmRemoveProject() {
   document.getElementById('btn-refresh')?.addEventListener('click', manualRefresh);
   document.addEventListener('keydown', e => {
     if (e.key === 'Escape' && _rpRepo !== null) closeRemoveProjectDialog();
+    if (e.key === 'Escape') closeDraftTicketModal();
   });
 })();
+
+// ── Draft Ticket Modal (issue #94) ────────────────────────────────────────────
+
+let _dtFiles = [];
+let _dtDraftId = null;
+
+function openDraftTicketModal() {
+  _dtFiles = [];
+  _dtDraftId = null;
+  document.getElementById('dt-backdrop').classList.remove('hidden');
+  document.getElementById('dt-modal').classList.remove('hidden');
+  document.getElementById('dt-description').value = '';
+  document.getElementById('dt-sprint').value = '';
+  document.getElementById('dt-error').classList.add('hidden');
+  document.getElementById('dt-draft-section').classList.add('hidden');
+  document.getElementById('dt-previews').innerHTML = '';
+  const generateBtn = document.getElementById('dt-generate-btn');
+  generateBtn.disabled = false;
+  generateBtn.textContent = 'Generate Draft';
+
+  // Populate project dropdown
+  const sel = document.getElementById('dt-project');
+  sel.innerHTML = allProjects.map(p =>
+    `<option value="${escapeHtml(p.repo)}">${escapeHtml(p.name || p.repo)}</option>`
+  ).join('');
+  if (_activeProject) {
+    sel.value = _activeProject;
+  }
+
+  document.getElementById('dt-description').focus();
+}
+
+function closeDraftTicketModal() {
+  document.getElementById('dt-backdrop').classList.add('hidden');
+  document.getElementById('dt-modal').classList.add('hidden');
+}
+
+function _dtPickFiles() {
+  document.getElementById('dt-file-input').click();
+}
+
+function _dtOnFileInput(event) {
+  _dtAddFiles(Array.from(event.target.files));
+  event.target.value = '';
+}
+
+function _dtOnDrop(event) {
+  event.preventDefault();
+  document.getElementById('dt-dropzone').classList.remove('drag-over');
+  _dtAddFiles(Array.from(event.dataTransfer.files));
+}
+
+function _dtAddFiles(incoming) {
+  const allowed = new Set(['.png','.jpg','.jpeg','.gif','.webp','.md','.txt','.json','.py','.js','.html','.css']);
+  for (const f of incoming) {
+    if (_dtFiles.length >= 10) break;
+    const ext = '.' + f.name.split('.').pop().toLowerCase();
+    if (!allowed.has(ext)) continue;
+    _dtFiles.push(f);
+  }
+  _dtRenderPreviews();
+}
+
+function _dtRemoveFile(idx) {
+  _dtFiles.splice(idx, 1);
+  _dtRenderPreviews();
+}
+
+function _dtRenderPreviews() {
+  const container = document.getElementById('dt-previews');
+  container.innerHTML = _dtFiles.map((f, i) => {
+    const isImage = f.type.startsWith('image/');
+    const nameEl = `<div class="dt-preview-name" title="${escapeHtml(f.name)}">${escapeHtml(f.name)}</div>`;
+    const removeEl = `<button class="dt-preview-remove" onclick="_dtRemoveFile(${i})" title="Remove">×</button>`;
+    if (isImage) {
+      const url = URL.createObjectURL(f);
+      return `<div class="dt-preview-item">${removeEl}<img src="${url}" class="dt-preview-img" alt="${escapeHtml(f.name)}">${nameEl}</div>`;
+    }
+    return `<div class="dt-preview-item">${removeEl}<div class="dt-preview-icon">📄</div>${nameEl}</div>`;
+  }).join('');
+}
+
+async function generateDraft(event) {
+  event.preventDefault();
+
+  const desc = document.getElementById('dt-description').value.trim();
+  if (!desc) {
+    _dtShowError('Description is required.');
+    return;
+  }
+
+  const generateBtn = document.getElementById('dt-generate-btn');
+  generateBtn.disabled = true;
+  generateBtn.innerHTML = '<span class="dt-spinner"></span>Generating…';
+  document.getElementById('dt-error').classList.add('hidden');
+  document.getElementById('dt-draft-section').classList.add('hidden');
+
+  const formData = new FormData();
+  formData.append('description', desc);
+  formData.append('project', document.getElementById('dt-project').value || '');
+  formData.append('sprint_label', document.getElementById('dt-sprint').value.trim());
+  for (const f of _dtFiles) {
+    formData.append('files', f);
+  }
+
+  try {
+    const res = await fetch('/api/tickets/draft', { method: 'POST', body: formData });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.detail || `Server error ${res.status}`);
+    }
+    const data = await res.json();
+    _dtDraftId = data.draft_id;
+    document.getElementById('dt-title').value = data.title || '';
+    document.getElementById('dt-body').value = data.body || '';
+    document.getElementById('dt-draft-section').classList.remove('hidden');
+    document.getElementById('dt-modal').scrollTop = document.getElementById('dt-modal').scrollHeight;
+  } catch (e) {
+    _dtShowError('Generation failed: ' + e.message);
+  } finally {
+    generateBtn.disabled = false;
+    generateBtn.textContent = 'Generate Draft';
+  }
+}
+
+async function postDraftToGitHub() {
+  const title = document.getElementById('dt-title').value.trim();
+  if (!title) {
+    _dtShowError('Title is required before posting.');
+    return;
+  }
+
+  const postBtn = document.getElementById('dt-post-btn');
+  postBtn.disabled = true;
+  postBtn.textContent = 'Posting…';
+  document.getElementById('dt-error').classList.add('hidden');
+
+  try {
+    const res = await fetch('/api/tickets/create', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        draft_id: _dtDraftId || '',
+        title,
+        body: document.getElementById('dt-body').value,
+        project: document.getElementById('dt-project').value || '',
+        sprint_label: document.getElementById('dt-sprint').value.trim(),
+      }),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.detail || `Server error ${res.status}`);
+    }
+    const data = await res.json();
+    closeDraftTicketModal();
+    showSuccessToast(`Ticket created: ${data.url}`);
+    loadProjects().catch(() => {});
+  } catch (e) {
+    _dtShowError('Post failed: ' + e.message);
+  } finally {
+    postBtn.disabled = false;
+    postBtn.textContent = 'Post to GitHub';
+  }
+}
+
+function _dtShowError(msg) {
+  const el = document.getElementById('dt-error');
+  el.textContent = msg;
+  el.classList.remove('hidden');
+}

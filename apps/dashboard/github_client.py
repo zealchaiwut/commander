@@ -194,6 +194,16 @@ def ensure_sprint_label(sprint_num: int, repo_name: str | None = None) -> None:
     invalidate(f"sprints:{r}")
 
 
+def delete_label(label_name: str, repo_name: str | None = None) -> None:
+    """Delete a GitHub label by name."""
+    r = _r(repo_name)
+    _run("label", "delete", label_name, "--repo", r, "--yes")
+    invalidate(f"sprints:{r}")
+    invalidate(f"open_issues:{r}")
+    invalidate(f"open_issues_body:{r}")
+    invalidate(f"issues:{r}:")
+
+
 def assign_sprint(issue_id: int, sprint_num: int | None, repo_name: str | None = None) -> None:
     """Assign (or remove) a sprint-N label on an issue.
 

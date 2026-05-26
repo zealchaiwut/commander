@@ -1405,4 +1405,77 @@ async def create_sprint_label(body: SprintCreateBody):
     return {"ok": True, "sprint_label": f"sprint-{next_num}"}
 
 
+_RERUN_STRIP_LABELS = {"UAT", "UAT-approved", "released", "SIT", "in-progress", "needs-rework"}
+
+
+class SprintRerunBody(BaseModel):
+    confirm: bool
+
+
+@app.post("/api/sprints/{sprint_label}/rerun")
+def rerun_sprint(sprint_label: str, project: str, body: SprintRerunBody):
+    """Strip status labels from all completed tickets in a sprint and delete the state file.
+
+    Does NOT spawn any sprint subprocess — user clicks Run sprint afterward.
+    """
+    if not _SPRINT_LABEL_RE.match(sprint_label):
+        raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")
+    if not body.confirm:
+        raise HTTPException(400, detail="confirm must be true")
+
+    if _is_sprint_running(_project_root_path(project), sprint_label):
+        raise HTTPException(409, detail="Cannot reset a sprint that is currently running")
+
+    project_root = _project_root_path(project)
+    commander = _commander_dir(project_root)
+
+    log_dir = commander / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
+    log_path = log_dir / f"sprint-rerun-{sprint_label}-{ts}.log"
+    log_lines: list[str] = []
+
+    try:
+        issues = github_client.list_open_issues_with_body(repo_name=project, limit=200)
+    except subprocess.CalledProcessError as e:
+        raise _gh_error(e)
+
+    sprint_issues = [
+        iss for iss in issues
+        if any(lbl["name"] == sprint_label for lbl in iss.get("labels", []))
+    ]
+
+    affected: list[dict] = []
+    errors: list[str] = []
+
+    for iss in sprint_issues:
+        current_labels = {lbl["name"] for lbl in iss.get("labels", [])}
+        to_remove = list(current_labels & _RERUN_STRIP_LABELS)
+        if not to_remove:
+            continue
+        try:
+            github_client.update_labels(iss["number"], add=[], remove=to_remove, repo_name=project)
+            affected.append({"number": iss["number"], "removed_labels": to_remove})
+            log_lines.append(f"#{iss['number']} {iss['title']}: removed {to_remove}")
+        except subprocess.CalledProcessError as e:
+            msg = f"#{iss['number']} failed: {e.stderr.strip()}"
+            errors.append(msg)
+            log_lines.append(f"ERROR {msg}")
+
+    state_file = commander / "sprints" / f"{sprint_label}-state.json"
+    state_file.unlink(missing_ok=True)
+    log_lines.append(f"Deleted state file: {state_file}")
+
+    log_path.write_text("\n".join(log_lines) + "\n", encoding="utf-8")
+
+    github_client.invalidate(f"open_issues_body:")
+    github_client.invalidate(f"open_issues:")
+    github_client.invalidate(f"issues:")
+
+    result: dict = {"reset_count": len(affected), "affected_issues": affected}
+    if errors:
+        result["errors"] = errors
+    return result
+
+
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")

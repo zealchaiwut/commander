@@ -692,6 +692,7 @@
 </header>
 
 <div id="toast-error" style="display:none;position:fixed;top:12px;right:12px;z-index:9999;background:#ef4444;color:#fff;padding:8px 14px;border-radius:6px;font-size:13px;max-width:320px;box-shadow:0 2px 8px rgba(0,0,0,.2)"></div>
+<div id="toast-success" style="display:none;position:fixed;top:52px;right:12px;z-index:9999;background:#16a34a;color:#fff;padding:8px 14px;border-radius:6px;font-size:13px;max-width:320px;box-shadow:0 2px 8px rgba(0,0,0,.2)"></div>
 
 <!-- ── Alert banners (AC-3a) ── -->
 <div id="alert-banners" style="padding:0 16px;"></div>
@@ -1061,6 +1062,20 @@
   <div id="psp-error" class="psp-error hidden"></div>
 </div>
 
+<!-- Sprint rerun confirmation modal -->
+<div class="modal-backdrop hidden" id="smgmt-rerun-backdrop" onclick="smgmtRerunClose()"></div>
+<div class="modal hidden" id="smgmt-rerun-modal" role="dialog" aria-modal="true">
+  <div class="modal-header">
+    <span class="modal-title" id="smgmt-rerun-title">Reset Sprint?</span>
+    <button class="modal-close" onclick="smgmtRerunClose()" aria-label="Close">&times;</button>
+  </div>
+  <div class="smgmt-rerun-body" id="smgmt-rerun-body"></div>
+  <div class="modal-footer">
+    <button class="btn-ghost" onclick="smgmtRerunClose()">Cancel</button>
+    <button class="btn-danger" id="smgmt-rerun-confirm" onclick="smgmtRerunConfirm()">Reset</button>
+  </div>
+</div>
+
 <!-- Plan Sprint confirmation dialog -->
 <div class="modal-backdrop hidden" id="psp-dialog-backdrop" onclick="pspCloseDialog()"></div>
 <div class="modal hidden" id="psp-dialog" role="dialog" aria-modal="true">
@@ -1352,6 +1367,27 @@
     background: var(--surface-2); color: var(--text-sub);
     border: 1px solid var(--border); cursor: not-allowed; opacity: 1;
   }
+  .smgmt-rerun-btn {
+    padding: 4px 10px; font-size: 11px; font-weight: 600;
+    background: var(--amber-bg); color: var(--amber);
+    border: 0.5px solid var(--amber); border-radius: 5px;
+    cursor: pointer; flex-shrink: 0; transition: opacity .15s;
+    display: flex; align-items: center; gap: 4px;
+  }
+  .smgmt-rerun-btn:hover { opacity: .85; }
+  .smgmt-rerun-btn:disabled {
+    background: var(--surface-2); color: var(--text-sub);
+    border: 0.5px solid var(--border); cursor: not-allowed; opacity: 1;
+  }
+
+  /* Rerun sprint modal body */
+  .smgmt-rerun-body { padding: 12px 24px 4px; font-size: 13px; max-height: 300px; overflow-y: auto; }
+  .smgmt-rerun-row { display: flex; align-items: baseline; gap: 6px; padding: 5px 0;
+    border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+  .smgmt-rerun-row:last-child { border-bottom: none; }
+  .smgmt-rerun-num { font-weight: 700; color: var(--text-sub); font-size: 12px; flex-shrink: 0; }
+  .smgmt-rerun-title-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .smgmt-rerun-labels { font-size: 11px; color: var(--text-muted); flex-shrink: 0; }
 
   /* Ticket cards in a sprint */
   .smgmt-sprint-tickets {

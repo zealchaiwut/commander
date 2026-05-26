@@ -702,6 +702,7 @@
   <button class="mtab"        id="mtab-activity"     onclick="switchMain('activity')">Activity log</button>
   <button class="mtab"        id="mtab-history"      onclick="switchMain('history')">Sprint History</button>
   <button class="mtab"        id="mtab-sprint-plan"  onclick="switchMain('sprint-plan')">Plan sprint</button>
+  <button class="mtab"        id="mtab-sprint-mgmt"  onclick="switchMain('sprint-mgmt')">Sprint Mgmt</button>
 </nav>
 
 <!-- ── Projects view ── -->
@@ -1121,6 +1122,175 @@
     .psp-row { padding: 10px 12px; }
     .psp-row-meta { justify-content: flex-start; }
     .psp-row-title { min-width: 0; }
+  }
+</style>
+
+<!-- ── Sprint Management view (issue #95) ── -->
+<div id="view-sprint-mgmt" class="hidden">
+
+  <!-- Project selector header -->
+  <div class="smgmt-header">
+    <div class="smgmt-header-left">
+      <h2 class="smgmt-title">Sprint Management</h2>
+      <select id="smgmt-project-select" class="smgmt-proj-select" onchange="smgmtSelectProject(this.value)">
+        <option value="">Loading projects…</option>
+      </select>
+    </div>
+    <button class="btn-primary smgmt-new-sprint-btn" id="smgmt-new-sprint-btn"
+            onclick="smgmtCreateSprint()" title="Create next sprint label on GitHub">+ New sprint</button>
+  </div>
+
+  <!-- Error banner -->
+  <div class="smgmt-error hidden" id="smgmt-error"></div>
+
+  <!-- Sprint blocks container -->
+  <div class="smgmt-body" id="smgmt-body">
+    <div class="smgmt-loading" id="smgmt-loading">Select a project to view sprints.</div>
+  </div>
+
+  <!-- Unassigned drop zone at bottom -->
+  <div class="smgmt-unassigned" id="smgmt-unassigned"
+       ondragover="smgmtDragOverZone(event, null)"
+       ondragleave="smgmtDragLeave(event)"
+       ondrop="smgmtDropOnSprint(event, null)">
+    <div class="smgmt-unassigned-label"><i class="ti ti-inbox"></i> Unassigned</div>
+    <div class="smgmt-unassigned-tickets" id="smgmt-unassigned-tickets">
+      <div class="smgmt-drop-hint">Drop tickets here to remove sprint label</div>
+    </div>
+  </div>
+</div>
+
+<style>
+  /* ── Sprint Management view ── */
+  .smgmt-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 24px; background: var(--surface);
+    border-bottom: 1px solid var(--border); gap: 12px; flex-wrap: wrap;
+  }
+  .smgmt-header-left { display: flex; align-items: center; gap: 14px; }
+  .smgmt-title { font-size: 16px; font-weight: 700; white-space: nowrap; }
+  .smgmt-proj-select {
+    padding: 6px 10px; border: 1px solid var(--border); border-radius: 6px;
+    background: var(--surface-2); color: var(--text); font-size: 13px;
+    font-family: inherit; outline: none; cursor: pointer; min-width: 180px;
+  }
+  .smgmt-proj-select:focus { border-color: var(--blue); }
+  .smgmt-new-sprint-btn { font-size: 12px; padding: 6px 14px; }
+
+  .smgmt-error {
+    margin: 12px 24px; padding: 10px 14px; background: var(--red-bg);
+    border-left: 4px solid var(--red); border-radius: 4px;
+    font-size: 12px; color: var(--red);
+  }
+  .smgmt-loading {
+    padding: 48px 24px; text-align: center; color: var(--text-muted); font-size: 13px;
+  }
+
+  /* Sprint blocks container — supports drag-reorder */
+  .smgmt-body {
+    padding: 16px 24px; display: flex; flex-direction: column; gap: 16px;
+    min-height: 120px;
+  }
+
+  /* Single sprint block */
+  .smgmt-sprint-block {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 8px; overflow: hidden;
+  }
+  .smgmt-sprint-block.drag-over-sprint { border-color: var(--blue); box-shadow: 0 0 0 2px var(--blue-bg); }
+  .smgmt-sprint-block.dragging-sprint { opacity: .45; }
+
+  /* Sprint header */
+  .smgmt-sprint-header {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 14px; background: var(--surface-2);
+    border-bottom: 1px solid var(--border); cursor: default;
+  }
+  .smgmt-sprint-grip {
+    cursor: grab; color: var(--text-sub); font-size: 14px; flex-shrink: 0;
+  }
+  .smgmt-sprint-grip:active { cursor: grabbing; }
+  .smgmt-sprint-name { font-size: 14px; font-weight: 700; flex: 1; }
+  .smgmt-next-badge {
+    font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .07em;
+    background: var(--green-bg); color: var(--green); padding: 2px 7px; border-radius: 10px;
+    flex-shrink: 0;
+  }
+  .smgmt-sprint-count { font-size: 11px; color: var(--text-muted); flex-shrink: 0; }
+  .smgmt-run-btn {
+    padding: 4px 12px; font-size: 11px; font-weight: 600;
+    background: var(--green); color: #fff; border: none; border-radius: 5px;
+    cursor: pointer; flex-shrink: 0; transition: opacity .15s;
+  }
+  .smgmt-run-btn:hover { opacity: .85; }
+  .smgmt-run-btn:disabled {
+    background: var(--surface-2); color: var(--text-sub);
+    border: 1px solid var(--border); cursor: not-allowed; opacity: 1;
+  }
+
+  /* Ticket cards in a sprint */
+  .smgmt-sprint-tickets {
+    padding: 8px 14px; min-height: 48px;
+    display: flex; flex-direction: column; gap: 6px;
+  }
+  .smgmt-drop-hint {
+    font-size: 12px; color: var(--text-sub); text-align: center;
+    padding: 10px; border: 1px dashed var(--border); border-radius: 5px;
+  }
+  .smgmt-sprint-block.drag-over-sprint .smgmt-drop-hint { border-color: var(--blue); }
+
+  /* Ticket card */
+  .smgmt-ticket {
+    display: flex; align-items: center; gap: 8px;
+    padding: 7px 10px; background: var(--surface-2); border: 1px solid var(--border);
+    border-radius: 5px; font-size: 12px; cursor: default;
+  }
+  .smgmt-ticket:hover { background: var(--surface-hover); }
+  .smgmt-ticket.dragging-ticket { opacity: .4; }
+  .smgmt-ticket-grip {
+    cursor: grab; color: var(--text-sub); font-size: 13px; flex-shrink: 0;
+  }
+  .smgmt-ticket-grip:active { cursor: grabbing; }
+  .smgmt-ticket-num {
+    font-family: var(--mono); font-size: 11px; color: var(--text-muted);
+    text-decoration: none; flex-shrink: 0; min-width: 32px;
+  }
+  .smgmt-ticket-num:hover { color: var(--blue); }
+  .smgmt-ticket-title { flex: 1; font-weight: 500; line-height: 1.4; min-width: 0;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .smgmt-ticket-status {
+    font-size: 10px; font-weight: 600; padding: 2px 6px; border-radius: 3px;
+    flex-shrink: 0; text-transform: uppercase;
+  }
+  .smgmt-status-backlog  { background: var(--surface-2); color: var(--text-muted); border: 1px solid var(--border); }
+  .smgmt-status-in-progress { background: var(--blue-bg); color: var(--blue); }
+  .smgmt-status-sit      { background: var(--amber-bg); color: var(--amber); }
+  .smgmt-status-uat      { background: var(--purple-bg); color: var(--purple); }
+  .smgmt-status-done     { background: var(--green-bg); color: var(--green); }
+
+  /* Unassigned zone */
+  .smgmt-unassigned {
+    margin: 0 24px 24px;
+    border: 2px dashed var(--border); border-radius: 8px;
+    background: var(--surface); transition: border-color .15s, background .15s;
+  }
+  .smgmt-unassigned.drag-over-zone {
+    border-color: var(--blue); background: var(--blue-bg);
+  }
+  .smgmt-unassigned-label {
+    display: flex; align-items: center; gap: 6px;
+    padding: 8px 14px; font-size: 12px; font-weight: 600;
+    color: var(--text-muted); border-bottom: 1px dashed var(--border);
+  }
+  .smgmt-unassigned-tickets {
+    padding: 8px 14px; min-height: 48px;
+    display: flex; flex-direction: column; gap: 6px;
+  }
+
+  @media (max-width: 600px) {
+    .smgmt-header { padding: 10px 12px; }
+    .smgmt-body   { padding: 12px; }
+    .smgmt-unassigned { margin: 0 12px 16px; }
   }
 </style>
 

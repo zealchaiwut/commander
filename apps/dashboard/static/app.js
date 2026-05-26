@@ -72,16 +72,17 @@ function _syncThemeIcon(theme) {
 
 // ── Tab navigation ────────────────────────────────────────────────────────────
 function switchMain(tab) {
-  ['projects', 'agents', 'activity', 'history', 'sprint-plan'].forEach(t => {
+  ['projects', 'agents', 'activity', 'history', 'sprint-plan', 'sprint-mgmt'].forEach(t => {
     const viewId = t === 'sprint-plan' ? 'view-sprint-plan' : `view-${t}`;
     const tabId  = `mtab-${t}`;
     document.getElementById(viewId)?.classList.toggle('hidden', t !== tab);
     document.getElementById(tabId)?.classList.toggle('active', t === tab);
   });
-  if (tab === 'agents')      fetchAgents();
-  if (tab === 'activity')    fetchEvents();
-  if (tab === 'history')     loadSprintHistory().catch(() => {});
-  if (tab === 'sprint-plan') loadSprintPlanning();
+  if (tab === 'agents')       fetchAgents();
+  if (tab === 'activity')     fetchEvents();
+  if (tab === 'history')      loadSprintHistory().catch(() => {});
+  if (tab === 'sprint-plan')  loadSprintPlanning();
+  if (tab === 'sprint-mgmt')  smgmtInit();
 }
 
 // ── Filter ────────────────────────────────────────────────────────────────────
@@ -1994,6 +1995,442 @@ async function _loadHistoryRowContent(idx) {
     : `<div class="empty-small" style="margin-bottom:8px;">Summary content not available in this view.</div>`;
 
   contentEl.innerHTML = contentHtml + ghLink;
+}
+
+// ── Sprint Management (issue #95) ─────────────────────────────────────────────
+
+let _smgmtCurrentRepo  = null;   // "owner/repo" currently displayed
+let _smgmtData         = null;   // { sprints, order, issues } from API
+let _smgmtDragSprint   = null;   // sprint label currently being drag-reordered
+let _smgmtDragTicket   = null;   // { number, fromSprint } being dragged
+let _smgmtRunningInfo  = null;   // { running, project, sprint_label } from /api/sprints/running
+let _smgmtPollTimer    = null;
+
+async function smgmtInit() {
+  // Populate project selector from already-loaded allProjects list
+  const sel = document.getElementById('smgmt-project-select');
+  if (!sel) return;
+
+  if (allProjects.length > 0) {
+    sel.innerHTML = allProjects.map(p =>
+      `<option value="${escapeHtml(p.repo)}">${escapeHtml(p.name)}</option>`
+    ).join('');
+    const repo = _smgmtCurrentRepo || allProjects[0].repo;
+    sel.value = repo;
+    await smgmtSelectProject(repo);
+  } else {
+    // Fetch projects if not yet loaded
+    try {
+      const res = await fetch('/api/projects');
+      if (!res.ok) throw new Error('Failed to load projects');
+      const data = await res.json();
+      allProjects = data.projects || [];
+      sel.innerHTML = allProjects.map(p =>
+        `<option value="${escapeHtml(p.repo)}">${escapeHtml(p.name)}</option>`
+      ).join('');
+      if (allProjects.length > 0) {
+        const repo = _smgmtCurrentRepo || allProjects[0].repo;
+        sel.value = repo;
+        await smgmtSelectProject(repo);
+      } else {
+        document.getElementById('smgmt-loading').textContent = 'No projects configured.';
+      }
+    } catch (e) {
+      smgmtShowError('Failed to load projects: ' + e.message);
+    }
+  }
+
+  // Start polling running status
+  if (_smgmtPollTimer) clearInterval(_smgmtPollTimer);
+  _smgmtPollTimer = setInterval(smgmtPollRunStatus, 5000);
+  smgmtPollRunStatus();
+}
+
+async function smgmtSelectProject(repo) {
+  if (!repo) return;
+  _smgmtCurrentRepo = repo;
+  smgmtShowError('');
+  const bodyEl = document.getElementById('smgmt-body');
+  if (bodyEl) bodyEl.innerHTML = '<div class="smgmt-loading">Loading sprints…</div>';
+
+  try {
+    const res = await fetch(`/api/sprint-management/issues?repo=${encodeURIComponent(repo)}`);
+    if (!res.ok) throw new Error(await res.text());
+    _smgmtData = await res.json();
+  } catch (e) {
+    smgmtShowError('Failed to load sprints: ' + e.message);
+    return;
+  }
+  smgmtRender();
+}
+
+function smgmtRender() {
+  if (!_smgmtData) return;
+  const { order, issues } = _smgmtData;
+  const bodyEl = document.getElementById('smgmt-body');
+  if (!bodyEl) return;
+
+  // Lowest-numbered sprint gets NEXT UP badge + Run button
+  const allNums  = order.map(l => parseInt(l.split('-')[1], 10)).filter(n => !isNaN(n));
+  const lowestN  = allNums.length > 0 ? Math.min(...allNums) : null;
+  const lowestLabel = lowestN != null ? `sprint-${lowestN}` : null;
+
+  // Build map: sprint_label -> issues[]
+  const bySprintLabel = {};
+  for (const label of order) bySprintLabel[label] = [];
+  const unassigned = [];
+  for (const iss of issues) {
+    const label = iss.sprint != null ? `sprint-${iss.sprint}` : null;
+    if (label && bySprintLabel[label]) {
+      bySprintLabel[label].push(iss);
+    } else if (label == null) {
+      unassigned.push(iss);
+    }
+  }
+
+  if (order.length === 0) {
+    bodyEl.innerHTML = '<div class="smgmt-loading">No sprints found. Use "+ New sprint" to create one.</div>';
+  } else {
+    bodyEl.innerHTML = order.map(label =>
+      smgmtSprintBlockHtml(label, bySprintLabel[label] || [], label === lowestLabel)
+    ).join('');
+  }
+
+  // Render unassigned tickets
+  smgmtRenderUnassigned(unassigned);
+  smgmtApplyRunState();
+}
+
+function smgmtSprintBlockHtml(label, tickets, isNext) {
+  const n = parseInt(label.split('-')[1], 10);
+  const nextBadge = isNext
+    ? '<span class="smgmt-next-badge">NEXT UP</span>'
+    : '';
+  const runBtnId = `smgmt-run-btn-${label.replace('-', '_')}`;
+
+  const ticketsHtml = tickets.length > 0
+    ? tickets.map(t => smgmtTicketCardHtml(t, label)).join('')
+    : '<div class="smgmt-drop-hint">Drop tickets here</div>';
+
+  return `
+    <div class="smgmt-sprint-block" id="smgmt-block-${label}"
+         ondragover="smgmtDragOverZone(event, '${label}')"
+         ondragleave="smgmtDragLeave(event)"
+         ondrop="smgmtDropOnSprint(event, '${label}')">
+      <div class="smgmt-sprint-header"
+           draggable="true"
+           ondragstart="smgmtSprintDragStart(event, '${label}')"
+           ondragend="smgmtSprintDragEnd(event)">
+        <i class="ti ti-grip-vertical smgmt-sprint-grip"></i>
+        <span class="smgmt-sprint-name">Sprint ${n}</span>
+        ${nextBadge}
+        <span class="smgmt-sprint-count">${tickets.length} ticket${tickets.length !== 1 ? 's' : ''}</span>
+        ${isNext
+          ? `<button class="smgmt-run-btn" id="${runBtnId}"
+                     onclick="smgmtRunSprint('${label}')">Run sprint</button>`
+          : ''}
+      </div>
+      <div class="smgmt-sprint-tickets" id="smgmt-tickets-${label}">
+        ${ticketsHtml}
+      </div>
+    </div>`;
+}
+
+function smgmtTicketCardHtml(ticket, currentSprint) {
+  const statusClass = {
+    'backlog':      'smgmt-status-backlog',
+    'in-progress':  'smgmt-status-in-progress',
+    'sit':          'smgmt-status-sit',
+    'uat':          'smgmt-status-uat',
+    'done':         'smgmt-status-done',
+  }[ticket.status] || 'smgmt-status-backlog';
+  const statusLabel = ticket.status || 'backlog';
+
+  return `
+    <div class="smgmt-ticket" id="smgmt-ticket-${ticket.number}"
+         draggable="true"
+         data-issue="${ticket.number}"
+         data-sprint="${currentSprint || ''}"
+         ondragstart="smgmtTicketDragStart(event, ${ticket.number}, '${currentSprint || ''}')"
+         ondragend="smgmtTicketDragEnd(event)">
+      <i class="ti ti-grip-vertical smgmt-ticket-grip"></i>
+      <a class="smgmt-ticket-num" href="${escapeHtml(ticket.url || '#')}" target="_blank"
+         rel="noopener" onclick="event.stopPropagation()">#${ticket.number}</a>
+      <span class="smgmt-ticket-title" title="${escapeHtml(ticket.title)}">${escapeHtml(ticket.title)}</span>
+      <span class="smgmt-ticket-status ${statusClass}">${escapeHtml(statusLabel)}</span>
+    </div>`;
+}
+
+function smgmtRenderUnassigned(tickets) {
+  const el = document.getElementById('smgmt-unassigned-tickets');
+  if (!el) return;
+  if (tickets.length === 0) {
+    el.innerHTML = '<div class="smgmt-drop-hint">Drop tickets here to remove sprint label</div>';
+  } else {
+    el.innerHTML = tickets.map(t => smgmtTicketCardHtml(t, null)).join('');
+  }
+}
+
+// ── Sprint drag-and-drop (reorder) ────────────────────────────────────────────
+
+let _smgmtDragSprintLabel = null;
+let _smgmtDragSprintOver  = null;
+
+function smgmtSprintDragStart(event, label) {
+  _smgmtDragSprintLabel = label;
+  event.dataTransfer.effectAllowed = 'move';
+  event.dataTransfer.setData('text/smgmt-sprint', label);
+  const block = document.getElementById(`smgmt-block-${label}`);
+  if (block) setTimeout(() => block.classList.add('dragging-sprint'), 0);
+}
+
+function smgmtSprintDragEnd(event) {
+  if (_smgmtDragSprintLabel) {
+    const block = document.getElementById(`smgmt-block-${_smgmtDragSprintLabel}`);
+    if (block) block.classList.remove('dragging-sprint');
+  }
+  _smgmtDragSprintLabel = null;
+  // Clear all hover states
+  document.querySelectorAll('.smgmt-sprint-block').forEach(b => b.classList.remove('drag-over-sprint'));
+}
+
+// ── Ticket drag-and-drop ──────────────────────────────────────────────────────
+
+function smgmtTicketDragStart(event, issueNum, fromSprint) {
+  _smgmtDragTicket = { number: issueNum, fromSprint: fromSprint || null };
+  event.dataTransfer.effectAllowed = 'move';
+  event.dataTransfer.setData('text/smgmt-ticket', String(issueNum));
+  const el = document.getElementById(`smgmt-ticket-${issueNum}`);
+  if (el) setTimeout(() => el.classList.add('dragging-ticket'), 0);
+}
+
+function smgmtTicketDragEnd(event) {
+  if (_smgmtDragTicket) {
+    const el = document.getElementById(`smgmt-ticket-${_smgmtDragTicket.number}`);
+    if (el) el.classList.remove('dragging-ticket');
+  }
+  _smgmtDragTicket = null;
+  // Clear all hover states
+  document.querySelectorAll('.smgmt-sprint-block, .smgmt-unassigned').forEach(el => {
+    el.classList.remove('drag-over-sprint', 'drag-over-zone');
+  });
+}
+
+function smgmtDragOverZone(event, sprintLabel) {
+  // Prevent default only for ticket drags or sprint drags
+  if (_smgmtDragTicket || _smgmtDragSprintLabel) {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+  }
+
+  if (_smgmtDragSprintLabel && sprintLabel && sprintLabel !== _smgmtDragSprintLabel) {
+    // Sprint reorder hover
+    document.querySelectorAll('.smgmt-sprint-block').forEach(b => b.classList.remove('drag-over-sprint'));
+    const target = document.getElementById(`smgmt-block-${sprintLabel}`);
+    if (target) target.classList.add('drag-over-sprint');
+    _smgmtDragSprintOver = sprintLabel;
+    return;
+  }
+
+  if (_smgmtDragTicket) {
+    if (sprintLabel) {
+      document.querySelectorAll('.smgmt-sprint-block').forEach(b => b.classList.remove('drag-over-sprint'));
+      document.querySelectorAll('.smgmt-unassigned').forEach(b => b.classList.remove('drag-over-zone'));
+      const target = document.getElementById(`smgmt-block-${sprintLabel}`);
+      if (target) target.classList.add('drag-over-sprint');
+    } else {
+      document.querySelectorAll('.smgmt-sprint-block').forEach(b => b.classList.remove('drag-over-sprint'));
+      document.getElementById('smgmt-unassigned')?.classList.add('drag-over-zone');
+    }
+  }
+}
+
+function smgmtDragLeave(event) {
+  // Only clear if leaving to outside the zone
+  if (event.currentTarget && !event.currentTarget.contains(event.relatedTarget)) {
+    event.currentTarget.classList.remove('drag-over-sprint', 'drag-over-zone');
+  }
+}
+
+async function smgmtDropOnSprint(event, targetSprintLabel) {
+  event.preventDefault();
+  document.querySelectorAll('.smgmt-sprint-block, .smgmt-unassigned').forEach(el => {
+    el.classList.remove('drag-over-sprint', 'drag-over-zone');
+  });
+
+  // Sprint reorder drop
+  if (_smgmtDragSprintLabel && targetSprintLabel && _smgmtDragSprintLabel !== targetSprintLabel) {
+    const fromLabel = _smgmtDragSprintLabel;
+    _smgmtDragSprintLabel = null;
+    await smgmtReorderSprints(fromLabel, targetSprintLabel);
+    return;
+  }
+
+  // Ticket drop
+  if (_smgmtDragTicket) {
+    const { number, fromSprint } = _smgmtDragTicket;
+    _smgmtDragTicket = null;
+
+    if (fromSprint === targetSprintLabel) return; // no-op
+
+    // Optimistic: move ticket in local data
+    const iss = _smgmtData.issues.find(i => i.number === number);
+    if (iss) {
+      const targetNum = targetSprintLabel ? parseInt(targetSprintLabel.split('-')[1], 10) : null;
+      iss.sprint = targetNum;
+    }
+    smgmtRender();
+
+    // API call
+    const targetSprintNum = targetSprintLabel ? parseInt(targetSprintLabel.split('-')[1], 10) : null;
+    try {
+      const res = await fetch('/api/sprint-planning/assign', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ issue: number, sprint: targetSprintNum }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+    } catch (e) {
+      // Rollback: restore original sprint
+      const iss2 = _smgmtData.issues.find(i => i.number === number);
+      if (iss2) {
+        const origNum = fromSprint ? parseInt(fromSprint.split('-')[1], 10) : null;
+        iss2.sprint = origNum;
+      }
+      smgmtRender();
+      smgmtShowError(`Failed to move ticket #${number}: ${e.message}`);
+    }
+  }
+}
+
+async function smgmtReorderSprints(fromLabel, toLabel) {
+  if (!_smgmtData) return;
+  const order = [..._smgmtData.order];
+  const fromIdx = order.indexOf(fromLabel);
+  const toIdx   = order.indexOf(toLabel);
+  if (fromIdx === -1 || toIdx === -1) return;
+
+  // Swap positions
+  order.splice(fromIdx, 1);
+  order.splice(toIdx, 0, fromLabel);
+  _smgmtData.order = order;
+  smgmtRender();
+
+  // Persist
+  const slug = (_smgmtCurrentRepo || '').split('/')[1] || _smgmtCurrentRepo || '';
+  try {
+    const res = await fetch(`/api/sprints/order?project=${encodeURIComponent(slug)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ order }),
+    });
+    if (!res.ok) throw new Error(await res.text());
+  } catch (e) {
+    smgmtShowError('Failed to save sprint order: ' + e.message);
+  }
+}
+
+// ── Run sprint ────────────────────────────────────────────────────────────────
+
+async function smgmtRunSprint(sprintLabel) {
+  if (!_smgmtCurrentRepo) return;
+  const runBtnId = `smgmt-run-btn-${sprintLabel.replace('-', '_')}`;
+  const btn = document.getElementById(runBtnId);
+  if (btn) { btn.disabled = true; btn.textContent = 'Starting…'; }
+
+  try {
+    const res = await fetch('/api/sprints/run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ project: _smgmtCurrentRepo, sprint_label: sprintLabel }),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    smgmtPollRunStatus();
+  } catch (e) {
+    smgmtShowError('Failed to start sprint: ' + e.message);
+    if (btn) { btn.disabled = false; btn.textContent = 'Run sprint'; }
+  }
+}
+
+async function smgmtPollRunStatus() {
+  try {
+    const [runRes, statusRes] = await Promise.all([
+      fetch('/api/sprints/running'),
+      fetch('/api/sprint-status').catch(() => ({ ok: false })),
+    ]);
+    if (runRes.ok) {
+      _smgmtRunningInfo = await runRes.json();
+    }
+    let sprintStatus = null;
+    if (statusRes.ok) sprintStatus = await statusRes.json();
+    smgmtApplyRunState(sprintStatus);
+  } catch { /* ignore poll errors */ }
+}
+
+function smgmtApplyRunState(sprintStatus) {
+  const running  = _smgmtRunningInfo?.running || false;
+  const runLabel = _smgmtRunningInfo?.sprint_label || null;
+  const runProj  = _smgmtRunningInfo?.project || null;
+
+  // Find all run buttons
+  document.querySelectorAll('.smgmt-run-btn').forEach(btn => {
+    const btnLabel = btn.id.replace('smgmt-run-btn-', '').replace('_', '-');
+
+    if (!running) {
+      btn.disabled = false;
+      btn.textContent = 'Run sprint';
+      return;
+    }
+
+    btn.disabled = true;
+    if (runLabel === btnLabel && runProj === _smgmtCurrentRepo) {
+      // This is the running sprint — show progress if available
+      if (sprintStatus && sprintStatus.sprint_label === runLabel) {
+        const total = (sprintStatus.issues || []).length;
+        const done  = (sprintStatus.issues || []).filter(i =>
+          i.status === 'done' || i.status === 'skipped'
+        ).length;
+        btn.textContent = `Running… ${done}/${total} tickets`;
+      } else {
+        btn.textContent = 'Running…';
+      }
+    } else {
+      btn.textContent = 'Another sprint is running';
+    }
+  });
+}
+
+// ── Create sprint ─────────────────────────────────────────────────────────────
+
+async function smgmtCreateSprint() {
+  if (!_smgmtCurrentRepo) return;
+  const btn = document.getElementById('smgmt-new-sprint-btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Creating…'; }
+
+  try {
+    const res = await fetch('/api/sprints/create', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ project: _smgmtCurrentRepo }),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    const data = await res.json();
+    // Reload sprint data
+    await smgmtSelectProject(_smgmtCurrentRepo);
+  } catch (e) {
+    smgmtShowError('Failed to create sprint: ' + e.message);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '+ New sprint'; }
+  }
+}
+
+// ── Error display ─────────────────────────────────────────────────────────────
+
+function smgmtShowError(msg) {
+  const el = document.getElementById('smgmt-error');
+  if (!el) return;
+  el.textContent = msg;
+  el.classList.toggle('hidden', !msg);
 }
 
 // ── SSE handler for sprint_plan_update ────────────────────────────────────────

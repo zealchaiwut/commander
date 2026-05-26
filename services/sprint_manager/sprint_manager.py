@@ -2150,6 +2150,46 @@ def _create_sprint_pr(
         return None
 
 
+# ── Issue Estimator integration ───────────────────────────────────────────────
+
+SERIOUS_RISK_FLAGS = {"touches-db-schema", "security-sensitive", "breaks-tests"}
+
+
+def _load_estimate(issue_num: int) -> Optional[dict]:
+    """Load .commander/estimates/issue-<N>.json by walking up from REPO_ROOT."""
+    current = REPO_ROOT.resolve()
+    while True:
+        estimate_path = current / ".commander" / "estimates" / f"issue-{issue_num}.json"
+        if estimate_path.exists():
+            try:
+                return json.loads(estimate_path.read_text())
+            except (json.JSONDecodeError, OSError):
+                return None
+        parent = current.parent
+        if parent == current:
+            break
+        current = parent
+    return None
+
+
+def _warn_file_conflicts(issues: list["IssueState"]) -> None:
+    """Warn when multiple pending issues share files in their estimates."""
+    file_to_issues: dict[str, list[int]] = {}
+    for issue_state in issues:
+        if issue_state.status not in ("pending", ""):
+            continue
+        estimate = _load_estimate(issue_state.number)
+        if not estimate:
+            continue
+        for f in estimate.get("files_likely_affected", []):
+            file_to_issues.setdefault(f, []).append(issue_state.number)
+
+    for f, nums in file_to_issues.items():
+        if len(nums) > 1:
+            issues_str = " and ".join(f"#{n}" for n in nums)
+            print(f"  [estimate] WARNING: tickets {issues_str} share files: {f} — processing sequentially")
+
+
 # -- GitHub issue listing --
 
 def _classify(labels: set[str]) -> str:
@@ -2298,6 +2338,9 @@ def run_sprint(
     else:
         print(f"  Using custom target branch {target_branch!r} — sprint branch creation skipped.")
 
+    # Warn about shared-file conflicts before dispatching
+    _warn_file_conflicts(state.issues)
+
     start_time = time.monotonic()
 
     total_issues = len(state.issues)
@@ -2328,6 +2371,20 @@ def run_sprint(
 
         # AC-3: check for pause file before dispatching this issue
         _wait_if_paused(sprint_num, state, api_url=api_url)
+
+        # Log estimate info if available
+        _est = _load_estimate(num)
+        if _est:
+            _size  = _est.get("size", "?")
+            _hours = _est.get("estimated_hours", "?")
+            _conf  = _est.get("confidence", "?")
+            print(f"  [estimate] size={_size} (~{_hours}h), confidence={_conf}")
+            _risk = _est.get("risk_flags", [])
+            if _risk:
+                print(f"  [estimate] risk flags: {', '.join(_risk)}")
+                _serious = [f for f in _risk if f in SERIOUS_RISK_FLAGS]
+                if _serious:
+                    print(f"  [estimate] WARNING: serious risk flags: {', '.join(_serious)}")
 
         # Preflight filter: skip issues not approved by pre-flight review
         if preflight_approved is not None and num not in preflight_approved:

@@ -336,6 +336,17 @@ def approve_issue(issue_id: int, repo: Optional[str] = None):
         raise _gh_error(e)
 
 
+@app.post("/api/tickets/{issue_id}/approve")
+async def approve_ticket(issue_id: int, repo: Optional[str] = None):
+    """Close a UAT-labelled ticket on GitHub and remove the UAT label."""
+    try:
+        github_client.approve_issue(issue_id, repo_name=repo)
+    except subprocess.CalledProcessError as e:
+        raise _gh_error(e)
+    await broadcast({"type": "update", "event": {"event_type": "ticket_approved", "issue": issue_id}})
+    return {"ok": True}
+
+
 @app.post("/api/issues/{issue_id}/reject")
 def reject_issue(issue_id: int, body: RejectBody, repo: Optional[str] = None):
     try:

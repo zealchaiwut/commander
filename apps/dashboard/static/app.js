@@ -5,6 +5,8 @@ let expandedProjects = new Set(); // repos currently expanded
 let detailsCache     = {};        // repo → detail data
 let testReportCache  = {};        // `${repo}#${issueNum}` → report data
 let doneAgentsVisible = {};       // repo → bool (toggle state for DONE agents, AC-2d)
+let _uatTicketsByRepo = {};       // repo → UAT ticket list (populated when expand panel renders)
+let _approveAllUatRepo = null;    // repo currently targeted by the approve-all modal
 
 // ── Agent name parser ────────────────────────────────────────────────────────
 // New format: "role·repo·branch·#short"   (4 parts, · separator)
@@ -387,12 +389,19 @@ function ticketCardHtml(ticket, repo) {
 function _ticketGroupHtml(label, tickets, repo) {
   if (tickets.length === 0) return '';
   const r = escapeHtml(repo);
-  const approveAllBtn = label === 'UAT'
-    ? ` <button class="btn-approve-sm" style="margin-left:auto;font-size:11px;padding:2px 8px;" onclick="approveAllUat('${r}', this)">Approve all UAT</button>`
-    : '';
-  const hdrStyle = label === 'UAT' ? ' style="display:flex;align-items:center;"' : '';
+  let hdrText, approveAllBtn, hdrStyle;
+  if (label === 'UAT') {
+    _uatTicketsByRepo[repo] = tickets;
+    hdrText = `UAT (${tickets.length})`;
+    approveAllBtn = ` <button class="btn-approve-all-uat" onclick="showApproveAllUatModal('${r}')"><i class="ti ti-checks"></i> Approve all UAT</button>`;
+    hdrStyle = ' style="display:flex;align-items:center;"';
+  } else {
+    hdrText = `${escapeHtml(label)} · ${tickets.length}`;
+    approveAllBtn = '';
+    hdrStyle = '';
+  }
   return `<div class="ticket-group">
-    <div class="expand-hdr-title ticket-group-hdr"${hdrStyle}>${escapeHtml(label)} · ${tickets.length}${approveAllBtn}</div>
+    <div class="expand-hdr-title ticket-group-hdr"${hdrStyle}>${hdrText}${approveAllBtn}</div>
     ${tickets.map(t => ticketCardHtml(t, repo)).join('')}
   </div>`;
 }
@@ -691,18 +700,43 @@ async function approveIssue(issueNum, repo, btnEl) {
   }
 }
 
-async function approveAllUat(repo, btnEl) {
-  if (btnEl) btnEl.disabled = true;
+function showApproveAllUatModal(repo) {
+  _approveAllUatRepo = repo;
+  const tickets = _uatTicketsByRepo[repo] || [];
+  const n = tickets.length;
+  const proj = allProjects.find(p => p.repo === repo);
+  const projName = proj ? proj.name : repo.split('/').pop();
+  document.getElementById('aua-modal-title').textContent =
+    `Approve ${n} UAT ticket${n !== 1 ? 's' : ''} for ${projName}?`;
+  document.getElementById('aua-modal-list').innerHTML =
+    tickets.map(t => `<li>#${t.number} ${escapeHtml(t.title)}</li>`).join('');
+  const confirmBtn = document.getElementById('aua-modal-confirm');
+  if (confirmBtn) confirmBtn.disabled = false;
+  document.getElementById('aua-modal-backdrop').classList.remove('hidden');
+  document.getElementById('aua-modal').classList.remove('hidden');
+}
+
+function closeApproveAllUatModal() {
+  document.getElementById('aua-modal-backdrop').classList.add('hidden');
+  document.getElementById('aua-modal').classList.add('hidden');
+  _approveAllUatRepo = null;
+}
+
+async function confirmApproveAllUat() {
+  const repo = _approveAllUatRepo;
+  if (!repo) return;
+  const btn = document.getElementById('aua-modal-confirm');
+  if (btn) btn.disabled = true;
   try {
-    const res = await fetch(
-      `/api/projects/${repo}/approve-batch`,
-      { method: 'POST' }
-    );
+    const res = await fetch(`/api/projects/${repo}/approve-batch`, { method: 'POST' });
     if (!res.ok) throw new Error(await res.text());
+    const data = await res.json();
+    closeApproveAllUatModal();
     _refreshAfterAction(repo);
+    showToastSuccess(`Approved ${data.count} ticket${data.count !== 1 ? 's' : ''}`);
   } catch (e) {
     alert('Batch approve failed: ' + e.message);
-    if (btnEl) btnEl.disabled = false;
+    if (btn) btn.disabled = false;
   }
 }
 
@@ -1277,6 +1311,14 @@ function showToast(msg) {
 function hideToast() {
   const t = document.getElementById('toast-error');
   if (t) t.style.display = 'none';
+}
+
+function showToastSuccess(msg) {
+  const t = document.getElementById('toast-success');
+  if (!t) return;
+  t.textContent = msg;
+  t.style.display = 'block';
+  setTimeout(() => { t.style.display = 'none'; }, 5000);
 }
 
 // ── Sprint alert banners (AC-3a) ──────────────────────────────────────────────

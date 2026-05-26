@@ -6,6 +6,10 @@ let detailsCache     = {};        // repo → detail data
 let testReportCache  = {};        // `${repo}#${issueNum}` → report data
 let doneAgentsVisible = {};       // repo → bool (toggle state for DONE agents, AC-2d)
 
+// ── Router state ──────────────────────────────────────────────────────────────
+let _activeProject    = null;   // "owner/repo" when in project view
+let _activeProjectTab = 'tickets'; // 'tickets' | 'sprint-mgmt' | 'sprint-history'
+
 // ── Agent name parser ────────────────────────────────────────────────────────
 // New format: "role·repo·branch·#short"   (4 parts, · separator)
 // Old format: plain basename              (graceful fallback)
@@ -72,18 +76,252 @@ function _syncThemeIcon(theme) {
 
 // ── Tab navigation ────────────────────────────────────────────────────────────
 function switchMain(tab) {
-  ['projects', 'agents', 'activity', 'history', 'sprint-plan', 'sprint-mgmt'].forEach(t => {
-    const viewId = t === 'sprint-plan' ? 'view-sprint-plan' : `view-${t}`;
-    const tabId  = `mtab-${t}`;
-    document.getElementById(viewId)?.classList.toggle('hidden', t !== tab);
-    document.getElementById(tabId)?.classList.toggle('active', t === tab);
+  // Hide project view when switching to a global tab
+  document.getElementById('view-project')?.classList.add('hidden');
+  document.getElementById('global-nav')?.classList.remove('hidden');
+
+  ['overview', 'agents', 'activity'].forEach(t => {
+    document.getElementById(`view-${t}`)?.classList.toggle('hidden', t !== tab);
+    document.getElementById(`mtab-${t}`)?.classList.toggle('active', t === tab);
   });
-  if (tab === 'agents')       fetchAgents();
-  if (tab === 'activity')     fetchEvents();
-  if (tab === 'history')      loadSprintHistory().catch(() => {});
-  if (tab === 'sprint-plan')  loadSprintPlanning();
-  if (tab === 'sprint-mgmt')  smgmtInit();
+
+  if (tab === 'agents')   fetchAgents();
+  if (tab === 'activity') fetchEvents();
+
+  if (tab === 'overview') {
+    history.pushState({ view: 'overview' }, '', '/');
+  }
 }
+
+// ── Project-scoped navigation ─────────────────────────────────────────────────
+function navigateToOverview() {
+  history.pushState({ view: 'overview' }, '', '/');
+  _showOverview();
+}
+
+function _showOverview() {
+  _activeProject = null;
+  document.getElementById('view-project')?.classList.add('hidden');
+  document.getElementById('view-overview')?.classList.remove('hidden');
+  document.getElementById('view-agents')?.classList.add('hidden');
+  document.getElementById('view-activity')?.classList.add('hidden');
+
+  ['overview', 'agents', 'activity'].forEach(t => {
+    document.getElementById(`mtab-${t}`)?.classList.toggle('active', t === 'overview');
+  });
+}
+
+function drillIntoProject(repo, tab) {
+  tab = tab || 'tickets';
+  _activeProject = repo;
+  _activeProjectTab = tab;
+
+  const encoded = encodeURIComponent(repo);
+  history.pushState({ view: 'project', repo, tab }, '', `/projects/${encoded}/${tab}`);
+  _renderProjectView(repo, tab);
+}
+
+function switchProject(repo) {
+  if (!repo) return;
+  drillIntoProject(repo, _activeProjectTab);
+}
+
+function switchProjectTab(tab) {
+  _activeProjectTab = tab;
+  const encoded = encodeURIComponent(_activeProject);
+  history.pushState({ view: 'project', repo: _activeProject, tab }, '', `/projects/${encoded}/${tab}`);
+  _activateProjectTab(tab);
+}
+
+function _renderProjectView(repo, tab) {
+  if (!repo) return;
+
+  // Hide all global views
+  ['overview', 'agents', 'activity'].forEach(t => {
+    document.getElementById(`view-${t}`)?.classList.add('hidden');
+    document.getElementById(`mtab-${t}`)?.classList.remove('active');
+  });
+
+  // Show project view
+  document.getElementById('view-project')?.classList.remove('hidden');
+
+  // Update project header
+  _updateProjectHeader(repo);
+
+  // Activate the right tab
+  _activateProjectTab(tab);
+}
+
+function _updateProjectHeader(repo) {
+  const proj = allProjects.find(p => p.repo === repo);
+  const name = proj?.name || repo.split('/')[1] || repo;
+
+  // Breadcrumb
+  document.getElementById('pvh-proj-name').textContent = name;
+
+  // Icon
+  const iconEl = document.getElementById('pvh-icon');
+  if (iconEl && proj) {
+    iconEl.style.background = proj.color || '#6b7280';
+    iconEl.innerHTML = `<i class="ti ${escapeHtml(proj.icon || 'ti-folder')}"></i>`;
+  }
+
+  // Title & sprint
+  document.getElementById('pvh-title').textContent = name;
+  const sprintEl = document.getElementById('pvh-sprint');
+  if (sprintEl) {
+    sprintEl.textContent = proj?.current_sprint
+      ? `Sprint ${proj.current_sprint}${proj.sprint_theme ? ' · ' + proj.sprint_theme : ''}`
+      : '';
+  }
+
+  // Project picker
+  const picker = document.getElementById('proj-picker');
+  if (picker && allProjects.length > 0) {
+    picker.innerHTML = allProjects.map(p =>
+      `<option value="${escapeHtml(p.repo)}" ${p.repo === repo ? 'selected' : ''}>${escapeHtml(p.name)}</option>`
+    ).join('');
+  }
+}
+
+function _activateProjectTab(tab) {
+  ['tickets', 'sprint-mgmt', 'sprint-history'].forEach(t => {
+    document.getElementById(`pview-${t}`)?.classList.toggle('hidden', t !== tab);
+    document.getElementById(`ptab-${t}`)?.classList.toggle('active', t === tab);
+  });
+
+  if (tab === 'tickets')        _loadProjectTickets(_activeProject);
+  if (tab === 'sprint-mgmt')    smgmtInitForProject(_activeProject);
+  if (tab === 'sprint-history') loadSprintHistory().catch(() => {});
+}
+
+function _loadProjectTickets(repo) {
+  const container = document.getElementById('pview-tickets-content');
+  if (!container) return;
+  if (!repo) { container.innerHTML = '<div class="empty">No project selected.</div>'; return; }
+
+  if (detailsCache[repo]) {
+    _renderProjectTickets(repo, detailsCache[repo]);
+    return;
+  }
+  container.innerHTML = '<div class="empty">Loading…</div>';
+  fetch(`/api/project-details?repo=${encodeURIComponent(repo)}`)
+    .then(r => r.ok ? r.json() : Promise.reject(r))
+    .then(data => {
+      detailsCache[repo] = data;
+      _renderProjectTickets(repo, data);
+    })
+    .catch(() => {
+      container.innerHTML = '<div class="empty">Failed to load tickets.</div>';
+    });
+}
+
+function _renderProjectTickets(repo, data) {
+  const container = document.getElementById('pview-tickets-content');
+  if (!container) return;
+
+  const tickets = data.tickets || [];
+  const agents  = data.agents  || [];
+  const ghUrl   = data.github_url || `https://github.com/${repo}/issues`;
+
+  // Tickets column
+  let ticketsHtml;
+  if (tickets.length === 0) {
+    ticketsHtml = '<div class="empty-small">No open tickets</div>';
+  } else {
+    const sitT    = tickets.filter(t => t.status === 'SIT');
+    const uatT    = tickets.filter(t => t.status === 'UAT');
+    const activeT = tickets.filter(t => t.status === 'in-progress' || t.status === 'blocked');
+    const backlogT = tickets.filter(t => t.status === 'backlog');
+    ticketsHtml = [
+      _ticketGroupHtml('SIT',         sitT,     repo),
+      _ticketGroupHtml('UAT',         uatT,     repo),
+      _ticketGroupHtml('In progress', activeT,  repo),
+      _ticketGroupHtml('Backlog',     backlogT, repo),
+    ].join('');
+  }
+
+  // Agents column
+  const projData     = allProjects.find(p => p.repo === repo) || null;
+  const miniSprint   = _miniSprintSummaryHtml(projData);
+  const workingAgents = agents.filter(a => a.status === 'working');
+  const doneAgents    = agents.filter(a => a.status === 'done');
+  const showDone      = !!doneAgentsVisible[repo];
+  const id            = _projId(repo);
+
+  const doneToggleStyle = doneAgents.length > 0 ? 'cursor:pointer;text-decoration:underline dotted;' : '';
+  const doneLabel = `<span id="done-toggle-${id}" style="${doneToggleStyle}"
+    onclick="${doneAgents.length > 0 ? `toggleDoneAgents('${id}','${escapeHtml(repo)}')` : ''}">
+    done (${doneAgents.length})</span>`;
+
+  let agentsHtml = '';
+  if (workingAgents.length === 0 && !showDone) {
+    agentsHtml = '<div class="empty-small">No active agents</div>';
+  } else {
+    agentsHtml = workingAgents.map(agentDetailCardHtml).join('');
+  }
+  if (showDone && doneAgents.length > 0) {
+    agentsHtml += doneAgents.map(agentDetailCardHtml).join('');
+  }
+
+  const tokLine = data.tokens_today > 0
+    ? `<div class="agent-detail-meta" style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border)">Tokens today: ${data.tokens_today.toLocaleString()}${data.cost_today_usd != null ? ` · ~$${data.cost_today_usd.toFixed(2)}` : ''}</div>`
+    : '';
+
+  container.innerHTML = `
+    <div class="pview-tickets-main">
+      ${miniSprint}
+      <div class="expand-hdr">
+        <span class="expand-hdr-title">Active tickets</span>
+        <a class="view-all" href="${escapeHtml(ghUrl)}" target="_blank" rel="noopener">View all →</a>
+      </div>
+      ${ticketsHtml}
+    </div>
+    <div class="pview-tickets-aside">
+      <div class="expand-hdr">
+        <span class="expand-hdr-title">AGENTS · working (${workingAgents.length}) · ${doneLabel}</span>
+      </div>
+      ${agentsHtml}
+      ${tokLine}
+    </div>`;
+
+  // Load test reports for UAT tickets
+  tickets.filter(t => t.is_uat).forEach(t => loadTestReport(t.number, repo));
+}
+
+// ── URL Router ────────────────────────────────────────────────────────────────
+function _route() {
+  const path = window.location.pathname;
+
+  // Match /projects/<encoded-repo>/<tab>
+  const m = path.match(/^\/projects\/([^/]+)\/?(tickets|sprint-mgmt|sprint-history)?$/);
+  if (m) {
+    const repo = decodeURIComponent(m[1]);
+    const tab  = m[2] || 'tickets';
+    _activeProject    = repo;
+    _activeProjectTab = tab;
+    // If projects not yet loaded, defer render until after load
+    if (allProjects.length > 0) {
+      _renderProjectView(repo, tab);
+    }
+    // else _route() will be called again after loadProjects resolves
+    return;
+  }
+
+  // Default: overview
+  _showOverview();
+}
+
+window.addEventListener('popstate', e => {
+  const s = e.state;
+  if (s?.view === 'project') {
+    _activeProject    = s.repo;
+    _activeProjectTab = s.tab || 'tickets';
+    _renderProjectView(s.repo, s.tab || 'tickets');
+  } else {
+    _showOverview();
+  }
+});
 
 // ── Filter ────────────────────────────────────────────────────────────────────
 function setFilter(filter) {
@@ -203,12 +441,13 @@ function projectRowHtml(proj) {
       </span>
     </div>`;
 
-  // use data attributes to avoid quoting issues in onclick
+  // clicking navigates to project-scoped view
   return `
     <div class="project-block" id="proj-block-${id}">
       <div class="project-row" id="proj-row-${id}"
            data-repo="${escapeHtml(proj.repo)}" data-id="${id}"
-           onclick="toggleProject(this.dataset.id, this.dataset.repo)">
+           onclick="toggleProject(this.dataset.id, this.dataset.repo)"
+           title="Open ${escapeHtml(proj.name)}">
         <div class="proj-col-name">
           <div class="proj-icon" style="background:${colorHex}">
             <i class="ti ${escapeHtml(proj.icon || 'ti-folder')}"></i>
@@ -224,18 +463,19 @@ function projectRowHtml(proj) {
           ${chipsHtml}
           ${agentPillsHtml(proj.agents)}
         </div>
-        <div class="proj-col-chevron"><i class="ti ti-chevron-down chevron-icon"></i></div>
-      </div>
-      <div class="proj-expand hidden" id="proj-expand-${id}">
-        <div class="expand-inner" id="proj-detail-${id}">
-          <div class="expand-loading">Loading…</div>
-        </div>
+        <div class="proj-col-chevron"><i class="ti ti-chevron-right chevron-icon"></i></div>
       </div>
     </div>`;
 }
 
 function renderProjects(projects) {
   allProjects = projects;
+
+  // Refresh project header & picker if currently in project view
+  if (_activeProject) {
+    _updateProjectHeader(_activeProject);
+  }
+
   const container = document.getElementById('project-list');
 
   let filtered = projects;
@@ -251,43 +491,11 @@ function renderProjects(projects) {
   }
 
   container.innerHTML = filtered.map(projectRowHtml).join('');
-
-  // re-expand panels that were open before the re-render
-  expandedProjects.forEach(repo => {
-    const id    = _projId(repo);
-    const row   = document.getElementById(`proj-row-${id}`);
-    const panel = document.getElementById(`proj-expand-${id}`);
-    if (!row || !panel) return;
-    row.classList.add('expanded');
-    panel.classList.remove('hidden');
-    if (detailsCache[repo]) {
-      renderExpandPanel(id, detailsCache[repo], repo);
-    } else {
-      loadProjectDetails(id, repo);
-    }
-  });
 }
 
-// ── Expand / collapse ─────────────────────────────────────────────────────────
+// ── Expand / collapse → navigate to project view ──────────────────────────────
 function toggleProject(id, repo) {
-  const row   = document.getElementById(`proj-row-${id}`);
-  const panel = document.getElementById(`proj-expand-${id}`);
-  if (!row || !panel) return;
-
-  if (row.classList.contains('expanded')) {
-    row.classList.remove('expanded');
-    panel.classList.add('hidden');
-    expandedProjects.delete(repo);
-  } else {
-    row.classList.add('expanded');
-    panel.classList.remove('hidden');
-    expandedProjects.add(repo);
-    if (detailsCache[repo]) {
-      renderExpandPanel(id, detailsCache[repo], repo);
-    } else {
-      loadProjectDetails(id, repo);
-    }
-  }
+  drillIntoProject(repo, 'tickets');
 }
 
 async function loadProjectDetails(id, repo) {
@@ -520,8 +728,8 @@ function renderExpandPanel(id, data, repo) {
 // AC-2c: toggle done agents visibility per project
 function toggleDoneAgents(id, repo) {
   doneAgentsVisible[repo] = !doneAgentsVisible[repo];
-  if (detailsCache[repo]) {
-    renderExpandPanel(id, detailsCache[repo], repo);
+  if (detailsCache[repo] && _activeProject === repo) {
+    _renderProjectTickets(repo, detailsCache[repo]);
   }
 }
 
@@ -743,10 +951,11 @@ async function submitRejectInline(issueNum, repo) {
 }
 
 function _refreshAfterAction(repo) {
-  // clear both caches so next expand fetches fresh data
   delete detailsCache[repo];
   Object.keys(testReportCache).forEach(k => { if (k.startsWith(`${repo}#`)) delete testReportCache[k]; });
-  loadProjectDetails(_projId(repo), repo);
+  if (_activeProject === repo && _activeProjectTab === 'tickets') {
+    _loadProjectTickets(repo);
+  }
   loadProjects().catch(() => {});
 }
 
@@ -882,16 +1091,23 @@ function connectSSE() {
       }
 
       if (msg.type !== 'update') return;
-      if (!document.getElementById('view-projects').classList.contains('hidden')) {
+      const projectView  = document.getElementById('view-project');
+      const overviewView = document.getElementById('view-overview');
+      const isOverview   = overviewView && !overviewView.classList.contains('hidden');
+      const isProject    = projectView  && !projectView.classList.contains('hidden');
+
+      if (isOverview) {
         loadProjects().catch(() => {});
-        // AC-1d: when cache refreshes, also refresh details for expanded projects
-        expandedProjects.forEach(repo => {
-          delete detailsCache[repo];
-          loadProjectDetails(_projId(repo), repo);
-        });
+      }
+      if (isProject && _activeProject) {
+        delete detailsCache[_activeProject];
+        if (_activeProjectTab === 'tickets') {
+          _loadProjectTickets(_activeProject);
+        }
+        loadProjects().catch(() => {}); // keep header/picker in sync
       }
       if (!document.getElementById('view-agents').classList.contains('hidden')) fetchAgents();
-      if (!document.getElementById('view-history')?.classList.contains('hidden')) {
+      if (isProject && _activeProjectTab === 'sprint-history') {
         loadSprintHistory().catch(() => {});
       }
       if (msg.event && msg.event.event_type === 'sprint_plan_update') _handleSprintPlanSSE();
@@ -1252,8 +1468,11 @@ async function manualRefresh() {
   hideToast();
   try {
     const tasks = [loadProjects(), loadPlanUsage()];
-    if (!document.getElementById('view-history')?.classList.contains('hidden')) {
-      tasks.push(loadSprintHistory());
+    const isHistory = !document.getElementById('pview-sprint-history')?.classList.contains('hidden');
+    if (isHistory) tasks.push(loadSprintHistory());
+    if (_activeProject && _activeProjectTab === 'tickets') {
+      delete detailsCache[_activeProject];
+      tasks.push(Promise.resolve().then(() => _loadProjectTickets(_activeProject)));
     }
     await Promise.all(tasks);
   } catch {
@@ -1277,6 +1496,14 @@ function showToast(msg) {
 function hideToast() {
   const t = document.getElementById('toast-error');
   if (t) t.style.display = 'none';
+}
+
+function showSuccessToast(msg) {
+  const t = document.getElementById('toast-success');
+  if (!t) return;
+  t.textContent = msg;
+  t.style.display = 'block';
+  setTimeout(() => { t.style.display = 'none'; }, 5000);
 }
 
 // ── Sprint alert banners (AC-3a) ──────────────────────────────────────────────
@@ -1352,11 +1579,14 @@ function retrySkipped() {
 
 // ── Periodic refresh ──────────────────────────────────────────────────────────
 setInterval(() => {
-  if (!document.getElementById('view-projects').classList.contains('hidden')) {
+  const overviewVisible = !document.getElementById('view-overview')?.classList.contains('hidden');
+  const projectVisible  = !document.getElementById('view-project')?.classList.contains('hidden');
+
+  if (overviewVisible || projectVisible) {
     loadProjects().catch(() => {});
     loadPlanUsage().catch(() => {});
   }
-  if (!document.getElementById('view-history')?.classList.contains('hidden')) {
+  if (projectVisible && _activeProjectTab === 'sprint-history') {
     loadSprintHistory().catch(() => {});
   }
 }, 60_000);
@@ -2019,46 +2249,46 @@ async function _loadHistoryRowContent(idx) {
 
 // ── Sprint Management (issue #95) ─────────────────────────────────────────────
 
-let _smgmtCurrentRepo  = null;   // "owner/repo" currently displayed
-let _smgmtData         = null;   // { sprints, order, issues } from API
-let _smgmtDragSprint   = null;   // sprint label currently being drag-reordered
-let _smgmtDragTicket   = null;   // { number, fromSprint } being dragged
-let _smgmtRunningInfo  = null;   // { running, project, sprint_label } from /api/sprints/running
-let _smgmtPollTimer    = null;
+let _smgmtCurrentRepo    = null;   // "owner/repo" currently displayed
+let _smgmtData           = null;   // { sprints, order, issues, empty_sprint_labels, placeholder_sprint } from API
+let _smgmtDragSprint     = null;   // sprint label currently being drag-reordered
+let _smgmtDragTicket     = null;   // { number, fromSprint } being dragged
+let _smgmtRunningInfo    = null;   // { running, project, sprint_label } from /api/sprints/running
+let _smgmtPollTimer      = null;
+let _smgmtGoals          = {};     // sprint_label -> goal string
+let _smgmtGoalSaveTimers = {};     // sprint_label -> debounce timer id
+let _smgmtBacklogFilter  = '';     // label name filter for backlog, '' = all
+let _smgmtRerunLabel     = null;   // sprint label pending rerun confirmation
+let _smgmtCleanupLabels  = [];     // empty sprint labels pending cleanup confirmation
+
+const RERUN_STRIP_LABELS = new Set(['UAT', 'UAT-approved', 'released', 'SIT', 'in-progress', 'needs-rework']);
 
 async function smgmtInit() {
-  // Populate project selector from already-loaded allProjects list
-  const sel = document.getElementById('smgmt-project-select');
-  if (!sel) return;
+  // Legacy: called with no repo; use current project or first project
+  const repo = _activeProject || _smgmtCurrentRepo || (allProjects[0]?.repo) || null;
+  await smgmtInitForProject(repo);
+}
 
-  if (allProjects.length > 0) {
-    sel.innerHTML = allProjects.map(p =>
-      `<option value="${escapeHtml(p.repo)}">${escapeHtml(p.name)}</option>`
-    ).join('');
-    const repo = _smgmtCurrentRepo || allProjects[0].repo;
-    sel.value = repo;
-    await smgmtSelectProject(repo);
-  } else {
-    // Fetch projects if not yet loaded
+async function smgmtInitForProject(repo) {
+  if (!repo) {
+    document.getElementById('smgmt-loading').textContent = 'No project selected.';
+    return;
+  }
+  _smgmtCurrentRepo = repo;
+  smgmtShowError('');
+
+  if (allProjects.length === 0) {
     try {
       const res = await fetch('/api/projects');
       if (!res.ok) throw new Error('Failed to load projects');
       const data = await res.json();
       allProjects = data.projects || [];
-      sel.innerHTML = allProjects.map(p =>
-        `<option value="${escapeHtml(p.repo)}">${escapeHtml(p.name)}</option>`
-      ).join('');
-      if (allProjects.length > 0) {
-        const repo = _smgmtCurrentRepo || allProjects[0].repo;
-        sel.value = repo;
-        await smgmtSelectProject(repo);
-      } else {
-        document.getElementById('smgmt-loading').textContent = 'No projects configured.';
-      }
     } catch (e) {
       smgmtShowError('Failed to load projects: ' + e.message);
     }
   }
+
+  await smgmtSelectProject(repo);
 
   // Start polling running status
   if (_smgmtPollTimer) clearInterval(_smgmtPollTimer);
@@ -2069,6 +2299,8 @@ async function smgmtInit() {
 async function smgmtSelectProject(repo) {
   if (!repo) return;
   _smgmtCurrentRepo = repo;
+  _smgmtGoals = {};
+  _smgmtBacklogFilter = '';
   smgmtShowError('');
   const bodyEl = document.getElementById('smgmt-body');
   if (bodyEl) bodyEl.innerHTML = '<div class="smgmt-loading">Loading sprints…</div>';
@@ -2081,19 +2313,34 @@ async function smgmtSelectProject(repo) {
     smgmtShowError('Failed to load sprints: ' + e.message);
     return;
   }
+
+  await smgmtLoadGoals();
   smgmtRender();
 }
 
 function smgmtRender() {
   if (!_smgmtData) return;
-  const { order, issues } = _smgmtData;
+  const { order, issues, empty_sprint_labels, placeholder_sprint } = _smgmtData;
   const bodyEl = document.getElementById('smgmt-body');
   if (!bodyEl) return;
 
-  // Lowest-numbered sprint gets NEXT UP badge + Run button
-  const allNums  = order.map(l => parseInt(l.split('-')[1], 10)).filter(n => !isNaN(n));
-  const lowestN  = allNums.length > 0 ? Math.min(...allNums) : null;
-  const lowestLabel = lowestN != null ? `sprint-${lowestN}` : null;
+  // Show cleanup banner for stale empty sprint labels
+  const cleanupBanner = document.getElementById('smgmt-cleanup-banner');
+  const emptyLabels = empty_sprint_labels || [];
+  if (cleanupBanner) {
+    if (emptyLabels.length > 0) {
+      const count = emptyLabels.length;
+      cleanupBanner.innerHTML = `
+        <i class="ti ti-alert-triangle"></i>
+        ${count} empty sprint label${count !== 1 ? 's' : ''} detected (${emptyLabels.join(', ')}) —
+        <button class="smgmt-cleanup-link" onclick="smgmtCleanupOpen()">Clean up empty sprints</button>
+      `;
+      cleanupBanner.classList.remove('hidden');
+    } else {
+      cleanupBanner.classList.add('hidden');
+    }
+  }
+
 
   // Build map: sprint_label -> issues[]
   const bySprintLabel = {};
@@ -2108,25 +2355,53 @@ function smgmtRender() {
     }
   }
 
+  // NEXT-UP: lowest-numbered sprint with >= 1 ticket AND a sprint goal set (>= 10 chars)
+  const allNums = order.map(l => parseInt(l.split('-')[1], 10)).filter(n => !isNaN(n));
+  allNums.sort((a, b) => a - b);
+  let lowestLabel = null;
+  for (const n of allNums) {
+    const lbl = `sprint-${n}`;
+    const tickets = bySprintLabel[lbl] || [];
+    const goal = _smgmtGoals[lbl] || '';
+    if (tickets.length >= 1 && goal.length >= 10) {
+      lowestLabel = lbl;
+      break;
+    }
+  }
+
+  // Render sprint blocks (only non-empty sprints are in order)
+  let blocksHtml = '';
   if (order.length === 0) {
-    bodyEl.innerHTML = '<div class="smgmt-loading">No sprints found. Use "+ New sprint" to create one.</div>';
+    blocksHtml = '<div class="smgmt-loading">No sprints found. Use "+ New sprint" to create one.</div>';
   } else {
-    bodyEl.innerHTML = order.map(label =>
+    blocksHtml = order.map(label =>
       smgmtSprintBlockHtml(label, bySprintLabel[label] || [], label === lowestLabel)
     ).join('');
   }
 
-  // Render unassigned tickets
-  smgmtRenderUnassigned(unassigned);
+  // Append trailing placeholder card
+  const placeholderN = placeholder_sprint || ((order.length > 0 ? Math.max(...allNums) : 0) + 1);
+  blocksHtml += smgmtPlaceholderBlockHtml(placeholderN);
+
+  bodyEl.innerHTML = blocksHtml;
+
+  smgmtRenderBacklog(unassigned);
   smgmtApplyRunState();
+}
+
+function smgmtHasCompletedTickets(tickets) {
+  return tickets.some(t => (t.labels || []).some(l => RERUN_STRIP_LABELS.has(l.name)));
 }
 
 function smgmtSprintBlockHtml(label, tickets, isNext) {
   const n = parseInt(label.split('-')[1], 10);
-  const nextBadge = isNext
-    ? '<span class="smgmt-next-badge">NEXT UP</span>'
-    : '';
-  const runBtnId = `smgmt-run-btn-${label.replace('-', '_')}`;
+  const nextBadge = isNext ? '<span class="smgmt-next-badge">NEXT UP</span>' : '';
+  const runBtnId    = `smgmt-run-btn-${label.replace('-', '_')}`;
+  const rerunBtnId  = `smgmt-rerun-btn-${label.replace('-', '_')}`;
+  const goalId      = `smgmt-goal-${label.replace('-', '_')}`;
+  const savedGoal   = _smgmtGoals[label] || '';
+  const goalValid   = savedGoal.length >= 10;
+  const hasCompleted = smgmtHasCompletedTickets(tickets);
 
   const ticketsHtml = tickets.length > 0
     ? tickets.map(t => smgmtTicketCardHtml(t, label)).join('')
@@ -2145,13 +2420,43 @@ function smgmtSprintBlockHtml(label, tickets, isNext) {
         <span class="smgmt-sprint-name">Sprint ${n}</span>
         ${nextBadge}
         <span class="smgmt-sprint-count">${tickets.length} ticket${tickets.length !== 1 ? 's' : ''}</span>
+        <button class="smgmt-rerun-btn" id="${rerunBtnId}"
+                title="${hasCompleted ? '' : 'No completed tickets to reset'}"
+                ${hasCompleted ? '' : 'disabled'}
+                onclick="smgmtRerunSprint('${label}')">
+          <i class="ti ti-refresh"></i> Rerun sprint</button>
         ${isNext
           ? `<button class="smgmt-run-btn" id="${runBtnId}"
+                     title="${goalValid ? '' : 'Set a sprint goal first'}"
+                     ${goalValid ? '' : 'disabled'}
                      onclick="smgmtRunSprint('${label}')">Run sprint</button>`
           : ''}
       </div>
+      <div class="smgmt-sprint-goal-row">
+        <input class="smgmt-goal-input" id="${goalId}" type="text"
+               placeholder="Sprint goal (required to run) — e.g. Dashboard UX cleanup"
+               value="${escapeHtml(savedGoal)}"
+               oninput="smgmtGoalInput('${label}', this.value)" />
+      </div>
       <div class="smgmt-sprint-tickets" id="smgmt-tickets-${label}">
         ${ticketsHtml}
+      </div>
+    </div>`;
+}
+
+function smgmtPlaceholderBlockHtml(n) {
+  return `
+    <div class="smgmt-sprint-block smgmt-sprint-placeholder" id="smgmt-block-placeholder-${n}"
+         ondragover="smgmtDragOverPlaceholder(event)"
+         ondragleave="smgmtDragLeave(event)"
+         ondrop="smgmtDropOnPlaceholder(event, ${n})">
+      <div class="smgmt-sprint-header smgmt-placeholder-header">
+        <i class="ti ti-plus smgmt-sprint-grip" style="cursor:default;"></i>
+        <span class="smgmt-sprint-name smgmt-placeholder-name">Sprint ${n}</span>
+        <span class="smgmt-sprint-count smgmt-placeholder-badge">empty — drop tickets here</span>
+      </div>
+      <div class="smgmt-sprint-tickets smgmt-placeholder-tickets" id="smgmt-tickets-placeholder-${n}">
+        <div class="smgmt-drop-hint smgmt-placeholder-hint">Drop a ticket here to start Sprint ${n}</div>
       </div>
     </div>`;
 }
@@ -2181,13 +2486,154 @@ function smgmtTicketCardHtml(ticket, currentSprint) {
     </div>`;
 }
 
-function smgmtRenderUnassigned(tickets) {
-  const el = document.getElementById('smgmt-unassigned-tickets');
-  if (!el) return;
-  if (tickets.length === 0) {
-    el.innerHTML = '<div class="smgmt-drop-hint">Drop tickets here to remove sprint label</div>';
+function smgmtRenderBacklog(tickets) {
+  const labelEl    = document.getElementById('smgmt-backlog-label');
+  const filterEl   = document.getElementById('smgmt-backlog-filter');
+  const ticketsEl  = document.getElementById('smgmt-backlog-tickets');
+  if (!ticketsEl) return;
+
+  // Populate label filter options from unique labels across all backlog tickets
+  if (filterEl) {
+    const labelSet = new Set();
+    for (const t of tickets) {
+      for (const l of (t.labels || [])) labelSet.add(l.name);
+    }
+    const existing = new Set([...filterEl.options].slice(1).map(o => o.value));
+    for (const name of [...labelSet].sort()) {
+      if (!existing.has(name)) {
+        const opt = document.createElement('option');
+        opt.value = name;
+        opt.textContent = name;
+        filterEl.appendChild(opt);
+      }
+    }
+    // Keep current filter selection
+    filterEl.value = _smgmtBacklogFilter;
+  }
+
+  // Apply filter
+  const filtered = _smgmtBacklogFilter
+    ? tickets.filter(t => (t.labels || []).some(l => l.name === _smgmtBacklogFilter))
+    : tickets;
+
+  if (labelEl) {
+    labelEl.textContent = `Backlog · ${tickets.length} ticket${tickets.length !== 1 ? 's' : ''} · unassigned to any sprint`;
+  }
+
+  const sprintLabels = _smgmtData?.order || [];
+  if (filtered.length === 0) {
+    ticketsEl.innerHTML = '<div class="smgmt-drop-hint">Drop tickets here to remove sprint label</div>';
   } else {
-    el.innerHTML = tickets.map(t => smgmtTicketCardHtml(t, null)).join('');
+    ticketsEl.innerHTML = filtered.map(t => smgmtBacklogTicketHtml(t, sprintLabels)).join('');
+  }
+}
+
+function smgmtBacklogTicketHtml(ticket, sprintLabels) {
+  const sprintOptions = sprintLabels.map(label => {
+    const n = label.split('-')[1];
+    return `<option value="${label}">Sprint ${n}</option>`;
+  }).join('');
+
+  const sizeLabel = (ticket.labels || []).find(l => /^size-/.test(l.name));
+  const sizeChip  = sizeLabel
+    ? `<span class="smgmt-size-chip">${escapeHtml(sizeLabel.name.replace('size-', ''))}</span>`
+    : '';
+
+  return `
+    <div class="smgmt-ticket" id="smgmt-ticket-${ticket.number}"
+         draggable="true"
+         data-issue="${ticket.number}"
+         data-sprint=""
+         ondragstart="smgmtTicketDragStart(event, ${ticket.number}, null)"
+         ondragend="smgmtTicketDragEnd(event)">
+      <i class="ti ti-grip-vertical smgmt-ticket-grip"></i>
+      <a class="smgmt-ticket-num" href="${escapeHtml(ticket.url || '#')}" target="_blank"
+         rel="noopener" onclick="event.stopPropagation()">#${ticket.number}</a>
+      <span class="smgmt-ticket-title" title="${escapeHtml(ticket.title)}">${escapeHtml(ticket.title)}</span>
+      ${sizeChip}
+      <select class="smgmt-move-to" onchange="smgmtMoveTicketTo(${ticket.number}, this.value)"
+              onclick="event.stopPropagation()">
+        <option value="">Move to...</option>
+        ${sprintOptions}
+      </select>
+    </div>`;
+}
+
+function smgmtBacklogFilter(label) {
+  _smgmtBacklogFilter = label;
+  if (!_smgmtData) return;
+  const unassigned = _smgmtData.issues.filter(i => i.sprint == null);
+  smgmtRenderBacklog(unassigned);
+}
+
+async function smgmtMoveTicketTo(issueNum, sprintLabel) {
+  if (!sprintLabel) return;
+  const sprintNum = parseInt(sprintLabel.split('-')[1], 10);
+
+  const iss = _smgmtData.issues.find(i => i.number === issueNum);
+  if (iss) iss.sprint = sprintNum;
+  smgmtRender();
+
+  try {
+    const res = await fetch('/api/sprint-planning/assign', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ issue: issueNum, sprint: sprintNum }),
+    });
+    if (!res.ok) throw new Error(await res.text());
+  } catch (e) {
+    const iss2 = _smgmtData.issues.find(i => i.number === issueNum);
+    if (iss2) iss2.sprint = null;
+    smgmtRender();
+    smgmtShowError(`Failed to move ticket #${issueNum}: ${e.message}`);
+  }
+}
+
+async function smgmtLoadGoals() {
+  if (!_smgmtCurrentRepo || !_smgmtData) return;
+  const repo = _smgmtCurrentRepo;
+  await Promise.all(_smgmtData.order.map(async (label) => {
+    try {
+      const res = await fetch(
+        `/api/sprints/goal?project=${encodeURIComponent(repo)}&sprint=${encodeURIComponent(label)}`
+      );
+      if (res.ok) {
+        const data = await res.json();
+        _smgmtGoals[label] = data.goal || '';
+      } else {
+        _smgmtGoals[label] = '';
+      }
+    } catch (e) {
+      _smgmtGoals[label] = '';
+    }
+  }));
+}
+
+function smgmtGoalInput(label, value) {
+  _smgmtGoals[label] = value;
+  const runBtnId = `smgmt-run-btn-${label.replace('-', '_')}`;
+  const btn = document.getElementById(runBtnId);
+  if (btn) {
+    const valid = value.length >= 10;
+    btn.disabled = !valid;
+    btn.title = valid ? '' : 'Set a sprint goal first';
+  }
+  if (_smgmtGoalSaveTimers[label]) clearTimeout(_smgmtGoalSaveTimers[label]);
+  _smgmtGoalSaveTimers[label] = setTimeout(() => smgmtSaveGoal(label, value), 800);
+}
+
+async function smgmtSaveGoal(label, goal) {
+  if (!_smgmtCurrentRepo) return;
+  try {
+    await fetch('/api/sprints/goal', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ project: _smgmtCurrentRepo, sprint_label: label, goal }),
+    });
+    // Re-render so NEXT-UP badge moves to the correct sprint after goal changes
+    smgmtRender();
+  } catch (e) {
+    smgmtShowError('Failed to save sprint goal: ' + e.message);
   }
 }
 
@@ -2231,7 +2677,7 @@ function smgmtTicketDragEnd(event) {
   }
   _smgmtDragTicket = null;
   // Clear all hover states
-  document.querySelectorAll('.smgmt-sprint-block, .smgmt-unassigned').forEach(el => {
+  document.querySelectorAll('.smgmt-sprint-block, .smgmt-backlog').forEach(el => {
     el.classList.remove('drag-over-sprint', 'drag-over-zone');
   });
 }
@@ -2255,12 +2701,12 @@ function smgmtDragOverZone(event, sprintLabel) {
   if (_smgmtDragTicket) {
     if (sprintLabel) {
       document.querySelectorAll('.smgmt-sprint-block').forEach(b => b.classList.remove('drag-over-sprint'));
-      document.querySelectorAll('.smgmt-unassigned').forEach(b => b.classList.remove('drag-over-zone'));
+      document.querySelectorAll('.smgmt-backlog').forEach(b => b.classList.remove('drag-over-zone'));
       const target = document.getElementById(`smgmt-block-${sprintLabel}`);
       if (target) target.classList.add('drag-over-sprint');
     } else {
       document.querySelectorAll('.smgmt-sprint-block').forEach(b => b.classList.remove('drag-over-sprint'));
-      document.getElementById('smgmt-unassigned')?.classList.add('drag-over-zone');
+      document.getElementById('smgmt-backlog')?.classList.add('drag-over-zone');
     }
   }
 }
@@ -2272,9 +2718,73 @@ function smgmtDragLeave(event) {
   }
 }
 
+function smgmtDragOverPlaceholder(event) {
+  if (_smgmtDragTicket) {
+    event.preventDefault();
+    document.querySelectorAll('.smgmt-sprint-block').forEach(b => b.classList.remove('drag-over-sprint'));
+    document.querySelectorAll('.smgmt-backlog').forEach(b => b.classList.remove('drag-over-zone'));
+    const placeholder = event.currentTarget;
+    if (placeholder) placeholder.classList.add('drag-over-sprint');
+  }
+}
+
+async function smgmtDropOnPlaceholder(event, placeholderN) {
+  event.preventDefault();
+  document.querySelectorAll('.smgmt-sprint-block, .smgmt-backlog').forEach(el => {
+    el.classList.remove('drag-over-sprint', 'drag-over-zone');
+  });
+
+  if (!_smgmtDragTicket || !_smgmtCurrentRepo) return;
+  const { number, fromSprint } = _smgmtDragTicket;
+  _smgmtDragTicket = null;
+
+  const newSprintLabel = `sprint-${placeholderN}`;
+
+  // Optimistic: add ticket to data and convert placeholder to real sprint
+  const iss = _smgmtData.issues.find(i => i.number === number);
+  if (iss) iss.sprint = placeholderN;
+
+  // Add new sprint to sprints list and order
+  if (!_smgmtData.sprints.includes(placeholderN)) {
+    _smgmtData.sprints.push(placeholderN);
+    _smgmtData.sprints.sort((a, b) => a - b);
+  }
+  if (!_smgmtData.order.includes(newSprintLabel)) {
+    _smgmtData.order.push(newSprintLabel);
+  }
+  // Update placeholder to next+1
+  _smgmtData.placeholder_sprint = placeholderN + 1;
+
+  smgmtRender();
+
+  try {
+    // Create the sprint label on GitHub and assign the ticket
+    const res = await fetch('/api/sprint-planning/assign', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ issue: number, sprint: placeholderN }),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    // Reload to get fresh state from server
+    await smgmtSelectProject(_smgmtCurrentRepo);
+  } catch (e) {
+    // Rollback optimistic update
+    const iss2 = _smgmtData.issues.find(i => i.number === number);
+    if (iss2) {
+      const origNum = fromSprint ? parseInt(fromSprint.split('-')[1], 10) : null;
+      iss2.sprint = origNum;
+    }
+    _smgmtData.order = _smgmtData.order.filter(l => l !== newSprintLabel);
+    _smgmtData.sprints = _smgmtData.sprints.filter(n => n !== placeholderN);
+    _smgmtData.placeholder_sprint = placeholderN;
+    smgmtRender();
+    smgmtShowError(`Failed to assign ticket #${number} to Sprint ${placeholderN}: ${e.message}`);
+  }
+}
+
 async function smgmtDropOnSprint(event, targetSprintLabel) {
   event.preventDefault();
-  document.querySelectorAll('.smgmt-sprint-block, .smgmt-unassigned').forEach(el => {
+  document.querySelectorAll('.smgmt-sprint-block, .smgmt-backlog').forEach(el => {
     el.classList.remove('drag-over-sprint', 'drag-over-zone');
   });
 
@@ -2354,6 +2864,11 @@ async function smgmtReorderSprints(fromLabel, toLabel) {
 
 async function smgmtRunSprint(sprintLabel) {
   if (!_smgmtCurrentRepo) return;
+  const goal = _smgmtGoals[sprintLabel] || '';
+  if (goal.length < 10) {
+    smgmtShowError('Set a sprint goal (at least 10 characters) before running.');
+    return;
+  }
   const runBtnId = `smgmt-run-btn-${sprintLabel.replace('-', '_')}`;
   const btn = document.getElementById(runBtnId);
   if (btn) { btn.disabled = true; btn.textContent = 'Starting…'; }
@@ -2368,7 +2883,11 @@ async function smgmtRunSprint(sprintLabel) {
     smgmtPollRunStatus();
   } catch (e) {
     smgmtShowError('Failed to start sprint: ' + e.message);
-    if (btn) { btn.disabled = false; btn.textContent = 'Run sprint'; }
+    if (btn) {
+      const goalValid = ((_smgmtGoals[sprintLabel] || '').length >= 10);
+      btn.disabled = !goalValid;
+      btn.textContent = 'Run sprint';
+    }
   }
 }
 
@@ -2392,32 +2911,226 @@ function smgmtApplyRunState(sprintStatus) {
   const runLabel = _smgmtRunningInfo?.sprint_label || null;
   const runProj  = _smgmtRunningInfo?.project || null;
 
-  // Find all run buttons
-  document.querySelectorAll('.smgmt-run-btn').forEach(btn => {
-    const btnLabel = btn.id.replace('smgmt-run-btn-', '').replace('_', '-');
+  // Clear running state from all blocks first
+  document.querySelectorAll('.smgmt-sprint-block').forEach(block => {
+    block.classList.remove('smgmt-running');
+    const hdr = block.querySelector('.smgmt-sprint-header');
+    if (hdr) hdr.classList.remove('smgmt-running-header');
+    // Remove injected running elements (badge, progress, kill btn)
+    block.querySelectorAll('.smgmt-running-badge, .smgmt-progress-text, .smgmt-kill-btn').forEach(el => el.remove());
+    // Restore any hidden run buttons
+    block.querySelectorAll('.smgmt-run-btn').forEach(btn => btn.style.display = '');
+  });
 
-    if (!running) {
-      btn.disabled = false;
-      btn.textContent = 'Run sprint';
-      return;
-    }
+  // Apply running state to the active sprint block (only if it's in the current project)
+  if (running && runLabel && runProj === _smgmtCurrentRepo) {
+    const safeLabel = runLabel.replace('-', '_');
+    const block = document.getElementById(`smgmt-block-${runLabel}`);
+    if (block) {
+      block.classList.add('smgmt-running');
+      const hdr = block.querySelector('.smgmt-sprint-header');
+      if (hdr) {
+        hdr.classList.add('smgmt-running-header');
 
-    btn.disabled = true;
-    if (runLabel === btnLabel && runProj === _smgmtCurrentRepo) {
-      // This is the running sprint — show progress if available
-      if (sprintStatus && sprintStatus.sprint_label === runLabel) {
-        const total = (sprintStatus.issues || []).length;
-        const done  = (sprintStatus.issues || []).filter(i =>
-          i.status === 'done' || i.status === 'skipped'
-        ).length;
-        btn.textContent = `Running… ${done}/${total} tickets`;
-      } else {
-        btn.textContent = 'Running…';
+        // Insert RUNNING badge after NEXT UP badge (or sprint name)
+        const runBadge = document.createElement('span');
+        runBadge.className = 'smgmt-running-badge';
+        runBadge.textContent = 'RUNNING';
+        const nextBadge = hdr.querySelector('.smgmt-next-badge');
+        const sprintName = hdr.querySelector('.smgmt-sprint-name');
+        const insertAfter = nextBadge || sprintName;
+        if (insertAfter && insertAfter.nextSibling) {
+          hdr.insertBefore(runBadge, insertAfter.nextSibling);
+        } else {
+          hdr.appendChild(runBadge);
+        }
+
+        // Build progress text
+        let progressText = '';
+        if (sprintStatus && sprintStatus.sprint_label === runLabel) {
+          const total = (sprintStatus.issues || []).length;
+          const done  = (sprintStatus.issues || []).filter(i =>
+            i.status === 'done' || i.status === 'skipped'
+          ).length;
+          progressText = `${done}/${total} tickets`;
+          if (done > 0 && sprintStatus.wall_clock_secs > 0) {
+            const avgSecs = sprintStatus.wall_clock_secs / done;
+            const remaining = Math.round(avgSecs * (total - done) / 60);
+            if (remaining > 0) progressText += ` · ~${remaining} min remaining`;
+          }
+        }
+        if (progressText) {
+          const progEl = document.createElement('span');
+          progEl.className = 'smgmt-progress-text';
+          progEl.textContent = progressText;
+          // Insert before the rerun button
+          const rerunBtn = hdr.querySelector('.smgmt-rerun-btn');
+          if (rerunBtn) {
+            hdr.insertBefore(progEl, rerunBtn);
+          } else {
+            hdr.appendChild(progEl);
+          }
+        }
+
+        // Hide Run button and insert Kill button after it
+        const runBtn = document.getElementById(`smgmt-run-btn-${safeLabel}`);
+        if (runBtn) {
+          runBtn.style.display = 'none';
+          const killBtn = document.createElement('button');
+          killBtn.className = 'smgmt-kill-btn';
+          killBtn.innerHTML = '<i class="ti ti-x"></i> Kill';
+          killBtn.onclick = () => smgmtKillSprint(runLabel);
+          runBtn.parentNode.insertBefore(killBtn, runBtn.nextSibling);
+        }
       }
+    }
+  }
+
+  // Handle Run buttons on non-running cards
+  document.querySelectorAll('.smgmt-run-btn').forEach(btn => {
+    const btnLabel = btn.id.replace('smgmt-run-btn-', '').replace(/_/g, '-');
+    if (!running) {
+      const goal = _smgmtGoals[btnLabel] || '';
+      const goalValid = goal.length >= 10;
+      btn.disabled = !goalValid;
+      btn.title = goalValid ? '' : 'Set a sprint goal first';
+      btn.textContent = 'Run sprint';
     } else {
-      btn.textContent = 'Another sprint is running';
+      btn.disabled = true;
+      btn.title = `Sprint ${runLabel} is running for ${runProj}`;
+      btn.textContent = 'Run sprint';
     }
   });
+
+  // Hide/disable rerun buttons while a sprint is running
+  document.querySelectorAll('.smgmt-rerun-btn').forEach(btn => {
+    if (running) {
+      btn.style.display = 'none';
+      return;
+    }
+    btn.style.display = '';
+    const btnLabel = btn.id.replace('smgmt-rerun-btn-', '').replace(/_/g, '-');
+    const sprintTickets = (_smgmtData?.issues || []).filter(
+      t => t.sprint != null && `sprint-${t.sprint}` === btnLabel
+    );
+    const hasCompleted = smgmtHasCompletedTickets(sprintTickets);
+    btn.disabled = !hasCompleted;
+    btn.title = hasCompleted ? '' : 'No completed tickets to reset';
+  });
+}
+
+// ── Rerun sprint ──────────────────────────────────────────────────────────────
+
+function smgmtRerunSprint(label) {
+  if (!_smgmtCurrentRepo || !_smgmtData) return;
+  const sprintTickets = (_smgmtData.issues || []).filter(
+    t => t.sprint != null && `sprint-${t.sprint}` === label
+  );
+  const affected = sprintTickets.filter(t =>
+    (t.labels || []).some(l => RERUN_STRIP_LABELS.has(l.name))
+  );
+
+  _smgmtRerunLabel = label;
+  const n = parseInt(label.split('-')[1], 10);
+  document.getElementById('smgmt-rerun-title').textContent = `Reset Sprint ${n}?`;
+
+  const bodyEl = document.getElementById('smgmt-rerun-body');
+  if (affected.length === 0) {
+    bodyEl.innerHTML = '<em style="color:var(--text-muted)">No affected tickets.</em>';
+  } else {
+    bodyEl.innerHTML = affected.map(t => {
+      const toRemove = (t.labels || []).filter(l => RERUN_STRIP_LABELS.has(l.name)).map(l => escapeHtml(l.name));
+      const toKeep   = (t.labels || []).filter(l => !RERUN_STRIP_LABELS.has(l.name)).map(l => escapeHtml(l.name));
+      return `<div class="smgmt-rerun-row">
+        <span class="smgmt-rerun-num">#${t.number}</span>
+        <span class="smgmt-rerun-title-text" title="${escapeHtml(t.title)}">${escapeHtml(t.title)}</span>
+        <span class="smgmt-rerun-labels">[${toRemove.join(', ')} to remove${toKeep.length ? '; keep: ' + toKeep.join(', ') : ''}]</span>
+      </div>`;
+    }).join('');
+  }
+
+  const confirmBtn = document.getElementById('smgmt-rerun-confirm');
+  if (confirmBtn) { confirmBtn.disabled = false; confirmBtn.textContent = 'Reset'; }
+  document.getElementById('smgmt-rerun-backdrop').classList.remove('hidden');
+  document.getElementById('smgmt-rerun-modal').classList.remove('hidden');
+}
+
+function smgmtRerunClose() {
+  document.getElementById('smgmt-rerun-backdrop').classList.add('hidden');
+  document.getElementById('smgmt-rerun-modal').classList.add('hidden');
+  _smgmtRerunLabel = null;
+}
+
+async function smgmtRerunConfirm() {
+  if (!_smgmtRerunLabel || !_smgmtCurrentRepo) return;
+  const confirmBtn = document.getElementById('smgmt-rerun-confirm');
+  if (confirmBtn) { confirmBtn.disabled = true; confirmBtn.textContent = 'Resetting…'; }
+
+  try {
+    const res = await fetch(
+      `/api/sprints/${encodeURIComponent(_smgmtRerunLabel)}/rerun?project=${encodeURIComponent(_smgmtCurrentRepo)}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confirm: true }),
+      }
+    );
+    if (!res.ok) throw new Error(await res.text());
+    const data = await res.json();
+    smgmtRerunClose();
+
+    const total = data.reset_count + (data.errors ? data.errors.length : 0);
+    if (data.errors && data.errors.length > 0) {
+      smgmtShowError(`Reset ${data.reset_count} of ${total} tickets; ${data.errors.join('; ')}`);
+    } else {
+      showSuccessToast(`Reset ${data.reset_count} ticket${data.reset_count !== 1 ? 's' : ''}. Click Run sprint when ready.`);
+    }
+
+    await smgmtSelectProject(_smgmtCurrentRepo);
+  } catch (e) {
+    smgmtShowError('Failed to reset sprint: ' + e.message);
+    if (confirmBtn) { confirmBtn.disabled = false; confirmBtn.textContent = 'Reset'; }
+  }
+}
+
+// ── Kill sprint ───────────────────────────────────────────────────────────────
+
+let _smgmtKillLabel = null;
+
+function smgmtKillSprint(label) {
+  _smgmtKillLabel = label;
+  const confirmBtn = document.getElementById('smgmt-kill-confirm');
+  if (confirmBtn) { confirmBtn.disabled = false; confirmBtn.textContent = 'Yes, kill it'; }
+  document.getElementById('smgmt-kill-backdrop').classList.remove('hidden');
+  document.getElementById('smgmt-kill-modal').classList.remove('hidden');
+}
+
+function smgmtKillClose() {
+  document.getElementById('smgmt-kill-backdrop').classList.add('hidden');
+  document.getElementById('smgmt-kill-modal').classList.add('hidden');
+  _smgmtKillLabel = null;
+}
+
+async function smgmtKillConfirm() {
+  if (!_smgmtKillLabel || !_smgmtCurrentRepo) return;
+  const confirmBtn = document.getElementById('smgmt-kill-confirm');
+  if (confirmBtn) { confirmBtn.disabled = true; confirmBtn.textContent = 'Killing…'; }
+
+  try {
+    const res = await fetch(
+      `/api/sprints/run/${encodeURIComponent(_smgmtKillLabel)}?project=${encodeURIComponent(_smgmtCurrentRepo)}`,
+      { method: 'DELETE' }
+    );
+    if (!res.ok) throw new Error(await res.text());
+    smgmtKillClose();
+    _smgmtRunningInfo = { running: false, project: null, sprint_label: null };
+    smgmtApplyRunState(null);
+    showSuccessToast('Sprint killed. Run button restored.');
+    await smgmtSelectProject(_smgmtCurrentRepo);
+  } catch (e) {
+    smgmtShowError('Failed to kill sprint: ' + e.message);
+    if (confirmBtn) { confirmBtn.disabled = false; confirmBtn.textContent = 'Yes, kill it'; }
+  }
 }
 
 // ── Create sprint ─────────────────────────────────────────────────────────────
@@ -2444,6 +3157,65 @@ async function smgmtCreateSprint() {
   }
 }
 
+// ── Clean up empty sprints ─────────────────────────────────────────────────────
+
+function smgmtCleanupOpen() {
+  if (!_smgmtData) return;
+  _smgmtCleanupLabels = [...(_smgmtData.empty_sprint_labels || [])];
+  if (_smgmtCleanupLabels.length === 0) return;
+
+  const bodyEl = document.getElementById('smgmt-cleanup-body');
+  if (bodyEl) {
+    bodyEl.innerHTML = _smgmtCleanupLabels.map(label => {
+      const n = label.split('-')[1];
+      return `<div class="smgmt-cleanup-row">
+        <span class="smgmt-cleanup-label">${escapeHtml(label)}</span>
+        <span class="smgmt-cleanup-desc">0 tickets</span>
+      </div>`;
+    }).join('');
+  }
+
+  const confirmBtn = document.getElementById('smgmt-cleanup-confirm');
+  if (confirmBtn) { confirmBtn.disabled = false; confirmBtn.textContent = 'Delete labels'; }
+
+  document.getElementById('smgmt-cleanup-backdrop')?.classList.remove('hidden');
+  document.getElementById('smgmt-cleanup-modal')?.classList.remove('hidden');
+}
+
+function smgmtCleanupClose() {
+  document.getElementById('smgmt-cleanup-backdrop')?.classList.add('hidden');
+  document.getElementById('smgmt-cleanup-modal')?.classList.add('hidden');
+  _smgmtCleanupLabels = [];
+}
+
+async function smgmtCleanupConfirm() {
+  if (_smgmtCleanupLabels.length === 0 || !_smgmtCurrentRepo) return;
+  const confirmBtn = document.getElementById('smgmt-cleanup-confirm');
+  if (confirmBtn) { confirmBtn.disabled = true; confirmBtn.textContent = 'Deleting…'; }
+
+  try {
+    const res = await fetch('/api/sprints/delete-empty', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ labels: _smgmtCleanupLabels, project: _smgmtCurrentRepo }),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    const data = await res.json();
+    smgmtCleanupClose();
+
+    if (data.errors && data.errors.length > 0) {
+      smgmtShowError(`Deleted ${data.deleted.length} label(s); errors: ${data.errors.join('; ')}`);
+    } else {
+      showSuccessToast(`Deleted ${data.deleted.length} empty sprint label${data.deleted.length !== 1 ? 's' : ''}.`);
+    }
+
+    await smgmtSelectProject(_smgmtCurrentRepo);
+  } catch (e) {
+    smgmtShowError('Failed to clean up empty sprints: ' + e.message);
+    if (confirmBtn) { confirmBtn.disabled = false; confirmBtn.textContent = 'Delete labels'; }
+  }
+}
+
 // ── Error display ─────────────────────────────────────────────────────────────
 
 function smgmtShowError(msg) {
@@ -2456,9 +3228,7 @@ function smgmtShowError(msg) {
 // ── SSE handler for sprint_plan_update ────────────────────────────────────────
 
 function _handleSprintPlanSSE() {
-  if (!document.getElementById('view-sprint-plan').classList.contains('hidden')) {
-    loadSprintPlanning();
-  }
+  // Plan sprint view is no longer in main nav; no-op for now
 }
 
 // ── Remove Project Dialog ─────────────────────────────────────────────────────
@@ -2533,10 +3303,26 @@ async function confirmRemoveProject() {
 (function init() {
   initTheme();
   fetchEnvironment();
-  loadProjects().catch(e => {
-    document.getElementById('project-list').innerHTML =
-      `<div class="empty-projects">Failed to load projects: ${escapeHtml(e.message)}</div>`;
-  });
+
+  // Load projects first, then route (so project view can show project data)
+  loadProjects()
+    .then(() => {
+      // After projects are loaded, run router to handle deep-link URLs
+      _route();
+      // Update project picker if we're already in project view
+      if (_activeProject) _updateProjectHeader(_activeProject);
+    })
+    .catch(e => {
+      document.getElementById('project-list').innerHTML =
+        `<div class="empty-projects">Failed to load projects: ${escapeHtml(e.message)}</div>`;
+      _route(); // still route even on failure
+    });
+
+  // On first load with a non-project URL, show overview
+  if (!window.location.pathname.startsWith('/projects/')) {
+    _showOverview();
+  }
+
   loadPlanUsage().catch(() => {});
   loadAlerts().catch(() => {});
   loadSprintStatus().catch(() => {});

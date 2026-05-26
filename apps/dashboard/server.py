@@ -2,6 +2,7 @@ import asyncio
 import json
 import os
 import re
+import signal
 import subprocess
 import time
 from contextlib import asynccontextmanager
@@ -11,7 +12,7 @@ from typing import Optional
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, model_validator
 
@@ -154,6 +155,14 @@ async def broadcast(data: dict):
 
 @app.get("/")
 async def root():
+    return FileResponse(STATIC_DIR / "index.html")
+
+
+@app.get("/projects/{path:path}")
+async def spa_project_route(path: str):
+    if path.endswith("/plan-sprint"):
+        new_path = path[: -len("plan-sprint")] + "sprint-mgmt"
+        return RedirectResponse(url=f"/projects/{new_path}", status_code=308)
     return FileResponse(STATIC_DIR / "index.html")
 
 
@@ -763,11 +772,12 @@ def _parse_summary_file(path: Path) -> dict:
     status_m = re.search(r"^## Sprint \S+ — (\S+)", content, re.MULTILINE)
     status   = status_m.group(1) if status_m else "unknown"
 
-    # Count shipped rows (rows in What Shipped table, skip header + empty rows)
+    # Count shipped rows (rows in Pending UAT Review table, skip header + empty rows).
+    # Also accepts the legacy "What Shipped" heading for old summary files.
     shipped_count = 0
     in_shipped = False
     for line in content.splitlines():
-        if line.startswith("## What Shipped"):
+        if line.startswith("## Pending UAT Review") or line.startswith("## What Shipped"):
             in_shipped = True
             continue
         if in_shipped and line.startswith("## "):
@@ -1159,6 +1169,10 @@ def _sprint_order_path(project_root: Path) -> Path:
     return _commander_dir(project_root) / "sprint-order.json"
 
 
+def _sprint_goal_path(project_root: Path, sprint_label: str) -> Path:
+    return _commander_dir(project_root) / "sprints" / f"{sprint_label}-goal.txt"
+
+
 def _load_sprint_order(project_root: Path, all_sprints: list[int]) -> list[str]:
     """Load sprint order from file; fill missing/new sprints in ascending order."""
     order_path = _sprint_order_path(project_root)
@@ -1226,9 +1240,42 @@ class SprintCreateBody(BaseModel):
     project: str
 
 
+class SprintGoalBody(BaseModel):
+    project: str
+    sprint_label: str
+    goal: str
+
+
+@app.get("/api/sprints/goal")
+def get_sprint_goal(project: str, sprint: str):
+    """Return the persisted sprint goal for a project/sprint."""
+    project_root = _project_root_path(project)
+    goal_path = _sprint_goal_path(project_root, sprint)
+    if goal_path.exists():
+        return {"goal": goal_path.read_text(encoding="utf-8").strip()}
+    return {"goal": ""}
+
+
+@app.post("/api/sprints/goal")
+def save_sprint_goal(body: SprintGoalBody):
+    """Persist sprint goal to .commander/sprints/<label>-goal.txt."""
+    if not _SPRINT_LABEL_RE.match(body.sprint_label):
+        raise HTTPException(400, detail=f"Invalid sprint label: {body.sprint_label!r}")
+    project_root = _project_root_path(body.project)
+    goal_path = _sprint_goal_path(project_root, body.sprint_label)
+    goal_path.parent.mkdir(parents=True, exist_ok=True)
+    goal_path.write_text(body.goal, encoding="utf-8")
+    return {"ok": True}
+
+
 @app.get("/api/sprint-management/issues")
 def get_sprint_management_issues(repo: str):
-    """Return all open issues + sprint list + display order for a project."""
+    """Return all open issues + sprint list + display order for a project.
+
+    Also returns:
+    - empty_sprint_labels: sprint labels that have 0 open tickets (stale/ghost sprints)
+    - placeholder_sprint: the next sprint number to show as a drop target (max+1)
+    """
     try:
         issues = github_client.list_open_issues_with_body(repo_name=repo, limit=200)
         sprints = github_client.list_sprints(repo_name=repo)
@@ -1239,6 +1286,8 @@ def get_sprint_management_issues(repo: str):
 
     sprint_re_local = re.compile(r"^sprint-(\d+)$")
     result_issues = []
+    # Count open tickets per sprint label
+    sprint_ticket_counts: dict[int, int] = {n: 0 for n in sprints}
     for iss in issues:
         sprint_num = None
         for lbl in iss.get("labels", []):
@@ -1254,14 +1303,29 @@ def get_sprint_management_issues(repo: str):
             "status": github_client.classify_issue(iss),
             "url": iss.get("url", ""),
         })
+        if sprint_num is not None and sprint_num in sprint_ticket_counts:
+            sprint_ticket_counts[sprint_num] += 1
 
+    # Sprint labels with 0 tickets are "empty" — these are stale/ghost labels
+    empty_sprint_labels = [
+        f"sprint-{n}" for n in sorted(sprint_ticket_counts.keys())
+        if sprint_ticket_counts[n] == 0
+    ]
+
+    # Build order only from sprints that have tickets (non-empty)
+    non_empty_sprints = [n for n in sprints if sprint_ticket_counts.get(n, 0) > 0]
     project_root = _project_root_path(repo)
-    order = _load_sprint_order(project_root, sprints)
+    order = _load_sprint_order(project_root, non_empty_sprints)
+
+    # Placeholder sprint = max existing sprint + 1 (or 1 if no sprints)
+    placeholder_sprint = (max(sprints) if sprints else 0) + 1
 
     return {
         "sprints": sprints,
         "order": order,
         "issues": result_issues,
+        "empty_sprint_labels": empty_sprint_labels,
+        "placeholder_sprint": placeholder_sprint,
     }
 
 
@@ -1322,6 +1386,9 @@ def run_sprint_managed(body: SprintMgmtRunBody):
     pid_path = pid_dir / f"{body.sprint_label}-pid"
 
     stripped_env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
+    goal_path = _sprint_goal_path(project_root, body.sprint_label)
+    if goal_path.exists():
+        stripped_env["SPRINT_GOAL"] = goal_path.read_text(encoding="utf-8").strip()
 
     log_fh = open(log_path, "w")
     proc = subprocess.Popen(
@@ -1346,6 +1413,53 @@ def get_running_sprints():
     return {"running": False, "project": None, "sprint_label": None}
 
 
+@app.delete("/api/sprints/run/{sprint_label}", status_code=200)
+def kill_sprint(sprint_label: str, project: str):
+    """SIGTERM then SIGKILL the running sprint process for the given project/label."""
+    if not _SPRINT_LABEL_RE.match(sprint_label):
+        raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")
+
+    project_root = _project_root_path(project)
+    pid_file = _commander_dir(project_root) / "sprints" / f"{sprint_label}-pid"
+
+    if not pid_file.exists():
+        raise HTTPException(404, detail=f"No running sprint found for {sprint_label}")
+
+    try:
+        pid = int(pid_file.read_text(encoding="utf-8").strip())
+    except ValueError:
+        try:
+            pid_file.unlink()
+        except OSError:
+            pass
+        raise HTTPException(404, detail=f"Invalid PID file for {sprint_label}")
+
+    # SIGTERM first, then wait up to 5 s for graceful exit, then SIGKILL
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except (ProcessLookupError, PermissionError):
+        pass
+    else:
+        for _ in range(10):
+            time.sleep(0.5)
+            try:
+                os.kill(pid, 0)
+            except (ProcessLookupError, PermissionError):
+                break
+        else:
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                pass
+
+    try:
+        pid_file.unlink()
+    except OSError:
+        pass
+
+    return {"ok": True}
+
+
 @app.post("/api/sprints/create")
 async def create_sprint_label(body: SprintCreateBody):
     """Create the next sprint-N label for a project (idempotent)."""
@@ -1359,6 +1473,123 @@ async def create_sprint_label(body: SprintCreateBody):
     except ValueError as e:
         raise HTTPException(400, detail=str(e))
     return {"ok": True, "sprint_label": f"sprint-{next_num}"}
+
+
+class SprintDeleteBody(BaseModel):
+    labels: list[str]  # list of sprint-N label names to delete
+    project: str
+
+
+@app.post("/api/sprints/delete-empty")
+async def delete_empty_sprints(body: SprintDeleteBody):
+    """Delete empty sprint labels from GitHub. Only allows deleting sprint-N labels with 0 tickets."""
+    # Validate all labels are sprint-N pattern
+    for label in body.labels:
+        if not _SPRINT_LABEL_RE.match(label):
+            raise HTTPException(400, detail=f"Invalid sprint label: {label!r}")
+
+    # Verify each label has 0 tickets before deleting
+    try:
+        issues = github_client.list_open_issues_with_body(repo_name=body.project, limit=200)
+    except subprocess.CalledProcessError as e:
+        raise _gh_error(e)
+
+    label_set = set(body.labels)
+    for iss in issues:
+        for lbl in iss.get("labels", []):
+            if lbl["name"] in label_set:
+                raise HTTPException(
+                    400,
+                    detail=f"Label {lbl['name']!r} still has open tickets — cannot delete",
+                )
+
+    deleted = []
+    errors = []
+    for label in body.labels:
+        try:
+            github_client.delete_label(label, repo_name=body.project)
+            deleted.append(label)
+        except subprocess.CalledProcessError as e:
+            errors.append(f"{label}: {e.stderr.strip() if e.stderr else str(e)}")
+
+    github_client.invalidate("sprints:")
+    result: dict = {"ok": True, "deleted": deleted}
+    if errors:
+        result["errors"] = errors
+    return result
+
+
+_RERUN_STRIP_LABELS = {"UAT", "UAT-approved", "released", "SIT", "in-progress", "needs-rework"}
+
+
+class SprintRerunBody(BaseModel):
+    confirm: bool
+
+
+@app.post("/api/sprints/{sprint_label}/rerun")
+def rerun_sprint(sprint_label: str, project: str, body: SprintRerunBody):
+    """Strip status labels from all completed tickets in a sprint and delete the state file.
+
+    Does NOT spawn any sprint subprocess — user clicks Run sprint afterward.
+    """
+    if not _SPRINT_LABEL_RE.match(sprint_label):
+        raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")
+    if not body.confirm:
+        raise HTTPException(400, detail="confirm must be true")
+
+    if _is_sprint_running(_project_root_path(project), sprint_label):
+        raise HTTPException(409, detail="Cannot reset a sprint that is currently running")
+
+    project_root = _project_root_path(project)
+    commander = _commander_dir(project_root)
+
+    log_dir = commander / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
+    log_path = log_dir / f"sprint-rerun-{sprint_label}-{ts}.log"
+    log_lines: list[str] = []
+
+    try:
+        issues = github_client.list_open_issues_with_body(repo_name=project, limit=200)
+    except subprocess.CalledProcessError as e:
+        raise _gh_error(e)
+
+    sprint_issues = [
+        iss for iss in issues
+        if any(lbl["name"] == sprint_label for lbl in iss.get("labels", []))
+    ]
+
+    affected: list[dict] = []
+    errors: list[str] = []
+
+    for iss in sprint_issues:
+        current_labels = {lbl["name"] for lbl in iss.get("labels", [])}
+        to_remove = list(current_labels & _RERUN_STRIP_LABELS)
+        if not to_remove:
+            continue
+        try:
+            github_client.update_labels(iss["number"], add=[], remove=to_remove, repo_name=project)
+            affected.append({"number": iss["number"], "removed_labels": to_remove})
+            log_lines.append(f"#{iss['number']} {iss['title']}: removed {to_remove}")
+        except subprocess.CalledProcessError as e:
+            msg = f"#{iss['number']} failed: {e.stderr.strip()}"
+            errors.append(msg)
+            log_lines.append(f"ERROR {msg}")
+
+    state_file = commander / "sprints" / f"{sprint_label}-state.json"
+    state_file.unlink(missing_ok=True)
+    log_lines.append(f"Deleted state file: {state_file}")
+
+    log_path.write_text("\n".join(log_lines) + "\n", encoding="utf-8")
+
+    github_client.invalidate(f"open_issues_body:")
+    github_client.invalidate(f"open_issues:")
+    github_client.invalidate(f"issues:")
+
+    result: dict = {"reset_count": len(affected), "affected_issues": affected}
+    if errors:
+        result["errors"] = errors
+    return result
 
 
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")

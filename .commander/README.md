@@ -23,3 +23,21 @@ Sprint manager auto-discovers `.commander/sprint.yaml` by walking up from `cwd`.
 - `README.md` — this file (committed)
 - `sprint.yaml` — your actual config (gitignored)
 - `logs/`, `sprints/`, `alerts/`, `runtime/` — runtime artifacts (gitignored)
+
+## Don't copy Python venvs
+
+A Python venv hardcodes absolute paths in its scripts and shim binaries.
+Copying `venv/` from one location (or machine) to another will produce
+`ModuleNotFoundError: No module named 'encodings'` and similar errors
+when Python can't find its standard library at the original path.
+
+**Always recreate venvs fresh:**
+
+```bash
+# In each clone (prd, uat, coder, tester):
+rm -rf venv
+~/.local/bin/python3.12 -m venv venv
+./venv/bin/pip install -r apps/dashboard/requirements.txt
+```
+
+Or use the `.commander/setup.sh` helper if it includes venv setup.

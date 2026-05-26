@@ -185,3 +185,21 @@ output:
 
 Be consistent. If you see "Total Tokens" somewhere and "Total tokens" 
 elsewhere, that's a bug — flag it.
+
+## Don't copy Python venvs
+
+A Python venv hardcodes absolute paths in its scripts and shim binaries.
+Copying `venv/` from one location (or machine) to another will produce
+`ModuleNotFoundError: No module named 'encodings'` and similar errors
+when Python can't find its standard library at the original path.
+
+**Always recreate venvs fresh:**
+
+```bash
+# In each clone (prd, uat, coder, tester):
+rm -rf venv
+~/.local/bin/python3.12 -m venv venv
+./venv/bin/pip install -r apps/dashboard/requirements.txt
+```
+
+Or use the `.commander/setup.sh` helper if it includes venv setup.

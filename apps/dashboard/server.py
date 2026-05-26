@@ -715,12 +715,15 @@ class SprintStatusPayload(BaseModel):
     total_tokens_in: int = 0
     total_tokens_out: int = 0
     wall_clock_secs: float = 0.0
+    token_budget: int = 0
+    paused: bool = False
 
 
 @app.post("/api/sprint-status")
-def set_sprint_status(payload: SprintStatusPayload):
+async def set_sprint_status(payload: SprintStatusPayload):
     global _sprint_status
     _sprint_status = payload.model_dump()
+    await broadcast({"type": "sprint_update", **_sprint_status})
     return {"ok": True}
 
 
@@ -729,6 +732,63 @@ def get_sprint_status():
     if _sprint_status is None:
         raise HTTPException(status_code=404, detail="No active sprint")
     return _sprint_status
+
+
+@app.post("/api/sprint-pause")
+async def sprint_pause():
+    """AC-4: Create pause file, set paused=True in state, broadcast SSE."""
+    global _sprint_status
+    if _sprint_status is None:
+        raise HTTPException(status_code=404, detail="No active sprint")
+    n = _sprint_status.get("sprint_number")
+    if n is not None:
+        pause_file = SPRINTS_DIR / f"sprint-{n}.pause"
+        pause_file.parent.mkdir(parents=True, exist_ok=True)
+        pause_file.touch()
+    _sprint_status["paused"] = True
+    await broadcast({"type": "sprint_update", **_sprint_status})
+    return {"ok": True, "state": "paused"}
+
+
+@app.post("/api/sprint-resume")
+async def sprint_resume():
+    """AC-5: Remove pause file, set paused=False in state, broadcast SSE."""
+    global _sprint_status
+    if _sprint_status is None:
+        raise HTTPException(status_code=404, detail="No active sprint")
+    n = _sprint_status.get("sprint_number")
+    if n is not None:
+        pause_file = SPRINTS_DIR / f"sprint-{n}.pause"
+        pause_file.unlink(missing_ok=True)
+    _sprint_status["paused"] = False
+    await broadcast({"type": "sprint_update", **_sprint_status})
+    return {"ok": True, "state": "running"}
+
+
+@app.post("/api/sprint-stop")
+async def sprint_stop():
+    """AC-6: Read PID from sprint-N.pid, SIGTERM the process, clear state, broadcast sprint_stopped."""
+    global _sprint_status
+    if _sprint_status is None:
+        raise HTTPException(status_code=404, detail="No active sprint")
+    n = _sprint_status.get("sprint_number")
+    if n is None:
+        raise HTTPException(status_code=404, detail="Sprint number unknown")
+    pid_file = SPRINTS_DIR / f"sprint-{n}.pid"
+    if not pid_file.exists():
+        raise HTTPException(status_code=404, detail="PID file missing — sprint may have already stopped")
+    try:
+        pid = int(pid_file.read_text(encoding="utf-8").strip())
+        os.kill(pid, signal.SIGTERM)
+    except ValueError:
+        pid_file.unlink(missing_ok=True)
+        raise HTTPException(status_code=404, detail="Invalid PID file")
+    except (ProcessLookupError, PermissionError) as e:
+        raise HTTPException(status_code=502, detail=f"Cannot signal process: {e}")
+    pid_file.unlink(missing_ok=True)
+    _sprint_status = None
+    await broadcast({"type": "sprint_stopped"})
+    return {"ok": True}
 
 
 # ── sprint summary / history endpoints (AC-4 / AC-6 from #24) ────────────────
@@ -1107,6 +1167,7 @@ SPRINT_LOG_PATH = Path(__file__).parent / "sprints" / "sprint_run.log"
 class SprintRunBody(BaseModel):
     label: str
     goal: str
+    budget: Optional[int] = None
 
 
 @app.post("/api/sprint-run")
@@ -1120,8 +1181,12 @@ def run_sprint(body: SprintRunBody):
     SPRINT_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
     log_fh = open(SPRINT_LOG_PATH, "a")
 
+    cmd = ["python3", str(SPRINT_MANAGER_PATH), body.label]
+    if body.budget is not None:
+        cmd += [f"--budget={body.budget}"]
+
     subprocess.Popen(
-        ["python3", str(SPRINT_MANAGER_PATH), body.label],
+        cmd,
         env={**os.environ, "SPRINT_GOAL": body.goal},
         stdout=log_fh,
         stderr=log_fh,

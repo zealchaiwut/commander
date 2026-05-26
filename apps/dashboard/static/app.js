@@ -80,13 +80,14 @@ function switchMain(tab) {
   document.getElementById('view-project')?.classList.add('hidden');
   document.getElementById('global-nav')?.classList.remove('hidden');
 
-  ['overview', 'agents', 'activity'].forEach(t => {
+  ['overview', 'agents', 'activity', 'sprint'].forEach(t => {
     document.getElementById(`view-${t}`)?.classList.toggle('hidden', t !== tab);
     document.getElementById(`mtab-${t}`)?.classList.toggle('active', t === tab);
   });
 
   if (tab === 'agents')   fetchAgents();
   if (tab === 'activity') fetchEvents();
+  if (tab === 'sprint')   scRefresh();
 
   if (tab === 'overview') {
     history.pushState({ view: 'overview' }, '', '/');
@@ -105,8 +106,9 @@ function _showOverview() {
   document.getElementById('view-overview')?.classList.remove('hidden');
   document.getElementById('view-agents')?.classList.add('hidden');
   document.getElementById('view-activity')?.classList.add('hidden');
+  document.getElementById('view-sprint')?.classList.add('hidden');
 
-  ['overview', 'agents', 'activity'].forEach(t => {
+  ['overview', 'agents', 'activity', 'sprint'].forEach(t => {
     document.getElementById(`mtab-${t}`)?.classList.toggle('active', t === 'overview');
   });
 }
@@ -1083,10 +1085,26 @@ function connectSSE() {
         return;
       }
 
-      // Sprint status push (AC-6d)
-      if (msg.type === 'sprint_update' && msg.sprint) {
-        _sprintState = msg.sprint;
-        renderSprintPanel(msg.sprint);
+      // Sprint status push (AC-6d / issue #32)
+      if (msg.type === 'sprint_update') {
+        _sprintState = msg;
+        renderSprintPanel(msg);
+        _scLastUpdateTime = Date.now();
+        const sprintVisible = !document.getElementById('view-sprint')?.classList.contains('hidden');
+        if (sprintVisible) {
+          scRenderCockpit(_sprintState);
+          scRefreshAgents();
+          scRefreshFeed();
+          scRefreshAttention();
+        }
+        return;
+      }
+
+      // Sprint stopped (issue #32 AC-15)
+      if (msg.type === 'sprint_stopped') {
+        _sprintState = null;
+        scRenderIdle();
+        _updateSprintNavDot(false);
         return;
       }
 
@@ -1554,22 +1572,30 @@ async function dismissAlert(idx) {
 let _sprintState = null;
 
 async function loadSprintStatus() {
-  // The global sprint panel was removed (AC-1, issue #82). Sprint progress is
-  // now shown per-project in the expand panel via _miniSprintSummaryHtml.
-  // We still fetch and cache sprint state for SSE compatibility.
   try {
     const res = await fetch('/api/sprint-status');
-    if (res.status === 404) return;
+    if (res.status === 404) {
+      _sprintState = null;
+      _updateSprintNavDot(false);
+      return;
+    }
     if (!res.ok) return;
     _sprintState = await res.json();
+    _updateSprintNavDot(true);
+    const sprintVisible = !document.getElementById('view-sprint')?.classList.contains('hidden');
+    if (sprintVisible) scRenderCockpit(_sprintState);
   } catch { /* silent */ }
 }
 
 function renderSprintPanel(state) {
-  // The global sprint panel was removed (AC-1, issue #82).
-  // Per-project progress bars are rendered in _miniSprintSummaryHtml inside each expand panel.
-  // This function is kept as a no-op so SSE sprint_update messages don't throw errors.
   _sprintState = state;
+  _updateSprintNavDot(!!state);
+}
+
+function _updateSprintNavDot(active) {
+  const dot = document.getElementById('sc-nav-dot');
+  if (!dot) return;
+  dot.classList.toggle('dot-hidden', !active);
 }
 
 // AC-6c: Retry skipped button — opens instructions (actual retry requires CLI)
@@ -1595,6 +1621,8 @@ setInterval(() => {
 setInterval(() => {
   loadSprintStatus().catch(() => {});
   loadAlerts().catch(() => {});
+  const sprintVisible = !document.getElementById('view-sprint')?.classList.contains('hidden');
+  if (sprintVisible) { scRefreshAgents(); scRefreshFeed(); }
 }, 30_000);
 
 // ── Environment badge ─────────────────────────────────────────────────────────
@@ -3297,6 +3325,331 @@ async function confirmRemoveProject() {
     btn.disabled = false;
     btn.textContent = 'Confirm Remove';
   }
+}
+
+// ── Sprint cockpit (issue #32) ────────────────────────────────────────────────
+
+let _scLastUpdateTime = null;  // timestamp of last sprint_update SSE event
+let _scPaused = false;
+
+// Tick "Last update Xs ago" every second
+setInterval(() => {
+  if (_scLastUpdateTime === null) return;
+  const secs = Math.floor((Date.now() - _scLastUpdateTime) / 1000);
+  const txt = `Last update ${secs}s ago`;
+  ['sc-prog-update', 'sc-budget-update'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = txt;
+  });
+}, 1000);
+
+async function scRefresh() {
+  await loadSprintStatus();
+  if (_sprintState) {
+    scRenderCockpit(_sprintState);
+    scRefreshAttention();
+  } else {
+    scRenderIdle();
+  }
+  scRefreshAgents();
+  scRefreshFeed();
+}
+
+function scRenderIdle() {
+  document.getElementById('sc-idle')?.classList.remove('hidden');
+  document.getElementById('sc-cockpit')?.classList.add('hidden');
+}
+
+function scRenderCockpit(state) {
+  if (!state) { scRenderIdle(); return; }
+  document.getElementById('sc-idle')?.classList.add('hidden');
+  document.getElementById('sc-cockpit')?.classList.remove('hidden');
+
+  _scPaused = !!state.paused;
+  const n = state.sprint_number ?? state.sprint_label ?? '?';
+
+  // Header (AC-9)
+  const titleEl = document.getElementById('sc-title');
+  if (titleEl) titleEl.textContent = `Sprint ${n} · ${_scPaused ? 'paused' : 'running'}`;
+
+  // Subtitle: "Started X ago · est Y remaining"
+  const subEl = document.getElementById('sc-subtitle');
+  if (subEl) {
+    const startedAgo = state.start_timestamp ? _scTimeAgo(state.start_timestamp) : '?';
+    const doneCount  = (state.issues || []).filter(i => i.status === 'done').length;
+    const pendCount  = (state.issues || []).filter(i => i.status === 'pending').length;
+    let estStr = 'est. unknown';
+    if (doneCount > 0 && state.wall_clock_secs > 0) {
+      const perIssue = state.wall_clock_secs / doneCount;
+      const estRemSecs = Math.round(pendCount * perIssue);
+      estStr = `est ${_fmtSecs(estRemSecs)} remaining`;
+    }
+    subEl.textContent = `Started ${startedAgo} · ${estStr}`;
+  }
+
+  // Pause button label
+  const pauseBtn = document.getElementById('sc-pause-btn');
+  if (pauseBtn) pauseBtn.textContent = _scPaused ? 'Resume' : 'Pause';
+
+  // Pills
+  const total = (state.issues || []).length;
+  const issuesPill = document.getElementById('sc-pill-issues');
+  if (issuesPill) issuesPill.textContent = `${total} issue${total !== 1 ? 's' : ''}`;
+
+  // Progress bar (AC-10)
+  _scRenderProgressBar(state);
+
+  // Budget bar (AC-11)
+  _scRenderBudgetBar(state);
+}
+
+function _scRenderProgressBar(state) {
+  const issues = state.issues || [];
+  const total  = issues.length || 1;
+  const done    = issues.filter(i => i.status === 'done').length;
+  const skipped = issues.filter(i => i.status === 'skipped').length;
+  const pending = issues.filter(i => i.status === 'pending').length;
+  // Infer in-progress: the first pending issue when ≥ 1 done
+  const inprog = (done >= 1 && pending > 0) ? 1 : 0;
+  const effectivePending = Math.max(0, pending - inprog);
+
+  const pDone    = done          / total * 100;
+  const pInprog  = inprog        / total * 100;
+  const pSkipped = skipped       / total * 100;
+  const pPending = effectivePending / total * 100;
+
+  const setW = (id, pct) => {
+    const el = document.getElementById(id);
+    if (el) el.style.width = pct.toFixed(1) + '%';
+  };
+  setW('sc-seg-done',       pDone);
+  setW('sc-seg-inprogress', pInprog);
+  setW('sc-seg-skipped',    pSkipped);
+  setW('sc-seg-pending',    pPending);
+
+  const setLabel = (id, count, label) => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = `${count} ${label}`;
+  };
+  setLabel('sc-lbl-pending',    effectivePending + pending - effectivePending, 'pending');
+  setLabel('sc-lbl-inprogress', inprog,   'in-progress');
+  setLabel('sc-lbl-done',       done,     'done');
+  setLabel('sc-lbl-skipped',    skipped,  'skipped');
+  // Correct pending label
+  const pendLblEl = document.getElementById('sc-lbl-pending');
+  if (pendLblEl) pendLblEl.textContent = `${pending} pending`;
+}
+
+function _scRenderBudgetBar(state) {
+  const used    = (state.total_tokens_in || 0) + (state.total_tokens_out || 0);
+  const budget  = state.token_budget || 0;
+  const fill    = document.getElementById('sc-budget-fill');
+  const label   = document.getElementById('sc-budget-label');
+
+  if (!budget) {
+    if (fill)  { fill.style.width = '0%'; fill.classList.remove('budget-red'); }
+    if (label) label.textContent = 'No budget set';
+    return;
+  }
+
+  const pct = Math.min(used / budget * 100, 100);
+  if (fill) {
+    fill.style.width = pct.toFixed(1) + '%';
+    fill.classList.toggle('budget-red', pct >= 80);
+  }
+  if (label) {
+    const usedK  = _fmtTokens(used);
+    const budgK  = _fmtTokens(budget);
+    label.textContent = `${usedK} / ${budgK} tokens`;
+  }
+}
+
+function _fmtTokens(n) {
+  if (n >= 1000) return `${Math.round(n / 1000)}k`;
+  return String(n);
+}
+
+function _fmtSecs(s) {
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  if (h > 0) return `${h}h ${m}m`;
+  return `${m}m`;
+}
+
+function _scTimeAgo(isoStr) {
+  const s = Math.floor((Date.now() - new Date(isoStr.endsWith('Z') ? isoStr : isoStr + 'Z')) / 1000);
+  if (s < 60)    return `${s}s ago`;
+  if (s < 3600)  return `${Math.floor(s / 60)}m ago`;
+  return `${Math.floor(s / 3600)}h ago`;
+}
+
+// Agents grid (AC-12)
+async function scRefreshAgents() {
+  try {
+    const res  = await fetch('/api/agents');
+    if (!res.ok) return;
+    const data = await res.json();
+    const agents = data.filter(a => a.status === 'working');
+
+    const pill = document.getElementById('sc-pill-agents');
+    if (pill) pill.textContent = `${agents.length} agent${agents.length !== 1 ? 's' : ''}`;
+
+    const grid = document.getElementById('sc-agents-grid');
+    if (!grid) return;
+    if (!agents.length) {
+      grid.innerHTML = '<div style="color:var(--text-muted);font-size:12px">No active agents.</div>';
+      return;
+    }
+    grid.innerHTML = agents.map(a => {
+      const statusClass = { working: 'ac-working', done: 'ac-done', timed_out: 'ac-error' }[a.status] || 'ac-waiting';
+      const parsed  = _parseAgentName(a.name || '');
+      const role    = parsed.role || 'agent';
+      const issueM  = (a.working_dir || '').match(/#?(\d+)/) || (a.name || '').match(/#?(\d+)/);
+      const issueRef = issueM ? `#${issueM[1]}` : '';
+      const elapsed = a.last_seen ? _scTimeAgo(a.last_seen) : '';
+      return `<div class="sc-agent-card ${statusClass}">
+        <div class="sc-agent-role">${escapeHtml(role)}</div>
+        ${issueRef ? `<div class="sc-agent-issue">${escapeHtml(issueRef)}</div>` : ''}
+        <div class="sc-agent-elapsed">${escapeHtml(elapsed)}</div>
+        ${a.tool_name ? `<div class="sc-agent-tool">${escapeHtml(a.tool_name)}</div>` : ''}
+      </div>`;
+    }).join('');
+  } catch { /* silent */ }
+}
+
+// Activity feed (AC-14)
+async function scRefreshFeed() {
+  try {
+    const res = await fetch('/api/events');
+    if (!res.ok) return;
+    const events = await res.json();
+
+    // Filter events matching sprint issue numbers
+    const sprintIssueNums = (_sprintState?.issues || []).map(i => String(i.number));
+    const relevant = events.filter(ev => {
+      const dir  = ev.working_dir || ev.session_id || '';
+      return sprintIssueNums.some(n => dir.includes(n));
+    }).slice(0, 5);
+
+    const container = document.getElementById('sc-feed-rows');
+    if (!container) return;
+    if (!relevant.length) {
+      container.innerHTML = '<div style="color:var(--text-muted);font-size:12px">No recent events.</div>';
+      return;
+    }
+    container.innerHTML = relevant.map(ev => {
+      const evType = ev.event_type || '';
+      let icon = '⬜';
+      if (['done', 'merged'].includes(evType))               icon = '✅';
+      else if (['working', 'tool_use'].includes(evType))     icon = '🔵';
+      else if (['skipped', 'gate_fail'].includes(evType))    icon = '⚠️';
+      else if (['crash', 'error'].includes(evType))          icon = '❌';
+
+      const issueM   = (ev.working_dir || '').match(/#?(\d+)/);
+      const issueRef = issueM ? issueM[1] : '';
+      const ghUrl    = issueRef ? `https://github.com/${escapeHtml(ev.working_dir?.split('/').slice(-2).join('/') || '')}/issues/${issueRef}` : '';
+      const timeStr  = ev.created_at ? _scTimeAgo(ev.created_at) : '';
+      return `<div class="sc-feed-row">
+        <span class="sc-feed-time">${escapeHtml(timeStr)}</span>
+        <span class="sc-feed-icon">${icon}</span>
+        <span class="sc-feed-desc">${escapeHtml(evType)}</span>
+        ${issueRef
+          ? `<a class="sc-feed-ref" href="${ghUrl}" target="_blank" rel="noreferrer">#${escapeHtml(issueRef)}</a>`
+          : '<span></span>'
+        }
+      </div>`;
+    }).join('');
+  } catch { /* silent */ }
+}
+
+// Attention section (AC-13) — fetch labels from GitHub since IssueState doesn't carry them
+async function scRefreshAttention() {
+  if (!_sprintState) return;
+  const sprintNum = _sprintState.sprint_number;
+  if (!sprintNum) return;
+  try {
+    const res = await fetch(`/api/sprint-planning/issues`);
+    if (!res.ok) return;
+    const data = await res.json();
+    const sprintIssues = (data.issues || []).filter(i => i.sprint === sprintNum);
+
+    const uatItems     = sprintIssues.filter(i => {
+      const lbls = (i.labels || []).map(l => l.name || l);
+      return lbls.includes('UAT') && !lbls.includes('UAT-approved');
+    });
+    const blockedItems = sprintIssues.filter(i => {
+      const lbls = (i.labels || []).map(l => l.name || l);
+      return lbls.includes('blocked');
+    });
+
+    const section   = document.getElementById('sc-attention-section');
+    const container = document.getElementById('sc-attention-items');
+    if (!section || !container) return;
+
+    const all = [...uatItems, ...blockedItems];
+    section.classList.toggle('hidden', all.length === 0);
+    if (!all.length) return;
+
+    container.innerHTML = all.map(i => {
+      const isUat = uatItems.includes(i);
+      const title  = escapeHtml(i.title || `Issue #${i.number}`);
+      const ghUrl  = i.url || '';
+      const action = isUat
+        ? `<a class="sc-btn-review" href="${escapeHtml(ghUrl)}" target="_blank" rel="noreferrer">Review</a>`
+        : `<a class="sc-attention-link" href="${escapeHtml(ghUrl)}" target="_blank" rel="noreferrer">View on GitHub</a>`;
+      return `<div class="sc-attention-card">
+        <div class="sc-attention-meta"><span class="sc-attention-num">#${i.number}</span>${title}</div>
+        ${action}
+      </div>`;
+    }).join('');
+  } catch { /* silent */ }
+}
+
+// Pause / Resume (AC-9)
+async function scTogglePause() {
+  const endpoint = _scPaused ? '/api/sprint-resume' : '/api/sprint-pause';
+  try {
+    const res = await fetch(endpoint, { method: 'POST' });
+    if (!res.ok) throw new Error(await res.text());
+    // State update comes via SSE
+  } catch (e) {
+    showErrorToast('Sprint control failed: ' + e.message);
+  }
+}
+
+// Stop sprint confirmation (AC-9)
+function scStopConfirm() {
+  document.getElementById('sc-stop-dialog-backdrop')?.classList.remove('hidden');
+  document.getElementById('sc-stop-dialog')?.classList.remove('hidden');
+  const btn = document.getElementById('sc-stop-confirm-btn');
+  if (btn) { btn.disabled = false; btn.textContent = 'Stop sprint'; }
+}
+
+function scStopCancel() {
+  document.getElementById('sc-stop-dialog-backdrop')?.classList.add('hidden');
+  document.getElementById('sc-stop-dialog')?.classList.add('hidden');
+}
+
+async function scStopExecute() {
+  const btn = document.getElementById('sc-stop-confirm-btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Stopping…'; }
+  try {
+    const res = await fetch('/api/sprint-stop', { method: 'POST' });
+    if (!res.ok) throw new Error(await res.text());
+    scStopCancel();
+    // sprint_stopped SSE will trigger scRenderIdle()
+  } catch (e) {
+    if (btn) { btn.disabled = false; btn.textContent = 'Stop sprint'; }
+    showErrorToast('Failed to stop sprint: ' + e.message);
+  }
+}
+
+function showErrorToast(msg) {
+  const el = document.getElementById('toast-error');
+  if (!el) return;
+  el.textContent = msg;
+  el.style.display = 'block';
+  setTimeout(() => { el.style.display = 'none'; }, 5000);
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────

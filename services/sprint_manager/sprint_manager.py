@@ -31,10 +31,12 @@ Run from the git root of the repository.
 from __future__ import annotations
 
 import argparse
+import atexit
 import email.mime.text
 import json
 import os
 import re
+import signal
 import smtplib
 import subprocess
 import sys
@@ -344,6 +346,62 @@ def _summary_path(
     return sprints_dir / f"sprint-{n}-summary-{day}.md"
 
 
+# ── PID file management (AC-2) ───────────────────────────────────────────────
+
+_pid_file_path: Optional[Path] = None
+
+
+def _remove_pid_file() -> None:
+    """Remove the sprint PID file if it exists (called by atexit + signal handlers)."""
+    global _pid_file_path
+    if _pid_file_path and _pid_file_path.exists():
+        try:
+            _pid_file_path.unlink()
+        except OSError:
+            pass
+
+
+def _setup_pid_file(sprint_num: Optional[int]) -> None:
+    """Write PID to dashboard/sprints/sprint-N.pid and register cleanup handlers."""
+    global _pid_file_path
+    if sprint_num is None:
+        return
+    sprints_dir = SPRINTS_DIR
+    sprints_dir.mkdir(parents=True, exist_ok=True)
+    pid_path = sprints_dir / f"sprint-{sprint_num}.pid"
+    pid_path.write_text(str(os.getpid()), encoding="utf-8")
+    _pid_file_path = pid_path
+
+    atexit.register(_remove_pid_file)
+
+    def _sig_handler(signum: int, frame: object) -> None:
+        _remove_pid_file()
+        sys.exit(0)
+
+    signal.signal(signal.SIGTERM, _sig_handler)
+    signal.signal(signal.SIGINT, _sig_handler)
+
+
+# ── Pause check (AC-3) ───────────────────────────────────────────────────────
+
+def _wait_if_paused(
+    sprint_num: Optional[int],
+    state: "SprintState",
+    api_url: Optional[str] = None,
+) -> None:
+    """Block until the sprint-N.pause file is removed, then broadcast resume."""
+    if sprint_num is None:
+        return
+    pause_file = SPRINTS_DIR / f"sprint-{sprint_num}.pause"
+    if not pause_file.exists():
+        return
+    print("Paused — waiting for resume…", flush=True)
+    while pause_file.exists():
+        time.sleep(5)
+    print("Resuming sprint…", flush=True)
+    _post_sprint_status(state, api_url=api_url)
+
+
 # ── failure categories ────────────────────────────────────────────────────────
 
 class FailureCategory:
@@ -411,6 +469,7 @@ class SprintState:
     total_tokens_in:  int              = 0
     total_tokens_out: int              = 0
     wall_clock_secs:  float            = 0.0
+    token_budget:     int              = 0
 
     def to_dict(self) -> dict:
         return {
@@ -421,6 +480,7 @@ class SprintState:
             "total_tokens_in":  self.total_tokens_in,
             "total_tokens_out": self.total_tokens_out,
             "wall_clock_secs":  self.wall_clock_secs,
+            "token_budget":     self.token_budget,
         }
 
     @staticmethod
@@ -432,6 +492,7 @@ class SprintState:
             total_tokens_in  = d.get("total_tokens_in", 0),
             total_tokens_out = d.get("total_tokens_out", 0),
             wall_clock_secs  = d.get("wall_clock_secs", 0.0),
+            token_budget     = d.get("token_budget", 0),
         )
         s.issues = [IssueState.from_dict(i) for i in d.get("issues", [])]
         return s
@@ -2148,6 +2209,7 @@ def run_sprint(
     cfg: Optional["SprintConfig"] = None,
     preflight_approved: Optional[list[int]] = None,
     gate_scope: str = "changed",
+    token_budget: int = 0,
 ) -> tuple[SprintSummary, SprintState]:
     """Main sprint loop -- processes backlog issues sequentially.
 
@@ -2175,6 +2237,10 @@ def run_sprint(
     sprint_num = _sprint_number(label)
     state_path = _state_path(sprint_num, label, cfg=cfg)
 
+    # AC-2: write PID file and register cleanup handlers
+    if not dry_run:
+        _setup_pid_file(sprint_num)
+
     # Log config info when running against a second repo
     if cfg and cfg.repo_name:
         print(f"\n=== SprintConfig ===")
@@ -2195,6 +2261,8 @@ def run_sprint(
     if (resume or retry_failed) and state_path.exists():
         print(f"  Loading existing sprint state from {state_path}")
         state = SprintState.from_dict(json.loads(state_path.read_text()))
+        if token_budget:
+            state.token_budget = token_budget
     else:
         raw_issues = list_backlog_issues(label, repo_name=eff_repo)
         if not raw_issues:
@@ -2210,6 +2278,7 @@ def run_sprint(
             sprint_label    = label,
             sprint_number   = sprint_num,
             start_timestamp = _utcnow(),
+            token_budget    = token_budget,
             issues=[
                 IssueState(number=i["number"], title=i["title"])
                 for i in raw_issues
@@ -2256,6 +2325,9 @@ def run_sprint(
 
         print(f"\n--- {progress} Issue #{num}: {title} ---")
         summary.processed.append(f"#{num}")
+
+        # AC-3: check for pause file before dispatching this issue
+        _wait_if_paused(sprint_num, state, api_url=api_url)
 
         # Preflight filter: skip issues not approved by pre-flight review
         if preflight_approved is not None and num not in preflight_approved:
@@ -2460,6 +2532,15 @@ def main() -> None:
         ),
     )
 
+    # Token budget (AC-1)
+    p.add_argument(
+        "--budget",
+        type=int,
+        default=0,
+        metavar="TOKENS",
+        help="Token estimate from the planning view. Stored in sprint state and broadcast to dashboard.",
+    )
+
     # Gate scope (AC-9)
     p.add_argument(
         "--gate-scope",
@@ -2569,6 +2650,7 @@ def main() -> None:
         cfg                  = cfg,
         preflight_approved   = preflight_approved,
         gate_scope           = args.gate_scope,
+        token_budget         = args.budget,
     )
 
     # Derive sprint_branch for summary (mirrors run_sprint logic)

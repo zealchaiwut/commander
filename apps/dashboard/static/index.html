@@ -665,6 +665,175 @@
       .history-row-header { grid-template-columns: 60px 90px 1fr 40px; }
       .history-date, .history-shipped, .history-skipped { display: none; }
     }
+
+    /* ── Sprint cockpit (issue #32) ── */
+    .sc-idle {
+      padding: 60px 24px; text-align: center; color: var(--text-muted);
+    }
+    .sc-idle-icon { font-size: 40px; margin-bottom: 12px; }
+    .sc-idle-title { font-size: 16px; font-weight: 600; color: var(--text); margin-bottom: 6px; }
+    .sc-idle-sub   { font-size: 13px; }
+
+    .sc-cockpit { padding: 0; }
+
+    /* Header */
+    .sc-header {
+      display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap;
+      gap: 12px; padding: 16px 24px;
+      background: var(--surface); border-bottom: 1px solid var(--border);
+    }
+    .sc-header-left { display: flex; align-items: center; gap: 10px; min-width: 0; }
+    .sc-title { font-size: 15px; font-weight: 700; }
+    .sc-subtitle { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+    .sc-pills { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+    .sc-pill {
+      padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600;
+      background: var(--surface-2); color: var(--text-muted); border: 1px solid var(--border);
+    }
+    .sc-pill.pill-live { background: var(--green-bg); color: var(--green); border-color: rgba(22,163,74,.2); }
+    .sc-header-right { display: flex; gap: 8px; align-items: center; }
+    .sc-btn-pause {
+      padding: 6px 14px; border: 1px solid var(--border); border-radius: 6px;
+      background: var(--surface); color: var(--text); font-size: 12px; font-weight: 600;
+      transition: background .15s;
+    }
+    .sc-btn-pause:hover { background: var(--surface-2); }
+    .sc-btn-stop {
+      padding: 6px 14px; border: none; border-radius: 6px;
+      background: var(--red); color: #fff; font-size: 12px; font-weight: 600;
+      transition: opacity .15s;
+    }
+    .sc-btn-stop:hover { opacity: .82; }
+
+    /* Hero row */
+    .sc-hero-row {
+      display: grid; grid-template-columns: 1fr 1fr;
+      gap: 16px; padding: 16px 24px;
+      background: var(--bg);
+    }
+    .sc-card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 8px; padding: 16px;
+    }
+    .sc-card-title { font-size: 10px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: .08em; color: var(--text-muted); margin-bottom: 12px; }
+    .sc-bar-track {
+      height: 14px; border-radius: 7px; background: var(--surface-2);
+      overflow: hidden; display: flex;
+    }
+    .sc-bar-seg { height: 100%; transition: width .4s ease; }
+    .sc-bar-seg.seg-pending    { background: var(--text-sub); }
+    .sc-bar-seg.seg-inprogress { background: var(--blue); }
+    .sc-bar-seg.seg-done       { background: var(--green); }
+    .sc-bar-seg.seg-skipped    { background: var(--amber); }
+    .sc-bar-labels {
+      display: flex; gap: 12px; margin-top: 8px; flex-wrap: wrap;
+    }
+    .sc-bar-label { font-size: 11px; color: var(--text-muted); display: flex; align-items: center; gap: 4px; }
+    .sc-bar-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+
+    .sc-budget-track {
+      height: 14px; border-radius: 7px; background: var(--surface-2); overflow: hidden;
+    }
+    .sc-budget-fill {
+      height: 100%; border-radius: 7px; transition: width .4s ease, background .4s ease;
+      background: var(--green);
+    }
+    .sc-budget-fill.budget-red { background: var(--red); }
+    .sc-budget-label { font-size: 12px; color: var(--text-muted); margin-top: 8px; }
+    .sc-last-update {
+      font-size: 10px; color: var(--text-sub); text-align: right; margin-top: 8px;
+    }
+
+    /* Agents grid */
+    .sc-section { padding: 16px 24px; }
+    .sc-section-title {
+      font-size: 11px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: .08em; color: var(--text-muted); margin-bottom: 12px;
+    }
+    .sc-agents-grid {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px;
+    }
+    .sc-agent-card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-left: 4px solid var(--border); border-radius: 6px;
+      padding: 10px 12px;
+    }
+    .sc-agent-card.ac-working { border-left-color: var(--blue); }
+    .sc-agent-card.ac-done    { border-left-color: var(--green); }
+    .sc-agent-card.ac-waiting { border-left-color: var(--amber); }
+    .sc-agent-card.ac-error   { border-left-color: var(--red); }
+    .sc-agent-role { display: inline-block; font-size: 10px; font-weight: 700;
+      padding: 2px 6px; border-radius: 4px; margin-bottom: 6px;
+      background: var(--surface-2); color: var(--text-muted); text-transform: uppercase; }
+    .sc-agent-elapsed { font-size: 11px; color: var(--text-muted); }
+    .sc-agent-issue { font-size: 11px; color: var(--blue); font-weight: 500; }
+    .sc-agent-tool { font-size: 11px; color: var(--text-sub); margin-top: 2px;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+    /* Attention section */
+    .sc-attention-card {
+      background: var(--amber-bg); border: 1px solid rgba(217,119,6,.3);
+      border-radius: 6px; padding: 10px 14px; display: flex;
+      align-items: center; justify-content: space-between; gap: 12px;
+      margin-bottom: 8px;
+    }
+    .sc-attention-meta { font-size: 12px; color: var(--text); }
+    .sc-attention-num { font-weight: 700; margin-right: 4px; }
+    .sc-btn-review {
+      padding: 4px 10px; border: 1px solid var(--amber); border-radius: 5px;
+      background: none; color: var(--amber); font-size: 11px; font-weight: 600; flex-shrink: 0;
+      text-decoration: none; display: inline-block;
+    }
+    .sc-attention-link {
+      padding: 4px 10px; border: 1px solid var(--border); border-radius: 5px;
+      background: none; color: var(--text-muted); font-size: 11px; font-weight: 600;
+      text-decoration: none; flex-shrink: 0;
+    }
+
+    /* Activity feed */
+    .sc-feed-row {
+      display: grid; grid-template-columns: 80px 20px 1fr 70px;
+      align-items: center; gap: 8px; padding: 7px 0;
+      border-bottom: 1px solid var(--border); font-size: 12px;
+    }
+    .sc-feed-row:last-child { border-bottom: none; }
+    .sc-feed-time { color: var(--text-sub); font-size: 11px; }
+    .sc-feed-icon { font-size: 14px; text-align: center; }
+    .sc-feed-desc { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .sc-feed-ref  { font-size: 11px; color: var(--blue); text-align: right; text-decoration: none; }
+    .sc-feed-ref:hover { text-decoration: underline; }
+
+    /* Stop-sprint confirmation dialog */
+    #sc-stop-dialog-backdrop {
+      position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 200;
+    }
+    #sc-stop-dialog {
+      position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%);
+      z-index: 201; background: var(--surface); border: 1px solid var(--border);
+      border-radius: 10px; padding: 24px; width: min(360px, calc(100vw - 32px));
+      box-shadow: 0 8px 32px rgba(0,0,0,.18);
+    }
+    #sc-stop-dialog h3 { font-size: 15px; font-weight: 700; margin-bottom: 10px; }
+    #sc-stop-dialog p  { font-size: 13px; color: var(--text-muted); margin-bottom: 20px; }
+    #sc-stop-dialog .modal-footer { display: flex; gap: 8px; justify-content: flex-end; }
+
+    /* Nav tab pulsing dot */
+    .mtab .tab-dot {
+      display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+      background: var(--green); margin-left: 5px; vertical-align: middle;
+      animation: glow 2s ease-in-out infinite;
+    }
+    .mtab .tab-dot.dot-hidden { display: none; }
+
+    @media (max-width: 600px) {
+      .sc-hero-row { grid-template-columns: 1fr; }
+      .sc-header { flex-direction: column; align-items: flex-start; }
+      .sc-header-right { width: 100%; }
+      .sc-btn-pause, .sc-btn-stop { flex: 1; }
+      .sc-agents-grid { grid-template-columns: 1fr; }
+      .sc-section { padding: 12px 16px; }
+    }
   </style>
 </head>
 <body>
@@ -703,6 +872,7 @@
   <button class="mtab active" id="mtab-overview"  onclick="switchMain('overview')">Overview</button>
   <button class="mtab"        id="mtab-agents"    onclick="switchMain('agents')">Agents</button>
   <button class="mtab"        id="mtab-activity"  onclick="switchMain('activity')">Activity log</button>
+  <button class="mtab"        id="mtab-sprint"    onclick="switchMain('sprint')">Sprint<span class="tab-dot dot-hidden" id="sc-nav-dot"></span></button>
 </nav>
 
 <!-- ── Overview view (formerly Projects) ── -->
@@ -756,6 +926,105 @@
 
   <div class="project-list" id="project-list">
     <div class="empty-projects">Loading projects…</div>
+  </div>
+</div>
+
+<!-- ── Sprint cockpit view (issue #32) ── -->
+<div id="view-sprint" class="hidden">
+
+  <!-- Idle placeholder (AC-8) -->
+  <div class="sc-idle" id="sc-idle">
+    <div class="sc-idle-icon"><i class="ti ti-player-pause"></i></div>
+    <div class="sc-idle-title">No active sprint</div>
+    <div class="sc-idle-sub">Start a sprint from the Sprint Mgmt tab to see the live cockpit.</div>
+  </div>
+
+  <!-- Cockpit (shown when sprint is active) -->
+  <div class="sc-cockpit hidden" id="sc-cockpit">
+
+    <!-- Header (AC-9) -->
+    <div class="sc-header">
+      <div class="sc-header-left">
+        <div class="live-dot" id="sc-live-dot"></div>
+        <div>
+          <div class="sc-title" id="sc-title">Sprint — loading…</div>
+          <div class="sc-subtitle" id="sc-subtitle"></div>
+        </div>
+      </div>
+      <div class="sc-pills">
+        <span class="sc-pill pill-live">live</span>
+        <span class="sc-pill" id="sc-pill-issues">— issues</span>
+        <span class="sc-pill" id="sc-pill-agents">— agents</span>
+      </div>
+      <div class="sc-header-right">
+        <button class="sc-btn-pause" id="sc-pause-btn" onclick="scTogglePause()">Pause</button>
+        <button class="sc-btn-stop"  onclick="scStopConfirm()">Stop sprint</button>
+      </div>
+    </div>
+
+    <!-- Hero row (AC-10, AC-11) -->
+    <div class="sc-hero-row">
+      <!-- Progress bar card -->
+      <div class="sc-card">
+        <div class="sc-card-title">Sprint progress</div>
+        <div class="sc-bar-track" id="sc-prog-bar">
+          <div class="sc-bar-seg seg-done"       id="sc-seg-done"       style="width:0%"></div>
+          <div class="sc-bar-seg seg-inprogress" id="sc-seg-inprogress" style="width:0%"></div>
+          <div class="sc-bar-seg seg-skipped"    id="sc-seg-skipped"    style="width:0%"></div>
+          <div class="sc-bar-seg seg-pending"    id="sc-seg-pending"    style="width:100%"></div>
+        </div>
+        <div class="sc-bar-labels">
+          <span class="sc-bar-label"><span class="sc-bar-dot" style="background:var(--text-sub)"></span><span id="sc-lbl-pending">— pending</span></span>
+          <span class="sc-bar-label"><span class="sc-bar-dot" style="background:var(--blue)"></span><span id="sc-lbl-inprogress">— in-progress</span></span>
+          <span class="sc-bar-label"><span class="sc-bar-dot" style="background:var(--green)"></span><span id="sc-lbl-done">— done</span></span>
+          <span class="sc-bar-label"><span class="sc-bar-dot" style="background:var(--amber)"></span><span id="sc-lbl-skipped">— skipped</span></span>
+        </div>
+        <div class="sc-last-update" id="sc-prog-update">—</div>
+      </div>
+      <!-- Budget bar card -->
+      <div class="sc-card">
+        <div class="sc-card-title">Token budget</div>
+        <div class="sc-budget-track">
+          <div class="sc-budget-fill" id="sc-budget-fill" style="width:0%"></div>
+        </div>
+        <div class="sc-budget-label" id="sc-budget-label">—</div>
+        <div class="sc-last-update"  id="sc-budget-update">—</div>
+      </div>
+    </div>
+
+    <!-- Live agents grid (AC-12) -->
+    <div class="sc-section">
+      <div class="sc-section-title">Live agents</div>
+      <div class="sc-agents-grid" id="sc-agents-grid">
+        <div style="color:var(--text-muted);font-size:12px">Loading…</div>
+      </div>
+    </div>
+
+    <!-- Needs attention (AC-13) -->
+    <div class="sc-section hidden" id="sc-attention-section">
+      <div class="sc-section-title">Needs your attention</div>
+      <div id="sc-attention-items"></div>
+    </div>
+
+    <!-- Activity feed (AC-14) -->
+    <div class="sc-section">
+      <div class="sc-section-title">Live activity feed</div>
+      <div id="sc-feed-rows">
+        <div style="color:var(--text-muted);font-size:12px">No recent events.</div>
+      </div>
+    </div>
+
+  </div><!-- end sc-cockpit -->
+</div><!-- end view-sprint -->
+
+<!-- Stop-sprint confirmation dialog -->
+<div id="sc-stop-dialog-backdrop" class="hidden" onclick="scStopCancel()"></div>
+<div id="sc-stop-dialog" class="hidden">
+  <h3>Stop sprint?</h3>
+  <p>This will send SIGTERM to the sprint manager process. In-flight issues may be left incomplete.</p>
+  <div class="modal-footer">
+    <button class="btn-ghost" onclick="scStopCancel()">Cancel</button>
+    <button class="btn-danger" id="sc-stop-confirm-btn" onclick="scStopExecute()">Stop sprint</button>
   </div>
 </div>
 

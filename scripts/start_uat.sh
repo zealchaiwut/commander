@@ -24,7 +24,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 PROJECT_DIR="$(cd "$REPO_ROOT/.." && pwd)"
 
 UAT_DIR="$PROJECT_DIR/uat/apps/dashboard"
-VENV="$UAT_DIR/venv"
+VENV="$PROJECT_DIR/venv"
 PID_FILE="$UAT_DIR/uat.pid"
 LOG_FILE="$UAT_DIR/uat.log"
 PORT=8001

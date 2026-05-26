@@ -2,6 +2,13 @@
 
 A FastAPI-based agent-event dashboard for monitoring Claude Code activity across PRD and UAT environments.
 
+## Testing Against a Sandbox Repo
+
+When running the tester agent against commander itself, all GitHub operations target
+a dedicated sandbox repo (`zealchaiwut/commander-issue-test`) to avoid polluting the
+real backlog. See [`docs/testing/sandbox-repo.md`](docs/testing/sandbox-repo.md) for
+setup, seeding, and reset instructions.
+
 ## PRD/UAT Workflow
 
 Commander runs two isolated environments side-by-side:

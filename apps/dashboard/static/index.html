@@ -26,6 +26,7 @@
       --blue-bg:      #dbeafe;
       --purple:       #7c3aed;
       --purple-bg:    #ede9fe;
+      --color-border-info: #2563eb;
       --mono: 'SF Mono','Fira Code','Cascadia Code',monospace;
     }
 
@@ -48,6 +49,7 @@
       --blue-bg:      rgba(96,165,250,.13);
       --purple:       #a78bfa;
       --purple-bg:    rgba(167,139,250,.13);
+      --color-border-info: #60a5fa;
     }
 
     /* ── Reset ── */
@@ -1076,6 +1078,22 @@
   </div>
 </div>
 
+<!-- Kill sprint confirmation modal -->
+<div class="modal-backdrop hidden" id="smgmt-kill-backdrop" onclick="smgmtKillClose()"></div>
+<div class="modal hidden" id="smgmt-kill-modal" role="dialog" aria-modal="true">
+  <div class="modal-header">
+    <span class="modal-title">Kill Sprint?</span>
+    <button class="modal-close" onclick="smgmtKillClose()" aria-label="Close">&times;</button>
+  </div>
+  <div style="padding: 0 4px 8px; font-size: 13px; color: var(--text-muted);">
+    Are you sure? This will SIGTERM then SIGKILL the sprint subprocess.
+  </div>
+  <div class="modal-footer">
+    <button class="btn-ghost" onclick="smgmtKillClose()">Cancel</button>
+    <button class="btn-danger" id="smgmt-kill-confirm" onclick="smgmtKillConfirm()">Yes, kill it</button>
+  </div>
+</div>
+
 <!-- Plan Sprint confirmation dialog -->
 <div class="modal-backdrop hidden" id="psp-dialog-backdrop" onclick="pspCloseDialog()"></div>
 <div class="modal hidden" id="psp-dialog" role="dialog" aria-modal="true">
@@ -1378,6 +1396,34 @@
   .smgmt-rerun-btn:disabled {
     background: var(--surface-2); color: var(--text-sub);
     border: 0.5px solid var(--border); cursor: not-allowed; opacity: 1;
+  }
+
+  /* Kill button (replaces Run on the running card) */
+  .smgmt-kill-btn {
+    padding: 4px 10px; font-size: 11px; font-weight: 600;
+    background: var(--red); color: #fff; border: none; border-radius: 5px;
+    cursor: pointer; flex-shrink: 0; transition: opacity .15s;
+    display: flex; align-items: center; gap: 4px;
+  }
+  .smgmt-kill-btn:hover { opacity: .85; }
+
+  /* Running sprint card state */
+  .smgmt-sprint-block.smgmt-running {
+    border-color: var(--color-border-info);
+    box-shadow: 0 0 0 2px var(--blue-bg);
+  }
+  .smgmt-sprint-header.smgmt-running-header {
+    background: var(--blue-bg);
+    border-bottom-color: var(--color-border-info);
+  }
+  .smgmt-running-badge {
+    font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .07em;
+    background: var(--blue-bg); color: var(--blue);
+    border: 1px solid var(--color-border-info);
+    padding: 2px 7px; border-radius: 10px; flex-shrink: 0;
+  }
+  .smgmt-progress-text {
+    font-size: 11px; color: var(--blue); font-weight: 500; flex-shrink: 0;
   }
 
   /* Rerun sprint modal body */

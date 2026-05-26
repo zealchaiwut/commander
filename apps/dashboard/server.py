@@ -2,6 +2,7 @@ import asyncio
 import json
 import os
 import re
+import signal
 import subprocess
 import time
 from contextlib import asynccontextmanager
@@ -1388,6 +1389,53 @@ def get_running_sprints():
     if running:
         return {"running": True, "project": running["project"], "sprint_label": running["sprint_label"]}
     return {"running": False, "project": None, "sprint_label": None}
+
+
+@app.delete("/api/sprints/run/{sprint_label}", status_code=200)
+def kill_sprint(sprint_label: str, project: str):
+    """SIGTERM then SIGKILL the running sprint process for the given project/label."""
+    if not _SPRINT_LABEL_RE.match(sprint_label):
+        raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")
+
+    project_root = _project_root_path(project)
+    pid_file = _commander_dir(project_root) / "sprints" / f"{sprint_label}-pid"
+
+    if not pid_file.exists():
+        raise HTTPException(404, detail=f"No running sprint found for {sprint_label}")
+
+    try:
+        pid = int(pid_file.read_text(encoding="utf-8").strip())
+    except ValueError:
+        try:
+            pid_file.unlink()
+        except OSError:
+            pass
+        raise HTTPException(404, detail=f"Invalid PID file for {sprint_label}")
+
+    # SIGTERM first, then wait up to 5 s for graceful exit, then SIGKILL
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except (ProcessLookupError, PermissionError):
+        pass
+    else:
+        for _ in range(10):
+            time.sleep(0.5)
+            try:
+                os.kill(pid, 0)
+            except (ProcessLookupError, PermissionError):
+                break
+        else:
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                pass
+
+    try:
+        pid_file.unlink()
+    except OSError:
+        pass
+
+    return {"ok": True}
 
 
 @app.post("/api/sprints/create")

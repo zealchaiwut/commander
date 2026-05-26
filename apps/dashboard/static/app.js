@@ -684,7 +684,7 @@ async function approveAllUat(repo, btnEl) {
   if (btnEl) btnEl.disabled = true;
   try {
     const res = await fetch(
-      `/api/projects/${encodeURIComponent(repo)}/approve-batch`,
+      `/api/projects/${repo}/approve-batch`,
       { method: 'POST' }
     );
     if (!res.ok) throw new Error(await res.text());

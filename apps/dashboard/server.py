@@ -371,8 +371,9 @@ def add_project(body: NewProjectBody):
         raise _gh_error(e)
 
 
-@app.post("/api/projects/{repo}/approve-batch")
-def approve_batch(repo: str):
+@app.post("/api/projects/{owner}/{repo_name}/approve-batch")
+def approve_batch(owner: str, repo_name: str):
+    repo = f"{owner}/{repo_name}"
     try:
         issues = github_client.list_open_uat_issues(repo_name=repo)
         approved = []

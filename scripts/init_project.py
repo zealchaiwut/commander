@@ -178,8 +178,8 @@ def _bootstrap_machine_config(commander_home: Path, api_url: str = "http://local
 # ── projects.json helpers ──────────────────────────────────────────────────────
 
 def _find_projects_json() -> Path:
-    """Locate dashboard/projects.json relative to this script."""
-    return Path(__file__).parent.parent / "projects.json"
+    """Locate apps/dashboard/projects.json relative to this script."""
+    return Path(__file__).parent.parent / "apps" / "dashboard" / "projects.json"
 
 
 def _load_projects_json() -> list:
@@ -207,11 +207,11 @@ def _find_all_projects_jsons() -> list[Path]:
     Falls back to the script's own dashboard/projects.json if neither sibling
     is found (single-dashboard install or fresh setup).
     """
-    own = Path(__file__).parent.parent / "projects.json"
+    own = Path(__file__).parent.parent / "apps" / "dashboard" / "projects.json"
     commander_home = Path(__file__).parent.parent.parent.parent
     found: list[Path] = []
     for variant in ("prd", "uat"):
-        candidate = commander_home / variant / "dashboard" / "projects.json"
+        candidate = commander_home / variant / "apps" / "dashboard" / "projects.json"
         if candidate.exists():
             found.append(candidate)
 

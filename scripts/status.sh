@@ -5,11 +5,11 @@
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DASHBOARD_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-REPO_ROOT="$(cd "$DASHBOARD_DIR/.." && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+DASHBOARD_DIR="$REPO_ROOT/apps/dashboard"
 PROJECT_DIR="$(cd "$REPO_ROOT/.." && pwd)"
 
-UAT_DIR="$PROJECT_DIR/uat/dashboard"
+UAT_DIR="$PROJECT_DIR/uat/apps/dashboard"
 
 _status_port() {
     local port="$1"

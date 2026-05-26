@@ -412,6 +412,26 @@ Schema: `{ "issue", "gate", "timestamp", "failures": [{ "type", "location", "iss
 
 The sprint manager reads this sidecar when dispatching a coder retry and injects exact file:line locations and test names into the coder prompt. If the sidecar is absent, sprint manager falls back to the generic retry prompt without error.
 
+## Sandbox Isolation (Commander Self-Testing)
+
+**When testing commander itself, all GitHub operations MUST target `$TEST_GITHUB_REPO`
+(default: `zealchaiwut/commander-issue-test`), not the real `zealchaiwut/commander` repo.**
+
+This is enforced automatically by `github_client.get_repo_for_operation()` via two mechanisms:
+
+1. **Env var:** Set `COMMANDER_TEST_MODE=1` before running any tester workflow against commander.
+2. **Self-referential detection:** Any operation that would target `zealchaiwut/commander`
+   is automatically redirected to the sandbox — no manual setup required.
+
+To override the sandbox target: `export COMMANDER_TEST_REPO=yourorg/your-sandbox`
+
+To verify isolation is working:
+```bash
+COMMANDER_TEST_MODE=1 pytest tests/integration/test_sandbox_isolation.py -v
+```
+
+See `docs/testing/sandbox-repo.md` for full setup and seeding instructions.
+
 ## Notes
 
 - The UAT server must be running at `$UAT_BASE_URL` for HTTP tests to pass. If Step 0's curl check warned the server wasn't responding, and all tests then fail with connection errors, say so clearly rather than marking them all as real failures.

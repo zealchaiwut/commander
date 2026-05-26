@@ -413,29 +413,29 @@ def _summary_path(
 
 # ── PID file management (AC-2) ───────────────────────────────────────────────
 
-_pid_file_path: Optional[Path] = None
+_active_pid_path: Optional[Path] = None
 
 
 def _remove_pid_file() -> None:
     """Remove the sprint PID file if it exists (called by atexit + signal handlers)."""
-    global _pid_file_path
-    if _pid_file_path and _pid_file_path.exists():
+    global _active_pid_path
+    if _active_pid_path and _active_pid_path.exists():
         try:
-            _pid_file_path.unlink()
+            _active_pid_path.unlink()
         except OSError:
             pass
 
 
 def _setup_pid_file(sprint_num: Optional[int]) -> None:
     """Write PID to dashboard/sprints/sprint-N.pid and register cleanup handlers."""
-    global _pid_file_path
+    global _active_pid_path
     if sprint_num is None:
         return
     sprints_dir = SPRINTS_DIR
     sprints_dir.mkdir(parents=True, exist_ok=True)
     pid_path = sprints_dir / f"sprint-{sprint_num}.pid"
     pid_path.write_text(str(os.getpid()), encoding="utf-8")
-    _pid_file_path = pid_path
+    _active_pid_path = pid_path
 
     atexit.register(_remove_pid_file)
 

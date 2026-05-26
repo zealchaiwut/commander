@@ -371,6 +371,19 @@ def add_project(body: NewProjectBody):
         raise _gh_error(e)
 
 
+@app.post("/api/projects/{repo}/approve-batch")
+def approve_batch(repo: str):
+    try:
+        issues = github_client.list_open_uat_issues(repo_name=repo)
+        approved = []
+        for issue in issues:
+            github_client.approve_issue(issue["number"], repo_name=repo)
+            approved.append(issue["number"])
+        return {"approved": approved, "count": len(approved)}
+    except subprocess.CalledProcessError as e:
+        raise _gh_error(e)
+
+
 @app.post("/api/projects/init")
 async def init_project(body: InitProjectBody):
     """Spawn init_project.py and stream its stdout back as SSE (text/event-stream).

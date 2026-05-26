@@ -295,6 +295,21 @@ def repo_config() -> dict:
     }
 
 
+def list_open_uat_issues(repo_name: str | None = None, sprint: int | None = None) -> list[dict]:
+    """List open issues labelled UAT, optionally filtered to sprint-N."""
+    r = _r(repo_name)
+    args = [
+        "issue", "list", "--repo", r,
+        "--label", "UAT",
+        "--state", "open",
+        "--json", "number,title,url",
+        "--limit", "200",
+    ]
+    if sprint is not None:
+        args += ["--label", f"sprint-{sprint}"]
+    return _json(*args)
+
+
 # ── write operations ──────────────────────────────────────────────────────────
 
 def approve_issue(issue_id: int, repo_name: str | None = None):

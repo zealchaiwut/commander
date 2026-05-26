@@ -15,6 +15,10 @@ def pytest_configure(config):
         "markers",
         "live: mark test as requiring a running dashboard server (deselected by default)",
     )
+    config.addinivalue_line(
+        "markers",
+        "selenium: mark test as requiring Chrome/ChromeDriver and a running dashboard server",
+    )
 
 
 @pytest.fixture(scope="session")

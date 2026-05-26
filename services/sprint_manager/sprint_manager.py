@@ -1440,9 +1440,11 @@ def _dispatch_tester(
             f" you MUST immediately run `python3 dashboard/scripts/finish_feature.py --issue {issue_num}`"
             " from the repo root without asking. The script reads COMMANDER_MERGE_TARGET from its"
             " own env to pick the merge target — do not override with --target-branch."
-            " Apply the UAT label to the issue automatically via `gh issue edit`."
+            " finish_feature.py applies the UAT label automatically — do NOT separately edit labels or close the issue."
+            " NEVER apply the UAT-approved label or close the issue — UAT-approved is set ONLY by the human"
+            " via the dashboard Approve button or scripts/approve_ticket.py."
             " Do NOT output language like 'let me know if you want me to...' —"
-            " complete the full workflow autonomously including finish_feature.py and label update."
+            " complete the full workflow autonomously by running finish_feature.py and then stop."
         )
     cmd = [
         "claude",
@@ -1599,18 +1601,18 @@ def generate_sprint_summary(
         "",
     ]
 
-    # -- What Shipped --
+    # -- Pending UAT Review --
     lines += [
-        "## What Shipped",
+        "## Pending UAT Review",
         "",
         "| Issue # | Title | Time taken | Outcome | Size |",
         "|---|---|---|---|---|",
     ]
     if completed:
         for issue in completed:
-            lines.append(f"| #{issue.number} | {issue.title} | -- | UAT-approved / closed | -- |")
+            lines.append(f"| #{issue.number} | {issue.title} | -- | merged — awaiting UAT review | -- |")
     else:
-        lines.append("| -- | No issues shipped | -- | -- | -- |")
+        lines.append("| -- | No issues merged this sprint | -- | -- | -- |")
     lines.append("")
 
     # -- What Didn't Ship --

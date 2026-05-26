@@ -354,9 +354,15 @@ python3 "$MAIN_REPO/dashboard/scripts/post_test_report.py" \
 
 If `READY_FOR_UAT`:
 ```bash
-# Merges to develop, pushes, labels UAT, deletes branch — all in one step
+# Merges to target branch, pushes, labels UAT, deletes branch — all in one step
 cd "$MAIN_REPO" && python3 dashboard/scripts/finish_feature.py --issue <N>
 ```
+
+**MANDATORY — human-in-the-loop gate:**
+- `finish_feature.py` applies the **UAT** label and keeps the issue **OPEN**. That is the correct end state.
+- Do **NOT** apply `UAT-approved` label. Do **NOT** close the issue. Do **NOT** run `update_ticket.py --status uat-approved`.
+- `UAT-approved` is set **only** by a human via the dashboard Approve button or `scripts/approve_ticket.py`.
+- Your job ends when `finish_feature.py` completes successfully. The issue will remain open in UAT state awaiting human review.
 
 If `NEEDS_FIXES`, leave the ticket in SIT (do not move it). Say which tests failed and what the likely fix is.
 

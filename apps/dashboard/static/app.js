@@ -2323,11 +2323,6 @@ function smgmtRender() {
   const bodyEl = document.getElementById('smgmt-body');
   if (!bodyEl) return;
 
-  // Lowest-numbered sprint gets NEXT UP badge + Run button
-  const allNums  = order.map(l => parseInt(l.split('-')[1], 10)).filter(n => !isNaN(n));
-  const lowestN  = allNums.length > 0 ? Math.min(...allNums) : null;
-  const lowestLabel = lowestN != null ? `sprint-${lowestN}` : null;
-
   // Build map: sprint_label -> issues[]
   const bySprintLabel = {};
   for (const label of order) bySprintLabel[label] = [];
@@ -2338,6 +2333,20 @@ function smgmtRender() {
       bySprintLabel[label].push(iss);
     } else if (label == null) {
       unassigned.push(iss);
+    }
+  }
+
+  // NEXT-UP: lowest-numbered sprint with >= 1 ticket AND a sprint goal set (>= 10 chars)
+  const allNums = order.map(l => parseInt(l.split('-')[1], 10)).filter(n => !isNaN(n));
+  allNums.sort((a, b) => a - b);
+  let lowestLabel = null;
+  for (const n of allNums) {
+    const lbl = `sprint-${n}`;
+    const tickets = bySprintLabel[lbl] || [];
+    const goal = _smgmtGoals[lbl] || '';
+    if (tickets.length >= 1 && goal.length >= 10) {
+      lowestLabel = lbl;
+      break;
     }
   }
 
@@ -2577,6 +2586,8 @@ async function smgmtSaveGoal(label, goal) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ project: _smgmtCurrentRepo, sprint_label: label, goal }),
     });
+    // Re-render so NEXT-UP badge moves to the correct sprint after goal changes
+    smgmtRender();
   } catch (e) {
     smgmtShowError('Failed to save sprint goal: ' + e.message);
   }
@@ -2792,33 +2803,94 @@ function smgmtApplyRunState(sprintStatus) {
   const runLabel = _smgmtRunningInfo?.sprint_label || null;
   const runProj  = _smgmtRunningInfo?.project || null;
 
-  // Find all run buttons
-  document.querySelectorAll('.smgmt-run-btn').forEach(btn => {
-    const btnLabel = btn.id.replace('smgmt-run-btn-', '').replace('_', '-');
+  // Clear running state from all blocks first
+  document.querySelectorAll('.smgmt-sprint-block').forEach(block => {
+    block.classList.remove('smgmt-running');
+    const hdr = block.querySelector('.smgmt-sprint-header');
+    if (hdr) hdr.classList.remove('smgmt-running-header');
+    // Remove injected running elements (badge, progress, kill btn)
+    block.querySelectorAll('.smgmt-running-badge, .smgmt-progress-text, .smgmt-kill-btn').forEach(el => el.remove());
+    // Restore any hidden run buttons
+    block.querySelectorAll('.smgmt-run-btn').forEach(btn => btn.style.display = '');
+  });
 
+  // Apply running state to the active sprint block (only if it's in the current project)
+  if (running && runLabel && runProj === _smgmtCurrentRepo) {
+    const safeLabel = runLabel.replace('-', '_');
+    const block = document.getElementById(`smgmt-block-${runLabel}`);
+    if (block) {
+      block.classList.add('smgmt-running');
+      const hdr = block.querySelector('.smgmt-sprint-header');
+      if (hdr) {
+        hdr.classList.add('smgmt-running-header');
+
+        // Insert RUNNING badge after NEXT UP badge (or sprint name)
+        const runBadge = document.createElement('span');
+        runBadge.className = 'smgmt-running-badge';
+        runBadge.textContent = 'RUNNING';
+        const nextBadge = hdr.querySelector('.smgmt-next-badge');
+        const sprintName = hdr.querySelector('.smgmt-sprint-name');
+        const insertAfter = nextBadge || sprintName;
+        if (insertAfter && insertAfter.nextSibling) {
+          hdr.insertBefore(runBadge, insertAfter.nextSibling);
+        } else {
+          hdr.appendChild(runBadge);
+        }
+
+        // Build progress text
+        let progressText = '';
+        if (sprintStatus && sprintStatus.sprint_label === runLabel) {
+          const total = (sprintStatus.issues || []).length;
+          const done  = (sprintStatus.issues || []).filter(i =>
+            i.status === 'done' || i.status === 'skipped'
+          ).length;
+          progressText = `${done}/${total} tickets`;
+          if (done > 0 && sprintStatus.wall_clock_secs > 0) {
+            const avgSecs = sprintStatus.wall_clock_secs / done;
+            const remaining = Math.round(avgSecs * (total - done) / 60);
+            if (remaining > 0) progressText += ` · ~${remaining} min remaining`;
+          }
+        }
+        if (progressText) {
+          const progEl = document.createElement('span');
+          progEl.className = 'smgmt-progress-text';
+          progEl.textContent = progressText;
+          // Insert before the rerun button
+          const rerunBtn = hdr.querySelector('.smgmt-rerun-btn');
+          if (rerunBtn) {
+            hdr.insertBefore(progEl, rerunBtn);
+          } else {
+            hdr.appendChild(progEl);
+          }
+        }
+
+        // Hide Run button and insert Kill button after it
+        const runBtn = document.getElementById(`smgmt-run-btn-${safeLabel}`);
+        if (runBtn) {
+          runBtn.style.display = 'none';
+          const killBtn = document.createElement('button');
+          killBtn.className = 'smgmt-kill-btn';
+          killBtn.innerHTML = '<i class="ti ti-x"></i> Kill';
+          killBtn.onclick = () => smgmtKillSprint(runLabel);
+          runBtn.parentNode.insertBefore(killBtn, runBtn.nextSibling);
+        }
+      }
+    }
+  }
+
+  // Handle Run buttons on non-running cards
+  document.querySelectorAll('.smgmt-run-btn').forEach(btn => {
+    const btnLabel = btn.id.replace('smgmt-run-btn-', '').replace(/_/g, '-');
     if (!running) {
       const goal = _smgmtGoals[btnLabel] || '';
       const goalValid = goal.length >= 10;
       btn.disabled = !goalValid;
       btn.title = goalValid ? '' : 'Set a sprint goal first';
       btn.textContent = 'Run sprint';
-      return;
-    }
-
-    btn.disabled = true;
-    if (runLabel === btnLabel && runProj === _smgmtCurrentRepo) {
-      // This is the running sprint — show progress if available
-      if (sprintStatus && sprintStatus.sprint_label === runLabel) {
-        const total = (sprintStatus.issues || []).length;
-        const done  = (sprintStatus.issues || []).filter(i =>
-          i.status === 'done' || i.status === 'skipped'
-        ).length;
-        btn.textContent = `Running… ${done}/${total} tickets`;
-      } else {
-        btn.textContent = 'Running…';
-      }
     } else {
-      btn.textContent = 'Another sprint is running';
+      btn.disabled = true;
+      btn.title = `Sprint ${runLabel} is running for ${runProj}`;
+      btn.textContent = 'Run sprint';
     }
   });
 
@@ -2829,7 +2901,7 @@ function smgmtApplyRunState(sprintStatus) {
       return;
     }
     btn.style.display = '';
-    const btnLabel = btn.id.replace('smgmt-rerun-btn-', '').replace('_', '-');
+    const btnLabel = btn.id.replace('smgmt-rerun-btn-', '').replace(/_/g, '-');
     const sprintTickets = (_smgmtData?.issues || []).filter(
       t => t.sprint != null && `sprint-${t.sprint}` === btnLabel
     );
@@ -2910,6 +2982,46 @@ async function smgmtRerunConfirm() {
   } catch (e) {
     smgmtShowError('Failed to reset sprint: ' + e.message);
     if (confirmBtn) { confirmBtn.disabled = false; confirmBtn.textContent = 'Reset'; }
+  }
+}
+
+// ── Kill sprint ───────────────────────────────────────────────────────────────
+
+let _smgmtKillLabel = null;
+
+function smgmtKillSprint(label) {
+  _smgmtKillLabel = label;
+  const confirmBtn = document.getElementById('smgmt-kill-confirm');
+  if (confirmBtn) { confirmBtn.disabled = false; confirmBtn.textContent = 'Yes, kill it'; }
+  document.getElementById('smgmt-kill-backdrop').classList.remove('hidden');
+  document.getElementById('smgmt-kill-modal').classList.remove('hidden');
+}
+
+function smgmtKillClose() {
+  document.getElementById('smgmt-kill-backdrop').classList.add('hidden');
+  document.getElementById('smgmt-kill-modal').classList.add('hidden');
+  _smgmtKillLabel = null;
+}
+
+async function smgmtKillConfirm() {
+  if (!_smgmtKillLabel || !_smgmtCurrentRepo) return;
+  const confirmBtn = document.getElementById('smgmt-kill-confirm');
+  if (confirmBtn) { confirmBtn.disabled = true; confirmBtn.textContent = 'Killing…'; }
+
+  try {
+    const res = await fetch(
+      `/api/sprints/run/${encodeURIComponent(_smgmtKillLabel)}?project=${encodeURIComponent(_smgmtCurrentRepo)}`,
+      { method: 'DELETE' }
+    );
+    if (!res.ok) throw new Error(await res.text());
+    smgmtKillClose();
+    _smgmtRunningInfo = { running: false, project: null, sprint_label: null };
+    smgmtApplyRunState(null);
+    showSuccessToast('Sprint killed. Run button restored.');
+    await smgmtSelectProject(_smgmtCurrentRepo);
+  } catch (e) {
+    smgmtShowError('Failed to kill sprint: ' + e.message);
+    if (confirmBtn) { confirmBtn.disabled = false; confirmBtn.textContent = 'Yes, kill it'; }
   }
 }
 

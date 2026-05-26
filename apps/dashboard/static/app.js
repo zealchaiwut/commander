@@ -1498,6 +1498,14 @@ function hideToast() {
   if (t) t.style.display = 'none';
 }
 
+function showSuccessToast(msg) {
+  const t = document.getElementById('toast-success');
+  if (!t) return;
+  t.textContent = msg;
+  t.style.display = 'block';
+  setTimeout(() => { t.style.display = 'none'; }, 5000);
+}
+
 // ── Sprint alert banners (AC-3a) ──────────────────────────────────────────────
 
 let _alertsCache = [];
@@ -2250,6 +2258,9 @@ let _smgmtPollTimer      = null;
 let _smgmtGoals          = {};     // sprint_label -> goal string
 let _smgmtGoalSaveTimers = {};     // sprint_label -> debounce timer id
 let _smgmtBacklogFilter  = '';     // label name filter for backlog, '' = all
+let _smgmtRerunLabel     = null;   // sprint label pending rerun confirmation
+
+const RERUN_STRIP_LABELS = new Set(['UAT', 'UAT-approved', 'released', 'SIT', 'in-progress', 'needs-rework']);
 
 async function smgmtInit() {
   // Legacy: called with no repo; use current project or first project
@@ -2342,13 +2353,19 @@ function smgmtRender() {
   smgmtApplyRunState();
 }
 
+function smgmtHasCompletedTickets(tickets) {
+  return tickets.some(t => (t.labels || []).some(l => RERUN_STRIP_LABELS.has(l.name)));
+}
+
 function smgmtSprintBlockHtml(label, tickets, isNext) {
   const n = parseInt(label.split('-')[1], 10);
   const nextBadge = isNext ? '<span class="smgmt-next-badge">NEXT UP</span>' : '';
-  const runBtnId  = `smgmt-run-btn-${label.replace('-', '_')}`;
-  const goalId    = `smgmt-goal-${label.replace('-', '_')}`;
-  const savedGoal = _smgmtGoals[label] || '';
-  const goalValid = savedGoal.length >= 10;
+  const runBtnId    = `smgmt-run-btn-${label.replace('-', '_')}`;
+  const rerunBtnId  = `smgmt-rerun-btn-${label.replace('-', '_')}`;
+  const goalId      = `smgmt-goal-${label.replace('-', '_')}`;
+  const savedGoal   = _smgmtGoals[label] || '';
+  const goalValid   = savedGoal.length >= 10;
+  const hasCompleted = smgmtHasCompletedTickets(tickets);
 
   const ticketsHtml = tickets.length > 0
     ? tickets.map(t => smgmtTicketCardHtml(t, label)).join('')
@@ -2367,6 +2384,11 @@ function smgmtSprintBlockHtml(label, tickets, isNext) {
         <span class="smgmt-sprint-name">Sprint ${n}</span>
         ${nextBadge}
         <span class="smgmt-sprint-count">${tickets.length} ticket${tickets.length !== 1 ? 's' : ''}</span>
+        <button class="smgmt-rerun-btn" id="${rerunBtnId}"
+                title="${hasCompleted ? '' : 'No completed tickets to reset'}"
+                ${hasCompleted ? '' : 'disabled'}
+                onclick="smgmtRerunSprint('${label}')">
+          <i class="ti ti-refresh"></i> Rerun sprint</button>
         ${isNext
           ? `<button class="smgmt-run-btn" id="${runBtnId}"
                      title="${goalValid ? '' : 'Set a sprint goal first'}"
@@ -2799,6 +2821,96 @@ function smgmtApplyRunState(sprintStatus) {
       btn.textContent = 'Another sprint is running';
     }
   });
+
+  // Hide/disable rerun buttons while a sprint is running
+  document.querySelectorAll('.smgmt-rerun-btn').forEach(btn => {
+    if (running) {
+      btn.style.display = 'none';
+      return;
+    }
+    btn.style.display = '';
+    const btnLabel = btn.id.replace('smgmt-rerun-btn-', '').replace('_', '-');
+    const sprintTickets = (_smgmtData?.issues || []).filter(
+      t => t.sprint != null && `sprint-${t.sprint}` === btnLabel
+    );
+    const hasCompleted = smgmtHasCompletedTickets(sprintTickets);
+    btn.disabled = !hasCompleted;
+    btn.title = hasCompleted ? '' : 'No completed tickets to reset';
+  });
+}
+
+// ── Rerun sprint ──────────────────────────────────────────────────────────────
+
+function smgmtRerunSprint(label) {
+  if (!_smgmtCurrentRepo || !_smgmtData) return;
+  const sprintTickets = (_smgmtData.issues || []).filter(
+    t => t.sprint != null && `sprint-${t.sprint}` === label
+  );
+  const affected = sprintTickets.filter(t =>
+    (t.labels || []).some(l => RERUN_STRIP_LABELS.has(l.name))
+  );
+
+  _smgmtRerunLabel = label;
+  const n = parseInt(label.split('-')[1], 10);
+  document.getElementById('smgmt-rerun-title').textContent = `Reset Sprint ${n}?`;
+
+  const bodyEl = document.getElementById('smgmt-rerun-body');
+  if (affected.length === 0) {
+    bodyEl.innerHTML = '<em style="color:var(--text-muted)">No affected tickets.</em>';
+  } else {
+    bodyEl.innerHTML = affected.map(t => {
+      const toRemove = (t.labels || []).filter(l => RERUN_STRIP_LABELS.has(l.name)).map(l => escapeHtml(l.name));
+      const toKeep   = (t.labels || []).filter(l => !RERUN_STRIP_LABELS.has(l.name)).map(l => escapeHtml(l.name));
+      return `<div class="smgmt-rerun-row">
+        <span class="smgmt-rerun-num">#${t.number}</span>
+        <span class="smgmt-rerun-title-text" title="${escapeHtml(t.title)}">${escapeHtml(t.title)}</span>
+        <span class="smgmt-rerun-labels">[${toRemove.join(', ')} to remove${toKeep.length ? '; keep: ' + toKeep.join(', ') : ''}]</span>
+      </div>`;
+    }).join('');
+  }
+
+  const confirmBtn = document.getElementById('smgmt-rerun-confirm');
+  if (confirmBtn) { confirmBtn.disabled = false; confirmBtn.textContent = 'Reset'; }
+  document.getElementById('smgmt-rerun-backdrop').classList.remove('hidden');
+  document.getElementById('smgmt-rerun-modal').classList.remove('hidden');
+}
+
+function smgmtRerunClose() {
+  document.getElementById('smgmt-rerun-backdrop').classList.add('hidden');
+  document.getElementById('smgmt-rerun-modal').classList.add('hidden');
+  _smgmtRerunLabel = null;
+}
+
+async function smgmtRerunConfirm() {
+  if (!_smgmtRerunLabel || !_smgmtCurrentRepo) return;
+  const confirmBtn = document.getElementById('smgmt-rerun-confirm');
+  if (confirmBtn) { confirmBtn.disabled = true; confirmBtn.textContent = 'Resetting…'; }
+
+  try {
+    const res = await fetch(
+      `/api/sprints/${encodeURIComponent(_smgmtRerunLabel)}/rerun?project=${encodeURIComponent(_smgmtCurrentRepo)}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confirm: true }),
+      }
+    );
+    if (!res.ok) throw new Error(await res.text());
+    const data = await res.json();
+    smgmtRerunClose();
+
+    const total = data.reset_count + (data.errors ? data.errors.length : 0);
+    if (data.errors && data.errors.length > 0) {
+      smgmtShowError(`Reset ${data.reset_count} of ${total} tickets; ${data.errors.join('; ')}`);
+    } else {
+      showSuccessToast(`Reset ${data.reset_count} ticket${data.reset_count !== 1 ? 's' : ''}. Click Run sprint when ready.`);
+    }
+
+    await smgmtSelectProject(_smgmtCurrentRepo);
+  } catch (e) {
+    smgmtShowError('Failed to reset sprint: ' + e.message);
+    if (confirmBtn) { confirmBtn.disabled = false; confirmBtn.textContent = 'Reset'; }
+  }
 }
 
 // ── Create sprint ─────────────────────────────────────────────────────────────

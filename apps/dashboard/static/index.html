@@ -1872,6 +1872,22 @@
   .smgmt-cleanup-desc { font-size: 11px; color: var(--text-muted); }
 </style>
 
+<!-- Approve ticket confirmation modal -->
+<div class="modal-backdrop hidden" id="approve-backdrop" onclick="approveModalCancel()"></div>
+<div class="modal hidden" id="approve-modal" role="dialog" aria-modal="true">
+  <div class="modal-header">
+    <span class="modal-title">Approve Ticket?</span>
+    <button class="modal-close" onclick="approveModalCancel()" aria-label="Close">&times;</button>
+  </div>
+  <div style="padding: 0 4px 8px; font-size: 13px; color: var(--text-muted);">
+    Close issue <strong id="approve-modal-issue-ref"></strong> on GitHub and remove the UAT label?
+  </div>
+  <div class="modal-footer">
+    <button class="btn-ghost" onclick="approveModalCancel()">Cancel</button>
+    <button class="btn-primary" id="approve-modal-confirm-btn" onclick="approveModalConfirm()">Confirm</button>
+  </div>
+</div>
+
 <!-- ── New Project Modal ── -->
 <div class="modal-backdrop hidden" id="new-project-backdrop" onclick="closeNewProjectModal()"></div>
 <div class="modal hidden" id="new-project-modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">

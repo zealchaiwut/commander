@@ -567,7 +567,7 @@ function ticketCardHtml(ticket, repo) {
         <div class="tr-loading">Loading test report…</div>
       </div>
       <div class="ticket-actions" id="tact-${n}">
-        <button class="btn-approve-sm" id="approve-btn-${n}" onclick="approveIssue(${n}, '${r}', this)">Approve</button>
+        <button class="btn-approve-sm" id="approve-btn-${n}" onclick="confirmApprove(${n}, '${r}')">Approve ✓</button>
         <button class="btn-reject-sm"  onclick="showRejectInline(${n})">Reject…</button>
       </div>
       <div class="reject-inline hidden" id="reject-inline-${n}">
@@ -895,6 +895,54 @@ function updateApproveBtn(issueNum, data) {
 }
 
 // ── Approve / Reject ──────────────────────────────────────────────────────────
+let _approveModalIssue = null;
+let _approveModalRepo  = null;
+
+function confirmApprove(issueNum, repo) {
+  _approveModalIssue = issueNum;
+  _approveModalRepo  = repo;
+  const ref = document.getElementById('approve-modal-issue-ref');
+  if (ref) ref.textContent = `#${issueNum}`;
+  document.getElementById('approve-backdrop')?.classList.remove('hidden');
+  document.getElementById('approve-modal')?.classList.remove('hidden');
+}
+
+function approveModalCancel() {
+  document.getElementById('approve-backdrop')?.classList.add('hidden');
+  document.getElementById('approve-modal')?.classList.add('hidden');
+  _approveModalIssue = null;
+  _approveModalRepo  = null;
+  const btn = document.getElementById('approve-modal-confirm-btn');
+  if (btn) btn.disabled = false;
+}
+
+async function approveModalConfirm() {
+  const issueNum = _approveModalIssue;
+  const repo     = _approveModalRepo;
+  if (issueNum === null) return;
+
+  const btn = document.getElementById('approve-modal-confirm-btn');
+  if (btn) btn.disabled = true;
+
+  try {
+    const res = await fetch(
+      `/api/tickets/${issueNum}/approve?repo=${encodeURIComponent(repo)}`,
+      { method: 'POST' }
+    );
+    if (!res.ok) {
+      const text = await res.text();
+      showToast(`${res.status} ${res.statusText}: ${text}`);
+      if (btn) btn.disabled = false;
+      return;
+    }
+    approveModalCancel();
+    document.getElementById(`approve-btn-${issueNum}`)?.closest('.ticket-card')?.remove();
+  } catch (e) {
+    showToast(`Approve failed: ${e.message}`);
+    if (btn) btn.disabled = false;
+  }
+}
+
 async function approveIssue(issueNum, repo, btnEl) {
   if (btnEl) btnEl.disabled = true;
   try {
@@ -905,7 +953,7 @@ async function approveIssue(issueNum, repo, btnEl) {
     if (!res.ok) throw new Error(await res.text());
     _refreshAfterAction(repo);
   } catch (e) {
-    alert('Approve failed: ' + e.message);
+    showToast('Approve failed: ' + e.message);
     if (btnEl) btnEl.disabled = false;
   }
 }

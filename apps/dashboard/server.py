@@ -978,4 +978,81 @@ async def assign_sprint_label(body: SprintAssignBody):
     return {"ok": True}
 
 
+# ── Plan-sprint endpoints (AC-14, AC-15, AC-16) ───────────────────────────────
+
+
+@app.get("/api/open-issues")
+def get_open_issues():
+    """Return all open issues including body for conflict detection.  Cached 30 s."""
+    try:
+        issues = github_client.list_open_issues_with_body(limit=200)
+    except subprocess.CalledProcessError as e:
+        raise _gh_error(e)
+    return [
+        {
+            "number": iss["number"],
+            "title": iss["title"],
+            "labels": iss.get("labels", []),
+            "body": iss.get("body") or "",
+            "url": iss.get("url", ""),
+            "state": iss.get("state", "open"),
+        }
+        for iss in issues
+    ]
+
+
+class SprintLabelBody(BaseModel):
+    sprint: int
+
+
+@app.post("/api/issues/{issue_id}/sprint-label")
+async def add_sprint_label(issue_id: int, body: SprintLabelBody):
+    """Add sprint-N label to an issue without removing existing labels."""
+    sprint_label = f"sprint-{body.sprint}"
+    try:
+        github_client.ensure_sprint_label(body.sprint)
+        github_client.update_labels(issue_id, add=[sprint_label], remove=[])
+        github_client.invalidate("open_issues_body:")
+        github_client.invalidate("open_issues:")
+        github_client.invalidate("sprints:")
+    except subprocess.CalledProcessError as e:
+        raise _gh_error(e)
+    except ValueError as e:
+        raise HTTPException(400, detail=str(e))
+    return {"ok": True}
+
+
+_SPRINT_LABEL_RE = re.compile(r"^sprint-\d+$")
+
+_REPO_ROOT = Path(__file__).parent.parent.parent
+SPRINT_MANAGER_PATH = _REPO_ROOT / "services" / "sprint_manager" / "sprint_manager.py"
+SPRINT_LOG_PATH = Path(__file__).parent / "sprints" / "sprint_run.log"
+
+
+class SprintRunBody(BaseModel):
+    label: str
+    goal: str
+
+
+@app.post("/api/sprint-run")
+def run_sprint(body: SprintRunBody):
+    """Spawn sprint_manager.py as a detached background process."""
+    if not _SPRINT_LABEL_RE.match(body.label):
+        raise HTTPException(400, detail=f"Invalid sprint label: {body.label!r}")
+    if not SPRINT_MANAGER_PATH.exists():
+        raise HTTPException(502, detail=f"sprint_manager.py not found at {SPRINT_MANAGER_PATH}")
+
+    SPRINT_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    log_fh = open(SPRINT_LOG_PATH, "a")
+
+    subprocess.Popen(
+        ["python3", str(SPRINT_MANAGER_PATH), body.label],
+        env={**os.environ, "SPRINT_GOAL": body.goal},
+        stdout=log_fh,
+        stderr=log_fh,
+        start_new_session=True,
+    )
+    return {"ok": True, "label": body.label}
+
+
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")

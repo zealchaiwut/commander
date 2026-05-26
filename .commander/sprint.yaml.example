@@ -1,0 +1,26 @@
+# Sprint Manager configuration — COPY THIS to .commander/sprint.yaml and edit paths.
+#
+# After cloning the repo, run: ./.commander/setup.sh
+# That script fills in $HOME automatically. Edit the resulting sprint.yaml
+# if your local layout differs from the standard ~/dev/commander/{coder,tester,prd} setup.
+
+repo_name: zealchaiwut/commander
+
+worktrees:
+  coder: /Users/USER/dev/commander/coder
+  tester: /Users/USER/dev/commander/tester
+  tester_app_subdir: apps/dashboard
+
+paths:
+  scripts_dir: /Users/USER/dev/commander/prd/scripts
+  logs_dir: /Users/USER/dev/commander/.commander/logs
+  sprints_dir: /Users/USER/dev/commander/.commander/sprints
+  alerts_dir: /Users/USER/dev/commander/.commander/alerts
+
+dashboard:
+  api_url: http://localhost:8000
+
+# Optional — per-project port detection (issue #62)
+# app:
+#   default_port: 8000
+#   port_strategy: prefer_default

@@ -704,12 +704,15 @@ def dismiss_alert(idx: int):
 
 # ── sprint status endpoint (AC-6 from #24) ───────────────────────────────────
 
-_sprint_status: Optional[dict] = None
+# Keyed by project ("owner/repo"). Legacy fallback key is "" for older sprint
+# managers that do not send a project field.
+_sprint_statuses: dict[str, dict] = {}
 
 
 class SprintStatusPayload(BaseModel):
     model_config = ConfigDict(extra="allow")
 
+    project: str = ""
     sprint_label: str = ""
     sprint_number: Optional[int] = None
     issues: list[dict] = []
@@ -723,17 +726,37 @@ class SprintStatusPayload(BaseModel):
 
 @app.post("/api/sprint-status")
 async def set_sprint_status(payload: SprintStatusPayload):
-    global _sprint_status
-    _sprint_status = payload.model_dump()
-    await broadcast({"type": "sprint_update", **_sprint_status})
+    global _sprint_statuses
+    data = payload.model_dump()
+    key = data.get("project") or ""
+    _sprint_statuses[key] = data
+    await broadcast({"type": "sprint_update", **data})
     return {"ok": True}
 
 
 @app.get("/api/sprint-status")
-def get_sprint_status():
-    if _sprint_status is None:
-        return {"active": False}
-    return {**_sprint_status, "active": True}
+def get_sprint_status(project: Optional[str] = None):
+    """Return sprint status.
+
+    Without ?project=: returns all active statuses as a list under key "statuses".
+    With ?project=owner/repo: returns single status dict (or {"active": False}).
+
+    For backwards compatibility the response always includes "active" key.
+    """
+    if project is not None:
+        status = _sprint_statuses.get(project)
+        if status is None:
+            return {"active": False}
+        return {**status, "active": True}
+    # Return all stored statuses
+    statuses = [
+        {**v, "active": True}
+        for v in _sprint_statuses.values()
+        if v.get("sprint_label")
+    ]
+    if not statuses:
+        return {"active": False, "statuses": []}
+    return {"active": True, "statuses": statuses}
 
 
 @app.post("/api/sprint-pause")
@@ -1294,6 +1317,22 @@ def _any_sprint_running() -> Optional[dict]:
     return None
 
 
+def _all_sprints_running() -> list[dict]:
+    """Scan all projects for running sprints. Returns list of {project, sprint_label}."""
+    result: list[dict] = []
+    projects = projects_module.load_projects()
+    for proj in projects:
+        root = _project_root_path(proj["repo"])
+        sprints_dir = _commander_dir(root) / "sprints"
+        if not sprints_dir.exists():
+            continue
+        for pid_file in sprints_dir.glob("*-pid"):
+            label = pid_file.stem  # e.g. "sprint-2"
+            if _is_sprint_running(root, label):
+                result.append({"project": proj["repo"], "sprint_label": label})
+    return result
+
+
 class SprintMgmtRunBody(BaseModel):
     project: str
     sprint_label: str
@@ -1432,6 +1471,8 @@ def run_sprint_managed(body: SprintMgmtRunBody):
     if not SPRINT_MANAGER_PATH.exists():
         raise HTTPException(502, detail=f"sprint_manager.py not found at {SPRINT_MANAGER_PATH}")
 
+    # Per-issue-#123: only block if this specific (project, sprint_label) is already running.
+    # Different projects and different sprint labels within the same project can run concurrently.
     project_root = _project_root_path(body.project)
     if _is_sprint_running(project_root, body.sprint_label):
         pid_file = _commander_dir(project_root) / "sprints" / f"{body.sprint_label}-pid"
@@ -1477,11 +1518,23 @@ def run_sprint_managed(body: SprintMgmtRunBody):
 
 @app.get("/api/sprints/running")
 def get_running_sprints():
-    """Return currently running sprint info across all projects (checks PID files)."""
-    running = _any_sprint_running()
-    if running:
-        return {"running": True, "project": running["project"], "sprint_label": running["sprint_label"]}
-    return {"running": False, "project": None, "sprint_label": None}
+    """Return all currently running sprints across all projects (checks PID files).
+
+    Returns {"sprints": [...], "count": N} where each item is {project, sprint_label}.
+    """
+    sprints = _all_sprints_running()
+    return {"sprints": sprints, "count": len(sprints)}
+
+
+@app.get("/api/sprints/running-all")
+def get_all_running_sprints():
+    """Return ALL currently running sprints across all projects (per-project PID files).
+
+    Returns: {"running": [{"project": ..., "sprint_label": ...}, ...]}
+    Empty list means no sprints are running.
+    """
+    all_running = _all_sprints_running()
+    return {"running": all_running}
 
 
 @app.delete("/api/sprints/run/{sprint_label}", status_code=200)

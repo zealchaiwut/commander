@@ -529,6 +529,7 @@ class IssueState:
 class SprintState:
     sprint_label:     str
     sprint_number:    Optional[int]
+    project:          str              = ""
     issues:           list[IssueState]  = field(default_factory=list)
     start_timestamp:  str              = ""
     total_tokens_in:  int              = 0
@@ -538,6 +539,7 @@ class SprintState:
 
     def to_dict(self) -> dict:
         return {
+            "project":          self.project,
             "sprint_label":     self.sprint_label,
             "sprint_number":    self.sprint_number,
             "issues":           [i.to_dict() for i in self.issues],
@@ -553,6 +555,7 @@ class SprintState:
         s = SprintState(
             sprint_label     = d["sprint_label"],
             sprint_number    = d.get("sprint_number"),
+            project          = d.get("project", ""),
             start_timestamp  = d.get("start_timestamp", ""),
             total_tokens_in  = d.get("total_tokens_in", 0),
             total_tokens_out = d.get("total_tokens_out", 0),
@@ -2374,6 +2377,9 @@ def run_sprint(
         state = SprintState.from_dict(json.loads(state_path.read_text()))
         if token_budget:
             state.token_budget = token_budget
+        # Backfill project if missing from saved state (legacy runs)
+        if not state.project and eff_repo:
+            state.project = eff_repo
     else:
         raw_issues = list_backlog_issues(label, repo_name=eff_repo)
         if not raw_issues:
@@ -2381,6 +2387,7 @@ def run_sprint(
             state = SprintState(
                 sprint_label  = label,
                 sprint_number = sprint_num,
+                project       = eff_repo or "",
                 start_timestamp = _utcnow(),
             )
             return summary, state
@@ -2388,6 +2395,7 @@ def run_sprint(
         state = SprintState(
             sprint_label    = label,
             sprint_number   = sprint_num,
+            project         = eff_repo or "",
             start_timestamp = _utcnow(),
             token_budget    = token_budget,
             issues=[

@@ -1606,6 +1606,10 @@ async function dismissAlert(idx) {
 let _sprintState = null;
 
 async function loadSprintStatus() {
+  // The global sprint panel was removed (AC-1, issue #82). Sprint progress is
+  // now shown per-project in the expand panel via _miniSprintSummaryHtml.
+  // Per-#123: running badges and banner are updated via smgmtPollRunStatus().
+  // We still fetch and cache sprint state for SSE compatibility.
   try {
     const res = await fetch('/api/sprint-status');
     if (!res.ok) return;
@@ -1653,11 +1657,24 @@ setInterval(() => {
 }, 60_000);
 
 // Sprint status polls every 30s (AC-6d)
+// Also refreshes running badges/banner on overview.
 setInterval(() => {
   loadSprintStatus().catch(() => {});
   loadAlerts().catch(() => {});
   const sprintVisible = !document.getElementById('view-sprint')?.classList.contains('hidden');
   if (sprintVisible) { scRefreshAgents(); scRefreshFeed(); }
+  // Per-#123: refresh overview badges even when sprint-mgmt is not open
+  fetch('/api/sprints/running-all').then(r => r.ok ? r.json() : null).then(d => {
+    if (!d) return;
+    const newMap = {};
+    for (const entry of (d.running || [])) {
+      const key = `${entry.project}:${entry.sprint_label}`;
+      newMap[key] = entry;
+    }
+    _smgmtAllRunning = newMap;
+    _updateOverviewRunningBadges();
+    _updateRunningBanner();
+  }).catch(() => {});
 }, 30_000);
 
 // ── Environment badge ─────────────────────────────────────────────────────────
@@ -2316,7 +2333,9 @@ let _smgmtCurrentRepo    = null;   // "owner/repo" currently displayed
 let _smgmtData           = null;   // { sprints, order, issues, empty_sprint_labels, placeholder_sprint } from API
 let _smgmtDragSprint     = null;   // sprint label currently being drag-reordered
 let _smgmtDragTicket     = null;   // { number, fromSprint } being dragged
-let _smgmtRunningInfo    = null;   // { running, project, sprint_label } from /api/sprints/running
+// Per-#123: replaced single _smgmtRunningInfo with a map of ALL running sprints:
+//   key = "project:sprint_label", value = { project, sprint_label }
+let _smgmtAllRunning     = {};     // map: "project:sprint_label" -> {project, sprint_label}
 let _smgmtPollTimer      = null;
 let _smgmtGoals          = {};     // sprint_label -> goal string
 let _smgmtGoalSaveTimers = {};     // sprint_label -> debounce timer id
@@ -2956,26 +2975,50 @@ async function smgmtRunSprint(sprintLabel) {
 
 async function smgmtPollRunStatus() {
   try {
-    const [runRes, statusRes] = await Promise.all([
-      fetch('/api/sprints/running'),
+    const [runAllRes, statusRes] = await Promise.all([
+      fetch('/api/sprints/running-all'),
       fetch('/api/sprint-status').catch(() => ({ ok: false })),
     ]);
-    if (runRes.ok) {
-      _smgmtRunningInfo = await runRes.json();
+
+    // Build new all-running map from API response
+    if (runAllRes.ok) {
+      const runAllData = await runAllRes.json();
+      const newMap = {};
+      for (const entry of (runAllData.running || [])) {
+        const key = `${entry.project}:${entry.sprint_label}`;
+        newMap[key] = entry;
+      }
+      _smgmtAllRunning = newMap;
     }
-    let sprintStatus = null;
+
+    // Sprint status for progress text — build a map of sprint_label -> status data.
+    // Supports both the new multi-sprint format {statuses: [...]} and the legacy
+    // single-sprint format {sprint_label, issues, ...}.
+    let sprintStatusMap = {};  // sprint_label -> status object
     if (statusRes.ok) {
       const statusData = await statusRes.json();
-      if (statusData.active) sprintStatus = statusData;
+      if (statusData.statuses) {
+        // New multi-sprint format
+        for (const s of statusData.statuses) {
+          if (s.sprint_label) sprintStatusMap[s.sprint_label] = s;
+        }
+      } else if (statusData.active && statusData.sprint_label) {
+        // Legacy single-sprint format
+        sprintStatusMap[statusData.sprint_label] = statusData;
+      }
     }
-    smgmtApplyRunState(sprintStatus);
+
+    smgmtApplyRunState(sprintStatusMap);
+    _updateRunningBanner();
+    _updateOverviewRunningBadges();
   } catch { /* ignore poll errors */ }
 }
 
-function smgmtApplyRunState(sprintStatus) {
-  const running  = _smgmtRunningInfo?.running || false;
-  const runLabel = _smgmtRunningInfo?.sprint_label || null;
-  const runProj  = _smgmtRunningInfo?.project || null;
+function smgmtApplyRunState(sprintStatusMap) {
+  // Per-#123: each sprint card checks its own (project, sprint_label) key independently.
+  // Multiple cards can be in RUNNING state simultaneously.
+  // sprintStatusMap: { sprint_label -> status_object } built from /api/sprint-status
+  if (!sprintStatusMap) sprintStatusMap = {};
 
   // Clear running state from all blocks first
   document.querySelectorAll('.smgmt-sprint-block').forEach(block => {
@@ -2988,100 +3031,178 @@ function smgmtApplyRunState(sprintStatus) {
     block.querySelectorAll('.smgmt-run-btn').forEach(btn => btn.style.display = '');
   });
 
-  // Apply running state to the active sprint block (only if it's in the current project)
-  if (running && runLabel && runProj === _smgmtCurrentRepo) {
-    const safeLabel = runLabel.replace('-', '_');
+  // Apply running state to each running sprint block in the current project
+  for (const [key, entry] of Object.entries(_smgmtAllRunning)) {
+    const { project: runProj, sprint_label: runLabel } = entry;
+    if (runProj !== _smgmtCurrentRepo) continue;  // not the currently viewed project
+
+    const safeLabel = runLabel.replace(/-/g, '_');
     const block = document.getElementById(`smgmt-block-${runLabel}`);
-    if (block) {
-      block.classList.add('smgmt-running');
-      const hdr = block.querySelector('.smgmt-sprint-header');
-      if (hdr) {
-        hdr.classList.add('smgmt-running-header');
+    if (!block) continue;
 
-        // Insert RUNNING badge after NEXT UP badge (or sprint name)
-        const runBadge = document.createElement('span');
-        runBadge.className = 'smgmt-running-badge';
-        runBadge.textContent = 'RUNNING';
-        const nextBadge = hdr.querySelector('.smgmt-next-badge');
-        const sprintName = hdr.querySelector('.smgmt-sprint-name');
-        const insertAfter = nextBadge || sprintName;
-        if (insertAfter && insertAfter.nextSibling) {
-          hdr.insertBefore(runBadge, insertAfter.nextSibling);
-        } else {
-          hdr.appendChild(runBadge);
-        }
+    block.classList.add('smgmt-running');
+    const hdr = block.querySelector('.smgmt-sprint-header');
+    if (!hdr) continue;
 
-        // Build progress text
-        let progressText = '';
-        if (sprintStatus && sprintStatus.sprint_label === runLabel) {
-          const total = (sprintStatus.issues || []).length;
-          const done  = (sprintStatus.issues || []).filter(i =>
-            i.status === 'done' || i.status === 'skipped'
-          ).length;
-          progressText = `${done}/${total} tickets`;
-          if (done > 0 && sprintStatus.wall_clock_secs > 0) {
-            const avgSecs = sprintStatus.wall_clock_secs / done;
-            const remaining = Math.round(avgSecs * (total - done) / 60);
-            if (remaining > 0) progressText += ` · ~${remaining} min remaining`;
-          }
-        }
-        if (progressText) {
-          const progEl = document.createElement('span');
-          progEl.className = 'smgmt-progress-text';
-          progEl.textContent = progressText;
-          // Insert before the rerun button
-          const rerunBtn = hdr.querySelector('.smgmt-rerun-btn');
-          if (rerunBtn) {
-            hdr.insertBefore(progEl, rerunBtn);
-          } else {
-            hdr.appendChild(progEl);
-          }
-        }
+    hdr.classList.add('smgmt-running-header');
 
-        // Hide Run button and insert Kill button after it
-        const runBtn = document.getElementById(`smgmt-run-btn-${safeLabel}`);
-        if (runBtn) {
-          runBtn.style.display = 'none';
-          const killBtn = document.createElement('button');
-          killBtn.className = 'smgmt-kill-btn';
-          killBtn.innerHTML = '<i class="ti ti-x"></i> Kill';
-          killBtn.onclick = () => smgmtKillSprint(runLabel);
-          runBtn.parentNode.insertBefore(killBtn, runBtn.nextSibling);
-        }
+    // Insert RUNNING badge after NEXT UP badge (or sprint name)
+    const runBadge = document.createElement('span');
+    runBadge.className = 'smgmt-running-badge';
+    runBadge.textContent = 'RUNNING';
+    const nextBadge = hdr.querySelector('.smgmt-next-badge');
+    const sprintName = hdr.querySelector('.smgmt-sprint-name');
+    const insertAfter = nextBadge || sprintName;
+    if (insertAfter && insertAfter.nextSibling) {
+      hdr.insertBefore(runBadge, insertAfter.nextSibling);
+    } else {
+      hdr.appendChild(runBadge);
+    }
+
+    // Build progress text from per-sprint status map
+    let progressText = '';
+    const sprintStatus = sprintStatusMap[runLabel];
+    if (sprintStatus) {
+      const total = (sprintStatus.issues || []).length;
+      const done  = (sprintStatus.issues || []).filter(i =>
+        i.status === 'done' || i.status === 'skipped'
+      ).length;
+      progressText = `${done}/${total} tickets`;
+      if (done > 0 && sprintStatus.wall_clock_secs > 0) {
+        const avgSecs = sprintStatus.wall_clock_secs / done;
+        const remaining = Math.round(avgSecs * (total - done) / 60);
+        if (remaining > 0) progressText += ` · ~${remaining} min remaining`;
       }
+    }
+    if (progressText) {
+      const progEl = document.createElement('span');
+      progEl.className = 'smgmt-progress-text';
+      progEl.textContent = progressText;
+      // Insert before the rerun button
+      const rerunBtn = hdr.querySelector('.smgmt-rerun-btn');
+      if (rerunBtn) {
+        hdr.insertBefore(progEl, rerunBtn);
+      } else {
+        hdr.appendChild(progEl);
+      }
+    }
+
+    // Hide Run button and insert Kill button after it
+    const runBtn = document.getElementById(`smgmt-run-btn-${safeLabel}`);
+    if (runBtn) {
+      runBtn.style.display = 'none';
+      const killBtn = document.createElement('button');
+      killBtn.className = 'smgmt-kill-btn';
+      killBtn.innerHTML = '<i class="ti ti-x"></i> Kill';
+      killBtn.onclick = () => smgmtKillSprint(runLabel);
+      runBtn.parentNode.insertBefore(killBtn, runBtn.nextSibling);
     }
   }
 
-  // Handle Run buttons on non-running cards
+  // Handle Run buttons — disable only if THIS specific (project, sprint_label) is running.
+  // Other sprints (different label or different project) stay enabled.
   document.querySelectorAll('.smgmt-run-btn').forEach(btn => {
     const btnLabel = btn.id.replace('smgmt-run-btn-', '').replace(/_/g, '-');
-    if (!running) {
-      const goal = _smgmtGoals[btnLabel] || '';
-      const goalValid = goal.length >= 10;
-      btn.disabled = !goalValid;
-      btn.title = goalValid ? '' : 'Set a sprint goal first';
-      btn.textContent = 'Run sprint';
-    } else {
-      btn.disabled = true;
-      btn.title = `Sprint ${runLabel} is running for ${runProj}`;
-      btn.textContent = 'Run sprint';
+    const runKey = `${_smgmtCurrentRepo}:${btnLabel}`;
+    const isThisRunning = !!_smgmtAllRunning[runKey];
+
+    if (isThisRunning) {
+      // The Run button for this sprint is hidden (Kill is shown instead), nothing to do here.
+      return;
     }
+
+    const goal = _smgmtGoals[btnLabel] || '';
+    const goalValid = goal.length >= 10;
+    btn.disabled = !goalValid;
+    btn.title = goalValid ? '' : 'Set a sprint goal first';
+    btn.textContent = 'Run sprint';
   });
 
-  // Hide/disable rerun buttons while a sprint is running
+  // Hide/disable rerun buttons while THIS sprint is running
   document.querySelectorAll('.smgmt-rerun-btn').forEach(btn => {
-    if (running) {
+    const btnLabel = btn.id.replace('smgmt-rerun-btn-', '').replace(/_/g, '-');
+    const runKey = `${_smgmtCurrentRepo}:${btnLabel}`;
+    const isThisRunning = !!_smgmtAllRunning[runKey];
+
+    if (isThisRunning) {
       btn.style.display = 'none';
       return;
     }
     btn.style.display = '';
-    const btnLabel = btn.id.replace('smgmt-rerun-btn-', '').replace(/_/g, '-');
     const sprintTickets = (_smgmtData?.issues || []).filter(
       t => t.sprint != null && `sprint-${t.sprint}` === btnLabel
     );
     const hasCompleted = smgmtHasCompletedTickets(sprintTickets);
     btn.disabled = !hasCompleted;
     btn.title = hasCompleted ? '' : 'No completed tickets to reset';
+  });
+}
+
+// ── Per-#123: Running banner + overview badges ────────────────────────────────
+
+/**
+ * Update the "N sprints running" banner at the top of the dashboard.
+ * Shows when 2+ sprints are running simultaneously with scroll-to anchors.
+ */
+function _updateRunningBanner() {
+  let banner = document.getElementById('running-sprints-banner');
+  const entries = Object.values(_smgmtAllRunning);
+  const count = entries.length;
+
+  if (count < 2) {
+    if (banner) banner.remove();
+    return;
+  }
+
+  if (!banner) {
+    banner = document.createElement('div');
+    banner.id = 'running-sprints-banner';
+    banner.className = 'running-sprints-banner';
+    // Insert below alert banners
+    const alertBanners = document.getElementById('alert-banners');
+    if (alertBanners && alertBanners.parentNode) {
+      alertBanners.parentNode.insertBefore(banner, alertBanners.nextSibling);
+    } else {
+      document.body.insertBefore(banner, document.body.firstChild);
+    }
+  }
+
+  const links = entries.map(e => {
+    const projName = e.project.split('/')[1] || e.project;
+    const sprintN  = e.sprint_label.replace('sprint-', '');
+    return `<a class="running-sprint-anchor" href="#" onclick="drillIntoProject('${escapeHtml(e.project)}','sprint-mgmt');event.preventDefault();">${escapeHtml(projName)} S${sprintN}</a>`;
+  }).join(', ');
+
+  banner.innerHTML = `
+    <i class="ti ti-loader-2 running-banner-spin"></i>
+    <strong>${count} sprints running simultaneously:</strong> ${links}
+    <button class="running-banner-dismiss" onclick="this.parentElement.remove()" title="Dismiss">&#x2715;</button>
+  `;
+}
+
+/**
+ * Update RUNNING badges on project cards in the Overview tab.
+ * A project card gets a RUNNING badge when ANY sprint for that project is active.
+ */
+function _updateOverviewRunningBadges() {
+  // Build a set of projects that have at least one running sprint
+  const runningProjects = new Set(Object.values(_smgmtAllRunning).map(e => e.project));
+
+  // Update each project row's name column
+  document.querySelectorAll('.project-row[data-repo]').forEach(row => {
+    const repo = row.getAttribute('data-repo');
+    const nameCol = row.querySelector('.proj-col-name');
+    if (!nameCol) return;
+
+    // Remove existing running badge
+    nameCol.querySelectorAll('.proj-running-badge').forEach(el => el.remove());
+
+    if (runningProjects.has(repo)) {
+      const badge = document.createElement('span');
+      badge.className = 'proj-running-badge';
+      badge.textContent = 'RUNNING';
+      nameCol.appendChild(badge);
+    }
   });
 }
 
@@ -3189,8 +3310,12 @@ async function smgmtKillConfirm() {
     );
     if (!res.ok) throw new Error(await res.text());
     smgmtKillClose();
-    _smgmtRunningInfo = { running: false, project: null, sprint_label: null };
+    // Per-#123: only remove this specific sprint from the running map; others continue.
+    const killedKey = `${_smgmtCurrentRepo}:${_smgmtKillLabel}`;
+    delete _smgmtAllRunning[killedKey];
     smgmtApplyRunState(null);
+    _updateRunningBanner();
+    _updateOverviewRunningBadges();
     showSuccessToast('Sprint killed. Run button restored.');
     await smgmtSelectProject(_smgmtCurrentRepo);
   } catch (e) {
@@ -3717,6 +3842,13 @@ function showErrorToast(msg) {
   loadPlanUsage().catch(() => {});
   loadAlerts().catch(() => {});
   loadSprintStatus().catch(() => {});
+
+  // Per-#123: Global poll for all running sprints every 4 seconds.
+  // This drives overview RUNNING badges and the multi-sprint banner
+  // independently of which tab is currently active.
+  smgmtPollRunStatus().catch(() => {});
+  setInterval(() => smgmtPollRunStatus().catch(() => {}), 4000);
+
   connectSSE();
   document.getElementById('btn-refresh')?.addEventListener('click', manualRefresh);
   document.addEventListener('keydown', e => {

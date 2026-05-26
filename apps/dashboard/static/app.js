@@ -2403,6 +2403,8 @@ function smgmtSprintBlockHtml(label, tickets, isNext) {
   const savedGoal   = _smgmtGoals[label] || '';
   const goalValid   = savedGoal.length >= 10;
   const hasCompleted = smgmtHasCompletedTickets(tickets);
+  // Run button shows on every sprint with >= 1 ticket and a valid sprint goal
+  const canRun = tickets.length >= 1 && goalValid;
 
   const ticketsHtml = tickets.length > 0
     ? tickets.map(t => smgmtTicketCardHtml(t, label)).join('')
@@ -2426,12 +2428,10 @@ function smgmtSprintBlockHtml(label, tickets, isNext) {
                 ${hasCompleted ? '' : 'disabled'}
                 onclick="smgmtRerunSprint('${label}')">
           <i class="ti ti-refresh"></i> Rerun sprint</button>
-        ${isNext
-          ? `<button class="smgmt-run-btn" id="${runBtnId}"
-                     title="${goalValid ? '' : 'Set a sprint goal first'}"
-                     ${goalValid ? '' : 'disabled'}
-                     onclick="smgmtRunSprint('${label}')">Run sprint</button>`
-          : ''}
+        <button class="smgmt-run-btn" id="${runBtnId}"
+                title="${goalValid ? (tickets.length >= 1 ? '' : 'Add at least one ticket first') : 'Set a sprint goal first'}"
+                ${canRun ? '' : 'disabled'}
+                onclick="smgmtRunSprint('${label}')">Run sprint</button>
       </div>
       <div class="smgmt-sprint-goal-row">
         <input class="smgmt-goal-input" id="${goalId}" type="text"
@@ -2615,9 +2615,14 @@ function smgmtGoalInput(label, value) {
   const runBtnId = `smgmt-run-btn-${label.replace('-', '_')}`;
   const btn = document.getElementById(runBtnId);
   if (btn) {
-    const valid = value.length >= 10;
-    btn.disabled = !valid;
-    btn.title = valid ? '' : 'Set a sprint goal first';
+    const goalValid = value.length >= 10;
+    const sprintTickets = (_smgmtData?.issues || []).filter(
+      t => t.sprint != null && `sprint-${t.sprint}` === label
+    );
+    const hasTickets = sprintTickets.length >= 1;
+    const canRun = goalValid && hasTickets;
+    btn.disabled = !canRun;
+    btn.title = goalValid ? (hasTickets ? '' : 'Add at least one ticket first') : 'Set a sprint goal first';
   }
   if (_smgmtGoalSaveTimers[label]) clearTimeout(_smgmtGoalSaveTimers[label]);
   _smgmtGoalSaveTimers[label] = setTimeout(() => smgmtSaveGoal(label, value), 800);
@@ -2863,6 +2868,9 @@ async function smgmtReorderSprints(fromLabel, toLabel) {
 
 // ── Run sprint ────────────────────────────────────────────────────────────────
 
+let _smgmtMigrateTargetLabel = null;  // sprint label we are about to run
+let _smgmtMigrateChoices     = {};    // sprint_num (int) -> 'move' | 'leave'
+
 async function smgmtRunSprint(sprintLabel) {
   if (!_smgmtCurrentRepo) return;
   const goal = _smgmtGoals[sprintLabel] || '';
@@ -2870,6 +2878,116 @@ async function smgmtRunSprint(sprintLabel) {
     smgmtShowError('Set a sprint goal (at least 10 characters) before running.');
     return;
   }
+
+  // Determine target sprint number
+  const targetNum = parseInt(sprintLabel.split('-')[1], 10);
+
+  // Find earlier sprints with open (non-done) tickets
+  const allIssues = _smgmtData?.issues || [];
+  const earlierWithTickets = [];  // [ { sprintNum, sprintLabel, tickets: [] } ]
+
+  const { order } = _smgmtData || {};
+  if (order) {
+    for (const lbl of order) {
+      const n = parseInt(lbl.split('-')[1], 10);
+      if (isNaN(n) || n >= targetNum) continue;
+      const tickets = allIssues.filter(t => t.sprint === n && t.status !== 'done');
+      if (tickets.length > 0) {
+        earlierWithTickets.push({ sprintNum: n, sprintLabel: lbl, tickets });
+      }
+    }
+  }
+
+  if (earlierWithTickets.length === 0) {
+    // No migration needed — dispatch directly
+    await smgmtDispatchRun(sprintLabel, []);
+    return;
+  }
+
+  // Show migration modal
+  smgmtMigrateOpen(sprintLabel, earlierWithTickets);
+}
+
+function smgmtMigrateOpen(targetLabel, earlierSprints) {
+  _smgmtMigrateTargetLabel = targetLabel;
+  _smgmtMigrateChoices = {};
+
+  const targetNum = parseInt(targetLabel.split('-')[1], 10);
+  document.getElementById('smgmt-migrate-title').textContent = `Run Sprint ${targetNum}?`;
+
+  const bodyEl = document.getElementById('smgmt-migrate-body');
+  let html = '';
+  for (const { sprintNum, sprintLabel, tickets } of earlierSprints) {
+    const ticketListHtml = tickets.map(t => {
+      const status = t.status || 'backlog';
+      return `<li class="smgmt-migrate-ticket-item">
+        <span class="smgmt-migrate-ticket-num">#${t.number}</span>
+        <span class="smgmt-migrate-ticket-title" title="${escapeHtml(t.title)}">${escapeHtml(t.title)}</span>
+        <span class="smgmt-migrate-ticket-status">${escapeHtml(status)}</span>
+      </li>`;
+    }).join('');
+
+    html += `<div class="smgmt-migrate-sprint-section">
+      <div class="smgmt-migrate-sprint-heading">Sprint ${sprintNum} — ${tickets.length} open ticket${tickets.length !== 1 ? 's' : ''}</div>
+      <ul class="smgmt-migrate-ticket-list">${ticketListHtml}</ul>
+      <div class="smgmt-migrate-radios">
+        <label class="smgmt-migrate-radio-label">
+          <input type="radio" name="migrate-sprint-${sprintNum}" value="move"
+                 checked onchange="smgmtMigrateChoice(${sprintNum}, 'move')">
+          Move all tickets to Sprint ${targetNum}
+        </label>
+        <label class="smgmt-migrate-radio-label">
+          <input type="radio" name="migrate-sprint-${sprintNum}" value="leave"
+                 onchange="smgmtMigrateChoice(${sprintNum}, 'leave')">
+          Leave in Sprint ${sprintNum}
+        </label>
+      </div>
+    </div>`;
+
+    // Default choice is 'move'
+    _smgmtMigrateChoices[sprintNum] = 'move';
+  }
+  bodyEl.innerHTML = html;
+
+  smgmtMigrateUpdateConfirmBtn();
+
+  document.getElementById('smgmt-migrate-backdrop').classList.remove('hidden');
+  document.getElementById('smgmt-migrate-modal').classList.remove('hidden');
+  document.getElementById('smgmt-migrate-modal').focus();
+}
+
+function smgmtMigrateChoice(sprintNum, choice) {
+  _smgmtMigrateChoices[sprintNum] = choice;
+  smgmtMigrateUpdateConfirmBtn();
+}
+
+function smgmtMigrateUpdateConfirmBtn() {
+  const confirmBtn = document.getElementById('smgmt-migrate-confirm');
+  if (!confirmBtn) return;
+  // All sprint groups must have a selection (they default to 'move', so always valid after open)
+  const allChosen = Object.values(_smgmtMigrateChoices).every(v => v === 'move' || v === 'leave');
+  confirmBtn.disabled = !allChosen;
+}
+
+function smgmtMigrateClose() {
+  document.getElementById('smgmt-migrate-backdrop').classList.add('hidden');
+  document.getElementById('smgmt-migrate-modal').classList.add('hidden');
+  _smgmtMigrateTargetLabel = null;
+  _smgmtMigrateChoices = {};
+}
+
+async function smgmtMigrateConfirm() {
+  if (!_smgmtMigrateTargetLabel) return;
+  const migrateFrom = Object.entries(_smgmtMigrateChoices)
+    .filter(([, choice]) => choice === 'move')
+    .map(([sprintNum]) => parseInt(sprintNum, 10));
+
+  const targetLabel = _smgmtMigrateTargetLabel;
+  smgmtMigrateClose();
+  await smgmtDispatchRun(targetLabel, migrateFrom);
+}
+
+async function smgmtDispatchRun(sprintLabel, migrateFrom) {
   const runBtnId = `smgmt-run-btn-${sprintLabel.replace('-', '_')}`;
   const btn = document.getElementById(runBtnId);
   if (btn) { btn.disabled = true; btn.textContent = 'Starting…'; }
@@ -2878,15 +2996,26 @@ async function smgmtRunSprint(sprintLabel) {
     const res = await fetch('/api/sprints/run', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ project: _smgmtCurrentRepo, sprint_label: sprintLabel }),
+      body: JSON.stringify({ project: _smgmtCurrentRepo, sprint_label: sprintLabel, migrate_from: migrateFrom }),
     });
     if (!res.ok) throw new Error(await res.text());
+    const data = await res.json();
+
+    if (data.migrated_count > 0) {
+      const fromNums = (data.migrate_from || []).join(', ');
+      showSuccessToast(`Migrated ${data.migrated_count} ticket${data.migrated_count !== 1 ? 's' : ''} from Sprint ${fromNums} to Sprint ${sprintLabel.split('-')[1]}. Dispatching sprint…`);
+    }
+
     smgmtPollRunStatus();
   } catch (e) {
     smgmtShowError('Failed to start sprint: ' + e.message);
     if (btn) {
+      const sprintTickets = (_smgmtData?.issues || []).filter(
+        t => t.sprint != null && `sprint-${t.sprint}` === sprintLabel
+      );
       const goalValid = ((_smgmtGoals[sprintLabel] || '').length >= 10);
-      btn.disabled = !goalValid;
+      const canRun = goalValid && sprintTickets.length >= 1;
+      btn.disabled = !canRun;
       btn.textContent = 'Run sprint';
     }
   }
@@ -2996,8 +3125,13 @@ function smgmtApplyRunState(sprintStatus) {
     if (!running) {
       const goal = _smgmtGoals[btnLabel] || '';
       const goalValid = goal.length >= 10;
-      btn.disabled = !goalValid;
-      btn.title = goalValid ? '' : 'Set a sprint goal first';
+      const sprintTickets = (_smgmtData?.issues || []).filter(
+        t => t.sprint != null && `sprint-${t.sprint}` === btnLabel
+      );
+      const hasTickets = sprintTickets.length >= 1;
+      const canRun = goalValid && hasTickets;
+      btn.disabled = !canRun;
+      btn.title = goalValid ? (hasTickets ? '' : 'Add at least one ticket first') : 'Set a sprint goal first';
       btn.textContent = 'Run sprint';
     } else {
       btn.disabled = true;
@@ -3334,5 +3468,21 @@ async function confirmRemoveProject() {
   document.getElementById('btn-refresh')?.addEventListener('click', manualRefresh);
   document.addEventListener('keydown', e => {
     if (e.key === 'Escape' && _rpRepo !== null) closeRemoveProjectDialog();
+  });
+
+  // Migration modal keyboard shortcuts
+  document.addEventListener('keydown', e => {
+    const modal = document.getElementById('smgmt-migrate-modal');
+    if (!modal || modal.classList.contains('hidden')) return;
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      smgmtMigrateClose();
+    } else if (e.key === 'Enter') {
+      const confirmBtn = document.getElementById('smgmt-migrate-confirm');
+      if (confirmBtn && !confirmBtn.disabled) {
+        e.preventDefault();
+        smgmtMigrateConfirm();
+      }
+    }
   });
 })();

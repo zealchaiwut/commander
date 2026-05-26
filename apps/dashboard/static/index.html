@@ -1109,6 +1109,20 @@
   </div>
 </div>
 
+<!-- Sprint migration modal (shown before dispatch when earlier sprints have open tickets) -->
+<div class="modal-backdrop hidden" id="smgmt-migrate-backdrop" onclick="smgmtMigrateClose()"></div>
+<div class="modal hidden" id="smgmt-migrate-modal" role="dialog" aria-modal="true">
+  <div class="modal-header">
+    <span class="modal-title" id="smgmt-migrate-title">Run Sprint?</span>
+    <button class="modal-close" onclick="smgmtMigrateClose()" aria-label="Close">&times;</button>
+  </div>
+  <div class="smgmt-migrate-body" id="smgmt-migrate-body"></div>
+  <div class="modal-footer">
+    <button class="btn-ghost" onclick="smgmtMigrateClose()">Cancel</button>
+    <button class="btn-primary" id="smgmt-migrate-confirm" onclick="smgmtMigrateConfirm()">Run sprint</button>
+  </div>
+</div>
+
 <!-- Plan Sprint confirmation dialog -->
 <div class="modal-backdrop hidden" id="psp-dialog-backdrop" onclick="pspCloseDialog()"></div>
 <div class="modal hidden" id="psp-dialog" role="dialog" aria-modal="true">
@@ -1449,6 +1463,22 @@
   .smgmt-rerun-num { font-weight: 700; color: var(--text-sub); font-size: 12px; flex-shrink: 0; }
   .smgmt-rerun-title-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .smgmt-rerun-labels { font-size: 11px; color: var(--text-muted); flex-shrink: 0; }
+
+  /* Migration modal body */
+  .smgmt-migrate-body { padding: 12px 24px 4px; font-size: 13px; max-height: 400px; overflow-y: auto; }
+  .smgmt-migrate-sprint-section { margin-bottom: 16px; }
+  .smgmt-migrate-sprint-section:last-child { margin-bottom: 0; }
+  .smgmt-migrate-sprint-heading { font-weight: 700; font-size: 13px; margin-bottom: 6px; color: var(--text-main); }
+  .smgmt-migrate-ticket-list { list-style: none; margin: 0 0 8px 0; padding: 0; }
+  .smgmt-migrate-ticket-item { display: flex; align-items: baseline; gap: 6px; padding: 3px 0;
+    border-bottom: 1px solid var(--border); font-size: 12px; }
+  .smgmt-migrate-ticket-item:last-child { border-bottom: none; }
+  .smgmt-migrate-ticket-num { font-weight: 700; color: var(--text-sub); flex-shrink: 0; }
+  .smgmt-migrate-ticket-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .smgmt-migrate-ticket-status { font-size: 11px; color: var(--text-muted); flex-shrink: 0; }
+  .smgmt-migrate-radios { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 6px; }
+  .smgmt-migrate-radio-label { display: flex; align-items: center; gap: 5px; cursor: pointer; font-size: 12px; color: var(--text-main); }
+  .smgmt-migrate-radio-label input[type="radio"] { cursor: pointer; }
 
   /* Ticket cards in a sprint */
   .smgmt-sprint-tickets {

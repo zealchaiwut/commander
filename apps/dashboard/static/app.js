@@ -1559,9 +1559,10 @@ async function loadSprintStatus() {
   // We still fetch and cache sprint state for SSE compatibility.
   try {
     const res = await fetch('/api/sprint-status');
-    if (res.status === 404) return;
     if (!res.ok) return;
-    _sprintState = await res.json();
+    const data = await res.json();
+    if (!data.active) return;
+    _sprintState = data;
   } catch { /* silent */ }
 }
 
@@ -2901,7 +2902,10 @@ async function smgmtPollRunStatus() {
       _smgmtRunningInfo = await runRes.json();
     }
     let sprintStatus = null;
-    if (statusRes.ok) sprintStatus = await statusRes.json();
+    if (statusRes.ok) {
+      const statusData = await statusRes.json();
+      if (statusData.active) sprintStatus = statusData;
+    }
     smgmtApplyRunState(sprintStatus);
   } catch { /* ignore poll errors */ }
 }

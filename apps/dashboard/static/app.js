@@ -6,6 +6,10 @@ let detailsCache     = {};        // repo → detail data
 let testReportCache  = {};        // `${repo}#${issueNum}` → report data
 let doneAgentsVisible = {};       // repo → bool (toggle state for DONE agents, AC-2d)
 
+// ── Router state ──────────────────────────────────────────────────────────────
+let _activeProject    = null;   // "owner/repo" when in project view
+let _activeProjectTab = 'tickets'; // 'tickets' | 'sprint-mgmt' | 'sprint-history'
+
 // ── Agent name parser ────────────────────────────────────────────────────────
 // New format: "role·repo·branch·#short"   (4 parts, · separator)
 // Old format: plain basename              (graceful fallback)
@@ -72,18 +76,252 @@ function _syncThemeIcon(theme) {
 
 // ── Tab navigation ────────────────────────────────────────────────────────────
 function switchMain(tab) {
-  ['projects', 'agents', 'activity', 'history', 'sprint-plan', 'sprint-mgmt'].forEach(t => {
-    const viewId = t === 'sprint-plan' ? 'view-sprint-plan' : `view-${t}`;
-    const tabId  = `mtab-${t}`;
-    document.getElementById(viewId)?.classList.toggle('hidden', t !== tab);
-    document.getElementById(tabId)?.classList.toggle('active', t === tab);
+  // Hide project view when switching to a global tab
+  document.getElementById('view-project')?.classList.add('hidden');
+  document.getElementById('global-nav')?.classList.remove('hidden');
+
+  ['overview', 'agents', 'activity'].forEach(t => {
+    document.getElementById(`view-${t}`)?.classList.toggle('hidden', t !== tab);
+    document.getElementById(`mtab-${t}`)?.classList.toggle('active', t === tab);
   });
-  if (tab === 'agents')       fetchAgents();
-  if (tab === 'activity')     fetchEvents();
-  if (tab === 'history')      loadSprintHistory().catch(() => {});
-  if (tab === 'sprint-plan')  loadSprintPlanning();
-  if (tab === 'sprint-mgmt')  smgmtInit();
+
+  if (tab === 'agents')   fetchAgents();
+  if (tab === 'activity') fetchEvents();
+
+  if (tab === 'overview') {
+    history.pushState({ view: 'overview' }, '', '/');
+  }
 }
+
+// ── Project-scoped navigation ─────────────────────────────────────────────────
+function navigateToOverview() {
+  history.pushState({ view: 'overview' }, '', '/');
+  _showOverview();
+}
+
+function _showOverview() {
+  _activeProject = null;
+  document.getElementById('view-project')?.classList.add('hidden');
+  document.getElementById('view-overview')?.classList.remove('hidden');
+  document.getElementById('view-agents')?.classList.add('hidden');
+  document.getElementById('view-activity')?.classList.add('hidden');
+
+  ['overview', 'agents', 'activity'].forEach(t => {
+    document.getElementById(`mtab-${t}`)?.classList.toggle('active', t === 'overview');
+  });
+}
+
+function drillIntoProject(repo, tab) {
+  tab = tab || 'tickets';
+  _activeProject = repo;
+  _activeProjectTab = tab;
+
+  const encoded = encodeURIComponent(repo);
+  history.pushState({ view: 'project', repo, tab }, '', `/projects/${encoded}/${tab}`);
+  _renderProjectView(repo, tab);
+}
+
+function switchProject(repo) {
+  if (!repo) return;
+  drillIntoProject(repo, _activeProjectTab);
+}
+
+function switchProjectTab(tab) {
+  _activeProjectTab = tab;
+  const encoded = encodeURIComponent(_activeProject);
+  history.pushState({ view: 'project', repo: _activeProject, tab }, '', `/projects/${encoded}/${tab}`);
+  _activateProjectTab(tab);
+}
+
+function _renderProjectView(repo, tab) {
+  if (!repo) return;
+
+  // Hide all global views
+  ['overview', 'agents', 'activity'].forEach(t => {
+    document.getElementById(`view-${t}`)?.classList.add('hidden');
+    document.getElementById(`mtab-${t}`)?.classList.remove('active');
+  });
+
+  // Show project view
+  document.getElementById('view-project')?.classList.remove('hidden');
+
+  // Update project header
+  _updateProjectHeader(repo);
+
+  // Activate the right tab
+  _activateProjectTab(tab);
+}
+
+function _updateProjectHeader(repo) {
+  const proj = allProjects.find(p => p.repo === repo);
+  const name = proj?.name || repo.split('/')[1] || repo;
+
+  // Breadcrumb
+  document.getElementById('pvh-proj-name').textContent = name;
+
+  // Icon
+  const iconEl = document.getElementById('pvh-icon');
+  if (iconEl && proj) {
+    iconEl.style.background = proj.color || '#6b7280';
+    iconEl.innerHTML = `<i class="ti ${escapeHtml(proj.icon || 'ti-folder')}"></i>`;
+  }
+
+  // Title & sprint
+  document.getElementById('pvh-title').textContent = name;
+  const sprintEl = document.getElementById('pvh-sprint');
+  if (sprintEl) {
+    sprintEl.textContent = proj?.current_sprint
+      ? `Sprint ${proj.current_sprint}${proj.sprint_theme ? ' · ' + proj.sprint_theme : ''}`
+      : '';
+  }
+
+  // Project picker
+  const picker = document.getElementById('proj-picker');
+  if (picker && allProjects.length > 0) {
+    picker.innerHTML = allProjects.map(p =>
+      `<option value="${escapeHtml(p.repo)}" ${p.repo === repo ? 'selected' : ''}>${escapeHtml(p.name)}</option>`
+    ).join('');
+  }
+}
+
+function _activateProjectTab(tab) {
+  ['tickets', 'sprint-mgmt', 'sprint-history'].forEach(t => {
+    document.getElementById(`pview-${t}`)?.classList.toggle('hidden', t !== tab);
+    document.getElementById(`ptab-${t}`)?.classList.toggle('active', t === tab);
+  });
+
+  if (tab === 'tickets')        _loadProjectTickets(_activeProject);
+  if (tab === 'sprint-mgmt')    smgmtInitForProject(_activeProject);
+  if (tab === 'sprint-history') loadSprintHistory().catch(() => {});
+}
+
+function _loadProjectTickets(repo) {
+  const container = document.getElementById('pview-tickets-content');
+  if (!container) return;
+  if (!repo) { container.innerHTML = '<div class="empty">No project selected.</div>'; return; }
+
+  if (detailsCache[repo]) {
+    _renderProjectTickets(repo, detailsCache[repo]);
+    return;
+  }
+  container.innerHTML = '<div class="empty">Loading…</div>';
+  fetch(`/api/project-details?repo=${encodeURIComponent(repo)}`)
+    .then(r => r.ok ? r.json() : Promise.reject(r))
+    .then(data => {
+      detailsCache[repo] = data;
+      _renderProjectTickets(repo, data);
+    })
+    .catch(() => {
+      container.innerHTML = '<div class="empty">Failed to load tickets.</div>';
+    });
+}
+
+function _renderProjectTickets(repo, data) {
+  const container = document.getElementById('pview-tickets-content');
+  if (!container) return;
+
+  const tickets = data.tickets || [];
+  const agents  = data.agents  || [];
+  const ghUrl   = data.github_url || `https://github.com/${repo}/issues`;
+
+  // Tickets column
+  let ticketsHtml;
+  if (tickets.length === 0) {
+    ticketsHtml = '<div class="empty-small">No open tickets</div>';
+  } else {
+    const sitT    = tickets.filter(t => t.status === 'SIT');
+    const uatT    = tickets.filter(t => t.status === 'UAT');
+    const activeT = tickets.filter(t => t.status === 'in-progress' || t.status === 'blocked');
+    const backlogT = tickets.filter(t => t.status === 'backlog');
+    ticketsHtml = [
+      _ticketGroupHtml('SIT',         sitT,     repo),
+      _ticketGroupHtml('UAT',         uatT,     repo),
+      _ticketGroupHtml('In progress', activeT,  repo),
+      _ticketGroupHtml('Backlog',     backlogT, repo),
+    ].join('');
+  }
+
+  // Agents column
+  const projData     = allProjects.find(p => p.repo === repo) || null;
+  const miniSprint   = _miniSprintSummaryHtml(projData);
+  const workingAgents = agents.filter(a => a.status === 'working');
+  const doneAgents    = agents.filter(a => a.status === 'done');
+  const showDone      = !!doneAgentsVisible[repo];
+  const id            = _projId(repo);
+
+  const doneToggleStyle = doneAgents.length > 0 ? 'cursor:pointer;text-decoration:underline dotted;' : '';
+  const doneLabel = `<span id="done-toggle-${id}" style="${doneToggleStyle}"
+    onclick="${doneAgents.length > 0 ? `toggleDoneAgents('${id}','${escapeHtml(repo)}')` : ''}">
+    done (${doneAgents.length})</span>`;
+
+  let agentsHtml = '';
+  if (workingAgents.length === 0 && !showDone) {
+    agentsHtml = '<div class="empty-small">No active agents</div>';
+  } else {
+    agentsHtml = workingAgents.map(agentDetailCardHtml).join('');
+  }
+  if (showDone && doneAgents.length > 0) {
+    agentsHtml += doneAgents.map(agentDetailCardHtml).join('');
+  }
+
+  const tokLine = data.tokens_today > 0
+    ? `<div class="agent-detail-meta" style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border)">Tokens today: ${data.tokens_today.toLocaleString()}${data.cost_today_usd != null ? ` · ~$${data.cost_today_usd.toFixed(2)}` : ''}</div>`
+    : '';
+
+  container.innerHTML = `
+    <div class="pview-tickets-main">
+      ${miniSprint}
+      <div class="expand-hdr">
+        <span class="expand-hdr-title">Active tickets</span>
+        <a class="view-all" href="${escapeHtml(ghUrl)}" target="_blank" rel="noopener">View all →</a>
+      </div>
+      ${ticketsHtml}
+    </div>
+    <div class="pview-tickets-aside">
+      <div class="expand-hdr">
+        <span class="expand-hdr-title">AGENTS · working (${workingAgents.length}) · ${doneLabel}</span>
+      </div>
+      ${agentsHtml}
+      ${tokLine}
+    </div>`;
+
+  // Load test reports for UAT tickets
+  tickets.filter(t => t.is_uat).forEach(t => loadTestReport(t.number, repo));
+}
+
+// ── URL Router ────────────────────────────────────────────────────────────────
+function _route() {
+  const path = window.location.pathname;
+
+  // Match /projects/<encoded-repo>/<tab>
+  const m = path.match(/^\/projects\/([^/]+)\/?(tickets|sprint-mgmt|sprint-history)?$/);
+  if (m) {
+    const repo = decodeURIComponent(m[1]);
+    const tab  = m[2] || 'tickets';
+    _activeProject    = repo;
+    _activeProjectTab = tab;
+    // If projects not yet loaded, defer render until after load
+    if (allProjects.length > 0) {
+      _renderProjectView(repo, tab);
+    }
+    // else _route() will be called again after loadProjects resolves
+    return;
+  }
+
+  // Default: overview
+  _showOverview();
+}
+
+window.addEventListener('popstate', e => {
+  const s = e.state;
+  if (s?.view === 'project') {
+    _activeProject    = s.repo;
+    _activeProjectTab = s.tab || 'tickets';
+    _renderProjectView(s.repo, s.tab || 'tickets');
+  } else {
+    _showOverview();
+  }
+});
 
 // ── Filter ────────────────────────────────────────────────────────────────────
 function setFilter(filter) {
@@ -203,12 +441,13 @@ function projectRowHtml(proj) {
       </span>
     </div>`;
 
-  // use data attributes to avoid quoting issues in onclick
+  // clicking navigates to project-scoped view
   return `
     <div class="project-block" id="proj-block-${id}">
       <div class="project-row" id="proj-row-${id}"
            data-repo="${escapeHtml(proj.repo)}" data-id="${id}"
-           onclick="toggleProject(this.dataset.id, this.dataset.repo)">
+           onclick="toggleProject(this.dataset.id, this.dataset.repo)"
+           title="Open ${escapeHtml(proj.name)}">
         <div class="proj-col-name">
           <div class="proj-icon" style="background:${colorHex}">
             <i class="ti ${escapeHtml(proj.icon || 'ti-folder')}"></i>
@@ -224,18 +463,19 @@ function projectRowHtml(proj) {
           ${chipsHtml}
           ${agentPillsHtml(proj.agents)}
         </div>
-        <div class="proj-col-chevron"><i class="ti ti-chevron-down chevron-icon"></i></div>
-      </div>
-      <div class="proj-expand hidden" id="proj-expand-${id}">
-        <div class="expand-inner" id="proj-detail-${id}">
-          <div class="expand-loading">Loading…</div>
-        </div>
+        <div class="proj-col-chevron"><i class="ti ti-chevron-right chevron-icon"></i></div>
       </div>
     </div>`;
 }
 
 function renderProjects(projects) {
   allProjects = projects;
+
+  // Refresh project header & picker if currently in project view
+  if (_activeProject) {
+    _updateProjectHeader(_activeProject);
+  }
+
   const container = document.getElementById('project-list');
 
   let filtered = projects;
@@ -251,43 +491,11 @@ function renderProjects(projects) {
   }
 
   container.innerHTML = filtered.map(projectRowHtml).join('');
-
-  // re-expand panels that were open before the re-render
-  expandedProjects.forEach(repo => {
-    const id    = _projId(repo);
-    const row   = document.getElementById(`proj-row-${id}`);
-    const panel = document.getElementById(`proj-expand-${id}`);
-    if (!row || !panel) return;
-    row.classList.add('expanded');
-    panel.classList.remove('hidden');
-    if (detailsCache[repo]) {
-      renderExpandPanel(id, detailsCache[repo], repo);
-    } else {
-      loadProjectDetails(id, repo);
-    }
-  });
 }
 
-// ── Expand / collapse ─────────────────────────────────────────────────────────
+// ── Expand / collapse → navigate to project view ──────────────────────────────
 function toggleProject(id, repo) {
-  const row   = document.getElementById(`proj-row-${id}`);
-  const panel = document.getElementById(`proj-expand-${id}`);
-  if (!row || !panel) return;
-
-  if (row.classList.contains('expanded')) {
-    row.classList.remove('expanded');
-    panel.classList.add('hidden');
-    expandedProjects.delete(repo);
-  } else {
-    row.classList.add('expanded');
-    panel.classList.remove('hidden');
-    expandedProjects.add(repo);
-    if (detailsCache[repo]) {
-      renderExpandPanel(id, detailsCache[repo], repo);
-    } else {
-      loadProjectDetails(id, repo);
-    }
-  }
+  drillIntoProject(repo, 'tickets');
 }
 
 async function loadProjectDetails(id, repo) {
@@ -520,8 +728,8 @@ function renderExpandPanel(id, data, repo) {
 // AC-2c: toggle done agents visibility per project
 function toggleDoneAgents(id, repo) {
   doneAgentsVisible[repo] = !doneAgentsVisible[repo];
-  if (detailsCache[repo]) {
-    renderExpandPanel(id, detailsCache[repo], repo);
+  if (detailsCache[repo] && _activeProject === repo) {
+    _renderProjectTickets(repo, detailsCache[repo]);
   }
 }
 
@@ -743,10 +951,11 @@ async function submitRejectInline(issueNum, repo) {
 }
 
 function _refreshAfterAction(repo) {
-  // clear both caches so next expand fetches fresh data
   delete detailsCache[repo];
   Object.keys(testReportCache).forEach(k => { if (k.startsWith(`${repo}#`)) delete testReportCache[k]; });
-  loadProjectDetails(_projId(repo), repo);
+  if (_activeProject === repo && _activeProjectTab === 'tickets') {
+    _loadProjectTickets(repo);
+  }
   loadProjects().catch(() => {});
 }
 
@@ -882,16 +1091,23 @@ function connectSSE() {
       }
 
       if (msg.type !== 'update') return;
-      if (!document.getElementById('view-projects').classList.contains('hidden')) {
+      const projectView  = document.getElementById('view-project');
+      const overviewView = document.getElementById('view-overview');
+      const isOverview   = overviewView && !overviewView.classList.contains('hidden');
+      const isProject    = projectView  && !projectView.classList.contains('hidden');
+
+      if (isOverview) {
         loadProjects().catch(() => {});
-        // AC-1d: when cache refreshes, also refresh details for expanded projects
-        expandedProjects.forEach(repo => {
-          delete detailsCache[repo];
-          loadProjectDetails(_projId(repo), repo);
-        });
+      }
+      if (isProject && _activeProject) {
+        delete detailsCache[_activeProject];
+        if (_activeProjectTab === 'tickets') {
+          _loadProjectTickets(_activeProject);
+        }
+        loadProjects().catch(() => {}); // keep header/picker in sync
       }
       if (!document.getElementById('view-agents').classList.contains('hidden')) fetchAgents();
-      if (!document.getElementById('view-history')?.classList.contains('hidden')) {
+      if (isProject && _activeProjectTab === 'sprint-history') {
         loadSprintHistory().catch(() => {});
       }
       if (msg.event && msg.event.event_type === 'sprint_plan_update') _handleSprintPlanSSE();
@@ -1252,8 +1468,11 @@ async function manualRefresh() {
   hideToast();
   try {
     const tasks = [loadProjects(), loadPlanUsage()];
-    if (!document.getElementById('view-history')?.classList.contains('hidden')) {
-      tasks.push(loadSprintHistory());
+    const isHistory = !document.getElementById('pview-sprint-history')?.classList.contains('hidden');
+    if (isHistory) tasks.push(loadSprintHistory());
+    if (_activeProject && _activeProjectTab === 'tickets') {
+      delete detailsCache[_activeProject];
+      tasks.push(Promise.resolve().then(() => _loadProjectTickets(_activeProject)));
     }
     await Promise.all(tasks);
   } catch {
@@ -1352,11 +1571,14 @@ function retrySkipped() {
 
 // ── Periodic refresh ──────────────────────────────────────────────────────────
 setInterval(() => {
-  if (!document.getElementById('view-projects').classList.contains('hidden')) {
+  const overviewVisible = !document.getElementById('view-overview')?.classList.contains('hidden');
+  const projectVisible  = !document.getElementById('view-project')?.classList.contains('hidden');
+
+  if (overviewVisible || projectVisible) {
     loadProjects().catch(() => {});
     loadPlanUsage().catch(() => {});
   }
-  if (!document.getElementById('view-history')?.classList.contains('hidden')) {
+  if (projectVisible && _activeProjectTab === 'sprint-history') {
     loadSprintHistory().catch(() => {});
   }
 }, 60_000);
@@ -2027,38 +2249,31 @@ let _smgmtRunningInfo  = null;   // { running, project, sprint_label } from /api
 let _smgmtPollTimer    = null;
 
 async function smgmtInit() {
-  // Populate project selector from already-loaded allProjects list
-  const sel = document.getElementById('smgmt-project-select');
-  if (!sel) return;
+  // Legacy: called with no repo; use current project or first project
+  const repo = _activeProject || _smgmtCurrentRepo || (allProjects[0]?.repo) || null;
+  await smgmtInitForProject(repo);
+}
 
-  if (allProjects.length > 0) {
-    sel.innerHTML = allProjects.map(p =>
-      `<option value="${escapeHtml(p.repo)}">${escapeHtml(p.name)}</option>`
-    ).join('');
-    const repo = _smgmtCurrentRepo || allProjects[0].repo;
-    sel.value = repo;
-    await smgmtSelectProject(repo);
-  } else {
-    // Fetch projects if not yet loaded
+async function smgmtInitForProject(repo) {
+  if (!repo) {
+    document.getElementById('smgmt-loading').textContent = 'No project selected.';
+    return;
+  }
+  _smgmtCurrentRepo = repo;
+  smgmtShowError('');
+
+  if (allProjects.length === 0) {
     try {
       const res = await fetch('/api/projects');
       if (!res.ok) throw new Error('Failed to load projects');
       const data = await res.json();
       allProjects = data.projects || [];
-      sel.innerHTML = allProjects.map(p =>
-        `<option value="${escapeHtml(p.repo)}">${escapeHtml(p.name)}</option>`
-      ).join('');
-      if (allProjects.length > 0) {
-        const repo = _smgmtCurrentRepo || allProjects[0].repo;
-        sel.value = repo;
-        await smgmtSelectProject(repo);
-      } else {
-        document.getElementById('smgmt-loading').textContent = 'No projects configured.';
-      }
     } catch (e) {
       smgmtShowError('Failed to load projects: ' + e.message);
     }
   }
+
+  await smgmtSelectProject(repo);
 
   // Start polling running status
   if (_smgmtPollTimer) clearInterval(_smgmtPollTimer);
@@ -2456,9 +2671,7 @@ function smgmtShowError(msg) {
 // ── SSE handler for sprint_plan_update ────────────────────────────────────────
 
 function _handleSprintPlanSSE() {
-  if (!document.getElementById('view-sprint-plan').classList.contains('hidden')) {
-    loadSprintPlanning();
-  }
+  // Plan sprint view is no longer in main nav; no-op for now
 }
 
 // ── Remove Project Dialog ─────────────────────────────────────────────────────
@@ -2533,10 +2746,26 @@ async function confirmRemoveProject() {
 (function init() {
   initTheme();
   fetchEnvironment();
-  loadProjects().catch(e => {
-    document.getElementById('project-list').innerHTML =
-      `<div class="empty-projects">Failed to load projects: ${escapeHtml(e.message)}</div>`;
-  });
+
+  // Load projects first, then route (so project view can show project data)
+  loadProjects()
+    .then(() => {
+      // After projects are loaded, run router to handle deep-link URLs
+      _route();
+      // Update project picker if we're already in project view
+      if (_activeProject) _updateProjectHeader(_activeProject);
+    })
+    .catch(e => {
+      document.getElementById('project-list').innerHTML =
+        `<div class="empty-projects">Failed to load projects: ${escapeHtml(e.message)}</div>`;
+      _route(); // still route even on failure
+    });
+
+  // On first load with a non-project URL, show overview
+  if (!window.location.pathname.startsWith('/projects/')) {
+    _showOverview();
+  }
+
   loadPlanUsage().catch(() => {});
   loadAlerts().catch(() => {});
   loadSprintStatus().catch(() => {});

@@ -16,14 +16,17 @@ venv/
 # Generated code-navigation snapshot
 codedb.snapshot
 
-# Live environment clones (managed outside git)
-dashboard-uat/
-
-# Git worktrees (linked via .git/worktrees)
-work-*/
-
 # Runtime
 *.pid
 *.log
 logs/
 sprints/
+
+# Sprint manager user-specific config (template lives at .commander/sprint.yaml.example)
+.commander/sprint.yaml
+.commander/runtime/
+.commander/logs/
+.commander/sprints/
+.commander/alerts/
+
+apps/dashboard/projects.json

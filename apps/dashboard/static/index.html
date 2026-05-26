@@ -701,7 +701,8 @@
   <button class="mtab"        id="mtab-agents"       onclick="switchMain('agents')">Agents</button>
   <button class="mtab"        id="mtab-activity"     onclick="switchMain('activity')">Activity log</button>
   <button class="mtab"        id="mtab-history"      onclick="switchMain('history')">Sprint History</button>
-  <button class="mtab"        id="mtab-sprint-plan"  onclick="switchMain('sprint-plan')">Sprint Planning</button>
+  <button class="mtab"        id="mtab-sprint-plan"  onclick="switchMain('sprint-plan')">Plan sprint</button>
+  <button class="mtab"        id="mtab-sprint-mgmt"  onclick="switchMain('sprint-mgmt')">Sprint Mgmt</button>
 </nav>
 
 <!-- ── Projects view ── -->
@@ -824,150 +825,472 @@
 </div>
 
 
-<!-- ── Sprint Planning view ── -->
+<!-- ── Plan Sprint view ── -->
 <div id="view-sprint-plan" class="hidden">
-  <div class="sp-toolbar">
-    <div class="sp-toolbar-left">
-      <span class="sp-label">Sprint:</span>
-      <select id="sp-sprint-select" onchange="onSprintSelect()" class="sp-select">
-        <option value="">Loading…</option>
+
+  <!-- Header -->
+  <div class="psp-header">
+    <h2 class="psp-title" id="psp-title">Plan sprint</h2>
+    <div class="psp-goal-row">
+      <label class="psp-goal-label">Sprint goal <span class="psp-required">Required</span></label>
+      <div class="psp-goal-input-wrap">
+        <input id="psp-goal" class="psp-goal-input" type="text" placeholder="What does this sprint achieve?"
+               oninput="pspOnGoalInput()">
+      </div>
+      <button id="psp-start-btn" class="btn-primary psp-start-btn" disabled
+              onclick="pspStartSprint()">Start sprint</button>
+    </div>
+  </div>
+
+  <!-- 4-card summary strip -->
+  <div class="psp-strip">
+    <div class="psp-strip-card">
+      <span class="psp-strip-val" id="psp-count">0</span>
+      <span class="psp-strip-lbl">Issues selected</span>
+    </div>
+    <div class="psp-strip-card">
+      <span class="psp-strip-val" id="psp-tokens">0 k</span>
+      <span class="psp-strip-lbl">Est. tokens</span>
+    </div>
+    <div class="psp-strip-card">
+      <span class="psp-strip-val" id="psp-duration">0h 0m</span>
+      <span class="psp-strip-lbl">Est. duration</span>
+    </div>
+    <div class="psp-strip-card" id="psp-conflicts-card">
+      <span class="psp-strip-val" id="psp-conflicts">0</span>
+      <span class="psp-strip-lbl">Conflicts</span>
+    </div>
+  </div>
+
+  <!-- Conflict warning banner -->
+  <div id="psp-conflict-banner" class="psp-conflict-banner hidden">
+    <strong>File conflicts detected:</strong>
+    <ul id="psp-conflict-list" class="psp-conflict-list"></ul>
+  </div>
+
+  <!-- Filter bar -->
+  <div class="psp-filter-bar">
+    <div class="psp-filter-tabs" id="psp-filter-tabs">
+      <button class="psp-ftab active" data-filter="all" onclick="pspSetFilter('all')">All open</button>
+      <button class="psp-ftab" data-filter="backlog" onclick="pspSetFilter('backlog')">Backlog</button>
+      <button class="psp-ftab psp-ftab-sprint" data-filter="in-sprint" onclick="pspSetFilter('in-sprint')">In sprint</button>
+      <select id="psp-label-select" class="psp-label-select" onchange="pspSetLabelFilter(this.value)">
+        <option value="">By label…</option>
       </select>
     </div>
-    <div class="sp-toolbar-right">
-      <button id="sp-apply-btn" class="btn-primary" onclick="applySprintChanges()" style="display:none">Apply ✓</button>
-    </div>
+    <input id="psp-search" class="psp-search" type="search" placeholder="Search issues…" oninput="pspOnSearch()">
   </div>
 
-  <div class="sp-columns">
-    <div class="sp-col" id="sp-col-unassigned"
-         ondragover="event.preventDefault()" ondrop="onDrop(event,'unassigned')"
-         data-col="unassigned">
-      <div class="sp-col-header">
-        <span class="sp-col-title" id="sp-unassigned-title">Unassigned</span>
-      </div>
-      <div class="sp-cards" id="sp-cards-unassigned">
-        <div class="sp-empty">Loading…</div>
-      </div>
-    </div>
-
-    <div class="sp-col" id="sp-col-sprint"
-         ondragover="event.preventDefault()" ondrop="onDrop(event,'sprint')"
-         data-col="sprint">
-      <div class="sp-col-header">
-        <span class="sp-col-title" id="sp-sprint-title">Sprint</span>
-      </div>
-      <div class="sp-cards" id="sp-cards-sprint">
-        <div class="sp-empty">Select a sprint</div>
-      </div>
-    </div>
+  <!-- Bulk action bar -->
+  <div id="psp-bulk-bar" class="psp-bulk-bar hidden">
+    <span id="psp-bulk-count" class="psp-bulk-count"></span>
+    <button class="btn-primary psp-bulk-add" onclick="pspBulkAddToSprint()">Add to sprint</button>
+    <select class="psp-size-select" onchange="pspBulkMarkSize(this.value); this.value=''">
+      <option value="">Mark size…</option>
+      <option value="S">S</option>
+      <option value="M">M</option>
+      <option value="L">L</option>
+      <option value="XL">XL</option>
+    </select>
+    <button class="psp-bulk-clear" onclick="pspClearSelection()">Clear</button>
   </div>
 
-  <div class="sp-footer" id="sp-footer"></div>
+  <!-- Issue list -->
+  <div id="psp-issue-list" class="psp-issue-list">
+    <div class="psp-loading">Loading issues…</div>
+  </div>
+
+  <div id="psp-error" class="psp-error hidden"></div>
+</div>
+
+<!-- Plan Sprint confirmation dialog -->
+<div class="modal-backdrop hidden" id="psp-dialog-backdrop" onclick="pspCloseDialog()"></div>
+<div class="modal hidden" id="psp-dialog" role="dialog" aria-modal="true">
+  <div class="modal-header">
+    <span class="modal-title" id="psp-dialog-title">Start sprint?</span>
+    <button class="modal-close" onclick="pspCloseDialog()" aria-label="Close">&times;</button>
+  </div>
+  <div class="psp-dialog-body">
+    <p id="psp-dialog-msg"></p>
+  </div>
+  <div class="modal-footer">
+    <button class="btn-ghost" onclick="pspCloseDialog()">Cancel</button>
+    <button class="btn-primary" id="psp-dialog-confirm" onclick="pspConfirmStart()">Confirm</button>
+  </div>
 </div>
 
 <style>
-  /* ── Sprint Planning tab ── */
-  .sp-toolbar {
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 12px 24px; background: var(--surface);
-    border-bottom: 1px solid var(--border); gap: 12px;
-  }
-  .sp-toolbar-left { display: flex; align-items: center; gap: 8px; }
-  .sp-toolbar-right { display: flex; align-items: center; gap: 8px; }
-  .sp-label { font-size: 12px; font-weight: 600; color: var(--text-muted); }
-  .sp-select {
-    padding: 5px 8px; border: 1px solid var(--border); border-radius: 6px;
-    background: var(--surface-2); color: var(--text); font-size: 13px; font-family: inherit;
-    outline: none; cursor: pointer;
-  }
-  .sp-select:focus { border-color: var(--blue); }
-
-  .sp-columns {
-    display: grid; grid-template-columns: 1fr 1fr;
-    gap: 0; min-height: calc(100dvh - 200px);
-  }
-  .sp-col {
-    border-right: 1px solid var(--border);
-    display: flex; flex-direction: column;
-    background: var(--bg);
-  }
-  .sp-col:last-child { border-right: none; }
-  .sp-col-header {
-    padding: 14px 20px 10px;
+  /* ── Plan Sprint view ── */
+  .psp-header {
+    padding: 16px 24px 12px;
     background: var(--surface);
     border-bottom: 1px solid var(--border);
-    font-size: 12px; font-weight: 700; text-transform: uppercase;
-    letter-spacing: .07em; color: var(--text-muted);
   }
-  .sp-col-title { }
-  .sp-cards {
-    flex: 1; padding: 12px; display: flex; flex-direction: column; gap: 6px;
-    min-height: 100px;
+  .psp-title {
+    font-size: 18px; font-weight: 700; margin: 0 0 10px;
+    color: var(--text);
   }
-  .sp-empty {
-    padding: 24px 12px; text-align: center;
-    color: var(--text-sub); font-size: 12px; font-style: italic;
+  .psp-goal-row {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  }
+  .psp-goal-label {
+    font-size: 12px; font-weight: 600; color: var(--text-muted);
+    display: flex; align-items: center; gap: 6px; white-space: nowrap;
+  }
+  .psp-required {
+    font-size: 10px; background: var(--red-bg); color: var(--red);
+    padding: 1px 5px; border-radius: 3px; font-weight: 700;
+  }
+  .psp-goal-input-wrap { flex: 1; min-width: 200px; }
+  .psp-goal-input {
+    width: 100%; padding: 7px 10px; border: 1px solid var(--border); border-radius: 6px;
+    background: var(--surface-2); color: var(--text); font-size: 13px; font-family: inherit;
+    outline: none; box-sizing: border-box;
+  }
+  .psp-goal-input:focus { border-color: var(--blue); }
+  .psp-start-btn:disabled {
+    background: var(--surface-2); color: var(--text-sub);
+    border-color: var(--border); cursor: not-allowed;
+  }
+  .psp-start-btn:not(:disabled) { cursor: pointer; }
+
+  /* Summary strip */
+  .psp-strip {
+    display: grid; grid-template-columns: repeat(4, 1fr);
+    gap: 0; border-bottom: 1px solid var(--border);
+    background: var(--surface);
+  }
+  .psp-strip-card {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    padding: 12px 16px; border-right: 1px solid var(--border);
+    text-align: center;
+  }
+  .psp-strip-card:last-child { border-right: none; }
+  .psp-strip-val {
+    font-size: 22px; font-weight: 700; color: var(--text); line-height: 1.1;
+  }
+  .psp-strip-lbl {
+    font-size: 10px; text-transform: uppercase; letter-spacing: .07em;
+    color: var(--text-muted); margin-top: 2px;
+  }
+  #psp-conflicts-card.has-conflicts .psp-strip-lbl { color: var(--amber); }
+  #psp-conflicts-card.has-conflicts .psp-strip-val { color: var(--amber); }
+
+  /* Conflict banner */
+  .psp-conflict-banner {
+    margin: 12px 24px 0;
+    background: var(--amber-bg);
+    border-left: 4px solid var(--amber);
+    border-radius: 4px;
+    padding: 10px 14px;
+    font-size: 12px;
+    color: var(--text);
+  }
+  .psp-conflict-list {
+    margin: 6px 0 0; padding-left: 16px;
+  }
+  .psp-conflict-list li { margin: 2px 0; }
+
+  /* Filter bar */
+  .psp-filter-bar {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 24px; background: var(--surface);
+    border-bottom: 1px solid var(--border); gap: 12px; flex-wrap: wrap;
+  }
+  .psp-filter-tabs {
+    display: flex; align-items: center; gap: 4px; flex-wrap: nowrap; overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .psp-filter-tabs::-webkit-scrollbar { display: none; }
+  .psp-ftab {
+    padding: 4px 10px; border: 1px solid var(--border); border-radius: 14px;
+    background: transparent; color: var(--text-muted); font-size: 12px;
+    cursor: pointer; white-space: nowrap; font-family: inherit;
+    transition: background .1s, color .1s;
+  }
+  .psp-ftab:hover { background: var(--surface-2); color: var(--text); }
+  .psp-ftab.active { background: var(--text); color: var(--surface); border-color: var(--text); }
+  .psp-label-select {
+    padding: 4px 6px; border: 1px solid var(--border); border-radius: 14px;
+    background: transparent; color: var(--text-muted); font-size: 12px;
+    cursor: pointer; font-family: inherit; outline: none;
+  }
+  .psp-label-select:focus { border-color: var(--blue); }
+  .psp-search {
+    padding: 5px 10px; border: 1px solid var(--border); border-radius: 6px;
+    background: var(--surface-2); color: var(--text); font-size: 12px; font-family: inherit;
+    outline: none; width: 180px;
+  }
+  .psp-search:focus { border-color: var(--blue); }
+
+  /* Bulk action bar */
+  .psp-bulk-bar {
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px 24px; background: var(--blue-bg);
+    border-bottom: 1px solid var(--border); flex-wrap: wrap;
+  }
+  .psp-bulk-count { font-size: 12px; font-weight: 600; color: var(--blue); }
+  .psp-bulk-add { padding: 5px 12px; font-size: 12px; }
+  .psp-size-select {
+    padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px;
+    background: var(--surface); color: var(--text); font-size: 12px; font-family: inherit;
+    cursor: pointer; outline: none;
+  }
+  .psp-bulk-clear {
+    background: none; border: none; color: var(--blue); font-size: 12px;
+    cursor: pointer; text-decoration: underline; padding: 0; font-family: inherit;
   }
 
-  /* Issue cards in sprint planning */
-  .sp-card {
-    background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
-    padding: 9px 11px; cursor: grab; user-select: none;
-    transition: box-shadow .15s, border-color .15s, transform .15s;
-    display: flex; flex-direction: column; gap: 5px;
+  /* Issue list */
+  .psp-issue-list { overflow-y: auto; }
+  .psp-loading {
+    padding: 40px; text-align: center; color: var(--text-muted); font-size: 13px;
   }
-  .sp-card:active { cursor: grabbing; }
-  .sp-card:hover { border-color: var(--blue); box-shadow: 0 2px 8px rgba(37,99,235,.1); }
-  .sp-card.dragging { opacity: .4; transform: scale(.97); }
-  .sp-card.drag-over-target { border-color: var(--blue); background: var(--blue-bg); }
-  .sp-card.error-flash {
-    animation: error-flash .5s ease;
-    border-color: var(--red);
+  .psp-error {
+    margin: 16px 24px; padding: 10px 14px; background: var(--red-bg);
+    border-left: 4px solid var(--red); border-radius: 4px; font-size: 12px; color: var(--red);
   }
-  @keyframes error-flash {
-    0%,100% { border-color: var(--border); }
-    25%,75%  { border-color: var(--red); background: var(--red-bg); }
+
+  .psp-row {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 24px; border-bottom: 1px solid var(--border);
+    cursor: pointer; transition: background .1s; background: var(--surface);
   }
-  .sp-card-top { display: flex; align-items: flex-start; gap: 6px; }
-  .sp-card-num {
+  .psp-row:hover { background: var(--surface-hover); }
+  .psp-row.psp-in-sprint { background: #f0fdf4; }
+  .psp-row.psp-selected { background: #eff6ff; }
+  .psp-row.psp-in-sprint:hover { background: #dcfce7; }
+  .psp-row.psp-selected:hover { background: #dbeafe; }
+  [data-theme="dark"] .psp-row.psp-in-sprint { background: rgba(22,163,74,.12); }
+  [data-theme="dark"] .psp-row.psp-selected { background: rgba(37,99,235,.12); }
+
+  .psp-row-cb { flex-shrink: 0; cursor: pointer; width: 15px; height: 15px; }
+  .psp-row-num {
     font-family: var(--mono); font-size: 11px; color: var(--text-muted);
-    text-decoration: none; flex-shrink: 0; line-height: 1.5;
+    text-decoration: none; flex-shrink: 0; min-width: 36px;
   }
-  .sp-card-num:hover { color: var(--blue); }
-  .sp-card-size {
-    font-size: 9px; font-weight: 700; text-transform: uppercase;
-    letter-spacing: .06em; padding: 2px 5px; border-radius: 3px;
-    background: var(--surface-2); color: var(--text-muted);
-    border: 1px solid var(--border); flex-shrink: 0; margin-top: 1px;
+  .psp-row-num:hover { color: var(--blue); }
+  .psp-row-title { flex: 1; font-size: 13px; font-weight: 500; line-height: 1.4; }
+  .psp-row-meta {
+    display: flex; align-items: center; gap: 6px; flex-shrink: 0; flex-wrap: wrap;
+    justify-content: flex-end;
   }
-  .sp-card-title {
-    font-size: 12px; font-weight: 500; line-height: 1.4; flex: 1;
-    overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical;
+  .psp-row-labels { display: flex; gap: 3px; flex-wrap: wrap; }
+  .psp-lbl-pill {
+    font-size: 10px; padding: 1px 6px; border-radius: 10px;
+    background: var(--surface-2); color: var(--text-muted); border: 1px solid var(--border);
   }
-  .sp-card-meta {
-    display: flex; gap: 5px; align-items: center; flex-wrap: wrap;
+  .psp-size-pill {
+    font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 4px;
+    text-transform: uppercase; letter-spacing: .05em; flex-shrink: 0;
   }
-  .sp-card-error {
-    font-size: 11px; color: var(--red); margin-top: 2px;
-    animation: fadeIn .2s ease;
+  .psp-size-S  { background: #dcfce7; color: #16a34a; }
+  .psp-size-M  { background: #dbeafe; color: #2563eb; }
+  .psp-size-L  { background: #fef3c7; color: #d97706; }
+  .psp-size-XL { background: #fee2e2; color: #dc2626; }
+  .psp-size-q  { background: var(--surface-2); color: var(--text-sub); }
+  .psp-token-est {
+    font-size: 11px; color: var(--text-sub); font-family: var(--mono);
+    white-space: nowrap; flex-shrink: 0;
   }
-  @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+  .psp-conflict-icon {
+    color: var(--amber); font-size: 14px; flex-shrink: 0; display: none;
+  }
+  .psp-row.psp-has-conflict .psp-conflict-icon { display: inline; }
+  .psp-row-add {
+    padding: 3px 9px; font-size: 11px; border: 1px solid var(--border);
+    border-radius: 5px; background: var(--surface-2); color: var(--text-muted);
+    cursor: pointer; flex-shrink: 0; font-family: inherit;
+    transition: background .1s, color .1s;
+  }
+  .psp-row-add:hover { background: var(--blue-bg); color: var(--blue); border-color: var(--blue); }
+  .psp-row.psp-in-sprint .psp-row-add { visibility: hidden; }
 
-  .sp-footer {
-    padding: 10px 20px; background: var(--surface);
-    border-top: 1px solid var(--border);
-    font-size: 12px; color: var(--text-muted);
-    min-height: 36px;
-  }
+  /* Dialog body */
+  .psp-dialog-body { padding: 12px 24px; font-size: 13px; }
 
-  /* Mobile */
+  /* Responsive */
   @media (max-width: 600px) {
-    .sp-columns {
-      grid-template-columns: 1fr;
-    }
-    .sp-col { border-right: none; border-bottom: 1px solid var(--border); min-height: 200px; }
-    .sp-toolbar { padding: 10px 16px; }
+    .psp-strip { grid-template-columns: 1fr 1fr; }
+    .psp-strip-card:nth-child(2) { border-right: none; }
+    .psp-filter-bar { padding: 8px 12px; }
+    .psp-header { padding: 12px 12px 10px; }
+    .psp-goal-row { flex-wrap: wrap; }
+    .psp-goal-input-wrap { width: 100%; min-width: 0; flex: none; }
+    .psp-conflict-banner { margin: 8px 12px 0; }
+    .psp-bulk-bar { flex-direction: column; align-items: flex-start; padding: 8px 12px; }
+    .psp-row { padding: 10px 12px; }
+    .psp-row-meta { justify-content: flex-start; }
+    .psp-row-title { min-width: 0; }
+  }
+</style>
+
+<!-- ── Sprint Management view (issue #95) ── -->
+<div id="view-sprint-mgmt" class="hidden">
+
+  <!-- Project selector header -->
+  <div class="smgmt-header">
+    <div class="smgmt-header-left">
+      <h2 class="smgmt-title">Sprint Management</h2>
+      <select id="smgmt-project-select" class="smgmt-proj-select" onchange="smgmtSelectProject(this.value)">
+        <option value="">Loading projects…</option>
+      </select>
+    </div>
+    <button class="btn-primary smgmt-new-sprint-btn" id="smgmt-new-sprint-btn"
+            onclick="smgmtCreateSprint()" title="Create next sprint label on GitHub">+ New sprint</button>
+  </div>
+
+  <!-- Error banner -->
+  <div class="smgmt-error hidden" id="smgmt-error"></div>
+
+  <!-- Sprint blocks container -->
+  <div class="smgmt-body" id="smgmt-body">
+    <div class="smgmt-loading" id="smgmt-loading">Select a project to view sprints.</div>
+  </div>
+
+  <!-- Unassigned drop zone at bottom -->
+  <div class="smgmt-unassigned" id="smgmt-unassigned"
+       ondragover="smgmtDragOverZone(event, null)"
+       ondragleave="smgmtDragLeave(event)"
+       ondrop="smgmtDropOnSprint(event, null)">
+    <div class="smgmt-unassigned-label"><i class="ti ti-inbox"></i> Unassigned</div>
+    <div class="smgmt-unassigned-tickets" id="smgmt-unassigned-tickets">
+      <div class="smgmt-drop-hint">Drop tickets here to remove sprint label</div>
+    </div>
+  </div>
+</div>
+
+<style>
+  /* ── Sprint Management view ── */
+  .smgmt-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 24px; background: var(--surface);
+    border-bottom: 1px solid var(--border); gap: 12px; flex-wrap: wrap;
+  }
+  .smgmt-header-left { display: flex; align-items: center; gap: 14px; }
+  .smgmt-title { font-size: 16px; font-weight: 700; white-space: nowrap; }
+  .smgmt-proj-select {
+    padding: 6px 10px; border: 1px solid var(--border); border-radius: 6px;
+    background: var(--surface-2); color: var(--text); font-size: 13px;
+    font-family: inherit; outline: none; cursor: pointer; min-width: 180px;
+  }
+  .smgmt-proj-select:focus { border-color: var(--blue); }
+  .smgmt-new-sprint-btn { font-size: 12px; padding: 6px 14px; }
+
+  .smgmt-error {
+    margin: 12px 24px; padding: 10px 14px; background: var(--red-bg);
+    border-left: 4px solid var(--red); border-radius: 4px;
+    font-size: 12px; color: var(--red);
+  }
+  .smgmt-loading {
+    padding: 48px 24px; text-align: center; color: var(--text-muted); font-size: 13px;
+  }
+
+  /* Sprint blocks container — supports drag-reorder */
+  .smgmt-body {
+    padding: 16px 24px; display: flex; flex-direction: column; gap: 16px;
+    min-height: 120px;
+  }
+
+  /* Single sprint block */
+  .smgmt-sprint-block {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 8px; overflow: hidden;
+  }
+  .smgmt-sprint-block.drag-over-sprint { border-color: var(--blue); box-shadow: 0 0 0 2px var(--blue-bg); }
+  .smgmt-sprint-block.dragging-sprint { opacity: .45; }
+
+  /* Sprint header */
+  .smgmt-sprint-header {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 14px; background: var(--surface-2);
+    border-bottom: 1px solid var(--border); cursor: default;
+  }
+  .smgmt-sprint-grip {
+    cursor: grab; color: var(--text-sub); font-size: 14px; flex-shrink: 0;
+  }
+  .smgmt-sprint-grip:active { cursor: grabbing; }
+  .smgmt-sprint-name { font-size: 14px; font-weight: 700; flex: 1; }
+  .smgmt-next-badge {
+    font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .07em;
+    background: var(--green-bg); color: var(--green); padding: 2px 7px; border-radius: 10px;
+    flex-shrink: 0;
+  }
+  .smgmt-sprint-count { font-size: 11px; color: var(--text-muted); flex-shrink: 0; }
+  .smgmt-run-btn {
+    padding: 4px 12px; font-size: 11px; font-weight: 600;
+    background: var(--green); color: #fff; border: none; border-radius: 5px;
+    cursor: pointer; flex-shrink: 0; transition: opacity .15s;
+  }
+  .smgmt-run-btn:hover { opacity: .85; }
+  .smgmt-run-btn:disabled {
+    background: var(--surface-2); color: var(--text-sub);
+    border: 1px solid var(--border); cursor: not-allowed; opacity: 1;
+  }
+
+  /* Ticket cards in a sprint */
+  .smgmt-sprint-tickets {
+    padding: 8px 14px; min-height: 48px;
+    display: flex; flex-direction: column; gap: 6px;
+  }
+  .smgmt-drop-hint {
+    font-size: 12px; color: var(--text-sub); text-align: center;
+    padding: 10px; border: 1px dashed var(--border); border-radius: 5px;
+  }
+  .smgmt-sprint-block.drag-over-sprint .smgmt-drop-hint { border-color: var(--blue); }
+
+  /* Ticket card */
+  .smgmt-ticket {
+    display: flex; align-items: center; gap: 8px;
+    padding: 7px 10px; background: var(--surface-2); border: 1px solid var(--border);
+    border-radius: 5px; font-size: 12px; cursor: default;
+  }
+  .smgmt-ticket:hover { background: var(--surface-hover); }
+  .smgmt-ticket.dragging-ticket { opacity: .4; }
+  .smgmt-ticket-grip {
+    cursor: grab; color: var(--text-sub); font-size: 13px; flex-shrink: 0;
+  }
+  .smgmt-ticket-grip:active { cursor: grabbing; }
+  .smgmt-ticket-num {
+    font-family: var(--mono); font-size: 11px; color: var(--text-muted);
+    text-decoration: none; flex-shrink: 0; min-width: 32px;
+  }
+  .smgmt-ticket-num:hover { color: var(--blue); }
+  .smgmt-ticket-title { flex: 1; font-weight: 500; line-height: 1.4; min-width: 0;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .smgmt-ticket-status {
+    font-size: 10px; font-weight: 600; padding: 2px 6px; border-radius: 3px;
+    flex-shrink: 0; text-transform: uppercase;
+  }
+  .smgmt-status-backlog  { background: var(--surface-2); color: var(--text-muted); border: 1px solid var(--border); }
+  .smgmt-status-in-progress { background: var(--blue-bg); color: var(--blue); }
+  .smgmt-status-sit      { background: var(--amber-bg); color: var(--amber); }
+  .smgmt-status-uat      { background: var(--purple-bg); color: var(--purple); }
+  .smgmt-status-done     { background: var(--green-bg); color: var(--green); }
+
+  /* Unassigned zone */
+  .smgmt-unassigned {
+    margin: 0 24px 24px;
+    border: 2px dashed var(--border); border-radius: 8px;
+    background: var(--surface); transition: border-color .15s, background .15s;
+  }
+  .smgmt-unassigned.drag-over-zone {
+    border-color: var(--blue); background: var(--blue-bg);
+  }
+  .smgmt-unassigned-label {
+    display: flex; align-items: center; gap: 6px;
+    padding: 8px 14px; font-size: 12px; font-weight: 600;
+    color: var(--text-muted); border-bottom: 1px dashed var(--border);
+  }
+  .smgmt-unassigned-tickets {
+    padding: 8px 14px; min-height: 48px;
+    display: flex; flex-direction: column; gap: 6px;
+  }
+
+  @media (max-width: 600px) {
+    .smgmt-header { padding: 10px 12px; }
+    .smgmt-body   { padding: 12px; }
+    .smgmt-unassigned { margin: 0 12px 16px; }
   }
 </style>
 
@@ -1036,6 +1359,33 @@
   </form>
 </div>
 
+<!-- ── Remove Project Confirmation Dialog ── -->
+<div class="modal-backdrop hidden" id="remove-project-backdrop"></div>
+<div class="modal hidden" id="remove-project-modal" role="dialog" aria-modal="true" aria-labelledby="rp-modal-title">
+  <div class="modal-header">
+    <span class="modal-title" id="rp-modal-title">Remove Project</span>
+    <button class="modal-close" onclick="closeRemoveProjectDialog()" aria-label="Close">&times;</button>
+  </div>
+  <div class="rp-dialog-body">
+    <p style="margin:0 0 16px;font-size:13px;">Remove <strong id="rp-project-name"></strong> from the dashboard?</p>
+    <div class="modal-field">
+      <label class="modal-check-label">
+        <input type="checkbox" id="rp-delete-folders"> Delete local folders (worktrees / clones)
+      </label>
+    </div>
+    <div class="modal-field">
+      <label class="modal-check-label">
+        <input type="checkbox" id="rp-delete-github"> Delete GitHub repository
+      </label>
+    </div>
+    <div class="modal-error hidden" id="rp-error"></div>
+  </div>
+  <div class="modal-footer">
+    <button class="btn-ghost" onclick="closeRemoveProjectDialog()">Cancel</button>
+    <button class="btn-danger" id="rp-confirm-btn" onclick="confirmRemoveProject()">Confirm Remove</button>
+  </div>
+</div>
+
 <style>
   .modal-backdrop {
     position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 100;
@@ -1092,6 +1442,28 @@
     margin: 0; padding: 10px; font-size: 11px; font-family: var(--mono, monospace);
     color: var(--text); white-space: pre-wrap; word-break: break-all;
     max-height: 180px; overflow-y: auto; overflow-x: hidden;
+  }
+
+  /* ── Danger button ── */
+  .btn-danger {
+    padding: 6px 14px; border: none; border-radius: 6px;
+    background: var(--red); color: #fff; font-size: 12px; font-weight: 600;
+    transition: opacity .15s; cursor: pointer;
+  }
+  .btn-danger:hover { opacity: .82; }
+  .btn-danger:disabled { opacity: .5; cursor: not-allowed; }
+
+  /* ── Remove project dialog body ── */
+  .rp-dialog-body { padding: 0 0 4px; font-size: 13px; }
+  .rp-dialog-body .modal-field { margin-bottom: 10px; }
+
+  /* ── Remove project button in expand panel ── */
+  .expand-remove-row {
+    grid-column: 1 / -1;
+    padding: 12px 0 0;
+    border-top: 1px solid var(--border);
+    display: flex;
+    justify-content: flex-end;
   }
 
   /* ── Alert banners (AC-3a) ── */

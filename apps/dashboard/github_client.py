@@ -49,8 +49,22 @@ def repo() -> str:
     )
 
 
+def get_repo_for_operation(repo_name: str | None = None) -> str:
+    """Resolve target repo, redirecting to the sandbox repo in test mode.
+
+    Test mode is active when COMMANDER_TEST_MODE=1 OR when the resolved repo
+    is the production commander repo (self-referential detection).
+    Override the sandbox target with COMMANDER_TEST_REPO env var.
+    """
+    resolved = repo_name or repo()
+    test_mode = os.environ.get("COMMANDER_TEST_MODE", "").strip() == "1"
+    if test_mode or resolved == "zealchaiwut/commander":
+        return os.environ.get("COMMANDER_TEST_REPO", "zealchaiwut/commander-issue-test")
+    return resolved
+
+
 def _r(repo_name: str | None) -> str:
-    return repo_name or repo()
+    return get_repo_for_operation(repo_name)
 
 
 # ── cache ─────────────────────────────────────────────────────────────────────
@@ -293,6 +307,21 @@ def repo_config() -> dict:
         "repo": repo(),
         "default_branch": os.environ.get("GITHUB_DEFAULT_BRANCH", "main"),
     }
+
+
+def list_open_uat_issues(repo_name: str | None = None, sprint: int | None = None) -> list[dict]:
+    """List open issues labelled UAT, optionally filtered to sprint-N."""
+    r = _r(repo_name)
+    args = [
+        "issue", "list", "--repo", r,
+        "--label", "UAT",
+        "--state", "open",
+        "--json", "number,title,url",
+        "--limit", "200",
+    ]
+    if sprint is not None:
+        args += ["--label", f"sprint-{sprint}"]
+    return _json(*args)
 
 
 # ── write operations ──────────────────────────────────────────────────────────

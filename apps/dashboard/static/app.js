@@ -72,16 +72,17 @@ function _syncThemeIcon(theme) {
 
 // ── Tab navigation ────────────────────────────────────────────────────────────
 function switchMain(tab) {
-  ['projects', 'agents', 'activity', 'history', 'sprint-plan'].forEach(t => {
+  ['projects', 'agents', 'activity', 'history', 'sprint-plan', 'sprint-mgmt'].forEach(t => {
     const viewId = t === 'sprint-plan' ? 'view-sprint-plan' : `view-${t}`;
     const tabId  = `mtab-${t}`;
     document.getElementById(viewId)?.classList.toggle('hidden', t !== tab);
     document.getElementById(tabId)?.classList.toggle('active', t === tab);
   });
-  if (tab === 'agents')      fetchAgents();
-  if (tab === 'activity')    fetchEvents();
-  if (tab === 'history')     loadSprintHistory().catch(() => {});
-  if (tab === 'sprint-plan') loadSprintPlanning();
+  if (tab === 'agents')       fetchAgents();
+  if (tab === 'activity')     fetchEvents();
+  if (tab === 'history')      loadSprintHistory().catch(() => {});
+  if (tab === 'sprint-plan')  loadSprintPlanning();
+  if (tab === 'sprint-mgmt')  smgmtInit();
 }
 
 // ── Filter ────────────────────────────────────────────────────────────────────
@@ -385,8 +386,13 @@ function ticketCardHtml(ticket, repo) {
 
 function _ticketGroupHtml(label, tickets, repo) {
   if (tickets.length === 0) return '';
+  const r = escapeHtml(repo);
+  const approveAllBtn = label === 'UAT'
+    ? ` <button class="btn-approve-sm" style="margin-left:auto;font-size:11px;padding:2px 8px;" onclick="approveAllUat('${r}', this)">Approve all UAT</button>`
+    : '';
+  const hdrStyle = label === 'UAT' ? ' style="display:flex;align-items:center;"' : '';
   return `<div class="ticket-group">
-    <div class="expand-hdr-title ticket-group-hdr">${escapeHtml(label)} · ${tickets.length}</div>
+    <div class="expand-hdr-title ticket-group-hdr"${hdrStyle}>${escapeHtml(label)} · ${tickets.length}${approveAllBtn}</div>
     ${tickets.map(t => ticketCardHtml(t, repo)).join('')}
   </div>`;
 }
@@ -480,6 +486,8 @@ function renderExpandPanel(id, data, repo) {
   const projData = allProjects.find(p => p.repo === repo) || null;
   const miniSprintHtml = _miniSprintSummaryHtml(projData);
 
+  const projName = escapeHtml(projData?.name || repo);
+
   el.innerHTML = `
     <div class="expand-col">
       ${miniSprintHtml}
@@ -495,6 +503,14 @@ function renderExpandPanel(id, data, repo) {
       </div>
       ${agentsListHtml}
       ${tokLine}
+    </div>
+    <div class="expand-remove-row">
+      <button class="btn-danger"
+        data-repo="${escapeHtml(repo)}"
+        data-name="${projName}"
+        onclick="openRemoveProjectDialog(this.dataset.repo, this.dataset.name)">
+        <i class="ti ti-trash" style="margin-right:4px;"></i>Remove Project
+      </button>
     </div>`;
 
   // kick off test-report loads for UAT tickets
@@ -671,6 +687,21 @@ async function approveIssue(issueNum, repo, btnEl) {
     _refreshAfterAction(repo);
   } catch (e) {
     alert('Approve failed: ' + e.message);
+    if (btnEl) btnEl.disabled = false;
+  }
+}
+
+async function approveAllUat(repo, btnEl) {
+  if (btnEl) btnEl.disabled = true;
+  try {
+    const res = await fetch(
+      `/api/projects/${repo}/approve-batch`,
+      { method: 'POST' }
+    );
+    if (!res.ok) throw new Error(await res.text());
+    _refreshAfterAction(repo);
+  } catch (e) {
+    alert('Batch approve failed: ' + e.message);
     if (btnEl) btnEl.disabled = false;
   }
 }
@@ -1455,125 +1486,479 @@ function _sprintRowHtml(sprint, idx) {
     </div>`;
 }
 
-// ── Sprint Planning (issue #26) ───────────────────────────────────────────────
+// ── Plan Sprint (issue #31) ───────────────────────────────────────────────────
 
-let _spData = null;          // last-fetched { sprints, issues }
-let _spSelectedSprint = null; // currently selected sprint number (int or null)
-let _spPendingChanges = {};  // issueNum -> { from: 'unassigned'|'sprint', to: ... }
-let _spDragSrc = null;       // { card, issueNum, fromCol }
-let _spDragGhost = null;     // pointer-event drag ghost element
+const PSP_DRAFT_KEY = 'commander:plan-sprint-draft';
+const TOKEN_MAP = { S: 20, M: 40, L: 60, XL: 85 };
+const FILE_EXT_PAT = String.raw`\b[\w.-]+\.(?:py|html|js|sh|md|json)\b`;
+const STATUS_LABELS_SET = new Set(['in-progress', 'SIT', 'UAT', 'UAT-approved', 'needs-rework', 'blocked', 'backlog', 'enhancement', 'bug']);
+const SPRINT_NUM_RE = /^sprint-(\d+)$/;
+
+let _pspIssues = [];          // all open issues from /api/open-issues
+let _pspSprints = [];         // sprint numbers from /api/sprints
+let _pspTargetSprint = null;  // int: next sprint number
+let _pspSelected = new Set(); // selected issue numbers (session)
+let _pspFilter = 'all';       // 'all' | 'backlog' | 'in-sprint' | label string
+let _pspLabelFilter = '';     // label name from dropdown
+let _pspSearch = '';          // text search
 
 // ── fetch / render ────────────────────────────────────────────────────────────
 
 async function loadSprintPlanning() {
+  const listEl = document.getElementById('psp-issue-list');
+  if (listEl) listEl.innerHTML = '<div class="psp-loading">Loading issues…</div>';
+  _pspShowError('');
   try {
-    const res = await fetch('/api/sprint-planning/issues');
-    if (!res.ok) throw new Error(await res.text());
-    _spData = await res.json();
-    _renderSprintPlanning();
+    const [issRes, spRes] = await Promise.all([
+      fetch('/api/open-issues'),
+      fetch('/api/sprints'),
+    ]);
+    if (!issRes.ok) throw new Error(await issRes.text());
+    if (!spRes.ok) throw new Error(await spRes.text());
+    _pspIssues = await issRes.json();
+    const spData = await spRes.json();
+    _pspSprints = spData.sprints || [];
+    _pspTargetSprint = (_pspSprints.length > 0 ? Math.max(..._pspSprints) : 0) + 1;
   } catch (e) {
-    document.getElementById('sp-cards-unassigned').innerHTML =
-      `<div class="sp-empty">Failed to load: ${escapeHtml(e.message)}</div>`;
+    _pspShowError('Failed to load: ' + e.message);
+    return;
   }
+  _pspRestoreDraft();
+  _pspRender();
 }
 
-function _renderSprintPlanning() {
-  if (!_spData) return;
+function _pspRender() {
+  // Update title
+  const titleEl = document.getElementById('psp-title');
+  if (titleEl) titleEl.textContent = `Plan sprint ${_pspTargetSprint}`;
 
-  const { sprints, issues } = _spData;
+  // Update "In sprint N" filter tab label
+  const inSprintTab = document.querySelector('.psp-ftab-sprint');
+  if (inSprintTab) inSprintTab.textContent = `In sprint ${_pspTargetSprint}`;
 
-  // Build sprint selector
-  const sel = document.getElementById('sp-sprint-select');
-  const prevVal = sel.value;
-  sel.innerHTML = '';
+  // Update Start button label
+  const startBtn = document.getElementById('psp-start-btn');
+  if (startBtn) startBtn.textContent = `Start sprint ${_pspTargetSprint}`;
 
-  sprints.forEach(n => {
-    const opt = document.createElement('option');
-    opt.value = n;
-    opt.textContent = `sprint-${n}`;
-    sel.appendChild(opt);
+  // Populate label filter dropdown
+  _pspBuildLabelDropdown();
+
+  _pspRenderList();
+  _pspUpdateStrip();
+  _pspUpdateConflicts();
+  _pspUpdateBulkBar();
+  _pspSaveDraft();
+}
+
+function _pspRenderList() {
+  const issues = _pspFilteredIssues();
+  const listEl = document.getElementById('psp-issue-list');
+  if (!listEl) return;
+
+  if (issues.length === 0) {
+    listEl.innerHTML = '<div class="psp-loading">No issues match.</div>';
+    return;
+  }
+
+  const conflicts = _pspConflictSet();
+  listEl.innerHTML = issues.map(iss => _pspRowHtml(iss, conflicts)).join('');
+}
+
+function _pspFilteredIssues() {
+  const q = _pspSearch.toLowerCase();
+  return _pspIssues.filter(iss => {
+    const labelNames = (iss.labels || []).map(l => l.name);
+    const sprintNum = _pspIssueSprintNum(iss);
+
+    if (_pspFilter === 'all') { /* no-op */ }
+    else if (_pspFilter === 'backlog') {
+      if (!labelNames.includes('backlog')) return false;
+    } else if (_pspFilter === 'in-sprint') {
+      if (sprintNum !== _pspTargetSprint) return false;
+    }
+
+    if (_pspLabelFilter && !labelNames.includes(_pspLabelFilter)) return false;
+
+    if (q && !iss.title.toLowerCase().includes(q) && !String(iss.number).includes(q)) return false;
+
+    return true;
   });
-
-  // + New sprint option
-  const newOpt = document.createElement('option');
-  newOpt.value = 'new';
-  newOpt.textContent = '+ New sprint';
-  sel.appendChild(newOpt);
-
-  // Restore or set default
-  if (_spSelectedSprint !== null && sprints.includes(_spSelectedSprint)) {
-    sel.value = String(_spSelectedSprint);
-  } else if (prevVal && prevVal !== 'new' && sprints.includes(Number(prevVal))) {
-    sel.value = prevVal;
-    _spSelectedSprint = Number(prevVal);
-  } else if (sprints.length > 0) {
-    _spSelectedSprint = sprints[sprints.length - 1];
-    sel.value = String(_spSelectedSprint);
-  }
-
-  _renderColumns(issues);
 }
 
-function _renderColumns(issues) {
-  const sprint = _spSelectedSprint;
-
-  // Apply pending changes
-  const effectiveIssues = issues.map(iss => {
-    const pending = _spPendingChanges[iss.number];
-    if (!pending) return iss;
-    const newSprint = pending.to === 'sprint' ? sprint : null;
-    return { ...iss, sprint: newSprint };
-  });
-
-  const unassigned = effectiveIssues.filter(iss => iss.sprint === null || iss.sprint === undefined);
-  const inSprint   = effectiveIssues.filter(iss => iss.sprint === sprint);
-
-  const unassignedTitle = document.getElementById('sp-unassigned-title');
-  const sprintTitle     = document.getElementById('sp-sprint-title');
-  if (unassignedTitle) unassignedTitle.textContent = `Unassigned (${unassigned.length})`;
-  if (sprintTitle)     sprintTitle.textContent     = `Sprint ${sprint ?? '?'} (${inSprint.length})`;
-
-  document.getElementById('sp-cards-unassigned').innerHTML =
-    unassigned.length === 0
-      ? '<div class="sp-empty">No unassigned issues</div>'
-      : unassigned.map(iss => _spCardHtml(iss)).join('');
-
-  document.getElementById('sp-cards-sprint').innerHTML =
-    sprint === null
-      ? '<div class="sp-empty">Select a sprint</div>'
-      : inSprint.length === 0
-        ? '<div class="sp-empty">No issues in this sprint</div>'
-        : inSprint.map(iss => _spCardHtml(iss)).join('');
-
-  _bindDragEvents();
-  _renderSpFooter(inSprint);
-
-  // Show/hide Apply button if there are pending changes
-  const applyBtn = document.getElementById('sp-apply-btn');
-  if (applyBtn) {
-    const hasPending = Object.keys(_spPendingChanges).length > 0;
-    applyBtn.style.display = hasPending ? '' : 'none';
+function _pspIssueSprintNum(iss) {
+  for (const lbl of (iss.labels || [])) {
+    const m = SPRINT_NUM_RE.exec(lbl.name);
+    if (m) return parseInt(m[1], 10);
   }
+  return null;
 }
 
-function _spCardHtml(iss) {
-  const statusColor = { 'in-progress': 'blue', 'SIT': 'amber', 'UAT': 'purple', 'backlog': 'gray', 'blocked': 'red' };
-  const color = statusColor[iss.status] || 'gray';
-  const title = escapeHtml(iss.title || '');
+function _pspIssueSize(iss) {
+  for (const lbl of (iss.labels || [])) {
+    if (['S', 'M', 'L', 'XL'].includes(lbl.name)) return lbl.name;
+  }
+  return null;
+}
+
+function _pspTokenEst(iss) {
+  const body = iss.body || '';
+  const m = /<!--\s*tokens:(\d+)\s*-->/.exec(body);
+  if (m) return parseInt(m[1], 10);
+  const size = _pspIssueSize(iss);
+  return TOKEN_MAP[size] || TOKEN_MAP['M'];
+}
+
+function _pspConflictSet() {
+  const selected = _pspIssues.filter(i => _pspSelected.has(i.number));
+  const fileMap = {};
+  for (const iss of selected) {
+    const files = new Set((iss.body || '').match(new RegExp(FILE_EXT_PAT, 'g')) || []);
+    for (const f of files) {
+      if (!fileMap[f]) fileMap[f] = [];
+      fileMap[f].push(iss.number);
+    }
+  }
+  const conflicting = new Set();
+  const pairs = [];
+  for (const [file, nums] of Object.entries(fileMap)) {
+    if (nums.length > 1) {
+      for (let i = 0; i < nums.length; i++)
+        for (let j = i + 1; j < nums.length; j++) {
+          conflicting.add(nums[i]);
+          conflicting.add(nums[j]);
+          pairs.push({ a: nums[i], b: nums[j], file });
+        }
+    }
+  }
+  return { conflicting, pairs };
+}
+
+function _pspRowHtml(iss, { conflicting }) {
+  const isSelected = _pspSelected.has(iss.number);
+  const sprintNum  = _pspIssueSprintNum(iss);
+  const inSprint   = sprintNum === _pspTargetSprint;
+  const hasConflict = conflicting.has(iss.number);
+
+  let cls = 'psp-row';
+  if (inSprint)    cls += ' psp-in-sprint';
+  if (isSelected)  cls += ' psp-selected';
+  if (hasConflict) cls += ' psp-has-conflict';
+
+  const size = _pspIssueSize(iss) || '?';
+  const sizeClass = size === '?' ? 'psp-size-q' : `psp-size-${size}`;
+  const tokens = _pspTokenEst(iss);
+
+  const nonStatusLabels = (iss.labels || []).filter(l => !STATUS_LABELS_SET.has(l.name) && !SPRINT_NUM_RE.test(l.name));
+  const labelPills = nonStatusLabels.slice(0, 3).map(l =>
+    `<span class="psp-lbl-pill">${escapeHtml(l.name)}</span>`
+  ).join('');
+
   return `
-    <div class="sp-card" id="sp-card-${iss.number}"
-         draggable="true"
-         data-issue="${iss.number}" data-sprint="${iss.sprint ?? ''}" data-size="${escapeHtml(iss.size || '?')}">
-      <div class="sp-card-top">
-        <a class="sp-card-num" href="${escapeHtml(iss.url || '#')}" target="_blank" rel="noopener"
-           onclick="event.stopPropagation()">#${iss.number}</a>
-        <span class="sp-card-size">${escapeHtml(iss.size || '?')}</span>
-        <span class="sp-card-title">${title}</span>
-      </div>
-      <div class="sp-card-meta">
-        <span class="sbadge ${color}">${escapeHtml(iss.status)}</span>
+    <div class="${escapeHtml(cls)}" id="psp-row-${iss.number}" onclick="pspToggleRow(event, ${iss.number})">
+      <input type="checkbox" class="psp-row-cb" ${isSelected ? 'checked' : ''}
+             onclick="event.stopPropagation(); pspToggleRow(event, ${iss.number})">
+      <a class="psp-row-num" href="${escapeHtml(iss.url || '#')}" target="_blank" rel="noopener"
+         onclick="event.stopPropagation()">#${iss.number}</a>
+      <span class="psp-row-title">${escapeHtml(iss.title || '')}</span>
+      <div class="psp-row-meta">
+        <div class="psp-row-labels">${labelPills}</div>
+        <span class="psp-size-pill ${sizeClass}">${escapeHtml(size)}</span>
+        <span class="psp-token-est">${tokens} k</span>
+        <span class="psp-conflict-icon" title="File conflict">&#9888;</span>
+        <button class="psp-row-add" onclick="event.stopPropagation(); pspAddRowToSprint(${iss.number})">Add</button>
       </div>
     </div>`;
+}
+
+function _pspUpdateStrip() {
+  const sel = _pspIssues.filter(i => _pspSelected.has(i.number));
+  const count = sel.length;
+  const tokens = sel.reduce((s, i) => s + _pspTokenEst(i), 0);
+  const mins = count * 30;
+  const h = Math.floor(mins / 60), m = mins % 60;
+  const { pairs } = _pspConflictSet();
+  const conflictCount = pairs.length;
+
+  document.getElementById('psp-count').textContent = count;
+  document.getElementById('psp-tokens').textContent = tokens + ' k';
+  document.getElementById('psp-duration').textContent = `${h}h ${m}m`;
+  document.getElementById('psp-conflicts').textContent = conflictCount;
+
+  const card = document.getElementById('psp-conflicts-card');
+  if (card) card.classList.toggle('has-conflicts', conflictCount > 0);
+}
+
+function _pspUpdateConflicts() {
+  const { pairs } = _pspConflictSet();
+  const banner = document.getElementById('psp-conflict-banner');
+  const list   = document.getElementById('psp-conflict-list');
+  if (!banner || !list) return;
+
+  if (pairs.length === 0) {
+    banner.classList.add('hidden');
+    return;
+  }
+
+  banner.classList.remove('hidden');
+  list.innerHTML = pairs.map(p =>
+    `<li>Issue #${p.a} ↔ #${p.b} — shared: ${escapeHtml(p.file)}</li>`
+  ).join('');
+}
+
+function _pspUpdateBulkBar() {
+  const bar = document.getElementById('psp-bulk-bar');
+  const countEl = document.getElementById('psp-bulk-count');
+  if (!bar) return;
+  const n = _pspSelected.size;
+  bar.classList.toggle('hidden', n === 0);
+  if (countEl) countEl.textContent = `${n} selected`;
+}
+
+function _pspBuildLabelDropdown() {
+  const sel = document.getElementById('psp-label-select');
+  if (!sel) return;
+  const allLabels = new Set();
+  for (const iss of _pspIssues) {
+    for (const l of (iss.labels || [])) {
+      if (!STATUS_LABELS_SET.has(l.name) && !SPRINT_NUM_RE.test(l.name)) {
+        allLabels.add(l.name);
+      }
+    }
+  }
+  const current = sel.value;
+  sel.innerHTML = '<option value="">By label…</option>' +
+    [...allLabels].sort().map(l => `<option value="${escapeHtml(l)}">${escapeHtml(l)}</option>`).join('');
+  if (current && allLabels.has(current)) sel.value = current;
+}
+
+// ── Row interaction ───────────────────────────────────────────────────────────
+
+function pspToggleRow(e, issueNum) {
+  if (_pspSelected.has(issueNum)) {
+    _pspSelected.delete(issueNum);
+  } else {
+    _pspSelected.add(issueNum);
+  }
+  _pspUpdateRowState(issueNum);
+  _pspUpdateStrip();
+  _pspUpdateConflicts();
+  _pspUpdateBulkBar();
+  // re-render conflict icons on all rows
+  const { conflicting } = _pspConflictSet();
+  for (const iss of _pspIssues) {
+    const row = document.getElementById(`psp-row-${iss.number}`);
+    if (row) row.classList.toggle('psp-has-conflict', conflicting.has(iss.number));
+  }
+  _pspSaveDraft();
+}
+
+function _pspUpdateRowState(issueNum) {
+  const row = document.getElementById(`psp-row-${issueNum}`);
+  if (!row) return;
+  const cb = row.querySelector('.psp-row-cb');
+  const isSelected = _pspSelected.has(issueNum);
+  if (cb) cb.checked = isSelected;
+  row.classList.toggle('psp-selected', isSelected);
+}
+
+// ── Filters ───────────────────────────────────────────────────────────────────
+
+function pspSetFilter(filter) {
+  _pspFilter = filter;
+  _pspLabelFilter = '';
+  document.getElementById('psp-label-select').value = '';
+  document.querySelectorAll('.psp-ftab').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.filter === filter);
+  });
+  _pspRenderList();
+}
+
+function pspSetLabelFilter(val) {
+  _pspLabelFilter = val;
+  _pspFilter = val ? '' : 'all';
+  document.querySelectorAll('.psp-ftab').forEach(btn => btn.classList.remove('active'));
+  _pspRenderList();
+}
+
+function pspOnSearch() {
+  _pspSearch = document.getElementById('psp-search').value;
+  _pspRenderList();
+}
+
+// ── Goal input ────────────────────────────────────────────────────────────────
+
+function pspOnGoalInput() {
+  const val = (document.getElementById('psp-goal').value || '').trim();
+  const btn = document.getElementById('psp-start-btn');
+  if (btn) btn.disabled = val.length === 0;
+  _pspSaveDraft();
+}
+
+// ── Add to sprint ─────────────────────────────────────────────────────────────
+
+async function pspAddRowToSprint(issueNum) {
+  await _pspAddIssuesToSprint([issueNum]);
+}
+
+async function pspBulkAddToSprint() {
+  await _pspAddIssuesToSprint([..._pspSelected]);
+}
+
+async function _pspAddIssuesToSprint(issueNums) {
+  _pspShowError('');
+  const N = _pspTargetSprint;
+  let failed = false;
+  for (const num of issueNums) {
+    try {
+      const res = await fetch(`/api/issues/${num}/sprint-label`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sprint: N }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      // Mark row as in-sprint, deselect
+      _pspSelected.delete(num);
+      // Update issue labels locally so row turns green immediately
+      const iss = _pspIssues.find(i => i.number === num);
+      if (iss && !iss.labels.some(l => l.name === `sprint-${N}`)) {
+        iss.labels.push({ name: `sprint-${N}` });
+      }
+      const row = document.getElementById(`psp-row-${num}`);
+      if (row) {
+        row.classList.remove('psp-selected');
+        row.classList.add('psp-in-sprint');
+        const cb = row.querySelector('.psp-row-cb');
+        if (cb) cb.checked = false;
+      }
+    } catch (e) {
+      failed = true;
+      _pspShowError(`Failed to label #${num}: ${e.message}`);
+    }
+  }
+  _pspUpdateStrip();
+  _pspUpdateConflicts();
+  _pspUpdateBulkBar();
+  _pspSaveDraft();
+}
+
+// ── Bulk size mark ────────────────────────────────────────────────────────────
+
+async function pspBulkMarkSize(size) {
+  if (!size) return;
+  // Size marking via label — call sprint-planning/assign for now;
+  // just update locally for visual feedback (GitHub label management is separate scope)
+  for (const num of _pspSelected) {
+    const iss = _pspIssues.find(i => i.number === num);
+    if (!iss) continue;
+    iss.labels = iss.labels.filter(l => !['S', 'M', 'L', 'XL'].includes(l.name));
+    iss.labels.push({ name: size });
+    const row = document.getElementById(`psp-row-${num}`);
+    if (row) {
+      const pill = row.querySelector('.psp-size-pill');
+      if (pill) {
+        pill.className = `psp-size-pill psp-size-${size}`;
+        pill.textContent = size;
+      }
+      const tok = row.querySelector('.psp-token-est');
+      if (tok) tok.textContent = TOKEN_MAP[size] + ' k';
+    }
+  }
+  _pspUpdateStrip();
+}
+
+// ── Clear selection ───────────────────────────────────────────────────────────
+
+function pspClearSelection() {
+  const prev = [..._pspSelected];
+  _pspSelected.clear();
+  prev.forEach(n => _pspUpdateRowState(n));
+  _pspUpdateStrip();
+  _pspUpdateConflicts();
+  _pspUpdateBulkBar();
+  _pspSaveDraft();
+}
+
+// ── Start sprint ──────────────────────────────────────────────────────────────
+
+function pspStartSprint() {
+  const goal = (document.getElementById('psp-goal').value || '').trim();
+  if (!goal) return;
+  const N = _pspTargetSprint;
+  document.getElementById('psp-dialog-title').textContent = `Start sprint ${N}?`;
+  document.getElementById('psp-dialog-msg').textContent =
+    `Goal: "${goal}" — ${_pspSelected.size} issues selected.`;
+  document.getElementById('psp-dialog-backdrop').classList.remove('hidden');
+  document.getElementById('psp-dialog').classList.remove('hidden');
+}
+
+function pspCloseDialog() {
+  document.getElementById('psp-dialog-backdrop').classList.add('hidden');
+  document.getElementById('psp-dialog').classList.add('hidden');
+}
+
+async function pspConfirmStart() {
+  const goal = (document.getElementById('psp-goal').value || '').trim();
+  const N = _pspTargetSprint;
+  const btn = document.getElementById('psp-dialog-confirm');
+  const startBtn = document.getElementById('psp-start-btn');
+  pspCloseDialog();
+
+  if (startBtn) { startBtn.disabled = true; startBtn.textContent = 'Launching…'; }
+  try {
+    const res = await fetch('/api/sprint-run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ label: `sprint-${N}`, goal }),
+    });
+    if (!res.ok) throw new Error(await res.text());
+  } catch (e) {
+    _pspShowError('Failed to start sprint: ' + e.message);
+  } finally {
+    if (startBtn) {
+      const goalNow = (document.getElementById('psp-goal').value || '').trim();
+      startBtn.disabled = goalNow.length === 0;
+      startBtn.textContent = `Start sprint ${N}`;
+    }
+  }
+}
+
+// ── LocalStorage draft ────────────────────────────────────────────────────────
+
+function _pspSaveDraft() {
+  try {
+    localStorage.setItem(PSP_DRAFT_KEY, JSON.stringify({
+      selected: [..._pspSelected],
+      goal: document.getElementById('psp-goal')?.value || '',
+      sprint: _pspTargetSprint,
+    }));
+  } catch { /* ignore quota errors */ }
+}
+
+function _pspRestoreDraft() {
+  try {
+    const raw = localStorage.getItem(PSP_DRAFT_KEY);
+    if (!raw) return;
+    const draft = JSON.parse(raw);
+    if (draft.sprint === _pspTargetSprint && Array.isArray(draft.selected)) {
+      for (const n of draft.selected) {
+        if (_pspIssues.some(i => i.number === n)) _pspSelected.add(n);
+      }
+    }
+    const goalEl = document.getElementById('psp-goal');
+    if (goalEl && draft.goal) {
+      goalEl.value = draft.goal;
+      pspOnGoalInput();
+    }
+  } catch { /* ignore */ }
+}
+
+// ── Error helper ──────────────────────────────────────────────────────────────
+
+function _pspShowError(msg) {
+  const el = document.getElementById('psp-error');
+  if (!el) return;
+  el.textContent = msg;
+  el.classList.toggle('hidden', !msg);
 }
 
 function toggleHistoryRow(idx) {
@@ -1632,333 +2017,515 @@ async function _loadHistoryRowContent(idx) {
   contentEl.innerHTML = contentHtml + ghLink;
 }
 
-function _renderSpFooter(inSprintIssues) {
-  const footer = document.getElementById('sp-footer');
-  if (!footer) return;
-  if (_spSelectedSprint === null || inSprintIssues.length === 0) {
-    footer.textContent = '';
-    return;
-  }
+// ── Sprint Management (issue #95) ─────────────────────────────────────────────
 
-  const sizeHours = { S: 1, M: 2, L: 4, XL: 8 };
-  const counts = {};
-  let total = 0;
-  for (const iss of inSprintIssues) {
-    const s = iss.size || 'M';
-    counts[s] = (counts[s] || 0) + 1;
-    total += (sizeHours[s] || 2);
-  }
+let _smgmtCurrentRepo  = null;   // "owner/repo" currently displayed
+let _smgmtData         = null;   // { sprints, order, issues } from API
+let _smgmtDragSprint   = null;   // sprint label currently being drag-reordered
+let _smgmtDragTicket   = null;   // { number, fromSprint } being dragged
+let _smgmtRunningInfo  = null;   // { running, project, sprint_label } from /api/sprints/running
+let _smgmtPollTimer    = null;
 
-  const sizeOrder = ['S', 'M', 'L', 'XL'];
-  const parts = sizeOrder.filter(s => counts[s]).map(s => `${counts[s]}${s}`);
-  footer.textContent = `Sprint ${_spSelectedSprint} size: ${parts.join(' + ')} · est ${total}h`;
-}
+async function smgmtInit() {
+  // Populate project selector from already-loaded allProjects list
+  const sel = document.getElementById('smgmt-project-select');
+  if (!sel) return;
 
-// ── Sprint selector ───────────────────────────────────────────────────────────
-
-async function onSprintSelect() {
-  const sel = document.getElementById('sp-sprint-select');
-  const val = sel.value;
-
-  if (val === 'new') {
-    // Auto-increment sprint number
-    const sprints = (_spData && _spData.sprints) || [];
-    const next = sprints.length > 0 ? Math.max(...sprints) + 1 : 1;
-    // Create the label via assign endpoint — use a dummy "no-op" call to trigger label creation
+  if (allProjects.length > 0) {
+    sel.innerHTML = allProjects.map(p =>
+      `<option value="${escapeHtml(p.repo)}">${escapeHtml(p.name)}</option>`
+    ).join('');
+    const repo = _smgmtCurrentRepo || allProjects[0].repo;
+    sel.value = repo;
+    await smgmtSelectProject(repo);
+  } else {
+    // Fetch projects if not yet loaded
     try {
-      await fetch('/api/sprint-planning/issues'); // ensure data is loaded
-      // Create label by calling ensure via a dry-run assign on a non-existent issue
-      // Instead, we hit the assign endpoint with the new sprint for any existing issue
-      // Actually, we just set the sprint selector to the new number and let it render
-      _spSelectedSprint = next;
-      _spPendingChanges = {};
-
-      // Add to local sprints list
-      if (_spData) {
-        if (!_spData.sprints.includes(next)) _spData.sprints.push(next);
-        sel.value = String(next); // will be wrong until re-render
-        _renderSprintPlanning();
+      const res = await fetch('/api/projects');
+      if (!res.ok) throw new Error('Failed to load projects');
+      const data = await res.json();
+      allProjects = data.projects || [];
+      sel.innerHTML = allProjects.map(p =>
+        `<option value="${escapeHtml(p.repo)}">${escapeHtml(p.name)}</option>`
+      ).join('');
+      if (allProjects.length > 0) {
+        const repo = _smgmtCurrentRepo || allProjects[0].repo;
+        sel.value = repo;
+        await smgmtSelectProject(repo);
+      } else {
+        document.getElementById('smgmt-loading').textContent = 'No projects configured.';
       }
     } catch (e) {
-      sel.value = _spSelectedSprint ? String(_spSelectedSprint) : '';
+      smgmtShowError('Failed to load projects: ' + e.message);
     }
+  }
+
+  // Start polling running status
+  if (_smgmtPollTimer) clearInterval(_smgmtPollTimer);
+  _smgmtPollTimer = setInterval(smgmtPollRunStatus, 5000);
+  smgmtPollRunStatus();
+}
+
+async function smgmtSelectProject(repo) {
+  if (!repo) return;
+  _smgmtCurrentRepo = repo;
+  smgmtShowError('');
+  const bodyEl = document.getElementById('smgmt-body');
+  if (bodyEl) bodyEl.innerHTML = '<div class="smgmt-loading">Loading sprints…</div>';
+
+  try {
+    const res = await fetch(`/api/sprint-management/issues?repo=${encodeURIComponent(repo)}`);
+    if (!res.ok) throw new Error(await res.text());
+    _smgmtData = await res.json();
+  } catch (e) {
+    smgmtShowError('Failed to load sprints: ' + e.message);
+    return;
+  }
+  smgmtRender();
+}
+
+function smgmtRender() {
+  if (!_smgmtData) return;
+  const { order, issues } = _smgmtData;
+  const bodyEl = document.getElementById('smgmt-body');
+  if (!bodyEl) return;
+
+  // Lowest-numbered sprint gets NEXT UP badge + Run button
+  const allNums  = order.map(l => parseInt(l.split('-')[1], 10)).filter(n => !isNaN(n));
+  const lowestN  = allNums.length > 0 ? Math.min(...allNums) : null;
+  const lowestLabel = lowestN != null ? `sprint-${lowestN}` : null;
+
+  // Build map: sprint_label -> issues[]
+  const bySprintLabel = {};
+  for (const label of order) bySprintLabel[label] = [];
+  const unassigned = [];
+  for (const iss of issues) {
+    const label = iss.sprint != null ? `sprint-${iss.sprint}` : null;
+    if (label && bySprintLabel[label]) {
+      bySprintLabel[label].push(iss);
+    } else if (label == null) {
+      unassigned.push(iss);
+    }
+  }
+
+  if (order.length === 0) {
+    bodyEl.innerHTML = '<div class="smgmt-loading">No sprints found. Use "+ New sprint" to create one.</div>';
+  } else {
+    bodyEl.innerHTML = order.map(label =>
+      smgmtSprintBlockHtml(label, bySprintLabel[label] || [], label === lowestLabel)
+    ).join('');
+  }
+
+  // Render unassigned tickets
+  smgmtRenderUnassigned(unassigned);
+  smgmtApplyRunState();
+}
+
+function smgmtSprintBlockHtml(label, tickets, isNext) {
+  const n = parseInt(label.split('-')[1], 10);
+  const nextBadge = isNext
+    ? '<span class="smgmt-next-badge">NEXT UP</span>'
+    : '';
+  const runBtnId = `smgmt-run-btn-${label.replace('-', '_')}`;
+
+  const ticketsHtml = tickets.length > 0
+    ? tickets.map(t => smgmtTicketCardHtml(t, label)).join('')
+    : '<div class="smgmt-drop-hint">Drop tickets here</div>';
+
+  return `
+    <div class="smgmt-sprint-block" id="smgmt-block-${label}"
+         ondragover="smgmtDragOverZone(event, '${label}')"
+         ondragleave="smgmtDragLeave(event)"
+         ondrop="smgmtDropOnSprint(event, '${label}')">
+      <div class="smgmt-sprint-header"
+           draggable="true"
+           ondragstart="smgmtSprintDragStart(event, '${label}')"
+           ondragend="smgmtSprintDragEnd(event)">
+        <i class="ti ti-grip-vertical smgmt-sprint-grip"></i>
+        <span class="smgmt-sprint-name">Sprint ${n}</span>
+        ${nextBadge}
+        <span class="smgmt-sprint-count">${tickets.length} ticket${tickets.length !== 1 ? 's' : ''}</span>
+        ${isNext
+          ? `<button class="smgmt-run-btn" id="${runBtnId}"
+                     onclick="smgmtRunSprint('${label}')">Run sprint</button>`
+          : ''}
+      </div>
+      <div class="smgmt-sprint-tickets" id="smgmt-tickets-${label}">
+        ${ticketsHtml}
+      </div>
+    </div>`;
+}
+
+function smgmtTicketCardHtml(ticket, currentSprint) {
+  const statusClass = {
+    'backlog':      'smgmt-status-backlog',
+    'in-progress':  'smgmt-status-in-progress',
+    'sit':          'smgmt-status-sit',
+    'uat':          'smgmt-status-uat',
+    'done':         'smgmt-status-done',
+  }[ticket.status] || 'smgmt-status-backlog';
+  const statusLabel = ticket.status || 'backlog';
+
+  return `
+    <div class="smgmt-ticket" id="smgmt-ticket-${ticket.number}"
+         draggable="true"
+         data-issue="${ticket.number}"
+         data-sprint="${currentSprint || ''}"
+         ondragstart="smgmtTicketDragStart(event, ${ticket.number}, '${currentSprint || ''}')"
+         ondragend="smgmtTicketDragEnd(event)">
+      <i class="ti ti-grip-vertical smgmt-ticket-grip"></i>
+      <a class="smgmt-ticket-num" href="${escapeHtml(ticket.url || '#')}" target="_blank"
+         rel="noopener" onclick="event.stopPropagation()">#${ticket.number}</a>
+      <span class="smgmt-ticket-title" title="${escapeHtml(ticket.title)}">${escapeHtml(ticket.title)}</span>
+      <span class="smgmt-ticket-status ${statusClass}">${escapeHtml(statusLabel)}</span>
+    </div>`;
+}
+
+function smgmtRenderUnassigned(tickets) {
+  const el = document.getElementById('smgmt-unassigned-tickets');
+  if (!el) return;
+  if (tickets.length === 0) {
+    el.innerHTML = '<div class="smgmt-drop-hint">Drop tickets here to remove sprint label</div>';
+  } else {
+    el.innerHTML = tickets.map(t => smgmtTicketCardHtml(t, null)).join('');
+  }
+}
+
+// ── Sprint drag-and-drop (reorder) ────────────────────────────────────────────
+
+let _smgmtDragSprintLabel = null;
+let _smgmtDragSprintOver  = null;
+
+function smgmtSprintDragStart(event, label) {
+  _smgmtDragSprintLabel = label;
+  event.dataTransfer.effectAllowed = 'move';
+  event.dataTransfer.setData('text/smgmt-sprint', label);
+  const block = document.getElementById(`smgmt-block-${label}`);
+  if (block) setTimeout(() => block.classList.add('dragging-sprint'), 0);
+}
+
+function smgmtSprintDragEnd(event) {
+  if (_smgmtDragSprintLabel) {
+    const block = document.getElementById(`smgmt-block-${_smgmtDragSprintLabel}`);
+    if (block) block.classList.remove('dragging-sprint');
+  }
+  _smgmtDragSprintLabel = null;
+  // Clear all hover states
+  document.querySelectorAll('.smgmt-sprint-block').forEach(b => b.classList.remove('drag-over-sprint'));
+}
+
+// ── Ticket drag-and-drop ──────────────────────────────────────────────────────
+
+function smgmtTicketDragStart(event, issueNum, fromSprint) {
+  _smgmtDragTicket = { number: issueNum, fromSprint: fromSprint || null };
+  event.dataTransfer.effectAllowed = 'move';
+  event.dataTransfer.setData('text/smgmt-ticket', String(issueNum));
+  const el = document.getElementById(`smgmt-ticket-${issueNum}`);
+  if (el) setTimeout(() => el.classList.add('dragging-ticket'), 0);
+}
+
+function smgmtTicketDragEnd(event) {
+  if (_smgmtDragTicket) {
+    const el = document.getElementById(`smgmt-ticket-${_smgmtDragTicket.number}`);
+    if (el) el.classList.remove('dragging-ticket');
+  }
+  _smgmtDragTicket = null;
+  // Clear all hover states
+  document.querySelectorAll('.smgmt-sprint-block, .smgmt-unassigned').forEach(el => {
+    el.classList.remove('drag-over-sprint', 'drag-over-zone');
+  });
+}
+
+function smgmtDragOverZone(event, sprintLabel) {
+  // Prevent default only for ticket drags or sprint drags
+  if (_smgmtDragTicket || _smgmtDragSprintLabel) {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+  }
+
+  if (_smgmtDragSprintLabel && sprintLabel && sprintLabel !== _smgmtDragSprintLabel) {
+    // Sprint reorder hover
+    document.querySelectorAll('.smgmt-sprint-block').forEach(b => b.classList.remove('drag-over-sprint'));
+    const target = document.getElementById(`smgmt-block-${sprintLabel}`);
+    if (target) target.classList.add('drag-over-sprint');
+    _smgmtDragSprintOver = sprintLabel;
     return;
   }
 
-  _spSelectedSprint = Number(val);
-  _spPendingChanges = {};
-  if (_spData) _renderColumns(_spData.issues);
+  if (_smgmtDragTicket) {
+    if (sprintLabel) {
+      document.querySelectorAll('.smgmt-sprint-block').forEach(b => b.classList.remove('drag-over-sprint'));
+      document.querySelectorAll('.smgmt-unassigned').forEach(b => b.classList.remove('drag-over-zone'));
+      const target = document.getElementById(`smgmt-block-${sprintLabel}`);
+      if (target) target.classList.add('drag-over-sprint');
+    } else {
+      document.querySelectorAll('.smgmt-sprint-block').forEach(b => b.classList.remove('drag-over-sprint'));
+      document.getElementById('smgmt-unassigned')?.classList.add('drag-over-zone');
+    }
+  }
 }
 
-// ── Apply pending changes ─────────────────────────────────────────────────────
+function smgmtDragLeave(event) {
+  // Only clear if leaving to outside the zone
+  if (event.currentTarget && !event.currentTarget.contains(event.relatedTarget)) {
+    event.currentTarget.classList.remove('drag-over-sprint', 'drag-over-zone');
+  }
+}
 
-async function applySprintChanges() {
-  const changes = Object.entries(_spPendingChanges);
-  if (changes.length === 0) return;
+async function smgmtDropOnSprint(event, targetSprintLabel) {
+  event.preventDefault();
+  document.querySelectorAll('.smgmt-sprint-block, .smgmt-unassigned').forEach(el => {
+    el.classList.remove('drag-over-sprint', 'drag-over-zone');
+  });
 
-  const btn = document.getElementById('sp-apply-btn');
-  if (btn) { btn.disabled = true; btn.textContent = 'Applying…'; }
+  // Sprint reorder drop
+  if (_smgmtDragSprintLabel && targetSprintLabel && _smgmtDragSprintLabel !== targetSprintLabel) {
+    const fromLabel = _smgmtDragSprintLabel;
+    _smgmtDragSprintLabel = null;
+    await smgmtReorderSprints(fromLabel, targetSprintLabel);
+    return;
+  }
 
-  let failed = false;
-  for (const [issNum, change] of changes) {
-    const sprintVal = change.to === 'sprint' ? _spSelectedSprint : null;
+  // Ticket drop
+  if (_smgmtDragTicket) {
+    const { number, fromSprint } = _smgmtDragTicket;
+    _smgmtDragTicket = null;
+
+    if (fromSprint === targetSprintLabel) return; // no-op
+
+    // Optimistic: move ticket in local data
+    const iss = _smgmtData.issues.find(i => i.number === number);
+    if (iss) {
+      const targetNum = targetSprintLabel ? parseInt(targetSprintLabel.split('-')[1], 10) : null;
+      iss.sprint = targetNum;
+    }
+    smgmtRender();
+
+    // API call
+    const targetSprintNum = targetSprintLabel ? parseInt(targetSprintLabel.split('-')[1], 10) : null;
     try {
       const res = await fetch('/api/sprint-planning/assign', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ issue: Number(issNum), sprint: sprintVal }),
+        body: JSON.stringify({ issue: number, sprint: targetSprintNum }),
       });
       if (!res.ok) throw new Error(await res.text());
     } catch (e) {
-      failed = true;
-      const card = document.getElementById(`sp-card-${issNum}`);
-      if (card) {
-        card.classList.add('error-flash');
-        let errEl = card.querySelector('.sp-card-error');
-        if (!errEl) { errEl = document.createElement('div'); errEl.className = 'sp-card-error'; card.appendChild(errEl); }
-        errEl.textContent = 'Apply failed: ' + e.message;
-        setTimeout(() => card.classList.remove('error-flash'), 600);
+      // Rollback: restore original sprint
+      const iss2 = _smgmtData.issues.find(i => i.number === number);
+      if (iss2) {
+        const origNum = fromSprint ? parseInt(fromSprint.split('-')[1], 10) : null;
+        iss2.sprint = origNum;
       }
+      smgmtRender();
+      smgmtShowError(`Failed to move ticket #${number}: ${e.message}`);
     }
   }
-
-  if (!failed) {
-    _spPendingChanges = {};
-  }
-
-  if (btn) { btn.disabled = false; btn.textContent = 'Apply ✓'; }
-
-  // Reload fresh data
-  await loadSprintPlanning();
 }
 
-// ── Drag & drop (HTML5 native) ────────────────────────────────────────────────
+async function smgmtReorderSprints(fromLabel, toLabel) {
+  if (!_smgmtData) return;
+  const order = [..._smgmtData.order];
+  const fromIdx = order.indexOf(fromLabel);
+  const toIdx   = order.indexOf(toLabel);
+  if (fromIdx === -1 || toIdx === -1) return;
 
-function _bindDragEvents() {
-  document.querySelectorAll('.sp-card').forEach(card => {
-    card.addEventListener('dragstart', _onDragStart);
-    card.addEventListener('dragend',   _onDragEnd);
-  });
-}
+  // Swap positions
+  order.splice(fromIdx, 1);
+  order.splice(toIdx, 0, fromLabel);
+  _smgmtData.order = order;
+  smgmtRender();
 
-function _onDragStart(e) {
-  const card = e.currentTarget;
-  _spDragSrc = {
-    card,
-    issueNum: Number(card.dataset.issue),
-    fromCol: card.closest('.sp-col')?.dataset.col,
-  };
-  card.classList.add('dragging');
-  e.dataTransfer.effectAllowed = 'move';
-  e.dataTransfer.setData('text/plain', card.dataset.issue);
-}
-
-function _onDragEnd(e) {
-  e.currentTarget.classList.remove('dragging');
-  _spDragSrc = null;
-}
-
-function onDrop(e, targetCol) {
-  e.preventDefault();
-  if (!_spDragSrc) return;
-
-  const { card, issueNum, fromCol } = _spDragSrc;
-
-  if (fromCol === targetCol) {
-    // Reorder within sprint column (client-side only)
-    return;
-  }
-
-  // Optimistic UI: move card immediately
-  const targetCards = document.getElementById(`sp-cards-${targetCol}`);
-  const fromCards   = document.getElementById(`sp-cards-${fromCol}`);
-  if (!targetCards || !fromCards) return;
-
-  // Remove empty placeholder if present
-  targetCards.querySelectorAll('.sp-empty').forEach(el => el.remove());
-
-  // Move card
-  fromCards.removeChild(card);
-  targetCards.appendChild(card);
-
-  // If source is now empty, add empty placeholder
-  if (fromCards.querySelectorAll('.sp-card').length === 0) {
-    const empty = document.createElement('div');
-    empty.className = 'sp-empty';
-    empty.textContent = fromCol === 'sprint' ? 'No issues in this sprint' : 'No unassigned issues';
-    fromCards.appendChild(empty);
-  }
-
-  // Track pending change
-  const pendingPrev = _spPendingChanges[issueNum];
-  if (pendingPrev && pendingPrev.from === targetCol) {
-    // Moving back to original — cancel pending
-    delete _spPendingChanges[issueNum];
-  } else {
-    _spPendingChanges[issueNum] = { from: fromCol, to: targetCol };
-  }
-
-  // Update Apply button visibility
-  const applyBtn = document.getElementById('sp-apply-btn');
-  if (applyBtn) {
-    applyBtn.style.display = Object.keys(_spPendingChanges).length > 0 ? '' : 'none';
-  }
-
-  // Re-compute footer from current DOM state
-  _recomputeFooterFromDOM();
-
-  // Immediately apply (no "Apply" button required for single drags)
-  _applyOneDrop(issueNum, targetCol);
-}
-
-async function _applyOneDrop(issueNum, targetCol) {
-  const sprintVal = targetCol === 'sprint' ? _spSelectedSprint : null;
-  const card = document.getElementById(`sp-card-${issueNum}`);
-  const fromCol = targetCol === 'sprint' ? 'unassigned' : 'sprint';
-
+  // Persist
+  const slug = (_smgmtCurrentRepo || '').split('/')[1] || _smgmtCurrentRepo || '';
   try {
-    const res = await fetch('/api/sprint-planning/assign', {
+    const res = await fetch(`/api/sprints/order?project=${encodeURIComponent(slug)}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ issue: issueNum, sprint: sprintVal }),
+      body: JSON.stringify({ order }),
     });
     if (!res.ok) throw new Error(await res.text());
-    // Success — remove from pending
-    delete _spPendingChanges[issueNum];
-    const applyBtn = document.getElementById('sp-apply-btn');
-    if (applyBtn) applyBtn.style.display = Object.keys(_spPendingChanges).length > 0 ? '' : 'none';
   } catch (e) {
-    // Rollback: move card back
-    if (card) {
-      const targetCards = document.getElementById(`sp-cards-${targetCol}`);
-      const fromCards   = document.getElementById(`sp-cards-${fromCol}`);
-      if (targetCards && fromCards) {
-        targetCards.removeChild(card);
-        fromCards.querySelectorAll('.sp-empty').forEach(el => el.remove());
-        fromCards.appendChild(card);
-        if (targetCards.querySelectorAll('.sp-card').length === 0) {
-          const empty = document.createElement('div');
-          empty.className = 'sp-empty';
-          empty.textContent = targetCol === 'sprint' ? 'No issues in this sprint' : 'No unassigned issues';
-          targetCards.appendChild(empty);
-        }
-      }
-      // Flash error on card
-      card.classList.add('error-flash');
-      let errEl = card.querySelector('.sp-card-error');
-      if (!errEl) { errEl = document.createElement('div'); errEl.className = 'sp-card-error'; card.appendChild(errEl); }
-      errEl.textContent = 'Failed: ' + e.message;
-      setTimeout(() => {
-        card.classList.remove('error-flash');
-        if (errEl) errEl.remove();
-      }, 3000);
+    smgmtShowError('Failed to save sprint order: ' + e.message);
+  }
+}
+
+// ── Run sprint ────────────────────────────────────────────────────────────────
+
+async function smgmtRunSprint(sprintLabel) {
+  if (!_smgmtCurrentRepo) return;
+  const runBtnId = `smgmt-run-btn-${sprintLabel.replace('-', '_')}`;
+  const btn = document.getElementById(runBtnId);
+  if (btn) { btn.disabled = true; btn.textContent = 'Starting…'; }
+
+  try {
+    const res = await fetch('/api/sprints/run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ project: _smgmtCurrentRepo, sprint_label: sprintLabel }),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    smgmtPollRunStatus();
+  } catch (e) {
+    smgmtShowError('Failed to start sprint: ' + e.message);
+    if (btn) { btn.disabled = false; btn.textContent = 'Run sprint'; }
+  }
+}
+
+async function smgmtPollRunStatus() {
+  try {
+    const [runRes, statusRes] = await Promise.all([
+      fetch('/api/sprints/running'),
+      fetch('/api/sprint-status').catch(() => ({ ok: false })),
+    ]);
+    if (runRes.ok) {
+      _smgmtRunningInfo = await runRes.json();
     }
-    delete _spPendingChanges[issueNum];
-    _recomputeFooterFromDOM();
-  }
+    let sprintStatus = null;
+    if (statusRes.ok) sprintStatus = await statusRes.json();
+    smgmtApplyRunState(sprintStatus);
+  } catch { /* ignore poll errors */ }
 }
 
-function _recomputeFooterFromDOM() {
-  const footer = document.getElementById('sp-footer');
-  if (!footer || _spSelectedSprint === null) return;
+function smgmtApplyRunState(sprintStatus) {
+  const running  = _smgmtRunningInfo?.running || false;
+  const runLabel = _smgmtRunningInfo?.sprint_label || null;
+  const runProj  = _smgmtRunningInfo?.project || null;
 
-  const sizeHours = { S: 1, M: 2, L: 4, XL: 8 };
-  const counts = {};
-  let total = 0;
+  // Find all run buttons
+  document.querySelectorAll('.smgmt-run-btn').forEach(btn => {
+    const btnLabel = btn.id.replace('smgmt-run-btn-', '').replace('_', '-');
 
-  document.querySelectorAll('#sp-cards-sprint .sp-card').forEach(card => {
-    const s = card.dataset.size || 'M';
-    counts[s] = (counts[s] || 0) + 1;
-    total += (sizeHours[s] || 2);
+    if (!running) {
+      btn.disabled = false;
+      btn.textContent = 'Run sprint';
+      return;
+    }
+
+    btn.disabled = true;
+    if (runLabel === btnLabel && runProj === _smgmtCurrentRepo) {
+      // This is the running sprint — show progress if available
+      if (sprintStatus && sprintStatus.sprint_label === runLabel) {
+        const total = (sprintStatus.issues || []).length;
+        const done  = (sprintStatus.issues || []).filter(i =>
+          i.status === 'done' || i.status === 'skipped'
+        ).length;
+        btn.textContent = `Running… ${done}/${total} tickets`;
+      } else {
+        btn.textContent = 'Running…';
+      }
+    } else {
+      btn.textContent = 'Another sprint is running';
+    }
   });
+}
 
-  if (Object.keys(counts).length === 0) {
-    footer.textContent = '';
-    return;
+// ── Create sprint ─────────────────────────────────────────────────────────────
+
+async function smgmtCreateSprint() {
+  if (!_smgmtCurrentRepo) return;
+  const btn = document.getElementById('smgmt-new-sprint-btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Creating…'; }
+
+  try {
+    const res = await fetch('/api/sprints/create', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ project: _smgmtCurrentRepo }),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    const data = await res.json();
+    // Reload sprint data
+    await smgmtSelectProject(_smgmtCurrentRepo);
+  } catch (e) {
+    smgmtShowError('Failed to create sprint: ' + e.message);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '+ New sprint'; }
   }
-
-  const sizeOrder = ['S', 'M', 'L', 'XL'];
-  const parts = sizeOrder.filter(s => counts[s]).map(s => `${counts[s]}${s}`);
-  footer.textContent = `Sprint ${_spSelectedSprint} size: ${parts.join(' + ')} · est ${total}h`;
 }
 
-// ── Mobile touch/pointer drag ─────────────────────────────────────────────────
+// ── Error display ─────────────────────────────────────────────────────────────
 
-(function _initPointerDrag() {
-  // We use event delegation on the sp-columns container (added after render)
-  document.addEventListener('pointerdown', _spPointerDown, { passive: false });
-  document.addEventListener('pointermove', _spPointerMove, { passive: false });
-  document.addEventListener('pointerup',   _spPointerUp,   { passive: false });
-})();
-
-let _spTouchDrag = null; // { card, issueNum, fromCol, ghost, startX, startY }
-
-function _spPointerDown(e) {
-  // Only act on touch/pen on sp-card elements
-  if (e.pointerType === 'mouse') return;
-  const card = e.target.closest('.sp-card');
-  if (!card) return;
-
-  e.preventDefault();
-  const rect = card.getBoundingClientRect();
-
-  // Create ghost
-  const ghost = card.cloneNode(true);
-  ghost.style.cssText = `
-    position: fixed; left: ${rect.left}px; top: ${rect.top}px;
-    width: ${rect.width}px; opacity: 0.8; pointer-events: none;
-    z-index: 9999; box-shadow: 0 4px 16px rgba(0,0,0,.2);
-    transition: none;
-  `;
-  document.body.appendChild(ghost);
-  _spDragGhost = ghost;
-
-  _spTouchDrag = {
-    card,
-    issueNum: Number(card.dataset.issue),
-    fromCol: card.closest('.sp-col')?.dataset.col,
-    ghost,
-    startX: e.clientX,
-    startY: e.clientY,
-    offsetX: e.clientX - rect.left,
-    offsetY: e.clientY - rect.top,
-  };
-  card.classList.add('dragging');
-}
-
-function _spPointerMove(e) {
-  if (!_spTouchDrag) return;
-  e.preventDefault();
-  const { ghost, offsetX, offsetY } = _spTouchDrag;
-  ghost.style.left = (e.clientX - offsetX) + 'px';
-  ghost.style.top  = (e.clientY - offsetY) + 'px';
-}
-
-function _spPointerUp(e) {
-  if (!_spTouchDrag) return;
-  const { card, issueNum, fromCol, ghost } = _spTouchDrag;
-
-  ghost.style.display = 'none';
-  const el = document.elementFromPoint(e.clientX, e.clientY);
-  ghost.remove();
-  _spDragGhost = null;
-  card.classList.remove('dragging');
-
-  const targetCol = el?.closest('.sp-col')?.dataset.col;
-  _spTouchDrag = null;
-
-  if (targetCol && targetCol !== fromCol) {
-    _spDragSrc = { card, issueNum, fromCol };
-    onDrop({ preventDefault: () => {} }, targetCol);
-  }
+function smgmtShowError(msg) {
+  const el = document.getElementById('smgmt-error');
+  if (!el) return;
+  el.textContent = msg;
+  el.classList.toggle('hidden', !msg);
 }
 
 // ── SSE handler for sprint_plan_update ────────────────────────────────────────
 
 function _handleSprintPlanSSE() {
-  // Re-fetch and re-render if the Sprint Planning tab is active
   if (!document.getElementById('view-sprint-plan').classList.contains('hidden')) {
     loadSprintPlanning();
+  }
+}
+
+// ── Remove Project Dialog ─────────────────────────────────────────────────────
+
+let _rpRepo = null;
+
+function openRemoveProjectDialog(repo, name) {
+  _rpRepo = repo;
+  document.getElementById('rp-project-name').textContent = name;
+  document.getElementById('rp-delete-folders').checked = false;
+  document.getElementById('rp-delete-github').checked = false;
+  const errEl = document.getElementById('rp-error');
+  errEl.textContent = '';
+  errEl.classList.add('hidden');
+  const btn = document.getElementById('rp-confirm-btn');
+  btn.disabled = false;
+  btn.textContent = 'Confirm Remove';
+  document.getElementById('remove-project-backdrop').classList.remove('hidden');
+  document.getElementById('remove-project-modal').classList.remove('hidden');
+}
+
+function closeRemoveProjectDialog() {
+  _rpRepo = null;
+  document.getElementById('remove-project-backdrop').classList.add('hidden');
+  document.getElementById('remove-project-modal').classList.add('hidden');
+}
+
+async function confirmRemoveProject() {
+  if (!_rpRepo) return;
+  const repo          = _rpRepo;
+  const deleteLocal   = document.getElementById('rp-delete-folders').checked;
+  const deleteGithub  = document.getElementById('rp-delete-github').checked;
+
+  const btn   = document.getElementById('rp-confirm-btn');
+  const errEl = document.getElementById('rp-error');
+  btn.disabled = true;
+  btn.textContent = 'Removing…';
+  errEl.textContent = '';
+  errEl.classList.add('hidden');
+
+  try {
+    const parts = repo.split('/');
+    const url = `/api/projects/${encodeURIComponent(parts[0])}/${encodeURIComponent(parts[1])}`;
+    const res = await fetch(url, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ delete_local_folders: deleteLocal, delete_github_repo: deleteGithub }),
+    });
+
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      errEl.textContent = data.detail || `Error ${res.status}`;
+      errEl.classList.remove('hidden');
+      btn.disabled = false;
+      btn.textContent = 'Confirm Remove';
+      return;
+    }
+
+    closeRemoveProjectDialog();
+    expandedProjects.delete(repo);
+    delete detailsCache[repo];
+    loadProjects();
+  } catch {
+    errEl.textContent = 'Network error. Please try again.';
+    errEl.classList.remove('hidden');
+    btn.disabled = false;
+    btn.textContent = 'Confirm Remove';
   }
 }
 
@@ -1975,4 +2542,7 @@ function _handleSprintPlanSSE() {
   loadSprintStatus().catch(() => {});
   connectSSE();
   document.getElementById('btn-refresh')?.addEventListener('click', manualRefresh);
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && _rpRepo !== null) closeRemoveProjectDialog();
+  });
 })();

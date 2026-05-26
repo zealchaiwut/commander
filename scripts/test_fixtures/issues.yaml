@@ -1,0 +1,332 @@
+# Commander sandbox test fixture — issues.yaml
+#
+# Structure:
+#   issues:                     top-level list of issue objects
+#     - title: str              required — used as idempotency key (exact match)
+#       body:  str              required — issue body text (markdown)
+#       labels: [str]           optional — list of label names to apply
+#       state:  open|closed     optional — defaults to open
+#       comments: [str]         optional — list of comment bodies to post after creation
+#
+# Labels used:
+#   Status:   backlog, in-progress, SIT, UAT, UAT-approved, needs-rework, blocked
+#   Sprint:   sprint-1, sprint-2, sprint-3
+#   Size:     size-S, size-M, size-L
+#
+# The seed script ensures all referenced labels exist before creating issues.
+# Issues are identified by title for idempotent runs.
+
+issues:
+  # ── Backlog issues ─────────────────────────────────────────────────────────
+
+  - title: "[test] Add user authentication flow"
+    body: |
+      ## What & Why
+      Add OAuth-based user authentication to protect the dashboard.
+
+      ## Acceptance Criteria
+      - [ ] Login page renders at /login
+      - [ ] Valid OAuth token grants access
+      - [ ] Invalid token returns 401
+
+      ## UAT Test Steps
+      1. Visit /login — Expected: login form visible
+      2. Submit valid credentials — Expected: redirect to dashboard
+    labels:
+      - backlog
+      - sprint-1
+      - size-L
+    state: open
+
+  - title: "[test] Fix login session timeout"
+    body: |
+      ## What & Why
+      Sessions expire too quickly (30 sec instead of 30 min).
+
+      ## Acceptance Criteria
+      - [ ] Session timeout is configurable via SESSION_TTL env var
+      - [ ] Default timeout is 30 minutes
+
+      ## UAT Test Steps
+      1. Log in and wait 35 minutes — Expected: session still valid
+    labels:
+      - backlog
+      - sprint-1
+      - size-S
+    state: open
+
+  - title: "[test] Add dashboard data export"
+    body: |
+      ## What & Why
+      Allow users to export sprint data as CSV.
+
+      ## Acceptance Criteria
+      - [ ] GET /api/export returns CSV content-type
+      - [ ] CSV contains all open issues for the sprint
+      - [ ] Filename includes sprint number
+
+      ## UAT Test Steps
+      1. Click export button — Expected: CSV file downloaded
+    labels:
+      - backlog
+      - sprint-2
+      - size-M
+    state: open
+
+  - title: "[test] Add sprint-3 planning endpoint"
+    body: |
+      ## What & Why
+      Sprint 3 needs a dedicated planning API endpoint.
+
+      ## Acceptance Criteria
+      - [ ] GET /api/sprint/3/plan returns plan data
+      - [ ] Endpoint respects COMMANDER_MERGE_TARGET
+
+      ## UAT Test Steps
+      1. GET /api/sprint/3/plan — Expected: 200 with plan JSON
+    labels:
+      - backlog
+      - sprint-3
+      - size-M
+    state: open
+
+  # ── In-progress issues ─────────────────────────────────────────────────────
+
+  - title: "[test] Implement response caching layer"
+    body: |
+      ## What & Why
+      GitHub API calls are slow. Add a 30-second cache.
+
+      ## Acceptance Criteria
+      - [ ] Repeated calls within 30s return cached result
+      - [ ] Cache invalidates after TTL
+      - [ ] Cache can be manually cleared via /api/cache/clear
+
+      ## UAT Test Steps
+      1. Make two rapid calls to /api/issues — Expected: second is instant
+    labels:
+      - in-progress
+      - sprint-1
+      - size-L
+    state: open
+
+  - title: "[test] Fix issue pagination bug"
+    body: |
+      ## What & Why
+      Issues beyond page 2 are not returned by the API.
+
+      ## Acceptance Criteria
+      - [ ] /api/issues returns all issues regardless of count
+      - [ ] Pagination meta shows correct total
+
+      ## UAT Test Steps
+      1. Create 25 issues, fetch /api/issues — Expected: all 25 returned
+    labels:
+      - in-progress
+      - sprint-2
+      - size-S
+    state: open
+
+  # ── SIT issues ─────────────────────────────────────────────────────────────
+
+  - title: "[test] Add audit logging for write operations"
+    body: |
+      ## What & Why
+      Track who changed issue labels and when for compliance.
+
+      ## Acceptance Criteria
+      - [ ] Each label change is logged to audit_log table
+      - [ ] Log entry includes timestamp, issue id, old label, new label
+      - [ ] GET /api/audit returns paginated log
+
+      ## UAT Test Steps
+      1. Approve an issue — Expected: audit entry created
+      2. GET /api/audit — Expected: entry visible in response
+    labels:
+      - SIT
+      - sprint-1
+      - size-M
+    state: open
+
+  - title: "[test] Refactor DB query performance"
+    body: |
+      ## What & Why
+      Sprint board queries take 2+ seconds on large datasets.
+
+      ## Acceptance Criteria
+      - [ ] Sprint board query completes in < 200ms for 500 issues
+      - [ ] Existing tests still pass
+      - [ ] No schema migrations required
+
+      ## UAT Test Steps
+      1. Load sprint board with 500 issues — Expected: renders in < 1 second
+    labels:
+      - SIT
+      - sprint-2
+      - size-L
+    state: open
+
+  # ── UAT issues (with mock test-report comments) ────────────────────────────
+
+  - title: "[test] Add API rate limiting"
+    body: |
+      ## What & Why
+      Prevent abuse by limiting requests to 100/min per IP.
+
+      ## Acceptance Criteria
+      - [ ] Requests over 100/min receive 429 response
+      - [ ] X-RateLimit-Remaining header present on all responses
+      - [ ] Rate limit resets after 60 seconds
+
+      ## UAT Test Steps
+      1. Send 101 rapid requests — Expected: 101st returns 429
+      2. Check headers — Expected: X-RateLimit-Remaining visible
+    labels:
+      - UAT
+      - sprint-1
+      - size-S
+    state: open
+    comments:
+      - |
+        ## Acceptance Criteria Results
+        - [x] Requests over 100/min receive 429 response — ✅ PASS
+        - [x] X-RateLimit-Remaining header present on all responses — ✅ PASS
+        - [x] Rate limit resets after 60 seconds — ✅ PASS
+
+        ## UAT Step Results
+        1. Send 101 rapid requests — ✅ PASS (HTTP 429 on 101st)
+        2. Check headers — ✅ PASS (X-RateLimit-Remaining: 0)
+
+        ## Summary
+        Status: READY_FOR_UAT
+        Risk: MEDIUM
+        Environment: UAT (http://localhost:8001)
+        Passed: 3 / Failed: 0 / Manual: 0
+
+  - title: "[test] Implement dark mode toggle"
+    body: |
+      ## What & Why
+      Users want a dark mode for late-night coding sessions.
+
+      ## Acceptance Criteria
+      - [ ] Toggle button appears in header
+      - [ ] Dark mode persists across page reloads via localStorage
+      - [ ] All text remains readable in dark mode
+
+      ## UAT Test Steps
+      1. Click dark mode toggle — Expected: page switches to dark theme
+      2. Reload page — Expected: dark mode preserved
+    labels:
+      - UAT
+      - sprint-2
+      - size-M
+    state: open
+    comments:
+      - |
+        ## Acceptance Criteria Results
+        - [x] Toggle button appears in header — ✅ PASS
+        - [x] Dark mode persists across page reloads via localStorage — ✅ PASS
+        - [ ] All text remains readable in dark mode — ⚠️ MANUAL (visual check)
+
+        ## UAT Step Results
+        1. Click dark mode toggle — ⚠️ MANUAL (requires browser interaction)
+        2. Reload page — ⚠️ MANUAL (visual check)
+
+        ## Summary
+        Status: READY_FOR_UAT
+        Risk: LOW
+        Environment: UAT (http://localhost:8001)
+        Passed: 2 / Failed: 0 / Manual: 3
+
+  # ── UAT-approved issues ────────────────────────────────────────────────────
+
+  - title: "[test] Add CSV export for issues"
+    body: |
+      ## What & Why
+      Export sprint issues as CSV for stakeholder reporting.
+
+      ## Acceptance Criteria
+      - [ ] GET /api/export/csv returns valid CSV
+      - [ ] CSV includes number, title, status, sprint columns
+      - [ ] Empty sprint returns empty CSV with headers
+
+      ## UAT Test Steps
+      1. GET /api/export/csv — Expected: file downloads with correct headers
+    labels:
+      - UAT-approved
+      - sprint-1
+      - size-L
+    state: closed
+
+  - title: "[test] Fix mobile layout overflow"
+    body: |
+      ## What & Why
+      Sprint board overflows on screens narrower than 400px.
+
+      ## Acceptance Criteria
+      - [ ] Board renders without horizontal scroll on 375px viewport
+      - [ ] Issue titles truncate with ellipsis when too long
+
+      ## UAT Test Steps
+      1. View board on iPhone SE — Expected: no horizontal scroll
+    labels:
+      - UAT-approved
+      - sprint-2
+      - size-S
+    state: closed
+
+  # ── Released (closed + UAT-approved) ──────────────────────────────────────
+
+  - title: "[test] Add webhook support for issue events"
+    body: |
+      ## What & Why
+      Allow external tools to subscribe to issue label changes.
+
+      ## Acceptance Criteria
+      - [ ] POST /api/webhooks registers a URL
+      - [ ] Label changes trigger POST to registered URLs
+      - [ ] Failed deliveries are retried up to 3 times
+
+      ## UAT Test Steps
+      1. Register webhook — Expected: 201 created
+      2. Change label — Expected: webhook fires within 5 seconds
+    labels:
+      - UAT-approved
+      - sprint-1
+      - size-M
+    state: closed
+
+  # ── Edge cases ─────────────────────────────────────────────────────────────
+
+  - title: "[test] Edge case — no labels"
+    body: |
+      ## What & Why
+      Verify the dashboard handles issues with no labels gracefully.
+
+      ## Acceptance Criteria
+      - [ ] Issue with no labels appears in the backlog column
+      - [ ] No 500 error when rendering unlabelled issues
+
+      ## UAT Test Steps
+      1. Load sprint board with unlabelled issue — Expected: no error, appears in backlog
+    labels: []
+    state: open
+
+  - title: "[test] Edge case — conflicting status labels"
+    body: |
+      ## What & Why
+      Verify the dashboard handles issues with both SIT and UAT labels.
+      This should not normally occur but the UI must not crash.
+
+      ## Acceptance Criteria
+      - [ ] Issue with both SIT and UAT renders without error
+      - [ ] Dashboard shows the higher-priority status (UAT takes precedence)
+
+      ## UAT Test Steps
+      1. View issue with SIT+UAT labels — Expected: shown as UAT, no crash
+    labels:
+      - SIT
+      - UAT
+      - sprint-3
+      - size-S
+    state: open

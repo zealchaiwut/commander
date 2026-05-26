@@ -126,6 +126,11 @@ class InitProjectBody(BaseModel):
     skip_uat: bool = False
 
 
+class RemoveProjectBody(BaseModel):
+    delete_local_folders: bool = False
+    delete_github_repo: bool = False
+
+
 class DatabaseStatus(BaseModel):
     reachable: bool
     path: str
@@ -367,6 +372,66 @@ def add_project(body: NewProjectBody):
         raise HTTPException(409, detail=str(e))
     except ValueError as e:
         raise HTTPException(422, detail=str(e))
+    except subprocess.CalledProcessError as e:
+        raise _gh_error(e)
+
+
+@app.delete("/api/projects/{owner}/{repo_name}")
+async def remove_project(owner: str, repo_name: str, body: RemoveProjectBody):
+    import shutil
+
+    repo = f"{owner}/{repo_name}"
+
+    if not any(p["repo"] == repo for p in projects_module.load_projects()):
+        raise HTTPException(404, detail="Project not found")
+
+    removed: list[str] = []
+
+    # Remove from all projects.json copies first (not rolled back on subsequent errors)
+    removed.extend(projects_module.remove_project(repo))
+
+    if body.delete_local_folders:
+        projects_dir = Path.home() / "dev"
+        project_root = projects_dir / repo_name
+        nested = (project_root / "main").exists() and (project_root / "main" / ".git").exists()
+        if nested:
+            if project_root.exists():
+                shutil.rmtree(project_root)
+                removed.append(str(project_root))
+        else:
+            uat_dir = project_root / "uat"
+            if uat_dir.exists():
+                shutil.rmtree(uat_dir)
+                removed.append(str(uat_dir))
+            for suffix in ("", "-coder", "-tester"):
+                d = projects_dir / f"{repo_name}{suffix}"
+                if d.exists():
+                    shutil.rmtree(d)
+                    removed.append(str(d))
+
+    if body.delete_github_repo:
+        result = subprocess.run(
+            ["gh", "repo", "delete", repo, "--yes"],
+            capture_output=True, text=True,
+        )
+        if result.returncode != 0:
+            err = result.stderr.strip() or result.stdout.strip() or "unknown error"
+            raise HTTPException(502, detail=f"Failed to delete GitHub repository: {err}")
+        removed.append(f"GitHub repo {repo}")
+
+    return {"ok": True, "removed": removed}
+
+
+@app.post("/api/projects/{owner}/{repo_name}/approve-batch")
+def approve_batch(owner: str, repo_name: str):
+    repo = f"{owner}/{repo_name}"
+    try:
+        issues = github_client.list_open_uat_issues(repo_name=repo)
+        approved = []
+        for issue in issues:
+            github_client.approve_issue(issue["number"], repo_name=repo)
+            approved.append(issue["number"])
+        return {"approved": approved, "count": len(approved)}
     except subprocess.CalledProcessError as e:
         raise _gh_error(e)
 
@@ -976,6 +1041,324 @@ async def assign_sprint_label(body: SprintAssignBody):
 
     await broadcast({"type": "update", "event": {"event_type": "sprint_plan_update"}})
     return {"ok": True}
+
+
+# ── Plan-sprint endpoints (AC-14, AC-15, AC-16) ───────────────────────────────
+
+
+@app.get("/api/open-issues")
+def get_open_issues():
+    """Return all open issues including body for conflict detection.  Cached 30 s."""
+    try:
+        issues = github_client.list_open_issues_with_body(limit=200)
+    except subprocess.CalledProcessError as e:
+        raise _gh_error(e)
+    return [
+        {
+            "number": iss["number"],
+            "title": iss["title"],
+            "labels": iss.get("labels", []),
+            "body": iss.get("body") or "",
+            "url": iss.get("url", ""),
+            "state": iss.get("state", "open"),
+        }
+        for iss in issues
+    ]
+
+
+class SprintLabelBody(BaseModel):
+    sprint: int
+
+
+@app.post("/api/issues/{issue_id}/sprint-label")
+async def add_sprint_label(issue_id: int, body: SprintLabelBody):
+    """Add sprint-N label to an issue without removing existing labels."""
+    sprint_label = f"sprint-{body.sprint}"
+    try:
+        github_client.ensure_sprint_label(body.sprint)
+        github_client.update_labels(issue_id, add=[sprint_label], remove=[])
+        github_client.invalidate("open_issues_body:")
+        github_client.invalidate("open_issues:")
+        github_client.invalidate("sprints:")
+    except subprocess.CalledProcessError as e:
+        raise _gh_error(e)
+    except ValueError as e:
+        raise HTTPException(400, detail=str(e))
+    return {"ok": True}
+
+
+_SPRINT_LABEL_RE = re.compile(r"^sprint-\d+$")
+
+_REPO_ROOT = Path(__file__).parent.parent.parent
+SPRINT_MANAGER_PATH = _REPO_ROOT / "services" / "sprint_manager" / "sprint_manager.py"
+SPRINT_LOG_PATH = Path(__file__).parent / "sprints" / "sprint_run.log"
+
+
+class SprintRunBody(BaseModel):
+    label: str
+    goal: str
+
+
+@app.post("/api/sprint-run")
+def run_sprint(body: SprintRunBody):
+    """Spawn sprint_manager.py as a detached background process."""
+    if not _SPRINT_LABEL_RE.match(body.label):
+        raise HTTPException(400, detail=f"Invalid sprint label: {body.label!r}")
+    if not SPRINT_MANAGER_PATH.exists():
+        raise HTTPException(502, detail=f"sprint_manager.py not found at {SPRINT_MANAGER_PATH}")
+
+    SPRINT_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    log_fh = open(SPRINT_LOG_PATH, "a")
+
+    subprocess.Popen(
+        ["python3", str(SPRINT_MANAGER_PATH), body.label],
+        env={**os.environ, "SPRINT_GOAL": body.goal},
+        stdout=log_fh,
+        stderr=log_fh,
+        start_new_session=True,
+    )
+    return {"ok": True, "label": body.label}
+
+
+# ── Sprint Management endpoints (issue #95) ──────────────────────────────────
+
+_PROJECTS_BASE = Path.home() / "dev"
+
+
+def _project_root_path(repo: str) -> Path:
+    """Return the project root directory for a given repo (owner/repo).
+
+    Supports both nested layout (~/dev/<slug>/) and flat layout
+    (~/dev/<slug>/ as the main clone). Uses ~/dev as base.
+    """
+    slug = repo.split("/")[-1] if "/" in repo else repo
+    return _PROJECTS_BASE / slug
+
+
+def _coder_clone_path(project_root: Path) -> Path:
+    """Return the coder clone path for a project root.
+
+    Nested: <project_root>/coder/
+    Flat:   <dev>/<slug>-coder/
+    Falls back to project_root itself.
+    """
+    nested = project_root / "coder"
+    if nested.exists():
+        return nested
+    flat = project_root.parent / f"{project_root.name}-coder"
+    if flat.exists():
+        return flat
+    return project_root
+
+
+def _commander_dir(project_root: Path) -> Path:
+    return project_root / ".commander"
+
+
+def _sprint_order_path(project_root: Path) -> Path:
+    return _commander_dir(project_root) / "sprint-order.json"
+
+
+def _load_sprint_order(project_root: Path, all_sprints: list[int]) -> list[str]:
+    """Load sprint order from file; fill missing/new sprints in ascending order."""
+    order_path = _sprint_order_path(project_root)
+    saved: list[str] = []
+    if order_path.exists():
+        try:
+            saved = json.loads(order_path.read_text(encoding="utf-8"))
+        except Exception:
+            saved = []
+
+    all_labels = {f"sprint-{n}" for n in all_sprints}
+    saved_set = set(saved)
+
+    # Start with known order, filter out sprints that no longer exist
+    result = [s for s in saved if s in all_labels]
+    # Append any new sprints not in saved order (ascending)
+    new_sprints = sorted(all_labels - saved_set, key=lambda s: int(s.split("-")[1]))
+    result.extend(new_sprints)
+    return result
+
+
+def _is_sprint_running(project_root: Path, sprint_label: str) -> bool:
+    """Check if a sprint process is running by reading its PID file."""
+    pid_file = _commander_dir(project_root) / "sprints" / f"{sprint_label}-pid"
+    if not pid_file.exists():
+        return False
+    try:
+        pid = int(pid_file.read_text(encoding="utf-8").strip())
+        os.kill(pid, 0)  # signal 0 = check if process exists
+        return True
+    except (ValueError, ProcessLookupError, PermissionError, OSError):
+        # Process not running — clean up stale PID file
+        try:
+            pid_file.unlink()
+        except OSError:
+            pass
+        return False
+
+
+def _any_sprint_running() -> Optional[dict]:
+    """Scan all projects for a running sprint. Returns {project, sprint_label} or None."""
+    projects = projects_module.load_projects()
+    for proj in projects:
+        root = _project_root_path(proj["repo"])
+        sprints_dir = _commander_dir(root) / "sprints"
+        if not sprints_dir.exists():
+            continue
+        for pid_file in sprints_dir.glob("*-pid"):
+            label = pid_file.stem  # e.g. "sprint-2"
+            if _is_sprint_running(root, label):
+                return {"project": proj["repo"], "sprint_label": label}
+    return None
+
+
+class SprintMgmtRunBody(BaseModel):
+    project: str
+    sprint_label: str
+
+
+class SprintOrderBody(BaseModel):
+    order: list[str]
+
+
+class SprintCreateBody(BaseModel):
+    project: str
+
+
+@app.get("/api/sprint-management/issues")
+def get_sprint_management_issues(repo: str):
+    """Return all open issues + sprint list + display order for a project."""
+    try:
+        issues = github_client.list_open_issues_with_body(repo_name=repo, limit=200)
+        sprints = github_client.list_sprints(repo_name=repo)
+    except subprocess.CalledProcessError as e:
+        raise _gh_error(e)
+    except ValueError as e:
+        raise HTTPException(400, detail=str(e))
+
+    sprint_re_local = re.compile(r"^sprint-(\d+)$")
+    result_issues = []
+    for iss in issues:
+        sprint_num = None
+        for lbl in iss.get("labels", []):
+            m = sprint_re_local.match(lbl["name"])
+            if m:
+                sprint_num = int(m.group(1))
+                break
+        result_issues.append({
+            "number": iss["number"],
+            "title": iss["title"],
+            "labels": iss.get("labels", []),
+            "sprint": sprint_num,
+            "status": github_client.classify_issue(iss),
+            "url": iss.get("url", ""),
+        })
+
+    project_root = _project_root_path(repo)
+    order = _load_sprint_order(project_root, sprints)
+
+    return {
+        "sprints": sprints,
+        "order": order,
+        "issues": result_issues,
+    }
+
+
+@app.get("/api/sprints/order")
+def get_sprint_order(project: str):
+    """Return the persisted sprint display order for a project slug."""
+    project_root = _project_root_path(project)
+    try:
+        sprints = github_client.list_sprints(repo_name=None)
+    except Exception:
+        sprints = []
+    order = _load_sprint_order(project_root, sprints)
+    return {"order": order}
+
+
+@app.post("/api/sprints/order")
+def save_sprint_order(project: str, body: SprintOrderBody):
+    """Persist sprint display order for a project slug."""
+    project_root = _project_root_path(project)
+    order_path = _sprint_order_path(project_root)
+    order_path.parent.mkdir(parents=True, exist_ok=True)
+    order_path.write_text(json.dumps(body.order), encoding="utf-8")
+    return {"ok": True}
+
+
+@app.post("/api/sprints/run", status_code=202)
+def run_sprint_managed(body: SprintMgmtRunBody):
+    """Spawn sprint_manager.py for the given project + sprint.
+
+    - cwd = project's coder clone
+    - ANTHROPIC_API_KEY stripped from subprocess env
+    - stdout/stderr → .commander/logs/sprint-run-<label>-<ts>.log
+    - PID → .commander/sprints/<label>-pid
+    """
+    if not _SPRINT_LABEL_RE.match(body.sprint_label):
+        raise HTTPException(400, detail=f"Invalid sprint label: {body.sprint_label!r}")
+    if not SPRINT_MANAGER_PATH.exists():
+        raise HTTPException(502, detail=f"sprint_manager.py not found at {SPRINT_MANAGER_PATH}")
+
+    running = _any_sprint_running()
+    if running:
+        raise HTTPException(
+            409,
+            detail=f"Sprint {running['sprint_label']} is already running for {running['project']}",
+        )
+
+    project_root = _project_root_path(body.project)
+    coder_path   = _coder_clone_path(project_root)
+    commander    = _commander_dir(project_root)
+
+    log_dir = commander / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
+    log_path = log_dir / f"sprint-run-{body.sprint_label}-{ts}.log"
+
+    pid_dir = commander / "sprints"
+    pid_dir.mkdir(parents=True, exist_ok=True)
+    pid_path = pid_dir / f"{body.sprint_label}-pid"
+
+    stripped_env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
+
+    log_fh = open(log_path, "w")
+    proc = subprocess.Popen(
+        ["python3", str(SPRINT_MANAGER_PATH), body.sprint_label, "--skip-gates"],
+        env=stripped_env,
+        cwd=str(coder_path),
+        stdout=log_fh,
+        stderr=log_fh,
+        start_new_session=True,
+    )
+
+    pid_path.write_text(str(proc.pid), encoding="utf-8")
+    return {"ok": True, "sprint_label": body.sprint_label, "pid": proc.pid, "log": str(log_path)}
+
+
+@app.get("/api/sprints/running")
+def get_running_sprints():
+    """Return currently running sprint info across all projects (checks PID files)."""
+    running = _any_sprint_running()
+    if running:
+        return {"running": True, "project": running["project"], "sprint_label": running["sprint_label"]}
+    return {"running": False, "project": None, "sprint_label": None}
+
+
+@app.post("/api/sprints/create")
+async def create_sprint_label(body: SprintCreateBody):
+    """Create the next sprint-N label for a project (idempotent)."""
+    try:
+        sprints = github_client.list_sprints(repo_name=body.project)
+        next_num = (max(sprints) if sprints else 0) + 1
+        github_client.ensure_sprint_label(next_num, repo_name=body.project)
+        github_client.invalidate("sprints:")
+    except subprocess.CalledProcessError as e:
+        raise _gh_error(e)
+    except ValueError as e:
+        raise HTTPException(400, detail=str(e))
+    return {"ok": True, "sprint_label": f"sprint-{next_num}"}
 
 
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")

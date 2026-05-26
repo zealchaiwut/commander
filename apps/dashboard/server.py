@@ -763,11 +763,12 @@ def _parse_summary_file(path: Path) -> dict:
     status_m = re.search(r"^## Sprint \S+ — (\S+)", content, re.MULTILINE)
     status   = status_m.group(1) if status_m else "unknown"
 
-    # Count shipped rows (rows in What Shipped table, skip header + empty rows)
+    # Count shipped rows (rows in Pending UAT Review table, skip header + empty rows).
+    # Also accepts the legacy "What Shipped" heading for old summary files.
     shipped_count = 0
     in_shipped = False
     for line in content.splitlines():
-        if line.startswith("## What Shipped"):
+        if line.startswith("## Pending UAT Review") or line.startswith("## What Shipped"):
             in_shipped = True
             continue
         if in_shipped and line.startswith("## "):

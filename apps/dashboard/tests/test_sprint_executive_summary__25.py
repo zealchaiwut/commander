@@ -98,7 +98,7 @@ class TestExtendedSummaryTemplate:
         sm      = _import_sprint_manager()
         state   = _make_state(sm)
         content = sm.generate_sprint_summary(state, elapsed_secs=3661)
-        assert "## What Shipped" in content
+        assert "## Pending UAT Review" in content
 
     def test_section_what_didnt_ship(self):
         sm      = _import_sprint_manager()
@@ -146,8 +146,9 @@ class TestExtendedSummaryTemplate:
         content = sm.generate_sprint_summary(state, elapsed_secs=100)
         assert "#1" in content
         assert "#2" in content
-        # "UAT-approved / closed" outcome in shipped table
-        assert "UAT-approved" in content
+        # Merged tickets are awaiting human UAT review, not auto-approved
+        assert "awaiting UAT review" in content
+        assert "UAT-approved" not in content
 
     def test_didnt_ship_table_has_failure_category(self):
         sm      = _import_sprint_manager()

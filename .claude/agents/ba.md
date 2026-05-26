@@ -117,6 +117,19 @@ Example:
 > Slug: `fix-approve-auto-close`
 > 5 acceptance criteria defined.
 
+## Step 5 — Optional: Estimate the issue
+
+This step is **off by default**. Only run it if the user explicitly asked (e.g. passed `--estimate`, said "and estimate it", or "estimate after creating").
+
+On opt-in, after the issue is created, run:
+
+```bash
+python3 $(git rev-parse --show-toplevel)/services/sprint_manager/estimate_issue.py \
+  --issue <N> --repo zealchaiwut/commander --save-comment --save-label
+```
+
+This invokes the Issue Estimator (Haiku 4.5) and posts a sizing comment to the issue. Report the size and risk flags alongside the issue URL.
+
 ## Tools available
 
 Use the `codedb` MCP server tools (`codedb_tree`, `codedb_search`) to read existing code when you need to understand current behaviour before writing acceptance criteria.

@@ -732,8 +732,8 @@ async def set_sprint_status(payload: SprintStatusPayload):
 @app.get("/api/sprint-status")
 def get_sprint_status():
     if _sprint_status is None:
-        raise HTTPException(status_code=404, detail="No active sprint")
-    return _sprint_status
+        return {"active": False}
+    return {**_sprint_status, "active": True}
 
 
 @app.post("/api/sprint-pause")

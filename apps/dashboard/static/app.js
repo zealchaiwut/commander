@@ -1574,13 +1574,14 @@ let _sprintState = null;
 async function loadSprintStatus() {
   try {
     const res = await fetch('/api/sprint-status');
-    if (res.status === 404) {
+    if (!res.ok) return;
+    const data = await res.json();
+    if (!data.active) {
       _sprintState = null;
       _updateSprintNavDot(false);
       return;
     }
-    if (!res.ok) return;
-    _sprintState = await res.json();
+    _sprintState = data;
     _updateSprintNavDot(true);
     const sprintVisible = !document.getElementById('view-sprint')?.classList.contains('hidden');
     if (sprintVisible) scRenderCockpit(_sprintState);
@@ -2929,7 +2930,10 @@ async function smgmtPollRunStatus() {
       _smgmtRunningInfo = await runRes.json();
     }
     let sprintStatus = null;
-    if (statusRes.ok) sprintStatus = await statusRes.json();
+    if (statusRes.ok) {
+      const statusData = await statusRes.json();
+      if (statusData.active) sprintStatus = statusData;
+    }
     smgmtApplyRunState(sprintStatus);
   } catch { /* ignore poll errors */ }
 }

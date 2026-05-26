@@ -696,17 +696,14 @@
 <!-- ── Alert banners (AC-3a) ── -->
 <div id="alert-banners" style="padding:0 16px;"></div>
 
-<nav class="main-tabs">
-  <button class="mtab active" id="mtab-projects"     onclick="switchMain('projects')">Projects</button>
-  <button class="mtab"        id="mtab-agents"       onclick="switchMain('agents')">Agents</button>
-  <button class="mtab"        id="mtab-activity"     onclick="switchMain('activity')">Activity log</button>
-  <button class="mtab"        id="mtab-history"      onclick="switchMain('history')">Sprint History</button>
-  <button class="mtab"        id="mtab-sprint-plan"  onclick="switchMain('sprint-plan')">Plan sprint</button>
-  <button class="mtab"        id="mtab-sprint-mgmt"  onclick="switchMain('sprint-mgmt')">Sprint Mgmt</button>
+<nav class="main-tabs" id="global-nav">
+  <button class="mtab active" id="mtab-overview"  onclick="switchMain('overview')">Overview</button>
+  <button class="mtab"        id="mtab-agents"    onclick="switchMain('agents')">Agents</button>
+  <button class="mtab"        id="mtab-activity"  onclick="switchMain('activity')">Activity log</button>
 </nav>
 
-<!-- ── Projects view ── -->
-<div id="view-projects">
+<!-- ── Overview view (formerly Projects) ── -->
+<div id="view-overview">
 
   <!-- Sprint panel removed (AC-1, issue #82): progress is now per-project in expand panels -->
 
@@ -759,6 +756,175 @@
   </div>
 </div>
 
+<!-- ── Project-scoped view ── -->
+<div id="view-project" class="hidden">
+
+  <!-- Project header: breadcrumb + info + picker -->
+  <div class="pvh-wrap">
+    <div class="pvh-breadcrumb">
+      <button class="pvh-back-btn" onclick="navigateToOverview()" aria-label="Back to Overview">
+        <i class="ti ti-arrow-left"></i>
+        <span class="pvh-back-label">Overview</span>
+      </button>
+      <i class="ti ti-chevron-right pvh-sep"></i>
+      <span class="pvh-proj-name" id="pvh-proj-name">—</span>
+    </div>
+    <div class="pvh-info">
+      <div class="proj-icon pvh-icon" id="pvh-icon"><i class="ti ti-folder"></i></div>
+      <div class="pvh-text">
+        <span class="pvh-title" id="pvh-title">—</span>
+        <span class="pvh-sprint" id="pvh-sprint"></span>
+      </div>
+    </div>
+    <div class="pvh-right">
+      <select id="proj-picker" class="pvh-picker" onchange="switchProject(this.value)">
+        <option value="">Loading…</option>
+      </select>
+    </div>
+  </div>
+
+  <!-- Project-scoped tabs -->
+  <nav class="proj-tabs">
+    <button class="ptab active" id="ptab-tickets"       onclick="switchProjectTab('tickets')">Tickets</button>
+    <button class="ptab"        id="ptab-sprint-mgmt"   onclick="switchProjectTab('sprint-mgmt')">Sprint Mgmt</button>
+    <button class="ptab"        id="ptab-sprint-history" onclick="switchProjectTab('sprint-history')">Sprint history</button>
+  </nav>
+
+  <!-- Tickets tab content -->
+  <div id="pview-tickets">
+    <div id="pview-tickets-content" class="pview-tickets-inner">
+      <div class="empty">Loading…</div>
+    </div>
+  </div>
+
+  <!-- Sprint Mgmt tab content (reuses original smgmt element IDs) -->
+  <div id="pview-sprint-mgmt" class="hidden">
+    <div class="smgmt-header">
+      <div class="smgmt-header-left">
+        <h2 class="smgmt-title">Sprint Management</h2>
+      </div>
+      <button class="btn-primary smgmt-new-sprint-btn" id="smgmt-new-sprint-btn"
+              onclick="smgmtCreateSprint()" title="Create next sprint label on GitHub">+ New sprint</button>
+    </div>
+    <div class="smgmt-error hidden" id="smgmt-error"></div>
+    <div class="smgmt-body" id="smgmt-body">
+      <div class="smgmt-loading" id="smgmt-loading">Select a project to view sprints.</div>
+    </div>
+    <div class="smgmt-unassigned" id="smgmt-unassigned"
+         ondragover="smgmtDragOverZone(event, null)"
+         ondragleave="smgmtDragLeave(event)"
+         ondrop="smgmtDropOnSprint(event, null)">
+      <div class="smgmt-unassigned-label"><i class="ti ti-inbox"></i> Unassigned</div>
+      <div class="smgmt-unassigned-tickets" id="smgmt-unassigned-tickets">
+        <div class="smgmt-drop-hint">Drop tickets here to remove sprint label</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Sprint History tab content (reuses original history element IDs) -->
+  <div id="pview-sprint-history" class="hidden">
+    <div class="history-stats-row" id="history-stats-row">
+      <div class="history-stat-card">
+        <span class="history-stat-label">Avg Sprint Duration</span>
+        <span class="history-stat-value" id="h-avg-duration">—</span>
+      </div>
+      <div class="history-stat-card">
+        <span class="history-stat-label">Total Tokens This Month</span>
+        <span class="history-stat-value" id="h-tokens-month">—</span>
+      </div>
+    </div>
+    <div id="history-list">
+      <div class="empty" id="history-empty" style="display:none;">No sprints recorded yet.</div>
+      <div id="history-rows"></div>
+    </div>
+  </div>
+
+</div>
+
+<style>
+  /* ── Project header ── */
+  .pvh-wrap {
+    position: sticky; top: 62px; z-index: 15;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 10px 24px;
+    display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+  }
+  .pvh-breadcrumb {
+    display: flex; align-items: center; gap: 6px;
+    min-width: 0; flex-shrink: 0;
+  }
+  .pvh-back-btn {
+    display: flex; align-items: center; gap: 5px;
+    background: none; border: none;
+    color: var(--blue); font-size: 13px; font-weight: 500;
+    cursor: pointer; padding: 3px 6px; border-radius: 5px;
+    transition: background .15s;
+  }
+  .pvh-back-btn:hover { background: var(--blue-bg); }
+  .pvh-back-btn .ti { font-size: 14px; }
+  .pvh-sep { color: var(--text-sub); font-size: 13px; }
+  .pvh-proj-name { font-size: 13px; font-weight: 600; color: var(--text); }
+  .pvh-info {
+    display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0;
+  }
+  .pvh-icon { width: 28px; height: 28px; border-radius: 6px; font-size: 14px; flex-shrink: 0; }
+  .pvh-text { min-width: 0; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .pvh-title { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pvh-sprint { font-size: 11px; color: var(--text-muted); white-space: nowrap; }
+  .pvh-right { flex-shrink: 0; }
+  .pvh-picker {
+    padding: 5px 8px; border: 1px solid var(--border); border-radius: 6px;
+    background: var(--surface-2); color: var(--text); font-size: 12px;
+    font-family: inherit; outline: none; cursor: pointer;
+  }
+  .pvh-picker:focus { border-color: var(--blue); }
+
+  /* ── Project-scoped tabs ── */
+  .proj-tabs {
+    display: flex; background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 0 24px; overflow-x: auto; scrollbar-width: none;
+  }
+  .proj-tabs::-webkit-scrollbar { display: none; }
+  .ptab {
+    padding: 10px 0; margin-right: 24px; flex-shrink: 0;
+    background: none; border: none; border-bottom: 2px solid transparent;
+    color: var(--text-muted); font-size: 13px; font-weight: 500;
+    transition: color .15s, border-color .15s; white-space: nowrap;
+  }
+  .ptab.active { color: var(--text); border-bottom-color: var(--blue); }
+  .ptab:hover:not(.active) { color: var(--text); }
+
+  /* ── Tickets tab inner layout ── */
+  .pview-tickets-inner {
+    display: grid;
+    grid-template-columns: 1fr 320px;
+    gap: 0;
+    min-height: 200px;
+  }
+  .pview-tickets-main {
+    padding: 20px 24px;
+    border-right: 1px solid var(--border);
+  }
+  .pview-tickets-aside {
+    padding: 20px 20px;
+  }
+  @media (max-width: 768px) {
+    .pview-tickets-inner {
+      grid-template-columns: 1fr;
+    }
+    .pview-tickets-main { border-right: none; border-bottom: 1px solid var(--border); }
+    .pvh-wrap { padding: 8px 16px; top: 62px; }
+    .pvh-back-label { display: none; }
+    .pvh-picker { max-width: 100px; }
+    .proj-tabs { padding: 0 16px; }
+  }
+
+  /* ── Sprint Mgmt in project view ── */
+  .pview-smgmt-header { top: unset; position: static; }
+</style>
+
 <!-- ── Agents view ── -->
 <div id="view-agents" class="hidden">
   <div class="agent-summary">
@@ -804,25 +970,7 @@
   </div>
 </div>
 
-<!-- ── Sprint History view (AC-5) ── -->
-<div id="view-history" class="hidden">
-  <!-- Quick-stats row (AC-5a) -->
-  <div class="history-stats-row" id="history-stats-row">
-    <div class="history-stat-card">
-      <span class="history-stat-label">Avg Sprint Duration</span>
-      <span class="history-stat-value" id="h-avg-duration">—</span>
-    </div>
-    <div class="history-stat-card">
-      <span class="history-stat-label">Total Tokens This Month</span>
-      <span class="history-stat-value" id="h-tokens-month">—</span>
-    </div>
-  </div>
-  <!-- Sprint list (AC-5b) -->
-  <div id="history-list">
-    <div class="empty" id="history-empty" style="display:none;">No sprints recorded yet.</div>
-    <div id="history-rows"></div>
-  </div>
-</div>
+<!-- view-history removed: sprint history is now in project-scoped view (pview-sprint-history) -->
 
 
 <!-- ── Plan Sprint view ── -->
@@ -1125,40 +1273,7 @@
   }
 </style>
 
-<!-- ── Sprint Management view (issue #95) ── -->
-<div id="view-sprint-mgmt" class="hidden">
-
-  <!-- Project selector header -->
-  <div class="smgmt-header">
-    <div class="smgmt-header-left">
-      <h2 class="smgmt-title">Sprint Management</h2>
-      <select id="smgmt-project-select" class="smgmt-proj-select" onchange="smgmtSelectProject(this.value)">
-        <option value="">Loading projects…</option>
-      </select>
-    </div>
-    <button class="btn-primary smgmt-new-sprint-btn" id="smgmt-new-sprint-btn"
-            onclick="smgmtCreateSprint()" title="Create next sprint label on GitHub">+ New sprint</button>
-  </div>
-
-  <!-- Error banner -->
-  <div class="smgmt-error hidden" id="smgmt-error"></div>
-
-  <!-- Sprint blocks container -->
-  <div class="smgmt-body" id="smgmt-body">
-    <div class="smgmt-loading" id="smgmt-loading">Select a project to view sprints.</div>
-  </div>
-
-  <!-- Unassigned drop zone at bottom -->
-  <div class="smgmt-unassigned" id="smgmt-unassigned"
-       ondragover="smgmtDragOverZone(event, null)"
-       ondragleave="smgmtDragLeave(event)"
-       ondrop="smgmtDropOnSprint(event, null)">
-    <div class="smgmt-unassigned-label"><i class="ti ti-inbox"></i> Unassigned</div>
-    <div class="smgmt-unassigned-tickets" id="smgmt-unassigned-tickets">
-      <div class="smgmt-drop-hint">Drop tickets here to remove sprint label</div>
-    </div>
-  </div>
-</div>
+<!-- view-sprint-mgmt removed: sprint mgmt is now in project-scoped view (pview-sprint-mgmt) -->
 
 <style>
   /* ── Sprint Management view ── */

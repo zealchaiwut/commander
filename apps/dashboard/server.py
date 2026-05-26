@@ -157,6 +157,11 @@ async def root():
     return FileResponse(STATIC_DIR / "index.html")
 
 
+@app.get("/projects/{path:path}")
+async def spa_project_route(path: str):
+    return FileResponse(STATIC_DIR / "index.html")
+
+
 @app.get("/api/health", response_model=HealthResponse)
 def health_check() -> HealthResponse:
     uptime = time.monotonic() - _start_time

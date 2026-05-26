@@ -1365,14 +1365,18 @@ def run_sprint_managed(body: SprintMgmtRunBody):
     if not SPRINT_MANAGER_PATH.exists():
         raise HTTPException(502, detail=f"sprint_manager.py not found at {SPRINT_MANAGER_PATH}")
 
-    running = _any_sprint_running()
-    if running:
+    project_root = _project_root_path(body.project)
+    if _is_sprint_running(project_root, body.sprint_label):
+        pid_file = _commander_dir(project_root) / "sprints" / f"{body.sprint_label}-pid"
+        try:
+            pid = int(pid_file.read_text(encoding="utf-8").strip())
+            pid_str = str(pid)
+        except (ValueError, OSError):
+            pid_str = "unknown"
         raise HTTPException(
             409,
-            detail=f"Sprint {running['sprint_label']} is already running for {running['project']}",
+            detail=f"Sprint {body.sprint_label} is already running on {body.project} (PID {pid_str})",
         )
-
-    project_root = _project_root_path(body.project)
     coder_path   = _coder_clone_path(project_root)
     commander    = _commander_dir(project_root)
 

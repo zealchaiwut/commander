@@ -50,15 +50,19 @@ def repo() -> str:
 
 
 def get_repo_for_operation(repo_name: str | None = None) -> str:
-    """Resolve target repo, redirecting to the sandbox repo in test mode.
+    """Resolve target repo, redirecting to the sandbox repo only in EXPLICIT test mode.
 
-    Test mode is active when COMMANDER_TEST_MODE=1 OR when the resolved repo
-    is the production commander repo (self-referential detection).
+    HOTFIX: previously redirected ALL commander-self operations including dashboard
+    READ operations, which broke the dashboard (sandbox was empty → 0 tickets shown).
+
+    Redirect ONLY when COMMANDER_TEST_MODE=1 is explicitly set (e.g. by agents).
+    Dashboard reads against commander itself now correctly hit the real repo.
+
     Override the sandbox target with COMMANDER_TEST_REPO env var.
     """
     resolved = repo_name or repo()
     test_mode = os.environ.get("COMMANDER_TEST_MODE", "").strip() == "1"
-    if test_mode or resolved == "zealchaiwut/commander":
+    if test_mode:
         return os.environ.get("COMMANDER_TEST_REPO", "zealchaiwut/commander-issue-test")
     return resolved
 

@@ -2037,7 +2037,8 @@
   /* Single sprint block */
   .smgmt-sprint-block {
     background: var(--surface); border: 1px solid var(--border);
-    border-radius: 8px; overflow: hidden;
+    border-radius: 10px; overflow: hidden;
+    position: relative; transition: border-color 0.2s, box-shadow 0.2s;
   }
   .smgmt-sprint-block.drag-over-sprint { border-color: var(--blue); box-shadow: 0 0 0 2px var(--blue-bg); }
   .smgmt-sprint-block.dragging-sprint { opacity: .45; }
@@ -2045,18 +2046,48 @@
   /* Sprint header */
   .smgmt-sprint-header {
     display: flex; align-items: center; gap: 10px;
-    padding: 10px 14px; background: var(--surface-2);
+    padding: 12px 16px; background: var(--surface);
     border-bottom: 1px solid var(--border); cursor: default;
+  }
+  .smgmt-sprint-header-left {
+    display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0;
+  }
+  .smgmt-sprint-header-right {
+    display: flex; align-items: center; gap: 8px; flex-shrink: 0;
   }
   .smgmt-sprint-grip {
     cursor: grab; color: var(--text-sub); font-size: 14px; flex-shrink: 0;
   }
   .smgmt-sprint-grip:active { cursor: grabbing; }
-  .smgmt-sprint-name { font-size: 14px; font-weight: 700; flex: 1; }
+  .smgmt-sprint-name { font-size: 15px; font-weight: 700; }
   .smgmt-next-badge {
-    font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .07em;
-    background: var(--green-bg); color: var(--green); padding: 2px 7px; border-radius: 10px;
+    font-family: var(--mono, monospace); font-size: 10px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: .08em;
+    background: var(--green-bg); color: var(--green); padding: 2px 7px; border-radius: 4px;
     flex-shrink: 0;
+  }
+
+  /* Sprint goal bar — visible text display (not an input) */
+  .smgmt-sprint-goal-bar {
+    padding: 10px 16px; border-bottom: 1px solid var(--border);
+    background: var(--surface); font-size: 13px; color: var(--text);
+  }
+  .smgmt-sprint-goal-bar.placeholder {
+    color: var(--text-sub); font-style: italic;
+  }
+
+  /* Run Sprint button — neutral with play icon */
+  .smgmt-run-btn-planned {
+    padding: 4px 12px; font-size: 11px; font-weight: 600;
+    background: var(--surface); color: var(--text);
+    border: 1px solid var(--border); border-radius: 5px;
+    cursor: pointer; flex-shrink: 0; transition: all .15s;
+    display: flex; align-items: center; gap: 4px;
+  }
+  .smgmt-run-btn-planned:hover { background: var(--surface-hover); }
+  .smgmt-run-btn-planned:disabled {
+    background: var(--surface-2); color: var(--text-sub);
+    border-color: var(--border); cursor: not-allowed; opacity: 0.6;
   }
   .smgmt-sprint-count { font-size: 11px; color: var(--text-muted); flex-shrink: 0; }
   /* Unified Run / Re-run button (issue #186) */
@@ -2071,23 +2102,23 @@
     background: var(--surface-2); color: var(--text-sub);
     border: 1px solid var(--border); cursor: not-allowed; opacity: 1;
   }
-  /* Re-run Sprint variant of the unified button */
+  /* Re-run Sprint variant of the unified button — amber border/text */
   .smgmt-run-btn.smgmt-run-btn--rerun {
-    background: var(--amber-bg); color: var(--amber);
-    border: 0.5px solid var(--amber);
+    background: var(--surface); color: var(--amber);
+    border: 1px solid var(--amber);
   }
-  .smgmt-run-btn.smgmt-run-btn--rerun:hover { opacity: .85; }
+  .smgmt-run-btn.smgmt-run-btn--rerun:hover { background: var(--amber-bg); }
   .smgmt-delete-btn {
     padding: 4px 10px; font-size: 11px; font-weight: 600;
-    background: transparent; color: var(--red);
-    border: 0.5px solid var(--red); border-radius: 5px;
-    cursor: pointer; flex-shrink: 0; transition: opacity .15s;
+    background: var(--surface); color: var(--red);
+    border: 1px solid var(--red); border-radius: 5px;
+    cursor: pointer; flex-shrink: 0; transition: all .15s;
     display: flex; align-items: center; gap: 4px;
   }
-  .smgmt-delete-btn:hover { background: var(--red-bg, rgba(220,38,38,.08)); opacity: 1; }
+  .smgmt-delete-btn:hover { background: var(--red-bg, rgba(220,38,38,.08)); }
   .smgmt-delete-btn:disabled {
     background: var(--surface-2); color: var(--text-sub);
-    border: 0.5px solid var(--border); cursor: not-allowed; opacity: 1;
+    border: 0.5px solid var(--border); cursor: not-allowed; opacity: 0.6;
   }
 
   .smgmt-delete-body { padding: 12px 24px 8px; font-size: 13px; color: var(--text-main); }
@@ -2132,32 +2163,170 @@
   .smgmt-finish-body p { margin: 0; }
   .smgmt-finish-body p + p { margin-top: 8px; }
 
-  /* Kill button (replaces Run on the running card) */
+  /* Cancel sprint button (replaces Run/Kill on the running card) */
   .smgmt-kill-btn {
     padding: 4px 10px; font-size: 11px; font-weight: 600;
-    background: var(--red); color: #fff; border: none; border-radius: 5px;
-    cursor: pointer; flex-shrink: 0; transition: opacity .15s;
+    background: var(--surface); color: var(--red);
+    border: 1px solid var(--red); border-radius: 5px;
+    cursor: pointer; flex-shrink: 0; transition: all .15s;
     display: flex; align-items: center; gap: 4px;
   }
-  .smgmt-kill-btn:hover { opacity: .85; }
+  .smgmt-kill-btn:hover { background: var(--red); color: #fff; }
+  .smgmt-kill-btn:focus-visible { outline: 2px solid var(--red); outline-offset: 2px; }
 
-  /* Running sprint card state */
+  /* Running sprint card state — green border + glow + animated top stripe */
   .smgmt-sprint-block.smgmt-running {
-    border-color: var(--color-border-info);
-    box-shadow: 0 0 0 2px var(--blue-bg);
+    border-color: var(--green);
+    box-shadow: 0 0 0 3px var(--green-bg), 0 1px 3px rgba(0,0,0,0.05);
   }
+  .smgmt-sprint-block.smgmt-running::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 3px;
+    background: linear-gradient(90deg, transparent 0%, var(--green) 20%, var(--green) 80%, transparent 100%);
+    background-size: 50% 100%;
+    background-repeat: no-repeat;
+    z-index: 1;
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .smgmt-sprint-block.smgmt-running::before {
+      animation: smgmtStripeFlow 2.4s linear infinite;
+    }
+  }
+  @keyframes smgmtStripeFlow {
+    0%   { background-position: -100% 0; }
+    100% { background-position: 200% 0; }
+  }
+
   .smgmt-sprint-header.smgmt-running-header {
-    background: var(--blue-bg);
-    border-bottom-color: var(--color-border-info);
+    background: linear-gradient(180deg, var(--green-bg) 0%, transparent 100%);
+    border-bottom-color: var(--border);
   }
+
+  /* Running badge — green pill with pulse dot */
   .smgmt-running-badge {
-    font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .07em;
-    background: var(--blue-bg); color: var(--blue);
-    border: 1px solid var(--color-border-info);
-    padding: 2px 7px; border-radius: 10px; flex-shrink: 0;
+    display: inline-flex; align-items: center; gap: 6px;
+    font-family: var(--mono, monospace); font-size: 10px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: .04em;
+    background: var(--green); color: #fff;
+    padding: 3px 9px; border-radius: 999px; flex-shrink: 0;
   }
-  .smgmt-progress-text {
-    font-size: 11px; color: var(--blue); font-weight: 500; flex-shrink: 0;
+  .smgmt-running-badge .smgmt-pulse-dot {
+    width: 6px; height: 6px; border-radius: 50%; background: #fff; flex-shrink: 0;
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .smgmt-running-badge .smgmt-pulse-dot {
+      animation: smgmtPulseDot 1.4s ease-in-out infinite;
+    }
+  }
+  @keyframes smgmtPulseDot {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50%      { opacity: 0.5; transform: scale(0.7); }
+  }
+
+  /* Progress section (RUNNING state only) */
+  .smgmt-progress-section {
+    padding: 12px 16px; border-bottom: 1px solid var(--border);
+    background: var(--surface);
+  }
+  .smgmt-progress-meta {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 8px;
+    font-family: var(--mono, monospace); font-size: 12px; color: var(--text-muted);
+  }
+  .smgmt-progress-bar {
+    height: 6px; background: var(--surface-2);
+    border-radius: 999px; overflow: hidden; position: relative;
+  }
+  .smgmt-progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--green) 0%, #22c55e 100%);
+    border-radius: 999px;
+    transition: width 0.5s ease;
+    position: relative; overflow: hidden;
+  }
+  .smgmt-progress-fill::after {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.4) 50%, transparent 100%);
+    transform: translateX(-100%);
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .smgmt-progress-fill::after {
+      animation: smgmtShimmer 1.8s linear infinite;
+    }
+  }
+  @keyframes smgmtShimmer {
+    0%   { transform: translateX(-100%); }
+    100% { transform: translateX(100%); }
+  }
+
+  /* Legacy progress text (removed in favour of progress section but kept for safety) */
+  .smgmt-progress-text { display: none; }
+
+  /* Per-ticket status circles (RUNNING sprint) */
+  .smgmt-ticket-status-circle {
+    width: 20px; height: 20px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0; font-size: 11px; position: relative;
+  }
+  .smgmt-ticket-status-circle.done {
+    background: var(--green-bg); color: var(--green); font-weight: 700;
+  }
+  .smgmt-ticket-status-circle.running {
+    background: var(--blue-bg);
+    border: 2px solid var(--blue);
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .smgmt-ticket-status-circle.running {
+      animation: smgmtSpin 1s linear infinite;
+    }
+  }
+  @keyframes smgmtSpin {
+    0%   { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+  }
+  .smgmt-ticket-status-circle.running .smgmt-inner-dot {
+    width: 7px; height: 7px; border-radius: 50%; background: var(--blue);
+    position: absolute;
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .smgmt-ticket-status-circle.running .smgmt-inner-dot {
+      animation: smgmtDotPulse 1.4s ease-in-out infinite;
+    }
+  }
+  @keyframes smgmtDotPulse {
+    0%, 100% { opacity: 1; }
+    50%      { opacity: 0.3; }
+  }
+  .smgmt-ticket-status-circle.pending {
+    background: var(--surface-2); color: var(--text-sub); font-size: 14px;
+  }
+
+  /* Per-ticket row states in running sprint */
+  .smgmt-ticket.is-running .smgmt-ticket-title { font-weight: 600; }
+  .smgmt-ticket.is-pending .smgmt-ticket-title { color: var(--text-muted); }
+  .smgmt-ticket.is-done .smgmt-ticket-title { font-weight: 400; }
+
+  /* Agent pill on running ticket */
+  .smgmt-agent-pill {
+    font-family: var(--mono, monospace); font-size: 10px; font-weight: 600;
+    padding: 2px 7px; border-radius: 4px; letter-spacing: .02em; flex-shrink: 0;
+  }
+  .smgmt-agent-pill.coder { background: var(--purple-bg); color: var(--purple); }
+  .smgmt-agent-pill.tester { background: var(--amber-bg); color: var(--amber); }
+
+  /* Elapsed time on ticket (mono, 11px, muted) */
+  .smgmt-ticket-elapsed-time {
+    font-family: var(--mono, monospace); font-size: 11px;
+    color: var(--text-sub); flex-shrink: 0; min-width: 50px; text-align: right;
+  }
+
+  /* Drag handle greyed on running sprint tickets */
+  .smgmt-sprint-block.smgmt-running .smgmt-ticket-grip {
+    color: var(--border); cursor: default; pointer-events: none;
   }
 
   /* Locked sprint card state (issue #186) — shown on non-running sprints while any sprint runs */
@@ -2208,8 +2377,8 @@
 
   /* Ticket cards in a sprint */
   .smgmt-sprint-tickets {
-    padding: 8px 14px; min-height: 48px;
-    display: flex; flex-direction: column; gap: 6px;
+    padding: 4px 0; min-height: 48px;
+    display: flex; flex-direction: column;
   }
   .smgmt-drop-hint {
     font-size: 12px; color: var(--text-sub); text-align: center;
@@ -2220,8 +2389,8 @@
   /* Ticket card */
   .smgmt-ticket {
     display: flex; align-items: center; gap: 8px;
-    padding: 7px 10px; background: var(--surface-2); border: 1px solid var(--border);
-    border-radius: 5px; font-size: 12px; cursor: default;
+    padding: 9px 16px; background: var(--surface);
+    font-size: 12px; cursor: default; transition: background 0.15s;
   }
   .smgmt-ticket:hover { background: var(--surface-hover); }
   .smgmt-ticket.dragging-ticket { opacity: .4; }
@@ -2230,8 +2399,8 @@
   }
   .smgmt-ticket-grip:active { cursor: grabbing; }
   .smgmt-ticket-num {
-    font-family: var(--mono); font-size: 11px; color: var(--text-muted);
-    text-decoration: none; flex-shrink: 0; min-width: 32px;
+    font-family: var(--mono); font-size: 12px; color: var(--text-sub);
+    text-decoration: none; flex-shrink: 0; min-width: 42px;
   }
   .smgmt-ticket-num:hover { color: var(--blue); }
   .smgmt-ticket-title { flex: 1; font-weight: 500; line-height: 1.4; min-width: 0;
@@ -2253,7 +2422,12 @@
   }
   .smgmt-ticket-spinner {
     flex-shrink: 0; font-size: 13px;
-    animation: spin 1s linear infinite; transform-origin: center;
+    transform-origin: center;
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .smgmt-ticket-spinner {
+      animation: smgmtSpin 1s linear infinite;
+    }
   }
   .smgmt-stall-warning {
     font-size: 11px; color: var(--amber); padding: 0;
@@ -2312,7 +2486,7 @@
     background: var(--surface);
   }
 
-  /* Sprint goal input row */
+  /* Sprint goal input row — hidden, used for saving only */
   .smgmt-sprint-goal-row {
     padding: 8px 14px; border-bottom: 1px solid var(--border);
     background: var(--surface);

@@ -3033,7 +3033,6 @@ function smgmtHasCompletedTickets(tickets) {
 
 function smgmtSprintBlockHtml(label, tickets, isNext) {
   const n = parseInt(label.split('-')[1], 10);
-  const nextBadge = isNext ? '<span class="smgmt-next-badge">NEXT UP</span>' : '';
   // Unified Run/Re-run button replaces the separate run + rerun buttons (issue #186)
   const actionBtnId  = `smgmt-run-btn-${label.replace('-', '_')}`;
   const deleteBtnId  = `smgmt-delete-btn-${label.replace('-', '_')}`;
@@ -3044,17 +3043,30 @@ function smgmtSprintBlockHtml(label, tickets, isNext) {
   // hasCompleted → unified button shows "Re-run Sprint" and calls smgmtRerunSprint
   // otherwise     → unified button shows "Run Sprint"    and calls smgmtRunSprint
   const canRun = !hasCompleted && tickets.length >= 1;
+  const hasGoal = savedGoal.trim().length > 0;
 
-  let actionLabel, actionHandler, actionTitle;
+  // NEXT UP state badge (aria-label for accessibility)
+  const nextBadge = isNext
+    ? '<span class="smgmt-next-badge" aria-label="Next up">NEXT UP</span>'
+    : '';
+
+  let actionBtn;
   if (hasCompleted) {
-    actionLabel   = '<i class="ti ti-refresh"></i> Re-run Sprint';
-    actionHandler = `smgmtRerunSprint('${label}')`;
-    actionTitle   = '';
+    // NEXT UP state: Re-run Sprint (amber border)
+    actionBtn = `<button class="smgmt-run-btn smgmt-run-btn--rerun smgmt-rerun-btn" id="${actionBtnId}"
+                ${hasCompleted ? '' : 'disabled'}
+                onclick="smgmtRerunSprint('${label}')">
+                <i class="ti ti-refresh"></i> Re-run Sprint</button>`;
   } else {
-    actionLabel   = 'Run Sprint';
-    actionHandler = `smgmtRunSprint('${label}')`;
-    if (tickets.length < 1) actionTitle = 'Add at least one ticket first';
-    else actionTitle = '';
+    // Planned state: Run Sprint (neutral, disabled when no goal)
+    const runDisabled = !canRun || !hasGoal ? 'disabled' : '';
+    const runTitle = !canRun
+      ? 'Add at least one ticket first'
+      : (!hasGoal ? 'Set a sprint goal first' : '');
+    actionBtn = `<button class="smgmt-run-btn" id="${actionBtnId}"
+                ${runDisabled} title="${runTitle}"
+                onclick="smgmtRunSprint('${label}')">
+                <i class="ti ti-player-play"></i> Run Sprint</button>`;
   }
 
   const ticketsHtml = tickets.length > 0
@@ -3072,6 +3084,12 @@ function smgmtSprintBlockHtml(label, tickets, isNext) {
     estimateSummaryHtml = `<span class="smgmt-estimate-total">estimated ${dur} across ${cnt} ticket${cnt !== 1 ? 's' : ''}</span>`;
   }
 
+  // Sprint goal bar — visible read-only display; hidden input for saving
+  const goalBarClass = hasGoal ? 'smgmt-sprint-goal-bar' : 'smgmt-sprint-goal-bar placeholder';
+  const goalBarText = hasGoal
+    ? escapeHtml(savedGoal)
+    : 'Sprint goal (required to run) — e.g. Dashboard UX cleanup';
+
   return `
     <div class="smgmt-sprint-block" id="smgmt-block-${label}"
          ondragover="smgmtDragOverZone(event, '${label}')"
@@ -3081,24 +3099,26 @@ function smgmtSprintBlockHtml(label, tickets, isNext) {
            draggable="true"
            ondragstart="smgmtSprintDragStart(event, '${label}')"
            ondragend="smgmtSprintDragEnd(event)">
-        <i class="ti ti-grip-vertical smgmt-sprint-grip"></i>
-        <span class="smgmt-sprint-name">Sprint ${n}</span>
-        ${nextBadge}
-        ${estimateSummaryHtml}
-        <span class="smgmt-sprint-count">${tickets.length} ticket${tickets.length !== 1 ? 's' : ''}</span>
-        <button class="smgmt-finish-btn${hasCompleted ? '' : ' hidden'}" id="${finishBtnId}"
-                title="Finish sprint — add UAT label and close all open issues"
-                onclick="smgmtFinishSprint('${label}')">
-          <i class="ti ti-flag-check"></i> Finish Sprint</button>
-        <button class="smgmt-delete-btn" id="${deleteBtnId}"
-                title="Delete sprint"
-                onclick="smgmtDeleteSprint('${label}')">
-          <i class="ti ti-trash"></i> Delete</button>
-        <button class="smgmt-run-btn${hasCompleted ? ' smgmt-run-btn--rerun' : ''}" id="${actionBtnId}"
-                title="${actionTitle}"
-                ${(hasCompleted || canRun) ? '' : 'disabled'}
-                onclick="${actionHandler}">${actionLabel}</button>
+        <div class="smgmt-sprint-header-left">
+          <i class="ti ti-grip-vertical smgmt-sprint-grip"></i>
+          <span class="smgmt-sprint-name">Sprint ${n}</span>
+          ${nextBadge}
+          ${estimateSummaryHtml}
+          <span class="smgmt-sprint-count">${tickets.length} ticket${tickets.length !== 1 ? 's' : ''}</span>
+        </div>
+        <div class="smgmt-sprint-header-right">
+          <button class="smgmt-finish-btn${hasCompleted ? '' : ' hidden'}" id="${finishBtnId}"
+                  title="Finish sprint — add UAT label and close all open issues"
+                  onclick="smgmtFinishSprint('${label}')">
+            <i class="ti ti-flag-check"></i> Finish Sprint</button>
+          <button class="smgmt-delete-btn" id="${deleteBtnId}"
+                  title="Delete sprint"
+                  onclick="smgmtDeleteSprint('${label}')">
+            <i class="ti ti-trash"></i> Delete</button>
+          ${actionBtn}
+        </div>
       </div>
+      <div class="${goalBarClass}" id="smgmt-goal-bar-${label.replace('-', '_')}">${goalBarText}</div>
       <div class="smgmt-sprint-goal-row" style="display:none">
         <input class="smgmt-goal-input" id="${goalId}" type="text"
                placeholder="Sprint goal (required to run) — e.g. Dashboard UX cleanup"
@@ -3310,7 +3330,22 @@ function smgmtGoalInput(label, value) {
   if (_smgmtAllRunning[runKey]) return;
 
   _smgmtGoals[label] = value;
-  const runBtnId = `smgmt-run-btn-${label.replace('-', '_')}`;
+
+  // Update the visible goal bar
+  const safeLabel = label.replace('-', '_');
+  const goalBar = document.getElementById(`smgmt-goal-bar-${safeLabel}`);
+  if (goalBar) {
+    const hasGoal = value.trim().length > 0;
+    if (hasGoal) {
+      goalBar.textContent = value;
+      goalBar.className = 'smgmt-sprint-goal-bar';
+    } else {
+      goalBar.textContent = 'Sprint goal (required to run) — e.g. Dashboard UX cleanup';
+      goalBar.className = 'smgmt-sprint-goal-bar placeholder';
+    }
+  }
+
+  const runBtnId = `smgmt-run-btn-${safeLabel}`;
   const btn = document.getElementById(runBtnId);
   if (btn) {
     const sprintTickets = (_smgmtData?.issues || []).filter(
@@ -3323,9 +3358,12 @@ function smgmtGoalInput(label, value) {
       btn.disabled = false;
       btn.title = '';
     } else {
-      const canRun = hasTickets;
+      const hasGoal = value.trim().length > 0;
+      const canRun = hasTickets && hasGoal;
       btn.disabled = !canRun;
-      btn.title = hasTickets ? '' : 'Add at least one ticket first';
+      btn.title = !hasTickets ? 'Add at least one ticket first'
+                : !hasGoal   ? 'Set a sprint goal first'
+                : '';
     }
   }
   if (_smgmtGoalSaveTimers[label]) clearTimeout(_smgmtGoalSaveTimers[label]);
@@ -3764,8 +3802,8 @@ let _smgmtEstEarlierWithTickets = [];    // earlier sprints for post-confirm mig
 async function smgmtRunSprint(sprintLabel) {
   if (!_smgmtCurrentRepo) return;
   const goal = _smgmtGoals[sprintLabel] || '';
-  if (goal.length < 10) {
-    smgmtShowError('Set a sprint goal (at least 10 characters) before running.');
+  if (goal.trim().length === 0) {
+    smgmtShowError('Set a sprint goal before running.');
     return;
   }
 
@@ -4109,10 +4147,18 @@ function smgmtApplyRunState(sprintStatusMap) {
       // Restore draggable on header
       hdr.setAttribute('draggable', 'true');
     }
-    // Remove injected running elements (badge, progress, kill btn)
-    block.querySelectorAll('.smgmt-running-badge, .smgmt-progress-text, .smgmt-kill-btn').forEach(el => el.remove());
+    // Remove injected running elements (badge, progress section, kill btn)
+    block.querySelectorAll('.smgmt-running-badge, .smgmt-progress-text, .smgmt-kill-btn, .smgmt-progress-section').forEach(el => el.remove());
+    // Remove status circles injected on ticket rows
+    block.querySelectorAll('.smgmt-ticket-status-circle, .smgmt-agent-pill, .smgmt-ticket-elapsed-time').forEach(el => el.remove());
+    // Remove running/pending/done classes from ticket rows
+    block.querySelectorAll('.smgmt-ticket').forEach(el => {
+      el.classList.remove('is-running', 'is-pending', 'is-done');
+    });
     // Restore any hidden unified action buttons
     block.querySelectorAll('.smgmt-run-btn').forEach(btn => btn.style.display = '');
+    // Restore hidden delete buttons
+    block.querySelectorAll('.smgmt-delete-btn').forEach(btn => btn.style.display = '');
     // Restore finish sprint button visibility (re-hidden by the HTML class if not hasCompleted)
     block.querySelectorAll('.smgmt-finish-btn').forEach(btn => btn.style.display = '');
     // Restore goal input
@@ -4172,56 +4218,80 @@ function smgmtApplyRunState(sprintStatusMap) {
       ticketEl.setAttribute('draggable', 'false');
     });
 
-    // Insert RUNNING badge after NEXT UP badge (or sprint name)
+    // Insert RUNNING badge (pulse pill) in the header-left div, after sprint name / NEXT UP badge
     const runBadge = document.createElement('span');
     runBadge.className = 'smgmt-running-badge';
-    runBadge.textContent = 'RUNNING';
-    const nextBadge = hdr.querySelector('.smgmt-next-badge');
-    const sprintName = hdr.querySelector('.smgmt-sprint-name');
+    runBadge.setAttribute('aria-label', 'Running sprint');
+    runBadge.innerHTML = '<span class="smgmt-pulse-dot" aria-hidden="true"></span><span>Running</span>';
+    const hdrLeft = hdr.querySelector('.smgmt-sprint-header-left') || hdr;
+    const nextBadge = hdrLeft.querySelector('.smgmt-next-badge');
+    const sprintName = hdrLeft.querySelector('.smgmt-sprint-name');
     const insertAfter = nextBadge || sprintName;
     if (insertAfter && insertAfter.nextSibling) {
-      hdr.insertBefore(runBadge, insertAfter.nextSibling);
+      hdrLeft.insertBefore(runBadge, insertAfter.nextSibling);
     } else {
-      hdr.appendChild(runBadge);
+      hdrLeft.appendChild(runBadge);
     }
 
-    // Build progress text from per-sprint status map
-    let progressText = '';
-    const sprintStatus = sprintStatusMap[runLabel];
-    if (sprintStatus) {
-      const total = (sprintStatus.issues || []).length;
-      const done  = (sprintStatus.issues || []).filter(i =>
-        i.status === 'done' || i.status === 'skipped'
-      ).length;
-      progressText = `${done}/${total} tickets`;
-      if (done > 0 && sprintStatus.wall_clock_secs > 0) {
-        const avgSecs = sprintStatus.wall_clock_secs / done;
-        const remaining = Math.round(avgSecs * (total - done) / 60);
-        if (remaining > 0) progressText += ` · ~${remaining} min remaining`;
-      }
-    }
-    if (progressText) {
-      const progEl = document.createElement('span');
-      progEl.className = 'smgmt-progress-text';
-      progEl.textContent = progressText;
-      // Insert before the unified action button
-      const actionBtn = document.getElementById(`smgmt-run-btn-${safeLabel}`);
-      if (actionBtn) {
-        hdr.insertBefore(progEl, actionBtn);
-      } else {
-        hdr.appendChild(progEl);
-      }
-    }
-
-    // Hide unified action button and insert Kill button after it (issue #186 AC)
+    // Hide unified action button + Finish/Delete buttons; insert Cancel sprint button
     const actionBtn = document.getElementById(`smgmt-run-btn-${safeLabel}`);
-    if (actionBtn) {
-      actionBtn.style.display = 'none';
+    if (actionBtn) actionBtn.style.display = 'none';
+    const deleteBtn2 = document.getElementById(`smgmt-delete-btn-${safeLabel}`);
+    if (deleteBtn2) deleteBtn2.style.display = 'none';
+
+    const hdrRight = hdr.querySelector('.smgmt-sprint-header-right') || hdr;
+    // Only add one Cancel button (guard against double-apply)
+    if (!hdrRight.querySelector('.smgmt-kill-btn')) {
       const killBtn = document.createElement('button');
       killBtn.className = 'smgmt-kill-btn';
-      killBtn.innerHTML = '<i class="ti ti-x"></i> Kill';
+      killBtn.innerHTML = '<i class="ti ti-player-stop-filled"></i> Cancel sprint';
       killBtn.onclick = () => smgmtKillSprint(runLabel);
-      actionBtn.parentNode.insertBefore(killBtn, actionBtn.nextSibling);
+      hdrRight.appendChild(killBtn);
+    }
+
+    // Inject progress section between goal bar and ticket list
+    const sprintStatus = sprintStatusMap[runLabel];
+    const goalBarEl = document.getElementById(`smgmt-goal-bar-${safeLabel}`);
+    const ticketsEl2 = document.getElementById(`smgmt-tickets-${runLabel}`);
+    // Only inject once
+    if (sprintStatus && ticketsEl2 && !block.querySelector('.smgmt-progress-section')) {
+      const issues = sprintStatus.issues || [];
+      const total  = issues.length;
+      const done   = issues.filter(i => i.status === 'done' || i.status === 'skipped').length;
+      const pct    = total > 0 ? Math.round((done / total) * 100) : 0;
+
+      let estText = '';
+      if (done > 0 && sprintStatus.wall_clock_secs > 0 && total > done) {
+        const avgSecs   = sprintStatus.wall_clock_secs / done;
+        const remMins   = Math.round(avgSecs * (total - done) / 60);
+        if (remMins > 0) {
+          const h = Math.floor(remMins / 60);
+          const m = remMins % 60;
+          estText = h > 0 ? ` · est. ${h}h ${m}m remaining` : ` · est. ${m}m remaining`;
+        }
+      }
+
+      const progSection = document.createElement('div');
+      progSection.className = 'smgmt-progress-section';
+      progSection.innerHTML = `
+        <div class="smgmt-progress-meta">
+          <span>${done} of ${total} ticket${total !== 1 ? 's' : ''} complete</span>
+          <span>${pct}%${estText}</span>
+        </div>
+        <div class="smgmt-progress-bar">
+          <div class="smgmt-progress-fill" style="width:${pct}%"
+               role="progressbar"
+               aria-valuenow="${pct}"
+               aria-valuemin="0"
+               aria-valuemax="100"></div>
+        </div>`;
+
+      // Insert after goal bar if present, otherwise before ticket list
+      if (goalBarEl && goalBarEl.nextSibling) {
+        block.insertBefore(progSection, goalBarEl.nextSibling);
+      } else if (ticketsEl2) {
+        block.insertBefore(progSection, ticketsEl2);
+      }
     }
 
     // Hide Finish Sprint button while running (issue #195 AC)
@@ -4300,8 +4370,12 @@ function smgmtApplyRunState(sprintStatusMap) {
     } else {
       const hasTickets = sprintTickets.length >= 1;
       const canRun = hasTickets;
-      btn.disabled = !canRun;
-      btn.title = hasTickets ? '' : 'Add at least one ticket first';
+      // Also check goal: Run Sprint button is visually disabled when no goal set (issue #223)
+      const hasGoal = ((_smgmtGoals[btnLabel] || '').trim().length > 0);
+      btn.disabled = !canRun || !hasGoal;
+      btn.title = !hasTickets ? 'Add at least one ticket first'
+                : !hasGoal   ? 'Set a sprint goal first'
+                : '';
     }
   });
 }
@@ -4345,7 +4419,37 @@ function smgmtAgentStatusBadge(agentStatus, statusChangedAt) {
 }
 
 /**
- * Update per-ticket badges, spinners and elapsed counters from sprintStatusMap.
+ * Derive ticket run state (done | running | pending) from agent_status or labels.
+ * Graceful fallback: if agent_status is absent, check GitHub labels.
+ */
+function _smgmtTicketRunState(issueData) {
+  const agentStatus = issueData.agent_status || '';
+  if (agentStatus === 'completed' || issueData.status === 'done' || issueData.status === 'skipped') {
+    return 'done';
+  }
+  if (agentStatus === 'coder_running' || agentStatus === 'tester_running') {
+    return 'running';
+  }
+  // Fallback: check GitHub labels
+  const labels = issueData.labels || [];
+  const labelNames = labels.map(l => (typeof l === 'string' ? l : l.name || ''));
+  if (labelNames.some(n => n === 'uat')) return 'done';
+  if (labelNames.some(n => /coder.running|tester.running/i.test(n))) return 'running';
+  return 'pending';
+}
+
+/**
+ * Build the active agent type string ('coder' | 'tester' | null) from agent_status.
+ */
+function _smgmtActiveAgent(agentStatus) {
+  if (!agentStatus) return null;
+  if (agentStatus.includes('coder')) return 'coder';
+  if (agentStatus.includes('tester')) return 'tester';
+  return null;
+}
+
+/**
+ * Update per-ticket badges, spinners, status circles, and elapsed counters.
  * Called from smgmtApplyRunState whenever sprintStatusMap is available.
  */
 function smgmtApplyTicketLiveStatus(sprintStatusMap) {
@@ -4358,25 +4462,86 @@ function smgmtApplyTicketLiveStatus(sprintStatusMap) {
       if (!ticketEl) continue;
 
       const agentStatus = issueData.agent_status;
-      const isRunning   = agentStatus === 'coder_running' || agentStatus === 'tester_running';
+      const runState    = _smgmtTicketRunState(issueData);
+      const isRunning   = runState === 'running';
+      const isDone      = runState === 'done';
+      const isPending   = runState === 'pending';
 
-      // Remove existing injected live-status elements
-      ticketEl.querySelectorAll('.smgmt-ticket-agent-badge, .smgmt-ticket-spinner, .smgmt-ticket-elapsed').forEach(el => el.remove());
+      // Remove existing injected live-status elements (keep .smgmt-ticket-status label)
+      ticketEl.querySelectorAll(
+        '.smgmt-ticket-agent-badge, .smgmt-ticket-spinner, .smgmt-ticket-elapsed, ' +
+        '.smgmt-ticket-status-circle, .smgmt-agent-pill, .smgmt-ticket-elapsed-time'
+      ).forEach(el => el.remove());
 
-      // Add spinner when running
+      // Apply row-level class for title styling
+      ticketEl.classList.remove('is-running', 'is-done', 'is-pending');
+      ticketEl.classList.add(`is-${runState}`);
+
+      // Build status circle
+      const circle = document.createElement('span');
+      circle.className = `smgmt-ticket-status-circle ${runState}`;
+      if (isDone) {
+        circle.textContent = '✓';
+        circle.setAttribute('aria-label', 'Done');
+      } else if (isRunning) {
+        circle.setAttribute('aria-label', 'Running');
+        const dot = document.createElement('span');
+        dot.className = 'smgmt-inner-dot';
+        circle.appendChild(dot);
+      } else {
+        circle.textContent = '○';
+        circle.setAttribute('aria-label', 'Pending');
+      }
+
+      // Insert circle before the ticket number (after checkbox and grip)
+      const numEl = ticketEl.querySelector('.smgmt-ticket-num');
+      if (numEl) {
+        ticketEl.insertBefore(circle, numEl);
+      } else {
+        ticketEl.insertBefore(circle, ticketEl.firstChild);
+      }
+
+      // Elapsed time on the right
+      const timeEl = document.createElement('span');
+      timeEl.className = 'smgmt-ticket-elapsed-time';
+      if (isRunning && issueData.status_changed_at) {
+        const startTs = new Date(issueData.status_changed_at).getTime();
+        if (!isNaN(startTs)) {
+          timeEl.dataset.startTs = startTs;
+          _smgmtUpdateElapsedTimeEl(timeEl);
+        } else {
+          timeEl.textContent = '—';
+        }
+      } else if (isDone && issueData.elapsed) {
+        // elapsed may be a formatted string like "18m 04s" or seconds number
+        const elVal = issueData.elapsed;
+        timeEl.textContent = typeof elVal === 'number' ? formatDuration(elVal) : elVal;
+      } else {
+        timeEl.textContent = '—';
+      }
+      ticketEl.appendChild(timeEl);
+
+      // Agent pill on running ticket
       if (isRunning) {
+        const agentType = _smgmtActiveAgent(agentStatus);
+        if (agentType) {
+          const pill = document.createElement('span');
+          pill.className = `smgmt-agent-pill ${agentType}`;
+          pill.textContent = agentType.toUpperCase();
+          // Insert before elapsed time
+          ticketEl.insertBefore(pill, timeEl);
+        }
+
+        // Legacy spinner (for existing status badge area)
         const spinner = document.createElement('i');
         spinner.className = 'ti ti-loader-2 smgmt-ticket-spinner';
-        // Insert before title (after grip and number)
         const titleEl = ticketEl.querySelector('.smgmt-ticket-title');
-        if (titleEl) {
-          ticketEl.insertBefore(spinner, titleEl);
-        } else {
-          ticketEl.appendChild(spinner);
+        if (titleEl && titleEl.nextSibling) {
+          ticketEl.insertBefore(spinner, titleEl.nextSibling);
         }
       }
 
-      // Add agent status badge after title
+      // Add legacy agent status badge (for sprint cockpit compatibility)
       const badgeHtml = smgmtAgentStatusBadge(agentStatus, issueData.status_changed_at);
       if (badgeHtml) {
         const statusEl = ticketEl.querySelector('.smgmt-ticket-status');
@@ -4386,23 +4551,19 @@ function smgmtApplyTicketLiveStatus(sprintStatusMap) {
         if (statusEl) {
           ticketEl.insertBefore(badgeNode, statusEl);
         } else {
-          ticketEl.appendChild(badgeNode);
+          ticketEl.insertBefore(badgeNode, timeEl);
         }
       }
 
-      // Elapsed counter for running states (AC7)
+      // Elapsed counter for running states (legacy AC7 - kept for compatibility)
       if (isRunning && issueData.status_changed_at) {
         const startTs = new Date(issueData.status_changed_at).getTime();
         if (!isNaN(startTs)) {
           const elapsedEl = document.createElement('span');
           elapsedEl.className = 'smgmt-ticket-elapsed smgmt-ticket-agent-badge sbadge gray';
+          elapsedEl.style.display = 'none'; // hidden; using smgmt-ticket-elapsed-time instead
           elapsedEl.dataset.startTs = startTs;
-          const statusEl = ticketEl.querySelector('.smgmt-ticket-status');
-          if (statusEl) {
-            ticketEl.insertBefore(elapsedEl, statusEl.nextSibling);
-          } else {
-            ticketEl.appendChild(elapsedEl);
-          }
+          ticketEl.appendChild(elapsedEl);
           _smgmtUpdateElapsedEl(elapsedEl);
         }
       }
@@ -4410,7 +4571,7 @@ function smgmtApplyTicketLiveStatus(sprintStatusMap) {
   }
 }
 
-/** Render elapsed time into an elapsed element. */
+/** Render elapsed time into a legacy elapsed element. */
 function _smgmtUpdateElapsedEl(el) {
   const startTs = parseInt(el.dataset.startTs, 10);
   if (isNaN(startTs)) return;
@@ -4420,6 +4581,16 @@ function _smgmtUpdateElapsedEl(el) {
   el.textContent = m > 0 ? `${m}m ${s}s` : `${s}s`;
 }
 
+/** Render elapsed time into the new elapsed-time element (mono, muted). */
+function _smgmtUpdateElapsedTimeEl(el) {
+  const startTs = parseInt(el.dataset.startTs, 10);
+  if (isNaN(startTs)) return;
+  const secs = Math.floor((Date.now() - startTs) / 1000);
+  const m = Math.floor(secs / 60);
+  const s = secs % 60;
+  el.textContent = m > 0 ? `${m}m ${String(s).padStart(2, '0')}s` : `${s}s`;
+}
+
 // Elapsed counter interval (AC7) — update all elapsed elements every second.
 let _smgmtElapsedTimer = null;
 
@@ -4427,6 +4598,7 @@ function _ensureElapsedTimer() {
   if (_smgmtElapsedTimer) return;
   _smgmtElapsedTimer = setInterval(() => {
     document.querySelectorAll('.smgmt-ticket-elapsed').forEach(_smgmtUpdateElapsedEl);
+    document.querySelectorAll('.smgmt-ticket-elapsed-time[data-start-ts]').forEach(_smgmtUpdateElapsedTimeEl);
   }, 1000);
 }
 

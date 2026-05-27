@@ -836,9 +836,8 @@ def dismiss_alert(idx: int):
 
 # ── sprint status endpoint (AC-6 from #24) ───────────────────────────────────
 
-# Keyed by project ("owner/repo"). Legacy fallback key is "" for older sprint
-# managers that do not send a project field.
-_sprint_statuses: dict[str, dict] = {}
+# Keyed by (project, sprint_label); populated by POST /api/sprint-status from sprint_manager.py
+_sprint_statuses: dict[tuple, dict] = {}
 
 
 class SprintStatusPayload(BaseModel):
@@ -857,95 +856,34 @@ class SprintStatusPayload(BaseModel):
 
 
 @app.post("/api/sprint-status")
-async def set_sprint_status(payload: SprintStatusPayload):
+def set_sprint_status(payload: SprintStatusPayload):
     global _sprint_statuses
-    data = payload.model_dump()
-    key = data.get("project") or ""
-    _sprint_statuses[key] = data
-    await broadcast({"type": "sprint_update", **data})
+    key = (payload.project, payload.sprint_label)
+    _sprint_statuses[key] = payload.model_dump()
     return {"ok": True}
 
 
 @app.get("/api/sprint-status")
 def get_sprint_status(project: Optional[str] = None):
-    """Return sprint status.
-
-    Without ?project=: returns all active statuses as a list under key "statuses".
-    With ?project=owner/repo: returns single status dict (or {"active": False}).
-
-    For backwards compatibility the response always includes "active" key.
-    """
-    if project is not None:
-        status = _sprint_statuses.get(project)
-        if status is None:
-            return {"active": False}
-        return {**status, "active": True}
-    # Return all stored statuses
-    statuses = [
-        {**v, "active": True}
-        for v in _sprint_statuses.values()
-        if v.get("sprint_label")
-    ]
-    if not statuses:
-        return {"active": False, "statuses": []}
-    return {"active": True, "statuses": statuses}
-
-
-@app.post("/api/sprint-pause")
-async def sprint_pause():
-    """AC-4: Create pause file, set paused=True in state, broadcast SSE."""
-    global _sprint_status
-    if _sprint_status is None:
-        raise HTTPException(status_code=404, detail="No active sprint")
-    n = _sprint_status.get("sprint_number")
-    if n is not None:
-        pause_file = SPRINTS_DIR / f"sprint-{n}.pause"
-        pause_file.parent.mkdir(parents=True, exist_ok=True)
-        pause_file.touch()
-    _sprint_status["paused"] = True
-    await broadcast({"type": "sprint_update", **_sprint_status})
-    return {"ok": True, "state": "paused"}
-
-
-@app.post("/api/sprint-resume")
-async def sprint_resume():
-    """AC-5: Remove pause file, set paused=False in state, broadcast SSE."""
-    global _sprint_status
-    if _sprint_status is None:
-        raise HTTPException(status_code=404, detail="No active sprint")
-    n = _sprint_status.get("sprint_number")
-    if n is not None:
-        pause_file = SPRINTS_DIR / f"sprint-{n}.pause"
-        pause_file.unlink(missing_ok=True)
-    _sprint_status["paused"] = False
-    await broadcast({"type": "sprint_update", **_sprint_status})
-    return {"ok": True, "state": "running"}
-
-
-@app.post("/api/sprint-stop")
-async def sprint_stop():
-    """AC-6: Read PID from sprint-N.pid, SIGTERM the process, clear state, broadcast sprint_stopped."""
-    global _sprint_status
-    if _sprint_status is None:
-        raise HTTPException(status_code=404, detail="No active sprint")
-    n = _sprint_status.get("sprint_number")
-    if n is None:
-        raise HTTPException(status_code=404, detail="Sprint number unknown")
-    pid_file = SPRINTS_DIR / f"sprint-{n}.pid"
-    if not pid_file.exists():
-        raise HTTPException(status_code=404, detail="PID file missing — sprint may have already stopped")
-    try:
-        pid = int(pid_file.read_text(encoding="utf-8").strip())
-        os.kill(pid, signal.SIGTERM)
-    except ValueError:
-        pid_file.unlink(missing_ok=True)
-        raise HTTPException(status_code=404, detail="Invalid PID file")
-    except (ProcessLookupError, PermissionError) as e:
-        raise HTTPException(status_code=502, detail=f"Cannot signal process: {e}")
-    pid_file.unlink(missing_ok=True)
-    _sprint_status = None
-    await broadcast({"type": "sprint_stopped"})
-    return {"ok": True}
+    running = _all_sprints_running()
+    if project:
+        running = [r for r in running if r["project"] == project]
+    result = []
+    for r in running:
+        key = (r["project"], r["sprint_label"])
+        status = _sprint_statuses.get(key, {})
+        issues = status.get("issues", [])
+        closed = sum(1 for i in issues if i.get("status") in ("done", "skipped"))
+        result.append({
+            "project":        r["project"],
+            "sprint_label":   r["sprint_label"],
+            "pid":            r.get("pid"),
+            "issues":         issues,
+            "progress":       {"closed": closed, "total": len(issues)},
+            "started_at":     status.get("start_timestamp"),
+            "wall_clock_secs": status.get("wall_clock_secs", 0.0),
+        })
+    return {"running_sprints": result}
 
 
 # ── sprint summary / history endpoints (AC-4 / AC-6 from #24) ────────────────
@@ -1443,8 +1381,9 @@ def _is_sprint_running(project_root: Path, sprint_label: str) -> bool:
         return False
 
 
-def _any_sprint_running() -> Optional[dict]:
-    """Scan all projects for a running sprint. Returns {project, sprint_label} or None."""
+def _all_sprints_running() -> list[dict]:
+    """Scan all projects for running sprints. Returns list of {project, sprint_label, pid}."""
+    result = []
     projects = projects_module.load_projects()
     for proj in projects:
         root = _project_root_path(proj["repo"])
@@ -1452,10 +1391,20 @@ def _any_sprint_running() -> Optional[dict]:
         if not sprints_dir.exists():
             continue
         for pid_file in sprints_dir.glob("*-pid"):
-            label = pid_file.stem  # e.g. "sprint-2"
+            label = pid_file.name.removesuffix("-pid")
             if _is_sprint_running(root, label):
-                return {"project": proj["repo"], "sprint_label": label}
-    return None
+                try:
+                    pid = int(pid_file.read_text(encoding="utf-8").strip())
+                except (ValueError, OSError):
+                    pid = None
+                result.append({"project": proj["repo"], "sprint_label": label, "pid": pid})
+    return result
+
+
+def _any_sprint_running() -> Optional[dict]:
+    """Scan all projects for a running sprint. Returns first found or None."""
+    running = _all_sprints_running()
+    return running[0] if running else None
 
 
 def _all_sprints_running() -> list[dict]:
@@ -1627,19 +1576,11 @@ def run_sprint_managed(body: SprintMgmtRunBody):
     if not SPRINT_MANAGER_PATH.exists():
         raise HTTPException(502, detail=f"sprint_manager.py not found at {SPRINT_MANAGER_PATH}")
 
-    # Per-issue-#123: only block if this specific (project, sprint_label) is already running.
-    # Different projects and different sprint labels within the same project can run concurrently.
     project_root = _project_root_path(body.project)
     if _is_sprint_running(project_root, body.sprint_label):
-        pid_file = _commander_dir(project_root) / "sprints" / f"{body.sprint_label}-pid"
-        try:
-            pid = int(pid_file.read_text(encoding="utf-8").strip())
-            pid_str = str(pid)
-        except (ValueError, OSError):
-            pid_str = "unknown"
         raise HTTPException(
             409,
-            detail=f"Sprint {body.sprint_label} is already running on {body.project} (PID {pid_str})",
+            detail=f"Sprint {body.sprint_label} is already running on {body.project}",
         )
     coder_path   = _coder_clone_path(project_root)
     commander    = _commander_dir(project_root)

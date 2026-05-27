@@ -1926,15 +1926,11 @@ async function loadSprintStatus() {
     const res = await fetch('/api/sprint-status');
     if (!res.ok) return;
     const data = await res.json();
-    if (!data.active) {
-      _sprintState = null;
-      _updateSprintNavDot(false);
-      return;
-    }
-    _sprintState = data;
-    _updateSprintNavDot(true);
+    const sprints = data.running_sprints || [];
+    _sprintState = sprints.length > 0 ? sprints[0] : null;
+    _updateSprintNavDot(!!_sprintState);
     const sprintVisible = !document.getElementById('view-sprint')?.classList.contains('hidden');
-    if (sprintVisible) scRenderCockpit(_sprintState);
+    if (sprintVisible && _sprintState) scRenderCockpit(_sprintState);
   } catch { /* silent */ }
 }
 
@@ -3624,14 +3620,9 @@ async function smgmtPollRunStatus() {
     let sprintStatusMap = {};  // sprint_label -> status object
     if (statusRes.ok) {
       const statusData = await statusRes.json();
-      if (statusData.statuses) {
-        // New multi-sprint format
-        for (const s of statusData.statuses) {
-          if (s.sprint_label) sprintStatusMap[s.sprint_label] = s;
-        }
-      } else if (statusData.active && statusData.sprint_label) {
-        // Legacy single-sprint format
-        sprintStatusMap[statusData.sprint_label] = statusData;
+      const sprints = statusData.running_sprints || [];
+      for (const s of sprints) {
+        if (s.sprint_label) sprintStatusMap[s.sprint_label] = s;
       }
     }
 

@@ -456,7 +456,7 @@ async def remove_project(owner: str, repo_name: str, body: RemoveProjectBody):
 
 
 @app.post("/api/projects/{owner}/{repo_name}/approve-batch")
-def approve_batch(owner: str, repo_name: str):
+async def approve_batch(owner: str, repo_name: str):
     repo = f"{owner}/{repo_name}"
     try:
         issues = github_client.list_open_uat_issues(repo_name=repo)
@@ -464,6 +464,8 @@ def approve_batch(owner: str, repo_name: str):
         for issue in issues:
             github_client.approve_issue(issue["number"], repo_name=repo)
             approved.append(issue["number"])
+        for issue_id in approved:
+            await broadcast({"type": "update", "event": {"event_type": "ticket_approved", "issue": issue_id}})
         return {"approved": approved, "count": len(approved)}
     except subprocess.CalledProcessError as e:
         raise _gh_error(e)

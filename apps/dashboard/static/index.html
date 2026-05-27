@@ -2341,11 +2341,12 @@
 <div class="modal hidden" id="aua-modal" role="dialog" aria-modal="true" aria-labelledby="aua-modal-title">
   <div class="modal-header">
     <span class="modal-title" id="aua-modal-title">Approve UAT tickets?</span>
-    <button class="modal-close" onclick="closeApproveAllUatModal()" aria-label="Close">&times;</button>
+    <button class="modal-close" id="aua-modal-close" onclick="closeApproveAllUatModal()" aria-label="Close">&times;</button>
   </div>
   <ul class="aua-ticket-list" id="aua-modal-list"></ul>
+  <div class="modal-error hidden" id="aua-modal-error"></div>
   <div class="modal-footer">
-    <button class="btn-ghost" onclick="closeApproveAllUatModal()">Cancel</button>
+    <button class="btn-ghost" id="aua-modal-cancel" onclick="closeApproveAllUatModal()">Cancel</button>
     <button class="aua-confirm-btn" id="aua-modal-confirm" onclick="confirmApproveAllUat()"><i class="ti ti-checks"></i> Confirm</button>
   </div>
 </div>

@@ -968,13 +968,25 @@ function showApproveAllUatModal(repo) {
     `Approve ${n} UAT ticket${n !== 1 ? 's' : ''} for ${projName}?`;
   document.getElementById('aua-modal-list').innerHTML =
     tickets.map(t => `<li>#${t.number} ${escapeHtml(t.title)}</li>`).join('');
+  // Reset state: re-enable all buttons, clear any previous error
   const confirmBtn = document.getElementById('aua-modal-confirm');
-  if (confirmBtn) confirmBtn.disabled = false;
-  document.getElementById('aua-modal-backdrop').classList.remove('hidden');
+  const cancelBtn  = document.getElementById('aua-modal-cancel');
+  const closeBtn   = document.getElementById('aua-modal-close');
+  if (confirmBtn) { confirmBtn.disabled = false; confirmBtn.innerHTML = '<i class="ti ti-checks"></i> Confirm'; }
+  if (cancelBtn)  cancelBtn.disabled = false;
+  if (closeBtn)   closeBtn.disabled  = false;
+  const errEl = document.getElementById('aua-modal-error');
+  if (errEl) { errEl.textContent = ''; errEl.classList.add('hidden'); }
+  const backdrop = document.getElementById('aua-modal-backdrop');
+  backdrop.onclick = closeApproveAllUatModal;
+  backdrop.classList.remove('hidden');
   document.getElementById('aua-modal').classList.remove('hidden');
 }
 
 function closeApproveAllUatModal() {
+  // Only close when not in loading state
+  const confirmBtn = document.getElementById('aua-modal-confirm');
+  if (confirmBtn && confirmBtn.disabled && confirmBtn.querySelector('.dt-spinner')) return;
   document.getElementById('aua-modal-backdrop').classList.add('hidden');
   document.getElementById('aua-modal').classList.add('hidden');
   _approveAllUatRepo = null;
@@ -983,18 +995,41 @@ function closeApproveAllUatModal() {
 async function confirmApproveAllUat() {
   const repo = _approveAllUatRepo;
   if (!repo) return;
-  const btn = document.getElementById('aua-modal-confirm');
-  if (btn) btn.disabled = true;
+  const confirmBtn = document.getElementById('aua-modal-confirm');
+  const cancelBtn  = document.getElementById('aua-modal-cancel');
+  const closeBtn   = document.getElementById('aua-modal-close');
+  const errEl      = document.getElementById('aua-modal-error');
+  const backdrop   = document.getElementById('aua-modal-backdrop');
+
+  // Enter loading state
+  if (confirmBtn) { confirmBtn.disabled = true; confirmBtn.innerHTML = '<span class="dt-spinner"></span>Approving…'; }
+  if (cancelBtn)  cancelBtn.disabled  = true;
+  if (closeBtn)   closeBtn.disabled   = true;
+  if (backdrop)   backdrop.onclick    = null;
+  if (errEl)      { errEl.textContent = ''; errEl.classList.add('hidden'); }
+
   try {
     const res = await fetch(`/api/projects/${repo}/approve-batch`, { method: 'POST' });
-    if (!res.ok) throw new Error(await res.text());
+    if (!res.ok) {
+      const body = await res.text();
+      let msg;
+      try { msg = JSON.parse(body).detail || body; } catch (_) { msg = body; }
+      throw new Error(msg);
+    }
     const data = await res.json();
-    closeApproveAllUatModal();
+    // Success: close modal, refresh, show toast
+    document.getElementById('aua-modal-backdrop').classList.add('hidden');
+    document.getElementById('aua-modal').classList.add('hidden');
+    _approveAllUatRepo = null;
     _refreshAfterAction(repo);
     showSuccessToast(`Approved ${data.count} ticket${data.count !== 1 ? 's' : ''}`);
   } catch (e) {
-    alert('Batch approve failed: ' + e.message);
-    if (btn) btn.disabled = false;
+    // Error: re-enable all controls and show inline error
+    if (confirmBtn) { confirmBtn.disabled = false; confirmBtn.innerHTML = '<i class="ti ti-checks"></i> Confirm'; }
+    if (cancelBtn)  cancelBtn.disabled  = false;
+    if (closeBtn)   closeBtn.disabled   = false;
+    if (backdrop)   backdrop.onclick    = closeApproveAllUatModal;
+    if (errEl)      { errEl.textContent = 'Batch approve failed: ' + e.message; errEl.classList.remove('hidden'); }
   }
 }
 

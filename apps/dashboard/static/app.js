@@ -4183,6 +4183,57 @@ function showErrorToast(msg) {
 let _dtFiles = [];
 let _dtDraftId = null;
 
+// Label picker cache: { ts: number, labels: [{name, color}] } | null
+let _dtLabelCache = null;
+const _DT_LABEL_CACHE_TTL = 30_000; // 30 seconds
+
+async function _dtFetchLabels(project) {
+  const now = Date.now();
+  if (_dtLabelCache && (now - _dtLabelCache.ts) < _DT_LABEL_CACHE_TTL) {
+    return _dtLabelCache.labels;
+  }
+  const qs = project ? `?repo=${encodeURIComponent(project)}` : '';
+  const res = await fetch(`/api/github/labels${qs}`);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const labels = await res.json();
+  _dtLabelCache = { ts: now, labels };
+  return labels;
+}
+
+function _dtRenderLabelList(labels) {
+  const list = document.getElementById('dt-label-list');
+  if (!labels.length) {
+    list.innerHTML = '<span class="dt-label-loading">No labels found</span>';
+    return;
+  }
+  list.innerHTML = labels.map(lbl => {
+    const safeId = 'dt-lbl-' + lbl.name.replace(/[^a-zA-Z0-9_-]/g, '_');
+    const color = lbl.color ? '#' + lbl.color.replace(/^#/, '') : '#cccccc';
+    return `<label class="dt-label-item">
+      <input type="checkbox" id="${escapeHtml(safeId)}" value="${escapeHtml(lbl.name)}">
+      <span class="dt-label-swatch" style="background:${color}"></span>
+      <span class="dt-label-name">${escapeHtml(lbl.name)}</span>
+    </label>`;
+  }).join('');
+}
+
+async function _dtLoadLabels(project) {
+  const loading = document.getElementById('dt-label-loading');
+  const error   = document.getElementById('dt-label-error');
+  const list    = document.getElementById('dt-label-list');
+  loading.classList.remove('hidden');
+  error.classList.add('hidden');
+  list.innerHTML = '';
+  try {
+    const labels = await _dtFetchLabels(project);
+    loading.classList.add('hidden');
+    _dtRenderLabelList(labels);
+  } catch (e) {
+    loading.classList.add('hidden');
+    error.classList.remove('hidden');
+  }
+}
+
 function openDraftTicketModal() {
   _dtFiles = [];
   _dtDraftId = null;
@@ -4206,6 +4257,9 @@ function openDraftTicketModal() {
   if (_activeProject) {
     sel.value = _activeProject;
   }
+
+  // Load label picker
+  _dtLoadLabels(sel.value || '');
 
   document.getElementById('dt-description').focus();
 }
@@ -4368,6 +4422,10 @@ async function postDraftToGitHub() {
     return;
   }
 
+  // Collect selected labels from picker
+  const checkedBoxes = document.querySelectorAll('#dt-label-list input[type="checkbox"]:checked');
+  const extraLabels = Array.from(checkedBoxes).map(cb => cb.value);
+
   const postBtn = document.getElementById('dt-post-btn');
   postBtn.disabled = true;
   postBtn.textContent = 'Posting…';
@@ -4383,6 +4441,7 @@ async function postDraftToGitHub() {
         body: document.getElementById('dt-body').value,
         project: document.getElementById('dt-project').value || '',
         sprint_label: _dtGetSprintValue(),
+        extra_labels: extraLabels,
       }),
     });
     if (!res.ok) {

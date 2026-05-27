@@ -12,6 +12,11 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
+try:
+    import psutil as _psutil
+except ImportError:
+    _psutil = None  # type: ignore[assignment]
+
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, RedirectResponse, StreamingResponse
@@ -60,11 +65,106 @@ async def _timeout_loop() -> None:
             pass  # never crash the background task
 
 
+def _sweep_orphan_pid_files() -> None:
+    """On startup: scan all projects' PID files and remove orphans.
+
+    A PID file is orphaned when:
+    - The process no longer exists (ProcessLookupError from os.kill(pid, 0))
+    - The process exists but its argv doesn't contain sprint_manager.py followed
+      by the expected sprint label (PID reuse by an unrelated process)
+
+    Live sprint_manager.py processes for the correct label are left untouched.
+    """
+    sweep_start = time.monotonic()
+    try:
+        projects = projects_module.load_projects()
+    except Exception as exc:
+        print(f"[startup-sweep] could not load projects: {exc}")
+        return
+
+    for proj in projects:
+        try:
+            project_root = _project_root_path(proj["repo"])
+            sprints_dir = _commander_dir(project_root) / "sprints"
+            if not sprints_dir.exists():
+                continue
+            for pid_file in sprints_dir.glob("*-pid"):
+                sprint_label = pid_file.stem  # e.g. "sprint-9"
+                try:
+                    pid = int(pid_file.read_text(encoding="utf-8").strip())
+                except (ValueError, OSError):
+                    # Unreadable/corrupt PID file — remove it.
+                    try:
+                        pid_file.unlink()
+                    except OSError:
+                        pass
+                    print(f"[startup-sweep] cleaned unreadable PID file {pid_file}")
+                    continue
+
+                # Check if the process exists.
+                try:
+                    os.kill(pid, 0)
+                except ProcessLookupError:
+                    try:
+                        pid_file.unlink()
+                    except OSError:
+                        pass
+                    print(
+                        f"[startup-sweep] cleaned orphan PID file {pid_file}"
+                        f" (PID {pid} not running)"
+                    )
+                    continue
+                except PermissionError:
+                    # Process exists but we can't signal it (different user).
+                    # Leave it; it may be legitimate.
+                    continue
+                except OSError:
+                    continue
+
+                # Process is alive — check its argv to guard against PID reuse.
+                if _psutil is None:
+                    # psutil not installed — skip argv check, leave PID file.
+                    continue
+                try:
+                    proc_info = _psutil.Process(pid)
+                    argv = proc_info.cmdline()
+                except Exception:
+                    # Process already gone or permission error — skip argv check.
+                    continue
+
+                # argv must contain "sprint_manager.py" followed by sprint_label.
+                try:
+                    sm_idx = next(
+                        i for i, arg in enumerate(argv) if "sprint_manager.py" in arg
+                    )
+                    label_present = (
+                        len(argv) > sm_idx + 1 and argv[sm_idx + 1] == sprint_label
+                    )
+                except StopIteration:
+                    label_present = False
+
+                if not label_present:
+                    try:
+                        pid_file.unlink()
+                    except OSError:
+                        pass
+                    print(
+                        f"[startup-sweep] cleaned orphan PID file {pid_file}"
+                        f" (PID {pid} reused by unrelated process)"
+                    )
+        except Exception as exc:
+            print(f"[startup-sweep] error scanning project {proj.get('repo')}: {exc}")
+
+    elapsed_ms = (time.monotonic() - sweep_start) * 1000
+    print(f"[startup-sweep] completed in {elapsed_ms:.1f}ms")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global _start_time
     _start_time = time.monotonic()
     db.init_db()
+    _sweep_orphan_pid_files()
     task1 = asyncio.create_task(_cache_refresh_loop())
     task2 = asyncio.create_task(_timeout_loop())
     yield
@@ -1627,7 +1727,36 @@ def run_sprint_managed(body: SprintMgmtRunBody):
         start_new_session=True,
     )
 
+    # Write PID file immediately so we can clean it up if the process crashes fast.
     pid_path.write_text(str(proc.pid), encoding="utf-8")
+
+    # Poll for ~2 seconds to detect fast crashes before returning 202.
+    exit_code: Optional[int] = None
+    deadline = time.monotonic() + 2.0
+    while time.monotonic() < deadline:
+        exit_code = proc.poll()
+        if exit_code is not None:
+            break
+        time.sleep(0.1)
+
+    if exit_code is not None:
+        # Subprocess crashed — flush the log, clean up PID file, return 502 with log tail.
+        log_fh.flush()
+        log_fh.close()
+        try:
+            pid_path.unlink()
+        except OSError:
+            pass
+        try:
+            log_lines = log_path.read_text(encoding="utf-8", errors="replace").splitlines()
+            log_tail = "\n".join(log_lines[-30:])
+        except OSError:
+            log_tail = "(log file not readable)"
+        detail = f"Sprint process exited with code {exit_code}.\n\n{log_tail}"
+        if len(detail) > 1500:
+            detail = detail[-1500:]
+        raise HTTPException(502, detail=detail)
+
     return {
         "ok": True,
         "sprint_label": body.sprint_label,

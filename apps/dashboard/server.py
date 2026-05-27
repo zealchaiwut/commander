@@ -262,6 +262,11 @@ async def root():
     return FileResponse(STATIC_DIR / "index.html")
 
 
+@app.get("/home-preview")
+async def home_preview():
+    return FileResponse(STATIC_DIR / "home-preview.html")
+
+
 @app.get("/projects/{path:path}")
 async def spa_project_route(path: str):
     if path.endswith("/plan-sprint"):

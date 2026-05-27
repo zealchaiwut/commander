@@ -1,0 +1,638 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sprint 10 — Running</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.30.0/dist/tabler-icons.min.css">
+  <style>
+    /* Match commander's design tokens */
+    :root {
+      --bg:           #f9fafb;
+      --surface:      #ffffff;
+      --surface-2:    #f3f4f6;
+      --surface-hover:#f5f6f8;
+      --border:       #e5e7eb;
+      --text:         #111827;
+      --text-muted:   #6b7280;
+      --text-sub:     #9ca3af;
+      --green:        #16a34a;
+      --green-bg:     #dcfce7;
+      --amber:        #d97706;
+      --amber-bg:     #fef3c7;
+      --red:          #dc2626;
+      --red-bg:       #fee2e2;
+      --blue:         #2563eb;
+      --blue-bg:      #dbeafe;
+      --purple:       #7c3aed;
+      --purple-bg:    #ede9fe;
+      --mono: 'SF Mono','Fira Code','Cascadia Code',monospace;
+    }
+
+    [data-theme="dark"] {
+      --bg: #0d0d0d; --surface: #161616; --surface-2: #1e1e1e;
+      --surface-hover: #222; --border: #2a2a2a;
+      --text: #e5e7eb; --text-muted: #9ca3af; --text-sub: #6b7280;
+      --green: #22c55e; --green-bg: rgba(34,197,94,.13);
+      --amber: #eab308; --amber-bg: rgba(234,179,8,.13);
+      --red: #f87171; --red-bg: rgba(239,68,68,.13);
+      --blue: #60a5fa; --blue-bg: rgba(96,165,250,.13);
+      --purple: #a78bfa; --purple-bg: rgba(167,139,250,.13);
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg); color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+      font-size: 14px; padding: 32px;
+      min-height: 100vh;
+    }
+
+    .mockup-container {
+      max-width: 920px; margin: 0 auto;
+      display: flex; flex-direction: column; gap: 24px;
+    }
+
+    .mockup-label {
+      font-size: 11px; font-weight: 700; letter-spacing: 0.1em;
+      color: var(--text-sub); text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+
+    .theme-toggle {
+      position: fixed; top: 20px; right: 20px;
+      background: var(--surface); border: 1px solid var(--border);
+      padding: 8px 12px; border-radius: 6px; font-size: 12px;
+      color: var(--text); cursor: pointer;
+      font-family: var(--mono);
+    }
+
+    /* ─── Running sprint card ─── */
+    .sprint-block {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      overflow: hidden;
+      transition: all 0.2s;
+    }
+
+    .sprint-block.running {
+      border-color: var(--green);
+      box-shadow: 0 0 0 3px var(--green-bg), 0 1px 3px rgba(0,0,0,0.05);
+      position: relative;
+    }
+
+    /* Pulsing top stripe to indicate "alive" */
+    .sprint-block.running::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 3px;
+      background: linear-gradient(
+        90deg,
+        transparent 0%,
+        var(--green) 20%,
+        var(--green) 80%,
+        transparent 100%
+      );
+      background-size: 50% 100%;
+      background-repeat: no-repeat;
+      animation: stripeFlow 2.4s linear infinite;
+    }
+
+    @keyframes stripeFlow {
+      0%   { background-position: -100% 0; }
+      100% { background-position: 200% 0; }
+    }
+
+    .sprint-header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface);
+    }
+
+    .sprint-header.running-header {
+      background: linear-gradient(180deg, var(--green-bg) 0%, transparent 100%);
+    }
+
+    .sprint-title-row {
+      display: flex; align-items: center; gap: 12px;
+    }
+
+    .sprint-title {
+      font-size: 17px; font-weight: 700; color: var(--text);
+      display: flex; align-items: center; gap: 10px;
+    }
+
+    .running-badge {
+      display: inline-flex; align-items: center; gap: 6px;
+      background: var(--green); color: white;
+      padding: 4px 10px; border-radius: 999px;
+      font-size: 11px; font-weight: 600;
+      letter-spacing: 0.04em; text-transform: uppercase;
+      font-family: var(--mono);
+    }
+
+    .running-badge .pulse-dot {
+      width: 6px; height: 6px;
+      border-radius: 50%; background: white;
+      animation: pulseDot 1.4s ease-in-out infinite;
+    }
+
+    @keyframes pulseDot {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50%      { opacity: 0.5; transform: scale(0.7); }
+    }
+
+    .sprint-goal {
+      font-size: 13px; color: var(--text-muted);
+      margin-top: 4px;
+    }
+
+    .header-actions {
+      display: flex; align-items: center; gap: 8px;
+    }
+
+    .btn {
+      border: 1px solid var(--border);
+      background: var(--surface);
+      color: var(--text);
+      padding: 7px 14px; border-radius: 6px;
+      font-size: 13px; font-weight: 500;
+      display: inline-flex; align-items: center; gap: 6px;
+      transition: all 0.15s;
+    }
+    .btn:hover { background: var(--surface-hover); }
+    .btn-kill {
+      color: var(--red); border-color: var(--red-bg);
+      background: var(--red-bg);
+    }
+    .btn-kill:hover { background: var(--red); color: white; }
+
+    /* ─── Progress bar ─── */
+    .progress-section {
+      padding: 14px 20px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .progress-meta {
+      display: flex; justify-content: space-between; align-items: center;
+      margin-bottom: 8px;
+      font-size: 12px; color: var(--text-muted);
+      font-family: var(--mono);
+    }
+
+    .progress-bar {
+      height: 6px; background: var(--surface-2);
+      border-radius: 999px; overflow: hidden;
+      position: relative;
+    }
+
+    .progress-fill {
+      height: 100%;
+      background: linear-gradient(90deg, var(--green) 0%, #22c55e 100%);
+      border-radius: 999px;
+      width: 40%;
+      transition: width 0.5s ease;
+      position: relative;
+    }
+
+    /* Shimmer over the progress fill */
+    .progress-fill::after {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: linear-gradient(
+        90deg,
+        transparent 0%,
+        rgba(255,255,255,0.4) 50%,
+        transparent 100%
+      );
+      animation: shimmer 1.8s linear infinite;
+    }
+
+    @keyframes shimmer {
+      0%   { transform: translateX(-100%); }
+      100% { transform: translateX(100%); }
+    }
+
+    /* ─── Ticket list ─── */
+    .ticket-list {
+      padding: 8px;
+    }
+
+    .ticket {
+      display: flex; align-items: center; gap: 12px;
+      padding: 12px 14px;
+      border-radius: 6px;
+      transition: background 0.15s;
+      position: relative;
+    }
+    .ticket:hover { background: var(--surface-hover); }
+
+    .ticket-status {
+      width: 22px; height: 22px;
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+      font-size: 12px;
+    }
+
+    .ticket-status.done {
+      background: var(--green-bg);
+      color: var(--green);
+    }
+    .ticket-status.done::before {
+      content: '✓'; font-weight: 700;
+    }
+
+    .ticket-status.running {
+      background: var(--blue-bg);
+      border: 2px solid var(--blue);
+      animation: spinBorder 1s linear infinite;
+    }
+
+    @keyframes spinBorder {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+
+    /* Spinner ring inside running */
+    .ticket-status.running::before {
+      content: '';
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: var(--blue);
+      animation: dotPulse 1.4s ease-in-out infinite;
+    }
+
+    @keyframes dotPulse {
+      0%, 100% { opacity: 1; }
+      50%      { opacity: 0.3; }
+    }
+
+    .ticket-status.pending {
+      background: var(--surface-2);
+      color: var(--text-sub);
+    }
+    .ticket-status.pending::before {
+      content: '○'; font-size: 14px;
+    }
+
+    .ticket-number {
+      font-family: var(--mono);
+      color: var(--text-sub);
+      font-size: 13px;
+      min-width: 50px;
+    }
+
+    .ticket-title {
+      flex: 1; min-width: 0;
+      font-size: 14px; color: var(--text);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+
+    .ticket.is-running .ticket-title { font-weight: 600; }
+    .ticket.is-pending .ticket-title { color: var(--text-muted); }
+
+    .ticket-agent {
+      font-family: var(--mono);
+      font-size: 11px;
+      padding: 3px 8px;
+      border-radius: 4px;
+      letter-spacing: 0.02em;
+    }
+    .ticket-agent.coder {
+      background: var(--purple-bg);
+      color: var(--purple);
+    }
+    .ticket-agent.tester {
+      background: var(--amber-bg);
+      color: var(--amber);
+    }
+    .ticket-agent.idle { display: none; }
+
+    .ticket-time {
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--text-sub);
+      min-width: 50px;
+      text-align: right;
+    }
+
+    /* ─── Live log panel ─── */
+    .log-panel {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      overflow: hidden;
+    }
+
+    .log-header {
+      padding: 14px 20px;
+      border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; justify-content: space-between;
+      background: var(--surface);
+    }
+
+    .log-header-left {
+      display: flex; align-items: center; gap: 10px;
+    }
+
+    .log-title {
+      font-size: 14px; font-weight: 600;
+      display: flex; align-items: center; gap: 8px;
+    }
+
+    .live-dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: var(--green);
+      box-shadow: 0 0 0 3px var(--green-bg);
+      animation: glow 2s ease-in-out infinite;
+    }
+
+    @keyframes glow {
+      0%, 100% { box-shadow: 0 0 0 3px var(--green-bg); }
+      50%      { box-shadow: 0 0 0 5px var(--green-bg); }
+    }
+
+    .log-controls {
+      display: flex; gap: 6px;
+    }
+
+    .log-pill {
+      font-size: 11px; padding: 3px 9px; border-radius: 999px;
+      font-family: var(--mono);
+      background: var(--surface-2);
+      color: var(--text-muted);
+    }
+    .log-pill.active {
+      background: var(--green-bg);
+      color: var(--green);
+    }
+
+    /* Log stats bar */
+    .log-stats {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 1px;
+      background: var(--border);
+    }
+
+    .log-stat {
+      background: var(--surface);
+      padding: 14px 18px;
+    }
+
+    .log-stat-label {
+      font-size: 10px; font-weight: 700;
+      letter-spacing: 0.1em;
+      color: var(--text-sub);
+      text-transform: uppercase;
+      margin-bottom: 6px;
+    }
+
+    .log-stat-value {
+      font-size: 18px; font-weight: 700;
+      color: var(--text);
+      font-family: var(--mono);
+      display: flex; align-items: baseline; gap: 6px;
+    }
+
+    .log-stat-sub {
+      font-size: 11px; color: var(--text-muted);
+      font-family: var(--mono);
+      font-weight: 400;
+    }
+
+    .log-stat-value .agent-tag {
+      font-size: 11px;
+      padding: 3px 8px;
+      border-radius: 4px;
+      letter-spacing: 0.02em;
+      font-weight: 500;
+    }
+    .agent-tag.coder { background: var(--purple-bg); color: var(--purple); }
+    .agent-tag.tester { background: var(--amber-bg); color: var(--amber); }
+
+    /* Log stream */
+    .log-stream {
+      background: var(--bg);
+      padding: 12px 20px;
+      font-family: var(--mono);
+      font-size: 12px;
+      line-height: 1.7;
+      max-height: 200px;
+      overflow-y: auto;
+    }
+
+    .log-line {
+      display: flex; gap: 12px;
+      color: var(--text-muted);
+      animation: slideIn 0.3s ease;
+    }
+
+    @keyframes slideIn {
+      from { opacity: 0; transform: translateX(-4px); }
+      to   { opacity: 1; transform: translateX(0); }
+    }
+
+    .log-time {
+      color: var(--text-sub);
+      flex-shrink: 0;
+    }
+
+    .log-msg { flex: 1; }
+    .log-line.event .log-msg { color: var(--text); }
+    .log-line.success .log-msg { color: var(--green); }
+    .log-line.dispatch .log-msg { color: var(--blue); font-weight: 500; }
+
+    .log-cursor {
+      display: inline-block;
+      width: 7px; height: 13px;
+      background: var(--green);
+      vertical-align: middle;
+      margin-left: 2px;
+      animation: blink 1s steps(2) infinite;
+    }
+
+    @keyframes blink {
+      0%, 50%   { opacity: 1; }
+      51%, 100% { opacity: 0; }
+    }
+
+    /* ─── Bottom action ─── */
+    .footer-note {
+      text-align: center;
+      font-size: 12px;
+      color: var(--text-sub);
+      margin-top: 8px;
+      font-family: var(--mono);
+    }
+
+  </style>
+</head>
+<body>
+
+  <button class="theme-toggle" onclick="toggleTheme()">
+    <i class="ti ti-moon"></i> Toggle theme
+  </button>
+
+  <div class="mockup-container">
+
+    <!-- ─── Sprint card (running state) ─── -->
+    <div>
+      <div class="mockup-label">Sprint Mgmt Board · running state</div>
+
+      <div class="sprint-block running">
+        <div class="sprint-header running-header">
+          <div>
+            <div class="sprint-title-row">
+              <div class="sprint-title">Sprint 10</div>
+              <div class="running-badge">
+                <span class="pulse-dot"></span>
+                <span>Running</span>
+              </div>
+            </div>
+            <div class="sprint-goal">Stay awake &amp; resilient — health endpoint, launchd, mobile audit</div>
+          </div>
+          <div class="header-actions">
+            <button class="btn btn-kill">
+              <i class="ti ti-player-stop-filled"></i>
+              Cancel sprint
+            </button>
+          </div>
+        </div>
+
+        <!-- Progress bar -->
+        <div class="progress-section">
+          <div class="progress-meta">
+            <span>2 of 5 tickets complete</span>
+            <span>40% · est. 1h 12m remaining</span>
+          </div>
+          <div class="progress-bar">
+            <div class="progress-fill"></div>
+          </div>
+        </div>
+
+        <!-- Ticket list -->
+        <div class="ticket-list">
+
+          <div class="ticket is-done">
+            <div class="ticket-status done"></div>
+            <span class="ticket-number">#168</span>
+            <span class="ticket-title">launchd auto-restart on crash and boot</span>
+            <span class="ticket-agent idle"></span>
+            <span class="ticket-time">18m 04s</span>
+          </div>
+
+          <div class="ticket is-done">
+            <div class="ticket-status done"></div>
+            <span class="ticket-number">#169</span>
+            <span class="ticket-title">GET /api/health endpoint with status block</span>
+            <span class="ticket-agent idle"></span>
+            <span class="ticket-time">22m 51s</span>
+          </div>
+
+          <div class="ticket is-running">
+            <div class="ticket-status running"></div>
+            <span class="ticket-number">#170</span>
+            <span class="ticket-title">Mobile viewport audit — tap targets and touch drag-drop</span>
+            <span class="ticket-agent coder">CODER</span>
+            <span class="ticket-time">06m 32s</span>
+          </div>
+
+          <div class="ticket is-pending">
+            <div class="ticket-status pending"></div>
+            <span class="ticket-number">#171</span>
+            <span class="ticket-title">Refresh button = full browser reload</span>
+            <span class="ticket-agent idle"></span>
+            <span class="ticket-time">—</span>
+          </div>
+
+          <div class="ticket is-pending">
+            <div class="ticket-status pending"></div>
+            <span class="ticket-number">#172</span>
+            <span class="ticket-title">Root requirements.txt + auto pip sync</span>
+            <span class="ticket-agent idle"></span>
+            <span class="ticket-time">—</span>
+          </div>
+
+        </div>
+      </div>
+    </div>
+
+    <!-- ─── Live log panel ─── -->
+    <div>
+      <div class="mockup-label">Sprint run log · live</div>
+
+      <div class="log-panel">
+        <div class="log-header">
+          <div class="log-header-left">
+            <span class="live-dot"></span>
+            <span class="log-title">Sprint 10 live log</span>
+          </div>
+          <div class="log-controls">
+            <span class="log-pill active">Streaming</span>
+            <span class="log-pill">Pause autoscroll</span>
+          </div>
+        </div>
+
+        <!-- Three big stats -->
+        <div class="log-stats">
+          <div class="log-stat">
+            <div class="log-stat-label">Time spent</div>
+            <div class="log-stat-value">
+              47m
+              <span class="log-stat-sub">27s</span>
+            </div>
+          </div>
+
+          <div class="log-stat">
+            <div class="log-stat-label">Currently working on</div>
+            <div class="log-stat-value">
+              <span style="font-size: 15px;">#170</span>
+              <span class="log-stat-sub">Mobile viewport audit</span>
+            </div>
+          </div>
+
+          <div class="log-stat">
+            <div class="log-stat-label">Active agent</div>
+            <div class="log-stat-value">
+              <span class="agent-tag coder">CODER</span>
+              <span class="log-stat-sub">sonnet-4-6</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Streaming log lines -->
+        <div class="log-stream">
+          <div class="log-line"><span class="log-time">11:42:18</span><span class="log-msg">→ start_feature.py creating feat/170-mobile-viewport-audit</span></div>
+          <div class="log-line success"><span class="log-time">11:42:21</span><span class="log-msg">✓ Branch created off sprint/sprint-10</span></div>
+          <div class="log-line event"><span class="log-time">11:43:05</span><span class="log-msg">Reading issue body and AC...</span></div>
+          <div class="log-line event"><span class="log-time">11:44:12</span><span class="log-msg">Editing apps/dashboard/static/index.html</span></div>
+          <div class="log-line event"><span class="log-time">11:45:33</span><span class="log-msg">Adding touch-fallback for sprint mgmt drag-drop</span></div>
+          <div class="log-line"><span class="log-time">11:46:01</span><span class="log-msg">Resizing tap targets to 44×44px minimum...<span class="log-cursor"></span></span></div>
+        </div>
+      </div>
+
+      <div class="footer-note">
+        Updates every 2s · auto-scrolls when new lines arrive
+      </div>
+    </div>
+
+  </div>
+
+  <script>
+    function toggleTheme() {
+      const html = document.documentElement;
+      const current = html.getAttribute('data-theme');
+      html.setAttribute('data-theme', current === 'light' ? 'dark' : 'light');
+    }
+  </script>
+
+</body>
+</html>

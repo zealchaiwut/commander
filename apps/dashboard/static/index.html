@@ -1320,13 +1320,13 @@
 
   <!-- Project-scoped tabs -->
   <nav class="proj-tabs">
-    <button class="ptab active" id="ptab-tickets"       onclick="switchProjectTab('tickets')">Tickets</button>
-    <button class="ptab"        id="ptab-sprint-mgmt"   onclick="switchProjectTab('sprint-mgmt')">Sprint Mgmt</button>
+    <button class="ptab active" id="ptab-sprint-mgmt"   onclick="switchProjectTab('sprint-mgmt')">Sprint Mgmt</button>
     <button class="ptab"        id="ptab-sprint-history" onclick="switchProjectTab('sprint-history')">Sprint history</button>
+    <button class="ptab"        id="ptab-tickets"        onclick="switchProjectTab('tickets')" style="display:none">Tickets</button>
   </nav>
 
   <!-- Tickets tab content -->
-  <div id="pview-tickets">
+  <div id="pview-tickets" class="hidden">
     <div id="pview-tickets-content" class="pview-tickets-inner">
       <div class="empty">Loading…</div>
     </div>

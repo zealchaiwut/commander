@@ -1612,6 +1612,7 @@ def run_sprint_managed(body: SprintMgmtRunBody):
     pid_path = pid_dir / f"{body.sprint_label}-pid"
 
     stripped_env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
+    stripped_env["COMMANDER_DISPATCHED_BY_SERVER"] = "1"
     goal_path = _sprint_goal_path(project_root, body.sprint_label)
     if goal_path.exists():
         stripped_env["SPRINT_GOAL"] = goal_path.read_text(encoding="utf-8").strip()

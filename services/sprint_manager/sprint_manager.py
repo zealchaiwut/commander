@@ -2962,22 +2962,27 @@ def main() -> None:
     eff_repo = args.repo or (cfg.repo_name if cfg else None)
 
     # ── Per-project PID lock (issue #122) ────────────────────────────────────
-    _project_id = eff_repo or _r(None)
-    _pid_path = _acquire_pid_lock(args.label, _project_id, cfg=cfg)
+    # When dispatched by the dashboard server, the server already writes the
+    # PID file after Popen.  Acquiring the lock here would read that same file
+    # and mistake our own PID for a running instance (self-collision).  Skip
+    # the lock entirely; the server's write at server.py:1629 remains in place.
+    if not os.environ.get("COMMANDER_DISPATCHED_BY_SERVER"):
+        _project_id = eff_repo or _r(None)
+        _pid_path = _acquire_pid_lock(args.label, _project_id, cfg=cfg)
 
-    def _cleanup_pid() -> None:
-        _release_pid_lock(_pid_path)
+        def _cleanup_pid() -> None:
+            _release_pid_lock(_pid_path)
 
-    atexit.register(_cleanup_pid)
+        atexit.register(_cleanup_pid)
 
-    _orig_sigterm = signal.getsignal(signal.SIGTERM)
+        _orig_sigterm = signal.getsignal(signal.SIGTERM)
 
-    def _sigterm_handler(signum: int, frame: object) -> None:
-        _cleanup_pid()
-        signal.signal(signal.SIGTERM, _orig_sigterm or signal.SIG_DFL)
-        os.kill(os.getpid(), signal.SIGTERM)
+        def _sigterm_handler(signum: int, frame: object) -> None:
+            _cleanup_pid()
+            signal.signal(signal.SIGTERM, _orig_sigterm or signal.SIG_DFL)
+            os.kill(os.getpid(), signal.SIGTERM)
 
-    signal.signal(signal.SIGTERM, _sigterm_handler)
+        signal.signal(signal.SIGTERM, _sigterm_handler)
 
     # ── Pre-flight review (AC-1 of issue #33) ────────────────────────────────
     preflight_approved: Optional[list] = None  # None = no preflight, list = approved numbers

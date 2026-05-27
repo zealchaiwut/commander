@@ -2763,6 +2763,7 @@ async function smgmtMoveTicketTo(issueNum, sprintLabel) {
       body: JSON.stringify({ issue: issueNum, sprint: sprintNum }),
     });
     if (!res.ok) throw new Error(await res.text());
+    window.location.reload();
   } catch (e) {
     const iss2 = _smgmtData.issues.find(i => i.number === issueNum);
     if (iss2) iss2.sprint = null;
@@ -2954,8 +2955,7 @@ async function smgmtDropOnPlaceholder(event, placeholderN) {
       body: JSON.stringify({ issue: number, sprint: placeholderN }),
     });
     if (!res.ok) throw new Error(await res.text());
-    // Reload to get fresh state from server
-    await smgmtSelectProject(_smgmtCurrentRepo);
+    window.location.reload();
   } catch (e) {
     // Rollback optimistic update
     const iss2 = _smgmtData.issues.find(i => i.number === number);
@@ -3009,6 +3009,7 @@ async function smgmtDropOnSprint(event, targetSprintLabel) {
         body: JSON.stringify({ issue: number, sprint: targetSprintNum }),
       });
       if (!res.ok) throw new Error(await res.text());
+      window.location.reload();
     } catch (e) {
       // Rollback: restore original sprint
       const iss2 = _smgmtData.issues.find(i => i.number === number);

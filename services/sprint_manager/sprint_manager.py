@@ -314,11 +314,18 @@ def _acquire_pid_lock(sprint_label: str, project: str,
                       cfg: Optional["SprintConfig"] = None) -> Path:
     """Write a PID file scoped to (project, sprint_label).
 
-    If another process holds the lock and is still alive, exits with an error.
-    If the PID file is stale (process dead), logs a warning and cleans it up.
+    Handles three cases:
+    1. No file exists (CLI dispatch): creates the file fresh.
+    2. File already exists with *our own* PID (server-dispatch two-phase claim,
+       issue #155): file is already correct — nothing to do.
+    3. File exists with a different PID:
+       a. Process alive → another instance is running; exit with an error.
+       b. Process dead → stale lock; log, clean up, then write fresh.
+
     Returns the path so the caller can release it on exit.
     """
     pid_path = _pid_file_path(sprint_label, cfg)
+    my_pid   = os.getpid()
 
     if pid_path.exists():
         stale_pid: Optional[int] = None
@@ -326,6 +333,10 @@ def _acquire_pid_lock(sprint_label: str, project: str,
             stale_pid = int(pid_path.read_text().strip())
         except (ValueError, OSError):
             pass
+
+        # Case 2: server already wrote our PID via two-phase claim — nothing to do.
+        if stale_pid == my_pid:
+            return pid_path
 
         alive = False
         if stale_pid is not None:
@@ -351,7 +362,7 @@ def _acquire_pid_lock(sprint_label: str, project: str,
             except OSError:
                 pass
 
-    pid_path.write_text(str(os.getpid()))
+    pid_path.write_text(str(my_pid))
     return pid_path
 
 
@@ -2961,28 +2972,29 @@ def main() -> None:
     # --repo flag overrides config (explicit always wins)
     eff_repo = args.repo or (cfg.repo_name if cfg else None)
 
-    # ── Per-project PID lock (issue #122) ────────────────────────────────────
-    # When dispatched by the dashboard server, the server already writes the
-    # PID file after Popen.  Acquiring the lock here would read that same file
-    # and mistake our own PID for a running instance (self-collision).  Skip
-    # the lock entirely; the server's write at server.py:1629 remains in place.
-    if not os.environ.get("COMMANDER_DISPATCHED_BY_SERVER"):
-        _project_id = eff_repo or _r(None)
-        _pid_path = _acquire_pid_lock(args.label, _project_id, cfg=cfg)
+    # ── Per-project PID lock (issues #122, #155) ─────────────────────────────
+    # Both dispatch paths (HTTP server and CLI) use the same locking protocol.
+    # When dispatched by the server the server has already atomically claimed
+    # the slot by writing <label>-pid (via two-phase rename from -pid.pending).
+    # _acquire_pid_lock detects our own PID in that file and skips the
+    # "already running" guard, then re-confirms the file still points to us.
+    # On CLI dispatch the file does not yet exist and is created fresh.
+    _project_id = eff_repo or _r(None)
+    _pid_path = _acquire_pid_lock(args.label, _project_id, cfg=cfg)
 
-        def _cleanup_pid() -> None:
-            _release_pid_lock(_pid_path)
+    def _cleanup_pid() -> None:
+        _release_pid_lock(_pid_path)
 
-        atexit.register(_cleanup_pid)
+    atexit.register(_cleanup_pid)
 
-        _orig_sigterm = signal.getsignal(signal.SIGTERM)
+    _orig_sigterm = signal.getsignal(signal.SIGTERM)
 
-        def _sigterm_handler(signum: int, frame: object) -> None:
-            _cleanup_pid()
-            signal.signal(signal.SIGTERM, _orig_sigterm or signal.SIG_DFL)
-            os.kill(os.getpid(), signal.SIGTERM)
+    def _sigterm_handler(signum: int, frame: object) -> None:
+        _cleanup_pid()
+        signal.signal(signal.SIGTERM, _orig_sigterm or signal.SIG_DFL)
+        os.kill(os.getpid(), signal.SIGTERM)
 
-        signal.signal(signal.SIGTERM, _sigterm_handler)
+    signal.signal(signal.SIGTERM, _sigterm_handler)
 
     # ── Pre-flight review (AC-1 of issue #33) ────────────────────────────────
     preflight_approved: Optional[list] = None  # None = no preflight, list = approved numbers

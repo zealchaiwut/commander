@@ -16,6 +16,19 @@ import pytest
 from fastapi.testclient import TestClient
 
 
+def _bulk_post(client, *, repo: str, prompts: list, concurrency: int = 3,
+               default_labels: list | None = None):
+    """POST to /api/tickets/bulk using multipart form-data (issue #205 changed the contract)."""
+    data = {
+        "repo": repo,
+        "prompts": json.dumps(prompts),
+        "concurrency": str(concurrency),
+    }
+    if default_labels is not None:
+        data["default_labels"] = json.dumps(default_labels)
+    return client.post("/api/tickets/bulk", data=data)
+
+
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -256,68 +269,39 @@ class TestBulkCreateJS:
 class TestBulkCreateAPIValidation:
     def test_empty_prompts_422(self, client):
         """Reject empty batch with 422."""
-        res = client.post("/api/tickets/bulk", json={
-            "repo": "zealchaiwut/commander",
-            "prompts": [],
-            "concurrency": 3,
-        })
+        res = _bulk_post(client, repo='zealchaiwut/commander', prompts=[])
         assert res.status_code == 422
 
     def test_blank_only_prompts_422(self, client):
         """Reject batch of only blank prompts with 422."""
-        res = client.post("/api/tickets/bulk", json={
-            "repo": "zealchaiwut/commander",
-            "prompts": ["   ", "\t", ""],
-            "concurrency": 3,
-        })
+        res = _bulk_post(client, repo='zealchaiwut/commander', prompts=['   ', '\t', ''])
         assert res.status_code == 422
 
     def test_over_25_prompts_422(self, client):
         """Reject batches over 25 prompts with 422."""
         prompts = [f"prompt {i}" for i in range(26)]
-        res = client.post("/api/tickets/bulk", json={
-            "repo": "zealchaiwut/commander",
-            "prompts": prompts,
-            "concurrency": 3,
-        })
+        res = _bulk_post(client, repo='zealchaiwut/commander', prompts=prompts)
         assert res.status_code == 422
         assert "25" in res.text
 
     def test_invalid_concurrency_422(self, client):
         """Reject concurrency values outside {1, 3, 5} with 422."""
-        res = client.post("/api/tickets/bulk", json={
-            "repo": "zealchaiwut/commander",
-            "prompts": ["some prompt"],
-            "concurrency": 4,
-        })
+        res = _bulk_post(client, repo='zealchaiwut/commander', prompts=['some prompt'], concurrency=4)
         assert res.status_code == 422
 
     def test_concurrency_2_422(self, client):
         """Concurrency 2 is not allowed."""
-        res = client.post("/api/tickets/bulk", json={
-            "repo": "zealchaiwut/commander",
-            "prompts": ["some prompt"],
-            "concurrency": 2,
-        })
+        res = _bulk_post(client, repo='zealchaiwut/commander', prompts=['some prompt'], concurrency=2)
         assert res.status_code == 422
 
     def test_unknown_repo_422(self, client):
         """Reject unknown repos with 422."""
-        res = client.post("/api/tickets/bulk", json={
-            "repo": "unknown/repo",
-            "prompts": ["some prompt"],
-            "concurrency": 3,
-        })
+        res = _bulk_post(client, repo='unknown/repo', prompts=['some prompt'])
         assert res.status_code == 422
 
     def test_unknown_default_label_422(self, client):
         """Reject default labels not in the repo with 422."""
-        res = client.post("/api/tickets/bulk", json={
-            "repo": "zealchaiwut/commander",
-            "prompts": ["some prompt"],
-            "default_labels": ["non-existent-label-xyz"],
-            "concurrency": 3,
-        })
+        res = _bulk_post(client, repo='zealchaiwut/commander', prompts=['some prompt'], default_labels=['non-existent-label-xyz'])
         assert res.status_code == 422
 
     def test_valid_request_returns_job_id(self, client):
@@ -335,11 +319,7 @@ class TestBulkCreateAPIValidation:
         with patch.object(server, "_run_bulk_job", side_effect=_noop_job):
             # asyncio.create_task is called inside the endpoint, patch it
             with patch("asyncio.create_task"):
-                res = client.post("/api/tickets/bulk", json={
-                    "repo": "zealchaiwut/commander",
-                    "prompts": ["Add user avatar", "API endpoint for avatar"],
-                    "concurrency": 3,
-                })
+                res = _bulk_post(client, repo='zealchaiwut/commander', prompts=['Add user avatar', 'API endpoint for avatar'])
         assert res.status_code == 202
         data = res.json()
         assert "job_id" in data
@@ -350,42 +330,26 @@ class TestBulkCreateAPIValidation:
         import server
 
         with patch("asyncio.create_task"):
-            res = client.post("/api/tickets/bulk", json={
-                "repo": "zealchaiwut/commander",
-                "prompts": [f"prompt {i}" for i in range(25)],
-                "concurrency": 1,
-            })
+            res = _bulk_post(client, repo='zealchaiwut/commander',
+                             prompts=[f"prompt {i}" for i in range(25)], concurrency=1)
         assert res.status_code == 202
 
     def test_concurrency_1_accepted(self, client):
         """Concurrency 1 is valid."""
         with patch("asyncio.create_task"):
-            res = client.post("/api/tickets/bulk", json={
-                "repo": "zealchaiwut/commander",
-                "prompts": ["test prompt"],
-                "concurrency": 1,
-            })
+            res = _bulk_post(client, repo='zealchaiwut/commander', prompts=['test prompt'], concurrency=1)
         assert res.status_code == 202
 
     def test_concurrency_5_accepted(self, client):
         """Concurrency 5 is valid."""
         with patch("asyncio.create_task"):
-            res = client.post("/api/tickets/bulk", json={
-                "repo": "zealchaiwut/commander",
-                "prompts": ["test prompt"],
-                "concurrency": 5,
-            })
+            res = _bulk_post(client, repo='zealchaiwut/commander', prompts=['test prompt'], concurrency=5)
         assert res.status_code == 202
 
     def test_valid_known_labels_accepted(self, client):
         """Valid known default labels are accepted."""
         with patch("asyncio.create_task"):
-            res = client.post("/api/tickets/bulk", json={
-                "repo": "zealchaiwut/commander",
-                "prompts": ["test prompt"],
-                "default_labels": ["enhancement"],
-                "concurrency": 3,
-            })
+            res = _bulk_post(client, repo='zealchaiwut/commander', prompts=['test prompt'], default_labels=['enhancement'])
         assert res.status_code == 202
 
 
@@ -397,11 +361,7 @@ class TestBulkGetJob:
     def _create_job(self, client) -> str:
         """Helper to create a job and return job_id."""
         with patch("asyncio.create_task"):
-            res = client.post("/api/tickets/bulk", json={
-                "repo": "zealchaiwut/commander",
-                "prompts": ["prompt one", "prompt two"],
-                "concurrency": 3,
-            })
+            res = _bulk_post(client, repo='zealchaiwut/commander', prompts=['prompt one', 'prompt two'])
         assert res.status_code == 202
         return res.json()["job_id"]
 
@@ -450,11 +410,7 @@ class TestBulkStop:
         import server
 
         with patch("asyncio.create_task"):
-            res = client.post("/api/tickets/bulk", json={
-                "repo": "zealchaiwut/commander",
-                "prompts": ["p1", "p2"],
-                "concurrency": 3,
-            })
+            res = _bulk_post(client, repo='zealchaiwut/commander', prompts=['p1', 'p2'])
         job_id = res.json()["job_id"]
 
         stop_res = client.post(f"/api/tickets/bulk/{job_id}/stop")
@@ -474,11 +430,7 @@ class TestBulkStop:
 class TestBulkSkip:
     def _make_job(self, client) -> str:
         with patch("asyncio.create_task"):
-            res = client.post("/api/tickets/bulk", json={
-                "repo": "zealchaiwut/commander",
-                "prompts": ["p1", "p2", "p3"],
-                "concurrency": 3,
-            })
+            res = _bulk_post(client, repo='zealchaiwut/commander', prompts=['p1', 'p2', 'p3'])
         return res.json()["job_id"]
 
     def test_skip_pending_ticket(self, client):
@@ -522,11 +474,7 @@ class TestBulkRetry:
         """Create a job and set first ticket to failed."""
         import server
         with patch("asyncio.create_task"):
-            res = client.post("/api/tickets/bulk", json={
-                "repo": "zealchaiwut/commander",
-                "prompts": ["p1", "p2"],
-                "concurrency": 3,
-            })
+            res = _bulk_post(client, repo='zealchaiwut/commander', prompts=['p1', 'p2'])
         job_id = res.json()["job_id"]
         server._bulk_jobs[job_id]["tickets"][0]["state"] = "failed"
         server._bulk_jobs[job_id]["tickets"][0]["error"] = "BA timed out"
@@ -550,11 +498,7 @@ class TestBulkRetry:
         """Retry with invalid index returns 422."""
         import server
         with patch("asyncio.create_task"):
-            res = client.post("/api/tickets/bulk", json={
-                "repo": "zealchaiwut/commander",
-                "prompts": ["p1"],
-                "concurrency": 3,
-            })
+            res = _bulk_post(client, repo='zealchaiwut/commander', prompts=['p1'])
         job_id = res.json()["job_id"]
         res = client.post(f"/api/tickets/bulk/{job_id}/retry", json={"index": 50})
         assert res.status_code == 422
@@ -585,11 +529,7 @@ class TestBulkJobState:
         """After POST, the job is stored in _bulk_jobs."""
         import server
         with patch("asyncio.create_task"):
-            res = client.post("/api/tickets/bulk", json={
-                "repo": "zealchaiwut/commander",
-                "prompts": ["test"],
-                "concurrency": 3,
-            })
+            res = _bulk_post(client, repo='zealchaiwut/commander', prompts=['test'])
         job_id = res.json()["job_id"]
         assert job_id in server._bulk_jobs
 
@@ -597,11 +537,7 @@ class TestBulkJobState:
         """Newly created job has status 'running'."""
         import server
         with patch("asyncio.create_task"):
-            res = client.post("/api/tickets/bulk", json={
-                "repo": "zealchaiwut/commander",
-                "prompts": ["test"],
-                "concurrency": 3,
-            })
+            res = _bulk_post(client, repo='zealchaiwut/commander', prompts=['test'])
         job_id = res.json()["job_id"]
         assert server._bulk_jobs[job_id]["status"] == "running"
 
@@ -609,11 +545,7 @@ class TestBulkJobState:
         """All tickets start in 'pending' state."""
         import server
         with patch("asyncio.create_task"):
-            res = client.post("/api/tickets/bulk", json={
-                "repo": "zealchaiwut/commander",
-                "prompts": ["p1", "p2", "p3"],
-                "concurrency": 3,
-            })
+            res = _bulk_post(client, repo='zealchaiwut/commander', prompts=['p1', 'p2', 'p3'])
         job_id = res.json()["job_id"]
         for t in server._bulk_jobs[job_id]["tickets"]:
             assert t["state"] == "pending"
@@ -622,11 +554,7 @@ class TestBulkJobState:
         """Blank prompts between separators are filtered out."""
         import server
         with patch("asyncio.create_task"):
-            res = client.post("/api/tickets/bulk", json={
-                "repo": "zealchaiwut/commander",
-                "prompts": ["real prompt", "   ", "another prompt"],
-                "concurrency": 3,
-            })
+            res = _bulk_post(client, repo='zealchaiwut/commander', prompts=['real prompt', '   ', 'another prompt'])
         job_id = res.json()["job_id"]
         # Only non-blank prompts are stored
         assert len(server._bulk_jobs[job_id]["tickets"]) == 2
@@ -635,11 +563,7 @@ class TestBulkJobState:
         """Concurrency value is stored on the job."""
         import server
         with patch("asyncio.create_task"):
-            res = client.post("/api/tickets/bulk", json={
-                "repo": "zealchaiwut/commander",
-                "prompts": ["test"],
-                "concurrency": 5,
-            })
+            res = _bulk_post(client, repo='zealchaiwut/commander', prompts=['test'], concurrency=5)
         job_id = res.json()["job_id"]
         assert server._bulk_jobs[job_id]["concurrency"] == 5
 
@@ -647,11 +571,7 @@ class TestBulkJobState:
         """Job state is persisted to .commander/bulk-jobs/<job_id>.json."""
         import server
         with patch("asyncio.create_task"):
-            res = client.post("/api/tickets/bulk", json={
-                "repo": "zealchaiwut/commander",
-                "prompts": ["test"],
-                "concurrency": 3,
-            })
+            res = _bulk_post(client, repo='zealchaiwut/commander', prompts=['test'])
         job_id = res.json()["job_id"]
         # Should be persisted somewhere readable
         jobs_dir = server._bulk_jobs_dir()

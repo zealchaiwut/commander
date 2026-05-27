@@ -2808,6 +2808,30 @@
     <div class="bc-info-note">
       Split prompts using <code>---</code> on its own line. All created tickets go to backlog &mdash; assign them to a sprint later via Sprint Mgmt.
     </div>
+
+    <!-- Attachments (issue #205) -->
+    <div class="bc-attach-section">
+      <div class="bc-attach-header">
+        <label class="modal-label">Attachments <span class="modal-hint">(optional &mdash; applied to every ticket in the batch)</span></label>
+        <p class="modal-hint bc-attach-limits">
+          Allowed: .png .pdf .html .htm and all other types supported by new-ticket.
+          &nbsp;&bull;&nbsp; Max 25 MB per file, 50 MB total.
+        </p>
+      </div>
+      <div class="dt-dropzone bc-dropzone" id="bc-dropzone"
+           ondragover="event.preventDefault(); this.classList.add('drag-over')"
+           ondragleave="this.classList.remove('drag-over')"
+           ondrop="_bcOnDrop(event)"
+           onclick="_bcPickFiles()">
+        <span class="dt-dropzone-hint">Drop files here or click to browse</span>
+        <input type="file" id="bc-file-input" multiple
+               accept=".html,.htm,.md,.txt,.csv,.json,.yaml,.yml,.png,.jpg,.jpeg,.gif,.svg,.webp,.pdf,.py,.js,.ts,.tsx,.css,.sh,.log,.drawio,.xlsx,.pptx,.docx,.zip"
+               style="display:none" onchange="_bcOnFileInput(event)">
+      </div>
+      <div class="bc-file-queue" id="bc-file-queue"></div>
+      <div class="bc-file-error hidden" id="bc-file-error"></div>
+    </div>
+
     <div class="modal-error hidden" id="bc-step1-error"></div>
 
     <div class="modal-footer bc-footer">
@@ -3105,6 +3129,10 @@
   }
   .bc-card-preview--error { color: var(--red, #dc2626); }
   .bc-card-tags { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 4px; }
+  .bc-attach-warn {
+    font-size: 10px; color: var(--orange, #d97706); margin-top: 3px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;
+  }
   .bc-tag {
     font-size: 10px; padding: 1px 6px; border-radius: 8px;
     background: var(--surface-2); border: 1px solid var(--border); color: var(--text-muted);
@@ -3120,6 +3148,39 @@
   .bc-action-btn:hover { color: var(--text); background: var(--surface-2); }
   .bc-action-btn--retry { color: var(--blue, #3b82f6); }
   .bc-action-btn--retry:hover { background: var(--blue-bg, #eff6ff); }
+
+  /* Attachments section (issue #205) */
+  .bc-attach-section {
+    padding: 10px 20px 6px;
+    border-top: 1px solid var(--border);
+  }
+  .bc-attach-header { margin-bottom: 6px; }
+  .bc-attach-limits { margin: 2px 0 6px; }
+  .bc-dropzone { margin-bottom: 6px; }
+  .bc-file-queue {
+    display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px;
+  }
+  .bc-file-chip {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 2px 8px 2px 10px; border-radius: 12px;
+    background: var(--surface-2); border: 1px solid var(--border);
+    font-size: 11px; color: var(--text); max-width: 200px;
+  }
+  .bc-file-chip-name {
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .bc-file-chip-remove {
+    background: none; border: none; cursor: pointer;
+    color: var(--text-muted); font-size: 13px; padding: 0; line-height: 1;
+    flex-shrink: 0;
+    transition: color .1s;
+  }
+  .bc-file-chip-remove:hover { color: var(--red, #dc2626); }
+  .bc-file-error {
+    font-size: 11px; color: var(--red, #dc2626); margin-top: 4px;
+    padding: 4px 8px; background: var(--red-bg, #fef2f2);
+    border: 1px solid var(--red-border, #fca5a5); border-radius: 4px;
+  }
 
   /* Toast */
   .bc-toast {

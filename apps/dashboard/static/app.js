@@ -5307,7 +5307,7 @@ function _dtShowError(msg) {
   el.classList.remove('hidden');
 }
 
-// ── Bulk Create Modal (issue #189) ────────────────────────────────────────────
+// ── Bulk Create Modal (issue #189 / #205) ─────────────────────────────────────
 
 let _bcJobId = null;
 let _bcEventSource = null;
@@ -5315,8 +5315,87 @@ let _bcJobState = null;      // current job snapshot {status, concurrency, ticke
 let _bcDebounceTimer = null;
 let _bcStartTimes = {};      // index -> start timestamp (for elapsed calc)
 let _bcAvgMs = null;         // rolling avg BA time per ticket
+let _bcFiles = [];           // queued attachment files (issue #205)
 
 const BC_MAX_PROMPTS = 25;
+const BC_ALLOWED_EXTS = new Set([
+  '.html','.htm','.md','.txt','.csv','.json','.yaml','.yml',
+  '.png','.jpg','.jpeg','.gif','.svg','.webp','.pdf',
+  '.py','.js','.ts','.tsx','.css','.sh','.log',
+  '.drawio','.xlsx','.pptx','.docx','.zip',
+]);
+
+// ── Bulk attachment helpers ───────────────────────────────────────────────────
+
+function _bcPickFiles() {
+  document.getElementById('bc-file-input').click();
+}
+
+function _bcOnFileInput(event) {
+  _bcAddFiles(Array.from(event.target.files));
+  event.target.value = '';
+}
+
+function _bcOnDrop(event) {
+  event.preventDefault();
+  document.getElementById('bc-dropzone').classList.remove('drag-over');
+  _bcAddFiles(Array.from(event.dataTransfer.files));
+}
+
+function _bcAddFiles(incoming) {
+  const errEl = document.getElementById('bc-file-error');
+  if (errEl) { errEl.textContent = ''; errEl.classList.add('hidden'); }
+  let totalSize = _bcFiles.reduce((s, f) => s + f.size, 0);
+
+  for (const f of incoming) {
+    if (_bcFiles.length >= 10) break;
+    const ext = '.' + f.name.split('.').pop().toLowerCase();
+    if (!BC_ALLOWED_EXTS.has(ext)) {
+      if (errEl) {
+        errEl.textContent = `File '${f.name}' has a disallowed extension ('${ext}').`;
+        errEl.classList.remove('hidden');
+      }
+      continue;
+    }
+    if (f.size > 25 * 1024 * 1024) {
+      if (errEl) {
+        errEl.textContent = `File '${f.name}' exceeds the 25 MB per-file limit.`;
+        errEl.classList.remove('hidden');
+      }
+      continue;
+    }
+    totalSize += f.size;
+    if (totalSize > 50 * 1024 * 1024) {
+      if (errEl) {
+        errEl.textContent = 'Upload batch would exceed the 50 MB total limit.';
+        errEl.classList.remove('hidden');
+      }
+      break;
+    }
+    _bcFiles.push(f);
+  }
+  _bcRenderFileQueue();
+}
+
+function _bcRemoveFile(idx) {
+  _bcFiles.splice(idx, 1);
+  _bcRenderFileQueue();
+}
+
+function _bcRenderFileQueue() {
+  const container = document.getElementById('bc-file-queue');
+  if (!container) return;
+  if (_bcFiles.length === 0) {
+    container.innerHTML = '';
+    return;
+  }
+  container.innerHTML = _bcFiles.map((f, i) =>
+    `<span class="bc-file-chip">
+      <span class="bc-file-chip-name" title="${escapeHtml(f.name)}">${escapeHtml(f.name)}</span>
+      <button class="bc-file-chip-remove" onclick="_bcRemoveFile(${i})" title="Remove">&times;</button>
+    </span>`
+  ).join('');
+}
 
 function openBulkCreateModal() {
   // If there's an active job stored in localStorage, go straight to step 2
@@ -5348,6 +5427,11 @@ function openBulkCreateModal() {
   document.getElementById('bc-default-labels').value = 'enhancement';
   document.getElementById('bc-concurrency').value = '3';
   document.getElementById('bc-step1-error').classList.add('hidden');
+  // Reset attachments
+  _bcFiles = [];
+  _bcRenderFileQueue();
+  const fileErrEl = document.getElementById('bc-file-error');
+  if (fileErrEl) { fileErrEl.textContent = ''; fileErrEl.classList.add('hidden'); }
   _bcUpdateCounter();
 }
 
@@ -5470,10 +5554,19 @@ async function bcRunAll() {
   errEl.classList.add('hidden');
 
   try {
+    // Use FormData so we can include attachment files
+    const formData = new FormData();
+    formData.append('repo', repo);
+    formData.append('prompts', JSON.stringify(prompts));
+    formData.append('default_labels', JSON.stringify(uniqueLabels));
+    formData.append('concurrency', String(concurrency));
+    for (const f of _bcFiles) {
+      formData.append('files', f);
+    }
+
     const res = await fetch('/api/tickets/bulk', {
       method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ repo, default_labels: uniqueLabels, prompts, concurrency }),
+      body: formData,
     });
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
@@ -5664,6 +5757,9 @@ function _bcRenderCard(t) {
     const labelsArr = t.label_pills || [];
     if (labelsArr.length > 0) {
       tags = `<div class="bc-card-tags">${labelsArr.map(l => `<span class="bc-tag">${escapeHtml(l)}</span>`).join('')}</div>`;
+    }
+    if (t.attachment_warning) {
+      tags += `<div class="bc-attach-warn">${escapeHtml(t.attachment_warning)}</div>`;
     }
     actions = `<a class="bc-action-btn" href="${escapeHtml(issueUrl)}" target="_blank" rel="noopener" title="Open on GitHub">&#x2197;</a>`;
   } else if (t.state === 'failed') {

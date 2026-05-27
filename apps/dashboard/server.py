@@ -2765,6 +2765,21 @@ _BULK_JOBS_DIR = Path(__file__).parent / "runtime" / "bulk-jobs"
 _ALLOWED_CONCURRENCY = {1, 3, 5}
 _MAX_BULK_PROMPTS = 25
 
+# In-memory registry of bulk job attachment temp directories (job_id -> Path)
+_bulk_attachment_dirs: dict[str, Path] = {}
+
+
+def _bulk_attachment_dir(job_id: str) -> Path | None:
+    """Return the temp directory holding attachment data for a bulk job, if any."""
+    return _bulk_attachment_dirs.get(job_id)
+
+
+def _cleanup_bulk_attachment_dir(job_id: str) -> None:
+    """Remove the temp directory for a bulk job's attachments (best-effort)."""
+    d = _bulk_attachment_dirs.pop(job_id, None)
+    if d and d.exists():
+        shutil.rmtree(d, ignore_errors=True)
+
 
 def _bulk_jobs_dir() -> Path:
     """Return the .commander/bulk-jobs directory, creating it if needed."""
@@ -2823,6 +2838,7 @@ def _prune_old_bulk_jobs() -> None:
     stale = [jid for jid, j in _bulk_jobs.items() if _bulk_job_created_at(j) < cutoff]
     for jid in stale:
         _bulk_jobs.pop(jid, None)
+        _cleanup_bulk_attachment_dir(jid)
 
 
 async def _broadcast_bulk_event(job_id: str, event: dict) -> None:
@@ -2965,13 +2981,14 @@ async def _bulk_flusher(job_id: str) -> None:
 
         if ticket["state"] == "draft_ready":
             # Create the issue
+            issue_repo = ticket.get("_repo") or None
             try:
                 labels = ["backlog"] + ticket.get("_default_labels", [])
                 number, url = github_client.create_issue(
                     title=ticket["title"],
                     body=ticket["body"],
                     labels=labels,
-                    repo_name=ticket.get("_repo") or None,
+                    repo_name=issue_repo,
                 )
                 ticket["state"] = "created"
                 ticket["issue_num"] = number
@@ -2981,6 +2998,41 @@ async def _bulk_flusher(job_id: str) -> None:
             except Exception as e:
                 ticket["state"] = "failed"
                 ticket["error"] = f"GitHub issue creation failed: {str(e)[:200]}"
+
+            # Apply attachments to the newly-created issue (best-effort, non-blocking)
+            if ticket["state"] == "created" and job.get("has_attachments"):
+                attach_dir = _bulk_attachment_dir(job_id)
+                if attach_dir and attach_dir.exists():
+                    repo_name = issue_repo or job["repo"]
+                    try:
+                        _ensure_attachments_branch(repo_name)
+                        cache_dir = _init_attachment_cache(repo_name)
+                        existing = _list_existing_attachments(cache_dir, number)
+                        file_data: list[tuple[str, bytes]] = []
+                        used_names: set[str] = set(existing)
+                        for fname in job.get("attachment_filenames", []):
+                            fpath = attach_dir / Path(fname).name
+                            if fpath.exists():
+                                sanitized = _sanitize_filename(fname)
+                                final_name = _resolve_collision(sanitized, used_names)
+                                used_names.add(final_name)
+                                file_data.append((final_name, fpath.read_bytes()))
+                        if file_data:
+                            _commit_attachments_to_branch(cache_dir, number, file_data)
+                            # Append Attachments section to issue body
+                            current_body = ticket.get("body", "") or ""
+                            if "## Attachments" not in current_body:
+                                links = "\n".join(
+                                    f"- [{fname}](https://raw.githubusercontent.com/{repo_name}/"
+                                    f"{_ATTACHMENTS_BRANCH}/references/issue-{number}/{fname})"
+                                    for fname, _ in file_data
+                                )
+                                updated_body = current_body + f"\n\n## Attachments\n\n{links}"
+                                github_client.update_issue_body(number, updated_body, repo_name=repo_name)
+                    except Exception as attach_err:
+                        ticket["attachment_warning"] = (
+                            f"Attachments could not be added: {str(attach_err)[:200]}"
+                        )
 
             ticket["finished_at"] = datetime.now(timezone.utc).isoformat()
             # Remove internal fields
@@ -3098,6 +3150,9 @@ async def _run_bulk_job(job_id: str) -> None:
         _persist_bulk_job(job)
         await _broadcast_bulk_event(job_id, {"type": "job_done", "job_id": job_id})
 
+    # Clean up attachment temp dir now that all issues have been processed
+    _cleanup_bulk_attachment_dir(job_id)
+
 
 class BulkCreateBody(BaseModel):
     repo: str
@@ -3107,24 +3162,49 @@ class BulkCreateBody(BaseModel):
 
 
 @app.post("/api/tickets/bulk", status_code=202)
-async def bulk_create_start(body: BulkCreateBody):
+async def bulk_create_start(
+    repo: str = Form(...),
+    prompts: str = Form(...),
+    default_labels: str = Form(default=""),
+    concurrency: int = Form(default=3),
+    files: list[UploadFile] = File(default=[]),
+):
     """Start a bulk ticket creation job.
 
+    Accepts multipart/form-data so optional attachment files can be included.
     Returns {job_id} immediately; use the SSE stream endpoint to track progress.
     """
     _prune_old_bulk_jobs()
 
+    # Parse prompts JSON array
+    try:
+        prompts_list: list[str] = json.loads(prompts)
+        if not isinstance(prompts_list, list):
+            raise ValueError("not a list")
+    except (json.JSONDecodeError, ValueError):
+        raise HTTPException(422, detail="'prompts' must be a JSON array of strings")
+
+    # Parse default_labels JSON array (may be empty string)
+    default_labels_list: list[str] = []
+    if default_labels.strip():
+        try:
+            default_labels_list = json.loads(default_labels)
+            if not isinstance(default_labels_list, list):
+                raise ValueError("not a list")
+        except (json.JSONDecodeError, ValueError):
+            raise HTTPException(422, detail="'default_labels' must be a JSON array of strings")
+
     # Validate repo
     projects = projects_module.load_projects()
-    if not any(p["repo"] == body.repo for p in projects):
-        raise HTTPException(422, detail=f"Repo '{body.repo}' is not a configured project")
+    if not any(p["repo"] == repo for p in projects):
+        raise HTTPException(422, detail=f"Repo '{repo}' is not a configured project")
 
     # Validate concurrency
-    if body.concurrency not in _ALLOWED_CONCURRENCY:
+    if concurrency not in _ALLOWED_CONCURRENCY:
         raise HTTPException(422, detail=f"Concurrency must be one of {sorted(_ALLOWED_CONCURRENCY)}")
 
     # Filter blank prompts
-    clean_prompts = [p.strip() for p in body.prompts if p.strip()]
+    clean_prompts = [p.strip() for p in prompts_list if p.strip()]
     if not clean_prompts:
         raise HTTPException(422, detail="Batch must contain at least one non-blank prompt")
     if len(clean_prompts) > _MAX_BULK_PROMPTS:
@@ -3134,17 +3214,53 @@ async def bulk_create_start(body: BulkCreateBody):
         )
 
     # Validate default_labels — each must already exist in the repo
-    if body.default_labels:
-        existing_labels = {lbl["name"] for lbl in github_client.list_labels(repo_name=body.repo)}
-        bad = [lbl for lbl in body.default_labels if lbl not in existing_labels]
+    if default_labels_list:
+        existing_labels = {lbl["name"] for lbl in github_client.list_labels(repo_name=repo)}
+        bad = [lbl for lbl in default_labels_list if lbl not in existing_labels]
         if bad:
             raise HTTPException(
                 422,
                 detail=f"Unknown labels (not in repo): {', '.join(bad)}"
             )
 
+    # Validate and store uploaded attachment files
+    valid_upload_files = [f for f in files if f.filename]
+    attachment_file_data: list[tuple[str, bytes]] = []  # (original_filename, content)
+    if valid_upload_files:
+        batch_size = 0
+        for upload in valid_upload_files:
+            ext = Path(upload.filename).suffix.lower()
+            if ext not in _ALLOWED_UPLOAD_EXTS:
+                raise HTTPException(
+                    422,
+                    detail=f"File '{upload.filename}' has disallowed extension '{ext}'. "
+                           f"Allowed: {', '.join(sorted(_ALLOWED_UPLOAD_EXTS))}",
+                )
+            content = await upload.read()
+            if len(content) > _MAX_FILE_SIZE_BYTES:
+                raise HTTPException(
+                    422,
+                    detail=f"File '{upload.filename}' exceeds the 25 MB per-file limit "
+                           f"({len(content) // (1024*1024)} MB).",
+                )
+            batch_size += len(content)
+            if batch_size > _MAX_BATCH_SIZE_BYTES:
+                raise HTTPException(
+                    422,
+                    detail="Upload batch exceeds the 50 MB total limit.",
+                )
+            attachment_file_data.append((upload.filename, content))
+
     job_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
+
+    # Persist attachment bytes to a temp directory keyed by job_id
+    if attachment_file_data:
+        attach_dir = Path(tempfile.mkdtemp(prefix=f"bc_attach_{job_id}_"))
+        _bulk_attachment_dirs[job_id] = attach_dir
+        for orig_name, content in attachment_file_data:
+            (attach_dir / Path(orig_name).name).write_bytes(content)
+
     tickets = [
         {
             "index": i,
@@ -3157,6 +3273,7 @@ async def bulk_create_start(body: BulkCreateBody):
             "issue_url": None,
             "label_pills": None,
             "error": None,
+            "attachment_warning": None,
             "started_at": None,
             "finished_at": None,
         }
@@ -3166,11 +3283,13 @@ async def bulk_create_start(body: BulkCreateBody):
     job = {
         "job_id": job_id,
         "status": "running",
-        "repo": body.repo,
-        "default_labels": body.default_labels,
-        "concurrency": body.concurrency,
+        "repo": repo,
+        "default_labels": default_labels_list,
+        "concurrency": concurrency,
         "created_at": now,
         "stop_requested": False,
+        "has_attachments": len(attachment_file_data) > 0,
+        "attachment_filenames": [n for n, _ in attachment_file_data],
         "tickets": tickets,
     }
     _bulk_jobs[job_id] = job
@@ -3325,13 +3444,14 @@ async def bulk_retry_ticket(job_id: str, body: BulkRetryBody):
         # After BA, trigger flusher to create the issue (best-effort, appended order)
         t = job["tickets"][body.index]
         if t.get("state") == "draft_ready":
+            issue_repo = t.get("_repo") or None
             try:
                 labels = ["backlog"] + t.get("_default_labels", [])
                 number, url = github_client.create_issue(
                     title=t["title"],
                     body=t["body"],
                     labels=labels,
-                    repo_name=t.get("_repo") or None,
+                    repo_name=issue_repo,
                 )
                 t["state"] = "created"
                 t["issue_num"] = number
@@ -3341,6 +3461,41 @@ async def bulk_retry_ticket(job_id: str, body: BulkRetryBody):
             except Exception as e:
                 t["state"] = "failed"
                 t["error"] = f"GitHub issue creation failed: {str(e)[:200]}"
+
+            # Apply attachments (best-effort, non-blocking)
+            if t["state"] == "created" and job.get("has_attachments"):
+                attach_dir = _bulk_attachment_dir(job_id)
+                if attach_dir and attach_dir.exists():
+                    repo_name = issue_repo or job["repo"]
+                    try:
+                        _ensure_attachments_branch(repo_name)
+                        cache_dir = _init_attachment_cache(repo_name)
+                        existing = _list_existing_attachments(cache_dir, number)
+                        file_data: list[tuple[str, bytes]] = []
+                        used_names: set[str] = set(existing)
+                        for fname in job.get("attachment_filenames", []):
+                            fpath = attach_dir / Path(fname).name
+                            if fpath.exists():
+                                sanitized = _sanitize_filename(fname)
+                                final_name = _resolve_collision(sanitized, used_names)
+                                used_names.add(final_name)
+                                file_data.append((final_name, fpath.read_bytes()))
+                        if file_data:
+                            _commit_attachments_to_branch(cache_dir, number, file_data)
+                            current_body = t.get("body", "") or ""
+                            if "## Attachments" not in current_body:
+                                links = "\n".join(
+                                    f"- [{fname}](https://raw.githubusercontent.com/{repo_name}/"
+                                    f"{_ATTACHMENTS_BRANCH}/references/issue-{number}/{fname})"
+                                    for fname, _ in file_data
+                                )
+                                updated_body = current_body + f"\n\n## Attachments\n\n{links}"
+                                github_client.update_issue_body(number, updated_body, repo_name=repo_name)
+                    except Exception as attach_err:
+                        t["attachment_warning"] = (
+                            f"Attachments could not be added: {str(attach_err)[:200]}"
+                        )
+
             t["finished_at"] = datetime.now(timezone.utc).isoformat()
             t.pop("_default_labels", None)
             t.pop("_repo", None)

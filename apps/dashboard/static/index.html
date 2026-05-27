@@ -1623,6 +1623,20 @@
   </div>
 </div>
 
+<!-- Finish sprint confirmation modal (issue #195) -->
+<div class="modal-backdrop hidden" id="smgmt-finish-backdrop" onclick="smgmtFinishClose()"></div>
+<div class="modal hidden" id="smgmt-finish-modal" role="dialog" aria-modal="true">
+  <div class="modal-header">
+    <span class="modal-title" id="smgmt-finish-title">Finish Sprint?</span>
+    <button class="modal-close" onclick="smgmtFinishClose()" aria-label="Close">&times;</button>
+  </div>
+  <div class="smgmt-finish-body" id="smgmt-finish-body"></div>
+  <div class="modal-footer">
+    <button class="btn-ghost" onclick="smgmtFinishClose()">Cancel</button>
+    <button class="btn-danger" id="smgmt-finish-confirm" onclick="smgmtFinishConfirm()">Finish Sprint</button>
+  </div>
+</div>
+
 <!-- Kill sprint confirmation modal -->
 <div class="modal-backdrop hidden" id="smgmt-kill-backdrop" onclick="smgmtKillClose()"></div>
 <div class="modal hidden" id="smgmt-kill-modal" role="dialog" aria-modal="true">
@@ -2021,6 +2035,19 @@
 
   .smgmt-delete-body { padding: 12px 24px 8px; font-size: 13px; color: var(--text-main); }
   .smgmt-delete-body p { margin: 0; }
+
+  /* Finish Sprint button (issue #195) */
+  .smgmt-finish-btn {
+    padding: 4px 10px; font-size: 11px; font-weight: 600;
+    background: var(--amber-bg, rgba(245,158,11,.1)); color: var(--amber, #d97706);
+    border: 0.5px solid var(--amber, #d97706); border-radius: 5px;
+    cursor: pointer; flex-shrink: 0; transition: opacity .15s;
+    display: flex; align-items: center; gap: 4px;
+  }
+  .smgmt-finish-btn:hover { opacity: .85; }
+  .smgmt-finish-body { padding: 12px 24px 8px; font-size: 13px; color: var(--text-main); }
+  .smgmt-finish-body p { margin: 0; }
+  .smgmt-finish-body p + p { margin-top: 8px; }
 
   /* Kill button (replaces Run on the running card) */
   .smgmt-kill-btn {

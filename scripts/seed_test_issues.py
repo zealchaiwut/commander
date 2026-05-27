@@ -10,7 +10,7 @@ Usage:
     python3 scripts/seed_test_issues.py --dry-run    # print what would happen, no API calls
 
 The fixture file is scripts/test_fixtures/issues.yaml.
-All operations target TEST_GITHUB_REPO (default: zealchaiwut/commander-issue-test),
+All operations target TEST_GITHUB_REPO (default: zealchaiwut/commander-test-issue),
 overrideable via COMMANDER_TEST_REPO env var.
 """
 import argparse

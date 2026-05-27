@@ -2,16 +2,19 @@
 """Create a GitHub issue and assign it to a sprint.
 
 Usage:
-  python3 scripts/create_ticket.py \\
-    --title "Fix login bug" \\
-    --body  "Steps to reproduce..." \\
-    --sprint 1 \\
-    --labels "bug,backend"
+  python3 scripts/create_ticket.py \
+    --title "Fix login bug" \
+    --body  "Steps to reproduce..." \
+    --sprint 1 \
+    --labels "bug,backend" \
+    --attachment /path/to/file.png \
+    --attachment /path/to/spec.txt
 
 Prints:  #<number> <url>
 """
 import argparse
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -32,22 +35,46 @@ def _load_env():
             os.environ.setdefault(k.strip(), v.strip())
 
 
+def _repo_root() -> Path:
+    result = subprocess.run(
+        ["git", "rev-parse", "--show-toplevel"],
+        capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        sys.exit("Could not determine git repo root")
+    return Path(result.stdout.strip())
+
+
 def main():
     _load_env()
 
     parser = argparse.ArgumentParser(description="Create a GitHub issue")
     parser.add_argument("--title",  required=True)
     parser.add_argument("--body",   default="")
-    parser.add_argument("--sprint", type=int, required=True)
+    parser.add_argument("--sprint", type=int, default=None)
     parser.add_argument("--labels", default="", help="Comma-separated extra labels")
+    parser.add_argument(
+        "--attachment", dest="attachments", action="append", metavar="PATH",
+        help="File to attach (repeatable); copied to references/issue-<N>/",
+    )
     args = parser.parse_args()
+
+    # Validate all attachment paths before creating the issue
+    attachment_paths = []
+    for p in (args.attachments or []):
+        path = Path(p)
+        if not path.exists():
+            sys.exit(f"attachment not found: {p}")
+        attachment_paths.append(path)
 
     try:
         repo = github_client.repo()
     except ValueError as e:
         sys.exit(str(e))
 
-    labels = [f"sprint-{args.sprint}"]
+    labels = []
+    if args.sprint is not None:
+        labels.append(f"sprint-{args.sprint}")
     if args.labels:
         labels += [l.strip() for l in args.labels.split(",") if l.strip()]
 
@@ -56,7 +83,7 @@ def main():
          "--repo",  repo,
          "--title", args.title,
          "--body",  args.body,
-         "--label", ",".join(labels)],
+         *(["--label", ",".join(labels)] if labels else [])],
         capture_output=True, text=True,
     )
     if result.returncode != 0:
@@ -64,6 +91,41 @@ def main():
 
     url    = result.stdout.strip()
     number = url.rstrip("/").split("/")[-1]
+
+    if attachment_paths:
+        root = _repo_root()
+        ref_dir = root / "references" / f"issue-{number}"
+        ref_dir.mkdir(parents=True, exist_ok=True)
+
+        gitkeep = root / "references" / ".gitkeep"
+        if not gitkeep.exists():
+            gitkeep.touch()
+
+        for src in attachment_paths:
+            shutil.copy2(src, ref_dir / src.name)
+
+        subprocess.run(
+            ["git", "add", "references/.gitkeep", f"references/issue-{number}"],
+            cwd=str(root), check=True,
+        )
+        subprocess.run(
+            ["git", "commit", "-m", f"chore: add attachments for issue #{number}"],
+            cwd=str(root), check=True,
+        )
+
+        links = "\n".join(
+            f"[{src.name}](references/issue-{number}/{src.name})"
+            for src in attachment_paths
+        )
+        updated_body = args.body + f"\n\n## Attachments\n\n{links}"
+
+        subprocess.run(
+            ["gh", "issue", "edit", number,
+             "--repo", repo,
+             "--body", updated_body],
+            capture_output=True, text=True, check=True,
+        )
+
     print(f"#{number} {url}")
 
 

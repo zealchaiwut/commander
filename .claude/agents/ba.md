@@ -99,12 +99,25 @@ After showing the proposal, ask exactly this question (no other text on that lin
 On approval, run:
 
 ```bash
-python3 $(git rev-parse --show-toplevel)/dashboard/scripts/create_ticket.py \
+python3 $(git rev-parse --show-toplevel)/scripts/create_ticket.py \
   --title "<title>" \
   --body "<body>" \
   --sprint <N> \
   --labels "<type-label>,backlog"
 ```
+
+To attach supporting files (screenshots, specs, logs), add one `--attachment` per file:
+
+```bash
+python3 $(git rev-parse --show-toplevel)/scripts/create_ticket.py \
+  --title "<title>" \
+  --body "<body>" \
+  --labels "<type-label>,backlog" \
+  --attachment /path/to/spec.txt \
+  --attachment /path/to/screenshot.png
+```
+
+Each attached file is copied to `references/issue-<N>/`, committed to the current branch, and linked in the issue body under an **Attachments** section. If any path does not exist, the script exits with an error before creating the issue.
 
 The script prints `#<number> <url>` on success.
 

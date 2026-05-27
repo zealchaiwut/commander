@@ -2166,9 +2166,28 @@ async def finish_sprint(owner: str, repo_name: str, label: str):
     github_client.invalidate(f"issues:")
     github_client.invalidate(f"recent_closed:")
 
-    await broadcast({"type": "update", "event": {"event_type": "sprint_finished", "sprint_label": label}})
+    # Delete the sprint label from GitHub; failure is non-fatal (AC4)
+    label_deleted = False
+    label_delete_error: str | None = None
+    try:
+        github_client.delete_label(label, repo_name=repo)
+        label_deleted = True
+    except Exception as exc:
+        label_delete_error = str(exc).strip() or "label deletion failed"
+        github_client.invalidate("sprints:")
 
-    result: dict = {"closed": closed, "errors": errors}
+    await broadcast({
+        "type": "update",
+        "event": {
+            "event_type": "sprint_finished",
+            "sprint_label": label,
+            "label_deleted": label_deleted,
+        },
+    })
+
+    result: dict = {"closed": closed, "errors": errors, "label_deleted": label_deleted}
+    if label_delete_error is not None:
+        result["label_delete_error"] = label_delete_error
     status_code = 207 if errors else 200
     return JSONResponse(content=result, status_code=status_code)
 

@@ -4836,11 +4836,31 @@ function _dtOnDrop(event) {
 }
 
 function _dtAddFiles(incoming) {
-  const allowed = new Set(['.png','.jpg','.jpeg','.gif','.webp','.md','.txt','.json','.py','.js','.html','.css']);
+  const allowed = new Set([
+    '.html','.htm','.md','.txt','.csv','.json','.yaml','.yml',
+    '.png','.jpg','.jpeg','.gif','.svg','.webp','.pdf',
+    '.py','.js','.ts','.tsx','.css','.sh','.log',
+    '.drawio','.xlsx','.pptx','.docx','.zip',
+  ]);
+  const fileEl = document.getElementById('dt-file-error');
+  if (fileEl) { fileEl.textContent = ''; fileEl.classList.add('hidden'); }
   for (const f of incoming) {
     if (_dtFiles.length >= 10) break;
     const ext = '.' + f.name.split('.').pop().toLowerCase();
-    if (!allowed.has(ext)) continue;
+    if (!allowed.has(ext)) {
+      if (fileEl) {
+        fileEl.textContent = `File '${f.name}' has a disallowed extension ('${ext}').`;
+        fileEl.classList.remove('hidden');
+      }
+      continue;
+    }
+    if (f.size > 25 * 1024 * 1024) {
+      if (fileEl) {
+        fileEl.textContent = `File '${f.name}' exceeds the 25 MB per-file limit.`;
+        fileEl.classList.remove('hidden');
+      }
+      continue;
+    }
     _dtFiles.push(f);
   }
   _dtRenderPreviews();
@@ -4921,8 +4941,14 @@ async function postDraftToGitHub() {
 
   const postBtn = document.getElementById('dt-post-btn');
   postBtn.disabled = true;
-  postBtn.textContent = 'Posting…';
+  // Show loading indicator while upload+commit happens (typically 2-5 s with attachments)
+  const hasFiles = _dtFiles.length > 0;
+  postBtn.innerHTML = hasFiles
+    ? '<span class="dt-spinner"></span>Uploading &amp; committing…'
+    : '<span class="dt-spinner"></span>Posting…';
   document.getElementById('dt-error').classList.add('hidden');
+  const fileErrEl = document.getElementById('dt-file-error');
+  if (fileErrEl) { fileErrEl.textContent = ''; fileErrEl.classList.add('hidden'); }
 
   try {
     // Use FormData so we can upload attachment files along with the ticket fields.
@@ -4945,9 +4971,22 @@ async function postDraftToGitHub() {
     });
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
-      throw new Error(data.detail || `Server error ${res.status}`);
+      const msg = data.detail || `Server error ${res.status}`;
+      if (res.status === 422 && fileErrEl) {
+        // Inline error under the file picker for rejected files
+        fileErrEl.textContent = msg;
+        fileErrEl.classList.remove('hidden');
+      } else {
+        throw new Error(msg);
+      }
+      return;
     }
     const data = await res.json();
+    // Check for push_warning field (set if attachments committed but push failed gracefully)
+    if (data.push_warning) {
+      const modal = document.getElementById('dt-push-fail-modal');
+      if (modal) modal.classList.remove('hidden');
+    }
     closeDraftTicketModal();
     showSuccessToast(`Ticket created: ${data.url}`);
     loadProjects().catch(() => {});

@@ -1,0 +1,923 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Commander — Project</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.30.0/dist/tabler-icons.min.css">
+  <style>
+    /* ── Variables ── */
+    :root {
+      --bg:           #f9fafb;
+      --surface:      #ffffff;
+      --surface-2:    #f3f4f6;
+      --surface-hover:#f5f6f8;
+      --border:       #e5e7eb;
+      --text:         #111827;
+      --text-muted:   #6b7280;
+      --text-sub:     #9ca3af;
+      --green:        #16a34a;
+      --green-bg:     #dcfce7;
+      --amber:        #d97706;
+      --amber-bg:     #fef3c7;
+      --red:          #dc2626;
+      --red-bg:       #fee2e2;
+      --blue:         #2563eb;
+      --blue-bg:      #dbeafe;
+      --purple:       #7c3aed;
+      --purple-bg:    #ede9fe;
+      --mono: 'SF Mono','Fira Code','Cascadia Code',monospace;
+      --sidebar-width: 220px;
+    }
+
+    [data-theme="dark"] {
+      --bg:           #0d0d0d;
+      --surface:      #161616;
+      --surface-2:    #1e1e1e;
+      --surface-hover:#222222;
+      --border:       #2a2a2a;
+      --text:         #e5e7eb;
+      --text-muted:   #9ca3af;
+      --text-sub:     #6b7280;
+      --green:        #22c55e;
+      --green-bg:     rgba(34,197,94,.13);
+      --amber:        #eab308;
+      --amber-bg:     rgba(234,179,8,.13);
+      --red:          #f87171;
+      --red-bg:       rgba(239,68,68,.13);
+      --blue:         #60a5fa;
+      --blue-bg:      rgba(96,165,250,.13);
+      --purple:       #a78bfa;
+      --purple-bg:    rgba(167,139,250,.13);
+    }
+
+    /* ── Reset ── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+      font-size: 14px;
+      min-height: 100dvh;
+      display: flex;
+      flex-direction: column;
+    }
+    button { font-family: inherit; cursor: pointer; }
+    a { color: inherit; text-decoration: none; }
+
+    /* ── Top nav bar ── */
+    .top-nav {
+      position: sticky; top: 0; z-index: 30;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 0 16px;
+      height: 48px;
+      display: flex; align-items: center; justify-content: space-between; gap: 12px;
+      flex-shrink: 0;
+    }
+    .top-nav-left { display: flex; align-items: center; gap: 10px; }
+    .brand-mark {
+      width: 26px; height: 26px; border-radius: 6px;
+      background: var(--text);
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0; color: var(--surface); font-size: 14px;
+      text-decoration: none;
+    }
+    .brand-wordmark { font-size: 14px; font-weight: 700; letter-spacing: -.02em; }
+    .top-nav-right { display: flex; align-items: center; gap: 8px; }
+    .btn-icon {
+      width: 32px; height: 32px; display: flex; align-items: center; justify-content: center;
+      border: 1px solid var(--border); border-radius: 6px; background: none;
+      color: var(--text-muted); font-size: 15px; transition: background .15s, color .15s;
+    }
+    .btn-icon:hover { background: var(--surface-2); color: var(--text); }
+
+    /* ── Page layout ── */
+    .page-layout {
+      display: flex;
+      flex: 1;
+      min-height: 0;
+    }
+
+    /* ── Sidebar ── */
+    .sidebar {
+      width: var(--sidebar-width);
+      flex-shrink: 0;
+      background: var(--surface);
+      border-right: 1px solid var(--border);
+      position: sticky;
+      top: 48px;
+      height: calc(100dvh - 48px);
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      scrollbar-width: thin;
+      scrollbar-color: var(--border) transparent;
+    }
+    .sidebar::-webkit-scrollbar { width: 4px; }
+    .sidebar::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+    .sidebar-body { flex: 1; padding: 12px 0; }
+
+    /* Home link */
+    .sb-home-link {
+      display: flex; align-items: center; gap: 9px;
+      padding: 8px 16px;
+      color: var(--text-muted);
+      font-size: 13px; font-weight: 500;
+      border-radius: 0;
+      transition: background .15s, color .15s;
+      text-decoration: none;
+    }
+    .sb-home-link:hover { background: var(--surface-hover); color: var(--text); }
+    .sb-home-link .ti { font-size: 16px; }
+
+    /* Projects section header */
+    .sb-section-hdr {
+      font-size: 10px; font-weight: 700; letter-spacing: .1em;
+      text-transform: uppercase; color: var(--text-sub);
+      padding: 10px 16px 4px;
+    }
+
+    /* Project items */
+    .sb-proj-item {
+      display: flex; align-items: center; gap: 9px;
+      padding: 7px 16px;
+      text-decoration: none;
+      color: var(--text);
+      font-size: 13px;
+      transition: background .15s;
+      position: relative;
+    }
+    .sb-proj-item:hover:not(.active) { background: var(--surface-hover); }
+    .sb-proj-item.active {
+      background: var(--surface-2);
+      box-shadow: inset 2px 0 0 var(--text);
+      font-weight: 700;
+    }
+
+    /* Icon badge */
+    .sb-icon-badge {
+      width: 22px; height: 22px; border-radius: 5px;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0; font-size: 12px; color: #fff;
+      background: var(--text-muted);
+    }
+    .sb-proj-item.active .sb-icon-badge { background: var(--text); }
+
+    /* Project name */
+    .sb-proj-name {
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      min-width: 0;
+    }
+
+    /* Status dot */
+    .sb-status-dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .sb-status-dot.running {
+      background: var(--green);
+      box-shadow: 0 0 0 2px var(--green-bg);
+      animation: sbGlow 2s ease-in-out infinite;
+    }
+    .sb-status-dot.uat {
+      background: var(--amber);
+    }
+    @keyframes sbGlow {
+      0%,100% { box-shadow: 0 0 0 2px var(--green-bg); }
+      50%      { box-shadow: 0 0 0 4px var(--green-bg); }
+    }
+
+    /* Add project tile */
+    .sb-add-tile {
+      display: flex; align-items: center; gap: 9px;
+      padding: 7px 16px;
+      margin: 6px 10px;
+      border: 1.5px dashed var(--border);
+      border-radius: 7px;
+      color: var(--text-sub);
+      font-size: 12px;
+      cursor: pointer;
+      transition: border-color .15s, color .15s, background .15s;
+      background: none; width: calc(100% - 20px);
+    }
+    .sb-add-tile:hover { border-color: var(--text-sub); color: var(--text-muted); background: var(--surface-2); }
+    .sb-add-tile .ti { font-size: 14px; }
+
+    /* Sidebar footer */
+    .sidebar-footer {
+      padding: 10px 16px;
+      border-top: 1px solid var(--border);
+      font-size: 10px;
+      color: var(--text-sub);
+      line-height: 1.4;
+      flex-shrink: 0;
+    }
+
+    /* ── Main content area ── */
+    .main-area {
+      flex: 1;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      overflow-y: auto;
+    }
+
+    /* ── Project header ── */
+    .proj-header {
+      position: sticky;
+      top: 0; /* sticks to top of main-area scroll container */
+      z-index: 20;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 18px 28px 0;
+    }
+    .proj-header-row {
+      display: flex; align-items: center; gap: 12px;
+      padding-bottom: 14px;
+      border-bottom: 1px solid var(--border);
+    }
+    .proj-header-icon {
+      width: 22px; height: 22px; border-radius: 5px;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0; font-size: 12px; color: #fff;
+    }
+    .proj-header-name {
+      font-size: 22px; font-weight: 700; line-height: 1.15;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      flex: 1; min-width: 0;
+    }
+    .proj-header-pill {
+      display: inline-flex; align-items: center; gap: 5px;
+      padding: 3px 9px; border-radius: 20px;
+      font-size: 11px; font-weight: 600;
+      flex-shrink: 0;
+    }
+    .pill-running {
+      background: var(--green-bg); color: var(--green);
+    }
+    .pill-uat {
+      background: var(--amber-bg); color: var(--amber);
+    }
+    .pill-dot {
+      width: 6px; height: 6px; border-radius: 50%;
+      background: currentColor;
+      animation: pillGlow 2s ease-in-out infinite;
+    }
+    @keyframes pillGlow {
+      0%,100% { opacity: 1; }
+      50%      { opacity: .4; }
+    }
+    .pill-running .pill-dot { animation: pillGlow 2s ease-in-out infinite; }
+    .pill-uat .pill-dot { animation: none; }
+
+    .proj-header-actions {
+      display: flex; align-items: center; gap: 8px;
+      margin-left: auto; flex-shrink: 0;
+    }
+    .btn-ghost {
+      padding: 6px 12px; border: 1px solid var(--border); border-radius: 6px;
+      background: none; color: var(--text-muted); font-size: 12px; font-weight: 500;
+      display: flex; align-items: center; gap: 5px;
+      transition: background .15s, color .15s;
+    }
+    .btn-ghost:hover { background: var(--surface-2); color: var(--text); }
+    .btn-ghost .ti { font-size: 14px; }
+    .btn-primary {
+      padding: 6px 14px; border: none; border-radius: 6px;
+      background: var(--text); color: var(--surface); font-size: 12px; font-weight: 600;
+      display: flex; align-items: center; gap: 5px;
+      transition: opacity .15s;
+    }
+    .btn-primary:hover { opacity: .82; }
+    .btn-primary .ti { font-size: 14px; }
+
+    /* ── Sub-tab strip ── */
+    .sub-tabs {
+      display: flex; align-items: flex-end;
+      padding: 0 0; gap: 0;
+      background: var(--surface);
+      overflow-x: auto; scrollbar-width: none;
+    }
+    .sub-tabs::-webkit-scrollbar { display: none; }
+    .stab {
+      display: flex; align-items: center; gap: 6px;
+      padding: 10px 0; margin-right: 24px; flex-shrink: 0;
+      background: none; border: none; border-bottom: 2px solid transparent;
+      color: var(--text-muted); font-size: 13px; font-weight: 500;
+      transition: color .15s, border-color .15s; white-space: nowrap;
+      cursor: pointer;
+    }
+    .stab.active { color: var(--text); border-bottom-color: var(--text); font-weight: 700; }
+    .stab:hover:not(.active):not(.disabled) { color: var(--text); }
+    .stab.disabled {
+      color: var(--text-sub); cursor: not-allowed;
+    }
+    .stab.disabled:hover { color: var(--text-sub); }
+    .stab .ti { font-size: 14px; }
+    .stab-soon {
+      font-size: 9px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+      background: var(--surface-2); color: var(--text-sub);
+      padding: 1px 5px; border-radius: 4px;
+    }
+
+    /* ── Tab content ── */
+    .tab-content { flex: 1; }
+    .tab-pane { display: none; padding: 28px; }
+    .tab-pane.active { display: block; }
+
+    /* Placeholder text */
+    .placeholder-msg {
+      padding: 48px 0;
+      text-align: center;
+      color: var(--text-sub);
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    .placeholder-msg .ti { font-size: 32px; display: block; margin-bottom: 12px; }
+
+    /* ── Tickets tab ── */
+    .tickets-grid {
+      display: grid;
+      grid-template-columns: 1fr 320px;
+      gap: 0;
+      min-height: 200px;
+    }
+    .tickets-main {
+      padding: 0;
+      border-right: 1px solid var(--border);
+      min-width: 0;
+    }
+    .tickets-aside { padding: 0; }
+
+    .ticket-group-hdr {
+      display: flex; align-items: center; gap: 8px;
+      padding: 10px 0 6px;
+      font-size: 10px; font-weight: 700; letter-spacing: .08em;
+      text-transform: uppercase; color: var(--text-muted);
+    }
+    .ticket-row {
+      display: flex; align-items: center; gap: 10px;
+      padding: 10px 0;
+      border-top: 1px solid var(--border);
+      font-size: 13px;
+    }
+    .ticket-status-pill {
+      font-size: 10px; font-weight: 600;
+      padding: 2px 7px; border-radius: 10px; white-space: nowrap;
+    }
+    .ticket-status-pill.SIT      { background: var(--blue-bg);   color: var(--blue); }
+    .ticket-status-pill.UAT      { background: var(--amber-bg);  color: var(--amber); }
+    .ticket-status-pill.in-progress { background: var(--green-bg);  color: var(--green); }
+    .ticket-status-pill.blocked  { background: var(--red-bg);    color: var(--red); }
+    .ticket-status-pill.backlog  { background: var(--surface-2); color: var(--text-sub); border: 1px solid var(--border); }
+    .ticket-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .ticket-num   { font-size: 11px; color: var(--text-sub); flex-shrink: 0; }
+    .empty-msg { color: var(--text-sub); font-size: 13px; padding: 12px 0; font-style: italic; }
+
+    /* ── Mobile ── */
+    @media (max-width: 699px) {
+      .sidebar { display: none; }
+      .sub-tabs { position: static; }
+      .main-area { overflow-y: visible; }
+      .proj-header { position: static; }
+      .tickets-grid { grid-template-columns: 1fr; }
+      .tickets-main { border-right: none; border-bottom: 1px solid var(--border); }
+    }
+
+    /* ── Tablet 700–1024px: sidebar at 180px ── */
+    @media (min-width: 700px) and (max-width: 1024px) {
+      :root { --sidebar-width: 180px; }
+    }
+
+    /* ── Loading / error states ── */
+    .loading-msg {
+      color: var(--text-sub); font-size: 13px; padding: 48px 0; text-align: center;
+    }
+  </style>
+</head>
+<body>
+
+<!-- ── Top nav ── -->
+<nav class="top-nav" aria-label="Site navigation">
+  <div class="top-nav-left">
+    <a href="/" class="brand-mark" title="Commander Home"><i class="ti ti-bolt"></i></a>
+    <span class="brand-wordmark">Commander</span>
+  </div>
+  <div class="top-nav-right">
+    <button class="btn-icon" onclick="toggleTheme()" id="theme-toggle-btn" title="Toggle theme" aria-label="Toggle dark/light theme">
+      <i class="ti ti-moon" id="theme-icon"></i>
+    </button>
+  </div>
+</nav>
+
+<!-- ── Page layout: sidebar + main ── -->
+<div class="page-layout">
+
+  <!-- ── Sidebar ── -->
+  <aside class="sidebar" aria-label="Project navigation" id="sidebar">
+    <div class="sidebar-body">
+
+      <!-- Home link -->
+      <a href="/" class="sb-home-link">
+        <i class="ti ti-home"></i>
+        <span>Home</span>
+      </a>
+
+      <!-- Projects section -->
+      <div class="sb-section-hdr">Projects</div>
+      <div id="sb-project-list">
+        <!-- populated by JS -->
+      </div>
+
+      <!-- Add project tile -->
+      <button class="sb-add-tile" onclick="window.location.href='/'" title="Add a new project" aria-label="Add project">
+        <i class="ti ti-plus"></i>
+        <span>Add project</span>
+      </button>
+
+    </div>
+    <footer class="sidebar-footer" id="sidebar-footer">
+      <!-- version · host populated by JS -->
+    </footer>
+  </aside>
+
+  <!-- ── Main content ── -->
+  <div class="main-area" id="main-area">
+
+    <!-- Project header (sticky within main-area) -->
+    <header class="proj-header" id="proj-header">
+      <div class="proj-header-row">
+        <div class="proj-header-icon" id="proj-header-icon">
+          <i class="ti ti-folder"></i>
+        </div>
+        <span class="proj-header-name" id="proj-header-name">Loading…</span>
+        <span id="proj-header-pill"></span>
+        <div class="proj-header-actions">
+          <button class="btn-ghost" onclick="openBulkCreate()" title="Bulk create tickets">
+            <i class="ti ti-stack-2"></i>
+            Bulk create
+          </button>
+          <button class="btn-primary" onclick="openNewTicket()" title="Create a new ticket">
+            <i class="ti ti-plus"></i>
+            New ticket
+          </button>
+        </div>
+      </div>
+
+      <!-- Sub-tab strip -->
+      <nav class="sub-tabs" role="tablist" aria-label="Project sections" id="sub-tabs">
+        <button class="stab active" role="tab" id="stab-sprint-mgmt"
+                aria-selected="true" onclick="switchTab('sprint-mgmt')">
+          <i class="ti ti-layout-kanban"></i>Sprint Mgmt
+        </button>
+        <button class="stab" role="tab" id="stab-tickets"
+                aria-selected="false" onclick="switchTab('tickets')">
+          <i class="ti ti-list"></i>Tickets
+        </button>
+        <button class="stab" role="tab" id="stab-logs"
+                aria-selected="false" onclick="switchTab('logs')">
+          <i class="ti ti-terminal-2"></i>Logs
+        </button>
+        <button class="stab disabled" role="tab" id="stab-sprint-history"
+                aria-selected="false" aria-disabled="true"
+                onclick="return false" tabindex="-1">
+          <i class="ti ti-history"></i>Sprint history
+          <span class="stab-soon">soon</span>
+        </button>
+      </nav>
+    </header>
+
+    <!-- Tab content -->
+    <div class="tab-content">
+
+      <!-- Sprint Mgmt tab -->
+      <div class="tab-pane active" id="pane-sprint-mgmt" role="tabpanel" aria-labelledby="stab-sprint-mgmt">
+        <div class="placeholder-msg" id="sprint-mgmt-placeholder">
+          <i class="ti ti-layout-kanban"></i>
+          Sprint Mgmt content lands in ticket #<span id="next-ticket-num">222</span>
+        </div>
+      </div>
+
+      <!-- Tickets tab -->
+      <div class="tab-pane" id="pane-tickets" role="tabpanel" aria-labelledby="stab-tickets">
+        <div id="tickets-content">
+          <div class="loading-msg">Loading tickets…</div>
+        </div>
+      </div>
+
+      <!-- Logs tab -->
+      <div class="tab-pane" id="pane-logs" role="tabpanel" aria-labelledby="stab-logs">
+        <div class="placeholder-msg">
+          <i class="ti ti-terminal-2"></i>
+          Logs view coming soon
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+</div>
+
+<script>
+// ── Theme ─────────────────────────────────────────────────────────────────────
+function initTheme() {
+  const saved = localStorage.getItem('theme') || 'light';
+  document.documentElement.setAttribute('data-theme', saved);
+  _syncThemeIcon(saved);
+}
+function toggleTheme() {
+  const next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+  document.documentElement.setAttribute('data-theme', next);
+  localStorage.setItem('theme', next);
+  _syncThemeIcon(next);
+}
+function _syncThemeIcon(theme) {
+  const icon = document.getElementById('theme-icon');
+  if (icon) icon.className = theme === 'dark' ? 'ti ti-sun' : 'ti ti-moon';
+}
+
+// ── Utilities ─────────────────────────────────────────────────────────────────
+function escHtml(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function colorHex(color) {
+  const map = {
+    blue:   '#3b82f6', purple: '#6366f1', green: '#16a34a',
+    amber:  '#d97706', red:    '#dc2626', pink:  '#ec4899',
+    cyan:   '#0891b2', gray:   '#6b7280',
+  };
+  return map[color] || color || '#6b7280';
+}
+
+// ── URL parsing ───────────────────────────────────────────────────────────────
+const PATH_RE = /^\/project\/([^/]+)\/?([^/]*)?$/;
+
+function parseUrl() {
+  const m = window.location.pathname.match(PATH_RE);
+  if (!m) return { slug: null, tab: 'sprint-mgmt' };
+  const slug = decodeURIComponent(m[1]);
+  const rawTab = m[2] || '';
+  // sprint-history is disabled → redirect to sprint-mgmt
+  const tab = (rawTab === 'tickets') ? 'tickets'
+            : (rawTab === 'logs')    ? 'logs'
+            : 'sprint-mgmt';
+  return { slug, tab };
+}
+
+// ── State ─────────────────────────────────────────────────────────────────────
+let _slug        = null;   // current project slug
+let _activeTab   = 'sprint-mgmt';
+let _homeData    = null;   // cached /api/home response
+let _projectData = null;   // full project config from /api/home
+let _ticketsLoaded = false;
+
+// ── Tab navigation ────────────────────────────────────────────────────────────
+function switchTab(tab, pushHistory) {
+  if (tab === 'sprint-history') return; // disabled
+
+  _activeTab = tab;
+
+  // Update aria-selected + active class on tabs
+  ['sprint-mgmt', 'tickets', 'logs'].forEach(t => {
+    const btn = document.getElementById('stab-' + t);
+    if (!btn) return;
+    const isActive = t === tab;
+    btn.classList.toggle('active', isActive);
+    btn.setAttribute('aria-selected', String(isActive));
+  });
+
+  // Show/hide panes
+  ['sprint-mgmt', 'tickets', 'logs'].forEach(t => {
+    const pane = document.getElementById('pane-' + t);
+    if (pane) pane.classList.toggle('active', t === tab);
+  });
+
+  // Update URL
+  const newUrl = '/project/' + encodeURIComponent(_slug) + '/' + tab;
+  if (pushHistory !== false) {
+    history.pushState({ slug: _slug, tab }, '', newUrl);
+  }
+
+  // Lazy-load tickets
+  if (tab === 'tickets' && !_ticketsLoaded) {
+    _ticketsLoaded = true;
+    loadTickets();
+  }
+}
+
+// ── Keyboard navigation for sub-tabs ─────────────────────────────────────────
+document.getElementById('sub-tabs').addEventListener('keydown', function(e) {
+  const enabledTabs = ['sprint-mgmt', 'tickets', 'logs'];
+  const focused = document.activeElement;
+  const currentId = focused ? focused.id.replace('stab-', '') : null;
+  const currentIdx = enabledTabs.indexOf(currentId);
+  if (currentIdx < 0) return;
+
+  if (e.key === 'ArrowRight') {
+    e.preventDefault();
+    const next = enabledTabs[(currentIdx + 1) % enabledTabs.length];
+    document.getElementById('stab-' + next).focus();
+  } else if (e.key === 'ArrowLeft') {
+    e.preventDefault();
+    const prev = enabledTabs[(currentIdx - 1 + enabledTabs.length) % enabledTabs.length];
+    document.getElementById('stab-' + prev).focus();
+  } else if (e.key === 'Enter' || e.key === ' ') {
+    e.preventDefault();
+    if (currentId) switchTab(currentId);
+  }
+});
+
+// ── Popstate handler ─────────────────────────────────────────────────────────
+window.addEventListener('popstate', function(e) {
+  const state = e.state;
+  if (state && state.slug && state.tab) {
+    _slug = state.slug;
+    switchTab(state.tab, false);
+  }
+});
+
+// ── Sidebar ───────────────────────────────────────────────────────────────────
+function buildSidebar(projects) {
+  const list = document.getElementById('sb-project-list');
+  if (!list) return;
+
+  if (!projects || projects.length === 0) {
+    list.innerHTML = '<div style="padding:8px 16px;font-size:12px;color:var(--text-sub)">No projects</div>';
+    return;
+  }
+
+  // Sort alphabetically by name
+  const sorted = [...projects].sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+
+  list.innerHTML = sorted.map(proj => {
+    const isActive = proj.slug === _slug;
+    const color = colorHex(proj.color || proj.icon_color || 'gray');
+    const icon  = proj.icon || 'ti-folder';
+
+    let dotHtml = '';
+    if (proj.status === 'running') {
+      dotHtml = '<span class="sb-status-dot running" aria-label="Running"></span>';
+    } else if (proj.status === 'uat-pending' || (proj.uat_count && proj.uat_count > 0)) {
+      dotHtml = '<span class="sb-status-dot uat" aria-label="UAT pending"></span>';
+    }
+
+    const href = '/project/' + encodeURIComponent(proj.slug) + '/sprint-mgmt';
+
+    return `<a href="${escHtml(href)}" class="sb-proj-item${isActive ? ' active' : ''}"
+              ${isActive ? 'aria-current="page"' : ''}>
+      <span class="sb-icon-badge" style="background:${escHtml(color)}">
+        <i class="ti ${escHtml(icon)}"></i>
+      </span>
+      <span class="sb-proj-name">${escHtml(proj.name)}</span>
+      ${dotHtml}
+    </a>`;
+  }).join('');
+}
+
+// ── Project header ────────────────────────────────────────────────────────────
+function updateProjectHeader(proj) {
+  if (!proj) return;
+
+  const iconEl = document.getElementById('proj-header-icon');
+  const nameEl = document.getElementById('proj-header-name');
+  const pillEl = document.getElementById('proj-header-pill');
+
+  const color = colorHex(proj.color || proj.icon_color || 'gray');
+  const icon  = proj.icon || 'ti-folder';
+
+  if (iconEl) {
+    iconEl.style.background = color;
+    iconEl.innerHTML = `<i class="ti ${escHtml(icon)}"></i>`;
+  }
+  if (nameEl) nameEl.textContent = proj.name || _slug;
+
+  // Status pill
+  if (pillEl) {
+    if (proj.status === 'running' && proj.sprint_running) {
+      const label = proj.sprint_running.label || '';
+      pillEl.innerHTML = `<span class="proj-header-pill pill-running">
+        <span class="pill-dot"></span>
+        Sprint ${escHtml(label.replace('sprint-', ''))} running
+      </span>`;
+    } else if (proj.status === 'uat-pending' || (proj.uat_count && proj.uat_count > 0)) {
+      const count = proj.uat_count || 0;
+      pillEl.innerHTML = `<span class="proj-header-pill pill-uat">
+        <span class="pill-dot"></span>
+        ${count} UAT pending
+      </span>`;
+    } else {
+      pillEl.innerHTML = '';
+    }
+  }
+
+  // Update page title
+  document.title = `Commander — ${proj.name || _slug}`;
+}
+
+// ── Sidebar footer ────────────────────────────────────────────────────────────
+function updateSidebarFooter() {
+  const footer = document.getElementById('sidebar-footer');
+  if (!footer) return;
+  const host = window.location.host;
+  // Try to get version from a meta tag or default
+  const version = document.querySelector('meta[name="app-version"]')?.content || '—';
+  footer.textContent = `v${version} · ${host}`;
+}
+
+// ── Load home data ────────────────────────────────────────────────────────────
+let _sidebarRefreshTimer = null;
+
+async function loadHomeData(silent) {
+  try {
+    const resp = await fetch('/api/home');
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const data = await resp.json();
+    _homeData = data;
+
+    const projects = data.projects || [];
+    // Find current project
+    _projectData = projects.find(p => p.slug === _slug) || null;
+
+    buildSidebar(projects);
+    updateProjectHeader(_projectData);
+  } catch (err) {
+    // Degrade gracefully: sidebar shows without dots, header may be empty
+    if (!silent) console.warn('Home data unavailable:', err);
+  }
+}
+
+function startSidebarRefresh() {
+  if (_sidebarRefreshTimer) clearInterval(_sidebarRefreshTimer);
+  _sidebarRefreshTimer = setInterval(() => loadHomeData(true), 30000);
+}
+
+// ── Tickets loading ───────────────────────────────────────────────────────────
+async function loadTickets() {
+  const container = document.getElementById('tickets-content');
+  if (!container) return;
+
+  // Find full repo path from home data
+  let repo = null;
+  if (_homeData && _homeData.projects) {
+    const proj = _homeData.projects.find(p => p.slug === _slug);
+    if (proj) {
+      // We need the full owner/repo — home endpoint only gives slug
+      // Use /api/projects to get the full repo path
+    }
+  }
+
+  // Fetch the full projects list to get owner/repo
+  try {
+    const projResp = await fetch('/api/projects');
+    if (!projResp.ok) throw new Error('HTTP ' + projResp.status);
+    const projData = await projResp.json();
+    const projs = projData.projects || [];
+    const proj = projs.find(p => {
+      const s = (p.repo || '').split('/').pop();
+      return s === _slug;
+    });
+    if (proj) repo = proj.repo;
+  } catch (err) {
+    container.innerHTML = '<div class="loading-msg">Failed to load project info.</div>';
+    return;
+  }
+
+  if (!repo) {
+    container.innerHTML = '<div class="loading-msg">Project not found.</div>';
+    return;
+  }
+
+  container.innerHTML = '<div class="loading-msg">Loading tickets…</div>';
+
+  try {
+    const resp = await fetch('/api/project-details?repo=' + encodeURIComponent(repo));
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const data = await resp.json();
+    renderTickets(data);
+  } catch (err) {
+    container.innerHTML = '<div class="loading-msg">Failed to load tickets.</div>';
+  }
+}
+
+function renderTickets(data) {
+  const container = document.getElementById('tickets-content');
+  if (!container) return;
+
+  const tickets = data.tickets || [];
+  const ghUrl   = data.github_url || '#';
+
+  if (tickets.length === 0) {
+    container.innerHTML = '<div class="loading-msg">No open tickets.</div>';
+    return;
+  }
+
+  const groups = [
+    { label: 'SIT',         status: 'SIT',         items: tickets.filter(t => t.status === 'SIT') },
+    { label: 'UAT',         status: 'UAT',          items: tickets.filter(t => t.status === 'UAT') },
+    { label: 'In progress', status: 'in-progress',  items: tickets.filter(t => t.status === 'in-progress' || t.status === 'blocked') },
+    { label: 'Backlog',     status: 'backlog',       items: tickets.filter(t => t.status === 'backlog') },
+  ].filter(g => g.items.length > 0);
+
+  const ticketsHtml = groups.map(g => {
+    const rows = g.items.map(t => `
+      <div class="ticket-row">
+        <span class="ticket-status-pill ${escHtml(t.status)}">${escHtml(t.status)}</span>
+        <a class="ticket-title" href="${escHtml(t.url)}" target="_blank" rel="noopener" title="${escHtml(t.title)}">${escHtml(t.title)}</a>
+        <span class="ticket-num">#${t.number}</span>
+      </div>`).join('');
+    return `<div class="ticket-group-hdr">${escHtml(g.label)} · ${g.items.length}</div>${rows}`;
+  }).join('');
+
+  container.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+      <span style="font-size:13px;font-weight:600;color:var(--text-muted)">${tickets.length} open tickets</span>
+      <a href="${escHtml(ghUrl)}" target="_blank" rel="noopener" style="font-size:12px;color:var(--blue)">View on GitHub →</a>
+    </div>
+    ${ticketsHtml}`;
+}
+
+// ── Placeholder stubs (open the correct modal when actual sprint-mgmt lands) ──
+function openBulkCreate() {
+  // Redirect to index.html sprint-mgmt for now
+  if (_slug) {
+    const repo = _findFullRepo(_slug);
+    if (repo) window.location.href = '/projects/' + encodeURIComponent(repo) + '/sprint-mgmt';
+    else window.location.href = '/';
+  }
+}
+
+function openNewTicket() {
+  if (_slug) {
+    const repo = _findFullRepo(_slug);
+    if (repo) window.location.href = '/projects/' + encodeURIComponent(repo) + '/sprint-mgmt';
+    else window.location.href = '/';
+  }
+}
+
+function _findFullRepo(slug) {
+  if (!_homeData) return null;
+  // Check the raw projects list from /api/projects if available, else null
+  return _cachedFullRepo[slug] || null;
+}
+
+const _cachedFullRepo = {};
+
+async function _prefetchFullRepo() {
+  try {
+    const r = await fetch('/api/projects');
+    if (!r.ok) return;
+    const d = await r.json();
+    (d.projects || []).forEach(p => {
+      const s = (p.repo || '').split('/').pop();
+      if (s) _cachedFullRepo[s] = p.repo;
+    });
+  } catch (e) { /* ignore */ }
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+async function init() {
+  initTheme();
+  updateSidebarFooter();
+
+  const { slug, tab } = parseUrl();
+
+  if (!slug) {
+    window.location.replace('/');
+    return;
+  }
+
+  _slug = slug;
+  _activeTab = tab;
+
+  // Replace URL if needed (e.g. sprint-history → sprint-mgmt)
+  const expected = '/project/' + encodeURIComponent(slug) + '/' + tab;
+  if (window.location.pathname !== expected) {
+    history.replaceState({ slug, tab }, '', expected);
+  }
+
+  // Activate the correct tab without pushing history (already set above)
+  switchTab(tab, false);
+
+  // Load data in parallel
+  await Promise.all([
+    loadHomeData(false),
+    _prefetchFullRepo(),
+  ]);
+
+  // Start 30s sidebar refresh
+  startSidebarRefresh();
+}
+
+document.addEventListener('DOMContentLoaded', init);
+</script>
+
+</body>
+</html>

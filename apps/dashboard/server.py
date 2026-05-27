@@ -285,6 +285,25 @@ async def spa_project_route(path: str):
     return FileResponse(STATIC_DIR / "index.html")
 
 
+# ── Slug-based project routes (/project/<slug>/...) ───────────────────────────
+
+_VALID_PROJECT_TABS = {"sprint-mgmt", "tickets", "logs"}
+
+
+@app.get("/project/{slug}")
+async def project_slug_no_tab(slug: str):
+    """Redirect bare /project/<slug> to /project/<slug>/sprint-mgmt."""
+    return RedirectResponse(url=f"/project/{slug}/sprint-mgmt", status_code=302)
+
+
+@app.get("/project/{slug}/{tab}")
+async def project_slug_tab(slug: str, tab: str):
+    """Serve the project chrome page for valid tabs; redirect invalid tabs to sprint-mgmt."""
+    if tab not in _VALID_PROJECT_TABS:
+        return RedirectResponse(url=f"/project/{slug}/sprint-mgmt", status_code=302)
+    return FileResponse(STATIC_DIR / "project.html")
+
+
 @app.get("/api/health", response_model=HealthResponse)
 def health_check() -> HealthResponse:
     uptime = time.monotonic() - _start_time

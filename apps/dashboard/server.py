@@ -1356,6 +1356,7 @@ class SprintOrderBody(BaseModel):
 
 class SprintCreateBody(BaseModel):
     project: str
+    sprint_number: int | None = None
 
 
 class SprintGoalBody(BaseModel):
@@ -1685,17 +1686,24 @@ def kill_sprint(sprint_label: str, project: str):
 
 @app.post("/api/sprints/create")
 async def create_sprint_label(body: SprintCreateBody):
-    """Create the next sprint-N label for a project (idempotent)."""
+    """Create a sprint-N label for a project. Uses sprint_number if provided, else auto-increments."""
     try:
         sprints = github_client.list_sprints(repo_name=body.project)
-        next_num = (max(sprints) if sprints else 0) + 1
-        github_client.ensure_sprint_label(next_num, repo_name=body.project)
+        if body.sprint_number is not None:
+            if body.sprint_number in sprints:
+                raise HTTPException(409, detail=f"Sprint {body.sprint_number} already exists")
+            target_num = body.sprint_number
+        else:
+            target_num = (max(sprints) if sprints else 0) + 1
+        github_client.ensure_sprint_label(target_num, repo_name=body.project)
         github_client.invalidate("sprints:")
+    except HTTPException:
+        raise
     except subprocess.CalledProcessError as e:
         raise _gh_error(e)
     except ValueError as e:
         raise HTTPException(400, detail=str(e))
-    return {"ok": True, "sprint_label": f"sprint-{next_num}"}
+    return {"ok": True, "sprint_label": f"sprint-{target_num}"}
 
 
 class SprintDeleteBody(BaseModel):

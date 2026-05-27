@@ -3576,25 +3576,72 @@ async function smgmtDeleteConfirm() {
 
 // ── Create sprint ─────────────────────────────────────────────────────────────
 
-async function smgmtCreateSprint() {
+function smgmtCreateSprint() {
   if (!_smgmtCurrentRepo) return;
-  const btn = document.getElementById('smgmt-new-sprint-btn');
-  if (btn) { btn.disabled = true; btn.textContent = 'Creating…'; }
+  const sprints = _smgmtData?.sprints || [];
+  const proposed = sprints.length > 0 ? Math.max(...sprints) + 1 : 1;
+
+  const input = document.getElementById('smgmt-new-sprint-input');
+  const errEl = document.getElementById('smgmt-new-sprint-error');
+  if (input) { input.value = proposed; }
+  if (errEl) { errEl.textContent = ''; }
+
+  const confirmBtn = document.getElementById('smgmt-new-sprint-confirm');
+  if (confirmBtn) { confirmBtn.disabled = false; confirmBtn.textContent = 'Create'; }
+
+  document.getElementById('smgmt-new-sprint-backdrop')?.classList.remove('hidden');
+  document.getElementById('smgmt-new-sprint-modal')?.classList.remove('hidden');
+  setTimeout(() => input?.focus(), 50);
+}
+
+function smgmtNewSprintClose() {
+  document.getElementById('smgmt-new-sprint-backdrop')?.classList.add('hidden');
+  document.getElementById('smgmt-new-sprint-modal')?.classList.add('hidden');
+}
+
+async function smgmtNewSprintConfirm() {
+  const input = document.getElementById('smgmt-new-sprint-input');
+  const errEl = document.getElementById('smgmt-new-sprint-error');
+  const confirmBtn = document.getElementById('smgmt-new-sprint-confirm');
+
+  const raw = input?.value.trim();
+  if (!raw) {
+    if (errEl) errEl.textContent = 'Please enter a sprint number';
+    return;
+  }
+  const num = Number(raw);
+  if (!Number.isInteger(num) || num < 1) {
+    if (errEl) errEl.textContent = 'Sprint number must be a positive integer';
+    return;
+  }
+
+  const sprints = _smgmtData?.sprints || [];
+  if (sprints.includes(num)) {
+    if (errEl) errEl.textContent = `Sprint ${num} already exists`;
+    return;
+  }
+
+  if (errEl) errEl.textContent = '';
+  if (confirmBtn) { confirmBtn.disabled = true; confirmBtn.textContent = 'Creating…'; }
 
   try {
     const res = await fetch('/api/sprints/create', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ project: _smgmtCurrentRepo }),
+      body: JSON.stringify({ project: _smgmtCurrentRepo, sprint_number: num }),
     });
-    if (!res.ok) throw new Error(await res.text());
-    const data = await res.json();
-    // Reload sprint data
+    if (!res.ok) {
+      let msg;
+      try { msg = (await res.json()).detail; } catch { msg = await res.text(); }
+      if (errEl) errEl.textContent = msg || 'Failed to create sprint';
+      if (confirmBtn) { confirmBtn.disabled = false; confirmBtn.textContent = 'Create'; }
+      return;
+    }
+    smgmtNewSprintClose();
     await smgmtSelectProject(_smgmtCurrentRepo);
   } catch (e) {
-    smgmtShowError('Failed to create sprint: ' + e.message);
-  } finally {
-    if (btn) { btn.disabled = false; btn.textContent = '+ New sprint'; }
+    if (errEl) errEl.textContent = 'Failed to create sprint: ' + e.message;
+    if (confirmBtn) { confirmBtn.disabled = false; confirmBtn.textContent = 'Create'; }
   }
 }
 

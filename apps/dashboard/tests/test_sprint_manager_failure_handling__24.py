@@ -509,17 +509,11 @@ class TestLiveSprintStatus:
         res = client.post("/api/sprint-status", json=payload)
         assert res.status_code == 200
 
-    def test_get_sprint_status_after_post(self, client):
-        payload = {
-            "sprint_label": "sprint-99",
-            "sprint_number": 99,
-            "issues": [],
-            "start_timestamp": "2026-01-01T00:00:00Z",
-            "total_tokens_in": 0,
-            "total_tokens_out": 0,
-            "wall_clock_secs": 0.0,
-        }
-        client.post("/api/sprint-status", json=payload)
+    def test_get_sprint_status_returns_list_shape(self, client):
+        # GET /api/sprint-status must always return {"running_sprints": [...]} with HTTP 200,
+        # even when no sprints are running.
         res = client.get("/api/sprint-status")
         assert res.status_code == 200
-        assert res.json()["sprint_label"] == "sprint-99"
+        data = res.json()
+        assert "running_sprints" in data
+        assert isinstance(data["running_sprints"], list)

@@ -2379,7 +2379,7 @@ def run_sprint(
         elapsed = time.monotonic() - start_time
         state.wall_clock_secs = elapsed
         state.save(state_path)
-        _post_sprint_status(state, api_url=api_url)
+        _post_sprint_status(state, api_url=api_url, project=eff_repo)
 
     # Final elapsed time
     state.wall_clock_secs = time.monotonic() - start_time

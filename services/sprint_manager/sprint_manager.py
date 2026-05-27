@@ -2076,8 +2076,21 @@ def _ensure_github_labels(labels: list[str], repo_name: Optional[str] = None) ->
             pass
 
 
-def _is_stale_summary(body: str, state_reason: Optional[str]) -> tuple[bool, str]:
-    """Return (is_stale, reason) for an existing summary issue body."""
+def _is_stale_summary(
+    body: str,
+    state_reason: Optional[str],
+    state_file_mtime: Optional[float] = None,
+    issue_created_at: Optional[str] = None,
+) -> tuple[bool, str]:
+    """Return (is_stale, reason) for an existing summary issue body.
+
+    Staleness criteria (any one is sufficient):
+    1. Issue was closed with state_reason "not_planned".
+    2. Body looks like a stub/failed run (stopped + all TESTER_REJECTED + nothing shipped).
+    3. The sprint state file on disk is newer than the GitHub issue (AC-2: state-file
+       timestamp check) — i.e. a newer sprint run has already completed locally but its
+       results were never reflected in the GitHub issue.
+    """
     if state_reason == "not_planned":
         return True, "closed as not_planned"
 
@@ -2092,6 +2105,18 @@ def _is_stale_summary(body: str, state_reason: Optional[str]) -> tuple[bool, str
     if has_stopped and has_rejected and no_shipped:
         return True, "failed-run summary (stopped, all TESTER_REJECTED, nothing shipped)"
 
+    # State-file timestamp check: if the local state file is newer than when the issue
+    # was created, the issue was produced by an older sprint run.
+    if state_file_mtime is not None and issue_created_at:
+        try:
+            issue_ts = datetime.fromisoformat(
+                issue_created_at.rstrip("Z")
+            ).replace(tzinfo=timezone.utc).timestamp()
+            if state_file_mtime > issue_ts:
+                return True, "state file is newer than summary issue (newer sprint run completed locally)"
+        except (ValueError, OSError):
+            pass  # malformed timestamp or missing file — skip this check
+
     return False, ""
 
 
@@ -2101,6 +2126,7 @@ def create_summary_github_issue(
     sprint_label: str,
     repo_name: Optional[str] = None,
     force_summary: bool = False,
+    state_file_path: Optional[Path] = None,
 ) -> tuple[Optional[int], Optional[str]]:
     """AC-2: Create a GitHub issue with the summary markdown as the body.
 
@@ -2108,6 +2134,10 @@ def create_summary_github_issue(
     with the exact title.  If one already exists and is stale (or force_summary
     is set), updates it in place.  Otherwise skips creation (AC-2).
     If none exists, creates the issue (AC-3).
+
+    state_file_path: optional path to the sprint state JSON file; when provided
+    its mtime is compared to the existing issue's createdAt to detect staleness
+    (AC-2: state-file timestamp check).
     """
     n      = sprint_number if sprint_number is not None else sprint_label
     title  = f"Sprint {n} Executive Summary"
@@ -2133,9 +2163,19 @@ def create_summary_github_issue(
         except Exception as e:
             print(f"  Warning: could not fetch existing summary issue body -- {e}", file=sys.stderr)
 
+        # Compute state-file mtime for the timestamp staleness check (best-effort)
+        state_file_mtime: Optional[float] = None
+        if state_file_path is not None:
+            try:
+                state_file_mtime = state_file_path.stat().st_mtime
+            except OSError:
+                pass
+
         is_stale, stale_reason = _is_stale_summary(
-            body         = full_issue.get("body", ""),
-            state_reason = full_issue.get("stateReason"),
+            body             = full_issue.get("body", ""),
+            state_reason     = full_issue.get("stateReason"),
+            state_file_mtime = state_file_mtime,
+            issue_created_at = full_issue.get("createdAt"),
         )
 
         if force_summary or is_stale:
@@ -2296,13 +2336,15 @@ def write_sprint_summary(
         return path
 
     # AC-2: Create GitHub issue (best-effort); deduplication handled inside
+    state_path = _state_path(state.sprint_number, state.sprint_label, cfg=cfg)
     try:
         summary_issue_num, summary_issue_url = create_summary_github_issue(
-            content=content,
-            sprint_number=state.sprint_number,
-            sprint_label=state.sprint_label,
-            repo_name=eff_repo,
-            force_summary=force_summary,
+            content         = content,
+            sprint_number   = state.sprint_number,
+            sprint_label    = state.sprint_label,
+            repo_name       = eff_repo,
+            force_summary   = force_summary,
+            state_file_path = state_path,
         )
     except Exception as exc:
         print(f"  Warning: create_summary_github_issue raised -- {exc}", file=sys.stderr)
@@ -2310,7 +2352,6 @@ def write_sprint_summary(
 
     # Store summary_issue_url in state JSON
     if summary_issue_url:
-        state_path = _state_path(state.sprint_number, state.sprint_label, cfg=cfg)
         try:
             if state_path.exists():
                 state_dict = json.loads(state_path.read_text())

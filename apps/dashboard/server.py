@@ -5,6 +5,7 @@ import re
 import shutil
 import signal
 import subprocess
+import tempfile
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -2562,12 +2563,14 @@ async def create_ticket_draft(
         "-p", prompt,
     ]
 
+    sub_env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
     try:
         proc = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            cwd=str(upload_dir),
+            cwd=tempfile.gettempdir(),
+            env=sub_env,
         )
         try:
             stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=180.0)
@@ -2579,8 +2582,15 @@ async def create_ticket_draft(
         raise HTTPException(503, detail="claude CLI not found")
 
     if proc.returncode != 0:
-        err = stderr.decode("utf-8", errors="replace").strip()
-        raise HTTPException(502, detail=f"BA agent failed: {err[:300]}")
+        err = stderr.decode("utf-8", errors="replace").strip()[:300]
+        out = stdout.decode("utf-8", errors="replace").strip()[:300]
+        if not err and not out:
+            detail = f"exit code {proc.returncode} with no output"
+        elif not err:
+            detail = f"exit code {proc.returncode}, stdout: {out}"
+        else:
+            detail = err
+        raise HTTPException(502, detail=f"BA agent failed: {detail}")
 
     output = stdout.decode("utf-8", errors="replace").strip()
     title, body = _parse_ba_draft(output)
@@ -2850,11 +2860,14 @@ async def _run_single_ba_ticket(
         "-p", prompt_text,
     ]
 
+    sub_env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
     try:
         proc = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            cwd=tempfile.gettempdir(),
+            env=sub_env,
         )
         try:
             stdout, stderr = await asyncio.wait_for(
@@ -2878,8 +2891,15 @@ async def _run_single_ba_ticket(
 
     if proc.returncode != 0:
         err = stderr.decode("utf-8", errors="replace").strip()[:300]
+        out = stdout.decode("utf-8", errors="replace").strip()[:300]
+        if not err and not out:
+            detail = f"exit code {proc.returncode} with no output"
+        elif not err:
+            detail = f"exit code {proc.returncode}, stdout: {out}"
+        else:
+            detail = err
         ticket["state"] = "failed"
-        ticket["error"] = f"BA agent failed: {err}"
+        ticket["error"] = f"BA agent failed: {detail}"
         ticket["finished_at"] = datetime.now(timezone.utc).isoformat()
         _persist_bulk_job(job)
         await _broadcast_bulk_event(job_id, {"type": "ticket_update", "ticket": dict(ticket)})

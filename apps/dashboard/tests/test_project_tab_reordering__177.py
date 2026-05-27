@@ -25,8 +25,8 @@ def test_project_tab_reordering__sprint_mgmt_first_and_active(client):
     AC: Sprint Mgmt is the first project tab — it appears as the leftmost tab in
     <nav class="proj-tabs"> and carries the active class on initial project load.
     """
-    # Navigate to the overview (which will have projects listed)
-    r = client.get("/")
+    # Navigate to a project page (which loads the SPA with project tabs)
+    r = client.get("/projects/test%2Frepo")
     assert r.status_code == 200
     html = r.text
 
@@ -52,7 +52,7 @@ def test_project_tab_reordering__tickets_tab_hidden(client):
     (e.g. display:none or hidden attribute); its view panel #pview-tickets
     (or equivalent) is also not rendered/visible.
     """
-    r = client.get("/")
+    r = client.get("/projects/test%2Frepo")
     assert r.status_code == 200
     html = r.text
 
@@ -85,7 +85,7 @@ def test_project_tab_reordering__sprint_history_tab_present(client):
     AC: Sprint history tab is unchanged — still present and functional as the
     second visible tab.
     """
-    r = client.get("/")
+    r = client.get("/projects/test%2Frepo")
     assert r.status_code == 200
     html = r.text
 

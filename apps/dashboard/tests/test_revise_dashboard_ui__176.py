@@ -66,8 +66,8 @@ def test_revise_dashboard_ui__ac2_log_entry_format(client):
 def test_revise_dashboard_ui__ac3_auto_scroll_scroll_lock(client):
     """AC-3: Panel auto-scrolls; manual scroll pauses it; 'Jump to latest' button re-enables it."""
     # This is a browser interaction test; HTTP API cannot directly test auto-scroll behavior
-    # Check that the dashboard HTML contains scroll-related JavaScript or data attributes
-    r = client.get("/")
+    # Check that the SPA HTML contains scroll-related JavaScript or data attributes
+    r = client.get("/projects/test%2Frepo")
     assert r.status_code == 200
     # Look for script or data attribute indicating scroll-lock logic
     assert "scroll" in r.text.lower() or "latest" in r.text.lower(), \
@@ -240,8 +240,8 @@ def test_revise_dashboard_ui__uat_step_7_project_filter(client):
 
 def test_revise_dashboard_ui__uat_step_8_agent_role_filter(client):
     """UAT Step 8: Use agent role filter to select 'Coder'; only Coder entries shown."""
-    # Check that the API or HTML supports role filtering
-    r = client.get("/")
+    # Check that the SPA HTML supports role filtering
+    r = client.get("/projects/test%2Frepo")
     assert r.status_code == 200
     # Role filter controls should be present
     assert any(role in r.text.lower() for role in ["coder", "ba", "tester"])

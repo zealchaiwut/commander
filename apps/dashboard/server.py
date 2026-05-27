@@ -259,12 +259,22 @@ async def broadcast(data: dict):
 
 @app.get("/")
 async def root():
-    return FileResponse(STATIC_DIR / "index.html")
+    return FileResponse(STATIC_DIR / "home-preview.html")
+
+
+@app.get("/home")
+async def home_redirect():
+    return RedirectResponse(url="/", status_code=301)
 
 
 @app.get("/home-preview")
-async def home_preview():
-    return FileResponse(STATIC_DIR / "home-preview.html")
+async def home_preview_redirect():
+    return RedirectResponse(url="/", status_code=301)
+
+
+@app.get("/overview")
+async def overview_redirect():
+    return RedirectResponse(url="/", status_code=301)
 
 
 @app.get("/projects/{path:path}")

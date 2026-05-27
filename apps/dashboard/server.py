@@ -2036,7 +2036,8 @@ async def delete_empty_sprints(body: SprintDeleteBody):
     return result
 
 
-_RERUN_STRIP_LABELS = {"UAT", "UAT-approved", "released", "SIT", "in-progress", "need-rework"}
+_RERUN_STRIP_LABELS = {"released", "SIT", "in-progress", "need-rework"}
+_RERUN_SKIP_LABELS = {"UAT", "UAT-approved"}
 
 
 @app.get("/api/sprints/{sprint_label}/estimate")
@@ -2114,6 +2115,9 @@ def rerun_sprint(sprint_label: str, project: str, body: SprintRerunBody):
 
     for iss in sprint_issues:
         current_labels = {lbl["name"] for lbl in iss.get("labels", [])}
+        if current_labels & _RERUN_SKIP_LABELS:
+            log_lines.append(f"#{iss['number']} {iss['title']}: skipped (UAT/UAT-approved)")
+            continue
         to_remove = list(current_labels & _RERUN_STRIP_LABELS)
         if not to_remove:
             continue

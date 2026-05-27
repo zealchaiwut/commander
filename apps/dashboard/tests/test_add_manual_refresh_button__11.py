@@ -202,16 +202,16 @@ class TestLiveServer:
         assert r.status_code == 200
 
     def test_dashboard_page_contains_refresh_button(self, client):
-        """AC-1 — Served HTML must include the refresh button element."""
-        r = client.get("/")
+        """AC-1 — Served SPA HTML must include the refresh button element."""
+        r = client.get("/projects/test%2Frepo")
         assert r.status_code == 200
         assert 'btn-refresh' in r.text, (
             "Served dashboard HTML should contain btn-refresh element"
         )
 
     def test_dashboard_page_contains_toast_container(self, client):
-        """AC-5 — Served HTML must include the toast container."""
-        r = client.get("/")
+        """AC-5 — Served SPA HTML must include the toast container."""
+        r = client.get("/projects/test%2Frepo")
         assert r.status_code == 200
         assert 'toast-error' in r.text, (
             "Served dashboard HTML should contain toast-error container"

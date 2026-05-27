@@ -292,22 +292,22 @@ class TestLiveAPIActiveTickets:
         )
 
     def test_html_shows_active_tickets_label(self, client):
-        """GET / must return HTML with 'Active Tickets' label."""
-        resp = client.get("/")
+        """GET /projects/ must return SPA HTML with 'Active Tickets' label."""
+        resp = client.get("/projects/test%2Frepo")
         assert resp.status_code == 200
         assert "Active Tickets" in resp.text, (
-            "Homepage HTML must contain 'Active Tickets' label"
+            "SPA HTML must contain 'Active Tickets' label"
         )
         assert "Open Tickets" not in resp.text, (
-            "Homepage HTML must not contain old 'Open Tickets' label"
+            "SPA HTML must not contain old 'Open Tickets' label"
         )
 
     def test_html_has_36px_font_rule(self, client):
-        """GET / must include CSS with 36px for Active Tickets card."""
-        resp = client.get("/")
+        """GET /projects/ must include CSS with 36px for Active Tickets card."""
+        resp = client.get("/projects/test%2Frepo")
         assert resp.status_code == 200
         assert "36px" in resp.text, (
-            "Homepage HTML/CSS must contain 36px font-size rule for Active Tickets"
+            "SPA HTML/CSS must contain 36px font-size rule for Active Tickets"
         )
 
     def test_api_project_details_has_url_and_status(self, client):

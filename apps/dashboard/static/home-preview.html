@@ -80,6 +80,7 @@
       flex-shrink: 0;
       color: var(--surface);
       font-size: 15px;
+      text-decoration: none;
     }
 
     .live-dot {
@@ -626,9 +627,9 @@
 <!-- ── Header ── -->
 <header class="header">
   <div class="header-left">
-    <div class="brand-mark" aria-hidden="true">
-      <i class="ti ti-bolt"></i>
-    </div>
+    <a href="/" class="brand-mark" aria-label="Commander Home">
+      <i class="ti ti-bolt" aria-hidden="true"></i>
+    </a>
     <span class="header-wordmark">Commander</span>
     <div class="live-dot" id="live-dot" aria-label="Live"></div>
   </div>

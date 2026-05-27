@@ -574,9 +574,9 @@ def test_api_endpoint_returns_json(client):
 # ── AC: dashboard UI — Deploy to Production button and modal ─────────────────
 
 def test_dashboard_has_deploy_button(client):
-    """AC: Dashboard 'Deploy to Production' button present in HTML"""
+    """AC: Dashboard SPA 'Deploy to Production' button present in HTML"""
     try:
-        r = client.get("/")
+        r = client.get("/projects/test%2Frepo")
         assert r.status_code == 200, f"Dashboard returned {r.status_code}"
         html = r.text
         assert "Deploy to Production" in html, "Missing 'Deploy to Production' button text"
@@ -585,9 +585,9 @@ def test_dashboard_has_deploy_button(client):
 
 
 def test_dashboard_has_confirmation_modal(client):
-    """AC: Dashboard confirmation modal present in HTML"""
+    """AC: Dashboard SPA confirmation modal present in HTML"""
     try:
-        r = client.get("/")
+        r = client.get("/projects/test%2Frepo")
         assert r.status_code == 200
         html = r.text
         # Modal should have confirm action
@@ -598,9 +598,9 @@ def test_dashboard_has_confirmation_modal(client):
 
 
 def test_dashboard_has_deploy_toast(client):
-    """AC: Dashboard has toast element for showing PR URL after deploy"""
+    """AC: Dashboard SPA has toast element for showing PR URL after deploy"""
     try:
-        r = client.get("/")
+        r = client.get("/projects/test%2Frepo")
         assert r.status_code == 200
         html = r.text
         assert "toast-deploy" in html or "View PR" in html, \

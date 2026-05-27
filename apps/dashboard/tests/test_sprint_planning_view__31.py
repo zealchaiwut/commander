@@ -25,8 +25,8 @@ def test_sprint_planning_view__plan_sprint_tab_and_header(client):
     """AC-1: A 'Plan sprint' tab is added to the main nav bar and activates the plan-sprint view.
     The header reads 'Plan sprint N' where N = max(existing sprint label numbers) + 1,
     derived from GET /api/sprints."""
-    # Fetch the main page to verify the tab exists
-    r = client.get("/")
+    # Fetch the SPA page to verify the tab exists
+    r = client.get("/projects/test%2Frepo")
     assert r.status_code == 200
     html = r.text
     # Verify Plan sprint tab is in nav
@@ -45,8 +45,8 @@ def test_sprint_planning_view__plan_sprint_tab_and_header(client):
 def test_sprint_planning_view__sprint_goal_input_required(client):
     """AC-2: A single-line sprint goal input with a red 'Required' badge is rendered.
     The 'Start sprint N' button remains disabled while the field is empty or whitespace-only."""
-    # Fetch the main page to verify goal input and Start button exist
-    r = client.get("/")
+    # Fetch the SPA page to verify goal input and Start button exist
+    r = client.get("/projects/test%2Frepo")
     assert r.status_code == 200
     html = r.text
     # Check for sprint goal input and start button elements

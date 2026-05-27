@@ -70,9 +70,11 @@ def _try(*cmd: str, cwd: Path | None = None) -> tuple[bool, str]:
 def check_preconditions() -> None:
     """Run all pre-condition checks. Exit on failure."""
 
-    # 1. No uncommitted changes (staged or unstaged, ignoring untracked and .pyc files)
+    # 1. No uncommitted changes to tracked files (staged or unstaged, excluding .pyc)
+    # Uses git diff HEAD to catch staged + unstaged modifications on tracked files.
+    # Untracked files are intentionally excluded (they don't block a PR creation).
     changed = _run(
-        "git", "diff", "HEAD", "--name-only", "--", ":(exclude)*.pyc", check=False
+        "git", "status", "--porcelain", "--untracked-files=no", check=False
     )
     if changed:
         print("Uncommitted changes detected; commit or stash first.", file=sys.stderr)
@@ -350,9 +352,9 @@ def main() -> None:
     if not args.dry_run:
         check_preconditions()
     else:
-        # For dry-run, still check git state but skip the gh API call
+        # For dry-run, still check git state but skip the gh API calls
         changed = _run(
-            "git", "diff", "HEAD", "--name-only", "--", ":(exclude)*.pyc", check=False
+            "git", "status", "--porcelain", "--untracked-files=no", check=False
         )
         if changed:
             print("Uncommitted changes detected; commit or stash first.", file=sys.stderr)

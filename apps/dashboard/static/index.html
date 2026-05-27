@@ -1365,6 +1365,26 @@
   </div>
 </div>
 
+<!-- New sprint modal -->
+<div class="modal-backdrop hidden" id="smgmt-new-sprint-backdrop" onclick="smgmtNewSprintClose()"></div>
+<div class="modal hidden" id="smgmt-new-sprint-modal" role="dialog" aria-modal="true">
+  <div class="modal-header">
+    <span class="modal-title">New Sprint</span>
+    <button class="modal-close" onclick="smgmtNewSprintClose()" aria-label="Close">&times;</button>
+  </div>
+  <div style="padding: 1rem 1.5rem;">
+    <label for="smgmt-new-sprint-input" style="display:block;margin-bottom:.5rem;font-size:.875rem;color:var(--text-secondary)">Sprint number</label>
+    <input type="number" id="smgmt-new-sprint-input" min="1" step="1"
+           style="width:100%;padding:.5rem .75rem;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text-primary);font-size:1rem;"
+           onkeydown="if(event.key==='Enter')smgmtNewSprintConfirm();if(event.key==='Escape')smgmtNewSprintClose();" />
+    <div id="smgmt-new-sprint-error" style="margin-top:.5rem;font-size:.8125rem;color:var(--danger,#e53e3e);min-height:1.2em;"></div>
+  </div>
+  <div class="modal-footer">
+    <button class="btn-ghost" onclick="smgmtNewSprintClose()">Cancel</button>
+    <button class="btn-primary" id="smgmt-new-sprint-confirm" onclick="smgmtNewSprintConfirm()">Create</button>
+  </div>
+</div>
+
 <!-- Clean up empty sprints confirmation modal -->
 <div class="modal-backdrop hidden" id="smgmt-cleanup-backdrop" onclick="smgmtCleanupClose()"></div>
 <div class="modal hidden" id="smgmt-cleanup-modal" role="dialog" aria-modal="true">

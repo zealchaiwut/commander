@@ -2150,7 +2150,14 @@
     </div>
     <div class="modal-field">
       <label class="modal-label" for="dt-sprint">Sprint label</label>
-      <input class="modal-input" id="dt-sprint" type="text" placeholder="sprint-7" autocomplete="off">
+      <select class="modal-input" id="dt-sprint" onchange="_dtSprintOnChange(this)">
+        <option value="">— no sprint —</option>
+        <option value="__new__">+ Add new sprint…</option>
+      </select>
+      <div class="hidden dt-sprint-new-wrap" id="dt-sprint-new-wrap">
+        <input class="modal-input" id="dt-sprint-new-input" type="text" placeholder="sprint-9" autocomplete="off">
+        <a href="#" class="dt-sprint-cancel" onclick="_dtSprintCancel(event)">Cancel</a>
+      </div>
     </div>
     <div class="modal-field">
       <label class="modal-label" for="dt-description">Description <span class="modal-required">*</span></label>
@@ -2234,6 +2241,12 @@
     border-radius: 50%; animation: dt-spin .6s linear infinite; vertical-align: middle;
   }
   @keyframes dt-spin { to { transform: rotate(360deg); } }
+
+  /* ── Sprint dropdown new-sprint row ── */
+  .dt-sprint-new-wrap { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
+  .dt-sprint-new-wrap .modal-input { flex: 1; }
+  .dt-sprint-cancel { font-size: 12px; color: var(--text-muted); text-decoration: none; white-space: nowrap; }
+  .dt-sprint-cancel:hover { color: var(--text); text-decoration: underline; }
 
   /* ── Secondary button ── */
   .btn-secondary {

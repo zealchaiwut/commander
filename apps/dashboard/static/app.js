@@ -4065,7 +4065,8 @@ function openDraftTicketModal() {
   document.getElementById('dt-backdrop').classList.remove('hidden');
   document.getElementById('dt-modal').classList.remove('hidden');
   document.getElementById('dt-description').value = '';
-  document.getElementById('dt-sprint').value = '';
+  _dtResetSprintField();
+  _dtLoadSprintOptions();
   document.getElementById('dt-error').classList.add('hidden');
   document.getElementById('dt-draft-section').classList.add('hidden');
   document.getElementById('dt-previews').innerHTML = '';
@@ -4088,6 +4089,64 @@ function openDraftTicketModal() {
 function closeDraftTicketModal() {
   document.getElementById('dt-backdrop').classList.add('hidden');
   document.getElementById('dt-modal').classList.add('hidden');
+}
+
+function _dtResetSprintField() {
+  const sel = document.getElementById('dt-sprint');
+  const newWrap = document.getElementById('dt-sprint-new-wrap');
+  sel.classList.remove('hidden');
+  newWrap.classList.add('hidden');
+  document.getElementById('dt-sprint-new-input').value = '';
+  sel.innerHTML = '<option value="">— no sprint —</option><option value="__new__">+ Add new sprint…</option>';
+  sel.value = '';
+}
+
+async function _dtLoadSprintOptions() {
+  try {
+    const res = await fetch('/api/sprints');
+    const data = res.ok ? await res.json() : {};
+    const sprints = data.sprints || [];
+    const sorted = [...sprints].sort((a, b) => b - a);
+    const sel = document.getElementById('dt-sprint');
+    if (!sel || !document.getElementById('dt-modal') || document.getElementById('dt-modal').classList.contains('hidden')) return;
+    sel.innerHTML =
+      '<option value="">— no sprint —</option>' +
+      sorted.map(n => `<option value="sprint-${n}">sprint-${n}</option>`).join('') +
+      '<option value="__new__">+ Add new sprint…</option>';
+    sel.value = '';
+  } catch (_) {
+    // Graceful degradation: _dtResetSprintField already placed blank + sentinel
+  }
+}
+
+function _dtSprintOnChange(selectEl) {
+  if (selectEl.value === '__new__') _dtSprintAddNew();
+}
+
+function _dtSprintAddNew() {
+  document.getElementById('dt-sprint').classList.add('hidden');
+  document.getElementById('dt-sprint-new-wrap').classList.remove('hidden');
+  const inp = document.getElementById('dt-sprint-new-input');
+  inp.value = '';
+  inp.focus();
+}
+
+function _dtSprintCancel(e) {
+  e.preventDefault();
+  document.getElementById('dt-sprint-new-wrap').classList.add('hidden');
+  const sel = document.getElementById('dt-sprint');
+  sel.classList.remove('hidden');
+  sel.value = '';
+  document.getElementById('dt-sprint-new-input').value = '';
+}
+
+function _dtGetSprintValue() {
+  const newWrap = document.getElementById('dt-sprint-new-wrap');
+  if (newWrap && !newWrap.classList.contains('hidden')) {
+    return document.getElementById('dt-sprint-new-input').value.trim();
+  }
+  const val = document.getElementById('dt-sprint').value;
+  return val === '__new__' ? '' : val;
 }
 
 function _dtPickFiles() {
@@ -4153,7 +4212,7 @@ async function generateDraft(event) {
   const formData = new FormData();
   formData.append('description', desc);
   formData.append('project', document.getElementById('dt-project').value || '');
-  formData.append('sprint_label', document.getElementById('dt-sprint').value.trim());
+  formData.append('sprint_label', _dtGetSprintValue());
   for (const f of _dtFiles) {
     formData.append('files', f);
   }
@@ -4199,7 +4258,7 @@ async function postDraftToGitHub() {
         title,
         body: document.getElementById('dt-body').value,
         project: document.getElementById('dt-project').value || '',
-        sprint_label: document.getElementById('dt-sprint').value.trim(),
+        sprint_label: _dtGetSprintValue(),
       }),
     });
     if (!res.ok) {

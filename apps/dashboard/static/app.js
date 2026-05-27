@@ -2689,6 +2689,12 @@ async function smgmtInitForProject(repo) {
   smgmtPollRunStatus();
 }
 
+// ── Partial refresh (issue #179) ─────────────────────────────────────────────
+async function smgmtRefreshBoard() {
+  if (!_smgmtCurrentRepo) return;
+  await smgmtSelectProject(_smgmtCurrentRepo);
+}
+
 async function smgmtSelectProject(repo) {
   if (!repo) return;
   _smgmtCurrentRepo = repo;
@@ -3183,7 +3189,7 @@ async function smgmtDropOnPlaceholder(event, placeholderN) {
       body: JSON.stringify({ issue: number, sprint: placeholderN }),
     });
     if (!res.ok) throw new Error(await res.text());
-    window.location.reload();
+    await smgmtRefreshBoard();
   } catch (e) {
     // Rollback optimistic update
     const iss2 = _smgmtData.issues.find(i => i.number === number);
@@ -3237,7 +3243,7 @@ async function smgmtDropOnSprint(event, targetSprintLabel) {
         body: JSON.stringify({ issue: number, sprint: targetSprintNum }),
       });
       if (!res.ok) throw new Error(await res.text());
-      window.location.reload();
+      await smgmtRefreshBoard();
     } catch (e) {
       // Rollback: restore original sprint
       const iss2 = _smgmtData.issues.find(i => i.number === number);

@@ -1339,9 +1339,10 @@
         <h2 class="smgmt-title">Sprint Management</h2>
       </div>
       <div class="smgmt-header-actions">
+        <button class="btn-secondary" onclick="smgmtRefreshBoard()" title="Re-fetch sprint board data without reloading the page">Trigger Refresh</button>
         <button class="btn-secondary" onclick="openDraftTicketModal()">+ New Ticket</button>
         <button class="btn-primary smgmt-new-sprint-btn" id="smgmt-new-sprint-btn"
-                onclick="smgmtCreateSprint()" title="Create next sprint label on GitHub">+ New sprint</button>
+                onclick="smgmtCreateSprint()" title="Create next sprint label on GitHub">+ New Sprint</button>
       </div>
     </div>
     <div class="smgmt-error hidden" id="smgmt-error"></div>

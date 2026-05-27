@@ -329,6 +329,8 @@
     .tab-content { flex: 1; }
     .tab-pane { display: none; padding: 28px; }
     .tab-pane.active { display: block; }
+    /* Sprint Mgmt pane manages its own padding via toolbar + smgmt-content */
+    #pane-sprint-mgmt { padding: 0; }
 
     /* Placeholder text */
     .placeholder-msg {
@@ -398,6 +400,129 @@
     .loading-msg {
       color: var(--text-sub); font-size: 13px; padding: 48px 0; text-align: center;
     }
+
+    /* ── Sprint Mgmt toolbar ── */
+    .smgmt-toolbar {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 14px 28px;
+      background: var(--bg);
+      position: sticky;
+      top: var(--proj-header-height, 88px); /* placed after sub-tab strip */
+      z-index: 15;
+      box-shadow: none;
+      transition: box-shadow .15s;
+    }
+    .smgmt-toolbar.scrolled {
+      box-shadow: 0 2px 4px rgba(0,0,0,0.04);
+    }
+    .smgmt-toolbar-title {
+      font-size: 15px; font-weight: 700; color: var(--text); line-height: 1;
+    }
+    .smgmt-toolbar-actions {
+      display: flex; align-items: center; gap: 8px;
+    }
+
+    /* ── Sprint list area ── */
+    .smgmt-content {
+      padding: 0 28px 28px;
+    }
+    .smgmt-sprint-list {
+      display: flex; flex-direction: column; gap: 12px;
+      margin-top: 16px;
+    }
+    .smgmt-sprint-card {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--surface);
+      padding: 14px 18px;
+    }
+    .smgmt-sprint-header {
+      display: flex; align-items: center; gap: 8px;
+      font-size: 13px; font-weight: 600; color: var(--text);
+      margin-bottom: 4px;
+    }
+    .smgmt-sprint-count {
+      font-size: 11px; color: var(--text-sub); font-weight: 400;
+    }
+
+    /* ── Refresh button flash ── */
+    @keyframes btnFlash {
+      0%,100% { opacity: 1; }
+      40%      { opacity: .45; }
+    }
+    .btn-flash { animation: btnFlash .45s ease-in-out; }
+
+    /* ── Modal shared ── */
+    .modal-backdrop {
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,.35);
+      z-index: 100;
+    }
+    .modal-backdrop.hidden { display: none; }
+    .modal {
+      position: fixed;
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      background: var(--surface);
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      z-index: 101;
+      display: flex; flex-direction: column;
+      box-shadow: 0 8px 32px rgba(0,0,0,.12);
+    }
+    .modal.hidden { display: none; }
+    .modal-header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 18px 20px 14px;
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .modal-title { font-size: 15px; font-weight: 700; color: var(--text); }
+    .modal-close {
+      background: none; border: none; color: var(--text-muted);
+      font-size: 20px; line-height: 1; cursor: pointer; padding: 0 2px;
+      border-radius: 4px;
+    }
+    .modal-close:hover { color: var(--text); }
+    .modal-body { padding: 20px; overflow-y: auto; }
+    .modal-footer {
+      display: flex; align-items: center; justify-content: flex-end; gap: 8px;
+      padding: 14px 20px;
+      border-top: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .modal-field { margin-bottom: 16px; }
+    .modal-field:last-child { margin-bottom: 0; }
+    .modal-label {
+      display: block; font-size: 12px; font-weight: 600; color: var(--text);
+      margin-bottom: 6px;
+    }
+    .modal-hint {
+      font-size: 11px; color: var(--text-muted); margin: 4px 0 0; line-height: 1.5;
+    }
+    .modal-input {
+      width: 100%; padding: 8px 10px; border: 1px solid var(--border);
+      border-radius: 6px; background: var(--surface-2); color: var(--text);
+      font-size: 13px; font-family: inherit;
+      transition: border-color .15s;
+    }
+    .modal-input:focus { outline: none; border-color: var(--blue); }
+    .modal-input:disabled { opacity: .55; cursor: not-allowed; }
+    .modal-textarea { resize: vertical; min-height: 88px; }
+    .modal-error {
+      background: var(--red-bg); color: var(--red);
+      font-size: 12px; padding: 8px 12px; border-radius: 6px;
+      margin-top: 12px;
+    }
+    .modal-error.hidden { display: none; }
+
+    /* ── New Sprint modal ── */
+    .ns-modal { width: min(480px, calc(100vw - 32px)); }
+
+    /* ── New Ticket modal ── */
+    .nt-modal { width: min(500px, calc(100vw - 32px)); max-height: calc(100vh - 48px); overflow: hidden; }
+    .nt-modal .modal-body { overflow-y: auto; }
+    .nt-textarea { resize: vertical; min-height: 80px; font-family: inherit; }
   </style>
 </head>
 <body>
@@ -497,10 +622,39 @@
 
       <!-- Sprint Mgmt tab -->
       <div class="tab-pane active" id="pane-sprint-mgmt" role="tabpanel" aria-labelledby="stab-sprint-mgmt">
-        <div class="placeholder-msg" id="sprint-mgmt-placeholder">
-          <i class="ti ti-layout-kanban"></i>
-          Sprint Mgmt content lands in ticket #<span id="next-ticket-num">222</span>
+
+        <!-- Toolbar -->
+        <div class="smgmt-toolbar" id="smgmt-toolbar">
+          <span class="smgmt-toolbar-title">Sprint Management</span>
+          <div class="smgmt-toolbar-actions">
+            <button class="btn-ghost" id="smgmt-refresh-btn"
+                    onclick="smgmtTriggerRefresh()" title="Re-fetch sprints from GitHub"
+                    aria-label="Trigger Refresh">
+              <i class="ti ti-refresh"></i>
+              Trigger Refresh
+            </button>
+            <button class="btn-ghost" id="smgmt-new-ticket-btn"
+                    onclick="smgmtOpenNewTicket()" title="Create a new ticket"
+                    aria-label="New Ticket">
+              <i class="ti ti-plus"></i>
+              New Ticket
+            </button>
+            <button class="btn-primary" id="smgmt-new-sprint-btn"
+                    onclick="smgmtOpenNewSprint()" title="Create a new sprint"
+                    aria-label="New Sprint">
+              <i class="ti ti-plus"></i>
+              New Sprint
+            </button>
+          </div>
         </div>
+
+        <!-- Sprint list -->
+        <div class="smgmt-content">
+          <div id="smgmt-sprint-list" class="smgmt-sprint-list">
+            <div class="loading-msg" id="smgmt-loading">Loading sprints…</div>
+          </div>
+        </div>
+
       </div>
 
       <!-- Tickets tab -->
@@ -577,7 +731,8 @@ let _slug        = null;   // current project slug
 let _activeTab   = 'sprint-mgmt';
 let _homeData    = null;   // cached /api/home response
 let _projectData = null;   // full project config from /api/home
-let _ticketsLoaded = false;
+let _ticketsLoaded    = false;
+let _sprintMgmtLoaded = false;
 
 // ── Tab navigation ────────────────────────────────────────────────────────────
 function switchTab(tab, pushHistory) {
@@ -610,6 +765,12 @@ function switchTab(tab, pushHistory) {
   if (tab === 'tickets' && !_ticketsLoaded) {
     _ticketsLoaded = true;
     loadTickets();
+  }
+
+  // Lazy-load sprint mgmt (only if _cachedFullRepo is already populated)
+  if (tab === 'sprint-mgmt' && !_sprintMgmtLoaded && _cachedFullRepo[_slug]) {
+    _sprintMgmtLoaded = true;
+    loadSprintMgmt();
   }
 }
 
@@ -689,6 +850,8 @@ function updateProjectHeader(proj) {
   const iconEl = document.getElementById('proj-header-icon');
   const nameEl = document.getElementById('proj-header-name');
   const pillEl = document.getElementById('proj-header-pill');
+  // Recalculate toolbar sticky top after header content changes
+  requestAnimationFrame(_smgmtUpdateToolbarTop);
 
   const color = colorHex(proj.color || proj.icon_color || 'gray');
   const icon  = proj.icon || 'ti-folder';
@@ -844,7 +1007,7 @@ function renderTickets(data) {
     ${ticketsHtml}`;
 }
 
-// ── Placeholder stubs (open the correct modal when actual sprint-mgmt lands) ──
+// ── Header button handlers ─────────────────────────────────────────────────
 function openBulkCreate() {
   // Redirect to index.html sprint-mgmt for now
   if (_slug) {
@@ -855,11 +1018,8 @@ function openBulkCreate() {
 }
 
 function openNewTicket() {
-  if (_slug) {
-    const repo = _findFullRepo(_slug);
-    if (repo) window.location.href = '/projects/' + encodeURIComponent(repo) + '/sprint-mgmt';
-    else window.location.href = '/';
-  }
+  // Open the New Ticket modal (same as the toolbar button)
+  smgmtOpenNewTicket();
 }
 
 function _findFullRepo(slug) {
@@ -906,6 +1066,12 @@ async function init() {
   // Activate the correct tab without pushing history (already set above)
   switchTab(tab, false);
 
+  // Wire up modal event listeners (DOM is ready at DOMContentLoaded)
+  _setupModals();
+
+  // Set up sticky toolbar shadow
+  _smgmtInitScrollShadow();
+
   // Load data in parallel
   await Promise.all([
     loadHomeData(false),
@@ -914,10 +1080,346 @@ async function init() {
 
   // Start 30s sidebar refresh
   startSidebarRefresh();
+
+  // Update toolbar sticky top based on actual header height
+  _smgmtUpdateToolbarTop();
+
+  // Load sprint-mgmt data if on that tab
+  if (_activeTab === 'sprint-mgmt') {
+    _sprintMgmtLoaded = true;
+    await loadSprintMgmt();
+  }
+}
+
+// ── Sprint Mgmt toolbar height calculation ─────────────────────────────────
+// Compute top offset for the sticky toolbar (proj-header height)
+function _smgmtUpdateToolbarTop() {
+  const header = document.getElementById('proj-header');
+  const toolbar = document.getElementById('smgmt-toolbar');
+  if (header && toolbar) {
+    toolbar.style.top = header.offsetHeight + 'px';
+  }
+}
+
+// ── Sprint Mgmt scroll-shadow ─────────────────────────────────────────────
+function _smgmtInitScrollShadow() {
+  const mainArea = document.getElementById('main-area');
+  const toolbar  = document.getElementById('smgmt-toolbar');
+  if (!mainArea || !toolbar) return;
+
+  mainArea.addEventListener('scroll', function() {
+    toolbar.classList.toggle('scrolled', mainArea.scrollTop > 4);
+  }, { passive: true });
+}
+
+// ── Sprint Mgmt: load sprint list ─────────────────────────────────────────
+async function loadSprintMgmt() {
+  const listEl = document.getElementById('smgmt-sprint-list');
+  if (!listEl) return;
+
+  const repo = _cachedFullRepo[_slug] || null;
+  if (!repo) {
+    listEl.innerHTML = '<div class="loading-msg">Project not found.</div>';
+    return;
+  }
+
+  listEl.innerHTML = '<div class="loading-msg">Loading sprints…</div>';
+
+  try {
+    const resp = await fetch('/api/sprint-management/issues?repo=' + encodeURIComponent(repo));
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const data = await resp.json();
+    _smgmtRender(data);
+  } catch (err) {
+    listEl.innerHTML = '<div class="loading-msg">Failed to load sprints.</div>';
+  }
+}
+
+function _smgmtRender(data) {
+  const listEl = document.getElementById('smgmt-sprint-list');
+  if (!listEl) return;
+
+  const sprints = data.sprints || [];
+  const order   = data.order   || [];
+  const issues  = data.issues  || [];
+
+  if (sprints.length === 0) {
+    listEl.innerHTML = '<div class="loading-msg">No sprints yet. Create one with + New Sprint.</div>';
+    return;
+  }
+
+  // Group issues by sprint number
+  const bySprint = {};
+  issues.forEach(iss => {
+    if (iss.sprint != null) {
+      if (!bySprint[iss.sprint]) bySprint[iss.sprint] = [];
+      bySprint[iss.sprint].push(iss);
+    }
+  });
+
+  // Use order list if available, else ascending
+  const orderedNums = order.length > 0
+    ? order.map(l => parseInt(l.replace('sprint-', ''), 10)).filter(n => !isNaN(n))
+    : [...sprints].sort((a, b) => a - b);
+
+  const cards = orderedNums.map(n => {
+    const issuesInSprint = bySprint[n] || [];
+    const count = issuesInSprint.length;
+    return `
+      <div class="smgmt-sprint-card">
+        <div class="smgmt-sprint-header">
+          <i class="ti ti-layout-kanban" style="font-size:14px;color:var(--text-muted)"></i>
+          Sprint ${escHtml(String(n))}
+          <span class="smgmt-sprint-count">&middot; ${count} ticket${count !== 1 ? 's' : ''}</span>
+        </div>
+      </div>`;
+  }).join('');
+
+  listEl.innerHTML = cards || '<div class="loading-msg">No sprints with tickets.</div>';
+}
+
+// ── Trigger Refresh ───────────────────────────────────────────────────────
+async function smgmtTriggerRefresh() {
+  const btn = document.getElementById('smgmt-refresh-btn');
+  if (btn) {
+    btn.classList.remove('btn-flash');
+    void btn.offsetWidth; // force reflow to restart animation
+    btn.classList.add('btn-flash');
+    btn.addEventListener('animationend', () => btn.classList.remove('btn-flash'), { once: true });
+  }
+  await loadSprintMgmt();
+}
+
+// ── New Sprint modal ──────────────────────────────────────────────────────
+function smgmtOpenNewSprint() {
+  document.getElementById('ns-goal').value = '';
+  document.getElementById('ns-error').classList.add('hidden');
+  document.getElementById('ns-submit-btn').disabled = true;
+  document.getElementById('ns-backdrop').classList.remove('hidden');
+  document.getElementById('ns-modal').classList.remove('hidden');
+  document.getElementById('ns-goal').focus();
+}
+
+function _nsClose(force) {
+  const goal = (document.getElementById('ns-goal').value || '').trim();
+  if (!force && goal.length > 0) {
+    if (!confirm('Discard unsaved sprint goal?')) return;
+  }
+  document.getElementById('ns-backdrop').classList.add('hidden');
+  document.getElementById('ns-modal').classList.add('hidden');
+}
+
+function _nsShowError(msg) {
+  const el = document.getElementById('ns-error');
+  el.textContent = msg;
+  el.classList.remove('hidden');
+}
+
+// ── New Ticket modal ──────────────────────────────────────────────────────
+async function smgmtOpenNewTicket() {
+  const sel = document.getElementById('nt-project');
+  sel.innerHTML = '<option value="">Loading projects…</option>';
+  sel.disabled = true;
+
+  document.getElementById('nt-description').value = '';
+  document.getElementById('nt-error').classList.add('hidden');
+  document.getElementById('nt-submit-btn').disabled = false;
+  document.getElementById('nt-submit-btn').textContent = 'Generate Draft';
+  document.getElementById('nt-backdrop').classList.remove('hidden');
+  document.getElementById('nt-modal').classList.remove('hidden');
+
+  try {
+    const r = await fetch('/api/projects');
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const d = await r.json();
+    const projects = d.projects || [];
+    const currentRepo = _cachedFullRepo[_slug] || null;
+    sel.innerHTML = projects.map(p =>
+      `<option value="${escHtml(p.repo)}"${p.repo === currentRepo ? ' selected' : ''}>${escHtml(p.name || p.repo)}</option>`
+    ).join('');
+    sel.disabled = false;
+  } catch (e) {
+    sel.innerHTML = '<option value="">Could not load projects</option>';
+    sel.disabled = false;
+  }
+
+  document.getElementById('nt-description').focus();
+}
+
+function _ntClose() {
+  document.getElementById('nt-backdrop').classList.add('hidden');
+  document.getElementById('nt-modal').classList.add('hidden');
+}
+
+// ── Modal event-binding (called once from init after DOM is ready) ─────────
+function _setupModals() {
+  // Global Escape handler
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') {
+      if (!document.getElementById('ns-modal').classList.contains('hidden')) {
+        _nsClose(false);
+      } else if (!document.getElementById('nt-modal').classList.contains('hidden')) {
+        _ntClose();
+      }
+    }
+  });
+
+  // ── New Sprint modal wiring ──
+  document.getElementById('ns-goal').addEventListener('input', function() {
+    document.getElementById('ns-submit-btn').disabled = this.value.trim().length < 10;
+  });
+
+  document.getElementById('ns-close-btn').addEventListener('click', () => _nsClose(false));
+  document.getElementById('ns-cancel-btn').addEventListener('click', () => _nsClose(false));
+  document.getElementById('ns-backdrop').addEventListener('click', () => _nsClose(false));
+
+  document.getElementById('ns-modal').addEventListener('keydown', function(e) {
+    if (e.key !== 'Tab') return;
+    const focusable = Array.from(this.querySelectorAll(
+      'button:not([disabled]), textarea, input, [tabindex]:not([tabindex="-1"])'
+    ));
+    if (!focusable.length) return;
+    const first = focusable[0], last = focusable[focusable.length - 1];
+    if (e.shiftKey) { if (document.activeElement === first) { e.preventDefault(); last.focus(); } }
+    else            { if (document.activeElement === last)  { e.preventDefault(); first.focus(); } }
+  });
+
+  document.getElementById('ns-submit-btn').addEventListener('click', async function() {
+    const goal = (document.getElementById('ns-goal').value || '').trim();
+    if (goal.length < 10) return;
+
+    const repo = _cachedFullRepo[_slug] || null;
+    if (!repo) { _nsShowError('Project not found — please reload the page.'); return; }
+
+    this.disabled = true;
+    this.textContent = 'Creating…';
+    document.getElementById('ns-error').classList.add('hidden');
+
+    try {
+      const resp = await fetch('/api/sprints/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ project: repo, goal }),
+      });
+      if (!resp.ok) {
+        const data = await resp.json().catch(() => ({}));
+        throw new Error(data.detail || 'HTTP ' + resp.status);
+      }
+      document.getElementById('ns-backdrop').classList.add('hidden');
+      document.getElementById('ns-modal').classList.add('hidden');
+      await loadSprintMgmt();
+    } catch (err) {
+      _nsShowError("Couldn't create sprint — " + err.message);
+      this.disabled = false;
+      this.textContent = 'Create Sprint';
+    }
+  });
+
+  // ── New Ticket modal wiring ──
+  document.getElementById('nt-close-btn').addEventListener('click', _ntClose);
+  document.getElementById('nt-cancel-btn').addEventListener('click', _ntClose);
+  document.getElementById('nt-backdrop').addEventListener('click', _ntClose);
+
+  document.getElementById('nt-modal').addEventListener('keydown', function(e) {
+    if (e.key !== 'Tab') return;
+    const focusable = Array.from(this.querySelectorAll(
+      'button:not([disabled]), select, textarea, input, [tabindex]:not([tabindex="-1"])'
+    ));
+    if (!focusable.length) return;
+    const first = focusable[0], last = focusable[focusable.length - 1];
+    if (e.shiftKey) { if (document.activeElement === first) { e.preventDefault(); last.focus(); } }
+    else            { if (document.activeElement === last)  { e.preventDefault(); first.focus(); } }
+  });
+
+  document.getElementById('nt-submit-btn').addEventListener('click', async function() {
+    const repo = document.getElementById('nt-project').value;
+    const description = (document.getElementById('nt-description').value || '').trim();
+    if (!repo || !description) {
+      document.getElementById('nt-error').textContent = 'Project and description are required.';
+      document.getElementById('nt-error').classList.remove('hidden');
+      return;
+    }
+
+    this.disabled = true;
+    this.textContent = 'Submitting…';
+    document.getElementById('nt-error').classList.add('hidden');
+
+    try {
+      const formData = new FormData();
+      formData.append('description', description);
+      formData.append('project', repo);
+      const resp = await fetch('/api/tickets/draft', { method: 'POST', body: formData });
+      if (!resp.ok) {
+        const data = await resp.json().catch(() => ({}));
+        throw new Error(data.detail || 'HTTP ' + resp.status);
+      }
+      // Draft generated — navigate to the project on main index to finish posting
+      _ntClose();
+      window.location.href = '/projects/' + encodeURIComponent(repo) + '/sprint-mgmt';
+    } catch (err) {
+      document.getElementById('nt-error').textContent = "Couldn't create ticket — " + err.message;
+      document.getElementById('nt-error').classList.remove('hidden');
+      this.disabled = false;
+      this.textContent = 'Generate Draft';
+    }
+  });
 }
 
 document.addEventListener('DOMContentLoaded', init);
 </script>
+
+<!-- ── New Sprint modal ── -->
+<div class="modal-backdrop hidden" id="ns-backdrop"></div>
+<div class="modal ns-modal hidden" id="ns-modal"
+     role="dialog" aria-modal="true" aria-labelledby="ns-modal-title">
+  <div class="modal-header">
+    <span class="modal-title" id="ns-modal-title">New Sprint</span>
+    <button class="modal-close" id="ns-close-btn" aria-label="Close">&times;</button>
+  </div>
+  <div class="modal-body">
+    <div class="modal-field">
+      <label class="modal-label" for="ns-goal">Sprint goal <span style="color:var(--red)">*</span></label>
+      <textarea class="modal-input modal-textarea" id="ns-goal"
+                rows="4"
+                placeholder="What should this sprint achieve? — e.g. Dashboard UX cleanup"
+                aria-required="true"></textarea>
+      <p class="modal-hint">The goal becomes the sprint label's description and the BA passes it to the coder/tester</p>
+    </div>
+    <div class="modal-error hidden" id="ns-error"></div>
+  </div>
+  <div class="modal-footer">
+    <button class="btn-ghost" id="ns-cancel-btn" type="button">Cancel</button>
+    <button class="btn-primary" id="ns-submit-btn" type="button" disabled>Create Sprint</button>
+  </div>
+</div>
+
+<!-- ── New Ticket modal ── -->
+<div class="modal-backdrop hidden" id="nt-backdrop"></div>
+<div class="modal nt-modal hidden" id="nt-modal"
+     role="dialog" aria-modal="true" aria-labelledby="nt-modal-title">
+  <div class="modal-header">
+    <span class="modal-title" id="nt-modal-title">New Ticket</span>
+    <button class="modal-close" id="nt-close-btn" aria-label="Close">&times;</button>
+  </div>
+  <div class="modal-body">
+    <div class="modal-field">
+      <label class="modal-label" for="nt-project">Project <span style="color:var(--red)">*</span></label>
+      <select class="modal-input" id="nt-project" aria-required="true"></select>
+    </div>
+    <div class="modal-field">
+      <label class="modal-label" for="nt-description">Description <span style="color:var(--red)">*</span></label>
+      <textarea class="modal-input nt-textarea" id="nt-description"
+                rows="4"
+                placeholder="Describe the feature or bug you want to file…"
+                aria-required="true"></textarea>
+    </div>
+    <div class="modal-error hidden" id="nt-error"></div>
+  </div>
+  <div class="modal-footer">
+    <button class="btn-ghost" id="nt-cancel-btn" type="button">Cancel</button>
+    <button class="btn-primary" id="nt-submit-btn" type="button">Generate Draft</button>
+  </div>
+</div>
 
 </body>
 </html>

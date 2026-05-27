@@ -526,29 +526,56 @@ class IssueState:
     category:    Optional[str]   = None         # FailureCategory value
     tokens_in:   int             = 0
     tokens_out:  int             = 0
+    # Per-ticket agent lifecycle fields (issue #131)
+    agent_status:         Optional[str] = None  # queued | coder_dispatched | coder_running | coder_done | tester_dispatched | tester_running | tester_done | completed | failed
+    status_changed_at:    Optional[str] = None  # ISO 8601 UTC
+    coder_started_at:     Optional[str] = None
+    coder_finished_at:    Optional[str] = None
+    tester_started_at:    Optional[str] = None
+    tester_finished_at:   Optional[str] = None
+    failure_reason:       Optional[str] = None
 
     def to_dict(self) -> dict:
         return {
-            "number":      self.number,
-            "title":       self.title,
-            "status":      self.status,
-            "skip_reason": self.skip_reason,
-            "category":    self.category,
-            "tokens_in":   self.tokens_in,
-            "tokens_out":  self.tokens_out,
+            "number":             self.number,
+            "title":              self.title,
+            "status":             self.status,
+            "skip_reason":        self.skip_reason,
+            "category":           self.category,
+            "tokens_in":          self.tokens_in,
+            "tokens_out":         self.tokens_out,
+            "agent_status":       self.agent_status,
+            "status_changed_at":  self.status_changed_at,
+            "coder_started_at":   self.coder_started_at,
+            "coder_finished_at":  self.coder_finished_at,
+            "tester_started_at":  self.tester_started_at,
+            "tester_finished_at": self.tester_finished_at,
+            "failure_reason":     self.failure_reason,
         }
 
     @staticmethod
     def from_dict(d: dict) -> "IssueState":
         return IssueState(
-            number      = d["number"],
-            title       = d["title"],
-            status      = d.get("status", "pending"),
-            skip_reason = d.get("skip_reason"),
-            category    = d.get("category"),
-            tokens_in   = d.get("tokens_in", 0),
-            tokens_out  = d.get("tokens_out", 0),
+            number             = d["number"],
+            title              = d["title"],
+            status             = d.get("status", "pending"),
+            skip_reason        = d.get("skip_reason"),
+            category           = d.get("category"),
+            tokens_in          = d.get("tokens_in", 0),
+            tokens_out         = d.get("tokens_out", 0),
+            agent_status       = d.get("agent_status"),
+            status_changed_at  = d.get("status_changed_at"),
+            coder_started_at   = d.get("coder_started_at"),
+            coder_finished_at  = d.get("coder_finished_at"),
+            tester_started_at  = d.get("tester_started_at"),
+            tester_finished_at = d.get("tester_finished_at"),
+            failure_reason     = d.get("failure_reason"),
         )
+
+    def set_agent_status(self, status: str) -> None:
+        """Set agent_status and record ISO 8601 UTC timestamp on status_changed_at."""
+        self.agent_status      = status
+        self.status_changed_at = _utcnow()
 
 
 @dataclass
@@ -1522,6 +1549,7 @@ def _dispatch_coder(
     cfg: Optional["SprintConfig"] = None,
     chosen_port: Optional[int] = None,
     rate_limit_events: Optional[list] = None,
+    on_running: Optional[object] = None,
 ) -> tuple[bool, Optional[str]]:
     """Dispatch a coder agent for the issue.  Returns (ok, failure_category).
 
@@ -1531,6 +1559,9 @@ def _dispatch_coder(
 
     Retries up to _RATE_LIMIT_MAX_RETRIES times on 429/rate-limit errors with
     exponential backoff.  Appends events to rate_limit_events when provided.
+
+    on_running: optional zero-argument callable invoked immediately after the
+    subprocess is spawned (before proc.wait) to signal coder_running status.
     """
     eff_repo = repo_name or (cfg.repo_name if cfg else None)
     api_url  = cfg.api_url if cfg else None
@@ -1603,7 +1634,18 @@ def _dispatch_coder(
         except FileNotFoundError:
             # claude CLI not available -- treat as stub success for testing
             print("  [coder] claude CLI not found -- stub success")
+            if on_running is not None:
+                try:
+                    on_running()
+                except Exception:
+                    pass
             return True, None
+
+        if on_running is not None:
+            try:
+                on_running()
+            except Exception:
+                pass
 
         detector = HangDetector(issue_num=issue_num, log_path=log_path, proc=proc)
         detector.start()
@@ -1678,6 +1720,7 @@ def _dispatch_tester(
     cfg: Optional["SprintConfig"] = None,
     chosen_port: Optional[int] = None,
     rate_limit_events: Optional[list] = None,
+    on_running: Optional[object] = None,
 ) -> tuple[int, Optional[str]]:
     """Dispatch a tester agent.  Returns (exit_code, failure_category_if_hang).
 
@@ -1687,6 +1730,9 @@ def _dispatch_tester(
 
     Retries up to _RATE_LIMIT_MAX_RETRIES times on 429/rate-limit errors with
     exponential backoff.  Appends events to rate_limit_events when provided.
+
+    on_running: optional zero-argument callable invoked immediately after the
+    subprocess is spawned (before proc.wait) to signal tester_running status.
     """
     eff_repo = repo_name or (cfg.repo_name if cfg else None)
     api_url  = cfg.api_url if cfg else None
@@ -1764,7 +1810,18 @@ def _dispatch_tester(
                 )
         except FileNotFoundError:
             print("  [tester] claude CLI not found -- stub success")
+            if on_running is not None:
+                try:
+                    on_running()
+                except Exception:
+                    pass
             return 0, None
+
+        if on_running is not None:
+            try:
+                on_running()
+            except Exception:
+                pass
 
         detector = HangDetector(issue_num=issue_num, log_path=log_path, proc=proc)
         detector.start()
@@ -2632,7 +2689,7 @@ def run_sprint(
             start_timestamp = _utcnow(),
             token_budget    = token_budget,
             issues=[
-                IssueState(number=i["number"], title=i["title"])
+                IssueState(number=i["number"], title=i["title"], agent_status="queued")
                 for i in raw_issues
             ],
         )
@@ -2701,8 +2758,10 @@ def run_sprint(
         # Preflight filter: skip issues not approved by pre-flight review
         if preflight_approved is not None and num not in preflight_approved:
             print("  [preflight] skipped by pre-flight review")
-            issue_state.status      = "skipped"
-            issue_state.skip_reason = "preflight-skipped"
+            issue_state.set_agent_status("failed")
+            issue_state.failure_reason  = "preflight-skipped"
+            issue_state.status          = "skipped"
+            issue_state.skip_reason     = "preflight-skipped"
             summary.skipped.append(f"#{num} (preflight-skipped)")
             state.save(state_path)
             _post_sprint_status(state, api_url=api_url)
@@ -2724,11 +2783,29 @@ def run_sprint(
             if chosen_port is not None:
                 _write_runtime_port(cfg.worktree_coder, chosen_port)
 
+        # -- Lifecycle: queued → coder_dispatched --
+        issue_state.set_agent_status("queued")
+        state.save(state_path)
+        _post_sprint_status(state, api_url=api_url)
+
         # -- Dispatch coder --
+        issue_state.set_agent_status("coder_dispatched")
+        issue_state.coder_started_at = issue_state.status_changed_at
+        state.save(state_path)
+        _post_sprint_status(state, api_url=api_url)
+
+        def _on_coder_running(
+            _is=issue_state, _st=state, _sp=state_path, _api=api_url
+        ) -> None:
+            _is.set_agent_status("coder_running")
+            _st.save(_sp)
+            _post_sprint_status(_st, api_url=_api)
+
         _coder_t0 = time.monotonic()
         coder_ok, coder_category = _dispatch_coder(
             num, alert_modes, sprint_branch=target_branch, repo_name=eff_repo, cfg=cfg,
             chosen_port=chosen_port, rate_limit_events=state.rate_limit_events,
+            on_running=_on_coder_running,
         )
         _coder_elapsed = time.monotonic() - _coder_t0
         _coder_m, _coder_s = divmod(int(_coder_elapsed), 60)
@@ -2741,9 +2818,12 @@ def run_sprint(
             else:
                 reason = f"Coder failed with category {category}"
             print(f"  Coder failed for #{num} ({category}) -- skipping to next issue")
-            issue_state.status      = "skipped"
-            issue_state.skip_reason = reason
-            issue_state.category    = category
+            issue_state.set_agent_status("failed")
+            issue_state.coder_finished_at = issue_state.status_changed_at
+            issue_state.failure_reason    = reason
+            issue_state.status            = "skipped"
+            issue_state.skip_reason       = reason
+            issue_state.category          = category
             summary.skipped.append(f"#{num} (coder failed)")
             dispatch_alerts(
                 alert_modes,
@@ -2757,33 +2837,64 @@ def run_sprint(
             _post_sprint_status(state, api_url=api_url)
             continue
 
+        # -- Lifecycle: coder_done → tester_dispatched --
+        issue_state.set_agent_status("coder_done")
+        issue_state.coder_finished_at = issue_state.status_changed_at
+        state.save(state_path)
+        _post_sprint_status(state, api_url=api_url)
+
+        issue_state.set_agent_status("tester_dispatched")
+        issue_state.tester_started_at = issue_state.status_changed_at
+        state.save(state_path)
+        _post_sprint_status(state, api_url=api_url)
+
+        def _on_tester_running(
+            _is=issue_state, _st=state, _sp=state_path, _api=api_url
+        ) -> None:
+            _is.set_agent_status("tester_running")
+            _st.save(_sp)
+            _post_sprint_status(_st, api_url=_api)
+
         # -- Dispatch tester --
         _tester_t0 = time.monotonic()
         tester_rc, hang_category = _dispatch_tester(
             num, alert_modes, repo_name=eff_repo, cfg=cfg,
             chosen_port=chosen_port, rate_limit_events=state.rate_limit_events,
+            on_running=_on_tester_running,
         )
         _tester_elapsed = time.monotonic() - _tester_t0
         _tester_m, _tester_s = divmod(int(_tester_elapsed), 60)
         print(f"  Total time used on tester dispatch: {_tester_m}m {_tester_s}s")
 
         if hang_category == FailureCategory.HANG:
-            issue_state.status      = "skipped"
-            issue_state.skip_reason = "Tester HANG detected"
-            issue_state.category    = FailureCategory.HANG
+            issue_state.set_agent_status("failed")
+            issue_state.tester_finished_at = issue_state.status_changed_at
+            issue_state.failure_reason     = "Tester HANG detected"
+            issue_state.status             = "skipped"
+            issue_state.skip_reason        = "Tester HANG detected"
+            issue_state.category           = FailureCategory.HANG
             summary.skipped.append(f"#{num} (tester hang)")
             state.save(state_path)
             _post_sprint_status(state, api_url=api_url)
             continue
 
         if hang_category == FailureCategory.RETRY_EXHAUSTED:
-            issue_state.status      = "skipped"
-            issue_state.skip_reason = "Subscription rate limit exhausted"
-            issue_state.category    = FailureCategory.RETRY_EXHAUSTED
+            issue_state.set_agent_status("failed")
+            issue_state.tester_finished_at = issue_state.status_changed_at
+            issue_state.failure_reason     = "Subscription rate limit exhausted"
+            issue_state.status             = "skipped"
+            issue_state.skip_reason        = "Subscription rate limit exhausted"
+            issue_state.category           = FailureCategory.RETRY_EXHAUSTED
             summary.skipped.append(f"#{num} (rate limit exhausted)")
             state.save(state_path)
             _post_sprint_status(state, api_url=api_url)
             continue
+
+        # -- Lifecycle: tester_done --
+        issue_state.set_agent_status("tester_done")
+        issue_state.tester_finished_at = issue_state.status_changed_at
+        state.save(state_path)
+        _post_sprint_status(state, api_url=api_url)
 
         # -- Post-tester gates --
         merged, summary_line, gate_category = handle_post_tester(
@@ -2803,13 +2914,16 @@ def run_sprint(
         print(f"  {summary_line}")
 
         if merged:
+            issue_state.set_agent_status("completed")
             issue_state.status = "done"
             summary.merged.append(f"#{num}")
         else:
             category = gate_category or FailureCategory.CRASH
-            issue_state.status      = "skipped"
-            issue_state.skip_reason = summary_line
-            issue_state.category    = category
+            issue_state.set_agent_status("failed")
+            issue_state.failure_reason  = summary_line
+            issue_state.status          = "skipped"
+            issue_state.skip_reason     = summary_line
+            issue_state.category        = category
             if "gate failed" in summary_line:
                 summary.gate_failures.append(summary_line)
             else:

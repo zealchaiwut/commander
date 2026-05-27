@@ -1851,6 +1851,20 @@
   .smgmt-status-uat      { background: var(--purple-bg); color: var(--purple); }
   .smgmt-status-done     { background: var(--green-bg); color: var(--green); }
 
+  /* Per-ticket live agent status (issue #131) */
+  .smgmt-ticket-agent-badge {
+    font-size: 10px; font-weight: 600; padding: 2px 6px; border-radius: 3px;
+    flex-shrink: 0; white-space: nowrap;
+  }
+  .smgmt-ticket-spinner {
+    flex-shrink: 0; font-size: 13px;
+    animation: spin 1s linear infinite; transform-origin: center;
+  }
+  .smgmt-stall-warning {
+    font-size: 11px; color: var(--amber); padding: 4px 14px 4px;
+    border-top: 1px solid var(--border); background: var(--amber-bg);
+  }
+
   /* Sprint goal input row */
   .smgmt-sprint-goal-row {
     padding: 8px 14px; border-bottom: 1px solid var(--border);

@@ -3204,11 +3204,19 @@ async function smgmtDispatchRun(sprintLabel, migrateFrom) {
     if (data.migrated_count > 0) {
       const fromNums = (data.migrate_from || []).join(', ');
       showSuccessToast(`Migrated ${data.migrated_count} ticket${data.migrated_count !== 1 ? 's' : ''} from Sprint ${fromNums} to Sprint ${sprintLabel.split('-')[1]}. Dispatching sprint…`);
+    } else {
+      showSuccessToast('Sprint dispatched. Watching for progress...');
     }
+
+    // AC9: track dispatch time for stall warning
+    _smgmtLastDispatchTime = Date.now();
+    _smgmtLastStatusChangeTime = Date.now();
+    _smgmtStallLabel = sprintLabel;
+    _ensureStallWarningTimer();
 
     smgmtPollRunStatus();
   } catch (e) {
-    smgmtShowError('Failed to start sprint: ' + e.message);
+    showToast('Failed to dispatch: ' + e.message);
     if (btn) {
       const sprintTickets = (_smgmtData?.issues || []).filter(
         t => t.sprint != null && `sprint-${t.sprint}` === sprintLabel
@@ -3253,6 +3261,18 @@ async function smgmtPollRunStatus() {
       } else if (statusData.active && statusData.sprint_label) {
         // Legacy single-sprint format
         sprintStatusMap[statusData.sprint_label] = statusData;
+      }
+    }
+
+    // AC9: update last status-change time if any per-ticket status_changed_at is newer
+    for (const s of Object.values(sprintStatusMap)) {
+      for (const iss of (s.issues || [])) {
+        if (iss.status_changed_at) {
+          const t = new Date(iss.status_changed_at).getTime();
+          if (!isNaN(t) && t > _smgmtLastStatusChangeTime) {
+            _smgmtLastStatusChangeTime = t;
+          }
+        }
       }
     }
 
@@ -3347,6 +3367,10 @@ function smgmtApplyRunState(sprintStatusMap) {
     }
   }
 
+  // Per-ticket live status badges, spinners, elapsed counters (AC5/6/7)
+  smgmtApplyTicketLiveStatus(sprintStatusMap);
+  _ensureElapsedTimer();
+
   // Handle Run buttons — disable only if THIS specific (project, sprint_label) is running.
   // Other sprints (different label or different project) stay enabled.
   document.querySelectorAll('.smgmt-run-btn').forEach(btn => {
@@ -3392,6 +3416,179 @@ function smgmtApplyRunState(sprintStatusMap) {
     btn.disabled = !hasCompleted;
     btn.title = hasCompleted ? '' : 'No completed tickets to reset';
   });
+}
+
+// ── Per-ticket live agent status (issue #131) ─────────────────────────────────
+
+/**
+ * Return an sbadge HTML string for the given agent_status.
+ * label format: "<status> at HH:MM" for point-in-time states,
+ *               "<status> Xm Ys"    for elapsed-time states (running).
+ * Colors: gray=queued, blue=coder stages, purple=tester stages, amber=completed, red=failed.
+ */
+function smgmtAgentStatusBadge(agentStatus, statusChangedAt) {
+  if (!agentStatus) return '';
+
+  const colorMap = {
+    queued:             'gray',
+    coder_dispatched:   'blue',
+    coder_running:      'blue',
+    coder_done:         'blue',
+    tester_dispatched:  'purple',
+    tester_running:     'purple',
+    tester_done:        'purple',
+    completed:          'amber',
+    failed:             'red',
+  };
+  const color = colorMap[agentStatus] || 'gray';
+
+  let timeStr = '';
+  if (statusChangedAt) {
+    try {
+      const ts = new Date(statusChangedAt);
+      const h = ts.getHours().toString().padStart(2, '0');
+      const m = ts.getMinutes().toString().padStart(2, '0');
+      timeStr = ` at ${h}:${m}`;
+    } catch (_) { /* ignore */ }
+  }
+
+  const label = agentStatus.replace(/_/g, ' ') + timeStr;
+  return `<span class="smgmt-ticket-agent-badge sbadge ${color}">${label}</span>`;
+}
+
+/**
+ * Update per-ticket badges, spinners and elapsed counters from sprintStatusMap.
+ * Called from smgmtApplyRunState whenever sprintStatusMap is available.
+ */
+function smgmtApplyTicketLiveStatus(sprintStatusMap) {
+  if (!sprintStatusMap) return;
+
+  for (const [runLabel, sprintStatus] of Object.entries(sprintStatusMap)) {
+    const issues = sprintStatus.issues || [];
+    for (const issueData of issues) {
+      const ticketEl = document.getElementById(`smgmt-ticket-${issueData.number}`);
+      if (!ticketEl) continue;
+
+      const agentStatus = issueData.agent_status;
+      const isRunning   = agentStatus === 'coder_running' || agentStatus === 'tester_running';
+
+      // Remove existing injected live-status elements
+      ticketEl.querySelectorAll('.smgmt-ticket-agent-badge, .smgmt-ticket-spinner, .smgmt-ticket-elapsed').forEach(el => el.remove());
+
+      // Add spinner when running
+      if (isRunning) {
+        const spinner = document.createElement('i');
+        spinner.className = 'ti ti-loader-2 smgmt-ticket-spinner';
+        // Insert before title (after grip and number)
+        const titleEl = ticketEl.querySelector('.smgmt-ticket-title');
+        if (titleEl) {
+          ticketEl.insertBefore(spinner, titleEl);
+        } else {
+          ticketEl.appendChild(spinner);
+        }
+      }
+
+      // Add agent status badge after title
+      const badgeHtml = smgmtAgentStatusBadge(agentStatus, issueData.status_changed_at);
+      if (badgeHtml) {
+        const statusEl = ticketEl.querySelector('.smgmt-ticket-status');
+        const badgeWrap = document.createElement('span');
+        badgeWrap.innerHTML = badgeHtml;
+        const badgeNode = badgeWrap.firstElementChild;
+        if (statusEl) {
+          ticketEl.insertBefore(badgeNode, statusEl);
+        } else {
+          ticketEl.appendChild(badgeNode);
+        }
+      }
+
+      // Elapsed counter for running states (AC7)
+      if (isRunning && issueData.status_changed_at) {
+        const startTs = new Date(issueData.status_changed_at).getTime();
+        if (!isNaN(startTs)) {
+          const elapsedEl = document.createElement('span');
+          elapsedEl.className = 'smgmt-ticket-elapsed smgmt-ticket-agent-badge sbadge gray';
+          elapsedEl.dataset.startTs = startTs;
+          const statusEl = ticketEl.querySelector('.smgmt-ticket-status');
+          if (statusEl) {
+            ticketEl.insertBefore(elapsedEl, statusEl.nextSibling);
+          } else {
+            ticketEl.appendChild(elapsedEl);
+          }
+          _smgmtUpdateElapsedEl(elapsedEl);
+        }
+      }
+    }
+  }
+}
+
+/** Render elapsed time into an elapsed element. */
+function _smgmtUpdateElapsedEl(el) {
+  const startTs = parseInt(el.dataset.startTs, 10);
+  if (isNaN(startTs)) return;
+  const secs = Math.floor((Date.now() - startTs) / 1000);
+  const m = Math.floor(secs / 60);
+  const s = secs % 60;
+  el.textContent = m > 0 ? `${m}m ${s}s` : `${s}s`;
+}
+
+// Elapsed counter interval (AC7) — update all elapsed elements every second.
+let _smgmtElapsedTimer = null;
+
+function _ensureElapsedTimer() {
+  if (_smgmtElapsedTimer) return;
+  _smgmtElapsedTimer = setInterval(() => {
+    document.querySelectorAll('.smgmt-ticket-elapsed').forEach(_smgmtUpdateElapsedEl);
+  }, 1000);
+}
+
+// Stall warning tracking (AC9)
+let _smgmtLastDispatchTime    = 0;
+let _smgmtLastStatusChangeTime = 0;
+let _smgmtStallLabel           = null;
+let _smgmtStallTimer           = null;
+const _SMGMT_STALL_THRESHOLD_MS = 30000;
+
+function _ensureStallWarningTimer() {
+  if (_smgmtStallTimer) clearInterval(_smgmtStallTimer);
+  _smgmtStallTimer = setInterval(_smgmtCheckStall, 5000);
+}
+
+function _smgmtCheckStall() {
+  if (!_smgmtStallLabel) return;
+
+  // Stop checking once sprint is no longer running
+  const runKey = `${_smgmtCurrentRepo}:${_smgmtStallLabel}`;
+  if (!_smgmtAllRunning[runKey]) {
+    if (_smgmtStallTimer) { clearInterval(_smgmtStallTimer); _smgmtStallTimer = null; }
+    _smgmtRemoveStallWarning(_smgmtStallLabel);
+    return;
+  }
+
+  const now = Date.now();
+  const sinceDispatch     = now - _smgmtLastDispatchTime;
+  const sinceStatusChange = now - _smgmtLastStatusChangeTime;
+
+  if (sinceDispatch >= _SMGMT_STALL_THRESHOLD_MS && sinceStatusChange >= _SMGMT_STALL_THRESHOLD_MS) {
+    _smgmtShowStallWarning(_smgmtStallLabel);
+  } else {
+    _smgmtRemoveStallWarning(_smgmtStallLabel);
+  }
+}
+
+function _smgmtShowStallWarning(sprintLabel) {
+  const block = document.getElementById(`smgmt-block-${sprintLabel}`);
+  if (!block) return;
+  if (block.querySelector('.smgmt-stall-warning')) return; // already shown
+  const warn = document.createElement('div');
+  warn.className = 'smgmt-stall-warning';
+  warn.textContent = 'Sprint launched but no progress reported. Check terminal logs.';
+  block.appendChild(warn);
+}
+
+function _smgmtRemoveStallWarning(sprintLabel) {
+  const block = document.getElementById(`smgmt-block-${sprintLabel}`);
+  if (block) block.querySelectorAll('.smgmt-stall-warning').forEach(el => el.remove());
 }
 
 // ── Per-#123: Running banner + overview badges ────────────────────────────────

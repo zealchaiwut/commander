@@ -2285,4 +2285,43 @@ async def create_ticket_from_draft(
     return {"number": number, "url": url}
 
 
+# ── deploy / promote endpoint ─────────────────────────────────────────────────
+
+_PROMOTE_SCRIPT_ROOT = Path(__file__).parent.parent.parent  # apps/dashboard -> apps -> repo root
+
+
+class PromoteBody(BaseModel):
+    draft: bool = True
+
+
+@app.post("/api/deploy/promote")
+def promote_to_master(body: PromoteBody):
+    """Shell out to scripts/promote_to_master.py and return the PR URL.
+
+    Returns: {"pr_url": "<url>"}
+    Exit codes from the script: 0 = success, 1 = precondition, 2 = GitHub API failure.
+    """
+    script_path = _PROMOTE_SCRIPT_ROOT / "scripts" / "promote_to_master.py"
+    if not script_path.exists():
+        raise HTTPException(500, detail="promote_to_master.py not found")
+
+    cmd = ["python3", str(script_path)]
+    if body.draft:
+        cmd.append("--draft")
+    else:
+        cmd.append("--ready")
+
+    result = subprocess.run(cmd, capture_output=True, text=True, cwd=str(_PROMOTE_SCRIPT_ROOT))
+
+    if result.returncode == 0:
+        pr_url = result.stdout.strip()
+        return {"pr_url": pr_url}
+    elif result.returncode == 1:
+        err = result.stderr.strip() or result.stdout.strip() or "Precondition failed"
+        raise HTTPException(400, detail=err)
+    else:
+        err = result.stderr.strip() or result.stdout.strip() or "GitHub API failure"
+        raise HTTPException(502, detail=err)
+
+
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")

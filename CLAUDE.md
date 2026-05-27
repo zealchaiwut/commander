@@ -226,7 +226,7 @@ when Python can't find its standard library at the original path.
 # In each clone (prd, uat, coder, tester):
 rm -rf venv
 ~/.local/bin/python3.12 -m venv venv
-./venv/bin/pip install -r apps/dashboard/requirements.txt
+./venv/bin/pip install -r requirements.txt
 ```
 
 Or use the `.commander/setup.sh` helper if it includes venv setup.

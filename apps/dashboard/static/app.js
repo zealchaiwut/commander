@@ -2680,6 +2680,7 @@ let _smgmtPollTimer      = null;
 let _smgmtGoals          = {};     // sprint_label -> goal string
 let _smgmtGoalSaveTimers = {};     // sprint_label -> debounce timer id
 let _smgmtEstimates      = {};     // sprint_label -> EstimateResult from /api/sprints/{label}/estimate
+let _smgmtSprintStates   = {};     // sprint_label -> {wall_clock_secs, issues:[{number,duration_secs,failed}]} (issue #212)
 let _smgmtBacklogFilter  = '';     // label name filter for backlog, '' = all
 let _smgmtRerunLabel     = null;   // sprint label pending rerun confirmation
 let _smgmtCleanupLabels  = [];     // empty sprint labels pending cleanup confirmation
@@ -2782,6 +2783,7 @@ async function smgmtSelectProject(repo) {
   _smgmtCurrentRepo = repo;
   _smgmtGoals = {};
   _smgmtEstimates = {};
+  _smgmtSprintStates = {};
   _smgmtBacklogFilter = '';
   _smgmtSelectedIssues.clear();
   _smgmtUpdateSelectionUI();
@@ -2800,6 +2802,7 @@ async function smgmtSelectProject(repo) {
 
   await smgmtLoadGoals();
   await smgmtLoadEstimates();
+  await smgmtLoadSprintStates();
   smgmtRender();
 }
 
@@ -2822,6 +2825,107 @@ async function smgmtLoadEstimates() {
       // network error — treat as absent
     }
   }));
+}
+
+// ── Sprint timing state (issue #212) ─────────────────────────────────────────
+
+/**
+ * Format seconds into human-readable duration string.
+ * Examples: 65 → "1m 05s", 3725 → "1h 02m 05s", 45 → "45s"
+ */
+function formatDuration(secs) {
+  const s = Math.floor(secs);
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  if (h > 0) {
+    return `${h}h ${String(m).padStart(2, '0')}m ${String(sec).padStart(2, '0')}s`;
+  }
+  if (m > 0) {
+    return `${m}m ${String(sec).padStart(2, '0')}s`;
+  }
+  return `${sec}s`;
+}
+
+async function smgmtLoadSprintStates() {
+  if (!_smgmtData || !_smgmtCurrentRepo) return;
+  const { order } = _smgmtData;
+  if (!order || order.length === 0) return;
+
+  // Fetch state for each sprint in parallel; silently ignore 404s (no state file yet)
+  await Promise.all(order.map(async (label) => {
+    try {
+      const res = await fetch(
+        `/api/sprints/${encodeURIComponent(label)}/state?project=${encodeURIComponent(_smgmtCurrentRepo)}`
+      );
+      if (res.ok) {
+        _smgmtSprintStates[label] = await res.json();
+      }
+      // 404 = no state file — sprint has not been run yet
+    } catch (_e) {
+      // network error — treat as absent
+    }
+  }));
+}
+
+/**
+ * Apply duration badges to ticket rows and sprint duration footers to sprint cards.
+ * Called after smgmtRender() so DOM elements exist.
+ * Only applies to completed/done sprints; running sprints are handled by smgmtApplyRunState.
+ */
+function smgmtApplyDurationBadges() {
+  const runningLabels = new Set(
+    Object.values(_smgmtAllRunning)
+      .filter(e => e.project === _smgmtCurrentRepo)
+      .map(e => e.sprint_label)
+  );
+
+  for (const [label, state] of Object.entries(_smgmtSprintStates)) {
+    // Skip running sprints — they have live badges via smgmtApplyRunState
+    if (runningLabels.has(label)) continue;
+
+    // Per-ticket duration badges
+    const issueMap = {};
+    for (const iss of (state.issues || [])) {
+      issueMap[iss.number] = iss;
+    }
+
+    for (const [num, issState] of Object.entries(issueMap)) {
+      const ticketEl = document.getElementById(`smgmt-ticket-${num}`);
+      if (!ticketEl) continue;
+
+      // Remove any existing duration badge (avoid duplicates on re-render)
+      ticketEl.querySelectorAll('.smgmt-duration-badge').forEach(el => el.remove());
+
+      const dur = formatDuration(issState.duration_secs);
+      const label_text = issState.failed ? `took ${dur} (failed)` : `took ${dur}`;
+      const badge = document.createElement('span');
+      badge.className = `smgmt-duration-badge${issState.failed ? ' smgmt-duration-badge--failed' : ''}`;
+      badge.textContent = label_text;
+
+      // Insert before the status badge
+      const statusEl = ticketEl.querySelector('.smgmt-ticket-status');
+      if (statusEl) {
+        ticketEl.insertBefore(badge, statusEl);
+      } else {
+        ticketEl.appendChild(badge);
+      }
+    }
+
+    // Sprint duration footer — only for completed (non-running) sprints
+    if (!state.wall_clock_secs || state.wall_clock_secs <= 0) continue;
+
+    const block = document.getElementById(`smgmt-block-${label}`);
+    if (!block) continue;
+
+    // Remove existing footer to avoid duplicates
+    block.querySelectorAll('.smgmt-sprint-duration-footer').forEach(el => el.remove());
+
+    const footer = document.createElement('div');
+    footer.className = 'smgmt-sprint-duration-footer';
+    footer.textContent = `Total sprint duration: ${formatDuration(state.wall_clock_secs)}`;
+    block.appendChild(footer);
+  }
 }
 
 function smgmtRender() {
@@ -2920,6 +3024,7 @@ function smgmtRender() {
 
   smgmtRenderBacklog(unassigned);
   smgmtApplyRunState();
+  smgmtApplyDurationBadges();
 }
 
 function smgmtHasCompletedTickets(tickets) {

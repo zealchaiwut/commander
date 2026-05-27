@@ -143,8 +143,11 @@ class TestAcquireAliveProcess:
         pid_path = sm._pid_file_path("sprint-5", cfg=cfg)
         pid_path.parent.mkdir(parents=True, exist_ok=True)
 
-        # Write our own PID (which is definitely alive)
-        pid_path.write_text(str(os.getpid()))
+        # Use the parent process PID — alive but NOT our own PID.
+        # (Using os.getpid() would trigger the server-dispatch self-recognition
+        # introduced in issue #155 and would not raise SystemExit.)
+        other_live_pid = os.getppid()
+        pid_path.write_text(str(other_live_pid))
 
         with pytest.raises(SystemExit) as exc_info:
             sm._acquire_pid_lock("sprint-5", "zealchaiwut/commander", cfg=cfg)
@@ -153,14 +156,17 @@ class TestAcquireAliveProcess:
         msg = str(exc_info.value)
         assert "sprint-5" in msg
         assert "zealchaiwut/commander" in msg
-        assert str(os.getpid()) in msg
+        assert str(other_live_pid) in msg
 
     def test_error_message_format(self, tmp_path):
         sm = _import_sprint_manager()
         cfg = sm.SprintConfig(sprints_dir=tmp_path / "sprints")
         pid_path = sm._pid_file_path("sprint-5", cfg=cfg)
         pid_path.parent.mkdir(parents=True, exist_ok=True)
-        pid_path.write_text(str(os.getpid()))
+
+        # Use the parent process PID — alive but NOT our own PID.
+        other_live_pid = os.getppid()
+        pid_path.write_text(str(other_live_pid))
 
         with pytest.raises(SystemExit) as exc_info:
             sm._acquire_pid_lock("sprint-5", "zealchaiwut/commander", cfg=cfg)
@@ -306,14 +312,22 @@ class TestConcurrentSprints:
         sprints_dir.mkdir()
         cfg = sm.SprintConfig(sprints_dir=sprints_dir)
 
-        # First acquire succeeds
-        path = sm._acquire_pid_lock("sprint-5", "zealchaiwut/commander", cfg=cfg)
+        # Write the parent PID — a live process that is NOT our own PID.
+        # This simulates a different process already holding the lock.
+        # (Using our own PID would trigger the server-dispatch self-recognition
+        # path introduced in issue #155 and the call would succeed instead of
+        # raising SystemExit.)
+        pid_path = sm._pid_file_path("sprint-5", cfg=cfg)
+        pid_path.parent.mkdir(parents=True, exist_ok=True)
+        other_live_pid = os.getppid()
+        pid_path.write_text(str(other_live_pid))
 
-        # Second acquire on same (project, label) should fail since our PID is alive
+        # Acquire on same (project, label) should fail — another live process holds it.
         with pytest.raises(SystemExit):
             sm._acquire_pid_lock("sprint-5", "zealchaiwut/commander", cfg=cfg)
 
-        sm._release_pid_lock(path)
+        # Clean up
+        sm._release_pid_lock(pid_path)
 
 
 # ── AC-9: COMMANDER_PROJECT propagated to subprocesses ───────────────────────

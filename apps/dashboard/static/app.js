@@ -194,9 +194,9 @@ function _activateProjectTab(tab) {
     document.getElementById(`ptab-${t}`)?.classList.toggle('active', t === tab);
   });
 
-  if (tab === 'tickets')        _loadProjectTickets(_activeProject);
+  if (tab === 'tickets')        { smgmtClearSelectionOnNav(); _loadProjectTickets(_activeProject); }
   if (tab === 'sprint-mgmt')    smgmtInitForProject(_activeProject);
-  if (tab === 'sprint-history') loadSprintHistory().catch(() => {});
+  if (tab === 'sprint-history') { smgmtClearSelectionOnNav(); loadSprintHistory().catch(() => {}); }
 }
 
 function _loadProjectTickets(repo) {
@@ -332,8 +332,23 @@ window.addEventListener('popstate', e => {
     _activeProjectTab = s.tab || 'sprint-mgmt';
     _renderProjectView(s.repo, s.tab || 'sprint-mgmt');
   } else {
+    smgmtClearSelectionOnNav();
     _showOverview();
   }
+});
+
+// Clear multi-select when clicking outside the sprint-mgmt ticket lists (issue #206)
+document.addEventListener('click', e => {
+  if (_smgmtSelectedIssues.size === 0) return;
+  // Only act when the sprint-mgmt view is active
+  const smgmtView = document.getElementById('pview-sprint-mgmt');
+  if (!smgmtView || smgmtView.classList.contains('hidden')) return;
+  // If the click is inside a ticket list area or on a checkbox, do nothing
+  const inTickets = e.target.closest('#smgmt-body, #smgmt-backlog-tickets');
+  if (inTickets) return;
+  // If it's inside a modal or the bulk bar, do nothing
+  if (e.target.closest('.modal, #smgmt-bulk-bar, #smgmt-moveto-modal')) return;
+  smgmtClearSelection();
 });
 
 // ── Filter ────────────────────────────────────────────────────────────────────
@@ -1926,15 +1941,11 @@ async function loadSprintStatus() {
     const res = await fetch('/api/sprint-status');
     if (!res.ok) return;
     const data = await res.json();
-    if (!data.active) {
-      _sprintState = null;
-      _updateSprintNavDot(false);
-      return;
-    }
-    _sprintState = data;
-    _updateSprintNavDot(true);
+    const sprints = data.running_sprints || [];
+    _sprintState = sprints.length > 0 ? sprints[0] : null;
+    _updateSprintNavDot(!!_sprintState);
     const sprintVisible = !document.getElementById('view-sprint')?.classList.contains('hidden');
-    if (sprintVisible) scRenderCockpit(_sprintState);
+    if (sprintVisible && _sprintState) scRenderCockpit(_sprintState);
   } catch { /* silent */ }
 }
 
@@ -2674,6 +2685,7 @@ let _smgmtRerunLabel     = null;   // sprint label pending rerun confirmation
 let _smgmtCleanupLabels  = [];     // empty sprint labels pending cleanup confirmation
 let _smgmtAutoRefreshTimer     = null; // interval timer for auto-refresh countdown
 let _smgmtAutoRefreshCountdown = 30;  // seconds remaining until next auto-refresh
+let _smgmtSelectedIssues       = new Set(); // issue numbers currently selected (multi-select, issue #206)
 
 const RERUN_STRIP_LABELS = new Set(['UAT', 'UAT-approved', 'released', 'SIT', 'in-progress', 'need-rework']);
 
@@ -2771,6 +2783,8 @@ async function smgmtSelectProject(repo) {
   _smgmtGoals = {};
   _smgmtEstimates = {};
   _smgmtBacklogFilter = '';
+  _smgmtSelectedIssues.clear();
+  _smgmtUpdateSelectionUI();
   smgmtShowError('');
   const bodyEl = document.getElementById('smgmt-body');
   if (bodyEl) bodyEl.innerHTML = '<div class="smgmt-loading">Loading sprints…</div>';
@@ -2861,18 +2875,45 @@ function smgmtRender() {
     }
   }
 
+  // Identify empty sprints that exist on GitHub but have no tickets (not in order)
+  // These should be rendered as droppable placeholder blocks so users can drop into them (issue #206)
+  const orderNums = new Set(order.map(l => parseInt(l.split('-')[1], 10)));
+  const placeholderN = placeholder_sprint || ((order.length > 0 ? Math.max(...allNums) : 0) + 1);
+  const emptySprintNums = (_smgmtData.sprints || [])
+    .filter(n => !orderNums.has(n) && n !== placeholderN)
+    .sort((a, b) => a - b);
+
+  // Sort non-empty sprints ascending by sprint number (issue #207).
+  // Empty sprints are interleaved into the correct sorted position.
+  const sortedOrder = [...order].sort((a, b) => {
+    const na = parseInt(a.split('-')[1], 10);
+    const nb = parseInt(b.split('-')[1], 10);
+    return na - nb;
+  });
+
+  // Build a merged list of all sprint numbers (non-empty + empty), sorted ascending.
+  // Each entry is: { num, isEmpty }
+  const allSprintNums = [
+    ...sortedOrder.map(l => ({ num: parseInt(l.split('-')[1], 10), isEmpty: false })),
+    ...emptySprintNums.map(n => ({ num: n, isEmpty: true })),
+  ].sort((a, b) => a.num - b.num);
+
   // Render sprint blocks (only non-empty sprints are in order)
   let blocksHtml = '';
-  if (order.length === 0) {
+  if (sortedOrder.length === 0 && emptySprintNums.length === 0) {
     blocksHtml = '<div class="smgmt-loading">No sprints found. Use "+ New sprint" to create one.</div>';
   } else {
-    blocksHtml = order.map(label =>
-      smgmtSprintBlockHtml(label, bySprintLabel[label] || [], label === lowestLabel)
-    ).join('');
+    // Render all sprints (non-empty and empty) interleaved in ascending number order
+    blocksHtml = allSprintNums.map(({ num, isEmpty }) => {
+      if (isEmpty) {
+        return smgmtPlaceholderBlockHtml(num);
+      }
+      const label = `sprint-${num}`;
+      return smgmtSprintBlockHtml(label, bySprintLabel[label] || [], label === lowestLabel);
+    }).join('');
   }
 
-  // Append trailing placeholder card
-  const placeholderN = placeholder_sprint || ((order.length > 0 ? Math.max(...allNums) : 0) + 1);
+  // Append trailing placeholder card for the next-to-be-created sprint
   blocksHtml += smgmtPlaceholderBlockHtml(placeholderN);
 
   bodyEl.innerHTML = blocksHtml;
@@ -3004,13 +3045,18 @@ function smgmtTicketCardHtml(ticket, currentSprint) {
     }
   }
 
+  const isSelected = _smgmtSelectedIssues.has(ticket.number);
   return `
-    <div class="smgmt-ticket" id="smgmt-ticket-${ticket.number}"
+    <div class="smgmt-ticket${isSelected ? ' is-selected' : ''}" id="smgmt-ticket-${ticket.number}"
          draggable="true"
          data-issue="${ticket.number}"
          data-sprint="${currentSprint || ''}"
          ondragstart="smgmtTicketDragStart(event, ${ticket.number}, '${currentSprint || ''}')"
          ondragend="smgmtTicketDragEnd(event)">
+      <input type="checkbox" class="smgmt-ticket-cb"
+             ${isSelected ? 'checked' : ''}
+             onclick="event.stopPropagation()"
+             onchange="smgmtToggleIssueSelect(${ticket.number}, this.checked)">
       <i class="ti ti-grip-vertical smgmt-ticket-grip"></i>
       <a class="smgmt-ticket-num" href="${escapeHtml(ticket.url || '#')}" target="_blank"
          rel="noopener" onclick="event.stopPropagation()">#${ticket.number}</a>
@@ -3079,13 +3125,18 @@ function smgmtBacklogTicketHtml(ticket, sprintLabels) {
     ? `<span class="smgmt-size-chip">${escapeHtml(sizeLabel.name.replace('size-', ''))}</span>`
     : '';
 
+  const isSelected = _smgmtSelectedIssues.has(ticket.number);
   return `
-    <div class="smgmt-ticket" id="smgmt-ticket-${ticket.number}"
+    <div class="smgmt-ticket${isSelected ? ' is-selected' : ''}" id="smgmt-ticket-${ticket.number}"
          draggable="true"
          data-issue="${ticket.number}"
          data-sprint=""
          ondragstart="smgmtTicketDragStart(event, ${ticket.number}, null)"
          ondragend="smgmtTicketDragEnd(event)">
+      <input type="checkbox" class="smgmt-ticket-cb"
+             ${isSelected ? 'checked' : ''}
+             onclick="event.stopPropagation()"
+             onchange="smgmtToggleIssueSelect(${ticket.number}, this.checked)">
       <i class="ti ti-grip-vertical smgmt-ticket-grip"></i>
       <a class="smgmt-ticket-num" href="${escapeHtml(ticket.url || '#')}" target="_blank"
          rel="noopener" onclick="event.stopPropagation()">#${ticket.number}</a>
@@ -3313,7 +3364,7 @@ async function smgmtDropOnPlaceholder(event, placeholderN) {
   const iss = _smgmtData.issues.find(i => i.number === number);
   if (iss) iss.sprint = placeholderN;
 
-  // Add new sprint to sprints list and order
+  // Add new sprint to sprints list and order (sprint may already exist on GitHub for empty sprints)
   if (!_smgmtData.sprints.includes(placeholderN)) {
     _smgmtData.sprints.push(placeholderN);
     _smgmtData.sprints.sort((a, b) => a - b);
@@ -3321,8 +3372,11 @@ async function smgmtDropOnPlaceholder(event, placeholderN) {
   if (!_smgmtData.order.includes(newSprintLabel)) {
     _smgmtData.order.push(newSprintLabel);
   }
-  // Update placeholder to next+1
-  _smgmtData.placeholder_sprint = placeholderN + 1;
+  // Update placeholder: advance past the dropped sprint and any higher existing sprints
+  // (placeholderN + 1 is correct for the trailing placeholder; for existing empty sprints
+  //  smgmtRefreshBoard will re-sync the correct value from the server)
+  const maxExistingSprint = Math.max(..._smgmtData.sprints);
+  _smgmtData.placeholder_sprint = Math.max(placeholderN + 1, maxExistingSprint + 1);
 
   smgmtRender();
 
@@ -3429,10 +3483,181 @@ async function smgmtReorderSprints(fromLabel, toLabel) {
   }
 }
 
+// ── Multi-select (issue #206) ─────────────────────────────────────────────────
+
+function smgmtToggleIssueSelect(issueNum, checked) {
+  if (checked) {
+    _smgmtSelectedIssues.add(issueNum);
+  } else {
+    _smgmtSelectedIssues.delete(issueNum);
+  }
+  _smgmtUpdateSelectionUI();
+}
+
+function smgmtToggleSelectAll(checkboxEl) {
+  // Collect all visible ticket issue numbers from the DOM
+  const allCbs = document.querySelectorAll('#smgmt-body .smgmt-ticket-cb, #smgmt-backlog-tickets .smgmt-ticket-cb');
+  allCbs.forEach(cb => {
+    const row = cb.closest('.smgmt-ticket');
+    const num = row ? parseInt(row.dataset.issue, 10) : NaN;
+    if (!isNaN(num)) {
+      if (checkboxEl.checked) {
+        _smgmtSelectedIssues.add(num);
+      } else {
+        _smgmtSelectedIssues.delete(num);
+      }
+      cb.checked = checkboxEl.checked;
+      if (checkboxEl.checked) {
+        row.classList.add('is-selected');
+      } else {
+        row.classList.remove('is-selected');
+      }
+    }
+  });
+  _smgmtUpdateSelectionUI();
+}
+
+function smgmtClearSelection() {
+  _smgmtSelectedIssues.clear();
+  _smgmtUpdateSelectionUI();
+  // Uncheck all visible checkboxes without full re-render
+  document.querySelectorAll('.smgmt-ticket-cb').forEach(cb => { cb.checked = false; });
+  document.querySelectorAll('.smgmt-ticket.is-selected').forEach(el => el.classList.remove('is-selected'));
+  const selectAllCb = document.getElementById('smgmt-backlog-select-all');
+  if (selectAllCb) selectAllCb.checked = false;
+}
+
+function _smgmtUpdateSelectionUI() {
+  const count = _smgmtSelectedIssues.size;
+  const bulkBar = document.getElementById('smgmt-bulk-bar');
+  const bulkCount = document.getElementById('smgmt-bulk-count');
+  const moveToBtn = document.getElementById('smgmt-move-to-btn');
+
+  if (bulkBar) {
+    if (count > 0) {
+      bulkBar.classList.remove('hidden');
+    } else {
+      bulkBar.classList.add('hidden');
+    }
+  }
+  if (bulkCount) {
+    bulkCount.textContent = `${count} selected`;
+  }
+  if (moveToBtn) {
+    moveToBtn.style.display = count > 0 ? '' : 'none';
+  }
+}
+
+function smgmtBulkMoveToOpen() {
+  const count = _smgmtSelectedIssues.size;
+  if (count === 0) return;
+
+  // Populate sprint options
+  const select = document.getElementById('smgmt-moveto-select');
+  const countEl = document.getElementById('smgmt-moveto-count');
+  const errEl = document.getElementById('smgmt-moveto-error');
+  if (countEl) countEl.textContent = count;
+  if (errEl) { errEl.textContent = ''; errEl.style.display = 'none'; }
+
+  if (select) {
+    select.innerHTML = '<option value="">— choose a sprint —</option>';
+    const order = _smgmtData?.order || [];
+    const allNums = [...new Set([
+      ...order.map(l => parseInt(l.split('-')[1], 10)),
+      ...(_smgmtData?.sprints || []),
+    ])].filter(n => !isNaN(n)).sort((a, b) => a - b);
+
+    for (const n of allNums) {
+      const opt = document.createElement('option');
+      opt.value = `sprint-${n}`;
+      opt.textContent = `Sprint ${n}`;
+      select.appendChild(opt);
+    }
+    // Add backlog option
+    const backlogOpt = document.createElement('option');
+    backlogOpt.value = 'backlog';
+    backlogOpt.textContent = 'Backlog (remove sprint label)';
+    select.appendChild(backlogOpt);
+  }
+
+  const confirmBtn = document.getElementById('smgmt-moveto-confirm');
+  if (confirmBtn) { confirmBtn.disabled = false; confirmBtn.textContent = 'Move tickets'; }
+
+  document.getElementById('smgmt-moveto-backdrop')?.classList.remove('hidden');
+  document.getElementById('smgmt-moveto-modal')?.classList.remove('hidden');
+}
+
+function smgmtBulkMoveToClose() {
+  document.getElementById('smgmt-moveto-backdrop')?.classList.add('hidden');
+  document.getElementById('smgmt-moveto-modal')?.classList.add('hidden');
+}
+
+async function smgmtBulkMoveToConfirm() {
+  const select = document.getElementById('smgmt-moveto-select');
+  const errEl = document.getElementById('smgmt-moveto-error');
+  const confirmBtn = document.getElementById('smgmt-moveto-confirm');
+  const destination = select?.value;
+
+  if (!destination) {
+    if (errEl) { errEl.textContent = 'Please choose a destination sprint.'; errEl.style.display = ''; }
+    return;
+  }
+
+  const issueNums = [..._smgmtSelectedIssues];
+  if (issueNums.length === 0) { smgmtBulkMoveToClose(); return; }
+
+  if (confirmBtn) { confirmBtn.disabled = true; confirmBtn.textContent = 'Moving…'; }
+
+  const sprintNum = destination === 'backlog' ? null : parseInt(destination.split('-')[1], 10);
+
+  // Optimistic update: update local data
+  for (const num of issueNums) {
+    const iss = _smgmtData?.issues.find(i => i.number === num);
+    if (iss) iss.sprint = sprintNum;
+  }
+  smgmtRender();
+
+  // API calls — fire in parallel
+  const failures = [];
+  await Promise.all(issueNums.map(async num => {
+    try {
+      const res = await fetch('/api/sprint-planning/assign', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ issue: num, sprint: sprintNum }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+    } catch (e) {
+      failures.push(num);
+    }
+  }));
+
+  smgmtBulkMoveToClose();
+  _smgmtSelectedIssues.clear();
+  _smgmtUpdateSelectionUI();
+
+  if (failures.length > 0) {
+    smgmtShowError(`Failed to move ticket(s) #${failures.join(', #')}.`);
+    await smgmtRefreshBoard();
+  } else {
+    await smgmtRefreshBoard();
+  }
+}
+
+// Clear selection when navigating away from sprint-mgmt tab
+function smgmtClearSelectionOnNav() {
+  _smgmtSelectedIssues.clear();
+  _smgmtUpdateSelectionUI();
+}
+
 // ── Run sprint ────────────────────────────────────────────────────────────────
 
 let _smgmtMigrateTargetLabel = null;  // sprint label we are about to run
 let _smgmtMigrateChoices     = {};    // sprint_num (int) -> 'move' | 'leave'
+
+// State for the estimate summary modal (issue #211)
+let _smgmtEstTargetLabel       = null;   // sprint label pending confirmation
+let _smgmtEstEarlierWithTickets = [];    // earlier sprints for post-confirm migration
 
 async function smgmtRunSprint(sprintLabel) {
   if (!_smgmtCurrentRepo) return;
@@ -3442,10 +3667,8 @@ async function smgmtRunSprint(sprintLabel) {
     return;
   }
 
-  // Determine target sprint number
+  // Determine target sprint number and gather earlier sprints for migration
   const targetNum = parseInt(sprintLabel.split('-')[1], 10);
-
-  // Find earlier sprints with open (non-done) tickets
   const allIssues = _smgmtData?.issues || [];
   const earlierWithTickets = [];  // [ { sprintNum, sprintLabel, tickets: [] } ]
 
@@ -3461,14 +3684,123 @@ async function smgmtRunSprint(sprintLabel) {
     }
   }
 
+  // Always show estimate summary modal first (issue #211)
+  await smgmtEstOpen(sprintLabel, earlierWithTickets);
+}
+
+// ── Estimate summary modal (issue #211) ──────────────────────────────────────
+
+async function smgmtEstOpen(sprintLabel, earlierWithTickets) {
+  _smgmtEstTargetLabel        = sprintLabel;
+  _smgmtEstEarlierWithTickets = earlierWithTickets;
+
+  // Update header title placeholder while loading
+  const titleEl = document.getElementById('smgmt-est-title');
+  if (titleEl) titleEl.textContent = 'Run sprint?';
+
+  // Show modal immediately with a loading state
+  const bodyEl = document.getElementById('smgmt-est-body');
+  if (bodyEl) bodyEl.innerHTML = '<p style="color:var(--text-muted);padding:8px 0;">Loading estimate…</p>';
+  document.getElementById('smgmt-est-backdrop').classList.remove('hidden');
+  document.getElementById('smgmt-est-modal').classList.remove('hidden');
+  document.getElementById('smgmt-est-confirm').disabled = true;
+
+  // Fetch estimate summary from server
+  let summary = null;
+  try {
+    const res = await fetch(
+      `/api/sprints/${encodeURIComponent(sprintLabel)}/estimate-summary?project=${encodeURIComponent(_smgmtCurrentRepo)}`
+    );
+    if (res.ok) {
+      summary = await res.json();
+    }
+  } catch (_e) {
+    // silently ignore; we'll render without summary data
+  }
+
+  // Render modal content
+  if (!bodyEl) return;
+
+  const sprintNum = parseInt(sprintLabel.split('-')[1], 10);
+  const sprintName = summary ? summary.sprint_name : `Sprint ${sprintNum}`;
+  const totalTickets = summary ? summary.total_tickets : '?';
+  if (titleEl) titleEl.textContent = `${sprintName} — ${totalTickets} ticket${totalTickets !== 1 ? 's' : ''}`;
+
+  let html = '';
+
+  if (summary) {
+    const { size_counts, total_minutes, unsized_numbers } = summary;
+
+    // Size breakdown row (e.g. "3 × S, 5 × M, 2 × L")
+    const sizes = ['S', 'M', 'L', 'XL'];
+    const breakdownParts = sizes
+      .filter(s => (size_counts[s] || 0) > 0)
+      .map(s => `${size_counts[s]} &times; ${s}`);
+    const unsizedCount = unsized_numbers.length;
+    if (unsizedCount > 0) breakdownParts.push(`${unsizedCount} unsized`);
+    const breakdownStr = breakdownParts.length > 0 ? breakdownParts.join(', ') : 'No sized tickets';
+
+    // Total estimate display
+    let totalStr;
+    if (total_minutes > 0) {
+      const hrs  = Math.floor(total_minutes / 60);
+      const mins = total_minutes % 60;
+      if (hrs > 0 && mins > 0) totalStr = `${hrs} h ${mins} min`;
+      else if (hrs > 0) totalStr = `${hrs} h`;
+      else totalStr = `${mins} min`;
+    } else {
+      totalStr = 'Unknown (no ticket sizes)';
+    }
+
+    html += `
+      <table class="smgmt-est-table">
+        <tr>
+          <td>Size breakdown</td>
+          <td>${breakdownStr}</td>
+        </tr>
+        <tr class="smgmt-est-total-row">
+          <td>Total estimate</td>
+          <td>${totalStr}</td>
+        </tr>
+      </table>`;
+
+    if (unsizedCount > 0) {
+      const nums = unsized_numbers.map(n => `#${n}`).join(', ');
+      html += `
+        <div class="smgmt-est-warning">
+          <strong>Unsized tickets:</strong> ${nums}<br>
+          <span>Unsized tickets will not contribute to the estimate.</span>
+        </div>`;
+    }
+  } else {
+    html += '<p style="color:var(--text-muted)">Could not load estimate data. You can still proceed.</p>';
+  }
+
+  bodyEl.innerHTML = html;
+  document.getElementById('smgmt-est-confirm').disabled = false;
+  document.getElementById('smgmt-est-modal').focus();
+}
+
+function smgmtEstClose() {
+  document.getElementById('smgmt-est-backdrop').classList.add('hidden');
+  document.getElementById('smgmt-est-modal').classList.add('hidden');
+  _smgmtEstTargetLabel        = null;
+  _smgmtEstEarlierWithTickets = [];
+}
+
+async function smgmtEstConfirm() {
+  if (!_smgmtEstTargetLabel) return;
+  const sprintLabel       = _smgmtEstTargetLabel;
+  const earlierWithTickets = _smgmtEstEarlierWithTickets;
+  smgmtEstClose();
+
   if (earlierWithTickets.length === 0) {
     // No migration needed — dispatch directly
     await smgmtDispatchRun(sprintLabel, []);
-    return;
+  } else {
+    // Show migration modal next
+    smgmtMigrateOpen(sprintLabel, earlierWithTickets);
   }
-
-  // Show migration modal
-  smgmtMigrateOpen(sprintLabel, earlierWithTickets);
 }
 
 function smgmtMigrateOpen(targetLabel, earlierSprints) {
@@ -3624,14 +3956,9 @@ async function smgmtPollRunStatus() {
     let sprintStatusMap = {};  // sprint_label -> status object
     if (statusRes.ok) {
       const statusData = await statusRes.json();
-      if (statusData.statuses) {
-        // New multi-sprint format
-        for (const s of statusData.statuses) {
-          if (s.sprint_label) sprintStatusMap[s.sprint_label] = s;
-        }
-      } else if (statusData.active && statusData.sprint_label) {
-        // Legacy single-sprint format
-        sprintStatusMap[statusData.sprint_label] = statusData;
+      const sprints = statusData.running_sprints || [];
+      for (const s of sprints) {
+        if (s.sprint_label) sprintStatusMap[s.sprint_label] = s;
       }
     }
 
@@ -4972,6 +5299,22 @@ function showErrorToast(msg) {
       }
     }
   });
+
+  // Estimate summary modal keyboard shortcuts (issue #211)
+  document.addEventListener('keydown', e => {
+    const modal = document.getElementById('smgmt-est-modal');
+    if (!modal || modal.classList.contains('hidden')) return;
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      smgmtEstClose();
+    } else if (e.key === 'Enter') {
+      const confirmBtn = document.getElementById('smgmt-est-confirm');
+      if (confirmBtn && !confirmBtn.disabled) {
+        e.preventDefault();
+        smgmtEstConfirm();
+      }
+    }
+  });
 })();
 
 // ── Draft Ticket Modal (issue #94) ────────────────────────────────────────────
@@ -5307,7 +5650,7 @@ function _dtShowError(msg) {
   el.classList.remove('hidden');
 }
 
-// ── Bulk Create Modal (issue #189 / #205) ─────────────────────────────────────
+// ── Bulk Create Modal (issue #189 / #205 / #208) ──────────────────────────────
 
 let _bcJobId = null;
 let _bcEventSource = null;
@@ -5316,6 +5659,7 @@ let _bcDebounceTimer = null;
 let _bcStartTimes = {};      // index -> start timestamp (for elapsed calc)
 let _bcAvgMs = null;         // rolling avg BA time per ticket
 let _bcFiles = [];           // queued attachment files (issue #205)
+let _bcLastInput = null;     // preserved Step 1 inputs for Recreate (issue #208)
 
 const BC_MAX_PROMPTS = 25;
 const BC_ALLOWED_EXTS = new Set([
@@ -5454,7 +5798,7 @@ function closeBulkCreateModal() {
 }
 
 function _bcBackdropClick() {
-  closeBulkCreateModal();
+  // Backdrop click intentionally does nothing — use Cancel or ✕ to close (issue #208)
 }
 
 // Keyboard: Esc closes; Cmd/Ctrl+Enter triggers Run
@@ -5545,6 +5889,14 @@ async function bcRunAll() {
   const uniqueLabels = [...new Set(defaultLabels)];
 
   const concurrency = parseInt(document.getElementById('bc-concurrency').value, 10);
+
+  // Preserve Step 1 inputs so Recreate can repopulate them (issue #208)
+  _bcLastInput = {
+    text,
+    repo,
+    labelsRaw,
+    concurrency,
+  };
 
   const runBtn = document.getElementById('bc-run-btn');
   runBtn.disabled = true;
@@ -5695,16 +6047,20 @@ function _bcRenderStep2() {
   // Footer buttons
   const stopBtn = document.getElementById('bc-stop-btn');
   const doneBtn = document.getElementById('bc-done-btn');
+  const recreateBtn = document.getElementById('bc-recreate-btn');
   if (stopBtn && doneBtn) {
     if (job.status === 'running') {
       stopBtn.disabled = false;
       doneBtn.disabled = true;
       doneBtn.textContent = 'Running...';
+      if (recreateBtn) recreateBtn.classList.add('hidden');
     } else {
       stopBtn.disabled = true;
       doneBtn.disabled = false;
       doneBtn.textContent = 'Close';
       doneBtn.onclick = closeBulkCreateModal;
+      // Show Recreate button once job is done/stopped (issue #208)
+      if (recreateBtn) recreateBtn.classList.remove('hidden');
     }
   }
 
@@ -5841,6 +6197,48 @@ async function bcStop() {
   } catch (_) {}
 }
 
+// Recreate: go back to Step 1 with the same input data (issue #208)
+function bcRecreate() {
+  // Disconnect SSE and clear job state
+  if (_bcEventSource) {
+    _bcEventSource.close();
+    _bcEventSource = null;
+  }
+  localStorage.removeItem('bc_job_id');
+  _bcJobId = null;
+  _bcJobState = null;
+  _bcStartTimes = {};
+  _bcAvgMs = null;
+
+  _bcShowStep1();
+
+  // Populate repo dropdown
+  const sel = document.getElementById('bc-repo');
+  sel.innerHTML = allProjects.map(p =>
+    `<option value="${escapeHtml(p.repo)}">${escapeHtml(p.name || p.repo)}</option>`
+  ).join('');
+
+  // Restore previous input values if available
+  if (_bcLastInput) {
+    if (sel && _bcLastInput.repo) sel.value = _bcLastInput.repo;
+    const textarea = document.getElementById('bc-textarea');
+    if (textarea) textarea.value = _bcLastInput.text || '';
+    const labelsEl = document.getElementById('bc-default-labels');
+    if (labelsEl) labelsEl.value = _bcLastInput.labelsRaw || 'enhancement';
+    const concEl = document.getElementById('bc-concurrency');
+    if (concEl) concEl.value = String(_bcLastInput.concurrency || 3);
+  } else {
+    if (_activeProject) sel.value = _activeProject;
+    document.getElementById('bc-textarea').value = '';
+    document.getElementById('bc-default-labels').value = 'enhancement';
+    document.getElementById('bc-concurrency').value = '3';
+  }
+
+  document.getElementById('bc-step1-error').classList.add('hidden');
+  // Do NOT reset files — keep the same attachments for the re-run
+  _bcUpdateCounter();
+}
+
 function _bcShowToast(msg) {
   const existing = document.querySelector('.bc-toast');
   if (existing) existing.remove();
@@ -5849,4 +6247,81 @@ function _bcShowToast(msg) {
   toast.textContent = msg;
   document.body.appendChild(toast);
   setTimeout(() => toast.remove(), 4000);
+}
+
+// ── Deploy to Production ──────────────────────────────────────────────────────
+
+function openDeployModal() {
+  const errEl = document.getElementById('deploy-modal-error');
+  if (errEl) { errEl.textContent = ''; errEl.classList.add('hidden'); }
+  const confirmBtn = document.getElementById('deploy-modal-confirm-btn');
+  const cancelBtn  = document.getElementById('deploy-modal-cancel-btn');
+  if (confirmBtn) { confirmBtn.disabled = false; confirmBtn.innerHTML = '<i class="ti ti-rocket"></i> Create Draft PR'; }
+  if (cancelBtn)  cancelBtn.disabled = false;
+  document.getElementById('deploy-modal-backdrop')?.classList.remove('hidden');
+  document.getElementById('deploy-modal')?.classList.remove('hidden');
+}
+
+function closeDeployModal() {
+  const confirmBtn = document.getElementById('deploy-modal-confirm-btn');
+  // Don't close while in loading state
+  if (confirmBtn && confirmBtn.disabled) return;
+  document.getElementById('deploy-modal-backdrop')?.classList.add('hidden');
+  document.getElementById('deploy-modal')?.classList.add('hidden');
+}
+
+async function confirmDeploy() {
+  const confirmBtn = document.getElementById('deploy-modal-confirm-btn');
+  const cancelBtn  = document.getElementById('deploy-modal-cancel-btn');
+  const errEl      = document.getElementById('deploy-modal-error');
+  if (!confirmBtn) return;
+
+  confirmBtn.disabled = true;
+  if (cancelBtn) cancelBtn.disabled = true;
+  confirmBtn.innerHTML = '<span class="dt-spinner"></span> Creating PR…';
+  if (errEl) { errEl.textContent = ''; errEl.classList.add('hidden'); }
+
+  try {
+    const res = await fetch('/api/deploy/promote', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ draft: true }),
+    });
+
+    if (!res.ok) {
+      let detail = `${res.status} ${res.statusText}`;
+      try { const d = await res.json(); detail = d.detail || detail; } catch {}
+      if (errEl) { errEl.textContent = detail; errEl.classList.remove('hidden'); }
+      confirmBtn.disabled = false;
+      if (cancelBtn) cancelBtn.disabled = false;
+      confirmBtn.innerHTML = '<i class="ti ti-rocket"></i> Create Draft PR';
+      return;
+    }
+
+    const data = await res.json();
+    const prUrl = data.pr_url || '';
+
+    // Close the modal
+    document.getElementById('deploy-modal-backdrop')?.classList.add('hidden');
+    document.getElementById('deploy-modal')?.classList.add('hidden');
+
+    // Show deploy toast with PR URL and View PR button
+    showDeployToast(prUrl);
+  } catch (e) {
+    if (errEl) { errEl.textContent = `Request failed: ${e.message}`; errEl.classList.remove('hidden'); }
+    if (confirmBtn) { confirmBtn.disabled = false; confirmBtn.innerHTML = '<i class="ti ti-rocket"></i> Create Draft PR'; }
+    if (cancelBtn)  cancelBtn.disabled = false;
+  }
+}
+
+function showDeployToast(prUrl) {
+  const t = document.getElementById('toast-deploy');
+  if (!t) return;
+  if (prUrl) {
+    t.innerHTML = `Draft PR created successfully! <a href="${escapeHtml(prUrl)}" target="_blank" rel="noopener noreferrer" style="color:#93c5fd;font-weight:600;text-decoration:underline;">View PR</a>`;
+  } else {
+    t.innerHTML = 'Draft PR created successfully!';
+  }
+  t.style.display = 'block';
+  setTimeout(() => { t.style.display = 'none'; }, 8000);
 }

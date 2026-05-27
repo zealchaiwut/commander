@@ -326,11 +326,18 @@ def _acquire_pid_lock(sprint_label: str, project: str,
                       cfg: Optional["SprintConfig"] = None) -> Path:
     """Write a PID file scoped to (project, sprint_label).
 
-    If another process holds the lock and is still alive, exits with an error.
-    If the PID file is stale (process dead), logs a warning and cleans it up.
+    Handles three cases:
+    1. No file exists (CLI dispatch): creates the file fresh.
+    2. File already exists with *our own* PID (server-dispatch two-phase claim,
+       issue #155): file is already correct — nothing to do.
+    3. File exists with a different PID:
+       a. Process alive → another instance is running; exit with an error.
+       b. Process dead → stale lock; log, clean up, then write fresh.
+
     Returns the path so the caller can release it on exit.
     """
     pid_path = _pid_file_path(sprint_label, cfg)
+    my_pid   = os.getpid()
 
     if pid_path.exists():
         stale_pid: Optional[int] = None
@@ -338,6 +345,10 @@ def _acquire_pid_lock(sprint_label: str, project: str,
             stale_pid = int(pid_path.read_text().strip())
         except (ValueError, OSError):
             pass
+
+        # Case 2: server already wrote our PID via two-phase claim — nothing to do.
+        if stale_pid == my_pid:
+            return pid_path
 
         alive = False
         if stale_pid is not None:
@@ -363,7 +374,7 @@ def _acquire_pid_lock(sprint_label: str, project: str,
             except OSError:
                 pass
 
-    pid_path.write_text(str(os.getpid()))
+    pid_path.write_text(str(my_pid))
     return pid_path
 
 
@@ -791,11 +802,18 @@ def _post_agent_event(
         pass
 
 
-def _post_sprint_status(state: "SprintState", api_url: Optional[str] = None) -> None:
+def _post_sprint_status(
+    state: "SprintState",
+    api_url: Optional[str] = None,
+    project: Optional[str] = None,
+) -> None:
     """POST the current sprint state to /api/sprint-status."""
     base = api_url or DASHBOARD_API_URL
     try:
-        payload = json.dumps(state.to_dict()).encode()
+        data = state.to_dict()
+        if project:
+            data["project"] = project
+        payload = json.dumps(data).encode()
         req = urllib.request.Request(
             f"{base}/api/sprint-status",
             data=payload,
@@ -816,6 +834,7 @@ def dispatch_alerts(
     issue_num: Optional[int] = None,
     category: Optional[str] = None,
     cfg: Optional["SprintConfig"] = None,
+    repo: Optional[str] = None,
 ) -> None:
     """Dispatch an alert through all configured channels."""
     api_url    = cfg.api_url    if cfg is not None else None
@@ -825,7 +844,7 @@ def dispatch_alerts(
             continue
         try:
             if mode == AlertMode.DASHBOARD_BANNER:
-                _alert_dashboard_banner(title, body, issue_num, category, api_url=api_url)
+                _alert_dashboard_banner(title, body, issue_num, category, api_url=api_url, repo=repo)
             elif mode == AlertMode.EMAIL:
                 _alert_email(title, body)
             elif mode == AlertMode.DISCORD:
@@ -842,6 +861,7 @@ def _alert_dashboard_banner(
     issue_num: Optional[int],
     category: Optional[str],
     api_url: Optional[str] = None,
+    repo: Optional[str] = None,
 ) -> None:
     base = api_url or DASHBOARD_API_URL
     payload = json.dumps({
@@ -849,6 +869,7 @@ def _alert_dashboard_banner(
         "body":       body,
         "issue_num":  issue_num,
         "category":   category,
+        "repo":       repo,
         "timestamp":  _utcnow(),
     }).encode()
     req = urllib.request.Request(
@@ -1479,6 +1500,7 @@ def handle_post_tester(
                 issue_num=issue_num,
                 category=FailureCategory.TESTER_REJECTED,
                 cfg=cfg,
+                repo=eff_repo,
             )
         return (False,
                 f"Issue #{issue_num}: tester exited 0 but not UAT -- no merge",
@@ -1738,6 +1760,7 @@ def _dispatch_coder(
                 issue_num=issue_num,
                 category=FailureCategory.HANG,
                 cfg=cfg,
+                repo=eff_repo,
             )
             return False, FailureCategory.HANG
 
@@ -1914,6 +1937,7 @@ def _dispatch_tester(
                 issue_num=issue_num,
                 category=FailureCategory.HANG,
                 cfg=cfg,
+                repo=eff_repo,
             )
             return -1, FailureCategory.HANG
 
@@ -2453,7 +2477,7 @@ def write_sprint_summary(
     # Dispatch via all configured alert channels (issue #24)
     if alert_modes:
         title = f"Sprint {state.sprint_label} summary"
-        dispatch_alerts(alert_modes, title=title, body=content[:2000], cfg=cfg)
+        dispatch_alerts(alert_modes, title=title, body=content[:2000], cfg=cfg, repo=eff_repo)
 
     # AC-5: skip GitHub issue creation entirely for dry runs
     if dry_run:
@@ -3544,7 +3568,12 @@ def run_sprint(
             _size  = _est.get("size", "?")
             _hours = _est.get("estimated_hours", "?")
             _conf  = _est.get("confidence", "?")
-            print(f"  [estimate] size={_size} (~{_hours}h), confidence={_conf}")
+            try:
+                _h = float(_hours)
+                _time_str = f"~{int(_h * 60)}min" if _h < 1 else f"~{_h}h"
+            except (TypeError, ValueError):
+                _time_str = f"~{_hours}h"
+            print(f"  [estimate] size={_size} ({_time_str}), confidence={_conf}")
             _risk = _est.get("risk_flags", [])
             if _risk:
                 print(f"  [estimate] risk flags: {', '.join(_risk)}")
@@ -3561,7 +3590,7 @@ def run_sprint(
             issue_state.skip_reason     = "preflight-skipped"
             summary.skipped.append(f"#{num} (preflight-skipped)")
             state.save(state_path)
-            _post_sprint_status(state, api_url=api_url)
+            _post_sprint_status(state, api_url=api_url, project=eff_repo)
             continue
 
         if dry_run:
@@ -3570,7 +3599,7 @@ def run_sprint(
             issue_state.skip_reason = "dry-run"
             summary.skipped.append(f"#{num} (dry-run)")
             state.save(state_path)
-            _post_sprint_status(state, api_url=api_url)
+            _post_sprint_status(state, api_url=api_url, project=eff_repo)
             continue
 
         # -- Port detection (issue #62, AC-5/6/7/8) --
@@ -3629,9 +3658,10 @@ def run_sprint(
                 issue_num=num,
                 category=category,
                 cfg=cfg,
+                repo=eff_repo,
             )
             state.save(state_path)
-            _post_sprint_status(state, api_url=api_url)
+            _post_sprint_status(state, api_url=api_url, project=eff_repo)
             continue
 
         # -- Lifecycle: coder_done → tester_dispatched --
@@ -3672,7 +3702,7 @@ def run_sprint(
             issue_state.category           = FailureCategory.HANG
             summary.skipped.append(f"#{num} (tester hang)")
             state.save(state_path)
-            _post_sprint_status(state, api_url=api_url)
+            _post_sprint_status(state, api_url=api_url, project=eff_repo)
             continue
 
         if hang_category == FailureCategory.RETRY_EXHAUSTED:
@@ -3733,12 +3763,13 @@ def run_sprint(
                 issue_num=num,
                 category=category,
                 cfg=cfg,
+                repo=eff_repo,
             )
 
         elapsed = time.monotonic() - start_time
         state.wall_clock_secs = elapsed
         state.save(state_path)
-        _post_sprint_status(state, api_url=api_url)
+        _post_sprint_status(state, api_url=api_url, project=eff_repo)
 
     # Final elapsed time
     state.wall_clock_secs = time.monotonic() - start_time
@@ -3938,28 +3969,29 @@ def main() -> None:
     # --repo flag overrides config (explicit always wins)
     eff_repo = args.repo or (cfg.repo_name if cfg else None)
 
-    # ── Per-project PID lock (issue #122) ────────────────────────────────────
-    # When dispatched by the dashboard server, the server already writes the
-    # PID file after Popen.  Acquiring the lock here would read that same file
-    # and mistake our own PID for a running instance (self-collision).  Skip
-    # the lock entirely; the server's write at server.py:1629 remains in place.
-    if not os.environ.get("COMMANDER_DISPATCHED_BY_SERVER"):
-        _project_id = eff_repo or _r(None)
-        _pid_path = _acquire_pid_lock(args.label, _project_id, cfg=cfg)
+    # ── Per-project PID lock (issues #122, #155) ─────────────────────────────
+    # Both dispatch paths (HTTP server and CLI) use the same locking protocol.
+    # When dispatched by the server the server has already atomically claimed
+    # the slot by writing <label>-pid (via two-phase rename from -pid.pending).
+    # _acquire_pid_lock detects our own PID in that file and skips the
+    # "already running" guard, then re-confirms the file still points to us.
+    # On CLI dispatch the file does not yet exist and is created fresh.
+    _project_id = eff_repo or _r(None)
+    _pid_path = _acquire_pid_lock(args.label, _project_id, cfg=cfg)
 
-        def _cleanup_pid() -> None:
-            _release_pid_lock(_pid_path)
+    def _cleanup_pid() -> None:
+        _release_pid_lock(_pid_path)
 
-        atexit.register(_cleanup_pid)
+    atexit.register(_cleanup_pid)
 
-        _orig_sigterm = signal.getsignal(signal.SIGTERM)
+    _orig_sigterm = signal.getsignal(signal.SIGTERM)
 
-        def _sigterm_handler(signum: int, frame: object) -> None:
-            _cleanup_pid()
-            signal.signal(signal.SIGTERM, _orig_sigterm or signal.SIG_DFL)
-            os.kill(os.getpid(), signal.SIGTERM)
+    def _sigterm_handler(signum: int, frame: object) -> None:
+        _cleanup_pid()
+        signal.signal(signal.SIGTERM, _orig_sigterm or signal.SIG_DFL)
+        os.kill(os.getpid(), signal.SIGTERM)
 
-        signal.signal(signal.SIGTERM, _sigterm_handler)
+    signal.signal(signal.SIGTERM, _sigterm_handler)
 
     # ── Pre-flight review (AC-1 of issue #33) ────────────────────────────────
     preflight_approved: Optional[list] = None  # None = no preflight, list = approved numbers

@@ -1091,6 +1091,7 @@
 
 <div id="toast-error" style="display:none;position:fixed;top:12px;right:12px;z-index:9999;background:#ef4444;color:#fff;padding:8px 14px;border-radius:6px;font-size:13px;max-width:320px;box-shadow:0 2px 8px rgba(0,0,0,.2)"></div>
 <div id="toast-success" style="display:none;position:fixed;top:52px;right:12px;z-index:9999;background:#16a34a;color:#fff;padding:8px 14px;border-radius:6px;font-size:13px;max-width:320px;box-shadow:0 2px 8px rgba(0,0,0,.2)"></div>
+<div id="toast-deploy" style="display:none;position:fixed;top:92px;right:12px;z-index:9999;background:#1d4ed8;color:#fff;padding:10px 14px;border-radius:6px;font-size:13px;max-width:360px;box-shadow:0 2px 8px rgba(0,0,0,.2);line-height:1.5;"></div>
 
 <!-- ── Alert banners (AC-3a) ── -->
 <div id="alert-banners" style="padding:0 16px;"></div>
@@ -1348,13 +1349,23 @@
       <div class="smgmt-header-actions">
         <button class="btn-secondary" id="smgmt-auto-refresh-btn" onclick="smgmtAutoRefreshNow()" title="Automatically re-fetches sprint board data every 30 seconds; click to refresh immediately">Auto Refresh (30s)</button>
         <button class="btn-secondary" onclick="openDraftTicketModal()">+ New Ticket</button>
-        <button class="btn-secondary" id="bulk-create-btn" onclick="openBulkCreateModal()">Bulk create</button>
+        <button class="btn-secondary" id="bulk-create-btn" onclick="openBulkCreateModal()">+ Bulk Create</button>
+        <button class="btn-secondary" id="smgmt-move-to-btn" onclick="smgmtBulkMoveToOpen()" style="display:none;">Move to</button>
         <button class="btn-primary smgmt-new-sprint-btn" id="smgmt-new-sprint-btn"
                 onclick="smgmtCreateSprint()" title="Create next sprint label on GitHub">+ New Sprint</button>
+        <button class="btn-deploy" id="deploy-to-prod-btn"
+                onclick="openDeployModal()" title="Create a draft PR from develop to master">
+          <i class="ti ti-rocket"></i> Deploy to Production
+        </button>
       </div>
     </div>
     <div class="smgmt-error hidden" id="smgmt-error"></div>
     <div class="smgmt-cleanup-banner hidden" id="smgmt-cleanup-banner"></div>
+    <div class="smgmt-bulk-bar hidden" id="smgmt-bulk-bar">
+      <span class="smgmt-bulk-count" id="smgmt-bulk-count">0 selected</span>
+      <button class="btn-secondary smgmt-bulk-action-btn" onclick="smgmtBulkMoveToOpen()">Move to sprint…</button>
+      <button class="btn-ghost smgmt-bulk-clear-btn" onclick="smgmtClearSelection()">Clear selection</button>
+    </div>
     <div class="smgmt-body" id="smgmt-body">
       <div class="smgmt-loading" id="smgmt-loading">Select a project to view sprints.</div>
     </div>
@@ -1364,6 +1375,9 @@
          ondrop="smgmtDropOnSprint(event, null)">
       <div class="smgmt-backlog-header">
         <div class="smgmt-backlog-title">
+          <input type="checkbox" class="smgmt-select-all" id="smgmt-backlog-select-all"
+                 title="Select all backlog tickets"
+                 onclick="event.stopPropagation()" onchange="smgmtToggleSelectAll(this)">
           <i class="ti ti-inbox"></i>
           <span id="smgmt-backlog-label">Backlog</span>
         </div>
@@ -1701,6 +1715,26 @@
   </div>
 </div>
 
+<!-- Bulk "Move to sprint" modal (issue #206) -->
+<div class="modal-backdrop hidden" id="smgmt-moveto-backdrop" onclick="smgmtBulkMoveToClose()"></div>
+<div class="modal hidden" id="smgmt-moveto-modal" role="dialog" aria-modal="true">
+  <div class="modal-header">
+    <span class="modal-title">Move Selected Tickets</span>
+    <button class="modal-close" onclick="smgmtBulkMoveToClose()" aria-label="Close">&times;</button>
+  </div>
+  <div style="padding: 16px 24px; font-size: 13px; color: var(--text-muted);">
+    <p style="margin: 0 0 12px;">Move <strong id="smgmt-moveto-count">0</strong> selected ticket(s) to:</p>
+    <select id="smgmt-moveto-select" class="smgmt-proj-select" style="width:100%; min-width:0;">
+      <option value="">— choose a sprint —</option>
+    </select>
+    <div id="smgmt-moveto-error" style="color:var(--red); font-size:12px; margin-top:8px; display:none;"></div>
+  </div>
+  <div class="modal-footer">
+    <button class="btn-ghost" onclick="smgmtBulkMoveToClose()">Cancel</button>
+    <button class="btn-primary" id="smgmt-moveto-confirm" onclick="smgmtBulkMoveToConfirm()">Move tickets</button>
+  </div>
+</div>
+
 <!-- Sprint migration modal (shown before dispatch when earlier sprints have open tickets) -->
 <div class="modal-backdrop hidden" id="smgmt-migrate-backdrop" onclick="smgmtMigrateClose()"></div>
 <div class="modal hidden" id="smgmt-migrate-modal" role="dialog" aria-modal="true">
@@ -1712,6 +1746,20 @@
   <div class="modal-footer">
     <button class="btn-ghost" onclick="smgmtMigrateClose()">Cancel</button>
     <button class="btn-primary" id="smgmt-migrate-confirm" onclick="smgmtMigrateConfirm()">Run sprint</button>
+  </div>
+</div>
+
+<!-- Estimate summary modal shown before dispatching sprint (issue #211) -->
+<div class="modal-backdrop hidden" id="smgmt-est-backdrop" onclick="smgmtEstClose()"></div>
+<div class="modal hidden" id="smgmt-est-modal" role="dialog" aria-modal="true" aria-labelledby="smgmt-est-title">
+  <div class="modal-header">
+    <span class="modal-title" id="smgmt-est-title">Run sprint?</span>
+    <button class="modal-close" onclick="smgmtEstClose()" aria-label="Close">&times;</button>
+  </div>
+  <div class="smgmt-est-body" id="smgmt-est-body"></div>
+  <div class="modal-footer">
+    <button class="btn-ghost" onclick="smgmtEstClose()">Cancel</button>
+    <button class="btn-primary" id="smgmt-est-confirm" onclick="smgmtEstConfirm()">Confirm and run</button>
   </div>
 </div>
 
@@ -1956,6 +2004,15 @@
   }
   .smgmt-proj-select:focus { border-color: var(--blue); }
   .smgmt-new-sprint-btn { font-size: 12px; padding: 6px 14px; }
+  .btn-deploy {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 6px 14px; border: none; border-radius: 6px;
+    background: #1d4ed8; color: #fff; font-size: 12px; font-weight: 600;
+    cursor: pointer; white-space: nowrap; transition: background .15s;
+  }
+  .btn-deploy:hover { background: #1e40af; }
+  .btn-deploy:disabled { opacity: .5; cursor: not-allowed; }
+  .btn-deploy .ti { font-size: 13px; }
 
   .smgmt-error {
     margin: 12px 24px; padding: 10px 14px; background: var(--red-bg);
@@ -2035,6 +2092,32 @@
 
   .smgmt-delete-body { padding: 12px 24px 8px; font-size: 13px; color: var(--text-main); }
   .smgmt-delete-body p { margin: 0; }
+
+  /* Estimate summary modal (issue #211) */
+  .smgmt-est-body { padding: 16px 24px 8px; font-size: 13px; color: var(--text-main); }
+  .smgmt-est-subtitle {
+    font-size: 12px; color: var(--text-muted); margin: 0 0 14px;
+  }
+  .smgmt-est-table {
+    width: 100%; border-collapse: collapse; margin-bottom: 12px;
+  }
+  .smgmt-est-table td {
+    padding: 5px 0; font-size: 13px; vertical-align: top;
+  }
+  .smgmt-est-table td:first-child {
+    color: var(--text-muted); width: 160px; padding-right: 12px;
+  }
+  .smgmt-est-total-row td { font-weight: 600; padding-top: 10px; border-top: 1px solid var(--border); }
+  .smgmt-est-warning {
+    background: var(--amber-bg, rgba(245,158,11,.1));
+    border: 1px solid var(--amber, #d97706);
+    border-radius: 6px;
+    padding: 8px 12px;
+    font-size: 12px;
+    color: var(--text-main);
+    margin-top: 4px;
+  }
+  .smgmt-est-warning strong { color: var(--amber, #d97706); }
 
   /* Finish Sprint button (issue #195) */
   .smgmt-finish-btn {
@@ -2292,6 +2375,36 @@
   }
   .smgmt-placeholder-tickets { min-height: 52px; }
 
+  /* ── Multi-select checkboxes (issue #206) ── */
+  .smgmt-ticket-cb {
+    flex-shrink: 0; width: 14px; height: 14px; cursor: pointer;
+    accent-color: var(--blue);
+  }
+  .smgmt-ticket.is-selected {
+    background: var(--blue-bg) !important;
+    border-color: var(--blue) !important;
+  }
+  .smgmt-select-all {
+    cursor: pointer; width: 14px; height: 14px;
+    accent-color: var(--blue); flex-shrink: 0;
+  }
+
+  /* ── Bulk action bar (issue #206) ── */
+  .smgmt-bulk-bar {
+    margin: 0 24px 8px; padding: 8px 14px;
+    background: var(--blue-bg); border: 1px solid var(--blue);
+    border-radius: 6px; font-size: 12px;
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  }
+  .smgmt-bulk-count { font-weight: 700; color: var(--blue); flex-shrink: 0; }
+  .smgmt-bulk-action-btn { font-size: 12px; padding: 4px 10px; }
+  .smgmt-bulk-clear-btn {
+    font-size: 12px; padding: 4px 10px; margin-left: auto;
+    background: none; border: none; color: var(--text-muted); cursor: pointer;
+    font-family: inherit;
+  }
+  .smgmt-bulk-clear-btn:hover { color: var(--text); text-decoration: underline; }
+
   /* ── Cleanup modal body ── */
   .smgmt-cleanup-body { padding: 12px 24px 4px; font-size: 13px; }
   .smgmt-cleanup-row {
@@ -2302,6 +2415,26 @@
   .smgmt-cleanup-label { font-weight: 700; color: var(--text-sub); }
   .smgmt-cleanup-desc { font-size: 11px; color: var(--text-muted); }
 </style>
+
+<!-- Deploy to Production confirmation modal -->
+<div class="modal-backdrop hidden" id="deploy-modal-backdrop" onclick="closeDeployModal()"></div>
+<div class="modal hidden" id="deploy-modal" role="dialog" aria-modal="true">
+  <div class="modal-header">
+    <span class="modal-title">Deploy to Production?</span>
+    <button class="modal-close" onclick="closeDeployModal()" aria-label="Close">&times;</button>
+  </div>
+  <div style="padding: 0 4px 8px; font-size: 13px; color: var(--text-muted);">
+    This will create a draft PR from <strong>develop</strong> to <strong>master</strong> with a sprint summary and changelog.
+    The PR will not be merged automatically — you review and merge it manually.
+  </div>
+  <div class="modal-error hidden" id="deploy-modal-error" style="color: var(--red); font-size: 12px; margin: 4px 0 8px;"></div>
+  <div class="modal-footer">
+    <button class="btn-ghost" id="deploy-modal-cancel-btn" onclick="closeDeployModal()">Cancel</button>
+    <button class="btn-primary" id="deploy-modal-confirm-btn" onclick="confirmDeploy()">
+      <i class="ti ti-rocket"></i> Create Draft PR
+    </button>
+  </div>
+</div>
 
 <!-- Approve ticket confirmation modal -->
 <div class="modal-backdrop hidden" id="approve-backdrop" onclick="approveModalCancel()"></div>
@@ -2860,6 +2993,7 @@
         <span class="bc-hint">You can close this modal &mdash; the job continues in the background.</span>
       </div>
       <div class="bc-footer-right">
+        <button type="button" class="btn-secondary hidden" id="bc-recreate-btn" onclick="bcRecreate()">Recreate</button>
         <button type="button" class="btn-danger" id="bc-stop-btn" onclick="bcStop()">Stop after current</button>
         <button type="button" class="btn-primary" id="bc-done-btn" disabled>Running...</button>
       </div>

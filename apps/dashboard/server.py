@@ -836,9 +836,8 @@ def dismiss_alert(idx: int):
 
 # ── sprint status endpoint (AC-6 from #24) ───────────────────────────────────
 
-# Keyed by project ("owner/repo"). Legacy fallback key is "" for older sprint
-# managers that do not send a project field.
-_sprint_statuses: dict[str, dict] = {}
+# Keyed by (project, sprint_label); populated by POST /api/sprint-status from sprint_manager.py
+_sprint_statuses: dict[tuple, dict] = {}
 
 
 class SprintStatusPayload(BaseModel):
@@ -857,95 +856,34 @@ class SprintStatusPayload(BaseModel):
 
 
 @app.post("/api/sprint-status")
-async def set_sprint_status(payload: SprintStatusPayload):
+def set_sprint_status(payload: SprintStatusPayload):
     global _sprint_statuses
-    data = payload.model_dump()
-    key = data.get("project") or ""
-    _sprint_statuses[key] = data
-    await broadcast({"type": "sprint_update", **data})
+    key = (payload.project, payload.sprint_label)
+    _sprint_statuses[key] = payload.model_dump()
     return {"ok": True}
 
 
 @app.get("/api/sprint-status")
 def get_sprint_status(project: Optional[str] = None):
-    """Return sprint status.
-
-    Without ?project=: returns all active statuses as a list under key "statuses".
-    With ?project=owner/repo: returns single status dict (or {"active": False}).
-
-    For backwards compatibility the response always includes "active" key.
-    """
-    if project is not None:
-        status = _sprint_statuses.get(project)
-        if status is None:
-            return {"active": False}
-        return {**status, "active": True}
-    # Return all stored statuses
-    statuses = [
-        {**v, "active": True}
-        for v in _sprint_statuses.values()
-        if v.get("sprint_label")
-    ]
-    if not statuses:
-        return {"active": False, "statuses": []}
-    return {"active": True, "statuses": statuses}
-
-
-@app.post("/api/sprint-pause")
-async def sprint_pause():
-    """AC-4: Create pause file, set paused=True in state, broadcast SSE."""
-    global _sprint_status
-    if _sprint_status is None:
-        raise HTTPException(status_code=404, detail="No active sprint")
-    n = _sprint_status.get("sprint_number")
-    if n is not None:
-        pause_file = SPRINTS_DIR / f"sprint-{n}.pause"
-        pause_file.parent.mkdir(parents=True, exist_ok=True)
-        pause_file.touch()
-    _sprint_status["paused"] = True
-    await broadcast({"type": "sprint_update", **_sprint_status})
-    return {"ok": True, "state": "paused"}
-
-
-@app.post("/api/sprint-resume")
-async def sprint_resume():
-    """AC-5: Remove pause file, set paused=False in state, broadcast SSE."""
-    global _sprint_status
-    if _sprint_status is None:
-        raise HTTPException(status_code=404, detail="No active sprint")
-    n = _sprint_status.get("sprint_number")
-    if n is not None:
-        pause_file = SPRINTS_DIR / f"sprint-{n}.pause"
-        pause_file.unlink(missing_ok=True)
-    _sprint_status["paused"] = False
-    await broadcast({"type": "sprint_update", **_sprint_status})
-    return {"ok": True, "state": "running"}
-
-
-@app.post("/api/sprint-stop")
-async def sprint_stop():
-    """AC-6: Read PID from sprint-N.pid, SIGTERM the process, clear state, broadcast sprint_stopped."""
-    global _sprint_status
-    if _sprint_status is None:
-        raise HTTPException(status_code=404, detail="No active sprint")
-    n = _sprint_status.get("sprint_number")
-    if n is None:
-        raise HTTPException(status_code=404, detail="Sprint number unknown")
-    pid_file = SPRINTS_DIR / f"sprint-{n}.pid"
-    if not pid_file.exists():
-        raise HTTPException(status_code=404, detail="PID file missing — sprint may have already stopped")
-    try:
-        pid = int(pid_file.read_text(encoding="utf-8").strip())
-        os.kill(pid, signal.SIGTERM)
-    except ValueError:
-        pid_file.unlink(missing_ok=True)
-        raise HTTPException(status_code=404, detail="Invalid PID file")
-    except (ProcessLookupError, PermissionError) as e:
-        raise HTTPException(status_code=502, detail=f"Cannot signal process: {e}")
-    pid_file.unlink(missing_ok=True)
-    _sprint_status = None
-    await broadcast({"type": "sprint_stopped"})
-    return {"ok": True}
+    running = _all_sprints_running()
+    if project:
+        running = [r for r in running if r["project"] == project]
+    result = []
+    for r in running:
+        key = (r["project"], r["sprint_label"])
+        status = _sprint_statuses.get(key, {})
+        issues = status.get("issues", [])
+        closed = sum(1 for i in issues if i.get("status") in ("done", "skipped"))
+        result.append({
+            "project":        r["project"],
+            "sprint_label":   r["sprint_label"],
+            "pid":            r.get("pid"),
+            "issues":         issues,
+            "progress":       {"closed": closed, "total": len(issues)},
+            "started_at":     status.get("start_timestamp"),
+            "wall_clock_secs": status.get("wall_clock_secs", 0.0),
+        })
+    return {"running_sprints": result}
 
 
 # ── sprint summary / history endpoints (AC-4 / AC-6 from #24) ────────────────
@@ -1426,36 +1364,99 @@ def _load_sprint_order(project_root: Path, all_sprints: list[int]) -> list[str]:
 
 
 def _is_sprint_running(project_root: Path, sprint_label: str) -> bool:
-    """Check if a sprint process is running by reading its PID file."""
-    pid_file = _commander_dir(project_root) / "sprints" / f"{sprint_label}-pid"
-    if not pid_file.exists():
-        return False
-    try:
-        pid = int(pid_file.read_text(encoding="utf-8").strip())
-        os.kill(pid, 0)  # signal 0 = check if process exists
-        return True
-    except (ValueError, ProcessLookupError, PermissionError, OSError):
-        # Process not running — clean up stale PID file
+    """Check if a sprint process is running by reading its PID file.
+
+    Accepts both ``<label>-pid`` (fully claimed) and ``<label>-pid.pending``
+    (claim written by server before subprocess startup completes) so there is
+    no transient window where a sprint appears not running.
+
+    Stale files (process dead) are cleaned up and logged so no manual ``rm``
+    is ever required.
+    """
+    sprints_dir = _commander_dir(project_root) / "sprints"
+    pid_file    = sprints_dir / f"{sprint_label}-pid"
+    pending_file = sprints_dir / f"{sprint_label}-pid.pending"
+
+    import logging as _logging
+    _log = _logging.getLogger(__name__)
+
+    for candidate in (pid_file, pending_file):
+        if not candidate.exists():
+            continue
+        raw = ""
         try:
-            pid_file.unlink()
+            raw = candidate.read_text(encoding="utf-8").strip()
+        except OSError:
+            continue
+
+        # pid == 0 means server wrote the pending file right before Popen;
+        # the process is being spawned — treat as running to block duplicates.
+        if raw == "" or raw == "0":
+            return True
+
+        try:
+            pid = int(raw)
+        except ValueError:
+            # Unreadable content — clean up and continue.
+            try:
+                candidate.unlink()
+            except OSError:
+                pass
+            continue
+
+        try:
+            os.kill(pid, 0)  # signal 0 = check if process exists
+            return True
+        except ProcessLookupError:
+            # Process is dead — clean up stale file and log recovery.
+            _log.warning(
+                "Stale sprint lock detected: %s (PID %s dead) — cleaning up",
+                candidate.name,
+                raw,
+            )
+            try:
+                candidate.unlink()
+            except OSError:
+                pass
+        except PermissionError:
+            # Process exists but owned by another user — treat as running.
+            return True
         except OSError:
             pass
-        return False
+
+    return False
 
 
-def _any_sprint_running() -> Optional[dict]:
-    """Scan all projects for a running sprint. Returns {project, sprint_label} or None."""
+def _all_sprints_running() -> list[dict]:
+    """Scan all projects for running sprints. Returns list of {project, sprint_label, pid}."""
+    result = []
     projects = projects_module.load_projects()
     for proj in projects:
         root = _project_root_path(proj["repo"])
         sprints_dir = _commander_dir(root) / "sprints"
         if not sprints_dir.exists():
             continue
-        for pid_file in sprints_dir.glob("*-pid"):
-            label = pid_file.stem  # e.g. "sprint-2"
+        seen: set[str] = set()
+        # Check both fully-claimed files (*-pid) and pending-claim files (*-pid.pending)
+        for pid_file in list(sprints_dir.glob("*-pid")) + list(sprints_dir.glob("*-pid.pending")):
+            # Derive label: strip trailing "-pid.pending" or "-pid"
+            label = pid_file.name.removesuffix("-pid.pending").removesuffix("-pid")
+            if label in seen:
+                continue
+            seen.add(label)
             if _is_sprint_running(root, label):
-                return {"project": proj["repo"], "sprint_label": label}
-    return None
+                try:
+                    pid = int(pid_file.read_text(encoding="utf-8").strip())
+                except (ValueError, OSError):
+                    pid = None
+                result.append({"project": proj["repo"], "sprint_label": label, "pid": pid})
+    return result
+
+
+def _any_sprint_running() -> Optional[dict]:
+    """Scan all projects for a running sprint. Returns first found or None."""
+    running = _all_sprints_running()
+    return running[0] if running else None
 
 
 def _all_sprints_running() -> list[dict]:
@@ -1467,8 +1468,13 @@ def _all_sprints_running() -> list[dict]:
         sprints_dir = _commander_dir(root) / "sprints"
         if not sprints_dir.exists():
             continue
-        for pid_file in sprints_dir.glob("*-pid"):
-            label = pid_file.stem  # e.g. "sprint-2"
+        seen: set[str] = set()
+        # Check both fully-claimed files (*-pid) and pending-claim files (*-pid.pending)
+        for pid_file in list(sprints_dir.glob("*-pid")) + list(sprints_dir.glob("*-pid.pending")):
+            label = pid_file.name.removesuffix("-pid.pending").removesuffix("-pid")
+            if label in seen:
+                continue
+            seen.add(label)
             if _is_sprint_running(root, label):
                 result.append({"project": proj["repo"], "sprint_label": label})
     return result
@@ -1611,6 +1617,77 @@ def save_sprint_order(project: str, body: SprintOrderBody):
 _MIGRATION_STATUS_LABELS = {"UAT", "UAT-approved", "SIT", "in-progress", "need-rework"}
 
 
+# ── Estimate-summary helpers (issue #211) ────────────────────────────────────
+
+def _size_to_minutes(size: str) -> int:
+    """Map a T-shirt size label to wall-clock minutes.
+
+    S = 30 min, M = 2 h (120 min), L = 8 h (480 min).
+    Change this single function to adjust all size mappings.
+    """
+    mapping = {"S": 30, "M": 120, "L": 480}
+    return mapping.get(size, 0)
+
+
+@app.get("/api/sprints/{sprint_label}/estimate-summary")
+def get_sprint_estimate_summary(sprint_label: str, project: str):
+    """Return a rolled-up estimate summary for a sprint.
+
+    Fetches open issues for the sprint via the existing list_open_issues_with_body
+    plumbing, reads size-S/M/L/XL labels from each ticket, and returns:
+      - size_counts: dict mapping size -> count (e.g. {"S": 2, "M": 3, "L": 1})
+      - total_minutes: int, sum of _size_to_minutes for all sized tickets
+      - unsized_numbers: list of issue numbers with no size label
+      - sprint_name: human-readable sprint name (e.g. "Sprint 15")
+      - total_tickets: total open ticket count in the sprint
+    """
+    if not _SPRINT_LABEL_RE.match(sprint_label):
+        raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")
+
+    try:
+        issues = github_client.list_open_issues_with_body(repo_name=project, limit=200)
+    except subprocess.CalledProcessError as e:
+        raise _gh_error(e)
+
+    # Filter to issues belonging to this sprint
+    sprint_issues = [
+        iss for iss in issues
+        if any(lbl["name"] == sprint_label for lbl in iss.get("labels", []))
+    ]
+
+    _SIZE_LABELS = ["S", "M", "L", "XL"]  # ordered smallest to largest
+    size_counts: dict[str, int] = {}
+    unsized_numbers: list[int] = []
+    total_minutes = 0
+
+    for iss in sprint_issues:
+        label_names = {lbl["name"] for lbl in iss.get("labels", [])}
+        found_size = None
+        for size in _SIZE_LABELS:
+            if f"size-{size}" in label_names:
+                found_size = size
+                break
+        if found_size:
+            size_counts[found_size] = size_counts.get(found_size, 0) + 1
+            total_minutes += _size_to_minutes(found_size)
+        else:
+            unsized_numbers.append(iss["number"])
+
+    # Extract sprint number for human-readable name
+    m = re.search(r"(\d+)", sprint_label)
+    sprint_num = int(m.group(1)) if m else None
+    sprint_name = f"Sprint {sprint_num}" if sprint_num is not None else sprint_label
+
+    return {
+        "sprint_name": sprint_name,
+        "sprint_label": sprint_label,
+        "total_tickets": len(sprint_issues),
+        "size_counts": size_counts,
+        "total_minutes": total_minutes,
+        "unsized_numbers": unsized_numbers,
+    }
+
+
 @app.post("/api/sprints/run", status_code=202)
 def run_sprint_managed(body: SprintMgmtRunBody):
     """Spawn sprint_manager.py for the given project + sprint.
@@ -1627,16 +1704,18 @@ def run_sprint_managed(body: SprintMgmtRunBody):
     if not SPRINT_MANAGER_PATH.exists():
         raise HTTPException(502, detail=f"sprint_manager.py not found at {SPRINT_MANAGER_PATH}")
 
-    # Per-issue-#123: only block if this specific (project, sprint_label) is already running.
-    # Different projects and different sprint labels within the same project can run concurrently.
     project_root = _project_root_path(body.project)
     if _is_sprint_running(project_root, body.sprint_label):
-        pid_file = _commander_dir(project_root) / "sprints" / f"{body.sprint_label}-pid"
-        try:
-            pid = int(pid_file.read_text(encoding="utf-8").strip())
-            pid_str = str(pid)
-        except (ValueError, OSError):
-            pid_str = "unknown"
+        sprints_dir = _commander_dir(project_root) / "sprints"
+        pid_str = "unknown"
+        for fname in (f"{body.sprint_label}-pid", f"{body.sprint_label}-pid.pending"):
+            candidate = sprints_dir / fname
+            if candidate.exists():
+                try:
+                    pid_str = candidate.read_text(encoding="utf-8").strip()
+                except OSError:
+                    pass
+                break
         raise HTTPException(
             409,
             detail=f"Sprint {body.sprint_label} is already running on {body.project} (PID {pid_str})",
@@ -1726,53 +1805,58 @@ def run_sprint_managed(body: SprintMgmtRunBody):
 
     pid_dir = commander / "sprints"
     pid_dir.mkdir(parents=True, exist_ok=True)
-    pid_path = pid_dir / f"{body.sprint_label}-pid"
+    pid_path    = pid_dir / f"{body.sprint_label}-pid"
+    pending_path = pid_dir / f"{body.sprint_label}-pid.pending"
+
+    # ── Two-phase atomic claim (Strategy A, issue #155) ──────────────────────
+    # Phase 1: Atomically create the pending file using O_CREAT|O_EXCL so that
+    # a concurrent second request races to the same syscall and loses.  The
+    # file exists from this point on, so _is_sprint_running will return True
+    # for all subsequent callers — there is no gap between "check" and "claim".
+    try:
+        fd = os.open(
+            str(pending_path),
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+            0o644,
+        )
+        os.write(fd, b"0")  # placeholder PID; subprocess will rename to -pid
+        os.close(fd)
+    except FileExistsError:
+        # Another request already claimed this slot after _is_sprint_running
+        # returned False — return 409 consistently.
+        raise HTTPException(
+            409,
+            detail=f"Sprint {body.sprint_label} is already running on {body.project}",
+        )
 
     stripped_env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
-    stripped_env["COMMANDER_DISPATCHED_BY_SERVER"] = "1"
     goal_path = _sprint_goal_path(project_root, body.sprint_label)
     if goal_path.exists():
         stripped_env["SPRINT_GOAL"] = goal_path.read_text(encoding="utf-8").strip()
 
     log_fh = open(log_path, "w")
-    proc = subprocess.Popen(
-        ["python3", str(SPRINT_MANAGER_PATH), body.sprint_label, "--skip-gates"],
-        env=stripped_env,
-        cwd=str(coder_path),
-        stdout=log_fh,
-        stderr=log_fh,
-        start_new_session=True,
-    )
-
-    # Write PID file immediately so we can clean it up if the process crashes fast.
-    pid_path.write_text(str(proc.pid), encoding="utf-8")
-
-    # Poll for ~2 seconds to detect fast crashes before returning 202.
-    exit_code: Optional[int] = None
-    deadline = time.monotonic() + 2.0
-    while time.monotonic() < deadline:
-        exit_code = proc.poll()
-        if exit_code is not None:
-            break
-        time.sleep(0.1)
-
-    if exit_code is not None:
-        # Subprocess crashed — flush the log, clean up PID file, return 502 with log tail.
-        log_fh.flush()
-        log_fh.close()
+    try:
+        proc = subprocess.Popen(
+            ["python3", str(SPRINT_MANAGER_PATH), body.sprint_label, "--skip-gates"],
+            env=stripped_env,
+            cwd=str(coder_path),
+            stdout=log_fh,
+            stderr=log_fh,
+            start_new_session=True,
+        )
+    except Exception:
+        # Popen failed — release the pending claim so the sprint can be retried.
         try:
-            pid_path.unlink()
+            pending_path.unlink()
         except OSError:
             pass
-        try:
-            log_lines = log_path.read_text(encoding="utf-8", errors="replace").splitlines()
-            log_tail = "\n".join(log_lines[-30:])
-        except OSError:
-            log_tail = "(log file not readable)"
-        detail = f"Sprint process exited with code {exit_code}.\n\n{log_tail}"
-        if len(detail) > 1500:
-            detail = detail[-1500:]
-        raise HTTPException(502, detail=detail)
+        raise
+
+    # Phase 2: Write the real PID then atomically rename pending → pid.
+    # os.replace is atomic on POSIX (rename(2)) — the final file either
+    # contains the real PID or doesn't exist; there is no half-written state.
+    pending_path.write_text(str(proc.pid), encoding="utf-8")
+    os.replace(str(pending_path), str(pid_path))
 
     return {
         "ok": True,
@@ -1812,42 +1896,49 @@ def kill_sprint(sprint_label: str, project: str):
         raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")
 
     project_root = _project_root_path(project)
-    pid_file = _commander_dir(project_root) / "sprints" / f"{sprint_label}-pid"
+    sprints_dir  = _commander_dir(project_root) / "sprints"
+    pid_file      = sprints_dir / f"{sprint_label}-pid"
+    pending_file  = sprints_dir / f"{sprint_label}-pid.pending"
 
-    if not pid_file.exists():
+    # Accept either the fully-claimed file or the pending file.
+    active_file = pid_file if pid_file.exists() else (pending_file if pending_file.exists() else None)
+    if active_file is None:
         raise HTTPException(404, detail=f"No running sprint found for {sprint_label}")
 
     try:
-        pid = int(pid_file.read_text(encoding="utf-8").strip())
+        pid = int(active_file.read_text(encoding="utf-8").strip())
     except ValueError:
-        try:
-            pid_file.unlink()
-        except OSError:
-            pass
+        for f in (pid_file, pending_file):
+            try:
+                f.unlink()
+            except OSError:
+                pass
         raise HTTPException(404, detail=f"Invalid PID file for {sprint_label}")
 
     # SIGTERM first, then wait up to 5 s for graceful exit, then SIGKILL
-    try:
-        os.kill(pid, signal.SIGTERM)
-    except (ProcessLookupError, PermissionError):
-        pass
-    else:
-        for _ in range(10):
-            time.sleep(0.5)
-            try:
-                os.kill(pid, 0)
-            except (ProcessLookupError, PermissionError):
-                break
+    if pid > 0:
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except (ProcessLookupError, PermissionError):
+            pass
         else:
-            try:
-                os.kill(pid, signal.SIGKILL)
-            except (ProcessLookupError, PermissionError):
-                pass
+            for _ in range(10):
+                time.sleep(0.5)
+                try:
+                    os.kill(pid, 0)
+                except (ProcessLookupError, PermissionError):
+                    break
+            else:
+                try:
+                    os.kill(pid, signal.SIGKILL)
+                except (ProcessLookupError, PermissionError):
+                    pass
 
-    try:
-        pid_file.unlink()
-    except OSError:
-        pass
+    for f in (pid_file, pending_file):
+        try:
+            f.unlink()
+        except OSError:
+            pass
 
     return {"ok": True}
 
@@ -1945,7 +2036,8 @@ async def delete_empty_sprints(body: SprintDeleteBody):
     return result
 
 
-_RERUN_STRIP_LABELS = {"UAT", "UAT-approved", "released", "SIT", "in-progress", "need-rework"}
+_RERUN_STRIP_LABELS = {"released", "SIT", "in-progress", "need-rework"}
+_RERUN_SKIP_LABELS = {"UAT", "UAT-approved"}
 
 
 @app.get("/api/sprints/{sprint_label}/estimate")
@@ -2023,6 +2115,9 @@ def rerun_sprint(sprint_label: str, project: str, body: SprintRerunBody):
 
     for iss in sprint_issues:
         current_labels = {lbl["name"] for lbl in iss.get("labels", [])}
+        if current_labels & _RERUN_SKIP_LABELS:
+            log_lines.append(f"#{iss['number']} {iss['title']}: skipped (UAT/UAT-approved)")
+            continue
         to_remove = list(current_labels & _RERUN_STRIP_LABELS)
         if not to_remove:
             continue
@@ -2504,8 +2599,12 @@ def _commit_attachments_to_branch(
         )
 
 
-def _parse_ba_draft(output: str) -> tuple[str, str]:
-    """Extract title and body from BA agent JSON output."""
+def _parse_ba_draft(output: str) -> tuple[str, str, bool]:
+    """Extract title and body from BA agent JSON output.
+
+    Returns (title, body, json_ok) where json_ok is False when JSON parsing
+    failed and the raw output was used as a fallback (issue #208).
+    """
     # Strip markdown code fence if present
     clean = re.sub(r"^```(?:json)?\s*", "", output.strip(), flags=re.MULTILINE)
     clean = re.sub(r"\s*```\s*$", "", clean.strip(), flags=re.MULTILINE)
@@ -2513,7 +2612,7 @@ def _parse_ba_draft(output: str) -> tuple[str, str]:
 
     try:
         data = json.loads(clean)
-        return str(data.get("title", "")), str(data.get("body", ""))
+        return str(data.get("title", "")), str(data.get("body", "")), True
     except json.JSONDecodeError:
         pass
 
@@ -2523,12 +2622,12 @@ def _parse_ba_draft(output: str) -> tuple[str, str]:
     if start >= 0 and end > start:
         try:
             data = json.loads(clean[start : end + 1])
-            return str(data.get("title", "")), str(data.get("body", ""))
+            return str(data.get("title", "")), str(data.get("body", "")), True
         except json.JSONDecodeError:
             pass
 
     first_line = output.split("\n")[0].strip()[:80]
-    return first_line or "Draft Ticket", output
+    return first_line or "Draft Ticket", output, False
 
 
 @app.post("/api/tickets/draft")
@@ -2612,7 +2711,15 @@ async def create_ticket_draft(
         raise HTTPException(502, detail=f"BA agent failed: {detail}")
 
     output = stdout.decode("utf-8", errors="replace").strip()
-    title, body = _parse_ba_draft(output)
+    title, body, json_ok = _parse_ba_draft(output)
+    if not json_ok:
+        raise HTTPException(
+            502,
+            detail=(
+                "BA returned malformed JSON — could not parse ticket fields. "
+                f"Raw output starts with: {output[:120]!r}"
+            ),
+        )
     return {"draft_id": draft_id, "title": title, "body": body}
 
 
@@ -2941,7 +3048,19 @@ async def _run_single_ba_ticket(
         return
 
     output = stdout.decode("utf-8", errors="replace").strip()
-    title, body = _parse_ba_draft(output)
+    title, body, json_ok = _parse_ba_draft(output)
+
+    # If BA output was not valid JSON, surface a clear error (issue #208)
+    if not json_ok:
+        ticket["state"] = "failed"
+        ticket["error"] = (
+            "BA returned malformed JSON — could not parse ticket fields. "
+            f"Raw output starts with: {output[:120]!r}"
+        )
+        ticket["finished_at"] = datetime.now(timezone.utc).isoformat()
+        _persist_bulk_job(job)
+        await _broadcast_bulk_event(job_id, {"type": "ticket_update", "ticket": dict(ticket)})
+        return
 
     # Store draft result — issue creation happens in-order via the flusher
     ticket["title"] = title
@@ -3536,6 +3655,45 @@ async def _mark_inflight_jobs_failed():
                 pass
     except Exception:
         pass
+
+
+# ── deploy / promote endpoint ─────────────────────────────────────────────────
+
+_PROMOTE_SCRIPT_ROOT = Path(__file__).parent.parent.parent  # apps/dashboard -> apps -> repo root
+
+
+class PromoteBody(BaseModel):
+    draft: bool = True
+
+
+@app.post("/api/deploy/promote")
+def promote_to_master(body: PromoteBody):
+    """Shell out to scripts/promote_to_master.py and return the PR URL.
+
+    Returns: {"pr_url": "<url>"}
+    Exit codes from the script: 0 = success, 1 = precondition, 2 = GitHub API failure.
+    """
+    script_path = _PROMOTE_SCRIPT_ROOT / "scripts" / "promote_to_master.py"
+    if not script_path.exists():
+        raise HTTPException(500, detail="promote_to_master.py not found")
+
+    cmd = ["python3", str(script_path)]
+    if body.draft:
+        cmd.append("--draft")
+    else:
+        cmd.append("--ready")
+
+    result = subprocess.run(cmd, capture_output=True, text=True, cwd=str(_PROMOTE_SCRIPT_ROOT))
+
+    if result.returncode == 0:
+        pr_url = result.stdout.strip()
+        return {"pr_url": pr_url}
+    elif result.returncode == 1:
+        err = result.stderr.strip() or result.stdout.strip() or "Precondition failed"
+        raise HTTPException(400, detail=err)
+    else:
+        err = result.stderr.strip() or result.stdout.strip() or "GitHub API failure"
+        raise HTTPException(502, detail=err)
 
 
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")

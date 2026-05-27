@@ -48,9 +48,9 @@ REQUIRED_LABELS: dict[str, tuple[str, str]] = {
     "sprint-1":     ("0052CC", "Sprint 1 issues"),
     "sprint-2":     ("0052CC", "Sprint 2 issues"),
     "sprint-3":     ("0052CC", "Sprint 3 issues"),
-    "size-S":       ("bfd4f2", "Small — 1–2 hours"),
-    "size-M":       ("bfd4f2", "Medium — half day"),
-    "size-L":       ("bfd4f2", "Large — full day"),
+    "size-S":       ("bfd4f2", "Small — 1–5 min"),
+    "size-M":       ("bfd4f2", "Medium — ~15 min"),
+    "size-L":       ("bfd4f2", "Large — ~30 min"),
 }
 
 

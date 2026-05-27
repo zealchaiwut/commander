@@ -43,7 +43,7 @@ Be specific. "backend code" is not acceptable — list actual paths like `backen
 
 For each ticket, decide:
 
-- **size**: "S" (under 20 min, single-file or trivial), "M" (20–45 min, multi-file or 1 layer), "L" (45–90 min, multi-layer or new schema), "XL" (90+ min, cross-cutting)
+- **size**: "S" (1–5 min, single-file or trivial), "M" (~15 min, multi-file or 1 layer), "L" (~30 min, multi-layer or new schema), "XL" (>30 min, cross-cutting)
 - **minutes**: integer estimate. Round up. Add a 20% buffer for unknowns. Don't be optimistic.
 - **files**: list of relative paths
 - **risks**: short strings for things that increase uncertainty: "DB migration", "touches public API", "thin AC — high uncertainty", "depends on #N", "new dependency required"

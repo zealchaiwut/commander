@@ -1369,27 +1369,44 @@
     <div class="smgmt-body" id="smgmt-body">
       <div class="smgmt-loading" id="smgmt-loading">Select a project to view sprints.</div>
     </div>
-    <div class="smgmt-backlog" id="smgmt-backlog"
-         ondragover="smgmtDragOverZone(event, null)"
+    <!-- Sticky Backlog Block (issue #225) -->
+    <div class="smgmt-backlog-block" id="smgmt-backlog"
+         role="region" aria-label="Backlog"
+         ondragover="smgmtBacklogDragOver(event)"
          ondragleave="smgmtDragLeave(event)"
          ondrop="smgmtDropOnSprint(event, null)">
-      <div class="smgmt-backlog-header">
-        <div class="smgmt-backlog-title">
-          <input type="checkbox" class="smgmt-select-all" id="smgmt-backlog-select-all"
-                 title="Select all backlog tickets"
-                 onclick="event.stopPropagation()" onchange="smgmtToggleSelectAll(this)">
-          <i class="ti ti-inbox"></i>
-          <span id="smgmt-backlog-label">Backlog</span>
+      <div class="smgmt-backlog-header" id="smgmt-backlog-header"
+           onclick="smgmtBacklogToggle()"
+           role="button" tabindex="0"
+           aria-expanded="false"
+           aria-controls="smgmt-backlog-body"
+           onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();smgmtBacklogToggle();}">
+        <span class="smgmt-backlog-grip" aria-hidden="true"><i class="ti ti-grip-vertical"></i></span>
+        <input type="checkbox" class="smgmt-select-all" id="smgmt-backlog-select-all"
+               title="Select all backlog tickets"
+               onclick="event.stopPropagation()" onchange="smgmtToggleSelectAll(this)">
+        <i class="ti ti-inbox smgmt-backlog-icon" aria-hidden="true"></i>
+        <span class="smgmt-backlog-label-text" id="smgmt-backlog-label">Backlog &middot; 0 tickets</span>
+        <span class="smgmt-backlog-filter-pills" id="smgmt-backlog-filter-pills" onclick="event.stopPropagation()">
+          <button class="smgmt-backlog-pill active" id="smgmt-backlog-pill-all"
+                  onclick="smgmtBacklogSetFilter('all'); event.stopPropagation()">All</button>
+          <button class="smgmt-backlog-pill" id="smgmt-backlog-pill-unestimated"
+                  onclick="smgmtBacklogSetFilter('unestimated'); event.stopPropagation()">Unestimated</button>
+          <button class="smgmt-backlog-pill" id="smgmt-backlog-pill-attachments"
+                  onclick="smgmtBacklogSetFilter('attachments'); event.stopPropagation()">Has attachments</button>
+        </span>
+        <span class="smgmt-backlog-helper">drag or use Move to &rarr;</span>
+        <span class="smgmt-backlog-chevron" id="smgmt-backlog-chevron" aria-hidden="true"><i class="ti ti-chevron-down"></i></span>
+      </div>
+      <div class="smgmt-backlog-body" id="smgmt-backlog-body">
+        <p class="smgmt-backlog-hint" id="smgmt-backlog-hint">Unassigned tickets &mdash; drag into a sprint above, or click Move to on the right</p>
+        <div class="smgmt-backlog-tickets" id="smgmt-backlog-tickets">
+          <div class="smgmt-drop-hint">Drop tickets here to remove sprint label</div>
         </div>
-        <select class="smgmt-backlog-filter" id="smgmt-backlog-filter"
-                onchange="smgmtBacklogFilter(this.value)"
-                onclick="event.stopPropagation()">
-          <option value="">All labels</option>
-        </select>
       </div>
-      <div class="smgmt-backlog-tickets" id="smgmt-backlog-tickets">
-        <div class="smgmt-drop-hint">Drop tickets here to remove sprint label</div>
-      </div>
+    </div>
+    <!-- "Move to" popup for backlog tickets (issue #225) -->
+    <div class="smgmt-moveto-popup hidden" id="smgmt-backlog-moveto-popup" role="listbox" aria-label="Move to sprint">
     </div>
   </div>
 
@@ -2033,6 +2050,10 @@
     padding: 16px 24px; display: flex; flex-direction: column; gap: 16px;
     min-height: 120px;
   }
+  /* Extra bottom padding when backlog is in sticky mode, so content doesn't hide behind header */
+  .smgmt-body.smgmt-body-sticky-backlog {
+    padding-bottom: 80px;
+  }
 
   /* Single sprint block */
   .smgmt-sprint-block {
@@ -2500,32 +2521,120 @@
   }
   .smgmt-goal-input:focus { border-color: var(--blue); }
 
-  /* Backlog section */
-  .smgmt-backlog {
-    margin: 0 24px 24px;
-    border: 2px dashed var(--border); border-radius: 8px;
-    background: var(--surface); transition: border-color .15s, background .15s;
+  /* ── Sticky Backlog Block (issue #225) ── */
+
+  /* Wrapper: fills width of sprint blocks area */
+  .smgmt-backlog-block {
+    margin: 0 24px;
+    border: 1px dashed var(--border); border-radius: 10px;
+    background: var(--surface-2);
+    transition: border-color .15s, background .15s, box-shadow .15s;
+    position: relative;
+    /* default: inline (not sticky) */
   }
-  .smgmt-backlog.drag-over-zone {
+  /* Sticky mode: >3 sprints — pinned to bottom of viewport */
+  .smgmt-backlog-block.smgmt-backlog-sticky {
+    position: sticky;
+    bottom: 0;
+    z-index: 20;
+    box-shadow: 0 -4px 16px rgba(0,0,0,0.06);
+    border-radius: 10px 10px 0 0;
+    margin-bottom: 0;
+  }
+  /* While drag from backlog is active: remove sticky, force expanded */
+  .smgmt-backlog-block.is-drag-active {
+    position: static !important;
+    box-shadow: none !important;
+  }
+  .smgmt-backlog-block.drag-over-zone {
     border-color: var(--blue); background: var(--blue-bg);
   }
+
+  /* Header: full-width clickable row, ~50px height */
   .smgmt-backlog-header {
-    display: flex; align-items: center; justify-content: space-between; gap: 10px;
-    padding: 8px 14px; border-bottom: 1px dashed var(--border);
+    display: flex; align-items: center; gap: 8px;
+    padding: 10px 16px; min-height: 50px;
+    width: 100%;
+    font-family: inherit; font-size: 13px; color: var(--text);
+    cursor: pointer;
+    border-radius: 10px;
+    transition: background .12s;
+    user-select: none;
   }
-  .smgmt-backlog-title {
-    display: flex; align-items: center; gap: 6px;
-    font-size: 12px; font-weight: 600; color: var(--text-muted);
+  .smgmt-backlog-header:hover { background: rgba(0,0,0,.025); }
+  .smgmt-backlog-header:focus-visible { outline: 2px solid var(--blue); outline-offset: -2px; border-radius: 10px; }
+  .smgmt-backlog-block.smgmt-backlog-sticky .smgmt-backlog-header {
+    border-radius: 10px 10px 0 0;
   }
-  .smgmt-backlog-filter {
-    padding: 3px 6px; font-size: 11px; font-family: inherit;
-    border: 1px solid var(--border); border-radius: 5px;
-    background: var(--surface-2); color: var(--text);
-    outline: none; cursor: pointer;
+
+  /* Decorative drag handle */
+  .smgmt-backlog-grip {
+    color: var(--text-sub); font-size: 14px; flex-shrink: 0; cursor: default;
   }
+  .smgmt-backlog-icon { font-size: 15px; color: var(--text-muted); flex-shrink: 0; }
+  .smgmt-backlog-label-text { font-weight: 700; font-size: 13px; flex-shrink: 0; }
+
+  /* Filter pills */
+  .smgmt-backlog-filter-pills {
+    display: flex; gap: 4px; flex-shrink: 0;
+  }
+  .smgmt-backlog-pill {
+    font-size: 11px; padding: 2px 8px; border-radius: 10px;
+    border: 1px solid var(--border); background: var(--surface);
+    color: var(--text-muted); cursor: pointer; font-family: inherit;
+    transition: background .12s, color .12s, border-color .12s;
+  }
+  .smgmt-backlog-pill:hover { background: var(--surface-hover); color: var(--text); }
+  .smgmt-backlog-pill.active {
+    background: var(--blue-bg); color: var(--blue); border-color: var(--blue);
+  }
+
+  /* Helper text */
+  .smgmt-backlog-helper {
+    flex: 1;
+    font-family: var(--mono, monospace); font-size: 11px;
+    color: var(--text-sub); text-align: right; white-space: nowrap;
+    padding-right: 4px;
+  }
+
+  /* Chevron */
+  .smgmt-backlog-chevron {
+    font-size: 14px; color: var(--text-muted); flex-shrink: 0;
+    transition: transform .2s ease;
+  }
+  .smgmt-backlog-block.smgmt-backlog-expanded .smgmt-backlog-chevron {
+    transform: rotate(180deg);
+  }
+
+  /* Body: hidden when collapsed, visible when expanded */
+  .smgmt-backlog-body {
+    display: none;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .smgmt-backlog-block.smgmt-backlog-expanded .smgmt-backlog-body {
+    display: flex;
+    max-height: 50vh;
+    overflow-y: auto;
+  }
+
+  /* Inline mode (<=3 sprints): always show the body */
+  .smgmt-backlog-block.smgmt-backlog-inline .smgmt-backlog-body {
+    display: flex;
+    max-height: none;
+    overflow-y: visible;
+  }
+
+  /* Static note line */
+  .smgmt-backlog-hint {
+    padding: 6px 16px 4px;
+    font-size: 11px; color: var(--text-sub); font-style: italic;
+    margin: 0;
+  }
+
   .smgmt-backlog-tickets {
-    padding: 8px 14px; min-height: 48px;
-    display: flex; flex-direction: column; gap: 6px;
+    padding: 4px 0; min-height: 32px;
+    display: flex; flex-direction: column;
   }
 
   /* Size chip on backlog tickets */
@@ -2535,7 +2644,48 @@
     color: var(--text-muted); text-transform: uppercase;
   }
 
-  /* "Move to..." dropdown */
+  /* "Move to" button on backlog ticket rows */
+  .smgmt-moveto-btn {
+    font-family: var(--mono, monospace);
+    font-size: 11px; padding: 4px 10px; border-radius: 5px;
+    border: 1px solid var(--border); background: var(--surface);
+    color: var(--text); cursor: pointer; flex-shrink: 0;
+    transition: background .12s, color .12s;
+  }
+  .smgmt-moveto-btn:hover { background: var(--text); color: var(--surface); }
+
+  /* "Move to" popup dropdown */
+  .smgmt-moveto-popup {
+    position: fixed;
+    z-index: 200;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+    box-shadow: 0 4px 16px rgba(0,0,0,.14);
+    min-width: 160px; max-height: 280px; overflow-y: auto;
+    padding: 4px 0;
+  }
+  .smgmt-moveto-popup.hidden { display: none; }
+  .smgmt-moveto-item {
+    display: block; width: 100%; padding: 7px 14px;
+    background: none; border: none; text-align: left;
+    font-family: inherit; font-size: 13px; color: var(--text);
+    cursor: pointer;
+  }
+  .smgmt-moveto-item:hover { background: var(--surface-2); }
+  .smgmt-moveto-divider {
+    border: none; border-top: 1px solid var(--border); margin: 4px 0;
+  }
+  .smgmt-moveto-item.smgmt-moveto-create {
+    color: var(--blue); font-weight: 600;
+  }
+
+  /* Label chips on backlog ticket rows (issue #225) */
+  .smgmt-backlog-label-chip {
+    font-size: 10px; padding: 1px 5px; border-radius: 3px;
+    background: var(--surface); border: 1px solid var(--border);
+    color: var(--text-muted); flex-shrink: 0; white-space: nowrap;
+  }
+
+  /* Legacy .smgmt-move-to — kept for compatibility */
   .smgmt-move-to {
     padding: 2px 5px; font-size: 11px; font-family: inherit;
     border: 1px solid var(--border); border-radius: 4px;
@@ -2543,10 +2693,12 @@
     outline: none; cursor: pointer; flex-shrink: 0;
   }
 
-  @media (max-width: 600px) {
+  @media (max-width: 700px) {
     .smgmt-header { padding: 10px 12px; }
     .smgmt-body   { padding: 12px; }
-    .smgmt-backlog { margin: 0 12px 16px; }
+    .smgmt-backlog-block { margin: 0 12px; }
+    .smgmt-backlog-helper { display: none; }
+    .smgmt-moveto-btn { display: inline-flex; }
   }
 
   /* ── Cleanup empty sprints banner ── */

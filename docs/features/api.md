@@ -118,9 +118,28 @@ These endpoints are called by the Claude Code hooks in `hooks/`.
 
 ---
 
+## Home
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/home` | Aggregated Home page payload: summary stats, per-project cards, and last 5 activity events. Per-project data is cached 30 s. Always returns HTTP 200 — failing projects degrade gracefully. |
+
+---
+
+## Sprint Logs
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/sprints/{sprint_label}/dispatch-log` | Return the tail of the most recent sprint run log file (`sprint-run-<label>-*.log`). Accepts `?tail_lines=N` (max 2000). |
+| `GET` | `/api/sprints/{sprint_label}/issue/{issue_num}/log` | Return the tail of the most recent per-issue log (`sprint-issue-<N>.log`). Accepts `?tail_lines=N` (max 2000). |
+
+---
+
 ## Pages
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/` | Dashboard home (serves `static/index.html`) |
-| `GET` | `/projects/{path}` | Project detail page (SPA deep-link handler) |
+| `GET` | `/` | Home page (serves `static/index.html`) |
+| `GET` | `/home` | Alias for `/` |
+| `GET` | `/home-preview` | Static preview of the Home stat card layout |
+| `GET` | `/projects/{path}` | Project detail page (SPA deep-link handler, serves `static/project.html`) |

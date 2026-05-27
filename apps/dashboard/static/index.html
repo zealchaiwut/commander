@@ -849,7 +849,6 @@
   <div class="header-right">
     <span class="env-badge hidden" id="env-badge"></span>
     <button class="btn-ghost">Filters</button>
-    <button class="btn-secondary" onclick="openDraftTicketModal()">+ New Ticket</button>
     <button class="btn-primary" onclick="openNewProjectModal()">+ New Project</button>
     <button id="btn-refresh" class="btn-icon" title="Refresh dashboard" aria-label="Refresh">
       <svg id="refresh-icon" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -1076,6 +1075,7 @@
       <div class="smgmt-header-left">
         <h2 class="smgmt-title">Sprint Management</h2>
       </div>
+      <button class="btn-secondary" onclick="openDraftTicketModal()">+ New Ticket</button>
       <button class="btn-primary smgmt-new-sprint-btn" id="smgmt-new-sprint-btn"
               onclick="smgmtCreateSprint()" title="Create next sprint label on GitHub">+ New sprint</button>
     </div>

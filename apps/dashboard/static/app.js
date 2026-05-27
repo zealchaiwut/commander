@@ -2883,16 +2883,34 @@ function smgmtRender() {
     .filter(n => !orderNums.has(n) && n !== placeholderN)
     .sort((a, b) => a - b);
 
+  // Sort non-empty sprints ascending by sprint number (issue #207).
+  // Empty sprints are interleaved into the correct sorted position.
+  const sortedOrder = [...order].sort((a, b) => {
+    const na = parseInt(a.split('-')[1], 10);
+    const nb = parseInt(b.split('-')[1], 10);
+    return na - nb;
+  });
+
+  // Build a merged list of all sprint numbers (non-empty + empty), sorted ascending.
+  // Each entry is: { num, isEmpty }
+  const allSprintNums = [
+    ...sortedOrder.map(l => ({ num: parseInt(l.split('-')[1], 10), isEmpty: false })),
+    ...emptySprintNums.map(n => ({ num: n, isEmpty: true })),
+  ].sort((a, b) => a.num - b.num);
+
   // Render sprint blocks (only non-empty sprints are in order)
   let blocksHtml = '';
-  if (order.length === 0 && emptySprintNums.length === 0) {
+  if (sortedOrder.length === 0 && emptySprintNums.length === 0) {
     blocksHtml = '<div class="smgmt-loading">No sprints found. Use "+ New sprint" to create one.</div>';
   } else {
-    blocksHtml = order.map(label =>
-      smgmtSprintBlockHtml(label, bySprintLabel[label] || [], label === lowestLabel)
-    ).join('');
-    // Render empty existing sprints as placeholder-style drop zones
-    blocksHtml += emptySprintNums.map(n => smgmtPlaceholderBlockHtml(n)).join('');
+    // Render all sprints (non-empty and empty) interleaved in ascending number order
+    blocksHtml = allSprintNums.map(({ num, isEmpty }) => {
+      if (isEmpty) {
+        return smgmtPlaceholderBlockHtml(num);
+      }
+      const label = `sprint-${num}`;
+      return smgmtSprintBlockHtml(label, bySprintLabel[label] || [], label === lowestLabel);
+    }).join('');
   }
 
   // Append trailing placeholder card for the next-to-be-created sprint

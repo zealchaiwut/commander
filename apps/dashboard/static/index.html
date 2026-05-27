@@ -1075,9 +1075,11 @@
       <div class="smgmt-header-left">
         <h2 class="smgmt-title">Sprint Management</h2>
       </div>
-      <button class="btn-secondary" onclick="openDraftTicketModal()">+ New Ticket</button>
-      <button class="btn-primary smgmt-new-sprint-btn" id="smgmt-new-sprint-btn"
-              onclick="smgmtCreateSprint()" title="Create next sprint label on GitHub">+ New sprint</button>
+      <div class="smgmt-header-actions">
+        <button class="btn-secondary" onclick="openDraftTicketModal()">+ New Ticket</button>
+        <button class="btn-primary smgmt-new-sprint-btn" id="smgmt-new-sprint-btn"
+                onclick="smgmtCreateSprint()" title="Create next sprint label on GitHub">+ New sprint</button>
+      </div>
     </div>
     <div class="smgmt-error hidden" id="smgmt-error"></div>
     <div class="smgmt-cleanup-banner hidden" id="smgmt-cleanup-banner"></div>
@@ -1659,6 +1661,7 @@
     border-bottom: 1px solid var(--border); gap: 12px; flex-wrap: wrap;
   }
   .smgmt-header-left { display: flex; align-items: center; gap: 14px; }
+  .smgmt-header-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
   .smgmt-title { font-size: 16px; font-weight: 700; white-space: nowrap; }
   .smgmt-proj-select {
     padding: 6px 10px; border: 1px solid var(--border); border-radius: 6px;

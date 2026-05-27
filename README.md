@@ -128,6 +128,18 @@ commander/
 
 ---
 
+## Going Remote?
+
+Traveling with iPad-only access? See [docs/TRAVEL_PLAYBOOK.md](docs/TRAVEL_PLAYBOOK.md) for:
+
+- Pre-travel checklist (sleep, launchd, Tailscale, auth, health check)
+- URLs to save before you leave
+- Common failure modes and step-by-step recovery
+- SSH commands reference
+- Fallback paths if hardware fails
+
+---
+
 ## Docs
 
 - [Setup and tutorial](docs/tutorial.md)
@@ -138,3 +150,4 @@ commander/
 - [PRD changelogs](docs/changelog/prd/)
 - [Testing sandbox](docs/testing/sandbox-repo.md)
 - [Sprint manager config](.commander/README.md)
+- [Travel playbook](docs/TRAVEL_PLAYBOOK.md)

@@ -475,6 +475,9 @@ function projectRowHtml(proj) {
 function renderProjects(projects) {
   allProjects = projects;
 
+  // AC-6: keep log panel project filter in sync
+  llpUpdateProjectFilter(projects);
+
   // Refresh project header & picker if currently in project view
   if (_activeProject) {
     _updateProjectHeader(_activeProject);
@@ -1191,15 +1194,205 @@ function renderEvents(events) {
   }).join('');
 }
 
+// ── Live Log Panel (issue #176) ───────────────────────────────────────────────
+
+const _LLP_MAX_ENTRIES = 200;
+let _llpAutoScroll     = true;
+let _llpProjectFilter  = '';   // '' = all
+let _llpRoleFilter     = '';   // '' = all
+let _llpRelativeTimer  = null;
+
+// Relative timestamp for a stored epoch (ms)
+function _llpTimeAgo(tsMs) {
+  const s = Math.floor((Date.now() - tsMs) / 1000);
+  if (s < 5)    return 'just now';
+  if (s < 60)   return `${s} s ago`;
+  if (s < 3600) return `${Math.floor(s / 60)} m ago`;
+  return `${Math.floor(s / 3600)} h ago`;
+}
+
+// Derive a short project name from working_dir or agent name
+function _llpProject(ev) {
+  if (!ev) return null;
+  // Try agent name first (new format: role·repo·branch·#short)
+  const parsed = _parseAgentName(ev.name);
+  if (parsed.isNew && parsed.repo) return parsed.repo.split('/').pop();
+  // Fallback: last path segment of working_dir
+  if (ev.working_dir && ev.working_dir !== 'unknown') {
+    return ev.working_dir.split('/').pop() || null;
+  }
+  return null;
+}
+
+function _llpRole(ev) {
+  if (!ev) return 'agent';
+  const parsed = _parseAgentName(ev.name);
+  return parsed.role || 'agent';
+}
+
+function _llpDesc(ev) {
+  if (!ev) return '—';
+  const et = ev.event_type || '';
+  if (et === 'tool_use' && ev.tool_name) return `Used ${ev.tool_name}`;
+  return et.replace(/_/g, ' ') || '—';
+}
+
+function llpAddEntry(ev) {
+  const container = document.getElementById('llp-entries');
+  if (!container) return;
+
+  // Remove placeholder if present
+  const placeholder = container.querySelector('.llp-empty');
+  if (placeholder) placeholder.remove();
+
+  const proj    = _llpProject(ev) || null;   // null = global
+  const role    = _llpRole(ev);
+  const desc    = _llpDesc(ev);
+  const tsMs    = Date.now();
+
+  const badgeClass = _roleBadgeClass(role);
+
+  const entry = document.createElement('div');
+  entry.className   = 'llp-entry';
+  entry.dataset.ts  = tsMs;
+  entry.dataset.proj = proj || '';
+  entry.dataset.role = role;
+
+  // Apply current filter immediately
+  if (_llpProjectFilter && proj !== _llpProjectFilter) entry.classList.add('llp-filtered');
+  if (_llpRoleFilter     && role !== _llpRoleFilter)    entry.classList.add('llp-filtered');
+
+  entry.innerHTML = `
+    <span class="llp-ts">${_llpTimeAgo(tsMs)}</span>
+    <span class="llp-proj" title="${escapeHtml(proj || '—')}">${escapeHtml(proj || '—')}</span>
+    <div class="llp-meta">
+      <span class="llp-role-badge ${escapeHtml(badgeClass)}">${escapeHtml(role)}</span>
+      <span class="llp-desc" title="${escapeHtml(desc)}">${escapeHtml(desc)}</span>
+    </div>`;
+
+  container.appendChild(entry);
+
+  // AC-4: cap at 200 DOM entries
+  const all = container.querySelectorAll('.llp-entry');
+  if (all.length > _LLP_MAX_ENTRIES) {
+    for (let i = 0; i < all.length - _LLP_MAX_ENTRIES; i++) {
+      all[i].remove();
+    }
+  }
+
+  // AC-3: auto-scroll
+  if (_llpAutoScroll) {
+    const scroll = document.getElementById('llp-scroll');
+    if (scroll) scroll.scrollTop = scroll.scrollHeight;
+  }
+}
+
+// AC-3: scroll detection — pause auto-scroll when user scrolls up
+function _llpInitScrollListener() {
+  const scroll = document.getElementById('llp-scroll');
+  const jumpBtn = document.getElementById('llp-jump-btn');
+  if (!scroll || !jumpBtn) return;
+
+  scroll.addEventListener('scroll', () => {
+    const atBottom = scroll.scrollTop + scroll.clientHeight >= scroll.scrollHeight - 20;
+    if (atBottom) {
+      _llpAutoScroll = true;
+      jumpBtn.classList.add('hidden');
+    } else {
+      _llpAutoScroll = false;
+      jumpBtn.classList.remove('hidden');
+    }
+  });
+}
+
+function llpJumpToLatest() {
+  const scroll = document.getElementById('llp-scroll');
+  if (scroll) scroll.scrollTop = scroll.scrollHeight;
+  _llpAutoScroll = true;
+  document.getElementById('llp-jump-btn')?.classList.add('hidden');
+}
+
+// AC-5: update SSE connection status in panel
+function _llpSetStatus(state) {
+  // states: 'connected' | 'reconnecting' | 'disconnected'
+  const dot  = document.getElementById('llp-dot');
+  const text = document.getElementById('llp-status-text');
+  if (!dot || !text) return;
+  dot.className = 'llp-dot llp-dot-' + (state === 'connected' ? 'connected' : state === 'reconnecting' ? 'reconnecting' : 'off');
+  text.textContent = state === 'connected' ? 'Connected' : state === 'reconnecting' ? 'Reconnecting…' : 'Disconnected';
+}
+
+// AC-6: project filter
+function llpSetProjectFilter(val) {
+  _llpProjectFilter = val;
+  _llpApplyFilters();
+}
+
+// AC-7: role filter
+function llpSetRoleFilter(val) {
+  _llpRoleFilter = val;
+  _llpApplyFilters();
+}
+
+function _llpApplyFilters() {
+  const entries = document.querySelectorAll('#llp-entries .llp-entry');
+  entries.forEach(entry => {
+    const projMatch = !_llpProjectFilter || entry.dataset.proj === _llpProjectFilter;
+    const roleMatch = !_llpRoleFilter    || entry.dataset.role === _llpRoleFilter;
+    entry.classList.toggle('llp-filtered', !(projMatch && roleMatch));
+  });
+  // Auto-scroll after filter change
+  if (_llpAutoScroll) {
+    const scroll = document.getElementById('llp-scroll');
+    if (scroll) scroll.scrollTop = scroll.scrollHeight;
+  }
+}
+
+// Populate project filter dropdown from known projects
+function llpUpdateProjectFilter(projects) {
+  const sel = document.getElementById('llp-project-filter');
+  if (!sel) return;
+  const cur = sel.value;
+  const names = (projects || []).map(p => ({
+    key: p.repo ? p.repo.split('/').pop() : p.name,
+    label: p.name || p.repo
+  }));
+  // Deduplicate by key
+  const seen = new Set();
+  const opts = [{ key: '', label: 'All projects' }];
+  for (const n of names) {
+    if (!seen.has(n.key)) { seen.add(n.key); opts.push(n); }
+  }
+  sel.innerHTML = opts.map(o =>
+    `<option value="${escapeHtml(o.key)}" ${o.key === cur ? 'selected' : ''}>${escapeHtml(o.label)}</option>`
+  ).join('');
+}
+
+// Tick all relative timestamps every 5 seconds
+function _llpStartRelativeClock() {
+  if (_llpRelativeTimer) return;
+  _llpRelativeTimer = setInterval(() => {
+    document.querySelectorAll('#llp-entries .llp-entry').forEach(entry => {
+      const ts = parseInt(entry.dataset.ts, 10);
+      if (!isNaN(ts)) {
+        const tsEl = entry.querySelector('.llp-ts');
+        if (tsEl) tsEl.textContent = _llpTimeAgo(ts);
+      }
+    });
+  }, 5000);
+}
+
 // ── SSE ───────────────────────────────────────────────────────────────────────
 function setLive(connected) {
   document.getElementById('live-dot')?.classList.toggle('off', !connected);
 }
 
+let _sseReconnectTimer = null;
+
 function connectSSE() {
   const es = new EventSource('/events');
-  es.onopen    = () => setLive(true);
-  es.onerror   = () => setLive(false);
+  es.onopen    = () => { setLive(true); _llpSetStatus('connected'); if (_sseReconnectTimer) { clearTimeout(_sseReconnectTimer); _sseReconnectTimer = null; } };
+  es.onerror   = () => { setLive(false); _llpSetStatus('reconnecting'); };
   es.onmessage = ev => {
     try {
       const msg = JSON.parse(ev.data);
@@ -1234,6 +1427,10 @@ function connectSSE() {
       }
 
       if (msg.type !== 'update') return;
+
+      // AC-1/AC-2: feed every agent event into the live log panel
+      if (msg.event) llpAddEntry(msg.event);
+
       const projectView  = document.getElementById('view-project');
       const overviewView = document.getElementById('view-overview');
       const isOverview   = overviewView && !overviewView.classList.contains('hidden');
@@ -4415,6 +4612,11 @@ function showErrorToast(msg) {
   // independently of which tab is currently active.
   smgmtPollRunStatus().catch(() => {});
   setInterval(() => smgmtPollRunStatus().catch(() => {}), 4000);
+
+  // AC-1: initialise live log panel
+  _llpInitScrollListener();
+  _llpStartRelativeClock();
+  _llpSetStatus('disconnected');
 
   connectSSE();
   document.getElementById('btn-refresh')?.addEventListener('click', () => window.location.reload());

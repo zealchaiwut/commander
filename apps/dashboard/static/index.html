@@ -841,6 +841,220 @@
       .sc-agents-grid { grid-template-columns: 1fr; }
       .sc-section { padding: 12px 16px; }
     }
+
+    /* ── Overview body: projects + live log panel (AC-8) ── */
+    .overview-body {
+      display: flex;
+      flex-direction: column;
+      align-items: stretch;
+    }
+    .overview-main {
+      flex: 1 1 auto;
+      min-width: 0;
+    }
+    /* AC-8: side-by-side on wide viewports */
+    @media (min-width: 1280px) {
+      .overview-body {
+        flex-direction: row;
+        align-items: flex-start;
+      }
+      .live-log-panel {
+        width: 360px;
+        flex-shrink: 0;
+        position: sticky;
+        top: 62px; /* below header */
+        height: calc(100dvh - 62px);
+      }
+    }
+
+    /* ── Live Log Panel (AC-1–AC-7, AC-9) ── */
+    .live-log-panel {
+      background: var(--surface);
+      border-left: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      /* On narrow viewports: not sticky, full width */
+      border-top: 1px solid var(--border);
+    }
+    @media (min-width: 1280px) {
+      .live-log-panel {
+        border-top: none;
+      }
+    }
+
+    .llp-header {
+      padding: 10px 14px 8px;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface);
+      flex-shrink: 0;
+    }
+    .llp-title-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 8px;
+    }
+    .llp-title {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      color: var(--text-muted);
+    }
+
+    /* AC-5: connection status */
+    .llp-status {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 10px;
+      color: var(--text-muted);
+    }
+    .llp-dot {
+      width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0;
+      transition: background .3s;
+    }
+    .llp-dot.llp-dot-connected {
+      background: var(--green);
+      box-shadow: 0 0 0 2px var(--green-bg);
+      animation: glow 2s ease-in-out infinite;
+    }
+    .llp-dot.llp-dot-reconnecting {
+      background: var(--amber);
+      box-shadow: 0 0 0 2px var(--amber-bg);
+    }
+    .llp-dot.llp-dot-off {
+      background: var(--text-sub);
+      box-shadow: none;
+      animation: none;
+    }
+
+    /* AC-6, AC-7: filter row */
+    .llp-filters {
+      display: flex;
+      gap: 6px;
+    }
+    .llp-select {
+      flex: 1;
+      padding: 4px 6px;
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      background: var(--surface-2);
+      color: var(--text);
+      font-size: 11px;
+      font-family: inherit;
+      outline: none;
+      cursor: pointer;
+    }
+    .llp-select:focus { border-color: var(--blue); }
+
+    /* Scroll container (AC-3) */
+    .llp-scroll {
+      flex: 1 1 auto;
+      overflow-y: auto;
+      overflow-x: hidden;
+      min-height: 200px;
+      max-height: 400px;
+      position: relative;
+    }
+    @media (min-width: 1280px) {
+      .llp-scroll {
+        max-height: none;
+        flex: 1 1 0;
+      }
+    }
+
+    .llp-entries {
+      padding: 6px 0;
+    }
+    .llp-empty {
+      padding: 24px 14px;
+      text-align: center;
+      color: var(--text-sub);
+      font-size: 12px;
+    }
+
+    /* AC-2: log entry row */
+    .llp-entry {
+      display: grid;
+      grid-template-columns: 52px auto 1fr;
+      gap: 6px;
+      align-items: baseline;
+      padding: 5px 14px;
+      border-bottom: 1px solid var(--border);
+      font-size: 11px;
+      transition: background .1s;
+    }
+    .llp-entry:last-child { border-bottom: none; }
+    .llp-entry:hover { background: var(--surface-hover); }
+    .llp-entry.llp-filtered { display: none; }
+
+    .llp-ts {
+      font-family: var(--mono);
+      color: var(--text-sub);
+      font-size: 10px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .llp-proj {
+      font-size: 10px;
+      color: var(--text-muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 80px;
+    }
+    .llp-meta {
+      display: flex;
+      align-items: baseline;
+      gap: 5px;
+      min-width: 0;
+    }
+    .llp-role-badge {
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: .06em;
+      text-transform: uppercase;
+      padding: 1px 5px;
+      border-radius: 3px;
+      flex-shrink: 0;
+    }
+    .llp-desc {
+      color: var(--text-muted);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      min-width: 0;
+    }
+
+    /* AC-3: jump button */
+    .llp-jump-btn {
+      position: sticky;
+      bottom: 8px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 5;
+      display: block;
+      margin: 0 auto 8px;
+      padding: 5px 14px;
+      background: var(--blue);
+      color: #fff;
+      border: none;
+      border-radius: 14px;
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+      box-shadow: 0 2px 8px rgba(0,0,0,.18);
+      transition: opacity .15s;
+    }
+    .llp-jump-btn:hover { opacity: .85; }
+    .llp-jump-btn.hidden { display: none !important; }
+
+    @media (max-width: 600px) {
+      .llp-entry { padding: 5px 10px; }
+      .llp-header { padding: 8px 10px 6px; }
+    }
   </style>
 </head>
 <body>
@@ -931,8 +1145,51 @@
     <button class="ftab"        id="ftab-review"  onclick="setFilter('review')">Needs review</button>
   </div>
 
-  <div class="project-list" id="project-list">
-    <div class="empty-projects">Loading projects…</div>
+  <!-- AC-8: responsive side-by-side layout at >=1280px -->
+  <div class="overview-body">
+    <div class="overview-main">
+      <div class="project-list" id="project-list">
+        <div class="empty-projects">Loading projects…</div>
+      </div>
+    </div>
+
+    <!-- AC-1: persistent live log panel -->
+    <aside class="live-log-panel" id="live-log-panel">
+      <!-- Panel header: title + connection status (AC-5) -->
+      <div class="llp-header">
+        <div class="llp-title-row">
+          <span class="llp-title">Live log</span>
+          <span class="llp-status" id="llp-status" title="SSE connection">
+            <span class="llp-dot llp-dot-off" id="llp-dot"></span>
+            <span class="llp-status-text" id="llp-status-text">Connecting…</span>
+          </span>
+        </div>
+        <!-- AC-6 + AC-7: filters -->
+        <div class="llp-filters">
+          <select class="llp-select" id="llp-project-filter" onchange="llpSetProjectFilter(this.value)">
+            <option value="">All projects</option>
+          </select>
+          <select class="llp-select" id="llp-role-filter" onchange="llpSetRoleFilter(this.value)">
+            <option value="">All roles</option>
+            <option value="ba">BA</option>
+            <option value="coder">Coder</option>
+            <option value="tester">Tester</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- AC-3: scroll container -->
+      <div class="llp-scroll" id="llp-scroll">
+        <div class="llp-entries" id="llp-entries">
+          <div class="llp-empty">Waiting for events…</div>
+        </div>
+      </div>
+
+      <!-- AC-3: jump-to-latest button (hidden until user scrolls up) -->
+      <button class="llp-jump-btn hidden" id="llp-jump-btn" onclick="llpJumpToLatest()">
+        &#8595; Jump to latest
+      </button>
+    </aside>
   </div>
 </div>
 

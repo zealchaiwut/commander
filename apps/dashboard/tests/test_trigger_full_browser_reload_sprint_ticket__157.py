@@ -2,7 +2,9 @@
 
 AC1 — smgmtMoveTicketTo calls window.location.reload() after successful API call.
 AC2 — smgmtDropOnSprint calls window.location.reload() after successful API call.
+       Updated by issue #179: now calls smgmtRefreshBoard() instead.
 AC3 — smgmtDropOnPlaceholder calls window.location.reload() (replaces smgmtSelectProject).
+       Updated by issue #179: now calls smgmtRefreshBoard() instead.
 AC4 — On API failure, no reload; rollback + smgmtShowError are preserved in each function.
 AC5 — No regressions: drag-and-drop functions exist, smgmtRender still called optimistically.
 """
@@ -88,34 +90,37 @@ def test_move_ticket_to_rollback_preserved(src):
 # ── AC2: smgmtDropOnSprint reloads on success ─────────────────────────────────
 
 def test_drop_on_sprint_reload_present(src):
-    """AC2: smgmtDropOnSprint calls window.location.reload() in the try block."""
+    """AC2 (updated by #179): smgmtDropOnSprint calls smgmtRefreshBoard() in the try block."""
     body = _extract_function(src, "smgmtDropOnSprint")
-    assert "window.location.reload()" in body, (
-        "smgmtDropOnSprint must call window.location.reload() after success"
+    assert "smgmtRefreshBoard()" in body, (
+        "smgmtDropOnSprint must call smgmtRefreshBoard() after success (issue #179)"
     )
 
 
 def test_drop_on_sprint_reload_after_ok_check(src):
-    """AC2: reload comes after the res.ok guard (success path only)."""
+    """AC2 (updated by #179): smgmtRefreshBoard call comes after the res.ok guard."""
     body = _extract_function(src, "smgmtDropOnSprint")
     ok_pos = body.find("if (!res.ok) throw new Error")
-    reload_pos = body.find("window.location.reload()")
+    reload_pos = body.find("smgmtRefreshBoard()")
     catch_pos = body.find("} catch (e) {")
     assert ok_pos != -1, "res.ok guard missing from smgmtDropOnSprint"
-    assert reload_pos != -1, "window.location.reload() missing from smgmtDropOnSprint"
+    assert reload_pos != -1, "smgmtRefreshBoard() missing from smgmtDropOnSprint"
     assert ok_pos < reload_pos < catch_pos, (
-        "reload() must appear after res.ok guard and before catch block in smgmtDropOnSprint"
+        "smgmtRefreshBoard() must appear after res.ok guard and before catch block in smgmtDropOnSprint"
     )
 
 
 def test_drop_on_sprint_no_reload_in_catch(src):
-    """AC4: smgmtDropOnSprint catch block does NOT call window.location.reload()."""
+    """AC4: smgmtDropOnSprint catch block does NOT call window.location.reload() or smgmtRefreshBoard()."""
     body = _extract_function(src, "smgmtDropOnSprint")
     catch_pos = body.find("} catch (e) {")
     assert catch_pos != -1, "catch block missing from smgmtDropOnSprint"
     catch_body = body[catch_pos:]
     assert "window.location.reload()" not in catch_body, (
         "smgmtDropOnSprint catch block must not reload on failure"
+    )
+    assert "smgmtRefreshBoard()" not in catch_body, (
+        "smgmtDropOnSprint catch block must not call smgmtRefreshBoard() on failure"
     )
 
 
@@ -135,15 +140,15 @@ def test_drop_on_sprint_rollback_preserved(src):
 # ── AC3: smgmtDropOnPlaceholder reloads on success ────────────────────────────
 
 def test_drop_on_placeholder_reload_present(src):
-    """AC3: smgmtDropOnPlaceholder calls window.location.reload() in the try block."""
+    """AC3 (updated by #179): smgmtDropOnPlaceholder calls smgmtRefreshBoard() in the try block."""
     body = _extract_function(src, "smgmtDropOnPlaceholder")
-    assert "window.location.reload()" in body, (
-        "smgmtDropOnPlaceholder must call window.location.reload() after success"
+    assert "smgmtRefreshBoard()" in body, (
+        "smgmtDropOnPlaceholder must call smgmtRefreshBoard() after success (issue #179)"
     )
 
 
 def test_drop_on_placeholder_no_select_project(src):
-    """AC3: smgmtDropOnPlaceholder no longer calls smgmtSelectProject in the success path."""
+    """AC3: smgmtDropOnPlaceholder no longer calls smgmtSelectProject directly in the success path."""
     body = _extract_function(src, "smgmtDropOnPlaceholder")
     try_start = body.find("try {")
     catch_start = body.find("} catch (e) {")
@@ -152,31 +157,34 @@ def test_drop_on_placeholder_no_select_project(src):
     )
     try_body = body[try_start:catch_start]
     assert "smgmtSelectProject(" not in try_body, (
-        "smgmtDropOnPlaceholder success path must NOT call smgmtSelectProject(); use reload() instead"
+        "smgmtDropOnPlaceholder success path must NOT call smgmtSelectProject() directly; use smgmtRefreshBoard() instead"
     )
 
 
 def test_drop_on_placeholder_reload_after_ok_check(src):
-    """AC3: reload comes after the res.ok guard (success path only)."""
+    """AC3 (updated by #179): smgmtRefreshBoard call comes after the res.ok guard."""
     body = _extract_function(src, "smgmtDropOnPlaceholder")
     ok_pos = body.find("if (!res.ok) throw new Error")
-    reload_pos = body.find("window.location.reload()")
+    reload_pos = body.find("smgmtRefreshBoard()")
     catch_pos = body.find("} catch (e) {")
     assert ok_pos != -1, "res.ok guard missing from smgmtDropOnPlaceholder"
-    assert reload_pos != -1, "window.location.reload() missing from smgmtDropOnPlaceholder"
+    assert reload_pos != -1, "smgmtRefreshBoard() missing from smgmtDropOnPlaceholder"
     assert ok_pos < reload_pos < catch_pos, (
-        "reload() must appear after res.ok guard and before catch block in smgmtDropOnPlaceholder"
+        "smgmtRefreshBoard() must appear after res.ok guard and before catch block in smgmtDropOnPlaceholder"
     )
 
 
 def test_drop_on_placeholder_no_reload_in_catch(src):
-    """AC4: smgmtDropOnPlaceholder catch block does NOT reload."""
+    """AC4: smgmtDropOnPlaceholder catch block does NOT reload or call smgmtRefreshBoard()."""
     body = _extract_function(src, "smgmtDropOnPlaceholder")
     catch_pos = body.find("} catch (e) {")
     assert catch_pos != -1, "catch block missing from smgmtDropOnPlaceholder"
     catch_body = body[catch_pos:]
     assert "window.location.reload()" not in catch_body, (
         "smgmtDropOnPlaceholder catch block must not reload on failure"
+    )
+    assert "smgmtRefreshBoard()" not in catch_body, (
+        "smgmtDropOnPlaceholder catch block must not call smgmtRefreshBoard() on failure"
     )
 
 

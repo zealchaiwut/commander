@@ -2524,8 +2524,12 @@ def _commit_attachments_to_branch(
         )
 
 
-def _parse_ba_draft(output: str) -> tuple[str, str]:
-    """Extract title and body from BA agent JSON output."""
+def _parse_ba_draft(output: str) -> tuple[str, str, bool]:
+    """Extract title and body from BA agent JSON output.
+
+    Returns (title, body, json_ok) where json_ok is False when JSON parsing
+    failed and the raw output was used as a fallback (issue #208).
+    """
     # Strip markdown code fence if present
     clean = re.sub(r"^```(?:json)?\s*", "", output.strip(), flags=re.MULTILINE)
     clean = re.sub(r"\s*```\s*$", "", clean.strip(), flags=re.MULTILINE)
@@ -2533,7 +2537,7 @@ def _parse_ba_draft(output: str) -> tuple[str, str]:
 
     try:
         data = json.loads(clean)
-        return str(data.get("title", "")), str(data.get("body", ""))
+        return str(data.get("title", "")), str(data.get("body", "")), True
     except json.JSONDecodeError:
         pass
 
@@ -2543,12 +2547,12 @@ def _parse_ba_draft(output: str) -> tuple[str, str]:
     if start >= 0 and end > start:
         try:
             data = json.loads(clean[start : end + 1])
-            return str(data.get("title", "")), str(data.get("body", ""))
+            return str(data.get("title", "")), str(data.get("body", "")), True
         except json.JSONDecodeError:
             pass
 
     first_line = output.split("\n")[0].strip()[:80]
-    return first_line or "Draft Ticket", output
+    return first_line or "Draft Ticket", output, False
 
 
 @app.post("/api/tickets/draft")
@@ -2632,7 +2636,15 @@ async def create_ticket_draft(
         raise HTTPException(502, detail=f"BA agent failed: {detail}")
 
     output = stdout.decode("utf-8", errors="replace").strip()
-    title, body = _parse_ba_draft(output)
+    title, body, json_ok = _parse_ba_draft(output)
+    if not json_ok:
+        raise HTTPException(
+            502,
+            detail=(
+                "BA returned malformed JSON — could not parse ticket fields. "
+                f"Raw output starts with: {output[:120]!r}"
+            ),
+        )
     return {"draft_id": draft_id, "title": title, "body": body}
 
 
@@ -2961,7 +2973,19 @@ async def _run_single_ba_ticket(
         return
 
     output = stdout.decode("utf-8", errors="replace").strip()
-    title, body = _parse_ba_draft(output)
+    title, body, json_ok = _parse_ba_draft(output)
+
+    # If BA output was not valid JSON, surface a clear error (issue #208)
+    if not json_ok:
+        ticket["state"] = "failed"
+        ticket["error"] = (
+            "BA returned malformed JSON — could not parse ticket fields. "
+            f"Raw output starts with: {output[:120]!r}"
+        )
+        ticket["finished_at"] = datetime.now(timezone.utc).isoformat()
+        _persist_bulk_job(job)
+        await _broadcast_bulk_event(job_id, {"type": "ticket_update", "ticket": dict(ticket)})
+        return
 
     # Store draft result — issue creation happens in-order via the flusher
     ticket["title"] = title

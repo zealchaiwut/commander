@@ -122,6 +122,8 @@ class SprintConfig:
     # Port detection (issue #62)
     app_default_port:      Optional[int]  = None
     app_port_strategy:     str            = "prefer_default"
+    # Documentor (issue #103)
+    documentor_enabled:    bool           = False
 
     @property
     def worktree_tester_app(self) -> Path:
@@ -240,6 +242,9 @@ def load_config(path: Path) -> "SprintConfig":
             )
         app_port_strategy = raw_strategy
 
+    # ── documentor section (issue #103) ──────────────────────────────────────
+    documentor_enabled: bool = bool(data.get("documentor_enabled", False))
+
     return SprintConfig(
         repo_name             = repo_name,
         worktree_coder        = worktree_coder,
@@ -254,6 +259,7 @@ def load_config(path: Path) -> "SprintConfig":
         tester_prompt_template= tester_prompt,
         app_default_port      = app_default_port,
         app_port_strategy     = app_port_strategy,
+        documentor_enabled    = documentor_enabled,
     )
 
 
@@ -279,15 +285,16 @@ def discover_config(start_dir: Optional[Path] = None) -> Optional[Path]:
 def _default_config() -> "SprintConfig":
     """Build a SprintConfig from env-vars + hardcoded defaults (backward compat)."""
     return SprintConfig(
-        repo_name         = None,  # will use github_client.repo()
-        worktree_coder    = Path.home() / "commander" / "work-coder",
-        worktree_tester   = WORKTESTER_ROOT,
-        tester_app_subdir = "apps/dashboard",
-        scripts_dir       = SCRIPTS_DIR,
-        logs_dir          = DASHBOARD_DIR / "logs",
-        sprints_dir       = SPRINTS_DIR,
-        alerts_dir        = ALERTS_DIR,
-        api_url           = DASHBOARD_API_URL,
+        repo_name          = None,  # will use github_client.repo()
+        worktree_coder     = Path.home() / "commander" / "work-coder",
+        worktree_tester    = WORKTESTER_ROOT,
+        tester_app_subdir  = "apps/dashboard",
+        scripts_dir        = SCRIPTS_DIR,
+        logs_dir           = DASHBOARD_DIR / "logs",
+        sprints_dir        = SPRINTS_DIR,
+        alerts_dir         = ALERTS_DIR,
+        api_url            = DASHBOARD_API_URL,
+        documentor_enabled = False,
     )
 
 
@@ -1292,6 +1299,46 @@ def _call_finish_feature(
         print("  finish_feature.py completed successfully")
 
 
+# ── documentor integration (issue #103) ──────────────────────────────────────
+
+def _run_documentor(
+    issue_num: int,
+    repo_name: Optional[str],
+    cfg: Optional["SprintConfig"] = None,
+) -> None:
+    """Invoke document_issue.py for the given issue (best-effort, non-blocking).
+
+    Runs only when documentor_enabled=True in sprint.yaml.  Failures are
+    logged as warnings so they never block the merge pipeline.
+    """
+    document_script = Path(__file__).parent / "document_issue.py"
+    if not document_script.exists():
+        print("  [documentor] document_issue.py not found — skipping", file=sys.stderr)
+        return
+
+    eff_repo = repo_name or (cfg.repo_name if cfg else None)
+    cmd = [sys.executable, str(document_script), "--issue", str(issue_num), "--mode", "both"]
+    if eff_repo:
+        cmd += ["--repo", eff_repo]
+
+    print(f"  [documentor] running for issue #{issue_num} ...")
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        if result.stdout:
+            for line in result.stdout.splitlines():
+                print(f"  {line}")
+        if result.returncode != 0:
+            print(f"  [documentor] exited {result.returncode} (non-fatal)", file=sys.stderr)
+            if result.stderr:
+                print(f"  [documentor] stderr: {result.stderr.strip()[:400]}", file=sys.stderr)
+        else:
+            print(f"  [documentor] completed for issue #{issue_num}")
+    except subprocess.TimeoutExpired:
+        print("  [documentor] timed out after 300s (non-fatal)", file=sys.stderr)
+    except Exception as e:
+        print(f"  [documentor] error (non-fatal): {e}", file=sys.stderr)
+
+
 # ── post-tester hook ──────────────────────────────────────────────────────────
 
 def handle_post_tester(
@@ -1308,6 +1355,7 @@ def handle_post_tester(
     cfg: Optional["SprintConfig"] = None,
     base_branch: str = "develop",
     gate_scope: str = "changed",
+    documentor_enabled: bool = False,
 ) -> tuple[bool, str, Optional[str]]:
     """Called after a tester subprocess exits.
 
@@ -1355,8 +1403,13 @@ def handle_post_tester(
         # Use a placeholder so the other gates can still run
         feature_branch = f"feature/{issue_num}-unknown"
 
+    # Resolve documentor_enabled: explicit param wins, then cfg, then False
+    eff_documentor = documentor_enabled or (cfg.documentor_enabled if cfg is not None else False)
+
     if skip_gates:
         print("  --skip-gates active -- skipping all quality gates, proceeding to merge")
+        if eff_documentor:
+            _run_documentor(issue_num, eff_repo, cfg=cfg)
         _call_finish_feature(issue_num, wt_root, target_branch=target_branch, repo_name=eff_repo, cfg=cfg)
         _post_agent_event("gate:merging", api_url=api_url)
         all_skipped = [
@@ -1388,6 +1441,8 @@ def handle_post_tester(
     if all_passed:
         _post_agent_event("gate:merging", api_url=api_url)
         print(f"  All gates passed -- calling finish_feature.py for issue #{issue_num}")
+        if eff_documentor:
+            _run_documentor(issue_num, eff_repo, cfg=cfg)
         _call_finish_feature(issue_num, wt_root, target_branch=target_branch, repo_name=eff_repo, cfg=cfg)
         _post_success_comment(issue_num, results, repo_name=eff_repo)
         return True, f"Tester promoted issue #{issue_num} to UAT; all gates passed, merged into {target_branch}", None
@@ -2702,6 +2757,7 @@ def run_sprint(
             cfg                = cfg,
             base_branch        = target_branch or "develop",
             gate_scope         = gate_scope,
+            documentor_enabled = cfg.documentor_enabled if cfg else False,
         )
         print(f"  {summary_line}")
 

@@ -834,6 +834,7 @@ def dispatch_alerts(
     issue_num: Optional[int] = None,
     category: Optional[str] = None,
     cfg: Optional["SprintConfig"] = None,
+    repo: Optional[str] = None,
 ) -> None:
     """Dispatch an alert through all configured channels."""
     api_url    = cfg.api_url    if cfg is not None else None
@@ -843,7 +844,7 @@ def dispatch_alerts(
             continue
         try:
             if mode == AlertMode.DASHBOARD_BANNER:
-                _alert_dashboard_banner(title, body, issue_num, category, api_url=api_url)
+                _alert_dashboard_banner(title, body, issue_num, category, api_url=api_url, repo=repo)
             elif mode == AlertMode.EMAIL:
                 _alert_email(title, body)
             elif mode == AlertMode.DISCORD:
@@ -860,6 +861,7 @@ def _alert_dashboard_banner(
     issue_num: Optional[int],
     category: Optional[str],
     api_url: Optional[str] = None,
+    repo: Optional[str] = None,
 ) -> None:
     base = api_url or DASHBOARD_API_URL
     payload = json.dumps({
@@ -867,6 +869,7 @@ def _alert_dashboard_banner(
         "body":       body,
         "issue_num":  issue_num,
         "category":   category,
+        "repo":       repo,
         "timestamp":  _utcnow(),
     }).encode()
     req = urllib.request.Request(
@@ -1497,6 +1500,7 @@ def handle_post_tester(
                 issue_num=issue_num,
                 category=FailureCategory.TESTER_REJECTED,
                 cfg=cfg,
+                repo=eff_repo,
             )
         return (False,
                 f"Issue #{issue_num}: tester exited 0 but not UAT -- no merge",
@@ -1756,6 +1760,7 @@ def _dispatch_coder(
                 issue_num=issue_num,
                 category=FailureCategory.HANG,
                 cfg=cfg,
+                repo=eff_repo,
             )
             return False, FailureCategory.HANG
 
@@ -1932,6 +1937,7 @@ def _dispatch_tester(
                 issue_num=issue_num,
                 category=FailureCategory.HANG,
                 cfg=cfg,
+                repo=eff_repo,
             )
             return -1, FailureCategory.HANG
 
@@ -2471,7 +2477,7 @@ def write_sprint_summary(
     # Dispatch via all configured alert channels (issue #24)
     if alert_modes:
         title = f"Sprint {state.sprint_label} summary"
-        dispatch_alerts(alert_modes, title=title, body=content[:2000], cfg=cfg)
+        dispatch_alerts(alert_modes, title=title, body=content[:2000], cfg=cfg, repo=eff_repo)
 
     # AC-5: skip GitHub issue creation entirely for dry runs
     if dry_run:
@@ -3647,6 +3653,7 @@ def run_sprint(
                 issue_num=num,
                 category=category,
                 cfg=cfg,
+                repo=eff_repo,
             )
             state.save(state_path)
             _post_sprint_status(state, api_url=api_url, project=eff_repo)
@@ -3751,6 +3758,7 @@ def run_sprint(
                 issue_num=num,
                 category=category,
                 cfg=cfg,
+                repo=eff_repo,
             )
 
         elapsed = time.monotonic() - start_time

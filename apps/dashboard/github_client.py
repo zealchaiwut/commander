@@ -399,6 +399,18 @@ def create_issue(title: str, body: str, labels: list[str],
     return number, url
 
 
+def list_labels(repo_name: str | None = None) -> list[dict]:
+    """Return all labels in the repo as [{"name": ..., "color": ...}, ...]."""
+    r = _r(repo_name)
+    key = f"labels:{r}"
+
+    def fetch():
+        raw = _json("label", "list", "--repo", r, "--json", "name,color", "--limit", "100")
+        return [{"name": lbl["name"], "color": lbl["color"]} for lbl in raw]
+
+    return _cached(key, fetch)
+
+
 def add_comment(issue_id: int, body: str, repo_name: str | None = None):
     r = _r(repo_name)
     _run("issue", "comment", str(issue_id), "--repo", r, "--body", body)

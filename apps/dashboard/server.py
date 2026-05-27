@@ -305,6 +305,17 @@ def get_repo_config():
         raise HTTPException(400, detail=str(e))
 
 
+@app.get("/api/github/labels")
+def get_github_labels(repo: Optional[str] = None):
+    """Return all GitHub labels for the repo (cached 30 s)."""
+    try:
+        return github_client.list_labels(repo_name=repo)
+    except subprocess.CalledProcessError as e:
+        raise _gh_error(e)
+    except ValueError as e:
+        raise HTTPException(400, detail=str(e))
+
+
 @app.get("/api/sprints")
 def get_sprints():
     try:
@@ -1968,6 +1979,7 @@ class CreateTicketBody(BaseModel):
     body: str = ""
     project: str = ""
     sprint_label: str = ""
+    extra_labels: list[str] = []
 
 
 @app.post("/api/tickets/create", status_code=201)
@@ -1979,6 +1991,10 @@ def create_ticket_from_draft(req: CreateTicketBody):
     labels: list[str] = ["backlog"]
     if req.sprint_label:
         labels.append(req.sprint_label)
+    for lbl in req.extra_labels:
+        lbl = lbl.strip()
+        if lbl and lbl not in labels:
+            labels.append(lbl)
 
     try:
         number, url = github_client.create_issue(

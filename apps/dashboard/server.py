@@ -1060,27 +1060,36 @@ def get_sprint_history():
             meta = {"sprint_num": None, "date": "", "status": "unknown",
                     "shipped_count": 0, "skipped_count": 0, "total_tokens": 0}
 
-        # Look for matching state file to get summary_issue_url
-        sprint_num   = meta.get("sprint_num")
-        issue_url    = None
+        # Look for matching state file to get summary_issue_url and reviewer data
+        sprint_num           = meta.get("sprint_num")
+        issue_url            = None
+        reviewer_status      = None
+        reviewer_comment_url = None
+        reviewer_findings    = None
         if sprint_num is not None:
             state_file = SPRINTS_DIR / f"sprint-{sprint_num}-state.json"
             if state_file.exists():
                 try:
-                    state_data = json.loads(state_file.read_text())
-                    issue_url  = state_data.get("summary_issue_url")
+                    state_data           = json.loads(state_file.read_text())
+                    issue_url            = state_data.get("summary_issue_url")
+                    reviewer_status      = state_data.get("reviewer_status")
+                    reviewer_comment_url = state_data.get("reviewer_comment_url")
+                    reviewer_findings    = state_data.get("reviewer_findings")
                 except Exception:
                     pass
 
         results.append({
-            "sprint_num":       meta["sprint_num"],
-            "date":             meta["date"],
-            "status":           meta["status"],
-            "file_path":        str(path),
-            "github_issue_url": issue_url,
-            "shipped_count":    meta["shipped_count"],
-            "skipped_count":    meta["skipped_count"],
-            "total_tokens":     meta["total_tokens"],
+            "sprint_num":            meta["sprint_num"],
+            "date":                  meta["date"],
+            "status":                meta["status"],
+            "file_path":             str(path),
+            "github_issue_url":      issue_url,
+            "shipped_count":         meta["shipped_count"],
+            "skipped_count":         meta["skipped_count"],
+            "total_tokens":          meta["total_tokens"],
+            "reviewer_status":       reviewer_status,
+            "reviewer_comment_url":  reviewer_comment_url,
+            "reviewer_findings":     reviewer_findings,
         })
 
     return results

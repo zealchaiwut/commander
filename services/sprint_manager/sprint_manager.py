@@ -124,6 +124,8 @@ class SprintConfig:
     app_port_strategy:     str            = "prefer_default"
     # Documentor (issue #103)
     documentor_enabled:    bool           = False
+    # Reviewer (issue #159)
+    reviewer_prompt_template: Optional[str] = None
 
     @property
     def worktree_tester_app(self) -> Path:
@@ -245,6 +247,9 @@ def load_config(path: Path) -> "SprintConfig":
     # ── documentor section (issue #103) ──────────────────────────────────────
     documentor_enabled: bool = bool(data.get("documentor_enabled", False))
 
+    # ── reviewer section (issue #159) ────────────────────────────────────────
+    reviewer_prompt = agents.get("reviewer_prompt_template") or None
+
     return SprintConfig(
         repo_name             = repo_name,
         worktree_coder        = worktree_coder,
@@ -257,9 +262,10 @@ def load_config(path: Path) -> "SprintConfig":
         api_url               = api_url,
         coder_prompt_template = coder_prompt,
         tester_prompt_template= tester_prompt,
-        app_default_port      = app_default_port,
-        app_port_strategy     = app_port_strategy,
-        documentor_enabled    = documentor_enabled,
+        app_default_port         = app_default_port,
+        app_port_strategy        = app_port_strategy,
+        documentor_enabled       = documentor_enabled,
+        reviewer_prompt_template = reviewer_prompt,
     )
 
 
@@ -590,19 +596,26 @@ class SprintState:
     wall_clock_secs:    float            = 0.0
     token_budget:       int              = 0
     rate_limit_events:  list[dict]       = field(default_factory=list)
+    # Reviewer fields (issue #159)
+    reviewer_status:      Optional[str]  = None   # "skipped" | "succeeded" | "failed"
+    reviewer_comment_url: Optional[str]  = None
+    reviewer_findings:    Optional[dict] = None   # {blockers, suggestions, nits, follow_up_tickets}
 
     def to_dict(self) -> dict:
         return {
-            "project":           self.project,
-            "sprint_label":      self.sprint_label,
-            "sprint_number":     self.sprint_number,
-            "issues":            [i.to_dict() for i in self.issues],
-            "start_timestamp":   self.start_timestamp,
-            "total_tokens_in":   self.total_tokens_in,
-            "total_tokens_out":  self.total_tokens_out,
-            "wall_clock_secs":   self.wall_clock_secs,
-            "token_budget":      self.token_budget,
-            "rate_limit_events": self.rate_limit_events,
+            "project":              self.project,
+            "sprint_label":         self.sprint_label,
+            "sprint_number":        self.sprint_number,
+            "issues":               [i.to_dict() for i in self.issues],
+            "start_timestamp":      self.start_timestamp,
+            "total_tokens_in":      self.total_tokens_in,
+            "total_tokens_out":     self.total_tokens_out,
+            "wall_clock_secs":      self.wall_clock_secs,
+            "token_budget":         self.token_budget,
+            "rate_limit_events":    self.rate_limit_events,
+            "reviewer_status":      self.reviewer_status,
+            "reviewer_comment_url": self.reviewer_comment_url,
+            "reviewer_findings":    self.reviewer_findings,
         }
 
     @staticmethod
@@ -617,8 +630,11 @@ class SprintState:
             wall_clock_secs  = d.get("wall_clock_secs", 0.0),
             token_budget     = d.get("token_budget", 0),
         )
-        s.issues            = [IssueState.from_dict(i) for i in d.get("issues", [])]
-        s.rate_limit_events = d.get("rate_limit_events", [])
+        s.issues              = [IssueState.from_dict(i) for i in d.get("issues", [])]
+        s.rate_limit_events   = d.get("rate_limit_events", [])
+        s.reviewer_status     = d.get("reviewer_status")
+        s.reviewer_comment_url = d.get("reviewer_comment_url")
+        s.reviewer_findings   = d.get("reviewer_findings")
         return s
 
     def save(self, path: Path) -> None:
@@ -2514,6 +2530,187 @@ def _create_sprint_pr(
         return None
 
 
+# ── Reviewer dispatch (issue #159) ───────────────────────────────────────────
+
+DEFAULT_REVIEWER_PROMPT = (
+    "You are the code reviewer for sprint {sprint_label}. "
+    "Repo: {repo_name}. "
+    "Sprint branch: {sprint_branch} (already merged to develop). "
+    "Diff range: {base_sha}..{head_sha}. "
+    "Sprint summary issue: #{summary_issue_num} "
+    "(see {sprint_filter_url} for all sprint tickets). "
+    "Follow the instructions in .claude/agents/reviewer.md exactly. "
+    "Your environment variables are set: "
+    "REPO={repo_name} SPRINT_LABEL={sprint_label} "
+    "SPRINT_SUMMARY_ISSUE={summary_issue_num} "
+    "SPRINT_BRANCH={sprint_branch} "
+    "BASE_REF={base_sha} HEAD_REF={head_sha}"
+)
+
+
+def _dispatch_reviewer(
+    state: "SprintState",
+    summary_issue_num: Optional[int],
+    sprint_branch: str,
+    base_sha: str,
+    head_sha: str,
+    cfg: Optional["SprintConfig"],
+    repo_name: Optional[str],
+) -> None:
+    """Dispatch the reviewer agent after sprint PR creation.
+
+    Updates state.reviewer_status, state.reviewer_comment_url, and
+    state.reviewer_findings in-place. Does NOT raise — failure is advisory.
+    """
+    eff_repo = repo_name or (cfg.repo_name if cfg else None)
+
+    # Skip conditions
+    merged = [i for i in state.issues if i.status == "done"]
+    if not merged:
+        print("  [reviewer] skipped: nothing merged this sprint")
+        state.reviewer_status = "skipped"
+        return
+
+    if summary_issue_num is None:
+        print("  [reviewer] skipped: no sprint summary issue available")
+        state.reviewer_status = "skipped"
+        return
+
+    # Determine prompt
+    if cfg and cfg.reviewer_prompt_template:
+        prompt_template = cfg.reviewer_prompt_template
+    else:
+        prompt_template = DEFAULT_REVIEWER_PROMPT
+
+    sprint_filter_url = (
+        f"https://github.com/{eff_repo}/issues"
+        f"?q=label%3A{state.sprint_label}"
+        if eff_repo else ""
+    )
+
+    try:
+        prompt = prompt_template.format(
+            sprint_label      = state.sprint_label,
+            sprint_branch     = sprint_branch,
+            base_sha          = base_sha,
+            head_sha          = head_sha,
+            summary_issue_num = summary_issue_num,
+            sprint_filter_url = sprint_filter_url,
+            repo_name         = eff_repo or "",
+        )
+    except KeyError as e:
+        print(f"  [reviewer] WARNING: prompt template has unknown placeholder {e} — skipping", file=sys.stderr)
+        state.reviewer_status = "skipped"
+        return
+
+    cwd_path = cfg.worktree_coder if cfg else Path.cwd()
+    logs_dir = cfg.logs_dir if cfg else Path.cwd()
+    log_path = logs_dir / f"sprint-{state.sprint_label}-reviewer.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Ensure coder clone has the sprint branch up to date
+    print(f"  [reviewer] Fetching {sprint_branch} in coder clone ...", flush=True)
+    try:
+        subprocess.run(
+            ["git", "fetch", "origin"],
+            cwd=str(cwd_path), capture_output=True, check=False,
+        )
+        subprocess.run(
+            ["git", "checkout", sprint_branch],
+            cwd=str(cwd_path), capture_output=True, check=False,
+        )
+        subprocess.run(
+            ["git", "pull"],
+            cwd=str(cwd_path), capture_output=True, check=False,
+        )
+    except Exception as e:
+        print(f"  [reviewer] WARNING: git prep failed: {e}", file=sys.stderr)
+
+    cmd = [
+        "claude",
+        "--model", "claude-haiku-4-5",
+        "--dangerously-skip-permissions",
+        "-p", prompt,
+    ]
+
+    sub_env = os.environ.copy()
+    sub_env.pop("ANTHROPIC_API_KEY", None)
+    if eff_repo:
+        sub_env["COMMANDER_PROJECT"] = eff_repo
+    sub_env["REPO"]                  = eff_repo or ""
+    sub_env["SPRINT_LABEL"]          = state.sprint_label
+    sub_env["SPRINT_SUMMARY_ISSUE"]  = str(summary_issue_num)
+    sub_env["SPRINT_BRANCH"]         = sprint_branch
+    sub_env["BASE_REF"]              = base_sha
+    sub_env["HEAD_REF"]              = head_sha
+
+    print("  [reviewer] Dispatching reviewer ...", flush=True)
+    try:
+        with log_path.open("w") as log_f:
+            proc = subprocess.Popen(
+                cmd,
+                stdout=log_f,
+                stderr=log_f,
+                cwd=str(cwd_path),
+                env=sub_env,
+            )
+    except FileNotFoundError:
+        print("  [reviewer] claude CLI not found — skipping", file=sys.stderr)
+        state.reviewer_status = "skipped"
+        return
+
+    # Use HangDetector with issue_num=0 as a sentinel for the reviewer
+    detector = HangDetector(issue_num=0, log_path=log_path, proc=proc)
+    detector.start()
+    rc = proc.wait()
+    detector.stop()
+
+    if detector.killed:
+        print("  [reviewer] WARNING: reviewer hung and was killed", file=sys.stderr)
+        state.reviewer_status = "failed"
+        return
+
+    if rc != 0:
+        print(f"  [reviewer] WARNING: reviewer exited with code {rc}", file=sys.stderr)
+        state.reviewer_status = "failed"
+        return
+
+    # Parse exit line: "Reviewer complete: B blockers, S suggestions, I nits, F follow-up tickets opened"
+    findings: dict = {"blockers": 0, "suggestions": 0, "nits": 0, "follow_up_tickets": []}
+    comment_url: Optional[str] = None
+    try:
+        log_text = log_path.read_text(errors="replace")
+        for line in reversed(log_text.splitlines()):
+            m = re.search(
+                r"Reviewer complete:\s*(\d+)\s*blockers?,\s*(\d+)\s*suggestions?,\s*(\d+)\s*nits?,\s*(\d+)\s*follow-up",
+                line, re.IGNORECASE,
+            )
+            if m:
+                findings["blockers"]    = int(m.group(1))
+                findings["suggestions"] = int(m.group(2))
+                findings["nits"]        = int(m.group(3))
+                findings["follow_up_tickets"] = list(range(int(m.group(4))))  # count only
+                break
+        # Look for comment URL in log
+        url_m = re.search(r"https://github\.com/[^\s]+/issues/\d+#issuecomment-\d+", log_text)
+        if url_m:
+            comment_url = url_m.group(0)
+    except Exception as e:
+        print(f"  [reviewer] WARNING: could not parse reviewer log: {e}", file=sys.stderr)
+
+    state.reviewer_status      = "succeeded"
+    state.reviewer_comment_url = comment_url
+    state.reviewer_findings    = findings
+    print(
+        f"  [reviewer] Done: "
+        f"{findings['blockers']} blockers, "
+        f"{findings['suggestions']} suggestions, "
+        f"{findings['nits']} nits, "
+        f"{len(findings['follow_up_tickets'])} follow-up tickets",
+        flush=True,
+    )
+
+
 # ── Issue Estimator integration ───────────────────────────────────────────────
 
 SERIOUS_RISK_FLAGS = {"touches-db-schema", "security-sensitive", "breaks-tests"}
@@ -3081,6 +3278,14 @@ def main() -> None:
         ),
     )
 
+    # Reviewer control (issue #159)
+    p.add_argument(
+        "--skip-reviewer",
+        action="store_true",
+        default=False,
+        help="Skip the post-sprint reviewer agent entirely.",
+    )
+
     args = p.parse_args()
 
     # ── Config resolution (AC-4 + AC-5 + AC-6) ───────────────────────────────
@@ -3209,6 +3414,64 @@ def main() -> None:
             state          = state,
             repo_name      = eff_repo,
         )
+
+    # Dispatch reviewer after sprint PR creation (issue #159)
+    if not args.skip_reviewer and not args.dry_run and state.issues:
+        rev_cwd = str(cfg.worktree_coder) if cfg else None
+        try:
+            r_head = subprocess.run(
+                ["git", "rev-parse", f"origin/{effective_target}"],
+                capture_output=True, text=True, check=False, cwd=rev_cwd,
+            )
+            r_base = subprocess.run(
+                ["git", "merge-base", f"origin/{effective_target}", "origin/develop"],
+                capture_output=True, text=True, check=False, cwd=rev_cwd,
+            )
+            head_sha = r_head.stdout.strip() or "HEAD"
+            base_sha = r_base.stdout.strip() or "develop"
+        except Exception:
+            head_sha = "HEAD"
+            base_sha = "develop"
+
+        # Read summary_issue_num from state JSON (set by write_sprint_summary)
+        summary_issue_num_for_reviewer: Optional[int] = None
+        state_path_rev = _state_path(state.sprint_number, state.sprint_label, cfg=cfg)
+        if state_path_rev.exists():
+            try:
+                sd = json.loads(state_path_rev.read_text())
+                surl = sd.get("summary_issue_url", "")
+                m_issue = re.search(r"/issues/(\d+)$", surl)
+                if m_issue:
+                    summary_issue_num_for_reviewer = int(m_issue.group(1))
+            except Exception:
+                pass
+
+        try:
+            _dispatch_reviewer(
+                state             = state,
+                summary_issue_num = summary_issue_num_for_reviewer,
+                sprint_branch     = effective_target,
+                base_sha          = base_sha,
+                head_sha          = head_sha,
+                cfg               = cfg,
+                repo_name         = eff_repo,
+            )
+            # Persist reviewer outcome into the state JSON
+            if state_path_rev.exists():
+                try:
+                    sd2 = json.loads(state_path_rev.read_text())
+                    sd2["reviewer_status"]      = state.reviewer_status
+                    sd2["reviewer_comment_url"] = state.reviewer_comment_url
+                    sd2["reviewer_findings"]    = state.reviewer_findings
+                    state_path_rev.write_text(json.dumps(sd2, indent=2))
+                except Exception as e_persist:
+                    print(
+                        f"  [reviewer] WARNING: could not persist reviewer outcome -- {e_persist}",
+                        file=sys.stderr,
+                    )
+        except Exception as e_rev:
+            print(f"  [reviewer] WARNING: reviewer raised unexpectedly -- {e_rev}", file=sys.stderr)
+            state.reviewer_status = "failed"
 
     print("\n=== Sprint Summary ===")
     print(f"Processed: {', '.join(summary.processed) or 'none'}")

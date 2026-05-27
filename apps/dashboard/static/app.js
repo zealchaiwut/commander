@@ -2084,21 +2084,38 @@ function _renderHistoryStats(data) {
   }
 }
 
+function _reviewerBadgeHtml(sprint) {
+  const rs = sprint.reviewer_status;
+  if (!rs || rs === 'skipped') return '<span class="history-reviewer reviewer-skipped">—</span>';
+  if (rs === 'failed') return '<span class="history-reviewer reviewer-failed">review failed</span>';
+  const f = sprint.reviewer_findings || {};
+  const b = f.blockers    ?? 0;
+  const s = f.suggestions ?? 0;
+  const url = sprint.reviewer_comment_url;
+  const label = `${b}B · ${s}S`;
+  if (url) {
+    return `<a class="history-reviewer reviewer-done${b > 0 ? ' reviewer-has-blockers' : ''}" href="${escapeHtml(url)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${escapeHtml(label)}</a>`;
+  }
+  return `<span class="history-reviewer reviewer-done${b > 0 ? ' reviewer-has-blockers' : ''}">${escapeHtml(label)}</span>`;
+}
+
 function _sprintRowHtml(sprint, idx) {
   const n       = sprint.sprint_num != null ? sprint.sprint_num : '?';
   const date    = sprint.date || '—';
   const status  = sprint.status || 'unknown';
   const shipped = sprint.shipped_count ?? 0;
   const skipped = sprint.skipped_count ?? 0;
+  const hasBlockers = (sprint.reviewer_findings?.blockers ?? 0) > 0;
 
   return `
-    <div class="history-row" id="history-row-${idx}" onclick="toggleHistoryRow(${idx})">
+    <div class="history-row${hasBlockers ? ' reviewer-blockers-row' : ''}" id="history-row-${idx}" onclick="toggleHistoryRow(${idx})">
       <div class="history-row-header">
-        <span class="history-sprint-num">Sprint ${escapeHtml(String(n))}</span>
+        <span class="history-sprint-num">Sprint ${escapeHtml(String(n))}${hasBlockers ? ' <span class="reviewer-red-dot" title="Reviewer found blockers"></span>' : ''}</span>
         <span class="history-date">${escapeHtml(date)}</span>
         <span class="history-status">${_statusBadgeHtml(status)}</span>
         <span class="history-shipped">&#10003; ${shipped} shipped</span>
         <span class="history-skipped">${skipped > 0 ? skipped + ' skipped' : '—'}</span>
+        <span class="history-reviewer-col">${_reviewerBadgeHtml(sprint)}</span>
         <span class="history-chevron"><i class="ti ti-chevron-down"></i></span>
       </div>
       <div class="history-expand-panel" id="history-expand-${idx}">

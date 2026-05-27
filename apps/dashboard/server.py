@@ -89,7 +89,7 @@ def _sweep_orphan_pid_files() -> None:
             if not sprints_dir.exists():
                 continue
             for pid_file in sprints_dir.glob("*-pid"):
-                sprint_label = pid_file.stem  # e.g. "sprint-9"
+                sprint_label = pid_file.name.removesuffix("-pid")  # e.g. "sprint-9"
                 try:
                     pid = int(pid_file.read_text(encoding="utf-8").strip())
                 except (ValueError, OSError):

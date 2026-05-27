@@ -2220,18 +2220,6 @@
       <label class="modal-label" for="dt-description">Description <span class="modal-required">*</span></label>
       <textarea class="modal-input dt-textarea" id="dt-description" placeholder="Describe the feature or bug you want to file…" rows="4"></textarea>
     </div>
-    <div class="modal-field">
-      <label class="modal-label">Attachments <span class="modal-hint">(images, .md, .txt, .json, .py, .js, .html, .css)</span></label>
-      <div class="dt-dropzone" id="dt-dropzone"
-           ondragover="event.preventDefault(); this.classList.add('drag-over')"
-           ondragleave="this.classList.remove('drag-over')"
-           ondrop="_dtOnDrop(event)"
-           onclick="_dtPickFiles()">
-        <span class="dt-dropzone-hint">Drop files here or click to browse</span>
-        <input type="file" id="dt-file-input" multiple accept=".png,.jpg,.jpeg,.gif,.webp,.md,.txt,.json,.py,.js,.html,.css" style="display:none" onchange="_dtOnFileInput(event)">
-      </div>
-      <div class="dt-previews" id="dt-previews"></div>
-    </div>
 
     <div class="modal-error hidden" id="dt-error"></div>
 
@@ -2251,6 +2239,18 @@
     <div class="modal-field">
       <label class="modal-label" for="dt-body">Body <span class="modal-hint">(edit before posting)</span></label>
       <textarea class="modal-input dt-body-textarea" id="dt-body" rows="10"></textarea>
+    </div>
+    <div class="modal-field">
+      <label class="modal-label">Attachments <span class="modal-hint">(images, .md, .txt, .json, .py, .js, .html, .css)</span></label>
+      <div class="dt-dropzone" id="dt-dropzone"
+           ondragover="event.preventDefault(); this.classList.add('drag-over')"
+           ondragleave="this.classList.remove('drag-over')"
+           ondrop="_dtOnDrop(event)"
+           onclick="_dtPickFiles()">
+        <span class="dt-dropzone-hint">Drop files here or click to browse</span>
+        <input type="file" id="dt-file-input" multiple accept=".png,.jpg,.jpeg,.gif,.webp,.md,.txt,.json,.py,.js,.html,.css" style="display:none" onchange="_dtOnFileInput(event)">
+      </div>
+      <div class="dt-previews" id="dt-previews"></div>
     </div>
     <div class="modal-footer">
       <button type="button" class="btn-ghost" onclick="closeDraftTicketModal()">Cancel</button>

@@ -2146,11 +2146,19 @@
   <form id="dt-form" onsubmit="generateDraft(event)">
     <div class="modal-field">
       <label class="modal-label" for="dt-project">Project <span class="modal-required">*</span></label>
-      <select class="modal-input" id="dt-project"></select>
+      <select class="modal-input" id="dt-project" onchange="_dtLabelCache=null; _dtLoadLabels(this.value)"></select>
     </div>
     <div class="modal-field">
       <label class="modal-label" for="dt-sprint">Sprint label</label>
       <input class="modal-input" id="dt-sprint" type="text" placeholder="sprint-7" autocomplete="off">
+    </div>
+    <div class="modal-field">
+      <label class="modal-label">Labels</label>
+      <div class="dt-label-picker" id="dt-label-picker">
+        <div class="dt-label-loading" id="dt-label-loading">Loading labels…</div>
+        <div class="dt-label-error hidden" id="dt-label-error">Could not load labels</div>
+        <div class="dt-label-list" id="dt-label-list"></div>
+      </div>
     </div>
     <div class="modal-field">
       <label class="modal-label" for="dt-description">Description <span class="modal-required">*</span></label>
@@ -2227,6 +2235,31 @@
   .dt-preview-remove:hover { opacity: .8; }
 
   .dt-draft-divider { border-top: 1px solid var(--border); margin: 20px 0; }
+
+  /* Label picker */
+  .dt-label-picker {
+    border: 1px solid var(--border); border-radius: 6px;
+    background: var(--surface-2); padding: 8px;
+    max-height: 140px; overflow-y: auto;
+  }
+  .dt-label-loading, .dt-label-error {
+    font-size: 12px; color: var(--text-muted); padding: 4px 2px;
+  }
+  .dt-label-error { color: var(--red, #e05); }
+  .dt-label-list { display: flex; flex-direction: column; gap: 4px; }
+  .dt-label-item {
+    display: flex; align-items: center; gap: 8px;
+    padding: 4px 6px; border-radius: 4px; cursor: pointer;
+    transition: background .12s;
+  }
+  .dt-label-item:hover { background: var(--surface); }
+  .dt-label-item input[type="checkbox"] { cursor: pointer; flex-shrink: 0; }
+  .dt-label-swatch {
+    display: inline-block; width: 12px; height: 12px;
+    border-radius: 50%; flex-shrink: 0;
+    border: 1px solid rgba(0,0,0,.15);
+  }
+  .dt-label-name { font-size: 12px; color: var(--text); }
 
   .dt-spinner {
     display: inline-block; width: 12px; height: 12px; margin-right: 6px;

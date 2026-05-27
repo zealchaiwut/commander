@@ -2544,20 +2544,43 @@
       <textarea class="modal-input dt-body-textarea" id="dt-body" rows="10"></textarea>
     </div>
     <div class="modal-field">
-      <label class="modal-label">Attachments <span class="modal-hint">(images, .md, .txt, .json, .py, .js, .html, .css)</span></label>
+      <label class="modal-label">Attachments</label>
+      <p class="modal-hint dt-attach-limits">
+        Allowed: .html .htm .md .txt .csv .json .yaml .yml .png .jpg .jpeg .gif .svg .webp .pdf .py .js .ts .tsx .css .sh .log .drawio .xlsx .pptx .docx .zip
+        &nbsp;&bull;&nbsp; Max 25 MB per file, 50 MB per upload.
+        HTML attachments will download — open locally to view rendered.
+      </p>
       <div class="dt-dropzone" id="dt-dropzone"
            ondragover="event.preventDefault(); this.classList.add('drag-over')"
            ondragleave="this.classList.remove('drag-over')"
            ondrop="_dtOnDrop(event)"
            onclick="_dtPickFiles()">
         <span class="dt-dropzone-hint">Drop files here or click to browse</span>
-        <input type="file" id="dt-file-input" multiple accept=".png,.jpg,.jpeg,.gif,.webp,.md,.txt,.json,.py,.js,.html,.css" style="display:none" onchange="_dtOnFileInput(event)">
+        <input type="file" id="dt-file-input" multiple
+               accept=".html,.htm,.md,.txt,.csv,.json,.yaml,.yml,.png,.jpg,.jpeg,.gif,.svg,.webp,.pdf,.py,.js,.ts,.tsx,.css,.sh,.log,.drawio,.xlsx,.pptx,.docx,.zip"
+               style="display:none" onchange="_dtOnFileInput(event)">
       </div>
       <div class="dt-previews" id="dt-previews"></div>
+      <div class="dt-file-error hidden" id="dt-file-error"></div>
     </div>
     <div class="modal-footer">
       <button type="button" class="btn-ghost" onclick="closeDraftTicketModal()">Cancel</button>
       <button type="button" class="btn-primary" id="dt-post-btn" onclick="postDraftToGitHub()">Post to GitHub</button>
+    </div>
+  </div>
+
+  <!-- Attachment push-failure modal (issue #188) -->
+  <div id="dt-push-fail-modal" class="hidden" style="
+    position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;
+    align-items:center;justify-content:center;z-index:9999;">
+    <div style="background:var(--surface);border-radius:8px;padding:24px;max-width:420px;width:90%;">
+      <p style="margin:0 0 16px;font-size:14px;">
+        Failed to commit attachments to GitHub. Issue was still created.
+        You can re-upload via the issue comment box.
+      </p>
+      <div style="text-align:right;">
+        <button class="btn-primary" onclick="document.getElementById('dt-push-fail-modal').classList.add('hidden')">OK</button>
+      </div>
     </div>
   </div>
 </div>
@@ -2594,6 +2617,9 @@
   .dt-preview-remove:hover { opacity: .8; }
 
   .dt-draft-divider { border-top: 1px solid var(--border); margin: 20px 0; }
+
+  .dt-attach-limits { font-size: 11px; color: var(--text-muted); margin: 0 0 8px; line-height: 1.5; }
+  .dt-file-error { font-size: 12px; color: var(--red, #e05); margin-top: 6px; }
 
   /* Label picker */
   .dt-label-picker {

@@ -230,3 +230,38 @@ rm -rf venv
 ```
 
 Or use the `.commander/setup.sh` helper if it includes venv setup.
+
+## How to read issue attachments
+
+When an issue body contains an `## Attachments` section, files are stored on the
+dedicated long-lived `attachments` branch (never merged into develop or master).
+
+**List files for an issue:**
+
+```bash
+gh api repos/zealchaiwut/commander/git/trees/attachments --recursive \
+  | jq -r '.tree[] | select(.path | startswith("references/issue-<N>/")) | .path'
+```
+
+**Download a specific file:**
+
+```bash
+# Via gh api (outputs raw bytes):
+gh api repos/zealchaiwut/commander/contents/references/issue-<N>/<filename> \
+  --header "Accept: application/vnd.github.raw" \
+  --jq '.' --output <local-filename>
+
+# Or via git show from the bare-clone cache (fastest if cache exists):
+git -C apps/dashboard/runtime/attachments-cache/zealchaiwut-commander \
+  show attachments:references/issue-<N>/<filename> > <local-filename>
+```
+
+**Direct raw URL (for supported file types that render on GitHub):**
+
+```
+https://raw.githubusercontent.com/zealchaiwut/commander/attachments/references/issue-<N>/<filename>
+```
+
+If the issue body has an `## Attachments` section, download the relevant files
+before starting implementation. The links in the issue body already point to the
+raw URL above.

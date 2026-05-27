@@ -2059,6 +2059,22 @@ def delete_sprint(sprint_label: str, project: str):
 
 _DRAFT_UPLOAD_DIR = Path(__file__).parent / "runtime" / "draft-uploads"
 
+# ── Attachment branch constants (issue #188) ──────────────────────────────────
+_ATTACHMENTS_BRANCH = "attachments"
+_ATTACHMENTS_CACHE_DIR = Path(__file__).parent / "runtime" / "attachments-cache"
+
+# Server-side allow-list for upload extensions.
+_ALLOWED_UPLOAD_EXTS = {
+    ".html", ".htm", ".md", ".txt", ".csv", ".json", ".yaml", ".yml",
+    ".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".pdf",
+    ".py", ".js", ".ts", ".tsx", ".css", ".sh", ".log",
+    ".drawio", ".xlsx", ".pptx", ".docx", ".zip",
+}
+# Per-file size limit (bytes)
+_MAX_FILE_SIZE_BYTES = 25 * 1024 * 1024  # 25 MB
+# Per-batch total size limit (bytes)
+_MAX_BATCH_SIZE_BYTES = 50 * 1024 * 1024  # 50 MB
+
 
 def _repo_root() -> Path:
     """Return the git repository root (the checkout that contains this file)."""
@@ -2070,10 +2086,285 @@ def _repo_root() -> Path:
     if result.returncode != 0:
         raise RuntimeError("Could not determine git repo root")
     return Path(result.stdout.strip())
-_ALLOWED_UPLOAD_EXTS = {
-    ".png", ".jpg", ".jpeg", ".gif", ".webp",
-    ".md", ".txt", ".json", ".py", ".js", ".html", ".css",
-}
+
+
+def _sanitize_filename(filename: str) -> str:
+    """Sanitize an uploaded filename for storage on the attachments branch.
+
+    - Strip path components (basename only)
+    - Lowercase
+    - Replace any char not in [a-z0-9._-] with _
+    - Preserve extension
+    """
+    name = Path(filename).name  # strip path components
+    name = name.lower()
+    stem = Path(name).stem
+    suffix = Path(name).suffix  # includes the dot
+    # Replace non-safe chars
+    safe_stem = re.sub(r"[^a-z0-9._-]", "_", stem)
+    safe_suffix = re.sub(r"[^a-z0-9._-]", "_", suffix)
+    return safe_stem + safe_suffix
+
+
+def _resolve_collision(desired: str, existing: set[str]) -> str:
+    """Return desired if not in existing, else append a numeric suffix before extension."""
+    if desired not in existing:
+        return desired
+    stem = Path(desired).stem
+    suffix = Path(desired).suffix
+    counter = 1
+    while True:
+        candidate = f"{stem}-{counter}{suffix}"
+        if candidate not in existing:
+            return candidate
+        counter += 1
+
+
+def _get_attachment_cache_dir(repo: str) -> Path:
+    """Return the bare-clone cache path for the given repo (owner/name)."""
+    safe = repo.replace("/", "-")
+    return _ATTACHMENTS_CACHE_DIR / safe
+
+
+def _ensure_attachments_branch(repo: str) -> None:
+    """Ensure the `attachments` orphan branch exists on the remote repo.
+
+    Uses `gh api` to check; if missing, clones the repo into a temp dir,
+    creates the orphan branch with an empty commit, and pushes it.
+    """
+    # Check if branch exists
+    result = subprocess.run(
+        ["gh", "api", f"repos/{repo}/branches/{_ATTACHMENTS_BRANCH}"],
+        capture_output=True, text=True,
+    )
+    if result.returncode == 0:
+        return  # branch already exists
+
+    # Branch missing — create orphan branch via a temp clone
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # Get remote URL
+        url_result = subprocess.run(
+            ["gh", "repo", "view", repo, "--json", "sshUrl,url", "-q", ".url"],
+            capture_output=True, text=True,
+        )
+        remote_url = url_result.stdout.strip()
+        if not remote_url:
+            remote_url = f"https://github.com/{repo}.git"
+
+        # Clone just enough to create the branch
+        subprocess.run(
+            ["git", "clone", "--depth=1", remote_url, tmpdir],
+            capture_output=True, text=True,
+        )
+        subprocess.run(
+            ["git", "checkout", "--orphan", _ATTACHMENTS_BRANCH],
+            capture_output=True, text=True, cwd=tmpdir,
+        )
+        subprocess.run(
+            ["git", "rm", "-rf", "."],
+            capture_output=True, text=True, cwd=tmpdir,
+        )
+        # Create empty initial commit
+        subprocess.run(
+            ["git", "commit", "--allow-empty", "-m", "init attachments branch"],
+            capture_output=True, text=True, cwd=tmpdir,
+        )
+        subprocess.run(
+            ["git", "push", "origin", _ATTACHMENTS_BRANCH],
+            capture_output=True, text=True, cwd=tmpdir, check=True,
+        )
+
+
+def _init_attachment_cache(repo: str) -> Path:
+    """Initialize or return the bare-clone cache for the attachments branch.
+
+    Returns path to the bare clone directory.
+    """
+    cache_dir = _get_attachment_cache_dir(repo)
+    if cache_dir.exists():
+        # Fetch latest from origin
+        subprocess.run(
+            ["git", "fetch", "origin", _ATTACHMENTS_BRANCH],
+            capture_output=True, text=True, cwd=str(cache_dir),
+        )
+        return cache_dir
+
+    # First use — bare-clone
+    cache_dir.parent.mkdir(parents=True, exist_ok=True)
+    url_result = subprocess.run(
+        ["gh", "repo", "view", repo, "--json", "url", "-q", ".url"],
+        capture_output=True, text=True,
+    )
+    remote_url = url_result.stdout.strip()
+    if not remote_url:
+        remote_url = f"https://github.com/{repo}.git"
+
+    subprocess.run(
+        ["git", "clone", "--bare", "--branch", _ATTACHMENTS_BRANCH,
+         remote_url, str(cache_dir)],
+        capture_output=True, text=True, check=True,
+    )
+    return cache_dir
+
+
+def _list_existing_attachments(cache_dir: Path, issue_number: int) -> set[str]:
+    """Return set of filenames already on the attachments branch for this issue."""
+    path_prefix = f"references/issue-{issue_number}/"
+    result = subprocess.run(
+        ["git", "ls-tree", "--name-only", f"refs/heads/{_ATTACHMENTS_BRANCH}", path_prefix],
+        capture_output=True, text=True, cwd=str(cache_dir),
+    )
+    if result.returncode != 0:
+        return set()
+    files = set()
+    for line in result.stdout.splitlines():
+        name = line.strip()
+        if "/" in name:
+            name = name.rsplit("/", 1)[-1]
+        if name:
+            files.add(name)
+    return files
+
+
+def _commit_attachments_to_branch(
+    cache_dir: Path,
+    issue_number: int,
+    file_data: list[tuple[str, bytes]],  # (sanitized_filename, content)
+) -> None:
+    """Commit files to the attachments branch in the bare cache and push.
+
+    Uses git hash-object + update-index + write-tree + commit-tree + update-ref
+    to write directly to the bare repo without a worktree checkout.
+
+    On push failure: retries once with fresh fetch+rebase.
+    Raises RuntimeError on persistent failure.
+    """
+    import tempfile
+
+    def _do_commit():
+        # Read existing tree for attachments branch
+        parent_result = subprocess.run(
+            ["git", "rev-parse", f"refs/heads/{_ATTACHMENTS_BRANCH}"],
+            capture_output=True, text=True, cwd=str(cache_dir),
+        )
+        parent_sha = parent_result.stdout.strip() if parent_result.returncode == 0 else None
+
+        # Get the current tree of the parent commit (or start empty)
+        if parent_sha:
+            tree_result = subprocess.run(
+                ["git", "cat-file", "-p", parent_sha],
+                capture_output=True, text=True, cwd=str(cache_dir),
+            )
+            parent_tree_sha = None
+            for line in tree_result.stdout.splitlines():
+                if line.startswith("tree "):
+                    parent_tree_sha = line.split()[1]
+                    break
+        else:
+            parent_tree_sha = None
+
+        # For each file: hash-object it, then add via update-index
+        # We use a temporary index file to build the new tree on top of the parent
+        import tempfile as _tf
+        idx_file = _tf.NamedTemporaryFile(delete=False, suffix=".idx")
+        idx_file.close()
+        idx_path = idx_file.name
+        try:
+            env = {"GIT_INDEX_FILE": idx_path, "HOME": str(Path.home())}
+            # Initialize index from parent tree if available
+            if parent_tree_sha:
+                subprocess.run(
+                    ["git", "read-tree", parent_tree_sha],
+                    capture_output=True, text=True, cwd=str(cache_dir),
+                    env={**env, "GIT_DIR": str(cache_dir)},
+                )
+
+            for fname, content in file_data:
+                dest_path = f"references/issue-{issue_number}/{fname}"
+                # Hash the object
+                hash_proc = subprocess.run(
+                    ["git", "hash-object", "-w", "--stdin"],
+                    input=content, capture_output=True,
+                    cwd=str(cache_dir),
+                )
+                if hash_proc.returncode != 0:
+                    raise RuntimeError(f"hash-object failed for {fname}")
+                blob_sha = hash_proc.stdout.strip().decode()
+
+                # Add to index
+                subprocess.run(
+                    ["git", "update-index", "--add", "--cacheinfo",
+                     f"100644,{blob_sha},{dest_path}"],
+                    capture_output=True, text=True, cwd=str(cache_dir),
+                    env={**env, "GIT_DIR": str(cache_dir)},
+                    check=True,
+                )
+
+            # Write the tree
+            write_result = subprocess.run(
+                ["git", "write-tree"],
+                capture_output=True, text=True, cwd=str(cache_dir),
+                env={**env, "GIT_DIR": str(cache_dir)},
+            )
+            new_tree_sha = write_result.stdout.strip()
+
+            # Create the commit object
+            commit_cmd = ["git", "commit-tree", new_tree_sha,
+                          "-m", f"chore(attachments): add file for issue #{issue_number}"]
+            if parent_sha:
+                commit_cmd += ["-p", parent_sha]
+            commit_result = subprocess.run(
+                commit_cmd,
+                capture_output=True, text=True, cwd=str(cache_dir),
+            )
+            new_commit_sha = commit_result.stdout.strip()
+
+            # Update the ref
+            subprocess.run(
+                ["git", "update-ref", f"refs/heads/{_ATTACHMENTS_BRANCH}", new_commit_sha],
+                capture_output=True, text=True, cwd=str(cache_dir), check=True,
+            )
+        finally:
+            try:
+                Path(idx_path).unlink()
+            except Exception:
+                pass
+
+        return new_commit_sha
+
+    new_sha = _do_commit()
+
+    # Push to remote
+    push_result = subprocess.run(
+        ["git", "push", "origin", f"refs/heads/{_ATTACHMENTS_BRANCH}:refs/heads/{_ATTACHMENTS_BRANCH}"],
+        capture_output=True, text=True, cwd=str(cache_dir),
+    )
+    if push_result.returncode == 0:
+        return
+
+    # Push failed — retry once with fresh fetch + rebase
+    subprocess.run(
+        ["git", "fetch", "origin", _ATTACHMENTS_BRANCH],
+        capture_output=True, text=True, cwd=str(cache_dir),
+    )
+    # Update FETCH_HEAD into the local branch and redo commit on top
+    # Reset local branch to remote
+    subprocess.run(
+        ["git", "update-ref", f"refs/heads/{_ATTACHMENTS_BRANCH}",
+         f"refs/remotes/origin/{_ATTACHMENTS_BRANCH}"],
+        capture_output=True, text=True, cwd=str(cache_dir),
+    )
+    # Redo the commit on the new base
+    _do_commit()
+    retry_push = subprocess.run(
+        ["git", "push", "origin", f"refs/heads/{_ATTACHMENTS_BRANCH}:refs/heads/{_ATTACHMENTS_BRANCH}"],
+        capture_output=True, text=True, cwd=str(cache_dir),
+    )
+    if retry_push.returncode != 0:
+        raise RuntimeError(
+            f"Push to attachments branch failed after retry: {retry_push.stderr.strip()}"
+        )
 
 
 def _parse_ba_draft(output: str) -> tuple[str, str]:
@@ -2220,58 +2511,88 @@ async def create_ticket_from_draft(
     except subprocess.CalledProcessError as e:
         raise HTTPException(502, detail=f"gh CLI failed: {e.stderr.strip()[:300]}")
 
-    # Handle attachments: copy to references/issue-<N>/, commit + push, append section.
+    # Handle attachments via the dedicated `attachments` branch (issue #188).
     valid_files = [f for f in files if f.filename]
     if valid_files:
+        repo_name = github_client.get_repo_for_operation(project or None)
+
+        # --- Validate extensions and sizes before reading content ---
+        batch_size = 0
+        file_data_raw: list[tuple[str, bytes]] = []  # (original_filename, content)
+        for upload in valid_files:
+            ext = Path(upload.filename).suffix.lower()
+            if ext not in _ALLOWED_UPLOAD_EXTS:
+                raise HTTPException(
+                    422,
+                    detail=f"File '{upload.filename}' has disallowed extension '{ext}'. "
+                           f"Allowed: {', '.join(sorted(_ALLOWED_UPLOAD_EXTS))}",
+                )
+            content = await upload.read()
+            if len(content) > _MAX_FILE_SIZE_BYTES:
+                raise HTTPException(
+                    422,
+                    detail=f"File '{upload.filename}' exceeds the 25 MB per-file limit "
+                           f"({len(content) // (1024*1024)} MB).",
+                )
+            batch_size += len(content)
+            if batch_size > _MAX_BATCH_SIZE_BYTES:
+                raise HTTPException(
+                    422,
+                    detail=f"Upload batch exceeds the 50 MB total limit.",
+                )
+            file_data_raw.append((upload.filename, content))
+
+        # --- Ensure attachments branch exists on remote ---
         try:
-            root = _repo_root()
-        except RuntimeError as e:
-            raise HTTPException(500, detail=str(e))
+            _ensure_attachments_branch(repo_name)
+        except Exception as e:
+            # Non-fatal: log and skip attachments
+            import logging
+            logging.warning(f"Could not ensure attachments branch: {e}")
+            file_data_raw = []
 
-        ref_dir = root / "references" / f"issue-{number}"
-        ref_dir.mkdir(parents=True, exist_ok=True)
+        if file_data_raw:
+            # --- Initialize or refresh the bare-clone cache ---
+            try:
+                cache_dir = _init_attachment_cache(repo_name)
+            except Exception as e:
+                import logging
+                logging.warning(f"Could not initialize attachment cache: {e}")
+                cache_dir = None
 
-        saved_names: list[str] = []
-        for f in valid_files:
-            content = await f.read()
-            dest = ref_dir / Path(f.filename).name
-            dest.write_bytes(content)
-            saved_names.append(Path(f.filename).name)
+            if cache_dir:
+                # --- Sanitize filenames and resolve collisions ---
+                existing = _list_existing_attachments(cache_dir, number)
+                file_data: list[tuple[str, bytes]] = []
+                used_names: set[str] = set(existing)
+                for orig_name, content in file_data_raw:
+                    sanitized = _sanitize_filename(orig_name)
+                    final_name = _resolve_collision(sanitized, used_names)
+                    used_names.add(final_name)
+                    file_data.append((final_name, content))
 
-        # Commit the attachment files.
-        subprocess.run(
-            ["git", "add", f"references/issue-{number}"],
-            cwd=str(root), check=True,
-        )
-        subprocess.run(
-            ["git", "commit", "-m", f"chore: add attachments for issue #{number}"],
-            cwd=str(root), check=True,
-        )
-        # Determine current branch to push to the right remote ref.
-        branch_result = subprocess.run(
-            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-            capture_output=True, text=True, cwd=str(root),
-        )
-        branch = branch_result.stdout.strip() if branch_result.returncode == 0 else "HEAD"
-        subprocess.run(
-            ["git", "push", "origin", branch],
-            cwd=str(root), check=True,
-        )
+                # --- Commit ONE batch, then append Attachments section ---
+                push_error: str | None = None
+                try:
+                    _commit_attachments_to_branch(cache_dir, number, file_data)
+                except RuntimeError as e:
+                    push_error = str(e)
 
-        # Append ## Attachments section to the issue body.
-        links = "\n".join(
-            f"[{name}](references/issue-{number}/{name})"
-            for name in saved_names
-        )
-        updated_body = body + f"\n\n## Attachments\n\n{links}"
-
-        repo = github_client.repo()
-        subprocess.run(
-            ["gh", "issue", "edit", str(number),
-             "--repo", repo,
-             "--body", updated_body],
-            capture_output=True, text=True, check=True,
-        )
+                if push_error is None:
+                    # Build raw.githubusercontent.com links
+                    owner_repo = repo_name  # e.g. "zealchaiwut/commander"
+                    links = "\n".join(
+                        f"- [{fname}](https://raw.githubusercontent.com/{owner_repo}/"
+                        f"{_ATTACHMENTS_BRANCH}/references/issue-{number}/{fname})"
+                        for fname, _ in file_data
+                    )
+                    # Only append if not already present (idempotent retry)
+                    if "## Attachments" not in body:
+                        updated_body = body + f"\n\n## Attachments\n\n{links}"
+                    else:
+                        updated_body = body
+                    github_client.update_issue_body(number, updated_body, repo_name=repo_name)
+                # If push_error is set, skip the Attachments section — issue already created.
 
     # Clean up temp draft upload directory.
     if draft_id:

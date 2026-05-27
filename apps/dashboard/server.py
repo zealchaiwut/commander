@@ -1928,6 +1928,18 @@ def delete_sprint(sprint_label: str, project: str):
 # ── Draft Ticket endpoints (issue #94) ───────────────────────────────────────
 
 _DRAFT_UPLOAD_DIR = Path(__file__).parent / "runtime" / "draft-uploads"
+
+
+def _repo_root() -> Path:
+    """Return the git repository root (the checkout that contains this file)."""
+    result = subprocess.run(
+        ["git", "rev-parse", "--show-toplevel"],
+        capture_output=True, text=True,
+        cwd=str(Path(__file__).parent),
+    )
+    if result.returncode != 0:
+        raise RuntimeError("Could not determine git repo root")
+    return Path(result.stdout.strip())
 _ALLOWED_UPLOAD_EXTS = {
     ".png", ".jpg", ".jpeg", ".gif", ".webp",
     ".md", ".txt", ".json", ".py", ".js", ".html", ".css",
@@ -2047,15 +2059,23 @@ class CreateTicketBody(BaseModel):
 
 
 @app.post("/api/tickets/create", status_code=201)
-def create_ticket_from_draft(req: CreateTicketBody):
-    title = req.title.strip()
+async def create_ticket_from_draft(
+    draft_id: str = Form(default=""),
+    title: str = Form(...),
+    body: str = Form(default=""),
+    project: str = Form(default=""),
+    sprint_label: str = Form(default=""),
+    extra_labels: list[str] = Form(default=[]),
+    files: list[UploadFile] = File(default=[]),
+):
+    title = title.strip()
     if not title:
         raise HTTPException(400, detail="Title is required")
 
     labels: list[str] = ["backlog"]
-    if req.sprint_label:
-        labels.append(req.sprint_label)
-    for lbl in req.extra_labels:
+    if sprint_label:
+        labels.append(sprint_label)
+    for lbl in extra_labels:
         lbl = lbl.strip()
         if lbl and lbl not in labels:
             labels.append(lbl)
@@ -2063,15 +2083,69 @@ def create_ticket_from_draft(req: CreateTicketBody):
     try:
         number, url = github_client.create_issue(
             title=title,
-            body=req.body,
+            body=body,
             labels=labels,
-            repo_name=req.project or None,
+            repo_name=project or None,
         )
     except subprocess.CalledProcessError as e:
         raise HTTPException(502, detail=f"gh CLI failed: {e.stderr.strip()[:300]}")
 
-    if req.draft_id:
-        upload_dir = _DRAFT_UPLOAD_DIR / req.draft_id
+    # Handle attachments: copy to references/issue-<N>/, commit + push, append section.
+    valid_files = [f for f in files if f.filename]
+    if valid_files:
+        try:
+            root = _repo_root()
+        except RuntimeError as e:
+            raise HTTPException(500, detail=str(e))
+
+        ref_dir = root / "references" / f"issue-{number}"
+        ref_dir.mkdir(parents=True, exist_ok=True)
+
+        saved_names: list[str] = []
+        for f in valid_files:
+            content = await f.read()
+            dest = ref_dir / Path(f.filename).name
+            dest.write_bytes(content)
+            saved_names.append(Path(f.filename).name)
+
+        # Commit the attachment files.
+        subprocess.run(
+            ["git", "add", f"references/issue-{number}"],
+            cwd=str(root), check=True,
+        )
+        subprocess.run(
+            ["git", "commit", "-m", f"chore: add attachments for issue #{number}"],
+            cwd=str(root), check=True,
+        )
+        # Determine current branch to push to the right remote ref.
+        branch_result = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            capture_output=True, text=True, cwd=str(root),
+        )
+        branch = branch_result.stdout.strip() if branch_result.returncode == 0 else "HEAD"
+        subprocess.run(
+            ["git", "push", "origin", branch],
+            cwd=str(root), check=True,
+        )
+
+        # Append ## Attachments section to the issue body.
+        links = "\n".join(
+            f"[{name}](references/issue-{number}/{name})"
+            for name in saved_names
+        )
+        updated_body = body + f"\n\n## Attachments\n\n{links}"
+
+        repo = github_client.repo()
+        subprocess.run(
+            ["gh", "issue", "edit", str(number),
+             "--repo", repo,
+             "--body", updated_body],
+            capture_output=True, text=True, check=True,
+        )
+
+    # Clean up temp draft upload directory.
+    if draft_id:
+        upload_dir = _DRAFT_UPLOAD_DIR / draft_id
         if upload_dir.exists():
             shutil.rmtree(upload_dir, ignore_errors=True)
 

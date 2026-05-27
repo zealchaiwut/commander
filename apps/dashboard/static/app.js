@@ -4426,9 +4426,7 @@ async function generateDraft(event) {
   formData.append('description', desc);
   formData.append('project', document.getElementById('dt-project').value || '');
   formData.append('sprint_label', _dtGetSprintValue());
-  for (const f of _dtFiles) {
-    formData.append('files', f);
-  }
+  // Attachments are no longer sent at draft-generation time; they are uploaded at post time.
 
   try {
     const res = await fetch('/api/tickets/draft', { method: 'POST', body: formData });
@@ -4438,6 +4436,8 @@ async function generateDraft(event) {
     }
     const data = await res.json();
     _dtDraftId = data.draft_id;
+    _dtFiles = [];
+    _dtRenderPreviews();
     document.getElementById('dt-title').value = data.title || '';
     document.getElementById('dt-body').value = data.body || '';
     document.getElementById('dt-draft-section').classList.remove('hidden');
@@ -4467,17 +4467,23 @@ async function postDraftToGitHub() {
   document.getElementById('dt-error').classList.add('hidden');
 
   try {
+    // Use FormData so we can upload attachment files along with the ticket fields.
+    const formData = new FormData();
+    formData.append('draft_id', _dtDraftId || '');
+    formData.append('title', title);
+    formData.append('body', document.getElementById('dt-body').value);
+    formData.append('project', document.getElementById('dt-project').value || '');
+    formData.append('sprint_label', _dtGetSprintValue());
+    for (const lbl of extraLabels) {
+      formData.append('extra_labels', lbl);
+    }
+    for (const f of _dtFiles) {
+      formData.append('files', f);
+    }
+
     const res = await fetch('/api/tickets/create', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        draft_id: _dtDraftId || '',
-        title,
-        body: document.getElementById('dt-body').value,
-        project: document.getElementById('dt-project').value || '',
-        sprint_label: _dtGetSprintValue(),
-        extra_labels: extraLabels,
-      }),
+      body: formData,
     });
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));

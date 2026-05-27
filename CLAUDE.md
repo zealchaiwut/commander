@@ -174,8 +174,7 @@ There are two pricing surfaces. Always prefer the cheaper option.
 
 | Surface | Funded by | When used |
 |---|---|---|
-| **Claude Code CLI** (`claude` subprocess) | Claude.ai subscription (free up to limits) | Coder and tester agents dispatched by sprint_manager.py |
-| **Raw Anthropic API** (`api.anthropic.com`) | ANTHROPIC_API_KEY — charged per token | `sprint_review.py` preflight calls |
+| **Claude Code CLI** (`claude` subprocess) | Claude.ai subscription (free up to limits) | Coder, tester, and preflight agents dispatched by sprint_manager.py |
 
 ### Default models per agent
 
@@ -185,7 +184,7 @@ There are two pricing surfaces. Always prefer the cheaper option.
 | Coder | `claude-sonnet-4-6` (via Claude Code) | Solid coding quality; subscription-funded |
 | Tester | `claude-haiku-4-5` (via Claude Code) | Mostly mechanical verification; cheapest capable model |
 | Estimator | `claude-haiku-4-5-20251001` (via Claude Code) | Structured JSON output; no Sonnet needed |
-| sprint_review.py | `claude-haiku-4-5-20251001` (raw API) | Already optimized; keep as-is |
+| sprint_review.py | `claude-haiku-4-5` (via Claude Code) | Single agent call for all issues; subscription-funded |
 
 ### How to choose a model
 
@@ -197,8 +196,7 @@ There are two pricing surfaces. Always prefer the cheaper option.
 ### Cost visibility
 
 - Token usage is tracked in the `token_usage` table with `agent_role` and `model_name` columns.
-- Sprint summaries include a `cost_estimate` row in the Stats table showing estimated API spend.
-- Raw API spend (sprint_review.py) uses Haiku 4.5 rates: $0.80/M input, $4.00/M output.
+- Sprint summaries include a `cost_estimate` row in the Stats table (shows $0.00 — all agents are subscription-funded).
 - Audit per-agent/model spend: `GET /api/debug/token-usage/by-agent-model`
 
 ## String literal conventions

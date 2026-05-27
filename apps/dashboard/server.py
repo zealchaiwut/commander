@@ -19,7 +19,7 @@ except ImportError:
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, model_validator
 
@@ -2102,6 +2102,74 @@ def delete_sprint(sprint_label: str, project: str):
     if errors:
         result["errors"] = errors
     return result
+
+
+# ── Finish Sprint endpoint (issue #195) ──────────────────────────────────────
+
+_FINISH_SPRINT_REMOVE_LABELS = {"in-progress", "sit", "need-rework"}
+
+
+@app.post("/api/projects/{owner}/{repo_name}/sprints/{label}/finish")
+async def finish_sprint(owner: str, repo_name: str, label: str):
+    """Bulk-close all open issues for a sprint, moving them to UAT first.
+
+    AC: iterates all open issues with the sprint label, adds 'UAT' label
+    (removing 'in-progress', 'sit', 'need-rework' if present), then closes each
+    issue via gh issue close.
+
+    Returns: { "closed": N, "errors": [] }
+      - HTTP 200 on full success (including zero-issue case)
+      - HTTP 207 if any individual issue operation failed
+    """
+    if not _SPRINT_LABEL_RE.match(label):
+        raise HTTPException(400, detail=f"Invalid sprint label: {label!r}")
+
+    repo = f"{owner}/{repo_name}"
+    project_root = _project_root_path(repo)
+
+    # Block if this sprint is currently running
+    if _is_sprint_running(project_root, label):
+        raise HTTPException(409, detail=f"Sprint {label} is currently running — finish it after the run completes")
+
+    # Fetch all open issues for the repo
+    try:
+        all_issues = github_client.list_open_issues_with_body(repo_name=repo, limit=200)
+    except subprocess.CalledProcessError as e:
+        raise _gh_error(e)
+
+    # Filter to issues belonging to this sprint label
+    sprint_issues = [
+        iss for iss in all_issues
+        if any(lbl["name"] == label for lbl in iss.get("labels", []))
+    ]
+
+    closed = 0
+    errors: list[str] = []
+
+    for iss in sprint_issues:
+        issue_num = iss["number"]
+        current_labels = {lbl["name"] for lbl in iss.get("labels", [])}
+        to_remove = list(current_labels & _FINISH_SPRINT_REMOVE_LABELS)
+        try:
+            # Add UAT and strip workflow labels in one gh call
+            github_client.update_labels(issue_num, add=["UAT"], remove=to_remove, repo_name=repo)
+            github_client.close_issue(issue_num, repo_name=repo)
+            closed += 1
+        except subprocess.CalledProcessError as e:
+            err_msg = e.stderr.strip() if e.stderr else str(e)
+            errors.append(f"#{issue_num}: {err_msg}")
+
+    # Invalidate caches so the board refreshes
+    github_client.invalidate(f"open_issues_body:")
+    github_client.invalidate(f"open_issues:")
+    github_client.invalidate(f"issues:")
+    github_client.invalidate(f"recent_closed:")
+
+    await broadcast({"type": "update", "event": {"event_type": "sprint_finished", "sprint_label": label}})
+
+    result: dict = {"closed": closed, "errors": errors}
+    status_code = 207 if errors else 200
+    return JSONResponse(content=result, status_code=status_code)
 
 
 # ── Draft Ticket endpoints (issue #94) ───────────────────────────────────────

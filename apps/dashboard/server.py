@@ -1424,10 +1424,18 @@ def get_sprint_management_issues(repo: str):
         if sprint_num is not None and sprint_num in sprint_ticket_counts:
             sprint_ticket_counts[sprint_num] += 1
 
-    # Sprint labels with 0 tickets are "empty" — these are stale/ghost labels
+    # Compute the minimum sprint number that has >= 1 open ticket (lowest active sprint)
+    active_sprint_nums = [n for n, count in sprint_ticket_counts.items() if count > 0]
+    min_active_sprint = min(active_sprint_nums) if active_sprint_nums else None
+
+    # Sprint labels with 0 tickets are "empty" — only include those strictly below the
+    # lowest active sprint (sprints at or above the threshold are not offered for cleanup).
+    # If there are no active sprints at all, no sprints are offered for cleanup.
     empty_sprint_labels = [
         f"sprint-{n}" for n in sorted(sprint_ticket_counts.keys())
         if sprint_ticket_counts[n] == 0
+        and min_active_sprint is not None
+        and n < min_active_sprint
     ]
 
     # Build order only from sprints that have tickets (non-empty)
@@ -1705,25 +1713,52 @@ class SprintDeleteBody(BaseModel):
 
 @app.post("/api/sprints/delete-empty")
 async def delete_empty_sprints(body: SprintDeleteBody):
-    """Delete empty sprint labels from GitHub. Only allows deleting sprint-N labels with 0 tickets."""
+    """Delete empty sprint labels from GitHub. Only allows deleting sprint-N labels with 0 tickets
+    that are strictly below the lowest active sprint number."""
     # Validate all labels are sprint-N pattern
     for label in body.labels:
         if not _SPRINT_LABEL_RE.match(label):
             raise HTTPException(400, detail=f"Invalid sprint label: {label!r}")
 
-    # Verify each label has 0 tickets before deleting
+    # Verify each label has 0 tickets before deleting, and compute lowest active sprint
     try:
         issues = github_client.list_open_issues_with_body(repo_name=body.project, limit=200)
     except subprocess.CalledProcessError as e:
         raise _gh_error(e)
 
+    # Compute sprint ticket counts to determine min_active_sprint
+    sprint_re_local = re.compile(r"^sprint-(\d+)$")
+    issue_sprint_counts: dict[int, int] = {}
     label_set = set(body.labels)
     for iss in issues:
         for lbl in iss.get("labels", []):
+            m = sprint_re_local.match(lbl["name"])
+            if m:
+                n = int(m.group(1))
+                issue_sprint_counts[n] = issue_sprint_counts.get(n, 0) + 1
             if lbl["name"] in label_set:
                 raise HTTPException(
                     400,
                     detail=f"Label {lbl['name']!r} still has open tickets — cannot delete",
+                )
+
+    active_sprint_nums = [n for n, count in issue_sprint_counts.items() if count > 0]
+    min_active_sprint = min(active_sprint_nums) if active_sprint_nums else None
+
+    # Reject any label whose sprint number >= min_active_sprint (or if no active sprints exist)
+    for label in body.labels:
+        m = sprint_re_local.match(label)
+        if m:
+            label_num = int(m.group(1))
+            if min_active_sprint is None:
+                raise HTTPException(
+                    422,
+                    detail=f"Cannot delete {label}: no active sprints exist, nothing is eligible for cleanup",
+                )
+            if label_num >= min_active_sprint:
+                raise HTTPException(
+                    422,
+                    detail=f"Cannot delete {label}: sprint number {label_num} is not below the lowest active sprint ({min_active_sprint})",
                 )
 
     deleted = []

@@ -637,16 +637,23 @@
     .history-row:hover { background: var(--surface-hover); }
     .history-row-header {
       display: grid;
-      grid-template-columns: 80px 110px 120px 90px 90px 40px;
+      grid-template-columns: 80px 110px 120px 90px 90px 110px 40px;
       align-items: center; gap: 16px;
       padding: 14px 24px;
     }
-    .history-sprint-num { font-weight: 700; font-size: 14px; }
+    .history-sprint-num { font-weight: 700; font-size: 14px; display: flex; align-items: center; gap: 6px; }
     .history-date       { font-size: 12px; color: var(--text-muted); font-family: var(--mono); }
     .history-shipped    { font-size: 13px; font-weight: 600; color: var(--green); }
     .history-skipped    { font-size: 13px; font-weight: 600; color: var(--amber); }
     .history-chevron    { display: flex; justify-content: flex-end; color: var(--text-sub); font-size: 16px; transition: transform .2s ease; }
     .history-row.expanded .history-chevron { transform: rotate(180deg); }
+    .history-reviewer-col { font-size: 12px; }
+    .history-reviewer { font-size: 11px; font-weight: 600; font-family: var(--mono); padding: 2px 6px; border-radius: 4px; white-space: nowrap; text-decoration: none; }
+    .reviewer-skipped { color: var(--text-muted); }
+    .reviewer-failed  { background: var(--surface-2); color: var(--text-muted); }
+    .reviewer-done    { background: var(--surface-2); color: var(--text-sub); border: 1px solid var(--border); }
+    .reviewer-has-blockers { background: var(--red-bg); color: var(--red); border: 1px solid var(--red); }
+    .reviewer-red-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--red); flex-shrink: 0; }
 
     .history-expand-panel {
       display: none;
@@ -670,7 +677,7 @@
     .history-gh-link:hover { text-decoration: underline; }
     @media (max-width: 600px) {
       .history-row-header { grid-template-columns: 60px 90px 1fr 40px; }
-      .history-date, .history-shipped, .history-skipped { display: none; }
+      .history-date, .history-shipped, .history-skipped, .history-reviewer-col { display: none; }
     }
 
     /* ── Sprint cockpit (issue #32) ── */

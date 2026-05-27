@@ -4470,19 +4470,109 @@ function _smgmtCheckStall() {
   }
 }
 
+let _smgmtStallRefreshInterval = null;
+
 function _smgmtShowStallWarning(sprintLabel) {
   const block = document.getElementById(`smgmt-block-${sprintLabel}`);
   if (!block) return;
   if (block.querySelector('.smgmt-stall-warning')) return; // already shown
+
   const warn = document.createElement('div');
   warn.className = 'smgmt-stall-warning';
-  warn.textContent = 'Sprint launched but no progress reported. Check terminal logs.';
+
+  const header = document.createElement('div');
+  header.className = 'smgmt-stall-header';
+
+  const title = document.createElement('span');
+  title.textContent = 'Sprint launched but no progress reported after 30s.';
+
+  const chevron = document.createElement('span');
+  chevron.className = 'smgmt-stall-chevron';
+  chevron.textContent = '▶';
+
+  const actions = document.createElement('span');
+  actions.className = 'smgmt-stall-actions';
+
+  const refreshBtn = document.createElement('button');
+  refreshBtn.className = 'smgmt-stall-btn';
+  refreshBtn.textContent = 'Refresh log';
+
+  const cancelBtn = document.createElement('button');
+  cancelBtn.className = 'smgmt-stall-btn smgmt-stall-btn-cancel';
+  cancelBtn.textContent = 'Cancel sprint';
+  cancelBtn.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    if (!_smgmtCurrentRepo) return;
+    try {
+      await fetch(`/api/sprints/run/${encodeURIComponent(sprintLabel)}?project=${encodeURIComponent(_smgmtCurrentRepo)}`, { method: 'DELETE' });
+      _smgmtRemoveStallWarning(sprintLabel);
+    } catch (err) {
+      console.error('Cancel sprint failed:', err);
+    }
+  });
+
+  actions.appendChild(refreshBtn);
+  actions.appendChild(cancelBtn);
+  header.appendChild(chevron);
+  header.appendChild(title);
+  header.appendChild(actions);
+
+  const body = document.createElement('div');
+  body.className = 'smgmt-stall-body';
+  body.style.display = 'none';
+
+  const pre = document.createElement('pre');
+  pre.className = 'smgmt-stall-log';
+  pre.textContent = 'Loading…';
+  body.appendChild(pre);
+
+  warn.appendChild(header);
+  warn.appendChild(body);
   block.appendChild(warn);
+
+  let expanded = false;
+
+  async function fetchLog() {
+    if (!_smgmtCurrentRepo) return;
+    const url = `/api/sprints/${encodeURIComponent(sprintLabel)}/dispatch-log?project=${encodeURIComponent(_smgmtCurrentRepo)}&tail_lines=40`;
+    try {
+      const res = await fetch(url);
+      const data = await res.json();
+      if (data.found) {
+        pre.textContent = data.tail || '(log file is empty)';
+      } else {
+        pre.textContent = `No dispatch log file found yet at ${data.log_dir}.\nThe subprocess may have failed before writing any output.`;
+      }
+    } catch (err) {
+      pre.textContent = `Error fetching log: ${err.message}`;
+    }
+  }
+
+  function toggleExpand() {
+    expanded = !expanded;
+    chevron.textContent = expanded ? '▼' : '▶';
+    body.style.display = expanded ? 'block' : 'none';
+    if (expanded) fetchLog();
+  }
+
+  header.addEventListener('click', toggleExpand);
+  refreshBtn.addEventListener('click', (e) => { e.stopPropagation(); fetchLog(); });
+
+  // Auto-expand and start periodic refresh
+  toggleExpand();
+  if (_smgmtStallRefreshInterval) clearInterval(_smgmtStallRefreshInterval);
+  _smgmtStallRefreshInterval = setInterval(() => {
+    if (block.querySelector('.smgmt-stall-warning') && expanded) fetchLog();
+  }, 5000);
 }
 
 function _smgmtRemoveStallWarning(sprintLabel) {
   const block = document.getElementById(`smgmt-block-${sprintLabel}`);
   if (block) block.querySelectorAll('.smgmt-stall-warning').forEach(el => el.remove());
+  if (_smgmtStallRefreshInterval) {
+    clearInterval(_smgmtStallRefreshInterval);
+    _smgmtStallRefreshInterval = null;
+  }
 }
 
 // ── Per-#123: Running banner + overview badges ────────────────────────────────

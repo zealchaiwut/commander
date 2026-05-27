@@ -1718,6 +1718,10 @@ def _dispatch_coder(
         sub_env["COMMANDER_APP_PORT"] = str(chosen_port)
         print(f"  [port] COMMANDER_APP_PORT={chosen_port} injected into coder env")
 
+    # Pre-touch so the dispatch-log endpoint always has a file to read.
+    if not log_path.exists():
+        log_path.write_text("", encoding="utf-8")
+
     for attempt in range(_RATE_LIMIT_MAX_RETRIES + 1):
         open_mode = "w" if attempt == 0 else "a"
         try:
@@ -1730,14 +1734,38 @@ def _dispatch_coder(
                     env=sub_env,
                 )
         except FileNotFoundError:
-            # claude CLI not available -- treat as stub success for testing
-            print("  [coder] claude CLI not found -- stub success")
-            if on_running is not None:
-                try:
-                    on_running()
-                except Exception:
-                    pass
-            return True, None
+            _allow_stub = os.environ.get("COMMANDER_ALLOW_STUB_SUCCESS", "") == "1"
+            if _allow_stub:
+                print("  [coder] claude CLI not found -- stub success")
+                if on_running is not None:
+                    try:
+                        on_running()
+                    except Exception:
+                        pass
+                return True, None
+            # Production: log the error and return a real failure so the stall
+            # warning shows "claude CLI not found" instead of silently succeeding.
+            err_msg = (
+                f"[coder] ERROR: claude CLI not found for issue #{issue_num}.\n"
+                f"PATH={sub_env.get('PATH', '<empty>')}\n"
+                "Sprint cannot proceed. Install claude CLI or set COMMANDER_ALLOW_STUB_SUCCESS=1 for testing.\n"
+            )
+            print(err_msg, flush=True)
+            try:
+                with log_path.open("a") as lf:
+                    lf.write(err_msg)
+            except OSError:
+                pass
+            dispatch_alerts(
+                alert_modes,
+                title=f"Issue #{issue_num}: claude CLI not found",
+                body=f"_dispatch_coder failed to spawn 'claude' subprocess: file not found. PATH={sub_env.get('PATH', '<empty>')}. Sprint cannot proceed.",
+                issue_num=issue_num,
+                category=FailureCategory.CRASH,
+                cfg=cfg,
+                repo=eff_repo,
+            )
+            return False, FailureCategory.CRASH
 
         if on_running is not None:
             try:
@@ -1841,6 +1869,9 @@ def _dispatch_tester(
     _post_agent_event(f"tester:issue-{issue_num}", api_url=api_url)
 
     log_path = _issue_log_path(issue_num, cfg=cfg)
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    if not log_path.exists():
+        log_path.write_text("", encoding="utf-8")
 
     # Build prompt
     if cfg and cfg.tester_prompt_template:
@@ -1908,13 +1939,36 @@ def _dispatch_tester(
                     env=sub_env,
                 )
         except FileNotFoundError:
-            print("  [tester] claude CLI not found -- stub success")
-            if on_running is not None:
-                try:
-                    on_running()
-                except Exception:
-                    pass
-            return 0, None
+            _allow_stub = os.environ.get("COMMANDER_ALLOW_STUB_SUCCESS", "") == "1"
+            if _allow_stub:
+                print("  [tester] claude CLI not found -- stub success")
+                if on_running is not None:
+                    try:
+                        on_running()
+                    except Exception:
+                        pass
+                return 0, None
+            err_msg = (
+                f"[tester] ERROR: claude CLI not found for issue #{issue_num}.\n"
+                f"PATH={sub_env.get('PATH', '<empty>')}\n"
+                "Sprint cannot proceed. Install claude CLI or set COMMANDER_ALLOW_STUB_SUCCESS=1 for testing.\n"
+            )
+            print(err_msg, flush=True)
+            try:
+                with log_path.open("a") as lf:
+                    lf.write(err_msg)
+            except OSError:
+                pass
+            dispatch_alerts(
+                alert_modes,
+                title=f"Issue #{issue_num}: claude CLI not found",
+                body=f"_dispatch_tester failed to spawn 'claude' subprocess: file not found. PATH={sub_env.get('PATH', '<empty>')}. Sprint cannot proceed.",
+                issue_num=issue_num,
+                category=FailureCategory.CRASH,
+                cfg=cfg,
+                repo=eff_repo,
+            )
+            return -1, FailureCategory.CRASH
 
         if on_running is not None:
             try:

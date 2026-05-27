@@ -1980,16 +1980,24 @@
     flex-shrink: 0;
   }
   .smgmt-sprint-count { font-size: 11px; color: var(--text-muted); flex-shrink: 0; }
+  /* Unified Run / Re-run button (issue #186) */
   .smgmt-run-btn {
     padding: 4px 12px; font-size: 11px; font-weight: 600;
     background: var(--green); color: #fff; border: none; border-radius: 5px;
     cursor: pointer; flex-shrink: 0; transition: opacity .15s;
+    display: flex; align-items: center; gap: 4px;
   }
   .smgmt-run-btn:hover { opacity: .85; }
   .smgmt-run-btn:disabled {
     background: var(--surface-2); color: var(--text-sub);
     border: 1px solid var(--border); cursor: not-allowed; opacity: 1;
   }
+  /* Re-run Sprint variant of the unified button */
+  .smgmt-run-btn.smgmt-run-btn--rerun {
+    background: var(--amber-bg); color: var(--amber);
+    border: 0.5px solid var(--amber);
+  }
+  .smgmt-run-btn.smgmt-run-btn--rerun:hover { opacity: .85; }
   .smgmt-delete-btn {
     padding: 4px 10px; font-size: 11px; font-weight: 600;
     background: transparent; color: var(--red);
@@ -1998,22 +2006,13 @@
     display: flex; align-items: center; gap: 4px;
   }
   .smgmt-delete-btn:hover { background: var(--red-bg, rgba(220,38,38,.08)); opacity: 1; }
-
-  .smgmt-delete-body { padding: 12px 24px 8px; font-size: 13px; color: var(--text-main); }
-  .smgmt-delete-body p { margin: 0; }
-
-  .smgmt-rerun-btn {
-    padding: 4px 10px; font-size: 11px; font-weight: 600;
-    background: var(--amber-bg); color: var(--amber);
-    border: 0.5px solid var(--amber); border-radius: 5px;
-    cursor: pointer; flex-shrink: 0; transition: opacity .15s;
-    display: flex; align-items: center; gap: 4px;
-  }
-  .smgmt-rerun-btn:hover { opacity: .85; }
-  .smgmt-rerun-btn:disabled {
+  .smgmt-delete-btn:disabled {
     background: var(--surface-2); color: var(--text-sub);
     border: 0.5px solid var(--border); cursor: not-allowed; opacity: 1;
   }
+
+  .smgmt-delete-body { padding: 12px 24px 8px; font-size: 13px; color: var(--text-main); }
+  .smgmt-delete-body p { margin: 0; }
 
   /* Kill button (replaces Run on the running card) */
   .smgmt-kill-btn {
@@ -2041,6 +2040,27 @@
   }
   .smgmt-progress-text {
     font-size: 11px; color: var(--blue); font-weight: 500; flex-shrink: 0;
+  }
+
+  /* Locked sprint card state (issue #186) — shown on non-running sprints while any sprint runs */
+  .smgmt-sprint-block.smgmt-locked {
+    border-color: var(--border);
+    box-shadow: 0 0 0 1px var(--surface-2);
+    opacity: 0.72;
+  }
+  .smgmt-sprint-block.smgmt-locked .smgmt-sprint-header {
+    background: var(--surface-2);
+    border-bottom-color: var(--border);
+  }
+  .smgmt-lock-icon {
+    font-size: 12px; flex-shrink: 0; margin-left: 2px;
+  }
+
+  /* Goal input readonly state (issue #186) */
+  .smgmt-goal-input.smgmt-goal-readonly {
+    color: var(--text-muted);
+    background: var(--surface-2);
+    cursor: not-allowed;
   }
 
   /* Rerun sprint modal body */

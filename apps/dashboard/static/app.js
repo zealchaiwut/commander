@@ -2795,21 +2795,29 @@ function smgmtHasCompletedTickets(tickets) {
 function smgmtSprintBlockHtml(label, tickets, isNext) {
   const n = parseInt(label.split('-')[1], 10);
   const nextBadge = isNext ? '<span class="smgmt-next-badge">NEXT UP</span>' : '';
-  const runBtnId    = `smgmt-run-btn-${label.replace('-', '_')}`;
-  const rerunBtnId  = `smgmt-rerun-btn-${label.replace('-', '_')}`;
+  // Unified Run/Re-run button replaces the separate run + rerun buttons (issue #186)
+  const actionBtnId = `smgmt-run-btn-${label.replace('-', '_')}`;
   const deleteBtnId = `smgmt-delete-btn-${label.replace('-', '_')}`;
   const goalId      = `smgmt-goal-${label.replace('-', '_')}`;
   const savedGoal   = _smgmtGoals[label] || '';
   const goalValid   = savedGoal.length >= 10;
   const hasCompleted = smgmtHasCompletedTickets(tickets);
-  // Past sprint (any completed ticket): Run disabled, Rerun enabled
-  // Upcoming sprint: Run follows canRun logic, Rerun disabled
+  // hasCompleted → unified button shows "Re-run Sprint" and calls smgmtRerunSprint
+  // otherwise     → unified button shows "Run Sprint"    and calls smgmtRunSprint
   const canRun = !hasCompleted && tickets.length >= 1 && goalValid;
 
-  let runTitle = '';
-  if (hasCompleted) runTitle = 'Sprint already ran — use Rerun to reset first';
-  else if (!goalValid) runTitle = 'Set a sprint goal first';
-  else if (tickets.length < 1) runTitle = 'Add at least one ticket first';
+  let actionLabel, actionHandler, actionTitle;
+  if (hasCompleted) {
+    actionLabel   = '<i class="ti ti-refresh"></i> Re-run Sprint';
+    actionHandler = `smgmtRerunSprint('${label}')`;
+    actionTitle   = '';
+  } else {
+    actionLabel   = 'Run Sprint';
+    actionHandler = `smgmtRunSprint('${label}')`;
+    if (!goalValid) actionTitle = 'Set a sprint goal first';
+    else if (tickets.length < 1) actionTitle = 'Add at least one ticket first';
+    else actionTitle = '';
+  }
 
   const ticketsHtml = tickets.length > 0
     ? tickets.map(t => smgmtTicketCardHtml(t, label)).join('')
@@ -2832,15 +2840,10 @@ function smgmtSprintBlockHtml(label, tickets, isNext) {
                 title="Delete sprint"
                 onclick="smgmtDeleteSprint('${label}')">
           <i class="ti ti-trash"></i> Delete</button>
-        <button class="smgmt-rerun-btn" id="${rerunBtnId}"
-                title="${hasCompleted ? '' : 'No completed tickets to reset'}"
-                ${hasCompleted ? '' : 'disabled'}
-                onclick="smgmtRerunSprint('${label}')">
-          <i class="ti ti-refresh"></i> Rerun sprint</button>
-        <button class="smgmt-run-btn" id="${runBtnId}"
-                title="${runTitle}"
-                ${canRun ? '' : 'disabled'}
-                onclick="smgmtRunSprint('${label}')">Run sprint</button>
+        <button class="smgmt-run-btn${hasCompleted ? ' smgmt-run-btn--rerun' : ''}" id="${actionBtnId}"
+                title="${actionTitle}"
+                ${(hasCompleted || canRun) ? '' : 'disabled'}
+                onclick="${actionHandler}">${actionLabel}</button>
       </div>
       <div class="smgmt-sprint-goal-row">
         <input class="smgmt-goal-input" id="${goalId}" type="text"
@@ -3027,6 +3030,10 @@ async function smgmtLoadGoals() {
 }
 
 function smgmtGoalInput(label, value) {
+  // No-op while this sprint is running (input is readonly anyway, but guard defensively)
+  const runKey = `${_smgmtCurrentRepo}:${label}`;
+  if (_smgmtAllRunning[runKey]) return;
+
   _smgmtGoals[label] = value;
   const runBtnId = `smgmt-run-btn-${label.replace('-', '_')}`;
   const btn = document.getElementById(runBtnId);
@@ -3037,10 +3044,15 @@ function smgmtGoalInput(label, value) {
     );
     const hasTickets = sprintTickets.length >= 1;
     const hasCompleted = smgmtHasCompletedTickets(sprintTickets);
-    const canRun = !hasCompleted && goalValid && hasTickets;
-    btn.disabled = !canRun;
-    if (hasCompleted) btn.title = 'Sprint already ran — use Rerun to reset first';
-    else btn.title = goalValid ? (hasTickets ? '' : 'Add at least one ticket first') : 'Set a sprint goal first';
+    if (hasCompleted) {
+      // Re-run button: always enabled, no goal dependency
+      btn.disabled = false;
+      btn.title = '';
+    } else {
+      const canRun = goalValid && hasTickets;
+      btn.disabled = !canRun;
+      btn.title = goalValid ? (hasTickets ? '' : 'Add at least one ticket first') : 'Set a sprint goal first';
+    }
   }
   if (_smgmtGoalSaveTimers[label]) clearTimeout(_smgmtGoalSaveTimers[label]);
   _smgmtGoalSaveTimers[label] = setTimeout(() => smgmtSaveGoal(label, value), 800);
@@ -3067,6 +3079,12 @@ let _smgmtDragSprintLabel = null;
 let _smgmtDragSprintOver  = null;
 
 function smgmtSprintDragStart(event, label) {
+  // Suppress drag if this sprint (or any sprint) is locked/running (issue #186)
+  const hdr = event.currentTarget;
+  if (hdr && hdr.getAttribute('draggable') === 'false') {
+    event.preventDefault();
+    return;
+  }
   _smgmtDragSprintLabel = label;
   event.dataTransfer.effectAllowed = 'move';
   event.dataTransfer.setData('text/smgmt-sprint', label);
@@ -3087,6 +3105,12 @@ function smgmtSprintDragEnd(event) {
 // ── Ticket drag-and-drop ──────────────────────────────────────────────────────
 
 function smgmtTicketDragStart(event, issueNum, fromSprint) {
+  // Suppress drag if the ticket's row has draggable="false" (issue #186)
+  const el = event.currentTarget;
+  if (el && el.getAttribute('draggable') === 'false') {
+    event.preventDefault();
+    return;
+  }
   _smgmtDragTicket = { number: issueNum, fromSprint: fromSprint || null };
   event.dataTransfer.effectAllowed = 'move';
   event.dataTransfer.setData('text/smgmt-ticket', String(issueNum));
@@ -3511,21 +3535,57 @@ async function smgmtPollRunStatus() {
 function smgmtApplyRunState(sprintStatusMap) {
   // Per-#123: each sprint card checks its own (project, sprint_label) key independently.
   // Multiple cards can be in RUNNING state simultaneously.
+  // Issue #186: lock running sprint's own controls; lock all other sprints while any runs.
   // sprintStatusMap: { sprint_label -> status_object } built from /api/sprint-status
   if (!sprintStatusMap) sprintStatusMap = {};
 
-  // Clear running state from all blocks first
+  // Determine whether any sprint (on any project) is currently running
+  const anyRunning = Object.keys(_smgmtAllRunning).length > 0;
+
+  // Collect running sprint labels for the currently-viewed project
+  const runningLabelsHere = new Set(
+    Object.values(_smgmtAllRunning)
+      .filter(e => e.project === _smgmtCurrentRepo)
+      .map(e => e.sprint_label)
+  );
+
+  // ── Pass 1: Clear all dynamic state from every block ─────────────────────────
   document.querySelectorAll('.smgmt-sprint-block').forEach(block => {
-    block.classList.remove('smgmt-running');
+    block.classList.remove('smgmt-running', 'smgmt-locked');
     const hdr = block.querySelector('.smgmt-sprint-header');
-    if (hdr) hdr.classList.remove('smgmt-running-header');
+    if (hdr) {
+      hdr.classList.remove('smgmt-running-header');
+      // Remove injected lock icon
+      hdr.querySelectorAll('.smgmt-lock-icon').forEach(el => el.remove());
+      // Restore draggable on header
+      hdr.setAttribute('draggable', 'true');
+    }
     // Remove injected running elements (badge, progress, kill btn)
     block.querySelectorAll('.smgmt-running-badge, .smgmt-progress-text, .smgmt-kill-btn').forEach(el => el.remove());
-    // Restore any hidden run buttons
+    // Restore any hidden unified action buttons
     block.querySelectorAll('.smgmt-run-btn').forEach(btn => btn.style.display = '');
+    // Restore goal input
+    const goalInput = block.querySelector('.smgmt-goal-input');
+    if (goalInput) {
+      goalInput.removeAttribute('readonly');
+      goalInput.classList.remove('smgmt-goal-readonly');
+    }
+    // Restore delete button
+    const blockId = block.id; // "smgmt-block-sprint-N"
+    const blockLabel = blockId.replace('smgmt-block-', '');
+    const safeLabel = blockLabel.replace(/-/g, '_');
+    const deleteBtn = document.getElementById(`smgmt-delete-btn-${safeLabel}`);
+    if (deleteBtn) {
+      deleteBtn.disabled = false;
+      deleteBtn.title = 'Delete sprint';
+    }
+    // Restore draggable on ticket rows
+    block.querySelectorAll('.smgmt-ticket').forEach(ticketEl => {
+      ticketEl.setAttribute('draggable', 'true');
+    });
   });
 
-  // Apply running state to each running sprint block in the current project
+  // ── Pass 2: Apply RUNNING state to each running sprint in this project ────────
   for (const [key, entry] of Object.entries(_smgmtAllRunning)) {
     const { project: runProj, sprint_label: runLabel } = entry;
     if (runProj !== _smgmtCurrentRepo) continue;  // not the currently viewed project
@@ -3539,6 +3599,27 @@ function smgmtApplyRunState(sprintStatusMap) {
     if (!hdr) continue;
 
     hdr.classList.add('smgmt-running-header');
+
+    // Disable Delete button (issue #186 AC: disabled with tooltip)
+    const deleteBtn = document.getElementById(`smgmt-delete-btn-${safeLabel}`);
+    if (deleteBtn) {
+      deleteBtn.disabled = true;
+      deleteBtn.title = 'Sprint is running';
+    }
+
+    // Make goal input readonly + muted (issue #186 AC)
+    const goalInput = document.getElementById(`smgmt-goal-${safeLabel}`);
+    if (goalInput) {
+      goalInput.setAttribute('readonly', '');
+      goalInput.classList.add('smgmt-goal-readonly');
+    }
+
+    // Suppress drag-and-drop for the running sprint header (issue #186 AC)
+    hdr.setAttribute('draggable', 'false');
+    // Suppress drag on ticket rows inside the running sprint (issue #186 AC)
+    block.querySelectorAll('.smgmt-ticket').forEach(ticketEl => {
+      ticketEl.setAttribute('draggable', 'false');
+    });
 
     // Insert RUNNING badge after NEXT UP badge (or sprint name)
     const runBadge = document.createElement('span');
@@ -3572,75 +3653,103 @@ function smgmtApplyRunState(sprintStatusMap) {
       const progEl = document.createElement('span');
       progEl.className = 'smgmt-progress-text';
       progEl.textContent = progressText;
-      // Insert before the rerun button
-      const rerunBtn = hdr.querySelector('.smgmt-rerun-btn');
-      if (rerunBtn) {
-        hdr.insertBefore(progEl, rerunBtn);
+      // Insert before the unified action button
+      const actionBtn = document.getElementById(`smgmt-run-btn-${safeLabel}`);
+      if (actionBtn) {
+        hdr.insertBefore(progEl, actionBtn);
       } else {
         hdr.appendChild(progEl);
       }
     }
 
-    // Hide Run button and insert Kill button after it
-    const runBtn = document.getElementById(`smgmt-run-btn-${safeLabel}`);
-    if (runBtn) {
-      runBtn.style.display = 'none';
+    // Hide unified action button and insert Kill button after it (issue #186 AC)
+    const actionBtn = document.getElementById(`smgmt-run-btn-${safeLabel}`);
+    if (actionBtn) {
+      actionBtn.style.display = 'none';
       const killBtn = document.createElement('button');
       killBtn.className = 'smgmt-kill-btn';
       killBtn.innerHTML = '<i class="ti ti-x"></i> Kill';
       killBtn.onclick = () => smgmtKillSprint(runLabel);
-      runBtn.parentNode.insertBefore(killBtn, runBtn.nextSibling);
+      actionBtn.parentNode.insertBefore(killBtn, actionBtn.nextSibling);
     }
   }
 
-  // Per-ticket live status badges, spinners, elapsed counters (AC5/6/7)
+  // ── Pass 3: Apply LOCKED state to all non-running sprints when any is running ─
+  if (anyRunning) {
+    document.querySelectorAll('.smgmt-sprint-block').forEach(block => {
+      if (block.classList.contains('smgmt-running')) return; // skip the running one
+      const blockId = block.id; // "smgmt-block-sprint-N"
+      const blockLabel = blockId.replace('smgmt-block-', '');
+      if (!blockLabel.startsWith('sprint-')) return; // skip placeholder
+
+      block.classList.add('smgmt-locked');
+
+      // Add lock icon to the header (issue #186 AC)
+      const hdr = block.querySelector('.smgmt-sprint-header');
+      if (hdr && !hdr.querySelector('.smgmt-lock-icon')) {
+        const lockIcon = document.createElement('span');
+        lockIcon.className = 'smgmt-lock-icon';
+        lockIcon.textContent = '🔒';
+        lockIcon.setAttribute('aria-hidden', 'true');
+        // Insert after sprint name / NEXT UP badge
+        const nextBadge = hdr.querySelector('.smgmt-next-badge');
+        const sprintName = hdr.querySelector('.smgmt-sprint-name');
+        const insertAfter = nextBadge || sprintName;
+        if (insertAfter && insertAfter.nextSibling) {
+          hdr.insertBefore(lockIcon, insertAfter.nextSibling);
+        } else if (insertAfter) {
+          hdr.appendChild(lockIcon);
+        }
+        // Suppress drag on non-running sprint header (issue #186 AC)
+        hdr.setAttribute('draggable', 'false');
+      }
+
+      // Suppress drag on ticket rows in non-running sprints (issue #186 AC)
+      block.querySelectorAll('.smgmt-ticket').forEach(ticketEl => {
+        ticketEl.setAttribute('draggable', 'false');
+      });
+    });
+  }
+
+  // ── Pass 4: Per-ticket live status badges, spinners, elapsed counters ──────────
   smgmtApplyTicketLiveStatus(sprintStatusMap);
   _ensureElapsedTimer();
 
-  // Handle Run buttons — disable only if THIS specific (project, sprint_label) is running.
-  // Other sprints (different label or different project) stay enabled.
+  // ── Pass 5: Update unified action button state for all visible sprint buttons ──
+  // The unified button id is "smgmt-run-btn-<safeLabel>" for all sprints.
   document.querySelectorAll('.smgmt-run-btn').forEach(btn => {
-    const btnLabel = btn.id.replace('smgmt-run-btn-', '').replace(/_/g, '-');
-    const runKey = `${_smgmtCurrentRepo}:${btnLabel}`;
-    const isThisRunning = !!_smgmtAllRunning[runKey];
-
-    if (!isThisRunning) {
-      const goal = _smgmtGoals[btnLabel] || '';
-      const goalValid = goal.length >= 10;
-      const sprintTickets = (_smgmtData?.issues || []).filter(
-        t => t.sprint != null && `sprint-${t.sprint}` === btnLabel
-      );
-      const hasTickets = sprintTickets.length >= 1;
-      const hasCompleted = smgmtHasCompletedTickets(sprintTickets);
-      const canRun = !hasCompleted && goalValid && hasTickets;
-      btn.disabled = !canRun;
-      if (hasCompleted) btn.title = 'Sprint already ran — use Rerun to reset first';
-      else btn.title = goalValid ? (hasTickets ? '' : 'Add at least one ticket first') : 'Set a sprint goal first';
-      btn.textContent = 'Run sprint';
-    } else {
-      btn.disabled = true;
-      btn.title = `Sprint ${btnLabel} is running`;
-    }
-    btn.textContent = 'Run sprint';
-  });
-
-  // Hide/disable rerun buttons while THIS sprint is running
-  document.querySelectorAll('.smgmt-rerun-btn').forEach(btn => {
-    const btnLabel = btn.id.replace('smgmt-rerun-btn-', '').replace(/_/g, '-');
+    const safeId = btn.id.replace('smgmt-run-btn-', '');
+    // Reconstruct the label: replace first underscore with dash (sprint_N -> sprint-N)
+    const btnLabel = safeId.replace('_', '-');
     const runKey = `${_smgmtCurrentRepo}:${btnLabel}`;
     const isThisRunning = !!_smgmtAllRunning[runKey];
 
     if (isThisRunning) {
-      btn.style.display = 'none';
+      // Running sprint: action button is hidden above; skip state update
       return;
     }
-    btn.style.display = '';
+
     const sprintTickets = (_smgmtData?.issues || []).filter(
       t => t.sprint != null && `sprint-${t.sprint}` === btnLabel
     );
     const hasCompleted = smgmtHasCompletedTickets(sprintTickets);
-    btn.disabled = !hasCompleted;
-    btn.title = hasCompleted ? '' : 'No completed tickets to reset';
+
+    if (anyRunning) {
+      // Another sprint is running: disable this sprint's unified button (issue #186 AC)
+      btn.disabled = true;
+      btn.title = 'Another sprint is running';
+    } else if (hasCompleted) {
+      // Re-run mode: always enabled
+      btn.disabled = false;
+      btn.title = '';
+    } else {
+      const goal = _smgmtGoals[btnLabel] || '';
+      const goalValid = goal.length >= 10;
+      const hasTickets = sprintTickets.length >= 1;
+      const canRun = goalValid && hasTickets;
+      btn.disabled = !canRun;
+      btn.title = goalValid ? (hasTickets ? '' : 'Add at least one ticket first') : 'Set a sprint goal first';
+    }
   });
 }
 

@@ -126,6 +126,8 @@ class SprintConfig:
     documentor_enabled:    bool           = False
     # Reviewer (issue #159)
     reviewer_prompt_template: Optional[str] = None
+    # Documenter (issue #165)
+    documenter_prompt_template: Optional[str] = None
 
     @property
     def worktree_tester_app(self) -> Path:
@@ -250,6 +252,9 @@ def load_config(path: Path) -> "SprintConfig":
     # ── reviewer section (issue #159) ────────────────────────────────────────
     reviewer_prompt = agents.get("reviewer_prompt_template") or None
 
+    # ── documenter section (issue #165) ──────────────────────────────────────
+    documenter_prompt = agents.get("documenter_prompt_template") or None
+
     return SprintConfig(
         repo_name             = repo_name,
         worktree_coder        = worktree_coder,
@@ -264,8 +269,9 @@ def load_config(path: Path) -> "SprintConfig":
         tester_prompt_template= tester_prompt,
         app_default_port         = app_default_port,
         app_port_strategy        = app_port_strategy,
-        documentor_enabled       = documentor_enabled,
-        reviewer_prompt_template = reviewer_prompt,
+        documentor_enabled          = documentor_enabled,
+        reviewer_prompt_template    = reviewer_prompt,
+        documenter_prompt_template  = documenter_prompt,
     )
 
 
@@ -600,6 +606,10 @@ class SprintState:
     reviewer_status:      Optional[str]  = None   # "skipped" | "succeeded" | "failed"
     reviewer_comment_url: Optional[str]  = None
     reviewer_findings:    Optional[dict] = None   # {blockers, suggestions, nits, follow_up_tickets}
+    # Documenter fields (issue #165)
+    documenter_status:       Optional[str]       = None   # "skipped" | "succeeded" | "failed"
+    documenter_files_touched: list               = field(default_factory=list)
+    documenter_commit_sha:   Optional[str]       = None
 
     def to_dict(self) -> dict:
         return {
@@ -616,6 +626,9 @@ class SprintState:
             "reviewer_status":      self.reviewer_status,
             "reviewer_comment_url": self.reviewer_comment_url,
             "reviewer_findings":    self.reviewer_findings,
+            "documenter_status":         self.documenter_status,
+            "documenter_files_touched":  self.documenter_files_touched,
+            "documenter_commit_sha":     self.documenter_commit_sha,
         }
 
     @staticmethod
@@ -635,6 +648,9 @@ class SprintState:
         s.reviewer_status     = d.get("reviewer_status")
         s.reviewer_comment_url = d.get("reviewer_comment_url")
         s.reviewer_findings   = d.get("reviewer_findings")
+        s.documenter_status        = d.get("documenter_status")
+        s.documenter_files_touched = d.get("documenter_files_touched", [])
+        s.documenter_commit_sha    = d.get("documenter_commit_sha")
         return s
 
     def save(self, path: Path) -> None:
@@ -2835,6 +2851,245 @@ Then exit cleanly.
 """
 
 
+# ── Documenter agent (issue #165) ─────────────────────────────────────────────
+
+DEFAULT_DOCUMENTER_PROMPT = """\
+You are the **Documenter** agent for sprint {sprint_label}.
+
+## Context
+
+- Sprint branch: {sprint_branch}
+- Diff range: {base_sha}..{head_sha}
+- Sprint tickets: {sprint_filter_url}
+- Sprint summary issue: #{summary_issue_num}
+
+## Your Mandate
+
+Read the sprint diff and update project documentation to reflect what shipped
+this sprint. Commit any doc changes directly to the sprint branch.
+
+Documentation files to consider updating (only if relevant changes shipped):
+- README.md — new features, changed commands, updated usage examples
+- CHANGELOG.md — one-line entry per merged ticket (format: "- #N: <title>")
+- SCHEMA.md — any new or changed DB tables/columns/endpoints
+
+## Step 1 — Review the diff
+
+Run:
+```
+git diff {base_sha}..{head_sha} --stat
+git diff {base_sha}..{head_sha}
+```
+
+## Step 2 — Identify what shipped
+
+For each ticket in the sprint, read:
+```
+gh issue view <N> --json number,title,body,labels
+```
+
+Only document tickets that are in a merged/done state.
+
+## Step 3 — Update docs
+
+For each doc file that needs updating:
+1. Read the current file
+2. Make targeted, accurate additions
+3. Do not remove existing content unless it is factually incorrect after this sprint
+
+## Step 4 — Commit
+
+If you made any doc changes, stage and commit them:
+```
+git add <doc files changed>
+git commit -m "docs: update docs for sprint {sprint_label} (auto-documenter)"
+```
+
+Then print a line in this exact format so sprint_manager can parse it:
+```
+Documenter complete: <comma-separated list of files touched, or 'none'>
+```
+
+If no doc changes were needed (nothing to document), print:
+```
+Documenter complete: none
+```
+
+## Prohibited Actions
+
+- Do NOT modify source code (.py, .js, .html, .sql, etc.)
+- Do NOT create new tickets or close existing ones
+- Do NOT push to remote — sprint_manager handles git push
+- Do NOT modify files outside the project root
+"""
+
+
+def _dispatch_documenter(
+    state: "SprintState",
+    sprint_branch: str,
+    base_sha: str,
+    head_sha: str,
+    cfg: Optional["SprintConfig"],
+    repo_name: Optional[str],
+) -> None:
+    """Dispatch the documenter agent after write_sprint_summary() and before _create_sprint_pr().
+
+    Updates state.documenter_status, state.documenter_files_touched, and
+    state.documenter_commit_sha in-place. Does NOT raise — failure is advisory.
+    """
+    # Skip: nothing merged this sprint
+    merged = [i for i in state.issues if i.status == "done"]
+    if not merged:
+        print("  [documenter] skipped: nothing merged this sprint")
+        state.documenter_status = "skipped"
+        return
+
+    # Determine prompt
+    if cfg and cfg.documenter_prompt_template:
+        prompt_template = cfg.documenter_prompt_template
+    else:
+        prompt_template = DEFAULT_DOCUMENTER_PROMPT
+
+    eff_repo = repo_name or (cfg.repo_name if cfg else None)
+
+    sprint_filter_url = (
+        f"https://github.com/{eff_repo}/issues"
+        f"?q=label%3A{state.sprint_label}"
+        if eff_repo else ""
+    )
+
+    # Read summary_issue_num from state JSON
+    summary_issue_num: Optional[int] = None
+    # Resolve state path to pick up summary_issue_url
+    state_path_doc = _state_path(state.sprint_number, state.sprint_label, cfg=cfg)
+    if state_path_doc.exists():
+        try:
+            sd = json.loads(state_path_doc.read_text())
+            surl = sd.get("summary_issue_url", "")
+            m_issue = re.search(r"/issues/(\d+)$", surl)
+            if m_issue:
+                summary_issue_num = int(m_issue.group(1))
+        except Exception:
+            pass
+
+    try:
+        prompt = prompt_template.format(
+            sprint_label      = state.sprint_label,
+            sprint_branch     = sprint_branch,
+            base_sha          = base_sha,
+            head_sha          = head_sha,
+            sprint_filter_url = sprint_filter_url,
+            summary_issue_num = summary_issue_num or 0,
+        )
+    except KeyError as e:
+        print(f"  [documenter] WARNING: prompt template has unknown placeholder {e} — skipping", file=sys.stderr)
+        state.documenter_status = "skipped"
+        return
+
+    cwd_path = cfg.worktree_tester if cfg else Path.cwd()
+    logs_dir = cfg.logs_dir if cfg else Path.cwd()
+    log_path = logs_dir / f"sprint-{state.sprint_label}-documenter.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Ensure tester clone has the sprint branch up to date before committing docs
+    print(f"  [documenter] Checking out {sprint_branch} in tester clone ...", flush=True)
+    try:
+        subprocess.run(
+            ["git", "fetch", "origin"],
+            cwd=str(cwd_path), capture_output=True, check=False,
+        )
+        subprocess.run(
+            ["git", "checkout", sprint_branch],
+            cwd=str(cwd_path), capture_output=True, check=False,
+        )
+        subprocess.run(
+            ["git", "pull"],
+            cwd=str(cwd_path), capture_output=True, check=False,
+        )
+    except Exception as e:
+        print(f"  [documenter] WARNING: git prep failed: {e}", file=sys.stderr)
+
+    cmd = [
+        "claude",
+        "--model", "claude-sonnet-4-6",
+        "--dangerously-skip-permissions",
+        "-p", prompt,
+    ]
+
+    sub_env = os.environ.copy()
+    sub_env.pop("ANTHROPIC_API_KEY", None)
+    sub_env["COMMANDER_MERGE_TARGET"] = sprint_branch
+    if eff_repo:
+        sub_env["COMMANDER_PROJECT"] = eff_repo
+
+    print("  [documenter] Dispatching documenter ...", flush=True)
+    try:
+        with log_path.open("w") as log_f:
+            proc = subprocess.Popen(
+                cmd,
+                stdout=log_f,
+                stderr=log_f,
+                cwd=str(cwd_path),
+                env=sub_env,
+            )
+    except FileNotFoundError:
+        print("  [documenter] claude CLI not found — skipping", file=sys.stderr)
+        state.documenter_status = "skipped"
+        return
+
+    # Use HangDetector with issue_num=0 as a sentinel for the documenter
+    detector = HangDetector(issue_num=0, log_path=log_path, proc=proc)
+    detector.start()
+    rc = proc.wait()
+    detector.stop()
+
+    if detector.killed:
+        print("  [documenter] WARNING: documenter hung and was killed", file=sys.stderr)
+        state.documenter_status = "failed"
+        return
+
+    if rc != 0:
+        print(f"  [documenter] WARNING: documenter exited with code {rc}", file=sys.stderr)
+        state.documenter_status = "failed"
+        return
+
+    # Parse exit line: "Documenter complete: <files or 'none'>"
+    files_touched: list[str] = []
+    try:
+        log_text = log_path.read_text(errors="replace")
+        for line in reversed(log_text.splitlines()):
+            m = re.search(r"Documenter complete:\s*(.+)", line, re.IGNORECASE)
+            if m:
+                raw_files = m.group(1).strip()
+                if raw_files.lower() != "none":
+                    files_touched = [f.strip() for f in raw_files.split(",") if f.strip()]
+                break
+    except Exception as e:
+        print(f"  [documenter] WARNING: could not parse documenter log: {e}", file=sys.stderr)
+
+    # Record commit SHA if a doc commit was made
+    doc_commit_sha: Optional[str] = None
+    if files_touched:
+        try:
+            r = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=str(cwd_path), capture_output=True, text=True, check=False,
+            )
+            if r.returncode == 0:
+                doc_commit_sha = r.stdout.strip()
+        except Exception:
+            pass
+
+    state.documenter_status        = "succeeded"
+    state.documenter_files_touched = files_touched
+    state.documenter_commit_sha    = doc_commit_sha
+    print(
+        f"  [documenter] Done: {len(files_touched)} file(s) touched"
+        + (f" (commit {doc_commit_sha[:8]})" if doc_commit_sha else ""),
+        flush=True,
+    )
+
+
 def _dispatch_reviewer(
     state: "SprintState",
     summary_issue_num: Optional[int],
@@ -3574,6 +3829,14 @@ def main() -> None:
         help="Skip the post-sprint reviewer agent entirely.",
     )
 
+    # Documenter control (issue #165)
+    p.add_argument(
+        "--skip-documenter",
+        action="store_true",
+        default=False,
+        help="Skip the post-summary documenter agent entirely.",
+    )
+
     args = p.parse_args()
 
     # ── Config resolution (AC-4 + AC-5 + AC-6) ───────────────────────────────
@@ -3685,6 +3948,51 @@ def main() -> None:
         )
     else:
         summary_path = None
+
+    # Dispatch documenter after sprint summary, before sprint PR (issue #165)
+    if not args.skip_documenter and not args.dry_run and state.issues:
+        doc_cwd = str(cfg.worktree_tester) if cfg else None
+        try:
+            r_head = subprocess.run(
+                ["git", "rev-parse", f"origin/{effective_target}"],
+                capture_output=True, text=True, check=False, cwd=doc_cwd,
+            )
+            r_base = subprocess.run(
+                ["git", "merge-base", f"origin/{effective_target}", "origin/develop"],
+                capture_output=True, text=True, check=False, cwd=doc_cwd,
+            )
+            doc_head_sha = r_head.stdout.strip() or "HEAD"
+            doc_base_sha = r_base.stdout.strip() or "develop"
+        except Exception:
+            doc_head_sha = "HEAD"
+            doc_base_sha = "develop"
+
+        state_path_doc = _state_path(state.sprint_number, state.sprint_label, cfg=cfg)
+        try:
+            _dispatch_documenter(
+                state         = state,
+                sprint_branch = effective_target,
+                base_sha      = doc_base_sha,
+                head_sha      = doc_head_sha,
+                cfg           = cfg,
+                repo_name     = eff_repo,
+            )
+            # Persist documenter outcome into the state JSON
+            if state_path_doc.exists():
+                try:
+                    sd3 = json.loads(state_path_doc.read_text())
+                    sd3["documenter_status"]        = state.documenter_status
+                    sd3["documenter_files_touched"] = state.documenter_files_touched
+                    sd3["documenter_commit_sha"]    = state.documenter_commit_sha
+                    state_path_doc.write_text(json.dumps(sd3, indent=2))
+                except Exception as e_persist:
+                    print(
+                        f"  [documenter] WARNING: could not persist documenter outcome -- {e_persist}",
+                        file=sys.stderr,
+                    )
+        except Exception as e_doc:
+            print(f"  [documenter] WARNING: documenter raised unexpectedly -- {e_doc}", file=sys.stderr)
+            state.documenter_status = "failed"
 
     # AC6, AC7: auto-create PR sprint/sprint-N → develop at sprint end,
     # but only when we were running in sprint-branch mode (not manual 'develop' override)

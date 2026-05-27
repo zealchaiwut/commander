@@ -583,6 +583,14 @@ function ticketCardHtml(ticket, repo) {
     ? `<div class="ticket-branch"><i class="ti ti-git-branch"></i>${escapeHtml(ticket.feature_branch)}</div>`
     : '';
 
+  const sprintChip = ticket.sprint_label
+    ? `<span class="sprint-chip">${escapeHtml(ticket.sprint_label.replace(/^sprint-(\d+)$/, 'Sprint $1'))}</span>`
+    : '';
+
+  const chipsHtml = (sprintChip || branchChip)
+    ? `<div class="ticket-chips">${sprintChip}${branchChip}</div>`
+    : '';
+
   return `
     <div class="ticket-card">
       <div class="ticket-top">
@@ -591,7 +599,7 @@ function ticketCardHtml(ticket, repo) {
         <span class="sbadge ${color}">${escapeHtml(ticket.status)}</span>
       </div>
       <div class="ticket-meta">${assignee}${sep}${updated}</div>
-      ${branchChip}
+      ${chipsHtml}
       ${actionsHtml}
     </div>`;
 }

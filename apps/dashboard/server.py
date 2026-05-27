@@ -973,6 +973,346 @@ def _parse_summary_file(path: Path) -> dict:
     }
 
 
+# ── home aggregated endpoint (#216) ──────────────────────────────────────────
+
+_home_cache: dict[str, tuple[float, dict]] = {}
+_HOME_CACHE_TTL = 30.0
+
+
+def _home_project_data(proj: dict, running_sprints: list[dict]) -> dict:
+    """Compute per-project home data, cached 30 s per project slug.
+
+    On any GitHub fetch error, returns an idle sentinel with 0 counts so the
+    overall endpoint still returns 200.
+    """
+    repo = proj["repo"]
+    slug = repo.split("/")[-1]
+    name = proj.get("name", slug)
+    icon = proj.get("icon", "ti-folder")
+
+    cache_key = f"home:{slug}"
+    now = time.monotonic()
+    cached = _home_cache.get(cache_key)
+    if cached and now - cached[0] < _HOME_CACHE_TTL:
+        return cached[1]
+
+    def _idle() -> dict:
+        sentinel: dict = {
+            "name": name, "slug": slug, "icon": icon,
+            "status": "idle", "uat_count": 0, "backlog_count": 0,
+            "last_activity_at": None,
+        }
+        _home_cache[cache_key] = (now, sentinel)
+        return sentinel
+
+    try:
+        all_open = github_client.list_all_open_issues(repo_name=repo)
+    except Exception:
+        return _idle()
+
+    proj_running = [r for r in running_sprints if r["project"] == repo]
+    sprint_running_field: dict | None = None
+    if proj_running:
+        r0 = proj_running[0]
+        status_data = _sprint_statuses.get((r0["project"], r0["sprint_label"]), {})
+        start_ts = status_data.get("start_timestamp")
+        elapsed_sec = 0
+        if start_ts:
+            try:
+                start_dt = datetime.fromisoformat(start_ts.replace("Z", "+00:00"))
+                elapsed_sec = int((datetime.now(timezone.utc) - start_dt).total_seconds())
+            except Exception:
+                pass
+        sprint_running_field = {"label": r0["sprint_label"], "elapsed_sec": elapsed_sec}
+
+    uat_issues = [i for i in all_open if any(l["name"] == "UAT" for l in i.get("labels", []))]
+    backlog_issues = [i for i in all_open if github_client.classify_issue(i) == "backlog"]
+
+    if proj_running:
+        status = "running"
+    elif uat_issues:
+        status = "uat-pending"
+    else:
+        status = "idle"
+
+    last_activity_at: str | None = None
+    issue_timestamps = [i.get("updatedAt") for i in all_open if i.get("updatedAt")]
+    if issue_timestamps:
+        last_activity_at = max(issue_timestamps)
+
+    last_sprint_data: dict | None = None
+    seen_dirs: set[str] = set()
+    for sprints_dir in [
+        _commander_dir(_project_root_path(repo)) / "sprints",
+        SPRINTS_DIR,
+    ]:
+        key_str = str(sprints_dir.resolve())
+        if not sprints_dir.exists() or key_str in seen_dirs:
+            continue
+        seen_dirs.add(key_str)
+        summary_files = sorted(
+            sprints_dir.glob("*-summary-*.md"),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+        if summary_files and last_sprint_data is None:
+            try:
+                meta = _parse_summary_file(summary_files[0])
+                if meta.get("date"):
+                    sprint_ts = meta["date"] + "T00:00:00Z"
+                    if last_activity_at is None or sprint_ts > last_activity_at:
+                        last_activity_at = sprint_ts
+                last_sprint_data = {
+                    "sprint_num": meta.get("sprint_num"),
+                    "date": meta.get("date"),
+                    "status": meta.get("status"),
+                }
+            except Exception:
+                pass
+
+    result: dict = {
+        "name": name,
+        "slug": slug,
+        "icon": icon,
+        "status": status,
+        "uat_count": len(uat_issues),
+        "backlog_count": len(backlog_issues),
+        "last_activity_at": last_activity_at,
+    }
+    if sprint_running_field is not None:
+        result["sprint_running"] = sprint_running_field
+    if last_sprint_data is not None:
+        result["last_sprint"] = last_sprint_data
+
+    _home_cache[cache_key] = (now, result)
+    return result
+
+
+def _home_activity_feed(
+    all_open_by_repo: dict[str, list[dict]],
+    running_sprints: list[dict],
+    projects: list[dict],
+) -> list[dict]:
+    """Build top-5 activity events from open issues and sprint history."""
+    events: list[dict] = []
+
+    for repo, issues in all_open_by_repo.items():
+        slug = repo.split("/")[-1]
+        for issue in issues:
+            labels = {l["name"] for l in issue.get("labels", [])}
+            ts = issue.get("updatedAt") or issue.get("createdAt") or ""
+            if not ts:
+                continue
+            if "UAT" in labels:
+                events.append({
+                    "type": "ticket_moved_to_uat",
+                    "project": slug,
+                    "title": issue.get("title", ""),
+                    "sub": f"#{issue.get('number', '')}",
+                    "timestamp": ts,
+                    "link": issue.get("url", ""),
+                })
+            elif "need-rework" in labels:
+                events.append({
+                    "type": "ticket_needs_rework",
+                    "project": slug,
+                    "title": issue.get("title", ""),
+                    "sub": f"#{issue.get('number', '')}",
+                    "timestamp": ts,
+                    "link": issue.get("url", ""),
+                })
+
+    for r in running_sprints:
+        repo = r["project"]
+        slug = repo.split("/")[-1]
+        status_data = _sprint_statuses.get((repo, r["sprint_label"]), {})
+        start_ts = status_data.get("start_timestamp")
+        if start_ts:
+            events.append({
+                "type": "sprint_started",
+                "project": slug,
+                "title": f"{r['sprint_label']} started",
+                "sub": slug,
+                "timestamp": start_ts,
+                "link": f"https://github.com/{repo}/issues?q=label:{r['sprint_label']}",
+            })
+
+    seen_summaries: set[str] = set()
+    for proj in projects:
+        repo = proj["repo"]
+        slug = repo.split("/")[-1]
+        for sprints_dir in [
+            _commander_dir(_project_root_path(repo)) / "sprints",
+            SPRINTS_DIR,
+        ]:
+            if not sprints_dir.exists():
+                continue
+            for sf in sorted(
+                sprints_dir.glob("*-summary-*.md"),
+                key=lambda p: p.stat().st_mtime,
+                reverse=True,
+            )[:5]:
+                uid = str(sf.resolve())
+                if uid in seen_summaries:
+                    continue
+                seen_summaries.add(uid)
+                try:
+                    meta = _parse_summary_file(sf)
+                    if not meta.get("date") or meta.get("sprint_num") is None:
+                        continue
+                    event_ts = meta["date"] + "T00:00:00Z"
+                    sprint_label = f"sprint-{meta['sprint_num']}"
+                    raw_status = meta.get("status", "").lower()
+                    etype = "sprint_failed" if raw_status in ("failed", "cancelled") else "sprint_completed"
+                    link = f"https://github.com/{repo}/issues"
+                    state_file = sprints_dir / f"sprint-{meta['sprint_num']}-state.json"
+                    if state_file.exists():
+                        try:
+                            sd = json.loads(state_file.read_text())
+                            link = sd.get("summary_issue_url") or link
+                        except Exception:
+                            pass
+                    events.append({
+                        "type": etype,
+                        "project": slug,
+                        "title": f"{sprint_label} {raw_status or 'completed'}",
+                        "sub": f"{meta.get('shipped_count', 0)} tickets shipped",
+                        "timestamp": event_ts,
+                        "link": link,
+                    })
+                except Exception:
+                    pass
+
+    events.sort(key=lambda e: e.get("timestamp", ""), reverse=True)
+    return events[:5]
+
+
+@app.get("/api/home")
+def get_home():
+    """Aggregated Home page payload: stats, per-project summaries, and activity feed.
+
+    Per-project data is cached 30 s (key home:<slug>).
+    Always returns HTTP 200 — failing projects degrade to idle with 0 counts.
+    """
+    projects = projects_module.load_projects()
+    running_sprints = _all_sprints_running()
+
+    all_open_by_repo: dict[str, list[dict]] = {}
+    proj_data_list: list[dict] = []
+
+    for proj in projects:
+        repo = proj["repo"]
+        data = _home_project_data(proj, running_sprints)
+        proj_data_list.append(data)
+        try:
+            all_open_by_repo[repo] = github_client.list_all_open_issues(repo_name=repo)
+        except Exception:
+            all_open_by_repo[repo] = []
+
+    # stats.sprint_running
+    sprint_running_projects: list[dict] = []
+    now_utc = datetime.now(timezone.utc)
+    for r in running_sprints:
+        repo = r["project"]
+        slug = repo.split("/")[-1]
+        proj_cfg = next((p for p in projects if p["repo"] == repo), {})
+        status_data = _sprint_statuses.get((repo, r["sprint_label"]), {})
+        start_ts = status_data.get("start_timestamp")
+        elapsed_sec = 0
+        if start_ts:
+            try:
+                start_dt = datetime.fromisoformat(start_ts.replace("Z", "+00:00"))
+                elapsed_sec = int((now_utc - start_dt).total_seconds())
+            except Exception:
+                pass
+        sprint_running_projects.append({
+            "name": proj_cfg.get("name", slug),
+            "sprint_label": r["sprint_label"],
+            "elapsed_sec": elapsed_sec,
+        })
+
+    # stats.awaiting_uat
+    uat_total = 0
+    uat_project_set: set[str] = set()
+    oldest_uat_ts: str | None = None
+    oldest_age_sec: int | None = None
+
+    for repo, issues in all_open_by_repo.items():
+        for issue in issues:
+            if any(l["name"] == "UAT" for l in issue.get("labels", [])):
+                uat_total += 1
+                uat_project_set.add(repo)
+                ts = issue.get("updatedAt") or issue.get("createdAt")
+                if ts and (oldest_uat_ts is None or ts < oldest_uat_ts):
+                    oldest_uat_ts = ts
+
+    if oldest_uat_ts:
+        try:
+            oldest_dt = datetime.fromisoformat(oldest_uat_ts.replace("Z", "+00:00"))
+            oldest_age_sec = int((now_utc - oldest_dt).total_seconds())
+        except Exception:
+            pass
+
+    # stats.sprints_planned
+    running_labels_by_repo: dict[str, set[str]] = {}
+    for r in running_sprints:
+        running_labels_by_repo.setdefault(r["project"], set()).add(r["sprint_label"])
+
+    planned_count = 0
+    planned_tickets = 0
+    _sprint_re = re.compile(r"^sprint-\d+$")
+    for repo, issues in all_open_by_repo.items():
+        running_lbls = running_labels_by_repo.get(repo, set())
+        label_ticket_counts: dict[str, int] = {}
+        for issue in issues:
+            for lbl in issue.get("labels", []):
+                lname = lbl["name"]
+                if _sprint_re.match(lname) and lname not in running_lbls:
+                    label_ticket_counts[lname] = label_ticket_counts.get(lname, 0) + 1
+        planned_count += len(label_ticket_counts)
+        planned_tickets += sum(label_ticket_counts.values())
+
+    # stats.backlog
+    backlog_per_proj: list[dict] = []
+    total_backlog = 0
+    for proj in projects:
+        repo = proj["repo"]
+        issues = all_open_by_repo.get(repo, [])
+        bc = sum(1 for i in issues if github_client.classify_issue(i) == "backlog")
+        total_backlog += bc
+        if bc > 0:
+            backlog_per_proj.append({"name": proj.get("name", repo.split("/")[-1]), "count": bc})
+    backlog_per_proj.sort(key=lambda x: x["count"], reverse=True)
+
+    activity = _home_activity_feed(all_open_by_repo, running_sprints, projects)
+
+    return {
+        "stats": {
+            "sprint_running": {
+                "count": len(sprint_running_projects),
+                "projects": sprint_running_projects,
+            },
+            "awaiting_uat": {
+                "count": uat_total,
+                "projects": len(uat_project_set),
+                "oldest_age_sec": oldest_age_sec,
+            },
+            "sprints_planned": {
+                "count": planned_count,
+                "total_tickets": planned_tickets,
+            },
+            "backlog": {
+                "count": total_backlog,
+                "per_project": backlog_per_proj[:5],
+            },
+        },
+        "projects": proj_data_list,
+        "activity": activity,
+    }
+
+
+# ── sprint summary / history endpoints (AC-4 / AC-6 from #24) ────────────────
+
 @app.get("/api/sprint-history")
 def get_sprint_history():
     """AC-4: Return a JSON array of all past summaries, newest first.

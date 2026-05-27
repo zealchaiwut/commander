@@ -31,3 +31,5 @@ sprints/
 
 apps/dashboard/projects.json
 
+# Runtime state — attachment bare-clone cache and draft uploads (issue #188)
+apps/dashboard/runtime/

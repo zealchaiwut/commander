@@ -1815,6 +1815,60 @@ def rerun_sprint(sprint_label: str, project: str, body: SprintRerunBody):
     return result
 
 
+@app.delete("/api/sprints/{sprint_label}")
+def delete_sprint(sprint_label: str, project: str):
+    """Remove a sprint label from GitHub and unlabel all attached tickets.
+
+    Does NOT delete the issues themselves — only the sprint label is removed.
+    """
+    if not _SPRINT_LABEL_RE.match(sprint_label):
+        raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")
+
+    if _is_sprint_running(_project_root_path(project), sprint_label):
+        raise HTTPException(409, detail="Cannot delete a sprint that is currently running")
+
+    project_root = _project_root_path(project)
+    commander = _commander_dir(project_root)
+
+    try:
+        issues = github_client.list_open_issues_with_body(repo_name=project, limit=200)
+    except subprocess.CalledProcessError as e:
+        raise _gh_error(e)
+
+    sprint_issues = [
+        iss for iss in issues
+        if any(lbl["name"] == sprint_label for lbl in iss.get("labels", []))
+    ]
+
+    errors: list[str] = []
+    unlabelled_count = 0
+
+    for iss in sprint_issues:
+        try:
+            github_client.update_labels(iss["number"], add=[], remove=[sprint_label], repo_name=project)
+            unlabelled_count += 1
+        except subprocess.CalledProcessError as e:
+            errors.append(f"#{iss['number']} failed: {e.stderr.strip()}")
+
+    try:
+        github_client.delete_label(sprint_label, repo_name=project)
+    except subprocess.CalledProcessError as e:
+        errors.append(f"Label deletion failed: {e.stderr.strip()}")
+
+    (commander / "sprints" / f"{sprint_label}-state.json").unlink(missing_ok=True)
+    (commander / "sprints" / f"{sprint_label}-goal.txt").unlink(missing_ok=True)
+
+    github_client.invalidate(f"open_issues_body:")
+    github_client.invalidate(f"open_issues:")
+    github_client.invalidate(f"issues:")
+    github_client.invalidate(f"sprints:")
+
+    result: dict = {"deleted_label": sprint_label, "unlabelled_count": unlabelled_count}
+    if errors:
+        result["errors"] = errors
+    return result
+
+
 # ── Draft Ticket endpoints (issue #94) ───────────────────────────────────────
 
 _DRAFT_UPLOAD_DIR = Path(__file__).parent / "runtime" / "draft-uploads"

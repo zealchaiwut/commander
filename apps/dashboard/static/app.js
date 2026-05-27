@@ -2528,12 +2528,19 @@ function smgmtSprintBlockHtml(label, tickets, isNext) {
   const nextBadge = isNext ? '<span class="smgmt-next-badge">NEXT UP</span>' : '';
   const runBtnId    = `smgmt-run-btn-${label.replace('-', '_')}`;
   const rerunBtnId  = `smgmt-rerun-btn-${label.replace('-', '_')}`;
+  const deleteBtnId = `smgmt-delete-btn-${label.replace('-', '_')}`;
   const goalId      = `smgmt-goal-${label.replace('-', '_')}`;
   const savedGoal   = _smgmtGoals[label] || '';
   const goalValid   = savedGoal.length >= 10;
   const hasCompleted = smgmtHasCompletedTickets(tickets);
-  // Run button shows on every sprint with >= 1 ticket and a valid sprint goal
-  const canRun = tickets.length >= 1 && goalValid;
+  // Past sprint (any completed ticket): Run disabled, Rerun enabled
+  // Upcoming sprint: Run follows canRun logic, Rerun disabled
+  const canRun = !hasCompleted && tickets.length >= 1 && goalValid;
+
+  let runTitle = '';
+  if (hasCompleted) runTitle = 'Sprint already ran — use Rerun to reset first';
+  else if (!goalValid) runTitle = 'Set a sprint goal first';
+  else if (tickets.length < 1) runTitle = 'Add at least one ticket first';
 
   const ticketsHtml = tickets.length > 0
     ? tickets.map(t => smgmtTicketCardHtml(t, label)).join('')
@@ -2552,13 +2559,17 @@ function smgmtSprintBlockHtml(label, tickets, isNext) {
         <span class="smgmt-sprint-name">Sprint ${n}</span>
         ${nextBadge}
         <span class="smgmt-sprint-count">${tickets.length} ticket${tickets.length !== 1 ? 's' : ''}</span>
+        <button class="smgmt-delete-btn" id="${deleteBtnId}"
+                title="Delete sprint"
+                onclick="smgmtDeleteSprint('${label}')">
+          <i class="ti ti-trash"></i> Delete</button>
         <button class="smgmt-rerun-btn" id="${rerunBtnId}"
                 title="${hasCompleted ? '' : 'No completed tickets to reset'}"
                 ${hasCompleted ? '' : 'disabled'}
                 onclick="smgmtRerunSprint('${label}')">
           <i class="ti ti-refresh"></i> Rerun sprint</button>
         <button class="smgmt-run-btn" id="${runBtnId}"
-                title="${goalValid ? (tickets.length >= 1 ? '' : 'Add at least one ticket first') : 'Set a sprint goal first'}"
+                title="${runTitle}"
                 ${canRun ? '' : 'disabled'}
                 onclick="smgmtRunSprint('${label}')">Run sprint</button>
       </div>
@@ -2749,9 +2760,11 @@ function smgmtGoalInput(label, value) {
       t => t.sprint != null && `sprint-${t.sprint}` === label
     );
     const hasTickets = sprintTickets.length >= 1;
-    const canRun = goalValid && hasTickets;
+    const hasCompleted = smgmtHasCompletedTickets(sprintTickets);
+    const canRun = !hasCompleted && goalValid && hasTickets;
     btn.disabled = !canRun;
-    btn.title = goalValid ? (hasTickets ? '' : 'Add at least one ticket first') : 'Set a sprint goal first';
+    if (hasCompleted) btn.title = 'Sprint already ran — use Rerun to reset first';
+    else btn.title = goalValid ? (hasTickets ? '' : 'Add at least one ticket first') : 'Set a sprint goal first';
   }
   if (_smgmtGoalSaveTimers[label]) clearTimeout(_smgmtGoalSaveTimers[label]);
   _smgmtGoalSaveTimers[label] = setTimeout(() => smgmtSaveGoal(label, value), 800);
@@ -3287,9 +3300,11 @@ function smgmtApplyRunState(sprintStatusMap) {
         t => t.sprint != null && `sprint-${t.sprint}` === btnLabel
       );
       const hasTickets = sprintTickets.length >= 1;
-      const canRun = goalValid && hasTickets;
+      const hasCompleted = smgmtHasCompletedTickets(sprintTickets);
+      const canRun = !hasCompleted && goalValid && hasTickets;
       btn.disabled = !canRun;
-      btn.title = goalValid ? (hasTickets ? '' : 'Add at least one ticket first') : 'Set a sprint goal first';
+      if (hasCompleted) btn.title = 'Sprint already ran — use Rerun to reset first';
+      else btn.title = goalValid ? (hasTickets ? '' : 'Add at least one ticket first') : 'Set a sprint goal first';
       btn.textContent = 'Run sprint';
     } else {
       btn.disabled = true;
@@ -3502,6 +3517,60 @@ async function smgmtKillConfirm() {
   } catch (e) {
     smgmtShowError('Failed to kill sprint: ' + e.message);
     if (confirmBtn) { confirmBtn.disabled = false; confirmBtn.textContent = 'Yes, kill it'; }
+  }
+}
+
+// ── Delete sprint ─────────────────────────────────────────────────────────────
+
+let _smgmtDeleteLabel = null;
+
+function smgmtDeleteSprint(label) {
+  if (!_smgmtCurrentRepo || !_smgmtData) return;
+  _smgmtDeleteLabel = label;
+  const n = parseInt(label.split('-')[1], 10);
+  const sprintTickets = (_smgmtData.issues || []).filter(
+    t => t.sprint != null && `sprint-${t.sprint}` === label
+  );
+  document.getElementById('smgmt-delete-title').textContent = `Delete Sprint ${n}?`;
+  const bodyEl = document.getElementById('smgmt-delete-body');
+  const ticketCount = sprintTickets.length;
+  bodyEl.innerHTML = ticketCount > 0
+    ? `<p>This will delete the <strong>sprint-${n}</strong> GitHub label and remove it from <strong>${ticketCount} ticket${ticketCount !== 1 ? 's' : ''}</strong>. The tickets themselves are not deleted.</p>`
+    : `<p>This will delete the <strong>sprint-${n}</strong> GitHub label. No tickets are attached to this sprint.</p>`;
+  const confirmBtn = document.getElementById('smgmt-delete-confirm');
+  if (confirmBtn) { confirmBtn.disabled = false; confirmBtn.textContent = 'Delete sprint'; }
+  document.getElementById('smgmt-delete-backdrop').classList.remove('hidden');
+  document.getElementById('smgmt-delete-modal').classList.remove('hidden');
+}
+
+function smgmtDeleteClose() {
+  document.getElementById('smgmt-delete-backdrop').classList.add('hidden');
+  document.getElementById('smgmt-delete-modal').classList.add('hidden');
+  _smgmtDeleteLabel = null;
+}
+
+async function smgmtDeleteConfirm() {
+  if (!_smgmtDeleteLabel || !_smgmtCurrentRepo) return;
+  const confirmBtn = document.getElementById('smgmt-delete-confirm');
+  if (confirmBtn) { confirmBtn.disabled = true; confirmBtn.textContent = 'Deleting…'; }
+
+  try {
+    const res = await fetch(
+      `/api/sprints/${encodeURIComponent(_smgmtDeleteLabel)}?project=${encodeURIComponent(_smgmtCurrentRepo)}`,
+      { method: 'DELETE' }
+    );
+    if (!res.ok) throw new Error(await res.text());
+    const data = await res.json();
+    const n = parseInt(_smgmtDeleteLabel.split('-')[1], 10);
+    smgmtDeleteClose();
+    const msg = data.unlabelled_count > 0
+      ? `Sprint ${n} deleted — removed label from ${data.unlabelled_count} ticket${data.unlabelled_count !== 1 ? 's' : ''}.`
+      : `Sprint ${n} deleted.`;
+    showSuccessToast(msg);
+    await smgmtSelectProject(_smgmtCurrentRepo);
+  } catch (e) {
+    smgmtShowError('Failed to delete sprint: ' + e.message);
+    if (confirmBtn) { confirmBtn.disabled = false; confirmBtn.textContent = 'Delete sprint'; }
   }
 }
 

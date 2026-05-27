@@ -1365,6 +1365,20 @@
   </div>
 </div>
 
+<!-- Delete sprint confirmation modal -->
+<div class="modal-backdrop hidden" id="smgmt-delete-backdrop" onclick="smgmtDeleteClose()"></div>
+<div class="modal hidden" id="smgmt-delete-modal" role="dialog" aria-modal="true">
+  <div class="modal-header">
+    <span class="modal-title" id="smgmt-delete-title">Delete Sprint?</span>
+    <button class="modal-close" onclick="smgmtDeleteClose()" aria-label="Close">&times;</button>
+  </div>
+  <div class="smgmt-delete-body" id="smgmt-delete-body"></div>
+  <div class="modal-footer">
+    <button class="btn-ghost" onclick="smgmtDeleteClose()">Cancel</button>
+    <button class="btn-danger" id="smgmt-delete-confirm" onclick="smgmtDeleteConfirm()">Delete sprint</button>
+  </div>
+</div>
+
 <!-- Clean up empty sprints confirmation modal -->
 <div class="modal-backdrop hidden" id="smgmt-cleanup-backdrop" onclick="smgmtCleanupClose()"></div>
 <div class="modal hidden" id="smgmt-cleanup-modal" role="dialog" aria-modal="true">
@@ -1684,6 +1698,18 @@
     background: var(--surface-2); color: var(--text-sub);
     border: 1px solid var(--border); cursor: not-allowed; opacity: 1;
   }
+  .smgmt-delete-btn {
+    padding: 4px 10px; font-size: 11px; font-weight: 600;
+    background: transparent; color: var(--red);
+    border: 0.5px solid var(--red); border-radius: 5px;
+    cursor: pointer; flex-shrink: 0; transition: opacity .15s;
+    display: flex; align-items: center; gap: 4px;
+  }
+  .smgmt-delete-btn:hover { background: var(--red-bg, rgba(220,38,38,.08)); opacity: 1; }
+
+  .smgmt-delete-body { padding: 12px 24px 8px; font-size: 13px; color: var(--text-main); }
+  .smgmt-delete-body p { margin: 0; }
+
   .smgmt-rerun-btn {
     padding: 4px 10px; font-size: 11px; font-weight: 600;
     background: var(--amber-bg); color: var(--amber);

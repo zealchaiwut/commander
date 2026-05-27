@@ -44,7 +44,37 @@ For a full walkthrough including multi-clone setup for Coder/Tester agents, see
 |---|---|---|
 | **Dashboard** | Live agent event feed, project cards, sprint progress bar, UAT sign-off UI | [docs/features/dashboard.md](docs/features/dashboard.md) |
 | **Sprint Manager** | Automates the BA → Coder → Tester → UAT loop for every ticket in a sprint | [docs/features/sprint-manager.md](docs/features/sprint-manager.md) |
+| **Sprint Estimator** | Claude Code-driven effort estimation for all sprint tickets — runs automatically at sprint start | see below |
 | **API** | REST API consumed by the dashboard and agent hooks | [docs/features/api.md](docs/features/api.md) |
+
+---
+
+## How the estimator works
+
+The Sprint Estimator runs automatically at the start of every sprint (after the
+sprint branch is created, before any coder agents are dispatched). It uses a single
+Claude Code subprocess to estimate effort, files impacted, and risks for all backlog
+tickets in one pass.
+
+**What it does:**
+1. Fetches all open backlog issues labeled with the sprint label (skips any already labeled `estimated`, `done`, `UAT-approved`, `needs-rework`, or `closed`).
+2. For each ticket, reads the full issue body, scans the codebase for likely-impacted files, and estimates size (S/M/L/XL) and minutes (with 20% buffer, 30% for thin AC).
+3. Comments on each issue with the estimate and applies the `estimated` label.
+4. Writes `<project>/.commander/sprints/sprint-<N>-estimate.json` atomically.
+5. Merges results into the sprint state so the dashboard reflects them immediately.
+
+**Estimate badge:** Each ticket card in the Sprint Mgmt board shows `M · ~25 min` (or equivalent) when estimates are available. The sprint block header shows a total like `estimated 2h 25m across 5 tickets`.
+
+**API:** `GET /api/sprints/{sprint_label}/estimate?project=<name>` returns the estimate JSON or 404 if not yet generated.
+
+**Standalone usage:**
+
+```bash
+python3 scripts/sprint_estimator.py sprint-N
+python3 scripts/sprint_estimator.py sprint-N --repo owner/repo
+```
+
+**Graceful degradation:** If the claude CLI is missing or the agent times out, the estimator logs a warning, writes an empty estimate file, and the sprint continues normally — estimation never blocks the sprint run.
 
 ---
 

@@ -1749,6 +1749,20 @@
   </div>
 </div>
 
+<!-- Estimate summary modal shown before dispatching sprint (issue #211) -->
+<div class="modal-backdrop hidden" id="smgmt-est-backdrop" onclick="smgmtEstClose()"></div>
+<div class="modal hidden" id="smgmt-est-modal" role="dialog" aria-modal="true" aria-labelledby="smgmt-est-title">
+  <div class="modal-header">
+    <span class="modal-title" id="smgmt-est-title">Run sprint?</span>
+    <button class="modal-close" onclick="smgmtEstClose()" aria-label="Close">&times;</button>
+  </div>
+  <div class="smgmt-est-body" id="smgmt-est-body"></div>
+  <div class="modal-footer">
+    <button class="btn-ghost" onclick="smgmtEstClose()">Cancel</button>
+    <button class="btn-primary" id="smgmt-est-confirm" onclick="smgmtEstConfirm()">Confirm and run</button>
+  </div>
+</div>
+
 <!-- Plan Sprint confirmation dialog -->
 <div class="modal-backdrop hidden" id="psp-dialog-backdrop" onclick="pspCloseDialog()"></div>
 <div class="modal hidden" id="psp-dialog" role="dialog" aria-modal="true">
@@ -2078,6 +2092,32 @@
 
   .smgmt-delete-body { padding: 12px 24px 8px; font-size: 13px; color: var(--text-main); }
   .smgmt-delete-body p { margin: 0; }
+
+  /* Estimate summary modal (issue #211) */
+  .smgmt-est-body { padding: 16px 24px 8px; font-size: 13px; color: var(--text-main); }
+  .smgmt-est-subtitle {
+    font-size: 12px; color: var(--text-muted); margin: 0 0 14px;
+  }
+  .smgmt-est-table {
+    width: 100%; border-collapse: collapse; margin-bottom: 12px;
+  }
+  .smgmt-est-table td {
+    padding: 5px 0; font-size: 13px; vertical-align: top;
+  }
+  .smgmt-est-table td:first-child {
+    color: var(--text-muted); width: 160px; padding-right: 12px;
+  }
+  .smgmt-est-total-row td { font-weight: 600; padding-top: 10px; border-top: 1px solid var(--border); }
+  .smgmt-est-warning {
+    background: var(--amber-bg, rgba(245,158,11,.1));
+    border: 1px solid var(--amber, #d97706);
+    border-radius: 6px;
+    padding: 8px 12px;
+    font-size: 12px;
+    color: var(--text-main);
+    margin-top: 4px;
+  }
+  .smgmt-est-warning strong { color: var(--amber, #d97706); }
 
   /* Finish Sprint button (issue #195) */
   .smgmt-finish-btn {

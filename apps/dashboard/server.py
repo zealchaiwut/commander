@@ -1617,6 +1617,77 @@ def save_sprint_order(project: str, body: SprintOrderBody):
 _MIGRATION_STATUS_LABELS = {"UAT", "UAT-approved", "SIT", "in-progress", "need-rework"}
 
 
+# ── Estimate-summary helpers (issue #211) ────────────────────────────────────
+
+def _size_to_minutes(size: str) -> int:
+    """Map a T-shirt size label to wall-clock minutes.
+
+    S = 30 min, M = 2 h (120 min), L = 8 h (480 min).
+    Change this single function to adjust all size mappings.
+    """
+    mapping = {"S": 30, "M": 120, "L": 480}
+    return mapping.get(size, 0)
+
+
+@app.get("/api/sprints/{sprint_label}/estimate-summary")
+def get_sprint_estimate_summary(sprint_label: str, project: str):
+    """Return a rolled-up estimate summary for a sprint.
+
+    Fetches open issues for the sprint via the existing list_open_issues_with_body
+    plumbing, reads size-S/M/L/XL labels from each ticket, and returns:
+      - size_counts: dict mapping size -> count (e.g. {"S": 2, "M": 3, "L": 1})
+      - total_minutes: int, sum of _size_to_minutes for all sized tickets
+      - unsized_numbers: list of issue numbers with no size label
+      - sprint_name: human-readable sprint name (e.g. "Sprint 15")
+      - total_tickets: total open ticket count in the sprint
+    """
+    if not _SPRINT_LABEL_RE.match(sprint_label):
+        raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")
+
+    try:
+        issues = github_client.list_open_issues_with_body(repo_name=project, limit=200)
+    except subprocess.CalledProcessError as e:
+        raise _gh_error(e)
+
+    # Filter to issues belonging to this sprint
+    sprint_issues = [
+        iss for iss in issues
+        if any(lbl["name"] == sprint_label for lbl in iss.get("labels", []))
+    ]
+
+    _SIZE_LABELS = ["S", "M", "L", "XL"]  # ordered smallest to largest
+    size_counts: dict[str, int] = {}
+    unsized_numbers: list[int] = []
+    total_minutes = 0
+
+    for iss in sprint_issues:
+        label_names = {lbl["name"] for lbl in iss.get("labels", [])}
+        found_size = None
+        for size in _SIZE_LABELS:
+            if f"size-{size}" in label_names:
+                found_size = size
+                break
+        if found_size:
+            size_counts[found_size] = size_counts.get(found_size, 0) + 1
+            total_minutes += _size_to_minutes(found_size)
+        else:
+            unsized_numbers.append(iss["number"])
+
+    # Extract sprint number for human-readable name
+    m = re.search(r"(\d+)", sprint_label)
+    sprint_num = int(m.group(1)) if m else None
+    sprint_name = f"Sprint {sprint_num}" if sprint_num is not None else sprint_label
+
+    return {
+        "sprint_name": sprint_name,
+        "sprint_label": sprint_label,
+        "total_tickets": len(sprint_issues),
+        "size_counts": size_counts,
+        "total_minutes": total_minutes,
+        "unsized_numbers": unsized_numbers,
+    }
+
+
 @app.post("/api/sprints/run", status_code=202)
 def run_sprint_managed(body: SprintMgmtRunBody):
     """Spawn sprint_manager.py for the given project + sprint.

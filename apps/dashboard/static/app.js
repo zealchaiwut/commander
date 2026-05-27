@@ -5176,3 +5176,451 @@ function _dtShowError(msg) {
   el.textContent = msg;
   el.classList.remove('hidden');
 }
+
+// ── Bulk Create Modal (issue #189) ────────────────────────────────────────────
+
+let _bcJobId = null;
+let _bcEventSource = null;
+let _bcJobState = null;      // current job snapshot {status, concurrency, tickets}
+let _bcDebounceTimer = null;
+let _bcStartTimes = {};      // index -> start timestamp (for elapsed calc)
+let _bcAvgMs = null;         // rolling avg BA time per ticket
+
+const BC_MAX_PROMPTS = 25;
+
+function openBulkCreateModal() {
+  // If there's an active job stored in localStorage, go straight to step 2
+  const savedJobId = localStorage.getItem('bc_job_id');
+  if (savedJobId) {
+    _bcJobId = savedJobId;
+    _bcShowStep2Shell();
+    _bcConnectSSE(savedJobId);
+    document.getElementById('bc-backdrop').classList.remove('hidden');
+    document.getElementById('bc-modal').classList.remove('hidden');
+    return;
+  }
+
+  _bcJobId = null;
+  _bcJobState = null;
+  document.getElementById('bc-backdrop').classList.remove('hidden');
+  document.getElementById('bc-modal').classList.remove('hidden');
+  _bcShowStep1();
+
+  // Populate repo dropdown
+  const sel = document.getElementById('bc-repo');
+  sel.innerHTML = allProjects.map(p =>
+    `<option value="${escapeHtml(p.repo)}">${escapeHtml(p.name || p.repo)}</option>`
+  ).join('');
+  if (_activeProject) sel.value = _activeProject;
+
+  // Reset fields
+  document.getElementById('bc-textarea').value = '';
+  document.getElementById('bc-default-labels').value = 'enhancement';
+  document.getElementById('bc-concurrency').value = '3';
+  document.getElementById('bc-step1-error').classList.add('hidden');
+  _bcUpdateCounter();
+}
+
+function closeBulkCreateModal() {
+  // If a job is in progress, show a toast but keep the job running
+  if (_bcJobId && _bcJobState && _bcJobState.status === 'running') {
+    _bcShowToast('Bulk job continues running. Reopen via the Bulk create button.');
+  } else {
+    // Job is done or never started — clear localStorage
+    localStorage.removeItem('bc_job_id');
+    _bcJobId = null;
+  }
+  // Disconnect SSE (reconnect later if needed)
+  if (_bcEventSource) {
+    _bcEventSource.close();
+    _bcEventSource = null;
+  }
+  document.getElementById('bc-backdrop').classList.add('hidden');
+  document.getElementById('bc-modal').classList.add('hidden');
+}
+
+function _bcBackdropClick() {
+  closeBulkCreateModal();
+}
+
+// Keyboard: Esc closes; Cmd/Ctrl+Enter triggers Run
+document.addEventListener('keydown', function(e) {
+  const modal = document.getElementById('bc-modal');
+  if (!modal || modal.classList.contains('hidden')) return;
+
+  if (e.key === 'Escape') {
+    closeBulkCreateModal();
+    return;
+  }
+
+  const step1 = document.getElementById('bc-step1');
+  if (step1 && !step1.classList.contains('hidden')) {
+    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+      e.preventDefault();
+      const btn = document.getElementById('bc-run-btn');
+      if (btn && !btn.disabled) bcRunAll();
+    }
+  }
+});
+
+function _bcShowStep1() {
+  document.getElementById('bc-step1').classList.remove('hidden');
+  document.getElementById('bc-step2').classList.add('hidden');
+  document.getElementById('bc-step-badge').textContent = 'Step 1 of 2 · Input';
+}
+
+function _bcShowStep2Shell() {
+  document.getElementById('bc-step1').classList.add('hidden');
+  document.getElementById('bc-step2').classList.remove('hidden');
+  document.getElementById('bc-step-badge').textContent = 'Step 2 of 2 · Review & create';
+}
+
+function bcRepoChanged() {
+  // Nothing extra needed — repo is read at run time
+}
+
+let _bcCounterTimer = null;
+function bcOnTextareaInput() {
+  clearTimeout(_bcCounterTimer);
+  _bcCounterTimer = setTimeout(_bcUpdateCounter, 200);
+}
+
+function _bcParsePrompts(text) {
+  return text.split(/^---$/m).map(s => s.trim()).filter(s => s.length > 0);
+}
+
+function _bcUpdateCounter() {
+  const text = (document.getElementById('bc-textarea') || {}).value || '';
+  const prompts = _bcParsePrompts(text);
+  const n = prompts.length;
+  const chars = text.length;
+  const counterEl = document.getElementById('bc-counter');
+  if (counterEl) counterEl.textContent = `${n} tickets detected · ${chars} chars`;
+
+  const runBtn = document.getElementById('bc-run-btn');
+  if (runBtn) {
+    runBtn.textContent = `Run BA on all ${n}`;
+    const repo = (document.getElementById('bc-repo') || {}).value || '';
+    runBtn.disabled = (n === 0 || !repo || n > BC_MAX_PROMPTS);
+  }
+
+  // Inline validation for >25
+  const errEl = document.getElementById('bc-step1-error');
+  if (errEl) {
+    if (n > BC_MAX_PROMPTS) {
+      errEl.textContent = `Batch limit is ${BC_MAX_PROMPTS} prompts (you have ${n})`;
+      errEl.classList.remove('hidden');
+    } else {
+      errEl.classList.add('hidden');
+    }
+  }
+}
+
+async function bcRunAll() {
+  const text = document.getElementById('bc-textarea').value;
+  const prompts = _bcParsePrompts(text);
+  if (prompts.length === 0) return;
+  if (prompts.length > BC_MAX_PROMPTS) return;
+
+  const repo = document.getElementById('bc-repo').value;
+  if (!repo) return;
+
+  const labelsRaw = document.getElementById('bc-default-labels').value;
+  const defaultLabels = labelsRaw.split(',').map(l => l.trim()).filter(l => l.length > 0);
+  // Dedupe
+  const uniqueLabels = [...new Set(defaultLabels)];
+
+  const concurrency = parseInt(document.getElementById('bc-concurrency').value, 10);
+
+  const runBtn = document.getElementById('bc-run-btn');
+  runBtn.disabled = true;
+  runBtn.textContent = 'Starting…';
+
+  const errEl = document.getElementById('bc-step1-error');
+  errEl.classList.add('hidden');
+
+  try {
+    const res = await fetch('/api/tickets/bulk', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ repo, default_labels: uniqueLabels, prompts, concurrency }),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      errEl.textContent = data.detail || `Server error ${res.status}`;
+      errEl.classList.remove('hidden');
+      runBtn.disabled = false;
+      runBtn.textContent = `Run BA on all ${prompts.length}`;
+      return;
+    }
+    const data = await res.json();
+    _bcJobId = data.job_id;
+    localStorage.setItem('bc_job_id', _bcJobId);
+
+    _bcStartTimes = {};
+    _bcAvgMs = null;
+
+    _bcShowStep2Shell();
+    _bcConnectSSE(_bcJobId);
+  } catch (e) {
+    errEl.textContent = 'Failed to start job: ' + e.message;
+    errEl.classList.remove('hidden');
+    runBtn.disabled = false;
+    runBtn.textContent = `Run BA on all ${prompts.length}`;
+  }
+}
+
+function _bcConnectSSE(jobId) {
+  if (_bcEventSource) {
+    _bcEventSource.close();
+    _bcEventSource = null;
+  }
+
+  const es = new EventSource(`/api/tickets/bulk/${jobId}/stream`);
+  _bcEventSource = es;
+
+  es.addEventListener('snapshot', (e) => {
+    try {
+      _bcJobState = JSON.parse(e.data);
+      _bcRenderStep2();
+    } catch (_) {}
+  });
+
+  es.addEventListener('update', (e) => {
+    try {
+      const event = JSON.parse(e.data);
+      if (event.type === 'ticket_update' && _bcJobState) {
+        const idx = event.ticket.index;
+        _bcJobState.tickets[idx] = event.ticket;
+        _bcRenderStep2();
+      } else if (event.type === 'job_done' && _bcJobState) {
+        _bcJobState.status = 'done';
+        _bcRenderStep2();
+        es.close();
+        _bcEventSource = null;
+        localStorage.removeItem('bc_job_id');
+        _bcJobId = null;
+      }
+    } catch (_) {}
+  });
+
+  es.onerror = () => {
+    // SSE will auto-reconnect; we'll get a new snapshot on reconnect
+  };
+}
+
+function _bcRenderStep2() {
+  if (!_bcJobState) return;
+  const job = _bcJobState;
+  const tickets = job.tickets || [];
+  const concurrency = job.concurrency || 3;
+
+  const created = tickets.filter(t => t.state === 'created').length;
+  const drafting = tickets.filter(t => t.state === 'drafting').length;
+  const pending = tickets.filter(t => t.state === 'pending').length;
+  const failed = tickets.filter(t => t.state === 'failed').length;
+  const skipped = tickets.filter(t => t.state === 'skipped').length;
+  const total = tickets.length;
+
+  // Banner
+  const banner = document.getElementById('bc-parallel-banner');
+  if (banner) {
+    if (job.status === 'running') {
+      banner.innerHTML =
+        `BA is drafting ${total} tickets in parallel &mdash; ` +
+        `${created} done, ${drafting} running, ${pending} queued` +
+        `<span class="bc-concurrency-pill">concurrency: ${concurrency}</span>`;
+    } else if (job.status === 'done') {
+      banner.innerHTML = `All ${total} tickets processed.`;
+    } else if (job.status === 'stopped') {
+      banner.innerHTML = `Stopped. ${created} created, ${failed} failed, ${skipped} skipped.`;
+    }
+  }
+
+  // Summary strip
+  const strip = document.getElementById('bc-summary-strip');
+  if (strip) {
+    const done = created + failed + skipped;
+    const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+    let etaHtml = '';
+    // Estimate remaining
+    if (created > 0 && pending > 0 && _bcAvgMs) {
+      const estMs = (_bcAvgMs / concurrency) * pending;
+      const estSec = Math.round(estMs / 1000);
+      const m = Math.floor(estSec / 60);
+      const s = estSec % 60;
+      const estLabel = m > 0 ? `${m}m ${s}s` : `${s}s`;
+      etaHtml = `<span class="bc-eta">est. ${estLabel} remaining</span>`;
+    }
+    strip.innerHTML = `
+      <span class="bc-metric bc-metric--created"><span class="bc-metric-count">${created}</span> Created</span>
+      <span class="bc-metric bc-metric--drafting"><span class="bc-metric-count">${drafting}</span> Drafting</span>
+      <span class="bc-metric bc-metric--pending"><span class="bc-metric-count">${pending}</span> Pending</span>
+      <div class="bc-progress-wrap">
+        <div class="bc-progress-bar" style="width:${pct}%"></div>
+      </div>
+      ${etaHtml}
+    `;
+  }
+
+  // Ticket list
+  const list = document.getElementById('bc-ticket-list');
+  if (list) {
+    list.innerHTML = tickets.map(t => _bcRenderCard(t)).join('');
+  }
+
+  // Footer buttons
+  const stopBtn = document.getElementById('bc-stop-btn');
+  const doneBtn = document.getElementById('bc-done-btn');
+  if (stopBtn && doneBtn) {
+    if (job.status === 'running') {
+      stopBtn.disabled = false;
+      doneBtn.disabled = true;
+      doneBtn.textContent = 'Running...';
+    } else {
+      stopBtn.disabled = true;
+      doneBtn.disabled = false;
+      doneBtn.textContent = 'Close';
+      doneBtn.onclick = closeBulkCreateModal;
+    }
+  }
+
+  // Track avg time
+  tickets.forEach(t => {
+    if (t.state === 'drafting' && t.started_at && !_bcStartTimes[t.index]) {
+      _bcStartTimes[t.index] = new Date(t.started_at).getTime();
+    }
+    if (t.state === 'created' && _bcStartTimes[t.index] && t.finished_at) {
+      const elapsed = new Date(t.finished_at).getTime() - _bcStartTimes[t.index];
+      if (elapsed > 0) {
+        _bcAvgMs = _bcAvgMs === null ? elapsed : (_bcAvgMs * 0.7 + elapsed * 0.3);
+      }
+    }
+  });
+}
+
+function _bcRenderCard(t) {
+  const stateClass = `bc-card--${t.state}`;
+  const dotClass = `bc-status-dot--${t.state}`;
+
+  let preview = '';
+  let label = '';
+  let head = '';
+  let actions = '';
+  let tags = '';
+
+  if (t.state === 'pending') {
+    preview = escapeHtml((t.prompt || '').slice(0, 80));
+    label = 'Queued';
+    actions = `<button class="bc-action-btn" title="Skip" onclick="bcSkipTicket(${t.index})">&#x00D7;</button>`;
+  } else if (t.state === 'drafting') {
+    preview = 'BA polishing prompt → drafting AC and UAT steps...';
+    const now = Date.now();
+    const start = _bcStartTimes[t.index] || (t.started_at ? new Date(t.started_at).getTime() : now);
+    const elapsedSec = Math.round((now - start) / 1000);
+    label = `Started ${elapsedSec}s ago`;
+    // No action icons while drafting
+  } else if (t.state === 'created') {
+    const issueNum = t.issue_num;
+    const issueUrl = t.issue_url || '#';
+    head = `<a class="bc-issue-badge" href="${escapeHtml(issueUrl)}" target="_blank" rel="noopener">#${issueNum}</a>`;
+    preview = escapeHtml((t.body_preview || t.body || '').slice(0, 200));
+    if (t.finished_at && t.started_at) {
+      const elapsed = Math.round((new Date(t.finished_at).getTime() - new Date(t.started_at).getTime()) / 1000);
+      label = `Created in ${elapsed}s`;
+    } else {
+      label = 'Created';
+    }
+    const labelsArr = t.label_pills || [];
+    if (labelsArr.length > 0) {
+      tags = `<div class="bc-card-tags">${labelsArr.map(l => `<span class="bc-tag">${escapeHtml(l)}</span>`).join('')}</div>`;
+    }
+    actions = `<a class="bc-action-btn" href="${escapeHtml(issueUrl)}" target="_blank" rel="noopener" title="Open on GitHub">&#x2197;</a>`;
+  } else if (t.state === 'failed') {
+    preview = escapeHtml(t.error || 'Unknown error');
+    label = 'Failed';
+    actions = `<button class="bc-action-btn bc-action-btn--retry" title="Retry" onclick="bcRetryTicket(${t.index})">&#x21BA;</button>`;
+  } else if (t.state === 'skipped') {
+    preview = escapeHtml((t.prompt || '').slice(0, 80));
+    label = 'Skipped';
+    actions = `<button class="bc-action-btn" title="Undo skip" onclick="bcUndoSkip(${t.index})">&#x21A9;</button>`;
+  }
+
+  const headHtml = head ? `<div class="bc-card-head">${head}<span class="bc-card-label">${escapeHtml(label)}</span></div>` :
+    `<div class="bc-card-head"><span class="bc-card-label">${escapeHtml(label)}</span></div>`;
+
+  const previewClass = t.state === 'failed' ? 'bc-card-preview bc-card-preview--error' : 'bc-card-preview';
+
+  return `
+    <div class="bc-card ${stateClass}">
+      <div class="bc-status-dot ${dotClass}"></div>
+      <div class="bc-card-body">
+        ${headHtml}
+        <div class="${previewClass}" title="${escapeHtml((t.state === 'failed' ? t.error : t.prompt) || '')}">${preview}</div>
+        ${tags}
+      </div>
+      ${actions ? `<div class="bc-card-actions">${actions}</div>` : ''}
+    </div>
+  `;
+}
+
+async function bcSkipTicket(index) {
+  if (!_bcJobId) return;
+  try {
+    await fetch(`/api/tickets/bulk/${_bcJobId}/skip`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ index }),
+    });
+    // SSE will update state
+  } catch (_) {}
+}
+
+async function bcUndoSkip(index) {
+  // Re-set to pending and retry
+  if (!_bcJobId || !_bcJobState) return;
+  const ticket = _bcJobState.tickets[index];
+  if (ticket && ticket.state === 'skipped') {
+    // Mark pending locally and call retry (which re-queues)
+    ticket.state = 'pending';
+    _bcRenderStep2();
+    try {
+      await fetch(`/api/tickets/bulk/${_bcJobId}/retry`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ index }),
+      });
+    } catch (_) {}
+  }
+}
+
+async function bcRetryTicket(index) {
+  if (!_bcJobId) return;
+  try {
+    await fetch(`/api/tickets/bulk/${_bcJobId}/retry`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ index }),
+    });
+    // SSE will update state
+  } catch (_) {}
+}
+
+async function bcStop() {
+  if (!_bcJobId) return;
+  const btn = document.getElementById('bc-stop-btn');
+  if (btn) btn.disabled = true;
+  try {
+    await fetch(`/api/tickets/bulk/${_bcJobId}/stop`, { method: 'POST' });
+  } catch (_) {}
+}
+
+function _bcShowToast(msg) {
+  const existing = document.querySelector('.bc-toast');
+  if (existing) existing.remove();
+  const toast = document.createElement('div');
+  toast.className = 'bc-toast';
+  toast.textContent = msg;
+  document.body.appendChild(toast);
+  setTimeout(() => toast.remove(), 4000);
+}

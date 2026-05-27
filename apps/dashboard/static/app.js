@@ -3123,8 +3123,8 @@ function smgmtSprintDragEnd(event) {
 
 function smgmtTicketDragStart(event, issueNum, fromSprint) {
   // Suppress drag if the ticket's row has draggable="false" (issue #186)
-  const el = event.currentTarget;
-  if (el && el.getAttribute('draggable') === 'false') {
+  const tgt = event.currentTarget;
+  if (tgt && tgt.getAttribute('draggable') === 'false') {
     event.preventDefault();
     return;
   }

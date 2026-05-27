@@ -1399,6 +1399,7 @@ def handle_post_tester(
     base_branch: str = "develop",
     gate_scope: str = "changed",
     documentor_enabled: bool = False,
+    alert_modes: Optional[list] = None,
 ) -> tuple[bool, str, Optional[str]]:
     """Called after a tester subprocess exits.
 
@@ -1432,18 +1433,42 @@ def handle_post_tester(
     if "UAT" not in labels:
         current = ", ".join(sorted(labels)) or "(none)"
         print(f"  Issue #{issue_num}: tester exited 0 but label is [{current}], not UAT -- skipping gates")
+        warning_body = (
+            f"**Tester exited 0 but not UAT — label missing.**\n\n"
+            f"The tester subprocess finished successfully (exit code 0), "
+            f"but the UAT label was never applied. Current labels: [{current}].\n\n"
+            f"This almost always means the tester agent skipped running `finish_feature.py`. "
+            f"Please either re-run the tester or apply the **UAT** label manually to move this "
+            f"ticket to the UAT queue."
+        )
+        try:
+            github_client.add_comment(issue_num, warning_body, repo_name=eff_repo)
+        except Exception as exc:
+            print(f"  Warning: failed to post missing-UAT comment — {exc}", file=sys.stderr)
+        if alert_modes:
+            dispatch_alerts(
+                alert_modes,
+                title=f"Issue #{issue_num} skipped: tester exited 0 but not UAT",
+                body=warning_body[:500],
+                issue_num=issue_num,
+                category=FailureCategory.TESTER_REJECTED,
+                cfg=cfg,
+            )
         return (False,
                 f"Issue #{issue_num}: tester exited 0 but not UAT -- no merge",
                 FailureCategory.TESTER_REJECTED)
 
     print(f"\nTester promoted issue #{issue_num} to UAT -- running quality gates...")
 
-    # Find the feature branch
+    # Find the feature branch; None means the tester agent already merged via finish_feature.py
     feature_branch = _find_feature_branch(issue_num)
-    if not feature_branch:
-        msg = f"Issue #{issue_num}: feature branch not found -- cannot run merge-preview gate"
-        print(f"  Warning: {msg}")
-        # Use a placeholder so the other gates can still run
+    already_merged_by_tester = feature_branch is None
+    if already_merged_by_tester:
+        print(
+            f"  Issue #{issue_num}: feature branch not found — "
+            f"tester already merged via finish_feature.py; skipping re-merge"
+        )
+        # Use a placeholder so pytest/lint gates can still run; merge-preview will be skipped
         feature_branch = f"feature/{issue_num}-unknown"
 
     # Resolve documentor_enabled: explicit param wins, then cfg, then False
@@ -1453,7 +1478,8 @@ def handle_post_tester(
         print("  --skip-gates active -- skipping all quality gates, proceeding to merge")
         if eff_documentor:
             _run_documentor(issue_num, eff_repo, cfg=cfg)
-        _call_finish_feature(issue_num, wt_root, target_branch=target_branch, repo_name=eff_repo, cfg=cfg)
+        if not already_merged_by_tester:
+            _call_finish_feature(issue_num, wt_root, target_branch=target_branch, repo_name=eff_repo, cfg=cfg)
         _post_agent_event("gate:merging", api_url=api_url)
         all_skipped = [
             GateResult(gate="pytest",        passed=True, skipped=True),
@@ -1461,6 +1487,8 @@ def handle_post_tester(
             GateResult(gate="merge-preview", passed=True, skipped=True),
         ]
         _post_success_comment(issue_num, all_skipped, repo_name=eff_repo)
+        if already_merged_by_tester:
+            return True, f"Tester promoted issue #{issue_num} to UAT; merge already done by tester, comment posted", None
         return True, f"Tester promoted issue #{issue_num} to UAT; all gates skipped, merged into {target_branch}", None
 
     results = _run_quality_gates(
@@ -1483,11 +1511,17 @@ def handle_post_tester(
 
     if all_passed:
         _post_agent_event("gate:merging", api_url=api_url)
-        print(f"  All gates passed -- calling finish_feature.py for issue #{issue_num}")
+        if already_merged_by_tester:
+            print(f"  All gates passed -- tester already merged via finish_feature.py, skipping re-merge")
+        else:
+            print(f"  All gates passed -- calling finish_feature.py for issue #{issue_num}")
         if eff_documentor:
             _run_documentor(issue_num, eff_repo, cfg=cfg)
-        _call_finish_feature(issue_num, wt_root, target_branch=target_branch, repo_name=eff_repo, cfg=cfg)
+        if not already_merged_by_tester:
+            _call_finish_feature(issue_num, wt_root, target_branch=target_branch, repo_name=eff_repo, cfg=cfg)
         _post_success_comment(issue_num, results, repo_name=eff_repo)
+        if already_merged_by_tester:
+            return True, f"Tester promoted issue #{issue_num} to UAT; merge already done by tester, comment posted", None
         return True, f"Tester promoted issue #{issue_num} to UAT; all gates passed, merged into {target_branch}", None
     else:
         failed = next((r for r in results if not r.passed), None)
@@ -3107,6 +3141,7 @@ def run_sprint(
             base_branch        = target_branch or "develop",
             gate_scope         = gate_scope,
             documentor_enabled = cfg.documentor_enabled if cfg else False,
+            alert_modes        = alert_modes,
         )
         print(f"  {summary_line}")
 

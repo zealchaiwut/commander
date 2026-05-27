@@ -20,6 +20,7 @@ import argparse
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 _DASHBOARD_DIR = Path(__file__).parent.parent / "apps" / "dashboard"
@@ -128,12 +129,44 @@ def main():
     # Apply UAT label before deleting the branch so the safeguard can verify
     # the merge-base check (it needs the branch ref to still exist on origin).
     update_ticket = Path(__file__).parent / "update_ticket.py"
-    label_result = subprocess.run(
-        [sys.executable, str(update_ticket), "--issue", str(args.issue), "--status", "uat"],
-        capture_output=True, text=True,
-    )
+    _UAT_BACKOFFS = (2, 5, 10)
+    label_result = None
+    for attempt in range(len(_UAT_BACKOFFS) + 1):
+        label_result = subprocess.run(
+            [sys.executable, str(update_ticket), "--issue", str(args.issue), "--status", "uat"],
+            capture_output=True, text=True,
+        )
+        if label_result.returncode == 0:
+            break
+        if attempt < len(_UAT_BACKOFFS):
+            wait = _UAT_BACKOFFS[attempt]
+            print(
+                f"Warning: UAT label attempt {attempt + 1} failed — retrying in {wait}s…",
+                file=sys.stderr,
+            )
+            time.sleep(wait)
+
     if label_result.returncode != 0:
-        print(f"Warning: failed to apply UAT label — {label_result.stderr.strip()}", file=sys.stderr)
+        stderr_text = label_result.stderr.strip()
+        warning_comment = (
+            f"**Merge succeeded but UAT label could not be applied.**\n\n"
+            f"The merge of this feature branch into `{target}` completed successfully, "
+            f"but `update_ticket.py --status uat` failed after {len(_UAT_BACKOFFS) + 1} attempts.\n\n"
+            f"Last error:\n"
+            f"```\n"
+            f"{stderr_text}\n"
+            f"```\n\n"
+            f"Please apply the **UAT** label manually so this ticket reaches the UAT queue."
+        )
+        print(
+            f"Error: failed to apply UAT label after {len(_UAT_BACKOFFS) + 1} attempts — {stderr_text}",
+            file=sys.stderr,
+        )
+        try:
+            github_client.add_comment(args.issue, warning_comment, repo_name=args.repo)
+        except Exception as exc:
+            print(f"Warning: could not post warning comment — {exc}", file=sys.stderr)
+        sys.exit(2)
     else:
         print(f"UAT label applied to issue #{args.issue}.")
 

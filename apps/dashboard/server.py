@@ -2073,6 +2073,75 @@ def get_sprint_estimate(sprint_label: str, project: str):
     return data
 
 
+@app.get("/api/sprints/{sprint_label}/state")
+def get_sprint_state(sprint_label: str, project: str):
+    """Return timing data from sprint-N-state.json for duration display (issue #212).
+
+    Returns:
+      - wall_clock_secs: total sprint wall-clock time
+      - issues: list of {number, duration_secs, failed} for each issue that has
+                timing data (coder_started_at present); duration_secs is computed
+                from coder_started_at to tester_finished_at (or status_changed_at
+                as fallback).  failed=true when issue status is 'skipped' or
+                agent_status is 'failed'.
+    """
+    if not _SPRINT_LABEL_RE.match(sprint_label):
+        raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")
+
+    project_root = _project_root_path(project)
+    commander = _commander_dir(project_root)
+
+    m = re.search(r"(\d+)", sprint_label)
+    n = m.group(1) if m else sprint_label
+
+    state_path = commander / "sprints" / f"sprint-{n}-state.json"
+
+    if not state_path.exists():
+        raise HTTPException(404, detail=f"State not found for {sprint_label!r}")
+
+    try:
+        state_data = json.loads(state_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as e:
+        raise HTTPException(500, detail=f"Could not read state file: {e}")
+
+    def _parse_iso(s: Optional[str]) -> Optional[float]:
+        if not s:
+            return None
+        try:
+            dt = datetime.fromisoformat(s.rstrip("Z"))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt.timestamp()
+        except Exception:
+            return None
+
+    issue_durations = []
+    for iss in state_data.get("issues", []):
+        start_ts = _parse_iso(iss.get("coder_started_at"))
+        if start_ts is None:
+            continue  # no timing data for this ticket
+        end_ts = _parse_iso(iss.get("tester_finished_at")) or _parse_iso(iss.get("status_changed_at"))
+        if end_ts is None:
+            continue
+        duration_secs = max(0.0, end_ts - start_ts)
+        failed = (
+            iss.get("status") == "skipped"
+            or iss.get("agent_status") == "failed"
+            or iss.get("failure_reason") is not None
+        )
+        issue_durations.append({
+            "number":       iss["number"],
+            "duration_secs": round(duration_secs),
+            "failed":       failed,
+        })
+
+    return {
+        "sprint_label":   sprint_label,
+        "wall_clock_secs": state_data.get("wall_clock_secs", 0.0),
+        "issues":         issue_durations,
+    }
+
+
 class SprintRerunBody(BaseModel):
     confirm: bool
 

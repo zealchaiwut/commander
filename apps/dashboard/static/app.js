@@ -5850,3 +5850,80 @@ function _bcShowToast(msg) {
   document.body.appendChild(toast);
   setTimeout(() => toast.remove(), 4000);
 }
+
+// ── Deploy to Production ──────────────────────────────────────────────────────
+
+function openDeployModal() {
+  const errEl = document.getElementById('deploy-modal-error');
+  if (errEl) { errEl.textContent = ''; errEl.classList.add('hidden'); }
+  const confirmBtn = document.getElementById('deploy-modal-confirm-btn');
+  const cancelBtn  = document.getElementById('deploy-modal-cancel-btn');
+  if (confirmBtn) { confirmBtn.disabled = false; confirmBtn.innerHTML = '<i class="ti ti-rocket"></i> Create Draft PR'; }
+  if (cancelBtn)  cancelBtn.disabled = false;
+  document.getElementById('deploy-modal-backdrop')?.classList.remove('hidden');
+  document.getElementById('deploy-modal')?.classList.remove('hidden');
+}
+
+function closeDeployModal() {
+  const confirmBtn = document.getElementById('deploy-modal-confirm-btn');
+  // Don't close while in loading state
+  if (confirmBtn && confirmBtn.disabled) return;
+  document.getElementById('deploy-modal-backdrop')?.classList.add('hidden');
+  document.getElementById('deploy-modal')?.classList.add('hidden');
+}
+
+async function confirmDeploy() {
+  const confirmBtn = document.getElementById('deploy-modal-confirm-btn');
+  const cancelBtn  = document.getElementById('deploy-modal-cancel-btn');
+  const errEl      = document.getElementById('deploy-modal-error');
+  if (!confirmBtn) return;
+
+  confirmBtn.disabled = true;
+  if (cancelBtn) cancelBtn.disabled = true;
+  confirmBtn.innerHTML = '<span class="dt-spinner"></span> Creating PR…';
+  if (errEl) { errEl.textContent = ''; errEl.classList.add('hidden'); }
+
+  try {
+    const res = await fetch('/api/deploy/promote', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ draft: true }),
+    });
+
+    if (!res.ok) {
+      let detail = `${res.status} ${res.statusText}`;
+      try { const d = await res.json(); detail = d.detail || detail; } catch {}
+      if (errEl) { errEl.textContent = detail; errEl.classList.remove('hidden'); }
+      confirmBtn.disabled = false;
+      if (cancelBtn) cancelBtn.disabled = false;
+      confirmBtn.innerHTML = '<i class="ti ti-rocket"></i> Create Draft PR';
+      return;
+    }
+
+    const data = await res.json();
+    const prUrl = data.pr_url || '';
+
+    // Close the modal
+    document.getElementById('deploy-modal-backdrop')?.classList.add('hidden');
+    document.getElementById('deploy-modal')?.classList.add('hidden');
+
+    // Show deploy toast with PR URL and View PR button
+    showDeployToast(prUrl);
+  } catch (e) {
+    if (errEl) { errEl.textContent = `Request failed: ${e.message}`; errEl.classList.remove('hidden'); }
+    if (confirmBtn) { confirmBtn.disabled = false; confirmBtn.innerHTML = '<i class="ti ti-rocket"></i> Create Draft PR'; }
+    if (cancelBtn)  cancelBtn.disabled = false;
+  }
+}
+
+function showDeployToast(prUrl) {
+  const t = document.getElementById('toast-deploy');
+  if (!t) return;
+  if (prUrl) {
+    t.innerHTML = `Draft PR created successfully! <a href="${escapeHtml(prUrl)}" target="_blank" rel="noopener noreferrer" style="color:#93c5fd;font-weight:600;text-decoration:underline;">View PR</a>`;
+  } else {
+    t.innerHTML = 'Draft PR created successfully!';
+  }
+  t.style.display = 'block';
+  setTimeout(() => { t.style.display = 'none'; }, 8000);
+}

@@ -1091,6 +1091,7 @@
 
 <div id="toast-error" style="display:none;position:fixed;top:12px;right:12px;z-index:9999;background:#ef4444;color:#fff;padding:8px 14px;border-radius:6px;font-size:13px;max-width:320px;box-shadow:0 2px 8px rgba(0,0,0,.2)"></div>
 <div id="toast-success" style="display:none;position:fixed;top:52px;right:12px;z-index:9999;background:#16a34a;color:#fff;padding:8px 14px;border-radius:6px;font-size:13px;max-width:320px;box-shadow:0 2px 8px rgba(0,0,0,.2)"></div>
+<div id="toast-deploy" style="display:none;position:fixed;top:92px;right:12px;z-index:9999;background:#1d4ed8;color:#fff;padding:10px 14px;border-radius:6px;font-size:13px;max-width:360px;box-shadow:0 2px 8px rgba(0,0,0,.2);line-height:1.5;"></div>
 
 <!-- ── Alert banners (AC-3a) ── -->
 <div id="alert-banners" style="padding:0 16px;"></div>
@@ -1351,6 +1352,10 @@
         <button class="btn-secondary" id="bulk-create-btn" onclick="openBulkCreateModal()">Bulk create</button>
         <button class="btn-primary smgmt-new-sprint-btn" id="smgmt-new-sprint-btn"
                 onclick="smgmtCreateSprint()" title="Create next sprint label on GitHub">+ New Sprint</button>
+        <button class="btn-deploy" id="deploy-to-prod-btn"
+                onclick="openDeployModal()" title="Create a draft PR from develop to master">
+          <i class="ti ti-rocket"></i> Deploy to Production
+        </button>
       </div>
     </div>
     <div class="smgmt-error hidden" id="smgmt-error"></div>
@@ -1956,6 +1961,15 @@
   }
   .smgmt-proj-select:focus { border-color: var(--blue); }
   .smgmt-new-sprint-btn { font-size: 12px; padding: 6px 14px; }
+  .btn-deploy {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 6px 14px; border: none; border-radius: 6px;
+    background: #1d4ed8; color: #fff; font-size: 12px; font-weight: 600;
+    cursor: pointer; white-space: nowrap; transition: background .15s;
+  }
+  .btn-deploy:hover { background: #1e40af; }
+  .btn-deploy:disabled { opacity: .5; cursor: not-allowed; }
+  .btn-deploy .ti { font-size: 13px; }
 
   .smgmt-error {
     margin: 12px 24px; padding: 10px 14px; background: var(--red-bg);
@@ -2302,6 +2316,26 @@
   .smgmt-cleanup-label { font-weight: 700; color: var(--text-sub); }
   .smgmt-cleanup-desc { font-size: 11px; color: var(--text-muted); }
 </style>
+
+<!-- Deploy to Production confirmation modal -->
+<div class="modal-backdrop hidden" id="deploy-modal-backdrop" onclick="closeDeployModal()"></div>
+<div class="modal hidden" id="deploy-modal" role="dialog" aria-modal="true">
+  <div class="modal-header">
+    <span class="modal-title">Deploy to Production?</span>
+    <button class="modal-close" onclick="closeDeployModal()" aria-label="Close">&times;</button>
+  </div>
+  <div style="padding: 0 4px 8px; font-size: 13px; color: var(--text-muted);">
+    This will create a draft PR from <strong>develop</strong> to <strong>master</strong> with a sprint summary and changelog.
+    The PR will not be merged automatically — you review and merge it manually.
+  </div>
+  <div class="modal-error hidden" id="deploy-modal-error" style="color: var(--red); font-size: 12px; margin: 4px 0 8px;"></div>
+  <div class="modal-footer">
+    <button class="btn-ghost" id="deploy-modal-cancel-btn" onclick="closeDeployModal()">Cancel</button>
+    <button class="btn-primary" id="deploy-modal-confirm-btn" onclick="confirmDeploy()">
+      <i class="ti ti-rocket"></i> Create Draft PR
+    </button>
+  </div>
+</div>
 
 <!-- Approve ticket confirmation modal -->
 <div class="modal-backdrop hidden" id="approve-backdrop" onclick="approveModalCancel()"></div>

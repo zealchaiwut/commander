@@ -1364,21 +1364,67 @@ def _load_sprint_order(project_root: Path, all_sprints: list[int]) -> list[str]:
 
 
 def _is_sprint_running(project_root: Path, sprint_label: str) -> bool:
-    """Check if a sprint process is running by reading its PID file."""
-    pid_file = _commander_dir(project_root) / "sprints" / f"{sprint_label}-pid"
-    if not pid_file.exists():
-        return False
-    try:
-        pid = int(pid_file.read_text(encoding="utf-8").strip())
-        os.kill(pid, 0)  # signal 0 = check if process exists
-        return True
-    except (ValueError, ProcessLookupError, PermissionError, OSError):
-        # Process not running — clean up stale PID file
+    """Check if a sprint process is running by reading its PID file.
+
+    Accepts both ``<label>-pid`` (fully claimed) and ``<label>-pid.pending``
+    (claim written by server before subprocess startup completes) so there is
+    no transient window where a sprint appears not running.
+
+    Stale files (process dead) are cleaned up and logged so no manual ``rm``
+    is ever required.
+    """
+    sprints_dir = _commander_dir(project_root) / "sprints"
+    pid_file    = sprints_dir / f"{sprint_label}-pid"
+    pending_file = sprints_dir / f"{sprint_label}-pid.pending"
+
+    import logging as _logging
+    _log = _logging.getLogger(__name__)
+
+    for candidate in (pid_file, pending_file):
+        if not candidate.exists():
+            continue
+        raw = ""
         try:
-            pid_file.unlink()
+            raw = candidate.read_text(encoding="utf-8").strip()
+        except OSError:
+            continue
+
+        # pid == 0 means server wrote the pending file right before Popen;
+        # the process is being spawned — treat as running to block duplicates.
+        if raw == "" or raw == "0":
+            return True
+
+        try:
+            pid = int(raw)
+        except ValueError:
+            # Unreadable content — clean up and continue.
+            try:
+                candidate.unlink()
+            except OSError:
+                pass
+            continue
+
+        try:
+            os.kill(pid, 0)  # signal 0 = check if process exists
+            return True
+        except ProcessLookupError:
+            # Process is dead — clean up stale file and log recovery.
+            _log.warning(
+                "Stale sprint lock detected: %s (PID %s dead) — cleaning up",
+                candidate.name,
+                raw,
+            )
+            try:
+                candidate.unlink()
+            except OSError:
+                pass
+        except PermissionError:
+            # Process exists but owned by another user — treat as running.
+            return True
         except OSError:
             pass
-        return False
+
+    return False
 
 
 def _all_sprints_running() -> list[dict]:
@@ -1390,8 +1436,14 @@ def _all_sprints_running() -> list[dict]:
         sprints_dir = _commander_dir(root) / "sprints"
         if not sprints_dir.exists():
             continue
-        for pid_file in sprints_dir.glob("*-pid"):
-            label = pid_file.name.removesuffix("-pid")
+        seen: set[str] = set()
+        # Check both fully-claimed files (*-pid) and pending-claim files (*-pid.pending)
+        for pid_file in list(sprints_dir.glob("*-pid")) + list(sprints_dir.glob("*-pid.pending")):
+            # Derive label: strip trailing "-pid.pending" or "-pid"
+            label = pid_file.name.removesuffix("-pid.pending").removesuffix("-pid")
+            if label in seen:
+                continue
+            seen.add(label)
             if _is_sprint_running(root, label):
                 try:
                     pid = int(pid_file.read_text(encoding="utf-8").strip())
@@ -1416,8 +1468,13 @@ def _all_sprints_running() -> list[dict]:
         sprints_dir = _commander_dir(root) / "sprints"
         if not sprints_dir.exists():
             continue
-        for pid_file in sprints_dir.glob("*-pid"):
-            label = pid_file.stem  # e.g. "sprint-2"
+        seen: set[str] = set()
+        # Check both fully-claimed files (*-pid) and pending-claim files (*-pid.pending)
+        for pid_file in list(sprints_dir.glob("*-pid")) + list(sprints_dir.glob("*-pid.pending")):
+            label = pid_file.name.removesuffix("-pid.pending").removesuffix("-pid")
+            if label in seen:
+                continue
+            seen.add(label)
             if _is_sprint_running(root, label):
                 result.append({"project": proj["repo"], "sprint_label": label})
     return result
@@ -1578,9 +1635,19 @@ def run_sprint_managed(body: SprintMgmtRunBody):
 
     project_root = _project_root_path(body.project)
     if _is_sprint_running(project_root, body.sprint_label):
+        sprints_dir = _commander_dir(project_root) / "sprints"
+        pid_str = "unknown"
+        for fname in (f"{body.sprint_label}-pid", f"{body.sprint_label}-pid.pending"):
+            candidate = sprints_dir / fname
+            if candidate.exists():
+                try:
+                    pid_str = candidate.read_text(encoding="utf-8").strip()
+                except OSError:
+                    pass
+                break
         raise HTTPException(
             409,
-            detail=f"Sprint {body.sprint_label} is already running on {body.project}",
+            detail=f"Sprint {body.sprint_label} is already running on {body.project} (PID {pid_str})",
         )
     coder_path   = _coder_clone_path(project_root)
     commander    = _commander_dir(project_root)
@@ -1667,53 +1734,58 @@ def run_sprint_managed(body: SprintMgmtRunBody):
 
     pid_dir = commander / "sprints"
     pid_dir.mkdir(parents=True, exist_ok=True)
-    pid_path = pid_dir / f"{body.sprint_label}-pid"
+    pid_path    = pid_dir / f"{body.sprint_label}-pid"
+    pending_path = pid_dir / f"{body.sprint_label}-pid.pending"
+
+    # ── Two-phase atomic claim (Strategy A, issue #155) ──────────────────────
+    # Phase 1: Atomically create the pending file using O_CREAT|O_EXCL so that
+    # a concurrent second request races to the same syscall and loses.  The
+    # file exists from this point on, so _is_sprint_running will return True
+    # for all subsequent callers — there is no gap between "check" and "claim".
+    try:
+        fd = os.open(
+            str(pending_path),
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+            0o644,
+        )
+        os.write(fd, b"0")  # placeholder PID; subprocess will rename to -pid
+        os.close(fd)
+    except FileExistsError:
+        # Another request already claimed this slot after _is_sprint_running
+        # returned False — return 409 consistently.
+        raise HTTPException(
+            409,
+            detail=f"Sprint {body.sprint_label} is already running on {body.project}",
+        )
 
     stripped_env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
-    stripped_env["COMMANDER_DISPATCHED_BY_SERVER"] = "1"
     goal_path = _sprint_goal_path(project_root, body.sprint_label)
     if goal_path.exists():
         stripped_env["SPRINT_GOAL"] = goal_path.read_text(encoding="utf-8").strip()
 
     log_fh = open(log_path, "w")
-    proc = subprocess.Popen(
-        ["python3", str(SPRINT_MANAGER_PATH), body.sprint_label, "--skip-gates"],
-        env=stripped_env,
-        cwd=str(coder_path),
-        stdout=log_fh,
-        stderr=log_fh,
-        start_new_session=True,
-    )
-
-    # Write PID file immediately so we can clean it up if the process crashes fast.
-    pid_path.write_text(str(proc.pid), encoding="utf-8")
-
-    # Poll for ~2 seconds to detect fast crashes before returning 202.
-    exit_code: Optional[int] = None
-    deadline = time.monotonic() + 2.0
-    while time.monotonic() < deadline:
-        exit_code = proc.poll()
-        if exit_code is not None:
-            break
-        time.sleep(0.1)
-
-    if exit_code is not None:
-        # Subprocess crashed — flush the log, clean up PID file, return 502 with log tail.
-        log_fh.flush()
-        log_fh.close()
+    try:
+        proc = subprocess.Popen(
+            ["python3", str(SPRINT_MANAGER_PATH), body.sprint_label, "--skip-gates"],
+            env=stripped_env,
+            cwd=str(coder_path),
+            stdout=log_fh,
+            stderr=log_fh,
+            start_new_session=True,
+        )
+    except Exception:
+        # Popen failed — release the pending claim so the sprint can be retried.
         try:
-            pid_path.unlink()
+            pending_path.unlink()
         except OSError:
             pass
-        try:
-            log_lines = log_path.read_text(encoding="utf-8", errors="replace").splitlines()
-            log_tail = "\n".join(log_lines[-30:])
-        except OSError:
-            log_tail = "(log file not readable)"
-        detail = f"Sprint process exited with code {exit_code}.\n\n{log_tail}"
-        if len(detail) > 1500:
-            detail = detail[-1500:]
-        raise HTTPException(502, detail=detail)
+        raise
+
+    # Phase 2: Write the real PID then atomically rename pending → pid.
+    # os.replace is atomic on POSIX (rename(2)) — the final file either
+    # contains the real PID or doesn't exist; there is no half-written state.
+    pending_path.write_text(str(proc.pid), encoding="utf-8")
+    os.replace(str(pending_path), str(pid_path))
 
     return {
         "ok": True,
@@ -1753,42 +1825,49 @@ def kill_sprint(sprint_label: str, project: str):
         raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")
 
     project_root = _project_root_path(project)
-    pid_file = _commander_dir(project_root) / "sprints" / f"{sprint_label}-pid"
+    sprints_dir  = _commander_dir(project_root) / "sprints"
+    pid_file      = sprints_dir / f"{sprint_label}-pid"
+    pending_file  = sprints_dir / f"{sprint_label}-pid.pending"
 
-    if not pid_file.exists():
+    # Accept either the fully-claimed file or the pending file.
+    active_file = pid_file if pid_file.exists() else (pending_file if pending_file.exists() else None)
+    if active_file is None:
         raise HTTPException(404, detail=f"No running sprint found for {sprint_label}")
 
     try:
-        pid = int(pid_file.read_text(encoding="utf-8").strip())
+        pid = int(active_file.read_text(encoding="utf-8").strip())
     except ValueError:
-        try:
-            pid_file.unlink()
-        except OSError:
-            pass
+        for f in (pid_file, pending_file):
+            try:
+                f.unlink()
+            except OSError:
+                pass
         raise HTTPException(404, detail=f"Invalid PID file for {sprint_label}")
 
     # SIGTERM first, then wait up to 5 s for graceful exit, then SIGKILL
-    try:
-        os.kill(pid, signal.SIGTERM)
-    except (ProcessLookupError, PermissionError):
-        pass
-    else:
-        for _ in range(10):
-            time.sleep(0.5)
-            try:
-                os.kill(pid, 0)
-            except (ProcessLookupError, PermissionError):
-                break
+    if pid > 0:
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except (ProcessLookupError, PermissionError):
+            pass
         else:
-            try:
-                os.kill(pid, signal.SIGKILL)
-            except (ProcessLookupError, PermissionError):
-                pass
+            for _ in range(10):
+                time.sleep(0.5)
+                try:
+                    os.kill(pid, 0)
+                except (ProcessLookupError, PermissionError):
+                    break
+            else:
+                try:
+                    os.kill(pid, signal.SIGKILL)
+                except (ProcessLookupError, PermissionError):
+                    pass
 
-    try:
-        pid_file.unlink()
-    except OSError:
-        pass
+    for f in (pid_file, pending_file):
+        try:
+            f.unlink()
+        except OSError:
+            pass
 
     return {"ok": True}
 

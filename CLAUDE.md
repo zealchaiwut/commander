@@ -174,7 +174,7 @@ There are two pricing surfaces. Always prefer the cheaper option.
 
 | Surface | Funded by | When used |
 |---|---|---|
-| **Claude Code CLI** (`claude` subprocess) | Claude.ai subscription (free up to limits) | Coder, tester, and preflight agents dispatched by sprint_manager.py |
+| **Claude Code CLI** (`claude` subprocess) | Claude.ai subscription (free up to limits) | Coder, tester, preflight, and sprint_estimator agents dispatched by sprint_manager.py |
 
 ### Default models per agent
 
@@ -183,7 +183,8 @@ There are two pricing surfaces. Always prefer the cheaper option.
 | BA | `claude-sonnet-4-6` | Ticket writing benefits from quality reasoning; Opus is overkill |
 | Coder | `claude-sonnet-4-6` (via Claude Code) | Solid coding quality; subscription-funded |
 | Tester | `claude-haiku-4-5` (via Claude Code) | Mostly mechanical verification; cheapest capable model |
-| Estimator | `claude-haiku-4-5-20251001` (via Claude Code) | Structured JSON output; no Sonnet needed |
+| Estimator (per-issue) | `claude-haiku-4-5-20251001` (via Claude Code) | Structured JSON output; no Sonnet needed |
+| Sprint estimator | `claude-sonnet-4-6` (via Claude Code) | Scans codebase for all backlog tickets in one pass; subscription-funded |
 | sprint_review.py | `claude-haiku-4-5` (via Claude Code) | Single agent call for all issues; subscription-funded |
 
 ### How to choose a model

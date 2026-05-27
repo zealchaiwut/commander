@@ -2667,6 +2667,7 @@ let _smgmtAllRunning     = {};     // map: "project:sprint_label" -> {project, s
 let _smgmtPollTimer      = null;
 let _smgmtGoals          = {};     // sprint_label -> goal string
 let _smgmtGoalSaveTimers = {};     // sprint_label -> debounce timer id
+let _smgmtEstimates      = {};     // sprint_label -> EstimateResult from /api/sprints/{label}/estimate
 let _smgmtBacklogFilter  = '';     // label name filter for backlog, '' = all
 let _smgmtRerunLabel     = null;   // sprint label pending rerun confirmation
 let _smgmtCleanupLabels  = [];     // empty sprint labels pending cleanup confirmation
@@ -2716,6 +2717,7 @@ async function smgmtSelectProject(repo) {
   if (!repo) return;
   _smgmtCurrentRepo = repo;
   _smgmtGoals = {};
+  _smgmtEstimates = {};
   _smgmtBacklogFilter = '';
   smgmtShowError('');
   const bodyEl = document.getElementById('smgmt-body');
@@ -2731,7 +2733,29 @@ async function smgmtSelectProject(repo) {
   }
 
   await smgmtLoadGoals();
+  await smgmtLoadEstimates();
   smgmtRender();
+}
+
+async function smgmtLoadEstimates() {
+  if (!_smgmtData || !_smgmtCurrentRepo) return;
+  const { order } = _smgmtData;
+  if (!order || order.length === 0) return;
+
+  // Fetch estimates for each sprint in parallel; silently ignore 404s (not yet generated)
+  await Promise.all(order.map(async (label) => {
+    try {
+      const res = await fetch(
+        `/api/sprints/${encodeURIComponent(label)}/estimate?project=${encodeURIComponent(_smgmtCurrentRepo)}`
+      );
+      if (res.ok) {
+        _smgmtEstimates[label] = await res.json();
+      }
+      // 404 = not yet generated — treat as absent, no error
+    } catch (_e) {
+      // network error — treat as absent
+    }
+  }));
 }
 
 function smgmtRender() {
@@ -2840,6 +2864,17 @@ function smgmtSprintBlockHtml(label, tickets, isNext) {
     ? tickets.map(t => smgmtTicketCardHtml(t, label)).join('')
     : '<div class="smgmt-drop-hint">Drop tickets here</div>';
 
+  // Estimate summary for sprint block header
+  const estimateData = _smgmtEstimates[label];
+  let estimateSummaryHtml = '';
+  if (estimateData && estimateData.total_minutes > 0) {
+    const hrs  = Math.floor(estimateData.total_minutes / 60);
+    const mins = estimateData.total_minutes % 60;
+    const dur  = hrs > 0 ? `${hrs}h ${mins}m` : `${mins}m`;
+    const cnt  = Object.keys(estimateData.estimates || {}).length;
+    estimateSummaryHtml = `<span class="smgmt-estimate-total">estimated ${dur} across ${cnt} ticket${cnt !== 1 ? 's' : ''}</span>`;
+  }
+
   return `
     <div class="smgmt-sprint-block" id="smgmt-block-${label}"
          ondragover="smgmtDragOverZone(event, '${label}')"
@@ -2852,6 +2887,7 @@ function smgmtSprintBlockHtml(label, tickets, isNext) {
         <i class="ti ti-grip-vertical smgmt-sprint-grip"></i>
         <span class="smgmt-sprint-name">Sprint ${n}</span>
         ${nextBadge}
+        ${estimateSummaryHtml}
         <span class="smgmt-sprint-count">${tickets.length} ticket${tickets.length !== 1 ? 's' : ''}</span>
         <button class="smgmt-delete-btn" id="${deleteBtnId}"
                 title="Delete sprint"
@@ -2901,6 +2937,16 @@ function smgmtTicketCardHtml(ticket, currentSprint) {
   }[ticket.status] || 'smgmt-status-backlog';
   const statusLabel = ticket.status || 'backlog';
 
+  // Estimate badge: look up from sprint estimates if available
+  let estimateBadgeHtml = '';
+  if (currentSprint && _smgmtEstimates[currentSprint]) {
+    const sprintEst = _smgmtEstimates[currentSprint];
+    const issueEst  = (sprintEst.estimates || {})[String(ticket.number)];
+    if (issueEst) {
+      estimateBadgeHtml = `<span class="smgmt-estimate-badge">${escapeHtml(issueEst.size)} · ~${issueEst.minutes} min</span>`;
+    }
+  }
+
   return `
     <div class="smgmt-ticket" id="smgmt-ticket-${ticket.number}"
          draggable="true"
@@ -2912,6 +2958,7 @@ function smgmtTicketCardHtml(ticket, currentSprint) {
       <a class="smgmt-ticket-num" href="${escapeHtml(ticket.url || '#')}" target="_blank"
          rel="noopener" onclick="event.stopPropagation()">#${ticket.number}</a>
       <span class="smgmt-ticket-title" title="${escapeHtml(ticket.title)}">${escapeHtml(ticket.title)}</span>
+      ${estimateBadgeHtml}
       <span class="smgmt-ticket-status ${statusClass}">${escapeHtml(statusLabel)}</span>
     </div>`;
 }

@@ -610,6 +610,10 @@ class SprintState:
     documenter_status:       Optional[str]       = None   # "skipped" | "succeeded" | "failed"
     documenter_files_touched: list               = field(default_factory=list)
     documenter_commit_sha:   Optional[str]       = None
+    # Estimator fields (issue #166)
+    estimator_status:        Optional[str]       = None   # "succeeded" | "failed" | "skipped"
+    estimator_total_minutes: Optional[int]       = None
+    estimates:               dict                = field(default_factory=dict)   # keyed by issue number (int)
 
     def to_dict(self) -> dict:
         return {
@@ -629,6 +633,9 @@ class SprintState:
             "documenter_status":         self.documenter_status,
             "documenter_files_touched":  self.documenter_files_touched,
             "documenter_commit_sha":     self.documenter_commit_sha,
+            "estimator_status":          self.estimator_status,
+            "estimator_total_minutes":   self.estimator_total_minutes,
+            "estimates":                 self.estimates,
         }
 
     @staticmethod
@@ -651,6 +658,9 @@ class SprintState:
         s.documenter_status        = d.get("documenter_status")
         s.documenter_files_touched = d.get("documenter_files_touched", [])
         s.documenter_commit_sha    = d.get("documenter_commit_sha")
+        s.estimator_status         = d.get("estimator_status")
+        s.estimator_total_minutes  = d.get("estimator_total_minutes")
+        s.estimates                = d.get("estimates", {})
         return s
 
     def save(self, path: Path) -> None:
@@ -3353,6 +3363,7 @@ def run_sprint(
     preflight_approved: Optional[list[int]] = None,
     gate_scope: str = "changed",
     token_budget: int = 0,
+    skip_estimator: bool = False,
 ) -> tuple[SprintSummary, SprintState]:
     """Main sprint loop -- processes backlog issues sequentially.
 
@@ -3448,6 +3459,53 @@ def run_sprint(
 
     # Warn about shared-file conflicts before dispatching
     _warn_file_conflicts(state.issues)
+
+    # ── Sprint estimator (issue #166) ──────────────────────────────────────────
+    # Runs BEFORE the per-ticket loop so the human can see estimates on the
+    # dashboard before any coding starts.  Failure never blocks the sprint.
+    if not skip_estimator and not dry_run and not resume and not retry_failed:
+        print("\n  [estimator] Running sprint estimator ...")
+        try:
+            from sprint_estimator import run_estimator  # noqa: PLC0415
+            eff_sprints_dir = cfg.sprints_dir if cfg is not None else SPRINTS_DIR
+            est_result = run_estimator(
+                sprint_label = label,
+                repo_name    = eff_repo,
+                sprints_dir  = eff_sprints_dir,
+                cfg          = cfg,
+            )
+            # Merge estimates into state keyed by issue number (int)
+            state.estimates = {
+                num: est.to_dict()
+                for num, est in est_result.estimates.items()
+            }
+            state.estimator_status        = "succeeded"
+            state.estimator_total_minutes = est_result.total_minutes
+            state.save(state_path)
+            _post_sprint_status(state, api_url=api_url)
+            print(
+                f"  [estimator] Estimator succeeded: "
+                f"{len(est_result.estimates)} tickets, "
+                f"{est_result.total_minutes} total minutes"
+            )
+        except ImportError:
+            print(
+                "  [estimator] WARNING: sprint_estimator module not found — skipping",
+                file=sys.stderr,
+            )
+            state.estimator_status = "failed"
+            state.save(state_path)
+        except Exception as e:
+            print(
+                f"  [estimator] WARNING: estimator failed ({e}) — sprint continues",
+                file=sys.stderr,
+            )
+            state.estimator_status = "failed"
+            state.save(state_path)
+    elif skip_estimator:
+        print("  [estimator] --skip-estimator active — skipping estimation")
+        state.estimator_status = "skipped"
+    # ── end estimator ──────────────────────────────────────────────────────────
 
     start_time = time.monotonic()
 
@@ -3837,6 +3895,14 @@ def main() -> None:
         help="Skip the post-summary documenter agent entirely.",
     )
 
+    # Estimator control (issue #166) — hidden debug-only flag, not shown in --help
+    p.add_argument(
+        "--skip-estimator",
+        action="store_true",
+        default=False,
+        help=argparse.SUPPRESS,
+    )
+
     args = p.parse_args()
 
     # ── Config resolution (AC-4 + AC-5 + AC-6) ───────────────────────────────
@@ -3926,6 +3992,7 @@ def main() -> None:
         preflight_approved   = preflight_approved,
         gate_scope           = args.gate_scope,
         token_budget         = args.budget,
+        skip_estimator       = args.skip_estimator,
     )
 
     # Derive sprint_branch for summary (mirrors run_sprint logic)

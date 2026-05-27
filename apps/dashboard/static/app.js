@@ -4031,7 +4031,7 @@ function showErrorToast(msg) {
   setInterval(() => smgmtPollRunStatus().catch(() => {}), 4000);
 
   connectSSE();
-  document.getElementById('btn-refresh')?.addEventListener('click', manualRefresh);
+  document.getElementById('btn-refresh')?.addEventListener('click', () => window.location.reload());
   document.addEventListener('keydown', e => {
     if (e.key === 'Escape' && _rpRepo !== null) closeRemoveProjectDialog();
     if (e.key === 'Escape') closeDraftTicketModal();

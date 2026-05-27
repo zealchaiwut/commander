@@ -2661,11 +2661,17 @@ function smgmtRenderBacklog(tickets) {
     labelEl.textContent = `Backlog · ${tickets.length} ticket${tickets.length !== 1 ? 's' : ''} · unassigned to any sprint`;
   }
 
-  const sprintLabels = _smgmtData?.order || [];
+  const nonEmptyLabels = _smgmtData?.order || [];
+  const emptyLabels    = _smgmtData?.empty_sprint_labels || [];
+  const allSprintLabels = [...new Set([...nonEmptyLabels, ...emptyLabels])].sort((a, b) => {
+    const numA = parseInt(a.split('-')[1], 10) || 0;
+    const numB = parseInt(b.split('-')[1], 10) || 0;
+    return numA - numB;
+  });
   if (filtered.length === 0) {
     ticketsEl.innerHTML = '<div class="smgmt-drop-hint">Drop tickets here to remove sprint label</div>';
   } else {
-    ticketsEl.innerHTML = filtered.map(t => smgmtBacklogTicketHtml(t, sprintLabels)).join('');
+    ticketsEl.innerHTML = filtered.map(t => smgmtBacklogTicketHtml(t, allSprintLabels)).join('');
   }
 }
 

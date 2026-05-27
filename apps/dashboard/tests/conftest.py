@@ -43,3 +43,11 @@ def async_client(base_url):
             yield c
 
     return _make
+
+
+@pytest.fixture
+def allow_stub_success(monkeypatch):
+    """Set COMMANDER_ALLOW_STUB_SUCCESS=1 so that FileNotFoundError in
+    _dispatch_coder/_dispatch_tester is treated as a silent stub success.
+    Apply to test classes/functions that don't need a real claude CLI."""
+    monkeypatch.setenv("COMMANDER_ALLOW_STUB_SUCCESS", "1")

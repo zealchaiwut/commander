@@ -494,12 +494,129 @@
       .idle-deck-container.is-expanded { grid-template-columns: 1fr; }
     }
 
-    /* ── Placeholder section content ── */
-    .placeholder-text {
+    /* ── Activity section CSS variables (badge colors per event type) ── */
+    :root {
+      --activity-sprint-started-badge:    var(--green-bg);
+      --activity-sprint-started-icon:     var(--green);
+      --activity-sprint-completed-badge:  var(--surface-2);
+      --activity-sprint-completed-icon:   var(--text-muted);
+      --activity-ticket-uat-badge:        var(--amber-bg);
+      --activity-ticket-uat-icon:         var(--amber);
+      --activity-ticket-rework-badge:     var(--red-bg);
+      --activity-ticket-rework-icon:      var(--red);
+      --activity-sprint-failed-badge:     var(--red-bg);
+      --activity-sprint-failed-icon:      var(--red);
+    }
+
+    /* ── Activity section header row ── */
+    .activity-section-header {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      margin-bottom: 16px;
+    }
+    .activity-section-header .section-heading { margin-bottom: 0; }
+    .activity-count-label {
+      font-family: var(--mono);
+      font-size: 12px;
       color: var(--text-sub);
+    }
+
+    /* ── Activity list ── */
+    .activity-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    /* ── Activity item card ── */
+    .activity-item {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 14px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      transition: border-color .15s, background .15s;
+      outline: none;
+      text-decoration: none;
+      color: inherit;
+    }
+    .activity-item.is-clickable {
+      cursor: pointer;
+    }
+    .activity-item.is-clickable:hover,
+    .activity-item.is-clickable:focus-visible {
+      border-color: var(--text-sub);
+      background: var(--surface-hover);
+    }
+    .activity-item:focus-visible {
+      outline: 2px solid var(--blue);
+      outline-offset: 2px;
+    }
+
+    /* ── Icon badge ── */
+    .activity-badge {
+      width: 34px;
+      height: 34px;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      font-size: 16px;
+    }
+    .activity-badge.badge-sprint-started    { background: var(--activity-sprint-started-badge);   color: var(--activity-sprint-started-icon); }
+    .activity-badge.badge-sprint-completed  { background: var(--activity-sprint-completed-badge); color: var(--activity-sprint-completed-icon); }
+    .activity-badge.badge-ticket-uat        { background: var(--activity-ticket-uat-badge);        color: var(--activity-ticket-uat-icon); }
+    .activity-badge.badge-ticket-rework     { background: var(--activity-ticket-rework-badge);     color: var(--activity-ticket-rework-icon); }
+    .activity-badge.badge-sprint-failed     { background: var(--activity-sprint-failed-badge);     color: var(--activity-sprint-failed-icon); }
+
+    /* ── Middle text ── */
+    .activity-body {
+      flex: 1;
+      min-width: 0;
+    }
+    .activity-title {
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--text);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      margin-bottom: 2px;
+    }
+    .activity-sub {
+      font-family: var(--mono);
+      font-size: 12px;
+      color: var(--text-muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    /* ── Chevron ── */
+    .activity-chevron {
+      font-size: 16px;
+      color: var(--text-sub);
+      flex-shrink: 0;
+    }
+
+    /* ── Empty state ── */
+    .activity-empty {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+      padding: 28px 0;
+      color: var(--text-muted);
+      text-align: center;
+    }
+    .activity-empty .ti { font-size: 20px; color: var(--text-sub); }
+    .activity-empty-text {
       font-size: 13px;
-      font-style: italic;
-      padding: 20px 0;
+      color: var(--text-muted);
     }
 
   </style>
@@ -656,8 +773,13 @@
 
   <!-- ── Activity ── -->
   <section id="section-activity">
-    <div class="section-heading">Activity</div>
-    <p class="placeholder-text">Activity feed coming soon</p>
+    <div class="activity-section-header">
+      <div class="section-heading">Activity</div>
+      <span class="activity-count-label">last 5 events</span>
+    </div>
+    <div class="activity-list" id="activity-list">
+      <!-- Populated by renderActivity() -->
+    </div>
   </section>
 
 </main>
@@ -1052,6 +1174,111 @@
     });
   }
 
+  // ── Activity ───────────────────────────────────────────────────────────────
+
+  /**
+   * Humanize an ISO timestamp string to a relative string like "47m ago", "1d ago".
+   * Uses dayjs if loaded; falls back to a hand-rolled formatter.
+   */
+  function fmtRelative(isoStr) {
+    if (!isoStr) return '';
+    let diffSec;
+    try {
+      diffSec = Math.max(0, Math.floor((Date.now() - new Date(isoStr).getTime()) / 1000));
+    } catch (e) {
+      return '';
+    }
+    if (typeof dayjs !== 'undefined' && dayjs.extend) {
+      // dayjs with relativeTime plugin
+      try {
+        return dayjs(isoStr).fromNow();
+      } catch (e) { /* fallthrough */ }
+    }
+    // hand-rolled formatter
+    if (diffSec < 60)          return diffSec + 's ago';
+    if (diffSec < 3600)        return Math.floor(diffSec / 60) + 'm ago';
+    if (diffSec < 86400)       return Math.floor(diffSec / 3600) + 'h ago';
+    if (diffSec < 86400 * 7)   return Math.floor(diffSec / 86400) + 'd ago';
+    if (diffSec < 86400 * 30)  return Math.floor(diffSec / (86400 * 7)) + 'w ago';
+    return Math.floor(diffSec / (86400 * 30)) + 'mo ago';
+  }
+
+  /**
+   * Return the CSS badge class and Tabler icon class for a given event type.
+   */
+  function activityTypeConfig(eventType) {
+    switch (eventType) {
+      case 'sprint_started':
+        return { badge: 'badge-sprint-started',   icon: 'ti-player-play' };
+      case 'sprint_completed':
+        return { badge: 'badge-sprint-completed',  icon: 'ti-circle-check' };
+      case 'ticket_moved_to_uat':
+        return { badge: 'badge-ticket-uat',         icon: 'ti-eye-check' };
+      case 'ticket_needs_rework':
+        return { badge: 'badge-ticket-rework',      icon: 'ti-x' };
+      case 'sprint_failed':
+        return { badge: 'badge-sprint-failed',      icon: 'ti-alert-triangle' };
+      default:
+        return { badge: 'badge-sprint-completed',  icon: 'ti-activity' };
+    }
+  }
+
+  function renderActivity(data) {
+    const items   = (data.activity || []).slice(0, 5);
+    const listEl  = document.getElementById('activity-list');
+    listEl.innerHTML = '';
+
+    if (items.length === 0) {
+      listEl.innerHTML =
+        '<div class="activity-empty">'
+        + '<i class="ti ti-clock-hour-3"></i>'
+        + '<span class="activity-empty-text">Nothing recent — try running a sprint from a project</span>'
+        + '</div>';
+      return;
+    }
+
+    items.forEach(item => {
+      const cfg       = activityTypeConfig(item.type || '');
+      const hasLink   = !!item.link;
+      const timeStr   = fmtRelative(item.timestamp);
+      const subParts  = [item.sub, timeStr].filter(Boolean);
+      const subLine   = subParts.join(' · ');
+
+      // Build element — use <a> when clickable so keyboard nav works natively
+      const el = document.createElement(hasLink ? 'a' : 'div');
+      el.className = 'activity-item' + (hasLink ? ' is-clickable' : '');
+
+      if (hasLink) {
+        el.href = escHtml(item.link);
+        el.setAttribute('target', '_blank');
+        el.setAttribute('rel', 'noopener noreferrer');
+        el.setAttribute('tabindex', '0');
+      } else {
+        el.setAttribute('tabindex', '0');
+        // non-clickable: Enter does nothing, but item is still focusable (AC-12)
+      }
+
+      el.innerHTML =
+        '<div class="activity-badge ' + escHtml(cfg.badge) + '">'
+        +   '<i class="ti ' + escHtml(cfg.icon) + '"></i>'
+        + '</div>'
+        + '<div class="activity-body">'
+        +   '<div class="activity-title">' + escHtml(item.title || '') + '</div>'
+        +   '<div class="activity-sub">'   + escHtml(subLine)          + '</div>'
+        + '</div>'
+        + (hasLink ? '<i class="ti ti-chevron-right activity-chevron"></i>' : '');
+
+      // Keyboard navigation: Enter triggers click (for <div> fallback, <a> handles it natively)
+      if (!hasLink) {
+        el.addEventListener('keydown', e => {
+          // non-clickable: no navigation, but element is focusable per AC-12
+        });
+      }
+
+      listEl.appendChild(el);
+    });
+  }
+
   // ── Data fetching ──────────────────────────────────────────────────────────
 
   async function loadHomeData() {
@@ -1064,6 +1291,7 @@
       _homeData = data;
       renderStats(data);
       renderProjects(data);
+      renderActivity(data);
       showReal();
     } catch (err) {
       console.error('Home data load failed:', err);

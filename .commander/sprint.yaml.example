@@ -24,3 +24,8 @@ dashboard:
 # app:
 #   default_port: 8000
 #   port_strategy: prefer_default
+
+# Optional — documentor agent (issue #103)
+# When true, sprint manager runs the documentor after each tester passes UAT,
+# committing minimal README/CLAUDE.md updates and posting a UAT comment.
+# documentor_enabled: false

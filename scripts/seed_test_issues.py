@@ -10,7 +10,7 @@ Usage:
     python3 scripts/seed_test_issues.py --dry-run    # print what would happen, no API calls
 
 The fixture file is scripts/test_fixtures/issues.yaml.
-All operations target TEST_GITHUB_REPO (default: zealchaiwut/commander-issue-test),
+All operations target TEST_GITHUB_REPO (default: zealchaiwut/commander-test-issue),
 overrideable via COMMANDER_TEST_REPO env var.
 """
 import argparse
@@ -43,7 +43,7 @@ REQUIRED_LABELS: dict[str, tuple[str, str]] = {
     "SIT":          ("e4e669", "System integration testing"),
     "UAT":          ("ff9f00", "User acceptance testing"),
     "UAT-approved": ("0e8a16", "UAT sign-off complete"),
-    "needs-rework": ("d93f0b", "Needs to be fixed"),
+    "need-rework": ("d93f0b", "Needs to be fixed"),
     "blocked":      ("b60205", "Blocked by dependency"),
     "sprint-1":     ("0052CC", "Sprint 1 issues"),
     "sprint-2":     ("0052CC", "Sprint 2 issues"),

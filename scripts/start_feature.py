@@ -113,7 +113,7 @@ def main():
     github_client.update_labels(
         short,
         add=["in-progress"],
-        remove=["backlog", "needs-rework"],
+        remove=["backlog", "need-rework"],
         repo_name=args.repo,
     )
     github_client.add_comment(

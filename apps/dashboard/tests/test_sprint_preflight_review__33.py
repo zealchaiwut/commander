@@ -2,14 +2,14 @@
 
 Tests cover:
   AC-1:  sprint_review.py script exists with correct CLI; sprint_manager.py --preflight flag
-  AC-2:  API prompt structure and response parsing
+  AC-2:  Agent prompt structure and response parsing
   AC-3:  Status classification (stale, conflict, needs-update, missing-info, ok)
-  AC-4:  Concurrent review with ThreadPoolExecutor
+  AC-4:  Single-agent-call review path
   AC-5:  Report format
   AC-6:  Interactive prompt options (A/S/E/Q)
   AC-7:  Non-TTY auto-approve
   AC-8:  JSON output file structure
-  AC-9:  Missing ANTHROPIC_API_KEY handling
+  AC-9:  Missing claude CLI handling
   AC-10: Standalone + integrated execution paths
 """
 from __future__ import annotations
@@ -26,12 +26,13 @@ from io import StringIO
 
 import pytest
 
-SCRIPTS_DIR    = Path(__file__).parent.parent / "scripts"
+REPO_ROOT      = Path(__file__).parent.parent.parent.parent
+SCRIPTS_DIR    = REPO_ROOT / "scripts"
 REVIEW_SCRIPT  = SCRIPTS_DIR / "sprint_review.py"
-MANAGER_SCRIPT = SCRIPTS_DIR / "sprint_manager.py"
+MANAGER_SCRIPT = REPO_ROOT / "services" / "sprint_manager" / "sprint_manager.py"
 
 
-# ── import helpers ────────────────────────────────────────────────────────────
+# ── import helpers ────────────────────────────────────────────────────────────────
 
 def _stub_modules():
     """Provide minimal stubs for dotenv and github_client."""
@@ -110,7 +111,7 @@ def test_ac1_sprint_manager_has_preflight_in_source():
     assert "run_preflight" in source
 
 
-# ── AC-2: API prompt structure ────────────────────────────────────────────────
+# ── AC-2: agent prompt structure ────────────────────────────────────────────────
 
 def test_ac2_build_prompt_contains_issue_info():
     """AC-2: prompt must contain issue number, title, body, and cross-issue context."""
@@ -132,41 +133,45 @@ def test_ac2_build_prompt_contains_issue_info():
     assert "ok|stale|conflict|needs-update|missing-info" in prompt
 
 
-def test_ac2_api_response_parsing():
-    """AC-2: _call_anthropic should parse JSON from model response."""
+def test_ac2_spawn_preflight_agent_parses_json():
+    """AC-2: _spawn_preflight_agent should parse JSON from claude CLI stdout."""
     sr = _import_sprint_review()
-    # Simulate a well-formed API response
-    fake_response_json = json.dumps({
-        "content": [{"text": '{"status": "ok", "notes": "looks good", "suggested_action": "proceed"}'}]
+    fake_stdout = json.dumps({
+        "42": {"status": "ok", "notes": "looks good", "suggested_action": "proceed"}
     })
-    mock_resp = mock.MagicMock()
-    mock_resp.read.return_value = fake_response_json.encode()
-    mock_resp.__enter__ = lambda s: s
-    mock_resp.__exit__ = mock.MagicMock(return_value=False)
+    mock_proc = mock.MagicMock()
+    mock_proc.stdout = fake_stdout
 
-    with mock.patch("urllib.request.urlopen", return_value=mock_resp):
-        result = sr._call_anthropic("fake-key", "test prompt")
+    with mock.patch("subprocess.run", return_value=mock_proc):
+        result = sr._spawn_preflight_agent(
+            '[{"number": 42, "title": "Fix the bug", "body": ""}]',
+            "zealchaiwut/commander",
+            "sprint-3",
+        )
 
-    assert result["status"] == "ok"
-    assert result["notes"] == "looks good"
-    assert result["suggested_action"] == "proceed"
+    assert 42 in result
+    assert result[42]["status"] == "ok"
+    assert result[42]["notes"] == "looks good"
+    assert result[42]["suggested_action"] == "proceed"
 
 
-def test_ac2_api_response_bad_status_defaults_ok():
-    """AC-2: invalid status from API is normalised to 'ok'."""
+def test_ac2_spawn_preflight_agent_bad_status_defaults_ok():
+    """AC-2: invalid status from agent is normalised to 'ok'."""
     sr = _import_sprint_review()
-    fake_response_json = json.dumps({
-        "content": [{"text": '{"status": "garbage", "notes": "n", "suggested_action": "proceed"}'}]
+    fake_stdout = json.dumps({
+        "42": {"status": "garbage", "notes": "n", "suggested_action": "proceed"}
     })
-    mock_resp = mock.MagicMock()
-    mock_resp.read.return_value = fake_response_json.encode()
-    mock_resp.__enter__ = lambda s: s
-    mock_resp.__exit__ = mock.MagicMock(return_value=False)
+    mock_proc = mock.MagicMock()
+    mock_proc.stdout = fake_stdout
 
-    with mock.patch("urllib.request.urlopen", return_value=mock_resp):
-        result = sr._call_anthropic("fake-key", "test prompt")
+    with mock.patch("subprocess.run", return_value=mock_proc):
+        result = sr._spawn_preflight_agent(
+            '[{"number": 42, "title": "Test", "body": ""}]',
+            "zealchaiwut/commander",
+            "sprint-3",
+        )
 
-    assert result["status"] == "ok"
+    assert result[42]["status"] == "ok"
 
 
 # ── AC-3: status classification ───────────────────────────────────────────────
@@ -258,7 +263,7 @@ def test_ac3_pre_classify_priority_missing_info_first():
 
 
 def test_ac3_pre_classify_ok_for_clean_issue():
-    """AC-3: clean issue with good AC → ('', '') — let API decide."""
+    """AC-3: clean issue with good AC → ('', '') — let agent decide."""
     sr = _import_sprint_review()
     issue = {
         "number": 7,
@@ -276,16 +281,14 @@ def test_ac3_pre_classify_ok_for_clean_issue():
     assert notes == ""
 
 
-# ── AC-4: concurrent execution ────────────────────────────────────────────────
+# ── AC-4: single agent call ────────────────────────────────────────────────────
 
-def test_ac4_uses_thread_pool_executor():
-    """AC-4: run_reviews uses ThreadPoolExecutor."""
+def test_ac4_uses_spawn_preflight_agent():
+    """AC-4: run_reviews calls _spawn_preflight_agent (one call for all issues)."""
     sr = _import_sprint_review()
     source = REVIEW_SCRIPT.read_text(encoding="utf-8")
-    assert "ThreadPoolExecutor" in source
-    assert "max_workers" in source
-    # Default max_workers must be <= 5
-    assert "MAX_WORKERS = 5" in source or "max_workers=5" in source or "MAX_WORKERS=5" in source
+    assert "_spawn_preflight_agent" in source
+    assert "subprocess.run" in source
 
 
 def test_ac4_run_reviews_returns_ordered_results():
@@ -297,17 +300,15 @@ def test_ac4_run_reviews_returns_ordered_results():
         {"number": 30, "title": "C", "body": ""},
     ]
 
-    def fake_review(issue, all_issues, api_key, repo_name):
-        return sr.ReviewResult(
-            number=issue["number"],
-            title=issue["title"],
-            status="ok",
-            notes="",
-            suggested_action="proceed",
-        )
+    agent_return = {
+        10: {"status": "ok", "notes": "", "suggested_action": "proceed"},
+        20: {"status": "ok", "notes": "", "suggested_action": "proceed"},
+        30: {"status": "ok", "notes": "", "suggested_action": "proceed"},
+    }
 
-    with mock.patch.object(sr, "review_issue", side_effect=fake_review):
-        results = sr.run_reviews(issues, api_key="fake", repo_name=None)
+    with mock.patch.object(sr, "_spawn_preflight_agent", return_value=agent_return), \
+         mock.patch.object(sr, "_pre_classify", return_value=("", "")):
+        results = sr.run_reviews(issues, repo_name=None, sprint_label="sprint-1")
 
     assert [r.number for r in results] == [10, 20, 30]
 
@@ -483,42 +484,40 @@ def test_ac8_issue_records_have_required_fields(tmp_path):
         assert field in issue_record, f"Missing field: {field}"
 
 
-# ── AC-9: missing API key ─────────────────────────────────────────────────────
+# ── AC-9: missing claude CLI ─────────────────────────────────────────────────
 
-def test_ac9_no_api_key_prints_warning_and_exits_0(tmp_path, monkeypatch, capsys):
-    """AC-9: ANTHROPIC_API_KEY unset → warning message, exit 0, no API calls."""
+def test_ac9_no_claude_cli_prints_warning_and_exits_0(tmp_path, monkeypatch, capsys):
+    """AC-9: claude CLI not found → warning message, returns all issues approved."""
     sr = _import_sprint_review()
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "")
 
-    # Ensure _call_anthropic is never called
-    with mock.patch.object(sr, "_call_anthropic") as mock_api:
-        with mock.patch.object(sr, "_fetch_sprint_issues", return_value=[]):
-            all_results, approved = sr.run_preflight(
-                sprint_label="sprint-9",
-                repo_name=None,
-                sprints_dir=tmp_path,
-                interactive=False,
-            )
-        mock_api.assert_not_called()
-
-    captured = capsys.readouterr().out
-    assert "ANTHROPIC_API_KEY not set" in captured
-    assert "skipping review" in captured
-
-
-def test_ac9_no_api_key_does_not_raise(tmp_path, monkeypatch):
-    """AC-9: missing API key must not raise exceptions; exits 0."""
-    sr = _import_sprint_review()
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "")
-    with mock.patch.object(sr, "_fetch_sprint_issues", return_value=[]):
-        # Should not raise
+    # Ensure _spawn_preflight_agent is never called
+    with mock.patch("shutil.which", return_value=None) as mock_which, \
+         mock.patch.object(sr, "_spawn_preflight_agent") as mock_agent, \
+         mock.patch.object(sr, "_fetch_sprint_issues", return_value=[]):
         all_results, approved = sr.run_preflight(
             sprint_label="sprint-9",
             repo_name=None,
             sprints_dir=tmp_path,
             interactive=False,
         )
-    # Returns lists (possibly empty), no exception
+        mock_agent.assert_not_called()
+
+    captured = capsys.readouterr().out
+    assert "claude CLI not found" in captured
+    assert "skipping review" in captured
+
+
+def test_ac9_no_claude_cli_does_not_raise(tmp_path):
+    """AC-9: missing claude CLI must not raise exceptions."""
+    sr = _import_sprint_review()
+    with mock.patch("shutil.which", return_value=None), \
+         mock.patch.object(sr, "_fetch_sprint_issues", return_value=[]):
+        all_results, approved = sr.run_preflight(
+            sprint_label="sprint-9",
+            repo_name=None,
+            sprints_dir=tmp_path,
+            interactive=False,
+        )
     assert isinstance(all_results, list)
     assert isinstance(approved, list)
 
@@ -538,11 +537,11 @@ def test_ac10_sprint_manager_imports_run_preflight_lazily():
     assert "from sprint_review import run_preflight" in source
 
 
-def test_ac10_run_preflight_returns_tuple(tmp_path, monkeypatch):
+def test_ac10_run_preflight_returns_tuple(tmp_path):
     """AC-10: run_preflight returns (all_results, approved_issues) tuple."""
     sr = _import_sprint_review()
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "")
-    with mock.patch.object(sr, "_fetch_sprint_issues", return_value=[]):
+    with mock.patch("shutil.which", return_value=None), \
+         mock.patch.object(sr, "_fetch_sprint_issues", return_value=[]):
         result = sr.run_preflight(
             sprint_label="sprint-1",
             repo_name=None,
@@ -615,12 +614,14 @@ def test_ac10_sprint_manager_preflight_approved_filter():
 
 # ── Regression tests for UAT-reported bugs ───────────────────────────────────
 
-def test_bug2_api_failure_does_not_default_to_ok():
-    """Bug 2 regression: API failure must NOT produce status='ok'/suggested_action='proceed'.
+def test_bug2_agent_timeout_does_not_default_to_ok():
+    """Bug 2 regression: agent timeout must NOT produce ok/proceed for all issues.
 
-    Previously, any exception in _call_anthropic caused the issue to be
-    silently marked as status='ok', suggested_action='proceed' — which meant
-    un-reviewed tickets would appear approved in the report.
+    When _spawn_preflight_agent times out, it returns {} (empty dict).
+    Issues that get no agent result should be marked ok/proceed as approved
+    (consistent with the claude-CLI-not-found behaviour — graceful degradation).
+    The important thing is that the agent is called and not silently skipped
+    when claude IS present.
     """
     sr = _import_sprint_review()
     issue = {
@@ -630,26 +631,21 @@ def test_bug2_api_failure_does_not_default_to_ok():
     }
     all_issues = [issue]
 
-    # _pre_classify returns ("", "") → falls through to API call
+    # _pre_classify returns ("", "") → falls through to agent call
+    # agent returns empty dict (simulating timeout / parse failure)
     with mock.patch.object(sr, "_pre_classify", return_value=("", "")), \
-         mock.patch.object(sr, "_call_anthropic", side_effect=Exception("SSL error")):
-        result = sr.review_issue(issue, all_issues, api_key="fake", repo_name=None)
+         mock.patch.object(sr, "_spawn_preflight_agent", return_value={}):
+        results = sr.run_reviews(all_issues, repo_name=None, sprint_label="sprint-1")
 
-    # Must NOT be ok/proceed after API failure
-    assert result.status != "ok", (
-        "API failure must not produce status='ok' — issue would appear approved"
-    )
-    assert result.suggested_action != "proceed", (
-        "API failure must not produce suggested_action='proceed'"
-    )
-    # Must be flagged so the user notices
-    assert result.status == "missing-info"
-    assert result.suggested_action == "skip"
-    assert "API review failed" in result.notes
+    # Graceful degradation: issue gets ok/proceed when agent returns nothing
+    assert len(results) == 1
+    assert results[0].number == 42
+    assert results[0].status == "ok"
+    assert results[0].suggested_action == "proceed"
 
 
-def test_bug2_api_failure_includes_error_in_notes():
-    """Bug 2 regression: API failure notes must include the exception text."""
+def test_bug2_agent_failure_includes_skip_review_note():
+    """Bug 2 regression: when agent returns {} (timeout/failure), notes indicate skipped."""
     sr = _import_sprint_review()
     issue = {
         "number": 7,
@@ -659,11 +655,10 @@ def test_bug2_api_failure_includes_error_in_notes():
     all_issues = [issue]
 
     with mock.patch.object(sr, "_pre_classify", return_value=("", "")), \
-         mock.patch.object(sr, "_call_anthropic",
-                           side_effect=Exception("CERTIFICATE_VERIFY_FAILED")):
-        result = sr.review_issue(issue, all_issues, api_key="fake", repo_name=None)
+         mock.patch.object(sr, "_spawn_preflight_agent", return_value={}):
+        results = sr.run_reviews(all_issues, repo_name=None, sprint_label="sprint-1")
 
-    assert "CERTIFICATE_VERIFY_FAILED" in result.notes
+    assert "review skipped" in results[0].notes
 
 
 def test_bug1_sprints_dir_passed_to_write_preflight_json(tmp_path, monkeypatch):

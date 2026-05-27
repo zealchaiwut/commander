@@ -363,6 +363,13 @@
       border-radius: 4px; padding: 1px 6px; margin-top: 5px;
       max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     }
+    .ticket-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; margin-top: 5px; }
+    .sprint-chip {
+      display: inline-flex; align-items: center; gap: 3px;
+      font-size: 10px; font-weight: 600; color: var(--green);
+      background: var(--green-bg); border-radius: 4px; padding: 1px 6px;
+      white-space: nowrap; flex-shrink: 0;
+    }
     .sign-off { color: var(--amber); font-weight: 500; }
     .ticket-actions { display: flex; gap: 6px; margin-top: 8px; }
     .btn-approve-sm {
@@ -630,16 +637,23 @@
     .history-row:hover { background: var(--surface-hover); }
     .history-row-header {
       display: grid;
-      grid-template-columns: 80px 110px 120px 90px 90px 40px;
+      grid-template-columns: 80px 110px 120px 90px 90px 110px 40px;
       align-items: center; gap: 16px;
       padding: 14px 24px;
     }
-    .history-sprint-num { font-weight: 700; font-size: 14px; }
+    .history-sprint-num { font-weight: 700; font-size: 14px; display: flex; align-items: center; gap: 6px; }
     .history-date       { font-size: 12px; color: var(--text-muted); font-family: var(--mono); }
     .history-shipped    { font-size: 13px; font-weight: 600; color: var(--green); }
     .history-skipped    { font-size: 13px; font-weight: 600; color: var(--amber); }
     .history-chevron    { display: flex; justify-content: flex-end; color: var(--text-sub); font-size: 16px; transition: transform .2s ease; }
     .history-row.expanded .history-chevron { transform: rotate(180deg); }
+    .history-reviewer-col { font-size: 12px; }
+    .history-reviewer { font-size: 11px; font-weight: 600; font-family: var(--mono); padding: 2px 6px; border-radius: 4px; white-space: nowrap; text-decoration: none; }
+    .reviewer-skipped { color: var(--text-muted); }
+    .reviewer-failed  { background: var(--surface-2); color: var(--text-muted); }
+    .reviewer-done    { background: var(--surface-2); color: var(--text-sub); border: 1px solid var(--border); }
+    .reviewer-has-blockers { background: var(--red-bg); color: var(--red); border: 1px solid var(--red); }
+    .reviewer-red-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--red); flex-shrink: 0; }
 
     .history-expand-panel {
       display: none;
@@ -663,7 +677,389 @@
     .history-gh-link:hover { text-decoration: underline; }
     @media (max-width: 600px) {
       .history-row-header { grid-template-columns: 60px 90px 1fr 40px; }
-      .history-date, .history-shipped, .history-skipped { display: none; }
+      .history-date, .history-shipped, .history-skipped, .history-reviewer-col { display: none; }
+    }
+
+    /* ── Sprint cockpit (issue #32) ── */
+    .sc-idle {
+      padding: 60px 24px; text-align: center; color: var(--text-muted);
+    }
+    .sc-idle-icon { font-size: 40px; margin-bottom: 12px; }
+    .sc-idle-title { font-size: 16px; font-weight: 600; color: var(--text); margin-bottom: 6px; }
+    .sc-idle-sub   { font-size: 13px; }
+
+    .sc-cockpit { padding: 0; }
+
+    /* Header */
+    .sc-header {
+      display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap;
+      gap: 12px; padding: 16px 24px;
+      background: var(--surface); border-bottom: 1px solid var(--border);
+    }
+    .sc-header-left { display: flex; align-items: center; gap: 10px; min-width: 0; }
+    .sc-title { font-size: 15px; font-weight: 700; }
+    .sc-subtitle { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+    .sc-pills { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+    .sc-pill {
+      padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600;
+      background: var(--surface-2); color: var(--text-muted); border: 1px solid var(--border);
+    }
+    .sc-pill.pill-live { background: var(--green-bg); color: var(--green); border-color: rgba(22,163,74,.2); }
+    .sc-header-right { display: flex; gap: 8px; align-items: center; }
+    .sc-btn-pause {
+      padding: 6px 14px; border: 1px solid var(--border); border-radius: 6px;
+      background: var(--surface); color: var(--text); font-size: 12px; font-weight: 600;
+      transition: background .15s;
+    }
+    .sc-btn-pause:hover { background: var(--surface-2); }
+    .sc-btn-stop {
+      padding: 6px 14px; border: none; border-radius: 6px;
+      background: var(--red); color: #fff; font-size: 12px; font-weight: 600;
+      transition: opacity .15s;
+    }
+    .sc-btn-stop:hover { opacity: .82; }
+
+    /* Hero row */
+    .sc-hero-row {
+      display: grid; grid-template-columns: 1fr 1fr;
+      gap: 16px; padding: 16px 24px;
+      background: var(--bg);
+    }
+    .sc-card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 8px; padding: 16px;
+    }
+    .sc-card-title { font-size: 10px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: .08em; color: var(--text-muted); margin-bottom: 12px; }
+    .sc-bar-track {
+      height: 14px; border-radius: 7px; background: var(--surface-2);
+      overflow: hidden; display: flex;
+    }
+    .sc-bar-seg { height: 100%; transition: width .4s ease; }
+    .sc-bar-seg.seg-pending    { background: var(--text-sub); }
+    .sc-bar-seg.seg-inprogress { background: var(--blue); }
+    .sc-bar-seg.seg-done       { background: var(--green); }
+    .sc-bar-seg.seg-skipped    { background: var(--amber); }
+    .sc-bar-labels {
+      display: flex; gap: 12px; margin-top: 8px; flex-wrap: wrap;
+    }
+    .sc-bar-label { font-size: 11px; color: var(--text-muted); display: flex; align-items: center; gap: 4px; }
+    .sc-bar-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+
+    .sc-budget-track {
+      height: 14px; border-radius: 7px; background: var(--surface-2); overflow: hidden;
+    }
+    .sc-budget-fill {
+      height: 100%; border-radius: 7px; transition: width .4s ease, background .4s ease;
+      background: var(--green);
+    }
+    .sc-budget-fill.budget-red { background: var(--red); }
+    .sc-budget-label { font-size: 12px; color: var(--text-muted); margin-top: 8px; }
+    .sc-last-update {
+      font-size: 10px; color: var(--text-sub); text-align: right; margin-top: 8px;
+    }
+
+    /* Agents grid */
+    .sc-section { padding: 16px 24px; }
+    .sc-section-title {
+      font-size: 11px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: .08em; color: var(--text-muted); margin-bottom: 12px;
+    }
+    .sc-agents-grid {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px;
+    }
+    .sc-agent-card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-left: 4px solid var(--border); border-radius: 6px;
+      padding: 10px 12px;
+    }
+    .sc-agent-card.ac-working { border-left-color: var(--blue); }
+    .sc-agent-card.ac-done    { border-left-color: var(--green); }
+    .sc-agent-card.ac-waiting { border-left-color: var(--amber); }
+    .sc-agent-card.ac-error   { border-left-color: var(--red); }
+    .sc-agent-role { display: inline-block; font-size: 10px; font-weight: 700;
+      padding: 2px 6px; border-radius: 4px; margin-bottom: 6px;
+      background: var(--surface-2); color: var(--text-muted); text-transform: uppercase; }
+    .sc-agent-elapsed { font-size: 11px; color: var(--text-muted); }
+    .sc-agent-issue { font-size: 11px; color: var(--blue); font-weight: 500; }
+    .sc-agent-tool { font-size: 11px; color: var(--text-sub); margin-top: 2px;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+    /* Attention section */
+    .sc-attention-card {
+      background: var(--amber-bg); border: 1px solid rgba(217,119,6,.3);
+      border-radius: 6px; padding: 10px 14px; display: flex;
+      align-items: center; justify-content: space-between; gap: 12px;
+      margin-bottom: 8px;
+    }
+    .sc-attention-meta { font-size: 12px; color: var(--text); }
+    .sc-attention-num { font-weight: 700; margin-right: 4px; }
+    .sc-btn-review {
+      padding: 4px 10px; border: 1px solid var(--amber); border-radius: 5px;
+      background: none; color: var(--amber); font-size: 11px; font-weight: 600; flex-shrink: 0;
+      text-decoration: none; display: inline-block;
+    }
+    .sc-attention-link {
+      padding: 4px 10px; border: 1px solid var(--border); border-radius: 5px;
+      background: none; color: var(--text-muted); font-size: 11px; font-weight: 600;
+      text-decoration: none; flex-shrink: 0;
+    }
+
+    /* Activity feed */
+    .sc-feed-row {
+      display: grid; grid-template-columns: 80px 20px 1fr 70px;
+      align-items: center; gap: 8px; padding: 7px 0;
+      border-bottom: 1px solid var(--border); font-size: 12px;
+    }
+    .sc-feed-row:last-child { border-bottom: none; }
+    .sc-feed-time { color: var(--text-sub); font-size: 11px; }
+    .sc-feed-icon { font-size: 14px; text-align: center; }
+    .sc-feed-desc { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .sc-feed-ref  { font-size: 11px; color: var(--blue); text-align: right; text-decoration: none; }
+    .sc-feed-ref:hover { text-decoration: underline; }
+
+    /* Stop-sprint confirmation dialog */
+    #sc-stop-dialog-backdrop {
+      position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 200;
+    }
+    #sc-stop-dialog {
+      position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%);
+      z-index: 201; background: var(--surface); border: 1px solid var(--border);
+      border-radius: 10px; padding: 24px; width: min(360px, calc(100vw - 32px));
+      box-shadow: 0 8px 32px rgba(0,0,0,.18);
+    }
+    #sc-stop-dialog h3 { font-size: 15px; font-weight: 700; margin-bottom: 10px; }
+    #sc-stop-dialog p  { font-size: 13px; color: var(--text-muted); margin-bottom: 20px; }
+    #sc-stop-dialog .modal-footer { display: flex; gap: 8px; justify-content: flex-end; }
+
+    /* Nav tab pulsing dot */
+    .mtab .tab-dot {
+      display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+      background: var(--green); margin-left: 5px; vertical-align: middle;
+      animation: glow 2s ease-in-out infinite;
+    }
+    .mtab .tab-dot.dot-hidden { display: none; }
+
+    @media (max-width: 600px) {
+      .sc-hero-row { grid-template-columns: 1fr; }
+      .sc-header { flex-direction: column; align-items: flex-start; }
+      .sc-header-right { width: 100%; }
+      .sc-btn-pause, .sc-btn-stop { flex: 1; }
+      .sc-agents-grid { grid-template-columns: 1fr; }
+      .sc-section { padding: 12px 16px; }
+    }
+
+    /* ── Overview body: projects + live log panel (AC-8) ── */
+    .overview-body {
+      display: flex;
+      flex-direction: column;
+      align-items: stretch;
+    }
+    .overview-main {
+      flex: 1 1 auto;
+      min-width: 0;
+    }
+    /* AC-8: side-by-side on wide viewports */
+    @media (min-width: 1280px) {
+      .overview-body {
+        flex-direction: row;
+        align-items: flex-start;
+      }
+      .live-log-panel {
+        width: 360px;
+        flex-shrink: 0;
+        position: sticky;
+        top: 62px; /* below header */
+        height: calc(100dvh - 62px);
+      }
+    }
+
+    /* ── Live Log Panel (AC-1–AC-7, AC-9) ── */
+    .live-log-panel {
+      background: var(--surface);
+      border-left: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      /* On narrow viewports: not sticky, full width */
+      border-top: 1px solid var(--border);
+    }
+    @media (min-width: 1280px) {
+      .live-log-panel {
+        border-top: none;
+      }
+    }
+
+    .llp-header {
+      padding: 10px 14px 8px;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface);
+      flex-shrink: 0;
+    }
+    .llp-title-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 8px;
+    }
+    .llp-title {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      color: var(--text-muted);
+    }
+
+    /* AC-5: connection status */
+    .llp-status {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 10px;
+      color: var(--text-muted);
+    }
+    .llp-dot {
+      width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0;
+      transition: background .3s;
+    }
+    .llp-dot.llp-dot-connected {
+      background: var(--green);
+      box-shadow: 0 0 0 2px var(--green-bg);
+      animation: glow 2s ease-in-out infinite;
+    }
+    .llp-dot.llp-dot-reconnecting {
+      background: var(--amber);
+      box-shadow: 0 0 0 2px var(--amber-bg);
+    }
+    .llp-dot.llp-dot-off {
+      background: var(--text-sub);
+      box-shadow: none;
+      animation: none;
+    }
+
+    /* AC-6, AC-7: filter row */
+    .llp-filters {
+      display: flex;
+      gap: 6px;
+    }
+    .llp-select {
+      flex: 1;
+      padding: 4px 6px;
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      background: var(--surface-2);
+      color: var(--text);
+      font-size: 11px;
+      font-family: inherit;
+      outline: none;
+      cursor: pointer;
+    }
+    .llp-select:focus { border-color: var(--blue); }
+
+    /* Scroll container (AC-3) */
+    .llp-scroll {
+      flex: 1 1 auto;
+      overflow-y: auto;
+      overflow-x: hidden;
+      min-height: 200px;
+      max-height: 400px;
+      position: relative;
+    }
+    @media (min-width: 1280px) {
+      .llp-scroll {
+        max-height: none;
+        flex: 1 1 0;
+      }
+    }
+
+    .llp-entries {
+      padding: 6px 0;
+    }
+    .llp-empty {
+      padding: 24px 14px;
+      text-align: center;
+      color: var(--text-sub);
+      font-size: 12px;
+    }
+
+    /* AC-2: log entry row */
+    .llp-entry {
+      display: grid;
+      grid-template-columns: 52px 70px 1fr;
+      gap: 6px;
+      align-items: baseline;
+      padding: 5px 14px;
+      border-bottom: 1px solid var(--border);
+      font-size: 11px;
+      transition: background .1s;
+    }
+    .llp-entry:last-child { border-bottom: none; }
+    .llp-entry:hover { background: var(--surface-hover); }
+    .llp-entry.llp-filtered { display: none; }
+
+    .llp-ts {
+      font-family: var(--mono);
+      color: var(--text-sub);
+      font-size: 10px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .llp-proj {
+      font-size: 10px;
+      color: var(--text-muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .llp-meta {
+      display: flex;
+      align-items: baseline;
+      gap: 5px;
+      min-width: 0;
+    }
+    .llp-role-badge {
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: .06em;
+      text-transform: uppercase;
+      padding: 1px 5px;
+      border-radius: 3px;
+      flex-shrink: 0;
+    }
+    .llp-desc {
+      color: var(--text-muted);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      min-width: 0;
+    }
+
+    /* AC-3: jump button */
+    .llp-jump-btn {
+      position: sticky;
+      bottom: 8px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 5;
+      display: block;
+      margin: 0 auto 8px;
+      padding: 5px 14px;
+      background: var(--blue);
+      color: #fff;
+      border: none;
+      border-radius: 14px;
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+      box-shadow: 0 2px 8px rgba(0,0,0,.18);
+      transition: opacity .15s;
+    }
+    .llp-jump-btn:hover { opacity: .85; }
+    .llp-jump-btn.hidden { display: none !important; }
+
+    @media (max-width: 600px) {
+      .llp-entry { padding: 5px 10px; }
+      .llp-header { padding: 8px 10px 6px; }
     }
   </style>
 </head>
@@ -703,6 +1099,7 @@
   <button class="mtab active" id="mtab-overview"  onclick="switchMain('overview')">Overview</button>
   <button class="mtab"        id="mtab-agents"    onclick="switchMain('agents')">Agents</button>
   <button class="mtab"        id="mtab-activity"  onclick="switchMain('activity')">Activity log</button>
+  <button class="mtab"        id="mtab-sprint"    onclick="switchMain('sprint')">Sprint<span class="tab-dot dot-hidden" id="sc-nav-dot"></span></button>
 </nav>
 
 <!-- ── Overview view (formerly Projects) ── -->
@@ -754,8 +1151,150 @@
     <button class="ftab"        id="ftab-review"  onclick="setFilter('review')">Needs review</button>
   </div>
 
-  <div class="project-list" id="project-list">
-    <div class="empty-projects">Loading projects…</div>
+  <!-- AC-8: responsive side-by-side layout at >=1280px -->
+  <div class="overview-body">
+    <div class="overview-main">
+      <div class="project-list" id="project-list">
+        <div class="empty-projects">Loading projects…</div>
+      </div>
+    </div>
+
+    <!-- AC-1: persistent live log panel -->
+    <aside class="live-log-panel" id="live-log-panel">
+      <!-- Panel header: title + connection status (AC-5) -->
+      <div class="llp-header">
+        <div class="llp-title-row">
+          <span class="llp-title">Live log</span>
+          <span class="llp-status" id="llp-status" title="SSE connection">
+            <span class="llp-dot llp-dot-off" id="llp-dot"></span>
+            <span class="llp-status-text" id="llp-status-text">Connecting…</span>
+          </span>
+        </div>
+        <!-- AC-6 + AC-7: filters -->
+        <div class="llp-filters">
+          <select class="llp-select" id="llp-project-filter" onchange="llpSetProjectFilter(this.value)">
+            <option value="">All projects</option>
+          </select>
+          <select class="llp-select" id="llp-role-filter" onchange="llpSetRoleFilter(this.value)">
+            <option value="">All roles</option>
+            <option value="ba">BA</option>
+            <option value="coder">Coder</option>
+            <option value="tester">Tester</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- AC-3: scroll container -->
+      <div class="llp-scroll" id="llp-scroll">
+        <div class="llp-entries" id="llp-entries">
+          <div class="llp-empty">Waiting for events…</div>
+        </div>
+      </div>
+
+      <!-- AC-3: jump-to-latest button (hidden until user scrolls up) -->
+      <button class="llp-jump-btn hidden" id="llp-jump-btn" onclick="llpJumpToLatest()">
+        &#8595; Jump to latest
+      </button>
+    </aside>
+  </div>
+</div>
+
+<!-- ── Sprint cockpit view (issue #32) ── -->
+<div id="view-sprint" class="hidden">
+
+  <!-- Idle placeholder (AC-8) -->
+  <div class="sc-idle" id="sc-idle">
+    <div class="sc-idle-icon"><i class="ti ti-player-pause"></i></div>
+    <div class="sc-idle-title">No active sprint</div>
+    <div class="sc-idle-sub">Start a sprint from the Sprint Mgmt tab to see the live cockpit.</div>
+  </div>
+
+  <!-- Cockpit (shown when sprint is active) -->
+  <div class="sc-cockpit hidden" id="sc-cockpit">
+
+    <!-- Header (AC-9) -->
+    <div class="sc-header">
+      <div class="sc-header-left">
+        <div class="live-dot" id="sc-live-dot"></div>
+        <div>
+          <div class="sc-title" id="sc-title">Sprint — loading…</div>
+          <div class="sc-subtitle" id="sc-subtitle"></div>
+        </div>
+      </div>
+      <div class="sc-pills">
+        <span class="sc-pill pill-live">live</span>
+        <span class="sc-pill" id="sc-pill-issues">— issues</span>
+        <span class="sc-pill" id="sc-pill-agents">— agents</span>
+      </div>
+      <div class="sc-header-right">
+        <button class="sc-btn-pause" id="sc-pause-btn" onclick="scTogglePause()">Pause</button>
+        <button class="sc-btn-stop"  onclick="scStopConfirm()">Stop sprint</button>
+      </div>
+    </div>
+
+    <!-- Hero row (AC-10, AC-11) -->
+    <div class="sc-hero-row">
+      <!-- Progress bar card -->
+      <div class="sc-card">
+        <div class="sc-card-title">Sprint progress</div>
+        <div class="sc-bar-track" id="sc-prog-bar">
+          <div class="sc-bar-seg seg-done"       id="sc-seg-done"       style="width:0%"></div>
+          <div class="sc-bar-seg seg-inprogress" id="sc-seg-inprogress" style="width:0%"></div>
+          <div class="sc-bar-seg seg-skipped"    id="sc-seg-skipped"    style="width:0%"></div>
+          <div class="sc-bar-seg seg-pending"    id="sc-seg-pending"    style="width:100%"></div>
+        </div>
+        <div class="sc-bar-labels">
+          <span class="sc-bar-label"><span class="sc-bar-dot" style="background:var(--text-sub)"></span><span id="sc-lbl-pending">— pending</span></span>
+          <span class="sc-bar-label"><span class="sc-bar-dot" style="background:var(--blue)"></span><span id="sc-lbl-inprogress">— in-progress</span></span>
+          <span class="sc-bar-label"><span class="sc-bar-dot" style="background:var(--green)"></span><span id="sc-lbl-done">— done</span></span>
+          <span class="sc-bar-label"><span class="sc-bar-dot" style="background:var(--amber)"></span><span id="sc-lbl-skipped">— skipped</span></span>
+        </div>
+        <div class="sc-last-update" id="sc-prog-update">—</div>
+      </div>
+      <!-- Budget bar card -->
+      <div class="sc-card">
+        <div class="sc-card-title">Token budget</div>
+        <div class="sc-budget-track">
+          <div class="sc-budget-fill" id="sc-budget-fill" style="width:0%"></div>
+        </div>
+        <div class="sc-budget-label" id="sc-budget-label">—</div>
+        <div class="sc-last-update"  id="sc-budget-update">—</div>
+      </div>
+    </div>
+
+    <!-- Live agents grid (AC-12) -->
+    <div class="sc-section">
+      <div class="sc-section-title">Live agents</div>
+      <div class="sc-agents-grid" id="sc-agents-grid">
+        <div style="color:var(--text-muted);font-size:12px">Loading…</div>
+      </div>
+    </div>
+
+    <!-- Needs attention (AC-13) -->
+    <div class="sc-section hidden" id="sc-attention-section">
+      <div class="sc-section-title">Needs your attention</div>
+      <div id="sc-attention-items"></div>
+    </div>
+
+    <!-- Activity feed (AC-14) -->
+    <div class="sc-section">
+      <div class="sc-section-title">Live activity feed</div>
+      <div id="sc-feed-rows">
+        <div style="color:var(--text-muted);font-size:12px">No recent events.</div>
+      </div>
+    </div>
+
+  </div><!-- end sc-cockpit -->
+</div><!-- end view-sprint -->
+
+<!-- Stop-sprint confirmation dialog -->
+<div id="sc-stop-dialog-backdrop" class="hidden" onclick="scStopCancel()"></div>
+<div id="sc-stop-dialog" class="hidden">
+  <h3>Stop sprint?</h3>
+  <p>This will send SIGTERM to the sprint manager process. In-flight issues may be left incomplete.</p>
+  <div class="modal-footer">
+    <button class="btn-ghost" onclick="scStopCancel()">Cancel</button>
+    <button class="btn-danger" id="sc-stop-confirm-btn" onclick="scStopExecute()">Stop sprint</button>
   </div>
 </div>
 
@@ -788,13 +1327,13 @@
 
   <!-- Project-scoped tabs -->
   <nav class="proj-tabs">
-    <button class="ptab active" id="ptab-tickets"       onclick="switchProjectTab('tickets')">Tickets</button>
-    <button class="ptab"        id="ptab-sprint-mgmt"   onclick="switchProjectTab('sprint-mgmt')">Sprint Mgmt</button>
+    <button class="ptab active" id="ptab-sprint-mgmt"   onclick="switchProjectTab('sprint-mgmt')">Sprint Mgmt</button>
     <button class="ptab"        id="ptab-sprint-history" onclick="switchProjectTab('sprint-history')">Sprint history</button>
+    <button class="ptab"        id="ptab-tickets"        onclick="switchProjectTab('tickets')" style="display:none">Tickets</button>
   </nav>
 
   <!-- Tickets tab content -->
-  <div id="pview-tickets">
+  <div id="pview-tickets" class="hidden">
     <div id="pview-tickets-content" class="pview-tickets-inner">
       <div class="empty">Loading…</div>
     </div>
@@ -806,8 +1345,13 @@
       <div class="smgmt-header-left">
         <h2 class="smgmt-title">Sprint Management</h2>
       </div>
-      <button class="btn-primary smgmt-new-sprint-btn" id="smgmt-new-sprint-btn"
-              onclick="smgmtCreateSprint()" title="Create next sprint label on GitHub">+ New sprint</button>
+      <div class="smgmt-header-actions">
+        <button class="btn-secondary" id="smgmt-auto-refresh-btn" onclick="smgmtAutoRefreshNow()" title="Automatically re-fetches sprint board data every 30 seconds; click to refresh immediately">Auto Refresh (30s)</button>
+        <button class="btn-secondary" onclick="openDraftTicketModal()">+ New Ticket</button>
+        <button class="btn-secondary" id="bulk-create-btn" onclick="openBulkCreateModal()">Bulk create</button>
+        <button class="btn-primary smgmt-new-sprint-btn" id="smgmt-new-sprint-btn"
+                onclick="smgmtCreateSprint()" title="Create next sprint label on GitHub">+ New Sprint</button>
+      </div>
     </div>
     <div class="smgmt-error hidden" id="smgmt-error"></div>
     <div class="smgmt-cleanup-banner hidden" id="smgmt-cleanup-banner"></div>
@@ -1079,6 +1623,20 @@
   </div>
 </div>
 
+<!-- Finish sprint confirmation modal (issue #195) -->
+<div class="modal-backdrop hidden" id="smgmt-finish-backdrop" onclick="smgmtFinishClose()"></div>
+<div class="modal hidden" id="smgmt-finish-modal" role="dialog" aria-modal="true">
+  <div class="modal-header">
+    <span class="modal-title" id="smgmt-finish-title">Finish Sprint?</span>
+    <button class="modal-close" onclick="smgmtFinishClose()" aria-label="Close">&times;</button>
+  </div>
+  <div class="smgmt-finish-body" id="smgmt-finish-body"></div>
+  <div class="modal-footer">
+    <button class="btn-ghost" onclick="smgmtFinishClose()">Cancel</button>
+    <button class="btn-danger" id="smgmt-finish-confirm" onclick="smgmtFinishConfirm()">Finish Sprint</button>
+  </div>
+</div>
+
 <!-- Kill sprint confirmation modal -->
 <div class="modal-backdrop hidden" id="smgmt-kill-backdrop" onclick="smgmtKillClose()"></div>
 <div class="modal hidden" id="smgmt-kill-modal" role="dialog" aria-modal="true">
@@ -1095,6 +1653,40 @@
   </div>
 </div>
 
+<!-- Delete sprint confirmation modal -->
+<div class="modal-backdrop hidden" id="smgmt-delete-backdrop" onclick="smgmtDeleteClose()"></div>
+<div class="modal hidden" id="smgmt-delete-modal" role="dialog" aria-modal="true">
+  <div class="modal-header">
+    <span class="modal-title" id="smgmt-delete-title">Delete Sprint?</span>
+    <button class="modal-close" onclick="smgmtDeleteClose()" aria-label="Close">&times;</button>
+  </div>
+  <div class="smgmt-delete-body" id="smgmt-delete-body"></div>
+  <div class="modal-footer">
+    <button class="btn-ghost" onclick="smgmtDeleteClose()">Cancel</button>
+    <button class="btn-danger" id="smgmt-delete-confirm" onclick="smgmtDeleteConfirm()">Delete sprint</button>
+  </div>
+</div>
+
+<!-- New sprint modal -->
+<div class="modal-backdrop hidden" id="smgmt-new-sprint-backdrop" onclick="smgmtNewSprintClose()"></div>
+<div class="modal hidden" id="smgmt-new-sprint-modal" role="dialog" aria-modal="true">
+  <div class="modal-header">
+    <span class="modal-title">New Sprint</span>
+    <button class="modal-close" onclick="smgmtNewSprintClose()" aria-label="Close">&times;</button>
+  </div>
+  <div style="padding: 1rem 1.5rem;">
+    <label for="smgmt-new-sprint-input" style="display:block;margin-bottom:.5rem;font-size:.875rem;color:var(--text-secondary)">Sprint number</label>
+    <input type="number" id="smgmt-new-sprint-input" min="1" step="1"
+           style="width:100%;padding:.5rem .75rem;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text-primary);font-size:1rem;"
+           onkeydown="if(event.key==='Enter')smgmtNewSprintConfirm();if(event.key==='Escape')smgmtNewSprintClose();" />
+    <div id="smgmt-new-sprint-error" style="margin-top:.5rem;font-size:.8125rem;color:var(--danger,#e53e3e);min-height:1.2em;"></div>
+  </div>
+  <div class="modal-footer">
+    <button class="btn-ghost" onclick="smgmtNewSprintClose()">Cancel</button>
+    <button class="btn-primary" id="smgmt-new-sprint-confirm" onclick="smgmtNewSprintConfirm()">Create</button>
+  </div>
+</div>
+
 <!-- Clean up empty sprints confirmation modal -->
 <div class="modal-backdrop hidden" id="smgmt-cleanup-backdrop" onclick="smgmtCleanupClose()"></div>
 <div class="modal hidden" id="smgmt-cleanup-modal" role="dialog" aria-modal="true">
@@ -1106,6 +1698,20 @@
   <div class="modal-footer">
     <button class="btn-ghost" onclick="smgmtCleanupClose()">Cancel</button>
     <button class="btn-danger" id="smgmt-cleanup-confirm" onclick="smgmtCleanupConfirm()">Delete labels</button>
+  </div>
+</div>
+
+<!-- Sprint migration modal (shown before dispatch when earlier sprints have open tickets) -->
+<div class="modal-backdrop hidden" id="smgmt-migrate-backdrop" onclick="smgmtMigrateClose()"></div>
+<div class="modal hidden" id="smgmt-migrate-modal" role="dialog" aria-modal="true">
+  <div class="modal-header">
+    <span class="modal-title" id="smgmt-migrate-title">Run Sprint?</span>
+    <button class="modal-close" onclick="smgmtMigrateClose()" aria-label="Close">&times;</button>
+  </div>
+  <div class="smgmt-migrate-body" id="smgmt-migrate-body"></div>
+  <div class="modal-footer">
+    <button class="btn-ghost" onclick="smgmtMigrateClose()">Cancel</button>
+    <button class="btn-primary" id="smgmt-migrate-confirm" onclick="smgmtMigrateConfirm()">Run sprint</button>
   </div>
 </div>
 
@@ -1341,6 +1947,7 @@
     border-bottom: 1px solid var(--border); gap: 12px; flex-wrap: wrap;
   }
   .smgmt-header-left { display: flex; align-items: center; gap: 14px; }
+  .smgmt-header-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
   .smgmt-title { font-size: 16px; font-weight: 700; white-space: nowrap; }
   .smgmt-proj-select {
     padding: 6px 10px; border: 1px solid var(--border); border-radius: 6px;
@@ -1354,6 +1961,11 @@
     margin: 12px 24px; padding: 10px 14px; background: var(--red-bg);
     border-left: 4px solid var(--red); border-radius: 4px;
     font-size: 12px; color: var(--red);
+  }
+  .smgmt-error-log {
+    margin: 6px 0 0; padding: 6px 8px; background: rgba(0,0,0,.15);
+    border-radius: 3px; font-size: 11px; white-space: pre-wrap;
+    word-break: break-all; max-height: 200px; overflow-y: auto;
   }
   .smgmt-loading {
     padding: 48px 24px; text-align: center; color: var(--text-muted); font-size: 13px;
@@ -1390,28 +2002,52 @@
     flex-shrink: 0;
   }
   .smgmt-sprint-count { font-size: 11px; color: var(--text-muted); flex-shrink: 0; }
+  /* Unified Run / Re-run button (issue #186) */
   .smgmt-run-btn {
     padding: 4px 12px; font-size: 11px; font-weight: 600;
     background: var(--green); color: #fff; border: none; border-radius: 5px;
     cursor: pointer; flex-shrink: 0; transition: opacity .15s;
+    display: flex; align-items: center; gap: 4px;
   }
   .smgmt-run-btn:hover { opacity: .85; }
   .smgmt-run-btn:disabled {
     background: var(--surface-2); color: var(--text-sub);
     border: 1px solid var(--border); cursor: not-allowed; opacity: 1;
   }
-  .smgmt-rerun-btn {
-    padding: 4px 10px; font-size: 11px; font-weight: 600;
+  /* Re-run Sprint variant of the unified button */
+  .smgmt-run-btn.smgmt-run-btn--rerun {
     background: var(--amber-bg); color: var(--amber);
-    border: 0.5px solid var(--amber); border-radius: 5px;
+    border: 0.5px solid var(--amber);
+  }
+  .smgmt-run-btn.smgmt-run-btn--rerun:hover { opacity: .85; }
+  .smgmt-delete-btn {
+    padding: 4px 10px; font-size: 11px; font-weight: 600;
+    background: transparent; color: var(--red);
+    border: 0.5px solid var(--red); border-radius: 5px;
     cursor: pointer; flex-shrink: 0; transition: opacity .15s;
     display: flex; align-items: center; gap: 4px;
   }
-  .smgmt-rerun-btn:hover { opacity: .85; }
-  .smgmt-rerun-btn:disabled {
+  .smgmt-delete-btn:hover { background: var(--red-bg, rgba(220,38,38,.08)); opacity: 1; }
+  .smgmt-delete-btn:disabled {
     background: var(--surface-2); color: var(--text-sub);
     border: 0.5px solid var(--border); cursor: not-allowed; opacity: 1;
   }
+
+  .smgmt-delete-body { padding: 12px 24px 8px; font-size: 13px; color: var(--text-main); }
+  .smgmt-delete-body p { margin: 0; }
+
+  /* Finish Sprint button (issue #195) */
+  .smgmt-finish-btn {
+    padding: 4px 10px; font-size: 11px; font-weight: 600;
+    background: var(--amber-bg, rgba(245,158,11,.1)); color: var(--amber, #d97706);
+    border: 0.5px solid var(--amber, #d97706); border-radius: 5px;
+    cursor: pointer; flex-shrink: 0; transition: opacity .15s;
+    display: flex; align-items: center; gap: 4px;
+  }
+  .smgmt-finish-btn:hover { opacity: .85; }
+  .smgmt-finish-body { padding: 12px 24px 8px; font-size: 13px; color: var(--text-main); }
+  .smgmt-finish-body p { margin: 0; }
+  .smgmt-finish-body p + p { margin-top: 8px; }
 
   /* Kill button (replaces Run on the running card) */
   .smgmt-kill-btn {
@@ -1441,6 +2077,27 @@
     font-size: 11px; color: var(--blue); font-weight: 500; flex-shrink: 0;
   }
 
+  /* Locked sprint card state (issue #186) — shown on non-running sprints while any sprint runs */
+  .smgmt-sprint-block.smgmt-locked {
+    border-color: var(--border);
+    box-shadow: 0 0 0 1px var(--surface-2);
+    opacity: 0.72;
+  }
+  .smgmt-sprint-block.smgmt-locked .smgmt-sprint-header {
+    background: var(--surface-2);
+    border-bottom-color: var(--border);
+  }
+  .smgmt-lock-icon {
+    font-size: 12px; flex-shrink: 0; margin-left: 2px;
+  }
+
+  /* Goal input readonly state (issue #186) */
+  .smgmt-goal-input.smgmt-goal-readonly {
+    color: var(--text-muted);
+    background: var(--surface-2);
+    cursor: not-allowed;
+  }
+
   /* Rerun sprint modal body */
   .smgmt-rerun-body { padding: 12px 24px 4px; font-size: 13px; max-height: 300px; overflow-y: auto; }
   .smgmt-rerun-row { display: flex; align-items: baseline; gap: 6px; padding: 5px 0;
@@ -1449,6 +2106,22 @@
   .smgmt-rerun-num { font-weight: 700; color: var(--text-sub); font-size: 12px; flex-shrink: 0; }
   .smgmt-rerun-title-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .smgmt-rerun-labels { font-size: 11px; color: var(--text-muted); flex-shrink: 0; }
+
+  /* Migration modal body */
+  .smgmt-migrate-body { padding: 12px 24px 4px; font-size: 13px; max-height: 400px; overflow-y: auto; }
+  .smgmt-migrate-sprint-section { margin-bottom: 16px; }
+  .smgmt-migrate-sprint-section:last-child { margin-bottom: 0; }
+  .smgmt-migrate-sprint-heading { font-weight: 700; font-size: 13px; margin-bottom: 6px; color: var(--text-main); }
+  .smgmt-migrate-ticket-list { list-style: none; margin: 0 0 8px 0; padding: 0; }
+  .smgmt-migrate-ticket-item { display: flex; align-items: baseline; gap: 6px; padding: 3px 0;
+    border-bottom: 1px solid var(--border); font-size: 12px; }
+  .smgmt-migrate-ticket-item:last-child { border-bottom: none; }
+  .smgmt-migrate-ticket-num { font-weight: 700; color: var(--text-sub); flex-shrink: 0; }
+  .smgmt-migrate-ticket-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .smgmt-migrate-ticket-status { font-size: 11px; color: var(--text-muted); flex-shrink: 0; }
+  .smgmt-migrate-radios { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 6px; }
+  .smgmt-migrate-radio-label { display: flex; align-items: center; gap: 5px; cursor: pointer; font-size: 12px; color: var(--text-main); }
+  .smgmt-migrate-radio-label input[type="radio"] { cursor: pointer; }
 
   /* Ticket cards in a sprint */
   .smgmt-sprint-tickets {
@@ -1489,6 +2162,34 @@
   .smgmt-status-sit      { background: var(--amber-bg); color: var(--amber); }
   .smgmt-status-uat      { background: var(--purple-bg); color: var(--purple); }
   .smgmt-status-done     { background: var(--green-bg); color: var(--green); }
+
+  /* Per-ticket live agent status (issue #131) */
+  .smgmt-ticket-agent-badge {
+    font-size: 10px; font-weight: 600; padding: 2px 6px; border-radius: 3px;
+    flex-shrink: 0; white-space: nowrap;
+  }
+  .smgmt-ticket-spinner {
+    flex-shrink: 0; font-size: 13px;
+    animation: spin 1s linear infinite; transform-origin: center;
+  }
+  .smgmt-stall-warning {
+    font-size: 11px; color: var(--amber); padding: 4px 14px 4px;
+    border-top: 1px solid var(--border); background: var(--amber-bg);
+  }
+
+  /* Estimate badges (issue #166) */
+  .smgmt-estimate-badge {
+    font-size: 10px; font-weight: 600; padding: 2px 6px; border-radius: 4px;
+    background: var(--purple-bg, #f3f0ff); color: var(--purple, #7c3aed);
+    flex-shrink: 0; white-space: nowrap; letter-spacing: .02em;
+    border: 1px solid rgba(124,58,237,.18);
+  }
+  .smgmt-estimate-total {
+    font-size: 11px; font-weight: 500; color: var(--purple, #7c3aed);
+    flex-shrink: 0; white-space: nowrap;
+    background: var(--purple-bg, #f3f0ff); padding: 2px 8px; border-radius: 4px;
+    border: 1px solid rgba(124,58,237,.15);
+  }
 
   /* Sprint goal input row */
   .smgmt-sprint-goal-row {
@@ -1601,6 +2302,22 @@
   .smgmt-cleanup-label { font-weight: 700; color: var(--text-sub); }
   .smgmt-cleanup-desc { font-size: 11px; color: var(--text-muted); }
 </style>
+
+<!-- Approve ticket confirmation modal -->
+<div class="modal-backdrop hidden" id="approve-backdrop" onclick="approveModalCancel()"></div>
+<div class="modal hidden" id="approve-modal" role="dialog" aria-modal="true">
+  <div class="modal-header">
+    <span class="modal-title">Approve Ticket?</span>
+    <button class="modal-close" onclick="approveModalCancel()" aria-label="Close">&times;</button>
+  </div>
+  <div style="padding: 0 4px 8px; font-size: 13px; color: var(--text-muted);">
+    Close issue <strong id="approve-modal-issue-ref"></strong> on GitHub and remove the UAT label?
+  </div>
+  <div class="modal-footer">
+    <button class="btn-ghost" onclick="approveModalCancel()">Cancel</button>
+    <button class="btn-primary" id="approve-modal-confirm-btn" onclick="approveModalConfirm()">Confirm</button>
+  </div>
+</div>
 
 <!-- ── New Project Modal ── -->
 <div class="modal-backdrop hidden" id="new-project-backdrop" onclick="closeNewProjectModal()"></div>
@@ -1788,6 +2505,693 @@
     flex-shrink: 0; background: none; border: none; cursor: pointer;
     font-size: 16px; color: var(--red, #ef4444); line-height: 1; padding: 0 2px;
   }
+
+  /* ── Approve all UAT button in expand panel ── */
+  .btn-approve-all-uat {
+    margin-left: auto; padding: 3px 10px;
+    background: var(--green); color: #fff; border: none; border-radius: 5px;
+    font-size: 11px; font-weight: 600; cursor: pointer;
+    display: inline-flex; align-items: center; gap: 4px;
+    transition: opacity .15s;
+  }
+  .btn-approve-all-uat:hover { opacity: .82; }
+  .btn-approve-all-uat:disabled { opacity: .45; cursor: not-allowed; }
+
+  /* ── Approve all UAT modal ── */
+  .aua-ticket-list {
+    margin: 12px 0; padding: 0; list-style: none;
+    max-height: 240px; overflow-y: auto;
+  }
+  .aua-ticket-list li {
+    padding: 5px 0; font-size: 13px; color: var(--text);
+    border-bottom: 1px solid var(--border);
+  }
+  .aua-ticket-list li:last-child { border-bottom: none; }
+  .aua-confirm-btn {
+    padding: 6px 16px; border: none; border-radius: 6px;
+    background: var(--green); color: #fff; font-size: 13px; font-weight: 600;
+    cursor: pointer; transition: opacity .15s;
+  }
+  .aua-confirm-btn:hover { opacity: .82; }
+  .aua-confirm-btn:disabled { opacity: .45; cursor: not-allowed; }
+</style>
+
+<!-- ── Draft Ticket Modal (issue #94) ── -->
+<div class="modal-backdrop hidden" id="dt-backdrop" onclick="closeDraftTicketModal()"></div>
+<div class="modal dt-modal hidden" id="dt-modal" role="dialog" aria-modal="true" aria-labelledby="dt-modal-title">
+  <div class="modal-header">
+    <span class="modal-title" id="dt-modal-title">New Ticket</span>
+    <button class="modal-close" onclick="closeDraftTicketModal()" aria-label="Close">&times;</button>
+  </div>
+
+  <form id="dt-form" onsubmit="generateDraft(event)">
+    <div class="modal-field">
+      <label class="modal-label" for="dt-project">Project <span class="modal-required">*</span></label>
+      <select class="modal-input" id="dt-project" onchange="_dtLabelCache=null; _dtLoadLabels(this.value)"></select>
+    </div>
+    <div class="modal-field">
+      <label class="modal-label" for="dt-sprint">Sprint label</label>
+      <select class="modal-input" id="dt-sprint" onchange="_dtSprintOnChange(this)">
+        <option value="">— no sprint —</option>
+        <option value="__new__">+ Add new sprint…</option>
+      </select>
+      <div class="hidden dt-sprint-new-wrap" id="dt-sprint-new-wrap">
+        <input class="modal-input" id="dt-sprint-new-input" type="text" placeholder="sprint-9" autocomplete="off">
+        <a href="#" class="dt-sprint-cancel" onclick="_dtSprintCancel(event)">Cancel</a>
+      </div>
+    </div>
+    <div class="modal-field">
+      <label class="modal-label">Labels</label>
+      <div class="dt-label-picker" id="dt-label-picker">
+        <div class="dt-label-loading" id="dt-label-loading">Loading labels…</div>
+        <div class="dt-label-error hidden" id="dt-label-error">Could not load labels</div>
+        <div class="dt-label-list" id="dt-label-list"></div>
+      </div>
+    </div>
+    <div class="modal-field">
+      <label class="modal-label" for="dt-description">Description <span class="modal-required">*</span></label>
+      <textarea class="modal-input dt-textarea" id="dt-description" placeholder="Describe the feature or bug you want to file…" rows="4"></textarea>
+    </div>
+
+    <div class="modal-error hidden" id="dt-error"></div>
+
+    <div class="modal-footer">
+      <button type="button" class="btn-ghost" onclick="closeDraftTicketModal()">Cancel</button>
+      <button type="submit" class="btn-primary" id="dt-generate-btn">Generate Draft</button>
+    </div>
+  </form>
+
+  <!-- Draft review section (hidden until generated) -->
+  <div id="dt-draft-section" class="hidden">
+    <div class="dt-draft-divider"></div>
+    <div class="modal-field">
+      <label class="modal-label" for="dt-title">Title</label>
+      <input class="modal-input" id="dt-title" type="text" autocomplete="off">
+    </div>
+    <div class="modal-field">
+      <label class="modal-label" for="dt-body">Body <span class="modal-hint">(edit before posting)</span></label>
+      <textarea class="modal-input dt-body-textarea" id="dt-body" rows="10"></textarea>
+    </div>
+    <div class="modal-field">
+      <label class="modal-label">Attachments</label>
+      <p class="modal-hint dt-attach-limits">
+        Allowed: .html .htm .md .txt .csv .json .yaml .yml .png .jpg .jpeg .gif .svg .webp .pdf .py .js .ts .tsx .css .sh .log .drawio .xlsx .pptx .docx .zip
+        &nbsp;&bull;&nbsp; Max 25 MB per file, 50 MB per upload.
+        HTML attachments will download — open locally to view rendered.
+      </p>
+      <div class="dt-dropzone" id="dt-dropzone"
+           ondragover="event.preventDefault(); this.classList.add('drag-over')"
+           ondragleave="this.classList.remove('drag-over')"
+           ondrop="_dtOnDrop(event)"
+           onclick="_dtPickFiles()">
+        <span class="dt-dropzone-hint">Drop files here or click to browse</span>
+        <input type="file" id="dt-file-input" multiple
+               accept=".html,.htm,.md,.txt,.csv,.json,.yaml,.yml,.png,.jpg,.jpeg,.gif,.svg,.webp,.pdf,.py,.js,.ts,.tsx,.css,.sh,.log,.drawio,.xlsx,.pptx,.docx,.zip"
+               style="display:none" onchange="_dtOnFileInput(event)">
+      </div>
+      <div class="dt-previews" id="dt-previews"></div>
+      <div class="dt-file-error hidden" id="dt-file-error"></div>
+    </div>
+    <div class="modal-footer">
+      <button type="button" class="btn-ghost" onclick="closeDraftTicketModal()">Cancel</button>
+      <button type="button" class="btn-primary" id="dt-post-btn" onclick="postDraftToGitHub()">Post to GitHub</button>
+    </div>
+  </div>
+
+  <!-- Attachment push-failure modal (issue #188) -->
+  <div id="dt-push-fail-modal" class="hidden" style="
+    position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;
+    align-items:center;justify-content:center;z-index:9999;">
+    <div style="background:var(--surface);border-radius:8px;padding:24px;max-width:420px;width:90%;">
+      <p style="margin:0 0 16px;font-size:14px;">
+        Failed to commit attachments to GitHub. Issue was still created.
+        You can re-upload via the issue comment box.
+      </p>
+      <div style="text-align:right;">
+        <button class="btn-primary" onclick="document.getElementById('dt-push-fail-modal').classList.add('hidden')">OK</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<style>
+  /* ── Draft Ticket Modal ── */
+  .dt-modal { width: min(560px, calc(100vw - 32px)); max-height: calc(100vh - 48px); overflow-y: auto; }
+  .dt-textarea { resize: vertical; min-height: 80px; }
+  .dt-body-textarea { resize: vertical; min-height: 200px; font-family: var(--mono, monospace); font-size: 12px; }
+
+  .dt-dropzone {
+    border: 2px dashed var(--border); border-radius: 6px;
+    padding: 20px; text-align: center; cursor: pointer;
+    background: var(--surface-2); transition: border-color .15s, background .15s;
+  }
+  .dt-dropzone:hover, .dt-dropzone.drag-over {
+    border-color: var(--blue); background: var(--surface);
+  }
+  .dt-dropzone-hint { font-size: 12px; color: var(--text-muted); pointer-events: none; }
+
+  .dt-previews { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+  .dt-preview-item {
+    position: relative; width: 72px; text-align: center; font-size: 10px; color: var(--text-muted);
+  }
+  .dt-preview-img { width: 64px; height: 64px; object-fit: cover; border-radius: 4px; border: 1px solid var(--border); display: block; margin: 0 auto 2px; }
+  .dt-preview-icon { width: 64px; height: 64px; border-radius: 4px; border: 1px solid var(--border); background: var(--surface-2); display: flex; align-items: center; justify-content: center; font-size: 24px; margin: 0 auto 2px; }
+  .dt-preview-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 72px; }
+  .dt-preview-remove {
+    position: absolute; top: -4px; right: 2px;
+    background: var(--red); color: #fff; border: none; border-radius: 50%;
+    width: 16px; height: 16px; font-size: 11px; line-height: 16px; text-align: center;
+    cursor: pointer; padding: 0;
+  }
+  .dt-preview-remove:hover { opacity: .8; }
+
+  .dt-draft-divider { border-top: 1px solid var(--border); margin: 20px 0; }
+
+  .dt-attach-limits { font-size: 11px; color: var(--text-muted); margin: 0 0 8px; line-height: 1.5; }
+  .dt-file-error { font-size: 12px; color: var(--red, #e05); margin-top: 6px; }
+
+  /* Label picker */
+  .dt-label-picker {
+    border: 1px solid var(--border); border-radius: 6px;
+    background: var(--surface-2); padding: 8px;
+    max-height: 140px; overflow-y: auto;
+  }
+  .dt-label-loading, .dt-label-error {
+    font-size: 12px; color: var(--text-muted); padding: 4px 2px;
+  }
+  .dt-label-error { color: var(--red, #e05); }
+  .dt-label-list { display: flex; flex-direction: column; gap: 4px; }
+  .dt-label-item {
+    display: flex; align-items: center; gap: 8px;
+    padding: 4px 6px; border-radius: 4px; cursor: pointer;
+    transition: background .12s;
+  }
+  .dt-label-item:hover { background: var(--surface); }
+  .dt-label-item input[type="checkbox"] { cursor: pointer; flex-shrink: 0; }
+  .dt-label-swatch {
+    display: inline-block; width: 12px; height: 12px;
+    border-radius: 50%; flex-shrink: 0;
+    border: 1px solid rgba(0,0,0,.15);
+  }
+  .dt-label-name { font-size: 12px; color: var(--text); }
+
+  .dt-spinner {
+    display: inline-block; width: 12px; height: 12px; margin-right: 6px;
+    border: 2px solid rgba(255,255,255,.4); border-top-color: #fff;
+    border-radius: 50%; animation: dt-spin .6s linear infinite; vertical-align: middle;
+  }
+  @keyframes dt-spin { to { transform: rotate(360deg); } }
+
+  /* ── Sprint dropdown new-sprint row ── */
+  .dt-sprint-new-wrap { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
+  .dt-sprint-new-wrap .modal-input { flex: 1; }
+  .dt-sprint-cancel { font-size: 12px; color: var(--text-muted); text-decoration: none; white-space: nowrap; }
+  .dt-sprint-cancel:hover { color: var(--text); text-decoration: underline; }
+
+  /* ── Secondary button ── */
+  .btn-secondary {
+    padding: 6px 14px; border: 1px solid var(--border); border-radius: 6px;
+    background: var(--surface-2); color: var(--text); font-size: 12px; font-weight: 600;
+    transition: background .15s; cursor: pointer;
+  }
+  .btn-secondary:hover { background: var(--surface); }
+</style>
+
+<!-- ── Approve all UAT confirmation modal ── -->
+<div class="modal-backdrop hidden" id="aua-modal-backdrop" onclick="closeApproveAllUatModal()"></div>
+<div class="modal hidden" id="aua-modal" role="dialog" aria-modal="true" aria-labelledby="aua-modal-title">
+  <div class="modal-header">
+    <span class="modal-title" id="aua-modal-title">Approve UAT tickets?</span>
+    <button class="modal-close" id="aua-modal-close" onclick="closeApproveAllUatModal()" aria-label="Close">&times;</button>
+  </div>
+  <ul class="aua-ticket-list" id="aua-modal-list"></ul>
+  <div class="modal-error hidden" id="aua-modal-error"></div>
+  <div class="modal-footer">
+    <button class="btn-ghost" id="aua-modal-cancel" onclick="closeApproveAllUatModal()">Cancel</button>
+    <button class="aua-confirm-btn" id="aua-modal-confirm" onclick="confirmApproveAllUat()"><i class="ti ti-checks"></i> Confirm</button>
+  </div>
+</div>
+
+<style>
+  /* ── Per-#123: Running sprints banner + overview badges ── */
+
+  /* "N sprints running" banner shown when 2+ sprints are running */
+  .running-sprints-banner {
+    display: flex; align-items: center; gap: 8px;
+    padding: 8px 16px; margin: 0;
+    background: var(--blue-bg); color: var(--blue);
+    border-bottom: 1px solid var(--color-border-info);
+    font-size: 12px; flex-wrap: wrap;
+  }
+  .running-sprints-banner strong { font-weight: 700; }
+  .running-sprint-anchor {
+    color: var(--blue); font-weight: 600; text-decoration: underline; cursor: pointer;
+  }
+  .running-sprint-anchor:hover { opacity: .8; }
+  .running-banner-spin {
+    font-size: 14px; flex-shrink: 0;
+    animation: spin 1.2s linear infinite; transform-origin: center;
+  }
+  .running-banner-dismiss {
+    margin-left: auto; background: none; border: none; cursor: pointer;
+    color: var(--blue); font-size: 14px; padding: 0 2px; flex-shrink: 0;
+  }
+  .running-banner-dismiss:hover { opacity: .7; }
+
+  /* RUNNING badge on overview project cards */
+  .proj-running-badge {
+    font-size: 9px; font-weight: 800; text-transform: uppercase; letter-spacing: .08em;
+    padding: 2px 7px; border-radius: 10px;
+    background: var(--blue-bg); color: var(--blue);
+    border: 1px solid var(--color-border-info);
+    white-space: nowrap; flex-shrink: 0;
+    animation: running-badge-pulse 2s ease-in-out infinite;
+  }
+  @keyframes running-badge-pulse {
+    0%,100% { opacity: 1; }
+    50%      { opacity: .65; }
+  }
+</style>
+
+<!-- ── Bulk Create Modal (issue #189) ── -->
+<div class="modal-backdrop hidden" id="bc-backdrop" onclick="_bcBackdropClick()"></div>
+<div class="modal bc-modal hidden" id="bc-modal" role="dialog" aria-modal="true" aria-labelledby="bc-modal-title">
+  <!-- Header -->
+  <div class="modal-header">
+    <span class="modal-title" id="bc-modal-title">Bulk create tickets</span>
+    <span class="bc-step-badge" id="bc-step-badge">Step 1 of 2 &middot; Input</span>
+    <button class="modal-close" onclick="closeBulkCreateModal()" aria-label="Close">&times;</button>
+  </div>
+
+  <!-- Step 1: Input -->
+  <div id="bc-step1">
+    <div class="bc-settings-bar">
+      <div class="bc-settings-field">
+        <label class="modal-label" for="bc-repo">Repo</label>
+        <select class="modal-input bc-select" id="bc-repo" onchange="bcRepoChanged()"></select>
+      </div>
+      <div class="bc-settings-field bc-settings-field--labels">
+        <label class="modal-label" for="bc-default-labels">Default labels</label>
+        <input class="modal-input" id="bc-default-labels" type="text"
+               placeholder="enhancement, frontend" autocomplete="off">
+      </div>
+    </div>
+
+    <div class="bc-counter-row">
+      <span class="bc-counter" id="bc-counter">0 tickets detected &middot; 0 chars</span>
+    </div>
+
+    <textarea class="bc-textarea" id="bc-textarea"
+              placeholder="Paste your ticket prompts here, separated by --- on its own line..."
+              oninput="bcOnTextareaInput()"></textarea>
+
+    <div class="bc-info-note">
+      Split prompts using <code>---</code> on its own line. All created tickets go to backlog &mdash; assign them to a sprint later via Sprint Mgmt.
+    </div>
+
+    <!-- Attachments (issue #205) -->
+    <div class="bc-attach-section">
+      <div class="bc-attach-header">
+        <label class="modal-label">Attachments <span class="modal-hint">(optional &mdash; applied to every ticket in the batch)</span></label>
+        <p class="modal-hint bc-attach-limits">
+          Allowed: .png .pdf .html .htm and all other types supported by new-ticket.
+          &nbsp;&bull;&nbsp; Max 25 MB per file, 50 MB total.
+        </p>
+      </div>
+      <div class="dt-dropzone bc-dropzone" id="bc-dropzone"
+           ondragover="event.preventDefault(); this.classList.add('drag-over')"
+           ondragleave="this.classList.remove('drag-over')"
+           ondrop="_bcOnDrop(event)"
+           onclick="_bcPickFiles()">
+        <span class="dt-dropzone-hint">Drop files here or click to browse</span>
+        <input type="file" id="bc-file-input" multiple
+               accept=".html,.htm,.md,.txt,.csv,.json,.yaml,.yml,.png,.jpg,.jpeg,.gif,.svg,.webp,.pdf,.py,.js,.ts,.tsx,.css,.sh,.log,.drawio,.xlsx,.pptx,.docx,.zip"
+               style="display:none" onchange="_bcOnFileInput(event)">
+      </div>
+      <div class="bc-file-queue" id="bc-file-queue"></div>
+      <div class="bc-file-error hidden" id="bc-file-error"></div>
+    </div>
+
+    <div class="modal-error hidden" id="bc-step1-error"></div>
+
+    <div class="modal-footer bc-footer">
+      <div class="bc-footer-left">
+        <label class="bc-concurrency-label">Run BA in parallel:</label>
+        <select class="bc-concurrency-select" id="bc-concurrency">
+          <option value="1">1 at a time (serial)</option>
+          <option value="3" selected>3 at a time</option>
+          <option value="5">5 at a time</option>
+        </select>
+      </div>
+      <div class="bc-footer-right">
+        <button type="button" class="btn-ghost" onclick="closeBulkCreateModal()">Cancel</button>
+        <button type="button" class="btn-primary" id="bc-run-btn" disabled onclick="bcRunAll()">Run BA on all 0</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Step 2: Review & Create -->
+  <div id="bc-step2" class="hidden">
+    <div class="bc-parallel-banner" id="bc-parallel-banner"></div>
+    <div class="bc-summary-strip" id="bc-summary-strip"></div>
+    <div class="bc-ticket-list" id="bc-ticket-list"></div>
+    <div class="modal-footer bc-footer">
+      <div class="bc-footer-left">
+        <span class="bc-hint">You can close this modal &mdash; the job continues in the background.</span>
+      </div>
+      <div class="bc-footer-right">
+        <button type="button" class="btn-danger" id="bc-stop-btn" onclick="bcStop()">Stop after current</button>
+        <button type="button" class="btn-primary" id="bc-done-btn" disabled>Running...</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<style>
+  /* ── Bulk Create Modal ── */
+  .bc-modal {
+    width: min(740px, calc(100vw - 32px));
+    max-height: calc(100vh - 48px);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+  .bc-modal .modal-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-shrink: 0;
+  }
+  .bc-step-badge {
+    font-size: 11px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 10px;
+    background: var(--surface-2);
+    color: var(--text-muted);
+    border: 1px solid var(--border);
+    white-space: nowrap;
+    margin-left: auto;
+    margin-right: 4px;
+  }
+  .bc-modal .modal-close { margin-left: 0; }
+
+  /* Settings bar */
+  .bc-settings-bar {
+    display: flex;
+    gap: 12px;
+    padding: 14px 20px 10px;
+    border-bottom: 1px solid var(--border);
+    flex-wrap: wrap;
+  }
+  .bc-settings-field { display: flex; flex-direction: column; gap: 4px; }
+  .bc-settings-field--labels { flex: 1; min-width: 200px; }
+  .bc-select { min-width: 180px; }
+
+  /* Counter */
+  .bc-counter-row { padding: 8px 20px 4px; }
+  .bc-counter { font-size: 11px; color: var(--text-muted); font-weight: 500; }
+
+  /* Textarea */
+  .bc-textarea {
+    display: block;
+    width: 100%;
+    box-sizing: border-box;
+    min-height: 280px;
+    resize: vertical;
+    font-family: var(--mono, monospace);
+    font-size: 12px;
+    border: none;
+    border-top: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+    padding: 12px 20px;
+    background: var(--surface);
+    color: var(--text);
+    outline: none;
+  }
+  .bc-textarea:focus { border-color: var(--blue); }
+
+  /* Info note */
+  .bc-info-note {
+    padding: 8px 20px;
+    font-size: 11px;
+    color: var(--text-muted);
+    line-height: 1.5;
+  }
+  .bc-info-note code {
+    font-family: var(--mono, monospace);
+    background: var(--surface-2);
+    padding: 1px 4px;
+    border-radius: 3px;
+    font-size: 11px;
+  }
+
+  /* Footer */
+  .bc-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 20px;
+    border-top: 1px solid var(--border);
+    gap: 12px;
+    flex-wrap: wrap;
+    flex-shrink: 0;
+  }
+  .bc-footer-left { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .bc-footer-right { display: flex; align-items: center; gap: 8px; }
+  .bc-concurrency-label { font-size: 12px; color: var(--text); white-space: nowrap; }
+  .bc-concurrency-select {
+    padding: 4px 8px; border: 1px solid var(--border); border-radius: 5px;
+    background: var(--surface-2); color: var(--text); font-size: 12px; cursor: pointer;
+  }
+  .bc-hint { font-size: 11px; color: var(--text-muted); }
+  .btn-danger {
+    padding: 6px 14px; border: 1px solid var(--red, #dc2626); border-radius: 6px;
+    background: transparent; color: var(--red, #dc2626); font-size: 12px; font-weight: 600;
+    transition: background .15s, color .15s; cursor: pointer;
+  }
+  .btn-danger:hover { background: var(--red, #dc2626); color: #fff; }
+  .btn-danger:disabled { opacity: .45; cursor: not-allowed; pointer-events: none; }
+
+  /* Step 2 */
+  #bc-step1, #bc-step2 {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+  }
+  #bc-step2 {
+    overflow: hidden;
+    min-height: 0;
+  }
+
+  /* Parallel banner */
+  .bc-parallel-banner {
+    padding: 10px 20px;
+    background: var(--blue-bg, #eff6ff);
+    border-bottom: 1px solid var(--color-border-info, #93c5fd);
+    font-size: 12px;
+    color: var(--blue, #3b82f6);
+    flex-shrink: 0;
+  }
+  .bc-parallel-banner .bc-concurrency-pill {
+    display: inline-block;
+    padding: 1px 7px;
+    border-radius: 10px;
+    background: var(--blue, #3b82f6);
+    color: #fff;
+    font-size: 10px;
+    font-weight: 700;
+    margin-left: 4px;
+    vertical-align: middle;
+  }
+
+  /* Summary strip */
+  .bc-summary-strip {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 8px 20px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+    flex-wrap: wrap;
+  }
+  .bc-metric { display: flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 600; }
+  .bc-metric-count { font-size: 15px; font-weight: 700; }
+  .bc-metric--created .bc-metric-count { color: var(--green, #16a34a); }
+  .bc-metric--drafting .bc-metric-count { color: var(--blue, #3b82f6); }
+  .bc-metric--pending .bc-metric-count { color: var(--text-muted); }
+  .bc-progress-wrap {
+    flex: 1; min-width: 120px;
+    height: 6px; border-radius: 3px;
+    background: var(--surface-2); overflow: hidden; position: relative;
+  }
+  .bc-progress-bar {
+    height: 100%; border-radius: 3px;
+    background: var(--blue, #3b82f6);
+    transition: width .4s ease;
+    position: relative; overflow: hidden;
+  }
+  .bc-progress-bar::after {
+    content: '';
+    position: absolute; top: 0; left: -100%;
+    width: 100%; height: 100%;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,.4), transparent);
+    animation: bc-shimmer 1.5s infinite;
+  }
+  @keyframes bc-shimmer { to { left: 100%; } }
+  .bc-eta { font-size: 10px; color: var(--text-muted); white-space: nowrap; }
+
+  /* Ticket list */
+  .bc-ticket-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-height: 0;
+  }
+
+  /* Ticket cards */
+  .bc-card {
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    padding: 10px 12px;
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    transition: border-color .15s, opacity .15s;
+    background: var(--surface);
+  }
+  .bc-card--drafting { border-color: var(--blue, #3b82f6); }
+  .bc-card--created { border-color: var(--green, #16a34a); }
+  .bc-card--failed { border-color: var(--red, #dc2626); }
+  .bc-card--skipped { opacity: 0.55; }
+
+  /* Status dot */
+  .bc-status-dot {
+    flex-shrink: 0; width: 14px; height: 14px; border-radius: 50%;
+    border: 2px solid var(--border); background: transparent;
+    margin-top: 2px;
+  }
+  .bc-status-dot--pending { border-color: var(--border); }
+  .bc-status-dot--drafting {
+    border-color: var(--blue, #3b82f6);
+    border-top-color: transparent;
+    animation: bc-spin .7s linear infinite;
+  }
+  .bc-status-dot--created {
+    border-color: var(--green, #16a34a);
+    background: var(--green, #16a34a);
+    position: relative;
+  }
+  .bc-status-dot--created::after {
+    content: '';
+    position: absolute; left: 2px; top: 1px;
+    width: 5px; height: 3px;
+    border-left: 1.5px solid #fff; border-bottom: 1.5px solid #fff;
+    transform: rotate(-45deg);
+  }
+  .bc-status-dot--failed {
+    border-color: var(--red, #dc2626);
+    background: var(--red, #dc2626);
+    position: relative; display: flex; align-items: center; justify-content: center;
+  }
+  .bc-status-dot--failed::after {
+    content: '!'; color: #fff; font-size: 8px; font-weight: 700; line-height: 1;
+    position: absolute;
+  }
+  .bc-status-dot--skipped {
+    border-color: var(--text-muted); background: var(--text-muted);
+    position: relative; display: flex; align-items: center; justify-content: center;
+  }
+  .bc-status-dot--skipped::after {
+    content: '−'; color: #fff; font-size: 8px; font-weight: 700; line-height: 1;
+    position: absolute;
+  }
+  @keyframes bc-spin { to { transform: rotate(360deg); } }
+
+  /* Card body */
+  .bc-card-body { flex: 1; min-width: 0; }
+  .bc-card-head { display: flex; align-items: center; gap: 8px; margin-bottom: 3px; }
+  .bc-issue-badge {
+    font-size: 11px; font-weight: 700; color: var(--green, #16a34a);
+    text-decoration: none; flex-shrink: 0;
+  }
+  .bc-issue-badge:hover { text-decoration: underline; }
+  .bc-card-label { font-size: 10px; color: var(--text-muted); }
+  .bc-card-preview {
+    font-size: 11px; color: var(--text);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    max-width: 100%;
+  }
+  .bc-card-preview--error { color: var(--red, #dc2626); }
+  .bc-card-tags { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 4px; }
+  .bc-attach-warn {
+    font-size: 10px; color: var(--orange, #d97706); margin-top: 3px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;
+  }
+  .bc-tag {
+    font-size: 10px; padding: 1px 6px; border-radius: 8px;
+    background: var(--surface-2); border: 1px solid var(--border); color: var(--text-muted);
+  }
+
+  /* Card actions */
+  .bc-card-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+  .bc-action-btn {
+    background: none; border: none; cursor: pointer;
+    color: var(--text-muted); font-size: 14px; padding: 2px 4px; border-radius: 3px;
+    transition: color .12s, background .12s;
+  }
+  .bc-action-btn:hover { color: var(--text); background: var(--surface-2); }
+  .bc-action-btn--retry { color: var(--blue, #3b82f6); }
+  .bc-action-btn--retry:hover { background: var(--blue-bg, #eff6ff); }
+
+  /* Attachments section (issue #205) */
+  .bc-attach-section {
+    padding: 10px 20px 6px;
+    border-top: 1px solid var(--border);
+  }
+  .bc-attach-header { margin-bottom: 6px; }
+  .bc-attach-limits { margin: 2px 0 6px; }
+  .bc-dropzone { margin-bottom: 6px; }
+  .bc-file-queue {
+    display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px;
+  }
+  .bc-file-chip {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 2px 8px 2px 10px; border-radius: 12px;
+    background: var(--surface-2); border: 1px solid var(--border);
+    font-size: 11px; color: var(--text); max-width: 200px;
+  }
+  .bc-file-chip-name {
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .bc-file-chip-remove {
+    background: none; border: none; cursor: pointer;
+    color: var(--text-muted); font-size: 13px; padding: 0; line-height: 1;
+    flex-shrink: 0;
+    transition: color .1s;
+  }
+  .bc-file-chip-remove:hover { color: var(--red, #dc2626); }
+  .bc-file-error {
+    font-size: 11px; color: var(--red, #dc2626); margin-top: 4px;
+    padding: 4px 8px; background: var(--red-bg, #fef2f2);
+    border: 1px solid var(--red-border, #fca5a5); border-radius: 4px;
+  }
+
+  /* Toast */
+  .bc-toast {
+    position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+    background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+    padding: 10px 20px; font-size: 13px; color: var(--text);
+    box-shadow: 0 4px 16px rgba(0,0,0,.15);
+    z-index: 9999; white-space: nowrap;
+    animation: bc-toast-in .2s ease;
+  }
+  @keyframes bc-toast-in { from { opacity: 0; transform: translateX(-50%) translateY(8px); } }
 </style>
 
 <script src="/static/app.js"></script>

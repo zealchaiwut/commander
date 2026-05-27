@@ -23,17 +23,17 @@ import github_client
 STATUS_MAP = {
     "in-progress": {
         "add":    ["in-progress"],
-        "remove": ["SIT", "UAT", "needs-rework", "blocked"],
+        "remove": ["SIT", "UAT", "need-rework", "blocked"],
         "close":  None,
     },
     "sit": {
         "add":    ["SIT"],
-        "remove": ["in-progress", "UAT", "needs-rework", "blocked"],
+        "remove": ["in-progress", "UAT", "need-rework", "blocked"],
         "close":  None,
     },
     "uat": {
         "add":    ["UAT"],
-        "remove": ["in-progress", "SIT", "needs-rework", "blocked"],
+        "remove": ["in-progress", "SIT", "need-rework", "blocked"],
         "close":  None,
     },
     "blocked": {

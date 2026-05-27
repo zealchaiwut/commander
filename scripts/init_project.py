@@ -65,7 +65,7 @@ STANDARD_LABELS = [
     ("UAT",          "#C6D2D9"),
     ("UAT-approved", "#C6D2D9"),
     ("blocked",      "#C6D2D9"),
-    ("needs-rework", "#C6D2D9"),
+    ("need-rework", "#C6D2D9"),
     ("enhancement",  "#A2EAF6"),
     ("bug",          "#D73A4A"),
     ("sprint-1",     "#1D76DB"),
@@ -562,6 +562,10 @@ agents:
   coder_prompt_template: |
     Read the issue at {{issue_url}} and implement it following the
     project's branching workflow. Use the workflow defined in CLAUDE.md.
+    If the issue body contains an '## Attachments' section, download the
+    referenced files from the 'attachments' branch before starting — see
+    the 'How to read issue attachments' section in CLAUDE.md for the
+    exact `gh api` commands.
   tester_prompt_template: |
     Read the issue at {{issue_url}} and verify it as a tester following
     the project's testing workflow. Use the workflow defined in CLAUDE.md.

@@ -63,7 +63,7 @@ Once you have enough information, produce a proposal block that contains ALL of 
 - Example: "Fix approve button auto-close on reopen" → `fix-approve-auto-close`
 
 ### Label selection rules
-Only use labels from the **approved vocabulary**: `enhancement`, `bug`, `backlog`, `in-progress`, `SIT`, `UAT`, `UAT-approved`, `needs-rework`, `sprint-N`.
+Only use labels from the **approved vocabulary**: `enhancement`, `bug`, `backlog`, `in-progress`, `SIT`, `UAT`, `UAT-approved`, `need-rework`, `sprint-N`.
 
 Apply labels as follows:
 1. **Type:** use `enhancement` for new features or improvements; use `bug` for defects or broken behaviour.
@@ -99,12 +99,25 @@ After showing the proposal, ask exactly this question (no other text on that lin
 On approval, run:
 
 ```bash
-python3 $(git rev-parse --show-toplevel)/dashboard/scripts/create_ticket.py \
+python3 $(git rev-parse --show-toplevel)/scripts/create_ticket.py \
   --title "<title>" \
   --body "<body>" \
   --sprint <N> \
   --labels "<type-label>,backlog"
 ```
+
+To attach supporting files (screenshots, specs, logs), add one `--attachment` per file:
+
+```bash
+python3 $(git rev-parse --show-toplevel)/scripts/create_ticket.py \
+  --title "<title>" \
+  --body "<body>" \
+  --labels "<type-label>,backlog" \
+  --attachment /path/to/spec.txt \
+  --attachment /path/to/screenshot.png
+```
+
+Each attached file is copied to `references/issue-<N>/`, committed to the current branch, and linked in the issue body under an **Attachments** section. If any path does not exist, the script exits with an error before creating the issue.
 
 The script prints `#<number> <url>` on success.
 
@@ -116,6 +129,19 @@ Example:
 > Created **#12** https://github.com/zealchaiwut/commander/issues/12
 > Slug: `fix-approve-auto-close`
 > 5 acceptance criteria defined.
+
+## Step 5 — Optional: Estimate the issue
+
+This step is **off by default**. Only run it if the user explicitly asked (e.g. passed `--estimate`, said "and estimate it", or "estimate after creating").
+
+On opt-in, after the issue is created, run:
+
+```bash
+python3 $(git rev-parse --show-toplevel)/services/sprint_manager/estimate_issue.py \
+  --issue <N> --repo zealchaiwut/commander --save-comment --save-label
+```
+
+This invokes the Issue Estimator (Haiku 4.5) and posts a sizing comment to the issue. Report the size and risk flags alongside the issue URL.
 
 ## Tools available
 

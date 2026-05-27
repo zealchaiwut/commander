@@ -56,6 +56,10 @@ else
     fi
 fi
 
+# ── Sync pip requirements ─────────────────────────────────────────────────────
+echo "Syncing pip requirements…"
+"$VENV/bin/pip" install --quiet -r "$REPO_ROOT/requirements.txt"
+
 # ── Launch uvicorn in background ──────────────────────────────────────────────
 cd "$PRD_DIR"
 ENVIRONMENT=prd "$VENV/bin/uvicorn" server:app --host 0.0.0.0 --port "$PORT" \

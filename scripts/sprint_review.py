@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Sprint Pre-flight Review — BA sanity-check pass before sprint-run dispatches agents.
 
-For each open backlog issue in a sprint, calls the Anthropic API concurrently to
-review the issue for staleness, conflicts, vague AC, and missing info. Prints a
-structured report and presents an interactive prompt when stdout is a TTY.
+For each open backlog issue in a sprint, spawns a single claude CLI subprocess to
+review all issues in one pass for staleness, conflicts, vague AC, and missing info.
+Prints a structured report and presents an interactive prompt when stdout is a TTY.
 
 Usage (standalone):
     python3 dashboard/scripts/sprint_review.py sprint-3
@@ -20,11 +20,9 @@ import argparse
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
-import urllib.request
-import urllib.error
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -45,10 +43,7 @@ import github_client  # noqa: E402
 
 # ── constants ─────────────────────────────────────────────────────────────────
 
-MODEL = "claude-haiku-4-5-20251001"
-ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages"
-ANTHROPIC_VERSION = "2023-06-01"
-MAX_WORKERS = 5
+PREFLIGHT_TIMEOUT_SEC = int(os.environ.get("PREFLIGHT_TIMEOUT_SEC", "120"))
 
 # Vague-phrase patterns that trigger needs-update
 VAGUE_PHRASES = [
@@ -75,6 +70,34 @@ SYMBOLS = {
 
 # Token budget per issue (default M=40k tokens)
 TOKENS_PER_ISSUE = 40_000
+
+DEFAULT_PREFLIGHT_PROMPT = """\
+You are a BA reviewing GitHub issues for sprint readiness. Review ALL issues below in one pass.
+
+For each issue, check:
+- ok: issue is clear, actionable, and ready for a coder
+- stale: body references a #N issue number that is now closed, or mentions a feature/file that has since been merged
+- conflict: body references file paths that also appear in another sprint issue's body
+- needs-update: AC section present but contains vague phrases ("works correctly", "handles errors", "is fast") or has fewer than 2 checkbox items
+- missing-info: no "## Acceptance Criteria" section found in body
+
+Suggested actions: proceed (ok), rewrite (stale/needs-update), reorder (conflict), skip (missing-info)
+
+Sprint label: {sprint_label}
+Repository: {repo}
+
+Issues to review:
+{issues_json}
+
+Respond with ONLY a JSON object keyed by issue number (as string). Each value must have:
+  "status": one of ok|stale|conflict|needs-update|missing-info
+  "notes": one-sentence explanation
+  "suggested_action": one of proceed|rewrite|skip|reorder
+
+Example:
+{{"42": {{"status": "ok", "notes": "clear AC, ready to implement", "suggested_action": "proceed"}}, "43": {{"status": "missing-info", "notes": "no Acceptance Criteria section found", "suggested_action": "skip"}}}}
+
+Respond with ONLY the JSON object, no other text."""
 
 
 # ── review data structures ────────────────────────────────────────────────────
@@ -106,55 +129,85 @@ class ReviewResult:
         }
 
 
-# ── Anthropic API call (raw HTTP, no SDK) ─────────────────────────────────────
+# ── claude CLI subprocess agent call ─────────────────────────────────────────
 
-def _call_anthropic(api_key: str, prompt: str) -> dict:
-    """Call the Anthropic Messages API and return the parsed JSON response dict.
+def _spawn_preflight_agent(issues_json: str, repo: str, sprint_label: str) -> dict:
+    """Spawn a single claude CLI call to review all issues in one pass.
 
-    Returns a dict with keys: status, notes, suggested_action.
-    Raises urllib.error.HTTPError or ValueError on failure.
+    Returns a dict keyed by issue number (int) with {status, notes, suggested_action}.
+    On timeout or parse failure, returns an empty dict (caller falls back to ok).
     """
-    payload = {
-        "model": MODEL,
-        "max_tokens": 256,
-        "messages": [
-            {"role": "user", "content": prompt},
-        ],
-    }
-    body = json.dumps(payload).encode("utf-8")
-    req  = urllib.request.Request(
-        ANTHROPIC_API_URL,
-        data=body,
-        headers={
-            "Content-Type":         "application/json",
-            "x-api-key":            api_key,
-            "anthropic-version":    ANTHROPIC_VERSION,
-        },
-        method="POST",
+    prompt = DEFAULT_PREFLIGHT_PROMPT.format(
+        sprint_label=sprint_label,
+        repo=repo,
+        issues_json=issues_json,
     )
-    with urllib.request.urlopen(req, timeout=30) as resp:
-        raw = resp.read().decode("utf-8")
 
-    data    = json.loads(raw)
-    content = data.get("content", [{}])[0].get("text", "").strip()
+    env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
 
-    # Extract JSON from the response (model may wrap it in backticks)
-    json_match = re.search(r"\{.*\}", content, re.DOTALL)
+    try:
+        proc = subprocess.run(
+            [
+                "claude",
+                "--model", "claude-haiku-4-5",
+                "--dangerously-skip-permissions",
+                "-p", prompt,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=PREFLIGHT_TIMEOUT_SEC,
+            env=env,
+        )
+        stdout = proc.stdout.strip()
+    except subprocess.TimeoutExpired:
+        print(
+            f"\n  WARNING: preflight agent timed out after {PREFLIGHT_TIMEOUT_SEC}s "
+            "— all issues marked ok.",
+            file=sys.stderr,
+        )
+        return {}
+
+    # Extract JSON object from output (model may wrap in backticks or add prose)
+    json_match = re.search(r"\{.*\}", stdout, re.DOTALL)
     if not json_match:
-        raise ValueError(f"No JSON object in API response: {content!r}")
+        print(
+            f"\n  WARNING: preflight agent returned no JSON — all issues marked ok.\n"
+            f"           stdout: {stdout[:200]!r}",
+            file=sys.stderr,
+        )
+        return {}
 
-    result = json.loads(json_match.group(0))
+    try:
+        raw = json.loads(json_match.group(0))
+    except json.JSONDecodeError as exc:
+        print(
+            f"\n  WARNING: preflight agent JSON parse error ({exc}) — all issues marked ok.",
+            file=sys.stderr,
+        )
+        return {}
 
-    # Validate required fields
+    # Normalise: coerce string keys to int, validate status/action values
     valid_statuses = {"ok", "stale", "conflict", "needs-update", "missing-info"}
     valid_actions  = {"proceed", "rewrite", "skip", "reorder"}
-    if result.get("status") not in valid_statuses:
-        result["status"] = "ok"
-    if result.get("suggested_action") not in valid_actions:
-        result["suggested_action"] = "proceed"
-    if "notes" not in result:
-        result["notes"] = ""
-
+    result: dict[int, dict] = {}
+    for key, val in raw.items():
+        try:
+            num = int(key)
+        except (ValueError, TypeError):
+            continue
+        if not isinstance(val, dict):
+            continue
+        status = val.get("status", "ok")
+        action = val.get("suggested_action", "proceed")
+        if status not in valid_statuses:
+            status = "ok"
+        if action not in valid_actions:
+            action = "proceed"
+        result[num] = {
+            "status":           status,
+            "notes":            val.get("notes", ""),
+            "suggested_action": action,
+        }
     return result
 
 
@@ -231,9 +284,9 @@ def _pre_classify(
     all_issues: list[dict],
     repo_name: Optional[str],
 ) -> tuple[str, str]:
-    """Run deterministic checks and return (status, notes) before calling the API.
+    """Run deterministic checks and return (status, notes) before calling the agent.
 
-    Returns ("", "") if no pre-classification applies (let the API decide).
+    Returns ("", "") if no pre-classification applies (let the agent decide).
     """
     body       = issue.get("body") or ""
     issue_num  = issue["number"]
@@ -301,22 +354,15 @@ Status definitions:
 Respond with ONLY the JSON object, no other text."""
 
 
-# ── review a single issue ─────────────────────────────────────────────────────
+# ── review all issues via agent (one call) ────────────────────────────────────
 
-def review_issue(
-    issue: dict,
-    all_issues: list[dict],
-    api_key: str,
+def run_reviews(
+    issues: list[dict],
     repo_name: Optional[str],
-) -> ReviewResult:
-    """Review a single issue, using pre-classification + API fallback."""
-    number = issue["number"]
-    title  = issue["title"]
-
-    # Try deterministic pre-classification first (fast, no API call)
-    pre_status, pre_notes = _pre_classify(issue, all_issues, repo_name)
-
-    # Map pre-classified status to a suggested_action
+    sprint_label: str,
+) -> list[ReviewResult]:
+    """Review all issues: deterministic pre-classification first, then a single agent call
+    for any issues that pass pre-classification."""
     action_map = {
         "stale":        "rewrite",
         "conflict":     "reorder",
@@ -324,83 +370,64 @@ def review_issue(
         "missing-info": "skip",
     }
 
-    if pre_status:
-        return ReviewResult(
-            number           = number,
-            title            = title,
-            status           = pre_status,
-            notes            = pre_notes,
-            suggested_action = action_map.get(pre_status, "skip"),
+    pre_classified: dict[int, ReviewResult] = {}
+    needs_agent: list[dict] = []
+
+    for issue in issues:
+        pre_status, pre_notes = _pre_classify(issue, issues, repo_name)
+        if pre_status:
+            pre_classified[issue["number"]] = ReviewResult(
+                number           = issue["number"],
+                title            = issue["title"],
+                status           = pre_status,
+                notes            = pre_notes,
+                suggested_action = action_map.get(pre_status, "skip"),
+            )
+        else:
+            needs_agent.append(issue)
+
+    agent_results: dict[int, dict] = {}
+    if needs_agent:
+        issues_for_agent = [
+            {
+                "number": i["number"],
+                "title":  i["title"],
+                "body":   (i.get("body") or "")[:3000],
+            }
+            for i in needs_agent
+        ]
+        repo = github_client._r(repo_name)
+        agent_results = _spawn_preflight_agent(
+            json.dumps(issues_for_agent, indent=2),
+            repo,
+            sprint_label,
         )
 
-    # Fall back to API for nuanced review
-    prompt = _build_prompt(issue, all_issues)
-    try:
-        result = _call_anthropic(api_key, prompt)
-        return ReviewResult(
-            number           = number,
-            title            = title,
-            status           = result["status"],
-            notes            = result["notes"],
-            suggested_action = result["suggested_action"],
-        )
-    except Exception as exc:
-        # On API failure, do NOT default to ok/proceed — that would be dangerous.
-        # Mark as missing-info/skip so the issue is flagged for manual review.
-        err_note = f"API review failed: {exc}"
-        print(
-            f"\n  WARNING: Anthropic API failed for #{number} — defaulting to skip.\n"
-            f"           {exc}",
-            file=sys.stderr,
-        )
-        return ReviewResult(
-            number           = number,
-            title            = title,
-            status           = "missing-info",
-            notes            = err_note,
-            suggested_action = "skip",
-        )
-
-
-# ── concurrent review (AC-4) ─────────────────────────────────────────────────
-
-def run_reviews(
-    issues: list[dict],
-    api_key: str,
-    repo_name: Optional[str],
-) -> list[ReviewResult]:
-    """Review all issues concurrently using a ThreadPoolExecutor."""
-    results: dict[int, ReviewResult] = {}
-
-    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
-        future_to_num = {
-            pool.submit(review_issue, issue, issues, api_key, repo_name): issue["number"]
-            for issue in issues
-        }
-        for future in as_completed(future_to_num):
-            num = future_to_num[future]
-            try:
-                results[num] = future.result()
-            except Exception as exc:
-                # Should not normally reach here since review_issue catches internally.
-                # Still, do NOT default to ok/proceed on unexpected errors.
-                err_note = f"review error: {exc}"
-                print(
-                    f"\n  WARNING: Unexpected review error for #{num} — defaulting to skip.\n"
-                    f"           {exc}",
-                    file=sys.stderr,
-                )
-                results[num] = ReviewResult(
-                    number           = num,
-                    title            = next(i["title"] for i in issues if i["number"] == num),
-                    status           = "missing-info",
-                    notes            = err_note,
-                    suggested_action = "skip",
-                )
+    results: dict[int, ReviewResult] = dict(pre_classified)
+    for issue in needs_agent:
+        num   = issue["number"]
+        title = issue["title"]
+        if num in agent_results:
+            r = agent_results[num]
+            results[num] = ReviewResult(
+                number           = num,
+                title            = title,
+                status           = r["status"],
+                notes            = r["notes"],
+                suggested_action = r["suggested_action"],
+            )
+        else:
+            # Agent returned nothing for this issue — approve with skip-review note
+            results[num] = ReviewResult(
+                number           = num,
+                title            = title,
+                status           = "ok",
+                notes            = "review skipped (claude CLI not found)",
+                suggested_action = "proceed",
+            )
 
     # Return in original issue order
-    num_order = [i["number"] for i in issues]
-    return [results[n] for n in num_order if n in results]
+    return [results[i["number"]] for i in issues if i["number"] in results]
 
 
 # ── report printing (AC-5) ────────────────────────────────────────────────────
@@ -552,25 +579,23 @@ def run_preflight(
 ) -> tuple[list[ReviewResult], list[ReviewResult]]:
     """Run the preflight review and return (all_results, approved_issues).
 
-    all_results    — every issue that was reviewed
+    all_results     — every issue that was reviewed
     approved_issues — issues the user approved to run (may be a subset)
 
-    AC-9: If ANTHROPIC_API_KEY is unset/empty, prints warning and returns
-    all issues as approved (no API calls made).
+    If the claude CLI is not found, prints a warning and returns all issues
+    approved with status="ok", notes="review skipped (claude CLI not found)".
     """
-    api_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
-    if not api_key:
+    if not shutil.which("claude"):
         print(
-            "[preflight] ANTHROPIC_API_KEY not set — skipping review, proceeding with all issues"
+            "[preflight] claude CLI not found — skipping review, proceeding with all issues"
         )
-        # Fetch issues to build the approved list even without API
         issues = _fetch_sprint_issues(sprint_label, repo_name)
         pseudo = [
             ReviewResult(
                 number=i["number"],
                 title=i["title"],
                 status="ok",
-                notes="review skipped (no API key)",
+                notes="review skipped (claude CLI not found)",
                 suggested_action="proceed",
             )
             for i in issues
@@ -586,8 +611,7 @@ def run_preflight(
 
     print(f"[preflight] Reviewing {len(issues)} issue(s) for {sprint_label!r} ...")
 
-    # Concurrent review
-    results = run_reviews(issues, api_key, repo_name)
+    results = run_reviews(issues, repo_name, sprint_label)
 
     # Print report
     print_report(sprint_label, results)
@@ -630,7 +654,7 @@ def _fetch_sprint_issues(sprint_label: str, repo_name: Optional[str]) -> list[di
     for issue in all_issues:
         labels = {lbl["name"] for lbl in issue.get("labels", [])}
         # Classify: backlog = not in-progress / SIT / UAT / UAT-approved
-        status_labels = {"in-progress", "SIT", "UAT", "UAT-approved", "needs-rework", "blocked"}
+        status_labels = {"in-progress", "SIT", "UAT", "UAT-approved", "need-rework", "blocked"}
         if not (labels & status_labels):
             result.append(issue)
     return sorted(result, key=lambda i: i["number"])

@@ -23,6 +23,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 PROJECT_DIR="$(cd "$REPO_ROOT/.." && pwd)"
 
+UAT_REPO="$PROJECT_DIR/uat"
 UAT_DIR="$PROJECT_DIR/uat/apps/dashboard"
 VENV="$PROJECT_DIR/venv"
 PID_FILE="$UAT_DIR/uat.pid"
@@ -54,6 +55,10 @@ if [ -f "$PID_FILE" ]; then
         rm -f "$PID_FILE"
     fi
 fi
+
+# ── Sync pip requirements ─────────────────────────────────────────────────────
+echo "Syncing pip requirements…"
+"$VENV/bin/pip" install --quiet -r "$UAT_REPO/requirements.txt"
 
 # ── Launch uvicorn in background ──────────────────────────────────────────────
 cd "$UAT_DIR"

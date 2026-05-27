@@ -186,6 +186,14 @@ def _ticket_status(issue: dict) -> str:
     return "backlog"
 
 
+def _ticket_sprint_label(issue: dict) -> Optional[str]:
+    """Return the sprint-N label name (e.g. 'sprint-6') if present, else None."""
+    for label in issue.get("labels", []):
+        if re.fullmatch(r"sprint-\d+", label["name"]):
+            return label["name"]
+    return None
+
+
 # ── Token cost helpers ─────────────────────────────────────────────────────────
 
 _INPUT_COST_PER_M  = 3.0   # USD per million input tokens (Claude Sonnet)
@@ -453,6 +461,7 @@ def get_project_details(repo: str, agents: list[dict]) -> dict:
             "updated_at":     issue.get("updatedAt", ""),
             "is_uat":         status == "UAT",
             "feature_branch": feature_branches.get(issue["number"]),
+            "sprint_label":   _ticket_sprint_label(issue),
         })
 
     proj_agents = _project_agents(proj, agents)

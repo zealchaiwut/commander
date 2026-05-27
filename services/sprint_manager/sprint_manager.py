@@ -31,10 +31,12 @@ Run from the git root of the repository.
 from __future__ import annotations
 
 import argparse
+import atexit
 import email.mime.text
 import json
 import os
 import re
+import signal
 import smtplib
 import subprocess
 import sys
@@ -89,11 +91,11 @@ SPRINTS_DIR          = DASHBOARD_DIR / "sprints"
 ALERTS_DIR           = DASHBOARD_DIR / "alerts"
 
 # ── API cost pricing (USD per million tokens) ─────────────────────────────────
-# sprint_review.py uses Haiku 4.5 for raw API calls.  Coder/tester agents run
-# via Claude Code CLI (subscription-funded) so their tokens are free on the API.
-# Rates as of 2025: https://www.anthropic.com/pricing
-_HAIKU_INPUT_COST_PER_M  = 0.80   # claude-haiku-4-5-20251001 input
-_HAIKU_OUTPUT_COST_PER_M = 4.00   # claude-haiku-4-5-20251001 output
+# All agents (coder, tester, preflight) run via Claude Code CLI which is
+# subscription-funded — no raw API charges.
+# Rates kept for reference only; not used in cost_estimate.
+_HAIKU_INPUT_COST_PER_M  = 0.80   # claude-haiku-4-5-20251001 input (reference)
+_HAIKU_OUTPUT_COST_PER_M = 4.00   # claude-haiku-4-5-20251001 output (reference)
 
 
 # ── SprintConfig dataclass + loader ──────────────────────────────────────────
@@ -120,6 +122,12 @@ class SprintConfig:
     # Port detection (issue #62)
     app_default_port:      Optional[int]  = None
     app_port_strategy:     str            = "prefer_default"
+    # Documentor (issue #103)
+    documentor_enabled:    bool           = False
+    # Reviewer (issue #159)
+    reviewer_prompt_template: Optional[str] = None
+    # Documenter (issue #165)
+    documenter_prompt_template: Optional[str] = None
 
     @property
     def worktree_tester_app(self) -> Path:
@@ -238,6 +246,15 @@ def load_config(path: Path) -> "SprintConfig":
             )
         app_port_strategy = raw_strategy
 
+    # ── documentor section (issue #103) ──────────────────────────────────────
+    documentor_enabled: bool = bool(data.get("documentor_enabled", False))
+
+    # ── reviewer section (issue #159) ────────────────────────────────────────
+    reviewer_prompt = agents.get("reviewer_prompt_template") or None
+
+    # ── documenter section (issue #165) ──────────────────────────────────────
+    documenter_prompt = agents.get("documenter_prompt_template") or None
+
     return SprintConfig(
         repo_name             = repo_name,
         worktree_coder        = worktree_coder,
@@ -250,8 +267,11 @@ def load_config(path: Path) -> "SprintConfig":
         api_url               = api_url,
         coder_prompt_template = coder_prompt,
         tester_prompt_template= tester_prompt,
-        app_default_port      = app_default_port,
-        app_port_strategy     = app_port_strategy,
+        app_default_port         = app_default_port,
+        app_port_strategy        = app_port_strategy,
+        documentor_enabled          = documentor_enabled,
+        reviewer_prompt_template    = reviewer_prompt,
+        documenter_prompt_template  = documenter_prompt,
     )
 
 
@@ -277,22 +297,94 @@ def discover_config(start_dir: Optional[Path] = None) -> Optional[Path]:
 def _default_config() -> "SprintConfig":
     """Build a SprintConfig from env-vars + hardcoded defaults (backward compat)."""
     return SprintConfig(
-        repo_name         = None,  # will use github_client.repo()
-        worktree_coder    = Path.home() / "commander" / "work-coder",
-        worktree_tester   = WORKTESTER_ROOT,
-        tester_app_subdir = "apps/dashboard",
-        scripts_dir       = SCRIPTS_DIR,
-        logs_dir          = DASHBOARD_DIR / "logs",
-        sprints_dir       = SPRINTS_DIR,
-        alerts_dir        = ALERTS_DIR,
-        api_url           = DASHBOARD_API_URL,
+        repo_name          = None,  # will use github_client.repo()
+        worktree_coder     = Path.home() / "commander" / "work-coder",
+        worktree_tester    = WORKTESTER_ROOT,
+        tester_app_subdir  = "apps/dashboard",
+        scripts_dir        = SCRIPTS_DIR,
+        logs_dir           = DASHBOARD_DIR / "logs",
+        sprints_dir        = SPRINTS_DIR,
+        alerts_dir         = ALERTS_DIR,
+        api_url            = DASHBOARD_API_URL,
+        documentor_enabled = False,
     )
+
+
+# ── per-project PID lock ──────────────────────────────────────────────────────
+
+def _pid_file_path(sprint_label: str, cfg: Optional["SprintConfig"] = None) -> Path:
+    """Return the per-(project, sprint_label) PID file path."""
+    if cfg is not None:
+        sprints_dir = cfg.sprints_dir
+    else:
+        sprints_dir = REPO_ROOT / ".commander" / "sprints"
+    sprints_dir.mkdir(parents=True, exist_ok=True)
+    return sprints_dir / f"{sprint_label}-pid"
+
+
+def _acquire_pid_lock(sprint_label: str, project: str,
+                      cfg: Optional["SprintConfig"] = None) -> Path:
+    """Write a PID file scoped to (project, sprint_label).
+
+    If another process holds the lock and is still alive, exits with an error.
+    If the PID file is stale (process dead), logs a warning and cleans it up.
+    Returns the path so the caller can release it on exit.
+    """
+    pid_path = _pid_file_path(sprint_label, cfg)
+
+    if pid_path.exists():
+        stale_pid: Optional[int] = None
+        try:
+            stale_pid = int(pid_path.read_text().strip())
+        except (ValueError, OSError):
+            pass
+
+        alive = False
+        if stale_pid is not None:
+            try:
+                os.kill(stale_pid, 0)
+                alive = True
+            except ProcessLookupError:
+                alive = False
+            except PermissionError:
+                alive = True  # process exists but is owned by another user
+
+        if alive:
+            sys.exit(
+                f"Sprint {sprint_label} is already running on {project} (PID {stale_pid})"
+            )
+        else:
+            print(
+                f"  [pid-lock] Stale lock from PID {stale_pid} cleaned up",
+                file=sys.stderr,
+            )
+            try:
+                pid_path.unlink()
+            except OSError:
+                pass
+
+    pid_path.write_text(str(os.getpid()))
+    return pid_path
+
+
+def _release_pid_lock(pid_path: Path) -> None:
+    """Remove the PID file; idempotent."""
+    try:
+        pid_path.unlink()
+    except OSError:
+        pass
 
 
 # Hang detection constants (in seconds)
 HANG_WARN_SECS  = 30 * 60   # 30 minutes
 HANG_KILL_SECS  = 60 * 60   # 60 minutes
 HANG_CHECK_SECS = 5  * 60   # check every 5 minutes
+
+# Rate-limit retry constants
+_RATE_LIMIT_MAX_RETRIES     = 3
+_RATE_LIMIT_BACKOFF_DELAYS  = [30, 60, 120]   # seconds per attempt
+_RATE_LIMIT_SIGNALS         = ["429", "rate limit", "too many requests",
+                                "subscription rate limit", "rate_limit"]
 
 
 def _utcnow() -> str:
@@ -321,6 +413,19 @@ def _sprint_number(label: str) -> Optional[int]:
     return int(m.group(1)) if m else None
 
 
+def _is_rate_limit_error(output: str) -> tuple[bool, Optional[int]]:
+    """Return (is_rate_limit, retry_after_secs) by inspecting subprocess output.
+
+    Checks for 429 / rate-limit signals and an optional Retry-After value.
+    """
+    lower = output.lower()
+    if not any(sig in lower for sig in _RATE_LIMIT_SIGNALS):
+        return False, None
+    m = re.search(r"retry.?after[:\s]+(\d+)", output, re.IGNORECASE)
+    retry_after = int(m.group(1)) if m else None
+    return True, retry_after
+
+
 def _state_path(
     sprint_number: Optional[int],
     sprint_label: str,
@@ -342,6 +447,62 @@ def _summary_path(
     n   = sprint_number if sprint_number is not None else sprint_label
     day = datetime.now().strftime("%Y-%m-%d")
     return sprints_dir / f"sprint-{n}-summary-{day}.md"
+
+
+# ── PID file management (AC-2) ───────────────────────────────────────────────
+
+_active_pid_path: Optional[Path] = None
+
+
+def _remove_pid_file() -> None:
+    """Remove the sprint PID file if it exists (called by atexit + signal handlers)."""
+    global _active_pid_path
+    if _active_pid_path and _active_pid_path.exists():
+        try:
+            _active_pid_path.unlink()
+        except OSError:
+            pass
+
+
+def _setup_pid_file(sprint_num: Optional[int]) -> None:
+    """Write PID to dashboard/sprints/sprint-N.pid and register cleanup handlers."""
+    global _active_pid_path
+    if sprint_num is None:
+        return
+    sprints_dir = SPRINTS_DIR
+    sprints_dir.mkdir(parents=True, exist_ok=True)
+    pid_path = sprints_dir / f"sprint-{sprint_num}.pid"
+    pid_path.write_text(str(os.getpid()), encoding="utf-8")
+    _active_pid_path = pid_path
+
+    atexit.register(_remove_pid_file)
+
+    def _sig_handler(signum: int, frame: object) -> None:
+        _remove_pid_file()
+        sys.exit(0)
+
+    signal.signal(signal.SIGTERM, _sig_handler)
+    signal.signal(signal.SIGINT, _sig_handler)
+
+
+# ── Pause check (AC-3) ───────────────────────────────────────────────────────
+
+def _wait_if_paused(
+    sprint_num: Optional[int],
+    state: "SprintState",
+    api_url: Optional[str] = None,
+) -> None:
+    """Block until the sprint-N.pause file is removed, then broadcast resume."""
+    if sprint_num is None:
+        return
+    pause_file = SPRINTS_DIR / f"sprint-{sprint_num}.pause"
+    if not pause_file.exists():
+        return
+    print("Paused — waiting for resume…", flush=True)
+    while pause_file.exists():
+        time.sleep(5)
+    print("Resuming sprint…", flush=True)
+    _post_sprint_status(state, api_url=api_url)
 
 
 # ── failure categories ────────────────────────────────────────────────────────
@@ -377,50 +538,104 @@ class IssueState:
     category:    Optional[str]   = None         # FailureCategory value
     tokens_in:   int             = 0
     tokens_out:  int             = 0
+    # Per-ticket agent lifecycle fields (issue #131)
+    agent_status:         Optional[str] = None  # queued | coder_dispatched | coder_running | coder_done | tester_dispatched | tester_running | tester_done | completed | failed
+    status_changed_at:    Optional[str] = None  # ISO 8601 UTC
+    coder_started_at:     Optional[str] = None
+    coder_finished_at:    Optional[str] = None
+    tester_started_at:    Optional[str] = None
+    tester_finished_at:   Optional[str] = None
+    failure_reason:       Optional[str] = None
 
     def to_dict(self) -> dict:
         return {
-            "number":      self.number,
-            "title":       self.title,
-            "status":      self.status,
-            "skip_reason": self.skip_reason,
-            "category":    self.category,
-            "tokens_in":   self.tokens_in,
-            "tokens_out":  self.tokens_out,
+            "number":             self.number,
+            "title":              self.title,
+            "status":             self.status,
+            "skip_reason":        self.skip_reason,
+            "category":           self.category,
+            "tokens_in":          self.tokens_in,
+            "tokens_out":         self.tokens_out,
+            "agent_status":       self.agent_status,
+            "status_changed_at":  self.status_changed_at,
+            "coder_started_at":   self.coder_started_at,
+            "coder_finished_at":  self.coder_finished_at,
+            "tester_started_at":  self.tester_started_at,
+            "tester_finished_at": self.tester_finished_at,
+            "failure_reason":     self.failure_reason,
         }
 
     @staticmethod
     def from_dict(d: dict) -> "IssueState":
         return IssueState(
-            number      = d["number"],
-            title       = d["title"],
-            status      = d.get("status", "pending"),
-            skip_reason = d.get("skip_reason"),
-            category    = d.get("category"),
-            tokens_in   = d.get("tokens_in", 0),
-            tokens_out  = d.get("tokens_out", 0),
+            number             = d["number"],
+            title              = d["title"],
+            status             = d.get("status", "pending"),
+            skip_reason        = d.get("skip_reason"),
+            category           = d.get("category"),
+            tokens_in          = d.get("tokens_in", 0),
+            tokens_out         = d.get("tokens_out", 0),
+            agent_status       = d.get("agent_status"),
+            status_changed_at  = d.get("status_changed_at"),
+            coder_started_at   = d.get("coder_started_at"),
+            coder_finished_at  = d.get("coder_finished_at"),
+            tester_started_at  = d.get("tester_started_at"),
+            tester_finished_at = d.get("tester_finished_at"),
+            failure_reason     = d.get("failure_reason"),
         )
+
+    def set_agent_status(self, status: str) -> None:
+        """Set agent_status and record ISO 8601 UTC timestamp on status_changed_at."""
+        self.agent_status      = status
+        self.status_changed_at = _utcnow()
 
 
 @dataclass
 class SprintState:
-    sprint_label:     str
-    sprint_number:    Optional[int]
-    issues:           list[IssueState]  = field(default_factory=list)
-    start_timestamp:  str              = ""
-    total_tokens_in:  int              = 0
-    total_tokens_out: int              = 0
-    wall_clock_secs:  float            = 0.0
+    sprint_label:       str
+    sprint_number:      Optional[int]
+    project:            str              = ""
+    issues:             list[IssueState]  = field(default_factory=list)
+    start_timestamp:    str              = ""
+    total_tokens_in:    int              = 0
+    total_tokens_out:   int              = 0
+    wall_clock_secs:    float            = 0.0
+    token_budget:       int              = 0
+    rate_limit_events:  list[dict]       = field(default_factory=list)
+    # Reviewer fields (issue #159)
+    reviewer_status:      Optional[str]  = None   # "skipped" | "succeeded" | "failed"
+    reviewer_comment_url: Optional[str]  = None
+    reviewer_findings:    Optional[dict] = None   # {blockers, suggestions, nits, follow_up_tickets}
+    # Documenter fields (issue #165)
+    documenter_status:       Optional[str]       = None   # "skipped" | "succeeded" | "failed"
+    documenter_files_touched: list               = field(default_factory=list)
+    documenter_commit_sha:   Optional[str]       = None
+    # Estimator fields (issue #166)
+    estimator_status:        Optional[str]       = None   # "succeeded" | "failed" | "skipped"
+    estimator_total_minutes: Optional[int]       = None
+    estimates:               dict                = field(default_factory=dict)   # keyed by issue number (int)
 
     def to_dict(self) -> dict:
         return {
-            "sprint_label":     self.sprint_label,
-            "sprint_number":    self.sprint_number,
-            "issues":           [i.to_dict() for i in self.issues],
-            "start_timestamp":  self.start_timestamp,
-            "total_tokens_in":  self.total_tokens_in,
-            "total_tokens_out": self.total_tokens_out,
-            "wall_clock_secs":  self.wall_clock_secs,
+            "project":              self.project,
+            "sprint_label":         self.sprint_label,
+            "sprint_number":        self.sprint_number,
+            "issues":               [i.to_dict() for i in self.issues],
+            "start_timestamp":      self.start_timestamp,
+            "total_tokens_in":      self.total_tokens_in,
+            "total_tokens_out":     self.total_tokens_out,
+            "wall_clock_secs":      self.wall_clock_secs,
+            "token_budget":         self.token_budget,
+            "rate_limit_events":    self.rate_limit_events,
+            "reviewer_status":      self.reviewer_status,
+            "reviewer_comment_url": self.reviewer_comment_url,
+            "reviewer_findings":    self.reviewer_findings,
+            "documenter_status":         self.documenter_status,
+            "documenter_files_touched":  self.documenter_files_touched,
+            "documenter_commit_sha":     self.documenter_commit_sha,
+            "estimator_status":          self.estimator_status,
+            "estimator_total_minutes":   self.estimator_total_minutes,
+            "estimates":                 self.estimates,
         }
 
     @staticmethod
@@ -428,12 +643,24 @@ class SprintState:
         s = SprintState(
             sprint_label     = d["sprint_label"],
             sprint_number    = d.get("sprint_number"),
+            project          = d.get("project", ""),
             start_timestamp  = d.get("start_timestamp", ""),
             total_tokens_in  = d.get("total_tokens_in", 0),
             total_tokens_out = d.get("total_tokens_out", 0),
             wall_clock_secs  = d.get("wall_clock_secs", 0.0),
+            token_budget     = d.get("token_budget", 0),
         )
-        s.issues = [IssueState.from_dict(i) for i in d.get("issues", [])]
+        s.issues              = [IssueState.from_dict(i) for i in d.get("issues", [])]
+        s.rate_limit_events   = d.get("rate_limit_events", [])
+        s.reviewer_status     = d.get("reviewer_status")
+        s.reviewer_comment_url = d.get("reviewer_comment_url")
+        s.reviewer_findings   = d.get("reviewer_findings")
+        s.documenter_status        = d.get("documenter_status")
+        s.documenter_files_touched = d.get("documenter_files_touched", [])
+        s.documenter_commit_sha    = d.get("documenter_commit_sha")
+        s.estimator_status         = d.get("estimator_status")
+        s.estimator_total_minutes  = d.get("estimator_total_minutes")
+        s.estimates                = d.get("estimates", {})
         return s
 
     def save(self, path: Path) -> None:
@@ -1141,6 +1368,46 @@ def _call_finish_feature(
         print("  finish_feature.py completed successfully")
 
 
+# ── documentor integration (issue #103) ──────────────────────────────────────
+
+def _run_documentor(
+    issue_num: int,
+    repo_name: Optional[str],
+    cfg: Optional["SprintConfig"] = None,
+) -> None:
+    """Invoke document_issue.py for the given issue (best-effort, non-blocking).
+
+    Runs only when documentor_enabled=True in sprint.yaml.  Failures are
+    logged as warnings so they never block the merge pipeline.
+    """
+    document_script = Path(__file__).parent / "document_issue.py"
+    if not document_script.exists():
+        print("  [documentor] document_issue.py not found — skipping", file=sys.stderr)
+        return
+
+    eff_repo = repo_name or (cfg.repo_name if cfg else None)
+    cmd = [sys.executable, str(document_script), "--issue", str(issue_num), "--mode", "both"]
+    if eff_repo:
+        cmd += ["--repo", eff_repo]
+
+    print(f"  [documentor] running for issue #{issue_num} ...")
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        if result.stdout:
+            for line in result.stdout.splitlines():
+                print(f"  {line}")
+        if result.returncode != 0:
+            print(f"  [documentor] exited {result.returncode} (non-fatal)", file=sys.stderr)
+            if result.stderr:
+                print(f"  [documentor] stderr: {result.stderr.strip()[:400]}", file=sys.stderr)
+        else:
+            print(f"  [documentor] completed for issue #{issue_num}")
+    except subprocess.TimeoutExpired:
+        print("  [documentor] timed out after 300s (non-fatal)", file=sys.stderr)
+    except Exception as e:
+        print(f"  [documentor] error (non-fatal): {e}", file=sys.stderr)
+
+
 # ── post-tester hook ──────────────────────────────────────────────────────────
 
 def handle_post_tester(
@@ -1157,6 +1424,8 @@ def handle_post_tester(
     cfg: Optional["SprintConfig"] = None,
     base_branch: str = "develop",
     gate_scope: str = "changed",
+    documentor_enabled: bool = False,
+    alert_modes: Optional[list] = None,
 ) -> tuple[bool, str, Optional[str]]:
     """Called after a tester subprocess exits.
 
@@ -1190,23 +1459,53 @@ def handle_post_tester(
     if "UAT" not in labels:
         current = ", ".join(sorted(labels)) or "(none)"
         print(f"  Issue #{issue_num}: tester exited 0 but label is [{current}], not UAT -- skipping gates")
+        warning_body = (
+            f"**Tester exited 0 but not UAT — label missing.**\n\n"
+            f"The tester subprocess finished successfully (exit code 0), "
+            f"but the UAT label was never applied. Current labels: [{current}].\n\n"
+            f"This almost always means the tester agent skipped running `finish_feature.py`. "
+            f"Please either re-run the tester or apply the **UAT** label manually to move this "
+            f"ticket to the UAT queue."
+        )
+        try:
+            github_client.add_comment(issue_num, warning_body, repo_name=eff_repo)
+        except Exception as exc:
+            print(f"  Warning: failed to post missing-UAT comment — {exc}", file=sys.stderr)
+        if alert_modes:
+            dispatch_alerts(
+                alert_modes,
+                title=f"Issue #{issue_num} skipped: tester exited 0 but not UAT",
+                body=warning_body[:500],
+                issue_num=issue_num,
+                category=FailureCategory.TESTER_REJECTED,
+                cfg=cfg,
+            )
         return (False,
                 f"Issue #{issue_num}: tester exited 0 but not UAT -- no merge",
                 FailureCategory.TESTER_REJECTED)
 
     print(f"\nTester promoted issue #{issue_num} to UAT -- running quality gates...")
 
-    # Find the feature branch
+    # Find the feature branch; None means the tester agent already merged via finish_feature.py
     feature_branch = _find_feature_branch(issue_num)
-    if not feature_branch:
-        msg = f"Issue #{issue_num}: feature branch not found -- cannot run merge-preview gate"
-        print(f"  Warning: {msg}")
-        # Use a placeholder so the other gates can still run
+    already_merged_by_tester = feature_branch is None
+    if already_merged_by_tester:
+        print(
+            f"  Issue #{issue_num}: feature branch not found — "
+            f"tester already merged via finish_feature.py; skipping re-merge"
+        )
+        # Use a placeholder so pytest/lint gates can still run; merge-preview will be skipped
         feature_branch = f"feature/{issue_num}-unknown"
+
+    # Resolve documentor_enabled: explicit param wins, then cfg, then False
+    eff_documentor = documentor_enabled or (cfg.documentor_enabled if cfg is not None else False)
 
     if skip_gates:
         print("  --skip-gates active -- skipping all quality gates, proceeding to merge")
-        _call_finish_feature(issue_num, wt_root, target_branch=target_branch, repo_name=eff_repo, cfg=cfg)
+        if eff_documentor:
+            _run_documentor(issue_num, eff_repo, cfg=cfg)
+        if not already_merged_by_tester:
+            _call_finish_feature(issue_num, wt_root, target_branch=target_branch, repo_name=eff_repo, cfg=cfg)
         _post_agent_event("gate:merging", api_url=api_url)
         all_skipped = [
             GateResult(gate="pytest",        passed=True, skipped=True),
@@ -1214,6 +1513,8 @@ def handle_post_tester(
             GateResult(gate="merge-preview", passed=True, skipped=True),
         ]
         _post_success_comment(issue_num, all_skipped, repo_name=eff_repo)
+        if already_merged_by_tester:
+            return True, f"Tester promoted issue #{issue_num} to UAT; merge already done by tester, comment posted", None
         return True, f"Tester promoted issue #{issue_num} to UAT; all gates skipped, merged into {target_branch}", None
 
     results = _run_quality_gates(
@@ -1236,9 +1537,17 @@ def handle_post_tester(
 
     if all_passed:
         _post_agent_event("gate:merging", api_url=api_url)
-        print(f"  All gates passed -- calling finish_feature.py for issue #{issue_num}")
-        _call_finish_feature(issue_num, wt_root, target_branch=target_branch, repo_name=eff_repo, cfg=cfg)
+        if already_merged_by_tester:
+            print(f"  All gates passed -- tester already merged via finish_feature.py, skipping re-merge")
+        else:
+            print(f"  All gates passed -- calling finish_feature.py for issue #{issue_num}")
+        if eff_documentor:
+            _run_documentor(issue_num, eff_repo, cfg=cfg)
+        if not already_merged_by_tester:
+            _call_finish_feature(issue_num, wt_root, target_branch=target_branch, repo_name=eff_repo, cfg=cfg)
         _post_success_comment(issue_num, results, repo_name=eff_repo)
+        if already_merged_by_tester:
+            return True, f"Tester promoted issue #{issue_num} to UAT; merge already done by tester, comment posted", None
         return True, f"Tester promoted issue #{issue_num} to UAT; all gates passed, merged into {target_branch}", None
     else:
         failed = next((r for r in results if not r.passed), None)
@@ -1315,12 +1624,20 @@ def _dispatch_coder(
     repo_name: Optional[str] = None,
     cfg: Optional["SprintConfig"] = None,
     chosen_port: Optional[int] = None,
+    rate_limit_events: Optional[list] = None,
+    on_running: Optional[object] = None,
 ) -> tuple[bool, Optional[str]]:
     """Dispatch a coder agent for the issue.  Returns (ok, failure_category).
 
     When sprint_branch is not 'develop', sets COMMANDER_MERGE_TARGET in the
     subprocess environment so the coder agent creates the feature branch off
     the sprint branch instead of develop (AC2, AC3).
+
+    Retries up to _RATE_LIMIT_MAX_RETRIES times on 429/rate-limit errors with
+    exponential backoff.  Appends events to rate_limit_events when provided.
+
+    on_running: optional zero-argument callable invoked immediately after the
+    subprocess is spawned (before proc.wait) to signal coder_running status.
     """
     eff_repo = repo_name or (cfg.repo_name if cfg else None)
     api_url  = cfg.api_url if cfg else None
@@ -1357,9 +1674,12 @@ def _dispatch_coder(
     ]
 
     # Build subprocess environment: inherit current env, set COMMANDER_MERGE_TARGET
-    # when in sprint mode (AC2), and COMMANDER_APP_PORT if a port was chosen (issue #62).
+    # when in sprint mode (AC2), COMMANDER_APP_PORT if a port was chosen (issue #62),
+    # and COMMANDER_PROJECT so log output is tagged by project (issue #122).
     sub_env = os.environ.copy()
     sub_env.pop("ANTHROPIC_API_KEY", None)
+    if eff_repo:
+        sub_env["COMMANDER_PROJECT"] = eff_repo
     if sprint_branch not in ("develop",):
         sub_env["COMMANDER_MERGE_TARGET"] = sprint_branch
         # Always append sprint-mode instructions regardless of whether a custom
@@ -1376,42 +1696,96 @@ def _dispatch_coder(
         sub_env["COMMANDER_APP_PORT"] = str(chosen_port)
         print(f"  [port] COMMANDER_APP_PORT={chosen_port} injected into coder env")
 
-    try:
-        with log_path.open("w") as log_f:
-            proc = subprocess.Popen(
-                cmd,
-                stdout=log_f,
-                stderr=log_f,
-                cwd=str(cwd_path),
-                env=sub_env,
+    for attempt in range(_RATE_LIMIT_MAX_RETRIES + 1):
+        open_mode = "w" if attempt == 0 else "a"
+        try:
+            with log_path.open(open_mode) as log_f:
+                proc = subprocess.Popen(
+                    cmd,
+                    stdout=log_f,
+                    stderr=log_f,
+                    cwd=str(cwd_path),
+                    env=sub_env,
+                )
+        except FileNotFoundError:
+            # claude CLI not available -- treat as stub success for testing
+            print("  [coder] claude CLI not found -- stub success")
+            if on_running is not None:
+                try:
+                    on_running()
+                except Exception:
+                    pass
+            return True, None
+
+        if on_running is not None:
+            try:
+                on_running()
+            except Exception:
+                pass
+
+        detector = HangDetector(issue_num=issue_num, log_path=log_path, proc=proc)
+        detector.start()
+        rc = proc.wait()
+        detector.stop()
+
+        if detector.killed:
+            reason = f"No log activity for {HANG_KILL_SECS//60} minutes"
+            _add_blocked_label(issue_num, reason, repo_name=eff_repo)
+            dispatch_alerts(
+                alert_modes,
+                title=f"Issue #{issue_num}: HANG detected",
+                body=f"The coder subprocess produced no output for {HANG_KILL_SECS//60} minutes and was killed.",
+                issue_num=issue_num,
+                category=FailureCategory.HANG,
+                cfg=cfg,
             )
-    except FileNotFoundError:
-        # claude CLI not available -- treat as stub success for testing
-        print("  [coder] claude CLI not found -- stub success")
-        return True, None
+            return False, FailureCategory.HANG
 
-    detector = HangDetector(issue_num=issue_num, log_path=log_path, proc=proc)
-    detector.start()
-    rc = proc.wait()
-    detector.stop()
+        if rc == 0:
+            return True, None
 
-    if detector.killed:
-        reason = f"No log activity for {HANG_KILL_SECS//60} minutes"
-        _add_blocked_label(issue_num, reason, repo_name=eff_repo)
-        dispatch_alerts(
-            alert_modes,
-            title=f"Issue #{issue_num}: HANG detected",
-            body=f"The coder subprocess produced no output for {HANG_KILL_SECS//60} minutes and was killed.",
-            issue_num=issue_num,
-            category=FailureCategory.HANG,
-            cfg=cfg,
-        )
-        return False, FailureCategory.HANG
+        # Non-zero exit: inspect log for rate-limit signal
+        log_content = ""
+        if log_path.exists():
+            try:
+                log_content = log_path.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                pass
 
-    if rc != 0:
+        is_rl, retry_after = _is_rate_limit_error(log_content)
+
+        if is_rl and attempt < _RATE_LIMIT_MAX_RETRIES:
+            delay = retry_after if retry_after is not None else _RATE_LIMIT_BACKOFF_DELAYS[attempt]
+            retry_num = attempt + 1
+            print(f"  Rate limit hit, retrying in {delay} seconds (attempt {retry_num}/{_RATE_LIMIT_MAX_RETRIES})", flush=True)
+            if rate_limit_events is not None:
+                rate_limit_events.append({
+                    "issue_num": issue_num,
+                    "role": "coder",
+                    "attempt": retry_num,
+                    "delay_secs": delay,
+                    "timestamp": _utcnow(),
+                })
+            time.sleep(delay)
+            continue
+
+        if is_rl:
+            print(f"  Subscription rate limit exhausted for coder issue #{issue_num} after {_RATE_LIMIT_MAX_RETRIES} retries", flush=True)
+            if rate_limit_events is not None:
+                rate_limit_events.append({
+                    "issue_num": issue_num,
+                    "role": "coder",
+                    "attempt": _RATE_LIMIT_MAX_RETRIES,
+                    "delay_secs": 0,
+                    "exhausted": True,
+                    "timestamp": _utcnow(),
+                })
+            return False, FailureCategory.RETRY_EXHAUSTED
+
         return False, FailureCategory.CRASH
 
-    return True, None
+    # Should not be reached, but satisfy the type checker
+    return False, FailureCategory.CRASH
 
 
 def _dispatch_tester(
@@ -1421,12 +1795,20 @@ def _dispatch_tester(
     repo_name: Optional[str] = None,
     cfg: Optional["SprintConfig"] = None,
     chosen_port: Optional[int] = None,
+    rate_limit_events: Optional[list] = None,
+    on_running: Optional[object] = None,
 ) -> tuple[int, Optional[str]]:
     """Dispatch a tester agent.  Returns (exit_code, failure_category_if_hang).
 
     When sprint_branch is not 'develop', sets COMMANDER_MERGE_TARGET in the
     subprocess environment so the tester agent merges the feature branch into
     the sprint branch instead of develop (AC2, AC4).
+
+    Retries up to _RATE_LIMIT_MAX_RETRIES times on 429/rate-limit errors with
+    exponential backoff.  Appends events to rate_limit_events when provided.
+
+    on_running: optional zero-argument callable invoked immediately after the
+    subprocess is spawned (before proc.wait) to signal tester_running status.
     """
     eff_repo = repo_name or (cfg.repo_name if cfg else None)
     api_url  = cfg.api_url if cfg else None
@@ -1472,9 +1854,12 @@ def _dispatch_tester(
     ]
 
     # Build subprocess environment: inherit current env, set COMMANDER_MERGE_TARGET
-    # when in sprint mode (AC2), and COMMANDER_APP_PORT if a port was chosen (issue #62).
+    # when in sprint mode (AC2), COMMANDER_APP_PORT if a port was chosen (issue #62),
+    # and COMMANDER_PROJECT so log output is tagged by project (issue #122).
     sub_env = os.environ.copy()
     sub_env.pop("ANTHROPIC_API_KEY", None)
+    if eff_repo:
+        sub_env["COMMANDER_PROJECT"] = eff_repo
     if sprint_branch not in ("develop",):
         sub_env["COMMANDER_MERGE_TARGET"] = sprint_branch
         # Always append sprint-mode instructions regardless of whether a custom
@@ -1489,37 +1874,93 @@ def _dispatch_tester(
         sub_env["COMMANDER_APP_PORT"] = str(chosen_port)
         print(f"  [port] COMMANDER_APP_PORT={chosen_port} injected into tester env")
 
-    try:
-        with log_path.open("a") as log_f:
-            proc = subprocess.Popen(
-                cmd,
-                stdout=log_f,
-                stderr=log_f,
-                cwd=str(cwd_path),
-                env=sub_env,
+    for attempt in range(_RATE_LIMIT_MAX_RETRIES + 1):
+        try:
+            with log_path.open("a") as log_f:
+                proc = subprocess.Popen(
+                    cmd,
+                    stdout=log_f,
+                    stderr=log_f,
+                    cwd=str(cwd_path),
+                    env=sub_env,
+                )
+        except FileNotFoundError:
+            print("  [tester] claude CLI not found -- stub success")
+            if on_running is not None:
+                try:
+                    on_running()
+                except Exception:
+                    pass
+            return 0, None
+
+        if on_running is not None:
+            try:
+                on_running()
+            except Exception:
+                pass
+
+        detector = HangDetector(issue_num=issue_num, log_path=log_path, proc=proc)
+        detector.start()
+        rc = proc.wait()
+        detector.stop()
+
+        if detector.killed:
+            reason = f"Tester: no log activity for {HANG_KILL_SECS//60} minutes"
+            _add_blocked_label(issue_num, reason, repo_name=eff_repo)
+            dispatch_alerts(
+                alert_modes,
+                title=f"Issue #{issue_num}: HANG detected in tester",
+                body=f"The tester subprocess produced no output for {HANG_KILL_SECS//60} minutes.",
+                issue_num=issue_num,
+                category=FailureCategory.HANG,
+                cfg=cfg,
             )
-    except FileNotFoundError:
-        print("  [tester] claude CLI not found -- stub success")
-        return 0, None
+            return -1, FailureCategory.HANG
 
-    detector = HangDetector(issue_num=issue_num, log_path=log_path, proc=proc)
-    detector.start()
-    rc = proc.wait()
-    detector.stop()
+        if rc == 0:
+            return 0, None
 
-    if detector.killed:
-        reason = f"Tester: no log activity for {HANG_KILL_SECS//60} minutes"
-        _add_blocked_label(issue_num, reason, repo_name=eff_repo)
-        dispatch_alerts(
-            alert_modes,
-            title=f"Issue #{issue_num}: HANG detected in tester",
-            body=f"The tester subprocess produced no output for {HANG_KILL_SECS//60} minutes.",
-            issue_num=issue_num,
-            category=FailureCategory.HANG,
-            cfg=cfg,
-        )
-        return -1, FailureCategory.HANG
+        # Non-zero exit: inspect log for rate-limit signal
+        log_content = ""
+        if log_path.exists():
+            try:
+                log_content = log_path.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                pass
 
+        is_rl, retry_after = _is_rate_limit_error(log_content)
+
+        if is_rl and attempt < _RATE_LIMIT_MAX_RETRIES:
+            delay = retry_after if retry_after is not None else _RATE_LIMIT_BACKOFF_DELAYS[attempt]
+            retry_num = attempt + 1
+            print(f"  Rate limit hit, retrying in {delay} seconds (attempt {retry_num}/{_RATE_LIMIT_MAX_RETRIES})", flush=True)
+            if rate_limit_events is not None:
+                rate_limit_events.append({
+                    "issue_num": issue_num,
+                    "role": "tester",
+                    "attempt": retry_num,
+                    "delay_secs": delay,
+                    "timestamp": _utcnow(),
+                })
+            time.sleep(delay)
+            continue
+
+        if is_rl:
+            print(f"  Subscription rate limit exhausted for tester issue #{issue_num} after {_RATE_LIMIT_MAX_RETRIES} retries", flush=True)
+            if rate_limit_events is not None:
+                rate_limit_events.append({
+                    "issue_num": issue_num,
+                    "role": "tester",
+                    "attempt": _RATE_LIMIT_MAX_RETRIES,
+                    "delay_secs": 0,
+                    "exhausted": True,
+                    "timestamp": _utcnow(),
+                })
+            return rc, FailureCategory.RETRY_EXHAUSTED
+
+        return rc, None
+
+    # Should not be reached
     return rc, None
 
 
@@ -1565,17 +2006,9 @@ def generate_sprint_summary(
     pending   = [i for i in state.issues if i.status == "pending"]
 
     total_tokens     = state.total_tokens_in + state.total_tokens_out
-    # cost_estimate: only sprint_review.py uses raw API (Haiku 4.5); coder/tester
-    # run via Claude Code CLI which is subscription-funded (no API charges).
-    # We estimate preflight API cost based on issues reviewed × avg input tokens.
-    # The token split is roughly 95% input (long prompts), 5% output (short JSON).
-    reviewed_issues = len(state.issues)
-    _preflight_in_tokens  = reviewed_issues * 40_000  # TOKENS_PER_ISSUE from sprint_review
-    _preflight_out_tokens = reviewed_issues * 256       # max_tokens per issue call
-    cost_estimate_usd = (
-        _preflight_in_tokens  / 1_000_000 * _HAIKU_INPUT_COST_PER_M
-        + _preflight_out_tokens / 1_000_000 * _HAIKU_OUTPUT_COST_PER_M
-    )
+    # cost_estimate: all agents (coder, tester, preflight) run via Claude Code CLI
+    # which is subscription-funded — no raw API charges.
+    cost_estimate_usd = 0.0
     avg_ticket_secs  = (elapsed_secs / len(completed)) if completed else 0
     avg_h, avg_r     = divmod(int(avg_ticket_secs), 3600)
     avg_m, avg_s     = divmod(avg_r, 60)
@@ -1657,7 +2090,7 @@ def generate_sprint_summary(
         lines.append("")
 
     # -- Stats --
-    cost_str = f"~${cost_estimate_usd:.4f} (preflight API only; coder/tester via Claude Code subscription)"
+    cost_str = "$0.00 (all agents subscription-funded via Claude Code)"
     lines += [
         "## Stats",
         "",
@@ -1671,6 +2104,25 @@ def generate_sprint_summary(
         f"| Cost estimate | {cost_str} |",
         "",
     ]
+
+    # -- Rate Limit Events --
+    if state.rate_limit_events:
+        lines += ["## Rate Limit Events", ""]
+        lines += [
+            "| Issue # | Role | Attempt | Delay (s) | Exhausted | Timestamp |",
+            "|---|---|---|---|---|---|",
+        ]
+        for ev in state.rate_limit_events:
+            exhausted = "Yes" if ev.get("exhausted") else "No"
+            lines.append(
+                f"| #{ev.get('issue_num', '?')} "
+                f"| {ev.get('role', '?')} "
+                f"| {ev.get('attempt', '?')}/{_RATE_LIMIT_MAX_RETRIES} "
+                f"| {ev.get('delay_secs', '?')} "
+                f"| {exhausted} "
+                f"| {ev.get('timestamp', '?')} |"
+            )
+        lines.append("")
 
     # -- Carried Over --
     lines += ["## Carried Over", ""]
@@ -1749,8 +2201,21 @@ def _ensure_github_labels(labels: list[str], repo_name: Optional[str] = None) ->
             pass
 
 
-def _is_stale_summary(body: str, state_reason: Optional[str]) -> tuple[bool, str]:
-    """Return (is_stale, reason) for an existing summary issue body."""
+def _is_stale_summary(
+    body: str,
+    state_reason: Optional[str],
+    state_file_mtime: Optional[float] = None,
+    issue_created_at: Optional[str] = None,
+) -> tuple[bool, str]:
+    """Return (is_stale, reason) for an existing summary issue body.
+
+    Staleness criteria (any one is sufficient):
+    1. Issue was closed with state_reason "not_planned".
+    2. Body looks like a stub/failed run (stopped + all TESTER_REJECTED + nothing shipped).
+    3. The sprint state file on disk is newer than the GitHub issue (AC-2: state-file
+       timestamp check) — i.e. a newer sprint run has already completed locally but its
+       results were never reflected in the GitHub issue.
+    """
     if state_reason == "not_planned":
         return True, "closed as not_planned"
 
@@ -1765,6 +2230,18 @@ def _is_stale_summary(body: str, state_reason: Optional[str]) -> tuple[bool, str
     if has_stopped and has_rejected and no_shipped:
         return True, "failed-run summary (stopped, all TESTER_REJECTED, nothing shipped)"
 
+    # State-file timestamp check: if the local state file is newer than when the issue
+    # was created, the issue was produced by an older sprint run.
+    if state_file_mtime is not None and issue_created_at:
+        try:
+            issue_ts = datetime.fromisoformat(
+                issue_created_at.rstrip("Z")
+            ).replace(tzinfo=timezone.utc).timestamp()
+            if state_file_mtime > issue_ts:
+                return True, "state file is newer than summary issue (newer sprint run completed locally)"
+        except (ValueError, OSError):
+            pass  # malformed timestamp or missing file — skip this check
+
     return False, ""
 
 
@@ -1774,6 +2251,7 @@ def create_summary_github_issue(
     sprint_label: str,
     repo_name: Optional[str] = None,
     force_summary: bool = False,
+    state_file_path: Optional[Path] = None,
 ) -> tuple[Optional[int], Optional[str]]:
     """AC-2: Create a GitHub issue with the summary markdown as the body.
 
@@ -1781,6 +2259,10 @@ def create_summary_github_issue(
     with the exact title.  If one already exists and is stale (or force_summary
     is set), updates it in place.  Otherwise skips creation (AC-2).
     If none exists, creates the issue (AC-3).
+
+    state_file_path: optional path to the sprint state JSON file; when provided
+    its mtime is compared to the existing issue's createdAt to detect staleness
+    (AC-2: state-file timestamp check).
     """
     n      = sprint_number if sprint_number is not None else sprint_label
     title  = f"Sprint {n} Executive Summary"
@@ -1806,9 +2288,19 @@ def create_summary_github_issue(
         except Exception as e:
             print(f"  Warning: could not fetch existing summary issue body -- {e}", file=sys.stderr)
 
+        # Compute state-file mtime for the timestamp staleness check (best-effort)
+        state_file_mtime: Optional[float] = None
+        if state_file_path is not None:
+            try:
+                state_file_mtime = state_file_path.stat().st_mtime
+            except OSError:
+                pass
+
         is_stale, stale_reason = _is_stale_summary(
-            body         = full_issue.get("body", ""),
-            state_reason = full_issue.get("stateReason"),
+            body             = full_issue.get("body", ""),
+            state_reason     = full_issue.get("stateReason"),
+            state_file_mtime = state_file_mtime,
+            issue_created_at = full_issue.get("createdAt"),
         )
 
         if force_summary or is_stale:
@@ -1969,13 +2461,15 @@ def write_sprint_summary(
         return path
 
     # AC-2: Create GitHub issue (best-effort); deduplication handled inside
+    state_path = _state_path(state.sprint_number, state.sprint_label, cfg=cfg)
     try:
         summary_issue_num, summary_issue_url = create_summary_github_issue(
-            content=content,
-            sprint_number=state.sprint_number,
-            sprint_label=state.sprint_label,
-            repo_name=eff_repo,
-            force_summary=force_summary,
+            content         = content,
+            sprint_number   = state.sprint_number,
+            sprint_label    = state.sprint_label,
+            repo_name       = eff_repo,
+            force_summary   = force_summary,
+            state_file_path = state_path,
         )
     except Exception as exc:
         print(f"  Warning: create_summary_github_issue raised -- {exc}", file=sys.stderr)
@@ -1983,7 +2477,6 @@ def write_sprint_summary(
 
     # Store summary_issue_url in state JSON
     if summary_issue_url:
-        state_path = _state_path(state.sprint_number, state.sprint_label, cfg=cfg)
         try:
             if state_path.exists():
                 state_dict = json.loads(state_path.read_text())
@@ -2089,6 +2582,727 @@ def _create_sprint_pr(
         return None
 
 
+# ── Reviewer dispatch (issue #159 / #160) ────────────────────────────────────
+#
+# Sprint.yaml override example (add under the `agents:` key):
+#
+#   agents:
+#     reviewer_prompt_template: |
+#       You are the code reviewer for sprint {sprint_label}.
+#       Repo: {repo_name}. Diff: {base_sha}..{head_sha}.
+#       Sprint summary issue: #{summary_issue_num}.
+#       ... (your custom instructions here) ...
+#
+# All six placeholders are available in every template (custom or default):
+#   {sprint_label}       e.g. "sprint-12"
+#   {sprint_branch}      e.g. "sprint/sprint-12"
+#   {base_sha}           base commit SHA of the sprint branch
+#   {head_sha}           head commit SHA of the sprint branch
+#   {summary_issue_num}  GitHub issue number of the sprint summary
+#   {sprint_filter_url}  GitHub issues URL filtered by sprint label
+#   {repo_name}          e.g. "zealchaiwut/commander"
+
+DEFAULT_REVIEWER_PROMPT = """\
+You are the **Code Reviewer** agent for sprint {sprint_label}.
+
+## Context
+
+- Repo: {repo_name}
+- Sprint branch: {sprint_branch} (already merged to develop)
+- Diff range: {base_sha}..{head_sha}
+- Sprint summary issue: #{summary_issue_num}
+- Sprint tickets: {sprint_filter_url}
+
+## Your Mandate (Read-Only Review)
+
+You perform a structured code review of everything merged this sprint. \
+You do NOT modify code, make commits, push branches, close tickets, \
+apply labels to merged tickets, run tests, or run the application. \
+You post EXACTLY ONE comment on the sprint summary issue. \
+You do NOT review tickets that failed or were not merged.
+
+## Step 1 — Collect the diff
+
+Run these two commands and read their output carefully:
+
+```
+git diff {base_sha}..{head_sha}
+git diff {base_sha}..{head_sha} --stat
+```
+
+## Step 2 — Identify merged tickets
+
+Run:
+
+```
+gh issue view {summary_issue_num} --json body
+```
+
+Parse the sprint summary body to extract the list of merged ticket numbers \
+(look for checkboxes or a "Merged" / "Done" section). \
+For each merged ticket N, run:
+
+```
+gh issue view N --json number,title,body,labels
+```
+
+Skip any ticket that:
+- Has the label `needs-rework`
+- Is NOT in a merged/done state (failed or skipped tickets are not reviewed)
+
+## Step 3 — Per-Ticket Review
+
+For each merged ticket, evaluate the following. \
+Every finding MUST include a `file:line` reference from the actual diff — \
+vague findings with no file reference are not allowed.
+
+### 3a. Acceptance Criteria Coverage
+
+Every AC checkbox in the ticket body should have corresponding code changes \
+in the diff. Flag any AC item that appears unimplemented or only partially \
+implemented.
+
+### 3b. Scope Creep
+
+Files changed in the diff that go beyond what the ticket asked for. \
+Flag files that have no plausible connection to the ticket's stated goal.
+
+### 3c. Out-of-Scope Violations
+
+If the ticket has an "Out of Scope" section listing things NOT to do, \
+check whether the diff does any of those things anyway.
+
+### 3d. Code Quality Smells
+
+Check for:
+- Hardcoded secrets or credentials
+- Raw SQL string concatenation (SQL injection risk)
+- Bare `except:` with no exception type
+- Missing input validation on new API endpoints
+- Missing error handling on external calls (HTTP, subprocess, file I/O)
+- Dead code (unreachable branches, unused imports, commented-out blocks)
+- Hardcoded values that belong in config
+- New unjustified dependencies added to requirements.txt or package.json
+
+### 3e. Spec-vs-Code Drift
+
+Does the code actually implement what the AC says, beyond what the tester \
+already verified? Look for subtle divergences: wrong defaults, inverted \
+conditions, missing edge-case handling the AC implied.
+
+## Step 4 — Sprint-Level Review
+
+After reviewing all individual tickets, check across the full diff for:
+
+- **Migration order**: if multiple Alembic migrations are present, are their \
+  down_revision chains chronologically valid?
+- **Schema conflicts**: column names referenced consistently across tickets \
+  (no ticket renames a column another ticket still uses under the old name)?
+- **Endpoint consistency**: new routes follow the naming conventions of \
+  existing routes?
+- **Dependency additions**: every new entry in requirements.txt / package.json \
+  is justified by at least one ticket?
+- **Cross-file quiet refactoring**: large code movements or renames that no \
+  individual ticket required?
+
+## Step 5 — Classify Each Finding
+
+Assign one of three severity labels:
+
+| Label | Meaning |
+|-------|---------|
+| **BLOCKER** | Real harm if shipped — data loss, security hole, broken contract, \
+crash on the happy path. Do NOT create a follow-up ticket for blockers. |
+| **SUGGESTION** | Worth fixing but not blocking — better error handling, \
+cleaner abstraction, missing test coverage for an edge case. |
+| **NIT** | Minor polish — naming, formatting, a missing docstring. |
+
+Be conservative with BLOCKER. When in doubt, downgrade to SUGGESTION.
+
+## Step 6 — Post ONE Comment on Issue #{summary_issue_num}
+
+Use this exact structure. Write the body to a temp file, then post it with:
+
+```
+gh issue comment {summary_issue_num} --body-file /tmp/reviewer-report.md
+```
+
+If a reviewer comment from a previous run already exists on this issue, \
+EDIT that comment instead of posting a new one (use `gh api` PATCH). \
+Do NOT post more than one reviewer comment on the sprint summary issue.
+
+### Comment Structure
+
+```
+## Code Reviewer Report — Sprint {sprint_label}
+
+**Diff range:** {base_sha}..{head_sha}
+**Tickets reviewed:** N  |  **Findings:** B blockers · S suggestions · N nits
+
+---
+
+### Per-Ticket Review
+
+#### Ticket #N — <title>
+
+**AC coverage:** [all covered | AC item "..." not found in diff]
+**Scope creep:** [none | file:line — reason]
+**Out-of-scope violations:** [none | description]
+
+BLOCKER · `file.py:42` — Raw SQL concatenation: `query = "SELECT * FROM users WHERE id=" + user_id`
+SUGGESTION · `file.py:88` — Missing error handling on `requests.get(url)` call; wrap in try/except and return HTTP 502 on failure.
+NIT · `file.py:15` — Unused import `os`.
+
+---
+
+### Sprint-Level Findings
+
+[findings here, or "None identified."]
+
+---
+
+### Follow-up Tickets Opened
+
+[List of #N — title, or "None."]
+
+---
+
+**Recommendation:** Ready for human UAT  ← (or "Blockers present — resolve before UAT")
+
+_Generated by reviewer on <ISO timestamp>_
+```
+
+## Step 7 — Create Follow-up Tickets for SUGGESTION and NIT
+
+For every SUGGESTION and NIT finding, create one follow-up ticket:
+
+```
+gh issue create \
+  --title "[follow-up] <short description>" \
+  --body "..." \
+  --label "enhancement,follow-up,code-review,<area>"
+```
+
+Where `<area>` is `backend`, `frontend`, or `database` — inferred from the \
+file path of the finding.
+
+**Body format:**
+
+```
+Context: sprint {sprint_label} review of #<original-ticket-num> — \
+see #{summary_issue_num} for full report.
+
+**Original ticket:** #<N>
+**Severity:** SUGGESTION | NIT
+**File:** `file.py:42`
+**Issue:** <description of the problem>
+**Suggested fix:** <concrete suggestion, or "N/A">
+```
+
+**Label rules:**
+- Always apply: `enhancement`, `follow-up`, `code-review`
+- Infer area label from file path: `backend` for .py server files, \
+  `frontend` for .html/.js/.css, `database` for migrations/models
+- DO NOT apply any `sprint-N` label
+- DO NOT create follow-up tickets for BLOCKER findings
+
+## Step 8 — Output ONE JSON Line to stdout
+
+After posting the comment and creating tickets, output exactly one JSON line:
+
+```
+{"comment_url": "https://github.com/...", "blockers": N, "suggestions": N, "nits": N, "follow_up_tickets": [123, 124]}
+```
+
+Then exit cleanly.
+
+## Concrete Examples of Good vs Bad Findings
+
+### BLOCKER — Good finding
+
+> BLOCKER · `apps/dashboard/main.py:234` — `user_id` from query string is \
+> concatenated directly into SQL: `query = "SELECT * FROM orders WHERE user=" + user_id`. \
+> Classic SQL injection; any unauthenticated caller can dump the database.
+
+### BLOCKER — Bad finding (vague, no file reference)
+
+> BLOCKER — The code might have SQL injection somewhere.
+
+### SUGGESTION — Good finding
+
+> SUGGESTION · `services/sprint_manager/sprint_manager.py:1802` — \
+> `subprocess.run(cmd)` has no timeout. If the subprocess hangs, \
+> the sprint loop blocks indefinitely. Add `timeout=300`.
+
+### SUGGESTION — Bad finding (not tied to diff)
+
+> SUGGESTION — The codebase should use async everywhere for better performance.
+
+### NIT — Good finding
+
+> NIT · `apps/dashboard/static/index.html:88` — `var` used instead of `const` \
+> for `let result = fetch(...)`. Modern JS prefers `const` or `let`.
+
+### NIT — Bad finding (invented requirement)
+
+> NIT — All functions should have docstrings. (This was not in the AC.)
+
+## Prohibited Actions (Do NOT Do These)
+
+- Modify any source file
+- Run `git commit`, `git push`, or any branch operation
+- Apply labels to the merged sprint tickets (only to new follow-up tickets)
+- Close any issue
+- Run the application, run tests, or invoke any server
+- Post more than one comment on the sprint summary issue
+- Review tickets that failed, were skipped, or were not merged
+- Invent requirements not present in the AC or issue body
+- Include file:line references that do not appear in `git diff --name-only {base_sha}..{head_sha}`
+"""
+
+
+# ── Documenter agent (issue #165) ─────────────────────────────────────────────
+
+DEFAULT_DOCUMENTER_PROMPT = """\
+You are the **Documenter** agent for sprint {sprint_label}.
+
+## Context
+
+- Sprint branch: {sprint_branch}
+- Diff range: {base_sha}..{head_sha}
+- Sprint tickets: {sprint_filter_url}
+- Sprint summary issue: #{summary_issue_num}
+
+## Your Mandate
+
+Read the sprint diff and update project documentation to reflect what shipped
+this sprint. Commit any doc changes directly to the sprint branch.
+
+Documentation files to consider updating (only if relevant changes shipped):
+- README.md — new features, changed commands, updated usage examples
+- CHANGELOG.md — one-line entry per merged ticket (format: "- #N: <title>")
+- SCHEMA.md — any new or changed DB tables/columns/endpoints
+
+## Step 1 — Review the diff
+
+Run:
+```
+git diff {base_sha}..{head_sha} --stat
+git diff {base_sha}..{head_sha}
+```
+
+## Step 2 — Identify what shipped
+
+For each ticket in the sprint, read:
+```
+gh issue view <N> --json number,title,body,labels
+```
+
+Only document tickets that are in a merged/done state.
+
+## Step 3 — Update docs
+
+For each doc file that needs updating:
+1. Read the current file
+2. Make targeted, accurate additions
+3. Do not remove existing content unless it is factually incorrect after this sprint
+
+## Step 4 — Commit
+
+If you made any doc changes, stage and commit them:
+```
+git add <doc files changed>
+git commit -m "docs: update docs for sprint {sprint_label} (auto-documenter)"
+```
+
+Then print a line in this exact format so sprint_manager can parse it:
+```
+Documenter complete: <comma-separated list of files touched, or 'none'>
+```
+
+If no doc changes were needed (nothing to document), print:
+```
+Documenter complete: none
+```
+
+## Prohibited Actions
+
+- Do NOT modify source code (.py, .js, .html, .sql, etc.)
+- Do NOT create new tickets or close existing ones
+- Do NOT push to remote — sprint_manager handles git push
+- Do NOT modify files outside the project root
+"""
+
+
+def _dispatch_documenter(
+    state: "SprintState",
+    sprint_branch: str,
+    base_sha: str,
+    head_sha: str,
+    cfg: Optional["SprintConfig"],
+    repo_name: Optional[str],
+) -> None:
+    """Dispatch the documenter agent after write_sprint_summary() and before _create_sprint_pr().
+
+    Updates state.documenter_status, state.documenter_files_touched, and
+    state.documenter_commit_sha in-place. Does NOT raise — failure is advisory.
+    """
+    # Skip: nothing merged this sprint
+    merged = [i for i in state.issues if i.status == "done"]
+    if not merged:
+        print("  [documenter] skipped: nothing merged this sprint")
+        state.documenter_status = "skipped"
+        return
+
+    # Determine prompt
+    if cfg and cfg.documenter_prompt_template:
+        prompt_template = cfg.documenter_prompt_template
+    else:
+        prompt_template = DEFAULT_DOCUMENTER_PROMPT
+
+    eff_repo = repo_name or (cfg.repo_name if cfg else None)
+
+    sprint_filter_url = (
+        f"https://github.com/{eff_repo}/issues"
+        f"?q=label%3A{state.sprint_label}"
+        if eff_repo else ""
+    )
+
+    # Read summary_issue_num from state JSON
+    summary_issue_num: Optional[int] = None
+    # Resolve state path to pick up summary_issue_url
+    state_path_doc = _state_path(state.sprint_number, state.sprint_label, cfg=cfg)
+    if state_path_doc.exists():
+        try:
+            sd = json.loads(state_path_doc.read_text())
+            surl = sd.get("summary_issue_url", "")
+            m_issue = re.search(r"/issues/(\d+)$", surl)
+            if m_issue:
+                summary_issue_num = int(m_issue.group(1))
+        except Exception:
+            pass
+
+    try:
+        prompt = prompt_template.format(
+            sprint_label      = state.sprint_label,
+            sprint_branch     = sprint_branch,
+            base_sha          = base_sha,
+            head_sha          = head_sha,
+            sprint_filter_url = sprint_filter_url,
+            summary_issue_num = summary_issue_num or 0,
+        )
+    except KeyError as e:
+        print(f"  [documenter] WARNING: prompt template has unknown placeholder {e} — skipping", file=sys.stderr)
+        state.documenter_status = "skipped"
+        return
+
+    cwd_path = cfg.worktree_tester if cfg else Path.cwd()
+    logs_dir = cfg.logs_dir if cfg else Path.cwd()
+    log_path = logs_dir / f"sprint-{state.sprint_label}-documenter.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Ensure tester clone has the sprint branch up to date before committing docs
+    print(f"  [documenter] Checking out {sprint_branch} in tester clone ...", flush=True)
+    try:
+        subprocess.run(
+            ["git", "fetch", "origin"],
+            cwd=str(cwd_path), capture_output=True, check=False,
+        )
+        subprocess.run(
+            ["git", "checkout", sprint_branch],
+            cwd=str(cwd_path), capture_output=True, check=False,
+        )
+        subprocess.run(
+            ["git", "pull"],
+            cwd=str(cwd_path), capture_output=True, check=False,
+        )
+    except Exception as e:
+        print(f"  [documenter] WARNING: git prep failed: {e}", file=sys.stderr)
+
+    cmd = [
+        "claude",
+        "--model", "claude-sonnet-4-6",
+        "--dangerously-skip-permissions",
+        "-p", prompt,
+    ]
+
+    sub_env = os.environ.copy()
+    sub_env.pop("ANTHROPIC_API_KEY", None)
+    sub_env["COMMANDER_MERGE_TARGET"] = sprint_branch
+    if eff_repo:
+        sub_env["COMMANDER_PROJECT"] = eff_repo
+
+    print("  [documenter] Dispatching documenter ...", flush=True)
+    try:
+        with log_path.open("w") as log_f:
+            proc = subprocess.Popen(
+                cmd,
+                stdout=log_f,
+                stderr=log_f,
+                cwd=str(cwd_path),
+                env=sub_env,
+            )
+    except FileNotFoundError:
+        print("  [documenter] claude CLI not found — skipping", file=sys.stderr)
+        state.documenter_status = "skipped"
+        return
+
+    # Use HangDetector with issue_num=0 as a sentinel for the documenter
+    detector = HangDetector(issue_num=0, log_path=log_path, proc=proc)
+    detector.start()
+    rc = proc.wait()
+    detector.stop()
+
+    if detector.killed:
+        print("  [documenter] WARNING: documenter hung and was killed", file=sys.stderr)
+        state.documenter_status = "failed"
+        return
+
+    if rc != 0:
+        print(f"  [documenter] WARNING: documenter exited with code {rc}", file=sys.stderr)
+        state.documenter_status = "failed"
+        return
+
+    # Parse exit line: "Documenter complete: <files or 'none'>"
+    files_touched: list[str] = []
+    try:
+        log_text = log_path.read_text(errors="replace")
+        for line in reversed(log_text.splitlines()):
+            m = re.search(r"Documenter complete:\s*(.+)", line, re.IGNORECASE)
+            if m:
+                raw_files = m.group(1).strip()
+                if raw_files.lower() != "none":
+                    files_touched = [f.strip() for f in raw_files.split(",") if f.strip()]
+                break
+    except Exception as e:
+        print(f"  [documenter] WARNING: could not parse documenter log: {e}", file=sys.stderr)
+
+    # Record commit SHA if a doc commit was made
+    doc_commit_sha: Optional[str] = None
+    if files_touched:
+        try:
+            r = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=str(cwd_path), capture_output=True, text=True, check=False,
+            )
+            if r.returncode == 0:
+                doc_commit_sha = r.stdout.strip()
+        except Exception:
+            pass
+
+    state.documenter_status        = "succeeded"
+    state.documenter_files_touched = files_touched
+    state.documenter_commit_sha    = doc_commit_sha
+    print(
+        f"  [documenter] Done: {len(files_touched)} file(s) touched"
+        + (f" (commit {doc_commit_sha[:8]})" if doc_commit_sha else ""),
+        flush=True,
+    )
+
+
+def _dispatch_reviewer(
+    state: "SprintState",
+    summary_issue_num: Optional[int],
+    sprint_branch: str,
+    base_sha: str,
+    head_sha: str,
+    cfg: Optional["SprintConfig"],
+    repo_name: Optional[str],
+) -> None:
+    """Dispatch the reviewer agent after sprint PR creation.
+
+    Updates state.reviewer_status, state.reviewer_comment_url, and
+    state.reviewer_findings in-place. Does NOT raise — failure is advisory.
+    """
+    eff_repo = repo_name or (cfg.repo_name if cfg else None)
+
+    # Skip conditions
+    merged = [i for i in state.issues if i.status == "done"]
+    if not merged:
+        print("  [reviewer] skipped: nothing merged this sprint")
+        state.reviewer_status = "skipped"
+        return
+
+    if summary_issue_num is None:
+        print("  [reviewer] skipped: no sprint summary issue available")
+        state.reviewer_status = "skipped"
+        return
+
+    # Determine prompt
+    if cfg and cfg.reviewer_prompt_template:
+        prompt_template = cfg.reviewer_prompt_template
+    else:
+        prompt_template = DEFAULT_REVIEWER_PROMPT
+
+    sprint_filter_url = (
+        f"https://github.com/{eff_repo}/issues"
+        f"?q=label%3A{state.sprint_label}"
+        if eff_repo else ""
+    )
+
+    try:
+        prompt = prompt_template.format(
+            sprint_label      = state.sprint_label,
+            sprint_branch     = sprint_branch,
+            base_sha          = base_sha,
+            head_sha          = head_sha,
+            summary_issue_num = summary_issue_num,
+            sprint_filter_url = sprint_filter_url,
+            repo_name         = eff_repo or "",
+        )
+    except KeyError as e:
+        print(f"  [reviewer] WARNING: prompt template has unknown placeholder {e} — skipping", file=sys.stderr)
+        state.reviewer_status = "skipped"
+        return
+
+    cwd_path = cfg.worktree_coder if cfg else Path.cwd()
+    logs_dir = cfg.logs_dir if cfg else Path.cwd()
+    log_path = logs_dir / f"sprint-{state.sprint_label}-reviewer.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Ensure coder clone has the sprint branch up to date
+    print(f"  [reviewer] Fetching {sprint_branch} in coder clone ...", flush=True)
+    try:
+        subprocess.run(
+            ["git", "fetch", "origin"],
+            cwd=str(cwd_path), capture_output=True, check=False,
+        )
+        subprocess.run(
+            ["git", "checkout", sprint_branch],
+            cwd=str(cwd_path), capture_output=True, check=False,
+        )
+        subprocess.run(
+            ["git", "pull"],
+            cwd=str(cwd_path), capture_output=True, check=False,
+        )
+    except Exception as e:
+        print(f"  [reviewer] WARNING: git prep failed: {e}", file=sys.stderr)
+
+    cmd = [
+        "claude",
+        "--model", "claude-haiku-4-5",
+        "--dangerously-skip-permissions",
+        "-p", prompt,
+    ]
+
+    sub_env = os.environ.copy()
+    sub_env.pop("ANTHROPIC_API_KEY", None)
+    if eff_repo:
+        sub_env["COMMANDER_PROJECT"] = eff_repo
+    sub_env["REPO"]                  = eff_repo or ""
+    sub_env["SPRINT_LABEL"]          = state.sprint_label
+    sub_env["SPRINT_SUMMARY_ISSUE"]  = str(summary_issue_num)
+    sub_env["SPRINT_BRANCH"]         = sprint_branch
+    sub_env["BASE_REF"]              = base_sha
+    sub_env["HEAD_REF"]              = head_sha
+
+    print("  [reviewer] Dispatching reviewer ...", flush=True)
+    try:
+        with log_path.open("w") as log_f:
+            proc = subprocess.Popen(
+                cmd,
+                stdout=log_f,
+                stderr=log_f,
+                cwd=str(cwd_path),
+                env=sub_env,
+            )
+    except FileNotFoundError:
+        print("  [reviewer] claude CLI not found — skipping", file=sys.stderr)
+        state.reviewer_status = "skipped"
+        return
+
+    # Use HangDetector with issue_num=0 as a sentinel for the reviewer
+    detector = HangDetector(issue_num=0, log_path=log_path, proc=proc)
+    detector.start()
+    rc = proc.wait()
+    detector.stop()
+
+    if detector.killed:
+        print("  [reviewer] WARNING: reviewer hung and was killed", file=sys.stderr)
+        state.reviewer_status = "failed"
+        return
+
+    if rc != 0:
+        print(f"  [reviewer] WARNING: reviewer exited with code {rc}", file=sys.stderr)
+        state.reviewer_status = "failed"
+        return
+
+    # Parse exit line: "Reviewer complete: B blockers, S suggestions, I nits, F follow-up tickets opened"
+    findings: dict = {"blockers": 0, "suggestions": 0, "nits": 0, "follow_up_tickets": []}
+    comment_url: Optional[str] = None
+    try:
+        log_text = log_path.read_text(errors="replace")
+        for line in reversed(log_text.splitlines()):
+            m = re.search(
+                r"Reviewer complete:\s*(\d+)\s*blockers?,\s*(\d+)\s*suggestions?,\s*(\d+)\s*nits?,\s*(\d+)\s*follow-up",
+                line, re.IGNORECASE,
+            )
+            if m:
+                findings["blockers"]    = int(m.group(1))
+                findings["suggestions"] = int(m.group(2))
+                findings["nits"]        = int(m.group(3))
+                findings["follow_up_tickets"] = list(range(int(m.group(4))))  # count only
+                break
+        # Look for comment URL in log
+        url_m = re.search(r"https://github\.com/[^\s]+/issues/\d+#issuecomment-\d+", log_text)
+        if url_m:
+            comment_url = url_m.group(0)
+    except Exception as e:
+        print(f"  [reviewer] WARNING: could not parse reviewer log: {e}", file=sys.stderr)
+
+    state.reviewer_status      = "succeeded"
+    state.reviewer_comment_url = comment_url
+    state.reviewer_findings    = findings
+    print(
+        f"  [reviewer] Done: "
+        f"{findings['blockers']} blockers, "
+        f"{findings['suggestions']} suggestions, "
+        f"{findings['nits']} nits, "
+        f"{len(findings['follow_up_tickets'])} follow-up tickets",
+        flush=True,
+    )
+
+
+# ── Issue Estimator integration ───────────────────────────────────────────────
+
+SERIOUS_RISK_FLAGS = {"touches-db-schema", "security-sensitive", "breaks-tests"}
+
+
+def _load_estimate(issue_num: int) -> Optional[dict]:
+    """Load .commander/estimates/issue-<N>.json by walking up from REPO_ROOT."""
+    current = REPO_ROOT.resolve()
+    while True:
+        estimate_path = current / ".commander" / "estimates" / f"issue-{issue_num}.json"
+        if estimate_path.exists():
+            try:
+                return json.loads(estimate_path.read_text())
+            except (json.JSONDecodeError, OSError):
+                return None
+        parent = current.parent
+        if parent == current:
+            break
+        current = parent
+    return None
+
+
+def _warn_file_conflicts(issues: list["IssueState"]) -> None:
+    """Warn when multiple pending issues share files in their estimates."""
+    file_to_issues: dict[str, list[int]] = {}
+    for issue_state in issues:
+        if issue_state.status not in ("pending", ""):
+            continue
+        estimate = _load_estimate(issue_state.number)
+        if not estimate:
+            continue
+        for f in estimate.get("files_likely_affected", []):
+            file_to_issues.setdefault(f, []).append(issue_state.number)
+
+    for f, nums in file_to_issues.items():
+        if len(nums) > 1:
+            issues_str = " and ".join(f"#{n}" for n in nums)
+            print(f"  [estimate] WARNING: tickets {issues_str} share files: {f} — processing sequentially")
+
+
 # -- GitHub issue listing --
 
 def _classify(labels: set[str]) -> str:
@@ -2148,6 +3362,8 @@ def run_sprint(
     cfg: Optional["SprintConfig"] = None,
     preflight_approved: Optional[list[int]] = None,
     gate_scope: str = "changed",
+    token_budget: int = 0,
+    skip_estimator: bool = False,
 ) -> tuple[SprintSummary, SprintState]:
     """Main sprint loop -- processes backlog issues sequentially.
 
@@ -2155,7 +3371,7 @@ def run_sprint(
     Supports resume/retry_failed from persisted state.
 
     target_branch: branch to merge feature branches into. Defaults to
-    sprint/<label>. Pass 'develop' to restore legacy behaviour.
+    'develop'. Pass a sprint branch name to enable sprint-branch merge mode.
 
     preflight_approved: optional list of issue numbers approved by the pre-flight
     review. When provided, only issues in this list are dispatched; others are
@@ -2175,6 +3391,10 @@ def run_sprint(
     sprint_num = _sprint_number(label)
     state_path = _state_path(sprint_num, label, cfg=cfg)
 
+    # AC-2: write PID file and register cleanup handlers
+    if not dry_run:
+        _setup_pid_file(sprint_num)
+
     # Log config info when running against a second repo
     if cfg and cfg.repo_name:
         print(f"\n=== SprintConfig ===")
@@ -2189,12 +3409,17 @@ def run_sprint(
     # Determine the sprint branch name and effective merge target
     sprint_branch = f"sprint/{label}"
     if target_branch is None:
-        target_branch = sprint_branch
+        target_branch = "develop"
 
     # Load or build state
     if (resume or retry_failed) and state_path.exists():
         print(f"  Loading existing sprint state from {state_path}")
         state = SprintState.from_dict(json.loads(state_path.read_text()))
+        if token_budget:
+            state.token_budget = token_budget
+        # Backfill project if missing from saved state (legacy runs)
+        if not state.project and eff_repo:
+            state.project = eff_repo
     else:
         raw_issues = list_backlog_issues(label, repo_name=eff_repo)
         if not raw_issues:
@@ -2202,6 +3427,7 @@ def run_sprint(
             state = SprintState(
                 sprint_label  = label,
                 sprint_number = sprint_num,
+                project       = eff_repo or "",
                 start_timestamp = _utcnow(),
             )
             return summary, state
@@ -2209,9 +3435,11 @@ def run_sprint(
         state = SprintState(
             sprint_label    = label,
             sprint_number   = sprint_num,
+            project         = eff_repo or "",
             start_timestamp = _utcnow(),
+            token_budget    = token_budget,
             issues=[
-                IssueState(number=i["number"], title=i["title"])
+                IssueState(number=i["number"], title=i["title"], agent_status="queued")
                 for i in raw_issues
             ],
         )
@@ -2228,6 +3456,56 @@ def run_sprint(
             _create_sprint_branch(sprint_branch)
     else:
         print(f"  Using custom target branch {target_branch!r} — sprint branch creation skipped.")
+
+    # Warn about shared-file conflicts before dispatching
+    _warn_file_conflicts(state.issues)
+
+    # ── Sprint estimator (issue #166) ──────────────────────────────────────────
+    # Runs BEFORE the per-ticket loop so the human can see estimates on the
+    # dashboard before any coding starts.  Failure never blocks the sprint.
+    if not skip_estimator and not dry_run and not resume and not retry_failed:
+        print("\n  [estimator] Running sprint estimator ...")
+        try:
+            from sprint_estimator import run_estimator  # noqa: PLC0415
+            eff_sprints_dir = cfg.sprints_dir if cfg is not None else SPRINTS_DIR
+            est_result = run_estimator(
+                sprint_label = label,
+                repo_name    = eff_repo,
+                sprints_dir  = eff_sprints_dir,
+                cfg          = cfg,
+            )
+            # Merge estimates into state keyed by issue number (int)
+            state.estimates = {
+                num: est.to_dict()
+                for num, est in est_result.estimates.items()
+            }
+            state.estimator_status        = "succeeded"
+            state.estimator_total_minutes = est_result.total_minutes
+            state.save(state_path)
+            _post_sprint_status(state, api_url=api_url)
+            print(
+                f"  [estimator] Estimator succeeded: "
+                f"{len(est_result.estimates)} tickets, "
+                f"{est_result.total_minutes} total minutes"
+            )
+        except ImportError:
+            print(
+                "  [estimator] WARNING: sprint_estimator module not found — skipping",
+                file=sys.stderr,
+            )
+            state.estimator_status = "failed"
+            state.save(state_path)
+        except Exception as e:
+            print(
+                f"  [estimator] WARNING: estimator failed ({e}) — sprint continues",
+                file=sys.stderr,
+            )
+            state.estimator_status = "failed"
+            state.save(state_path)
+    elif skip_estimator:
+        print("  [estimator] --skip-estimator active — skipping estimation")
+        state.estimator_status = "skipped"
+    # ── end estimator ──────────────────────────────────────────────────────────
 
     start_time = time.monotonic()
 
@@ -2257,11 +3535,30 @@ def run_sprint(
         print(f"\n--- {progress} Issue #{num}: {title} ---")
         summary.processed.append(f"#{num}")
 
+        # AC-3: check for pause file before dispatching this issue
+        _wait_if_paused(sprint_num, state, api_url=api_url)
+
+        # Log estimate info if available
+        _est = _load_estimate(num)
+        if _est:
+            _size  = _est.get("size", "?")
+            _hours = _est.get("estimated_hours", "?")
+            _conf  = _est.get("confidence", "?")
+            print(f"  [estimate] size={_size} (~{_hours}h), confidence={_conf}")
+            _risk = _est.get("risk_flags", [])
+            if _risk:
+                print(f"  [estimate] risk flags: {', '.join(_risk)}")
+                _serious = [f for f in _risk if f in SERIOUS_RISK_FLAGS]
+                if _serious:
+                    print(f"  [estimate] WARNING: serious risk flags: {', '.join(_serious)}")
+
         # Preflight filter: skip issues not approved by pre-flight review
         if preflight_approved is not None and num not in preflight_approved:
             print("  [preflight] skipped by pre-flight review")
-            issue_state.status      = "skipped"
-            issue_state.skip_reason = "preflight-skipped"
+            issue_state.set_agent_status("failed")
+            issue_state.failure_reason  = "preflight-skipped"
+            issue_state.status          = "skipped"
+            issue_state.skip_reason     = "preflight-skipped"
             summary.skipped.append(f"#{num} (preflight-skipped)")
             state.save(state_path)
             _post_sprint_status(state, api_url=api_url)
@@ -2283,11 +3580,29 @@ def run_sprint(
             if chosen_port is not None:
                 _write_runtime_port(cfg.worktree_coder, chosen_port)
 
+        # -- Lifecycle: queued → coder_dispatched --
+        issue_state.set_agent_status("queued")
+        state.save(state_path)
+        _post_sprint_status(state, api_url=api_url)
+
         # -- Dispatch coder --
+        issue_state.set_agent_status("coder_dispatched")
+        issue_state.coder_started_at = issue_state.status_changed_at
+        state.save(state_path)
+        _post_sprint_status(state, api_url=api_url)
+
+        def _on_coder_running(
+            _is=issue_state, _st=state, _sp=state_path, _api=api_url
+        ) -> None:
+            _is.set_agent_status("coder_running")
+            _st.save(_sp)
+            _post_sprint_status(_st, api_url=_api)
+
         _coder_t0 = time.monotonic()
         coder_ok, coder_category = _dispatch_coder(
             num, alert_modes, sprint_branch=target_branch, repo_name=eff_repo, cfg=cfg,
-            chosen_port=chosen_port,
+            chosen_port=chosen_port, rate_limit_events=state.rate_limit_events,
+            on_running=_on_coder_running,
         )
         _coder_elapsed = time.monotonic() - _coder_t0
         _coder_m, _coder_s = divmod(int(_coder_elapsed), 60)
@@ -2295,11 +3610,17 @@ def run_sprint(
 
         if not coder_ok:
             category = coder_category or FailureCategory.CRASH
-            reason   = f"Coder failed with category {category}"
+            if category == FailureCategory.RETRY_EXHAUSTED:
+                reason = "Subscription rate limit exhausted"
+            else:
+                reason = f"Coder failed with category {category}"
             print(f"  Coder failed for #{num} ({category}) -- skipping to next issue")
-            issue_state.status      = "skipped"
-            issue_state.skip_reason = reason
-            issue_state.category    = category
+            issue_state.set_agent_status("failed")
+            issue_state.coder_finished_at = issue_state.status_changed_at
+            issue_state.failure_reason    = reason
+            issue_state.status            = "skipped"
+            issue_state.skip_reason       = reason
+            issue_state.category          = category
             summary.skipped.append(f"#{num} (coder failed)")
             dispatch_alerts(
                 alert_modes,
@@ -2313,24 +3634,64 @@ def run_sprint(
             _post_sprint_status(state, api_url=api_url)
             continue
 
+        # -- Lifecycle: coder_done → tester_dispatched --
+        issue_state.set_agent_status("coder_done")
+        issue_state.coder_finished_at = issue_state.status_changed_at
+        state.save(state_path)
+        _post_sprint_status(state, api_url=api_url)
+
+        issue_state.set_agent_status("tester_dispatched")
+        issue_state.tester_started_at = issue_state.status_changed_at
+        state.save(state_path)
+        _post_sprint_status(state, api_url=api_url)
+
+        def _on_tester_running(
+            _is=issue_state, _st=state, _sp=state_path, _api=api_url
+        ) -> None:
+            _is.set_agent_status("tester_running")
+            _st.save(_sp)
+            _post_sprint_status(_st, api_url=_api)
+
         # -- Dispatch tester --
         _tester_t0 = time.monotonic()
         tester_rc, hang_category = _dispatch_tester(
             num, alert_modes, repo_name=eff_repo, cfg=cfg,
-            chosen_port=chosen_port,
+            chosen_port=chosen_port, rate_limit_events=state.rate_limit_events,
+            on_running=_on_tester_running,
         )
         _tester_elapsed = time.monotonic() - _tester_t0
         _tester_m, _tester_s = divmod(int(_tester_elapsed), 60)
         print(f"  Total time used on tester dispatch: {_tester_m}m {_tester_s}s")
 
         if hang_category == FailureCategory.HANG:
-            issue_state.status      = "skipped"
-            issue_state.skip_reason = "Tester HANG detected"
-            issue_state.category    = FailureCategory.HANG
+            issue_state.set_agent_status("failed")
+            issue_state.tester_finished_at = issue_state.status_changed_at
+            issue_state.failure_reason     = "Tester HANG detected"
+            issue_state.status             = "skipped"
+            issue_state.skip_reason        = "Tester HANG detected"
+            issue_state.category           = FailureCategory.HANG
             summary.skipped.append(f"#{num} (tester hang)")
             state.save(state_path)
             _post_sprint_status(state, api_url=api_url)
             continue
+
+        if hang_category == FailureCategory.RETRY_EXHAUSTED:
+            issue_state.set_agent_status("failed")
+            issue_state.tester_finished_at = issue_state.status_changed_at
+            issue_state.failure_reason     = "Subscription rate limit exhausted"
+            issue_state.status             = "skipped"
+            issue_state.skip_reason        = "Subscription rate limit exhausted"
+            issue_state.category           = FailureCategory.RETRY_EXHAUSTED
+            summary.skipped.append(f"#{num} (rate limit exhausted)")
+            state.save(state_path)
+            _post_sprint_status(state, api_url=api_url)
+            continue
+
+        # -- Lifecycle: tester_done --
+        issue_state.set_agent_status("tester_done")
+        issue_state.tester_finished_at = issue_state.status_changed_at
+        state.save(state_path)
+        _post_sprint_status(state, api_url=api_url)
 
         # -- Post-tester gates --
         merged, summary_line, gate_category = handle_post_tester(
@@ -2345,17 +3706,22 @@ def run_sprint(
             cfg                = cfg,
             base_branch        = target_branch or "develop",
             gate_scope         = gate_scope,
+            documentor_enabled = cfg.documentor_enabled if cfg else False,
+            alert_modes        = alert_modes,
         )
         print(f"  {summary_line}")
 
         if merged:
+            issue_state.set_agent_status("completed")
             issue_state.status = "done"
             summary.merged.append(f"#{num}")
         else:
             category = gate_category or FailureCategory.CRASH
-            issue_state.status      = "skipped"
-            issue_state.skip_reason = summary_line
-            issue_state.category    = category
+            issue_state.set_agent_status("failed")
+            issue_state.failure_reason  = summary_line
+            issue_state.status          = "skipped"
+            issue_state.skip_reason     = summary_line
+            issue_state.category        = category
             if "gate failed" in summary_line:
                 summary.gate_failures.append(summary_line)
             else:
@@ -2460,6 +3826,15 @@ def main() -> None:
         ),
     )
 
+    # Token budget (AC-1)
+    p.add_argument(
+        "--budget",
+        type=int,
+        default=0,
+        metavar="TOKENS",
+        help="Token estimate from the planning view. Stored in sprint state and broadcast to dashboard.",
+    )
+
     # Gate scope (AC-9)
     p.add_argument(
         "--gate-scope",
@@ -2504,6 +3879,30 @@ def main() -> None:
         ),
     )
 
+    # Reviewer control (issue #159)
+    p.add_argument(
+        "--skip-reviewer",
+        action="store_true",
+        default=False,
+        help="Skip the post-sprint reviewer agent entirely.",
+    )
+
+    # Documenter control (issue #165)
+    p.add_argument(
+        "--skip-documenter",
+        action="store_true",
+        default=False,
+        help="Skip the post-summary documenter agent entirely.",
+    )
+
+    # Estimator control (issue #166) — hidden debug-only flag, not shown in --help
+    p.add_argument(
+        "--skip-estimator",
+        action="store_true",
+        default=False,
+        help=argparse.SUPPRESS,
+    )
+
     args = p.parse_args()
 
     # ── Config resolution (AC-4 + AC-5 + AC-6) ───────────────────────────────
@@ -2539,6 +3938,29 @@ def main() -> None:
     # --repo flag overrides config (explicit always wins)
     eff_repo = args.repo or (cfg.repo_name if cfg else None)
 
+    # ── Per-project PID lock (issue #122) ────────────────────────────────────
+    # When dispatched by the dashboard server, the server already writes the
+    # PID file after Popen.  Acquiring the lock here would read that same file
+    # and mistake our own PID for a running instance (self-collision).  Skip
+    # the lock entirely; the server's write at server.py:1629 remains in place.
+    if not os.environ.get("COMMANDER_DISPATCHED_BY_SERVER"):
+        _project_id = eff_repo or _r(None)
+        _pid_path = _acquire_pid_lock(args.label, _project_id, cfg=cfg)
+
+        def _cleanup_pid() -> None:
+            _release_pid_lock(_pid_path)
+
+        atexit.register(_cleanup_pid)
+
+        _orig_sigterm = signal.getsignal(signal.SIGTERM)
+
+        def _sigterm_handler(signum: int, frame: object) -> None:
+            _cleanup_pid()
+            signal.signal(signal.SIGTERM, _orig_sigterm or signal.SIG_DFL)
+            os.kill(os.getpid(), signal.SIGTERM)
+
+        signal.signal(signal.SIGTERM, _sigterm_handler)
+
     # ── Pre-flight review (AC-1 of issue #33) ────────────────────────────────
     preflight_approved: Optional[list] = None  # None = no preflight, list = approved numbers
     if args.preflight:
@@ -2569,6 +3991,8 @@ def main() -> None:
         cfg                  = cfg,
         preflight_approved   = preflight_approved,
         gate_scope           = args.gate_scope,
+        token_budget         = args.budget,
+        skip_estimator       = args.skip_estimator,
     )
 
     # Derive sprint_branch for summary (mirrors run_sprint logic)
@@ -2592,6 +4016,51 @@ def main() -> None:
     else:
         summary_path = None
 
+    # Dispatch documenter after sprint summary, before sprint PR (issue #165)
+    if not args.skip_documenter and not args.dry_run and state.issues:
+        doc_cwd = str(cfg.worktree_tester) if cfg else None
+        try:
+            r_head = subprocess.run(
+                ["git", "rev-parse", f"origin/{effective_target}"],
+                capture_output=True, text=True, check=False, cwd=doc_cwd,
+            )
+            r_base = subprocess.run(
+                ["git", "merge-base", f"origin/{effective_target}", "origin/develop"],
+                capture_output=True, text=True, check=False, cwd=doc_cwd,
+            )
+            doc_head_sha = r_head.stdout.strip() or "HEAD"
+            doc_base_sha = r_base.stdout.strip() or "develop"
+        except Exception:
+            doc_head_sha = "HEAD"
+            doc_base_sha = "develop"
+
+        state_path_doc = _state_path(state.sprint_number, state.sprint_label, cfg=cfg)
+        try:
+            _dispatch_documenter(
+                state         = state,
+                sprint_branch = effective_target,
+                base_sha      = doc_base_sha,
+                head_sha      = doc_head_sha,
+                cfg           = cfg,
+                repo_name     = eff_repo,
+            )
+            # Persist documenter outcome into the state JSON
+            if state_path_doc.exists():
+                try:
+                    sd3 = json.loads(state_path_doc.read_text())
+                    sd3["documenter_status"]        = state.documenter_status
+                    sd3["documenter_files_touched"] = state.documenter_files_touched
+                    sd3["documenter_commit_sha"]    = state.documenter_commit_sha
+                    state_path_doc.write_text(json.dumps(sd3, indent=2))
+                except Exception as e_persist:
+                    print(
+                        f"  [documenter] WARNING: could not persist documenter outcome -- {e_persist}",
+                        file=sys.stderr,
+                    )
+        except Exception as e_doc:
+            print(f"  [documenter] WARNING: documenter raised unexpectedly -- {e_doc}", file=sys.stderr)
+            state.documenter_status = "failed"
+
     # AC6, AC7: auto-create PR sprint/sprint-N → develop at sprint end,
     # but only when we were running in sprint-branch mode (not manual 'develop' override)
     sprint_pr_url: Optional[str] = None
@@ -2608,6 +4077,64 @@ def main() -> None:
             state          = state,
             repo_name      = eff_repo,
         )
+
+    # Dispatch reviewer after sprint PR creation (issue #159)
+    if not args.skip_reviewer and not args.dry_run and state.issues:
+        rev_cwd = str(cfg.worktree_coder) if cfg else None
+        try:
+            r_head = subprocess.run(
+                ["git", "rev-parse", f"origin/{effective_target}"],
+                capture_output=True, text=True, check=False, cwd=rev_cwd,
+            )
+            r_base = subprocess.run(
+                ["git", "merge-base", f"origin/{effective_target}", "origin/develop"],
+                capture_output=True, text=True, check=False, cwd=rev_cwd,
+            )
+            head_sha = r_head.stdout.strip() or "HEAD"
+            base_sha = r_base.stdout.strip() or "develop"
+        except Exception:
+            head_sha = "HEAD"
+            base_sha = "develop"
+
+        # Read summary_issue_num from state JSON (set by write_sprint_summary)
+        summary_issue_num_for_reviewer: Optional[int] = None
+        state_path_rev = _state_path(state.sprint_number, state.sprint_label, cfg=cfg)
+        if state_path_rev.exists():
+            try:
+                sd = json.loads(state_path_rev.read_text())
+                surl = sd.get("summary_issue_url", "")
+                m_issue = re.search(r"/issues/(\d+)$", surl)
+                if m_issue:
+                    summary_issue_num_for_reviewer = int(m_issue.group(1))
+            except Exception:
+                pass
+
+        try:
+            _dispatch_reviewer(
+                state             = state,
+                summary_issue_num = summary_issue_num_for_reviewer,
+                sprint_branch     = effective_target,
+                base_sha          = base_sha,
+                head_sha          = head_sha,
+                cfg               = cfg,
+                repo_name         = eff_repo,
+            )
+            # Persist reviewer outcome into the state JSON
+            if state_path_rev.exists():
+                try:
+                    sd2 = json.loads(state_path_rev.read_text())
+                    sd2["reviewer_status"]      = state.reviewer_status
+                    sd2["reviewer_comment_url"] = state.reviewer_comment_url
+                    sd2["reviewer_findings"]    = state.reviewer_findings
+                    state_path_rev.write_text(json.dumps(sd2, indent=2))
+                except Exception as e_persist:
+                    print(
+                        f"  [reviewer] WARNING: could not persist reviewer outcome -- {e_persist}",
+                        file=sys.stderr,
+                    )
+        except Exception as e_rev:
+            print(f"  [reviewer] WARNING: reviewer raised unexpectedly -- {e_rev}", file=sys.stderr)
+            state.reviewer_status = "failed"
 
     print("\n=== Sprint Summary ===")
     print(f"Processed: {', '.join(summary.processed) or 'none'}")

@@ -14,7 +14,7 @@ from typing import Optional
 
 CACHE_TTL = 30.0
 SPRINT_RE = re.compile(r"^sprint-(\d+)$")
-STATUS_LABELS = {"in-progress", "SIT", "UAT", "UAT-approved", "needs-rework", "blocked"}
+STATUS_LABELS = {"in-progress", "SIT", "UAT", "UAT-approved", "need-rework", "blocked"}
 
 _cache: dict[str, tuple[float, object]] = {}
 _detected_repo: str | None = None
@@ -354,8 +354,7 @@ def approve_issue(issue_id: int, repo_name: str | None = None):
 def reject_issue(issue_id: int, reason: str, repo_name: str | None = None):
     r = _r(repo_name)
     _run("issue", "edit", str(issue_id), "--repo", r,
-         "--add-label", "needs-rework",
-         "--add-label", "in-progress",
+         "--add-label", "need-rework",
          "--remove-label", "UAT")
     _run("issue", "comment", str(issue_id), "--repo", r,
          "--body", f"❌ **Rejected:** {reason}")
@@ -397,6 +396,18 @@ def create_issue(title: str, body: str, labels: list[str],
     invalidate(f"issues:{r}:")
     invalidate(f"latest_sprint:{r}")
     return number, url
+
+
+def list_labels(repo_name: str | None = None) -> list[dict]:
+    """Return all labels in the repo as [{"name": ..., "color": ...}, ...]."""
+    r = _r(repo_name)
+    key = f"labels:{r}"
+
+    def fetch():
+        raw = _json("label", "list", "--repo", r, "--json", "name,color", "--limit", "100")
+        return [{"name": lbl["name"], "color": lbl["color"]} for lbl in raw]
+
+    return _cached(key, fetch)
 
 
 def add_comment(issue_id: int, body: str, repo_name: str | None = None):

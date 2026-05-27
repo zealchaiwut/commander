@@ -2672,6 +2672,8 @@ let _smgmtEstimates      = {};     // sprint_label -> EstimateResult from /api/s
 let _smgmtBacklogFilter  = '';     // label name filter for backlog, '' = all
 let _smgmtRerunLabel     = null;   // sprint label pending rerun confirmation
 let _smgmtCleanupLabels  = [];     // empty sprint labels pending cleanup confirmation
+let _smgmtAutoRefreshTimer     = null; // interval timer for auto-refresh countdown
+let _smgmtAutoRefreshCountdown = 30;  // seconds remaining until next auto-refresh
 
 const RERUN_STRIP_LABELS = new Set(['UAT', 'UAT-approved', 'released', 'SIT', 'in-progress', 'need-rework']);
 
@@ -2684,6 +2686,8 @@ async function smgmtInit() {
 async function smgmtInitForProject(repo) {
   if (!repo) {
     document.getElementById('smgmt-loading').textContent = 'No project selected.';
+    smgmtAutoRefreshStop();
+    _smgmtUpdateAutoRefreshBtn();
     return;
   }
   _smgmtCurrentRepo = repo;
@@ -2706,12 +2710,59 @@ async function smgmtInitForProject(repo) {
   if (_smgmtPollTimer) clearInterval(_smgmtPollTimer);
   _smgmtPollTimer = setInterval(smgmtPollRunStatus, 5000);
   smgmtPollRunStatus();
+
+  // Start auto-refresh countdown (issue #199)
+  smgmtAutoRefreshReset();
 }
 
 // ── Partial refresh (issue #179) ─────────────────────────────────────────────
 async function smgmtRefreshBoard() {
   if (!_smgmtCurrentRepo) return;
   await smgmtSelectProject(_smgmtCurrentRepo);
+}
+
+// ── Auto-refresh countdown (issue #199) ──────────────────────────────────────
+function _smgmtUpdateAutoRefreshBtn() {
+  const btn = document.getElementById('smgmt-auto-refresh-btn');
+  if (!btn) return;
+  if (_smgmtCurrentRepo) {
+    btn.textContent = `Auto Refresh (${_smgmtAutoRefreshCountdown}s)`;
+  } else {
+    btn.textContent = 'Auto Refresh';
+  }
+}
+
+function smgmtAutoRefreshStop() {
+  if (_smgmtAutoRefreshTimer) {
+    clearInterval(_smgmtAutoRefreshTimer);
+    _smgmtAutoRefreshTimer = null;
+  }
+}
+
+function smgmtAutoRefreshStart() {
+  smgmtAutoRefreshStop();
+  if (!_smgmtCurrentRepo) return;
+  _smgmtAutoRefreshCountdown = 30;
+  _smgmtUpdateAutoRefreshBtn();
+  _smgmtAutoRefreshTimer = setInterval(async () => {
+    _smgmtAutoRefreshCountdown -= 1;
+    if (_smgmtAutoRefreshCountdown <= 0) {
+      _smgmtAutoRefreshCountdown = 30;
+      _smgmtUpdateAutoRefreshBtn();
+      await smgmtRefreshBoard();
+    } else {
+      _smgmtUpdateAutoRefreshBtn();
+    }
+  }, 1000);
+}
+
+function smgmtAutoRefreshReset() {
+  smgmtAutoRefreshStart();
+}
+
+async function smgmtAutoRefreshNow() {
+  smgmtAutoRefreshReset();
+  await smgmtRefreshBoard();
 }
 
 async function smgmtSelectProject(repo) {

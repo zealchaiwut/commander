@@ -43,7 +43,7 @@ REQUIRED_LABELS: dict[str, tuple[str, str]] = {
     "SIT":          ("e4e669", "System integration testing"),
     "UAT":          ("ff9f00", "User acceptance testing"),
     "UAT-approved": ("0e8a16", "UAT sign-off complete"),
-    "needs-rework": ("d93f0b", "Needs to be fixed"),
+    "need-rework": ("d93f0b", "Needs to be fixed"),
     "blocked":      ("b60205", "Blocked by dependency"),
     "sprint-1":     ("0052CC", "Sprint 1 issues"),
     "sprint-2":     ("0052CC", "Sprint 2 issues"),

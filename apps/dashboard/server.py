@@ -1477,7 +1477,7 @@ def save_sprint_order(project: str, body: SprintOrderBody):
     return {"ok": True}
 
 
-_MIGRATION_STATUS_LABELS = {"UAT", "UAT-approved", "SIT", "in-progress", "needs-rework"}
+_MIGRATION_STATUS_LABELS = {"UAT", "UAT-approved", "SIT", "in-progress", "need-rework"}
 
 
 @app.post("/api/sprints/run", status_code=202)
@@ -1777,7 +1777,7 @@ async def delete_empty_sprints(body: SprintDeleteBody):
     return result
 
 
-_RERUN_STRIP_LABELS = {"UAT", "UAT-approved", "released", "SIT", "in-progress", "needs-rework"}
+_RERUN_STRIP_LABELS = {"UAT", "UAT-approved", "released", "SIT", "in-progress", "need-rework"}
 
 
 class SprintRerunBody(BaseModel):

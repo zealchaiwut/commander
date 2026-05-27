@@ -1849,7 +1849,7 @@ function _sprintRowHtml(sprint, idx) {
 const PSP_DRAFT_KEY = 'commander:plan-sprint-draft';
 const TOKEN_MAP = { S: 20, M: 40, L: 60, XL: 85 };
 const FILE_EXT_PAT = String.raw`\b[\w.-]+\.(?:py|html|js|sh|md|json)\b`;
-const STATUS_LABELS_SET = new Set(['in-progress', 'SIT', 'UAT', 'UAT-approved', 'needs-rework', 'blocked', 'backlog', 'enhancement', 'bug']);
+const STATUS_LABELS_SET = new Set(['in-progress', 'SIT', 'UAT', 'UAT-approved', 'need-rework', 'blocked', 'backlog', 'enhancement', 'bug']);
 const SPRINT_NUM_RE = /^sprint-(\d+)$/;
 
 let _pspIssues = [];          // all open issues from /api/open-issues
@@ -2391,7 +2391,7 @@ let _smgmtBacklogFilter  = '';     // label name filter for backlog, '' = all
 let _smgmtRerunLabel     = null;   // sprint label pending rerun confirmation
 let _smgmtCleanupLabels  = [];     // empty sprint labels pending cleanup confirmation
 
-const RERUN_STRIP_LABELS = new Set(['UAT', 'UAT-approved', 'released', 'SIT', 'in-progress', 'needs-rework']);
+const RERUN_STRIP_LABELS = new Set(['UAT', 'UAT-approved', 'released', 'SIT', 'in-progress', 'need-rework']);
 
 async function smgmtInit() {
   // Legacy: called with no repo; use current project or first project

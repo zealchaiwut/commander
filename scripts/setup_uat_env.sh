@@ -69,7 +69,7 @@ fi
 
 echo "      Installing/upgrading requirements …"
 "$VENV_DIR/bin/pip" install --quiet --upgrade pip
-"$VENV_DIR/bin/pip" install --quiet -r "$UAT_DASHBOARD/requirements.txt"
+"$VENV_DIR/bin/pip" install --quiet -r "$UAT_DIR/requirements.txt"
 
 # ── 4. Write .env ─────────────────────────────────────────────────────────────
 ENV_FILE="$UAT_DASHBOARD/.env"

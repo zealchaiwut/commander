@@ -15,7 +15,7 @@ cd ~/dev/commander/prd
 
 # 2. Create the virtualenv and install dependencies
 python3.12 -m venv venv && source venv/bin/activate
-pip install -r apps/dashboard/requirements.txt
+pip install -r requirements.txt
 
 # 3. Copy and edit the environment file
 cp apps/dashboard/.env.example apps/dashboard/.env

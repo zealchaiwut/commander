@@ -3020,11 +3020,24 @@ function smgmtRender() {
   // Append trailing placeholder card for the next-to-be-created sprint
   blocksHtml += smgmtPlaceholderBlockHtml(placeholderN);
 
+  // Clean up existing live panel state before wiping the DOM
+  // (DOM is about to be replaced; SSE connections and timers are explicitly closed)
+  for (const label of Object.keys(_sllPanels)) {
+    const ps = _sllPanels[label];
+    if (ps) {
+      if (ps.sse)          { try { ps.sse.close(); } catch {} ps.sse = null; }
+      if (ps.tickInterval) { clearInterval(ps.tickInterval); ps.tickInterval = null; }
+    }
+    delete _sllPanels[label];
+  }
+
   bodyEl.innerHTML = blocksHtml;
 
   smgmtRenderBacklog(unassigned);
   smgmtApplyRunState();
   smgmtApplyDurationBadges();
+  // Re-mount live panels for any currently-running sprints after render
+  smgmtSyncLivePanels();
 }
 
 function smgmtHasCompletedTickets(tickets) {
@@ -4116,6 +4129,7 @@ async function smgmtPollRunStatus() {
     smgmtApplyRunState(sprintStatusMap);
     _updateRunningBanner();
     _updateOverviewRunningBadges();
+    smgmtSyncLivePanels();
   } catch { /* ignore poll errors */ }
 }
 
@@ -6685,4 +6699,547 @@ function showDeployToast(prUrl) {
   }
   t.style.display = 'block';
   setTimeout(() => { t.style.display = 'none'; }, 8000);
+}
+
+// ── Sprint Live Log Panel (issue #224) ────────────────────────────────────────
+//
+// One panel instance per running sprint block. Keyed by sprint_label.
+// Each panel has:
+//   - a 3-stat grid (time spent, current ticket, active agent)
+//   - a streaming log feed
+//   - SSE connection to /api/sprints/<label>/live/stream
+//
+// Panel lifecycle:
+//   mount  → smgmtLivePanelMount(label, project)
+//   update → smgmtLivePanelUpdate(label, snapshot)   (called by snapshot poll)
+//   unmount → smgmtLivePanelUnmount(label)            (called when sprint ends)
+
+const _sllPanels = {};   // label -> { el, sse, tickInterval, autoScroll, lineCount }
+
+// ── CSS injected once ──────────────────────────────────────────────────────────
+(function _injectSllCss() {
+  if (document.getElementById('sll-styles')) return;
+  const style = document.createElement('style');
+  style.id = 'sll-styles';
+  style.textContent = `
+    .sll-panel {
+      margin-top: 16px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      overflow: hidden;
+      background: var(--surface, #1e1e2e);
+      transition: opacity 0.3s ease;
+    }
+    .sll-panel.sll-fading { opacity: 0; pointer-events: none; }
+
+    /* Header */
+    .sll-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 18px;
+      border-bottom: 1px solid var(--border);
+    }
+    .sll-header-left {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .sll-live-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #22c55e;
+      animation: sll-pulse 1.5s ease-in-out infinite;
+      flex-shrink: 0;
+    }
+    @keyframes sll-pulse {
+      0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(34,197,94,0.5); }
+      50%       { opacity: 0.7; box-shadow: 0 0 0 4px rgba(34,197,94,0); }
+    }
+    .sll-title {
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--text);
+    }
+    .sll-controls {
+      display: flex;
+      gap: 6px;
+      align-items: center;
+    }
+    .sll-pill {
+      font-family: ui-monospace, monospace;
+      font-size: 11px;
+      padding: 3px 8px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: transparent;
+      cursor: pointer;
+      color: var(--text-muted);
+      transition: background 0.15s, color 0.15s;
+    }
+    .sll-pill.sll-pill-streaming {
+      background: rgba(34,197,94,0.12);
+      color: #22c55e;
+      border-color: rgba(34,197,94,0.3);
+    }
+    .sll-pill-pause[aria-pressed="true"] {
+      background: rgba(234,179,8,0.15);
+      color: #eab308;
+      border-color: rgba(234,179,8,0.35);
+    }
+    .sll-pill:hover { background: var(--hover-bg, rgba(255,255,255,0.06)); }
+
+    /* 3-stat grid */
+    .sll-stats {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      border-bottom: 1px solid var(--border);
+    }
+    .sll-stat {
+      padding: 14px 18px;
+      border-right: 1px solid var(--border);
+    }
+    .sll-stat:last-child { border-right: none; }
+    .sll-stat-label {
+      font-size: 10px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      margin-bottom: 4px;
+    }
+    .sll-stat-value {
+      font-family: ui-monospace, monospace;
+      font-size: 18px;
+      font-weight: 700;
+      color: var(--text);
+      margin-bottom: 2px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .sll-stat-value.sll-stat-value--sm { font-size: 15px; }
+    .sll-stat-sub {
+      font-family: ui-monospace, monospace;
+      font-size: 11px;
+      color: var(--text-muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .sll-agent-pill {
+      display: inline-block;
+      font-family: ui-monospace, monospace;
+      font-size: 11px;
+      font-weight: 600;
+      padding: 2px 8px;
+      border-radius: 4px;
+    }
+    .sll-agent-pill--coder {
+      background: rgba(168,85,247,0.15);
+      color: #c084fc;
+      border: 1px solid rgba(168,85,247,0.3);
+    }
+    .sll-agent-pill--tester {
+      background: rgba(245,158,11,0.15);
+      color: #fbbf24;
+      border: 1px solid rgba(245,158,11,0.3);
+    }
+
+    /* Log feed */
+    .sll-feed {
+      background: var(--bg, #13131f);
+      padding: 12px 20px;
+      font-family: ui-monospace, monospace;
+      font-size: 12px;
+      line-height: 1.7;
+      max-height: 220px;
+      overflow-y: auto;
+    }
+    .sll-feed-inner {
+      /* aria-live region */
+    }
+    .sll-line {
+      display: flex;
+      gap: 10px;
+      animation: sll-slideIn 0.3s ease;
+    }
+    @keyframes sll-slideIn {
+      from { opacity: 0; transform: translateX(-8px); }
+      to   { opacity: 1; transform: translateX(0); }
+    }
+    .sll-line-ts  { color: var(--text-muted); flex-shrink: 0; }
+    .sll-line-msg { flex: 1; word-break: break-all; }
+    .sll-line--dispatch .sll-line-msg { color: #60a5fa; font-weight: 500; }
+    .sll-line--success  .sll-line-msg { color: #4ade80; }
+    .sll-line--warn     .sll-line-msg { color: #fbbf24; }
+    .sll-line--fail     .sll-line-msg { color: #f87171; }
+    .sll-line--event    .sll-line-msg { color: var(--text); }
+    .sll-cursor {
+      display: inline-block;
+      color: #22c55e;
+      animation: sll-blink 1s steps(2) infinite;
+    }
+    @keyframes sll-blink {
+      0%, 100% { opacity: 1; }
+      50%       { opacity: 0; }
+    }
+  `;
+  document.head.appendChild(style);
+})();
+
+// ── Helpers ────────────────────────────────────────────────────────────────────
+
+function _sllFmtDuration(totalSec) {
+  const mins = Math.floor(totalSec / 60);
+  return `${mins}m`;
+}
+
+function _sllFmtStarted(isoStr) {
+  if (!isoStr) return '';
+  try {
+    const d = new Date(isoStr);
+    const hh = String(d.getHours()).padStart(2, '0');
+    const mm = String(d.getMinutes()).padStart(2, '0');
+    return `started ${hh}:${mm}`;
+  } catch { return ''; }
+}
+
+function _sllNow() {
+  const d = new Date();
+  return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}:${String(d.getSeconds()).padStart(2,'0')}`;
+}
+
+function _sllEscHtml(s) {
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+// ── Mount ──────────────────────────────────────────────────────────────────────
+
+function smgmtLivePanelMount(label, project) {
+  if (_sllPanels[label]) return;  // already mounted
+
+  const block = document.getElementById(`smgmt-block-${label}`);
+  if (!block) return;
+
+  const n = label.replace('sprint-', '');
+
+  // Build panel DOM
+  const panel = document.createElement('div');
+  panel.className = 'sll-panel';
+  panel.id = `sll-panel-${label}`;
+  panel.setAttribute('data-label', label);
+
+  panel.innerHTML = `
+    <div class="sll-header">
+      <div class="sll-header-left">
+        <span class="sll-live-dot" aria-label="Live"></span>
+        <span class="sll-title">Sprint ${_sllEscHtml(n)} live log</span>
+      </div>
+      <div class="sll-controls">
+        <span class="sll-pill sll-pill-streaming" id="sll-pill-streaming-${label}">Streaming</span>
+        <button class="sll-pill sll-pill-pause"
+                id="sll-pill-pause-${label}"
+                aria-pressed="false"
+                onclick="smgmtLivePanelTogglePause('${label}')">Pause autoscroll</button>
+        <button class="sll-pill"
+                id="sll-pill-expand-${label}"
+                onclick="smgmtLivePanelExpand('${label}')">Expand</button>
+      </div>
+    </div>
+
+    <div class="sll-stats">
+      <div class="sll-stat" id="sll-stat-time-${label}">
+        <div class="sll-stat-label"><i class="ti ti-clock" aria-hidden="true"></i> Time Spent</div>
+        <div class="sll-stat-value" id="sll-val-time-${label}">—</div>
+        <div class="sll-stat-sub"  id="sll-sub-time-${label}">—</div>
+      </div>
+      <div class="sll-stat" id="sll-stat-ticket-${label}">
+        <div class="sll-stat-label"><i class="ti ti-ticket" aria-hidden="true"></i> Currently Working On</div>
+        <div class="sll-stat-value sll-stat-value--sm" id="sll-val-ticket-${label}">—</div>
+        <div class="sll-stat-sub"  id="sll-sub-ticket-${label}">—</div>
+      </div>
+      <div class="sll-stat" id="sll-stat-agent-${label}">
+        <div class="sll-stat-label"><i class="ti ti-robot" aria-hidden="true"></i> Active Agent</div>
+        <div class="sll-stat-value" id="sll-val-agent-${label}">—</div>
+        <div class="sll-stat-sub"  id="sll-sub-agent-${label}">—</div>
+      </div>
+    </div>
+
+    <div class="sll-feed" id="sll-feed-${label}" role="log" aria-live="polite" aria-label="Sprint live log feed">
+      <div class="sll-feed-inner" id="sll-feed-inner-${label}"></div>
+    </div>`;
+
+  // Insert after the sprint block
+  block.insertAdjacentElement('afterend', panel);
+
+  // State
+  _sllPanels[label] = {
+    el: panel,
+    sse: null,
+    tickInterval: null,
+    autoScroll: true,
+    lineCount: 0,
+    startedAt: null,
+  };
+
+  // Load snapshot immediately
+  smgmtLivePanelLoadSnapshot(label, project);
+
+  // Start SSE stream
+  smgmtLivePanelConnectSSE(label, project);
+
+  // Start 1-second ticker for the Time Spent stat
+  const state = _sllPanels[label];
+  state.tickInterval = setInterval(() => {
+    if (!_sllPanels[label]) return;
+    _sllUpdateTimeStat(label);
+  }, 1000);
+}
+
+// ── Load snapshot (initial state + backfill of last 50 log lines) ─────────────
+
+async function smgmtLivePanelLoadSnapshot(label, project) {
+  try {
+    const resp = await fetch(
+      `/api/sprints/${encodeURIComponent(label)}/live?project=${encodeURIComponent(project)}`
+    );
+    if (!resp.ok) return;
+    const snap = await resp.json();
+    smgmtLivePanelUpdateStats(label, snap);
+
+    // Backfill log lines
+    const lines = snap.recent_log_lines || [];
+    for (const entry of lines) {
+      _sllAddLine(label, entry);
+    }
+  } catch { /* ignore */ }
+}
+
+// ── Update stats ───────────────────────────────────────────────────────────────
+
+function smgmtLivePanelUpdateStats(label, snap) {
+  const state = _sllPanels[label];
+  if (!state) return;
+
+  // Store started_at for the tick timer
+  if (snap.started_at) {
+    state.startedAt = snap.started_at;
+    state.timeSpentSec = snap.time_spent_sec || 0;
+    state.snapshotLoadedAt = Date.now();
+  }
+
+  _sllUpdateTimeStat(label, snap);
+
+  // Ticket
+  const valTicket = document.getElementById(`sll-val-ticket-${label}`);
+  const subTicket = document.getElementById(`sll-sub-ticket-${label}`);
+  if (valTicket && subTicket) {
+    if (snap.current_ticket) {
+      valTicket.textContent = `#${snap.current_ticket.number}`;
+      subTicket.textContent = snap.current_ticket.title || '';
+      subTicket.title = snap.current_ticket.title || '';
+    } else {
+      valTicket.textContent = '—';
+      subTicket.textContent = 'Waiting…';
+    }
+  }
+
+  // Agent
+  const valAgent = document.getElementById(`sll-val-agent-${label}`);
+  const subAgent = document.getElementById(`sll-sub-agent-${label}`);
+  if (valAgent && subAgent) {
+    if (snap.active_agent) {
+      const name = (snap.active_agent.name || 'coder').toLowerCase();
+      const pillClass = name === 'tester' ? 'sll-agent-pill--tester' : 'sll-agent-pill--coder';
+      valAgent.innerHTML = `<span class="sll-agent-pill ${pillClass}">${_sllEscHtml(name.toUpperCase())}</span>`;
+      const model = snap.active_agent.model || '';
+      const pid   = snap.active_agent.pid ? `pid ${snap.active_agent.pid}` : '';
+      subAgent.textContent = [model, pid].filter(Boolean).join(' · ') || '—';
+    } else {
+      valAgent.innerHTML = '—';
+      subAgent.textContent = '—';
+    }
+  }
+}
+
+function _sllUpdateTimeStat(label, snap) {
+  const state = _sllPanels[label];
+  if (!state) return;
+
+  let totalSec = 0;
+  let secFrac = 0;
+  if (state.snapshotLoadedAt && state.timeSpentSec != null) {
+    const elapsed = (Date.now() - state.snapshotLoadedAt) / 1000;
+    totalSec = Math.floor(state.timeSpentSec + elapsed);
+    secFrac = Math.floor((state.timeSpentSec + elapsed) % 60);
+  } else if (snap && snap.time_spent_sec) {
+    totalSec = snap.time_spent_sec;
+    secFrac  = totalSec % 60;
+  }
+
+  const valTime = document.getElementById(`sll-val-time-${label}`);
+  const subTime = document.getElementById(`sll-sub-time-${label}`);
+  if (valTime) valTime.textContent = _sllFmtDuration(totalSec);
+  if (subTime) {
+    const startedStr = state.startedAt ? _sllFmtStarted(state.startedAt) : '';
+    subTime.textContent = `${secFrac}s · ${startedStr}`;
+  }
+}
+
+// ── Add a log line ─────────────────────────────────────────────────────────────
+
+function _sllAddLine(label, entry) {
+  const state = _sllPanels[label];
+  if (!state) return;
+
+  const inner = document.getElementById(`sll-feed-inner-${label}`);
+  if (!inner) return;
+
+  // Remove cursor from previous last line
+  inner.querySelectorAll('.sll-cursor').forEach(el => el.remove());
+
+  const lineType = entry.type || 'event';
+  const ts       = entry.timestamp || _sllNow();
+  const msg      = entry.message || '';
+
+  const line = document.createElement('div');
+  line.className = `sll-line sll-line--${_sllEscHtml(lineType)}`;
+  line.innerHTML = `<span class="sll-line-ts">${_sllEscHtml(ts)}</span><span class="sll-line-msg">${_sllEscHtml(msg)}<span class="sll-cursor" aria-hidden="true">&#x25AE;</span></span>`;
+  inner.appendChild(line);
+
+  // Prune to last 200 lines
+  state.lineCount++;
+  if (state.lineCount > 200) {
+    const first = inner.querySelector('.sll-line');
+    if (first) { first.remove(); state.lineCount--; }
+  }
+
+  // Auto-scroll
+  if (state.autoScroll) {
+    const feed = document.getElementById(`sll-feed-${label}`);
+    if (feed) feed.scrollTop = feed.scrollHeight;
+  }
+}
+
+// ── Toggle autoscroll ──────────────────────────────────────────────────────────
+
+function smgmtLivePanelTogglePause(label) {
+  const state = _sllPanels[label];
+  if (!state) return;
+  state.autoScroll = !state.autoScroll;
+  const btn = document.getElementById(`sll-pill-pause-${label}`);
+  if (btn) {
+    const pressed = !state.autoScroll;
+    btn.setAttribute('aria-pressed', pressed ? 'true' : 'false');
+    btn.textContent = pressed ? 'Resume autoscroll' : 'Pause autoscroll';
+  }
+}
+
+// ── Expand ─────────────────────────────────────────────────────────────────────
+
+function smgmtLivePanelExpand(label) {
+  // Open the Logs sub-tab (or navigate to the logs pane)
+  const logsTab = document.getElementById('stab-logs');
+  if (logsTab) {
+    switchTab('logs');
+  }
+}
+
+// ── SSE connection ─────────────────────────────────────────────────────────────
+
+function smgmtLivePanelConnectSSE(label, project) {
+  const state = _sllPanels[label];
+  if (!state) return;
+
+  // Close any existing connection
+  if (state.sse) { try { state.sse.close(); } catch {} state.sse = null; }
+
+  const url = `/api/sprints/${encodeURIComponent(label)}/live/stream?project=${encodeURIComponent(project)}`;
+  const es = new EventSource(url);
+  state.sse = es;
+
+  // Update streaming pill to connected
+  const pill = document.getElementById(`sll-pill-streaming-${label}`);
+  if (pill) { pill.textContent = 'Streaming'; pill.classList.add('sll-pill-streaming'); }
+
+  es.addEventListener('log_line', (ev) => {
+    try {
+      const entry = JSON.parse(ev.data);
+      _sllAddLine(label, entry);
+    } catch {}
+  });
+
+  es.addEventListener('complete', () => {
+    smgmtLivePanelUnmount(label);
+  });
+
+  es.onerror = () => {
+    // EventSource will auto-reconnect — just update the pill to show disconnected briefly
+    if (pill) { pill.textContent = 'Reconnecting…'; pill.classList.remove('sll-pill-streaming'); }
+    // If the state is gone, fully close
+    if (!_sllPanels[label]) { try { es.close(); } catch {} }
+  };
+
+  es.onopen = () => {
+    if (pill) { pill.textContent = 'Streaming'; pill.classList.add('sll-pill-streaming'); }
+  };
+}
+
+// ── Unmount (fade then remove) ─────────────────────────────────────────────────
+
+function smgmtLivePanelUnmount(label) {
+  const state = _sllPanels[label];
+  if (!state) return;
+
+  // Stop SSE
+  if (state.sse) { try { state.sse.close(); } catch {} state.sse = null; }
+
+  // Stop tick
+  if (state.tickInterval) { clearInterval(state.tickInterval); state.tickInterval = null; }
+
+  // Fade out then remove from DOM
+  const panel = state.el;
+  if (panel) {
+    panel.classList.add('sll-fading');
+    setTimeout(() => {
+      if (panel.parentNode) panel.parentNode.removeChild(panel);
+    }, 350);
+  }
+
+  delete _sllPanels[label];
+}
+
+// ── Integration with smgmtApplyRunState ──────────────────────────────────────
+//
+// Called after each smgmtPollRunStatus cycle to reconcile panels with
+// the current set of running sprints.
+
+function smgmtSyncLivePanels() {
+  if (!_smgmtCurrentRepo) return;
+
+  // Running labels for the current project
+  const runningLabels = new Set(
+    Object.values(_smgmtAllRunning)
+      .filter(e => e.project === _smgmtCurrentRepo)
+      .map(e => e.sprint_label)
+  );
+
+  // Mount panels for newly-running sprints
+  for (const label of runningLabels) {
+    if (!_sllPanels[label]) {
+      smgmtLivePanelMount(label, _smgmtCurrentRepo);
+    }
+  }
+
+  // Unmount panels for sprints that are no longer running
+  for (const label of Object.keys(_sllPanels)) {
+    if (!runningLabels.has(label)) {
+      smgmtLivePanelUnmount(label);
+    }
+  }
 }

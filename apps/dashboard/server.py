@@ -2395,6 +2395,253 @@ def get_issue_log(sprint_label: str, project: str, issue_num: int, tail_lines: i
     return {"found": True, "path": str(log_path), "tail": tail, "mtime": mtime}
 
 
+# ── Sprint live snapshot + SSE stream (issue #224) ───────────────────────────
+
+def _parse_log_lines_for_live(lines: list[str], limit: int = 50) -> list[dict]:
+    """Parse log lines into structured log entries for the live panel.
+
+    Classifies each line into one of: dispatch, success, warn, fail, event.
+    Returns the last `limit` entries (oldest-first).
+    """
+    entries: list[dict] = []
+    for raw in lines:
+        stripped = raw.strip()
+        if not stripped:
+            continue
+
+        # Determine line type by content heuristics
+        if (
+            stripped.startswith("→")
+            or stripped.startswith("---")
+            or "start_feature.py" in stripped
+            or "Dispatching" in stripped
+        ):
+            line_type = "dispatch"
+        elif (
+            stripped.startswith("✓")
+            or "promoted" in stripped.lower()
+            or "merged" in stripped.lower()
+            or "completed" in stripped.lower()
+            or "done" in stripped.lower()
+        ):
+            line_type = "success"
+        elif (
+            "warning" in stripped.lower()
+            or stripped.lower().startswith("warn")
+            or "[retry]" in stripped.lower()
+        ):
+            line_type = "warn"
+        elif (
+            "error" in stripped.lower()
+            or "fail" in stripped.lower()
+            or "skipped" in stripped.lower()
+            or stripped.lower().startswith("err")
+        ):
+            line_type = "fail"
+        else:
+            line_type = "event"
+
+        # Use the current UTC time formatted as HH:MM:SS — we don't have per-line
+        # timestamps in the log, so we label with a placeholder "—"; callers may
+        # pre-process the raw lines before calling this function.
+        entries.append({"timestamp": "—", "type": line_type, "message": stripped})
+
+    return entries[-limit:]
+
+
+def _find_latest_sprint_log(log_dir: Path, sprint_label: str) -> Optional[Path]:
+    """Return the most recently modified sprint-run-<label>-*.log file, or None."""
+    if not log_dir.exists():
+        return None
+    candidates = sorted(
+        log_dir.glob(f"sprint-run-{sprint_label}-*.log"),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+    return candidates[0] if candidates else None
+
+
+@app.get("/api/sprints/{sprint_label}/live")
+def get_sprint_live_snapshot(sprint_label: str, project: str):
+    """Return a JSON snapshot of the live running sprint.
+
+    Response shape:
+    {
+      "time_spent_sec": <int>,
+      "started_at": "<ISO8601>",
+      "current_ticket": {"number": N, "title": "..."} | null,
+      "active_agent": {"name": "coder"|"tester", "model": "...", "pid": N} | null,
+      "recent_log_lines": [{"timestamp": "HH:MM:SS", "type": "...", "message": "..."}, ...]
+    }
+    recent_log_lines contains the last 50 lines.
+    """
+    if not _SPRINT_LABEL_RE.match(sprint_label):
+        raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")
+
+    project_root = _project_root_path(project)
+    commander = _commander_dir(project_root)
+
+    # ── Time spent + started_at from _sprint_statuses in-memory dict ──────────
+    status_key = (project, sprint_label)
+    status_data = _sprint_statuses.get(status_key, {})
+
+    started_at_str: Optional[str] = status_data.get("start_timestamp")
+    started_at_dt: Optional[datetime] = None
+    if started_at_str:
+        try:
+            started_at_dt = datetime.fromisoformat(started_at_str.rstrip("Z"))
+            if started_at_dt.tzinfo is None:
+                started_at_dt = started_at_dt.replace(tzinfo=timezone.utc)
+        except Exception:
+            started_at_dt = None
+
+    now_utc = datetime.now(timezone.utc)
+    time_spent_sec: int = 0
+    if started_at_dt:
+        time_spent_sec = max(0, int((now_utc - started_at_dt).total_seconds()))
+
+    # ── current_ticket: the most-recent in-progress issue from sprint status ──
+    current_ticket: Optional[dict] = None
+    issues = status_data.get("issues", [])
+    # Prefer the last issue with status "in-progress"; fall back to last non-done issue
+    in_progress = [i for i in issues if i.get("status") == "in-progress"]
+    if in_progress:
+        iss = in_progress[-1]
+        current_ticket = {"number": iss.get("number"), "title": iss.get("title", "")}
+    else:
+        pending = [i for i in issues if i.get("status") not in ("done", "skipped")]
+        if pending:
+            iss = pending[0]
+            current_ticket = {"number": iss.get("number"), "title": iss.get("title", "")}
+
+    # ── active_agent: derive from sprint state JSON (coder/tester transition) ──
+    active_agent: Optional[dict] = None
+    m = re.search(r"(\d+)", sprint_label)
+    n = m.group(1) if m else sprint_label
+    state_path = commander / "sprints" / f"sprint-{n}-state.json"
+    if state_path.exists():
+        try:
+            state_data = json.loads(state_path.read_text(encoding="utf-8"))
+            # Find the issue currently being processed (has coder_started but no tester_finished)
+            for iss in state_data.get("issues", []):
+                if iss.get("coder_started_at") and not iss.get("tester_finished_at"):
+                    agent_name = "tester" if iss.get("tester_started_at") else "coder"
+                    active_agent = {"name": agent_name, "model": None, "pid": None}
+                    break
+        except Exception:
+            pass
+
+    # PID from PID file
+    pid_file = commander / "sprints" / f"{sprint_label}-pid"
+    if pid_file.exists():
+        try:
+            pid_val = int(pid_file.read_text(encoding="utf-8").strip())
+            if active_agent:
+                active_agent["pid"] = pid_val
+            else:
+                active_agent = {"name": "coder", "model": None, "pid": pid_val}
+        except Exception:
+            pass
+
+    # ── recent_log_lines: last 50 lines from sprint run log ──────────────────
+    log_dir = commander / "logs"
+    recent_log_lines: list[dict] = []
+    log_path = _find_latest_sprint_log(log_dir, sprint_label)
+    if log_path:
+        try:
+            raw_lines = log_path.read_text(encoding="utf-8", errors="replace").splitlines()
+            recent_log_lines = _parse_log_lines_for_live(raw_lines, limit=50)
+        except OSError:
+            pass
+
+    return {
+        "time_spent_sec": time_spent_sec,
+        "started_at": started_at_str,
+        "current_ticket": current_ticket,
+        "active_agent": active_agent,
+        "recent_log_lines": recent_log_lines,
+    }
+
+
+@app.get("/api/sprints/{sprint_label}/live/stream")
+async def get_sprint_live_stream(sprint_label: str, project: str, request: Request):
+    """SSE endpoint that streams incremental log-line events as they occur.
+
+    Events emitted:
+    - event: log_line   data: {"timestamp": "...", "type": "...", "message": "..."}
+    - event: complete   data: {"reason": "stopped"}   (when sprint ends)
+    - keepalive comment every 15 s while idle
+
+    Data source: tails the most recent sprint-run-<label>-*.log file.
+    """
+    if not _SPRINT_LABEL_RE.match(sprint_label):
+        raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")
+
+    project_root = _project_root_path(project)
+    commander = _commander_dir(project_root)
+    log_dir = commander / "logs"
+
+    async def _stream():
+        # Find the current log file — retry briefly in case it hasn't appeared yet
+        log_path: Optional[Path] = None
+        for _ in range(20):  # up to 2 seconds
+            log_path = _find_latest_sprint_log(log_dir, sprint_label)
+            if log_path:
+                break
+            await asyncio.sleep(0.1)
+
+        if not log_path:
+            yield f"event: complete\ndata: {json.dumps({'reason': 'no_log_file'})}\n\n"
+            return
+
+        # Seek to end of file so we only stream new lines
+        try:
+            file_size = log_path.stat().st_size
+        except OSError:
+            file_size = 0
+
+        current_offset = file_size
+
+        while True:
+            if await request.is_disconnected():
+                return
+
+            # Check if sprint is still running
+            is_running = _is_sprint_running(project_root, sprint_label)
+
+            # Read any new bytes from the log file
+            try:
+                file_size = log_path.stat().st_size
+            except OSError:
+                file_size = current_offset
+
+            if file_size > current_offset:
+                try:
+                    with open(log_path, "r", encoding="utf-8", errors="replace") as fh:
+                        fh.seek(current_offset)
+                        new_text = fh.read(file_size - current_offset)
+                    current_offset = file_size
+
+                    new_lines = new_text.splitlines()
+                    parsed = _parse_log_lines_for_live(new_lines, limit=len(new_lines))
+                    for entry in parsed:
+                        yield f"event: log_line\ndata: {json.dumps(entry)}\n\n"
+                except OSError:
+                    pass
+
+            if not is_running:
+                yield f"event: complete\ndata: {json.dumps({'reason': 'stopped'})}\n\n"
+                return
+
+            await asyncio.sleep(0.5)
+
+    return StreamingResponse(
+        _stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
 @app.post("/api/sprints/create")
 async def create_sprint_label(body: SprintCreateBody):
     """Create a sprint-N label for a project. Uses sprint_number if provided, else auto-increments.

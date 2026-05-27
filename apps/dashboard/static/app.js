@@ -3181,7 +3181,15 @@ async function smgmtDispatchRun(sprintLabel, migrateFrom) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ project: _smgmtCurrentRepo, sprint_label: sprintLabel, migrate_from: migrateFrom }),
     });
-    if (!res.ok) throw new Error(await res.text());
+    if (!res.ok) {
+      const rawText = await res.text();
+      let errMsg = rawText;
+      try {
+        const errJson = JSON.parse(rawText);
+        if (errJson && errJson.detail) errMsg = errJson.detail;
+      } catch (_) { /* use raw text if not JSON */ }
+      throw new Error(errMsg);
+    }
     const data = await res.json();
 
     if (data.migrated_count > 0) {
@@ -3752,8 +3760,21 @@ async function smgmtCleanupConfirm() {
 function smgmtShowError(msg) {
   const el = document.getElementById('smgmt-error');
   if (!el) return;
-  el.textContent = msg;
-  el.classList.toggle('hidden', !msg);
+  if (!msg) {
+    el.innerHTML = '';
+    el.classList.add('hidden');
+    return;
+  }
+  // Render multi-line messages (e.g. log tails) in a <pre> block for readability.
+  if (msg.includes('\n')) {
+    const parts = msg.split('\n');
+    const firstLine = escapeHtml(parts[0]);
+    const rest = escapeHtml(parts.slice(1).join('\n').trimStart());
+    el.innerHTML = `${firstLine}<pre class="smgmt-error-log">${rest}</pre>`;
+  } else {
+    el.textContent = msg;
+  }
+  el.classList.remove('hidden');
 }
 
 // ── SSE handler for sprint_plan_update ────────────────────────────────────────

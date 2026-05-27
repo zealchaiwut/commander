@@ -2655,4 +2655,625 @@ async def create_ticket_from_draft(
     return {"number": number, "url": url}
 
 
+# ── Bulk Ticket Creation (issue #189) ─────────────────────────────────────────
+
+# Configurable BA timeout per ticket (seconds)
+_BULK_BA_TIMEOUT = int(os.environ.get("BULK_CREATE_BA_TIMEOUT_SEC", "90"))
+
+# Job storage: in-memory + persisted snapshots
+_bulk_jobs: dict[str, dict] = {}  # job_id -> job state
+_bulk_job_queues: dict[str, asyncio.Queue] = {}  # job_id -> SSE event queue list
+_BULK_JOBS_DIR = Path(__file__).parent / "runtime" / "bulk-jobs"
+
+_ALLOWED_CONCURRENCY = {1, 3, 5}
+_MAX_BULK_PROMPTS = 25
+
+
+def _bulk_jobs_dir() -> Path:
+    """Return the .commander/bulk-jobs directory, creating it if needed."""
+    # Try to find .commander relative to repo root
+    try:
+        root = _repo_root()
+        commander_dir = root / ".commander" / "bulk-jobs"
+    except RuntimeError:
+        commander_dir = _BULK_JOBS_DIR
+    commander_dir.mkdir(parents=True, exist_ok=True)
+    return commander_dir
+
+
+def _persist_bulk_job(job: dict) -> None:
+    """Persist job state snapshot to disk."""
+    try:
+        jobs_dir = _bulk_jobs_dir()
+        path = jobs_dir / f"{job['job_id']}.json"
+        path.write_text(json.dumps(job, default=str))
+    except Exception:
+        pass
+
+
+def _bulk_job_created_at(job: dict) -> float:
+    """Return created_at as epoch float for age comparison."""
+    try:
+        ts = job.get("created_at", "")
+        if ts:
+            from datetime import timezone as _tz
+            dt = datetime.fromisoformat(ts)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt.timestamp()
+    except Exception:
+        pass
+    return time.time()
+
+
+def _prune_old_bulk_jobs() -> None:
+    """Remove job snapshots older than 24 hours from disk and memory."""
+    cutoff = time.time() - 86400
+    try:
+        jobs_dir = _bulk_jobs_dir()
+        for p in jobs_dir.glob("*.json"):
+            try:
+                data = json.loads(p.read_text())
+                age = _bulk_job_created_at(data)
+                if age < cutoff:
+                    p.unlink(missing_ok=True)
+                    _bulk_jobs.pop(data.get("job_id", ""), None)
+            except Exception:
+                pass
+    except Exception:
+        pass
+    # Also prune from memory
+    stale = [jid for jid, j in _bulk_jobs.items() if _bulk_job_created_at(j) < cutoff]
+    for jid in stale:
+        _bulk_jobs.pop(jid, None)
+
+
+async def _broadcast_bulk_event(job_id: str, event: dict) -> None:
+    """Send a job update event to all SSE subscribers for this job."""
+    queues = _bulk_job_queues.get(job_id, [])
+    payload = json.dumps(event)
+    for q in list(queues):
+        try:
+            q.put_nowait(payload)
+        except asyncio.QueueFull:
+            pass
+
+
+async def _run_single_ba_ticket(
+    job_id: str,
+    index: int,
+    prompt: str,
+    repo: str,
+    default_labels: list[str],
+) -> None:
+    """Run BA polish for a single ticket and update job state. Does NOT create the issue."""
+    job = _bulk_jobs.get(job_id)
+    if not job:
+        return
+
+    ticket = job["tickets"][index]
+    # Check if skipped before starting
+    if ticket["state"] == "skipped":
+        return
+
+    # Transition to drafting
+    ticket["state"] = "drafting"
+    ticket["started_at"] = datetime.now(timezone.utc).isoformat()
+    _persist_bulk_job(job)
+    await _broadcast_bulk_event(job_id, {"type": "ticket_update", "ticket": dict(ticket)})
+
+    prompt_text = (
+        "You are a BA (Business Analyst) agent writing a GitHub issue.\n\n"
+        f"User description: {prompt}\n\n"
+        "Write a complete GitHub issue with these sections:\n"
+        "  - Title (short, imperative, 5-10 words)\n"
+        "  - ## What & Why (1-3 sentences)\n"
+        "  - ## Acceptance Criteria (checkbox list, specific and testable)\n"
+        "  - ## UAT Test Steps (numbered, each with Expected: line)\n"
+        "  - ## Out of Scope (brief list)\n\n"
+        'Output ONLY valid JSON with exactly two string fields: "title" and "body".\n'
+        "The body field must be GitHub-flavored markdown. No text outside the JSON."
+    )
+
+    cmd = [
+        "claude",
+        "--model", "claude-sonnet-4-6",
+        "--dangerously-skip-permissions",
+        "-p", prompt_text,
+    ]
+
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        try:
+            stdout, stderr = await asyncio.wait_for(
+                proc.communicate(), timeout=float(_BULK_BA_TIMEOUT)
+            )
+        except asyncio.TimeoutError:
+            proc.kill()
+            ticket["state"] = "failed"
+            ticket["error"] = f"BA polish timed out after {_BULK_BA_TIMEOUT}s"
+            ticket["finished_at"] = datetime.now(timezone.utc).isoformat()
+            _persist_bulk_job(job)
+            await _broadcast_bulk_event(job_id, {"type": "ticket_update", "ticket": dict(ticket)})
+            return
+    except FileNotFoundError:
+        ticket["state"] = "failed"
+        ticket["error"] = "claude CLI not found on server"
+        ticket["finished_at"] = datetime.now(timezone.utc).isoformat()
+        _persist_bulk_job(job)
+        await _broadcast_bulk_event(job_id, {"type": "ticket_update", "ticket": dict(ticket)})
+        return
+
+    if proc.returncode != 0:
+        err = stderr.decode("utf-8", errors="replace").strip()[:300]
+        ticket["state"] = "failed"
+        ticket["error"] = f"BA agent failed: {err}"
+        ticket["finished_at"] = datetime.now(timezone.utc).isoformat()
+        _persist_bulk_job(job)
+        await _broadcast_bulk_event(job_id, {"type": "ticket_update", "ticket": dict(ticket)})
+        return
+
+    output = stdout.decode("utf-8", errors="replace").strip()
+    title, body = _parse_ba_draft(output)
+
+    # Store draft result — issue creation happens in-order via the flusher
+    ticket["title"] = title
+    ticket["body"] = body
+    ticket["state"] = "draft_ready"  # internal state — flusher picks up from here
+    ticket["finished_at"] = datetime.now(timezone.utc).isoformat()
+    ticket["_default_labels"] = default_labels
+    ticket["_repo"] = repo
+    _persist_bulk_job(job)
+    # Don't broadcast yet — flusher will broadcast after creating the issue
+
+
+async def _bulk_flusher(job_id: str) -> None:
+    """Flush completed drafts to GitHub in original index order."""
+    job = _bulk_jobs.get(job_id)
+    if not job:
+        return
+
+    tickets = job["tickets"]
+    n = len(tickets)
+    flush_idx = 0
+
+    while flush_idx < n:
+        job = _bulk_jobs.get(job_id)
+        if not job:
+            return
+
+        # Check if job is stopped
+        if job.get("stop_requested") and job.get("status") == "stopped":
+            break
+
+        ticket = job["tickets"][flush_idx]
+
+        if ticket["state"] in ("skipped", "failed"):
+            flush_idx += 1
+            continue
+
+        if ticket["state"] == "draft_ready":
+            # Create the issue
+            try:
+                labels = ["backlog"] + ticket.get("_default_labels", [])
+                number, url = github_client.create_issue(
+                    title=ticket["title"],
+                    body=ticket["body"],
+                    labels=labels,
+                    repo_name=ticket.get("_repo") or None,
+                )
+                ticket["state"] = "created"
+                ticket["issue_num"] = number
+                ticket["issue_url"] = url
+                ticket["body_preview"] = ticket["body"][:200]
+                ticket["label_pills"] = labels
+            except Exception as e:
+                ticket["state"] = "failed"
+                ticket["error"] = f"GitHub issue creation failed: {str(e)[:200]}"
+
+            ticket["finished_at"] = datetime.now(timezone.utc).isoformat()
+            # Remove internal fields
+            ticket.pop("_default_labels", None)
+            ticket.pop("_repo", None)
+            _persist_bulk_job(job)
+            await _broadcast_bulk_event(job_id, {"type": "ticket_update", "ticket": dict(ticket)})
+            flush_idx += 1
+
+        elif ticket["state"] in ("pending", "drafting"):
+            # Not ready yet — wait a bit
+            await asyncio.sleep(0.5)
+
+        else:
+            flush_idx += 1
+
+    # Check if all done
+    job = _bulk_jobs.get(job_id)
+    if job:
+        all_done = all(
+            t["state"] in ("created", "failed", "skipped") for t in job["tickets"]
+        )
+        if all_done:
+            job["status"] = "done"
+            _persist_bulk_job(job)
+            await _broadcast_bulk_event(job_id, {"type": "job_done", "job_id": job_id})
+
+
+async def _bulk_worker(
+    job_id: str,
+    semaphore: asyncio.Semaphore,
+    queue: asyncio.Queue,
+    repo: str,
+    default_labels: list[str],
+) -> None:
+    """Worker coroutine: pull tickets from queue and run BA on each."""
+    while True:
+        try:
+            index = queue.get_nowait()
+        except asyncio.QueueEmpty:
+            break
+
+        job = _bulk_jobs.get(job_id)
+        if not job:
+            break
+
+        ticket = job["tickets"][index]
+        if ticket["state"] == "skipped":
+            queue.task_done()
+            continue
+
+        # Check if stop was requested
+        if job.get("stop_requested"):
+            ticket["state"] = "skipped"
+            _persist_bulk_job(job)
+            await _broadcast_bulk_event(job_id, {"type": "ticket_update", "ticket": dict(ticket)})
+            queue.task_done()
+            continue
+
+        async with semaphore:
+            await _run_single_ba_ticket(job_id, index, ticket["prompt"], repo, default_labels)
+        queue.task_done()
+
+
+async def _run_bulk_job(job_id: str) -> None:
+    """Main bulk job orchestrator: runs workers + flusher concurrently."""
+    job = _bulk_jobs.get(job_id)
+    if not job:
+        return
+
+    concurrency = job["concurrency"]
+    repo = job["repo"]
+    default_labels = job["default_labels"]
+    tickets = job["tickets"]
+
+    semaphore = asyncio.Semaphore(concurrency)
+    work_queue: asyncio.Queue = asyncio.Queue()
+
+    for t in tickets:
+        if t["state"] == "pending":
+            work_queue.put_nowait(t["index"])
+
+    # Launch workers
+    workers = [
+        asyncio.create_task(
+            _bulk_worker(job_id, semaphore, work_queue, repo, default_labels)
+        )
+        for _ in range(min(concurrency, len(tickets)))
+    ]
+
+    # Launch flusher
+    flusher = asyncio.create_task(_bulk_flusher(job_id))
+
+    # Wait for all workers to finish
+    await asyncio.gather(*workers, return_exceptions=True)
+
+    # Signal stop if needed — mark remaining pending as skipped
+    job = _bulk_jobs.get(job_id)
+    if job and job.get("stop_requested"):
+        for t in job["tickets"]:
+            if t["state"] in ("pending", "draft_ready"):
+                t["state"] = "skipped"
+                await _broadcast_bulk_event(job_id, {"type": "ticket_update", "ticket": dict(t)})
+        job["status"] = "stopped"
+        _persist_bulk_job(job)
+        await _broadcast_bulk_event(job_id, {"type": "job_done", "job_id": job_id})
+
+    # Wait for flusher to finish
+    await flusher
+
+    # Final status update
+    job = _bulk_jobs.get(job_id)
+    if job and job.get("status") not in ("done", "stopped"):
+        job["status"] = "done"
+        _persist_bulk_job(job)
+        await _broadcast_bulk_event(job_id, {"type": "job_done", "job_id": job_id})
+
+
+class BulkCreateBody(BaseModel):
+    repo: str
+    default_labels: list[str] = []
+    prompts: list[str]
+    concurrency: int = 3
+
+
+@app.post("/api/tickets/bulk", status_code=202)
+async def bulk_create_start(body: BulkCreateBody):
+    """Start a bulk ticket creation job.
+
+    Returns {job_id} immediately; use the SSE stream endpoint to track progress.
+    """
+    _prune_old_bulk_jobs()
+
+    # Validate repo
+    projects = projects_module.load_projects()
+    if not any(p["repo"] == body.repo for p in projects):
+        raise HTTPException(422, detail=f"Repo '{body.repo}' is not a configured project")
+
+    # Validate concurrency
+    if body.concurrency not in _ALLOWED_CONCURRENCY:
+        raise HTTPException(422, detail=f"Concurrency must be one of {sorted(_ALLOWED_CONCURRENCY)}")
+
+    # Filter blank prompts
+    clean_prompts = [p.strip() for p in body.prompts if p.strip()]
+    if not clean_prompts:
+        raise HTTPException(422, detail="Batch must contain at least one non-blank prompt")
+    if len(clean_prompts) > _MAX_BULK_PROMPTS:
+        raise HTTPException(
+            422,
+            detail=f"Batch limit is {_MAX_BULK_PROMPTS} prompts (got {len(clean_prompts)})"
+        )
+
+    # Validate default_labels — each must already exist in the repo
+    if body.default_labels:
+        existing_labels = {lbl["name"] for lbl in github_client.list_labels(repo_name=body.repo)}
+        bad = [lbl for lbl in body.default_labels if lbl not in existing_labels]
+        if bad:
+            raise HTTPException(
+                422,
+                detail=f"Unknown labels (not in repo): {', '.join(bad)}"
+            )
+
+    job_id = str(uuid.uuid4())
+    now = datetime.now(timezone.utc).isoformat()
+    tickets = [
+        {
+            "index": i,
+            "prompt": prompt,
+            "state": "pending",
+            "title": None,
+            "body": None,
+            "body_preview": None,
+            "issue_num": None,
+            "issue_url": None,
+            "label_pills": None,
+            "error": None,
+            "started_at": None,
+            "finished_at": None,
+        }
+        for i, prompt in enumerate(clean_prompts)
+    ]
+
+    job = {
+        "job_id": job_id,
+        "status": "running",
+        "repo": body.repo,
+        "default_labels": body.default_labels,
+        "concurrency": body.concurrency,
+        "created_at": now,
+        "stop_requested": False,
+        "tickets": tickets,
+    }
+    _bulk_jobs[job_id] = job
+    _bulk_job_queues[job_id] = []
+    _persist_bulk_job(job)
+
+    # Fire off the job in the background
+    asyncio.create_task(_run_bulk_job(job_id))
+
+    return {"job_id": job_id}
+
+
+@app.get("/api/tickets/bulk/{job_id}")
+async def bulk_get_job(job_id: str):
+    """Return the current state of a bulk job."""
+    job = _bulk_jobs.get(job_id)
+    if not job:
+        # Try to load from disk
+        try:
+            path = _bulk_jobs_dir() / f"{job_id}.json"
+            if path.exists():
+                job = json.loads(path.read_text())
+                _bulk_jobs[job_id] = job
+        except Exception:
+            pass
+    if not job:
+        raise HTTPException(404, detail="Job not found")
+    # Strip internal fields from response
+    tickets = [
+        {k: v for k, v in t.items() if not k.startswith("_")}
+        for t in job["tickets"]
+    ]
+    return {
+        "job_id": job["job_id"],
+        "status": job["status"],
+        "concurrency": job["concurrency"],
+        "tickets": tickets,
+    }
+
+
+@app.get("/api/tickets/bulk/{job_id}/stream")
+async def bulk_job_stream(job_id: str, request: Request):
+    """SSE stream of state-change events for a bulk job."""
+    job = _bulk_jobs.get(job_id)
+    if not job:
+        raise HTTPException(404, detail="Job not found")
+
+    queue: asyncio.Queue = asyncio.Queue(maxsize=200)
+
+    # Register this subscriber
+    if job_id not in _bulk_job_queues:
+        _bulk_job_queues[job_id] = []
+    _bulk_job_queues[job_id].append(queue)
+
+    async def generator():
+        try:
+            # On connect: send full current state first
+            state_snapshot = await bulk_get_job(job_id)
+            yield f"event: snapshot\ndata: {json.dumps(state_snapshot)}\n\n"
+
+            while True:
+                try:
+                    data = await asyncio.wait_for(queue.get(), timeout=15.0)
+                    yield f"event: update\ndata: {data}\n\n"
+                    # Stop streaming if job is done
+                    parsed = json.loads(data)
+                    if parsed.get("type") == "job_done":
+                        break
+                except asyncio.TimeoutError:
+                    yield ": keepalive\n\n"
+                except Exception:
+                    break
+        finally:
+            qlist = _bulk_job_queues.get(job_id, [])
+            if queue in qlist:
+                qlist.remove(queue)
+
+    return StreamingResponse(
+        generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+class BulkStopBody(BaseModel):
+    pass
+
+
+@app.post("/api/tickets/bulk/{job_id}/stop")
+async def bulk_stop_job(job_id: str):
+    """Graceful stop: finish in-flight BA calls, mark remaining pending as skipped."""
+    job = _bulk_jobs.get(job_id)
+    if not job:
+        raise HTTPException(404, detail="Job not found")
+    job["stop_requested"] = True
+    _persist_bulk_job(job)
+    return {"ok": True}
+
+
+class BulkSkipBody(BaseModel):
+    index: int
+
+
+@app.post("/api/tickets/bulk/{job_id}/skip")
+async def bulk_skip_ticket(job_id: str, body: BulkSkipBody):
+    """Mark a pending ticket as skipped (no-op if already past pending)."""
+    job = _bulk_jobs.get(job_id)
+    if not job:
+        raise HTTPException(404, detail="Job not found")
+    tickets = job["tickets"]
+    if body.index < 0 or body.index >= len(tickets):
+        raise HTTPException(422, detail="Invalid ticket index")
+    ticket = tickets[body.index]
+    if ticket["state"] == "pending":
+        ticket["state"] = "skipped"
+        _persist_bulk_job(job)
+        await _broadcast_bulk_event(job_id, {"type": "ticket_update", "ticket": dict(ticket)})
+    return {"ok": True, "state": ticket["state"]}
+
+
+class BulkRetryBody(BaseModel):
+    index: int
+
+
+@app.post("/api/tickets/bulk/{job_id}/retry")
+async def bulk_retry_ticket(job_id: str, body: BulkRetryBody):
+    """Re-queue a failed ticket for retry."""
+    job = _bulk_jobs.get(job_id)
+    if not job:
+        raise HTTPException(404, detail="Job not found")
+    tickets = job["tickets"]
+    if body.index < 0 or body.index >= len(tickets):
+        raise HTTPException(422, detail="Invalid ticket index")
+    ticket = tickets[body.index]
+    if ticket["state"] != "failed":
+        return {"ok": True, "state": ticket["state"]}
+
+    # Reset to pending and re-run as a single task
+    ticket["state"] = "pending"
+    ticket["error"] = None
+    ticket["started_at"] = None
+    ticket["finished_at"] = None
+    job["status"] = "running"
+    _persist_bulk_job(job)
+    await _broadcast_bulk_event(job_id, {"type": "ticket_update", "ticket": dict(ticket)})
+
+    async def _retry_task():
+        await _run_single_ba_ticket(
+            job_id, body.index, ticket["prompt"],
+            job["repo"], job["default_labels"]
+        )
+        # After BA, trigger flusher to create the issue (best-effort, appended order)
+        t = job["tickets"][body.index]
+        if t.get("state") == "draft_ready":
+            try:
+                labels = ["backlog"] + t.get("_default_labels", [])
+                number, url = github_client.create_issue(
+                    title=t["title"],
+                    body=t["body"],
+                    labels=labels,
+                    repo_name=t.get("_repo") or None,
+                )
+                t["state"] = "created"
+                t["issue_num"] = number
+                t["issue_url"] = url
+                t["body_preview"] = t["body"][:200]
+                t["label_pills"] = labels
+            except Exception as e:
+                t["state"] = "failed"
+                t["error"] = f"GitHub issue creation failed: {str(e)[:200]}"
+            t["finished_at"] = datetime.now(timezone.utc).isoformat()
+            t.pop("_default_labels", None)
+            t.pop("_repo", None)
+            _persist_bulk_job(job)
+            await _broadcast_bulk_event(job_id, {"type": "ticket_update", "ticket": dict(t)})
+
+        # Update job status
+        all_done = all(
+            tt["state"] in ("created", "failed", "skipped") for tt in job["tickets"]
+        )
+        if all_done:
+            job["status"] = "done"
+            _persist_bulk_job(job)
+            await _broadcast_bulk_event(job_id, {"type": "job_done", "job_id": job_id})
+
+    asyncio.create_task(_retry_task())
+    return {"ok": True}
+
+
+# ── Startup: mark any in-flight jobs as failed (best-effort) ─────────────────
+
+@app.on_event("startup")
+async def _mark_inflight_jobs_failed():
+    """On restart, mark any previously-running jobs as failed (state lost)."""
+    try:
+        jobs_dir = _bulk_jobs_dir()
+        for p in jobs_dir.glob("*.json"):
+            try:
+                job = json.loads(p.read_text())
+                if job.get("status") == "running":
+                    job["status"] = "failed"
+                    for t in job.get("tickets", []):
+                        if t["state"] in ("pending", "drafting", "draft_ready"):
+                            t["state"] = "failed"
+                            t["error"] = "Server restarted — job state lost"
+                    p.write_text(json.dumps(job, default=str))
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")

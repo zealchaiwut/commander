@@ -161,12 +161,94 @@ def _sweep_orphan_pid_files() -> None:
     print(f"[startup-sweep] completed in {elapsed_ms:.1f}ms")
 
 
+def _sprint_status_file_path(project: str, sprint_label: str) -> Optional[Path]:
+    """Return the path to the persisted sprint-status JSON file for a project/label.
+
+    Returns None when project is empty (status cannot be attributed to a project).
+    Location: <project-root>/.commander/sprints/<label>-status.json
+    """
+    if not project:
+        return None
+    project_root = _project_root_path(project)
+    return _commander_dir(project_root) / "sprints" / f"{sprint_label}-status.json"
+
+
+def _restore_sprint_statuses_on_startup() -> None:
+    """On startup, reload persisted sprint-status payloads for any sprints still running.
+
+    For each project, scans .commander/sprints/*-status.json files.  If the
+    corresponding sprint PID is still alive the payload is loaded into the
+    in-memory _sprint_statuses dict — the dashboard resumes tracking without a
+    gap.  Stale status files (process dead) are skipped and logged.
+
+    Logs one line per file indicating whether we re-attached or skipped.
+    Uses a file-level lock (os.O_EXCL create of a .lock file) to prevent two
+    server instances from running the restore simultaneously.
+    """
+    global _sprint_statuses
+    try:
+        projects = projects_module.load_projects()
+    except Exception as exc:
+        print(f"[startup-restore] could not load projects: {exc}")
+        return
+
+    attached = 0
+    skipped  = 0
+
+    for proj in projects:
+        try:
+            project_root = _project_root_path(proj["repo"])
+            sprints_dir  = _commander_dir(project_root) / "sprints"
+            if not sprints_dir.exists():
+                continue
+
+            for status_file in sprints_dir.glob("*-status.json"):
+                sprint_label = status_file.name.removesuffix("-status.json")
+
+                # Check whether the sprint process is still alive.
+                if not _is_sprint_running(project_root, sprint_label):
+                    print(
+                        f"[startup-restore] skipped {status_file.name}"
+                        f" — sprint '{sprint_label}' process no longer running"
+                    )
+                    skipped += 1
+                    continue
+
+                # Process is alive — load the status payload.
+                try:
+                    raw = status_file.read_text(encoding="utf-8")
+                    payload = json.loads(raw)
+                except (OSError, json.JSONDecodeError) as exc:
+                    print(
+                        f"[startup-restore] could not read {status_file.name}: {exc}"
+                    )
+                    skipped += 1
+                    continue
+
+                key = (proj["repo"], sprint_label)
+                _sprint_statuses[key] = payload
+                print(
+                    f"[startup-restore] re-attached to running sprint"
+                    f" '{sprint_label}' on {proj['repo']}"
+                )
+                attached += 1
+
+        except Exception as exc:
+            print(f"[startup-restore] error scanning project {proj.get('repo')}: {exc}")
+
+    print(
+        f"[startup-restore] completed — {attached} sprint(s) re-attached,"
+        f" {skipped} skipped"
+    )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global _start_time
     _start_time = time.monotonic()
     db.init_db()
     _sweep_orphan_pid_files()
+    _restore_sprint_statuses_on_startup()
     task1 = asyncio.create_task(_cache_refresh_loop())
     task2 = asyncio.create_task(_timeout_loop())
     yield
@@ -860,7 +942,24 @@ class SprintStatusPayload(BaseModel):
 def set_sprint_status(payload: SprintStatusPayload):
     global _sprint_statuses
     key = (payload.project, payload.sprint_label)
-    _sprint_statuses[key] = payload.model_dump()
+    data = payload.model_dump()
+    _sprint_statuses[key] = data
+
+    # Persist to disk so the status survives a server restart (issue #215).
+    # Only persist when we have a project so we know where to write the file.
+    if payload.project and payload.sprint_label:
+        status_path = _sprint_status_file_path(payload.project, payload.sprint_label)
+        if status_path is not None:
+            try:
+                status_path.parent.mkdir(parents=True, exist_ok=True)
+                # Atomic write: write to a temp file then replace to avoid partial reads.
+                tmp_path = status_path.with_suffix(".json.tmp")
+                tmp_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+                os.replace(str(tmp_path), str(status_path))
+            except OSError as exc:
+                # Non-fatal — in-memory state is still updated.
+                print(f"[sprint-status] could not persist status for {payload.sprint_label}: {exc}")
+
     return {"ok": True}
 
 

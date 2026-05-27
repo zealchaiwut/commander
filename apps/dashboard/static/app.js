@@ -10,7 +10,7 @@ let _approveAllUatRepo = null;    // repo currently targeted by the approve-all 
 
 // ── Router state ──────────────────────────────────────────────────────────────
 let _activeProject    = null;   // "owner/repo" when in project view
-let _activeProjectTab = 'tickets'; // 'tickets' | 'sprint-mgmt' | 'sprint-history'
+let _activeProjectTab = 'sprint-mgmt'; // 'sprint-mgmt' | 'sprint-history' | 'tickets' (hidden)
 
 // ── Agent name parser ────────────────────────────────────────────────────────
 // New format: "role·repo·branch·#short"   (4 parts, · separator)
@@ -116,7 +116,7 @@ function _showOverview() {
 }
 
 function drillIntoProject(repo, tab) {
-  tab = tab || 'tickets';
+  tab = tab || 'sprint-mgmt';
   _activeProject = repo;
   _activeProjectTab = tab;
 
@@ -298,10 +298,19 @@ function _route() {
   const path = window.location.pathname;
 
   // Match /projects/<encoded-repo>/<tab>
-  const m = path.match(/^\/projects\/([^/]+)\/?(tickets|sprint-mgmt|sprint-history)?$/);
+  const m = path.match(/^\/projects\/([^/]+)\/?([^/]*)?$/);
   if (m) {
-    const repo = decodeURIComponent(m[1]);
-    const tab  = m[2] || 'tickets';
+    const repo    = decodeURIComponent(m[1]);
+    const rawTab  = m[2] || '';
+    // Redirect stale 'tickets' deep-link to sprint-mgmt; unknown/empty → sprint-mgmt
+    const tab = (rawTab === 'sprint-history') ? 'sprint-history'
+              : (rawTab === 'sprint-mgmt')    ? 'sprint-mgmt'
+              : 'sprint-mgmt'; // covers '', 'tickets', or any unknown segment
+    if (rawTab === 'tickets' || (!rawTab && path.includes('/projects/'))) {
+      // Replace stale URL silently so the address bar reflects the active tab
+      const encoded = encodeURIComponent(repo);
+      history.replaceState({ view: 'project', repo, tab }, '', `/projects/${encoded}/${tab}`);
+    }
     _activeProject    = repo;
     _activeProjectTab = tab;
     // If projects not yet loaded, defer render until after load
@@ -320,8 +329,8 @@ window.addEventListener('popstate', e => {
   const s = e.state;
   if (s?.view === 'project') {
     _activeProject    = s.repo;
-    _activeProjectTab = s.tab || 'tickets';
-    _renderProjectView(s.repo, s.tab || 'tickets');
+    _activeProjectTab = s.tab || 'sprint-mgmt';
+    _renderProjectView(s.repo, s.tab || 'sprint-mgmt');
   } else {
     _showOverview();
   }

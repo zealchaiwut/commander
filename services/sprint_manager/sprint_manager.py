@@ -2523,7 +2523,7 @@ def run_sprint(
     Supports resume/retry_failed from persisted state.
 
     target_branch: branch to merge feature branches into. Defaults to
-    sprint/<label>. Pass 'develop' to restore legacy behaviour.
+    'develop'. Pass a sprint branch name to enable sprint-branch merge mode.
 
     preflight_approved: optional list of issue numbers approved by the pre-flight
     review. When provided, only issues in this list are dispatched; others are
@@ -2561,7 +2561,7 @@ def run_sprint(
     # Determine the sprint branch name and effective merge target
     sprint_branch = f"sprint/{label}"
     if target_branch is None:
-        target_branch = sprint_branch
+        target_branch = "develop"
 
     # Load or build state
     if (resume or retry_failed) and state_path.exists():

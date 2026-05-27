@@ -34,8 +34,8 @@ import github_client
 SIZES = ["S", "M", "L", "XL"]
 SIZE_IDX = {s: i for i, s in enumerate(SIZES)}
 
-# Hours per size for estimation
-SIZE_HOURS = {"S": 1, "M": 2, "L": 4, "XL": 8}
+# Minutes per size for estimation
+SIZE_MINUTES = {"S": 5, "M": 15, "L": 30, "XL": 60}
 
 
 def _estimate_size(issue: dict) -> str:
@@ -147,15 +147,15 @@ def _print_plan_table(plan: list[dict]) -> None:
 
     # Footer: size summary + time estimate
     size_counts: dict[str, int] = {}
-    total_hours = 0
+    total_minutes = 0
     for issue in plan:
         s = issue.get("_size", "M")
         size_counts[s] = size_counts.get(s, 0) + 1
-        total_hours += SIZE_HOURS.get(s, 2)
+        total_minutes += SIZE_MINUTES.get(s, 15)
 
     parts = [f"{count}{s}" for s, count in sorted(size_counts.items(), key=lambda x: SIZE_IDX[x[0]])]
     sprint_num = plan[0].get("_sprint_num", "?") if plan else "?"
-    print(f"  Sprint {sprint_num} size: {' + '.join(parts)} · est {total_hours}h")
+    print(f"  Sprint {sprint_num} size: {' + '.join(parts)} · est {total_minutes}min")
     print()
 
 

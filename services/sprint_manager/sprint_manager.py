@@ -3568,7 +3568,12 @@ def run_sprint(
             _size  = _est.get("size", "?")
             _hours = _est.get("estimated_hours", "?")
             _conf  = _est.get("confidence", "?")
-            print(f"  [estimate] size={_size} (~{_hours}h), confidence={_conf}")
+            try:
+                _h = float(_hours)
+                _time_str = f"~{int(_h * 60)}min" if _h < 1 else f"~{_h}h"
+            except (TypeError, ValueError):
+                _time_str = f"~{_hours}h"
+            print(f"  [estimate] size={_size} ({_time_str}), confidence={_conf}")
             _risk = _est.get("risk_flags", [])
             if _risk:
                 print(f"  [estimate] risk flags: {', '.join(_risk)}")

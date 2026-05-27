@@ -143,7 +143,7 @@ The Issue Estimator agent reads a ticket after it is created and produces struct
 
 **Output saved to:** `<project>/.commander/estimates/issue-<N>.json`
 
-**Size scale:** S=<1hr, M=1–3hr, L=3–8hr, XL=>8hr
+**Size scale:** S=1–5min, M=~15min, L=~30min, XL=>30min
 
 **Caching:** estimates are cached — re-running without `--force` returns the cached result instantly.
 

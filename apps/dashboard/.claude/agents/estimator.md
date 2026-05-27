@@ -30,10 +30,10 @@ Output ONLY the JSON — no preamble, no explanation, no markdown wrapper.
 
 | Size | Definition |
 |------|-----------|
-| S    | <1 hour — trivial change, single file, well-understood scope |
-| M    | 1–3 hours — typical feature, a few files, clear requirements |
-| L    | 3–8 hours — complex feature, multiple subsystems, some uncertainty |
-| XL   | >8 hours — major feature, high uncertainty, many dependencies |
+| S    | ~1–5 min — trivial change, single file, well-understood scope |
+| M    | ~15 min — typical feature, a few files, clear requirements |
+| L    | ~30 min — complex feature, multiple subsystems, some uncertainty |
+| XL   | >30 min — major feature, high uncertainty, many dependencies |
 
 ## Confidence levels
 

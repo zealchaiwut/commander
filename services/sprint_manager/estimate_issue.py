@@ -200,11 +200,12 @@ def apply_label(issue_num: int, repo: str, size: str) -> None:
         print(f"Warning: unknown size {size!r}, skipping label", file=sys.stderr)
         return
 
+    size_descriptions = {"S": "1–5 min", "M": "~15 min", "L": "~30 min", "XL": ">30 min"}
     label = f"size-{size}"
     subprocess.run(
         [
             "gh", "label", "create", label, "--repo", repo, "--force",
-            "--color", "0075ca", "--description", f"Estimated size {size}",
+            "--color", "0075ca", "--description", f"Estimated size {size} ({size_descriptions.get(size, size)})",
         ],
         capture_output=True,
     )

@@ -42,6 +42,8 @@ Commander is:
 -
 -     - **BA** writes acceptance criteria + UAT steps, creates GitHub issues using 
 -       `scripts/create_ticket.py`. Uses `.github/ISSUE_TEMPLATE/feature.md`.
+-       Pass `--attachment <path>` (repeatable) to attach supporting files; each file
+-       is copied to `references/issue-<N>/`, committed, and linked in the issue body.
 -
 -       - **Coder** creates a feature branch off develop, implements the feature, 
 -         pushes the branch, updates label to SIT. Does NOT merge.

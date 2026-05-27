@@ -3040,11 +3040,10 @@ function smgmtSprintBlockHtml(label, tickets, isNext) {
   const finishBtnId  = `smgmt-finish-btn-${label.replace('-', '_')}`;
   const goalId       = `smgmt-goal-${label.replace('-', '_')}`;
   const savedGoal    = _smgmtGoals[label] || '';
-  const goalValid    = savedGoal.length >= 10;
   const hasCompleted = smgmtHasCompletedTickets(tickets);
   // hasCompleted → unified button shows "Re-run Sprint" and calls smgmtRerunSprint
   // otherwise     → unified button shows "Run Sprint"    and calls smgmtRunSprint
-  const canRun = !hasCompleted && tickets.length >= 1 && goalValid;
+  const canRun = !hasCompleted && tickets.length >= 1;
 
   let actionLabel, actionHandler, actionTitle;
   if (hasCompleted) {
@@ -3054,8 +3053,7 @@ function smgmtSprintBlockHtml(label, tickets, isNext) {
   } else {
     actionLabel   = 'Run Sprint';
     actionHandler = `smgmtRunSprint('${label}')`;
-    if (!goalValid) actionTitle = 'Set a sprint goal first';
-    else if (tickets.length < 1) actionTitle = 'Add at least one ticket first';
+    if (tickets.length < 1) actionTitle = 'Add at least one ticket first';
     else actionTitle = '';
   }
 
@@ -3101,7 +3099,7 @@ function smgmtSprintBlockHtml(label, tickets, isNext) {
                 ${(hasCompleted || canRun) ? '' : 'disabled'}
                 onclick="${actionHandler}">${actionLabel}</button>
       </div>
-      <div class="smgmt-sprint-goal-row">
+      <div class="smgmt-sprint-goal-row" style="display:none">
         <input class="smgmt-goal-input" id="${goalId}" type="text"
                placeholder="Sprint goal (required to run) — e.g. Dashboard UX cleanup"
                value="${escapeHtml(savedGoal)}"
@@ -3315,7 +3313,6 @@ function smgmtGoalInput(label, value) {
   const runBtnId = `smgmt-run-btn-${label.replace('-', '_')}`;
   const btn = document.getElementById(runBtnId);
   if (btn) {
-    const goalValid = value.length >= 10;
     const sprintTickets = (_smgmtData?.issues || []).filter(
       t => t.sprint != null && `sprint-${t.sprint}` === label
     );
@@ -3326,9 +3323,9 @@ function smgmtGoalInput(label, value) {
       btn.disabled = false;
       btn.title = '';
     } else {
-      const canRun = goalValid && hasTickets;
+      const canRun = hasTickets;
       btn.disabled = !canRun;
-      btn.title = goalValid ? (hasTickets ? '' : 'Add at least one ticket first') : 'Set a sprint goal first';
+      btn.title = hasTickets ? '' : 'Add at least one ticket first';
     }
   }
   if (_smgmtGoalSaveTimers[label]) clearTimeout(_smgmtGoalSaveTimers[label]);
@@ -4029,8 +4026,7 @@ async function smgmtDispatchRun(sprintLabel, migrateFrom) {
       const sprintTickets = (_smgmtData?.issues || []).filter(
         t => t.sprint != null && `sprint-${t.sprint}` === sprintLabel
       );
-      const goalValid = ((_smgmtGoals[sprintLabel] || '').length >= 10);
-      const canRun = goalValid && sprintTickets.length >= 1;
+      const canRun = sprintTickets.length >= 1;
       btn.disabled = !canRun;
       btn.textContent = 'Run sprint';
     }
@@ -4302,12 +4298,10 @@ function smgmtApplyRunState(sprintStatusMap) {
       btn.disabled = false;
       btn.title = '';
     } else {
-      const goal = _smgmtGoals[btnLabel] || '';
-      const goalValid = goal.length >= 10;
       const hasTickets = sprintTickets.length >= 1;
-      const canRun = goalValid && hasTickets;
+      const canRun = hasTickets;
       btn.disabled = !canRun;
-      btn.title = goalValid ? (hasTickets ? '' : 'Add at least one ticket first') : 'Set a sprint goal first';
+      btn.title = hasTickets ? '' : 'Add at least one ticket first';
     }
   });
 }

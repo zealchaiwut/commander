@@ -293,13 +293,30 @@ Rules:
 
 ### Step 5 — Run the tests
 
+**MANDATORY: You must run `pytest` and confirm a green exit code (0) before calling `finish_feature.py`. Do not skip this step or assume tests pass. If pytest is not executed and confirmed green, you must not merge the branch under any circumstances.**
+
 ```bash
 cd "$MAIN_REPO/dashboard" && source venv/bin/activate && \
   UAT_BASE_URL="$UAT_BASE_URL" UAT_PORT="$UAT_PORT" \
   pytest tests/test_{slug}__{N}.py -v --tb=short 2>&1
+PYTEST_EXIT_CODE=$?
+echo "pytest exit code: $PYTEST_EXIT_CODE"
 ```
 
-Capture the full output. Parse it to build a pass/fail map keyed by function name.
+Capture the **full output** including the final summary line (e.g. `5 passed, 1 failed in 2.3s`). Record `PYTEST_EXIT_CODE`.
+
+**If pytest cannot be invoked** (missing venv, `ModuleNotFoundError`, fixture error, `command not found`):
+1. Capture the error output.
+2. Move the label to `blocked`: `python3 scripts/update_ticket.py --issue <N> --status blocked`
+3. Post a report via `scripts/post_test_report.py` describing the invocation failure and exit code.
+4. **Do not call `finish_feature.py`.** Stop here and report the failure.
+
+**If `PYTEST_EXIT_CODE` is non-zero** (any test failed or errored):
+1. Move the label to `blocked`: `python3 scripts/update_ticket.py --issue <N> --status blocked`
+2. Post the report (Step 8) including the failing test names and pytest output.
+3. **Do not call `finish_feature.py`.** Stop here and report which tests failed.
+
+Parse the captured output to build a pass/fail map keyed by function name and extract pass count, fail count, and error details.
 
 ### Step 6 — Evaluate UAT steps
 
@@ -309,8 +326,8 @@ For each UAT step:
 
 ### Step 7 — Determine overall status
 
-- `READY_FOR_UAT` — all AC tests passed (skipped counts as manual, not fail) AND no UAT steps are ❌ FAIL.
-- `NEEDS_FIXES` — one or more AC tests failed OR one or more UAT steps are ❌ FAIL.
+- `READY_FOR_UAT` — **`PYTEST_EXIT_CODE` is 0** AND all AC tests passed (skipped counts as manual, not fail) AND no UAT steps are ❌ FAIL.
+- `NEEDS_FIXES` — `PYTEST_EXIT_CODE` is non-zero OR one or more AC tests failed OR one or more UAT steps are ❌ FAIL. Any non-zero exit code alone is sufficient to set NEEDS_FIXES regardless of other results.
 
 ### Step 8 — Write the report file
 
@@ -328,11 +345,19 @@ Write to `/tmp/test_report_{N}.md` using **exactly** these section headers:
 2. <step text> — ⚠️ MANUAL (visual check)
 3. <step text> — ❌ FAIL (HTTP 404, expected 200)
 
+## Pytest Output
+Exit code: 0
+5 passed, 0 failed in 1.23s
+
+<paste the full pytest -v --tb=short output here, truncated to 100 lines if very long>
+
 ## Summary
 Status: READY_FOR_UAT
 Risk: MEDIUM
 Environment: UAT (<UAT_BASE_URL>)
 Passed: 3 / Failed: 0 / Manual: 2
+Pytest exit code: 0
+Merge executed: yes
 ```
 
 Rules for the report format (the dashboard parses these):
@@ -340,7 +365,8 @@ Rules for the report format (the dashboard parses these):
 - Each criterion line: `- [x]` for pass, `- [ ]` for fail/manual; ends with ` — ✅ PASS`, ` — ❌ FAIL (reason)`, or ` — ⚠️ MANUAL (reason)`.
 - `## UAT Step Results` — exact header.
 - Each step line: `N. text — ✅ PASS (detail)` or `⚠️ MANUAL (reason)` or `❌ FAIL (detail)`.
-- `## Summary` — exact header. `Status:` line is the very first line of this section. `Environment:` line records which UAT URL was hit (helps debug when ports shift).
+- `## Pytest Output` — exact header. Must include: the exit code on its own line (`Exit code: <N>`), the pytest summary line (e.g. `5 passed, 0 failed in 1.23s`), and the full `pytest -v --tb=short` output (truncate to 100 lines if very long). If pytest could not be invoked, include the invocation error instead.
+- `## Summary` — exact header. `Status:` line is the very first line of this section. `Environment:` line records which UAT URL was hit. `Pytest exit code:` line states the numeric exit code. `Merge executed:` line states `yes` if `finish_feature.py` was called and succeeded, or `no` with the reason (e.g. `no — pytest exit code 1`, `no — pytest invocation failed`).
 
 ### Step 9 — Post the report
 
@@ -352,10 +378,12 @@ python3 "$MAIN_REPO/dashboard/scripts/post_test_report.py" \
 
 ### Step 10 — Promote to UAT (if ready)
 
-If `READY_FOR_UAT`:
+**Only call `finish_feature.py` when `PYTEST_EXIT_CODE` is `0` and status is `READY_FOR_UAT`.** Any other condition must not trigger a merge.
+
+If `READY_FOR_UAT` (pytest exit code 0, all tests pass):
 ```bash
 # Merges to target branch, pushes, labels UAT, deletes branch — all in one step
-cd "$MAIN_REPO" && python3 dashboard/scripts/finish_feature.py --issue <N>
+cd "$MAIN_REPO" && python3 scripts/finish_feature.py --issue <N>
 ```
 
 **MANDATORY — human-in-the-loop gate:**
@@ -364,7 +392,10 @@ cd "$MAIN_REPO" && python3 dashboard/scripts/finish_feature.py --issue <N>
 - `UAT-approved` is set **only** by a human via the dashboard Approve button or `scripts/approve_ticket.py`.
 - Your job ends when `finish_feature.py` completes successfully. The issue will remain open in UAT state awaiting human review.
 
-If `NEEDS_FIXES`, leave the ticket in SIT (do not move it). Say which tests failed and what the likely fix is.
+If `NEEDS_FIXES` (pytest exit code non-zero, or invocation failed, or any test failed):
+- Move the label to `blocked`: `python3 scripts/update_ticket.py --issue <N> --status blocked`
+- The report (already posted in Step 9) includes the failing test names, pytest exit code, and error details.
+- Do **not** call `finish_feature.py`. Do **not** merge. Leave the branch intact for the coder to fix.
 
 ### Step 11 — Report back
 

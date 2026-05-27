@@ -4,6 +4,8 @@ The sprint manager automates the full BA → Coder → Tester → UAT loop for e
 ticket in a sprint. It dispatches Claude Code agents as subprocesses, polls for
 results, runs quality gates, and generates a sprint summary.
 
+![image](./flow.png)
+
 ---
 
 ## How It Works

@@ -70,9 +70,11 @@ def _try(*cmd: str, cwd: Path | None = None) -> tuple[bool, str]:
 def check_preconditions() -> None:
     """Run all pre-condition checks. Exit on failure."""
 
-    # 1. No uncommitted changes (staged or unstaged, ignoring untracked files)
-    ok, _ = _try("git", "diff", "--quiet", "HEAD")
-    if not ok:
+    # 1. No uncommitted changes (staged or unstaged, ignoring untracked and .pyc files)
+    changed = _run(
+        "git", "diff", "HEAD", "--name-only", "--", ":(exclude)*.pyc", check=False
+    )
+    if changed:
         print("Uncommitted changes detected; commit or stash first.", file=sys.stderr)
         sys.exit(1)
 
@@ -349,8 +351,10 @@ def main() -> None:
         check_preconditions()
     else:
         # For dry-run, still check git state but skip the gh API call
-        ok, _ = _try("git", "diff", "--quiet", "HEAD")
-        if not ok:
+        changed = _run(
+            "git", "diff", "HEAD", "--name-only", "--", ":(exclude)*.pyc", check=False
+        )
+        if changed:
             print("Uncommitted changes detected; commit or stash first.", file=sys.stderr)
             sys.exit(1)
         _run("git", "fetch", "origin", check=False)

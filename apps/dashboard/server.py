@@ -1241,7 +1241,7 @@ def _all_sprints_running() -> list[dict]:
         if not sprints_dir.exists():
             continue
         for pid_file in sprints_dir.glob("*-pid"):
-            label = pid_file.stem
+            label = pid_file.name.removesuffix("-pid")
             if _is_sprint_running(root, label):
                 try:
                     pid = int(pid_file.read_text(encoding="utf-8").strip())

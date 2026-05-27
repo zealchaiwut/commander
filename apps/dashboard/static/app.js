@@ -3655,6 +3655,10 @@ function smgmtClearSelectionOnNav() {
 let _smgmtMigrateTargetLabel = null;  // sprint label we are about to run
 let _smgmtMigrateChoices     = {};    // sprint_num (int) -> 'move' | 'leave'
 
+// State for the estimate summary modal (issue #211)
+let _smgmtEstTargetLabel       = null;   // sprint label pending confirmation
+let _smgmtEstEarlierWithTickets = [];    // earlier sprints for post-confirm migration
+
 async function smgmtRunSprint(sprintLabel) {
   if (!_smgmtCurrentRepo) return;
   const goal = _smgmtGoals[sprintLabel] || '';
@@ -3663,10 +3667,8 @@ async function smgmtRunSprint(sprintLabel) {
     return;
   }
 
-  // Determine target sprint number
+  // Determine target sprint number and gather earlier sprints for migration
   const targetNum = parseInt(sprintLabel.split('-')[1], 10);
-
-  // Find earlier sprints with open (non-done) tickets
   const allIssues = _smgmtData?.issues || [];
   const earlierWithTickets = [];  // [ { sprintNum, sprintLabel, tickets: [] } ]
 
@@ -3682,14 +3684,123 @@ async function smgmtRunSprint(sprintLabel) {
     }
   }
 
+  // Always show estimate summary modal first (issue #211)
+  await smgmtEstOpen(sprintLabel, earlierWithTickets);
+}
+
+// ── Estimate summary modal (issue #211) ──────────────────────────────────────
+
+async function smgmtEstOpen(sprintLabel, earlierWithTickets) {
+  _smgmtEstTargetLabel        = sprintLabel;
+  _smgmtEstEarlierWithTickets = earlierWithTickets;
+
+  // Update header title placeholder while loading
+  const titleEl = document.getElementById('smgmt-est-title');
+  if (titleEl) titleEl.textContent = 'Run sprint?';
+
+  // Show modal immediately with a loading state
+  const bodyEl = document.getElementById('smgmt-est-body');
+  if (bodyEl) bodyEl.innerHTML = '<p style="color:var(--text-muted);padding:8px 0;">Loading estimate…</p>';
+  document.getElementById('smgmt-est-backdrop').classList.remove('hidden');
+  document.getElementById('smgmt-est-modal').classList.remove('hidden');
+  document.getElementById('smgmt-est-confirm').disabled = true;
+
+  // Fetch estimate summary from server
+  let summary = null;
+  try {
+    const res = await fetch(
+      `/api/sprints/${encodeURIComponent(sprintLabel)}/estimate-summary?project=${encodeURIComponent(_smgmtCurrentRepo)}`
+    );
+    if (res.ok) {
+      summary = await res.json();
+    }
+  } catch (_e) {
+    // silently ignore; we'll render without summary data
+  }
+
+  // Render modal content
+  if (!bodyEl) return;
+
+  const sprintNum = parseInt(sprintLabel.split('-')[1], 10);
+  const sprintName = summary ? summary.sprint_name : `Sprint ${sprintNum}`;
+  const totalTickets = summary ? summary.total_tickets : '?';
+  if (titleEl) titleEl.textContent = `${sprintName} — ${totalTickets} ticket${totalTickets !== 1 ? 's' : ''}`;
+
+  let html = '';
+
+  if (summary) {
+    const { size_counts, total_minutes, unsized_numbers } = summary;
+
+    // Size breakdown row (e.g. "3 × S, 5 × M, 2 × L")
+    const sizes = ['S', 'M', 'L', 'XL'];
+    const breakdownParts = sizes
+      .filter(s => (size_counts[s] || 0) > 0)
+      .map(s => `${size_counts[s]} &times; ${s}`);
+    const unsizedCount = unsized_numbers.length;
+    if (unsizedCount > 0) breakdownParts.push(`${unsizedCount} unsized`);
+    const breakdownStr = breakdownParts.length > 0 ? breakdownParts.join(', ') : 'No sized tickets';
+
+    // Total estimate display
+    let totalStr;
+    if (total_minutes > 0) {
+      const hrs  = Math.floor(total_minutes / 60);
+      const mins = total_minutes % 60;
+      if (hrs > 0 && mins > 0) totalStr = `${hrs} h ${mins} min`;
+      else if (hrs > 0) totalStr = `${hrs} h`;
+      else totalStr = `${mins} min`;
+    } else {
+      totalStr = 'Unknown (no ticket sizes)';
+    }
+
+    html += `
+      <table class="smgmt-est-table">
+        <tr>
+          <td>Size breakdown</td>
+          <td>${breakdownStr}</td>
+        </tr>
+        <tr class="smgmt-est-total-row">
+          <td>Total estimate</td>
+          <td>${totalStr}</td>
+        </tr>
+      </table>`;
+
+    if (unsizedCount > 0) {
+      const nums = unsized_numbers.map(n => `#${n}`).join(', ');
+      html += `
+        <div class="smgmt-est-warning">
+          <strong>Unsized tickets:</strong> ${nums}<br>
+          <span>Unsized tickets will not contribute to the estimate.</span>
+        </div>`;
+    }
+  } else {
+    html += '<p style="color:var(--text-muted)">Could not load estimate data. You can still proceed.</p>';
+  }
+
+  bodyEl.innerHTML = html;
+  document.getElementById('smgmt-est-confirm').disabled = false;
+  document.getElementById('smgmt-est-modal').focus();
+}
+
+function smgmtEstClose() {
+  document.getElementById('smgmt-est-backdrop').classList.add('hidden');
+  document.getElementById('smgmt-est-modal').classList.add('hidden');
+  _smgmtEstTargetLabel        = null;
+  _smgmtEstEarlierWithTickets = [];
+}
+
+async function smgmtEstConfirm() {
+  if (!_smgmtEstTargetLabel) return;
+  const sprintLabel       = _smgmtEstTargetLabel;
+  const earlierWithTickets = _smgmtEstEarlierWithTickets;
+  smgmtEstClose();
+
   if (earlierWithTickets.length === 0) {
     // No migration needed — dispatch directly
     await smgmtDispatchRun(sprintLabel, []);
-    return;
+  } else {
+    // Show migration modal next
+    smgmtMigrateOpen(sprintLabel, earlierWithTickets);
   }
-
-  // Show migration modal
-  smgmtMigrateOpen(sprintLabel, earlierWithTickets);
 }
 
 function smgmtMigrateOpen(targetLabel, earlierSprints) {
@@ -5185,6 +5296,22 @@ function showErrorToast(msg) {
       if (confirmBtn && !confirmBtn.disabled) {
         e.preventDefault();
         smgmtMigrateConfirm();
+      }
+    }
+  });
+
+  // Estimate summary modal keyboard shortcuts (issue #211)
+  document.addEventListener('keydown', e => {
+    const modal = document.getElementById('smgmt-est-modal');
+    if (!modal || modal.classList.contains('hidden')) return;
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      smgmtEstClose();
+    } else if (e.key === 'Enter') {
+      const confirmBtn = document.getElementById('smgmt-est-confirm');
+      if (confirmBtn && !confirmBtn.disabled) {
+        e.preventDefault();
+        smgmtEstConfirm();
       }
     }
   });

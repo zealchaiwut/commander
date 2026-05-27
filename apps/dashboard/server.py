@@ -1947,6 +1947,39 @@ async def delete_empty_sprints(body: SprintDeleteBody):
 _RERUN_STRIP_LABELS = {"UAT", "UAT-approved", "released", "SIT", "in-progress", "need-rework"}
 
 
+@app.get("/api/sprints/{sprint_label}/estimate")
+def get_sprint_estimate(sprint_label: str, project: str):
+    """Return the sprint estimate JSON file content for sprint_label.
+
+    Returns the parsed JSON from <sprints_dir>/sprint-<N>-estimate.json,
+    or 404 if the file has not been generated yet.
+    """
+    if not _SPRINT_LABEL_RE.match(sprint_label):
+        raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")
+
+    project_root = _project_root_path(project)
+    commander = _commander_dir(project_root)
+
+    # Extract sprint number from label like "sprint-9" → "9"
+    m = re.search(r"(\d+)", sprint_label)
+    n = m.group(1) if m else sprint_label
+
+    estimate_path = commander / "sprints" / f"sprint-{n}-estimate.json"
+
+    if not estimate_path.exists():
+        raise HTTPException(
+            404,
+            detail=f"Estimate not found for {sprint_label!r}. Run the estimator first.",
+        )
+
+    try:
+        data = json.loads(estimate_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as e:
+        raise HTTPException(500, detail=f"Could not read estimate file: {e}")
+
+    return data
+
+
 class SprintRerunBody(BaseModel):
     confirm: bool
 

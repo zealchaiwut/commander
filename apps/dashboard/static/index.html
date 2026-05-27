@@ -2256,8 +2256,28 @@
     animation: spin 1s linear infinite; transform-origin: center;
   }
   .smgmt-stall-warning {
-    font-size: 11px; color: var(--amber); padding: 4px 14px 4px;
+    font-size: 11px; color: var(--amber); padding: 0;
     border-top: 1px solid var(--border); background: var(--amber-bg);
+  }
+  .smgmt-stall-header {
+    display: flex; align-items: center; gap: 6px;
+    padding: 4px 14px; cursor: pointer; user-select: none;
+  }
+  .smgmt-stall-header:hover { filter: brightness(0.95); }
+  .smgmt-stall-chevron { font-size: 9px; flex-shrink: 0; }
+  .smgmt-stall-actions { margin-left: auto; display: flex; gap: 6px; }
+  .smgmt-stall-btn {
+    font-size: 10px; padding: 1px 7px; border-radius: 3px; cursor: pointer;
+    border: 1px solid var(--amber); background: transparent; color: var(--amber);
+  }
+  .smgmt-stall-btn:hover { background: var(--amber); color: #fff; }
+  .smgmt-stall-btn-cancel { border-color: var(--red, #dc2626); color: var(--red, #dc2626); }
+  .smgmt-stall-btn-cancel:hover { background: var(--red, #dc2626); color: #fff; }
+  .smgmt-stall-body { padding: 0 14px 8px; }
+  .smgmt-stall-log {
+    font-size: 10px; font-family: monospace; white-space: pre-wrap; word-break: break-all;
+    background: #1e1e1e; color: #d4d4d4; padding: 8px; border-radius: 4px;
+    max-height: 300px; overflow-y: auto; margin: 0;
   }
 
   /* Estimate badges (issue #166) */

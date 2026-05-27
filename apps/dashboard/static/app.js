@@ -1387,12 +1387,26 @@ function setLive(connected) {
   document.getElementById('live-dot')?.classList.toggle('off', !connected);
 }
 
-let _sseReconnectTimer = null;
+let _sseReconnectTimer    = null;
+const _SSE_DISCONNECT_MS  = 12000; // after 12 s in error state, show "disconnected"
 
 function connectSSE() {
   const es = new EventSource('/events');
-  es.onopen    = () => { setLive(true); _llpSetStatus('connected'); if (_sseReconnectTimer) { clearTimeout(_sseReconnectTimer); _sseReconnectTimer = null; } };
-  es.onerror   = () => { setLive(false); _llpSetStatus('reconnecting'); };
+  es.onopen    = () => {
+    setLive(true);
+    _llpSetStatus('connected');
+    if (_sseReconnectTimer) { clearTimeout(_sseReconnectTimer); _sseReconnectTimer = null; }
+  };
+  es.onerror   = () => {
+    setLive(false);
+    _llpSetStatus('reconnecting');
+    if (!_sseReconnectTimer) {
+      _sseReconnectTimer = setTimeout(() => {
+        _llpSetStatus('disconnected');
+        _sseReconnectTimer = null;
+      }, _SSE_DISCONNECT_MS);
+    }
+  };
   es.onmessage = ev => {
     try {
       const msg = JSON.parse(ev.data);

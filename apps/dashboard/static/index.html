@@ -1346,7 +1346,7 @@
         <h2 class="smgmt-title">Sprint Management</h2>
       </div>
       <div class="smgmt-header-actions">
-        <button class="btn-secondary" onclick="smgmtRefreshBoard()" title="Re-fetch sprint board data without reloading the page">Trigger Refresh</button>
+        <button class="btn-secondary" id="smgmt-auto-refresh-btn" onclick="smgmtAutoRefreshNow()" title="Automatically re-fetches sprint board data every 30 seconds; click to refresh immediately">Auto Refresh (30s)</button>
         <button class="btn-secondary" onclick="openDraftTicketModal()">+ New Ticket</button>
         <button class="btn-secondary" id="bulk-create-btn" onclick="openBulkCreateModal()">Bulk create</button>
         <button class="btn-primary smgmt-new-sprint-btn" id="smgmt-new-sprint-btn"

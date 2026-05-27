@@ -85,9 +85,9 @@ def client(tmp_path, monkeypatch) -> Generator:
 
 class TestBulkCreateButton:
     def test_bulk_create_button_exists(self, html):
-        """Bulk create button exists in the smgmt-header-actions."""
-        assert "Bulk create" in html, \
-            "Bulk create button text not found in index.html"
+        """Bulk create button exists in the smgmt-header-actions (labeled '+ Bulk Create' per issue #206)."""
+        assert "+ Bulk Create" in html, \
+            "+ Bulk Create button text not found in index.html"
 
     def test_bulk_create_button_calls_open_modal(self, html):
         """Bulk create button calls openBulkCreateModal()."""
@@ -97,12 +97,12 @@ class TestBulkCreateButton:
     def test_bulk_create_button_adjacent_to_new_ticket(self, html):
         """Bulk create button is near the + New Ticket button."""
         ticket_idx = html.find("+ New Ticket")
-        bulk_idx = html.find("Bulk create")
+        bulk_idx = html.find("+ Bulk Create")
         assert ticket_idx != -1, "+ New Ticket button not found"
-        assert bulk_idx != -1, "Bulk create button not found"
+        assert bulk_idx != -1, "+ Bulk Create button not found"
         # Both should be within 500 chars of each other (same actions bar)
         assert abs(ticket_idx - bulk_idx) < 500, \
-            "Bulk create should be adjacent to + New Ticket in the toolbar"
+            "+ Bulk Create should be adjacent to + New Ticket in the toolbar"
 
 
 # ---------------------------------------------------------------------------

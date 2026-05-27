@@ -1349,7 +1349,8 @@
       <div class="smgmt-header-actions">
         <button class="btn-secondary" id="smgmt-auto-refresh-btn" onclick="smgmtAutoRefreshNow()" title="Automatically re-fetches sprint board data every 30 seconds; click to refresh immediately">Auto Refresh (30s)</button>
         <button class="btn-secondary" onclick="openDraftTicketModal()">+ New Ticket</button>
-        <button class="btn-secondary" id="bulk-create-btn" onclick="openBulkCreateModal()">Bulk create</button>
+        <button class="btn-secondary" id="bulk-create-btn" onclick="openBulkCreateModal()">+ Bulk Create</button>
+        <button class="btn-secondary" id="smgmt-move-to-btn" onclick="smgmtBulkMoveToOpen()" style="display:none;">Move to</button>
         <button class="btn-primary smgmt-new-sprint-btn" id="smgmt-new-sprint-btn"
                 onclick="smgmtCreateSprint()" title="Create next sprint label on GitHub">+ New Sprint</button>
         <button class="btn-deploy" id="deploy-to-prod-btn"
@@ -1360,6 +1361,11 @@
     </div>
     <div class="smgmt-error hidden" id="smgmt-error"></div>
     <div class="smgmt-cleanup-banner hidden" id="smgmt-cleanup-banner"></div>
+    <div class="smgmt-bulk-bar hidden" id="smgmt-bulk-bar">
+      <span class="smgmt-bulk-count" id="smgmt-bulk-count">0 selected</span>
+      <button class="btn-secondary smgmt-bulk-action-btn" onclick="smgmtBulkMoveToOpen()">Move to sprint…</button>
+      <button class="btn-ghost smgmt-bulk-clear-btn" onclick="smgmtClearSelection()">Clear selection</button>
+    </div>
     <div class="smgmt-body" id="smgmt-body">
       <div class="smgmt-loading" id="smgmt-loading">Select a project to view sprints.</div>
     </div>
@@ -1369,6 +1375,9 @@
          ondrop="smgmtDropOnSprint(event, null)">
       <div class="smgmt-backlog-header">
         <div class="smgmt-backlog-title">
+          <input type="checkbox" class="smgmt-select-all" id="smgmt-backlog-select-all"
+                 title="Select all backlog tickets"
+                 onclick="event.stopPropagation()" onchange="smgmtToggleSelectAll(this)">
           <i class="ti ti-inbox"></i>
           <span id="smgmt-backlog-label">Backlog</span>
         </div>
@@ -1703,6 +1712,26 @@
   <div class="modal-footer">
     <button class="btn-ghost" onclick="smgmtCleanupClose()">Cancel</button>
     <button class="btn-danger" id="smgmt-cleanup-confirm" onclick="smgmtCleanupConfirm()">Delete labels</button>
+  </div>
+</div>
+
+<!-- Bulk "Move to sprint" modal (issue #206) -->
+<div class="modal-backdrop hidden" id="smgmt-moveto-backdrop" onclick="smgmtBulkMoveToClose()"></div>
+<div class="modal hidden" id="smgmt-moveto-modal" role="dialog" aria-modal="true">
+  <div class="modal-header">
+    <span class="modal-title">Move Selected Tickets</span>
+    <button class="modal-close" onclick="smgmtBulkMoveToClose()" aria-label="Close">&times;</button>
+  </div>
+  <div style="padding: 16px 24px; font-size: 13px; color: var(--text-muted);">
+    <p style="margin: 0 0 12px;">Move <strong id="smgmt-moveto-count">0</strong> selected ticket(s) to:</p>
+    <select id="smgmt-moveto-select" class="smgmt-proj-select" style="width:100%; min-width:0;">
+      <option value="">— choose a sprint —</option>
+    </select>
+    <div id="smgmt-moveto-error" style="color:var(--red); font-size:12px; margin-top:8px; display:none;"></div>
+  </div>
+  <div class="modal-footer">
+    <button class="btn-ghost" onclick="smgmtBulkMoveToClose()">Cancel</button>
+    <button class="btn-primary" id="smgmt-moveto-confirm" onclick="smgmtBulkMoveToConfirm()">Move tickets</button>
   </div>
 </div>
 
@@ -2305,6 +2334,36 @@
     text-align: center; padding: 12px;
   }
   .smgmt-placeholder-tickets { min-height: 52px; }
+
+  /* ── Multi-select checkboxes (issue #206) ── */
+  .smgmt-ticket-cb {
+    flex-shrink: 0; width: 14px; height: 14px; cursor: pointer;
+    accent-color: var(--blue);
+  }
+  .smgmt-ticket.is-selected {
+    background: var(--blue-bg) !important;
+    border-color: var(--blue) !important;
+  }
+  .smgmt-select-all {
+    cursor: pointer; width: 14px; height: 14px;
+    accent-color: var(--blue); flex-shrink: 0;
+  }
+
+  /* ── Bulk action bar (issue #206) ── */
+  .smgmt-bulk-bar {
+    margin: 0 24px 8px; padding: 8px 14px;
+    background: var(--blue-bg); border: 1px solid var(--blue);
+    border-radius: 6px; font-size: 12px;
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  }
+  .smgmt-bulk-count { font-weight: 700; color: var(--blue); flex-shrink: 0; }
+  .smgmt-bulk-action-btn { font-size: 12px; padding: 4px 10px; }
+  .smgmt-bulk-clear-btn {
+    font-size: 12px; padding: 4px 10px; margin-left: auto;
+    background: none; border: none; color: var(--text-muted); cursor: pointer;
+    font-family: inherit;
+  }
+  .smgmt-bulk-clear-btn:hover { color: var(--text); text-decoration: underline; }
 
   /* ── Cleanup modal body ── */
   .smgmt-cleanup-body { padding: 12px 24px 4px; font-size: 13px; }

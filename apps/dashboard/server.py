@@ -354,9 +354,7 @@ def clear_test_events():
     """Remove test/debug events and agents from the database and clear test alerts from memory."""
     events_deleted = db.delete_test_events()
     agents_deleted = db.delete_test_agents()
-    # Also purge in-memory test alerts (patterns: 'test_', 'Test-', 'Test alert')
-    import re as _re
-    _test_pat = _re.compile(r"(test_|Test-|Test alert|\[CRASH\])", _re.IGNORECASE)
+    # Also purge in-memory test alerts using the module-level _test_pat pattern.
     before = len(_alerts)
     _alerts[:] = [
         a for a in _alerts
@@ -799,6 +797,11 @@ def get_plan_usage():
 
 _alerts: list[dict] = []
 
+# Pattern used to identify test/debug alerts — applied both when purging via
+# DELETE /api/events/test and when serving GET /api/alerts so that test noise
+# is never surfaced on PRD.
+_test_pat = re.compile(r"(test_|Test-|Test alert|\[CRASH\])", re.IGNORECASE)
+
 
 class AlertPayload(BaseModel):
     title: str = ""
@@ -816,7 +819,11 @@ def receive_alert(payload: AlertPayload):
 
 @app.get("/api/alerts")
 def get_alerts():
-    return _alerts
+    # Silently exclude test/debug alerts so they are never shown on PRD.
+    return [
+        a for a in _alerts
+        if not (_test_pat.search(a.get("title", "")) or _test_pat.search(a.get("body", "")))
+    ]
 
 
 @app.delete("/api/alerts/{idx}")

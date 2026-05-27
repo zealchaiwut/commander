@@ -2459,7 +2459,7 @@ def write_sprint_summary(
     # Dispatch via all configured alert channels (issue #24)
     if alert_modes:
         title = f"Sprint {state.sprint_label} summary"
-        dispatch_alerts(alert_modes, title=title, body=content[:2000], cfg=cfg)
+        dispatch_alerts(alert_modes, title=title, body=content[:2000], cfg=cfg, repo=eff_repo)
 
     # AC-5: skip GitHub issue creation entirely for dry runs
     if dry_run:
@@ -3635,6 +3635,7 @@ def run_sprint(
                 issue_num=num,
                 category=category,
                 cfg=cfg,
+                repo=eff_repo,
             )
             state.save(state_path)
             _post_sprint_status(state, api_url=api_url)
@@ -3739,6 +3740,7 @@ def run_sprint(
                 issue_num=num,
                 category=category,
                 cfg=cfg,
+                repo=eff_repo,
             )
 
         elapsed = time.monotonic() - start_time

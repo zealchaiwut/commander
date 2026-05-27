@@ -65,7 +65,7 @@ STANDARD_LABELS = [
     ("UAT",          "#C6D2D9"),
     ("UAT-approved", "#C6D2D9"),
     ("blocked",      "#C6D2D9"),
-    ("needs-rework", "#C6D2D9"),
+    ("need-rework", "#C6D2D9"),
     ("enhancement",  "#A2EAF6"),
     ("bug",          "#D73A4A"),
     ("sprint-1",     "#1D76DB"),

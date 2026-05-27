@@ -14,7 +14,7 @@ from typing import Optional
 
 CACHE_TTL = 30.0
 SPRINT_RE = re.compile(r"^sprint-(\d+)$")
-STATUS_LABELS = {"in-progress", "SIT", "UAT", "UAT-approved", "needs-rework", "blocked"}
+STATUS_LABELS = {"in-progress", "SIT", "UAT", "UAT-approved", "need-rework", "blocked"}
 
 _cache: dict[str, tuple[float, object]] = {}
 _detected_repo: str | None = None
@@ -354,8 +354,7 @@ def approve_issue(issue_id: int, repo_name: str | None = None):
 def reject_issue(issue_id: int, reason: str, repo_name: str | None = None):
     r = _r(repo_name)
     _run("issue", "edit", str(issue_id), "--repo", r,
-         "--add-label", "needs-rework",
-         "--add-label", "in-progress",
+         "--add-label", "need-rework",
          "--remove-label", "UAT")
     _run("issue", "comment", str(issue_id), "--repo", r,
          "--body", f"❌ **Rejected:** {reason}")

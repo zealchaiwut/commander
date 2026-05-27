@@ -3280,7 +3280,10 @@ function smgmtApplyRunState(sprintStatusMap) {
   // Other sprints (different label or different project) stay enabled.
   document.querySelectorAll('.smgmt-run-btn').forEach(btn => {
     const btnLabel = btn.id.replace('smgmt-run-btn-', '').replace(/_/g, '-');
-    if (!running) {
+    const runKey = `${_smgmtCurrentRepo}:${btnLabel}`;
+    const isThisRunning = !!_smgmtAllRunning[runKey];
+
+    if (!isThisRunning) {
       const goal = _smgmtGoals[btnLabel] || '';
       const goalValid = goal.length >= 10;
       const sprintTickets = (_smgmtData?.issues || []).filter(
@@ -3290,11 +3293,9 @@ function smgmtApplyRunState(sprintStatusMap) {
       const canRun = goalValid && hasTickets;
       btn.disabled = !canRun;
       btn.title = goalValid ? (hasTickets ? '' : 'Add at least one ticket first') : 'Set a sprint goal first';
-      btn.textContent = 'Run sprint';
     } else {
       btn.disabled = true;
-      btn.title = `Sprint ${runLabel} is running for ${runProj}`;
-      btn.textContent = 'Run sprint';
+      btn.title = `Sprint ${btnLabel} is running`;
     }
     btn.textContent = 'Run sprint';
   });

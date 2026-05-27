@@ -5523,7 +5523,7 @@ function _dtShowError(msg) {
   el.classList.remove('hidden');
 }
 
-// ── Bulk Create Modal (issue #189 / #205) ─────────────────────────────────────
+// ── Bulk Create Modal (issue #189 / #205 / #208) ──────────────────────────────
 
 let _bcJobId = null;
 let _bcEventSource = null;
@@ -5532,6 +5532,7 @@ let _bcDebounceTimer = null;
 let _bcStartTimes = {};      // index -> start timestamp (for elapsed calc)
 let _bcAvgMs = null;         // rolling avg BA time per ticket
 let _bcFiles = [];           // queued attachment files (issue #205)
+let _bcLastInput = null;     // preserved Step 1 inputs for Recreate (issue #208)
 
 const BC_MAX_PROMPTS = 25;
 const BC_ALLOWED_EXTS = new Set([
@@ -5670,7 +5671,7 @@ function closeBulkCreateModal() {
 }
 
 function _bcBackdropClick() {
-  closeBulkCreateModal();
+  // Backdrop click intentionally does nothing — use Cancel or ✕ to close (issue #208)
 }
 
 // Keyboard: Esc closes; Cmd/Ctrl+Enter triggers Run
@@ -5761,6 +5762,14 @@ async function bcRunAll() {
   const uniqueLabels = [...new Set(defaultLabels)];
 
   const concurrency = parseInt(document.getElementById('bc-concurrency').value, 10);
+
+  // Preserve Step 1 inputs so Recreate can repopulate them (issue #208)
+  _bcLastInput = {
+    text,
+    repo,
+    labelsRaw,
+    concurrency,
+  };
 
   const runBtn = document.getElementById('bc-run-btn');
   runBtn.disabled = true;
@@ -5911,16 +5920,20 @@ function _bcRenderStep2() {
   // Footer buttons
   const stopBtn = document.getElementById('bc-stop-btn');
   const doneBtn = document.getElementById('bc-done-btn');
+  const recreateBtn = document.getElementById('bc-recreate-btn');
   if (stopBtn && doneBtn) {
     if (job.status === 'running') {
       stopBtn.disabled = false;
       doneBtn.disabled = true;
       doneBtn.textContent = 'Running...';
+      if (recreateBtn) recreateBtn.classList.add('hidden');
     } else {
       stopBtn.disabled = true;
       doneBtn.disabled = false;
       doneBtn.textContent = 'Close';
       doneBtn.onclick = closeBulkCreateModal;
+      // Show Recreate button once job is done/stopped (issue #208)
+      if (recreateBtn) recreateBtn.classList.remove('hidden');
     }
   }
 
@@ -6055,6 +6068,48 @@ async function bcStop() {
   try {
     await fetch(`/api/tickets/bulk/${_bcJobId}/stop`, { method: 'POST' });
   } catch (_) {}
+}
+
+// Recreate: go back to Step 1 with the same input data (issue #208)
+function bcRecreate() {
+  // Disconnect SSE and clear job state
+  if (_bcEventSource) {
+    _bcEventSource.close();
+    _bcEventSource = null;
+  }
+  localStorage.removeItem('bc_job_id');
+  _bcJobId = null;
+  _bcJobState = null;
+  _bcStartTimes = {};
+  _bcAvgMs = null;
+
+  _bcShowStep1();
+
+  // Populate repo dropdown
+  const sel = document.getElementById('bc-repo');
+  sel.innerHTML = allProjects.map(p =>
+    `<option value="${escapeHtml(p.repo)}">${escapeHtml(p.name || p.repo)}</option>`
+  ).join('');
+
+  // Restore previous input values if available
+  if (_bcLastInput) {
+    if (sel && _bcLastInput.repo) sel.value = _bcLastInput.repo;
+    const textarea = document.getElementById('bc-textarea');
+    if (textarea) textarea.value = _bcLastInput.text || '';
+    const labelsEl = document.getElementById('bc-default-labels');
+    if (labelsEl) labelsEl.value = _bcLastInput.labelsRaw || 'enhancement';
+    const concEl = document.getElementById('bc-concurrency');
+    if (concEl) concEl.value = String(_bcLastInput.concurrency || 3);
+  } else {
+    if (_activeProject) sel.value = _activeProject;
+    document.getElementById('bc-textarea').value = '';
+    document.getElementById('bc-default-labels').value = 'enhancement';
+    document.getElementById('bc-concurrency').value = '3';
+  }
+
+  document.getElementById('bc-step1-error').classList.add('hidden');
+  // Do NOT reset files — keep the same attachments for the re-run
+  _bcUpdateCounter();
 }
 
 function _bcShowToast(msg) {

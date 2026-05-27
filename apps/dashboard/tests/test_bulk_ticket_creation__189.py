@@ -590,14 +590,16 @@ class TestParseBaDraft:
         """_parse_ba_draft extracts title and body from JSON output."""
         import server
         raw = json.dumps({"title": "My Title", "body": "## What\n\nStuff"})
-        title, body = server._parse_ba_draft(raw)
+        title, body, json_ok = server._parse_ba_draft(raw)
         assert title == "My Title"
         assert "Stuff" in body
+        assert json_ok is True
 
     def test_parses_fenced_json(self):
         """_parse_ba_draft handles ```json ... ``` fences."""
         import server
         raw = "```json\n" + json.dumps({"title": "T", "body": "B"}) + "\n```"
-        title, body = server._parse_ba_draft(raw)
+        title, body, json_ok = server._parse_ba_draft(raw)
         assert title == "T"
         assert body == "B"
+        assert json_ok is True

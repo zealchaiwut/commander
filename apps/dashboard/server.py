@@ -1868,6 +1868,7 @@ class SprintOrderBody(BaseModel):
 class SprintCreateBody(BaseModel):
     project: str
     sprint_number: int | None = None
+    goal: str | None = None
 
 
 class SprintGoalBody(BaseModel):
@@ -2396,7 +2397,13 @@ def get_issue_log(sprint_label: str, project: str, issue_num: int, tail_lines: i
 
 @app.post("/api/sprints/create")
 async def create_sprint_label(body: SprintCreateBody):
-    """Create a sprint-N label for a project. Uses sprint_number if provided, else auto-increments."""
+    """Create a sprint-N label for a project. Uses sprint_number if provided, else auto-increments.
+
+    Optionally accepts a goal string (min 10 chars) which is persisted to
+    .commander/sprints/<label>-goal.txt after the label is created.
+    """
+    if body.goal is not None and len(body.goal.strip()) < 10:
+        raise HTTPException(400, detail="Sprint goal must be at least 10 characters")
     try:
         sprints = github_client.list_sprints(repo_name=body.project)
         if body.sprint_number is not None:
@@ -2413,7 +2420,14 @@ async def create_sprint_label(body: SprintCreateBody):
         raise _gh_error(e)
     except ValueError as e:
         raise HTTPException(400, detail=str(e))
-    return {"ok": True, "sprint_label": f"sprint-{target_num}"}
+    sprint_label = f"sprint-{target_num}"
+    # Persist goal if provided
+    if body.goal is not None:
+        project_root = _project_root_path(body.project)
+        goal_path = _sprint_goal_path(project_root, sprint_label)
+        goal_path.parent.mkdir(parents=True, exist_ok=True)
+        goal_path.write_text(body.goal.strip(), encoding="utf-8")
+    return {"ok": True, "sprint_label": sprint_label}
 
 
 class SprintDeleteBody(BaseModel):

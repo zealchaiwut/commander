@@ -1118,6 +1118,32 @@ def _find_feature_branch(issue_num: int) -> Optional[str]:
     return None
 
 
+def _is_branch_merged_into(branch: str, target: str) -> bool:
+    """Return True if branch has been merged into target (local or remote).
+
+    Checks both local refs and origin/ remote refs for the branch.
+    Uses ``git branch --merged`` which lists branches fully reachable from
+    the given commit — i.e. whose tip is an ancestor of <target>.
+    """
+    # Prefer the remote ref for the target so we don't need a local checkout
+    target_ref = f"origin/{target}"
+    ok, _, _ = _try("git", "rev-parse", "--verify", target_ref)
+    if not ok:
+        target_ref = target
+
+    # Try local branch ref first
+    ok, out, _ = _try("git", "branch", "--merged", target_ref, "--list", branch)
+    if ok and out.strip():
+        return True
+
+    # Fall back to checking the remote tracking branch
+    ok, out, _ = _try("git", "branch", "-r", "--merged", target_ref, "--list", f"origin/{branch}")
+    if ok and out.strip():
+        return True
+
+    return False
+
+
 # ── quality gates ─────────────────────────────────────────────────────────────
 
 def _revert_to_sit(issue_num: int, gate_name: str, output: str,
@@ -1566,34 +1592,98 @@ def handle_post_tester(
     labels = _get_issue_labels(issue_num, repo_name=eff_repo)
     if "UAT" not in labels:
         current = ", ".join(sorted(labels)) or "(none)"
-        print(f"  Issue #{issue_num}: tester exited 0 but label is [{current}], not UAT -- skipping gates")
-        warning_body = (
-            f"**Tester exited 0 but not UAT — label missing.**\n\n"
-            f"The tester subprocess finished successfully (exit code 0), "
-            f"but the UAT label was never applied. Current labels: [{current}].\n\n"
-            f"This almost always means the tester agent skipped running `finish_feature.py`. "
-            f"Please either re-run the tester or apply the **UAT** label manually to move this "
-            f"ticket to the UAT queue."
-        )
-        try:
-            github_client.add_comment(issue_num, warning_body, repo_name=eff_repo)
-        except Exception as exc:
-            print(f"  Warning: failed to post missing-UAT comment — {exc}", file=sys.stderr)
-        if alert_modes:
-            dispatch_alerts(
-                alert_modes,
-                title=f"Issue #{issue_num} skipped: tester exited 0 but not UAT",
-                body=warning_body[:500],
-                issue_num=issue_num,
-                category=FailureCategory.TESTER_REJECTED,
-                cfg=cfg,
-                repo=eff_repo,
-            )
-        return (False,
-                f"Issue #{issue_num}: tester exited 0 but not UAT -- no merge",
-                FailureCategory.TESTER_REJECTED)
+        print(f"  Issue #{issue_num}: tester exited 0 but label is [{current}], not UAT -- checking merge status")
 
-    print(f"\nTester promoted issue #{issue_num} to UAT -- running quality gates...")
+        # Check whether the feature branch has already been merged into the target
+        # (agent may have merged outside finish_feature.py, leaving UAT label absent)
+        found_branch = _find_feature_branch(issue_num)
+        branch_is_merged = False
+        if found_branch:
+            branch_is_merged = _is_branch_merged_into(found_branch, target_branch)
+            print(
+                f"  Issue #{issue_num}: feature branch '{found_branch}' merged into "
+                f"'{target_branch}': {branch_is_merged}"
+            )
+        else:
+            # Branch not found at all — cannot determine merge status; fall through
+            # to existing TESTER_REJECTED behavior.
+            print(
+                f"  Issue #{issue_num}: feature branch not found — cannot confirm merge, "
+                f"treating as genuine tester skip"
+            )
+
+        if branch_is_merged:
+            # Auto-recovery: branch was merged outside finish_feature.py, apply UAT label
+            print(f"  Issue #{issue_num}: branch is merged — auto-applying UAT label")
+            scripts_dir = cfg.scripts_dir if cfg is not None else SCRIPTS_DIR
+            update_script = scripts_dir / "update_ticket.py"
+            _UAT_RECOVERY_BACKOFFS = (2, 5, 10)
+            label_result = None
+            for attempt in range(len(_UAT_RECOVERY_BACKOFFS) + 1):
+                label_result = subprocess.run(
+                    [sys.executable, str(update_script), "--issue", str(issue_num), "--status", "uat"],
+                    capture_output=True, text=True,
+                )
+                if label_result.returncode == 0:
+                    break
+                if attempt < len(_UAT_RECOVERY_BACKOFFS):
+                    wait = _UAT_RECOVERY_BACKOFFS[attempt]
+                    print(
+                        f"  Warning: UAT label recovery attempt {attempt + 1} failed — retrying in {wait}s…",
+                        file=sys.stderr,
+                    )
+                    time.sleep(wait)
+
+            recovery_comment = (
+                "Detected merged feature branch without UAT label — applied UAT automatically "
+                "(agent appears to have merged outside finish_feature.py)."
+            )
+            try:
+                github_client.add_comment(issue_num, recovery_comment, repo_name=eff_repo)
+            except Exception as exc:
+                print(f"  Warning: failed to post UAT recovery comment — {exc}", file=sys.stderr)
+
+            if label_result is None or label_result.returncode != 0:
+                stderr_text = label_result.stderr.strip() if label_result else "unknown error"
+                print(
+                    f"  Warning: UAT label auto-recovery failed after "
+                    f"{len(_UAT_RECOVERY_BACKOFFS) + 1} attempts — {stderr_text}",
+                    file=sys.stderr,
+                )
+            else:
+                print(f"  Issue #{issue_num}: UAT label applied via auto-recovery")
+
+            # Treat as a successful merge — gates may run below
+            print(f"\nTester promoted issue #{issue_num} to UAT (auto-recovered) -- running quality gates...")
+        else:
+            # Branch exists and is NOT merged — genuine tester skip, preserve existing behavior
+            warning_body = (
+                f"**Tester exited 0 but not UAT — label missing.**\n\n"
+                f"The tester subprocess finished successfully (exit code 0), "
+                f"but the UAT label was never applied. Current labels: [{current}].\n\n"
+                f"This almost always means the tester agent skipped running `finish_feature.py`. "
+                f"Please either re-run the tester or apply the **UAT** label manually to move this "
+                f"ticket to the UAT queue."
+            )
+            try:
+                github_client.add_comment(issue_num, warning_body, repo_name=eff_repo)
+            except Exception as exc:
+                print(f"  Warning: failed to post missing-UAT comment — {exc}", file=sys.stderr)
+            if alert_modes:
+                dispatch_alerts(
+                    alert_modes,
+                    title=f"Issue #{issue_num} skipped: tester exited 0 but not UAT",
+                    body=warning_body[:500],
+                    issue_num=issue_num,
+                    category=FailureCategory.TESTER_REJECTED,
+                    cfg=cfg,
+                    repo=eff_repo,
+                )
+            return (False,
+                    f"Issue #{issue_num}: tester exited 0 but not UAT -- no merge",
+                    FailureCategory.TESTER_REJECTED)
+    else:
+        print(f"\nTester promoted issue #{issue_num} to UAT -- running quality gates...")
 
     # Find the feature branch; None means the tester agent already merged via finish_feature.py
     feature_branch = _find_feature_branch(issue_num)

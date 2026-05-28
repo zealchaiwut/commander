@@ -293,6 +293,7 @@ def main() -> None:
             post_comment(args.issue, repo, estimate)
         if args.save_label:
             apply_label(args.issue, repo, estimate.get("size", ""))
+            apply_estimated_status(args.issue, repo)
         return
 
     # Fetch issue and run estimator
@@ -316,6 +317,10 @@ def main() -> None:
         post_comment(args.issue, repo, estimate)
     if args.save_label:
         apply_label(args.issue, repo, estimate.get("size", ""))
+        # Apply the 'estimated' status label via the resilient update_ticket.py path
+        # so downstream consumers (sprint_estimator loop, dashboard) can identify
+        # already-estimated tickets (issue #267).
+        apply_estimated_status(args.issue, repo)
 
 
 if __name__ == "__main__":

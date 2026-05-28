@@ -499,7 +499,7 @@
     }
     .smgmt-ticket:hover { background: var(--surface-hover); }
     .smgmt-ticket.dragging-ticket { opacity: .4; }
-    .smgmt-ticket.is-selected { background: var(--blue-bg); }
+    .smgmt-ticket.is-selected { background: var(--blue-bg); border-left: 3px solid var(--blue); }
     .smgmt-ticket-grip { cursor: grab; color: var(--text-sub); font-size: 13px; flex-shrink: 0; }
     .smgmt-ticket-grip:active { cursor: grabbing; }
     .smgmt-ticket-cb { cursor: pointer; flex-shrink: 0; }
@@ -537,6 +537,84 @@
       40%      { opacity: .45; }
     }
     .btn-flash { animation: btnFlash .45s ease-in-out; }
+
+    /* ── Floating selection action bar ── */
+    .smgmt-selection-bar {
+      position: fixed;
+      bottom: 24px;
+      left: 50%;
+      transform: translateX(-50%) translateY(8px);
+      background: var(--text);
+      color: var(--surface);
+      border-radius: 10px;
+      padding: 10px 16px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 13px;
+      font-weight: 500;
+      z-index: 300;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.18);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity .2s, transform .2s;
+      white-space: nowrap;
+    }
+    .smgmt-selection-bar.show {
+      opacity: 1;
+      pointer-events: auto;
+      transform: translateX(-50%) translateY(0);
+    }
+    .smgmt-selection-bar-count {
+      font-weight: 600;
+    }
+    .smgmt-selection-bar select {
+      background: var(--surface-2);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      padding: 4px 8px;
+      font-size: 12px;
+      cursor: pointer;
+    }
+    .smgmt-selection-bar-deselect {
+      background: transparent;
+      color: var(--surface);
+      border: 1px solid rgba(255,255,255,.35);
+      border-radius: 5px;
+      padding: 4px 10px;
+      font-size: 12px;
+      cursor: pointer;
+      transition: background .15s;
+    }
+    .smgmt-selection-bar-deselect:hover { background: rgba(255,255,255,.15); }
+
+    /* ── Toolbar deselect button ── */
+    .smgmt-deselect-btn {
+      padding: 5px 12px; font-size: 11px; font-weight: 600;
+      background: var(--blue-bg); color: var(--blue); border: 1px solid var(--blue);
+      border-radius: 5px; cursor: pointer; flex-shrink: 0;
+      display: none; align-items: center; gap: 4px; transition: opacity .15s;
+    }
+    .smgmt-deselect-btn.visible { display: inline-flex; }
+    .smgmt-deselect-btn:hover { opacity: .8; }
+
+    /* ── Multi-drag floating pill ── */
+    .smgmt-drag-pill {
+      position: fixed;
+      top: -100px;
+      left: -100px;
+      background: var(--blue);
+      color: #fff;
+      border-radius: 20px;
+      padding: 6px 14px;
+      font-size: 12px;
+      font-weight: 600;
+      pointer-events: none;
+      z-index: 9999;
+      box-shadow: 0 4px 12px rgba(0,0,0,.2);
+      white-space: nowrap;
+    }
 
     /* ── Modal shared ── */
     .modal-backdrop {
@@ -713,6 +791,12 @@
         <div class="smgmt-toolbar" id="smgmt-toolbar">
           <span class="smgmt-toolbar-title">Sprint Management</span>
           <div class="smgmt-toolbar-actions">
+            <button class="smgmt-deselect-btn" id="smgmt-deselect-btn"
+                    onclick="_smgmtClearSelection()" title="Clear all selections"
+                    aria-label="Deselect all">
+              <i class="ti ti-x"></i>
+              Deselect (<span id="smgmt-deselect-count">0</span>)
+            </button>
             <button class="btn-ghost" id="smgmt-refresh-btn"
                     onclick="smgmtTriggerRefresh()" title="Re-fetch sprints from GitHub"
                     aria-label="Trigger Refresh">
@@ -1160,6 +1244,9 @@ async function init() {
   // Wire up modal event listeners (DOM is ready at DOMContentLoaded)
   _setupModals();
 
+  // Track drag cursor position for the multi-drag pill
+  document.addEventListener('dragover', _smgmtDragMovePill);
+
   // Set up sticky toolbar shadow
   _smgmtInitScrollShadow();
 
@@ -1230,6 +1317,8 @@ function _smgmtRender(data) {
   const listEl = document.getElementById('smgmt-sprint-list');
   if (!listEl) return;
   _smgmtData = data;
+  // Update selection dropdown whenever sprint data changes
+  _smgmtPopulateSelectionDropdown();
 
   const sprints = data.sprints || [];
   const order   = data.order   || [];
@@ -1453,28 +1542,178 @@ async function smgmtFinishSprint(label) {
   }
 }
 
-// ── Multi-select toggle ────────────────────────────────────────────────────
+// ── Multi-select helpers ───────────────────────────────────────────────────
+
+function _smgmtUpdateSelectionUI() {
+  const count = _smgmtSelectedIssues.size;
+
+  // Floating bar
+  const bar = document.getElementById('smgmt-selection-bar');
+  if (bar) {
+    bar.classList.toggle('show', count > 0);
+    const countEl = document.getElementById('smgmt-sel-count');
+    if (countEl) countEl.textContent = count === 1 ? '1 selected' : `${count} selected`;
+  }
+
+  // Toolbar deselect button
+  const deselectBtn = document.getElementById('smgmt-deselect-btn');
+  if (deselectBtn) {
+    deselectBtn.classList.toggle('visible', count > 0);
+    const countSpan = document.getElementById('smgmt-deselect-count');
+    if (countSpan) countSpan.textContent = String(count);
+  }
+
+  // Populate sprint dropdown in selection bar
+  _smgmtPopulateSelectionDropdown();
+}
+
+function _smgmtPopulateSelectionDropdown() {
+  const sel = document.getElementById('smgmt-sel-move-to');
+  if (!sel || !_smgmtData) return;
+  const sprints = (_smgmtData.sprints || []).sort((a, b) => a - b);
+  const currentOptions = Array.from(sel.options).map(o => o.value).filter(v => v !== '' && v !== 'backlog');
+  const newValues = sprints.map(n => `sprint-${n}`);
+  // Only rebuild if changed
+  if (JSON.stringify(currentOptions) === JSON.stringify(newValues)) return;
+  // Keep the placeholder then add sprint options + Backlog
+  sel.innerHTML = '<option value="">Sprint…</option>';
+  sprints.forEach(n => {
+    const opt = document.createElement('option');
+    opt.value = `sprint-${n}`;
+    opt.textContent = `Sprint ${n}`;
+    sel.appendChild(opt);
+  });
+  const backlogOpt = document.createElement('option');
+  backlogOpt.value = 'backlog';
+  backlogOpt.textContent = 'Backlog (no sprint)';
+  sel.appendChild(backlogOpt);
+}
+
+function _smgmtClearSelection() {
+  _smgmtSelectedIssues.forEach(num => {
+    const el = document.getElementById(`smgmt-ticket-${num}`);
+    if (el) {
+      el.classList.remove('is-selected');
+      const cb = el.querySelector('.smgmt-ticket-cb');
+      if (cb) cb.checked = false;
+    }
+  });
+  _smgmtSelectedIssues.clear();
+  _smgmtUpdateSelectionUI();
+}
+
 function _smgmtToggleSelect(number, checked) {
   if (checked) _smgmtSelectedIssues.add(number);
   else _smgmtSelectedIssues.delete(number);
   const el = document.getElementById(`smgmt-ticket-${number}`);
   if (el) el.classList.toggle('is-selected', checked);
+  _smgmtUpdateSelectionUI();
+}
+
+async function _smgmtMoveSelectedTo(targetLabel) {
+  if (!targetLabel || _smgmtSelectedIssues.size === 0) return;
+  const repo = _smgmtRepo();
+  if (!repo) return;
+
+  const nums = Array.from(_smgmtSelectedIssues);
+  const changes = nums.map(n => ({ issue_num: n, sprint_label: targetLabel }));
+
+  // Optimistic UI update
+  if (_smgmtData) {
+    const targetNum = targetLabel === 'backlog' ? null : parseInt(targetLabel.split('-')[1], 10);
+    nums.forEach(n => {
+      const iss = _smgmtData.issues.find(i => i.number === n);
+      if (iss) iss.sprint = targetNum;
+    });
+    _smgmtClearSelection();
+    _smgmtRender(_smgmtData);
+  }
+
+  try {
+    const res = await fetch('/api/sprints/batch-labels', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ changes, project: repo }),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    await loadSprintMgmt();
+  } catch (e) {
+    alert('Failed to move tickets: ' + e.message);
+    await loadSprintMgmt();
+  }
 }
 
 // ── Drag-and-drop ──────────────────────────────────────────────────────────
 function _smgmtTicketDragStart(event, issueNum, fromSprint) {
-  _smgmtDragTicket = { number: issueNum, fromSprint: fromSprint || null };
-  event.dataTransfer.effectAllowed = 'move';
-  event.dataTransfer.setData('text/plain', String(issueNum));
-  const el = document.getElementById(`smgmt-ticket-${issueNum}`);
-  if (el) setTimeout(() => el.classList.add('dragging-ticket'), 0);
+  const isChecked = _smgmtSelectedIssues.has(issueNum);
+
+  if (isChecked && _smgmtSelectedIssues.size > 1) {
+    // Multi-ticket drag: pack all selected issue numbers
+    const nums = Array.from(_smgmtSelectedIssues);
+    const sprints = new Set(nums.map(n => {
+      const iss = (_smgmtData?.issues || []).find(i => i.number === n);
+      return iss ? iss.sprint : null;
+    }));
+    _smgmtDragTicket = {
+      number: issueNum,
+      fromSprint: fromSprint || null,
+      multi: nums,
+      multiSprints: sprints.size,
+    };
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', nums.join(','));
+
+    // Show floating pill
+    const pill = document.getElementById('smgmt-drag-pill');
+    if (pill) {
+      const label = sprints.size > 1
+        ? `Moving ${nums.length} tickets from ${sprints.size} sprints`
+        : `Moving ${nums.length} tickets`;
+      pill.textContent = label;
+      pill.style.top = (event.clientY - 20) + 'px';
+      pill.style.left = (event.clientX + 12) + 'px';
+    }
+    setTimeout(() => {
+      nums.forEach(n => {
+        const el = document.getElementById(`smgmt-ticket-${n}`);
+        if (el) el.classList.add('dragging-ticket');
+      });
+    }, 0);
+  } else {
+    // Single-ticket drag (unchecked row or single selection)
+    _smgmtDragTicket = { number: issueNum, fromSprint: fromSprint || null, multi: null };
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', String(issueNum));
+    const el = document.getElementById(`smgmt-ticket-${issueNum}`);
+    if (el) setTimeout(() => el.classList.add('dragging-ticket'), 0);
+  }
+}
+
+function _smgmtDragMovePill(event) {
+  if (_smgmtDragTicket?.multi) {
+    const pill = document.getElementById('smgmt-drag-pill');
+    if (pill && pill.textContent) {
+      pill.style.top = (event.clientY - 20) + 'px';
+      pill.style.left = (event.clientX + 12) + 'px';
+    }
+  }
 }
 
 function _smgmtTicketDragEnd(event) {
   if (_smgmtDragTicket) {
-    const el = document.getElementById(`smgmt-ticket-${_smgmtDragTicket.number}`);
-    if (el) el.classList.remove('dragging-ticket');
+    if (_smgmtDragTicket.multi) {
+      _smgmtDragTicket.multi.forEach(n => {
+        const el = document.getElementById(`smgmt-ticket-${n}`);
+        if (el) el.classList.remove('dragging-ticket');
+      });
+    } else {
+      const el = document.getElementById(`smgmt-ticket-${_smgmtDragTicket.number}`);
+      if (el) el.classList.remove('dragging-ticket');
+    }
   }
+  // Hide drag pill
+  const pill = document.getElementById('smgmt-drag-pill');
+  if (pill) { pill.style.top = '-100px'; pill.style.left = '-100px'; pill.textContent = ''; }
   _smgmtDragTicket = null;
   document.querySelectorAll('.smgmt-sprint-card').forEach(el => el.classList.remove('drag-over-sprint'));
 }
@@ -1500,39 +1739,74 @@ async function _smgmtDropOnSprint(event, targetLabel) {
   document.querySelectorAll('.smgmt-sprint-card').forEach(el => el.classList.remove('drag-over-sprint'));
 
   if (!_smgmtDragTicket) return;
-  const { number, fromSprint } = _smgmtDragTicket;
+  const dragInfo = _smgmtDragTicket;
   _smgmtDragTicket = null;
-
-  if (fromSprint === targetLabel) return;
 
   const repo = _smgmtRepo();
   if (!repo) return;
 
-  const targetNum = targetLabel ? parseInt(targetLabel.split('-')[1], 10) : null;
+  if (dragInfo.multi && dragInfo.multi.length > 1) {
+    // Multi-ticket drop
+    const nums = dragInfo.multi;
+    const targetNum = targetLabel ? parseInt(targetLabel.split('-')[1], 10) : null;
 
-  // Optimistic update
-  if (_smgmtData) {
-    const iss = _smgmtData.issues.find(i => i.number === number);
-    if (iss) iss.sprint = targetNum;
-    _smgmtRender(_smgmtData);
-  }
+    // Optimistic update
+    if (_smgmtData) {
+      nums.forEach(n => {
+        const iss = _smgmtData.issues.find(i => i.number === n);
+        if (iss) iss.sprint = targetNum;
+      });
+    }
+    // Clear selection before render
+    _smgmtClearSelection();
+    if (_smgmtData) _smgmtRender(_smgmtData);
 
-  try {
-    const res = await fetch(`/api/issues/${number}/sprint-label`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sprint_label: targetLabel, project: repo }),
-    });
-    if (!res.ok) throw new Error(await res.text());
-    await loadSprintMgmt();
-  } catch (e) {
-    // Rollback optimistic update
+    const changes = nums.map(n => ({ issue_num: n, sprint_label: targetLabel || 'backlog' }));
+    try {
+      const res = await fetch('/api/sprints/batch-labels', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ changes, project: repo }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      await loadSprintMgmt();
+    } catch (e) {
+      alert(`Failed to move tickets: ${e.message}`);
+      await loadSprintMgmt();
+    }
+  } else {
+    // Single-ticket drop
+    const { number, fromSprint } = dragInfo;
+    if (fromSprint === targetLabel) return;
+
+    const targetNum = targetLabel ? parseInt(targetLabel.split('-')[1], 10) : null;
+
+    // Optimistic update
     if (_smgmtData) {
       const iss = _smgmtData.issues.find(i => i.number === number);
-      if (iss) iss.sprint = fromSprint ? parseInt(fromSprint.split('-')[1], 10) : null;
+      if (iss) iss.sprint = targetNum;
       _smgmtRender(_smgmtData);
     }
-    alert(`Failed to move ticket #${number}: ${e.message}`);
+    // Clear selection after any drag completes
+    _smgmtClearSelection();
+
+    try {
+      const res = await fetch(`/api/issues/${number}/sprint-label`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sprint_label: targetLabel || 'backlog', project: repo }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      await loadSprintMgmt();
+    } catch (e) {
+      // Rollback optimistic update
+      if (_smgmtData) {
+        const iss = _smgmtData.issues.find(i => i.number === number);
+        if (iss) iss.sprint = fromSprint ? parseInt(fromSprint.split('-')[1], 10) : null;
+        _smgmtRender(_smgmtData);
+      }
+      alert(`Failed to move ticket #${number}: ${e.message}`);
+    }
   }
 }
 
@@ -1618,6 +1892,9 @@ function _setupModals() {
         _nsClose(false);
       } else if (!document.getElementById('nt-modal').classList.contains('hidden')) {
         _ntClose();
+      } else if (_smgmtSelectedIssues.size > 0) {
+        // Clear multi-select when Escape pressed and no modal is open
+        _smgmtClearSelection();
       }
     }
   });
@@ -1725,6 +2002,19 @@ function _setupModals() {
 
 document.addEventListener('DOMContentLoaded', init);
 </script>
+
+<!-- ── Floating multi-select action bar ── -->
+<div class="smgmt-selection-bar" id="smgmt-selection-bar" role="status" aria-live="polite">
+  <span class="smgmt-selection-bar-count" id="smgmt-sel-count">0 selected</span>
+  <span style="opacity:.5">Move to:</span>
+  <select id="smgmt-sel-move-to" onchange="_smgmtMoveSelectedTo(this.value); this.value=''">
+    <option value="">Sprint…</option>
+  </select>
+  <button class="smgmt-selection-bar-deselect" onclick="_smgmtClearSelection()">Deselect</button>
+</div>
+
+<!-- ── Multi-drag pill (follows cursor) ── -->
+<div class="smgmt-drag-pill" id="smgmt-drag-pill"></div>
 
 <!-- ── New Sprint modal ── -->
 <div class="modal-backdrop hidden" id="ns-backdrop"></div>

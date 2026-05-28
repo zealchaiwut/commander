@@ -2029,24 +2029,93 @@ def get_open_issues():
 
 
 class SprintLabelBody(BaseModel):
-    sprint: int
+    # Accepts either sprint_label (e.g. "sprint-3" or null for backlog) or
+    # the legacy sprint: int field for backward compatibility.
+    sprint_label: Optional[str] = None
+    sprint: Optional[int] = None
+    project: Optional[str] = None
 
 
 @app.post("/api/issues/{issue_id}/sprint-label")
 async def add_sprint_label(issue_id: int, body: SprintLabelBody):
-    """Add sprint-N label to an issue without removing existing labels."""
-    sprint_label = f"sprint-{body.sprint}"
+    """Assign a sprint label to an issue (replaces any existing sprint-N labels).
+
+    Accepts either:
+    - sprint_label: "sprint-N" string (or null/empty to remove sprint label)
+    - sprint: int (legacy; converted to "sprint-N")
+    """
+    # Resolve the sprint number from whichever field was provided
+    if body.sprint_label is not None:
+        raw = body.sprint_label.strip()
+        if raw == "" or raw == "backlog":
+            sprint_num = None
+        else:
+            m = re.match(r"^sprint-(\d+)$", raw)
+            if not m:
+                raise HTTPException(400, detail=f"Invalid sprint_label: {raw!r}")
+            sprint_num = int(m.group(1))
+    elif body.sprint is not None:
+        sprint_num = body.sprint
+    else:
+        raise HTTPException(400, detail="Provide sprint_label or sprint")
+
+    repo = body.project or None
     try:
-        github_client.ensure_sprint_label(body.sprint)
-        github_client.update_labels(issue_id, add=[sprint_label], remove=[])
-        github_client.invalidate("open_issues_body:")
-        github_client.invalidate("open_issues:")
-        github_client.invalidate("sprints:")
+        github_client.assign_sprint(issue_id, sprint_num, repo_name=repo)
     except subprocess.CalledProcessError as e:
         raise _gh_error(e)
     except ValueError as e:
         raise HTTPException(400, detail=str(e))
     return {"ok": True}
+
+
+class BatchLabelChange(BaseModel):
+    issue_num: int
+    sprint_label: str  # e.g. "sprint-3" or "backlog"
+
+
+class BatchLabelsBody(BaseModel):
+    changes: list[BatchLabelChange]
+    project: Optional[str] = None
+
+
+@app.post("/api/sprints/batch-labels")
+async def batch_sprint_labels(body: BatchLabelsBody):
+    """Batch-move tickets to their target sprint labels.
+
+    Accepts: {"changes": [{"issue_num": N, "sprint_label": "sprint-3"}, ...], "project": "owner/repo"}
+    Returns: {"applied": N, "failed": N, "errors": [...]}
+    """
+    applied = 0
+    failed = 0
+    errors: list[str] = []
+
+    repo = body.project or None
+
+    for change in body.changes:
+        raw = change.sprint_label.strip()
+        if raw == "" or raw == "backlog":
+            sprint_num = None
+        else:
+            m = re.match(r"^sprint-(\d+)$", raw)
+            if not m:
+                errors.append(f"#{change.issue_num}: invalid sprint_label {raw!r}")
+                failed += 1
+                continue
+            sprint_num = int(m.group(1))
+
+        try:
+            github_client.assign_sprint(change.issue_num, sprint_num, repo_name=repo)
+            applied += 1
+        except subprocess.CalledProcessError as e:
+            err_msg = e.stderr.strip() if e.stderr else str(e)
+            errors.append(f"#{change.issue_num}: {err_msg}")
+            failed += 1
+        except Exception as e:
+            errors.append(f"#{change.issue_num}: {e}")
+            failed += 1
+
+    return {"applied": applied, "failed": failed, "errors": errors}
 
 
 _SPRINT_LABEL_RE = re.compile(r"^sprint-\d+$")

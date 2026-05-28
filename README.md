@@ -176,6 +176,64 @@ commander/
 
 ---
 
+## Backup & Restore
+
+Commander automatically backs up your config files (`projects.json`, `sprint.yaml`, and `.env` if
+present) to a private GitHub gist. This protects against accidental data loss from `rm -rf`,
+disk failure, or a machine wipe — since both files are gitignored by design.
+
+### What gets backed up
+
+| File | Description |
+|---|---|
+| `apps/dashboard/projects.json` | Project registry (all registered repos) |
+| `.commander/sprint.yaml` | Agent config (sprint manager settings) |
+| `apps/dashboard/.env` | Environment variables (secrets are **redacted** before upload) |
+
+**Secrets redaction:** any line matching `*_TOKEN=*`, `*_KEY=*`, or `*_SECRET=*` has its value
+replaced with `REDACTED` before uploading. The gist description notes this.
+
+### How it works
+
+- On server startup, a backup runs automatically after 30 seconds.
+- A backup runs every 6 hours in the background (no impact on request latency).
+- A backup is triggered after any successful write to `projects.json` via the dashboard API.
+- All backups update the **same private gist** — GitHub stores the full revision history,
+  so you can view previous versions on `https://gist.github.com/<your-user>/<gist-id>/revisions`.
+- The gist ID is stored in `.commander/backup_config.json` (gitignored).
+
+### Check backup status
+
+```
+GET /api/backup/status
+```
+
+Returns:
+```json
+{
+  "last_backup_at": "2026-05-28T12:00:00+00:00",
+  "gist_id": "abc123...",
+  "gist_url": "https://gist.github.com/abc123...",
+  "file_count": 2,
+  "last_error": null
+}
+```
+
+### Restore from gist
+
+```bash
+# From the repo root:
+python -m services.sprint_manager.backup restore --gist-id <gist-id>
+
+# Write to a specific directory:
+python -m services.sprint_manager.backup restore --gist-id <gist-id> --target-dir /tmp/restore
+```
+
+Restored files are written with their original names. Copy them back to their expected locations
+after verifying the contents.
+
+---
+
 ## Going Remote?
 
 Traveling with iPad-only access? See [docs/TRAVEL_PLAYBOOK.md](docs/TRAVEL_PLAYBOOK.md) for:

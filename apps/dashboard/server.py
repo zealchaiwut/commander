@@ -3421,6 +3421,156 @@ def get_sprint_state(sprint_label: str, project: str):
     }
 
 
+@app.get("/api/sprints/{sprint_label}/outcome")
+def get_sprint_outcome(sprint_label: str, project: str):
+    """Return frozen outcome data for a completed or stopped sprint.
+
+    Reads sprint-N-state.json plus the latest sprint-run-<label>-*.log to produce:
+      - sprint_status: "completed" | "stopped" | None (still running or not found)
+      - counts: { done, failed, skipped }
+      - wall_clock_secs: total duration
+      - ended_at: ISO 8601 timestamp of sprint end (from last issue status_changed_at)
+      - issues: list of { number, title, outcome, elapsed_secs } for each issue
+      - log_line_count: number of lines in the archived run log
+    """
+    if not _SPRINT_LABEL_RE.match(sprint_label):
+        raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")
+
+    project_root = _project_root_path(project)
+    commander = _commander_dir(project_root)
+
+    m = re.search(r"(\d+)", sprint_label)
+    n = m.group(1) if m else sprint_label
+
+    state_path = commander / "sprints" / f"sprint-{n}-state.json"
+    if not state_path.exists():
+        raise HTTPException(404, detail=f"Outcome not found for {sprint_label!r}")
+
+    try:
+        state_data = json.loads(state_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as e:
+        raise HTTPException(500, detail=f"Could not read state file: {e}")
+
+    # If sprint is still actively running, return 404 so UI doesn't freeze it
+    if _is_sprint_running(project_root, sprint_label):
+        raise HTTPException(404, detail=f"Sprint {sprint_label!r} is still running")
+
+    def _parse_iso(s: Optional[str]) -> Optional[float]:
+        if not s:
+            return None
+        try:
+            dt = datetime.fromisoformat(s.rstrip("Z"))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt.timestamp()
+        except Exception:
+            return None
+
+    def _fmt_iso(ts: Optional[float]) -> Optional[str]:
+        if ts is None:
+            return None
+        return datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%H:%M")
+
+    # Derive sprint status from summary file (most authoritative)
+    sprint_status: Optional[str] = None
+    sprints_dir = commander / "sprints"
+    for sf in sorted(sprints_dir.glob(f"sprint-{n}-summary-*.md"), key=lambda p: p.stat().st_mtime, reverse=True):
+        try:
+            meta = _parse_summary_file(sf)
+            raw = (meta.get("status") or "").lower()
+            if raw in ("complete", "completed"):
+                sprint_status = "completed"
+            elif raw in ("stopped", "failed", "cancelled"):
+                sprint_status = "stopped"
+        except Exception:
+            pass
+        break
+
+    # Fallback: derive from issue statuses — if all are done/skipped and no failures, completed
+    issues_raw = state_data.get("issues", [])
+    if sprint_status is None and issues_raw:
+        has_pending = any(i.get("status") == "pending" for i in issues_raw)
+        has_failed = any(
+            i.get("agent_status") == "failed" or i.get("failure_reason")
+            for i in issues_raw
+        )
+        if not has_pending:
+            sprint_status = "stopped" if has_failed else "completed"
+
+    if sprint_status is None:
+        raise HTTPException(404, detail=f"Cannot determine outcome for {sprint_label!r}")
+
+    # Build issue outcome list
+    result_issues = []
+    ended_ts: Optional[float] = None
+    for iss in issues_raw:
+        start_ts = _parse_iso(iss.get("coder_started_at"))
+        end_ts = (
+            _parse_iso(iss.get("tester_finished_at"))
+            or _parse_iso(iss.get("status_changed_at"))
+        )
+        elapsed_secs = None
+        if start_ts is not None and end_ts is not None:
+            elapsed_secs = max(0.0, end_ts - start_ts)
+
+        if end_ts and (ended_ts is None or end_ts > ended_ts):
+            ended_ts = end_ts
+
+        iss_status = iss.get("status", "pending")
+        iss_agent = iss.get("agent_status")
+        failure_reason = iss.get("failure_reason")
+
+        if iss_status == "done":
+            outcome = "done"
+        elif iss_agent == "failed" or failure_reason:
+            outcome = "failed"
+        elif iss_status == "skipped":
+            outcome = "skipped"
+        else:
+            outcome = "skipped"
+
+        result_issues.append({
+            "number":       iss.get("number"),
+            "title":        iss.get("title", ""),
+            "outcome":      outcome,
+            "elapsed_secs": round(elapsed_secs) if elapsed_secs is not None else None,
+            "failure_reason": failure_reason,
+        })
+
+    # Counts
+    done_count    = sum(1 for i in result_issues if i["outcome"] == "done")
+    failed_count  = sum(1 for i in result_issues if i["outcome"] == "failed")
+    skipped_count = sum(1 for i in result_issues if i["outcome"] == "skipped")
+
+    # Log line count from most recent run log
+    log_line_count = 0
+    log_dir = commander / "logs"
+    if log_dir.exists():
+        candidates = sorted(
+            log_dir.glob(f"sprint-run-{sprint_label}-*.log"),
+            key=lambda p: p.stat().st_mtime, reverse=True,
+        )
+        if candidates:
+            try:
+                log_line_count = len(candidates[0].read_text(encoding="utf-8", errors="replace").splitlines())
+            except OSError:
+                pass
+
+    return {
+        "sprint_label":   sprint_label,
+        "sprint_status":  sprint_status,
+        "counts": {
+            "done":    done_count,
+            "failed":  failed_count,
+            "skipped": skipped_count,
+        },
+        "wall_clock_secs": state_data.get("wall_clock_secs", 0.0),
+        "ended_at":        _fmt_iso(ended_ts),
+        "issues":          result_issues,
+        "log_line_count":  log_line_count,
+    }
+
+
 class SprintRerunBody(BaseModel):
     confirm: bool
 

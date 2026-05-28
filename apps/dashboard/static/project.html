@@ -3348,7 +3348,10 @@ function _smgmtTicketRowHtml(ticket, label) {
          data-issue="${ticket.number}"
          data-sprint="${escHtml(label)}"
          ondragstart="_smgmtTicketDragStart(event, ${ticket.number}, '${escHtml(label)}')"
-         ondragend="_smgmtTicketDragEnd(event)">
+         ondragend="_smgmtTicketDragEnd(event)"
+         ondragover="_smgmtTicketReorderDragOver(event)"
+         ondragleave="_smgmtTicketReorderDragLeave(event)"
+         ondrop="_smgmtTicketReorderDrop(event, ${ticket.number}, '${escHtml(label)}')">
       <input type="checkbox" class="smgmt-ticket-cb"
              ${isSelected ? 'checked' : ''}
              onclick="event.stopPropagation()"
@@ -3789,6 +3792,69 @@ async function _smgmtDropOnSprint(event, targetLabel) {
     } finally {
       _smgmtBoardUnlock();
     }
+  }
+}
+
+// ── Within-sprint ticket reorder (issue #247) ─────────────────────────────
+
+function _smgmtTicketReorderDragOver(event) {
+  if (!_smgmtDragTicket || (_smgmtDragTicket.multi && _smgmtDragTicket.multi.length > 1)) return;
+  const target = event.currentTarget;
+  const targetSprint = target.dataset.sprint;
+  const dragSprint = _smgmtDragTicket ? _smgmtDragTicket.fromSprint : null;
+  if (targetSprint !== dragSprint) return; // cross-sprint moves handled by _smgmtDropOnSprint
+  event.preventDefault();
+  event.stopPropagation();
+  const rect = target.getBoundingClientRect();
+  const midY = rect.top + rect.height / 2;
+  target.classList.remove('drag-before', 'drag-after');
+  target.classList.add(event.clientY < midY ? 'drag-before' : 'drag-after');
+}
+
+function _smgmtTicketReorderDragLeave(event) {
+  event.currentTarget.classList.remove('drag-before', 'drag-after');
+}
+
+async function _smgmtTicketReorderDrop(event, targetIssue, sprintLabel) {
+  if (!_smgmtDragTicket || (_smgmtDragTicket.multi && _smgmtDragTicket.multi.length > 1)) return;
+  const dragInfo = _smgmtDragTicket;
+  if (dragInfo.fromSprint !== sprintLabel) return; // cross-sprint handled elsewhere
+  const dragIssue = dragInfo.number;
+  if (dragIssue === targetIssue) {
+    event.currentTarget.classList.remove('drag-before', 'drag-after');
+    return;
+  }
+  event.preventDefault();
+  event.stopPropagation();
+
+  const rect = event.currentTarget.getBoundingClientRect();
+  const insertAfter = event.clientY >= rect.top + rect.height / 2;
+  event.currentTarget.classList.remove('drag-before', 'drag-after');
+
+  const repo = _smgmtRepo();
+  if (!repo || !_smgmtData) return;
+
+  // Build new order from current DOM positions.
+  const container = document.getElementById(`smgmt-tickets-${sprintLabel}`);
+  if (!container) return;
+  const rows = Array.from(container.querySelectorAll('.smgmt-ticket[data-issue]'));
+  let order = rows.map(r => parseInt(r.dataset.issue, 10)).filter(n => !isNaN(n));
+  order = order.filter(n => n !== dragIssue);
+  const insertIdx = order.indexOf(targetIssue) + (insertAfter ? 1 : 0);
+  order.splice(insertIdx, 0, dragIssue);
+
+  _smgmtDragTicket = null;
+  try {
+    const res = await fetch(`/api/sprints/${encodeURIComponent(sprintLabel)}/tickets/reorder`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ issue_numbers: order, project: repo }),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    await loadSprintMgmt();
+  } catch (e) {
+    alert(`Failed to reorder tickets: ${e.message}`);
+    await loadSprintMgmt();
   }
 }
 

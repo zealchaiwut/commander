@@ -1,16 +1,11 @@
 """Tests for issue #229: Add GET /api/health endpoint with dependency checks."""
+import os
 import time
 import pytest
 import httpx
 
 
-BASE_URL = "http://localhost:8000"
-
-
-@pytest.fixture
-def client():
-    with httpx.Client(base_url=BASE_URL, timeout=10.0) as c:
-        yield c
+BASE_URL = os.environ.get("TEST_BASE_URL", "http://localhost:8000")
 
 
 # ── AC: Response shape ────────────────────────────────────────────────────────

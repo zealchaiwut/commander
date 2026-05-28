@@ -2424,6 +2424,13 @@
   .smgmt-status-sit      { background: var(--amber-bg); color: var(--amber); }
   .smgmt-status-uat      { background: var(--purple-bg); color: var(--purple); }
   .smgmt-status-done     { background: var(--green-bg); color: var(--green); }
+  .smgmt-status-need-rework { background: #fef2f2; color: #dc2626; border: 1px solid #fca5a5; }
+  .smgmt-rework-badge {
+    font-size: 10px; font-weight: 600; padding: 2px 6px; border-radius: 3px;
+    background: #fef2f2; color: #dc2626; border: 1px solid #fca5a5;
+    flex-shrink: 0; white-space: nowrap; text-transform: uppercase; letter-spacing: .04em;
+  }
+  .smgmt-ticket.is-needs-rework { border-left: 3px solid #dc2626; }
 
   /* Per-ticket live agent status (issue #131) */
   .smgmt-ticket-agent-badge {

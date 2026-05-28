@@ -18,6 +18,7 @@ Run from the git root of the repository (NOT from dashboard/).
 """
 import argparse
 import os
+import re
 import subprocess
 import sys
 import time
@@ -28,6 +29,11 @@ sys.path.insert(0, str(_DASHBOARD_DIR))
 from dotenv import load_dotenv
 load_dotenv(_DASHBOARD_DIR / ".env")
 import github_client
+
+# Sprint labels (sprint-N) must never be removed during or after a merge.
+# Label changes here go through update_ticket.py which enforces this too,
+# but this guard protects any future direct github_client.update_labels calls.
+_SPRINT_LABEL_RE = re.compile(r"^sprint-\d+$")
 
 
 def _run(*cmd) -> str:

@@ -17,6 +17,7 @@ all retries (a warning comment is posted to the issue in that case).
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -25,6 +26,10 @@ from pathlib import Path
 _DASHBOARD_DIR = Path(__file__).parent.parent / "apps" / "dashboard"
 sys.path.insert(0, str(_DASHBOARD_DIR))
 import github_client
+
+# Sprint labels (sprint-N) are protected: they must never be removed by a
+# status transition. This guard matches any "sprint-<digits>" label name.
+_SPRINT_LABEL_RE = re.compile(r"^sprint-\d+$")
 
 STATUS_MAP = {
     "in-progress": {
@@ -225,6 +230,9 @@ def main():
     # Handle each remove label individually
     for lbl in mapping["remove"]:
         op = f'remove "{lbl}"'
+        if _SPRINT_LABEL_RE.match(lbl):
+            print(f'skipped remove "{lbl}" (sprint label protected)', file=sys.stderr)
+            continue
         if lbl not in current_labels:
             print(f'skipped remove "{lbl}" (not present)')
             continue

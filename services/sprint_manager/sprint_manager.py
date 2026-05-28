@@ -391,6 +391,58 @@ HANG_WARN_SECS  = 30 * 60   # 30 minutes
 HANG_KILL_SECS  = 60 * 60   # 60 minutes
 HANG_CHECK_SECS = 5  * 60   # check every 5 minutes
 
+# ── Sprint-label protection (issue #305) ─────────────────────────────────────
+
+# Status labels that may be added or removed while a sprint run is active.
+# All other label additions are deferred to post-run; sprint-N is never
+# removed from a ticket until the sprint run ends.
+RUN_MUTABLE_LABELS: frozenset[str] = frozenset({
+    "in-progress", "sit", "uat", "needs-rework",
+})
+
+# Actual GitHub label strings (as applied on issues) that correspond to
+# RUN_MUTABLE_LABELS.  Used as the allowlist when filtering add-label calls.
+_RUN_MUTABLE_GITHUB_LABELS: frozenset[str] = frozenset({
+    "in-progress", "SIT", "UAT", "need-rework", "needs-rework",
+})
+
+_SPRINT_LABEL_RE = re.compile(r"^sprint-\d+$")
+
+
+def _guard_sprint_labels(
+    add: list[str],
+    remove: list[str],
+    sprint_label: Optional[str] = None,
+) -> tuple[list[str], list[str]]:
+    """Return filtered (add, remove) respecting sprint-label protection.
+
+    Always: sprint-N labels are stripped from *remove* and never deleted.
+    Active run (sprint_label provided): *add* is restricted to
+    _RUN_MUTABLE_GITHUB_LABELS; any other additions are logged and dropped.
+    """
+    safe_remove = [lbl for lbl in remove if not _SPRINT_LABEL_RE.match(lbl)]
+    blocked_removes = [lbl for lbl in remove if _SPRINT_LABEL_RE.match(lbl)]
+    if blocked_removes:
+        print(
+            f"  [label-guard] Blocked removal of sprint label(s): {blocked_removes}",
+            file=sys.stderr,
+        )
+
+    if sprint_label is not None:
+        safe_add = [lbl for lbl in add if lbl in _RUN_MUTABLE_GITHUB_LABELS]
+        deferred = [lbl for lbl in add if lbl not in _RUN_MUTABLE_GITHUB_LABELS]
+        if deferred:
+            print(
+                f"  [label-guard] Deferred non-mutable label addition(s) until post-run: {deferred}",
+                file=sys.stderr,
+            )
+    else:
+        safe_add = add
+
+    return safe_add, safe_remove
+
+# ── end sprint-label protection ───────────────────────────────────────────────
+
 # Rate-limit retry constants
 _RATE_LIMIT_MAX_RETRIES     = 3
 _RATE_LIMIT_BACKOFF_DELAYS  = [30, 60, 120]   # seconds per attempt
@@ -1095,9 +1147,30 @@ def _apply_needs_rework_label(
         print(f"  [needs-rework] WARNING: failed to apply label for #{issue_num}: {e}", file=sys.stderr)
 
 
-def _add_blocked_label(issue_num: int, reason: str, repo_name: Optional[str] = None) -> None:
+def _add_blocked_label(
+    issue_num: int,
+    reason: str,
+    repo_name: Optional[str] = None,
+    sprint_label: Optional[str] = None,
+) -> None:
+    safe_add, _ = _guard_sprint_labels(["blocked"], [], sprint_label=sprint_label)
+    if not safe_add:
+        # "blocked" is outside RUN_MUTABLE_LABELS — suppressed during active run
+        print(
+            f"  [label-guard] 'blocked' label suppressed for #{issue_num} during active sprint run",
+            file=sys.stderr,
+        )
+        try:
+            github_client.add_comment(
+                issue_num,
+                f"Issue hung (HANG): {reason}. 'blocked' label deferred — applied post-run.",
+                repo_name=repo_name,
+            )
+        except Exception as e:
+            print(f"  Warning: failed to post hang comment — {e}", file=sys.stderr)
+        return
     try:
-        github_client.update_labels(issue_num, add=["blocked"], repo_name=repo_name)
+        github_client.update_labels(issue_num, add=safe_add, repo_name=repo_name)
         github_client.add_comment(
             issue_num,
             f"Issue blocked by sprint manager (HANG): {reason}",
@@ -1175,11 +1248,12 @@ def _revert_to_sit(issue_num: int, gate_name: str, output: str,
         except Exception as e:
             print(f"  Warning: failure parsing/sidecar failed — {e}", file=sys.stderr)
 
+    safe_add, safe_remove = _guard_sprint_labels(["SIT"], ["UAT", "in-progress"])
     try:
         github_client.update_labels(
             issue_num,
-            add=["SIT"],
-            remove=["UAT", "in-progress"],
+            add=safe_add,
+            remove=safe_remove,
             repo_name=repo_name,
         )
         github_client.add_comment(issue_num, comment, repo_name=repo_name)
@@ -1832,6 +1906,7 @@ def _dispatch_coder(
     chosen_port: Optional[int] = None,
     rate_limit_events: Optional[list] = None,
     on_running: Optional[object] = None,
+    sprint_label: Optional[str] = None,
 ) -> tuple[bool, Optional[str]]:
     """Dispatch a coder agent for the issue.  Returns (ok, failure_category).
 
@@ -1975,7 +2050,7 @@ def _dispatch_coder(
 
         if detector.killed:
             reason = f"No log activity for {HANG_KILL_SECS//60} minutes"
-            _add_blocked_label(issue_num, reason, repo_name=eff_repo)
+            _add_blocked_label(issue_num, reason, repo_name=eff_repo, sprint_label=sprint_label)
             dispatch_alerts(
                 alert_modes,
                 title=f"Issue #{issue_num}: HANG detected",
@@ -2043,6 +2118,7 @@ def _dispatch_tester(
     chosen_port: Optional[int] = None,
     rate_limit_events: Optional[list] = None,
     on_running: Optional[object] = None,
+    sprint_label: Optional[str] = None,
 ) -> tuple[int, Optional[str]]:
     """Dispatch a tester agent.  Returns (exit_code, failure_category_if_hang).
 
@@ -2185,7 +2261,7 @@ def _dispatch_tester(
 
         if detector.killed:
             reason = f"Tester: no log activity for {HANG_KILL_SECS//60} minutes"
-            _add_blocked_label(issue_num, reason, repo_name=eff_repo)
+            _add_blocked_label(issue_num, reason, repo_name=eff_repo, sprint_label=sprint_label)
             dispatch_alerts(
                 alert_modes,
                 title=f"Issue #{issue_num}: HANG detected in tester",
@@ -3910,7 +3986,7 @@ def run_sprint(
         coder_ok, coder_category = _dispatch_coder(
             num, alert_modes, sprint_branch=target_branch, repo_name=eff_repo, cfg=cfg,
             chosen_port=chosen_port, rate_limit_events=state.rate_limit_events,
-            on_running=_on_coder_running,
+            on_running=_on_coder_running, sprint_label=label,
         )
         _coder_elapsed = time.monotonic() - _coder_t0
         _coder_m, _coder_s = divmod(int(_coder_elapsed), 60)
@@ -3993,7 +4069,7 @@ def run_sprint(
         tester_rc, hang_category = _dispatch_tester(
             num, alert_modes, sprint_branch=target_branch, repo_name=eff_repo, cfg=cfg,
             chosen_port=chosen_port, rate_limit_events=state.rate_limit_events,
-            on_running=_on_tester_running,
+            on_running=_on_tester_running, sprint_label=label,
         )
         _tester_elapsed = time.monotonic() - _tester_t0
         _tester_m, _tester_s = divmod(int(_tester_elapsed), 60)

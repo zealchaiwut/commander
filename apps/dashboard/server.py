@@ -3040,9 +3040,21 @@ def get_sprint_live_snapshot(sprint_label: str, project: str):
       "started_at": "<ISO8601>",
       "current_ticket": {"number": N, "title": "..."} | null,
       "active_agent": {"name": "coder"|"tester", "model": "...", "pid": N} | null,
-      "recent_log_lines": [{"timestamp": "HH:MM:SS", "type": "...", "message": "..."}, ...]
+      "recent_log_lines": [{"timestamp": "HH:MM:SS", "type": "...", "message": "..."}, ...],
+      "issues": [
+        {
+          "number": <int>,
+          "title": <str>,
+          "status": "pending"|"in-progress"|"done"|"skipped",
+          "agent_status": "running"|"failed"|null,
+          "agent": "coder"|"tester"|null,
+          "elapsed_secs": <int>|null,
+          "size": "S"|"M"|"L"|"XL"|null
+        }, ...
+      ]
     }
     recent_log_lines contains the last 50 lines.
+    issues is sourced from the locked launch snapshot (issue #306).
     """
     if not _SPRINT_LABEL_RE.match(sprint_label):
         raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")
@@ -3127,6 +3139,70 @@ def get_sprint_live_snapshot(sprint_label: str, project: str):
     if est_remaining_minutes is None and total_count > 0:
         est_remaining_minutes = 0
 
+    # ── issues array: snapshot with per-ticket status, agent, elapsed, size ──
+    _IN_FLIGHT_AGENT_STATUSES = frozenset({
+        "coder_dispatched", "coder_running", "coder_done",
+        "tester_dispatched", "tester_running", "tester_done",
+    })
+
+    def _parse_ts_utc(s: Optional[str]) -> Optional[datetime]:
+        if not s:
+            return None
+        try:
+            dt = datetime.fromisoformat(s.rstrip("Z"))
+            return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+        except Exception:
+            return None
+
+    issues_out: list[dict] = []
+    for iss in issues:
+        num = iss.get("number")
+        raw_agent_status = iss.get("agent_status")
+
+        # status: derive "in-progress" for tickets currently being worked on
+        if raw_agent_status in _IN_FLIGHT_AGENT_STATUSES:
+            derived_status = "in-progress"
+        else:
+            derived_status = iss.get("status", "pending")
+
+        # agent_status: normalize to running | failed | null
+        if raw_agent_status in ("coder_running", "tester_running"):
+            public_agent_status: Optional[str] = "running"
+        elif raw_agent_status == "failed":
+            public_agent_status = "failed"
+        else:
+            public_agent_status = None
+
+        # agent: active role or null (only while agent is dispatched or running)
+        if raw_agent_status in ("coder_dispatched", "coder_running"):
+            active_role: Optional[str] = "coder"
+        elif raw_agent_status in ("tester_dispatched", "tester_running"):
+            active_role = "tester"
+        else:
+            active_role = None
+
+        # elapsed_secs: coder_started_at → tester_finished_at (or now if still running)
+        coder_start_dt = _parse_ts_utc(iss.get("coder_started_at"))
+        if coder_start_dt is not None:
+            end_dt = _parse_ts_utc(iss.get("tester_finished_at")) or now_utc
+            issue_elapsed: Optional[int] = max(0, int((end_dt - coder_start_dt).total_seconds()))
+        else:
+            issue_elapsed = None
+
+        # size: from estimates only — never derived from minutes
+        est_entry = estimates.get(str(num)) or estimates.get(num)
+        size: Optional[str] = est_entry.get("size") if est_entry else None
+
+        issues_out.append({
+            "number":       num,
+            "title":        iss.get("title", ""),
+            "status":       derived_status,
+            "agent_status": public_agent_status,
+            "agent":        active_role,
+            "elapsed_secs": issue_elapsed,
+            "size":         size,
+        })
+
     # ── active_agent: derive from sprint state JSON (coder/tester transition) ──
     active_agent: Optional[dict] = None
     m = re.search(r"(\d+)", sprint_label)
@@ -3181,6 +3257,8 @@ def get_sprint_live_snapshot(sprint_label: str, project: str):
         "total_count":          total_count,
         "complete_count":       complete_count,
         "est_remaining_minutes": est_remaining_minutes,
+        # Per-ticket snapshot (issue #306)
+        "issues":               issues_out,
     }
 
 

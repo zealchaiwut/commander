@@ -5105,6 +5105,8 @@ async def bulk_create_start(
             "attachment_warning": None,
             "started_at": None,
             "finished_at": None,
+            "retry_count": 0,
+            "last_error": None,
         }
         for i, prompt in enumerate(clean_prompts)
     ]
@@ -5232,7 +5234,7 @@ async def bulk_skip_ticket(job_id: str, body: BulkSkipBody):
     if body.index < 0 or body.index >= len(tickets):
         raise HTTPException(422, detail="Invalid ticket index")
     ticket = tickets[body.index]
-    if ticket["state"] == "pending":
+    if ticket["state"] in ("pending", "failed"):
         ticket["state"] = "skipped"
         _persist_bulk_job(job)
         await _broadcast_bulk_event(job_id, {"type": "ticket_update", "ticket": dict(ticket)})
@@ -5342,6 +5344,127 @@ async def bulk_retry_ticket(job_id: str, body: BulkRetryBody):
 
     asyncio.create_task(_retry_task())
     return {"ok": True}
+
+
+async def _post_ticket_body_to_github(job_id: str, index: int, body_text: str) -> None:
+    """Post a ticket body directly to GitHub (no BA drafting) and update job state."""
+    job = _bulk_jobs.get(job_id)
+    if not job:
+        return
+    tickets = job["tickets"]
+    if index < 0 or index >= len(tickets):
+        return
+    t = tickets[index]
+
+    # Transition to drafting state while posting
+    t["state"] = "drafting"
+    t["started_at"] = datetime.now(timezone.utc).isoformat()
+    t["error"] = None
+    _persist_bulk_job(job)
+    await _broadcast_bulk_event(job_id, {"type": "ticket_update", "ticket": dict(t)})
+
+    issue_repo = t.get("_repo") or job.get("repo") or None
+    labels = ["backlog"] + job.get("default_labels", [])
+
+    # Use the stored title if available, otherwise derive from body first line
+    title = t.get("title") or ""
+    if not title:
+        first_line = (body_text.strip().splitlines() or [""])[0]
+        title = first_line.lstrip("# ").strip()[:120] or "Untitled ticket"
+
+    try:
+        number, url = github_client.create_issue(
+            title=title,
+            body=body_text,
+            labels=labels,
+            repo_name=issue_repo,
+        )
+        t["state"] = "created"
+        t["body"] = body_text
+        t["issue_num"] = number
+        t["issue_url"] = url
+        t["body_preview"] = body_text[:200]
+        t["label_pills"] = labels
+        t["finished_at"] = datetime.now(timezone.utc).isoformat()
+        t.pop("_default_labels", None)
+        t.pop("_repo", None)
+    except Exception as e:
+        err_msg = str(e)[:300]
+        t["state"] = "failed"
+        t["error"] = err_msg
+        t["last_error"] = err_msg
+        t["retry_count"] = (t.get("retry_count") or 0) + 1
+        t["finished_at"] = datetime.now(timezone.utc).isoformat()
+
+    _persist_bulk_job(job)
+    await _broadcast_bulk_event(job_id, {"type": "ticket_update", "ticket": dict(t)})
+
+    # Update job status
+    all_done = all(
+        tt["state"] in ("created", "failed", "skipped") for tt in job["tickets"]
+    )
+    if all_done:
+        job["status"] = "done"
+        _persist_bulk_job(job)
+        await _broadcast_bulk_event(job_id, {"type": "job_done", "job_id": job_id})
+
+
+class BulkRetryWithBodyBody(BaseModel):
+    index: int
+    body: str
+
+
+@app.post("/api/tickets/bulk/{job_id}/retry-with-body")
+async def bulk_retry_ticket_with_body(job_id: str, body: BulkRetryWithBodyBody):
+    """Retry a failed ticket by POSTing the supplied body directly to GitHub (no BA drafting)."""
+    job = _bulk_jobs.get(job_id)
+    if not job:
+        raise HTTPException(404, detail="Job not found")
+    tickets = job["tickets"]
+    if body.index < 0 or body.index >= len(tickets):
+        raise HTTPException(422, detail="Invalid ticket index")
+    ticket = tickets[body.index]
+    if ticket["state"] not in ("failed", "skipped"):
+        return {"ok": True, "state": ticket["state"]}
+
+    job["status"] = "running"
+    _persist_bulk_job(job)
+
+    asyncio.create_task(_post_ticket_body_to_github(job_id, body.index, body.body))
+    return {"ok": True}
+
+
+class BulkRetryAllBody(BaseModel):
+    bodies: dict[str, str]  # str(index) -> body text
+
+
+@app.post("/api/tickets/bulk/{job_id}/retry-all")
+async def bulk_retry_all_failed(job_id: str, body: BulkRetryAllBody):
+    """Retry all failed tickets by POSTing each ticket's edited body directly to GitHub."""
+    job = _bulk_jobs.get(job_id)
+    if not job:
+        raise HTTPException(404, detail="Job not found")
+    tickets = job["tickets"]
+
+    retried = 0
+    for idx_str, body_text in body.bodies.items():
+        try:
+            idx = int(idx_str)
+        except ValueError:
+            continue
+        if idx < 0 or idx >= len(tickets):
+            continue
+        t = tickets[idx]
+        if t["state"] != "failed":
+            continue
+        job["status"] = "running"
+        asyncio.create_task(_post_ticket_body_to_github(job_id, idx, body_text))
+        retried += 1
+
+    if retried > 0:
+        _persist_bulk_job(job)
+
+    return {"ok": True, "retried": retried}
 
 
 # ── Startup: mark any in-flight jobs as failed (best-effort) ─────────────────

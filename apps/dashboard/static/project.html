@@ -1322,7 +1322,7 @@
     .bc-ticket-list {
       display: flex; flex-direction: column; gap: 8px;
       padding: 16px 28px;
-      max-height: 420px; overflow-y: auto;
+      max-height: 560px; overflow-y: auto;
       scrollbar-width: thin; scrollbar-color: var(--border) transparent;
     }
     .bc-ticket-list::-webkit-scrollbar { width: 4px; }
@@ -1404,6 +1404,59 @@
     .bc-action-btn:hover { color: var(--text); background: var(--surface-2); }
     .bc-action-btn--retry { color: var(--blue); }
     .bc-action-btn--retry:hover { background: var(--blue-bg); }
+    .bc-action-btn--skip { color: var(--text-muted); }
+    .bc-action-btn--skip:hover { color: var(--red); background: var(--surface-2); }
+
+    /* Failed card expanded area */
+    .bc-fail-detail {
+      margin-top: 8px; width: 100%;
+    }
+    .bc-fail-banner {
+      font-size: 11px; color: var(--red);
+      background: rgba(220,38,38,0.08); border: 1px solid rgba(220,38,38,0.25);
+      border-radius: 5px; padding: 5px 8px; margin-bottom: 6px;
+      word-break: break-word;
+    }
+    .bc-fail-body-editor {
+      width: 100%; min-height: 120px; max-height: 280px;
+      font-family: monospace; font-size: 11px;
+      background: var(--surface-2); color: var(--text);
+      border: 1px solid var(--border); border-radius: 5px;
+      padding: 6px 8px; box-sizing: border-box; resize: vertical;
+      line-height: 1.5;
+    }
+    .bc-fail-body-editor:focus { outline: none; border-color: var(--blue); }
+    .bc-char-counter {
+      font-size: 10px; color: var(--text-muted); margin-top: 3px; text-align: right;
+    }
+    .bc-char-counter--over { color: var(--red); font-weight: 600; }
+    .bc-retry-meta {
+      font-size: 10px; color: var(--text-sub); margin-bottom: 4px;
+    }
+    .bc-fail-actions {
+      display: flex; gap: 6px; margin-top: 6px; align-items: center;
+    }
+    .bc-btn-retry-this {
+      font-size: 11px; padding: 4px 10px; border-radius: 5px; cursor: pointer;
+      background: var(--blue); color: #fff; border: none;
+      transition: opacity .12s;
+    }
+    .bc-btn-retry-this:hover { opacity: 0.85; }
+    .bc-btn-retry-this:disabled { opacity: 0.5; cursor: not-allowed; }
+    .bc-btn-skip-this {
+      font-size: 11px; padding: 4px 10px; border-radius: 5px; cursor: pointer;
+      background: none; color: var(--text-muted); border: 1px solid var(--border);
+      transition: color .12s, border-color .12s;
+    }
+    .bc-btn-skip-this:hover { color: var(--red); border-color: var(--red); }
+
+    /* Retry all failed footer button */
+    .bc-btn-retry-all {
+      font-size: 12px; padding: 5px 14px; border-radius: 6px; cursor: pointer;
+      background: none; border: 1px solid var(--red); color: var(--red);
+      transition: background .12s, color .12s;
+    }
+    .bc-btn-retry-all:hover { background: rgba(220,38,38,0.08); }
   </style>
 </head>
 <body>
@@ -1712,6 +1765,7 @@
               <span class="bc-hint">Job continues if you switch tabs.</span>
             </div>
             <div class="bc-step-actions-right">
+              <button type="button" class="bc-btn-retry-all hidden" id="bc-retry-all-btn" onclick="bcRetryAllFailed()">Retry all failed (0)</button>
               <button type="button" class="btn-ghost hidden" id="bc-recreate-btn" onclick="bcRecreate()">Recreate</button>
               <button type="button" class="bc-stop-btn" id="bc-stop-btn" onclick="bcStop()">
                 <i class="ti ti-player-stop"></i> Stop after current
@@ -4300,16 +4354,26 @@ function _bcRenderStep2() {
       ${etaHtml}`;
   }
 
-  // Ticket list
+  // Ticket list — preserve any in-progress editor content before re-rendering
   const list = document.getElementById('bc-ticket-list');
   if (list) {
+    // Save current editor values so they survive the innerHTML replacement
+    tickets.forEach(t => {
+      if (t.state === 'failed') {
+        const editor = document.getElementById(`bc-editor-${t.index}`);
+        if (editor) {
+          t.body = editor.value;
+        }
+      }
+    });
     list.innerHTML = tickets.map(t => _bcRenderCard(t)).join('');
   }
 
   // Footer buttons
-  const stopBtn     = document.getElementById('bc-stop-btn');
-  const doneBtn     = document.getElementById('bc-done-btn');
-  const recreateBtn = document.getElementById('bc-recreate-btn');
+  const stopBtn      = document.getElementById('bc-stop-btn');
+  const doneBtn      = document.getElementById('bc-done-btn');
+  const recreateBtn  = document.getElementById('bc-recreate-btn');
+  const retryAllBtn  = document.getElementById('bc-retry-all-btn');
   if (stopBtn && doneBtn) {
     if (job.status === 'running') {
       stopBtn.disabled = false;
@@ -4322,6 +4386,14 @@ function _bcRenderStep2() {
       doneBtn.textContent = 'Done';
       doneBtn.onclick = () => { _bcShowStep(1); };
       if (recreateBtn) recreateBtn.classList.remove('hidden');
+    }
+  }
+  if (retryAllBtn) {
+    if (failed > 0) {
+      retryAllBtn.textContent = `Retry all failed (${failed})`;
+      retryAllBtn.classList.remove('hidden');
+    } else {
+      retryAllBtn.classList.add('hidden');
     }
   }
 
@@ -4377,9 +4449,45 @@ function _bcRenderCard(t) {
     }
     actions = `<a class="bc-action-btn" href="${escHtml(issueUrl)}" target="_blank" rel="noopener" title="Open on GitHub">&#x2197;</a>`;
   } else if (t.state === 'failed') {
-    preview = escHtml(t.error || 'Unknown error');
     label   = 'Failed';
-    actions = `<button class="bc-action-btn bc-action-btn--retry" title="Retry" onclick="bcRetryTicket(${t.index})">&#x21BA;</button>`;
+    // Expanded failed card: error banner + editable body + char counter + actions
+    const retryCount = t.retry_count || 0;
+    const lastErr = t.last_error || t.error || '';
+    const bodyVal = escHtml(t.body || '');
+    const charLen = (t.body || '').length;
+    const GH_LIMIT = 65536;
+    const counterClass = charLen > GH_LIMIT ? 'bc-char-counter bc-char-counter--over' : 'bc-char-counter';
+    const retryMetaHtml = retryCount > 0
+      ? `<div class="bc-retry-meta">Retry #${retryCount} — last attempt: ${escHtml(lastErr.slice(0, 80))}</div>`
+      : '';
+
+    // Build the expanded detail section (appended after the standard card body)
+    preview = escHtml((t.error || 'Unknown error').slice(0, 200));
+    actions = `<button class="bc-action-btn bc-action-btn--skip" title="Skip" onclick="bcSkipTicket(${t.index})">&#x00D7;</button>`;
+
+    // We'll return a custom card HTML for failed state
+    const titleText = t.title ? escHtml(t.title.slice(0, 80)) : '';
+    const headHtmlFailed = titleText
+      ? `<div class="bc-card-head"><span class="bc-card-label">Failed</span><span class="bc-card-preview" style="flex:1;margin-left:6px;">${titleText}</span></div>`
+      : `<div class="bc-card-head"><span class="bc-card-label">Failed</span></div>`;
+    return `
+      <div class="bc-card bc-card--failed" id="bc-card-${t.index}">
+        <div class="bc-status-dot bc-status-dot--failed"></div>
+        <div class="bc-card-body" style="min-width:0;flex:1;">
+          ${headHtmlFailed}
+          <div class="bc-fail-detail">
+            <div class="bc-fail-banner">${escHtml((t.error || 'Unknown error'))}</div>
+            ${retryMetaHtml}
+            <textarea class="bc-fail-body-editor" id="bc-editor-${t.index}"
+              oninput="bcEditorInput(${t.index})">${bodyVal}</textarea>
+            <div class="${counterClass}" id="bc-counter-${t.index}">${charLen.toLocaleString()} / ${GH_LIMIT.toLocaleString()}</div>
+            <div class="bc-fail-actions">
+              <button class="bc-btn-retry-this" onclick="bcRetryWithBody(${t.index})">Retry this ticket</button>
+              <button class="bc-btn-skip-this" onclick="bcSkipTicket(${t.index})">Skip</button>
+            </div>
+          </div>
+        </div>
+      </div>`;
   } else if (t.state === 'skipped') {
     preview = escHtml((t.prompt || '').slice(0, 80));
     label   = 'Skipped';
@@ -4437,6 +4545,69 @@ async function bcRetryTicket(index) {
       body: JSON.stringify({ index }),
     });
   } catch (_) {}
+}
+
+function bcEditorInput(index) {
+  const editor = document.getElementById(`bc-editor-${index}`);
+  const counter = document.getElementById(`bc-counter-${index}`);
+  if (!editor || !counter) return;
+  const GH_LIMIT = 65536;
+  const len = editor.value.length;
+  counter.textContent = `${len.toLocaleString()} / ${GH_LIMIT.toLocaleString()}`;
+  if (len > GH_LIMIT) {
+    counter.className = 'bc-char-counter bc-char-counter--over';
+  } else {
+    counter.className = 'bc-char-counter';
+  }
+  // Keep in-memory body in sync so retry-all gets current value
+  if (_bcJobState && _bcJobState.tickets[index]) {
+    _bcJobState.tickets[index].body = editor.value;
+  }
+}
+
+async function bcRetryWithBody(index) {
+  if (!_bcJobId || !_bcJobState) return;
+  const editor = document.getElementById(`bc-editor-${index}`);
+  const bodyText = editor ? editor.value : (_bcJobState.tickets[index] || {}).body || '';
+
+  const btn = document.querySelector(`#bc-card-${index} .bc-btn-retry-this`);
+  if (btn) { btn.disabled = true; btn.textContent = 'Retrying...'; }
+
+  try {
+    await fetch(`/api/tickets/bulk/${_bcJobId}/retry-with-body`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ index, body: bodyText }),
+    });
+  } catch (_) {
+    if (btn) { btn.disabled = false; btn.textContent = 'Retry this ticket'; }
+  }
+}
+
+async function bcRetryAllFailed() {
+  if (!_bcJobId || !_bcJobState) return;
+  const tickets = _bcJobState.tickets || [];
+
+  // Collect current body from each failed ticket's editor (or in-memory state)
+  const bodies = {};
+  tickets.forEach(t => {
+    if (t.state !== 'failed') return;
+    const editor = document.getElementById(`bc-editor-${t.index}`);
+    bodies[String(t.index)] = editor ? editor.value : (t.body || '');
+  });
+
+  if (Object.keys(bodies).length === 0) return;
+
+  const btn = document.getElementById('bc-retry-all-btn');
+  if (btn) { btn.disabled = true; }
+
+  try {
+    await fetch(`/api/tickets/bulk/${_bcJobId}/retry-all`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ bodies }),
+    });
+  } catch (_) {}
+
+  if (btn) { btn.disabled = false; }
 }
 
 async function bcStop() {

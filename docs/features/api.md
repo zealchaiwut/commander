@@ -80,11 +80,43 @@ These endpoints are called by the Claude Code hooks in `hooks/`.
 | `GET` | `/api/sprints/running` | Check whether a sprint is currently running |
 | `DELETE` | `/api/sprints/run/{sprint_label}` | Kill a running sprint |
 | `POST` | `/api/sprints/{sprint_label}/rerun` | Reset ticket labels and rerun a sprint |
+| `GET` | `/api/sprints/{sprint_label}/live` | Live snapshot of a running sprint — counts, current ticket, active agent, last 50 log lines, and locked `issues[]` array (see below) |
+| `GET` | `/api/sprints/{sprint_label}/live/stream` | SSE stream — pushed live sprint events |
 | `GET` | `/api/sprint-status` | Get current sprint run status (per-ticket states) |
 | `POST` | `/api/sprint-status` | Update sprint run status (called by sprint manager) |
 | `GET` | `/api/sprint-summary` | Get the sprint summary for the active or last sprint |
 | `GET` | `/api/sprint-history` | List completed sprint summaries |
 | `GET` | `/api/sprint-history-content` | Get the raw Markdown content of a sprint summary |
+
+### `/api/sprints/{sprint_label}/live` response shape
+
+```json
+{
+  "time_spent_sec": 342,
+  "started_at": "2026-05-29T00:00:00+07:00",
+  "current_ticket": { "number": 307, "title": "Lock running sprint card…" },
+  "active_agent": { "name": "coder", "model": "claude-sonnet-4-6", "pid": 12345 },
+  "recent_log_lines": [
+    { "timestamp": "00:05:12", "type": "info", "message": "Starting coder…" }
+  ],
+  "issues": [
+    {
+      "number": 305,
+      "title": "Lock sprint-N label…",
+      "status": "done",
+      "agent_status": null,
+      "agent": null,
+      "elapsed_secs": 180,
+      "size": "M"
+    }
+  ]
+}
+```
+
+`issues[]` is sourced from the locked launch snapshot (not live GitHub queries), so
+tickets whose `sprint-N` label was stripped mid-run still appear. `status` is one of
+`pending`, `in-progress`, `done`, `skipped`. `agent_status` is `running`, `failed`,
+or `null`.
 
 ---
 

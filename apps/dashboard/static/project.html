@@ -1248,6 +1248,19 @@
       flex-shrink: 0; transition: color .1s;
     }
     .bc-file-chip-remove:hover { color: var(--red); }
+    .bc-file-assign {
+      font-size: 11px; border: 1px solid var(--border); border-radius: 6px;
+      background: var(--surface); color: var(--text); padding: 1px 4px;
+      cursor: pointer; flex-shrink: 0;
+    }
+    .bc-fail-img-row { margin: 6px 0 4px; display: flex; align-items: center; gap: 8px; }
+    .bc-btn-attach-img {
+      font-size: 11px; padding: 3px 10px; border-radius: 6px;
+      border: 1px dashed var(--border); background: var(--surface);
+      color: var(--text-muted); cursor: pointer; transition: border-color .15s, color .15s;
+    }
+    .bc-btn-attach-img:hover { border-color: var(--accent); color: var(--accent); }
+    .bc-file-chip--retry { background: var(--surface-alt, #f5f5f5); }
     .bc-file-error {
       font-size: 11px; color: var(--red); margin-top: 4px;
       padding: 4px 8px; background: var(--red-bg);
@@ -1710,12 +1723,12 @@
             Split prompts using <code>---</code> on its own line. All created tickets go to backlog &mdash; assign them to a sprint later via Sprint Mgmt.
           </div>
 
-          <!-- Attachments -->
+          <!-- Image Attachments -->
           <div class="bc-attach-section">
             <div class="bc-attach-header">
-              <label class="bc-settings-label">Attachments <span class="bc-label-hint">(optional &mdash; applied to every ticket in the batch)</span></label>
+              <label class="bc-settings-label">Images <span class="bc-label-hint">(optional &mdash; assign each image to all tickets or a specific one)</span></label>
               <p class="bc-label-hint bc-attach-limits">
-                Allowed: .png .pdf .html .htm and all other supported types.
+                Allowed: .png and .jpg images.
                 &nbsp;&bull;&nbsp; Max 25 MB per file, 50 MB total.
               </p>
             </div>
@@ -1724,9 +1737,9 @@
                  ondragleave="this.classList.remove('drag-over')"
                  ondrop="_bcOnDrop(event)"
                  onclick="_bcPickFiles()">
-              <span class="dt-dropzone-hint">Drop files here or click to browse</span>
+              <span class="dt-dropzone-hint">Drop images here or click to attach</span>
               <input type="file" id="bc-file-input" multiple
-                     accept=".html,.htm,.md,.txt,.csv,.json,.yaml,.yml,.png,.jpg,.jpeg,.gif,.svg,.webp,.pdf,.py,.js,.ts,.tsx,.css,.sh,.log,.drawio,.xlsx,.pptx,.docx,.zip"
+                     accept=".png,.jpg,.jpeg"
                      style="display:none" onchange="_bcOnFileInput(event)">
             </div>
             <div class="bc-file-queue" id="bc-file-queue"></div>
@@ -3989,17 +4002,14 @@ let _bcJobState     = null;      // current job snapshot {status, concurrency, t
 let _bcCounterTimer = null;
 let _bcStartTimes   = {};        // index -> start timestamp
 let _bcAvgMs        = null;      // rolling avg BA time per ticket
-let _bcFiles        = [];        // queued attachment files
+let _bcFiles            = [];    // queued image files
+let _bcFileAssignments  = [];    // parallel to _bcFiles: "all" | ticket_index (number)
+let _bcRetryFiles       = {};    // ticket_index -> File for retry image attach
 let _bcLastInput    = null;      // preserved Step 1 inputs for Recreate
 let _bcTabInited    = false;     // whether the tab has been populated once
 
 const BC_MAX_PROMPTS = 25;
-const BC_ALLOWED_EXTS = new Set([
-  '.html','.htm','.md','.txt','.csv','.json','.yaml','.yml',
-  '.png','.jpg','.jpeg','.gif','.svg','.webp','.pdf',
-  '.py','.js','.ts','.tsx','.css','.sh','.log',
-  '.drawio','.xlsx','.pptx','.docx','.zip',
-]);
+const BC_ALLOWED_EXTS = new Set(['.png', '.jpg', '.jpeg']);
 
 /** Called each time the Bulk Create tab becomes active. */
 function _bcInitTab() {
@@ -4119,6 +4129,9 @@ function _bcUpdateCounter() {
       errEl.classList.add('hidden');
     }
   }
+
+  // Refresh assignment dropdowns when ticket count changes
+  if (_bcFiles.length > 0) _bcRenderFileQueue();
 }
 
 function _bcPickFiles() {
@@ -4148,7 +4161,7 @@ function _bcAddFiles(incoming) {
     const ext = '.' + f.name.split('.').pop().toLowerCase();
     if (!BC_ALLOWED_EXTS.has(ext)) {
       if (errEl) {
-        errEl.textContent = `File '${f.name}' has a disallowed extension ('${ext}').`;
+        errEl.textContent = `File '${f.name}' is not a PNG or JPG image.`;
         errEl.classList.remove('hidden');
       }
       continue;
@@ -4169,25 +4182,43 @@ function _bcAddFiles(incoming) {
       break;
     }
     _bcFiles.push(f);
+    _bcFileAssignments.push('all');
   }
   _bcRenderFileQueue();
 }
 
 function _bcRemoveFile(idx) {
   _bcFiles.splice(idx, 1);
+  _bcFileAssignments.splice(idx, 1);
   _bcRenderFileQueue();
+}
+
+function _bcSetAssignment(idx, val) {
+  _bcFileAssignments[idx] = (val === 'all') ? 'all' : parseInt(val, 10);
 }
 
 function _bcRenderFileQueue() {
   const container = document.getElementById('bc-file-queue');
   if (!container) return;
   if (_bcFiles.length === 0) { container.innerHTML = ''; return; }
-  container.innerHTML = _bcFiles.map((f, i) =>
-    `<span class="bc-file-chip">
+
+  const text = (document.getElementById('bc-textarea') || {}).value || '';
+  const ticketCount = _bcParsePrompts(text).length;
+
+  container.innerHTML = _bcFiles.map((f, i) => {
+    const assignment = _bcFileAssignments[i] !== undefined ? _bcFileAssignments[i] : 'all';
+    const ticketOptions = Array.from({length: ticketCount}, (_, k) =>
+      `<option value="${k}" ${assignment === k ? 'selected' : ''}>→ ticket #${k + 1} only</option>`
+    ).join('');
+    return `<span class="bc-file-chip">
       <span class="bc-file-chip-name" title="${escHtml(f.name)}">${escHtml(f.name)}</span>
+      <select class="bc-file-assign" onchange="_bcSetAssignment(${i}, this.value)">
+        <option value="all" ${assignment === 'all' ? 'selected' : ''}>→ all tickets</option>
+        ${ticketOptions}
+      </select>
       <button class="bc-file-chip-remove" onclick="_bcRemoveFile(${i})" title="Remove">&times;</button>
-    </span>`
-  ).join('');
+    </span>`;
+  }).join('');
 }
 
 async function bcRunAll() {
@@ -4217,11 +4248,17 @@ async function bcRunAll() {
   if (errEl) errEl.classList.add('hidden');
 
   try {
+    const assignments = _bcFiles.map((f, i) => ({
+      filename: f.name,
+      assignment: _bcFileAssignments[i] !== undefined ? _bcFileAssignments[i] : 'all',
+    }));
+
     const formData = new FormData();
     formData.append('repo', repo);
     formData.append('prompts', JSON.stringify(prompts));
     formData.append('default_labels', JSON.stringify(uniqueLabels));
     formData.append('concurrency', String(concurrency));
+    formData.append('assignments', JSON.stringify(assignments));
     for (const f of _bcFiles) {
       formData.append('files', f);
     }
@@ -4470,6 +4507,15 @@ function _bcRenderCard(t) {
     const headHtmlFailed = titleText
       ? `<div class="bc-card-head"><span class="bc-card-label">Failed</span><span class="bc-card-preview" style="flex:1;margin-left:6px;">${titleText}</span></div>`
       : `<div class="bc-card-head"><span class="bc-card-label">Failed</span></div>`;
+    const retryImgFile = _bcRetryFiles[t.index];
+    const imgChipHtml = retryImgFile
+      ? `<span class="bc-file-chip bc-file-chip--retry">
+           <span class="bc-file-chip-name">${escHtml(retryImgFile.name)}</span>
+           <button class="bc-file-chip-remove" onclick="_bcRetryRemoveImage(${t.index})" title="Remove">&times;</button>
+         </span>`
+      : `<button class="bc-btn-attach-img" onclick="_bcRetryPickImage(${t.index})">Attach image</button>
+         <input type="file" id="bc-retry-img-input-${t.index}" accept=".png,.jpg,.jpeg"
+                style="display:none" onchange="_bcRetryFileSelected(${t.index}, event)">`;
     return `
       <div class="bc-card bc-card--failed" id="bc-card-${t.index}">
         <div class="bc-status-dot bc-status-dot--failed"></div>
@@ -4481,6 +4527,7 @@ function _bcRenderCard(t) {
             <textarea class="bc-fail-body-editor" id="bc-editor-${t.index}"
               oninput="bcEditorInput(${t.index})">${bodyVal}</textarea>
             <div class="${counterClass}" id="bc-counter-${t.index}">${charLen.toLocaleString()} / ${GH_LIMIT.toLocaleString()}</div>
+            <div class="bc-fail-img-row">${imgChipHtml}</div>
             <div class="bc-fail-actions">
               <button class="bc-btn-retry-this" onclick="bcRetryWithBody(${t.index})">Retry this ticket</button>
               <button class="bc-btn-skip-this" onclick="bcSkipTicket(${t.index})">Skip</button>
@@ -4565,6 +4612,25 @@ function bcEditorInput(index) {
   }
 }
 
+function _bcRetryPickImage(index) {
+  const inp = document.getElementById(`bc-retry-img-input-${index}`);
+  if (inp) inp.click();
+}
+
+function _bcRetryFileSelected(index, event) {
+  const files = event.target.files;
+  if (files && files.length > 0) {
+    _bcRetryFiles[index] = files[0];
+    _bcRenderStep2();
+  }
+  event.target.value = '';
+}
+
+function _bcRetryRemoveImage(index) {
+  delete _bcRetryFiles[index];
+  _bcRenderStep2();
+}
+
 async function bcRetryWithBody(index) {
   if (!_bcJobId || !_bcJobState) return;
   const editor = document.getElementById(`bc-editor-${index}`);
@@ -4573,11 +4639,24 @@ async function bcRetryWithBody(index) {
   const btn = document.querySelector(`#bc-card-${index} .bc-btn-retry-this`);
   if (btn) { btn.disabled = true; btn.textContent = 'Retrying...'; }
 
+  const retryFile = _bcRetryFiles[index];
   try {
-    await fetch(`/api/tickets/bulk/${_bcJobId}/retry-with-body`, {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ index, body: bodyText }),
-    });
+    if (retryFile) {
+      const formData = new FormData();
+      formData.append('index', String(index));
+      formData.append('body_text', bodyText);
+      formData.append('file', retryFile);
+      await fetch(`/api/tickets/bulk/${_bcJobId}/retry-with-image`, {
+        method: 'POST',
+        body: formData,
+      });
+      delete _bcRetryFiles[index];
+    } else {
+      await fetch(`/api/tickets/bulk/${_bcJobId}/retry-with-body`, {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ index, body: bodyText }),
+      });
+    }
   } catch (_) {
     if (btn) { btn.disabled = false; btn.textContent = 'Retry this ticket'; }
   }

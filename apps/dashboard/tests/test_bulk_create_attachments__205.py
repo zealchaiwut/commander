@@ -229,8 +229,8 @@ class TestBulkAttachValidation:
             )
         assert res.status_code == 202
 
-    def test_allowed_pdf_accepted(self, client):
-        """AC4: PDF file is accepted."""
+    def test_pdf_rejected_images_only(self, client):
+        """AC: Bulk create now accepts images only — PDF returns 422 (issue #260)."""
         pdf_bytes = b"%PDF-1.4 " + b"\x00" * 50
         with patch("asyncio.create_task"):
             res = client.post(
@@ -242,10 +242,11 @@ class TestBulkAttachValidation:
                 },
                 files=[("files", ("spec.pdf", pdf_bytes, "application/pdf"))],
             )
-        assert res.status_code == 202
+        assert res.status_code == 422
+        assert "png" in res.text.lower() or "jpg" in res.text.lower() or "disallowed" in res.text.lower()
 
-    def test_allowed_html_accepted(self, client):
-        """AC4: HTML file is accepted."""
+    def test_html_rejected_images_only(self, client):
+        """AC: Bulk create now accepts images only — HTML returns 422 (issue #260)."""
         html_bytes = b"<html><body>Test</body></html>"
         with patch("asyncio.create_task"):
             res = client.post(
@@ -257,7 +258,8 @@ class TestBulkAttachValidation:
                 },
                 files=[("files", ("page.html", html_bytes, "text/html"))],
             )
-        assert res.status_code == 202
+        assert res.status_code == 422
+        assert "png" in res.text.lower() or "jpg" in res.text.lower() or "disallowed" in res.text.lower()
 
     def test_oversized_file_returns_422(self, client):
         """AC4: File exceeding 25 MB returns 422."""
@@ -312,7 +314,7 @@ class TestBulkAttachValidation:
         """AC3: Job records original filenames for all uploaded attachments."""
         import server
         png_bytes = b'\x89PNG\r\n\x1a\n' + b'\x00' * 100
-        pdf_bytes = b"%PDF-1.4 " + b"\x00" * 50
+        jpg_bytes = b'\xff\xd8\xff' + b'\x00' * 50
         with patch("asyncio.create_task"):
             res = client.post(
                 "/api/tickets/bulk",
@@ -323,14 +325,14 @@ class TestBulkAttachValidation:
                 },
                 files=[
                     ("files", ("a.png", png_bytes, "image/png")),
-                    ("files", ("b.pdf", pdf_bytes, "application/pdf")),
+                    ("files", ("b.jpg", jpg_bytes, "image/jpeg")),
                 ],
             )
         assert res.status_code == 202
         job_id = res.json()["job_id"]
         job = server._bulk_jobs.get(job_id)
         assert "a.png" in job.get("attachment_filenames", [])
-        assert "b.pdf" in job.get("attachment_filenames", [])
+        assert "b.jpg" in job.get("attachment_filenames", [])
 
     def test_no_files_job_has_no_attachments_flag(self, client):
         """AC2: Job without files has has_attachments=False."""

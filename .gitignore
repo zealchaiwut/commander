@@ -31,7 +31,9 @@ sprints/
 .commander/bulk-jobs/
 .commander/docs/
 
+# dashboard temp
 apps/dashboard/projects.json
+apps/dashboard/tests/
 
 # Backup config — stores gist ID, gitignored by design
 .commander/backup_config.json

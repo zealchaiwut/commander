@@ -940,6 +940,38 @@
       margin-right: 6px; vertical-align: middle;
     }
     @keyframes nt-spin { to { transform: rotate(360deg); } }
+
+    /* ── Board move overlay (issue #276) ── */
+    #pane-sprint-mgmt { position: relative; }
+    .smgmt-move-overlay {
+      display: none;
+      position: absolute;
+      inset: 0;
+      background: rgba(0,0,0,.35);
+      z-index: 500;
+      align-items: center;
+      justify-content: center;
+      border-radius: 0;
+    }
+    .smgmt-move-overlay.active { display: flex; }
+    .smgmt-move-overlay-pill {
+      display: flex; align-items: center; gap: 10px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 10px 20px;
+      font-size: 13px; font-weight: 600;
+      color: var(--text);
+      box-shadow: 0 4px 16px rgba(0,0,0,.18);
+      pointer-events: none;
+    }
+    .smgmt-move-spinner {
+      display: inline-block; width: 14px; height: 14px;
+      border: 2px solid var(--border); border-top-color: var(--blue);
+      border-radius: 50%; animation: smgmt-spin .7s linear infinite;
+      flex-shrink: 0;
+    }
+    @keyframes smgmt-spin { to { transform: rotate(360deg); } }
   </style>
 </head>
 <body>
@@ -1039,6 +1071,14 @@
 
       <!-- Sprint Mgmt tab -->
       <div class="tab-pane active" id="pane-sprint-mgmt" role="tabpanel" aria-labelledby="stab-sprint-mgmt">
+
+        <!-- Board move overlay (issue #276) -->
+        <div class="smgmt-move-overlay" id="smgmt-move-overlay" aria-live="assertive" aria-label="Moving ticket, please wait">
+          <div class="smgmt-move-overlay-pill">
+            <span class="smgmt-move-spinner"></span>
+            Moving…
+          </div>
+        </div>
 
         <!-- Toolbar -->
         <div class="smgmt-toolbar" id="smgmt-toolbar">
@@ -2330,6 +2370,8 @@ async function _smgmtDropOnSprint(event, targetLabel) {
   document.querySelectorAll('.smgmt-sprint-card').forEach(el => el.classList.remove('drag-over-sprint'));
   document.getElementById('smgmt-backlog-pane')?.classList.remove('drag-over-backlog');
 
+  // Block concurrent moves (issue #276)
+  if (_smgmtMoveLock) return;
   if (!_smgmtDragTicket) return;
   const dragInfo = _smgmtDragTicket;
   _smgmtDragTicket = null;
@@ -2354,6 +2396,7 @@ async function _smgmtDropOnSprint(event, targetLabel) {
     if (_smgmtData) _smgmtRender(_smgmtData);
 
     const changes = nums.map(n => ({ issue_num: n, sprint_label: targetLabel || 'backlog' }));
+    _smgmtBoardLock();
     try {
       const res = await fetch('/api/sprints/batch-labels', {
         method: 'POST',
@@ -2365,6 +2408,8 @@ async function _smgmtDropOnSprint(event, targetLabel) {
     } catch (e) {
       alert(`Failed to move tickets: ${e.message}`);
       await loadSprintMgmt();
+    } finally {
+      _smgmtBoardUnlock();
     }
   } else {
     // Single-ticket drop
@@ -2382,6 +2427,7 @@ async function _smgmtDropOnSprint(event, targetLabel) {
     // Clear selection after any drag completes
     _smgmtClearSelection();
 
+    _smgmtBoardLock();
     try {
       const res = await fetch(`/api/issues/${number}/sprint-label`, {
         method: 'POST',
@@ -2398,6 +2444,8 @@ async function _smgmtDropOnSprint(event, targetLabel) {
         _smgmtRender(_smgmtData);
       }
       alert(`Failed to move ticket #${number}: ${e.message}`);
+    } finally {
+      _smgmtBoardUnlock();
     }
   }
 }
@@ -2536,6 +2584,8 @@ function _smgmtMoveToClose() {
 }
 
 async function _smgmtMoveToConfirm(issueNum, targetLabel) {
+  // Block concurrent moves (issue #276)
+  if (_smgmtMoveLock) return;
   const fromSprint = _smgmtMoveFromSprint;  // capture before close resets it
   _smgmtMoveToClose();
 
@@ -2550,6 +2600,7 @@ async function _smgmtMoveToConfirm(issueNum, targetLabel) {
   }
 
   const repo = _smgmtRepo();
+  _smgmtBoardLock();
   try {
     const res = await fetch(`/api/issues/${issueNum}/sprint-label`, {
       method: 'POST',
@@ -2566,6 +2617,8 @@ async function _smgmtMoveToConfirm(issueNum, targetLabel) {
       _smgmtRender(_smgmtData);
     }
     _smgmtShowToast(`Failed to move #${issueNum}: ${e.message}`);
+  } finally {
+    _smgmtBoardUnlock();
   }
 }
 
@@ -2598,6 +2651,8 @@ async function _smgmtDropOnBacklog(event) {
   event.preventDefault();
   document.getElementById('smgmt-backlog-pane')?.classList.remove('drag-over-backlog');
 
+  // Block concurrent moves (issue #276)
+  if (_smgmtMoveLock) return;
   if (!_smgmtDragTicket) return;
   const dragInfo = _smgmtDragTicket;
   _smgmtDragTicket = null;
@@ -2620,6 +2675,7 @@ async function _smgmtDropOnBacklog(event) {
     if (_smgmtData) _smgmtRender(_smgmtData);
 
     const changes = nums.map(n => ({ issue_num: n, sprint_label: 'backlog' }));
+    _smgmtBoardLock();
     try {
       const res = await fetch('/api/sprints/batch-labels', {
         method: 'POST',
@@ -2631,6 +2687,8 @@ async function _smgmtDropOnBacklog(event) {
     } catch (e) {
       alert(`Failed to move tickets to backlog: ${e.message}`);
       await loadSprintMgmt();
+    } finally {
+      _smgmtBoardUnlock();
     }
   } else {
     const { number, fromSprint } = dragInfo;
@@ -2643,6 +2701,7 @@ async function _smgmtDropOnBacklog(event) {
     }
     _smgmtClearSelection();
 
+    _smgmtBoardLock();
     try {
       const res = await fetch(`/api/issues/${number}/sprint-label`, {
         method: 'POST',
@@ -2659,6 +2718,8 @@ async function _smgmtDropOnBacklog(event) {
         _smgmtRender(_smgmtData);
       }
       alert(`Failed to move ticket #${number} to backlog: ${e.message}`);
+    } finally {
+      _smgmtBoardUnlock();
     }
   }
 }
@@ -2672,6 +2733,27 @@ document.addEventListener('keydown', function(e) {
     }
   }
 });
+
+// ── Board move lock (issue #276) ──────────────────────────────────────────
+let _smgmtMoveLock = false;
+
+/** Show the full-board overlay and suppress auto-refresh for the duration of a move. */
+function _smgmtBoardLock() {
+  _smgmtMoveLock = true;
+  // Pause the auto-refresh ticker without changing the user's chosen interval
+  _smgmtArStopTicker();
+  const overlay = document.getElementById('smgmt-move-overlay');
+  if (overlay) overlay.classList.add('active');
+}
+
+/** Hide the overlay and resume auto-refresh at the previously chosen interval. */
+function _smgmtBoardUnlock() {
+  _smgmtMoveLock = false;
+  const overlay = document.getElementById('smgmt-move-overlay');
+  if (overlay) overlay.classList.remove('active');
+  // Resume auto-refresh if an interval is selected
+  if (_arInterval > 0) _smgmtArStartTicker();
+}
 
 // ── Auto-refresh pill (issue #275) ────────────────────────────────────────
 const _AR_SESSION_KEY = 'smgmt-ar-interval';
@@ -2704,6 +2786,8 @@ async function _smgmtArDoRefresh() {
 
 /** Manual refresh triggered by clicking the pill label/icon. */
 async function _smgmtArManualRefresh() {
+  // Suppressed while a move is in flight (issue #276)
+  if (_smgmtMoveLock) return;
   if (_arTickerId !== null) {
     // Reset countdown so next auto-tick is a full interval away
     _arCountdown = _arInterval;
@@ -2714,6 +2798,8 @@ async function _smgmtArManualRefresh() {
 
 /** Called every second by setInterval. */
 function _smgmtArTick() {
+  // Suppressed while a move is in flight (issue #276)
+  if (_smgmtMoveLock) return;
   if (_arCountdown <= 1) {
     _arCountdown = _arInterval;
     _smgmtArUpdateLabel();

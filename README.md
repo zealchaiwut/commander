@@ -234,6 +234,58 @@ after verifying the contents.
 
 ---
 
+## Health Check
+
+`GET /api/health` returns a rich system health snapshot — bookmarkable and safe to
+ping from UptimeRobot. No authentication required. Response is cached for 10 seconds.
+
+### Response shape
+
+```json
+{
+  "status": "ok",
+  "checked_at": "2026-05-28T12:00:00Z",
+  "checks": {
+    "dashboard":        { "status": "ok", "uptime_sec": 12345 },
+    "database":         { "status": "ok" },
+    "github_auth":      { "status": "ok", "user": "zealchaiwut" },
+    "claude_code_auth": { "status": "ok" },
+    "disk":             { "status": "ok", "free_gb": 45.2, "total_gb": 500.0 },
+    "stuck_sprints":    { "status": "ok", "count": 0, "labels": [] }
+  }
+}
+```
+
+### Overall status values
+
+| Value | Meaning |
+|---|---|
+| `ok` | All checks are `ok` |
+| `degraded` | One or more checks are `warn`, `critical`, `expired`, or `missing`; nothing is critically down |
+| `down` | `database` is `down`/`timeout`, or `github_auth` is `expired`/`missing`/`timeout` |
+
+### HTTP status codes
+
+| Overall status | HTTP code |
+|---|---|
+| `ok` or `degraded` | `200` |
+| `down` | `503` |
+
+### Individual check statuses
+
+| Check | Possible statuses |
+|---|---|
+| `dashboard` | `ok` (always) |
+| `database` | `ok`, `down` (with `error` field), `timeout` |
+| `github_auth` | `ok` (with `user` field), `expired`, `missing`, `timeout` |
+| `claude_code_auth` | `ok`, `expired`, `missing`, `timeout` |
+| `disk` | `ok` (≥10 GB free), `warn` (<10 GB free), `critical` (<2 GB free), `timeout` |
+| `stuck_sprints` | `ok`, `warn` (with `count` and `labels` fields) |
+
+`github_auth` result is cached for 60 seconds to avoid hammering the `gh` CLI.
+
+---
+
 ## Going Remote?
 
 Traveling with iPad-only access? See [docs/TRAVEL_PLAYBOOK.md](docs/TRAVEL_PLAYBOOK.md) for:

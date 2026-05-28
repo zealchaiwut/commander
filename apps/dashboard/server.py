@@ -1,6 +1,7 @@
 import asyncio
 import hashlib
 import json
+import logging
 import os
 import re
 import shutil
@@ -346,6 +347,8 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
+logger = logging.getLogger(__name__)
+
 
 # ── API no-cache middleware (issue #249) ──────────────────────────────────────
 # Ensure all /api/* responses carry Cache-Control: no-cache so browsers and
@@ -646,12 +649,39 @@ async def diagnostics_page():
     return _serve_html(STATIC_DIR / "diagnostics.html")
 
 
-@app.get("/projects/{path:path}")
-async def spa_project_route(path: str):
-    if path.endswith("/plan-sprint"):
-        new_path = path[: -len("plan-sprint")] + "sprint-mgmt"
-        return RedirectResponse(url=f"/projects/{new_path}", status_code=308)
+# ── Legacy UI route (/legacy/<slug>/<tab>) ────────────────────────────────────
+# Deprecated legacy route: serves the old index.html UI.
+# Emits a warning on every hit so operators can track usage before removal.
+
+@app.get("/legacy/{path:path}")
+async def legacy_project_route(path: str):
+    """Serve the legacy index.html UI at /legacy/. DEPRECATED — use /project/ instead."""
+    logger.warning("Deprecated /legacy/ route hit: /%s", path)
     return _serve_html(STATIC_DIR / "index.html")
+
+
+# ── /projects/ redirect — 301 to current /project/ UI ─────────────────────────
+# Old /projects/<slug>/<tab> bookmarks are redirected to /project/<slug>/<tab>.
+# Paths that cannot be cleanly mapped (no slug/tab) go to the dashboard home.
+
+@app.get("/projects/{path:path}")
+async def projects_redirect(path: str):
+    """Redirect /projects/<slug>/<tab> → /project/<slug>/<tab> (301).
+
+    Any path that does not contain a recognisable slug/tab segment is redirected
+    to the dashboard home ('/') instead of serving the legacy UI.
+    """
+    # Strip leading/trailing slashes and split into parts
+    parts = [p for p in path.strip("/").split("/") if p]
+    if len(parts) >= 2:
+        slug, tab = parts[0], parts[1]
+        return RedirectResponse(url=f"/project/{slug}/{tab}", status_code=301)
+    elif len(parts) == 1:
+        slug = parts[0]
+        return RedirectResponse(url=f"/project/{slug}/sprint-mgmt", status_code=301)
+    else:
+        # No recognisable slug — send to dashboard home
+        return RedirectResponse(url="/", status_code=301)
 
 
 # ── Slug-based project routes (/project/<slug>/...) ───────────────────────────

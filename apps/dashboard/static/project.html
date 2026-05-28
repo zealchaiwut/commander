@@ -1314,7 +1314,7 @@ function openBulkCreate() {
   // Redirect to index.html sprint-mgmt for now
   if (_slug) {
     const repo = _findFullRepo(_slug);
-    if (repo) window.location.href = '/projects/' + encodeURIComponent(repo) + '/sprint-mgmt';
+    if (repo) window.location.href = '/project/' + encodeURIComponent(repo) + '/sprint-mgmt';
     else window.location.href = '/';
   }
 }
@@ -2380,7 +2380,7 @@ function _setupModals() {
       }
       // Draft generated — navigate to the project on main index to finish posting
       _ntClose();
-      window.location.href = '/projects/' + encodeURIComponent(repo) + '/sprint-mgmt';
+      window.location.href = '/project/' + encodeURIComponent(repo) + '/sprint-mgmt';
     } catch (err) {
       document.getElementById('nt-error').textContent = "Couldn't create ticket — " + err.message;
       document.getElementById('nt-error').classList.remove('hidden');

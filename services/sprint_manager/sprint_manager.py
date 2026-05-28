@@ -3600,10 +3600,14 @@ def run_sprint(
         print(f"  sprints-dir:  {cfg.sprints_dir}")
         print(f"  api-url:      {cfg.api_url}")
 
-    # Determine the sprint branch name and effective merge target
+    # Determine the sprint branch name and effective merge target.
+    # When target_branch is not explicitly passed, default to sprint/<label>
+    # so per-ticket feature branches merge into the sprint branch, not develop.
+    # Passing --target-branch develop explicitly is still supported as a
+    # deliberate override (AC-5 of issue #269).
     sprint_branch = f"sprint/{label}"
     if target_branch is None:
-        target_branch = "develop"
+        target_branch = sprint_branch
 
     # Load or build state
     if (resume or retry_failed) and state_path.exists():
@@ -3887,7 +3891,7 @@ def run_sprint(
         # -- Dispatch tester --
         _tester_t0 = time.monotonic()
         tester_rc, hang_category = _dispatch_tester(
-            num, alert_modes, repo_name=eff_repo, cfg=cfg,
+            num, alert_modes, sprint_branch=target_branch, repo_name=eff_repo, cfg=cfg,
             chosen_port=chosen_port, rate_limit_events=state.rate_limit_events,
             on_running=_on_tester_running,
         )

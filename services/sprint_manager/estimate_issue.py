@@ -136,7 +136,7 @@ Output ONLY the JSON object. No other text."""
             timeout=180,
         )
     except subprocess.TimeoutExpired:
-        print("Error: estimator agent timed out after 180s", file=sys.stderr)
+        structured_log.error("estimator_timeout", "estimator agent timed out after 180s", issue_num=issue_num, timeout_secs=180)
         return None
     except FileNotFoundError:
         print("Error: claude CLI not found in PATH", file=sys.stderr)
@@ -150,8 +150,7 @@ Output ONLY the JSON object. No other text."""
 
     parsed = extract_json(result.stdout)
     if not parsed:
-        print("Error: could not parse JSON from agent output:", file=sys.stderr)
-        print(result.stdout[:800], file=sys.stderr)
+        structured_log.error("estimator_parse_error", "could not parse JSON from agent output", issue_num=issue_num, output_preview=result.stdout[:200])
         return None
 
     parsed["issue_number"] = issue_num
@@ -237,7 +236,7 @@ def apply_label(issue_num: int, repo: str, size: str) -> None:
     """Apply size-S/M/L/XL label to the issue, creating it if needed."""
     valid = {"S", "M", "L", "XL"}
     if size not in valid:
-        print(f"Warning: unknown size {size!r}, skipping label", file=sys.stderr)
+        structured_log.warn("estimate_invalid_size", f"unknown size {size!r}, skipping label", issue_num=issue_num, size=size)
         return
 
     size_descriptions = {"S": "1–5 min", "M": "~15 min", "L": "~30 min", "XL": ">30 min"}

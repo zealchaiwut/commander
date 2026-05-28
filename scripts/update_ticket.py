@@ -24,8 +24,11 @@ import time
 from pathlib import Path
 
 _DASHBOARD_DIR = Path(__file__).parent.parent / "apps" / "dashboard"
+_REPO_ROOT = Path(__file__).parent.parent
+sys.path.insert(0, str(_REPO_ROOT))
 sys.path.insert(0, str(_DASHBOARD_DIR))
 import github_client
+from services.logging import log as structured_log
 
 # Sprint labels (sprint-N) are protected: they must never be removed by a
 # status transition. This guard matches any "sprint-<digits>" label name.
@@ -162,7 +165,7 @@ def _fetch_current_labels(issue: int, repo: str) -> set[str]:
         return set()
 
 
-def _run_with_retry(cmd: list[str], label: str, operation: str) -> tuple[bool, str]:
+def _run_with_retry(cmd: list[str], label: str, operation: str, issue_num: int = 0) -> tuple[bool, str]:
     """Run a gh label command with up to 3 retries and backoff.
 
     Returns (success, last_stderr).
@@ -175,10 +178,15 @@ def _run_with_retry(cmd: list[str], label: str, operation: str) -> tuple[bool, s
         last_stderr = result.stderr.strip()
         if attempt < len(_BACKOFFS):
             wait = _BACKOFFS[attempt]
-            print(
-                f"Warning: {operation} label \"{label}\" attempt {attempt + 1} failed "
-                f"— retrying in {wait}s…",
-                file=sys.stderr,
+            structured_log.warn(
+                "ticket_update_retry",
+                f"{operation} label \"{label}\" attempt {attempt + 1} failed — retrying in {wait}s",
+                issue_num=issue_num,
+                label=label,
+                operation=operation,
+                attempt=attempt + 1,
+                retry_delay_secs=wait,
+                subprocess_stderr=last_stderr,
             )
             time.sleep(wait)
     return False, last_stderr
@@ -186,6 +194,10 @@ def _run_with_retry(cmd: list[str], label: str, operation: str) -> tuple[bool, s
 
 def main():
     _load_env()
+
+    run_id = os.environ.get("COMMANDER_RUN_ID", "")
+    if run_id:
+        structured_log.set_context(run_id=run_id, source="update_ticket")
 
     parser = argparse.ArgumentParser(description="Update issue status")
     parser.add_argument("--issue",  type=int, required=True)
@@ -220,7 +232,7 @@ def main():
         op = f'add "{lbl}"'
         attempted_ops.append(op)
         cmd = ["gh", "issue", "edit", str(args.issue), "--repo", repo, "--add-label", lbl]
-        success, last_stderr = _run_with_retry(cmd, lbl, "add")
+        success, last_stderr = _run_with_retry(cmd, lbl, "add", issue_num=args.issue)
         if success:
             print(f'applied label "{lbl}"')
         else:
@@ -238,7 +250,7 @@ def main():
             continue
         attempted_ops.append(op)
         cmd = ["gh", "issue", "edit", str(args.issue), "--repo", repo, "--remove-label", lbl]
-        success, last_stderr = _run_with_retry(cmd, lbl, "remove")
+        success, last_stderr = _run_with_retry(cmd, lbl, "remove", issue_num=args.issue)
         if success:
             print(f'removed label "{lbl}"')
         else:

@@ -1130,6 +1130,270 @@
       border-radius: 50%;
       border: 2px solid var(--border);
     }
+
+    /* Generic utility used by Bulk Create */
+    .hidden { display: none !important; }
+    .btn-primary:disabled { opacity: .45; cursor: not-allowed; }
+
+    /* ── Bulk Create tab (issue #257) ── */
+
+    /* Step rail */
+    .bc-step-rail {
+      display: flex; align-items: center; gap: 10px;
+      padding: 20px 28px 0;
+      font-size: 12px; font-family: var(--mono);
+    }
+    .bc-step-chip {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 5px 12px; border-radius: 999px;
+      background: var(--surface-2); color: var(--text-muted);
+      transition: background .15s, color .15s;
+    }
+    .bc-step-chip.active { background: var(--text); color: var(--surface); }
+    .bc-step-n {
+      width: 16px; height: 16px; border-radius: 50%;
+      background: rgba(0,0,0,.10);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 10px; flex-shrink: 0;
+    }
+    .bc-step-chip.active .bc-step-n { background: rgba(255,255,255,.22); }
+    .bc-step-arrow { color: var(--text-sub); font-size: 13px; }
+
+    /* Settings bar */
+    .bc-settings-bar {
+      display: flex; gap: 12px;
+      padding: 18px 28px 12px;
+      border-bottom: 1px solid var(--border);
+      flex-wrap: wrap;
+    }
+    .bc-settings-field { display: flex; flex-direction: column; gap: 5px; }
+    .bc-settings-field--labels { flex: 1; min-width: 200px; }
+    .bc-settings-label {
+      font-size: 11px; font-weight: 600; color: var(--text-muted);
+      letter-spacing: .04em; text-transform: uppercase;
+    }
+    .bc-label-hint { font-size: 11px; color: var(--text-muted); }
+    .bc-select, .bc-text-input {
+      padding: 7px 10px; border: 1px solid var(--border);
+      border-radius: 6px; background: var(--surface-2); color: var(--text);
+      font-size: 13px; font-family: inherit;
+      min-width: 180px;
+    }
+    .bc-select:focus, .bc-text-input:focus { outline: none; border-color: var(--blue); }
+
+    /* Counter */
+    .bc-counter-row { padding: 8px 28px 4px; }
+    .bc-counter { font-size: 11px; color: var(--text-muted); font-weight: 500; }
+
+    /* Textarea */
+    .bc-textarea {
+      display: block; width: 100%; box-sizing: border-box;
+      min-height: 260px; resize: vertical;
+      font-family: var(--mono); font-size: 12px;
+      border: none;
+      border-top: 1px solid var(--border);
+      border-bottom: 1px solid var(--border);
+      padding: 14px 28px;
+      background: var(--surface); color: var(--text);
+      outline: none;
+    }
+    .bc-textarea:focus { border-color: var(--blue); }
+
+    /* Info note */
+    .bc-info-note {
+      padding: 8px 28px;
+      font-size: 11px; color: var(--text-muted); line-height: 1.5;
+    }
+    .bc-info-note code {
+      font-family: var(--mono); background: var(--surface-2);
+      padding: 1px 5px; border-radius: 3px; font-size: 11px;
+    }
+
+    /* Attachments */
+    .bc-attach-section { padding: 10px 28px 6px; border-top: 1px solid var(--border); }
+    .bc-attach-header { margin-bottom: 6px; }
+    .bc-attach-limits { margin: 2px 0 6px; }
+    .bc-dropzone { margin-bottom: 6px; }
+    .dt-dropzone {
+      border: 2px dashed var(--border); border-radius: 8px;
+      padding: 16px; text-align: center;
+      color: var(--text-sub); font-size: 13px;
+      transition: border-color .15s, background .15s, color .15s;
+      cursor: pointer;
+    }
+    .dt-dropzone.drag-over,
+    .dt-dropzone:hover { border-color: var(--blue); color: var(--blue); background: var(--blue-bg); }
+    .dt-dropzone-hint { font-size: 12px; }
+    .bc-file-queue { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+    .bc-file-chip {
+      display: inline-flex; align-items: center; gap: 5px;
+      padding: 2px 8px 2px 10px; border-radius: 12px;
+      background: var(--surface-2); border: 1px solid var(--border);
+      font-size: 11px; color: var(--text); max-width: 200px;
+    }
+    .bc-file-chip-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .bc-file-chip-remove {
+      background: none; border: none; cursor: pointer;
+      color: var(--text-muted); font-size: 13px; padding: 0; line-height: 1;
+      flex-shrink: 0; transition: color .1s;
+    }
+    .bc-file-chip-remove:hover { color: var(--red); }
+    .bc-file-error {
+      font-size: 11px; color: var(--red); margin-top: 4px;
+      padding: 4px 8px; background: var(--red-bg);
+      border: 1px solid rgba(220,38,38,.3); border-radius: 4px;
+    }
+
+    /* Error banner */
+    .bc-error {
+      margin: 8px 28px;
+      background: var(--red-bg); color: var(--red);
+      font-size: 12px; padding: 8px 12px; border-radius: 6px;
+    }
+
+    /* Step actions footer */
+    .bc-step-actions {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 14px 28px;
+      border-top: 1px solid var(--border);
+      gap: 12px; flex-wrap: wrap;
+    }
+    .bc-step-actions-left { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .bc-step-actions-right { display: flex; align-items: center; gap: 8px; }
+    .bc-concurrency-label { font-size: 12px; color: var(--text); white-space: nowrap; }
+    .bc-concurrency-select {
+      padding: 4px 8px; border: 1px solid var(--border); border-radius: 5px;
+      background: var(--surface-2); color: var(--text); font-size: 12px; cursor: pointer;
+    }
+    .bc-hint { font-size: 11px; color: var(--text-muted); }
+    .bc-stop-btn {
+      padding: 6px 14px; border: 1px solid var(--red); border-radius: 6px;
+      background: transparent; color: var(--red); font-size: 12px; font-weight: 600;
+      display: inline-flex; align-items: center; gap: 5px; cursor: pointer;
+      transition: background .15s;
+    }
+    .bc-stop-btn:hover { background: var(--red-bg); }
+    .bc-stop-btn:disabled { opacity: .45; cursor: not-allowed; }
+
+    /* Review step: parallel banner */
+    .bc-parallel-banner {
+      padding: 10px 28px;
+      font-size: 12px; color: var(--text-muted);
+      background: var(--surface-2);
+      border-bottom: 1px solid var(--border);
+    }
+    .bc-concurrency-pill {
+      display: inline-block;
+      margin-left: 10px; padding: 1px 8px; border-radius: 10px;
+      background: var(--border); color: var(--text-muted); font-size: 11px;
+      font-family: var(--mono);
+    }
+
+    /* Summary strip */
+    .bc-summary-strip {
+      display: flex; align-items: center; gap: 16px;
+      padding: 12px 28px;
+      border-bottom: 1px solid var(--border);
+      font-size: 12px; flex-wrap: wrap;
+    }
+    .bc-metric { display: flex; align-items: center; gap: 5px; }
+    .bc-metric-count { font-size: 15px; font-weight: 700; font-family: var(--mono); }
+    .bc-metric--created .bc-metric-count { color: var(--green); }
+    .bc-metric--drafting .bc-metric-count { color: var(--blue); }
+    .bc-metric--pending .bc-metric-count { color: var(--text-sub); }
+    .bc-progress-wrap {
+      flex: 1; min-width: 80px; height: 5px;
+      background: var(--border); border-radius: 999px; overflow: hidden;
+    }
+    .bc-progress-bar { height: 100%; background: var(--green); border-radius: 999px; transition: width .4s; }
+    .bc-eta { font-size: 11px; color: var(--text-muted); font-family: var(--mono); white-space: nowrap; }
+
+    /* Ticket list (review step) */
+    .bc-ticket-list {
+      display: flex; flex-direction: column; gap: 8px;
+      padding: 16px 28px;
+      max-height: 420px; overflow-y: auto;
+      scrollbar-width: thin; scrollbar-color: var(--border) transparent;
+    }
+    .bc-ticket-list::-webkit-scrollbar { width: 4px; }
+    .bc-ticket-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+    /* Ticket card */
+    .bc-card {
+      display: flex; align-items: flex-start; gap: 10px;
+      padding: 10px 14px; border-radius: 8px;
+      border: 1px solid var(--border); background: var(--surface);
+      transition: border-color .15s;
+    }
+    .bc-card--created { border-color: var(--green); }
+    .bc-card--failed  { border-color: var(--red); }
+    .bc-card--drafting { border-color: var(--blue); }
+
+    /* Status dot */
+    .bc-status-dot {
+      width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; margin-top: 3px;
+      border: 2px solid var(--border); background: transparent;
+    }
+    .bc-status-dot--drafting {
+      border-color: var(--blue); border-top-color: transparent;
+      animation: bc-spin .7s linear infinite;
+    }
+    .bc-status-dot--created {
+      border-color: var(--green); background: var(--green); position: relative;
+    }
+    .bc-status-dot--created::after {
+      content: ''; position: absolute; left: 2px; top: 1px;
+      width: 5px; height: 3px;
+      border-left: 1.5px solid #fff; border-bottom: 1.5px solid #fff;
+      transform: rotate(-45deg);
+    }
+    .bc-status-dot--failed {
+      border-color: var(--red); background: var(--red);
+      display: flex; align-items: center; justify-content: center;
+    }
+    .bc-status-dot--failed::after {
+      content: '!'; color: #fff; font-size: 7px; font-weight: 700;
+    }
+    .bc-status-dot--skipped {
+      border-color: var(--text-muted); background: var(--text-muted);
+      display: flex; align-items: center; justify-content: center;
+    }
+    .bc-status-dot--skipped::after {
+      content: '−'; color: #fff; font-size: 9px; font-weight: 700;
+    }
+    @keyframes bc-spin { to { transform: rotate(360deg); } }
+
+    /* Card body */
+    .bc-card-body { flex: 1; min-width: 0; }
+    .bc-card-head { display: flex; align-items: center; gap: 8px; margin-bottom: 3px; }
+    .bc-issue-badge {
+      font-size: 11px; font-weight: 700; color: var(--green);
+      text-decoration: none; flex-shrink: 0;
+    }
+    .bc-issue-badge:hover { text-decoration: underline; }
+    .bc-card-label { font-size: 10px; color: var(--text-muted); }
+    .bc-card-preview {
+      font-size: 11px; color: var(--text);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;
+    }
+    .bc-card-preview--error { color: var(--red); }
+    .bc-card-tags { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 4px; }
+    .bc-attach-warn { font-size: 10px; color: var(--amber); margin-top: 3px; }
+    .bc-tag {
+      font-size: 10px; padding: 1px 6px; border-radius: 8px;
+      background: var(--surface-2); border: 1px solid var(--border); color: var(--text-muted);
+    }
+
+    /* Card actions */
+    .bc-card-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+    .bc-action-btn {
+      background: none; border: none; cursor: pointer;
+      color: var(--text-muted); font-size: 14px; padding: 2px 4px; border-radius: 3px;
+      transition: color .12s, background .12s;
+    }
+    .bc-action-btn:hover { color: var(--text); background: var(--surface-2); }
+    .bc-action-btn--retry { color: var(--blue); }
+    .bc-action-btn--retry:hover { background: var(--blue-bg); }
   </style>
 </head>
 <body>
@@ -1214,6 +1478,10 @@
         <button class="stab" role="tab" id="stab-logs"
                 aria-selected="false" onclick="switchTab('logs')">
           <i class="ti ti-terminal-2"></i>Logs
+        </button>
+        <button class="stab" role="tab" id="stab-bulk-create"
+                aria-selected="false" onclick="switchTab('bulk-create')">
+          <i class="ti ti-stack-2"></i>Bulk Create
         </button>
         <button class="stab disabled" role="tab" id="stab-sprint-history"
                 aria-selected="false" aria-disabled="true"
@@ -1339,6 +1607,112 @@
         </div>
       </div>
 
+      <!-- Bulk Create tab -->
+      <div class="tab-pane" id="pane-bulk-create" role="tabpanel" aria-labelledby="stab-bulk-create">
+
+        <!-- Step rail -->
+        <div class="bc-step-rail">
+          <span class="bc-step-chip" id="bc-chip-1" data-step="1">
+            <span class="bc-step-n">1</span> Input
+          </span>
+          <span class="bc-step-arrow"><i class="ti ti-arrow-right"></i></span>
+          <span class="bc-step-chip" id="bc-chip-2" data-step="2">
+            <span class="bc-step-n">2</span> Review &amp; create
+          </span>
+        </div>
+
+        <!-- Step 1: Input -->
+        <div id="bc-step1">
+          <div class="bc-settings-bar">
+            <div class="bc-settings-field">
+              <label class="bc-settings-label" for="bc-repo">Repo</label>
+              <select class="bc-select" id="bc-repo" onchange="bcRepoChanged()"></select>
+            </div>
+            <div class="bc-settings-field bc-settings-field--labels">
+              <label class="bc-settings-label" for="bc-default-labels">Default labels</label>
+              <input class="bc-text-input" id="bc-default-labels" type="text"
+                     placeholder="enhancement, frontend" autocomplete="off">
+            </div>
+          </div>
+
+          <div class="bc-counter-row">
+            <span class="bc-counter" id="bc-counter">0 tickets detected &middot; 0 chars</span>
+          </div>
+
+          <textarea class="bc-textarea" id="bc-textarea"
+                    placeholder="Paste your ticket prompts here, separated by --- on its own line..."
+                    oninput="bcOnTextareaInput()"></textarea>
+
+          <div class="bc-info-note">
+            Split prompts using <code>---</code> on its own line. All created tickets go to backlog &mdash; assign them to a sprint later via Sprint Mgmt.
+          </div>
+
+          <!-- Attachments -->
+          <div class="bc-attach-section">
+            <div class="bc-attach-header">
+              <label class="bc-settings-label">Attachments <span class="bc-label-hint">(optional &mdash; applied to every ticket in the batch)</span></label>
+              <p class="bc-label-hint bc-attach-limits">
+                Allowed: .png .pdf .html .htm and all other supported types.
+                &nbsp;&bull;&nbsp; Max 25 MB per file, 50 MB total.
+              </p>
+            </div>
+            <div class="dt-dropzone bc-dropzone" id="bc-dropzone"
+                 ondragover="event.preventDefault(); this.classList.add('drag-over')"
+                 ondragleave="this.classList.remove('drag-over')"
+                 ondrop="_bcOnDrop(event)"
+                 onclick="_bcPickFiles()">
+              <span class="dt-dropzone-hint">Drop files here or click to browse</span>
+              <input type="file" id="bc-file-input" multiple
+                     accept=".html,.htm,.md,.txt,.csv,.json,.yaml,.yml,.png,.jpg,.jpeg,.gif,.svg,.webp,.pdf,.py,.js,.ts,.tsx,.css,.sh,.log,.drawio,.xlsx,.pptx,.docx,.zip"
+                     style="display:none" onchange="_bcOnFileInput(event)">
+            </div>
+            <div class="bc-file-queue" id="bc-file-queue"></div>
+            <div class="bc-file-error hidden" id="bc-file-error"></div>
+          </div>
+
+          <div class="bc-error hidden" id="bc-step1-error"></div>
+
+          <!-- Step 1 footer actions -->
+          <div class="bc-step-actions">
+            <div class="bc-step-actions-left">
+              <label class="bc-concurrency-label">Run BA in parallel:</label>
+              <select class="bc-concurrency-select" id="bc-concurrency">
+                <option value="1">1 at a time (serial)</option>
+                <option value="3" selected>3 at a time</option>
+                <option value="5">5 at a time</option>
+              </select>
+            </div>
+            <div class="bc-step-actions-right">
+              <button type="button" class="btn-primary" id="bc-run-btn" disabled onclick="bcRunAll()">Run BA on all 0</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Step 2: Review & Create -->
+        <div id="bc-step2" class="hidden">
+          <div class="bc-parallel-banner" id="bc-parallel-banner"></div>
+          <div class="bc-summary-strip" id="bc-summary-strip"></div>
+          <div class="bc-ticket-list" id="bc-ticket-list"></div>
+          <!-- Step 2 footer actions -->
+          <div class="bc-step-actions">
+            <div class="bc-step-actions-left">
+              <button type="button" class="btn-ghost" onclick="_bcGoToStep1()">
+                <i class="ti ti-arrow-left"></i> Back to input
+              </button>
+              <span class="bc-hint">Job continues if you switch tabs.</span>
+            </div>
+            <div class="bc-step-actions-right">
+              <button type="button" class="btn-ghost hidden" id="bc-recreate-btn" onclick="bcRecreate()">Recreate</button>
+              <button type="button" class="bc-stop-btn" id="bc-stop-btn" onclick="bcStop()">
+                <i class="ti ti-player-stop"></i> Stop after current
+              </button>
+              <button type="button" class="btn-primary" id="bc-done-btn" disabled>Running...</button>
+            </div>
+          </div>
+        </div>
+
+      </div><!-- /pane-bulk-create -->
+
     </div>
   </div>
 
@@ -1387,8 +1761,9 @@ function parseUrl() {
   const slug = decodeURIComponent(m[1]);
   const rawTab = m[2] || '';
   // sprint-history is disabled → redirect to sprint-mgmt
-  const tab = (rawTab === 'tickets') ? 'tickets'
-            : (rawTab === 'logs')    ? 'logs'
+  const tab = (rawTab === 'tickets')     ? 'tickets'
+            : (rawTab === 'logs')        ? 'logs'
+            : (rawTab === 'bulk-create') ? 'bulk-create'
             : 'sprint-mgmt';
   return { slug, tab };
 }
@@ -1432,7 +1807,7 @@ function switchTab(tab, pushHistory) {
   _activeTab = tab;
 
   // Update aria-selected + active class on tabs
-  ['sprint-mgmt', 'tickets', 'logs'].forEach(t => {
+  ['sprint-mgmt', 'tickets', 'logs', 'bulk-create'].forEach(t => {
     const btn = document.getElementById('stab-' + t);
     if (!btn) return;
     const isActive = t === tab;
@@ -1441,7 +1816,7 @@ function switchTab(tab, pushHistory) {
   });
 
   // Show/hide panes
-  ['sprint-mgmt', 'tickets', 'logs'].forEach(t => {
+  ['sprint-mgmt', 'tickets', 'logs', 'bulk-create'].forEach(t => {
     const pane = document.getElementById('pane-' + t);
     if (pane) pane.classList.toggle('active', t === tab);
   });
@@ -1466,11 +1841,16 @@ function switchTab(tab, pushHistory) {
     // Tab switched back — restart ticker if not already running
     if (_arTickerId === null && _arInterval > 0) _smgmtArStartTicker();
   }
+
+  // Init bulk-create tab on first visit
+  if (tab === 'bulk-create') {
+    _bcInitTab();
+  }
 }
 
 // ── Keyboard navigation for sub-tabs ─────────────────────────────────────────
 document.getElementById('sub-tabs').addEventListener('keydown', function(e) {
-  const enabledTabs = ['sprint-mgmt', 'tickets', 'logs'];
+  const enabledTabs = ['sprint-mgmt', 'tickets', 'logs', 'bulk-create'];
   const focused = document.activeElement;
   const currentId = focused ? focused.id.replace('stab-', '') : null;
   const currentIdx = enabledTabs.indexOf(currentId);
@@ -1709,12 +2089,7 @@ function renderTickets(data) {
 
 // ── Header button handlers ─────────────────────────────────────────────────
 function openBulkCreate() {
-  // Redirect to index.html sprint-mgmt for now
-  if (_slug) {
-    const repo = _findFullRepo(_slug);
-    if (repo) window.location.href = '/project/' + encodeURIComponent(repo) + '/sprint-mgmt';
-    else window.location.href = '/';
-  }
+  switchTab('bulk-create');
 }
 
 function openNewTicket() {
@@ -3534,6 +3909,539 @@ function _setupModals() {
     }
   });
 }
+
+// ── Bulk Create tab (issue #257) ─────────────────────────────────────────────
+
+let _bcJobId        = null;
+let _bcEventSource  = null;
+let _bcJobState     = null;      // current job snapshot {status, concurrency, tickets}
+let _bcCounterTimer = null;
+let _bcStartTimes   = {};        // index -> start timestamp
+let _bcAvgMs        = null;      // rolling avg BA time per ticket
+let _bcFiles        = [];        // queued attachment files
+let _bcLastInput    = null;      // preserved Step 1 inputs for Recreate
+let _bcTabInited    = false;     // whether the tab has been populated once
+
+const BC_MAX_PROMPTS = 25;
+const BC_ALLOWED_EXTS = new Set([
+  '.html','.htm','.md','.txt','.csv','.json','.yaml','.yml',
+  '.png','.jpg','.jpeg','.gif','.svg','.webp','.pdf',
+  '.py','.js','.ts','.tsx','.css','.sh','.log',
+  '.drawio','.xlsx','.pptx','.docx','.zip',
+]);
+
+/** Called each time the Bulk Create tab becomes active. */
+function _bcInitTab() {
+  // If a running job was saved in localStorage, go straight to step 2
+  const savedJobId = localStorage.getItem('bc_job_id');
+  if (savedJobId && !_bcJobId) {
+    _bcJobId = savedJobId;
+    _bcShowStep(2);
+    _bcConnectSSE(savedJobId);
+    return;
+  }
+
+  if (!_bcTabInited) {
+    _bcTabInited = true;
+    _bcShowStep(1);
+    _bcPopulateRepo();
+    _bcUpdateCounter();
+  }
+}
+
+/** Populate the repo dropdown to the current project. */
+function _bcPopulateRepo() {
+  const sel = document.getElementById('bc-repo');
+  if (!sel) return;
+  // Use _cachedFullRepo (keyed by slug) to build list
+  const repos = Object.values(_cachedFullRepo);
+  if (repos.length === 0) {
+    // Fallback: just show the current project's repo
+    const repo = _cachedFullRepo[_slug];
+    if (repo) {
+      sel.innerHTML = `<option value="${escHtml(repo)}">${escHtml(_slug)}</option>`;
+    }
+    return;
+  }
+  // Build from _homeData if available, else fall back to cached repos
+  const projects = (_homeData && _homeData.projects) ? _homeData.projects : [];
+  if (projects.length > 0) {
+    sel.innerHTML = projects.map(p => {
+      const repo = _cachedFullRepo[p.slug] || p.slug;
+      const selected = p.slug === _slug ? ' selected' : '';
+      return `<option value="${escHtml(repo)}"${selected}>${escHtml(p.name || p.slug)}</option>`;
+    }).join('');
+  } else {
+    sel.innerHTML = repos.map(repo => {
+      const slug = repo.split('/').pop();
+      const selected = slug === _slug ? ' selected' : '';
+      return `<option value="${escHtml(repo)}"${selected}>${escHtml(slug)}</option>`;
+    }).join('');
+  }
+}
+
+function _bcShowStep(n) {
+  const step1 = document.getElementById('bc-step1');
+  const step2 = document.getElementById('bc-step2');
+  const chip1 = document.getElementById('bc-chip-1');
+  const chip2 = document.getElementById('bc-chip-2');
+  if (!step1 || !step2 || !chip1 || !chip2) return;
+
+  if (n === 1) {
+    step1.classList.remove('hidden');
+    step2.classList.add('hidden');
+    chip1.classList.add('active');
+    chip2.classList.remove('active');
+  } else {
+    step1.classList.add('hidden');
+    step2.classList.remove('hidden');
+    chip1.classList.remove('active');
+    chip2.classList.add('active');
+  }
+}
+
+function _bcGoToStep1() {
+  _bcShowStep(1);
+}
+
+function bcRepoChanged() {
+  // Nothing extra needed — repo is read at run time
+}
+
+function bcOnTextareaInput() {
+  clearTimeout(_bcCounterTimer);
+  _bcCounterTimer = setTimeout(_bcUpdateCounter, 200);
+}
+
+function _bcParsePrompts(text) {
+  return text.split(/^---$/m).map(s => s.trim()).filter(s => s.length > 0);
+}
+
+function _bcUpdateCounter() {
+  const text = (document.getElementById('bc-textarea') || {}).value || '';
+  const prompts = _bcParsePrompts(text);
+  const n = prompts.length;
+  const chars = text.length;
+  const counterEl = document.getElementById('bc-counter');
+  if (counterEl) counterEl.textContent = `${n} tickets detected · ${chars} chars`;
+
+  const runBtn = document.getElementById('bc-run-btn');
+  if (runBtn) {
+    runBtn.textContent = `Run BA on all ${n}`;
+    const repo = (document.getElementById('bc-repo') || {}).value || '';
+    runBtn.disabled = (n === 0 || !repo || n > BC_MAX_PROMPTS);
+  }
+
+  const errEl = document.getElementById('bc-step1-error');
+  if (errEl) {
+    if (n > BC_MAX_PROMPTS) {
+      errEl.textContent = `Batch limit is ${BC_MAX_PROMPTS} prompts (you have ${n})`;
+      errEl.classList.remove('hidden');
+    } else {
+      errEl.classList.add('hidden');
+    }
+  }
+}
+
+function _bcPickFiles() {
+  const inp = document.getElementById('bc-file-input');
+  if (inp) inp.click();
+}
+
+function _bcOnFileInput(event) {
+  _bcAddFiles(Array.from(event.target.files));
+  event.target.value = '';
+}
+
+function _bcOnDrop(event) {
+  event.preventDefault();
+  const dz = document.getElementById('bc-dropzone');
+  if (dz) dz.classList.remove('drag-over');
+  _bcAddFiles(Array.from(event.dataTransfer.files));
+}
+
+function _bcAddFiles(incoming) {
+  const errEl = document.getElementById('bc-file-error');
+  if (errEl) { errEl.textContent = ''; errEl.classList.add('hidden'); }
+  let totalSize = _bcFiles.reduce((s, f) => s + f.size, 0);
+
+  for (const f of incoming) {
+    if (_bcFiles.length >= 10) break;
+    const ext = '.' + f.name.split('.').pop().toLowerCase();
+    if (!BC_ALLOWED_EXTS.has(ext)) {
+      if (errEl) {
+        errEl.textContent = `File '${f.name}' has a disallowed extension ('${ext}').`;
+        errEl.classList.remove('hidden');
+      }
+      continue;
+    }
+    if (f.size > 25 * 1024 * 1024) {
+      if (errEl) {
+        errEl.textContent = `File '${f.name}' exceeds the 25 MB per-file limit.`;
+        errEl.classList.remove('hidden');
+      }
+      continue;
+    }
+    totalSize += f.size;
+    if (totalSize > 50 * 1024 * 1024) {
+      if (errEl) {
+        errEl.textContent = 'Upload batch would exceed the 50 MB total limit.';
+        errEl.classList.remove('hidden');
+      }
+      break;
+    }
+    _bcFiles.push(f);
+  }
+  _bcRenderFileQueue();
+}
+
+function _bcRemoveFile(idx) {
+  _bcFiles.splice(idx, 1);
+  _bcRenderFileQueue();
+}
+
+function _bcRenderFileQueue() {
+  const container = document.getElementById('bc-file-queue');
+  if (!container) return;
+  if (_bcFiles.length === 0) { container.innerHTML = ''; return; }
+  container.innerHTML = _bcFiles.map((f, i) =>
+    `<span class="bc-file-chip">
+      <span class="bc-file-chip-name" title="${escHtml(f.name)}">${escHtml(f.name)}</span>
+      <button class="bc-file-chip-remove" onclick="_bcRemoveFile(${i})" title="Remove">&times;</button>
+    </span>`
+  ).join('');
+}
+
+async function bcRunAll() {
+  const textarea = document.getElementById('bc-textarea');
+  if (!textarea) return;
+  const text = textarea.value;
+  const prompts = _bcParsePrompts(text);
+  if (prompts.length === 0) return;
+  if (prompts.length > BC_MAX_PROMPTS) return;
+
+  const repoEl = document.getElementById('bc-repo');
+  const repo = repoEl ? repoEl.value : '';
+  if (!repo) return;
+
+  const labelsRaw = (document.getElementById('bc-default-labels') || {}).value || '';
+  const defaultLabels = labelsRaw.split(',').map(l => l.trim()).filter(l => l.length > 0);
+  const uniqueLabels = [...new Set(defaultLabels)];
+
+  const concurrency = parseInt((document.getElementById('bc-concurrency') || {}).value || '3', 10);
+
+  _bcLastInput = { text, repo, labelsRaw, concurrency };
+
+  const runBtn = document.getElementById('bc-run-btn');
+  if (runBtn) { runBtn.disabled = true; runBtn.textContent = 'Starting…'; }
+
+  const errEl = document.getElementById('bc-step1-error');
+  if (errEl) errEl.classList.add('hidden');
+
+  try {
+    const formData = new FormData();
+    formData.append('repo', repo);
+    formData.append('prompts', JSON.stringify(prompts));
+    formData.append('default_labels', JSON.stringify(uniqueLabels));
+    formData.append('concurrency', String(concurrency));
+    for (const f of _bcFiles) {
+      formData.append('files', f);
+    }
+
+    const res = await fetch('/api/tickets/bulk', { method: 'POST', body: formData });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      if (errEl) { errEl.textContent = data.detail || `Server error ${res.status}`; errEl.classList.remove('hidden'); }
+      if (runBtn) { runBtn.disabled = false; runBtn.textContent = `Run BA on all ${prompts.length}`; }
+      return;
+    }
+    const data = await res.json();
+    _bcJobId = data.job_id;
+    localStorage.setItem('bc_job_id', _bcJobId);
+
+    _bcStartTimes = {};
+    _bcAvgMs = null;
+
+    _bcShowStep(2);
+    _bcConnectSSE(_bcJobId);
+  } catch (e) {
+    if (errEl) { errEl.textContent = 'Failed to start job: ' + e.message; errEl.classList.remove('hidden'); }
+    if (runBtn) { runBtn.disabled = false; runBtn.textContent = `Run BA on all ${prompts.length}`; }
+  }
+}
+
+function _bcConnectSSE(jobId) {
+  if (_bcEventSource) { _bcEventSource.close(); _bcEventSource = null; }
+
+  const es = new EventSource(`/api/tickets/bulk/${jobId}/stream`);
+  _bcEventSource = es;
+
+  es.addEventListener('snapshot', (e) => {
+    try { _bcJobState = JSON.parse(e.data); _bcRenderStep2(); } catch (_) {}
+  });
+
+  es.addEventListener('update', (e) => {
+    try {
+      const event = JSON.parse(e.data);
+      if (event.type === 'ticket_update' && _bcJobState) {
+        _bcJobState.tickets[event.ticket.index] = event.ticket;
+        _bcRenderStep2();
+      } else if (event.type === 'job_done' && _bcJobState) {
+        _bcJobState.status = 'done';
+        _bcRenderStep2();
+        es.close();
+        _bcEventSource = null;
+        localStorage.removeItem('bc_job_id');
+        _bcJobId = null;
+      }
+    } catch (_) {}
+  });
+
+  es.onerror = () => { /* SSE auto-reconnects */ };
+}
+
+function _bcRenderStep2() {
+  if (!_bcJobState) return;
+  const job = _bcJobState;
+  const tickets = job.tickets || [];
+  const concurrency = job.concurrency || 3;
+
+  const created  = tickets.filter(t => t.state === 'created').length;
+  const drafting = tickets.filter(t => t.state === 'drafting').length;
+  const pending  = tickets.filter(t => t.state === 'pending').length;
+  const failed   = tickets.filter(t => t.state === 'failed').length;
+  const skipped  = tickets.filter(t => t.state === 'skipped').length;
+  const total    = tickets.length;
+
+  // Banner
+  const banner = document.getElementById('bc-parallel-banner');
+  if (banner) {
+    if (job.status === 'running') {
+      banner.innerHTML = `BA is drafting ${total} tickets in parallel — ` +
+        `${created} done, ${drafting} running, ${pending} queued` +
+        `<span class="bc-concurrency-pill">concurrency: ${concurrency}</span>`;
+    } else if (job.status === 'done') {
+      banner.innerHTML = `All ${total} tickets processed.`;
+    } else if (job.status === 'stopped') {
+      banner.innerHTML = `Stopped. ${created} created, ${failed} failed, ${skipped} skipped.`;
+    }
+  }
+
+  // Summary strip
+  const strip = document.getElementById('bc-summary-strip');
+  if (strip) {
+    const done = created + failed + skipped;
+    const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+    let etaHtml = '';
+    if (created > 0 && pending > 0 && _bcAvgMs) {
+      const estMs = (_bcAvgMs / concurrency) * pending;
+      const estSec = Math.round(estMs / 1000);
+      const m = Math.floor(estSec / 60);
+      const s = estSec % 60;
+      etaHtml = `<span class="bc-eta">est. ${m > 0 ? m + 'm ' + s + 's' : s + 's'} remaining</span>`;
+    }
+    strip.innerHTML = `
+      <span class="bc-metric bc-metric--created"><span class="bc-metric-count">${created}</span> Created</span>
+      <span class="bc-metric bc-metric--drafting"><span class="bc-metric-count">${drafting}</span> Drafting</span>
+      <span class="bc-metric bc-metric--pending"><span class="bc-metric-count">${pending}</span> Pending</span>
+      <div class="bc-progress-wrap"><div class="bc-progress-bar" style="width:${pct}%"></div></div>
+      ${etaHtml}`;
+  }
+
+  // Ticket list
+  const list = document.getElementById('bc-ticket-list');
+  if (list) {
+    list.innerHTML = tickets.map(t => _bcRenderCard(t)).join('');
+  }
+
+  // Footer buttons
+  const stopBtn     = document.getElementById('bc-stop-btn');
+  const doneBtn     = document.getElementById('bc-done-btn');
+  const recreateBtn = document.getElementById('bc-recreate-btn');
+  if (stopBtn && doneBtn) {
+    if (job.status === 'running') {
+      stopBtn.disabled = false;
+      doneBtn.disabled = true;
+      doneBtn.textContent = 'Running...';
+      if (recreateBtn) recreateBtn.classList.add('hidden');
+    } else {
+      stopBtn.disabled = true;
+      doneBtn.disabled = false;
+      doneBtn.textContent = 'Done';
+      doneBtn.onclick = () => { _bcShowStep(1); };
+      if (recreateBtn) recreateBtn.classList.remove('hidden');
+    }
+  }
+
+  // Track avg time
+  tickets.forEach(t => {
+    if (t.state === 'drafting' && t.started_at && !_bcStartTimes[t.index]) {
+      _bcStartTimes[t.index] = new Date(t.started_at).getTime();
+    }
+    if (t.state === 'created' && _bcStartTimes[t.index] && t.finished_at) {
+      const elapsed = new Date(t.finished_at).getTime() - _bcStartTimes[t.index];
+      if (elapsed > 0) {
+        _bcAvgMs = _bcAvgMs === null ? elapsed : (_bcAvgMs * 0.7 + elapsed * 0.3);
+      }
+    }
+  });
+}
+
+function _bcRenderCard(t) {
+  const stateClass = `bc-card--${t.state}`;
+  const dotClass   = `bc-status-dot--${t.state}`;
+
+  let preview = '';
+  let label   = '';
+  let head    = '';
+  let actions = '';
+  let tags    = '';
+
+  if (t.state === 'pending') {
+    preview = escHtml((t.prompt || '').slice(0, 80));
+    label   = 'Queued';
+    actions = `<button class="bc-action-btn" title="Skip" onclick="bcSkipTicket(${t.index})">&#x00D7;</button>`;
+  } else if (t.state === 'drafting') {
+    preview = 'BA polishing prompt → drafting AC and UAT steps...';
+    const now   = Date.now();
+    const start = _bcStartTimes[t.index] || (t.started_at ? new Date(t.started_at).getTime() : now);
+    label = `Started ${Math.round((now - start) / 1000)}s ago`;
+  } else if (t.state === 'created') {
+    const issueUrl = t.issue_url || '#';
+    head    = `<a class="bc-issue-badge" href="${escHtml(issueUrl)}" target="_blank" rel="noopener">#${t.issue_num}</a>`;
+    preview = escHtml((t.body_preview || t.body || '').slice(0, 200));
+    if (t.finished_at && t.started_at) {
+      const elapsed = Math.round((new Date(t.finished_at).getTime() - new Date(t.started_at).getTime()) / 1000);
+      label = `Created in ${elapsed}s`;
+    } else {
+      label = 'Created';
+    }
+    const labelsArr = t.label_pills || [];
+    if (labelsArr.length > 0) {
+      tags = `<div class="bc-card-tags">${labelsArr.map(l => `<span class="bc-tag">${escHtml(l)}</span>`).join('')}</div>`;
+    }
+    if (t.attachment_warning) {
+      tags += `<div class="bc-attach-warn">${escHtml(t.attachment_warning)}</div>`;
+    }
+    actions = `<a class="bc-action-btn" href="${escHtml(issueUrl)}" target="_blank" rel="noopener" title="Open on GitHub">&#x2197;</a>`;
+  } else if (t.state === 'failed') {
+    preview = escHtml(t.error || 'Unknown error');
+    label   = 'Failed';
+    actions = `<button class="bc-action-btn bc-action-btn--retry" title="Retry" onclick="bcRetryTicket(${t.index})">&#x21BA;</button>`;
+  } else if (t.state === 'skipped') {
+    preview = escHtml((t.prompt || '').slice(0, 80));
+    label   = 'Skipped';
+    actions = `<button class="bc-action-btn" title="Undo skip" onclick="bcUndoSkip(${t.index})">&#x21A9;</button>`;
+  }
+
+  const headHtml = head
+    ? `<div class="bc-card-head">${head}<span class="bc-card-label">${escHtml(label)}</span></div>`
+    : `<div class="bc-card-head"><span class="bc-card-label">${escHtml(label)}</span></div>`;
+
+  const previewClass = t.state === 'failed' ? 'bc-card-preview bc-card-preview--error' : 'bc-card-preview';
+
+  return `
+    <div class="bc-card ${stateClass}">
+      <div class="bc-status-dot ${dotClass}"></div>
+      <div class="bc-card-body">
+        ${headHtml}
+        <div class="${previewClass}">${preview}</div>
+        ${tags}
+      </div>
+      ${actions ? `<div class="bc-card-actions">${actions}</div>` : ''}
+    </div>`;
+}
+
+async function bcSkipTicket(index) {
+  if (!_bcJobId) return;
+  try {
+    await fetch(`/api/tickets/bulk/${_bcJobId}/skip`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ index }),
+    });
+  } catch (_) {}
+}
+
+async function bcUndoSkip(index) {
+  if (!_bcJobId || !_bcJobState) return;
+  const ticket = _bcJobState.tickets[index];
+  if (ticket && ticket.state === 'skipped') {
+    ticket.state = 'pending';
+    _bcRenderStep2();
+    try {
+      await fetch(`/api/tickets/bulk/${_bcJobId}/retry`, {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ index }),
+      });
+    } catch (_) {}
+  }
+}
+
+async function bcRetryTicket(index) {
+  if (!_bcJobId) return;
+  try {
+    await fetch(`/api/tickets/bulk/${_bcJobId}/retry`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ index }),
+    });
+  } catch (_) {}
+}
+
+async function bcStop() {
+  if (!_bcJobId) return;
+  const btn = document.getElementById('bc-stop-btn');
+  if (btn) btn.disabled = true;
+  try {
+    await fetch(`/api/tickets/bulk/${_bcJobId}/stop`, { method: 'POST' });
+  } catch (_) {}
+}
+
+function bcRecreate() {
+  if (_bcEventSource) { _bcEventSource.close(); _bcEventSource = null; }
+  localStorage.removeItem('bc_job_id');
+  _bcJobId = null;
+  _bcJobState = null;
+  _bcStartTimes = {};
+  _bcAvgMs = null;
+
+  _bcShowStep(1);
+  _bcPopulateRepo();
+
+  if (_bcLastInput) {
+    const textarea = document.getElementById('bc-textarea');
+    if (textarea) textarea.value = _bcLastInput.text || '';
+    const repoEl = document.getElementById('bc-repo');
+    if (repoEl && _bcLastInput.repo) repoEl.value = _bcLastInput.repo;
+    const labelsEl = document.getElementById('bc-default-labels');
+    if (labelsEl) labelsEl.value = _bcLastInput.labelsRaw || 'enhancement';
+    const concEl = document.getElementById('bc-concurrency');
+    if (concEl) concEl.value = String(_bcLastInput.concurrency || 3);
+  } else {
+    const textarea = document.getElementById('bc-textarea');
+    if (textarea) textarea.value = '';
+    const labelsEl = document.getElementById('bc-default-labels');
+    if (labelsEl) labelsEl.value = 'enhancement';
+    const concEl = document.getElementById('bc-concurrency');
+    if (concEl) concEl.value = '3';
+  }
+
+  const errEl = document.getElementById('bc-step1-error');
+  if (errEl) errEl.classList.add('hidden');
+  _bcUpdateCounter();
+}
+
+// Keyboard: Cmd/Ctrl+Enter triggers Run when Bulk Create tab is active and step 1 is shown
+document.addEventListener('keydown', function(e) {
+  if (_activeTab !== 'bulk-create') return;
+  const step1 = document.getElementById('bc-step1');
+  if (step1 && !step1.classList.contains('hidden')) {
+    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+      e.preventDefault();
+      const btn = document.getElementById('bc-run-btn');
+      if (btn && !btn.disabled) bcRunAll();
+    }
+  }
+});
 
 document.addEventListener('DOMContentLoaded', init);
 </script>

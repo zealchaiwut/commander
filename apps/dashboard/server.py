@@ -571,6 +571,12 @@ async def overview_redirect():
     return RedirectResponse(url="/", status_code=301)
 
 
+@app.get("/diagnostics")
+async def diagnostics_page():
+    """Serve the system diagnostics page (issue #230)."""
+    return FileResponse(STATIC_DIR / "diagnostics.html")
+
+
 @app.get("/projects/{path:path}")
 async def spa_project_route(path: str):
     if path.endswith("/plan-sprint"):

@@ -364,6 +364,10 @@
       0%,100% { opacity: 1; transform: scale(1); }
       50%     { opacity: 0.5; transform: scale(0.75); }
     }
+    /* Health icon animation when system is down — reuses pulseDot keyframe */
+    #health-icon.health-down {
+      animation: pulseDot 1s ease-in-out infinite;
+    }
 
     /* ── Progress line + bar ── */
     .proj-progress-line {
@@ -636,6 +640,10 @@
   <div class="header-right">
     <button class="btn-icon" title="Bulk create" aria-label="Bulk create" onclick="window.location.href='/'">
       <i class="ti ti-list-plus"></i>
+    </button>
+    <button class="btn-icon" id="health-icon-btn" title="Diagnostics" aria-label="Diagnostics"
+            onclick="window.location.href='/diagnostics'">
+      <i class="ti ti-heartbeat" id="health-icon" style="transition:color .3s;"></i>
     </button>
     <button class="btn-icon" title="Settings" aria-label="Settings" onclick="window.location.href='/'">
       <i class="ti ti-settings"></i>
@@ -1348,8 +1356,45 @@
     }
   }
 
+  // ── Health icon polling ────────────────────────────────────────────────────
+
+  function applyHealthIconColor(status) {
+    const icon = document.getElementById('health-icon');
+    if (!icon) return;
+    icon.classList.remove('health-down');
+    if (status === 'ok') {
+      icon.style.color = 'var(--green)';
+    } else if (status === 'degraded') {
+      icon.style.color = 'var(--amber)';
+    } else {
+      // down or unknown
+      icon.style.color = 'var(--red)';
+      icon.classList.add('health-down');
+    }
+  }
+
+  async function pollHealth() {
+    try {
+      const resp = await fetch('/api/health');
+      // Accept both 200 (ok/degraded) and 503 (down)
+      if (resp.ok || resp.status === 503) {
+        const data = await resp.json();
+        applyHealthIconColor(data.status || 'down');
+      } else {
+        applyHealthIconColor('down');
+      }
+    } catch (e) {
+      // Network error — show as down but don't change to unknown
+      applyHealthIconColor('down');
+    }
+  }
+
   // ── Init ───────────────────────────────────────────────────────────────────
-  document.addEventListener('DOMContentLoaded', loadHomeData);
+  document.addEventListener('DOMContentLoaded', () => {
+    loadHomeData();
+    pollHealth();
+    setInterval(pollHealth, 30000);
+  });
 </script>
 
 </body>

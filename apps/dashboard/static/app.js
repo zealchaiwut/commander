@@ -3179,6 +3179,7 @@ function smgmtRender() {
     if (ps) {
       if (ps.sse)          { try { ps.sse.close(); } catch {} ps.sse = null; }
       if (ps.tickInterval) { clearInterval(ps.tickInterval); ps.tickInterval = null; }
+      if (ps.snapInterval) { clearInterval(ps.snapInterval); ps.snapInterval = null; }
     }
     delete _sllPanels[label];
   }
@@ -4792,6 +4793,8 @@ async function smgmtPollRunStatus() {
     _updateRunningBanner();
     _updateOverviewRunningBadges();
     smgmtSyncLivePanels();
+    // Push live stat-strip updates from sprint-status poll into mounted panels (issue #256)
+    _sllUpdateStatsFromStatusMap(sprintStatusMap);
   } catch { /* ignore poll errors */ }
 }
 
@@ -7556,10 +7559,10 @@ const _sllPanels = {};   // label -> { el, sse, tickInterval, autoScroll, lineCo
     }
     .sll-pill:hover { background: var(--hover-bg, rgba(255,255,255,0.06)); }
 
-    /* 3-stat grid */
+    /* 5-cell stat strip (issue #256) */
     .sll-stats {
       display: grid;
-      grid-template-columns: repeat(3, 1fr);
+      grid-template-columns: repeat(5, 1fr);
       border-bottom: 1px solid var(--border);
     }
     .sll-stat {
@@ -7585,6 +7588,9 @@ const _sllPanels = {};   // label -> { el, sse, tickInterval, autoScroll, lineCo
       text-overflow: ellipsis;
     }
     .sll-stat-value.sll-stat-value--sm { font-size: 15px; }
+    .sll-stat-value--done    { color: #4ade80; }
+    .sll-stat-value--failed  { color: #f87171; }
+    .sll-stat-value--skipped { color: var(--text-muted); }
     .sll-stat-sub {
       font-family: ui-monospace, monospace;
       font-size: 11px;
@@ -7610,6 +7616,47 @@ const _sllPanels = {};   // label -> { el, sse, tickInterval, autoScroll, lineCo
       background: rgba(245,158,11,0.15);
       color: #fbbf24;
       border: 1px solid rgba(245,158,11,0.3);
+    }
+
+    /* Progress bar inside live panel (issue #256) */
+    .sll-progress-section {
+      padding: 12px 18px;
+      border-bottom: 1px solid var(--border);
+    }
+    .sll-progress-meta {
+      display: flex;
+      justify-content: space-between;
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-bottom: 6px;
+    }
+    .sll-progress-bar {
+      height: 6px;
+      background: var(--border);
+      border-radius: 3px;
+      overflow: hidden;
+      position: relative;
+    }
+    .sll-progress-fill {
+      height: 100%;
+      background: #22c55e;
+      border-radius: 3px;
+      transition: width 0.4s ease;
+      position: relative;
+      overflow: hidden;
+    }
+    .sll-progress-fill.sll-shimmer::after {
+      content: '';
+      position: absolute;
+      top: 0; left: -60%;
+      width: 60%;
+      height: 100%;
+      background: linear-gradient(90deg, transparent, rgba(255,255,255,0.35), transparent);
+      animation: sll-shimmer 1.4s ease-in-out infinite;
+    }
+    @keyframes sll-shimmer {
+      0%   { left: -60%; }
+      100% { left: 110%; }
     }
 
     /* Log feed */
@@ -7719,20 +7766,42 @@ function smgmtLivePanelMount(label, project) {
     </div>
 
     <div class="sll-stats">
+      <div class="sll-stat" id="sll-stat-done-${label}">
+        <div class="sll-stat-label">Done</div>
+        <div class="sll-stat-value sll-stat-value--done" id="sll-val-done-${label}">0</div>
+        <div class="sll-stat-sub" id="sll-sub-done-${label}"></div>
+      </div>
+      <div class="sll-stat" id="sll-stat-failed-${label}">
+        <div class="sll-stat-label">Failed</div>
+        <div class="sll-stat-value sll-stat-value--failed" id="sll-val-failed-${label}">0</div>
+        <div class="sll-stat-sub" id="sll-sub-failed-${label}"></div>
+      </div>
+      <div class="sll-stat" id="sll-stat-skipped-${label}">
+        <div class="sll-stat-label">Skipped</div>
+        <div class="sll-stat-value sll-stat-value--skipped" id="sll-val-skipped-${label}">0</div>
+        <div class="sll-stat-sub" id="sll-sub-skipped-${label}"></div>
+      </div>
+      <div class="sll-stat" id="sll-stat-estrem-${label}">
+        <div class="sll-stat-label">Est. remaining</div>
+        <div class="sll-stat-value" id="sll-val-estrem-${label}">0m</div>
+        <div class="sll-stat-sub" id="sll-sub-estrem-${label}"></div>
+      </div>
       <div class="sll-stat" id="sll-stat-time-${label}">
-        <div class="sll-stat-label"><i class="ti ti-clock" aria-hidden="true"></i> Time Spent</div>
+        <div class="sll-stat-label">Time spent</div>
         <div class="sll-stat-value" id="sll-val-time-${label}">—</div>
         <div class="sll-stat-sub"  id="sll-sub-time-${label}">—</div>
       </div>
-      <div class="sll-stat" id="sll-stat-ticket-${label}">
-        <div class="sll-stat-label"><i class="ti ti-ticket" aria-hidden="true"></i> Currently Working On</div>
-        <div class="sll-stat-value sll-stat-value--sm" id="sll-val-ticket-${label}">—</div>
-        <div class="sll-stat-sub"  id="sll-sub-ticket-${label}">—</div>
+    </div>
+
+    <div class="sll-progress-section" id="sll-progress-${label}">
+      <div class="sll-progress-meta">
+        <span id="sll-prog-left-${label}">0 of 0 tickets complete</span>
+        <span id="sll-prog-right-${label}">0%</span>
       </div>
-      <div class="sll-stat" id="sll-stat-agent-${label}">
-        <div class="sll-stat-label"><i class="ti ti-robot" aria-hidden="true"></i> Active Agent</div>
-        <div class="sll-stat-value" id="sll-val-agent-${label}">—</div>
-        <div class="sll-stat-sub"  id="sll-sub-agent-${label}">—</div>
+      <div class="sll-progress-bar">
+        <div class="sll-progress-fill sll-shimmer" id="sll-prog-fill-${label}"
+             style="width:0%"
+             role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
       </div>
     </div>
 
@@ -7748,6 +7817,7 @@ function smgmtLivePanelMount(label, project) {
     el: panel,
     sse: null,
     tickInterval: null,
+    snapInterval: null,
     autoScroll: true,
     lineCount: 0,
     startedAt: null,
@@ -7765,6 +7835,12 @@ function smgmtLivePanelMount(label, project) {
     if (!_sllPanels[label]) return;
     _sllUpdateTimeStat(label);
   }, 1000);
+
+  // Refresh full snapshot every 10 seconds to pick up est_remaining from estimates (issue #256)
+  state.snapInterval = setInterval(() => {
+    if (!_sllPanels[label]) return;
+    smgmtLivePanelLoadSnapshot(label, project);
+  }, 10000);
 }
 
 // ── Load snapshot (initial state + backfill of last 50 log lines) ─────────────
@@ -7801,34 +7877,69 @@ function smgmtLivePanelUpdateStats(label, snap) {
 
   _sllUpdateTimeStat(label, snap);
 
-  // Ticket
-  const valTicket = document.getElementById(`sll-val-ticket-${label}`);
-  const subTicket = document.getElementById(`sll-sub-ticket-${label}`);
-  if (valTicket && subTicket) {
-    if (snap.current_ticket) {
-      valTicket.textContent = `#${snap.current_ticket.number}`;
-      subTicket.textContent = snap.current_ticket.title || '';
-      subTicket.title = snap.current_ticket.title || '';
+  // ── Outcome counts (issue #256) ────────────────────────────────────────────
+  const doneCount    = snap.done_count    != null ? snap.done_count    : 0;
+  const failedCount  = snap.failed_count  != null ? snap.failed_count  : 0;
+  const skippedCount = snap.skipped_count != null ? snap.skipped_count : 0;
+  const totalCount   = snap.total_count   != null ? snap.total_count   : 0;
+  const completeCount = snap.complete_count != null ? snap.complete_count : (doneCount + failedCount + skippedCount);
+  const estRem       = snap.est_remaining_minutes;  // may be null
+
+  const valDone = document.getElementById(`sll-val-done-${label}`);
+  if (valDone) valDone.textContent = doneCount;
+
+  const valFailed = document.getElementById(`sll-val-failed-${label}`);
+  if (valFailed) valFailed.textContent = failedCount;
+
+  const valSkipped = document.getElementById(`sll-val-skipped-${label}`);
+  if (valSkipped) valSkipped.textContent = skippedCount;
+
+  // Est. remaining cell
+  const valEstrem = document.getElementById(`sll-val-estrem-${label}`);
+  if (valEstrem) {
+    if (estRem != null) {
+      const h = Math.floor(estRem / 60);
+      const m = estRem % 60;
+      valEstrem.textContent = h > 0 ? `${h}h ${m}m` : `${m}m`;
     } else {
-      valTicket.textContent = '—';
-      subTicket.textContent = 'Waiting…';
+      valEstrem.textContent = '—';
     }
   }
 
-  // Agent
-  const valAgent = document.getElementById(`sll-val-agent-${label}`);
-  const subAgent = document.getElementById(`sll-sub-agent-${label}`);
-  if (valAgent && subAgent) {
-    if (snap.active_agent) {
-      const name = (snap.active_agent.name || 'coder').toLowerCase();
-      const pillClass = name === 'tester' ? 'sll-agent-pill--tester' : 'sll-agent-pill--coder';
-      valAgent.innerHTML = `<span class="sll-agent-pill ${pillClass}">${_sllEscHtml(name.toUpperCase())}</span>`;
-      const model = snap.active_agent.model || '';
-      const pid   = snap.active_agent.pid ? `pid ${snap.active_agent.pid}` : '';
-      subAgent.textContent = [model, pid].filter(Boolean).join(' · ') || '—';
+  // ── Progress bar (issue #256) ──────────────────────────────────────────────
+  const pct = totalCount > 0 ? Math.round((completeCount / totalCount) * 100) : 0;
+  const currentTicketNum = snap.current_ticket ? snap.current_ticket.number : null;
+
+  // Left label: "X of N tickets complete · #NNN in progress"
+  const progLeft = document.getElementById(`sll-prog-left-${label}`);
+  if (progLeft) {
+    let leftText = `${completeCount} of ${totalCount} ticket${totalCount !== 1 ? 's' : ''} complete`;
+    if (currentTicketNum) leftText += ` · #${currentTicketNum} in progress`;
+    progLeft.textContent = leftText;
+  }
+
+  // Right label: "NN% · est. Xm remaining"
+  const progRight = document.getElementById(`sll-prog-right-${label}`);
+  if (progRight) {
+    let rightText = `${pct}%`;
+    if (estRem != null) {
+      const h = Math.floor(estRem / 60);
+      const m = estRem % 60;
+      rightText += ` · est. ${h > 0 ? `${h}h ${m}m` : `${m}m`} remaining`;
+    }
+    progRight.textContent = rightText;
+  }
+
+  // Fill width
+  const fill = document.getElementById(`sll-prog-fill-${label}`);
+  if (fill) {
+    fill.style.width = `${pct}%`;
+    fill.setAttribute('aria-valuenow', pct);
+    // Stop shimmer when sprint is complete (pct === 100)
+    if (pct >= 100) {
+      fill.classList.remove('sll-shimmer');
     } else {
-      valAgent.innerHTML = '—';
-      subAgent.textContent = '—';
+      fill.classList.add('sll-shimmer');
     }
   }
 }
@@ -7968,6 +8079,9 @@ function smgmtLivePanelUnmount(label) {
   // Stop tick
   if (state.tickInterval) { clearInterval(state.tickInterval); state.tickInterval = null; }
 
+  // Stop snapshot refresh
+  if (state.snapInterval) { clearInterval(state.snapInterval); state.snapInterval = null; }
+
   // Fade out then remove from DOM
   const panel = state.el;
   if (panel) {
@@ -8007,5 +8121,58 @@ function smgmtSyncLivePanels() {
     if (!runningLabels.has(label)) {
       smgmtLivePanelUnmount(label);
     }
+  }
+}
+
+// ── Push stat-strip updates from sprint-status poll into live panels (issue #256) ──
+//
+// Called from smgmtPollRunStatus after each poll cycle.  sprintStatusMap is keyed
+// by sprint_label and each value has {issues, wall_clock_secs, started_at, ...}.
+// We compute outcome counts and est_remaining here so the stat strip stays live
+// without a separate snapshot request per poll tick.
+
+function _sllUpdateStatsFromStatusMap(sprintStatusMap) {
+  for (const [label, statusObj] of Object.entries(sprintStatusMap)) {
+    if (!_sllPanels[label]) continue;  // panel not mounted for this label
+
+    const issues = statusObj.issues || [];
+    const total  = issues.length;
+    const done   = issues.filter(i => i.status === 'done').length;
+    const failed = issues.filter(i => i.agent_status === 'failed').length;
+    const skipped = issues.filter(i => i.status === 'skipped' && i.agent_status !== 'failed').length;
+    const complete = done + failed + skipped;
+    const pending  = total - complete;
+
+    // Est. remaining: use wall_clock_secs / complete × pending as fallback
+    // (Full estimate data is only available via the /live snapshot endpoint;
+    //  the fallback keeps the cell populated every poll tick.)
+    let estRem = null;
+    if (complete > 0 && pending > 0 && statusObj.wall_clock_secs > 0) {
+      const avgSecs = statusObj.wall_clock_secs / complete;
+      estRem = Math.max(0, Math.round(avgSecs * pending / 60));
+    } else if (pending === 0 && complete > 0) {
+      estRem = 0;
+    }
+    // AC: No stat cell is left blank — show 0 if sprint is active but no estimate yet
+    if (estRem === null && total > 0) estRem = 0;
+
+    // Find in-progress ticket number for progress bar label
+    const inProgressIssue = issues.find(i => i.status === 'in-progress' || (
+      i.agent_status && (i.agent_status.includes('running'))
+    ));
+    const currentTicketNum = inProgressIssue ? inProgressIssue.number : null;
+
+    const snap = {
+      done_count:    done,
+      failed_count:  failed,
+      skipped_count: skipped,
+      total_count:   total,
+      complete_count: complete,
+      est_remaining_minutes: estRem,
+      current_ticket: currentTicketNum ? { number: currentTicketNum } : null,
+      // Preserve existing time/started_at from state — don't overwrite
+    };
+
+    smgmtLivePanelUpdateStats(label, snap);
   }
 }

@@ -3081,6 +3081,50 @@ def get_sprint_live_snapshot(sprint_label: str, project: str):
             iss = pending[0]
             current_ticket = {"number": iss.get("number"), "title": iss.get("title", "")}
 
+    # ── Outcome counts for the stat strip (issue #256) ───────────────────────
+    done_count    = sum(1 for i in issues if i.get("status") == "done")
+    failed_count  = sum(1 for i in issues if i.get("agent_status") == "failed")
+    # Skipped = status==skipped but NOT agent_status==failed (true skips: preflight, dry-run)
+    skipped_count = sum(
+        1 for i in issues
+        if i.get("status") == "skipped" and i.get("agent_status") != "failed"
+    )
+    total_count   = len(issues)
+    complete_count = done_count + failed_count + skipped_count  # all terminal states
+    pending_count  = total_count - complete_count
+
+    # ── Est. remaining (issue #256) ──────────────────────────────────────────
+    # Primary source: sum of per-ticket estimates (minutes) for non-terminal tickets.
+    # Fallback: pending_count × avg wall-clock time per completed ticket (minutes).
+    estimates: dict = status_data.get("estimates", {})
+    est_remaining_minutes: Optional[int] = None
+
+    if estimates and total_count > 0:
+        # estimates keys may be int or str (JSON serialises int keys as strings)
+        rem_minutes = 0
+        has_any_estimate = False
+        for iss in issues:
+            num = iss.get("number")
+            terminal = iss.get("status") in ("done", "skipped")
+            est_entry = estimates.get(str(num)) or estimates.get(num)
+            if est_entry:
+                has_any_estimate = True
+                if not terminal:
+                    rem_minutes += int(est_entry.get("minutes", 0))
+        if has_any_estimate:
+            est_remaining_minutes = rem_minutes
+
+    if est_remaining_minutes is None and complete_count > 0 and pending_count > 0:
+        # Fallback: avg wall-clock per completed ticket × pending count
+        wall_secs = status_data.get("wall_clock_secs", 0.0)
+        avg_secs = wall_secs / complete_count if complete_count > 0 else 0
+        est_remaining_minutes = max(0, round(avg_secs * pending_count / 60))
+
+    # AC: No stat cell is left blank — zero is acceptable.
+    # If the sprint is active but estimates aren't available yet, show 0 rather than null.
+    if est_remaining_minutes is None and total_count > 0:
+        est_remaining_minutes = 0
+
     # ── active_agent: derive from sprint state JSON (coder/tester transition) ──
     active_agent: Optional[dict] = None
     m = re.search(r"(\d+)", sprint_label)
@@ -3127,6 +3171,14 @@ def get_sprint_live_snapshot(sprint_label: str, project: str):
         "current_ticket": current_ticket,
         "active_agent": active_agent,
         "recent_log_lines": recent_log_lines,
+        # Stat strip fields (issue #256)
+        "done_count":           done_count,
+        "failed_count":         failed_count,
+        "skipped_count":        skipped_count,
+        "pending_count":        pending_count,
+        "total_count":          total_count,
+        "complete_count":       complete_count,
+        "est_remaining_minutes": est_remaining_minutes,
     }
 
 

@@ -804,6 +804,88 @@
 
     /* ── New Ticket modal ── */
     .nt-modal { width: min(560px, calc(100vw - 32px)); max-height: calc(100vh - 48px); overflow-y: auto; }
+
+    /* ── Backlog pane (issue #274) ── */
+    .smgmt-backlog-pane {
+      border: 2px dashed var(--border);
+      border-radius: 8px;
+      background: var(--surface-2);
+      margin-top: 16px;
+    }
+    .smgmt-backlog-pane.drag-over-backlog {
+      border-color: var(--blue);
+      box-shadow: 0 0 0 2px var(--blue-bg);
+      background: var(--blue-bg);
+    }
+    .smgmt-backlog-header-row {
+      display: flex; align-items: center; gap: 8px;
+      padding: 12px 18px;
+      cursor: pointer;
+      user-select: none;
+      border-radius: 8px 8px 0 0;
+    }
+    .smgmt-backlog-header-row:hover { background: rgba(0,0,0,.025); }
+    .smgmt-backlog-title {
+      font-size: 13px; font-weight: 700; color: var(--text); flex: 1;
+      display: flex; align-items: center; gap: 8px;
+    }
+    .smgmt-backlog-count-badge {
+      font-size: 11px; color: var(--text-sub); font-weight: 400;
+    }
+    .smgmt-backlog-chevron-icon {
+      font-size: 14px; color: var(--text-muted); transition: transform .2s;
+    }
+    .smgmt-backlog-pane.is-expanded .smgmt-backlog-chevron-icon {
+      transform: rotate(180deg);
+    }
+    .smgmt-backlog-tickets-container {
+      display: none;
+      border-top: 1px solid var(--border);
+      padding: 4px 0;
+      min-height: 48px;
+    }
+    .smgmt-backlog-pane.is-expanded .smgmt-backlog-tickets-container {
+      display: block;
+    }
+    .smgmt-backlog-hint-row {
+      font-size: 12px; color: var(--text-sub);
+      padding: 10px 18px;
+    }
+    /* "Move to" button on backlog ticket rows */
+    .smgmt-moveto-pill {
+      padding: 2px 8px; font-size: 11px; font-weight: 600;
+      background: var(--surface); color: var(--text-muted);
+      border: 1px solid var(--border);
+      border-radius: 5px; cursor: pointer;
+      opacity: 0; transition: opacity .15s, background .15s;
+      flex-shrink: 0;
+      white-space: nowrap;
+    }
+    .smgmt-ticket:hover .smgmt-moveto-pill { opacity: 1; }
+    .smgmt-moveto-pill:hover { background: var(--surface-hover); color: var(--text); }
+    /* "Move to" popup for backlog/sprint tickets */
+    .smgmt-moveto-popup {
+      position: fixed;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      box-shadow: 0 4px 16px rgba(0,0,0,.12);
+      z-index: 400;
+      min-width: 160px;
+      padding: 4px 0;
+    }
+    .smgmt-moveto-popup.hidden { display: none; }
+    .smgmt-moveto-option {
+      display: block; width: 100%;
+      text-align: left; padding: 7px 14px;
+      font-size: 13px;
+      background: none; border: none;
+      color: var(--text); cursor: pointer;
+      font-family: inherit;
+    }
+    .smgmt-moveto-option:hover { background: var(--surface-hover); }
+    .smgmt-moveto-option.is-backlog { color: var(--text-muted); }
+    .smgmt-moveto-divider { border: none; border-top: 1px solid var(--border); margin: 4px 0; }
     .nt-textarea { resize: vertical; min-height: 80px; font-family: inherit; }
     .nt-body-textarea { resize: vertical; min-height: 140px; font-family: monospace; font-size: 12px; }
     .nt-draft-divider { border-top: 1px solid var(--border); margin: 20px 0; }
@@ -950,6 +1032,37 @@
           <div id="smgmt-sprint-list" class="smgmt-sprint-list">
             <div class="loading-msg" id="smgmt-loading">Loading sprints…</div>
           </div>
+
+          <!-- Backlog pane (issue #274) — dashed border, grey tint, drag target -->
+          <div class="smgmt-backlog-pane is-expanded" id="smgmt-backlog-pane"
+               role="region" aria-label="Backlog"
+               ondragover="_smgmtBacklogDragOver(event)"
+               ondragleave="_smgmtBacklogDragLeave(event)"
+               ondrop="_smgmtDropOnBacklog(event)">
+            <div class="smgmt-backlog-header-row" id="smgmt-backlog-header-row"
+                 onclick="_smgmtBacklogToggle()"
+                 role="button" tabindex="0"
+                 aria-expanded="true"
+                 aria-controls="smgmt-backlog-tickets-container"
+                 onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();_smgmtBacklogToggle();}">
+              <span class="smgmt-backlog-title">
+                <i class="ti ti-inbox" style="font-size:14px;color:var(--text-muted)"></i>
+                Backlog
+                <span class="smgmt-backlog-count-badge" id="smgmt-backlog-count"></span>
+              </span>
+              <span class="smgmt-backlog-chevron-icon"><i class="ti ti-chevron-down"></i></span>
+            </div>
+            <div class="smgmt-backlog-tickets-container" id="smgmt-backlog-tickets-container">
+              <p class="smgmt-backlog-hint-row">Unassigned tickets — drag into a sprint above, or use Move to</p>
+              <div id="smgmt-backlog-tickets">
+                <div class="smgmt-drop-hint">Drop tickets here to remove sprint label</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- "Move to" popup (shared for backlog and sprint tickets) -->
+        <div class="smgmt-moveto-popup hidden" id="smgmt-moveto-popup" role="listbox" aria-label="Move to sprint">
         </div>
 
       </div>
@@ -1468,19 +1581,25 @@ function _smgmtRender(data) {
   const order   = data.order   || [];
   const issues  = data.issues  || [];
 
-  if (sprints.length === 0) {
-    listEl.innerHTML = '<div class="loading-msg">No sprints yet. Create one with + New Sprint.</div>';
-    return;
-  }
-
-  // Group issues by sprint number
+  // Group issues by sprint number; collect unassigned for backlog
   const bySprint = {};
+  const unassigned = [];
   issues.forEach(iss => {
     if (iss.sprint != null) {
       if (!bySprint[iss.sprint]) bySprint[iss.sprint] = [];
       bySprint[iss.sprint].push(iss);
+    } else {
+      unassigned.push(iss);
     }
   });
+
+  // Always render the backlog pane regardless of sprint count
+  _smgmtRenderBacklog(unassigned);
+
+  if (sprints.length === 0) {
+    listEl.innerHTML = '<div class="loading-msg">No sprints yet. Create one with + New Sprint.</div>';
+    return;
+  }
 
   // Use order list if available, else ascending
   const orderedNums = order.length > 0
@@ -1798,6 +1917,9 @@ function _smgmtTicketRowHtml(ticket, label) {
          rel="noopener" onclick="event.stopPropagation()">#${ticket.number}</a>
       <span class="smgmt-ticket-title" title="${escHtml(ticket.title)}">${escHtml(ticket.title)}</span>
       <span class="smgmt-ticket-status ${statusClass}">${escHtml(statusLabel)}</span>
+      <button class="smgmt-moveto-pill" tabindex="0"
+              onclick="event.stopPropagation();_smgmtMoveToOpen(event, ${ticket.number}, '${escHtml(label)}')"
+              onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();_smgmtMoveToOpen(event,${ticket.number},'${escHtml(label)}');}">Move to &#9660;</button>
     </div>`;
 }
 
@@ -2114,6 +2236,7 @@ function _smgmtTicketDragEnd(event) {
   if (pill) { pill.style.top = '-100px'; pill.style.left = '-100px'; pill.textContent = ''; }
   _smgmtDragTicket = null;
   document.querySelectorAll('.smgmt-sprint-card').forEach(el => el.classList.remove('drag-over-sprint'));
+  document.getElementById('smgmt-backlog-pane')?.classList.remove('drag-over-backlog');
 }
 
 function _smgmtDragOver(event, sprintLabel) {
@@ -2121,6 +2244,7 @@ function _smgmtDragOver(event, sprintLabel) {
     event.preventDefault();
     event.dataTransfer.dropEffect = 'move';
     document.querySelectorAll('.smgmt-sprint-card').forEach(b => b.classList.remove('drag-over-sprint'));
+    document.getElementById('smgmt-backlog-pane')?.classList.remove('drag-over-backlog');
     const target = document.getElementById(`smgmt-card-${sprintLabel}`);
     if (target) target.classList.add('drag-over-sprint');
   }
@@ -2135,6 +2259,7 @@ function _smgmtDragLeave(event) {
 async function _smgmtDropOnSprint(event, targetLabel) {
   event.preventDefault();
   document.querySelectorAll('.smgmt-sprint-card').forEach(el => el.classList.remove('drag-over-sprint'));
+  document.getElementById('smgmt-backlog-pane')?.classList.remove('drag-over-backlog');
 
   if (!_smgmtDragTicket) return;
   const dragInfo = _smgmtDragTicket;
@@ -2207,6 +2332,277 @@ async function _smgmtDropOnSprint(event, targetLabel) {
     }
   }
 }
+
+// ── Backlog pane (issue #274) ──────────────────────────────────────────────
+
+function _smgmtBacklogToggle() {
+  const pane = document.getElementById('smgmt-backlog-pane');
+  const hdr  = document.getElementById('smgmt-backlog-header-row');
+  if (!pane) return;
+  const expanded = pane.classList.toggle('is-expanded');
+  if (hdr) hdr.setAttribute('aria-expanded', String(expanded));
+}
+
+function _smgmtRenderBacklog(tickets) {
+  const countEl   = document.getElementById('smgmt-backlog-count');
+  const ticketsEl = document.getElementById('smgmt-backlog-tickets');
+  if (!ticketsEl) return;
+
+  if (countEl) {
+    countEl.textContent = tickets.length > 0
+      ? `· ${tickets.length} ticket${tickets.length !== 1 ? 's' : ''}`
+      : '';
+  }
+
+  // Sort newest first (higher issue number = newer)
+  const sorted = [...tickets].sort((a, b) => b.number - a.number);
+
+  // Build list of sprint labels for "Move to" popup
+  const allSprintNums = (_smgmtData?.sprints || []).sort((a, b) => a - b);
+
+  if (sorted.length === 0) {
+    ticketsEl.innerHTML = '<div class="smgmt-drop-hint" style="padding:14px 18px;text-align:center;">No backlog tickets — all caught up</div>';
+    return;
+  }
+
+  ticketsEl.innerHTML = sorted.map(t => _smgmtBacklogTicketHtml(t, allSprintNums)).join('');
+}
+
+function _smgmtBacklogTicketHtml(ticket, sprintNums) {
+  const isSelected = _smgmtSelectedIssues.has(ticket.number);
+  return `
+    <div class="smgmt-ticket${isSelected ? ' is-selected' : ''}" id="smgmt-ticket-${ticket.number}"
+         draggable="true"
+         data-issue="${ticket.number}"
+         data-sprint=""
+         ondragstart="_smgmtBacklogTicketDragStart(event, ${ticket.number})"
+         ondragend="_smgmtTicketDragEnd(event)">
+      <input type="checkbox" class="smgmt-ticket-cb"
+             ${isSelected ? 'checked' : ''}
+             onclick="event.stopPropagation()"
+             onchange="_smgmtToggleSelect(${ticket.number}, this.checked)">
+      <i class="ti ti-grip-vertical smgmt-ticket-grip"></i>
+      <a class="smgmt-ticket-num" href="${escHtml(ticket.url || '#')}" target="_blank"
+         rel="noopener" onclick="event.stopPropagation()">#${ticket.number}</a>
+      <span class="smgmt-ticket-title" title="${escHtml(ticket.title)}">${escHtml(ticket.title)}</span>
+      <button class="smgmt-moveto-pill" tabindex="0"
+              onclick="event.stopPropagation();_smgmtMoveToOpen(event, ${ticket.number}, null)"
+              onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();_smgmtMoveToOpen(event,${ticket.number},null);}">Move to &#9660;</button>
+    </div>`;
+}
+
+// ── "Move to" popup (shared for backlog and sprint tickets) ────────────────
+
+let _smgmtMoveToIssue  = null;  // issue number for currently open popup
+let _smgmtMoveFromSprint = null; // current sprint label (null if from backlog)
+
+function _smgmtMoveToOpen(event, issueNum, fromSprintLabel) {
+  event.stopPropagation();
+  const popup = document.getElementById('smgmt-moveto-popup');
+  if (!popup) return;
+
+  // Toggle: close if same issue
+  if (_smgmtMoveToIssue === issueNum && !popup.classList.contains('hidden')) {
+    _smgmtMoveToClose();
+    return;
+  }
+
+  _smgmtMoveToIssue    = issueNum;
+  _smgmtMoveFromSprint = fromSprintLabel || null;
+
+  const sprintNums = (_smgmtData?.sprints || []).sort((a, b) => a - b);
+
+  let html = '';
+  sprintNums.forEach(n => {
+    const label = `sprint-${n}`;
+    if (label === fromSprintLabel) return; // skip current sprint
+    html += `<button class="smgmt-moveto-option" onclick="_smgmtMoveToConfirm(${issueNum},'${label}')">Sprint ${n}</button>`;
+  });
+
+  // Only show Backlog option if ticket is currently in a sprint
+  if (fromSprintLabel) {
+    if (html) html += '<hr class="smgmt-moveto-divider">';
+    html += `<button class="smgmt-moveto-option is-backlog" onclick="_smgmtMoveToConfirm(${issueNum},null)">Backlog (remove sprint)</button>`;
+  }
+
+  if (!html) {
+    html = '<div style="padding:10px 14px;font-size:12px;color:var(--text-muted)">No sprints available</div>';
+  }
+
+  popup.innerHTML = html;
+  popup.classList.remove('hidden');
+  popup.setAttribute('aria-label', `Move ticket #${issueNum} to sprint`);
+
+  // Position popup near clicked button
+  const btn = event.currentTarget || event.target;
+  const rect = btn.getBoundingClientRect();
+  const popupH = 200;
+  const spaceBelow = window.innerHeight - rect.bottom;
+  if (spaceBelow < popupH) {
+    popup.style.top  = (rect.top + window.scrollY - popupH) + 'px';
+  } else {
+    popup.style.top  = (rect.bottom + window.scrollY) + 'px';
+  }
+  popup.style.left     = (rect.left + window.scrollX) + 'px';
+  popup.style.minWidth = Math.max(rect.width, 160) + 'px';
+
+  // Close on outside click
+  setTimeout(() => {
+    document.addEventListener('click', _smgmtMoveToOutsideHandler);
+  }, 0);
+}
+
+function _smgmtMoveToOutsideHandler(event) {
+  const popup = document.getElementById('smgmt-moveto-popup');
+  if (!popup || popup.contains(event.target)) return;
+  _smgmtMoveToClose();
+}
+
+function _smgmtMoveToClose() {
+  const popup = document.getElementById('smgmt-moveto-popup');
+  if (popup) popup.classList.add('hidden');
+  _smgmtMoveToIssue    = null;
+  _smgmtMoveFromSprint = null;
+  document.removeEventListener('click', _smgmtMoveToOutsideHandler);
+}
+
+async function _smgmtMoveToConfirm(issueNum, targetLabel) {
+  const fromSprint = _smgmtMoveFromSprint;  // capture before close resets it
+  _smgmtMoveToClose();
+
+  // targetLabel is "sprint-N" or null (backlog)
+  const targetNum = targetLabel ? parseInt(targetLabel.split('-')[1], 10) : null;
+
+  // Optimistic update
+  if (_smgmtData) {
+    const iss = _smgmtData.issues.find(i => i.number === issueNum);
+    if (iss) iss.sprint = targetNum;
+    _smgmtRender(_smgmtData);
+  }
+
+  const repo = _smgmtRepo();
+  try {
+    const res = await fetch(`/api/issues/${issueNum}/sprint-label`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sprint_label: targetLabel || 'backlog', project: repo }),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    await loadSprintMgmt();
+  } catch (e) {
+    // Rollback optimistic update
+    if (_smgmtData) {
+      const iss = _smgmtData.issues.find(i => i.number === issueNum);
+      if (iss) iss.sprint = fromSprint ? parseInt(fromSprint.split('-')[1], 10) : null;
+      _smgmtRender(_smgmtData);
+    }
+    _smgmtShowToast(`Failed to move #${issueNum}: ${e.message}`);
+  }
+}
+
+// ── Backlog drag handlers ──────────────────────────────────────────────────
+
+function _smgmtBacklogTicketDragStart(event, issueNum) {
+  _smgmtDragTicket = { number: issueNum, fromSprint: null, multi: null };
+  event.dataTransfer.effectAllowed = 'move';
+  event.dataTransfer.setData('text/plain', String(issueNum));
+  const el = document.getElementById(`smgmt-ticket-${issueNum}`);
+  if (el) setTimeout(() => el.classList.add('dragging-ticket'), 0);
+}
+
+function _smgmtBacklogDragOver(event) {
+  if (_smgmtDragTicket && _smgmtDragTicket.fromSprint !== null) {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+    document.getElementById('smgmt-backlog-pane')?.classList.add('drag-over-backlog');
+  }
+}
+
+function _smgmtBacklogDragLeave(event) {
+  const pane = document.getElementById('smgmt-backlog-pane');
+  if (pane && !pane.contains(event.relatedTarget)) {
+    pane.classList.remove('drag-over-backlog');
+  }
+}
+
+async function _smgmtDropOnBacklog(event) {
+  event.preventDefault();
+  document.getElementById('smgmt-backlog-pane')?.classList.remove('drag-over-backlog');
+
+  if (!_smgmtDragTicket) return;
+  const dragInfo = _smgmtDragTicket;
+  _smgmtDragTicket = null;
+
+  // If dragging from backlog back to backlog, no-op
+  if (!dragInfo.fromSprint) return;
+
+  const repo = _smgmtRepo();
+  if (!repo) return;
+
+  if (dragInfo.multi && dragInfo.multi.length > 1) {
+    const nums = dragInfo.multi;
+    if (_smgmtData) {
+      nums.forEach(n => {
+        const iss = _smgmtData.issues.find(i => i.number === n);
+        if (iss) iss.sprint = null;
+      });
+    }
+    _smgmtClearSelection();
+    if (_smgmtData) _smgmtRender(_smgmtData);
+
+    const changes = nums.map(n => ({ issue_num: n, sprint_label: 'backlog' }));
+    try {
+      const res = await fetch('/api/sprints/batch-labels', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ changes, project: repo }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      await loadSprintMgmt();
+    } catch (e) {
+      alert(`Failed to move tickets to backlog: ${e.message}`);
+      await loadSprintMgmt();
+    }
+  } else {
+    const { number, fromSprint } = dragInfo;
+
+    // Optimistic update
+    if (_smgmtData) {
+      const iss = _smgmtData.issues.find(i => i.number === number);
+      if (iss) iss.sprint = null;
+      _smgmtRender(_smgmtData);
+    }
+    _smgmtClearSelection();
+
+    try {
+      const res = await fetch(`/api/issues/${number}/sprint-label`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sprint_label: 'backlog', project: repo }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      await loadSprintMgmt();
+    } catch (e) {
+      // Rollback
+      if (_smgmtData) {
+        const iss = _smgmtData.issues.find(i => i.number === number);
+        if (iss) iss.sprint = fromSprint ? parseInt(fromSprint.split('-')[1], 10) : null;
+        _smgmtRender(_smgmtData);
+      }
+      alert(`Failed to move ticket #${number} to backlog: ${e.message}`);
+    }
+  }
+}
+
+// Close Move-to popup on Escape
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape') {
+    const popup = document.getElementById('smgmt-moveto-popup');
+    if (popup && !popup.classList.contains('hidden')) {
+      _smgmtMoveToClose();
+    }
+  }
+});
 
 // ── Trigger Refresh ───────────────────────────────────────────────────────
 async function smgmtTriggerRefresh() {

@@ -3104,11 +3104,10 @@ function smgmtRender() {
   if (sortedOrder.length === 0 && emptySprintNums.length === 0) {
     blocksHtml = '<div class="smgmt-loading">No sprints found. Use "+ New sprint" to create one.</div>';
   } else {
-    // Render all sprints (non-empty and empty) interleaved in ascending number order
-    blocksHtml = allSprintNums.map(({ num, isEmpty }) => {
-      if (isEmpty) {
-        return smgmtPlaceholderBlockHtml(num);
-      }
+    // Render all sprints (non-empty and empty) interleaved in ascending number order.
+    // Empty sprints that exist on GitHub use the full pane (with Delete + disabled Run);
+    // only the trailing placeholder uses smgmtPlaceholderBlockHtml.
+    blocksHtml = allSprintNums.map(({ num }) => {
       const label = `sprint-${num}`;
       return smgmtSprintBlockHtml(label, bySprintLabel[label] || [], label === lowestLabel);
     }).join('');
@@ -3174,7 +3173,7 @@ function smgmtSprintBlockHtml(label, tickets, isNext) {
     // Planned state: Run Sprint (neutral, disabled when no tickets or has completed)
     // issue #242: goal is no longer required to enable Run Sprint
     const runDisabled = !canRun ? 'disabled' : '';
-    const runTitle = !canRun ? 'Add at least one ticket first' : '';
+    const runTitle = !canRun ? 'No tickets to run' : '';
     actionBtn = `<button class="smgmt-run-btn" id="${actionBtnId}"
                 ${runDisabled} title="${runTitle}"
                 onclick="smgmtRunSprint('${label}')">
@@ -3216,7 +3215,7 @@ function smgmtSprintBlockHtml(label, tickets, isNext) {
           <span class="smgmt-sprint-name">Sprint ${n}</span>
           ${nextBadge}
           ${estimateSummaryHtml}
-          <span class="smgmt-sprint-count">${tickets.length} ticket${tickets.length !== 1 ? 's' : ''}</span>
+          <span class="smgmt-sprint-count">${tickets.length === 0 ? 'empty' : `${tickets.length} ticket${tickets.length !== 1 ? 's' : ''}`}</span>
         </div>
         <div class="smgmt-sprint-header-right">
           <button class="smgmt-finish-btn${hasCompleted ? '' : ' hidden'}" id="${finishBtnId}"
@@ -3955,11 +3954,19 @@ async function smgmtDropOnSprint(event, targetSprintLabel) {
 
     if (fromSprint === targetSprintLabel) return; // no-op
 
+    // Track whether this sprint was already in order before the optimistic update (for rollback)
+    const wasInOrder = !targetSprintLabel || _smgmtData.order.includes(targetSprintLabel);
+
     // Optimistic: move ticket in local data
     const iss = _smgmtData.issues.find(i => i.number === number);
     if (iss) {
       const targetNum = targetSprintLabel ? parseInt(targetSprintLabel.split('-')[1], 10) : null;
       iss.sprint = targetNum;
+    }
+    // If dropping onto an existing empty sprint (not yet in order), promote it optimistically
+    // so the ticket appears in the pane immediately after smgmtRender().
+    if (targetSprintLabel && !wasInOrder) {
+      _smgmtData.order.push(targetSprintLabel);
     }
     smgmtRender();
 
@@ -3974,11 +3981,14 @@ async function smgmtDropOnSprint(event, targetSprintLabel) {
       if (!res.ok) throw new Error(await res.text());
       await smgmtRefreshBoard();
     } catch (e) {
-      // Rollback: restore original sprint
+      // Rollback: restore original sprint and order
       const iss2 = _smgmtData.issues.find(i => i.number === number);
       if (iss2) {
         const origNum = fromSprint ? parseInt(fromSprint.split('-')[1], 10) : null;
         iss2.sprint = origNum;
+      }
+      if (targetSprintLabel && !wasInOrder) {
+        _smgmtData.order = _smgmtData.order.filter(l => l !== targetSprintLabel);
       }
       smgmtRender();
       smgmtShowError(`Failed to move ticket #${number}: ${e.message}`);

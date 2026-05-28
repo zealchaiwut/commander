@@ -652,6 +652,8 @@ async def diagnostics_page():
 # ── Legacy UI route (/legacy/<slug>/<tab>) ────────────────────────────────────
 # Deprecated legacy route: serves the old index.html UI.
 # Emits a warning on every hit so operators can track usage before removal.
+# New-ticket creation no longer navigates here — all ticket creation goes
+# through the current-UI modal on /project/ pages (issue #272).
 
 @app.get("/legacy/{path:path}")
 async def legacy_project_route(path: str):

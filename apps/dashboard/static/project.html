@@ -627,6 +627,50 @@
     }
     .btn-flash { animation: btnFlash .45s ease-in-out; }
 
+    /* ── Auto-refresh pill ── */
+    .smgmt-ar-pill {
+      position: relative;
+      display: flex; align-items: center; gap: 0;
+    }
+    .smgmt-ar-trigger {
+      display: flex; align-items: center; gap: 5px;
+      padding: 6px 10px;
+      border: 1px solid var(--border); border-right: none;
+      border-radius: 6px 0 0 6px;
+      background: none; color: var(--text-muted); font-size: 12px; font-weight: 500;
+      cursor: pointer; transition: background .15s, color .15s; white-space: nowrap;
+    }
+    .smgmt-ar-trigger:hover { background: var(--surface-2); color: var(--text); }
+    .smgmt-ar-trigger .ti { font-size: 14px; }
+    .smgmt-ar-caret-btn {
+      display: flex; align-items: center; justify-content: center;
+      padding: 6px 7px;
+      border: 1px solid var(--border);
+      border-radius: 0 6px 6px 0;
+      background: none; color: var(--text-muted); font-size: 11px;
+      cursor: pointer; transition: background .15s, color .15s;
+    }
+    .smgmt-ar-caret-btn:hover { background: var(--surface-2); color: var(--text); }
+    .smgmt-ar-dropdown {
+      position: absolute; top: calc(100% + 4px); right: 0;
+      min-width: 130px;
+      background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.10);
+      z-index: 50; overflow: hidden;
+      display: none;
+    }
+    .smgmt-ar-dropdown.open { display: block; }
+    .smgmt-ar-option {
+      display: block; width: 100%;
+      padding: 8px 14px; text-align: left;
+      background: none; border: none;
+      font-size: 12px; color: var(--text-muted); cursor: pointer;
+      transition: background .12s, color .12s;
+    }
+    .smgmt-ar-option:hover { background: var(--surface-2); color: var(--text); }
+    .smgmt-ar-option.selected { font-weight: 700; color: var(--text); }
+    .smgmt-ar-pill.is-off .smgmt-ar-trigger { color: var(--text-sub); }
+
     /* ── Inline selection action bar (above sprint list) ── */
     .smgmt-selection-bar {
       display: none;
@@ -803,9 +847,289 @@
     .ns-modal { width: min(480px, calc(100vw - 32px)); }
 
     /* ── New Ticket modal ── */
-    .nt-modal { width: min(500px, calc(100vw - 32px)); max-height: calc(100vh - 48px); overflow: hidden; }
-    .nt-modal .modal-body { overflow-y: auto; }
+    .nt-modal { width: min(560px, calc(100vw - 32px)); max-height: calc(100vh - 48px); overflow-y: auto; }
+
+    /* ── Backlog pane (issue #274) ── */
+    .smgmt-backlog-pane {
+      border: 2px dashed var(--border);
+      border-radius: 8px;
+      background: var(--surface-2);
+      margin-top: 16px;
+    }
+    .smgmt-backlog-pane.drag-over-backlog {
+      border-color: var(--blue);
+      box-shadow: 0 0 0 2px var(--blue-bg);
+      background: var(--blue-bg);
+    }
+    .smgmt-backlog-header-row {
+      display: flex; align-items: center; gap: 8px;
+      padding: 12px 18px;
+      cursor: pointer;
+      user-select: none;
+      border-radius: 8px 8px 0 0;
+    }
+    .smgmt-backlog-header-row:hover { background: rgba(0,0,0,.025); }
+    .smgmt-backlog-title {
+      font-size: 13px; font-weight: 700; color: var(--text); flex: 1;
+      display: flex; align-items: center; gap: 8px;
+    }
+    .smgmt-backlog-count-badge {
+      font-size: 11px; color: var(--text-sub); font-weight: 400;
+    }
+    .smgmt-backlog-chevron-icon {
+      font-size: 14px; color: var(--text-muted); transition: transform .2s;
+    }
+    .smgmt-backlog-pane.is-expanded .smgmt-backlog-chevron-icon {
+      transform: rotate(180deg);
+    }
+    .smgmt-backlog-tickets-container {
+      display: none;
+      border-top: 1px solid var(--border);
+      padding: 4px 0;
+      min-height: 48px;
+    }
+    .smgmt-backlog-pane.is-expanded .smgmt-backlog-tickets-container {
+      display: block;
+    }
+    .smgmt-backlog-hint-row {
+      font-size: 12px; color: var(--text-sub);
+      padding: 10px 18px;
+    }
+    /* "Move to" button on backlog ticket rows */
+    .smgmt-moveto-pill {
+      padding: 2px 8px; font-size: 11px; font-weight: 600;
+      background: var(--surface); color: var(--text-muted);
+      border: 1px solid var(--border);
+      border-radius: 5px; cursor: pointer;
+      opacity: 0; transition: opacity .15s, background .15s;
+      flex-shrink: 0;
+      white-space: nowrap;
+    }
+    .smgmt-ticket:hover .smgmt-moveto-pill { opacity: 1; }
+    .smgmt-moveto-pill:hover { background: var(--surface-hover); color: var(--text); }
+    /* "Move to" popup for backlog/sprint tickets */
+    .smgmt-moveto-popup {
+      position: fixed;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      box-shadow: 0 4px 16px rgba(0,0,0,.12);
+      z-index: 400;
+      min-width: 160px;
+      padding: 4px 0;
+    }
+    .smgmt-moveto-popup.hidden { display: none; }
+    .smgmt-moveto-option {
+      display: block; width: 100%;
+      text-align: left; padding: 7px 14px;
+      font-size: 13px;
+      background: none; border: none;
+      color: var(--text); cursor: pointer;
+      font-family: inherit;
+    }
+    .smgmt-moveto-option:hover { background: var(--surface-hover); }
+    .smgmt-moveto-option.is-backlog { color: var(--text-muted); }
+    .smgmt-moveto-divider { border: none; border-top: 1px solid var(--border); margin: 4px 0; }
     .nt-textarea { resize: vertical; min-height: 80px; font-family: inherit; }
+    .nt-body-textarea { resize: vertical; min-height: 140px; font-family: monospace; font-size: 12px; }
+    .nt-draft-divider { border-top: 1px solid var(--border); margin: 20px 0; }
+    .nt-spinner {
+      display: inline-block; width: 12px; height: 12px;
+      border: 2px solid currentColor; border-top-color: transparent;
+      border-radius: 50%; animation: nt-spin 0.7s linear infinite;
+      margin-right: 6px; vertical-align: middle;
+    }
+    @keyframes nt-spin { to { transform: rotate(360deg); } }
+
+    /* ── Board move overlay (issue #276) ── */
+    #pane-sprint-mgmt { position: relative; }
+    .smgmt-move-overlay {
+      display: none;
+      position: absolute;
+      inset: 0;
+      background: rgba(0,0,0,.35);
+      z-index: 500;
+      align-items: center;
+      justify-content: center;
+      border-radius: 0;
+    }
+    .smgmt-move-overlay.active { display: flex; }
+    .smgmt-move-overlay-pill {
+      display: flex; align-items: center; gap: 10px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 10px 20px;
+      font-size: 13px; font-weight: 600;
+      color: var(--text);
+      box-shadow: 0 4px 16px rgba(0,0,0,.18);
+      pointer-events: none;
+    }
+    .smgmt-move-spinner {
+      display: inline-block; width: 14px; height: 14px;
+      border: 2px solid var(--border); border-top-color: var(--blue);
+      border-radius: 50%; animation: smgmt-spin .7s linear infinite;
+      flex-shrink: 0;
+    }
+    @keyframes smgmt-spin { to { transform: rotate(360deg); } }
+
+    /* ── Running sprint block (issue #277) ── */
+
+    /* Flowing top-stripe animation */
+    @keyframes smgmt-running-stripe {
+      0%   { background-position: 0% 0; }
+      100% { background-position: 200% 0; }
+    }
+
+    /* Pulsing badge opacity */
+    @keyframes smgmt-running-badge-pulse {
+      0%, 100% { opacity: 1; }
+      50%       { opacity: 0.45; }
+    }
+
+    /* Shimmer sweep for progress bar */
+    @keyframes smgmt-shimmer {
+      0%   { transform: translateX(-100%); }
+      100% { transform: translateX(400%); }
+    }
+
+    /* Spinning ring for in-flight ticket */
+    @keyframes smgmt-ring-spin {
+      to { transform: rotate(360deg); }
+    }
+
+    /* Glow pulse on the card border */
+    @keyframes smgmt-glow-pulse {
+      0%, 100% { box-shadow: 0 0 0 1px var(--green), 0 0 8px 2px rgba(22,163,74,.18); }
+      50%       { box-shadow: 0 0 0 1px var(--green), 0 0 16px 5px rgba(22,163,74,.32); }
+    }
+
+    .smgmt-sprint-card.smgmt-running {
+      border-color: var(--green);
+      animation: smgmt-glow-pulse 2.4s ease-in-out infinite;
+    }
+
+    /* Flowing top stripe */
+    .smgmt-running-stripe {
+      height: 3px;
+      border-radius: 8px 8px 0 0;
+      background: linear-gradient(
+        90deg,
+        var(--green) 0%,
+        #4ade80 25%,
+        #86efac 50%,
+        #4ade80 75%,
+        var(--green) 100%
+      );
+      background-size: 200% 100%;
+      animation: smgmt-running-stripe 2s linear infinite;
+    }
+
+    /* Pulsing "Running" badge */
+    .smgmt-running-badge {
+      display: inline-flex; align-items: center; gap: 5px;
+      padding: 3px 9px; border-radius: 999px;
+      font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+      font-family: var(--mono);
+      background: var(--green-bg); color: var(--green);
+      animation: smgmt-running-badge-pulse 2s ease-in-out infinite;
+    }
+    .smgmt-running-badge .smgmt-running-badge-dot {
+      width: 6px; height: 6px; border-radius: 50%;
+      background: var(--green);
+    }
+
+    /* Stat strip */
+    .smgmt-running-stat-strip {
+      display: flex; align-items: center; flex-wrap: wrap; gap: 18px;
+      padding: 10px 18px;
+      background: var(--green-bg);
+      border-bottom: 1px solid rgba(22,163,74,.18);
+      font-family: var(--mono); font-size: 12px;
+    }
+    .smgmt-running-stat {
+      display: flex; align-items: baseline; gap: 5px;
+    }
+    .smgmt-running-stat .rsnum {
+      font-size: 16px; font-weight: 700;
+    }
+    .smgmt-running-stat .rsnum.green  { color: var(--green); }
+    .smgmt-running-stat .rsnum.red    { color: var(--red); }
+    .smgmt-running-stat .rsnum.muted  { color: var(--text-sub); }
+    .smgmt-running-stat .rsnum.amber  { color: var(--amber); }
+    .smgmt-running-stat .rslbl {
+      font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .05em;
+    }
+    .smgmt-running-time {
+      margin-left: auto;
+      font-size: 11px; color: var(--text-muted);
+      display: flex; align-items: center; gap: 5px;
+    }
+
+    /* Shimmer progress bar */
+    .smgmt-running-progress-wrap {
+      padding: 0 18px 10px;
+      background: var(--green-bg);
+    }
+    .smgmt-running-progress-track {
+      height: 4px;
+      background: rgba(22,163,74,.2);
+      border-radius: 2px;
+      overflow: hidden;
+      position: relative;
+    }
+    .smgmt-running-progress-fill {
+      height: 100%;
+      background: var(--green);
+      border-radius: 2px;
+      transition: width .6s ease;
+      position: relative;
+      overflow: hidden;
+    }
+    .smgmt-running-progress-shimmer {
+      position: absolute;
+      top: 0; left: 0;
+      width: 30%; height: 100%;
+      background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,.6) 50%, transparent 100%);
+      animation: smgmt-shimmer 1.8s ease-in-out infinite;
+    }
+
+    /* Per-ticket status indicators */
+    .smgmt-ticket-indicator {
+      flex-shrink: 0;
+      width: 18px; height: 18px;
+      display: flex; align-items: center; justify-content: center;
+    }
+    /* Spinning ring for in-flight */
+    .smgmt-ticket-indicator .ring {
+      width: 14px; height: 14px;
+      border: 2px solid rgba(22,163,74,.25);
+      border-top-color: var(--green);
+      border-radius: 50%;
+      animation: smgmt-ring-spin .8s linear infinite;
+    }
+    /* Filled check circle for completed */
+    .smgmt-ticket-indicator .circle-done {
+      width: 14px; height: 14px;
+      border-radius: 50%;
+      background: var(--green);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 9px; font-weight: 700; color: #fff;
+    }
+    /* Failed X circle */
+    .smgmt-ticket-indicator .circle-failed {
+      width: 14px; height: 14px;
+      border-radius: 50%;
+      background: var(--red);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 9px; font-weight: 700; color: #fff;
+    }
+    /* Empty circle for pending */
+    .smgmt-ticket-indicator .circle-pending {
+      width: 14px; height: 14px;
+      border-radius: 50%;
+      border: 2px solid var(--border);
+    }
   </style>
 </head>
 <body>
@@ -906,6 +1230,14 @@
       <!-- Sprint Mgmt tab -->
       <div class="tab-pane active" id="pane-sprint-mgmt" role="tabpanel" aria-labelledby="stab-sprint-mgmt">
 
+        <!-- Board move overlay (issue #276) -->
+        <div class="smgmt-move-overlay" id="smgmt-move-overlay" aria-live="assertive" aria-label="Moving ticket, please wait">
+          <div class="smgmt-move-overlay-pill">
+            <span class="smgmt-move-spinner"></span>
+            Moving…
+          </div>
+        </div>
+
         <!-- Toolbar -->
         <div class="smgmt-toolbar" id="smgmt-toolbar">
           <span class="smgmt-toolbar-title">Sprint Management</span>
@@ -916,12 +1248,27 @@
               <i class="ti ti-x"></i>
               Deselect (<span id="smgmt-deselect-count">0</span>)
             </button>
-            <button class="btn-ghost" id="smgmt-refresh-btn"
-                    onclick="smgmtTriggerRefresh()" title="Re-fetch sprints from GitHub"
-                    aria-label="Trigger Refresh">
-              <i class="ti ti-refresh"></i>
-              Trigger Refresh
-            </button>
+            <!-- Auto-refresh pill (issue #275) -->
+            <div class="smgmt-ar-pill" id="smgmt-ar-pill">
+              <button class="smgmt-ar-trigger" id="smgmt-ar-trigger"
+                      onclick="_smgmtArManualRefresh()"
+                      title="Click to refresh now">
+                <i class="ti ti-refresh" id="smgmt-ar-icon"></i>
+                <span id="smgmt-ar-label">Auto Refresh</span>
+              </button>
+              <button class="smgmt-ar-caret-btn" id="smgmt-ar-caret"
+                      onclick="_smgmtArToggleDropdown(event)"
+                      title="Change refresh interval"
+                      aria-label="Auto refresh interval">
+                <i class="ti ti-chevron-down"></i>
+              </button>
+              <div class="smgmt-ar-dropdown" id="smgmt-ar-dropdown" role="listbox">
+                <button class="smgmt-ar-option" data-interval="0" onclick="_smgmtArSelectInterval(0)">Off</button>
+                <button class="smgmt-ar-option" data-interval="1" onclick="_smgmtArSelectInterval(1)">1s</button>
+                <button class="smgmt-ar-option" data-interval="5" onclick="_smgmtArSelectInterval(5)">5s</button>
+                <button class="smgmt-ar-option" data-interval="10" onclick="_smgmtArSelectInterval(10)">10s</button>
+              </div>
+            </div>
             <button class="btn-ghost" id="smgmt-new-ticket-btn"
                     onclick="smgmtOpenNewTicket()" title="Create a new ticket"
                     aria-label="New Ticket">
@@ -942,6 +1289,37 @@
           <div id="smgmt-sprint-list" class="smgmt-sprint-list">
             <div class="loading-msg" id="smgmt-loading">Loading sprints…</div>
           </div>
+
+          <!-- Backlog pane (issue #274) — dashed border, grey tint, drag target -->
+          <div class="smgmt-backlog-pane is-expanded" id="smgmt-backlog-pane"
+               role="region" aria-label="Backlog"
+               ondragover="_smgmtBacklogDragOver(event)"
+               ondragleave="_smgmtBacklogDragLeave(event)"
+               ondrop="_smgmtDropOnBacklog(event)">
+            <div class="smgmt-backlog-header-row" id="smgmt-backlog-header-row"
+                 onclick="_smgmtBacklogToggle()"
+                 role="button" tabindex="0"
+                 aria-expanded="true"
+                 aria-controls="smgmt-backlog-tickets-container"
+                 onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();_smgmtBacklogToggle();}">
+              <span class="smgmt-backlog-title">
+                <i class="ti ti-inbox" style="font-size:14px;color:var(--text-muted)"></i>
+                Backlog
+                <span class="smgmt-backlog-count-badge" id="smgmt-backlog-count"></span>
+              </span>
+              <span class="smgmt-backlog-chevron-icon"><i class="ti ti-chevron-down"></i></span>
+            </div>
+            <div class="smgmt-backlog-tickets-container" id="smgmt-backlog-tickets-container">
+              <p class="smgmt-backlog-hint-row">Unassigned tickets — drag into a sprint above, or use Move to</p>
+              <div id="smgmt-backlog-tickets">
+                <div class="smgmt-drop-hint">Drop tickets here to remove sprint label</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- "Move to" popup (shared for backlog and sprint tickets) -->
+        <div class="smgmt-moveto-popup hidden" id="smgmt-moveto-popup" role="listbox" aria-label="Move to sprint">
         </div>
 
       </div>
@@ -1030,9 +1408,26 @@ const RERUN_STRIP_LABELS = new Set(['UAT','UAT-approved','released','SIT','in-pr
 // Cache for sprint outcome data: key = sprint label, value = outcome object
 const _smgmtOutcomeCache = {};
 
+// ── Running sprint live state (issue #277) ────────────────────────────────
+// Set of sprint labels that are currently running, populated on each render
+let _smgmtRunningLabels = new Set();
+// Live data cache: sprint label → last live snapshot from /api/sprints/{label}/live
+const _smgmtLiveCache = {};
+// Poll timer for live data
+let _smgmtLivePollId = null;
+
 // ── Tab navigation ────────────────────────────────────────────────────────────
 function switchTab(tab, pushHistory) {
   if (tab === 'sprint-history') return; // disabled
+
+  // Pause auto-refresh and live polling when leaving sprint-mgmt
+  if (_activeTab === 'sprint-mgmt' && tab !== 'sprint-mgmt') {
+    _smgmtArStopTicker();
+    if (_smgmtLivePollId !== null) {
+      clearInterval(_smgmtLivePollId);
+      _smgmtLivePollId = null;
+    }
+  }
 
   _activeTab = tab;
 
@@ -1066,7 +1461,10 @@ function switchTab(tab, pushHistory) {
   // Lazy-load sprint mgmt (only if _cachedFullRepo is already populated)
   if (tab === 'sprint-mgmt' && !_sprintMgmtLoaded && _cachedFullRepo[_slug]) {
     _sprintMgmtLoaded = true;
-    loadSprintMgmt();
+    loadSprintMgmt().then(() => _smgmtArInit());
+  } else if (tab === 'sprint-mgmt' && _sprintMgmtLoaded) {
+    // Tab switched back — restart ticker if not already running
+    if (_arTickerId === null && _arInterval > 0) _smgmtArStartTicker();
   }
 }
 
@@ -1404,6 +1802,7 @@ async function init() {
   if (_activeTab === 'sprint-mgmt') {
     _sprintMgmtLoaded = true;
     await loadSprintMgmt();
+    _smgmtArInit();
   }
 }
 
@@ -1429,7 +1828,8 @@ function _smgmtInitScrollShadow() {
 }
 
 // ── Sprint Mgmt: load sprint list ─────────────────────────────────────────
-async function loadSprintMgmt() {
+// silent=true skips the "Loading sprints…" spinner (used by auto-refresh)
+async function loadSprintMgmt(silent) {
   const listEl = document.getElementById('smgmt-sprint-list');
   if (!listEl) return;
 
@@ -1439,15 +1839,36 @@ async function loadSprintMgmt() {
     return;
   }
 
-  listEl.innerHTML = '<div class="loading-msg">Loading sprints…</div>';
+  if (!silent) listEl.innerHTML = '<div class="loading-msg">Loading sprints…</div>';
 
   try {
-    const resp = await fetch('/api/sprint-management/issues?repo=' + encodeURIComponent(repo));
+    // Fetch sprint management data + running sprint status in parallel
+    const [resp, runningResp] = await Promise.all([
+      fetch('/api/sprint-management/issues?repo=' + encodeURIComponent(repo)),
+      fetch('/api/sprints/running-all').catch(() => null),
+    ]);
     if (!resp.ok) throw new Error('HTTP ' + resp.status);
     const data = await resp.json();
+
+    // Update running labels set
+    _smgmtRunningLabels = new Set();
+    if (runningResp && runningResp.ok) {
+      const runningData = await runningResp.json();
+      const running = runningData.running || [];
+      running.forEach(r => {
+        // Only mark as running if this is the current project
+        if (r.project === repo) {
+          _smgmtRunningLabels.add(r.sprint_label);
+        }
+      });
+    }
+
     _smgmtRender(data);
+
+    // Start (or restart) live polling if there are running sprints
+    _smgmtLivePollRestart();
   } catch (err) {
-    listEl.innerHTML = '<div class="loading-msg">Failed to load sprints.</div>';
+    if (!silent) listEl.innerHTML = '<div class="loading-msg">Failed to load sprints.</div>';
   }
 }
 
@@ -1460,19 +1881,25 @@ function _smgmtRender(data) {
   const order   = data.order   || [];
   const issues  = data.issues  || [];
 
-  if (sprints.length === 0) {
-    listEl.innerHTML = '<div class="loading-msg">No sprints yet. Create one with + New Sprint.</div>';
-    return;
-  }
-
-  // Group issues by sprint number
+  // Group issues by sprint number; collect unassigned for backlog
   const bySprint = {};
+  const unassigned = [];
   issues.forEach(iss => {
     if (iss.sprint != null) {
       if (!bySprint[iss.sprint]) bySprint[iss.sprint] = [];
       bySprint[iss.sprint].push(iss);
+    } else {
+      unassigned.push(iss);
     }
   });
+
+  // Always render the backlog pane regardless of sprint count
+  _smgmtRenderBacklog(unassigned);
+
+  if (sprints.length === 0) {
+    listEl.innerHTML = '<div class="loading-msg">No sprints yet. Create one with + New Sprint.</div>';
+    return;
+  }
 
   // Use order list if available, else ascending
   const orderedNums = order.length > 0
@@ -1684,6 +2111,13 @@ function _smgmtHasCompletedTickets(tickets) {
 }
 
 function _smgmtCardHtml(label, n, tickets, outcome) {
+  const isRunning = _smgmtRunningLabels.has(label);
+
+  // Running sprint gets special animated treatment (issue #277)
+  if (isRunning) {
+    return _smgmtRunningCardHtml(label, n, tickets);
+  }
+
   const hasCompleted = _smgmtHasCompletedTickets(tickets);
   const canRun = !hasCompleted && tickets.length >= 1;
 
@@ -1762,6 +2196,236 @@ function _smgmtCardHtml(label, n, tickets, outcome) {
     </div>`;
 }
 
+// ── Running sprint card (issue #277) ──────────────────────────────────────
+
+/** Build the animated running sprint card HTML. Live data patched separately by _smgmtLivePatch. */
+function _smgmtRunningCardHtml(label, n, tickets) {
+  const live = _smgmtLiveCache[label] || null;
+
+  // Stat strip values (use live data if available, else zeros)
+  const doneCount     = live ? (live.done_count    || 0) : 0;
+  const failedCount   = live ? (live.failed_count  || 0) : 0;
+  const skippedCount  = live ? (live.skipped_count || 0) : 0;
+  const totalCount    = live ? (live.total_count   || tickets.length) : tickets.length;
+  const completeCount = doneCount + failedCount + skippedCount;
+  const estRemMins    = live ? live.est_remaining_minutes : null;
+  const timeSpentSec  = live ? (live.time_spent_sec || 0) : 0;
+  const currentTicket = live ? live.current_ticket : null;
+
+  // Progress bar percentage (complete / total)
+  const pct = totalCount > 0 ? Math.round((completeCount / totalCount) * 100) : 0;
+
+  // Build per-ticket indicator list from live issues data
+  // Match live issue statuses to ticket list
+  const liveIssues = (live && live.issues) ? live.issues : [];
+  const liveByNum = {};
+  liveIssues.forEach(i => { liveByNum[i.number] = i; });
+
+  const ticketRowsHtml = tickets.map(t => {
+    const liveIss = liveByNum[t.number];
+    const liveStatus = liveIss ? liveIss.status : null;
+    const agentStatus = liveIss ? liveIss.agent_status : null;
+
+    let indicator = '';
+    if (liveStatus === 'done') {
+      indicator = '<div class="smgmt-ticket-indicator"><div class="circle-done">&#10003;</div></div>';
+    } else if (agentStatus === 'failed' || liveStatus === 'skipped') {
+      indicator = '<div class="smgmt-ticket-indicator"><div class="circle-failed">&#10005;</div></div>';
+    } else if (currentTicket && t.number === currentTicket.number) {
+      // In-flight — show spinning ring
+      indicator = '<div class="smgmt-ticket-indicator"><div class="ring"></div></div>';
+    } else {
+      // Pending — empty circle
+      indicator = '<div class="smgmt-ticket-indicator"><div class="circle-pending"></div></div>';
+    }
+
+    return `<div class="smgmt-ticket" data-issue="${t.number}" draggable="false">
+      ${indicator}
+      <a class="smgmt-ticket-num" href="${escHtml(t.url || '#')}" target="_blank"
+         rel="noopener">#${t.number}</a>
+      <span class="smgmt-ticket-title" title="${escHtml(t.title)}">${escHtml(t.title)}</span>
+    </div>`;
+  }).join('');
+
+  return `
+    <div class="smgmt-sprint-card smgmt-running" id="smgmt-card-${escHtml(label)}">
+      <div class="smgmt-running-stripe"></div>
+      <div class="smgmt-sprint-header">
+        <div class="smgmt-sprint-header-left">
+          <i class="ti ti-layout-kanban" style="font-size:14px;color:var(--green)"></i>
+          <span class="smgmt-sprint-name" style="font-size:15px;font-weight:700;">Sprint ${escHtml(String(n))}</span>
+          <span class="smgmt-running-badge" id="smgmt-running-badge-${escHtml(label)}">
+            <span class="smgmt-running-badge-dot"></span>Running
+          </span>
+          <span class="smgmt-sprint-count">&middot; ${tickets.length} ticket${tickets.length !== 1 ? 's' : ''}</span>
+        </div>
+        <div class="smgmt-sprint-header-right">
+          <button class="smgmt-run-btn" disabled title="Sprint is currently running">
+            <i class="ti ti-player-play"></i> Running…</button>
+        </div>
+      </div>
+      <div class="smgmt-running-stat-strip" id="smgmt-running-stats-${escHtml(label)}">
+        <div class="smgmt-running-stat">
+          <span class="rsnum green" id="smgmt-rs-done-${escHtml(label)}">${doneCount}</span>
+          <span class="rslbl">Done</span>
+        </div>
+        <div class="smgmt-running-stat">
+          <span class="rsnum ${failedCount > 0 ? 'red' : 'muted'}" id="smgmt-rs-failed-${escHtml(label)}">${failedCount}</span>
+          <span class="rslbl">Failed</span>
+        </div>
+        <div class="smgmt-running-stat">
+          <span class="rsnum muted" id="smgmt-rs-skipped-${escHtml(label)}">${skippedCount}</span>
+          <span class="rslbl">Skipped</span>
+        </div>
+        <div class="smgmt-running-stat">
+          <span class="rsnum amber" id="smgmt-rs-est-${escHtml(label)}">${estRemMins != null ? estRemMins + 'm' : '—'}</span>
+          <span class="rslbl">Est. remaining</span>
+        </div>
+        <div class="smgmt-running-time" id="smgmt-rs-time-${escHtml(label)}">
+          <i class="ti ti-clock" style="font-size:12px;"></i>
+          ${_fmtRunningTime(timeSpentSec)}
+        </div>
+      </div>
+      <div class="smgmt-running-progress-wrap">
+        <div class="smgmt-running-progress-track">
+          <div class="smgmt-running-progress-fill" id="smgmt-rs-prog-${escHtml(label)}" style="width:${pct}%">
+            <div class="smgmt-running-progress-shimmer"></div>
+          </div>
+        </div>
+      </div>
+      <div class="smgmt-sprint-tickets" id="smgmt-tickets-${escHtml(label)}">
+        ${ticketRowsHtml || '<div class="smgmt-drop-hint">No tickets in this sprint</div>'}
+      </div>
+    </div>`;
+}
+
+/** Format seconds as h:mm or m:ss for the running sprint time display. */
+function _fmtRunningTime(secs) {
+  if (!secs || secs <= 0) return '0m 0s';
+  const h = Math.floor(secs / 3600);
+  const m = Math.floor((secs % 3600) / 60);
+  const s = secs % 60;
+  if (h > 0) return `${h}h ${m}m`;
+  return `${m}m ${s}s`;
+}
+
+/** Patch live stat strip + progress bar + ticket indicators in place (no full re-render). */
+function _smgmtLivePatch(label, live) {
+  const card = document.getElementById(`smgmt-card-${label}`);
+  if (!card || !card.classList.contains('smgmt-running')) return;
+
+  const doneCount    = live.done_count    || 0;
+  const failedCount  = live.failed_count  || 0;
+  const skippedCount = live.skipped_count || 0;
+  const totalCount   = live.total_count   || 0;
+  const completeCount = doneCount + failedCount + skippedCount;
+  const estRemMins   = live.est_remaining_minutes;
+  const timeSpentSec = live.time_spent_sec || 0;
+  const currentTicket = live.current_ticket;
+  const pct = totalCount > 0 ? Math.round((completeCount / totalCount) * 100) : 0;
+
+  // Update stat numbers
+  const doneEl    = document.getElementById(`smgmt-rs-done-${label}`);
+  const failedEl  = document.getElementById(`smgmt-rs-failed-${label}`);
+  const skippedEl = document.getElementById(`smgmt-rs-skipped-${label}`);
+  const estEl     = document.getElementById(`smgmt-rs-est-${label}`);
+  const timeEl    = document.getElementById(`smgmt-rs-time-${label}`);
+  const progEl    = document.getElementById(`smgmt-rs-prog-${label}`);
+
+  if (doneEl)    { doneEl.textContent = String(doneCount); }
+  if (failedEl)  {
+    failedEl.textContent = String(failedCount);
+    failedEl.className = `rsnum ${failedCount > 0 ? 'red' : 'muted'}`;
+  }
+  if (skippedEl) { skippedEl.textContent = String(skippedCount); }
+  if (estEl)     { estEl.textContent = estRemMins != null ? estRemMins + 'm' : '—'; }
+  if (timeEl)    {
+    timeEl.innerHTML = `<i class="ti ti-clock" style="font-size:12px;"></i> ${_fmtRunningTime(timeSpentSec)}`;
+  }
+  if (progEl)    { progEl.style.width = pct + '%'; }
+
+  // Update per-ticket status indicators
+  const liveIssues = live.issues || [];
+  const liveByNum = {};
+  liveIssues.forEach(i => { liveByNum[i.number] = i; });
+
+  card.querySelectorAll('.smgmt-ticket[data-issue]').forEach(row => {
+    const num = parseInt(row.dataset.issue, 10);
+    const indicatorEl = row.querySelector('.smgmt-ticket-indicator');
+    if (!indicatorEl) return;
+
+    const liveIss = liveByNum[num];
+    const liveStatus = liveIss ? liveIss.status : null;
+    const agentStatus = liveIss ? liveIss.agent_status : null;
+
+    if (liveStatus === 'done') {
+      indicatorEl.innerHTML = '<div class="circle-done">&#10003;</div>';
+    } else if (agentStatus === 'failed' || liveStatus === 'skipped') {
+      indicatorEl.innerHTML = '<div class="circle-failed">&#10005;</div>';
+    } else if (currentTicket && num === currentTicket.number) {
+      indicatorEl.innerHTML = '<div class="ring"></div>';
+    } else {
+      indicatorEl.innerHTML = '<div class="circle-pending"></div>';
+    }
+  });
+}
+
+/** Start or restart the live polling loop for any running sprints. */
+function _smgmtLivePollRestart() {
+  // Clear existing poll
+  if (_smgmtLivePollId !== null) {
+    clearInterval(_smgmtLivePollId);
+    _smgmtLivePollId = null;
+  }
+
+  if (_smgmtRunningLabels.size === 0) return;
+
+  // Poll every 2 seconds
+  _smgmtLivePollId = setInterval(_smgmtLivePollTick, 2000);
+  // Kick off immediately
+  _smgmtLivePollTick();
+}
+
+/** Fetch live data for all running sprints and patch in place. */
+async function _smgmtLivePollTick() {
+  if (_smgmtRunningLabels.size === 0) {
+    clearInterval(_smgmtLivePollId);
+    _smgmtLivePollId = null;
+    return;
+  }
+  const repo = _smgmtRepo();
+  if (!repo) return;
+
+  // Fetch live snapshot + sprint status (for per-issue statuses) in parallel
+  try {
+    const [statusResp] = await Promise.all([
+      fetch(`/api/sprint-status?project=${encodeURIComponent(repo)}`).catch(() => null),
+    ]);
+
+    // Build per-sprint per-issue map from sprint-status
+    const sprintIssueMap = {}; // label → issues[]
+    if (statusResp && statusResp.ok) {
+      const statusData = await statusResp.json();
+      (statusData.running_sprints || []).forEach(r => {
+        sprintIssueMap[r.sprint_label] = r.issues || [];
+      });
+    }
+
+    for (const label of _smgmtRunningLabels) {
+      const resp = await fetch(
+        `/api/sprints/${encodeURIComponent(label)}/live?project=${encodeURIComponent(repo)}`
+      ).catch(() => null);
+      if (resp && resp.ok) {
+        const live = await resp.json();
+        // Augment with per-issue status data from sprint-status endpoint
+        live.issues = sprintIssueMap[label] || [];
+        _smgmtLiveCache[label] = live;
+        _smgmtLivePatch(label, live);
+      }
+    }
+  } catch (_) { /* silently ignore poll errors */ }
+}
+
 function _smgmtTicketRowHtml(ticket, label) {
   const hasRework = (ticket.labels || []).some(l => l.name === 'need-rework' || l.name === 'needs-rework');
   const statusClass = hasRework ? 'smgmt-status-need-rework' : ({
@@ -1790,6 +2454,9 @@ function _smgmtTicketRowHtml(ticket, label) {
          rel="noopener" onclick="event.stopPropagation()">#${ticket.number}</a>
       <span class="smgmt-ticket-title" title="${escHtml(ticket.title)}">${escHtml(ticket.title)}</span>
       <span class="smgmt-ticket-status ${statusClass}">${escHtml(statusLabel)}</span>
+      <button class="smgmt-moveto-pill" tabindex="0"
+              onclick="event.stopPropagation();_smgmtMoveToOpen(event, ${ticket.number}, '${escHtml(label)}')"
+              onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();_smgmtMoveToOpen(event,${ticket.number},'${escHtml(label)}');}">Move to &#9660;</button>
     </div>`;
 }
 
@@ -2106,6 +2773,7 @@ function _smgmtTicketDragEnd(event) {
   if (pill) { pill.style.top = '-100px'; pill.style.left = '-100px'; pill.textContent = ''; }
   _smgmtDragTicket = null;
   document.querySelectorAll('.smgmt-sprint-card').forEach(el => el.classList.remove('drag-over-sprint'));
+  document.getElementById('smgmt-backlog-pane')?.classList.remove('drag-over-backlog');
 }
 
 function _smgmtDragOver(event, sprintLabel) {
@@ -2113,6 +2781,7 @@ function _smgmtDragOver(event, sprintLabel) {
     event.preventDefault();
     event.dataTransfer.dropEffect = 'move';
     document.querySelectorAll('.smgmt-sprint-card').forEach(b => b.classList.remove('drag-over-sprint'));
+    document.getElementById('smgmt-backlog-pane')?.classList.remove('drag-over-backlog');
     const target = document.getElementById(`smgmt-card-${sprintLabel}`);
     if (target) target.classList.add('drag-over-sprint');
   }
@@ -2127,7 +2796,10 @@ function _smgmtDragLeave(event) {
 async function _smgmtDropOnSprint(event, targetLabel) {
   event.preventDefault();
   document.querySelectorAll('.smgmt-sprint-card').forEach(el => el.classList.remove('drag-over-sprint'));
+  document.getElementById('smgmt-backlog-pane')?.classList.remove('drag-over-backlog');
 
+  // Block concurrent moves (issue #276)
+  if (_smgmtMoveLock) return;
   if (!_smgmtDragTicket) return;
   const dragInfo = _smgmtDragTicket;
   _smgmtDragTicket = null;
@@ -2152,6 +2824,7 @@ async function _smgmtDropOnSprint(event, targetLabel) {
     if (_smgmtData) _smgmtRender(_smgmtData);
 
     const changes = nums.map(n => ({ issue_num: n, sprint_label: targetLabel || 'backlog' }));
+    _smgmtBoardLock();
     try {
       const res = await fetch('/api/sprints/batch-labels', {
         method: 'POST',
@@ -2163,6 +2836,8 @@ async function _smgmtDropOnSprint(event, targetLabel) {
     } catch (e) {
       alert(`Failed to move tickets: ${e.message}`);
       await loadSprintMgmt();
+    } finally {
+      _smgmtBoardUnlock();
     }
   } else {
     // Single-ticket drop
@@ -2180,6 +2855,7 @@ async function _smgmtDropOnSprint(event, targetLabel) {
     // Clear selection after any drag completes
     _smgmtClearSelection();
 
+    _smgmtBoardLock();
     try {
       const res = await fetch(`/api/issues/${number}/sprint-label`, {
         method: 'POST',
@@ -2196,21 +2872,441 @@ async function _smgmtDropOnSprint(event, targetLabel) {
         _smgmtRender(_smgmtData);
       }
       alert(`Failed to move ticket #${number}: ${e.message}`);
+    } finally {
+      _smgmtBoardUnlock();
     }
   }
 }
 
-// ── Trigger Refresh ───────────────────────────────────────────────────────
-async function smgmtTriggerRefresh() {
-  const btn = document.getElementById('smgmt-refresh-btn');
-  if (btn) {
-    btn.classList.remove('btn-flash');
-    void btn.offsetWidth; // force reflow to restart animation
-    btn.classList.add('btn-flash');
-    btn.addEventListener('animationend', () => btn.classList.remove('btn-flash'), { once: true });
-  }
-  await loadSprintMgmt();
+// ── Backlog pane (issue #274) ──────────────────────────────────────────────
+
+function _smgmtBacklogToggle() {
+  const pane = document.getElementById('smgmt-backlog-pane');
+  const hdr  = document.getElementById('smgmt-backlog-header-row');
+  if (!pane) return;
+  const expanded = pane.classList.toggle('is-expanded');
+  if (hdr) hdr.setAttribute('aria-expanded', String(expanded));
 }
+
+function _smgmtRenderBacklog(tickets) {
+  const countEl   = document.getElementById('smgmt-backlog-count');
+  const ticketsEl = document.getElementById('smgmt-backlog-tickets');
+  if (!ticketsEl) return;
+
+  if (countEl) {
+    countEl.textContent = tickets.length > 0
+      ? `· ${tickets.length} ticket${tickets.length !== 1 ? 's' : ''}`
+      : '';
+  }
+
+  // Sort newest first (higher issue number = newer)
+  const sorted = [...tickets].sort((a, b) => b.number - a.number);
+
+  // Build list of sprint labels for "Move to" popup
+  const allSprintNums = (_smgmtData?.sprints || []).sort((a, b) => a - b);
+
+  if (sorted.length === 0) {
+    ticketsEl.innerHTML = '<div class="smgmt-drop-hint" style="padding:14px 18px;text-align:center;">No backlog tickets — all caught up</div>';
+    return;
+  }
+
+  ticketsEl.innerHTML = sorted.map(t => _smgmtBacklogTicketHtml(t, allSprintNums)).join('');
+}
+
+function _smgmtBacklogTicketHtml(ticket, sprintNums) {
+  const isSelected = _smgmtSelectedIssues.has(ticket.number);
+  return `
+    <div class="smgmt-ticket${isSelected ? ' is-selected' : ''}" id="smgmt-ticket-${ticket.number}"
+         draggable="true"
+         data-issue="${ticket.number}"
+         data-sprint=""
+         ondragstart="_smgmtBacklogTicketDragStart(event, ${ticket.number})"
+         ondragend="_smgmtTicketDragEnd(event)">
+      <input type="checkbox" class="smgmt-ticket-cb"
+             ${isSelected ? 'checked' : ''}
+             onclick="event.stopPropagation()"
+             onchange="_smgmtToggleSelect(${ticket.number}, this.checked)">
+      <i class="ti ti-grip-vertical smgmt-ticket-grip"></i>
+      <a class="smgmt-ticket-num" href="${escHtml(ticket.url || '#')}" target="_blank"
+         rel="noopener" onclick="event.stopPropagation()">#${ticket.number}</a>
+      <span class="smgmt-ticket-title" title="${escHtml(ticket.title)}">${escHtml(ticket.title)}</span>
+      <button class="smgmt-moveto-pill" tabindex="0"
+              onclick="event.stopPropagation();_smgmtMoveToOpen(event, ${ticket.number}, null)"
+              onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();_smgmtMoveToOpen(event,${ticket.number},null);}">Move to &#9660;</button>
+    </div>`;
+}
+
+// ── "Move to" popup (shared for backlog and sprint tickets) ────────────────
+
+let _smgmtMoveToIssue  = null;  // issue number for currently open popup
+let _smgmtMoveFromSprint = null; // current sprint label (null if from backlog)
+
+function _smgmtMoveToOpen(event, issueNum, fromSprintLabel) {
+  event.stopPropagation();
+  const popup = document.getElementById('smgmt-moveto-popup');
+  if (!popup) return;
+
+  // Toggle: close if same issue
+  if (_smgmtMoveToIssue === issueNum && !popup.classList.contains('hidden')) {
+    _smgmtMoveToClose();
+    return;
+  }
+
+  _smgmtMoveToIssue    = issueNum;
+  _smgmtMoveFromSprint = fromSprintLabel || null;
+
+  const sprintNums = (_smgmtData?.sprints || []).sort((a, b) => a - b);
+
+  let html = '';
+  sprintNums.forEach(n => {
+    const label = `sprint-${n}`;
+    if (label === fromSprintLabel) return; // skip current sprint
+    html += `<button class="smgmt-moveto-option" onclick="_smgmtMoveToConfirm(${issueNum},'${label}')">Sprint ${n}</button>`;
+  });
+
+  // Only show Backlog option if ticket is currently in a sprint
+  if (fromSprintLabel) {
+    if (html) html += '<hr class="smgmt-moveto-divider">';
+    html += `<button class="smgmt-moveto-option is-backlog" onclick="_smgmtMoveToConfirm(${issueNum},null)">Backlog (remove sprint)</button>`;
+  }
+
+  if (!html) {
+    html = '<div style="padding:10px 14px;font-size:12px;color:var(--text-muted)">No sprints available</div>';
+  }
+
+  popup.innerHTML = html;
+  popup.classList.remove('hidden');
+  popup.setAttribute('aria-label', `Move ticket #${issueNum} to sprint`);
+
+  // Position popup near clicked button
+  const btn = event.currentTarget || event.target;
+  const rect = btn.getBoundingClientRect();
+  const popupH = 200;
+  const spaceBelow = window.innerHeight - rect.bottom;
+  if (spaceBelow < popupH) {
+    popup.style.top  = (rect.top + window.scrollY - popupH) + 'px';
+  } else {
+    popup.style.top  = (rect.bottom + window.scrollY) + 'px';
+  }
+  popup.style.left     = (rect.left + window.scrollX) + 'px';
+  popup.style.minWidth = Math.max(rect.width, 160) + 'px';
+
+  // Close on outside click
+  setTimeout(() => {
+    document.addEventListener('click', _smgmtMoveToOutsideHandler);
+  }, 0);
+}
+
+function _smgmtMoveToOutsideHandler(event) {
+  const popup = document.getElementById('smgmt-moveto-popup');
+  if (!popup || popup.contains(event.target)) return;
+  _smgmtMoveToClose();
+}
+
+function _smgmtMoveToClose() {
+  const popup = document.getElementById('smgmt-moveto-popup');
+  if (popup) popup.classList.add('hidden');
+  _smgmtMoveToIssue    = null;
+  _smgmtMoveFromSprint = null;
+  document.removeEventListener('click', _smgmtMoveToOutsideHandler);
+}
+
+async function _smgmtMoveToConfirm(issueNum, targetLabel) {
+  // Block concurrent moves (issue #276)
+  if (_smgmtMoveLock) return;
+  const fromSprint = _smgmtMoveFromSprint;  // capture before close resets it
+  _smgmtMoveToClose();
+
+  // targetLabel is "sprint-N" or null (backlog)
+  const targetNum = targetLabel ? parseInt(targetLabel.split('-')[1], 10) : null;
+
+  // Optimistic update
+  if (_smgmtData) {
+    const iss = _smgmtData.issues.find(i => i.number === issueNum);
+    if (iss) iss.sprint = targetNum;
+    _smgmtRender(_smgmtData);
+  }
+
+  const repo = _smgmtRepo();
+  _smgmtBoardLock();
+  try {
+    const res = await fetch(`/api/issues/${issueNum}/sprint-label`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sprint_label: targetLabel || 'backlog', project: repo }),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    await loadSprintMgmt();
+  } catch (e) {
+    // Rollback optimistic update
+    if (_smgmtData) {
+      const iss = _smgmtData.issues.find(i => i.number === issueNum);
+      if (iss) iss.sprint = fromSprint ? parseInt(fromSprint.split('-')[1], 10) : null;
+      _smgmtRender(_smgmtData);
+    }
+    _smgmtShowToast(`Failed to move #${issueNum}: ${e.message}`);
+  } finally {
+    _smgmtBoardUnlock();
+  }
+}
+
+// ── Backlog drag handlers ──────────────────────────────────────────────────
+
+function _smgmtBacklogTicketDragStart(event, issueNum) {
+  _smgmtDragTicket = { number: issueNum, fromSprint: null, multi: null };
+  event.dataTransfer.effectAllowed = 'move';
+  event.dataTransfer.setData('text/plain', String(issueNum));
+  const el = document.getElementById(`smgmt-ticket-${issueNum}`);
+  if (el) setTimeout(() => el.classList.add('dragging-ticket'), 0);
+}
+
+function _smgmtBacklogDragOver(event) {
+  if (_smgmtDragTicket && _smgmtDragTicket.fromSprint !== null) {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+    document.getElementById('smgmt-backlog-pane')?.classList.add('drag-over-backlog');
+  }
+}
+
+function _smgmtBacklogDragLeave(event) {
+  const pane = document.getElementById('smgmt-backlog-pane');
+  if (pane && !pane.contains(event.relatedTarget)) {
+    pane.classList.remove('drag-over-backlog');
+  }
+}
+
+async function _smgmtDropOnBacklog(event) {
+  event.preventDefault();
+  document.getElementById('smgmt-backlog-pane')?.classList.remove('drag-over-backlog');
+
+  // Block concurrent moves (issue #276)
+  if (_smgmtMoveLock) return;
+  if (!_smgmtDragTicket) return;
+  const dragInfo = _smgmtDragTicket;
+  _smgmtDragTicket = null;
+
+  // If dragging from backlog back to backlog, no-op
+  if (!dragInfo.fromSprint) return;
+
+  const repo = _smgmtRepo();
+  if (!repo) return;
+
+  if (dragInfo.multi && dragInfo.multi.length > 1) {
+    const nums = dragInfo.multi;
+    if (_smgmtData) {
+      nums.forEach(n => {
+        const iss = _smgmtData.issues.find(i => i.number === n);
+        if (iss) iss.sprint = null;
+      });
+    }
+    _smgmtClearSelection();
+    if (_smgmtData) _smgmtRender(_smgmtData);
+
+    const changes = nums.map(n => ({ issue_num: n, sprint_label: 'backlog' }));
+    _smgmtBoardLock();
+    try {
+      const res = await fetch('/api/sprints/batch-labels', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ changes, project: repo }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      await loadSprintMgmt();
+    } catch (e) {
+      alert(`Failed to move tickets to backlog: ${e.message}`);
+      await loadSprintMgmt();
+    } finally {
+      _smgmtBoardUnlock();
+    }
+  } else {
+    const { number, fromSprint } = dragInfo;
+
+    // Optimistic update
+    if (_smgmtData) {
+      const iss = _smgmtData.issues.find(i => i.number === number);
+      if (iss) iss.sprint = null;
+      _smgmtRender(_smgmtData);
+    }
+    _smgmtClearSelection();
+
+    _smgmtBoardLock();
+    try {
+      const res = await fetch(`/api/issues/${number}/sprint-label`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sprint_label: 'backlog', project: repo }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      await loadSprintMgmt();
+    } catch (e) {
+      // Rollback
+      if (_smgmtData) {
+        const iss = _smgmtData.issues.find(i => i.number === number);
+        if (iss) iss.sprint = fromSprint ? parseInt(fromSprint.split('-')[1], 10) : null;
+        _smgmtRender(_smgmtData);
+      }
+      alert(`Failed to move ticket #${number} to backlog: ${e.message}`);
+    } finally {
+      _smgmtBoardUnlock();
+    }
+  }
+}
+
+// Close Move-to popup on Escape
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape') {
+    const popup = document.getElementById('smgmt-moveto-popup');
+    if (popup && !popup.classList.contains('hidden')) {
+      _smgmtMoveToClose();
+    }
+  }
+});
+
+// ── Board move lock (issue #276) ──────────────────────────────────────────
+let _smgmtMoveLock = false;
+
+/** Show the full-board overlay and suppress auto-refresh for the duration of a move. */
+function _smgmtBoardLock() {
+  _smgmtMoveLock = true;
+  // Pause the auto-refresh ticker without changing the user's chosen interval
+  _smgmtArStopTicker();
+  const overlay = document.getElementById('smgmt-move-overlay');
+  if (overlay) overlay.classList.add('active');
+}
+
+/** Hide the overlay and resume auto-refresh at the previously chosen interval. */
+function _smgmtBoardUnlock() {
+  _smgmtMoveLock = false;
+  const overlay = document.getElementById('smgmt-move-overlay');
+  if (overlay) overlay.classList.remove('active');
+  // Resume auto-refresh if an interval is selected
+  if (_arInterval > 0) _smgmtArStartTicker();
+}
+
+// ── Auto-refresh pill (issue #275) ────────────────────────────────────────
+const _AR_SESSION_KEY = 'smgmt-ar-interval';
+const _AR_INTERVALS   = [0, 1, 5, 10]; // 0 = Off
+
+let _arInterval   = 5;   // active interval in seconds (0 = off)
+let _arCountdown  = 0;   // current countdown value
+let _arTickerId   = null; // setInterval handle
+
+/** Initialise the pill from sessionStorage and start ticking if needed. */
+function _smgmtArInit() {
+  const saved = parseInt(sessionStorage.getItem(_AR_SESSION_KEY), 10);
+  const interval = _AR_INTERVALS.includes(saved) ? saved : 5;
+  _smgmtArSelectInterval(interval, /*skipSave=*/false);
+}
+
+/** Refresh board data preserving scroll position; flash the icon. */
+async function _smgmtArDoRefresh() {
+  const icon = document.getElementById('smgmt-ar-icon');
+  if (icon) {
+    icon.classList.remove('btn-flash');
+    void icon.offsetWidth;
+    icon.classList.add('btn-flash');
+    icon.addEventListener('animationend', () => icon.classList.remove('btn-flash'), { once: true });
+  }
+  const scrollY = window.scrollY;
+  await loadSprintMgmt(/*silent=*/true);
+  window.scrollTo({ top: scrollY, behavior: 'instant' });
+}
+
+/** Manual refresh triggered by clicking the pill label/icon. */
+async function _smgmtArManualRefresh() {
+  // Suppressed while a move is in flight (issue #276)
+  if (_smgmtMoveLock) return;
+  if (_arTickerId !== null) {
+    // Reset countdown so next auto-tick is a full interval away
+    _arCountdown = _arInterval;
+    _smgmtArUpdateLabel();
+  }
+  await _smgmtArDoRefresh();
+}
+
+/** Called every second by setInterval. */
+function _smgmtArTick() {
+  // Suppressed while a move is in flight (issue #276)
+  if (_smgmtMoveLock) return;
+  if (_arCountdown <= 1) {
+    _arCountdown = _arInterval;
+    _smgmtArUpdateLabel();
+    _smgmtArDoRefresh();
+  } else {
+    _arCountdown--;
+    _smgmtArUpdateLabel();
+  }
+}
+
+/** Start the ticker for the current _arInterval. */
+function _smgmtArStartTicker() {
+  _smgmtArStopTicker();
+  if (_arInterval <= 0) return;
+  _arCountdown = _arInterval;
+  _smgmtArUpdateLabel();
+  _arTickerId = setInterval(_smgmtArTick, 1000);
+}
+
+/** Stop the ticker. */
+function _smgmtArStopTicker() {
+  if (_arTickerId !== null) {
+    clearInterval(_arTickerId);
+    _arTickerId = null;
+  }
+}
+
+/** Update the pill label text. */
+function _smgmtArUpdateLabel() {
+  const label = document.getElementById('smgmt-ar-label');
+  const pill  = document.getElementById('smgmt-ar-pill');
+  if (!label) return;
+  if (_arInterval <= 0) {
+    label.textContent = 'Auto Refresh';
+    if (pill) pill.classList.add('is-off');
+  } else {
+    label.textContent = `Auto Refresh (${_arCountdown}s)`;
+    if (pill) pill.classList.remove('is-off');
+  }
+}
+
+/** Select a new interval, persist to sessionStorage, restart ticker. */
+function _smgmtArSelectInterval(interval, skipSave) {
+  _arInterval = interval;
+  if (!skipSave) sessionStorage.setItem(_AR_SESSION_KEY, String(interval));
+
+  // Update selected state on dropdown options
+  document.querySelectorAll('.smgmt-ar-option').forEach(btn => {
+    const v = parseInt(btn.dataset.interval, 10);
+    btn.classList.toggle('selected', v === interval);
+  });
+
+  _smgmtArStopTicker();
+  if (interval > 0) {
+    _smgmtArStartTicker();
+  } else {
+    _smgmtArUpdateLabel();
+  }
+
+  // Close dropdown
+  const dd = document.getElementById('smgmt-ar-dropdown');
+  if (dd) dd.classList.remove('open');
+}
+
+/** Toggle dropdown open/closed. */
+function _smgmtArToggleDropdown(e) {
+  e.stopPropagation();
+  const dd = document.getElementById('smgmt-ar-dropdown');
+  if (dd) dd.classList.toggle('open');
+}
+
+// Close dropdown when clicking outside
+document.addEventListener('click', function(e) {
+  const pill = document.getElementById('smgmt-ar-pill');
+  if (pill && !pill.contains(e.target)) {
+    const dd = document.getElementById('smgmt-ar-dropdown');
+    if (dd) dd.classList.remove('open');
+  }
+});
 
 // ── New Sprint modal ──────────────────────────────────────────────────────
 function smgmtOpenNewSprint() {
@@ -2238,18 +3334,23 @@ function _nsShowError(msg) {
 }
 
 // ── New Ticket modal ──────────────────────────────────────────────────────
-async function smgmtOpenNewTicket() {
-  const sel = document.getElementById('nt-project');
-  sel.innerHTML = '<option value="">Loading projects…</option>';
-  sel.disabled = true;
+let _ntDraftId = null;
 
+async function smgmtOpenNewTicket() {
+  // Reset to input state
+  _ntDraftId = null;
   document.getElementById('nt-description').value = '';
   document.getElementById('nt-error').classList.add('hidden');
   document.getElementById('nt-submit-btn').disabled = false;
   document.getElementById('nt-submit-btn').textContent = 'Generate Draft';
+  document.getElementById('nt-draft-section').classList.add('hidden');
   document.getElementById('nt-backdrop').classList.remove('hidden');
   document.getElementById('nt-modal').classList.remove('hidden');
 
+  // Populate project dropdown
+  const sel = document.getElementById('nt-project');
+  sel.innerHTML = '<option value="">Loading projects…</option>';
+  sel.disabled = true;
   try {
     const r = await fetch('/api/projects');
     if (!r.ok) throw new Error('HTTP ' + r.status);
@@ -2343,6 +3444,7 @@ function _setupModals() {
   // ── New Ticket modal wiring ──
   document.getElementById('nt-close-btn').addEventListener('click', _ntClose);
   document.getElementById('nt-cancel-btn').addEventListener('click', _ntClose);
+  document.getElementById('nt-post-cancel-btn').addEventListener('click', _ntClose);
   document.getElementById('nt-backdrop').addEventListener('click', _ntClose);
 
   document.getElementById('nt-modal').addEventListener('keydown', function(e) {
@@ -2366,8 +3468,9 @@ function _setupModals() {
     }
 
     this.disabled = true;
-    this.textContent = 'Submitting…';
+    this.innerHTML = '<span class="nt-spinner"></span>Generating…';
     document.getElementById('nt-error').classList.add('hidden');
+    document.getElementById('nt-draft-section').classList.add('hidden');
 
     try {
       const formData = new FormData();
@@ -2378,14 +3481,56 @@ function _setupModals() {
         const data = await resp.json().catch(() => ({}));
         throw new Error(data.detail || 'HTTP ' + resp.status);
       }
-      // Draft generated — navigate to the project on main index to finish posting
-      _ntClose();
-      window.location.href = '/project/' + encodeURIComponent(repo) + '/sprint-mgmt';
+      const data = await resp.json();
+      _ntDraftId = data.draft_id;
+      document.getElementById('nt-title').value = data.title || '';
+      document.getElementById('nt-body').value = data.body || '';
+      document.getElementById('nt-draft-section').classList.remove('hidden');
+      document.getElementById('nt-modal').scrollTop = document.getElementById('nt-modal').scrollHeight;
     } catch (err) {
-      document.getElementById('nt-error').textContent = "Couldn't create ticket — " + err.message;
+      document.getElementById('nt-error').textContent = "Couldn't generate draft — " + err.message;
       document.getElementById('nt-error').classList.remove('hidden');
+    } finally {
       this.disabled = false;
       this.textContent = 'Generate Draft';
+    }
+  });
+
+  document.getElementById('nt-post-btn').addEventListener('click', async function() {
+    const title = (document.getElementById('nt-title').value || '').trim();
+    const repo = document.getElementById('nt-project').value;
+    if (!title) {
+      document.getElementById('nt-error').textContent = 'Title is required before posting.';
+      document.getElementById('nt-error').classList.remove('hidden');
+      return;
+    }
+
+    this.disabled = true;
+    this.innerHTML = '<span class="nt-spinner"></span>Posting…';
+    document.getElementById('nt-error').classList.add('hidden');
+
+    try {
+      const formData = new FormData();
+      formData.append('draft_id', _ntDraftId || '');
+      formData.append('title', title);
+      formData.append('body', document.getElementById('nt-body').value);
+      formData.append('project', repo);
+      const resp = await fetch('/api/tickets/create', { method: 'POST', body: formData });
+      if (!resp.ok) {
+        const data = await resp.json().catch(() => ({}));
+        throw new Error(data.detail || 'HTTP ' + resp.status);
+      }
+      _ntClose();
+      _smgmtShowToast('Ticket created successfully');
+      // Refresh both views without a hard page reload
+      await loadSprintMgmt();
+      loadTickets().catch(() => {});
+    } catch (err) {
+      document.getElementById('nt-error').textContent = "Couldn't post ticket — " + err.message;
+      document.getElementById('nt-error').classList.remove('hidden');
+    } finally {
+      this.disabled = false;
+      this.textContent = 'Post to GitHub';
     }
   });
 }
@@ -2432,7 +3577,9 @@ document.addEventListener('DOMContentLoaded', init);
     <span class="modal-title" id="nt-modal-title">New Ticket</span>
     <button class="modal-close" id="nt-close-btn" aria-label="Close">&times;</button>
   </div>
-  <div class="modal-body">
+
+  <!-- Step 1: input form -->
+  <div class="modal-body" id="nt-input-section">
     <div class="modal-field">
       <label class="modal-label" for="nt-project">Project <span style="color:var(--red)">*</span></label>
       <select class="modal-input" id="nt-project" aria-required="true"></select>
@@ -2446,9 +3593,28 @@ document.addEventListener('DOMContentLoaded', init);
     </div>
     <div class="modal-error hidden" id="nt-error"></div>
   </div>
-  <div class="modal-footer">
+  <div class="modal-footer" id="nt-generate-footer">
     <button class="btn-ghost" id="nt-cancel-btn" type="button">Cancel</button>
     <button class="btn-primary" id="nt-submit-btn" type="button">Generate Draft</button>
+  </div>
+
+  <!-- Step 2: draft review (hidden until draft generated) -->
+  <div id="nt-draft-section" class="hidden">
+    <div class="nt-draft-divider"></div>
+    <div class="modal-body">
+      <div class="modal-field">
+        <label class="modal-label" for="nt-title">Title</label>
+        <input class="modal-input" id="nt-title" type="text" autocomplete="off">
+      </div>
+      <div class="modal-field">
+        <label class="modal-label" for="nt-body">Body <span class="modal-hint" style="font-weight:normal;color:var(--text-muted)">(edit before posting)</span></label>
+        <textarea class="modal-input nt-body-textarea" id="nt-body" rows="10"></textarea>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-ghost" id="nt-post-cancel-btn" type="button">Cancel</button>
+      <button class="btn-primary" id="nt-post-btn" type="button">Post to GitHub</button>
+    </div>
   </div>
 </div>
 

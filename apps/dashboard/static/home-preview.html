@@ -364,13 +364,9 @@
       0%,100% { opacity: 1; transform: scale(1); }
       50%     { opacity: 0.5; transform: scale(0.75); }
     }
-    /* Health icon animation when system is down */
-    @keyframes healthPulse {
-      0%,100% { opacity: 1; }
-      50%      { opacity: 0.4; }
-    }
+    /* Health icon animation when system is down — reuses pulseDot keyframe */
     #health-icon.health-down {
-      animation: healthPulse 1s ease-in-out infinite;
+      animation: pulseDot 1s ease-in-out infinite;
     }
 
     /* ── Progress line + bar ── */

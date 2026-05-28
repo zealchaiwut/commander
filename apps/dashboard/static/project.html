@@ -490,17 +490,38 @@
       font-size: 12px; color: var(--text-sub); text-align: center;
       padding: 10px; border: 1px dashed var(--border); border-radius: 5px; margin: 4px 8px;
     }
-    .smgmt-sprint-card.drag-over-sprint { border-color: var(--blue); box-shadow: 0 0 0 2px var(--blue-bg); }
-    .smgmt-sprint-card.drag-over-sprint .smgmt-drop-hint { border-color: var(--blue); }
+    .smgmt-sprint-card.drag-over-sprint,
+    .smgmt-sprint-block.drag-over-sprint { border-color: var(--blue); box-shadow: 0 0 0 2px var(--blue-bg); }
+    .smgmt-sprint-card.drag-over-sprint .smgmt-drop-hint,
+    .smgmt-sprint-block.drag-over-sprint .smgmt-drop-hint { border-color: var(--blue); }
+    .smgmt-sprint-block.drag-over-zone { border-color: var(--blue); box-shadow: 0 0 0 2px var(--blue-bg); }
     .smgmt-ticket {
       display: flex; align-items: center; gap: 8px;
       padding: 9px 16px; background: var(--surface); font-size: 12px;
-      cursor: default; transition: background 0.15s;
+      cursor: default; transition: background 0.15s, box-shadow 0.12s;
     }
     .smgmt-ticket:hover { background: var(--surface-hover); }
-    .smgmt-ticket.dragging-ticket { opacity: .4; }
+    .smgmt-ticket[draggable="true"]:hover { cursor: grab; }
+    .smgmt-ticket[draggable="true"]:active { cursor: grabbing; }
+    .smgmt-ticket[draggable="false"] { cursor: default; }
+    .smgmt-ticket.dragging-ticket {
+      opacity: 0.5;
+      box-shadow: 0 6px 20px rgba(0,0,0,0.14);
+      position: relative; z-index: 1;
+    }
+    .smgmt-ticket.drag-before { box-shadow: inset 0 2px 0 var(--blue); }
+    .smgmt-ticket.drag-after  { box-shadow: inset 0 -2px 0 var(--blue); }
     .smgmt-ticket.is-selected { background: var(--blue-bg); border-left: 3px solid var(--blue); }
-    .smgmt-ticket-grip { cursor: grab; color: var(--text-sub); font-size: 13px; flex-shrink: 0; }
+    .smgmt-ticket-grip {
+      color: var(--text-sub); font-size: 13px; flex-shrink: 0;
+      opacity: 0; transition: opacity 0.15s, color 0.15s, transform 0.12s;
+      cursor: grab;
+    }
+    .smgmt-ticket[draggable="true"]:hover .smgmt-ticket-grip { opacity: 1; }
+    .smgmt-ticket.dragging-ticket .smgmt-ticket-grip {
+      opacity: 1; color: var(--text); transform: scale(1.18);
+    }
+    .smgmt-ticket[draggable="false"] .smgmt-ticket-grip { opacity: 0 !important; cursor: default; }
     .smgmt-ticket-grip:active { cursor: grabbing; }
     .smgmt-ticket-cb { cursor: pointer; flex-shrink: 0; }
     .smgmt-ticket-num {

@@ -2687,6 +2687,8 @@ let _smgmtBacklogDragRestoreTimer = null; // timer to restore sticky after drag
 let _smgmtRerunLabel     = null;   // sprint label pending rerun confirmation
 let _smgmtCleanupLabels  = [];     // empty sprint labels pending cleanup confirmation
 let _smgmtAutoRefreshTimer     = null; // interval timer for auto-refresh polling
+let _smgmtDropDebounceTimers   = {};   // issueNum -> debounce timer id (issue #252)
+let _smgmtDropOriginalSprint   = {};   // issueNum -> sprint label before debounce sequence (issue #252)
 let _smgmtAutoRefreshInterval  = 15;  // seconds between refreshes (5|15|30|60)
 let _smgmtAutoRefreshEnabled   = true; // whether auto-refresh is active
 let _smgmtSelectedIssues       = new Set(); // issue numbers currently selected (multi-select, issue #206)
@@ -3053,6 +3055,31 @@ function smgmtApplyDurationBadges() {
   }
 }
 
+// ── Within-sprint ticket order (localStorage, issue #252) ────────────────────
+
+function _smgmtOrderKey(sprintLabel) {
+  return `commander:ticket-order:${_smgmtCurrentRepo}:${sprintLabel}`;
+}
+
+function _smgmtLoadOrder(sprintLabel) {
+  try { return JSON.parse(localStorage.getItem(_smgmtOrderKey(sprintLabel)) || 'null'); }
+  catch { return null; }
+}
+
+function _smgmtSaveOrder(sprintLabel, issueNums) {
+  try { localStorage.setItem(_smgmtOrderKey(sprintLabel), JSON.stringify(issueNums)); }
+  catch {}
+}
+
+function _smgmtApplyOrder(tickets, sprintLabel) {
+  const stored = _smgmtLoadOrder(sprintLabel);
+  if (!stored || !stored.length) return tickets;
+  const byNum = Object.fromEntries(tickets.map(t => [t.number, t]));
+  const ordered = stored.filter(n => byNum[n]).map(n => byNum[n]);
+  const rest = tickets.filter(t => !stored.includes(t.number));
+  return [...ordered, ...rest];
+}
+
 function smgmtRender() {
   if (!_smgmtData) return;
   const { order, issues, empty_sprint_labels, placeholder_sprint } = _smgmtData;
@@ -3208,8 +3235,9 @@ function smgmtSprintBlockHtml(label, tickets, isNext) {
                 <i class="ti ti-player-play"></i> Run Sprint</button>`;
   }
 
-  const ticketsHtml = tickets.length > 0
-    ? tickets.map(t => smgmtTicketCardHtml(t, label)).join('')
+  const orderedTickets = _smgmtApplyOrder(tickets, label);
+  const ticketsHtml = orderedTickets.length > 0
+    ? orderedTickets.map(t => smgmtTicketCardHtml(t, label)).join('')
     : '<div class="smgmt-drop-hint">Drop tickets here</div>';
 
   // Estimate summary for sprint block header
@@ -3855,9 +3883,12 @@ function smgmtTicketDragEnd(event) {
     if (el) el.classList.remove('dragging-ticket');
   }
   _smgmtDragTicket = null;
-  // Clear all hover states
+  // Clear all hover states and insertion indicators
   document.querySelectorAll('.smgmt-sprint-block').forEach(el => {
     el.classList.remove('drag-over-sprint', 'drag-over-zone');
+  });
+  document.querySelectorAll('.smgmt-ticket').forEach(el => {
+    el.classList.remove('drag-before', 'drag-after');
   });
   document.getElementById('smgmt-backlog')?.classList.remove('drag-over-sprint', 'drag-over-zone');
 }
@@ -3879,12 +3910,27 @@ function smgmtDragOverZone(event, sprintLabel) {
   }
 
   if (_smgmtDragTicket) {
-    if (sprintLabel) {
+    const fromSprint = _smgmtDragTicket.fromSprint || null;
+    if (sprintLabel && fromSprint === sprintLabel) {
+      // Same-sprint: show per-ticket insertion indicator via event delegation
+      document.querySelectorAll('.smgmt-sprint-block').forEach(b => b.classList.remove('drag-over-sprint'));
+      document.getElementById('smgmt-backlog')?.classList.remove('drag-over-zone');
+      const hoveredTicket = event.target.closest('.smgmt-ticket');
+      if (hoveredTicket && parseInt(hoveredTicket.dataset.issue, 10) !== _smgmtDragTicket.number) {
+        const rect = hoveredTicket.getBoundingClientRect();
+        const isBefore = event.clientY < rect.top + rect.height / 2;
+        document.querySelectorAll('.smgmt-ticket.drag-before, .smgmt-ticket.drag-after')
+          .forEach(e => e.classList.remove('drag-before', 'drag-after'));
+        hoveredTicket.classList.add(isBefore ? 'drag-before' : 'drag-after');
+      }
+    } else if (sprintLabel) {
+      // Cross-sprint: highlight target card
       document.querySelectorAll('.smgmt-sprint-block').forEach(b => b.classList.remove('drag-over-sprint'));
       document.getElementById('smgmt-backlog')?.classList.remove('drag-over-zone');
       const target = document.getElementById(`smgmt-block-${sprintLabel}`);
       if (target) target.classList.add('drag-over-sprint');
     } else {
+      // Backlog drop zone
       document.querySelectorAll('.smgmt-sprint-block').forEach(b => b.classList.remove('drag-over-sprint'));
       document.getElementById('smgmt-backlog')?.classList.add('drag-over-zone');
     }
@@ -3892,9 +3938,11 @@ function smgmtDragOverZone(event, sprintLabel) {
 }
 
 function smgmtDragLeave(event) {
-  // Only clear if leaving to outside the zone
   if (event.currentTarget && !event.currentTarget.contains(event.relatedTarget)) {
     event.currentTarget.classList.remove('drag-over-sprint', 'drag-over-zone');
+    // Clear insertion indicators when leaving the sprint block entirely
+    event.currentTarget.querySelectorAll('.smgmt-ticket.drag-before, .smgmt-ticket.drag-after')
+      .forEach(e => e.classList.remove('drag-before', 'drag-after'));
   }
 }
 
@@ -3970,6 +4018,9 @@ async function smgmtDropOnSprint(event, targetSprintLabel) {
   document.querySelectorAll('.smgmt-sprint-block').forEach(el => {
     el.classList.remove('drag-over-sprint', 'drag-over-zone');
   });
+  document.querySelectorAll('.smgmt-ticket').forEach(el => {
+    el.classList.remove('drag-before', 'drag-after');
+  });
   document.getElementById('smgmt-backlog')?.classList.remove('drag-over-sprint', 'drag-over-zone');
 
   // Sprint reorder drop
@@ -3985,37 +4036,85 @@ async function smgmtDropOnSprint(event, targetSprintLabel) {
     const { number, fromSprint } = _smgmtDragTicket;
     _smgmtDragTicket = null;
 
-    if (fromSprint === targetSprintLabel) return; // no-op
-
-    // Optimistic: move ticket in local data
-    const iss = _smgmtData.issues.find(i => i.number === number);
-    if (iss) {
-      const targetNum = targetSprintLabel ? parseInt(targetSprintLabel.split('-')[1], 10) : null;
-      iss.sprint = targetNum;
+    if (fromSprint === targetSprintLabel) {
+      // Within-sprint reorder: compute position from mouse and persist to localStorage
+      const insertIdx = _smgmtGetDropInsertIndex(event, targetSprintLabel);
+      _smgmtReorderInSprint(number, targetSprintLabel, insertIdx);
+      return;
     }
-    smgmtRender();
 
-    // API call
+    // Cross-sprint or sprint↔backlog move: debounce the API call
+    _smgmtQueueDrop(number, targetSprintLabel, fromSprint);
+  }
+}
+
+// ── Within-sprint reorder helpers (issue #252) ───────────────────────────────
+
+function _smgmtGetDropInsertIndex(event, sprintLabel) {
+  const ticketsEl = document.getElementById(`smgmt-tickets-${sprintLabel}`);
+  if (!ticketsEl) return 0;
+  const tickets = [...ticketsEl.querySelectorAll('.smgmt-ticket')];
+  const mouseY = event.clientY;
+  for (let i = 0; i < tickets.length; i++) {
+    const rect = tickets[i].getBoundingClientRect();
+    if (mouseY < rect.top + rect.height / 2) return i;
+  }
+  return tickets.length;
+}
+
+function _smgmtReorderInSprint(issueNum, sprintLabel, insertIndex) {
+  if (!_smgmtData) return;
+  const sprintNum = parseInt(sprintLabel.split('-')[1], 10);
+  const tickets = (_smgmtData.issues || []).filter(i => i.sprint === sprintNum);
+  const order = _smgmtApplyOrder(tickets, sprintLabel).map(t => t.number);
+  const fromIdx = order.indexOf(issueNum);
+  if (fromIdx === -1) return;
+  order.splice(fromIdx, 1);
+  const adjustedIdx = insertIndex > fromIdx ? insertIndex - 1 : insertIndex;
+  order.splice(Math.max(0, adjustedIdx), 0, issueNum);
+  _smgmtSaveOrder(sprintLabel, order);
+  smgmtRender();
+}
+
+// ── Debounced cross-sprint drop (issue #252) ──────────────────────────────────
+
+function _smgmtQueueDrop(issueNum, targetSprintLabel, fromSprint) {
+  if (!_smgmtDropDebounceTimers[issueNum]) {
+    // First drop in sequence — record persisted origin for rollback
+    _smgmtDropOriginalSprint[issueNum] = fromSprint;
+  }
+  clearTimeout(_smgmtDropDebounceTimers[issueNum]);
+
+  // Optimistic: move ticket in local data immediately for responsive feel
+  const iss = _smgmtData && _smgmtData.issues.find(i => i.number === issueNum);
+  if (iss) {
+    iss.sprint = targetSprintLabel ? parseInt(targetSprintLabel.split('-')[1], 10) : null;
+  }
+  smgmtRender();
+
+  _smgmtDropDebounceTimers[issueNum] = setTimeout(async () => {
+    delete _smgmtDropDebounceTimers[issueNum];
+    const originalSprint = _smgmtDropOriginalSprint[issueNum];
+    delete _smgmtDropOriginalSprint[issueNum];
+
     const targetSprintNum = targetSprintLabel ? parseInt(targetSprintLabel.split('-')[1], 10) : null;
     try {
       const res = await fetch('/api/sprint-planning/assign', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ issue: number, sprint: targetSprintNum }),
+        body: JSON.stringify({ issue: issueNum, sprint: targetSprintNum }),
       });
       if (!res.ok) throw new Error(await res.text());
       await smgmtRefreshBoard();
     } catch (e) {
-      // Rollback: restore original sprint
-      const iss2 = _smgmtData.issues.find(i => i.number === number);
+      const iss2 = _smgmtData && _smgmtData.issues.find(i => i.number === issueNum);
       if (iss2) {
-        const origNum = fromSprint ? parseInt(fromSprint.split('-')[1], 10) : null;
-        iss2.sprint = origNum;
+        iss2.sprint = originalSprint ? parseInt(originalSprint.split('-')[1], 10) : null;
       }
       smgmtRender();
-      smgmtShowError(`Failed to move ticket #${number}: ${e.message}`);
+      smgmtShowError(`Failed to move ticket #${issueNum}: ${e.message}`);
     }
-  }
+  }, 600);
 }
 
 async function smgmtReorderSprints(fromLabel, toLabel) {

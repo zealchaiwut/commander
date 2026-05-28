@@ -3049,15 +3049,14 @@ function smgmtRender() {
     }
   }
 
-  // NEXT-UP: lowest-numbered sprint with >= 1 ticket AND a sprint goal set (>= 10 chars)
+  // NEXT-UP: lowest-numbered sprint with >= 1 ticket (issue #242: no goal required)
   const allNums = order.map(l => parseInt(l.split('-')[1], 10)).filter(n => !isNaN(n));
   allNums.sort((a, b) => a - b);
   let lowestLabel = null;
   for (const n of allNums) {
     const lbl = `sprint-${n}`;
     const tickets = bySprintLabel[lbl] || [];
-    const goal = _smgmtGoals[lbl] || '';
-    if (tickets.length >= 1 && goal.length >= 10) {
+    if (tickets.length >= 1) {
       lowestLabel = lbl;
       break;
     }
@@ -3158,11 +3157,10 @@ function smgmtSprintBlockHtml(label, tickets, isNext) {
                 onclick="smgmtRerunSprint('${label}')">
                 <i class="ti ti-refresh"></i> Re-run Sprint</button>`;
   } else {
-    // Planned state: Run Sprint (neutral, disabled when no goal)
-    const runDisabled = !canRun || !hasGoal ? 'disabled' : '';
-    const runTitle = !canRun
-      ? 'Add at least one ticket first'
-      : (!hasGoal ? 'Set a sprint goal first' : '');
+    // Planned state: Run Sprint (neutral, disabled when no tickets or has completed)
+    // issue #242: goal is no longer required to enable Run Sprint
+    const runDisabled = !canRun ? 'disabled' : '';
+    const runTitle = !canRun ? 'Add at least one ticket first' : '';
     actionBtn = `<button class="smgmt-run-btn" id="${actionBtnId}"
                 ${runDisabled} title="${runTitle}"
                 onclick="smgmtRunSprint('${label}')">
@@ -3218,7 +3216,7 @@ function smgmtSprintBlockHtml(label, tickets, isNext) {
           ${actionBtn}
         </div>
       </div>
-      <div class="${goalBarClass}" id="smgmt-goal-bar-${label.replace('-', '_')}">${goalBarText}</div>
+      <div class="${goalBarClass}" id="smgmt-goal-bar-${label.replace('-', '_')}" style="display:none">${goalBarText}</div>
       <div class="smgmt-sprint-goal-row" style="display:none">
         <input class="smgmt-goal-input" id="${goalId}" type="text"
                placeholder="Sprint goal (required to run) — e.g. Dashboard UX cleanup"
@@ -3735,12 +3733,10 @@ function smgmtGoalInput(label, value) {
       btn.disabled = false;
       btn.title = '';
     } else {
-      const hasGoal = value.trim().length > 0;
-      const canRun = hasTickets && hasGoal;
+      // issue #242: goal is no longer required to enable Run Sprint
+      const canRun = hasTickets;
       btn.disabled = !canRun;
-      btn.title = !hasTickets ? 'Add at least one ticket first'
-                : !hasGoal   ? 'Set a sprint goal first'
-                : '';
+      btn.title = !hasTickets ? 'Add at least one ticket first' : '';
     }
   }
   if (_smgmtGoalSaveTimers[label]) clearTimeout(_smgmtGoalSaveTimers[label]);
@@ -4182,10 +4178,7 @@ let _smgmtEstEarlierWithTickets = [];    // earlier sprints for post-confirm mig
 async function smgmtRunSprint(sprintLabel) {
   if (!_smgmtCurrentRepo) return;
   const goal = _smgmtGoals[sprintLabel] || '';
-  if (goal.trim().length === 0) {
-    smgmtShowError('Set a sprint goal before running.');
-    return;
-  }
+  // issue #242: goal is no longer required to run a sprint
 
   // Determine target sprint number and gather earlier sprints for migration
   const targetNum = parseInt(sprintLabel.split('-')[1], 10);
@@ -4698,13 +4691,10 @@ function smgmtApplyRunState(sprintStatusMap) {
       btn.title = '';
     } else {
       const hasTickets = sprintTickets.length >= 1;
+      // issue #242: goal is no longer required to enable Run Sprint
       const canRun = hasTickets;
-      // Also check goal: Run Sprint button is visually disabled when no goal set (issue #223)
-      const hasGoal = ((_smgmtGoals[btnLabel] || '').trim().length > 0);
-      btn.disabled = !canRun || !hasGoal;
-      btn.title = !hasTickets ? 'Add at least one ticket first'
-                : !hasGoal   ? 'Set a sprint goal first'
-                : '';
+      btn.disabled = !canRun;
+      btn.title = !hasTickets ? 'Add at least one ticket first' : '';
     }
   });
 }

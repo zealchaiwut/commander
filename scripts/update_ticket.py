@@ -58,8 +58,8 @@ STATUS_MAP = {
         "close":  None,
     },
     "needs-rework": {
-        "add":    ["needs-rework"],
-        "remove": ["in-progress", "SIT", "UAT", "blocked"],
+        "add":    ["need-rework"],
+        "remove": ["in-progress", "SIT", "UAT", "UAT-approved"],
         "close":  None,
     },
 }

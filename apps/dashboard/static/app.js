@@ -3172,14 +3172,15 @@ function smgmtPlaceholderBlockHtml(n) {
 }
 
 function smgmtTicketCardHtml(ticket, currentSprint) {
-  const statusClass = {
+  const hasNeedsReworkLabel = (ticket.labels || []).some(l => l.name === 'need-rework' || l.name === 'needs-rework');
+  const statusClass = hasNeedsReworkLabel ? 'smgmt-status-need-rework' : ({
     'backlog':      'smgmt-status-backlog',
     'in-progress':  'smgmt-status-in-progress',
     'sit':          'smgmt-status-sit',
     'uat':          'smgmt-status-uat',
     'done':         'smgmt-status-done',
-  }[ticket.status] || 'smgmt-status-backlog';
-  const statusLabel = ticket.status || 'backlog';
+  }[ticket.status] || 'smgmt-status-backlog');
+  const statusLabel = hasNeedsReworkLabel ? 'needs rework' : (ticket.status || 'backlog');
 
   // Estimate badge: look up from sprint estimates if available
   let estimateBadgeHtml = '';
@@ -3398,9 +3399,14 @@ function smgmtBacklogTicketHtml(ticket, sprintLabels) {
     ? `<span class="smgmt-size-chip">${escapeHtml(sizeLabel.name.replace('size-', ''))}</span>`
     : '';
 
+  const hasNeedsRework = (ticket.labels || []).some(l => l.name === 'need-rework' || l.name === 'needs-rework');
+  const reworkBadge = hasNeedsRework
+    ? `<span class="smgmt-rework-badge" title="Needs rework after rejection">needs rework</span>`
+    : '';
+
   const isSelected = _smgmtSelectedIssues.has(ticket.number);
   return `
-    <div class="smgmt-ticket${isSelected ? ' is-selected' : ''}" id="smgmt-ticket-${ticket.number}"
+    <div class="smgmt-ticket${isSelected ? ' is-selected' : ''}${hasNeedsRework ? ' is-needs-rework' : ''}" id="smgmt-ticket-${ticket.number}"
          draggable="true"
          data-issue="${ticket.number}"
          data-sprint=""
@@ -3414,6 +3420,7 @@ function smgmtBacklogTicketHtml(ticket, sprintLabels) {
       <a class="smgmt-ticket-num" href="${escapeHtml(ticket.url || '#')}" target="_blank"
          rel="noopener" onclick="event.stopPropagation()">#${ticket.number}</a>
       <span class="smgmt-ticket-title" title="${escapeHtml(ticket.title)}">${escapeHtml(ticket.title)}</span>
+      ${reworkBadge}
       ${sizeChip}
       <button class="smgmt-moveto-btn" tabindex="0"
               onclick="smgmtBacklogMoveToOpen(event, ${ticket.number})"

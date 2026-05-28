@@ -3765,6 +3765,7 @@ def run_sprint(
     gate_scope: str = "changed",
     token_budget: int = 0,
     skip_estimator: bool = False,
+    rerun_manifest: Optional[dict] = None,
 ) -> tuple[SprintSummary, SprintState]:
     """Main sprint loop -- processes backlog issues sequentially.
 
@@ -3816,6 +3817,14 @@ def run_sprint(
     if target_branch is None:
         target_branch = sprint_branch
 
+    # Build rerun decisions map (issue → action) when running from a rerun manifest
+    rerun_decisions: dict[int, str] = {}
+    if rerun_manifest:
+        rerun_decisions = {
+            d["issue_num"]: d["action"]
+            for d in rerun_manifest.get("decisions", [])
+        }
+
     # Load or build state
     if (resume or retry_failed) and state_path.exists():
         print(f"  Loading existing sprint state from {state_path}")
@@ -3825,6 +3834,34 @@ def run_sprint(
         # Backfill project if missing from saved state (legacy runs)
         if not state.project and eff_repo:
             state.project = eff_repo
+    elif rerun_manifest:
+        # Build state from manifest decisions (skip UAT; dispatch coder/tester for rest)
+        raw_issues = [
+            {"number": d["issue_num"], "title": d["issue_title"]}
+            for d in rerun_manifest.get("decisions", [])
+            if d["action"] != "skip"
+        ]
+        if not raw_issues:
+            print("No issues to dispatch for this re-run (all skipped).")
+            state = SprintState(
+                sprint_label    = label,
+                sprint_number   = sprint_num,
+                project         = eff_repo or "",
+                start_timestamp = _utcnow(),
+            )
+            return summary, state
+
+        state = SprintState(
+            sprint_label    = label,
+            sprint_number   = sprint_num,
+            project         = eff_repo or "",
+            start_timestamp = _utcnow(),
+            token_budget    = token_budget,
+            issues=[
+                IssueState(number=i["number"], title=i["title"], agent_status="queued")
+                for i in raw_issues
+            ],
+        )
     else:
         raw_issues = list_backlog_issues(label, repo_name=eff_repo)
         if not raw_issues:
@@ -3990,99 +4027,106 @@ def run_sprint(
             if chosen_port is not None:
                 _write_runtime_port(cfg.worktree_coder, chosen_port)
 
-        # -- Lifecycle: queued → coder_dispatched --
+        # Determine rerun routing: dispatch_tester skips coder entirely
+        _skip_coder = rerun_decisions.get(num) == "dispatch_tester"
+
+        # -- Lifecycle: queued --
         issue_state.set_agent_status("queued")
         state.save(state_path)
         _post_sprint_status(state, api_url=api_url)
 
-        # -- Dispatch coder --
-        issue_state.set_agent_status("coder_dispatched")
-        issue_state.coder_started_at = issue_state.status_changed_at
-        state.save(state_path)
-        _post_sprint_status(state, api_url=api_url)
-
-        # AC-5 (issue #311): apply in-progress label when coder starts so the
-        # board reflects active work during coding.  Best-effort — never blocks
-        # the sprint on label failure.
-        _apply_in_progress_label(num, cfg=cfg)
-
-        def _on_coder_running(
-            _is=issue_state, _st=state, _sp=state_path, _api=api_url
-        ) -> None:
-            _is.set_agent_status("coder_running")
-            _st.save(_sp)
-            _post_sprint_status(_st, api_url=_api)
-
-        _coder_t0 = time.monotonic()
-        coder_ok, coder_category = _dispatch_coder(
-            num, alert_modes, sprint_branch=target_branch, repo_name=eff_repo, cfg=cfg,
-            chosen_port=chosen_port, rate_limit_events=state.rate_limit_events,
-            on_running=_on_coder_running, sprint_label=label,
-        )
-        _coder_elapsed = time.monotonic() - _coder_t0
-        _coder_m, _coder_s = divmod(int(_coder_elapsed), 60)
-        print(f"  Total time used on coder dispatch: {_coder_m}m {_coder_s}s")
-
-        if not coder_ok:
-            category = coder_category or FailureCategory.CRASH
-            if category == FailureCategory.RETRY_EXHAUSTED:
-                reason = "Subscription rate limit exhausted"
-            else:
-                reason = f"Coder failed with category {category}"
-            print(f"  Coder failed for #{num} ({category}) -- skipping to next issue")
-            issue_state.set_agent_status("failed")
-            issue_state.coder_finished_at = issue_state.status_changed_at
-            issue_state.failure_reason    = reason
-            issue_state.status            = "skipped"
-            issue_state.skip_reason       = reason
-            issue_state.category          = category
-            summary.skipped.append(f"#{num} (coder failed)")
-            dispatch_alerts(
-                alert_modes,
-                title=f"Issue #{num} skipped: {category}",
-                body=reason,
-                issue_num=num,
-                category=category,
-                cfg=cfg,
-                repo=eff_repo,
-            )
-            _apply_needs_rework_label(num, category, cfg=cfg)
+        if _skip_coder:
+            print(f"  [rerun] SIT ticket: dispatching tester directly for #{num}")
+        else:
+            # -- Dispatch coder --
+            issue_state.set_agent_status("coder_dispatched")
+            issue_state.coder_started_at = issue_state.status_changed_at
             state.save(state_path)
-            _post_sprint_status(state, api_url=api_url, project=eff_repo)
-            continue
+            _post_sprint_status(state, api_url=api_url)
 
-        # -- Detect CODER_NO_WORK: coder exited 0 but created no feature branch --
-        if _find_feature_branch(num) is None:
-            category = FailureCategory.CODER_NO_WORK
-            reason = f"Coder exited 0 but no feature/{num}-* branch was created"
-            print(f"  {reason} -- skipping to next issue")
-            issue_state.set_agent_status("failed")
-            issue_state.coder_finished_at = issue_state.status_changed_at
-            issue_state.failure_reason    = reason
-            issue_state.status            = "skipped"
-            issue_state.skip_reason       = reason
-            issue_state.category          = category
-            summary.skipped.append(f"#{num} (coder no work)")
-            dispatch_alerts(
-                alert_modes,
-                title=f"Issue #{num} skipped: {category}",
-                body=reason,
-                issue_num=num,
-                category=category,
-                cfg=cfg,
-                repo=eff_repo,
+            # AC-5 (issue #311): apply in-progress label when coder starts so the
+            # board reflects active work during coding.  Best-effort — never blocks
+            # the sprint on label failure.
+            _apply_in_progress_label(num, cfg=cfg)
+
+            def _on_coder_running(
+                _is=issue_state, _st=state, _sp=state_path, _api=api_url
+            ) -> None:
+                _is.set_agent_status("coder_running")
+                _st.save(_sp)
+                _post_sprint_status(_st, api_url=_api)
+
+            _coder_t0 = time.monotonic()
+            coder_ok, coder_category = _dispatch_coder(
+                num, alert_modes, sprint_branch=target_branch, repo_name=eff_repo, cfg=cfg,
+                chosen_port=chosen_port, rate_limit_events=state.rate_limit_events,
+                on_running=_on_coder_running, sprint_label=label,
             )
-            _apply_needs_rework_label(num, category, cfg=cfg)
+            _coder_elapsed = time.monotonic() - _coder_t0
+            _coder_m, _coder_s = divmod(int(_coder_elapsed), 60)
+            print(f"  Total time used on coder dispatch: {_coder_m}m {_coder_s}s")
+
+            if not coder_ok:
+                category = coder_category or FailureCategory.CRASH
+                if category == FailureCategory.RETRY_EXHAUSTED:
+                    reason = "Subscription rate limit exhausted"
+                else:
+                    reason = f"Coder failed with category {category}"
+                print(f"  Coder failed for #{num} ({category}) -- skipping to next issue")
+                issue_state.set_agent_status("failed")
+                issue_state.coder_finished_at = issue_state.status_changed_at
+                issue_state.failure_reason    = reason
+                issue_state.status            = "skipped"
+                issue_state.skip_reason       = reason
+                issue_state.category          = category
+                summary.skipped.append(f"#{num} (coder failed)")
+                dispatch_alerts(
+                    alert_modes,
+                    title=f"Issue #{num} skipped: {category}",
+                    body=reason,
+                    issue_num=num,
+                    category=category,
+                    cfg=cfg,
+                    repo=eff_repo,
+                )
+                _apply_needs_rework_label(num, category, cfg=cfg)
+                state.save(state_path)
+                _post_sprint_status(state, api_url=api_url, project=eff_repo)
+                continue
+
+            # -- Detect CODER_NO_WORK: coder exited 0 but created no feature branch --
+            if _find_feature_branch(num) is None:
+                category = FailureCategory.CODER_NO_WORK
+                reason = f"Coder exited 0 but no feature/{num}-* branch was created"
+                print(f"  {reason} -- skipping to next issue")
+                issue_state.set_agent_status("failed")
+                issue_state.coder_finished_at = issue_state.status_changed_at
+                issue_state.failure_reason    = reason
+                issue_state.status            = "skipped"
+                issue_state.skip_reason       = reason
+                issue_state.category          = category
+                summary.skipped.append(f"#{num} (coder no work)")
+                dispatch_alerts(
+                    alert_modes,
+                    title=f"Issue #{num} skipped: {category}",
+                    body=reason,
+                    issue_num=num,
+                    category=category,
+                    cfg=cfg,
+                    repo=eff_repo,
+                )
+                _apply_needs_rework_label(num, category, cfg=cfg)
+                state.save(state_path)
+                _post_sprint_status(state, api_url=api_url, project=eff_repo)
+                continue
+
+            # -- Lifecycle: coder_done --
+            issue_state.set_agent_status("coder_done")
+            issue_state.coder_finished_at = issue_state.status_changed_at
             state.save(state_path)
-            _post_sprint_status(state, api_url=api_url, project=eff_repo)
-            continue
+            _post_sprint_status(state, api_url=api_url)
 
-        # -- Lifecycle: coder_done → tester_dispatched --
-        issue_state.set_agent_status("coder_done")
-        issue_state.coder_finished_at = issue_state.status_changed_at
-        state.save(state_path)
-        _post_sprint_status(state, api_url=api_url)
-
+        # -- Lifecycle: tester_dispatched --
         issue_state.set_agent_status("tester_dispatched")
         issue_state.tester_started_at = issue_state.status_changed_at
         state.save(state_path)
@@ -4348,6 +4392,14 @@ def main() -> None:
         help=argparse.SUPPRESS,
     )
 
+    # Rerun manifest (issue #332) — written by the server rerun endpoint
+    p.add_argument(
+        "--rerun-manifest",
+        default=None,
+        metavar="PATH",
+        help=argparse.SUPPRESS,
+    )
+
     args = p.parse_args()
 
     # ── Config resolution (AC-4 + AC-5 + AC-6) ───────────────────────────────
@@ -4422,6 +4474,13 @@ def main() -> None:
         preflight_approved = [r.number for r in approved]
         print(f"[preflight] Approved {len(preflight_approved)} issue(s) for this run.")
 
+    _rerun_manifest: Optional[dict] = None
+    if args.rerun_manifest:
+        _manifest_path = Path(args.rerun_manifest)
+        if not _manifest_path.exists():
+            p.error(f"Rerun manifest not found: {_manifest_path}")
+        _rerun_manifest = json.loads(_manifest_path.read_text(encoding="utf-8"))
+
     summary, state = run_sprint(
         label                = args.label,
         skip_gates           = args.skip_gates,
@@ -4439,6 +4498,7 @@ def main() -> None:
         gate_scope           = args.gate_scope,
         token_budget         = args.budget,
         skip_estimator       = args.skip_estimator,
+        rerun_manifest       = _rerun_manifest,
     )
 
     # Derive sprint_branch for summary (mirrors run_sprint logic)

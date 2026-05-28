@@ -8,6 +8,9 @@ let doneAgentsVisible = {};       // repo → bool (toggle state for DONE agents
 let _uatTicketsByRepo = {};       // repo → UAT ticket list (populated when expand panel renders)
 let _approveAllUatRepo = null;    // repo currently targeted by the approve-all modal
 
+// ── Build stamp cache (issue #329) ────────────────────────────────────────────
+let _buildStampCache = null; // fetched once per session from /api/version
+
 // ── Router state ──────────────────────────────────────────────────────────────
 let _activeProject    = null;   // "owner/repo" when in project view
 let _activeProjectTab = 'sprint-mgmt'; // 'sprint-mgmt' | 'sprint-history' | 'tickets' (hidden)
@@ -2028,6 +2031,23 @@ async function fetchEnvironment() {
       el.className   = `env-badge ${env}`;
     }
   } catch { /* ignore — badge is optional */ }
+}
+
+// ── Build stamp footer (issue #329) ──────────────────────────────────────────
+
+async function fetchBuildStamp() {
+  if (_buildStampCache) return; // already fetched this session
+  try {
+    const res = await fetch('/api/version');
+    if (!res.ok) return;
+    const data = await res.json();
+    _buildStampCache = data;
+    const el = document.getElementById('build-stamp-footer');
+    if (!el) return;
+    const host = window.location.host;
+    const sha  = (data.git_sha || 'unknown').slice(0, 7);
+    el.textContent = `v${data.version || '?'} · ${host} · build ${sha} · ${data.branch || 'unknown'}`;
+  } catch { /* footer is optional */ }
 }
 
 // ── Sprint History view (AC-5) ────────────────────────────────────────────────
@@ -6076,6 +6096,7 @@ function showErrorToast(msg) {
 (function init() {
   initTheme();
   fetchEnvironment();
+  fetchBuildStamp().catch(() => {});
 
   // Load projects first, then route (so project view can show project data)
   loadProjects()

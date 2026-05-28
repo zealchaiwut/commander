@@ -89,6 +89,21 @@ _subscribers: list[asyncio.Queue] = []
 _start_time: float = 0.0
 
 
+# ── Git startup metadata (issue #329) ─────────────────────────────────────────
+# Captured once at process start; never re-runs git per request.
+
+def _capture_git_value(cmd: list) -> str:
+    try:
+        return subprocess.check_output(cmd, stderr=subprocess.DEVNULL, text=True).strip()
+    except Exception:
+        return "unknown"
+
+
+_GIT_SHA: str = _capture_git_value(["git", "rev-parse", "--short", "HEAD"])
+_GIT_BRANCH: str = _capture_git_value(["git", "rev-parse", "--abbrev-ref", "HEAD"])
+_STARTED_AT: str = datetime.now(timezone.utc).isoformat()
+
+
 # ── Build hash (cache-busting) ─────────────────────────────────────────────────
 
 def _compute_build_hash() -> str:
@@ -873,16 +888,23 @@ def get_environment():
 
 @app.get("/api/version")
 def get_version():
-    """Return the build version hash for cache-busting (issue #249).
+    """Return build metadata for the running process (issue #329).
 
     Response shape:
     {
       "version": "1.0",
-      "build": "abc12345"
+      "git_sha": "abc1234",
+      "branch": "main",
+      "started_at": "2026-05-29T12:00:00+00:00"
     }
     """
     return JSONResponse(
-        content={"version": _APP_VERSION, "build": _BUILD_HASH},
+        content={
+            "version": _APP_VERSION,
+            "git_sha": _GIT_SHA[:7] if _GIT_SHA != "unknown" else "unknown",
+            "branch": _GIT_BRANCH,
+            "started_at": _STARTED_AT,
+        },
         headers={"Cache-Control": "no-cache, must-revalidate"},
     )
 

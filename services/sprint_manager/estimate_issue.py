@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import subprocess
 import sys
@@ -22,6 +23,12 @@ from typing import Optional
 # Repo root is two levels up
 REPO_ROOT = Path(__file__).parent.parent.parent
 AGENT_PATH = REPO_ROOT / "apps" / "dashboard" / ".claude" / "agents" / "estimator.md"
+
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from services.run_id import mint_run_id
+from services.logging import log as structured_log
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -259,6 +266,11 @@ def main() -> None:
     p.add_argument("--save-label", action="store_true", help="Apply size-S/M/L/XL label to issue")
     p.add_argument("--force", action="store_true", help="Re-run estimator even if cached result exists")
     args = p.parse_args()
+
+    # Mint or adopt run_id for this invocation
+    _run_id = mint_run_id("manual")
+    os.environ["COMMANDER_RUN_ID"] = _run_id
+    structured_log.set_context(run_id=_run_id, source="manual")
 
     # Auto-detect repo
     repo = args.repo

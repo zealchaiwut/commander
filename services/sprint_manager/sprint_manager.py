@@ -70,10 +70,14 @@ REPO_ROOT     = Path(__file__).parent.parent.parent
 DASHBOARD_DIR = REPO_ROOT / "apps" / "dashboard"
 SCRIPTS_DIR   = REPO_ROOT / "scripts"
 
+sys.path.insert(0, str(REPO_ROOT))      # allow `from services.*` imports
 sys.path.insert(0, str(DASHBOARD_DIR))
 from dotenv import load_dotenv
 load_dotenv(DASHBOARD_DIR / ".env")
 import github_client
+
+from services.run_id import mint_run_id
+from services.logging import log as structured_log
 
 # Import failure-parsing helpers from post_test_report (no circular deps)
 try:
@@ -3920,6 +3924,12 @@ def run_sprint(
     summary    = SprintSummary()
     sprint_num = _sprint_number(label)
     state_path = _state_path(sprint_num, label, cfg=cfg)
+
+    # Mint run_id before any agent work; propagates to subprocesses via COMMANDER_RUN_ID
+    _sprint_num_str = str(sprint_num) if sprint_num is not None else label.replace("sprint-", "")
+    _run_id = mint_run_id("sprint", _sprint_num_str)
+    os.environ["COMMANDER_RUN_ID"] = _run_id
+    structured_log.set_context(run_id=_run_id, source="sprint", sprint_label=label)
 
     # AC-2: write PID file and register cleanup handlers
     if not dry_run:

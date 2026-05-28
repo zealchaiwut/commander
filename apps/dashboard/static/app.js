@@ -3171,16 +3171,8 @@ function smgmtSprintBlockHtml(label, tickets, isNext) {
     ? tickets.map(t => smgmtTicketCardHtml(t, label)).join('')
     : '<div class="smgmt-drop-hint">Drop tickets here</div>';
 
-  // Estimate summary for sprint block header
-  const estimateData = _smgmtEstimates[label];
-  let estimateSummaryHtml = '';
-  if (estimateData && estimateData.total_minutes > 0) {
-    const hrs  = Math.floor(estimateData.total_minutes / 60);
-    const mins = estimateData.total_minutes % 60;
-    const dur  = hrs > 0 ? `${hrs}h ${mins}m` : `${mins}m`;
-    const cnt  = Object.keys(estimateData.estimates || {}).length;
-    estimateSummaryHtml = `<span class="smgmt-estimate-total">estimated ${dur} across ${cnt} ticket${cnt !== 1 ? 's' : ''}</span>`;
-  }
+  // Estimate summary badge is injected dynamically for running sprints only (issue #250).
+  // Planning sprint headers do not show the estimate badge.
 
   // Sprint goal bar — visible read-only display; hidden input for saving
   const goalBarClass = hasGoal ? 'smgmt-sprint-goal-bar' : 'smgmt-sprint-goal-bar placeholder';
@@ -3201,7 +3193,6 @@ function smgmtSprintBlockHtml(label, tickets, isNext) {
           <i class="ti ti-grip-vertical smgmt-sprint-grip"></i>
           <span class="smgmt-sprint-name">Sprint ${n}</span>
           ${nextBadge}
-          ${estimateSummaryHtml}
           <span class="smgmt-sprint-count">${tickets.length} ticket${tickets.length !== 1 ? 's' : ''}</span>
         </div>
         <div class="smgmt-sprint-header-right">
@@ -3257,15 +3248,8 @@ function smgmtTicketCardHtml(ticket, currentSprint) {
   }[ticket.status] || 'smgmt-status-backlog');
   const statusLabel = hasNeedsReworkLabel ? 'needs rework' : (ticket.status || 'backlog');
 
-  // Estimate badge: look up from sprint estimates if available
-  let estimateBadgeHtml = '';
-  if (currentSprint && _smgmtEstimates[currentSprint]) {
-    const sprintEst = _smgmtEstimates[currentSprint];
-    const issueEst  = (sprintEst.estimates || {})[String(ticket.number)];
-    if (issueEst) {
-      estimateBadgeHtml = `<span class="smgmt-estimate-badge" title="~${issueEst.minutes} min">${escapeHtml(issueEst.size)}</span>`;
-    }
-  }
+  // Estimate size pills are injected only for running sprints via smgmtApplyRunState (issue #250).
+  // Planning view ticket rows do not show any estimate pill.
 
   const isSelected = _smgmtSelectedIssues.has(ticket.number);
   return `
@@ -3283,7 +3267,6 @@ function smgmtTicketCardHtml(ticket, currentSprint) {
       <a class="smgmt-ticket-num" href="${escapeHtml(ticket.url || '#')}" target="_blank"
          rel="noopener" onclick="event.stopPropagation()">#${ticket.number}</a>
       <span class="smgmt-ticket-title" title="${escapeHtml(ticket.title)}">${escapeHtml(ticket.title)}</span>
-      ${estimateBadgeHtml}
       <span class="smgmt-ticket-status ${statusClass}">${escapeHtml(statusLabel)}</span>
     </div>`;
 }
@@ -4493,6 +4476,52 @@ async function smgmtPollRunStatus() {
   } catch { /* ignore poll errors */ }
 }
 
+/**
+ * Inject size-estimation pills on all ticket rows inside running sprints (issue #250).
+ * Shows "Size · ~Xmin" for estimated tickets, "— · est?" placeholder for un-estimated ones.
+ * Only running sprints are affected; planning-view sprints are untouched.
+ * Called from smgmtApplyRunState (Pass 3b) so DOM blocks already have .smgmt-running class.
+ */
+function smgmtApplyRunningSprintSizePills() {
+  for (const [key, entry] of Object.entries(_smgmtAllRunning)) {
+    const { project: runProj, sprint_label: runLabel } = entry;
+    if (runProj !== _smgmtCurrentRepo) continue;
+
+    const block = document.getElementById(`smgmt-block-${runLabel}`);
+    if (!block) continue;
+
+    const estimateData = _smgmtEstimates[runLabel];
+    const estMap = estimateData ? (estimateData.estimates || {}) : {};
+
+    block.querySelectorAll('.smgmt-ticket').forEach(ticketEl => {
+      // Skip if pill already injected (guard against double-apply)
+      if (ticketEl.querySelector('.smgmt-running-size-pill')) return;
+
+      const issueNum = ticketEl.dataset.issue;
+      const sizePill = document.createElement('span');
+      const issueEst = estMap[String(issueNum)];
+
+      if (issueEst && issueEst.size && issueEst.minutes > 0) {
+        sizePill.className = 'smgmt-running-size-pill smgmt-running-size-pill--estimated';
+        sizePill.textContent = `${issueEst.size} · ~${issueEst.minutes}min`;
+        sizePill.title = `Estimated size: ${issueEst.size} (~${issueEst.minutes} min)`;
+      } else {
+        sizePill.className = 'smgmt-running-size-pill smgmt-running-size-pill--empty';
+        sizePill.textContent = '— · est?';
+        sizePill.title = 'No estimate available yet';
+      }
+
+      // Insert before the status label so pill sits between title and status
+      const statusLabelEl = ticketEl.querySelector('.smgmt-ticket-status');
+      if (statusLabelEl) {
+        ticketEl.insertBefore(sizePill, statusLabelEl);
+      } else {
+        ticketEl.appendChild(sizePill);
+      }
+    });
+  }
+}
+
 function smgmtApplyRunState(sprintStatusMap) {
   // Per-#123: each sprint card checks its own (project, sprint_label) key independently.
   // Multiple cards can be in RUNNING state simultaneously.
@@ -4510,10 +4539,10 @@ function smgmtApplyRunState(sprintStatusMap) {
       // Restore draggable on header
       hdr.setAttribute('draggable', 'true');
     }
-    // Remove injected running elements (badge, progress section, kill btn)
-    block.querySelectorAll('.smgmt-running-badge, .smgmt-progress-text, .smgmt-kill-btn, .smgmt-progress-section').forEach(el => el.remove());
+    // Remove injected running elements (badge, progress section, kill btn, estimate header badge)
+    block.querySelectorAll('.smgmt-running-badge, .smgmt-progress-text, .smgmt-kill-btn, .smgmt-progress-section, .smgmt-running-estimate-badge').forEach(el => el.remove());
     // Remove status circles injected on ticket rows
-    block.querySelectorAll('.smgmt-ticket-status-circle, .smgmt-agent-pill, .smgmt-ticket-elapsed-time').forEach(el => el.remove());
+    block.querySelectorAll('.smgmt-ticket-status-circle, .smgmt-agent-pill, .smgmt-ticket-elapsed-time, .smgmt-running-size-pill').forEach(el => el.remove());
     // Remove running/pending/done classes from ticket rows
     block.querySelectorAll('.smgmt-ticket').forEach(el => {
       el.classList.remove('is-running', 'is-pending', 'is-done');
@@ -4596,6 +4625,32 @@ function smgmtApplyRunState(sprintStatusMap) {
       hdrLeft.appendChild(runBadge);
     }
 
+    // Inject size-estimation header badge for running sprints (issue #250)
+    // Shows "estimated Xh Ym across N tickets" for all estimated tickets in the sprint.
+    if (!hdrLeft.querySelector('.smgmt-running-estimate-badge')) {
+      const estimateData = _smgmtEstimates[runLabel];
+      if (estimateData) {
+        const estMap = estimateData.estimates || {};
+        const estimatedEntries = Object.values(estMap).filter(e => e && e.minutes > 0);
+        if (estimatedEntries.length > 0) {
+          const totalMins = estimatedEntries.reduce((sum, e) => sum + (e.minutes || 0), 0);
+          const hrs  = Math.floor(totalMins / 60);
+          const mins = totalMins % 60;
+          const dur  = hrs > 0 ? `${hrs}h ${mins}m` : `${mins}m`;
+          const cnt  = estimatedEntries.length;
+          const estBadge = document.createElement('span');
+          estBadge.className = 'smgmt-running-estimate-badge';
+          estBadge.textContent = `estimated ${dur} across ${cnt} ticket${cnt !== 1 ? 's' : ''}`;
+          // Insert after running badge
+          if (runBadge.nextSibling) {
+            hdrLeft.insertBefore(estBadge, runBadge.nextSibling);
+          } else {
+            hdrLeft.appendChild(estBadge);
+          }
+        }
+      }
+    }
+
     // Hide unified action button + Finish/Delete buttons; insert Cancel sprint button
     const actionBtn = document.getElementById(`smgmt-run-btn-${safeLabel}`);
     if (actionBtn) actionBtn.style.display = 'none';
@@ -4665,6 +4720,11 @@ function smgmtApplyRunState(sprintStatusMap) {
   // ── Pass 4: Per-ticket live status badges, spinners, elapsed counters ──────────
   smgmtApplyTicketLiveStatus(sprintStatusMap);
   _ensureElapsedTimer();
+
+  // ── Pass 4b: Inject size-estimation pills on running-sprint ticket rows (issue #250) ──────────
+  // Must run AFTER smgmtApplyTicketLiveStatus, which clears .smgmt-running-size-pill on its own
+  // cleanup pass; running after it ensures pills are not wiped.
+  smgmtApplyRunningSprintSizePills();
 
   // ── Pass 5: Update unified action button state for all visible sprint buttons ──
   // The unified button id is "smgmt-run-btn-<safeLabel>" for all sprints.

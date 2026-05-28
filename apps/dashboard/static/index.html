@@ -2484,7 +2484,7 @@
     max-height: 300px; overflow-y: auto; margin: 0;
   }
 
-  /* Estimate badges (issue #166) */
+  /* Estimate badges (issue #166) — planning view only (kept for backward compat) */
   .smgmt-estimate-badge {
     font-size: 10px; font-weight: 600; padding: 2px 6px; border-radius: 4px;
     background: var(--purple-bg, #f3f0ff); color: var(--purple, #7c3aed);
@@ -2496,6 +2496,29 @@
     flex-shrink: 0; white-space: nowrap;
     background: var(--purple-bg, #f3f0ff); padding: 2px 8px; border-radius: 4px;
     border: 1px solid rgba(124,58,237,.15);
+  }
+
+  /* Running sprint size-estimation pills (issue #250) */
+  .smgmt-running-size-pill {
+    font-size: 10px; font-weight: 600; padding: 2px 7px; border-radius: 10px;
+    flex-shrink: 0; white-space: nowrap; letter-spacing: .02em;
+    display: inline-flex; align-items: center;
+  }
+  .smgmt-running-size-pill--estimated {
+    background: var(--purple-bg, #f3f0ff); color: var(--purple, #7c3aed);
+    border: 1px solid rgba(124,58,237,.22);
+  }
+  .smgmt-running-size-pill--empty {
+    background: transparent; color: var(--text-muted, #9ca3af);
+    border: 1px dashed var(--border, #d1d5db);
+    font-weight: 500; opacity: .75;
+  }
+  /* Running sprint header estimate badge (issue #250) */
+  .smgmt-running-estimate-badge {
+    font-size: 11px; font-weight: 500; color: var(--purple, #7c3aed);
+    flex-shrink: 0; white-space: nowrap;
+    background: var(--purple-bg, #f3f0ff); padding: 2px 8px; border-radius: 10px;
+    border: 1px solid rgba(124,58,237,.22);
   }
 
   /* Duration badges on ticket rows (issue #212, #240) */

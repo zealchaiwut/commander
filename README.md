@@ -102,6 +102,54 @@ Source `~/.commander.zsh` to get these shortcuts:
 
 ---
 
+## Run as a service (launchd)
+
+For unattended operation — especially when running remote with iPad-only access — the
+dashboard can be registered as a macOS LaunchAgent. This starts it automatically on
+user login and restarts it if the process crashes.
+
+> **Note:** launchd is an additional deployment option. The existing `start.sh` (tmux)
+> workflow continues to work unchanged and is still recommended for interactive
+> development.
+
+### Install
+
+```bash
+# From the commander repo root:
+bash scripts/install_launchd.sh
+```
+
+The script will:
+1. Check for a port-8000 conflict (prints a warning and exits if one is found).
+2. Substitute the repo root, venv path, and home directory into the plist template.
+3. Copy `scripts/com.commander.dashboard.plist` to `~/Library/LaunchAgents/` with `644` permissions.
+4. Load the service with `launchctl load`.
+5. Verify with `launchctl list | grep commander` and print success or failure.
+
+Logs are written to:
+- `~/Library/Logs/commander-dashboard.out.log` (stdout / uvicorn output)
+- `~/Library/Logs/commander-dashboard.err.log` (stderr / errors)
+
+### Uninstall
+
+```bash
+bash scripts/uninstall_launchd.sh
+```
+
+Unloads the service and removes the plist from `~/Library/LaunchAgents/`.
+
+### Verify
+
+```bash
+# Service is listed:
+launchctl list | grep commander
+
+# Tail the log:
+tail -f ~/Library/Logs/commander-dashboard.out.log
+```
+
+---
+
 ## Repository Layout
 
 ```

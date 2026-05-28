@@ -3407,7 +3407,7 @@ async function smgmtRerunSprint(label) {
   const repo = _smgmtRepo();
   if (!repo) return;
   const n = parseInt(label.split('-')[1], 10);
-  if (!confirm(`Reset and re-run Sprint ${n}?\n\nThis will strip in-progress/sit/uat labels from tickets and re-dispatch agents.`)) return;
+  if (!confirm(`Re-run Sprint ${n}?\n\nAgents will be dispatched selectively based on each ticket's current state:\n• UAT tickets are skipped\n• SIT tickets go directly to tester\n• All others go to coder`)) return;
   try {
     const res = await fetch(`/api/sprints/${encodeURIComponent(label)}/rerun?project=${encodeURIComponent(repo)}`, {
       method: 'POST',
@@ -3416,7 +3416,14 @@ async function smgmtRerunSprint(label) {
     });
     if (!res.ok) throw new Error(await res.text());
     const data = await res.json();
-    _smgmtShowToast(`Reset ${data.reset_count} ticket${data.reset_count !== 1 ? 's' : ''}. Click Run Sprint when ready.`);
+    const coderCount = (data.decisions || []).filter(d => d.action === 'dispatch_coder').length;
+    const testerCount = (data.decisions || []).filter(d => d.action === 'dispatch_tester').length;
+    const skipCount = data.skip_count || 0;
+    const parts = [];
+    if (coderCount) parts.push(`${coderCount} coding`);
+    if (testerCount) parts.push(`${testerCount} testing`);
+    if (skipCount) parts.push(`${skipCount} skipped`);
+    _smgmtShowToast(`Re-run started: ${parts.join(', ') || '0 dispatched'}.`);
     // Clear cached outcome so the band disappears after rerun
     delete _smgmtOutcomeCache[label];
     await loadSprintMgmt();

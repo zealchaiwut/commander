@@ -4356,21 +4356,28 @@ document.addEventListener('click', function(e) {
 
 // ── New Sprint modal ──────────────────────────────────────────────────────
 function smgmtOpenNewSprint() {
-  document.getElementById('ns-goal').value = '';
+  document.getElementById('ns-label').value = '';
   document.getElementById('ns-error').classList.add('hidden');
   document.getElementById('ns-submit-btn').disabled = true;
   document.getElementById('ns-backdrop').classList.remove('hidden');
   document.getElementById('ns-modal').classList.remove('hidden');
-  document.getElementById('ns-goal').focus();
+  document.getElementById('ns-label').focus();
 }
 
 function _nsClose(force) {
-  const goal = (document.getElementById('ns-goal').value || '').trim();
-  if (!force && goal.length > 0) {
-    if (!confirm('Discard unsaved sprint goal?')) return;
+  const label = (document.getElementById('ns-label').value || '').trim();
+  if (!force && label.length > 0) {
+    if (!confirm('Discard unsaved sprint label?')) return;
   }
   document.getElementById('ns-backdrop').classList.add('hidden');
   document.getElementById('ns-modal').classList.add('hidden');
+}
+
+function _parseSprintNum(str) {
+  if (!str) return null;
+  const clean = str.trim().toLowerCase().replace(/\s+/g, '-');
+  const m = clean.match(/^(?:sprint-)?(\d+)$/);
+  return m ? parseInt(m[1], 10) : null;
 }
 
 function _nsShowError(msg) {
@@ -4451,8 +4458,8 @@ function _setupModals() {
   });
 
   // ── New Sprint modal wiring ──
-  document.getElementById('ns-goal').addEventListener('input', function() {
-    document.getElementById('ns-submit-btn').disabled = this.value.trim().length < 10;
+  document.getElementById('ns-label').addEventListener('input', function() {
+    document.getElementById('ns-submit-btn').disabled = _parseSprintNum(this.value) === null;
   });
 
   document.getElementById('ns-close-btn').addEventListener('click', () => _nsClose(false));
@@ -4471,8 +4478,9 @@ function _setupModals() {
   });
 
   document.getElementById('ns-submit-btn').addEventListener('click', async function() {
-    const goal = (document.getElementById('ns-goal').value || '').trim();
-    if (goal.length < 10) return;
+    const labelVal = (document.getElementById('ns-label').value || '').trim();
+    const sprintNum = _parseSprintNum(labelVal);
+    if (sprintNum === null) return;
 
     const repo = _cachedFullRepo[_slug] || null;
     if (!repo) { _nsShowError('Project not found — please reload the page.'); return; }
@@ -4485,7 +4493,7 @@ function _setupModals() {
       const resp = await fetch('/api/sprints/create', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ project: repo, goal }),
+        body: JSON.stringify({ project: repo, sprint_number: sprintNum }),
       });
       if (!resp.ok) {
         const data = await resp.json().catch(() => ({}));
@@ -5517,12 +5525,10 @@ document.addEventListener('DOMContentLoaded', init);
   </div>
   <div class="modal-body">
     <div class="modal-field">
-      <label class="modal-label" for="ns-goal">Sprint goal <span style="color:var(--red)">*</span></label>
-      <textarea class="modal-input modal-textarea" id="ns-goal"
-                rows="4"
-                placeholder="What should this sprint achieve? — e.g. Dashboard UX cleanup"
-                aria-required="true"></textarea>
-      <p class="modal-hint">The goal becomes the sprint label's description and the BA passes it to the coder/tester</p>
+      <label class="modal-label" for="ns-label">Sprint label <span style="color:var(--red)">*</span></label>
+      <input class="modal-input" id="ns-label" type="text"
+             placeholder="e.g. Sprint 25 or sprint-25"
+             aria-required="true">
     </div>
     <div class="modal-error hidden" id="ns-error"></div>
   </div>

@@ -194,6 +194,7 @@ class TestWriteRuntimePort:
 
 # ── AC-7: COMMANDER_APP_PORT injected into subprocess env ─────────────────────
 
+@pytest.mark.usefixtures("allow_stub_success")
 class TestDispatchEnvVar:
     """AC-7: COMMANDER_APP_PORT is passed in coder and tester Popen env."""
 

@@ -14,13 +14,18 @@ The dashboard is organised into two navigation levels:
 
 | Tab | What it shows |
 |---|---|
-| **Overview** | All tracked projects, each as a card with sprint progress and UAT counts |
+| **Home** | Summary stat cards, per-project active/idle cards, and last 5 agent events |
 | **Sprint Mgmt** | Sprint planning, sprint runner, and per-sprint progress for the selected project |
 | **Agents** | Live agent event feed — tool calls, token usage, finish events |
 
+The root route `/` and `/home` both load the Home tab (previously called "Overview").
+
 ### Project drill-in
 
-Click any project card on the Overview tab to expand it. The expanded view shows:
+Clicking an active project card from the Home tab opens the project detail view in
+`/projects/<owner>/<repo>`. A persistent sidebar lists all tracked projects; a
+sub-tab bar lets you switch between Sprint Mgmt, Agents, and Tickets without a
+full page reload. The project page shows:
 
 - **Active tickets** grouped by status: In Progress, SIT, UAT, Backlog
 - Sprint label per ticket (the `sprint-N` GitHub label)
@@ -45,10 +50,59 @@ Agent hooks post events to the URL in their `HOOK_POST_TARGET` env var
 
 ---
 
+## Home Tab
+
+The Home tab (`/`) shows:
+
+- **Stat cards** — counts for active agents, open tickets, running sprints, and UAT-pending tickets
+- **Projects section** — active project cards (sprint progress, ticket counts) and an idle deck for projects with no open issues
+- **Activity feed** — last 5 agent events across all projects (role, event type, timestamp)
+
+---
+
+## Sprint Mgmt Tab
+
+The Sprint Mgmt tab has a toolbar at the top and a list of sprint blocks below.
+
+### Toolbar
+
+| Button | Action |
+|---|---|
+| Trigger Refresh | Re-fetches sprint data from GitHub without a full page reload |
+| New Ticket | Opens the BA draft-ticket modal |
+| New Sprint | Opens the New Sprint modal to create a sprint label |
+
+### Sprint blocks
+
+Each sprint is shown as a block with four visual states:
+
+| State | Appearance |
+|---|---|
+| Idle | Grey — sprint has tickets but is not running |
+| Running | Blue with live progress counter and per-ticket status indicators |
+| Completed | Green — all tickets merged or skipped |
+| Failed | Red — one or more tickets failed the tester gate |
+
+A running sprint block shows a **live log panel** below it. The panel tails the
+sprint dispatch log, refreshes on demand, and includes a Cancel button to kill
+the sprint.
+
+A **sticky Backlog block** always appears at the bottom of the sprint list,
+showing all issues not yet assigned to a sprint. It cannot be reordered past
+other sprint blocks via drag-and-drop.
+
+### Time tracking
+
+Each ticket row in a sprint block shows elapsed wall-clock time (updated live
+while the sprint runs). The sprint block header shows the total estimated and
+elapsed time across all tickets.
+
+---
+
 ## Sprint Progress Bar
 
-Each project card on the Overview tab shows a sprint progress bar when a sprint
-is active. The bar shows:
+Each active project card on the Home tab shows a sprint progress bar when a
+sprint is active. The bar shows:
 
 - Ticket count by status (done / UAT / in-progress / pending)
 - Sprint label (e.g. "Sprint 7")

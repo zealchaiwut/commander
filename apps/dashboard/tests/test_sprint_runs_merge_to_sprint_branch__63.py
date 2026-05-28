@@ -131,6 +131,7 @@ class TestAC1SprintBranchCreation:
 # AC2 — Sprint manager passes COMMANDER_MERGE_TARGET to coder/tester
 # ---------------------------------------------------------------------------
 
+@pytest.mark.usefixtures("allow_stub_success")
 class TestAC2CommanderMergeTargetEnvVar:
     def test_commander_merge_target_set_in_coder_env(self):
         """_dispatch_coder must set COMMANDER_MERGE_TARGET in subprocess env
@@ -189,6 +190,7 @@ class TestAC2CommanderMergeTargetEnvVar:
 # AC3 — Coder creates feature branches from sprint branch (via env var)
 # ---------------------------------------------------------------------------
 
+@pytest.mark.usefixtures("allow_stub_success")
 class TestAC3CoderSprintBranchMode:
     def test_coder_env_not_set_when_develop_mode(self):
         """COMMANDER_MERGE_TARGET must NOT be set when sprint_branch is 'develop'."""
@@ -452,6 +454,7 @@ class TestAC7PRUrlPrinted:
 # AC8 — Manual triggers (no COMMANDER_MERGE_TARGET) still merge to develop
 # ---------------------------------------------------------------------------
 
+@pytest.mark.usefixtures("allow_stub_success")
 class TestAC8ManualTriggersDevelop:
     def test_develop_target_skips_sprint_branch_creation(self, tmp_path):
         """When target_branch='develop' is explicitly passed, sprint branch creation is skipped."""

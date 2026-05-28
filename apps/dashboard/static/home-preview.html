@@ -1,0 +1,1401 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Commander — Home</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.30.0/dist/tabler-icons.min.css">
+  <style>
+    /* ── Variables ── */
+    :root {
+      --bg:           #f9fafb;
+      --surface:      #ffffff;
+      --surface-2:    #f3f4f6;
+      --surface-hover:#f5f6f8;
+      --border:       #e5e7eb;
+      --text:         #111827;
+      --text-muted:   #6b7280;
+      --text-sub:     #9ca3af;
+      --green:        #16a34a;
+      --green-bg:     #dcfce7;
+      --amber:        #d97706;
+      --amber-bg:     #fef3c7;
+      --red:          #dc2626;
+      --red-bg:       #fee2e2;
+      --blue:         #2563eb;
+      --blue-bg:      #dbeafe;
+      --purple:       #7c3aed;
+      --purple-bg:    #ede9fe;
+      --mono: 'SF Mono','Fira Code','Cascadia Code',monospace;
+    }
+
+    [data-theme="dark"] {
+      --bg:           #0d0d0d;
+      --surface:      #161616;
+      --surface-2:    #1e1e1e;
+      --surface-hover:#222222;
+      --border:       #2a2a2a;
+      --text:         #e5e7eb;
+      --text-muted:   #9ca3af;
+      --text-sub:     #6b7280;
+      --green:        #22c55e;
+      --green-bg:     rgba(34,197,94,.13);
+      --amber:        #eab308;
+      --amber-bg:     rgba(234,179,8,.13);
+      --red:          #f87171;
+      --red-bg:       rgba(239,68,68,.13);
+      --blue:         #60a5fa;
+      --blue-bg:      rgba(96,165,250,.13);
+      --purple:       #a78bfa;
+      --purple-bg:    rgba(167,139,250,.13);
+    }
+
+    /* ── Reset ── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+      font-size: 14px;
+      min-height: 100dvh;
+    }
+    button { font-family: inherit; cursor: pointer; }
+    a { color: inherit; }
+
+    /* ── Header ── */
+    .header {
+      position: sticky; top: 0; z-index: 20;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 14px 24px;
+      display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    }
+    .header-left { display: flex; align-items: center; gap: 12px; min-width: 0; }
+
+    /* Brand mark — small coloured square with a lightning bolt */
+    .brand-mark {
+      width: 28px; height: 28px; border-radius: 7px;
+      background: var(--text);
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+      color: var(--surface);
+      font-size: 15px;
+      text-decoration: none;
+    }
+
+    .live-dot {
+      width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0;
+      background: var(--green); box-shadow: 0 0 0 3px var(--green-bg);
+      animation: glow 2s ease-in-out infinite;
+    }
+    @keyframes glow {
+      0%,100% { box-shadow: 0 0 0 3px var(--green-bg); }
+      50%      { box-shadow: 0 0 0 5px var(--green-bg); }
+    }
+
+    .header-wordmark { font-size: 15px; font-weight: 700; letter-spacing: -.02em; }
+
+    .header-right { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+
+    .btn-icon {
+      width: 32px; height: 32px; display: flex; align-items: center; justify-content: center;
+      border: 1px solid var(--border); border-radius: 6px; background: none;
+      color: var(--text-muted); font-size: 15px;
+      transition: background .15s, color .15s;
+      min-width: 44px; min-height: 44px; /* mobile tap target AC-12 */
+    }
+    .btn-icon:hover { background: var(--surface-2); color: var(--text); }
+
+    /* Tooltip (data-tooltip attribute) */
+    [data-tooltip] { position: relative; }
+    [data-tooltip]::after {
+      content: attr(data-tooltip);
+      position: absolute; bottom: calc(100% + 6px); left: 50%; transform: translateX(-50%);
+      background: #1a1a1a; color: #f0f0f0; font-size: 11px; font-weight: 400;
+      padding: 5px 9px; border-radius: 5px; white-space: nowrap;
+      pointer-events: none; opacity: 0; transition: opacity .15s; z-index: 100;
+    }
+    [data-tooltip]:hover::after { opacity: 1; }
+
+    /* ── Page body ── */
+    .page-body {
+      padding: 32px;
+      display: flex; flex-direction: column; gap: 40px;
+      max-width: 1280px;
+      margin: 0 auto;
+    }
+
+    /* ── Section ── */
+    .section-heading {
+      font-size: 11px; font-weight: 700; letter-spacing: .1em;
+      text-transform: uppercase; color: var(--text-sub);
+      margin-bottom: 16px;
+    }
+
+    /* ── Error banner ── */
+    .error-banner {
+      display: none;
+      background: var(--red-bg);
+      border: 1px solid var(--red);
+      border-radius: 8px;
+      padding: 12px 16px;
+      color: var(--red);
+      font-size: 13px;
+      font-weight: 500;
+      display: flex; align-items: center; gap: 12px;
+    }
+    .error-banner.hidden { display: none; }
+    .error-banner button {
+      margin-left: auto;
+      background: var(--red); color: #fff;
+      border: none; border-radius: 5px;
+      padding: 5px 12px; font-size: 12px; font-weight: 600;
+      cursor: pointer;
+    }
+
+    /* ── Stat card grid ── */
+    .stat-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 14px;
+    }
+    @media (max-width: 1024px) {
+      .stat-grid { grid-template-columns: repeat(2, 1fr); }
+    }
+    @media (max-width: 700px) {
+      .stat-grid { grid-template-columns: 1fr; }
+      .page-body { padding: 20px; }
+    }
+
+    /* ── Stat card ── */
+    .stat-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 18px 20px;
+      cursor: pointer;
+      transition: transform .15s, border-color .15s, box-shadow .15s;
+      position: relative;
+      overflow: hidden;
+      min-height: 44px; /* mobile tap target AC-12 */
+      outline: none;
+    }
+    .stat-card:hover, .stat-card:focus-visible {
+      transform: translateY(-1px);
+      border-color: var(--text-sub);
+      box-shadow: 0 4px 12px rgba(0,0,0,0.04);
+    }
+    .stat-card:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+
+    /* Running sprint card treatment — shared class (AC-18) */
+    .stat-card.sprint-running-active {
+      border-color: var(--green);
+      background: linear-gradient(180deg, var(--green-bg) 0%, transparent 60%);
+    }
+    .stat-card.sprint-running-active::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 3px;
+      background: linear-gradient(90deg, transparent 0%, var(--green) 20%, var(--green) 80%, transparent 100%);
+      background-size: 50% 100%;
+      background-repeat: no-repeat;
+      animation: stripeFlow 2.4s linear infinite;
+      border-radius: 10px 10px 0 0;
+    }
+    @keyframes stripeFlow {
+      0%   { background-position: -100% 0; }
+      100% { background-position: 200% 0; }
+    }
+
+    .stat-card-label {
+      font-size: 10px; font-weight: 700;
+      text-transform: uppercase; letter-spacing: .1em;
+      color: var(--text-muted);
+      display: flex; align-items: center; gap: 6px;
+      margin-bottom: 10px;
+    }
+    .stat-card-label .ti { font-size: 13px; }
+
+    .stat-card-number {
+      font-family: var(--mono);
+      font-size: 36px; font-weight: 800; line-height: 1;
+      font-variant-numeric: tabular-nums;
+      margin-bottom: 8px;
+    }
+    .stat-card-number.amber { color: var(--amber); }
+    .stat-card-number.green { color: var(--green); }
+
+    .stat-card-sub {
+      font-size: 12px; color: var(--text-muted); line-height: 1.4;
+    }
+    .stat-card-sub strong {
+      font-family: var(--mono);
+      font-weight: 600;
+      color: var(--text);
+    }
+
+    /* ── Skeleton loader ── */
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50%       { opacity: .45; }
+    }
+    .skel {
+      background: var(--surface-2);
+      border-radius: 4px;
+      animation: pulse 1.5s ease-in-out infinite;
+    }
+    .skel-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 18px 20px;
+      min-height: 120px;
+    }
+    .skel-label { height: 10px; width: 80px; margin-bottom: 14px; }
+    .skel-number { height: 36px; width: 60px; margin-bottom: 12px; }
+    .skel-sub { height: 10px; width: 140px; }
+
+    /* ── Projects section header ── */
+    .projects-section-header {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      margin-bottom: 16px;
+    }
+    .projects-section-header .section-heading { margin-bottom: 0; }
+    .projects-total-count {
+      font-family: var(--mono);
+      font-size: 12px;
+      color: var(--text-sub);
+    }
+
+    /* ── Active projects row ── */
+    .active-projects-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 14px;
+      margin-bottom: 20px;
+    }
+
+    /* ── Project card ── */
+    .project-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px 18px;
+      cursor: pointer;
+      transition: transform .15s, border-color .15s, box-shadow .15s;
+      outline: none;
+      position: relative;
+      overflow: hidden;
+      min-height: 44px;
+      user-select: none;
+    }
+    .project-card:hover, .project-card:focus-visible {
+      transform: translateY(-1px);
+      border-color: var(--text-sub);
+      box-shadow: 0 4px 12px rgba(0,0,0,0.06);
+    }
+    .project-card:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+
+    /* Running card — green left/top border + animated flowing stripe */
+    .project-card.card-running {
+      border-left: 2px solid var(--green);
+      border-top: 2px solid var(--green);
+      background: linear-gradient(180deg, var(--green-bg) 0%, transparent 60%);
+    }
+    .project-card.card-running::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 3px;
+      background: linear-gradient(90deg, transparent 0%, var(--green) 20%, var(--green) 80%, transparent 100%);
+      background-size: 50% 100%;
+      background-repeat: no-repeat;
+      animation: stripeFlow 2.4s linear infinite;
+      border-radius: 10px 10px 0 0;
+    }
+
+    /* UAT-pending card */
+    .project-card.card-uat { border-left: 2px solid var(--amber); }
+
+    /* ── Card top row ── */
+    .proj-card-top {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+    .proj-icon-badge {
+      width: 26px; height: 26px;
+      border-radius: 7px;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+      font-size: 14px;
+    }
+    .proj-icon-badge.badge-running { background: var(--green-bg); color: var(--green); }
+    .proj-icon-badge.badge-uat     { background: var(--amber-bg); color: var(--amber); }
+    .proj-icon-badge.badge-idle    { background: var(--surface-2); color: var(--text-muted); }
+
+    .proj-card-name {
+      font-size: 16px; font-weight: 700;
+      flex: 1;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+
+    /* Status pill */
+    .status-pill {
+      display: inline-flex; align-items: center; gap: 5px;
+      padding: 3px 9px; border-radius: 20px;
+      font-size: 11px; font-weight: 600;
+      flex-shrink: 0; white-space: nowrap;
+    }
+    .pill-running { background: var(--green-bg); color: var(--green); }
+    .pill-uat     { background: var(--amber-bg); color: var(--amber); }
+
+    .pulse-dot {
+      width: 6px; height: 6px; border-radius: 50%;
+      background: var(--green);
+      animation: pulseDot 1.5s ease-in-out infinite;
+      flex-shrink: 0;
+    }
+    @keyframes pulseDot {
+      0%,100% { opacity: 1; transform: scale(1); }
+      50%     { opacity: 0.5; transform: scale(0.75); }
+    }
+    /* Health icon animation when system is down — reuses pulseDot keyframe */
+    #health-icon.health-down {
+      animation: pulseDot 1s ease-in-out infinite;
+    }
+
+    /* ── Progress line + bar ── */
+    .proj-progress-line {
+      font-size: 12px; color: var(--text-muted);
+      margin-bottom: 8px; line-height: 1.4;
+    }
+    .proj-progress-bar-wrap {
+      height: 5px; background: var(--surface-2);
+      border-radius: 3px; overflow: hidden; margin-bottom: 10px;
+    }
+    .proj-progress-bar { height: 100%; border-radius: 3px; min-width: 8px; }
+    .bar-running { background: var(--green); position: relative; overflow: hidden; }
+    .bar-running::after {
+      content: '';
+      position: absolute; top: 0; left: 0; bottom: 0;
+      width: 60%;
+      background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.5) 50%, transparent 100%);
+      animation: shimmerBar 1.8s ease-in-out infinite;
+    }
+    @keyframes shimmerBar {
+      0%   { transform: translateX(-150%); }
+      100% { transform: translateX(350%); }
+    }
+    .bar-uat { background: var(--amber); }
+
+    /* ── Meta row ── */
+    .proj-meta-row {
+      display: flex; align-items: center; gap: 6px;
+      font-family: var(--mono); font-size: 11px; color: var(--text-muted);
+      flex-wrap: wrap;
+    }
+    .proj-meta-sep { color: var(--text-sub); }
+    .proj-card-timestamp {
+      font-family: var(--mono); font-size: 11px; color: var(--text-sub);
+      margin-left: auto; flex-shrink: 0;
+    }
+
+    /* ── Idle deck section ── */
+    .idle-deck-section { margin-top: 4px; }
+
+    .idle-deck-header {
+      width: 100%; display: flex; align-items: center; justify-content: space-between;
+      padding: 10px 14px; background: var(--surface-2);
+      border: 1px solid var(--border); border-radius: 8px;
+      margin-bottom: 10px;
+      font-size: 13px; font-weight: 500; color: var(--text);
+      cursor: pointer; transition: background .15s;
+      min-height: 44px;
+    }
+    .idle-deck-header:hover { background: var(--surface-hover); }
+    .idle-deck-header:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+
+    .idle-header-left { display: flex; align-items: center; gap: 8px; }
+    .idle-header-left .ti { font-size: 15px; color: var(--text-muted); }
+
+    .idle-count-badge {
+      display: inline-flex; align-items: center; justify-content: center;
+      min-width: 20px; height: 20px; border-radius: 10px;
+      background: var(--surface); border: 1px solid var(--border);
+      font-size: 11px; font-weight: 700; font-family: var(--mono);
+      color: var(--text-muted); padding: 0 5px;
+    }
+    .idle-toggle-hint { font-size: 11px; color: var(--text-sub); font-weight: 400; }
+
+    /* ── Idle deck container ── */
+    .idle-deck-container { position: relative; }
+
+    /* Collapsed: all cards overlap in one grid cell, peek with side offsets */
+    .idle-deck-container:not(.is-expanded) {
+      display: grid;
+      grid-template-columns: 1fr;
+      padding-bottom: 14px;
+      cursor: pointer;
+    }
+    .idle-deck-container:not(.is-expanded) .idle-card {
+      grid-area: 1 / 1;
+      transition: transform 0.35s cubic-bezier(0.22, 1, 0.36, 1),
+                  opacity  0.35s cubic-bezier(0.22, 1, 0.36, 1);
+      pointer-events: none;
+    }
+    .idle-deck-container:not(.is-expanded) .idle-card:nth-child(1) {
+      z-index: 4; pointer-events: auto;
+    }
+    .idle-deck-container:not(.is-expanded) .idle-card:nth-child(2) {
+      z-index: 3; opacity: 0.85; transform: translateX(4px) translateY(4px);
+    }
+    .idle-deck-container:not(.is-expanded) .idle-card:nth-child(3) {
+      z-index: 2; opacity: 0.65; transform: translateX(8px) translateY(8px);
+    }
+    .idle-deck-container:not(.is-expanded) .idle-card:nth-child(4) {
+      z-index: 1; opacity: 0.45; transform: translateX(12px) translateY(12px);
+    }
+    .idle-deck-container:not(.is-expanded) .idle-card:nth-child(n+5) {
+      z-index: 0; opacity: 0; transform: translateX(12px) translateY(12px);
+    }
+    .idle-deck-container:not(.is-expanded) .idle-meta    { display: none; }
+    .idle-deck-container:not(.is-expanded) .idle-add-tile { display: none !important; }
+
+    /* Expanded: multi-column grid */
+    .idle-deck-container.is-expanded {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 10px;
+    }
+    .idle-deck-container.is-expanded .idle-card {
+      animation: fanIn 0.4s cubic-bezier(0.22, 1, 0.36, 1) both;
+    }
+    @keyframes fanIn {
+      from { opacity: 0; transform: translateY(8px) scale(0.97); }
+      to   { opacity: 1; transform: translateY(0) scale(1); }
+    }
+
+    /* ── Add project dashed tile ── */
+    .add-project-tile {
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center; gap: 8px;
+      border: 2px dashed var(--border); border-radius: 10px;
+      padding: 24px 16px; cursor: pointer;
+      color: var(--text-muted); font-size: 13px; font-weight: 500;
+      transition: border-color .15s, color .15s, background .15s;
+      min-height: 80px;
+    }
+    .add-project-tile:hover { border-color: var(--text-sub); color: var(--text); background: var(--surface-2); }
+    .add-project-tile:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+    .add-project-tile .ti { font-size: 20px; }
+
+    @media (max-width: 480px) {
+      .active-projects-grid { grid-template-columns: 1fr; }
+      .idle-deck-container.is-expanded { grid-template-columns: 1fr; }
+    }
+
+    /* ── Activity section CSS variables (badge colors per event type) ── */
+    :root {
+      --activity-sprint-started-badge:    var(--green-bg);
+      --activity-sprint-started-icon:     var(--green);
+      --activity-sprint-completed-badge:  var(--surface-2);
+      --activity-sprint-completed-icon:   var(--text-muted);
+      --activity-ticket-uat-badge:        var(--amber-bg);
+      --activity-ticket-uat-icon:         var(--amber);
+      --activity-ticket-rework-badge:     var(--red-bg);
+      --activity-ticket-rework-icon:      var(--red);
+      --activity-sprint-failed-badge:     var(--red-bg);
+      --activity-sprint-failed-icon:      var(--red);
+    }
+
+    /* ── Activity section header row ── */
+    .activity-section-header {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      margin-bottom: 16px;
+    }
+    .activity-section-header .section-heading { margin-bottom: 0; }
+    .activity-count-label {
+      font-family: var(--mono);
+      font-size: 12px;
+      color: var(--text-sub);
+    }
+
+    /* ── Activity list ── */
+    .activity-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    /* ── Activity item card ── */
+    .activity-item {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 14px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      transition: border-color .15s, background .15s;
+      outline: none;
+      text-decoration: none;
+      color: inherit;
+    }
+    .activity-item.is-clickable {
+      cursor: pointer;
+    }
+    .activity-item.is-clickable:hover,
+    .activity-item.is-clickable:focus-visible {
+      border-color: var(--text-sub);
+      background: var(--surface-hover);
+    }
+    .activity-item:focus-visible {
+      outline: 2px solid var(--blue);
+      outline-offset: 2px;
+    }
+
+    /* ── Icon badge ── */
+    .activity-badge {
+      width: 34px;
+      height: 34px;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      font-size: 16px;
+    }
+    .activity-badge.badge-sprint-started    { background: var(--activity-sprint-started-badge);   color: var(--activity-sprint-started-icon); }
+    .activity-badge.badge-sprint-completed  { background: var(--activity-sprint-completed-badge); color: var(--activity-sprint-completed-icon); }
+    .activity-badge.badge-ticket-uat        { background: var(--activity-ticket-uat-badge);        color: var(--activity-ticket-uat-icon); }
+    .activity-badge.badge-ticket-rework     { background: var(--activity-ticket-rework-badge);     color: var(--activity-ticket-rework-icon); }
+    .activity-badge.badge-sprint-failed     { background: var(--activity-sprint-failed-badge);     color: var(--activity-sprint-failed-icon); }
+
+    /* ── Middle text ── */
+    .activity-body {
+      flex: 1;
+      min-width: 0;
+    }
+    .activity-title {
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--text);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      margin-bottom: 2px;
+    }
+    .activity-sub {
+      font-family: var(--mono);
+      font-size: 12px;
+      color: var(--text-muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    /* ── Chevron ── */
+    .activity-chevron {
+      font-size: 16px;
+      color: var(--text-sub);
+      flex-shrink: 0;
+    }
+
+    /* ── Empty state ── */
+    .activity-empty {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+      padding: 28px 0;
+      color: var(--text-muted);
+      text-align: center;
+    }
+    .activity-empty .ti { font-size: 20px; color: var(--text-sub); }
+    .activity-empty-text {
+      font-size: 13px;
+      color: var(--text-muted);
+    }
+
+  </style>
+</head>
+<body>
+
+<!-- ── Header ── -->
+<header class="header">
+  <div class="header-left">
+    <a href="/" class="brand-mark" aria-label="Commander Home">
+      <i class="ti ti-bolt" aria-hidden="true"></i>
+    </a>
+    <span class="header-wordmark">Commander</span>
+    <div class="live-dot" id="live-dot" aria-label="Live"></div>
+  </div>
+  <div class="header-right">
+    <button class="btn-icon" title="Bulk create" aria-label="Bulk create" onclick="window.location.href='/'">
+      <i class="ti ti-list-plus"></i>
+    </button>
+    <button class="btn-icon" id="health-icon-btn" title="Diagnostics" aria-label="Diagnostics"
+            onclick="window.location.href='/diagnostics'">
+      <i class="ti ti-heartbeat" id="health-icon" style="transition:color .3s;"></i>
+    </button>
+    <button class="btn-icon" title="Settings" aria-label="Settings" onclick="window.location.href='/'">
+      <i class="ti ti-settings"></i>
+    </button>
+  </div>
+</header>
+
+<!-- ── Page body ── -->
+<main class="page-body">
+
+  <!-- Error banner (hidden until error) -->
+  <div class="error-banner hidden" id="error-banner" role="alert">
+    <i class="ti ti-alert-triangle"></i>
+    Couldn't load dashboard — retry
+    <button onclick="loadHomeData()">Retry</button>
+  </div>
+
+  <!-- ── Right now ── -->
+  <section id="section-right-now">
+    <div class="section-heading">Right now</div>
+
+    <!-- Skeleton grid (shown while loading) -->
+    <div class="stat-grid" id="stat-grid-skeleton">
+      <div class="skel-card">
+        <div class="skel skel-label"></div>
+        <div class="skel skel-number"></div>
+        <div class="skel skel-sub"></div>
+      </div>
+      <div class="skel-card">
+        <div class="skel skel-label"></div>
+        <div class="skel skel-number"></div>
+        <div class="skel skel-sub"></div>
+      </div>
+      <div class="skel-card">
+        <div class="skel skel-label"></div>
+        <div class="skel skel-number"></div>
+        <div class="skel skel-sub"></div>
+      </div>
+      <div class="skel-card">
+        <div class="skel skel-label"></div>
+        <div class="skel skel-number"></div>
+        <div class="skel skel-sub"></div>
+      </div>
+    </div>
+
+    <!-- Real stat grid (hidden until loaded) -->
+    <div class="stat-grid hidden" id="stat-grid-real">
+
+      <!-- Card 1: Sprint running -->
+      <div class="stat-card"
+           id="card-sprint-running"
+           role="button" tabindex="0"
+           aria-label="Sprint running"
+           onclick="handleCardClick('sprint-running')"
+           onkeydown="handleCardKey(event, 'sprint-running')">
+        <div class="stat-card-label">
+          <i class="ti ti-player-play"></i>
+          Sprint running
+        </div>
+        <div class="stat-card-number" id="num-sprint-running">—</div>
+        <div class="stat-card-sub" id="sub-sprint-running">Loading…</div>
+      </div>
+
+      <!-- Card 2: Awaiting UAT -->
+      <div class="stat-card"
+           id="card-awaiting-uat"
+           role="button" tabindex="0"
+           aria-label="Awaiting UAT"
+           onclick="handleCardClick('awaiting-uat')"
+           onkeydown="handleCardKey(event, 'awaiting-uat')">
+        <div class="stat-card-label">
+          <i class="ti ti-eye-check"></i>
+          Awaiting UAT
+        </div>
+        <div class="stat-card-number" id="num-awaiting-uat">—</div>
+        <div class="stat-card-sub" id="sub-awaiting-uat">Loading…</div>
+      </div>
+
+      <!-- Card 3: Sprints planned -->
+      <div class="stat-card"
+           id="card-sprints-planned"
+           role="button" tabindex="0"
+           aria-label="Sprints planned"
+           data-tooltip="Open a project to plan sprints"
+           onclick="handleCardClick('sprints-planned')"
+           onkeydown="handleCardKey(event, 'sprints-planned')">
+        <div class="stat-card-label">
+          <i class="ti ti-list-check"></i>
+          Sprints planned
+        </div>
+        <div class="stat-card-number" id="num-sprints-planned">—</div>
+        <div class="stat-card-sub" id="sub-sprints-planned">Loading…</div>
+      </div>
+
+      <!-- Card 4: Backlog -->
+      <div class="stat-card"
+           id="card-backlog"
+           role="button" tabindex="0"
+           aria-label="Backlog"
+           data-tooltip="Open a project to view its backlog"
+           onclick="handleCardClick('backlog')"
+           onkeydown="handleCardKey(event, 'backlog')">
+        <div class="stat-card-label">
+          <i class="ti ti-inbox"></i>
+          Backlog
+        </div>
+        <div class="stat-card-number" id="num-backlog">—</div>
+        <div class="stat-card-sub" id="sub-backlog">Loading…</div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ── Projects ── -->
+  <section id="section-projects">
+    <div class="projects-section-header">
+      <div class="section-heading">Projects · click to open</div>
+      <span id="projects-total-count" class="projects-total-count"></span>
+    </div>
+
+    <!-- Active projects row (hidden when no active projects) -->
+    <div class="active-projects-grid" id="active-projects-grid" style="display:none"></div>
+
+    <!-- Idle deck section (built dynamically) -->
+    <div class="idle-deck-section" id="idle-deck-section" style="display:none"></div>
+
+    <!-- Zero-projects tile (shown when no projects at all) -->
+    <div class="add-project-tile" id="add-project-tile-zero" style="display:none"
+         role="button" tabindex="0" aria-label="Add project"
+         onclick="openAddProjectFlow()"
+         onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openAddProjectFlow();}">
+      <i class="ti ti-plus"></i>
+      <span>Add project</span>
+    </div>
+  </section>
+
+  <!-- ── Activity ── -->
+  <section id="section-activity">
+    <div class="activity-section-header">
+      <div class="section-heading">Activity</div>
+      <span class="activity-count-label">last 5 events</span>
+    </div>
+    <div class="activity-list" id="activity-list">
+      <!-- Populated by renderActivity() -->
+    </div>
+  </section>
+
+</main>
+
+<script>
+  // ── State ──────────────────────────────────────────────────────────────────
+  let _homeData = null;
+
+  // ── Utilities ──────────────────────────────────────────────────────────────
+
+  /** Format seconds into human-friendly elapsed string: "2h 14m", "47m", etc. */
+  function fmtElapsed(sec) {
+    if (!sec || sec < 60) return sec + 's';
+    const m = Math.floor(sec / 60);
+    const h = Math.floor(m / 60);
+    const rm = m % 60;
+    if (h > 0) return h + 'h ' + (rm > 0 ? rm + 'm' : '');
+    return m + 'm';
+  }
+
+  /** Format seconds into a humanised relative-time string: "3h ago", "2d ago" */
+  function fmtAgo(sec) {
+    if (!sec || sec < 0) return '?';
+    if (sec < 60)           return sec + 's ago';
+    if (sec < 3600)         return Math.floor(sec / 60) + 'm ago';
+    if (sec < 86400)        return Math.floor(sec / 3600) + 'h ago';
+    if (sec < 86400 * 7)    return Math.floor(sec / 86400) + 'd ago';
+    if (sec < 86400 * 30)   return Math.floor(sec / (86400 * 7)) + 'w ago';
+    return Math.floor(sec / (86400 * 30)) + 'mo ago';
+  }
+
+  // ── Render ─────────────────────────────────────────────────────────────────
+
+  function renderStats(data) {
+    const stats = data.stats;
+
+    // ── Card 1: Sprint running ──
+    const sr = stats.sprint_running;
+    const numEl1 = document.getElementById('num-sprint-running');
+    const subEl1 = document.getElementById('sub-sprint-running');
+    const card1  = document.getElementById('card-sprint-running');
+
+    numEl1.textContent = sr.count;
+    numEl1.className   = 'stat-card-number';
+
+    if (sr.count >= 1) {
+      card1.classList.add('sprint-running-active');
+      if (sr.count === 1) {
+        const p = sr.projects[0];
+        const elapsed = p.elapsed_sec > 0 ? fmtElapsed(p.elapsed_sec) + ' elapsed' : '';
+        subEl1.innerHTML = '<strong>' + escHtml(p.name) + '</strong> '
+          + escHtml(p.sprint_label)
+          + (elapsed ? ' · ' + elapsed : '');
+      } else {
+        subEl1.textContent = sr.count + ' projects';
+      }
+    } else {
+      card1.classList.remove('sprint-running-active');
+      subEl1.textContent = 'None right now';
+    }
+
+    // ── Card 2: Awaiting UAT ──
+    const uat   = stats.awaiting_uat;
+    const numEl2 = document.getElementById('num-awaiting-uat');
+    const subEl2 = document.getElementById('sub-awaiting-uat');
+
+    numEl2.textContent = uat.count;
+    numEl2.className   = uat.count >= 1
+      ? 'stat-card-number amber'
+      : 'stat-card-number';
+
+    const projectsWord = uat.projects === 1 ? 'project' : 'projects';
+    let subUat = 'Across <strong>' + uat.projects + '</strong> ' + projectsWord;
+    if (uat.oldest_age_sec != null) {
+      subUat += ' · oldest <strong>' + fmtAgo(uat.oldest_age_sec) + '</strong>';
+    }
+    subEl2.innerHTML = subUat;
+
+    // ── Card 3: Sprints planned ──
+    const sp    = stats.sprints_planned;
+    const numEl3 = document.getElementById('num-sprints-planned');
+    const subEl3 = document.getElementById('sub-sprints-planned');
+
+    numEl3.textContent = sp.count;
+    numEl3.className   = 'stat-card-number';
+    subEl3.innerHTML   = 'Ready to run · <strong>' + sp.total_tickets + '</strong> tickets total';
+
+    // ── Card 4: Backlog ──
+    const bl    = stats.backlog;
+    const numEl4 = document.getElementById('num-backlog');
+    const subEl4 = document.getElementById('sub-backlog');
+
+    numEl4.textContent = bl.count;
+    numEl4.className   = 'stat-card-number';
+
+    const perProj = bl.per_project || [];
+    if (perProj.length === 0) {
+      subEl4.textContent = 'No backlog items';
+    } else {
+      const top2 = perProj.slice(0, 2);
+      let subBl = top2.map(p => '<strong>' + escHtml(p.name) + '</strong> ' + p.count).join(' · ');
+      const extra = perProj.length - 2;
+      if (extra > 0) subBl += ' · +' + extra + ' more';
+      subEl4.innerHTML = subBl;
+    }
+  }
+
+  function showSkeleton() {
+    document.getElementById('stat-grid-skeleton').classList.remove('hidden');
+    document.getElementById('stat-grid-real').classList.add('hidden');
+  }
+
+  function showReal() {
+    document.getElementById('stat-grid-skeleton').classList.add('hidden');
+    document.getElementById('stat-grid-real').classList.remove('hidden');
+  }
+
+  function showError() {
+    document.getElementById('error-banner').classList.remove('hidden');
+  }
+
+  function hideError() {
+    document.getElementById('error-banner').classList.add('hidden');
+  }
+
+  function escHtml(s) {
+    return String(s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  // ── Projects: localStorage key ─────────────────────────────────────────────
+  const IDLE_DECK_KEY = 'commander.home.idleDeckExpanded';
+
+  // ── Projects helpers ───────────────────────────────────────────────────────
+
+  /** Compute seconds-ago from an ISO 8601 timestamp string. */
+  function ageSecFromIso(iso) {
+    try {
+      return Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 1000));
+    } catch { return 0; }
+  }
+
+  /** Build and return an active project card element. */
+  function buildActiveCard(proj) {
+    const isRunning = proj.status === 'running';
+    const card = document.createElement('div');
+    card.className = 'project-card ' + (isRunning ? 'card-running' : 'card-uat');
+    card.setAttribute('role', 'button');
+    card.setAttribute('tabindex', '0');
+    card.setAttribute('aria-label', proj.name);
+
+    const badgeCls = isRunning ? 'badge-running' : 'badge-uat';
+    const icon = proj.icon || 'ti-folder';
+
+    const pillHtml = isRunning
+      ? '<div class="status-pill pill-running"><div class="pulse-dot"></div>Running</div>'
+      : '<div class="status-pill pill-uat">' + escHtml(proj.uat_count + ' UAT pending') + '</div>';
+
+    let progressHtml = '';
+    if (isRunning && proj.sprint_running) {
+      const elapsed = fmtElapsed(proj.sprint_running.elapsed_sec);
+      progressHtml = 'Sprint ' + escHtml(proj.sprint_running.label) + ' &middot; ' + escHtml(elapsed) + ' elapsed';
+    } else if (!isRunning) {
+      if (proj.last_sprint) {
+        const sprintLabel = proj.last_sprint.sprint_num ? 'sprint-' + proj.last_sprint.sprint_num : 'last sprint';
+        let agoStr = '';
+        if (proj.last_sprint.date) {
+          const ageSec = Math.floor((Date.now() - new Date(proj.last_sprint.date + 'T00:00:00Z').getTime()) / 1000);
+          agoStr = ' &middot; finished ' + escHtml(fmtAgo(ageSec));
+        } else if (proj.last_activity_at) {
+          agoStr = ' &middot; finished ' + escHtml(fmtAgo(ageSecFromIso(proj.last_activity_at)));
+        }
+        progressHtml = 'Last sprint: ' + escHtml(sprintLabel) + agoStr;
+      } else if (proj.last_activity_at) {
+        progressHtml = 'Last activity ' + escHtml(fmtAgo(ageSecFromIso(proj.last_activity_at)));
+      }
+    }
+
+    const barCls = isRunning ? 'bar-running' : 'bar-uat';
+    const barWidth = isRunning ? '55%' : '100%';
+
+    let metaHtml = escHtml(proj.uat_count + ' UAT')
+      + '<span class="proj-meta-sep">&middot;</span>'
+      + escHtml(proj.backlog_count + ' backlog');
+    if (isRunning && proj.sprint_running) {
+      metaHtml += '<span class="proj-meta-sep">&middot;</span>'
+        + '<span style="color:var(--text-sub)">' + escHtml(proj.sprint_running.label) + '</span>';
+    }
+
+    card.innerHTML =
+      '<div class="proj-card-top">'
+      + '<div class="proj-icon-badge ' + escHtml(badgeCls) + '"><i class="ti ' + escHtml(icon) + '"></i></div>'
+      + '<span class="proj-card-name">' + escHtml(proj.name) + '</span>'
+      + pillHtml
+      + '</div>'
+      + (progressHtml ? '<div class="proj-progress-line">' + progressHtml + '</div>' : '')
+      + '<div class="proj-progress-bar-wrap"><div class="proj-progress-bar ' + barCls + '" style="width:' + barWidth + '"></div></div>'
+      + '<div class="proj-meta-row">' + metaHtml + '</div>';
+
+    card.addEventListener('click', () => navigateToProject(proj.slug));
+    card.addEventListener('keydown', e => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); navigateToProject(proj.slug); }
+    });
+    return card;
+  }
+
+  /** Build and return an idle project card element. */
+  function buildIdleCard(proj) {
+    const card = document.createElement('div');
+    card.className = 'project-card idle-card';
+    card.setAttribute('role', 'button');
+    card.setAttribute('tabindex', '0');
+    card.setAttribute('aria-label', proj.name);
+
+    const icon = proj.icon || 'ti-folder';
+    const timestamp = proj.last_activity_at ? fmtAgo(ageSecFromIso(proj.last_activity_at)) : '—';
+
+    card.innerHTML =
+      '<div class="proj-card-top">'
+      + '<div class="proj-icon-badge badge-idle"><i class="ti ' + escHtml(icon) + '"></i></div>'
+      + '<span class="proj-card-name">' + escHtml(proj.name) + '</span>'
+      + '<span class="proj-card-timestamp">' + escHtml(timestamp) + '</span>'
+      + '</div>'
+      + '<div class="proj-meta-row idle-meta">'
+      + escHtml(proj.uat_count + ' UAT')
+      + '<span class="proj-meta-sep">&middot;</span>'
+      + escHtml(proj.backlog_count + ' backlog')
+      + '</div>';
+
+    return card;
+  }
+
+  /** Build and return the "+ Add project" dashed tile element. */
+  function buildAddTile(extraClass) {
+    const tile = document.createElement('div');
+    tile.className = 'add-project-tile' + (extraClass ? ' ' + extraClass : '');
+    tile.setAttribute('role', 'button');
+    tile.setAttribute('tabindex', '0');
+    tile.setAttribute('aria-label', 'Add project');
+    tile.innerHTML = '<i class="ti ti-plus"></i><span>Add project</span>';
+    tile.addEventListener('click', openAddProjectFlow);
+    tile.addEventListener('keydown', e => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openAddProjectFlow(); }
+    });
+    return tile;
+  }
+
+  function navigateToProject(slug) {
+    window.location.href = '/project/' + encodeURIComponent(slug) + '/sprint-mgmt';
+  }
+
+  function openAddProjectFlow() {
+    window.location.href = '/';
+  }
+
+  // ── Projects render ────────────────────────────────────────────────────────
+
+  function renderProjects(data) {
+    const projects = data.projects || [];
+    const total    = projects.length;
+
+    document.getElementById('projects-total-count').textContent = total + ' total';
+
+    const active = projects.filter(p => p.status === 'running' || p.uat_count >= 1);
+    const idle   = projects.filter(p => p.status !== 'running' && p.uat_count < 1);
+
+    const activeGrid     = document.getElementById('active-projects-grid');
+    const idleSection    = document.getElementById('idle-deck-section');
+    const zeroTile       = document.getElementById('add-project-tile-zero');
+
+    activeGrid.innerHTML  = '';
+    idleSection.innerHTML = '';
+
+    // Edge: 0 projects
+    if (total === 0) {
+      activeGrid.style.display  = 'none';
+      idleSection.style.display = 'none';
+      zeroTile.style.display    = 'flex';
+      return;
+    }
+    zeroTile.style.display = 'none';
+
+    // Active row
+    if (active.length > 0) {
+      activeGrid.style.display = '';
+      active.forEach(proj => activeGrid.appendChild(buildActiveCard(proj)));
+    } else {
+      activeGrid.style.display = 'none';
+    }
+
+    // Idle section
+    if (idle.length === 0) {
+      idleSection.style.display = 'none';
+      return;
+    }
+    idleSection.style.display = '';
+
+    // Edge: exactly 1 idle project — no deck, single card + add tile below
+    if (idle.length === 1) {
+      const card = buildIdleCard(idle[0]);
+      card.querySelector('.idle-meta').style.display = '';
+      card.addEventListener('click', () => navigateToProject(idle[0].slug));
+      card.addEventListener('keydown', e => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); navigateToProject(idle[0].slug); }
+      });
+      idleSection.appendChild(card);
+      idleSection.appendChild(buildAddTile());
+      return;
+    }
+
+    // Multiple idle projects: deck UI
+    const defaultExpanded = active.length === 0;
+    const saved = localStorage.getItem(IDLE_DECK_KEY);
+    const isExpanded = saved !== null ? saved === 'true' : defaultExpanded;
+
+    // Deck header
+    const header = document.createElement('button');
+    header.className = 'idle-deck-header';
+    header.setAttribute('aria-expanded', String(isExpanded));
+    header.setAttribute('tabindex', '0');
+    header.innerHTML =
+      '<span class="idle-header-left">'
+      + '<i class="ti ti-layers-subtract"></i>'
+      + '<span>Idle projects</span>'
+      + '<span class="idle-count-badge">' + idle.length + '</span>'
+      + '</span>'
+      + '<span class="idle-toggle-hint">' + (isExpanded ? 'click to collapse ↑' : 'click to expand ↓') + '</span>';
+
+    idleSection.appendChild(header);
+
+    // Deck container
+    const container = document.createElement('div');
+    container.className = 'idle-deck-container' + (isExpanded ? ' is-expanded' : '');
+
+    // Build idle cards
+    idle.forEach((proj, i) => {
+      const card = buildIdleCard(proj);
+      if (isExpanded) {
+        card.style.animationDelay = (i * 40) + 'ms';
+      }
+      card.addEventListener('click', () => {
+        if (container.classList.contains('is-expanded')) {
+          navigateToProject(proj.slug);
+        }
+        // collapsed-state click handled by container listener below
+      });
+      card.addEventListener('keydown', e => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          if (container.classList.contains('is-expanded')) navigateToProject(proj.slug);
+          else toggle();
+        }
+      });
+      container.appendChild(card);
+    });
+
+    // Add tile inside deck (only visible when expanded)
+    const addTileInDeck = buildAddTile('idle-add-tile');
+    container.appendChild(addTileInDeck);
+
+    idleSection.appendChild(container);
+
+    // Toggle logic
+    function toggle() {
+      const expanded = !container.classList.contains('is-expanded');
+      container.classList.toggle('is-expanded', expanded);
+      header.setAttribute('aria-expanded', String(expanded));
+      header.querySelector('.idle-toggle-hint').textContent = expanded ? 'click to collapse ↑' : 'click to expand ↓';
+      localStorage.setItem(IDLE_DECK_KEY, String(expanded));
+
+      if (expanded) {
+        container.querySelectorAll('.idle-card').forEach((card, i) => {
+          card.style.animation = 'none';
+          card.offsetHeight; // force reflow
+          card.style.animation = '';
+          card.style.animationDelay = (i * 40) + 'ms';
+        });
+      }
+    }
+
+    header.addEventListener('click', toggle);
+    header.addEventListener('keydown', e => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); }
+    });
+
+    // Click anywhere on collapsed deck to toggle
+    container.addEventListener('click', () => {
+      if (!container.classList.contains('is-expanded')) toggle();
+    });
+  }
+
+  // ── Activity ───────────────────────────────────────────────────────────────
+
+  /**
+   * Humanize an ISO timestamp string to a relative string like "47m ago", "1d ago".
+   * Uses dayjs if loaded; falls back to a hand-rolled formatter.
+   */
+  function fmtRelative(isoStr) {
+    if (!isoStr) return '';
+    let diffSec;
+    try {
+      diffSec = Math.max(0, Math.floor((Date.now() - new Date(isoStr).getTime()) / 1000));
+    } catch (e) {
+      return '';
+    }
+    if (typeof dayjs !== 'undefined' && dayjs.extend) {
+      // dayjs with relativeTime plugin
+      try {
+        return dayjs(isoStr).fromNow();
+      } catch (e) { /* fallthrough */ }
+    }
+    // hand-rolled formatter
+    if (diffSec < 60)          return diffSec + 's ago';
+    if (diffSec < 3600)        return Math.floor(diffSec / 60) + 'm ago';
+    if (diffSec < 86400)       return Math.floor(diffSec / 3600) + 'h ago';
+    if (diffSec < 86400 * 7)   return Math.floor(diffSec / 86400) + 'd ago';
+    if (diffSec < 86400 * 30)  return Math.floor(diffSec / (86400 * 7)) + 'w ago';
+    return Math.floor(diffSec / (86400 * 30)) + 'mo ago';
+  }
+
+  /**
+   * Return the CSS badge class and Tabler icon class for a given event type.
+   */
+  function activityTypeConfig(eventType) {
+    switch (eventType) {
+      case 'sprint_started':
+        return { badge: 'badge-sprint-started',   icon: 'ti-player-play' };
+      case 'sprint_completed':
+        return { badge: 'badge-sprint-completed',  icon: 'ti-circle-check' };
+      case 'ticket_moved_to_uat':
+        return { badge: 'badge-ticket-uat',         icon: 'ti-eye-check' };
+      case 'ticket_needs_rework':
+        return { badge: 'badge-ticket-rework',      icon: 'ti-x' };
+      case 'sprint_failed':
+        return { badge: 'badge-sprint-failed',      icon: 'ti-alert-triangle' };
+      default:
+        return { badge: 'badge-sprint-completed',  icon: 'ti-activity' };
+    }
+  }
+
+  function renderActivity(data) {
+    const items   = (data.activity || []).slice(0, 5);
+    const listEl  = document.getElementById('activity-list');
+    listEl.innerHTML = '';
+
+    if (items.length === 0) {
+      listEl.innerHTML =
+        '<div class="activity-empty">'
+        + '<i class="ti ti-clock-hour-3"></i>'
+        + '<span class="activity-empty-text">Nothing recent — try running a sprint from a project</span>'
+        + '</div>';
+      return;
+    }
+
+    items.forEach(item => {
+      const cfg       = activityTypeConfig(item.type || '');
+      const hasLink   = !!item.link;
+      const timeStr   = fmtRelative(item.timestamp);
+      const subParts  = [item.sub, timeStr].filter(Boolean);
+      const subLine   = subParts.join(' · ');
+
+      // Build element — use <a> when clickable so keyboard nav works natively
+      const el = document.createElement(hasLink ? 'a' : 'div');
+      el.className = 'activity-item' + (hasLink ? ' is-clickable' : '');
+
+      if (hasLink) {
+        el.href = escHtml(item.link);
+        el.setAttribute('target', '_blank');
+        el.setAttribute('rel', 'noopener noreferrer');
+        el.setAttribute('tabindex', '0');
+      } else {
+        el.setAttribute('tabindex', '0');
+        // non-clickable: Enter does nothing, but item is still focusable (AC-12)
+      }
+
+      el.innerHTML =
+        '<div class="activity-badge ' + escHtml(cfg.badge) + '">'
+        +   '<i class="ti ' + escHtml(cfg.icon) + '"></i>'
+        + '</div>'
+        + '<div class="activity-body">'
+        +   '<div class="activity-title">' + escHtml(item.title || '') + '</div>'
+        +   '<div class="activity-sub">'   + escHtml(subLine)          + '</div>'
+        + '</div>'
+        + (hasLink ? '<i class="ti ti-chevron-right activity-chevron"></i>' : '');
+
+      // Keyboard navigation: Enter triggers click (for <div> fallback, <a> handles it natively)
+      if (!hasLink) {
+        el.addEventListener('keydown', e => {
+          // non-clickable: no navigation, but element is focusable per AC-12
+        });
+      }
+
+      listEl.appendChild(el);
+    });
+  }
+
+  // ── Data fetching ──────────────────────────────────────────────────────────
+
+  async function loadHomeData() {
+    hideError();
+    showSkeleton();
+    try {
+      const resp = await fetch('/api/home');
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      const data = await resp.json();
+      _homeData = data;
+      renderStats(data);
+      renderProjects(data);
+      renderActivity(data);
+      showReal();
+    } catch (err) {
+      console.error('Home data load failed:', err);
+      showError();
+      showReal(); // show cards (with default dashes) so layout is stable
+    }
+  }
+
+  // ── Card click/keyboard actions ────────────────────────────────────────────
+
+  function handleCardClick(cardId) {
+    if (!_homeData) return;
+    const stats = _homeData.stats;
+
+    if (cardId === 'sprint-running') {
+      const sr = stats.sprint_running;
+      if (sr.count === 0) return;
+      // Navigate to first running project's sprint-mgmt page
+      const projects = _homeData.projects || [];
+      const firstRunning = _homeData.stats.sprint_running.projects[0];
+      if (!firstRunning) return;
+      // Find slug from projects list matching name
+      const proj = projects.find(p => p.name === firstRunning.name);
+      const slug = proj ? proj.slug : null;
+      if (slug) {
+        window.location.href = '/project/' + encodeURIComponent(slug) + '/sprint-mgmt';
+      }
+    } else if (cardId === 'awaiting-uat') {
+      const uat = stats.awaiting_uat;
+      if (uat.count === 0) return;
+      // Navigate to project with most UAT-pending tickets
+      const projects = _homeData.projects || [];
+      let maxProj = null;
+      let maxCount = 0;
+      for (const p of projects) {
+        const uatCount = p.uat_count || 0;
+        if (uatCount > maxCount) {
+          maxCount = uatCount;
+          maxProj = p;
+        }
+      }
+      if (maxProj && maxProj.slug) {
+        window.location.href = '/project/' + encodeURIComponent(maxProj.slug) + '/sprint-mgmt';
+      }
+    }
+    // sprints-planned and backlog use tooltip only — no navigation (AC-14)
+  }
+
+  function handleCardKey(event, cardId) {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      handleCardClick(cardId);
+    }
+  }
+
+  // ── Health icon polling ────────────────────────────────────────────────────
+
+  function applyHealthIconColor(status) {
+    const icon = document.getElementById('health-icon');
+    if (!icon) return;
+    icon.classList.remove('health-down');
+    if (status === 'ok') {
+      icon.style.color = 'var(--green)';
+    } else if (status === 'degraded') {
+      icon.style.color = 'var(--amber)';
+    } else {
+      // down or unknown
+      icon.style.color = 'var(--red)';
+      icon.classList.add('health-down');
+    }
+  }
+
+  async function pollHealth() {
+    try {
+      const resp = await fetch('/api/health');
+      // Accept both 200 (ok/degraded) and 503 (down)
+      if (resp.ok || resp.status === 503) {
+        const data = await resp.json();
+        applyHealthIconColor(data.status || 'down');
+      } else {
+        applyHealthIconColor('down');
+      }
+    } catch (e) {
+      // Network error — show as down but don't change to unknown
+      applyHealthIconColor('down');
+    }
+  }
+
+  // ── Init ───────────────────────────────────────────────────────────────────
+  document.addEventListener('DOMContentLoaded', () => {
+    loadHomeData();
+    pollHealth();
+    setInterval(pollHealth, 30000);
+  });
+</script>
+
+</body>
+</html>

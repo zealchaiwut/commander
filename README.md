@@ -102,6 +102,54 @@ Source `~/.commander.zsh` to get these shortcuts:
 
 ---
 
+## Run as a service (launchd)
+
+For unattended operation — especially when running remote with iPad-only access — the
+dashboard can be registered as a macOS LaunchAgent. This starts it automatically on
+user login and restarts it if the process crashes.
+
+> **Note:** launchd is an additional deployment option. The existing `start.sh` (tmux)
+> workflow continues to work unchanged and is still recommended for interactive
+> development.
+
+### Install
+
+```bash
+# From the commander repo root:
+bash scripts/install_launchd.sh
+```
+
+The script will:
+1. Check for a port-8000 conflict (prints a warning and exits if one is found).
+2. Substitute the repo root, venv path, and home directory into the plist template.
+3. Copy `scripts/com.commander.dashboard.plist` to `~/Library/LaunchAgents/` with `644` permissions.
+4. Load the service with `launchctl load`.
+5. Verify with `launchctl list | grep commander` and print success or failure.
+
+Logs are written to:
+- `~/Library/Logs/commander-dashboard.out.log` (stdout / uvicorn output)
+- `~/Library/Logs/commander-dashboard.err.log` (stderr / errors)
+
+### Uninstall
+
+```bash
+bash scripts/uninstall_launchd.sh
+```
+
+Unloads the service and removes the plist from `~/Library/LaunchAgents/`.
+
+### Verify
+
+```bash
+# Service is listed:
+launchctl list | grep commander
+
+# Tail the log:
+tail -f ~/Library/Logs/commander-dashboard.out.log
+```
+
+---
+
 ## Repository Layout
 
 ```
@@ -128,6 +176,128 @@ commander/
 
 ---
 
+## Backup & Restore
+
+Commander automatically backs up your config files (`projects.json`, `sprint.yaml`, and `.env` if
+present) to a private GitHub gist. This protects against accidental data loss from `rm -rf`,
+disk failure, or a machine wipe — since both files are gitignored by design.
+
+### What gets backed up
+
+| File | Description |
+|---|---|
+| `apps/dashboard/projects.json` | Project registry (all registered repos) |
+| `.commander/sprint.yaml` | Agent config (sprint manager settings) |
+| `apps/dashboard/.env` | Environment variables (secrets are **redacted** before upload) |
+
+**Secrets redaction:** any line matching `*_TOKEN=*`, `*_KEY=*`, or `*_SECRET=*` has its value
+replaced with `REDACTED` before uploading. The gist description notes this.
+
+### How it works
+
+- On server startup, a backup runs automatically after 30 seconds.
+- A backup runs every 6 hours in the background (no impact on request latency).
+- A backup is triggered after any successful write to `projects.json` via the dashboard API.
+- All backups update the **same private gist** — GitHub stores the full revision history,
+  so you can view previous versions on `https://gist.github.com/<your-user>/<gist-id>/revisions`.
+- The gist ID is stored in `.commander/backup_config.json` (gitignored).
+
+### Check backup status
+
+```
+GET /api/backup/status
+```
+
+Returns:
+```json
+{
+  "last_backup_at": "2026-05-28T12:00:00+00:00",
+  "gist_id": "abc123...",
+  "gist_url": "https://gist.github.com/abc123...",
+  "file_count": 2,
+  "last_error": null
+}
+```
+
+### Restore from gist
+
+```bash
+# From the repo root:
+python -m services.sprint_manager.backup restore --gist-id <gist-id>
+
+# Write to a specific directory:
+python -m services.sprint_manager.backup restore --gist-id <gist-id> --target-dir /tmp/restore
+```
+
+Restored files are written with their original names. Copy them back to their expected locations
+after verifying the contents.
+
+---
+
+## Health Check
+
+`GET /api/health` returns a rich system health snapshot — bookmarkable and safe to
+ping from UptimeRobot. No authentication required. Response is cached for 10 seconds.
+
+### Response shape
+
+```json
+{
+  "status": "ok",
+  "checked_at": "2026-05-28T12:00:00Z",
+  "checks": {
+    "dashboard":        { "status": "ok", "uptime_sec": 12345 },
+    "database":         { "status": "ok" },
+    "github_auth":      { "status": "ok", "user": "zealchaiwut" },
+    "claude_code_auth": { "status": "ok" },
+    "disk":             { "status": "ok", "free_gb": 45.2, "total_gb": 500.0 },
+    "stuck_sprints":    { "status": "ok", "count": 0, "labels": [] }
+  }
+}
+```
+
+### Overall status values
+
+| Value | Meaning |
+|---|---|
+| `ok` | All checks are `ok` |
+| `degraded` | One or more checks are `warn`, `critical`, `expired`, or `missing`; nothing is critically down |
+| `down` | `database` is `down`/`timeout`, or `github_auth` is `expired`/`missing`/`timeout` |
+
+### HTTP status codes
+
+| Overall status | HTTP code |
+|---|---|
+| `ok` or `degraded` | `200` |
+| `down` | `503` |
+
+### Individual check statuses
+
+| Check | Possible statuses |
+|---|---|
+| `dashboard` | `ok` (always) |
+| `database` | `ok`, `down` (with `error` field), `timeout` |
+| `github_auth` | `ok` (with `user` field), `expired`, `missing`, `timeout` |
+| `claude_code_auth` | `ok`, `expired`, `missing`, `timeout` |
+| `disk` | `ok` (≥10 GB free), `warn` (<10 GB free), `critical` (<2 GB free), `timeout` |
+| `stuck_sprints` | `ok`, `warn` (with `count` and `labels` fields) |
+
+`github_auth` result is cached for 60 seconds to avoid hammering the `gh` CLI.
+
+---
+
+## Going Remote?
+
+Traveling with iPad-only access? See [docs/TRAVEL_PLAYBOOK.md](docs/TRAVEL_PLAYBOOK.md) for:
+
+- Pre-travel checklist (sleep, launchd, Tailscale, auth, health check)
+- URLs to save before you leave
+- Common failure modes and step-by-step recovery
+- SSH commands reference
+- Fallback paths if hardware fails
+
+---
+
 ## Docs
 
 - [Setup and tutorial](docs/tutorial.md)
@@ -138,3 +308,4 @@ commander/
 - [PRD changelogs](docs/changelog/prd/)
 - [Testing sandbox](docs/testing/sandbox-repo.md)
 - [Sprint manager config](.commander/README.md)
+- [Travel playbook](docs/TRAVEL_PLAYBOOK.md)

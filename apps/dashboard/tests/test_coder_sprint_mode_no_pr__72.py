@@ -65,6 +65,7 @@ def _import_sprint_manager():
 # AC1 — Coder reads COMMANDER_MERGE_TARGET env var
 # ---------------------------------------------------------------------------
 
+@pytest.mark.usefixtures("allow_stub_success")
 class TestAC1CoderReadsMergeTarget:
     def test_sprint_manager_sets_commander_merge_target(self):
         """_dispatch_coder must set COMMANDER_MERGE_TARGET when sprint_branch is not develop."""

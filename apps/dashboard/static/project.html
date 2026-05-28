@@ -1,0 +1,2456 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Commander — Project</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.30.0/dist/tabler-icons.min.css">
+  <style>
+    /* ── Variables ── */
+    :root {
+      --bg:           #f9fafb;
+      --surface:      #ffffff;
+      --surface-2:    #f3f4f6;
+      --surface-hover:#f5f6f8;
+      --border:       #e5e7eb;
+      --text:         #111827;
+      --text-muted:   #6b7280;
+      --text-sub:     #9ca3af;
+      --green:        #16a34a;
+      --green-bg:     #dcfce7;
+      --amber:        #d97706;
+      --amber-bg:     #fef3c7;
+      --red:          #dc2626;
+      --red-bg:       #fee2e2;
+      --blue:         #2563eb;
+      --blue-bg:      #dbeafe;
+      --purple:       #7c3aed;
+      --purple-bg:    #ede9fe;
+      --mono: 'SF Mono','Fira Code','Cascadia Code',monospace;
+      --sidebar-width: 220px;
+    }
+
+    [data-theme="dark"] {
+      --bg:           #0d0d0d;
+      --surface:      #161616;
+      --surface-2:    #1e1e1e;
+      --surface-hover:#222222;
+      --border:       #2a2a2a;
+      --text:         #e5e7eb;
+      --text-muted:   #9ca3af;
+      --text-sub:     #6b7280;
+      --green:        #22c55e;
+      --green-bg:     rgba(34,197,94,.13);
+      --amber:        #eab308;
+      --amber-bg:     rgba(234,179,8,.13);
+      --red:          #f87171;
+      --red-bg:       rgba(239,68,68,.13);
+      --blue:         #60a5fa;
+      --blue-bg:      rgba(96,165,250,.13);
+      --purple:       #a78bfa;
+      --purple-bg:    rgba(167,139,250,.13);
+    }
+
+    /* ── Reset ── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+      font-size: 14px;
+      min-height: 100dvh;
+      display: flex;
+      flex-direction: column;
+    }
+    button { font-family: inherit; cursor: pointer; }
+    a { color: inherit; text-decoration: none; }
+
+    /* ── Top nav bar ── */
+    .top-nav {
+      position: sticky; top: 0; z-index: 30;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 0 16px;
+      height: 48px;
+      display: flex; align-items: center; justify-content: space-between; gap: 12px;
+      flex-shrink: 0;
+    }
+    .top-nav-left { display: flex; align-items: center; gap: 10px; }
+    .brand-mark {
+      width: 26px; height: 26px; border-radius: 6px;
+      background: var(--text);
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0; color: var(--surface); font-size: 14px;
+      text-decoration: none;
+    }
+    .brand-wordmark { font-size: 14px; font-weight: 700; letter-spacing: -.02em; }
+    .top-nav-right { display: flex; align-items: center; gap: 8px; }
+    .btn-icon {
+      width: 32px; height: 32px; display: flex; align-items: center; justify-content: center;
+      border: 1px solid var(--border); border-radius: 6px; background: none;
+      color: var(--text-muted); font-size: 15px; transition: background .15s, color .15s;
+    }
+    .btn-icon:hover { background: var(--surface-2); color: var(--text); }
+
+    /* ── Page layout ── */
+    .page-layout {
+      display: flex;
+      flex: 1;
+      min-height: 0;
+    }
+
+    /* ── Sidebar ── */
+    .sidebar {
+      width: var(--sidebar-width);
+      flex-shrink: 0;
+      background: var(--surface);
+      border-right: 1px solid var(--border);
+      position: sticky;
+      top: 48px;
+      height: calc(100dvh - 48px);
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      scrollbar-width: thin;
+      scrollbar-color: var(--border) transparent;
+    }
+    .sidebar::-webkit-scrollbar { width: 4px; }
+    .sidebar::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+    .sidebar-body { flex: 1; padding: 12px 0; }
+
+    /* Home link */
+    .sb-home-link {
+      display: flex; align-items: center; gap: 9px;
+      padding: 8px 16px;
+      color: var(--text-muted);
+      font-size: 13px; font-weight: 500;
+      border-radius: 0;
+      transition: background .15s, color .15s;
+      text-decoration: none;
+    }
+    .sb-home-link:hover { background: var(--surface-hover); color: var(--text); }
+    .sb-home-link .ti { font-size: 16px; }
+
+    /* Projects section header */
+    .sb-section-hdr {
+      font-size: 10px; font-weight: 700; letter-spacing: .1em;
+      text-transform: uppercase; color: var(--text-sub);
+      padding: 10px 16px 4px;
+    }
+
+    /* Project items */
+    .sb-proj-item {
+      display: flex; align-items: center; gap: 9px;
+      padding: 7px 16px;
+      text-decoration: none;
+      color: var(--text);
+      font-size: 13px;
+      transition: background .15s;
+      position: relative;
+    }
+    .sb-proj-item:hover:not(.active) { background: var(--surface-hover); }
+    .sb-proj-item.active {
+      background: var(--surface-2);
+      box-shadow: inset 2px 0 0 var(--text);
+      font-weight: 700;
+    }
+
+    /* Icon badge */
+    .sb-icon-badge {
+      width: 22px; height: 22px; border-radius: 5px;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0; font-size: 12px; color: #fff;
+      background: var(--text-muted);
+    }
+    .sb-proj-item.active .sb-icon-badge { background: var(--text); }
+
+    /* Project name */
+    .sb-proj-name {
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      min-width: 0;
+    }
+
+    /* Status dot */
+    .sb-status-dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .sb-status-dot.running {
+      background: var(--green);
+      box-shadow: 0 0 0 2px var(--green-bg);
+      animation: sbGlow 2s ease-in-out infinite;
+    }
+    .sb-status-dot.uat {
+      background: var(--amber);
+    }
+    @keyframes sbGlow {
+      0%,100% { box-shadow: 0 0 0 2px var(--green-bg); }
+      50%      { box-shadow: 0 0 0 4px var(--green-bg); }
+    }
+
+    /* Add project tile */
+    .sb-add-tile {
+      display: flex; align-items: center; gap: 9px;
+      padding: 7px 16px;
+      margin: 6px 10px;
+      border: 1.5px dashed var(--border);
+      border-radius: 7px;
+      color: var(--text-sub);
+      font-size: 12px;
+      cursor: pointer;
+      transition: border-color .15s, color .15s, background .15s;
+      background: none; width: calc(100% - 20px);
+    }
+    .sb-add-tile:hover { border-color: var(--text-sub); color: var(--text-muted); background: var(--surface-2); }
+    .sb-add-tile .ti { font-size: 14px; }
+
+    /* Sidebar footer */
+    .sidebar-footer {
+      padding: 10px 16px;
+      border-top: 1px solid var(--border);
+      font-size: 10px;
+      color: var(--text-sub);
+      line-height: 1.4;
+      flex-shrink: 0;
+    }
+
+    /* ── Main content area ── */
+    .main-area {
+      flex: 1;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      overflow-y: auto;
+    }
+
+    /* ── Project header ── */
+    .proj-header {
+      position: sticky;
+      top: 0; /* sticks to top of main-area scroll container */
+      z-index: 20;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 18px 28px 0;
+    }
+    .proj-header-row {
+      display: flex; align-items: center; gap: 12px;
+      padding-bottom: 14px;
+      border-bottom: 1px solid var(--border);
+    }
+    .proj-header-icon {
+      width: 22px; height: 22px; border-radius: 5px;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0; font-size: 12px; color: #fff;
+    }
+    .proj-header-name {
+      font-size: 22px; font-weight: 700; line-height: 1.15;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      flex: 1; min-width: 0;
+    }
+    .proj-header-pill {
+      display: inline-flex; align-items: center; gap: 5px;
+      padding: 3px 9px; border-radius: 20px;
+      font-size: 11px; font-weight: 600;
+      flex-shrink: 0;
+    }
+    .pill-running {
+      background: var(--green-bg); color: var(--green);
+    }
+    .pill-uat {
+      background: var(--amber-bg); color: var(--amber);
+    }
+    .pill-dot {
+      width: 6px; height: 6px; border-radius: 50%;
+      background: currentColor;
+      animation: pillGlow 2s ease-in-out infinite;
+    }
+    @keyframes pillGlow {
+      0%,100% { opacity: 1; }
+      50%      { opacity: .4; }
+    }
+    .pill-running .pill-dot { animation: pillGlow 2s ease-in-out infinite; }
+    .pill-uat .pill-dot { animation: none; }
+
+    .proj-header-actions {
+      display: flex; align-items: center; gap: 8px;
+      margin-left: auto; flex-shrink: 0;
+    }
+    .btn-ghost {
+      padding: 6px 12px; border: 1px solid var(--border); border-radius: 6px;
+      background: none; color: var(--text-muted); font-size: 12px; font-weight: 500;
+      display: flex; align-items: center; gap: 5px;
+      transition: background .15s, color .15s;
+    }
+    .btn-ghost:hover { background: var(--surface-2); color: var(--text); }
+    .btn-ghost .ti { font-size: 14px; }
+    .btn-primary {
+      padding: 6px 14px; border: none; border-radius: 6px;
+      background: var(--text); color: var(--surface); font-size: 12px; font-weight: 600;
+      display: flex; align-items: center; gap: 5px;
+      transition: opacity .15s;
+    }
+    .btn-primary:hover { opacity: .82; }
+    .btn-primary .ti { font-size: 14px; }
+
+    /* ── Sub-tab strip ── */
+    .sub-tabs {
+      display: flex; align-items: flex-end;
+      padding: 0 0; gap: 0;
+      background: var(--surface);
+      overflow-x: auto; scrollbar-width: none;
+    }
+    .sub-tabs::-webkit-scrollbar { display: none; }
+    .stab {
+      display: flex; align-items: center; gap: 6px;
+      padding: 10px 0; margin-right: 24px; flex-shrink: 0;
+      background: none; border: none; border-bottom: 2px solid transparent;
+      color: var(--text-muted); font-size: 13px; font-weight: 500;
+      transition: color .15s, border-color .15s; white-space: nowrap;
+      cursor: pointer;
+    }
+    .stab.active { color: var(--text); border-bottom-color: var(--text); font-weight: 700; }
+    .stab:hover:not(.active):not(.disabled) { color: var(--text); }
+    .stab.disabled {
+      color: var(--text-sub); cursor: not-allowed;
+    }
+    .stab.disabled:hover { color: var(--text-sub); }
+    .stab .ti { font-size: 14px; }
+    .stab-soon {
+      font-size: 9px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+      background: var(--surface-2); color: var(--text-sub);
+      padding: 1px 5px; border-radius: 4px;
+    }
+
+    /* ── Tab content ── */
+    .tab-content { flex: 1; }
+    .tab-pane { display: none; padding: 28px; }
+    .tab-pane.active { display: block; }
+    /* Sprint Mgmt pane manages its own padding via toolbar + smgmt-content */
+    #pane-sprint-mgmt { padding: 0; }
+
+    /* Placeholder text */
+    .placeholder-msg {
+      padding: 48px 0;
+      text-align: center;
+      color: var(--text-sub);
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    .placeholder-msg .ti { font-size: 32px; display: block; margin-bottom: 12px; }
+
+    /* ── Tickets tab ── */
+    .tickets-grid {
+      display: grid;
+      grid-template-columns: 1fr 320px;
+      gap: 0;
+      min-height: 200px;
+    }
+    .tickets-main {
+      padding: 0;
+      border-right: 1px solid var(--border);
+      min-width: 0;
+    }
+    .tickets-aside { padding: 0; }
+
+    .ticket-group-hdr {
+      display: flex; align-items: center; gap: 8px;
+      padding: 10px 0 6px;
+      font-size: 10px; font-weight: 700; letter-spacing: .08em;
+      text-transform: uppercase; color: var(--text-muted);
+    }
+    .ticket-row {
+      display: flex; align-items: center; gap: 10px;
+      padding: 10px 0;
+      border-top: 1px solid var(--border);
+      font-size: 13px;
+    }
+    .ticket-status-pill {
+      font-size: 10px; font-weight: 600;
+      padding: 2px 7px; border-radius: 10px; white-space: nowrap;
+    }
+    .ticket-status-pill.SIT      { background: var(--blue-bg);   color: var(--blue); }
+    .ticket-status-pill.UAT      { background: var(--amber-bg);  color: var(--amber); }
+    .ticket-status-pill.in-progress { background: var(--green-bg);  color: var(--green); }
+    .ticket-status-pill.blocked  { background: var(--red-bg);    color: var(--red); }
+    .ticket-status-pill.backlog  { background: var(--surface-2); color: var(--text-sub); border: 1px solid var(--border); }
+    .ticket-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .ticket-num   { font-size: 11px; color: var(--text-sub); flex-shrink: 0; }
+    .empty-msg { color: var(--text-sub); font-size: 13px; padding: 12px 0; font-style: italic; }
+
+    /* ── Mobile ── */
+    @media (max-width: 699px) {
+      .sidebar { display: none; }
+      .sub-tabs { position: static; }
+      .main-area { overflow-y: visible; }
+      .proj-header { position: static; }
+      .tickets-grid { grid-template-columns: 1fr; }
+      .tickets-main { border-right: none; border-bottom: 1px solid var(--border); }
+    }
+
+    /* ── Tablet 700–1024px: sidebar at 180px ── */
+    @media (min-width: 700px) and (max-width: 1024px) {
+      :root { --sidebar-width: 180px; }
+    }
+
+    /* ── Loading / error states ── */
+    .loading-msg {
+      color: var(--text-sub); font-size: 13px; padding: 48px 0; text-align: center;
+    }
+
+    /* ── Sprint Mgmt toolbar ── */
+    .smgmt-toolbar {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 14px 28px;
+      background: var(--bg);
+      position: sticky;
+      top: var(--proj-header-height, 88px); /* placed after sub-tab strip */
+      z-index: 15;
+      box-shadow: none;
+      transition: box-shadow .15s;
+    }
+    .smgmt-toolbar.scrolled {
+      box-shadow: 0 2px 4px rgba(0,0,0,0.04);
+    }
+    .smgmt-toolbar-title {
+      font-size: 15px; font-weight: 700; color: var(--text); line-height: 1;
+    }
+    .smgmt-toolbar-actions {
+      display: flex; align-items: center; gap: 8px;
+    }
+
+    /* ── Sprint list area ── */
+    .smgmt-content {
+      padding: 0 28px 28px;
+    }
+    .smgmt-sprint-list {
+      display: flex; flex-direction: column; gap: 12px;
+      margin-top: 16px;
+    }
+    .smgmt-sprint-card {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--surface);
+      padding: 14px 18px;
+    }
+    .smgmt-sprint-header {
+      display: flex; align-items: center; gap: 8px;
+      font-size: 13px; font-weight: 600; color: var(--text);
+      margin-bottom: 4px;
+    }
+    .smgmt-sprint-count {
+      font-size: 11px; color: var(--text-sub); font-weight: 400;
+    }
+    .smgmt-sprint-header { justify-content: space-between; }
+    .smgmt-sprint-header-left {
+      display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0;
+    }
+    .smgmt-sprint-header-right {
+      display: flex; align-items: center; gap: 6px; flex-shrink: 0;
+    }
+    /* ── Action buttons ── */
+    .smgmt-run-btn {
+      padding: 4px 12px; font-size: 11px; font-weight: 600;
+      background: var(--green); color: #fff; border: none; border-radius: 5px;
+      cursor: pointer; flex-shrink: 0; transition: opacity .15s;
+      display: inline-flex; align-items: center; gap: 4px;
+    }
+    .smgmt-run-btn:hover { opacity: .85; }
+    .smgmt-run-btn:disabled {
+      background: var(--surface-2); color: var(--text-sub);
+      border: 1px solid var(--border); cursor: not-allowed; opacity: 1;
+    }
+    .smgmt-run-btn.smgmt-run-btn--rerun {
+      background: var(--surface); color: var(--amber); border: 1px solid var(--amber);
+    }
+    .smgmt-run-btn.smgmt-run-btn--rerun:hover { background: var(--amber-bg); }
+    .smgmt-delete-btn {
+      padding: 4px 10px; font-size: 11px; font-weight: 600;
+      background: var(--surface); color: var(--red); border: 1px solid var(--red);
+      border-radius: 5px; cursor: pointer; flex-shrink: 0; transition: all .15s;
+      display: inline-flex; align-items: center; gap: 4px;
+    }
+    .smgmt-delete-btn:hover { background: var(--red-bg); }
+    .smgmt-finish-btn {
+      padding: 4px 10px; font-size: 11px; font-weight: 600;
+      background: var(--amber-bg); color: var(--amber); border: 0.5px solid var(--amber);
+      border-radius: 5px; cursor: pointer; flex-shrink: 0; transition: opacity .15s;
+      display: inline-flex; align-items: center; gap: 4px;
+    }
+    .smgmt-finish-btn:hover { opacity: .85; }
+    .smgmt-finish-btn.hidden { display: none; }
+    /* ── Ticket list ── */
+    .smgmt-sprint-tickets {
+      padding: 4px 0; min-height: 48px; display: flex; flex-direction: column;
+    }
+    .smgmt-drop-hint {
+      font-size: 12px; color: var(--text-sub); text-align: center;
+      padding: 10px; border: 1px dashed var(--border); border-radius: 5px; margin: 4px 8px;
+    }
+    .smgmt-sprint-card.drag-over-sprint,
+    .smgmt-sprint-block.drag-over-sprint { border-color: var(--blue); box-shadow: 0 0 0 2px var(--blue-bg); }
+    .smgmt-sprint-card.drag-over-sprint .smgmt-drop-hint,
+    .smgmt-sprint-block.drag-over-sprint .smgmt-drop-hint { border-color: var(--blue); }
+    .smgmt-sprint-block.drag-over-zone { border-color: var(--blue); box-shadow: 0 0 0 2px var(--blue-bg); }
+    .smgmt-ticket {
+      display: flex; align-items: center; gap: 8px;
+      padding: 9px 16px; background: var(--surface); font-size: 12px;
+      cursor: default; transition: background 0.15s, box-shadow 0.12s;
+    }
+    .smgmt-ticket:hover { background: var(--surface-hover); }
+    .smgmt-ticket[draggable="true"]:hover { cursor: grab; }
+    .smgmt-ticket[draggable="true"]:active { cursor: grabbing; }
+    .smgmt-ticket[draggable="false"] { cursor: default; }
+    .smgmt-ticket.dragging-ticket {
+      opacity: 0.5;
+      box-shadow: 0 6px 20px rgba(0,0,0,0.14);
+      position: relative; z-index: 1;
+    }
+    .smgmt-ticket.drag-before { box-shadow: inset 0 2px 0 var(--blue); }
+    .smgmt-ticket.drag-after  { box-shadow: inset 0 -2px 0 var(--blue); }
+    .smgmt-ticket.is-selected { background: var(--blue-bg); border-left: 3px solid var(--blue); }
+    .smgmt-ticket-grip {
+      color: var(--text-sub); font-size: 13px; flex-shrink: 0;
+      opacity: 0; transition: opacity 0.15s, color 0.15s, transform 0.12s;
+      cursor: grab;
+    }
+    .smgmt-ticket[draggable="true"]:hover .smgmt-ticket-grip { opacity: 1; }
+    .smgmt-ticket.dragging-ticket .smgmt-ticket-grip {
+      opacity: 1; color: var(--text); transform: scale(1.18);
+    }
+    .smgmt-ticket[draggable="false"] .smgmt-ticket-grip { opacity: 0 !important; cursor: default; }
+    .smgmt-ticket-grip:active { cursor: grabbing; }
+    .smgmt-ticket-cb { cursor: pointer; flex-shrink: 0; }
+    .smgmt-ticket-num {
+      font-family: var(--mono); font-size: 12px; color: var(--text-sub);
+      text-decoration: none; flex-shrink: 0; min-width: 42px;
+    }
+    .smgmt-ticket-num:hover { color: var(--blue); }
+    .smgmt-ticket-title {
+      flex: 1; font-weight: 500; line-height: 1.4; min-width: 0;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .smgmt-ticket-status {
+      font-size: 10px; font-weight: 600; padding: 2px 6px; border-radius: 3px;
+      flex-shrink: 0; text-transform: uppercase;
+    }
+    .smgmt-status-backlog    { background: var(--surface-2); color: var(--text-muted); border: 1px solid var(--border); }
+    .smgmt-status-in-progress { background: var(--blue-bg); color: var(--blue); }
+    .smgmt-status-sit        { background: var(--amber-bg); color: var(--amber); }
+    .smgmt-status-uat        { background: var(--purple-bg); color: var(--purple); }
+    .smgmt-status-done       { background: var(--green-bg); color: var(--green); }
+    .smgmt-status-need-rework { background: #fef2f2; color: #dc2626; border: 1px solid #fca5a5; }
+
+    /* ── Outcome band (completed/stopped sprints) ── */
+    .smgmt-sprint-card.smgmt-completed { border-color: var(--green); }
+    .smgmt-sprint-card.smgmt-completed .smgmt-sprint-header { background: linear-gradient(180deg,var(--green-bg) 0%,transparent 100%); }
+    .smgmt-sprint-card.smgmt-stopped { border-color: var(--amber); }
+    .smgmt-sprint-card.smgmt-stopped .smgmt-sprint-header { background: linear-gradient(180deg,var(--amber-bg) 0%,transparent 100%); }
+    .smgmt-done-badge {
+      display: inline-flex; align-items: center; gap: 5px;
+      padding: 4px 10px; border-radius: 999px; font-size: 11px;
+      font-weight: 600; letter-spacing: .04em; text-transform: uppercase;
+      font-family: var(--mono);
+    }
+    .smgmt-done-badge.completed { background: var(--green-bg); color: var(--green); }
+    .smgmt-done-badge.stopped   { background: var(--amber-bg); color: var(--amber); }
+    .smgmt-outcome-band {
+      display: flex; align-items: center; gap: 18px;
+      padding: 12px 16px; font-family: var(--mono); font-size: 12px;
+      border-bottom: 1px solid var(--border);
+    }
+    .smgmt-outcome-band.completed { background: var(--green-bg); }
+    .smgmt-outcome-band.stopped   { background: var(--amber-bg); }
+    .smgmt-outcome-stat { display: flex; align-items: baseline; gap: 5px; }
+    .smgmt-outcome-stat .onum { font-size: 16px; font-weight: 700; }
+    .smgmt-outcome-stat .onum.green  { color: var(--green); }
+    .smgmt-outcome-stat .onum.red    { color: var(--red); }
+    .smgmt-outcome-stat .onum.muted  { color: var(--text-sub); }
+    .smgmt-outcome-stat .olbl { font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .05em; }
+    .smgmt-outcome-dur { margin-left: auto; color: var(--text-muted); font-size: 12px; }
+    /* Ticket status circles (post-run) */
+    .smgmt-ticket-circle {
+      width: 20px; height: 20px; border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0; font-size: 11px; font-weight: 700;
+    }
+    .smgmt-ticket-circle.done    { background: var(--green-bg); color: var(--green); }
+    .smgmt-ticket-circle.failed  { background: var(--red-bg);   color: var(--red); }
+    .smgmt-ticket-circle.skipped { background: var(--surface-2); color: var(--text-sub); }
+    /* Elapsed time in outcome rows */
+    .smgmt-ticket-elapsed {
+      font-family: var(--mono); font-size: 11px; color: var(--text-sub);
+      min-width: 60px; text-align: right; flex-shrink: 0;
+    }
+    /* TESTER REJECTED label */
+    .smgmt-lbl-rejected {
+      font-family: var(--mono); font-size: 10px; padding: 2px 6px; border-radius: 3px;
+      font-weight: 600; letter-spacing: .05em; color: var(--red);
+      background: transparent; flex-shrink: 0;
+    }
+    /* Archived log row */
+    .smgmt-log-compact { background: var(--bg); border-top: 1px solid var(--border); }
+    .smgmt-log-bar {
+      display: flex; align-items: center; gap: 10px;
+      padding: 9px 16px; cursor: pointer;
+      font-family: var(--mono); font-size: 11px; color: var(--text-muted);
+      user-select: none;
+    }
+    .smgmt-log-bar:hover { background: var(--surface-hover); }
+    .smgmt-log-caret { transition: transform .2s; display: inline-flex; }
+    .smgmt-log-compact.open .smgmt-log-caret { transform: rotate(90deg); }
+    .smgmt-log-stream {
+      max-height: 0; overflow: hidden; transition: max-height .25s ease;
+      font-family: var(--mono); font-size: 11.5px; line-height: 1.7;
+    }
+    .smgmt-log-compact.open .smgmt-log-stream {
+      max-height: 200px; overflow-y: auto; padding: 4px 16px 12px;
+    }
+    .smgmt-log-line { display: flex; gap: 12px; color: var(--text-muted); }
+    .smgmt-log-time { color: var(--text-sub); flex-shrink: 0; }
+    /* ── Toast ── */
+    .smgmt-toast {
+      position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%) translateY(12px);
+      background: var(--text); color: var(--surface); padding: 8px 18px; border-radius: 6px;
+      font-size: 13px; z-index: 200; opacity: 0; pointer-events: none;
+      transition: opacity .2s, transform .2s;
+    }
+    .smgmt-toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+    /* ── Refresh button flash ── */
+    @keyframes btnFlash {
+      0%,100% { opacity: 1; }
+      40%      { opacity: .45; }
+    }
+    .btn-flash { animation: btnFlash .45s ease-in-out; }
+
+    /* ── Inline selection action bar (above sprint list) ── */
+    .smgmt-selection-bar {
+      display: none;
+      align-items: center;
+      gap: 12px;
+      padding: 9px 16px;
+      background: var(--blue-bg);
+      border: 1px solid var(--blue);
+      border-radius: 8px;
+      margin-bottom: 10px;
+      font-size: 13px;
+      color: var(--blue);
+      white-space: nowrap;
+    }
+    .smgmt-selection-bar.show {
+      display: flex;
+    }
+    .smgmt-selection-bar-count {
+      font-weight: 600;
+    }
+    .smgmt-sel-bar-actions {
+      margin-left: auto;
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      position: relative;
+    }
+    .smgmt-selection-bar-deselect {
+      padding: 5px 10px;
+      font-size: 12px;
+      font-weight: 600;
+      background: var(--surface);
+      color: var(--red);
+      border: 1px solid var(--red-bg);
+      border-radius: 5px;
+      cursor: pointer;
+      transition: background .15s, color .15s, border-color .15s;
+    }
+    .smgmt-selection-bar-deselect:hover { background: var(--red); color: #fff; border-color: var(--red); }
+    .smgmt-move-to-btn {
+      padding: 5px 10px;
+      font-size: 12px;
+      font-weight: 600;
+      background: var(--surface);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      cursor: pointer;
+      transition: background .15s;
+      display: inline-flex; align-items: center; gap: 4px;
+    }
+    .smgmt-move-to-btn:hover { background: var(--surface-hover); }
+    /* Move-to dropdown menu */
+    .smgmt-move-to-menu {
+      position: absolute;
+      right: 0;
+      top: calc(100% + 4px);
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      box-shadow: 0 4px 16px rgba(0,0,0,.12);
+      z-index: 400;
+      min-width: 140px;
+      padding: 4px 0;
+      display: none;
+    }
+    .smgmt-move-to-menu.open { display: block; }
+    .smgmt-move-to-item {
+      display: block;
+      width: 100%;
+      text-align: left;
+      padding: 7px 14px;
+      font-size: 13px;
+      background: none;
+      border: none;
+      color: var(--text);
+      cursor: pointer;
+      font-family: inherit;
+    }
+    .smgmt-move-to-item:hover { background: var(--surface-hover); }
+
+    /* ── Toolbar deselect button ── */
+    .smgmt-deselect-btn {
+      padding: 5px 12px; font-size: 11px; font-weight: 600;
+      background: var(--blue-bg); color: var(--blue); border: 1px solid var(--blue);
+      border-radius: 5px; cursor: pointer; flex-shrink: 0;
+      display: none; align-items: center; gap: 4px; transition: opacity .15s;
+    }
+    .smgmt-deselect-btn.visible { display: inline-flex; }
+    .smgmt-deselect-btn:hover { opacity: .8; }
+
+    /* ── Multi-drag floating pill ── */
+    .smgmt-drag-pill {
+      position: fixed;
+      top: -100px;
+      left: -100px;
+      background: var(--blue);
+      color: #fff;
+      border-radius: 20px;
+      padding: 6px 14px;
+      font-size: 12px;
+      font-weight: 600;
+      pointer-events: none;
+      z-index: 9999;
+      box-shadow: 0 4px 12px rgba(0,0,0,.2);
+      white-space: nowrap;
+    }
+
+    /* ── Modal shared ── */
+    .modal-backdrop {
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,.35);
+      z-index: 100;
+    }
+    .modal-backdrop.hidden { display: none; }
+    .modal {
+      position: fixed;
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      background: var(--surface);
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      z-index: 101;
+      display: flex; flex-direction: column;
+      box-shadow: 0 8px 32px rgba(0,0,0,.12);
+    }
+    .modal.hidden { display: none; }
+    .modal-header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 18px 20px 14px;
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .modal-title { font-size: 15px; font-weight: 700; color: var(--text); }
+    .modal-close {
+      background: none; border: none; color: var(--text-muted);
+      font-size: 20px; line-height: 1; cursor: pointer; padding: 0 2px;
+      border-radius: 4px;
+    }
+    .modal-close:hover { color: var(--text); }
+    .modal-body { padding: 20px; overflow-y: auto; }
+    .modal-footer {
+      display: flex; align-items: center; justify-content: flex-end; gap: 8px;
+      padding: 14px 20px;
+      border-top: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .modal-field { margin-bottom: 16px; }
+    .modal-field:last-child { margin-bottom: 0; }
+    .modal-label {
+      display: block; font-size: 12px; font-weight: 600; color: var(--text);
+      margin-bottom: 6px;
+    }
+    .modal-hint {
+      font-size: 11px; color: var(--text-muted); margin: 4px 0 0; line-height: 1.5;
+    }
+    .modal-input {
+      width: 100%; padding: 8px 10px; border: 1px solid var(--border);
+      border-radius: 6px; background: var(--surface-2); color: var(--text);
+      font-size: 13px; font-family: inherit;
+      transition: border-color .15s;
+    }
+    .modal-input:focus { outline: none; border-color: var(--blue); }
+    .modal-input:disabled { opacity: .55; cursor: not-allowed; }
+    .modal-textarea { resize: vertical; min-height: 88px; }
+    .modal-error {
+      background: var(--red-bg); color: var(--red);
+      font-size: 12px; padding: 8px 12px; border-radius: 6px;
+      margin-top: 12px;
+    }
+    .modal-error.hidden { display: none; }
+
+    /* ── New Sprint modal ── */
+    .ns-modal { width: min(480px, calc(100vw - 32px)); }
+
+    /* ── New Ticket modal ── */
+    .nt-modal { width: min(500px, calc(100vw - 32px)); max-height: calc(100vh - 48px); overflow: hidden; }
+    .nt-modal .modal-body { overflow-y: auto; }
+    .nt-textarea { resize: vertical; min-height: 80px; font-family: inherit; }
+  </style>
+</head>
+<body>
+
+<!-- ── Top nav ── -->
+<nav class="top-nav" aria-label="Site navigation">
+  <div class="top-nav-left">
+    <a href="/" class="brand-mark" title="Commander Home"><i class="ti ti-bolt"></i></a>
+    <span class="brand-wordmark">Commander</span>
+  </div>
+  <div class="top-nav-right">
+    <button class="btn-icon" onclick="toggleTheme()" id="theme-toggle-btn" title="Toggle theme" aria-label="Toggle dark/light theme">
+      <i class="ti ti-moon" id="theme-icon"></i>
+    </button>
+  </div>
+</nav>
+
+<!-- ── Page layout: sidebar + main ── -->
+<div class="page-layout">
+
+  <!-- ── Sidebar ── -->
+  <aside class="sidebar" aria-label="Project navigation" id="sidebar">
+    <div class="sidebar-body">
+
+      <!-- Home link -->
+      <a href="/" class="sb-home-link">
+        <i class="ti ti-home"></i>
+        <span>Home</span>
+      </a>
+
+      <!-- Projects section -->
+      <div class="sb-section-hdr">Projects</div>
+      <div id="sb-project-list">
+        <!-- populated by JS -->
+      </div>
+
+      <!-- Add project tile -->
+      <button class="sb-add-tile" onclick="window.location.href='/'" title="Add a new project" aria-label="Add project">
+        <i class="ti ti-plus"></i>
+        <span>Add project</span>
+      </button>
+
+    </div>
+    <footer class="sidebar-footer" id="sidebar-footer">
+      <!-- version · host populated by JS -->
+    </footer>
+  </aside>
+
+  <!-- ── Main content ── -->
+  <div class="main-area" id="main-area">
+
+    <!-- Project header (sticky within main-area) -->
+    <header class="proj-header" id="proj-header">
+      <div class="proj-header-row">
+        <div class="proj-header-icon" id="proj-header-icon">
+          <i class="ti ti-folder"></i>
+        </div>
+        <span class="proj-header-name" id="proj-header-name">Loading…</span>
+        <span id="proj-header-pill"></span>
+        <div class="proj-header-actions">
+          <button class="btn-ghost" onclick="openBulkCreate()" title="Bulk create tickets">
+            <i class="ti ti-stack-2"></i>
+            Bulk create
+          </button>
+          <button class="btn-primary" onclick="openNewTicket()" title="Create a new ticket">
+            <i class="ti ti-plus"></i>
+            New ticket
+          </button>
+        </div>
+      </div>
+
+      <!-- Sub-tab strip -->
+      <nav class="sub-tabs" role="tablist" aria-label="Project sections" id="sub-tabs">
+        <button class="stab active" role="tab" id="stab-sprint-mgmt"
+                aria-selected="true" onclick="switchTab('sprint-mgmt')">
+          <i class="ti ti-layout-kanban"></i>Sprint Mgmt
+        </button>
+        <button class="stab" role="tab" id="stab-tickets"
+                aria-selected="false" onclick="switchTab('tickets')">
+          <i class="ti ti-list"></i>Tickets
+        </button>
+        <button class="stab" role="tab" id="stab-logs"
+                aria-selected="false" onclick="switchTab('logs')">
+          <i class="ti ti-terminal-2"></i>Logs
+        </button>
+        <button class="stab disabled" role="tab" id="stab-sprint-history"
+                aria-selected="false" aria-disabled="true"
+                onclick="return false" tabindex="-1">
+          <i class="ti ti-history"></i>Sprint history
+          <span class="stab-soon">soon</span>
+        </button>
+      </nav>
+    </header>
+
+    <!-- Tab content -->
+    <div class="tab-content">
+
+      <!-- Sprint Mgmt tab -->
+      <div class="tab-pane active" id="pane-sprint-mgmt" role="tabpanel" aria-labelledby="stab-sprint-mgmt">
+
+        <!-- Toolbar -->
+        <div class="smgmt-toolbar" id="smgmt-toolbar">
+          <span class="smgmt-toolbar-title">Sprint Management</span>
+          <div class="smgmt-toolbar-actions">
+            <button class="smgmt-deselect-btn" id="smgmt-deselect-btn"
+                    onclick="_smgmtClearSelection()" title="Clear all selections"
+                    aria-label="Deselect all">
+              <i class="ti ti-x"></i>
+              Deselect (<span id="smgmt-deselect-count">0</span>)
+            </button>
+            <button class="btn-ghost" id="smgmt-refresh-btn"
+                    onclick="smgmtTriggerRefresh()" title="Re-fetch sprints from GitHub"
+                    aria-label="Trigger Refresh">
+              <i class="ti ti-refresh"></i>
+              Trigger Refresh
+            </button>
+            <button class="btn-ghost" id="smgmt-new-ticket-btn"
+                    onclick="smgmtOpenNewTicket()" title="Create a new ticket"
+                    aria-label="New Ticket">
+              <i class="ti ti-plus"></i>
+              New Ticket
+            </button>
+            <button class="btn-primary" id="smgmt-new-sprint-btn"
+                    onclick="smgmtOpenNewSprint()" title="Create a new sprint"
+                    aria-label="New Sprint">
+              <i class="ti ti-plus"></i>
+              New Sprint
+            </button>
+          </div>
+        </div>
+
+        <!-- Sprint list -->
+        <div class="smgmt-content">
+          <div id="smgmt-sprint-list" class="smgmt-sprint-list">
+            <div class="loading-msg" id="smgmt-loading">Loading sprints…</div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Tickets tab -->
+      <div class="tab-pane" id="pane-tickets" role="tabpanel" aria-labelledby="stab-tickets">
+        <div id="tickets-content">
+          <div class="loading-msg">Loading tickets…</div>
+        </div>
+      </div>
+
+      <!-- Logs tab -->
+      <div class="tab-pane" id="pane-logs" role="tabpanel" aria-labelledby="stab-logs">
+        <div class="placeholder-msg">
+          <i class="ti ti-terminal-2"></i>
+          Logs view coming soon
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+</div>
+
+<script>
+// ── Theme ─────────────────────────────────────────────────────────────────────
+function initTheme() {
+  const saved = localStorage.getItem('theme') || 'light';
+  document.documentElement.setAttribute('data-theme', saved);
+  _syncThemeIcon(saved);
+}
+function toggleTheme() {
+  const next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+  document.documentElement.setAttribute('data-theme', next);
+  localStorage.setItem('theme', next);
+  _syncThemeIcon(next);
+}
+function _syncThemeIcon(theme) {
+  const icon = document.getElementById('theme-icon');
+  if (icon) icon.className = theme === 'dark' ? 'ti ti-sun' : 'ti ti-moon';
+}
+
+// ── Utilities ─────────────────────────────────────────────────────────────────
+function escHtml(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function colorHex(color) {
+  const map = {
+    blue:   '#3b82f6', purple: '#6366f1', green: '#16a34a',
+    amber:  '#d97706', red:    '#dc2626', pink:  '#ec4899',
+    cyan:   '#0891b2', gray:   '#6b7280',
+  };
+  return map[color] || color || '#6b7280';
+}
+
+// ── URL parsing ───────────────────────────────────────────────────────────────
+const PATH_RE = /^\/project\/([^/]+)\/?([^/]*)?$/;
+
+function parseUrl() {
+  const m = window.location.pathname.match(PATH_RE);
+  if (!m) return { slug: null, tab: 'sprint-mgmt' };
+  const slug = decodeURIComponent(m[1]);
+  const rawTab = m[2] || '';
+  // sprint-history is disabled → redirect to sprint-mgmt
+  const tab = (rawTab === 'tickets') ? 'tickets'
+            : (rawTab === 'logs')    ? 'logs'
+            : 'sprint-mgmt';
+  return { slug, tab };
+}
+
+// ── State ─────────────────────────────────────────────────────────────────────
+let _slug        = null;   // current project slug
+let _activeTab   = 'sprint-mgmt';
+let _homeData    = null;   // cached /api/home response
+let _projectData = null;   // full project config from /api/home
+let _ticketsLoaded    = false;
+let _sprintMgmtLoaded = false;
+let _smgmtData           = null;
+let _smgmtSelectedIssues = new Set();
+let _smgmtDragTicket     = null;
+let _smgmtDragSprintLabel = null;
+const RERUN_STRIP_LABELS = new Set(['UAT','UAT-approved','released','SIT','in-progress','need-rework']);
+// Cache for sprint outcome data: key = sprint label, value = outcome object
+const _smgmtOutcomeCache = {};
+
+// ── Tab navigation ────────────────────────────────────────────────────────────
+function switchTab(tab, pushHistory) {
+  if (tab === 'sprint-history') return; // disabled
+
+  _activeTab = tab;
+
+  // Update aria-selected + active class on tabs
+  ['sprint-mgmt', 'tickets', 'logs'].forEach(t => {
+    const btn = document.getElementById('stab-' + t);
+    if (!btn) return;
+    const isActive = t === tab;
+    btn.classList.toggle('active', isActive);
+    btn.setAttribute('aria-selected', String(isActive));
+  });
+
+  // Show/hide panes
+  ['sprint-mgmt', 'tickets', 'logs'].forEach(t => {
+    const pane = document.getElementById('pane-' + t);
+    if (pane) pane.classList.toggle('active', t === tab);
+  });
+
+  // Update URL
+  const newUrl = '/project/' + encodeURIComponent(_slug) + '/' + tab;
+  if (pushHistory !== false) {
+    history.pushState({ slug: _slug, tab }, '', newUrl);
+  }
+
+  // Lazy-load tickets
+  if (tab === 'tickets' && !_ticketsLoaded) {
+    _ticketsLoaded = true;
+    loadTickets();
+  }
+
+  // Lazy-load sprint mgmt (only if _cachedFullRepo is already populated)
+  if (tab === 'sprint-mgmt' && !_sprintMgmtLoaded && _cachedFullRepo[_slug]) {
+    _sprintMgmtLoaded = true;
+    loadSprintMgmt();
+  }
+}
+
+// ── Keyboard navigation for sub-tabs ─────────────────────────────────────────
+document.getElementById('sub-tabs').addEventListener('keydown', function(e) {
+  const enabledTabs = ['sprint-mgmt', 'tickets', 'logs'];
+  const focused = document.activeElement;
+  const currentId = focused ? focused.id.replace('stab-', '') : null;
+  const currentIdx = enabledTabs.indexOf(currentId);
+  if (currentIdx < 0) return;
+
+  if (e.key === 'ArrowRight') {
+    e.preventDefault();
+    const next = enabledTabs[(currentIdx + 1) % enabledTabs.length];
+    document.getElementById('stab-' + next).focus();
+  } else if (e.key === 'ArrowLeft') {
+    e.preventDefault();
+    const prev = enabledTabs[(currentIdx - 1 + enabledTabs.length) % enabledTabs.length];
+    document.getElementById('stab-' + prev).focus();
+  } else if (e.key === 'Enter' || e.key === ' ') {
+    e.preventDefault();
+    if (currentId) switchTab(currentId);
+  }
+});
+
+// ── Popstate handler ─────────────────────────────────────────────────────────
+window.addEventListener('popstate', function(e) {
+  const state = e.state;
+  if (state && state.slug && state.tab) {
+    _slug = state.slug;
+    switchTab(state.tab, false);
+  }
+});
+
+// ── Sidebar ───────────────────────────────────────────────────────────────────
+function buildSidebar(projects) {
+  const list = document.getElementById('sb-project-list');
+  if (!list) return;
+
+  if (!projects || projects.length === 0) {
+    list.innerHTML = '<div style="padding:8px 16px;font-size:12px;color:var(--text-sub)">No projects</div>';
+    return;
+  }
+
+  // Sort alphabetically by name
+  const sorted = [...projects].sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+
+  list.innerHTML = sorted.map(proj => {
+    const isActive = proj.slug === _slug;
+    const color = colorHex(proj.color || proj.icon_color || 'gray');
+    const icon  = proj.icon || 'ti-folder';
+
+    let dotHtml = '';
+    if (proj.status === 'running') {
+      dotHtml = '<span class="sb-status-dot running" aria-label="Running"></span>';
+    } else if (proj.status === 'uat-pending' || (proj.uat_count && proj.uat_count > 0)) {
+      dotHtml = '<span class="sb-status-dot uat" aria-label="UAT pending"></span>';
+    }
+
+    const href = '/project/' + encodeURIComponent(proj.slug) + '/sprint-mgmt';
+
+    return `<a href="${escHtml(href)}" class="sb-proj-item${isActive ? ' active' : ''}"
+              ${isActive ? 'aria-current="page"' : ''}>
+      <span class="sb-icon-badge" style="background:${escHtml(color)}">
+        <i class="ti ${escHtml(icon)}"></i>
+      </span>
+      <span class="sb-proj-name">${escHtml(proj.name)}</span>
+      ${dotHtml}
+    </a>`;
+  }).join('');
+}
+
+// ── Project header ────────────────────────────────────────────────────────────
+function updateProjectHeader(proj) {
+  if (!proj) return;
+
+  const iconEl = document.getElementById('proj-header-icon');
+  const nameEl = document.getElementById('proj-header-name');
+  const pillEl = document.getElementById('proj-header-pill');
+  // Recalculate toolbar sticky top after header content changes
+  requestAnimationFrame(_smgmtUpdateToolbarTop);
+
+  const color = colorHex(proj.color || proj.icon_color || 'gray');
+  const icon  = proj.icon || 'ti-folder';
+
+  if (iconEl) {
+    iconEl.style.background = color;
+    iconEl.innerHTML = `<i class="ti ${escHtml(icon)}"></i>`;
+  }
+  if (nameEl) nameEl.textContent = proj.name || _slug;
+
+  // Status pill
+  if (pillEl) {
+    if (proj.status === 'running' && proj.sprint_running) {
+      const label = proj.sprint_running.label || '';
+      pillEl.innerHTML = `<span class="proj-header-pill pill-running">
+        <span class="pill-dot"></span>
+        Sprint ${escHtml(label.replace('sprint-', ''))} running
+      </span>`;
+    } else if (proj.status === 'uat-pending' || (proj.uat_count && proj.uat_count > 0)) {
+      const count = proj.uat_count || 0;
+      pillEl.innerHTML = `<span class="proj-header-pill pill-uat">
+        <span class="pill-dot"></span>
+        ${count} UAT pending
+      </span>`;
+    } else {
+      pillEl.innerHTML = '';
+    }
+  }
+
+  // Update page title
+  document.title = `Commander — ${proj.name || _slug}`;
+}
+
+// ── Sidebar footer ────────────────────────────────────────────────────────────
+async function updateSidebarFooter() {
+  const footer = document.getElementById('sidebar-footer');
+  if (!footer) return;
+  const host = window.location.host;
+  try {
+    const resp = await fetch('/api/version', { cache: 'no-store' });
+    if (resp.ok) {
+      const data = await resp.json();
+      footer.textContent = `v${data.version} · ${host} · build ${data.build}`;
+      return;
+    }
+  } catch (_) { /* fall through */ }
+  footer.textContent = `v— · ${host}`;
+}
+
+// ── Load home data ────────────────────────────────────────────────────────────
+let _sidebarRefreshTimer = null;
+
+async function loadHomeData(silent) {
+  try {
+    const resp = await fetch('/api/home');
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const data = await resp.json();
+    _homeData = data;
+
+    const projects = data.projects || [];
+    // Find current project
+    _projectData = projects.find(p => p.slug === _slug) || null;
+
+    buildSidebar(projects);
+    updateProjectHeader(_projectData);
+  } catch (err) {
+    // Degrade gracefully: sidebar shows without dots, header may be empty
+    if (!silent) console.warn('Home data unavailable:', err);
+  }
+}
+
+function startSidebarRefresh() {
+  if (_sidebarRefreshTimer) clearInterval(_sidebarRefreshTimer);
+  _sidebarRefreshTimer = setInterval(() => loadHomeData(true), 30000);
+}
+
+// ── Tickets loading ───────────────────────────────────────────────────────────
+async function loadTickets() {
+  const container = document.getElementById('tickets-content');
+  if (!container) return;
+
+  // Find full repo path from home data
+  let repo = null;
+  if (_homeData && _homeData.projects) {
+    const proj = _homeData.projects.find(p => p.slug === _slug);
+    if (proj) {
+      // We need the full owner/repo — home endpoint only gives slug
+      // Use /api/projects to get the full repo path
+    }
+  }
+
+  // Fetch the full projects list to get owner/repo
+  try {
+    const projResp = await fetch('/api/projects');
+    if (!projResp.ok) throw new Error('HTTP ' + projResp.status);
+    const projData = await projResp.json();
+    const projs = projData.projects || [];
+    const proj = projs.find(p => {
+      const s = (p.repo || '').split('/').pop();
+      return s === _slug;
+    });
+    if (proj) repo = proj.repo;
+  } catch (err) {
+    container.innerHTML = '<div class="loading-msg">Failed to load project info.</div>';
+    return;
+  }
+
+  if (!repo) {
+    container.innerHTML = '<div class="loading-msg">Project not found.</div>';
+    return;
+  }
+
+  container.innerHTML = '<div class="loading-msg">Loading tickets…</div>';
+
+  try {
+    const resp = await fetch('/api/project-details?repo=' + encodeURIComponent(repo));
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const data = await resp.json();
+    renderTickets(data);
+  } catch (err) {
+    container.innerHTML = '<div class="loading-msg">Failed to load tickets.</div>';
+  }
+}
+
+function renderTickets(data) {
+  const container = document.getElementById('tickets-content');
+  if (!container) return;
+
+  const tickets = data.tickets || [];
+  const ghUrl   = data.github_url || '#';
+
+  if (tickets.length === 0) {
+    container.innerHTML = '<div class="loading-msg">No open tickets.</div>';
+    return;
+  }
+
+  const groups = [
+    { label: 'SIT',         status: 'SIT',         items: tickets.filter(t => t.status === 'SIT') },
+    { label: 'UAT',         status: 'UAT',          items: tickets.filter(t => t.status === 'UAT') },
+    { label: 'In progress', status: 'in-progress',  items: tickets.filter(t => t.status === 'in-progress' || t.status === 'blocked') },
+    { label: 'Backlog',     status: 'backlog',       items: tickets.filter(t => t.status === 'backlog') },
+  ].filter(g => g.items.length > 0);
+
+  const ticketsHtml = groups.map(g => {
+    const rows = g.items.map(t => `
+      <div class="ticket-row">
+        <span class="ticket-status-pill ${escHtml(t.status)}">${escHtml(t.status)}</span>
+        <a class="ticket-title" href="${escHtml(t.url)}" target="_blank" rel="noopener" title="${escHtml(t.title)}">${escHtml(t.title)}</a>
+        <span class="ticket-num">#${t.number}</span>
+      </div>`).join('');
+    return `<div class="ticket-group-hdr">${escHtml(g.label)} · ${g.items.length}</div>${rows}`;
+  }).join('');
+
+  container.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+      <span style="font-size:13px;font-weight:600;color:var(--text-muted)">${tickets.length} open tickets</span>
+      <a href="${escHtml(ghUrl)}" target="_blank" rel="noopener" style="font-size:12px;color:var(--blue)">View on GitHub →</a>
+    </div>
+    ${ticketsHtml}`;
+}
+
+// ── Header button handlers ─────────────────────────────────────────────────
+function openBulkCreate() {
+  // Redirect to index.html sprint-mgmt for now
+  if (_slug) {
+    const repo = _findFullRepo(_slug);
+    if (repo) window.location.href = '/projects/' + encodeURIComponent(repo) + '/sprint-mgmt';
+    else window.location.href = '/';
+  }
+}
+
+function openNewTicket() {
+  // Open the New Ticket modal (same as the toolbar button)
+  smgmtOpenNewTicket();
+}
+
+function _findFullRepo(slug) {
+  if (!_homeData) return null;
+  // Check the raw projects list from /api/projects if available, else null
+  return _cachedFullRepo[slug] || null;
+}
+
+const _cachedFullRepo = {};
+
+async function _prefetchFullRepo() {
+  try {
+    const r = await fetch('/api/projects');
+    if (!r.ok) return;
+    const d = await r.json();
+    (d.projects || []).forEach(p => {
+      const s = (p.repo || '').split('/').pop();
+      if (s) _cachedFullRepo[s] = p.repo;
+    });
+  } catch (e) { /* ignore */ }
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+async function init() {
+  initTheme();
+  updateSidebarFooter();
+
+  const { slug, tab } = parseUrl();
+
+  if (!slug) {
+    window.location.replace('/');
+    return;
+  }
+
+  _slug = slug;
+  _activeTab = tab;
+
+  // Replace URL if needed (e.g. sprint-history → sprint-mgmt)
+  const expected = '/project/' + encodeURIComponent(slug) + '/' + tab;
+  if (window.location.pathname !== expected) {
+    history.replaceState({ slug, tab }, '', expected);
+  }
+
+  // Activate the correct tab without pushing history (already set above)
+  switchTab(tab, false);
+
+  // Wire up modal event listeners (DOM is ready at DOMContentLoaded)
+  _setupModals();
+
+  // Track drag cursor position for the multi-drag pill
+  document.addEventListener('dragover', _smgmtDragMovePill);
+
+  // Close move-to menu when clicking outside
+  document.addEventListener('click', function(e) {
+    const menu = document.getElementById('smgmt-move-to-menu');
+    const btn = document.getElementById('smgmt-move-to-btn');
+    if (menu && menu.classList.contains('open')) {
+      if (!menu.contains(e.target) && e.target !== btn) {
+        menu.classList.remove('open');
+      }
+    }
+  });
+
+  // Set up sticky toolbar shadow
+  _smgmtInitScrollShadow();
+
+  // Load data in parallel
+  await Promise.all([
+    loadHomeData(false),
+    _prefetchFullRepo(),
+  ]);
+
+  // Start 30s sidebar refresh
+  startSidebarRefresh();
+
+  // Update toolbar sticky top based on actual header height
+  _smgmtUpdateToolbarTop();
+
+  // Load sprint-mgmt data if on that tab
+  if (_activeTab === 'sprint-mgmt') {
+    _sprintMgmtLoaded = true;
+    await loadSprintMgmt();
+  }
+}
+
+// ── Sprint Mgmt toolbar height calculation ─────────────────────────────────
+// Compute top offset for the sticky toolbar (proj-header height)
+function _smgmtUpdateToolbarTop() {
+  const header = document.getElementById('proj-header');
+  const toolbar = document.getElementById('smgmt-toolbar');
+  if (header && toolbar) {
+    toolbar.style.top = header.offsetHeight + 'px';
+  }
+}
+
+// ── Sprint Mgmt scroll-shadow ─────────────────────────────────────────────
+function _smgmtInitScrollShadow() {
+  const mainArea = document.getElementById('main-area');
+  const toolbar  = document.getElementById('smgmt-toolbar');
+  if (!mainArea || !toolbar) return;
+
+  mainArea.addEventListener('scroll', function() {
+    toolbar.classList.toggle('scrolled', mainArea.scrollTop > 4);
+  }, { passive: true });
+}
+
+// ── Sprint Mgmt: load sprint list ─────────────────────────────────────────
+async function loadSprintMgmt() {
+  const listEl = document.getElementById('smgmt-sprint-list');
+  if (!listEl) return;
+
+  const repo = _cachedFullRepo[_slug] || null;
+  if (!repo) {
+    listEl.innerHTML = '<div class="loading-msg">Project not found.</div>';
+    return;
+  }
+
+  listEl.innerHTML = '<div class="loading-msg">Loading sprints…</div>';
+
+  try {
+    const resp = await fetch('/api/sprint-management/issues?repo=' + encodeURIComponent(repo));
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const data = await resp.json();
+    _smgmtRender(data);
+  } catch (err) {
+    listEl.innerHTML = '<div class="loading-msg">Failed to load sprints.</div>';
+  }
+}
+
+function _smgmtRender(data) {
+  const listEl = document.getElementById('smgmt-sprint-list');
+  if (!listEl) return;
+  _smgmtData = data;
+
+  const sprints = data.sprints || [];
+  const order   = data.order   || [];
+  const issues  = data.issues  || [];
+
+  if (sprints.length === 0) {
+    listEl.innerHTML = '<div class="loading-msg">No sprints yet. Create one with + New Sprint.</div>';
+    return;
+  }
+
+  // Group issues by sprint number
+  const bySprint = {};
+  issues.forEach(iss => {
+    if (iss.sprint != null) {
+      if (!bySprint[iss.sprint]) bySprint[iss.sprint] = [];
+      bySprint[iss.sprint].push(iss);
+    }
+  });
+
+  // Use order list if available, else ascending
+  const orderedNums = order.length > 0
+    ? order.map(l => parseInt(l.replace('sprint-', ''), 10)).filter(n => !isNaN(n))
+    : [...sprints].sort((a, b) => a - b);
+
+  const cards = orderedNums.map(n => {
+    const label = `sprint-${n}`;
+    const tickets = bySprint[n] || [];
+    const outcome = _smgmtOutcomeCache[label] || null;
+    return _smgmtCardHtml(label, n, tickets, outcome);
+  }).join('');
+
+  listEl.innerHTML = cards || '<div class="loading-msg">No sprints found.</div>';
+
+  // Re-inject selection bar if tickets are selected
+  if (_smgmtSelectedIssues.size > 0) _smgmtUpdateSelectionUI();
+
+  // Fetch outcome data for sprints that look completed (no open tickets)
+  _smgmtFetchMissingOutcomes(orderedNums, bySprint);
+}
+
+async function _smgmtFetchMissingOutcomes(orderedNums, bySprint) {
+  const repo = _smgmtRepo();
+  if (!repo) return;
+  for (const n of orderedNums) {
+    const label = `sprint-${n}`;
+    // Only fetch if not cached and no open tickets in this sprint
+    if (_smgmtOutcomeCache[label] !== undefined) continue;
+    const tickets = bySprint[n] || [];
+    if (tickets.length > 0) continue; // open tickets → still active planning sprint
+    try {
+      const resp = await fetch(
+        `/api/sprints/${encodeURIComponent(label)}/outcome?project=${encodeURIComponent(repo)}`
+      );
+      if (resp.ok) {
+        const outcome = await resp.json();
+        _smgmtOutcomeCache[label] = outcome;
+        // Patch the card in-place rather than re-rendering everything
+        _smgmtInjectOutcomeBand(label, outcome);
+      } else {
+        // 404 means no outcome data — mark as null so we don't retry
+        _smgmtOutcomeCache[label] = null;
+      }
+    } catch (_) {
+      _smgmtOutcomeCache[label] = null;
+    }
+  }
+}
+
+function _smgmtInjectOutcomeBand(label, outcome) {
+  if (!outcome || !outcome.sprint_status) return;
+  const card = document.getElementById(`smgmt-card-${label}`);
+  if (!card) return;
+  // Remove placeholder outcome band if already there
+  const existing = card.querySelector('.smgmt-outcome-band');
+  if (existing) existing.remove();
+  const existingLog = card.querySelector('.smgmt-log-compact');
+  if (existingLog) existingLog.remove();
+
+  // Update card border class
+  card.classList.remove('smgmt-completed', 'smgmt-stopped');
+  card.classList.add(outcome.sprint_status === 'completed' ? 'smgmt-completed' : 'smgmt-stopped');
+
+  // Update badge in header
+  const existingBadge = card.querySelector('.smgmt-done-badge');
+  if (existingBadge) existingBadge.remove();
+  const headerLeft = card.querySelector('.smgmt-sprint-header-left');
+  if (headerLeft) {
+    const badge = document.createElement('span');
+    badge.className = `smgmt-done-badge ${outcome.sprint_status}`;
+    badge.innerHTML = outcome.sprint_status === 'completed'
+      ? '<i class="ti ti-circle-check-filled"></i> Completed'
+      : '<i class="ti ti-player-stop-filled"></i> Stopped';
+    // Insert after sprint name (second child, after drag handle)
+    const nameEl = headerLeft.querySelector('.smgmt-sprint-name') || headerLeft.children[1];
+    if (nameEl && nameEl.nextSibling) headerLeft.insertBefore(badge, nameEl.nextSibling);
+    else headerLeft.appendChild(badge);
+  }
+
+  // Build outcome band HTML
+  const bandHtml = _smgmtOutcomeBandHtml(label, outcome);
+  // Build ticket list HTML
+  const ticketListHtml = _smgmtOutcomeTicketListHtml(outcome.issues || []);
+  // Build log row HTML
+  const logHtml = _smgmtOutcomeLogHtml(label, outcome);
+
+  // Insert band after sprint header
+  const headerEl = card.querySelector('.smgmt-sprint-header');
+  const ticketsContainer = card.querySelector('.smgmt-sprint-tickets');
+
+  const bandEl = document.createElement('div');
+  bandEl.innerHTML = bandHtml;
+  const bandNode = bandEl.firstElementChild;
+
+  if (headerEl) {
+    headerEl.insertAdjacentElement('afterend', bandNode);
+  } else if (ticketsContainer) {
+    card.insertBefore(bandNode, ticketsContainer);
+  }
+
+  // Replace ticket container with outcome ticket rows
+  if (ticketsContainer) {
+    ticketsContainer.innerHTML = ticketListHtml;
+  }
+
+  // Append log row
+  if (logHtml) {
+    const logEl = document.createElement('div');
+    logEl.innerHTML = logHtml;
+    card.appendChild(logEl.firstElementChild);
+  }
+}
+
+function _fmtElapsed(secs) {
+  if (secs == null || secs <= 0) return '—';
+  const h = Math.floor(secs / 3600);
+  const m = Math.floor((secs % 3600) / 60);
+  const s = secs % 60;
+  if (h > 0) return `${h}h ${m}m`;
+  if (m > 0) return `${m}m ${s}s`;
+  return `${s}s`;
+}
+
+function _fmtWallClock(secs) {
+  if (!secs || secs <= 0) return '—';
+  const h = Math.floor(secs / 3600);
+  const m = Math.floor((secs % 3600) / 60);
+  if (h > 0) return `${h}h ${m}m`;
+  return `${m}m`;
+}
+
+function _smgmtOutcomeBandHtml(label, outcome) {
+  const st = outcome.sprint_status;
+  const c = outcome.counts || {};
+  const dur = _fmtWallClock(outcome.wall_clock_secs);
+  const ts = outcome.ended_at
+    ? (st === 'completed' ? `ended ${outcome.ended_at}` : `stopped ${outcome.ended_at}`)
+    : '';
+  return `<div class="smgmt-outcome-band ${escHtml(st)}">
+    <div class="smgmt-outcome-stat"><span class="onum green">${c.done || 0}</span><span class="olbl">Completed</span></div>
+    <div class="smgmt-outcome-stat"><span class="onum ${c.failed ? 'red' : 'muted'}">${c.failed || 0}</span><span class="olbl">Failed</span></div>
+    <div class="smgmt-outcome-stat"><span class="onum muted">${c.skipped || 0}</span><span class="olbl">Skipped</span></div>
+    <div class="smgmt-outcome-dur"><i class="ti ti-clock" style="vertical-align:-1px;"></i> ${escHtml(dur)}${ts ? ' · ' + escHtml(ts) : ''}</div>
+  </div>`;
+}
+
+function _smgmtOutcomeTicketListHtml(issues) {
+  if (!issues || issues.length === 0) return '';
+  return issues.map(iss => {
+    const o = iss.outcome || 'skipped';
+    let circle = '';
+    if (o === 'done')    circle = '<div class="smgmt-ticket-circle done">✓</div>';
+    else if (o === 'failed')  circle = '<div class="smgmt-ticket-circle failed">✕</div>';
+    else                 circle = '<div class="smgmt-ticket-circle skipped">−</div>';
+
+    const elapsed = `<span class="smgmt-ticket-elapsed">${escHtml(_fmtElapsed(iss.elapsed_secs))}</span>`;
+    const rejLabel = o === 'failed'
+      ? '<span class="smgmt-lbl-rejected">TESTER REJECTED</span>'
+      : '';
+
+    return `<div class="smgmt-ticket" data-issue="${iss.number}" draggable="false">
+      ${circle}
+      <a class="smgmt-ticket-num" href="https://github.com/issues/${iss.number}" target="_blank" rel="noopener">#${iss.number}</a>
+      <span class="smgmt-ticket-title" title="${escHtml(iss.title)}">${escHtml(iss.title)}</span>
+      ${rejLabel}
+      ${elapsed}
+    </div>`;
+  }).join('');
+}
+
+function _smgmtOutcomeLogHtml(label, outcome) {
+  const lineCount = outcome.log_line_count || 0;
+  const logId = `smgmt-log-${escHtml(label)}`;
+  return `<div class="smgmt-log-compact" id="${logId}">
+    <div class="smgmt-log-bar" onclick="this.closest('.smgmt-log-compact').classList.toggle('open');_smgmtMaybeLoadLog('${escHtml(label)}', '${logId}')">
+      <span class="smgmt-log-caret"><i class="ti ti-chevron-right"></i></span>
+      <i class="ti ti-file-text" style="color:var(--text-sub);"></i>
+      <span>Run log archived · ${lineCount > 0 ? lineCount + ' lines' : 'no log found'}</span>
+      <span style="margin-left:auto;color:var(--text-sub);">Show log</span>
+    </div>
+    <div class="smgmt-log-stream" id="${logId}-stream"></div>
+  </div>`;
+}
+
+async function _smgmtMaybeLoadLog(label, logId) {
+  const streamEl = document.getElementById(logId + '-stream');
+  if (!streamEl || streamEl.dataset.loaded) return;
+  streamEl.dataset.loaded = '1';
+  const repo = _smgmtRepo();
+  if (!repo) return;
+  try {
+    const resp = await fetch(
+      `/api/sprints/${encodeURIComponent(label)}/dispatch-log?project=${encodeURIComponent(repo)}&tail_lines=200`
+    );
+    if (!resp.ok) { streamEl.textContent = 'Log not available.'; return; }
+    const data = await resp.json();
+    if (!data.found || !data.tail) { streamEl.textContent = 'Log not available.'; return; }
+    streamEl.innerHTML = data.tail.split('\n').map(line =>
+      `<div class="smgmt-log-line"><span class="smgmt-log-msg">${escHtml(line)}</span></div>`
+    ).join('');
+  } catch (_) {
+    streamEl.textContent = 'Could not load log.';
+  }
+}
+
+function _smgmtHasCompletedTickets(tickets) {
+  return tickets.some(t => (t.labels || []).some(l => RERUN_STRIP_LABELS.has(l.name)));
+}
+
+function _smgmtCardHtml(label, n, tickets, outcome) {
+  const hasCompleted = _smgmtHasCompletedTickets(tickets);
+  const canRun = !hasCompleted && tickets.length >= 1;
+
+  let actionBtn;
+  if (hasCompleted) {
+    actionBtn = `<button class="smgmt-run-btn smgmt-run-btn--rerun"
+                  onclick="smgmtRerunSprint('${label}')">
+                  <i class="ti ti-refresh"></i> Re-run Sprint</button>`;
+  } else if (outcome && outcome.sprint_status) {
+    // Post-run frozen sprint: offer Re-run
+    actionBtn = `<button class="smgmt-run-btn smgmt-run-btn--rerun"
+                  onclick="smgmtRerunSprint('${label}')">
+                  <i class="ti ti-refresh"></i> Re-run Sprint</button>`;
+  } else {
+    const runDisabled = !canRun ? 'disabled' : '';
+    const runTitle = !canRun ? 'title="Add at least one ticket first"' : '';
+    actionBtn = `<button class="smgmt-run-btn" ${runDisabled} ${runTitle}
+                  onclick="smgmtRunSprint('${label}')">
+                  <i class="ti ti-player-play"></i> Run Sprint</button>`;
+  }
+
+  const finishHidden = hasCompleted ? '' : 'hidden';
+
+  // Outcome state: build band + ticket rows if outcome is cached
+  let outcomeBandHtml = '';
+  let outcomeCardClass = '';
+  let outcomeBadgeHtml = '';
+  let ticketCount = tickets.length;
+  let ticketsContainerHtml = '';
+
+  if (outcome && outcome.sprint_status) {
+    outcomeCardClass = outcome.sprint_status === 'completed' ? ' smgmt-completed' : ' smgmt-stopped';
+    outcomeBadgeHtml = outcome.sprint_status === 'completed'
+      ? '<span class="smgmt-done-badge completed"><i class="ti ti-circle-check-filled"></i> Completed</span>'
+      : '<span class="smgmt-done-badge stopped"><i class="ti ti-player-stop-filled"></i> Stopped</span>';
+    outcomeBandHtml = _smgmtOutcomeBandHtml(label, outcome);
+    const issueList = outcome.issues || [];
+    ticketCount = issueList.length;
+    ticketsContainerHtml = _smgmtOutcomeTicketListHtml(issueList);
+  } else {
+    // Planning view ticket rows
+    ticketsContainerHtml = tickets.length > 0
+      ? tickets.map(t => _smgmtTicketRowHtml(t, label)).join('')
+      : '<div class="smgmt-drop-hint">Drop tickets here</div>';
+  }
+
+  const logHtml = (outcome && outcome.sprint_status) ? _smgmtOutcomeLogHtml(label, outcome) : '';
+
+  return `
+    <div class="smgmt-sprint-card${outcomeCardClass}" id="smgmt-card-${escHtml(label)}"
+         ondragover="_smgmtDragOver(event, '${escHtml(label)}')"
+         ondragleave="_smgmtDragLeave(event)"
+         ondrop="_smgmtDropOnSprint(event, '${escHtml(label)}')">
+      <div class="smgmt-sprint-header">
+        <div class="smgmt-sprint-header-left">
+          <i class="ti ti-layout-kanban" style="font-size:14px;color:var(--text-muted)"></i>
+          <span class="smgmt-sprint-name" style="font-size:15px;font-weight:700;">Sprint ${escHtml(String(n))}</span>
+          ${outcomeBadgeHtml}
+          <span class="smgmt-sprint-count">&middot; ${ticketCount} ticket${ticketCount !== 1 ? 's' : ''}</span>
+        </div>
+        <div class="smgmt-sprint-header-right">
+          <button class="smgmt-finish-btn ${finishHidden}"
+                  onclick="smgmtFinishSprint('${escHtml(label)}')">
+            <i class="ti ti-flag-check"></i> Finish Sprint</button>
+          <button class="smgmt-delete-btn"
+                  onclick="smgmtDeleteSprint('${escHtml(label)}')">
+            <i class="ti ti-trash"></i> Delete</button>
+          ${actionBtn}
+        </div>
+      </div>
+      ${outcomeBandHtml}
+      <div class="smgmt-sprint-tickets" id="smgmt-tickets-${escHtml(label)}">
+        ${ticketsContainerHtml}
+      </div>
+      ${logHtml}
+    </div>`;
+}
+
+function _smgmtTicketRowHtml(ticket, label) {
+  const hasRework = (ticket.labels || []).some(l => l.name === 'need-rework' || l.name === 'needs-rework');
+  const statusClass = hasRework ? 'smgmt-status-need-rework' : ({
+    'backlog':      'smgmt-status-backlog',
+    'in-progress':  'smgmt-status-in-progress',
+    'sit':          'smgmt-status-sit',
+    'uat':          'smgmt-status-uat',
+    'done':         'smgmt-status-done',
+  }[ticket.status] || 'smgmt-status-backlog');
+  const statusLabel = hasRework ? 'needs rework' : (ticket.status || 'backlog');
+  const isSelected = _smgmtSelectedIssues.has(ticket.number);
+
+  return `
+    <div class="smgmt-ticket${isSelected ? ' is-selected' : ''}" id="smgmt-ticket-${ticket.number}"
+         draggable="true"
+         data-issue="${ticket.number}"
+         data-sprint="${escHtml(label)}"
+         ondragstart="_smgmtTicketDragStart(event, ${ticket.number}, '${escHtml(label)}')"
+         ondragend="_smgmtTicketDragEnd(event)">
+      <input type="checkbox" class="smgmt-ticket-cb"
+             ${isSelected ? 'checked' : ''}
+             onclick="event.stopPropagation()"
+             onchange="_smgmtToggleSelect(${ticket.number}, this.checked)">
+      <i class="ti ti-grip-vertical smgmt-ticket-grip"></i>
+      <a class="smgmt-ticket-num" href="${escHtml(ticket.url || '#')}" target="_blank"
+         rel="noopener" onclick="event.stopPropagation()">#${ticket.number}</a>
+      <span class="smgmt-ticket-title" title="${escHtml(ticket.title)}">${escHtml(ticket.title)}</span>
+      <span class="smgmt-ticket-status ${statusClass}">${escHtml(statusLabel)}</span>
+    </div>`;
+}
+
+// ── Sprint action handlers ─────────────────────────────────────────────────
+function _smgmtRepo() { return _cachedFullRepo[_slug] || null; }
+
+function _smgmtShowToast(msg) {
+  let el = document.getElementById('smgmt-toast');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'smgmt-toast';
+    el.className = 'smgmt-toast';
+    document.body.appendChild(el);
+  }
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(el._timer);
+  el._timer = setTimeout(() => el.classList.remove('show'), 2800);
+}
+
+async function smgmtRunSprint(label) {
+  const repo = _smgmtRepo();
+  if (!repo) return;
+  const n = parseInt(label.split('-')[1], 10);
+  if (!confirm(`Run Sprint ${n}?\n\nThis will dispatch coder and tester agents for all tickets in this sprint.`)) return;
+  try {
+    const res = await fetch('/api/sprints/run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ project: repo, sprint_label: label }),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    _smgmtShowToast(`Sprint ${n} dispatched.`);
+    await loadSprintMgmt();
+  } catch (e) {
+    alert('Failed to run sprint: ' + e.message);
+  }
+}
+
+async function smgmtRerunSprint(label) {
+  const repo = _smgmtRepo();
+  if (!repo) return;
+  const n = parseInt(label.split('-')[1], 10);
+  if (!confirm(`Reset and re-run Sprint ${n}?\n\nThis will strip in-progress/sit/uat labels from tickets and re-dispatch agents.`)) return;
+  try {
+    const res = await fetch(`/api/sprints/${encodeURIComponent(label)}/rerun?project=${encodeURIComponent(repo)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ confirm: true }),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    const data = await res.json();
+    _smgmtShowToast(`Reset ${data.reset_count} ticket${data.reset_count !== 1 ? 's' : ''}. Click Run Sprint when ready.`);
+    // Clear cached outcome so the band disappears after rerun
+    delete _smgmtOutcomeCache[label];
+    await loadSprintMgmt();
+  } catch (e) {
+    alert('Failed to re-run sprint: ' + e.message);
+  }
+}
+
+async function smgmtDeleteSprint(label) {
+  const repo = _smgmtRepo();
+  if (!repo) return;
+  const n = parseInt(label.split('-')[1], 10);
+  const tickets = (_smgmtData?.issues || []).filter(t => t.sprint != null && `sprint-${t.sprint}` === label);
+  const confirmMsg = tickets.length > 0
+    ? `Delete Sprint ${n}?\n\nThis will delete the sprint-${n} label and remove it from ${tickets.length} ticket${tickets.length !== 1 ? 's' : ''}. The tickets themselves are not deleted.`
+    : `Delete Sprint ${n}?\n\nThis will delete the sprint-${n} GitHub label. No tickets are attached.`;
+  if (!confirm(confirmMsg)) return;
+  try {
+    const res = await fetch(`/api/sprints/${encodeURIComponent(label)}?project=${encodeURIComponent(repo)}`, { method: 'DELETE' });
+    if (!res.ok) throw new Error(await res.text());
+    const data = await res.json();
+    const toastMsg = data.unlabelled_count > 0
+      ? `Sprint ${n} deleted — removed label from ${data.unlabelled_count} ticket${data.unlabelled_count !== 1 ? 's' : ''}.`
+      : `Sprint ${n} deleted.`;
+    _smgmtShowToast(toastMsg);
+    await loadSprintMgmt();
+  } catch (e) {
+    alert('Failed to delete sprint: ' + e.message);
+  }
+}
+
+async function smgmtFinishSprint(label) {
+  const repo = _smgmtRepo();
+  if (!repo) return;
+  const n = parseInt(label.split('-')[1], 10);
+  const tickets = (_smgmtData?.issues || []).filter(t => t.sprint != null && `sprint-${t.sprint}` === label);
+  if (!confirm(`Finish Sprint ${n}?\n\n${tickets.length} open issue${tickets.length !== 1 ? 's' : ''} will be moved to UAT and closed. This cannot be undone.`)) return;
+  const parts = repo.split('/');
+  const owner = parts[0];
+  const repoName = parts.slice(1).join('/');
+  try {
+    const res = await fetch(
+      `/api/projects/${encodeURIComponent(owner)}/${encodeURIComponent(repoName)}/sprints/${encodeURIComponent(label)}/finish`,
+      { method: 'POST' }
+    );
+    const data = await res.json();
+    if (data.errors && data.errors.length > 0) {
+      alert(`Closed ${data.closed} issue${data.closed !== 1 ? 's' : ''}; ${data.errors.length} error(s): ${data.errors.join('; ')}`);
+    } else {
+      _smgmtShowToast(`Sprint finished — ${data.closed} issue${data.closed !== 1 ? 's' : ''} moved to UAT and closed.`);
+    }
+    await loadSprintMgmt();
+  } catch (e) {
+    alert('Failed to finish sprint: ' + e.message);
+  }
+}
+
+// ── Multi-select helpers ───────────────────────────────────────────────────
+
+function _smgmtUpdateSelectionUI() {
+  const count = _smgmtSelectedIssues.size;
+
+  // Inline selection bar (lives inside smgmt-sprint-list as first child)
+  let bar = document.getElementById('smgmt-selection-bar');
+  const listEl = document.getElementById('smgmt-sprint-list');
+
+  if (count > 0) {
+    if (!bar) {
+      bar = document.createElement('div');
+      bar.id = 'smgmt-selection-bar';
+      bar.className = 'smgmt-selection-bar';
+      bar.setAttribute('role', 'status');
+      bar.setAttribute('aria-live', 'polite');
+      // Build interior once
+      bar.innerHTML = `
+        <i class="ti ti-checkbox"></i>
+        <strong class="smgmt-selection-bar-count" id="smgmt-sel-count">0 tickets selected</strong>
+        <span style="color:var(--text-muted)">— batch move to a sprint or backlog</span>
+        <div class="smgmt-sel-bar-actions">
+          <button class="smgmt-selection-bar-deselect" onclick="_smgmtClearSelection()">
+            <i class="ti ti-x"></i> Deselect all
+          </button>
+          <button class="smgmt-move-to-btn" id="smgmt-move-to-btn"
+                  onclick="_smgmtToggleMoveToMenu(event)">
+            Move to &#9660;
+          </button>
+          <div class="smgmt-move-to-menu" id="smgmt-move-to-menu"></div>
+        </div>`;
+      if (listEl) listEl.insertBefore(bar, listEl.firstChild);
+    }
+    bar.classList.add('show');
+    const countEl = document.getElementById('smgmt-sel-count');
+    if (countEl) countEl.textContent = count === 1 ? '1 ticket selected' : `${count} tickets selected`;
+    _smgmtPopulateMoveToMenu();
+  } else {
+    if (bar) bar.classList.remove('show');
+  }
+
+  // Toolbar deselect button
+  const deselectBtn = document.getElementById('smgmt-deselect-btn');
+  if (deselectBtn) {
+    deselectBtn.classList.toggle('visible', count > 0);
+    const countSpan = document.getElementById('smgmt-deselect-count');
+    if (countSpan) countSpan.textContent = String(count);
+  }
+}
+
+function _smgmtPopulateSelectionDropdown() {
+  // legacy no-op — replaced by _smgmtPopulateMoveToMenu
+}
+
+function _smgmtPopulateMoveToMenu() {
+  const menu = document.getElementById('smgmt-move-to-menu');
+  if (!menu || !_smgmtData) return;
+  const sprints = (_smgmtData.sprints || []).sort((a, b) => a - b);
+  let html = '';
+  sprints.forEach(n => {
+    html += `<button class="smgmt-move-to-item" onclick="_smgmtMoveSelectedTo('sprint-${n}');_smgmtCloseMoveToMenu()">Sprint ${n}</button>`;
+  });
+  html += `<button class="smgmt-move-to-item" onclick="_smgmtMoveSelectedTo('backlog');_smgmtCloseMoveToMenu()">Backlog (no sprint)</button>`;
+  menu.innerHTML = html;
+}
+
+function _smgmtToggleMoveToMenu(event) {
+  event.stopPropagation();
+  const menu = document.getElementById('smgmt-move-to-menu');
+  if (!menu) return;
+  _smgmtPopulateMoveToMenu();
+  menu.classList.toggle('open');
+}
+
+function _smgmtCloseMoveToMenu() {
+  const menu = document.getElementById('smgmt-move-to-menu');
+  if (menu) menu.classList.remove('open');
+}
+
+function _smgmtClearSelection() {
+  _smgmtSelectedIssues.forEach(num => {
+    const el = document.getElementById(`smgmt-ticket-${num}`);
+    if (el) {
+      el.classList.remove('is-selected');
+      const cb = el.querySelector('.smgmt-ticket-cb');
+      if (cb) cb.checked = false;
+    }
+  });
+  _smgmtSelectedIssues.clear();
+  _smgmtUpdateSelectionUI();
+}
+
+function _smgmtToggleSelect(number, checked) {
+  if (checked) _smgmtSelectedIssues.add(number);
+  else _smgmtSelectedIssues.delete(number);
+  const el = document.getElementById(`smgmt-ticket-${number}`);
+  if (el) el.classList.toggle('is-selected', checked);
+  _smgmtUpdateSelectionUI();
+}
+
+async function _smgmtMoveSelectedTo(targetLabel) {
+  if (!targetLabel || _smgmtSelectedIssues.size === 0) return;
+  const repo = _smgmtRepo();
+  if (!repo) return;
+
+  const nums = Array.from(_smgmtSelectedIssues);
+  const changes = nums.map(n => ({ issue_num: n, sprint_label: targetLabel }));
+
+  // Optimistic UI update
+  if (_smgmtData) {
+    const targetNum = targetLabel === 'backlog' ? null : parseInt(targetLabel.split('-')[1], 10);
+    nums.forEach(n => {
+      const iss = _smgmtData.issues.find(i => i.number === n);
+      if (iss) iss.sprint = targetNum;
+    });
+    _smgmtClearSelection();
+    _smgmtRender(_smgmtData);
+  }
+
+  try {
+    const res = await fetch('/api/sprints/batch-labels', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ changes, project: repo }),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    await loadSprintMgmt();
+  } catch (e) {
+    alert('Failed to move tickets: ' + e.message);
+    await loadSprintMgmt();
+  }
+}
+
+// ── Drag-and-drop ──────────────────────────────────────────────────────────
+function _smgmtTicketDragStart(event, issueNum, fromSprint) {
+  const isChecked = _smgmtSelectedIssues.has(issueNum);
+
+  if (isChecked && _smgmtSelectedIssues.size > 1) {
+    // Multi-ticket drag: pack all selected issue numbers
+    const nums = Array.from(_smgmtSelectedIssues);
+    const sprints = new Set(nums.map(n => {
+      const iss = (_smgmtData?.issues || []).find(i => i.number === n);
+      return iss ? iss.sprint : null;
+    }));
+    _smgmtDragTicket = {
+      number: issueNum,
+      fromSprint: fromSprint || null,
+      multi: nums,
+      multiSprints: sprints.size,
+    };
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', nums.join(','));
+
+    // Show floating pill
+    const pill = document.getElementById('smgmt-drag-pill');
+    if (pill) {
+      const label = sprints.size > 1
+        ? `Moving ${nums.length} tickets from ${sprints.size} sprints`
+        : `Moving ${nums.length} tickets`;
+      pill.textContent = label;
+      pill.style.top = (event.clientY - 20) + 'px';
+      pill.style.left = (event.clientX + 12) + 'px';
+    }
+    setTimeout(() => {
+      nums.forEach(n => {
+        const el = document.getElementById(`smgmt-ticket-${n}`);
+        if (el) el.classList.add('dragging-ticket');
+      });
+    }, 0);
+  } else {
+    // Single-ticket drag (unchecked row or single selection)
+    _smgmtDragTicket = { number: issueNum, fromSprint: fromSprint || null, multi: null };
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', String(issueNum));
+    const el = document.getElementById(`smgmt-ticket-${issueNum}`);
+    if (el) setTimeout(() => el.classList.add('dragging-ticket'), 0);
+  }
+}
+
+function _smgmtDragMovePill(event) {
+  if (_smgmtDragTicket?.multi) {
+    const pill = document.getElementById('smgmt-drag-pill');
+    if (pill && pill.textContent) {
+      pill.style.top = (event.clientY - 20) + 'px';
+      pill.style.left = (event.clientX + 12) + 'px';
+    }
+  }
+}
+
+function _smgmtTicketDragEnd(event) {
+  if (_smgmtDragTicket) {
+    if (_smgmtDragTicket.multi) {
+      _smgmtDragTicket.multi.forEach(n => {
+        const el = document.getElementById(`smgmt-ticket-${n}`);
+        if (el) el.classList.remove('dragging-ticket');
+      });
+    } else {
+      const el = document.getElementById(`smgmt-ticket-${_smgmtDragTicket.number}`);
+      if (el) el.classList.remove('dragging-ticket');
+    }
+  }
+  // Hide drag pill
+  const pill = document.getElementById('smgmt-drag-pill');
+  if (pill) { pill.style.top = '-100px'; pill.style.left = '-100px'; pill.textContent = ''; }
+  _smgmtDragTicket = null;
+  document.querySelectorAll('.smgmt-sprint-card').forEach(el => el.classList.remove('drag-over-sprint'));
+}
+
+function _smgmtDragOver(event, sprintLabel) {
+  if (_smgmtDragTicket) {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+    document.querySelectorAll('.smgmt-sprint-card').forEach(b => b.classList.remove('drag-over-sprint'));
+    const target = document.getElementById(`smgmt-card-${sprintLabel}`);
+    if (target) target.classList.add('drag-over-sprint');
+  }
+}
+
+function _smgmtDragLeave(event) {
+  if (event.currentTarget && !event.currentTarget.contains(event.relatedTarget)) {
+    event.currentTarget.classList.remove('drag-over-sprint');
+  }
+}
+
+async function _smgmtDropOnSprint(event, targetLabel) {
+  event.preventDefault();
+  document.querySelectorAll('.smgmt-sprint-card').forEach(el => el.classList.remove('drag-over-sprint'));
+
+  if (!_smgmtDragTicket) return;
+  const dragInfo = _smgmtDragTicket;
+  _smgmtDragTicket = null;
+
+  const repo = _smgmtRepo();
+  if (!repo) return;
+
+  if (dragInfo.multi && dragInfo.multi.length > 1) {
+    // Multi-ticket drop
+    const nums = dragInfo.multi;
+    const targetNum = targetLabel ? parseInt(targetLabel.split('-')[1], 10) : null;
+
+    // Optimistic update
+    if (_smgmtData) {
+      nums.forEach(n => {
+        const iss = _smgmtData.issues.find(i => i.number === n);
+        if (iss) iss.sprint = targetNum;
+      });
+    }
+    // Clear selection before render
+    _smgmtClearSelection();
+    if (_smgmtData) _smgmtRender(_smgmtData);
+
+    const changes = nums.map(n => ({ issue_num: n, sprint_label: targetLabel || 'backlog' }));
+    try {
+      const res = await fetch('/api/sprints/batch-labels', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ changes, project: repo }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      await loadSprintMgmt();
+    } catch (e) {
+      alert(`Failed to move tickets: ${e.message}`);
+      await loadSprintMgmt();
+    }
+  } else {
+    // Single-ticket drop
+    const { number, fromSprint } = dragInfo;
+    if (fromSprint === targetLabel) return;
+
+    const targetNum = targetLabel ? parseInt(targetLabel.split('-')[1], 10) : null;
+
+    // Optimistic update
+    if (_smgmtData) {
+      const iss = _smgmtData.issues.find(i => i.number === number);
+      if (iss) iss.sprint = targetNum;
+      _smgmtRender(_smgmtData);
+    }
+    // Clear selection after any drag completes
+    _smgmtClearSelection();
+
+    try {
+      const res = await fetch(`/api/issues/${number}/sprint-label`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sprint_label: targetLabel || 'backlog', project: repo }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      await loadSprintMgmt();
+    } catch (e) {
+      // Rollback optimistic update
+      if (_smgmtData) {
+        const iss = _smgmtData.issues.find(i => i.number === number);
+        if (iss) iss.sprint = fromSprint ? parseInt(fromSprint.split('-')[1], 10) : null;
+        _smgmtRender(_smgmtData);
+      }
+      alert(`Failed to move ticket #${number}: ${e.message}`);
+    }
+  }
+}
+
+// ── Trigger Refresh ───────────────────────────────────────────────────────
+async function smgmtTriggerRefresh() {
+  const btn = document.getElementById('smgmt-refresh-btn');
+  if (btn) {
+    btn.classList.remove('btn-flash');
+    void btn.offsetWidth; // force reflow to restart animation
+    btn.classList.add('btn-flash');
+    btn.addEventListener('animationend', () => btn.classList.remove('btn-flash'), { once: true });
+  }
+  await loadSprintMgmt();
+}
+
+// ── New Sprint modal ──────────────────────────────────────────────────────
+function smgmtOpenNewSprint() {
+  document.getElementById('ns-goal').value = '';
+  document.getElementById('ns-error').classList.add('hidden');
+  document.getElementById('ns-submit-btn').disabled = true;
+  document.getElementById('ns-backdrop').classList.remove('hidden');
+  document.getElementById('ns-modal').classList.remove('hidden');
+  document.getElementById('ns-goal').focus();
+}
+
+function _nsClose(force) {
+  const goal = (document.getElementById('ns-goal').value || '').trim();
+  if (!force && goal.length > 0) {
+    if (!confirm('Discard unsaved sprint goal?')) return;
+  }
+  document.getElementById('ns-backdrop').classList.add('hidden');
+  document.getElementById('ns-modal').classList.add('hidden');
+}
+
+function _nsShowError(msg) {
+  const el = document.getElementById('ns-error');
+  el.textContent = msg;
+  el.classList.remove('hidden');
+}
+
+// ── New Ticket modal ──────────────────────────────────────────────────────
+async function smgmtOpenNewTicket() {
+  const sel = document.getElementById('nt-project');
+  sel.innerHTML = '<option value="">Loading projects…</option>';
+  sel.disabled = true;
+
+  document.getElementById('nt-description').value = '';
+  document.getElementById('nt-error').classList.add('hidden');
+  document.getElementById('nt-submit-btn').disabled = false;
+  document.getElementById('nt-submit-btn').textContent = 'Generate Draft';
+  document.getElementById('nt-backdrop').classList.remove('hidden');
+  document.getElementById('nt-modal').classList.remove('hidden');
+
+  try {
+    const r = await fetch('/api/projects');
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const d = await r.json();
+    const projects = d.projects || [];
+    const currentRepo = _cachedFullRepo[_slug] || null;
+    sel.innerHTML = projects.map(p =>
+      `<option value="${escHtml(p.repo)}"${p.repo === currentRepo ? ' selected' : ''}>${escHtml(p.name || p.repo)}</option>`
+    ).join('');
+    sel.disabled = false;
+  } catch (e) {
+    sel.innerHTML = '<option value="">Could not load projects</option>';
+    sel.disabled = false;
+  }
+
+  document.getElementById('nt-description').focus();
+}
+
+function _ntClose() {
+  document.getElementById('nt-backdrop').classList.add('hidden');
+  document.getElementById('nt-modal').classList.add('hidden');
+}
+
+// ── Modal event-binding (called once from init after DOM is ready) ─────────
+function _setupModals() {
+  // Global Escape handler
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') {
+      if (!document.getElementById('ns-modal').classList.contains('hidden')) {
+        _nsClose(false);
+      } else if (!document.getElementById('nt-modal').classList.contains('hidden')) {
+        _ntClose();
+      } else if (_smgmtSelectedIssues.size > 0) {
+        // Clear multi-select when Escape pressed and no modal is open
+        _smgmtClearSelection();
+      }
+    }
+  });
+
+  // ── New Sprint modal wiring ──
+  document.getElementById('ns-goal').addEventListener('input', function() {
+    document.getElementById('ns-submit-btn').disabled = this.value.trim().length < 10;
+  });
+
+  document.getElementById('ns-close-btn').addEventListener('click', () => _nsClose(false));
+  document.getElementById('ns-cancel-btn').addEventListener('click', () => _nsClose(false));
+  document.getElementById('ns-backdrop').addEventListener('click', () => _nsClose(false));
+
+  document.getElementById('ns-modal').addEventListener('keydown', function(e) {
+    if (e.key !== 'Tab') return;
+    const focusable = Array.from(this.querySelectorAll(
+      'button:not([disabled]), textarea, input, [tabindex]:not([tabindex="-1"])'
+    ));
+    if (!focusable.length) return;
+    const first = focusable[0], last = focusable[focusable.length - 1];
+    if (e.shiftKey) { if (document.activeElement === first) { e.preventDefault(); last.focus(); } }
+    else            { if (document.activeElement === last)  { e.preventDefault(); first.focus(); } }
+  });
+
+  document.getElementById('ns-submit-btn').addEventListener('click', async function() {
+    const goal = (document.getElementById('ns-goal').value || '').trim();
+    if (goal.length < 10) return;
+
+    const repo = _cachedFullRepo[_slug] || null;
+    if (!repo) { _nsShowError('Project not found — please reload the page.'); return; }
+
+    this.disabled = true;
+    this.textContent = 'Creating…';
+    document.getElementById('ns-error').classList.add('hidden');
+
+    try {
+      const resp = await fetch('/api/sprints/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ project: repo, goal }),
+      });
+      if (!resp.ok) {
+        const data = await resp.json().catch(() => ({}));
+        throw new Error(data.detail || 'HTTP ' + resp.status);
+      }
+      document.getElementById('ns-backdrop').classList.add('hidden');
+      document.getElementById('ns-modal').classList.add('hidden');
+      await loadSprintMgmt();
+    } catch (err) {
+      _nsShowError("Couldn't create sprint — " + err.message);
+      this.disabled = false;
+      this.textContent = 'Create Sprint';
+    }
+  });
+
+  // ── New Ticket modal wiring ──
+  document.getElementById('nt-close-btn').addEventListener('click', _ntClose);
+  document.getElementById('nt-cancel-btn').addEventListener('click', _ntClose);
+  document.getElementById('nt-backdrop').addEventListener('click', _ntClose);
+
+  document.getElementById('nt-modal').addEventListener('keydown', function(e) {
+    if (e.key !== 'Tab') return;
+    const focusable = Array.from(this.querySelectorAll(
+      'button:not([disabled]), select, textarea, input, [tabindex]:not([tabindex="-1"])'
+    ));
+    if (!focusable.length) return;
+    const first = focusable[0], last = focusable[focusable.length - 1];
+    if (e.shiftKey) { if (document.activeElement === first) { e.preventDefault(); last.focus(); } }
+    else            { if (document.activeElement === last)  { e.preventDefault(); first.focus(); } }
+  });
+
+  document.getElementById('nt-submit-btn').addEventListener('click', async function() {
+    const repo = document.getElementById('nt-project').value;
+    const description = (document.getElementById('nt-description').value || '').trim();
+    if (!repo || !description) {
+      document.getElementById('nt-error').textContent = 'Project and description are required.';
+      document.getElementById('nt-error').classList.remove('hidden');
+      return;
+    }
+
+    this.disabled = true;
+    this.textContent = 'Submitting…';
+    document.getElementById('nt-error').classList.add('hidden');
+
+    try {
+      const formData = new FormData();
+      formData.append('description', description);
+      formData.append('project', repo);
+      const resp = await fetch('/api/tickets/draft', { method: 'POST', body: formData });
+      if (!resp.ok) {
+        const data = await resp.json().catch(() => ({}));
+        throw new Error(data.detail || 'HTTP ' + resp.status);
+      }
+      // Draft generated — navigate to the project on main index to finish posting
+      _ntClose();
+      window.location.href = '/projects/' + encodeURIComponent(repo) + '/sprint-mgmt';
+    } catch (err) {
+      document.getElementById('nt-error').textContent = "Couldn't create ticket — " + err.message;
+      document.getElementById('nt-error').classList.remove('hidden');
+      this.disabled = false;
+      this.textContent = 'Generate Draft';
+    }
+  });
+}
+
+document.addEventListener('DOMContentLoaded', init);
+</script>
+
+<!-- ── Inline multi-select action bar (rendered inside sprint list by JS) ── -->
+<!-- The bar is injected at the top of #smgmt-sprint-list via _smgmtUpdateSelectionUI() -->
+
+<!-- ── Multi-drag pill (follows cursor) ── -->
+<div class="smgmt-drag-pill" id="smgmt-drag-pill"></div>
+
+<!-- ── New Sprint modal ── -->
+<div class="modal-backdrop hidden" id="ns-backdrop"></div>
+<div class="modal ns-modal hidden" id="ns-modal"
+     role="dialog" aria-modal="true" aria-labelledby="ns-modal-title">
+  <div class="modal-header">
+    <span class="modal-title" id="ns-modal-title">New Sprint</span>
+    <button class="modal-close" id="ns-close-btn" aria-label="Close">&times;</button>
+  </div>
+  <div class="modal-body">
+    <div class="modal-field">
+      <label class="modal-label" for="ns-goal">Sprint goal <span style="color:var(--red)">*</span></label>
+      <textarea class="modal-input modal-textarea" id="ns-goal"
+                rows="4"
+                placeholder="What should this sprint achieve? — e.g. Dashboard UX cleanup"
+                aria-required="true"></textarea>
+      <p class="modal-hint">The goal becomes the sprint label's description and the BA passes it to the coder/tester</p>
+    </div>
+    <div class="modal-error hidden" id="ns-error"></div>
+  </div>
+  <div class="modal-footer">
+    <button class="btn-ghost" id="ns-cancel-btn" type="button">Cancel</button>
+    <button class="btn-primary" id="ns-submit-btn" type="button" disabled>Create Sprint</button>
+  </div>
+</div>
+
+<!-- ── New Ticket modal ── -->
+<div class="modal-backdrop hidden" id="nt-backdrop"></div>
+<div class="modal nt-modal hidden" id="nt-modal"
+     role="dialog" aria-modal="true" aria-labelledby="nt-modal-title">
+  <div class="modal-header">
+    <span class="modal-title" id="nt-modal-title">New Ticket</span>
+    <button class="modal-close" id="nt-close-btn" aria-label="Close">&times;</button>
+  </div>
+  <div class="modal-body">
+    <div class="modal-field">
+      <label class="modal-label" for="nt-project">Project <span style="color:var(--red)">*</span></label>
+      <select class="modal-input" id="nt-project" aria-required="true"></select>
+    </div>
+    <div class="modal-field">
+      <label class="modal-label" for="nt-description">Description <span style="color:var(--red)">*</span></label>
+      <textarea class="modal-input nt-textarea" id="nt-description"
+                rows="4"
+                placeholder="Describe the feature or bug you want to file…"
+                aria-required="true"></textarea>
+    </div>
+    <div class="modal-error hidden" id="nt-error"></div>
+  </div>
+  <div class="modal-footer">
+    <button class="btn-ghost" id="nt-cancel-btn" type="button">Cancel</button>
+    <button class="btn-primary" id="nt-submit-btn" type="button">Generate Draft</button>
+  </div>
+</div>
+
+</body>
+</html>

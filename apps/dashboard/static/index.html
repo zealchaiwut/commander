@@ -1305,9 +1305,9 @@
   <!-- Project header: breadcrumb + info + picker -->
   <div class="pvh-wrap">
     <div class="pvh-breadcrumb">
-      <button class="pvh-back-btn" onclick="navigateToOverview()" aria-label="Back to Overview">
-        <i class="ti ti-arrow-left"></i>
-        <span class="pvh-back-label">Overview</span>
+      <button class="pvh-back-btn" onclick="window.location.href='/'" aria-label="Home">
+        <i class="ti ti-home"></i>
+        <span class="pvh-back-label">Home</span>
       </button>
       <i class="ti ti-chevron-right pvh-sep"></i>
       <span class="pvh-proj-name" id="pvh-proj-name">—</span>
@@ -1347,7 +1347,23 @@
         <h2 class="smgmt-title">Sprint Management</h2>
       </div>
       <div class="smgmt-header-actions">
-        <button class="btn-secondary" id="smgmt-auto-refresh-btn" onclick="smgmtAutoRefreshNow()" title="Automatically re-fetches sprint board data every 30 seconds; click to refresh immediately">Auto Refresh (30s)</button>
+        <div class="smgmt-ar-pill-wrap" id="smgmt-ar-pill-wrap">
+          <button class="smgmt-ar-pill is-on" id="smgmt-ar-pill"
+                  onclick="smgmtArPillClick(event)" aria-haspopup="true" aria-expanded="false"
+                  aria-label="Auto-refresh interval">
+            <i class="ti ti-refresh"></i>
+            <span id="smgmt-ar-pill-label">15s</span>
+            <i class="ti ti-chevron-down smgmt-ar-chevron"></i>
+          </button>
+          <div class="smgmt-ar-menu hidden" id="smgmt-ar-menu" role="menu">
+            <button class="smgmt-ar-menu-item" data-interval="5"  onclick="smgmtArSelect(5)">5s</button>
+            <button class="smgmt-ar-menu-item" data-interval="15" onclick="smgmtArSelect(15)">15s</button>
+            <button class="smgmt-ar-menu-item" data-interval="30" onclick="smgmtArSelect(30)">30s</button>
+            <button class="smgmt-ar-menu-item" data-interval="60" onclick="smgmtArSelect(60)">1m</button>
+            <div class="smgmt-ar-menu-divider"></div>
+            <button class="smgmt-ar-menu-item smgmt-ar-turn-off" onclick="smgmtArTurnOff()">Turn off</button>
+          </div>
+        </div>
         <button class="btn-secondary" onclick="openDraftTicketModal()">+ New Ticket</button>
         <button class="btn-secondary" id="bulk-create-btn" onclick="openBulkCreateModal()">+ Bulk Create</button>
         <button class="btn-secondary" id="smgmt-move-to-btn" onclick="smgmtBulkMoveToOpen()" style="display:none;">Move to</button>
@@ -1369,27 +1385,52 @@
     <div class="smgmt-body" id="smgmt-body">
       <div class="smgmt-loading" id="smgmt-loading">Select a project to view sprints.</div>
     </div>
-    <div class="smgmt-backlog" id="smgmt-backlog"
-         ondragover="smgmtDragOverZone(event, null)"
+    <!-- Create-zone drop target for new sprint (issue #254) -->
+    <div class="smgmt-create-zone hidden" id="smgmt-create-zone"
+         ondragover="smgmtDragOverCreateZone(event)"
+         ondragleave="smgmtDragLeaveCreateZone(event)"
+         ondrop="smgmtDropOnCreateZone(event)">
+      <i class="ti ti-plus"></i>
+      <span id="smgmt-create-zone-label">Drop to create sprint</span>
+    </div>
+    <!-- Sticky Backlog Block (issue #225) -->
+    <div class="smgmt-backlog-block" id="smgmt-backlog"
+         role="region" aria-label="Backlog"
+         ondragover="smgmtBacklogDragOver(event)"
          ondragleave="smgmtDragLeave(event)"
          ondrop="smgmtDropOnSprint(event, null)">
-      <div class="smgmt-backlog-header">
-        <div class="smgmt-backlog-title">
-          <input type="checkbox" class="smgmt-select-all" id="smgmt-backlog-select-all"
-                 title="Select all backlog tickets"
-                 onclick="event.stopPropagation()" onchange="smgmtToggleSelectAll(this)">
-          <i class="ti ti-inbox"></i>
-          <span id="smgmt-backlog-label">Backlog</span>
+      <div class="smgmt-backlog-header" id="smgmt-backlog-header"
+           onclick="smgmtBacklogToggle()"
+           role="button" tabindex="0"
+           aria-expanded="false"
+           aria-controls="smgmt-backlog-body"
+           onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();smgmtBacklogToggle();}">
+        <span class="smgmt-backlog-grip" aria-hidden="true"><i class="ti ti-grip-vertical"></i></span>
+        <input type="checkbox" class="smgmt-select-all" id="smgmt-backlog-select-all"
+               title="Select all backlog tickets"
+               onclick="event.stopPropagation()" onchange="smgmtToggleSelectAll(this)">
+        <i class="ti ti-inbox smgmt-backlog-icon" aria-hidden="true"></i>
+        <span class="smgmt-backlog-label-text" id="smgmt-backlog-label">Backlog &middot; 0 tickets</span>
+        <span class="smgmt-backlog-filter-pills" id="smgmt-backlog-filter-pills" onclick="event.stopPropagation()">
+          <button class="smgmt-backlog-pill active" id="smgmt-backlog-pill-all"
+                  onclick="smgmtBacklogSetFilter('all'); event.stopPropagation()">All</button>
+          <button class="smgmt-backlog-pill" id="smgmt-backlog-pill-unestimated"
+                  onclick="smgmtBacklogSetFilter('unestimated'); event.stopPropagation()">Unestimated</button>
+          <button class="smgmt-backlog-pill" id="smgmt-backlog-pill-attachments"
+                  onclick="smgmtBacklogSetFilter('attachments'); event.stopPropagation()">Has attachments</button>
+        </span>
+        <span class="smgmt-backlog-helper">drag or use Move to &rarr;</span>
+        <span class="smgmt-backlog-chevron" id="smgmt-backlog-chevron" aria-hidden="true"><i class="ti ti-chevron-down"></i></span>
+      </div>
+      <div class="smgmt-backlog-body" id="smgmt-backlog-body">
+        <p class="smgmt-backlog-hint" id="smgmt-backlog-hint">Unassigned tickets &mdash; drag into a sprint above, or click Move to on the right</p>
+        <div class="smgmt-backlog-tickets" id="smgmt-backlog-tickets">
+          <div class="smgmt-drop-hint">Drop tickets here to remove sprint label</div>
         </div>
-        <select class="smgmt-backlog-filter" id="smgmt-backlog-filter"
-                onchange="smgmtBacklogFilter(this.value)"
-                onclick="event.stopPropagation()">
-          <option value="">All labels</option>
-        </select>
       </div>
-      <div class="smgmt-backlog-tickets" id="smgmt-backlog-tickets">
-        <div class="smgmt-drop-hint">Drop tickets here to remove sprint label</div>
-      </div>
+    </div>
+    <!-- "Move to" popup for backlog tickets (issue #225) -->
+    <div class="smgmt-moveto-popup hidden" id="smgmt-backlog-moveto-popup" role="listbox" aria-label="Move to sprint">
     </div>
   </div>
 
@@ -1735,6 +1776,22 @@
   </div>
 </div>
 
+<!-- Create sprint confirm modal (issue #254) -->
+<div class="modal-backdrop hidden" id="smgmt-create-sprint-backdrop" onclick="smgmtCreateSprintCancel()"></div>
+<div class="modal hidden" id="smgmt-create-sprint-modal" role="dialog" aria-modal="true">
+  <div class="modal-header">
+    <span class="modal-title">Create Sprint</span>
+    <button class="modal-close" onclick="smgmtCreateSprintCancel()" aria-label="Close">&times;</button>
+  </div>
+  <div style="padding: 16px 24px; font-size: 13px; color: var(--text-muted);">
+    <p id="smgmt-create-sprint-msg" style="margin: 0;"></p>
+  </div>
+  <div class="modal-footer">
+    <button class="btn-ghost" onclick="smgmtCreateSprintCancel()">Cancel</button>
+    <button class="btn-primary" id="smgmt-create-sprint-confirm" onclick="smgmtCreateSprintConfirm()">Confirm</button>
+  </div>
+</div>
+
 <!-- Sprint migration modal (shown before dispatch when earlier sprints have open tickets) -->
 <div class="modal-backdrop hidden" id="smgmt-migrate-backdrop" onclick="smgmtMigrateClose()"></div>
 <div class="modal hidden" id="smgmt-migrate-modal" role="dialog" aria-modal="true">
@@ -2033,11 +2090,16 @@
     padding: 16px 24px; display: flex; flex-direction: column; gap: 16px;
     min-height: 120px;
   }
+  /* Extra bottom padding when backlog is in sticky mode, so content doesn't hide behind header */
+  .smgmt-body.smgmt-body-sticky-backlog {
+    padding-bottom: 80px;
+  }
 
   /* Single sprint block */
   .smgmt-sprint-block {
     background: var(--surface); border: 1px solid var(--border);
-    border-radius: 8px; overflow: hidden;
+    border-radius: 10px; overflow: hidden;
+    position: relative; transition: border-color 0.2s, box-shadow 0.2s;
   }
   .smgmt-sprint-block.drag-over-sprint { border-color: var(--blue); box-shadow: 0 0 0 2px var(--blue-bg); }
   .smgmt-sprint-block.dragging-sprint { opacity: .45; }
@@ -2045,18 +2107,48 @@
   /* Sprint header */
   .smgmt-sprint-header {
     display: flex; align-items: center; gap: 10px;
-    padding: 10px 14px; background: var(--surface-2);
+    padding: 12px 16px; background: var(--surface);
     border-bottom: 1px solid var(--border); cursor: default;
+  }
+  .smgmt-sprint-header-left {
+    display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0;
+  }
+  .smgmt-sprint-header-right {
+    display: flex; align-items: center; gap: 8px; flex-shrink: 0;
   }
   .smgmt-sprint-grip {
     cursor: grab; color: var(--text-sub); font-size: 14px; flex-shrink: 0;
   }
   .smgmt-sprint-grip:active { cursor: grabbing; }
-  .smgmt-sprint-name { font-size: 14px; font-weight: 700; flex: 1; }
+  .smgmt-sprint-name { font-size: 15px; font-weight: 700; }
   .smgmt-next-badge {
-    font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .07em;
-    background: var(--green-bg); color: var(--green); padding: 2px 7px; border-radius: 10px;
+    font-family: var(--mono, monospace); font-size: 10px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: .08em;
+    background: var(--green-bg); color: var(--green); padding: 2px 7px; border-radius: 4px;
     flex-shrink: 0;
+  }
+
+  /* Sprint goal bar — visible text display (not an input) */
+  .smgmt-sprint-goal-bar {
+    padding: 10px 16px; border-bottom: 1px solid var(--border);
+    background: var(--surface); font-size: 13px; color: var(--text);
+  }
+  .smgmt-sprint-goal-bar.placeholder {
+    color: var(--text-sub); font-style: italic;
+  }
+
+  /* Run Sprint button — neutral with play icon */
+  .smgmt-run-btn-planned {
+    padding: 4px 12px; font-size: 11px; font-weight: 600;
+    background: var(--surface); color: var(--text);
+    border: 1px solid var(--border); border-radius: 5px;
+    cursor: pointer; flex-shrink: 0; transition: all .15s;
+    display: flex; align-items: center; gap: 4px;
+  }
+  .smgmt-run-btn-planned:hover { background: var(--surface-hover); }
+  .smgmt-run-btn-planned:disabled {
+    background: var(--surface-2); color: var(--text-sub);
+    border-color: var(--border); cursor: not-allowed; opacity: 0.6;
   }
   .smgmt-sprint-count { font-size: 11px; color: var(--text-muted); flex-shrink: 0; }
   /* Unified Run / Re-run button (issue #186) */
@@ -2071,23 +2163,23 @@
     background: var(--surface-2); color: var(--text-sub);
     border: 1px solid var(--border); cursor: not-allowed; opacity: 1;
   }
-  /* Re-run Sprint variant of the unified button */
+  /* Re-run Sprint variant of the unified button — amber border/text */
   .smgmt-run-btn.smgmt-run-btn--rerun {
-    background: var(--amber-bg); color: var(--amber);
-    border: 0.5px solid var(--amber);
+    background: var(--surface); color: var(--amber);
+    border: 1px solid var(--amber);
   }
-  .smgmt-run-btn.smgmt-run-btn--rerun:hover { opacity: .85; }
+  .smgmt-run-btn.smgmt-run-btn--rerun:hover { background: var(--amber-bg); }
   .smgmt-delete-btn {
     padding: 4px 10px; font-size: 11px; font-weight: 600;
-    background: transparent; color: var(--red);
-    border: 0.5px solid var(--red); border-radius: 5px;
-    cursor: pointer; flex-shrink: 0; transition: opacity .15s;
+    background: var(--surface); color: var(--red);
+    border: 1px solid var(--red); border-radius: 5px;
+    cursor: pointer; flex-shrink: 0; transition: all .15s;
     display: flex; align-items: center; gap: 4px;
   }
-  .smgmt-delete-btn:hover { background: var(--red-bg, rgba(220,38,38,.08)); opacity: 1; }
+  .smgmt-delete-btn:hover { background: var(--red-bg, rgba(220,38,38,.08)); }
   .smgmt-delete-btn:disabled {
     background: var(--surface-2); color: var(--text-sub);
-    border: 0.5px solid var(--border); cursor: not-allowed; opacity: 1;
+    border: 0.5px solid var(--border); cursor: not-allowed; opacity: 0.6;
   }
 
   .smgmt-delete-body { padding: 12px 24px 8px; font-size: 13px; color: var(--text-main); }
@@ -2132,46 +2224,236 @@
   .smgmt-finish-body p { margin: 0; }
   .smgmt-finish-body p + p { margin-top: 8px; }
 
-  /* Kill button (replaces Run on the running card) */
+  /* Cancel sprint button (replaces Run/Kill on the running card) */
   .smgmt-kill-btn {
     padding: 4px 10px; font-size: 11px; font-weight: 600;
-    background: var(--red); color: #fff; border: none; border-radius: 5px;
-    cursor: pointer; flex-shrink: 0; transition: opacity .15s;
+    background: var(--surface); color: var(--red);
+    border: 1px solid var(--red); border-radius: 5px;
+    cursor: pointer; flex-shrink: 0; transition: all .15s;
     display: flex; align-items: center; gap: 4px;
   }
-  .smgmt-kill-btn:hover { opacity: .85; }
+  .smgmt-kill-btn:hover { background: var(--red); color: #fff; }
+  .smgmt-kill-btn:focus-visible { outline: 2px solid var(--red); outline-offset: 2px; }
 
-  /* Running sprint card state */
+  /* Running sprint card state — green border + glow + animated top stripe */
   .smgmt-sprint-block.smgmt-running {
-    border-color: var(--color-border-info);
-    box-shadow: 0 0 0 2px var(--blue-bg);
+    border-color: var(--green);
+    box-shadow: 0 0 0 3px var(--green-bg), 0 1px 3px rgba(0,0,0,0.05);
   }
-  .smgmt-sprint-header.smgmt-running-header {
-    background: var(--blue-bg);
-    border-bottom-color: var(--color-border-info);
+  .smgmt-sprint-block.smgmt-running::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 3px;
+    background: linear-gradient(90deg, transparent 0%, var(--green) 20%, var(--green) 80%, transparent 100%);
+    background-size: 50% 100%;
+    background-repeat: no-repeat;
+    z-index: 1;
   }
-  .smgmt-running-badge {
-    font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .07em;
-    background: var(--blue-bg); color: var(--blue);
-    border: 1px solid var(--color-border-info);
-    padding: 2px 7px; border-radius: 10px; flex-shrink: 0;
+  @media (prefers-reduced-motion: no-preference) {
+    .smgmt-sprint-block.smgmt-running::before {
+      animation: smgmtStripeFlow 2.4s linear infinite;
+    }
   }
-  .smgmt-progress-text {
-    font-size: 11px; color: var(--blue); font-weight: 500; flex-shrink: 0;
+  @keyframes smgmtStripeFlow {
+    0%   { background-position: -100% 0; }
+    100% { background-position: 200% 0; }
   }
 
-  /* Locked sprint card state (issue #186) — shown on non-running sprints while any sprint runs */
+  .smgmt-sprint-header.smgmt-running-header {
+    background: linear-gradient(180deg, var(--green-bg) 0%, transparent 100%);
+    border-bottom-color: var(--border);
+  }
+
+  /* Running badge — green pill with pulse dot */
+  .smgmt-running-badge {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-family: var(--mono, monospace); font-size: 10px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: .04em;
+    background: var(--green); color: #fff;
+    padding: 3px 9px; border-radius: 999px; flex-shrink: 0;
+  }
+  .smgmt-running-badge .smgmt-pulse-dot {
+    width: 6px; height: 6px; border-radius: 50%; background: #fff; flex-shrink: 0;
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .smgmt-running-badge .smgmt-pulse-dot {
+      animation: smgmtPulseDot 1.4s ease-in-out infinite;
+    }
+  }
+  @keyframes smgmtPulseDot {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50%      { opacity: 0.5; transform: scale(0.7); }
+  }
+
+  /* Progress section (RUNNING state only) */
+  .smgmt-progress-section {
+    padding: 12px 16px; border-bottom: 1px solid var(--border);
+    background: var(--surface);
+  }
+  .smgmt-progress-meta {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 8px;
+    font-family: var(--mono, monospace); font-size: 12px; color: var(--text-muted);
+  }
+  .smgmt-progress-bar {
+    height: 6px; background: var(--surface-2);
+    border-radius: 999px; overflow: hidden; position: relative;
+  }
+  .smgmt-progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--green) 0%, #22c55e 100%);
+    border-radius: 999px;
+    transition: width 0.5s ease;
+    position: relative; overflow: hidden;
+  }
+  .smgmt-progress-fill::after {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.4) 50%, transparent 100%);
+    transform: translateX(-100%);
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .smgmt-progress-fill::after {
+      animation: smgmtShimmer 1.8s linear infinite;
+    }
+  }
+  @keyframes smgmtShimmer {
+    0%   { transform: translateX(-100%); }
+    100% { transform: translateX(100%); }
+  }
+
+  /* Legacy progress text (removed in favour of progress section but kept for safety) */
+  .smgmt-progress-text { display: none; }
+
+  /* Per-ticket status circles (RUNNING sprint) */
+  .smgmt-ticket-status-circle {
+    width: 20px; height: 20px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0; font-size: 11px; position: relative;
+  }
+  .smgmt-ticket-status-circle.done {
+    background: var(--green-bg); color: var(--green); font-weight: 700;
+  }
+  .smgmt-ticket-status-circle.running {
+    background: var(--blue-bg);
+    border: 2px solid var(--blue);
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .smgmt-ticket-status-circle.running {
+      animation: smgmtSpin 1s linear infinite;
+    }
+  }
+  @keyframes smgmtSpin {
+    0%   { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+  }
+  .smgmt-ticket-status-circle.running .smgmt-inner-dot {
+    width: 7px; height: 7px; border-radius: 50%; background: var(--blue);
+    position: absolute;
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .smgmt-ticket-status-circle.running .smgmt-inner-dot {
+      animation: smgmtDotPulse 1.4s ease-in-out infinite;
+    }
+  }
+  @keyframes smgmtDotPulse {
+    0%, 100% { opacity: 1; }
+    50%      { opacity: 0.3; }
+  }
+  .smgmt-ticket-status-circle.pending {
+    background: var(--surface-2); color: var(--text-sub); font-size: 14px;
+  }
+  /* Failed circle: red ✕ (issue #251) */
+  .smgmt-ticket-status-circle.failed {
+    background: var(--red-bg); color: var(--red); font-weight: 700;
+  }
+  /* Skipped circle: muted − (issue #251) */
+  .smgmt-ticket-status-circle.skipped {
+    background: var(--surface-2); color: var(--text-sub); font-weight: 700; font-size: 14px;
+  }
+
+  /* Per-ticket row states in running sprint */
+  .smgmt-ticket.is-running .smgmt-ticket-title { font-weight: 600; }
+  .smgmt-ticket.is-pending .smgmt-ticket-title { color: var(--text-muted); }
+  .smgmt-ticket.is-done .smgmt-ticket-title { font-weight: 400; }
+  .smgmt-ticket.is-failed .smgmt-ticket-title { color: var(--red); }
+  .smgmt-ticket.is-skipped .smgmt-ticket-title { color: var(--text-muted); }
+
+  /* Agent pill on running ticket */
+  .smgmt-agent-pill {
+    font-family: var(--mono, monospace); font-size: 10px; font-weight: 600;
+    padding: 2px 7px; border-radius: 4px; letter-spacing: .02em; flex-shrink: 0;
+  }
+  .smgmt-agent-pill.coder { background: var(--purple-bg); color: var(--purple); }
+  .smgmt-agent-pill.tester { background: var(--amber-bg); color: var(--amber); }
+
+  /* Stage label: right-aligned text showing run stage (issue #251) */
+  .smgmt-ticket-stage-label {
+    font-family: var(--mono, monospace); font-size: 10px; font-weight: 600;
+    padding: 2px 6px; border-radius: 3px; flex-shrink: 0;
+    white-space: nowrap; letter-spacing: .04em; text-transform: uppercase;
+    background: var(--surface-2); color: var(--text-muted);
+    border: 1px solid var(--border);
+  }
+  .smgmt-ticket-stage-label.stage-running {
+    background: var(--blue-bg); color: var(--blue); border-color: transparent;
+  }
+  .smgmt-ticket-stage-label.stage-completed {
+    background: transparent; color: var(--text-muted); border-color: transparent;
+  }
+  .smgmt-ticket-stage-label.stage-rejected {
+    background: var(--red-bg); color: var(--red); border-color: transparent;
+  }
+  .smgmt-ticket-stage-label.stage-skipped {
+    background: var(--surface-2); color: var(--text-sub); border-color: transparent;
+  }
+  .smgmt-ticket-stage-label.stage-uat {
+    background: var(--purple-bg); color: var(--purple); border-color: transparent;
+  }
+  .smgmt-ticket-stage-label.stage-sit {
+    background: var(--amber-bg); color: var(--amber); border-color: transparent;
+  }
+
+  /* Elapsed time on ticket (HH:MM format, mono, muted) */
+  .smgmt-ticket-elapsed-time {
+    font-family: var(--mono, monospace); font-size: 11px;
+    color: var(--text-sub); flex-shrink: 0; min-width: 42px; text-align: right;
+  }
+
+  /* Drag handle greyed on running sprint tickets */
+  .smgmt-sprint-block.smgmt-running .smgmt-ticket-grip {
+    color: var(--border); cursor: default; pointer-events: none;
+  }
+
+  /* ── Board lock state: all non-running blocks while a sprint is running (issue #253) ── */
   .smgmt-sprint-block.smgmt-locked {
-    border-color: var(--border);
-    box-shadow: 0 0 0 1px var(--surface-2);
     opacity: 0.72;
+    border-color: var(--border);
   }
   .smgmt-sprint-block.smgmt-locked .smgmt-sprint-header {
     background: var(--surface-2);
-    border-bottom-color: var(--border);
   }
+  /* Dimmed drag handles on locked blocks */
+  .smgmt-sprint-block.smgmt-locked .smgmt-ticket-grip,
+  .smgmt-sprint-block.smgmt-locked .smgmt-sprint-grip {
+    color: var(--border); cursor: not-allowed; pointer-events: none;
+  }
+  /* Checkboxes rendered in disabled state (reduced opacity, not-allowed cursor) — not hidden */
+  .smgmt-sprint-block.smgmt-locked .smgmt-ticket-cb,
+  .smgmt-sprint-block.smgmt-running .smgmt-ticket-cb {
+    opacity: 0.38; cursor: not-allowed; pointer-events: none;
+  }
+  /* Lock icon injected into header */
   .smgmt-lock-icon {
-    font-size: 12px; flex-shrink: 0; margin-left: 2px;
+    font-size: 11px; opacity: 0.6; flex-shrink: 0;
+    cursor: default; user-select: none;
+  }
+  /* Disabled New Sprint and Deploy buttons when board is locked */
+  #smgmt-new-sprint-btn:disabled,
+  #deploy-to-prod-btn:disabled {
+    opacity: 0.45; cursor: not-allowed; pointer-events: none;
   }
 
   /* Goal input readonly state (issue #186) */
@@ -2208,8 +2490,8 @@
 
   /* Ticket cards in a sprint */
   .smgmt-sprint-tickets {
-    padding: 8px 14px; min-height: 48px;
-    display: flex; flex-direction: column; gap: 6px;
+    padding: 4px 0; min-height: 48px;
+    display: flex; flex-direction: column;
   }
   .smgmt-drop-hint {
     font-size: 12px; color: var(--text-sub); text-align: center;
@@ -2220,8 +2502,8 @@
   /* Ticket card */
   .smgmt-ticket {
     display: flex; align-items: center; gap: 8px;
-    padding: 7px 10px; background: var(--surface-2); border: 1px solid var(--border);
-    border-radius: 5px; font-size: 12px; cursor: default;
+    padding: 9px 16px; background: var(--surface);
+    font-size: 12px; cursor: default; transition: background 0.15s;
   }
   .smgmt-ticket:hover { background: var(--surface-hover); }
   .smgmt-ticket.dragging-ticket { opacity: .4; }
@@ -2230,8 +2512,8 @@
   }
   .smgmt-ticket-grip:active { cursor: grabbing; }
   .smgmt-ticket-num {
-    font-family: var(--mono); font-size: 11px; color: var(--text-muted);
-    text-decoration: none; flex-shrink: 0; min-width: 32px;
+    font-family: var(--mono); font-size: 12px; color: var(--text-sub);
+    text-decoration: none; flex-shrink: 0; min-width: 42px;
   }
   .smgmt-ticket-num:hover { color: var(--blue); }
   .smgmt-ticket-title { flex: 1; font-weight: 500; line-height: 1.4; min-width: 0;
@@ -2245,6 +2527,13 @@
   .smgmt-status-sit      { background: var(--amber-bg); color: var(--amber); }
   .smgmt-status-uat      { background: var(--purple-bg); color: var(--purple); }
   .smgmt-status-done     { background: var(--green-bg); color: var(--green); }
+  .smgmt-status-need-rework { background: #fef2f2; color: #dc2626; border: 1px solid #fca5a5; }
+  .smgmt-rework-badge {
+    font-size: 10px; font-weight: 600; padding: 2px 6px; border-radius: 3px;
+    background: #fef2f2; color: #dc2626; border: 1px solid #fca5a5;
+    flex-shrink: 0; white-space: nowrap; text-transform: uppercase; letter-spacing: .04em;
+  }
+  .smgmt-ticket.is-needs-rework { border-left: 3px solid #dc2626; }
 
   /* Per-ticket live agent status (issue #131) */
   .smgmt-ticket-agent-badge {
@@ -2253,14 +2542,39 @@
   }
   .smgmt-ticket-spinner {
     flex-shrink: 0; font-size: 13px;
-    animation: spin 1s linear infinite; transform-origin: center;
+    transform-origin: center;
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .smgmt-ticket-spinner {
+      animation: smgmtSpin 1s linear infinite;
+    }
   }
   .smgmt-stall-warning {
-    font-size: 11px; color: var(--amber); padding: 4px 14px 4px;
+    font-size: 11px; color: var(--amber); padding: 0;
     border-top: 1px solid var(--border); background: var(--amber-bg);
   }
+  .smgmt-stall-header {
+    display: flex; align-items: center; gap: 6px;
+    padding: 4px 14px; cursor: pointer; user-select: none;
+  }
+  .smgmt-stall-header:hover { filter: brightness(0.95); }
+  .smgmt-stall-chevron { font-size: 9px; flex-shrink: 0; }
+  .smgmt-stall-actions { margin-left: auto; display: flex; gap: 6px; }
+  .smgmt-stall-btn {
+    font-size: 10px; padding: 1px 7px; border-radius: 3px; cursor: pointer;
+    border: 1px solid var(--amber); background: transparent; color: var(--amber);
+  }
+  .smgmt-stall-btn:hover { background: var(--amber); color: #fff; }
+  .smgmt-stall-btn-cancel { border-color: var(--red, #dc2626); color: var(--red, #dc2626); }
+  .smgmt-stall-btn-cancel:hover { background: var(--red, #dc2626); color: #fff; }
+  .smgmt-stall-body { padding: 0 14px 8px; }
+  .smgmt-stall-log {
+    font-size: 10px; font-family: monospace; white-space: pre-wrap; word-break: break-all;
+    background: #1e1e1e; color: #d4d4d4; padding: 8px; border-radius: 4px;
+    max-height: 300px; overflow-y: auto; margin: 0;
+  }
 
-  /* Estimate badges (issue #166) */
+  /* Estimate badges (issue #166) — planning view only (kept for backward compat) */
   .smgmt-estimate-badge {
     font-size: 10px; font-weight: 600; padding: 2px 6px; border-radius: 4px;
     background: var(--purple-bg, #f3f0ff); color: var(--purple, #7c3aed);
@@ -2274,7 +2588,50 @@
     border: 1px solid rgba(124,58,237,.15);
   }
 
-  /* Sprint goal input row */
+  /* Running sprint size-estimation pills (issue #250) */
+  .smgmt-running-size-pill {
+    font-size: 10px; font-weight: 600; padding: 2px 7px; border-radius: 10px;
+    flex-shrink: 0; white-space: nowrap; letter-spacing: .02em;
+    display: inline-flex; align-items: center;
+  }
+  .smgmt-running-size-pill--estimated {
+    background: var(--purple-bg, #f3f0ff); color: var(--purple, #7c3aed);
+    border: 1px solid rgba(124,58,237,.22);
+  }
+  .smgmt-running-size-pill--empty {
+    background: transparent; color: var(--text-muted, #9ca3af);
+    border: 1px dashed var(--border, #d1d5db);
+    font-weight: 500; opacity: .75;
+  }
+  /* Running sprint header estimate badge (issue #250) */
+  .smgmt-running-estimate-badge {
+    font-size: 11px; font-weight: 500; color: var(--purple, #7c3aed);
+    flex-shrink: 0; white-space: nowrap;
+    background: var(--purple-bg, #f3f0ff); padding: 2px 8px; border-radius: 10px;
+    border: 1px solid rgba(124,58,237,.22);
+  }
+
+  /* Duration badges on ticket rows (issue #212, #240) */
+  .smgmt-took-success {
+    font-size: 10px; font-weight: 500; padding: 2px 6px; border-radius: 4px;
+    background: var(--surface-2); color: var(--text-muted);
+    flex-shrink: 0; white-space: nowrap;
+    border: 1px solid var(--border);
+  }
+  .smgmt-took-failed {
+    font-size: 10px; font-weight: 500; padding: 2px 6px; border-radius: 4px;
+    background: var(--red-bg, #fff0f0); color: var(--red, #dc2626);
+    flex-shrink: 0; white-space: nowrap;
+    border: 1px solid rgba(220,38,38,.2);
+  }
+  /* Sprint total duration footer (issue #212) */
+  .smgmt-sprint-duration-footer {
+    padding: 6px 14px; font-size: 11px; font-weight: 500;
+    color: var(--text-muted); border-top: 1px solid var(--border);
+    background: var(--surface);
+  }
+
+  /* Sprint goal input row — hidden, used for saving only */
   .smgmt-sprint-goal-row {
     padding: 8px 14px; border-bottom: 1px solid var(--border);
     background: var(--surface);
@@ -2288,32 +2645,120 @@
   }
   .smgmt-goal-input:focus { border-color: var(--blue); }
 
-  /* Backlog section */
-  .smgmt-backlog {
-    margin: 0 24px 24px;
-    border: 2px dashed var(--border); border-radius: 8px;
-    background: var(--surface); transition: border-color .15s, background .15s;
+  /* ── Sticky Backlog Block (issue #225) ── */
+
+  /* Wrapper: fills width of sprint blocks area */
+  .smgmt-backlog-block {
+    margin: 0 24px;
+    border: 1px dashed var(--border); border-radius: 10px;
+    background: var(--surface-2);
+    transition: border-color .15s, background .15s, box-shadow .15s;
+    position: relative;
+    /* default: inline (not sticky) */
   }
-  .smgmt-backlog.drag-over-zone {
+  /* Sticky mode: >3 sprints — pinned to bottom of viewport */
+  .smgmt-backlog-block.smgmt-backlog-sticky {
+    position: sticky;
+    bottom: 0;
+    z-index: 20;
+    box-shadow: 0 -4px 16px rgba(0,0,0,0.06);
+    border-radius: 10px 10px 0 0;
+    margin-bottom: 0;
+  }
+  /* While drag from backlog is active: remove sticky, force expanded */
+  .smgmt-backlog-block.is-drag-active {
+    position: static !important;
+    box-shadow: none !important;
+  }
+  .smgmt-backlog-block.drag-over-zone {
     border-color: var(--blue); background: var(--blue-bg);
   }
+
+  /* Header: full-width clickable row, ~50px height */
   .smgmt-backlog-header {
-    display: flex; align-items: center; justify-content: space-between; gap: 10px;
-    padding: 8px 14px; border-bottom: 1px dashed var(--border);
+    display: flex; align-items: center; gap: 8px;
+    padding: 10px 16px; min-height: 50px;
+    width: 100%;
+    font-family: inherit; font-size: 13px; color: var(--text);
+    cursor: pointer;
+    border-radius: 10px;
+    transition: background .12s;
+    user-select: none;
   }
-  .smgmt-backlog-title {
-    display: flex; align-items: center; gap: 6px;
-    font-size: 12px; font-weight: 600; color: var(--text-muted);
+  .smgmt-backlog-header:hover { background: rgba(0,0,0,.025); }
+  .smgmt-backlog-header:focus-visible { outline: 2px solid var(--blue); outline-offset: -2px; border-radius: 10px; }
+  .smgmt-backlog-block.smgmt-backlog-sticky .smgmt-backlog-header {
+    border-radius: 10px 10px 0 0;
   }
-  .smgmt-backlog-filter {
-    padding: 3px 6px; font-size: 11px; font-family: inherit;
-    border: 1px solid var(--border); border-radius: 5px;
-    background: var(--surface-2); color: var(--text);
-    outline: none; cursor: pointer;
+
+  /* Decorative drag handle */
+  .smgmt-backlog-grip {
+    color: var(--text-sub); font-size: 14px; flex-shrink: 0; cursor: default;
   }
+  .smgmt-backlog-icon { font-size: 15px; color: var(--text-muted); flex-shrink: 0; }
+  .smgmt-backlog-label-text { font-weight: 700; font-size: 13px; flex-shrink: 0; }
+
+  /* Filter pills */
+  .smgmt-backlog-filter-pills {
+    display: flex; gap: 4px; flex-shrink: 0;
+  }
+  .smgmt-backlog-pill {
+    font-size: 11px; padding: 2px 8px; border-radius: 10px;
+    border: 1px solid var(--border); background: var(--surface);
+    color: var(--text-muted); cursor: pointer; font-family: inherit;
+    transition: background .12s, color .12s, border-color .12s;
+  }
+  .smgmt-backlog-pill:hover { background: var(--surface-hover); color: var(--text); }
+  .smgmt-backlog-pill.active {
+    background: var(--blue-bg); color: var(--blue); border-color: var(--blue);
+  }
+
+  /* Helper text */
+  .smgmt-backlog-helper {
+    flex: 1;
+    font-family: var(--mono, monospace); font-size: 11px;
+    color: var(--text-sub); text-align: right; white-space: nowrap;
+    padding-right: 4px;
+  }
+
+  /* Chevron */
+  .smgmt-backlog-chevron {
+    font-size: 14px; color: var(--text-muted); flex-shrink: 0;
+    transition: transform .2s ease;
+  }
+  .smgmt-backlog-block.smgmt-backlog-expanded .smgmt-backlog-chevron {
+    transform: rotate(180deg);
+  }
+
+  /* Body: hidden when collapsed, visible when expanded */
+  .smgmt-backlog-body {
+    display: none;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .smgmt-backlog-block.smgmt-backlog-expanded .smgmt-backlog-body {
+    display: flex;
+    max-height: 50vh;
+    overflow-y: auto;
+  }
+
+  /* Inline mode (<=3 sprints): always show the body */
+  .smgmt-backlog-block.smgmt-backlog-inline .smgmt-backlog-body {
+    display: flex;
+    max-height: none;
+    overflow-y: visible;
+  }
+
+  /* Static note line */
+  .smgmt-backlog-hint {
+    padding: 6px 16px 4px;
+    font-size: 11px; color: var(--text-sub); font-style: italic;
+    margin: 0;
+  }
+
   .smgmt-backlog-tickets {
-    padding: 8px 14px; min-height: 48px;
-    display: flex; flex-direction: column; gap: 6px;
+    padding: 4px 0; min-height: 32px;
+    display: flex; flex-direction: column;
   }
 
   /* Size chip on backlog tickets */
@@ -2323,7 +2768,48 @@
     color: var(--text-muted); text-transform: uppercase;
   }
 
-  /* "Move to..." dropdown */
+  /* "Move to" button on backlog ticket rows */
+  .smgmt-moveto-btn {
+    font-family: var(--mono, monospace);
+    font-size: 11px; padding: 4px 10px; border-radius: 5px;
+    border: 1px solid var(--border); background: var(--surface);
+    color: var(--text); cursor: pointer; flex-shrink: 0;
+    transition: background .12s, color .12s;
+  }
+  .smgmt-moveto-btn:hover { background: var(--text); color: var(--surface); }
+
+  /* "Move to" popup dropdown */
+  .smgmt-moveto-popup {
+    position: fixed;
+    z-index: 200;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+    box-shadow: 0 4px 16px rgba(0,0,0,.14);
+    min-width: 160px; max-height: 280px; overflow-y: auto;
+    padding: 4px 0;
+  }
+  .smgmt-moveto-popup.hidden { display: none; }
+  .smgmt-moveto-item {
+    display: block; width: 100%; padding: 7px 14px;
+    background: none; border: none; text-align: left;
+    font-family: inherit; font-size: 13px; color: var(--text);
+    cursor: pointer;
+  }
+  .smgmt-moveto-item:hover { background: var(--surface-2); }
+  .smgmt-moveto-divider {
+    border: none; border-top: 1px solid var(--border); margin: 4px 0;
+  }
+  .smgmt-moveto-item.smgmt-moveto-create {
+    color: var(--blue); font-weight: 600;
+  }
+
+  /* Label chips on backlog ticket rows (issue #225) */
+  .smgmt-backlog-label-chip {
+    font-size: 10px; padding: 1px 5px; border-radius: 3px;
+    background: var(--surface); border: 1px solid var(--border);
+    color: var(--text-muted); flex-shrink: 0; white-space: nowrap;
+  }
+
+  /* Legacy .smgmt-move-to — kept for compatibility */
   .smgmt-move-to {
     padding: 2px 5px; font-size: 11px; font-family: inherit;
     border: 1px solid var(--border); border-radius: 4px;
@@ -2331,10 +2817,12 @@
     outline: none; cursor: pointer; flex-shrink: 0;
   }
 
-  @media (max-width: 600px) {
+  @media (max-width: 700px) {
     .smgmt-header { padding: 10px 12px; }
     .smgmt-body   { padding: 12px; }
-    .smgmt-backlog { margin: 0 12px 16px; }
+    .smgmt-backlog-block { margin: 0 12px; }
+    .smgmt-backlog-helper { display: none; }
+    .smgmt-moveto-btn { display: inline-flex; }
   }
 
   /* ── Cleanup empty sprints banner ── */
@@ -2374,6 +2862,19 @@
     text-align: center; padding: 12px;
   }
   .smgmt-placeholder-tickets { min-height: 52px; }
+
+  /* ── Create-zone drop target for new sprint (issue #254) ── */
+  .smgmt-create-zone {
+    border: 2px dashed var(--border); border-radius: 10px;
+    margin: 0 24px 16px; padding: 18px 24px;
+    display: flex; align-items: center; justify-content: center;
+    gap: 8px; color: var(--text-muted); font-size: 13px; font-style: italic;
+    transition: border-color 0.15s, background 0.15s, color 0.15s;
+    cursor: default; user-select: none;
+  }
+  .smgmt-create-zone.drag-over {
+    border-color: var(--blue); background: var(--blue-bg); color: var(--blue);
+  }
 
   /* ── Multi-select checkboxes (issue #206) ── */
   .smgmt-ticket-cb {
@@ -2848,6 +3349,52 @@
     transition: background .15s; cursor: pointer;
   }
   .btn-secondary:hover { background: var(--surface); }
+
+  /* ── Auto-refresh compact pill (issue #240) ── */
+  .smgmt-ar-pill-wrap {
+    position: relative; display: inline-block;
+  }
+  .smgmt-ar-pill {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 5px 10px; border-radius: 20px; border: 1px solid transparent;
+    font-size: 12px; font-weight: 600; cursor: pointer;
+    transition: background .15s, border-color .15s, color .15s;
+    white-space: nowrap; background: none;
+  }
+  .smgmt-ar-pill.is-on {
+    background: var(--green-bg, #f0fdf4); color: var(--green, #16a34a);
+    border-color: rgba(22,163,74,.35);
+  }
+  .smgmt-ar-pill.is-on:hover {
+    background: var(--green-bg, #dcfce7); border-color: var(--green, #16a34a);
+  }
+  .smgmt-ar-pill.is-off {
+    background: var(--surface-2); color: var(--text-muted);
+    border-color: var(--border);
+  }
+  .smgmt-ar-pill.is-off:hover { background: var(--surface); color: var(--text); }
+  .smgmt-ar-chevron { font-size: 10px; opacity: .7; }
+  /* Dropdown menu */
+  .smgmt-ar-menu {
+    position: absolute; right: 0; top: calc(100% + 4px); z-index: 200;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 8px; box-shadow: 0 4px 16px rgba(0,0,0,.12);
+    min-width: 110px; overflow: hidden;
+    display: flex; flex-direction: column;
+  }
+  .smgmt-ar-menu.hidden { display: none; }
+  .smgmt-ar-menu-item {
+    display: flex; align-items: center; gap: 6px;
+    padding: 8px 14px; font-size: 13px; color: var(--text);
+    background: none; border: none; cursor: pointer; text-align: left;
+    transition: background .1s;
+  }
+  .smgmt-ar-menu-item:hover { background: var(--surface-2); }
+  .smgmt-ar-menu-item.is-active { font-weight: 600; color: var(--green, #16a34a); }
+  .smgmt-ar-menu-item.is-active::before { content: '✓'; margin-right: 2px; }
+  .smgmt-ar-menu-divider { height: 1px; background: var(--border); margin: 2px 0; }
+  .smgmt-ar-turn-off { color: var(--text-muted); }
+  .smgmt-ar-turn-off:hover { color: var(--red, #dc2626); background: var(--red-bg, #fff0f0); }
 </style>
 
 <!-- ── Approve all UAT confirmation modal ── -->

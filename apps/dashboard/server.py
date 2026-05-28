@@ -1,10 +1,12 @@
 import asyncio
+import hashlib
 import json
 import os
 import re
 import shutil
 import signal
 import subprocess
+import sys
 import tempfile
 import time
 import uuid
@@ -20,7 +22,7 @@ except ImportError:
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, model_validator
 
@@ -32,6 +34,18 @@ import db
 import github_client
 import projects as projects_module
 
+# Backup module lives in services/sprint_manager/ — add it to sys.path
+import sys as _sys
+_SERVICES_DIR = Path(__file__).parent.parent.parent / "services" / "sprint_manager"
+if str(_SERVICES_DIR) not in _sys.path:
+    _sys.path.insert(0, str(_SERVICES_DIR))
+try:
+    import backup as _backup_module
+    _BACKUP_AVAILABLE = True
+except ImportError:
+    _backup_module = None  # type: ignore[assignment]
+    _BACKUP_AVAILABLE = False
+
 STATIC_DIR = Path(__file__).parent / "static"
 ENVIRONMENT = os.environ.get("ENVIRONMENT", "prd").lower()
 
@@ -42,6 +56,61 @@ _TIMEOUT_CHECK_INTERVAL: int = 60  # run the check every 60 seconds
 
 _subscribers: list[asyncio.Queue] = []
 _start_time: float = 0.0
+
+
+# ── Build hash (cache-busting) ─────────────────────────────────────────────────
+
+def _compute_build_hash() -> str:
+    """Compute an 8-char MD5 hash over all JS and CSS files in STATIC_DIR.
+
+    The hash changes whenever any local static asset changes, which lets
+    browsers cache assets indefinitely while always loading fresh code after
+    a deploy/restart.
+    """
+    h = hashlib.md5()
+    for ext in ("*.js", "*.css"):
+        for f in sorted(STATIC_DIR.glob(ext)):
+            try:
+                h.update(f.read_bytes())
+            except OSError:
+                pass
+    return h.hexdigest()[:8]
+
+
+_BUILD_HASH: str = _compute_build_hash()
+_APP_VERSION: str = "1.0"
+
+
+def _inject_version_into_html(html: str) -> str:
+    """Inject ?v=<hash> query string on local /static/*.js and /static/*.css URLs."""
+    # Replace src="/static/foo.js" → src="/static/foo.js?v=<hash>"
+    # Replace href="/static/foo.css" → href="/static/foo.css?v=<hash>"
+    # Skip URLs that already have a query string.
+    pattern = r'((?:src|href)="(/static/[^"?]+\.(?:js|css))")'
+    replacement = rf'\g<2>?v={_BUILD_HASH}'
+
+    def _replacer(m: re.Match) -> str:
+        attr_name = m.group(1).split("=")[0]  # src or href
+        url = m.group(2)
+        return f'{attr_name}="{url}?v={_BUILD_HASH}"'
+
+    return re.sub(pattern, _replacer, html)
+
+
+_HTML_NO_CACHE_HEADERS = {
+    "Cache-Control": "no-cache, must-revalidate",
+    "Pragma": "no-cache",
+}
+
+
+def _serve_html(path: Path) -> HTMLResponse:
+    """Read an HTML file, inject cache-busting version stamps, and serve with no-cache headers."""
+    try:
+        content = path.read_text(encoding="utf-8")
+    except OSError:
+        raise HTTPException(status_code=404, detail="Not found")
+    content = _inject_version_into_html(content)
+    return HTMLResponse(content=content, headers=_HTML_NO_CACHE_HEADERS)
 
 
 async def _cache_refresh_loop():
@@ -77,10 +146,14 @@ def _sweep_orphan_pid_files() -> None:
     Live sprint_manager.py processes for the correct label are left untouched.
     """
     sweep_start = time.monotonic()
+    scanned = 0
+    cleaned = 0
     try:
         projects = projects_module.load_projects()
     except Exception as exc:
         print(f"[startup-sweep] could not load projects: {exc}")
+        elapsed_ms = (time.monotonic() - sweep_start) * 1000
+        print(f"[startup-sweep] scanned {scanned} PID files, cleaned {cleaned} orphans in {elapsed_ms:.1f}ms")
         return
 
     for proj in projects:
@@ -90,6 +163,7 @@ def _sweep_orphan_pid_files() -> None:
             if not sprints_dir.exists():
                 continue
             for pid_file in sprints_dir.glob("*-pid"):
+                scanned += 1
                 sprint_label = pid_file.name.removesuffix("-pid")  # e.g. "sprint-9"
                 try:
                     pid = int(pid_file.read_text(encoding="utf-8").strip())
@@ -99,6 +173,7 @@ def _sweep_orphan_pid_files() -> None:
                         pid_file.unlink()
                     except OSError:
                         pass
+                    cleaned += 1
                     print(f"[startup-sweep] cleaned unreadable PID file {pid_file}")
                     continue
 
@@ -110,6 +185,7 @@ def _sweep_orphan_pid_files() -> None:
                         pid_file.unlink()
                     except OSError:
                         pass
+                    cleaned += 1
                     print(
                         f"[startup-sweep] cleaned orphan PID file {pid_file}"
                         f" (PID {pid} not running)"
@@ -149,6 +225,7 @@ def _sweep_orphan_pid_files() -> None:
                         pid_file.unlink()
                     except OSError:
                         pass
+                    cleaned += 1
                     print(
                         f"[startup-sweep] cleaned orphan PID file {pid_file}"
                         f" (PID {pid} reused by unrelated process)"
@@ -157,7 +234,88 @@ def _sweep_orphan_pid_files() -> None:
             print(f"[startup-sweep] error scanning project {proj.get('repo')}: {exc}")
 
     elapsed_ms = (time.monotonic() - sweep_start) * 1000
-    print(f"[startup-sweep] completed in {elapsed_ms:.1f}ms")
+    print(f"[startup-sweep] scanned {scanned} PID files, cleaned {cleaned} orphans in {elapsed_ms:.1f}ms")
+
+
+def _sprint_status_file_path(project: str, sprint_label: str) -> Optional[Path]:
+    """Return the path to the persisted sprint-status JSON file for a project/label.
+
+    Returns None when project is empty (status cannot be attributed to a project).
+    Location: <project-root>/.commander/sprints/<label>-status.json
+    """
+    if not project:
+        return None
+    project_root = _project_root_path(project)
+    return _commander_dir(project_root) / "sprints" / f"{sprint_label}-status.json"
+
+
+def _restore_sprint_statuses_on_startup() -> None:
+    """On startup, reload persisted sprint-status payloads for any sprints still running.
+
+    For each project, scans .commander/sprints/*-status.json files.  If the
+    corresponding sprint PID is still alive the payload is loaded into the
+    in-memory _sprint_statuses dict — the dashboard resumes tracking without a
+    gap.  Stale status files (process dead) are skipped and logged.
+
+    Logs one line per file indicating whether we re-attached or skipped.
+    Uses a file-level lock (os.O_EXCL create of a .lock file) to prevent two
+    server instances from running the restore simultaneously.
+    """
+    global _sprint_statuses
+    try:
+        projects = projects_module.load_projects()
+    except Exception as exc:
+        print(f"[startup-restore] could not load projects: {exc}")
+        return
+
+    attached = 0
+    skipped  = 0
+
+    for proj in projects:
+        try:
+            project_root = _project_root_path(proj["repo"])
+            sprints_dir  = _commander_dir(project_root) / "sprints"
+            if not sprints_dir.exists():
+                continue
+
+            for status_file in sprints_dir.glob("*-status.json"):
+                sprint_label = status_file.name.removesuffix("-status.json")
+
+                # Check whether the sprint process is still alive.
+                if not _is_sprint_running(project_root, sprint_label):
+                    print(
+                        f"[startup-restore] skipped {status_file.name}"
+                        f" — sprint '{sprint_label}' process no longer running"
+                    )
+                    skipped += 1
+                    continue
+
+                # Process is alive — load the status payload.
+                try:
+                    raw = status_file.read_text(encoding="utf-8")
+                    payload = json.loads(raw)
+                except (OSError, json.JSONDecodeError) as exc:
+                    print(
+                        f"[startup-restore] could not read {status_file.name}: {exc}"
+                    )
+                    skipped += 1
+                    continue
+
+                key = (proj["repo"], sprint_label)
+                _sprint_statuses[key] = payload
+                print(
+                    f"[startup-restore] re-attached to running sprint"
+                    f" '{sprint_label}' on {proj['repo']}"
+                )
+                attached += 1
+
+        except Exception as exc:
+            print(f"[startup-restore] error scanning project {proj.get('repo')}: {exc}")
+
+    print(
+        f"[startup-restore] completed — {attached} sprint(s) re-attached,"
+        f" {skipped} skipped"
+    )
 
 
 @asynccontextmanager
@@ -166,6 +324,14 @@ async def lifespan(app: FastAPI):
     _start_time = time.monotonic()
     db.init_db()
     _sweep_orphan_pid_files()
+    _restore_sprint_statuses_on_startup()
+    # Start backup scheduler and queue a startup backup after 30 s
+    if _BACKUP_AVAILABLE:
+        try:
+            _backup_module.start_backup_scheduler()
+            _backup_module.schedule_startup_backup(delay_seconds=30)
+        except Exception:
+            pass  # backup failures never affect server startup
     task1 = asyncio.create_task(_cache_refresh_loop())
     task2 = asyncio.create_task(_timeout_loop())
     yield
@@ -179,6 +345,19 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan)
+
+
+# ── API no-cache middleware (issue #249) ──────────────────────────────────────
+# Ensure all /api/* responses carry Cache-Control: no-cache so browsers and
+# proxies never serve stale API data on auto-refresh or manual refresh.
+
+@app.middleware("http")
+async def add_api_no_cache_headers(request: Request, call_next):
+    response = await call_next(request)
+    if request.url.path.startswith("/api/"):
+        response.headers["Cache-Control"] = "no-cache, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
+    return response
 
 
 # ── request models ────────────────────────────────────────────────────────────
@@ -246,6 +425,191 @@ class HealthResponse(BaseModel):
     database: DatabaseStatus
 
 
+# ── Health check v2 (issue #229) ─────────────────────────────────────────────
+# Global cache: (timestamp, response_dict)
+_health_cache: tuple[float, dict] | None = None
+_HEALTH_CACHE_TTL = 10.0  # seconds
+_GITHUB_AUTH_CACHE: tuple[float, dict] | None = None
+_GITHUB_AUTH_CACHE_TTL = 60.0  # seconds
+_CHECK_TIMEOUT = 0.5  # 500 ms per individual check
+_HEALTH_TOTAL_TIMEOUT = 2.0  # 2 s overall
+
+
+async def _check_dashboard() -> dict:
+    uptime = time.monotonic() - _start_time
+    return {"status": "ok", "uptime_sec": int(uptime)}
+
+
+async def _check_database() -> dict:
+    try:
+        loop = asyncio.get_event_loop()
+        def _run():
+            conn = db.get_conn()
+            try:
+                conn.execute("SELECT 1")
+            finally:
+                conn.close()
+        await asyncio.wait_for(loop.run_in_executor(None, _run), timeout=_CHECK_TIMEOUT)
+        return {"status": "ok"}
+    except asyncio.TimeoutError:
+        return {"status": "timeout"}
+    except Exception as exc:
+        return {"status": "down", "error": str(exc)}
+
+
+async def _check_github_auth() -> dict:
+    global _GITHUB_AUTH_CACHE
+    now = time.monotonic()
+    if _GITHUB_AUTH_CACHE is not None:
+        ts, cached = _GITHUB_AUTH_CACHE
+        if now - ts < _GITHUB_AUTH_CACHE_TTL:
+            return cached
+
+    async def _run() -> dict:
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "gh", "auth", "status",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await proc.communicate()
+            combined = (stdout + stderr).decode("utf-8", errors="replace")
+            if proc.returncode == 0:
+                # Parse logged-in user from output like "Logged in to github.com as <user>"
+                import re as _re
+                m = _re.search(r"Logged in to \S+ as (\S+)", combined)
+                user = m.group(1) if m else None
+                result = {"status": "ok"}
+                if user:
+                    result["user"] = user
+                return result
+            # Non-zero exit — determine if expired or missing
+            combined_lower = combined.lower()
+            if "expired" in combined_lower or "token" in combined_lower:
+                return {"status": "expired"}
+            return {"status": "missing"}
+        except FileNotFoundError:
+            return {"status": "missing"}
+        except Exception as exc:
+            return {"status": "missing", "error": str(exc)}
+
+    try:
+        result = await asyncio.wait_for(_run(), timeout=_CHECK_TIMEOUT)
+    except asyncio.TimeoutError:
+        result = {"status": "timeout"}
+
+    _GITHUB_AUTH_CACHE = (now, result)
+    return result
+
+
+async def _check_claude_code_auth() -> dict:
+    credentials_path = Path.home() / ".claude" / "credentials.json"
+    if not credentials_path.exists():
+        # Try running `claude --version` as fallback
+        try:
+            proc = await asyncio.wait_for(
+                asyncio.create_subprocess_exec(
+                    "claude", "--version",
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                ),
+                timeout=_CHECK_TIMEOUT,
+            )
+            await proc.communicate()
+            if proc.returncode == 0:
+                return {"status": "ok"}
+            return {"status": "expired"}
+        except asyncio.TimeoutError:
+            return {"status": "timeout"}
+        except FileNotFoundError:
+            return {"status": "missing"}
+        except Exception:
+            return {"status": "missing"}
+
+    # credentials.json exists — check it's valid JSON and non-empty
+    try:
+        data = json.loads(credentials_path.read_text(encoding="utf-8"))
+        if not data:
+            return {"status": "expired"}
+        return {"status": "ok"}
+    except Exception:
+        return {"status": "expired"}
+
+
+async def _check_disk() -> dict:
+    try:
+        loop = asyncio.get_event_loop()
+        usage = await asyncio.wait_for(
+            loop.run_in_executor(None, lambda: shutil.disk_usage(Path(__file__).parent)),
+            timeout=_CHECK_TIMEOUT,
+        )
+        free_gb = usage.free / (1024 ** 3)
+        total_gb = usage.total / (1024 ** 3)
+        if free_gb < 2.0:
+            status = "critical"
+        elif free_gb < 10.0:
+            status = "warn"
+        else:
+            status = "ok"
+        return {
+            "status": status,
+            "free_gb": round(free_gb, 2),
+            "total_gb": round(total_gb, 2),
+        }
+    except asyncio.TimeoutError:
+        return {"status": "timeout"}
+    except Exception as exc:
+        return {"status": "warn", "error": str(exc)}
+
+
+async def _check_stuck_sprints() -> dict:
+    """Check for sprints in 'running' state whose state file mtime is > 2 hours old."""
+    try:
+        loop = asyncio.get_event_loop()
+
+        def _scan() -> dict:
+            two_hours_ago = time.time() - 7200
+            stuck_labels: list[str] = []
+            try:
+                projects = projects_module.load_projects()
+            except Exception:
+                return {"status": "ok", "count": 0, "labels": []}
+            for proj in projects:
+                try:
+                    project_root = _project_root_path(proj["repo"])
+                    sprints_dir = _commander_dir(project_root) / "sprints"
+                    if not sprints_dir.exists():
+                        continue
+                    for state_file in sprints_dir.glob("*-state.json"):
+                        try:
+                            data = json.loads(state_file.read_text(encoding="utf-8"))
+                        except Exception:
+                            continue
+                        if data.get("status") != "running":
+                            continue
+                        # Check mtime
+                        mtime = state_file.stat().st_mtime
+                        if mtime < two_hours_ago:
+                            # Extract sprint label from filename: sprint-N-state.json
+                            label = state_file.name.removesuffix("-state.json")
+                            stuck_labels.append(label)
+                except Exception:
+                    continue
+            if stuck_labels:
+                return {"status": "warn", "count": len(stuck_labels), "labels": stuck_labels}
+            return {"status": "ok", "count": 0, "labels": []}
+
+        result = await asyncio.wait_for(
+            loop.run_in_executor(None, _scan),
+            timeout=_CHECK_TIMEOUT,
+        )
+        return result
+    except asyncio.TimeoutError:
+        return {"status": "timeout"}
+    except Exception as exc:
+        return {"status": "ok", "count": 0, "labels": [], "error": str(exc)}
+
+
 # ── SSE broadcast ─────────────────────────────────────────────────────────────
 
 async def broadcast(data: dict):
@@ -258,7 +622,28 @@ async def broadcast(data: dict):
 
 @app.get("/")
 async def root():
-    return FileResponse(STATIC_DIR / "index.html")
+    return _serve_html(STATIC_DIR / "home-preview.html")
+
+
+@app.get("/home")
+async def home_redirect():
+    return RedirectResponse(url="/", status_code=301)
+
+
+@app.get("/home-preview")
+async def home_preview_redirect():
+    return RedirectResponse(url="/", status_code=301)
+
+
+@app.get("/overview")
+async def overview_redirect():
+    return RedirectResponse(url="/", status_code=301)
+
+
+@app.get("/diagnostics")
+async def diagnostics_page():
+    """Serve the system diagnostics page (issue #230)."""
+    return _serve_html(STATIC_DIR / "diagnostics.html")
 
 
 @app.get("/projects/{path:path}")
@@ -266,31 +651,149 @@ async def spa_project_route(path: str):
     if path.endswith("/plan-sprint"):
         new_path = path[: -len("plan-sprint")] + "sprint-mgmt"
         return RedirectResponse(url=f"/projects/{new_path}", status_code=308)
-    return FileResponse(STATIC_DIR / "index.html")
+    return _serve_html(STATIC_DIR / "index.html")
 
 
-@app.get("/api/health", response_model=HealthResponse)
-def health_check() -> HealthResponse:
-    uptime = time.monotonic() - _start_time
+# ── Slug-based project routes (/project/<slug>/...) ───────────────────────────
 
-    db_reachable = False
+_VALID_PROJECT_TABS = {"sprint-mgmt", "tickets", "logs"}
+
+
+@app.get("/project/{slug}")
+async def project_slug_no_tab(slug: str):
+    """Redirect bare /project/<slug> to /project/<slug>/sprint-mgmt."""
+    return RedirectResponse(url=f"/project/{slug}/sprint-mgmt", status_code=302)
+
+
+@app.get("/project/{slug}/{tab}")
+async def project_slug_tab(slug: str, tab: str):
+    """Serve the project chrome page for valid tabs; redirect invalid tabs to sprint-mgmt."""
+    if tab not in _VALID_PROJECT_TABS:
+        return RedirectResponse(url=f"/project/{slug}/sprint-mgmt", status_code=302)
+    return _serve_html(STATIC_DIR / "project.html")
+
+
+@app.get("/api/health")
+async def health_check():
+    """GET /api/health — rich dependency health check (issue #229).
+
+    Runs 6 checks concurrently: dashboard, database, github_auth, claude_code_auth,
+    disk, stuck_sprints.  Response is cached 10 s.  Returns 200 for ok/degraded,
+    503 for down.  No authentication required.
+    """
+    global _health_cache
+    now = time.monotonic()
+    if _health_cache is not None:
+        ts, cached = _health_cache
+        if now - ts < _HEALTH_CACHE_TTL:
+            status_code = 503 if cached["status"] == "down" else 200
+            return JSONResponse(content=cached, status_code=status_code)
+
+    checked_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
     try:
-        db.get_conn().execute("SELECT 1")
-        db_reachable = True
-    except Exception:
-        pass
+        results = await asyncio.wait_for(
+            asyncio.gather(
+                _check_dashboard(),
+                _check_database(),
+                _check_github_auth(),
+                _check_claude_code_auth(),
+                _check_disk(),
+                _check_stuck_sprints(),
+                return_exceptions=True,
+            ),
+            timeout=_HEALTH_TOTAL_TIMEOUT,
+        )
+    except asyncio.TimeoutError:
+        results = [
+            {"status": "timeout"},
+            {"status": "timeout"},
+            {"status": "timeout"},
+            {"status": "timeout"},
+            {"status": "timeout"},
+            {"status": "timeout"},
+        ]
 
-    return HealthResponse(
-        status="ok" if db_reachable else "degraded",
-        uptime_seconds=uptime,
-        database=DatabaseStatus(reachable=db_reachable, path=str(db.DB_PATH)),
+    # Unpack results; replace any unexpected exceptions with error dicts
+    def _safe(r, fallback_status: str = "down") -> dict:
+        if isinstance(r, Exception):
+            return {"status": fallback_status, "error": str(r)}
+        return r
+
+    checks = {
+        "dashboard":        _safe(results[0], "down"),
+        "database":         _safe(results[1], "down"),
+        "github_auth":      _safe(results[2], "missing"),
+        "claude_code_auth": _safe(results[3], "missing"),
+        "disk":             _safe(results[4], "warn"),
+        "stuck_sprints":    _safe(results[5], "ok"),
+    }
+
+    # Determine overall status
+    # "down" if database or github_auth failed
+    critical_down = checks["database"]["status"] in ("down", "timeout") or \
+                    checks["github_auth"]["status"] in ("expired", "missing", "timeout")
+    has_warn = any(
+        c.get("status") in ("warn", "critical", "expired", "missing", "timeout")
+        for c in checks.values()
     )
+
+    if critical_down:
+        overall = "down"
+    elif has_warn:
+        overall = "degraded"
+    else:
+        overall = "ok"
+
+    response = {
+        "status": overall,
+        "checked_at": checked_at,
+        "checks": checks,
+    }
+    _health_cache = (now, response)
+
+    status_code = 503 if overall == "down" else 200
+    return JSONResponse(content=response, status_code=status_code)
 
 
 @app.get("/api/environment")
 def get_environment():
     """Return the current runtime environment (prd or uat)."""
     return {"environment": ENVIRONMENT}
+
+
+@app.get("/api/version")
+def get_version():
+    """Return the build version hash for cache-busting (issue #249).
+
+    Response shape:
+    {
+      "version": "1.0",
+      "build": "abc12345"
+    }
+    """
+    return JSONResponse(
+        content={"version": _APP_VERSION, "build": _BUILD_HASH},
+        headers={"Cache-Control": "no-cache, must-revalidate"},
+    )
+
+
+@app.get("/api/backup/status")
+def get_backup_status():
+    """Return the current state of the gist-based config backup.
+
+    Response shape:
+    {
+      "last_backup_at": "<ISO-8601>" | null,
+      "gist_id": "<id>" | null,
+      "gist_url": "https://gist.github.com/..." | null,
+      "file_count": <int>,
+      "last_error": "<message>" | null
+    }
+    """
+    if not _BACKUP_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Backup module not available")
+    return _backup_module.get_backup_status()
 
 
 @app.post("/api/agent-event")
@@ -499,6 +1002,12 @@ def add_project(body: NewProjectBody):
             icon=body.icon or "ti-folder",
             color=body.color or "gray",
         )
+        # Trigger a background backup after a successful projects.json write
+        if _BACKUP_AVAILABLE:
+            try:
+                _backup_module.schedule_backup()
+            except Exception:
+                pass  # backup trigger failures never affect the response
         return new_proj
     except FileExistsError as e:
         raise HTTPException(409, detail=str(e))
@@ -550,6 +1059,13 @@ async def remove_project(owner: str, repo_name: str, body: RemoveProjectBody):
             err = result.stderr.strip() or result.stdout.strip() or "unknown error"
             raise HTTPException(502, detail=f"Failed to delete GitHub repository: {err}")
         removed.append(f"GitHub repo {repo}")
+
+    # Trigger a background backup after a successful projects.json write
+    if _BACKUP_AVAILABLE:
+        try:
+            _backup_module.schedule_backup()
+        except Exception:
+            pass  # backup trigger failures never affect the response
 
     return {"ok": True, "removed": removed}
 
@@ -859,7 +1375,24 @@ class SprintStatusPayload(BaseModel):
 def set_sprint_status(payload: SprintStatusPayload):
     global _sprint_statuses
     key = (payload.project, payload.sprint_label)
-    _sprint_statuses[key] = payload.model_dump()
+    data = payload.model_dump()
+    _sprint_statuses[key] = data
+
+    # Persist to disk so the status survives a server restart (issue #215).
+    # Only persist when we have a project so we know where to write the file.
+    if payload.project and payload.sprint_label:
+        status_path = _sprint_status_file_path(payload.project, payload.sprint_label)
+        if status_path is not None:
+            try:
+                status_path.parent.mkdir(parents=True, exist_ok=True)
+                # Atomic write: write to a temp file then replace to avoid partial reads.
+                tmp_path = status_path.with_suffix(".json.tmp")
+                tmp_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+                os.replace(str(tmp_path), str(status_path))
+            except OSError as exc:
+                # Non-fatal — in-memory state is still updated.
+                print(f"[sprint-status] could not persist status for {payload.sprint_label}: {exc}")
+
     return {"ok": True}
 
 
@@ -971,6 +1504,346 @@ def _parse_summary_file(path: Path) -> dict:
         "total_tokens":  total_tokens,
     }
 
+
+# ── home aggregated endpoint (#216) ──────────────────────────────────────────
+
+_home_cache: dict[str, tuple[float, dict]] = {}
+_HOME_CACHE_TTL = 30.0
+
+
+def _home_project_data(proj: dict, running_sprints: list[dict]) -> dict:
+    """Compute per-project home data, cached 30 s per project slug.
+
+    On any GitHub fetch error, returns an idle sentinel with 0 counts so the
+    overall endpoint still returns 200.
+    """
+    repo = proj["repo"]
+    slug = repo.split("/")[-1]
+    name = proj.get("name", slug)
+    icon = proj.get("icon", "ti-folder")
+
+    cache_key = f"home:{slug}"
+    now = time.monotonic()
+    cached = _home_cache.get(cache_key)
+    if cached and now - cached[0] < _HOME_CACHE_TTL:
+        return cached[1]
+
+    def _idle() -> dict:
+        sentinel: dict = {
+            "name": name, "slug": slug, "icon": icon,
+            "status": "idle", "uat_count": 0, "backlog_count": 0,
+            "last_activity_at": None,
+        }
+        _home_cache[cache_key] = (now, sentinel)
+        return sentinel
+
+    try:
+        all_open = github_client.list_all_open_issues(repo_name=repo)
+    except Exception:
+        return _idle()
+
+    proj_running = [r for r in running_sprints if r["project"] == repo]
+    sprint_running_field: dict | None = None
+    if proj_running:
+        r0 = proj_running[0]
+        status_data = _sprint_statuses.get((r0["project"], r0["sprint_label"]), {})
+        start_ts = status_data.get("start_timestamp")
+        elapsed_sec = 0
+        if start_ts:
+            try:
+                start_dt = datetime.fromisoformat(start_ts.replace("Z", "+00:00"))
+                elapsed_sec = int((datetime.now(timezone.utc) - start_dt).total_seconds())
+            except Exception:
+                pass
+        sprint_running_field = {"label": r0["sprint_label"], "elapsed_sec": elapsed_sec}
+
+    uat_issues = [i for i in all_open if any(l["name"] == "UAT" for l in i.get("labels", []))]
+    backlog_issues = [i for i in all_open if github_client.classify_issue(i) == "backlog"]
+
+    if proj_running:
+        status = "running"
+    elif uat_issues:
+        status = "uat-pending"
+    else:
+        status = "idle"
+
+    last_activity_at: str | None = None
+    issue_timestamps = [i.get("updatedAt") for i in all_open if i.get("updatedAt")]
+    if issue_timestamps:
+        last_activity_at = max(issue_timestamps)
+
+    last_sprint_data: dict | None = None
+    seen_dirs: set[str] = set()
+    for sprints_dir in [
+        _commander_dir(_project_root_path(repo)) / "sprints",
+        SPRINTS_DIR,
+    ]:
+        key_str = str(sprints_dir.resolve())
+        if not sprints_dir.exists() or key_str in seen_dirs:
+            continue
+        seen_dirs.add(key_str)
+        summary_files = sorted(
+            sprints_dir.glob("*-summary-*.md"),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+        if summary_files and last_sprint_data is None:
+            try:
+                meta = _parse_summary_file(summary_files[0])
+                if meta.get("date"):
+                    sprint_ts = meta["date"] + "T00:00:00Z"
+                    if last_activity_at is None or sprint_ts > last_activity_at:
+                        last_activity_at = sprint_ts
+                last_sprint_data = {
+                    "sprint_num": meta.get("sprint_num"),
+                    "date": meta.get("date"),
+                    "status": meta.get("status"),
+                }
+            except Exception:
+                pass
+
+    result: dict = {
+        "name": name,
+        "slug": slug,
+        "icon": icon,
+        "status": status,
+        "uat_count": len(uat_issues),
+        "backlog_count": len(backlog_issues),
+        "last_activity_at": last_activity_at,
+    }
+    if sprint_running_field is not None:
+        result["sprint_running"] = sprint_running_field
+    if last_sprint_data is not None:
+        result["last_sprint"] = last_sprint_data
+
+    _home_cache[cache_key] = (now, result)
+    return result
+
+
+def _home_activity_feed(
+    all_open_by_repo: dict[str, list[dict]],
+    running_sprints: list[dict],
+    projects: list[dict],
+) -> list[dict]:
+    """Build top-5 activity events from open issues and sprint history."""
+    events: list[dict] = []
+
+    for repo, issues in all_open_by_repo.items():
+        slug = repo.split("/")[-1]
+        for issue in issues:
+            labels = {l["name"] for l in issue.get("labels", [])}
+            ts = issue.get("updatedAt") or issue.get("createdAt") or ""
+            if not ts:
+                continue
+            if "UAT" in labels:
+                events.append({
+                    "type": "ticket_moved_to_uat",
+                    "project": slug,
+                    "title": issue.get("title", ""),
+                    "sub": f"#{issue.get('number', '')}",
+                    "timestamp": ts,
+                    "link": issue.get("url", ""),
+                })
+            elif "need-rework" in labels:
+                events.append({
+                    "type": "ticket_needs_rework",
+                    "project": slug,
+                    "title": issue.get("title", ""),
+                    "sub": f"#{issue.get('number', '')}",
+                    "timestamp": ts,
+                    "link": issue.get("url", ""),
+                })
+
+    for r in running_sprints:
+        repo = r["project"]
+        slug = repo.split("/")[-1]
+        status_data = _sprint_statuses.get((repo, r["sprint_label"]), {})
+        start_ts = status_data.get("start_timestamp")
+        if start_ts:
+            events.append({
+                "type": "sprint_started",
+                "project": slug,
+                "title": f"{r['sprint_label']} started",
+                "sub": slug,
+                "timestamp": start_ts,
+                "link": f"https://github.com/{repo}/issues?q=label:{r['sprint_label']}",
+            })
+
+    seen_summaries: set[str] = set()
+    for proj in projects:
+        repo = proj["repo"]
+        slug = repo.split("/")[-1]
+        for sprints_dir in [
+            _commander_dir(_project_root_path(repo)) / "sprints",
+            SPRINTS_DIR,
+        ]:
+            if not sprints_dir.exists():
+                continue
+            for sf in sorted(
+                sprints_dir.glob("*-summary-*.md"),
+                key=lambda p: p.stat().st_mtime,
+                reverse=True,
+            )[:5]:
+                uid = str(sf.resolve())
+                if uid in seen_summaries:
+                    continue
+                seen_summaries.add(uid)
+                try:
+                    meta = _parse_summary_file(sf)
+                    if not meta.get("date") or meta.get("sprint_num") is None:
+                        continue
+                    event_ts = meta["date"] + "T00:00:00Z"
+                    sprint_label = f"sprint-{meta['sprint_num']}"
+                    raw_status = meta.get("status", "").lower()
+                    etype = "sprint_failed" if raw_status in ("failed", "cancelled") else "sprint_completed"
+                    link = f"https://github.com/{repo}/issues"
+                    state_file = sprints_dir / f"sprint-{meta['sprint_num']}-state.json"
+                    if state_file.exists():
+                        try:
+                            sd = json.loads(state_file.read_text())
+                            link = sd.get("summary_issue_url") or link
+                        except Exception:
+                            pass
+                    events.append({
+                        "type": etype,
+                        "project": slug,
+                        "title": f"{sprint_label} {raw_status or 'completed'}",
+                        "sub": f"{meta.get('shipped_count', 0)} tickets shipped",
+                        "timestamp": event_ts,
+                        "link": link,
+                    })
+                except Exception:
+                    pass
+
+    events.sort(key=lambda e: e.get("timestamp", ""), reverse=True)
+    return events[:5]
+
+
+@app.get("/api/home")
+def get_home():
+    """Aggregated Home page payload: stats, per-project summaries, and activity feed.
+
+    Per-project data is cached 30 s (key home:<slug>).
+    Always returns HTTP 200 — failing projects degrade to idle with 0 counts.
+    """
+    projects = projects_module.load_projects()
+    running_sprints = _all_sprints_running()
+
+    all_open_by_repo: dict[str, list[dict]] = {}
+    proj_data_list: list[dict] = []
+
+    for proj in projects:
+        repo = proj["repo"]
+        data = _home_project_data(proj, running_sprints)
+        proj_data_list.append(data)
+        try:
+            all_open_by_repo[repo] = github_client.list_all_open_issues(repo_name=repo)
+        except Exception:
+            all_open_by_repo[repo] = []
+
+    # stats.sprint_running
+    sprint_running_projects: list[dict] = []
+    now_utc = datetime.now(timezone.utc)
+    for r in running_sprints:
+        repo = r["project"]
+        slug = repo.split("/")[-1]
+        proj_cfg = next((p for p in projects if p["repo"] == repo), {})
+        status_data = _sprint_statuses.get((repo, r["sprint_label"]), {})
+        start_ts = status_data.get("start_timestamp")
+        elapsed_sec = 0
+        if start_ts:
+            try:
+                start_dt = datetime.fromisoformat(start_ts.replace("Z", "+00:00"))
+                elapsed_sec = int((now_utc - start_dt).total_seconds())
+            except Exception:
+                pass
+        sprint_running_projects.append({
+            "name": proj_cfg.get("name", slug),
+            "sprint_label": r["sprint_label"],
+            "elapsed_sec": elapsed_sec,
+        })
+
+    # stats.awaiting_uat
+    uat_total = 0
+    uat_project_set: set[str] = set()
+    oldest_uat_ts: str | None = None
+    oldest_age_sec: int | None = None
+
+    for repo, issues in all_open_by_repo.items():
+        for issue in issues:
+            if any(l["name"] == "UAT" for l in issue.get("labels", [])):
+                uat_total += 1
+                uat_project_set.add(repo)
+                ts = issue.get("updatedAt") or issue.get("createdAt")
+                if ts and (oldest_uat_ts is None or ts < oldest_uat_ts):
+                    oldest_uat_ts = ts
+
+    if oldest_uat_ts:
+        try:
+            oldest_dt = datetime.fromisoformat(oldest_uat_ts.replace("Z", "+00:00"))
+            oldest_age_sec = int((now_utc - oldest_dt).total_seconds())
+        except Exception:
+            pass
+
+    # stats.sprints_planned
+    running_labels_by_repo: dict[str, set[str]] = {}
+    for r in running_sprints:
+        running_labels_by_repo.setdefault(r["project"], set()).add(r["sprint_label"])
+
+    planned_count = 0
+    planned_tickets = 0
+    _sprint_re = re.compile(r"^sprint-\d+$")
+    for repo, issues in all_open_by_repo.items():
+        running_lbls = running_labels_by_repo.get(repo, set())
+        label_ticket_counts: dict[str, int] = {}
+        for issue in issues:
+            for lbl in issue.get("labels", []):
+                lname = lbl["name"]
+                if _sprint_re.match(lname) and lname not in running_lbls:
+                    label_ticket_counts[lname] = label_ticket_counts.get(lname, 0) + 1
+        planned_count += len(label_ticket_counts)
+        planned_tickets += sum(label_ticket_counts.values())
+
+    # stats.backlog
+    backlog_per_proj: list[dict] = []
+    total_backlog = 0
+    for proj in projects:
+        repo = proj["repo"]
+        issues = all_open_by_repo.get(repo, [])
+        bc = sum(1 for i in issues if github_client.classify_issue(i) == "backlog")
+        total_backlog += bc
+        if bc > 0:
+            backlog_per_proj.append({"name": proj.get("name", repo.split("/")[-1]), "count": bc})
+    backlog_per_proj.sort(key=lambda x: x["count"], reverse=True)
+
+    activity = _home_activity_feed(all_open_by_repo, running_sprints, projects)
+
+    return {
+        "stats": {
+            "sprint_running": {
+                "count": len(sprint_running_projects),
+                "projects": sprint_running_projects,
+            },
+            "awaiting_uat": {
+                "count": uat_total,
+                "projects": len(uat_project_set),
+                "oldest_age_sec": oldest_age_sec,
+            },
+            "sprints_planned": {
+                "count": planned_count,
+                "total_tickets": planned_tickets,
+            },
+            "backlog": {
+                "count": total_backlog,
+                "per_project": backlog_per_proj[:5],
+            },
+        },
+        "projects": proj_data_list,
+        "activity": activity,
+    }
+
+
+# ── sprint summary / history endpoints (AC-4 / AC-6 from #24) ────────────────
 
 @app.get("/api/sprint-history")
 def get_sprint_history():
@@ -1241,24 +2114,93 @@ def get_open_issues():
 
 
 class SprintLabelBody(BaseModel):
-    sprint: int
+    # Accepts either sprint_label (e.g. "sprint-3" or null for backlog) or
+    # the legacy sprint: int field for backward compatibility.
+    sprint_label: Optional[str] = None
+    sprint: Optional[int] = None
+    project: Optional[str] = None
 
 
 @app.post("/api/issues/{issue_id}/sprint-label")
 async def add_sprint_label(issue_id: int, body: SprintLabelBody):
-    """Add sprint-N label to an issue without removing existing labels."""
-    sprint_label = f"sprint-{body.sprint}"
+    """Assign a sprint label to an issue (replaces any existing sprint-N labels).
+
+    Accepts either:
+    - sprint_label: "sprint-N" string (or null/empty to remove sprint label)
+    - sprint: int (legacy; converted to "sprint-N")
+    """
+    # Resolve the sprint number from whichever field was provided
+    if body.sprint_label is not None:
+        raw = body.sprint_label.strip()
+        if raw == "" or raw == "backlog":
+            sprint_num = None
+        else:
+            m = re.match(r"^sprint-(\d+)$", raw)
+            if not m:
+                raise HTTPException(400, detail=f"Invalid sprint_label: {raw!r}")
+            sprint_num = int(m.group(1))
+    elif body.sprint is not None:
+        sprint_num = body.sprint
+    else:
+        raise HTTPException(400, detail="Provide sprint_label or sprint")
+
+    repo = body.project or None
     try:
-        github_client.ensure_sprint_label(body.sprint)
-        github_client.update_labels(issue_id, add=[sprint_label], remove=[])
-        github_client.invalidate("open_issues_body:")
-        github_client.invalidate("open_issues:")
-        github_client.invalidate("sprints:")
+        github_client.assign_sprint(issue_id, sprint_num, repo_name=repo)
     except subprocess.CalledProcessError as e:
         raise _gh_error(e)
     except ValueError as e:
         raise HTTPException(400, detail=str(e))
     return {"ok": True}
+
+
+class BatchLabelChange(BaseModel):
+    issue_num: int
+    sprint_label: str  # e.g. "sprint-3" or "backlog"
+
+
+class BatchLabelsBody(BaseModel):
+    changes: list[BatchLabelChange]
+    project: Optional[str] = None
+
+
+@app.post("/api/sprints/batch-labels")
+async def batch_sprint_labels(body: BatchLabelsBody):
+    """Batch-move tickets to their target sprint labels.
+
+    Accepts: {"changes": [{"issue_num": N, "sprint_label": "sprint-3"}, ...], "project": "owner/repo"}
+    Returns: {"applied": N, "failed": N, "errors": [...]}
+    """
+    applied = 0
+    failed = 0
+    errors: list[str] = []
+
+    repo = body.project or None
+
+    for change in body.changes:
+        raw = change.sprint_label.strip()
+        if raw == "" or raw == "backlog":
+            sprint_num = None
+        else:
+            m = re.match(r"^sprint-(\d+)$", raw)
+            if not m:
+                errors.append(f"#{change.issue_num}: invalid sprint_label {raw!r}")
+                failed += 1
+                continue
+            sprint_num = int(m.group(1))
+
+        try:
+            github_client.assign_sprint(change.issue_num, sprint_num, repo_name=repo)
+            applied += 1
+        except subprocess.CalledProcessError as e:
+            err_msg = e.stderr.strip() if e.stderr else str(e)
+            errors.append(f"#{change.issue_num}: {err_msg}")
+            failed += 1
+        except Exception as e:
+            errors.append(f"#{change.issue_num}: {e}")
+            failed += 1
+
+    return {"applied": applied, "failed": failed, "errors": errors}
 
 
 _SPRINT_LABEL_RE = re.compile(r"^sprint-\d+$")
@@ -1493,6 +2435,7 @@ class SprintOrderBody(BaseModel):
 class SprintCreateBody(BaseModel):
     project: str
     sprint_number: int | None = None
+    goal: str | None = None
 
 
 class SprintGoalBody(BaseModel):
@@ -1943,9 +2886,390 @@ def kill_sprint(sprint_label: str, project: str):
     return {"ok": True}
 
 
+@app.get("/api/sprints/{sprint_label}/dispatch-log")
+def get_dispatch_log(sprint_label: str, project: str, tail_lines: int = 200):
+    """Return the last N lines of the most recent sprint-run-<label>-*.log."""
+    if not _SPRINT_LABEL_RE.match(sprint_label):
+        raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")
+    project_root = _project_root_path(project)
+    log_dir = _commander_dir(project_root) / "logs"
+    tail_lines = max(1, min(tail_lines, 2000))
+
+    candidates = sorted(
+        log_dir.glob(f"sprint-run-{sprint_label}-*.log"),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    ) if log_dir.exists() else []
+
+    if not candidates:
+        return {"found": False, "log_dir": str(log_dir), "tail": ""}
+
+    log_path = candidates[0]
+    try:
+        lines = log_path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError as e:
+        return {"found": False, "log_dir": str(log_dir), "tail": "", "error": str(e)}
+
+    tail = "\n".join(lines[-tail_lines:])
+    mtime = datetime.fromtimestamp(log_path.stat().st_mtime, tz=timezone.utc).isoformat()
+    return {"found": True, "path": str(log_path), "tail": tail, "mtime": mtime}
+
+
+@app.get("/api/sprints/{sprint_label}/issue/{issue_num}/log")
+def get_issue_log(sprint_label: str, project: str, issue_num: int, tail_lines: int = 200):
+    """Return the last N lines of the most recent sprint-issue-<N>.log."""
+    if not _SPRINT_LABEL_RE.match(sprint_label):
+        raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")
+    tail_lines = max(1, min(tail_lines, 2000))
+
+    project_root = _project_root_path(project)
+    commander_logs = _commander_dir(project_root) / "logs"
+
+    # Try to read logs_dir from sprint.yaml; fall back to commander/logs
+    cfg_logs_dir: Optional[Path] = None
+    try:
+        import yaml as _yaml  # type: ignore[import]
+        yaml_path = _commander_dir(project_root) / "sprint.yaml"
+        if yaml_path.exists():
+            data = _yaml.safe_load(yaml_path.read_text(encoding="utf-8")) or {}
+            raw = (data.get("paths") or {}).get("logs_dir", "").strip()
+            if raw:
+                p = Path(raw)
+                cfg_logs_dir = p if p.is_absolute() else yaml_path.parent / p
+    except Exception:
+        pass
+
+    candidates_checked: list[str] = []
+    log_path: Optional[Path] = None
+
+    for candidate_dir in filter(None, [cfg_logs_dir, commander_logs]):
+        p = candidate_dir / f"sprint-issue-{issue_num}.log"
+        candidates_checked.append(str(p))
+        if p.exists():
+            log_path = p
+            break
+
+    if log_path is None:
+        return {"found": False, "candidates": candidates_checked, "tail": ""}
+
+    try:
+        lines = log_path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError as e:
+        return {"found": False, "candidates": candidates_checked, "tail": "", "error": str(e)}
+
+    tail = "\n".join(lines[-tail_lines:])
+    mtime = datetime.fromtimestamp(log_path.stat().st_mtime, tz=timezone.utc).isoformat()
+    return {"found": True, "path": str(log_path), "tail": tail, "mtime": mtime}
+
+
+# ── Sprint live snapshot + SSE stream (issue #224) ───────────────────────────
+
+def _parse_log_lines_for_live(lines: list[str], limit: int = 50) -> list[dict]:
+    """Parse log lines into structured log entries for the live panel.
+
+    Classifies each line into one of: dispatch, success, warn, fail, event.
+    Returns the last `limit` entries (oldest-first).
+    """
+    entries: list[dict] = []
+    for raw in lines:
+        stripped = raw.strip()
+        if not stripped:
+            continue
+
+        # Determine line type by content heuristics
+        if (
+            stripped.startswith("→")
+            or stripped.startswith("---")
+            or "start_feature.py" in stripped
+            or "Dispatching" in stripped
+        ):
+            line_type = "dispatch"
+        elif (
+            stripped.startswith("✓")
+            or "promoted" in stripped.lower()
+            or "merged" in stripped.lower()
+            or "completed" in stripped.lower()
+            or "done" in stripped.lower()
+        ):
+            line_type = "success"
+        elif (
+            "warning" in stripped.lower()
+            or stripped.lower().startswith("warn")
+            or "[retry]" in stripped.lower()
+        ):
+            line_type = "warn"
+        elif (
+            "error" in stripped.lower()
+            or "fail" in stripped.lower()
+            or "skipped" in stripped.lower()
+            or stripped.lower().startswith("err")
+        ):
+            line_type = "fail"
+        else:
+            line_type = "event"
+
+        # Use the current UTC time formatted as HH:MM:SS — we don't have per-line
+        # timestamps in the log, so we label with a placeholder "—"; callers may
+        # pre-process the raw lines before calling this function.
+        entries.append({"timestamp": "—", "type": line_type, "message": stripped})
+
+    return entries[-limit:]
+
+
+def _find_latest_sprint_log(log_dir: Path, sprint_label: str) -> Optional[Path]:
+    """Return the most recently modified sprint-run-<label>-*.log file, or None."""
+    if not log_dir.exists():
+        return None
+    candidates = sorted(
+        log_dir.glob(f"sprint-run-{sprint_label}-*.log"),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+    return candidates[0] if candidates else None
+
+
+@app.get("/api/sprints/{sprint_label}/live")
+def get_sprint_live_snapshot(sprint_label: str, project: str):
+    """Return a JSON snapshot of the live running sprint.
+
+    Response shape:
+    {
+      "time_spent_sec": <int>,
+      "started_at": "<ISO8601>",
+      "current_ticket": {"number": N, "title": "..."} | null,
+      "active_agent": {"name": "coder"|"tester", "model": "...", "pid": N} | null,
+      "recent_log_lines": [{"timestamp": "HH:MM:SS", "type": "...", "message": "..."}, ...]
+    }
+    recent_log_lines contains the last 50 lines.
+    """
+    if not _SPRINT_LABEL_RE.match(sprint_label):
+        raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")
+
+    project_root = _project_root_path(project)
+    commander = _commander_dir(project_root)
+
+    # ── Time spent + started_at from _sprint_statuses in-memory dict ──────────
+    status_key = (project, sprint_label)
+    status_data = _sprint_statuses.get(status_key, {})
+
+    started_at_str: Optional[str] = status_data.get("start_timestamp")
+    started_at_dt: Optional[datetime] = None
+    if started_at_str:
+        try:
+            started_at_dt = datetime.fromisoformat(started_at_str.rstrip("Z"))
+            if started_at_dt.tzinfo is None:
+                started_at_dt = started_at_dt.replace(tzinfo=timezone.utc)
+        except Exception:
+            started_at_dt = None
+
+    now_utc = datetime.now(timezone.utc)
+    time_spent_sec: int = 0
+    if started_at_dt:
+        time_spent_sec = max(0, int((now_utc - started_at_dt).total_seconds()))
+
+    # ── current_ticket: the most-recent in-progress issue from sprint status ──
+    current_ticket: Optional[dict] = None
+    issues = status_data.get("issues", [])
+    # Prefer the last issue with status "in-progress"; fall back to last non-done issue
+    in_progress = [i for i in issues if i.get("status") == "in-progress"]
+    if in_progress:
+        iss = in_progress[-1]
+        current_ticket = {"number": iss.get("number"), "title": iss.get("title", "")}
+    else:
+        pending = [i for i in issues if i.get("status") not in ("done", "skipped")]
+        if pending:
+            iss = pending[0]
+            current_ticket = {"number": iss.get("number"), "title": iss.get("title", "")}
+
+    # ── Outcome counts for the stat strip (issue #256) ───────────────────────
+    done_count    = sum(1 for i in issues if i.get("status") == "done")
+    failed_count  = sum(1 for i in issues if i.get("agent_status") == "failed")
+    # Skipped = status==skipped but NOT agent_status==failed (true skips: preflight, dry-run)
+    skipped_count = sum(
+        1 for i in issues
+        if i.get("status") == "skipped" and i.get("agent_status") != "failed"
+    )
+    total_count   = len(issues)
+    complete_count = done_count + failed_count + skipped_count  # all terminal states
+    pending_count  = total_count - complete_count
+
+    # ── Est. remaining (issue #256) ──────────────────────────────────────────
+    # Primary source: sum of per-ticket estimates (minutes) for non-terminal tickets.
+    # Fallback: pending_count × avg wall-clock time per completed ticket (minutes).
+    estimates: dict = status_data.get("estimates", {})
+    est_remaining_minutes: Optional[int] = None
+
+    if estimates and total_count > 0:
+        # estimates keys may be int or str (JSON serialises int keys as strings)
+        rem_minutes = 0
+        has_any_estimate = False
+        for iss in issues:
+            num = iss.get("number")
+            terminal = iss.get("status") in ("done", "skipped")
+            est_entry = estimates.get(str(num)) or estimates.get(num)
+            if est_entry:
+                has_any_estimate = True
+                if not terminal:
+                    rem_minutes += int(est_entry.get("minutes", 0))
+        if has_any_estimate:
+            est_remaining_minutes = rem_minutes
+
+    if est_remaining_minutes is None and complete_count > 0 and pending_count > 0:
+        # Fallback: avg wall-clock per completed ticket × pending count
+        wall_secs = status_data.get("wall_clock_secs", 0.0)
+        avg_secs = wall_secs / complete_count if complete_count > 0 else 0
+        est_remaining_minutes = max(0, round(avg_secs * pending_count / 60))
+
+    # AC: No stat cell is left blank — zero is acceptable.
+    # If the sprint is active but estimates aren't available yet, show 0 rather than null.
+    if est_remaining_minutes is None and total_count > 0:
+        est_remaining_minutes = 0
+
+    # ── active_agent: derive from sprint state JSON (coder/tester transition) ──
+    active_agent: Optional[dict] = None
+    m = re.search(r"(\d+)", sprint_label)
+    n = m.group(1) if m else sprint_label
+    state_path = commander / "sprints" / f"sprint-{n}-state.json"
+    if state_path.exists():
+        try:
+            state_data = json.loads(state_path.read_text(encoding="utf-8"))
+            # Find the issue currently being processed (has coder_started but no tester_finished)
+            for iss in state_data.get("issues", []):
+                if iss.get("coder_started_at") and not iss.get("tester_finished_at"):
+                    agent_name = "tester" if iss.get("tester_started_at") else "coder"
+                    active_agent = {"name": agent_name, "model": None, "pid": None}
+                    break
+        except Exception:
+            pass
+
+    # PID from PID file
+    pid_file = commander / "sprints" / f"{sprint_label}-pid"
+    if pid_file.exists():
+        try:
+            pid_val = int(pid_file.read_text(encoding="utf-8").strip())
+            if active_agent:
+                active_agent["pid"] = pid_val
+            else:
+                active_agent = {"name": "coder", "model": None, "pid": pid_val}
+        except Exception:
+            pass
+
+    # ── recent_log_lines: last 50 lines from sprint run log ──────────────────
+    log_dir = commander / "logs"
+    recent_log_lines: list[dict] = []
+    log_path = _find_latest_sprint_log(log_dir, sprint_label)
+    if log_path:
+        try:
+            raw_lines = log_path.read_text(encoding="utf-8", errors="replace").splitlines()
+            recent_log_lines = _parse_log_lines_for_live(raw_lines, limit=50)
+        except OSError:
+            pass
+
+    return {
+        "time_spent_sec": time_spent_sec,
+        "started_at": started_at_str,
+        "current_ticket": current_ticket,
+        "active_agent": active_agent,
+        "recent_log_lines": recent_log_lines,
+        # Stat strip fields (issue #256)
+        "done_count":           done_count,
+        "failed_count":         failed_count,
+        "skipped_count":        skipped_count,
+        "pending_count":        pending_count,
+        "total_count":          total_count,
+        "complete_count":       complete_count,
+        "est_remaining_minutes": est_remaining_minutes,
+    }
+
+
+@app.get("/api/sprints/{sprint_label}/live/stream")
+async def get_sprint_live_stream(sprint_label: str, project: str, request: Request):
+    """SSE endpoint that streams incremental log-line events as they occur.
+
+    Events emitted:
+    - event: log_line   data: {"timestamp": "...", "type": "...", "message": "..."}
+    - event: complete   data: {"reason": "stopped"}   (when sprint ends)
+    - keepalive comment every 15 s while idle
+
+    Data source: tails the most recent sprint-run-<label>-*.log file.
+    """
+    if not _SPRINT_LABEL_RE.match(sprint_label):
+        raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")
+
+    project_root = _project_root_path(project)
+    commander = _commander_dir(project_root)
+    log_dir = commander / "logs"
+
+    async def _stream():
+        # Find the current log file — retry briefly in case it hasn't appeared yet
+        log_path: Optional[Path] = None
+        for _ in range(20):  # up to 2 seconds
+            log_path = _find_latest_sprint_log(log_dir, sprint_label)
+            if log_path:
+                break
+            await asyncio.sleep(0.1)
+
+        if not log_path:
+            yield f"event: complete\ndata: {json.dumps({'reason': 'no_log_file'})}\n\n"
+            return
+
+        # Seek to end of file so we only stream new lines
+        try:
+            file_size = log_path.stat().st_size
+        except OSError:
+            file_size = 0
+
+        current_offset = file_size
+
+        while True:
+            if await request.is_disconnected():
+                return
+
+            # Check if sprint is still running
+            is_running = _is_sprint_running(project_root, sprint_label)
+
+            # Read any new bytes from the log file
+            try:
+                file_size = log_path.stat().st_size
+            except OSError:
+                file_size = current_offset
+
+            if file_size > current_offset:
+                try:
+                    with open(log_path, "r", encoding="utf-8", errors="replace") as fh:
+                        fh.seek(current_offset)
+                        new_text = fh.read(file_size - current_offset)
+                    current_offset = file_size
+
+                    new_lines = new_text.splitlines()
+                    parsed = _parse_log_lines_for_live(new_lines, limit=len(new_lines))
+                    for entry in parsed:
+                        yield f"event: log_line\ndata: {json.dumps(entry)}\n\n"
+                except OSError:
+                    pass
+
+            if not is_running:
+                yield f"event: complete\ndata: {json.dumps({'reason': 'stopped'})}\n\n"
+                return
+
+            await asyncio.sleep(0.5)
+
+    return StreamingResponse(
+        _stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
 @app.post("/api/sprints/create")
 async def create_sprint_label(body: SprintCreateBody):
-    """Create a sprint-N label for a project. Uses sprint_number if provided, else auto-increments."""
+    """Create a sprint-N label for a project. Uses sprint_number if provided, else auto-increments.
+
+    Optionally accepts a goal string (min 10 chars) which is persisted to
+    .commander/sprints/<label>-goal.txt after the label is created.
+    """
+    if body.goal is not None and len(body.goal.strip()) < 10:
+        raise HTTPException(400, detail="Sprint goal must be at least 10 characters")
     try:
         sprints = github_client.list_sprints(repo_name=body.project)
         if body.sprint_number is not None:
@@ -1962,7 +3286,14 @@ async def create_sprint_label(body: SprintCreateBody):
         raise _gh_error(e)
     except ValueError as e:
         raise HTTPException(400, detail=str(e))
-    return {"ok": True, "sprint_label": f"sprint-{target_num}"}
+    sprint_label = f"sprint-{target_num}"
+    # Persist goal if provided
+    if body.goal is not None:
+        project_root = _project_root_path(body.project)
+        goal_path = _sprint_goal_path(project_root, sprint_label)
+        goal_path.parent.mkdir(parents=True, exist_ok=True)
+        goal_path.write_text(body.goal.strip(), encoding="utf-8")
+    return {"ok": True, "sprint_label": sprint_label}
 
 
 class SprintDeleteBody(BaseModel):
@@ -2071,6 +3402,225 @@ def get_sprint_estimate(sprint_label: str, project: str):
         raise HTTPException(500, detail=f"Could not read estimate file: {e}")
 
     return data
+
+
+@app.get("/api/sprints/{sprint_label}/state")
+def get_sprint_state(sprint_label: str, project: str):
+    """Return timing data from sprint-N-state.json for duration display (issue #212).
+
+    Returns:
+      - wall_clock_secs: total sprint wall-clock time
+      - issues: list of {number, duration_secs, failed} for each issue that has
+                timing data (coder_started_at present); duration_secs is computed
+                from coder_started_at to tester_finished_at (or status_changed_at
+                as fallback).  failed=true when issue status is 'skipped' or
+                agent_status is 'failed'.
+    """
+    if not _SPRINT_LABEL_RE.match(sprint_label):
+        raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")
+
+    project_root = _project_root_path(project)
+    commander = _commander_dir(project_root)
+
+    m = re.search(r"(\d+)", sprint_label)
+    n = m.group(1) if m else sprint_label
+
+    state_path = commander / "sprints" / f"sprint-{n}-state.json"
+
+    if not state_path.exists():
+        raise HTTPException(404, detail=f"State not found for {sprint_label!r}")
+
+    try:
+        state_data = json.loads(state_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as e:
+        raise HTTPException(500, detail=f"Could not read state file: {e}")
+
+    def _parse_iso(s: Optional[str]) -> Optional[float]:
+        if not s:
+            return None
+        try:
+            dt = datetime.fromisoformat(s.rstrip("Z"))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt.timestamp()
+        except Exception:
+            return None
+
+    issue_durations = []
+    for iss in state_data.get("issues", []):
+        start_ts = _parse_iso(iss.get("coder_started_at"))
+        if start_ts is None:
+            continue  # no timing data for this ticket
+        end_ts = _parse_iso(iss.get("tester_finished_at")) or _parse_iso(iss.get("status_changed_at"))
+        if end_ts is None:
+            continue
+        duration_secs = max(0.0, end_ts - start_ts)
+        failed = (
+            iss.get("status") == "skipped"
+            or iss.get("agent_status") == "failed"
+            or iss.get("failure_reason") is not None
+        )
+        issue_durations.append({
+            "number":       iss["number"],
+            "duration_secs": round(duration_secs),
+            "failed":       failed,
+        })
+
+    return {
+        "sprint_label":   sprint_label,
+        "wall_clock_secs": state_data.get("wall_clock_secs", 0.0),
+        "issues":         issue_durations,
+    }
+
+
+@app.get("/api/sprints/{sprint_label}/outcome")
+def get_sprint_outcome(sprint_label: str, project: str):
+    """Return frozen outcome data for a completed or stopped sprint.
+
+    Reads sprint-N-state.json plus the latest sprint-run-<label>-*.log to produce:
+      - sprint_status: "completed" | "stopped" | None (still running or not found)
+      - counts: { done, failed, skipped }
+      - wall_clock_secs: total duration
+      - ended_at: ISO 8601 timestamp of sprint end (from last issue status_changed_at)
+      - issues: list of { number, title, outcome, elapsed_secs } for each issue
+      - log_line_count: number of lines in the archived run log
+    """
+    if not _SPRINT_LABEL_RE.match(sprint_label):
+        raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")
+
+    project_root = _project_root_path(project)
+    commander = _commander_dir(project_root)
+
+    m = re.search(r"(\d+)", sprint_label)
+    n = m.group(1) if m else sprint_label
+
+    state_path = commander / "sprints" / f"sprint-{n}-state.json"
+    if not state_path.exists():
+        raise HTTPException(404, detail=f"Outcome not found for {sprint_label!r}")
+
+    try:
+        state_data = json.loads(state_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as e:
+        raise HTTPException(500, detail=f"Could not read state file: {e}")
+
+    # If sprint is still actively running, return 404 so UI doesn't freeze it
+    if _is_sprint_running(project_root, sprint_label):
+        raise HTTPException(404, detail=f"Sprint {sprint_label!r} is still running")
+
+    def _parse_iso(s: Optional[str]) -> Optional[float]:
+        if not s:
+            return None
+        try:
+            dt = datetime.fromisoformat(s.rstrip("Z"))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt.timestamp()
+        except Exception:
+            return None
+
+    def _fmt_iso(ts: Optional[float]) -> Optional[str]:
+        if ts is None:
+            return None
+        return datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%H:%M")
+
+    # Derive sprint status from summary file (most authoritative)
+    sprint_status: Optional[str] = None
+    sprints_dir = commander / "sprints"
+    for sf in sorted(sprints_dir.glob(f"sprint-{n}-summary-*.md"), key=lambda p: p.stat().st_mtime, reverse=True):
+        try:
+            meta = _parse_summary_file(sf)
+            raw = (meta.get("status") or "").lower()
+            if raw in ("complete", "completed"):
+                sprint_status = "completed"
+            elif raw in ("stopped", "failed", "cancelled"):
+                sprint_status = "stopped"
+        except Exception:
+            pass
+        break
+
+    # Fallback: derive from issue statuses — if all are done/skipped and no failures, completed
+    issues_raw = state_data.get("issues", [])
+    if sprint_status is None and issues_raw:
+        has_pending = any(i.get("status") == "pending" for i in issues_raw)
+        has_failed = any(
+            i.get("agent_status") == "failed" or i.get("failure_reason")
+            for i in issues_raw
+        )
+        if not has_pending:
+            sprint_status = "stopped" if has_failed else "completed"
+
+    if sprint_status is None:
+        raise HTTPException(404, detail=f"Cannot determine outcome for {sprint_label!r}")
+
+    # Build issue outcome list
+    result_issues = []
+    ended_ts: Optional[float] = None
+    for iss in issues_raw:
+        start_ts = _parse_iso(iss.get("coder_started_at"))
+        end_ts = (
+            _parse_iso(iss.get("tester_finished_at"))
+            or _parse_iso(iss.get("status_changed_at"))
+        )
+        elapsed_secs = None
+        if start_ts is not None and end_ts is not None:
+            elapsed_secs = max(0.0, end_ts - start_ts)
+
+        if end_ts and (ended_ts is None or end_ts > ended_ts):
+            ended_ts = end_ts
+
+        iss_status = iss.get("status", "pending")
+        iss_agent = iss.get("agent_status")
+        failure_reason = iss.get("failure_reason")
+
+        if iss_status == "done":
+            outcome = "done"
+        elif iss_agent == "failed" or failure_reason:
+            outcome = "failed"
+        elif iss_status == "skipped":
+            outcome = "skipped"
+        else:
+            outcome = "skipped"
+
+        result_issues.append({
+            "number":       iss.get("number"),
+            "title":        iss.get("title", ""),
+            "outcome":      outcome,
+            "elapsed_secs": round(elapsed_secs) if elapsed_secs is not None else None,
+            "failure_reason": failure_reason,
+        })
+
+    # Counts
+    done_count    = sum(1 for i in result_issues if i["outcome"] == "done")
+    failed_count  = sum(1 for i in result_issues if i["outcome"] == "failed")
+    skipped_count = sum(1 for i in result_issues if i["outcome"] == "skipped")
+
+    # Log line count from most recent run log
+    log_line_count = 0
+    log_dir = commander / "logs"
+    if log_dir.exists():
+        candidates = sorted(
+            log_dir.glob(f"sprint-run-{sprint_label}-*.log"),
+            key=lambda p: p.stat().st_mtime, reverse=True,
+        )
+        if candidates:
+            try:
+                log_line_count = len(candidates[0].read_text(encoding="utf-8", errors="replace").splitlines())
+            except OSError:
+                pass
+
+    return {
+        "sprint_label":   sprint_label,
+        "sprint_status":  sprint_status,
+        "counts": {
+            "done":    done_count,
+            "failed":  failed_count,
+            "skipped": skipped_count,
+        },
+        "wall_clock_secs": state_data.get("wall_clock_secs", 0.0),
+        "ended_at":        _fmt_iso(ended_ts),
+        "issues":          result_issues,
+        "log_line_count":  log_line_count,
+    }
 
 
 class SprintRerunBody(BaseModel):
@@ -3694,6 +5244,32 @@ def promote_to_master(body: PromoteBody):
     else:
         err = result.stderr.strip() or result.stdout.strip() or "GitHub API failure"
         raise HTTPException(502, detail=err)
+
+
+# ── Static asset routes with long-lived cache headers (issue #249) ────────────
+# Explicit routes for JS and CSS files must appear before the StaticFiles mount.
+# Browsers can cache these indefinitely because the build hash in the query
+# string changes whenever the file content changes.
+
+@app.get("/static/{filename:path}")
+async def static_assets(filename: str):
+    """Serve static files with appropriate cache headers.
+
+    JS and CSS files get Cache-Control: public, max-age=31536000, immutable
+    because index.html always references them with a versioned query string.
+    Other files fall through to a plain FileResponse with no special caching.
+    """
+    file_path = STATIC_DIR / filename
+    if not file_path.exists() or not file_path.is_file():
+        raise HTTPException(status_code=404, detail="Not found")
+
+    ext = file_path.suffix.lower()
+    if ext in (".js", ".css"):
+        return FileResponse(
+            file_path,
+            headers={"Cache-Control": "public, max-age=31536000, immutable"},
+        )
+    return FileResponse(file_path)
 
 
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")

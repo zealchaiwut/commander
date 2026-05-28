@@ -524,6 +524,22 @@ class FailureCategory:
     GATE_FAIL        = "GATE_FAIL"
     TESTER_REJECTED  = "TESTER_REJECTED"
     RETRY_EXHAUSTED  = "RETRY_EXHAUSTED"
+    # Fine-grained logic failure categories (issue #239)
+    CODER_NO_WORK    = "CODER_NO_WORK"
+    MERGE_CONFLICT   = "MERGE_CONFLICT"
+    LINT_FAIL        = "LINT_FAIL"
+    PYTEST_FAIL      = "PYTEST_FAIL"
+
+
+# Logic failures signal bad code/spec and warrant needs-rework label.
+# Infrastructure failures (CRASH, HANG, RETRY_EXHAUSTED) are transient and do not.
+_LOGIC_FAILURE_CATEGORIES: frozenset[str] = frozenset({
+    FailureCategory.TESTER_REJECTED,
+    FailureCategory.CODER_NO_WORK,
+    FailureCategory.MERGE_CONFLICT,
+    FailureCategory.LINT_FAIL,
+    FailureCategory.PYTEST_FAIL,
+})
 
 
 # ── alert modes ───────────────────────────────────────────────────────────────
@@ -1006,6 +1022,44 @@ def _get_issue_labels(issue_num: int, repo_name: Optional[str] = None) -> set[st
         return {lbl["name"] for lbl in data.get("labels", [])}
     except Exception:
         return set()
+
+
+def _apply_needs_rework_label(
+    issue_num: int,
+    category: Optional[str],
+    cfg: Optional["SprintConfig"] = None,
+) -> None:
+    """Apply the need-rework label via update_ticket.py (best-effort).
+
+    Only called for logic failure categories; exceptions are caught and printed
+    as warnings so a missing label never breaks the sprint.
+    """
+    if category not in _LOGIC_FAILURE_CATEGORIES:
+        return
+
+    scripts_dir = cfg.scripts_dir if cfg is not None else SCRIPTS_DIR
+    update_script = scripts_dir / "update_ticket.py"
+    cmd = [
+        sys.executable, str(update_script),
+        "--issue", str(issue_num),
+        "--status", "needs-rework",
+        "--force",
+    ]
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        if result.returncode in (0, 2):
+            # exit 2 means label ops partially failed but a warning comment was posted
+            print(f"  [needs-rework] label applied for #{issue_num} ({category})")
+        else:
+            print(
+                f"  [needs-rework] WARNING: update_ticket.py exited {result.returncode} "
+                f"for #{issue_num}",
+                file=sys.stderr,
+            )
+            if result.stderr:
+                print(f"  [needs-rework] {result.stderr.strip()[:400]}", file=sys.stderr)
+    except Exception as e:
+        print(f"  [needs-rework] WARNING: failed to apply label for #{issue_num}: {e}", file=sys.stderr)
 
 
 def _add_blocked_label(issue_num: int, reason: str, repo_name: Optional[str] = None) -> None:
@@ -1574,9 +1628,16 @@ def handle_post_tester(
     else:
         failed = next((r for r in results if not r.passed), None)
         gate_name = failed.gate if failed else "unknown"
+        # Map gate name to fine-grained failure category for needs-rework logic
+        gate_category_map = {
+            "pytest":        FailureCategory.PYTEST_FAIL,
+            "lint":          FailureCategory.LINT_FAIL,
+            "merge-preview": FailureCategory.MERGE_CONFLICT,
+        }
+        gate_category = gate_category_map.get(gate_name, FailureCategory.GATE_FAIL)
         return (False,
                 f"Issue #{issue_num}: gate failed ({gate_name})",
-                FailureCategory.GATE_FAIL)
+                gate_category)
 
 
 # ── agent dispatch helpers ────────────────────────────────────────────────────
@@ -1718,6 +1779,10 @@ def _dispatch_coder(
         sub_env["COMMANDER_APP_PORT"] = str(chosen_port)
         print(f"  [port] COMMANDER_APP_PORT={chosen_port} injected into coder env")
 
+    # Pre-touch so the dispatch-log endpoint always has a file to read.
+    if not log_path.exists():
+        log_path.write_text("", encoding="utf-8")
+
     for attempt in range(_RATE_LIMIT_MAX_RETRIES + 1):
         open_mode = "w" if attempt == 0 else "a"
         try:
@@ -1730,14 +1795,38 @@ def _dispatch_coder(
                     env=sub_env,
                 )
         except FileNotFoundError:
-            # claude CLI not available -- treat as stub success for testing
-            print("  [coder] claude CLI not found -- stub success")
-            if on_running is not None:
-                try:
-                    on_running()
-                except Exception:
-                    pass
-            return True, None
+            _allow_stub = os.environ.get("COMMANDER_ALLOW_STUB_SUCCESS", "") == "1"
+            if _allow_stub:
+                print("  [coder] claude CLI not found -- stub success")
+                if on_running is not None:
+                    try:
+                        on_running()
+                    except Exception:
+                        pass
+                return True, None
+            # Production: log the error and return a real failure so the stall
+            # warning shows "claude CLI not found" instead of silently succeeding.
+            err_msg = (
+                f"[coder] ERROR: claude CLI not found for issue #{issue_num}.\n"
+                f"PATH={sub_env.get('PATH', '<empty>')}\n"
+                "Sprint cannot proceed. Install claude CLI or set COMMANDER_ALLOW_STUB_SUCCESS=1 for testing.\n"
+            )
+            print(err_msg, flush=True)
+            try:
+                with log_path.open("a") as lf:
+                    lf.write(err_msg)
+            except OSError:
+                pass
+            dispatch_alerts(
+                alert_modes,
+                title=f"Issue #{issue_num}: claude CLI not found",
+                body=f"_dispatch_coder failed to spawn 'claude' subprocess: file not found. PATH={sub_env.get('PATH', '<empty>')}. Sprint cannot proceed.",
+                issue_num=issue_num,
+                category=FailureCategory.CRASH,
+                cfg=cfg,
+                repo=eff_repo,
+            )
+            return False, FailureCategory.CRASH
 
         if on_running is not None:
             try:
@@ -1841,6 +1930,9 @@ def _dispatch_tester(
     _post_agent_event(f"tester:issue-{issue_num}", api_url=api_url)
 
     log_path = _issue_log_path(issue_num, cfg=cfg)
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    if not log_path.exists():
+        log_path.write_text("", encoding="utf-8")
 
     # Build prompt
     if cfg and cfg.tester_prompt_template:
@@ -1908,13 +2000,36 @@ def _dispatch_tester(
                     env=sub_env,
                 )
         except FileNotFoundError:
-            print("  [tester] claude CLI not found -- stub success")
-            if on_running is not None:
-                try:
-                    on_running()
-                except Exception:
-                    pass
-            return 0, None
+            _allow_stub = os.environ.get("COMMANDER_ALLOW_STUB_SUCCESS", "") == "1"
+            if _allow_stub:
+                print("  [tester] claude CLI not found -- stub success")
+                if on_running is not None:
+                    try:
+                        on_running()
+                    except Exception:
+                        pass
+                return 0, None
+            err_msg = (
+                f"[tester] ERROR: claude CLI not found for issue #{issue_num}.\n"
+                f"PATH={sub_env.get('PATH', '<empty>')}\n"
+                "Sprint cannot proceed. Install claude CLI or set COMMANDER_ALLOW_STUB_SUCCESS=1 for testing.\n"
+            )
+            print(err_msg, flush=True)
+            try:
+                with log_path.open("a") as lf:
+                    lf.write(err_msg)
+            except OSError:
+                pass
+            dispatch_alerts(
+                alert_modes,
+                title=f"Issue #{issue_num}: claude CLI not found",
+                body=f"_dispatch_tester failed to spawn 'claude' subprocess: file not found. PATH={sub_env.get('PATH', '<empty>')}. Sprint cannot proceed.",
+                issue_num=issue_num,
+                category=FailureCategory.CRASH,
+                cfg=cfg,
+                repo=eff_repo,
+            )
+            return -1, FailureCategory.CRASH
 
         if on_running is not None:
             try:
@@ -2003,6 +2118,10 @@ def _follow_up_action(category: Optional[str]) -> str:
         FailureCategory.GATE_FAIL:       "Review the gate output in the GitHub comment. Fix failing tests or linting errors.",
         FailureCategory.TESTER_REJECTED: "The tester did not advance the issue to UAT. Review the tester log and re-run tester.",
         FailureCategory.RETRY_EXHAUSTED: "Max retries reached. Manually investigate and fix the issue.",
+        FailureCategory.CODER_NO_WORK:   "Coder produced no feature branch. Review the AC and re-run the coder.",
+        FailureCategory.PYTEST_FAIL:     "Pytest gate failed. Review the GitHub comment, fix the failing tests, and re-run.",
+        FailureCategory.LINT_FAIL:       "Lint gate failed. Fix the ruff errors noted in the GitHub comment and re-run.",
+        FailureCategory.MERGE_CONFLICT:  "Merge-preview gate detected conflicts. Resolve conflicts against develop and re-run.",
     }
     return mapping.get(category or "", "Review the issue manually.")
 
@@ -3660,6 +3779,33 @@ def run_sprint(
                 cfg=cfg,
                 repo=eff_repo,
             )
+            _apply_needs_rework_label(num, category, cfg=cfg)
+            state.save(state_path)
+            _post_sprint_status(state, api_url=api_url, project=eff_repo)
+            continue
+
+        # -- Detect CODER_NO_WORK: coder exited 0 but created no feature branch --
+        if _find_feature_branch(num) is None:
+            category = FailureCategory.CODER_NO_WORK
+            reason = f"Coder exited 0 but no feature/{num}-* branch was created"
+            print(f"  {reason} -- skipping to next issue")
+            issue_state.set_agent_status("failed")
+            issue_state.coder_finished_at = issue_state.status_changed_at
+            issue_state.failure_reason    = reason
+            issue_state.status            = "skipped"
+            issue_state.skip_reason       = reason
+            issue_state.category          = category
+            summary.skipped.append(f"#{num} (coder no work)")
+            dispatch_alerts(
+                alert_modes,
+                title=f"Issue #{num} skipped: {category}",
+                body=reason,
+                issue_num=num,
+                category=category,
+                cfg=cfg,
+                repo=eff_repo,
+            )
+            _apply_needs_rework_label(num, category, cfg=cfg)
             state.save(state_path)
             _post_sprint_status(state, api_url=api_url, project=eff_repo)
             continue
@@ -3765,6 +3911,7 @@ def run_sprint(
                 cfg=cfg,
                 repo=eff_repo,
             )
+            _apply_needs_rework_label(num, category, cfg=cfg)
 
         elapsed = time.monotonic() - start_time
         state.wall_clock_secs = elapsed

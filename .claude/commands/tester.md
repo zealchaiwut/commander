@@ -17,8 +17,8 @@ The tester subagent will:
 - Run the tests against the live server at `http://localhost:8000`
 - Evaluate UAT steps (HTTP steps executed, browser/visual steps marked ⚠️ MANUAL)
 - Post a structured report via `scripts/post_test_report.py`
-- **If READY_FOR_UAT:** run `scripts/finish_feature.py --issue <N>` (merges to `develop`, deletes branch, labels UAT)
-- **If NEEDS_FIXES:** label ticket `in-progress` and leave branch intact for the coder
+- **If READY_FOR_UAT:** run `scripts/finish_feature.py --issue <N>` (merges to `develop`, deletes branch, labels UAT) — **only when pytest exit code is 0**
+- **If NEEDS_FIXES:** move label to `blocked`, do not merge, leave branch intact for the coder
 
 Repo context: owner `zealchaiwut`, repo `commander`
 

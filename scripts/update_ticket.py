@@ -7,13 +7,19 @@ Usage:
   python3 scripts/update_ticket.py --issue 42 --status uat
   python3 scripts/update_ticket.py --issue 42 --status blocked
   python3 scripts/update_ticket.py --issue 42 --status uat-approved
+  python3 scripts/update_ticket.py --issue 42 --status estimated
+  python3 scripts/update_ticket.py --issue 42 --status needs-rework
 
 Prints:  #<number> <url>
+Exits with code 0 on full success, code 2 if any label operation failed after
+all retries (a warning comment is posted to the issue in that case).
 """
 import argparse
+import json
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 _DASHBOARD_DIR = Path(__file__).parent.parent / "apps" / "dashboard"
@@ -46,7 +52,19 @@ STATUS_MAP = {
         "remove": ["UAT"],
         "close":  "completed",
     },
+    "estimated": {
+        "add":    ["estimated"],
+        "remove": [],
+        "close":  None,
+    },
+    "needs-rework": {
+        "add":    ["need-rework"],
+        "remove": ["in-progress", "SIT", "UAT", "UAT-approved"],
+        "close":  None,
+    },
 }
+
+_BACKOFFS = (2, 5, 10)
 
 
 def _load_env():
@@ -123,6 +141,44 @@ def _check_uat_safeguard(issue: int, force: bool) -> None:
             sys.exit(msg)
 
 
+def _fetch_current_labels(issue: int, repo: str) -> set[str]:
+    """Pre-fetch the current labels on the issue from GitHub."""
+    result = subprocess.run(
+        ["gh", "issue", "view", str(issue), "--repo", repo, "--json", "labels"],
+        capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        # If we can't fetch labels, return empty set — removes will be attempted
+        return set()
+    try:
+        data = json.loads(result.stdout)
+        return {lbl["name"] for lbl in data.get("labels", [])}
+    except (json.JSONDecodeError, KeyError):
+        return set()
+
+
+def _run_with_retry(cmd: list[str], label: str, operation: str) -> tuple[bool, str]:
+    """Run a gh label command with up to 3 retries and backoff.
+
+    Returns (success, last_stderr).
+    """
+    last_stderr = ""
+    for attempt in range(len(_BACKOFFS) + 1):
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode == 0:
+            return True, ""
+        last_stderr = result.stderr.strip()
+        if attempt < len(_BACKOFFS):
+            wait = _BACKOFFS[attempt]
+            print(
+                f"Warning: {operation} label \"{label}\" attempt {attempt + 1} failed "
+                f"— retrying in {wait}s…",
+                file=sys.stderr,
+            )
+            time.sleep(wait)
+    return False, last_stderr
+
+
 def main():
     _load_env()
 
@@ -142,15 +198,64 @@ def main():
         sys.exit(str(e))
 
     mapping = STATUS_MAP[args.status]
-    cmd = ["gh", "issue", "edit", str(args.issue), "--repo", repo]
-    for lbl in mapping["add"]:
-        cmd += ["--add-label", lbl]
-    for lbl in mapping["remove"]:
-        cmd += ["--remove-label", lbl]
 
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    if result.returncode != 0:
-        sys.exit(f"Error: {result.stderr.strip()}")
+    # Pre-fetch current labels to allow smart skipping of removes
+    current_labels = _fetch_current_labels(args.issue, repo)
+
+    failed_ops = []
+    attempted_ops = []
+
+    # Apply each add label individually with retry
+    for lbl in mapping["add"]:
+        op = f'add "{lbl}"'
+        attempted_ops.append(op)
+        cmd = ["gh", "issue", "edit", str(args.issue), "--repo", repo, "--add-label", lbl]
+        success, last_stderr = _run_with_retry(cmd, lbl, "add")
+        if success:
+            print(f'applied label "{lbl}"')
+        else:
+            print(f'failed to apply label "{lbl}"', file=sys.stderr)
+            failed_ops.append((op, last_stderr))
+
+    # Handle each remove label individually
+    for lbl in mapping["remove"]:
+        op = f'remove "{lbl}"'
+        if lbl not in current_labels:
+            print(f'skipped remove "{lbl}" (not present)')
+            continue
+        attempted_ops.append(op)
+        cmd = ["gh", "issue", "edit", str(args.issue), "--repo", repo, "--remove-label", lbl]
+        success, last_stderr = _run_with_retry(cmd, lbl, "remove")
+        if success:
+            print(f'removed label "{lbl}"')
+        else:
+            print(f'failed to remove label "{lbl}"', file=sys.stderr)
+            failed_ops.append((op, last_stderr))
+
+    if failed_ops:
+        # Post a warning comment
+        failed_lines = "\n".join(
+            f"- `{op}`: {stderr}" for op, stderr in failed_ops
+        )
+        attempted_lines = "\n".join(f"- `{op}`" for op in attempted_ops)
+        warning_comment = (
+            f"**Label update failed for `--status {args.status}`.**\n\n"
+            f"Some label operations failed after {len(_BACKOFFS) + 1} attempts "
+            f"and require manual review.\n\n"
+            f"**Target status:** `{args.status}`\n\n"
+            f"**Attempted operations:**\n{attempted_lines}\n\n"
+            f"**Failed operations (with last error):**\n{failed_lines}\n\n"
+            f"Please apply or remove the above labels manually."
+        )
+        try:
+            subprocess.run(
+                ["gh", "issue", "comment", str(args.issue), "--repo", repo,
+                 "--body", warning_comment],
+                capture_output=True,
+            )
+        except Exception:
+            pass
+        sys.exit(2)
 
     if mapping["close"]:
         close_result = subprocess.run(

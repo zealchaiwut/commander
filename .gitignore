@@ -28,8 +28,13 @@ sprints/
 .commander/logs/
 .commander/sprints/
 .commander/alerts/
+.commander/bulk-jobs/
+.commander/docs/
 
 apps/dashboard/projects.json
+
+# Backup config — stores gist ID, gitignored by design
+.commander/backup_config.json
 
 # Runtime state — attachment bare-clone cache and draft uploads (issue #188)
 apps/dashboard/runtime/

@@ -209,21 +209,19 @@ def delete_label(label_name: str, repo_name: str | None = None) -> None:
 def assign_sprint(issue_id: int, sprint_num: int | None, repo_name: str | None = None) -> None:
     """Assign (or remove) a sprint-N label on an issue.
 
-    If sprint_num is None, removes all sprint-* labels.
-    If sprint_num is set, ensures the label exists, removes other sprint-* labels,
-    then adds sprint-N.
+    If sprint_num is None, removes all sprint-* labels (move to backlog).
+    If sprint_num is set, ensures the label exists, removes other sprint-* labels
+    and removes the 'backlog' label if present, then adds sprint-N.
     """
     r = _r(repo_name)
 
     # Find existing sprint labels on the issue
     issue = get_issue(issue_id, repo_name=repo_name)
-    current_sprint_labels = [
-        lbl["name"] for lbl in issue.get("labels", [])
-        if SPRINT_RE.match(lbl["name"])
-    ]
+    current_labels = [lbl["name"] for lbl in issue.get("labels", [])]
+    current_sprint_labels = [lbl for lbl in current_labels if SPRINT_RE.match(lbl)]
 
     if sprint_num is None:
-        # Remove all sprint labels
+        # Remove all sprint labels (ticket moves to backlog)
         if current_sprint_labels:
             cmd = ["issue", "edit", str(issue_id), "--repo", r]
             for lbl in current_sprint_labels:
@@ -233,7 +231,10 @@ def assign_sprint(issue_id: int, sprint_num: int | None, repo_name: str | None =
         ensure_sprint_label(sprint_num, repo_name=repo_name)
         target_label = f"sprint-{sprint_num}"
         add_labels = [target_label]
+        # Remove other sprint labels and also remove 'backlog' label if present
         remove_labels = [lbl for lbl in current_sprint_labels if lbl != target_label]
+        if "backlog" in current_labels:
+            remove_labels.append("backlog")
         update_labels(issue_id, add=add_labels, remove=remove_labels, repo_name=repo_name)
 
     invalidate(f"issues:{r}:")

@@ -734,13 +734,29 @@
       font-size: 12px;
       font-weight: 600;
       background: var(--surface);
+      color: var(--text-sub);
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      cursor: pointer;
+      transition: background .15s, color .15s, border-color .15s;
+    }
+    .smgmt-selection-bar-deselect:hover { background: var(--surface-hover); color: var(--text); border-color: var(--border); }
+    .smgmt-selection-bar-delete {
+      display: none;
+      padding: 5px 10px;
+      font-size: 12px;
+      font-weight: 600;
+      background: var(--surface);
       color: var(--red);
       border: 1px solid var(--red-bg);
       border-radius: 5px;
       cursor: pointer;
       transition: background .15s, color .15s, border-color .15s;
+      align-items: center;
+      gap: 4px;
     }
-    .smgmt-selection-bar-deselect:hover { background: var(--red); color: #fff; border-color: var(--red); }
+    .smgmt-selection-bar-delete.show { display: inline-flex; }
+    .smgmt-selection-bar-delete:hover { background: var(--red); color: #fff; border-color: var(--red); }
     .smgmt-move-to-btn {
       padding: 5px 10px;
       font-size: 12px;
@@ -3515,6 +3531,10 @@ function _smgmtUpdateSelectionUI() {
         <strong class="smgmt-selection-bar-count" id="smgmt-sel-count">0 tickets selected</strong>
         <span style="color:var(--text-muted)">— batch move to a sprint or backlog</span>
         <div class="smgmt-sel-bar-actions">
+          <button class="smgmt-selection-bar-delete" id="smgmt-sel-delete-btn"
+                  onclick="_smgmtDeleteSelected()">
+            <i class="ti ti-trash"></i> Delete
+          </button>
           <button class="smgmt-selection-bar-deselect" onclick="_smgmtClearSelection()">
             <i class="ti ti-x"></i> Deselect all
           </button>
@@ -3530,6 +3550,12 @@ function _smgmtUpdateSelectionUI() {
     const countEl = document.getElementById('smgmt-sel-count');
     if (countEl) countEl.textContent = count === 1 ? '1 ticket selected' : `${count} tickets selected`;
     _smgmtPopulateMoveToMenu();
+    // Show Delete button only for a single closed/unplanned issue
+    const deleteBtn = document.getElementById('smgmt-sel-delete-btn');
+    if (deleteBtn) {
+      const showDelete = count === 1 && _smgmtIsDeletableIssue([..._smgmtSelectedIssues][0]);
+      deleteBtn.classList.toggle('show', showDelete);
+    }
   } else {
     if (bar) bar.classList.remove('show');
   }
@@ -3591,6 +3617,37 @@ function _smgmtToggleSelect(number, checked) {
   const el = document.getElementById(`smgmt-ticket-${number}`);
   if (el) el.classList.toggle('is-selected', checked);
   _smgmtUpdateSelectionUI();
+}
+
+function _smgmtIsDeletableIssue(num) {
+  if (!_smgmtData) return false;
+  const iss = _smgmtData.issues.find(i => i.number === num);
+  if (!iss) return false;
+  return iss.status === 'done' || iss.sprint === null;
+}
+
+async function _smgmtDeleteSelected() {
+  if (_smgmtSelectedIssues.size !== 1) return;
+  const num = [..._smgmtSelectedIssues][0];
+  const repo = _smgmtRepo();
+  if (!repo) return;
+  const iss = _smgmtData?.issues.find(i => i.number === num);
+  const label = iss ? `#${num}: ${iss.title}` : `#${num}`;
+  if (!confirm(`Delete ${label}?\n\nThis will close the issue on GitHub. This cannot be undone.`)) return;
+  // Optimistic UI: remove from local data and re-render
+  if (_smgmtData) _smgmtData.issues = _smgmtData.issues.filter(i => i.number !== num);
+  _smgmtClearSelection();
+  _smgmtRender(_smgmtData);
+  try {
+    const res = await fetch(`/api/issues/${num}/close?repo=${encodeURIComponent(repo)}`, {
+      method: 'POST',
+    });
+    if (!res.ok) throw new Error(await res.text());
+    _smgmtShowToast(`Issue #${num} closed.`);
+  } catch (e) {
+    alert('Failed to delete issue: ' + e.message);
+    await loadSprintMgmt();
+  }
 }
 
 async function _smgmtMoveSelectedTo(targetLabel) {

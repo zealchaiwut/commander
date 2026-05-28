@@ -356,6 +356,191 @@ class HealthResponse(BaseModel):
     database: DatabaseStatus
 
 
+# ── Health check v2 (issue #229) ─────────────────────────────────────────────
+# Global cache: (timestamp, response_dict)
+_health_cache: tuple[float, dict] | None = None
+_HEALTH_CACHE_TTL = 10.0  # seconds
+_GITHUB_AUTH_CACHE: tuple[float, dict] | None = None
+_GITHUB_AUTH_CACHE_TTL = 60.0  # seconds
+_CHECK_TIMEOUT = 0.5  # 500 ms per individual check
+_HEALTH_TOTAL_TIMEOUT = 2.0  # 2 s overall
+
+
+async def _check_dashboard() -> dict:
+    uptime = time.monotonic() - _start_time
+    return {"status": "ok", "uptime_sec": int(uptime)}
+
+
+async def _check_database() -> dict:
+    try:
+        loop = asyncio.get_event_loop()
+        def _run():
+            conn = db.get_conn()
+            try:
+                conn.execute("SELECT 1")
+            finally:
+                conn.close()
+        await asyncio.wait_for(loop.run_in_executor(None, _run), timeout=_CHECK_TIMEOUT)
+        return {"status": "ok"}
+    except asyncio.TimeoutError:
+        return {"status": "timeout"}
+    except Exception as exc:
+        return {"status": "down", "error": str(exc)}
+
+
+async def _check_github_auth() -> dict:
+    global _GITHUB_AUTH_CACHE
+    now = time.monotonic()
+    if _GITHUB_AUTH_CACHE is not None:
+        ts, cached = _GITHUB_AUTH_CACHE
+        if now - ts < _GITHUB_AUTH_CACHE_TTL:
+            return cached
+
+    async def _run() -> dict:
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "gh", "auth", "status",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await proc.communicate()
+            combined = (stdout + stderr).decode("utf-8", errors="replace")
+            if proc.returncode == 0:
+                # Parse logged-in user from output like "Logged in to github.com as <user>"
+                import re as _re
+                m = _re.search(r"Logged in to \S+ as (\S+)", combined)
+                user = m.group(1) if m else None
+                result = {"status": "ok"}
+                if user:
+                    result["user"] = user
+                return result
+            # Non-zero exit — determine if expired or missing
+            combined_lower = combined.lower()
+            if "expired" in combined_lower or "token" in combined_lower:
+                return {"status": "expired"}
+            return {"status": "missing"}
+        except FileNotFoundError:
+            return {"status": "missing"}
+        except Exception as exc:
+            return {"status": "missing", "error": str(exc)}
+
+    try:
+        result = await asyncio.wait_for(_run(), timeout=_CHECK_TIMEOUT)
+    except asyncio.TimeoutError:
+        result = {"status": "timeout"}
+
+    _GITHUB_AUTH_CACHE = (now, result)
+    return result
+
+
+async def _check_claude_code_auth() -> dict:
+    credentials_path = Path.home() / ".claude" / "credentials.json"
+    if not credentials_path.exists():
+        # Try running `claude --version` as fallback
+        try:
+            proc = await asyncio.wait_for(
+                asyncio.create_subprocess_exec(
+                    "claude", "--version",
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                ),
+                timeout=_CHECK_TIMEOUT,
+            )
+            await proc.communicate()
+            if proc.returncode == 0:
+                return {"status": "ok"}
+            return {"status": "expired"}
+        except asyncio.TimeoutError:
+            return {"status": "timeout"}
+        except FileNotFoundError:
+            return {"status": "missing"}
+        except Exception:
+            return {"status": "missing"}
+
+    # credentials.json exists — check it's valid JSON and non-empty
+    try:
+        data = json.loads(credentials_path.read_text(encoding="utf-8"))
+        if not data:
+            return {"status": "expired"}
+        return {"status": "ok"}
+    except Exception:
+        return {"status": "expired"}
+
+
+async def _check_disk() -> dict:
+    try:
+        loop = asyncio.get_event_loop()
+        usage = await asyncio.wait_for(
+            loop.run_in_executor(None, lambda: shutil.disk_usage(Path(__file__).parent)),
+            timeout=_CHECK_TIMEOUT,
+        )
+        free_gb = usage.free / (1024 ** 3)
+        total_gb = usage.total / (1024 ** 3)
+        if free_gb < 2.0:
+            status = "critical"
+        elif free_gb < 10.0:
+            status = "warn"
+        else:
+            status = "ok"
+        return {
+            "status": status,
+            "free_gb": round(free_gb, 2),
+            "total_gb": round(total_gb, 2),
+        }
+    except asyncio.TimeoutError:
+        return {"status": "timeout"}
+    except Exception as exc:
+        return {"status": "warn", "error": str(exc)}
+
+
+async def _check_stuck_sprints() -> dict:
+    """Check for sprints in 'running' state whose state file mtime is > 2 hours old."""
+    try:
+        loop = asyncio.get_event_loop()
+
+        def _scan() -> dict:
+            two_hours_ago = time.time() - 7200
+            stuck_labels: list[str] = []
+            try:
+                projects = projects_module.load_projects()
+            except Exception:
+                return {"status": "ok", "count": 0, "labels": []}
+            for proj in projects:
+                try:
+                    project_root = _project_root_path(proj["repo"])
+                    sprints_dir = _commander_dir(project_root) / "sprints"
+                    if not sprints_dir.exists():
+                        continue
+                    for state_file in sprints_dir.glob("*-state.json"):
+                        try:
+                            data = json.loads(state_file.read_text(encoding="utf-8"))
+                        except Exception:
+                            continue
+                        if data.get("status") != "running":
+                            continue
+                        # Check mtime
+                        mtime = state_file.stat().st_mtime
+                        if mtime < two_hours_ago:
+                            # Extract sprint label from filename: sprint-N-state.json
+                            label = state_file.name.removesuffix("-state.json")
+                            stuck_labels.append(label)
+                except Exception:
+                    continue
+            if stuck_labels:
+                return {"status": "warn", "count": len(stuck_labels), "labels": stuck_labels}
+            return {"status": "ok", "count": 0, "labels": []}
+
+        result = await asyncio.wait_for(
+            loop.run_in_executor(None, _scan),
+            timeout=_CHECK_TIMEOUT,
+        )
+        return result
+    except asyncio.TimeoutError:
+        return {"status": "timeout"}
+    except Exception as exc:
+        return {"status": "ok", "count": 0, "labels": [], "error": str(exc)}
+
+
 # ── SSE broadcast ─────────────────────────────────────────────────────────────
 
 async def broadcast(data: dict):
@@ -413,22 +598,87 @@ async def project_slug_tab(slug: str, tab: str):
     return FileResponse(STATIC_DIR / "project.html")
 
 
-@app.get("/api/health", response_model=HealthResponse)
-def health_check() -> HealthResponse:
-    uptime = time.monotonic() - _start_time
+@app.get("/api/health")
+async def health_check():
+    """GET /api/health — rich dependency health check (issue #229).
 
-    db_reachable = False
+    Runs 6 checks concurrently: dashboard, database, github_auth, claude_code_auth,
+    disk, stuck_sprints.  Response is cached 10 s.  Returns 200 for ok/degraded,
+    503 for down.  No authentication required.
+    """
+    global _health_cache
+    now = time.monotonic()
+    if _health_cache is not None:
+        ts, cached = _health_cache
+        if now - ts < _HEALTH_CACHE_TTL:
+            status_code = 503 if cached["status"] == "down" else 200
+            return JSONResponse(content=cached, status_code=status_code)
+
+    checked_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
     try:
-        db.get_conn().execute("SELECT 1")
-        db_reachable = True
-    except Exception:
-        pass
+        results = await asyncio.wait_for(
+            asyncio.gather(
+                _check_dashboard(),
+                _check_database(),
+                _check_github_auth(),
+                _check_claude_code_auth(),
+                _check_disk(),
+                _check_stuck_sprints(),
+                return_exceptions=True,
+            ),
+            timeout=_HEALTH_TOTAL_TIMEOUT,
+        )
+    except asyncio.TimeoutError:
+        results = [
+            {"status": "timeout"},
+            {"status": "timeout"},
+            {"status": "timeout"},
+            {"status": "timeout"},
+            {"status": "timeout"},
+            {"status": "timeout"},
+        ]
 
-    return HealthResponse(
-        status="ok" if db_reachable else "degraded",
-        uptime_seconds=uptime,
-        database=DatabaseStatus(reachable=db_reachable, path=str(db.DB_PATH)),
+    # Unpack results; replace any unexpected exceptions with error dicts
+    def _safe(r, fallback_status: str = "down") -> dict:
+        if isinstance(r, Exception):
+            return {"status": fallback_status, "error": str(r)}
+        return r
+
+    checks = {
+        "dashboard":        _safe(results[0], "down"),
+        "database":         _safe(results[1], "down"),
+        "github_auth":      _safe(results[2], "missing"),
+        "claude_code_auth": _safe(results[3], "missing"),
+        "disk":             _safe(results[4], "warn"),
+        "stuck_sprints":    _safe(results[5], "ok"),
+    }
+
+    # Determine overall status
+    # "down" if database or github_auth failed
+    critical_down = checks["database"]["status"] in ("down", "timeout") or \
+                    checks["github_auth"]["status"] in ("expired", "missing", "timeout")
+    has_warn = any(
+        c.get("status") in ("warn", "critical", "expired", "missing", "timeout")
+        for c in checks.values()
     )
+
+    if critical_down:
+        overall = "down"
+    elif has_warn:
+        overall = "degraded"
+    else:
+        overall = "ok"
+
+    response = {
+        "status": overall,
+        "checked_at": checked_at,
+        "checks": checks,
+    }
+    _health_cache = (now, response)
+
+    status_code = 503 if overall == "down" else 200
+    return JSONResponse(content=response, status_code=status_code)
 
 
 @app.get("/api/environment")

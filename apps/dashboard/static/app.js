@@ -321,6 +321,25 @@ function _route() {
     return;
   }
 
+  // Match /project/<slug>/<tab>  (new singular URL scheme)
+  const m2 = path.match(/^\/project\/([^/]+)\/?([^/]*)?$/);
+  if (m2) {
+    const slug   = m2[1];
+    const rawTab = m2[2] || '';
+    const tab = (rawTab === 'sprint-history') ? 'sprint-history'
+              : (rawTab === 'sprint-mgmt')    ? 'sprint-mgmt'
+              : 'sprint-mgmt';
+    // Map slug (repo name only) → full owner/repo using the loaded projects list
+    const proj = allProjects.find(p => (p.repo || '').split('/')[1] === slug);
+    const repo = proj ? proj.repo : slug;
+    _activeProject    = repo;
+    _activeProjectTab = tab;
+    if (allProjects.length > 0) {
+      _renderProjectView(repo, tab);
+    }
+    return;
+  }
+
   // Default: overview
   _showOverview();
 }
@@ -5947,7 +5966,8 @@ function showErrorToast(msg) {
     });
 
   // On first load with a non-project URL, show overview
-  if (!window.location.pathname.startsWith('/projects/')) {
+  const _initPath = window.location.pathname;
+  if (!_initPath.startsWith('/projects/') && !_initPath.startsWith('/project/')) {
     _showOverview();
   }
 

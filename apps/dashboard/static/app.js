@@ -6790,6 +6790,7 @@ function _bcRenderStep2() {
   const pending = tickets.filter(t => t.state === 'pending').length;
   const failed = tickets.filter(t => t.state === 'failed').length;
   const skipped = tickets.filter(t => t.state === 'skipped').length;
+  const sizeWarning = tickets.filter(t => t.state === 'size_warning').length;
   const total = tickets.length;
 
   // Banner
@@ -6801,7 +6802,11 @@ function _bcRenderStep2() {
         `${created} done, ${drafting} running, ${pending} queued` +
         `<span class="bc-concurrency-pill">concurrency: ${concurrency}</span>`;
     } else if (job.status === 'done') {
-      banner.innerHTML = `All ${total} tickets processed.`;
+      if (sizeWarning > 0) {
+        banner.innerHTML = `All tickets processed. ${sizeWarning} ticket${sizeWarning > 1 ? 's' : ''} need size remediation.`;
+      } else {
+        banner.innerHTML = `All ${total} tickets processed.`;
+      }
     } else if (job.status === 'stopped') {
       banner.innerHTML = `Stopped. ${created} created, ${failed} failed, ${skipped} skipped.`;
     }
@@ -6917,6 +6922,35 @@ function _bcRenderCard(t) {
     preview = escapeHtml(t.error || 'Unknown error');
     label = 'Failed';
     actions = `<button class="bc-action-btn bc-action-btn--retry" title="Retry" onclick="bcRetryTicket(${t.index})">&#x21BA;</button>`;
+  } else if (t.state === 'size_warning') {
+    // Size warning card: amber banner with two remediation buttons (issue #261)
+    const charCount = t.body_char_count || (t.body || '').length;
+    const overBy    = t.body_over_by   || Math.max(0, charCount - 62000);
+    const titleText = t.title ? escapeHtml(t.title.slice(0, 80)) : '';
+    const headHtmlSz = titleText
+      ? `<div class="bc-card-head"><span class="bc-card-label" style="color:#d97706">Size warning</span><span class="bc-card-preview" style="flex:1;margin-left:6px;">${titleText}</span></div>`
+      : `<div class="bc-card-head"><span class="bc-card-label" style="color:#d97706">Size warning</span></div>`;
+    const bodyStr = t.body || '';
+    const hasInlineImages = /!\[[^\]]*\]\(data:image\/[a-zA-Z]+;base64,/.test(bodyStr);
+    const remedyImagesBtn = hasInlineImages
+      ? `<button class="bc-action-btn" style="font-size:10px;padding:2px 6px;color:#d97706;border:1px solid #d97706;border-radius:4px;" onclick="bcSizeRemedyImages(${t.index})">Link images</button>`
+      : `<button class="bc-action-btn" style="font-size:10px;padding:2px 6px;opacity:0.4;" disabled title="No inlined base64 images">Link images</button>`;
+    return `
+      <div class="bc-card" style="border-color:#d97706;">
+        <div class="bc-status-dot" style="border-color:#d97706;background:#d97706;display:flex;align-items:center;justify-content:center;"><span style="color:#fff;font-size:7px;font-weight:700">!</span></div>
+        <div class="bc-card-body">
+          ${headHtmlSz}
+          <div class="bc-card-preview" style="color:#d97706;white-space:normal;font-size:10px;">
+            ${charCount.toLocaleString()} chars — ${overBy.toLocaleString()} over limit
+          </div>
+        </div>
+        <div class="bc-card-actions" style="flex-direction:column;gap:4px;align-items:flex-end;">
+          <button class="bc-action-btn" style="font-size:10px;padding:2px 6px;color:#d97706;border:1px solid #d97706;border-radius:4px;" onclick="bcSizeRemedyComment(${t.index})">Split to comment</button>
+          ${remedyImagesBtn}
+          <button class="bc-action-btn" onclick="bcSkipTicket(${t.index})">&#x00D7;</button>
+        </div>
+      </div>
+    `;
   } else if (t.state === 'skipped') {
     preview = escapeHtml((t.prompt || '').slice(0, 80));
     label = 'Skipped';
@@ -6989,6 +7023,30 @@ async function bcStop() {
   if (btn) btn.disabled = true;
   try {
     await fetch(`/api/tickets/bulk/${_bcJobId}/stop`, { method: 'POST' });
+  } catch (_) {}
+}
+
+// ── Size-warning remediation (issue #261) ────────────────────────────────────
+
+async function bcSizeRemedyComment(index) {
+  if (!_bcJobId) return;
+  try {
+    await fetch(`/api/tickets/bulk/${_bcJobId}/size-remedy-comment`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ index }),
+    });
+    // SSE will update state
+  } catch (_) {}
+}
+
+async function bcSizeRemedyImages(index) {
+  if (!_bcJobId) return;
+  try {
+    await fetch(`/api/tickets/bulk/${_bcJobId}/size-remedy-images`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ index }),
+    });
+    // SSE will update state
   } catch (_) {}
 }
 

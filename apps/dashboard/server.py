@@ -3914,6 +3914,12 @@ _ALLOWED_UPLOAD_EXTS = {
 _MAX_FILE_SIZE_BYTES = 25 * 1024 * 1024  # 25 MB
 # Per-batch total size limit (bytes)
 _MAX_BATCH_SIZE_BYTES = 50 * 1024 * 1024  # 50 MB
+# Image-only extensions allowed for bulk create attachments (issue #260)
+_BULK_IMAGE_EXTS = {'.png', '.jpg', '.jpeg'}
+
+# Body size guard threshold (issue #261)
+# GitHub hard limit is 65,536 chars; we use 62,000 as a safety margin.
+_BC_BODY_SIZE_THRESHOLD = 62_000
 
 
 def _repo_root() -> Path:
@@ -4205,6 +4211,213 @@ def _commit_attachments_to_branch(
         raise RuntimeError(
             f"Push to attachments branch failed after retry: {retry_push.stderr.strip()}"
         )
+
+
+def _list_existing_assets(cache_dir: Path) -> set[str]:
+    """Return filenames already at references/issue-assets/ on the attachments branch."""
+    result = subprocess.run(
+        ["git", "ls-tree", "--name-only", f"refs/heads/{_ATTACHMENTS_BRANCH}",
+         "references/issue-assets/"],
+        capture_output=True, text=True, cwd=str(cache_dir),
+    )
+    if result.returncode != 0:
+        return set()
+    files = set()
+    for line in result.stdout.splitlines():
+        name = line.strip()
+        if "/" in name:
+            name = name.rsplit("/", 1)[-1]
+        if name:
+            files.add(name)
+    return files
+
+
+def _commit_assets_to_branch(
+    cache_dir: Path,
+    file_data: list[tuple[str, bytes]],  # (sanitized_filename, content)
+) -> None:
+    """Commit image files to references/issue-assets/ on the attachments branch and push."""
+    import tempfile as _tf
+
+    def _do_commit():
+        parent_result = subprocess.run(
+            ["git", "rev-parse", f"refs/heads/{_ATTACHMENTS_BRANCH}"],
+            capture_output=True, text=True, cwd=str(cache_dir),
+        )
+        parent_sha = parent_result.stdout.strip() if parent_result.returncode == 0 else None
+
+        if parent_sha:
+            tree_result = subprocess.run(
+                ["git", "cat-file", "-p", parent_sha],
+                capture_output=True, text=True, cwd=str(cache_dir),
+            )
+            parent_tree_sha = None
+            for line in tree_result.stdout.splitlines():
+                if line.startswith("tree "):
+                    parent_tree_sha = line.split()[1]
+                    break
+        else:
+            parent_tree_sha = None
+
+        idx_file = _tf.NamedTemporaryFile(delete=False, suffix=".idx")
+        idx_file.close()
+        idx_path = idx_file.name
+        try:
+            env = {"GIT_INDEX_FILE": idx_path, "HOME": str(Path.home())}
+            if parent_tree_sha:
+                subprocess.run(
+                    ["git", "read-tree", parent_tree_sha],
+                    capture_output=True, text=True, cwd=str(cache_dir),
+                    env={**env, "GIT_DIR": str(cache_dir)},
+                )
+
+            for fname, content in file_data:
+                dest_path = f"references/issue-assets/{fname}"
+                hash_proc = subprocess.run(
+                    ["git", "hash-object", "-w", "--stdin"],
+                    input=content, capture_output=True,
+                    cwd=str(cache_dir),
+                )
+                if hash_proc.returncode != 0:
+                    raise RuntimeError(f"hash-object failed for {fname}")
+                blob_sha = hash_proc.stdout.strip().decode()
+
+                subprocess.run(
+                    ["git", "update-index", "--add", "--cacheinfo",
+                     f"100644,{blob_sha},{dest_path}"],
+                    capture_output=True, text=True, cwd=str(cache_dir),
+                    env={**env, "GIT_DIR": str(cache_dir)},
+                    check=True,
+                )
+
+            write_result = subprocess.run(
+                ["git", "write-tree"],
+                capture_output=True, text=True, cwd=str(cache_dir),
+                env={**env, "GIT_DIR": str(cache_dir)},
+            )
+            new_tree_sha = write_result.stdout.strip()
+
+            commit_cmd = ["git", "commit-tree", new_tree_sha,
+                          "-m", "chore(attachments): add bulk images to issue-assets"]
+            if parent_sha:
+                commit_cmd += ["-p", parent_sha]
+            commit_result = subprocess.run(
+                commit_cmd,
+                capture_output=True, text=True, cwd=str(cache_dir),
+            )
+            new_commit_sha = commit_result.stdout.strip()
+
+            subprocess.run(
+                ["git", "update-ref", f"refs/heads/{_ATTACHMENTS_BRANCH}", new_commit_sha],
+                capture_output=True, text=True, cwd=str(cache_dir), check=True,
+            )
+        finally:
+            try:
+                Path(idx_path).unlink()
+            except Exception:
+                pass
+
+        return new_commit_sha
+
+    _do_commit()
+
+    push_result = subprocess.run(
+        ["git", "push", "origin",
+         f"refs/heads/{_ATTACHMENTS_BRANCH}:refs/heads/{_ATTACHMENTS_BRANCH}"],
+        capture_output=True, text=True, cwd=str(cache_dir),
+    )
+    if push_result.returncode == 0:
+        return
+
+    # Retry once on push failure
+    subprocess.run(
+        ["git", "fetch", "origin", _ATTACHMENTS_BRANCH],
+        capture_output=True, text=True, cwd=str(cache_dir),
+    )
+    subprocess.run(
+        ["git", "update-ref", f"refs/heads/{_ATTACHMENTS_BRANCH}",
+         f"refs/remotes/origin/{_ATTACHMENTS_BRANCH}"],
+        capture_output=True, text=True, cwd=str(cache_dir),
+    )
+    _do_commit()
+    retry_push = subprocess.run(
+        ["git", "push", "origin",
+         f"refs/heads/{_ATTACHMENTS_BRANCH}:refs/heads/{_ATTACHMENTS_BRANCH}"],
+        capture_output=True, text=True, cwd=str(cache_dir),
+    )
+    if retry_push.returncode != 0:
+        raise RuntimeError(
+            f"Push to attachments branch failed after retry: {retry_push.stderr.strip()}"
+        )
+
+
+def _do_pre_commit_bulk_images(job_id: str, repo: str) -> dict[str, str]:
+    """Commit all bulk images to references/issue-assets/ and return {orig_filename: raw_url}.
+
+    Called in a thread before any issues are created so image URLs can be injected
+    into issue bodies at POST time (no post-create body update needed).
+    """
+    attach_dir = _bulk_attachment_dir(job_id)
+    if not attach_dir or not attach_dir.exists():
+        return {}
+
+    job = _bulk_jobs.get(job_id)
+    if not job:
+        return {}
+
+    attachment_filenames = job.get("attachment_filenames", [])
+    if not attachment_filenames:
+        return {}
+
+    _ensure_attachments_branch(repo)
+    cache_dir = _init_attachment_cache(repo)
+    existing = _list_existing_assets(cache_dir)
+
+    file_data: list[tuple[str, bytes]] = []
+    used_names: set[str] = set(existing)
+    name_map: dict[str, str] = {}  # orig_filename -> sanitized_final_name
+
+    for fname in attachment_filenames:
+        fpath = attach_dir / Path(fname).name
+        if not fpath.exists():
+            continue
+        sanitized = _sanitize_filename(fname)
+        final_name = _resolve_collision(sanitized, used_names)
+        used_names.add(final_name)
+        file_data.append((final_name, fpath.read_bytes()))
+        name_map[fname] = final_name
+
+    if file_data:
+        _commit_assets_to_branch(cache_dir, file_data)
+
+    url_map: dict[str, str] = {}
+    for orig_fname, final_name in name_map.items():
+        url = (
+            f"https://raw.githubusercontent.com/{repo}/"
+            f"{_ATTACHMENTS_BRANCH}/references/issue-assets/{final_name}"
+        )
+        url_map[orig_fname] = url
+
+    return url_map
+
+
+def _build_body_with_images(body: str, ticket_index: int, job: dict) -> str:
+    """Prepend image markdown links for images assigned to this ticket."""
+    url_map = job.get("image_url_map") or {}
+    if not url_map:
+        return body
+    assignments = job.get("image_assignments") or []
+    links: list[str] = []
+    for a in assignments:
+        assignment = a.get("assignment")
+        if assignment == "all" or assignment == ticket_index:
+            fname = a.get("filename", "")
+            url = url_map.get(fname)
+            if url:
+                links.append(f"![{fname}]({url})")
+    if not links:
+        return body
+    return body + "\n\n" + "\n\n".join(links)
 
 
 def _parse_ba_draft(output: str) -> tuple[str, str, bool]:
@@ -4789,6 +5002,16 @@ async def _bulk_flusher(job_id: str) -> None:
     if not job:
         return
 
+    # Pre-commit images before any issues are created so URLs can go in the body directly
+    if job.get("has_attachments") and not job.get("image_url_map"):
+        try:
+            url_map = await asyncio.to_thread(_do_pre_commit_bulk_images, job_id, job["repo"])
+            job["image_url_map"] = url_map
+            _persist_bulk_job(job)
+        except Exception as pre_err:
+            logger.warning("Bulk image pre-commit failed: %s", str(pre_err)[:200])
+            job["image_url_map"] = {}
+
     tickets = job["tickets"]
     n = len(tickets)
     flush_idx = 0
@@ -4809,59 +5032,43 @@ async def _bulk_flusher(job_id: str) -> None:
             continue
 
         if ticket["state"] == "draft_ready":
-            # Create the issue
+            # Inject image links into body before creating the issue
             issue_repo = ticket.get("_repo") or None
+            labels = ["backlog"] + ticket.get("_default_labels", [])
+            body_with_images = _build_body_with_images(
+                ticket["body"] or "", flush_idx, job
+            )
+
+            # Body size guard (issue #261): block POST if over threshold
+            if len(body_with_images) > _BC_BODY_SIZE_THRESHOLD:
+                ticket["state"] = "size_warning"
+                ticket["body"] = body_with_images
+                ticket["body_char_count"] = len(body_with_images)
+                ticket["body_over_by"] = len(body_with_images) - _BC_BODY_SIZE_THRESHOLD
+                ticket["_default_labels"] = labels
+                ticket["_repo"] = issue_repo
+                ticket["finished_at"] = datetime.now(timezone.utc).isoformat()
+                _persist_bulk_job(job)
+                await _broadcast_bulk_event(job_id, {"type": "ticket_update", "ticket": dict(ticket)})
+                flush_idx += 1
+                continue
+
             try:
-                labels = ["backlog"] + ticket.get("_default_labels", [])
                 number, url = github_client.create_issue(
                     title=ticket["title"],
-                    body=ticket["body"],
+                    body=body_with_images,
                     labels=labels,
                     repo_name=issue_repo,
                 )
                 ticket["state"] = "created"
                 ticket["issue_num"] = number
                 ticket["issue_url"] = url
-                ticket["body_preview"] = ticket["body"][:200]
+                ticket["body"] = body_with_images
+                ticket["body_preview"] = body_with_images[:200]
                 ticket["label_pills"] = labels
             except Exception as e:
                 ticket["state"] = "failed"
                 ticket["error"] = f"GitHub issue creation failed: {str(e)[:200]}"
-
-            # Apply attachments to the newly-created issue (best-effort, non-blocking)
-            if ticket["state"] == "created" and job.get("has_attachments"):
-                attach_dir = _bulk_attachment_dir(job_id)
-                if attach_dir and attach_dir.exists():
-                    repo_name = issue_repo or job["repo"]
-                    try:
-                        _ensure_attachments_branch(repo_name)
-                        cache_dir = _init_attachment_cache(repo_name)
-                        existing = _list_existing_attachments(cache_dir, number)
-                        file_data: list[tuple[str, bytes]] = []
-                        used_names: set[str] = set(existing)
-                        for fname in job.get("attachment_filenames", []):
-                            fpath = attach_dir / Path(fname).name
-                            if fpath.exists():
-                                sanitized = _sanitize_filename(fname)
-                                final_name = _resolve_collision(sanitized, used_names)
-                                used_names.add(final_name)
-                                file_data.append((final_name, fpath.read_bytes()))
-                        if file_data:
-                            _commit_attachments_to_branch(cache_dir, number, file_data)
-                            # Append Attachments section to issue body
-                            current_body = ticket.get("body", "") or ""
-                            if "## Attachments" not in current_body:
-                                links = "\n".join(
-                                    f"- [{fname}](https://raw.githubusercontent.com/{repo_name}/"
-                                    f"{_ATTACHMENTS_BRANCH}/references/issue-{number}/{fname})"
-                                    for fname, _ in file_data
-                                )
-                                updated_body = current_body + f"\n\n## Attachments\n\n{links}"
-                                github_client.update_issue_body(number, updated_body, repo_name=repo_name)
-                    except Exception as attach_err:
-                        ticket["attachment_warning"] = (
-                            f"Attachments could not be added: {str(attach_err)[:200]}"
-                        )
 
             ticket["finished_at"] = datetime.now(timezone.utc).isoformat()
             # Remove internal fields
@@ -4878,16 +5085,23 @@ async def _bulk_flusher(job_id: str) -> None:
         else:
             flush_idx += 1
 
-    # Check if all done
+    # Check if all done (size_warning tickets are not done — they await user remediation)
     job = _bulk_jobs.get(job_id)
     if job:
         all_done = all(
-            t["state"] in ("created", "failed", "skipped") for t in job["tickets"]
+            t["state"] in ("created", "failed", "skipped", "size_warning") for t in job["tickets"]
         )
         if all_done:
-            job["status"] = "done"
-            _persist_bulk_job(job)
-            await _broadcast_bulk_event(job_id, {"type": "job_done", "job_id": job_id})
+            has_size_warnings = any(t["state"] == "size_warning" for t in job["tickets"])
+            if not has_size_warnings:
+                job["status"] = "done"
+                _persist_bulk_job(job)
+                await _broadcast_bulk_event(job_id, {"type": "job_done", "job_id": job_id})
+            else:
+                # Job paused — waiting for user to remediate oversized tickets
+                job["status"] = "done"
+                _persist_bulk_job(job)
+                await _broadcast_bulk_event(job_id, {"type": "job_done", "job_id": job_id})
 
 
 async def _bulk_worker(
@@ -4997,10 +5211,11 @@ async def bulk_create_start(
     default_labels: str = Form(default=""),
     concurrency: int = Form(default=3),
     files: list[UploadFile] = File(default=[]),
+    assignments: str = Form(default=""),
 ):
     """Start a bulk ticket creation job.
 
-    Accepts multipart/form-data so optional attachment files can be included.
+    Accepts multipart/form-data so optional image files can be included.
     Returns {job_id} immediately; use the SSE stream endpoint to track progress.
     """
     _prune_old_bulk_jobs()
@@ -5052,18 +5267,34 @@ async def bulk_create_start(
                 detail=f"Unknown labels (not in repo): {', '.join(bad)}"
             )
 
-    # Validate and store uploaded attachment files
+    # Parse image assignments: [{filename, assignment: "all" | ticket_index}]
+    image_assignments: list[dict] = []
+    if assignments.strip():
+        try:
+            parsed_assignments = json.loads(assignments)
+            if not isinstance(parsed_assignments, list):
+                raise ValueError("not a list")
+            for a in parsed_assignments:
+                asgn = a.get("assignment", "all")
+                image_assignments.append({
+                    "filename": str(a.get("filename", "")),
+                    "assignment": asgn if asgn == "all" else int(asgn),
+                })
+        except (json.JSONDecodeError, ValueError, TypeError):
+            raise HTTPException(422, detail="'assignments' must be a JSON array")
+
+    # Validate and store uploaded image files (PNG/JPG only for bulk create)
     valid_upload_files = [f for f in files if f.filename]
     attachment_file_data: list[tuple[str, bytes]] = []  # (original_filename, content)
     if valid_upload_files:
         batch_size = 0
         for upload in valid_upload_files:
             ext = Path(upload.filename).suffix.lower()
-            if ext not in _ALLOWED_UPLOAD_EXTS:
+            if ext not in _BULK_IMAGE_EXTS:
                 raise HTTPException(
                     422,
                     detail=f"File '{upload.filename}' has disallowed extension '{ext}'. "
-                           f"Allowed: {', '.join(sorted(_ALLOWED_UPLOAD_EXTS))}",
+                           f"Only PNG and JPG images are allowed.",
                 )
             content = await upload.read()
             if len(content) > _MAX_FILE_SIZE_BYTES:
@@ -5105,6 +5336,8 @@ async def bulk_create_start(
             "attachment_warning": None,
             "started_at": None,
             "finished_at": None,
+            "retry_count": 0,
+            "last_error": None,
         }
         for i, prompt in enumerate(clean_prompts)
     ]
@@ -5119,6 +5352,8 @@ async def bulk_create_start(
         "stop_requested": False,
         "has_attachments": len(attachment_file_data) > 0,
         "attachment_filenames": [n for n, _ in attachment_file_data],
+        "image_assignments": image_assignments,
+        "image_url_map": None,
         "tickets": tickets,
     }
     _bulk_jobs[job_id] = job
@@ -5232,10 +5467,22 @@ async def bulk_skip_ticket(job_id: str, body: BulkSkipBody):
     if body.index < 0 or body.index >= len(tickets):
         raise HTTPException(422, detail="Invalid ticket index")
     ticket = tickets[body.index]
-    if ticket["state"] == "pending":
+    if ticket["state"] in ("pending", "failed", "size_warning"):
         ticket["state"] = "skipped"
+        ticket.pop("_default_labels", None)
+        ticket.pop("_repo", None)
         _persist_bulk_job(job)
         await _broadcast_bulk_event(job_id, {"type": "ticket_update", "ticket": dict(ticket)})
+        # Check if job should be marked done now that this blocking ticket is skipped
+        all_done = all(
+            tt["state"] in ("created", "failed", "skipped", "size_warning")
+            for tt in job["tickets"]
+        )
+        has_size_warnings = any(t["state"] == "size_warning" for t in job["tickets"])
+        if all_done and not has_size_warnings:
+            job["status"] = "done"
+            _persist_bulk_job(job)
+            await _broadcast_bulk_event(job_id, {"type": "job_done", "job_id": job_id})
     return {"ok": True, "state": ticket["state"]}
 
 
@@ -5270,70 +5517,53 @@ async def bulk_retry_ticket(job_id: str, body: BulkRetryBody):
             job_id, body.index, ticket["prompt"],
             job["repo"], job["default_labels"]
         )
-        # After BA, trigger flusher to create the issue (best-effort, appended order)
+        # After BA, create the issue with image links injected into body
         t = job["tickets"][body.index]
         if t.get("state") == "draft_ready":
             issue_repo = t.get("_repo") or None
-            try:
-                labels = ["backlog"] + t.get("_default_labels", [])
-                number, url = github_client.create_issue(
-                    title=t["title"],
-                    body=t["body"],
-                    labels=labels,
-                    repo_name=issue_repo,
-                )
-                t["state"] = "created"
-                t["issue_num"] = number
-                t["issue_url"] = url
-                t["body_preview"] = t["body"][:200]
-                t["label_pills"] = labels
-            except Exception as e:
-                t["state"] = "failed"
-                t["error"] = f"GitHub issue creation failed: {str(e)[:200]}"
+            labels = ["backlog"] + t.get("_default_labels", [])
+            body_with_images = _build_body_with_images(
+                t.get("body") or "", body.index, job
+            )
 
-            # Apply attachments (best-effort, non-blocking)
-            if t["state"] == "created" and job.get("has_attachments"):
-                attach_dir = _bulk_attachment_dir(job_id)
-                if attach_dir and attach_dir.exists():
-                    repo_name = issue_repo or job["repo"]
-                    try:
-                        _ensure_attachments_branch(repo_name)
-                        cache_dir = _init_attachment_cache(repo_name)
-                        existing = _list_existing_attachments(cache_dir, number)
-                        file_data: list[tuple[str, bytes]] = []
-                        used_names: set[str] = set(existing)
-                        for fname in job.get("attachment_filenames", []):
-                            fpath = attach_dir / Path(fname).name
-                            if fpath.exists():
-                                sanitized = _sanitize_filename(fname)
-                                final_name = _resolve_collision(sanitized, used_names)
-                                used_names.add(final_name)
-                                file_data.append((final_name, fpath.read_bytes()))
-                        if file_data:
-                            _commit_attachments_to_branch(cache_dir, number, file_data)
-                            current_body = t.get("body", "") or ""
-                            if "## Attachments" not in current_body:
-                                links = "\n".join(
-                                    f"- [{fname}](https://raw.githubusercontent.com/{repo_name}/"
-                                    f"{_ATTACHMENTS_BRANCH}/references/issue-{number}/{fname})"
-                                    for fname, _ in file_data
-                                )
-                                updated_body = current_body + f"\n\n## Attachments\n\n{links}"
-                                github_client.update_issue_body(number, updated_body, repo_name=repo_name)
-                    except Exception as attach_err:
-                        t["attachment_warning"] = (
-                            f"Attachments could not be added: {str(attach_err)[:200]}"
-                        )
+            # Body size guard (issue #261)
+            if len(body_with_images) > _BC_BODY_SIZE_THRESHOLD:
+                t["state"] = "size_warning"
+                t["body"] = body_with_images
+                t["body_char_count"] = len(body_with_images)
+                t["body_over_by"] = len(body_with_images) - _BC_BODY_SIZE_THRESHOLD
+                t["_default_labels"] = labels
+                t["_repo"] = issue_repo
+                t["finished_at"] = datetime.now(timezone.utc).isoformat()
+                _persist_bulk_job(job)
+                await _broadcast_bulk_event(job_id, {"type": "ticket_update", "ticket": dict(t)})
+            else:
+                try:
+                    number, url = github_client.create_issue(
+                        title=t["title"],
+                        body=body_with_images,
+                        labels=labels,
+                        repo_name=issue_repo,
+                    )
+                    t["state"] = "created"
+                    t["issue_num"] = number
+                    t["issue_url"] = url
+                    t["body"] = body_with_images
+                    t["body_preview"] = body_with_images[:200]
+                    t["label_pills"] = labels
+                except Exception as e:
+                    t["state"] = "failed"
+                    t["error"] = f"GitHub issue creation failed: {str(e)[:200]}"
 
-            t["finished_at"] = datetime.now(timezone.utc).isoformat()
-            t.pop("_default_labels", None)
-            t.pop("_repo", None)
-            _persist_bulk_job(job)
-            await _broadcast_bulk_event(job_id, {"type": "ticket_update", "ticket": dict(t)})
+                t["finished_at"] = datetime.now(timezone.utc).isoformat()
+                t.pop("_default_labels", None)
+                t.pop("_repo", None)
+                _persist_bulk_job(job)
+                await _broadcast_bulk_event(job_id, {"type": "ticket_update", "ticket": dict(t)})
 
         # Update job status
         all_done = all(
-            tt["state"] in ("created", "failed", "skipped") for tt in job["tickets"]
+            tt["state"] in ("created", "failed", "skipped", "size_warning") for tt in job["tickets"]
         )
         if all_done:
             job["status"] = "done"
@@ -5341,6 +5571,489 @@ async def bulk_retry_ticket(job_id: str, body: BulkRetryBody):
             await _broadcast_bulk_event(job_id, {"type": "job_done", "job_id": job_id})
 
     asyncio.create_task(_retry_task())
+    return {"ok": True}
+
+
+async def _post_ticket_body_to_github(job_id: str, index: int, body_text: str) -> None:
+    """Post a ticket body directly to GitHub (no BA drafting) and update job state."""
+    job = _bulk_jobs.get(job_id)
+    if not job:
+        return
+    tickets = job["tickets"]
+    if index < 0 or index >= len(tickets):
+        return
+    t = tickets[index]
+
+    # Transition to drafting state while posting
+    t["state"] = "drafting"
+    t["started_at"] = datetime.now(timezone.utc).isoformat()
+    t["error"] = None
+    _persist_bulk_job(job)
+    await _broadcast_bulk_event(job_id, {"type": "ticket_update", "ticket": dict(t)})
+
+    issue_repo = t.get("_repo") or job.get("repo") or None
+    labels = ["backlog"] + job.get("default_labels", [])
+
+    # Use the stored title if available, otherwise derive from body first line
+    title = t.get("title") or ""
+    if not title:
+        first_line = (body_text.strip().splitlines() or [""])[0]
+        title = first_line.lstrip("# ").strip()[:120] or "Untitled ticket"
+
+    # Body size guard (issue #261)
+    if len(body_text) > _BC_BODY_SIZE_THRESHOLD:
+        t["state"] = "size_warning"
+        t["body"] = body_text
+        t["body_char_count"] = len(body_text)
+        t["body_over_by"] = len(body_text) - _BC_BODY_SIZE_THRESHOLD
+        t["_default_labels"] = labels
+        t["_repo"] = issue_repo
+        t["finished_at"] = datetime.now(timezone.utc).isoformat()
+        _persist_bulk_job(job)
+        await _broadcast_bulk_event(job_id, {"type": "ticket_update", "ticket": dict(t)})
+        # Update job status (size_warning pauses processing)
+        all_done = all(
+            tt["state"] in ("created", "failed", "skipped", "size_warning") for tt in job["tickets"]
+        )
+        if all_done:
+            job["status"] = "done"
+            _persist_bulk_job(job)
+            await _broadcast_bulk_event(job_id, {"type": "job_done", "job_id": job_id})
+        return
+
+    try:
+        number, url = github_client.create_issue(
+            title=title,
+            body=body_text,
+            labels=labels,
+            repo_name=issue_repo,
+        )
+        t["state"] = "created"
+        t["body"] = body_text
+        t["issue_num"] = number
+        t["issue_url"] = url
+        t["body_preview"] = body_text[:200]
+        t["label_pills"] = labels
+        t["finished_at"] = datetime.now(timezone.utc).isoformat()
+        t.pop("_default_labels", None)
+        t.pop("_repo", None)
+    except Exception as e:
+        err_msg = str(e)[:300]
+        t["state"] = "failed"
+        t["error"] = err_msg
+        t["last_error"] = err_msg
+        t["retry_count"] = (t.get("retry_count") or 0) + 1
+        t["finished_at"] = datetime.now(timezone.utc).isoformat()
+
+    _persist_bulk_job(job)
+    await _broadcast_bulk_event(job_id, {"type": "ticket_update", "ticket": dict(t)})
+
+    # Update job status
+    all_done = all(
+        tt["state"] in ("created", "failed", "skipped", "size_warning") for tt in job["tickets"]
+    )
+    if all_done:
+        job["status"] = "done"
+        _persist_bulk_job(job)
+        await _broadcast_bulk_event(job_id, {"type": "job_done", "job_id": job_id})
+
+
+class BulkRetryWithBodyBody(BaseModel):
+    index: int
+    body: str
+
+
+@app.post("/api/tickets/bulk/{job_id}/retry-with-body")
+async def bulk_retry_ticket_with_body(job_id: str, body: BulkRetryWithBodyBody):
+    """Retry a failed ticket by POSTing the supplied body directly to GitHub (no BA drafting)."""
+    job = _bulk_jobs.get(job_id)
+    if not job:
+        raise HTTPException(404, detail="Job not found")
+    tickets = job["tickets"]
+    if body.index < 0 or body.index >= len(tickets):
+        raise HTTPException(422, detail="Invalid ticket index")
+    ticket = tickets[body.index]
+    if ticket["state"] not in ("failed", "skipped"):
+        return {"ok": True, "state": ticket["state"]}
+
+    job["status"] = "running"
+    _persist_bulk_job(job)
+
+    asyncio.create_task(_post_ticket_body_to_github(job_id, body.index, body.body))
+    return {"ok": True}
+
+
+@app.post("/api/tickets/bulk/{job_id}/retry-with-image")
+async def bulk_retry_with_image(
+    job_id: str,
+    index: int = Form(...),
+    body_text: str = Form(default=""),
+    file: UploadFile = File(default=None),
+):
+    """Retry a failed ticket with an optional new image committed to issue-assets."""
+    job = _bulk_jobs.get(job_id)
+    if not job:
+        raise HTTPException(404, detail="Job not found")
+    tickets = job["tickets"]
+    if index < 0 or index >= len(tickets):
+        raise HTTPException(422, detail="Invalid ticket index")
+    ticket = tickets[index]
+    if ticket["state"] not in ("failed", "skipped"):
+        return {"ok": True, "state": ticket["state"]}
+
+    final_body = body_text or ticket.get("body") or ""
+
+    # Commit new image and append its URL to body
+    if file and file.filename:
+        ext = Path(file.filename).suffix.lower()
+        if ext not in _BULK_IMAGE_EXTS:
+            raise HTTPException(
+                422,
+                detail=f"Only PNG and JPG images are allowed (got '{ext}').",
+            )
+        content = await file.read()
+        if len(content) > _MAX_FILE_SIZE_BYTES:
+            raise HTTPException(422, detail="File exceeds the 25 MB per-file limit.")
+
+        repo = job["repo"]
+        sanitized = _sanitize_filename(file.filename)
+
+        def _commit_single_image() -> str:
+            _ensure_attachments_branch(repo)
+            cache_dir = _init_attachment_cache(repo)
+            existing = _list_existing_assets(cache_dir)
+            final_name = _resolve_collision(sanitized, existing)
+            _commit_assets_to_branch(cache_dir, [(final_name, content)])
+            return (
+                f"https://raw.githubusercontent.com/{repo}/"
+                f"{_ATTACHMENTS_BRANCH}/references/issue-assets/{final_name}"
+            )
+
+        try:
+            img_url = await asyncio.to_thread(_commit_single_image)
+            final_body = final_body + f"\n\n![{file.filename}]({img_url})"
+        except Exception as e:
+            raise HTTPException(500, detail=f"Image commit failed: {str(e)[:200]}")
+
+    if len(final_body) > 65536:
+        final_body = final_body[:65536]
+
+    job["status"] = "running"
+    _persist_bulk_job(job)
+
+    asyncio.create_task(_post_ticket_body_to_github(job_id, index, final_body))
+    return {"ok": True}
+
+
+class BulkRetryAllBody(BaseModel):
+    bodies: dict[str, str]  # str(index) -> body text
+
+
+@app.post("/api/tickets/bulk/{job_id}/retry-all")
+async def bulk_retry_all_failed(job_id: str, body: BulkRetryAllBody):
+    """Retry all failed tickets by POSTing each ticket's edited body directly to GitHub."""
+    job = _bulk_jobs.get(job_id)
+    if not job:
+        raise HTTPException(404, detail="Job not found")
+    tickets = job["tickets"]
+
+    retried = 0
+    for idx_str, body_text in body.bodies.items():
+        try:
+            idx = int(idx_str)
+        except ValueError:
+            continue
+        if idx < 0 or idx >= len(tickets):
+            continue
+        t = tickets[idx]
+        if t["state"] != "failed":
+            continue
+        job["status"] = "running"
+        asyncio.create_task(_post_ticket_body_to_github(job_id, idx, body_text))
+        retried += 1
+
+    if retried > 0:
+        _persist_bulk_job(job)
+
+    return {"ok": True, "retried": retried}
+
+
+# ── Body-size remediation endpoints (issue #261) ─────────────────────────────
+
+class SizeRemedyCommentBody(BaseModel):
+    index: int
+
+
+@app.post("/api/tickets/bulk/{job_id}/size-remedy-comment")
+async def bulk_size_remedy_comment(job_id: str, body: SizeRemedyCommentBody):
+    """Remediation: create issue with body trimmed to threshold, post overflow as comment.
+
+    Accepts a ticket in size_warning state, creates the issue with a trimmed body,
+    then immediately posts the overflow as a follow-up comment.
+    """
+    job = _bulk_jobs.get(job_id)
+    if not job:
+        raise HTTPException(404, detail="Job not found")
+    tickets = job["tickets"]
+    if body.index < 0 or body.index >= len(tickets):
+        raise HTTPException(422, detail="Invalid ticket index")
+    ticket = tickets[body.index]
+    if ticket["state"] != "size_warning":
+        return {"ok": True, "state": ticket["state"]}
+
+    full_body = ticket.get("body") or ""
+    title = ticket.get("title") or "Untitled ticket"
+    issue_repo = ticket.get("_repo") or job.get("repo") or None
+    labels = ticket.get("_default_labels") or (["backlog"] + job.get("default_labels", []))
+
+    # Trim body to fit within threshold, appending a note about the overflow
+    overflow_note = "\n\n---\n*Body exceeded size limit — continued in first comment.*"
+    max_trimmed = _BC_BODY_SIZE_THRESHOLD - len(overflow_note)
+    trimmed_body = full_body[:max_trimmed] + overflow_note
+    overflow_content = full_body[max_trimmed:]
+
+    # Transition to drafting state while posting
+    ticket["state"] = "drafting"
+    ticket["started_at"] = datetime.now(timezone.utc).isoformat()
+    ticket["error"] = None
+    _persist_bulk_job(job)
+    job["status"] = "running"
+    await _broadcast_bulk_event(job_id, {"type": "ticket_update", "ticket": dict(ticket)})
+
+    async def _remedy_task():
+        try:
+            number, url = await asyncio.to_thread(
+                github_client.create_issue,
+                title=title,
+                body=trimmed_body,
+                labels=labels,
+                repo_name=issue_repo,
+            )
+            # Post overflow as comment
+            comment_body = f"*Continued from issue body (overflow content):*\n\n{overflow_content}"
+            await asyncio.to_thread(
+                github_client.add_comment,
+                issue_id=number,
+                body=comment_body,
+                repo_name=issue_repo,
+            )
+            ticket["state"] = "created"
+            ticket["issue_num"] = number
+            ticket["issue_url"] = url
+            ticket["body"] = trimmed_body
+            ticket["body_preview"] = trimmed_body[:200]
+            ticket["label_pills"] = labels
+            ticket.pop("_default_labels", None)
+            ticket.pop("_repo", None)
+            ticket.pop("body_char_count", None)
+            ticket.pop("body_over_by", None)
+        except Exception as e:
+            ticket["state"] = "failed"
+            ticket["error"] = f"Size remedy failed: {str(e)[:200]}"
+            ticket["last_error"] = ticket["error"]
+            ticket["retry_count"] = (ticket.get("retry_count") or 0) + 1
+
+        ticket["finished_at"] = datetime.now(timezone.utc).isoformat()
+        _persist_bulk_job(job)
+        await _broadcast_bulk_event(job_id, {"type": "ticket_update", "ticket": dict(ticket)})
+
+        all_done = all(
+            tt["state"] in ("created", "failed", "skipped", "size_warning")
+            for tt in job["tickets"]
+        )
+        has_size_warnings = any(t["state"] == "size_warning" for t in job["tickets"])
+        if all_done and not has_size_warnings:
+            job["status"] = "done"
+            _persist_bulk_job(job)
+            await _broadcast_bulk_event(job_id, {"type": "job_done", "job_id": job_id})
+
+    asyncio.create_task(_remedy_task())
+    return {"ok": True}
+
+
+class SizeRemedyImagesBody(BaseModel):
+    index: int
+
+
+def _extract_and_replace_base64_images(body_text: str, repo: str) -> tuple[str, int]:
+    """Find all base64/data-URI images in body, upload to attachments branch, replace with links.
+
+    Returns (updated_body, image_count).
+    """
+    import re
+    import base64 as _base64
+    import hashlib
+
+    # Match markdown image syntax with data URI: ![alt](data:image/...;base64,...)
+    # Also matches bare data URIs in <img src="data:..."> or plain data:... references
+    pattern = re.compile(
+        r'!\[([^\]]*)\]\(data:image/([a-zA-Z]+);base64,([A-Za-z0-9+/=\s]+)\)'
+    )
+
+    _ensure_attachments_branch(repo)
+    cache_dir = _init_attachment_cache(repo)
+    existing = set(_list_existing_assets(cache_dir))
+
+    replacements: list[tuple[str, str, str, str]] = []  # (full_match, alt, ext, raw_url)
+    file_data: list[tuple[str, bytes]] = []
+    used_names: set[str] = set(existing)
+
+    for m in pattern.finditer(body_text):
+        full_match = m.group(0)
+        alt = m.group(1)
+        ext = m.group(2).lower()
+        b64_data = re.sub(r'\s', '', m.group(3))
+        try:
+            img_bytes = _base64.b64decode(b64_data)
+        except Exception:
+            continue  # skip if decode fails
+
+        # Use SHA256 hash as filename to avoid duplicates
+        digest = hashlib.sha256(img_bytes).hexdigest()[:16]
+        fname = f"img-{digest}.{ext}"
+        final_name = _resolve_collision(fname, used_names)
+        used_names.add(final_name)
+        file_data.append((final_name, img_bytes))
+
+        raw_url = (
+            f"https://raw.githubusercontent.com/{repo}/"
+            f"{_ATTACHMENTS_BRANCH}/references/issue-assets/{final_name}"
+        )
+        replacements.append((full_match, alt, ext, raw_url))
+
+    if not file_data:
+        return body_text, 0
+
+    _commit_assets_to_branch(cache_dir, file_data)
+
+    # Replace each match with a markdown link
+    updated = body_text
+    for i, (full_match, alt, _ext, raw_url) in enumerate(replacements):
+        link_alt = alt or f"image-{i + 1}"
+        updated = updated.replace(full_match, f"![{link_alt}]({raw_url})", 1)
+
+    return updated, len(replacements)
+
+
+@app.post("/api/tickets/bulk/{job_id}/size-remedy-images")
+async def bulk_size_remedy_images(job_id: str, body: SizeRemedyImagesBody):
+    """Remediation: extract base64 images from body, upload to attachments branch, replace with links.
+
+    After replacement the body length is rechecked. If still over threshold the ticket stays in
+    size_warning state with updated counts. If under threshold the issue is created immediately.
+    """
+    job = _bulk_jobs.get(job_id)
+    if not job:
+        raise HTTPException(404, detail="Job not found")
+    tickets = job["tickets"]
+    if body.index < 0 or body.index >= len(tickets):
+        raise HTTPException(422, detail="Invalid ticket index")
+    ticket = tickets[body.index]
+    if ticket["state"] != "size_warning":
+        return {"ok": True, "state": ticket["state"]}
+
+    full_body = ticket.get("body") or ""
+    title = ticket.get("title") or "Untitled ticket"
+    issue_repo = ticket.get("_repo") or job.get("repo") or None
+    labels = ticket.get("_default_labels") or (["backlog"] + job.get("default_labels", []))
+    repo = job.get("repo") or ""
+
+    # Transition to drafting while processing
+    ticket["state"] = "drafting"
+    ticket["started_at"] = datetime.now(timezone.utc).isoformat()
+    ticket["error"] = None
+    _persist_bulk_job(job)
+    job["status"] = "running"
+    await _broadcast_bulk_event(job_id, {"type": "ticket_update", "ticket": dict(ticket)})
+
+    async def _image_remedy_task():
+        try:
+            updated_body, img_count = await asyncio.to_thread(
+                _extract_and_replace_base64_images, full_body, repo
+            )
+        except Exception as e:
+            ticket["state"] = "size_warning"
+            ticket["body"] = full_body
+            ticket["body_char_count"] = len(full_body)
+            ticket["body_over_by"] = len(full_body) - _BC_BODY_SIZE_THRESHOLD
+            ticket["_default_labels"] = labels
+            ticket["_repo"] = issue_repo
+            ticket["error"] = f"Image upload failed: {str(e)[:200]}"
+            ticket["finished_at"] = datetime.now(timezone.utc).isoformat()
+            _persist_bulk_job(job)
+            await _broadcast_bulk_event(job_id, {"type": "ticket_update", "ticket": dict(ticket)})
+            return
+
+        if img_count == 0:
+            # No images found — go back to size_warning with same body
+            ticket["state"] = "size_warning"
+            ticket["body"] = full_body
+            ticket["body_char_count"] = len(full_body)
+            ticket["body_over_by"] = len(full_body) - _BC_BODY_SIZE_THRESHOLD
+            ticket["_default_labels"] = labels
+            ticket["_repo"] = issue_repo
+            ticket["error"] = "No inlined base64 images found to convert"
+            ticket["finished_at"] = datetime.now(timezone.utc).isoformat()
+            _persist_bulk_job(job)
+            await _broadcast_bulk_event(job_id, {"type": "ticket_update", "ticket": dict(ticket)})
+            return
+
+        # Recheck size after image replacement
+        if len(updated_body) > _BC_BODY_SIZE_THRESHOLD:
+            # Still over — stay in size_warning with updated body and counts
+            ticket["state"] = "size_warning"
+            ticket["body"] = updated_body
+            ticket["body_char_count"] = len(updated_body)
+            ticket["body_over_by"] = len(updated_body) - _BC_BODY_SIZE_THRESHOLD
+            ticket["_default_labels"] = labels
+            ticket["_repo"] = issue_repo
+            ticket["error"] = None
+            ticket["finished_at"] = datetime.now(timezone.utc).isoformat()
+            _persist_bulk_job(job)
+            await _broadcast_bulk_event(job_id, {"type": "ticket_update", "ticket": dict(ticket)})
+            return
+
+        # Body now fits — create the issue
+        try:
+            number, url = await asyncio.to_thread(
+                github_client.create_issue,
+                title=title,
+                body=updated_body,
+                labels=labels,
+                repo_name=issue_repo,
+            )
+            ticket["state"] = "created"
+            ticket["issue_num"] = number
+            ticket["issue_url"] = url
+            ticket["body"] = updated_body
+            ticket["body_preview"] = updated_body[:200]
+            ticket["label_pills"] = labels
+            ticket.pop("_default_labels", None)
+            ticket.pop("_repo", None)
+            ticket.pop("body_char_count", None)
+            ticket.pop("body_over_by", None)
+            ticket["error"] = None
+        except Exception as e:
+            ticket["state"] = "failed"
+            ticket["error"] = f"GitHub issue creation failed: {str(e)[:200]}"
+            ticket["last_error"] = ticket["error"]
+            ticket["retry_count"] = (ticket.get("retry_count") or 0) + 1
+
+        ticket["finished_at"] = datetime.now(timezone.utc).isoformat()
+        _persist_bulk_job(job)
+        await _broadcast_bulk_event(job_id, {"type": "ticket_update", "ticket": dict(ticket)})
+
+        all_done = all(
+            tt["state"] in ("created", "failed", "skipped", "size_warning")
+            for tt in job["tickets"]
+        )
+        has_size_warnings = any(t["state"] == "size_warning" for t in job["tickets"])
+        if all_done and not has_size_warnings:
+            job["status"] = "done"
+            _persist_bulk_job(job)
+            await _broadcast_bulk_event(job_id, {"type": "job_done", "job_id": job_id})
+
+    asyncio.create_task(_image_remedy_task())
     return {"ok": True}
 
 

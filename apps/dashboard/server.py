@@ -21,7 +21,7 @@ except ImportError:
     _psutil = None  # type: ignore[assignment]
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, model_validator
@@ -4080,8 +4080,99 @@ class CreateTicketBody(BaseModel):
     extra_labels: list[str] = []
 
 
+# ── Single-ticket background estimator (issue #267) ───────────────────────────
+
+_ESTIMATE_ISSUE_SCRIPT = _SERVICES_DIR / "estimate_issue.py"
+
+
+async def _run_estimator_for_issue(issue_number: int, repo: str) -> None:
+    """Run estimate_issue.py in the background for a single newly created ticket.
+
+    Posts the estimate comment and applies the 'estimated' + size-* labels via
+    the resilient update_ticket.py path (issue #267).  Failures are non-fatal:
+    a warning comment is posted on the issue and the ticket-creation response is
+    never affected.  Invalidates the open-issues cache after completion so the
+    size badge appears on the next dashboard load.
+    """
+    import logging as _logging
+
+    stdout_bytes: bytes = b""
+    stderr_bytes: bytes = b""
+    returncode: int = -1
+
+    try:
+        cmd = [
+            sys.executable,
+            str(_ESTIMATE_ISSUE_SCRIPT),
+            "--issue", str(issue_number),
+            "--repo", repo,
+            "--save-comment",
+            "--save-label",
+        ]
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        try:
+            stdout_bytes, stderr_bytes = await asyncio.wait_for(
+                proc.communicate(), timeout=240.0
+            )
+            returncode = proc.returncode or 0
+        except asyncio.TimeoutError:
+            proc.kill()
+            _logging.warning(
+                f"[estimator] background estimation for #{issue_number} timed out after 240s"
+            )
+            # Post warning comment via update_ticket.py resilient path
+            _post_estimator_warning(issue_number, repo, "estimation timed out after 240s")
+            return
+    except Exception as exc:
+        _logging.warning(f"[estimator] background estimation for #{issue_number} failed: {exc}")
+        _post_estimator_warning(issue_number, repo, str(exc))
+        return
+
+    if returncode != 0:
+        err = stderr_bytes.decode("utf-8", errors="replace").strip()[:300]
+        _logging.warning(
+            f"[estimator] estimate_issue.py exited {returncode} for #{issue_number}: {err}"
+        )
+        _post_estimator_warning(issue_number, repo, f"estimator exited {returncode}: {err or '(no output)'}")
+        return
+
+    # Invalidate the issues cache so the size badge appears on next load.
+    github_client.invalidate(f"open_issues_body:")
+    github_client.invalidate(f"open_issues:")
+    github_client.invalidate(f"issues:")
+
+
+def _post_estimator_warning(issue_number: int, repo: str, reason: str) -> None:
+    """Post a warning comment on the issue via gh CLI (fire-and-forget).
+
+    Failures here are silently swallowed — the ticket was already created
+    successfully and the estimation failure should not surface as an HTTP error.
+    """
+    import logging as _logging
+    body = (
+        f"**Background estimation failed for #{issue_number}.**\n\n"
+        f"Reason: {reason}\n\n"
+        f"Please run `python3 services/sprint_manager/estimate_issue.py "
+        f"--issue {issue_number} --save-comment --save-label` manually, "
+        f"or wait for the next sprint estimator run."
+    )
+    try:
+        subprocess.run(
+            ["gh", "issue", "comment", str(issue_number), "--repo", repo, "--body", body],
+            capture_output=True,
+            timeout=30,
+        )
+    except Exception as exc:
+        _logging.warning(f"[estimator] could not post warning comment for #{issue_number}: {exc}")
+
+
 @app.post("/api/tickets/create", status_code=201)
 async def create_ticket_from_draft(
+    background_tasks: BackgroundTasks,
     draft_id: str = Form(default=""),
     title: str = Form(...),
     body: str = Form(default=""),
@@ -4204,6 +4295,17 @@ async def create_ticket_from_draft(
     github_client.invalidate(f"open_issues_body:")
     github_client.invalidate(f"open_issues:")
     github_client.invalidate(f"issues:")
+
+    # Kick off the estimator as a background task (issue #267).
+    # Resolve the repo now (while in the request context) so the background
+    # coroutine has a concrete string.
+    try:
+        est_repo = github_client.get_repo_for_operation(project or None)
+    except Exception:
+        est_repo = None
+    if est_repo and _ESTIMATE_ISSUE_SCRIPT.exists():
+        background_tasks.add_task(_run_estimator_for_issue, number, est_repo)
+
     return {"number": number, "url": url}
 
 

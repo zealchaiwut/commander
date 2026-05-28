@@ -618,12 +618,26 @@ function ticketCardHtml(ticket, repo) {
     ? `<div class="ticket-chips">${sprintChip}${branchChip}</div>`
     : '';
 
+  // Size / estimating badge (issue #267): show size-S/M/L/XL when available,
+  // or an "estimating…" placeholder while the background task runs.
+  const labels = ticket.labels || [];
+  const hasEstimated = labels.includes('estimated');
+  const sizeLabel = labels.find(l => /^size-/.test(l));
+  let sizeBadgeHtml = '';
+  if (sizeLabel) {
+    const sizeVal = sizeLabel.replace('size-', '');
+    sizeBadgeHtml = `<span class="ticket-size-badge ticket-size-${sizeVal}">${escapeHtml(sizeVal)}</span>`;
+  } else if (!hasEstimated) {
+    sizeBadgeHtml = `<span class="ticket-size-badge ticket-size-estimating">estimating…</span>`;
+  }
+
   return `
     <div class="ticket-card">
       <div class="ticket-top">
         <a class="ticket-num" href="${escapeHtml(ticket.url)}" target="_blank" rel="noopener">#${ticket.number}</a>
         <a class="ticket-title ticket-title-link" href="${escapeHtml(ticket.url)}" target="_blank" rel="noopener">${escapeHtml(ticket.title)}</a>
         <span class="sbadge ${color}">${escapeHtml(ticket.status)}</span>
+        ${sizeBadgeHtml}
       </div>
       <div class="ticket-meta">${assignee}${sep}${updated}</div>
       ${chipsHtml}
@@ -4738,12 +4752,14 @@ function smgmtAgentStatusBadge(agentStatus, statusChangedAt) {
 }
 
 /**
- * Derive ticket run state (done | running | pending) from agent_status or labels.
+ * Derive ticket run state (done | failed | skipped | running | pending) from agent_status or labels.
  * Graceful fallback: if agent_status is absent, check GitHub labels.
  */
 function _smgmtTicketRunState(issueData) {
   const agentStatus = issueData.agent_status || '';
-  if (agentStatus === 'completed' || issueData.status === 'done' || issueData.status === 'skipped') {
+  if (agentStatus === 'failed') return 'failed';
+  if (issueData.status === 'skipped') return 'skipped';
+  if (agentStatus === 'completed' || issueData.status === 'done') {
     return 'done';
   }
   if (agentStatus === 'coder_running' || agentStatus === 'tester_running') {
@@ -4765,6 +4781,88 @@ function _smgmtActiveAgent(agentStatus) {
   if (agentStatus.includes('coder')) return 'coder';
   if (agentStatus.includes('tester')) return 'tester';
   return null;
+}
+
+/**
+ * Format a clock timestamp as HH:MM string.
+ * Used in stage labels like "TESTER RUNNING 10:17".
+ */
+function _smgmtClockHHMM(isoTimestamp) {
+  if (!isoTimestamp) return '';
+  try {
+    const ts = new Date(isoTimestamp);
+    const h = ts.getHours().toString().padStart(2, '0');
+    const m = ts.getMinutes().toString().padStart(2, '0');
+    return `${h}:${m}`;
+  } catch (_) { return ''; }
+}
+
+/**
+ * Format elapsed seconds as HH:MM (e.g. 90 -> "01:30").
+ * Used for the elapsed time counter element.
+ */
+function _smgmtFormatElapsedHHMM(secs) {
+  const totalMins = Math.floor(secs / 60);
+  const ss = secs % 60;
+  const hh = Math.floor(totalMins / 60);
+  const mm = totalMins % 60;
+  if (hh > 0) {
+    return `${hh.toString().padStart(2, '0')}:${mm.toString().padStart(2, '0')}`;
+  }
+  return `${mm.toString().padStart(2, '0')}:${ss.toString().padStart(2, '0')}`;
+}
+
+/**
+ * Build the stage label { text, cssClass } for a ticket given its run state and agent_status.
+ * Returns { text: string, cssClass: string } for the .smgmt-ticket-stage-label element.
+ *
+ * Stage label spec (issue #251):
+ *   running  → "TESTER RUNNING HH:MM" or "CODER RUNNING HH:MM"      (blue)
+ *   done     → "COMPLETED HH:MM"                                     (default/muted)
+ *   failed   → "TESTER REJECTED"                                     (red)
+ *   skipped  → "SKIPPED"                                             (muted)
+ *   pending  → "QUEUED" | "BACKLOG" | "SIT" | "UAT" (from labels)   (default)
+ */
+function _smgmtBuildStageLabel(runState, issueData) {
+  const agentStatus = issueData.agent_status || '';
+  const clockTime = _smgmtClockHHMM(issueData.status_changed_at);
+
+  if (runState === 'running') {
+    const agentType = _smgmtActiveAgent(agentStatus);
+    const prefix = agentType ? agentType.toUpperCase() : 'AGENT';
+    const text = clockTime ? `${prefix} RUNNING ${clockTime}` : `${prefix} RUNNING`;
+    return { text, cssClass: 'stage-running' };
+  }
+
+  if (runState === 'done') {
+    const text = clockTime ? `COMPLETED ${clockTime}` : 'COMPLETED';
+    return { text, cssClass: 'stage-completed' };
+  }
+
+  if (runState === 'failed') {
+    return { text: 'TESTER REJECTED', cssClass: 'stage-rejected' };
+  }
+
+  if (runState === 'skipped') {
+    return { text: 'SKIPPED', cssClass: 'stage-skipped' };
+  }
+
+  // pending: derive from GitHub labels / status
+  const labels = issueData.labels || [];
+  const labelNames = labels.map(l => (typeof l === 'string' ? l : l.name || ''));
+  if (issueData.status === 'uat' || labelNames.includes('uat')) {
+    return { text: 'UAT', cssClass: 'stage-uat' };
+  }
+  if (issueData.status === 'sit' || labelNames.includes('sit')) {
+    return { text: 'SIT', cssClass: 'stage-sit' };
+  }
+  if (issueData.status === 'in-progress' || labelNames.includes('in-progress')) {
+    return { text: 'QUEUED', cssClass: '' };
+  }
+  if (issueData.status === 'backlog' || labelNames.includes('backlog')) {
+    return { text: 'BACKLOG', cssClass: '' };
+  }
+  return { text: 'QUEUED', cssClass: '' };
 }
 
 /**
@@ -4900,14 +4998,12 @@ function _smgmtUpdateElapsedEl(el) {
   el.textContent = m > 0 ? `${m}m ${s}s` : `${s}s`;
 }
 
-/** Render elapsed time into the new elapsed-time element (mono, muted). */
+/** Render elapsed time into the new elapsed-time element (HH:MM format). */
 function _smgmtUpdateElapsedTimeEl(el) {
   const startTs = parseInt(el.dataset.startTs, 10);
   if (isNaN(startTs)) return;
   const secs = Math.floor((Date.now() - startTs) / 1000);
-  const m = Math.floor(secs / 60);
-  const s = secs % 60;
-  el.textContent = m > 0 ? `${m}m ${String(s).padStart(2, '0')}s` : `${s}s`;
+  el.textContent = _smgmtFormatElapsedHHMM(secs);
 }
 
 // Elapsed counter interval (AC7) — update all elapsed elements every second.

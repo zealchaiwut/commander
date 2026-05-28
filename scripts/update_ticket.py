@@ -187,15 +187,20 @@ def main():
     parser.add_argument("--status", required=True, choices=list(STATUS_MAP))
     parser.add_argument("--force",  action="store_true",
                         help="Skip UAT merge safeguard (prints warning to stderr)")
+    parser.add_argument("--repo",   default=None,
+                        help="Override repo (owner/name).  Defaults to auto-detected repo.")
     args = parser.parse_args()
 
     if args.status == "uat":
         _check_uat_safeguard(args.issue, args.force)
 
-    try:
-        repo = github_client.repo()
-    except ValueError as e:
-        sys.exit(str(e))
+    if args.repo:
+        repo = args.repo
+    else:
+        try:
+            repo = github_client.repo()
+        except ValueError as e:
+            sys.exit(str(e))
 
     mapping = STATUS_MAP[args.status]
 

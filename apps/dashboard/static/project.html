@@ -1352,6 +1352,9 @@
     .bc-card--failed  { border-color: var(--red); }
     .bc-card--drafting { border-color: var(--blue); }
     .bc-card--size_warning { border-color: var(--amber); }
+    .bc-card--estimating { border-color: var(--blue); }
+    .bc-card--sized { border-color: var(--green); }
+    .bc-card--estimate_failed { border-color: var(--amber); }
 
     /* Status dot */
     .bc-status-dot {
@@ -1370,6 +1373,31 @@
       width: 5px; height: 3px;
       border-left: 1.5px solid #fff; border-bottom: 1.5px solid #fff;
       transform: rotate(-45deg);
+    }
+    .bc-status-dot--estimating {
+      border-color: var(--blue); border-top-color: transparent;
+      animation: bc-spin .7s linear infinite;
+    }
+    .bc-status-dot--sized {
+      border-color: var(--green); background: var(--green); position: relative;
+    }
+    .bc-status-dot--sized::after {
+      content: ''; position: absolute; left: 2px; top: 1px;
+      width: 5px; height: 3px;
+      border-left: 1.5px solid #fff; border-bottom: 1.5px solid #fff;
+      transform: rotate(-45deg);
+    }
+    .bc-status-dot--estimate_failed {
+      border-color: var(--amber); background: var(--amber);
+      display: flex; align-items: center; justify-content: center;
+    }
+    .bc-status-dot--estimate_failed::after {
+      content: '!'; color: #fff; font-size: 7px; font-weight: 700;
+    }
+    .bc-size-badge {
+      display: inline-block; font-size: 10px; font-weight: 700; padding: 1px 6px;
+      border-radius: 4px; background: var(--green); color: #fff;
+      margin-left: 4px; vertical-align: middle; letter-spacing: 0.02em;
     }
     .bc-status-dot--failed {
       border-color: var(--red); background: var(--red);
@@ -4476,22 +4504,27 @@ function _bcUpdateBadge() {
   const job = _bcJobState;
   if (!job) { badge.className = 'bc-tab-badge hidden'; return; }
 
-  const tickets      = job.tickets || [];
-  const total        = tickets.length;
-  const created      = tickets.filter(t => t.state === 'created').length;
-  const failed       = tickets.filter(t => t.state === 'failed').length;
-  const sizeWarn     = tickets.filter(t => t.state === 'size_warning').length;
+  const tickets        = job.tickets || [];
+  const total          = tickets.length;
+  // In-progress: created (issue created, estimating not started), estimating, drafting
+  const inProgress     = tickets.filter(t => ['created', 'estimating', 'drafting'].includes(t.state)).length;
+  const sized          = tickets.filter(t => t.state === 'sized').length;
+  const estimateFailed = tickets.filter(t => t.state === 'estimate_failed').length;
+  const failed         = tickets.filter(t => t.state === 'failed').length;
+  const sizeWarn       = tickets.filter(t => t.state === 'size_warning').length;
+  const fullyDone      = sized + estimateFailed + failed;
 
   if (job.status === 'running') {
     badge.className = 'bc-tab-badge';
-    badge.innerHTML = `<span class="bc-tab-badge-spin">&#x27F3;</span>${created}/${total}`;
+    badge.innerHTML = `<span class="bc-tab-badge-spin">&#x27F3;</span>${fullyDone}/${total}`;
   } else if (job.status === 'done' || job.status === 'stopped') {
-    const issues = failed + sizeWarn;
+    const issues = failed + sizeWarn + estimateFailed;
     if (issues > 0) {
       badge.className = 'bc-tab-badge bc-tab-badge--warn';
       const parts = [];
-      if (failed > 0)   parts.push(`${failed} failed`);
-      if (sizeWarn > 0) parts.push(`${sizeWarn} oversized`);
+      if (failed > 0)         parts.push(`${failed} failed`);
+      if (sizeWarn > 0)       parts.push(`${sizeWarn} oversized`);
+      if (estimateFailed > 0) parts.push(`${estimateFailed} estimate failed`);
       badge.textContent = `⚠ ${parts.join(', ')}`;
     } else {
       badge.className = 'bc-tab-badge hidden';
@@ -4540,19 +4573,24 @@ function _bcRenderStep2() {
   const concurrency = job.concurrency || 3;
 
   const created      = tickets.filter(t => t.state === 'created').length;
+  const estimating   = tickets.filter(t => t.state === 'estimating').length;
+  const sized        = tickets.filter(t => t.state === 'sized').length;
+  const estimateFailed = tickets.filter(t => t.state === 'estimate_failed').length;
   const drafting     = tickets.filter(t => t.state === 'drafting').length;
   const pending      = tickets.filter(t => t.state === 'pending').length;
   const failed       = tickets.filter(t => t.state === 'failed').length;
   const skipped      = tickets.filter(t => t.state === 'skipped').length;
   const sizeWarning  = tickets.filter(t => t.state === 'size_warning').length;
   const total        = tickets.length;
+  // Terminal states: sized, estimate_failed, failed, skipped
+  const fullyDone    = sized + estimateFailed + failed + skipped;
 
   // Banner
   const banner = document.getElementById('bc-parallel-banner');
   if (banner) {
     if (job.status === 'running') {
       banner.innerHTML = `BA is drafting ${total} tickets in parallel — ` +
-        `${created} done, ${drafting} running, ${pending} queued` +
+        `${sized + estimateFailed} done, ${drafting + estimating + created} running, ${pending} queued` +
         `<span class="bc-concurrency-pill">concurrency: ${concurrency}</span>`;
     } else if (job.status === 'done') {
       if (sizeWarning > 0) {
@@ -4561,17 +4599,16 @@ function _bcRenderStep2() {
         banner.innerHTML = `All ${total} tickets processed.`;
       }
     } else if (job.status === 'stopped') {
-      banner.innerHTML = `Stopped. ${created} created, ${failed} failed, ${skipped} skipped.`;
+      banner.innerHTML = `Stopped. ${sized + estimateFailed} estimated, ${failed} failed, ${skipped} skipped.`;
     }
   }
 
   // Summary strip
   const strip = document.getElementById('bc-summary-strip');
   if (strip) {
-    const done = created + failed + skipped;
-    const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+    const pct = total > 0 ? Math.round((fullyDone / total) * 100) : 0;
     let etaHtml = '';
-    if (created > 0 && pending > 0 && _bcAvgMs) {
+    if ((sized + estimateFailed) > 0 && pending > 0 && _bcAvgMs) {
       const estMs = (_bcAvgMs / concurrency) * pending;
       const estSec = Math.round(estMs / 1000);
       const m = Math.floor(estSec / 60);
@@ -4582,8 +4619,8 @@ function _bcRenderStep2() {
       ? `<span class="bc-metric" style="color:var(--amber)"><span class="bc-metric-count">${sizeWarning}</span> Oversized</span>`
       : '';
     strip.innerHTML = `
-      <span class="bc-metric bc-metric--created"><span class="bc-metric-count">${created}</span> Created</span>
-      <span class="bc-metric bc-metric--drafting"><span class="bc-metric-count">${drafting}</span> Drafting</span>
+      <span class="bc-metric bc-metric--created"><span class="bc-metric-count">${sized + estimateFailed}</span> Done</span>
+      <span class="bc-metric bc-metric--drafting"><span class="bc-metric-count">${drafting + estimating + created}</span> In progress</span>
       <span class="bc-metric bc-metric--pending"><span class="bc-metric-count">${pending}</span> Pending</span>
       ${sizeWarnHtml}
       <div class="bc-progress-wrap"><div class="bc-progress-bar" style="width:${pct}%"></div></div>
@@ -4670,18 +4707,43 @@ function _bcRenderCard(t) {
     const issueUrl = t.issue_url || '#';
     head    = `<a class="bc-issue-badge" href="${escHtml(issueUrl)}" target="_blank" rel="noopener">#${t.issue_num}</a>`;
     preview = escHtml((t.body_preview || t.body || '').slice(0, 200));
-    if (t.finished_at && t.started_at) {
-      const elapsed = Math.round((new Date(t.finished_at).getTime() - new Date(t.started_at).getTime()) / 1000);
-      label = `Created in ${elapsed}s`;
-    } else {
-      label = 'Created';
-    }
+    label   = 'Created';
     const labelsArr = t.label_pills || [];
     if (labelsArr.length > 0) {
       tags = `<div class="bc-card-tags">${labelsArr.map(l => `<span class="bc-tag">${escHtml(l)}</span>`).join('')}</div>`;
     }
     if (t.attachment_warning) {
       tags += `<div class="bc-attach-warn">${escHtml(t.attachment_warning)}</div>`;
+    }
+    actions = `<a class="bc-action-btn" href="${escHtml(issueUrl)}" target="_blank" rel="noopener" title="Open on GitHub">&#x2197;</a>`;
+  } else if (t.state === 'estimating') {
+    const issueUrl = t.issue_url || '#';
+    head    = `<a class="bc-issue-badge" href="${escHtml(issueUrl)}" target="_blank" rel="noopener">#${t.issue_num}</a>`;
+    preview = 'Estimating size (S/M/L/XL)...';
+    label   = 'estimating…';
+    actions = `<a class="bc-action-btn" href="${escHtml(issueUrl)}" target="_blank" rel="noopener" title="Open on GitHub">&#x2197;</a>`;
+  } else if (t.state === 'sized') {
+    const issueUrl = t.issue_url || '#';
+    const sizeBadge = t.estimate_size ? `<span class="bc-size-badge">${escHtml(t.estimate_size)}</span>` : '';
+    head    = `<a class="bc-issue-badge" href="${escHtml(issueUrl)}" target="_blank" rel="noopener">#${t.issue_num}</a>${sizeBadge}`;
+    preview = escHtml((t.body_preview || t.body || '').slice(0, 200));
+    label   = t.estimate_size ? `Sized: ${t.estimate_size}` : 'Sized';
+    const labelsArr = t.label_pills || [];
+    if (labelsArr.length > 0) {
+      tags = `<div class="bc-card-tags">${labelsArr.map(l => `<span class="bc-tag">${escHtml(l)}</span>`).join('')}</div>`;
+    }
+    if (t.attachment_warning) {
+      tags += `<div class="bc-attach-warn">${escHtml(t.attachment_warning)}</div>`;
+    }
+    actions = `<a class="bc-action-btn" href="${escHtml(issueUrl)}" target="_blank" rel="noopener" title="Open on GitHub">&#x2197;</a>`;
+  } else if (t.state === 'estimate_failed') {
+    const issueUrl = t.issue_url || '#';
+    head    = `<a class="bc-issue-badge" href="${escHtml(issueUrl)}" target="_blank" rel="noopener">#${t.issue_num}</a>`;
+    preview = escHtml((t.estimate_error || 'Estimation failed').slice(0, 120));
+    label   = 'Estimate failed';
+    const labelsArr = t.label_pills || [];
+    if (labelsArr.length > 0) {
+      tags = `<div class="bc-card-tags">${labelsArr.map(l => `<span class="bc-tag">${escHtml(l)}</span>`).join('')}</div>`;
     }
     actions = `<a class="bc-action-btn" href="${escHtml(issueUrl)}" target="_blank" rel="noopener" title="Open on GitHub">&#x2197;</a>`;
   } else if (t.state === 'failed') {

@@ -4587,6 +4587,158 @@ def _post_estimator_warning(issue_number: int, repo: str, reason: str) -> None:
         _logging.warning(f"[estimator] could not post warning comment for #{issue_number}: {exc}")
 
 
+# ── Bulk-create background estimator (issue #265) ─────────────────────────────
+
+# Global semaphore: max 3 concurrent bulk-estimation tasks (mirrors BA concurrency cap).
+# Initialized lazily on first use so it is always created in the correct event loop.
+_bulk_estimator_semaphore: asyncio.Semaphore | None = None
+
+
+def _get_bulk_estimator_semaphore() -> asyncio.Semaphore:
+    """Return (or create) the global semaphore for bulk estimation tasks."""
+    global _bulk_estimator_semaphore
+    if _bulk_estimator_semaphore is None:
+        _bulk_estimator_semaphore = asyncio.Semaphore(3)
+    return _bulk_estimator_semaphore
+
+
+def _extract_size_from_estimator_stdout(stdout: str) -> str | None:
+    """Parse size (S/M/L/XL) from estimate_issue.py stdout.
+
+    The script prints the JSON estimate after the 'Saved:' line.
+    """
+    import re as _re
+    import logging as _logging
+    # Brace-matching scan for the first top-level JSON object in stdout
+    start = stdout.find("{")
+    if start < 0:
+        return None
+    depth = 0
+    for i in range(start, len(stdout)):
+        if stdout[i] == "{":
+            depth += 1
+        elif stdout[i] == "}":
+            depth -= 1
+            if depth == 0:
+                try:
+                    data = json.loads(stdout[start : i + 1])
+                    size = data.get("size")
+                    if size in {"S", "M", "L", "XL"}:
+                        return size
+                except (json.JSONDecodeError, Exception):
+                    pass
+                break
+    return None
+
+
+async def _run_bulk_estimator_for_ticket(
+    job_id: str,
+    index: int,
+    issue_number: int,
+    repo: str,
+) -> None:
+    """Run the estimator for one bulk-created ticket and update job state.
+
+    State transitions: created → estimating → sized (S/M/L/XL) | estimate_failed.
+    Failures post a per-ticket warning comment without blocking other tickets.
+    """
+    import logging as _logging
+
+    job = _bulk_jobs.get(job_id)
+    if not job:
+        return
+    ticket = job["tickets"][index]
+
+    # Transition to estimating
+    ticket["state"] = "estimating"
+    _persist_bulk_job(job)
+    await _broadcast_bulk_event(job_id, {"type": "ticket_update", "ticket": dict(ticket)})
+
+    semaphore = _get_bulk_estimator_semaphore()
+
+    stdout_bytes: bytes = b""
+    stderr_bytes: bytes = b""
+    returncode: int = -1
+
+    try:
+        async with semaphore:
+            cmd = [
+                sys.executable,
+                str(_ESTIMATE_ISSUE_SCRIPT),
+                "--issue", str(issue_number),
+                "--repo", repo,
+                "--save-comment",
+                "--save-label",
+            ]
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            try:
+                stdout_bytes, stderr_bytes = await asyncio.wait_for(
+                    proc.communicate(), timeout=240.0
+                )
+                returncode = proc.returncode or 0
+            except asyncio.TimeoutError:
+                proc.kill()
+                _logging.warning(
+                    f"[bulk-estimator] estimation for #{issue_number} (job {job_id}) timed out after 240s"
+                )
+                _post_estimator_warning(issue_number, repo, "bulk estimation timed out after 240s")
+                # Re-fetch job in case it was updated while waiting
+                job = _bulk_jobs.get(job_id)
+                if job:
+                    ticket = job["tickets"][index]
+                    ticket["state"] = "estimate_failed"
+                    ticket["estimate_error"] = "estimation timed out after 240s"
+                    _persist_bulk_job(job)
+                    await _broadcast_bulk_event(job_id, {"type": "ticket_update", "ticket": dict(ticket)})
+                return
+    except Exception as exc:
+        _logging.warning(f"[bulk-estimator] estimation for #{issue_number} failed: {exc}")
+        _post_estimator_warning(issue_number, repo, str(exc))
+        job = _bulk_jobs.get(job_id)
+        if job:
+            ticket = job["tickets"][index]
+            ticket["state"] = "estimate_failed"
+            ticket["estimate_error"] = str(exc)[:200]
+            _persist_bulk_job(job)
+            await _broadcast_bulk_event(job_id, {"type": "ticket_update", "ticket": dict(ticket)})
+        return
+
+    job = _bulk_jobs.get(job_id)
+    if not job:
+        return
+    ticket = job["tickets"][index]
+
+    if returncode != 0:
+        err = stderr_bytes.decode("utf-8", errors="replace").strip()[:300]
+        reason = f"estimator exited {returncode}: {err or '(no output)'}"
+        _logging.warning(f"[bulk-estimator] estimate_issue.py exited {returncode} for #{issue_number}: {err}")
+        _post_estimator_warning(issue_number, repo, reason)
+        ticket["state"] = "estimate_failed"
+        ticket["estimate_error"] = reason
+        _persist_bulk_job(job)
+        await _broadcast_bulk_event(job_id, {"type": "ticket_update", "ticket": dict(ticket)})
+        return
+
+    # Parse size from stdout
+    stdout_text = stdout_bytes.decode("utf-8", errors="replace")
+    size = _extract_size_from_estimator_stdout(stdout_text)
+
+    # Transition to sized
+    ticket["state"] = "sized"
+    ticket["estimate_size"] = size  # "S", "M", "L", "XL", or None
+    _persist_bulk_job(job)
+    await _broadcast_bulk_event(job_id, {"type": "ticket_update", "ticket": dict(ticket)})
+
+    # Invalidate open-issues cache so size badge appears on next dashboard load
+    github_client.invalidate("open_issues_body:")
+    github_client.invalidate("open_issues:")
+    github_client.invalidate("issues:")
+
+
 @app.post("/api/tickets/create", status_code=201)
 async def create_ticket_from_draft(
     background_tasks: BackgroundTasks,
@@ -4959,6 +5111,8 @@ async def _bulk_flusher(job_id: str) -> None:
     tickets = job["tickets"]
     n = len(tickets)
     flush_idx = 0
+    # Track estimation tasks so the flusher can wait for them before job_done (issue #265)
+    estimation_tasks: list[asyncio.Task] = []
 
     while flush_idx < n:
         job = _bulk_jobs.get(job_id)
@@ -4997,6 +5151,8 @@ async def _bulk_flusher(job_id: str) -> None:
                 flush_idx += 1
                 continue
 
+            created_issue_number: int | None = None
+            created_issue_repo: str | None = None
             try:
                 number, url = github_client.create_issue(
                     title=ticket["title"],
@@ -5010,6 +5166,11 @@ async def _bulk_flusher(job_id: str) -> None:
                 ticket["body"] = body_with_images
                 ticket["body_preview"] = body_with_images[:200]
                 ticket["label_pills"] = labels
+                created_issue_number = number
+                try:
+                    created_issue_repo = issue_repo or github_client.get_repo_for_operation(None)
+                except Exception:
+                    created_issue_repo = None
             except Exception as e:
                 ticket["state"] = "failed"
                 ticket["error"] = f"GitHub issue creation failed: {str(e)[:200]}"
@@ -5020,6 +5181,17 @@ async def _bulk_flusher(job_id: str) -> None:
             ticket.pop("_repo", None)
             _persist_bulk_job(job)
             await _broadcast_bulk_event(job_id, {"type": "ticket_update", "ticket": dict(ticket)})
+
+            # Kick off background estimation after successful issue creation (issue #265).
+            # Track the task so the flusher waits for all estimates before job_done.
+            if created_issue_number is not None and created_issue_repo and _ESTIMATE_ISSUE_SCRIPT.exists():
+                est_task = asyncio.create_task(
+                    _run_bulk_estimator_for_ticket(
+                        job_id, flush_idx, created_issue_number, created_issue_repo
+                    )
+                )
+                estimation_tasks.append(est_task)
+
             flush_idx += 1
 
         elif ticket["state"] in ("pending", "drafting"):
@@ -5029,23 +5201,25 @@ async def _bulk_flusher(job_id: str) -> None:
         else:
             flush_idx += 1
 
-    # Check if all done (size_warning tickets are not done — they await user remediation)
+    # Wait for all estimation background tasks to complete before sending job_done.
+    # This ensures the SSE stream stays open until all tickets reach a terminal state
+    # (sized or estimate_failed). Errors are swallowed — each task handles its own
+    # failure path and updates the ticket state independently.
+    if estimation_tasks:
+        await asyncio.gather(*estimation_tasks, return_exceptions=True)
+
+    # Check if all done (size_warning tickets are not done — they await user remediation).
+    # Terminal states now include sized and estimate_failed (issue #265).
     job = _bulk_jobs.get(job_id)
     if job:
         all_done = all(
-            t["state"] in ("created", "failed", "skipped", "size_warning") for t in job["tickets"]
+            t["state"] in ("sized", "estimate_failed", "failed", "skipped", "size_warning")
+            for t in job["tickets"]
         )
         if all_done:
-            has_size_warnings = any(t["state"] == "size_warning" for t in job["tickets"])
-            if not has_size_warnings:
-                job["status"] = "done"
-                _persist_bulk_job(job)
-                await _broadcast_bulk_event(job_id, {"type": "job_done", "job_id": job_id})
-            else:
-                # Job paused — waiting for user to remediate oversized tickets
-                job["status"] = "done"
-                _persist_bulk_job(job)
-                await _broadcast_bulk_event(job_id, {"type": "job_done", "job_id": job_id})
+            job["status"] = "done"
+            _persist_bulk_job(job)
+            await _broadcast_bulk_event(job_id, {"type": "job_done", "job_id": job_id})
 
 
 async def _bulk_worker(

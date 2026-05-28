@@ -1061,13 +1061,19 @@ function updateProjectHeader(proj) {
 }
 
 // ── Sidebar footer ────────────────────────────────────────────────────────────
-function updateSidebarFooter() {
+async function updateSidebarFooter() {
   const footer = document.getElementById('sidebar-footer');
   if (!footer) return;
   const host = window.location.host;
-  // Try to get version from a meta tag or default
-  const version = document.querySelector('meta[name="app-version"]')?.content || '—';
-  footer.textContent = `v${version} · ${host}`;
+  try {
+    const resp = await fetch('/api/version', { cache: 'no-store' });
+    if (resp.ok) {
+      const data = await resp.json();
+      footer.textContent = `v${data.version} · ${host} · build ${data.build}`;
+      return;
+    }
+  } catch (_) { /* fall through */ }
+  footer.textContent = `v— · ${host}`;
 }
 
 // ── Load home data ────────────────────────────────────────────────────────────

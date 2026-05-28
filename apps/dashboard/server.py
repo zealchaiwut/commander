@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import json
 import os
 import re
@@ -21,7 +22,7 @@ except ImportError:
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, model_validator
 
@@ -55,6 +56,61 @@ _TIMEOUT_CHECK_INTERVAL: int = 60  # run the check every 60 seconds
 
 _subscribers: list[asyncio.Queue] = []
 _start_time: float = 0.0
+
+
+# ── Build hash (cache-busting) ─────────────────────────────────────────────────
+
+def _compute_build_hash() -> str:
+    """Compute an 8-char MD5 hash over all JS and CSS files in STATIC_DIR.
+
+    The hash changes whenever any local static asset changes, which lets
+    browsers cache assets indefinitely while always loading fresh code after
+    a deploy/restart.
+    """
+    h = hashlib.md5()
+    for ext in ("*.js", "*.css"):
+        for f in sorted(STATIC_DIR.glob(ext)):
+            try:
+                h.update(f.read_bytes())
+            except OSError:
+                pass
+    return h.hexdigest()[:8]
+
+
+_BUILD_HASH: str = _compute_build_hash()
+_APP_VERSION: str = "1.0"
+
+
+def _inject_version_into_html(html: str) -> str:
+    """Inject ?v=<hash> query string on local /static/*.js and /static/*.css URLs."""
+    # Replace src="/static/foo.js" → src="/static/foo.js?v=<hash>"
+    # Replace href="/static/foo.css" → href="/static/foo.css?v=<hash>"
+    # Skip URLs that already have a query string.
+    pattern = r'((?:src|href)="(/static/[^"?]+\.(?:js|css))")'
+    replacement = rf'\g<2>?v={_BUILD_HASH}'
+
+    def _replacer(m: re.Match) -> str:
+        attr_name = m.group(1).split("=")[0]  # src or href
+        url = m.group(2)
+        return f'{attr_name}="{url}?v={_BUILD_HASH}"'
+
+    return re.sub(pattern, _replacer, html)
+
+
+_HTML_NO_CACHE_HEADERS = {
+    "Cache-Control": "no-cache, must-revalidate",
+    "Pragma": "no-cache",
+}
+
+
+def _serve_html(path: Path) -> HTMLResponse:
+    """Read an HTML file, inject cache-busting version stamps, and serve with no-cache headers."""
+    try:
+        content = path.read_text(encoding="utf-8")
+    except OSError:
+        raise HTTPException(status_code=404, detail="Not found")
+    content = _inject_version_into_html(content)
+    return HTMLResponse(content=content, headers=_HTML_NO_CACHE_HEADERS)
 
 
 async def _cache_refresh_loop():
@@ -289,6 +345,19 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan)
+
+
+# ── API no-cache middleware (issue #249) ──────────────────────────────────────
+# Ensure all /api/* responses carry Cache-Control: no-cache so browsers and
+# proxies never serve stale API data on auto-refresh or manual refresh.
+
+@app.middleware("http")
+async def add_api_no_cache_headers(request: Request, call_next):
+    response = await call_next(request)
+    if request.url.path.startswith("/api/"):
+        response.headers["Cache-Control"] = "no-cache, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
+    return response
 
 
 # ── request models ────────────────────────────────────────────────────────────
@@ -553,7 +622,7 @@ async def broadcast(data: dict):
 
 @app.get("/")
 async def root():
-    return FileResponse(STATIC_DIR / "home-preview.html")
+    return _serve_html(STATIC_DIR / "home-preview.html")
 
 
 @app.get("/home")
@@ -574,7 +643,7 @@ async def overview_redirect():
 @app.get("/diagnostics")
 async def diagnostics_page():
     """Serve the system diagnostics page (issue #230)."""
-    return FileResponse(STATIC_DIR / "diagnostics.html")
+    return _serve_html(STATIC_DIR / "diagnostics.html")
 
 
 @app.get("/projects/{path:path}")
@@ -582,7 +651,7 @@ async def spa_project_route(path: str):
     if path.endswith("/plan-sprint"):
         new_path = path[: -len("plan-sprint")] + "sprint-mgmt"
         return RedirectResponse(url=f"/projects/{new_path}", status_code=308)
-    return FileResponse(STATIC_DIR / "index.html")
+    return _serve_html(STATIC_DIR / "index.html")
 
 
 # ── Slug-based project routes (/project/<slug>/...) ───────────────────────────
@@ -601,7 +670,7 @@ async def project_slug_tab(slug: str, tab: str):
     """Serve the project chrome page for valid tabs; redirect invalid tabs to sprint-mgmt."""
     if tab not in _VALID_PROJECT_TABS:
         return RedirectResponse(url=f"/project/{slug}/sprint-mgmt", status_code=302)
-    return FileResponse(STATIC_DIR / "project.html")
+    return _serve_html(STATIC_DIR / "project.html")
 
 
 @app.get("/api/health")
@@ -691,6 +760,22 @@ async def health_check():
 def get_environment():
     """Return the current runtime environment (prd or uat)."""
     return {"environment": ENVIRONMENT}
+
+
+@app.get("/api/version")
+def get_version():
+    """Return the build version hash for cache-busting (issue #249).
+
+    Response shape:
+    {
+      "version": "1.0",
+      "build": "abc12345"
+    }
+    """
+    return JSONResponse(
+        content={"version": _APP_VERSION, "build": _BUILD_HASH},
+        headers={"Cache-Control": "no-cache, must-revalidate"},
+    )
 
 
 @app.get("/api/backup/status")
@@ -4957,6 +5042,32 @@ def promote_to_master(body: PromoteBody):
     else:
         err = result.stderr.strip() or result.stdout.strip() or "GitHub API failure"
         raise HTTPException(502, detail=err)
+
+
+# ── Static asset routes with long-lived cache headers (issue #249) ────────────
+# Explicit routes for JS and CSS files must appear before the StaticFiles mount.
+# Browsers can cache these indefinitely because the build hash in the query
+# string changes whenever the file content changes.
+
+@app.get("/static/{filename:path}")
+async def static_assets(filename: str):
+    """Serve static files with appropriate cache headers.
+
+    JS and CSS files get Cache-Control: public, max-age=31536000, immutable
+    because index.html always references them with a versioned query string.
+    Other files fall through to a plain FileResponse with no special caching.
+    """
+    file_path = STATIC_DIR / filename
+    if not file_path.exists() or not file_path.is_file():
+        raise HTTPException(status_code=404, detail="Not found")
+
+    ext = file_path.suffix.lower()
+    if ext in (".js", ".css"):
+        return FileResponse(
+            file_path,
+            headers={"Cache-Control": "public, max-age=31536000, immutable"},
+        )
+    return FileResponse(file_path)
 
 
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")

@@ -12,6 +12,8 @@ import time
 from pathlib import Path
 from typing import Optional
 
+from .config import TEST_GITHUB_REPO
+
 CACHE_TTL = 30.0
 SPRINT_RE = re.compile(r"^sprint-(\d+)$")
 STATUS_LABELS = {"in-progress", "SIT", "UAT", "UAT-approved", "need-rework", "blocked"}
@@ -63,7 +65,7 @@ def get_repo_for_operation(repo_name: str | None = None) -> str:
     resolved = repo_name or repo()
     test_mode = os.environ.get("COMMANDER_TEST_MODE", "").strip() == "1"
     if test_mode:
-        return os.environ.get("COMMANDER_TEST_REPO", "zealchaiwut/commander-issue-test")
+        return os.environ.get("COMMANDER_TEST_REPO", TEST_GITHUB_REPO)
     return resolved
 
 

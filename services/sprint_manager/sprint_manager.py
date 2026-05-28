@@ -172,7 +172,7 @@ def load_config(path: Path) -> "SprintConfig":
 
     # ── required fields ───────────────────────────────────────────────────────
     missing = []
-    repo_name = (data.get("repo_name") or "").strip()
+    repo_name = os.environ.get("COMMANDER_REPO", "").strip() or (data.get("repo_name") or "").strip()
     if not repo_name:
         missing.append("repo_name")
 

@@ -879,6 +879,15 @@
 
     /* ── New Ticket modal ── */
     .nt-modal { width: min(560px, calc(100vw - 32px)); max-height: calc(100vh - 48px); overflow-y: auto; }
+    .nt-warn-item {
+      display: flex; align-items: center; gap: 8px;
+      background: var(--amber-bg); color: var(--amber);
+      font-size: 12px; padding: 8px 12px; border-radius: 6px;
+      border: 1px solid color-mix(in srgb, var(--amber) 40%, transparent);
+      margin-bottom: 8px;
+    }
+    .nt-warn-item.hidden { display: none; }
+    .nt-file-input { padding: 4px 8px; cursor: pointer; }
 
     /* ── Backlog pane (issue #274) ── */
     .smgmt-backlog-pane {
@@ -4315,11 +4324,25 @@ function _nsShowError(msg) {
 
 // ── New Ticket modal ──────────────────────────────────────────────────────
 let _ntDraftId = null;
+let _ntDraftGenerated = false;
+
+function _ntUpdateWarnings() {
+  if (!_ntDraftGenerated) return;
+  const labelEmpty = !document.getElementById('nt-label').value.trim();
+  const attachEmpty = document.getElementById('nt-files').files.length === 0;
+  document.getElementById('nt-warn-label').classList.toggle('hidden', !labelEmpty);
+  document.getElementById('nt-warn-attach').classList.toggle('hidden', !attachEmpty);
+}
 
 async function smgmtOpenNewTicket() {
   // Reset to input state
   _ntDraftId = null;
+  _ntDraftGenerated = false;
   document.getElementById('nt-description').value = '';
+  document.getElementById('nt-label').value = '';
+  document.getElementById('nt-files').value = '';
+  document.getElementById('nt-warn-label').classList.add('hidden');
+  document.getElementById('nt-warn-attach').classList.add('hidden');
   document.getElementById('nt-error').classList.add('hidden');
   document.getElementById('nt-submit-btn').disabled = false;
   document.getElementById('nt-submit-btn').textContent = 'Generate Draft';
@@ -4426,6 +4449,8 @@ function _setupModals() {
   document.getElementById('nt-cancel-btn').addEventListener('click', _ntClose);
   document.getElementById('nt-post-cancel-btn').addEventListener('click', _ntClose);
   document.getElementById('nt-backdrop').addEventListener('click', _ntClose);
+  document.getElementById('nt-label').addEventListener('input', _ntUpdateWarnings);
+  document.getElementById('nt-files').addEventListener('change', _ntUpdateWarnings);
 
   document.getElementById('nt-modal').addEventListener('keydown', function(e) {
     if (e.key !== 'Tab') return;
@@ -4465,6 +4490,8 @@ function _setupModals() {
       _ntDraftId = data.draft_id;
       document.getElementById('nt-title').value = data.title || '';
       document.getElementById('nt-body').value = data.body || '';
+      _ntDraftGenerated = true;
+      _ntUpdateWarnings();
       document.getElementById('nt-draft-section').classList.remove('hidden');
       document.getElementById('nt-modal').scrollTop = document.getElementById('nt-modal').scrollHeight;
     } catch (err) {
@@ -4495,6 +4522,11 @@ function _setupModals() {
       formData.append('title', title);
       formData.append('body', document.getElementById('nt-body').value);
       formData.append('project', repo);
+      const labelVal = document.getElementById('nt-label').value.trim();
+      if (labelVal) formData.append('extra_labels', labelVal);
+      for (const f of document.getElementById('nt-files').files) {
+        formData.append('files', f);
+      }
       const resp = await fetch('/api/tickets/create', { method: 'POST', body: formData });
       if (!resp.ok) {
         const data = await resp.json().catch(() => ({}));
@@ -5465,6 +5497,14 @@ document.addEventListener('DOMContentLoaded', init);
                 placeholder="Describe the feature or bug you want to file…"
                 aria-required="true"></textarea>
     </div>
+    <div class="modal-field">
+      <label class="modal-label" for="nt-label">Label <span class="modal-hint" style="font-weight:normal;color:var(--text-muted)">(optional)</span></label>
+      <input class="modal-input" id="nt-label" type="text" placeholder="e.g. enhancement, bug…" autocomplete="off">
+    </div>
+    <div class="modal-field" style="margin-bottom:0">
+      <label class="modal-label" for="nt-files">Attachments <span class="modal-hint" style="font-weight:normal;color:var(--text-muted)">(optional — .png .jpg .pdf .md and others, max 25 MB per file)</span></label>
+      <input class="modal-input nt-file-input" id="nt-files" type="file" multiple>
+    </div>
     <div class="modal-error hidden" id="nt-error"></div>
   </div>
   <div class="modal-footer" id="nt-generate-footer">
@@ -5484,6 +5524,10 @@ document.addEventListener('DOMContentLoaded', init);
         <label class="modal-label" for="nt-body">Body <span class="modal-hint" style="font-weight:normal;color:var(--text-muted)">(edit before posting)</span></label>
         <textarea class="modal-input nt-body-textarea" id="nt-body" rows="10"></textarea>
       </div>
+    </div>
+    <div style="padding: 0 20px 4px">
+      <div id="nt-warn-label" class="nt-warn-item hidden">&#9888; No label assigned — add one above or leave blank.</div>
+      <div id="nt-warn-attach" class="nt-warn-item hidden">&#9888; No attachments added — add files above or leave blank.</div>
     </div>
     <div class="modal-footer">
       <button class="btn-ghost" id="nt-post-cancel-btn" type="button">Cancel</button>

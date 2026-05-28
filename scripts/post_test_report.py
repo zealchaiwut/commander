@@ -20,6 +20,7 @@ Usage:
 """
 import argparse
 import json
+import os
 import re
 import sys
 from datetime import datetime, timezone
@@ -181,6 +182,7 @@ def write_sidecar(
     payload = {
         "issue":            issue_num,
         "gate":             gate,
+        "run_id":           os.environ.get("COMMANDER_RUN_ID"),
         "timestamp":        datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "failures":         [
             {

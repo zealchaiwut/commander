@@ -1385,6 +1385,14 @@
     <div class="smgmt-body" id="smgmt-body">
       <div class="smgmt-loading" id="smgmt-loading">Select a project to view sprints.</div>
     </div>
+    <!-- Create-zone drop target for new sprint (issue #254) -->
+    <div class="smgmt-create-zone hidden" id="smgmt-create-zone"
+         ondragover="smgmtDragOverCreateZone(event)"
+         ondragleave="smgmtDragLeaveCreateZone(event)"
+         ondrop="smgmtDropOnCreateZone(event)">
+      <i class="ti ti-plus"></i>
+      <span id="smgmt-create-zone-label">Drop to create sprint</span>
+    </div>
     <!-- Sticky Backlog Block (issue #225) -->
     <div class="smgmt-backlog-block" id="smgmt-backlog"
          role="region" aria-label="Backlog"
@@ -1765,6 +1773,22 @@
   <div class="modal-footer">
     <button class="btn-ghost" onclick="smgmtBulkMoveToClose()">Cancel</button>
     <button class="btn-primary" id="smgmt-moveto-confirm" onclick="smgmtBulkMoveToConfirm()">Move tickets</button>
+  </div>
+</div>
+
+<!-- Create sprint confirm modal (issue #254) -->
+<div class="modal-backdrop hidden" id="smgmt-create-sprint-backdrop" onclick="smgmtCreateSprintCancel()"></div>
+<div class="modal hidden" id="smgmt-create-sprint-modal" role="dialog" aria-modal="true">
+  <div class="modal-header">
+    <span class="modal-title">Create Sprint</span>
+    <button class="modal-close" onclick="smgmtCreateSprintCancel()" aria-label="Close">&times;</button>
+  </div>
+  <div style="padding: 16px 24px; font-size: 13px; color: var(--text-muted);">
+    <p id="smgmt-create-sprint-msg" style="margin: 0;"></p>
+  </div>
+  <div class="modal-footer">
+    <button class="btn-ghost" onclick="smgmtCreateSprintCancel()">Cancel</button>
+    <button class="btn-primary" id="smgmt-create-sprint-confirm" onclick="smgmtCreateSprintConfirm()">Confirm</button>
   </div>
 </div>
 
@@ -2838,6 +2862,19 @@
     text-align: center; padding: 12px;
   }
   .smgmt-placeholder-tickets { min-height: 52px; }
+
+  /* ── Create-zone drop target for new sprint (issue #254) ── */
+  .smgmt-create-zone {
+    border: 2px dashed var(--border); border-radius: 10px;
+    margin: 0 24px 16px; padding: 18px 24px;
+    display: flex; align-items: center; justify-content: center;
+    gap: 8px; color: var(--text-muted); font-size: 13px; font-style: italic;
+    transition: border-color 0.15s, background 0.15s, color 0.15s;
+    cursor: default; user-select: none;
+  }
+  .smgmt-create-zone.drag-over {
+    border-color: var(--blue); background: var(--blue-bg); color: var(--blue);
+  }
 
   /* ── Multi-select checkboxes (issue #206) ── */
   .smgmt-ticket-cb {

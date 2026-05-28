@@ -2692,6 +2692,7 @@ let _smgmtDropOriginalSprint   = {};   // issueNum -> sprint label before deboun
 let _smgmtAutoRefreshInterval  = 15;  // seconds between refreshes (5|15|30|60)
 let _smgmtAutoRefreshEnabled   = true; // whether auto-refresh is active
 let _smgmtSelectedIssues       = new Set(); // issue numbers currently selected (multi-select, issue #206)
+let _smgmtCreateZoneNextN      = null;      // sprint number offered by the create-zone (issue #254)
 
 const RERUN_STRIP_LABELS = new Set(['UAT', 'UAT-approved', 'released', 'SIT', 'in-progress', 'need-rework']);
 
@@ -3875,6 +3876,25 @@ function smgmtTicketDragStart(event, issueNum, fromSprint) {
   event.dataTransfer.setData('text/smgmt-ticket', String(issueNum));
   const el = document.getElementById(`smgmt-ticket-${issueNum}`);
   if (el) setTimeout(() => el.classList.add('dragging-ticket'), 0);
+
+  // Show create-zone if board is not locked (issue #254)
+  const _czAnyRunning = Object.values(_smgmtAllRunning).some(e => e.project === _smgmtCurrentRepo);
+  if (!_czAnyRunning && _smgmtData) {
+    const _czAllNums = [...new Set(
+      (_smgmtData.sprints || []).concat(
+        (_smgmtData.order || []).map(l => parseInt(l.split('-')[1], 10)).filter(n => !isNaN(n))
+      )
+    )].filter(n => !isNaN(n) && n > 0);
+    _smgmtCreateZoneNextN = _czAllNums.length > 0 ? Math.max(..._czAllNums) + 1 : 1;
+    setTimeout(() => {
+      const zone = document.getElementById('smgmt-create-zone');
+      if (zone) {
+        const lbl = document.getElementById('smgmt-create-zone-label');
+        if (lbl) lbl.textContent = `Drop here to create sprint-${_smgmtCreateZoneNextN}`;
+        zone.classList.remove('hidden');
+      }
+    }, 0);
+  }
 }
 
 function smgmtTicketDragEnd(event) {
@@ -3891,6 +3911,9 @@ function smgmtTicketDragEnd(event) {
     el.classList.remove('drag-before', 'drag-after');
   });
   document.getElementById('smgmt-backlog')?.classList.remove('drag-over-sprint', 'drag-over-zone');
+  // Hide create-zone (issue #254)
+  const _czZone = document.getElementById('smgmt-create-zone');
+  if (_czZone) { _czZone.classList.add('hidden'); _czZone.classList.remove('drag-over'); }
 }
 
 function smgmtDragOverZone(event, sprintLabel) {
@@ -4014,6 +4037,124 @@ async function smgmtDropOnPlaceholder(event, placeholderN) {
     _smgmtData.placeholder_sprint = placeholderN;
     smgmtRender();
     smgmtShowError(`Failed to assign ticket #${number} to Sprint ${placeholderN}: ${e.message}`);
+  }
+}
+
+// ── Create-zone drag handlers (issue #254) ────────────────────────────────────
+
+function smgmtDragOverCreateZone(event) {
+  if (_smgmtDragTicket) {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+    document.querySelectorAll('.smgmt-sprint-block').forEach(b => b.classList.remove('drag-over-sprint'));
+    document.getElementById('smgmt-backlog')?.classList.remove('drag-over-zone');
+    event.currentTarget.classList.add('drag-over');
+  }
+}
+
+function smgmtDragLeaveCreateZone(event) {
+  if (!event.currentTarget.contains(event.relatedTarget)) {
+    event.currentTarget.classList.remove('drag-over');
+  }
+}
+
+async function smgmtDropOnCreateZone(event) {
+  event.preventDefault();
+  const zone = document.getElementById('smgmt-create-zone');
+  if (zone) { zone.classList.remove('drag-over'); zone.classList.add('hidden'); }
+
+  // Board locked while any sprint is running (issue #253)
+  const anyRunning254 = Object.values(_smgmtAllRunning).some(e => e.project === _smgmtCurrentRepo);
+  if (anyRunning254) { _smgmtDragTicket = null; return; }
+
+  if (!_smgmtDragTicket || !_smgmtCurrentRepo || !_smgmtCreateZoneNextN) { _smgmtDragTicket = null; return; }
+
+  const { number, fromSprint } = _smgmtDragTicket;
+  _smgmtDragTicket = null;
+
+  // Move all selected tickets if the dragged ticket is among them; otherwise single ticket
+  const ticketsToMove = (_smgmtSelectedIssues.size > 0 && _smgmtSelectedIssues.has(number))
+    ? [..._smgmtSelectedIssues]
+    : [number];
+
+  _smgmtShowCreateSprintModal(_smgmtCreateZoneNextN, ticketsToMove, fromSprint);
+}
+
+function _smgmtShowCreateSprintModal(nextN, ticketNums, fromSprint) {
+  const modal = document.getElementById('smgmt-create-sprint-modal');
+  const backdrop = document.getElementById('smgmt-create-sprint-backdrop');
+  const msg = document.getElementById('smgmt-create-sprint-msg');
+  if (!modal || !msg) return;
+
+  msg.textContent = `Create sprint-${nextN} and move ${ticketNums.length} ticket${ticketNums.length !== 1 ? 's' : ''} into it?`;
+  modal.dataset.nextN = String(nextN);
+  modal.dataset.tickets = JSON.stringify(ticketNums);
+  modal.dataset.fromSprint = fromSprint || '';
+  modal.classList.remove('hidden');
+  if (backdrop) backdrop.classList.remove('hidden');
+}
+
+function smgmtCreateSprintCancel() {
+  const modal = document.getElementById('smgmt-create-sprint-modal');
+  const backdrop = document.getElementById('smgmt-create-sprint-backdrop');
+  if (modal) modal.classList.add('hidden');
+  if (backdrop) backdrop.classList.add('hidden');
+}
+
+async function smgmtCreateSprintConfirm() {
+  const modal = document.getElementById('smgmt-create-sprint-modal');
+  const backdrop = document.getElementById('smgmt-create-sprint-backdrop');
+  if (!modal) return;
+
+  const nextN = parseInt(modal.dataset.nextN, 10);
+  const ticketNums = JSON.parse(modal.dataset.tickets || '[]');
+  const fromSprintLabel = modal.dataset.fromSprint || null;
+  modal.classList.add('hidden');
+  if (backdrop) backdrop.classList.add('hidden');
+
+  if (!nextN || ticketNums.length === 0) return;
+
+  const newSprintLabel = `sprint-${nextN}`;
+
+  // Optimistic: add tickets to new sprint in local data
+  for (const num of ticketNums) {
+    const iss = _smgmtData && _smgmtData.issues.find(i => i.number === num);
+    if (iss) iss.sprint = nextN;
+  }
+  if (!_smgmtData.sprints.includes(nextN)) {
+    _smgmtData.sprints.push(nextN);
+    _smgmtData.sprints.sort((a, b) => a - b);
+  }
+  if (!_smgmtData.order.includes(newSprintLabel)) {
+    _smgmtData.order.push(newSprintLabel);
+  }
+  _smgmtData.placeholder_sprint = Math.max(..._smgmtData.sprints) + 1;
+  smgmtRender();
+
+  try {
+    for (const num of ticketNums) {
+      const res = await fetch('/api/sprint-planning/assign', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ issue: num, sprint: nextN }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+    }
+    _smgmtSelectedIssues.clear();
+    await smgmtRefreshBoard();
+  } catch (e) {
+    // Rollback optimistic update
+    for (const num of ticketNums) {
+      const iss2 = _smgmtData && _smgmtData.issues.find(i => i.number === num);
+      if (iss2) {
+        iss2.sprint = fromSprintLabel ? parseInt(fromSprintLabel.split('-')[1], 10) : null;
+      }
+    }
+    _smgmtData.order = _smgmtData.order.filter(l => l !== newSprintLabel);
+    _smgmtData.sprints = _smgmtData.sprints.filter(n => n !== nextN);
+    _smgmtData.placeholder_sprint = nextN;
+    smgmtRender();
+    smgmtShowError(`Failed to create sprint-${nextN}: ${e.message}`);
   }
 }
 
@@ -4849,6 +4990,10 @@ function smgmtApplyRunState(sprintStatusMap) {
     if (newSprintBtn2) { newSprintBtn2.disabled = true; newSprintBtn2.title = lockTip; }
     const deployBtn2 = document.getElementById('deploy-to-prod-btn');
     if (deployBtn2) { deployBtn2.disabled = true; deployBtn2.title = lockTip; }
+
+    // Hide create-zone while board is locked (issue #254)
+    const createZone254 = document.getElementById('smgmt-create-zone');
+    if (createZone254) createZone254.classList.add('hidden');
 
     // Lock every non-running sprint block
     document.querySelectorAll('.smgmt-sprint-block').forEach(block => {

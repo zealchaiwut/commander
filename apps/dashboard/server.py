@@ -78,10 +78,14 @@ def _sweep_orphan_pid_files() -> None:
     Live sprint_manager.py processes for the correct label are left untouched.
     """
     sweep_start = time.monotonic()
+    scanned = 0
+    cleaned = 0
     try:
         projects = projects_module.load_projects()
     except Exception as exc:
         print(f"[startup-sweep] could not load projects: {exc}")
+        elapsed_ms = (time.monotonic() - sweep_start) * 1000
+        print(f"[startup-sweep] scanned {scanned} PID files, cleaned {cleaned} orphans in {elapsed_ms:.1f}ms")
         return
 
     for proj in projects:
@@ -91,6 +95,7 @@ def _sweep_orphan_pid_files() -> None:
             if not sprints_dir.exists():
                 continue
             for pid_file in sprints_dir.glob("*-pid"):
+                scanned += 1
                 sprint_label = pid_file.name.removesuffix("-pid")  # e.g. "sprint-9"
                 try:
                     pid = int(pid_file.read_text(encoding="utf-8").strip())
@@ -100,6 +105,7 @@ def _sweep_orphan_pid_files() -> None:
                         pid_file.unlink()
                     except OSError:
                         pass
+                    cleaned += 1
                     print(f"[startup-sweep] cleaned unreadable PID file {pid_file}")
                     continue
 
@@ -111,6 +117,7 @@ def _sweep_orphan_pid_files() -> None:
                         pid_file.unlink()
                     except OSError:
                         pass
+                    cleaned += 1
                     print(
                         f"[startup-sweep] cleaned orphan PID file {pid_file}"
                         f" (PID {pid} not running)"
@@ -150,6 +157,7 @@ def _sweep_orphan_pid_files() -> None:
                         pid_file.unlink()
                     except OSError:
                         pass
+                    cleaned += 1
                     print(
                         f"[startup-sweep] cleaned orphan PID file {pid_file}"
                         f" (PID {pid} reused by unrelated process)"
@@ -158,7 +166,7 @@ def _sweep_orphan_pid_files() -> None:
             print(f"[startup-sweep] error scanning project {proj.get('repo')}: {exc}")
 
     elapsed_ms = (time.monotonic() - sweep_start) * 1000
-    print(f"[startup-sweep] completed in {elapsed_ms:.1f}ms")
+    print(f"[startup-sweep] scanned {scanned} PID files, cleaned {cleaned} orphans in {elapsed_ms:.1f}ms")
 
 
 def _sprint_status_file_path(project: str, sprint_label: str) -> Optional[Path]:

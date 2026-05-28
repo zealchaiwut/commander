@@ -5640,6 +5640,17 @@ async def _bulk_flusher(job_id: str) -> None:
                     )
                 )
                 estimation_tasks.append(est_task)
+            elif created_issue_number is not None:
+                # Estimation cannot start — surface a clear reason so job_done still fires
+                # instead of leaving the ticket in "created" (non-terminal) forever.
+                if not created_issue_repo:
+                    _est_err = "could not resolve repository for estimation"
+                else:
+                    _est_err = "estimate_issue.py not found"
+                ticket["state"] = "estimate_failed"
+                ticket["estimate_error"] = _est_err
+                _persist_bulk_job(job)
+                await _broadcast_bulk_event(job_id, {"type": "ticket_update", "ticket": dict(ticket)})
 
             flush_idx += 1
 

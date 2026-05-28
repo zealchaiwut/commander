@@ -2206,6 +2206,37 @@ def _dispatch_tester(
         sub_env["COMMANDER_APP_PORT"] = str(chosen_port)
         print(f"  [port] COMMANDER_APP_PORT={chosen_port} injected into tester env")
 
+    # ── GITHUB_ISSUE_TEST_REPO injection (issue #301) ─────────────────────────
+    # Read GITHUB_ISSUE_TEST_REPO at tester-dispatch time and inject it into the
+    # tester's environment along with an explicit prompt distinction between the
+    # work repo (GITHUB_REPO / eff_repo) and the issue-test target repo.
+    issue_test_repo = os.environ.get("GITHUB_ISSUE_TEST_REPO", "").strip()
+    if issue_test_repo:
+        sub_env["GITHUB_ISSUE_TEST_REPO"] = issue_test_repo
+        test_repo_hint = (
+            f" GITHUB REPO SEGREGATION (issue #301):"
+            f" GITHUB_ISSUE_TEST_REPO is set to {issue_test_repo!r}."
+            f" The work repo is {eff_repo!r} (all coder commits, sprint issues, and branch operations stay here)."
+            f" Any UAT step that creates a GitHub issue or applies/removes labels MUST target"
+            f" GITHUB_ISSUE_TEST_REPO ({issue_test_repo!r}), NOT the work repo ({eff_repo!r})."
+            f" Use GITHUB_ISSUE_TEST_REPO as the --repo argument for any `gh issue create` or label operations."
+        )
+        cmd[-1] = cmd[-1] + test_repo_hint
+        print(f"  [issue-test-repo] GITHUB_ISSUE_TEST_REPO={issue_test_repo!r} injected into tester env")
+    else:
+        # GITHUB_ISSUE_TEST_REPO not set — tester must skip live issue/label tests
+        test_repo_hint = (
+            " GITHUB REPO SEGREGATION (issue #301):"
+            " GITHUB_ISSUE_TEST_REPO is NOT set."
+            " Any UAT step that would create a GitHub issue or apply/remove labels on a repo"
+            " MUST be skipped — do NOT perform those operations against the work repo."
+            " Include exactly the note"
+            " \"GITHUB_ISSUE_TEST_REPO not configured — skipped live issue/label verification.\""
+            " in the test report for each skipped step."
+        )
+        cmd[-1] = cmd[-1] + test_repo_hint
+        print("  [issue-test-repo] GITHUB_ISSUE_TEST_REPO not set — tester will skip live issue/label tests")
+
     for attempt in range(_RATE_LIMIT_MAX_RETRIES + 1):
         try:
             with log_path.open("a") as log_f:

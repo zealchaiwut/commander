@@ -6632,6 +6632,16 @@ function openBulkCreateModal() {
   const fileErrEl = document.getElementById('bc-file-error');
   if (fileErrEl) { fileErrEl.textContent = ''; fileErrEl.classList.add('hidden'); }
   _bcUpdateCounter();
+
+  // Show recovery banner if there are saved inputs from a previous failed run (issue #335)
+  const recoverBanner = document.getElementById('bc-recovery-banner');
+  if (recoverBanner) {
+    try {
+      recoverBanner.classList.toggle('hidden', !localStorage.getItem('bc_last_input'));
+    } catch (_) {
+      recoverBanner.classList.add('hidden');
+    }
+  }
 }
 
 function closeBulkCreateModal() {
@@ -6752,6 +6762,8 @@ async function bcRunAll() {
     labelsRaw,
     concurrency,
   };
+  // Persist to localStorage so Recreate still works after a page refresh (issue #335)
+  try { localStorage.setItem('bc_last_input', JSON.stringify(_bcLastInput)); } catch (_) {}
 
   const runBtn = document.getElementById('bc-run-btn');
   runBtn.disabled = true;
@@ -7163,6 +7175,18 @@ function bcRecreate() {
     `<option value="${escapeHtml(p.repo)}">${escapeHtml(p.name || p.repo)}</option>`
   ).join('');
 
+  // Fall back to localStorage if in-memory state was lost (e.g. page refresh, issue #335)
+  if (!_bcLastInput) {
+    try {
+      const saved = localStorage.getItem('bc_last_input');
+      if (saved) _bcLastInput = JSON.parse(saved);
+    } catch (_) {}
+  }
+
+  // Always hide the recovery banner when Recreate is used (data is about to be restored)
+  const recoverBanner = document.getElementById('bc-recovery-banner');
+  if (recoverBanner) recoverBanner.classList.add('hidden');
+
   // Restore previous input values if available
   if (_bcLastInput) {
     if (sel && _bcLastInput.repo) sel.value = _bcLastInput.repo;
@@ -7182,6 +7206,33 @@ function bcRecreate() {
   document.getElementById('bc-step1-error').classList.add('hidden');
   // Do NOT reset files — keep the same attachments for the re-run
   _bcUpdateCounter();
+}
+
+// Restore saved inputs from localStorage into Step 1 fields (issue #335)
+function bcRestoreLastInput() {
+  try {
+    const saved = localStorage.getItem('bc_last_input');
+    if (!saved) return;
+    const input = JSON.parse(saved);
+    _bcLastInput = input;
+    const sel = document.getElementById('bc-repo');
+    if (sel && input.repo) sel.value = input.repo;
+    const textarea = document.getElementById('bc-textarea');
+    if (textarea) textarea.value = input.text || '';
+    const labelsEl = document.getElementById('bc-default-labels');
+    if (labelsEl) labelsEl.value = input.labelsRaw || 'enhancement';
+    const concEl = document.getElementById('bc-concurrency');
+    if (concEl) concEl.value = String(input.concurrency || 3);
+    document.getElementById('bc-recovery-banner').classList.add('hidden');
+    _bcUpdateCounter();
+  } catch (_) {}
+}
+
+// Dismiss recovery banner and clear saved inputs (issue #335)
+function bcDismissRecovery() {
+  try { localStorage.removeItem('bc_last_input'); } catch (_) {}
+  _bcLastInput = null;
+  document.getElementById('bc-recovery-banner').classList.add('hidden');
 }
 
 function _bcShowToast(msg) {

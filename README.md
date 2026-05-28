@@ -298,6 +298,34 @@ Traveling with iPad-only access? See [docs/TRAVEL_PLAYBOOK.md](docs/TRAVEL_PLAYB
 
 ---
 
+## Database Setup
+
+Commander's sprint manager uses a Neon (Postgres) database for persistent storage. Follow these steps to set it up:
+
+1. **Create a Neon project** — sign up at [neon.tech](https://neon.tech) and create a new project. Copy the connection string from the project dashboard.
+
+2. **Set `DATABASE_URL`** — copy `.env.example` to `.env` at the repo root and fill in your Neon connection string:
+   ```bash
+   cp .env.example .env
+   # Edit .env and set DATABASE_URL=postgresql://user:password@host/dbname?sslmode=require
+   ```
+
+3. **Run migrations** — apply the schema:
+   ```bash
+   alembic upgrade head
+   ```
+
+After running `alembic upgrade head`, you can verify the setup with:
+```bash
+# Check the current migration head
+alembic current
+
+# Verify the connection
+python -c "from services.sprint_manager.neon_db import get_engine; print(get_engine().connect())"
+```
+
+---
+
 ## Docs
 
 - [Setup and tutorial](docs/tutorial.md)

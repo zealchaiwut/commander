@@ -96,6 +96,13 @@
       transition: opacity .15s;
     }
     .btn-primary:hover { opacity: .82; }
+    .btn-warning {
+      padding: 6px 14px; border: none; border-radius: 6px;
+      background: var(--amber); color: #fff; font-size: 12px; font-weight: 600;
+      transition: opacity .15s; cursor: pointer;
+    }
+    .btn-warning:hover { opacity: .82; }
+    .btn-warning:disabled { opacity: .5; cursor: not-allowed; }
     .btn-icon {
       width: 32px; height: 32px; display: flex; align-items: center; justify-content: center;
       border: 1px solid var(--border); border-radius: 6px; background: none;
@@ -1674,13 +1681,13 @@
 <div class="modal-backdrop hidden" id="smgmt-rerun-backdrop" onclick="smgmtRerunClose()"></div>
 <div class="modal hidden" id="smgmt-rerun-modal" role="dialog" aria-modal="true">
   <div class="modal-header">
-    <span class="modal-title" id="smgmt-rerun-title">Reset Sprint?</span>
+    <span class="modal-title"><i class="ti ti-alert-triangle" style="color:var(--amber);margin-right:6px;"></i><span id="smgmt-rerun-title">Re-run Sprint?</span></span>
     <button class="modal-close" onclick="smgmtRerunClose()" aria-label="Close">&times;</button>
   </div>
   <div class="smgmt-rerun-body" id="smgmt-rerun-body"></div>
   <div class="modal-footer">
     <button class="btn-ghost" onclick="smgmtRerunClose()">Cancel</button>
-    <button class="btn-danger" id="smgmt-rerun-confirm" onclick="smgmtRerunConfirm()">Reset</button>
+    <button class="btn-warning" id="smgmt-rerun-confirm" onclick="smgmtRerunConfirm()">Re-run sprint</button>
   </div>
 </div>
 
@@ -2424,12 +2431,12 @@
 
   /* Rerun sprint modal body */
   .smgmt-rerun-body { padding: 12px 24px 4px; font-size: 13px; max-height: 300px; overflow-y: auto; }
-  .smgmt-rerun-row { display: flex; align-items: baseline; gap: 6px; padding: 5px 0;
+  .smgmt-rerun-count-row { display: flex; align-items: baseline; gap: 8px; padding: 7px 0;
     border-bottom: 1px solid var(--border); flex-wrap: wrap; }
-  .smgmt-rerun-row:last-child { border-bottom: none; }
-  .smgmt-rerun-num { font-weight: 700; color: var(--text-sub); font-size: 12px; flex-shrink: 0; }
-  .smgmt-rerun-title-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .smgmt-rerun-labels { font-size: 11px; color: var(--text-muted); flex-shrink: 0; }
+  .smgmt-rerun-count-row:last-child { border-bottom: none; }
+  .smgmt-rerun-count-num { font-size: 18px; font-weight: 700; color: var(--amber); flex-shrink: 0; min-width: 28px; text-align: right; }
+  .smgmt-rerun-count-label { flex: 1; min-width: 0; font-weight: 500; }
+  .smgmt-rerun-count-reason { font-size: 11px; color: var(--text-muted); flex-shrink: 0; }
 
   /* Migration modal body */
   .smgmt-migrate-body { padding: 12px 24px 4px; font-size: 13px; max-height: 400px; overflow-y: auto; }

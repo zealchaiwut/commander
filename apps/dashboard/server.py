@@ -3772,6 +3772,57 @@ class SprintRerunBody(BaseModel):
     confirm: bool
 
 
+@app.get("/api/sprints/{sprint_label}/rerun/preview")
+def rerun_sprint_preview(sprint_label: str, project: str):
+    """Return per-ticket rerun preview counts without executing anything.
+
+    Response schema:
+      { redispatch_count, tester_count, skip_count, by_ticket: [
+          { issue_num, issue_title, action }  # action: dispatch_coder|dispatch_tester|skip
+        ]
+      }
+    """
+    if not _SPRINT_LABEL_RE.match(sprint_label):
+        raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")
+
+    try:
+        issues = github_client.list_open_issues_with_body(repo_name=project, limit=200)
+    except subprocess.CalledProcessError as e:
+        raise _gh_error(e)
+
+    sprint_issues = [
+        iss for iss in issues
+        if any(lbl["name"] == sprint_label for lbl in iss.get("labels", []))
+    ]
+
+    redispatch_count = 0
+    tester_count = 0
+    skip_count = 0
+    by_ticket: list[dict] = []
+
+    for iss in sprint_issues:
+        current_labels = {lbl["name"] for lbl in iss.get("labels", [])}
+        action, _ = _rerun_policy(current_labels)
+        if action == "dispatch_coder":
+            redispatch_count += 1
+        elif action == "dispatch_tester":
+            tester_count += 1
+        else:
+            skip_count += 1
+        by_ticket.append({
+            "issue_num": iss["number"],
+            "issue_title": iss["title"],
+            "action": action,
+        })
+
+    return {
+        "redispatch_count": redispatch_count,
+        "tester_count": tester_count,
+        "skip_count": skip_count,
+        "by_ticket": by_ticket,
+    }
+
+
 @app.post("/api/sprints/{sprint_label}/rerun")
 def rerun_sprint(sprint_label: str, project: str, body: SprintRerunBody):
     """Apply per-ticket re-run policy and dispatch agents selectively.

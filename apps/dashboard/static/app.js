@@ -5243,38 +5243,64 @@ function _updateOverviewRunningBadges() {
 
 // ── Rerun sprint ──────────────────────────────────────────────────────────────
 
-function smgmtRerunSprint(label) {
-  if (!_smgmtCurrentRepo || !_smgmtData) return;
-  const sprintTickets = (_smgmtData.issues || []).filter(
-    t => t.sprint != null && `sprint-${t.sprint}` === label
-  );
+async function smgmtRerunSprint(label) {
+  if (!_smgmtCurrentRepo) return;
 
   _smgmtRerunLabel = label;
-  const n = parseInt(label.split('-')[1], 10);
-  document.getElementById('smgmt-rerun-title').textContent = `Re-run Sprint ${n}?`;
-
-  const ACTION_LABEL = { dispatch_coder: '→ re-code', dispatch_tester: '→ re-test', skip: 'skip (already UAT)' };
+  document.getElementById('smgmt-rerun-title').textContent = `Re-run Sprint ${label}?`;
 
   const bodyEl = document.getElementById('smgmt-rerun-body');
-  if (sprintTickets.length === 0) {
-    bodyEl.innerHTML = '<em style="color:var(--text-muted)">No tickets in this sprint.</em>';
-  } else {
-    bodyEl.innerHTML = sprintTickets.map(t => {
-      const labelNames = (t.labels || []).map(l => l.name);
-      const action = _rerunPolicyAction(labelNames);
-      const actionText = ACTION_LABEL[action] || action;
-      return `<div class="smgmt-rerun-row">
-        <span class="smgmt-rerun-num">#${t.number}</span>
-        <span class="smgmt-rerun-title-text" title="${escapeHtml(t.title)}">${escapeHtml(t.title)}</span>
-        <span class="smgmt-rerun-labels">${escapeHtml(actionText)}</span>
-      </div>`;
-    }).join('');
-  }
+  bodyEl.innerHTML = '<p style="color:var(--text-muted);padding:8px 0;">Loading preview…</p>';
 
   const confirmBtn = document.getElementById('smgmt-rerun-confirm');
-  if (confirmBtn) { confirmBtn.disabled = false; confirmBtn.textContent = 'Re-run'; }
+  if (confirmBtn) { confirmBtn.disabled = true; confirmBtn.textContent = 'Re-run sprint'; }
   document.getElementById('smgmt-rerun-backdrop').classList.remove('hidden');
   document.getElementById('smgmt-rerun-modal').classList.remove('hidden');
+
+  try {
+    const res = await fetch(
+      `/api/sprints/${encodeURIComponent(label)}/rerun/preview?project=${encodeURIComponent(_smgmtCurrentRepo)}`
+    );
+    if (!res.ok) throw new Error(await res.text());
+    const preview = await res.json();
+
+    const rows = [];
+    if (preview.redispatch_count > 0) {
+      const n = preview.redispatch_count;
+      rows.push(`<div class="smgmt-rerun-count-row">
+        <span class="smgmt-rerun-count-num">${n}</span>
+        <span class="smgmt-rerun-count-label">ticket${n !== 1 ? 's' : ''} will re-dispatch (coder)</span>
+        <span class="smgmt-rerun-count-reason">Re-dispatch from coder</span>
+      </div>`);
+    }
+    if (preview.tester_count > 0) {
+      const n = preview.tester_count;
+      rows.push(`<div class="smgmt-rerun-count-row">
+        <span class="smgmt-rerun-count-num">${n}</span>
+        <span class="smgmt-rerun-count-label">ticket${n !== 1 ? 's' : ''} will start at tester</span>
+        <span class="smgmt-rerun-count-reason">Start at tester — coder work already passed</span>
+      </div>`);
+    }
+    if (preview.skip_count > 0) {
+      const n = preview.skip_count;
+      rows.push(`<div class="smgmt-rerun-count-row">
+        <span class="smgmt-rerun-count-num">${n}</span>
+        <span class="smgmt-rerun-count-label">ticket${n !== 1 ? 's' : ''} will be skipped (already in UAT)</span>
+        <span class="smgmt-rerun-count-reason">Already passed tester; not re-running</span>
+      </div>`);
+    }
+
+    if (rows.length === 0) {
+      bodyEl.innerHTML = '<em style="color:var(--text-muted)">No tickets in this sprint.</em>';
+    } else {
+      bodyEl.innerHTML = rows.join('');
+    }
+
+    if (confirmBtn) { confirmBtn.disabled = false; }
+  } catch (e) {
+    bodyEl.innerHTML = `<p style="color:var(--red,#dc2626)">Failed to load preview: ${escapeHtml(e.message)}</p>`;
+    if (confirmBtn) { confirmBtn.disabled = false; }
+  }
 }
 
 function smgmtRerunClose() {
@@ -5317,7 +5343,7 @@ async function smgmtRerunConfirm() {
     await smgmtSelectProject(_smgmtCurrentRepo);
   } catch (e) {
     smgmtShowError('Failed to re-run sprint: ' + e.message);
-    if (confirmBtn) { confirmBtn.disabled = false; confirmBtn.textContent = 'Re-run'; }
+    if (confirmBtn) { confirmBtn.disabled = false; confirmBtn.textContent = 'Re-run sprint'; }
   }
 }
 

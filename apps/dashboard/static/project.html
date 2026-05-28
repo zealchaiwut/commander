@@ -444,6 +444,92 @@
     .smgmt-sprint-count {
       font-size: 11px; color: var(--text-sub); font-weight: 400;
     }
+    .smgmt-sprint-header { justify-content: space-between; }
+    .smgmt-sprint-header-left {
+      display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0;
+    }
+    .smgmt-sprint-header-right {
+      display: flex; align-items: center; gap: 6px; flex-shrink: 0;
+    }
+    /* ── Action buttons ── */
+    .smgmt-run-btn {
+      padding: 4px 12px; font-size: 11px; font-weight: 600;
+      background: var(--green); color: #fff; border: none; border-radius: 5px;
+      cursor: pointer; flex-shrink: 0; transition: opacity .15s;
+      display: inline-flex; align-items: center; gap: 4px;
+    }
+    .smgmt-run-btn:hover { opacity: .85; }
+    .smgmt-run-btn:disabled {
+      background: var(--surface-2); color: var(--text-sub);
+      border: 1px solid var(--border); cursor: not-allowed; opacity: 1;
+    }
+    .smgmt-run-btn.smgmt-run-btn--rerun {
+      background: var(--surface); color: var(--amber); border: 1px solid var(--amber);
+    }
+    .smgmt-run-btn.smgmt-run-btn--rerun:hover { background: var(--amber-bg); }
+    .smgmt-delete-btn {
+      padding: 4px 10px; font-size: 11px; font-weight: 600;
+      background: var(--surface); color: var(--red); border: 1px solid var(--red);
+      border-radius: 5px; cursor: pointer; flex-shrink: 0; transition: all .15s;
+      display: inline-flex; align-items: center; gap: 4px;
+    }
+    .smgmt-delete-btn:hover { background: var(--red-bg); }
+    .smgmt-finish-btn {
+      padding: 4px 10px; font-size: 11px; font-weight: 600;
+      background: var(--amber-bg); color: var(--amber); border: 0.5px solid var(--amber);
+      border-radius: 5px; cursor: pointer; flex-shrink: 0; transition: opacity .15s;
+      display: inline-flex; align-items: center; gap: 4px;
+    }
+    .smgmt-finish-btn:hover { opacity: .85; }
+    .smgmt-finish-btn.hidden { display: none; }
+    /* ── Ticket list ── */
+    .smgmt-sprint-tickets {
+      padding: 4px 0; min-height: 48px; display: flex; flex-direction: column;
+    }
+    .smgmt-drop-hint {
+      font-size: 12px; color: var(--text-sub); text-align: center;
+      padding: 10px; border: 1px dashed var(--border); border-radius: 5px; margin: 4px 8px;
+    }
+    .smgmt-sprint-card.drag-over-sprint { border-color: var(--blue); box-shadow: 0 0 0 2px var(--blue-bg); }
+    .smgmt-sprint-card.drag-over-sprint .smgmt-drop-hint { border-color: var(--blue); }
+    .smgmt-ticket {
+      display: flex; align-items: center; gap: 8px;
+      padding: 9px 16px; background: var(--surface); font-size: 12px;
+      cursor: default; transition: background 0.15s;
+    }
+    .smgmt-ticket:hover { background: var(--surface-hover); }
+    .smgmt-ticket.dragging-ticket { opacity: .4; }
+    .smgmt-ticket.is-selected { background: var(--blue-bg); }
+    .smgmt-ticket-grip { cursor: grab; color: var(--text-sub); font-size: 13px; flex-shrink: 0; }
+    .smgmt-ticket-grip:active { cursor: grabbing; }
+    .smgmt-ticket-cb { cursor: pointer; flex-shrink: 0; }
+    .smgmt-ticket-num {
+      font-family: var(--mono); font-size: 12px; color: var(--text-sub);
+      text-decoration: none; flex-shrink: 0; min-width: 42px;
+    }
+    .smgmt-ticket-num:hover { color: var(--blue); }
+    .smgmt-ticket-title {
+      flex: 1; font-weight: 500; line-height: 1.4; min-width: 0;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .smgmt-ticket-status {
+      font-size: 10px; font-weight: 600; padding: 2px 6px; border-radius: 3px;
+      flex-shrink: 0; text-transform: uppercase;
+    }
+    .smgmt-status-backlog    { background: var(--surface-2); color: var(--text-muted); border: 1px solid var(--border); }
+    .smgmt-status-in-progress { background: var(--blue-bg); color: var(--blue); }
+    .smgmt-status-sit        { background: var(--amber-bg); color: var(--amber); }
+    .smgmt-status-uat        { background: var(--purple-bg); color: var(--purple); }
+    .smgmt-status-done       { background: var(--green-bg); color: var(--green); }
+    .smgmt-status-need-rework { background: #fef2f2; color: #dc2626; border: 1px solid #fca5a5; }
+    /* ── Toast ── */
+    .smgmt-toast {
+      position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%) translateY(12px);
+      background: var(--text); color: var(--surface); padding: 8px 18px; border-radius: 6px;
+      font-size: 13px; z-index: 200; opacity: 0; pointer-events: none;
+      transition: opacity .2s, transform .2s;
+    }
+    .smgmt-toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 
     /* ── Refresh button flash ── */
     @keyframes btnFlash {
@@ -733,6 +819,11 @@ let _homeData    = null;   // cached /api/home response
 let _projectData = null;   // full project config from /api/home
 let _ticketsLoaded    = false;
 let _sprintMgmtLoaded = false;
+let _smgmtData           = null;
+let _smgmtSelectedIssues = new Set();
+let _smgmtDragTicket     = null;
+let _smgmtDragSprintLabel = null;
+const RERUN_STRIP_LABELS = new Set(['UAT','UAT-approved','released','SIT','in-progress','need-rework']);
 
 // ── Tab navigation ────────────────────────────────────────────────────────────
 function switchTab(tab, pushHistory) {
@@ -1138,6 +1229,7 @@ async function loadSprintMgmt() {
 function _smgmtRender(data) {
   const listEl = document.getElementById('smgmt-sprint-list');
   if (!listEl) return;
+  _smgmtData = data;
 
   const sprints = data.sprints || [];
   const order   = data.order   || [];
@@ -1163,19 +1255,285 @@ function _smgmtRender(data) {
     : [...sprints].sort((a, b) => a - b);
 
   const cards = orderedNums.map(n => {
-    const issuesInSprint = bySprint[n] || [];
-    const count = issuesInSprint.length;
-    return `
-      <div class="smgmt-sprint-card">
-        <div class="smgmt-sprint-header">
-          <i class="ti ti-layout-kanban" style="font-size:14px;color:var(--text-muted)"></i>
-          Sprint ${escHtml(String(n))}
-          <span class="smgmt-sprint-count">&middot; ${count} ticket${count !== 1 ? 's' : ''}</span>
-        </div>
-      </div>`;
+    const label = `sprint-${n}`;
+    const tickets = bySprint[n] || [];
+    return _smgmtCardHtml(label, n, tickets);
   }).join('');
 
-  listEl.innerHTML = cards || '<div class="loading-msg">No sprints with tickets.</div>';
+  listEl.innerHTML = cards || '<div class="loading-msg">No sprints found.</div>';
+}
+
+function _smgmtHasCompletedTickets(tickets) {
+  return tickets.some(t => (t.labels || []).some(l => RERUN_STRIP_LABELS.has(l.name)));
+}
+
+function _smgmtCardHtml(label, n, tickets) {
+  const hasCompleted = _smgmtHasCompletedTickets(tickets);
+  const canRun = !hasCompleted && tickets.length >= 1;
+
+  let actionBtn;
+  if (hasCompleted) {
+    actionBtn = `<button class="smgmt-run-btn smgmt-run-btn--rerun"
+                  onclick="smgmtRerunSprint('${label}')">
+                  <i class="ti ti-refresh"></i> Re-run Sprint</button>`;
+  } else {
+    const runDisabled = !canRun ? 'disabled' : '';
+    const runTitle = !canRun ? 'title="Add at least one ticket first"' : '';
+    actionBtn = `<button class="smgmt-run-btn" ${runDisabled} ${runTitle}
+                  onclick="smgmtRunSprint('${label}')">
+                  <i class="ti ti-player-play"></i> Run Sprint</button>`;
+  }
+
+  const ticketsHtml = tickets.length > 0
+    ? tickets.map(t => _smgmtTicketRowHtml(t, label)).join('')
+    : '<div class="smgmt-drop-hint">Drop tickets here</div>';
+
+  const finishHidden = hasCompleted ? '' : 'hidden';
+
+  return `
+    <div class="smgmt-sprint-card" id="smgmt-card-${escHtml(label)}"
+         ondragover="_smgmtDragOver(event, '${escHtml(label)}')"
+         ondragleave="_smgmtDragLeave(event)"
+         ondrop="_smgmtDropOnSprint(event, '${escHtml(label)}')">
+      <div class="smgmt-sprint-header">
+        <div class="smgmt-sprint-header-left">
+          <i class="ti ti-layout-kanban" style="font-size:14px;color:var(--text-muted)"></i>
+          <span style="font-size:15px;font-weight:700;">Sprint ${escHtml(String(n))}</span>
+          <span class="smgmt-sprint-count">&middot; ${tickets.length} ticket${tickets.length !== 1 ? 's' : ''}</span>
+        </div>
+        <div class="smgmt-sprint-header-right">
+          <button class="smgmt-finish-btn ${finishHidden}"
+                  onclick="smgmtFinishSprint('${escHtml(label)}')">
+            <i class="ti ti-flag-check"></i> Finish Sprint</button>
+          <button class="smgmt-delete-btn"
+                  onclick="smgmtDeleteSprint('${escHtml(label)}')">
+            <i class="ti ti-trash"></i> Delete</button>
+          ${actionBtn}
+        </div>
+      </div>
+      <div class="smgmt-sprint-tickets" id="smgmt-tickets-${escHtml(label)}">
+        ${ticketsHtml}
+      </div>
+    </div>`;
+}
+
+function _smgmtTicketRowHtml(ticket, label) {
+  const hasRework = (ticket.labels || []).some(l => l.name === 'need-rework' || l.name === 'needs-rework');
+  const statusClass = hasRework ? 'smgmt-status-need-rework' : ({
+    'backlog':      'smgmt-status-backlog',
+    'in-progress':  'smgmt-status-in-progress',
+    'sit':          'smgmt-status-sit',
+    'uat':          'smgmt-status-uat',
+    'done':         'smgmt-status-done',
+  }[ticket.status] || 'smgmt-status-backlog');
+  const statusLabel = hasRework ? 'needs rework' : (ticket.status || 'backlog');
+  const isSelected = _smgmtSelectedIssues.has(ticket.number);
+
+  return `
+    <div class="smgmt-ticket${isSelected ? ' is-selected' : ''}" id="smgmt-ticket-${ticket.number}"
+         draggable="true"
+         data-issue="${ticket.number}"
+         data-sprint="${escHtml(label)}"
+         ondragstart="_smgmtTicketDragStart(event, ${ticket.number}, '${escHtml(label)}')"
+         ondragend="_smgmtTicketDragEnd(event)">
+      <input type="checkbox" class="smgmt-ticket-cb"
+             ${isSelected ? 'checked' : ''}
+             onclick="event.stopPropagation()"
+             onchange="_smgmtToggleSelect(${ticket.number}, this.checked)">
+      <i class="ti ti-grip-vertical smgmt-ticket-grip"></i>
+      <a class="smgmt-ticket-num" href="${escHtml(ticket.url || '#')}" target="_blank"
+         rel="noopener" onclick="event.stopPropagation()">#${ticket.number}</a>
+      <span class="smgmt-ticket-title" title="${escHtml(ticket.title)}">${escHtml(ticket.title)}</span>
+      <span class="smgmt-ticket-status ${statusClass}">${escHtml(statusLabel)}</span>
+    </div>`;
+}
+
+// ── Sprint action handlers ─────────────────────────────────────────────────
+function _smgmtRepo() { return _cachedFullRepo[_slug] || null; }
+
+function _smgmtShowToast(msg) {
+  let el = document.getElementById('smgmt-toast');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'smgmt-toast';
+    el.className = 'smgmt-toast';
+    document.body.appendChild(el);
+  }
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(el._timer);
+  el._timer = setTimeout(() => el.classList.remove('show'), 2800);
+}
+
+async function smgmtRunSprint(label) {
+  const repo = _smgmtRepo();
+  if (!repo) return;
+  const n = parseInt(label.split('-')[1], 10);
+  if (!confirm(`Run Sprint ${n}?\n\nThis will dispatch coder and tester agents for all tickets in this sprint.`)) return;
+  try {
+    const res = await fetch('/api/sprints/run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ project: repo, sprint_label: label }),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    _smgmtShowToast(`Sprint ${n} dispatched.`);
+    await loadSprintMgmt();
+  } catch (e) {
+    alert('Failed to run sprint: ' + e.message);
+  }
+}
+
+async function smgmtRerunSprint(label) {
+  const repo = _smgmtRepo();
+  if (!repo) return;
+  const n = parseInt(label.split('-')[1], 10);
+  if (!confirm(`Reset and re-run Sprint ${n}?\n\nThis will strip in-progress/sit/uat labels from tickets and re-dispatch agents.`)) return;
+  try {
+    const res = await fetch(`/api/sprints/${encodeURIComponent(label)}/rerun?project=${encodeURIComponent(repo)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ confirm: true }),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    const data = await res.json();
+    _smgmtShowToast(`Reset ${data.reset_count} ticket${data.reset_count !== 1 ? 's' : ''}. Click Run Sprint when ready.`);
+    await loadSprintMgmt();
+  } catch (e) {
+    alert('Failed to re-run sprint: ' + e.message);
+  }
+}
+
+async function smgmtDeleteSprint(label) {
+  const repo = _smgmtRepo();
+  if (!repo) return;
+  const n = parseInt(label.split('-')[1], 10);
+  const tickets = (_smgmtData?.issues || []).filter(t => t.sprint != null && `sprint-${t.sprint}` === label);
+  const confirmMsg = tickets.length > 0
+    ? `Delete Sprint ${n}?\n\nThis will delete the sprint-${n} label and remove it from ${tickets.length} ticket${tickets.length !== 1 ? 's' : ''}. The tickets themselves are not deleted.`
+    : `Delete Sprint ${n}?\n\nThis will delete the sprint-${n} GitHub label. No tickets are attached.`;
+  if (!confirm(confirmMsg)) return;
+  try {
+    const res = await fetch(`/api/sprints/${encodeURIComponent(label)}?project=${encodeURIComponent(repo)}`, { method: 'DELETE' });
+    if (!res.ok) throw new Error(await res.text());
+    const data = await res.json();
+    const toastMsg = data.unlabelled_count > 0
+      ? `Sprint ${n} deleted — removed label from ${data.unlabelled_count} ticket${data.unlabelled_count !== 1 ? 's' : ''}.`
+      : `Sprint ${n} deleted.`;
+    _smgmtShowToast(toastMsg);
+    await loadSprintMgmt();
+  } catch (e) {
+    alert('Failed to delete sprint: ' + e.message);
+  }
+}
+
+async function smgmtFinishSprint(label) {
+  const repo = _smgmtRepo();
+  if (!repo) return;
+  const n = parseInt(label.split('-')[1], 10);
+  const tickets = (_smgmtData?.issues || []).filter(t => t.sprint != null && `sprint-${t.sprint}` === label);
+  if (!confirm(`Finish Sprint ${n}?\n\n${tickets.length} open issue${tickets.length !== 1 ? 's' : ''} will be moved to UAT and closed. This cannot be undone.`)) return;
+  const parts = repo.split('/');
+  const owner = parts[0];
+  const repoName = parts.slice(1).join('/');
+  try {
+    const res = await fetch(
+      `/api/projects/${encodeURIComponent(owner)}/${encodeURIComponent(repoName)}/sprints/${encodeURIComponent(label)}/finish`,
+      { method: 'POST' }
+    );
+    const data = await res.json();
+    if (data.errors && data.errors.length > 0) {
+      alert(`Closed ${data.closed} issue${data.closed !== 1 ? 's' : ''}; ${data.errors.length} error(s): ${data.errors.join('; ')}`);
+    } else {
+      _smgmtShowToast(`Sprint finished — ${data.closed} issue${data.closed !== 1 ? 's' : ''} moved to UAT and closed.`);
+    }
+    await loadSprintMgmt();
+  } catch (e) {
+    alert('Failed to finish sprint: ' + e.message);
+  }
+}
+
+// ── Multi-select toggle ────────────────────────────────────────────────────
+function _smgmtToggleSelect(number, checked) {
+  if (checked) _smgmtSelectedIssues.add(number);
+  else _smgmtSelectedIssues.delete(number);
+  const el = document.getElementById(`smgmt-ticket-${number}`);
+  if (el) el.classList.toggle('is-selected', checked);
+}
+
+// ── Drag-and-drop ──────────────────────────────────────────────────────────
+function _smgmtTicketDragStart(event, issueNum, fromSprint) {
+  _smgmtDragTicket = { number: issueNum, fromSprint: fromSprint || null };
+  event.dataTransfer.effectAllowed = 'move';
+  event.dataTransfer.setData('text/plain', String(issueNum));
+  const el = document.getElementById(`smgmt-ticket-${issueNum}`);
+  if (el) setTimeout(() => el.classList.add('dragging-ticket'), 0);
+}
+
+function _smgmtTicketDragEnd(event) {
+  if (_smgmtDragTicket) {
+    const el = document.getElementById(`smgmt-ticket-${_smgmtDragTicket.number}`);
+    if (el) el.classList.remove('dragging-ticket');
+  }
+  _smgmtDragTicket = null;
+  document.querySelectorAll('.smgmt-sprint-card').forEach(el => el.classList.remove('drag-over-sprint'));
+}
+
+function _smgmtDragOver(event, sprintLabel) {
+  if (_smgmtDragTicket) {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+    document.querySelectorAll('.smgmt-sprint-card').forEach(b => b.classList.remove('drag-over-sprint'));
+    const target = document.getElementById(`smgmt-card-${sprintLabel}`);
+    if (target) target.classList.add('drag-over-sprint');
+  }
+}
+
+function _smgmtDragLeave(event) {
+  if (event.currentTarget && !event.currentTarget.contains(event.relatedTarget)) {
+    event.currentTarget.classList.remove('drag-over-sprint');
+  }
+}
+
+async function _smgmtDropOnSprint(event, targetLabel) {
+  event.preventDefault();
+  document.querySelectorAll('.smgmt-sprint-card').forEach(el => el.classList.remove('drag-over-sprint'));
+
+  if (!_smgmtDragTicket) return;
+  const { number, fromSprint } = _smgmtDragTicket;
+  _smgmtDragTicket = null;
+
+  if (fromSprint === targetLabel) return;
+
+  const repo = _smgmtRepo();
+  if (!repo) return;
+
+  const targetNum = targetLabel ? parseInt(targetLabel.split('-')[1], 10) : null;
+
+  // Optimistic update
+  if (_smgmtData) {
+    const iss = _smgmtData.issues.find(i => i.number === number);
+    if (iss) iss.sprint = targetNum;
+    _smgmtRender(_smgmtData);
+  }
+
+  try {
+    const res = await fetch(`/api/issues/${number}/sprint-label`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sprint_label: targetLabel, project: repo }),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    await loadSprintMgmt();
+  } catch (e) {
+    // Rollback optimistic update
+    if (_smgmtData) {
+      const iss = _smgmtData.issues.find(i => i.number === number);
+      if (iss) iss.sprint = fromSprint ? parseInt(fromSprint.split('-')[1], 10) : null;
+      _smgmtRender(_smgmtData);
+    }
+    alert(`Failed to move ticket #${number}: ${e.message}`);
+  }
 }
 
 // ── Trigger Refresh ───────────────────────────────────────────────────────

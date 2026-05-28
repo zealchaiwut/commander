@@ -3671,6 +3671,9 @@
   }
   .bc-card--drafting { border-color: var(--blue, #3b82f6); }
   .bc-card--created { border-color: var(--green, #16a34a); }
+  .bc-card--estimating { border-color: var(--blue, #3b82f6); }
+  .bc-card--sized { border-color: var(--green, #16a34a); }
+  .bc-card--estimate_failed { border-color: var(--amber, #d97706); }
   .bc-card--failed { border-color: var(--red, #dc2626); }
   .bc-card--skipped { opacity: 0.55; }
 
@@ -3697,6 +3700,37 @@
     width: 5px; height: 3px;
     border-left: 1.5px solid #fff; border-bottom: 1.5px solid #fff;
     transform: rotate(-45deg);
+  }
+  .bc-status-dot--estimating {
+    border-color: var(--blue, #3b82f6);
+    border-top-color: transparent;
+    animation: bc-spin .7s linear infinite;
+  }
+  .bc-status-dot--sized {
+    border-color: var(--green, #16a34a);
+    background: var(--green, #16a34a);
+    position: relative;
+  }
+  .bc-status-dot--sized::after {
+    content: '';
+    position: absolute; left: 2px; top: 1px;
+    width: 5px; height: 3px;
+    border-left: 1.5px solid #fff; border-bottom: 1.5px solid #fff;
+    transform: rotate(-45deg);
+  }
+  .bc-status-dot--estimate_failed {
+    border-color: var(--amber, #d97706);
+    background: var(--amber, #d97706);
+    position: relative; display: flex; align-items: center; justify-content: center;
+  }
+  .bc-status-dot--estimate_failed::after {
+    content: '!'; color: #fff; font-size: 8px; font-weight: 700; line-height: 1;
+    position: absolute;
+  }
+  .bc-size-badge {
+    display: inline-block; font-size: 10px; font-weight: 700; padding: 1px 6px;
+    border-radius: 4px; background: var(--green, #16a34a); color: #fff;
+    margin-left: 6px; vertical-align: middle; letter-spacing: 0.02em;
   }
   .bc-status-dot--failed {
     border-color: var(--red, #dc2626);

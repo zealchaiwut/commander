@@ -6786,12 +6786,17 @@ function _bcRenderStep2() {
   const concurrency = job.concurrency || 3;
 
   const created = tickets.filter(t => t.state === 'created').length;
+  const estimating = tickets.filter(t => t.state === 'estimating').length;
+  const sized = tickets.filter(t => t.state === 'sized').length;
+  const estimateFailed = tickets.filter(t => t.state === 'estimate_failed').length;
   const drafting = tickets.filter(t => t.state === 'drafting').length;
   const pending = tickets.filter(t => t.state === 'pending').length;
   const failed = tickets.filter(t => t.state === 'failed').length;
   const skipped = tickets.filter(t => t.state === 'skipped').length;
   const sizeWarning = tickets.filter(t => t.state === 'size_warning').length;
   const total = tickets.length;
+  // Tickets that have fully completed (terminal state reached)
+  const fullyDone = sized + estimateFailed + failed + skipped;
 
   // Banner
   const banner = document.getElementById('bc-parallel-banner');
@@ -6799,7 +6804,7 @@ function _bcRenderStep2() {
     if (job.status === 'running') {
       banner.innerHTML =
         `BA is drafting ${total} tickets in parallel &mdash; ` +
-        `${created} done, ${drafting} running, ${pending} queued` +
+        `${sized + estimateFailed} done, ${drafting + estimating} running, ${pending + created} queued` +
         `<span class="bc-concurrency-pill">concurrency: ${concurrency}</span>`;
     } else if (job.status === 'done') {
       if (sizeWarning > 0) {
@@ -6808,18 +6813,17 @@ function _bcRenderStep2() {
         banner.innerHTML = `All ${total} tickets processed.`;
       }
     } else if (job.status === 'stopped') {
-      banner.innerHTML = `Stopped. ${created} created, ${failed} failed, ${skipped} skipped.`;
+      banner.innerHTML = `Stopped. ${sized + estimateFailed} estimated, ${failed} failed, ${skipped} skipped.`;
     }
   }
 
   // Summary strip
   const strip = document.getElementById('bc-summary-strip');
   if (strip) {
-    const done = created + failed + skipped;
-    const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+    const pct = total > 0 ? Math.round((fullyDone / total) * 100) : 0;
     let etaHtml = '';
-    // Estimate remaining
-    if (created > 0 && pending > 0 && _bcAvgMs) {
+    // Estimate remaining based on original BA creation pace
+    if ((sized + estimateFailed) > 0 && pending > 0 && _bcAvgMs) {
       const estMs = (_bcAvgMs / concurrency) * pending;
       const estSec = Math.round(estMs / 1000);
       const m = Math.floor(estSec / 60);
@@ -6828,8 +6832,8 @@ function _bcRenderStep2() {
       etaHtml = `<span class="bc-eta">est. ${estLabel} remaining</span>`;
     }
     strip.innerHTML = `
-      <span class="bc-metric bc-metric--created"><span class="bc-metric-count">${created}</span> Created</span>
-      <span class="bc-metric bc-metric--drafting"><span class="bc-metric-count">${drafting}</span> Drafting</span>
+      <span class="bc-metric bc-metric--created"><span class="bc-metric-count">${sized + estimateFailed}</span> Done</span>
+      <span class="bc-metric bc-metric--drafting"><span class="bc-metric-count">${drafting + estimating + created}</span> In progress</span>
       <span class="bc-metric bc-metric--pending"><span class="bc-metric-count">${pending}</span> Pending</span>
       <div class="bc-progress-wrap">
         <div class="bc-progress-bar" style="width:${pct}%"></div>
@@ -6904,18 +6908,46 @@ function _bcRenderCard(t) {
     const issueUrl = t.issue_url || '#';
     head = `<a class="bc-issue-badge" href="${escapeHtml(issueUrl)}" target="_blank" rel="noopener">#${issueNum}</a>`;
     preview = escapeHtml((t.body_preview || t.body || '').slice(0, 200));
-    if (t.finished_at && t.started_at) {
-      const elapsed = Math.round((new Date(t.finished_at).getTime() - new Date(t.started_at).getTime()) / 1000);
-      label = `Created in ${elapsed}s`;
-    } else {
-      label = 'Created';
-    }
+    label = 'Created';
     const labelsArr = t.label_pills || [];
     if (labelsArr.length > 0) {
       tags = `<div class="bc-card-tags">${labelsArr.map(l => `<span class="bc-tag">${escapeHtml(l)}</span>`).join('')}</div>`;
     }
     if (t.attachment_warning) {
       tags += `<div class="bc-attach-warn">${escapeHtml(t.attachment_warning)}</div>`;
+    }
+    actions = `<a class="bc-action-btn" href="${escapeHtml(issueUrl)}" target="_blank" rel="noopener" title="Open on GitHub">&#x2197;</a>`;
+  } else if (t.state === 'estimating') {
+    const issueNum = t.issue_num;
+    const issueUrl = t.issue_url || '#';
+    head = `<a class="bc-issue-badge" href="${escapeHtml(issueUrl)}" target="_blank" rel="noopener">#${issueNum}</a>`;
+    preview = 'Estimating size (S/M/L/XL)...';
+    label = 'estimating…';
+    actions = `<a class="bc-action-btn" href="${escapeHtml(issueUrl)}" target="_blank" rel="noopener" title="Open on GitHub">&#x2197;</a>`;
+  } else if (t.state === 'sized') {
+    const issueNum = t.issue_num;
+    const issueUrl = t.issue_url || '#';
+    const sizeBadge = t.estimate_size ? `<span class="bc-size-badge">${escapeHtml(t.estimate_size)}</span>` : '';
+    head = `<a class="bc-issue-badge" href="${escapeHtml(issueUrl)}" target="_blank" rel="noopener">#${issueNum}</a>${sizeBadge}`;
+    preview = escapeHtml((t.body_preview || t.body || '').slice(0, 200));
+    label = t.estimate_size ? `Sized: ${t.estimate_size}` : 'Sized';
+    const labelsArr = t.label_pills || [];
+    if (labelsArr.length > 0) {
+      tags = `<div class="bc-card-tags">${labelsArr.map(l => `<span class="bc-tag">${escapeHtml(l)}</span>`).join('')}</div>`;
+    }
+    if (t.attachment_warning) {
+      tags += `<div class="bc-attach-warn">${escapeHtml(t.attachment_warning)}</div>`;
+    }
+    actions = `<a class="bc-action-btn" href="${escapeHtml(issueUrl)}" target="_blank" rel="noopener" title="Open on GitHub">&#x2197;</a>`;
+  } else if (t.state === 'estimate_failed') {
+    const issueNum = t.issue_num;
+    const issueUrl = t.issue_url || '#';
+    head = `<a class="bc-issue-badge" href="${escapeHtml(issueUrl)}" target="_blank" rel="noopener">#${issueNum}</a>`;
+    preview = escapeHtml((t.estimate_error || 'Estimation failed').slice(0, 120));
+    label = 'Estimate failed';
+    const labelsArr = t.label_pills || [];
+    if (labelsArr.length > 0) {
+      tags = `<div class="bc-card-tags">${labelsArr.map(l => `<span class="bc-tag">${escapeHtml(l)}</span>`).join('')}</div>`;
     }
     actions = `<a class="bc-action-btn" href="${escapeHtml(issueUrl)}" target="_blank" rel="noopener" title="Open on GitHub">&#x2197;</a>`;
   } else if (t.state === 'failed') {

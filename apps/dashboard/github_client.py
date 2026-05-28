@@ -12,7 +12,7 @@ import time
 from pathlib import Path
 from typing import Optional
 
-from .config import TEST_GITHUB_REPO
+from config import TEST_GITHUB_REPO
 
 CACHE_TTL = 30.0
 SPRINT_RE = re.compile(r"^sprint-(\d+)$")

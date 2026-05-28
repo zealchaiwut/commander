@@ -121,7 +121,7 @@ function drillIntoProject(repo, tab) {
   _activeProjectTab = tab;
 
   const encoded = encodeURIComponent(repo);
-  history.pushState({ view: 'project', repo, tab }, '', `/projects/${encoded}/${tab}`);
+  history.pushState({ view: 'project', repo, tab }, '', `/legacy/${encoded}/${tab}`);
   _renderProjectView(repo, tab);
 }
 
@@ -133,7 +133,7 @@ function switchProject(repo) {
 function switchProjectTab(tab) {
   _activeProjectTab = tab;
   const encoded = encodeURIComponent(_activeProject);
-  history.pushState({ view: 'project', repo: _activeProject, tab }, '', `/projects/${encoded}/${tab}`);
+  history.pushState({ view: 'project', repo: _activeProject, tab }, '', `/legacy/${encoded}/${tab}`);
   _activateProjectTab(tab);
 }
 
@@ -297,8 +297,8 @@ function _renderProjectTickets(repo, data) {
 function _route() {
   const path = window.location.pathname;
 
-  // Match /projects/<encoded-repo>/<tab>
-  const m = path.match(/^\/projects\/([^/]+)\/?([^/]*)?$/);
+  // Match /legacy/<encoded-repo>/<tab>
+  const m = path.match(/^\/legacy\/([^/]+)\/?([^/]*)?$/);
   if (m) {
     const repo    = decodeURIComponent(m[1]);
     const rawTab  = m[2] || '';
@@ -306,10 +306,10 @@ function _route() {
     const tab = (rawTab === 'sprint-history') ? 'sprint-history'
               : (rawTab === 'sprint-mgmt')    ? 'sprint-mgmt'
               : 'sprint-mgmt'; // covers '', 'tickets', or any unknown segment
-    if (rawTab === 'tickets' || (!rawTab && path.includes('/projects/'))) {
+    if (rawTab === 'tickets' || (!rawTab && path.includes('/legacy/'))) {
       // Replace stale URL silently so the address bar reflects the active tab
       const encoded = encodeURIComponent(repo);
-      history.replaceState({ view: 'project', repo, tab }, '', `/projects/${encoded}/${tab}`);
+      history.replaceState({ view: 'project', repo, tab }, '', `/legacy/${encoded}/${tab}`);
     }
     _activeProject    = repo;
     _activeProjectTab = tab;
@@ -6402,7 +6402,7 @@ function showErrorToast(msg) {
     });
 
   // On first load with a non-project URL, show overview
-  if (!window.location.pathname.startsWith('/projects/')) {
+  if (!window.location.pathname.startsWith('/legacy/')) {
     _showOverview();
   }
 

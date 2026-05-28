@@ -621,6 +621,27 @@
     }
     .smgmt-log-line { display: flex; gap: 12px; color: var(--text-muted); }
     .smgmt-log-time { color: var(--text-sub); flex-shrink: 0; }
+    /* ── Live log panel (running sprint, issue #309) ── */
+    .smgmt-live-log {
+      border-top: 1px solid var(--border);
+      background: var(--bg);
+    }
+    .smgmt-live-log-bar {
+      display: flex; align-items: center; gap: 8px;
+      padding: 8px 16px;
+      font-family: var(--mono); font-size: 11px; color: var(--text-muted);
+    }
+    .smgmt-live-indicator {
+      width: 6px; height: 6px; border-radius: 50%;
+      background: var(--green); flex-shrink: 0;
+      animation: smgmt-running-badge-pulse 2s ease-in-out infinite;
+    }
+    .smgmt-live-log-agent { margin-left: auto; color: var(--text-sub); }
+    .smgmt-live-log-stream {
+      max-height: 200px; overflow-y: auto;
+      font-family: var(--mono); font-size: 11px; line-height: 1.7;
+      padding: 0 16px 10px;
+    }
     /* ── Toast ── */
     .smgmt-toast {
       position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%) translateY(12px);
@@ -1981,8 +2002,10 @@ const _smgmtOutcomeCache = {};
 let _smgmtRunningLabels = new Set();
 // Live data cache: sprint label → last live snapshot from /api/sprints/{label}/live
 const _smgmtLiveCache = {};
-// Poll timer for live data
+// Poll timer for live data (2s indicator refresh)
 let _smgmtLivePollId = null;
+// Poll timer for live log panel (5s log refresh, issue #309)
+let _smgmtLogPollId = null;
 
 // ── Tab navigation ────────────────────────────────────────────────────────────
 function switchTab(tab, pushHistory) {
@@ -1994,6 +2017,10 @@ function switchTab(tab, pushHistory) {
     if (_smgmtLivePollId !== null) {
       clearInterval(_smgmtLivePollId);
       _smgmtLivePollId = null;
+    }
+    if (_smgmtLogPollId !== null) {
+      clearInterval(_smgmtLogPollId);
+      _smgmtLogPollId = null;
     }
   }
 
@@ -2534,6 +2561,9 @@ function _smgmtInjectOutcomeBand(label, outcome) {
   if (existing) existing.remove();
   const existingLog = card.querySelector('.smgmt-log-compact');
   if (existingLog) existingLog.remove();
+  // Remove live log panel (issue #309)
+  const existingLiveLog = card.querySelector('.smgmt-live-log');
+  if (existingLiveLog) existingLiveLog.remove();
 
   // Update card border class
   card.classList.remove('smgmt-completed', 'smgmt-stopped');
@@ -2903,6 +2933,8 @@ function _smgmtRunningCardHtml(label, n, tickets) {
   const estRemMins    = live ? live.est_remaining_minutes : null;
   const timeSpentSec  = live ? (live.time_spent_sec || 0) : 0;
   const currentTicket = live ? live.current_ticket : null;
+  const activeAgent   = live ? live.active_agent : null;
+  const recentLogLines = live ? (live.recent_log_lines || []) : [];
 
   // Progress bar percentage (complete / total)
   const pct = totalCount > 0 ? Math.round((completeCount / totalCount) * 100) : 0;
@@ -3005,6 +3037,18 @@ function _smgmtRunningCardHtml(label, n, tickets) {
       <div class="smgmt-sprint-tickets" id="smgmt-tickets-${escHtml(label)}">
         ${ticketRowsHtml || '<div class="smgmt-drop-hint">No tickets in this sprint</div>'}
       </div>
+      <div class="smgmt-live-log" id="smgmt-live-log-${escHtml(label)}">
+        <div class="smgmt-live-log-bar">
+          <span class="smgmt-live-indicator"></span>
+          <span>live</span>
+          <span class="smgmt-live-log-agent" id="smgmt-live-agent-${escHtml(label)}">${
+            activeAgent ? escHtml(activeAgent.name.toUpperCase() + ' · pid ' + activeAgent.pid) : ''
+          }</span>
+        </div>
+        <div class="smgmt-live-log-stream" id="smgmt-live-log-stream-${escHtml(label)}">${
+          _smgmtLiveLogLinesHtml(recentLogLines)
+        }</div>
+      </div>
     </div>`;
 }
 
@@ -3016,6 +3060,46 @@ function _fmtRunningTime(secs) {
   const s = secs % 60;
   if (h > 0) return `${h}h ${m}m`;
   return `${m}m ${s}s`;
+}
+
+/** Render recent_log_lines array to HTML for the live log stream container. */
+function _smgmtLiveLogLinesHtml(logLines) {
+  if (!logLines || logLines.length === 0) {
+    return '<div class="smgmt-log-line" style="color:var(--text-sub)">Waiting for log…</div>';
+  }
+  return logLines.map(l =>
+    `<div class="smgmt-log-line">` +
+    `<span class="smgmt-log-time">${escHtml(l.timestamp)}</span>` +
+    `<span class="smgmt-log-msg">${escHtml(l.message)}</span>` +
+    `</div>`
+  ).join('');
+}
+
+/** Update the live log panel for a running sprint card (header agent info + log stream). */
+function _smgmtLiveLogPatch(label, live) {
+  const agentEl  = document.getElementById(`smgmt-live-agent-${label}`);
+  const streamEl = document.getElementById(`smgmt-live-log-stream-${label}`);
+  if (agentEl) {
+    const agent = live.active_agent;
+    agentEl.textContent = agent ? `${agent.name.toUpperCase()} · pid ${agent.pid}` : '';
+  }
+  if (streamEl) {
+    streamEl.innerHTML = _smgmtLiveLogLinesHtml(live.recent_log_lines || []);
+    streamEl.scrollTop = streamEl.scrollHeight;
+  }
+}
+
+/** 5-second tick: update live log panels from cached live data (issue #309). */
+function _smgmtLogPollTick() {
+  if (_smgmtRunningLabels.size === 0) {
+    clearInterval(_smgmtLogPollId);
+    _smgmtLogPollId = null;
+    return;
+  }
+  for (const label of _smgmtRunningLabels) {
+    const live = _smgmtLiveCache[label];
+    if (live) _smgmtLiveLogPatch(label, live);
+  }
 }
 
 /** Format per-ticket elapsed seconds as "{N}m {N}s". Returns null if no value. */
@@ -3180,16 +3264,22 @@ function _smgmtLivePatch(label, live) {
 
 /** Start or restart the live polling loop for any running sprints. */
 function _smgmtLivePollRestart() {
-  // Clear existing poll
+  // Clear existing polls
   if (_smgmtLivePollId !== null) {
     clearInterval(_smgmtLivePollId);
     _smgmtLivePollId = null;
   }
+  if (_smgmtLogPollId !== null) {
+    clearInterval(_smgmtLogPollId);
+    _smgmtLogPollId = null;
+  }
 
   if (_smgmtRunningLabels.size === 0) return;
 
-  // Poll every 2 seconds
+  // Poll every 2 seconds for stat/indicator updates
   _smgmtLivePollId = setInterval(_smgmtLivePollTick, 2000);
+  // Poll every 5 seconds for live log panel (reads from cache populated by the 2s poll)
+  _smgmtLogPollId = setInterval(_smgmtLogPollTick, 5000);
   // Kick off immediately
   _smgmtLivePollTick();
 }

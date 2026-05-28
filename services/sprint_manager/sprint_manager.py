@@ -3095,7 +3095,7 @@ see #{summary_issue_num} for full report.
 After posting the comment and creating tickets, output exactly one JSON line:
 
 ```
-{"comment_url": "https://github.com/...", "blockers": N, "suggestions": N, "nits": N, "follow_up_tickets": [123, 124]}
+{{"comment_url": "https://github.com/...", "blockers": N, "suggestions": N, "nits": N, "follow_up_tickets": [123, 124]}}
 ```
 
 Then exit cleanly.
@@ -3276,9 +3276,12 @@ def _dispatch_documenter(
             summary_issue_num = summary_issue_num or 0,
         )
     except KeyError as e:
-        print(f"  [documenter] WARNING: prompt template has unknown placeholder {e} — skipping", file=sys.stderr)
-        state.documenter_status = "skipped"
-        return
+        print(f"  [documenter] ERROR: prompt template has unknown placeholder {e} — aborting documenter stage", file=sys.stderr)
+        state.documenter_status = "failed"
+        raise RuntimeError(
+            f"[documenter] prompt template has unknown placeholder {e}; "
+            "check documenter_prompt_template in sprint.yaml or DEFAULT_DOCUMENTER_PROMPT"
+        ) from e
 
     cwd_path = cfg.worktree_tester if cfg else Path.cwd()
     logs_dir = cfg.logs_dir if cfg else Path.cwd()
@@ -3396,7 +3399,11 @@ def _dispatch_reviewer(
     """Dispatch the reviewer agent after sprint PR creation.
 
     Updates state.reviewer_status, state.reviewer_comment_url, and
-    state.reviewer_findings in-place. Does NOT raise — failure is advisory.
+    state.reviewer_findings in-place.
+
+    Raises RuntimeError when the prompt template contains an unknown placeholder
+    (AC-3: unknown placeholders must surface as a loud ERROR, not a silent skip).
+    All other failures are advisory (logged and set state.reviewer_status="failed").
     """
     eff_repo = repo_name or (cfg.repo_name if cfg else None)
 
@@ -3435,9 +3442,12 @@ def _dispatch_reviewer(
             repo_name         = eff_repo or "",
         )
     except KeyError as e:
-        print(f"  [reviewer] WARNING: prompt template has unknown placeholder {e} — skipping", file=sys.stderr)
-        state.reviewer_status = "skipped"
-        return
+        print(f"  [reviewer] ERROR: prompt template has unknown placeholder {e} — aborting reviewer stage", file=sys.stderr)
+        state.reviewer_status = "failed"
+        raise RuntimeError(
+            f"[reviewer] prompt template has unknown placeholder {e}; "
+            "check reviewer_prompt_template in sprint.yaml or DEFAULT_REVIEWER_PROMPT"
+        ) from e
 
     cwd_path = cfg.worktree_coder if cfg else Path.cwd()
     logs_dir = cfg.logs_dir if cfg else Path.cwd()
@@ -4462,7 +4472,7 @@ def main() -> None:
                         file=sys.stderr,
                     )
         except Exception as e_rev:
-            print(f"  [reviewer] WARNING: reviewer raised unexpectedly -- {e_rev}", file=sys.stderr)
+            print(f"  [reviewer] ERROR: reviewer stage failed -- {e_rev}", file=sys.stderr)
             state.reviewer_status = "failed"
 
     print("\n=== Sprint Summary ===")

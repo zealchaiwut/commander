@@ -1117,6 +1117,15 @@ def reject_issue(issue_id: int, body: RejectBody, repo: Optional[str] = None):
         raise _gh_error(e)
 
 
+@app.post("/api/issues/{issue_id}/close")
+def close_issue_endpoint(issue_id: int, repo: Optional[str] = None):
+    try:
+        github_client.close_issue(issue_id, repo_name=repo)
+        return {"ok": True}
+    except subprocess.CalledProcessError as e:
+        raise _gh_error(e)
+
+
 @app.get("/api/issues/{issue_id}/test-report")
 def get_test_report(issue_id: int, repo: Optional[str] = None):
     try:

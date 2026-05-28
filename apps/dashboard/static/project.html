@@ -803,9 +803,17 @@
     .ns-modal { width: min(480px, calc(100vw - 32px)); }
 
     /* ── New Ticket modal ── */
-    .nt-modal { width: min(500px, calc(100vw - 32px)); max-height: calc(100vh - 48px); overflow: hidden; }
-    .nt-modal .modal-body { overflow-y: auto; }
+    .nt-modal { width: min(560px, calc(100vw - 32px)); max-height: calc(100vh - 48px); overflow-y: auto; }
     .nt-textarea { resize: vertical; min-height: 80px; font-family: inherit; }
+    .nt-body-textarea { resize: vertical; min-height: 140px; font-family: monospace; font-size: 12px; }
+    .nt-draft-divider { border-top: 1px solid var(--border); margin: 20px 0; }
+    .nt-spinner {
+      display: inline-block; width: 12px; height: 12px;
+      border: 2px solid currentColor; border-top-color: transparent;
+      border-radius: 50%; animation: nt-spin 0.7s linear infinite;
+      margin-right: 6px; vertical-align: middle;
+    }
+    @keyframes nt-spin { to { transform: rotate(360deg); } }
   </style>
 </head>
 <body>
@@ -2238,18 +2246,23 @@ function _nsShowError(msg) {
 }
 
 // ── New Ticket modal ──────────────────────────────────────────────────────
-async function smgmtOpenNewTicket() {
-  const sel = document.getElementById('nt-project');
-  sel.innerHTML = '<option value="">Loading projects…</option>';
-  sel.disabled = true;
+let _ntDraftId = null;
 
+async function smgmtOpenNewTicket() {
+  // Reset to input state
+  _ntDraftId = null;
   document.getElementById('nt-description').value = '';
   document.getElementById('nt-error').classList.add('hidden');
   document.getElementById('nt-submit-btn').disabled = false;
   document.getElementById('nt-submit-btn').textContent = 'Generate Draft';
+  document.getElementById('nt-draft-section').classList.add('hidden');
   document.getElementById('nt-backdrop').classList.remove('hidden');
   document.getElementById('nt-modal').classList.remove('hidden');
 
+  // Populate project dropdown
+  const sel = document.getElementById('nt-project');
+  sel.innerHTML = '<option value="">Loading projects…</option>';
+  sel.disabled = true;
   try {
     const r = await fetch('/api/projects');
     if (!r.ok) throw new Error('HTTP ' + r.status);
@@ -2343,6 +2356,7 @@ function _setupModals() {
   // ── New Ticket modal wiring ──
   document.getElementById('nt-close-btn').addEventListener('click', _ntClose);
   document.getElementById('nt-cancel-btn').addEventListener('click', _ntClose);
+  document.getElementById('nt-post-cancel-btn').addEventListener('click', _ntClose);
   document.getElementById('nt-backdrop').addEventListener('click', _ntClose);
 
   document.getElementById('nt-modal').addEventListener('keydown', function(e) {
@@ -2366,8 +2380,9 @@ function _setupModals() {
     }
 
     this.disabled = true;
-    this.textContent = 'Submitting…';
+    this.innerHTML = '<span class="nt-spinner"></span>Generating…';
     document.getElementById('nt-error').classList.add('hidden');
+    document.getElementById('nt-draft-section').classList.add('hidden');
 
     try {
       const formData = new FormData();
@@ -2378,14 +2393,56 @@ function _setupModals() {
         const data = await resp.json().catch(() => ({}));
         throw new Error(data.detail || 'HTTP ' + resp.status);
       }
-      // Draft generated — navigate to the project on main index to finish posting
-      _ntClose();
-      window.location.href = '/project/' + encodeURIComponent(repo) + '/sprint-mgmt';
+      const data = await resp.json();
+      _ntDraftId = data.draft_id;
+      document.getElementById('nt-title').value = data.title || '';
+      document.getElementById('nt-body').value = data.body || '';
+      document.getElementById('nt-draft-section').classList.remove('hidden');
+      document.getElementById('nt-modal').scrollTop = document.getElementById('nt-modal').scrollHeight;
     } catch (err) {
-      document.getElementById('nt-error').textContent = "Couldn't create ticket — " + err.message;
+      document.getElementById('nt-error').textContent = "Couldn't generate draft — " + err.message;
       document.getElementById('nt-error').classList.remove('hidden');
+    } finally {
       this.disabled = false;
       this.textContent = 'Generate Draft';
+    }
+  });
+
+  document.getElementById('nt-post-btn').addEventListener('click', async function() {
+    const title = (document.getElementById('nt-title').value || '').trim();
+    const repo = document.getElementById('nt-project').value;
+    if (!title) {
+      document.getElementById('nt-error').textContent = 'Title is required before posting.';
+      document.getElementById('nt-error').classList.remove('hidden');
+      return;
+    }
+
+    this.disabled = true;
+    this.innerHTML = '<span class="nt-spinner"></span>Posting…';
+    document.getElementById('nt-error').classList.add('hidden');
+
+    try {
+      const formData = new FormData();
+      formData.append('draft_id', _ntDraftId || '');
+      formData.append('title', title);
+      formData.append('body', document.getElementById('nt-body').value);
+      formData.append('project', repo);
+      const resp = await fetch('/api/tickets/create', { method: 'POST', body: formData });
+      if (!resp.ok) {
+        const data = await resp.json().catch(() => ({}));
+        throw new Error(data.detail || 'HTTP ' + resp.status);
+      }
+      _ntClose();
+      _smgmtShowToast('Ticket created successfully');
+      // Refresh both views without a hard page reload
+      await loadSprintMgmt();
+      loadTickets().catch(() => {});
+    } catch (err) {
+      document.getElementById('nt-error').textContent = "Couldn't post ticket — " + err.message;
+      document.getElementById('nt-error').classList.remove('hidden');
+    } finally {
+      this.disabled = false;
+      this.textContent = 'Post to GitHub';
     }
   });
 }
@@ -2432,7 +2489,9 @@ document.addEventListener('DOMContentLoaded', init);
     <span class="modal-title" id="nt-modal-title">New Ticket</span>
     <button class="modal-close" id="nt-close-btn" aria-label="Close">&times;</button>
   </div>
-  <div class="modal-body">
+
+  <!-- Step 1: input form -->
+  <div class="modal-body" id="nt-input-section">
     <div class="modal-field">
       <label class="modal-label" for="nt-project">Project <span style="color:var(--red)">*</span></label>
       <select class="modal-input" id="nt-project" aria-required="true"></select>
@@ -2446,9 +2505,28 @@ document.addEventListener('DOMContentLoaded', init);
     </div>
     <div class="modal-error hidden" id="nt-error"></div>
   </div>
-  <div class="modal-footer">
+  <div class="modal-footer" id="nt-generate-footer">
     <button class="btn-ghost" id="nt-cancel-btn" type="button">Cancel</button>
     <button class="btn-primary" id="nt-submit-btn" type="button">Generate Draft</button>
+  </div>
+
+  <!-- Step 2: draft review (hidden until draft generated) -->
+  <div id="nt-draft-section" class="hidden">
+    <div class="nt-draft-divider"></div>
+    <div class="modal-body">
+      <div class="modal-field">
+        <label class="modal-label" for="nt-title">Title</label>
+        <input class="modal-input" id="nt-title" type="text" autocomplete="off">
+      </div>
+      <div class="modal-field">
+        <label class="modal-label" for="nt-body">Body <span class="modal-hint" style="font-weight:normal;color:var(--text-muted)">(edit before posting)</span></label>
+        <textarea class="modal-input nt-body-textarea" id="nt-body" rows="10"></textarea>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-ghost" id="nt-post-cancel-btn" type="button">Cancel</button>
+      <button class="btn-primary" id="nt-post-btn" type="button">Post to GitHub</button>
+    </div>
   </div>
 </div>
 

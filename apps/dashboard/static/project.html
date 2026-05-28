@@ -1351,6 +1351,7 @@
     .bc-card--created { border-color: var(--green); }
     .bc-card--failed  { border-color: var(--red); }
     .bc-card--drafting { border-color: var(--blue); }
+    .bc-card--size_warning { border-color: var(--amber); }
 
     /* Status dot */
     .bc-status-dot {
@@ -1383,6 +1384,13 @@
     }
     .bc-status-dot--skipped::after {
       content: '−'; color: #fff; font-size: 9px; font-weight: 700;
+    }
+    .bc-status-dot--size_warning {
+      border-color: var(--amber); background: var(--amber);
+      display: flex; align-items: center; justify-content: center;
+    }
+    .bc-status-dot--size_warning::after {
+      content: '!'; color: #fff; font-size: 7px; font-weight: 700;
     }
     @keyframes bc-spin { to { transform: rotate(360deg); } }
 
@@ -1470,6 +1478,32 @@
       transition: background .12s, color .12s;
     }
     .bc-btn-retry-all:hover { background: rgba(220,38,38,0.08); }
+
+    /* Size warning card (issue #261) */
+    .bc-size-warn-detail { margin-top: 8px; width: 100%; }
+    .bc-size-warn-banner {
+      font-size: 11px; color: var(--amber);
+      background: var(--amber-bg); border: 1px solid var(--amber);
+      border-radius: 5px; padding: 5px 8px; margin-bottom: 6px;
+      word-break: break-word;
+    }
+    .bc-size-warn-actions {
+      display: flex; gap: 6px; margin-top: 6px; align-items: center; flex-wrap: wrap;
+    }
+    .bc-btn-remedy-comment {
+      font-size: 11px; padding: 4px 10px; border-radius: 5px; cursor: pointer;
+      background: var(--amber); color: #fff; border: none;
+      transition: opacity .12s;
+    }
+    .bc-btn-remedy-comment:hover { opacity: 0.85; }
+    .bc-btn-remedy-comment:disabled { opacity: 0.5; cursor: not-allowed; }
+    .bc-btn-remedy-images {
+      font-size: 11px; padding: 4px 10px; border-radius: 5px; cursor: pointer;
+      background: none; color: var(--amber); border: 1px solid var(--amber);
+      transition: background .12s, color .12s;
+    }
+    .bc-btn-remedy-images:hover { background: var(--amber-bg); }
+    .bc-btn-remedy-images:disabled { opacity: 0.5; cursor: not-allowed; }
   </style>
 </head>
 <body>
@@ -4291,18 +4325,23 @@ function _bcUpdateBadge() {
   const job = _bcJobState;
   if (!job) { badge.className = 'bc-tab-badge hidden'; return; }
 
-  const tickets = job.tickets || [];
-  const total   = tickets.length;
-  const created = tickets.filter(t => t.state === 'created').length;
-  const failed  = tickets.filter(t => t.state === 'failed').length;
+  const tickets      = job.tickets || [];
+  const total        = tickets.length;
+  const created      = tickets.filter(t => t.state === 'created').length;
+  const failed       = tickets.filter(t => t.state === 'failed').length;
+  const sizeWarn     = tickets.filter(t => t.state === 'size_warning').length;
 
   if (job.status === 'running') {
     badge.className = 'bc-tab-badge';
     badge.innerHTML = `<span class="bc-tab-badge-spin">&#x27F3;</span>${created}/${total}`;
   } else if (job.status === 'done' || job.status === 'stopped') {
-    if (failed > 0) {
+    const issues = failed + sizeWarn;
+    if (issues > 0) {
       badge.className = 'bc-tab-badge bc-tab-badge--warn';
-      badge.textContent = `⚠ ${failed} failed`;
+      const parts = [];
+      if (failed > 0)   parts.push(`${failed} failed`);
+      if (sizeWarn > 0) parts.push(`${sizeWarn} oversized`);
+      badge.textContent = `⚠ ${parts.join(', ')}`;
     } else {
       badge.className = 'bc-tab-badge hidden';
     }
@@ -4349,12 +4388,13 @@ function _bcRenderStep2() {
   const tickets = job.tickets || [];
   const concurrency = job.concurrency || 3;
 
-  const created  = tickets.filter(t => t.state === 'created').length;
-  const drafting = tickets.filter(t => t.state === 'drafting').length;
-  const pending  = tickets.filter(t => t.state === 'pending').length;
-  const failed   = tickets.filter(t => t.state === 'failed').length;
-  const skipped  = tickets.filter(t => t.state === 'skipped').length;
-  const total    = tickets.length;
+  const created      = tickets.filter(t => t.state === 'created').length;
+  const drafting     = tickets.filter(t => t.state === 'drafting').length;
+  const pending      = tickets.filter(t => t.state === 'pending').length;
+  const failed       = tickets.filter(t => t.state === 'failed').length;
+  const skipped      = tickets.filter(t => t.state === 'skipped').length;
+  const sizeWarning  = tickets.filter(t => t.state === 'size_warning').length;
+  const total        = tickets.length;
 
   // Banner
   const banner = document.getElementById('bc-parallel-banner');
@@ -4364,7 +4404,11 @@ function _bcRenderStep2() {
         `${created} done, ${drafting} running, ${pending} queued` +
         `<span class="bc-concurrency-pill">concurrency: ${concurrency}</span>`;
     } else if (job.status === 'done') {
-      banner.innerHTML = `All ${total} tickets processed.`;
+      if (sizeWarning > 0) {
+        banner.innerHTML = `All tickets processed. ${sizeWarning} ticket${sizeWarning > 1 ? 's' : ''} need size remediation.`;
+      } else {
+        banner.innerHTML = `All ${total} tickets processed.`;
+      }
     } else if (job.status === 'stopped') {
       banner.innerHTML = `Stopped. ${created} created, ${failed} failed, ${skipped} skipped.`;
     }
@@ -4383,10 +4427,14 @@ function _bcRenderStep2() {
       const s = estSec % 60;
       etaHtml = `<span class="bc-eta">est. ${m > 0 ? m + 'm ' + s + 's' : s + 's'} remaining</span>`;
     }
+    const sizeWarnHtml = sizeWarning > 0
+      ? `<span class="bc-metric" style="color:var(--amber)"><span class="bc-metric-count">${sizeWarning}</span> Oversized</span>`
+      : '';
     strip.innerHTML = `
       <span class="bc-metric bc-metric--created"><span class="bc-metric-count">${created}</span> Created</span>
       <span class="bc-metric bc-metric--drafting"><span class="bc-metric-count">${drafting}</span> Drafting</span>
       <span class="bc-metric bc-metric--pending"><span class="bc-metric-count">${pending}</span> Pending</span>
+      ${sizeWarnHtml}
       <div class="bc-progress-wrap"><div class="bc-progress-bar" style="width:${pct}%"></div></div>
       ${etaHtml}`;
   }
@@ -4530,6 +4578,41 @@ function _bcRenderCard(t) {
             <div class="bc-fail-img-row">${imgChipHtml}</div>
             <div class="bc-fail-actions">
               <button class="bc-btn-retry-this" onclick="bcRetryWithBody(${t.index})">Retry this ticket</button>
+              <button class="bc-btn-skip-this" onclick="bcSkipTicket(${t.index})">Skip</button>
+            </div>
+          </div>
+        </div>
+      </div>`;
+  } else if (t.state === 'size_warning') {
+    const charCount = t.body_char_count || (t.body || '').length;
+    const overBy    = t.body_over_by   || Math.max(0, charCount - 62000);
+    const titleText = t.title ? escHtml(t.title.slice(0, 80)) : '';
+    const headHtmlSz = titleText
+      ? `<div class="bc-card-head"><span class="bc-card-label" style="color:var(--amber)">Size warning</span><span class="bc-card-preview" style="flex:1;margin-left:6px;">${titleText}</span></div>`
+      : `<div class="bc-card-head"><span class="bc-card-label" style="color:var(--amber)">Size warning</span></div>`;
+
+    // Detect whether base64 images are present in the body
+    const bodyStr = t.body || '';
+    const hasInlineImages = /!\[[^\]]*\]\(data:image\/[a-zA-Z]+;base64,/.test(bodyStr);
+    const remedyImagesBtn = hasInlineImages
+      ? `<button class="bc-btn-remedy-images" id="bc-btn-images-${t.index}"
+             onclick="bcSizeRemedyImages(${t.index})">Link image instead of inlining</button>`
+      : `<button class="bc-btn-remedy-images" id="bc-btn-images-${t.index}" disabled
+             title="No inlined base64 images detected">Link image instead of inlining</button>`;
+
+    return `
+      <div class="bc-card bc-card--size_warning" id="bc-card-${t.index}">
+        <div class="bc-status-dot bc-status-dot--size_warning"></div>
+        <div class="bc-card-body" style="min-width:0;flex:1;">
+          ${headHtmlSz}
+          <div class="bc-size-warn-detail">
+            <div class="bc-size-warn-banner">
+              Body is too large for GitHub (${charCount.toLocaleString()} chars, ${overBy.toLocaleString()} over the 62,000-char limit). Choose a remediation action or skip.
+            </div>
+            <div class="bc-size-warn-actions">
+              <button class="bc-btn-remedy-comment" id="bc-btn-comment-${t.index}"
+                  onclick="bcSizeRemedyComment(${t.index})">Move detail to follow-up comment</button>
+              ${remedyImagesBtn}
               <button class="bc-btn-skip-this" onclick="bcSkipTicket(${t.index})">Skip</button>
             </div>
           </div>
@@ -4687,6 +4770,44 @@ async function bcRetryAllFailed() {
   } catch (_) {}
 
   if (btn) { btn.disabled = false; }
+}
+
+// ── Size-warning remediation handlers (issue #261) ───────────────────────────
+
+async function bcSizeRemedyComment(index) {
+  if (!_bcJobId) return;
+  const btn = document.getElementById(`bc-btn-comment-${index}`);
+  const imgBtn = document.getElementById(`bc-btn-images-${index}`);
+  if (btn) { btn.disabled = true; btn.textContent = 'Creating…'; }
+  if (imgBtn) imgBtn.disabled = true;
+  try {
+    await fetch(`/api/tickets/bulk/${_bcJobId}/size-remedy-comment`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ index }),
+    });
+    // SSE will update state
+  } catch (_) {
+    if (btn) { btn.disabled = false; btn.textContent = 'Move detail to follow-up comment'; }
+    if (imgBtn) imgBtn.disabled = false;
+  }
+}
+
+async function bcSizeRemedyImages(index) {
+  if (!_bcJobId) return;
+  const btn = document.getElementById(`bc-btn-images-${index}`);
+  const commentBtn = document.getElementById(`bc-btn-comment-${index}`);
+  if (btn) { btn.disabled = true; btn.textContent = 'Uploading images…'; }
+  if (commentBtn) commentBtn.disabled = true;
+  try {
+    await fetch(`/api/tickets/bulk/${_bcJobId}/size-remedy-images`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ index }),
+    });
+    // SSE will update state
+  } catch (_) {
+    if (btn) { btn.disabled = false; btn.textContent = 'Link image instead of inlining'; }
+    if (commentBtn) commentBtn.disabled = false;
+  }
 }
 
 async function bcStop() {

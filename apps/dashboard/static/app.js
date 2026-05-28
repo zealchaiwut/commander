@@ -3272,6 +3272,7 @@ function smgmtSprintBlockHtml(label, tickets, isNext) {
 function smgmtPlaceholderBlockHtml(n) {
   return `
     <div class="smgmt-sprint-block smgmt-sprint-placeholder" id="smgmt-block-placeholder-${n}"
+         style="display:none"
          ondragover="smgmtDragOverPlaceholder(event)"
          ondragleave="smgmtDragLeave(event)"
          ondrop="smgmtDropOnPlaceholder(event, ${n})">
@@ -3674,6 +3675,8 @@ function smgmtBacklogTicketDragStart(event, issueNum) {
   event.dataTransfer.setData('text/smgmt-ticket', String(issueNum));
   const el = document.getElementById(`smgmt-ticket-${issueNum}`);
   if (el) setTimeout(() => el.classList.add('dragging-ticket'), 0);
+  // Show the N+1 ghost sprint pane only while a ticket drag is active (issue #340)
+  document.querySelectorAll('.smgmt-sprint-placeholder').forEach(p => { p.style.display = 'block'; });
 }
 
 function smgmtBacklogTicketDragEnd(event) {
@@ -3841,6 +3844,8 @@ function smgmtTicketDragStart(event, issueNum, fromSprint) {
   event.dataTransfer.setData('text/smgmt-ticket', String(issueNum));
   const el = document.getElementById(`smgmt-ticket-${issueNum}`);
   if (el) setTimeout(() => el.classList.add('dragging-ticket'), 0);
+  // Show the N+1 ghost sprint pane only while a ticket drag is active (issue #340)
+  document.querySelectorAll('.smgmt-sprint-placeholder').forEach(p => { p.style.display = 'block'; });
 }
 
 function smgmtTicketDragEnd(event) {
@@ -3854,6 +3859,8 @@ function smgmtTicketDragEnd(event) {
     el.classList.remove('drag-over-sprint', 'drag-over-zone');
   });
   document.getElementById('smgmt-backlog')?.classList.remove('drag-over-sprint', 'drag-over-zone');
+  // Hide the N+1 ghost sprint pane now that the drag is over (issue #340)
+  document.querySelectorAll('.smgmt-sprint-placeholder').forEach(p => { p.style.display = 'none'; });
 }
 
 function smgmtDragOverZone(event, sprintLabel) {

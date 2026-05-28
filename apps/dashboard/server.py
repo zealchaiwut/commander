@@ -319,11 +319,58 @@ def _restore_sprint_statuses_on_startup() -> None:
     )
 
 
+def _check_repo_accessible(repo: str) -> bool:
+    """Return True if `repo` (owner/repo) exists and is accessible via gh CLI.
+
+    Uses `gh repo view --json name` which returns exit code 0 on success.
+    Network errors or missing repos both produce non-zero exit codes.
+    """
+    try:
+        result = subprocess.run(
+            ["gh", "repo", "view", repo, "--json", "name"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        return result.returncode == 0
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return False
+
+
+def _validate_github_repos() -> None:
+    """Validate GITHUB_REPO and GITHUB_ISSUE_TEST_REPO at startup.
+
+    AC (issue #301):
+    - GITHUB_REPO missing/inaccessible → sys.exit with descriptive error.
+    - GITHUB_ISSUE_TEST_REPO set but missing/inaccessible → print warning, continue.
+    """
+    # Validate work repo (GITHUB_REPO)
+    try:
+        work_repo = github_client.repo()
+    except ValueError as exc:
+        sys.exit(f"[startup] {exc}")
+
+    if not _check_repo_accessible(work_repo):
+        sys.exit(
+            f"Configured GITHUB_REPO '{work_repo}' does not exist or is inaccessible."
+        )
+
+    # Validate test repo (GITHUB_ISSUE_TEST_REPO) — warning only, never fatal
+    test_repo = os.environ.get("GITHUB_ISSUE_TEST_REPO", "").strip()
+    if test_repo and not _check_repo_accessible(test_repo):
+        print(
+            f"GITHUB_ISSUE_TEST_REPO '{test_repo}' is set but does not exist or is "
+            f"inaccessible — tester issue/label tests will be skipped.",
+            flush=True,
+        )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global _start_time
     _start_time = time.monotonic()
     db.init_db()
+    _validate_github_repos()
     _sweep_orphan_pid_files()
     _restore_sprint_statuses_on_startup()
     # Start backup scheduler and queue a startup backup after 30 s

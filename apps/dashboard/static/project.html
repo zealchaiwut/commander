@@ -2884,13 +2884,16 @@ function _smgmtRunningCardHtml(label, n, tickets) {
   // Progress bar percentage (complete / total)
   const pct = totalCount > 0 ? Math.round((completeCount / totalCount) * 100) : 0;
 
-  // Build per-ticket indicator list from live issues data
-  // Match live issue statuses to ticket list
-  const liveIssues = (live && live.issues) ? live.issues : [];
+  // Use locked snapshot (live.issues) as the source of truth for rows when available.
+  // Fall back to label-derived tickets only during the pre-snapshot window.
+  const liveIssues = (live && live.issues && live.issues.length > 0) ? live.issues : [];
   const liveByNum = {};
   liveIssues.forEach(i => { liveByNum[i.number] = i; });
 
-  const ticketRowsHtml = tickets.map(t => {
+  const sourceTickets = liveIssues.length > 0 ? liveIssues : tickets;
+  const cardRepo = _smgmtRepo();
+
+  const ticketRowsHtml = sourceTickets.map(t => {
     const liveIss = liveByNum[t.number];
     const liveStatus = liveIss ? liveIss.status : null;
     const agentStatus = liveIss ? liveIss.agent_status : null;
@@ -2908,9 +2911,10 @@ function _smgmtRunningCardHtml(label, n, tickets) {
       indicator = '<div class="smgmt-ticket-indicator"><div class="circle-pending"></div></div>';
     }
 
+    const issueUrl = t.url || (cardRepo ? `https://github.com/${cardRepo}/issues/${t.number}` : '#');
     return `<div class="smgmt-ticket" data-issue="${t.number}" draggable="false">
       ${indicator}
-      <a class="smgmt-ticket-num" href="${escHtml(t.url || '#')}" target="_blank"
+      <a class="smgmt-ticket-num" href="${escHtml(issueUrl)}" target="_blank"
          rel="noopener">#${t.number}</a>
       <span class="smgmt-ticket-title" title="${escHtml(t.title)}">${escHtml(t.title)}</span>
     </div>`;
@@ -2926,7 +2930,7 @@ function _smgmtRunningCardHtml(label, n, tickets) {
           <span class="smgmt-running-badge" id="smgmt-running-badge-${escHtml(label)}">
             <span class="smgmt-running-badge-dot"></span>Running
           </span>
-          <span class="smgmt-sprint-count">&middot; ${tickets.length} ticket${tickets.length !== 1 ? 's' : ''}</span>
+          <span class="smgmt-sprint-count">&middot; ${sourceTickets.length} ticket${sourceTickets.length !== 1 ? 's' : ''}</span>
         </div>
         <div class="smgmt-sprint-header-right">
           <button class="smgmt-run-btn" disabled title="Sprint is currently running">
@@ -3018,6 +3022,33 @@ function _smgmtLivePatch(label, live) {
   const liveByNum = {};
   liveIssues.forEach(i => { liveByNum[i.number] = i; });
 
+  // Inject rows for snapshot tickets missing from the DOM (e.g. label stripped before first render)
+  if (liveIssues.length > 0) {
+    const ticketsContainer = document.getElementById(`smgmt-tickets-${label}`);
+    if (ticketsContainer) {
+      const existingNums = new Set(
+        Array.from(card.querySelectorAll('.smgmt-ticket[data-issue]'))
+          .map(r => parseInt(r.dataset.issue, 10))
+      );
+      // Remove "no tickets" placeholder if present
+      const placeholder = ticketsContainer.querySelector('.smgmt-drop-hint');
+      if (placeholder) placeholder.remove();
+      const patchRepo = _smgmtRepo();
+      liveIssues.forEach(t => {
+        if (existingNums.has(t.number)) return;
+        const issueUrl = t.url || (patchRepo ? `https://github.com/${patchRepo}/issues/${t.number}` : '#');
+        const row = document.createElement('div');
+        row.className = 'smgmt-ticket';
+        row.dataset.issue = String(t.number);
+        row.draggable = false;
+        row.innerHTML = `<div class="smgmt-ticket-indicator"><div class="circle-pending"></div></div>` +
+          `<a class="smgmt-ticket-num" href="${escHtml(issueUrl)}" target="_blank" rel="noopener">#${t.number}</a>` +
+          `<span class="smgmt-ticket-title" title="${escHtml(t.title)}">${escHtml(t.title)}</span>`;
+        ticketsContainer.appendChild(row);
+      });
+    }
+  }
+
   card.querySelectorAll('.smgmt-ticket[data-issue]').forEach(row => {
     const num = parseInt(row.dataset.issue, 10);
     const indicatorEl = row.querySelector('.smgmt-ticket-indicator');
@@ -3065,14 +3096,17 @@ async function _smgmtLivePollTick() {
   const repo = _smgmtRepo();
   if (!repo) return;
 
-  // Fetch live snapshot + sprint status (for per-issue statuses) in parallel
+  // Fetch live snapshot for each running sprint.
+  // live.issues from the /live endpoint is the locked snapshot (issue #306) and is the
+  // source of truth for which tickets to show — stripping sprint-N labels mid-run does
+  // not affect it.  Fall back to sprint-status label-derived data only in the
+  // pre-snapshot window (live.issues not yet populated by the backend).
   try {
-    const [statusResp] = await Promise.all([
-      fetch(`/api/sprint-status?project=${encodeURIComponent(repo)}`).catch(() => null),
-    ]);
-
-    // Build per-sprint per-issue map from sprint-status
-    const sprintIssueMap = {}; // label → issues[]
+    // Sprint-status provides a label-derived fallback for the pre-snapshot window only.
+    const statusResp = await fetch(
+      `/api/sprint-status?project=${encodeURIComponent(repo)}`
+    ).catch(() => null);
+    const sprintIssueMap = {}; // label → issues[] (fallback only)
     if (statusResp && statusResp.ok) {
       const statusData = await statusResp.json();
       (statusData.running_sprints || []).forEach(r => {
@@ -3086,8 +3120,11 @@ async function _smgmtLivePollTick() {
       ).catch(() => null);
       if (resp && resp.ok) {
         const live = await resp.json();
-        // Augment with per-issue status data from sprint-status endpoint
-        live.issues = sprintIssueMap[label] || [];
+        // Use live.issues (locked snapshot) when available; only fall back to the
+        // label-derived sprint-status list during the pre-snapshot window.
+        if (!live.issues || live.issues.length === 0) {
+          live.issues = sprintIssueMap[label] || [];
+        }
         _smgmtLiveCache[label] = live;
         _smgmtLivePatch(label, live);
       }

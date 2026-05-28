@@ -2341,11 +2341,21 @@
   .smgmt-ticket-status-circle.pending {
     background: var(--surface-2); color: var(--text-sub); font-size: 14px;
   }
+  /* Failed circle: red ✕ (issue #251) */
+  .smgmt-ticket-status-circle.failed {
+    background: var(--red-bg); color: var(--red); font-weight: 700;
+  }
+  /* Skipped circle: muted − (issue #251) */
+  .smgmt-ticket-status-circle.skipped {
+    background: var(--surface-2); color: var(--text-sub); font-weight: 700; font-size: 14px;
+  }
 
   /* Per-ticket row states in running sprint */
   .smgmt-ticket.is-running .smgmt-ticket-title { font-weight: 600; }
   .smgmt-ticket.is-pending .smgmt-ticket-title { color: var(--text-muted); }
   .smgmt-ticket.is-done .smgmt-ticket-title { font-weight: 400; }
+  .smgmt-ticket.is-failed .smgmt-ticket-title { color: var(--red); }
+  .smgmt-ticket.is-skipped .smgmt-ticket-title { color: var(--text-muted); }
 
   /* Agent pill on running ticket */
   .smgmt-agent-pill {
@@ -2355,10 +2365,37 @@
   .smgmt-agent-pill.coder { background: var(--purple-bg); color: var(--purple); }
   .smgmt-agent-pill.tester { background: var(--amber-bg); color: var(--amber); }
 
-  /* Elapsed time on ticket (mono, 11px, muted) */
+  /* Stage label: right-aligned text showing run stage (issue #251) */
+  .smgmt-ticket-stage-label {
+    font-family: var(--mono, monospace); font-size: 10px; font-weight: 600;
+    padding: 2px 6px; border-radius: 3px; flex-shrink: 0;
+    white-space: nowrap; letter-spacing: .04em; text-transform: uppercase;
+    background: var(--surface-2); color: var(--text-muted);
+    border: 1px solid var(--border);
+  }
+  .smgmt-ticket-stage-label.stage-running {
+    background: var(--blue-bg); color: var(--blue); border-color: transparent;
+  }
+  .smgmt-ticket-stage-label.stage-completed {
+    background: transparent; color: var(--text-muted); border-color: transparent;
+  }
+  .smgmt-ticket-stage-label.stage-rejected {
+    background: var(--red-bg); color: var(--red); border-color: transparent;
+  }
+  .smgmt-ticket-stage-label.stage-skipped {
+    background: var(--surface-2); color: var(--text-sub); border-color: transparent;
+  }
+  .smgmt-ticket-stage-label.stage-uat {
+    background: var(--purple-bg); color: var(--purple); border-color: transparent;
+  }
+  .smgmt-ticket-stage-label.stage-sit {
+    background: var(--amber-bg); color: var(--amber); border-color: transparent;
+  }
+
+  /* Elapsed time on ticket (HH:MM format, mono, muted) */
   .smgmt-ticket-elapsed-time {
     font-family: var(--mono, monospace); font-size: 11px;
-    color: var(--text-sub); flex-shrink: 0; min-width: 50px; text-align: right;
+    color: var(--text-sub); flex-shrink: 0; min-width: 42px; text-align: right;
   }
 
   /* Drag handle greyed on running sprint tickets */

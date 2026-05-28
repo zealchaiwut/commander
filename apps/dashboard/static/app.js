@@ -2978,14 +2978,55 @@ function smgmtApplyDurationBadges() {
       const ticketEl = document.getElementById(`smgmt-ticket-${num}`);
       if (!ticketEl) continue;
 
-      // Remove any existing duration badge (avoid duplicates on re-render)
-      ticketEl.querySelectorAll('.smgmt-took-success, .smgmt-took-failed').forEach(el => el.remove());
+      // Remove existing duration badges and live-status elements (avoid duplicates on re-render)
+      ticketEl.querySelectorAll(
+        '.smgmt-took-success, .smgmt-took-failed, ' +
+        '.smgmt-ticket-status-circle, .smgmt-ticket-stage-label, .smgmt-ticket-elapsed-time'
+      ).forEach(el => el.remove());
 
+      // ── Status circle for completed sprint tickets (issue #251) ──────────────
+      const isFailed = !!issState.failed;
+      const circleEl = document.createElement('span');
+      circleEl.className = `smgmt-ticket-status-circle ${isFailed ? 'failed' : 'done'}`;
+      circleEl.textContent = isFailed ? '✕' : '✓';
+      circleEl.setAttribute('aria-label', isFailed ? 'Failed' : 'Completed');
+      const numEl = ticketEl.querySelector('.smgmt-ticket-num');
+      if (numEl) {
+        ticketEl.insertBefore(circleEl, numEl);
+      } else {
+        ticketEl.insertBefore(circleEl, ticketEl.firstChild);
+      }
+      ticketEl.classList.remove('is-running', 'is-pending', 'is-failed', 'is-skipped');
+      ticketEl.classList.add(isFailed ? 'is-failed' : 'is-done');
+
+      // ── Elapsed time frozen in HH:MM format ──────────────────────────────────
+      let elapsedText = '';
+      if (issState.duration_secs != null) {
+        elapsedText = _smgmtFormatElapsedHHMM(issState.duration_secs);
+      }
+      const elapsedEl = document.createElement('span');
+      elapsedEl.className = 'smgmt-ticket-elapsed-time';
+      if (elapsedText) elapsedEl.textContent = elapsedText;
+
+      // ── Stage label for completed sprint tickets ──────────────────────────────
+      const stageLabelEl = document.createElement('span');
+      if (isFailed) {
+        stageLabelEl.className = 'smgmt-ticket-stage-label stage-rejected';
+        stageLabelEl.textContent = 'TESTER REJECTED';
+      } else {
+        stageLabelEl.className = 'smgmt-ticket-stage-label stage-completed';
+        stageLabelEl.textContent = 'COMPLETED';
+      }
+      ticketEl.appendChild(stageLabelEl);
+      if (elapsedText) ticketEl.appendChild(elapsedEl);
+
+      // ── Legacy "took X" duration badge (hidden; superseded by stage label) ────
       const dur = formatDuration(issState.duration_secs);
       const label_text = issState.failed ? `took ${dur} (failed)` : `took ${dur}`;
       const badge = document.createElement('span');
       badge.className = issState.failed ? 'smgmt-took-failed' : 'smgmt-took-success';
       badge.textContent = label_text;
+      badge.style.display = 'none';
 
       // Insert before the status badge
       const statusEl = ticketEl.querySelector('.smgmt-ticket-status');
@@ -3171,8 +3212,16 @@ function smgmtSprintBlockHtml(label, tickets, isNext) {
     ? tickets.map(t => smgmtTicketCardHtml(t, label)).join('')
     : '<div class="smgmt-drop-hint">Drop tickets here</div>';
 
-  // Estimate summary badge is injected dynamically for running sprints only (issue #250).
-  // Planning sprint headers do not show the estimate badge.
+  // Estimate summary for sprint block header
+  const estimateData = _smgmtEstimates[label];
+  let estimateSummaryHtml = '';
+  if (estimateData && estimateData.total_minutes > 0) {
+    const hrs  = Math.floor(estimateData.total_minutes / 60);
+    const mins = estimateData.total_minutes % 60;
+    const dur  = hrs > 0 ? `${hrs}h ${mins}m` : `${mins}m`;
+    const cnt  = Object.keys(estimateData.estimates || {}).length;
+    estimateSummaryHtml = `<span class="smgmt-estimate-total">estimated ${dur} across ${cnt} ticket${cnt !== 1 ? 's' : ''}</span>`;
+  }
 
   // Sprint goal bar — visible read-only display; hidden input for saving
   const goalBarClass = hasGoal ? 'smgmt-sprint-goal-bar' : 'smgmt-sprint-goal-bar placeholder';
@@ -3193,6 +3242,7 @@ function smgmtSprintBlockHtml(label, tickets, isNext) {
           <i class="ti ti-grip-vertical smgmt-sprint-grip"></i>
           <span class="smgmt-sprint-name">Sprint ${n}</span>
           ${nextBadge}
+          ${estimateSummaryHtml}
           <span class="smgmt-sprint-count">${tickets.length} ticket${tickets.length !== 1 ? 's' : ''}</span>
         </div>
         <div class="smgmt-sprint-header-right">
@@ -3247,9 +3297,20 @@ function smgmtTicketCardHtml(ticket, currentSprint) {
     'done':         'smgmt-status-done',
   }[ticket.status] || 'smgmt-status-backlog');
   const statusLabel = hasNeedsReworkLabel ? 'needs rework' : (ticket.status || 'backlog');
+  // Stage label (issue #251): right-aligned BACKLOG/QUEUED/SIT/UAT in planning view
+  const _slMap = { 'sit':['SIT','stage-sit'], 'uat':['UAT','stage-uat'], 'done':['UAT','stage-uat'], 'in-progress':['QUEUED',''] };
+  const _slEntry = hasNeedsReworkLabel ? ['NEEDS REWORK','stage-rejected'] : (_slMap[ticket.status] || ['BACKLOG','']);
+  const stageLabelHtml = `<span class="smgmt-ticket-stage-label${_slEntry[1] ? ' '+_slEntry[1] : ''}">${_slEntry[0]}</span>`;
 
-  // Estimate size pills are injected only for running sprints via smgmtApplyRunState (issue #250).
-  // Planning view ticket rows do not show any estimate pill.
+  // Estimate badge: look up from sprint estimates if available
+  let estimateBadgeHtml = '';
+  if (currentSprint && _smgmtEstimates[currentSprint]) {
+    const sprintEst = _smgmtEstimates[currentSprint];
+    const issueEst  = (sprintEst.estimates || {})[String(ticket.number)];
+    if (issueEst) {
+      estimateBadgeHtml = `<span class="smgmt-estimate-badge" title="~${issueEst.minutes} min">${escapeHtml(issueEst.size)}</span>`;
+    }
+  }
 
   const isSelected = _smgmtSelectedIssues.has(ticket.number);
   return `
@@ -3267,7 +3328,9 @@ function smgmtTicketCardHtml(ticket, currentSprint) {
       <a class="smgmt-ticket-num" href="${escapeHtml(ticket.url || '#')}" target="_blank"
          rel="noopener" onclick="event.stopPropagation()">#${ticket.number}</a>
       <span class="smgmt-ticket-title" title="${escapeHtml(ticket.title)}">${escapeHtml(ticket.title)}</span>
-      <span class="smgmt-ticket-status ${statusClass}">${escapeHtml(statusLabel)}</span>
+      ${estimateBadgeHtml}
+      ${stageLabelHtml}
+      <span class="smgmt-ticket-status ${statusClass}" style="display:none">${escapeHtml(statusLabel)}</span>
     </div>`;
 }
 
@@ -4476,52 +4539,6 @@ async function smgmtPollRunStatus() {
   } catch { /* ignore poll errors */ }
 }
 
-/**
- * Inject size-estimation pills on all ticket rows inside running sprints (issue #250).
- * Shows "Size · ~Xmin" for estimated tickets, "— · est?" placeholder for un-estimated ones.
- * Only running sprints are affected; planning-view sprints are untouched.
- * Called from smgmtApplyRunState (Pass 3b) so DOM blocks already have .smgmt-running class.
- */
-function smgmtApplyRunningSprintSizePills() {
-  for (const [key, entry] of Object.entries(_smgmtAllRunning)) {
-    const { project: runProj, sprint_label: runLabel } = entry;
-    if (runProj !== _smgmtCurrentRepo) continue;
-
-    const block = document.getElementById(`smgmt-block-${runLabel}`);
-    if (!block) continue;
-
-    const estimateData = _smgmtEstimates[runLabel];
-    const estMap = estimateData ? (estimateData.estimates || {}) : {};
-
-    block.querySelectorAll('.smgmt-ticket').forEach(ticketEl => {
-      // Skip if pill already injected (guard against double-apply)
-      if (ticketEl.querySelector('.smgmt-running-size-pill')) return;
-
-      const issueNum = ticketEl.dataset.issue;
-      const sizePill = document.createElement('span');
-      const issueEst = estMap[String(issueNum)];
-
-      if (issueEst && issueEst.size && issueEst.minutes > 0) {
-        sizePill.className = 'smgmt-running-size-pill smgmt-running-size-pill--estimated';
-        sizePill.textContent = `${issueEst.size} · ~${issueEst.minutes}min`;
-        sizePill.title = `Estimated size: ${issueEst.size} (~${issueEst.minutes} min)`;
-      } else {
-        sizePill.className = 'smgmt-running-size-pill smgmt-running-size-pill--empty';
-        sizePill.textContent = '— · est?';
-        sizePill.title = 'No estimate available yet';
-      }
-
-      // Insert before the status label so pill sits between title and status
-      const statusLabelEl = ticketEl.querySelector('.smgmt-ticket-status');
-      if (statusLabelEl) {
-        ticketEl.insertBefore(sizePill, statusLabelEl);
-      } else {
-        ticketEl.appendChild(sizePill);
-      }
-    });
-  }
-}
-
 function smgmtApplyRunState(sprintStatusMap) {
   // Per-#123: each sprint card checks its own (project, sprint_label) key independently.
   // Multiple cards can be in RUNNING state simultaneously.
@@ -4539,13 +4556,15 @@ function smgmtApplyRunState(sprintStatusMap) {
       // Restore draggable on header
       hdr.setAttribute('draggable', 'true');
     }
-    // Remove injected running elements (badge, progress section, kill btn, estimate header badge)
-    block.querySelectorAll('.smgmt-running-badge, .smgmt-progress-text, .smgmt-kill-btn, .smgmt-progress-section, .smgmt-running-estimate-badge').forEach(el => el.remove());
-    // Remove status circles injected on ticket rows
-    block.querySelectorAll('.smgmt-ticket-status-circle, .smgmt-agent-pill, .smgmt-ticket-elapsed-time, .smgmt-running-size-pill').forEach(el => el.remove());
-    // Remove running/pending/done classes from ticket rows
+    // Remove injected running elements (badge, progress section, kill btn)
+    block.querySelectorAll('.smgmt-running-badge, .smgmt-progress-text, .smgmt-kill-btn, .smgmt-progress-section').forEach(el => el.remove());
+    // Remove status circles, stage labels, and elapsed time injected on ticket rows
+    block.querySelectorAll(
+      '.smgmt-ticket-status-circle, .smgmt-agent-pill, .smgmt-ticket-elapsed-time, .smgmt-ticket-stage-label'
+    ).forEach(el => el.remove());
+    // Remove run-state classes from ticket rows
     block.querySelectorAll('.smgmt-ticket').forEach(el => {
-      el.classList.remove('is-running', 'is-pending', 'is-done');
+      el.classList.remove('is-running', 'is-pending', 'is-done', 'is-failed', 'is-skipped');
     });
     // Restore any hidden unified action buttons
     block.querySelectorAll('.smgmt-run-btn').forEach(btn => btn.style.display = '');
@@ -4625,32 +4644,6 @@ function smgmtApplyRunState(sprintStatusMap) {
       hdrLeft.appendChild(runBadge);
     }
 
-    // Inject size-estimation header badge for running sprints (issue #250)
-    // Shows "estimated Xh Ym across N tickets" for all estimated tickets in the sprint.
-    if (!hdrLeft.querySelector('.smgmt-running-estimate-badge')) {
-      const estimateData = _smgmtEstimates[runLabel];
-      if (estimateData) {
-        const estMap = estimateData.estimates || {};
-        const estimatedEntries = Object.values(estMap).filter(e => e && e.minutes > 0);
-        if (estimatedEntries.length > 0) {
-          const totalMins = estimatedEntries.reduce((sum, e) => sum + (e.minutes || 0), 0);
-          const hrs  = Math.floor(totalMins / 60);
-          const mins = totalMins % 60;
-          const dur  = hrs > 0 ? `${hrs}h ${mins}m` : `${mins}m`;
-          const cnt  = estimatedEntries.length;
-          const estBadge = document.createElement('span');
-          estBadge.className = 'smgmt-running-estimate-badge';
-          estBadge.textContent = `estimated ${dur} across ${cnt} ticket${cnt !== 1 ? 's' : ''}`;
-          // Insert after running badge
-          if (runBadge.nextSibling) {
-            hdrLeft.insertBefore(estBadge, runBadge.nextSibling);
-          } else {
-            hdrLeft.appendChild(estBadge);
-          }
-        }
-      }
-    }
-
     // Hide unified action button + Finish/Delete buttons; insert Cancel sprint button
     const actionBtn = document.getElementById(`smgmt-run-btn-${safeLabel}`);
     if (actionBtn) actionBtn.style.display = 'none';
@@ -4720,11 +4713,6 @@ function smgmtApplyRunState(sprintStatusMap) {
   // ── Pass 4: Per-ticket live status badges, spinners, elapsed counters ──────────
   smgmtApplyTicketLiveStatus(sprintStatusMap);
   _ensureElapsedTimer();
-
-  // ── Pass 4b: Inject size-estimation pills on running-sprint ticket rows (issue #250) ──────────
-  // Must run AFTER smgmtApplyTicketLiveStatus, which clears .smgmt-running-size-pill on its own
-  // cleanup pass; running after it ensures pills are not wiped.
-  smgmtApplyRunningSprintSizePills();
 
   // ── Pass 5: Update unified action button state for all visible sprint buttons ──
   // The unified button id is "smgmt-run-btn-<safeLabel>" for all sprints.
@@ -4798,12 +4786,14 @@ function smgmtAgentStatusBadge(agentStatus, statusChangedAt) {
 }
 
 /**
- * Derive ticket run state (done | running | pending) from agent_status or labels.
+ * Derive ticket run state (done | failed | skipped | running | pending) from agent_status or labels.
  * Graceful fallback: if agent_status is absent, check GitHub labels.
  */
 function _smgmtTicketRunState(issueData) {
   const agentStatus = issueData.agent_status || '';
-  if (agentStatus === 'completed' || issueData.status === 'done' || issueData.status === 'skipped') {
+  if (agentStatus === 'failed') return 'failed';
+  if (issueData.status === 'skipped') return 'skipped';
+  if (agentStatus === 'completed' || issueData.status === 'done') {
     return 'done';
   }
   if (agentStatus === 'coder_running' || agentStatus === 'tester_running') {
@@ -4828,7 +4818,77 @@ function _smgmtActiveAgent(agentStatus) {
 }
 
 /**
- * Update per-ticket badges, spinners, status circles, and elapsed counters.
+ * Format a clock timestamp as HH:MM string.
+ * Used in stage labels like "TESTER RUNNING 10:17".
+ */
+function _smgmtClockHHMM(isoTimestamp) {
+  if (!isoTimestamp) return '';
+  try {
+    const ts = new Date(isoTimestamp);
+    const h = ts.getHours().toString().padStart(2, '0');
+    const m = ts.getMinutes().toString().padStart(2, '0');
+    return `${h}:${m}`;
+  } catch (_) { return ''; }
+}
+
+/**
+ * Format elapsed seconds as HH:MM (e.g. 90s -> "01:30", 3661s -> "01:01").
+ * Used for the elapsed time counter element.
+ */
+function _smgmtFormatElapsedHHMM(secs) {
+  const totalMins = Math.floor(secs / 60);
+  const ss = secs % 60;
+  const hh = Math.floor(totalMins / 60);
+  const mm = totalMins % 60;
+  if (hh > 0) {
+    return `${hh.toString().padStart(2, '0')}:${mm.toString().padStart(2, '0')}`;
+  }
+  return `${mm.toString().padStart(2, '0')}:${ss.toString().padStart(2, '0')}`;
+}
+
+/**
+ * Build the stage label { text, cssClass } for a ticket given its run state and agent_status.
+ * Returns { text: string, cssClass: string } for the .smgmt-ticket-stage-label element.
+ *
+ * Stage label spec (issue #251):
+ *   running  → "TESTER RUNNING HH:MM" or "CODER RUNNING HH:MM"      (blue)
+ *   done     → "COMPLETED HH:MM"                                     (muted)
+ *   failed   → "TESTER REJECTED"                                     (red)
+ *   skipped  → "SKIPPED"                                             (muted)
+ *   pending  → "QUEUED" | "BACKLOG" | "SIT" | "UAT" (from labels)   (default)
+ */
+function _smgmtBuildStageLabel(runState, issueData) {
+  const agentStatus = issueData.agent_status || '';
+  const clockTime = _smgmtClockHHMM(issueData.status_changed_at);
+
+  if (runState === 'running') {
+    const agentType = _smgmtActiveAgent(agentStatus);
+    const prefix = agentType ? agentType.toUpperCase() : 'AGENT';
+    const text = clockTime ? `${prefix} RUNNING ${clockTime}` : `${prefix} RUNNING`;
+    return { text, cssClass: 'stage-running' };
+  }
+  if (runState === 'done') {
+    const text = clockTime ? `COMPLETED ${clockTime}` : 'COMPLETED';
+    return { text, cssClass: 'stage-completed' };
+  }
+  if (runState === 'failed') {
+    return { text: 'TESTER REJECTED', cssClass: 'stage-rejected' };
+  }
+  if (runState === 'skipped') {
+    return { text: 'SKIPPED', cssClass: 'stage-skipped' };
+  }
+  // pending: derive from GitHub labels / status
+  const labels = issueData.labels || [];
+  const labelNames = labels.map(l => (typeof l === 'string' ? l : l.name || ''));
+  if (issueData.status === 'uat' || labelNames.includes('uat')) return { text: 'UAT', cssClass: 'stage-uat' };
+  if (issueData.status === 'sit' || labelNames.includes('sit')) return { text: 'SIT', cssClass: 'stage-sit' };
+  if (issueData.status === 'in-progress' || labelNames.includes('in-progress')) return { text: 'QUEUED', cssClass: '' };
+  if (issueData.status === 'backlog' || labelNames.includes('backlog')) return { text: 'BACKLOG', cssClass: '' };
+  return { text: 'QUEUED', cssClass: '' };
+}
+
+/**
+ * Update per-ticket status circles, stage labels, and elapsed counters (issue #251).
  * Called from smgmtApplyRunState whenever sprintStatusMap is available.
  */
 function smgmtApplyTicketLiveStatus(sprintStatusMap) {
@@ -4844,24 +4904,32 @@ function smgmtApplyTicketLiveStatus(sprintStatusMap) {
       const runState    = _smgmtTicketRunState(issueData);
       const isRunning   = runState === 'running';
       const isDone      = runState === 'done';
-      const isPending   = runState === 'pending';
+      const isFailed    = runState === 'failed';
+      const isSkipped   = runState === 'skipped';
 
       // Remove existing injected live-status elements (keep .smgmt-ticket-status label)
       ticketEl.querySelectorAll(
         '.smgmt-ticket-agent-badge, .smgmt-ticket-spinner, .smgmt-ticket-elapsed, ' +
-        '.smgmt-ticket-status-circle, .smgmt-agent-pill, .smgmt-ticket-elapsed-time'
+        '.smgmt-ticket-status-circle, .smgmt-agent-pill, .smgmt-ticket-elapsed-time, ' +
+        '.smgmt-ticket-stage-label'
       ).forEach(el => el.remove());
 
       // Apply row-level class for title styling
-      ticketEl.classList.remove('is-running', 'is-done', 'is-pending');
+      ticketEl.classList.remove('is-running', 'is-done', 'is-pending', 'is-failed', 'is-skipped');
       ticketEl.classList.add(`is-${runState}`);
 
-      // Build status circle
+      // ── Status circle (left edge) ────────────────────────────────────────────
       const circle = document.createElement('span');
       circle.className = `smgmt-ticket-status-circle ${runState}`;
       if (isDone) {
         circle.textContent = '✓';
-        circle.setAttribute('aria-label', 'Done');
+        circle.setAttribute('aria-label', 'Completed');
+      } else if (isFailed) {
+        circle.textContent = '✕';
+        circle.setAttribute('aria-label', 'Failed');
+      } else if (isSkipped) {
+        circle.textContent = '−';
+        circle.setAttribute('aria-label', 'Skipped');
       } else if (isRunning) {
         circle.setAttribute('aria-label', 'Running');
         const dot = document.createElement('span');
@@ -4880,38 +4948,48 @@ function smgmtApplyTicketLiveStatus(sprintStatusMap) {
         ticketEl.insertBefore(circle, ticketEl.firstChild);
       }
 
-      // Elapsed time on the right
+      // ── Elapsed time (HH:MM format) — only for running and done ──────────────
       const timeEl = document.createElement('span');
       timeEl.className = 'smgmt-ticket-elapsed-time';
+      let hasElapsed = false;
       if (isRunning && issueData.status_changed_at) {
         const startTs = new Date(issueData.status_changed_at).getTime();
         if (!isNaN(startTs)) {
           timeEl.dataset.startTs = startTs;
           _smgmtUpdateElapsedTimeEl(timeEl);
-        } else {
-          timeEl.textContent = '—';
+          hasElapsed = true;
         }
-      } else if (isDone && issueData.elapsed) {
-        // elapsed may be a formatted string like "18m 04s" or seconds number
+      } else if (isDone && issueData.elapsed != null) {
         const elVal = issueData.elapsed;
-        timeEl.textContent = typeof elVal === 'number' ? formatDuration(elVal) : elVal;
-      } else {
-        timeEl.textContent = '—';
+        timeEl.textContent = typeof elVal === 'number' ? _smgmtFormatElapsedHHMM(elVal) : elVal;
+        hasElapsed = !!timeEl.textContent;
       }
-      ticketEl.appendChild(timeEl);
+      // pending/failed/skipped: no elapsed shown per AC
+      if (hasElapsed) ticketEl.appendChild(timeEl);
 
-      // Agent pill on running ticket
+      // ── Stage label (right-aligned, dual signal with circle per AC) ──────────
+      const { text: stageLabelText, cssClass: stageLabelClass } =
+        _smgmtBuildStageLabel(runState, issueData);
+      const stageLabelEl = document.createElement('span');
+      stageLabelEl.className = `smgmt-ticket-stage-label${stageLabelClass ? ' ' + stageLabelClass : ''}`;
+      stageLabelEl.textContent = stageLabelText;
+      // Insert stage label before elapsed time
+      if (hasElapsed && timeEl.parentNode === ticketEl) {
+        ticketEl.insertBefore(stageLabelEl, timeEl);
+      } else {
+        ticketEl.appendChild(stageLabelEl);
+      }
+
+      // ── Agent pill on running ticket ──────────────────────────────────────────
       if (isRunning) {
         const agentType = _smgmtActiveAgent(agentStatus);
         if (agentType) {
           const pill = document.createElement('span');
           pill.className = `smgmt-agent-pill ${agentType}`;
           pill.textContent = agentType.toUpperCase();
-          // Insert before elapsed time
-          ticketEl.insertBefore(pill, timeEl);
+          ticketEl.insertBefore(pill, stageLabelEl);
         }
-
-        // Legacy spinner (for existing status badge area)
+        // Legacy spinner icon after title
         const spinner = document.createElement('i');
         spinner.className = 'ti ti-loader-2 smgmt-ticket-spinner';
         const titleEl = ticketEl.querySelector('.smgmt-ticket-title');
@@ -4920,27 +4998,13 @@ function smgmtApplyTicketLiveStatus(sprintStatusMap) {
         }
       }
 
-      // Add legacy agent status badge (for sprint cockpit compatibility)
-      const badgeHtml = smgmtAgentStatusBadge(agentStatus, issueData.status_changed_at);
-      if (badgeHtml) {
-        const statusEl = ticketEl.querySelector('.smgmt-ticket-status');
-        const badgeWrap = document.createElement('span');
-        badgeWrap.innerHTML = badgeHtml;
-        const badgeNode = badgeWrap.firstElementChild;
-        if (statusEl) {
-          ticketEl.insertBefore(badgeNode, statusEl);
-        } else {
-          ticketEl.insertBefore(badgeNode, timeEl);
-        }
-      }
-
-      // Elapsed counter for running states (legacy AC7 - kept for compatibility)
+      // ── Legacy elapsed counter (hidden, kept for timer interval compatibility) ──
       if (isRunning && issueData.status_changed_at) {
         const startTs = new Date(issueData.status_changed_at).getTime();
         if (!isNaN(startTs)) {
           const elapsedEl = document.createElement('span');
           elapsedEl.className = 'smgmt-ticket-elapsed smgmt-ticket-agent-badge sbadge gray';
-          elapsedEl.style.display = 'none'; // hidden; using smgmt-ticket-elapsed-time instead
+          elapsedEl.style.display = 'none';
           elapsedEl.dataset.startTs = startTs;
           ticketEl.appendChild(elapsedEl);
           _smgmtUpdateElapsedEl(elapsedEl);
@@ -4960,14 +5024,12 @@ function _smgmtUpdateElapsedEl(el) {
   el.textContent = m > 0 ? `${m}m ${s}s` : `${s}s`;
 }
 
-/** Render elapsed time into the new elapsed-time element (mono, muted). */
+/** Render elapsed time into the new elapsed-time element (HH:MM format). */
 function _smgmtUpdateElapsedTimeEl(el) {
   const startTs = parseInt(el.dataset.startTs, 10);
   if (isNaN(startTs)) return;
   const secs = Math.floor((Date.now() - startTs) / 1000);
-  const m = Math.floor(secs / 60);
-  const s = secs % 60;
-  el.textContent = m > 0 ? `${m}m ${String(s).padStart(2, '0')}s` : `${s}s`;
+  el.textContent = _smgmtFormatElapsedHHMM(secs);
 }
 
 // Elapsed counter interval (AC7) — update all elapsed elements every second.

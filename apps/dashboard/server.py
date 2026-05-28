@@ -54,6 +54,13 @@ except Exception:
     _sprint_repo = None  # type: ignore[assignment]
     _SPRINT_REPO_AVAILABLE = False
 
+try:
+    import sync_projects_to_neon as _sync_projects_module
+    _SYNC_PROJECTS_AVAILABLE = True
+except Exception:
+    _sync_projects_module = None  # type: ignore[assignment]
+    _SYNC_PROJECTS_AVAILABLE = False
+
 
 def _sprint_json_path(project_root: Path, sprint_label: str) -> Path:
     return _commander_dir(project_root) / "sprints" / f"{sprint_label}.json"
@@ -418,6 +425,14 @@ async def lifespan(app: FastAPI):
     _validate_github_repos()
     _sweep_orphan_pid_files()
     _restore_sprint_statuses_on_startup()
+    # Sync projects.json → Neon (non-blocking; warn on failure, never fatal)
+    if _SYNC_PROJECTS_AVAILABLE:
+        try:
+            _result = _sync_projects_module.sync_projects_to_neon()
+            logger.info("projects sync complete: %s", _result)
+        except Exception as _exc:
+            logger.warning("projects sync failed (non-fatal): %s", _exc)
+
     # Start backup scheduler and queue a startup backup after 30 s
     if _BACKUP_AVAILABLE:
         try:
@@ -1199,6 +1214,20 @@ async def remove_project(owner: str, repo_name: str, body: RemoveProjectBody):
             pass  # backup trigger failures never affect the response
 
     return {"ok": True, "removed": removed}
+
+
+@app.post("/api/projects/sync-to-db")
+async def sync_projects_to_db():
+    """Trigger a manual sync of projects.json → Neon.
+
+    Returns a JSON summary: {projects_synced, projects_skipped, envs_synced, envs_skipped, errors}.
+    """
+    if not _SYNC_PROJECTS_AVAILABLE:
+        raise HTTPException(status_code=503, detail="sync module not available")
+    try:
+        return _sync_projects_module.sync_projects_to_neon()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
 
 
 @app.post("/api/projects/{owner}/{repo_name}/approve-batch")

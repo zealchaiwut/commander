@@ -10,6 +10,34 @@ from sqlalchemy.dialects.postgresql import ENUM, TIMESTAMP
 
 from services.sprint_manager.neon_db import Base
 
+
+class Project(Base):
+    __tablename__ = "projects"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    repo = Column(Text, unique=True, nullable=False)
+    name = Column(Text, nullable=False)
+    created_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default="now()")
+
+
+class ProjectEnvironment(Base):
+    __tablename__ = "project_environments"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    project_id = Column(
+        Integer,
+        ForeignKey("projects.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    env = Column(Text, nullable=False)
+    local_directory = Column(Text, nullable=False)
+    created_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default="now()")
+
+    __table_args__ = (
+        UniqueConstraint("project_id", "env", name="uq_project_environments_project_env"),
+        Index("ix_project_environments_project_id", "project_id"),
+    )
+
 sprint_status_enum = ENUM(
     "pending", "running", "complete", "cancelled",
     name="sprint_status_enum",

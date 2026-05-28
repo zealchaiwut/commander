@@ -2734,15 +2734,80 @@ async function smgmtRefreshBoard() {
   await smgmtSelectProject(_smgmtCurrentRepo);
 }
 
-// ── Auto-refresh countdown (issue #199) ──────────────────────────────────────
+// ── Auto-refresh state machine (issue #226) ───────────────────────────────────
+// State values: 'idle' | 'counting' | 'about_to_fire' | 'refreshing' | 'just_refreshed'
+// Pause sub-states: 'paused_drag' | 'paused_modal' | 'paused_input'
+
+const _SMGMT_REFRESH_INTERVAL = (() => {
+  try {
+    const v = window.COMMANDER_REFRESH_INTERVAL_SEC;
+    return (v && Number.isFinite(+v) && +v > 0) ? (+v | 0) : 30;
+  } catch (_) { return 30; }
+})();
+
+let _smgmtRefreshState   = 'idle';   // state machine state
+let _smgmtRefreshing     = false;    // true when a refresh fetch is in-flight
+let _smgmtDragDebounce   = null;     // debounce timer id for drag-drop trigger (2 s)
+let _smgmtIsDragging     = false;    // true while a drag is in progress
+let _smgmtLastActionTs   = 0;        // ms timestamp of last action-triggered refresh
+const _SMGMT_ACTION_SUPPRESS_MS = 5000; // 5 s suppression after action refresh
+
+/**
+ * Render the refresh button into the correct visual state.
+ * Base class: .refresh-btn
+ * Modifier classes: .refreshing | .just-refreshed | .paused
+ * No modifier = default / counting state.
+ */
 function _smgmtUpdateAutoRefreshBtn() {
   const btn = document.getElementById('smgmt-auto-refresh-btn');
   if (!btn) return;
-  if (_smgmtCurrentRepo) {
-    btn.textContent = `Auto Refresh (${_smgmtAutoRefreshCountdown}s)`;
+
+  const prefersReduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const st = _smgmtRefreshState;
+
+  btn.classList.remove('refreshing', 'just-refreshed', 'paused');
+  btn.removeAttribute('aria-busy');
+
+  const isPaused = (st === 'paused_drag' || st === 'paused_modal' || st === 'paused_input');
+
+  if (st === 'refreshing') {
+    btn.classList.add('refreshing');
+    btn.setAttribute('aria-busy', 'true');
+    btn.innerHTML = '<i class="ti ti-refresh"></i> Refreshing…';
+    const icon = btn.querySelector('.ti');
+    if (icon && !prefersReduced) icon.classList.add('spinning');
+  } else if (st === 'just_refreshed') {
+    btn.classList.add('just-refreshed');
+    btn.setAttribute('aria-live', 'polite');
+    btn.innerHTML = '<i class="ti ti-check"></i> Updated just now';
+  } else if (isPaused) {
+    btn.classList.add('paused');
+    btn.setAttribute('aria-label', 'Auto-refresh paused');
+    btn.innerHTML = '<i class="ti ti-player-pause"></i> Paused';
   } else {
-    btn.textContent = 'Auto Refresh';
+    // Default / counting
+    const n = _smgmtCurrentRepo ? _smgmtAutoRefreshCountdown : _SMGMT_REFRESH_INTERVAL;
+    const progress = _smgmtCurrentRepo
+      ? ((_SMGMT_REFRESH_INTERVAL - _smgmtAutoRefreshCountdown) / _SMGMT_REFRESH_INTERVAL) * 100
+      : 0;
+    btn.style.setProperty('--progress', progress + '%');
+    btn.innerHTML = `<i class="ti ti-refresh"></i> Auto-refresh in ${n}s`;
+    btn.setAttribute('aria-label', `Auto-refresh in ${n} seconds`);
   }
+}
+
+/** Returns pause reason string or null. */
+function _smgmtShouldPause() {
+  if (_smgmtIsDragging) return 'paused_drag';
+  const openModals = document.querySelectorAll('.modal:not(.hidden), .modal-backdrop:not(.hidden)');
+  if (openModals.length > 0) return 'paused_modal';
+  const openDropdowns = document.querySelectorAll('.smgmt-moveto-popup:not(.hidden)');
+  if (openDropdowns.length > 0) return 'paused_modal';
+  const active = document.activeElement;
+  if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.tagName === 'SELECT')) {
+    return 'paused_input';
+  }
+  return null;
 }
 
 function smgmtAutoRefreshStop() {
@@ -2752,21 +2817,124 @@ function smgmtAutoRefreshStop() {
   }
 }
 
+/**
+ * Core refresh executor. Sets state machine states and calls smgmtRefreshBoard().
+ * @param {'auto'|'manual'|'action'|'drag'} trigger
+ */
+async function _smgmtDoRefresh(trigger) {
+  if (_smgmtRefreshing) return;
+  _smgmtRefreshing = true;
+
+  // Cancel pending drag debounce if action/manual triggers
+  if (trigger !== 'drag' && _smgmtDragDebounce) {
+    clearTimeout(_smgmtDragDebounce);
+    _smgmtDragDebounce = null;
+  }
+
+  // Pause the auto-countdown timer while refreshing (for action/manual)
+  if ((trigger === 'action' || trigger === 'manual') && _smgmtAutoRefreshTimer) {
+    clearInterval(_smgmtAutoRefreshTimer);
+    _smgmtAutoRefreshTimer = null;
+  }
+
+  _smgmtRefreshState = 'refreshing';
+  _smgmtUpdateAutoRefreshBtn();
+
+  try {
+    await smgmtRefreshBoard();
+  } catch (_) {}
+
+  if (trigger === 'action') {
+    _smgmtLastActionTs = Date.now();
+  }
+
+  _smgmtRefreshing = false;
+  _smgmtRefreshState = 'just_refreshed';
+  _smgmtUpdateAutoRefreshBtn();
+
+  // Hold "just refreshed" for 1.2 s, then return to counting
+  setTimeout(() => {
+    _smgmtRefreshState = 'counting';
+    _smgmtAutoRefreshCountdown = _SMGMT_REFRESH_INTERVAL;
+    _smgmtUpdateAutoRefreshBtn();
+    // Restart timer if it was stopped by action/manual
+    if (!_smgmtAutoRefreshTimer && _smgmtCurrentRepo) {
+      smgmtAutoRefreshStart();
+    }
+  }, 1200);
+}
+
 function smgmtAutoRefreshStart() {
   smgmtAutoRefreshStop();
-  if (!_smgmtCurrentRepo) return;
-  _smgmtAutoRefreshCountdown = 30;
+  if (!_smgmtCurrentRepo) {
+    _smgmtRefreshState = 'idle';
+    _smgmtUpdateAutoRefreshBtn();
+    return;
+  }
+  _smgmtAutoRefreshCountdown = _SMGMT_REFRESH_INTERVAL;
+  _smgmtRefreshState = 'counting';
   _smgmtUpdateAutoRefreshBtn();
+
   _smgmtAutoRefreshTimer = setInterval(async () => {
+    // Skip while tab hidden
+    if (document.visibilityState !== 'visible') return;
+
+    // Check pause conditions
+    const pauseReason = _smgmtShouldPause();
+    if (pauseReason) {
+      if (_smgmtRefreshState !== pauseReason) {
+        _smgmtRefreshState = pauseReason;
+        _smgmtUpdateAutoRefreshBtn();
+      }
+      return;
+    }
+
+    // Resume from pause
+    const wasPaused = _smgmtRefreshState === 'paused_drag'
+      || _smgmtRefreshState === 'paused_modal'
+      || _smgmtRefreshState === 'paused_input';
+    if (wasPaused) {
+      _smgmtRefreshState = 'counting';
+      _smgmtUpdateAutoRefreshBtn();
+      return;
+    }
+
+    // Skip if already refreshing
+    if (_smgmtRefreshing) return;
+
+    // Skip if an action-triggered refresh ran < 5 s ago
+    if (Date.now() - _smgmtLastActionTs < _SMGMT_ACTION_SUPPRESS_MS) return;
+
     _smgmtAutoRefreshCountdown -= 1;
     if (_smgmtAutoRefreshCountdown <= 0) {
-      _smgmtAutoRefreshCountdown = 30;
-      _smgmtUpdateAutoRefreshBtn();
-      await smgmtRefreshBoard();
+      _smgmtAutoRefreshCountdown = _SMGMT_REFRESH_INTERVAL;
+      await _smgmtDoRefresh('auto');
     } else {
       _smgmtUpdateAutoRefreshBtn();
     }
   }, 1000);
+
+  // Visibility-change handler: fire once immediately on tab becoming visible
+  document.removeEventListener('visibilitychange', _smgmtVisibilityHandler);
+  document.addEventListener('visibilitychange', _smgmtVisibilityHandler);
+}
+
+let _smgmtHiddenSince = 0; // timestamp when tab became hidden
+
+function _smgmtVisibilityHandler() {
+  if (document.visibilityState === 'hidden') {
+    _smgmtHiddenSince = Date.now();
+    return;
+  }
+  // Tab became visible
+  if (!_smgmtCurrentRepo || _smgmtRefreshing) return;
+  // If we were hidden for at least one full interval, fire immediately
+  const hiddenMs = Date.now() - _smgmtHiddenSince;
+  const hiddenLong = _smgmtHiddenSince > 0 && hiddenMs >= _SMGMT_REFRESH_INTERVAL * 1000;
+  if (hiddenLong || _smgmtRefreshState === 'about_to_fire') {
+    _smgmtDoRefresh('auto').catch(() => {});
+  }
+  _smgmtHiddenSince = 0;
 }
 
 function smgmtAutoRefreshReset() {
@@ -2774,8 +2942,50 @@ function smgmtAutoRefreshReset() {
 }
 
 async function smgmtAutoRefreshNow() {
-  smgmtAutoRefreshReset();
-  await smgmtRefreshBoard();
+  // Manual click: immediate refresh, resets countdown to 30 s
+  if (_smgmtRefreshing) return; // second click ignored while in-flight
+  await _smgmtDoRefresh('manual');
+}
+
+// ── Drag-drop debounce trigger (issue #226) ────────────────────────────────────
+
+/** Call on every dragstart: pauses the auto-countdown. */
+function _smgmtOnDragStart() {
+  _smgmtIsDragging = true;
+  if (_smgmtRefreshState !== 'paused_drag') {
+    _smgmtRefreshState = 'paused_drag';
+    _smgmtUpdateAutoRefreshBtn();
+  }
+}
+
+/** Call on dragend (before drop handling): clears drag in-progress flag. */
+function _smgmtOnDragEnd() {
+  _smgmtIsDragging = false;
+}
+
+/**
+ * Call after every successful drop event.
+ * Clears any existing debounce and sets a 2 s timer.
+ * If no further drops within 2 s, fires a refresh.
+ */
+function _smgmtOnDrop() {
+  _smgmtIsDragging = false;
+  if (_smgmtDragDebounce) clearTimeout(_smgmtDragDebounce);
+  _smgmtDragDebounce = setTimeout(async () => {
+    _smgmtDragDebounce = null;
+    if (!_smgmtRefreshing && _smgmtCurrentRepo) {
+      await _smgmtDoRefresh('drag');
+    }
+  }, 2000);
+}
+
+/**
+ * Call after any action that results in a 200 OK server response.
+ * Fires a refresh immediately and resets the auto-countdown.
+ */
+async function _smgmtOnActionComplete() {
+  if (!_smgmtCurrentRepo) return;
+  await _smgmtDoRefresh('action');
 }
 
 async function smgmtSelectProject(repo) {
@@ -3103,7 +3313,8 @@ function smgmtSprintBlockHtml(label, tickets, isNext) {
         <input class="smgmt-goal-input" id="${goalId}" type="text"
                placeholder="Sprint goal (required to run) — e.g. Dashboard UX cleanup"
                value="${escapeHtml(savedGoal)}"
-               oninput="smgmtGoalInput('${label}', this.value)" />
+               oninput="smgmtGoalInput('${label}', this.value)"
+               onblur="_smgmtOnGoalBlur('${label}', this.value)" />
       </div>
       <div class="smgmt-sprint-tickets" id="smgmt-tickets-${label}">
         ${ticketsHtml}
@@ -3265,6 +3476,7 @@ async function smgmtMoveTicketTo(issueNum, sprintLabel) {
   const sprintNum = parseInt(sprintLabel.split('-')[1], 10);
 
   const iss = _smgmtData.issues.find(i => i.number === issueNum);
+  const origSprint = iss ? iss.sprint : null;
   if (iss) iss.sprint = sprintNum;
   smgmtRender();
 
@@ -3275,10 +3487,10 @@ async function smgmtMoveTicketTo(issueNum, sprintLabel) {
       body: JSON.stringify({ issue: issueNum, sprint: sprintNum }),
     });
     if (!res.ok) throw new Error(await res.text());
-    window.location.reload();
+    await _smgmtOnActionComplete(); // issue #226: action-triggered refresh after "Move to" (no reload)
   } catch (e) {
     const iss2 = _smgmtData.issues.find(i => i.number === issueNum);
-    if (iss2) iss2.sprint = null;
+    if (iss2) iss2.sprint = origSprint;
     smgmtRender();
     smgmtShowError(`Failed to move ticket #${issueNum}: ${e.message}`);
   }
@@ -3347,6 +3559,19 @@ async function smgmtSaveGoal(label, goal) {
   }
 }
 
+/**
+ * Called on blur of the sprint goal input (issue #226).
+ * Saves immediately if there is a pending debounce, then triggers action refresh.
+ */
+async function _smgmtOnGoalBlur(label, value) {
+  if (_smgmtGoalSaveTimers[label]) {
+    clearTimeout(_smgmtGoalSaveTimers[label]);
+    delete _smgmtGoalSaveTimers[label];
+  }
+  await smgmtSaveGoal(label, value);
+  await _smgmtOnActionComplete();
+}
+
 // ── Sprint drag-and-drop (reorder) ────────────────────────────────────────────
 
 let _smgmtDragSprintLabel = null;
@@ -3364,6 +3589,7 @@ function smgmtSprintDragStart(event, label) {
   event.dataTransfer.setData('text/smgmt-sprint', label);
   const block = document.getElementById(`smgmt-block-${label}`);
   if (block) setTimeout(() => block.classList.add('dragging-sprint'), 0);
+  _smgmtOnDragStart(); // issue #226: pause auto-countdown during drag
 }
 
 function smgmtSprintDragEnd(event) {
@@ -3374,6 +3600,7 @@ function smgmtSprintDragEnd(event) {
   _smgmtDragSprintLabel = null;
   // Clear all hover states
   document.querySelectorAll('.smgmt-sprint-block').forEach(b => b.classList.remove('drag-over-sprint'));
+  _smgmtOnDragEnd(); // issue #226: clear drag flag
 }
 
 // ── Ticket drag-and-drop ──────────────────────────────────────────────────────
@@ -3390,6 +3617,7 @@ function smgmtTicketDragStart(event, issueNum, fromSprint) {
   event.dataTransfer.setData('text/smgmt-ticket', String(issueNum));
   const el = document.getElementById(`smgmt-ticket-${issueNum}`);
   if (el) setTimeout(() => el.classList.add('dragging-ticket'), 0);
+  _smgmtOnDragStart(); // issue #226: pause auto-countdown during drag
 }
 
 function smgmtTicketDragEnd(event) {
@@ -3402,6 +3630,7 @@ function smgmtTicketDragEnd(event) {
   document.querySelectorAll('.smgmt-sprint-block, .smgmt-backlog').forEach(el => {
     el.classList.remove('drag-over-sprint', 'drag-over-zone');
   });
+  _smgmtOnDragEnd(); // issue #226: clear drag flag (drop handler fires separately)
 }
 
 function smgmtDragOverZone(event, sprintLabel) {
@@ -3490,7 +3719,7 @@ async function smgmtDropOnPlaceholder(event, placeholderN) {
       body: JSON.stringify({ issue: number, sprint: placeholderN }),
     });
     if (!res.ok) throw new Error(await res.text());
-    await smgmtRefreshBoard();
+    _smgmtOnDrop(); // issue #226: debounced refresh after drop
   } catch (e) {
     // Rollback optimistic update
     const iss2 = _smgmtData.issues.find(i => i.number === number);
@@ -3544,7 +3773,7 @@ async function smgmtDropOnSprint(event, targetSprintLabel) {
         body: JSON.stringify({ issue: number, sprint: targetSprintNum }),
       });
       if (!res.ok) throw new Error(await res.text());
-      await smgmtRefreshBoard();
+      _smgmtOnDrop(); // issue #226: debounced refresh after drop
     } catch (e) {
       // Rollback: restore original sprint
       const iss2 = _smgmtData.issues.find(i => i.number === number);
@@ -3740,10 +3969,9 @@ async function smgmtBulkMoveToConfirm() {
 
   if (failures.length > 0) {
     smgmtShowError(`Failed to move ticket(s) #${failures.join(', #')}.`);
-    await smgmtRefreshBoard();
-  } else {
-    await smgmtRefreshBoard();
   }
+  await _smgmtOnActionComplete(); // issue #226: action-triggered refresh
+
 }
 
 // Clear selection when navigating away from sprint-mgmt tab
@@ -4020,6 +4248,7 @@ async function smgmtDispatchRun(sprintLabel, migrateFrom) {
     _ensureStallWarningTimer();
 
     smgmtPollRunStatus();
+    _smgmtOnActionComplete().catch(() => {}); // issue #226: action-triggered refresh after run
   } catch (e) {
     showToast('Failed to dispatch: ' + e.message);
     if (btn) {
@@ -4498,8 +4727,9 @@ function _smgmtShowStallWarning(sprintLabel) {
     e.stopPropagation();
     if (!_smgmtCurrentRepo) return;
     try {
-      await fetch(`/api/sprints/run/${encodeURIComponent(sprintLabel)}?project=${encodeURIComponent(_smgmtCurrentRepo)}`, { method: 'DELETE' });
+      const res = await fetch(`/api/sprints/run/${encodeURIComponent(sprintLabel)}?project=${encodeURIComponent(_smgmtCurrentRepo)}`, { method: 'DELETE' });
       _smgmtRemoveStallWarning(sprintLabel);
+      if (res.ok) _smgmtOnActionComplete().catch(() => {}); // issue #226
     } catch (err) {
       console.error('Cancel sprint failed:', err);
     }
@@ -4704,7 +4934,7 @@ async function smgmtRerunConfirm() {
       showSuccessToast(`Reset ${data.reset_count} ticket${data.reset_count !== 1 ? 's' : ''}. Click Run sprint when ready.`);
     }
 
-    await smgmtSelectProject(_smgmtCurrentRepo);
+    await _smgmtOnActionComplete(); // issue #226: action-triggered refresh
   } catch (e) {
     smgmtShowError('Failed to reset sprint: ' + e.message);
     if (confirmBtn) { confirmBtn.disabled = false; confirmBtn.textContent = 'Reset'; }
@@ -4771,7 +5001,7 @@ async function smgmtFinishConfirm() {
       showSuccessToast(`Sprint finished — ${data.closed} issue${data.closed !== 1 ? 's' : ''} moved to UAT and closed.`);
     }
 
-    await smgmtSelectProject(_smgmtCurrentRepo);
+    await _smgmtOnActionComplete(); // issue #226: action-triggered refresh
   } catch (e) {
     smgmtShowError('Failed to finish sprint: ' + e.message);
     if (confirmBtn) { confirmBtn.disabled = false; confirmBtn.textContent = 'Finish Sprint'; }
@@ -4815,7 +5045,7 @@ async function smgmtKillConfirm() {
     _updateRunningBanner();
     _updateOverviewRunningBadges();
     showSuccessToast('Sprint killed. Run button restored.');
-    await smgmtSelectProject(_smgmtCurrentRepo);
+    await _smgmtOnActionComplete(); // issue #226: action-triggered refresh
   } catch (e) {
     smgmtShowError('Failed to kill sprint: ' + e.message);
     if (confirmBtn) { confirmBtn.disabled = false; confirmBtn.textContent = 'Yes, kill it'; }
@@ -4869,7 +5099,7 @@ async function smgmtDeleteConfirm() {
       ? `Sprint ${n} deleted — removed label from ${data.unlabelled_count} ticket${data.unlabelled_count !== 1 ? 's' : ''}.`
       : `Sprint ${n} deleted.`;
     showSuccessToast(msg);
-    await smgmtSelectProject(_smgmtCurrentRepo);
+    await _smgmtOnActionComplete(); // issue #226: action-triggered refresh
   } catch (e) {
     smgmtShowError('Failed to delete sprint: ' + e.message);
     if (confirmBtn) { confirmBtn.disabled = false; confirmBtn.textContent = 'Delete sprint'; }
@@ -4940,7 +5170,7 @@ async function smgmtNewSprintConfirm() {
       return;
     }
     smgmtNewSprintClose();
-    await smgmtSelectProject(_smgmtCurrentRepo);
+    await _smgmtOnActionComplete(); // issue #226: action-triggered refresh
   } catch (e) {
     if (errEl) errEl.textContent = 'Failed to create sprint: ' + e.message;
     if (confirmBtn) { confirmBtn.disabled = false; confirmBtn.textContent = 'Create'; }
@@ -4999,7 +5229,7 @@ async function smgmtCleanupConfirm() {
       showSuccessToast(`Deleted ${data.deleted.length} empty sprint label${data.deleted.length !== 1 ? 's' : ''}.`);
     }
 
-    await smgmtSelectProject(_smgmtCurrentRepo);
+    await _smgmtOnActionComplete(); // issue #226: action-triggered refresh
   } catch (e) {
     smgmtShowError('Failed to clean up empty sprints: ' + e.message);
     if (confirmBtn) { confirmBtn.disabled = false; confirmBtn.textContent = 'Delete labels'; }
@@ -5825,6 +6055,7 @@ async function postDraftToGitHub() {
     closeDraftTicketModal();
     showSuccessToast(`Ticket created: ${data.url}`);
     loadProjects().catch(() => {});
+    _smgmtOnActionComplete().catch(() => {}); // issue #226: action-triggered refresh after new ticket
   } catch (e) {
     _dtShowError('Post failed: ' + e.message);
   } finally {
@@ -6164,6 +6395,7 @@ function _bcConnectSSE(jobId) {
         _bcEventSource = null;
         localStorage.removeItem('bc_job_id');
         _bcJobId = null;
+        _smgmtOnActionComplete().catch(() => {}); // issue #226: refresh after bulk create completes
       }
     } catch (_) {}
   });

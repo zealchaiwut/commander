@@ -1347,7 +1347,10 @@
         <h2 class="smgmt-title">Sprint Management</h2>
       </div>
       <div class="smgmt-header-actions">
-        <button class="btn-secondary" id="smgmt-auto-refresh-btn" onclick="smgmtAutoRefreshNow()" title="Automatically re-fetches sprint board data every 30 seconds; click to refresh immediately">Auto Refresh (30s)</button>
+        <button class="refresh-btn" id="smgmt-auto-refresh-btn" onclick="smgmtAutoRefreshNow()"
+                aria-live="polite" aria-label="Auto-refresh in 30 seconds">
+          <i class="ti ti-refresh"></i> Auto-refresh in 30s
+        </button>
         <button class="btn-secondary" onclick="openDraftTicketModal()">+ New Ticket</button>
         <button class="btn-secondary" id="bulk-create-btn" onclick="openBulkCreateModal()">+ Bulk Create</button>
         <button class="btn-secondary" id="smgmt-move-to-btn" onclick="smgmtBulkMoveToOpen()" style="display:none;">Move to</button>
@@ -2886,6 +2889,51 @@
     transition: background .15s; cursor: pointer;
   }
   .btn-secondary:hover { background: var(--surface); }
+
+  /* ── Auto-refresh button — 5 visual states (issue #226) ── */
+  .refresh-btn {
+    position: relative; overflow: hidden;
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 6px 14px; border: 1px solid var(--border); border-radius: 6px;
+    background: none; color: var(--text-muted); font-size: 12px; font-weight: 500;
+    transition: background .15s, border-color .2s, color .15s, transform .15s;
+    cursor: pointer; white-space: nowrap;
+  }
+  /* Progress fill grows left-to-right as countdown approaches zero */
+  .refresh-btn::before {
+    content: '';
+    position: absolute; left: 0; top: 0; bottom: 0;
+    width: var(--progress, 0%);
+    background: rgba(22,163,74,.08);
+    transition: width 1s linear;
+    pointer-events: none;
+  }
+  .refresh-btn:hover { background: var(--surface-2); color: var(--text); }
+  /* Refreshing state */
+  .refresh-btn.refreshing {
+    color: var(--green); border-color: var(--green); background: var(--green-bg);
+  }
+  .refresh-btn.refreshing .ti { display: inline-block; }
+  /* Just-refreshed state */
+  .refresh-btn.just-refreshed {
+    color: var(--green); border-color: var(--green); background: var(--green-bg);
+    transform: scale(1.04);
+  }
+  /* Paused state */
+  .refresh-btn.paused { color: var(--text-muted); border-style: dashed; opacity: 0.7; }
+  /* Spinning icon for refreshing state */
+  .refresh-btn .ti.spinning {
+    animation: spin 0.7s linear infinite;
+    transform-origin: center;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  /* Respect prefers-reduced-motion */
+  @media (prefers-reduced-motion: reduce) {
+    .refresh-btn { transition: none; }
+    .refresh-btn::before { transition: none; }
+    .refresh-btn.just-refreshed { transform: none; }
+    .refresh-btn .ti.spinning { animation: none; }
+  }
 </style>
 
 <!-- ── Approve all UAT confirmation modal ── -->

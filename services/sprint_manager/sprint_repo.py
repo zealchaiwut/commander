@@ -33,12 +33,23 @@ def get_sprint_by_label(label: str) -> Optional[Sprint]:
         return sprint
 
 
-def list_sprints() -> List[Sprint]:
+def list_sprints(project: Optional[str] = None) -> List[Sprint]:
     with _open_session() as session:
-        sprints = session.query(Sprint).all()
+        q = session.query(Sprint)
+        if project:
+            q = q.filter_by(project=project)
+        sprints = q.all()
         for s in sprints:
             session.expunge(s)
         return sprints
+
+
+def get_or_create_sprint(label: str, goal: str, project: str) -> Sprint:
+    """Return existing sprint or create a new one — idempotent."""
+    existing = get_sprint_by_label(label)
+    if existing is not None:
+        return existing
+    return create_sprint(label=label, goal=goal, project=project)
 
 
 def create_sprint(label: str, goal: str, project: str) -> Sprint:

@@ -55,6 +55,13 @@ try:
 except ImportError:  # pragma: no cover
     yaml = None  # type: ignore[assignment]
 
+try:
+    from services.sprint_manager import sprint_repo as _sprint_repo
+    _SPRINT_REPO_AVAILABLE = True
+except Exception:  # pragma: no cover
+    _sprint_repo = None  # type: ignore[assignment]
+    _SPRINT_REPO_AVAILABLE = False
+
 # ── path setup ────────────────────────────────────────────────────────────────
 
 # This file lives at services/sprint_manager/sprint_manager.py
@@ -743,8 +750,11 @@ class SprintState:
         return s
 
     def save(self, path: Path) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(self.to_dict(), indent=2))
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(self.to_dict(), indent=2))
+        except OSError as _e:
+            print(f"[sprint-json] WARNING: could not write state JSON {path}: {_e}", file=sys.stderr)
 
 
 @dataclass
@@ -3746,6 +3756,124 @@ def list_backlog_issues(label: str, repo_name: Optional[str] = None) -> list[dic
         return []
 
 
+# ── Neon dual-write helpers ────────────────────────────────────────────────────
+
+def _neon_update(fn_name: str, *args, **kwargs) -> None:
+    """Call a sprint_repo function; print loudly on failure but don't abort sprint."""
+    if not _SPRINT_REPO_AVAILABLE or _sprint_repo is None:
+        return
+    try:
+        getattr(_sprint_repo, fn_name)(*args, **kwargs)
+    except Exception as _e:
+        print(f"[neon] ERROR: {fn_name}({args}, {kwargs}) failed: {_e}", file=sys.stderr)
+
+
+def _neon_sprint_json_path(sprint_label: str, sprints_dir: Path) -> Path:
+    return sprints_dir / f"{sprint_label}.json"
+
+
+def _neon_sprint_json_write(path: Path, data: dict) -> None:
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        os.replace(str(tmp), str(path))
+    except OSError as _e:
+        print(f"[sprint-json] WARNING: could not write {path}: {_e}", file=sys.stderr)
+
+
+def _neon_sprint_json_read(path: Path) -> dict:
+    if path.exists():
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    return {}
+
+
+def _neon_sprint_init(
+    label: str,
+    issues: "list[IssueState]",
+    project: str,
+    sprints_dir: Path,
+) -> None:
+    """Create sprint + tickets in Neon and write the JSON mirror. Called once on fresh start."""
+    goal = os.environ.get("SPRINT_GOAL", "").strip()
+    if not goal:
+        goal_file = sprints_dir / f"{label}-goal.txt"
+        if goal_file.exists():
+            try:
+                goal = goal_file.read_text(encoding="utf-8").strip()
+            except OSError:
+                pass
+    if not goal:
+        goal = label
+
+    if not _SPRINT_REPO_AVAILABLE or _sprint_repo is None:
+        return
+
+    # Create (or reuse) sprint row in Neon — this must succeed or we abort.
+    try:
+        _sprint_repo.get_or_create_sprint(label=label, goal=goal, project=project)
+        _sprint_repo.update_sprint_status(label, "running")
+    except Exception as _e:
+        print(f"[neon] ERROR: sprint init failed for {label!r}: {_e}", file=sys.stderr)
+        return
+
+    # Add all tickets (idempotent — skip if already present).
+    for position, issue_state in enumerate(issues):
+        try:
+            _sprint_repo.add_ticket(sprint_label=label, issue_number=issue_state.number, position=position)
+        except Exception as _e:
+            if "UNIQUE" in str(_e).upper() or "unique" in str(_e).lower():
+                pass  # Already added (resume path)
+            else:
+                print(f"[neon] WARNING: add_ticket #{issue_state.number} failed: {_e}", file=sys.stderr)
+
+    # Write JSON mirror.
+    json_path = _neon_sprint_json_path(label, sprints_dir)
+    _neon_sprint_json_write(json_path, {
+        "label": label,
+        "goal": goal,
+        "project": project,
+        "status": "running",
+        "tickets": [
+            {"issue_number": s.number, "position": i, "status": "pending"}
+            for i, s in enumerate(issues)
+        ],
+    })
+
+
+def _neon_ticket_status(
+    sprint_label: str,
+    issue_number: int,
+    neon_status: str,
+    sprints_dir: Path,
+) -> None:
+    """Update a ticket's Neon status + patch the sprint JSON mirror."""
+    _neon_update("update_ticket_status", sprint_label, issue_number, neon_status)
+
+    json_path = _neon_sprint_json_path(sprint_label, sprints_dir)
+    data = _neon_sprint_json_read(json_path)
+    if "tickets" in data:
+        for t in data["tickets"]:
+            if t.get("issue_number") == issue_number:
+                t["status"] = neon_status
+                break
+        _neon_sprint_json_write(json_path, data)
+
+
+def _neon_sprint_status(sprint_label: str, neon_status: str, sprints_dir: Path) -> None:
+    """Update sprint Neon status + patch the sprint JSON mirror."""
+    _neon_update("update_sprint_status", sprint_label, neon_status)
+
+    json_path = _neon_sprint_json_path(sprint_label, sprints_dir)
+    data = _neon_sprint_json_read(json_path)
+    if data:
+        data["status"] = neon_status
+        _neon_sprint_json_write(json_path, data)
+
+
 # ── sprint loop ────────────────────────────────────────────────────────────────
 
 def run_sprint(
@@ -3902,6 +4030,11 @@ def run_sprint(
     # Warn about shared-file conflicts before dispatching
     _warn_file_conflicts(state.issues)
 
+    # ── Neon dual-write: initialise sprint + tickets ───────────────────────────
+    _eff_sprints_dir = cfg.sprints_dir if cfg is not None else SPRINTS_DIR
+    if not dry_run and not resume and not retry_failed:
+        _neon_sprint_init(label, state.issues, eff_repo or "", _eff_sprints_dir)
+
     # ── Sprint estimator (issue #166) ──────────────────────────────────────────
     # Runs BEFORE the per-ticket loop so the human can see estimates on the
     # dashboard before any coding starts.  Failure never blocks the sprint.
@@ -4007,6 +4140,7 @@ def run_sprint(
             issue_state.status          = "skipped"
             issue_state.skip_reason     = "preflight-skipped"
             summary.skipped.append(f"#{num} (preflight-skipped)")
+            _neon_ticket_status(label, num, "skipped", _eff_sprints_dir)
             state.save(state_path)
             _post_sprint_status(state, api_url=api_url, project=eff_repo)
             continue
@@ -4016,6 +4150,7 @@ def run_sprint(
             issue_state.status = "skipped"
             issue_state.skip_reason = "dry-run"
             summary.skipped.append(f"#{num} (dry-run)")
+            _neon_ticket_status(label, num, "skipped", _eff_sprints_dir)
             state.save(state_path)
             _post_sprint_status(state, api_url=api_url, project=eff_repo)
             continue
@@ -4050,9 +4185,11 @@ def run_sprint(
             _apply_in_progress_label(num, cfg=cfg)
 
             def _on_coder_running(
-                _is=issue_state, _st=state, _sp=state_path, _api=api_url
+                _is=issue_state, _st=state, _sp=state_path, _api=api_url,
+                _lbl=label, _n=num, _sd=_eff_sprints_dir,
             ) -> None:
                 _is.set_agent_status("coder_running")
+                _neon_ticket_status(_lbl, _n, "running", _sd)
                 _st.save(_sp)
                 _post_sprint_status(_st, api_url=_api)
 
@@ -4090,6 +4227,7 @@ def run_sprint(
                     repo=eff_repo,
                 )
                 _apply_needs_rework_label(num, category, cfg=cfg)
+                _neon_ticket_status(label, num, "failed", _eff_sprints_dir)
                 state.save(state_path)
                 _post_sprint_status(state, api_url=api_url, project=eff_repo)
                 continue
@@ -4116,6 +4254,7 @@ def run_sprint(
                     repo=eff_repo,
                 )
                 _apply_needs_rework_label(num, category, cfg=cfg)
+                _neon_ticket_status(label, num, "failed", _eff_sprints_dir)
                 state.save(state_path)
                 _post_sprint_status(state, api_url=api_url, project=eff_repo)
                 continue
@@ -4158,6 +4297,7 @@ def run_sprint(
             issue_state.skip_reason        = "Tester HANG detected"
             issue_state.category           = FailureCategory.HANG
             summary.skipped.append(f"#{num} (tester hang)")
+            _neon_ticket_status(label, num, "failed", _eff_sprints_dir)
             state.save(state_path)
             _post_sprint_status(state, api_url=api_url, project=eff_repo)
             continue
@@ -4170,6 +4310,7 @@ def run_sprint(
             issue_state.skip_reason        = "Subscription rate limit exhausted"
             issue_state.category           = FailureCategory.RETRY_EXHAUSTED
             summary.skipped.append(f"#{num} (rate limit exhausted)")
+            _neon_ticket_status(label, num, "failed", _eff_sprints_dir)
             state.save(state_path)
             _post_sprint_status(state, api_url=api_url)
             continue
@@ -4202,6 +4343,7 @@ def run_sprint(
             issue_state.set_agent_status("completed")
             issue_state.status = "done"
             summary.merged.append(f"#{num}")
+            _neon_ticket_status(label, num, "done", _eff_sprints_dir)
         else:
             category = gate_category or FailureCategory.CRASH
             issue_state.set_agent_status("failed")
@@ -4223,6 +4365,7 @@ def run_sprint(
                 repo=eff_repo,
             )
             _apply_needs_rework_label(num, category, cfg=cfg)
+            _neon_ticket_status(label, num, "failed", _eff_sprints_dir)
 
         elapsed = time.monotonic() - start_time
         state.wall_clock_secs = elapsed
@@ -4231,6 +4374,7 @@ def run_sprint(
 
     # Final elapsed time
     state.wall_clock_secs = time.monotonic() - start_time
+    _neon_sprint_status(label, "complete", _eff_sprints_dir)
     state.save(state_path)
 
     return summary, state

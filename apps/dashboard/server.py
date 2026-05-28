@@ -47,6 +47,36 @@ except ImportError:
     _backup_module = None  # type: ignore[assignment]
     _BACKUP_AVAILABLE = False
 
+try:
+    import sprint_repo as _sprint_repo
+    _SPRINT_REPO_AVAILABLE = True
+except Exception:
+    _sprint_repo = None  # type: ignore[assignment]
+    _SPRINT_REPO_AVAILABLE = False
+
+
+def _sprint_json_path(project_root: Path, sprint_label: str) -> Path:
+    return _commander_dir(project_root) / "sprints" / f"{sprint_label}.json"
+
+
+def _sprint_json_write(path: Path, data: dict) -> None:
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        os.replace(str(tmp), str(path))
+    except OSError as _e:
+        print(f"[sprint-json] WARNING: could not write {path}: {_e}")
+
+
+def _sprint_json_read(path: Path) -> dict:
+    if path.exists():
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    return {}
+
 STATIC_DIR = Path(__file__).parent / "static"
 ENVIRONMENT = os.environ.get("ENVIRONMENT", "prd").lower()
 
@@ -1639,7 +1669,19 @@ def _home_project_data(proj: dict, running_sprints: list[dict]) -> dict:
     uat_issues = [i for i in all_open if any(l["name"] == "UAT" for l in i.get("labels", []))]
     backlog_issues = [i for i in all_open if github_client.classify_issue(i) == "backlog"]
 
-    if proj_running:
+    # Supplement PID-based check with Neon: if Neon says a sprint is running for
+    # this project, the sidebar dot is green even if the JSON file was deleted.
+    neon_running = False
+    if not proj_running and _SPRINT_REPO_AVAILABLE and _sprint_repo is not None:
+        try:
+            neon_running = any(
+                s.status == "running"
+                for s in _sprint_repo.list_sprints(project=repo)
+            )
+        except Exception:
+            pass
+
+    if proj_running or neon_running:
         status = "running"
     elif uat_issues:
         status = "uat-pending"
@@ -2988,6 +3030,19 @@ def kill_sprint(sprint_label: str, project: str):
         except OSError:
             pass
 
+    # Neon + JSON: mark sprint as cancelled (best-effort — don't fail the kill).
+    if _SPRINT_REPO_AVAILABLE and _sprint_repo is not None:
+        try:
+            _sprint_repo.update_sprint_status(sprint_label, "cancelled")
+        except Exception as _e:
+            print(f"[neon] WARNING: could not mark sprint {sprint_label!r} cancelled: {_e}")
+    project_root = _project_root_path(project)
+    json_path = _sprint_json_path(project_root, sprint_label)
+    data = _sprint_json_read(json_path)
+    if data:
+        data["status"] = "cancelled"
+        _sprint_json_write(json_path, data)
+
     return {"ok": True}
 
 
@@ -3414,13 +3469,66 @@ async def create_sprint_label(body: SprintCreateBody):
     except ValueError as e:
         raise HTTPException(400, detail=str(e))
     sprint_label = f"sprint-{target_num}"
-    # Persist goal if provided
+    eff_goal = (body.goal or sprint_label).strip() or sprint_label
+
+    # Neon write must succeed before any JSON is written (AC-6).
+    if _SPRINT_REPO_AVAILABLE and _sprint_repo is not None:
+        try:
+            _sprint_repo.get_or_create_sprint(
+                label=sprint_label,
+                goal=eff_goal,
+                project=body.project,
+            )
+        except Exception as _e:
+            raise HTTPException(500, detail=f"Neon write failed: {_e}")
+
+    # JSON writes are best-effort (AC-7).
+    project_root = _project_root_path(body.project)
     if body.goal is not None:
-        project_root = _project_root_path(body.project)
         goal_path = _sprint_goal_path(project_root, sprint_label)
         goal_path.parent.mkdir(parents=True, exist_ok=True)
         goal_path.write_text(body.goal.strip(), encoding="utf-8")
+    _sprint_json_write(
+        _sprint_json_path(project_root, sprint_label),
+        {"label": sprint_label, "goal": eff_goal, "project": body.project, "status": "pending", "tickets": []},
+    )
     return {"ok": True, "sprint_label": sprint_label}
+
+
+class SprintTicketReorderBody(BaseModel):
+    issue_numbers: list[int]
+    project: str
+
+
+@app.post("/api/sprints/{sprint_label}/tickets/reorder")
+def reorder_sprint_tickets(sprint_label: str, body: SprintTicketReorderBody):
+    """Reorder tickets within a sprint. Writes to Neon first, then JSON fallback."""
+    if not _SPRINT_LABEL_RE.match(sprint_label):
+        raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")
+
+    # Neon write must succeed (AC-6).
+    if _SPRINT_REPO_AVAILABLE and _sprint_repo is not None:
+        try:
+            _sprint_repo.reorder_tickets(sprint_label, body.issue_numbers)
+        except Exception as _e:
+            if "SprintNotFound" in type(_e).__name__ or "not found" in str(_e).lower():
+                raise HTTPException(404, detail=f"Sprint {sprint_label!r} not found in DB")
+            raise HTTPException(500, detail=f"Neon write failed: {_e}")
+
+    # JSON fallback (AC-7).
+    project_root = _project_root_path(body.project)
+    json_path = _sprint_json_path(project_root, sprint_label)
+    data = _sprint_json_read(json_path)
+    if "tickets" in data:
+        by_num = {t["issue_number"]: t for t in data["tickets"]}
+        data["tickets"] = [
+            {**by_num[n], "position": pos}
+            for pos, n in enumerate(body.issue_numbers)
+            if n in by_num
+        ]
+        _sprint_json_write(json_path, data)
+
+    return {"ok": True}
 
 
 class SprintDeleteBody(BaseModel):

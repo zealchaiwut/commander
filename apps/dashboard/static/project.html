@@ -627,6 +627,50 @@
     }
     .btn-flash { animation: btnFlash .45s ease-in-out; }
 
+    /* ── Auto-refresh pill ── */
+    .smgmt-ar-pill {
+      position: relative;
+      display: flex; align-items: center; gap: 0;
+    }
+    .smgmt-ar-trigger {
+      display: flex; align-items: center; gap: 5px;
+      padding: 6px 10px;
+      border: 1px solid var(--border); border-right: none;
+      border-radius: 6px 0 0 6px;
+      background: none; color: var(--text-muted); font-size: 12px; font-weight: 500;
+      cursor: pointer; transition: background .15s, color .15s; white-space: nowrap;
+    }
+    .smgmt-ar-trigger:hover { background: var(--surface-2); color: var(--text); }
+    .smgmt-ar-trigger .ti { font-size: 14px; }
+    .smgmt-ar-caret-btn {
+      display: flex; align-items: center; justify-content: center;
+      padding: 6px 7px;
+      border: 1px solid var(--border);
+      border-radius: 0 6px 6px 0;
+      background: none; color: var(--text-muted); font-size: 11px;
+      cursor: pointer; transition: background .15s, color .15s;
+    }
+    .smgmt-ar-caret-btn:hover { background: var(--surface-2); color: var(--text); }
+    .smgmt-ar-dropdown {
+      position: absolute; top: calc(100% + 4px); right: 0;
+      min-width: 130px;
+      background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.10);
+      z-index: 50; overflow: hidden;
+      display: none;
+    }
+    .smgmt-ar-dropdown.open { display: block; }
+    .smgmt-ar-option {
+      display: block; width: 100%;
+      padding: 8px 14px; text-align: left;
+      background: none; border: none;
+      font-size: 12px; color: var(--text-muted); cursor: pointer;
+      transition: background .12s, color .12s;
+    }
+    .smgmt-ar-option:hover { background: var(--surface-2); color: var(--text); }
+    .smgmt-ar-option.selected { font-weight: 700; color: var(--text); }
+    .smgmt-ar-pill.is-off .smgmt-ar-trigger { color: var(--text-sub); }
+
     /* ── Inline selection action bar (above sprint list) ── */
     .smgmt-selection-bar {
       display: none;
@@ -1006,12 +1050,27 @@
               <i class="ti ti-x"></i>
               Deselect (<span id="smgmt-deselect-count">0</span>)
             </button>
-            <button class="btn-ghost" id="smgmt-refresh-btn"
-                    onclick="smgmtTriggerRefresh()" title="Re-fetch sprints from GitHub"
-                    aria-label="Trigger Refresh">
-              <i class="ti ti-refresh"></i>
-              Trigger Refresh
-            </button>
+            <!-- Auto-refresh pill (issue #275) -->
+            <div class="smgmt-ar-pill" id="smgmt-ar-pill">
+              <button class="smgmt-ar-trigger" id="smgmt-ar-trigger"
+                      onclick="_smgmtArManualRefresh()"
+                      title="Click to refresh now">
+                <i class="ti ti-refresh" id="smgmt-ar-icon"></i>
+                <span id="smgmt-ar-label">Auto Refresh</span>
+              </button>
+              <button class="smgmt-ar-caret-btn" id="smgmt-ar-caret"
+                      onclick="_smgmtArToggleDropdown(event)"
+                      title="Change refresh interval"
+                      aria-label="Auto refresh interval">
+                <i class="ti ti-chevron-down"></i>
+              </button>
+              <div class="smgmt-ar-dropdown" id="smgmt-ar-dropdown" role="listbox">
+                <button class="smgmt-ar-option" data-interval="0" onclick="_smgmtArSelectInterval(0)">Off</button>
+                <button class="smgmt-ar-option" data-interval="1" onclick="_smgmtArSelectInterval(1)">1s</button>
+                <button class="smgmt-ar-option" data-interval="5" onclick="_smgmtArSelectInterval(5)">5s</button>
+                <button class="smgmt-ar-option" data-interval="10" onclick="_smgmtArSelectInterval(10)">10s</button>
+              </div>
+            </div>
             <button class="btn-ghost" id="smgmt-new-ticket-btn"
                     onclick="smgmtOpenNewTicket()" title="Create a new ticket"
                     aria-label="New Ticket">
@@ -1155,6 +1214,11 @@ const _smgmtOutcomeCache = {};
 function switchTab(tab, pushHistory) {
   if (tab === 'sprint-history') return; // disabled
 
+  // Pause auto-refresh when leaving sprint-mgmt
+  if (_activeTab === 'sprint-mgmt' && tab !== 'sprint-mgmt') {
+    _smgmtArStopTicker();
+  }
+
   _activeTab = tab;
 
   // Update aria-selected + active class on tabs
@@ -1187,7 +1251,10 @@ function switchTab(tab, pushHistory) {
   // Lazy-load sprint mgmt (only if _cachedFullRepo is already populated)
   if (tab === 'sprint-mgmt' && !_sprintMgmtLoaded && _cachedFullRepo[_slug]) {
     _sprintMgmtLoaded = true;
-    loadSprintMgmt();
+    loadSprintMgmt().then(() => _smgmtArInit());
+  } else if (tab === 'sprint-mgmt' && _sprintMgmtLoaded) {
+    // Tab switched back — restart ticker if not already running
+    if (_arTickerId === null && _arInterval > 0) _smgmtArStartTicker();
   }
 }
 
@@ -1525,6 +1592,7 @@ async function init() {
   if (_activeTab === 'sprint-mgmt') {
     _sprintMgmtLoaded = true;
     await loadSprintMgmt();
+    _smgmtArInit();
   }
 }
 
@@ -1550,7 +1618,8 @@ function _smgmtInitScrollShadow() {
 }
 
 // ── Sprint Mgmt: load sprint list ─────────────────────────────────────────
-async function loadSprintMgmt() {
+// silent=true skips the "Loading sprints…" spinner (used by auto-refresh)
+async function loadSprintMgmt(silent) {
   const listEl = document.getElementById('smgmt-sprint-list');
   if (!listEl) return;
 
@@ -1560,7 +1629,7 @@ async function loadSprintMgmt() {
     return;
   }
 
-  listEl.innerHTML = '<div class="loading-msg">Loading sprints…</div>';
+  if (!silent) listEl.innerHTML = '<div class="loading-msg">Loading sprints…</div>';
 
   try {
     const resp = await fetch('/api/sprint-management/issues?repo=' + encodeURIComponent(repo));
@@ -1568,7 +1637,7 @@ async function loadSprintMgmt() {
     const data = await resp.json();
     _smgmtRender(data);
   } catch (err) {
-    listEl.innerHTML = '<div class="loading-msg">Failed to load sprints.</div>';
+    if (!silent) listEl.innerHTML = '<div class="loading-msg">Failed to load sprints.</div>';
   }
 }
 
@@ -2604,17 +2673,126 @@ document.addEventListener('keydown', function(e) {
   }
 });
 
-// ── Trigger Refresh ───────────────────────────────────────────────────────
-async function smgmtTriggerRefresh() {
-  const btn = document.getElementById('smgmt-refresh-btn');
-  if (btn) {
-    btn.classList.remove('btn-flash');
-    void btn.offsetWidth; // force reflow to restart animation
-    btn.classList.add('btn-flash');
-    btn.addEventListener('animationend', () => btn.classList.remove('btn-flash'), { once: true });
-  }
-  await loadSprintMgmt();
+// ── Auto-refresh pill (issue #275) ────────────────────────────────────────
+const _AR_SESSION_KEY = 'smgmt-ar-interval';
+const _AR_INTERVALS   = [0, 1, 5, 10]; // 0 = Off
+
+let _arInterval   = 5;   // active interval in seconds (0 = off)
+let _arCountdown  = 0;   // current countdown value
+let _arTickerId   = null; // setInterval handle
+
+/** Initialise the pill from sessionStorage and start ticking if needed. */
+function _smgmtArInit() {
+  const saved = parseInt(sessionStorage.getItem(_AR_SESSION_KEY), 10);
+  const interval = _AR_INTERVALS.includes(saved) ? saved : 5;
+  _smgmtArSelectInterval(interval, /*skipSave=*/false);
 }
+
+/** Refresh board data preserving scroll position; flash the icon. */
+async function _smgmtArDoRefresh() {
+  const icon = document.getElementById('smgmt-ar-icon');
+  if (icon) {
+    icon.classList.remove('btn-flash');
+    void icon.offsetWidth;
+    icon.classList.add('btn-flash');
+    icon.addEventListener('animationend', () => icon.classList.remove('btn-flash'), { once: true });
+  }
+  const scrollY = window.scrollY;
+  await loadSprintMgmt(/*silent=*/true);
+  window.scrollTo({ top: scrollY, behavior: 'instant' });
+}
+
+/** Manual refresh triggered by clicking the pill label/icon. */
+async function _smgmtArManualRefresh() {
+  if (_arTickerId !== null) {
+    // Reset countdown so next auto-tick is a full interval away
+    _arCountdown = _arInterval;
+    _smgmtArUpdateLabel();
+  }
+  await _smgmtArDoRefresh();
+}
+
+/** Called every second by setInterval. */
+function _smgmtArTick() {
+  if (_arCountdown <= 1) {
+    _arCountdown = _arInterval;
+    _smgmtArUpdateLabel();
+    _smgmtArDoRefresh();
+  } else {
+    _arCountdown--;
+    _smgmtArUpdateLabel();
+  }
+}
+
+/** Start the ticker for the current _arInterval. */
+function _smgmtArStartTicker() {
+  _smgmtArStopTicker();
+  if (_arInterval <= 0) return;
+  _arCountdown = _arInterval;
+  _smgmtArUpdateLabel();
+  _arTickerId = setInterval(_smgmtArTick, 1000);
+}
+
+/** Stop the ticker. */
+function _smgmtArStopTicker() {
+  if (_arTickerId !== null) {
+    clearInterval(_arTickerId);
+    _arTickerId = null;
+  }
+}
+
+/** Update the pill label text. */
+function _smgmtArUpdateLabel() {
+  const label = document.getElementById('smgmt-ar-label');
+  const pill  = document.getElementById('smgmt-ar-pill');
+  if (!label) return;
+  if (_arInterval <= 0) {
+    label.textContent = 'Auto Refresh';
+    if (pill) pill.classList.add('is-off');
+  } else {
+    label.textContent = `Auto Refresh (${_arCountdown}s)`;
+    if (pill) pill.classList.remove('is-off');
+  }
+}
+
+/** Select a new interval, persist to sessionStorage, restart ticker. */
+function _smgmtArSelectInterval(interval, skipSave) {
+  _arInterval = interval;
+  if (!skipSave) sessionStorage.setItem(_AR_SESSION_KEY, String(interval));
+
+  // Update selected state on dropdown options
+  document.querySelectorAll('.smgmt-ar-option').forEach(btn => {
+    const v = parseInt(btn.dataset.interval, 10);
+    btn.classList.toggle('selected', v === interval);
+  });
+
+  _smgmtArStopTicker();
+  if (interval > 0) {
+    _smgmtArStartTicker();
+  } else {
+    _smgmtArUpdateLabel();
+  }
+
+  // Close dropdown
+  const dd = document.getElementById('smgmt-ar-dropdown');
+  if (dd) dd.classList.remove('open');
+}
+
+/** Toggle dropdown open/closed. */
+function _smgmtArToggleDropdown(e) {
+  e.stopPropagation();
+  const dd = document.getElementById('smgmt-ar-dropdown');
+  if (dd) dd.classList.toggle('open');
+}
+
+// Close dropdown when clicking outside
+document.addEventListener('click', function(e) {
+  const pill = document.getElementById('smgmt-ar-pill');
+  if (pill && !pill.contains(e.target)) {
+    const dd = document.getElementById('smgmt-ar-dropdown');
+    if (dd) dd.classList.remove('open');
+  }
+});
 
 // ── New Sprint modal ──────────────────────────────────────────────────────
 function smgmtOpenNewSprint() {

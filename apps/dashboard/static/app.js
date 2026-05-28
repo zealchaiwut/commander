@@ -2686,8 +2686,9 @@ let _smgmtBacklogExpanded = false; // expand/collapse state (sticky mode only)
 let _smgmtBacklogDragRestoreTimer = null; // timer to restore sticky after drag
 let _smgmtRerunLabel     = null;   // sprint label pending rerun confirmation
 let _smgmtCleanupLabels  = [];     // empty sprint labels pending cleanup confirmation
-let _smgmtAutoRefreshTimer     = null; // interval timer for auto-refresh countdown
-let _smgmtAutoRefreshCountdown = 30;  // seconds remaining until next auto-refresh
+let _smgmtAutoRefreshTimer     = null; // interval timer for auto-refresh polling
+let _smgmtAutoRefreshInterval  = 15;  // seconds between refreshes (5|15|30|60)
+let _smgmtAutoRefreshEnabled   = true; // whether auto-refresh is active
 let _smgmtSelectedIssues       = new Set(); // issue numbers currently selected (multi-select, issue #206)
 
 const RERUN_STRIP_LABELS = new Set(['UAT', 'UAT-approved', 'released', 'SIT', 'in-progress', 'need-rework']);
@@ -2726,7 +2727,8 @@ async function smgmtInitForProject(repo) {
   _smgmtPollTimer = setInterval(smgmtPollRunStatus, 5000);
   smgmtPollRunStatus();
 
-  // Start auto-refresh countdown (issue #199)
+  // Load persisted auto-refresh state and start poller (issue #240)
+  _smgmtArLoadState();
   smgmtAutoRefreshReset();
 }
 
@@ -2736,15 +2738,48 @@ async function smgmtRefreshBoard() {
   await smgmtSelectProject(_smgmtCurrentRepo);
 }
 
-// ── Auto-refresh countdown (issue #199) ──────────────────────────────────────
+// ── Auto-refresh compact pill (issue #240) ────────────────────────────────────
+
+const _AR_LS_INTERVAL = 'commander.smgmt.arInterval';
+const _AR_LS_ENABLED  = 'commander.smgmt.arEnabled';
+const _AR_INTERVALS   = [5, 15, 30, 60]; // seconds
+
+/** Load persisted state from localStorage; use defaults if absent. */
+function _smgmtArLoadState() {
+  const savedInterval = parseInt(localStorage.getItem(_AR_LS_INTERVAL), 10);
+  if (_AR_INTERVALS.includes(savedInterval)) _smgmtAutoRefreshInterval = savedInterval;
+  const savedEnabled = localStorage.getItem(_AR_LS_ENABLED);
+  if (savedEnabled !== null) _smgmtAutoRefreshEnabled = savedEnabled !== 'false';
+}
+
+/** Save current state to localStorage. */
+function _smgmtArSaveState() {
+  localStorage.setItem(_AR_LS_INTERVAL, String(_smgmtAutoRefreshInterval));
+  localStorage.setItem(_AR_LS_ENABLED,  String(_smgmtAutoRefreshEnabled));
+}
+
+/** Update pill appearance and dropdown checkmarks to match current state. */
 function _smgmtUpdateAutoRefreshBtn() {
-  const btn = document.getElementById('smgmt-auto-refresh-btn');
-  if (!btn) return;
-  if (_smgmtCurrentRepo) {
-    btn.textContent = `Auto Refresh (${_smgmtAutoRefreshCountdown}s)`;
+  const pill      = document.getElementById('smgmt-ar-pill');
+  const pillLabel = document.getElementById('smgmt-ar-pill-label');
+  if (!pill || !pillLabel) return;
+
+  if (_smgmtAutoRefreshEnabled) {
+    pill.classList.replace('is-off', 'is-on');
+    pill.classList.add('is-on');
+    const secs = _smgmtAutoRefreshInterval;
+    pillLabel.textContent = secs >= 60 ? `${secs / 60}m` : `${secs}s`;
   } else {
-    btn.textContent = 'Auto Refresh';
+    pill.classList.replace('is-on', 'is-off');
+    pill.classList.add('is-off');
+    pillLabel.textContent = 'off';
   }
+
+  // Update checkmarks on menu items
+  document.querySelectorAll('.smgmt-ar-menu-item[data-interval]').forEach(item => {
+    const iv = parseInt(item.dataset.interval, 10);
+    item.classList.toggle('is-active', _smgmtAutoRefreshEnabled && iv === _smgmtAutoRefreshInterval);
+  });
 }
 
 function smgmtAutoRefreshStop() {
@@ -2756,29 +2791,71 @@ function smgmtAutoRefreshStop() {
 
 function smgmtAutoRefreshStart() {
   smgmtAutoRefreshStop();
-  if (!_smgmtCurrentRepo) return;
-  _smgmtAutoRefreshCountdown = 30;
-  _smgmtUpdateAutoRefreshBtn();
+  if (!_smgmtCurrentRepo || !_smgmtAutoRefreshEnabled) return;
   _smgmtAutoRefreshTimer = setInterval(async () => {
-    _smgmtAutoRefreshCountdown -= 1;
-    if (_smgmtAutoRefreshCountdown <= 0) {
-      _smgmtAutoRefreshCountdown = 30;
-      _smgmtUpdateAutoRefreshBtn();
-      await smgmtRefreshBoard();
-    } else {
-      _smgmtUpdateAutoRefreshBtn();
-    }
-  }, 1000);
+    await smgmtRefreshBoard();
+  }, _smgmtAutoRefreshInterval * 1000);
 }
 
 function smgmtAutoRefreshReset() {
   smgmtAutoRefreshStart();
+  _smgmtUpdateAutoRefreshBtn();
 }
 
 async function smgmtAutoRefreshNow() {
   smgmtAutoRefreshReset();
   await smgmtRefreshBoard();
 }
+
+/** Called when pill button is clicked — toggle menu open/closed. */
+function smgmtArPillClick(event) {
+  event.stopPropagation();
+  const menu = document.getElementById('smgmt-ar-menu');
+  const pill = document.getElementById('smgmt-ar-pill');
+  if (!menu) return;
+  const isOpen = !menu.classList.contains('hidden');
+  if (isOpen) {
+    menu.classList.add('hidden');
+    pill.setAttribute('aria-expanded', 'false');
+  } else {
+    _smgmtUpdateAutoRefreshBtn(); // refresh checkmarks before showing
+    menu.classList.remove('hidden');
+    pill.setAttribute('aria-expanded', 'true');
+  }
+}
+
+/** Called when a menu interval option is selected. */
+function smgmtArSelect(seconds) {
+  _smgmtAutoRefreshInterval = seconds;
+  _smgmtAutoRefreshEnabled  = true;
+  _smgmtArSaveState();
+  _smgmtArCloseMenu();
+  smgmtAutoRefreshReset();
+}
+
+/** Called when "Turn off" is selected. */
+function smgmtArTurnOff() {
+  _smgmtAutoRefreshEnabled = false;
+  _smgmtArSaveState();
+  smgmtAutoRefreshStop();
+  _smgmtArCloseMenu();
+  _smgmtUpdateAutoRefreshBtn();
+}
+
+function _smgmtArCloseMenu() {
+  const menu = document.getElementById('smgmt-ar-menu');
+  const pill = document.getElementById('smgmt-ar-pill');
+  if (menu) menu.classList.add('hidden');
+  if (pill) pill.setAttribute('aria-expanded', 'false');
+}
+
+// Close pill menu when clicking outside
+document.addEventListener('click', function(e) {
+  const wrap = document.getElementById('smgmt-ar-pill-wrap');
+  if (wrap && !wrap.contains(e.target)) {
+    _smgmtArCloseMenu();
+  }
+});
 
 async function smgmtSelectProject(repo) {
   if (!repo) return;
@@ -2902,12 +2979,12 @@ function smgmtApplyDurationBadges() {
       if (!ticketEl) continue;
 
       // Remove any existing duration badge (avoid duplicates on re-render)
-      ticketEl.querySelectorAll('.smgmt-duration-badge').forEach(el => el.remove());
+      ticketEl.querySelectorAll('.smgmt-took-success, .smgmt-took-failed').forEach(el => el.remove());
 
       const dur = formatDuration(issState.duration_secs);
       const label_text = issState.failed ? `took ${dur} (failed)` : `took ${dur}`;
       const badge = document.createElement('span');
-      badge.className = `smgmt-duration-badge${issState.failed ? ' smgmt-duration-badge--failed' : ''}`;
+      badge.className = issState.failed ? 'smgmt-took-failed' : 'smgmt-took-success';
       badge.textContent = label_text;
 
       // Insert before the status badge
@@ -3188,7 +3265,7 @@ function smgmtTicketCardHtml(ticket, currentSprint) {
     const sprintEst = _smgmtEstimates[currentSprint];
     const issueEst  = (sprintEst.estimates || {})[String(ticket.number)];
     if (issueEst) {
-      estimateBadgeHtml = `<span class="smgmt-estimate-badge">${escapeHtml(issueEst.size)} · ~${issueEst.minutes} min</span>`;
+      estimateBadgeHtml = `<span class="smgmt-estimate-badge" title="~${issueEst.minutes} min">${escapeHtml(issueEst.size)}</span>`;
     }
   }
 

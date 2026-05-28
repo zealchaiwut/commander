@@ -324,6 +324,26 @@ alembic current
 python -c "from services.sprint_manager.neon_db import get_engine; print(get_engine().connect())"
 ```
 
+### Backfilling existing sprints
+
+If you have existing sprint data in `.commander/sprints/*.json` that pre-dates the Neon integration, run this one-shot script to migrate it:
+
+```bash
+python scripts/migrate_sprints_to_neon.py
+```
+
+Sprints already present in Neon are skipped automatically, so the script is safe to re-run. Use `--dry-run` to preview what would be inserted without writing anything:
+
+```bash
+python scripts/migrate_sprints_to_neon.py --dry-run
+```
+
+To backfill only a specific project:
+
+```bash
+python scripts/migrate_sprints_to_neon.py --project zealchaiwut/commander
+```
+
 ---
 
 ## Docs

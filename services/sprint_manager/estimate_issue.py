@@ -100,8 +100,19 @@ def fetch_issue(issue_num: int, repo: str) -> dict:
     return json.loads(result.stdout)
 
 
+_ESTIMATOR_MAX_RETRIES = 3
+_ESTIMATOR_RETRY_DELAY_SECS = 5
+
+
 def run_estimator(issue_num: int, issue_data: dict) -> Optional[dict]:
-    """Invoke the estimator agent via `claude -p` and return parsed JSON."""
+    """Invoke the estimator agent via `claude -p` and return parsed JSON.
+
+    Retries up to _ESTIMATOR_MAX_RETRIES times on transient agent failures
+    (non-zero exit code). --no-session-persistence prevents session-file
+    conflicts when multiple estimations run concurrently during bulk create.
+    """
+    import time as _time
+
     instructions = load_agent_instructions()
 
     title = issue_data.get("title", "")
@@ -125,36 +136,48 @@ Output ONLY the JSON object. No other text."""
         "claude",
         "--model", "claude-haiku-4-5-20251001",
         "--dangerously-skip-permissions",
+        "--no-session-persistence",
         "-p", prompt,
     ]
 
-    try:
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=180,
-        )
-    except subprocess.TimeoutExpired:
-        structured_log.error("estimator_timeout", "estimator agent timed out after 180s", issue_num=issue_num, timeout_secs=180)
-        return None
-    except FileNotFoundError:
-        print("Error: claude CLI not found in PATH", file=sys.stderr)
-        return None
+    for attempt in range(1, _ESTIMATOR_MAX_RETRIES + 1):
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=180,
+            )
+        except subprocess.TimeoutExpired:
+            structured_log.error("estimator_timeout", "estimator agent timed out after 180s", issue_num=issue_num, timeout_secs=180)
+            return None
+        except FileNotFoundError:
+            print("Error: claude CLI not found in PATH", file=sys.stderr)
+            return None
 
-    if result.returncode != 0:
+        if result.returncode == 0:
+            parsed = extract_json(result.stdout)
+            if not parsed:
+                structured_log.error("estimator_parse_error", "could not parse JSON from agent output", issue_num=issue_num, output_preview=result.stdout[:200])
+                return None
+            parsed["issue_number"] = issue_num
+            return parsed
+
+        # Non-zero exit — transient failure; retry if attempts remain.
+        if attempt < _ESTIMATOR_MAX_RETRIES:
+            print(
+                f"Warning: agent exited {result.returncode} for #{issue_num} "
+                f"(attempt {attempt}/{_ESTIMATOR_MAX_RETRIES}), retrying in {_ESTIMATOR_RETRY_DELAY_SECS}s…",
+                file=sys.stderr,
+            )
+            _time.sleep(_ESTIMATOR_RETRY_DELAY_SECS)
+            continue
+
         print(f"Error: agent exited {result.returncode}", file=sys.stderr)
         if result.stderr:
             print(result.stderr[:500], file=sys.stderr)
-        return None
 
-    parsed = extract_json(result.stdout)
-    if not parsed:
-        structured_log.error("estimator_parse_error", "could not parse JSON from agent output", issue_num=issue_num, output_preview=result.stdout[:200])
-        return None
-
-    parsed["issue_number"] = issue_num
-    return parsed
+    return None
 
 
 def post_comment(issue_num: int, repo: str, estimate: dict) -> None:

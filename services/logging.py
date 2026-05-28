@@ -25,7 +25,7 @@ _REQUIRED_KEYS = (
 )
 
 
-def _get_git_sha() -> str | None:
+def _get_git_sha() -> str:
     try:
         return subprocess.check_output(
             ["git", "rev-parse", "--short", "HEAD"],
@@ -33,7 +33,7 @@ def _get_git_sha() -> str | None:
             text=True,
         ).strip()
     except Exception:
-        return None
+        return "unknown"
 
 
 def _resolve_log_dir() -> Path:
@@ -50,7 +50,7 @@ class _Logger:
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._context: dict[str, Any] = {}
-        self._git_sha: str | None = _get_git_sha()
+        self._git_sha: str = _get_git_sha()
 
     def set_context(self, **kwargs: Any) -> None:
         """Merge kwargs into the persistent context applied to every record."""

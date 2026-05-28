@@ -1024,6 +1024,39 @@ def _get_issue_labels(issue_num: int, repo_name: Optional[str] = None) -> set[st
         return set()
 
 
+def _apply_in_progress_label(
+    issue_num: int,
+    cfg: Optional["SprintConfig"] = None,
+) -> None:
+    """Apply the in-progress label via update_ticket.py (best-effort, issue #311 AC-5).
+
+    Called when coder_started_at is set so the board reflects active work.
+    Exceptions are caught and printed as warnings so a missing label never
+    blocks the sprint.
+    """
+    scripts_dir = cfg.scripts_dir if cfg is not None else SCRIPTS_DIR
+    update_script = scripts_dir / "update_ticket.py"
+    cmd = [
+        sys.executable, str(update_script),
+        "--issue", str(issue_num),
+        "--status", "in-progress",
+    ]
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        if result.returncode in (0, 2):
+            print(f"  [in-progress] label applied for #{issue_num}")
+        else:
+            print(
+                f"  [in-progress] WARNING: update_ticket.py exited {result.returncode} "
+                f"for #{issue_num}",
+                file=sys.stderr,
+            )
+            if result.stderr:
+                print(f"  [in-progress] {result.stderr.strip()[:400]}", file=sys.stderr)
+    except Exception as e:
+        print(f"  [in-progress] WARNING: failed to apply label for #{issue_num}: {e}", file=sys.stderr)
+
+
 def _apply_needs_rework_label(
     issue_num: int,
     category: Optional[str],
@@ -1743,6 +1776,17 @@ def _dispatch_coder(
             "Use the BA/coder/tester workflow defined in CLAUDE.md."
         )
 
+    # AC-3 (issue #311): always append the no-merge constraint so the coder
+    # never merges to the target branch regardless of prompt template.
+    if "must not merge" not in prompt and "finish_feature" not in prompt:
+        prompt += (
+            " MERGE BOUNDARY (issue #311): your responsibility ends at pushing the"
+            " feature branch. You must NOT merge to the target branch (develop or any"
+            " sprint branch) by any means — no `git merge`, no PR merge, no"
+            " finish_feature.py. Merging is exclusively the tester's job via"
+            " `scripts/finish_feature.py` after tests pass."
+        )
+
     # Inject failure context from sidecar if available (AC: sprint manager reads sidecar)
     failure_suffix = _build_failure_suffix(issue_num)
     if failure_suffix:
@@ -1959,6 +2003,13 @@ def _dispatch_tester(
             " via the dashboard Approve button or scripts/approve_ticket.py."
             " Do NOT output language like 'let me know if you want me to...' —"
             " complete the full workflow autonomously by running finish_feature.py and then stop."
+            # AC-1 / AC-2 (issue #311): explicit prohibition of direct merge paths
+            " MERGE PATH ENFORCEMENT (issue #311): `scripts/finish_feature.py` is the ONLY"
+            " sanctioned merge path. You are FORBIDDEN from running `git merge`, opening"
+            " or merging a PR directly, or pushing commits to the target branch by any"
+            " means other than finish_feature.py. Merging by any other path will skip the"
+            " UAT label entirely and constitutes a workflow failure — halt immediately and"
+            " report the violation rather than proceeding."
         )
     cmd = [
         "claude",
@@ -3738,6 +3789,11 @@ def run_sprint(
         issue_state.coder_started_at = issue_state.status_changed_at
         state.save(state_path)
         _post_sprint_status(state, api_url=api_url)
+
+        # AC-5 (issue #311): apply in-progress label when coder starts so the
+        # board reflects active work during coding.  Best-effort — never blocks
+        # the sprint on label failure.
+        _apply_in_progress_label(num, cfg=cfg)
 
         def _on_coder_running(
             _is=issue_state, _st=state, _sp=state_path, _api=api_url

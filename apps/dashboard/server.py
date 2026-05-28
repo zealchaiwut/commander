@@ -33,6 +33,18 @@ import db
 import github_client
 import projects as projects_module
 
+# Backup module lives in services/sprint_manager/ — add it to sys.path
+import sys as _sys
+_SERVICES_DIR = Path(__file__).parent.parent.parent / "services" / "sprint_manager"
+if str(_SERVICES_DIR) not in _sys.path:
+    _sys.path.insert(0, str(_SERVICES_DIR))
+try:
+    import backup as _backup_module
+    _BACKUP_AVAILABLE = True
+except ImportError:
+    _backup_module = None  # type: ignore[assignment]
+    _BACKUP_AVAILABLE = False
+
 STATIC_DIR = Path(__file__).parent / "static"
 ENVIRONMENT = os.environ.get("ENVIRONMENT", "prd").lower()
 
@@ -257,6 +269,13 @@ async def lifespan(app: FastAPI):
     db.init_db()
     _sweep_orphan_pid_files()
     _restore_sprint_statuses_on_startup()
+    # Start backup scheduler and queue a startup backup after 30 s
+    if _BACKUP_AVAILABLE:
+        try:
+            _backup_module.start_backup_scheduler()
+            _backup_module.schedule_startup_backup(delay_seconds=30)
+        except Exception:
+            pass  # backup failures never affect server startup
     task1 = asyncio.create_task(_cache_refresh_loop())
     task2 = asyncio.create_task(_timeout_loop())
     yield
@@ -416,6 +435,24 @@ def health_check() -> HealthResponse:
 def get_environment():
     """Return the current runtime environment (prd or uat)."""
     return {"environment": ENVIRONMENT}
+
+
+@app.get("/api/backup/status")
+def get_backup_status():
+    """Return the current state of the gist-based config backup.
+
+    Response shape:
+    {
+      "last_backup_at": "<ISO-8601>" | null,
+      "gist_id": "<id>" | null,
+      "gist_url": "https://gist.github.com/..." | null,
+      "file_count": <int>,
+      "last_error": "<message>" | null
+    }
+    """
+    if not _BACKUP_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Backup module not available")
+    return _backup_module.get_backup_status()
 
 
 @app.post("/api/agent-event")
@@ -624,6 +661,12 @@ def add_project(body: NewProjectBody):
             icon=body.icon or "ti-folder",
             color=body.color or "gray",
         )
+        # Trigger a background backup after a successful projects.json write
+        if _BACKUP_AVAILABLE:
+            try:
+                _backup_module.schedule_backup()
+            except Exception:
+                pass  # backup trigger failures never affect the response
         return new_proj
     except FileExistsError as e:
         raise HTTPException(409, detail=str(e))
@@ -675,6 +718,13 @@ async def remove_project(owner: str, repo_name: str, body: RemoveProjectBody):
             err = result.stderr.strip() or result.stdout.strip() or "unknown error"
             raise HTTPException(502, detail=f"Failed to delete GitHub repository: {err}")
         removed.append(f"GitHub repo {repo}")
+
+    # Trigger a background backup after a successful projects.json write
+    if _BACKUP_AVAILABLE:
+        try:
+            _backup_module.schedule_backup()
+        except Exception:
+            pass  # backup trigger failures never affect the response
 
     return {"ok": True, "removed": removed}
 

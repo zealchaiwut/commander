@@ -324,6 +324,16 @@
       background: var(--surface-2); color: var(--text-sub);
       padding: 1px 5px; border-radius: 4px;
     }
+    .bc-tab-badge {
+      display: inline-flex; align-items: center; gap: 2px;
+      font-size: 10px; font-weight: 600; letter-spacing: .02em;
+      background: var(--blue); color: #fff;
+      padding: 1px 6px; border-radius: 10px; margin-left: 4px;
+      white-space: nowrap; line-height: 1.6;
+    }
+    .bc-tab-badge--warn { background: #f59e0b; }
+    @keyframes bc-badge-spin { to { transform: rotate(360deg); } }
+    .bc-tab-badge-spin { display: inline-block; animation: bc-badge-spin .9s linear infinite; }
 
     /* ── Tab content ── */
     .tab-content { flex: 1; }
@@ -1481,7 +1491,7 @@
         </button>
         <button class="stab" role="tab" id="stab-bulk-create"
                 aria-selected="false" onclick="switchTab('bulk-create')">
-          <i class="ti ti-stack-2"></i>Bulk Create
+          <i class="ti ti-stack-2"></i>Bulk Create<span id="bc-tab-badge" class="bc-tab-badge hidden"></span>
         </button>
         <button class="stab disabled" role="tab" id="stab-sprint-history"
                 aria-selected="false" aria-disabled="true"
@@ -2172,6 +2182,13 @@ async function init() {
 
   // Update toolbar sticky top based on actual header height
   _smgmtUpdateToolbarTop();
+
+  // Reconnect badge SSE if a bulk job was in progress before this page load
+  const _bcSavedOnLoad = localStorage.getItem('bc_job_id');
+  if (_bcSavedOnLoad && !_bcJobId) {
+    _bcJobId = _bcSavedOnLoad;
+    _bcConnectSSE(_bcSavedOnLoad);
+  }
 
   // Load sprint-mgmt data if on that tab
   if (_activeTab === 'sprint-mgmt') {
@@ -3932,9 +3949,16 @@ const BC_ALLOWED_EXTS = new Set([
 
 /** Called each time the Bulk Create tab becomes active. */
 function _bcInitTab() {
-  // If a running job was saved in localStorage, go straight to step 2
+  // Badge SSE may already be running from page load (init reconnect)
+  if (_bcJobId) {
+    _bcShowStep(2);
+    if (_bcJobState) _bcRenderStep2();
+    return;
+  }
+
+  // Job saved in localStorage but SSE not yet started (e.g. tab opened first)
   const savedJobId = localStorage.getItem('bc_job_id');
-  if (savedJobId && !_bcJobId) {
+  if (savedJobId) {
     _bcJobId = savedJobId;
     _bcShowStep(2);
     _bcConnectSSE(savedJobId);
@@ -4170,6 +4194,32 @@ async function bcRunAll() {
   }
 }
 
+function _bcUpdateBadge() {
+  const badge = document.getElementById('bc-tab-badge');
+  if (!badge) return;
+  const job = _bcJobState;
+  if (!job) { badge.className = 'bc-tab-badge hidden'; return; }
+
+  const tickets = job.tickets || [];
+  const total   = tickets.length;
+  const created = tickets.filter(t => t.state === 'created').length;
+  const failed  = tickets.filter(t => t.state === 'failed').length;
+
+  if (job.status === 'running') {
+    badge.className = 'bc-tab-badge';
+    badge.innerHTML = `<span class="bc-tab-badge-spin">&#x27F3;</span>${created}/${total}`;
+  } else if (job.status === 'done' || job.status === 'stopped') {
+    if (failed > 0) {
+      badge.className = 'bc-tab-badge bc-tab-badge--warn';
+      badge.textContent = `⚠ ${failed} failed`;
+    } else {
+      badge.className = 'bc-tab-badge hidden';
+    }
+  } else {
+    badge.className = 'bc-tab-badge hidden';
+  }
+}
+
 function _bcConnectSSE(jobId) {
   if (_bcEventSource) { _bcEventSource.close(); _bcEventSource = null; }
 
@@ -4177,7 +4227,7 @@ function _bcConnectSSE(jobId) {
   _bcEventSource = es;
 
   es.addEventListener('snapshot', (e) => {
-    try { _bcJobState = JSON.parse(e.data); _bcRenderStep2(); } catch (_) {}
+    try { _bcJobState = JSON.parse(e.data); _bcRenderStep2(); _bcUpdateBadge(); } catch (_) {}
   });
 
   es.addEventListener('update', (e) => {
@@ -4186,9 +4236,11 @@ function _bcConnectSSE(jobId) {
       if (event.type === 'ticket_update' && _bcJobState) {
         _bcJobState.tickets[event.ticket.index] = event.ticket;
         _bcRenderStep2();
+        _bcUpdateBadge();
       } else if (event.type === 'job_done' && _bcJobState) {
         _bcJobState.status = 'done';
         _bcRenderStep2();
+        _bcUpdateBadge();
         es.close();
         _bcEventSource = null;
         localStorage.removeItem('bc_job_id');
@@ -4403,6 +4455,7 @@ function bcRecreate() {
   _bcJobState = null;
   _bcStartTimes = {};
   _bcAvgMs = null;
+  _bcUpdateBadge();
 
   _bcShowStep(1);
   _bcPopulateRepo();

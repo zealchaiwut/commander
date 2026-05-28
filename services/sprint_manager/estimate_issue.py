@@ -193,6 +193,39 @@ def post_comment(issue_num: int, repo: str, estimate: dict) -> None:
     print(f"  Posted estimate comment on #{issue_num}")
 
 
+def apply_estimated_status(issue_num: int, repo: str) -> bool:
+    """Apply the 'estimated' status label via update_ticket.py with retry-and-warn logic.
+
+    Returns True on success, False if update_ticket.py exited with code 2 (partial failure).
+    Propagates other non-zero exit codes as warnings but does not raise.
+    """
+    update_ticket = REPO_ROOT / "scripts" / "update_ticket.py"
+    result = subprocess.run(
+        [sys.executable, str(update_ticket), "--issue", str(issue_num), "--status", "estimated",
+         "--repo", repo],
+        capture_output=True, text=True,
+    )
+    if result.returncode == 0:
+        print(f"  Applied 'estimated' label to #{issue_num}")
+        return True
+    if result.returncode == 2:
+        print(
+            f"Warning: update_ticket.py --status estimated exited with code 2 for "
+            f"#{issue_num} — label operations failed after all retries. "
+            f"A warning comment has been posted to the issue.",
+            file=sys.stderr,
+        )
+        return False
+    # Unexpected non-zero exit
+    stderr_text = result.stderr.strip()
+    print(
+        f"Warning: update_ticket.py --status estimated failed (exit {result.returncode})"
+        f" for #{issue_num}: {stderr_text}",
+        file=sys.stderr,
+    )
+    return False
+
+
 def apply_label(issue_num: int, repo: str, size: str) -> None:
     """Apply size-S/M/L/XL label to the issue, creating it if needed."""
     valid = {"S", "M", "L", "XL"}

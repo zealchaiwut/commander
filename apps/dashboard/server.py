@@ -1122,7 +1122,7 @@ async def init_project(body: InitProjectBody):
     # Build subprocess command
     script_path = Path(__file__).parent / "scripts" / "init_project.py"
     cmd = [
-        "python3",
+        sys.executable,
         str(script_path),
         repo_name,
         "--projects-dir", str(projects_dir),
@@ -2227,7 +2227,7 @@ def run_sprint(body: SprintRunBody):
     SPRINT_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
     log_fh = open(SPRINT_LOG_PATH, "a")
 
-    cmd = ["python3", str(SPRINT_MANAGER_PATH), body.label]
+    cmd = [sys.executable, str(SPRINT_MANAGER_PATH), body.label]
     if body.budget is not None:
         cmd += [f"--budget={body.budget}"]
 
@@ -2780,7 +2780,7 @@ def run_sprint_managed(body: SprintMgmtRunBody):
     log_fh = open(log_path, "w")
     try:
         proc = subprocess.Popen(
-            ["python3", str(SPRINT_MANAGER_PATH), body.sprint_label, "--skip-gates"],
+            [sys.executable, str(SPRINT_MANAGER_PATH), body.sprint_label, "--skip-gates"],
             env=stripped_env,
             cwd=str(coder_path),
             stdout=log_fh,
@@ -2800,6 +2800,32 @@ def run_sprint_managed(body: SprintMgmtRunBody):
     # contains the real PID or doesn't exist; there is no half-written state.
     pending_path.write_text(str(proc.pid), encoding="utf-8")
     os.replace(str(pending_path), str(pid_path))
+
+    # Early-crash detection: if the subprocess exits within 2 seconds it almost
+    # certainly failed to start (e.g. missing venv dependency).  Read the tail
+    # of the dispatch log and return HTTP 502 with the error detail so the
+    # caller gets a meaningful message instead of a silent 202.
+    try:
+        proc.wait(timeout=2.0)
+        # Process already exited — read the log tail for the error message.
+        log_fh.flush()
+        try:
+            log_text = log_path.read_text(encoding="utf-8", errors="replace")
+            tail = "\n".join(log_text.splitlines()[-30:]) if log_text else "(no output)"
+        except OSError:
+            tail = "(could not read log)"
+        # Clean up the PID file since the process is already dead.
+        try:
+            pid_path.unlink()
+        except OSError:
+            pass
+        raise HTTPException(
+            502,
+            detail=f"Sprint subprocess exited immediately (rc={proc.returncode}). Log tail:\n{tail}",
+        )
+    except subprocess.TimeoutExpired:
+        # Still running after 2 seconds — normal startup, return 202.
+        pass
 
     return {
         "ok": True,
@@ -5227,7 +5253,7 @@ def promote_to_master(body: PromoteBody):
     if not script_path.exists():
         raise HTTPException(500, detail="promote_to_master.py not found")
 
-    cmd = ["python3", str(script_path)]
+    cmd = [sys.executable, str(script_path)]
     if body.draft:
         cmd.append("--draft")
     else:

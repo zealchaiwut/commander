@@ -972,6 +972,164 @@
       flex-shrink: 0;
     }
     @keyframes smgmt-spin { to { transform: rotate(360deg); } }
+
+    /* ── Running sprint block (issue #277) ── */
+
+    /* Flowing top-stripe animation */
+    @keyframes smgmt-running-stripe {
+      0%   { background-position: 0% 0; }
+      100% { background-position: 200% 0; }
+    }
+
+    /* Pulsing badge opacity */
+    @keyframes smgmt-running-badge-pulse {
+      0%, 100% { opacity: 1; }
+      50%       { opacity: 0.45; }
+    }
+
+    /* Shimmer sweep for progress bar */
+    @keyframes smgmt-shimmer {
+      0%   { transform: translateX(-100%); }
+      100% { transform: translateX(400%); }
+    }
+
+    /* Spinning ring for in-flight ticket */
+    @keyframes smgmt-ring-spin {
+      to { transform: rotate(360deg); }
+    }
+
+    /* Glow pulse on the card border */
+    @keyframes smgmt-glow-pulse {
+      0%, 100% { box-shadow: 0 0 0 1px var(--green), 0 0 8px 2px rgba(22,163,74,.18); }
+      50%       { box-shadow: 0 0 0 1px var(--green), 0 0 16px 5px rgba(22,163,74,.32); }
+    }
+
+    .smgmt-sprint-card.smgmt-running {
+      border-color: var(--green);
+      animation: smgmt-glow-pulse 2.4s ease-in-out infinite;
+    }
+
+    /* Flowing top stripe */
+    .smgmt-running-stripe {
+      height: 3px;
+      border-radius: 8px 8px 0 0;
+      background: linear-gradient(
+        90deg,
+        var(--green) 0%,
+        #4ade80 25%,
+        #86efac 50%,
+        #4ade80 75%,
+        var(--green) 100%
+      );
+      background-size: 200% 100%;
+      animation: smgmt-running-stripe 2s linear infinite;
+    }
+
+    /* Pulsing "Running" badge */
+    .smgmt-running-badge {
+      display: inline-flex; align-items: center; gap: 5px;
+      padding: 3px 9px; border-radius: 999px;
+      font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+      font-family: var(--mono);
+      background: var(--green-bg); color: var(--green);
+      animation: smgmt-running-badge-pulse 2s ease-in-out infinite;
+    }
+    .smgmt-running-badge .smgmt-running-badge-dot {
+      width: 6px; height: 6px; border-radius: 50%;
+      background: var(--green);
+    }
+
+    /* Stat strip */
+    .smgmt-running-stat-strip {
+      display: flex; align-items: center; flex-wrap: wrap; gap: 18px;
+      padding: 10px 18px;
+      background: var(--green-bg);
+      border-bottom: 1px solid rgba(22,163,74,.18);
+      font-family: var(--mono); font-size: 12px;
+    }
+    .smgmt-running-stat {
+      display: flex; align-items: baseline; gap: 5px;
+    }
+    .smgmt-running-stat .rsnum {
+      font-size: 16px; font-weight: 700;
+    }
+    .smgmt-running-stat .rsnum.green  { color: var(--green); }
+    .smgmt-running-stat .rsnum.red    { color: var(--red); }
+    .smgmt-running-stat .rsnum.muted  { color: var(--text-sub); }
+    .smgmt-running-stat .rsnum.amber  { color: var(--amber); }
+    .smgmt-running-stat .rslbl {
+      font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .05em;
+    }
+    .smgmt-running-time {
+      margin-left: auto;
+      font-size: 11px; color: var(--text-muted);
+      display: flex; align-items: center; gap: 5px;
+    }
+
+    /* Shimmer progress bar */
+    .smgmt-running-progress-wrap {
+      padding: 0 18px 10px;
+      background: var(--green-bg);
+    }
+    .smgmt-running-progress-track {
+      height: 4px;
+      background: rgba(22,163,74,.2);
+      border-radius: 2px;
+      overflow: hidden;
+      position: relative;
+    }
+    .smgmt-running-progress-fill {
+      height: 100%;
+      background: var(--green);
+      border-radius: 2px;
+      transition: width .6s ease;
+      position: relative;
+      overflow: hidden;
+    }
+    .smgmt-running-progress-shimmer {
+      position: absolute;
+      top: 0; left: 0;
+      width: 30%; height: 100%;
+      background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,.6) 50%, transparent 100%);
+      animation: smgmt-shimmer 1.8s ease-in-out infinite;
+    }
+
+    /* Per-ticket status indicators */
+    .smgmt-ticket-indicator {
+      flex-shrink: 0;
+      width: 18px; height: 18px;
+      display: flex; align-items: center; justify-content: center;
+    }
+    /* Spinning ring for in-flight */
+    .smgmt-ticket-indicator .ring {
+      width: 14px; height: 14px;
+      border: 2px solid rgba(22,163,74,.25);
+      border-top-color: var(--green);
+      border-radius: 50%;
+      animation: smgmt-ring-spin .8s linear infinite;
+    }
+    /* Filled check circle for completed */
+    .smgmt-ticket-indicator .circle-done {
+      width: 14px; height: 14px;
+      border-radius: 50%;
+      background: var(--green);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 9px; font-weight: 700; color: #fff;
+    }
+    /* Failed X circle */
+    .smgmt-ticket-indicator .circle-failed {
+      width: 14px; height: 14px;
+      border-radius: 50%;
+      background: var(--red);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 9px; font-weight: 700; color: #fff;
+    }
+    /* Empty circle for pending */
+    .smgmt-ticket-indicator .circle-pending {
+      width: 14px; height: 14px;
+      border-radius: 50%;
+      border: 2px solid var(--border);
+    }
   </style>
 </head>
 <body>
@@ -1250,13 +1408,25 @@ const RERUN_STRIP_LABELS = new Set(['UAT','UAT-approved','released','SIT','in-pr
 // Cache for sprint outcome data: key = sprint label, value = outcome object
 const _smgmtOutcomeCache = {};
 
+// ── Running sprint live state (issue #277) ────────────────────────────────
+// Set of sprint labels that are currently running, populated on each render
+let _smgmtRunningLabels = new Set();
+// Live data cache: sprint label → last live snapshot from /api/sprints/{label}/live
+const _smgmtLiveCache = {};
+// Poll timer for live data
+let _smgmtLivePollId = null;
+
 // ── Tab navigation ────────────────────────────────────────────────────────────
 function switchTab(tab, pushHistory) {
   if (tab === 'sprint-history') return; // disabled
 
-  // Pause auto-refresh when leaving sprint-mgmt
+  // Pause auto-refresh and live polling when leaving sprint-mgmt
   if (_activeTab === 'sprint-mgmt' && tab !== 'sprint-mgmt') {
     _smgmtArStopTicker();
+    if (_smgmtLivePollId !== null) {
+      clearInterval(_smgmtLivePollId);
+      _smgmtLivePollId = null;
+    }
   }
 
   _activeTab = tab;
@@ -1672,10 +1842,31 @@ async function loadSprintMgmt(silent) {
   if (!silent) listEl.innerHTML = '<div class="loading-msg">Loading sprints…</div>';
 
   try {
-    const resp = await fetch('/api/sprint-management/issues?repo=' + encodeURIComponent(repo));
+    // Fetch sprint management data + running sprint status in parallel
+    const [resp, runningResp] = await Promise.all([
+      fetch('/api/sprint-management/issues?repo=' + encodeURIComponent(repo)),
+      fetch('/api/sprints/running-all').catch(() => null),
+    ]);
     if (!resp.ok) throw new Error('HTTP ' + resp.status);
     const data = await resp.json();
+
+    // Update running labels set
+    _smgmtRunningLabels = new Set();
+    if (runningResp && runningResp.ok) {
+      const runningData = await runningResp.json();
+      const running = runningData.running || [];
+      running.forEach(r => {
+        // Only mark as running if this is the current project
+        if (r.project === repo) {
+          _smgmtRunningLabels.add(r.sprint_label);
+        }
+      });
+    }
+
     _smgmtRender(data);
+
+    // Start (or restart) live polling if there are running sprints
+    _smgmtLivePollRestart();
   } catch (err) {
     if (!silent) listEl.innerHTML = '<div class="loading-msg">Failed to load sprints.</div>';
   }
@@ -1920,6 +2111,13 @@ function _smgmtHasCompletedTickets(tickets) {
 }
 
 function _smgmtCardHtml(label, n, tickets, outcome) {
+  const isRunning = _smgmtRunningLabels.has(label);
+
+  // Running sprint gets special animated treatment (issue #277)
+  if (isRunning) {
+    return _smgmtRunningCardHtml(label, n, tickets);
+  }
+
   const hasCompleted = _smgmtHasCompletedTickets(tickets);
   const canRun = !hasCompleted && tickets.length >= 1;
 
@@ -1996,6 +2194,236 @@ function _smgmtCardHtml(label, n, tickets, outcome) {
       </div>
       ${logHtml}
     </div>`;
+}
+
+// ── Running sprint card (issue #277) ──────────────────────────────────────
+
+/** Build the animated running sprint card HTML. Live data patched separately by _smgmtLivePatch. */
+function _smgmtRunningCardHtml(label, n, tickets) {
+  const live = _smgmtLiveCache[label] || null;
+
+  // Stat strip values (use live data if available, else zeros)
+  const doneCount     = live ? (live.done_count    || 0) : 0;
+  const failedCount   = live ? (live.failed_count  || 0) : 0;
+  const skippedCount  = live ? (live.skipped_count || 0) : 0;
+  const totalCount    = live ? (live.total_count   || tickets.length) : tickets.length;
+  const completeCount = doneCount + failedCount + skippedCount;
+  const estRemMins    = live ? live.est_remaining_minutes : null;
+  const timeSpentSec  = live ? (live.time_spent_sec || 0) : 0;
+  const currentTicket = live ? live.current_ticket : null;
+
+  // Progress bar percentage (complete / total)
+  const pct = totalCount > 0 ? Math.round((completeCount / totalCount) * 100) : 0;
+
+  // Build per-ticket indicator list from live issues data
+  // Match live issue statuses to ticket list
+  const liveIssues = (live && live.issues) ? live.issues : [];
+  const liveByNum = {};
+  liveIssues.forEach(i => { liveByNum[i.number] = i; });
+
+  const ticketRowsHtml = tickets.map(t => {
+    const liveIss = liveByNum[t.number];
+    const liveStatus = liveIss ? liveIss.status : null;
+    const agentStatus = liveIss ? liveIss.agent_status : null;
+
+    let indicator = '';
+    if (liveStatus === 'done') {
+      indicator = '<div class="smgmt-ticket-indicator"><div class="circle-done">&#10003;</div></div>';
+    } else if (agentStatus === 'failed' || liveStatus === 'skipped') {
+      indicator = '<div class="smgmt-ticket-indicator"><div class="circle-failed">&#10005;</div></div>';
+    } else if (currentTicket && t.number === currentTicket.number) {
+      // In-flight — show spinning ring
+      indicator = '<div class="smgmt-ticket-indicator"><div class="ring"></div></div>';
+    } else {
+      // Pending — empty circle
+      indicator = '<div class="smgmt-ticket-indicator"><div class="circle-pending"></div></div>';
+    }
+
+    return `<div class="smgmt-ticket" data-issue="${t.number}" draggable="false">
+      ${indicator}
+      <a class="smgmt-ticket-num" href="${escHtml(t.url || '#')}" target="_blank"
+         rel="noopener">#${t.number}</a>
+      <span class="smgmt-ticket-title" title="${escHtml(t.title)}">${escHtml(t.title)}</span>
+    </div>`;
+  }).join('');
+
+  return `
+    <div class="smgmt-sprint-card smgmt-running" id="smgmt-card-${escHtml(label)}">
+      <div class="smgmt-running-stripe"></div>
+      <div class="smgmt-sprint-header">
+        <div class="smgmt-sprint-header-left">
+          <i class="ti ti-layout-kanban" style="font-size:14px;color:var(--green)"></i>
+          <span class="smgmt-sprint-name" style="font-size:15px;font-weight:700;">Sprint ${escHtml(String(n))}</span>
+          <span class="smgmt-running-badge" id="smgmt-running-badge-${escHtml(label)}">
+            <span class="smgmt-running-badge-dot"></span>Running
+          </span>
+          <span class="smgmt-sprint-count">&middot; ${tickets.length} ticket${tickets.length !== 1 ? 's' : ''}</span>
+        </div>
+        <div class="smgmt-sprint-header-right">
+          <button class="smgmt-run-btn" disabled title="Sprint is currently running">
+            <i class="ti ti-player-play"></i> Running…</button>
+        </div>
+      </div>
+      <div class="smgmt-running-stat-strip" id="smgmt-running-stats-${escHtml(label)}">
+        <div class="smgmt-running-stat">
+          <span class="rsnum green" id="smgmt-rs-done-${escHtml(label)}">${doneCount}</span>
+          <span class="rslbl">Done</span>
+        </div>
+        <div class="smgmt-running-stat">
+          <span class="rsnum ${failedCount > 0 ? 'red' : 'muted'}" id="smgmt-rs-failed-${escHtml(label)}">${failedCount}</span>
+          <span class="rslbl">Failed</span>
+        </div>
+        <div class="smgmt-running-stat">
+          <span class="rsnum muted" id="smgmt-rs-skipped-${escHtml(label)}">${skippedCount}</span>
+          <span class="rslbl">Skipped</span>
+        </div>
+        <div class="smgmt-running-stat">
+          <span class="rsnum amber" id="smgmt-rs-est-${escHtml(label)}">${estRemMins != null ? estRemMins + 'm' : '—'}</span>
+          <span class="rslbl">Est. remaining</span>
+        </div>
+        <div class="smgmt-running-time" id="smgmt-rs-time-${escHtml(label)}">
+          <i class="ti ti-clock" style="font-size:12px;"></i>
+          ${_fmtRunningTime(timeSpentSec)}
+        </div>
+      </div>
+      <div class="smgmt-running-progress-wrap">
+        <div class="smgmt-running-progress-track">
+          <div class="smgmt-running-progress-fill" id="smgmt-rs-prog-${escHtml(label)}" style="width:${pct}%">
+            <div class="smgmt-running-progress-shimmer"></div>
+          </div>
+        </div>
+      </div>
+      <div class="smgmt-sprint-tickets" id="smgmt-tickets-${escHtml(label)}">
+        ${ticketRowsHtml || '<div class="smgmt-drop-hint">No tickets in this sprint</div>'}
+      </div>
+    </div>`;
+}
+
+/** Format seconds as h:mm or m:ss for the running sprint time display. */
+function _fmtRunningTime(secs) {
+  if (!secs || secs <= 0) return '0m 0s';
+  const h = Math.floor(secs / 3600);
+  const m = Math.floor((secs % 3600) / 60);
+  const s = secs % 60;
+  if (h > 0) return `${h}h ${m}m`;
+  return `${m}m ${s}s`;
+}
+
+/** Patch live stat strip + progress bar + ticket indicators in place (no full re-render). */
+function _smgmtLivePatch(label, live) {
+  const card = document.getElementById(`smgmt-card-${label}`);
+  if (!card || !card.classList.contains('smgmt-running')) return;
+
+  const doneCount    = live.done_count    || 0;
+  const failedCount  = live.failed_count  || 0;
+  const skippedCount = live.skipped_count || 0;
+  const totalCount   = live.total_count   || 0;
+  const completeCount = doneCount + failedCount + skippedCount;
+  const estRemMins   = live.est_remaining_minutes;
+  const timeSpentSec = live.time_spent_sec || 0;
+  const currentTicket = live.current_ticket;
+  const pct = totalCount > 0 ? Math.round((completeCount / totalCount) * 100) : 0;
+
+  // Update stat numbers
+  const doneEl    = document.getElementById(`smgmt-rs-done-${label}`);
+  const failedEl  = document.getElementById(`smgmt-rs-failed-${label}`);
+  const skippedEl = document.getElementById(`smgmt-rs-skipped-${label}`);
+  const estEl     = document.getElementById(`smgmt-rs-est-${label}`);
+  const timeEl    = document.getElementById(`smgmt-rs-time-${label}`);
+  const progEl    = document.getElementById(`smgmt-rs-prog-${label}`);
+
+  if (doneEl)    { doneEl.textContent = String(doneCount); }
+  if (failedEl)  {
+    failedEl.textContent = String(failedCount);
+    failedEl.className = `rsnum ${failedCount > 0 ? 'red' : 'muted'}`;
+  }
+  if (skippedEl) { skippedEl.textContent = String(skippedCount); }
+  if (estEl)     { estEl.textContent = estRemMins != null ? estRemMins + 'm' : '—'; }
+  if (timeEl)    {
+    timeEl.innerHTML = `<i class="ti ti-clock" style="font-size:12px;"></i> ${_fmtRunningTime(timeSpentSec)}`;
+  }
+  if (progEl)    { progEl.style.width = pct + '%'; }
+
+  // Update per-ticket status indicators
+  const liveIssues = live.issues || [];
+  const liveByNum = {};
+  liveIssues.forEach(i => { liveByNum[i.number] = i; });
+
+  card.querySelectorAll('.smgmt-ticket[data-issue]').forEach(row => {
+    const num = parseInt(row.dataset.issue, 10);
+    const indicatorEl = row.querySelector('.smgmt-ticket-indicator');
+    if (!indicatorEl) return;
+
+    const liveIss = liveByNum[num];
+    const liveStatus = liveIss ? liveIss.status : null;
+    const agentStatus = liveIss ? liveIss.agent_status : null;
+
+    if (liveStatus === 'done') {
+      indicatorEl.innerHTML = '<div class="circle-done">&#10003;</div>';
+    } else if (agentStatus === 'failed' || liveStatus === 'skipped') {
+      indicatorEl.innerHTML = '<div class="circle-failed">&#10005;</div>';
+    } else if (currentTicket && num === currentTicket.number) {
+      indicatorEl.innerHTML = '<div class="ring"></div>';
+    } else {
+      indicatorEl.innerHTML = '<div class="circle-pending"></div>';
+    }
+  });
+}
+
+/** Start or restart the live polling loop for any running sprints. */
+function _smgmtLivePollRestart() {
+  // Clear existing poll
+  if (_smgmtLivePollId !== null) {
+    clearInterval(_smgmtLivePollId);
+    _smgmtLivePollId = null;
+  }
+
+  if (_smgmtRunningLabels.size === 0) return;
+
+  // Poll every 2 seconds
+  _smgmtLivePollId = setInterval(_smgmtLivePollTick, 2000);
+  // Kick off immediately
+  _smgmtLivePollTick();
+}
+
+/** Fetch live data for all running sprints and patch in place. */
+async function _smgmtLivePollTick() {
+  if (_smgmtRunningLabels.size === 0) {
+    clearInterval(_smgmtLivePollId);
+    _smgmtLivePollId = null;
+    return;
+  }
+  const repo = _smgmtRepo();
+  if (!repo) return;
+
+  // Fetch live snapshot + sprint status (for per-issue statuses) in parallel
+  try {
+    const [statusResp] = await Promise.all([
+      fetch(`/api/sprint-status?project=${encodeURIComponent(repo)}`).catch(() => null),
+    ]);
+
+    // Build per-sprint per-issue map from sprint-status
+    const sprintIssueMap = {}; // label → issues[]
+    if (statusResp && statusResp.ok) {
+      const statusData = await statusResp.json();
+      (statusData.running_sprints || []).forEach(r => {
+        sprintIssueMap[r.sprint_label] = r.issues || [];
+      });
+    }
+
+    for (const label of _smgmtRunningLabels) {
+      const resp = await fetch(
+        `/api/sprints/${encodeURIComponent(label)}/live?project=${encodeURIComponent(repo)}`
+      ).catch(() => null);
+      if (resp && resp.ok) {
+        const live = await resp.json();
+        // Augment with per-issue status data from sprint-status endpoint
+        live.issues = sprintIssueMap[label] || [];
+        _smgmtLiveCache[label] = live;
+        _smgmtLivePatch(label, live);
+      }
+    }
+  } catch (_) { /* silently ignore poll errors */ }
 }
 
 function _smgmtTicketRowHtml(ticket, label) {

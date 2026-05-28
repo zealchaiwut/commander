@@ -5284,10 +5284,15 @@ async function smgmtRerunSprint(label) {
   document.getElementById('smgmt-rerun-backdrop').classList.remove('hidden');
   document.getElementById('smgmt-rerun-modal').classList.remove('hidden');
 
+  const _rerunPreviewController = new AbortController();
+  const _rerunPreviewTimeout = setTimeout(() => _rerunPreviewController.abort(), 8000);
+
   try {
     const res = await fetch(
-      `/api/sprints/${encodeURIComponent(label)}/rerun/preview?project=${encodeURIComponent(_smgmtCurrentRepo)}`
+      `/api/sprints/${encodeURIComponent(label)}/rerun/preview?project=${encodeURIComponent(_smgmtCurrentRepo)}`,
+      { signal: _rerunPreviewController.signal }
     );
+    clearTimeout(_rerunPreviewTimeout);
     if (!res.ok) throw new Error(await res.text());
     const preview = await res.json();
 
@@ -5325,7 +5330,11 @@ async function smgmtRerunSprint(label) {
 
     if (confirmBtn) { confirmBtn.disabled = false; }
   } catch (e) {
-    bodyEl.innerHTML = `<p style="color:var(--red,#dc2626)">Failed to load preview: ${escapeHtml(e.message)}</p>`;
+    clearTimeout(_rerunPreviewTimeout);
+    const msg = e.name === 'AbortError'
+      ? 'Preview timed out — server took too long to respond.'
+      : e.message;
+    bodyEl.innerHTML = `<p style="color:var(--red,#dc2626)">Failed to load preview: ${escapeHtml(msg)}</p>`;
     if (confirmBtn) { confirmBtn.disabled = false; }
   }
 }

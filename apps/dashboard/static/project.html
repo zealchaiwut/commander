@@ -1504,6 +1504,40 @@
     }
     .bc-btn-remedy-images:hover { background: var(--amber-bg); }
     .bc-btn-remedy-images:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    /* ── Log viewer modal (issue #264) ── */
+    .lv-modal { width: min(720px, calc(100vw - 32px)); max-height: calc(100vh - 80px); }
+    .lv-meta {
+      font-size: 11.5px; color: var(--text-muted); font-family: var(--mono);
+      padding: 8px 20px 0;
+      word-break: break-all;
+    }
+    .lv-path-label { color: var(--text-sub); font-size: 11px; margin-right: 6px; }
+    .lv-not-found {
+      padding: 24px 20px;
+      font-family: var(--mono); font-size: 12px;
+      color: var(--text-muted); font-style: italic;
+    }
+    .lv-stream {
+      background: #0d1117; color: #c9d1d9;
+      font-family: var(--mono); font-size: 12px; line-height: 1.65;
+      padding: 12px 16px;
+      overflow-y: auto;
+      max-height: 400px;
+      margin: 12px 20px 20px;
+      border-radius: 6px;
+      border: 1px solid rgba(255,255,255,.08);
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+    .lv-stream:empty::after { content: 'Loading…'; color: #6e7681; }
+    .btn-view-log {
+      background: none; border: none; padding: 2px 4px; cursor: pointer;
+      color: var(--text-sub); font-size: 13px; border-radius: 4px;
+      line-height: 1; flex-shrink: 0;
+      transition: color .15s, background .15s;
+    }
+    .btn-view-log:hover { color: var(--blue); background: var(--blue-bg); }
   </style>
 </head>
 <body>
@@ -2476,7 +2510,7 @@ function _smgmtInjectOutcomeBand(label, outcome) {
   // Build outcome band HTML
   const bandHtml = _smgmtOutcomeBandHtml(label, outcome);
   // Build ticket list HTML
-  const ticketListHtml = _smgmtOutcomeTicketListHtml(outcome.issues || []);
+  const ticketListHtml = _smgmtOutcomeTicketListHtml(outcome.issues || [], label, _smgmtRepo());
   // Build log row HTML
   const logHtml = _smgmtOutcomeLogHtml(label, outcome);
 
@@ -2540,8 +2574,10 @@ function _smgmtOutcomeBandHtml(label, outcome) {
   </div>`;
 }
 
-function _smgmtOutcomeTicketListHtml(issues) {
+function _smgmtOutcomeTicketListHtml(issues, label, repo) {
   if (!issues || issues.length === 0) return '';
+  const safeLabel = label ? escHtml(label) : '';
+  const safeRepo  = repo  ? escHtml(repo)  : '';
   return issues.map(iss => {
     const o = iss.outcome || 'skipped';
     let circle = '';
@@ -2554,11 +2590,18 @@ function _smgmtOutcomeTicketListHtml(issues) {
       ? '<span class="smgmt-lbl-rejected">TESTER REJECTED</span>'
       : '';
 
+    const viewLogBtn = safeLabel && safeRepo
+      ? `<button class="btn-view-log" title="View issue log"
+              onclick="event.stopPropagation();openLvIssueLog(${iss.number},'${safeLabel}','${safeRepo}')">
+           <i class="ti ti-file-text"></i></button>`
+      : '';
+
     return `<div class="smgmt-ticket" data-issue="${iss.number}" draggable="false">
       ${circle}
       <a class="smgmt-ticket-num" href="https://github.com/issues/${iss.number}" target="_blank" rel="noopener">#${iss.number}</a>
       <span class="smgmt-ticket-title" title="${escHtml(iss.title)}">${escHtml(iss.title)}</span>
       ${rejLabel}
+      ${viewLogBtn}
       ${elapsed}
     </div>`;
   }).join('');
@@ -2572,7 +2615,9 @@ function _smgmtOutcomeLogHtml(label, outcome) {
       <span class="smgmt-log-caret"><i class="ti ti-chevron-right"></i></span>
       <i class="ti ti-file-text" style="color:var(--text-sub);"></i>
       <span>Run log archived · ${lineCount > 0 ? lineCount + ' lines' : 'no log found'}</span>
-      <span style="margin-left:auto;color:var(--text-sub);">Show log</span>
+      <button class="btn-view-log" style="margin-left:auto;" title="View dispatch log"
+              onclick="event.stopPropagation();openLvDispatchLog('${escHtml(label)}',_smgmtRepo()||'')">
+        <i class="ti ti-external-link"></i> View dispatch log</button>
     </div>
     <div class="smgmt-log-stream" id="${logId}-stream"></div>
   </div>`;
@@ -2590,12 +2635,115 @@ async function _smgmtMaybeLoadLog(label, logId) {
     );
     if (!resp.ok) { streamEl.textContent = 'Log not available.'; return; }
     const data = await resp.json();
-    if (!data.found || !data.tail) { streamEl.textContent = 'Log not available.'; return; }
+    if (!data.found || !data.tail) {
+      const searchedDir = data.searched_dir || data.log_dir || '';
+      streamEl.textContent = searchedDir
+        ? `No log found yet at \`${searchedDir}\``
+        : 'No log found yet.';
+      return;
+    }
     streamEl.innerHTML = data.tail.split('\n').map(line =>
       `<div class="smgmt-log-line"><span class="smgmt-log-msg">${escHtml(line)}</span></div>`
     ).join('');
   } catch (_) {
     streamEl.textContent = 'Could not load log.';
+  }
+}
+
+// ── Log viewer modal (issue #264) ────────────────────────────────────────────
+
+let _lvCurrentKind   = null;  // 'dispatch' | 'issue'
+let _lvCurrentLabel  = null;
+let _lvCurrentIssue  = null;
+let _lvCurrentRepo   = null;
+
+function openLvDispatchLog(label, repo) {
+  _lvCurrentKind  = 'dispatch';
+  _lvCurrentLabel = label;
+  _lvCurrentIssue = null;
+  _lvCurrentRepo  = repo;
+  const n = parseInt(label.split('-')[1], 10);
+  document.getElementById('lv-modal-title').textContent = `Dispatch log — Sprint ${n}`;
+  _lvLoad();
+  document.getElementById('lv-backdrop').classList.remove('hidden');
+  document.getElementById('lv-modal').classList.remove('hidden');
+}
+
+function openLvIssueLog(issueNum, label, repo) {
+  _lvCurrentKind  = 'issue';
+  _lvCurrentLabel = label;
+  _lvCurrentIssue = issueNum;
+  _lvCurrentRepo  = repo;
+  document.getElementById('lv-modal-title').textContent = `Issue log — #${issueNum}`;
+  _lvLoad();
+  document.getElementById('lv-backdrop').classList.remove('hidden');
+  document.getElementById('lv-modal').classList.remove('hidden');
+}
+
+function closeLvModal() {
+  document.getElementById('lv-backdrop').classList.add('hidden');
+  document.getElementById('lv-modal').classList.add('hidden');
+}
+
+function _lvRefresh() {
+  _lvLoad();
+}
+
+async function _lvLoad() {
+  const streamEl   = document.getElementById('lv-stream');
+  const notFoundEl = document.getElementById('lv-not-found');
+  const metaEl     = document.getElementById('lv-meta');
+  const pathEl     = document.getElementById('lv-path-text');
+
+  streamEl.classList.add('hidden');
+  notFoundEl.classList.add('hidden');
+  metaEl.style.display = 'none';
+  streamEl.textContent = '';
+
+  if (!_lvCurrentRepo || !_lvCurrentLabel) return;
+
+  let url;
+  if (_lvCurrentKind === 'dispatch') {
+    url = `/api/sprints/${encodeURIComponent(_lvCurrentLabel)}/dispatch-log` +
+          `?project=${encodeURIComponent(_lvCurrentRepo)}&tail_lines=200`;
+  } else {
+    url = `/api/sprints/${encodeURIComponent(_lvCurrentLabel)}/issue/${_lvCurrentIssue}/log` +
+          `?project=${encodeURIComponent(_lvCurrentRepo)}&tail_lines=200`;
+  }
+
+  try {
+    const resp = await fetch(url);
+    if (!resp.ok) {
+      notFoundEl.textContent = 'Log not available.';
+      notFoundEl.classList.remove('hidden');
+      return;
+    }
+    const data = await resp.json();
+    if (!data.found) {
+      // Determine the best "path hint" to show the user
+      let pathHint = '';
+      if (_lvCurrentKind === 'dispatch') {
+        pathHint = data.searched_dir || data.log_dir || '';
+      } else {
+        const candidates = data.candidate_paths || data.candidates || [];
+        pathHint = candidates[0] || '';
+      }
+      notFoundEl.textContent = pathHint
+        ? `No log found yet at \`${pathHint}\``
+        : 'No log found yet.';
+      notFoundEl.classList.remove('hidden');
+      return;
+    }
+    // Show path
+    if (data.path) {
+      pathEl.textContent = data.path;
+      metaEl.style.display = '';
+    }
+    streamEl.textContent = data.tail || '';
+    streamEl.classList.remove('hidden');
+  } catch (_) {
+    notFoundEl.textContent = 'Could not load log.';
+    notFoundEl.classList.remove('hidden');
   }
 }
 
@@ -2649,7 +2797,7 @@ function _smgmtCardHtml(label, n, tickets, outcome) {
     outcomeBandHtml = _smgmtOutcomeBandHtml(label, outcome);
     const issueList = outcome.issues || [];
     ticketCount = issueList.length;
-    ticketsContainerHtml = _smgmtOutcomeTicketListHtml(issueList);
+    ticketsContainerHtml = _smgmtOutcomeTicketListHtml(issueList, label, _smgmtRepo());
   } else {
     // Planning view ticket rows
     ticketsContainerHtml = tickets.length > 0
@@ -2947,6 +3095,9 @@ function _smgmtTicketRowHtml(ticket, label) {
          rel="noopener" onclick="event.stopPropagation()">#${ticket.number}</a>
       <span class="smgmt-ticket-title" title="${escHtml(ticket.title)}">${escHtml(ticket.title)}</span>
       <span class="smgmt-ticket-status ${statusClass}">${escHtml(statusLabel)}</span>
+      <button class="btn-view-log" tabindex="0" title="View issue log"
+              onclick="event.stopPropagation();openLvIssueLog(${ticket.number},'${escHtml(label)}',_smgmtRepo()||'')">
+        <i class="ti ti-file-text"></i></button>
       <button class="smgmt-moveto-pill" tabindex="0"
               onclick="event.stopPropagation();_smgmtMoveToOpen(event, ${ticket.number}, '${escHtml(label)}')"
               onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();_smgmtMoveToOpen(event,${ticket.number},'${escHtml(label)}');}">Move to &#9660;</button>
@@ -4875,6 +5026,27 @@ document.addEventListener('DOMContentLoaded', init);
 
 <!-- ── Multi-drag pill (follows cursor) ── -->
 <div class="smgmt-drag-pill" id="smgmt-drag-pill"></div>
+
+<!-- ── Log viewer modal (issue #264) ── -->
+<div class="modal-backdrop hidden" id="lv-backdrop" onclick="closeLvModal()"></div>
+<div class="modal lv-modal hidden" id="lv-modal"
+     role="dialog" aria-modal="true" aria-labelledby="lv-modal-title">
+  <div class="modal-header">
+    <span class="modal-title" id="lv-modal-title">Log Viewer</span>
+    <button class="modal-close" onclick="closeLvModal()" aria-label="Close">&times;</button>
+  </div>
+  <div class="lv-meta" id="lv-meta" style="display:none">
+    <span class="lv-path-label">path</span><span id="lv-path-text"></span>
+  </div>
+  <div class="lv-not-found hidden" id="lv-not-found"></div>
+  <div class="lv-stream hidden" id="lv-stream"></div>
+  <div class="modal-footer">
+    <button class="btn-ghost" onclick="closeLvModal()" type="button">Close</button>
+    <button class="btn-primary" id="lv-refresh-btn" onclick="_lvRefresh()" type="button">
+      <i class="ti ti-refresh"></i> Refresh
+    </button>
+  </div>
+</div>
 
 <!-- ── New Sprint modal ── -->
 <div class="modal-backdrop hidden" id="ns-backdrop"></div>

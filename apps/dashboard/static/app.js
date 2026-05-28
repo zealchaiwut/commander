@@ -3963,6 +3963,10 @@ async function smgmtDropOnPlaceholder(event, placeholderN) {
   });
   document.getElementById('smgmt-backlog')?.classList.remove('drag-over-sprint', 'drag-over-zone');
 
+  // Board locked while any sprint is running (issue #253)
+  const anyRunning253 = Object.values(_smgmtAllRunning).some(e => e.project === _smgmtCurrentRepo);
+  if (anyRunning253) { _smgmtDragTicket = null; return; }
+
   if (!_smgmtDragTicket || !_smgmtCurrentRepo) return;
   const { number, fromSprint } = _smgmtDragTicket;
   _smgmtDragTicket = null;
@@ -4022,6 +4026,10 @@ async function smgmtDropOnSprint(event, targetSprintLabel) {
     el.classList.remove('drag-before', 'drag-after');
   });
   document.getElementById('smgmt-backlog')?.classList.remove('drag-over-sprint', 'drag-over-zone');
+
+  // Board locked while any sprint is running (issue #253)
+  const anyRunning253b = Object.values(_smgmtAllRunning).some(e => e.project === _smgmtCurrentRepo);
+  if (anyRunning253b) { _smgmtDragTicket = null; _smgmtDragSprintLabel = null; return; }
 
   // Sprint reorder drop
   if (_smgmtDragSprintLabel && targetSprintLabel && _smgmtDragSprintLabel !== targetSprintLabel) {
@@ -4147,6 +4155,14 @@ async function smgmtReorderSprints(fromLabel, toLabel) {
 // ── Multi-select (issue #206) ─────────────────────────────────────────────────
 
 function smgmtToggleIssueSelect(issueNum, checked) {
+  // Board locked while any sprint is running — checkboxes do not respond (issue #253)
+  const anyRunning253c = Object.values(_smgmtAllRunning).some(e => e.project === _smgmtCurrentRepo);
+  if (anyRunning253c) {
+    // Revert checkbox to its current state (do not toggle)
+    const cb = document.querySelector(`#smgmt-ticket-${issueNum} .smgmt-ticket-cb`);
+    if (cb) cb.checked = _smgmtSelectedIssues.has(issueNum);
+    return;
+  }
   if (checked) {
     _smgmtSelectedIssues.add(issueNum);
   } else {
@@ -4646,7 +4662,7 @@ function smgmtApplyRunState(sprintStatusMap) {
 
   // ── Pass 1: Clear all dynamic state from every block ─────────────────────────
   document.querySelectorAll('.smgmt-sprint-block').forEach(block => {
-    block.classList.remove('smgmt-running');
+    block.classList.remove('smgmt-running', 'smgmt-locked');
     const hdr = block.querySelector('.smgmt-sprint-header');
     if (hdr) {
       hdr.classList.remove('smgmt-running-header');
@@ -4690,7 +4706,18 @@ function smgmtApplyRunState(sprintStatusMap) {
     block.querySelectorAll('.smgmt-ticket').forEach(ticketEl => {
       ticketEl.setAttribute('draggable', 'true');
     });
+    // Restore all buttons disabled by board lock (issue #253)
+    block.querySelectorAll('.smgmt-run-btn, .smgmt-delete-btn, .smgmt-finish-btn').forEach(btn => {
+      if (!btn.classList.contains('smgmt-kill-btn')) {
+        btn.disabled = false;
+      }
+    });
   });
+  // Restore global board-level buttons (issue #253)
+  const newSprintBtn = document.getElementById('smgmt-new-sprint-btn');
+  if (newSprintBtn) { newSprintBtn.disabled = false; newSprintBtn.title = 'Create next sprint label on GitHub'; }
+  const deployBtn = document.getElementById('deploy-to-prod-btn');
+  if (deployBtn) { deployBtn.disabled = false; deployBtn.title = 'Create a draft PR from develop to master'; }
 
   // ── Pass 2: Apply RUNNING state to each running sprint in this project ────────
   for (const [key, entry] of Object.entries(_smgmtAllRunning)) {
@@ -4809,41 +4836,100 @@ function smgmtApplyRunState(sprintStatusMap) {
     if (finishBtn) finishBtn.style.display = 'none';
   }
 
+  // ── Pass 3: Lock all non-running blocks when any sprint is running (issue #253) ─
+  const anyRunning = Object.values(_smgmtAllRunning).some(e => e.project === _smgmtCurrentRepo);
+  if (anyRunning) {
+    // Find the first running sprint number for the tooltip message
+    const runningEntry = Object.values(_smgmtAllRunning).find(e => e.project === _smgmtCurrentRepo);
+    const runningN = runningEntry ? (runningEntry.sprint_label.split('-')[1] || runningEntry.sprint_label) : '';
+    const lockTip = `Locked while Sprint ${runningN} is running`;
+
+    // Disable global board-level buttons
+    const newSprintBtn2 = document.getElementById('smgmt-new-sprint-btn');
+    if (newSprintBtn2) { newSprintBtn2.disabled = true; newSprintBtn2.title = lockTip; }
+    const deployBtn2 = document.getElementById('deploy-to-prod-btn');
+    if (deployBtn2) { deployBtn2.disabled = true; deployBtn2.title = lockTip; }
+
+    // Lock every non-running sprint block
+    document.querySelectorAll('.smgmt-sprint-block').forEach(block => {
+      if (block.classList.contains('smgmt-running')) return; // skip the running sprint itself
+
+      block.classList.add('smgmt-locked');
+
+      const hdr = block.querySelector('.smgmt-sprint-header');
+      if (hdr) {
+        // Suppress drag on header (sprint reorder disabled)
+        hdr.setAttribute('draggable', 'false');
+
+        // Inject lock icon into header if not already there
+        if (!hdr.querySelector('.smgmt-lock-icon')) {
+          const lockIcon = document.createElement('span');
+          lockIcon.className = 'smgmt-lock-icon';
+          lockIcon.textContent = '🔒';
+          lockIcon.setAttribute('aria-label', 'Board locked');
+          lockIcon.title = lockTip;
+          const hdrLeft = hdr.querySelector('.smgmt-sprint-header-left') || hdr;
+          const sprintName = hdrLeft.querySelector('.smgmt-sprint-name');
+          if (sprintName && sprintName.nextSibling) {
+            hdrLeft.insertBefore(lockIcon, sprintName.nextSibling);
+          } else {
+            hdrLeft.appendChild(lockIcon);
+          }
+        }
+      }
+
+      // Disable Run/Re-run, Delete, and Finish buttons with lock tooltip
+      block.querySelectorAll('.smgmt-run-btn, .smgmt-delete-btn, .smgmt-finish-btn').forEach(btn => {
+        btn.disabled = true;
+        btn.title = lockTip;
+      });
+
+      // Suppress drag on all ticket rows
+      block.querySelectorAll('.smgmt-ticket').forEach(ticketEl => {
+        ticketEl.setAttribute('draggable', 'false');
+      });
+    });
+  }
+
   // ── Pass 4: Per-ticket live status badges, spinners, elapsed counters ──────────
   smgmtApplyTicketLiveStatus(sprintStatusMap);
   _ensureElapsedTimer();
 
   // ── Pass 5: Update unified action button state for all visible sprint buttons ──
   // The unified button id is "smgmt-run-btn-<safeLabel>" for all sprints.
-  document.querySelectorAll('.smgmt-run-btn').forEach(btn => {
-    const safeId = btn.id.replace('smgmt-run-btn-', '');
-    // Reconstruct the label: replace first underscore with dash (sprint_N -> sprint-N)
-    const btnLabel = safeId.replace('_', '-');
-    const runKey = `${_smgmtCurrentRepo}:${btnLabel}`;
-    const isThisRunning = !!_smgmtAllRunning[runKey];
+  // When any sprint is running, non-running sprint buttons are already disabled by Pass 3;
+  // skip re-enabling them here so the lock tooltip is preserved.
+  if (!anyRunning) {
+    document.querySelectorAll('.smgmt-run-btn').forEach(btn => {
+      const safeId = btn.id.replace('smgmt-run-btn-', '');
+      // Reconstruct the label: replace first underscore with dash (sprint_N -> sprint-N)
+      const btnLabel = safeId.replace('_', '-');
+      const runKey = `${_smgmtCurrentRepo}:${btnLabel}`;
+      const isThisRunning = !!_smgmtAllRunning[runKey];
 
-    if (isThisRunning) {
-      // Running sprint: action button is hidden above; skip state update
-      return;
-    }
+      if (isThisRunning) {
+        // Running sprint: action button is hidden above; skip state update
+        return;
+      }
 
-    const sprintTickets = (_smgmtData?.issues || []).filter(
-      t => t.sprint != null && `sprint-${t.sprint}` === btnLabel
-    );
-    const hasCompleted = smgmtHasCompletedTickets(sprintTickets);
+      const sprintTickets = (_smgmtData?.issues || []).filter(
+        t => t.sprint != null && `sprint-${t.sprint}` === btnLabel
+      );
+      const hasCompleted = smgmtHasCompletedTickets(sprintTickets);
 
-    if (hasCompleted) {
-      // Re-run mode: always enabled
-      btn.disabled = false;
-      btn.title = '';
-    } else {
-      const hasTickets = sprintTickets.length >= 1;
-      // issue #242: goal is no longer required to enable Run Sprint
-      const canRun = hasTickets;
-      btn.disabled = !canRun;
-      btn.title = !hasTickets ? 'Add at least one ticket first' : '';
-    }
-  });
+      if (hasCompleted) {
+        // Re-run mode: always enabled
+        btn.disabled = false;
+        btn.title = '';
+      } else {
+        const hasTickets = sprintTickets.length >= 1;
+        // issue #242: goal is no longer required to enable Run Sprint
+        const canRun = hasTickets;
+        btn.disabled = !canRun;
+        btn.title = !hasTickets ? 'Add at least one ticket first' : '';
+      }
+    });
+  }
 }
 
 // ── Per-ticket live agent status (issue #131) ─────────────────────────────────

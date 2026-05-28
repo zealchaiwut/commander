@@ -2403,6 +2403,35 @@
     color: var(--border); cursor: default; pointer-events: none;
   }
 
+  /* ── Board lock state: all non-running blocks while a sprint is running (issue #253) ── */
+  .smgmt-sprint-block.smgmt-locked {
+    opacity: 0.72;
+    border-color: var(--border);
+  }
+  .smgmt-sprint-block.smgmt-locked .smgmt-sprint-header {
+    background: var(--surface-2);
+  }
+  /* Dimmed drag handles on locked blocks */
+  .smgmt-sprint-block.smgmt-locked .smgmt-ticket-grip,
+  .smgmt-sprint-block.smgmt-locked .smgmt-sprint-grip {
+    color: var(--border); cursor: not-allowed; pointer-events: none;
+  }
+  /* Checkboxes rendered in disabled state (reduced opacity, not-allowed cursor) — not hidden */
+  .smgmt-sprint-block.smgmt-locked .smgmt-ticket-cb,
+  .smgmt-sprint-block.smgmt-running .smgmt-ticket-cb {
+    opacity: 0.38; cursor: not-allowed; pointer-events: none;
+  }
+  /* Lock icon injected into header */
+  .smgmt-lock-icon {
+    font-size: 11px; opacity: 0.6; flex-shrink: 0;
+    cursor: default; user-select: none;
+  }
+  /* Disabled New Sprint and Deploy buttons when board is locked */
+  #smgmt-new-sprint-btn:disabled,
+  #deploy-to-prod-btn:disabled {
+    opacity: 0.45; cursor: not-allowed; pointer-events: none;
+  }
+
   /* Goal input readonly state (issue #186) */
   .smgmt-goal-input.smgmt-goal-readonly {
     color: var(--text-muted);

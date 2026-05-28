@@ -4419,23 +4419,12 @@ async function smgmtPollRunStatus() {
 function smgmtApplyRunState(sprintStatusMap) {
   // Per-#123: each sprint card checks its own (project, sprint_label) key independently.
   // Multiple cards can be in RUNNING state simultaneously.
-  // Issue #186: lock running sprint's own controls; lock all other sprints while any runs.
   // sprintStatusMap: { sprint_label -> status_object } built from /api/sprint-status
   if (!sprintStatusMap) sprintStatusMap = {};
 
-  // Determine whether any sprint (on any project) is currently running
-  const anyRunning = Object.keys(_smgmtAllRunning).length > 0;
-
-  // Collect running sprint labels for the currently-viewed project
-  const runningLabelsHere = new Set(
-    Object.values(_smgmtAllRunning)
-      .filter(e => e.project === _smgmtCurrentRepo)
-      .map(e => e.sprint_label)
-  );
-
   // ── Pass 1: Clear all dynamic state from every block ─────────────────────────
   document.querySelectorAll('.smgmt-sprint-block').forEach(block => {
-    block.classList.remove('smgmt-running', 'smgmt-locked');
+    block.classList.remove('smgmt-running');
     const hdr = block.querySelector('.smgmt-sprint-header');
     if (hdr) {
       hdr.classList.remove('smgmt-running-header');
@@ -4596,43 +4585,6 @@ function smgmtApplyRunState(sprintStatusMap) {
     if (finishBtn) finishBtn.style.display = 'none';
   }
 
-  // ── Pass 3: Apply LOCKED state to all non-running sprints when any is running ─
-  if (anyRunning) {
-    document.querySelectorAll('.smgmt-sprint-block').forEach(block => {
-      if (block.classList.contains('smgmt-running')) return; // skip the running one
-      const blockId = block.id; // "smgmt-block-sprint-N"
-      const blockLabel = blockId.replace('smgmt-block-', '');
-      if (!blockLabel.startsWith('sprint-')) return; // skip placeholder
-
-      block.classList.add('smgmt-locked');
-
-      // Add lock icon to the header (issue #186 AC)
-      const hdr = block.querySelector('.smgmt-sprint-header');
-      if (hdr && !hdr.querySelector('.smgmt-lock-icon')) {
-        const lockIcon = document.createElement('span');
-        lockIcon.className = 'smgmt-lock-icon';
-        lockIcon.textContent = '🔒';
-        lockIcon.setAttribute('aria-hidden', 'true');
-        // Insert after sprint name / NEXT UP badge
-        const nextBadge = hdr.querySelector('.smgmt-next-badge');
-        const sprintName = hdr.querySelector('.smgmt-sprint-name');
-        const insertAfter = nextBadge || sprintName;
-        if (insertAfter && insertAfter.nextSibling) {
-          hdr.insertBefore(lockIcon, insertAfter.nextSibling);
-        } else if (insertAfter) {
-          hdr.appendChild(lockIcon);
-        }
-        // Suppress drag on non-running sprint header (issue #186 AC)
-        hdr.setAttribute('draggable', 'false');
-      }
-
-      // Suppress drag on ticket rows in non-running sprints (issue #186 AC)
-      block.querySelectorAll('.smgmt-ticket').forEach(ticketEl => {
-        ticketEl.setAttribute('draggable', 'false');
-      });
-    });
-  }
-
   // ── Pass 4: Per-ticket live status badges, spinners, elapsed counters ──────────
   smgmtApplyTicketLiveStatus(sprintStatusMap);
   _ensureElapsedTimer();
@@ -4656,11 +4608,7 @@ function smgmtApplyRunState(sprintStatusMap) {
     );
     const hasCompleted = smgmtHasCompletedTickets(sprintTickets);
 
-    if (anyRunning) {
-      // Another sprint is running: disable this sprint's unified button (issue #186 AC)
-      btn.disabled = true;
-      btn.title = 'Another sprint is running';
-    } else if (hasCompleted) {
+    if (hasCompleted) {
       // Re-run mode: always enabled
       btn.disabled = false;
       btn.title = '';

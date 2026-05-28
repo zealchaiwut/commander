@@ -1141,6 +1141,26 @@
       border: 2px solid var(--border);
     }
 
+    /* Per-ticket agent tag (issue #308) */
+    .smgmt-ticket-agent-tag {
+      flex-shrink: 0;
+      padding: 1px 5px; border-radius: 3px;
+      font-size: 10px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+      font-family: var(--mono);
+    }
+    .smgmt-ticket-agent-tag.coder-class  { background: var(--purple-bg); color: var(--purple); }
+    .smgmt-ticket-agent-tag.tester-class { background: var(--amber-bg);  color: var(--amber); }
+    .smgmt-ticket-agent-tag.unknown-class { background: var(--surface-2); color: var(--text-sub); }
+
+    /* Per-ticket size pill (issue #308) */
+    .smgmt-ticket-size-pill {
+      flex-shrink: 0;
+      padding: 1px 5px; border-radius: 3px;
+      font-size: 10px; font-weight: 700;
+      font-family: var(--mono);
+      background: var(--surface-2); color: var(--text-sub);
+    }
+
     /* Generic utility used by Bulk Create */
     .hidden { display: none !important; }
     .btn-primary:disabled { opacity: .45; cursor: not-allowed; }
@@ -2867,6 +2887,9 @@ function _smgmtCardHtml(label, n, tickets, outcome) {
 
 // ── Running sprint card (issue #277) ──────────────────────────────────────
 
+// Configurable placeholder — to be replaced by stats-derived values (issue #308)
+const SIZE_MINUTES = { S: 7, M: 15, L: 25, XL: 40 };
+
 /** Build the animated running sprint card HTML. Live data patched separately by _smgmtLivePatch. */
 function _smgmtRunningCardHtml(label, n, tickets) {
   const live = _smgmtLiveCache[label] || null;
@@ -2912,11 +2935,24 @@ function _smgmtRunningCardHtml(label, n, tickets) {
     }
 
     const issueUrl = t.url || (cardRepo ? `https://github.com/${cardRepo}/issues/${t.number}` : '#');
+
+    const sizePillHtml = (liveIss && liveIss.size)
+      ? `<span class="smgmt-ticket-size-pill">${escHtml(liveIss.size)}</span>`
+      : '';
+    const agentTagHtml = (liveIss && liveIss.agent)
+      ? `<span class="smgmt-ticket-agent-tag ${_smgmtAgentTagClass(liveIss.agent)}">${escHtml(liveIss.agent.toUpperCase())}</span>`
+      : '';
+    const elapsedStr = liveIss ? _fmtTicketElapsed(liveIss.elapsed_secs) : null;
+    const elapsedHtml = elapsedStr
+      ? `<span class="smgmt-ticket-elapsed">${elapsedStr}</span>`
+      : '';
+
     return `<div class="smgmt-ticket" data-issue="${t.number}" draggable="false">
       ${indicator}
       <a class="smgmt-ticket-num" href="${escHtml(issueUrl)}" target="_blank"
          rel="noopener">#${t.number}</a>
       <span class="smgmt-ticket-title" title="${escHtml(t.title)}">${escHtml(t.title)}</span>
+      ${sizePillHtml}${agentTagHtml}${elapsedHtml}
     </div>`;
   }).join('');
 
@@ -2982,6 +3018,23 @@ function _fmtRunningTime(secs) {
   return `${m}m ${s}s`;
 }
 
+/** Format per-ticket elapsed seconds as "{N}m {N}s". Returns null if no value. */
+function _fmtTicketElapsed(secs) {
+  if (secs == null || secs <= 0) return null;
+  const m = Math.floor(secs / 60);
+  const s = secs % 60;
+  return `${m}m ${s}s`;
+}
+
+/** CSS class for agent role tag: purple for coder-class, amber for tester-class. */
+function _smgmtAgentTagClass(role) {
+  if (!role) return 'unknown-class';
+  const r = role.toUpperCase();
+  if (r.includes('CODER')) return 'coder-class';
+  if (r.includes('TESTER')) return 'tester-class';
+  return 'unknown-class';
+}
+
 /** Patch live stat strip + progress bar + ticket indicators in place (no full re-render). */
 function _smgmtLivePatch(label, live) {
   const card = document.getElementById(`smgmt-card-${label}`);
@@ -3041,9 +3094,17 @@ function _smgmtLivePatch(label, live) {
         row.className = 'smgmt-ticket';
         row.dataset.issue = String(t.number);
         row.draggable = false;
+        const initSizePill = t.size
+          ? `<span class="smgmt-ticket-size-pill">${escHtml(t.size)}</span>` : '';
+        const initAgentTag = t.agent
+          ? `<span class="smgmt-ticket-agent-tag ${_smgmtAgentTagClass(t.agent)}">${escHtml(t.agent.toUpperCase())}</span>` : '';
+        const initElapsedStr = _fmtTicketElapsed(t.elapsed_secs);
+        const initElapsed = initElapsedStr
+          ? `<span class="smgmt-ticket-elapsed">${initElapsedStr}</span>` : '';
         row.innerHTML = `<div class="smgmt-ticket-indicator"><div class="circle-pending"></div></div>` +
           `<a class="smgmt-ticket-num" href="${escHtml(issueUrl)}" target="_blank" rel="noopener">#${t.number}</a>` +
-          `<span class="smgmt-ticket-title" title="${escHtml(t.title)}">${escHtml(t.title)}</span>`;
+          `<span class="smgmt-ticket-title" title="${escHtml(t.title)}">${escHtml(t.title)}</span>` +
+          initSizePill + initAgentTag + initElapsed;
         ticketsContainer.appendChild(row);
       });
     }
@@ -3066,6 +3127,53 @@ function _smgmtLivePatch(label, live) {
       indicatorEl.innerHTML = '<div class="ring"></div>';
     } else {
       indicatorEl.innerHTML = '<div class="circle-pending"></div>';
+    }
+
+    // Update size pill
+    let sizePillEl = row.querySelector('.smgmt-ticket-size-pill');
+    if (liveIss && liveIss.size) {
+      if (!sizePillEl) {
+        sizePillEl = document.createElement('span');
+        sizePillEl.className = 'smgmt-ticket-size-pill';
+        const titleEl = row.querySelector('.smgmt-ticket-title');
+        if (titleEl) titleEl.after(sizePillEl);
+      }
+      sizePillEl.textContent = liveIss.size;
+    } else if (sizePillEl) {
+      sizePillEl.remove();
+    }
+
+    // Update agent tag — only on tickets with an active agent
+    let agentTagEl = row.querySelector('.smgmt-ticket-agent-tag');
+    if (liveIss && liveIss.agent) {
+      if (!agentTagEl) {
+        agentTagEl = document.createElement('span');
+        agentTagEl.className = 'smgmt-ticket-agent-tag';
+        const sizeEl = row.querySelector('.smgmt-ticket-size-pill');
+        if (sizeEl) sizeEl.after(agentTagEl);
+        else {
+          const titleEl = row.querySelector('.smgmt-ticket-title');
+          if (titleEl) titleEl.after(agentTagEl);
+        }
+      }
+      agentTagEl.className = `smgmt-ticket-agent-tag ${_smgmtAgentTagClass(liveIss.agent)}`;
+      agentTagEl.textContent = liveIss.agent.toUpperCase();
+    } else if (agentTagEl) {
+      agentTagEl.remove();
+    }
+
+    // Update elapsed time
+    let elapsedEl = row.querySelector('.smgmt-ticket-elapsed');
+    const elapsedStr = liveIss ? _fmtTicketElapsed(liveIss.elapsed_secs) : null;
+    if (elapsedStr) {
+      if (!elapsedEl) {
+        elapsedEl = document.createElement('span');
+        elapsedEl.className = 'smgmt-ticket-elapsed';
+        row.appendChild(elapsedEl);
+      }
+      elapsedEl.textContent = elapsedStr;
+    } else if (elapsedEl) {
+      elapsedEl.remove();
     }
   });
 }

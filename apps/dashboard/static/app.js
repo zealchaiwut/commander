@@ -2705,7 +2705,14 @@ let _smgmtAutoRefreshInterval  = 15;  // seconds between refreshes (5|15|30|60)
 let _smgmtAutoRefreshEnabled   = true; // whether auto-refresh is active
 let _smgmtSelectedIssues       = new Set(); // issue numbers currently selected (multi-select, issue #206)
 
-const RERUN_STRIP_LABELS = new Set(['UAT', 'UAT-approved', 'released', 'SIT', 'in-progress', 'need-rework']);
+const RERUN_STRIP_LABELS = new Set(['UAT', 'UAT-approved', 'released', 'SIT', 'in-progress', 'need-rework', 'needs-rework', 'tester-rejected']);
+
+function _rerunPolicyAction(labelNames) {
+  const s = new Set(labelNames);
+  if (s.has('UAT') || s.has('UAT-approved')) return 'skip';
+  if (s.has('SIT')) return 'dispatch_tester';
+  return 'dispatch_coder';
+}
 
 async function smgmtInit() {
   // Legacy: called with no repo; use current project or first project
@@ -5241,31 +5248,31 @@ function smgmtRerunSprint(label) {
   const sprintTickets = (_smgmtData.issues || []).filter(
     t => t.sprint != null && `sprint-${t.sprint}` === label
   );
-  const affected = sprintTickets.filter(t =>
-    (t.labels || []).some(l => RERUN_STRIP_LABELS.has(l.name))
-  );
 
   _smgmtRerunLabel = label;
   const n = parseInt(label.split('-')[1], 10);
-  document.getElementById('smgmt-rerun-title').textContent = `Reset Sprint ${n}?`;
+  document.getElementById('smgmt-rerun-title').textContent = `Re-run Sprint ${n}?`;
+
+  const ACTION_LABEL = { dispatch_coder: '→ re-code', dispatch_tester: '→ re-test', skip: 'skip (already UAT)' };
 
   const bodyEl = document.getElementById('smgmt-rerun-body');
-  if (affected.length === 0) {
-    bodyEl.innerHTML = '<em style="color:var(--text-muted)">No affected tickets.</em>';
+  if (sprintTickets.length === 0) {
+    bodyEl.innerHTML = '<em style="color:var(--text-muted)">No tickets in this sprint.</em>';
   } else {
-    bodyEl.innerHTML = affected.map(t => {
-      const toRemove = (t.labels || []).filter(l => RERUN_STRIP_LABELS.has(l.name)).map(l => escapeHtml(l.name));
-      const toKeep   = (t.labels || []).filter(l => !RERUN_STRIP_LABELS.has(l.name)).map(l => escapeHtml(l.name));
+    bodyEl.innerHTML = sprintTickets.map(t => {
+      const labelNames = (t.labels || []).map(l => l.name);
+      const action = _rerunPolicyAction(labelNames);
+      const actionText = ACTION_LABEL[action] || action;
       return `<div class="smgmt-rerun-row">
         <span class="smgmt-rerun-num">#${t.number}</span>
         <span class="smgmt-rerun-title-text" title="${escapeHtml(t.title)}">${escapeHtml(t.title)}</span>
-        <span class="smgmt-rerun-labels">[${toRemove.join(', ')} to remove${toKeep.length ? '; keep: ' + toKeep.join(', ') : ''}]</span>
+        <span class="smgmt-rerun-labels">${escapeHtml(actionText)}</span>
       </div>`;
     }).join('');
   }
 
   const confirmBtn = document.getElementById('smgmt-rerun-confirm');
-  if (confirmBtn) { confirmBtn.disabled = false; confirmBtn.textContent = 'Reset'; }
+  if (confirmBtn) { confirmBtn.disabled = false; confirmBtn.textContent = 'Re-run'; }
   document.getElementById('smgmt-rerun-backdrop').classList.remove('hidden');
   document.getElementById('smgmt-rerun-modal').classList.remove('hidden');
 }
@@ -5279,7 +5286,7 @@ function smgmtRerunClose() {
 async function smgmtRerunConfirm() {
   if (!_smgmtRerunLabel || !_smgmtCurrentRepo) return;
   const confirmBtn = document.getElementById('smgmt-rerun-confirm');
-  if (confirmBtn) { confirmBtn.disabled = true; confirmBtn.textContent = 'Resetting…'; }
+  if (confirmBtn) { confirmBtn.disabled = true; confirmBtn.textContent = 'Starting…'; }
 
   try {
     const res = await fetch(
@@ -5294,17 +5301,23 @@ async function smgmtRerunConfirm() {
     const data = await res.json();
     smgmtRerunClose();
 
-    const total = data.reset_count + (data.errors ? data.errors.length : 0);
     if (data.errors && data.errors.length > 0) {
-      smgmtShowError(`Reset ${data.reset_count} of ${total} tickets; ${data.errors.join('; ')}`);
+      smgmtShowError(`Re-run started with errors: ${data.errors.join('; ')}`);
     } else {
-      showSuccessToast(`Reset ${data.reset_count} ticket${data.reset_count !== 1 ? 's' : ''}. Click Run sprint when ready.`);
+      const parts = [];
+      const coderCount = (data.decisions || []).filter(d => d.action === 'dispatch_coder').length;
+      const testerCount = (data.decisions || []).filter(d => d.action === 'dispatch_tester').length;
+      const skipCount = data.skip_count || 0;
+      if (coderCount) parts.push(`${coderCount} coding`);
+      if (testerCount) parts.push(`${testerCount} testing`);
+      if (skipCount) parts.push(`${skipCount} skipped`);
+      showSuccessToast(`Re-run started: ${parts.join(', ') || '0 dispatched'}.`);
     }
 
     await smgmtSelectProject(_smgmtCurrentRepo);
   } catch (e) {
-    smgmtShowError('Failed to reset sprint: ' + e.message);
-    if (confirmBtn) { confirmBtn.disabled = false; confirmBtn.textContent = 'Reset'; }
+    smgmtShowError('Failed to re-run sprint: ' + e.message);
+    if (confirmBtn) { confirmBtn.disabled = false; confirmBtn.textContent = 'Re-run'; }
   }
 }
 

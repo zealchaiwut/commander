@@ -2949,75 +2949,19 @@ def get_dispatch_log(sprint_label: str, project: str, tail_lines: int = 200):
     """Return the last N lines of the most recent sprint-run-<label>-*.log."""
     if not _SPRINT_LABEL_RE.match(sprint_label):
         raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")
+    from log_source import read_log  # local import keeps startup fast
     project_root = _project_root_path(project)
-    log_dir = _commander_dir(project_root) / "logs"
-    tail_lines = max(1, min(tail_lines, 2000))
-
-    candidates = sorted(
-        log_dir.glob(f"sprint-run-{sprint_label}-*.log"),
-        key=lambda p: p.stat().st_mtime,
-        reverse=True,
-    ) if log_dir.exists() else []
-
-    if not candidates:
-        return {"found": False, "log_dir": str(log_dir), "tail": ""}
-
-    log_path = candidates[0]
-    try:
-        lines = log_path.read_text(encoding="utf-8", errors="replace").splitlines()
-    except OSError as e:
-        return {"found": False, "log_dir": str(log_dir), "tail": "", "error": str(e)}
-
-    tail = "\n".join(lines[-tail_lines:])
-    mtime = datetime.fromtimestamp(log_path.stat().st_mtime, tz=timezone.utc).isoformat()
-    return {"found": True, "path": str(log_path), "tail": tail, "mtime": mtime}
+    return read_log("dispatch", project_root, label=sprint_label, tail_lines=tail_lines)
 
 
 @app.get("/api/sprints/{sprint_label}/issue/{issue_num}/log")
 def get_issue_log(sprint_label: str, project: str, issue_num: int, tail_lines: int = 200):
-    """Return the last N lines of the most recent sprint-issue-<N>.log."""
+    """Return the last N lines of sprint-issue-<N>.log for the given sprint."""
     if not _SPRINT_LABEL_RE.match(sprint_label):
         raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")
-    tail_lines = max(1, min(tail_lines, 2000))
-
+    from log_source import read_log  # local import keeps startup fast
     project_root = _project_root_path(project)
-    commander_logs = _commander_dir(project_root) / "logs"
-
-    # Try to read logs_dir from sprint.yaml; fall back to commander/logs
-    cfg_logs_dir: Optional[Path] = None
-    try:
-        import yaml as _yaml  # type: ignore[import]
-        yaml_path = _commander_dir(project_root) / "sprint.yaml"
-        if yaml_path.exists():
-            data = _yaml.safe_load(yaml_path.read_text(encoding="utf-8")) or {}
-            raw = (data.get("paths") or {}).get("logs_dir", "").strip()
-            if raw:
-                p = Path(raw)
-                cfg_logs_dir = p if p.is_absolute() else yaml_path.parent / p
-    except Exception:
-        pass
-
-    candidates_checked: list[str] = []
-    log_path: Optional[Path] = None
-
-    for candidate_dir in filter(None, [cfg_logs_dir, commander_logs]):
-        p = candidate_dir / f"sprint-issue-{issue_num}.log"
-        candidates_checked.append(str(p))
-        if p.exists():
-            log_path = p
-            break
-
-    if log_path is None:
-        return {"found": False, "candidates": candidates_checked, "tail": ""}
-
-    try:
-        lines = log_path.read_text(encoding="utf-8", errors="replace").splitlines()
-    except OSError as e:
-        return {"found": False, "candidates": candidates_checked, "tail": "", "error": str(e)}
-
-    tail = "\n".join(lines[-tail_lines:])
-    mtime = datetime.fromtimestamp(log_path.stat().st_mtime, tz=timezone.utc).isoformat()
-    return {"found": True, "path": str(log_path), "tail": tail, "mtime": mtime}
+    return read_log("issue", project_root, label=sprint_label, issue_num=issue_num, tail_lines=tail_lines)
 
 
 # ── Sprint live snapshot + SSE stream (issue #224) ───────────────────────────

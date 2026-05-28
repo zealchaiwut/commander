@@ -51,3 +51,23 @@ def allow_stub_success(monkeypatch):
     _dispatch_coder/_dispatch_tester is treated as a silent stub success.
     Apply to test classes/functions that don't need a real claude CLI."""
     monkeypatch.setenv("COMMANDER_ALLOW_STUB_SUCCESS", "1")
+
+
+@pytest.fixture(scope="session")
+def driver():
+    """Selenium WebDriver for real browser testing."""
+    from selenium import webdriver
+    from selenium.webdriver.chrome.options import Options
+
+    options = Options()
+    # Run headless by default (no visible window)
+    # Uncomment to debug: options.add_argument("--no-headless")
+    options.add_argument("--headless")
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--disable-gpu")
+    options.add_argument("--window-size=1920,1080")
+
+    driver = webdriver.Chrome(options=options)
+    yield driver
+    driver.quit()

@@ -601,7 +601,7 @@ async def project_slug_tab(slug: str, tab: str):
     """Serve the project chrome page for valid tabs; redirect invalid tabs to sprint-mgmt."""
     if tab not in _VALID_PROJECT_TABS:
         return RedirectResponse(url=f"/project/{slug}/sprint-mgmt", status_code=302)
-    return FileResponse(STATIC_DIR / "index.html")
+    return FileResponse(STATIC_DIR / "project.html")
 
 
 @app.get("/api/health")

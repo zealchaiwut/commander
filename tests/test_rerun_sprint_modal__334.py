@@ -265,9 +265,13 @@ class TestNoNativeConfirmInJS:
 
     def test_modal_title_uses_full_label(self, js):
         fn_body = self._extract_function(js, "smgmtRerunSprint")
-        # The title should include the full label (e.g. "sprint-23"), not just the number
-        assert "Re-run Sprint" in fn_body, "Modal title must say 'Re-run Sprint'"
+        # The title should use sprintLabelDisplay(label) for sub-label support
+        assert "Re-run" in fn_body, "Modal title must say 'Re-run ...'"
         assert "label" in fn_body, "Modal title must incorporate the sprint label variable"
+        # Either old form "Re-run Sprint" or new form "Re-run ${sprintLabelDisplay(label)}"
+        uses_display = "sprintLabelDisplay" in fn_body
+        uses_literal = "Re-run Sprint" in fn_body
+        assert uses_display or uses_literal, "Title must use sprintLabelDisplay() or literal 'Re-run Sprint'"
 
 
 # ── Selenium: confirm() never called during re-run flow ───────────────────────

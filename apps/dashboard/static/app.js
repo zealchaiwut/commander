@@ -2732,6 +2732,23 @@ function _rerunPolicyAction(labelNames) {
   return 'dispatch_coder';
 }
 
+function sprintLabelCompare(a, b) {
+  const parse = (l) => {
+    const m = l.match(/^sprint-(\d+)(?:\.(\d+))?$/);
+    if (!m) return [0, 0];
+    return [parseInt(m[1], 10), m[2] ? parseInt(m[2], 10) : 0];
+  };
+  const [an, ax] = parse(a);
+  const [bn, bx] = parse(b);
+  return an !== bn ? an - bn : ax - bx;
+}
+
+function sprintLabelDisplay(label) {
+  const m = label.match(/^sprint-(\d+)(?:\.(\d+))?$/);
+  if (!m) return label;
+  return m[2] ? `Sprint ${m[1]}.${m[2]}` : `Sprint ${m[1]}`;
+}
+
 async function smgmtInit() {
   // Legacy: called with no repo; use current project or first project
   const repo = _activeProject || _smgmtCurrentRepo || (allProjects[0]?.repo) || null;
@@ -3082,7 +3099,8 @@ function smgmtRender() {
   for (const label of order) bySprintLabel[label] = [];
   const unassigned = [];
   for (const iss of issues) {
-    const label = iss.sprint != null ? `sprint-${iss.sprint}` : null;
+    // Prefer the exact sprint_label field (supports dotted sub-labels like sprint-15.1)
+    const label = iss.sprint_label || (iss.sprint != null ? `sprint-${iss.sprint}` : null);
     if (label && bySprintLabel[label]) {
       bySprintLabel[label].push(iss);
     } else if (label == null) {
@@ -3090,52 +3108,49 @@ function smgmtRender() {
     }
   }
 
-  // NEXT-UP: lowest-numbered sprint with >= 1 ticket (issue #242: no goal required)
-  const allNums = order.map(l => parseInt(l.split('-')[1], 10)).filter(n => !isNaN(n));
-  allNums.sort((a, b) => a - b);
+  // NEXT-UP: lowest sprint label with >= 1 ticket (natural sort order)
+  const sortedOrderForNext = [...order].sort(sprintLabelCompare);
   let lowestLabel = null;
-  for (const n of allNums) {
-    const lbl = `sprint-${n}`;
-    const tickets = bySprintLabel[lbl] || [];
-    if (tickets.length >= 1) {
+  for (const lbl of sortedOrderForNext) {
+    if ((bySprintLabel[lbl] || []).length >= 1) {
       lowestLabel = lbl;
       break;
     }
   }
 
-  // Identify empty sprints that exist on GitHub but have no tickets (not in order)
-  // These should be rendered as droppable placeholder blocks so users can drop into them (issue #206)
-  const orderNums = new Set(order.map(l => parseInt(l.split('-')[1], 10)));
-  const placeholderN = placeholder_sprint || ((order.length > 0 ? Math.max(...allNums) : 0) + 1);
+  // Identify empty plain sprint-N labels that exist on GitHub but have no tickets
+  // These should be rendered as droppable placeholder blocks (issue #206)
+  const orderBaseNums = new Set(
+    order.map(l => { const m = l.match(/^sprint-(\d+)$/); return m ? parseInt(m[1], 10) : null; })
+         .filter(n => n !== null)
+  );
+  const allBaseNums = order.length > 0
+    ? Math.max(...order.map(l => { const m = l.match(/^sprint-(\d+)/); return m ? parseInt(m[1], 10) : 0; }))
+    : 0;
+  const placeholderN = placeholder_sprint || (allBaseNums + 1);
   const emptySprintNums = (_smgmtData.sprints || [])
-    .filter(n => !orderNums.has(n) && n !== placeholderN)
+    .filter(n => !orderBaseNums.has(n) && n !== placeholderN)
     .sort((a, b) => a - b);
 
-  // Sort non-empty sprints ascending by sprint number (issue #207).
-  // Empty sprints are interleaved into the correct sorted position.
-  const sortedOrder = [...order].sort((a, b) => {
-    const na = parseInt(a.split('-')[1], 10);
-    const nb = parseInt(b.split('-')[1], 10);
-    return na - nb;
-  });
+  // Sort non-empty sprint labels naturally (sprint-N before sprint-N.1 before sprint-N+1)
+  const sortedOrder = [...order].sort(sprintLabelCompare);
 
-  // Build a merged list of all sprint numbers (non-empty + empty), sorted ascending.
-  // Each entry is: { num, isEmpty }
-  const allSprintNums = [
-    ...sortedOrder.map(l => ({ num: parseInt(l.split('-')[1], 10), isEmpty: false })),
-    ...emptySprintNums.map(n => ({ num: n, isEmpty: true })),
-  ].sort((a, b) => a.num - b.num);
+  // Build a merged list of all sprint entries (non-empty labels + empty plain sprints), sorted.
+  // Each entry is: { label, isEmpty }
+  const allSprintEntries = [
+    ...sortedOrder.map(l => ({ label: l, isEmpty: false })),
+    ...emptySprintNums.map(n => ({ label: `sprint-${n}`, isEmpty: true })),
+  ].sort((a, b) => sprintLabelCompare(a.label, b.label));
 
-  // Render sprint blocks (only non-empty sprints are in order)
+  // Render sprint blocks (non-empty sprints and empty plain sprints)
   let blocksHtml = '';
   if (sortedOrder.length === 0 && emptySprintNums.length === 0) {
     blocksHtml = '<div class="smgmt-loading">No sprints found. Use "+ New sprint" to create one.</div>';
   } else {
-    // Render all sprints (non-empty and empty) interleaved in ascending number order.
-    // Empty sprints that exist on GitHub use the full pane (with Delete + disabled Run);
+    // Render all sprint entries (non-empty and empty) in natural sort order.
+    // Empty sprints use the full pane (with Delete + disabled Run);
     // only the trailing placeholder uses smgmtPlaceholderBlockHtml.
-    blocksHtml = allSprintNums.map(({ num }) => {
-      const label = `sprint-${num}`;
+    blocksHtml = allSprintEntries.map(({ label }) => {
       return smgmtSprintBlockHtml(label, bySprintLabel[label] || [], label === lowestLabel);
     }).join('');
   }
@@ -3163,7 +3178,7 @@ function smgmtRender() {
 
   smgmtRenderBacklog(unassigned);
   // Count total visible sprint blocks (non-placeholder) for sticky decision (issue #225)
-  const totalSprints = allSprintNums.length; // includes both non-empty and empty sprints
+  const totalSprints = allSprintEntries.length; // includes both non-empty and empty sprints
   smgmtBacklogApplyMode(totalSprints);
   smgmtApplyRunState();
   smgmtApplyDurationBadges();
@@ -3179,12 +3194,14 @@ function smgmtHasCompletedTickets(tickets) {
 }
 
 function smgmtSprintBlockHtml(label, tickets, isNext) {
-  const n = parseInt(label.split('-')[1], 10);
+  const displayName = sprintLabelDisplay(label);
+  // Sanitize label for use in HTML element IDs (replace hyphens and dots with underscores)
+  const safeIdSuffix = label.replace(/-/g, '_').replace(/\./g, '_');
   // Unified Run/Re-run button replaces the separate run + rerun buttons (issue #186)
-  const actionBtnId  = `smgmt-run-btn-${label.replace('-', '_')}`;
-  const deleteBtnId  = `smgmt-delete-btn-${label.replace('-', '_')}`;
-  const finishBtnId  = `smgmt-finish-btn-${label.replace('-', '_')}`;
-  const goalId       = `smgmt-goal-${label.replace('-', '_')}`;
+  const actionBtnId  = `smgmt-run-btn-${safeIdSuffix}`;
+  const deleteBtnId  = `smgmt-delete-btn-${safeIdSuffix}`;
+  const finishBtnId  = `smgmt-finish-btn-${safeIdSuffix}`;
+  const goalId       = `smgmt-goal-${safeIdSuffix}`;
   const savedGoal    = _smgmtGoals[label] || '';
   const hasCompleted = smgmtHasCompletedTickets(tickets);
   // hasCompleted → unified button shows "Re-run Sprint" and calls smgmtRerunSprint
@@ -3247,7 +3264,7 @@ function smgmtSprintBlockHtml(label, tickets, isNext) {
            ondragend="smgmtSprintDragEnd(event)">
         <div class="smgmt-sprint-header-left">
           <i class="ti ti-grip-vertical smgmt-sprint-grip"></i>
-          <span class="smgmt-sprint-name">Sprint ${n}</span>
+          <span class="smgmt-sprint-name">${displayName}</span>
           <button class="smgmt-rename-btn" title="Rename sprint"
                   onclick="smgmtStartRename('${label}', event)"><i class="ti ti-pencil"></i></button>
           ${nextBadge}
@@ -3266,7 +3283,7 @@ function smgmtSprintBlockHtml(label, tickets, isNext) {
           ${actionBtn}
         </div>
       </div>
-      <div class="${goalBarClass}" id="smgmt-goal-bar-${label.replace('-', '_')}" style="display:none">${goalBarText}</div>
+      <div class="${goalBarClass}" id="smgmt-goal-bar-${safeIdSuffix}" style="display:none">${goalBarText}</div>
       <div class="smgmt-sprint-goal-row" style="display:none">
         <input class="smgmt-goal-input" id="${goalId}" type="text"
                placeholder="Sprint goal (required to run) — e.g. Dashboard UX cleanup"
@@ -3767,29 +3784,37 @@ function smgmtBacklogMoveToClose() {
 async function smgmtBacklogMoveTicketTo(issueNum, sprintLabel) {
   smgmtBacklogMoveToClose();
   if (!sprintLabel || !_smgmtData) return;
-  const sprintNum = parseInt(sprintLabel.split('-')[1], 10);
+  const baseMatch = sprintLabel.match(/^sprint-(\d+)/);
+  const sprintNum = baseMatch ? parseInt(baseMatch[1], 10) : null;
+  const isDotted = /^sprint-\d+\.\d+$/.test(sprintLabel);
 
   // Optimistic update
   const iss = _smgmtData.issues.find(i => i.number === issueNum);
-  if (iss) iss.sprint = sprintNum;
+  if (iss) {
+    iss.sprint = sprintNum;
+    iss.sprint_label = sprintLabel;
+  }
   // Add sprint to order if needed
   if (!_smgmtData.order.includes(sprintLabel)) {
     _smgmtData.order.push(sprintLabel);
   }
   smgmtRender();
 
+  const apiBody = isDotted
+    ? { issue: issueNum, sprint_label: sprintLabel }
+    : { issue: issueNum, sprint: sprintNum };
   try {
     const res = await fetch('/api/sprint-planning/assign', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ issue: issueNum, sprint: sprintNum }),
+      body: JSON.stringify(apiBody),
     });
     if (!res.ok) throw new Error(await res.text());
     await smgmtRefreshBoard();
   } catch (e) {
     // Rollback optimistic update
     const iss2 = _smgmtData.issues.find(i => i.number === issueNum);
-    if (iss2) iss2.sprint = null;
+    if (iss2) { iss2.sprint = null; iss2.sprint_label = null; }
     smgmtRender();
     smgmtShowError(`Failed to move ticket #${issueNum}: ${e.message}`);
     _showToast(`Failed to move #${issueNum}: ${e.message}`, 'error');
@@ -3899,7 +3924,7 @@ function smgmtGoalInput(label, value) {
   _smgmtGoals[label] = value;
 
   // Update the visible goal bar
-  const safeLabel = label.replace('-', '_');
+  const safeLabel = label.replace(/-/g, '_').replace(/\./g, '_');
   const goalBar = document.getElementById(`smgmt-goal-bar-${safeLabel}`);
   if (goalBar) {
     const hasGoal = value.trim().length > 0;
@@ -3916,7 +3941,7 @@ function smgmtGoalInput(label, value) {
   const btn = document.getElementById(runBtnId);
   if (btn) {
     const sprintTickets = (_smgmtData?.issues || []).filter(
-      t => t.sprint != null && `sprint-${t.sprint}` === label
+      t => (t.sprint_label || (t.sprint != null ? `sprint-${t.sprint}` : null)) === label
     );
     const hasTickets = sprintTickets.length >= 1;
     const hasCompleted = smgmtHasCompletedTickets(sprintTickets);
@@ -3971,7 +3996,6 @@ function smgmtSprintDragStart(event, label) {
   _smgmtDragSprintLabel = label;
   event.dataTransfer.effectAllowed = 'move';
   event.dataTransfer.setData('text/smgmt-sprint', label);
-  const block = document.getElementById(`smgmt-block-${label}`);
   if (block) setTimeout(() => block.classList.add('dragging-sprint'), 0);
 }
 
@@ -4148,9 +4172,11 @@ async function smgmtDropOnSprint(event, targetSprintLabel) {
 
     // Optimistic: move ticket in local data
     const iss = _smgmtData.issues.find(i => i.number === number);
+    const prevSprintLabel = iss ? (iss.sprint_label || (iss.sprint != null ? `sprint-${iss.sprint}` : null)) : fromSprint;
     if (iss) {
-      const targetNum = targetSprintLabel ? parseInt(targetSprintLabel.split('-')[1], 10) : null;
-      iss.sprint = targetNum;
+      const targetBaseMatch = targetSprintLabel ? targetSprintLabel.match(/^sprint-(\d+)/) : null;
+      iss.sprint = targetBaseMatch ? parseInt(targetBaseMatch[1], 10) : null;
+      iss.sprint_label = targetSprintLabel || null;
     }
     // If dropping onto an existing empty sprint (not yet in order), promote it optimistically
     // so the ticket appears in the pane immediately after smgmtRender().
@@ -4159,13 +4185,16 @@ async function smgmtDropOnSprint(event, targetSprintLabel) {
     }
     smgmtRender();
 
-    // API call
-    const targetSprintNum = targetSprintLabel ? parseInt(targetSprintLabel.split('-')[1], 10) : null;
+    // API call — use sprint_label for dotted sub-labels, sprint int for plain labels
+    const isDotted = targetSprintLabel && /^sprint-\d+\.\d+$/.test(targetSprintLabel);
+    const apiBody = isDotted || targetSprintLabel === null
+      ? { issue: number, sprint_label: targetSprintLabel }
+      : { issue: number, sprint: targetSprintLabel ? parseInt(targetSprintLabel.split('-')[1], 10) : null };
     try {
       const res = await fetch('/api/sprint-planning/assign', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ issue: number, sprint: targetSprintNum }),
+        body: JSON.stringify(apiBody),
       });
       if (!res.ok) throw new Error(await res.text());
       await smgmtRefreshBoard();
@@ -4173,8 +4202,9 @@ async function smgmtDropOnSprint(event, targetSprintLabel) {
       // Rollback: restore original sprint and order
       const iss2 = _smgmtData.issues.find(i => i.number === number);
       if (iss2) {
-        const origNum = fromSprint ? parseInt(fromSprint.split('-')[1], 10) : null;
-        iss2.sprint = origNum;
+        const origBaseMatch = prevSprintLabel ? prevSprintLabel.match(/^sprint-(\d+)/) : null;
+        iss2.sprint = origBaseMatch ? parseInt(origBaseMatch[1], 10) : null;
+        iss2.sprint_label = prevSprintLabel || null;
       }
       if (targetSprintLabel && !wasInOrder) {
         _smgmtData.order = _smgmtData.order.filter(l => l !== targetSprintLabel);
@@ -4291,15 +4321,15 @@ function smgmtBulkMoveToOpen() {
   if (select) {
     select.innerHTML = '<option value="">— choose a sprint —</option>';
     const order = _smgmtData?.order || [];
-    const allNums = [...new Set([
-      ...order.map(l => parseInt(l.split('-')[1], 10)),
-      ...(_smgmtData?.sprints || []),
-    ])].filter(n => !isNaN(n)).sort((a, b) => a - b);
+    // Build all sprint labels (from order + plain sprint numbers), sorted naturally
+    const orderSet = new Set(order);
+    const plainFromSprints = (_smgmtData?.sprints || []).map(n => `sprint-${n}`);
+    const allLabels = [...new Set([...order, ...plainFromSprints])].sort(sprintLabelCompare);
 
-    for (const n of allNums) {
+    for (const lbl of allLabels) {
       const opt = document.createElement('option');
-      opt.value = `sprint-${n}`;
-      opt.textContent = `Sprint ${n}`;
+      opt.value = lbl;
+      opt.textContent = sprintLabelDisplay(lbl);
       select.appendChild(opt);
     }
     // Add backlog option
@@ -4337,23 +4367,31 @@ async function smgmtBulkMoveToConfirm() {
 
   if (confirmBtn) { confirmBtn.disabled = true; confirmBtn.textContent = 'Moving…'; }
 
-  const sprintNum = destination === 'backlog' ? null : parseInt(destination.split('-')[1], 10);
+  const isDottedDest = destination !== 'backlog' && /^sprint-\d+\.\d+$/.test(destination);
+  const sprintNum = destination === 'backlog' ? null
+    : parseInt(destination.match(/^sprint-(\d+)/)?.[1] || '0', 10);
 
   // Optimistic update: update local data
   for (const num of issueNums) {
     const iss = _smgmtData?.issues.find(i => i.number === num);
-    if (iss) iss.sprint = sprintNum;
+    if (iss) {
+      iss.sprint = sprintNum;
+      iss.sprint_label = destination === 'backlog' ? null : destination;
+    }
   }
   smgmtRender();
 
   // API calls — fire in parallel
+  const apiBodyForDest = isDottedDest || destination === 'backlog'
+    ? (num) => ({ issue: num, sprint_label: destination === 'backlog' ? null : destination })
+    : (num) => ({ issue: num, sprint: sprintNum });
   const failures = [];
   await Promise.all(issueNums.map(async num => {
     try {
       const res = await fetch('/api/sprint-planning/assign', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ issue: num, sprint: sprintNum }),
+        body: JSON.stringify(apiBodyForDest(num)),
       });
       if (!res.ok) throw new Error(await res.text());
     } catch (e) {
@@ -4394,16 +4432,25 @@ async function smgmtRunSprint(sprintLabel) {
   // issue #242: goal is no longer required to run a sprint
 
   // Determine target sprint number and gather earlier sprints for migration
-  const targetNum = parseInt(sprintLabel.split('-')[1], 10);
+  const [targetNum, targetSuffix] = (() => {
+    const m = sprintLabel.match(/^sprint-(\d+)(?:\.(\d+))?$/);
+    return m ? [parseInt(m[1], 10), m[2] ? parseInt(m[2], 10) : 0] : [0, 0];
+  })();
   const allIssues = _smgmtData?.issues || [];
   const earlierWithTickets = [];  // [ { sprintNum, sprintLabel, tickets: [] } ]
 
   const { order } = _smgmtData || {};
   if (order) {
     for (const lbl of order) {
-      const n = parseInt(lbl.split('-')[1], 10);
-      if (isNaN(n) || n >= targetNum) continue;
-      const tickets = allIssues.filter(t => t.sprint === n && t.status !== 'done');
+      const m = lbl.match(/^sprint-(\d+)(?:\.(\d+))?$/);
+      if (!m) continue;
+      const [n, s] = [parseInt(m[1], 10), m[2] ? parseInt(m[2], 10) : 0];
+      // Only show earlier plain sprints for migration (not sub-labels)
+      if (s !== 0 || n >= targetNum) continue;
+      const tickets = allIssues.filter(
+        t => (t.sprint_label || (t.sprint != null ? `sprint-${t.sprint}` : null)) === lbl
+             && t.status !== 'done'
+      );
       if (tickets.length > 0) {
         earlierWithTickets.push({ sprintNum: n, sprintLabel: lbl, tickets });
       }
@@ -4533,8 +4580,7 @@ function smgmtMigrateOpen(targetLabel, earlierSprints) {
   _smgmtMigrateTargetLabel = targetLabel;
   _smgmtMigrateChoices = {};
 
-  const targetNum = parseInt(targetLabel.split('-')[1], 10);
-  document.getElementById('smgmt-migrate-title').textContent = `Run Sprint ${targetNum}?`;
+  document.getElementById('smgmt-migrate-title').textContent = `Run ${sprintLabelDisplay(targetLabel)}?`;
 
   const bodyEl = document.getElementById('smgmt-migrate-body');
   let html = '';
@@ -4609,7 +4655,7 @@ async function smgmtMigrateConfirm() {
 }
 
 async function smgmtDispatchRun(sprintLabel, migrateFrom) {
-  const runBtnId = `smgmt-run-btn-${sprintLabel.replace('-', '_')}`;
+  const runBtnId = `smgmt-run-btn-${sprintLabel.replace(/-/g, '_').replace(/\./g, '_')}`;
   const btn = document.getElementById(runBtnId);
   if (btn) { btn.disabled = true; btn.textContent = 'Starting…'; }
 
@@ -4632,7 +4678,7 @@ async function smgmtDispatchRun(sprintLabel, migrateFrom) {
 
     if (data.migrated_count > 0) {
       const fromNums = (data.migrate_from || []).join(', ');
-      showSuccessToast(`Migrated ${data.migrated_count} ticket${data.migrated_count !== 1 ? 's' : ''} from Sprint ${fromNums} to Sprint ${sprintLabel.split('-')[1]}. Dispatching sprint…`);
+      showSuccessToast(`Migrated ${data.migrated_count} ticket${data.migrated_count !== 1 ? 's' : ''} from Sprint ${fromNums} to ${sprintLabelDisplay(sprintLabel)}. Dispatching sprint…`);
     } else {
       showSuccessToast('Sprint dispatched. Watching for progress...');
     }
@@ -4744,9 +4790,9 @@ function smgmtApplyRunState(sprintStatusMap) {
       goalInput.classList.remove('smgmt-goal-readonly');
     }
     // Restore delete button
-    const blockId = block.id; // "smgmt-block-sprint-N"
+    const blockId = block.id; // "smgmt-block-sprint-N" or "smgmt-block-sprint-N.X"
     const blockLabel = blockId.replace('smgmt-block-', '');
-    const safeLabel = blockLabel.replace(/-/g, '_');
+    const safeLabel = blockLabel.replace(/-/g, '_').replace(/\./g, '_');
     const deleteBtn = document.getElementById(`smgmt-delete-btn-${safeLabel}`);
     if (deleteBtn) {
       deleteBtn.disabled = false;
@@ -4763,7 +4809,7 @@ function smgmtApplyRunState(sprintStatusMap) {
     const { project: runProj, sprint_label: runLabel } = entry;
     if (runProj !== _smgmtCurrentRepo) continue;  // not the currently viewed project
 
-    const safeLabel = runLabel.replace(/-/g, '_');
+    const safeLabel = runLabel.replace(/-/g, '_').replace(/\./g, '_');
     const block = document.getElementById(`smgmt-block-${runLabel}`);
     if (!block) continue;
 
@@ -5429,7 +5475,7 @@ async function smgmtRerunSprint(label) {
   if (!_smgmtCurrentRepo) return;
 
   _smgmtRerunLabel = label;
-  document.getElementById('smgmt-rerun-title').textContent = `Re-run Sprint ${label}?`;
+  document.getElementById('smgmt-rerun-title').textContent = `Re-run ${sprintLabelDisplay(label)}?`;
 
   const bodyEl = document.getElementById('smgmt-rerun-body');
   bodyEl.innerHTML = '<p style="color:var(--text-muted);padding:8px 0;">Loading preview…</p>';
@@ -5477,13 +5523,17 @@ async function smgmtRerunSprint(label) {
       </div>`);
     }
 
+    const isNoop = preview.redispatch_count === 0 && preview.tester_count === 0 && preview.skip_count > 0;
     if (rows.length === 0) {
       bodyEl.innerHTML = '<em style="color:var(--text-muted)">No tickets in this sprint.</em>';
+      if (confirmBtn) { confirmBtn.disabled = true; }
     } else {
+      if (isNoop) {
+        rows.unshift('<p style="color:var(--amber,#d97706);padding-bottom:6px">All tickets are in UAT — nothing to re-run. Confirming will return a no-op.</p>');
+      }
       bodyEl.innerHTML = rows.join('');
+      if (confirmBtn) { confirmBtn.disabled = false; }
     }
-
-    if (confirmBtn) { confirmBtn.disabled = false; }
   } catch (e) {
     clearTimeout(_rerunPreviewTimeout);
     const msg = e.name === 'AbortError'
@@ -5528,7 +5578,12 @@ async function smgmtRerunConfirm() {
       if (coderCount) parts.push(`${coderCount} coding`);
       if (testerCount) parts.push(`${testerCount} testing`);
       if (skipCount) parts.push(`${skipCount} skipped`);
-      showSuccessToast(`Re-run started: ${parts.join(', ') || '0 dispatched'}.`);
+      if (data.noop) {
+        showSuccessToast(data.message || 'Nothing to re-run — all tickets are in UAT.');
+      } else {
+        const subLabel = data.sub_label ? ` → ${sprintLabelDisplay(data.sub_label)}` : '';
+        showSuccessToast(`Re-run started${subLabel}: ${parts.join(', ') || '0 dispatched'}.`);
+      }
     }
 
     await smgmtSelectProject(_smgmtCurrentRepo);
@@ -5545,15 +5600,15 @@ let _smgmtFinishLabel = null;
 function smgmtFinishSprint(label) {
   if (!_smgmtCurrentRepo || !_smgmtData) return;
   _smgmtFinishLabel = label;
-  const n = parseInt(label.split('-')[1], 10);
+  const displayName = sprintLabelDisplay(label);
 
   // Count open issues in this sprint (from current data)
   const sprintTickets = (_smgmtData.issues || []).filter(
-    t => t.sprint != null && `sprint-${t.sprint}` === label
+    t => (t.sprint_label || (t.sprint != null ? `sprint-${t.sprint}` : null)) === label
   );
   const openCount = sprintTickets.length;
 
-  document.getElementById('smgmt-finish-title').textContent = `Finish Sprint ${n}?`;
+  document.getElementById('smgmt-finish-title').textContent = `Finish ${displayName}?`;
   const bodyEl = document.getElementById('smgmt-finish-body');
   if (openCount === 0) {
     bodyEl.innerHTML = '<em style="color:var(--text-muted)">No open issues in this sprint. The operation will succeed with 0 closures.</em>';
@@ -5656,16 +5711,16 @@ let _smgmtDeleteLabel = null;
 function smgmtDeleteSprint(label) {
   if (!_smgmtCurrentRepo || !_smgmtData) return;
   _smgmtDeleteLabel = label;
-  const n = parseInt(label.split('-')[1], 10);
+  const displayName = sprintLabelDisplay(label);
   const sprintTickets = (_smgmtData.issues || []).filter(
-    t => t.sprint != null && `sprint-${t.sprint}` === label
+    t => (t.sprint_label || (t.sprint != null ? `sprint-${t.sprint}` : null)) === label
   );
-  document.getElementById('smgmt-delete-title').textContent = `Delete Sprint ${n}?`;
+  document.getElementById('smgmt-delete-title').textContent = `Delete ${displayName}?`;
   const bodyEl = document.getElementById('smgmt-delete-body');
   const ticketCount = sprintTickets.length;
   bodyEl.innerHTML = ticketCount > 0
-    ? `<p>This will delete the <strong>sprint-${n}</strong> GitHub label and remove it from <strong>${ticketCount} ticket${ticketCount !== 1 ? 's' : ''}</strong>. The tickets themselves are not deleted.</p>`
-    : `<p>This will delete the <strong>sprint-${n}</strong> GitHub label. No tickets are attached to this sprint.</p>`;
+    ? `<p>This will delete the <strong>${label}</strong> GitHub label and remove it from <strong>${ticketCount} ticket${ticketCount !== 1 ? 's' : ''}</strong>. The tickets themselves are not deleted.</p>`
+    : `<p>This will delete the <strong>${label}</strong> GitHub label. No tickets are attached to this sprint.</p>`;
   const confirmBtn = document.getElementById('smgmt-delete-confirm');
   if (confirmBtn) { confirmBtn.disabled = false; confirmBtn.textContent = 'Delete sprint'; }
   document.getElementById('smgmt-delete-backdrop').classList.remove('hidden');

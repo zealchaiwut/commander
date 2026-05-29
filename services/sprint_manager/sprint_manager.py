@@ -62,6 +62,8 @@ except (ImportError, ModuleNotFoundError):  # pragma: no cover
     _sprint_repo = None  # type: ignore[assignment]
     _SPRINT_REPO_AVAILABLE = False
 
+from services.sprint_manager.state_machine import TicketState, TransitionError, transition
+
 # ── path setup ────────────────────────────────────────────────────────────────
 
 # This file lives at services/sprint_manager/sprint_manager.py
@@ -401,6 +403,32 @@ def _release_pid_lock(pid_path: Path) -> None:
         pass
 
 
+# ── plan.json lifecycle helpers (issue #380) ─────────────────────────────────
+
+def _plan_json_path_for(sprint_label: str, cfg: Optional["SprintConfig"] = None) -> Path:
+    sprints_dir = cfg.sprints_dir if cfg is not None else SPRINTS_DIR
+    return sprints_dir / f"{sprint_label}-plan.json"
+
+
+def _plan_json_update(sprint_label: str, updates: dict, cfg: Optional["SprintConfig"] = None) -> None:
+    """Merge `updates` into the existing plan.json; idempotent on missing file."""
+    plan_path = _plan_json_path_for(sprint_label, cfg)
+    existing: dict = {}
+    if plan_path.exists():
+        try:
+            existing = json.loads(plan_path.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    merged = {**existing, **updates}
+    try:
+        plan_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = plan_path.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(merged, indent=2), encoding="utf-8")
+        os.replace(str(tmp), str(plan_path))
+    except OSError as _e:
+        print(f"[plan-json] WARNING: could not write {plan_path}: {_e}", file=sys.stderr)
+
+
 # Hang detection constants (in seconds)
 HANG_WARN_SECS  = 30 * 60   # 30 minutes
 HANG_KILL_SECS  = 60 * 60   # 60 minutes
@@ -412,7 +440,7 @@ HANG_CHECK_SECS = 5  * 60   # check every 5 minutes
 # All other label additions are deferred to post-run; sprint-N is never
 # removed from a ticket until the sprint run ends.
 RUN_MUTABLE_LABELS: frozenset[str] = frozenset({
-    "in-progress", "sit", "uat", "needs-rework",
+    "in-progress", "SIT", "UAT", "needs-rework",
 })
 
 # Actual GitHub label strings (as applied on issues) that correspond to
@@ -456,6 +484,22 @@ def _guard_sprint_labels(
         safe_add = add
 
     return safe_add, safe_remove
+
+
+def _assert_run_mutable(labels: list[str], op: str) -> None:
+    """Raise ValueError if any label is not in RUN_MUTABLE_LABELS.
+
+    Logs the refusal before raising.  Callers catch ValueError, skip the
+    operation, and continue the sprint loop without crashing.
+    """
+    for lbl in labels:
+        if lbl not in RUN_MUTABLE_LABELS:
+            msg = (
+                f"Refused to {op} label {lbl!r} during sprint run"
+                " — outside RUN_MUTABLE_LABELS"
+            )
+            print(f"  [label-guard] {msg}", file=sys.stderr)
+            raise ValueError(msg)
 
 # ── end sprint-label protection ───────────────────────────────────────────────
 
@@ -1096,27 +1140,18 @@ def _get_issue_labels(issue_num: int, repo_name: Optional[str] = None) -> set[st
 def _apply_in_progress_label(
     issue_num: int,
     cfg: Optional["SprintConfig"] = None,
+    repo_name: Optional[str] = None,
 ) -> None:
-    """Apply the in-progress label via update_ticket.py (best-effort, issue #311 AC-5).
+    """Transition ticket to IN_PROGRESS via transition() (best-effort).
 
-    Called when coder_started_at is set so the board reflects active work.
-    Exceptions are caught and printed as warnings so a missing label never
-    blocks the sprint.
+    Called before dispatching the coder agent so the board reflects active work.
+    Exceptions are caught as warnings so a missing label never blocks the sprint.
     """
-    scripts_dir = cfg.scripts_dir if cfg is not None else SCRIPTS_DIR
-    update_script = scripts_dir / "update_ticket.py"
-    cmd = [
-        sys.executable, str(update_script),
-        "--issue", str(issue_num),
-        "--status", "in-progress",
-    ]
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
-        if result.returncode in (0, 2):
-            print(f"  [in-progress] label applied for #{issue_num}")
-        else:
-            structured_log.warn("label_apply_failed", f"update_ticket.py exited {result.returncode} for #{issue_num}", issue_num=issue_num, label="in-progress", exit_code=result.returncode, subprocess_stderr=result.stderr.strip()[:400] if result.stderr else "")
-    except Exception as e:
+        eff_repo = repo_name or (cfg.repo_name if cfg else None)
+        transition(issue_num, TicketState.IN_PROGRESS, actor="sprint_manager", repo=eff_repo)
+        print(f"  [in-progress] label applied for #{issue_num}")
+    except (TransitionError, Exception) as e:
         structured_log.warn("label_apply_failed", f"failed to apply in-progress label for #{issue_num}: {e}", issue_num=issue_num, label="in-progress", exc=str(e))
 
 
@@ -1124,31 +1159,21 @@ def _apply_needs_rework_label(
     issue_num: int,
     category: Optional[str],
     cfg: Optional["SprintConfig"] = None,
+    repo_name: Optional[str] = None,
 ) -> None:
-    """Apply the needs-rework label via update_ticket.py (best-effort).
+    """Transition ticket to NEEDS_REWORK via transition() (best-effort).
 
-    Only called for logic failure categories; exceptions are caught and printed
-    as warnings so a missing label never breaks the sprint.
+    Only called for logic failure categories; exceptions are caught as warnings
+    so a missing label never breaks the sprint.
     """
     if category not in _LOGIC_FAILURE_CATEGORIES:
         return
 
-    scripts_dir = cfg.scripts_dir if cfg is not None else SCRIPTS_DIR
-    update_script = scripts_dir / "update_ticket.py"
-    cmd = [
-        sys.executable, str(update_script),
-        "--issue", str(issue_num),
-        "--status", "needs-rework",
-        "--force",
-    ]
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
-        if result.returncode in (0, 2):
-            # exit 2 means label ops partially failed but a warning comment was posted
-            structured_log.info("needs_rework_label_applied", f"needs-rework label applied for #{issue_num}", issue_num=issue_num, category=category)
-        else:
-            structured_log.warn("label_apply_failed", f"update_ticket.py exited {result.returncode} for #{issue_num}", issue_num=issue_num, label="needs-rework", exit_code=result.returncode, subprocess_stderr=result.stderr.strip()[:400] if result.stderr else "")
-    except Exception as e:
+        eff_repo = repo_name or (cfg.repo_name if cfg else None)
+        transition(issue_num, TicketState.NEEDS_REWORK, actor="sprint_manager", repo=eff_repo)
+        structured_log.info("needs_rework_label_applied", f"needs-rework label applied for #{issue_num}", issue_num=issue_num, category=category)
+    except (TransitionError, Exception) as e:
         structured_log.warn("label_apply_failed", f"failed to apply needs-rework label for #{issue_num}: {e}", issue_num=issue_num, label="needs-rework", exc=str(e))
 
 
@@ -1158,24 +1183,25 @@ def _add_blocked_label(
     repo_name: Optional[str] = None,
     sprint_label: Optional[str] = None,
 ) -> None:
-    safe_add, _ = _guard_sprint_labels(["blocked"], [], sprint_label=sprint_label)
-    if not safe_add:
-        # "blocked" is outside RUN_MUTABLE_LABELS — suppressed during active run
-        print(
-            f"  [label-guard] 'blocked' label suppressed for #{issue_num} during active sprint run",
-            file=sys.stderr,
-        )
+    if sprint_label is not None:
         try:
-            github_client.add_comment(
-                issue_num,
-                f"Issue hung (HANG): {reason}. 'blocked' label deferred — applied post-run.",
-                repo_name=repo_name,
+            _assert_run_mutable(["blocked"], "add")
+        except ValueError:
+            print(
+                f"  [label-guard] 'blocked' label suppressed for #{issue_num} during active sprint run",
+                file=sys.stderr,
             )
-        except Exception as e:
-            structured_log.warn("hang_comment_failed", f"failed to post hang comment: {e}", exc=str(e))
-        return
+            try:
+                github_client.add_comment(
+                    issue_num,
+                    f"Issue hung (HANG): {reason}. 'blocked' label deferred — applied post-run.",
+                    repo_name=repo_name,
+                )
+            except Exception as e:
+                structured_log.warn("hang_comment_failed", f"failed to post hang comment: {e}", exc=str(e))
+            return
     try:
-        github_client.update_labels(issue_num, add=safe_add, repo_name=repo_name)
+        github_client.update_labels(issue_num, add=["blocked"], repo_name=repo_name)
         github_client.add_comment(
             issue_num,
             f"Issue blocked by sprint manager (HANG): {reason}",
@@ -1282,16 +1308,10 @@ def _revert_to_sit(issue_num: int, gate_name: str, output: str,
         except Exception as e:
             structured_log.error("failure_sidecar_write_error", f"failure parsing/sidecar failed: {e}", issue_num=issue_num, exc=str(e))
 
-    safe_add, safe_remove = _guard_sprint_labels(["SIT"], ["UAT", "in-progress"])
     try:
-        github_client.update_labels(
-            issue_num,
-            add=safe_add,
-            remove=safe_remove,
-            repo_name=repo_name,
-        )
+        transition(issue_num, TicketState.SIT, actor="sprint_manager", repo=repo_name)
         github_client.add_comment(issue_num, comment, repo_name=repo_name)
-    except Exception as e:
+    except (TransitionError, Exception) as e:
         structured_log.warn("github_update_failed", f"failed to update GitHub: {e}", issue_num=issue_num, exc=str(e))
 
 
@@ -1582,7 +1602,7 @@ def _call_finish_feature(
     repo_name: Optional[str] = None,
     cfg: Optional["SprintConfig"] = None,
 ) -> None:
-    """Call finish_feature.py as a subprocess from the worktester root."""
+    """Call finish_feature.py, then transition ticket to UAT on successful merge."""
     if cfg is not None:
         finish_script = cfg.finish_feature_script
         wt_root = worktester_root or cfg.worktree_tester
@@ -1604,6 +1624,21 @@ def _call_finish_feature(
         print(result.stdout.rstrip())
     if result.returncode != 0:
         structured_log.error("subprocess_nonzero_exit", f"finish_feature.py exited {result.returncode}", issue_num=issue_num, subprocess="finish_feature.py", exit_code=result.returncode, subprocess_stderr=result.stderr.rstrip() if result.stderr else "")
+        return
+
+    # finish_feature.py prints FINISH_FEATURE_OUTCOME merged sha=<sha> branch=<branch>
+    # on success. Transition the ticket to UAT now that the merge is confirmed.
+    merged_confirmed = any(
+        "FINISH_FEATURE_OUTCOME merged" in line
+        for line in (result.stdout or "").splitlines()
+    )
+    if merged_confirmed:
+        try:
+            transition(issue_num, TicketState.UAT, actor="sprint_manager", repo=repo_name)
+            print(f"  UAT label applied to issue #{issue_num}")
+        except (TransitionError, Exception) as exc:
+            structured_log.warn("uat_label_failed", f"UAT transition failed after merge: {exc}", issue_num=issue_num, exc=str(exc))
+            print(f"  Warning: UAT label could not be applied — {exc}", file=sys.stderr)
     else:
         print("  finish_feature.py completed successfully")
 
@@ -1729,24 +1764,12 @@ def handle_post_tester(
         if branch_is_merged:
             # Auto-recovery: branch is merged (or was merged and deleted) but UAT label absent
             print(f"  Issue #{issue_num}: branch is merged — auto-applying UAT label")
-            scripts_dir = cfg.scripts_dir if cfg is not None else SCRIPTS_DIR
-            update_script = scripts_dir / "update_ticket.py"
-            _UAT_RECOVERY_BACKOFFS = (2, 5, 10)
-            label_result = None
-            for attempt in range(len(_UAT_RECOVERY_BACKOFFS) + 1):
-                label_result = subprocess.run(
-                    [sys.executable, str(update_script), "--issue", str(issue_num), "--status", "uat"],
-                    capture_output=True, text=True,
-                )
-                if label_result.returncode == 0:
-                    break
-                if attempt < len(_UAT_RECOVERY_BACKOFFS):
-                    wait = _UAT_RECOVERY_BACKOFFS[attempt]
-                    print(
-                        f"  Warning: UAT label recovery attempt {attempt + 1} failed — retrying in {wait}s…",
-                        file=sys.stderr,
-                    )
-                    time.sleep(wait)
+            try:
+                transition(issue_num, TicketState.UAT, actor="sprint_manager", repo=eff_repo)
+                print(f"  Issue #{issue_num}: UAT label applied via auto-recovery")
+            except (TransitionError, Exception) as exc:
+                structured_log.warn("uat_recovery_failed", f"UAT label auto-recovery failed: {exc}", issue_num=issue_num, exc=str(exc))
+                print(f"  Warning: UAT label auto-recovery failed — {exc}", file=sys.stderr)
 
             recovery_comment = (
                 "Detected merged feature branch without UAT label — applied UAT automatically "
@@ -1756,16 +1779,6 @@ def handle_post_tester(
                 github_client.add_comment(issue_num, recovery_comment, repo_name=eff_repo)
             except Exception as exc:
                 structured_log.warn("uat_recovery_comment_failed", f"failed to post UAT recovery comment: {exc}", issue_num=issue_num, exc=str(exc))
-
-            if label_result is None or label_result.returncode != 0:
-                stderr_text = label_result.stderr.strip() if label_result else "unknown error"
-                print(
-                    f"  Warning: UAT label auto-recovery failed after "
-                    f"{len(_UAT_RECOVERY_BACKOFFS) + 1} attempts — {stderr_text}",
-                    file=sys.stderr,
-                )
-            else:
-                print(f"  Issue #{issue_num}: UAT label applied via auto-recovery")
 
             # Treat as a successful merge — gates may run below
             print(f"\nTester promoted issue #{issue_num} to UAT (auto-recovered) -- running quality gates...")
@@ -1992,6 +2005,13 @@ def _dispatch_coder(
             " `scripts/finish_feature.py` after tests pass."
         )
 
+    # Label guard: always append regardless of template so coders never touch labels.
+    if "DO NOT modify any GitHub label" not in prompt:
+        prompt += (
+            " DO NOT modify any GitHub label on this issue or any other issue."
+            " Label transitions are managed exclusively by sprint_manager."
+        )
+
     # Inject failure context from sidecar if available (AC: sprint manager reads sidecar)
     failure_suffix = _build_failure_suffix(issue_num)
     if failure_suffix:
@@ -2012,6 +2032,8 @@ def _dispatch_coder(
     sub_env.pop("ANTHROPIC_API_KEY", None)
     if eff_repo:
         sub_env["COMMANDER_PROJECT"] = eff_repo
+    if sprint_label:
+        sub_env["COMMANDER_SPRINT_RUNNING"] = sprint_label
     if sprint_branch not in ("develop",):
         sub_env["COMMANDER_MERGE_TARGET"] = sprint_branch
         # Always append sprint-mode instructions regardless of whether a custom
@@ -2204,7 +2226,8 @@ def _dispatch_tester(
             f" you MUST immediately run `python3 dashboard/scripts/finish_feature.py --issue {issue_num}`"
             " from the repo root without asking. The script reads COMMANDER_MERGE_TARGET from its"
             " own env to pick the merge target — do not override with --target-branch."
-            " finish_feature.py applies the UAT label automatically — do NOT separately edit labels or close the issue."
+            " sprint_manager applies the UAT label after finish_feature.py confirms the merge —"
+            " do NOT separately edit labels or close the issue."
             " NEVER apply the UAT-approved label or close the issue — UAT-approved is set ONLY by the human"
             " via the dashboard Approve button or scripts/approve_ticket.py."
             " Do NOT output language like 'let me know if you want me to...' —"
@@ -2216,6 +2239,13 @@ def _dispatch_tester(
             " means other than finish_feature.py. Merging by any other path will skip the"
             " UAT label entirely and constitutes a workflow failure — halt immediately and"
             " report the violation rather than proceeding."
+        )
+
+    # Label guard: always append regardless of template so testers never touch labels.
+    if "DO NOT modify any GitHub label" not in prompt:
+        prompt += (
+            " DO NOT modify any GitHub label on this issue or any other issue."
+            " Label transitions are managed exclusively by sprint_manager."
         )
     cmd = [
         "claude",
@@ -2232,6 +2262,8 @@ def _dispatch_tester(
     sub_env.pop("ANTHROPIC_API_KEY", None)
     if eff_repo:
         sub_env["COMMANDER_PROJECT"] = eff_repo
+    if sprint_label:
+        sub_env["COMMANDER_SPRINT_RUNNING"] = sprint_label
     if sprint_branch not in ("develop",):
         sub_env["COMMANDER_MERGE_TARGET"] = sprint_branch
         # Always append sprint-mode instructions regardless of whether a custom
@@ -4184,6 +4216,10 @@ def run_sprint(
 
     start_time = time.monotonic()
 
+    # AC-4 (issue #379): set env var so all child subprocesses (coder, tester,
+    # update_ticket.py, finish_feature.py) inherit the sprint-running guard.
+    os.environ["COMMANDER_SPRINT_RUNNING"] = label
+
     total_issues = len(state.issues)
     for idx, issue_state in enumerate(state.issues, start=1):
         num   = issue_state.number
@@ -4279,10 +4315,9 @@ def run_sprint(
             state.save(state_path)
             _post_sprint_status(state, api_url=api_url)
 
-            # AC-5 (issue #311): apply in-progress label when coder starts so the
-            # board reflects active work during coding.  Best-effort — never blocks
-            # the sprint on label failure.
-            _apply_in_progress_label(num, cfg=cfg)
+            # Apply in-progress label before dispatching coder so the board reflects
+            # active work. Best-effort — never blocks the sprint on label failure.
+            _apply_in_progress_label(num, cfg=cfg, repo_name=eff_repo)
 
             def _on_coder_running(
                 _is=issue_state, _st=state, _sp=state_path, _api=api_url,
@@ -4326,7 +4361,7 @@ def run_sprint(
                     cfg=cfg,
                     repo=eff_repo,
                 )
-                _apply_needs_rework_label(num, category, cfg=cfg)
+                _apply_needs_rework_label(num, category, cfg=cfg, repo_name=eff_repo)
                 _neon_ticket_status(label, num, "failed", _eff_sprints_dir)
                 state.save(state_path)
                 _post_sprint_status(state, api_url=api_url, project=eff_repo)
@@ -4353,7 +4388,7 @@ def run_sprint(
                     cfg=cfg,
                     repo=eff_repo,
                 )
-                _apply_needs_rework_label(num, category, cfg=cfg)
+                _apply_needs_rework_label(num, category, cfg=cfg, repo_name=eff_repo)
                 _neon_ticket_status(label, num, "failed", _eff_sprints_dir)
                 state.save(state_path)
                 _post_sprint_status(state, api_url=api_url, project=eff_repo)
@@ -4370,6 +4405,14 @@ def run_sprint(
         issue_state.tester_started_at = issue_state.status_changed_at
         state.save(state_path)
         _post_sprint_status(state, api_url=api_url)
+
+        # Apply SIT label before dispatching tester so the board reflects testing state.
+        # Best-effort — never blocks the sprint on label failure.
+        try:
+            transition(num, TicketState.SIT, actor="sprint_manager", repo=eff_repo)
+            print(f"  [SIT] label applied for #{num}")
+        except (TransitionError, Exception) as _sit_exc:
+            structured_log.warn("label_apply_failed", f"failed to apply SIT label for #{num}: {_sit_exc}", issue_num=num, label="SIT", exc=str(_sit_exc))
 
         def _on_tester_running(
             _is=issue_state, _st=state, _sp=state_path, _api=api_url
@@ -4464,13 +4507,16 @@ def run_sprint(
                 cfg=cfg,
                 repo=eff_repo,
             )
-            _apply_needs_rework_label(num, category, cfg=cfg)
+            _apply_needs_rework_label(num, category, cfg=cfg, repo_name=eff_repo)
             _neon_ticket_status(label, num, "failed", _eff_sprints_dir)
 
         elapsed = time.monotonic() - start_time
         state.wall_clock_secs = elapsed
         state.save(state_path)
         _post_sprint_status(state, api_url=api_url, project=eff_repo)
+
+    # Sprint loop ended; clear the running guard so post-sprint agents are unrestricted.
+    os.environ.pop("COMMANDER_SPRINT_RUNNING", None)
 
     # Final elapsed time
     state.wall_clock_secs = time.monotonic() - start_time
@@ -4698,6 +4744,15 @@ def main() -> None:
         global _sprint_user_cancelled
         _sprint_user_cancelled = True
         _cleanup_pid()
+        # Best-effort: write cancelled state before exiting (issue #380)
+        try:
+            _plan_json_update(args.label, {
+                "state": "cancelled",
+                "ended_at": datetime.now(timezone.utc).isoformat(),
+                "end_reason": "sigterm",
+            }, cfg=cfg)
+        except Exception:
+            pass
         raise SystemExit(130)
 
     signal.signal(signal.SIGTERM, _sigterm_handler)
@@ -4772,6 +4827,16 @@ def main() -> None:
             )
         else:
             summary_path = None
+
+        # Update plan.json to completed on natural exit (issue #380)
+        try:
+            _plan_json_update(args.label, {
+                "state": "completed",
+                "ended_at": datetime.now(timezone.utc).isoformat(),
+                "end_reason": "natural",
+            }, cfg=cfg)
+        except Exception:
+            pass
 
     except SystemExit:
         if _sprint_user_cancelled:

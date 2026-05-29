@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
-"""Merge a tested feature branch into develop and promote the ticket to UAT.
+"""Merge a tested feature branch into the target branch.
 
 Call this after tests pass. It:
   1. Fetches latest from origin
   2. Checks out the feature/<N>-* branch
-  3. Merges it into develop with --no-ff
-  4. Pushes develop
-  5. Applies the UAT label via update_ticket.py (branch still exists at this point)
-  6. Deletes the feature branch locally and on origin
+  3. Merges it into the target branch with --no-ff
+  4. Pushes the target branch
+  5. Deletes the feature branch locally and on origin
+
+Prints FINISH_FEATURE_OUTCOME merged sha=<sha> branch=<branch> to stdout on
+success. Label transitions are sprint_manager's responsibility.
 
 On merge conflict: aborts cleanly, posts a comment, exits non-zero.
 
@@ -18,10 +20,8 @@ Run from the git root of the repository (NOT from dashboard/).
 """
 import argparse
 import os
-import re
 import subprocess
 import sys
-import time
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).parent.parent
@@ -33,12 +33,6 @@ load_dotenv(_DASHBOARD_DIR / ".env")
 import github_client
 from services.run_id import mint_run_id
 from services.logging import log as structured_log
-
-# Sprint labels (sprint-N) must never be removed during or after a merge.
-# Label changes here go through update_ticket.py which enforces this too,
-# but this guard protects any future direct github_client.update_labels calls.
-_SPRINT_LABEL_RE = re.compile(r"^sprint-\d+$")
-
 
 def _run(*cmd) -> str:
     return subprocess.run(cmd, capture_output=True, text=True, check=True).stdout.strip()
@@ -139,47 +133,13 @@ def main():
             pass
         sys.exit(1)
 
-    # Capture merge commit SHA now — passed to update_ticket.py so the UAT
-    # safeguard uses ancestry check instead of branch-ref presence (no race).
-    ok, merge_sha = _try("git", "rev-parse", "HEAD")
-    if not ok or not merge_sha:
-        print("Warning: could not capture merge SHA; UAT safeguard will fall back to branch-ref check.", file=sys.stderr)
-        merge_sha = None
-
     _run("git", "push", "origin", target)
     print(f"Pushed {target}.")
 
-    # Apply UAT label. Pass the merge SHA so the safeguard can verify ancestry
-    # authoritatively without racing against ref propagation. On transient
-    # GitHub API failures allow one short retry.
-    update_ticket = Path(__file__).parent / "update_ticket.py"
-    uat_cmd = [
-        sys.executable, str(update_ticket),
-        "--issue", str(args.issue),
-        "--status", "uat",
-        "--target-branch", target,
-    ]
-    if merge_sha:
-        uat_cmd += ["--merge-sha", merge_sha]
-
-    label_result = None
-    for attempt in range(2):
-        label_result = subprocess.run(uat_cmd, capture_output=True, text=True)
-        if label_result.returncode == 0:
-            break
-        if attempt == 0:
-            print("Warning: UAT label attempt 1 failed — retrying in 3s…", file=sys.stderr)
-            time.sleep(3)
-
-    if label_result.returncode != 0:
-        stderr_text = label_result.stderr.strip()
-        print(
-            f"Error: failed to apply UAT label after 2 attempts — {stderr_text}",
-            file=sys.stderr,
-        )
-        sys.exit(2)
-    else:
-        print(f"UAT label applied to issue #{args.issue}.")
+    # Capture the merge commit SHA for the outcome line
+    ok, merge_sha = _try("git", "rev-parse", "HEAD")
+    if not ok:
+        merge_sha = "unknown"
 
     # Clean up feature branch
     _try("git", "branch", "-d", branch)
@@ -187,6 +147,7 @@ def main():
 
     print(f"✅  Merged {branch} into {target}")
     print(f"    Feature branch deleted locally and on origin")
+    print(f"FINISH_FEATURE_OUTCOME merged sha={merge_sha} branch={branch}")
 
 
 if __name__ == "__main__":

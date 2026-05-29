@@ -480,6 +480,10 @@ COMMANDER_TEST_MODE=1 pytest tests/integration/test_sandbox_isolation.py -v
 
 See `docs/testing/sandbox-repo.md` for full setup and seeding instructions.
 
+## Rules
+
+- **DO NOT modify any GitHub label on this issue or any other issue. Label transitions are managed by sprint_manager.**
+
 ## Notes
 
 - The UAT server must be running at `$UAT_BASE_URL` for HTTP tests to pass. If Step 0's curl check warned the server wasn't responding, and all tests then fail with connection errors, say so clearly rather than marking them all as real failures.

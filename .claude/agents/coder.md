@@ -133,3 +133,13 @@ Tell the user:
 - If you encounter a failing test in the existing `tests/` suite that is unrelated to your feature, note it but do not fix it in this branch.
 - Keep commits atomic and well-described. The Tester reads the git log.
 - Use `codedb_search` aggressively — reading code is faster than guessing.
+
+## MERGE BOUNDARY (issue #311)
+
+Your responsibility ends at **pushing the feature branch**. You must NOT merge to the target branch by any means:
+
+- Do **not** run `git merge`
+- Do **not** open, approve, or merge a pull request against `develop` or any sprint branch
+- Do **not** run `scripts/finish_feature.py` — that is exclusively the tester's job
+
+Merging is done by the Tester agent via `scripts/finish_feature.py` after tests pass. If you merge the branch yourself, the UAT label will be skipped and the ticket will be stuck in an inconsistent state.

@@ -17,14 +17,23 @@ all retries (a warning comment is posted to the issue in that case).
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import time
 from pathlib import Path
 
-_DASHBOARD_DIR = Path(__file__).parent.parent / "apps" / "dashboard"
+_REPO_ROOT = Path(__file__).parent.parent
+_DASHBOARD_DIR = _REPO_ROOT / "apps" / "dashboard"
+sys.path.insert(0, str(_REPO_ROOT))
 sys.path.insert(0, str(_DASHBOARD_DIR))
 import github_client
+from services.logging import log as structured_log
+from services.run_id import mint_run_id
+
+# Sprint labels (sprint-N) are protected: they must never be removed by a
+# status transition. This guard matches any "sprint-<digits>" label name.
+_SPRINT_LABEL_RE = re.compile(r"^sprint-\d+$")
 
 STATUS_MAP = {
     "in-progress": {
@@ -157,7 +166,7 @@ def _fetch_current_labels(issue: int, repo: str) -> set[str]:
         return set()
 
 
-def _run_with_retry(cmd: list[str], label: str, operation: str) -> tuple[bool, str]:
+def _run_with_retry(cmd: list[str], label: str, operation: str, issue_num: int = 0) -> tuple[bool, str]:
     """Run a gh label command with up to 3 retries and backoff.
 
     Returns (success, last_stderr).
@@ -170,10 +179,15 @@ def _run_with_retry(cmd: list[str], label: str, operation: str) -> tuple[bool, s
         last_stderr = result.stderr.strip()
         if attempt < len(_BACKOFFS):
             wait = _BACKOFFS[attempt]
-            print(
-                f"Warning: {operation} label \"{label}\" attempt {attempt + 1} failed "
-                f"— retrying in {wait}s…",
-                file=sys.stderr,
+            structured_log.warn(
+                "ticket_update_retry",
+                f"{operation} label \"{label}\" attempt {attempt + 1} failed — retrying in {wait}s",
+                issue_num=issue_num,
+                label=label,
+                operation=operation,
+                attempt=attempt + 1,
+                retry_delay_secs=wait,
+                subprocess_stderr=last_stderr,
             )
             time.sleep(wait)
     return False, last_stderr
@@ -182,20 +196,31 @@ def _run_with_retry(cmd: list[str], label: str, operation: str) -> tuple[bool, s
 def main():
     _load_env()
 
+    _run_id = mint_run_id("manual")
+    os.environ["COMMANDER_RUN_ID"] = _run_id
+    structured_log.set_context(run_id=_run_id, source="update_ticket")
+
     parser = argparse.ArgumentParser(description="Update issue status")
     parser.add_argument("--issue",  type=int, required=True)
     parser.add_argument("--status", required=True, choices=list(STATUS_MAP))
     parser.add_argument("--force",  action="store_true",
                         help="Skip UAT merge safeguard (prints warning to stderr)")
+    parser.add_argument("--repo",   default=None,
+                        help="Override repo (owner/name).  Defaults to auto-detected repo.")
     args = parser.parse_args()
+    structured_log.set_context(issue_num=args.issue)
+    structured_log.info("ticket_update_start", f"updating issue #{args.issue} to status {args.status!r}", issue_num=args.issue, status=args.status)
 
     if args.status == "uat":
         _check_uat_safeguard(args.issue, args.force)
 
-    try:
-        repo = github_client.repo()
-    except ValueError as e:
-        sys.exit(str(e))
+    if args.repo:
+        repo = args.repo
+    else:
+        try:
+            repo = github_client.repo()
+        except ValueError as e:
+            sys.exit(str(e))
 
     mapping = STATUS_MAP[args.status]
 
@@ -210,7 +235,7 @@ def main():
         op = f'add "{lbl}"'
         attempted_ops.append(op)
         cmd = ["gh", "issue", "edit", str(args.issue), "--repo", repo, "--add-label", lbl]
-        success, last_stderr = _run_with_retry(cmd, lbl, "add")
+        success, last_stderr = _run_with_retry(cmd, lbl, "add", issue_num=args.issue)
         if success:
             print(f'applied label "{lbl}"')
         else:
@@ -220,12 +245,15 @@ def main():
     # Handle each remove label individually
     for lbl in mapping["remove"]:
         op = f'remove "{lbl}"'
+        if _SPRINT_LABEL_RE.match(lbl):
+            print(f'skipped remove "{lbl}" (sprint label protected)', file=sys.stderr)
+            continue
         if lbl not in current_labels:
             print(f'skipped remove "{lbl}" (not present)')
             continue
         attempted_ops.append(op)
         cmd = ["gh", "issue", "edit", str(args.issue), "--repo", repo, "--remove-label", lbl]
-        success, last_stderr = _run_with_retry(cmd, lbl, "remove")
+        success, last_stderr = _run_with_retry(cmd, lbl, "remove", issue_num=args.issue)
         if success:
             print(f'removed label "{lbl}"')
         else:

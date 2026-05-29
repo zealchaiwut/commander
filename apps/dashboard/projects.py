@@ -462,6 +462,7 @@ def get_project_details(repo: str, agents: list[dict]) -> dict:
             "is_uat":         status == "UAT",
             "feature_branch": feature_branches.get(issue["number"]),
             "sprint_label":   _ticket_sprint_label(issue),
+            "labels":         [l["name"] for l in issue.get("labels", [])],
         })
 
     proj_agents = _project_agents(proj, agents)

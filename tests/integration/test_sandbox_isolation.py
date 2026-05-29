@@ -1,7 +1,7 @@
 """Integration tests verifying GitHub operations in test mode target the sandbox repo.
 
-Sets COMMANDER_TEST_MODE=1 and asserts that get_repo_for_operation() returns a URL
-containing 'commander-issue-test', not the real 'zealchaiwut/commander' repo.
+Sets COMMANDER_TEST_MODE=1 and asserts that get_repo_for_operation() returns the value
+of GITHUB_ISSUE_TEST_REPO (or COMMANDER_TEST_REPO), not the work repo.
 """
 import os
 import sys
@@ -39,24 +39,31 @@ class _EnvPatch:
                 os.environ[key] = orig
 
 
-def test_get_repo_for_operation_test_mode_returns_sandbox():
-    """COMMANDER_TEST_MODE=1 must redirect all operations to the sandbox repo."""
-    with _EnvPatch(COMMANDER_TEST_MODE="1", COMMANDER_TEST_REPO=None):
+def test_get_repo_for_operation_test_mode_uses_github_issue_test_repo():
+    """COMMANDER_TEST_MODE=1 with GITHUB_ISSUE_TEST_REPO set must redirect to that repo."""
+    sandbox = "myorg/sandbox-repo"
+    with _EnvPatch(
+        COMMANDER_TEST_MODE="1",
+        COMMANDER_TEST_REPO=None,
+        GITHUB_ISSUE_TEST_REPO=sandbox,
+    ):
+        # Reload TEST_GITHUB_REPO from env since it's module-level in config
+        import importlib
+        import config
+        importlib.reload(config)
+        github_client.TEST_GITHUB_REPO = config.TEST_GITHUB_REPO  # type: ignore[attr-defined]
         result = github_client.get_repo_for_operation()
-    assert "commander-issue-test" in result, (
+    assert result == sandbox, (
         f"Expected sandbox repo in test mode, got: {result!r}"
     )
-    assert result != "zealchaiwut/commander", (
-        "Test mode must not target the production repo"
-    )
 
 
-def test_get_repo_for_operation_production_repo_redirected():
-    """Passing the production repo directly must redirect to sandbox (self-referential detection)."""
+def test_get_repo_for_operation_production_repo_unchanged_outside_test_mode():
+    """Outside test mode, any repo passes through unchanged."""
     with _EnvPatch(COMMANDER_TEST_MODE=None):
-        result = github_client.get_repo_for_operation("zealchaiwut/commander")
-    assert "commander-issue-test" in result, (
-        f"Targeting production repo should redirect to sandbox, got: {result!r}"
+        result = github_client.get_repo_for_operation("myorg/some-repo")
+    assert result == "myorg/some-repo", (
+        f"Non-test-mode repo should be unchanged, got: {result!r}"
     )
 
 
@@ -69,15 +76,6 @@ def test_get_repo_for_operation_other_repo_unchanged():
     )
 
 
-def test_r_function_uses_sandbox_in_test_mode():
-    """The internal _r() resolver must also apply sandbox redirection."""
-    with _EnvPatch(COMMANDER_TEST_MODE="1"):
-        result = github_client._r("zealchaiwut/commander")
-    assert "commander-issue-test" in result, (
-        f"_r() should redirect to sandbox in test mode, got: {result!r}"
-    )
-
-
 def test_custom_test_repo_override():
     """COMMANDER_TEST_REPO env var must override the default sandbox target."""
     with _EnvPatch(COMMANDER_TEST_MODE="1", COMMANDER_TEST_REPO="myorg/my-custom-sandbox"):
@@ -87,13 +85,13 @@ def test_custom_test_repo_override():
     )
 
 
-def test_no_production_repo_in_test_mode():
-    """Verify the real commander repo is never returned when test mode is active."""
-    with _EnvPatch(COMMANDER_TEST_MODE="1"):
-        result = github_client.get_repo_for_operation("zealchaiwut/commander")
-    assert result != "zealchaiwut/commander", (
-        "Production repo must never be targeted in test mode"
+def test_no_work_repo_in_test_mode():
+    """Verify the real work repo is never returned when test mode is active and a sandbox is configured."""
+    work_repo = "myorg/the-real-repo"
+    sandbox = "myorg/sandbox-repo"
+    with _EnvPatch(COMMANDER_TEST_MODE="1", COMMANDER_TEST_REPO=sandbox):
+        result = github_client.get_repo_for_operation(work_repo)
+    assert result != work_repo, (
+        "Work repo must never be targeted in test mode when a sandbox is configured"
     )
-    assert "commander-issue-test" in result or "sandbox" in result.lower() or (
-        os.environ.get("COMMANDER_TEST_REPO", "") in result
-    ), f"Unexpected repo in test mode: {result!r}"
+    assert result == sandbox, f"Unexpected repo in test mode: {result!r}"

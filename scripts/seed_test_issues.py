@@ -10,8 +10,8 @@ Usage:
     python3 scripts/seed_test_issues.py --dry-run    # print what would happen, no API calls
 
 The fixture file is scripts/test_fixtures/issues.yaml.
-All operations target TEST_GITHUB_REPO (default: zealchaiwut/commander-test-issue),
-overrideable via COMMANDER_TEST_REPO env var.
+All operations target the repo from GITHUB_ISSUE_TEST_REPO (or COMMANDER_TEST_REPO)
+env var.  Set one of these before running, or pass --repo explicitly.
 """
 import argparse
 import json
@@ -240,8 +240,13 @@ def main() -> None:
                         help="Also create feature branches for each issue")
     parser.add_argument("--dry-run", action="store_true",
                         help="Print planned operations without making any API calls")
-    parser.add_argument("--repo", default=TEST_GITHUB_REPO,
-                        help=f"Target repo (default: {TEST_GITHUB_REPO})")
+    _default_repo = TEST_GITHUB_REPO or ""
+    parser.add_argument(
+        "--repo",
+        default=_default_repo or None,
+        required=not bool(_default_repo),
+        help="Target repo (owner/repo). Defaults to GITHUB_ISSUE_TEST_REPO env var.",
+    )
     args = parser.parse_args()
 
     repo = args.repo

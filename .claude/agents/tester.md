@@ -380,6 +380,17 @@ python3 "$MAIN_REPO/dashboard/scripts/post_test_report.py" \
 
 **Only call `finish_feature.py` when `PYTEST_EXIT_CODE` is `0` and status is `READY_FOR_UAT`.** Any other condition must not trigger a merge.
 
+#### MERGE PATH ENFORCEMENT (issue #311)
+
+`scripts/finish_feature.py` is the **ONLY** sanctioned merge path. The following are **strictly forbidden**:
+
+- Running `git merge` directly
+- Merging or approving a pull request via the GitHub UI or CLI
+- Pushing commits directly to the target branch (`develop` or any sprint branch)
+- Any other method that bypasses `finish_feature.py`
+
+**Merging by any other path will skip the UAT label entirely and constitutes a workflow failure.** If you find yourself considering a direct merge for any reason, halt immediately and report the situation rather than proceeding.
+
 If `READY_FOR_UAT` (pytest exit code 0, all tests pass):
 ```bash
 # Merges to target branch, pushes, labels UAT, deletes branch — all in one step

@@ -12,8 +12,11 @@ import time
 from pathlib import Path
 from typing import Optional
 
+from config import TEST_GITHUB_REPO
+
 CACHE_TTL = 30.0
 SPRINT_RE = re.compile(r"^sprint-(\d+)$")
+SPRINT_LABEL_RE_ALL = re.compile(r"^sprint-(\d+)(?:\.(\d+))?$")
 STATUS_LABELS = {"in-progress", "SIT", "UAT", "UAT-approved", "need-rework", "blocked"}
 
 _cache: dict[str, tuple[float, object]] = {}
@@ -63,7 +66,7 @@ def get_repo_for_operation(repo_name: str | None = None) -> str:
     resolved = repo_name or repo()
     test_mode = os.environ.get("COMMANDER_TEST_MODE", "").strip() == "1"
     if test_mode:
-        return os.environ.get("COMMANDER_TEST_REPO", "zealchaiwut/commander-issue-test")
+        return os.environ.get("COMMANDER_TEST_REPO", TEST_GITHUB_REPO)
     return resolved
 
 
@@ -204,24 +207,37 @@ def delete_label(label_name: str, repo_name: str | None = None) -> None:
     invalidate(f"issues:{r}:")
 
 
+def edit_label(old_name: str, new_name: str, description: str | None = None,
+               repo_name: str | None = None) -> None:
+    """Rename a GitHub label in-place. GitHub updates all issues automatically."""
+    r = _r(repo_name)
+    cmd = ["label", "edit", old_name, "--repo", r, "--name", new_name]
+    if description is not None:
+        cmd += ["--description", description]
+    _run(*cmd)
+    invalidate(f"sprints:{r}")
+    invalidate(f"open_issues:{r}")
+    invalidate(f"open_issues_body:{r}")
+    invalidate(f"issues:{r}:")
+    invalidate(f"labels:{r}")
+
+
 def assign_sprint(issue_id: int, sprint_num: int | None, repo_name: str | None = None) -> None:
     """Assign (or remove) a sprint-N label on an issue.
 
-    If sprint_num is None, removes all sprint-* labels.
-    If sprint_num is set, ensures the label exists, removes other sprint-* labels,
-    then adds sprint-N.
+    If sprint_num is None, removes all sprint-* labels (move to backlog).
+    If sprint_num is set, ensures the label exists, removes other sprint-* labels
+    and removes the 'backlog' label if present, then adds sprint-N.
     """
     r = _r(repo_name)
 
     # Find existing sprint labels on the issue
     issue = get_issue(issue_id, repo_name=repo_name)
-    current_sprint_labels = [
-        lbl["name"] for lbl in issue.get("labels", [])
-        if SPRINT_RE.match(lbl["name"])
-    ]
+    current_labels = [lbl["name"] for lbl in issue.get("labels", [])]
+    current_sprint_labels = [lbl for lbl in current_labels if SPRINT_RE.match(lbl)]
 
     if sprint_num is None:
-        # Remove all sprint labels
+        # Remove all sprint labels (ticket moves to backlog)
         if current_sprint_labels:
             cmd = ["issue", "edit", str(issue_id), "--repo", r]
             for lbl in current_sprint_labels:
@@ -231,7 +247,10 @@ def assign_sprint(issue_id: int, sprint_num: int | None, repo_name: str | None =
         ensure_sprint_label(sprint_num, repo_name=repo_name)
         target_label = f"sprint-{sprint_num}"
         add_labels = [target_label]
+        # Remove other sprint labels and also remove 'backlog' label if present
         remove_labels = [lbl for lbl in current_sprint_labels if lbl != target_label]
+        if "backlog" in current_labels:
+            remove_labels.append("backlog")
         update_labels(issue_id, add=add_labels, remove=remove_labels, repo_name=repo_name)
 
     invalidate(f"issues:{r}:")
@@ -288,6 +307,89 @@ def list_sprints(repo_name: str | None = None) -> list[int]:
     return _cached(key, fetch)
 
 
+def _sprint_label_sort_key_gc(label: str) -> tuple[int, int]:
+    """Return (base, suffix) sort key for sprint labels (plain or dotted)."""
+    m = SPRINT_LABEL_RE_ALL.match(label)
+    if not m:
+        return (0, 0)
+    return (int(m.group(1)), int(m.group(2)) if m.group(2) else 0)
+
+
+def list_sprint_labels(repo_name: str | None = None) -> list[str]:
+    """Return all sprint labels (sprint-N and sprint-N.X) sorted naturally."""
+    r = _r(repo_name)
+    key = f"sprint_labels:{r}"
+    def fetch():
+        labels = _json("label", "list", "--repo", r, "--json", "name", "--limit", "200")
+        result = []
+        for lbl in labels:
+            if SPRINT_LABEL_RE_ALL.match(lbl["name"]):
+                result.append(lbl["name"])
+        return sorted(result, key=_sprint_label_sort_key_gc)
+    return _cached(key, fetch)
+
+
+def get_label_color(label_name: str, repo_name: str | None = None) -> str | None:
+    """Return the hex color (without #) of a GitHub label, or None if not found."""
+    r = _r(repo_name)
+    try:
+        labels = _json("label", "list", "--repo", r, "--json", "name,color", "--limit", "200")
+        for lbl in labels:
+            if lbl["name"] == label_name:
+                return lbl["color"]
+    except Exception:
+        pass
+    return None
+
+
+def create_label(name: str, color: str, description: str = "", repo_name: str | None = None) -> None:
+    """Create a GitHub label with the given color. Ignores if it already exists."""
+    r = _r(repo_name)
+    try:
+        _run("label", "create", name, "--repo", r,
+             "--color", color, "--description", description)
+    except subprocess.CalledProcessError:
+        pass
+    invalidate(f"sprints:{r}")
+    invalidate(f"sprint_labels:{r}")
+    invalidate(f"labels:{r}")
+
+
+def assign_sprint_by_label(issue_id: int, sprint_label: str | None,
+                           repo_name: str | None = None) -> None:
+    """Assign (or remove) a sprint label on an issue by label string.
+
+    Handles both plain sprint-N and dotted sprint-N.X labels.
+    If sprint_label is None, removes all sprint-* labels.
+    """
+    r = _r(repo_name)
+    issue = get_issue(issue_id, repo_name=repo_name)
+    current_labels = [lbl["name"] for lbl in issue.get("labels", [])]
+    current_sprint_labels = [lbl for lbl in current_labels if SPRINT_LABEL_RE_ALL.match(lbl)]
+
+    if sprint_label is None:
+        if current_sprint_labels:
+            cmd = ["issue", "edit", str(issue_id), "--repo", r]
+            for lbl in current_sprint_labels:
+                cmd += ["--remove-label", lbl]
+            _run(*cmd)
+        invalidate(f"issues:{r}:")
+        return
+
+    to_add = [sprint_label] if sprint_label not in current_labels else []
+    to_remove = [lbl for lbl in current_sprint_labels if lbl != sprint_label]
+    to_remove += [lbl for lbl in ["backlog"] if lbl in current_labels]
+
+    if to_add or to_remove:
+        cmd = ["issue", "edit", str(issue_id), "--repo", r]
+        for lbl in to_add:
+            cmd += ["--add-label", lbl]
+        for lbl in to_remove:
+            cmd += ["--remove-label", lbl]
+        _run(*cmd)
+    invalidate(f"issues:{r}:")
+
+
 def latest_active_sprint(repo_name: str | None = None) -> Optional[int]:
     r = _r(repo_name)
     key = f"latest_sprint:{r}"
@@ -314,6 +416,27 @@ def get_pr(pr_number: int, repo_name: str | None = None) -> dict:
         "pr", "view", str(pr_number), "--repo", _r(repo_name),
         "--json", "number,title,state,url,body,headRefName",
     )
+
+
+def find_open_pr_for_head(head_branch: str, repo_name: str | None = None) -> dict | None:
+    """Return the first open PR whose head branch matches head_branch, or None."""
+    r = _r(repo_name)
+    try:
+        prs = _json(
+            "pr", "list", "--repo", r,
+            "--head", head_branch,
+            "--state", "open",
+            "--json", "number,title,url,headRefName,baseRefName",
+        )
+        return prs[0] if prs else None
+    except subprocess.CalledProcessError:
+        return None
+
+
+def merge_pr(pr_number: int, repo_name: str | None = None) -> None:
+    """Merge a PR by number using a merge commit (preserves history)."""
+    r = _r(repo_name)
+    _run("pr", "merge", str(pr_number), "--repo", r, "--merge")
 
 
 def repo_config() -> dict:

@@ -22,8 +22,8 @@ The root route `/` and `/home` both load the Home tab (previously called "Overvi
 
 ### Project drill-in
 
-Clicking an active project card from the Home tab opens the project detail view in
-`/projects/<owner>/<repo>`. A persistent sidebar lists all tracked projects; a
+Clicking an active project card from the Home tab opens the project detail view at
+`/project/{slug}` (current route; `/projects/` is legacy, pending removal). A persistent sidebar lists all tracked projects; a
 sub-tab bar lets you switch between Sprint Mgmt, Agents, and Tickets without a
 full page reload. The project page shows:
 

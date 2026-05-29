@@ -8,6 +8,11 @@ venv/
 .venv/
 .pytest_cache/
 
+# Environment variables
+.env
+.env.*
+!.env.example
+
 # Claude Code — local/generated files
 .claude/settings.local.json
 **/.claude/settings.local.json
@@ -31,7 +36,9 @@ sprints/
 .commander/bulk-jobs/
 .commander/docs/
 
+# dashboard temp
 apps/dashboard/projects.json
+apps/dashboard/tests/
 
 # Backup config — stores gist ID, gitignored by design
 .commander/backup_config.json

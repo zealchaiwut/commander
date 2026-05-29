@@ -18,16 +18,26 @@ Run from the git root of the repository (NOT from dashboard/).
 """
 import argparse
 import os
+import re
 import subprocess
 import sys
 import time
 from pathlib import Path
 
-_DASHBOARD_DIR = Path(__file__).parent.parent / "apps" / "dashboard"
+_REPO_ROOT = Path(__file__).parent.parent
+_DASHBOARD_DIR = _REPO_ROOT / "apps" / "dashboard"
+sys.path.insert(0, str(_REPO_ROOT))
 sys.path.insert(0, str(_DASHBOARD_DIR))
 from dotenv import load_dotenv
 load_dotenv(_DASHBOARD_DIR / ".env")
 import github_client
+from services.run_id import mint_run_id
+from services.logging import log as structured_log
+
+# Sprint labels (sprint-N) must never be removed during or after a merge.
+# Label changes here go through update_ticket.py which enforces this too,
+# but this guard protects any future direct github_client.update_labels calls.
+_SPRINT_LABEL_RE = re.compile(r"^sprint-\d+$")
 
 
 def _run(*cmd) -> str:
@@ -53,6 +63,10 @@ def find_branch(issue_num: int) -> str | None:
 
 
 def main():
+    _run_id = mint_run_id("manual")
+    os.environ["COMMANDER_RUN_ID"] = _run_id
+    structured_log.set_context(run_id=_run_id, source="finish_feature")
+
     p = argparse.ArgumentParser(description="Merge feature branch into target branch after tests pass")
     p.add_argument("--issue", type=int, required=True, help="Issue number")
     p.add_argument("--repo",  default=None,            help="owner/repo override")
@@ -63,6 +77,8 @@ def main():
     )
     args = p.parse_args()
     target = args.target_branch
+    structured_log.set_context(issue_num=args.issue)
+    structured_log.info("feature_finish_start", f"merging feature branch for issue #{args.issue} into {target}", issue_num=args.issue)
 
     # Fetch so remote-only branches are visible
     print("Fetching from origin…")

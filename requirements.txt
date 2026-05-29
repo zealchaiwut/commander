@@ -10,3 +10,7 @@ pyyaml>=6.0
 selenium==4.27.1
 webdriver-manager==4.0.2
 psutil>=5.9
+psycopg2-binary>=2.9
+sqlalchemy>=2.0
+alembic>=1.13
+psycopg[binary]>=3.1

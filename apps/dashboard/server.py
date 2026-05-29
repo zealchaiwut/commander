@@ -1,6 +1,7 @@
 import asyncio
 import hashlib
 import json
+import logging
 import os
 import re
 import shutil
@@ -21,8 +22,8 @@ except ImportError:
     _psutil = None  # type: ignore[assignment]
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
+from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, model_validator
 
@@ -46,6 +47,43 @@ except ImportError:
     _backup_module = None  # type: ignore[assignment]
     _BACKUP_AVAILABLE = False
 
+try:
+    import sprint_repo as _sprint_repo
+    _SPRINT_REPO_AVAILABLE = True
+except Exception:
+    _sprint_repo = None  # type: ignore[assignment]
+    _SPRINT_REPO_AVAILABLE = False
+
+try:
+    import sync_projects_to_neon as _sync_projects_module
+    _SYNC_PROJECTS_AVAILABLE = True
+except Exception:
+    _sync_projects_module = None  # type: ignore[assignment]
+    _SYNC_PROJECTS_AVAILABLE = False
+
+
+def _sprint_json_path(project_root: Path, sprint_label: str) -> Path:
+    return _commander_dir(project_root) / "sprints" / f"{sprint_label}.json"
+
+
+def _sprint_json_write(path: Path, data: dict) -> None:
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        os.replace(str(tmp), str(path))
+    except OSError as _e:
+        print(f"[sprint-json] WARNING: could not write {path}: {_e}")
+
+
+def _sprint_json_read(path: Path) -> dict:
+    if path.exists():
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    return {}
+
 STATIC_DIR = Path(__file__).parent / "static"
 ENVIRONMENT = os.environ.get("ENVIRONMENT", "prd").lower()
 
@@ -56,6 +94,21 @@ _TIMEOUT_CHECK_INTERVAL: int = 60  # run the check every 60 seconds
 
 _subscribers: list[asyncio.Queue] = []
 _start_time: float = 0.0
+
+
+# ── Git startup metadata (issue #329) ─────────────────────────────────────────
+# Captured once at process start; never re-runs git per request.
+
+def _capture_git_value(cmd: list) -> str:
+    try:
+        return subprocess.check_output(cmd, stderr=subprocess.DEVNULL, text=True).strip()
+    except Exception:
+        return "unknown"
+
+
+_GIT_SHA: str = _capture_git_value(["git", "rev-parse", "--short", "HEAD"])
+_GIT_BRANCH: str = _capture_git_value(["git", "rev-parse", "--abbrev-ref", "HEAD"])
+_STARTED_AT: str = datetime.now(timezone.utc).isoformat()
 
 
 # ── Build hash (cache-busting) ─────────────────────────────────────────────────
@@ -318,13 +371,68 @@ def _restore_sprint_statuses_on_startup() -> None:
     )
 
 
+def _check_repo_accessible(repo: str) -> bool:
+    """Return True if `repo` (owner/repo) exists and is accessible via gh CLI.
+
+    Uses `gh repo view --json name` which returns exit code 0 on success.
+    Network errors or missing repos both produce non-zero exit codes.
+    """
+    try:
+        result = subprocess.run(
+            ["gh", "repo", "view", repo, "--json", "name"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        return result.returncode == 0
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return False
+
+
+def _validate_github_repos() -> None:
+    """Validate GITHUB_REPO and GITHUB_ISSUE_TEST_REPO at startup.
+
+    AC (issue #301):
+    - GITHUB_REPO missing/inaccessible → sys.exit with descriptive error.
+    - GITHUB_ISSUE_TEST_REPO set but missing/inaccessible → print warning, continue.
+    """
+    # Validate work repo (GITHUB_REPO)
+    try:
+        work_repo = github_client.repo()
+    except ValueError as exc:
+        sys.exit(f"[startup] {exc}")
+
+    if not _check_repo_accessible(work_repo):
+        sys.exit(
+            f"Configured GITHUB_REPO '{work_repo}' does not exist or is inaccessible."
+        )
+
+    # Validate test repo (GITHUB_ISSUE_TEST_REPO) — warning only, never fatal
+    test_repo = os.environ.get("GITHUB_ISSUE_TEST_REPO", "").strip()
+    if test_repo and not _check_repo_accessible(test_repo):
+        print(
+            f"GITHUB_ISSUE_TEST_REPO '{test_repo}' is set but does not exist or is "
+            f"inaccessible — tester issue/label tests will be skipped.",
+            flush=True,
+        )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global _start_time
     _start_time = time.monotonic()
     db.init_db()
+    _validate_github_repos()
     _sweep_orphan_pid_files()
     _restore_sprint_statuses_on_startup()
+    # Sync projects.json → Neon (non-blocking; warn on failure, never fatal)
+    if _SYNC_PROJECTS_AVAILABLE:
+        try:
+            _result = _sync_projects_module.sync_projects_to_neon()
+            logger.info("projects sync complete: %s", _result)
+        except Exception as _exc:
+            logger.warning("projects sync failed (non-fatal): %s", _exc)
+
     # Start backup scheduler and queue a startup backup after 30 s
     if _BACKUP_AVAILABLE:
         try:
@@ -345,6 +453,8 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan)
+
+logger = logging.getLogger(__name__)
 
 
 # ── API no-cache middleware (issue #249) ──────────────────────────────────────
@@ -630,11 +740,6 @@ async def home_redirect():
     return RedirectResponse(url="/", status_code=301)
 
 
-@app.get("/home-preview")
-async def home_preview_redirect():
-    return RedirectResponse(url="/", status_code=301)
-
-
 @app.get("/overview")
 async def overview_redirect():
     return RedirectResponse(url="/", status_code=301)
@@ -646,12 +751,41 @@ async def diagnostics_page():
     return _serve_html(STATIC_DIR / "diagnostics.html")
 
 
-@app.get("/projects/{path:path}")
-async def spa_project_route(path: str):
-    if path.endswith("/plan-sprint"):
-        new_path = path[: -len("plan-sprint")] + "sprint-mgmt"
-        return RedirectResponse(url=f"/projects/{new_path}", status_code=308)
+# ── Legacy UI route (/legacy/<slug>/<tab>) ────────────────────────────────────
+# Deprecated legacy route: serves the old index.html UI.
+# Emits a warning on every hit so operators can track usage before removal.
+# New-ticket creation no longer navigates here — all ticket creation goes
+# through the current-UI modal on /project/ pages (issue #272).
+
+@app.get("/legacy/{path:path}")
+async def legacy_project_route(path: str):
+    """Serve the legacy index.html UI at /legacy/. DEPRECATED — use /project/ instead."""
+    logger.warning("Deprecated /legacy/ route hit: /%s", path)
     return _serve_html(STATIC_DIR / "index.html")
+
+
+# ── /projects/ redirect — 301 to current /project/ UI ─────────────────────────
+# Old /projects/<slug>/<tab> bookmarks are redirected to /project/<slug>/<tab>.
+# Paths that cannot be cleanly mapped (no slug/tab) go to the dashboard home.
+
+@app.get("/projects/{path:path}")
+async def projects_redirect(path: str):
+    """Redirect /projects/<slug>/<tab> → /project/<slug>/<tab> (301).
+
+    Any path that does not contain a recognisable slug/tab segment is redirected
+    to the dashboard home ('/') instead of serving the legacy UI.
+    """
+    # Strip leading/trailing slashes and split into parts
+    parts = [p for p in path.strip("/").split("/") if p]
+    if len(parts) >= 2:
+        slug, tab = parts[0], parts[1]
+        return RedirectResponse(url=f"/project/{slug}/{tab}", status_code=301)
+    elif len(parts) == 1:
+        slug = parts[0]
+        return RedirectResponse(url=f"/project/{slug}/sprint-mgmt", status_code=301)
+    else:
+        # No recognisable slug — send to dashboard home
+        return RedirectResponse(url="/", status_code=301)
 
 
 # ── Slug-based project routes (/project/<slug>/...) ───────────────────────────
@@ -764,16 +898,23 @@ def get_environment():
 
 @app.get("/api/version")
 def get_version():
-    """Return the build version hash for cache-busting (issue #249).
+    """Return build metadata for the running process (issue #329).
 
     Response shape:
     {
       "version": "1.0",
-      "build": "abc12345"
+      "git_sha": "abc1234",
+      "branch": "main",
+      "started_at": "2026-05-29T12:00:00+00:00"
     }
     """
     return JSONResponse(
-        content={"version": _APP_VERSION, "build": _BUILD_HASH},
+        content={
+            "version": _APP_VERSION,
+            "git_sha": _GIT_SHA[:7] if _GIT_SHA != "unknown" else "unknown",
+            "branch": _GIT_BRANCH,
+            "started_at": _STARTED_AT,
+        },
         headers={"Cache-Control": "no-cache, must-revalidate"},
     )
 
@@ -820,27 +961,6 @@ async def receive_token_usage(event: TokenUsageEvent):
     )
     await broadcast({"type": "update", "event": event.model_dump()})
     return {"ok": True}
-
-
-@app.get("/api/debug/token-usage/by-agent-model")
-def debug_token_usage_by_agent_model(since: Optional[str] = None):
-    """Return token usage grouped by agent_role and model_name.
-
-    Useful for auditing which agents/models are consuming tokens.
-    Optional query param: since=<ISO-8601> to restrict to a time window.
-    """
-    return db.get_token_usage_by_agent_model(window_start_utc=since)
-
-
-@app.get("/api/debug/token-usage")
-def debug_token_usage():
-    """AC-2: Diagnostic endpoint for the token_usage pipeline.
-
-    Returns row_count (int), latest_recorded_at (ISO-8601 or null),
-    and tokens_today (int) so operators can confirm pipeline health
-    without querying SQLite directly.
-    """
-    return db.get_debug_token_usage()
 
 
 @app.get("/api/agents")
@@ -918,6 +1038,32 @@ def get_github_labels(repo: Optional[str] = None):
         raise HTTPException(400, detail=str(e))
 
 
+class CreateLabelBody(BaseModel):
+    name: str
+    color: str = "a2eeef"
+    description: str = ""
+    repo: Optional[str] = None
+
+
+@app.post("/api/github/labels")
+def post_create_label(body: CreateLabelBody):
+    """Create a new GitHub label in the repo; returns updated label list."""
+    body.name = body.name.strip()
+    if not body.name:
+        raise HTTPException(400, detail="Label name is required.")
+    try:
+        github_client.create_label(
+            body.name, body.color,
+            description=body.description,
+            repo_name=body.repo,
+        )
+        return github_client.list_labels(repo_name=body.repo)
+    except subprocess.CalledProcessError as e:
+        raise _gh_error(e)
+    except ValueError as e:
+        raise HTTPException(400, detail=str(e))
+
+
 @app.get("/api/sprints")
 def get_sprints():
     try:
@@ -966,6 +1112,15 @@ async def approve_ticket(issue_id: int, repo: Optional[str] = None):
 def reject_issue(issue_id: int, body: RejectBody, repo: Optional[str] = None):
     try:
         github_client.reject_issue(issue_id, body.reason, repo_name=repo)
+        return {"ok": True}
+    except subprocess.CalledProcessError as e:
+        raise _gh_error(e)
+
+
+@app.post("/api/issues/{issue_id}/close")
+def close_issue_endpoint(issue_id: int, repo: Optional[str] = None):
+    try:
+        github_client.close_issue(issue_id, repo_name=repo)
         return {"ok": True}
     except subprocess.CalledProcessError as e:
         raise _gh_error(e)
@@ -1070,6 +1225,68 @@ async def remove_project(owner: str, repo_name: str, body: RemoveProjectBody):
     return {"ok": True, "removed": removed}
 
 
+@app.post("/api/projects/sync-to-db")
+async def sync_projects_to_db():
+    """Trigger a manual sync of projects.json → Neon.
+
+    Returns a JSON summary: {projects_synced, projects_skipped, envs_synced, envs_skipped, errors}.
+    """
+    if not _SYNC_PROJECTS_AVAILABLE:
+        raise HTTPException(status_code=503, detail="sync module not available")
+    try:
+        return _sync_projects_module.sync_projects_to_neon()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/api/projects/{project}/running-sprint")
+def get_running_sprint(project: str):
+    """Return the currently running sprint for the given project slug.
+
+    200 — { label, started_at (ISO 8601 UTC), pid }
+    204 — no sprint running (or only stale PID files)
+    404 — project not registered
+    """
+    try:
+        all_projects = projects_module.load_projects()
+    except Exception:
+        all_projects = []
+
+    matched = next(
+        (p for p in all_projects
+         if p["repo"].split("/")[-1] == project or p["repo"] == project),
+        None,
+    )
+    if matched is None:
+        raise HTTPException(status_code=404, detail=f"Project '{project}' not found")
+
+    project_root = _project_root_path(matched["repo"])
+    sprints_dir = _commander_dir(project_root) / "sprints"
+
+    if not sprints_dir.exists():
+        return Response(status_code=204)
+
+    seen: set[str] = set()
+    for pid_file in list(sprints_dir.glob("*-pid")) + list(sprints_dir.glob("*-pid.pending")):
+        label = pid_file.name.removesuffix("-pid.pending").removesuffix("-pid")
+        if label in seen:
+            continue
+        seen.add(label)
+        if _is_sprint_running(project_root, label):
+            try:
+                pid = int(pid_file.read_text(encoding="utf-8").strip())
+            except (ValueError, OSError):
+                pid = 0
+            try:
+                mtime = pid_file.stat().st_mtime
+                started_at = datetime.fromtimestamp(mtime, tz=timezone.utc).isoformat().replace("+00:00", "Z")
+            except OSError:
+                started_at = datetime.now(tz=timezone.utc).isoformat().replace("+00:00", "Z")
+            return {"label": label, "started_at": started_at, "pid": pid}
+
+    return Response(status_code=204)
+
+
 @app.post("/api/projects/{owner}/{repo_name}/approve-batch")
 async def approve_batch(owner: str, repo_name: str):
     repo = f"{owner}/{repo_name}"
@@ -1122,7 +1339,7 @@ async def init_project(body: InitProjectBody):
     # Build subprocess command
     script_path = Path(__file__).parent / "scripts" / "init_project.py"
     cmd = [
-        "python3",
+        sys.executable,
         str(script_path),
         repo_name,
         "--projects-dir", str(projects_dir),
@@ -1560,7 +1777,19 @@ def _home_project_data(proj: dict, running_sprints: list[dict]) -> dict:
     uat_issues = [i for i in all_open if any(l["name"] == "UAT" for l in i.get("labels", []))]
     backlog_issues = [i for i in all_open if github_client.classify_issue(i) == "backlog"]
 
-    if proj_running:
+    # Supplement PID-based check with Neon: if Neon says a sprint is running for
+    # this project, the sidebar dot is green even if the JSON file was deleted.
+    neon_running = False
+    if not proj_running and _SPRINT_REPO_AVAILABLE and _sprint_repo is not None:
+        try:
+            neon_running = any(
+                s.status == "running"
+                for s in _sprint_repo.list_sprints(project=repo)
+            )
+        except Exception:
+            pass
+
+    if proj_running or neon_running:
         status = "running"
     elif uat_issues:
         status = "uat-pending"
@@ -2018,7 +2247,8 @@ def _sprint_estimate_size(issue: dict) -> str:
 
 class SprintAssignBody(BaseModel):
     issue: int
-    sprint: Optional[int] = None  # None = remove all sprint labels
+    sprint: Optional[int] = None        # None = remove all sprint labels (legacy)
+    sprint_label: Optional[str] = None  # e.g. "sprint-15.1"; takes precedence over sprint
 
 
 @app.get("/api/sprint-planning/issues")
@@ -2069,18 +2299,27 @@ def get_sprint_planning_issues():
 async def assign_sprint_label(body: SprintAssignBody):
     """Assign or remove a sprint label on an issue.
 
-    Body: {"issue": 21, "sprint": 3} — assigns sprint-3, removes other sprint-* labels
-    Body: {"issue": 21, "sprint": null} — removes all sprint-* labels
+    Body: {"issue": 21, "sprint": 3}               — assigns sprint-3 (legacy)
+    Body: {"issue": 21, "sprint_label": "sprint-15.1"} — assigns sprint-15.1 (dotted sub-label)
+    Body: {"issue": 21, "sprint": null}             — removes all sprint-* labels
 
     On success: invalidates cache, broadcasts SSE sprint_plan_update, returns {"ok": true}.
     Creates sprint-N label if it doesn't exist.
     """
     try:
-        github_client.assign_sprint(body.issue, body.sprint)
+        if body.sprint_label is not None:
+            # Dotted or plain label string — use the string-based assign function
+            label = body.sprint_label.strip() or None
+            if label and not _SPRINT_LABEL_RE.match(label):
+                raise HTTPException(400, detail=f"Invalid sprint_label: {label!r}")
+            github_client.assign_sprint_by_label(body.issue, label)
+        else:
+            github_client.assign_sprint(body.issue, body.sprint)
         # Invalidate open_issues_body cache so next GET reflects the change
         github_client.invalidate("open_issues_body:")
         github_client.invalidate("open_issues:")
         github_client.invalidate("sprints:")
+        github_client.invalidate("sprint_labels:")
     except subprocess.CalledProcessError as e:
         raise _gh_error(e)
     except ValueError as e:
@@ -2129,24 +2368,23 @@ async def add_sprint_label(issue_id: int, body: SprintLabelBody):
     - sprint_label: "sprint-N" string (or null/empty to remove sprint label)
     - sprint: int (legacy; converted to "sprint-N")
     """
-    # Resolve the sprint number from whichever field was provided
+    # Resolve the sprint label from whichever field was provided
     if body.sprint_label is not None:
         raw = body.sprint_label.strip()
         if raw == "" or raw == "backlog":
-            sprint_num = None
+            label_to_assign: str | None = None
+        elif _SPRINT_LABEL_RE.match(raw):
+            label_to_assign = raw
         else:
-            m = re.match(r"^sprint-(\d+)$", raw)
-            if not m:
-                raise HTTPException(400, detail=f"Invalid sprint_label: {raw!r}")
-            sprint_num = int(m.group(1))
+            raise HTTPException(400, detail=f"Invalid sprint_label: {raw!r}")
     elif body.sprint is not None:
-        sprint_num = body.sprint
+        label_to_assign = f"sprint-{body.sprint}"
     else:
         raise HTTPException(400, detail="Provide sprint_label or sprint")
 
     repo = body.project or None
     try:
-        github_client.assign_sprint(issue_id, sprint_num, repo_name=repo)
+        github_client.assign_sprint_by_label(issue_id, label_to_assign, repo_name=repo)
     except subprocess.CalledProcessError as e:
         raise _gh_error(e)
     except ValueError as e:
@@ -2203,11 +2441,33 @@ async def batch_sprint_labels(body: BatchLabelsBody):
     return {"applied": applied, "failed": failed, "errors": errors}
 
 
-_SPRINT_LABEL_RE = re.compile(r"^sprint-\d+$")
+_SPRINT_LABEL_RE = re.compile(r"^sprint-\d+(\.\d+)?$")
 
 _REPO_ROOT = Path(__file__).parent.parent.parent
 SPRINT_MANAGER_PATH = _REPO_ROOT / "services" / "sprint_manager" / "sprint_manager.py"
 SPRINT_LOG_PATH = Path(__file__).parent / "sprints" / "sprint_run.log"
+
+
+def _sprint_label_sort_key(label: str) -> tuple[int, int]:
+    """Return (base, suffix) for natural sprint label ordering."""
+    m = re.match(r"^sprint-(\d+)(?:\.(\d+))?$", label)
+    if not m:
+        return (0, 0)
+    return (int(m.group(1)), int(m.group(2)) if m.group(2) else 0)
+
+
+def _next_sprint_sublabel(sprint_label: str) -> str:
+    """Compute the next sub-label for a sprint re-run.
+
+    sprint-15   → sprint-15.1
+    sprint-15.3 → sprint-15.4
+    """
+    m = re.match(r"^sprint-(\d+)(?:\.(\d+))?$", sprint_label)
+    if not m:
+        raise ValueError(f"Invalid sprint label: {sprint_label!r}")
+    base = int(m.group(1))
+    suffix = int(m.group(2)) if m.group(2) else 0
+    return f"sprint-{base}.{suffix + 1}"
 
 
 class SprintRunBody(BaseModel):
@@ -2227,7 +2487,7 @@ def run_sprint(body: SprintRunBody):
     SPRINT_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
     log_fh = open(SPRINT_LOG_PATH, "a")
 
-    cmd = ["python3", str(SPRINT_MANAGER_PATH), body.label]
+    cmd = [sys.executable, str(SPRINT_MANAGER_PATH), body.label]
     if body.budget is not None:
         cmd += [f"--budget={body.budget}"]
 
@@ -2284,8 +2544,8 @@ def _sprint_goal_path(project_root: Path, sprint_label: str) -> Path:
     return _commander_dir(project_root) / "sprints" / f"{sprint_label}-goal.txt"
 
 
-def _load_sprint_order(project_root: Path, all_sprints: list[int]) -> list[str]:
-    """Load sprint order from file; fill missing/new sprints in ascending order."""
+def _load_sprint_order(project_root: Path, all_sprint_labels: list[str]) -> list[str]:
+    """Load sprint order from file; fill missing/new sprint labels in natural order."""
     order_path = _sprint_order_path(project_root)
     saved: list[str] = []
     if order_path.exists():
@@ -2294,13 +2554,13 @@ def _load_sprint_order(project_root: Path, all_sprints: list[int]) -> list[str]:
         except Exception:
             saved = []
 
-    all_labels = {f"sprint-{n}" for n in all_sprints}
+    all_labels = set(all_sprint_labels)
     saved_set = set(saved)
 
     # Start with known order, filter out sprints that no longer exist
     result = [s for s in saved if s in all_labels]
-    # Append any new sprints not in saved order (ascending)
-    new_sprints = sorted(all_labels - saved_set, key=lambda s: int(s.split("-")[1]))
+    # Append any new sprints not in saved order (natural sort)
+    new_sprints = sorted(all_labels - saved_set, key=_sprint_label_sort_key)
     result.extend(new_sprints)
     return result
 
@@ -2473,24 +2733,30 @@ def get_sprint_management_issues(repo: str):
     Also returns:
     - empty_sprint_labels: sprint labels that have 0 open tickets (stale/ghost sprints)
     - placeholder_sprint: the next sprint number to show as a drop target (max+1)
+
+    Issues include a sprint_label field (e.g. "sprint-15" or "sprint-15.1") that
+    identifies their exact sprint label, including dotted sub-labels.
     """
     try:
         issues = github_client.list_open_issues_with_body(repo_name=repo, limit=200)
         sprints = github_client.list_sprints(repo_name=repo)
+        all_sprint_labels = github_client.list_sprint_labels(repo_name=repo)
     except subprocess.CalledProcessError as e:
         raise _gh_error(e)
     except ValueError as e:
         raise HTTPException(400, detail=str(e))
 
-    sprint_re_local = re.compile(r"^sprint-(\d+)$")
+    sprint_label_re = re.compile(r"^sprint-(\d+)(?:\.(\d+))?$")
     result_issues = []
-    # Count open tickets per sprint label
-    sprint_ticket_counts: dict[int, int] = {n: 0 for n in sprints}
+    # Count open tickets per sprint label (both plain and dotted)
+    sprint_ticket_counts: dict[str, int] = {lbl: 0 for lbl in all_sprint_labels}
     for iss in issues:
         sprint_num = None
+        found_sprint_label = None
         for lbl in iss.get("labels", []):
-            m = sprint_re_local.match(lbl["name"])
+            m = sprint_label_re.match(lbl["name"])
             if m:
+                found_sprint_label = lbl["name"]
                 sprint_num = int(m.group(1))
                 break
         result_issues.append({
@@ -2498,32 +2764,42 @@ def get_sprint_management_issues(repo: str):
             "title": iss["title"],
             "labels": iss.get("labels", []),
             "sprint": sprint_num,
+            "sprint_label": found_sprint_label,
             "status": github_client.classify_issue(iss),
             "url": iss.get("url", ""),
         })
-        if sprint_num is not None and sprint_num in sprint_ticket_counts:
-            sprint_ticket_counts[sprint_num] += 1
+        if found_sprint_label is not None and found_sprint_label in sprint_ticket_counts:
+            sprint_ticket_counts[found_sprint_label] += 1
 
-    # Compute the minimum sprint number that has >= 1 open ticket (lowest active sprint)
-    active_sprint_nums = [n for n, count in sprint_ticket_counts.items() if count > 0]
+    # For "empty sprint" cleanup: only care about plain sprint-N labels
+    plain_sprint_counts = {
+        n: sprint_ticket_counts.get(f"sprint-{n}", 0) for n in sprints
+    }
+    active_sprint_nums = [n for n, count in plain_sprint_counts.items() if count > 0]
+    # Also consider sub-labels when determining if a base sprint is active
+    for lbl in all_sprint_labels:
+        m = sprint_label_re.match(lbl)
+        if m and m.group(2) and sprint_ticket_counts.get(lbl, 0) > 0:
+            base = int(m.group(1))
+            if base not in active_sprint_nums:
+                active_sprint_nums.append(base)
     min_active_sprint = min(active_sprint_nums) if active_sprint_nums else None
 
-    # Sprint labels with 0 tickets are "empty" — only include those strictly below the
-    # lowest active sprint (sprints at or above the threshold are not offered for cleanup).
-    # If there are no active sprints at all, no sprints are offered for cleanup.
     empty_sprint_labels = [
-        f"sprint-{n}" for n in sorted(sprint_ticket_counts.keys())
-        if sprint_ticket_counts[n] == 0
+        f"sprint-{n}" for n in sorted(plain_sprint_counts.keys())
+        if plain_sprint_counts[n] == 0
         and min_active_sprint is not None
         and n < min_active_sprint
     ]
 
-    # Build order only from sprints that have tickets (non-empty)
-    non_empty_sprints = [n for n in sprints if sprint_ticket_counts.get(n, 0) > 0]
+    # Build order from all sprint labels (plain and dotted) that have tickets
+    non_empty_sprint_labels = [
+        lbl for lbl in all_sprint_labels if sprint_ticket_counts.get(lbl, 0) > 0
+    ]
     project_root = _project_root_path(repo)
-    order = _load_sprint_order(project_root, non_empty_sprints)
+    order = _load_sprint_order(project_root, non_empty_sprint_labels)
 
-    # Placeholder sprint = max existing sprint + 1 (or 1 if no sprints)
+    # Placeholder sprint = max plain sprint number + 1 (or 1 if none)
     placeholder_sprint = (max(sprints) if sprints else 0) + 1
 
     return {
@@ -2780,7 +3056,7 @@ def run_sprint_managed(body: SprintMgmtRunBody):
     log_fh = open(log_path, "w")
     try:
         proc = subprocess.Popen(
-            ["python3", str(SPRINT_MANAGER_PATH), body.sprint_label, "--skip-gates"],
+            [sys.executable, str(SPRINT_MANAGER_PATH), body.sprint_label, "--skip-gates"],
             env=stripped_env,
             cwd=str(coder_path),
             stdout=log_fh,
@@ -2801,6 +3077,32 @@ def run_sprint_managed(body: SprintMgmtRunBody):
     pending_path.write_text(str(proc.pid), encoding="utf-8")
     os.replace(str(pending_path), str(pid_path))
 
+    # Early-crash detection: if the subprocess exits within 2 seconds it almost
+    # certainly failed to start (e.g. missing venv dependency).  Read the tail
+    # of the dispatch log and return HTTP 502 with the error detail so the
+    # caller gets a meaningful message instead of a silent 202.
+    try:
+        proc.wait(timeout=2.0)
+        # Process already exited — read the log tail for the error message.
+        log_fh.flush()
+        try:
+            log_text = log_path.read_text(encoding="utf-8", errors="replace")
+            tail = "\n".join(log_text.splitlines()[-30:]) if log_text else "(no output)"
+        except OSError:
+            tail = "(could not read log)"
+        # Clean up the PID file since the process is already dead.
+        try:
+            pid_path.unlink()
+        except OSError:
+            pass
+        raise HTTPException(
+            502,
+            detail=f"Sprint subprocess exited immediately (rc={proc.returncode}). Log tail:\n{tail}",
+        )
+    except subprocess.TimeoutExpired:
+        # Still running after 2 seconds — normal startup, return 202.
+        pass
+
     return {
         "ok": True,
         "sprint_label": body.sprint_label,
@@ -2809,16 +3111,6 @@ def run_sprint_managed(body: SprintMgmtRunBody):
         "migrated_count": migrated_count,
         "migrate_from": body.migrate_from,
     }
-
-
-@app.get("/api/sprints/running")
-def get_running_sprints():
-    """Return all currently running sprints across all projects (checks PID files).
-
-    Returns {"sprints": [...], "count": N} where each item is {project, sprint_label}.
-    """
-    sprints = _all_sprints_running()
-    return {"sprints": sprints, "count": len(sprints)}
 
 
 @app.get("/api/sprints/running-all")
@@ -2883,6 +3175,19 @@ def kill_sprint(sprint_label: str, project: str):
         except OSError:
             pass
 
+    # Neon + JSON: mark sprint as cancelled (best-effort — don't fail the kill).
+    if _SPRINT_REPO_AVAILABLE and _sprint_repo is not None:
+        try:
+            _sprint_repo.update_sprint_status(sprint_label, "cancelled")
+        except Exception as _e:
+            print(f"[neon] WARNING: could not mark sprint {sprint_label!r} cancelled: {_e}")
+    project_root = _project_root_path(project)
+    json_path = _sprint_json_path(project_root, sprint_label)
+    data = _sprint_json_read(json_path)
+    if data:
+        data["status"] = "cancelled"
+        _sprint_json_write(json_path, data)
+
     return {"ok": True}
 
 
@@ -2891,75 +3196,19 @@ def get_dispatch_log(sprint_label: str, project: str, tail_lines: int = 200):
     """Return the last N lines of the most recent sprint-run-<label>-*.log."""
     if not _SPRINT_LABEL_RE.match(sprint_label):
         raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")
+    from log_source import read_log  # local import keeps startup fast
     project_root = _project_root_path(project)
-    log_dir = _commander_dir(project_root) / "logs"
-    tail_lines = max(1, min(tail_lines, 2000))
-
-    candidates = sorted(
-        log_dir.glob(f"sprint-run-{sprint_label}-*.log"),
-        key=lambda p: p.stat().st_mtime,
-        reverse=True,
-    ) if log_dir.exists() else []
-
-    if not candidates:
-        return {"found": False, "log_dir": str(log_dir), "tail": ""}
-
-    log_path = candidates[0]
-    try:
-        lines = log_path.read_text(encoding="utf-8", errors="replace").splitlines()
-    except OSError as e:
-        return {"found": False, "log_dir": str(log_dir), "tail": "", "error": str(e)}
-
-    tail = "\n".join(lines[-tail_lines:])
-    mtime = datetime.fromtimestamp(log_path.stat().st_mtime, tz=timezone.utc).isoformat()
-    return {"found": True, "path": str(log_path), "tail": tail, "mtime": mtime}
+    return read_log("dispatch", project_root, label=sprint_label, tail_lines=tail_lines)
 
 
 @app.get("/api/sprints/{sprint_label}/issue/{issue_num}/log")
 def get_issue_log(sprint_label: str, project: str, issue_num: int, tail_lines: int = 200):
-    """Return the last N lines of the most recent sprint-issue-<N>.log."""
+    """Return the last N lines of sprint-issue-<N>.log for the given sprint."""
     if not _SPRINT_LABEL_RE.match(sprint_label):
         raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")
-    tail_lines = max(1, min(tail_lines, 2000))
-
+    from log_source import read_log  # local import keeps startup fast
     project_root = _project_root_path(project)
-    commander_logs = _commander_dir(project_root) / "logs"
-
-    # Try to read logs_dir from sprint.yaml; fall back to commander/logs
-    cfg_logs_dir: Optional[Path] = None
-    try:
-        import yaml as _yaml  # type: ignore[import]
-        yaml_path = _commander_dir(project_root) / "sprint.yaml"
-        if yaml_path.exists():
-            data = _yaml.safe_load(yaml_path.read_text(encoding="utf-8")) or {}
-            raw = (data.get("paths") or {}).get("logs_dir", "").strip()
-            if raw:
-                p = Path(raw)
-                cfg_logs_dir = p if p.is_absolute() else yaml_path.parent / p
-    except Exception:
-        pass
-
-    candidates_checked: list[str] = []
-    log_path: Optional[Path] = None
-
-    for candidate_dir in filter(None, [cfg_logs_dir, commander_logs]):
-        p = candidate_dir / f"sprint-issue-{issue_num}.log"
-        candidates_checked.append(str(p))
-        if p.exists():
-            log_path = p
-            break
-
-    if log_path is None:
-        return {"found": False, "candidates": candidates_checked, "tail": ""}
-
-    try:
-        lines = log_path.read_text(encoding="utf-8", errors="replace").splitlines()
-    except OSError as e:
-        return {"found": False, "candidates": candidates_checked, "tail": "", "error": str(e)}
-
-    tail = "\n".join(lines[-tail_lines:])
-    mtime = datetime.fromtimestamp(log_path.stat().st_mtime, tz=timezone.utc).isoformat()
-    return {"found": True, "path": str(log_path), "tail": tail, "mtime": mtime}
+    return read_log("issue", project_root, label=sprint_label, issue_num=issue_num, tail_lines=tail_lines)
 
 
 # ── Sprint live snapshot + SSE stream (issue #224) ───────────────────────────
@@ -3038,9 +3287,21 @@ def get_sprint_live_snapshot(sprint_label: str, project: str):
       "started_at": "<ISO8601>",
       "current_ticket": {"number": N, "title": "..."} | null,
       "active_agent": {"name": "coder"|"tester", "model": "...", "pid": N} | null,
-      "recent_log_lines": [{"timestamp": "HH:MM:SS", "type": "...", "message": "..."}, ...]
+      "recent_log_lines": [{"timestamp": "HH:MM:SS", "type": "...", "message": "..."}, ...],
+      "issues": [
+        {
+          "number": <int>,
+          "title": <str>,
+          "status": "pending"|"in-progress"|"done"|"skipped",
+          "agent_status": "running"|"failed"|null,
+          "agent": "coder"|"tester"|null,
+          "elapsed_secs": <int>|null,
+          "size": "S"|"M"|"L"|"XL"|null
+        }, ...
+      ]
     }
     recent_log_lines contains the last 50 lines.
+    issues is sourced from the locked launch snapshot (issue #306).
     """
     if not _SPRINT_LABEL_RE.match(sprint_label):
         raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")
@@ -3125,6 +3386,70 @@ def get_sprint_live_snapshot(sprint_label: str, project: str):
     if est_remaining_minutes is None and total_count > 0:
         est_remaining_minutes = 0
 
+    # ── issues array: snapshot with per-ticket status, agent, elapsed, size ──
+    _IN_FLIGHT_AGENT_STATUSES = frozenset({
+        "coder_dispatched", "coder_running", "coder_done",
+        "tester_dispatched", "tester_running", "tester_done",
+    })
+
+    def _parse_ts_utc(s: Optional[str]) -> Optional[datetime]:
+        if not s:
+            return None
+        try:
+            dt = datetime.fromisoformat(s.rstrip("Z"))
+            return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+        except Exception:
+            return None
+
+    issues_out: list[dict] = []
+    for iss in issues:
+        num = iss.get("number")
+        raw_agent_status = iss.get("agent_status")
+
+        # status: derive "in-progress" for tickets currently being worked on
+        if raw_agent_status in _IN_FLIGHT_AGENT_STATUSES:
+            derived_status = "in-progress"
+        else:
+            derived_status = iss.get("status", "pending")
+
+        # agent_status: normalize to running | failed | null
+        if raw_agent_status in ("coder_running", "tester_running"):
+            public_agent_status: Optional[str] = "running"
+        elif raw_agent_status == "failed":
+            public_agent_status = "failed"
+        else:
+            public_agent_status = None
+
+        # agent: active role or null (only while agent is dispatched or running)
+        if raw_agent_status in ("coder_dispatched", "coder_running"):
+            active_role: Optional[str] = "coder"
+        elif raw_agent_status in ("tester_dispatched", "tester_running"):
+            active_role = "tester"
+        else:
+            active_role = None
+
+        # elapsed_secs: coder_started_at → tester_finished_at (or now if still running)
+        coder_start_dt = _parse_ts_utc(iss.get("coder_started_at"))
+        if coder_start_dt is not None:
+            end_dt = _parse_ts_utc(iss.get("tester_finished_at")) or now_utc
+            issue_elapsed: Optional[int] = max(0, int((end_dt - coder_start_dt).total_seconds()))
+        else:
+            issue_elapsed = None
+
+        # size: from estimates only — never derived from minutes
+        est_entry = estimates.get(str(num)) or estimates.get(num)
+        size: Optional[str] = est_entry.get("size") if est_entry else None
+
+        issues_out.append({
+            "number":       num,
+            "title":        iss.get("title", ""),
+            "status":       derived_status,
+            "agent_status": public_agent_status,
+            "agent":        active_role,
+            "elapsed_secs": issue_elapsed,
+            "size":         size,
+        })
+
     # ── active_agent: derive from sprint state JSON (coder/tester transition) ──
     active_agent: Optional[dict] = None
     m = re.search(r"(\d+)", sprint_label)
@@ -3179,6 +3504,8 @@ def get_sprint_live_snapshot(sprint_label: str, project: str):
         "total_count":          total_count,
         "complete_count":       complete_count,
         "est_remaining_minutes": est_remaining_minutes,
+        # Per-ticket snapshot (issue #306)
+        "issues":               issues_out,
     }
 
 
@@ -3287,13 +3614,140 @@ async def create_sprint_label(body: SprintCreateBody):
     except ValueError as e:
         raise HTTPException(400, detail=str(e))
     sprint_label = f"sprint-{target_num}"
-    # Persist goal if provided
+    eff_goal = (body.goal or sprint_label).strip() or sprint_label
+
+    # Neon write must succeed before any JSON is written (AC-6).
+    if _SPRINT_REPO_AVAILABLE and _sprint_repo is not None:
+        try:
+            _sprint_repo.get_or_create_sprint(
+                label=sprint_label,
+                goal=eff_goal,
+                project=body.project,
+            )
+        except Exception as _e:
+            raise HTTPException(500, detail=f"Neon write failed: {_e}")
+
+    # JSON writes are best-effort (AC-7).
+    project_root = _project_root_path(body.project)
     if body.goal is not None:
-        project_root = _project_root_path(body.project)
         goal_path = _sprint_goal_path(project_root, sprint_label)
         goal_path.parent.mkdir(parents=True, exist_ok=True)
         goal_path.write_text(body.goal.strip(), encoding="utf-8")
+    _sprint_json_write(
+        _sprint_json_path(project_root, sprint_label),
+        {"label": sprint_label, "goal": eff_goal, "project": body.project, "status": "pending", "tickets": []},
+    )
     return {"ok": True, "sprint_label": sprint_label}
+
+
+class SprintRenameBody(BaseModel):
+    new_sprint_number: int
+    project: str
+
+
+@app.post("/api/sprints/{sprint_label}/rename")
+async def rename_sprint_label(sprint_label: str, body: SprintRenameBody):
+    """Rename a sprint label to a new sprint number.
+
+    GitHub's label edit API updates all issues automatically — no per-issue
+    re-labelling is required.
+    """
+    if not _SPRINT_LABEL_RE.match(sprint_label):
+        raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")
+
+    if body.new_sprint_number <= 0:
+        raise HTTPException(400, detail="Sprint number must be a positive integer")
+
+    new_label = f"sprint-{body.new_sprint_number}"
+    if new_label == sprint_label:
+        raise HTTPException(400, detail="New sprint number is the same as the current one")
+
+    try:
+        existing = github_client.list_sprints(repo_name=body.project)
+    except subprocess.CalledProcessError as e:
+        raise _gh_error(e)
+
+    if body.new_sprint_number in existing:
+        raise HTTPException(409, detail=f"Sprint {body.new_sprint_number} already exists")
+
+    project_root = _project_root_path(body.project)
+    if _is_sprint_running(project_root, sprint_label):
+        raise HTTPException(409, detail="Cannot rename a sprint that is currently running")
+
+    # Rename the GitHub label (updates all issues automatically via GitHub API)
+    try:
+        github_client.edit_label(
+            sprint_label,
+            new_label,
+            description=f"Sprint {body.new_sprint_number} issues",
+            repo_name=body.project,
+        )
+    except subprocess.CalledProcessError as e:
+        raise _gh_error(e)
+
+    # Rename local files
+    commander = _commander_dir(project_root)
+    sprints_dir = commander / "sprints"
+    for suffix in ("-goal.txt", "-state.json"):
+        old_path = sprints_dir / f"{sprint_label}{suffix}"
+        new_path = sprints_dir / f"{new_label}{suffix}"
+        if old_path.exists():
+            old_path.rename(new_path)
+
+    # Update sprint order JSON
+    order_path = _sprint_order_path(project_root)
+    if order_path.exists():
+        try:
+            order: list[str] = json.loads(order_path.read_text(encoding="utf-8"))
+            order = [new_label if s == sprint_label else s for s in order]
+            order_path.write_text(json.dumps(order), encoding="utf-8")
+        except Exception:
+            pass
+
+    # Update Neon DB
+    if _SPRINT_REPO_AVAILABLE and _sprint_repo is not None:
+        try:
+            _sprint_repo.rename_sprint(sprint_label, new_label)
+        except Exception:
+            pass  # Best-effort; GitHub is the source of truth for labels
+
+    return {"ok": True, "old_label": sprint_label, "new_label": new_label}
+
+
+class SprintTicketReorderBody(BaseModel):
+    issue_numbers: list[int]
+    project: str
+
+
+@app.post("/api/sprints/{sprint_label}/tickets/reorder")
+def reorder_sprint_tickets(sprint_label: str, body: SprintTicketReorderBody):
+    """Reorder tickets within a sprint. Writes to Neon first, then JSON fallback."""
+    if not _SPRINT_LABEL_RE.match(sprint_label):
+        raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")
+
+    # Neon write must succeed (AC-6).
+    if _SPRINT_REPO_AVAILABLE and _sprint_repo is not None:
+        try:
+            _sprint_repo.reorder_tickets(sprint_label, body.issue_numbers)
+        except Exception as _e:
+            if "SprintNotFound" in type(_e).__name__ or "not found" in str(_e).lower():
+                raise HTTPException(404, detail=f"Sprint {sprint_label!r} not found in DB")
+            raise HTTPException(500, detail=f"Neon write failed: {_e}")
+
+    # JSON fallback (AC-7).
+    project_root = _project_root_path(body.project)
+    json_path = _sprint_json_path(project_root, sprint_label)
+    data = _sprint_json_read(json_path)
+    if "tickets" in data:
+        by_num = {t["issue_number"]: t for t in data["tickets"]}
+        data["tickets"] = [
+            {**by_num[n], "position": pos}
+            for pos, n in enumerate(body.issue_numbers)
+            if n in by_num
+        ]
+        _sprint_json_write(json_path, data)
+
+    return {"ok": True}
 
 
 class SprintDeleteBody(BaseModel):
@@ -3367,8 +3821,26 @@ async def delete_empty_sprints(body: SprintDeleteBody):
     return result
 
 
-_RERUN_STRIP_LABELS = {"released", "SIT", "in-progress", "need-rework"}
-_RERUN_SKIP_LABELS = {"UAT", "UAT-approved"}
+def _rerun_policy(labels: set[str]) -> tuple[str, list[str]]:
+    """Return (action, labels_to_strip) for a sprint ticket based on its current labels.
+
+    action:
+        'skip'             — UAT / UAT-approved; leave ticket and labels untouched
+        'dispatch_tester'  — SIT ticket; send to tester directly; SIT label preserved
+        'dispatch_coder'   — all other states; send to coder; strip appropriate labels
+    """
+    if labels & {"UAT", "UAT-approved"}:
+        return "skip", []
+    if "SIT" in labels:
+        return "dispatch_tester", []
+    if "tester-rejected" in labels:
+        return "dispatch_coder", ["tester-rejected"]
+    if "needs-rework" in labels or "need-rework" in labels:
+        to_strip = ["in-progress"] if "in-progress" in labels else []
+        return "dispatch_coder", to_strip
+    if "in-progress" in labels:
+        return "dispatch_coder", ["in-progress"]
+    return "dispatch_coder", []
 
 
 @app.get("/api/sprints/{sprint_label}/estimate")
@@ -3627,28 +4099,18 @@ class SprintRerunBody(BaseModel):
     confirm: bool
 
 
-@app.post("/api/sprints/{sprint_label}/rerun")
-def rerun_sprint(sprint_label: str, project: str, body: SprintRerunBody):
-    """Strip status labels from all completed tickets in a sprint and delete the state file.
+@app.get("/api/sprints/{sprint_label}/rerun/preview")
+def rerun_sprint_preview(sprint_label: str, project: str):
+    """Return per-ticket rerun preview counts without executing anything.
 
-    Does NOT spawn any sprint subprocess — user clicks Run sprint afterward.
+    Response schema:
+      { redispatch_count, tester_count, skip_count, by_ticket: [
+          { issue_num, issue_title, action }  # action: dispatch_coder|dispatch_tester|skip
+        ]
+      }
     """
     if not _SPRINT_LABEL_RE.match(sprint_label):
         raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")
-    if not body.confirm:
-        raise HTTPException(400, detail="confirm must be true")
-
-    if _is_sprint_running(_project_root_path(project), sprint_label):
-        raise HTTPException(409, detail="Cannot reset a sprint that is currently running")
-
-    project_root = _project_root_path(project)
-    commander = _commander_dir(project_root)
-
-    log_dir = commander / "logs"
-    log_dir.mkdir(parents=True, exist_ok=True)
-    ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
-    log_path = log_dir / f"sprint-rerun-{sprint_label}-{ts}.log"
-    log_lines: list[str] = []
 
     try:
         issues = github_client.list_open_issues_with_body(repo_name=project, limit=200)
@@ -3660,37 +4122,255 @@ def rerun_sprint(sprint_label: str, project: str, body: SprintRerunBody):
         if any(lbl["name"] == sprint_label for lbl in iss.get("labels", []))
     ]
 
-    affected: list[dict] = []
-    errors: list[str] = []
+    redispatch_count = 0
+    tester_count = 0
+    skip_count = 0
+    by_ticket: list[dict] = []
 
     for iss in sprint_issues:
         current_labels = {lbl["name"] for lbl in iss.get("labels", [])}
-        if current_labels & _RERUN_SKIP_LABELS:
-            log_lines.append(f"#{iss['number']} {iss['title']}: skipped (UAT/UAT-approved)")
+        action, _ = _rerun_policy(current_labels)
+        if action == "dispatch_coder":
+            redispatch_count += 1
+        elif action == "dispatch_tester":
+            tester_count += 1
+        else:
+            skip_count += 1
+        by_ticket.append({
+            "issue_num": iss["number"],
+            "issue_title": iss["title"],
+            "action": action,
+        })
+
+    return {
+        "redispatch_count": redispatch_count,
+        "tester_count": tester_count,
+        "skip_count": skip_count,
+        "by_ticket": by_ticket,
+    }
+
+
+@app.post("/api/sprints/{sprint_label}/rerun")
+def rerun_sprint(sprint_label: str, project: str, body: SprintRerunBody):
+    """Apply per-ticket re-run policy, create a sub-label, and dispatch agents.
+
+    Creates sprint-N.1 (or sprint-N.2, etc.) from sprint-N, moving unfinished
+    tickets to the new sub-label. UAT tickets stay on the original label.
+
+    Per-ticket routing on the sub-label:
+      no-label / in-progress  → coder (strips in-progress)
+      tester-rejected         → coder (strips tester-rejected)
+      needs-rework            → coder (preserves needs-rework)
+      SIT                     → tester directly (preserves SIT label)
+      UAT / UAT-approved      → skipped; no label change, stays on parent sprint
+    """
+    if not _SPRINT_LABEL_RE.match(sprint_label):
+        raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")
+    if not body.confirm:
+        raise HTTPException(400, detail="confirm must be true")
+
+    project_root = _project_root_path(project)
+    if _is_sprint_running(project_root, sprint_label):
+        raise HTTPException(409, detail=f"Cannot re-run sprint {sprint_label!r}: it is currently running")
+
+    commander = _commander_dir(project_root)
+    log_dir = commander / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
+    run_id = str(uuid.uuid4())
+
+    try:
+        issues = github_client.list_open_issues_with_body(repo_name=project, limit=200)
+    except subprocess.CalledProcessError as e:
+        raise _gh_error(e)
+
+    sprint_issues = [
+        iss for iss in issues
+        if any(lbl["name"] == sprint_label for lbl in iss.get("labels", []))
+    ]
+
+    # Evaluate per-ticket policy
+    decisions: list[dict] = []
+    for iss in sprint_issues:
+        current_labels = {lbl["name"] for lbl in iss.get("labels", [])}
+        action, to_strip = _rerun_policy(current_labels)
+        decisions.append({
+            "issue_num": iss["number"],
+            "issue_title": iss["title"],
+            "action": action,
+            "stripped": to_strip,
+        })
+
+    unfinished = [d for d in decisions if d["action"] != "skip"]
+    if not unfinished:
+        return {
+            "run_id": run_id,
+            "noop": True,
+            "message": f"All tickets in {sprint_label!r} are in UAT — nothing to re-run.",
+            "decisions": decisions,
+            "dispatch_count": 0,
+            "skip_count": len(decisions),
+        }
+
+    # Compute the sub-label for this re-run
+    sub_label = _next_sprint_sublabel(sprint_label)
+
+    # Create the sub-label on GitHub with the same color as the parent sprint label
+    parent_color = github_client.get_label_color(sprint_label, repo_name=project) or "0075ca"
+    github_client.create_label(
+        sub_label, parent_color,
+        description=f"Re-run of {sprint_label}",
+        repo_name=project,
+    )
+
+    log_lines: list[str] = []
+    decision_log_path = log_dir / f"sprint-rerun-{sprint_label}-{ts}.log"
+    manifest_path = log_dir / f"sprint-rerun-{sprint_label}-{ts}-manifest.json"
+    errors: list[str] = []
+
+    # Apply per-ticket changes: move unfinished tickets to sub-label, strip status labels
+    for d in decisions:
+        issue_num = d["issue_num"]
+        action = d["action"]
+        to_strip = d.get("stripped", [])
+
+        if action == "skip":
+            # UAT ticket: stays on parent sprint, untouched
+            log_lines.append(json.dumps({
+                "run_id": run_id, "tag": "rerun_decision", "ts": ts,
+                "issue": issue_num, "action": "skip",
+            }))
             continue
-        to_remove = list(current_labels & _RERUN_STRIP_LABELS)
-        if not to_remove:
-            continue
+
+        # Move ticket: remove parent sprint label, add sub-label, strip status labels
+        labels_to_remove = [sprint_label] + to_strip
         try:
-            github_client.update_labels(iss["number"], add=[], remove=to_remove, repo_name=project)
-            affected.append({"number": iss["number"], "removed_labels": to_remove})
-            log_lines.append(f"#{iss['number']} {iss['title']}: removed {to_remove}")
+            github_client.update_labels(
+                issue_num,
+                add=[sub_label],
+                remove=labels_to_remove,
+                repo_name=project,
+            )
         except subprocess.CalledProcessError as e:
-            msg = f"#{iss['number']} failed: {e.stderr.strip()}"
+            msg = f"#{issue_num} failed: {e.stderr.strip()}"
             errors.append(msg)
-            log_lines.append(f"ERROR {msg}")
+            log_lines.append(json.dumps({
+                "run_id": run_id, "tag": "rerun_decision", "ts": ts,
+                "issue": issue_num, "action": "error", "error": msg,
+            }))
+            continue
 
-    state_file = commander / "sprints" / f"{sprint_label}-state.json"
-    state_file.unlink(missing_ok=True)
-    log_lines.append(f"Deleted state file: {state_file}")
+        log_lines.append(json.dumps({
+            "run_id": run_id, "tag": "rerun_decision", "ts": ts,
+            "issue": issue_num, "action": action, "sub_label": sub_label,
+        }))
 
-    log_path.write_text("\n".join(log_lines) + "\n", encoding="utf-8")
+    manifest = {
+        "run_id": run_id,
+        "sprint_label": sub_label,
+        "parent_label": sprint_label,
+        "created_at": ts,
+        "decisions": [d for d in decisions if d["action"] != "skip"],
+    }
+    manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 
-    github_client.invalidate(f"open_issues_body:")
-    github_client.invalidate(f"open_issues:")
-    github_client.invalidate(f"issues:")
+    # Mark the parent sprint's state file as completed (add rerun_into field)
+    sprints_dir = commander / "sprints"
+    sprints_dir.mkdir(parents=True, exist_ok=True)
+    parent_state_path = sprints_dir / f"{sprint_label}-state.json"
+    if parent_state_path.exists():
+        try:
+            parent_state = json.loads(parent_state_path.read_text(encoding="utf-8"))
+            parent_state["rerun_into"] = sub_label
+            parent_state["completed_at"] = ts
+            parent_state_path.write_text(json.dumps(parent_state, indent=2), encoding="utf-8")
+        except Exception:
+            pass
+    log_lines.append(json.dumps({"run_id": run_id, "tag": "parent_state_updated",
+                                  "ts": ts, "sub_label": sub_label}))
+    decision_log_path.write_text("\n".join(log_lines) + "\n", encoding="utf-8")
 
-    result: dict = {"reset_count": len(affected), "affected_issues": affected}
+    github_client.invalidate("open_issues_body:")
+    github_client.invalidate("open_issues:")
+    github_client.invalidate("issues:")
+    github_client.invalidate("sprint_labels:")
+
+    if not SPRINT_MANAGER_PATH.exists():
+        raise HTTPException(502, detail=f"sprint_manager.py not found at {SPRINT_MANAGER_PATH}")
+
+    coder_path = _coder_clone_path(project_root)
+    pid_path = sprints_dir / f"{sub_label}-pid"
+    pending_path = sprints_dir / f"{sub_label}-pid.pending"
+    run_log_path = log_dir / f"sprint-run-{sub_label}-{ts}.log"
+
+    try:
+        fd = os.open(str(pending_path), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
+        os.write(fd, b"0")
+        os.close(fd)
+    except FileExistsError:
+        raise HTTPException(409, detail=f"Sprint {sub_label} is already running on {project}")
+
+    stripped_env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
+    # Inherit parent sprint goal for sub-label run
+    goal_path = _sprint_goal_path(project_root, sprint_label)
+    if not goal_path.exists():
+        goal_path = _sprint_goal_path(project_root, sub_label)
+    if goal_path.exists():
+        stripped_env["SPRINT_GOAL"] = goal_path.read_text(encoding="utf-8").strip()
+
+    run_log_fh = open(run_log_path, "w")
+    try:
+        proc = subprocess.Popen(
+            [
+                sys.executable, str(SPRINT_MANAGER_PATH), sub_label,
+                "--skip-gates", "--rerun-manifest", str(manifest_path),
+            ],
+            env=stripped_env,
+            cwd=str(coder_path),
+            stdout=run_log_fh,
+            stderr=run_log_fh,
+            start_new_session=True,
+        )
+    except Exception:
+        try:
+            pending_path.unlink()
+        except OSError:
+            pass
+        raise
+
+    pending_path.write_text(str(proc.pid), encoding="utf-8")
+    os.replace(str(pending_path), str(pid_path))
+
+    try:
+        proc.wait(timeout=2.0)
+        run_log_fh.flush()
+        try:
+            log_text = run_log_path.read_text(encoding="utf-8", errors="replace")
+            tail = "\n".join(log_text.splitlines()[-30:]) if log_text else "(no output)"
+        except OSError:
+            tail = "(could not read log)"
+        try:
+            pid_path.unlink()
+        except OSError:
+            pass
+        raise HTTPException(
+            502,
+            detail=f"Sprint subprocess exited immediately (rc={proc.returncode}). Log tail:\n{tail}",
+        )
+    except subprocess.TimeoutExpired:
+        pass
+
+    dispatch_count = sum(1 for d in decisions if d["action"] != "skip")
+    skip_count = sum(1 for d in decisions if d["action"] == "skip")
+    result: dict = {
+        "run_id": run_id,
+        "sub_label": sub_label,
+        "decisions": decisions,
+        "dispatch_count": dispatch_count,
+        "skip_count": skip_count,
+        "pid": proc.pid,
+        "log": str(run_log_path),
+    }
     if errors:
         result["errors"] = errors
     return result
@@ -3821,6 +4501,24 @@ async def finish_sprint(owner: str, repo_name: str, label: str):
         label_delete_error = str(exc).strip() or "label deletion failed"
         github_client.invalidate("sprints:")
 
+    # Merge the sprint branch PR into develop (issue #361)
+    sprint_branch = f"sprint/{label}"  # e.g., sprint/sprint-25
+    merge_result: dict = {}
+    try:
+        pr = github_client.find_open_pr_for_head(sprint_branch, repo_name=repo)
+        if pr:
+            try:
+                github_client.merge_pr(pr["number"], repo_name=repo)
+                merge_result = {"merged": True, "pr_number": pr["number"], "pr_url": pr["url"]}
+            except subprocess.CalledProcessError as merge_exc:
+                merge_err = merge_exc.stderr.strip() if merge_exc.stderr else str(merge_exc)
+                merge_result = {"merged": False, "pr_number": pr["number"], "pr_url": pr["url"], "merge_error": merge_err}
+                errors.append(f"PR #{pr['number']} merge failed: {merge_err}")
+        else:
+            merge_result = {"merged": False, "merge_error": f"no open PR found for {sprint_branch}"}
+    except Exception as exc:
+        merge_result = {"merged": False, "merge_error": str(exc)}
+
     await broadcast({
         "type": "update",
         "event": {
@@ -3830,7 +4528,7 @@ async def finish_sprint(owner: str, repo_name: str, label: str):
         },
     })
 
-    result: dict = {"closed": closed, "errors": errors, "label_deleted": label_deleted}
+    result: dict = {"closed": closed, "errors": errors, "label_deleted": label_deleted, "merge_result": merge_result}
     if label_delete_error is not None:
         result["label_delete_error"] = label_delete_error
     status_code = 207 if errors else 200
@@ -3856,6 +4554,12 @@ _ALLOWED_UPLOAD_EXTS = {
 _MAX_FILE_SIZE_BYTES = 25 * 1024 * 1024  # 25 MB
 # Per-batch total size limit (bytes)
 _MAX_BATCH_SIZE_BYTES = 50 * 1024 * 1024  # 50 MB
+# Image-only extensions allowed for bulk create attachments (issue #260)
+_BULK_IMAGE_EXTS = {'.png', '.jpg', '.jpeg'}
+
+# Body size guard threshold (issue #261)
+# GitHub hard limit is 65,536 chars; we use 62,000 as a safety margin.
+_BC_BODY_SIZE_THRESHOLD = 62_000
 
 
 def _repo_root() -> Path:
@@ -4149,6 +4853,213 @@ def _commit_attachments_to_branch(
         )
 
 
+def _list_existing_assets(cache_dir: Path) -> set[str]:
+    """Return filenames already at references/issue-assets/ on the attachments branch."""
+    result = subprocess.run(
+        ["git", "ls-tree", "--name-only", f"refs/heads/{_ATTACHMENTS_BRANCH}",
+         "references/issue-assets/"],
+        capture_output=True, text=True, cwd=str(cache_dir),
+    )
+    if result.returncode != 0:
+        return set()
+    files = set()
+    for line in result.stdout.splitlines():
+        name = line.strip()
+        if "/" in name:
+            name = name.rsplit("/", 1)[-1]
+        if name:
+            files.add(name)
+    return files
+
+
+def _commit_assets_to_branch(
+    cache_dir: Path,
+    file_data: list[tuple[str, bytes]],  # (sanitized_filename, content)
+) -> None:
+    """Commit image files to references/issue-assets/ on the attachments branch and push."""
+    import tempfile as _tf
+
+    def _do_commit():
+        parent_result = subprocess.run(
+            ["git", "rev-parse", f"refs/heads/{_ATTACHMENTS_BRANCH}"],
+            capture_output=True, text=True, cwd=str(cache_dir),
+        )
+        parent_sha = parent_result.stdout.strip() if parent_result.returncode == 0 else None
+
+        if parent_sha:
+            tree_result = subprocess.run(
+                ["git", "cat-file", "-p", parent_sha],
+                capture_output=True, text=True, cwd=str(cache_dir),
+            )
+            parent_tree_sha = None
+            for line in tree_result.stdout.splitlines():
+                if line.startswith("tree "):
+                    parent_tree_sha = line.split()[1]
+                    break
+        else:
+            parent_tree_sha = None
+
+        idx_file = _tf.NamedTemporaryFile(delete=False, suffix=".idx")
+        idx_file.close()
+        idx_path = idx_file.name
+        try:
+            env = {"GIT_INDEX_FILE": idx_path, "HOME": str(Path.home())}
+            if parent_tree_sha:
+                subprocess.run(
+                    ["git", "read-tree", parent_tree_sha],
+                    capture_output=True, text=True, cwd=str(cache_dir),
+                    env={**env, "GIT_DIR": str(cache_dir)},
+                )
+
+            for fname, content in file_data:
+                dest_path = f"references/issue-assets/{fname}"
+                hash_proc = subprocess.run(
+                    ["git", "hash-object", "-w", "--stdin"],
+                    input=content, capture_output=True,
+                    cwd=str(cache_dir),
+                )
+                if hash_proc.returncode != 0:
+                    raise RuntimeError(f"hash-object failed for {fname}")
+                blob_sha = hash_proc.stdout.strip().decode()
+
+                subprocess.run(
+                    ["git", "update-index", "--add", "--cacheinfo",
+                     f"100644,{blob_sha},{dest_path}"],
+                    capture_output=True, text=True, cwd=str(cache_dir),
+                    env={**env, "GIT_DIR": str(cache_dir)},
+                    check=True,
+                )
+
+            write_result = subprocess.run(
+                ["git", "write-tree"],
+                capture_output=True, text=True, cwd=str(cache_dir),
+                env={**env, "GIT_DIR": str(cache_dir)},
+            )
+            new_tree_sha = write_result.stdout.strip()
+
+            commit_cmd = ["git", "commit-tree", new_tree_sha,
+                          "-m", "chore(attachments): add bulk images to issue-assets"]
+            if parent_sha:
+                commit_cmd += ["-p", parent_sha]
+            commit_result = subprocess.run(
+                commit_cmd,
+                capture_output=True, text=True, cwd=str(cache_dir),
+            )
+            new_commit_sha = commit_result.stdout.strip()
+
+            subprocess.run(
+                ["git", "update-ref", f"refs/heads/{_ATTACHMENTS_BRANCH}", new_commit_sha],
+                capture_output=True, text=True, cwd=str(cache_dir), check=True,
+            )
+        finally:
+            try:
+                Path(idx_path).unlink()
+            except Exception:
+                pass
+
+        return new_commit_sha
+
+    _do_commit()
+
+    push_result = subprocess.run(
+        ["git", "push", "origin",
+         f"refs/heads/{_ATTACHMENTS_BRANCH}:refs/heads/{_ATTACHMENTS_BRANCH}"],
+        capture_output=True, text=True, cwd=str(cache_dir),
+    )
+    if push_result.returncode == 0:
+        return
+
+    # Retry once on push failure
+    subprocess.run(
+        ["git", "fetch", "origin", _ATTACHMENTS_BRANCH],
+        capture_output=True, text=True, cwd=str(cache_dir),
+    )
+    subprocess.run(
+        ["git", "update-ref", f"refs/heads/{_ATTACHMENTS_BRANCH}",
+         f"refs/remotes/origin/{_ATTACHMENTS_BRANCH}"],
+        capture_output=True, text=True, cwd=str(cache_dir),
+    )
+    _do_commit()
+    retry_push = subprocess.run(
+        ["git", "push", "origin",
+         f"refs/heads/{_ATTACHMENTS_BRANCH}:refs/heads/{_ATTACHMENTS_BRANCH}"],
+        capture_output=True, text=True, cwd=str(cache_dir),
+    )
+    if retry_push.returncode != 0:
+        raise RuntimeError(
+            f"Push to attachments branch failed after retry: {retry_push.stderr.strip()}"
+        )
+
+
+def _do_pre_commit_bulk_images(job_id: str, repo: str) -> dict[str, str]:
+    """Commit all bulk images to references/issue-assets/ and return {orig_filename: raw_url}.
+
+    Called in a thread before any issues are created so image URLs can be injected
+    into issue bodies at POST time (no post-create body update needed).
+    """
+    attach_dir = _bulk_attachment_dir(job_id)
+    if not attach_dir or not attach_dir.exists():
+        return {}
+
+    job = _bulk_jobs.get(job_id)
+    if not job:
+        return {}
+
+    attachment_filenames = job.get("attachment_filenames", [])
+    if not attachment_filenames:
+        return {}
+
+    _ensure_attachments_branch(repo)
+    cache_dir = _init_attachment_cache(repo)
+    existing = _list_existing_assets(cache_dir)
+
+    file_data: list[tuple[str, bytes]] = []
+    used_names: set[str] = set(existing)
+    name_map: dict[str, str] = {}  # orig_filename -> sanitized_final_name
+
+    for fname in attachment_filenames:
+        fpath = attach_dir / Path(fname).name
+        if not fpath.exists():
+            continue
+        sanitized = _sanitize_filename(fname)
+        final_name = _resolve_collision(sanitized, used_names)
+        used_names.add(final_name)
+        file_data.append((final_name, fpath.read_bytes()))
+        name_map[fname] = final_name
+
+    if file_data:
+        _commit_assets_to_branch(cache_dir, file_data)
+
+    url_map: dict[str, str] = {}
+    for orig_fname, final_name in name_map.items():
+        url = (
+            f"https://raw.githubusercontent.com/{repo}/"
+            f"{_ATTACHMENTS_BRANCH}/references/issue-assets/{final_name}"
+        )
+        url_map[orig_fname] = url
+
+    return url_map
+
+
+def _build_body_with_images(body: str, ticket_index: int, job: dict) -> str:
+    """Prepend image markdown links for images assigned to this ticket."""
+    url_map = job.get("image_url_map") or {}
+    if not url_map:
+        return body
+    assignments = job.get("image_assignments") or []
+    links: list[str] = []
+    for a in assignments:
+        assignment = a.get("assignment")
+        if assignment == "all" or assignment == ticket_index:
+            fname = a.get("filename", "")
+            url = url_map.get(fname)
+            if url:
+                links.append(f"![{fname}]({url})")
+    if not links:
+        return body
+    return body + "\n\n" + "\n\n".join(links)
+
+
 def _parse_ba_draft(output: str) -> tuple[str, str, bool]:
     """Extract title and body from BA agent JSON output.
 
@@ -4282,8 +5193,251 @@ class CreateTicketBody(BaseModel):
     extra_labels: list[str] = []
 
 
+# ── Single-ticket background estimator (issue #267) ───────────────────────────
+
+_ESTIMATE_ISSUE_SCRIPT = _SERVICES_DIR / "estimate_issue.py"
+
+
+async def _run_estimator_for_issue(issue_number: int, repo: str) -> None:
+    """Run estimate_issue.py in the background for a single newly created ticket.
+
+    Posts the estimate comment and applies the 'estimated' + size-* labels via
+    the resilient update_ticket.py path (issue #267).  Failures are non-fatal:
+    a warning comment is posted on the issue and the ticket-creation response is
+    never affected.  Invalidates the open-issues cache after completion so the
+    size badge appears on the next dashboard load.
+    """
+    import logging as _logging
+
+    stdout_bytes: bytes = b""
+    stderr_bytes: bytes = b""
+    returncode: int = -1
+
+    try:
+        cmd = [
+            sys.executable,
+            str(_ESTIMATE_ISSUE_SCRIPT),
+            "--issue", str(issue_number),
+            "--repo", repo,
+            "--save-comment",
+            "--save-label",
+        ]
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        try:
+            stdout_bytes, stderr_bytes = await asyncio.wait_for(
+                proc.communicate(), timeout=240.0
+            )
+            returncode = proc.returncode or 0
+        except asyncio.TimeoutError:
+            proc.kill()
+            _logging.warning(
+                f"[estimator] background estimation for #{issue_number} timed out after 240s"
+            )
+            # Post warning comment via update_ticket.py resilient path
+            _post_estimator_warning(issue_number, repo, "estimation timed out after 240s")
+            return
+    except Exception as exc:
+        _logging.warning(f"[estimator] background estimation for #{issue_number} failed: {exc}")
+        _post_estimator_warning(issue_number, repo, str(exc))
+        return
+
+    if returncode != 0:
+        err = stderr_bytes.decode("utf-8", errors="replace").strip()[:300]
+        _logging.warning(
+            f"[estimator] estimate_issue.py exited {returncode} for #{issue_number}: {err}"
+        )
+        _post_estimator_warning(issue_number, repo, f"estimator exited {returncode}: {err or '(no output)'}")
+        return
+
+    # Invalidate the issues cache so the size badge appears on next load.
+    github_client.invalidate(f"open_issues_body:")
+    github_client.invalidate(f"open_issues:")
+    github_client.invalidate(f"issues:")
+
+
+def _post_estimator_warning(issue_number: int, repo: str, reason: str) -> None:
+    """Post a warning comment on the issue via gh CLI (fire-and-forget).
+
+    Failures here are silently swallowed — the ticket was already created
+    successfully and the estimation failure should not surface as an HTTP error.
+    """
+    import logging as _logging
+    body = (
+        f"**Background estimation failed for #{issue_number}.**\n\n"
+        f"Reason: {reason}\n\n"
+        f"Please run `python3 services/sprint_manager/estimate_issue.py "
+        f"--issue {issue_number} --save-comment --save-label` manually, "
+        f"or wait for the next sprint estimator run."
+    )
+    try:
+        subprocess.run(
+            ["gh", "issue", "comment", str(issue_number), "--repo", repo, "--body", body],
+            capture_output=True,
+            timeout=30,
+        )
+    except Exception as exc:
+        _logging.warning(f"[estimator] could not post warning comment for #{issue_number}: {exc}")
+
+
+# ── Bulk-create background estimator (issue #265) ─────────────────────────────
+
+# Global semaphore: max 3 concurrent bulk-estimation tasks (mirrors BA concurrency cap).
+# Initialized lazily on first use so it is always created in the correct event loop.
+_bulk_estimator_semaphore: asyncio.Semaphore | None = None
+
+
+def _get_bulk_estimator_semaphore() -> asyncio.Semaphore:
+    """Return (or create) the global semaphore for bulk estimation tasks."""
+    global _bulk_estimator_semaphore
+    if _bulk_estimator_semaphore is None:
+        _bulk_estimator_semaphore = asyncio.Semaphore(3)
+    return _bulk_estimator_semaphore
+
+
+def _extract_size_from_estimator_stdout(stdout: str) -> str | None:
+    """Parse size (S/M/L/XL) from estimate_issue.py stdout.
+
+    The script prints the JSON estimate after the 'Saved:' line.
+    """
+    import re as _re
+    import logging as _logging
+    # Brace-matching scan for the first top-level JSON object in stdout
+    start = stdout.find("{")
+    if start < 0:
+        return None
+    depth = 0
+    for i in range(start, len(stdout)):
+        if stdout[i] == "{":
+            depth += 1
+        elif stdout[i] == "}":
+            depth -= 1
+            if depth == 0:
+                try:
+                    data = json.loads(stdout[start : i + 1])
+                    size = data.get("size")
+                    if size in {"S", "M", "L", "XL"}:
+                        return size
+                except (json.JSONDecodeError, Exception):
+                    pass
+                break
+    return None
+
+
+async def _run_bulk_estimator_for_ticket(
+    job_id: str,
+    index: int,
+    issue_number: int,
+    repo: str,
+) -> None:
+    """Run the estimator for one bulk-created ticket and update job state.
+
+    State transitions: created → estimating → sized (S/M/L/XL) | estimate_failed.
+    Failures post a per-ticket warning comment without blocking other tickets.
+    """
+    import logging as _logging
+
+    job = _bulk_jobs.get(job_id)
+    if not job:
+        return
+    ticket = job["tickets"][index]
+
+    # Transition to estimating
+    ticket["state"] = "estimating"
+    _persist_bulk_job(job)
+    await _broadcast_bulk_event(job_id, {"type": "ticket_update", "ticket": dict(ticket)})
+
+    semaphore = _get_bulk_estimator_semaphore()
+
+    stdout_bytes: bytes = b""
+    stderr_bytes: bytes = b""
+    returncode: int = -1
+
+    try:
+        async with semaphore:
+            cmd = [
+                sys.executable,
+                str(_ESTIMATE_ISSUE_SCRIPT),
+                "--issue", str(issue_number),
+                "--repo", repo,
+                "--save-comment",
+                "--save-label",
+            ]
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            try:
+                stdout_bytes, stderr_bytes = await asyncio.wait_for(
+                    proc.communicate(), timeout=240.0
+                )
+                returncode = proc.returncode or 0
+            except asyncio.TimeoutError:
+                proc.kill()
+                _logging.warning(
+                    f"[bulk-estimator] estimation for #{issue_number} (job {job_id}) timed out after 240s"
+                )
+                _post_estimator_warning(issue_number, repo, "bulk estimation timed out after 240s")
+                # Re-fetch job in case it was updated while waiting
+                job = _bulk_jobs.get(job_id)
+                if job:
+                    ticket = job["tickets"][index]
+                    ticket["state"] = "estimate_failed"
+                    ticket["estimate_error"] = "estimation timed out after 240s"
+                    _persist_bulk_job(job)
+                    await _broadcast_bulk_event(job_id, {"type": "ticket_update", "ticket": dict(ticket)})
+                return
+    except Exception as exc:
+        _logging.warning(f"[bulk-estimator] estimation for #{issue_number} failed: {exc}")
+        _post_estimator_warning(issue_number, repo, str(exc))
+        job = _bulk_jobs.get(job_id)
+        if job:
+            ticket = job["tickets"][index]
+            ticket["state"] = "estimate_failed"
+            ticket["estimate_error"] = str(exc)[:200]
+            _persist_bulk_job(job)
+            await _broadcast_bulk_event(job_id, {"type": "ticket_update", "ticket": dict(ticket)})
+        return
+
+    job = _bulk_jobs.get(job_id)
+    if not job:
+        return
+    ticket = job["tickets"][index]
+
+    if returncode != 0:
+        err = stderr_bytes.decode("utf-8", errors="replace").strip()[:300]
+        reason = f"estimator exited {returncode}: {err or '(no output)'}"
+        _logging.warning(f"[bulk-estimator] estimate_issue.py exited {returncode} for #{issue_number}: {err}")
+        _post_estimator_warning(issue_number, repo, reason)
+        ticket["state"] = "estimate_failed"
+        ticket["estimate_error"] = reason
+        _persist_bulk_job(job)
+        await _broadcast_bulk_event(job_id, {"type": "ticket_update", "ticket": dict(ticket)})
+        return
+
+    # Parse size from stdout
+    stdout_text = stdout_bytes.decode("utf-8", errors="replace")
+    size = _extract_size_from_estimator_stdout(stdout_text)
+
+    # Transition to sized
+    ticket["state"] = "sized"
+    ticket["estimate_size"] = size  # "S", "M", "L", "XL", or None
+    _persist_bulk_job(job)
+    await _broadcast_bulk_event(job_id, {"type": "ticket_update", "ticket": dict(ticket)})
+
+    # Invalidate open-issues cache so size badge appears on next dashboard load
+    github_client.invalidate("open_issues_body:")
+    github_client.invalidate("open_issues:")
+    github_client.invalidate("issues:")
+
+
 @app.post("/api/tickets/create", status_code=201)
 async def create_ticket_from_draft(
+    background_tasks: BackgroundTasks,
     draft_id: str = Form(default=""),
     title: str = Form(...),
     body: str = Form(default=""),
@@ -4406,6 +5560,17 @@ async def create_ticket_from_draft(
     github_client.invalidate(f"open_issues_body:")
     github_client.invalidate(f"open_issues:")
     github_client.invalidate(f"issues:")
+
+    # Kick off the estimator as a background task (issue #267).
+    # Resolve the repo now (while in the request context) so the background
+    # coroutine has a concrete string.
+    try:
+        est_repo = github_client.get_repo_for_operation(project or None)
+    except Exception:
+        est_repo = None
+    if est_repo and _ESTIMATE_ISSUE_SCRIPT.exists():
+        background_tasks.add_task(_run_estimator_for_issue, number, est_repo)
+
     return {"number": number, "url": url}
 
 
@@ -4629,9 +5794,21 @@ async def _bulk_flusher(job_id: str) -> None:
     if not job:
         return
 
+    # Pre-commit images before any issues are created so URLs can go in the body directly
+    if job.get("has_attachments") and not job.get("image_url_map"):
+        try:
+            url_map = await asyncio.to_thread(_do_pre_commit_bulk_images, job_id, job["repo"])
+            job["image_url_map"] = url_map
+            _persist_bulk_job(job)
+        except Exception as pre_err:
+            logger.warning("Bulk image pre-commit failed: %s", str(pre_err)[:200])
+            job["image_url_map"] = {}
+
     tickets = job["tickets"]
     n = len(tickets)
     flush_idx = 0
+    # Track estimation tasks so the flusher can wait for them before job_done (issue #265)
+    estimation_tasks: list[asyncio.Task] = []
 
     while flush_idx < n:
         job = _bulk_jobs.get(job_id)
@@ -4649,59 +5826,50 @@ async def _bulk_flusher(job_id: str) -> None:
             continue
 
         if ticket["state"] == "draft_ready":
-            # Create the issue
+            # Inject image links into body before creating the issue
             issue_repo = ticket.get("_repo") or None
+            labels = ["backlog"] + ticket.get("_default_labels", [])
+            body_with_images = _build_body_with_images(
+                ticket["body"] or "", flush_idx, job
+            )
+
+            # Body size guard (issue #261): block POST if over threshold
+            if len(body_with_images) > _BC_BODY_SIZE_THRESHOLD:
+                ticket["state"] = "size_warning"
+                ticket["body"] = body_with_images
+                ticket["body_char_count"] = len(body_with_images)
+                ticket["body_over_by"] = len(body_with_images) - _BC_BODY_SIZE_THRESHOLD
+                ticket["_default_labels"] = labels
+                ticket["_repo"] = issue_repo
+                ticket["finished_at"] = datetime.now(timezone.utc).isoformat()
+                _persist_bulk_job(job)
+                await _broadcast_bulk_event(job_id, {"type": "ticket_update", "ticket": dict(ticket)})
+                flush_idx += 1
+                continue
+
+            created_issue_number: int | None = None
+            created_issue_repo: str | None = None
             try:
-                labels = ["backlog"] + ticket.get("_default_labels", [])
                 number, url = github_client.create_issue(
                     title=ticket["title"],
-                    body=ticket["body"],
+                    body=body_with_images,
                     labels=labels,
                     repo_name=issue_repo,
                 )
                 ticket["state"] = "created"
                 ticket["issue_num"] = number
                 ticket["issue_url"] = url
-                ticket["body_preview"] = ticket["body"][:200]
+                ticket["body"] = body_with_images
+                ticket["body_preview"] = body_with_images[:200]
                 ticket["label_pills"] = labels
+                created_issue_number = number
+                try:
+                    created_issue_repo = issue_repo or github_client.get_repo_for_operation(None)
+                except Exception:
+                    created_issue_repo = None
             except Exception as e:
                 ticket["state"] = "failed"
                 ticket["error"] = f"GitHub issue creation failed: {str(e)[:200]}"
-
-            # Apply attachments to the newly-created issue (best-effort, non-blocking)
-            if ticket["state"] == "created" and job.get("has_attachments"):
-                attach_dir = _bulk_attachment_dir(job_id)
-                if attach_dir and attach_dir.exists():
-                    repo_name = issue_repo or job["repo"]
-                    try:
-                        _ensure_attachments_branch(repo_name)
-                        cache_dir = _init_attachment_cache(repo_name)
-                        existing = _list_existing_attachments(cache_dir, number)
-                        file_data: list[tuple[str, bytes]] = []
-                        used_names: set[str] = set(existing)
-                        for fname in job.get("attachment_filenames", []):
-                            fpath = attach_dir / Path(fname).name
-                            if fpath.exists():
-                                sanitized = _sanitize_filename(fname)
-                                final_name = _resolve_collision(sanitized, used_names)
-                                used_names.add(final_name)
-                                file_data.append((final_name, fpath.read_bytes()))
-                        if file_data:
-                            _commit_attachments_to_branch(cache_dir, number, file_data)
-                            # Append Attachments section to issue body
-                            current_body = ticket.get("body", "") or ""
-                            if "## Attachments" not in current_body:
-                                links = "\n".join(
-                                    f"- [{fname}](https://raw.githubusercontent.com/{repo_name}/"
-                                    f"{_ATTACHMENTS_BRANCH}/references/issue-{number}/{fname})"
-                                    for fname, _ in file_data
-                                )
-                                updated_body = current_body + f"\n\n## Attachments\n\n{links}"
-                                github_client.update_issue_body(number, updated_body, repo_name=repo_name)
-                    except Exception as attach_err:
-                        ticket["attachment_warning"] = (
-                            f"Attachments could not be added: {str(attach_err)[:200]}"
-                        )
 
             ticket["finished_at"] = datetime.now(timezone.utc).isoformat()
             # Remove internal fields
@@ -4709,6 +5877,28 @@ async def _bulk_flusher(job_id: str) -> None:
             ticket.pop("_repo", None)
             _persist_bulk_job(job)
             await _broadcast_bulk_event(job_id, {"type": "ticket_update", "ticket": dict(ticket)})
+
+            # Kick off background estimation after successful issue creation (issue #265).
+            # Track the task so the flusher waits for all estimates before job_done.
+            if created_issue_number is not None and created_issue_repo and _ESTIMATE_ISSUE_SCRIPT.exists():
+                est_task = asyncio.create_task(
+                    _run_bulk_estimator_for_ticket(
+                        job_id, flush_idx, created_issue_number, created_issue_repo
+                    )
+                )
+                estimation_tasks.append(est_task)
+            elif created_issue_number is not None:
+                # Estimation cannot start — surface a clear reason so job_done still fires
+                # instead of leaving the ticket in "created" (non-terminal) forever.
+                if not created_issue_repo:
+                    _est_err = "could not resolve repository for estimation"
+                else:
+                    _est_err = "estimate_issue.py not found"
+                ticket["state"] = "estimate_failed"
+                ticket["estimate_error"] = _est_err
+                _persist_bulk_job(job)
+                await _broadcast_bulk_event(job_id, {"type": "ticket_update", "ticket": dict(ticket)})
+
             flush_idx += 1
 
         elif ticket["state"] in ("pending", "drafting"):
@@ -4718,11 +5908,20 @@ async def _bulk_flusher(job_id: str) -> None:
         else:
             flush_idx += 1
 
-    # Check if all done
+    # Wait for all estimation background tasks to complete before sending job_done.
+    # This ensures the SSE stream stays open until all tickets reach a terminal state
+    # (sized or estimate_failed). Errors are swallowed — each task handles its own
+    # failure path and updates the ticket state independently.
+    if estimation_tasks:
+        await asyncio.gather(*estimation_tasks, return_exceptions=True)
+
+    # Check if all done (size_warning tickets are not done — they await user remediation).
+    # Terminal states now include sized and estimate_failed (issue #265).
     job = _bulk_jobs.get(job_id)
     if job:
         all_done = all(
-            t["state"] in ("created", "failed", "skipped") for t in job["tickets"]
+            t["state"] in ("sized", "estimate_failed", "failed", "skipped", "size_warning")
+            for t in job["tickets"]
         )
         if all_done:
             job["status"] = "done"
@@ -4837,10 +6036,11 @@ async def bulk_create_start(
     default_labels: str = Form(default=""),
     concurrency: int = Form(default=3),
     files: list[UploadFile] = File(default=[]),
+    assignments: str = Form(default=""),
 ):
     """Start a bulk ticket creation job.
 
-    Accepts multipart/form-data so optional attachment files can be included.
+    Accepts multipart/form-data so optional image files can be included.
     Returns {job_id} immediately; use the SSE stream endpoint to track progress.
     """
     _prune_old_bulk_jobs()
@@ -4892,18 +6092,34 @@ async def bulk_create_start(
                 detail=f"Unknown labels (not in repo): {', '.join(bad)}"
             )
 
-    # Validate and store uploaded attachment files
+    # Parse image assignments: [{filename, assignment: "all" | ticket_index}]
+    image_assignments: list[dict] = []
+    if assignments.strip():
+        try:
+            parsed_assignments = json.loads(assignments)
+            if not isinstance(parsed_assignments, list):
+                raise ValueError("not a list")
+            for a in parsed_assignments:
+                asgn = a.get("assignment", "all")
+                image_assignments.append({
+                    "filename": str(a.get("filename", "")),
+                    "assignment": asgn if asgn == "all" else int(asgn),
+                })
+        except (json.JSONDecodeError, ValueError, TypeError):
+            raise HTTPException(422, detail="'assignments' must be a JSON array")
+
+    # Validate and store uploaded image files (PNG/JPG only for bulk create)
     valid_upload_files = [f for f in files if f.filename]
     attachment_file_data: list[tuple[str, bytes]] = []  # (original_filename, content)
     if valid_upload_files:
         batch_size = 0
         for upload in valid_upload_files:
             ext = Path(upload.filename).suffix.lower()
-            if ext not in _ALLOWED_UPLOAD_EXTS:
+            if ext not in _BULK_IMAGE_EXTS:
                 raise HTTPException(
                     422,
                     detail=f"File '{upload.filename}' has disallowed extension '{ext}'. "
-                           f"Allowed: {', '.join(sorted(_ALLOWED_UPLOAD_EXTS))}",
+                           f"Only PNG and JPG images are allowed.",
                 )
             content = await upload.read()
             if len(content) > _MAX_FILE_SIZE_BYTES:
@@ -4945,6 +6161,8 @@ async def bulk_create_start(
             "attachment_warning": None,
             "started_at": None,
             "finished_at": None,
+            "retry_count": 0,
+            "last_error": None,
         }
         for i, prompt in enumerate(clean_prompts)
     ]
@@ -4959,6 +6177,8 @@ async def bulk_create_start(
         "stop_requested": False,
         "has_attachments": len(attachment_file_data) > 0,
         "attachment_filenames": [n for n, _ in attachment_file_data],
+        "image_assignments": image_assignments,
+        "image_url_map": None,
         "tickets": tickets,
     }
     _bulk_jobs[job_id] = job
@@ -5072,10 +6292,22 @@ async def bulk_skip_ticket(job_id: str, body: BulkSkipBody):
     if body.index < 0 or body.index >= len(tickets):
         raise HTTPException(422, detail="Invalid ticket index")
     ticket = tickets[body.index]
-    if ticket["state"] == "pending":
+    if ticket["state"] in ("pending", "failed", "size_warning"):
         ticket["state"] = "skipped"
+        ticket.pop("_default_labels", None)
+        ticket.pop("_repo", None)
         _persist_bulk_job(job)
         await _broadcast_bulk_event(job_id, {"type": "ticket_update", "ticket": dict(ticket)})
+        # Check if job should be marked done now that this blocking ticket is skipped
+        all_done = all(
+            tt["state"] in ("created", "failed", "skipped", "size_warning")
+            for tt in job["tickets"]
+        )
+        has_size_warnings = any(t["state"] == "size_warning" for t in job["tickets"])
+        if all_done and not has_size_warnings:
+            job["status"] = "done"
+            _persist_bulk_job(job)
+            await _broadcast_bulk_event(job_id, {"type": "job_done", "job_id": job_id})
     return {"ok": True, "state": ticket["state"]}
 
 
@@ -5110,70 +6342,53 @@ async def bulk_retry_ticket(job_id: str, body: BulkRetryBody):
             job_id, body.index, ticket["prompt"],
             job["repo"], job["default_labels"]
         )
-        # After BA, trigger flusher to create the issue (best-effort, appended order)
+        # After BA, create the issue with image links injected into body
         t = job["tickets"][body.index]
         if t.get("state") == "draft_ready":
             issue_repo = t.get("_repo") or None
-            try:
-                labels = ["backlog"] + t.get("_default_labels", [])
-                number, url = github_client.create_issue(
-                    title=t["title"],
-                    body=t["body"],
-                    labels=labels,
-                    repo_name=issue_repo,
-                )
-                t["state"] = "created"
-                t["issue_num"] = number
-                t["issue_url"] = url
-                t["body_preview"] = t["body"][:200]
-                t["label_pills"] = labels
-            except Exception as e:
-                t["state"] = "failed"
-                t["error"] = f"GitHub issue creation failed: {str(e)[:200]}"
+            labels = ["backlog"] + t.get("_default_labels", [])
+            body_with_images = _build_body_with_images(
+                t.get("body") or "", body.index, job
+            )
 
-            # Apply attachments (best-effort, non-blocking)
-            if t["state"] == "created" and job.get("has_attachments"):
-                attach_dir = _bulk_attachment_dir(job_id)
-                if attach_dir and attach_dir.exists():
-                    repo_name = issue_repo or job["repo"]
-                    try:
-                        _ensure_attachments_branch(repo_name)
-                        cache_dir = _init_attachment_cache(repo_name)
-                        existing = _list_existing_attachments(cache_dir, number)
-                        file_data: list[tuple[str, bytes]] = []
-                        used_names: set[str] = set(existing)
-                        for fname in job.get("attachment_filenames", []):
-                            fpath = attach_dir / Path(fname).name
-                            if fpath.exists():
-                                sanitized = _sanitize_filename(fname)
-                                final_name = _resolve_collision(sanitized, used_names)
-                                used_names.add(final_name)
-                                file_data.append((final_name, fpath.read_bytes()))
-                        if file_data:
-                            _commit_attachments_to_branch(cache_dir, number, file_data)
-                            current_body = t.get("body", "") or ""
-                            if "## Attachments" not in current_body:
-                                links = "\n".join(
-                                    f"- [{fname}](https://raw.githubusercontent.com/{repo_name}/"
-                                    f"{_ATTACHMENTS_BRANCH}/references/issue-{number}/{fname})"
-                                    for fname, _ in file_data
-                                )
-                                updated_body = current_body + f"\n\n## Attachments\n\n{links}"
-                                github_client.update_issue_body(number, updated_body, repo_name=repo_name)
-                    except Exception as attach_err:
-                        t["attachment_warning"] = (
-                            f"Attachments could not be added: {str(attach_err)[:200]}"
-                        )
+            # Body size guard (issue #261)
+            if len(body_with_images) > _BC_BODY_SIZE_THRESHOLD:
+                t["state"] = "size_warning"
+                t["body"] = body_with_images
+                t["body_char_count"] = len(body_with_images)
+                t["body_over_by"] = len(body_with_images) - _BC_BODY_SIZE_THRESHOLD
+                t["_default_labels"] = labels
+                t["_repo"] = issue_repo
+                t["finished_at"] = datetime.now(timezone.utc).isoformat()
+                _persist_bulk_job(job)
+                await _broadcast_bulk_event(job_id, {"type": "ticket_update", "ticket": dict(t)})
+            else:
+                try:
+                    number, url = github_client.create_issue(
+                        title=t["title"],
+                        body=body_with_images,
+                        labels=labels,
+                        repo_name=issue_repo,
+                    )
+                    t["state"] = "created"
+                    t["issue_num"] = number
+                    t["issue_url"] = url
+                    t["body"] = body_with_images
+                    t["body_preview"] = body_with_images[:200]
+                    t["label_pills"] = labels
+                except Exception as e:
+                    t["state"] = "failed"
+                    t["error"] = f"GitHub issue creation failed: {str(e)[:200]}"
 
-            t["finished_at"] = datetime.now(timezone.utc).isoformat()
-            t.pop("_default_labels", None)
-            t.pop("_repo", None)
-            _persist_bulk_job(job)
-            await _broadcast_bulk_event(job_id, {"type": "ticket_update", "ticket": dict(t)})
+                t["finished_at"] = datetime.now(timezone.utc).isoformat()
+                t.pop("_default_labels", None)
+                t.pop("_repo", None)
+                _persist_bulk_job(job)
+                await _broadcast_bulk_event(job_id, {"type": "ticket_update", "ticket": dict(t)})
 
         # Update job status
         all_done = all(
-            tt["state"] in ("created", "failed", "skipped") for tt in job["tickets"]
+            tt["state"] in ("created", "failed", "skipped", "size_warning") for tt in job["tickets"]
         )
         if all_done:
             job["status"] = "done"
@@ -5181,6 +6396,489 @@ async def bulk_retry_ticket(job_id: str, body: BulkRetryBody):
             await _broadcast_bulk_event(job_id, {"type": "job_done", "job_id": job_id})
 
     asyncio.create_task(_retry_task())
+    return {"ok": True}
+
+
+async def _post_ticket_body_to_github(job_id: str, index: int, body_text: str) -> None:
+    """Post a ticket body directly to GitHub (no BA drafting) and update job state."""
+    job = _bulk_jobs.get(job_id)
+    if not job:
+        return
+    tickets = job["tickets"]
+    if index < 0 or index >= len(tickets):
+        return
+    t = tickets[index]
+
+    # Transition to drafting state while posting
+    t["state"] = "drafting"
+    t["started_at"] = datetime.now(timezone.utc).isoformat()
+    t["error"] = None
+    _persist_bulk_job(job)
+    await _broadcast_bulk_event(job_id, {"type": "ticket_update", "ticket": dict(t)})
+
+    issue_repo = t.get("_repo") or job.get("repo") or None
+    labels = ["backlog"] + job.get("default_labels", [])
+
+    # Use the stored title if available, otherwise derive from body first line
+    title = t.get("title") or ""
+    if not title:
+        first_line = (body_text.strip().splitlines() or [""])[0]
+        title = first_line.lstrip("# ").strip()[:120] or "Untitled ticket"
+
+    # Body size guard (issue #261)
+    if len(body_text) > _BC_BODY_SIZE_THRESHOLD:
+        t["state"] = "size_warning"
+        t["body"] = body_text
+        t["body_char_count"] = len(body_text)
+        t["body_over_by"] = len(body_text) - _BC_BODY_SIZE_THRESHOLD
+        t["_default_labels"] = labels
+        t["_repo"] = issue_repo
+        t["finished_at"] = datetime.now(timezone.utc).isoformat()
+        _persist_bulk_job(job)
+        await _broadcast_bulk_event(job_id, {"type": "ticket_update", "ticket": dict(t)})
+        # Update job status (size_warning pauses processing)
+        all_done = all(
+            tt["state"] in ("created", "failed", "skipped", "size_warning") for tt in job["tickets"]
+        )
+        if all_done:
+            job["status"] = "done"
+            _persist_bulk_job(job)
+            await _broadcast_bulk_event(job_id, {"type": "job_done", "job_id": job_id})
+        return
+
+    try:
+        number, url = github_client.create_issue(
+            title=title,
+            body=body_text,
+            labels=labels,
+            repo_name=issue_repo,
+        )
+        t["state"] = "created"
+        t["body"] = body_text
+        t["issue_num"] = number
+        t["issue_url"] = url
+        t["body_preview"] = body_text[:200]
+        t["label_pills"] = labels
+        t["finished_at"] = datetime.now(timezone.utc).isoformat()
+        t.pop("_default_labels", None)
+        t.pop("_repo", None)
+    except Exception as e:
+        err_msg = str(e)[:300]
+        t["state"] = "failed"
+        t["error"] = err_msg
+        t["last_error"] = err_msg
+        t["retry_count"] = (t.get("retry_count") or 0) + 1
+        t["finished_at"] = datetime.now(timezone.utc).isoformat()
+
+    _persist_bulk_job(job)
+    await _broadcast_bulk_event(job_id, {"type": "ticket_update", "ticket": dict(t)})
+
+    # Update job status
+    all_done = all(
+        tt["state"] in ("created", "failed", "skipped", "size_warning") for tt in job["tickets"]
+    )
+    if all_done:
+        job["status"] = "done"
+        _persist_bulk_job(job)
+        await _broadcast_bulk_event(job_id, {"type": "job_done", "job_id": job_id})
+
+
+class BulkRetryWithBodyBody(BaseModel):
+    index: int
+    body: str
+
+
+@app.post("/api/tickets/bulk/{job_id}/retry-with-body")
+async def bulk_retry_ticket_with_body(job_id: str, body: BulkRetryWithBodyBody):
+    """Retry a failed ticket by POSTing the supplied body directly to GitHub (no BA drafting)."""
+    job = _bulk_jobs.get(job_id)
+    if not job:
+        raise HTTPException(404, detail="Job not found")
+    tickets = job["tickets"]
+    if body.index < 0 or body.index >= len(tickets):
+        raise HTTPException(422, detail="Invalid ticket index")
+    ticket = tickets[body.index]
+    if ticket["state"] not in ("failed", "skipped"):
+        return {"ok": True, "state": ticket["state"]}
+
+    job["status"] = "running"
+    _persist_bulk_job(job)
+
+    asyncio.create_task(_post_ticket_body_to_github(job_id, body.index, body.body))
+    return {"ok": True}
+
+
+@app.post("/api/tickets/bulk/{job_id}/retry-with-image")
+async def bulk_retry_with_image(
+    job_id: str,
+    index: int = Form(...),
+    body_text: str = Form(default=""),
+    file: UploadFile = File(default=None),
+):
+    """Retry a failed ticket with an optional new image committed to issue-assets."""
+    job = _bulk_jobs.get(job_id)
+    if not job:
+        raise HTTPException(404, detail="Job not found")
+    tickets = job["tickets"]
+    if index < 0 or index >= len(tickets):
+        raise HTTPException(422, detail="Invalid ticket index")
+    ticket = tickets[index]
+    if ticket["state"] not in ("failed", "skipped"):
+        return {"ok": True, "state": ticket["state"]}
+
+    final_body = body_text or ticket.get("body") or ""
+
+    # Commit new image and append its URL to body
+    if file and file.filename:
+        ext = Path(file.filename).suffix.lower()
+        if ext not in _BULK_IMAGE_EXTS:
+            raise HTTPException(
+                422,
+                detail=f"Only PNG and JPG images are allowed (got '{ext}').",
+            )
+        content = await file.read()
+        if len(content) > _MAX_FILE_SIZE_BYTES:
+            raise HTTPException(422, detail="File exceeds the 25 MB per-file limit.")
+
+        repo = job["repo"]
+        sanitized = _sanitize_filename(file.filename)
+
+        def _commit_single_image() -> str:
+            _ensure_attachments_branch(repo)
+            cache_dir = _init_attachment_cache(repo)
+            existing = _list_existing_assets(cache_dir)
+            final_name = _resolve_collision(sanitized, existing)
+            _commit_assets_to_branch(cache_dir, [(final_name, content)])
+            return (
+                f"https://raw.githubusercontent.com/{repo}/"
+                f"{_ATTACHMENTS_BRANCH}/references/issue-assets/{final_name}"
+            )
+
+        try:
+            img_url = await asyncio.to_thread(_commit_single_image)
+            final_body = final_body + f"\n\n![{file.filename}]({img_url})"
+        except Exception as e:
+            raise HTTPException(500, detail=f"Image commit failed: {str(e)[:200]}")
+
+    if len(final_body) > 65536:
+        final_body = final_body[:65536]
+
+    job["status"] = "running"
+    _persist_bulk_job(job)
+
+    asyncio.create_task(_post_ticket_body_to_github(job_id, index, final_body))
+    return {"ok": True}
+
+
+class BulkRetryAllBody(BaseModel):
+    bodies: dict[str, str]  # str(index) -> body text
+
+
+@app.post("/api/tickets/bulk/{job_id}/retry-all")
+async def bulk_retry_all_failed(job_id: str, body: BulkRetryAllBody):
+    """Retry all failed tickets by POSTing each ticket's edited body directly to GitHub."""
+    job = _bulk_jobs.get(job_id)
+    if not job:
+        raise HTTPException(404, detail="Job not found")
+    tickets = job["tickets"]
+
+    retried = 0
+    for idx_str, body_text in body.bodies.items():
+        try:
+            idx = int(idx_str)
+        except ValueError:
+            continue
+        if idx < 0 or idx >= len(tickets):
+            continue
+        t = tickets[idx]
+        if t["state"] != "failed":
+            continue
+        job["status"] = "running"
+        asyncio.create_task(_post_ticket_body_to_github(job_id, idx, body_text))
+        retried += 1
+
+    if retried > 0:
+        _persist_bulk_job(job)
+
+    return {"ok": True, "retried": retried}
+
+
+# ── Body-size remediation endpoints (issue #261) ─────────────────────────────
+
+class SizeRemedyCommentBody(BaseModel):
+    index: int
+
+
+@app.post("/api/tickets/bulk/{job_id}/size-remedy-comment")
+async def bulk_size_remedy_comment(job_id: str, body: SizeRemedyCommentBody):
+    """Remediation: create issue with body trimmed to threshold, post overflow as comment.
+
+    Accepts a ticket in size_warning state, creates the issue with a trimmed body,
+    then immediately posts the overflow as a follow-up comment.
+    """
+    job = _bulk_jobs.get(job_id)
+    if not job:
+        raise HTTPException(404, detail="Job not found")
+    tickets = job["tickets"]
+    if body.index < 0 or body.index >= len(tickets):
+        raise HTTPException(422, detail="Invalid ticket index")
+    ticket = tickets[body.index]
+    if ticket["state"] != "size_warning":
+        return {"ok": True, "state": ticket["state"]}
+
+    full_body = ticket.get("body") or ""
+    title = ticket.get("title") or "Untitled ticket"
+    issue_repo = ticket.get("_repo") or job.get("repo") or None
+    labels = ticket.get("_default_labels") or (["backlog"] + job.get("default_labels", []))
+
+    # Trim body to fit within threshold, appending a note about the overflow
+    overflow_note = "\n\n---\n*Body exceeded size limit — continued in first comment.*"
+    max_trimmed = _BC_BODY_SIZE_THRESHOLD - len(overflow_note)
+    trimmed_body = full_body[:max_trimmed] + overflow_note
+    overflow_content = full_body[max_trimmed:]
+
+    # Transition to drafting state while posting
+    ticket["state"] = "drafting"
+    ticket["started_at"] = datetime.now(timezone.utc).isoformat()
+    ticket["error"] = None
+    _persist_bulk_job(job)
+    job["status"] = "running"
+    await _broadcast_bulk_event(job_id, {"type": "ticket_update", "ticket": dict(ticket)})
+
+    async def _remedy_task():
+        try:
+            number, url = await asyncio.to_thread(
+                github_client.create_issue,
+                title=title,
+                body=trimmed_body,
+                labels=labels,
+                repo_name=issue_repo,
+            )
+            # Post overflow as comment
+            comment_body = f"*Continued from issue body (overflow content):*\n\n{overflow_content}"
+            await asyncio.to_thread(
+                github_client.add_comment,
+                issue_id=number,
+                body=comment_body,
+                repo_name=issue_repo,
+            )
+            ticket["state"] = "created"
+            ticket["issue_num"] = number
+            ticket["issue_url"] = url
+            ticket["body"] = trimmed_body
+            ticket["body_preview"] = trimmed_body[:200]
+            ticket["label_pills"] = labels
+            ticket.pop("_default_labels", None)
+            ticket.pop("_repo", None)
+            ticket.pop("body_char_count", None)
+            ticket.pop("body_over_by", None)
+        except Exception as e:
+            ticket["state"] = "failed"
+            ticket["error"] = f"Size remedy failed: {str(e)[:200]}"
+            ticket["last_error"] = ticket["error"]
+            ticket["retry_count"] = (ticket.get("retry_count") or 0) + 1
+
+        ticket["finished_at"] = datetime.now(timezone.utc).isoformat()
+        _persist_bulk_job(job)
+        await _broadcast_bulk_event(job_id, {"type": "ticket_update", "ticket": dict(ticket)})
+
+        all_done = all(
+            tt["state"] in ("created", "failed", "skipped", "size_warning")
+            for tt in job["tickets"]
+        )
+        has_size_warnings = any(t["state"] == "size_warning" for t in job["tickets"])
+        if all_done and not has_size_warnings:
+            job["status"] = "done"
+            _persist_bulk_job(job)
+            await _broadcast_bulk_event(job_id, {"type": "job_done", "job_id": job_id})
+
+    asyncio.create_task(_remedy_task())
+    return {"ok": True}
+
+
+class SizeRemedyImagesBody(BaseModel):
+    index: int
+
+
+def _extract_and_replace_base64_images(body_text: str, repo: str) -> tuple[str, int]:
+    """Find all base64/data-URI images in body, upload to attachments branch, replace with links.
+
+    Returns (updated_body, image_count).
+    """
+    import re
+    import base64 as _base64
+    import hashlib
+
+    # Match markdown image syntax with data URI: ![alt](data:image/...;base64,...)
+    # Also matches bare data URIs in <img src="data:..."> or plain data:... references
+    pattern = re.compile(
+        r'!\[([^\]]*)\]\(data:image/([a-zA-Z]+);base64,([A-Za-z0-9+/=\s]+)\)'
+    )
+
+    _ensure_attachments_branch(repo)
+    cache_dir = _init_attachment_cache(repo)
+    existing = set(_list_existing_assets(cache_dir))
+
+    replacements: list[tuple[str, str, str, str]] = []  # (full_match, alt, ext, raw_url)
+    file_data: list[tuple[str, bytes]] = []
+    used_names: set[str] = set(existing)
+
+    for m in pattern.finditer(body_text):
+        full_match = m.group(0)
+        alt = m.group(1)
+        ext = m.group(2).lower()
+        b64_data = re.sub(r'\s', '', m.group(3))
+        try:
+            img_bytes = _base64.b64decode(b64_data)
+        except Exception:
+            continue  # skip if decode fails
+
+        # Use SHA256 hash as filename to avoid duplicates
+        digest = hashlib.sha256(img_bytes).hexdigest()[:16]
+        fname = f"img-{digest}.{ext}"
+        final_name = _resolve_collision(fname, used_names)
+        used_names.add(final_name)
+        file_data.append((final_name, img_bytes))
+
+        raw_url = (
+            f"https://raw.githubusercontent.com/{repo}/"
+            f"{_ATTACHMENTS_BRANCH}/references/issue-assets/{final_name}"
+        )
+        replacements.append((full_match, alt, ext, raw_url))
+
+    if not file_data:
+        return body_text, 0
+
+    _commit_assets_to_branch(cache_dir, file_data)
+
+    # Replace each match with a markdown link
+    updated = body_text
+    for i, (full_match, alt, _ext, raw_url) in enumerate(replacements):
+        link_alt = alt or f"image-{i + 1}"
+        updated = updated.replace(full_match, f"![{link_alt}]({raw_url})", 1)
+
+    return updated, len(replacements)
+
+
+@app.post("/api/tickets/bulk/{job_id}/size-remedy-images")
+async def bulk_size_remedy_images(job_id: str, body: SizeRemedyImagesBody):
+    """Remediation: extract base64 images from body, upload to attachments branch, replace with links.
+
+    After replacement the body length is rechecked. If still over threshold the ticket stays in
+    size_warning state with updated counts. If under threshold the issue is created immediately.
+    """
+    job = _bulk_jobs.get(job_id)
+    if not job:
+        raise HTTPException(404, detail="Job not found")
+    tickets = job["tickets"]
+    if body.index < 0 or body.index >= len(tickets):
+        raise HTTPException(422, detail="Invalid ticket index")
+    ticket = tickets[body.index]
+    if ticket["state"] != "size_warning":
+        return {"ok": True, "state": ticket["state"]}
+
+    full_body = ticket.get("body") or ""
+    title = ticket.get("title") or "Untitled ticket"
+    issue_repo = ticket.get("_repo") or job.get("repo") or None
+    labels = ticket.get("_default_labels") or (["backlog"] + job.get("default_labels", []))
+    repo = job.get("repo") or ""
+
+    # Transition to drafting while processing
+    ticket["state"] = "drafting"
+    ticket["started_at"] = datetime.now(timezone.utc).isoformat()
+    ticket["error"] = None
+    _persist_bulk_job(job)
+    job["status"] = "running"
+    await _broadcast_bulk_event(job_id, {"type": "ticket_update", "ticket": dict(ticket)})
+
+    async def _image_remedy_task():
+        try:
+            updated_body, img_count = await asyncio.to_thread(
+                _extract_and_replace_base64_images, full_body, repo
+            )
+        except Exception as e:
+            ticket["state"] = "size_warning"
+            ticket["body"] = full_body
+            ticket["body_char_count"] = len(full_body)
+            ticket["body_over_by"] = len(full_body) - _BC_BODY_SIZE_THRESHOLD
+            ticket["_default_labels"] = labels
+            ticket["_repo"] = issue_repo
+            ticket["error"] = f"Image upload failed: {str(e)[:200]}"
+            ticket["finished_at"] = datetime.now(timezone.utc).isoformat()
+            _persist_bulk_job(job)
+            await _broadcast_bulk_event(job_id, {"type": "ticket_update", "ticket": dict(ticket)})
+            return
+
+        if img_count == 0:
+            # No images found — go back to size_warning with same body
+            ticket["state"] = "size_warning"
+            ticket["body"] = full_body
+            ticket["body_char_count"] = len(full_body)
+            ticket["body_over_by"] = len(full_body) - _BC_BODY_SIZE_THRESHOLD
+            ticket["_default_labels"] = labels
+            ticket["_repo"] = issue_repo
+            ticket["error"] = "No inlined base64 images found to convert"
+            ticket["finished_at"] = datetime.now(timezone.utc).isoformat()
+            _persist_bulk_job(job)
+            await _broadcast_bulk_event(job_id, {"type": "ticket_update", "ticket": dict(ticket)})
+            return
+
+        # Recheck size after image replacement
+        if len(updated_body) > _BC_BODY_SIZE_THRESHOLD:
+            # Still over — stay in size_warning with updated body and counts
+            ticket["state"] = "size_warning"
+            ticket["body"] = updated_body
+            ticket["body_char_count"] = len(updated_body)
+            ticket["body_over_by"] = len(updated_body) - _BC_BODY_SIZE_THRESHOLD
+            ticket["_default_labels"] = labels
+            ticket["_repo"] = issue_repo
+            ticket["error"] = None
+            ticket["finished_at"] = datetime.now(timezone.utc).isoformat()
+            _persist_bulk_job(job)
+            await _broadcast_bulk_event(job_id, {"type": "ticket_update", "ticket": dict(ticket)})
+            return
+
+        # Body now fits — create the issue
+        try:
+            number, url = await asyncio.to_thread(
+                github_client.create_issue,
+                title=title,
+                body=updated_body,
+                labels=labels,
+                repo_name=issue_repo,
+            )
+            ticket["state"] = "created"
+            ticket["issue_num"] = number
+            ticket["issue_url"] = url
+            ticket["body"] = updated_body
+            ticket["body_preview"] = updated_body[:200]
+            ticket["label_pills"] = labels
+            ticket.pop("_default_labels", None)
+            ticket.pop("_repo", None)
+            ticket.pop("body_char_count", None)
+            ticket.pop("body_over_by", None)
+            ticket["error"] = None
+        except Exception as e:
+            ticket["state"] = "failed"
+            ticket["error"] = f"GitHub issue creation failed: {str(e)[:200]}"
+            ticket["last_error"] = ticket["error"]
+            ticket["retry_count"] = (ticket.get("retry_count") or 0) + 1
+
+        ticket["finished_at"] = datetime.now(timezone.utc).isoformat()
+        _persist_bulk_job(job)
+        await _broadcast_bulk_event(job_id, {"type": "ticket_update", "ticket": dict(ticket)})
+
+        all_done = all(
+            tt["state"] in ("created", "failed", "skipped", "size_warning")
+            for tt in job["tickets"]
+        )
+        has_size_warnings = any(t["state"] == "size_warning" for t in job["tickets"])
+        if all_done and not has_size_warnings:
+            job["status"] = "done"
+            _persist_bulk_job(job)
+            await _broadcast_bulk_event(job_id, {"type": "job_done", "job_id": job_id})
+
+    asyncio.create_task(_image_remedy_task())
     return {"ok": True}
 
 
@@ -5227,7 +6925,7 @@ def promote_to_master(body: PromoteBody):
     if not script_path.exists():
         raise HTTPException(500, detail="promote_to_master.py not found")
 
-    cmd = ["python3", str(script_path)]
+    cmd = [sys.executable, str(script_path)]
     if body.draft:
         cmd.append("--draft")
     else:

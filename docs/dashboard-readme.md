@@ -411,6 +411,23 @@ All scripts accept an optional `--repo owner/repo` argument to override the auto
 
 ---
 
+## UI routing reference
+
+The dashboard has two UI surfaces and a legacy redirect layer.
+
+| Path pattern | Served asset | Notes |
+|---|---|---|
+| `/project/{slug}/{tab}` | `static/project.html` | Current UI — use this for all new links |
+| `/project/{slug}` | — | Redirects to `/project/{slug}/sprint-mgmt` (302) |
+| `/legacy/{slug}/{tab}` | `static/index.html` | Legacy UI (deprecated) — emits a server warning on every hit |
+| `/projects/{slug}/{tab}` | — | Legacy redirect → `/project/{slug}/{tab}` (301) — pending removal |
+| `/projects/{slug}` | — | Legacy redirect → `/project/{slug}/sprint-mgmt` (301) — pending removal |
+| `/projects/` | — | Legacy redirect → `/` (301) — pending removal |
+
+> `/projects/` is a legacy path pending removal. Do not use it in new code or links. Use `/project/` for the current UI or `/legacy/` to reach the deprecated index.html interface.
+
+---
+
 ## API reference
 
 | Method | Path | Description |

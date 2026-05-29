@@ -324,6 +324,16 @@
       background: var(--surface-2); color: var(--text-sub);
       padding: 1px 5px; border-radius: 4px;
     }
+    .bc-tab-badge {
+      display: inline-flex; align-items: center; gap: 2px;
+      font-size: 10px; font-weight: 600; letter-spacing: .02em;
+      background: var(--blue); color: #fff;
+      padding: 1px 6px; border-radius: 10px; margin-left: 4px;
+      white-space: nowrap; line-height: 1.6;
+    }
+    .bc-tab-badge--warn { background: #f59e0b; }
+    @keyframes bc-badge-spin { to { transform: rotate(360deg); } }
+    .bc-tab-badge-spin { display: inline-block; animation: bc-badge-spin .9s linear infinite; }
 
     /* ── Tab content ── */
     .tab-content { flex: 1; }
@@ -482,6 +492,31 @@
     }
     .smgmt-finish-btn:hover { opacity: .85; }
     .smgmt-finish-btn.hidden { display: none; }
+    /* ── Sprint inline rename ── */
+    .smgmt-rename-btn {
+      background: none; border: none; padding: 0 2px; cursor: pointer;
+      color: var(--text-sub); font-size: 12px; line-height: 1;
+      opacity: 0; transition: opacity .15s; flex-shrink: 0;
+      display: inline-flex; align-items: center;
+    }
+    .smgmt-sprint-header-left:hover .smgmt-rename-btn { opacity: 1; }
+    .smgmt-rename-btn:hover { color: var(--blue); }
+    .smgmt-rename-wrap {
+      display: inline-flex; align-items: center; gap: 2px;
+    }
+    .smgmt-rename-prefix {
+      font-size: 15px; font-weight: 700; color: var(--text);
+    }
+    .smgmt-rename-input {
+      width: 3.5em; font-size: 15px; font-weight: 700; color: var(--text);
+      background: var(--surface-2); border: 1.5px solid var(--blue);
+      border-radius: 4px; padding: 1px 4px; outline: none;
+      font-family: inherit;
+    }
+    .smgmt-rename-input.is-invalid { border-color: var(--red); }
+    .smgmt-rename-error {
+      font-size: 11px; color: var(--red); margin-left: 4px;
+    }
     /* ── Ticket list ── */
     .smgmt-sprint-tickets {
       padding: 4px 0; min-height: 48px; display: flex; flex-direction: column;
@@ -611,6 +646,27 @@
     }
     .smgmt-log-line { display: flex; gap: 12px; color: var(--text-muted); }
     .smgmt-log-time { color: var(--text-sub); flex-shrink: 0; }
+    /* ── Live log panel (running sprint, issue #309) ── */
+    .smgmt-live-log {
+      border-top: 1px solid var(--border);
+      background: var(--bg);
+    }
+    .smgmt-live-log-bar {
+      display: flex; align-items: center; gap: 8px;
+      padding: 8px 16px;
+      font-family: var(--mono); font-size: 11px; color: var(--text-muted);
+    }
+    .smgmt-live-indicator {
+      width: 6px; height: 6px; border-radius: 50%;
+      background: var(--green); flex-shrink: 0;
+      animation: smgmt-running-badge-pulse 2s ease-in-out infinite;
+    }
+    .smgmt-live-log-agent { margin-left: auto; color: var(--text-sub); }
+    .smgmt-live-log-stream {
+      max-height: 200px; overflow-y: auto;
+      font-family: var(--mono); font-size: 11px; line-height: 1.7;
+      padding: 0 16px 10px;
+    }
     /* ── Toast ── */
     .smgmt-toast {
       position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%) translateY(12px);
@@ -626,6 +682,50 @@
       40%      { opacity: .45; }
     }
     .btn-flash { animation: btnFlash .45s ease-in-out; }
+
+    /* ── Auto-refresh pill ── */
+    .smgmt-ar-pill {
+      position: relative;
+      display: flex; align-items: center; gap: 0;
+    }
+    .smgmt-ar-trigger {
+      display: flex; align-items: center; gap: 5px;
+      padding: 6px 10px;
+      border: 1px solid var(--border); border-right: none;
+      border-radius: 6px 0 0 6px;
+      background: none; color: var(--text-muted); font-size: 12px; font-weight: 500;
+      cursor: pointer; transition: background .15s, color .15s; white-space: nowrap;
+    }
+    .smgmt-ar-trigger:hover { background: var(--surface-2); color: var(--text); }
+    .smgmt-ar-trigger .ti { font-size: 14px; }
+    .smgmt-ar-caret-btn {
+      display: flex; align-items: center; justify-content: center;
+      padding: 6px 7px;
+      border: 1px solid var(--border);
+      border-radius: 0 6px 6px 0;
+      background: none; color: var(--text-muted); font-size: 11px;
+      cursor: pointer; transition: background .15s, color .15s;
+    }
+    .smgmt-ar-caret-btn:hover { background: var(--surface-2); color: var(--text); }
+    .smgmt-ar-dropdown {
+      position: absolute; top: calc(100% + 4px); right: 0;
+      min-width: 130px;
+      background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.10);
+      z-index: 50; overflow: hidden;
+      display: none;
+    }
+    .smgmt-ar-dropdown.open { display: block; }
+    .smgmt-ar-option {
+      display: block; width: 100%;
+      padding: 8px 14px; text-align: left;
+      background: none; border: none;
+      font-size: 12px; color: var(--text-muted); cursor: pointer;
+      transition: background .12s, color .12s;
+    }
+    .smgmt-ar-option:hover { background: var(--surface-2); color: var(--text); }
+    .smgmt-ar-option.selected { font-weight: 700; color: var(--text); }
+    .smgmt-ar-pill.is-off .smgmt-ar-trigger { color: var(--text-sub); }
 
     /* ── Inline selection action bar (above sprint list) ── */
     .smgmt-selection-bar {
@@ -659,13 +759,29 @@
       font-size: 12px;
       font-weight: 600;
       background: var(--surface);
+      color: var(--text-sub);
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      cursor: pointer;
+      transition: background .15s, color .15s, border-color .15s;
+    }
+    .smgmt-selection-bar-deselect:hover { background: var(--surface-hover); color: var(--text); border-color: var(--border); }
+    .smgmt-selection-bar-delete {
+      display: none;
+      padding: 5px 10px;
+      font-size: 12px;
+      font-weight: 600;
+      background: var(--surface);
       color: var(--red);
       border: 1px solid var(--red-bg);
       border-radius: 5px;
       cursor: pointer;
       transition: background .15s, color .15s, border-color .15s;
+      align-items: center;
+      gap: 4px;
     }
-    .smgmt-selection-bar-deselect:hover { background: var(--red); color: #fff; border-color: var(--red); }
+    .smgmt-selection-bar-delete.show { display: inline-flex; }
+    .smgmt-selection-bar-delete:hover { background: var(--red); color: #fff; border-color: var(--red); }
     .smgmt-move-to-btn {
       padding: 5px 10px;
       font-size: 12px;
@@ -803,9 +919,774 @@
     .ns-modal { width: min(480px, calc(100vw - 32px)); }
 
     /* ── New Ticket modal ── */
-    .nt-modal { width: min(500px, calc(100vw - 32px)); max-height: calc(100vh - 48px); overflow: hidden; }
-    .nt-modal .modal-body { overflow-y: auto; }
+    .nt-modal { width: min(560px, calc(100vw - 32px)); max-height: calc(100vh - 48px); overflow-y: auto; }
+    .nt-warn-item {
+      display: flex; align-items: center; gap: 8px;
+      background: var(--amber-bg); color: var(--amber);
+      font-size: 12px; padding: 8px 12px; border-radius: 6px;
+      border: 1px solid color-mix(in srgb, var(--amber) 40%, transparent);
+      margin-bottom: 8px;
+    }
+    .nt-warn-item.hidden { display: none; }
+    .nt-file-input { padding: 4px 8px; cursor: pointer; }
+
+    /* ── Backlog pane (issue #274) ── */
+    .smgmt-backlog-pane {
+      border: 2px dashed var(--border);
+      border-radius: 8px;
+      background: var(--surface-2);
+      margin-top: 16px;
+    }
+    .smgmt-backlog-pane.drag-over-backlog {
+      border-color: var(--blue);
+      box-shadow: 0 0 0 2px var(--blue-bg);
+      background: var(--blue-bg);
+    }
+    .smgmt-backlog-header-row {
+      display: flex; align-items: center; gap: 8px;
+      padding: 12px 18px;
+      cursor: pointer;
+      user-select: none;
+      border-radius: 8px 8px 0 0;
+    }
+    .smgmt-backlog-header-row:hover { background: rgba(0,0,0,.025); }
+    .smgmt-backlog-title {
+      font-size: 13px; font-weight: 700; color: var(--text); flex: 1;
+      display: flex; align-items: center; gap: 8px;
+    }
+    .smgmt-backlog-count-badge {
+      font-size: 11px; color: var(--text-sub); font-weight: 400;
+    }
+    .smgmt-backlog-chevron-icon {
+      font-size: 14px; color: var(--text-muted); transition: transform .2s;
+    }
+    .smgmt-backlog-pane.is-expanded .smgmt-backlog-chevron-icon {
+      transform: rotate(180deg);
+    }
+    .smgmt-backlog-tickets-container {
+      display: none;
+      border-top: 1px solid var(--border);
+      padding: 4px 0;
+      min-height: 48px;
+    }
+    .smgmt-backlog-pane.is-expanded .smgmt-backlog-tickets-container {
+      display: block;
+    }
+    .smgmt-backlog-hint-row {
+      font-size: 12px; color: var(--text-sub);
+      padding: 10px 18px;
+    }
+    /* "Move to" button on backlog ticket rows */
+    .smgmt-moveto-pill {
+      padding: 2px 8px; font-size: 11px; font-weight: 600;
+      background: var(--surface); color: var(--text-muted);
+      border: 1px solid var(--border);
+      border-radius: 5px; cursor: pointer;
+      opacity: 0; transition: opacity .15s, background .15s;
+      flex-shrink: 0;
+      white-space: nowrap;
+    }
+    .smgmt-ticket:hover .smgmt-moveto-pill { opacity: 1; }
+    .smgmt-moveto-pill:hover { background: var(--surface-hover); color: var(--text); }
+    /* "Move to" popup for backlog/sprint tickets */
+    .smgmt-moveto-popup {
+      position: fixed;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      box-shadow: 0 4px 16px rgba(0,0,0,.12);
+      z-index: 400;
+      min-width: 160px;
+      padding: 4px 0;
+    }
+    .smgmt-moveto-popup.hidden { display: none; }
+    .smgmt-moveto-option {
+      display: block; width: 100%;
+      text-align: left; padding: 7px 14px;
+      font-size: 13px;
+      background: none; border: none;
+      color: var(--text); cursor: pointer;
+      font-family: inherit;
+    }
+    .smgmt-moveto-option:hover { background: var(--surface-hover); }
+    .smgmt-moveto-option.is-backlog { color: var(--text-muted); }
+    .smgmt-moveto-divider { border: none; border-top: 1px solid var(--border); margin: 4px 0; }
     .nt-textarea { resize: vertical; min-height: 80px; font-family: inherit; }
+    .nt-body-textarea { resize: vertical; min-height: 140px; font-family: monospace; font-size: 12px; }
+    .nt-draft-divider { border-top: 1px solid var(--border); margin: 20px 0; }
+    .nt-spinner {
+      display: inline-block; width: 12px; height: 12px;
+      border: 2px solid currentColor; border-top-color: transparent;
+      border-radius: 50%; animation: nt-spin 0.7s linear infinite;
+      margin-right: 6px; vertical-align: middle;
+    }
+    @keyframes nt-spin { to { transform: rotate(360deg); } }
+    /* Label searchable dropdown */
+    .nt-label-wrap { position: relative; }
+    .nt-label-wrap.hidden { display: none; }
+    .nt-label-dropdown {
+      position: absolute; top: calc(100% + 4px); left: 0; right: 0;
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 7px; z-index: 600; max-height: 196px; overflow-y: auto;
+      box-shadow: 0 4px 16px rgba(0,0,0,.14);
+    }
+    .nt-label-dropdown.hidden { display: none; }
+    .nt-label-opt {
+      display: flex; align-items: center; gap: 8px;
+      padding: 7px 12px; cursor: pointer; font-size: 13px; color: var(--text);
+    }
+    .nt-label-opt + .nt-label-opt { border-top: 1px solid var(--border); }
+    .nt-label-opt:hover, .nt-label-opt.focused { background: var(--surface-hover); }
+    .nt-label-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+    .nt-label-chip {
+      display: inline-flex; align-items: center; gap: 6px;
+      background: var(--surface-2); border: 1px solid var(--border);
+      border-radius: 12px; padding: 3px 10px 3px 8px; font-size: 12px;
+      color: var(--text); margin-bottom: 8px;
+    }
+    .nt-label-chip.hidden { display: none; }
+    .nt-label-chip-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+    .nt-label-chip-rm {
+      background: none; border: none; cursor: pointer;
+      color: var(--text-muted); font-size: 16px; padding: 0; line-height: 1; margin-left: 2px;
+    }
+    .nt-label-chip-rm:hover { color: var(--red); }
+
+    /* ── Board move overlay (issue #276) ── */
+    #pane-sprint-mgmt { position: relative; }
+    .smgmt-move-overlay {
+      display: none;
+      position: absolute;
+      inset: 0;
+      background: rgba(0,0,0,.35);
+      z-index: 500;
+      align-items: center;
+      justify-content: center;
+      border-radius: 0;
+    }
+    .smgmt-move-overlay.active { display: flex; }
+    .smgmt-move-overlay-pill {
+      display: flex; align-items: center; gap: 10px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 10px 20px;
+      font-size: 13px; font-weight: 600;
+      color: var(--text);
+      box-shadow: 0 4px 16px rgba(0,0,0,.18);
+      pointer-events: none;
+    }
+    .smgmt-move-spinner {
+      display: inline-block; width: 14px; height: 14px;
+      border: 2px solid var(--border); border-top-color: var(--blue);
+      border-radius: 50%; animation: smgmt-spin .7s linear infinite;
+      flex-shrink: 0;
+    }
+    @keyframes smgmt-spin { to { transform: rotate(360deg); } }
+
+    /* ── Running sprint block (issue #277) ── */
+
+    /* Flowing top-stripe animation */
+    @keyframes smgmt-running-stripe {
+      0%   { background-position: 0% 0; }
+      100% { background-position: 200% 0; }
+    }
+
+    /* Pulsing badge opacity */
+    @keyframes smgmt-running-badge-pulse {
+      0%, 100% { opacity: 1; }
+      50%       { opacity: 0.45; }
+    }
+
+    /* Shimmer sweep for progress bar */
+    @keyframes smgmt-shimmer {
+      0%   { transform: translateX(-100%); }
+      100% { transform: translateX(400%); }
+    }
+
+    /* Spinning ring for in-flight ticket */
+    @keyframes smgmt-ring-spin {
+      to { transform: rotate(360deg); }
+    }
+
+    /* Glow pulse on the card border */
+    @keyframes smgmt-glow-pulse {
+      0%, 100% { box-shadow: 0 0 0 1px var(--green), 0 0 8px 2px rgba(22,163,74,.18); }
+      50%       { box-shadow: 0 0 0 1px var(--green), 0 0 16px 5px rgba(22,163,74,.32); }
+    }
+
+    .smgmt-sprint-card.smgmt-running {
+      border-color: var(--green);
+      animation: smgmt-glow-pulse 2.4s ease-in-out infinite;
+    }
+
+    /* Flowing top stripe */
+    .smgmt-running-stripe {
+      height: 3px;
+      border-radius: 8px 8px 0 0;
+      background: linear-gradient(
+        90deg,
+        var(--green) 0%,
+        #4ade80 25%,
+        #86efac 50%,
+        #4ade80 75%,
+        var(--green) 100%
+      );
+      background-size: 200% 100%;
+      animation: smgmt-running-stripe 2s linear infinite;
+    }
+
+    /* Pulsing "Running" badge */
+    .smgmt-running-badge {
+      display: inline-flex; align-items: center; gap: 5px;
+      padding: 3px 9px; border-radius: 999px;
+      font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+      font-family: var(--mono);
+      background: var(--green-bg); color: var(--green);
+      animation: smgmt-running-badge-pulse 2s ease-in-out infinite;
+    }
+    .smgmt-running-badge .smgmt-running-badge-dot {
+      width: 6px; height: 6px; border-radius: 50%;
+      background: var(--green);
+    }
+
+    /* Stat strip */
+    .smgmt-running-stat-strip {
+      display: flex; align-items: center; flex-wrap: wrap; gap: 18px;
+      padding: 10px 18px;
+      background: var(--green-bg);
+      border-bottom: 1px solid rgba(22,163,74,.18);
+      font-family: var(--mono); font-size: 12px;
+    }
+    .smgmt-running-stat {
+      display: flex; align-items: baseline; gap: 5px;
+    }
+    .smgmt-running-stat .rsnum {
+      font-size: 16px; font-weight: 700;
+    }
+    .smgmt-running-stat .rsnum.green  { color: var(--green); }
+    .smgmt-running-stat .rsnum.red    { color: var(--red); }
+    .smgmt-running-stat .rsnum.muted  { color: var(--text-sub); }
+    .smgmt-running-stat .rsnum.amber  { color: var(--amber); }
+    .smgmt-running-stat .rslbl {
+      font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .05em;
+    }
+    .smgmt-running-time {
+      margin-left: auto;
+      font-size: 11px; color: var(--text-muted);
+      display: flex; align-items: center; gap: 5px;
+    }
+
+    /* Shimmer progress bar */
+    .smgmt-running-progress-wrap {
+      padding: 0 18px 10px;
+      background: var(--green-bg);
+    }
+    .smgmt-running-progress-track {
+      height: 4px;
+      background: rgba(22,163,74,.2);
+      border-radius: 2px;
+      overflow: hidden;
+      position: relative;
+    }
+    .smgmt-running-progress-fill {
+      height: 100%;
+      background: var(--green);
+      border-radius: 2px;
+      transition: width .6s ease;
+      position: relative;
+      overflow: hidden;
+    }
+    .smgmt-running-progress-shimmer {
+      position: absolute;
+      top: 0; left: 0;
+      width: 30%; height: 100%;
+      background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,.6) 50%, transparent 100%);
+      animation: smgmt-shimmer 1.8s ease-in-out infinite;
+    }
+
+    /* Per-ticket status indicators */
+    .smgmt-ticket-indicator {
+      flex-shrink: 0;
+      width: 18px; height: 18px;
+      display: flex; align-items: center; justify-content: center;
+    }
+    /* Spinning ring for in-flight */
+    .smgmt-ticket-indicator .ring {
+      width: 14px; height: 14px;
+      border: 2px solid rgba(22,163,74,.25);
+      border-top-color: var(--green);
+      border-radius: 50%;
+      animation: smgmt-ring-spin .8s linear infinite;
+    }
+    /* Filled check circle for completed */
+    .smgmt-ticket-indicator .circle-done {
+      width: 14px; height: 14px;
+      border-radius: 50%;
+      background: var(--green);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 9px; font-weight: 700; color: #fff;
+    }
+    /* Failed X circle */
+    .smgmt-ticket-indicator .circle-failed {
+      width: 14px; height: 14px;
+      border-radius: 50%;
+      background: var(--red);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 9px; font-weight: 700; color: #fff;
+    }
+    /* Empty circle for pending */
+    .smgmt-ticket-indicator .circle-pending {
+      width: 14px; height: 14px;
+      border-radius: 50%;
+      border: 2px solid var(--border);
+    }
+
+    /* Per-ticket agent tag (issue #308) */
+    .smgmt-ticket-agent-tag {
+      flex-shrink: 0;
+      padding: 1px 5px; border-radius: 3px;
+      font-size: 10px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+      font-family: var(--mono);
+    }
+    .smgmt-ticket-agent-tag.coder-class  { background: var(--purple-bg); color: var(--purple); }
+    .smgmt-ticket-agent-tag.tester-class { background: var(--amber-bg);  color: var(--amber); }
+    .smgmt-ticket-agent-tag.unknown-class { background: var(--surface-2); color: var(--text-sub); }
+
+    /* Per-ticket size pill (issue #308) */
+    .smgmt-ticket-size-pill {
+      flex-shrink: 0;
+      padding: 1px 5px; border-radius: 3px;
+      font-size: 10px; font-weight: 700;
+      font-family: var(--mono);
+      background: var(--surface-2); color: var(--text-sub);
+    }
+
+    /* Generic utility used by Bulk Create */
+    .hidden { display: none !important; }
+    .btn-primary:disabled { opacity: .45; cursor: not-allowed; }
+
+    /* ── Bulk Create tab (issue #257) ── */
+
+    /* Step rail */
+    .bc-step-rail {
+      display: flex; align-items: center; gap: 10px;
+      padding: 20px 28px 0;
+      font-size: 12px; font-family: var(--mono);
+    }
+    .bc-step-chip {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 5px 12px; border-radius: 999px;
+      background: var(--surface-2); color: var(--text-muted);
+      transition: background .15s, color .15s;
+    }
+    .bc-step-chip.active { background: var(--text); color: var(--surface); }
+    .bc-step-n {
+      width: 16px; height: 16px; border-radius: 50%;
+      background: rgba(0,0,0,.10);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 10px; flex-shrink: 0;
+    }
+    .bc-step-chip.active .bc-step-n { background: rgba(255,255,255,.22); }
+    .bc-step-arrow { color: var(--text-sub); font-size: 13px; }
+
+    /* Settings bar */
+    .bc-settings-bar {
+      display: flex; gap: 12px;
+      padding: 18px 28px 12px;
+      border-bottom: 1px solid var(--border);
+      flex-wrap: wrap;
+    }
+    .bc-settings-field { display: flex; flex-direction: column; gap: 5px; }
+    .bc-settings-field--labels { flex: 1; min-width: 200px; }
+    .bc-settings-label {
+      font-size: 11px; font-weight: 600; color: var(--text-muted);
+      letter-spacing: .04em; text-transform: uppercase;
+    }
+    .bc-label-hint { font-size: 11px; color: var(--text-muted); }
+    .bc-select, .bc-text-input {
+      padding: 7px 10px; border: 1px solid var(--border);
+      border-radius: 6px; background: var(--surface-2); color: var(--text);
+      font-size: 13px; font-family: inherit;
+      min-width: 180px;
+    }
+    .bc-select:focus, .bc-text-input:focus { outline: none; border-color: var(--blue); }
+
+    /* Counter */
+    .bc-counter-row { padding: 8px 28px 4px; }
+    .bc-counter { font-size: 11px; color: var(--text-muted); font-weight: 500; }
+
+    /* Textarea */
+    .bc-textarea {
+      display: block; width: 100%; box-sizing: border-box;
+      min-height: 260px; resize: vertical;
+      font-family: var(--mono); font-size: 12px;
+      border: none;
+      border-top: 1px solid var(--border);
+      border-bottom: 1px solid var(--border);
+      padding: 14px 28px;
+      background: var(--surface); color: var(--text);
+      outline: none;
+    }
+    .bc-textarea:focus { border-color: var(--blue); }
+
+    /* Info note */
+    .bc-info-note {
+      padding: 8px 28px;
+      font-size: 11px; color: var(--text-muted); line-height: 1.5;
+    }
+    .bc-info-note code {
+      font-family: var(--mono); background: var(--surface-2);
+      padding: 1px 5px; border-radius: 3px; font-size: 11px;
+    }
+
+    /* Attachments */
+    .bc-attach-section { padding: 10px 28px 6px; border-top: 1px solid var(--border); }
+    .bc-attach-header { margin-bottom: 6px; }
+    .bc-attach-limits { margin: 2px 0 6px; }
+    .bc-dropzone { margin-bottom: 6px; }
+    .dt-dropzone {
+      border: 2px dashed var(--border); border-radius: 8px;
+      padding: 16px; text-align: center;
+      color: var(--text-sub); font-size: 13px;
+      transition: border-color .15s, background .15s, color .15s;
+      cursor: pointer;
+    }
+    .dt-dropzone.drag-over,
+    .dt-dropzone:hover { border-color: var(--blue); color: var(--blue); background: var(--blue-bg); }
+    .dt-dropzone-hint { font-size: 12px; }
+    .bc-file-queue { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+    .bc-file-chip {
+      display: inline-flex; align-items: center; gap: 5px;
+      padding: 2px 8px 2px 10px; border-radius: 12px;
+      background: var(--surface-2); border: 1px solid var(--border);
+      font-size: 11px; color: var(--text); max-width: 200px;
+    }
+    .bc-file-chip-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .bc-file-chip-remove {
+      background: none; border: none; cursor: pointer;
+      color: var(--text-muted); font-size: 13px; padding: 0; line-height: 1;
+      flex-shrink: 0; transition: color .1s;
+    }
+    .bc-file-chip-remove:hover { color: var(--red); }
+    .bc-file-assign {
+      font-size: 11px; border: 1px solid var(--border); border-radius: 6px;
+      background: var(--surface); color: var(--text); padding: 1px 4px;
+      cursor: pointer; flex-shrink: 0;
+    }
+    .bc-fail-img-row { margin: 6px 0 4px; display: flex; align-items: center; gap: 8px; }
+    .bc-btn-attach-img {
+      font-size: 11px; padding: 3px 10px; border-radius: 6px;
+      border: 1px dashed var(--border); background: var(--surface);
+      color: var(--text-muted); cursor: pointer; transition: border-color .15s, color .15s;
+    }
+    .bc-btn-attach-img:hover { border-color: var(--accent); color: var(--accent); }
+    .bc-file-chip--retry { background: var(--surface-alt, #f5f5f5); }
+    .bc-file-error {
+      font-size: 11px; color: var(--red); margin-top: 4px;
+      padding: 4px 8px; background: var(--red-bg);
+      border: 1px solid rgba(220,38,38,.3); border-radius: 4px;
+    }
+
+    /* Error banner */
+    .bc-error {
+      margin: 8px 28px;
+      background: var(--red-bg); color: var(--red);
+      font-size: 12px; padding: 8px 12px; border-radius: 6px;
+    }
+
+    /* Step actions footer */
+    .bc-step-actions {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 14px 28px;
+      border-top: 1px solid var(--border);
+      gap: 12px; flex-wrap: wrap;
+    }
+    .bc-step-actions-left { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .bc-step-actions-right { display: flex; align-items: center; gap: 8px; }
+    .bc-concurrency-label { font-size: 12px; color: var(--text); white-space: nowrap; }
+    .bc-concurrency-select {
+      padding: 4px 8px; border: 1px solid var(--border); border-radius: 5px;
+      background: var(--surface-2); color: var(--text); font-size: 12px; cursor: pointer;
+    }
+    .bc-hint { font-size: 11px; color: var(--text-muted); }
+    .bc-stop-btn {
+      padding: 6px 14px; border: 1px solid var(--red); border-radius: 6px;
+      background: transparent; color: var(--red); font-size: 12px; font-weight: 600;
+      display: inline-flex; align-items: center; gap: 5px; cursor: pointer;
+      transition: background .15s;
+    }
+    .bc-stop-btn:hover { background: var(--red-bg); }
+    .bc-stop-btn:disabled { opacity: .45; cursor: not-allowed; }
+
+    /* Review step: parallel banner */
+    .bc-parallel-banner {
+      padding: 10px 28px;
+      font-size: 12px; color: var(--text-muted);
+      background: var(--surface-2);
+      border-bottom: 1px solid var(--border);
+    }
+    .bc-concurrency-pill {
+      display: inline-block;
+      margin-left: 10px; padding: 1px 8px; border-radius: 10px;
+      background: var(--border); color: var(--text-muted); font-size: 11px;
+      font-family: var(--mono);
+    }
+
+    /* Summary strip */
+    .bc-summary-strip {
+      display: flex; align-items: center; gap: 16px;
+      padding: 12px 28px;
+      border-bottom: 1px solid var(--border);
+      font-size: 12px; flex-wrap: wrap;
+    }
+    .bc-metric { display: flex; align-items: center; gap: 5px; }
+    .bc-metric-count { font-size: 15px; font-weight: 700; font-family: var(--mono); }
+    .bc-metric--created .bc-metric-count { color: var(--green); }
+    .bc-metric--drafting .bc-metric-count { color: var(--blue); }
+    .bc-metric--pending .bc-metric-count { color: var(--text-sub); }
+    .bc-progress-wrap {
+      flex: 1; min-width: 80px; height: 5px;
+      background: var(--border); border-radius: 999px; overflow: hidden;
+    }
+    .bc-progress-bar { height: 100%; background: var(--green); border-radius: 999px; transition: width .4s; }
+    .bc-eta { font-size: 11px; color: var(--text-muted); font-family: var(--mono); white-space: nowrap; }
+
+    /* Ticket list (review step) */
+    .bc-ticket-list {
+      display: flex; flex-direction: column; gap: 8px;
+      padding: 16px 28px;
+      max-height: 560px; overflow-y: auto;
+      scrollbar-width: thin; scrollbar-color: var(--border) transparent;
+    }
+    .bc-ticket-list::-webkit-scrollbar { width: 4px; }
+    .bc-ticket-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+    /* Ticket card */
+    .bc-card {
+      display: flex; align-items: flex-start; gap: 10px;
+      padding: 10px 14px; border-radius: 8px;
+      border: 1px solid var(--border); background: var(--surface);
+      transition: border-color .15s;
+    }
+    .bc-card--created { border-color: var(--green); }
+    .bc-card--failed  { border-color: var(--red); }
+    .bc-card--drafting { border-color: var(--blue); }
+    .bc-card--size_warning { border-color: var(--amber); }
+    .bc-card--estimating { border-color: var(--blue); }
+    .bc-card--sized { border-color: var(--green); }
+    .bc-card--estimate_failed { border-color: var(--amber); }
+
+    /* Status dot */
+    .bc-status-dot {
+      width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; margin-top: 3px;
+      border: 2px solid var(--border); background: transparent;
+    }
+    .bc-status-dot--drafting {
+      border-color: var(--blue); border-top-color: transparent;
+      animation: bc-spin .7s linear infinite;
+    }
+    .bc-status-dot--created {
+      border-color: var(--green); background: var(--green); position: relative;
+    }
+    .bc-status-dot--created::after {
+      content: ''; position: absolute; left: 2px; top: 1px;
+      width: 5px; height: 3px;
+      border-left: 1.5px solid #fff; border-bottom: 1.5px solid #fff;
+      transform: rotate(-45deg);
+    }
+    .bc-status-dot--estimating {
+      border-color: var(--blue); border-top-color: transparent;
+      animation: bc-spin .7s linear infinite;
+    }
+    .bc-status-dot--sized {
+      border-color: var(--green); background: var(--green); position: relative;
+    }
+    .bc-status-dot--sized::after {
+      content: ''; position: absolute; left: 2px; top: 1px;
+      width: 5px; height: 3px;
+      border-left: 1.5px solid #fff; border-bottom: 1.5px solid #fff;
+      transform: rotate(-45deg);
+    }
+    .bc-status-dot--estimate_failed {
+      border-color: var(--amber); background: var(--amber);
+      display: flex; align-items: center; justify-content: center;
+    }
+    .bc-status-dot--estimate_failed::after {
+      content: '!'; color: #fff; font-size: 7px; font-weight: 700;
+    }
+    .bc-size-badge {
+      display: inline-block; font-size: 10px; font-weight: 700; padding: 1px 6px;
+      border-radius: 4px; background: var(--green); color: #fff;
+      margin-left: 4px; vertical-align: middle; letter-spacing: 0.02em;
+    }
+    .bc-status-dot--failed {
+      border-color: var(--red); background: var(--red);
+      display: flex; align-items: center; justify-content: center;
+    }
+    .bc-status-dot--failed::after {
+      content: '!'; color: #fff; font-size: 7px; font-weight: 700;
+    }
+    .bc-status-dot--skipped {
+      border-color: var(--text-muted); background: var(--text-muted);
+      display: flex; align-items: center; justify-content: center;
+    }
+    .bc-status-dot--skipped::after {
+      content: '−'; color: #fff; font-size: 9px; font-weight: 700;
+    }
+    .bc-status-dot--size_warning {
+      border-color: var(--amber); background: var(--amber);
+      display: flex; align-items: center; justify-content: center;
+    }
+    .bc-status-dot--size_warning::after {
+      content: '!'; color: #fff; font-size: 7px; font-weight: 700;
+    }
+    @keyframes bc-spin { to { transform: rotate(360deg); } }
+
+    /* Card body */
+    .bc-card-body { flex: 1; min-width: 0; }
+    .bc-card-head { display: flex; align-items: center; gap: 8px; margin-bottom: 3px; }
+    .bc-issue-badge {
+      font-size: 11px; font-weight: 700; color: var(--green);
+      text-decoration: none; flex-shrink: 0;
+    }
+    .bc-issue-badge:hover { text-decoration: underline; }
+    .bc-card-label { font-size: 10px; color: var(--text-muted); }
+    .bc-card-preview {
+      font-size: 11px; color: var(--text);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;
+    }
+    .bc-card-preview--error { color: var(--red); }
+    .bc-card-tags { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 4px; }
+    .bc-attach-warn { font-size: 10px; color: var(--amber); margin-top: 3px; }
+    .bc-tag {
+      font-size: 10px; padding: 1px 6px; border-radius: 8px;
+      background: var(--surface-2); border: 1px solid var(--border); color: var(--text-muted);
+    }
+
+    /* Card actions */
+    .bc-card-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+    .bc-action-btn {
+      background: none; border: none; cursor: pointer;
+      color: var(--text-muted); font-size: 14px; padding: 2px 4px; border-radius: 3px;
+      transition: color .12s, background .12s;
+    }
+    .bc-action-btn:hover { color: var(--text); background: var(--surface-2); }
+    .bc-action-btn--retry { color: var(--blue); }
+    .bc-action-btn--retry:hover { background: var(--blue-bg); }
+    .bc-action-btn--skip { color: var(--text-muted); }
+    .bc-action-btn--skip:hover { color: var(--red); background: var(--surface-2); }
+
+    /* Failed card expanded area */
+    .bc-fail-detail {
+      margin-top: 8px; width: 100%;
+    }
+    .bc-fail-banner {
+      font-size: 11px; color: var(--red);
+      background: rgba(220,38,38,0.08); border: 1px solid rgba(220,38,38,0.25);
+      border-radius: 5px; padding: 5px 8px; margin-bottom: 6px;
+      word-break: break-word;
+    }
+    .bc-fail-body-editor {
+      width: 100%; min-height: 120px; max-height: 280px;
+      font-family: monospace; font-size: 11px;
+      background: var(--surface-2); color: var(--text);
+      border: 1px solid var(--border); border-radius: 5px;
+      padding: 6px 8px; box-sizing: border-box; resize: vertical;
+      line-height: 1.5;
+    }
+    .bc-fail-body-editor:focus { outline: none; border-color: var(--blue); }
+    .bc-char-counter {
+      font-size: 10px; color: var(--text-muted); margin-top: 3px; text-align: right;
+    }
+    .bc-char-counter--over { color: var(--red); font-weight: 600; }
+    .bc-retry-meta {
+      font-size: 10px; color: var(--text-sub); margin-bottom: 4px;
+    }
+    .bc-fail-actions {
+      display: flex; gap: 6px; margin-top: 6px; align-items: center;
+    }
+    .bc-btn-retry-this {
+      font-size: 11px; padding: 4px 10px; border-radius: 5px; cursor: pointer;
+      background: var(--blue); color: #fff; border: none;
+      transition: opacity .12s;
+    }
+    .bc-btn-retry-this:hover { opacity: 0.85; }
+    .bc-btn-retry-this:disabled { opacity: 0.5; cursor: not-allowed; }
+    .bc-btn-skip-this {
+      font-size: 11px; padding: 4px 10px; border-radius: 5px; cursor: pointer;
+      background: none; color: var(--text-muted); border: 1px solid var(--border);
+      transition: color .12s, border-color .12s;
+    }
+    .bc-btn-skip-this:hover { color: var(--red); border-color: var(--red); }
+
+    /* Retry all failed footer button */
+    .bc-btn-retry-all {
+      font-size: 12px; padding: 5px 14px; border-radius: 6px; cursor: pointer;
+      background: none; border: 1px solid var(--red); color: var(--red);
+      transition: background .12s, color .12s;
+    }
+    .bc-btn-retry-all:hover { background: rgba(220,38,38,0.08); }
+
+    /* Size warning card (issue #261) */
+    .bc-size-warn-detail { margin-top: 8px; width: 100%; }
+    .bc-size-warn-banner {
+      font-size: 11px; color: var(--amber);
+      background: var(--amber-bg); border: 1px solid var(--amber);
+      border-radius: 5px; padding: 5px 8px; margin-bottom: 6px;
+      word-break: break-word;
+    }
+    .bc-size-warn-actions {
+      display: flex; gap: 6px; margin-top: 6px; align-items: center; flex-wrap: wrap;
+    }
+    .bc-btn-remedy-comment {
+      font-size: 11px; padding: 4px 10px; border-radius: 5px; cursor: pointer;
+      background: var(--amber); color: #fff; border: none;
+      transition: opacity .12s;
+    }
+    .bc-btn-remedy-comment:hover { opacity: 0.85; }
+    .bc-btn-remedy-comment:disabled { opacity: 0.5; cursor: not-allowed; }
+    .bc-btn-remedy-images {
+      font-size: 11px; padding: 4px 10px; border-radius: 5px; cursor: pointer;
+      background: none; color: var(--amber); border: 1px solid var(--amber);
+      transition: background .12s, color .12s;
+    }
+    .bc-btn-remedy-images:hover { background: var(--amber-bg); }
+    .bc-btn-remedy-images:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    /* ── Log viewer modal (issue #264) ── */
+    .lv-modal { width: min(720px, calc(100vw - 32px)); max-height: calc(100vh - 80px); }
+    .lv-meta {
+      font-size: 11.5px; color: var(--text-muted); font-family: var(--mono);
+      padding: 8px 20px 0;
+      word-break: break-all;
+    }
+    .lv-path-label { color: var(--text-sub); font-size: 11px; margin-right: 6px; }
+    .lv-not-found {
+      padding: 24px 20px;
+      font-family: var(--mono); font-size: 12px;
+      color: var(--text-muted); font-style: italic;
+    }
+    .lv-stream {
+      background: #0d1117; color: #c9d1d9;
+      font-family: var(--mono); font-size: 12px; line-height: 1.65;
+      padding: 12px 16px;
+      overflow-y: auto;
+      max-height: 400px;
+      margin: 12px 20px 20px;
+      border-radius: 6px;
+      border: 1px solid rgba(255,255,255,.08);
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+    .lv-stream:empty::after { content: 'Loading…'; color: #6e7681; }
+    .btn-view-log {
+      background: none; border: none; padding: 2px 4px; cursor: pointer;
+      color: var(--text-sub); font-size: 13px; border-radius: 4px;
+      line-height: 1; flex-shrink: 0;
+      transition: color .15s, background .15s;
+    }
+    .btn-view-log:hover { color: var(--blue); background: var(--blue-bg); }
   </style>
 </head>
 <body>
@@ -891,6 +1772,10 @@
                 aria-selected="false" onclick="switchTab('logs')">
           <i class="ti ti-terminal-2"></i>Logs
         </button>
+        <button class="stab" role="tab" id="stab-bulk-create"
+                aria-selected="false" onclick="switchTab('bulk-create')">
+          <i class="ti ti-stack-2"></i>Bulk Create<span id="bc-tab-badge" class="bc-tab-badge hidden"></span>
+        </button>
         <button class="stab disabled" role="tab" id="stab-sprint-history"
                 aria-selected="false" aria-disabled="true"
                 onclick="return false" tabindex="-1">
@@ -906,6 +1791,14 @@
       <!-- Sprint Mgmt tab -->
       <div class="tab-pane active" id="pane-sprint-mgmt" role="tabpanel" aria-labelledby="stab-sprint-mgmt">
 
+        <!-- Board move overlay (issue #276) -->
+        <div class="smgmt-move-overlay" id="smgmt-move-overlay" aria-live="assertive" aria-label="Moving ticket, please wait">
+          <div class="smgmt-move-overlay-pill">
+            <span class="smgmt-move-spinner"></span>
+            Moving…
+          </div>
+        </div>
+
         <!-- Toolbar -->
         <div class="smgmt-toolbar" id="smgmt-toolbar">
           <span class="smgmt-toolbar-title">Sprint Management</span>
@@ -916,12 +1809,27 @@
               <i class="ti ti-x"></i>
               Deselect (<span id="smgmt-deselect-count">0</span>)
             </button>
-            <button class="btn-ghost" id="smgmt-refresh-btn"
-                    onclick="smgmtTriggerRefresh()" title="Re-fetch sprints from GitHub"
-                    aria-label="Trigger Refresh">
-              <i class="ti ti-refresh"></i>
-              Trigger Refresh
-            </button>
+            <!-- Auto-refresh pill (issue #275) -->
+            <div class="smgmt-ar-pill" id="smgmt-ar-pill">
+              <button class="smgmt-ar-trigger" id="smgmt-ar-trigger"
+                      onclick="_smgmtArManualRefresh()"
+                      title="Click to refresh now">
+                <i class="ti ti-refresh" id="smgmt-ar-icon"></i>
+                <span id="smgmt-ar-label">Auto Refresh</span>
+              </button>
+              <button class="smgmt-ar-caret-btn" id="smgmt-ar-caret"
+                      onclick="_smgmtArToggleDropdown(event)"
+                      title="Change refresh interval"
+                      aria-label="Auto refresh interval">
+                <i class="ti ti-chevron-down"></i>
+              </button>
+              <div class="smgmt-ar-dropdown" id="smgmt-ar-dropdown" role="listbox">
+                <button class="smgmt-ar-option" data-interval="0" onclick="_smgmtArSelectInterval(0)">Off</button>
+                <button class="smgmt-ar-option" data-interval="1" onclick="_smgmtArSelectInterval(1)">1s</button>
+                <button class="smgmt-ar-option" data-interval="5" onclick="_smgmtArSelectInterval(5)">5s</button>
+                <button class="smgmt-ar-option" data-interval="10" onclick="_smgmtArSelectInterval(10)">10s</button>
+              </div>
+            </div>
             <button class="btn-ghost" id="smgmt-new-ticket-btn"
                     onclick="smgmtOpenNewTicket()" title="Create a new ticket"
                     aria-label="New Ticket">
@@ -942,6 +1850,37 @@
           <div id="smgmt-sprint-list" class="smgmt-sprint-list">
             <div class="loading-msg" id="smgmt-loading">Loading sprints…</div>
           </div>
+
+          <!-- Backlog pane (issue #274) — dashed border, grey tint, drag target -->
+          <div class="smgmt-backlog-pane is-expanded" id="smgmt-backlog-pane"
+               role="region" aria-label="Backlog"
+               ondragover="_smgmtBacklogDragOver(event)"
+               ondragleave="_smgmtBacklogDragLeave(event)"
+               ondrop="_smgmtDropOnBacklog(event)">
+            <div class="smgmt-backlog-header-row" id="smgmt-backlog-header-row"
+                 onclick="_smgmtBacklogToggle()"
+                 role="button" tabindex="0"
+                 aria-expanded="true"
+                 aria-controls="smgmt-backlog-tickets-container"
+                 onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();_smgmtBacklogToggle();}">
+              <span class="smgmt-backlog-title">
+                <i class="ti ti-inbox" style="font-size:14px;color:var(--text-muted)"></i>
+                Backlog
+                <span class="smgmt-backlog-count-badge" id="smgmt-backlog-count"></span>
+              </span>
+              <span class="smgmt-backlog-chevron-icon"><i class="ti ti-chevron-down"></i></span>
+            </div>
+            <div class="smgmt-backlog-tickets-container" id="smgmt-backlog-tickets-container">
+              <p class="smgmt-backlog-hint-row">Unassigned tickets — drag into a sprint above, or use Move to</p>
+              <div id="smgmt-backlog-tickets">
+                <div class="smgmt-drop-hint">Drop tickets here to remove sprint label</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- "Move to" popup (shared for backlog and sprint tickets) -->
+        <div class="smgmt-moveto-popup hidden" id="smgmt-moveto-popup" role="listbox" aria-label="Move to sprint">
         </div>
 
       </div>
@@ -960,6 +1899,113 @@
           Logs view coming soon
         </div>
       </div>
+
+      <!-- Bulk Create tab -->
+      <div class="tab-pane" id="pane-bulk-create" role="tabpanel" aria-labelledby="stab-bulk-create">
+
+        <!-- Step rail -->
+        <div class="bc-step-rail">
+          <span class="bc-step-chip" id="bc-chip-1" data-step="1">
+            <span class="bc-step-n">1</span> Input
+          </span>
+          <span class="bc-step-arrow"><i class="ti ti-arrow-right"></i></span>
+          <span class="bc-step-chip" id="bc-chip-2" data-step="2">
+            <span class="bc-step-n">2</span> Review &amp; create
+          </span>
+        </div>
+
+        <!-- Step 1: Input -->
+        <div id="bc-step1">
+          <div class="bc-settings-bar">
+            <div class="bc-settings-field">
+              <label class="bc-settings-label" for="bc-repo">Repo</label>
+              <select class="bc-select" id="bc-repo" onchange="bcRepoChanged()"></select>
+            </div>
+            <div class="bc-settings-field bc-settings-field--labels">
+              <label class="bc-settings-label" for="bc-default-labels">Default labels</label>
+              <input class="bc-text-input" id="bc-default-labels" type="text"
+                     placeholder="enhancement, frontend" autocomplete="off">
+            </div>
+          </div>
+
+          <div class="bc-counter-row">
+            <span class="bc-counter" id="bc-counter">0 tickets detected &middot; 0 chars</span>
+          </div>
+
+          <textarea class="bc-textarea" id="bc-textarea"
+                    placeholder="Paste your ticket prompts here, separated by --- on its own line..."
+                    oninput="bcOnTextareaInput()"></textarea>
+
+          <div class="bc-info-note">
+            Split prompts using <code>---</code> on its own line. All created tickets go to backlog &mdash; assign them to a sprint later via Sprint Mgmt.
+          </div>
+
+          <!-- Image Attachments -->
+          <div class="bc-attach-section">
+            <div class="bc-attach-header">
+              <label class="bc-settings-label">Images <span class="bc-label-hint">(optional &mdash; assign each image to all tickets or a specific one)</span></label>
+              <p class="bc-label-hint bc-attach-limits">
+                Allowed: .png and .jpg images.
+                &nbsp;&bull;&nbsp; Max 25 MB per file, 50 MB total.
+              </p>
+            </div>
+            <div class="dt-dropzone bc-dropzone" id="bc-dropzone"
+                 ondragover="event.preventDefault(); this.classList.add('drag-over')"
+                 ondragleave="this.classList.remove('drag-over')"
+                 ondrop="_bcOnDrop(event)"
+                 onclick="_bcPickFiles()">
+              <span class="dt-dropzone-hint">Drop images here or click to attach</span>
+              <input type="file" id="bc-file-input" multiple
+                     accept=".png,.jpg,.jpeg"
+                     style="display:none" onchange="_bcOnFileInput(event)">
+            </div>
+            <div class="bc-file-queue" id="bc-file-queue"></div>
+            <div class="bc-file-error hidden" id="bc-file-error"></div>
+          </div>
+
+          <div class="bc-error hidden" id="bc-step1-error"></div>
+
+          <!-- Step 1 footer actions -->
+          <div class="bc-step-actions">
+            <div class="bc-step-actions-left">
+              <label class="bc-concurrency-label">Run BA in parallel:</label>
+              <select class="bc-concurrency-select" id="bc-concurrency">
+                <option value="1">1 at a time (serial)</option>
+                <option value="3" selected>3 at a time</option>
+                <option value="5">5 at a time</option>
+              </select>
+            </div>
+            <div class="bc-step-actions-right">
+              <button type="button" class="btn-primary" id="bc-run-btn" disabled onclick="bcRunAll()">Run BA on all 0</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Step 2: Review & Create -->
+        <div id="bc-step2" class="hidden">
+          <div class="bc-parallel-banner" id="bc-parallel-banner"></div>
+          <div class="bc-summary-strip" id="bc-summary-strip"></div>
+          <div class="bc-ticket-list" id="bc-ticket-list"></div>
+          <!-- Step 2 footer actions -->
+          <div class="bc-step-actions">
+            <div class="bc-step-actions-left">
+              <button type="button" class="btn-ghost" onclick="_bcGoToStep1()">
+                <i class="ti ti-arrow-left"></i> Back to input
+              </button>
+              <span class="bc-hint">Job continues if you switch tabs.</span>
+            </div>
+            <div class="bc-step-actions-right">
+              <button type="button" class="bc-btn-retry-all hidden" id="bc-retry-all-btn" onclick="bcRetryAllFailed()">Retry all failed (0)</button>
+              <button type="button" class="btn-ghost hidden" id="bc-recreate-btn" onclick="bcRecreate()">Recreate</button>
+              <button type="button" class="bc-stop-btn" id="bc-stop-btn" onclick="bcStop()">
+                <i class="ti ti-player-stop"></i> Stop after current
+              </button>
+              <button type="button" class="btn-primary" id="bc-done-btn" disabled>Running...</button>
+            </div>
+          </div>
+        </div>
+
+      </div><!-- /pane-bulk-create -->
 
     </div>
   </div>
@@ -1009,8 +2055,9 @@ function parseUrl() {
   const slug = decodeURIComponent(m[1]);
   const rawTab = m[2] || '';
   // sprint-history is disabled → redirect to sprint-mgmt
-  const tab = (rawTab === 'tickets') ? 'tickets'
-            : (rawTab === 'logs')    ? 'logs'
+  const tab = (rawTab === 'tickets')     ? 'tickets'
+            : (rawTab === 'logs')        ? 'logs'
+            : (rawTab === 'bulk-create') ? 'bulk-create'
             : 'sprint-mgmt';
   return { slug, tab };
 }
@@ -1030,14 +2077,37 @@ const RERUN_STRIP_LABELS = new Set(['UAT','UAT-approved','released','SIT','in-pr
 // Cache for sprint outcome data: key = sprint label, value = outcome object
 const _smgmtOutcomeCache = {};
 
+// ── Running sprint live state (issue #277) ────────────────────────────────
+// Set of sprint labels that are currently running, populated on each render
+let _smgmtRunningLabels = new Set();
+// Live data cache: sprint label → last live snapshot from /api/sprints/{label}/live
+const _smgmtLiveCache = {};
+// Poll timer for live data (2s indicator refresh)
+let _smgmtLivePollId = null;
+// Poll timer for live log panel (5s log refresh, issue #309)
+let _smgmtLogPollId = null;
+
 // ── Tab navigation ────────────────────────────────────────────────────────────
 function switchTab(tab, pushHistory) {
   if (tab === 'sprint-history') return; // disabled
 
+  // Pause auto-refresh and live polling when leaving sprint-mgmt
+  if (_activeTab === 'sprint-mgmt' && tab !== 'sprint-mgmt') {
+    _smgmtArStopTicker();
+    if (_smgmtLivePollId !== null) {
+      clearInterval(_smgmtLivePollId);
+      _smgmtLivePollId = null;
+    }
+    if (_smgmtLogPollId !== null) {
+      clearInterval(_smgmtLogPollId);
+      _smgmtLogPollId = null;
+    }
+  }
+
   _activeTab = tab;
 
   // Update aria-selected + active class on tabs
-  ['sprint-mgmt', 'tickets', 'logs'].forEach(t => {
+  ['sprint-mgmt', 'tickets', 'logs', 'bulk-create'].forEach(t => {
     const btn = document.getElementById('stab-' + t);
     if (!btn) return;
     const isActive = t === tab;
@@ -1046,7 +2116,7 @@ function switchTab(tab, pushHistory) {
   });
 
   // Show/hide panes
-  ['sprint-mgmt', 'tickets', 'logs'].forEach(t => {
+  ['sprint-mgmt', 'tickets', 'logs', 'bulk-create'].forEach(t => {
     const pane = document.getElementById('pane-' + t);
     if (pane) pane.classList.toggle('active', t === tab);
   });
@@ -1066,13 +2136,21 @@ function switchTab(tab, pushHistory) {
   // Lazy-load sprint mgmt (only if _cachedFullRepo is already populated)
   if (tab === 'sprint-mgmt' && !_sprintMgmtLoaded && _cachedFullRepo[_slug]) {
     _sprintMgmtLoaded = true;
-    loadSprintMgmt();
+    loadSprintMgmt().then(() => _smgmtArInit());
+  } else if (tab === 'sprint-mgmt' && _sprintMgmtLoaded) {
+    // Tab switched back — restart ticker if not already running
+    if (_arTickerId === null && _arInterval > 0) _smgmtArStartTicker();
+  }
+
+  // Init bulk-create tab on first visit
+  if (tab === 'bulk-create') {
+    _bcInitTab();
   }
 }
 
 // ── Keyboard navigation for sub-tabs ─────────────────────────────────────────
 document.getElementById('sub-tabs').addEventListener('keydown', function(e) {
-  const enabledTabs = ['sprint-mgmt', 'tickets', 'logs'];
+  const enabledTabs = ['sprint-mgmt', 'tickets', 'logs', 'bulk-create'];
   const focused = document.activeElement;
   const currentId = focused ? focused.id.replace('stab-', '') : null;
   const currentIdx = enabledTabs.indexOf(currentId);
@@ -1311,12 +2389,7 @@ function renderTickets(data) {
 
 // ── Header button handlers ─────────────────────────────────────────────────
 function openBulkCreate() {
-  // Redirect to index.html sprint-mgmt for now
-  if (_slug) {
-    const repo = _findFullRepo(_slug);
-    if (repo) window.location.href = '/projects/' + encodeURIComponent(repo) + '/sprint-mgmt';
-    else window.location.href = '/';
-  }
+  switchTab('bulk-create');
 }
 
 function openNewTicket() {
@@ -1400,10 +2473,18 @@ async function init() {
   // Update toolbar sticky top based on actual header height
   _smgmtUpdateToolbarTop();
 
+  // Reconnect badge SSE if a bulk job was in progress before this page load
+  const _bcSavedOnLoad = localStorage.getItem('bc_job_id');
+  if (_bcSavedOnLoad && !_bcJobId) {
+    _bcJobId = _bcSavedOnLoad;
+    _bcConnectSSE(_bcSavedOnLoad);
+  }
+
   // Load sprint-mgmt data if on that tab
   if (_activeTab === 'sprint-mgmt') {
     _sprintMgmtLoaded = true;
     await loadSprintMgmt();
+    _smgmtArInit();
   }
 }
 
@@ -1429,7 +2510,8 @@ function _smgmtInitScrollShadow() {
 }
 
 // ── Sprint Mgmt: load sprint list ─────────────────────────────────────────
-async function loadSprintMgmt() {
+// silent=true skips the "Loading sprints…" spinner (used by auto-refresh)
+async function loadSprintMgmt(silent) {
   const listEl = document.getElementById('smgmt-sprint-list');
   if (!listEl) return;
 
@@ -1439,15 +2521,36 @@ async function loadSprintMgmt() {
     return;
   }
 
-  listEl.innerHTML = '<div class="loading-msg">Loading sprints…</div>';
+  if (!silent) listEl.innerHTML = '<div class="loading-msg">Loading sprints…</div>';
 
   try {
-    const resp = await fetch('/api/sprint-management/issues?repo=' + encodeURIComponent(repo));
+    // Fetch sprint management data + running sprint status in parallel
+    const [resp, runningResp] = await Promise.all([
+      fetch('/api/sprint-management/issues?repo=' + encodeURIComponent(repo)),
+      fetch('/api/sprints/running-all').catch(() => null),
+    ]);
     if (!resp.ok) throw new Error('HTTP ' + resp.status);
     const data = await resp.json();
+
+    // Update running labels set
+    _smgmtRunningLabels = new Set();
+    if (runningResp && runningResp.ok) {
+      const runningData = await runningResp.json();
+      const running = runningData.running || [];
+      running.forEach(r => {
+        // Only mark as running if this is the current project
+        if (r.project === repo) {
+          _smgmtRunningLabels.add(r.sprint_label);
+        }
+      });
+    }
+
     _smgmtRender(data);
+
+    // Start (or restart) live polling if there are running sprints
+    _smgmtLivePollRestart();
   } catch (err) {
-    listEl.innerHTML = '<div class="loading-msg">Failed to load sprints.</div>';
+    if (!silent) listEl.innerHTML = '<div class="loading-msg">Failed to load sprints.</div>';
   }
 }
 
@@ -1460,19 +2563,25 @@ function _smgmtRender(data) {
   const order   = data.order   || [];
   const issues  = data.issues  || [];
 
-  if (sprints.length === 0) {
-    listEl.innerHTML = '<div class="loading-msg">No sprints yet. Create one with + New Sprint.</div>';
-    return;
-  }
-
-  // Group issues by sprint number
+  // Group issues by sprint number; collect unassigned for backlog
   const bySprint = {};
+  const unassigned = [];
   issues.forEach(iss => {
     if (iss.sprint != null) {
       if (!bySprint[iss.sprint]) bySprint[iss.sprint] = [];
       bySprint[iss.sprint].push(iss);
+    } else {
+      unassigned.push(iss);
     }
   });
+
+  // Always render the backlog pane regardless of sprint count
+  _smgmtRenderBacklog(unassigned);
+
+  if (sprints.length === 0) {
+    listEl.innerHTML = '<div class="loading-msg">No sprints yet. Create one with + New Sprint.</div>';
+    return;
+  }
 
   // Use order list if available, else ascending
   const orderedNums = order.length > 0
@@ -1532,6 +2641,9 @@ function _smgmtInjectOutcomeBand(label, outcome) {
   if (existing) existing.remove();
   const existingLog = card.querySelector('.smgmt-log-compact');
   if (existingLog) existingLog.remove();
+  // Remove live log panel (issue #309)
+  const existingLiveLog = card.querySelector('.smgmt-live-log');
+  if (existingLiveLog) existingLiveLog.remove();
 
   // Update card border class
   card.classList.remove('smgmt-completed', 'smgmt-stopped');
@@ -1556,7 +2668,7 @@ function _smgmtInjectOutcomeBand(label, outcome) {
   // Build outcome band HTML
   const bandHtml = _smgmtOutcomeBandHtml(label, outcome);
   // Build ticket list HTML
-  const ticketListHtml = _smgmtOutcomeTicketListHtml(outcome.issues || []);
+  const ticketListHtml = _smgmtOutcomeTicketListHtml(outcome.issues || [], label, _smgmtRepo());
   // Build log row HTML
   const logHtml = _smgmtOutcomeLogHtml(label, outcome);
 
@@ -1620,8 +2732,10 @@ function _smgmtOutcomeBandHtml(label, outcome) {
   </div>`;
 }
 
-function _smgmtOutcomeTicketListHtml(issues) {
+function _smgmtOutcomeTicketListHtml(issues, label, repo) {
   if (!issues || issues.length === 0) return '';
+  const safeLabel = label ? escHtml(label) : '';
+  const safeRepo  = repo  ? escHtml(repo)  : '';
   return issues.map(iss => {
     const o = iss.outcome || 'skipped';
     let circle = '';
@@ -1634,11 +2748,18 @@ function _smgmtOutcomeTicketListHtml(issues) {
       ? '<span class="smgmt-lbl-rejected">TESTER REJECTED</span>'
       : '';
 
+    const viewLogBtn = safeLabel && safeRepo
+      ? `<button class="btn-view-log" title="View issue log"
+              onclick="event.stopPropagation();openLvIssueLog(${iss.number},'${safeLabel}','${safeRepo}')">
+           <i class="ti ti-file-text"></i></button>`
+      : '';
+
     return `<div class="smgmt-ticket" data-issue="${iss.number}" draggable="false">
       ${circle}
       <a class="smgmt-ticket-num" href="https://github.com/issues/${iss.number}" target="_blank" rel="noopener">#${iss.number}</a>
       <span class="smgmt-ticket-title" title="${escHtml(iss.title)}">${escHtml(iss.title)}</span>
       ${rejLabel}
+      ${viewLogBtn}
       ${elapsed}
     </div>`;
   }).join('');
@@ -1652,7 +2773,9 @@ function _smgmtOutcomeLogHtml(label, outcome) {
       <span class="smgmt-log-caret"><i class="ti ti-chevron-right"></i></span>
       <i class="ti ti-file-text" style="color:var(--text-sub);"></i>
       <span>Run log archived · ${lineCount > 0 ? lineCount + ' lines' : 'no log found'}</span>
-      <span style="margin-left:auto;color:var(--text-sub);">Show log</span>
+      <button class="btn-view-log" style="margin-left:auto;" title="View dispatch log"
+              onclick="event.stopPropagation();openLvDispatchLog('${escHtml(label)}',_smgmtRepo()||'')">
+        <i class="ti ti-external-link"></i> View dispatch log</button>
     </div>
     <div class="smgmt-log-stream" id="${logId}-stream"></div>
   </div>`;
@@ -1670,7 +2793,13 @@ async function _smgmtMaybeLoadLog(label, logId) {
     );
     if (!resp.ok) { streamEl.textContent = 'Log not available.'; return; }
     const data = await resp.json();
-    if (!data.found || !data.tail) { streamEl.textContent = 'Log not available.'; return; }
+    if (!data.found || !data.tail) {
+      const searchedDir = data.searched_dir || data.log_dir || '';
+      streamEl.textContent = searchedDir
+        ? `No log found yet at \`${searchedDir}\``
+        : 'No log found yet.';
+      return;
+    }
     streamEl.innerHTML = data.tail.split('\n').map(line =>
       `<div class="smgmt-log-line"><span class="smgmt-log-msg">${escHtml(line)}</span></div>`
     ).join('');
@@ -1679,11 +2808,115 @@ async function _smgmtMaybeLoadLog(label, logId) {
   }
 }
 
+// ── Log viewer modal (issue #264) ────────────────────────────────────────────
+
+let _lvCurrentKind   = null;  // 'dispatch' | 'issue'
+let _lvCurrentLabel  = null;
+let _lvCurrentIssue  = null;
+let _lvCurrentRepo   = null;
+
+function openLvDispatchLog(label, repo) {
+  _lvCurrentKind  = 'dispatch';
+  _lvCurrentLabel = label;
+  _lvCurrentIssue = null;
+  _lvCurrentRepo  = repo;
+  const n = parseInt(label.split('-')[1], 10);
+  document.getElementById('lv-modal-title').textContent = `Dispatch log — Sprint ${n}`;
+  _lvLoad();
+  document.getElementById('lv-backdrop').classList.remove('hidden');
+  document.getElementById('lv-modal').classList.remove('hidden');
+}
+
+function openLvIssueLog(issueNum, label, repo) {
+  _lvCurrentKind  = 'issue';
+  _lvCurrentLabel = label;
+  _lvCurrentIssue = issueNum;
+  _lvCurrentRepo  = repo;
+  document.getElementById('lv-modal-title').textContent = `Issue log — #${issueNum}`;
+  _lvLoad();
+  document.getElementById('lv-backdrop').classList.remove('hidden');
+  document.getElementById('lv-modal').classList.remove('hidden');
+}
+
+function closeLvModal() {
+  document.getElementById('lv-backdrop').classList.add('hidden');
+  document.getElementById('lv-modal').classList.add('hidden');
+}
+
+function _lvRefresh() {
+  _lvLoad();
+}
+
+async function _lvLoad() {
+  const streamEl   = document.getElementById('lv-stream');
+  const notFoundEl = document.getElementById('lv-not-found');
+  const metaEl     = document.getElementById('lv-meta');
+  const pathEl     = document.getElementById('lv-path-text');
+
+  streamEl.classList.add('hidden');
+  notFoundEl.classList.add('hidden');
+  metaEl.style.display = 'none';
+  streamEl.textContent = '';
+
+  if (!_lvCurrentRepo || !_lvCurrentLabel) return;
+
+  let url;
+  if (_lvCurrentKind === 'dispatch') {
+    url = `/api/sprints/${encodeURIComponent(_lvCurrentLabel)}/dispatch-log` +
+          `?project=${encodeURIComponent(_lvCurrentRepo)}&tail_lines=200`;
+  } else {
+    url = `/api/sprints/${encodeURIComponent(_lvCurrentLabel)}/issue/${_lvCurrentIssue}/log` +
+          `?project=${encodeURIComponent(_lvCurrentRepo)}&tail_lines=200`;
+  }
+
+  try {
+    const resp = await fetch(url);
+    if (!resp.ok) {
+      notFoundEl.textContent = 'Log not available.';
+      notFoundEl.classList.remove('hidden');
+      return;
+    }
+    const data = await resp.json();
+    if (!data.found) {
+      // Determine the best "path hint" to show the user
+      let pathHint = '';
+      if (_lvCurrentKind === 'dispatch') {
+        pathHint = data.searched_dir || data.log_dir || '';
+      } else {
+        const candidates = data.candidate_paths || data.candidates || [];
+        pathHint = candidates[0] || '';
+      }
+      notFoundEl.textContent = pathHint
+        ? `No log found yet at \`${pathHint}\``
+        : 'No log found yet.';
+      notFoundEl.classList.remove('hidden');
+      return;
+    }
+    // Show path
+    if (data.path) {
+      pathEl.textContent = data.path;
+      metaEl.style.display = '';
+    }
+    streamEl.textContent = data.tail || '';
+    streamEl.classList.remove('hidden');
+  } catch (_) {
+    notFoundEl.textContent = 'Could not load log.';
+    notFoundEl.classList.remove('hidden');
+  }
+}
+
 function _smgmtHasCompletedTickets(tickets) {
   return tickets.some(t => (t.labels || []).some(l => RERUN_STRIP_LABELS.has(l.name)));
 }
 
 function _smgmtCardHtml(label, n, tickets, outcome) {
+  const isRunning = _smgmtRunningLabels.has(label);
+
+  // Running sprint gets special animated treatment (issue #277)
+  if (isRunning) {
+    return _smgmtRunningCardHtml(label, n, tickets);
+  }
+
   const hasCompleted = _smgmtHasCompletedTickets(tickets);
   const canRun = !hasCompleted && tickets.length >= 1;
 
@@ -1722,7 +2955,7 @@ function _smgmtCardHtml(label, n, tickets, outcome) {
     outcomeBandHtml = _smgmtOutcomeBandHtml(label, outcome);
     const issueList = outcome.issues || [];
     ticketCount = issueList.length;
-    ticketsContainerHtml = _smgmtOutcomeTicketListHtml(issueList);
+    ticketsContainerHtml = _smgmtOutcomeTicketListHtml(issueList, label, _smgmtRepo());
   } else {
     // Planning view ticket rows
     ticketsContainerHtml = tickets.length > 0
@@ -1762,6 +2995,421 @@ function _smgmtCardHtml(label, n, tickets, outcome) {
     </div>`;
 }
 
+// ── Running sprint card (issue #277) ──────────────────────────────────────
+
+// Configurable placeholder — to be replaced by stats-derived values (issue #308)
+const SIZE_MINUTES = { S: 7, M: 15, L: 25, XL: 40 };
+
+/** Build the animated running sprint card HTML. Live data patched separately by _smgmtLivePatch. */
+function _smgmtRunningCardHtml(label, n, tickets) {
+  const live = _smgmtLiveCache[label] || null;
+
+  // Stat strip values (use live data if available, else zeros)
+  const doneCount     = live ? (live.done_count    || 0) : 0;
+  const failedCount   = live ? (live.failed_count  || 0) : 0;
+  const skippedCount  = live ? (live.skipped_count || 0) : 0;
+  const totalCount    = live ? (live.total_count   || tickets.length) : tickets.length;
+  const completeCount = doneCount + failedCount + skippedCount;
+  const estRemMins    = live ? live.est_remaining_minutes : null;
+  const timeSpentSec  = live ? (live.time_spent_sec || 0) : 0;
+  const currentTicket = live ? live.current_ticket : null;
+  const activeAgent   = live ? live.active_agent : null;
+  const recentLogLines = live ? (live.recent_log_lines || []) : [];
+
+  // Progress bar percentage (complete / total)
+  const pct = totalCount > 0 ? Math.round((completeCount / totalCount) * 100) : 0;
+
+  // Use locked snapshot (live.issues) as the source of truth for rows when available.
+  // Fall back to label-derived tickets only during the pre-snapshot window.
+  const liveIssues = (live && live.issues && live.issues.length > 0) ? live.issues : [];
+  const liveByNum = {};
+  liveIssues.forEach(i => { liveByNum[i.number] = i; });
+
+  const sourceTickets = liveIssues.length > 0 ? liveIssues : tickets;
+  const cardRepo = _smgmtRepo();
+
+  const ticketRowsHtml = sourceTickets.map(t => {
+    const liveIss = liveByNum[t.number];
+    const liveStatus = liveIss ? liveIss.status : null;
+    const agentStatus = liveIss ? liveIss.agent_status : null;
+
+    let indicator = '';
+    if (liveStatus === 'done') {
+      indicator = '<div class="smgmt-ticket-indicator"><div class="circle-done">&#10003;</div></div>';
+    } else if (agentStatus === 'failed' || liveStatus === 'skipped') {
+      indicator = '<div class="smgmt-ticket-indicator"><div class="circle-failed">&#10005;</div></div>';
+    } else if (currentTicket && t.number === currentTicket.number) {
+      // In-flight — show spinning ring
+      indicator = '<div class="smgmt-ticket-indicator"><div class="ring"></div></div>';
+    } else {
+      // Pending — empty circle
+      indicator = '<div class="smgmt-ticket-indicator"><div class="circle-pending"></div></div>';
+    }
+
+    const issueUrl = t.url || (cardRepo ? `https://github.com/${cardRepo}/issues/${t.number}` : '#');
+
+    const sizePillHtml = (liveIss && liveIss.size)
+      ? `<span class="smgmt-ticket-size-pill">${escHtml(liveIss.size)}</span>`
+      : '';
+    const agentTagHtml = (liveIss && liveIss.agent)
+      ? `<span class="smgmt-ticket-agent-tag ${_smgmtAgentTagClass(liveIss.agent)}">${escHtml(liveIss.agent.toUpperCase())}</span>`
+      : '';
+    const elapsedStr = liveIss ? _fmtTicketElapsed(liveIss.elapsed_secs) : null;
+    const elapsedHtml = elapsedStr
+      ? `<span class="smgmt-ticket-elapsed">${elapsedStr}</span>`
+      : '';
+
+    return `<div class="smgmt-ticket" data-issue="${t.number}" draggable="false">
+      ${indicator}
+      <a class="smgmt-ticket-num" href="${escHtml(issueUrl)}" target="_blank"
+         rel="noopener">#${t.number}</a>
+      <span class="smgmt-ticket-title" title="${escHtml(t.title)}">${escHtml(t.title)}</span>
+      ${sizePillHtml}${agentTagHtml}${elapsedHtml}
+    </div>`;
+  }).join('');
+
+  return `
+    <div class="smgmt-sprint-card smgmt-running" id="smgmt-card-${escHtml(label)}">
+      <div class="smgmt-running-stripe"></div>
+      <div class="smgmt-sprint-header">
+        <div class="smgmt-sprint-header-left">
+          <i class="ti ti-layout-kanban" style="font-size:14px;color:var(--green)"></i>
+          <span class="smgmt-sprint-name" style="font-size:15px;font-weight:700;">Sprint ${escHtml(String(n))}</span>
+          <span class="smgmt-running-badge" id="smgmt-running-badge-${escHtml(label)}">
+            <span class="smgmt-running-badge-dot"></span>Running
+          </span>
+          <span class="smgmt-sprint-count">&middot; ${sourceTickets.length} ticket${sourceTickets.length !== 1 ? 's' : ''}</span>
+        </div>
+        <div class="smgmt-sprint-header-right">
+          <button class="smgmt-run-btn" disabled title="Sprint is currently running">
+            <i class="ti ti-player-play"></i> Running…</button>
+        </div>
+      </div>
+      <div class="smgmt-running-stat-strip" id="smgmt-running-stats-${escHtml(label)}">
+        <div class="smgmt-running-stat">
+          <span class="rsnum green" id="smgmt-rs-done-${escHtml(label)}">${doneCount}</span>
+          <span class="rslbl">Done</span>
+        </div>
+        <div class="smgmt-running-stat">
+          <span class="rsnum ${failedCount > 0 ? 'red' : 'muted'}" id="smgmt-rs-failed-${escHtml(label)}">${failedCount}</span>
+          <span class="rslbl">Failed</span>
+        </div>
+        <div class="smgmt-running-stat">
+          <span class="rsnum muted" id="smgmt-rs-skipped-${escHtml(label)}">${skippedCount}</span>
+          <span class="rslbl">Skipped</span>
+        </div>
+        <div class="smgmt-running-stat">
+          <span class="rsnum amber" id="smgmt-rs-est-${escHtml(label)}">${estRemMins != null ? estRemMins + 'm' : '—'}</span>
+          <span class="rslbl">Est. remaining</span>
+        </div>
+        <div class="smgmt-running-time" id="smgmt-rs-time-${escHtml(label)}">
+          <i class="ti ti-clock" style="font-size:12px;"></i>
+          ${_fmtRunningTime(timeSpentSec)}
+        </div>
+      </div>
+      <div class="smgmt-running-progress-wrap">
+        <div class="smgmt-running-progress-track">
+          <div class="smgmt-running-progress-fill" id="smgmt-rs-prog-${escHtml(label)}" style="width:${pct}%">
+            <div class="smgmt-running-progress-shimmer"></div>
+          </div>
+        </div>
+      </div>
+      <div class="smgmt-sprint-tickets" id="smgmt-tickets-${escHtml(label)}">
+        ${ticketRowsHtml || '<div class="smgmt-drop-hint">No tickets in this sprint</div>'}
+      </div>
+      <div class="smgmt-live-log" id="smgmt-live-log-${escHtml(label)}">
+        <div class="smgmt-live-log-bar">
+          <span class="smgmt-live-indicator"></span>
+          <span>live</span>
+          <span class="smgmt-live-log-agent" id="smgmt-live-agent-${escHtml(label)}">${
+            activeAgent ? escHtml(activeAgent.name.toUpperCase() + ' · pid ' + activeAgent.pid) : ''
+          }</span>
+        </div>
+        <div class="smgmt-live-log-stream" id="smgmt-live-log-stream-${escHtml(label)}">${
+          _smgmtLiveLogLinesHtml(recentLogLines)
+        }</div>
+      </div>
+    </div>`;
+}
+
+/** Format seconds as h:mm or m:ss for the running sprint time display. */
+function _fmtRunningTime(secs) {
+  if (!secs || secs <= 0) return '0m 0s';
+  const h = Math.floor(secs / 3600);
+  const m = Math.floor((secs % 3600) / 60);
+  const s = secs % 60;
+  if (h > 0) return `${h}h ${m}m`;
+  return `${m}m ${s}s`;
+}
+
+/** Render recent_log_lines array to HTML for the live log stream container. */
+function _smgmtLiveLogLinesHtml(logLines) {
+  if (!logLines || logLines.length === 0) {
+    return '<div class="smgmt-log-line" style="color:var(--text-sub)">Waiting for log…</div>';
+  }
+  return logLines.map(l =>
+    `<div class="smgmt-log-line">` +
+    `<span class="smgmt-log-time">${escHtml(l.timestamp)}</span>` +
+    `<span class="smgmt-log-msg">${escHtml(l.message)}</span>` +
+    `</div>`
+  ).join('');
+}
+
+/** Update the live log panel for a running sprint card (header agent info + log stream). */
+function _smgmtLiveLogPatch(label, live) {
+  const agentEl  = document.getElementById(`smgmt-live-agent-${label}`);
+  const streamEl = document.getElementById(`smgmt-live-log-stream-${label}`);
+  if (agentEl) {
+    const agent = live.active_agent;
+    agentEl.textContent = agent ? `${agent.name.toUpperCase()} · pid ${agent.pid}` : '';
+  }
+  if (streamEl) {
+    streamEl.innerHTML = _smgmtLiveLogLinesHtml(live.recent_log_lines || []);
+    streamEl.scrollTop = streamEl.scrollHeight;
+  }
+}
+
+/** 5-second tick: update live log panels from cached live data (issue #309). */
+function _smgmtLogPollTick() {
+  if (_smgmtRunningLabels.size === 0) {
+    clearInterval(_smgmtLogPollId);
+    _smgmtLogPollId = null;
+    return;
+  }
+  for (const label of _smgmtRunningLabels) {
+    const live = _smgmtLiveCache[label];
+    if (live) _smgmtLiveLogPatch(label, live);
+  }
+}
+
+/** Format per-ticket elapsed seconds as "{N}m {N}s". Returns null if no value. */
+function _fmtTicketElapsed(secs) {
+  if (secs == null || secs <= 0) return null;
+  const m = Math.floor(secs / 60);
+  const s = secs % 60;
+  return `${m}m ${s}s`;
+}
+
+/** CSS class for agent role tag: purple for coder-class, amber for tester-class. */
+function _smgmtAgentTagClass(role) {
+  if (!role) return 'unknown-class';
+  const r = role.toUpperCase();
+  if (r.includes('CODER')) return 'coder-class';
+  if (r.includes('TESTER')) return 'tester-class';
+  return 'unknown-class';
+}
+
+/** Patch live stat strip + progress bar + ticket indicators in place (no full re-render). */
+function _smgmtLivePatch(label, live) {
+  const card = document.getElementById(`smgmt-card-${label}`);
+  if (!card || !card.classList.contains('smgmt-running')) return;
+
+  const doneCount    = live.done_count    || 0;
+  const failedCount  = live.failed_count  || 0;
+  const skippedCount = live.skipped_count || 0;
+  const totalCount   = live.total_count   || 0;
+  const completeCount = doneCount + failedCount + skippedCount;
+  const estRemMins   = live.est_remaining_minutes;
+  const timeSpentSec = live.time_spent_sec || 0;
+  const currentTicket = live.current_ticket;
+  const pct = totalCount > 0 ? Math.round((completeCount / totalCount) * 100) : 0;
+
+  // Update stat numbers
+  const doneEl    = document.getElementById(`smgmt-rs-done-${label}`);
+  const failedEl  = document.getElementById(`smgmt-rs-failed-${label}`);
+  const skippedEl = document.getElementById(`smgmt-rs-skipped-${label}`);
+  const estEl     = document.getElementById(`smgmt-rs-est-${label}`);
+  const timeEl    = document.getElementById(`smgmt-rs-time-${label}`);
+  const progEl    = document.getElementById(`smgmt-rs-prog-${label}`);
+
+  if (doneEl)    { doneEl.textContent = String(doneCount); }
+  if (failedEl)  {
+    failedEl.textContent = String(failedCount);
+    failedEl.className = `rsnum ${failedCount > 0 ? 'red' : 'muted'}`;
+  }
+  if (skippedEl) { skippedEl.textContent = String(skippedCount); }
+  if (estEl)     { estEl.textContent = estRemMins != null ? estRemMins + 'm' : '—'; }
+  if (timeEl)    {
+    timeEl.innerHTML = `<i class="ti ti-clock" style="font-size:12px;"></i> ${_fmtRunningTime(timeSpentSec)}`;
+  }
+  if (progEl)    { progEl.style.width = pct + '%'; }
+
+  // Update per-ticket status indicators
+  const liveIssues = live.issues || [];
+  const liveByNum = {};
+  liveIssues.forEach(i => { liveByNum[i.number] = i; });
+
+  // Inject rows for snapshot tickets missing from the DOM (e.g. label stripped before first render)
+  if (liveIssues.length > 0) {
+    const ticketsContainer = document.getElementById(`smgmt-tickets-${label}`);
+    if (ticketsContainer) {
+      const existingNums = new Set(
+        Array.from(card.querySelectorAll('.smgmt-ticket[data-issue]'))
+          .map(r => parseInt(r.dataset.issue, 10))
+      );
+      // Remove "no tickets" placeholder if present
+      const placeholder = ticketsContainer.querySelector('.smgmt-drop-hint');
+      if (placeholder) placeholder.remove();
+      const patchRepo = _smgmtRepo();
+      liveIssues.forEach(t => {
+        if (existingNums.has(t.number)) return;
+        const issueUrl = t.url || (patchRepo ? `https://github.com/${patchRepo}/issues/${t.number}` : '#');
+        const row = document.createElement('div');
+        row.className = 'smgmt-ticket';
+        row.dataset.issue = String(t.number);
+        row.draggable = false;
+        const initSizePill = t.size
+          ? `<span class="smgmt-ticket-size-pill">${escHtml(t.size)}</span>` : '';
+        const initAgentTag = t.agent
+          ? `<span class="smgmt-ticket-agent-tag ${_smgmtAgentTagClass(t.agent)}">${escHtml(t.agent.toUpperCase())}</span>` : '';
+        const initElapsedStr = _fmtTicketElapsed(t.elapsed_secs);
+        const initElapsed = initElapsedStr
+          ? `<span class="smgmt-ticket-elapsed">${initElapsedStr}</span>` : '';
+        row.innerHTML = `<div class="smgmt-ticket-indicator"><div class="circle-pending"></div></div>` +
+          `<a class="smgmt-ticket-num" href="${escHtml(issueUrl)}" target="_blank" rel="noopener">#${t.number}</a>` +
+          `<span class="smgmt-ticket-title" title="${escHtml(t.title)}">${escHtml(t.title)}</span>` +
+          initSizePill + initAgentTag + initElapsed;
+        ticketsContainer.appendChild(row);
+      });
+    }
+  }
+
+  card.querySelectorAll('.smgmt-ticket[data-issue]').forEach(row => {
+    const num = parseInt(row.dataset.issue, 10);
+    const indicatorEl = row.querySelector('.smgmt-ticket-indicator');
+    if (!indicatorEl) return;
+
+    const liveIss = liveByNum[num];
+    const liveStatus = liveIss ? liveIss.status : null;
+    const agentStatus = liveIss ? liveIss.agent_status : null;
+
+    if (liveStatus === 'done') {
+      indicatorEl.innerHTML = '<div class="circle-done">&#10003;</div>';
+    } else if (agentStatus === 'failed' || liveStatus === 'skipped') {
+      indicatorEl.innerHTML = '<div class="circle-failed">&#10005;</div>';
+    } else if (currentTicket && num === currentTicket.number) {
+      indicatorEl.innerHTML = '<div class="ring"></div>';
+    } else {
+      indicatorEl.innerHTML = '<div class="circle-pending"></div>';
+    }
+
+    // Update size pill
+    let sizePillEl = row.querySelector('.smgmt-ticket-size-pill');
+    if (liveIss && liveIss.size) {
+      if (!sizePillEl) {
+        sizePillEl = document.createElement('span');
+        sizePillEl.className = 'smgmt-ticket-size-pill';
+        const titleEl = row.querySelector('.smgmt-ticket-title');
+        if (titleEl) titleEl.after(sizePillEl);
+      }
+      sizePillEl.textContent = liveIss.size;
+    } else if (sizePillEl) {
+      sizePillEl.remove();
+    }
+
+    // Update agent tag — only on tickets with an active agent
+    let agentTagEl = row.querySelector('.smgmt-ticket-agent-tag');
+    if (liveIss && liveIss.agent) {
+      if (!agentTagEl) {
+        agentTagEl = document.createElement('span');
+        agentTagEl.className = 'smgmt-ticket-agent-tag';
+        const sizeEl = row.querySelector('.smgmt-ticket-size-pill');
+        if (sizeEl) sizeEl.after(agentTagEl);
+        else {
+          const titleEl = row.querySelector('.smgmt-ticket-title');
+          if (titleEl) titleEl.after(agentTagEl);
+        }
+      }
+      agentTagEl.className = `smgmt-ticket-agent-tag ${_smgmtAgentTagClass(liveIss.agent)}`;
+      agentTagEl.textContent = liveIss.agent.toUpperCase();
+    } else if (agentTagEl) {
+      agentTagEl.remove();
+    }
+
+    // Update elapsed time
+    let elapsedEl = row.querySelector('.smgmt-ticket-elapsed');
+    const elapsedStr = liveIss ? _fmtTicketElapsed(liveIss.elapsed_secs) : null;
+    if (elapsedStr) {
+      if (!elapsedEl) {
+        elapsedEl = document.createElement('span');
+        elapsedEl.className = 'smgmt-ticket-elapsed';
+        row.appendChild(elapsedEl);
+      }
+      elapsedEl.textContent = elapsedStr;
+    } else if (elapsedEl) {
+      elapsedEl.remove();
+    }
+  });
+}
+
+/** Start or restart the live polling loop for any running sprints. */
+function _smgmtLivePollRestart() {
+  // Clear existing polls
+  if (_smgmtLivePollId !== null) {
+    clearInterval(_smgmtLivePollId);
+    _smgmtLivePollId = null;
+  }
+  if (_smgmtLogPollId !== null) {
+    clearInterval(_smgmtLogPollId);
+    _smgmtLogPollId = null;
+  }
+
+  if (_smgmtRunningLabels.size === 0) return;
+
+  // Poll every 2 seconds for stat/indicator updates
+  _smgmtLivePollId = setInterval(_smgmtLivePollTick, 2000);
+  // Poll every 5 seconds for live log panel (reads from cache populated by the 2s poll)
+  _smgmtLogPollId = setInterval(_smgmtLogPollTick, 5000);
+  // Kick off immediately
+  _smgmtLivePollTick();
+}
+
+/** Fetch live data for all running sprints and patch in place. */
+async function _smgmtLivePollTick() {
+  if (_smgmtRunningLabels.size === 0) {
+    clearInterval(_smgmtLivePollId);
+    _smgmtLivePollId = null;
+    return;
+  }
+  const repo = _smgmtRepo();
+  if (!repo) return;
+
+  // Fetch live snapshot for each running sprint.
+  // live.issues from the /live endpoint is the locked snapshot (issue #306) and is the
+  // source of truth for which tickets to show — stripping sprint-N labels mid-run does
+  // not affect it.  Fall back to sprint-status label-derived data only in the
+  // pre-snapshot window (live.issues not yet populated by the backend).
+  try {
+    // Sprint-status provides a label-derived fallback for the pre-snapshot window only.
+    const statusResp = await fetch(
+      `/api/sprint-status?project=${encodeURIComponent(repo)}`
+    ).catch(() => null);
+    const sprintIssueMap = {}; // label → issues[] (fallback only)
+    if (statusResp && statusResp.ok) {
+      const statusData = await statusResp.json();
+      (statusData.running_sprints || []).forEach(r => {
+        sprintIssueMap[r.sprint_label] = r.issues || [];
+      });
+    }
+
+    for (const label of _smgmtRunningLabels) {
+      const resp = await fetch(
+        `/api/sprints/${encodeURIComponent(label)}/live?project=${encodeURIComponent(repo)}`
+      ).catch(() => null);
+      if (resp && resp.ok) {
+        const live = await resp.json();
+        // Use live.issues (locked snapshot) when available; only fall back to the
+        // label-derived sprint-status list during the pre-snapshot window.
+        if (!live.issues || live.issues.length === 0) {
+          live.issues = sprintIssueMap[label] || [];
+        }
+        _smgmtLiveCache[label] = live;
+        _smgmtLivePatch(label, live);
+      }
+    }
+  } catch (_) { /* silently ignore poll errors */ }
+}
+
 function _smgmtTicketRowHtml(ticket, label) {
   const hasRework = (ticket.labels || []).some(l => l.name === 'need-rework' || l.name === 'needs-rework');
   const statusClass = hasRework ? 'smgmt-status-need-rework' : ({
@@ -1780,7 +3428,10 @@ function _smgmtTicketRowHtml(ticket, label) {
          data-issue="${ticket.number}"
          data-sprint="${escHtml(label)}"
          ondragstart="_smgmtTicketDragStart(event, ${ticket.number}, '${escHtml(label)}')"
-         ondragend="_smgmtTicketDragEnd(event)">
+         ondragend="_smgmtTicketDragEnd(event)"
+         ondragover="_smgmtTicketReorderDragOver(event)"
+         ondragleave="_smgmtTicketReorderDragLeave(event)"
+         ondrop="_smgmtTicketReorderDrop(event, ${ticket.number}, '${escHtml(label)}')">
       <input type="checkbox" class="smgmt-ticket-cb"
              ${isSelected ? 'checked' : ''}
              onclick="event.stopPropagation()"
@@ -1790,6 +3441,12 @@ function _smgmtTicketRowHtml(ticket, label) {
          rel="noopener" onclick="event.stopPropagation()">#${ticket.number}</a>
       <span class="smgmt-ticket-title" title="${escHtml(ticket.title)}">${escHtml(ticket.title)}</span>
       <span class="smgmt-ticket-status ${statusClass}">${escHtml(statusLabel)}</span>
+      <button class="btn-view-log" tabindex="0" title="View issue log"
+              onclick="event.stopPropagation();openLvIssueLog(${ticket.number},'${escHtml(label)}',_smgmtRepo()||'')">
+        <i class="ti ti-file-text"></i></button>
+      <button class="smgmt-moveto-pill" tabindex="0"
+              onclick="event.stopPropagation();_smgmtMoveToOpen(event, ${ticket.number}, '${escHtml(label)}')"
+              onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();_smgmtMoveToOpen(event,${ticket.number},'${escHtml(label)}');}">Move to &#9660;</button>
     </div>`;
 }
 
@@ -1833,7 +3490,7 @@ async function smgmtRerunSprint(label) {
   const repo = _smgmtRepo();
   if (!repo) return;
   const n = parseInt(label.split('-')[1], 10);
-  if (!confirm(`Reset and re-run Sprint ${n}?\n\nThis will strip in-progress/sit/uat labels from tickets and re-dispatch agents.`)) return;
+  if (!confirm(`Re-run Sprint ${n}?\n\nAgents will be dispatched selectively based on each ticket's current state:\n• UAT tickets are skipped\n• SIT tickets go directly to tester\n• All others go to coder`)) return;
   try {
     const res = await fetch(`/api/sprints/${encodeURIComponent(label)}/rerun?project=${encodeURIComponent(repo)}`, {
       method: 'POST',
@@ -1842,7 +3499,14 @@ async function smgmtRerunSprint(label) {
     });
     if (!res.ok) throw new Error(await res.text());
     const data = await res.json();
-    _smgmtShowToast(`Reset ${data.reset_count} ticket${data.reset_count !== 1 ? 's' : ''}. Click Run Sprint when ready.`);
+    const coderCount = (data.decisions || []).filter(d => d.action === 'dispatch_coder').length;
+    const testerCount = (data.decisions || []).filter(d => d.action === 'dispatch_tester').length;
+    const skipCount = data.skip_count || 0;
+    const parts = [];
+    if (coderCount) parts.push(`${coderCount} coding`);
+    if (testerCount) parts.push(`${testerCount} testing`);
+    if (skipCount) parts.push(`${skipCount} skipped`);
+    _smgmtShowToast(`Re-run started: ${parts.join(', ') || '0 dispatched'}.`);
     // Clear cached outcome so the band disappears after rerun
     delete _smgmtOutcomeCache[label];
     await loadSprintMgmt();
@@ -1922,6 +3586,10 @@ function _smgmtUpdateSelectionUI() {
         <strong class="smgmt-selection-bar-count" id="smgmt-sel-count">0 tickets selected</strong>
         <span style="color:var(--text-muted)">— batch move to a sprint or backlog</span>
         <div class="smgmt-sel-bar-actions">
+          <button class="smgmt-selection-bar-delete" id="smgmt-sel-delete-btn"
+                  onclick="_smgmtDeleteSelected()">
+            <i class="ti ti-trash"></i> Delete
+          </button>
           <button class="smgmt-selection-bar-deselect" onclick="_smgmtClearSelection()">
             <i class="ti ti-x"></i> Deselect all
           </button>
@@ -1937,6 +3605,12 @@ function _smgmtUpdateSelectionUI() {
     const countEl = document.getElementById('smgmt-sel-count');
     if (countEl) countEl.textContent = count === 1 ? '1 ticket selected' : `${count} tickets selected`;
     _smgmtPopulateMoveToMenu();
+    // Show Delete button only for a single closed/unplanned issue
+    const deleteBtn = document.getElementById('smgmt-sel-delete-btn');
+    if (deleteBtn) {
+      const showDelete = count === 1 && _smgmtIsDeletableIssue([..._smgmtSelectedIssues][0]);
+      deleteBtn.classList.toggle('show', showDelete);
+    }
   } else {
     if (bar) bar.classList.remove('show');
   }
@@ -1998,6 +3672,37 @@ function _smgmtToggleSelect(number, checked) {
   const el = document.getElementById(`smgmt-ticket-${number}`);
   if (el) el.classList.toggle('is-selected', checked);
   _smgmtUpdateSelectionUI();
+}
+
+function _smgmtIsDeletableIssue(num) {
+  if (!_smgmtData) return false;
+  const iss = _smgmtData.issues.find(i => i.number === num);
+  if (!iss) return false;
+  return iss.status === 'done' || iss.sprint === null;
+}
+
+async function _smgmtDeleteSelected() {
+  if (_smgmtSelectedIssues.size !== 1) return;
+  const num = [..._smgmtSelectedIssues][0];
+  const repo = _smgmtRepo();
+  if (!repo) return;
+  const iss = _smgmtData?.issues.find(i => i.number === num);
+  const label = iss ? `#${num}: ${iss.title}` : `#${num}`;
+  if (!confirm(`Delete ${label}?\n\nThis will close the issue on GitHub. This cannot be undone.`)) return;
+  // Optimistic UI: remove from local data and re-render
+  if (_smgmtData) _smgmtData.issues = _smgmtData.issues.filter(i => i.number !== num);
+  _smgmtClearSelection();
+  _smgmtRender(_smgmtData);
+  try {
+    const res = await fetch(`/api/issues/${num}/close?repo=${encodeURIComponent(repo)}`, {
+      method: 'POST',
+    });
+    if (!res.ok) throw new Error(await res.text());
+    _smgmtShowToast(`Issue #${num} closed.`);
+  } catch (e) {
+    alert('Failed to delete issue: ' + e.message);
+    await loadSprintMgmt();
+  }
 }
 
 async function _smgmtMoveSelectedTo(targetLabel) {
@@ -2106,6 +3811,7 @@ function _smgmtTicketDragEnd(event) {
   if (pill) { pill.style.top = '-100px'; pill.style.left = '-100px'; pill.textContent = ''; }
   _smgmtDragTicket = null;
   document.querySelectorAll('.smgmt-sprint-card').forEach(el => el.classList.remove('drag-over-sprint'));
+  document.getElementById('smgmt-backlog-pane')?.classList.remove('drag-over-backlog');
 }
 
 function _smgmtDragOver(event, sprintLabel) {
@@ -2113,6 +3819,7 @@ function _smgmtDragOver(event, sprintLabel) {
     event.preventDefault();
     event.dataTransfer.dropEffect = 'move';
     document.querySelectorAll('.smgmt-sprint-card').forEach(b => b.classList.remove('drag-over-sprint'));
+    document.getElementById('smgmt-backlog-pane')?.classList.remove('drag-over-backlog');
     const target = document.getElementById(`smgmt-card-${sprintLabel}`);
     if (target) target.classList.add('drag-over-sprint');
   }
@@ -2127,7 +3834,10 @@ function _smgmtDragLeave(event) {
 async function _smgmtDropOnSprint(event, targetLabel) {
   event.preventDefault();
   document.querySelectorAll('.smgmt-sprint-card').forEach(el => el.classList.remove('drag-over-sprint'));
+  document.getElementById('smgmt-backlog-pane')?.classList.remove('drag-over-backlog');
 
+  // Block concurrent moves (issue #276)
+  if (_smgmtMoveLock) return;
   if (!_smgmtDragTicket) return;
   const dragInfo = _smgmtDragTicket;
   _smgmtDragTicket = null;
@@ -2152,6 +3862,7 @@ async function _smgmtDropOnSprint(event, targetLabel) {
     if (_smgmtData) _smgmtRender(_smgmtData);
 
     const changes = nums.map(n => ({ issue_num: n, sprint_label: targetLabel || 'backlog' }));
+    _smgmtBoardLock();
     try {
       const res = await fetch('/api/sprints/batch-labels', {
         method: 'POST',
@@ -2163,6 +3874,8 @@ async function _smgmtDropOnSprint(event, targetLabel) {
     } catch (e) {
       alert(`Failed to move tickets: ${e.message}`);
       await loadSprintMgmt();
+    } finally {
+      _smgmtBoardUnlock();
     }
   } else {
     // Single-ticket drop
@@ -2180,6 +3893,7 @@ async function _smgmtDropOnSprint(event, targetLabel) {
     // Clear selection after any drag completes
     _smgmtClearSelection();
 
+    _smgmtBoardLock();
     try {
       const res = await fetch(`/api/issues/${number}/sprint-label`, {
         method: 'POST',
@@ -2196,39 +3910,529 @@ async function _smgmtDropOnSprint(event, targetLabel) {
         _smgmtRender(_smgmtData);
       }
       alert(`Failed to move ticket #${number}: ${e.message}`);
+    } finally {
+      _smgmtBoardUnlock();
     }
   }
 }
 
-// ── Trigger Refresh ───────────────────────────────────────────────────────
-async function smgmtTriggerRefresh() {
-  const btn = document.getElementById('smgmt-refresh-btn');
-  if (btn) {
-    btn.classList.remove('btn-flash');
-    void btn.offsetWidth; // force reflow to restart animation
-    btn.classList.add('btn-flash');
-    btn.addEventListener('animationend', () => btn.classList.remove('btn-flash'), { once: true });
-  }
-  await loadSprintMgmt();
+// ── Within-sprint ticket reorder (issue #247) ─────────────────────────────
+
+function _smgmtTicketReorderDragOver(event) {
+  if (!_smgmtDragTicket || (_smgmtDragTicket.multi && _smgmtDragTicket.multi.length > 1)) return;
+  const target = event.currentTarget;
+  const targetSprint = target.dataset.sprint;
+  const dragSprint = _smgmtDragTicket ? _smgmtDragTicket.fromSprint : null;
+  if (targetSprint !== dragSprint) return; // cross-sprint moves handled by _smgmtDropOnSprint
+  event.preventDefault();
+  event.stopPropagation();
+  const rect = target.getBoundingClientRect();
+  const midY = rect.top + rect.height / 2;
+  target.classList.remove('drag-before', 'drag-after');
+  target.classList.add(event.clientY < midY ? 'drag-before' : 'drag-after');
 }
+
+function _smgmtTicketReorderDragLeave(event) {
+  event.currentTarget.classList.remove('drag-before', 'drag-after');
+}
+
+async function _smgmtTicketReorderDrop(event, targetIssue, sprintLabel) {
+  if (!_smgmtDragTicket || (_smgmtDragTicket.multi && _smgmtDragTicket.multi.length > 1)) return;
+  const dragInfo = _smgmtDragTicket;
+  if (dragInfo.fromSprint !== sprintLabel) return; // cross-sprint handled elsewhere
+  const dragIssue = dragInfo.number;
+  if (dragIssue === targetIssue) {
+    event.currentTarget.classList.remove('drag-before', 'drag-after');
+    return;
+  }
+  event.preventDefault();
+  event.stopPropagation();
+
+  const rect = event.currentTarget.getBoundingClientRect();
+  const insertAfter = event.clientY >= rect.top + rect.height / 2;
+  event.currentTarget.classList.remove('drag-before', 'drag-after');
+
+  const repo = _smgmtRepo();
+  if (!repo || !_smgmtData) return;
+
+  // Build new order from current DOM positions.
+  const container = document.getElementById(`smgmt-tickets-${sprintLabel}`);
+  if (!container) return;
+  const rows = Array.from(container.querySelectorAll('.smgmt-ticket[data-issue]'));
+  let order = rows.map(r => parseInt(r.dataset.issue, 10)).filter(n => !isNaN(n));
+  order = order.filter(n => n !== dragIssue);
+  const insertIdx = order.indexOf(targetIssue) + (insertAfter ? 1 : 0);
+  order.splice(insertIdx, 0, dragIssue);
+
+  _smgmtDragTicket = null;
+  try {
+    const res = await fetch(`/api/sprints/${encodeURIComponent(sprintLabel)}/tickets/reorder`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ issue_numbers: order, project: repo }),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    await loadSprintMgmt();
+  } catch (e) {
+    alert(`Failed to reorder tickets: ${e.message}`);
+    await loadSprintMgmt();
+  }
+}
+
+// ── Backlog pane (issue #274) ──────────────────────────────────────────────
+
+function _smgmtBacklogToggle() {
+  const pane = document.getElementById('smgmt-backlog-pane');
+  const hdr  = document.getElementById('smgmt-backlog-header-row');
+  if (!pane) return;
+  const expanded = pane.classList.toggle('is-expanded');
+  if (hdr) hdr.setAttribute('aria-expanded', String(expanded));
+}
+
+function _smgmtRenderBacklog(tickets) {
+  const countEl   = document.getElementById('smgmt-backlog-count');
+  const ticketsEl = document.getElementById('smgmt-backlog-tickets');
+  if (!ticketsEl) return;
+
+  if (countEl) {
+    countEl.textContent = tickets.length > 0
+      ? `· ${tickets.length} ticket${tickets.length !== 1 ? 's' : ''}`
+      : '';
+  }
+
+  // Sort newest first (higher issue number = newer)
+  const sorted = [...tickets].sort((a, b) => b.number - a.number);
+
+  // Build list of sprint labels for "Move to" popup
+  const allSprintNums = (_smgmtData?.sprints || []).sort((a, b) => a - b);
+
+  if (sorted.length === 0) {
+    ticketsEl.innerHTML = '<div class="smgmt-drop-hint" style="padding:14px 18px;text-align:center;">No backlog tickets — all caught up</div>';
+    return;
+  }
+
+  ticketsEl.innerHTML = sorted.map(t => _smgmtBacklogTicketHtml(t, allSprintNums)).join('');
+}
+
+function _smgmtBacklogTicketHtml(ticket, sprintNums) {
+  const isSelected = _smgmtSelectedIssues.has(ticket.number);
+  return `
+    <div class="smgmt-ticket${isSelected ? ' is-selected' : ''}" id="smgmt-ticket-${ticket.number}"
+         draggable="true"
+         data-issue="${ticket.number}"
+         data-sprint=""
+         ondragstart="_smgmtBacklogTicketDragStart(event, ${ticket.number})"
+         ondragend="_smgmtTicketDragEnd(event)">
+      <input type="checkbox" class="smgmt-ticket-cb"
+             ${isSelected ? 'checked' : ''}
+             onclick="event.stopPropagation()"
+             onchange="_smgmtToggleSelect(${ticket.number}, this.checked)">
+      <i class="ti ti-grip-vertical smgmt-ticket-grip"></i>
+      <a class="smgmt-ticket-num" href="${escHtml(ticket.url || '#')}" target="_blank"
+         rel="noopener" onclick="event.stopPropagation()">#${ticket.number}</a>
+      <span class="smgmt-ticket-title" title="${escHtml(ticket.title)}">${escHtml(ticket.title)}</span>
+      <button class="smgmt-moveto-pill" tabindex="0"
+              onclick="event.stopPropagation();_smgmtMoveToOpen(event, ${ticket.number}, null)"
+              onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();_smgmtMoveToOpen(event,${ticket.number},null);}">Move to &#9660;</button>
+    </div>`;
+}
+
+// ── "Move to" popup (shared for backlog and sprint tickets) ────────────────
+
+let _smgmtMoveToIssue  = null;  // issue number for currently open popup
+let _smgmtMoveFromSprint = null; // current sprint label (null if from backlog)
+
+function _smgmtMoveToOpen(event, issueNum, fromSprintLabel) {
+  event.stopPropagation();
+  const popup = document.getElementById('smgmt-moveto-popup');
+  if (!popup) return;
+
+  // Toggle: close if same issue
+  if (_smgmtMoveToIssue === issueNum && !popup.classList.contains('hidden')) {
+    _smgmtMoveToClose();
+    return;
+  }
+
+  _smgmtMoveToIssue    = issueNum;
+  _smgmtMoveFromSprint = fromSprintLabel || null;
+
+  const sprintNums = (_smgmtData?.sprints || []).sort((a, b) => a - b);
+
+  let html = '';
+  sprintNums.forEach(n => {
+    const label = `sprint-${n}`;
+    if (label === fromSprintLabel) return; // skip current sprint
+    html += `<button class="smgmt-moveto-option" onclick="_smgmtMoveToConfirm(${issueNum},'${label}')">Sprint ${n}</button>`;
+  });
+
+  // Only show Backlog option if ticket is currently in a sprint
+  if (fromSprintLabel) {
+    if (html) html += '<hr class="smgmt-moveto-divider">';
+    html += `<button class="smgmt-moveto-option is-backlog" onclick="_smgmtMoveToConfirm(${issueNum},null)">Backlog (remove sprint)</button>`;
+  }
+
+  if (!html) {
+    html = '<div style="padding:10px 14px;font-size:12px;color:var(--text-muted)">No sprints available</div>';
+  }
+
+  popup.innerHTML = html;
+  popup.classList.remove('hidden');
+  popup.setAttribute('aria-label', `Move ticket #${issueNum} to sprint`);
+
+  // Position popup near clicked button
+  const btn = event.currentTarget || event.target;
+  const rect = btn.getBoundingClientRect();
+  const popupH = 200;
+  const spaceBelow = window.innerHeight - rect.bottom;
+  if (spaceBelow < popupH) {
+    popup.style.top  = (rect.top + window.scrollY - popupH) + 'px';
+  } else {
+    popup.style.top  = (rect.bottom + window.scrollY) + 'px';
+  }
+  popup.style.left     = (rect.left + window.scrollX) + 'px';
+  popup.style.minWidth = Math.max(rect.width, 160) + 'px';
+
+  // Close on outside click
+  setTimeout(() => {
+    document.addEventListener('click', _smgmtMoveToOutsideHandler);
+  }, 0);
+}
+
+function _smgmtMoveToOutsideHandler(event) {
+  const popup = document.getElementById('smgmt-moveto-popup');
+  if (!popup || popup.contains(event.target)) return;
+  _smgmtMoveToClose();
+}
+
+function _smgmtMoveToClose() {
+  const popup = document.getElementById('smgmt-moveto-popup');
+  if (popup) popup.classList.add('hidden');
+  _smgmtMoveToIssue    = null;
+  _smgmtMoveFromSprint = null;
+  document.removeEventListener('click', _smgmtMoveToOutsideHandler);
+}
+
+async function _smgmtMoveToConfirm(issueNum, targetLabel) {
+  // Block concurrent moves (issue #276)
+  if (_smgmtMoveLock) return;
+  const fromSprint = _smgmtMoveFromSprint;  // capture before close resets it
+  _smgmtMoveToClose();
+
+  // targetLabel is "sprint-N" or null (backlog)
+  const targetNum = targetLabel ? parseInt(targetLabel.split('-')[1], 10) : null;
+
+  // Optimistic update
+  if (_smgmtData) {
+    const iss = _smgmtData.issues.find(i => i.number === issueNum);
+    if (iss) iss.sprint = targetNum;
+    _smgmtRender(_smgmtData);
+  }
+
+  const repo = _smgmtRepo();
+  _smgmtBoardLock();
+  try {
+    const res = await fetch(`/api/issues/${issueNum}/sprint-label`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sprint_label: targetLabel || 'backlog', project: repo }),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    await loadSprintMgmt();
+  } catch (e) {
+    // Rollback optimistic update
+    if (_smgmtData) {
+      const iss = _smgmtData.issues.find(i => i.number === issueNum);
+      if (iss) iss.sprint = fromSprint ? parseInt(fromSprint.split('-')[1], 10) : null;
+      _smgmtRender(_smgmtData);
+    }
+    _smgmtShowToast(`Failed to move #${issueNum}: ${e.message}`);
+  } finally {
+    _smgmtBoardUnlock();
+  }
+}
+
+// ── Backlog drag handlers ──────────────────────────────────────────────────
+
+function _smgmtBacklogTicketDragStart(event, issueNum) {
+  _smgmtDragTicket = { number: issueNum, fromSprint: null, multi: null };
+  event.dataTransfer.effectAllowed = 'move';
+  event.dataTransfer.setData('text/plain', String(issueNum));
+  const el = document.getElementById(`smgmt-ticket-${issueNum}`);
+  if (el) setTimeout(() => el.classList.add('dragging-ticket'), 0);
+}
+
+function _smgmtBacklogDragOver(event) {
+  if (_smgmtDragTicket && _smgmtDragTicket.fromSprint !== null) {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+    document.getElementById('smgmt-backlog-pane')?.classList.add('drag-over-backlog');
+  }
+}
+
+function _smgmtBacklogDragLeave(event) {
+  const pane = document.getElementById('smgmt-backlog-pane');
+  if (pane && !pane.contains(event.relatedTarget)) {
+    pane.classList.remove('drag-over-backlog');
+  }
+}
+
+async function _smgmtDropOnBacklog(event) {
+  event.preventDefault();
+  document.getElementById('smgmt-backlog-pane')?.classList.remove('drag-over-backlog');
+
+  // Block concurrent moves (issue #276)
+  if (_smgmtMoveLock) return;
+  if (!_smgmtDragTicket) return;
+  const dragInfo = _smgmtDragTicket;
+  _smgmtDragTicket = null;
+
+  // If dragging from backlog back to backlog, no-op
+  if (!dragInfo.fromSprint) return;
+
+  const repo = _smgmtRepo();
+  if (!repo) return;
+
+  if (dragInfo.multi && dragInfo.multi.length > 1) {
+    const nums = dragInfo.multi;
+    if (_smgmtData) {
+      nums.forEach(n => {
+        const iss = _smgmtData.issues.find(i => i.number === n);
+        if (iss) iss.sprint = null;
+      });
+    }
+    _smgmtClearSelection();
+    if (_smgmtData) _smgmtRender(_smgmtData);
+
+    const changes = nums.map(n => ({ issue_num: n, sprint_label: 'backlog' }));
+    _smgmtBoardLock();
+    try {
+      const res = await fetch('/api/sprints/batch-labels', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ changes, project: repo }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      await loadSprintMgmt();
+    } catch (e) {
+      alert(`Failed to move tickets to backlog: ${e.message}`);
+      await loadSprintMgmt();
+    } finally {
+      _smgmtBoardUnlock();
+    }
+  } else {
+    const { number, fromSprint } = dragInfo;
+
+    // Optimistic update
+    if (_smgmtData) {
+      const iss = _smgmtData.issues.find(i => i.number === number);
+      if (iss) iss.sprint = null;
+      _smgmtRender(_smgmtData);
+    }
+    _smgmtClearSelection();
+
+    _smgmtBoardLock();
+    try {
+      const res = await fetch(`/api/issues/${number}/sprint-label`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sprint_label: 'backlog', project: repo }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      await loadSprintMgmt();
+    } catch (e) {
+      // Rollback
+      if (_smgmtData) {
+        const iss = _smgmtData.issues.find(i => i.number === number);
+        if (iss) iss.sprint = fromSprint ? parseInt(fromSprint.split('-')[1], 10) : null;
+        _smgmtRender(_smgmtData);
+      }
+      alert(`Failed to move ticket #${number} to backlog: ${e.message}`);
+    } finally {
+      _smgmtBoardUnlock();
+    }
+  }
+}
+
+// Close Move-to popup on Escape
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape') {
+    const popup = document.getElementById('smgmt-moveto-popup');
+    if (popup && !popup.classList.contains('hidden')) {
+      _smgmtMoveToClose();
+    }
+  }
+});
+
+// ── Board move lock (issue #276) ──────────────────────────────────────────
+let _smgmtMoveLock = false;
+
+/** Show the full-board overlay and suppress auto-refresh for the duration of a move. */
+function _smgmtBoardLock() {
+  _smgmtMoveLock = true;
+  // Pause the auto-refresh ticker without changing the user's chosen interval
+  _smgmtArStopTicker();
+  const overlay = document.getElementById('smgmt-move-overlay');
+  if (overlay) overlay.classList.add('active');
+}
+
+/** Hide the overlay and resume auto-refresh at the previously chosen interval. */
+function _smgmtBoardUnlock() {
+  _smgmtMoveLock = false;
+  const overlay = document.getElementById('smgmt-move-overlay');
+  if (overlay) overlay.classList.remove('active');
+  // Resume auto-refresh if an interval is selected
+  if (_arInterval > 0) _smgmtArStartTicker();
+}
+
+// ── Auto-refresh pill (issue #275) ────────────────────────────────────────
+const _AR_SESSION_KEY = 'smgmt-ar-interval';
+const _AR_INTERVALS   = [0, 1, 5, 10]; // 0 = Off
+
+let _arInterval   = 5;   // active interval in seconds (0 = off)
+let _arCountdown  = 0;   // current countdown value
+let _arTickerId   = null; // setInterval handle
+
+/** Initialise the pill from sessionStorage and start ticking if needed. */
+function _smgmtArInit() {
+  const saved = parseInt(sessionStorage.getItem(_AR_SESSION_KEY), 10);
+  const interval = _AR_INTERVALS.includes(saved) ? saved : 5;
+  _smgmtArSelectInterval(interval, /*skipSave=*/false);
+}
+
+/** Refresh board data preserving scroll position; flash the icon. */
+async function _smgmtArDoRefresh() {
+  const icon = document.getElementById('smgmt-ar-icon');
+  if (icon) {
+    icon.classList.remove('btn-flash');
+    void icon.offsetWidth;
+    icon.classList.add('btn-flash');
+    icon.addEventListener('animationend', () => icon.classList.remove('btn-flash'), { once: true });
+  }
+  const scrollY = window.scrollY;
+  await loadSprintMgmt(/*silent=*/true);
+  window.scrollTo({ top: scrollY, behavior: 'instant' });
+}
+
+/** Manual refresh triggered by clicking the pill label/icon. */
+async function _smgmtArManualRefresh() {
+  // Suppressed while a move is in flight (issue #276)
+  if (_smgmtMoveLock) return;
+  if (_arTickerId !== null) {
+    // Reset countdown so next auto-tick is a full interval away
+    _arCountdown = _arInterval;
+    _smgmtArUpdateLabel();
+  }
+  await _smgmtArDoRefresh();
+}
+
+/** Called every second by setInterval. */
+function _smgmtArTick() {
+  // Suppressed while a move is in flight (issue #276)
+  if (_smgmtMoveLock) return;
+  if (_arCountdown <= 1) {
+    _arCountdown = _arInterval;
+    _smgmtArUpdateLabel();
+    _smgmtArDoRefresh();
+  } else {
+    _arCountdown--;
+    _smgmtArUpdateLabel();
+  }
+}
+
+/** Start the ticker for the current _arInterval. */
+function _smgmtArStartTicker() {
+  _smgmtArStopTicker();
+  if (_arInterval <= 0) return;
+  _arCountdown = _arInterval;
+  _smgmtArUpdateLabel();
+  _arTickerId = setInterval(_smgmtArTick, 1000);
+}
+
+/** Stop the ticker. */
+function _smgmtArStopTicker() {
+  if (_arTickerId !== null) {
+    clearInterval(_arTickerId);
+    _arTickerId = null;
+  }
+}
+
+/** Update the pill label text. */
+function _smgmtArUpdateLabel() {
+  const label = document.getElementById('smgmt-ar-label');
+  const pill  = document.getElementById('smgmt-ar-pill');
+  if (!label) return;
+  if (_arInterval <= 0) {
+    label.textContent = 'Auto Refresh';
+    if (pill) pill.classList.add('is-off');
+  } else {
+    label.textContent = `Auto Refresh (${_arCountdown}s)`;
+    if (pill) pill.classList.remove('is-off');
+  }
+}
+
+/** Select a new interval, persist to sessionStorage, restart ticker. */
+function _smgmtArSelectInterval(interval, skipSave) {
+  _arInterval = interval;
+  if (!skipSave) sessionStorage.setItem(_AR_SESSION_KEY, String(interval));
+
+  // Update selected state on dropdown options
+  document.querySelectorAll('.smgmt-ar-option').forEach(btn => {
+    const v = parseInt(btn.dataset.interval, 10);
+    btn.classList.toggle('selected', v === interval);
+  });
+
+  _smgmtArStopTicker();
+  if (interval > 0) {
+    _smgmtArStartTicker();
+  } else {
+    _smgmtArUpdateLabel();
+  }
+
+  // Close dropdown
+  const dd = document.getElementById('smgmt-ar-dropdown');
+  if (dd) dd.classList.remove('open');
+}
+
+/** Toggle dropdown open/closed. */
+function _smgmtArToggleDropdown(e) {
+  e.stopPropagation();
+  const dd = document.getElementById('smgmt-ar-dropdown');
+  if (dd) dd.classList.toggle('open');
+}
+
+// Close dropdown when clicking outside
+document.addEventListener('click', function(e) {
+  const pill = document.getElementById('smgmt-ar-pill');
+  if (pill && !pill.contains(e.target)) {
+    const dd = document.getElementById('smgmt-ar-dropdown');
+    if (dd) dd.classList.remove('open');
+  }
+});
 
 // ── New Sprint modal ──────────────────────────────────────────────────────
 function smgmtOpenNewSprint() {
-  document.getElementById('ns-goal').value = '';
+  document.getElementById('ns-label').value = '';
   document.getElementById('ns-error').classList.add('hidden');
   document.getElementById('ns-submit-btn').disabled = true;
   document.getElementById('ns-backdrop').classList.remove('hidden');
   document.getElementById('ns-modal').classList.remove('hidden');
-  document.getElementById('ns-goal').focus();
+  document.getElementById('ns-label').focus();
 }
 
 function _nsClose(force) {
-  const goal = (document.getElementById('ns-goal').value || '').trim();
-  if (!force && goal.length > 0) {
-    if (!confirm('Discard unsaved sprint goal?')) return;
+  const label = (document.getElementById('ns-label').value || '').trim();
+  if (!force && label.length > 0) {
+    if (!confirm('Discard unsaved sprint label?')) return;
   }
   document.getElementById('ns-backdrop').classList.add('hidden');
   document.getElementById('ns-modal').classList.add('hidden');
+}
+
+function _parseSprintNum(str) {
+  if (!str) return null;
+  const clean = str.trim().toLowerCase().replace(/\s+/g, '-');
+  const m = clean.match(/^(?:sprint-)?(\d+)$/);
+  return m ? parseInt(m[1], 10) : null;
 }
 
 function _nsShowError(msg) {
@@ -2238,18 +4442,147 @@ function _nsShowError(msg) {
 }
 
 // ── New Ticket modal ──────────────────────────────────────────────────────
-async function smgmtOpenNewTicket() {
-  const sel = document.getElementById('nt-project');
-  sel.innerHTML = '<option value="">Loading projects…</option>';
-  sel.disabled = true;
+let _ntDraftId = null;
+let _ntDraftGenerated = false;
+let _ntLabels = [];          // [{name, color}, ...] from GitHub
+let _ntSelectedLabel = null; // currently applied label name
+let _ntDropdownFocus = -1;   // keyboard-focused dropdown item index
 
+function _ntUpdateWarnings() {
+  if (!_ntDraftGenerated) return;
+  document.getElementById('nt-warn-label').classList.toggle('hidden', !!_ntSelectedLabel);
+  document.getElementById('nt-warn-attach').classList.toggle('hidden', document.getElementById('nt-files').files.length > 0);
+}
+
+async function _ntFetchLabels(repo) {
+  try {
+    const url = '/api/github/labels' + (repo ? '?repo=' + encodeURIComponent(repo) : '');
+    const r = await fetch(url);
+    if (r.ok) _ntLabels = await r.json();
+  } catch (_) {}
+}
+
+function _ntLabelColor(name) {
+  const found = _ntLabels.find(l => l.name === name);
+  return found ? '#' + found.color : '#888888';
+}
+
+function _ntRenderDropdown(query) {
+  const dd = document.getElementById('nt-label-dropdown');
+  const input = document.getElementById('nt-label');
+  const q = (query || '').toLowerCase().trim();
+  const filtered = q ? _ntLabels.filter(l => l.name.toLowerCase().includes(q)) : _ntLabels.slice(0, 20);
+  const exactMatch = _ntLabels.some(l => l.name.toLowerCase() === q);
+
+  let html = '';
+  filtered.slice(0, 12).forEach(l => {
+    html += `<div class="nt-label-opt" role="option" data-name="${escHtml(l.name)}">
+      <span class="nt-label-dot" style="background:#${l.color}"></span>${escHtml(l.name)}
+    </div>`;
+  });
+  if (q && !exactMatch) {
+    html += `<div class="nt-label-opt nt-label-opt-create" role="option" data-create="${escHtml(q)}">
+      <i class="ti ti-plus"></i> Create "${escHtml(q)}"
+    </div>`;
+  }
+  if (!html) {
+    dd.classList.add('hidden');
+    input.setAttribute('aria-expanded', 'false');
+    return;
+  }
+  dd.innerHTML = html;
+  dd.classList.remove('hidden');
+  input.setAttribute('aria-expanded', 'true');
+  _ntDropdownFocus = -1;
+}
+
+function _ntSelectLabel(name) {
+  _ntSelectedLabel = name;
+  const color = _ntLabelColor(name);
+  const chip = document.getElementById('nt-label-chip');
+  chip.innerHTML = `<span class="nt-label-chip-dot" style="background:${color}"></span>${escHtml(name)}<button class="nt-label-chip-rm" type="button" aria-label="Remove label">&times;</button>`;
+  chip.classList.remove('hidden');
+  document.getElementById('nt-label-wrap').classList.add('hidden');
+  document.getElementById('nt-label').value = '';
+  document.getElementById('nt-label-dropdown').classList.add('hidden');
+  document.getElementById('nt-label').setAttribute('aria-expanded', 'false');
+  _ntDropdownFocus = -1;
+  _ntUpdateWarnings();
+}
+
+function _ntClearLabel() {
+  _ntSelectedLabel = null;
+  document.getElementById('nt-label-chip').classList.add('hidden');
+  document.getElementById('nt-label-wrap').classList.remove('hidden');
+  document.getElementById('nt-label').focus();
+  _ntUpdateWarnings();
+}
+
+async function _ntCreateLabel(name) {
+  const repo = document.getElementById('nt-project').value;
+  const palette = ['0075ca', 'e4e669', 'd73a4a', 'a2eeef', '7057ff', '008672', 'e99695', 'fbca04'];
+  const color = palette[Math.floor(Math.random() * palette.length)];
+  try {
+    const resp = await fetch('/api/github/labels', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, color, repo }),
+    });
+    if (resp.ok) _ntLabels = await resp.json();
+  } catch (_) {}
+  _ntSelectLabel(name);
+}
+
+function _ntAutoSuggestLabel() {
+  if (_ntSelectedLabel || !_ntLabels.length) return;
+  const title = (document.getElementById('nt-title').value || '').toLowerCase();
+  const body = (document.getElementById('nt-body').value || '').toLowerCase();
+  const text = title + ' ' + body;
+  const MAP = [
+    { kw: ['bug', 'fix', 'error', 'crash', 'broken', 'fail', 'incorrect'],    preferred: ['bug'] },
+    { kw: ['doc', 'readme', 'documentation', 'guide'],                        preferred: ['documentation'] },
+    { kw: ['test', 'testing', 'coverage', 'spec'],                            preferred: ['test', 'testing'] },
+    { kw: ['refactor', 'cleanup', 'clean up', 'optimize', 'performance'],     preferred: ['refactor', 'cleanup'] },
+    { kw: ['feature', 'add', 'new', 'implement', 'improve', 'enhance', 'ui'], preferred: ['enhancement', 'feature'] },
+  ];
+  for (const { kw, preferred } of MAP) {
+    if (kw.some(k => text.includes(k))) {
+      for (const p of preferred) {
+        const found = _ntLabels.find(l => l.name.toLowerCase() === p);
+        if (found) { _ntSelectLabel(found.name); return; }
+      }
+    }
+  }
+  const fallback = _ntLabels.find(l => l.name.toLowerCase() === 'enhancement');
+  if (fallback) _ntSelectLabel(fallback.name);
+}
+
+async function smgmtOpenNewTicket() {
+  // Reset to input state
+  _ntDraftId = null;
+  _ntDraftGenerated = false;
+  _ntSelectedLabel = null;
+  _ntLabels = [];
+  _ntDropdownFocus = -1;
   document.getElementById('nt-description').value = '';
+  document.getElementById('nt-label').value = '';
+  document.getElementById('nt-label-chip').classList.add('hidden');
+  document.getElementById('nt-label-wrap').classList.remove('hidden');
+  document.getElementById('nt-label-dropdown').classList.add('hidden');
+  document.getElementById('nt-files').value = '';
+  document.getElementById('nt-warn-label').classList.add('hidden');
+  document.getElementById('nt-warn-attach').classList.add('hidden');
   document.getElementById('nt-error').classList.add('hidden');
   document.getElementById('nt-submit-btn').disabled = false;
   document.getElementById('nt-submit-btn').textContent = 'Generate Draft';
+  document.getElementById('nt-draft-section').classList.add('hidden');
   document.getElementById('nt-backdrop').classList.remove('hidden');
   document.getElementById('nt-modal').classList.remove('hidden');
 
+  // Populate project dropdown
+  const sel = document.getElementById('nt-project');
+  sel.innerHTML = '<option value="">Loading projects…</option>';
+  sel.disabled = true;
   try {
     const r = await fetch('/api/projects');
     if (!r.ok) throw new Error('HTTP ' + r.status);
@@ -2260,6 +4593,9 @@ async function smgmtOpenNewTicket() {
       `<option value="${escHtml(p.repo)}"${p.repo === currentRepo ? ' selected' : ''}>${escHtml(p.name || p.repo)}</option>`
     ).join('');
     sel.disabled = false;
+    // Pre-fetch labels for the selected project
+    const selectedRepo = sel.value;
+    if (selectedRepo) _ntFetchLabels(selectedRepo);
   } catch (e) {
     sel.innerHTML = '<option value="">Could not load projects</option>';
     sel.disabled = false;
@@ -2290,8 +4626,8 @@ function _setupModals() {
   });
 
   // ── New Sprint modal wiring ──
-  document.getElementById('ns-goal').addEventListener('input', function() {
-    document.getElementById('ns-submit-btn').disabled = this.value.trim().length < 10;
+  document.getElementById('ns-label').addEventListener('input', function() {
+    document.getElementById('ns-submit-btn').disabled = _parseSprintNum(this.value) === null;
   });
 
   document.getElementById('ns-close-btn').addEventListener('click', () => _nsClose(false));
@@ -2310,8 +4646,9 @@ function _setupModals() {
   });
 
   document.getElementById('ns-submit-btn').addEventListener('click', async function() {
-    const goal = (document.getElementById('ns-goal').value || '').trim();
-    if (goal.length < 10) return;
+    const labelVal = (document.getElementById('ns-label').value || '').trim();
+    const sprintNum = _parseSprintNum(labelVal);
+    if (sprintNum === null) return;
 
     const repo = _cachedFullRepo[_slug] || null;
     if (!repo) { _nsShowError('Project not found — please reload the page.'); return; }
@@ -2324,7 +4661,7 @@ function _setupModals() {
       const resp = await fetch('/api/sprints/create', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ project: repo, goal }),
+        body: JSON.stringify({ project: repo, sprint_number: sprintNum }),
       });
       if (!resp.ok) {
         const data = await resp.json().catch(() => ({}));
@@ -2343,7 +4680,75 @@ function _setupModals() {
   // ── New Ticket modal wiring ──
   document.getElementById('nt-close-btn').addEventListener('click', _ntClose);
   document.getElementById('nt-cancel-btn').addEventListener('click', _ntClose);
+  document.getElementById('nt-post-cancel-btn').addEventListener('click', _ntClose);
   document.getElementById('nt-backdrop').addEventListener('click', _ntClose);
+  document.getElementById('nt-files').addEventListener('change', _ntUpdateWarnings);
+
+  // Project change → re-fetch labels
+  document.getElementById('nt-project').addEventListener('change', function() {
+    if (this.value) _ntFetchLabels(this.value);
+  });
+
+  // Label chip removal (delegated)
+  document.getElementById('nt-label-chip').addEventListener('click', function(e) {
+    if (e.target.classList.contains('nt-label-chip-rm')) _ntClearLabel();
+  });
+
+  // Label input → filter dropdown
+  document.getElementById('nt-label').addEventListener('input', function() {
+    _ntRenderDropdown(this.value);
+  });
+  document.getElementById('nt-label').addEventListener('focus', function() {
+    if (!_ntDraftGenerated) return;
+    _ntRenderDropdown(this.value);
+  });
+  document.getElementById('nt-label').addEventListener('blur', function() {
+    setTimeout(() => {
+      document.getElementById('nt-label-dropdown').classList.add('hidden');
+      document.getElementById('nt-label').setAttribute('aria-expanded', 'false');
+      _ntDropdownFocus = -1;
+    }, 150);
+  });
+
+  // Dropdown keyboard navigation
+  document.getElementById('nt-label').addEventListener('keydown', function(e) {
+    const dd = document.getElementById('nt-label-dropdown');
+    if (dd.classList.contains('hidden')) {
+      if (e.key === 'ArrowDown') { e.preventDefault(); _ntRenderDropdown(this.value); }
+      return;
+    }
+    const items = Array.from(dd.querySelectorAll('.nt-label-opt'));
+    if (!items.length) return;
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      _ntDropdownFocus = Math.min(_ntDropdownFocus + 1, items.length - 1);
+      items.forEach((el, i) => el.classList.toggle('focused', i === _ntDropdownFocus));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      _ntDropdownFocus = Math.max(_ntDropdownFocus - 1, 0);
+      items.forEach((el, i) => el.classList.toggle('focused', i === _ntDropdownFocus));
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      const focused = _ntDropdownFocus >= 0 ? items[_ntDropdownFocus] : (items.length === 1 ? items[0] : null);
+      if (focused) focused.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+    } else if (e.key === 'Escape') {
+      dd.classList.add('hidden');
+      this.setAttribute('aria-expanded', 'false');
+      _ntDropdownFocus = -1;
+    }
+  });
+
+  // Dropdown item selection (mousedown fires before blur)
+  document.getElementById('nt-label-dropdown').addEventListener('mousedown', function(e) {
+    const opt = e.target.closest('.nt-label-opt');
+    if (!opt) return;
+    e.preventDefault();
+    if (opt.dataset.create) {
+      _ntCreateLabel(opt.dataset.create);
+    } else if (opt.dataset.name) {
+      _ntSelectLabel(opt.dataset.name);
+    }
+  });
 
   document.getElementById('nt-modal').addEventListener('keydown', function(e) {
     if (e.key !== 'Tab') return;
@@ -2366,8 +4771,9 @@ function _setupModals() {
     }
 
     this.disabled = true;
-    this.textContent = 'Submitting…';
+    this.innerHTML = '<span class="nt-spinner"></span>Generating…';
     document.getElementById('nt-error').classList.add('hidden');
+    document.getElementById('nt-draft-section').classList.add('hidden');
 
     try {
       const formData = new FormData();
@@ -2378,17 +4784,942 @@ function _setupModals() {
         const data = await resp.json().catch(() => ({}));
         throw new Error(data.detail || 'HTTP ' + resp.status);
       }
-      // Draft generated — navigate to the project on main index to finish posting
-      _ntClose();
-      window.location.href = '/projects/' + encodeURIComponent(repo) + '/sprint-mgmt';
+      const data = await resp.json();
+      _ntDraftId = data.draft_id;
+      document.getElementById('nt-title').value = data.title || '';
+      document.getElementById('nt-body').value = data.body || '';
+      _ntDraftGenerated = true;
+      _ntAutoSuggestLabel();
+      _ntUpdateWarnings();
+      document.getElementById('nt-draft-section').classList.remove('hidden');
+      requestAnimationFrame(() => {
+        const modal = document.getElementById('nt-modal');
+        modal.scrollTop = modal.scrollHeight;
+      });
     } catch (err) {
-      document.getElementById('nt-error').textContent = "Couldn't create ticket — " + err.message;
+      document.getElementById('nt-error').textContent = "Couldn't generate draft — " + err.message;
       document.getElementById('nt-error').classList.remove('hidden');
+    } finally {
       this.disabled = false;
       this.textContent = 'Generate Draft';
     }
   });
+
+  document.getElementById('nt-post-btn').addEventListener('click', async function() {
+    const title = (document.getElementById('nt-title').value || '').trim();
+    const repo = document.getElementById('nt-project').value;
+    if (!title) {
+      document.getElementById('nt-error').textContent = 'Title is required before posting.';
+      document.getElementById('nt-error').classList.remove('hidden');
+      return;
+    }
+
+    this.disabled = true;
+    this.innerHTML = '<span class="nt-spinner"></span>Posting…';
+    document.getElementById('nt-error').classList.add('hidden');
+
+    try {
+      const formData = new FormData();
+      formData.append('draft_id', _ntDraftId || '');
+      formData.append('title', title);
+      formData.append('body', document.getElementById('nt-body').value);
+      formData.append('project', repo);
+      if (_ntSelectedLabel) formData.append('extra_labels', _ntSelectedLabel);
+      for (const f of document.getElementById('nt-files').files) {
+        formData.append('files', f);
+      }
+      const resp = await fetch('/api/tickets/create', { method: 'POST', body: formData });
+      if (!resp.ok) {
+        const data = await resp.json().catch(() => ({}));
+        throw new Error(data.detail || 'HTTP ' + resp.status);
+      }
+      _ntClose();
+      _smgmtShowToast('Ticket created successfully');
+      // Refresh both views without a hard page reload
+      await loadSprintMgmt();
+      loadTickets().catch(() => {});
+    } catch (err) {
+      document.getElementById('nt-error').textContent = "Couldn't post ticket — " + err.message;
+      document.getElementById('nt-error').classList.remove('hidden');
+    } finally {
+      this.disabled = false;
+      this.textContent = 'Post to GitHub';
+    }
+  });
 }
+
+// ── Bulk Create tab (issue #257) ─────────────────────────────────────────────
+
+let _bcJobId        = null;
+let _bcEventSource  = null;
+let _bcJobState     = null;      // current job snapshot {status, concurrency, tickets}
+let _bcCounterTimer = null;
+let _bcStartTimes   = {};        // index -> start timestamp
+let _bcAvgMs        = null;      // rolling avg BA time per ticket
+let _bcFiles            = [];    // queued image files
+let _bcFileAssignments  = [];    // parallel to _bcFiles: "all" | ticket_index (number)
+let _bcRetryFiles       = {};    // ticket_index -> File for retry image attach
+let _bcLastInput    = null;      // preserved Step 1 inputs for Recreate
+let _bcTabInited    = false;     // whether the tab has been populated once
+
+const BC_MAX_PROMPTS = 25;
+const BC_ALLOWED_EXTS = new Set(['.png', '.jpg', '.jpeg']);
+
+/** Called each time the Bulk Create tab becomes active. */
+function _bcInitTab() {
+  // Badge SSE may already be running from page load (init reconnect)
+  if (_bcJobId) {
+    _bcShowStep(2);
+    if (_bcJobState) _bcRenderStep2();
+    return;
+  }
+
+  // Job saved in localStorage but SSE not yet started (e.g. tab opened first)
+  const savedJobId = localStorage.getItem('bc_job_id');
+  if (savedJobId) {
+    _bcJobId = savedJobId;
+    _bcShowStep(2);
+    _bcConnectSSE(savedJobId);
+    return;
+  }
+
+  if (!_bcTabInited) {
+    _bcTabInited = true;
+    _bcShowStep(1);
+    _bcPopulateRepo();
+    _bcUpdateCounter();
+  }
+}
+
+/** Populate the repo dropdown to the current project. */
+function _bcPopulateRepo() {
+  const sel = document.getElementById('bc-repo');
+  if (!sel) return;
+  // Use _cachedFullRepo (keyed by slug) to build list
+  const repos = Object.values(_cachedFullRepo);
+  if (repos.length === 0) {
+    // Fallback: just show the current project's repo
+    const repo = _cachedFullRepo[_slug];
+    if (repo) {
+      sel.innerHTML = `<option value="${escHtml(repo)}">${escHtml(_slug)}</option>`;
+    }
+    return;
+  }
+  // Build from _homeData if available, else fall back to cached repos
+  const projects = (_homeData && _homeData.projects) ? _homeData.projects : [];
+  if (projects.length > 0) {
+    sel.innerHTML = projects.map(p => {
+      const repo = _cachedFullRepo[p.slug] || p.slug;
+      const selected = p.slug === _slug ? ' selected' : '';
+      return `<option value="${escHtml(repo)}"${selected}>${escHtml(p.name || p.slug)}</option>`;
+    }).join('');
+  } else {
+    sel.innerHTML = repos.map(repo => {
+      const slug = repo.split('/').pop();
+      const selected = slug === _slug ? ' selected' : '';
+      return `<option value="${escHtml(repo)}"${selected}>${escHtml(slug)}</option>`;
+    }).join('');
+  }
+}
+
+function _bcShowStep(n) {
+  const step1 = document.getElementById('bc-step1');
+  const step2 = document.getElementById('bc-step2');
+  const chip1 = document.getElementById('bc-chip-1');
+  const chip2 = document.getElementById('bc-chip-2');
+  if (!step1 || !step2 || !chip1 || !chip2) return;
+
+  if (n === 1) {
+    step1.classList.remove('hidden');
+    step2.classList.add('hidden');
+    chip1.classList.add('active');
+    chip2.classList.remove('active');
+  } else {
+    step1.classList.add('hidden');
+    step2.classList.remove('hidden');
+    chip1.classList.remove('active');
+    chip2.classList.add('active');
+  }
+}
+
+function _bcGoToStep1() {
+  _bcShowStep(1);
+}
+
+function bcRepoChanged() {
+  // Nothing extra needed — repo is read at run time
+}
+
+function bcOnTextareaInput() {
+  clearTimeout(_bcCounterTimer);
+  _bcCounterTimer = setTimeout(_bcUpdateCounter, 200);
+}
+
+function _bcParsePrompts(text) {
+  return text.split(/^---$/m).map(s => s.trim()).filter(s => s.length > 0);
+}
+
+function _bcUpdateCounter() {
+  const text = (document.getElementById('bc-textarea') || {}).value || '';
+  const prompts = _bcParsePrompts(text);
+  const n = prompts.length;
+  const chars = text.length;
+  const counterEl = document.getElementById('bc-counter');
+  if (counterEl) counterEl.textContent = `${n} tickets detected · ${chars} chars`;
+
+  const runBtn = document.getElementById('bc-run-btn');
+  if (runBtn) {
+    runBtn.textContent = `Run BA on all ${n}`;
+    const repo = (document.getElementById('bc-repo') || {}).value || '';
+    runBtn.disabled = (n === 0 || !repo || n > BC_MAX_PROMPTS);
+  }
+
+  const errEl = document.getElementById('bc-step1-error');
+  if (errEl) {
+    if (n > BC_MAX_PROMPTS) {
+      errEl.textContent = `Batch limit is ${BC_MAX_PROMPTS} prompts (you have ${n})`;
+      errEl.classList.remove('hidden');
+    } else {
+      errEl.classList.add('hidden');
+    }
+  }
+
+  // Refresh assignment dropdowns when ticket count changes
+  if (_bcFiles.length > 0) _bcRenderFileQueue();
+}
+
+function _bcPickFiles() {
+  const inp = document.getElementById('bc-file-input');
+  if (inp) inp.click();
+}
+
+function _bcOnFileInput(event) {
+  _bcAddFiles(Array.from(event.target.files));
+  event.target.value = '';
+}
+
+function _bcOnDrop(event) {
+  event.preventDefault();
+  const dz = document.getElementById('bc-dropzone');
+  if (dz) dz.classList.remove('drag-over');
+  _bcAddFiles(Array.from(event.dataTransfer.files));
+}
+
+function _bcAddFiles(incoming) {
+  const errEl = document.getElementById('bc-file-error');
+  if (errEl) { errEl.textContent = ''; errEl.classList.add('hidden'); }
+  let totalSize = _bcFiles.reduce((s, f) => s + f.size, 0);
+
+  for (const f of incoming) {
+    if (_bcFiles.length >= 10) break;
+    const ext = '.' + f.name.split('.').pop().toLowerCase();
+    if (!BC_ALLOWED_EXTS.has(ext)) {
+      if (errEl) {
+        errEl.textContent = `File '${f.name}' is not a PNG or JPG image.`;
+        errEl.classList.remove('hidden');
+      }
+      continue;
+    }
+    if (f.size > 25 * 1024 * 1024) {
+      if (errEl) {
+        errEl.textContent = `File '${f.name}' exceeds the 25 MB per-file limit.`;
+        errEl.classList.remove('hidden');
+      }
+      continue;
+    }
+    totalSize += f.size;
+    if (totalSize > 50 * 1024 * 1024) {
+      if (errEl) {
+        errEl.textContent = 'Upload batch would exceed the 50 MB total limit.';
+        errEl.classList.remove('hidden');
+      }
+      break;
+    }
+    _bcFiles.push(f);
+    _bcFileAssignments.push('all');
+  }
+  _bcRenderFileQueue();
+}
+
+function _bcRemoveFile(idx) {
+  _bcFiles.splice(idx, 1);
+  _bcFileAssignments.splice(idx, 1);
+  _bcRenderFileQueue();
+}
+
+function _bcSetAssignment(idx, val) {
+  _bcFileAssignments[idx] = (val === 'all') ? 'all' : parseInt(val, 10);
+}
+
+function _bcRenderFileQueue() {
+  const container = document.getElementById('bc-file-queue');
+  if (!container) return;
+  if (_bcFiles.length === 0) { container.innerHTML = ''; return; }
+
+  const text = (document.getElementById('bc-textarea') || {}).value || '';
+  const ticketCount = _bcParsePrompts(text).length;
+
+  container.innerHTML = _bcFiles.map((f, i) => {
+    const assignment = _bcFileAssignments[i] !== undefined ? _bcFileAssignments[i] : 'all';
+    const ticketOptions = Array.from({length: ticketCount}, (_, k) =>
+      `<option value="${k}" ${assignment === k ? 'selected' : ''}>→ ticket #${k + 1} only</option>`
+    ).join('');
+    return `<span class="bc-file-chip">
+      <span class="bc-file-chip-name" title="${escHtml(f.name)}">${escHtml(f.name)}</span>
+      <select class="bc-file-assign" onchange="_bcSetAssignment(${i}, this.value)">
+        <option value="all" ${assignment === 'all' ? 'selected' : ''}>→ all tickets</option>
+        ${ticketOptions}
+      </select>
+      <button class="bc-file-chip-remove" onclick="_bcRemoveFile(${i})" title="Remove">&times;</button>
+    </span>`;
+  }).join('');
+}
+
+async function bcRunAll() {
+  const textarea = document.getElementById('bc-textarea');
+  if (!textarea) return;
+  const text = textarea.value;
+  const prompts = _bcParsePrompts(text);
+  if (prompts.length === 0) return;
+  if (prompts.length > BC_MAX_PROMPTS) return;
+
+  const repoEl = document.getElementById('bc-repo');
+  const repo = repoEl ? repoEl.value : '';
+  if (!repo) return;
+
+  const labelsRaw = (document.getElementById('bc-default-labels') || {}).value || '';
+  const defaultLabels = labelsRaw.split(',').map(l => l.trim()).filter(l => l.length > 0);
+  const uniqueLabels = [...new Set(defaultLabels)];
+
+  const concurrency = parseInt((document.getElementById('bc-concurrency') || {}).value || '3', 10);
+
+  _bcLastInput = { text, repo, labelsRaw, concurrency };
+
+  const runBtn = document.getElementById('bc-run-btn');
+  if (runBtn) { runBtn.disabled = true; runBtn.textContent = 'Starting…'; }
+
+  const errEl = document.getElementById('bc-step1-error');
+  if (errEl) errEl.classList.add('hidden');
+
+  try {
+    const assignments = _bcFiles.map((f, i) => ({
+      filename: f.name,
+      assignment: _bcFileAssignments[i] !== undefined ? _bcFileAssignments[i] : 'all',
+    }));
+
+    const formData = new FormData();
+    formData.append('repo', repo);
+    formData.append('prompts', JSON.stringify(prompts));
+    formData.append('default_labels', JSON.stringify(uniqueLabels));
+    formData.append('concurrency', String(concurrency));
+    formData.append('assignments', JSON.stringify(assignments));
+    for (const f of _bcFiles) {
+      formData.append('files', f);
+    }
+
+    const res = await fetch('/api/tickets/bulk', { method: 'POST', body: formData });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      if (errEl) { errEl.textContent = data.detail || `Server error ${res.status}`; errEl.classList.remove('hidden'); }
+      if (runBtn) { runBtn.disabled = false; runBtn.textContent = `Run BA on all ${prompts.length}`; }
+      return;
+    }
+    const data = await res.json();
+    _bcJobId = data.job_id;
+    localStorage.setItem('bc_job_id', _bcJobId);
+
+    _bcStartTimes = {};
+    _bcAvgMs = null;
+
+    _bcShowStep(2);
+    _bcConnectSSE(_bcJobId);
+  } catch (e) {
+    if (errEl) { errEl.textContent = 'Failed to start job: ' + e.message; errEl.classList.remove('hidden'); }
+    if (runBtn) { runBtn.disabled = false; runBtn.textContent = `Run BA on all ${prompts.length}`; }
+  }
+}
+
+function _bcUpdateBadge() {
+  const badge = document.getElementById('bc-tab-badge');
+  if (!badge) return;
+  const job = _bcJobState;
+  if (!job) { badge.className = 'bc-tab-badge hidden'; return; }
+
+  const tickets        = job.tickets || [];
+  const total          = tickets.length;
+  // In-progress: created (issue created, estimating not started), estimating, drafting
+  const inProgress     = tickets.filter(t => ['created', 'estimating', 'drafting'].includes(t.state)).length;
+  const sized          = tickets.filter(t => t.state === 'sized').length;
+  const estimateFailed = tickets.filter(t => t.state === 'estimate_failed').length;
+  const failed         = tickets.filter(t => t.state === 'failed').length;
+  const sizeWarn       = tickets.filter(t => t.state === 'size_warning').length;
+  const fullyDone      = sized + estimateFailed + failed;
+
+  if (job.status === 'running') {
+    badge.className = 'bc-tab-badge';
+    badge.innerHTML = `<span class="bc-tab-badge-spin">&#x27F3;</span>${fullyDone}/${total}`;
+  } else if (job.status === 'done' || job.status === 'stopped') {
+    const issues = failed + sizeWarn + estimateFailed;
+    if (issues > 0) {
+      badge.className = 'bc-tab-badge bc-tab-badge--warn';
+      const parts = [];
+      if (failed > 0)         parts.push(`${failed} failed`);
+      if (sizeWarn > 0)       parts.push(`${sizeWarn} oversized`);
+      if (estimateFailed > 0) parts.push(`${estimateFailed} estimate failed`);
+      badge.textContent = `⚠ ${parts.join(', ')}`;
+    } else {
+      badge.className = 'bc-tab-badge hidden';
+    }
+  } else {
+    badge.className = 'bc-tab-badge hidden';
+  }
+}
+
+function _bcConnectSSE(jobId) {
+  if (_bcEventSource) { _bcEventSource.close(); _bcEventSource = null; }
+
+  const es = new EventSource(`/api/tickets/bulk/${jobId}/stream`);
+  _bcEventSource = es;
+
+  es.addEventListener('snapshot', (e) => {
+    try { _bcJobState = JSON.parse(e.data); _bcRenderStep2(); _bcUpdateBadge(); } catch (_) {}
+  });
+
+  es.addEventListener('update', (e) => {
+    try {
+      const event = JSON.parse(e.data);
+      if (event.type === 'ticket_update' && _bcJobState) {
+        _bcJobState.tickets[event.ticket.index] = event.ticket;
+        _bcRenderStep2();
+        _bcUpdateBadge();
+      } else if (event.type === 'job_done' && _bcJobState) {
+        _bcJobState.status = 'done';
+        _bcRenderStep2();
+        _bcUpdateBadge();
+        es.close();
+        _bcEventSource = null;
+        localStorage.removeItem('bc_job_id');
+        _bcJobId = null;
+      }
+    } catch (_) {}
+  });
+
+  es.onerror = () => { /* SSE auto-reconnects */ };
+}
+
+function _bcRenderStep2() {
+  if (!_bcJobState) return;
+  const job = _bcJobState;
+  const tickets = job.tickets || [];
+  const concurrency = job.concurrency || 3;
+
+  const created      = tickets.filter(t => t.state === 'created').length;
+  const estimating   = tickets.filter(t => t.state === 'estimating').length;
+  const sized        = tickets.filter(t => t.state === 'sized').length;
+  const estimateFailed = tickets.filter(t => t.state === 'estimate_failed').length;
+  const drafting     = tickets.filter(t => t.state === 'drafting').length;
+  const pending      = tickets.filter(t => t.state === 'pending').length;
+  const failed       = tickets.filter(t => t.state === 'failed').length;
+  const skipped      = tickets.filter(t => t.state === 'skipped').length;
+  const sizeWarning  = tickets.filter(t => t.state === 'size_warning').length;
+  const total        = tickets.length;
+  // Terminal states: sized, estimate_failed, failed, skipped
+  const fullyDone    = sized + estimateFailed + failed + skipped;
+
+  // Banner
+  const banner = document.getElementById('bc-parallel-banner');
+  if (banner) {
+    if (job.status === 'running') {
+      banner.innerHTML = `BA is drafting ${total} tickets in parallel — ` +
+        `${sized + estimateFailed} done, ${drafting + estimating + created} running, ${pending} queued` +
+        `<span class="bc-concurrency-pill">concurrency: ${concurrency}</span>`;
+    } else if (job.status === 'done') {
+      if (sizeWarning > 0) {
+        banner.innerHTML = `All tickets processed. ${sizeWarning} ticket${sizeWarning > 1 ? 's' : ''} need size remediation.`;
+      } else {
+        banner.innerHTML = `All ${total} tickets processed.`;
+      }
+    } else if (job.status === 'stopped') {
+      banner.innerHTML = `Stopped. ${sized + estimateFailed} estimated, ${failed} failed, ${skipped} skipped.`;
+    }
+  }
+
+  // Summary strip
+  const strip = document.getElementById('bc-summary-strip');
+  if (strip) {
+    const pct = total > 0 ? Math.round((fullyDone / total) * 100) : 0;
+    let etaHtml = '';
+    if ((sized + estimateFailed) > 0 && pending > 0 && _bcAvgMs) {
+      const estMs = (_bcAvgMs / concurrency) * pending;
+      const estSec = Math.round(estMs / 1000);
+      const m = Math.floor(estSec / 60);
+      const s = estSec % 60;
+      etaHtml = `<span class="bc-eta">est. ${m > 0 ? m + 'm ' + s + 's' : s + 's'} remaining</span>`;
+    }
+    const sizeWarnHtml = sizeWarning > 0
+      ? `<span class="bc-metric" style="color:var(--amber)"><span class="bc-metric-count">${sizeWarning}</span> Oversized</span>`
+      : '';
+    strip.innerHTML = `
+      <span class="bc-metric bc-metric--created"><span class="bc-metric-count">${sized + estimateFailed}</span> Done</span>
+      <span class="bc-metric bc-metric--drafting"><span class="bc-metric-count">${drafting + estimating + created}</span> In progress</span>
+      <span class="bc-metric bc-metric--pending"><span class="bc-metric-count">${pending}</span> Pending</span>
+      ${sizeWarnHtml}
+      <div class="bc-progress-wrap"><div class="bc-progress-bar" style="width:${pct}%"></div></div>
+      ${etaHtml}`;
+  }
+
+  // Ticket list — preserve any in-progress editor content before re-rendering
+  const list = document.getElementById('bc-ticket-list');
+  if (list) {
+    // Save current editor values so they survive the innerHTML replacement
+    tickets.forEach(t => {
+      if (t.state === 'failed') {
+        const editor = document.getElementById(`bc-editor-${t.index}`);
+        if (editor) {
+          t.body = editor.value;
+        }
+      }
+    });
+    list.innerHTML = tickets.map(t => _bcRenderCard(t)).join('');
+  }
+
+  // Footer buttons
+  const stopBtn      = document.getElementById('bc-stop-btn');
+  const doneBtn      = document.getElementById('bc-done-btn');
+  const recreateBtn  = document.getElementById('bc-recreate-btn');
+  const retryAllBtn  = document.getElementById('bc-retry-all-btn');
+  if (stopBtn && doneBtn) {
+    if (job.status === 'running') {
+      stopBtn.disabled = false;
+      doneBtn.disabled = true;
+      doneBtn.textContent = 'Running...';
+      if (recreateBtn) recreateBtn.classList.add('hidden');
+    } else {
+      stopBtn.disabled = true;
+      doneBtn.disabled = false;
+      doneBtn.textContent = 'Done';
+      doneBtn.onclick = () => { _bcShowStep(1); };
+      if (recreateBtn) recreateBtn.classList.remove('hidden');
+    }
+  }
+  if (retryAllBtn) {
+    if (failed > 0) {
+      retryAllBtn.textContent = `Retry all failed (${failed})`;
+      retryAllBtn.classList.remove('hidden');
+    } else {
+      retryAllBtn.classList.add('hidden');
+    }
+  }
+
+  // Track avg time
+  tickets.forEach(t => {
+    if (t.state === 'drafting' && t.started_at && !_bcStartTimes[t.index]) {
+      _bcStartTimes[t.index] = new Date(t.started_at).getTime();
+    }
+    if (t.state === 'created' && _bcStartTimes[t.index] && t.finished_at) {
+      const elapsed = new Date(t.finished_at).getTime() - _bcStartTimes[t.index];
+      if (elapsed > 0) {
+        _bcAvgMs = _bcAvgMs === null ? elapsed : (_bcAvgMs * 0.7 + elapsed * 0.3);
+      }
+    }
+  });
+}
+
+function _bcRenderCard(t) {
+  const stateClass = `bc-card--${t.state}`;
+  const dotClass   = `bc-status-dot--${t.state}`;
+
+  let preview = '';
+  let label   = '';
+  let head    = '';
+  let actions = '';
+  let tags    = '';
+
+  if (t.state === 'pending') {
+    preview = escHtml((t.prompt || '').slice(0, 80));
+    label   = 'Queued';
+    actions = `<button class="bc-action-btn" title="Skip" onclick="bcSkipTicket(${t.index})">&#x00D7;</button>`;
+  } else if (t.state === 'drafting') {
+    preview = 'BA polishing prompt → drafting AC and UAT steps...';
+    const now   = Date.now();
+    const start = _bcStartTimes[t.index] || (t.started_at ? new Date(t.started_at).getTime() : now);
+    label = `Started ${Math.round((now - start) / 1000)}s ago`;
+  } else if (t.state === 'created') {
+    const issueUrl = t.issue_url || '#';
+    head    = `<a class="bc-issue-badge" href="${escHtml(issueUrl)}" target="_blank" rel="noopener">#${t.issue_num}</a>`;
+    preview = escHtml((t.body_preview || t.body || '').slice(0, 200));
+    label   = 'Created';
+    const labelsArr = t.label_pills || [];
+    if (labelsArr.length > 0) {
+      tags = `<div class="bc-card-tags">${labelsArr.map(l => `<span class="bc-tag">${escHtml(l)}</span>`).join('')}</div>`;
+    }
+    if (t.attachment_warning) {
+      tags += `<div class="bc-attach-warn">${escHtml(t.attachment_warning)}</div>`;
+    }
+    actions = `<a class="bc-action-btn" href="${escHtml(issueUrl)}" target="_blank" rel="noopener" title="Open on GitHub">&#x2197;</a>`;
+  } else if (t.state === 'estimating') {
+    const issueUrl = t.issue_url || '#';
+    head    = `<a class="bc-issue-badge" href="${escHtml(issueUrl)}" target="_blank" rel="noopener">#${t.issue_num}</a>`;
+    preview = 'Estimating size (S/M/L/XL)...';
+    label   = 'estimating…';
+    actions = `<a class="bc-action-btn" href="${escHtml(issueUrl)}" target="_blank" rel="noopener" title="Open on GitHub">&#x2197;</a>`;
+  } else if (t.state === 'sized') {
+    const issueUrl = t.issue_url || '#';
+    const sizeBadge = t.estimate_size ? `<span class="bc-size-badge">${escHtml(t.estimate_size)}</span>` : '';
+    head    = `<a class="bc-issue-badge" href="${escHtml(issueUrl)}" target="_blank" rel="noopener">#${t.issue_num}</a>${sizeBadge}`;
+    preview = escHtml((t.body_preview || t.body || '').slice(0, 200));
+    label   = t.estimate_size ? `Sized: ${t.estimate_size}` : 'Sized';
+    const labelsArr = t.label_pills || [];
+    if (labelsArr.length > 0) {
+      tags = `<div class="bc-card-tags">${labelsArr.map(l => `<span class="bc-tag">${escHtml(l)}</span>`).join('')}</div>`;
+    }
+    if (t.attachment_warning) {
+      tags += `<div class="bc-attach-warn">${escHtml(t.attachment_warning)}</div>`;
+    }
+    actions = `<a class="bc-action-btn" href="${escHtml(issueUrl)}" target="_blank" rel="noopener" title="Open on GitHub">&#x2197;</a>`;
+  } else if (t.state === 'estimate_failed') {
+    const issueUrl = t.issue_url || '#';
+    head    = `<a class="bc-issue-badge" href="${escHtml(issueUrl)}" target="_blank" rel="noopener">#${t.issue_num}</a>`;
+    preview = escHtml((t.estimate_error || 'Estimation failed').slice(0, 120));
+    label   = 'Estimate failed';
+    const labelsArr = t.label_pills || [];
+    if (labelsArr.length > 0) {
+      tags = `<div class="bc-card-tags">${labelsArr.map(l => `<span class="bc-tag">${escHtml(l)}</span>`).join('')}</div>`;
+    }
+    actions = `<a class="bc-action-btn" href="${escHtml(issueUrl)}" target="_blank" rel="noopener" title="Open on GitHub">&#x2197;</a>`;
+  } else if (t.state === 'failed') {
+    label   = 'Failed';
+    // Expanded failed card: error banner + editable body + char counter + actions
+    const retryCount = t.retry_count || 0;
+    const lastErr = t.last_error || t.error || '';
+    const bodyVal = escHtml(t.body || '');
+    const charLen = (t.body || '').length;
+    const GH_LIMIT = 65536;
+    const counterClass = charLen > GH_LIMIT ? 'bc-char-counter bc-char-counter--over' : 'bc-char-counter';
+    const retryMetaHtml = retryCount > 0
+      ? `<div class="bc-retry-meta">Retry #${retryCount} — last attempt: ${escHtml(lastErr.slice(0, 80))}</div>`
+      : '';
+
+    // Build the expanded detail section (appended after the standard card body)
+    preview = escHtml((t.error || 'Unknown error').slice(0, 200));
+    actions = `<button class="bc-action-btn bc-action-btn--skip" title="Skip" onclick="bcSkipTicket(${t.index})">&#x00D7;</button>`;
+
+    // We'll return a custom card HTML for failed state
+    const titleText = t.title ? escHtml(t.title.slice(0, 80)) : '';
+    const headHtmlFailed = titleText
+      ? `<div class="bc-card-head"><span class="bc-card-label">Failed</span><span class="bc-card-preview" style="flex:1;margin-left:6px;">${titleText}</span></div>`
+      : `<div class="bc-card-head"><span class="bc-card-label">Failed</span></div>`;
+    const retryImgFile = _bcRetryFiles[t.index];
+    const imgChipHtml = retryImgFile
+      ? `<span class="bc-file-chip bc-file-chip--retry">
+           <span class="bc-file-chip-name">${escHtml(retryImgFile.name)}</span>
+           <button class="bc-file-chip-remove" onclick="_bcRetryRemoveImage(${t.index})" title="Remove">&times;</button>
+         </span>`
+      : `<button class="bc-btn-attach-img" onclick="_bcRetryPickImage(${t.index})">Attach image</button>
+         <input type="file" id="bc-retry-img-input-${t.index}" accept=".png,.jpg,.jpeg"
+                style="display:none" onchange="_bcRetryFileSelected(${t.index}, event)">`;
+    return `
+      <div class="bc-card bc-card--failed" id="bc-card-${t.index}">
+        <div class="bc-status-dot bc-status-dot--failed"></div>
+        <div class="bc-card-body" style="min-width:0;flex:1;">
+          ${headHtmlFailed}
+          <div class="bc-fail-detail">
+            <div class="bc-fail-banner">${escHtml((t.error || 'Unknown error'))}</div>
+            ${retryMetaHtml}
+            <textarea class="bc-fail-body-editor" id="bc-editor-${t.index}"
+              oninput="bcEditorInput(${t.index})">${bodyVal}</textarea>
+            <div class="${counterClass}" id="bc-counter-${t.index}">${charLen.toLocaleString()} / ${GH_LIMIT.toLocaleString()}</div>
+            <div class="bc-fail-img-row">${imgChipHtml}</div>
+            <div class="bc-fail-actions">
+              <button class="bc-btn-retry-this" onclick="bcRetryWithBody(${t.index})">Retry this ticket</button>
+              <button class="bc-btn-skip-this" onclick="bcSkipTicket(${t.index})">Skip</button>
+            </div>
+          </div>
+        </div>
+      </div>`;
+  } else if (t.state === 'size_warning') {
+    const charCount = t.body_char_count || (t.body || '').length;
+    const overBy    = t.body_over_by   || Math.max(0, charCount - 62000);
+    const titleText = t.title ? escHtml(t.title.slice(0, 80)) : '';
+    const headHtmlSz = titleText
+      ? `<div class="bc-card-head"><span class="bc-card-label" style="color:var(--amber)">Size warning</span><span class="bc-card-preview" style="flex:1;margin-left:6px;">${titleText}</span></div>`
+      : `<div class="bc-card-head"><span class="bc-card-label" style="color:var(--amber)">Size warning</span></div>`;
+
+    // Detect whether base64 images are present in the body
+    const bodyStr = t.body || '';
+    const hasInlineImages = /!\[[^\]]*\]\(data:image\/[a-zA-Z]+;base64,/.test(bodyStr);
+    const remedyImagesBtn = hasInlineImages
+      ? `<button class="bc-btn-remedy-images" id="bc-btn-images-${t.index}"
+             onclick="bcSizeRemedyImages(${t.index})">Link image instead of inlining</button>`
+      : `<button class="bc-btn-remedy-images" id="bc-btn-images-${t.index}" disabled
+             title="No inlined base64 images detected">Link image instead of inlining</button>`;
+
+    return `
+      <div class="bc-card bc-card--size_warning" id="bc-card-${t.index}">
+        <div class="bc-status-dot bc-status-dot--size_warning"></div>
+        <div class="bc-card-body" style="min-width:0;flex:1;">
+          ${headHtmlSz}
+          <div class="bc-size-warn-detail">
+            <div class="bc-size-warn-banner">
+              Body is too large for GitHub (${charCount.toLocaleString()} chars, ${overBy.toLocaleString()} over the 62,000-char limit). Choose a remediation action or skip.
+            </div>
+            <div class="bc-size-warn-actions">
+              <button class="bc-btn-remedy-comment" id="bc-btn-comment-${t.index}"
+                  onclick="bcSizeRemedyComment(${t.index})">Move detail to follow-up comment</button>
+              ${remedyImagesBtn}
+              <button class="bc-btn-skip-this" onclick="bcSkipTicket(${t.index})">Skip</button>
+            </div>
+          </div>
+        </div>
+      </div>`;
+  } else if (t.state === 'skipped') {
+    preview = escHtml((t.prompt || '').slice(0, 80));
+    label   = 'Skipped';
+    actions = `<button class="bc-action-btn" title="Undo skip" onclick="bcUndoSkip(${t.index})">&#x21A9;</button>`;
+  }
+
+  const headHtml = head
+    ? `<div class="bc-card-head">${head}<span class="bc-card-label">${escHtml(label)}</span></div>`
+    : `<div class="bc-card-head"><span class="bc-card-label">${escHtml(label)}</span></div>`;
+
+  const previewClass = t.state === 'failed' ? 'bc-card-preview bc-card-preview--error' : 'bc-card-preview';
+
+  return `
+    <div class="bc-card ${stateClass}">
+      <div class="bc-status-dot ${dotClass}"></div>
+      <div class="bc-card-body">
+        ${headHtml}
+        <div class="${previewClass}">${preview}</div>
+        ${tags}
+      </div>
+      ${actions ? `<div class="bc-card-actions">${actions}</div>` : ''}
+    </div>`;
+}
+
+async function bcSkipTicket(index) {
+  if (!_bcJobId) return;
+  try {
+    await fetch(`/api/tickets/bulk/${_bcJobId}/skip`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ index }),
+    });
+  } catch (_) {}
+}
+
+async function bcUndoSkip(index) {
+  if (!_bcJobId || !_bcJobState) return;
+  const ticket = _bcJobState.tickets[index];
+  if (ticket && ticket.state === 'skipped') {
+    ticket.state = 'pending';
+    _bcRenderStep2();
+    try {
+      await fetch(`/api/tickets/bulk/${_bcJobId}/retry`, {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ index }),
+      });
+    } catch (_) {}
+  }
+}
+
+async function bcRetryTicket(index) {
+  if (!_bcJobId) return;
+  try {
+    await fetch(`/api/tickets/bulk/${_bcJobId}/retry`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ index }),
+    });
+  } catch (_) {}
+}
+
+function bcEditorInput(index) {
+  const editor = document.getElementById(`bc-editor-${index}`);
+  const counter = document.getElementById(`bc-counter-${index}`);
+  if (!editor || !counter) return;
+  const GH_LIMIT = 65536;
+  const len = editor.value.length;
+  counter.textContent = `${len.toLocaleString()} / ${GH_LIMIT.toLocaleString()}`;
+  if (len > GH_LIMIT) {
+    counter.className = 'bc-char-counter bc-char-counter--over';
+  } else {
+    counter.className = 'bc-char-counter';
+  }
+  // Keep in-memory body in sync so retry-all gets current value
+  if (_bcJobState && _bcJobState.tickets[index]) {
+    _bcJobState.tickets[index].body = editor.value;
+  }
+}
+
+function _bcRetryPickImage(index) {
+  const inp = document.getElementById(`bc-retry-img-input-${index}`);
+  if (inp) inp.click();
+}
+
+function _bcRetryFileSelected(index, event) {
+  const files = event.target.files;
+  if (files && files.length > 0) {
+    _bcRetryFiles[index] = files[0];
+    _bcRenderStep2();
+  }
+  event.target.value = '';
+}
+
+function _bcRetryRemoveImage(index) {
+  delete _bcRetryFiles[index];
+  _bcRenderStep2();
+}
+
+async function bcRetryWithBody(index) {
+  if (!_bcJobId || !_bcJobState) return;
+  const editor = document.getElementById(`bc-editor-${index}`);
+  const bodyText = editor ? editor.value : (_bcJobState.tickets[index] || {}).body || '';
+
+  const btn = document.querySelector(`#bc-card-${index} .bc-btn-retry-this`);
+  if (btn) { btn.disabled = true; btn.textContent = 'Retrying...'; }
+
+  const retryFile = _bcRetryFiles[index];
+  try {
+    if (retryFile) {
+      const formData = new FormData();
+      formData.append('index', String(index));
+      formData.append('body_text', bodyText);
+      formData.append('file', retryFile);
+      await fetch(`/api/tickets/bulk/${_bcJobId}/retry-with-image`, {
+        method: 'POST',
+        body: formData,
+      });
+      delete _bcRetryFiles[index];
+    } else {
+      await fetch(`/api/tickets/bulk/${_bcJobId}/retry-with-body`, {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ index, body: bodyText }),
+      });
+    }
+  } catch (_) {
+    if (btn) { btn.disabled = false; btn.textContent = 'Retry this ticket'; }
+  }
+}
+
+async function bcRetryAllFailed() {
+  if (!_bcJobId || !_bcJobState) return;
+  const tickets = _bcJobState.tickets || [];
+
+  // Collect current body from each failed ticket's editor (or in-memory state)
+  const bodies = {};
+  tickets.forEach(t => {
+    if (t.state !== 'failed') return;
+    const editor = document.getElementById(`bc-editor-${t.index}`);
+    bodies[String(t.index)] = editor ? editor.value : (t.body || '');
+  });
+
+  if (Object.keys(bodies).length === 0) return;
+
+  const btn = document.getElementById('bc-retry-all-btn');
+  if (btn) { btn.disabled = true; }
+
+  try {
+    await fetch(`/api/tickets/bulk/${_bcJobId}/retry-all`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ bodies }),
+    });
+  } catch (_) {}
+
+  if (btn) { btn.disabled = false; }
+}
+
+// ── Size-warning remediation handlers (issue #261) ───────────────────────────
+
+async function bcSizeRemedyComment(index) {
+  if (!_bcJobId) return;
+  const btn = document.getElementById(`bc-btn-comment-${index}`);
+  const imgBtn = document.getElementById(`bc-btn-images-${index}`);
+  if (btn) { btn.disabled = true; btn.textContent = 'Creating…'; }
+  if (imgBtn) imgBtn.disabled = true;
+  try {
+    await fetch(`/api/tickets/bulk/${_bcJobId}/size-remedy-comment`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ index }),
+    });
+    // SSE will update state
+  } catch (_) {
+    if (btn) { btn.disabled = false; btn.textContent = 'Move detail to follow-up comment'; }
+    if (imgBtn) imgBtn.disabled = false;
+  }
+}
+
+async function bcSizeRemedyImages(index) {
+  if (!_bcJobId) return;
+  const btn = document.getElementById(`bc-btn-images-${index}`);
+  const commentBtn = document.getElementById(`bc-btn-comment-${index}`);
+  if (btn) { btn.disabled = true; btn.textContent = 'Uploading images…'; }
+  if (commentBtn) commentBtn.disabled = true;
+  try {
+    await fetch(`/api/tickets/bulk/${_bcJobId}/size-remedy-images`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ index }),
+    });
+    // SSE will update state
+  } catch (_) {
+    if (btn) { btn.disabled = false; btn.textContent = 'Link image instead of inlining'; }
+    if (commentBtn) commentBtn.disabled = false;
+  }
+}
+
+async function bcStop() {
+  if (!_bcJobId) return;
+  const btn = document.getElementById('bc-stop-btn');
+  if (btn) btn.disabled = true;
+  try {
+    await fetch(`/api/tickets/bulk/${_bcJobId}/stop`, { method: 'POST' });
+  } catch (_) {}
+}
+
+function bcRecreate() {
+  if (_bcEventSource) { _bcEventSource.close(); _bcEventSource = null; }
+  localStorage.removeItem('bc_job_id');
+  _bcJobId = null;
+  _bcJobState = null;
+  _bcStartTimes = {};
+  _bcAvgMs = null;
+  _bcUpdateBadge();
+
+  _bcShowStep(1);
+  _bcPopulateRepo();
+
+  if (_bcLastInput) {
+    const textarea = document.getElementById('bc-textarea');
+    if (textarea) textarea.value = _bcLastInput.text || '';
+    const repoEl = document.getElementById('bc-repo');
+    if (repoEl && _bcLastInput.repo) repoEl.value = _bcLastInput.repo;
+    const labelsEl = document.getElementById('bc-default-labels');
+    if (labelsEl) labelsEl.value = _bcLastInput.labelsRaw || 'enhancement';
+    const concEl = document.getElementById('bc-concurrency');
+    if (concEl) concEl.value = String(_bcLastInput.concurrency || 3);
+  } else {
+    const textarea = document.getElementById('bc-textarea');
+    if (textarea) textarea.value = '';
+    const labelsEl = document.getElementById('bc-default-labels');
+    if (labelsEl) labelsEl.value = 'enhancement';
+    const concEl = document.getElementById('bc-concurrency');
+    if (concEl) concEl.value = '3';
+  }
+
+  const errEl = document.getElementById('bc-step1-error');
+  if (errEl) errEl.classList.add('hidden');
+  _bcUpdateCounter();
+}
+
+// Keyboard: Cmd/Ctrl+Enter triggers Run when Bulk Create tab is active and step 1 is shown
+document.addEventListener('keydown', function(e) {
+  if (_activeTab !== 'bulk-create') return;
+  const step1 = document.getElementById('bc-step1');
+  if (step1 && !step1.classList.contains('hidden')) {
+    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+      e.preventDefault();
+      const btn = document.getElementById('bc-run-btn');
+      if (btn && !btn.disabled) bcRunAll();
+    }
+  }
+});
 
 document.addEventListener('DOMContentLoaded', init);
 </script>
@@ -2398,6 +5729,27 @@ document.addEventListener('DOMContentLoaded', init);
 
 <!-- ── Multi-drag pill (follows cursor) ── -->
 <div class="smgmt-drag-pill" id="smgmt-drag-pill"></div>
+
+<!-- ── Log viewer modal (issue #264) ── -->
+<div class="modal-backdrop hidden" id="lv-backdrop" onclick="closeLvModal()"></div>
+<div class="modal lv-modal hidden" id="lv-modal"
+     role="dialog" aria-modal="true" aria-labelledby="lv-modal-title">
+  <div class="modal-header">
+    <span class="modal-title" id="lv-modal-title">Log Viewer</span>
+    <button class="modal-close" onclick="closeLvModal()" aria-label="Close">&times;</button>
+  </div>
+  <div class="lv-meta" id="lv-meta" style="display:none">
+    <span class="lv-path-label">path</span><span id="lv-path-text"></span>
+  </div>
+  <div class="lv-not-found hidden" id="lv-not-found"></div>
+  <div class="lv-stream hidden" id="lv-stream"></div>
+  <div class="modal-footer">
+    <button class="btn-ghost" onclick="closeLvModal()" type="button">Close</button>
+    <button class="btn-primary" id="lv-refresh-btn" onclick="_lvRefresh()" type="button">
+      <i class="ti ti-refresh"></i> Refresh
+    </button>
+  </div>
+</div>
 
 <!-- ── New Sprint modal ── -->
 <div class="modal-backdrop hidden" id="ns-backdrop"></div>
@@ -2409,12 +5761,10 @@ document.addEventListener('DOMContentLoaded', init);
   </div>
   <div class="modal-body">
     <div class="modal-field">
-      <label class="modal-label" for="ns-goal">Sprint goal <span style="color:var(--red)">*</span></label>
-      <textarea class="modal-input modal-textarea" id="ns-goal"
-                rows="4"
-                placeholder="What should this sprint achieve? — e.g. Dashboard UX cleanup"
-                aria-required="true"></textarea>
-      <p class="modal-hint">The goal becomes the sprint label's description and the BA passes it to the coder/tester</p>
+      <label class="modal-label" for="ns-label">Sprint label <span style="color:var(--red)">*</span></label>
+      <input class="modal-input" id="ns-label" type="text"
+             placeholder="e.g. Sprint 25 or sprint-25"
+             aria-required="true">
     </div>
     <div class="modal-error hidden" id="ns-error"></div>
   </div>
@@ -2432,12 +5782,14 @@ document.addEventListener('DOMContentLoaded', init);
     <span class="modal-title" id="nt-modal-title">New Ticket</span>
     <button class="modal-close" id="nt-close-btn" aria-label="Close">&times;</button>
   </div>
-  <div class="modal-body">
+
+  <!-- Step 1: input form -->
+  <div class="modal-body" id="nt-input-section">
     <div class="modal-field">
       <label class="modal-label" for="nt-project">Project <span style="color:var(--red)">*</span></label>
       <select class="modal-input" id="nt-project" aria-required="true"></select>
     </div>
-    <div class="modal-field">
+    <div class="modal-field" style="margin-bottom:0">
       <label class="modal-label" for="nt-description">Description <span style="color:var(--red)">*</span></label>
       <textarea class="modal-input nt-textarea" id="nt-description"
                 rows="4"
@@ -2446,9 +5798,46 @@ document.addEventListener('DOMContentLoaded', init);
     </div>
     <div class="modal-error hidden" id="nt-error"></div>
   </div>
-  <div class="modal-footer">
+  <div class="modal-footer" id="nt-generate-footer">
     <button class="btn-ghost" id="nt-cancel-btn" type="button">Cancel</button>
     <button class="btn-primary" id="nt-submit-btn" type="button">Generate Draft</button>
+  </div>
+
+  <!-- Step 2: draft review (hidden until draft generated) -->
+  <div id="nt-draft-section" class="hidden">
+    <div class="nt-draft-divider"></div>
+    <div class="modal-body">
+      <div class="modal-field">
+        <label class="modal-label" for="nt-title">Title</label>
+        <input class="modal-input" id="nt-title" type="text" autocomplete="off">
+      </div>
+      <div class="modal-field">
+        <label class="modal-label" for="nt-body">Body <span class="modal-hint" style="font-weight:normal;color:var(--text-muted)">(edit before posting)</span></label>
+        <textarea class="modal-input nt-body-textarea" id="nt-body" rows="10"></textarea>
+      </div>
+      <div class="modal-field">
+        <label class="modal-label" for="nt-label">Label <span class="modal-hint" style="font-weight:normal;color:var(--text-muted)">(optional)</span></label>
+        <div id="nt-label-chip" class="nt-label-chip hidden" role="status" aria-live="polite"></div>
+        <div class="nt-label-wrap" id="nt-label-wrap">
+          <input class="modal-input" id="nt-label" type="text"
+                 placeholder="Search labels…" autocomplete="off" role="combobox"
+                 aria-expanded="false" aria-controls="nt-label-dropdown" aria-autocomplete="list">
+          <div class="nt-label-dropdown hidden" id="nt-label-dropdown" role="listbox"></div>
+        </div>
+      </div>
+      <div class="modal-field" style="margin-bottom:0">
+        <label class="modal-label" for="nt-files">Attachments <span class="modal-hint" style="font-weight:normal;color:var(--text-muted)">(optional — .png .jpg .pdf .md and others, max 25 MB per file)</span></label>
+        <input class="modal-input nt-file-input" id="nt-files" type="file" multiple>
+      </div>
+    </div>
+    <div style="padding: 0 20px 4px">
+      <div id="nt-warn-label" class="nt-warn-item hidden"><i class="ti ti-alert-triangle"></i> No label assigned — add one below or leave blank.</div>
+      <div id="nt-warn-attach" class="nt-warn-item hidden"><i class="ti ti-alert-triangle"></i> No attachments added — add files below or leave blank.</div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-ghost" id="nt-post-cancel-btn" type="button">Cancel</button>
+      <button class="btn-primary" id="nt-post-btn" type="button">Post to GitHub</button>
+    </div>
   </div>
 </div>
 

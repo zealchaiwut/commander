@@ -55,6 +55,13 @@ try:
 except ImportError:  # pragma: no cover
     yaml = None  # type: ignore[assignment]
 
+try:
+    from services.sprint_manager import sprint_repo as _sprint_repo
+    _SPRINT_REPO_AVAILABLE = True
+except (ImportError, ModuleNotFoundError):  # pragma: no cover
+    _sprint_repo = None  # type: ignore[assignment]
+    _SPRINT_REPO_AVAILABLE = False
+
 # ── path setup ────────────────────────────────────────────────────────────────
 
 # This file lives at services/sprint_manager/sprint_manager.py
@@ -63,10 +70,14 @@ REPO_ROOT     = Path(__file__).parent.parent.parent
 DASHBOARD_DIR = REPO_ROOT / "apps" / "dashboard"
 SCRIPTS_DIR   = REPO_ROOT / "scripts"
 
+sys.path.insert(0, str(REPO_ROOT))      # allow `from services.*` imports
 sys.path.insert(0, str(DASHBOARD_DIR))
 from dotenv import load_dotenv
 load_dotenv(DASHBOARD_DIR / ".env")
 import github_client
+
+from services.run_id import mint_run_id
+from services.logging import log as structured_log
 
 # Import failure-parsing helpers from post_test_report (no circular deps)
 try:
@@ -172,7 +183,7 @@ def load_config(path: Path) -> "SprintConfig":
 
     # ── required fields ───────────────────────────────────────────────────────
     missing = []
-    repo_name = (data.get("repo_name") or "").strip()
+    repo_name = os.environ.get("COMMANDER_REPO", "").strip() or (data.get("repo_name") or "").strip()
     if not repo_name:
         missing.append("repo_name")
 
@@ -390,6 +401,58 @@ def _release_pid_lock(pid_path: Path) -> None:
 HANG_WARN_SECS  = 30 * 60   # 30 minutes
 HANG_KILL_SECS  = 60 * 60   # 60 minutes
 HANG_CHECK_SECS = 5  * 60   # check every 5 minutes
+
+# ── Sprint-label protection (issue #305) ─────────────────────────────────────
+
+# Status labels that may be added or removed while a sprint run is active.
+# All other label additions are deferred to post-run; sprint-N is never
+# removed from a ticket until the sprint run ends.
+RUN_MUTABLE_LABELS: frozenset[str] = frozenset({
+    "in-progress", "sit", "uat", "needs-rework",
+})
+
+# Actual GitHub label strings (as applied on issues) that correspond to
+# RUN_MUTABLE_LABELS.  Used as the allowlist when filtering add-label calls.
+_RUN_MUTABLE_GITHUB_LABELS: frozenset[str] = frozenset({
+    "in-progress", "SIT", "UAT", "need-rework", "needs-rework",
+})
+
+_SPRINT_LABEL_RE = re.compile(r"^sprint-\d+$")
+
+
+def _guard_sprint_labels(
+    add: list[str],
+    remove: list[str],
+    sprint_label: Optional[str] = None,
+) -> tuple[list[str], list[str]]:
+    """Return filtered (add, remove) respecting sprint-label protection.
+
+    Always: sprint-N labels are stripped from *remove* and never deleted.
+    Active run (sprint_label provided): *add* is restricted to
+    _RUN_MUTABLE_GITHUB_LABELS; any other additions are logged and dropped.
+    """
+    safe_remove = [lbl for lbl in remove if not _SPRINT_LABEL_RE.match(lbl)]
+    blocked_removes = [lbl for lbl in remove if _SPRINT_LABEL_RE.match(lbl)]
+    if blocked_removes:
+        print(
+            f"  [label-guard] Blocked removal of sprint label(s): {blocked_removes}",
+            file=sys.stderr,
+        )
+
+    if sprint_label is not None:
+        safe_add = [lbl for lbl in add if lbl in _RUN_MUTABLE_GITHUB_LABELS]
+        deferred = [lbl for lbl in add if lbl not in _RUN_MUTABLE_GITHUB_LABELS]
+        if deferred:
+            print(
+                f"  [label-guard] Deferred non-mutable label addition(s) until post-run: {deferred}",
+                file=sys.stderr,
+            )
+    else:
+        safe_add = add
+
+    return safe_add, safe_remove
+
+# ── end sprint-label protection ───────────────────────────────────────────────
 
 # Rate-limit retry constants
 _RATE_LIMIT_MAX_RETRIES     = 3
@@ -691,8 +754,11 @@ class SprintState:
         return s
 
     def save(self, path: Path) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(self.to_dict(), indent=2))
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(self.to_dict(), indent=2))
+        except OSError as _e:
+            structured_log.error("sprint_state_write_error", f"could not write state JSON: {_e}", path=str(path), exc=str(_e))
 
 
 @dataclass
@@ -759,7 +825,7 @@ def _detect_port(cfg: "SprintConfig") -> Optional[int]:
               f"(preferred: {cfg.app_default_port}, strategy: {cfg.app_port_strategy})")
         return chosen_port
     except (subprocess.CalledProcessError, ValueError) as e:
-        print(f"  Warning: find_port.py failed ({e}) -- skipping port detection", file=sys.stderr)
+        structured_log.warn("port_detection_failed", f"find_port.py failed: {e}", exc=str(e))
         return None
 
 
@@ -868,7 +934,7 @@ def dispatch_alerts(
             elif mode == AlertMode.FILE:
                 _alert_file(title, body, alerts_dir=alerts_dir)
         except Exception as e:
-            print(f"  [alert:{mode}] error — {e}", file=sys.stderr)
+            structured_log.error("alert_dispatch_error", f"[alert:{mode}] error: {e}", mode=mode, exc=str(e))
 
 
 def _alert_dashboard_banner(
@@ -990,8 +1056,7 @@ class HangDetector:
 
             idle = time.monotonic() - self._last_change
             if idle >= HANG_KILL_SECS:
-                print(f"  [hang-detect] issue #{self.issue_num}: no log activity for "
-                      f"{idle/60:.0f} min — KILLING subprocess", flush=True)
+                structured_log.error("subprocess_killed", f"no log activity for {idle/60:.0f} min — KILLING subprocess", issue_num=self.issue_num, idle_minutes=round(idle / 60))
                 try:
                     self.proc.kill()
                 except ProcessLookupError:
@@ -999,8 +1064,7 @@ class HangDetector:
                 self._killed = True
                 self._stop_event.set()
             elif idle >= HANG_WARN_SECS and not self._warned:
-                print(f"  WARN [hang-detect] issue #{self.issue_num}: no log activity for "
-                      f"{idle/60:.0f} min", flush=True)
+                structured_log.warn("hang_detected", f"no log activity for {idle/60:.0f} min", issue_num=self.issue_num, idle_minutes=round(idle / 60))
                 self._warned = True
 
 
@@ -1022,6 +1086,33 @@ def _get_issue_labels(issue_num: int, repo_name: Optional[str] = None) -> set[st
         return {lbl["name"] for lbl in data.get("labels", [])}
     except Exception:
         return set()
+
+
+def _apply_in_progress_label(
+    issue_num: int,
+    cfg: Optional["SprintConfig"] = None,
+) -> None:
+    """Apply the in-progress label via update_ticket.py (best-effort, issue #311 AC-5).
+
+    Called when coder_started_at is set so the board reflects active work.
+    Exceptions are caught and printed as warnings so a missing label never
+    blocks the sprint.
+    """
+    scripts_dir = cfg.scripts_dir if cfg is not None else SCRIPTS_DIR
+    update_script = scripts_dir / "update_ticket.py"
+    cmd = [
+        sys.executable, str(update_script),
+        "--issue", str(issue_num),
+        "--status", "in-progress",
+    ]
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        if result.returncode in (0, 2):
+            print(f"  [in-progress] label applied for #{issue_num}")
+        else:
+            structured_log.warn("label_apply_failed", f"update_ticket.py exited {result.returncode} for #{issue_num}", issue_num=issue_num, label="in-progress", exit_code=result.returncode, subprocess_stderr=result.stderr.strip()[:400] if result.stderr else "")
+    except Exception as e:
+        structured_log.warn("label_apply_failed", f"failed to apply in-progress label for #{issue_num}: {e}", issue_num=issue_num, label="in-progress", exc=str(e))
 
 
 def _apply_needs_rework_label(
@@ -1049,29 +1140,44 @@ def _apply_needs_rework_label(
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
         if result.returncode in (0, 2):
             # exit 2 means label ops partially failed but a warning comment was posted
-            print(f"  [needs-rework] label applied for #{issue_num} ({category})")
+            structured_log.info("needs_rework_label_applied", f"needs-rework label applied for #{issue_num}", issue_num=issue_num, category=category)
         else:
-            print(
-                f"  [needs-rework] WARNING: update_ticket.py exited {result.returncode} "
-                f"for #{issue_num}",
-                file=sys.stderr,
-            )
-            if result.stderr:
-                print(f"  [needs-rework] {result.stderr.strip()[:400]}", file=sys.stderr)
+            structured_log.warn("label_apply_failed", f"update_ticket.py exited {result.returncode} for #{issue_num}", issue_num=issue_num, label="needs-rework", exit_code=result.returncode, subprocess_stderr=result.stderr.strip()[:400] if result.stderr else "")
     except Exception as e:
-        print(f"  [needs-rework] WARNING: failed to apply label for #{issue_num}: {e}", file=sys.stderr)
+        structured_log.warn("label_apply_failed", f"failed to apply needs-rework label for #{issue_num}: {e}", issue_num=issue_num, label="needs-rework", exc=str(e))
 
 
-def _add_blocked_label(issue_num: int, reason: str, repo_name: Optional[str] = None) -> None:
+def _add_blocked_label(
+    issue_num: int,
+    reason: str,
+    repo_name: Optional[str] = None,
+    sprint_label: Optional[str] = None,
+) -> None:
+    safe_add, _ = _guard_sprint_labels(["blocked"], [], sprint_label=sprint_label)
+    if not safe_add:
+        # "blocked" is outside RUN_MUTABLE_LABELS — suppressed during active run
+        print(
+            f"  [label-guard] 'blocked' label suppressed for #{issue_num} during active sprint run",
+            file=sys.stderr,
+        )
+        try:
+            github_client.add_comment(
+                issue_num,
+                f"Issue hung (HANG): {reason}. 'blocked' label deferred — applied post-run.",
+                repo_name=repo_name,
+            )
+        except Exception as e:
+            structured_log.warn("hang_comment_failed", f"failed to post hang comment: {e}", exc=str(e))
+        return
     try:
-        github_client.update_labels(issue_num, add=["blocked"], repo_name=repo_name)
+        github_client.update_labels(issue_num, add=safe_add, repo_name=repo_name)
         github_client.add_comment(
             issue_num,
             f"Issue blocked by sprint manager (HANG): {reason}",
             repo_name=repo_name,
         )
     except Exception as e:
-        print(f"  Warning: failed to update GitHub blocked label — {e}", file=sys.stderr)
+        structured_log.warn("blocked_label_failed", f"failed to update GitHub blocked label: {e}", exc=str(e))
 
 
 def _find_feature_branch(issue_num: int) -> Optional[str]:
@@ -1083,6 +1189,32 @@ def _find_feature_branch(issue_num: int) -> Optional[str]:
     if ok and out.strip():
         return out.strip().splitlines()[0].strip().removeprefix("origin/")
     return None
+
+
+def _is_branch_merged_into(branch: str, target: str) -> bool:
+    """Return True if branch has been merged into target (local or remote).
+
+    Checks both local refs and origin/ remote refs for the branch.
+    Uses ``git branch --merged`` which lists branches fully reachable from
+    the given commit — i.e. whose tip is an ancestor of <target>.
+    """
+    # Prefer the remote ref for the target so we don't need a local checkout
+    target_ref = f"origin/{target}"
+    ok, _, _ = _try("git", "rev-parse", "--verify", target_ref)
+    if not ok:
+        target_ref = target
+
+    # Try local branch ref first
+    ok, out, _ = _try("git", "branch", "--merged", target_ref, "--list", branch)
+    if ok and out.strip():
+        return True
+
+    # Fall back to checking the remote tracking branch
+    ok, out, _ = _try("git", "branch", "-r", "--merged", target_ref, "--list", f"origin/{branch}")
+    if ok and out.strip():
+        return True
+
+    return False
 
 
 # ── quality gates ─────────────────────────────────────────────────────────────
@@ -1114,18 +1246,19 @@ def _revert_to_sit(issue_num: int, gate_name: str, output: str,
                                     repo_root=effective_root)
             print(f"  Wrote failure sidecar: {sidecar}")
         except Exception as e:
-            print(f"  Warning: failure parsing/sidecar failed — {e}", file=sys.stderr)
+            structured_log.error("failure_sidecar_write_error", f"failure parsing/sidecar failed: {e}", issue_num=issue_num, exc=str(e))
 
+    safe_add, safe_remove = _guard_sprint_labels(["SIT"], ["UAT", "in-progress"])
     try:
         github_client.update_labels(
             issue_num,
-            add=["SIT"],
-            remove=["UAT", "in-progress"],
+            add=safe_add,
+            remove=safe_remove,
             repo_name=repo_name,
         )
         github_client.add_comment(issue_num, comment, repo_name=repo_name)
     except Exception as e:
-        print(f"  Warning: failed to update GitHub — {e}", file=sys.stderr)
+        structured_log.warn("github_update_failed", f"failed to update GitHub: {e}", issue_num=issue_num, exc=str(e))
 
 
 def _post_success_comment(issue_num: int, results: list[GateResult],
@@ -1140,7 +1273,7 @@ def _post_success_comment(issue_num: int, results: list[GateResult],
     try:
         github_client.add_comment(issue_num, comment, repo_name=repo_name)
     except Exception as e:
-        print(f"  Warning: failed to post success comment — {e}", file=sys.stderr)
+        structured_log.warn("success_comment_failed", f"failed to post success comment: {e}", issue_num=issue_num, exc=str(e))
 
 
 def _gate_pytest(
@@ -1171,7 +1304,7 @@ def _gate_pytest(
             pytest_bin = str(venv_pytest.resolve())
         else:
             output = "pytest binary not found on PATH and no venv/bin/pytest found."
-            print(f"  [gate:pytest] FAIL -- {output}")
+            structured_log.error("gate_failed", f"[gate:pytest] FAIL: {output}", gate="pytest", issue_num=issue_num)
             return GateResult(gate="pytest", passed=False, output=output)
     else:
         pytest_bin = pytest_path
@@ -1195,7 +1328,7 @@ def _gate_pytest(
         print("  [gate:pytest] PASS")
         return GateResult(gate="pytest", passed=True, output=combined)
     else:
-        print(f"  [gate:pytest] FAIL (exit {rc})")
+        structured_log.error("gate_failed", f"[gate:pytest] FAIL (exit {rc})", gate="pytest", issue_num=issue_num, exit_code=rc)
         _revert_to_sit(issue_num, "pytest", combined, repo_name=repo_name)
         return GateResult(gate="pytest", passed=False, output=combined)
 
@@ -1227,7 +1360,7 @@ def _gate_lint(
         if venv_ruff.exists():
             ruff_bin = str(venv_ruff.resolve())
         else:
-            print("  [gate:lint] WARNING -- ruff not found; treating as passed")
+            structured_log.warn("lint_tool_missing", "[gate:lint] ruff not found; treating as passed", issue_num=issue_num)
             return GateResult(gate="lint", passed=True, skipped=False,
                               output="ruff not found -- skipped with warning")
     else:
@@ -1251,7 +1384,7 @@ def _gate_lint(
         print("  [gate:lint] PASS")
         return GateResult(gate="lint", passed=True, output=combined)
     else:
-        print(f"  [gate:lint] FAIL (exit {rc})")
+        structured_log.error("gate_failed", f"[gate:lint] FAIL (exit {rc})", gate="lint", issue_num=issue_num, exit_code=rc)
         _revert_to_sit(issue_num, "lint", combined, repo_name=repo_name)
         return GateResult(gate="lint", passed=False, output=combined)
 
@@ -1300,7 +1433,7 @@ def _gate_merge_preview(
         if merge_ok:
             print("  [gate:merge-preview] PASS -- no conflicts")
         else:
-            print(f"  [gate:merge-preview] FAIL -- conflicts detected merging into {target_branch}")
+            structured_log.error("gate_failed", f"[gate:merge-preview] FAIL: conflicts detected merging into {target_branch}", gate="merge-preview", issue_num=issue_num, target_branch=target_branch)
     finally:
         # Always abort to leave working tree clean
         _run("git", "merge", "--abort", cwd=worktester_root, check=False)
@@ -1401,7 +1534,7 @@ def _create_sprint_branch(sprint_branch: str) -> None:
         # fallback: try local develop
         ok, develop_sha, _ = _try("git", "rev-parse", "develop")
     if not ok or not develop_sha:
-        print("  Warning: could not resolve develop SHA — using HEAD for sprint branch", file=sys.stderr)
+        structured_log.warn("sprint_branch_sha_resolve_failed", "could not resolve develop SHA — using HEAD for sprint branch")
         develop_sha = "HEAD"
     _run("git", "branch", sprint_branch, develop_sha)
     _run("git", "push", "-u", "origin", sprint_branch)
@@ -1436,9 +1569,7 @@ def _call_finish_feature(
     if result.stdout:
         print(result.stdout.rstrip())
     if result.returncode != 0:
-        print(f"  Warning: finish_feature.py exited {result.returncode}", file=sys.stderr)
-        if result.stderr:
-            print(f"  {result.stderr.rstrip()}", file=sys.stderr)
+        structured_log.error("subprocess_nonzero_exit", f"finish_feature.py exited {result.returncode}", issue_num=issue_num, subprocess="finish_feature.py", exit_code=result.returncode, subprocess_stderr=result.stderr.rstrip() if result.stderr else "")
     else:
         print("  finish_feature.py completed successfully")
 
@@ -1478,9 +1609,9 @@ def _run_documentor(
         else:
             print(f"  [documentor] completed for issue #{issue_num}")
     except subprocess.TimeoutExpired:
-        print("  [documentor] timed out after 300s (non-fatal)", file=sys.stderr)
+        structured_log.warn("documentor_timeout", "[documentor] timed out after 300s", issue_num=issue_num)
     except Exception as e:
-        print(f"  [documentor] error (non-fatal): {e}", file=sys.stderr)
+        structured_log.error("documentor_error", f"[documentor] error: {e}", issue_num=issue_num, exc=str(e))
 
 
 # ── post-tester hook ──────────────────────────────────────────────────────────
@@ -1533,34 +1664,98 @@ def handle_post_tester(
     labels = _get_issue_labels(issue_num, repo_name=eff_repo)
     if "UAT" not in labels:
         current = ", ".join(sorted(labels)) or "(none)"
-        print(f"  Issue #{issue_num}: tester exited 0 but label is [{current}], not UAT -- skipping gates")
-        warning_body = (
-            f"**Tester exited 0 but not UAT — label missing.**\n\n"
-            f"The tester subprocess finished successfully (exit code 0), "
-            f"but the UAT label was never applied. Current labels: [{current}].\n\n"
-            f"This almost always means the tester agent skipped running `finish_feature.py`. "
-            f"Please either re-run the tester or apply the **UAT** label manually to move this "
-            f"ticket to the UAT queue."
-        )
-        try:
-            github_client.add_comment(issue_num, warning_body, repo_name=eff_repo)
-        except Exception as exc:
-            print(f"  Warning: failed to post missing-UAT comment — {exc}", file=sys.stderr)
-        if alert_modes:
-            dispatch_alerts(
-                alert_modes,
-                title=f"Issue #{issue_num} skipped: tester exited 0 but not UAT",
-                body=warning_body[:500],
-                issue_num=issue_num,
-                category=FailureCategory.TESTER_REJECTED,
-                cfg=cfg,
-                repo=eff_repo,
-            )
-        return (False,
-                f"Issue #{issue_num}: tester exited 0 but not UAT -- no merge",
-                FailureCategory.TESTER_REJECTED)
+        print(f"  Issue #{issue_num}: tester exited 0 but label is [{current}], not UAT -- checking merge status")
 
-    print(f"\nTester promoted issue #{issue_num} to UAT -- running quality gates...")
+        # Check whether the feature branch has already been merged into the target
+        # (agent may have merged outside finish_feature.py, leaving UAT label absent)
+        found_branch = _find_feature_branch(issue_num)
+        branch_is_merged = False
+        if found_branch:
+            branch_is_merged = _is_branch_merged_into(found_branch, target_branch)
+            print(
+                f"  Issue #{issue_num}: feature branch '{found_branch}' merged into "
+                f"'{target_branch}': {branch_is_merged}"
+            )
+        else:
+            # Branch not found at all — cannot determine merge status; fall through
+            # to existing TESTER_REJECTED behavior.
+            print(
+                f"  Issue #{issue_num}: feature branch not found — cannot confirm merge, "
+                f"treating as genuine tester skip"
+            )
+
+        if branch_is_merged:
+            # Auto-recovery: branch was merged outside finish_feature.py, apply UAT label
+            print(f"  Issue #{issue_num}: branch is merged — auto-applying UAT label")
+            scripts_dir = cfg.scripts_dir if cfg is not None else SCRIPTS_DIR
+            update_script = scripts_dir / "update_ticket.py"
+            _UAT_RECOVERY_BACKOFFS = (2, 5, 10)
+            label_result = None
+            for attempt in range(len(_UAT_RECOVERY_BACKOFFS) + 1):
+                label_result = subprocess.run(
+                    [sys.executable, str(update_script), "--issue", str(issue_num), "--status", "uat"],
+                    capture_output=True, text=True,
+                )
+                if label_result.returncode == 0:
+                    break
+                if attempt < len(_UAT_RECOVERY_BACKOFFS):
+                    wait = _UAT_RECOVERY_BACKOFFS[attempt]
+                    print(
+                        f"  Warning: UAT label recovery attempt {attempt + 1} failed — retrying in {wait}s…",
+                        file=sys.stderr,
+                    )
+                    time.sleep(wait)
+
+            recovery_comment = (
+                "Detected merged feature branch without UAT label — applied UAT automatically "
+                "(agent appears to have merged outside finish_feature.py)."
+            )
+            try:
+                github_client.add_comment(issue_num, recovery_comment, repo_name=eff_repo)
+            except Exception as exc:
+                structured_log.warn("uat_recovery_comment_failed", f"failed to post UAT recovery comment: {exc}", issue_num=issue_num, exc=str(exc))
+
+            if label_result is None or label_result.returncode != 0:
+                stderr_text = label_result.stderr.strip() if label_result else "unknown error"
+                print(
+                    f"  Warning: UAT label auto-recovery failed after "
+                    f"{len(_UAT_RECOVERY_BACKOFFS) + 1} attempts — {stderr_text}",
+                    file=sys.stderr,
+                )
+            else:
+                print(f"  Issue #{issue_num}: UAT label applied via auto-recovery")
+
+            # Treat as a successful merge — gates may run below
+            print(f"\nTester promoted issue #{issue_num} to UAT (auto-recovered) -- running quality gates...")
+        else:
+            # Branch exists and is NOT merged — genuine tester skip, preserve existing behavior
+            warning_body = (
+                f"**Tester exited 0 but not UAT — label missing.**\n\n"
+                f"The tester subprocess finished successfully (exit code 0), "
+                f"but the UAT label was never applied. Current labels: [{current}].\n\n"
+                f"This almost always means the tester agent skipped running `finish_feature.py`. "
+                f"Please either re-run the tester or apply the **UAT** label manually to move this "
+                f"ticket to the UAT queue."
+            )
+            try:
+                github_client.add_comment(issue_num, warning_body, repo_name=eff_repo)
+            except Exception as exc:
+                structured_log.warn("missing_uat_comment_failed", f"failed to post missing-UAT comment: {exc}", issue_num=issue_num, exc=str(exc))
+            if alert_modes:
+                dispatch_alerts(
+                    alert_modes,
+                    title=f"Issue #{issue_num} skipped: tester exited 0 but not UAT",
+                    body=warning_body[:500],
+                    issue_num=issue_num,
+                    category=FailureCategory.TESTER_REJECTED,
+                    cfg=cfg,
+                    repo=eff_repo,
+                )
+            return (False,
+                    f"Issue #{issue_num}: tester exited 0 but not UAT -- no merge",
+                    FailureCategory.TESTER_REJECTED)
+    else:
+        print(f"\nTester promoted issue #{issue_num} to UAT -- running quality gates...")
 
     # Find the feature branch; None means the tester agent already merged via finish_feature.py
     feature_branch = _find_feature_branch(issue_num)
@@ -1664,7 +1859,7 @@ def _build_failure_suffix(issue_num: int, repo_root: Optional[Path] = None) -> s
     try:
         data = json.loads(sc_path.read_text(encoding="utf-8"))
     except Exception as e:
-        print(f"  Warning: could not read failure sidecar {sc_path}: {e}", file=sys.stderr)
+        structured_log.warn("failure_sidecar_read_error", f"could not read failure sidecar: {e}", sidecar_path=str(sc_path), exc=str(e))
         return ""
 
     gate      = data.get("gate", "unknown")
@@ -1709,6 +1904,7 @@ def _dispatch_coder(
     chosen_port: Optional[int] = None,
     rate_limit_events: Optional[list] = None,
     on_running: Optional[object] = None,
+    sprint_label: Optional[str] = None,
 ) -> tuple[bool, Optional[str]]:
     """Dispatch a coder agent for the issue.  Returns (ok, failure_category).
 
@@ -1741,6 +1937,17 @@ def _dispatch_coder(
             f"Read the issue at https://github.com/{_r(eff_repo)}/issues/{issue_num} "
             "and implement it following the project's branching workflow. "
             "Use the BA/coder/tester workflow defined in CLAUDE.md."
+        )
+
+    # AC-3 (issue #311): always append the no-merge constraint so the coder
+    # never merges to the target branch regardless of prompt template.
+    if "must not merge" not in prompt and "finish_feature" not in prompt:
+        prompt += (
+            " MERGE BOUNDARY (issue #311): your responsibility ends at pushing the"
+            " feature branch. You must NOT merge to the target branch (develop or any"
+            " sprint branch) by any means — no `git merge`, no PR merge, no"
+            " finish_feature.py. Merging is exclusively the tester's job via"
+            " `scripts/finish_feature.py` after tests pass."
         )
 
     # Inject failure context from sidecar if available (AC: sprint manager reads sidecar)
@@ -1811,7 +2018,7 @@ def _dispatch_coder(
                 f"PATH={sub_env.get('PATH', '<empty>')}\n"
                 "Sprint cannot proceed. Install claude CLI or set COMMANDER_ALLOW_STUB_SUCCESS=1 for testing.\n"
             )
-            print(err_msg, flush=True)
+            structured_log.error("claude_cli_not_found", f"claude CLI not found for issue #{issue_num}", issue_num=issue_num, subprocess="coder", path=sub_env.get("PATH", ""))
             try:
                 with log_path.open("a") as lf:
                     lf.write(err_msg)
@@ -1841,7 +2048,7 @@ def _dispatch_coder(
 
         if detector.killed:
             reason = f"No log activity for {HANG_KILL_SECS//60} minutes"
-            _add_blocked_label(issue_num, reason, repo_name=eff_repo)
+            _add_blocked_label(issue_num, reason, repo_name=eff_repo, sprint_label=sprint_label)
             dispatch_alerts(
                 alert_modes,
                 title=f"Issue #{issue_num}: HANG detected",
@@ -1909,6 +2116,7 @@ def _dispatch_tester(
     chosen_port: Optional[int] = None,
     rate_limit_events: Optional[list] = None,
     on_running: Optional[object] = None,
+    sprint_label: Optional[str] = None,
 ) -> tuple[int, Optional[str]]:
     """Dispatch a tester agent.  Returns (exit_code, failure_category_if_hang).
 
@@ -1959,6 +2167,13 @@ def _dispatch_tester(
             " via the dashboard Approve button or scripts/approve_ticket.py."
             " Do NOT output language like 'let me know if you want me to...' —"
             " complete the full workflow autonomously by running finish_feature.py and then stop."
+            # AC-1 / AC-2 (issue #311): explicit prohibition of direct merge paths
+            " MERGE PATH ENFORCEMENT (issue #311): `scripts/finish_feature.py` is the ONLY"
+            " sanctioned merge path. You are FORBIDDEN from running `git merge`, opening"
+            " or merging a PR directly, or pushing commits to the target branch by any"
+            " means other than finish_feature.py. Merging by any other path will skip the"
+            " UAT label entirely and constitutes a workflow failure — halt immediately and"
+            " report the violation rather than proceeding."
         )
     cmd = [
         "claude",
@@ -1989,6 +2204,37 @@ def _dispatch_tester(
         sub_env["COMMANDER_APP_PORT"] = str(chosen_port)
         print(f"  [port] COMMANDER_APP_PORT={chosen_port} injected into tester env")
 
+    # ── GITHUB_ISSUE_TEST_REPO injection (issue #301) ─────────────────────────
+    # Read GITHUB_ISSUE_TEST_REPO at tester-dispatch time and inject it into the
+    # tester's environment along with an explicit prompt distinction between the
+    # work repo (GITHUB_REPO / eff_repo) and the issue-test target repo.
+    issue_test_repo = os.environ.get("GITHUB_ISSUE_TEST_REPO", "").strip()
+    if issue_test_repo:
+        sub_env["GITHUB_ISSUE_TEST_REPO"] = issue_test_repo
+        test_repo_hint = (
+            f" GITHUB REPO SEGREGATION (issue #301):"
+            f" GITHUB_ISSUE_TEST_REPO is set to {issue_test_repo!r}."
+            f" The work repo is {eff_repo!r} (all coder commits, sprint issues, and branch operations stay here)."
+            f" Any UAT step that creates a GitHub issue or applies/removes labels MUST target"
+            f" GITHUB_ISSUE_TEST_REPO ({issue_test_repo!r}), NOT the work repo ({eff_repo!r})."
+            f" Use GITHUB_ISSUE_TEST_REPO as the --repo argument for any `gh issue create` or label operations."
+        )
+        cmd[-1] = cmd[-1] + test_repo_hint
+        print(f"  [issue-test-repo] GITHUB_ISSUE_TEST_REPO={issue_test_repo!r} injected into tester env")
+    else:
+        # GITHUB_ISSUE_TEST_REPO not set — tester must skip live issue/label tests
+        test_repo_hint = (
+            " GITHUB REPO SEGREGATION (issue #301):"
+            " GITHUB_ISSUE_TEST_REPO is NOT set."
+            " Any UAT step that would create a GitHub issue or apply/remove labels on a repo"
+            " MUST be skipped — do NOT perform those operations against the work repo."
+            " Include exactly the note"
+            " \"GITHUB_ISSUE_TEST_REPO not configured — skipped live issue/label verification.\""
+            " in the test report for each skipped step."
+        )
+        cmd[-1] = cmd[-1] + test_repo_hint
+        print("  [issue-test-repo] GITHUB_ISSUE_TEST_REPO not set — tester will skip live issue/label tests")
+
     for attempt in range(_RATE_LIMIT_MAX_RETRIES + 1):
         try:
             with log_path.open("a") as log_f:
@@ -2014,7 +2260,7 @@ def _dispatch_tester(
                 f"PATH={sub_env.get('PATH', '<empty>')}\n"
                 "Sprint cannot proceed. Install claude CLI or set COMMANDER_ALLOW_STUB_SUCCESS=1 for testing.\n"
             )
-            print(err_msg, flush=True)
+            structured_log.error("claude_cli_not_found", f"claude CLI not found for issue #{issue_num}", issue_num=issue_num, subprocess="tester", path=sub_env.get("PATH", ""))
             try:
                 with log_path.open("a") as lf:
                     lf.write(err_msg)
@@ -2044,7 +2290,7 @@ def _dispatch_tester(
 
         if detector.killed:
             reason = f"Tester: no log activity for {HANG_KILL_SECS//60} minutes"
-            _add_blocked_label(issue_num, reason, repo_name=eff_repo)
+            _add_blocked_label(issue_num, reason, repo_name=eff_repo, sprint_label=sprint_label)
             dispatch_alerts(
                 alert_modes,
                 title=f"Issue #{issue_num}: HANG detected in tester",
@@ -2415,7 +2661,7 @@ def create_summary_github_issue(
     try:
         existing = github_client.search_issues_by_title(title, repo_name=repo_name)
     except Exception as e:
-        print(f"  Warning: deduplication search failed -- {e}", file=sys.stderr)
+        structured_log.warn("dedup_search_failed", f"deduplication search failed: {e}", exc=str(e))
         existing = []
 
     if existing:
@@ -2429,7 +2675,7 @@ def create_summary_github_issue(
         try:
             full_issue = github_client.get_issue(existing_num, repo_name=repo_name)
         except Exception as e:
-            print(f"  Warning: could not fetch existing summary issue body -- {e}", file=sys.stderr)
+            structured_log.warn("summary_issue_fetch_failed", f"could not fetch existing summary issue body: {e}", exc=str(e))
 
         # Compute state-file mtime for the timestamp staleness check (best-effort)
         state_file_mtime: Optional[float] = None
@@ -2452,13 +2698,13 @@ def create_summary_github_issue(
             try:
                 github_client.update_issue_body(existing_num, content, repo_name=repo_name)
             except Exception as e:
-                print(f"  Warning: failed to update summary issue body -- {e}", file=sys.stderr)
+                structured_log.warn("summary_issue_update_failed", f"failed to update summary issue body: {e}", exc=str(e))
             if existing_state == "closed":
                 try:
                     github_client.reopen_issue(existing_num, repo_name=repo_name)
                     print(f"  [summary] Reopened issue #{existing_num}.")
                 except Exception as e:
-                    print(f"  Warning: failed to reopen summary issue -- {e}", file=sys.stderr)
+                    structured_log.warn("summary_issue_reopen_failed", f"failed to reopen summary issue: {e}", exc=str(e))
             comment = (
                 f"Summary updated after fresh sprint run on {_utcnow()}. "
                 f"Previous content was from a failed run."
@@ -2466,7 +2712,7 @@ def create_summary_github_issue(
             try:
                 github_client.add_comment(existing_num, comment, repo_name=repo_name)
             except Exception as e:
-                print(f"  Warning: failed to add update comment -- {e}", file=sys.stderr)
+                structured_log.warn("summary_comment_failed", f"failed to add update comment: {e}", exc=str(e))
             return existing_num, existing_url
 
         # Valid existing summary — skip creation
@@ -2486,7 +2732,7 @@ def create_summary_github_issue(
         print(f"  Summary GitHub issue created: {url}")
         return issue_num, url
     except Exception as e:
-        print(f"  Warning: failed to create summary GitHub issue -- {e}", file=sys.stderr)
+        structured_log.warn("summary_issue_create_failed", f"failed to create summary GitHub issue: {e}", exc=str(e))
         return None, None
 
 
@@ -2521,7 +2767,7 @@ def _prompt_learnings(
         subprocess.run([editor, str(tmp_path)], check=False)
         new_learnings = tmp_path.read_text(encoding="utf-8").strip()
     except Exception as e:
-        print(f"  Warning: editor failed -- {e}", file=sys.stderr)
+        structured_log.warn("editor_failed", f"editor failed: {e}", exc=str(e))
         new_learnings = ""
     finally:
         try:
@@ -2552,7 +2798,7 @@ def _prompt_learnings(
             )
             print(f"  GitHub issue #{summary_issue_num} body updated with learnings.")
         except Exception as e:
-            print(f"  Warning: failed to update GitHub issue body -- {e}", file=sys.stderr)
+            structured_log.warn("github_update_failed", f"failed to update GitHub issue body: {e}", exc=str(e))
         finally:
             try:
                 tmp2.unlink()
@@ -2615,7 +2861,7 @@ def write_sprint_summary(
             state_file_path = state_path,
         )
     except Exception as exc:
-        print(f"  Warning: create_summary_github_issue raised -- {exc}", file=sys.stderr)
+        structured_log.warn("summary_issue_create_failed", f"create_summary_github_issue raised: {exc}", exc=str(exc))
         summary_issue_num, summary_issue_url = None, None
 
     # Store summary_issue_url in state JSON
@@ -2628,10 +2874,7 @@ def write_sprint_summary(
             state_dict["summary_issue_url"] = summary_issue_url
             state_path.write_text(json.dumps(state_dict, indent=2))
         except Exception as e:
-            print(
-                f"  Warning: could not update state file with summary_issue_url -- {e}",
-                file=sys.stderr,
-            )
+            structured_log.warn("state_file_update_failed", f"could not update state file with summary_issue_url: {e}", exc=str(e))
 
     # AC-3: Interactive learnings prompt
     _prompt_learnings(
@@ -2718,10 +2961,10 @@ def _create_sprint_pr(
                     pr_url = m.group(0)
                     print(f"  Sprint PR already exists: {pr_url}")
                     return pr_url
-            print(f"  Warning: failed to create sprint PR -- {stderr}", file=sys.stderr)
+            structured_log.error("sprint_pr_create_failed", f"failed to create sprint PR: {stderr}", subprocess_stderr=stderr)
             return None
     except Exception as e:
-        print(f"  Warning: exception creating sprint PR -- {e}", file=sys.stderr)
+        structured_log.error("sprint_pr_create_failed", f"exception creating sprint PR: {e}", exc=str(e))
         return None
 
 
@@ -2954,7 +3197,7 @@ see #{summary_issue_num} for full report.
 After posting the comment and creating tickets, output exactly one JSON line:
 
 ```
-{"comment_url": "https://github.com/...", "blockers": N, "suggestions": N, "nits": N, "follow_up_tickets": [123, 124]}
+{{"comment_url": "https://github.com/...", "blockers": N, "suggestions": N, "nits": N, "follow_up_tickets": [123, 124]}}
 ```
 
 Then exit cleanly.
@@ -3135,9 +3378,12 @@ def _dispatch_documenter(
             summary_issue_num = summary_issue_num or 0,
         )
     except KeyError as e:
-        print(f"  [documenter] WARNING: prompt template has unknown placeholder {e} — skipping", file=sys.stderr)
-        state.documenter_status = "skipped"
-        return
+        structured_log.error("documenter_template_error", f"[documenter] prompt template has unknown placeholder {e}", placeholder=str(e))
+        state.documenter_status = "failed"
+        raise RuntimeError(
+            f"[documenter] prompt template has unknown placeholder {e}; "
+            "check documenter_prompt_template in sprint.yaml or DEFAULT_DOCUMENTER_PROMPT"
+        ) from e
 
     cwd_path = cfg.worktree_tester if cfg else Path.cwd()
     logs_dir = cfg.logs_dir if cfg else Path.cwd()
@@ -3160,7 +3406,7 @@ def _dispatch_documenter(
             cwd=str(cwd_path), capture_output=True, check=False,
         )
     except Exception as e:
-        print(f"  [documenter] WARNING: git prep failed: {e}", file=sys.stderr)
+        structured_log.warn("documenter_git_prep_failed", f"[documenter] git prep failed: {e}", exc=str(e))
 
     cmd = [
         "claude",
@@ -3186,7 +3432,7 @@ def _dispatch_documenter(
                 env=sub_env,
             )
     except FileNotFoundError:
-        print("  [documenter] claude CLI not found — skipping", file=sys.stderr)
+        structured_log.warn("claude_cli_not_found", "[documenter] claude CLI not found — skipping", subprocess="documenter")
         state.documenter_status = "skipped"
         return
 
@@ -3197,12 +3443,12 @@ def _dispatch_documenter(
     detector.stop()
 
     if detector.killed:
-        print("  [documenter] WARNING: documenter hung and was killed", file=sys.stderr)
+        structured_log.warn("subprocess_killed", "[documenter] documenter hung and was killed", subprocess="documenter")
         state.documenter_status = "failed"
         return
 
     if rc != 0:
-        print(f"  [documenter] WARNING: documenter exited with code {rc}", file=sys.stderr)
+        structured_log.error("subprocess_nonzero_exit", f"[documenter] documenter exited with code {rc}", subprocess="documenter", exit_code=rc)
         state.documenter_status = "failed"
         return
 
@@ -3218,7 +3464,7 @@ def _dispatch_documenter(
                     files_touched = [f.strip() for f in raw_files.split(",") if f.strip()]
                 break
     except Exception as e:
-        print(f"  [documenter] WARNING: could not parse documenter log: {e}", file=sys.stderr)
+        structured_log.warn("documenter_log_parse_error", f"[documenter] could not parse documenter log: {e}", exc=str(e))
 
     # Record commit SHA if a doc commit was made
     doc_commit_sha: Optional[str] = None
@@ -3255,7 +3501,11 @@ def _dispatch_reviewer(
     """Dispatch the reviewer agent after sprint PR creation.
 
     Updates state.reviewer_status, state.reviewer_comment_url, and
-    state.reviewer_findings in-place. Does NOT raise — failure is advisory.
+    state.reviewer_findings in-place.
+
+    Raises RuntimeError when the prompt template contains an unknown placeholder
+    (AC-3: unknown placeholders must surface as a loud ERROR, not a silent skip).
+    All other failures are advisory (logged and set state.reviewer_status="failed").
     """
     eff_repo = repo_name or (cfg.repo_name if cfg else None)
 
@@ -3294,9 +3544,12 @@ def _dispatch_reviewer(
             repo_name         = eff_repo or "",
         )
     except KeyError as e:
-        print(f"  [reviewer] WARNING: prompt template has unknown placeholder {e} — skipping", file=sys.stderr)
-        state.reviewer_status = "skipped"
-        return
+        structured_log.error("reviewer_template_error", f"[reviewer] prompt template has unknown placeholder {e}", placeholder=str(e))
+        state.reviewer_status = "failed"
+        raise RuntimeError(
+            f"[reviewer] prompt template has unknown placeholder {e}; "
+            "check reviewer_prompt_template in sprint.yaml or DEFAULT_REVIEWER_PROMPT"
+        ) from e
 
     cwd_path = cfg.worktree_coder if cfg else Path.cwd()
     logs_dir = cfg.logs_dir if cfg else Path.cwd()
@@ -3319,7 +3572,7 @@ def _dispatch_reviewer(
             cwd=str(cwd_path), capture_output=True, check=False,
         )
     except Exception as e:
-        print(f"  [reviewer] WARNING: git prep failed: {e}", file=sys.stderr)
+        structured_log.warn("reviewer_git_prep_failed", f"[reviewer] git prep failed: {e}", exc=str(e))
 
     cmd = [
         "claude",
@@ -3350,7 +3603,7 @@ def _dispatch_reviewer(
                 env=sub_env,
             )
     except FileNotFoundError:
-        print("  [reviewer] claude CLI not found — skipping", file=sys.stderr)
+        structured_log.warn("claude_cli_not_found", "[reviewer] claude CLI not found — skipping", subprocess="reviewer")
         state.reviewer_status = "skipped"
         return
 
@@ -3361,12 +3614,12 @@ def _dispatch_reviewer(
     detector.stop()
 
     if detector.killed:
-        print("  [reviewer] WARNING: reviewer hung and was killed", file=sys.stderr)
+        structured_log.warn("subprocess_killed", "[reviewer] reviewer hung and was killed", subprocess="reviewer")
         state.reviewer_status = "failed"
         return
 
     if rc != 0:
-        print(f"  [reviewer] WARNING: reviewer exited with code {rc}", file=sys.stderr)
+        structured_log.error("subprocess_nonzero_exit", f"[reviewer] reviewer exited with code {rc}", subprocess="reviewer", exit_code=rc)
         state.reviewer_status = "failed"
         return
 
@@ -3391,7 +3644,7 @@ def _dispatch_reviewer(
         if url_m:
             comment_url = url_m.group(0)
     except Exception as e:
-        print(f"  [reviewer] WARNING: could not parse reviewer log: {e}", file=sys.stderr)
+        structured_log.warn("reviewer_log_parse_error", f"[reviewer] could not parse reviewer log: {e}", exc=str(e))
 
     state.reviewer_status      = "succeeded"
     state.reviewer_comment_url = comment_url
@@ -3443,7 +3696,7 @@ def _warn_file_conflicts(issues: list["IssueState"]) -> None:
     for f, nums in file_to_issues.items():
         if len(nums) > 1:
             issues_str = " and ".join(f"#{n}" for n in nums)
-            print(f"  [estimate] WARNING: tickets {issues_str} share files: {f} — processing sequentially")
+            structured_log.warn("estimate_file_conflict", f"tickets {issues_str} share files: {f}", file_path=f, issue_nums=nums)
 
 
 # -- GitHub issue listing --
@@ -3484,8 +3737,126 @@ def list_backlog_issues(label: str, repo_name: Optional[str] = None) -> list[dic
                 result.append(issue)
         return sorted(result, key=lambda i: i["number"])
     except Exception as e:
-        print(f"Warning: could not list issues -- {e}", file=sys.stderr)
+        structured_log.warn("list_issues_failed", f"could not list issues: {e}", label=label, exc=str(e))
         return []
+
+
+# ── Neon dual-write helpers ────────────────────────────────────────────────────
+
+def _neon_update(fn_name: str, *args, **kwargs) -> None:
+    """Call a sprint_repo function; print loudly on failure but don't abort sprint."""
+    if not _SPRINT_REPO_AVAILABLE or _sprint_repo is None:
+        return
+    try:
+        getattr(_sprint_repo, fn_name)(*args, **kwargs)
+    except Exception as _e:
+        structured_log.error("neon_update_failed", f"[neon] {fn_name} failed: {_e}", neon_fn=fn_name, exc=str(_e))
+
+
+def _neon_sprint_json_path(sprint_label: str, sprints_dir: Path) -> Path:
+    return sprints_dir / f"{sprint_label}.json"
+
+
+def _neon_sprint_json_write(path: Path, data: dict) -> None:
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        os.replace(str(tmp), str(path))
+    except OSError as _e:
+        structured_log.error("sprint_json_write_error", f"could not write {path}: {_e}", path=str(path), exc=str(_e))
+
+
+def _neon_sprint_json_read(path: Path) -> dict:
+    if path.exists():
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    return {}
+
+
+def _neon_sprint_init(
+    label: str,
+    issues: "list[IssueState]",
+    project: str,
+    sprints_dir: Path,
+) -> None:
+    """Create sprint + tickets in Neon and write the JSON mirror. Called once on fresh start."""
+    goal = os.environ.get("SPRINT_GOAL", "").strip()
+    if not goal:
+        goal_file = sprints_dir / f"{label}-goal.txt"
+        if goal_file.exists():
+            try:
+                goal = goal_file.read_text(encoding="utf-8").strip()
+            except OSError:
+                pass
+    if not goal:
+        goal = label
+
+    if not _SPRINT_REPO_AVAILABLE or _sprint_repo is None:
+        return
+
+    # Create (or reuse) sprint row in Neon — this must succeed or we abort.
+    try:
+        _sprint_repo.get_or_create_sprint(label=label, goal=goal, project=project)
+        _sprint_repo.update_sprint_status(label, "running")
+    except Exception as _e:
+        structured_log.error("neon_sprint_init_failed", f"[neon] sprint init failed for {label!r}: {_e}", sprint_label=label, exc=str(_e))
+        return
+
+    # Add all tickets (idempotent — skip if already present).
+    for position, issue_state in enumerate(issues):
+        try:
+            _sprint_repo.add_ticket(sprint_label=label, issue_number=issue_state.number, position=position)
+        except Exception as _e:
+            if "UNIQUE" in str(_e).upper() or "unique" in str(_e).lower():
+                pass  # Already added (resume path)
+            else:
+                structured_log.warn("neon_add_ticket_failed", f"[neon] add_ticket #{issue_state.number} failed: {_e}", issue_num=issue_state.number, exc=str(_e))
+
+    # Write JSON mirror.
+    json_path = _neon_sprint_json_path(label, sprints_dir)
+    _neon_sprint_json_write(json_path, {
+        "label": label,
+        "goal": goal,
+        "project": project,
+        "status": "running",
+        "tickets": [
+            {"issue_number": s.number, "position": i, "status": "pending"}
+            for i, s in enumerate(issues)
+        ],
+    })
+
+
+def _neon_ticket_status(
+    sprint_label: str,
+    issue_number: int,
+    neon_status: str,
+    sprints_dir: Path,
+) -> None:
+    """Update a ticket's Neon status + patch the sprint JSON mirror."""
+    _neon_update("update_ticket_status", sprint_label, issue_number, neon_status)
+
+    json_path = _neon_sprint_json_path(sprint_label, sprints_dir)
+    data = _neon_sprint_json_read(json_path)
+    if "tickets" in data:
+        for t in data["tickets"]:
+            if t.get("issue_number") == issue_number:
+                t["status"] = neon_status
+                break
+        _neon_sprint_json_write(json_path, data)
+
+
+def _neon_sprint_status(sprint_label: str, neon_status: str, sprints_dir: Path) -> None:
+    """Update sprint Neon status + patch the sprint JSON mirror."""
+    _neon_update("update_sprint_status", sprint_label, neon_status)
+
+    json_path = _neon_sprint_json_path(sprint_label, sprints_dir)
+    data = _neon_sprint_json_read(json_path)
+    if data:
+        data["status"] = neon_status
+        _neon_sprint_json_write(json_path, data)
 
 
 # ── sprint loop ────────────────────────────────────────────────────────────────
@@ -3507,6 +3878,7 @@ def run_sprint(
     gate_scope: str = "changed",
     token_budget: int = 0,
     skip_estimator: bool = False,
+    rerun_manifest: Optional[dict] = None,
 ) -> tuple[SprintSummary, SprintState]:
     """Main sprint loop -- processes backlog issues sequentially.
 
@@ -3534,6 +3906,12 @@ def run_sprint(
     sprint_num = _sprint_number(label)
     state_path = _state_path(sprint_num, label, cfg=cfg)
 
+    # Mint run_id before any agent work; propagates to subprocesses via COMMANDER_RUN_ID
+    _sprint_num_str = str(sprint_num) if sprint_num is not None else label.replace("sprint-", "")
+    _run_id = mint_run_id("sprint", _sprint_num_str)
+    os.environ["COMMANDER_RUN_ID"] = _run_id
+    structured_log.set_context(run_id=_run_id, source="sprint", sprint_label=label)
+
     # AC-2: write PID file and register cleanup handlers
     if not dry_run:
         _setup_pid_file(sprint_num)
@@ -3549,10 +3927,22 @@ def run_sprint(
         print(f"  sprints-dir:  {cfg.sprints_dir}")
         print(f"  api-url:      {cfg.api_url}")
 
-    # Determine the sprint branch name and effective merge target
+    # Determine the sprint branch name and effective merge target.
+    # When target_branch is not explicitly passed, default to sprint/<label>
+    # so per-ticket feature branches merge into the sprint branch, not develop.
+    # Passing --target-branch develop explicitly is still supported as a
+    # deliberate override (AC-5 of issue #269).
     sprint_branch = f"sprint/{label}"
     if target_branch is None:
-        target_branch = "develop"
+        target_branch = sprint_branch
+
+    # Build rerun decisions map (issue → action) when running from a rerun manifest
+    rerun_decisions: dict[int, str] = {}
+    if rerun_manifest:
+        rerun_decisions = {
+            d["issue_num"]: d["action"]
+            for d in rerun_manifest.get("decisions", [])
+        }
 
     # Load or build state
     if (resume or retry_failed) and state_path.exists():
@@ -3563,6 +3953,34 @@ def run_sprint(
         # Backfill project if missing from saved state (legacy runs)
         if not state.project and eff_repo:
             state.project = eff_repo
+    elif rerun_manifest:
+        # Build state from manifest decisions (skip UAT; dispatch coder/tester for rest)
+        raw_issues = [
+            {"number": d["issue_num"], "title": d["issue_title"]}
+            for d in rerun_manifest.get("decisions", [])
+            if d["action"] != "skip"
+        ]
+        if not raw_issues:
+            print("No issues to dispatch for this re-run (all skipped).")
+            state = SprintState(
+                sprint_label    = label,
+                sprint_number   = sprint_num,
+                project         = eff_repo or "",
+                start_timestamp = _utcnow(),
+            )
+            return summary, state
+
+        state = SprintState(
+            sprint_label    = label,
+            sprint_number   = sprint_num,
+            project         = eff_repo or "",
+            start_timestamp = _utcnow(),
+            token_budget    = token_budget,
+            issues=[
+                IssueState(number=i["number"], title=i["title"], agent_status="queued")
+                for i in raw_issues
+            ],
+        )
     else:
         raw_issues = list_backlog_issues(label, repo_name=eff_repo)
         if not raw_issues:
@@ -3603,6 +4021,11 @@ def run_sprint(
     # Warn about shared-file conflicts before dispatching
     _warn_file_conflicts(state.issues)
 
+    # ── Neon dual-write: initialise sprint + tickets ───────────────────────────
+    _eff_sprints_dir = cfg.sprints_dir if cfg is not None else SPRINTS_DIR
+    if not dry_run and not resume and not retry_failed:
+        _neon_sprint_init(label, state.issues, eff_repo or "", _eff_sprints_dir)
+
     # ── Sprint estimator (issue #166) ──────────────────────────────────────────
     # Runs BEFORE the per-ticket loop so the human can see estimates on the
     # dashboard before any coding starts.  Failure never blocks the sprint.
@@ -3632,17 +4055,11 @@ def run_sprint(
                 f"{est_result.total_minutes} total minutes"
             )
         except ImportError:
-            print(
-                "  [estimator] WARNING: sprint_estimator module not found — skipping",
-                file=sys.stderr,
-            )
+            structured_log.warn("estimator_module_missing", "[estimator] sprint_estimator module not found — skipping")
             state.estimator_status = "failed"
             state.save(state_path)
         except Exception as e:
-            print(
-                f"  [estimator] WARNING: estimator failed ({e}) — sprint continues",
-                file=sys.stderr,
-            )
+            structured_log.warn("estimator_sprint_failed", f"[estimator] estimator failed: {e}", exc=str(e))
             state.estimator_status = "failed"
             state.save(state_path)
     elif skip_estimator:
@@ -3698,7 +4115,7 @@ def run_sprint(
                 print(f"  [estimate] risk flags: {', '.join(_risk)}")
                 _serious = [f for f in _risk if f in SERIOUS_RISK_FLAGS]
                 if _serious:
-                    print(f"  [estimate] WARNING: serious risk flags: {', '.join(_serious)}")
+                    structured_log.warn("estimate_serious_risk", f"serious risk flags: {', '.join(_serious)}", issue_num=num, risk_flags=_serious)
 
         # Preflight filter: skip issues not approved by pre-flight review
         if preflight_approved is not None and num not in preflight_approved:
@@ -3708,6 +4125,7 @@ def run_sprint(
             issue_state.status          = "skipped"
             issue_state.skip_reason     = "preflight-skipped"
             summary.skipped.append(f"#{num} (preflight-skipped)")
+            _neon_ticket_status(label, num, "skipped", _eff_sprints_dir)
             state.save(state_path)
             _post_sprint_status(state, api_url=api_url, project=eff_repo)
             continue
@@ -3717,6 +4135,7 @@ def run_sprint(
             issue_state.status = "skipped"
             issue_state.skip_reason = "dry-run"
             summary.skipped.append(f"#{num} (dry-run)")
+            _neon_ticket_status(label, num, "skipped", _eff_sprints_dir)
             state.save(state_path)
             _post_sprint_status(state, api_url=api_url, project=eff_repo)
             continue
@@ -3728,94 +4147,110 @@ def run_sprint(
             if chosen_port is not None:
                 _write_runtime_port(cfg.worktree_coder, chosen_port)
 
-        # -- Lifecycle: queued → coder_dispatched --
+        # Determine rerun routing: dispatch_tester skips coder entirely
+        _skip_coder = rerun_decisions.get(num) == "dispatch_tester"
+
+        # -- Lifecycle: queued --
         issue_state.set_agent_status("queued")
         state.save(state_path)
         _post_sprint_status(state, api_url=api_url)
 
-        # -- Dispatch coder --
-        issue_state.set_agent_status("coder_dispatched")
-        issue_state.coder_started_at = issue_state.status_changed_at
-        state.save(state_path)
-        _post_sprint_status(state, api_url=api_url)
-
-        def _on_coder_running(
-            _is=issue_state, _st=state, _sp=state_path, _api=api_url
-        ) -> None:
-            _is.set_agent_status("coder_running")
-            _st.save(_sp)
-            _post_sprint_status(_st, api_url=_api)
-
-        _coder_t0 = time.monotonic()
-        coder_ok, coder_category = _dispatch_coder(
-            num, alert_modes, sprint_branch=target_branch, repo_name=eff_repo, cfg=cfg,
-            chosen_port=chosen_port, rate_limit_events=state.rate_limit_events,
-            on_running=_on_coder_running,
-        )
-        _coder_elapsed = time.monotonic() - _coder_t0
-        _coder_m, _coder_s = divmod(int(_coder_elapsed), 60)
-        print(f"  Total time used on coder dispatch: {_coder_m}m {_coder_s}s")
-
-        if not coder_ok:
-            category = coder_category or FailureCategory.CRASH
-            if category == FailureCategory.RETRY_EXHAUSTED:
-                reason = "Subscription rate limit exhausted"
-            else:
-                reason = f"Coder failed with category {category}"
-            print(f"  Coder failed for #{num} ({category}) -- skipping to next issue")
-            issue_state.set_agent_status("failed")
-            issue_state.coder_finished_at = issue_state.status_changed_at
-            issue_state.failure_reason    = reason
-            issue_state.status            = "skipped"
-            issue_state.skip_reason       = reason
-            issue_state.category          = category
-            summary.skipped.append(f"#{num} (coder failed)")
-            dispatch_alerts(
-                alert_modes,
-                title=f"Issue #{num} skipped: {category}",
-                body=reason,
-                issue_num=num,
-                category=category,
-                cfg=cfg,
-                repo=eff_repo,
-            )
-            _apply_needs_rework_label(num, category, cfg=cfg)
+        if _skip_coder:
+            print(f"  [rerun] SIT ticket: dispatching tester directly for #{num}")
+        else:
+            # -- Dispatch coder --
+            issue_state.set_agent_status("coder_dispatched")
+            issue_state.coder_started_at = issue_state.status_changed_at
             state.save(state_path)
-            _post_sprint_status(state, api_url=api_url, project=eff_repo)
-            continue
+            _post_sprint_status(state, api_url=api_url)
 
-        # -- Detect CODER_NO_WORK: coder exited 0 but created no feature branch --
-        if _find_feature_branch(num) is None:
-            category = FailureCategory.CODER_NO_WORK
-            reason = f"Coder exited 0 but no feature/{num}-* branch was created"
-            print(f"  {reason} -- skipping to next issue")
-            issue_state.set_agent_status("failed")
-            issue_state.coder_finished_at = issue_state.status_changed_at
-            issue_state.failure_reason    = reason
-            issue_state.status            = "skipped"
-            issue_state.skip_reason       = reason
-            issue_state.category          = category
-            summary.skipped.append(f"#{num} (coder no work)")
-            dispatch_alerts(
-                alert_modes,
-                title=f"Issue #{num} skipped: {category}",
-                body=reason,
-                issue_num=num,
-                category=category,
-                cfg=cfg,
-                repo=eff_repo,
+            # AC-5 (issue #311): apply in-progress label when coder starts so the
+            # board reflects active work during coding.  Best-effort — never blocks
+            # the sprint on label failure.
+            _apply_in_progress_label(num, cfg=cfg)
+
+            def _on_coder_running(
+                _is=issue_state, _st=state, _sp=state_path, _api=api_url,
+                _lbl=label, _n=num, _sd=_eff_sprints_dir,
+            ) -> None:
+                _is.set_agent_status("coder_running")
+                _neon_ticket_status(_lbl, _n, "running", _sd)
+                _st.save(_sp)
+                _post_sprint_status(_st, api_url=_api)
+
+            _coder_t0 = time.monotonic()
+            coder_ok, coder_category = _dispatch_coder(
+                num, alert_modes, sprint_branch=target_branch, repo_name=eff_repo, cfg=cfg,
+                chosen_port=chosen_port, rate_limit_events=state.rate_limit_events,
+                on_running=_on_coder_running, sprint_label=label,
             )
-            _apply_needs_rework_label(num, category, cfg=cfg)
+            _coder_elapsed = time.monotonic() - _coder_t0
+            _coder_m, _coder_s = divmod(int(_coder_elapsed), 60)
+            print(f"  Total time used on coder dispatch: {_coder_m}m {_coder_s}s")
+
+            if not coder_ok:
+                category = coder_category or FailureCategory.CRASH
+                if category == FailureCategory.RETRY_EXHAUSTED:
+                    reason = "Subscription rate limit exhausted"
+                else:
+                    reason = f"Coder failed with category {category}"
+                structured_log.error("coder_failed", f"coder failed for #{num}: {category}", issue_num=num, category=category)
+                issue_state.set_agent_status("failed")
+                issue_state.coder_finished_at = issue_state.status_changed_at
+                issue_state.failure_reason    = reason
+                issue_state.status            = "skipped"
+                issue_state.skip_reason       = reason
+                issue_state.category          = category
+                summary.skipped.append(f"#{num} (coder failed)")
+                dispatch_alerts(
+                    alert_modes,
+                    title=f"Issue #{num} skipped: {category}",
+                    body=reason,
+                    issue_num=num,
+                    category=category,
+                    cfg=cfg,
+                    repo=eff_repo,
+                )
+                _apply_needs_rework_label(num, category, cfg=cfg)
+                _neon_ticket_status(label, num, "failed", _eff_sprints_dir)
+                state.save(state_path)
+                _post_sprint_status(state, api_url=api_url, project=eff_repo)
+                continue
+
+            # -- Detect CODER_NO_WORK: coder exited 0 but created no feature branch --
+            if _find_feature_branch(num) is None:
+                category = FailureCategory.CODER_NO_WORK
+                reason = f"Coder exited 0 but no feature/{num}-* branch was created"
+                print(f"  {reason} -- skipping to next issue")
+                issue_state.set_agent_status("failed")
+                issue_state.coder_finished_at = issue_state.status_changed_at
+                issue_state.failure_reason    = reason
+                issue_state.status            = "skipped"
+                issue_state.skip_reason       = reason
+                issue_state.category          = category
+                summary.skipped.append(f"#{num} (coder no work)")
+                dispatch_alerts(
+                    alert_modes,
+                    title=f"Issue #{num} skipped: {category}",
+                    body=reason,
+                    issue_num=num,
+                    category=category,
+                    cfg=cfg,
+                    repo=eff_repo,
+                )
+                _apply_needs_rework_label(num, category, cfg=cfg)
+                _neon_ticket_status(label, num, "failed", _eff_sprints_dir)
+                state.save(state_path)
+                _post_sprint_status(state, api_url=api_url, project=eff_repo)
+                continue
+
+            # -- Lifecycle: coder_done --
+            issue_state.set_agent_status("coder_done")
+            issue_state.coder_finished_at = issue_state.status_changed_at
             state.save(state_path)
-            _post_sprint_status(state, api_url=api_url, project=eff_repo)
-            continue
+            _post_sprint_status(state, api_url=api_url)
 
-        # -- Lifecycle: coder_done → tester_dispatched --
-        issue_state.set_agent_status("coder_done")
-        issue_state.coder_finished_at = issue_state.status_changed_at
-        state.save(state_path)
-        _post_sprint_status(state, api_url=api_url)
-
+        # -- Lifecycle: tester_dispatched --
         issue_state.set_agent_status("tester_dispatched")
         issue_state.tester_started_at = issue_state.status_changed_at
         state.save(state_path)
@@ -3831,9 +4266,9 @@ def run_sprint(
         # -- Dispatch tester --
         _tester_t0 = time.monotonic()
         tester_rc, hang_category = _dispatch_tester(
-            num, alert_modes, repo_name=eff_repo, cfg=cfg,
+            num, alert_modes, sprint_branch=target_branch, repo_name=eff_repo, cfg=cfg,
             chosen_port=chosen_port, rate_limit_events=state.rate_limit_events,
-            on_running=_on_tester_running,
+            on_running=_on_tester_running, sprint_label=label,
         )
         _tester_elapsed = time.monotonic() - _tester_t0
         _tester_m, _tester_s = divmod(int(_tester_elapsed), 60)
@@ -3847,6 +4282,7 @@ def run_sprint(
             issue_state.skip_reason        = "Tester HANG detected"
             issue_state.category           = FailureCategory.HANG
             summary.skipped.append(f"#{num} (tester hang)")
+            _neon_ticket_status(label, num, "failed", _eff_sprints_dir)
             state.save(state_path)
             _post_sprint_status(state, api_url=api_url, project=eff_repo)
             continue
@@ -3859,6 +4295,7 @@ def run_sprint(
             issue_state.skip_reason        = "Subscription rate limit exhausted"
             issue_state.category           = FailureCategory.RETRY_EXHAUSTED
             summary.skipped.append(f"#{num} (rate limit exhausted)")
+            _neon_ticket_status(label, num, "failed", _eff_sprints_dir)
             state.save(state_path)
             _post_sprint_status(state, api_url=api_url)
             continue
@@ -3891,6 +4328,7 @@ def run_sprint(
             issue_state.set_agent_status("completed")
             issue_state.status = "done"
             summary.merged.append(f"#{num}")
+            _neon_ticket_status(label, num, "done", _eff_sprints_dir)
         else:
             category = gate_category or FailureCategory.CRASH
             issue_state.set_agent_status("failed")
@@ -3912,6 +4350,7 @@ def run_sprint(
                 repo=eff_repo,
             )
             _apply_needs_rework_label(num, category, cfg=cfg)
+            _neon_ticket_status(label, num, "failed", _eff_sprints_dir)
 
         elapsed = time.monotonic() - start_time
         state.wall_clock_secs = elapsed
@@ -3920,6 +4359,7 @@ def run_sprint(
 
     # Final elapsed time
     state.wall_clock_secs = time.monotonic() - start_time
+    _neon_sprint_status(label, "complete", _eff_sprints_dir)
     state.save(state_path)
 
     return summary, state
@@ -4081,6 +4521,14 @@ def main() -> None:
         help=argparse.SUPPRESS,
     )
 
+    # Rerun manifest (issue #332) — written by the server rerun endpoint
+    p.add_argument(
+        "--rerun-manifest",
+        default=None,
+        metavar="PATH",
+        help=argparse.SUPPRESS,
+    )
+
     args = p.parse_args()
 
     # ── Config resolution (AC-4 + AC-5 + AC-6) ───────────────────────────────
@@ -4155,6 +4603,13 @@ def main() -> None:
         preflight_approved = [r.number for r in approved]
         print(f"[preflight] Approved {len(preflight_approved)} issue(s) for this run.")
 
+    _rerun_manifest: Optional[dict] = None
+    if args.rerun_manifest:
+        _manifest_path = Path(args.rerun_manifest)
+        if not _manifest_path.exists():
+            p.error(f"Rerun manifest not found: {_manifest_path}")
+        _rerun_manifest = json.loads(_manifest_path.read_text(encoding="utf-8"))
+
     summary, state = run_sprint(
         label                = args.label,
         skip_gates           = args.skip_gates,
@@ -4172,6 +4627,7 @@ def main() -> None:
         gate_scope           = args.gate_scope,
         token_budget         = args.budget,
         skip_estimator       = args.skip_estimator,
+        rerun_manifest       = _rerun_manifest,
     )
 
     # Derive sprint_branch for summary (mirrors run_sprint logic)
@@ -4232,12 +4688,9 @@ def main() -> None:
                     sd3["documenter_commit_sha"]    = state.documenter_commit_sha
                     state_path_doc.write_text(json.dumps(sd3, indent=2))
                 except Exception as e_persist:
-                    print(
-                        f"  [documenter] WARNING: could not persist documenter outcome -- {e_persist}",
-                        file=sys.stderr,
-                    )
+                    structured_log.warn("documenter_state_persist_failed", f"could not persist documenter outcome: {e_persist}", exc=str(e_persist))
         except Exception as e_doc:
-            print(f"  [documenter] WARNING: documenter raised unexpectedly -- {e_doc}", file=sys.stderr)
+            structured_log.warn("documenter_error", f"documenter raised unexpectedly: {e_doc}", exc=str(e_doc))
             state.documenter_status = "failed"
 
     # AC6, AC7: auto-create PR sprint/sprint-N → develop at sprint end,
@@ -4307,12 +4760,9 @@ def main() -> None:
                     sd2["reviewer_findings"]    = state.reviewer_findings
                     state_path_rev.write_text(json.dumps(sd2, indent=2))
                 except Exception as e_persist:
-                    print(
-                        f"  [reviewer] WARNING: could not persist reviewer outcome -- {e_persist}",
-                        file=sys.stderr,
-                    )
+                    structured_log.warn("reviewer_state_persist_failed", f"could not persist reviewer outcome: {e_persist}", exc=str(e_persist))
         except Exception as e_rev:
-            print(f"  [reviewer] WARNING: reviewer raised unexpectedly -- {e_rev}", file=sys.stderr)
+            structured_log.error("reviewer_failed", f"reviewer stage failed: {e_rev}", exc=str(e_rev))
             state.reviewer_status = "failed"
 
     print("\n=== Sprint Summary ===")

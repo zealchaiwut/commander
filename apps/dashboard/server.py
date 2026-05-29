@@ -4475,6 +4475,24 @@ async def finish_sprint(owner: str, repo_name: str, label: str):
         label_delete_error = str(exc).strip() or "label deletion failed"
         github_client.invalidate("sprints:")
 
+    # Merge the sprint branch PR into develop (issue #361)
+    sprint_branch = f"sprint/{label}"  # e.g., sprint/sprint-25
+    merge_result: dict = {}
+    try:
+        pr = github_client.find_open_pr_for_head(sprint_branch, repo_name=repo)
+        if pr:
+            try:
+                github_client.merge_pr(pr["number"], repo_name=repo)
+                merge_result = {"merged": True, "pr_number": pr["number"], "pr_url": pr["url"]}
+            except subprocess.CalledProcessError as merge_exc:
+                merge_err = merge_exc.stderr.strip() if merge_exc.stderr else str(merge_exc)
+                merge_result = {"merged": False, "pr_number": pr["number"], "pr_url": pr["url"], "merge_error": merge_err}
+                errors.append(f"PR #{pr['number']} merge failed: {merge_err}")
+        else:
+            merge_result = {"merged": False, "merge_error": f"no open PR found for {sprint_branch}"}
+    except Exception as exc:
+        merge_result = {"merged": False, "merge_error": str(exc)}
+
     await broadcast({
         "type": "update",
         "event": {
@@ -4484,7 +4502,7 @@ async def finish_sprint(owner: str, repo_name: str, label: str):
         },
     })
 
-    result: dict = {"closed": closed, "errors": errors, "label_deleted": label_deleted}
+    result: dict = {"closed": closed, "errors": errors, "label_deleted": label_deleted, "merge_result": merge_result}
     if label_delete_error is not None:
         result["label_delete_error"] = label_delete_error
     status_code = 207 if errors else 200

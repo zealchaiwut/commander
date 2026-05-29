@@ -418,6 +418,27 @@ def get_pr(pr_number: int, repo_name: str | None = None) -> dict:
     )
 
 
+def find_open_pr_for_head(head_branch: str, repo_name: str | None = None) -> dict | None:
+    """Return the first open PR whose head branch matches head_branch, or None."""
+    r = _r(repo_name)
+    try:
+        prs = _json(
+            "pr", "list", "--repo", r,
+            "--head", head_branch,
+            "--state", "open",
+            "--json", "number,title,url,headRefName,baseRefName",
+        )
+        return prs[0] if prs else None
+    except subprocess.CalledProcessError:
+        return None
+
+
+def merge_pr(pr_number: int, repo_name: str | None = None) -> None:
+    """Merge a PR by number using a merge commit (preserves history)."""
+    r = _r(repo_name)
+    _run("pr", "merge", str(pr_number), "--repo", r, "--merge")
+
+
 def repo_config() -> dict:
     return {
         "repo": repo(),

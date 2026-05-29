@@ -5629,34 +5629,48 @@ function smgmtFinishClose() {
   _smgmtFinishLabel = null;
 }
 
+function _smgmtFinishShowLoading() {
+  const overlay = document.getElementById('smgmt-finish-loading-overlay');
+  if (overlay) overlay.classList.remove('hidden');
+}
+
+function _smgmtFinishHideLoading() {
+  const overlay = document.getElementById('smgmt-finish-loading-overlay');
+  if (overlay) overlay.classList.add('hidden');
+}
+
 async function smgmtFinishConfirm() {
   if (!_smgmtFinishLabel || !_smgmtCurrentRepo) return;
-  const confirmBtn = document.getElementById('smgmt-finish-confirm');
-  if (confirmBtn) { confirmBtn.disabled = true; confirmBtn.textContent = 'Finishing…'; }
 
-  // Parse owner/repo from _smgmtCurrentRepo ("owner/repo")
+  const label = _smgmtFinishLabel;
+  smgmtFinishClose();
+  _smgmtFinishShowLoading();
+
   const parts = _smgmtCurrentRepo.split('/');
   const owner = parts[0];
   const repoName = parts.slice(1).join('/');
 
   try {
     const res = await fetch(
-      `/api/projects/${encodeURIComponent(owner)}/${encodeURIComponent(repoName)}/sprints/${encodeURIComponent(_smgmtFinishLabel)}/finish`,
+      `/api/projects/${encodeURIComponent(owner)}/${encodeURIComponent(repoName)}/sprints/${encodeURIComponent(label)}/finish`,
       { method: 'POST' }
     );
     const data = await res.json();
-    smgmtFinishClose();
+    _smgmtFinishHideLoading();
 
+    const mr = data.merge_result || {};
     if (data.errors && data.errors.length > 0) {
       smgmtShowError(`Closed ${data.closed} issue${data.closed !== 1 ? 's' : ''}; ${data.errors.length} error${data.errors.length !== 1 ? 's' : ''}: ${data.errors.join('; ')}`);
     } else {
-      showSuccessToast(`Sprint finished — ${data.closed} issue${data.closed !== 1 ? 's' : ''} moved to UAT and closed.`);
+      let msg = `Sprint finished — ${data.closed} issue${data.closed !== 1 ? 's' : ''} moved to UAT and closed.`;
+      if (mr.merged) msg += ` PR #${mr.pr_number} merged into develop.`;
+      showSuccessToast(msg);
     }
 
     await smgmtSelectProject(_smgmtCurrentRepo);
   } catch (e) {
+    _smgmtFinishHideLoading();
     smgmtShowError('Failed to finish sprint: ' + e.message);
-    if (confirmBtn) { confirmBtn.disabled = false; confirmBtn.textContent = 'Finish Sprint'; }
   }
 }
 

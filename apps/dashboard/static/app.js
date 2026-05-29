@@ -3050,7 +3050,9 @@ async function smgmtLoadOutcomeStates() {
       );
       if (res.ok) {
         const data = await res.json();
-        if (data.state) _smgmtOutcomeStates[label] = data.state;
+        _smgmtOutcomeStates[label] = data.state || 'idle';
+      } else {
+        _smgmtOutcomeStates[label] = 'idle';
       }
     } catch (_e) { /* ignore network errors */ }
   }));
@@ -3059,13 +3061,20 @@ async function smgmtLoadOutcomeStates() {
 }
 
 /**
- * Apply CSS classes to sprint pane blocks based on cached _smgmtOutcomeStates.
- * Removes old state classes first, then applies the current one.
+ * Apply CSS classes and labeled badges to sprint pane blocks based on cached _smgmtOutcomeStates.
+ * Removes old state classes/badges first, then applies the current one.
  * Running state (handled by smgmtApplyRunState) is left untouched here.
  */
 function smgmtApplyOutcomeStates() {
   const STATE_CLASSES = ['smgmt-completed', 'smgmt-has-rework', 'smgmt-cancelled'];
   const HDR_CLASSES   = ['smgmt-completed-header', 'smgmt-has-rework-header', 'smgmt-cancelled-header'];
+
+  const BADGE_CONFIG = {
+    'completed':  { label: 'Finished',         cls: 'state-finished' },
+    'has_rework': { label: 'Need Fixed Sprint', cls: 'state-rework'   },
+    'cancelled':  { label: 'Idle',             cls: 'state-idle'     },
+    'idle':       { label: 'Idle',             cls: 'state-idle'     },
+  };
 
   document.querySelectorAll('.smgmt-sprint-block').forEach(block => {
     const label = block.id.replace('smgmt-block-', '');
@@ -3073,7 +3082,10 @@ function smgmtApplyOutcomeStates() {
 
     block.classList.remove(...STATE_CLASSES);
     const hdr = block.querySelector('.smgmt-sprint-header');
-    if (hdr) hdr.classList.remove(...HDR_CLASSES);
+    if (hdr) {
+      hdr.classList.remove(...HDR_CLASSES);
+      hdr.querySelectorAll('.smgmt-state-badge').forEach(el => el.remove());
+    }
 
     const state = _smgmtOutcomeStates[label];
     if (!state || state === 'running') return;
@@ -3081,7 +3093,25 @@ function smgmtApplyOutcomeStates() {
     const blockClass = state === 'has_rework' ? 'smgmt-has-rework' : `smgmt-${state}`;
     const hdrClass   = state === 'has_rework' ? 'smgmt-has-rework-header' : `smgmt-${state}-header`;
     block.classList.add(blockClass);
-    if (hdr) hdr.classList.add(hdrClass);
+    if (hdr) {
+      hdr.classList.add(hdrClass);
+
+      const cfg = BADGE_CONFIG[state];
+      if (cfg) {
+        const badge = document.createElement('span');
+        badge.className = `smgmt-state-badge ${cfg.cls}`;
+        badge.textContent = cfg.label;
+        const hdrLeft = hdr.querySelector('.smgmt-sprint-header-left') || hdr;
+        const nextBadge  = hdrLeft.querySelector('.smgmt-next-badge');
+        const sprintName = hdrLeft.querySelector('.smgmt-sprint-name');
+        const insertAfter = nextBadge || sprintName;
+        if (insertAfter && insertAfter.nextSibling) {
+          hdrLeft.insertBefore(badge, insertAfter.nextSibling);
+        } else {
+          hdrLeft.appendChild(badge);
+        }
+      }
+    }
   });
 }
 
@@ -3257,6 +3287,7 @@ function smgmtRender() {
   smgmtBacklogApplyMode(totalSprints);
   smgmtApplyRunState();
   smgmtApplyDurationBadges();
+  smgmtApplyOutcomeStates();
   // Re-mount live panels for any currently-running sprints after render
   smgmtSyncLivePanels();
 }
@@ -5129,11 +5160,18 @@ function smgmtApplyRunState(sprintStatusMap) {
       ticketEl.setAttribute('draggable', 'false');
     });
 
-    // Insert RUNNING badge (pulse pill) in the header-left div, after sprint name / NEXT UP badge
+    // Compute live progress ratio for the running badge (X/Y completed tickets)
+    const _runStatus = sprintStatusMap[runLabel];
+    const _runIssues = (_runStatus && _runStatus.issues) ? _runStatus.issues : [];
+    const _runTotal  = _runIssues.length;
+    const _runDone   = _runIssues.filter(i => i.status === 'done' || i.status === 'skipped').length;
+    const _runLabel  = _runTotal > 0 ? `${_runDone}/${_runTotal}` : '—';
+
+    // Insert RUNNING badge (pulse pill with progress ratio) in the header-left div, after sprint name / NEXT UP badge
     const runBadge = document.createElement('span');
     runBadge.className = 'smgmt-running-badge';
-    runBadge.setAttribute('aria-label', 'Running sprint');
-    runBadge.innerHTML = '<span class="smgmt-pulse-dot" aria-hidden="true"></span><span>Running</span>';
+    runBadge.setAttribute('aria-label', `Running: ${_runLabel}`);
+    runBadge.innerHTML = `<span class="smgmt-pulse-dot" aria-hidden="true"></span><span>${_runLabel}</span>`;
     const hdrLeft = hdr.querySelector('.smgmt-sprint-header-left') || hdr;
     const nextBadge = hdrLeft.querySelector('.smgmt-next-badge');
     const sprintName = hdrLeft.querySelector('.smgmt-sprint-name');

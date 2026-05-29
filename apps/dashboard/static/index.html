@@ -2323,6 +2323,18 @@
     50%      { opacity: 0.5; transform: scale(0.7); }
   }
 
+  /* State badges for non-running sprints (issue #368) */
+  .smgmt-state-badge {
+    display: inline-flex; align-items: center;
+    font-family: var(--mono, monospace); font-size: 10px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: .04em;
+    padding: 3px 9px; border-radius: 999px; flex-shrink: 0;
+    border: 1px solid transparent;
+  }
+  .smgmt-state-badge.state-finished  { background: var(--steel-bg);  color: var(--steel);    border-color: var(--steel);    }
+  .smgmt-state-badge.state-rework    { background: var(--yellow-bg); color: var(--yellow);   border-color: var(--yellow);   }
+  .smgmt-state-badge.state-idle      { background: var(--surface-2); color: var(--text-sub); border-color: var(--border);   }
+
   /* Completed clean — soft blue border + ring + header gradient */
   .smgmt-sprint-block.smgmt-completed {
     border-color: var(--steel);

@@ -2725,8 +2725,6 @@ let _smgmtAutoRefreshInterval  = 15;  // seconds between refreshes (5|15|30|60)
 let _smgmtAutoRefreshEnabled   = true; // whether auto-refresh is active
 let _smgmtSelectedIssues       = new Set(); // issue numbers currently selected (multi-select, issue #206)
 
-const RERUN_STRIP_LABELS = new Set(['UAT', 'UAT-approved', 'released', 'SIT', 'in-progress', 'need-rework', 'needs-rework', 'tester-rejected']);
-
 function _rerunPolicyAction(labelNames) {
   const s = new Set(labelNames);
   if (s.has('UAT') || s.has('UAT-approved')) return 'skip';
@@ -3167,7 +3165,10 @@ function smgmtRender() {
 }
 
 function smgmtHasCompletedTickets(tickets) {
-  return tickets.some(t => (t.labels || []).some(l => RERUN_STRIP_LABELS.has(l.name)));
+  return tickets.some(t => {
+    const action = _rerunPolicyAction((t.labels || []).map(l => l.name));
+    return action === 'dispatch_tester' || action === 'skip';
+  });
 }
 
 function smgmtSprintBlockHtml(label, tickets, isNext) {

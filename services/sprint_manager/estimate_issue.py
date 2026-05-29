@@ -22,7 +22,7 @@ from typing import Optional
 # This file lives at services/sprint_manager/estimate_issue.py
 # Repo root is two levels up
 REPO_ROOT = Path(__file__).parent.parent.parent
-AGENT_PATH = REPO_ROOT / "apps" / "dashboard" / ".claude" / "agents" / "estimator.md"
+AGENT_PATH = Path(__file__).parent / "prompts" / "estimate_issue.md"
 
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
@@ -49,15 +49,10 @@ def find_commander_dir(start: Optional[Path] = None) -> Optional[Path]:
 
 
 def load_agent_instructions() -> str:
-    """Read estimator.md and strip YAML frontmatter."""
+    """Read the estimator prompt file."""
     if not AGENT_PATH.exists():
         return ""
-    content = AGENT_PATH.read_text()
-    if content.startswith("---"):
-        parts = content.split("---", 2)
-        if len(parts) >= 3:
-            return parts[2].strip()
-    return content.strip()
+    return AGENT_PATH.read_text().strip()
 
 
 def extract_json(text: str) -> Optional[dict]:

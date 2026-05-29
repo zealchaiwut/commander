@@ -5963,6 +5963,7 @@ async def _run_bulk_estimator_for_ticket(
     # Transition to sized
     ticket["state"] = "sized"
     ticket["estimate_size"] = size  # "S", "M", "L", "XL", or None
+    ticket["estimate_minutes"] = _minutes_from_letter(size) if size else None
     _persist_bulk_job(job)
     await _broadcast_bulk_event(job_id, {"type": "ticket_update", "ticket": dict(ticket)})
 

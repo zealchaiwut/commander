@@ -3248,6 +3248,8 @@ function smgmtSprintBlockHtml(label, tickets, isNext) {
         <div class="smgmt-sprint-header-left">
           <i class="ti ti-grip-vertical smgmt-sprint-grip"></i>
           <span class="smgmt-sprint-name">Sprint ${n}</span>
+          <button class="smgmt-rename-btn" title="Rename sprint"
+                  onclick="smgmtStartRename('${label}', event)"><i class="ti ti-pencil"></i></button>
           ${nextBadge}
           ${estimateSummaryHtml}
           <span class="smgmt-sprint-count">${tickets.length === 0 ? 'empty' : `${tickets.length} ticket${tickets.length !== 1 ? 's' : ''}`}</span>
@@ -3293,6 +3295,145 @@ function smgmtPlaceholderBlockHtml(n) {
         <div class="smgmt-drop-hint smgmt-placeholder-hint">Drop a ticket here to start Sprint ${n}</div>
       </div>
     </div>`;
+}
+
+// ── Sprint inline rename (issue #341) ────────────────────────────────────────
+
+function smgmtStartRename(label, event) {
+  event.stopPropagation();
+  const block = document.getElementById(`smgmt-block-${label}`);
+  if (!block) return;
+  const nameEl = block.querySelector('.smgmt-sprint-name');
+  if (!nameEl || nameEl.querySelector('.smgmt-rename-wrap')) return; // already editing
+
+  const origN = parseInt(label.split('-')[1], 10);
+
+  nameEl.innerHTML = `
+    <span class="smgmt-rename-wrap">
+      <span class="smgmt-rename-prefix">Sprint </span>
+      <input class="smgmt-rename-input" id="smgmt-rename-input-${label}"
+             type="text" inputmode="numeric" pattern="[0-9]*"
+             value="${origN}" autocomplete="off" />
+      <span class="smgmt-rename-error" id="smgmt-rename-err-${label}"></span>
+    </span>`;
+
+  const input = document.getElementById(`smgmt-rename-input-${label}`);
+  input.focus();
+  input.select();
+
+  input.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      smgmtCommitRename(label, origN, nameEl);
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      smgmtCancelRename(label, origN, nameEl);
+    }
+  });
+
+  input.addEventListener('input', function() {
+    // strip non-numeric characters on input
+    this.value = this.value.replace(/[^0-9]/g, '');
+  });
+
+  input.addEventListener('blur', function() {
+    // Defer so Enter-key commit isn't pre-empted; skip if API call is in flight
+    const el = this;
+    setTimeout(() => {
+      if (el.disabled) return;
+      const wrap = nameEl.querySelector('.smgmt-rename-wrap');
+      if (wrap) smgmtCancelRename(label, origN, nameEl);
+    }, 150);
+  });
+}
+
+function _smgmtSetRenameError(label, msg) {
+  const errEl = document.getElementById(`smgmt-rename-err-${label}`);
+  const input = document.getElementById(`smgmt-rename-input-${label}`);
+  if (errEl) errEl.textContent = msg;
+  if (input) input.classList.toggle('is-invalid', !!msg);
+}
+
+async function smgmtCommitRename(label, origN, nameEl) {
+  const input = document.getElementById(`smgmt-rename-input-${label}`);
+  if (!input) return;
+  const raw = input.value.trim();
+
+  if (raw === '') {
+    _smgmtSetRenameError(label, 'Sprint number cannot be empty');
+    input.focus();
+    return;
+  }
+  const newN = parseInt(raw, 10);
+  if (isNaN(newN) || newN <= 0) {
+    _smgmtSetRenameError(label, 'Only numbers are allowed');
+    input.focus();
+    return;
+  }
+  if (newN === origN) {
+    smgmtCancelRename(label, origN, nameEl);
+    return;
+  }
+  const existingNums = (_smgmtData?.order || []).map(l => parseInt(l.split('-')[1], 10));
+  if (existingNums.includes(newN)) {
+    _smgmtSetRenameError(label, `Sprint ${newN} already exists`);
+    input.focus();
+    return;
+  }
+
+  _smgmtSetRenameError(label, '');
+  input.disabled = true;
+
+  try {
+    const res = await fetch(`/api/sprints/${label}/rename`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ new_sprint_number: newN, project: _smgmtCurrentRepo }),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      _smgmtSetRenameError(label, data.detail || `Error ${res.status}`);
+      if (input) input.disabled = false;
+      input.focus();
+      return;
+    }
+  } catch (err) {
+    _smgmtSetRenameError(label, 'Network error');
+    if (input) input.disabled = false;
+    input.focus();
+    return;
+  }
+
+  // Update in-memory data order immediately
+  const newLabel = `sprint-${newN}`;
+  if (_smgmtData?.order) {
+    _smgmtData.order = _smgmtData.order.map(l => l === label ? newLabel : l);
+  }
+  if (_smgmtData?.issues) {
+    _smgmtData.issues.forEach(iss => {
+      if (iss.sprint === label) iss.sprint = newLabel;
+    });
+  }
+  // Migrate goals/estimates/states to new label key
+  if (_smgmtGoals[label] !== undefined) {
+    _smgmtGoals[newLabel] = _smgmtGoals[label];
+    delete _smgmtGoals[label];
+  }
+  if (_smgmtEstimates[label] !== undefined) {
+    _smgmtEstimates[newLabel] = _smgmtEstimates[label];
+    delete _smgmtEstimates[label];
+  }
+  if (_smgmtSprintStates[label] !== undefined) {
+    _smgmtSprintStates[newLabel] = _smgmtSprintStates[label];
+    delete _smgmtSprintStates[label];
+  }
+
+  smgmtRender();
+}
+
+function smgmtCancelRename(label, origN, nameEl) {
+  if (!nameEl) return;
+  nameEl.textContent = `Sprint ${origN}`;
 }
 
 function smgmtTicketCardHtml(ticket, currentSprint) {
@@ -3818,6 +3959,12 @@ function smgmtSprintDragStart(event, label) {
   // Suppress drag if this sprint (or any sprint) is locked/running (issue #186)
   const hdr = event.currentTarget;
   if (hdr && hdr.getAttribute('draggable') === 'false') {
+    event.preventDefault();
+    return;
+  }
+  // Suppress drag while an inline rename is active (issue #341)
+  const block = document.getElementById(`smgmt-block-${label}`);
+  if (block && block.querySelector('.smgmt-rename-wrap')) {
     event.preventDefault();
     return;
   }

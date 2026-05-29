@@ -227,7 +227,7 @@ def _sweep_orphan_pid_files() -> None:
                     except OSError:
                         pass
                     cleaned += 1
-                    print(f"[startup-sweep] cleaned unreadable PID file {pid_file}")
+                    print(f"Sweeping orphan PID file: {pid_file} (pid unknown, unreadable)")
                     continue
 
                 # Check if the process exists.
@@ -239,10 +239,7 @@ def _sweep_orphan_pid_files() -> None:
                     except OSError:
                         pass
                     cleaned += 1
-                    print(
-                        f"[startup-sweep] cleaned orphan PID file {pid_file}"
-                        f" (PID {pid} not running)"
-                    )
+                    print(f"Sweeping orphan PID file: {pid_file} (pid {pid} not alive)")
                     continue
                 except PermissionError:
                     # Process exists but we can't signal it (different user).
@@ -279,10 +276,7 @@ def _sweep_orphan_pid_files() -> None:
                     except OSError:
                         pass
                     cleaned += 1
-                    print(
-                        f"[startup-sweep] cleaned orphan PID file {pid_file}"
-                        f" (PID {pid} reused by unrelated process)"
-                    )
+                    print(f"Sweeping orphan PID file: {pid_file} (pid {pid} not alive)")
         except Exception as exc:
             print(f"[startup-sweep] error scanning project {proj.get('repo')}: {exc}")
 
@@ -417,6 +411,16 @@ def _validate_github_repos() -> None:
         )
 
 
+async def _periodic_orphan_sweep_loop() -> None:
+    """Sweep orphan PID files every 60 seconds while the dashboard is running."""
+    while True:
+        await asyncio.sleep(60)
+        try:
+            _sweep_orphan_pid_files()
+        except Exception as exc:
+            print(f"[periodic-sweep] unexpected error: {exc}")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global _start_time
@@ -442,10 +446,12 @@ async def lifespan(app: FastAPI):
             pass  # backup failures never affect server startup
     task1 = asyncio.create_task(_cache_refresh_loop())
     task2 = asyncio.create_task(_timeout_loop())
+    task3 = asyncio.create_task(_periodic_orphan_sweep_loop())
     yield
     task1.cancel()
     task2.cancel()
-    for t in (task1, task2):
+    task3.cancel()
+    for t in (task1, task2, task3):
         try:
             await t
         except asyncio.CancelledError:
@@ -2930,20 +2936,14 @@ def run_sprint_managed(body: SprintMgmtRunBody):
         raise HTTPException(502, detail=f"sprint_manager.py not found at {SPRINT_MANAGER_PATH}")
 
     project_root = _project_root_path(body.project)
-    if _is_sprint_running(project_root, body.sprint_label):
-        sprints_dir = _commander_dir(project_root) / "sprints"
-        pid_str = "unknown"
-        for fname in (f"{body.sprint_label}-pid", f"{body.sprint_label}-pid.pending"):
-            candidate = sprints_dir / fname
-            if candidate.exists():
-                try:
-                    pid_str = candidate.read_text(encoding="utf-8").strip()
-                except OSError:
-                    pass
-                break
+    running = _any_sprint_running()
+    if running:
         raise HTTPException(
             409,
-            detail=f"Sprint {body.sprint_label} is already running on {body.project} (PID {pid_str})",
+            detail=(
+                f"Cannot start sprint: {running['sprint_label']} is currently running"
+                f" on {running['project']}"
+            ),
         )
     coder_path   = _coder_clone_path(project_root)
     commander    = _commander_dir(project_root)

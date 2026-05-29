@@ -2776,6 +2776,8 @@ async function smgmtInitForProject(repo) {
 // ── Partial refresh (issue #179) ─────────────────────────────────────────────
 async function smgmtRefreshBoard() {
   if (!_smgmtCurrentRepo) return;
+  // Don't clobber the DOM while a ticket drag is in flight (issue #340)
+  if (_smgmtDragTicket) return;
   await smgmtSelectProject(_smgmtCurrentRepo);
 }
 
@@ -3155,6 +3157,11 @@ function smgmtRender() {
   }
 
   bodyEl.innerHTML = blocksHtml;
+
+  // Restore placeholder visibility if a ticket drag is already in flight (issue #340)
+  if (_smgmtDragTicket) {
+    document.querySelectorAll('.smgmt-sprint-placeholder').forEach(p => { p.style.display = 'block'; });
+  }
 
   smgmtRenderBacklog(unassigned);
   // Count total visible sprint blocks (non-placeholder) for sticky decision (issue #225)

@@ -4558,7 +4558,10 @@ function _setupModals() {
       _ntDraftGenerated = true;
       _ntUpdateWarnings();
       document.getElementById('nt-draft-section').classList.remove('hidden');
-      document.getElementById('nt-modal').scrollTop = document.getElementById('nt-modal').scrollHeight;
+      requestAnimationFrame(() => {
+        const modal = document.getElementById('nt-modal');
+        modal.scrollTop = modal.scrollHeight;
+      });
     } catch (err) {
       document.getElementById('nt-error').textContent = "Couldn't generate draft — " + err.message;
       document.getElementById('nt-error').classList.remove('hidden');

@@ -55,6 +55,20 @@ except Exception:
     _SPRINT_REPO_AVAILABLE = False
 
 try:
+    from sizing import SIZE_TO_MINUTES as _SIZE_TO_MINUTES, letter_from_minutes as _letter_from_minutes, minutes_from_letter as _minutes_from_letter
+    _SIZING_AVAILABLE = True
+except ImportError:
+    _SIZE_TO_MINUTES = {"S": 7, "M": 15, "L": 25, "XL": 40}  # type: ignore[assignment]
+    def _letter_from_minutes(m: int) -> str:  # type: ignore[misc]
+        if m < 11: return "S"
+        if m < 20: return "M"
+        if m < 33: return "L"
+        return "XL"
+    def _minutes_from_letter(l: str) -> int:  # type: ignore[misc]
+        return _SIZE_TO_MINUTES.get(l, 0)
+    _SIZING_AVAILABLE = False
+
+try:
     import sync_projects_to_neon as _sync_projects_module
     _SYNC_PROJECTS_AVAILABLE = True
 except Exception:
@@ -3507,7 +3521,11 @@ def get_sprint_live_snapshot(sprint_label: str, project: str):
             if est_entry:
                 has_any_estimate = True
                 if not terminal:
-                    rem_minutes += int(est_entry.get("minutes", 0))
+                    mins = est_entry.get("minutes")
+                    if mins is None:
+                        # Historical entry — derive from size letter
+                        mins = _minutes_from_letter(est_entry.get("size", ""))
+                    rem_minutes += int(mins or 0)
         if has_any_estimate:
             est_remaining_minutes = rem_minutes
 
@@ -3572,9 +3590,18 @@ def get_sprint_live_snapshot(sprint_label: str, project: str):
         else:
             issue_elapsed = None
 
-        # size: from estimates only — never derived from minutes
+        # size + minutes: derive whichever field is absent from the stored estimate
         est_entry = estimates.get(str(num)) or estimates.get(num)
-        size: Optional[str] = est_entry.get("size") if est_entry else None
+        if est_entry:
+            size_val: Optional[str] = est_entry.get("size")
+            mins_val: Optional[int] = est_entry.get("minutes")
+            if size_val and mins_val is None:
+                mins_val = _minutes_from_letter(size_val) or None
+            elif mins_val is not None and not size_val:
+                size_val = _letter_from_minutes(int(mins_val))
+        else:
+            size_val = None
+            mins_val = None
 
         issues_out.append({
             "number":       num,
@@ -3583,7 +3610,8 @@ def get_sprint_live_snapshot(sprint_label: str, project: str):
             "agent_status": public_agent_status,
             "agent":        active_role,
             "elapsed_secs": issue_elapsed,
-            "size":         size,
+            "size":         size_val,
+            "minutes":      mins_val,
         })
 
     # ── active_agent: derive from sprint state JSON (coder/tester transition) ──

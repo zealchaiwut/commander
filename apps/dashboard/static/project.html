@@ -4740,11 +4740,81 @@ let _ntDraftGenerated = false;
 let _ntLabels = [];          // [{name, color}, ...] from GitHub
 let _ntSelectedLabel = null; // currently applied label name
 let _ntDropdownFocus = -1;   // keyboard-focused dropdown item index
+let _ntFiles = [];           // queued attachment files
 
 function _ntUpdateWarnings() {
   if (!_ntDraftGenerated) return;
   document.getElementById('nt-warn-label').classList.toggle('hidden', !!_ntSelectedLabel);
-  document.getElementById('nt-warn-attach').classList.toggle('hidden', document.getElementById('nt-files').files.length > 0);
+  document.getElementById('nt-warn-attach').classList.toggle('hidden', _ntFiles.length > 0);
+}
+
+function _ntPickFiles() {
+  document.getElementById('nt-files').click();
+}
+
+function _ntOnFileInput(event) {
+  _ntAddFiles(Array.from(event.target.files));
+  event.target.value = '';
+}
+
+function _ntOnDrop(event) {
+  event.preventDefault();
+  document.getElementById('nt-dropzone').classList.remove('drag-over');
+  _ntAddFiles(Array.from(event.dataTransfer.files));
+}
+
+function _ntAddFiles(incoming) {
+  const errEl = document.getElementById('nt-file-error');
+  if (errEl) { errEl.textContent = ''; errEl.classList.add('hidden'); }
+  let totalSize = _ntFiles.reduce((s, f) => s + f.size, 0);
+
+  for (const f of incoming) {
+    if (_ntFiles.length >= 10) break;
+    const ext = '.' + f.name.split('.').pop().toLowerCase();
+    if (!BC_ALLOWED_EXTS.has(ext)) {
+      if (errEl) {
+        errEl.textContent = `File '${f.name}' has a disallowed extension ('${ext}').`;
+        errEl.classList.remove('hidden');
+      }
+      continue;
+    }
+    if (f.size > 25 * 1024 * 1024) {
+      if (errEl) {
+        errEl.textContent = `File '${f.name}' exceeds the 25 MB per-file limit.`;
+        errEl.classList.remove('hidden');
+      }
+      continue;
+    }
+    totalSize += f.size;
+    if (totalSize > 50 * 1024 * 1024) {
+      if (errEl) {
+        errEl.textContent = 'Upload batch would exceed the 50 MB total limit.';
+        errEl.classList.remove('hidden');
+      }
+      break;
+    }
+    _ntFiles.push(f);
+  }
+  _ntRenderFileQueue();
+  _ntUpdateWarnings();
+}
+
+function _ntRemoveFile(idx) {
+  _ntFiles.splice(idx, 1);
+  _ntRenderFileQueue();
+  _ntUpdateWarnings();
+}
+
+function _ntRenderFileQueue() {
+  const container = document.getElementById('nt-file-queue');
+  if (!container) return;
+  if (_ntFiles.length === 0) { container.innerHTML = ''; return; }
+  container.innerHTML = _ntFiles.map((f, i) =>
+    `<span class="bc-file-chip">
+      <span class="bc-file-chip-name" title="${escHtml(f.name)}">${escHtml(f.name)}</span>
+      <button class="bc-file-chip-remove" onclick="_ntRemoveFile(${i})" title="Remove">&times;</button>
+    </span>`
+  ).join('');
 }
 
 async function _ntFetchLabels(repo) {
@@ -4862,7 +4932,10 @@ async function smgmtOpenNewTicket() {
   document.getElementById('nt-label-chip').classList.add('hidden');
   document.getElementById('nt-label-wrap').classList.remove('hidden');
   document.getElementById('nt-label-dropdown').classList.add('hidden');
-  document.getElementById('nt-files').value = '';
+  _ntFiles = [];
+  _ntRenderFileQueue();
+  const ntFileErr = document.getElementById('nt-file-error');
+  if (ntFileErr) { ntFileErr.textContent = ''; ntFileErr.classList.add('hidden'); }
   document.getElementById('nt-warn-label').classList.add('hidden');
   document.getElementById('nt-warn-attach').classList.add('hidden');
   document.getElementById('nt-error').classList.add('hidden');
@@ -4979,8 +5052,6 @@ function _setupModals() {
   document.getElementById('nt-cancel-btn').addEventListener('click', _ntClose);
   document.getElementById('nt-post-cancel-btn').addEventListener('click', _ntClose);
   document.getElementById('nt-backdrop').addEventListener('click', _ntClose);
-  document.getElementById('nt-files').addEventListener('change', _ntUpdateWarnings);
-
   // Project change → re-fetch labels
   document.getElementById('nt-project').addEventListener('change', function() {
     if (this.value) _ntFetchLabels(this.value);
@@ -5122,7 +5193,7 @@ function _setupModals() {
       formData.append('body', document.getElementById('nt-body').value);
       formData.append('project', repo);
       if (_ntSelectedLabel) formData.append('extra_labels', _ntSelectedLabel);
-      for (const f of document.getElementById('nt-files').files) {
+      for (const f of _ntFiles) {
         formData.append('files', f);
       }
       const resp = await fetch('/api/tickets/create', { method: 'POST', body: formData });
@@ -6157,8 +6228,17 @@ document.addEventListener('DOMContentLoaded', init);
         </div>
       </div>
       <div class="modal-field" style="margin-bottom:0">
-        <label class="modal-label" for="nt-files">Attachments <span class="modal-hint" style="font-weight:normal;color:var(--text-muted)">(optional — .png .jpg .pdf .md and others, max 25 MB per file)</span></label>
-        <input class="modal-input nt-file-input" id="nt-files" type="file" multiple>
+        <label class="modal-label">Attachments <span class="modal-hint" style="font-weight:normal;color:var(--text-muted)">(optional — max 25 MB per file, 50 MB total)</span></label>
+        <div class="dt-dropzone nt-dropzone" id="nt-dropzone"
+             ondragover="event.preventDefault(); this.classList.add('drag-over')"
+             ondragleave="this.classList.remove('drag-over')"
+             ondrop="_ntOnDrop(event)"
+             onclick="_ntPickFiles()">
+          <span class="dt-dropzone-hint">Drop files here or click to attach</span>
+          <input type="file" id="nt-files" multiple style="display:none" onchange="_ntOnFileInput(event)">
+        </div>
+        <div class="bc-file-queue" id="nt-file-queue"></div>
+        <div class="bc-file-error hidden" id="nt-file-error"></div>
       </div>
     </div>
     <div style="padding: 0 20px 4px">

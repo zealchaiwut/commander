@@ -2230,6 +2230,9 @@ const _smgmtOutcomeCache = {};
 // ── Running sprint live state (issue #277) ────────────────────────────────
 // Set of sprint labels that are currently running, populated on each render
 let _smgmtRunningLabels = new Set();
+// Explicit per-sprint lifecycle state from plan.json (issue #380)
+// Map of sprint_label → plan state string ("planning"|"running"|"completed"|"cancelled")
+let _smgmtPlanStates = {};
 // Live data cache: sprint label → last live snapshot from /api/sprints/{label}/live
 const _smgmtLiveCache = {};
 // Poll timer for live data (2s indicator refresh)
@@ -2881,6 +2884,25 @@ async function loadSprintMgmt(silent) {
       });
     }
 
+    // Fetch explicit plan states for all sprint labels (issue #380)
+    const allLabels = (data.order || []);
+    if (allLabels.length > 0) {
+      const planResults = await Promise.allSettled(
+        allLabels.map(label =>
+          fetch(`/api/sprints/${encodeURIComponent(label)}/plan-state?project=${encodeURIComponent(repo)}`)
+            .then(r => r.ok ? r.json() : null)
+            .catch(() => null)
+        )
+      );
+      _smgmtPlanStates = {};
+      planResults.forEach((result, i) => {
+        const plan = result.status === 'fulfilled' ? result.value : null;
+        if (plan && plan.state) {
+          _smgmtPlanStates[allLabels[i]] = plan.state;
+        }
+      });
+    }
+
     _smgmtRender(data);
 
     // Start (or restart) live polling if there are running sprints
@@ -3254,15 +3276,14 @@ function _smgmtCardHtml(label, n, tickets, outcome) {
   }
 
   const hasCompleted = _smgmtHasCompletedTickets(tickets);
-  const canRun = !hasCompleted && tickets.length >= 1;
+  // Use explicit plan state if available; fall back to ticket-derived inference (issue #380)
+  const explicitState = _smgmtPlanStates[label] || null;
+  const isPostRun = explicitState === 'completed' || explicitState === 'cancelled'
+    || hasCompleted || (outcome && outcome.sprint_status);
+  const canRun = !isPostRun && tickets.length >= 1;
 
   let actionBtn;
-  if (hasCompleted) {
-    actionBtn = `<button class="smgmt-run-btn smgmt-run-btn--rerun"
-                  onclick="smgmtRerunSprint('${label}')">
-                  <i class="ti ti-refresh"></i> Re-run Sprint</button>`;
-  } else if (outcome && outcome.sprint_status) {
-    // Post-run frozen sprint: offer Re-run
+  if (isPostRun) {
     actionBtn = `<button class="smgmt-run-btn smgmt-run-btn--rerun"
                   onclick="smgmtRerunSprint('${label}')">
                   <i class="ti ti-refresh"></i> Re-run Sprint</button>`;

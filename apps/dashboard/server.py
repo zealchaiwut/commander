@@ -2736,39 +2736,18 @@ def _is_sprint_running(project_root: Path, sprint_label: str) -> bool:
 
 
 def _all_sprints_running() -> list[dict]:
-    """Scan all projects for running sprints. Returns list of {project, sprint_label, pid}."""
-    result = []
-    projects = projects_module.load_projects()
-    for proj in projects:
-        root = _project_root_path(proj["repo"])
-        sprints_dir = _commander_dir(root) / "sprints"
-        if not sprints_dir.exists():
-            continue
-        seen: set[str] = set()
-        # Check both fully-claimed files (*-pid) and pending-claim files (*-pid.pending)
-        for pid_file in list(sprints_dir.glob("*-pid")) + list(sprints_dir.glob("*-pid.pending")):
-            # Derive label: strip trailing "-pid.pending" or "-pid"
-            label = pid_file.name.removesuffix("-pid.pending").removesuffix("-pid")
-            if label in seen:
-                continue
-            seen.add(label)
-            if _is_sprint_running(root, label):
-                try:
-                    pid = int(pid_file.read_text(encoding="utf-8").strip())
-                except (ValueError, OSError):
-                    pid = None
-                result.append({"project": proj["repo"], "sprint_label": label, "pid": pid})
-    return result
+    """Scan all projects for running sprints using plan.json as source of truth (issue #380).
 
+    Primary: scan *-plan.json files with state=running.
+    Fallback: if no plan.json exists, fall back to PID file scan (legacy sprints).
 
-def _any_sprint_running() -> Optional[dict]:
-    """Scan all projects for a running sprint. Returns first found or None."""
-    running = _all_sprints_running()
-    return running[0] if running else None
+    PID files are verified to guard against SIGKILL orphans — if plan.json says
+    "running" but the process is dead, plan.json is reconciled to "cancelled"
+    in-place and the sprint is excluded from the result.
+    """
+    import logging as _logging
+    _log = _logging.getLogger(__name__)
 
-
-def _all_sprints_running() -> list[dict]:
-    """Scan all projects for running sprints. Returns list of {project, sprint_label}."""
     result: list[dict] = []
     projects = projects_module.load_projects()
     for proj in projects:
@@ -2777,7 +2756,36 @@ def _all_sprints_running() -> list[dict]:
         if not sprints_dir.exists():
             continue
         seen: set[str] = set()
-        # Check both fully-claimed files (*-pid) and pending-claim files (*-pid.pending)
+
+        # Primary: scan plan.json files
+        for plan_file in sprints_dir.glob("*-plan.json"):
+            label = plan_file.name.removesuffix("-plan.json")
+            if label in seen:
+                continue
+            seen.add(label)
+            try:
+                plan = json.loads(plan_file.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            if plan.get("state") != "running":
+                continue
+            # Verify the process is actually alive (guards against SIGKILL orphans)
+            if not _is_sprint_running(root, label):
+                # Process is dead — reconcile plan.json to cancelled
+                _plan_json_write(plan_file, {
+                    **plan,
+                    "state": "cancelled",
+                    "ended_at": datetime.now(timezone.utc).isoformat(),
+                    "end_reason": "pid-dead-detected",
+                })
+                _log.warning(
+                    "[running-all] reconciled %s → cancelled (plan=running but PID dead)",
+                    label,
+                )
+                continue
+            result.append({"project": proj["repo"], "sprint_label": label})
+
+        # Fallback: sprints with PID files but no plan.json (legacy / CLI-launched)
         for pid_file in list(sprints_dir.glob("*-pid")) + list(sprints_dir.glob("*-pid.pending")):
             label = pid_file.name.removesuffix("-pid.pending").removesuffix("-pid")
             if label in seen:
@@ -2785,7 +2793,14 @@ def _all_sprints_running() -> list[dict]:
             seen.add(label)
             if _is_sprint_running(root, label):
                 result.append({"project": proj["repo"], "sprint_label": label})
+
     return result
+
+
+def _any_sprint_running() -> Optional[dict]:
+    """Scan all projects for a running sprint. Returns first found or None."""
+    running = _all_sprints_running()
+    return running[0] if running else None
 
 
 class SprintMgmtRunBody(BaseModel):
@@ -4073,6 +4088,30 @@ def get_sprint_state(sprint_label: str, project: str):
         "wall_clock_secs": state_data.get("wall_clock_secs", 0.0),
         "issues":         issue_durations,
     }
+
+
+@app.get("/api/sprints/{sprint_label}/plan-state")
+def get_sprint_plan_state(sprint_label: str, project: str):
+    """Return the full plan.json payload for a sprint (issue #380).
+
+    Creates a plan.json lazily for legacy sprints that predate this feature.
+    Returns 404 if the sprint label is unknown.
+    """
+    if not _SPRINT_LABEL_RE.match(sprint_label):
+        raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")
+
+    project_root = _project_root_path(project)
+    sprints_dir  = _commander_dir(project_root) / "sprints"
+    plan_path    = _plan_json_path(project_root, sprint_label)
+
+    if not plan_path.exists():
+        plan = _plan_json_lazy_migrate(project_root, sprint_label, sprints_dir)
+    else:
+        plan = _plan_json_read(plan_path)
+        if not plan:
+            raise HTTPException(500, detail=f"Could not read plan.json for {sprint_label!r}")
+
+    return plan
 
 
 def _has_rework_tickets(sprint_label: str, project: str) -> bool:

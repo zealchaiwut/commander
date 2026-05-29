@@ -401,6 +401,32 @@ def _release_pid_lock(pid_path: Path) -> None:
         pass
 
 
+# ── plan.json lifecycle helpers (issue #380) ─────────────────────────────────
+
+def _plan_json_path_for(sprint_label: str, cfg: Optional["SprintConfig"] = None) -> Path:
+    sprints_dir = cfg.sprints_dir if cfg is not None else SPRINTS_DIR
+    return sprints_dir / f"{sprint_label}-plan.json"
+
+
+def _plan_json_update(sprint_label: str, updates: dict, cfg: Optional["SprintConfig"] = None) -> None:
+    """Merge `updates` into the existing plan.json; idempotent on missing file."""
+    plan_path = _plan_json_path_for(sprint_label, cfg)
+    existing: dict = {}
+    if plan_path.exists():
+        try:
+            existing = json.loads(plan_path.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    merged = {**existing, **updates}
+    try:
+        plan_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = plan_path.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(merged, indent=2), encoding="utf-8")
+        os.replace(str(tmp), str(plan_path))
+    except OSError as _e:
+        print(f"[plan-json] WARNING: could not write {plan_path}: {_e}", file=sys.stderr)
+
+
 # Hang detection constants (in seconds)
 HANG_WARN_SECS  = 30 * 60   # 30 minutes
 HANG_KILL_SECS  = 60 * 60   # 60 minutes
@@ -4649,6 +4675,15 @@ def main() -> None:
         global _sprint_user_cancelled
         _sprint_user_cancelled = True
         _cleanup_pid()
+        # Best-effort: write cancelled state before exiting (issue #380)
+        try:
+            _plan_json_update(args.label, {
+                "state": "cancelled",
+                "ended_at": datetime.now(timezone.utc).isoformat(),
+                "end_reason": "sigterm",
+            }, cfg=cfg)
+        except Exception:
+            pass
         raise SystemExit(130)
 
     signal.signal(signal.SIGTERM, _sigterm_handler)
@@ -4723,6 +4758,16 @@ def main() -> None:
             )
         else:
             summary_path = None
+
+        # Update plan.json to completed on natural exit (issue #380)
+        try:
+            _plan_json_update(args.label, {
+                "state": "completed",
+                "ended_at": datetime.now(timezone.utc).isoformat(),
+                "end_reason": "natural",
+            }, cfg=cfg)
+        except Exception:
+            pass
 
     except SystemExit:
         if _sprint_user_cancelled:

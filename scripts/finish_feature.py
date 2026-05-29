@@ -139,49 +139,44 @@ def main():
             pass
         sys.exit(1)
 
+    # Capture merge commit SHA now — passed to update_ticket.py so the UAT
+    # safeguard uses ancestry check instead of branch-ref presence (no race).
+    ok, merge_sha = _try("git", "rev-parse", "HEAD")
+    if not ok or not merge_sha:
+        print("Warning: could not capture merge SHA; UAT safeguard will fall back to branch-ref check.", file=sys.stderr)
+        merge_sha = None
+
     _run("git", "push", "origin", target)
     print(f"Pushed {target}.")
 
-    # Apply UAT label before deleting the branch so the safeguard can verify
-    # the merge-base check (it needs the branch ref to still exist on origin).
+    # Apply UAT label. Pass the merge SHA so the safeguard can verify ancestry
+    # authoritatively without racing against ref propagation. On transient
+    # GitHub API failures allow one short retry.
     update_ticket = Path(__file__).parent / "update_ticket.py"
-    _UAT_BACKOFFS = (2, 5, 10)
+    uat_cmd = [
+        sys.executable, str(update_ticket),
+        "--issue", str(args.issue),
+        "--status", "uat",
+        "--target-branch", target,
+    ]
+    if merge_sha:
+        uat_cmd += ["--merge-sha", merge_sha]
+
     label_result = None
-    for attempt in range(len(_UAT_BACKOFFS) + 1):
-        label_result = subprocess.run(
-            [sys.executable, str(update_ticket), "--issue", str(args.issue), "--status", "uat"],
-            capture_output=True, text=True,
-        )
+    for attempt in range(2):
+        label_result = subprocess.run(uat_cmd, capture_output=True, text=True)
         if label_result.returncode == 0:
             break
-        if attempt < len(_UAT_BACKOFFS):
-            wait = _UAT_BACKOFFS[attempt]
-            print(
-                f"Warning: UAT label attempt {attempt + 1} failed — retrying in {wait}s…",
-                file=sys.stderr,
-            )
-            time.sleep(wait)
+        if attempt == 0:
+            print("Warning: UAT label attempt 1 failed — retrying in 3s…", file=sys.stderr)
+            time.sleep(3)
 
     if label_result.returncode != 0:
         stderr_text = label_result.stderr.strip()
-        warning_comment = (
-            f"**Merge succeeded but UAT label could not be applied.**\n\n"
-            f"The merge of this feature branch into `{target}` completed successfully, "
-            f"but `update_ticket.py --status uat` failed after {len(_UAT_BACKOFFS) + 1} attempts.\n\n"
-            f"Last error:\n"
-            f"```\n"
-            f"{stderr_text}\n"
-            f"```\n\n"
-            f"Please apply the **UAT** label manually so this ticket reaches the UAT queue."
-        )
         print(
-            f"Error: failed to apply UAT label after {len(_UAT_BACKOFFS) + 1} attempts — {stderr_text}",
+            f"Error: failed to apply UAT label after 2 attempts — {stderr_text}",
             file=sys.stderr,
         )
-        try:
-            github_client.add_comment(args.issue, warning_comment, repo_name=args.repo)
-        except Exception as exc:
-            print(f"Warning: could not post warning comment — {exc}", file=sys.stderr)
         sys.exit(2)
     else:
         print(f"UAT label applied to issue #{args.issue}.")

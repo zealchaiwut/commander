@@ -27,6 +27,8 @@
       --purple:       #7c3aed;
       --purple-bg:    #ede9fe;
       --mono: 'SF Mono','Fira Code','Cascadia Code',monospace;
+      --indigo:       #6d28d9;
+      --indigo-bg:    #ede9fe;
       --steel:        #4f7ab8;
       --steel-bg:     #e0eaf8;
       --yellow:       #a16207;
@@ -53,6 +55,8 @@
       --blue-bg:      rgba(96,165,250,.13);
       --purple:       #a78bfa;
       --purple-bg:    rgba(167,139,250,.13);
+      --indigo:       #a78bfa;
+      --indigo-bg:    rgba(167,139,250,.13);
       --steel:        #7aa3d4;
       --steel-bg:     rgba(122,163,212,.13);
       --yellow:       #facc15;
@@ -491,6 +495,109 @@
     }
     .smgmt-toolbar-actions {
       display: flex; align-items: center; gap: 8px;
+    }
+
+    /* ── Sprint Summaries pane ── */
+    .smgmt-summary-pane {
+      background: var(--surface);
+      border: 1px solid var(--indigo);
+      border-radius: 10px;
+      overflow: hidden;
+      box-shadow: 0 0 0 3px rgba(109,40,217,.06);
+      margin-bottom: 16px;
+    }
+    [data-theme="dark"] .smgmt-summary-pane {
+      box-shadow: 0 0 0 3px rgba(167,139,250,.10);
+    }
+    .smgmt-summary-pane.collapsed .smgmt-summary-rows,
+    .smgmt-summary-pane.collapsed .smgmt-summary-empty { display: none; }
+
+    .smgmt-summary-header {
+      padding: 13px 18px;
+      display: flex; align-items: center; gap: 12px;
+      background: linear-gradient(180deg, var(--indigo-bg) 0%, transparent 100%);
+      border-bottom: 1px solid var(--border);
+    }
+    .smgmt-summary-header-left { display: flex; align-items: center; gap: 10px; flex: 1; }
+    .smgmt-summary-icon {
+      width: 26px; height: 26px;
+      border-radius: 6px;
+      background: var(--indigo);
+      color: #fff;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 14px; flex-shrink: 0;
+    }
+    .smgmt-summary-title { font-size: 14px; font-weight: 700; color: var(--text); }
+    .smgmt-summary-count {
+      font-size: 12px; color: var(--indigo);
+      font-family: var(--mono); font-weight: 600; margin-left: 4px;
+    }
+    .smgmt-summary-header-actions { display: flex; align-items: center; gap: 4px; }
+    .smgmt-archived-toggle {
+      font-size: 11px; color: var(--text-muted);
+      background: var(--surface-2); padding: 4px 9px;
+      border-radius: 999px; border: 1px solid var(--border);
+      cursor: pointer; font-family: var(--mono); transition: all .12s;
+    }
+    .smgmt-archived-toggle:hover { color: var(--text); }
+    .smgmt-archived-toggle.active {
+      color: var(--indigo); background: var(--indigo-bg); border-color: var(--indigo);
+    }
+    .smgmt-summary-collapse-btn {
+      background: none; border: none; color: var(--text-muted);
+      cursor: pointer; padding: 5px;
+      display: flex; font-size: 15px; border-radius: 4px;
+    }
+    .smgmt-summary-collapse-btn:hover { background: var(--surface-2); color: var(--text); }
+
+    .smgmt-summary-rows { padding: 4px 0; }
+    .smgmt-summary-row {
+      display: flex; align-items: center; gap: 12px;
+      padding: 10px 18px;
+      transition: background .12s;
+      cursor: pointer; position: relative;
+    }
+    .smgmt-summary-row:hover { background: var(--surface-hover); }
+    .smgmt-summary-row + .smgmt-summary-row { border-top: 1px solid var(--border); }
+    .smgmt-summary-row.is-archived { opacity: .55; }
+    .smgmt-summary-row.is-archived:hover { opacity: .85; }
+    .smgmt-summary-row-num {
+      font-family: var(--mono); color: var(--text-sub);
+      font-size: 12px; min-width: 44px;
+    }
+    .smgmt-summary-row-title {
+      flex: 1; font-size: 13.5px; color: var(--text);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      font-weight: 500;
+    }
+    .smgmt-summary-row.is-archived .smgmt-summary-row-title {
+      text-decoration: line-through;
+      text-decoration-color: var(--text-sub);
+      text-decoration-thickness: 1px;
+    }
+    .smgmt-outcome-chip {
+      font-family: var(--mono); font-size: 10px; font-weight: 700;
+      letter-spacing: .04em; text-transform: uppercase;
+      padding: 3px 9px; border-radius: 999px;
+      display: inline-flex; align-items: center; gap: 5px;
+      flex-shrink: 0; border: 1px solid;
+    }
+    .smgmt-outcome-chip.completed { background: var(--steel-bg); color: var(--steel); border-color: rgba(79,122,184,.30); }
+    .smgmt-outcome-chip.has_rework { background: var(--yellow-bg); color: var(--yellow); border-color: rgba(161,98,7,.30); }
+    .smgmt-outcome-chip.cancelled  { background: var(--amber-bg); color: var(--amber); border-color: rgba(217,119,6,.30); }
+    .smgmt-summary-row-time {
+      font-family: var(--mono); font-size: 11px;
+      color: var(--text-sub); min-width: 60px; text-align: right;
+    }
+    .smgmt-summary-row-action {
+      color: var(--text-sub); font-size: 13px;
+      opacity: 0; transition: opacity .15s, color .15s;
+      display: flex; align-items: center; gap: 3px;
+    }
+    .smgmt-summary-row:hover .smgmt-summary-row-action { opacity: 1; color: var(--blue); }
+    .smgmt-summary-empty {
+      padding: 24px 18px; text-align: center;
+      color: var(--text-sub); font-size: 12.5px; font-style: italic;
     }
 
     /* ── Sprint list area ── */
@@ -2062,6 +2169,28 @@
 
         <!-- Sprint list -->
         <div class="smgmt-content">
+
+          <!-- Sprint Summaries pane (always at top) -->
+          <div class="smgmt-summary-pane" id="smgmt-summary-pane" style="display:none">
+            <div class="smgmt-summary-header">
+              <div class="smgmt-summary-header-left">
+                <div class="smgmt-summary-icon"><i class="ti ti-file-description"></i></div>
+                <span class="smgmt-summary-title">Sprint Summaries</span>
+                <span class="smgmt-summary-count" id="smgmt-summary-count"></span>
+              </div>
+              <div class="smgmt-summary-header-actions">
+                <button class="smgmt-archived-toggle" id="smgmt-archived-toggle"
+                        onclick="_smgmtSummaryToggleArchived()"></button>
+                <button class="smgmt-summary-collapse-btn" id="smgmt-summary-collapse-btn"
+                        onclick="_smgmtSummaryToggleCollapse()"
+                        title="Collapse">
+                  <i class="ti ti-chevron-up" id="smgmt-summary-chevron"></i>
+                </button>
+              </div>
+            </div>
+            <div class="smgmt-summary-rows" id="smgmt-summary-rows"></div>
+          </div>
+
           <div id="smgmt-sprint-list" class="smgmt-sprint-list">
             <div class="loading-msg" id="smgmt-loading">Loading sprints…</div>
           </div>
@@ -2923,6 +3052,117 @@ function _smgmtInitScrollShadow() {
 
 // ── Sprint Mgmt: load sprint list ─────────────────────────────────────────
 // silent=true skips the "Loading sprints…" spinner (used by auto-refresh)
+// ── Sprint Summaries pane ──────────────────────────────────────────────────
+let _smgmtSummaryShowArchived = false;
+let _smgmtSummaryCollapsed    = false;
+let _smgmtSummaryOpenData     = [];
+let _smgmtSummaryClosedData   = [];
+let _smgmtSummaryArchivedCount = 0;
+
+function _smgmtSummaryToggleArchived() {
+  _smgmtSummaryShowArchived = !_smgmtSummaryShowArchived;
+  _smgmtSummaryRender(_smgmtSummaryOpenData, _smgmtSummaryClosedData);
+}
+
+function _smgmtSummaryToggleCollapse() {
+  _smgmtSummaryCollapsed = !_smgmtSummaryCollapsed;
+  const pane = document.getElementById('smgmt-summary-pane');
+  const chev = document.getElementById('smgmt-summary-chevron');
+  if (pane) pane.classList.toggle('collapsed', _smgmtSummaryCollapsed);
+  if (chev) chev.className = _smgmtSummaryCollapsed ? 'ti ti-chevron-down' : 'ti ti-chevron-up';
+}
+
+function _smgmtSummaryRelTime(isoStr) {
+  if (!isoStr) return '';
+  try {
+    const diff = Date.now() - new Date(isoStr).getTime();
+    const mins = Math.floor(diff / 60000);
+    if (mins < 2)  return 'just now';
+    if (mins < 60) return `${mins}m ago`;
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 24)  return `${hrs}h ago`;
+    const days = Math.floor(hrs / 24);
+    if (days < 7)  return `${days}d ago`;
+    const wks = Math.floor(days / 7);
+    if (wks < 5)   return `${wks}w ago`;
+    return `${Math.floor(days / 30)}mo ago`;
+  } catch (_) { return ''; }
+}
+
+function _smgmtSummaryOutcomeChip(outcome) {
+  if (outcome === 'completed')  return `<span class="smgmt-outcome-chip completed">✓ Completed</span>`;
+  if (outcome === 'has_rework') return `<span class="smgmt-outcome-chip has_rework">⚠ Has Rework</span>`;
+  if (outcome === 'cancelled')  return `<span class="smgmt-outcome-chip cancelled">⊘ Cancelled</span>`;
+  return `<span class="smgmt-outcome-chip completed">✓ Completed</span>`;
+}
+
+function _smgmtSummaryRowHtml(s, isArchived) {
+  const archivedClass = isArchived ? ' is-archived' : '';
+  const url = escHtml(s.url || '#');
+  return `<div class="smgmt-summary-row${archivedClass}"
+               onclick="window.open('${url}','_blank')"
+               data-url="${url}">
+    <span class="smgmt-summary-row-num">#${s.number}</span>
+    <span class="smgmt-summary-row-title">${escHtml(s.title)}</span>
+    ${_smgmtSummaryOutcomeChip(s.outcome)}
+    <span class="smgmt-summary-row-time">${escHtml(_smgmtSummaryRelTime(s.created_at))}</span>
+    <span class="smgmt-summary-row-action"><i class="ti ti-external-link"></i> Open</span>
+  </div>`;
+}
+
+function _smgmtSummaryRender(openData, closedData) {
+  const pane       = document.getElementById('smgmt-summary-pane');
+  const rowsEl     = document.getElementById('smgmt-summary-rows');
+  const countEl    = document.getElementById('smgmt-summary-count');
+  const toggleBtn  = document.getElementById('smgmt-archived-toggle');
+  if (!pane || !rowsEl) return;
+
+  const openCount   = openData.length;
+  const closedCount = closedData.length;
+
+  // Update archived toggle text + active state
+  if (toggleBtn) {
+    toggleBtn.textContent = `Show archived (${closedCount})`;
+    toggleBtn.classList.toggle('active', _smgmtSummaryShowArchived);
+    toggleBtn.style.display = closedCount > 0 ? '' : 'none';
+  }
+
+  // Update count badge
+  if (countEl) {
+    if (_smgmtSummaryShowArchived && closedCount > 0) {
+      countEl.textContent = `${openCount} unread · ${closedCount} archived`;
+    } else {
+      countEl.textContent = openCount === 0 ? '0 unread' : `${openCount} unread`;
+    }
+  }
+
+  // Render rows
+  if (openCount === 0 && !_smgmtSummaryShowArchived) {
+    rowsEl.innerHTML = `<div class="smgmt-summary-empty">No unread summaries — sprint summaries appear here automatically when a sprint finishes.</div>`;
+  } else {
+    let html = openData.map(s => _smgmtSummaryRowHtml(s, false)).join('');
+    if (_smgmtSummaryShowArchived) {
+      html += closedData.map(s => _smgmtSummaryRowHtml(s, true)).join('');
+    }
+    rowsEl.innerHTML = html;
+  }
+
+  pane.style.display = '';
+}
+
+async function _smgmtLoadSummaries(repo) {
+  if (!repo) return;
+  try {
+    const resp = await fetch('/api/sprints/summaries?project=' + encodeURIComponent(repo));
+    if (!resp.ok) return;
+    const data = await resp.json();
+    const summaries = data.summaries || [];
+    _smgmtSummaryOpenData   = summaries.filter(s => s.state !== 'closed');
+    _smgmtSummaryClosedData = summaries.filter(s => s.state === 'closed');
+    _smgmtSummaryRender(_smgmtSummaryOpenData, _smgmtSummaryClosedData);
+  } catch (_) {}
+}
+
 async function loadSprintMgmt(silent) {
   const listEl = document.getElementById('smgmt-sprint-list');
   if (!listEl) return;
@@ -2940,7 +3180,7 @@ async function loadSprintMgmt(silent) {
   }
 
   try {
-    // Fetch sprint management data + running sprint status in parallel
+    // Fetch sprint management data + running sprint status + summaries in parallel
     const [resp, runningResp] = await Promise.all([
       fetch('/api/sprint-management/issues?repo=' + encodeURIComponent(repo)),
       fetch('/api/sprints/running-all').catch(() => null),
@@ -2962,6 +3202,9 @@ async function loadSprintMgmt(silent) {
     }
 
     _smgmtRender(data);
+
+    // Load summaries pane in parallel (non-blocking)
+    _smgmtLoadSummaries(repo);
 
     // Start (or restart) live polling if there are running sprints
     _smgmtLivePollRestart();

@@ -187,6 +187,15 @@
     .sb-status-dot.uat {
       background: var(--amber);
     }
+    .sb-running-badge {
+      min-width: 18px; height: 18px; border-radius: 9px;
+      display: inline-flex; align-items: center; justify-content: center;
+      font-size: 10px; font-weight: 700; padding: 0 4px;
+      background: var(--green-bg, #f0fdf4); color: var(--green, #16a34a);
+      border: 1px solid rgba(22,163,74,.35);
+      flex-shrink: 0;
+      animation: sbGlow 2s ease-in-out infinite;
+    }
     @keyframes sbGlow {
       0%,100% { box-shadow: 0 0 0 2px var(--green-bg); }
       50%      { box-shadow: 0 0 0 4px var(--green-bg); }
@@ -2330,7 +2339,7 @@ window.addEventListener('popstate', function(e) {
 });
 
 // ── Sidebar ───────────────────────────────────────────────────────────────────
-function buildSidebar(projects) {
+function buildSidebar(projects, runningBySlug = {}) {
   const list = document.getElementById('sb-project-list');
   if (!list) return;
 
@@ -2346,23 +2355,25 @@ function buildSidebar(projects) {
     const isActive = proj.slug === _slug;
     const color = colorHex(proj.color || proj.icon_color || 'gray');
     const icon  = proj.icon || 'ti-folder';
+    const runCount = runningBySlug[proj.slug] || 0;
 
-    let dotHtml = '';
-    if (proj.status === 'running') {
-      dotHtml = '<span class="sb-status-dot running" aria-label="Running"></span>';
+    let statusHtml = '';
+    if (runCount > 0) {
+      statusHtml = `<span class="sb-running-badge" aria-label="${runCount} running sprint${runCount !== 1 ? 's' : ''}">${runCount}</span>`;
     } else if (proj.status === 'uat-pending' || (proj.uat_count && proj.uat_count > 0)) {
-      dotHtml = '<span class="sb-status-dot uat" aria-label="UAT pending"></span>';
+      statusHtml = '<span class="sb-status-dot uat" aria-label="UAT pending"></span>';
     }
 
     const href = '/project/' + encodeURIComponent(proj.slug) + '/sprint-mgmt';
 
     return `<a href="${escHtml(href)}" class="sb-proj-item${isActive ? ' active' : ''}"
+              data-slug="${escHtml(proj.slug)}"
               ${isActive ? 'aria-current="page"' : ''}>
       <span class="sb-icon-badge" style="background:${escHtml(color)}">
         <i class="ti ${escHtml(icon)}"></i>
       </span>
       <span class="sb-proj-name">${escHtml(proj.name)}</span>
-      ${dotHtml}
+      ${statusHtml}
     </a>`;
   }).join('');
 }
@@ -2430,21 +2441,74 @@ let _sidebarRefreshTimer = null;
 
 async function loadHomeData(silent) {
   try {
-    const resp = await fetch('/api/home');
+    const [resp, runningResp] = await Promise.all([
+      fetch('/api/home'),
+      fetch('/api/sprints/running-all').catch(() => null),
+    ]);
     if (!resp.ok) throw new Error('HTTP ' + resp.status);
     const data = await resp.json();
     _homeData = data;
+
+    // Build running-sprint count per project slug
+    const runningBySlug = {};
+    if (runningResp && runningResp.ok) {
+      const runData = await runningResp.json();
+      for (const entry of (runData.running || [])) {
+        const slug = (entry.project || '').split('/').pop();
+        runningBySlug[slug] = (runningBySlug[slug] || 0) + 1;
+      }
+    }
 
     const projects = data.projects || [];
     // Find current project
     _projectData = projects.find(p => p.slug === _slug) || null;
 
-    buildSidebar(projects);
+    buildSidebar(projects, runningBySlug);
     updateProjectHeader(_projectData);
   } catch (err) {
     // Degrade gracefully: sidebar shows without dots, header may be empty
     if (!silent) console.warn('Home data unavailable:', err);
   }
+}
+
+/** Patch sidebar running-count badges in-place from /api/sprints/running-all data.
+ *  Called after loadSprintMgmt so counts update at the sprint-mgmt refresh rate. */
+function _updateSidebarRunningBadges(runningData) {
+  const runningBySlug = {};
+  for (const entry of ((runningData && runningData.running) || [])) {
+    const slug = (entry.project || '').split('/').pop();
+    runningBySlug[slug] = (runningBySlug[slug] || 0) + 1;
+  }
+  document.querySelectorAll('.sb-proj-item[data-slug]').forEach(item => {
+    const slug  = item.getAttribute('data-slug');
+    const badge = item.querySelector('.sb-running-badge');
+    const count = runningBySlug[slug] || 0;
+    if (count > 0) {
+      if (badge) {
+        if (parseInt(badge.textContent, 10) !== count) {
+          badge.textContent = count;
+          badge.setAttribute('aria-label', `${count} running sprint${count !== 1 ? 's' : ''}`);
+        }
+      } else {
+        item.querySelector('.sb-status-dot')?.remove();
+        const b = document.createElement('span');
+        b.className = 'sb-running-badge';
+        b.textContent = count;
+        b.setAttribute('aria-label', `${count} running sprint${count !== 1 ? 's' : ''}`);
+        item.appendChild(b);
+      }
+    } else if (badge) {
+      badge.remove();
+      // Restore UAT dot if project still has UAT-pending tickets (from cached _homeData)
+      const proj = (_homeData && _homeData.projects || []).find(p => p.slug === slug);
+      if (proj && (proj.uat_count || 0) > 0) {
+        const d = document.createElement('span');
+        d.className = 'sb-status-dot uat';
+        d.setAttribute('aria-label', 'UAT pending');
+        item.appendChild(d);
+      }
+    }
+  });
 }
 
 function startSidebarRefresh() {
@@ -2879,6 +2943,8 @@ async function loadSprintMgmt(silent) {
           _smgmtRunningLabels.add(r.sprint_label);
         }
       });
+      // Keep sidebar badges current without waiting for the 30s loadHomeData cycle
+      _updateSidebarRunningBadges(runningData);
     }
 
     _smgmtRender(data);

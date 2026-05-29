@@ -2726,6 +2726,7 @@ let _smgmtAutoRefreshEnabled   = true; // whether auto-refresh is active
 let _smgmtSelectedIssues       = new Set(); // issue numbers currently selected (multi-select, issue #206)
 let _smgmtDragTickets          = [];   // [{number,fromSprint}] for multi-ticket drag (issue #363)
 let _smgmtLastClickedIssue     = null; // last clicked issue for Shift+Click range select (issue #363)
+let _smgmtOutcomeStates        = {};   // sprint_label -> "running"|"completed"|"has_rework"|"cancelled" (issue #366)
 
 function _rerunPolicyAction(labelNames) {
   const s = new Set(labelNames);
@@ -2923,6 +2924,7 @@ async function smgmtSelectProject(repo) {
   _smgmtGoals = {};
   _smgmtEstimates = {};
   _smgmtSprintStates = {};
+  _smgmtOutcomeStates = {};
   // Load persisted backlog state from localStorage (issue #225)
   const slug = (repo || '').split('/')[1] || repo || '';
   const savedFilter = localStorage.getItem(`commander.${slug}.backlogFilter`);
@@ -2948,6 +2950,7 @@ async function smgmtSelectProject(repo) {
   await smgmtLoadEstimates();
   await smgmtLoadSprintStates();
   smgmtRender();
+  smgmtLoadOutcomeStates();
 }
 
 async function smgmtLoadEstimates() {
@@ -3010,6 +3013,76 @@ async function smgmtLoadSprintStates() {
       // network error — treat as absent
     }
   }));
+}
+
+// ── Sprint outcome 4-state coloring (issue #366) ──────────────────────────────
+
+/**
+ * Fetch outcome state for all non-running sprints and cache in _smgmtOutcomeStates.
+ * Running sprints are set to "running" without a network call.
+ * Already-cached states are not re-fetched (cache invalidated on run→stop transition).
+ */
+async function smgmtLoadOutcomeStates() {
+  if (!_smgmtData || !_smgmtCurrentRepo) return;
+  const { order } = _smgmtData;
+  if (!order || order.length === 0) return;
+
+  const runningLabels = new Set(
+    Object.values(_smgmtAllRunning)
+      .filter(e => e.project === _smgmtCurrentRepo)
+      .map(e => e.sprint_label)
+  );
+
+  for (const label of order) {
+    if (runningLabels.has(label)) {
+      _smgmtOutcomeStates[label] = 'running';
+    }
+  }
+
+  const toFetch = order.filter(label =>
+    !runningLabels.has(label) && !_smgmtOutcomeStates[label]
+  );
+
+  await Promise.all(toFetch.map(async (label) => {
+    try {
+      const res = await fetch(
+        `/api/sprints/${encodeURIComponent(label)}/outcome?project=${encodeURIComponent(_smgmtCurrentRepo)}`
+      );
+      if (res.ok) {
+        const data = await res.json();
+        if (data.state) _smgmtOutcomeStates[label] = data.state;
+      }
+    } catch (_e) { /* ignore network errors */ }
+  }));
+
+  smgmtApplyOutcomeStates();
+}
+
+/**
+ * Apply CSS classes to sprint pane blocks based on cached _smgmtOutcomeStates.
+ * Removes old state classes first, then applies the current one.
+ * Running state (handled by smgmtApplyRunState) is left untouched here.
+ */
+function smgmtApplyOutcomeStates() {
+  const STATE_CLASSES = ['smgmt-completed', 'smgmt-has-rework', 'smgmt-cancelled'];
+  const HDR_CLASSES   = ['smgmt-completed-header', 'smgmt-has-rework-header', 'smgmt-cancelled-header'];
+
+  document.querySelectorAll('.smgmt-sprint-block').forEach(block => {
+    const label = block.id.replace('smgmt-block-', '');
+    if (!label || label.startsWith('placeholder')) return;
+
+    block.classList.remove(...STATE_CLASSES);
+    const hdr = block.querySelector('.smgmt-sprint-header');
+    if (hdr) hdr.classList.remove(...HDR_CLASSES);
+
+    const state = _smgmtOutcomeStates[label];
+    if (!state || state === 'running') return;
+
+    const blockClass = state === 'has_rework' ? 'smgmt-has-rework' : `smgmt-${state}`;
+    const hdrClass   = state === 'has_rework' ? 'smgmt-has-rework-header' : `smgmt-${state}-header`;
+    block.classList.add(blockClass);
+    if (hdr) hdr.classList.add(hdrClass);
+  });
 }
 
 /**
@@ -4926,6 +4999,13 @@ async function smgmtPollRunStatus() {
         const key = `${entry.project}:${entry.sprint_label}`;
         newMap[key] = entry;
       }
+      // Detect run→stop transitions: invalidate outcome cache for sprints that stopped
+      for (const key of Object.keys(_smgmtAllRunning)) {
+        if (!newMap[key]) {
+          const label = key.split(':').slice(1).join(':');
+          delete _smgmtOutcomeStates[label];
+        }
+      }
       _smgmtAllRunning = newMap;
     }
 
@@ -4957,6 +5037,7 @@ async function smgmtPollRunStatus() {
     _updateRunningBanner();
     _updateOverviewRunningBadges();
     smgmtSyncLivePanels();
+    smgmtLoadOutcomeStates();
   } catch { /* ignore poll errors */ }
 }
 

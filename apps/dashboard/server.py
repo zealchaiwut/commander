@@ -3945,11 +3945,31 @@ def get_sprint_state(sprint_label: str, project: str):
     }
 
 
+def _has_rework_tickets(sprint_label: str, project: str) -> bool:
+    """Return True if any open issue in the sprint carries a needs-rework label."""
+    try:
+        r = github_client.get_repo_for_operation(project)
+        result = subprocess.run(
+            ["gh", "issue", "list", "--repo", r,
+             "--label", sprint_label,
+             "--label", "needs-rework",
+             "--json", "number",
+             "--limit", "1"],
+            capture_output=True, text=True, timeout=10,
+        )
+        if result.returncode == 0:
+            return len(json.loads(result.stdout or "[]")) > 0
+    except Exception:
+        pass
+    return False
+
+
 @app.get("/api/sprints/{sprint_label}/outcome")
 def get_sprint_outcome(sprint_label: str, project: str):
     """Return frozen outcome data for a completed or stopped sprint.
 
     Reads sprint-N-state.json plus the latest sprint-run-<label>-*.log to produce:
+      - state: "running" | "completed" | "has_rework" | "cancelled"
       - sprint_status: "completed" | "stopped" | None (still running or not found)
       - counts: { done, failed, skipped }
       - wall_clock_secs: total duration
@@ -3963,21 +3983,28 @@ def get_sprint_outcome(sprint_label: str, project: str):
     project_root = _project_root_path(project)
     commander = _commander_dir(project_root)
 
+    # Running sprints return immediately — no state file required
+    if _is_sprint_running(project_root, sprint_label):
+        return {"sprint_label": sprint_label, "state": "running"}
+
     m = re.search(r"(\d+)", sprint_label)
     n = m.group(1) if m else sprint_label
 
+    # Check sprint-N.json for cancelled status (may exist even without a state file)
+    json_path = _sprint_json_path(project_root, sprint_label)
+    sprint_json = _sprint_json_read(json_path)
+    is_cancelled: bool = sprint_json.get("status") == "cancelled"
+
     state_path = commander / "sprints" / f"sprint-{n}-state.json"
     if not state_path.exists():
+        if is_cancelled:
+            return {"sprint_label": sprint_label, "state": "cancelled"}
         raise HTTPException(404, detail=f"Outcome not found for {sprint_label!r}")
 
     try:
         state_data = json.loads(state_path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError) as e:
         raise HTTPException(500, detail=f"Could not read state file: {e}")
-
-    # If sprint is still actively running, return 404 so UI doesn't freeze it
-    if _is_sprint_running(project_root, sprint_label):
-        raise HTTPException(404, detail=f"Sprint {sprint_label!r} is still running")
 
     def _parse_iso(s: Optional[str]) -> Optional[float]:
         if not s:
@@ -4006,6 +4033,8 @@ def get_sprint_outcome(sprint_label: str, project: str):
                 sprint_status = "completed"
             elif raw in ("stopped", "failed", "cancelled"):
                 sprint_status = "stopped"
+                if raw == "cancelled":
+                    is_cancelled = True
         except Exception:
             pass
         break
@@ -4023,6 +4052,14 @@ def get_sprint_outcome(sprint_label: str, project: str):
 
     if sprint_status is None:
         raise HTTPException(404, detail=f"Cannot determine outcome for {sprint_label!r}")
+
+    # Derive 4-state outcome for pane coloring
+    if is_cancelled:
+        pane_state = "cancelled"
+    elif _has_rework_tickets(sprint_label, project):
+        pane_state = "has_rework"
+    else:
+        pane_state = "completed"
 
     # Build issue outcome list
     result_issues = []
@@ -4082,6 +4119,7 @@ def get_sprint_outcome(sprint_label: str, project: str):
 
     return {
         "sprint_label":   sprint_label,
+        "state":          pane_state,
         "sprint_status":  sprint_status,
         "counts": {
             "done":    done_count,

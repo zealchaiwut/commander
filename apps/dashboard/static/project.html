@@ -811,48 +811,47 @@
     .btn-flash { animation: btnFlash .45s ease-in-out; }
 
     /* ── Auto-refresh pill ── */
+    .smgmt-ar-pill-wrap { position: relative; display: inline-block; }
     .smgmt-ar-pill {
-      position: relative;
-      display: flex; align-items: center; gap: 0;
+      display: inline-flex; align-items: center; gap: 4px;
+      padding: 5px 10px; border-radius: 20px; border: 1px solid transparent;
+      font-size: 12px; font-weight: 600; cursor: pointer;
+      transition: background .15s, border-color .15s, color .15s;
+      white-space: nowrap; background: none;
     }
-    .smgmt-ar-trigger {
-      display: flex; align-items: center; gap: 5px;
-      padding: 6px 10px;
-      border: 1px solid var(--border); border-right: none;
-      border-radius: 6px 0 0 6px;
-      background: none; color: var(--text-muted); font-size: 12px; font-weight: 500;
-      cursor: pointer; transition: background .15s, color .15s; white-space: nowrap;
+    .smgmt-ar-pill.is-on {
+      background: var(--green-bg, #f0fdf4); color: var(--green, #16a34a);
+      border-color: rgba(22,163,74,.35);
     }
-    .smgmt-ar-trigger:hover { background: var(--surface-2); color: var(--text); }
-    .smgmt-ar-trigger .ti { font-size: 14px; }
-    .smgmt-ar-caret-btn {
-      display: flex; align-items: center; justify-content: center;
-      padding: 6px 7px;
-      border: 1px solid var(--border);
-      border-radius: 0 6px 6px 0;
-      background: none; color: var(--text-muted); font-size: 11px;
-      cursor: pointer; transition: background .15s, color .15s;
+    .smgmt-ar-pill.is-on:hover {
+      background: var(--green-bg, #dcfce7); border-color: var(--green, #16a34a);
     }
-    .smgmt-ar-caret-btn:hover { background: var(--surface-2); color: var(--text); }
-    .smgmt-ar-dropdown {
-      position: absolute; top: calc(100% + 4px); right: 0;
-      min-width: 130px;
-      background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.10);
-      z-index: 50; overflow: hidden;
-      display: none;
+    .smgmt-ar-pill.is-off {
+      background: var(--surface-2); color: var(--text-muted);
+      border-color: var(--border);
     }
-    .smgmt-ar-dropdown.open { display: block; }
-    .smgmt-ar-option {
-      display: block; width: 100%;
-      padding: 8px 14px; text-align: left;
-      background: none; border: none;
-      font-size: 12px; color: var(--text-muted); cursor: pointer;
-      transition: background .12s, color .12s;
+    .smgmt-ar-pill.is-off:hover { background: var(--surface); color: var(--text); }
+    .smgmt-ar-chevron { font-size: 10px; opacity: .7; }
+    .smgmt-ar-menu {
+      position: absolute; right: 0; top: calc(100% + 4px); z-index: 200;
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 8px; box-shadow: 0 4px 16px rgba(0,0,0,.12);
+      min-width: 110px; overflow: hidden;
+      display: flex; flex-direction: column;
     }
-    .smgmt-ar-option:hover { background: var(--surface-2); color: var(--text); }
-    .smgmt-ar-option.selected { font-weight: 700; color: var(--text); }
-    .smgmt-ar-pill.is-off .smgmt-ar-trigger { color: var(--text-sub); }
+    .smgmt-ar-menu.hidden { display: none; }
+    .smgmt-ar-menu-item {
+      display: flex; align-items: center; gap: 6px;
+      padding: 8px 14px; font-size: 13px; color: var(--text);
+      background: none; border: none; cursor: pointer; text-align: left;
+      transition: background .1s;
+    }
+    .smgmt-ar-menu-item:hover { background: var(--surface-2); }
+    .smgmt-ar-menu-item.is-active { font-weight: 600; color: var(--green, #16a34a); }
+    .smgmt-ar-menu-item.is-active::before { content: '✓'; margin-right: 2px; }
+    .smgmt-ar-menu-divider { height: 1px; background: var(--border); margin: 2px 0; }
+    .smgmt-ar-turn-off { color: var(--text-muted); }
+    .smgmt-ar-turn-off:hover { color: var(--red, #dc2626); background: var(--red-bg, #fff0f0); }
 
     /* ── Inline selection action bar (above sprint list) ── */
     .smgmt-selection-bar {
@@ -2025,24 +2024,21 @@
               Deselect (<span id="smgmt-deselect-count">0</span>)
             </button>
             <!-- Auto-refresh pill (issue #275) -->
-            <div class="smgmt-ar-pill" id="smgmt-ar-pill">
-              <button class="smgmt-ar-trigger" id="smgmt-ar-trigger"
-                      onclick="_smgmtArManualRefresh()"
-                      title="Click to refresh now">
-                <i class="ti ti-refresh" id="smgmt-ar-icon"></i>
-                <span id="smgmt-ar-label">Auto Refresh</span>
+            <div class="smgmt-ar-pill-wrap" id="smgmt-ar-pill-wrap">
+              <button class="smgmt-ar-pill is-on" id="smgmt-ar-pill"
+                      onclick="_smgmtArPillClick(event)" aria-haspopup="true" aria-expanded="false"
+                      aria-label="Auto-refresh interval">
+                <i class="ti ti-refresh"></i>
+                <span id="smgmt-ar-pill-label">15s</span>
+                <i class="ti ti-chevron-down smgmt-ar-chevron"></i>
               </button>
-              <button class="smgmt-ar-caret-btn" id="smgmt-ar-caret"
-                      onclick="_smgmtArToggleDropdown(event)"
-                      title="Change refresh interval"
-                      aria-label="Auto refresh interval">
-                <i class="ti ti-chevron-down"></i>
-              </button>
-              <div class="smgmt-ar-dropdown" id="smgmt-ar-dropdown" role="listbox">
-                <button class="smgmt-ar-option" data-interval="0" onclick="_smgmtArSelectInterval(0)">Off</button>
-                <button class="smgmt-ar-option" data-interval="1" onclick="_smgmtArSelectInterval(1)">1s</button>
-                <button class="smgmt-ar-option" data-interval="5" onclick="_smgmtArSelectInterval(5)">5s</button>
-                <button class="smgmt-ar-option" data-interval="10" onclick="_smgmtArSelectInterval(10)">10s</button>
+              <div class="smgmt-ar-menu hidden" id="smgmt-ar-menu" role="menu">
+                <button class="smgmt-ar-menu-item" data-interval="5"  onclick="_smgmtArSelect(5)">5s</button>
+                <button class="smgmt-ar-menu-item" data-interval="15" onclick="_smgmtArSelect(15)">15s</button>
+                <button class="smgmt-ar-menu-item" data-interval="30" onclick="_smgmtArSelect(30)">30s</button>
+                <button class="smgmt-ar-menu-item" data-interval="60" onclick="_smgmtArSelect(60)">1m</button>
+                <div class="smgmt-ar-menu-divider"></div>
+                <button class="smgmt-ar-menu-item smgmt-ar-turn-off" onclick="_smgmtArTurnOff()">Turn off</button>
               </div>
             </div>
             <button class="btn-ghost" id="smgmt-new-ticket-btn"
@@ -5212,67 +5208,38 @@ function _smgmtBoardUnlock() {
 }
 
 // ── Auto-refresh pill (issue #275) ────────────────────────────────────────
-const _AR_SESSION_KEY = 'smgmt-ar-interval';
-const _AR_INTERVALS   = [0, 1, 5, 10]; // 0 = Off
+const _AR_LS_KEY    = 'smgmt-ar-interval';
+const _AR_INTERVALS = [5, 15, 30, 60]; // valid interval values in seconds
 
-let _arInterval   = 5;   // active interval in seconds (0 = off)
-let _arCountdown  = 0;   // current countdown value
-let _arTickerId   = null; // setInterval handle
+let _arInterval  = 15;  // active interval in seconds (0 = off)
+let _arTickerId  = null; // setInterval handle
 
-/** Initialise the pill from sessionStorage and start ticking if needed. */
+/** Initialise the pill from localStorage and start the ticker. */
 function _smgmtArInit() {
-  const saved = parseInt(sessionStorage.getItem(_AR_SESSION_KEY), 10);
-  const interval = _AR_INTERVALS.includes(saved) ? saved : 5;
-  _smgmtArSelectInterval(interval, /*skipSave=*/false);
+  const saved = parseInt(localStorage.getItem(_AR_LS_KEY), 10);
+  _arInterval = _AR_INTERVALS.includes(saved) ? saved : (saved === 0 ? 0 : 15);
+  _smgmtArStartTicker();
+  _smgmtArUpdatePill();
 }
 
-/** Refresh board data preserving scroll position; flash the icon. */
+/** Refresh board data preserving scroll position. */
 async function _smgmtArDoRefresh() {
-  const icon = document.getElementById('smgmt-ar-icon');
-  if (icon) {
-    icon.classList.remove('btn-flash');
-    void icon.offsetWidth;
-    icon.classList.add('btn-flash');
-    icon.addEventListener('animationend', () => icon.classList.remove('btn-flash'), { once: true });
-  }
   const scrollY = window.scrollY;
   await loadSprintMgmt(/*silent=*/true);
   window.scrollTo({ top: scrollY, behavior: 'instant' });
 }
 
-/** Manual refresh triggered by clicking the pill label/icon. */
-async function _smgmtArManualRefresh() {
-  // Suppressed while a move is in flight (issue #276)
-  if (_smgmtMoveLock) return;
-  if (_arTickerId !== null) {
-    // Reset countdown so next auto-tick is a full interval away
-    _arCountdown = _arInterval;
-    _smgmtArUpdateLabel();
-  }
-  await _smgmtArDoRefresh();
-}
-
-/** Called every second by setInterval. */
+/** Called by setInterval each tick. */
 function _smgmtArTick() {
-  // Suppressed while a move is in flight (issue #276)
   if (_smgmtMoveLock) return;
-  if (_arCountdown <= 1) {
-    _arCountdown = _arInterval;
-    _smgmtArUpdateLabel();
-    _smgmtArDoRefresh();
-  } else {
-    _arCountdown--;
-    _smgmtArUpdateLabel();
-  }
+  _smgmtArDoRefresh();
 }
 
 /** Start the ticker for the current _arInterval. */
 function _smgmtArStartTicker() {
   _smgmtArStopTicker();
   if (_arInterval <= 0) return;
-  _arCountdown = _arInterval;
-  _smgmtArUpdateLabel();
-  _arTickerId = setInterval(_smgmtArTick, 1000);
+  _arTickerId = setInterval(_smgmtArTick, _arInterval * 1000);
 }
 
 /** Stop the ticker. */
@@ -5283,57 +5250,73 @@ function _smgmtArStopTicker() {
   }
 }
 
-/** Update the pill label text. */
-function _smgmtArUpdateLabel() {
-  const label = document.getElementById('smgmt-ar-label');
+/** Update the pill button appearance and menu checkmarks. */
+function _smgmtArUpdatePill() {
   const pill  = document.getElementById('smgmt-ar-pill');
-  if (!label) return;
-  if (_arInterval <= 0) {
-    label.textContent = 'Auto Refresh';
-    if (pill) pill.classList.add('is-off');
+  const label = document.getElementById('smgmt-ar-pill-label');
+  if (!pill || !label) return;
+  if (_arInterval > 0) {
+    pill.classList.replace('is-off', 'is-on');
+    pill.classList.add('is-on');
+    label.textContent = _arInterval >= 60 ? `${_arInterval / 60}m` : `${_arInterval}s`;
   } else {
-    label.textContent = `Auto Refresh (${_arCountdown}s)`;
-    if (pill) pill.classList.remove('is-off');
+    pill.classList.replace('is-on', 'is-off');
+    pill.classList.add('is-off');
+    label.textContent = 'off';
   }
-}
-
-/** Select a new interval, persist to sessionStorage, restart ticker. */
-function _smgmtArSelectInterval(interval, skipSave) {
-  _arInterval = interval;
-  if (!skipSave) sessionStorage.setItem(_AR_SESSION_KEY, String(interval));
-
-  // Update selected state on dropdown options
-  document.querySelectorAll('.smgmt-ar-option').forEach(btn => {
-    const v = parseInt(btn.dataset.interval, 10);
-    btn.classList.toggle('selected', v === interval);
+  document.querySelectorAll('.smgmt-ar-menu-item[data-interval]').forEach(item => {
+    const iv = parseInt(item.dataset.interval, 10);
+    item.classList.toggle('is-active', _arInterval > 0 && iv === _arInterval);
   });
-
-  _smgmtArStopTicker();
-  if (interval > 0) {
-    _smgmtArStartTicker();
-  } else {
-    _smgmtArUpdateLabel();
-  }
-
-  // Close dropdown
-  const dd = document.getElementById('smgmt-ar-dropdown');
-  if (dd) dd.classList.remove('open');
 }
 
-/** Toggle dropdown open/closed. */
-function _smgmtArToggleDropdown(e) {
-  e.stopPropagation();
-  const dd = document.getElementById('smgmt-ar-dropdown');
-  if (dd) dd.classList.toggle('open');
-}
-
-// Close dropdown when clicking outside
-document.addEventListener('click', function(e) {
+/** Toggle the interval menu open/closed. */
+function _smgmtArPillClick(event) {
+  event.stopPropagation();
+  const menu = document.getElementById('smgmt-ar-menu');
   const pill = document.getElementById('smgmt-ar-pill');
-  if (pill && !pill.contains(e.target)) {
-    const dd = document.getElementById('smgmt-ar-dropdown');
-    if (dd) dd.classList.remove('open');
+  if (!menu) return;
+  const isOpen = !menu.classList.contains('hidden');
+  if (isOpen) {
+    menu.classList.add('hidden');
+    pill.setAttribute('aria-expanded', 'false');
+  } else {
+    _smgmtArUpdatePill(); // refresh checkmarks before showing
+    menu.classList.remove('hidden');
+    pill.setAttribute('aria-expanded', 'true');
   }
+}
+
+/** Select a new interval, persist to localStorage, restart ticker. */
+function _smgmtArSelect(seconds) {
+  _arInterval = seconds;
+  localStorage.setItem(_AR_LS_KEY, String(seconds));
+  _smgmtArCloseMenu();
+  _smgmtArStartTicker();
+  _smgmtArUpdatePill();
+}
+
+/** Turn off auto-refresh. */
+function _smgmtArTurnOff() {
+  _arInterval = 0;
+  localStorage.setItem(_AR_LS_KEY, '0');
+  _smgmtArStopTicker();
+  _smgmtArCloseMenu();
+  _smgmtArUpdatePill();
+}
+
+/** Close the interval menu. */
+function _smgmtArCloseMenu() {
+  const menu = document.getElementById('smgmt-ar-menu');
+  const pill = document.getElementById('smgmt-ar-pill');
+  if (menu) menu.classList.add('hidden');
+  if (pill) pill.setAttribute('aria-expanded', 'false');
+}
+
+// Close menu when clicking outside the pill wrapper
+document.addEventListener('click', function(e) {
+  const wrap = document.getElementById('smgmt-ar-pill-wrap');
+  if (wrap && !wrap.contains(e.target)) _smgmtArCloseMenu();
 });
 
 // ── New Sprint modal ──────────────────────────────────────────────────────

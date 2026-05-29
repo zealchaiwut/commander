@@ -227,7 +227,7 @@ def _sweep_orphan_pid_files() -> None:
                     except OSError:
                         pass
                     cleaned += 1
-                    print(f"[startup-sweep] cleaned unreadable PID file {pid_file}")
+                    print(f"Sweeping orphan PID file: {pid_file} (pid unknown, unreadable)")
                     continue
 
                 # Check if the process exists.
@@ -239,10 +239,7 @@ def _sweep_orphan_pid_files() -> None:
                     except OSError:
                         pass
                     cleaned += 1
-                    print(
-                        f"[startup-sweep] cleaned orphan PID file {pid_file}"
-                        f" (PID {pid} not running)"
-                    )
+                    print(f"Sweeping orphan PID file: {pid_file} (pid {pid} not alive)")
                     continue
                 except PermissionError:
                     # Process exists but we can't signal it (different user).
@@ -279,10 +276,7 @@ def _sweep_orphan_pid_files() -> None:
                     except OSError:
                         pass
                     cleaned += 1
-                    print(
-                        f"[startup-sweep] cleaned orphan PID file {pid_file}"
-                        f" (PID {pid} reused by unrelated process)"
-                    )
+                    print(f"Sweeping orphan PID file: {pid_file} (pid {pid} not alive)")
         except Exception as exc:
             print(f"[startup-sweep] error scanning project {proj.get('repo')}: {exc}")
 
@@ -417,6 +411,16 @@ def _validate_github_repos() -> None:
         )
 
 
+async def _periodic_orphan_sweep_loop() -> None:
+    """Sweep orphan PID files every 60 seconds while the dashboard is running."""
+    while True:
+        await asyncio.sleep(60)
+        try:
+            _sweep_orphan_pid_files()
+        except Exception as exc:
+            print(f"[periodic-sweep] unexpected error: {exc}")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global _start_time
@@ -442,10 +446,12 @@ async def lifespan(app: FastAPI):
             pass  # backup failures never affect server startup
     task1 = asyncio.create_task(_cache_refresh_loop())
     task2 = asyncio.create_task(_timeout_loop())
+    task3 = asyncio.create_task(_periodic_orphan_sweep_loop())
     yield
     task1.cancel()
     task2.cancel()
-    for t in (task1, task2):
+    task3.cancel()
+    for t in (task1, task2, task3):
         try:
             await t
         except asyncio.CancelledError:
@@ -1873,7 +1879,7 @@ def _home_activity_feed(
                     "timestamp": ts,
                     "link": issue.get("url", ""),
                 })
-            elif "need-rework" in labels:
+            elif "needs-rework" in labels or "need-rework" in labels:  # READ-only: backward compat
                 events.append({
                     "type": "ticket_needs_rework",
                     "project": slug,
@@ -2838,7 +2844,8 @@ def save_sprint_order(project: str, body: SprintOrderBody):
     return {"ok": True}
 
 
-_MIGRATION_STATUS_LABELS = {"UAT", "UAT-approved", "SIT", "in-progress", "need-rework"}
+# READ-only: recognises both spellings so migration removes whichever is present
+_MIGRATION_STATUS_LABELS = {"UAT", "UAT-approved", "SIT", "in-progress", "needs-rework", "need-rework"}
 
 
 # ── Estimate-summary helpers (issue #211) ────────────────────────────────────
@@ -2929,20 +2936,14 @@ def run_sprint_managed(body: SprintMgmtRunBody):
         raise HTTPException(502, detail=f"sprint_manager.py not found at {SPRINT_MANAGER_PATH}")
 
     project_root = _project_root_path(body.project)
-    if _is_sprint_running(project_root, body.sprint_label):
-        sprints_dir = _commander_dir(project_root) / "sprints"
-        pid_str = "unknown"
-        for fname in (f"{body.sprint_label}-pid", f"{body.sprint_label}-pid.pending"):
-            candidate = sprints_dir / fname
-            if candidate.exists():
-                try:
-                    pid_str = candidate.read_text(encoding="utf-8").strip()
-                except OSError:
-                    pass
-                break
+    running = _any_sprint_running()
+    if running:
         raise HTTPException(
             409,
-            detail=f"Sprint {body.sprint_label} is already running on {body.project} (PID {pid_str})",
+            detail=(
+                f"Cannot start sprint: {running['sprint_label']} is currently running"
+                f" on {running['project']}"
+            ),
         )
     coder_path   = _coder_clone_path(project_root)
     commander    = _commander_dir(project_root)
@@ -4701,7 +4702,7 @@ def delete_sprint(sprint_label: str, project: str):
 
 # ── Finish Sprint endpoint (issue #195) ──────────────────────────────────────
 
-_FINISH_SPRINT_REMOVE_LABELS = {"in-progress", "sit", "need-rework"}
+_FINISH_SPRINT_REMOVE_LABELS = {"in-progress", "sit", "needs-rework"}
 
 
 @app.post("/api/projects/{owner}/{repo_name}/sprints/{label}/finish")
@@ -4709,7 +4710,7 @@ async def finish_sprint(owner: str, repo_name: str, label: str):
     """Bulk-close all open issues for a sprint, moving them to UAT first.
 
     AC: iterates all open issues with the sprint label, adds 'UAT' label
-    (removing 'in-progress', 'sit', 'need-rework' if present), then closes each
+    (removing 'in-progress', 'sit', 'needs-rework' if present), then closes each
     issue via gh issue close.
 
     Returns: { "closed": N, "errors": [] }
@@ -4823,8 +4824,8 @@ _ALLOWED_UPLOAD_EXTS = {
 _MAX_FILE_SIZE_BYTES = 25 * 1024 * 1024  # 25 MB
 # Per-batch total size limit (bytes)
 _MAX_BATCH_SIZE_BYTES = 50 * 1024 * 1024  # 50 MB
-# Image-only extensions allowed for bulk create attachments (issue #260)
-_BULK_IMAGE_EXTS = {'.png', '.jpg', '.jpeg'}
+# Extensions allowed for bulk create attachments (issue #374 extended from images-only)
+_BULK_ATTACH_EXTS = {'.png', '.jpg', '.jpeg', '.md', '.html', '.htm', '.pdf'}
 
 # Body size guard threshold (issue #261)
 # GitHub hard limit is 65,536 chars; we use 62,000 as a safety margin.
@@ -6058,12 +6059,17 @@ async def _run_single_ba_ticket(
 
 
 async def _bulk_flusher(job_id: str) -> None:
-    """Flush completed drafts to GitHub in original index order."""
+    """Flush completed drafts in original index order.
+
+    Issue #374: drafts are now held at draft_ready for user review before GitHub posting.
+    The flusher injects image links into the body and broadcasts; it does NOT create
+    GitHub issues — that happens via /post-selected after the user reviews.
+    """
     job = _bulk_jobs.get(job_id)
     if not job:
         return
 
-    # Pre-commit images before any issues are created so URLs can go in the body directly
+    # Pre-commit attachment files before finalising bodies so URLs can go in the body
     if job.get("has_attachments") and not job.get("image_url_map"):
         try:
             url_map = await asyncio.to_thread(_do_pre_commit_bulk_images, job_id, job["repo"])
@@ -6076,8 +6082,6 @@ async def _bulk_flusher(job_id: str) -> None:
     tickets = job["tickets"]
     n = len(tickets)
     flush_idx = 0
-    # Track estimation tasks so the flusher can wait for them before job_done (issue #265)
-    estimation_tasks: list[asyncio.Task] = []
 
     while flush_idx < n:
         job = _bulk_jobs.get(job_id)
@@ -6095,79 +6099,26 @@ async def _bulk_flusher(job_id: str) -> None:
             continue
 
         if ticket["state"] == "draft_ready":
-            # Inject image links into body before creating the issue
-            issue_repo = ticket.get("_repo") or None
-            labels = ["backlog"] + ticket.get("_default_labels", [])
-            body_with_images = _build_body_with_images(
+            # Inject image/attachment links into body
+            body_with_attachments = _build_body_with_images(
                 ticket["body"] or "", flush_idx, job
             )
 
-            # Body size guard (issue #261): block POST if over threshold
-            if len(body_with_images) > _BC_BODY_SIZE_THRESHOLD:
+            # Body size guard (issue #261): warn if body exceeds GitHub's limit
+            if len(body_with_attachments) > _BC_BODY_SIZE_THRESHOLD:
                 ticket["state"] = "size_warning"
-                ticket["body"] = body_with_images
-                ticket["body_char_count"] = len(body_with_images)
-                ticket["body_over_by"] = len(body_with_images) - _BC_BODY_SIZE_THRESHOLD
-                ticket["_default_labels"] = labels
-                ticket["_repo"] = issue_repo
+                ticket["body"] = body_with_attachments
+                ticket["body_char_count"] = len(body_with_attachments)
+                ticket["body_over_by"] = len(body_with_attachments) - _BC_BODY_SIZE_THRESHOLD
                 ticket["finished_at"] = datetime.now(timezone.utc).isoformat()
-                _persist_bulk_job(job)
-                await _broadcast_bulk_event(job_id, {"type": "ticket_update", "ticket": dict(ticket)})
-                flush_idx += 1
-                continue
+            else:
+                # Keep at draft_ready — user will review and choose which to post (issue #374)
+                ticket["body"] = body_with_attachments
+                ticket["body_preview"] = body_with_attachments[:200]
+                ticket["finished_at"] = datetime.now(timezone.utc).isoformat()
 
-            created_issue_number: int | None = None
-            created_issue_repo: str | None = None
-            try:
-                number, url = github_client.create_issue(
-                    title=ticket["title"],
-                    body=body_with_images,
-                    labels=labels,
-                    repo_name=issue_repo,
-                )
-                ticket["state"] = "created"
-                ticket["issue_num"] = number
-                ticket["issue_url"] = url
-                ticket["body"] = body_with_images
-                ticket["body_preview"] = body_with_images[:200]
-                ticket["label_pills"] = labels
-                created_issue_number = number
-                try:
-                    created_issue_repo = issue_repo or github_client.get_repo_for_operation(None)
-                except Exception:
-                    created_issue_repo = None
-            except Exception as e:
-                ticket["state"] = "failed"
-                ticket["error"] = f"GitHub issue creation failed: {str(e)[:200]}"
-
-            ticket["finished_at"] = datetime.now(timezone.utc).isoformat()
-            # Remove internal fields
-            ticket.pop("_default_labels", None)
-            ticket.pop("_repo", None)
             _persist_bulk_job(job)
             await _broadcast_bulk_event(job_id, {"type": "ticket_update", "ticket": dict(ticket)})
-
-            # Kick off background estimation after successful issue creation (issue #265).
-            # Track the task so the flusher waits for all estimates before job_done.
-            if created_issue_number is not None and created_issue_repo and _ESTIMATE_ISSUE_SCRIPT.exists():
-                est_task = asyncio.create_task(
-                    _run_bulk_estimator_for_ticket(
-                        job_id, flush_idx, created_issue_number, created_issue_repo
-                    )
-                )
-                estimation_tasks.append(est_task)
-            elif created_issue_number is not None:
-                # Estimation cannot start — surface a clear reason so job_done still fires
-                # instead of leaving the ticket in "created" (non-terminal) forever.
-                if not created_issue_repo:
-                    _est_err = "could not resolve repository for estimation"
-                else:
-                    _est_err = "estimate_issue.py not found"
-                ticket["state"] = "estimate_failed"
-                ticket["estimate_error"] = _est_err
-                _persist_bulk_job(job)
-                await _broadcast_bulk_event(job_id, {"type": "ticket_update", "ticket": dict(ticket)})
-
             flush_idx += 1
 
         elif ticket["state"] in ("pending", "drafting"):
@@ -6177,25 +6128,17 @@ async def _bulk_flusher(job_id: str) -> None:
         else:
             flush_idx += 1
 
-    # Wait for all estimation background tasks to complete before sending job_done.
-    # This ensures the SSE stream stays open until all tickets reach a terminal state
-    # (sized or estimate_failed). Errors are swallowed — each task handles its own
-    # failure path and updates the ticket state independently.
-    if estimation_tasks:
-        await asyncio.gather(*estimation_tasks, return_exceptions=True)
-
-    # Check if all done (size_warning tickets are not done — they await user remediation).
-    # Terminal states now include sized and estimate_failed (issue #265).
+    # All drafts processed — check terminal draft states (draft_ready, failed, skipped, size_warning)
     job = _bulk_jobs.get(job_id)
     if job:
-        all_done = all(
-            t["state"] in ("sized", "estimate_failed", "failed", "skipped", "size_warning")
+        all_drafted = all(
+            t["state"] in ("draft_ready", "failed", "skipped", "size_warning")
             for t in job["tickets"]
         )
-        if all_done:
-            job["status"] = "done"
+        if all_drafted and job.get("status") not in ("done", "stopped", "drafts_ready"):
+            job["status"] = "drafts_ready"
             _persist_bulk_job(job)
-            await _broadcast_bulk_event(job_id, {"type": "job_done", "job_id": job_id})
+            await _broadcast_bulk_event(job_id, {"type": "job_drafts_ready", "job_id": job_id})
 
 
 async def _bulk_worker(
@@ -6280,15 +6223,12 @@ async def _run_bulk_job(job_id: str) -> None:
     # Wait for flusher to finish
     await flusher
 
-    # Final status update
+    # Final status update — flusher handles drafts_ready; fall back if not set
     job = _bulk_jobs.get(job_id)
-    if job and job.get("status") not in ("done", "stopped"):
-        job["status"] = "done"
+    if job and job.get("status") not in ("done", "stopped", "drafts_ready"):
+        job["status"] = "drafts_ready"
         _persist_bulk_job(job)
-        await _broadcast_bulk_event(job_id, {"type": "job_done", "job_id": job_id})
-
-    # Clean up attachment temp dir now that all issues have been processed
-    _cleanup_bulk_attachment_dir(job_id)
+        await _broadcast_bulk_event(job_id, {"type": "job_drafts_ready", "job_id": job_id})
 
 
 class BulkCreateBody(BaseModel):
@@ -6377,18 +6317,19 @@ async def bulk_create_start(
         except (json.JSONDecodeError, ValueError, TypeError):
             raise HTTPException(422, detail="'assignments' must be a JSON array")
 
-    # Validate and store uploaded image files (PNG/JPG only for bulk create)
+    # Validate and store uploaded files (issue #374: now accepts .md/.html/.pdf in addition to images)
     valid_upload_files = [f for f in files if f.filename]
     attachment_file_data: list[tuple[str, bytes]] = []  # (original_filename, content)
     if valid_upload_files:
+        _accepted_fmt = ".png, .jpg, .jpeg, .md, .html, .htm, .pdf"
         batch_size = 0
         for upload in valid_upload_files:
             ext = Path(upload.filename).suffix.lower()
-            if ext not in _BULK_IMAGE_EXTS:
+            if ext not in _BULK_ATTACH_EXTS:
                 raise HTTPException(
                     422,
-                    detail=f"File '{upload.filename}' has disallowed extension '{ext}'. "
-                           f"Only PNG and JPG images are allowed.",
+                    detail=f"File '{upload.filename}' has unsupported extension '{ext}'. "
+                           f"Accepted: {_accepted_fmt}.",
                 )
             content = await upload.read()
             if len(content) > _MAX_FILE_SIZE_BYTES:
@@ -6611,60 +6552,233 @@ async def bulk_retry_ticket(job_id: str, body: BulkRetryBody):
             job_id, body.index, ticket["prompt"],
             job["repo"], job["default_labels"]
         )
-        # After BA, create the issue with image links injected into body
+        # After BA, keep at draft_ready for user review (issue #374)
         t = job["tickets"][body.index]
         if t.get("state") == "draft_ready":
-            issue_repo = t.get("_repo") or None
-            labels = ["backlog"] + t.get("_default_labels", [])
-            body_with_images = _build_body_with_images(
+            body_with_attachments = _build_body_with_images(
                 t.get("body") or "", body.index, job
             )
+            if len(body_with_attachments) > _BC_BODY_SIZE_THRESHOLD:
+                t["state"] = "size_warning"
+                t["body"] = body_with_attachments
+                t["body_char_count"] = len(body_with_attachments)
+                t["body_over_by"] = len(body_with_attachments) - _BC_BODY_SIZE_THRESHOLD
+                t["finished_at"] = datetime.now(timezone.utc).isoformat()
+            else:
+                t["body"] = body_with_attachments
+                t["body_preview"] = body_with_attachments[:200]
+                t["finished_at"] = datetime.now(timezone.utc).isoformat()
+            _persist_bulk_job(job)
+            await _broadcast_bulk_event(job_id, {"type": "ticket_update", "ticket": dict(t)})
+
+        # Check if all tickets are in terminal draft state
+        all_drafted = all(
+            tt["state"] in ("draft_ready", "failed", "skipped", "size_warning")
+            for tt in job["tickets"]
+        )
+        if all_drafted and job.get("status") not in ("done", "stopped", "drafts_ready"):
+            job["status"] = "drafts_ready"
+            _persist_bulk_job(job)
+            await _broadcast_bulk_event(job_id, {"type": "job_drafts_ready", "job_id": job_id})
+
+    asyncio.create_task(_retry_task())
+    return {"ok": True}
+
+
+class BulkRedraftBody(BaseModel):
+    index: int
+
+
+@app.post("/api/tickets/bulk/{job_id}/redraft")
+async def bulk_redraft_ticket(job_id: str, body: BulkRedraftBody):
+    """Re-run BA for a single ticket in place (issue #374 per-ticket recreate).
+
+    Works on draft_ready, failed, or skipped tickets. After BA completes the
+    ticket returns to draft_ready for user review — no GitHub issue is created.
+    """
+    job = _bulk_jobs.get(job_id)
+    if not job:
+        raise HTTPException(404, detail="Job not found")
+    tickets = job["tickets"]
+    if body.index < 0 or body.index >= len(tickets):
+        raise HTTPException(422, detail="Invalid ticket index")
+    ticket = tickets[body.index]
+
+    # Only allow redraft when not actively running
+    if ticket["state"] in ("drafting", "pending"):
+        return {"ok": True, "state": ticket["state"]}
+
+    # Reset ticket state
+    ticket["state"] = "pending"
+    ticket["error"] = None
+    ticket["started_at"] = None
+    ticket["finished_at"] = None
+    ticket["title"] = None
+    ticket["body"] = None
+    ticket["body_preview"] = None
+    job["status"] = "running"
+    _persist_bulk_job(job)
+    await _broadcast_bulk_event(job_id, {"type": "ticket_update", "ticket": dict(ticket)})
+
+    async def _redraft_task():
+        await _run_single_ba_ticket(
+            job_id, body.index, ticket["prompt"],
+            job["repo"], job["default_labels"]
+        )
+        t = job["tickets"][body.index]
+        if t.get("state") == "draft_ready":
+            body_with_attachments = _build_body_with_images(
+                t.get("body") or "", body.index, job
+            )
+            if len(body_with_attachments) > _BC_BODY_SIZE_THRESHOLD:
+                t["state"] = "size_warning"
+                t["body"] = body_with_attachments
+                t["body_char_count"] = len(body_with_attachments)
+                t["body_over_by"] = len(body_with_attachments) - _BC_BODY_SIZE_THRESHOLD
+                t["finished_at"] = datetime.now(timezone.utc).isoformat()
+            else:
+                t["body"] = body_with_attachments
+                t["body_preview"] = body_with_attachments[:200]
+                t["finished_at"] = datetime.now(timezone.utc).isoformat()
+            _persist_bulk_job(job)
+            await _broadcast_bulk_event(job_id, {"type": "ticket_update", "ticket": dict(t)})
+
+        all_drafted = all(
+            tt["state"] in ("draft_ready", "failed", "skipped", "size_warning")
+            for tt in job["tickets"]
+        )
+        if all_drafted and job.get("status") not in ("done", "stopped", "drafts_ready"):
+            job["status"] = "drafts_ready"
+            _persist_bulk_job(job)
+            await _broadcast_bulk_event(job_id, {"type": "job_drafts_ready", "job_id": job_id})
+
+    asyncio.create_task(_redraft_task())
+    return {"ok": True}
+
+
+class BulkPostSelectedItem(BaseModel):
+    index: int
+    labels: list[str] = []
+
+
+class BulkPostSelectedBody(BaseModel):
+    tickets: list[BulkPostSelectedItem]
+
+
+@app.post("/api/tickets/bulk/{job_id}/post-selected")
+async def bulk_post_selected(job_id: str, body: BulkPostSelectedBody):
+    """Post selected draft_ready tickets to GitHub (issue #374 review-then-post flow).
+
+    Each item in `tickets` specifies the ticket index and the labels to apply.
+    Only tickets in draft_ready state can be posted; others are ignored.
+    """
+    job = _bulk_jobs.get(job_id)
+    if not job:
+        raise HTTPException(404, detail="Job not found")
+
+    # Validate all indices up front
+    for item in body.tickets:
+        if item.index < 0 or item.index >= len(job["tickets"]):
+            raise HTTPException(422, detail=f"Invalid ticket index: {item.index}")
+        if job["tickets"][item.index]["state"] != "draft_ready":
+            raise HTTPException(
+                422,
+                detail=f"Ticket {item.index} is not in draft_ready state "
+                       f"(current: {job['tickets'][item.index]['state']})",
+            )
+
+    if not body.tickets:
+        raise HTTPException(422, detail="No tickets selected")
+
+    job["status"] = "running"
+    _persist_bulk_job(job)
+
+    async def _post_task():
+        estimation_tasks: list[asyncio.Task] = []
+
+        for item in body.tickets:
+            idx = item.index
+            labels = ["backlog"] + [lbl for lbl in item.labels if lbl]
+            t = job["tickets"][idx]
+            issue_repo = job.get("repo") or None
+
+            t["state"] = "drafting"
+            _persist_bulk_job(job)
+            await _broadcast_bulk_event(job_id, {"type": "ticket_update", "ticket": dict(t)})
+
+            body_with_attachments = _build_body_with_images(t.get("body") or "", idx, job)
 
             # Body size guard (issue #261)
-            if len(body_with_images) > _BC_BODY_SIZE_THRESHOLD:
+            if len(body_with_attachments) > _BC_BODY_SIZE_THRESHOLD:
                 t["state"] = "size_warning"
-                t["body"] = body_with_images
-                t["body_char_count"] = len(body_with_images)
-                t["body_over_by"] = len(body_with_images) - _BC_BODY_SIZE_THRESHOLD
+                t["body"] = body_with_attachments
+                t["body_char_count"] = len(body_with_attachments)
+                t["body_over_by"] = len(body_with_attachments) - _BC_BODY_SIZE_THRESHOLD
                 t["_default_labels"] = labels
-                t["_repo"] = issue_repo
                 t["finished_at"] = datetime.now(timezone.utc).isoformat()
                 _persist_bulk_job(job)
                 await _broadcast_bulk_event(job_id, {"type": "ticket_update", "ticket": dict(t)})
-            else:
+                continue
+
+            created_issue_number: int | None = None
+            try:
+                number, url = github_client.create_issue(
+                    title=t["title"],
+                    body=body_with_attachments,
+                    labels=labels,
+                    repo_name=issue_repo,
+                )
+                t["state"] = "created"
+                t["issue_num"] = number
+                t["issue_url"] = url
+                t["body"] = body_with_attachments
+                t["body_preview"] = body_with_attachments[:200]
+                t["label_pills"] = labels
+                created_issue_number = number
+            except Exception as e:
+                t["state"] = "failed"
+                t["error"] = f"GitHub issue creation failed: {str(e)[:200]}"
+
+            t["finished_at"] = datetime.now(timezone.utc).isoformat()
+            _persist_bulk_job(job)
+            await _broadcast_bulk_event(job_id, {"type": "ticket_update", "ticket": dict(t)})
+
+            # Kick off background estimation
+            if created_issue_number is not None and _ESTIMATE_ISSUE_SCRIPT.exists():
                 try:
-                    number, url = github_client.create_issue(
-                        title=t["title"],
-                        body=body_with_images,
-                        labels=labels,
-                        repo_name=issue_repo,
+                    resolved_repo = issue_repo or github_client.get_repo_for_operation(None)
+                except Exception:
+                    resolved_repo = None
+                if resolved_repo:
+                    est_task = asyncio.create_task(
+                        _run_bulk_estimator_for_ticket(job_id, idx, created_issue_number, resolved_repo)
                     )
-                    t["state"] = "created"
-                    t["issue_num"] = number
-                    t["issue_url"] = url
-                    t["body"] = body_with_images
-                    t["body_preview"] = body_with_images[:200]
-                    t["label_pills"] = labels
-                except Exception as e:
-                    t["state"] = "failed"
-                    t["error"] = f"GitHub issue creation failed: {str(e)[:200]}"
-
-                t["finished_at"] = datetime.now(timezone.utc).isoformat()
-                t.pop("_default_labels", None)
-                t.pop("_repo", None)
+                    estimation_tasks.append(est_task)
+                else:
+                    t["state"] = "estimate_failed"
+                    t["estimate_error"] = "could not resolve repository for estimation"
+                    _persist_bulk_job(job)
+                    await _broadcast_bulk_event(job_id, {"type": "ticket_update", "ticket": dict(t)})
+            elif created_issue_number is not None:
+                t["state"] = "estimate_failed"
+                t["estimate_error"] = "estimate_issue.py not found"
                 _persist_bulk_job(job)
                 await _broadcast_bulk_event(job_id, {"type": "ticket_update", "ticket": dict(t)})
 
-        # Update job status
-        all_done = all(
-            tt["state"] in ("created", "failed", "skipped", "size_warning") for tt in job["tickets"]
+        if estimation_tasks:
+            await asyncio.gather(*estimation_tasks, return_exceptions=True)
+
+        # Job is done when no tickets are still pending/drafting
+        # (unselected draft_ready tickets count as done)
+        no_active = all(
+            t["state"] not in ("pending", "drafting") for t in job["tickets"]
         )
-        if all_done:
+        if no_active and job.get("status") not in ("done", "stopped"):
             job["status"] = "done"
             _persist_bulk_job(job)
             await _broadcast_bulk_event(job_id, {"type": "job_done", "job_id": job_id})
 
-    asyncio.create_task(_retry_task())
+    asyncio.create_task(_post_task())
     return {"ok": True}
 
 
@@ -6800,10 +6914,10 @@ async def bulk_retry_with_image(
     # Commit new image and append its URL to body
     if file and file.filename:
         ext = Path(file.filename).suffix.lower()
-        if ext not in _BULK_IMAGE_EXTS:
+        if ext not in _BULK_ATTACH_EXTS:
             raise HTTPException(
                 422,
-                detail=f"Only PNG and JPG images are allowed (got '{ext}').",
+                detail=f"Unsupported file type '{ext}'. Accepted: .png, .jpg, .jpeg, .md, .html, .htm, .pdf.",
             )
         content = await file.read()
         if len(content) > _MAX_FILE_SIZE_BYTES:

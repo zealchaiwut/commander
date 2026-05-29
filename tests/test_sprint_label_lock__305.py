@@ -73,13 +73,13 @@ class TestGuardSprintLabels(unittest.TestCase):
         self.assertIn("in-progress", safe_remove)
 
     def test_mutable_labels_allowed_during_run(self):
-        """AC-3: in-progress, SIT, UAT, need-rework may be added during run."""
+        """AC-3: in-progress, SIT, UAT, needs-rework may be added during run."""
         safe_add, _ = self.guard(
-            ["in-progress", "SIT", "UAT", "need-rework"],
+            ["in-progress", "SIT", "UAT", "needs-rework"],
             [],
             sprint_label="sprint-1",
         )
-        self.assertEqual(set(safe_add), {"in-progress", "SIT", "UAT", "need-rework"})
+        self.assertEqual(set(safe_add), {"in-progress", "SIT", "UAT", "needs-rework"})
 
     def test_non_mutable_label_filtered_during_run(self):
         """AC-3: 'blocked' must be filtered out during an active sprint run."""

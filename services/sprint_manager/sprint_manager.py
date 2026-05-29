@@ -418,7 +418,7 @@ RUN_MUTABLE_LABELS: frozenset[str] = frozenset({
 # Actual GitHub label strings (as applied on issues) that correspond to
 # RUN_MUTABLE_LABELS.  Used as the allowlist when filtering add-label calls.
 _RUN_MUTABLE_GITHUB_LABELS: frozenset[str] = frozenset({
-    "in-progress", "SIT", "UAT", "need-rework", "needs-rework",
+    "in-progress", "SIT", "UAT", "needs-rework", "need-rework",  # READ-only: backward compat
 })
 
 _SPRINT_LABEL_RE = re.compile(r"^sprint-\d+$")
@@ -1124,7 +1124,7 @@ def _apply_needs_rework_label(
     category: Optional[str],
     cfg: Optional["SprintConfig"] = None,
 ) -> None:
-    """Apply the need-rework label via update_ticket.py (best-effort).
+    """Apply the needs-rework label via update_ticket.py (best-effort).
 
     Only called for logic failure categories; exceptions are caught and printed
     as warnings so a missing label never breaks the sprint.
@@ -1219,6 +1219,35 @@ def _is_branch_merged_into(branch: str, target: str) -> bool:
         return True
 
     return False
+
+
+def _was_feature_merged_via_log(issue_num: int, target: str) -> bool:
+    """Return True if the target branch history contains a merge commit for this issue.
+
+    Used when _find_feature_branch returns None (branch was deleted after merging).
+    finish_feature.py creates commits of the form:
+        "Merge feature/<N>-<slug> into <target> (issue #<N>)"
+    so we search the recent merge history of the target for that pattern.
+    """
+    target_ref = f"origin/{target}"
+    ok, _, _ = _try("git", "rev-parse", "--verify", target_ref)
+    if not ok:
+        target_ref = target
+
+    # Search for merge commits containing the issue reference
+    ok, out, _ = _try(
+        "git", "log", target_ref, "--merges", "--oneline",
+        f"--grep=issue #{issue_num}", "-1",
+    )
+    if ok and out.strip():
+        return True
+
+    # Also match branch name directly (covers non-standard merge messages)
+    ok, out, _ = _try(
+        "git", "log", target_ref, "--merges", "--oneline",
+        f"--grep=feature/{issue_num}-", "-1",
+    )
+    return ok and bool(out.strip())
 
 
 # ── quality gates ─────────────────────────────────────────────────────────────
@@ -1681,15 +1710,23 @@ def handle_post_tester(
                 f"'{target_branch}': {branch_is_merged}"
             )
         else:
-            # Branch not found at all — cannot determine merge status; fall through
-            # to existing TESTER_REJECTED behavior.
-            print(
-                f"  Issue #{issue_num}: feature branch not found — cannot confirm merge, "
-                f"treating as genuine tester skip"
-            )
+            # Branch not found locally or remotely — check git history for a merge commit.
+            # finish_feature.py creates: "Merge feature/<N>-* into <target> (issue #<N>)"
+            branch_is_merged = _was_feature_merged_via_log(issue_num, target_branch)
+            if branch_is_merged:
+                print(
+                    f"  Issue #{issue_num}: feature branch not found but merge commit "
+                    f"found in '{target_branch}' history — treating as merged "
+                    f"(likely a transient label-apply failure after merge+delete)"
+                )
+            else:
+                print(
+                    f"  Issue #{issue_num}: feature branch not found and no merge "
+                    f"commit found in '{target_branch}' — treating as genuine tester skip"
+                )
 
         if branch_is_merged:
-            # Auto-recovery: branch was merged outside finish_feature.py, apply UAT label
+            # Auto-recovery: branch is merged (or was merged and deleted) but UAT label absent
             print(f"  Issue #{issue_num}: branch is merged — auto-applying UAT label")
             scripts_dir = cfg.scripts_dir if cfg is not None else SCRIPTS_DIR
             update_script = scripts_dir / "update_ticket.py"
@@ -1712,7 +1749,7 @@ def handle_post_tester(
 
             recovery_comment = (
                 "Detected merged feature branch without UAT label — applied UAT automatically "
-                "(agent appears to have merged outside finish_feature.py)."
+                "(likely a transient label-apply failure)."
             )
             try:
                 github_client.add_comment(issue_num, recovery_comment, repo_name=eff_repo)
@@ -1732,7 +1769,7 @@ def handle_post_tester(
             # Treat as a successful merge — gates may run below
             print(f"\nTester promoted issue #{issue_num} to UAT (auto-recovered) -- running quality gates...")
         else:
-            # Branch exists and is NOT merged — genuine tester skip, preserve existing behavior
+            # Branch is not merged (or not found and not in log) — genuine tester skip
             warning_body = (
                 f"**Tester exited 0 but not UAT — label missing.**\n\n"
                 f"The tester subprocess finished successfully (exit code 0), "

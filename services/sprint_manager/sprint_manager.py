@@ -2659,7 +2659,7 @@ def create_summary_github_issue(
     """
     n      = sprint_number if sprint_number is not None else sprint_label
     title  = f"Sprint {n} Executive Summary"
-    labels = ["docs", f"sprint-{n}"]
+    labels = ["docs", f"sprint-{n}", "sprint-summary"]
 
     # AC-1 / AC-6: deduplication check — search both open and closed states
     try:
@@ -2727,6 +2727,18 @@ def create_summary_github_issue(
         return existing_num, existing_url
 
     # AC-3: no duplicate found — create as normal
+    # Ensure sprint-summary label exists with muted indigo color
+    try:
+        r = _r(repo_name)
+        subprocess.run(
+            ["gh", "label", "create", "sprint-summary",
+             "--color", "6D28D9",
+             "--description", "Sprint executive summary issues",
+             "--repo", r, "--force"],
+            capture_output=True, text=True, check=False,
+        )
+    except Exception:
+        pass
     _ensure_github_labels(labels, repo_name=repo_name)
 
     try:

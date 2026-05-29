@@ -1041,6 +1041,85 @@
     }
     .smgmt-ticket:hover .smgmt-moveto-pill { opacity: 1; }
     .smgmt-moveto-pill:hover { background: var(--surface-hover); color: var(--text); }
+
+    /* ── Ghost pane — drag-below to create sprint (issue #364) ── */
+    .smgmt-ghost-pane {
+      display: none; /* shown during drag */
+      border: 2px dashed var(--blue);
+      border-radius: 8px;
+      background: var(--blue-bg);
+      margin-top: 12px;
+      padding: 20px 16px;
+      text-align: center;
+      cursor: default;
+      transition: background 0.15s, transform 0.12s, box-shadow 0.12s;
+    }
+    .smgmt-ghost-pane.ghost-visible {
+      display: block;
+    }
+    .smgmt-ghost-pane.ghost-hot {
+      background: var(--blue);
+      border-style: solid;
+      transform: scale(1.012);
+      box-shadow: 0 4px 16px rgba(37,99,235,.25);
+    }
+    .smgmt-ghost-title {
+      font-size: 14px; font-weight: 700; color: var(--blue);
+      pointer-events: none;
+    }
+    .smgmt-ghost-pane.ghost-hot .smgmt-ghost-title {
+      color: #fff;
+    }
+    .smgmt-ghost-sub {
+      font-size: 12px; color: var(--blue); margin-top: 4px;
+      pointer-events: none;
+    }
+    .smgmt-ghost-pane.ghost-hot .smgmt-ghost-sub {
+      color: rgba(255,255,255,.85);
+    }
+
+    /* ── Ghost-confirm modal (issue #364) ── */
+    .gc-modal {
+      min-width: 340px;
+      max-width: 480px;
+    }
+    .gc-modal .modal-footer .btn-blue {
+      background: var(--blue);
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      padding: 7px 18px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    .gc-modal .modal-footer .btn-blue:hover { background: #1d4ed8; }
+    .gc-modal .modal-footer .btn-blue:disabled { opacity: .55; cursor: default; }
+    .gc-detail-row {
+      font-size: 13px; color: var(--text);
+      padding: 4px 0;
+    }
+    .gc-detail-label {
+      color: var(--text-muted); font-size: 12px;
+    }
+    .gc-note {
+      font-size: 12px; color: var(--text-sub);
+      background: var(--surface-2);
+      border-radius: 6px;
+      padding: 8px 12px;
+      margin-top: 12px;
+    }
+    .gc-error {
+      font-size: 12px; color: var(--red);
+      background: rgba(220,38,38,.07);
+      border: 1px solid rgba(220,38,38,.2);
+      border-radius: 5px;
+      padding: 7px 12px;
+      margin-top: 10px;
+    }
+    .gc-error.hidden { display: none; }
+
     /* "Move to" popup for backlog/sprint tickets */
     .smgmt-moveto-popup {
       position: fixed;
@@ -1911,6 +1990,15 @@
         <div class="smgmt-content">
           <div id="smgmt-sprint-list" class="smgmt-sprint-list">
             <div class="loading-msg" id="smgmt-loading">Loading sprints…</div>
+          </div>
+
+          <!-- Ghost pane — drag below last sprint to create next sprint (issue #364) -->
+          <div class="smgmt-ghost-pane" id="smgmt-ghost-pane"
+               ondragover="_smgmtGhostDragOver(event)"
+               ondragleave="_smgmtGhostDragLeave(event)"
+               ondrop="_smgmtGhostDrop(event)">
+            <div class="smgmt-ghost-title" id="smgmt-ghost-title">Drop here to create Sprint 1</div>
+            <div class="smgmt-ghost-sub" id="smgmt-ghost-sub"></div>
           </div>
 
           <!-- Backlog pane (issue #274) — dashed border, grey tint, drag target -->
@@ -4030,6 +4118,8 @@ function _smgmtTicketDragStart(event, issueNum, fromSprint) {
     const el = document.getElementById(`smgmt-ticket-${issueNum}`);
     if (el) setTimeout(() => el.classList.add('dragging-ticket'), 0);
   }
+  // Show ghost pane (running-lock means draggable=false tickets can't trigger this)
+  _smgmtGhostShow();
 }
 
 function _smgmtDragMovePill(event) {
@@ -4039,6 +4129,197 @@ function _smgmtDragMovePill(event) {
       pill.style.top = (event.clientY - 20) + 'px';
       pill.style.left = (event.clientX + 12) + 'px';
     }
+  }
+}
+
+// ── Ghost pane — drag-below to create next sprint (issue #364) ──────────────
+
+/** Cached next-free sprint number for the current drag session. */
+let _smgmtGhostNextNum = null;
+
+/**
+ * Compute the lowest positive integer N such that no label sprint-N already
+ * exists (plain integer labels only; sub-labels like sprint-N.M are ignored).
+ * Result is cached at drag-start — call once, reuse during session.
+ */
+function _smgmtGhostComputeNextFree() {
+  const existing = new Set((_smgmtData?.sprints || []).map(n => Number(n)));
+  let n = 1;
+  while (existing.has(n)) n++;
+  return n;
+}
+
+/** Show the ghost pane below the sprint list, pre-computing next-free number. */
+function _smgmtGhostShow() {
+  _smgmtGhostNextNum = _smgmtGhostComputeNextFree();
+  const ghost = document.getElementById('smgmt-ghost-pane');
+  const titleEl = document.getElementById('smgmt-ghost-title');
+  const subEl = document.getElementById('smgmt-ghost-sub');
+  if (!ghost) return;
+
+  titleEl.textContent = `Drop here to create Sprint ${_smgmtGhostNextNum}`;
+
+  // Build sub-text: identify skipped empty sprints
+  const existing = new Set((_smgmtData?.sprints || []).map(n => Number(n)));
+  const skipped = [];
+  for (let i = 1; i < _smgmtGhostNextNum; i++) {
+    if (!existing.has(i)) skipped.push(i);
+  }
+  if (skipped.length > 0) {
+    const skippedStr = skipped.map(s => `Sprint ${s}`).join(', ');
+    subEl.textContent = `next free number · skipped empty ${skippedStr}`;
+  } else {
+    subEl.textContent = `next free number`;
+  }
+
+  ghost.classList.add('ghost-visible');
+}
+
+/** Hide the ghost pane and reset hot state. */
+function _smgmtGhostHide() {
+  const ghost = document.getElementById('smgmt-ghost-pane');
+  if (!ghost) return;
+  ghost.classList.remove('ghost-visible', 'ghost-hot');
+  _smgmtGhostNextNum = null;
+}
+
+function _smgmtGhostDragOver(event) {
+  if (!_smgmtDragTicket) return;
+  event.preventDefault();
+  event.dataTransfer.dropEffect = 'move';
+  const ghost = document.getElementById('smgmt-ghost-pane');
+  if (!ghost) return;
+  const titleEl = document.getElementById('smgmt-ghost-title');
+  const subEl = document.getElementById('smgmt-ghost-sub');
+  ghost.classList.add('ghost-hot');
+  if (titleEl) titleEl.textContent = `Release to create Sprint ${_smgmtGhostNextNum}`;
+  if (subEl) subEl.textContent = "you'll be asked to confirm";
+}
+
+function _smgmtGhostDragLeave(event) {
+  const ghost = document.getElementById('smgmt-ghost-pane');
+  if (!ghost) return;
+  if (!ghost.contains(event.relatedTarget)) {
+    ghost.classList.remove('ghost-hot');
+    const titleEl = document.getElementById('smgmt-ghost-title');
+    const subEl = document.getElementById('smgmt-ghost-sub');
+    if (titleEl) titleEl.textContent = `Drop here to create Sprint ${_smgmtGhostNextNum}`;
+    // Restore sub-text
+    const existing = new Set((_smgmtData?.sprints || []).map(n => Number(n)));
+    const skipped = [];
+    for (let i = 1; i < _smgmtGhostNextNum; i++) {
+      if (!existing.has(i)) skipped.push(i);
+    }
+    if (subEl) subEl.textContent = skipped.length > 0
+      ? `next free number · skipped empty ${skipped.map(s => `Sprint ${s}`).join(', ')}`
+      : 'next free number';
+  }
+}
+
+async function _smgmtGhostDrop(event) {
+  event.preventDefault();
+  if (!_smgmtDragTicket) return;
+  const dragInfo = _smgmtDragTicket;
+  const nextNum = _smgmtGhostNextNum;
+  _smgmtGhostHide();
+
+  // Multi-ticket drag to ghost: not supported per spec — treat as no-op
+  if (dragInfo.multi && dragInfo.multi.length > 1) {
+    // Leave _smgmtDragTicket for dragend cleanup
+    return;
+  }
+
+  // Clear dragging-ticket class manually (dragend may fire after we null this)
+  const dragEl = document.getElementById(`smgmt-ticket-${dragInfo.number}`);
+  if (dragEl) dragEl.classList.remove('dragging-ticket');
+  _smgmtDragTicket = null;
+
+  if (nextNum == null) return;
+  const repo = _smgmtRepo();
+  if (!repo) return;
+
+  // Populate and open confirm modal
+  const sprintLabel = `sprint-${nextNum}`;
+  const issue = (_smgmtData?.issues || []).find(i => i.number === dragInfo.number);
+  const fromLabel = dragInfo.fromSprint || 'backlog';
+
+  document.getElementById('gc-sprint-name').textContent = sprintLabel;
+  document.getElementById('gc-ticket-info').textContent =
+    issue ? `#${issue.number} — ${issue.title}` : `#${dragInfo.number}`;
+  document.getElementById('gc-source-pane').textContent =
+    fromLabel === 'backlog' ? 'Backlog' : `Sprint ${fromLabel.replace('sprint-', '')}`;
+
+  const confirmBtn = document.getElementById('gc-confirm-btn');
+  confirmBtn.textContent = `Create ${sprintLabel} & move`;
+  confirmBtn.disabled = false;
+
+  const errEl = document.getElementById('gc-error');
+  errEl.textContent = '';
+  errEl.classList.add('hidden');
+
+  // Store drag state for confirm handler
+  document.getElementById('gc-modal').dataset.issueNum = String(dragInfo.number);
+  document.getElementById('gc-modal').dataset.fromSprint = fromLabel;
+  document.getElementById('gc-modal').dataset.sprintNum = String(nextNum);
+  document.getElementById('gc-modal').dataset.repo = repo;
+
+  document.getElementById('gc-backdrop').classList.remove('hidden');
+  document.getElementById('gc-modal').classList.remove('hidden');
+  confirmBtn.focus();
+}
+
+/** Close ghost confirm modal — full no-op. */
+function _gcClose() {
+  document.getElementById('gc-backdrop').classList.add('hidden');
+  document.getElementById('gc-modal').classList.add('hidden');
+}
+
+/** Confirm: create sprint and move ticket atomically. */
+async function _gcConfirm() {
+  const modal = document.getElementById('gc-modal');
+  const issueNum = parseInt(modal.dataset.issueNum, 10);
+  const sprintNum = parseInt(modal.dataset.sprintNum, 10);
+  const fromSprint = modal.dataset.fromSprint;
+  const repo = modal.dataset.repo;
+  const sprintLabel = `sprint-${sprintNum}`;
+
+  const confirmBtn = document.getElementById('gc-confirm-btn');
+  const errEl = document.getElementById('gc-error');
+  confirmBtn.disabled = true;
+  confirmBtn.textContent = 'Creating…';
+  errEl.classList.add('hidden');
+
+  try {
+    // Step 1: create the sprint label
+    const createRes = await fetch('/api/sprints/create', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ project: repo, sprint_number: sprintNum }),
+    });
+    if (!createRes.ok) {
+      const d = await createRes.json().catch(() => ({}));
+      throw new Error(d.detail || 'HTTP ' + createRes.status);
+    }
+
+    // Step 2: move the ticket
+    const moveRes = await fetch(`/api/issues/${issueNum}/sprint-label`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sprint_label: sprintLabel, project: repo }),
+    });
+    if (!moveRes.ok) {
+      const d = await moveRes.json().catch(() => ({}));
+      throw new Error(d.detail || 'HTTP ' + moveRes.status);
+    }
+
+    // Success — close modal and reload board
+    _gcClose();
+    await loadSprintMgmt();
+  } catch (e) {
+    errEl.textContent = `Failed: ${e.message}`;
+    errEl.classList.remove('hidden');
+    confirmBtn.disabled = false;
+    confirmBtn.textContent = `Create ${sprintLabel} & move`;
   }
 }
 
@@ -4054,9 +4335,10 @@ function _smgmtTicketDragEnd(event) {
       if (el) el.classList.remove('dragging-ticket');
     }
   }
-  // Hide drag pill
+  // Hide drag pill and ghost pane
   const pill = document.getElementById('smgmt-drag-pill');
   if (pill) { pill.style.top = '-100px'; pill.style.left = '-100px'; pill.textContent = ''; }
+  _smgmtGhostHide();
   _smgmtDragTicket = null;
   document.querySelectorAll('.smgmt-sprint-card').forEach(el => el.classList.remove('drag-over-sprint'));
   document.getElementById('smgmt-backlog-pane')?.classList.remove('drag-over-backlog');
@@ -4407,6 +4689,8 @@ function _smgmtBacklogTicketDragStart(event, issueNum) {
   event.dataTransfer.setData('text/plain', String(issueNum));
   const el = document.getElementById(`smgmt-ticket-${issueNum}`);
   if (el) setTimeout(() => el.classList.add('dragging-ticket'), 0);
+  // Show ghost pane
+  _smgmtGhostShow();
 }
 
 function _smgmtBacklogDragOver(event) {
@@ -4501,12 +4785,21 @@ async function _smgmtDropOnBacklog(event) {
   }
 }
 
-// Close Move-to popup on Escape
+// Close Move-to popup, ghost pane, and ghost confirm modal on Escape
 document.addEventListener('keydown', function(e) {
   if (e.key === 'Escape') {
     const popup = document.getElementById('smgmt-moveto-popup');
     if (popup && !popup.classList.contains('hidden')) {
       _smgmtMoveToClose();
+    }
+    // Dismiss ghost mid-drag
+    if (_smgmtDragTicket) {
+      _smgmtGhostHide();
+    }
+    // Close ghost confirm modal (no-op if not open)
+    const gcModal = document.getElementById('gc-modal');
+    if (gcModal && !gcModal.classList.contains('hidden')) {
+      _gcClose();
     }
   }
 });
@@ -5001,6 +5294,10 @@ function _setupModals() {
       this.textContent = 'Create Sprint';
     }
   });
+
+  // ── Ghost confirm modal wiring (issue #364) ──
+  document.getElementById('gc-backdrop').addEventListener('click', _gcClose);
+  document.getElementById('gc-confirm-btn').addEventListener('click', _gcConfirm);
 
   // ── New Ticket modal wiring ──
   document.getElementById('nt-close-btn').addEventListener('click', _ntClose);
@@ -6049,6 +6346,40 @@ document.addEventListener('DOMContentLoaded', init);
 
 <!-- ── Inline multi-select action bar (rendered inside sprint list by JS) ── -->
 <!-- The bar is injected at the top of #smgmt-sprint-list via _smgmtUpdateSelectionUI() -->
+
+<!-- ── Ghost-confirm modal (issue #364) ── -->
+<div class="modal-backdrop hidden" id="gc-backdrop"></div>
+<div class="modal gc-modal hidden" id="gc-modal"
+     role="dialog" aria-modal="true" aria-labelledby="gc-modal-title">
+  <div class="modal-header">
+    <span class="modal-title" id="gc-modal-title">Create new sprint?</span>
+    <button class="modal-close" id="gc-close-btn" aria-label="Close" onclick="_gcClose()">&times;</button>
+  </div>
+  <div class="modal-body">
+    <div class="gc-detail-row">
+      <span class="gc-detail-label">New sprint:</span>&nbsp;
+      <strong id="gc-sprint-name"></strong>
+    </div>
+    <div class="gc-detail-row">
+      <span class="gc-detail-label">Moving ticket:</span>&nbsp;
+      <span id="gc-ticket-info"></span>
+    </div>
+    <div class="gc-detail-row">
+      <span class="gc-detail-label">From:</span>&nbsp;
+      <span id="gc-source-pane"></span>
+    </div>
+    <div class="gc-note">
+      This sprint number is the lowest positive integer not yet used.
+      To use a specific number, drag directly onto an existing empty sprint pane
+      or use <em>New Sprint</em>.
+    </div>
+    <div class="gc-error hidden" id="gc-error"></div>
+  </div>
+  <div class="modal-footer">
+    <button class="btn-ghost" id="gc-cancel-btn" type="button" onclick="_gcClose()">Cancel</button>
+    <button class="btn-blue" id="gc-confirm-btn" type="button">Create sprint-1 &amp; move</button>
+  </div>
+</div>
 
 <!-- ── Multi-drag pill (follows cursor) ── -->
 <div class="smgmt-drag-pill" id="smgmt-drag-pill"></div>

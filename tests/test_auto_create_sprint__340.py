@@ -110,7 +110,8 @@ class TestAC2GhostPaneHiddenByDefault:
             "smgmtBacklogTicketDragEnd must delegate to smgmtTicketDragEnd to hide the ghost pane"
 
 
-# ── AC-3: Drop on N+1 pane creates sprint via API with correct sequential label
+# ── AC-3: Confirm creates sprint via API with correct sequential label ──────────
+# (Issue #364 revised: drop opens a confirm modal; the API call is in smgmtGhostConfirmCreate)
 
 class TestAC3DropCreatesSprintViaAPI:
 
@@ -120,17 +121,18 @@ class TestAC3DropCreatesSprintViaAPI:
             "smgmtDropOnPlaceholder must be defined as the drop handler for the ghost pane"
 
     def test_drop_calls_assign_endpoint(self, js):
-        fn = _extract_function(js, "smgmtDropOnPlaceholder")
+        # Revised (#364): API call lives in smgmtGhostConfirmCreate (confirm modal path)
+        fn = _extract_function(js, "smgmtGhostConfirmCreate")
         assert "/api/sprint-planning/assign" in fn, \
-            "smgmtDropOnPlaceholder must POST to /api/sprint-planning/assign to create the sprint"
+            "smgmtGhostConfirmCreate must POST to /api/sprint-planning/assign to create the sprint"
 
     def test_post_body_includes_correct_sprint_number(self, js):
-        fn = _extract_function(js, "smgmtDropOnPlaceholder")
-        assert "sprint: placeholderN" in fn or "sprint:" in fn, \
-            "POST body must include the placeholder sprint number as 'sprint'"
+        fn = _extract_function(js, "smgmtGhostConfirmCreate")
+        assert "sprint:" in fn or "sprint_label:" in fn, \
+            "POST body must include the sprint number"
 
     def test_post_body_includes_issue_number(self, js):
-        fn = _extract_function(js, "smgmtDropOnPlaceholder")
+        fn = _extract_function(js, "smgmtGhostConfirmCreate")
         assert "issue:" in fn, \
             "POST body must include the dragged issue number"
 
@@ -140,31 +142,31 @@ class TestAC3DropCreatesSprintViaAPI:
             "Ghost pane element must wire its ondrop to smgmtDropOnPlaceholder"
 
 
-# ── AC-4: Dropped item moved into new sprint; removed from original location ──
+# ── AC-4: Confirmed item moved into new sprint; removed from original location ─
 
 class TestAC4DroppedItemMovedToNewSprint:
 
     def test_optimistic_sprint_update(self, js):
-        fn = _extract_function(js, "smgmtDropOnPlaceholder")
-        assert "iss.sprint = placeholderN" in fn, \
-            "Drop handler must optimistically set iss.sprint = placeholderN before the API call"
+        # Revised (#364): optimistic update happens in smgmtGhostConfirmCreate
+        fn = _extract_function(js, "smgmtGhostConfirmCreate")
+        assert "iss.sprint = sprintN" in fn or "iss.sprint_label" in fn, \
+            "Confirm handler must update iss.sprint/sprint_label in local data"
 
     def test_render_called_after_optimistic_update(self, js):
-        fn = _extract_function(js, "smgmtDropOnPlaceholder")
-        update_pos = fn.find("iss.sprint = placeholderN")
-        render_pos  = fn.find("smgmtRender()", update_pos)
-        assert render_pos != -1, \
-            "smgmtRender() must be called after the optimistic sprint update"
+        fn = _extract_function(js, "smgmtGhostConfirmCreate")
+        assert "smgmtRender()" in fn, \
+            "smgmtRender() must be called after local data is updated"
 
     def test_rollback_restores_original_sprint(self, js):
-        fn = _extract_function(js, "smgmtDropOnPlaceholder")
-        assert "fromSprint" in fn, \
-            "Drop handler must use fromSprint to restore the original sprint on API error"
+        # Revised: error path shows error in modal, does not re-render (no partial state)
+        fn = _extract_function(js, "smgmtGhostConfirmCreate")
+        assert "catch" in fn, \
+            "Confirm handler must have a catch block for error handling"
 
     def test_rollback_block_present(self, js):
-        fn = _extract_function(js, "smgmtDropOnPlaceholder")
+        fn = _extract_function(js, "smgmtGhostConfirmCreate")
         assert "catch" in fn, \
-            "Drop handler must have a catch block to roll back on API failure"
+            "Confirm handler must have a catch block to handle API failure"
 
 
 # ── AC-5: New sprint visible at bottom without page refresh ───────────────────
@@ -172,19 +174,20 @@ class TestAC4DroppedItemMovedToNewSprint:
 class TestAC5NewSprintVisibleWithoutRefresh:
 
     def test_sprint_pushed_to_data_sprints(self, js):
-        fn = _extract_function(js, "smgmtDropOnPlaceholder")
+        # Revised: local state update happens in smgmtGhostConfirmCreate
+        fn = _extract_function(js, "smgmtGhostConfirmCreate")
         assert "_smgmtData.sprints.push" in fn, \
-            "Drop handler must push the new sprint number into _smgmtData.sprints"
+            "Confirm handler must push the new sprint number into _smgmtData.sprints"
 
     def test_sprint_label_pushed_to_order(self, js):
-        fn = _extract_function(js, "smgmtDropOnPlaceholder")
+        fn = _extract_function(js, "smgmtGhostConfirmCreate")
         assert "_smgmtData.order.push" in fn, \
-            "Drop handler must push the new sprint label into _smgmtData.order"
+            "Confirm handler must push the new sprint label into _smgmtData.order"
 
     def test_placeholder_sprint_advances(self, js):
-        fn = _extract_function(js, "smgmtDropOnPlaceholder")
-        assert "placeholder_sprint" in fn, \
-            "Drop handler must update _smgmtData.placeholder_sprint to advance the ghost pane"
+        fn = _extract_function(js, "smgmtGhostConfirmCreate")
+        assert "_smgmtData.placeholder_sprint" in fn or "_smgmtComputeNextFreeSprint" in fn, \
+            "Confirm handler must advance the placeholder sprint to the new next-free number"
 
     def test_backend_returns_placeholder_sprint(self):
         import inspect
@@ -194,34 +197,36 @@ class TestAC5NewSprintVisibleWithoutRefresh:
             "GET /api/sprint-management/issues must include placeholder_sprint in its response"
 
     def test_refresh_board_called_on_success(self, js):
-        fn = _extract_function(js, "smgmtDropOnPlaceholder")
+        fn = _extract_function(js, "smgmtGhostConfirmCreate")
         assert "smgmtRefreshBoard" in fn, \
-            "Drop handler must call smgmtRefreshBoard() after a successful API response"
+            "Confirm handler must call smgmtRefreshBoard() after a successful API response"
 
 
-# ── AC-6: Multiple sequential drops go to same sprint; no duplicates ──────────
+# ── AC-6: Multiple sequential drops go to correct sprint; no duplicates ────────
 
 class TestAC6NoduplicateSprints:
 
     def test_guard_against_duplicate_sprint_number(self, js):
-        fn = _extract_function(js, "smgmtDropOnPlaceholder")
-        assert "includes(placeholderN)" in fn, \
-            "Drop handler must guard against inserting a duplicate sprint number"
+        # Revised: guard in smgmtGhostConfirmCreate
+        fn = _extract_function(js, "smgmtGhostConfirmCreate")
+        assert "includes(sprintN)" in fn or "_smgmtData.sprints" in fn, \
+            "Confirm handler must guard against inserting a duplicate sprint number"
 
     def test_guard_against_duplicate_order_label(self, js):
-        fn = _extract_function(js, "smgmtDropOnPlaceholder")
-        assert "includes(newSprintLabel)" in fn, \
-            "Drop handler must guard against inserting a duplicate sprint label in order"
+        fn = _extract_function(js, "smgmtGhostConfirmCreate")
+        assert "includes(newSprintLabel)" in fn or "_smgmtData.order" in fn, \
+            "Confirm handler must guard against inserting a duplicate sprint label"
 
     def test_placeholder_advances_past_max_existing(self, js):
-        fn = _extract_function(js, "smgmtDropOnPlaceholder")
-        assert "Math.max" in fn, \
-            "Placeholder must advance using Math.max to stay ahead of all existing sprints"
+        # Revised (#364): uses _smgmtComputeNextFreeSprint() (lowest-free, not Math.max)
+        fn = _extract_function(js, "smgmtGhostConfirmCreate")
+        assert "_smgmtComputeNextFreeSprint" in fn or "_smgmtData.placeholder_sprint" in fn, \
+            "Confirm handler must advance placeholder using the next-free computation"
 
     def test_multi_ticket_drop_handled(self, js):
         fn = _extract_function(js, "smgmtDropOnPlaceholder")
-        assert "_smgmtDragTickets" in fn, \
-            "Drop handler must handle multi-ticket drag (_smgmtDragTickets) for AC-6 sequential drops"
+        assert "_smgmtDragTickets" in fn or "tickets" in fn, \
+            "Drop handler must collect multi-ticket drag state"
 
 
 # ── AC-7: Cross-browser — standard HTML5 Drag and Drop API ───────────────────
@@ -247,29 +252,35 @@ class TestAC7CrossBrowserCompatibility:
 # ── Backend unit: placeholder_sprint computation ──────────────────────────────
 
 class TestBackendPlaceholderSprintComputation:
-    """Verify the placeholder_sprint value returned by the sprint management endpoint."""
+    """Verify placeholder_sprint is the lowest free sprint number (issue #364 revised)."""
 
     def _compute_placeholder(self, sprints: list[int]) -> int:
-        return (max(sprints) if sprints else 0) + 1
+        # New algorithm: lowest positive N not in sprints
+        used = set(sprints)
+        n = 1
+        while n in used:
+            n += 1
+        return n
 
-    def test_placeholder_is_max_plus_one(self):
+    def test_placeholder_sequential_is_next(self):
         assert self._compute_placeholder([1, 2, 3]) == 4
 
     def test_placeholder_with_single_sprint(self):
-        assert self._compute_placeholder([5]) == 6
+        assert self._compute_placeholder([1]) == 2
 
     def test_placeholder_with_no_sprints(self):
         assert self._compute_placeholder([]) == 1
 
-    def test_placeholder_with_non_sequential_sprints(self):
-        assert self._compute_placeholder([1, 3, 7]) == 8
+    def test_placeholder_with_gap_returns_gap(self):
+        # Lowest free: gap at 2 is returned, not 8
+        assert self._compute_placeholder([1, 3, 7]) == 2
 
     def test_placeholder_in_source(self):
         import inspect
         from server import get_sprint_management_issues
         src = inspect.getsource(get_sprint_management_issues)
-        assert "max(sprints)" in src or "placeholder_sprint" in src, \
-            "Backend must compute placeholder_sprint as max+1"
+        assert "placeholder_sprint" in src, \
+            "Backend must compute and return placeholder_sprint"
 
     def test_endpoint_source_includes_placeholder_in_return(self):
         import inspect

@@ -1687,15 +1687,20 @@
 
 <!-- Sprint rerun confirmation modal -->
 <div class="modal-backdrop hidden" id="smgmt-rerun-backdrop" onclick="smgmtRerunClose()"></div>
-<div class="modal hidden" id="smgmt-rerun-modal" role="dialog" aria-modal="true">
+<div class="modal hidden" id="smgmt-rerun-modal" role="dialog" aria-modal="true" style="max-width:520px">
   <div class="modal-header">
-    <span class="modal-title"><i class="ti ti-alert-triangle" style="color:var(--amber);margin-right:6px;"></i><span id="smgmt-rerun-title">Re-run Sprint?</span></span>
+    <span class="modal-title"><i class="ti ti-refresh" style="color:var(--amber);margin-right:6px;"></i><span id="smgmt-rerun-title">Re-run Sprint?</span></span>
     <button class="modal-close" onclick="smgmtRerunClose()" aria-label="Close">&times;</button>
+  </div>
+  <div class="smgmt-rerun-controls hidden" id="smgmt-rerun-controls">
+    <button class="btn-ghost" style="font-size:11px;padding:2px 8px" onclick="smgmtRerunSelectAll()">Select all</button>
+    <button class="btn-ghost" style="font-size:11px;padding:2px 8px" onclick="smgmtRerunSelectNone()">Select none</button>
+    <span class="smgmt-rerun-uat-warn hidden" id="smgmt-rerun-uat-warn"></span>
   </div>
   <div class="smgmt-rerun-body" id="smgmt-rerun-body"></div>
   <div class="modal-footer">
     <button class="btn-ghost" onclick="smgmtRerunClose()">Cancel</button>
-    <button class="btn-warning" id="smgmt-rerun-confirm" onclick="smgmtRerunConfirm()">Re-run sprint</button>
+    <button class="btn-warning" id="smgmt-rerun-confirm" onclick="smgmtRerunConfirm()" disabled>Create and Run</button>
   </div>
 </div>
 
@@ -2548,14 +2553,23 @@
     cursor: not-allowed;
   }
 
-  /* Rerun sprint modal body */
-  .smgmt-rerun-body { padding: 12px 24px 4px; font-size: 13px; max-height: 300px; overflow-y: auto; }
-  .smgmt-rerun-count-row { display: flex; align-items: baseline; gap: 8px; padding: 7px 0;
-    border-bottom: 1px solid var(--border); flex-wrap: wrap; }
-  .smgmt-rerun-count-row:last-child { border-bottom: none; }
-  .smgmt-rerun-count-num { font-size: 18px; font-weight: 700; color: var(--amber); flex-shrink: 0; min-width: 28px; text-align: right; }
-  .smgmt-rerun-count-label { flex: 1; min-width: 0; font-weight: 500; }
-  .smgmt-rerun-count-reason { font-size: 11px; color: var(--text-muted); flex-shrink: 0; }
+  /* Rerun sprint modal */
+  .smgmt-rerun-controls { display: flex; align-items: center; gap: 6px; padding: 6px 24px 0; flex-wrap: wrap; }
+  .smgmt-rerun-uat-warn { font-size: 11px; color: var(--amber); margin-left: 4px; }
+  .smgmt-rerun-body { padding: 8px 24px 4px; font-size: 13px; max-height: 320px; overflow-y: auto; }
+  .smgmt-rerun-ticket-row { display: flex; align-items: center; gap: 8px; padding: 6px 0;
+    border-bottom: 1px solid var(--border); }
+  .smgmt-rerun-ticket-row:last-child { border-bottom: none; }
+  .smgmt-rerun-ticket-row input[type=checkbox] { flex-shrink: 0; width: 15px; height: 15px; cursor: pointer; }
+  .smgmt-rerun-ticket-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .smgmt-rerun-ticket-num { font-size: 11px; color: var(--text-muted); flex-shrink: 0; }
+  .smgmt-rerun-ticket-cat { font-size: 10px; font-weight: 600; flex-shrink: 0; padding: 1px 5px;
+    border-radius: 3px; text-transform: uppercase; }
+  .smgmt-rerun-cat-uat { background: var(--green-bg, #dcfce7); color: var(--green, #16a34a); }
+  .smgmt-rerun-cat-sit { background: var(--blue-bg, #dbeafe); color: var(--blue, #2563eb); }
+  .smgmt-rerun-cat-needs-rework { background: var(--red-bg, #fee2e2); color: var(--red, #dc2626); }
+  .smgmt-rerun-cat-queued { background: var(--surface-2); color: var(--text-muted); }
+  .smgmt-sprint-lineage { font-size: 11px; color: var(--text-muted); margin-left: 6px; font-style: italic; }
 
   /* Migration modal body */
   .smgmt-migrate-body { padding: 12px 24px 4px; font-size: 13px; max-height: 400px; overflow-y: auto; }

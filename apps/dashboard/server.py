@@ -55,6 +55,14 @@ except Exception:
     _SPRINT_REPO_AVAILABLE = False
 
 try:
+    from state_machine import TicketState as _TicketState, transition as _sm_transition
+    _STATE_MACHINE_AVAILABLE = True
+except Exception:
+    _TicketState = None  # type: ignore[assignment]
+    _sm_transition = None  # type: ignore[assignment]
+    _STATE_MACHINE_AVAILABLE = False
+
+try:
     from sizing import SIZE_TO_MINUTES as _SIZE_TO_MINUTES, letter_from_minutes as _letter_from_minutes, minutes_from_letter as _minutes_from_letter
     _SIZING_AVAILABLE = True
 except ImportError:
@@ -2561,33 +2569,37 @@ async def batch_sprint_labels(body: BatchLabelsBody):
     return {"applied": applied, "failed": failed, "errors": errors}
 
 
-_SPRINT_LABEL_RE = re.compile(r"^sprint-\d+(\.\d+)?$")
+_SPRINT_LABEL_RE = re.compile(r"^sprint-\d+(\.\d+)*$")
 
 _REPO_ROOT = Path(__file__).parent.parent.parent
 SPRINT_MANAGER_PATH = _REPO_ROOT / "services" / "sprint_manager" / "sprint_manager.py"
 SPRINT_LOG_PATH = Path(__file__).parent / "sprints" / "sprint_run.log"
 
 
-def _sprint_label_sort_key(label: str) -> tuple[int, int]:
-    """Return (base, suffix) for natural sprint label ordering."""
-    m = re.match(r"^sprint-(\d+)(?:\.(\d+))?$", label)
+def _sprint_label_sort_key(label: str) -> tuple[int, ...]:
+    """Return a tuple of ints for natural sprint label ordering (supports multi-level)."""
+    m = re.match(r"^sprint-(\d+)((?:\.\d+)*)$", label)
     if not m:
-        return (0, 0)
-    return (int(m.group(1)), int(m.group(2)) if m.group(2) else 0)
-
-
-def _next_sprint_sublabel(sprint_label: str) -> str:
-    """Compute the next sub-label for a sprint re-run.
-
-    sprint-15   → sprint-15.1
-    sprint-15.3 → sprint-15.4
-    """
-    m = re.match(r"^sprint-(\d+)(?:\.(\d+))?$", sprint_label)
-    if not m:
-        raise ValueError(f"Invalid sprint label: {sprint_label!r}")
+        return (0,)
     base = int(m.group(1))
-    suffix = int(m.group(2)) if m.group(2) else 0
-    return f"sprint-{base}.{suffix + 1}"
+    rest = tuple(int(x) for x in m.group(2).split(".") if x)
+    return (base,) + rest
+
+
+def _next_sprint_sublabel(sprint_label: str, existing_label_names: set[str]) -> str:
+    """Compute the next available child sub-label for a sprint re-run.
+
+    sprint-25   → sprint-25.1  (or sprint-25.2 if sprint-25.1 already exists, etc.)
+    sprint-25.1 → sprint-25.1.1  (child of sprint-25.1, not sprint-25.2)
+    """
+    if not re.match(r"^sprint-\d+(\.\d+)*$", sprint_label):
+        raise ValueError(f"Invalid sprint label: {sprint_label!r}")
+    suffix = 1
+    while True:
+        candidate = f"{sprint_label}.{suffix}"
+        if candidate not in existing_label_names:
+            return candidate
+        suffix += 1
 
 
 class SprintRunBody(BaseModel):
@@ -4557,17 +4569,36 @@ def get_sprint_branch_status(sprint_label: str, project: str):
 
 
 class SprintRerunBody(BaseModel):
-    confirm: bool
+    ticket_numbers: list[int]
+    auto_run: bool = True
 
 
-@app.get("/api/sprints/{sprint_label}/rerun/preview")
+_RERUN_STATUS_LABELS: frozenset[str] = frozenset({
+    "backlog", "in-progress", "SIT", "UAT", "UAT-approved",
+    "need-rework", "needs-rework", "tester-rejected",
+})
+
+
+def _ticket_category(labels: set[str]) -> str:
+    """Return display category for a sprint ticket based on its current labels."""
+    if labels & {"UAT", "UAT-approved"}:
+        return "UAT"
+    if "SIT" in labels:
+        return "SIT"
+    if labels & {"need-rework", "needs-rework"}:
+        return "needs-rework"
+    return "queued"
+
+
+@app.get("/api/sprints/{sprint_label}/rerun-preview")
 def rerun_sprint_preview(sprint_label: str, project: str):
-    """Return per-ticket rerun preview counts without executing anything.
+    """Return per-ticket preview for the hierarchical re-run dialog.
 
     Response schema:
-      { redispatch_count, tester_count, skip_count, by_ticket: [
-          { issue_num, issue_title, action }  # action: dispatch_coder|dispatch_tester|skip
-        ]
+      {
+        suggested_versioned_label: "sprint-25.1",
+        tickets: [{ issue_num, issue_title, category }]
+          # category: "UAT" | "SIT" | "needs-rework" | "queued"
       }
     """
     if not _SPRINT_LABEL_RE.match(sprint_label):
@@ -4583,100 +4614,59 @@ def rerun_sprint_preview(sprint_label: str, project: str):
         if any(lbl["name"] == sprint_label for lbl in iss.get("labels", []))
     ]
 
-    redispatch_count = 0
-    tester_count = 0
-    skip_count = 0
-    by_ticket: list[dict] = []
+    existing_label_names = {
+        lbl["name"] for lbl in github_client.list_labels(repo_name=project)
+    }
+    suggested = _next_sprint_sublabel(sprint_label, existing_label_names)
 
+    tickets = []
     for iss in sprint_issues:
         current_labels = {lbl["name"] for lbl in iss.get("labels", [])}
-        action, _ = _rerun_policy(current_labels)
-        if action == "dispatch_coder":
-            redispatch_count += 1
-        elif action == "dispatch_tester":
-            tester_count += 1
-        else:
-            skip_count += 1
-        by_ticket.append({
+        tickets.append({
             "issue_num": iss["number"],
             "issue_title": iss["title"],
-            "action": action,
+            "category": _ticket_category(current_labels),
         })
 
-    return {
-        "redispatch_count": redispatch_count,
-        "tester_count": tester_count,
-        "skip_count": skip_count,
-        "by_ticket": by_ticket,
-    }
+    return {"suggested_versioned_label": suggested, "tickets": tickets}
 
 
 @app.post("/api/sprints/{sprint_label}/rerun")
 def rerun_sprint(sprint_label: str, project: str, body: SprintRerunBody):
-    """Apply per-ticket re-run policy, create a sub-label, and dispatch agents.
+    """Create a hierarchically-versioned child sprint and dispatch agents.
 
-    Creates sprint-N.1 (or sprint-N.2, etc.) from sprint-N, moving unfinished
-    tickets to the new sub-label. UAT tickets stay on the original label.
+    Creates sprint-N.1 (or sprint-N.2, sprint-N.1.1, etc.) from sprint-N.
+    Only tickets listed in ticket_numbers are moved to the new sprint;
+    all others remain on the original sprint label unchanged.
 
-    Per-ticket routing on the sub-label:
-      no-label / in-progress  → coder (strips in-progress)
-      tester-rejected         → coder (strips tester-rejected)
-      needs-rework            → coder (preserves needs-rework)
-      SIT                     → tester directly (preserves SIT label)
-      UAT / UAT-approved      → skipped; no label change, stays on parent sprint
+    Each selected ticket is transitioned to QUEUED state (all status labels
+    stripped, 'backlog' added) so sprint_manager treats it as an ordinary
+    new ticket — no manifest, no routing policy.
     """
     if not _SPRINT_LABEL_RE.match(sprint_label):
         raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")
-    if not body.confirm:
-        raise HTTPException(400, detail="confirm must be true")
+    if not body.ticket_numbers:
+        raise HTTPException(400, detail="ticket_numbers must not be empty")
 
     project_root = _project_root_path(project)
     if _is_sprint_running(project_root, sprint_label):
         raise HTTPException(409, detail=f"Cannot re-run sprint {sprint_label!r}: it is currently running")
 
     commander = _commander_dir(project_root)
+    sprints_dir = commander / "sprints"
     log_dir = commander / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
+    sprints_dir.mkdir(parents=True, exist_ok=True)
     ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
     run_id = str(uuid.uuid4())
 
-    try:
-        issues = github_client.list_open_issues_with_body(repo_name=project, limit=200)
-    except subprocess.CalledProcessError as e:
-        raise _gh_error(e)
+    # Compute next versioned sub-label by scanning existing GitHub labels
+    existing_label_names = {
+        lbl["name"] for lbl in github_client.list_labels(repo_name=project)
+    }
+    sub_label = _next_sprint_sublabel(sprint_label, existing_label_names)
 
-    sprint_issues = [
-        iss for iss in issues
-        if any(lbl["name"] == sprint_label for lbl in iss.get("labels", []))
-    ]
-
-    # Evaluate per-ticket policy
-    decisions: list[dict] = []
-    for iss in sprint_issues:
-        current_labels = {lbl["name"] for lbl in iss.get("labels", [])}
-        action, to_strip = _rerun_policy(current_labels)
-        decisions.append({
-            "issue_num": iss["number"],
-            "issue_title": iss["title"],
-            "action": action,
-            "stripped": to_strip,
-        })
-
-    unfinished = [d for d in decisions if d["action"] != "skip"]
-    if not unfinished:
-        return {
-            "run_id": run_id,
-            "noop": True,
-            "message": f"All tickets in {sprint_label!r} are in UAT — nothing to re-run.",
-            "decisions": decisions,
-            "dispatch_count": 0,
-            "skip_count": len(decisions),
-        }
-
-    # Compute the sub-label for this re-run
-    sub_label = _next_sprint_sublabel(sprint_label)
-
-    # Create the sub-label on GitHub with the same color as the parent sprint label
+    # Create GitHub label for the new sprint (same color as parent)
     parent_color = github_client.get_label_color(sprint_label, repo_name=project) or "0075ca"
     github_client.create_label(
         sub_label, parent_color,
@@ -4684,78 +4674,48 @@ def rerun_sprint(sprint_label: str, project: str, body: SprintRerunBody):
         repo_name=project,
     )
 
-    log_lines: list[str] = []
-    decision_log_path = log_dir / f"sprint-rerun-{sprint_label}-{ts}.log"
-    manifest_path = log_dir / f"sprint-rerun-{sprint_label}-{ts}-manifest.json"
+    # Write plan.json for new sprint with parent field and state=planning
+    plan_path = _plan_json_path(project_root, sub_label)
+    _plan_json_write(plan_path, {
+        "sprint_label": sub_label,
+        "parent": sprint_label,
+        "state": "planning",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    })
+
+    # Move selected tickets: swap sprint label, reset to QUEUED state
+    selected_set = set(body.ticket_numbers)
     errors: list[str] = []
+    moved: list[int] = []
 
-    # Apply per-ticket changes: move unfinished tickets to sub-label, strip status labels
-    for d in decisions:
-        issue_num = d["issue_num"]
-        action = d["action"]
-        to_strip = d.get("stripped", [])
-
-        if action == "skip":
-            # UAT ticket: stays on parent sprint, untouched
-            log_lines.append(json.dumps({
-                "run_id": run_id, "tag": "rerun_decision", "ts": ts,
-                "issue": issue_num, "action": "skip",
-            }))
-            continue
-
-        # Move ticket: remove parent sprint label, add sub-label, strip status labels
-        labels_to_remove = [sprint_label] + to_strip
+    for issue_num in body.ticket_numbers:
+        status_to_remove = list(_RERUN_STATUS_LABELS)
         try:
             github_client.update_labels(
                 issue_num,
-                add=[sub_label],
-                remove=labels_to_remove,
+                add=[sub_label, "backlog"],
+                remove=[sprint_label] + status_to_remove,
                 repo_name=project,
             )
+            moved.append(issue_num)
         except subprocess.CalledProcessError as e:
-            msg = f"#{issue_num} failed: {e.stderr.strip()}"
-            errors.append(msg)
-            log_lines.append(json.dumps({
-                "run_id": run_id, "tag": "rerun_decision", "ts": ts,
-                "issue": issue_num, "action": "error", "error": msg,
-            }))
-            continue
-
-        log_lines.append(json.dumps({
-            "run_id": run_id, "tag": "rerun_decision", "ts": ts,
-            "issue": issue_num, "action": action, "sub_label": sub_label,
-        }))
-
-    manifest = {
-        "run_id": run_id,
-        "sprint_label": sub_label,
-        "parent_label": sprint_label,
-        "created_at": ts,
-        "decisions": [d for d in decisions if d["action"] != "skip"],
-    }
-    manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
-
-    # Mark the parent sprint's state file as completed (add rerun_into field)
-    sprints_dir = commander / "sprints"
-    sprints_dir.mkdir(parents=True, exist_ok=True)
-    parent_state_path = sprints_dir / f"{sprint_label}-state.json"
-    if parent_state_path.exists():
-        try:
-            parent_state = json.loads(parent_state_path.read_text(encoding="utf-8"))
-            parent_state["rerun_into"] = sub_label
-            parent_state["completed_at"] = ts
-            parent_state_path.write_text(json.dumps(parent_state, indent=2), encoding="utf-8")
-        except Exception:
-            pass
-    log_lines.append(json.dumps({"run_id": run_id, "tag": "parent_state_updated",
-                                  "ts": ts, "sub_label": sub_label}))
-    decision_log_path.write_text("\n".join(log_lines) + "\n", encoding="utf-8")
+            errors.append(f"#{issue_num}: {e.stderr.strip() if e.stderr else str(e)}")
 
     github_client.invalidate("open_issues_body:")
     github_client.invalidate("open_issues:")
     github_client.invalidate("issues:")
     github_client.invalidate("sprint_labels:")
 
+    if not body.auto_run:
+        return {
+            "run_id": run_id,
+            "sub_label": sub_label,
+            "moved": moved,
+            "errors": errors,
+            "dispatched": False,
+        }
+
+    # Dispatch sprint_manager for the new sprint (same code path as Run Sprint)
     if not SPRINT_MANAGER_PATH.exists():
         raise HTTPException(502, detail=f"sprint_manager.py not found at {SPRINT_MANAGER_PATH}")
 
@@ -4771,8 +4731,15 @@ def rerun_sprint(sprint_label: str, project: str, body: SprintRerunBody):
     except FileExistsError:
         raise HTTPException(409, detail=f"Sprint {sub_label} is already running on {project}")
 
+    # Update plan.json to running before spawning
+    _plan_json_write(plan_path, {
+        **_plan_json_read(plan_path),
+        "state": "running",
+        "started_at": datetime.now(timezone.utc).isoformat(),
+    })
+
     stripped_env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
-    # Inherit parent sprint goal for sub-label run
+    # Inherit parent sprint goal
     goal_path = _sprint_goal_path(project_root, sprint_label)
     if not goal_path.exists():
         goal_path = _sprint_goal_path(project_root, sub_label)
@@ -4782,10 +4749,7 @@ def rerun_sprint(sprint_label: str, project: str, body: SprintRerunBody):
     run_log_fh = open(run_log_path, "w")
     try:
         proc = subprocess.Popen(
-            [
-                sys.executable, str(SPRINT_MANAGER_PATH), sub_label,
-                "--skip-gates", "--rerun-manifest", str(manifest_path),
-            ],
+            [sys.executable, str(SPRINT_MANAGER_PATH), sub_label, "--skip-gates"],
             env=stripped_env,
             cwd=str(coder_path),
             stdout=run_log_fh,
@@ -4797,6 +4761,7 @@ def rerun_sprint(sprint_label: str, project: str, body: SprintRerunBody):
             pending_path.unlink()
         except OSError:
             pass
+        _plan_json_write(plan_path, {**_plan_json_read(plan_path), "state": "cancelled"})
         raise
 
     pending_path.write_text(str(proc.pid), encoding="utf-8")
@@ -4814,6 +4779,7 @@ def rerun_sprint(sprint_label: str, project: str, body: SprintRerunBody):
             pid_path.unlink()
         except OSError:
             pass
+        _plan_json_write(plan_path, {**_plan_json_read(plan_path), "state": "cancelled"})
         raise HTTPException(
             502,
             detail=f"Sprint subprocess exited immediately (rc={proc.returncode}). Log tail:\n{tail}",
@@ -4821,16 +4787,13 @@ def rerun_sprint(sprint_label: str, project: str, body: SprintRerunBody):
     except subprocess.TimeoutExpired:
         pass
 
-    dispatch_count = sum(1 for d in decisions if d["action"] != "skip")
-    skip_count = sum(1 for d in decisions if d["action"] == "skip")
     result: dict = {
         "run_id": run_id,
         "sub_label": sub_label,
-        "decisions": decisions,
-        "dispatch_count": dispatch_count,
-        "skip_count": skip_count,
+        "moved": moved,
         "pid": proc.pid,
         "log": str(run_log_path),
+        "dispatched": True,
     }
     if errors:
         result["errors"] = errors

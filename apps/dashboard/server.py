@@ -2448,6 +2448,7 @@ async def batch_sprint_labels(body: BatchLabelsBody):
 
 
 _SPRINT_LABEL_RE = re.compile(r"^sprint-\d+(\.\d+)?$")
+_SUMMARY_TITLE_RE = re.compile(r"^Sprint \d+(\.\d+)?\s+Executive Summary$")
 
 _REPO_ROOT = Path(__file__).parent.parent.parent
 SPRINT_MANAGER_PATH = _REPO_ROOT / "services" / "sprint_manager" / "sprint_manager.py"
@@ -2757,7 +2758,11 @@ def get_sprint_management_issues(repo: str):
     # Count open tickets per sprint label (both plain and dotted)
     sprint_ticket_counts: dict[str, int] = {lbl: 0 for lbl in all_sprint_labels}
     for iss in issues:
-        if any(lbl["name"] == "sprint-summary" for lbl in iss.get("labels", [])):
+        _is_summary = (
+            any(lbl["name"] == "sprint-summary" for lbl in iss.get("labels", []))
+            or bool(_SUMMARY_TITLE_RE.match(iss.get("title", "") or ""))
+        )
+        if _is_summary:
             continue  # hide sprint-summary issues from pane (AC P1-3)
         sprint_num = None
         found_sprint_label = None
@@ -2820,6 +2825,148 @@ def get_sprint_management_issues(repo: str):
         "empty_sprint_labels": empty_sprint_labels,
         "placeholder_sprint": placeholder_sprint,
     }
+
+
+@app.get("/api/sprints/summaries")
+def get_sprint_summaries(project: str):
+    """Return all sprint-summary issues for a project (open + optionally closed).
+
+    Query params:
+      project=<owner/repo>
+      state=open|all  (default: open)
+
+    Response shape:
+      { "summaries": [ { number, title, sprint_number, sprint_sub_label, state,
+                          outcome, url, created_at, summary_file_path } ] }
+    """
+    try:
+        repo = github_client.get_repo_for_operation(project)
+    except Exception as e:
+        raise HTTPException(400, detail=str(e))
+
+    sprint_label_re = re.compile(r"^sprint-(\d+)(?:\.(\d+))?$")
+
+    try:
+        result = subprocess.run(
+            [
+                "gh", "issue", "list", "--repo", repo,
+                "--label", "sprint-summary",
+                "--state", "open",
+                "--json", "number,title,labels,state,url,createdAt",
+                "--limit", "200",
+            ],
+            capture_output=True, text=True, timeout=15,
+        )
+        open_issues: list[dict] = json.loads(result.stdout or "[]") if result.returncode == 0 else []
+    except Exception:
+        open_issues = []
+
+    # Title-regex fallback: fetch all open issues and find legacy summaries without the label
+    try:
+        all_open = github_client.list_open_issues_with_body(repo_name=project, limit=200)
+        seen_nums = {i["number"] for i in open_issues}
+        for iss in all_open:
+            if iss["number"] in seen_nums:
+                continue
+            if _SUMMARY_TITLE_RE.match(iss.get("title", "") or ""):
+                open_issues.append(iss)
+    except Exception:
+        pass
+
+    project_root = _project_root_path(project)
+    commander = _commander_dir(project_root)
+    sprints_dir = commander / "sprints"
+
+    def _build_summary(iss: dict, is_closed: bool) -> dict:
+        num = iss["number"]
+        title = iss.get("title", "")
+
+        # Determine sprint number and sub-label from labels
+        sprint_number: Optional[int] = None
+        sprint_sub_label: Optional[str] = None
+        for lbl in iss.get("labels", []):
+            m = sprint_label_re.match(lbl["name"] if isinstance(lbl, dict) else lbl)
+            if m:
+                sprint_number = int(m.group(1))
+                sprint_sub_label = m.group(2)
+                break
+
+        # Fallback: parse sprint number from title ("Sprint 21 Executive Summary")
+        if sprint_number is None:
+            tm = re.match(r"^Sprint (\d+)(?:\.(\d+))?\s+Executive Summary$", title)
+            if tm:
+                sprint_number = int(tm.group(1))
+                sprint_sub_label = tm.group(2)
+
+        # Compute outcome using same logic as finish-card endpoint
+        outcome = "completed"
+        if sprint_number is not None:
+            sprint_n = str(sprint_number)
+            if sprint_sub_label:
+                sprint_label = f"sprint-{sprint_number}.{sprint_sub_label}"
+            else:
+                sprint_label = f"sprint-{sprint_number}"
+
+            # Check cancelled state from sprint json
+            fc_json_path = _sprint_json_path(project_root, sprint_label)
+            fc_sprint_json = _sprint_json_read(fc_json_path)
+            is_cancelled = fc_sprint_json.get("status") == "cancelled"
+
+            # Check summary file for status
+            fc_sprint_status: Optional[str] = None
+            if sprints_dir.exists():
+                for sf in sorted(sprints_dir.glob(f"sprint-{sprint_n}-summary-*.md"), key=lambda p: p.stat().st_mtime, reverse=True):
+                    try:
+                        meta = _parse_summary_file(sf)
+                        raw = (meta.get("status") or "").lower()
+                        if raw in ("complete", "completed"):
+                            fc_sprint_status = "completed"
+                        elif raw in ("stopped", "failed", "cancelled"):
+                            fc_sprint_status = "stopped"
+                            if raw == "cancelled":
+                                is_cancelled = True
+                    except Exception:
+                        pass
+                    break
+
+            if is_cancelled:
+                outcome = "cancelled"
+            elif _has_rework_tickets(sprint_label, project):
+                outcome = "has_rework"
+            else:
+                outcome = "completed"
+
+        # Find summary file path
+        summary_file_path: Optional[str] = None
+        if sprint_number is not None and sprints_dir.exists():
+            sprint_n = str(sprint_number)
+            cands = sorted(sprints_dir.glob(f"sprint-{sprint_n}-summary-*.md"), key=lambda p: p.stat().st_mtime, reverse=True)
+            if cands:
+                summary_file_path = f".commander/sprints/{cands[0].name}"
+
+        return {
+            "number": num,
+            "title": title,
+            "sprint_number": sprint_number,
+            "sprint_sub_label": sprint_sub_label,
+            "state": "closed" if is_closed else "open",
+            "outcome": outcome,
+            "url": iss.get("url", iss.get("html_url", "")),
+            "created_at": iss.get("createdAt", iss.get("created_at", "")),
+            "summary_file_path": summary_file_path,
+        }
+
+    summaries = [_build_summary(iss, False) for iss in open_issues]
+
+    # Sort: newest sprint number first; for sub-labels, higher sub sorts before base
+    def _sort_key(s: dict):
+        n = s["sprint_number"] or 0
+        sub = int(s["sprint_sub_label"]) if s["sprint_sub_label"] else 0
+        return (-n, -sub)
+
+    summaries.sort(key=_sort_key)
+
+    return {"summaries": summaries}
 
 
 @app.get("/api/sprints/order")

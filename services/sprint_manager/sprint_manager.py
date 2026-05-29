@@ -422,6 +422,7 @@ _RUN_MUTABLE_GITHUB_LABELS: frozenset[str] = frozenset({
 })
 
 _SPRINT_LABEL_RE = re.compile(r"^sprint-\d+$")
+_SUMMARY_TITLE_RE = re.compile(r"^Sprint \d+(\.\d+)?\s+Executive Summary$")
 
 
 def _guard_sprint_labels(
@@ -3832,10 +3833,21 @@ def list_backlog_issues(label: str, repo_name: Optional[str] = None) -> list[dic
             capture_output=True, text=True, check=True,
         )
         issues = json.loads(out.stdout)
-        # Only return issues in backlog state
+        # Only return issues in backlog state; skip sprint-summary documentation tickets
         result = []
         for issue in issues:
             labels_set = {lbl["name"] for lbl in issue.get("labels", [])}
+            is_summary = (
+                "sprint-summary" in labels_set
+                or bool(_SUMMARY_TITLE_RE.match(issue.get("title", "") or ""))
+            )
+            if is_summary:
+                structured_log.info(
+                    "dispatch_skipped_summary",
+                    f"skipping summary ticket #{issue['number']} from backlog",
+                    issue_num=issue["number"],
+                )
+                continue
             if _classify(labels_set) == "backlog":
                 result.append(issue)
         return sorted(result, key=lambda i: i["number"])

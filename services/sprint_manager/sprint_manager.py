@@ -418,7 +418,7 @@ RUN_MUTABLE_LABELS: frozenset[str] = frozenset({
 # Actual GitHub label strings (as applied on issues) that correspond to
 # RUN_MUTABLE_LABELS.  Used as the allowlist when filtering add-label calls.
 _RUN_MUTABLE_GITHUB_LABELS: frozenset[str] = frozenset({
-    "in-progress", "SIT", "UAT", "need-rework", "needs-rework",
+    "in-progress", "SIT", "UAT", "needs-rework", "need-rework",  # READ-only: backward compat
 })
 
 _SPRINT_LABEL_RE = re.compile(r"^sprint-\d+$")
@@ -1124,7 +1124,7 @@ def _apply_needs_rework_label(
     category: Optional[str],
     cfg: Optional["SprintConfig"] = None,
 ) -> None:
-    """Apply the need-rework label via update_ticket.py (best-effort).
+    """Apply the needs-rework label via update_ticket.py (best-effort).
 
     Only called for logic failure categories; exceptions are caught and printed
     as warnings so a missing label never breaks the sprint.

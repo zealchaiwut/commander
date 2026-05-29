@@ -1873,7 +1873,7 @@ def _home_activity_feed(
                     "timestamp": ts,
                     "link": issue.get("url", ""),
                 })
-            elif "need-rework" in labels:
+            elif "needs-rework" in labels or "need-rework" in labels:  # READ-only: backward compat
                 events.append({
                     "type": "ticket_needs_rework",
                     "project": slug,
@@ -2838,7 +2838,8 @@ def save_sprint_order(project: str, body: SprintOrderBody):
     return {"ok": True}
 
 
-_MIGRATION_STATUS_LABELS = {"UAT", "UAT-approved", "SIT", "in-progress", "need-rework"}
+# READ-only: recognises both spellings so migration removes whichever is present
+_MIGRATION_STATUS_LABELS = {"UAT", "UAT-approved", "SIT", "in-progress", "needs-rework", "need-rework"}
 
 
 # ── Estimate-summary helpers (issue #211) ────────────────────────────────────
@@ -4701,7 +4702,7 @@ def delete_sprint(sprint_label: str, project: str):
 
 # ── Finish Sprint endpoint (issue #195) ──────────────────────────────────────
 
-_FINISH_SPRINT_REMOVE_LABELS = {"in-progress", "sit", "need-rework"}
+_FINISH_SPRINT_REMOVE_LABELS = {"in-progress", "sit", "needs-rework"}
 
 
 @app.post("/api/projects/{owner}/{repo_name}/sprints/{label}/finish")
@@ -4709,7 +4710,7 @@ async def finish_sprint(owner: str, repo_name: str, label: str):
     """Bulk-close all open issues for a sprint, moving them to UAT first.
 
     AC: iterates all open issues with the sprint label, adds 'UAT' label
-    (removing 'in-progress', 'sit', 'need-rework' if present), then closes each
+    (removing 'in-progress', 'sit', 'needs-rework' if present), then closes each
     issue via gh issue close.
 
     Returns: { "closed": N, "errors": [] }

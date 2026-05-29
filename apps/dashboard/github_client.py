@@ -17,7 +17,8 @@ from config import TEST_GITHUB_REPO
 CACHE_TTL = 30.0
 SPRINT_RE = re.compile(r"^sprint-(\d+)$")
 SPRINT_LABEL_RE_ALL = re.compile(r"^sprint-(\d+)(?:\.(\d+))?$")
-STATUS_LABELS = {"in-progress", "SIT", "UAT", "UAT-approved", "need-rework", "blocked"}
+# READ-only: recognises both spellings for backward compat with old tickets
+STATUS_LABELS = {"in-progress", "SIT", "UAT", "UAT-approved", "needs-rework", "need-rework", "blocked"}
 
 _cache: dict[str, tuple[float, object]] = {}
 _detected_repo: str | None = None
@@ -477,7 +478,7 @@ def approve_issue(issue_id: int, repo_name: str | None = None):
 def reject_issue(issue_id: int, reason: str, repo_name: str | None = None):
     r = _r(repo_name)
     _run("issue", "edit", str(issue_id), "--repo", r,
-         "--add-label", "need-rework",
+         "--add-label", "needs-rework",
          "--remove-label", "UAT")
     _run("issue", "comment", str(issue_id), "--repo", r,
          "--body", f"❌ **Rejected:** {reason}")

@@ -38,17 +38,17 @@ _SPRINT_LABEL_RE = re.compile(r"^sprint-\d+$")
 STATUS_MAP = {
     "in-progress": {
         "add":    ["in-progress"],
-        "remove": ["SIT", "UAT", "need-rework", "blocked"],
+        "remove": ["SIT", "UAT", "needs-rework", "blocked"],
         "close":  None,
     },
     "sit": {
         "add":    ["SIT"],
-        "remove": ["in-progress", "UAT", "need-rework", "blocked"],
+        "remove": ["in-progress", "UAT", "needs-rework", "blocked"],
         "close":  None,
     },
     "uat": {
         "add":    ["UAT"],
-        "remove": ["in-progress", "SIT", "need-rework", "blocked"],
+        "remove": ["in-progress", "SIT", "needs-rework", "blocked"],
         "close":  None,
     },
     "blocked": {
@@ -67,7 +67,7 @@ STATUS_MAP = {
         "close":  None,
     },
     "needs-rework": {
-        "add":    ["need-rework"],
+        "add":    ["needs-rework"],
         "remove": ["in-progress", "SIT", "UAT", "UAT-approved"],
         "close":  None,
     },

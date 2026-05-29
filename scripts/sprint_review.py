@@ -654,7 +654,7 @@ def _fetch_sprint_issues(sprint_label: str, repo_name: Optional[str]) -> list[di
     for issue in all_issues:
         labels = {lbl["name"] for lbl in issue.get("labels", [])}
         # Classify: backlog = not in-progress / SIT / UAT / UAT-approved
-        status_labels = {"in-progress", "SIT", "UAT", "UAT-approved", "need-rework", "blocked"}
+        status_labels = {"in-progress", "SIT", "UAT", "UAT-approved", "needs-rework", "need-rework", "blocked"}  # READ-only: backward compat
         if not (labels & status_labels):
             result.append(issue)
     return sorted(result, key=lambda i: i["number"])

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Backfill the sprint-summary label on legacy summary issues.
 
-Reads projects.json, finds open issues whose title matches
+Reads projects.json, finds all issues (open or closed) whose title matches
   ^Sprint N[.M] Executive Summary$
 and adds the 'sprint-summary' label to any that don't already have it.
 
@@ -20,14 +20,15 @@ TITLE_RE = re.compile(r"^Sprint \d+(\.\d+)?\s+Executive Summary$")
 LABEL = "sprint-summary"
 
 
-def list_open_issues(repo: str) -> list[dict]:
+def list_all_issues(repo: str) -> list[dict]:
     result = subprocess.run(
         [
             "gh", "issue", "list",
             "--repo", repo,
-            "--state", "open",
+            "--state", "all",
+            "--search", "Executive Summary in:title",
             "--json", "number,title,labels",
-            "--limit", "200",
+            "--limit", "500",
         ],
         capture_output=True, text=True,
     )
@@ -73,7 +74,7 @@ def main():
         if not repo:
             continue
 
-        issues = list_open_issues(repo)
+        issues = list_all_issues(repo)
         missing = []
         for iss in issues:
             if not TITLE_RE.match(iss.get("title", "") or ""):

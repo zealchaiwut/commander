@@ -23,12 +23,13 @@ import sys
 import time
 from pathlib import Path
 
-_DASHBOARD_DIR = Path(__file__).parent.parent / "apps" / "dashboard"
 _REPO_ROOT = Path(__file__).parent.parent
+_DASHBOARD_DIR = _REPO_ROOT / "apps" / "dashboard"
 sys.path.insert(0, str(_REPO_ROOT))
 sys.path.insert(0, str(_DASHBOARD_DIR))
 import github_client
 from services.logging import log as structured_log
+from services.run_id import mint_run_id
 
 # Sprint labels (sprint-N) are protected: they must never be removed by a
 # status transition. This guard matches any "sprint-<digits>" label name.
@@ -195,9 +196,9 @@ def _run_with_retry(cmd: list[str], label: str, operation: str, issue_num: int =
 def main():
     _load_env()
 
-    run_id = os.environ.get("COMMANDER_RUN_ID", "")
-    if run_id:
-        structured_log.set_context(run_id=run_id, source="update_ticket")
+    _run_id = mint_run_id("manual")
+    os.environ["COMMANDER_RUN_ID"] = _run_id
+    structured_log.set_context(run_id=_run_id, source="update_ticket")
 
     parser = argparse.ArgumentParser(description="Update issue status")
     parser.add_argument("--issue",  type=int, required=True)
@@ -207,6 +208,8 @@ def main():
     parser.add_argument("--repo",   default=None,
                         help="Override repo (owner/name).  Defaults to auto-detected repo.")
     args = parser.parse_args()
+    structured_log.set_context(issue_num=args.issue)
+    structured_log.info("ticket_update_start", f"updating issue #{args.issue} to status {args.status!r}", issue_num=args.issue, status=args.status)
 
     if args.status == "uat":
         _check_uat_safeguard(args.issue, args.force)

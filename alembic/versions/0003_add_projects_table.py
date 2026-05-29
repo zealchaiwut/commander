@@ -8,6 +8,7 @@ Create Date: 2026-05-29 00:00:00.000000
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from typing import Sequence, Union
 
@@ -45,7 +46,10 @@ def upgrade() -> None:
     if _PROJECTS_JSON.exists():
         try:
             projects = json.loads(_PROJECTS_JSON.read_text())
-        except Exception:
+        except (json.JSONDecodeError, OSError) as exc:
+            logging.getLogger(__name__).warning(
+                "Could not parse %s, skipping seed data: %s", _PROJECTS_JSON, exc
+            )
             projects = []
         for proj in projects:
             repo = (proj.get("repo") or "").strip()

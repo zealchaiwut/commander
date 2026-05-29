@@ -26,6 +26,10 @@
       --blue-bg:      #dbeafe;
       --purple:       #7c3aed;
       --purple-bg:    #ede9fe;
+      --steel:        #4f7ab8;
+      --steel-bg:     #e0eaf8;
+      --yellow:       #a16207;
+      --yellow-bg:    #fefce8;
       --color-border-info: #2563eb;
       --mono: 'SF Mono','Fira Code','Cascadia Code',monospace;
     }
@@ -49,6 +53,10 @@
       --blue-bg:      rgba(96,165,250,.13);
       --purple:       #a78bfa;
       --purple-bg:    rgba(167,139,250,.13);
+      --steel:        #7aa3d4;
+      --steel-bg:     rgba(122,163,212,.13);
+      --yellow:       #facc15;
+      --yellow-bg:    rgba(250,204,21,.13);
       --color-border-info: #60a5fa;
     }
 
@@ -2313,6 +2321,36 @@
   @keyframes smgmtPulseDot {
     0%, 100% { opacity: 1; transform: scale(1); }
     50%      { opacity: 0.5; transform: scale(0.7); }
+  }
+
+  /* Completed clean — soft blue border + ring + header gradient */
+  .smgmt-sprint-block.smgmt-completed {
+    border-color: var(--steel);
+    box-shadow: 0 0 0 3px var(--steel-bg), 0 1px 3px rgba(0,0,0,0.05);
+  }
+  .smgmt-sprint-header.smgmt-completed-header {
+    background: linear-gradient(180deg, var(--steel-bg) 0%, transparent 100%);
+    border-bottom-color: var(--border);
+  }
+
+  /* Has rework — yellow border + ring + header gradient */
+  .smgmt-sprint-block.smgmt-has-rework {
+    border-color: var(--yellow);
+    box-shadow: 0 0 0 3px var(--yellow-bg), 0 1px 3px rgba(0,0,0,0.05);
+  }
+  .smgmt-sprint-header.smgmt-has-rework-header {
+    background: linear-gradient(180deg, var(--yellow-bg) 0%, transparent 100%);
+    border-bottom-color: var(--border);
+  }
+
+  /* Cancelled — amber border + ring + header gradient */
+  .smgmt-sprint-block.smgmt-cancelled {
+    border-color: var(--amber);
+    box-shadow: 0 0 0 3px var(--amber-bg), 0 1px 3px rgba(0,0,0,0.05);
+  }
+  .smgmt-sprint-header.smgmt-cancelled-header {
+    background: linear-gradient(180deg, var(--amber-bg) 0%, transparent 100%);
+    border-bottom-color: var(--border);
   }
 
   /* Progress section (RUNNING state only) */

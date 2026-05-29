@@ -740,11 +740,6 @@ async def home_redirect():
     return RedirectResponse(url="/", status_code=301)
 
 
-@app.get("/home-preview")
-async def home_preview_redirect():
-    return RedirectResponse(url="/", status_code=301)
-
-
 @app.get("/overview")
 async def overview_redirect():
     return RedirectResponse(url="/", status_code=301)
@@ -966,27 +961,6 @@ async def receive_token_usage(event: TokenUsageEvent):
     )
     await broadcast({"type": "update", "event": event.model_dump()})
     return {"ok": True}
-
-
-@app.get("/api/debug/token-usage/by-agent-model")
-def debug_token_usage_by_agent_model(since: Optional[str] = None):
-    """Return token usage grouped by agent_role and model_name.
-
-    Useful for auditing which agents/models are consuming tokens.
-    Optional query param: since=<ISO-8601> to restrict to a time window.
-    """
-    return db.get_token_usage_by_agent_model(window_start_utc=since)
-
-
-@app.get("/api/debug/token-usage")
-def debug_token_usage():
-    """AC-2: Diagnostic endpoint for the token_usage pipeline.
-
-    Returns row_count (int), latest_recorded_at (ISO-8601 or null),
-    and tokens_today (int) so operators can confirm pipeline health
-    without querying SQLite directly.
-    """
-    return db.get_debug_token_usage()
 
 
 @app.get("/api/agents")
@@ -3016,16 +2990,6 @@ def run_sprint_managed(body: SprintMgmtRunBody):
         "migrated_count": migrated_count,
         "migrate_from": body.migrate_from,
     }
-
-
-@app.get("/api/sprints/running")
-def get_running_sprints():
-    """Return all currently running sprints across all projects (checks PID files).
-
-    Returns {"sprints": [...], "count": N} where each item is {project, sprint_label}.
-    """
-    sprints = _all_sprints_running()
-    return {"sprints": sprints, "count": len(sprints)}
 
 
 @app.get("/api/sprints/running-all")

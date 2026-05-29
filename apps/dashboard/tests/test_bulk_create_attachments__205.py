@@ -229,8 +229,8 @@ class TestBulkAttachValidation:
             )
         assert res.status_code == 202
 
-    def test_pdf_rejected_images_only(self, client):
-        """AC: Bulk create now accepts images only — PDF returns 422 (issue #260)."""
+    def test_pdf_accepted(self, client):
+        """AC (issue #374): PDF files are now accepted by bulk create."""
         pdf_bytes = b"%PDF-1.4 " + b"\x00" * 50
         with patch("asyncio.create_task"):
             res = client.post(
@@ -242,11 +242,10 @@ class TestBulkAttachValidation:
                 },
                 files=[("files", ("spec.pdf", pdf_bytes, "application/pdf"))],
             )
-        assert res.status_code == 422
-        assert "png" in res.text.lower() or "jpg" in res.text.lower() or "disallowed" in res.text.lower()
+        assert res.status_code == 202
 
-    def test_html_rejected_images_only(self, client):
-        """AC: Bulk create now accepts images only — HTML returns 422 (issue #260)."""
+    def test_html_accepted(self, client):
+        """AC (issue #374): HTML files are now accepted by bulk create."""
         html_bytes = b"<html><body>Test</body></html>"
         with patch("asyncio.create_task"):
             res = client.post(
@@ -258,8 +257,22 @@ class TestBulkAttachValidation:
                 },
                 files=[("files", ("page.html", html_bytes, "text/html"))],
             )
-        assert res.status_code == 422
-        assert "png" in res.text.lower() or "jpg" in res.text.lower() or "disallowed" in res.text.lower()
+        assert res.status_code == 202
+
+    def test_md_accepted(self, client):
+        """AC (issue #374): Markdown files are accepted by bulk create."""
+        md_bytes = b"# Feature\n\nDetails here.\n"
+        with patch("asyncio.create_task"):
+            res = client.post(
+                "/api/tickets/bulk",
+                data={
+                    "repo": "zealchaiwut/commander",
+                    "prompts": json.dumps(["test prompt"]),
+                    "concurrency": "3",
+                },
+                files=[("files", ("spec.md", md_bytes, "text/markdown"))],
+            )
+        assert res.status_code == 202
 
     def test_oversized_file_returns_422(self, client):
         """AC4: File exceeding 25 MB returns 422."""

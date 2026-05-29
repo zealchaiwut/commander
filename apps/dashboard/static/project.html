@@ -1527,6 +1527,58 @@
       font-size: 12px; padding: 8px 12px; border-radius: 6px;
     }
 
+    /* Draft-ready card (issue #374) */
+    .bc-card--draft_ready { border-color: var(--blue); }
+    .bc-status-dot--draft_ready {
+      border-color: var(--blue); background: var(--blue);
+      position: relative; display: flex; align-items: center; justify-content: center;
+    }
+    .bc-status-dot--draft_ready::after {
+      content: '✓'; color: #fff; font-size: 7px; font-weight: 700; line-height: 1; position: absolute;
+    }
+    .bc-card-label--draft { color: var(--blue); font-weight: 700; }
+    .bc-card-title {
+      font-size: 11px; color: var(--text); font-weight: 600;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0;
+    }
+    .bc-card-label-row { display: flex; align-items: center; gap: 6px; margin-top: 6px; }
+    .bc-ticket-label-lbl { font-size: 10px; color: var(--text-muted); white-space: nowrap; }
+    .bc-ticket-label-input {
+      flex: 1; font-size: 11px; padding: 2px 6px;
+      border: 1px solid var(--border); border-radius: 4px;
+      background: var(--surface-2); color: var(--text); outline: none; min-width: 0;
+    }
+    .bc-ticket-label-input:focus { border-color: var(--blue); }
+
+    /* Review overlay (issue #374) */
+    .bc-review-overlay {
+      position: absolute; inset: 0; z-index: 10;
+      background: var(--surface);
+      display: flex; flex-direction: column;
+      border-top: 2px solid var(--blue);
+    }
+    #bc-step2 { position: relative; }
+    .bc-review-header {
+      display: flex; align-items: baseline; gap: 10px;
+      padding: 12px 20px 10px; border-bottom: 1px solid var(--border); flex-shrink: 0;
+      font-size: 13px; font-weight: 600; color: var(--text);
+    }
+    .bc-review-sub { font-size: 11px; color: var(--text-muted); font-weight: 400; }
+    .bc-review-list { flex: 1; overflow-y: auto; padding: 8px 16px; display: flex; flex-direction: column; gap: 6px; }
+    .bc-review-item {
+      display: flex; align-items: center; justify-content: space-between; gap: 12px;
+      padding: 8px 12px; border: 1px solid var(--border); border-radius: 6px;
+      background: var(--surface); font-size: 12px;
+    }
+    .bc-review-check-wrap { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; cursor: pointer; }
+    .bc-review-check { cursor: pointer; flex-shrink: 0; }
+    .bc-review-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
+    .bc-review-labels { font-size: 10px; color: var(--text-muted); white-space: nowrap; flex-shrink: 0; }
+    .bc-review-actions {
+      display: flex; justify-content: flex-end; gap: 8px;
+      padding: 10px 20px; border-top: 1px solid var(--border); flex-shrink: 0;
+    }
+
     /* Step actions footer */
     .bc-step-actions {
       display: flex; align-items: center; justify-content: space-between;
@@ -2071,10 +2123,10 @@
               <label class="bc-settings-label" for="bc-repo">Repo</label>
               <select class="bc-select" id="bc-repo" onchange="bcRepoChanged()"></select>
             </div>
-            <div class="bc-settings-field bc-settings-field--labels">
+            <div class="bc-settings-field bc-settings-field--labels" style="display:none">
               <label class="bc-settings-label" for="bc-default-labels">Default labels</label>
               <input class="bc-text-input" id="bc-default-labels" type="text"
-                     placeholder="enhancement, frontend" autocomplete="off">
+                     placeholder="enhancement, frontend" autocomplete="off" value="enhancement">
             </div>
           </div>
 
@@ -2093,9 +2145,9 @@
           <!-- Image Attachments -->
           <div class="bc-attach-section">
             <div class="bc-attach-header">
-              <label class="bc-settings-label">Images <span class="bc-label-hint">(optional &mdash; assign each image to all tickets or a specific one)</span></label>
+              <label class="bc-settings-label">Attachments <span class="bc-label-hint">(optional &mdash; applied to all tickets in the batch)</span></label>
               <p class="bc-label-hint bc-attach-limits">
-                Allowed: .png and .jpg images.
+                Allowed: .png, .jpg, .md, .html, .pdf.
                 &nbsp;&bull;&nbsp; Max 25 MB per file, 50 MB total.
               </p>
             </div>
@@ -2104,9 +2156,9 @@
                  ondragleave="this.classList.remove('drag-over')"
                  ondrop="_bcOnDrop(event)"
                  onclick="_bcPickFiles()">
-              <span class="dt-dropzone-hint">Drop images here or click to attach</span>
+              <span class="dt-dropzone-hint">Drop files here or click to attach</span>
               <input type="file" id="bc-file-input" multiple
-                     accept=".png,.jpg,.jpeg"
+                     accept=".png,.jpg,.jpeg,.md,.html,.htm,.pdf"
                      style="display:none" onchange="_bcOnFileInput(event)">
             </div>
             <div class="bc-file-queue" id="bc-file-queue"></div>
@@ -2136,6 +2188,20 @@
           <div class="bc-parallel-banner" id="bc-parallel-banner"></div>
           <div class="bc-summary-strip" id="bc-summary-strip"></div>
           <div class="bc-ticket-list" id="bc-ticket-list"></div>
+
+          <!-- Review overlay: shown when user clicks Review & Post (issue #374) -->
+          <div id="bc-review-overlay" class="bc-review-overlay hidden">
+            <div class="bc-review-header">
+              <strong>Review &amp; Post to GitHub</strong>
+              <span class="bc-review-sub">Select which tickets to create</span>
+            </div>
+            <div id="bc-review-list" class="bc-review-list"></div>
+            <div class="bc-review-actions">
+              <button type="button" class="btn-ghost" onclick="bcCancelReview()">Cancel</button>
+              <button type="button" class="btn-primary" id="bc-post-github-btn" disabled onclick="bcPostSelected()">Post to GitHub</button>
+            </div>
+          </div>
+
           <!-- Step 2 footer actions -->
           <div class="bc-step-actions">
             <div class="bc-step-actions-left">
@@ -2146,10 +2212,10 @@
             </div>
             <div class="bc-step-actions-right">
               <button type="button" class="bc-btn-retry-all hidden" id="bc-retry-all-btn" onclick="bcRetryAllFailed()">Retry all failed (0)</button>
-              <button type="button" class="btn-ghost hidden" id="bc-recreate-btn" onclick="bcRecreate()">Recreate</button>
               <button type="button" class="bc-stop-btn" id="bc-stop-btn" onclick="bcStop()">
                 <i class="ti ti-player-stop"></i> Stop after current
               </button>
+              <button type="button" class="btn-secondary hidden" id="bc-review-post-btn" onclick="bcReviewAndPost()">Review &amp; Post</button>
               <button type="button" class="btn-primary" id="bc-done-btn" disabled>Running...</button>
             </div>
           </div>

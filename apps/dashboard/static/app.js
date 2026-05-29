@@ -7415,7 +7415,7 @@ function _bcAddFiles(incoming) {
     const ext = '.' + f.name.split('.').pop().toLowerCase();
     if (!BC_ALLOWED_EXTS.has(ext)) {
       if (errEl) {
-        errEl.textContent = `File '${f.name}' has a disallowed extension ('${ext}').`;
+        errEl.textContent = `File '${f.name}' has unsupported type ('${ext}'). Accepted: .png, .jpg, .md, .html, .pdf, and other document/code types.`;
         errEl.classList.remove('hidden');
       }
       continue;
@@ -7699,6 +7699,18 @@ function _bcConnectSSE(jobId) {
         const idx = event.ticket.index;
         _bcJobState.tickets[idx] = event.ticket;
         _bcRenderStep2();
+      } else if (event.type === 'job_drafts_ready' && _bcJobState) {
+        // All BA drafts ready — show Review & Post button (issue #374)
+        _bcJobState.status = 'drafts_ready';
+        _bcRenderStep2();
+        es.close();
+        _bcEventSource = null;
+        // Keep job id in bc_last_job_id so post-selected and redraft can use it
+        if (_bcJobId) {
+          try { localStorage.setItem('bc_last_job_id', _bcJobId); } catch (_) {}
+        }
+        localStorage.removeItem('bc_job_id');
+        _bcJobId = null;
       } else if (event.type === 'job_done' && _bcJobState) {
         _bcJobState.status = 'done';
         _bcRenderStep2();
@@ -7741,6 +7753,9 @@ function _bcRenderStep2() {
   // Tickets that have fully completed (terminal state reached)
   const fullyDone = sized + estimateFailed + failed + skipped;
 
+  // Count draft_ready tickets for the new flow (issue #374)
+  const draftReady = tickets.filter(t => t.state === 'draft_ready').length;
+
   // Banner
   const banner = document.getElementById('bc-parallel-banner');
   if (banner) {
@@ -7749,6 +7764,12 @@ function _bcRenderStep2() {
         `BA is drafting ${total} tickets in parallel &mdash; ` +
         `${sized + estimateFailed} done, ${drafting + estimating} running, ${pending + created} queued` +
         `<span class="bc-concurrency-pill">concurrency: ${concurrency}</span>`;
+    } else if (job.status === 'drafts_ready') {
+      if (sizeWarning > 0) {
+        banner.innerHTML = `${draftReady} ticket${draftReady !== 1 ? 's' : ''} ready to review. ${sizeWarning} need size remediation.`;
+      } else {
+        banner.innerHTML = `${total} ticket${total !== 1 ? 's' : ''} drafted. Review and select which to post.`;
+      }
     } else if (job.status === 'done') {
       if (sizeWarning > 0) {
         banner.innerHTML = `All tickets processed. ${sizeWarning} ticket${sizeWarning > 1 ? 's' : ''} need size remediation.`;
@@ -7794,20 +7815,26 @@ function _bcRenderStep2() {
   // Footer buttons
   const stopBtn = document.getElementById('bc-stop-btn');
   const doneBtn = document.getElementById('bc-done-btn');
-  const recreateBtn = document.getElementById('bc-recreate-btn');
+  const reviewPostBtn = document.getElementById('bc-review-post-btn');
   if (stopBtn && doneBtn) {
     if (job.status === 'running') {
       stopBtn.disabled = false;
       doneBtn.disabled = true;
       doneBtn.textContent = 'Running...';
-      if (recreateBtn) recreateBtn.classList.add('hidden');
+      if (reviewPostBtn) reviewPostBtn.classList.add('hidden');
+    } else if (job.status === 'drafts_ready') {
+      // All drafts ready — offer Review & Post (issue #374)
+      stopBtn.disabled = true;
+      doneBtn.disabled = false;
+      doneBtn.textContent = 'Close';
+      doneBtn.onclick = closeBulkCreateModal;
+      if (reviewPostBtn && draftReady > 0) reviewPostBtn.classList.remove('hidden');
     } else {
       stopBtn.disabled = true;
       doneBtn.disabled = false;
       doneBtn.textContent = 'Close';
       doneBtn.onclick = closeBulkCreateModal;
-      // Show Recreate button once job is done/stopped (issue #208)
-      if (recreateBtn) recreateBtn.classList.remove('hidden');
+      if (reviewPostBtn) reviewPostBtn.classList.add('hidden');
     }
   }
 
@@ -7846,6 +7873,32 @@ function _bcRenderCard(t) {
     const elapsedSec = Math.round((now - start) / 1000);
     label = `Started ${elapsedSec}s ago`;
     // No action icons while drafting
+  } else if (t.state === 'draft_ready') {
+    // Draft ready for review — show title, body preview, per-ticket label input, recreate (issue #374)
+    const titleText = t.title ? escapeHtml(t.title.slice(0, 100)) : '(Untitled)';
+    const defaultLabels = (_bcLastInput && _bcLastInput.labelsRaw) ? _bcLastInput.labelsRaw : 'enhancement';
+    const bodyPreview = escapeHtml((t.body_preview || t.body || '').slice(0, 180));
+    return `
+      <div class="bc-card bc-card--draft_ready" data-index="${t.index}">
+        <div class="bc-status-dot bc-status-dot--draft_ready"></div>
+        <div class="bc-card-body">
+          <div class="bc-card-head">
+            <span class="bc-card-label bc-card-label--draft">Draft ready</span>
+            <span class="bc-card-title">${titleText}</span>
+          </div>
+          <div class="bc-card-preview" title="${escapeHtml(t.body_preview || '')}">${bodyPreview}</div>
+          <div class="bc-card-label-row">
+            <label class="bc-ticket-label-lbl" for="bc-ticket-labels-${t.index}">Labels:</label>
+            <input class="bc-ticket-label-input" id="bc-ticket-labels-${t.index}"
+                   type="text" value="${escapeHtml(defaultLabels)}" autocomplete="off"
+                   placeholder="enhancement, bug">
+          </div>
+        </div>
+        <div class="bc-card-actions">
+          <button class="bc-action-btn" title="Recreate this ticket" onclick="bcRedraftTicket(${t.index})">&#x21BB;</button>
+        </div>
+      </div>
+    `;
   } else if (t.state === 'created') {
     const issueNum = t.issue_num;
     const issueUrl = t.issue_url || '#';
@@ -8023,6 +8076,121 @@ async function bcSizeRemedyImages(index) {
     });
     // SSE will update state
   } catch (_) {}
+}
+
+// ── Per-ticket recreate (issue #374) ─────────────────────────────────────────
+
+async function bcRedraftTicket(index) {
+  if (!_bcJobId && !_bcJobState) return;
+  // If job is already done (no active job id), re-connect SSE first
+  const jobId = _bcJobId || (localStorage.getItem('bc_job_id'));
+  if (!jobId && !(_bcJobState)) return;
+  const activeJobId = jobId || (localStorage.getItem('bc_last_job_id'));
+  if (!activeJobId) return;
+
+  try {
+    const res = await fetch(`/api/tickets/bulk/${activeJobId}/redraft`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ index }),
+    });
+    if (!res.ok) return;
+    // Reconnect SSE to get the update
+    _bcJobId = activeJobId;
+    localStorage.setItem('bc_job_id', activeJobId);
+    _bcConnectSSE(activeJobId);
+  } catch (_) {}
+}
+
+// ── Review & Post flow (issue #374) ──────────────────────────────────────────
+
+function bcReviewAndPost() {
+  if (!_bcJobState) return;
+  const tickets = (_bcJobState.tickets || []).filter(t => t.state === 'draft_ready');
+  if (tickets.length === 0) return;
+
+  const reviewOverlay = document.getElementById('bc-review-overlay');
+  const reviewList = document.getElementById('bc-review-list');
+  if (!reviewOverlay || !reviewList) return;
+
+  // Build review list with checkboxes and label display
+  reviewList.innerHTML = tickets.map(t => {
+    const titleText = escapeHtml((t.title || '(Untitled)').slice(0, 120));
+    // Read per-ticket label from the card's input field
+    const labelInputEl = document.getElementById(`bc-ticket-labels-${t.index}`);
+    const labelsVal = labelInputEl ? escapeHtml(labelInputEl.value) : 'enhancement';
+    return `
+      <div class="bc-review-item">
+        <label class="bc-review-check-wrap">
+          <input type="checkbox" class="bc-review-check" data-index="${t.index}" checked
+                 onchange="_bcUpdatePostBtn()">
+          <span class="bc-review-title">${titleText}</span>
+        </label>
+        <span class="bc-review-labels">${labelsVal}</span>
+      </div>
+    `;
+  }).join('');
+
+  _bcUpdatePostBtn();
+  reviewOverlay.classList.remove('hidden');
+}
+
+function _bcUpdatePostBtn() {
+  const btn = document.getElementById('bc-post-github-btn');
+  if (!btn) return;
+  const anyChecked = Array.from(document.querySelectorAll('.bc-review-check')).some(cb => cb.checked);
+  btn.disabled = !anyChecked;
+}
+
+function bcCancelReview() {
+  const overlay = document.getElementById('bc-review-overlay');
+  if (overlay) overlay.classList.add('hidden');
+}
+
+async function bcPostSelected() {
+  if (!_bcJobState) return;
+  const checkboxes = Array.from(document.querySelectorAll('.bc-review-check'));
+  const selected = checkboxes
+    .filter(cb => cb.checked)
+    .map(cb => {
+      const idx = parseInt(cb.dataset.index, 10);
+      const labelInputEl = document.getElementById(`bc-ticket-labels-${idx}`);
+      const labelsRaw = labelInputEl ? labelInputEl.value : 'enhancement';
+      const labels = labelsRaw.split(',').map(l => l.trim()).filter(l => l.length > 0);
+      return { index: idx, labels };
+    });
+
+  if (selected.length === 0) return;
+
+  // Determine active job id (may have been cleared after drafts_ready)
+  const jobId = _bcJobId || localStorage.getItem('bc_last_job_id');
+  if (!jobId) return;
+
+  // Close review overlay and show progress
+  bcCancelReview();
+  const postBtn = document.getElementById('bc-review-post-btn');
+  if (postBtn) { postBtn.disabled = true; postBtn.textContent = 'Posting…'; }
+
+  try {
+    const res = await fetch(`/api/tickets/bulk/${jobId}/post-selected`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ tickets: selected }),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      _bcShowToast(data.detail || `Post failed (${res.status})`);
+      if (postBtn) { postBtn.disabled = false; postBtn.textContent = 'Review & Post'; }
+      return;
+    }
+    // Reconnect SSE to track posting progress
+    _bcJobId = jobId;
+    localStorage.setItem('bc_job_id', jobId);
+    _bcConnectSSE(jobId);
+  } catch (e) {
+    _bcShowToast('Failed to post: ' + e.message);
+    if (postBtn) { postBtn.disabled = false; postBtn.textContent = 'Review & Post'; }
+  }
 }
 
 // Recreate: go back to Step 1 with the same input data (issue #208)

@@ -7395,6 +7395,12 @@ function bcRestoreLastInput() {
     const saved = localStorage.getItem('bc_last_input');
     if (!saved) return;
     const input = JSON.parse(saved);
+    if (!input.repo || typeof input.repo !== 'string' || !input.repo.trim() ||
+        !input.text || typeof input.text !== 'string' || !input.text.trim()) {
+      console.warn('[bcRestoreLastInput] bc_last_input missing required fields (repo, text) — clearing entry.');
+      localStorage.removeItem('bc_last_input');
+      return;
+    }
     _bcLastInput = input;
     const sel = document.getElementById('bc-repo');
     if (sel && input.repo) sel.value = input.repo;

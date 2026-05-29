@@ -2348,7 +2348,7 @@ function _pspRowHtml(iss, { conflicting }) {
         <div class="psp-row-labels">${labelPills}</div>
         <span class="psp-size-pill ${sizeClass}">${escapeHtml(size)}</span>
         <span class="psp-token-est">${tokens} k</span>
-        <span class="psp-conflict-icon" title="File conflict">&#9888;</span>
+        <span class="psp-conflict-icon" title="File conflict"><i class="ti ti-alert-triangle"></i></span>
         <button class="psp-row-add" onclick="event.stopPropagation(); pspAddRowToSprint(${iss.number})">Add</button>
       </div>
     </div>`;

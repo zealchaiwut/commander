@@ -106,16 +106,14 @@ def _find_feature_branch(issue: int) -> str | None:
     return None
 
 
-def _branch_merged_into_develop(branch: str) -> bool:
-    """Return True if branch tip is an ancestor of origin/develop."""
-    subprocess.run(["git", "fetch", "--quiet", "origin", "develop"], capture_output=True)
-
+def _branch_merged_into_target(branch: str, target: str) -> bool:
+    """Return True if branch tip is an ancestor of origin/<target>."""
     for ref in (f"origin/{branch}", branch):
         r = subprocess.run(["git", "rev-parse", ref], capture_output=True, text=True)
         if r.returncode == 0:
             tip = r.stdout.strip()
             ancestor = subprocess.run(
-                ["git", "merge-base", "--is-ancestor", tip, "origin/develop"],
+                ["git", "merge-base", "--is-ancestor", tip, f"origin/{target}"],
                 capture_output=True,
             )
             return ancestor.returncode == 0
@@ -123,14 +121,35 @@ def _branch_merged_into_develop(branch: str) -> bool:
     return False
 
 
-def _check_uat_safeguard(issue: int, force: bool) -> None:
+def _check_uat_safeguard_with_sha(sha: str, target: str, force: bool) -> None:
+    """Verify merge SHA is an ancestor of origin/<target> (authoritative, no race)."""
+    subprocess.run(["git", "fetch", "--quiet", "origin", target], capture_output=True)
+    ancestor = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", sha, f"origin/{target}"],
+        capture_output=True,
+    )
+    if ancestor.returncode != 0:
+        msg = (
+            f"UAT safeguard: merge SHA {sha!r} is not an ancestor of 'origin/{target}'. "
+            f"Ensure the merge was pushed, or use --force to override."
+        )
+        if force:
+            print(f"WARNING: {msg}", file=sys.stderr)
+        else:
+            sys.exit(msg)
+
+
+def _check_uat_safeguard(issue: int, target: str, force: bool) -> None:
     """Enforce feature-branch-merged gate before UAT label is applied."""
+    # Prune stale refs so deleted branches don't cause false positives.
+    subprocess.run(["git", "fetch", "--prune", "origin"], capture_output=True)
+
     branch = _find_feature_branch(issue)
 
     if branch is None:
         msg = (
             f"UAT safeguard: no branch matching 'feature/{issue}-*' found locally "
-            f"or on origin. Merge the feature branch into develop first, "
+            f"or on origin. Merge the feature branch into {target} first, "
             f"or use --force to override."
         )
         if force:
@@ -139,10 +158,10 @@ def _check_uat_safeguard(issue: int, force: bool) -> None:
             sys.exit(msg)
         return
 
-    if not _branch_merged_into_develop(branch):
+    if not _branch_merged_into_target(branch, target):
         msg = (
             f"UAT safeguard: branch '{branch}' exists but has not been merged into "
-            f"develop. Merge it first, or use --force to override."
+            f"'{target}'. Merge it first, or use --force to override."
         )
         if force:
             print(f"WARNING: {msg}", file=sys.stderr)
@@ -207,12 +226,21 @@ def main():
                         help="Skip UAT merge safeguard (prints warning to stderr)")
     parser.add_argument("--repo",   default=None,
                         help="Override repo (owner/name).  Defaults to auto-detected repo.")
+    parser.add_argument("--merge-sha", default=None,
+                        help="Merge commit SHA; when provided the UAT safeguard uses "
+                             "ancestry check instead of branch-ref presence (avoids race).")
+    parser.add_argument("--target-branch",
+                        default=os.environ.get("COMMANDER_MERGE_TARGET", "develop"),
+                        help="Branch to verify merge against (default: COMMANDER_MERGE_TARGET or 'develop')")
     args = parser.parse_args()
     structured_log.set_context(issue_num=args.issue)
     structured_log.info("ticket_update_start", f"updating issue #{args.issue} to status {args.status!r}", issue_num=args.issue, status=args.status)
 
     if args.status == "uat":
-        _check_uat_safeguard(args.issue, args.force)
+        if args.merge_sha:
+            _check_uat_safeguard_with_sha(args.merge_sha, args.target_branch, args.force)
+        else:
+            _check_uat_safeguard(args.issue, args.target_branch, args.force)
 
     if args.repo:
         repo = args.repo

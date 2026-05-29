@@ -2175,7 +2175,8 @@ function _sprintRowHtml(sprint, idx) {
 const PSP_DRAFT_KEY = 'commander:plan-sprint-draft';
 const TOKEN_MAP = { S: 20, M: 40, L: 60, XL: 85 };
 const FILE_EXT_PAT = String.raw`\b[\w.-]+\.(?:py|html|js|sh|md|json)\b`;
-const STATUS_LABELS_SET = new Set(['in-progress', 'SIT', 'UAT', 'UAT-approved', 'need-rework', 'blocked', 'backlog', 'enhancement', 'bug']);
+// READ-only: both spellings recognised for backward compat with old tickets
+const STATUS_LABELS_SET = new Set(['in-progress', 'SIT', 'UAT', 'UAT-approved', 'needs-rework', 'need-rework', 'blocked', 'backlog', 'enhancement', 'bug']);
 const SPRINT_NUM_RE = /^sprint-(\d+)$/;
 
 let _pspIssues = [];          // all open issues from /api/open-issues
@@ -6238,7 +6239,7 @@ function smgmtFinishSprint(label) {
     bodyEl.innerHTML = '<em style="color:var(--text-muted)">No open issues in this sprint. The operation will succeed with 0 closures.</em>';
   } else {
     bodyEl.innerHTML = `<p>${openCount} open issue${openCount !== 1 ? 's' : ''} will be moved to <strong>UAT</strong> and closed.</p>` +
-      '<p style="margin-top:6px;color:var(--text-muted);font-size:12px;">Labels <code>in-progress</code>, <code>sit</code>, and <code>need-rework</code> will be removed. This action cannot be undone.</p>';
+      '<p style="margin-top:6px;color:var(--text-muted);font-size:12px;">Labels <code>in-progress</code>, <code>sit</code>, and <code>needs-rework</code> will be removed. This action cannot be undone.</p>';
   }
 
   const confirmBtn = document.getElementById('smgmt-finish-confirm');

@@ -1705,6 +1705,14 @@
   </div>
 </div>
 
+<!-- Finish sprint loading overlay (issue #361) -->
+<div class="smgmt-finish-loading-overlay hidden" id="smgmt-finish-loading-overlay" aria-live="assertive" aria-label="Finishing sprint, please wait">
+  <div class="smgmt-finish-loading-pill">
+    <span class="smgmt-finish-loading-spinner"></span>
+    Finishing sprint...
+  </div>
+</div>
+
 <!-- Kill sprint confirmation modal -->
 <div class="modal-backdrop hidden" id="smgmt-kill-backdrop" onclick="smgmtKillClose()"></div>
 <div class="modal hidden" id="smgmt-kill-modal" role="dialog" aria-modal="true">
@@ -2207,6 +2215,30 @@
     margin-top: 4px;
   }
   .smgmt-est-warning strong { color: var(--amber, #d97706); }
+
+  /* Finish sprint loading overlay (issue #361) */
+  .smgmt-finish-loading-overlay {
+    display: flex; position: fixed; inset: 0;
+    background: rgba(0,0,0,.35); z-index: 9998;
+    align-items: center; justify-content: center;
+    pointer-events: all;
+  }
+  .smgmt-finish-loading-overlay.hidden { display: none; }
+  .smgmt-finish-loading-pill {
+    display: flex; align-items: center; gap: 10px;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 999px; padding: 10px 20px;
+    font-size: 13px; font-weight: 600; color: var(--text);
+    box-shadow: 0 4px 16px rgba(0,0,0,.18);
+    pointer-events: none;
+  }
+  .smgmt-finish-loading-spinner {
+    display: inline-block; width: 14px; height: 14px;
+    border: 2px solid var(--border); border-top-color: var(--blue);
+    border-radius: 50%; animation: smgmt-finish-spin .7s linear infinite;
+    flex-shrink: 0;
+  }
+  @keyframes smgmt-finish-spin { to { transform: rotate(360deg); } }
 
   /* Finish Sprint button (issue #195) */
   .smgmt-finish-btn {

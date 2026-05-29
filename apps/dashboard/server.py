@@ -1038,6 +1038,32 @@ def get_github_labels(repo: Optional[str] = None):
         raise HTTPException(400, detail=str(e))
 
 
+class CreateLabelBody(BaseModel):
+    name: str
+    color: str = "a2eeef"
+    description: str = ""
+    repo: Optional[str] = None
+
+
+@app.post("/api/github/labels")
+def post_create_label(body: CreateLabelBody):
+    """Create a new GitHub label in the repo; returns updated label list."""
+    body.name = body.name.strip()
+    if not body.name:
+        raise HTTPException(400, detail="Label name is required.")
+    try:
+        github_client.create_label(
+            body.name, body.color,
+            description=body.description,
+            repo_name=body.repo,
+        )
+        return github_client.list_labels(repo_name=body.repo)
+    except subprocess.CalledProcessError as e:
+        raise _gh_error(e)
+    except ValueError as e:
+        raise HTTPException(400, detail=str(e))
+
+
 @app.get("/api/sprints")
 def get_sprints():
     try:

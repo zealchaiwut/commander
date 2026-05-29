@@ -2724,6 +2724,8 @@ let _smgmtAutoRefreshTimer     = null; // interval timer for auto-refresh pollin
 let _smgmtAutoRefreshInterval  = 15;  // seconds between refreshes (5|15|30|60)
 let _smgmtAutoRefreshEnabled   = true; // whether auto-refresh is active
 let _smgmtSelectedIssues       = new Set(); // issue numbers currently selected (multi-select, issue #206)
+let _smgmtDragTickets          = [];   // [{number,fromSprint}] for multi-ticket drag (issue #363)
+let _smgmtLastClickedIssue     = null; // last clicked issue for Shift+Click range select (issue #363)
 
 function _rerunPolicyAction(labelNames) {
   const s = new Set(labelNames);
@@ -3480,6 +3482,9 @@ function smgmtTicketCardHtml(ticket, currentSprint) {
          draggable="true"
          data-issue="${ticket.number}"
          data-sprint="${currentSprint || ''}"
+         tabindex="0"
+         onclick="smgmtTicketClick(event, ${ticket.number})"
+         onkeydown="smgmtTicketKeyDown(event, ${ticket.number})"
          ondragstart="smgmtTicketDragStart(event, ${ticket.number}, '${currentSprint || ''}')"
          ondragend="smgmtTicketDragEnd(event)">
       <input type="checkbox" class="smgmt-ticket-cb"
@@ -3692,6 +3697,9 @@ function smgmtBacklogTicketHtml(ticket, sprintLabels) {
          draggable="true"
          data-issue="${ticket.number}"
          data-sprint=""
+         tabindex="0"
+         onclick="smgmtTicketClick(event, ${ticket.number})"
+         onkeydown="smgmtTicketKeyDown(event, ${ticket.number})"
          ondragstart="smgmtBacklogTicketDragStart(event, ${ticket.number})"
          ondragend="smgmtBacklogTicketDragEnd(event)">
       <input type="checkbox" class="smgmt-ticket-cb"
@@ -3835,20 +3843,33 @@ function smgmtBacklogTicketDragStart(event, issueNum) {
   // Auto-expand the backlog and remove sticky while dragging
   const block = document.getElementById('smgmt-backlog');
   if (block) {
-    // Save pre-drag state
     block.dataset.preDragExpanded = String(_smgmtBacklogExpanded);
-    // Force expanded + non-sticky
     _smgmtBacklogExpanded = true;
     block.classList.add('smgmt-backlog-expanded', 'is-drag-active');
     const hdr = document.getElementById('smgmt-backlog-header');
     if (hdr) hdr.setAttribute('aria-expanded', 'true');
   }
-  // Reuse standard ticket drag start
   _smgmtDragTicket = { number: issueNum, fromSprint: null };
   event.dataTransfer.effectAllowed = 'move';
   event.dataTransfer.setData('text/smgmt-ticket', String(issueNum));
-  const el = document.getElementById(`smgmt-ticket-${issueNum}`);
-  if (el) setTimeout(() => el.classList.add('dragging-ticket'), 0);
+
+  if (_smgmtSelectedIssues.has(issueNum) && _smgmtSelectedIssues.size > 1) {
+    // Multi-drag: collect all selected tickets in DOM order
+    const allRows = [...document.querySelectorAll('#smgmt-backlog-tickets .smgmt-ticket, #smgmt-body .smgmt-ticket')];
+    _smgmtDragTickets = allRows
+      .map(r => ({ number: parseInt(r.dataset.issue, 10), fromSprint: r.dataset.sprint || null }))
+      .filter(t => _smgmtSelectedIssues.has(t.number));
+    setTimeout(() => {
+      _smgmtDragTickets.forEach(t => {
+        document.getElementById(`smgmt-ticket-${t.number}`)?.classList.add('dragging-ticket');
+      });
+    }, 0);
+    _smgmtSetMultiDragGhost(event, _smgmtDragTickets.length);
+  } else {
+    _smgmtDragTickets = [];
+    const el = document.getElementById(`smgmt-ticket-${issueNum}`);
+    if (el) setTimeout(() => el.classList.add('dragging-ticket'), 0);
+  }
   // Show the N+1 ghost sprint pane only while a ticket drag is active (issue #340)
   document.querySelectorAll('.smgmt-sprint-placeholder').forEach(p => { p.style.display = 'block'; });
 }
@@ -4021,18 +4042,38 @@ function smgmtTicketDragStart(event, issueNum, fromSprint) {
   _smgmtDragTicket = { number: issueNum, fromSprint: fromSprint || null };
   event.dataTransfer.effectAllowed = 'move';
   event.dataTransfer.setData('text/smgmt-ticket', String(issueNum));
-  const el = document.getElementById(`smgmt-ticket-${issueNum}`);
-  if (el) setTimeout(() => el.classList.add('dragging-ticket'), 0);
+
+  if (_smgmtSelectedIssues.has(issueNum) && _smgmtSelectedIssues.size > 1) {
+    const allRows = [...document.querySelectorAll('#smgmt-backlog-tickets .smgmt-ticket, #smgmt-body .smgmt-ticket')];
+    _smgmtDragTickets = allRows
+      .map(r => ({ number: parseInt(r.dataset.issue, 10), fromSprint: r.dataset.sprint || null }))
+      .filter(t => _smgmtSelectedIssues.has(t.number));
+    setTimeout(() => {
+      _smgmtDragTickets.forEach(t => {
+        document.getElementById(`smgmt-ticket-${t.number}`)?.classList.add('dragging-ticket');
+      });
+    }, 0);
+    _smgmtSetMultiDragGhost(event, _smgmtDragTickets.length);
+  } else {
+    _smgmtDragTickets = [];
+    const el = document.getElementById(`smgmt-ticket-${issueNum}`);
+    if (el) setTimeout(() => el.classList.add('dragging-ticket'), 0);
+  }
   // Show the N+1 ghost sprint pane only while a ticket drag is active (issue #340)
   document.querySelectorAll('.smgmt-sprint-placeholder').forEach(p => { p.style.display = 'block'; });
 }
 
 function smgmtTicketDragEnd(event) {
-  if (_smgmtDragTicket) {
+  if (_smgmtDragTickets.length > 1) {
+    _smgmtDragTickets.forEach(t => {
+      document.getElementById(`smgmt-ticket-${t.number}`)?.classList.remove('dragging-ticket');
+    });
+  } else if (_smgmtDragTicket) {
     const el = document.getElementById(`smgmt-ticket-${_smgmtDragTicket.number}`);
     if (el) el.classList.remove('dragging-ticket');
   }
   _smgmtDragTicket = null;
+  _smgmtDragTickets = [];
   // Clear all hover states
   document.querySelectorAll('.smgmt-sprint-block').forEach(el => {
     el.classList.remove('drag-over-sprint', 'drag-over-zone');
@@ -4095,17 +4136,60 @@ async function smgmtDropOnPlaceholder(event, placeholderN) {
   });
   document.getElementById('smgmt-backlog')?.classList.remove('drag-over-sprint', 'drag-over-zone');
 
-  if (!_smgmtDragTicket || !_smgmtCurrentRepo) return;
+  if (!_smgmtCurrentRepo) return;
+  const newSprintLabel = `sprint-${placeholderN}`;
+
+  // Multi-ticket drop
+  if (_smgmtDragTickets.length > 1) {
+    const ticketsToMove = [..._smgmtDragTickets];
+    _smgmtDragTickets = [];
+    _smgmtDragTicket = null;
+
+    for (const t of ticketsToMove) {
+      const iss = _smgmtData.issues.find(i => i.number === t.number);
+      if (iss) iss.sprint = placeholderN;
+    }
+    if (!_smgmtData.sprints.includes(placeholderN)) {
+      _smgmtData.sprints.push(placeholderN);
+      _smgmtData.sprints.sort((a, b) => a - b);
+    }
+    if (!_smgmtData.order.includes(newSprintLabel)) _smgmtData.order.push(newSprintLabel);
+    const maxSprint = Math.max(..._smgmtData.sprints);
+    _smgmtData.placeholder_sprint = Math.max(placeholderN + 1, maxSprint + 1);
+    smgmtRender();
+    smgmtClearSelection();
+
+    const failures = [];
+    await Promise.all(ticketsToMove.map(async (t) => {
+      try {
+        const res = await fetch('/api/sprint-planning/assign', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ issue: t.number, sprint: placeholderN }),
+        });
+        if (!res.ok) throw new Error(await res.text());
+      } catch (e) { failures.push({ t, err: e.message }); }
+    }));
+
+    if (failures.length > 0) {
+      for (const { t } of failures) {
+        const iss2 = _smgmtData.issues.find(i => i.number === t.number);
+        if (iss2) iss2.sprint = t.fromSprint ? parseInt(t.fromSprint.split('-')[1], 10) : null;
+      }
+      smgmtRender();
+      smgmtShowError(`Failed to move ticket(s) #${failures.map(f => f.t.number).join(', #')}.`);
+    }
+    await smgmtRefreshBoard();
+    return;
+  }
+
+  if (!_smgmtDragTicket) return;
   const { number, fromSprint } = _smgmtDragTicket;
   _smgmtDragTicket = null;
-
-  const newSprintLabel = `sprint-${placeholderN}`;
 
   // Optimistic: add ticket to data and convert placeholder to real sprint
   const iss = _smgmtData.issues.find(i => i.number === number);
   if (iss) iss.sprint = placeholderN;
 
-  // Add new sprint to sprints list and order (sprint may already exist on GitHub for empty sprints)
   if (!_smgmtData.sprints.includes(placeholderN)) {
     _smgmtData.sprints.push(placeholderN);
     _smgmtData.sprints.sort((a, b) => a - b);
@@ -4113,16 +4197,12 @@ async function smgmtDropOnPlaceholder(event, placeholderN) {
   if (!_smgmtData.order.includes(newSprintLabel)) {
     _smgmtData.order.push(newSprintLabel);
   }
-  // Update placeholder: advance past the dropped sprint and any higher existing sprints
-  // (placeholderN + 1 is correct for the trailing placeholder; for existing empty sprints
-  //  smgmtRefreshBoard will re-sync the correct value from the server)
   const maxExistingSprint = Math.max(..._smgmtData.sprints);
   _smgmtData.placeholder_sprint = Math.max(placeholderN + 1, maxExistingSprint + 1);
 
   smgmtRender();
 
   try {
-    // Create the sprint label on GitHub and assign the ticket
     const res = await fetch('/api/sprint-planning/assign', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -4131,7 +4211,6 @@ async function smgmtDropOnPlaceholder(event, placeholderN) {
     if (!res.ok) throw new Error(await res.text());
     await smgmtRefreshBoard();
   } catch (e) {
-    // Rollback optimistic update
     const iss2 = _smgmtData.issues.find(i => i.number === number);
     if (iss2) {
       const origNum = fromSprint ? parseInt(fromSprint.split('-')[1], 10) : null;
@@ -4160,17 +4239,74 @@ async function smgmtDropOnSprint(event, targetSprintLabel) {
     return;
   }
 
-  // Ticket drop
+  // Multi-ticket drop
+  if (_smgmtDragTickets.length > 1) {
+    const ticketsToMove = [..._smgmtDragTickets];
+    _smgmtDragTickets = [];
+    _smgmtDragTicket = null;
+
+    const toMove = ticketsToMove.filter(t => (t.fromSprint || null) !== targetSprintLabel);
+    if (toMove.length === 0) { smgmtClearSelection(); return; }
+
+    const wasInOrder = !targetSprintLabel || _smgmtData.order.includes(targetSprintLabel);
+    const prevData = toMove.map(t => {
+      const iss = _smgmtData.issues.find(i => i.number === t.number);
+      return { number: t.number, sprint: iss?.sprint ?? null, sprint_label: iss?.sprint_label ?? null };
+    });
+
+    for (const t of toMove) {
+      const iss = _smgmtData.issues.find(i => i.number === t.number);
+      if (iss) {
+        const m = targetSprintLabel ? targetSprintLabel.match(/^sprint-(\d+)/) : null;
+        iss.sprint = m ? parseInt(m[1], 10) : null;
+        iss.sprint_label = targetSprintLabel || null;
+      }
+    }
+    if (targetSprintLabel && !wasInOrder) _smgmtData.order.push(targetSprintLabel);
+    smgmtRender();
+    smgmtClearSelection();
+
+    const isDotted = targetSprintLabel && /^sprint-\d+\.\d+$/.test(targetSprintLabel);
+    const failures = [];
+    await Promise.all(toMove.map(async (t) => {
+      const apiBody = isDotted || targetSprintLabel === null
+        ? { issue: t.number, sprint_label: targetSprintLabel }
+        : { issue: t.number, sprint: targetSprintLabel ? parseInt(targetSprintLabel.split('-')[1], 10) : null };
+      try {
+        const res = await fetch('/api/sprint-planning/assign', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(apiBody),
+        });
+        if (!res.ok) throw new Error(await res.text());
+      } catch (e) { failures.push(t.number); }
+    }));
+
+    if (failures.length > 0) {
+      for (const prev of prevData) {
+        if (failures.includes(prev.number)) {
+          const iss2 = _smgmtData.issues.find(i => i.number === prev.number);
+          if (iss2) { iss2.sprint = prev.sprint; iss2.sprint_label = prev.sprint_label; }
+        }
+      }
+      if (targetSprintLabel && !wasInOrder) {
+        _smgmtData.order = _smgmtData.order.filter(l => l !== targetSprintLabel);
+      }
+      smgmtRender();
+      smgmtShowError(`Failed to move ticket(s) #${failures.join(', #')}.`);
+    }
+    await smgmtRefreshBoard();
+    return;
+  }
+
+  // Single ticket drop
   if (_smgmtDragTicket) {
     const { number, fromSprint } = _smgmtDragTicket;
     _smgmtDragTicket = null;
 
     if (fromSprint === targetSprintLabel) return; // no-op
 
-    // Track whether this sprint was already in order before the optimistic update (for rollback)
     const wasInOrder = !targetSprintLabel || _smgmtData.order.includes(targetSprintLabel);
 
-    // Optimistic: move ticket in local data
     const iss = _smgmtData.issues.find(i => i.number === number);
     const prevSprintLabel = iss ? (iss.sprint_label || (iss.sprint != null ? `sprint-${iss.sprint}` : null)) : fromSprint;
     if (iss) {
@@ -4178,14 +4314,11 @@ async function smgmtDropOnSprint(event, targetSprintLabel) {
       iss.sprint = targetBaseMatch ? parseInt(targetBaseMatch[1], 10) : null;
       iss.sprint_label = targetSprintLabel || null;
     }
-    // If dropping onto an existing empty sprint (not yet in order), promote it optimistically
-    // so the ticket appears in the pane immediately after smgmtRender().
     if (targetSprintLabel && !wasInOrder) {
       _smgmtData.order.push(targetSprintLabel);
     }
     smgmtRender();
 
-    // API call — use sprint_label for dotted sub-labels, sprint int for plain labels
     const isDotted = targetSprintLabel && /^sprint-\d+\.\d+$/.test(targetSprintLabel);
     const apiBody = isDotted || targetSprintLabel === null
       ? { issue: number, sprint_label: targetSprintLabel }
@@ -4199,7 +4332,6 @@ async function smgmtDropOnSprint(event, targetSprintLabel) {
       if (!res.ok) throw new Error(await res.text());
       await smgmtRefreshBoard();
     } catch (e) {
-      // Rollback: restore original sprint and order
       const iss2 = _smgmtData.issues.find(i => i.number === number);
       if (iss2) {
         const origBaseMatch = prevSprintLabel ? prevSprintLabel.match(/^sprint-(\d+)/) : null;
@@ -4278,6 +4410,7 @@ function smgmtToggleSelectAll(checkboxEl) {
 
 function smgmtClearSelection() {
   _smgmtSelectedIssues.clear();
+  _smgmtLastClickedIssue = null;
   _smgmtUpdateSelectionUI();
   // Uncheck all visible checkboxes without full re-render
   document.querySelectorAll('.smgmt-ticket-cb').forEach(cb => { cb.checked = false; });
@@ -4414,7 +4547,82 @@ async function smgmtBulkMoveToConfirm() {
 // Clear selection when navigating away from sprint-mgmt tab
 function smgmtClearSelectionOnNav() {
   _smgmtSelectedIssues.clear();
+  _smgmtLastClickedIssue = null;
   _smgmtUpdateSelectionUI();
+}
+
+// ── Multi-select click / keyboard / drag helpers (issue #363) ─────────────────
+
+function smgmtTicketClick(event, issueNum) {
+  if (event.target.classList.contains('smgmt-ticket-cb') ||
+      event.target.closest('a') ||
+      event.target.closest('button')) return;
+
+  if (event.shiftKey && _smgmtLastClickedIssue !== null) {
+    event.preventDefault();
+    smgmtRangeSelect(_smgmtLastClickedIssue, issueNum);
+  } else if (event.ctrlKey || event.metaKey) {
+    event.preventDefault();
+    const nowSelected = !_smgmtSelectedIssues.has(issueNum);
+    smgmtToggleIssueSelect(issueNum, nowSelected);
+    _smgmtLastClickedIssue = issueNum;
+  } else {
+    _smgmtLastClickedIssue = issueNum;
+  }
+}
+
+function smgmtRangeSelect(fromIssue, toIssue) {
+  const allRows = [...document.querySelectorAll('#smgmt-backlog-tickets .smgmt-ticket, #smgmt-body .smgmt-ticket')];
+  const nums = allRows.map(r => parseInt(r.dataset.issue, 10));
+  const fromIdx = nums.indexOf(fromIssue);
+  const toIdx   = nums.indexOf(toIssue);
+  if (fromIdx === -1 || toIdx === -1) return;
+  const start = Math.min(fromIdx, toIdx);
+  const end   = Math.max(fromIdx, toIdx);
+  for (let i = start; i <= end; i++) {
+    _smgmtSelectedIssues.add(nums[i]);
+    const cb = allRows[i].querySelector('.smgmt-ticket-cb');
+    if (cb) cb.checked = true;
+    allRows[i].classList.add('is-selected');
+  }
+  _smgmtUpdateSelectionUI();
+}
+
+function smgmtTicketKeyDown(event, issueNum) {
+  if (!event.shiftKey || (event.key !== 'ArrowDown' && event.key !== 'ArrowUp')) return;
+  const allRows = [...document.querySelectorAll('#smgmt-backlog-tickets .smgmt-ticket, #smgmt-body .smgmt-ticket')];
+  const nums = allRows.map(r => parseInt(r.dataset.issue, 10));
+  const idx = nums.indexOf(issueNum);
+  if (idx === -1) return;
+  const targetIdx = event.key === 'ArrowDown' ? idx + 1 : idx - 1;
+  if (targetIdx < 0 || targetIdx >= nums.length) return;
+  event.preventDefault();
+  _smgmtSelectedIssues.add(issueNum);
+  _smgmtSelectedIssues.add(nums[targetIdx]);
+  allRows[idx].classList.add('is-selected');
+  const cb1 = allRows[idx].querySelector('.smgmt-ticket-cb');
+  if (cb1) cb1.checked = true;
+  allRows[targetIdx].classList.add('is-selected');
+  const cb2 = allRows[targetIdx].querySelector('.smgmt-ticket-cb');
+  if (cb2) cb2.checked = true;
+  _smgmtLastClickedIssue = nums[targetIdx];
+  allRows[targetIdx].focus();
+  _smgmtUpdateSelectionUI();
+}
+
+function smgmtContainerClick(event) {
+  if (!event.target.closest('.smgmt-ticket') && _smgmtSelectedIssues.size > 0) {
+    smgmtClearSelection();
+  }
+}
+
+function _smgmtSetMultiDragGhost(event, count) {
+  const ghost = document.createElement('div');
+  ghost.className = 'smgmt-multi-drag-ghost';
+  ghost.textContent = `${count} tickets`;
+  document.body.appendChild(ghost);
+  event.dataTransfer.setDragImage(ghost, 20, 20);
+  setTimeout(() => ghost.remove(), 0);
 }
 
 // ── Run sprint ────────────────────────────────────────────────────────────────

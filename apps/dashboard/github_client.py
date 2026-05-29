@@ -195,6 +195,7 @@ def ensure_sprint_label(sprint_num: int, repo_name: str | None = None) -> None:
         # Label already exists — that's fine
         pass
     invalidate(f"sprints:{r}")
+    invalidate(f"sprint_labels:{r}")
 
 
 def delete_label(label_name: str, repo_name: str | None = None) -> None:
@@ -388,6 +389,11 @@ def assign_sprint_by_label(issue_id: int, sprint_label: str | None,
             cmd += ["--remove-label", lbl]
         _run(*cmd)
     invalidate(f"issues:{r}:")
+    invalidate(f"open_issues_body:{r}")
+    invalidate(f"open_issues:{r}")
+    invalidate(f"sprints:{r}")
+    invalidate(f"sprint_labels:{r}")
+    invalidate(f"latest_sprint:{r}")
 
 
 def latest_active_sprint(repo_name: str | None = None) -> Optional[int]:

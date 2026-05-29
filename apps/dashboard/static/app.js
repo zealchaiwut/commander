@@ -2729,6 +2729,8 @@ let _smgmtLastClickedIssue     = null; // last clicked issue for Shift+Click ran
 let _smgmtGhostNextN           = null; // next-free sprint number computed once at drag-start (issue #364)
 let _smgmtGhostPendingTickets  = null; // [{number,fromSprint,...}] queued for ghost confirm modal
 let _smgmtGhostPendingN        = null; // sprint N for the pending ghost confirm
+let _smgmtOutcomeStates        = {};   // sprint_label -> "running"|"completed"|"has_rework"|"cancelled" (issue #366)
+let _smgmtFinishCards          = {};   // sprint_label -> {card, branch} (issue #367)
 
 function _rerunPolicyAction(labelNames) {
   const s = new Set(labelNames);
@@ -2938,6 +2940,8 @@ async function smgmtSelectProject(repo) {
   _smgmtGoals = {};
   _smgmtEstimates = {};
   _smgmtSprintStates = {};
+  _smgmtOutcomeStates = {};
+  _smgmtFinishCards = {};
   // Load persisted backlog state from localStorage (issue #225)
   const slug = (repo || '').split('/')[1] || repo || '';
   const savedFilter = localStorage.getItem(`commander.${slug}.backlogFilter`);
@@ -2963,6 +2967,8 @@ async function smgmtSelectProject(repo) {
   await smgmtLoadEstimates();
   await smgmtLoadSprintStates();
   smgmtRender();
+  smgmtLoadOutcomeStates();
+  smgmtLoadFinishCards(); // non-blocking; populates cards async after render
 }
 
 async function smgmtLoadEstimates() {
@@ -3025,6 +3031,212 @@ async function smgmtLoadSprintStates() {
       // network error — treat as absent
     }
   }));
+}
+
+// ── Sprint outcome 4-state coloring (issue #366) ──────────────────────────────
+
+/**
+ * Fetch outcome state for all non-running sprints and cache in _smgmtOutcomeStates.
+ * Running sprints are set to "running" without a network call.
+ * Already-cached states are not re-fetched (cache invalidated on run→stop transition).
+ */
+async function smgmtLoadOutcomeStates() {
+  if (!_smgmtData || !_smgmtCurrentRepo) return;
+  const { order } = _smgmtData;
+  if (!order || order.length === 0) return;
+
+  const runningLabels = new Set(
+    Object.values(_smgmtAllRunning)
+      .filter(e => e.project === _smgmtCurrentRepo)
+      .map(e => e.sprint_label)
+  );
+
+  for (const label of order) {
+    if (runningLabels.has(label)) {
+      _smgmtOutcomeStates[label] = 'running';
+    }
+  }
+
+  const toFetch = order.filter(label =>
+    !runningLabels.has(label) && !_smgmtOutcomeStates[label]
+  );
+
+  await Promise.all(toFetch.map(async (label) => {
+    try {
+      const res = await fetch(
+        `/api/sprints/${encodeURIComponent(label)}/outcome?project=${encodeURIComponent(_smgmtCurrentRepo)}`
+      );
+      if (res.ok) {
+        const data = await res.json();
+        if (data.state) _smgmtOutcomeStates[label] = data.state;
+      }
+    } catch (_e) { /* ignore network errors */ }
+  }));
+
+  smgmtApplyOutcomeStates();
+}
+
+/**
+ * Apply CSS classes to sprint pane blocks based on cached _smgmtOutcomeStates.
+ * Removes old state classes first, then applies the current one.
+ * Running state (handled by smgmtApplyRunState) is left untouched here.
+ */
+function smgmtApplyOutcomeStates() {
+  const STATE_CLASSES = ['smgmt-completed', 'smgmt-has-rework', 'smgmt-cancelled'];
+  const HDR_CLASSES   = ['smgmt-completed-header', 'smgmt-has-rework-header', 'smgmt-cancelled-header'];
+
+  document.querySelectorAll('.smgmt-sprint-block').forEach(block => {
+    const label = block.id.replace('smgmt-block-', '');
+    if (!label || label.startsWith('placeholder')) return;
+
+    block.classList.remove(...STATE_CLASSES);
+    const hdr = block.querySelector('.smgmt-sprint-header');
+    if (hdr) hdr.classList.remove(...HDR_CLASSES);
+
+    const state = _smgmtOutcomeStates[label];
+    if (!state || state === 'running') return;
+
+    const blockClass = state === 'has_rework' ? 'smgmt-has-rework' : `smgmt-${state}`;
+    const hdrClass   = state === 'has_rework' ? 'smgmt-has-rework-header' : `smgmt-${state}-header`;
+    block.classList.add(blockClass);
+    if (hdr) hdr.classList.add(hdrClass);
+  });
+}
+
+// ── Issue #367: Finish-report cards ──────────────────────────────────────────
+
+async function smgmtLoadFinishCards() {
+  const repo = _smgmtCurrentRepo;
+  if (!repo || !_smgmtData) return;
+  const order = _smgmtData.order || [];
+  await Promise.allSettled(order.map(async (label) => {
+    try {
+      const [cardRes, branchRes] = await Promise.all([
+        fetch(`/api/sprints/${encodeURIComponent(label)}/finish-card?project=${encodeURIComponent(repo)}`),
+        fetch(`/api/sprints/${encodeURIComponent(label)}/branch-status?project=${encodeURIComponent(repo)}`).catch(() => null),
+      ]);
+      if (!cardRes.ok) return; // 404 = sprint never run; no card shown
+      const cardData  = await cardRes.json();
+      const branchData = branchRes?.ok ? await branchRes.json() : { exists: false };
+      _smgmtFinishCards[label] = { card: cardData, branch: branchData };
+      smgmtRenderFinishCard(label, cardData, branchData, repo);
+    } catch (_) { /* silent */ }
+  }));
+}
+
+function smgmtRenderFinishCard(label, cardData, branchData, repo) {
+  const cardEl  = document.getElementById(`smgmt-finish-card-${label}`);
+  const blockEl = document.getElementById(`smgmt-block-${label}`);
+  if (!cardEl || !blockEl) return;
+  cardEl.style.display = ''; // remove inline display:none so CSS flex takes over
+  cardEl.className = `smgmt-finish-card sfc-${cardData.state}`;
+  cardEl.innerHTML  = smgmtFinishCardInnerHtml(cardData, branchData, repo);
+  blockEl.classList.add('smgmt-has-card');
+}
+
+function smgmtFinishCardInnerHtml(cardData, branchData, repo) {
+  const { state, sprint_number: n } = cardData;
+  const branchName = `sprint/sprint-${n}`;
+  const branchUrl  = `https://github.com/${escapeHtml(repo)}/tree/${branchName}`;
+  const branchLink = branchData?.exists
+    ? `<a href="${branchUrl}" target="_blank" rel="noopener" class="sfc-branch-link"><i class="ti ti-git-branch"></i> ${escapeHtml(branchName)}</a>`
+    : `<a href="${branchUrl}" target="_blank" rel="noopener" class="sfc-branch-link sfc-branch-link--warn" title="Could not verify branch exists on GitHub"><i class="ti ti-alert-triangle"></i> ${escapeHtml(branchName)}</a>`;
+  if (state === 'running')    return _sfcRunningHtml(cardData, branchLink, n);
+  if (state === 'completed')  return _sfcCompletedHtml(cardData, branchLink, n);
+  if (state === 'has_rework') return _sfcHasReworkHtml(cardData, branchLink, n);
+  if (state === 'cancelled')  return _sfcCancelledHtml(cardData, branchLink, n);
+  return '';
+}
+
+function _sfcRunningHtml(d, branchLink, n) {
+  const elapsed = d.wall_clock_secs > 0 ? `<div class="sfc-time">Elapsed: ${formatDuration(d.wall_clock_secs)}</div>` : '';
+  return `
+    <div class="sfc-header">
+      <span class="sfc-icon"><i class="ti ti-loader-2"></i></span>
+      <span class="sfc-title">Sprint ${n} · Running</span>
+      <span class="sfc-badge sfc-badge--running">Running</span>
+    </div>
+    <div class="sfc-counts">
+      <span class="sfc-count sfc-count--done">${d.done_count} done</span>
+      <span class="sfc-count sfc-count--inflight">${d.in_flight_count} in-flight</span>
+      <span class="sfc-count sfc-count--pending">${d.pending_count} pending</span>
+    </div>
+    ${elapsed}
+    <div class="sfc-links">
+      ${branchLink}
+      <span class="sfc-summary-disabled">Summary issue (generated on finish)</span>
+    </div>`;
+}
+
+function _sfcCompletedHtml(d, branchLink, n) {
+  const total = d.wall_clock_secs > 0 ? `<div class="sfc-time">Total: ${formatDuration(d.wall_clock_secs)}</div>` : '';
+  const summaryHtml = d.summary_issue_num
+    ? `<a href="${escapeHtml(d.summary_issue_url)}" target="_blank" rel="noopener" class="sfc-summary-link"><i class="ti ti-file-description"></i> #${d.summary_issue_num} Executive Summary</a>`
+    : `<span class="sfc-summary-disabled">Summary not available</span>`;
+  return `
+    <div class="sfc-header">
+      <span class="sfc-icon"><i class="ti ti-circle-check"></i></span>
+      <span class="sfc-title">Sprint ${n} · Finished</span>
+      ${d.ended_at ? `<span class="sfc-timestamp">${escapeHtml(d.ended_at)}</span>` : ''}
+      <span class="sfc-badge sfc-badge--completed">Completed</span>
+    </div>
+    <div class="sfc-counts">
+      <span class="sfc-count sfc-count--done">${d.done_count} done</span>
+      <span class="sfc-count sfc-count--failed">${d.failed_count} failed</span>
+      <span class="sfc-count sfc-count--skipped">${d.skipped_count} skipped</span>
+    </div>
+    ${total}
+    <div class="sfc-links">
+      ${branchLink}
+      ${summaryHtml}
+    </div>`;
+}
+
+function _sfcHasReworkHtml(d, branchLink, n) {
+  const total = d.wall_clock_secs > 0 ? `<div class="sfc-time">Total: ${formatDuration(d.wall_clock_secs)}</div>` : '';
+  const summaryHtml = d.summary_issue_num
+    ? `<a href="${escapeHtml(d.summary_issue_url)}" target="_blank" rel="noopener" class="sfc-summary-link"><i class="ti ti-file-description"></i> #${d.summary_issue_num} Executive Summary</a>`
+    : `<span class="sfc-summary-disabled">Summary not available</span>`;
+  return `
+    <div class="sfc-header">
+      <span class="sfc-icon"><i class="ti ti-bolt"></i></span>
+      <span class="sfc-title">Sprint ${n} · Finished</span>
+      ${d.ended_at ? `<span class="sfc-timestamp">${escapeHtml(d.ended_at)}</span>` : ''}
+      <span class="sfc-badge sfc-badge--has_rework">Has Rework</span>
+    </div>
+    <div class="sfc-counts">
+      <span class="sfc-count sfc-count--done">${d.done_count} done</span>
+      <span class="sfc-count sfc-count--failed">${d.failed_count} failed</span>
+      <span class="sfc-count sfc-count--skipped">${d.skipped_count} skipped</span>
+      <span class="sfc-count sfc-count--rework">${d.rework_count} rework</span>
+    </div>
+    ${total}
+    <div class="sfc-links">
+      ${branchLink}
+      ${summaryHtml}
+      <span class="sfc-rework-tertiary" title="Available after re-run sub-label ships">Re-run rework → sprint-${n}.1</span>
+    </div>`;
+}
+
+function _sfcCancelledHtml(d, branchLink, n) {
+  const total = d.wall_clock_secs > 0 ? `<div class="sfc-time">Total: ${formatDuration(d.wall_clock_secs)}</div>` : '';
+  return `
+    <div class="sfc-header">
+      <span class="sfc-icon"><i class="ti ti-ban"></i></span>
+      <span class="sfc-title">Sprint ${n} · Stopped early</span>
+      ${d.ended_at ? `<span class="sfc-timestamp">${escapeHtml(d.ended_at)}</span>` : ''}
+      <span class="sfc-badge sfc-badge--cancelled">Cancelled</span>
+    </div>
+    <div class="sfc-counts">
+      <span class="sfc-count sfc-count--done">${d.done_count} done</span>
+      <span class="sfc-count sfc-count--failed">${d.failed_count} failed</span>
+      <span class="sfc-count sfc-count--skipped">${d.skipped_count} skipped</span>
+    </div>
+    ${total}
+    <div class="sfc-links">
+      ${branchLink}
+      <span class="sfc-summary-none"><i class="ti ti-info-circle"></i> Summary not generated (cancelled)</span>
+    </div>`;
 }
 
 /**
@@ -3201,6 +3413,10 @@ function smgmtRender() {
   smgmtApplyDurationBadges();
   // Re-mount live panels for any currently-running sprints after render
   smgmtSyncLivePanels();
+  // Re-apply cached finish cards (issue #367)
+  for (const [lbl, { card, branch }] of Object.entries(_smgmtFinishCards)) {
+    smgmtRenderFinishCard(lbl, card, branch, _smgmtCurrentRepo);
+  }
 }
 
 function smgmtHasCompletedTickets(tickets) {
@@ -3271,6 +3487,8 @@ function smgmtSprintBlockHtml(label, tickets, isNext) {
     : 'Sprint goal (required to run) — e.g. Dashboard UX cleanup';
 
   return `
+    <div class="smgmt-sprint-unit" id="smgmt-unit-${label}">
+    <div class="smgmt-finish-card sfc-hidden" id="smgmt-finish-card-${label}" style="display:none"></div>
     <div class="smgmt-sprint-block" id="smgmt-block-${label}"
          ondragover="smgmtDragOverZone(event, '${label}')"
          ondragleave="smgmtDragLeave(event)"
@@ -3310,6 +3528,7 @@ function smgmtSprintBlockHtml(label, tickets, isNext) {
       <div class="smgmt-sprint-tickets" id="smgmt-tickets-${label}">
         ${ticketsHtml}
       </div>
+    </div>
     </div>`;
 }
 
@@ -5032,6 +5251,13 @@ async function smgmtDispatchRun(sprintLabel, migrateFrom) {
 
 async function smgmtPollRunStatus() {
   try {
+    // Capture previously-running sprint labels for transition detection (issue #367)
+    const _prevRunningLabels = new Set(
+      Object.values(_smgmtAllRunning)
+        .filter(e => e.project === _smgmtCurrentRepo)
+        .map(e => e.sprint_label)
+    );
+
     const [runAllRes, statusRes] = await Promise.all([
       fetch('/api/sprints/running-all'),
       fetch('/api/sprint-status').catch(() => ({ ok: false })),
@@ -5046,6 +5272,29 @@ async function smgmtPollRunStatus() {
         newMap[key] = entry;
       }
       _smgmtAllRunning = newMap;
+    }
+
+    // Detect run→stop transitions and reload finish cards for those sprints (issue #367)
+    const _newRunningLabels = new Set(
+      Object.values(_smgmtAllRunning)
+        .filter(e => e.project === _smgmtCurrentRepo)
+        .map(e => e.sprint_label)
+    );
+    const _transitioned = [..._prevRunningLabels].filter(lbl => !_newRunningLabels.has(lbl));
+    if (_transitioned.length > 0 && _smgmtCurrentRepo) {
+      const repo = _smgmtCurrentRepo;
+      _transitioned.forEach(lbl => {
+        Promise.all([
+          fetch(`/api/sprints/${encodeURIComponent(lbl)}/finish-card?project=${encodeURIComponent(repo)}`),
+          fetch(`/api/sprints/${encodeURIComponent(lbl)}/branch-status?project=${encodeURIComponent(repo)}`).catch(() => null),
+        ]).then(async ([cardRes, branchRes]) => {
+          if (!cardRes.ok) return;
+          const cardData   = await cardRes.json();
+          const branchData = branchRes?.ok ? await branchRes.json() : { exists: false };
+          _smgmtFinishCards[lbl] = { card: cardData, branch: branchData };
+          smgmtRenderFinishCard(lbl, cardData, branchData, repo);
+        }).catch(() => {});
+      });
     }
 
     // Sprint status for progress text — build a map of sprint_label -> status data.

@@ -2751,6 +2751,8 @@ def get_sprint_management_issues(repo: str):
     # Count open tickets per sprint label (both plain and dotted)
     sprint_ticket_counts: dict[str, int] = {lbl: 0 for lbl in all_sprint_labels}
     for iss in issues:
+        if any(lbl["name"] == "sprint-summary" for lbl in iss.get("labels", [])):
+            continue  # hide sprint-summary issues from pane (AC P1-3)
         sprint_num = None
         found_sprint_label = None
         for lbl in iss.get("labels", []):
@@ -4096,6 +4098,232 @@ def get_sprint_outcome(sprint_label: str, project: str):
         "issues":          result_issues,
         "log_line_count":  log_line_count,
     }
+
+
+def _has_rework_tickets(sprint_label: str, project: str) -> bool:
+    """Return True if any open issue in the sprint carries a needs-rework label."""
+    try:
+        r = github_client.get_repo_for_operation(project)
+        result = subprocess.run(
+            ["gh", "issue", "list", "--repo", r,
+             "--label", sprint_label,
+             "--label", "needs-rework",
+             "--json", "number",
+             "--limit", "1"],
+            capture_output=True, text=True, timeout=10,
+        )
+        if result.returncode == 0:
+            return len(json.loads(result.stdout or "[]")) > 0
+    except Exception:
+        pass
+    return False
+
+
+def _count_rework_tickets(sprint_label: str, project: str) -> int:
+    """Return number of open issues in the sprint carrying needs-rework label."""
+    try:
+        r = github_client.get_repo_for_operation(project)
+        result = subprocess.run(
+            ["gh", "issue", "list", "--repo", r,
+             "--label", sprint_label,
+             "--label", "needs-rework",
+             "--json", "number",
+             "--limit", "100"],
+            capture_output=True, text=True, timeout=10,
+        )
+        if result.returncode == 0:
+            return len(json.loads(result.stdout or "[]"))
+    except Exception:
+        pass
+    return 0
+
+
+@app.get("/api/sprints/{sprint_label}/finish-card")
+def get_sprint_finish_card(sprint_label: str, project: str):
+    """Return data for the floating finish-report card above a sprint pane.
+
+    For running sprints: state="running", in_flight_count, pending_count,
+    done_count, wall_clock_secs, started_at.
+
+    For finished sprints: state in (completed|has_rework|cancelled),
+    done_count, failed_count, skipped_count, rework_count, wall_clock_secs,
+    ended_at, summary_issue_url, summary_issue_num.
+    """
+    if not _SPRINT_LABEL_RE.match(sprint_label):
+        raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")
+
+    fc_m = re.search(r"(\d+)", sprint_label)
+    fc_n = fc_m.group(1) if fc_m else sprint_label
+    sprint_number = int(fc_n) if fc_n.isdigit() else None
+
+    project_root = _project_root_path(project)
+    commander = _commander_dir(project_root)
+
+    if _is_sprint_running(project_root, sprint_label):
+        status_key = (project, sprint_label)
+        status_data = _sprint_statuses.get(status_key, {})
+        live_issues = status_data.get("issues", [])
+        in_flight = sum(1 for i in live_issues if i.get("status") == "in-progress")
+        pending = sum(1 for i in live_issues if i.get("status") == "pending")
+        done = sum(1 for i in live_issues if i.get("status") == "done")
+        started_at_str: Optional[str] = status_data.get("start_timestamp")
+        wall_clock_secs = 0.0
+        if started_at_str:
+            try:
+                started_dt = datetime.fromisoformat(started_at_str.rstrip("Z"))
+                if started_dt.tzinfo is None:
+                    started_dt = started_dt.replace(tzinfo=timezone.utc)
+                wall_clock_secs = (datetime.now(timezone.utc) - started_dt).total_seconds()
+            except Exception:
+                pass
+        return {
+            "sprint_label":    sprint_label,
+            "sprint_number":   sprint_number,
+            "state":           "running",
+            "in_flight_count": in_flight,
+            "pending_count":   pending,
+            "done_count":      done,
+            "wall_clock_secs": wall_clock_secs,
+            "started_at":      started_at_str,
+        }
+
+    fc_json_path = _sprint_json_path(project_root, sprint_label)
+    fc_sprint_json = _sprint_json_read(fc_json_path)
+    fc_is_cancelled: bool = fc_sprint_json.get("status") == "cancelled"
+
+    state_path = commander / "sprints" / f"sprint-{fc_n}-state.json"
+    if not state_path.exists():
+        if fc_is_cancelled:
+            return {
+                "sprint_label":      sprint_label,
+                "sprint_number":     sprint_number,
+                "state":             "cancelled",
+                "done_count":        0,
+                "failed_count":      0,
+                "skipped_count":     0,
+                "rework_count":      0,
+                "wall_clock_secs":   0.0,
+                "ended_at":          None,
+                "summary_issue_url": None,
+                "summary_issue_num": None,
+            }
+        raise HTTPException(404, detail=f"Finish card data not available for {sprint_label!r}")
+
+    try:
+        fc_state_data = json.loads(state_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as e:
+        raise HTTPException(500, detail=str(e))
+
+    def _fc_parse_iso(s: Optional[str]) -> Optional[float]:
+        if not s:
+            return None
+        try:
+            dt = datetime.fromisoformat(s.rstrip("Z"))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt.timestamp()
+        except Exception:
+            return None
+
+    sprints_dir = commander / "sprints"
+    fc_sprint_status: Optional[str] = None
+    for sf in sorted(sprints_dir.glob(f"sprint-{fc_n}-summary-*.md"), key=lambda p: p.stat().st_mtime, reverse=True):
+        try:
+            meta = _parse_summary_file(sf)
+            raw = (meta.get("status") or "").lower()
+            if raw in ("complete", "completed"):
+                fc_sprint_status = "completed"
+            elif raw in ("stopped", "failed", "cancelled"):
+                fc_sprint_status = "stopped"
+                if raw == "cancelled":
+                    fc_is_cancelled = True
+        except Exception:
+            pass
+        break
+
+    fc_issues_raw = fc_state_data.get("issues", [])
+    if fc_sprint_status is None and fc_issues_raw:
+        has_pending = any(i.get("status") == "pending" for i in fc_issues_raw)
+        has_failed = any(i.get("agent_status") == "failed" or i.get("failure_reason") for i in fc_issues_raw)
+        if not has_pending:
+            fc_sprint_status = "stopped" if has_failed else "completed"
+
+    done_count    = sum(1 for i in fc_issues_raw if i.get("status") == "done")
+    failed_count  = sum(1 for i in fc_issues_raw if i.get("agent_status") == "failed" or i.get("failure_reason"))
+    skipped_count = sum(
+        1 for i in fc_issues_raw
+        if i.get("status") == "skipped" and not (i.get("agent_status") == "failed" or i.get("failure_reason"))
+    )
+
+    fc_ended_ts: Optional[float] = None
+    for iss in fc_issues_raw:
+        end_ts = _fc_parse_iso(iss.get("tester_finished_at")) or _fc_parse_iso(iss.get("status_changed_at"))
+        if end_ts and (fc_ended_ts is None or end_ts > fc_ended_ts):
+            fc_ended_ts = end_ts
+    ended_at = (
+        datetime.fromtimestamp(fc_ended_ts, tz=timezone.utc).strftime("%H:%M")
+        if fc_ended_ts else None
+    )
+
+    if fc_is_cancelled:
+        card_state = "cancelled"
+        rework_count = 0
+    elif _has_rework_tickets(sprint_label, project):
+        card_state = "has_rework"
+        rework_count = _count_rework_tickets(sprint_label, project)
+    else:
+        card_state = "completed"
+        rework_count = 0
+
+    summary_issue_url: Optional[str] = fc_state_data.get("summary_issue_url")
+    summary_issue_num: Optional[int] = None
+    if summary_issue_url:
+        m_num = re.search(r"/issues/(\d+)", summary_issue_url)
+        if m_num:
+            summary_issue_num = int(m_num.group(1))
+
+    return {
+        "sprint_label":      sprint_label,
+        "sprint_number":     sprint_number,
+        "state":             card_state,
+        "done_count":        done_count,
+        "failed_count":      failed_count,
+        "skipped_count":     skipped_count,
+        "rework_count":      rework_count,
+        "wall_clock_secs":   fc_state_data.get("wall_clock_secs", 0.0),
+        "ended_at":          ended_at,
+        "summary_issue_url": summary_issue_url,
+        "summary_issue_num": summary_issue_num,
+    }
+
+
+@app.get("/api/sprints/{sprint_label}/branch-status")
+def get_sprint_branch_status(sprint_label: str, project: str):
+    """Check if the sprint branch exists on GitHub.
+
+    Uses gh CLI with a 2-second hard timeout; returns {exists, branch}.
+    If the CLI times out or fails, returns exists=False so the UI shows
+    the amber fallback without blocking page load.
+    """
+    if not _SPRINT_LABEL_RE.match(sprint_label):
+        raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")
+
+    try:
+        repo = github_client.get_repo_for_operation(project)
+    except Exception:
+        return {"exists": False, "branch": f"sprint/{sprint_label}"}
+
+    branch_name = f"sprint/{sprint_label}"
+    try:
+        result = subprocess.run(
+            ["gh", "api", f"repos/{repo}/git/ref/heads/{branch_name}"],
+            capture_output=True, text=True, timeout=2,
+        )
+        exists = result.returncode == 0
+    except Exception:
+        exists = False
+
+    return {"exists": exists, "branch": branch_name}
 
 
 class SprintRerunBody(BaseModel):

@@ -526,6 +526,11 @@
       background: var(--surface-2); color: var(--text-sub);
       border: 1px solid var(--border); cursor: not-allowed; opacity: 1;
     }
+    .smgmt-run-btn.smgmt-run-btn--blocked {
+      background: var(--surface-2); color: var(--text-sub);
+      border: 1px solid var(--border); cursor: not-allowed; opacity: 1;
+    }
+    .smgmt-run-btn.smgmt-run-btn--blocked:hover { opacity: 1; }
     .smgmt-run-btn.smgmt-run-btn--rerun {
       background: var(--surface); color: var(--amber); border: 1px solid var(--amber);
     }
@@ -2296,6 +2301,8 @@ const _smgmtOutcomeCache = {};
 // ── Running sprint live state (issue #277) ────────────────────────────────
 // Set of sprint labels that are currently running, populated on each render
 let _smgmtRunningLabels = new Set();
+// True if any sprint is running on any project (used to globally disable Run buttons)
+let _smgmtAnySprintRunning = false;
 // Live data cache: sprint label → last live snapshot from /api/sprints/{label}/live
 const _smgmtLiveCache = {};
 // Poll timer for live data (2s indicator refresh)
@@ -2936,11 +2943,13 @@ async function loadSprintMgmt(silent) {
 
     // Update running labels set
     _smgmtRunningLabels = new Set();
+    _smgmtAnySprintRunning = false;
     if (runningResp && runningResp.ok) {
       const runningData = await runningResp.json();
       const running = runningData.running || [];
+      _smgmtAnySprintRunning = running.length > 0;
       running.forEach(r => {
-        // Only mark as running if this is the current project
+        // Only mark as running for live-card tracking if this is the current project
         if (r.project === repo) {
           _smgmtRunningLabels.add(r.sprint_label);
         }
@@ -3332,6 +3341,11 @@ function _smgmtCardHtml(label, n, tickets, outcome) {
     actionBtn = `<button class="smgmt-run-btn smgmt-run-btn--rerun"
                   onclick="smgmtRerunSprint('${label}')">
                   <i class="ti ti-refresh"></i> Re-run Sprint</button>`;
+  } else if (_smgmtAnySprintRunning) {
+    actionBtn = `<button class="smgmt-run-btn smgmt-run-btn--blocked"
+                  title="Another sprint is running"
+                  onclick="smgmtRunBlockedToast()">
+                  <i class="ti ti-player-play"></i> Run Sprint</button>`;
   } else {
     const runDisabled = !canRun ? 'disabled' : '';
     const runTitle = !canRun ? 'title="Add at least one ticket first"' : '';
@@ -3867,6 +3881,10 @@ function _smgmtShowToast(msg) {
   el.classList.add('show');
   clearTimeout(el._timer);
   el._timer = setTimeout(() => el.classList.remove('show'), 2800);
+}
+
+function smgmtRunBlockedToast() {
+  _smgmtShowToast('Another sprint is running — wait for it to finish or cancel it');
 }
 
 async function smgmtRunSprint(label) {

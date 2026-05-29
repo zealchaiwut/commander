@@ -27,6 +27,10 @@
       --purple:       #7c3aed;
       --purple-bg:    #ede9fe;
       --mono: 'SF Mono','Fira Code','Cascadia Code',monospace;
+      --steel:        #4f7ab8;
+      --steel-bg:     #e0eaf8;
+      --yellow:       #a16207;
+      --yellow-bg:    #fefce8;
       --sidebar-width: 220px;
     }
 
@@ -49,6 +53,10 @@
       --blue-bg:      rgba(96,165,250,.13);
       --purple:       #a78bfa;
       --purple-bg:    rgba(167,139,250,.13);
+      --steel:        #7aa3d4;
+      --steel-bg:     rgba(122,163,212,.13);
+      --yellow:       #facc15;
+      --yellow-bg:    rgba(250,204,21,.13);
     }
 
     /* ── Reset ── */
@@ -632,11 +640,77 @@
     .smgmt-status-done       { background: var(--green-bg); color: var(--green); }
     .smgmt-status-need-rework { background: #fef2f2; color: #dc2626; border: 1px solid #fca5a5; }
 
-    /* ── Outcome band (completed/stopped sprints) ── */
-    .smgmt-sprint-card.smgmt-completed { border-color: var(--green); }
-    .smgmt-sprint-card.smgmt-completed .smgmt-sprint-header { background: linear-gradient(180deg,var(--green-bg) 0%,transparent 100%); }
+    /* ── Outcome band + 4-state pane coloring (sprint-26 parity port) ── */
+    .smgmt-sprint-card.smgmt-completed { border-color: var(--steel); box-shadow: 0 0 0 3px var(--steel-bg), 0 1px 3px rgba(0,0,0,0.05); }
+    .smgmt-sprint-card.smgmt-completed .smgmt-sprint-header { background: linear-gradient(180deg,var(--steel-bg) 0%,transparent 100%); }
+    .smgmt-sprint-card.smgmt-has-rework { border-color: var(--yellow); box-shadow: 0 0 0 3px var(--yellow-bg), 0 1px 3px rgba(0,0,0,0.05); }
+    .smgmt-sprint-card.smgmt-has-rework .smgmt-sprint-header { background: linear-gradient(180deg,var(--yellow-bg) 0%,transparent 100%); }
+    .smgmt-sprint-card.smgmt-cancelled { border-color: var(--amber); box-shadow: 0 0 0 3px var(--amber-bg), 0 1px 3px rgba(0,0,0,0.05); }
+    .smgmt-sprint-card.smgmt-cancelled .smgmt-sprint-header { background: linear-gradient(180deg,var(--amber-bg) 0%,transparent 100%); }
+    /* Legacy 2-state fallback (kept for any path still emitting smgmt-stopped) */
     .smgmt-sprint-card.smgmt-stopped { border-color: var(--amber); }
     .smgmt-sprint-card.smgmt-stopped .smgmt-sprint-header { background: linear-gradient(180deg,var(--amber-bg) 0%,transparent 100%); }
+    /* Labeled state badges — FINISHED / NEED FIXED SPRINT / IDLE */
+    .smgmt-state-badge {
+      display: inline-flex; align-items: center;
+      font-family: var(--mono); font-size: 10px; font-weight: 600;
+      text-transform: uppercase; letter-spacing: .04em;
+      padding: 3px 9px; border-radius: 999px; flex-shrink: 0;
+      border: 1px solid transparent;
+    }
+    .smgmt-state-badge.state-finished { background: var(--steel-bg);  color: var(--steel);    border-color: var(--steel);  }
+    .smgmt-state-badge.state-rework   { background: var(--yellow-bg); color: var(--yellow);   border-color: var(--yellow); }
+    .smgmt-state-badge.state-idle     { background: var(--surface-2); color: var(--text-sub); border-color: var(--border); }
+    /* NEXT UP badge */
+    .smgmt-next-badge {
+      font-family: var(--mono); font-size: 10px; font-weight: 700;
+      text-transform: uppercase; letter-spacing: .08em;
+      background: var(--green-bg); color: var(--green); padding: 2px 7px; border-radius: 4px;
+      flex-shrink: 0;
+    }
+    /* ── Finish-report card (the "hat" above a finished pane, issue #367 parity) ── */
+    .smgmt-sprint-unit { display: flex; flex-direction: column; }
+    .smgmt-finish-card {
+      border: 1px solid var(--border); border-radius: 10px 10px 0 0;
+      overflow: hidden; padding: 10px 16px;
+      display: flex; flex-direction: column; gap: 6px;
+      transition: border-color .2s, background .2s;
+    }
+    .smgmt-finish-card.sfc-running   { border-color: var(--green);  background: linear-gradient(180deg, var(--green-bg)  0%, var(--surface) 100%); }
+    .smgmt-finish-card.sfc-completed { border-color: var(--steel);  background: linear-gradient(180deg, var(--steel-bg)  0%, var(--surface) 100%); }
+    .smgmt-finish-card.sfc-has_rework{ border-color: var(--yellow); background: linear-gradient(180deg, var(--yellow-bg) 0%, var(--surface) 100%); }
+    .smgmt-finish-card.sfc-cancelled { border-color: var(--amber);  background: linear-gradient(180deg, var(--amber-bg)  0%, var(--surface) 100%); }
+    /* Pane loses top rounding when a finish-card sits flush above it */
+    .smgmt-sprint-card.smgmt-has-card { border-top-left-radius: 0; border-top-right-radius: 0; border-top: none; }
+    .sfc-header  { display: flex; align-items: center; gap: 8px; min-width: 0; }
+    .sfc-icon    { font-size: 14px; flex-shrink: 0; }
+    .sfc-title   { font-size: 13px; font-weight: 700; flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .sfc-timestamp { font-size: 11px; color: var(--text-muted); flex-shrink: 0; }
+    .sfc-badge   { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; padding: 2px 7px; border-radius: 10px; flex-shrink: 0; white-space: nowrap; }
+    .sfc-badge--running   { background: var(--green-bg);  color: var(--green);  border: 1px solid rgba(22,163,74,.25);  animation: sfc-pulse 2s ease-in-out infinite; }
+    .sfc-badge--completed { background: var(--steel-bg);  color: var(--steel);  border: 1px solid rgba(79,122,184,.25); }
+    .sfc-badge--has_rework{ background: var(--yellow-bg); color: var(--yellow); border: 1px solid rgba(161,98,7,.25);   }
+    .sfc-badge--cancelled { background: var(--amber-bg);  color: var(--amber);  border: 1px solid rgba(217,119,6,.25);  }
+    @keyframes sfc-pulse { 0%,100% { opacity:1; } 50% { opacity:.6; } }
+    .sfc-counts  { display: flex; gap: 10px; font-family: var(--mono); font-size: 12px; flex-wrap: wrap; }
+    .sfc-count   { white-space: nowrap; }
+    .sfc-count--done    { color: var(--green); }
+    .sfc-count--failed  { color: var(--red);   font-weight: 700; }
+    .sfc-count--skipped { color: var(--text-muted); }
+    .sfc-count--rework  { color: var(--yellow); font-weight: 700; }
+    .sfc-count--pending { color: var(--text-sub); }
+    .sfc-count--inflight{ color: var(--blue); }
+    .sfc-time { font-size: 11px; color: var(--text-muted); }
+    .sfc-links         { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; font-size: 12px; }
+    .sfc-branch-link   { display: flex; align-items: center; gap: 4px; color: var(--blue); text-decoration: none; }
+    .sfc-branch-link:hover { text-decoration: underline; }
+    .sfc-branch-link--warn { color: var(--amber); border: 1px solid var(--amber); border-radius: 4px; padding: 1px 6px; }
+    .sfc-branch-link--warn:hover { opacity: .8; text-decoration: none; }
+    .sfc-summary-link  { color: var(--blue); text-decoration: none; }
+    .sfc-summary-link:hover { text-decoration: underline; }
+    .sfc-summary-disabled { color: var(--text-muted); font-style: italic; cursor: default; }
+    .sfc-summary-none  { display: inline-flex; align-items: center; gap: 5px; color: var(--text-muted); border: 1px dashed var(--border); border-radius: 4px; padding: 2px 8px; cursor: default; }
+    .sfc-rework-tertiary { color: var(--text-sub); font-size: 11px; opacity: .7; cursor: default; }
     .smgmt-done-badge {
       display: inline-flex; align-items: center; gap: 5px;
       padding: 4px 10px; border-radius: 999px; font-size: 11px;
@@ -2236,6 +2310,8 @@ const _smgmtLiveCache = {};
 let _smgmtLivePollId = null;
 // Poll timer for live log panel (5s log refresh, issue #309)
 let _smgmtLogPollId = null;
+// Finish-report card cache: sprint label → {card, branch} (sprint-26 parity port, issue #367)
+const _smgmtFinishCards = {};
 
 // ── Tab navigation ────────────────────────────────────────────────────────────
 function switchTab(tab, pushHistory) {
@@ -2857,7 +2933,11 @@ async function loadSprintMgmt(silent) {
     return;
   }
 
-  if (!silent) listEl.innerHTML = '<div class="loading-msg">Loading sprints…</div>';
+  if (!silent) {
+    listEl.innerHTML = '<div class="loading-msg">Loading sprints…</div>';
+    // Reset finish-card cache on a full (non-silent) load so stale cross-sprint cards don't linger
+    for (const k of Object.keys(_smgmtFinishCards)) delete _smgmtFinishCards[k];
+  }
 
   try {
     // Fetch sprint management data + running sprint status in parallel
@@ -2924,17 +3004,35 @@ function _smgmtRender(data) {
     ? order.map(l => parseInt(l.replace('sprint-', ''), 10)).filter(n => !isNaN(n))
     : [...sprints].sort((a, b) => a - b);
 
+  // NEXT UP: lowest sprint number with >= 1 ticket that isn't currently running (sprint-26 parity)
+  let _smgmtNextUpLabel = null;
+  for (const n of [...orderedNums].sort((a, b) => a - b)) {
+    const lbl = `sprint-${n}`;
+    if (_smgmtRunningLabels.has(lbl)) continue;
+    if ((bySprint[n] || []).length >= 1) { _smgmtNextUpLabel = lbl; break; }
+  }
+
   const cards = orderedNums.map(n => {
     const label = `sprint-${n}`;
     const tickets = bySprint[n] || [];
     const outcome = _smgmtOutcomeCache[label] || null;
-    return _smgmtCardHtml(label, n, tickets, outcome);
+    const cardHtml = _smgmtCardHtml(label, n, tickets, outcome, label === _smgmtNextUpLabel);
+    // Wrap each pane in a unit with a hidden finish-report card "hat" above it (issue #367 parity)
+    return `<div class="smgmt-sprint-unit" id="smgmt-unit-${escHtml(label)}">` +
+           `<div class="smgmt-finish-card sfc-hidden" id="smgmt-finish-card-${escHtml(label)}" style="display:none"></div>` +
+           cardHtml + `</div>`;
   }).join('');
 
   listEl.innerHTML = cards || '<div class="loading-msg">No sprints found.</div>';
 
   // Re-inject selection bar if tickets are selected
   if (_smgmtSelectedIssues.size > 0) _smgmtUpdateSelectionUI();
+
+  // Re-apply cached finish cards (DOM was rebuilt), then refresh them from the API (issue #367 parity)
+  for (const [lbl, fc] of Object.entries(_smgmtFinishCards)) {
+    if (fc) _smgmtRenderFinishCard(lbl, fc.card, fc.branch, _smgmtRepo());
+  }
+  _smgmtLoadFinishCards();
 
   // Fetch outcome data for sprints that look completed (no open tickets)
   _smgmtFetchMissingOutcomes(orderedNums, bySprint);
@@ -2945,10 +3043,12 @@ async function _smgmtFetchMissingOutcomes(orderedNums, bySprint) {
   if (!repo) return;
   for (const n of orderedNums) {
     const label = `sprint-${n}`;
-    // Only fetch if not cached and no open tickets in this sprint
+    if (_smgmtRunningLabels.has(label)) continue; // running sprints show the live card
+    // Only fetch if not cached and the sprint isn't an active planning sprint
     if (_smgmtOutcomeCache[label] !== undefined) continue;
     const tickets = bySprint[n] || [];
-    if (tickets.length > 0) continue; // open tickets → still active planning sprint
+    const hasRework = tickets.some(t => (t.labels || []).some(l => l.name === 'need-rework' || l.name === 'needs-rework'));
+    if (tickets.length > 0 && !hasRework) continue; // open non-rework tickets → still active planning sprint
     try {
       const resp = await fetch(
         `/api/sprints/${encodeURIComponent(label)}/outcome?project=${encodeURIComponent(repo)}`
@@ -2969,7 +3069,7 @@ async function _smgmtFetchMissingOutcomes(orderedNums, bySprint) {
 }
 
 function _smgmtInjectOutcomeBand(label, outcome) {
-  if (!outcome || !outcome.sprint_status) return;
+  if (!outcome || !(outcome.sprint_status || outcome.state)) return;
   const card = document.getElementById(`smgmt-card-${label}`);
   if (!card) return;
   // Remove placeholder outcome band if already there
@@ -2981,25 +3081,28 @@ function _smgmtInjectOutcomeBand(label, outcome) {
   const existingLiveLog = card.querySelector('.smgmt-live-log');
   if (existingLiveLog) existingLiveLog.remove();
 
-  // Update card border class
-  card.classList.remove('smgmt-completed', 'smgmt-stopped');
-  card.classList.add(outcome.sprint_status === 'completed' ? 'smgmt-completed' : 'smgmt-stopped');
+  // Update card border class + labeled badge from the 4-state outcome (sprint-26 parity)
+  const meta = _smgmtStateMeta(outcome);
+  card.classList.remove('smgmt-completed', 'smgmt-stopped', 'smgmt-has-rework', 'smgmt-cancelled');
+  card.classList.add(meta.cardClass);
 
-  // Update badge in header
-  const existingBadge = card.querySelector('.smgmt-done-badge');
-  if (existingBadge) existingBadge.remove();
+  // Update labeled state badge in header (FINISHED / NEED FIXED SPRINT / IDLE)
+  card.querySelectorAll('.smgmt-done-badge, .smgmt-state-badge').forEach(el => el.remove());
   const headerLeft = card.querySelector('.smgmt-sprint-header-left');
   if (headerLeft) {
     const badge = document.createElement('span');
-    badge.className = `smgmt-done-badge ${outcome.sprint_status}`;
-    badge.innerHTML = outcome.sprint_status === 'completed'
-      ? '<i class="ti ti-circle-check-filled"></i> Completed'
-      : '<i class="ti ti-player-stop-filled"></i> Stopped';
-    // Insert after sprint name (second child, after drag handle)
-    const nameEl = headerLeft.querySelector('.smgmt-sprint-name') || headerLeft.children[1];
-    if (nameEl && nameEl.nextSibling) headerLeft.insertBefore(badge, nameEl.nextSibling);
+    badge.className = `smgmt-state-badge ${meta.badgeCls}`;
+    badge.textContent = meta.badge;
+    // Insert after the NEXT UP badge if present, else after the sprint name
+    const anchor = headerLeft.querySelector('.smgmt-next-badge')
+      || headerLeft.querySelector('.smgmt-sprint-name')
+      || headerLeft.children[1];
+    if (anchor && anchor.nextSibling) headerLeft.insertBefore(badge, anchor.nextSibling);
     else headerLeft.appendChild(badge);
   }
+
+  // Has-rework sprints keep their actionable planning tickets; the finish-card hat carries the summary.
+  if (meta.state === 'has_rework') return;
 
   // Build outcome band HTML
   const bandHtml = _smgmtOutcomeBandHtml(label, outcome);
@@ -3245,7 +3348,266 @@ function _smgmtHasCompletedTickets(tickets) {
   return tickets.some(t => (t.labels || []).some(l => RERUN_STRIP_LABELS.has(l.name)));
 }
 
-function _smgmtCardHtml(label, n, tickets, outcome) {
+// ── 4-state outcome + sprint label display (sprint-26 parity port) ───────────
+
+/** Convert a sprint label to its display name: sprint-26 → "Sprint 26", sprint-26.1 → "Sprint 26.1". */
+function sprintLabelDisplay(label) {
+  const m = String(label).match(/^sprint-(\d+)(?:\.(\d+))?$/);
+  if (!m) return label;
+  return m[2] ? `Sprint ${m[1]}.${m[2]}` : `Sprint ${m[1]}`;
+}
+
+/**
+ * Map a sprint outcome to its pane class + labeled badge.
+ * Prefers the backend 4-state `state` (completed|has_rework|cancelled|running),
+ * falling back to the legacy 2-state `sprint_status` (completed|stopped).
+ */
+function _smgmtStateMeta(outcome) {
+  let state = outcome && outcome.state;
+  if (!state || state === 'running') {
+    state = (outcome && outcome.sprint_status === 'completed') ? 'completed' : 'cancelled';
+  }
+  const META = {
+    completed:  { state: 'completed',  cardClass: 'smgmt-completed',  badge: 'Finished',          badgeCls: 'state-finished' },
+    has_rework: { state: 'has_rework', cardClass: 'smgmt-has-rework', badge: 'Need Fixed Sprint', badgeCls: 'state-rework'   },
+    cancelled:  { state: 'cancelled',  cardClass: 'smgmt-cancelled',  badge: 'Idle',              badgeCls: 'state-idle'     },
+    idle:       { state: 'cancelled',  cardClass: 'smgmt-cancelled',  badge: 'Idle',              badgeCls: 'state-idle'     },
+  };
+  return META[state] || META.completed;
+}
+
+// ── Issue #367 parity: floating finish-report cards ──────────────────────────
+
+async function _smgmtLoadFinishCards() {
+  const repo = _smgmtRepo();
+  if (!repo || !_smgmtData) return;
+  const order = (_smgmtData.order && _smgmtData.order.length)
+    ? _smgmtData.order
+    : (_smgmtData.sprints || []).map(n => `sprint-${n}`);
+  await Promise.allSettled(order.map(async (label) => {
+    try {
+      const [cardRes, branchRes] = await Promise.all([
+        fetch(`/api/sprints/${encodeURIComponent(label)}/finish-card?project=${encodeURIComponent(repo)}`),
+        fetch(`/api/sprints/${encodeURIComponent(label)}/branch-status?project=${encodeURIComponent(repo)}`).catch(() => null),
+      ]);
+      if (!cardRes.ok) return; // 404 = sprint never run; no card shown
+      const cardData = await cardRes.json();
+      const branchData = branchRes && branchRes.ok ? await branchRes.json() : { exists: false };
+      _smgmtFinishCards[label] = { card: cardData, branch: branchData };
+      _smgmtRenderFinishCard(label, cardData, branchData, repo);
+    } catch (_) { /* silent */ }
+  }));
+}
+
+function _smgmtRenderFinishCard(label, cardData, branchData, repo) {
+  const cardEl  = document.getElementById(`smgmt-finish-card-${label}`);
+  const blockEl = document.getElementById(`smgmt-card-${label}`);
+  if (!cardEl || !blockEl) return;
+  cardEl.style.display = ''; // remove inline display:none so CSS flex takes over
+  cardEl.className = `smgmt-finish-card sfc-${cardData.state}`;
+  cardEl.innerHTML  = _smgmtFinishCardInnerHtml(cardData, branchData, repo);
+  blockEl.classList.add('smgmt-has-card');
+}
+
+function _smgmtFinishCardInnerHtml(cardData, branchData, repo) {
+  const state = cardData.state;
+  const n = cardData.sprint_number;
+  const branchName = `sprint/sprint-${n}`;
+  const branchUrl  = `https://github.com/${escHtml(repo)}/tree/${branchName}`;
+  const branchLink = branchData && branchData.exists
+    ? `<a href="${branchUrl}" target="_blank" rel="noopener" class="sfc-branch-link"><i class="ti ti-git-branch"></i> ${escHtml(branchName)}</a>`
+    : `<a href="${branchUrl}" target="_blank" rel="noopener" class="sfc-branch-link sfc-branch-link--warn" title="Could not verify branch exists on GitHub"><i class="ti ti-alert-triangle"></i> ${escHtml(branchName)}</a>`;
+  if (state === 'running')    return _sfcRunningHtml(cardData, branchLink, n);
+  if (state === 'completed')  return _sfcCompletedHtml(cardData, branchLink, n);
+  if (state === 'has_rework') return _sfcHasReworkHtml(cardData, branchLink, n);
+  if (state === 'cancelled')  return _sfcCancelledHtml(cardData, branchLink, n);
+  return '';
+}
+
+function _sfcRunningHtml(d, branchLink, n) {
+  const elapsed = d.wall_clock_secs > 0 ? `<div class="sfc-time">Elapsed: ${_fmtWallClock(d.wall_clock_secs)}</div>` : '';
+  return `
+    <div class="sfc-header">
+      <span class="sfc-icon"><i class="ti ti-loader-2"></i></span>
+      <span class="sfc-title">Sprint ${n} · Running</span>
+      <span class="sfc-badge sfc-badge--running">Running</span>
+    </div>
+    <div class="sfc-counts">
+      <span class="sfc-count sfc-count--done">${d.done_count} done</span>
+      <span class="sfc-count sfc-count--inflight">${d.in_flight_count} in-flight</span>
+      <span class="sfc-count sfc-count--pending">${d.pending_count} pending</span>
+    </div>
+    ${elapsed}
+    <div class="sfc-links">
+      ${branchLink}
+      <span class="sfc-summary-disabled">Summary issue (generated on finish)</span>
+    </div>`;
+}
+
+function _sfcCompletedHtml(d, branchLink, n) {
+  const total = d.wall_clock_secs > 0 ? `<div class="sfc-time">Total: ${_fmtWallClock(d.wall_clock_secs)}</div>` : '';
+  const summaryHtml = d.summary_issue_num
+    ? `<a href="${escHtml(d.summary_issue_url)}" target="_blank" rel="noopener" class="sfc-summary-link"><i class="ti ti-file-description"></i> #${d.summary_issue_num} Executive Summary</a>`
+    : `<span class="sfc-summary-disabled">Summary not available</span>`;
+  return `
+    <div class="sfc-header">
+      <span class="sfc-icon"><i class="ti ti-circle-check"></i></span>
+      <span class="sfc-title">Sprint ${n} · Finished</span>
+      ${d.ended_at ? `<span class="sfc-timestamp">${escHtml(d.ended_at)}</span>` : ''}
+      <span class="sfc-badge sfc-badge--completed">Completed</span>
+    </div>
+    <div class="sfc-counts">
+      <span class="sfc-count sfc-count--done">${d.done_count} done</span>
+      <span class="sfc-count sfc-count--failed">${d.failed_count} failed</span>
+      <span class="sfc-count sfc-count--skipped">${d.skipped_count} skipped</span>
+    </div>
+    ${total}
+    <div class="sfc-links">
+      ${branchLink}
+      ${summaryHtml}
+    </div>`;
+}
+
+function _sfcHasReworkHtml(d, branchLink, n) {
+  const total = d.wall_clock_secs > 0 ? `<div class="sfc-time">Total: ${_fmtWallClock(d.wall_clock_secs)}</div>` : '';
+  const summaryHtml = d.summary_issue_num
+    ? `<a href="${escHtml(d.summary_issue_url)}" target="_blank" rel="noopener" class="sfc-summary-link"><i class="ti ti-file-description"></i> #${d.summary_issue_num} Executive Summary</a>`
+    : `<span class="sfc-summary-disabled">Summary not available</span>`;
+  return `
+    <div class="sfc-header">
+      <span class="sfc-icon"><i class="ti ti-bolt"></i></span>
+      <span class="sfc-title">Sprint ${n} · Finished</span>
+      ${d.ended_at ? `<span class="sfc-timestamp">${escHtml(d.ended_at)}</span>` : ''}
+      <span class="sfc-badge sfc-badge--has_rework">Has Rework</span>
+    </div>
+    <div class="sfc-counts">
+      <span class="sfc-count sfc-count--done">${d.done_count} done</span>
+      <span class="sfc-count sfc-count--failed">${d.failed_count} failed</span>
+      <span class="sfc-count sfc-count--skipped">${d.skipped_count} skipped</span>
+      <span class="sfc-count sfc-count--rework">${d.rework_count} rework</span>
+    </div>
+    ${total}
+    <div class="sfc-links">
+      ${branchLink}
+      ${summaryHtml}
+      <span class="sfc-rework-tertiary" title="Available after re-run sub-label ships">Re-run rework → sprint-${n}.1</span>
+    </div>`;
+}
+
+function _sfcCancelledHtml(d, branchLink, n) {
+  const total = d.wall_clock_secs > 0 ? `<div class="sfc-time">Total: ${_fmtWallClock(d.wall_clock_secs)}</div>` : '';
+  return `
+    <div class="sfc-header">
+      <span class="sfc-icon"><i class="ti ti-ban"></i></span>
+      <span class="sfc-title">Sprint ${n} · Stopped early</span>
+      ${d.ended_at ? `<span class="sfc-timestamp">${escHtml(d.ended_at)}</span>` : ''}
+      <span class="sfc-badge sfc-badge--cancelled">Cancelled</span>
+    </div>
+    <div class="sfc-counts">
+      <span class="sfc-count sfc-count--done">${d.done_count} done</span>
+      <span class="sfc-count sfc-count--failed">${d.failed_count} failed</span>
+      <span class="sfc-count sfc-count--skipped">${d.skipped_count} skipped</span>
+    </div>
+    ${total}
+    <div class="sfc-links">
+      ${branchLink}
+      <span class="sfc-summary-none"><i class="ti ti-info-circle"></i> Summary not generated (cancelled)</span>
+    </div>`;
+}
+
+// ── Issue #341 parity: inline sprint rename ──────────────────────────────────
+
+function smgmtStartRename(label, event) {
+  if (event) event.stopPropagation();
+  const card = document.getElementById(`smgmt-card-${label}`);
+  if (!card) return;
+  const nameEl = card.querySelector('.smgmt-sprint-name');
+  if (!nameEl || nameEl.querySelector('.smgmt-rename-wrap')) return; // already editing
+  const origN = parseInt(String(label).split('-')[1], 10);
+
+  nameEl.innerHTML = `
+    <span class="smgmt-rename-wrap">
+      <span class="smgmt-rename-prefix">Sprint </span>
+      <input class="smgmt-rename-input" id="smgmt-rename-input-${label}"
+             type="text" inputmode="numeric" pattern="[0-9]*"
+             value="${origN}" autocomplete="off" />
+      <span class="smgmt-rename-error" id="smgmt-rename-err-${label}"></span>
+    </span>`;
+
+  const input = document.getElementById(`smgmt-rename-input-${label}`);
+  input.focus();
+  input.select();
+
+  input.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') { e.preventDefault(); smgmtCommitRename(label, origN, nameEl); }
+    else if (e.key === 'Escape') { e.preventDefault(); smgmtCancelRename(label, origN, nameEl); }
+  });
+  input.addEventListener('input', function() {
+    this.value = this.value.replace(/[^0-9]/g, '');
+  });
+  input.addEventListener('blur', function() {
+    const el = this;
+    setTimeout(() => {
+      if (el.disabled) return;
+      const wrap = nameEl.querySelector('.smgmt-rename-wrap');
+      if (wrap) smgmtCancelRename(label, origN, nameEl);
+    }, 150);
+  });
+}
+
+function _smgmtSetRenameError(label, msg) {
+  const errEl = document.getElementById(`smgmt-rename-err-${label}`);
+  const input = document.getElementById(`smgmt-rename-input-${label}`);
+  if (errEl) errEl.textContent = msg;
+  if (input) input.classList.toggle('is-invalid', !!msg);
+}
+
+async function smgmtCommitRename(label, origN, nameEl) {
+  const input = document.getElementById(`smgmt-rename-input-${label}`);
+  if (!input) return;
+  const raw = input.value.trim();
+  if (raw === '') { _smgmtSetRenameError(label, 'Sprint number cannot be empty'); input.focus(); return; }
+  const newN = parseInt(raw, 10);
+  if (isNaN(newN) || newN <= 0) { _smgmtSetRenameError(label, 'Only numbers are allowed'); input.focus(); return; }
+  if (newN === origN) { smgmtCancelRename(label, origN, nameEl); return; }
+  const existingNums = (_smgmtData && _smgmtData.order && _smgmtData.order.length)
+    ? _smgmtData.order.map(l => parseInt(String(l).split('-')[1], 10))
+    : ((_smgmtData && _smgmtData.sprints) || []).map(Number);
+  if (existingNums.includes(newN)) { _smgmtSetRenameError(label, `Sprint ${newN} already exists`); input.focus(); return; }
+
+  _smgmtSetRenameError(label, '');
+  input.disabled = true;
+
+  try {
+    const res = await fetch(`/api/sprints/${label}/rename`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ new_sprint_number: newN, project: _smgmtRepo() }),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      _smgmtSetRenameError(label, data.detail || `Error ${res.status}`);
+      input.disabled = false;
+      input.focus();
+      return;
+    }
+  } catch (err) {
+    _smgmtSetRenameError(label, 'Network error');
+    input.disabled = false;
+    input.focus();
+    return;
+  }
+
+  // Reload the board from the server to reflect the renamed labels.
+  await loadSprintMgmt();
+}
+
+function smgmtCancelRename(label, origN, nameEl) {
+  if (!nameEl) return;
+  nameEl.textContent = sprintLabelDisplay(label);
+}
+
+function _smgmtCardHtml(label, n, tickets, outcome, isNext) {
   const isRunning = _smgmtRunningLabels.has(label);
 
   // Running sprint gets special animated treatment (issue #277)
@@ -3283,15 +3645,21 @@ function _smgmtCardHtml(label, n, tickets, outcome) {
   let ticketCount = tickets.length;
   let ticketsContainerHtml = '';
 
-  if (outcome && outcome.sprint_status) {
-    outcomeCardClass = outcome.sprint_status === 'completed' ? ' smgmt-completed' : ' smgmt-stopped';
-    outcomeBadgeHtml = outcome.sprint_status === 'completed'
-      ? '<span class="smgmt-done-badge completed"><i class="ti ti-circle-check-filled"></i> Completed</span>'
-      : '<span class="smgmt-done-badge stopped"><i class="ti ti-player-stop-filled"></i> Stopped</span>';
-    outcomeBandHtml = _smgmtOutcomeBandHtml(label, outcome);
-    const issueList = outcome.issues || [];
-    ticketCount = issueList.length;
-    ticketsContainerHtml = _smgmtOutcomeTicketListHtml(issueList, label, _smgmtRepo());
+  if (outcome && (outcome.sprint_status || outcome.state)) {
+    const meta = _smgmtStateMeta(outcome);
+    outcomeCardClass = ' ' + meta.cardClass;
+    outcomeBadgeHtml = `<span class="smgmt-state-badge ${meta.badgeCls}">${escHtml(meta.badge)}</span>`;
+    if (meta.state === 'has_rework') {
+      // Keep planning view: rework tickets stay actionable; the finish-card hat shows the summary.
+      ticketsContainerHtml = tickets.length > 0
+        ? tickets.map(t => _smgmtTicketRowHtml(t, label)).join('')
+        : '<div class="smgmt-drop-hint">Drop tickets here</div>';
+    } else {
+      outcomeBandHtml = _smgmtOutcomeBandHtml(label, outcome);
+      const issueList = outcome.issues || [];
+      ticketCount = issueList.length;
+      ticketsContainerHtml = _smgmtOutcomeTicketListHtml(issueList, label, _smgmtRepo());
+    }
   } else {
     // Planning view ticket rows
     ticketsContainerHtml = tickets.length > 0
@@ -3309,7 +3677,10 @@ function _smgmtCardHtml(label, n, tickets, outcome) {
       <div class="smgmt-sprint-header">
         <div class="smgmt-sprint-header-left">
           <i class="ti ti-layout-kanban" style="font-size:14px;color:var(--text-muted)"></i>
-          <span class="smgmt-sprint-name" style="font-size:15px;font-weight:700;">Sprint ${escHtml(String(n))}</span>
+          <span class="smgmt-sprint-name" style="font-size:15px;font-weight:700;">${escHtml(sprintLabelDisplay(label))}</span>
+          <button class="smgmt-rename-btn" title="Rename sprint"
+                  onclick="smgmtStartRename('${escHtml(label)}', event)"><i class="ti ti-pencil"></i></button>
+          ${isNext ? '<span class="smgmt-next-badge" aria-label="Next up">NEXT UP</span>' : ''}
           ${outcomeBadgeHtml}
           <span class="smgmt-sprint-count">&middot; ${ticketCount} ticket${ticketCount !== 1 ? 's' : ''}</span>
         </div>
@@ -3410,9 +3781,9 @@ function _smgmtRunningCardHtml(label, n, tickets) {
       <div class="smgmt-sprint-header">
         <div class="smgmt-sprint-header-left">
           <i class="ti ti-layout-kanban" style="font-size:14px;color:var(--green)"></i>
-          <span class="smgmt-sprint-name" style="font-size:15px;font-weight:700;">Sprint ${escHtml(String(n))}</span>
+          <span class="smgmt-sprint-name" style="font-size:15px;font-weight:700;">${escHtml(sprintLabelDisplay(label))}</span>
           <span class="smgmt-running-badge" id="smgmt-running-badge-${escHtml(label)}">
-            <span class="smgmt-running-badge-dot"></span>Running
+            <span class="smgmt-running-badge-dot"></span>${totalCount > 0 ? `${doneCount + skippedCount}/${totalCount}` : '—'}
           </span>
           <span class="smgmt-sprint-count">&middot; ${sourceTickets.length} ticket${sourceTickets.length !== 1 ? 's' : ''}</span>
         </div>
@@ -3569,6 +3940,13 @@ function _smgmtLivePatch(label, live) {
     timeEl.innerHTML = `<i class="ti ti-clock" style="font-size:12px;"></i> ${_fmtRunningTime(timeSpentSec)}`;
   }
   if (progEl)    { progEl.style.width = pct + '%'; }
+
+  // Update running badge X/Y ratio (sprint-26 parity, Gap 5)
+  const badgeEl = document.getElementById(`smgmt-running-badge-${label}`);
+  if (badgeEl) {
+    const ratio = totalCount > 0 ? `${doneCount + skippedCount}/${totalCount}` : '—';
+    badgeEl.innerHTML = `<span class="smgmt-running-badge-dot"></span>${ratio}`;
+  }
 
   // Update per-ticket status indicators
   const liveIssues = live.issues || [];

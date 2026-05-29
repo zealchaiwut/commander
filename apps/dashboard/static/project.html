@@ -2970,6 +2970,11 @@ async function loadSprintMgmt(silent) {
   }
 }
 
+function _smgmtSprintLabelSortKey(label) {
+  const m = String(label).match(/^sprint-(\d+)(?:\.(\d+))?$/);
+  return m ? [parseInt(m[1], 10), m[2] ? parseInt(m[2], 10) : 0] : [Infinity, 0];
+}
+
 function _smgmtRender(data) {
   const listEl = document.getElementById('smgmt-sprint-list');
   if (!listEl) return;
@@ -2979,13 +2984,14 @@ function _smgmtRender(data) {
   const order   = data.order   || [];
   const issues  = data.issues  || [];
 
-  // Group issues by sprint number; collect unassigned for backlog
+  // Group issues by sprint_label (handles both sprint-N and sprint-N.M)
   const bySprint = {};
   const unassigned = [];
   issues.forEach(iss => {
-    if (iss.sprint != null) {
-      if (!bySprint[iss.sprint]) bySprint[iss.sprint] = [];
-      bySprint[iss.sprint].push(iss);
+    const key = iss.sprint_label || null;
+    if (key != null) {
+      if (!bySprint[key]) bySprint[key] = [];
+      bySprint[key].push(iss);
     } else {
       unassigned.push(iss);
     }
@@ -2994,29 +3000,32 @@ function _smgmtRender(data) {
   // Always render the backlog pane regardless of sprint count
   _smgmtRenderBacklog(unassigned);
 
-  if (sprints.length === 0) {
+  if (order.length === 0 && sprints.length === 0) {
     listEl.innerHTML = '<div class="loading-msg">No sprints yet. Create one with + New Sprint.</div>';
     return;
   }
 
-  // Use order list if available, else ascending
-  const orderedNums = order.length > 0
-    ? order.map(l => parseInt(l.replace('sprint-', ''), 10)).filter(n => !isNaN(n))
-    : [...sprints].sort((a, b) => a - b);
+  // Use order list if available (includes sub-labels), else build from integer sprints ascending
+  const orderedLabels = order.length > 0
+    ? order.filter(l => /^sprint-\d+(\.\d+)?$/.test(l))
+    : [...sprints].sort((a, b) => a - b).map(n => `sprint-${n}`);
 
-  // NEXT UP: lowest sprint number with >= 1 ticket that isn't currently running (sprint-26 parity)
+  // NEXT UP: lowest label with >= 1 ticket that isn't currently running (sprint-26 parity)
   let _smgmtNextUpLabel = null;
-  for (const n of [...orderedNums].sort((a, b) => a - b)) {
-    const lbl = `sprint-${n}`;
+  const sortedForNext = [...orderedLabels].sort((a, b) => {
+    const [a1, a2] = _smgmtSprintLabelSortKey(a);
+    const [b1, b2] = _smgmtSprintLabelSortKey(b);
+    return a1 - b1 || a2 - b2;
+  });
+  for (const lbl of sortedForNext) {
     if (_smgmtRunningLabels.has(lbl)) continue;
-    if ((bySprint[n] || []).length >= 1) { _smgmtNextUpLabel = lbl; break; }
+    if ((bySprint[lbl] || []).length >= 1) { _smgmtNextUpLabel = lbl; break; }
   }
 
-  const cards = orderedNums.map(n => {
-    const label = `sprint-${n}`;
-    const tickets = bySprint[n] || [];
+  const cards = orderedLabels.map(label => {
+    const tickets = bySprint[label] || [];
     const outcome = _smgmtOutcomeCache[label] || null;
-    const cardHtml = _smgmtCardHtml(label, n, tickets, outcome, label === _smgmtNextUpLabel);
+    const cardHtml = _smgmtCardHtml(label, null, tickets, outcome, label === _smgmtNextUpLabel);
     // Wrap each pane in a unit with a hidden finish-report card "hat" above it (issue #367 parity)
     return `<div class="smgmt-sprint-unit" id="smgmt-unit-${escHtml(label)}">` +
            `<div class="smgmt-finish-card sfc-hidden" id="smgmt-finish-card-${escHtml(label)}" style="display:none"></div>` +
@@ -3035,18 +3044,17 @@ function _smgmtRender(data) {
   _smgmtLoadFinishCards();
 
   // Fetch outcome data for sprints that look completed (no open tickets)
-  _smgmtFetchMissingOutcomes(orderedNums, bySprint);
+  _smgmtFetchMissingOutcomes(orderedLabels, bySprint);
 }
 
-async function _smgmtFetchMissingOutcomes(orderedNums, bySprint) {
+async function _smgmtFetchMissingOutcomes(orderedLabels, bySprint) {
   const repo = _smgmtRepo();
   if (!repo) return;
-  for (const n of orderedNums) {
-    const label = `sprint-${n}`;
+  for (const label of orderedLabels) {
     if (_smgmtRunningLabels.has(label)) continue; // running sprints show the live card
     // Only fetch if not cached and the sprint isn't an active planning sprint
     if (_smgmtOutcomeCache[label] !== undefined) continue;
-    const tickets = bySprint[n] || [];
+    const tickets = bySprint[label] || [];
     const hasRework = tickets.some(t => (t.labels || []).some(l => l.name === 'need-rework' || l.name === 'needs-rework'));
     if (tickets.length > 0 && !hasRework) continue; // open non-rework tickets → still active planning sprint
     try {
@@ -4232,19 +4240,19 @@ async function smgmtRerunSprint(label) {
 async function smgmtDeleteSprint(label) {
   const repo = _smgmtRepo();
   if (!repo) return;
-  const n = parseInt(label.split('-')[1], 10);
-  const tickets = (_smgmtData?.issues || []).filter(t => t.sprint != null && `sprint-${t.sprint}` === label);
+  const displayName = sprintLabelDisplay(label);
+  const tickets = (_smgmtData?.issues || []).filter(t => t.sprint_label === label);
   const confirmMsg = tickets.length > 0
-    ? `Delete Sprint ${n}?\n\nThis will delete the sprint-${n} label and remove it from ${tickets.length} ticket${tickets.length !== 1 ? 's' : ''}. The tickets themselves are not deleted.`
-    : `Delete Sprint ${n}?\n\nThis will delete the sprint-${n} GitHub label. No tickets are attached.`;
+    ? `Delete ${displayName}?\n\nThis will delete the ${label} label and remove it from ${tickets.length} ticket${tickets.length !== 1 ? 's' : ''}. The tickets themselves are not deleted.`
+    : `Delete ${displayName}?\n\nThis will delete the ${label} GitHub label. No tickets are attached.`;
   if (!confirm(confirmMsg)) return;
   try {
     const res = await fetch(`/api/sprints/${encodeURIComponent(label)}?project=${encodeURIComponent(repo)}`, { method: 'DELETE' });
     if (!res.ok) throw new Error(await res.text());
     const data = await res.json();
     const toastMsg = data.unlabelled_count > 0
-      ? `Sprint ${n} deleted — removed label from ${data.unlabelled_count} ticket${data.unlabelled_count !== 1 ? 's' : ''}.`
-      : `Sprint ${n} deleted.`;
+      ? `${displayName} deleted — removed label from ${data.unlabelled_count} ticket${data.unlabelled_count !== 1 ? 's' : ''}.`
+      : `${displayName} deleted.`;
     _smgmtShowToast(toastMsg);
     await loadSprintMgmt();
   } catch (e) {
@@ -4255,9 +4263,9 @@ async function smgmtDeleteSprint(label) {
 async function smgmtFinishSprint(label) {
   const repo = _smgmtRepo();
   if (!repo) return;
-  const n = parseInt(label.split('-')[1], 10);
-  const tickets = (_smgmtData?.issues || []).filter(t => t.sprint != null && `sprint-${t.sprint}` === label);
-  if (!confirm(`Finish Sprint ${n}?\n\n${tickets.length} open issue${tickets.length !== 1 ? 's' : ''} will be moved to UAT and closed. This cannot be undone.`)) return;
+  const displayName = sprintLabelDisplay(label);
+  const tickets = (_smgmtData?.issues || []).filter(t => t.sprint_label === label);
+  if (!confirm(`Finish ${displayName}?\n\n${tickets.length} open issue${tickets.length !== 1 ? 's' : ''} will be moved to UAT and closed. This cannot be undone.`)) return;
   const parts = repo.split('/');
   const owner = parts[0];
   const repoName = parts.slice(1).join('/');

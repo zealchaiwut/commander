@@ -62,6 +62,18 @@ def create_sprint(label: str, goal: str, project: str) -> Sprint:
         return sprint
 
 
+def rename_sprint(old_label: str, new_label: str) -> Sprint:
+    """Rename a sprint by updating its label in the database."""
+    with _open_session() as session:
+        sprint = session.query(Sprint).filter_by(label=old_label).first()
+        if sprint is None:
+            raise SprintNotFound(f"Sprint {old_label!r} not found")
+        sprint.label = new_label
+        session.commit()
+        session.expunge(sprint)
+        return sprint
+
+
 def update_sprint_status(label: str, new_status: str) -> Sprint:
     with _open_session() as session:
         sprint = session.query(Sprint).filter_by(label=label).first()

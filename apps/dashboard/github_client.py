@@ -206,6 +206,21 @@ def delete_label(label_name: str, repo_name: str | None = None) -> None:
     invalidate(f"issues:{r}:")
 
 
+def edit_label(old_name: str, new_name: str, description: str | None = None,
+               repo_name: str | None = None) -> None:
+    """Rename a GitHub label in-place. GitHub updates all issues automatically."""
+    r = _r(repo_name)
+    cmd = ["label", "edit", old_name, "--repo", r, "--name", new_name]
+    if description is not None:
+        cmd += ["--description", description]
+    _run(*cmd)
+    invalidate(f"sprints:{r}")
+    invalidate(f"open_issues:{r}")
+    invalidate(f"open_issues_body:{r}")
+    invalidate(f"issues:{r}:")
+    invalidate(f"labels:{r}")
+
+
 def assign_sprint(issue_id: int, sprint_num: int | None, repo_name: str | None = None) -> None:
     """Assign (or remove) a sprint-N label on an issue.
 

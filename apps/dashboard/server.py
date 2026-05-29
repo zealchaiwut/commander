@@ -3555,6 +3555,80 @@ async def create_sprint_label(body: SprintCreateBody):
     return {"ok": True, "sprint_label": sprint_label}
 
 
+class SprintRenameBody(BaseModel):
+    new_sprint_number: int
+    project: str
+
+
+@app.post("/api/sprints/{sprint_label}/rename")
+async def rename_sprint_label(sprint_label: str, body: SprintRenameBody):
+    """Rename a sprint label to a new sprint number.
+
+    GitHub's label edit API updates all issues automatically — no per-issue
+    re-labelling is required.
+    """
+    if not _SPRINT_LABEL_RE.match(sprint_label):
+        raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")
+
+    if body.new_sprint_number <= 0:
+        raise HTTPException(400, detail="Sprint number must be a positive integer")
+
+    new_label = f"sprint-{body.new_sprint_number}"
+    if new_label == sprint_label:
+        raise HTTPException(400, detail="New sprint number is the same as the current one")
+
+    try:
+        existing = github_client.list_sprints(repo_name=body.project)
+    except subprocess.CalledProcessError as e:
+        raise _gh_error(e)
+
+    if body.new_sprint_number in existing:
+        raise HTTPException(409, detail=f"Sprint {body.new_sprint_number} already exists")
+
+    project_root = _project_root_path(body.project)
+    if _is_sprint_running(project_root, sprint_label):
+        raise HTTPException(409, detail="Cannot rename a sprint that is currently running")
+
+    # Rename the GitHub label (updates all issues automatically via GitHub API)
+    try:
+        github_client.edit_label(
+            sprint_label,
+            new_label,
+            description=f"Sprint {body.new_sprint_number} issues",
+            repo_name=body.project,
+        )
+    except subprocess.CalledProcessError as e:
+        raise _gh_error(e)
+
+    # Rename local files
+    commander = _commander_dir(project_root)
+    sprints_dir = commander / "sprints"
+    for suffix in ("-goal.txt", "-state.json"):
+        old_path = sprints_dir / f"{sprint_label}{suffix}"
+        new_path = sprints_dir / f"{new_label}{suffix}"
+        if old_path.exists():
+            old_path.rename(new_path)
+
+    # Update sprint order JSON
+    order_path = _sprint_order_path(project_root)
+    if order_path.exists():
+        try:
+            order: list[str] = json.loads(order_path.read_text(encoding="utf-8"))
+            order = [new_label if s == sprint_label else s for s in order]
+            order_path.write_text(json.dumps(order), encoding="utf-8")
+        except Exception:
+            pass
+
+    # Update Neon DB
+    if _SPRINT_REPO_AVAILABLE and _sprint_repo is not None:
+        try:
+            _sprint_repo.rename_sprint(sprint_label, new_label)
+        except Exception:
+            pass  # Best-effort; GitHub is the source of truth for labels
+
+    return {"ok": True, "old_label": sprint_label, "new_label": new_label}
+
+
 class SprintTicketReorderBody(BaseModel):
     issue_numbers: list[int]
     project: str

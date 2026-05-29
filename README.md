@@ -45,6 +45,8 @@ For a full walkthrough including multi-clone setup for Coder/Tester agents, see
 | **Dashboard** | Live agent event feed, project cards, sprint progress bar, UAT sign-off UI | [docs/features/dashboard.md](docs/features/dashboard.md) |
 | **Sprint Manager** | Automates the BA → Coder → Tester → UAT loop for every ticket in a sprint | [docs/features/sprint-manager.md](docs/features/sprint-manager.md) |
 | **Sprint Estimator** | Claude Code-driven effort estimation for all sprint tickets — runs automatically at sprint start | see below |
+| **Neon DB** | Postgres-backed sprint and project state with Alembic migrations; dual-writes alongside JSON | [SCHEMA.md](SCHEMA.md) |
+| **Structured Logging** | JSON-lines log module (`services/logging.py`) writing to `.commander/logs/structured-YYYY-MM-DD.log`; respects `COMMANDER_LOG_LEVEL` | — |
 | **API** | REST API consumed by the dashboard and agent hooks | [docs/features/api.md](docs/features/api.md) |
 
 ---

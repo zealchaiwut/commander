@@ -7358,7 +7358,10 @@ function bcRecreate() {
     try {
       const saved = localStorage.getItem('bc_last_input');
       if (saved) _bcLastInput = JSON.parse(saved);
-    } catch (_) {}
+    } catch (e) {
+      console.warn('[bcRecreate] Failed to parse bc_last_input from localStorage — data may be corrupted. Clearing entry.', e);
+      localStorage.removeItem('bc_last_input');
+    }
   }
 
   // Always hide the recovery banner when Recreate is used (data is about to be restored)
@@ -7403,7 +7406,10 @@ function bcRestoreLastInput() {
     if (concEl) concEl.value = String(input.concurrency || 3);
     document.getElementById('bc-recovery-banner').classList.add('hidden');
     _bcUpdateCounter();
-  } catch (_) {}
+  } catch (e) {
+    console.warn('[bcRestoreLastInput] Failed to parse bc_last_input from localStorage — data may be corrupted. Clearing entry.', e);
+    localStorage.removeItem('bc_last_input');
+  }
 }
 
 // Dismiss recovery banner and clear saved inputs (issue #335)

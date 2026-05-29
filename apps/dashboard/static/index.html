@@ -1403,7 +1403,7 @@
       <button class="btn-secondary smgmt-bulk-action-btn" onclick="smgmtBulkMoveToOpen()">Move to sprint…</button>
       <button class="btn-ghost smgmt-bulk-clear-btn" onclick="smgmtClearSelection()">Clear selection</button>
     </div>
-    <div class="smgmt-body" id="smgmt-body">
+    <div class="smgmt-body" id="smgmt-body" onclick="smgmtContainerClick(event)">
       <div class="smgmt-loading" id="smgmt-loading">Select a project to view sprints.</div>
     </div>
     <!-- Sticky Backlog Block (issue #225) -->
@@ -1437,7 +1437,7 @@
       </div>
       <div class="smgmt-backlog-body" id="smgmt-backlog-body">
         <p class="smgmt-backlog-hint" id="smgmt-backlog-hint">Unassigned tickets &mdash; drag into a sprint above, or click Move to on the right</p>
-        <div class="smgmt-backlog-tickets" id="smgmt-backlog-tickets">
+        <div class="smgmt-backlog-tickets" id="smgmt-backlog-tickets" onclick="smgmtContainerClick(event)">
           <div class="smgmt-drop-hint">Drop tickets here to remove sprint label</div>
         </div>
       </div>
@@ -1702,6 +1702,14 @@
   <div class="modal-footer">
     <button class="btn-ghost" onclick="smgmtFinishClose()">Cancel</button>
     <button class="btn-danger" id="smgmt-finish-confirm" onclick="smgmtFinishConfirm()">Finish Sprint</button>
+  </div>
+</div>
+
+<!-- Finish sprint loading overlay (issue #361) -->
+<div class="smgmt-finish-loading-overlay hidden" id="smgmt-finish-loading-overlay" aria-live="assertive" aria-label="Finishing sprint, please wait">
+  <div class="smgmt-finish-loading-pill">
+    <span class="smgmt-finish-loading-spinner"></span>
+    Finishing sprint...
   </div>
 </div>
 
@@ -2208,6 +2216,30 @@
   }
   .smgmt-est-warning strong { color: var(--amber, #d97706); }
 
+  /* Finish sprint loading overlay (issue #361) */
+  .smgmt-finish-loading-overlay {
+    display: flex; position: fixed; inset: 0;
+    background: rgba(0,0,0,.35); z-index: 9998;
+    align-items: center; justify-content: center;
+    pointer-events: all;
+  }
+  .smgmt-finish-loading-overlay.hidden { display: none; }
+  .smgmt-finish-loading-pill {
+    display: flex; align-items: center; gap: 10px;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 999px; padding: 10px 20px;
+    font-size: 13px; font-weight: 600; color: var(--text);
+    box-shadow: 0 4px 16px rgba(0,0,0,.18);
+    pointer-events: none;
+  }
+  .smgmt-finish-loading-spinner {
+    display: inline-block; width: 14px; height: 14px;
+    border: 2px solid var(--border); border-top-color: var(--blue);
+    border-radius: 50%; animation: smgmt-finish-spin .7s linear infinite;
+    flex-shrink: 0;
+  }
+  @keyframes smgmt-finish-spin { to { transform: rotate(360deg); } }
+
   /* Finish Sprint button (issue #195) */
   .smgmt-finish-btn {
     padding: 4px 10px; font-size: 11px; font-weight: 600;
@@ -2472,7 +2504,15 @@
     font-size: 12px; cursor: default; transition: background 0.15s;
   }
   .smgmt-ticket:hover { background: var(--surface-hover); }
+  .smgmt-ticket:focus-visible { outline: 2px solid var(--blue); outline-offset: -2px; }
   .smgmt-ticket.dragging-ticket { opacity: .4; }
+  .smgmt-multi-drag-ghost {
+    position: fixed; top: -1000px; left: -1000px;
+    background: var(--blue-bg); border: 2px solid var(--blue);
+    border-radius: 6px; padding: 6px 14px; font-size: 13px;
+    font-weight: 700; color: var(--blue); white-space: nowrap;
+    pointer-events: none; box-shadow: 0 4px 12px rgba(0,0,0,.15);
+  }
   .smgmt-ticket-grip {
     cursor: grab; color: var(--text-sub); font-size: 13px; flex-shrink: 0;
   }

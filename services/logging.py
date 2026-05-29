@@ -32,7 +32,7 @@ def _get_git_sha() -> str:
             stderr=subprocess.DEVNULL,
             text=True,
         ).strip()
-    except Exception:
+    except (subprocess.CalledProcessError, FileNotFoundError, OSError):
         return "unknown"
 
 

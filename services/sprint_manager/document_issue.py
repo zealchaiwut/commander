@@ -32,6 +32,8 @@ _REPO_ROOT    = _THIS_DIR.parent.parent
 _DASHBOARD    = _REPO_ROOT / "apps" / "dashboard"
 _AGENT_FILE   = _DASHBOARD / ".claude" / "agents" / "documentor.md"
 
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
 sys.path.insert(0, str(_DASHBOARD))
 try:
     from dotenv import load_dotenv
@@ -39,6 +41,9 @@ try:
 except ImportError:
     pass
 import github_client  # type: ignore[import]
+
+from services.run_id import mint_run_id
+from services.logging import log as structured_log
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -401,6 +406,11 @@ def main() -> None:
     p.add_argument("--base-branch", default="develop",
                    help="Base branch to diff against (default: develop)")
     args = p.parse_args()
+
+    # Mint or adopt run_id for this invocation
+    _run_id = mint_run_id("manual")
+    os.environ["COMMANDER_RUN_ID"] = _run_id
+    structured_log.set_context(run_id=_run_id, source="manual")
 
     # Resolve repo
     if args.repo:

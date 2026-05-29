@@ -3395,6 +3395,14 @@
 
   <!-- Step 1: Input -->
   <div id="bc-step1">
+    <!-- Recovery banner: shown when saved inputs exist from a previous failed run (issue #335) -->
+    <div class="bc-recovery-banner hidden" id="bc-recovery-banner">
+      <span class="bc-recovery-text">Previous input recovered &mdash; restore to continue where you left off.</span>
+      <div class="bc-recovery-actions">
+        <button type="button" class="btn-secondary bc-recovery-btn" onclick="bcRestoreLastInput()">Restore</button>
+        <button type="button" class="bc-recovery-dismiss" onclick="bcDismissRecovery()">Dismiss</button>
+      </div>
+    </div>
     <div class="bc-settings-bar">
       <div class="bc-settings-field">
         <label class="modal-label" for="bc-repo">Repo</label>
@@ -3506,6 +3514,29 @@
     margin-right: 4px;
   }
   .bc-modal .modal-close { margin-left: 0; }
+
+  /* Recovery banner (issue #335) */
+  .bc-recovery-banner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 9px 20px;
+    background: var(--amber-bg);
+    border-bottom: 1px solid var(--amber);
+    font-size: 12px;
+    color: var(--text);
+    flex-shrink: 0;
+    flex-wrap: wrap;
+  }
+  .bc-recovery-text { flex: 1; min-width: 0; }
+  .bc-recovery-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+  .bc-recovery-btn { padding: 4px 10px; font-size: 11px; }
+  .bc-recovery-dismiss {
+    background: none; border: none; cursor: pointer;
+    font-size: 11px; color: var(--amber); text-decoration: underline; padding: 0;
+  }
+  .bc-recovery-dismiss:hover { opacity: 0.8; }
 
   /* Settings bar */
   .bc-settings-bar {
@@ -3838,6 +3869,25 @@
   }
   @keyframes bc-toast-in { from { opacity: 0; transform: translateX(-50%) translateY(8px); } }
 </style>
+
+<!-- ── Build stamp footer (issue #329) ── -->
+<footer id="build-stamp-footer" style="
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  padding: 4px 12px;
+  font-size: 11px;
+  color: var(--text-muted, #6b7280);
+  background: var(--surface, #fff);
+  border-top: 1px solid var(--border, #e5e7eb);
+  text-align: right;
+  z-index: 10;
+  font-family: monospace;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+"></footer>
 
 <script src="/static/app.js"></script>
 </body>

@@ -8,6 +8,9 @@ let doneAgentsVisible = {};       // repo → bool (toggle state for DONE agents
 let _uatTicketsByRepo = {};       // repo → UAT ticket list (populated when expand panel renders)
 let _approveAllUatRepo = null;    // repo currently targeted by the approve-all modal
 
+// ── Build stamp cache (issue #329) ────────────────────────────────────────────
+let _buildStampCache = null; // fetched once per session from /api/version
+
 // ── Router state ──────────────────────────────────────────────────────────────
 let _activeProject    = null;   // "owner/repo" when in project view
 let _activeProjectTab = 'sprint-mgmt'; // 'sprint-mgmt' | 'sprint-history' | 'tickets' (hidden)
@@ -2030,6 +2033,23 @@ async function fetchEnvironment() {
   } catch { /* ignore — badge is optional */ }
 }
 
+// ── Build stamp footer (issue #329) ──────────────────────────────────────────
+
+async function fetchBuildStamp() {
+  if (_buildStampCache) return; // already fetched this session
+  try {
+    const res = await fetch('/api/version');
+    if (!res.ok) return;
+    const data = await res.json();
+    _buildStampCache = data;
+    const el = document.getElementById('build-stamp-footer');
+    if (!el) return;
+    const host = window.location.host;
+    const sha  = (data.git_sha || 'unknown').slice(0, 7);
+    el.textContent = `v${data.version || '?'} · ${host} · build ${sha} · ${data.branch || 'unknown'}`;
+  } catch { /* footer is optional */ }
+}
+
 // ── Sprint History view (AC-5) ────────────────────────────────────────────────
 
 let _sprintHistoryData = [];
@@ -2705,8 +2725,6 @@ let _smgmtAutoRefreshInterval  = 15;  // seconds between refreshes (5|15|30|60)
 let _smgmtAutoRefreshEnabled   = true; // whether auto-refresh is active
 let _smgmtSelectedIssues       = new Set(); // issue numbers currently selected (multi-select, issue #206)
 
-const RERUN_STRIP_LABELS = new Set(['UAT', 'UAT-approved', 'released', 'SIT', 'in-progress', 'need-rework', 'needs-rework', 'tester-rejected']);
-
 function _rerunPolicyAction(labelNames) {
   const s = new Set(labelNames);
   if (s.has('UAT') || s.has('UAT-approved')) return 'skip';
@@ -2756,6 +2774,8 @@ async function smgmtInitForProject(repo) {
 // ── Partial refresh (issue #179) ─────────────────────────────────────────────
 async function smgmtRefreshBoard() {
   if (!_smgmtCurrentRepo) return;
+  // Don't clobber the DOM while a ticket drag is in flight (issue #340)
+  if (_smgmtDragTicket) return;
   await smgmtSelectProject(_smgmtCurrentRepo);
 }
 
@@ -3136,6 +3156,11 @@ function smgmtRender() {
 
   bodyEl.innerHTML = blocksHtml;
 
+  // Restore placeholder visibility if a ticket drag is already in flight (issue #340)
+  if (_smgmtDragTicket) {
+    document.querySelectorAll('.smgmt-sprint-placeholder').forEach(p => { p.style.display = 'block'; });
+  }
+
   smgmtRenderBacklog(unassigned);
   // Count total visible sprint blocks (non-placeholder) for sticky decision (issue #225)
   const totalSprints = allSprintNums.length; // includes both non-empty and empty sprints
@@ -3147,7 +3172,10 @@ function smgmtRender() {
 }
 
 function smgmtHasCompletedTickets(tickets) {
-  return tickets.some(t => (t.labels || []).some(l => RERUN_STRIP_LABELS.has(l.name)));
+  return tickets.some(t => {
+    const action = _rerunPolicyAction((t.labels || []).map(l => l.name));
+    return action === 'dispatch_tester' || action === 'skip';
+  });
 }
 
 function smgmtSprintBlockHtml(label, tickets, isNext) {
@@ -3252,6 +3280,7 @@ function smgmtSprintBlockHtml(label, tickets, isNext) {
 function smgmtPlaceholderBlockHtml(n) {
   return `
     <div class="smgmt-sprint-block smgmt-sprint-placeholder" id="smgmt-block-placeholder-${n}"
+         style="display:none"
          ondragover="smgmtDragOverPlaceholder(event)"
          ondragleave="smgmtDragLeave(event)"
          ondrop="smgmtDropOnPlaceholder(event, ${n})">
@@ -3654,6 +3683,8 @@ function smgmtBacklogTicketDragStart(event, issueNum) {
   event.dataTransfer.setData('text/smgmt-ticket', String(issueNum));
   const el = document.getElementById(`smgmt-ticket-${issueNum}`);
   if (el) setTimeout(() => el.classList.add('dragging-ticket'), 0);
+  // Show the N+1 ghost sprint pane only while a ticket drag is active (issue #340)
+  document.querySelectorAll('.smgmt-sprint-placeholder').forEach(p => { p.style.display = 'block'; });
 }
 
 function smgmtBacklogTicketDragEnd(event) {
@@ -3821,6 +3852,8 @@ function smgmtTicketDragStart(event, issueNum, fromSprint) {
   event.dataTransfer.setData('text/smgmt-ticket', String(issueNum));
   const el = document.getElementById(`smgmt-ticket-${issueNum}`);
   if (el) setTimeout(() => el.classList.add('dragging-ticket'), 0);
+  // Show the N+1 ghost sprint pane only while a ticket drag is active (issue #340)
+  document.querySelectorAll('.smgmt-sprint-placeholder').forEach(p => { p.style.display = 'block'; });
 }
 
 function smgmtTicketDragEnd(event) {
@@ -3834,6 +3867,8 @@ function smgmtTicketDragEnd(event) {
     el.classList.remove('drag-over-sprint', 'drag-over-zone');
   });
   document.getElementById('smgmt-backlog')?.classList.remove('drag-over-sprint', 'drag-over-zone');
+  // Hide the N+1 ghost sprint pane now that the drag is over (issue #340)
+  document.querySelectorAll('.smgmt-sprint-placeholder').forEach(p => { p.style.display = 'none'; });
 }
 
 function smgmtDragOverZone(event, sprintLabel) {
@@ -5257,10 +5292,15 @@ async function smgmtRerunSprint(label) {
   document.getElementById('smgmt-rerun-backdrop').classList.remove('hidden');
   document.getElementById('smgmt-rerun-modal').classList.remove('hidden');
 
+  const _rerunPreviewController = new AbortController();
+  const _rerunPreviewTimeout = setTimeout(() => _rerunPreviewController.abort(), 8000);
+
   try {
     const res = await fetch(
-      `/api/sprints/${encodeURIComponent(label)}/rerun/preview?project=${encodeURIComponent(_smgmtCurrentRepo)}`
+      `/api/sprints/${encodeURIComponent(label)}/rerun/preview?project=${encodeURIComponent(_smgmtCurrentRepo)}`,
+      { signal: _rerunPreviewController.signal }
     );
+    clearTimeout(_rerunPreviewTimeout);
     if (!res.ok) throw new Error(await res.text());
     const preview = await res.json();
 
@@ -5298,7 +5338,11 @@ async function smgmtRerunSprint(label) {
 
     if (confirmBtn) { confirmBtn.disabled = false; }
   } catch (e) {
-    bodyEl.innerHTML = `<p style="color:var(--red,#dc2626)">Failed to load preview: ${escapeHtml(e.message)}</p>`;
+    clearTimeout(_rerunPreviewTimeout);
+    const msg = e.name === 'AbortError'
+      ? 'Preview timed out — server took too long to respond.'
+      : e.message;
+    bodyEl.innerHTML = `<p style="color:var(--red,#dc2626)">Failed to load preview: ${escapeHtml(msg)}</p>`;
     if (confirmBtn) { confirmBtn.disabled = false; }
   }
 }
@@ -6076,6 +6120,7 @@ function showErrorToast(msg) {
 (function init() {
   initTheme();
   fetchEnvironment();
+  fetchBuildStamp().catch(() => {});
 
   // Load projects first, then route (so project view can show project data)
   loadProjects()
@@ -6611,6 +6656,16 @@ function openBulkCreateModal() {
   const fileErrEl = document.getElementById('bc-file-error');
   if (fileErrEl) { fileErrEl.textContent = ''; fileErrEl.classList.add('hidden'); }
   _bcUpdateCounter();
+
+  // Show recovery banner if there are saved inputs from a previous failed run (issue #335)
+  const recoverBanner = document.getElementById('bc-recovery-banner');
+  if (recoverBanner) {
+    try {
+      recoverBanner.classList.toggle('hidden', !localStorage.getItem('bc_last_input'));
+    } catch (_) {
+      recoverBanner.classList.add('hidden');
+    }
+  }
 }
 
 function closeBulkCreateModal() {
@@ -6731,6 +6786,8 @@ async function bcRunAll() {
     labelsRaw,
     concurrency,
   };
+  // Persist to localStorage so Recreate still works after a page refresh (issue #335)
+  try { localStorage.setItem('bc_last_input', JSON.stringify(_bcLastInput)); } catch (_) {}
 
   const runBtn = document.getElementById('bc-run-btn');
   runBtn.disabled = true;
@@ -7142,6 +7199,18 @@ function bcRecreate() {
     `<option value="${escapeHtml(p.repo)}">${escapeHtml(p.name || p.repo)}</option>`
   ).join('');
 
+  // Fall back to localStorage if in-memory state was lost (e.g. page refresh, issue #335)
+  if (!_bcLastInput) {
+    try {
+      const saved = localStorage.getItem('bc_last_input');
+      if (saved) _bcLastInput = JSON.parse(saved);
+    } catch (_) {}
+  }
+
+  // Always hide the recovery banner when Recreate is used (data is about to be restored)
+  const recoverBanner = document.getElementById('bc-recovery-banner');
+  if (recoverBanner) recoverBanner.classList.add('hidden');
+
   // Restore previous input values if available
   if (_bcLastInput) {
     if (sel && _bcLastInput.repo) sel.value = _bcLastInput.repo;
@@ -7161,6 +7230,33 @@ function bcRecreate() {
   document.getElementById('bc-step1-error').classList.add('hidden');
   // Do NOT reset files — keep the same attachments for the re-run
   _bcUpdateCounter();
+}
+
+// Restore saved inputs from localStorage into Step 1 fields (issue #335)
+function bcRestoreLastInput() {
+  try {
+    const saved = localStorage.getItem('bc_last_input');
+    if (!saved) return;
+    const input = JSON.parse(saved);
+    _bcLastInput = input;
+    const sel = document.getElementById('bc-repo');
+    if (sel && input.repo) sel.value = input.repo;
+    const textarea = document.getElementById('bc-textarea');
+    if (textarea) textarea.value = input.text || '';
+    const labelsEl = document.getElementById('bc-default-labels');
+    if (labelsEl) labelsEl.value = input.labelsRaw || 'enhancement';
+    const concEl = document.getElementById('bc-concurrency');
+    if (concEl) concEl.value = String(input.concurrency || 3);
+    document.getElementById('bc-recovery-banner').classList.add('hidden');
+    _bcUpdateCounter();
+  } catch (_) {}
+}
+
+// Dismiss recovery banner and clear saved inputs (issue #335)
+function bcDismissRecovery() {
+  try { localStorage.removeItem('bc_last_input'); } catch (_) {}
+  _bcLastInput = null;
+  document.getElementById('bc-recovery-banner').classList.add('hidden');
 }
 
 function _bcShowToast(msg) {

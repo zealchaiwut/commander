@@ -17,6 +17,12 @@ import time
 from pathlib import Path
 from urllib.parse import urlparse
 
+try:
+    import psycopg2
+except ImportError:
+    print("ERROR: psycopg2 is not installed — run: pip install psycopg2-binary")
+    sys.exit(1)
+
 
 def _load_dotenv() -> None:
     try:
@@ -57,12 +63,6 @@ def main() -> None:
     print(f"Testing: {url_type}")
     print(f"  host:     {host}")
     print(f"  database: {dbname}")
-
-    try:
-        import psycopg2
-    except ImportError:
-        print("\nERROR: psycopg2 is not installed — run: pip install psycopg2-binary")
-        sys.exit(1)
 
     # Hard cap slightly above connect_timeout so psycopg2 fires first for normal cases.
     signal.signal(signal.SIGALRM, _timeout_handler)

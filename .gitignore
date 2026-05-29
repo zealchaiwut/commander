@@ -8,6 +8,11 @@ venv/
 .venv/
 .pytest_cache/
 
+# Environment variables
+.env
+.env.*
+!.env.example
+
 # Claude Code — local/generated files
 .claude/settings.local.json
 **/.claude/settings.local.json

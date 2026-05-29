@@ -7013,6 +7013,13 @@ function _bcConnectSSE(jobId) {
         _bcEventSource = null;
         localStorage.removeItem('bc_job_id');
         _bcJobId = null;
+        // Clear saved input when all tickets were created successfully so the
+        // recovery banner doesn't appear on the next modal open (issue #353)
+        const failed = (_bcJobState.tickets || []).filter(t => t.state === 'failed').length;
+        if (failed === 0) {
+          try { localStorage.removeItem('bc_last_input'); } catch (_) {}
+          _bcLastInput = null;
+        }
       }
     } catch (_) {}
   });

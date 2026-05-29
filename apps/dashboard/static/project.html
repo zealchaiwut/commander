@@ -390,6 +390,59 @@
     .ticket-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .ticket-num   { font-size: 11px; color: var(--text-sub); flex-shrink: 0; }
     .empty-msg { color: var(--text-sub); font-size: 13px; padding: 12px 0; font-style: italic; }
+    .ticket-close-btn {
+      padding: 2px 8px; font-size: 11px; font-weight: 500;
+      border: 1px solid var(--border); border-radius: 4px;
+      background: none; color: var(--text-muted); cursor: pointer;
+      transition: background .12s, color .12s, border-color .12s;
+      flex-shrink: 0; white-space: nowrap;
+    }
+    .ticket-close-btn:hover { background: var(--red-bg); color: var(--red); border-color: var(--red); }
+    .tickets-toolbar {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 12px;
+    }
+    .tickets-toolbar-left { display: flex; align-items: center; gap: 8px; }
+    .tickets-toolbar-right { display: flex; align-items: center; gap: 8px; }
+    .btn-create-label {
+      padding: 4px 10px; font-size: 11px; font-weight: 500;
+      border: 1px solid var(--border); border-radius: 4px;
+      background: none; color: var(--text-muted); cursor: pointer;
+      transition: background .12s, color .12s;
+      display: flex; align-items: center; gap: 4px;
+    }
+    .btn-create-label:hover { background: var(--surface-2); color: var(--text); }
+    .btn-danger {
+      padding: 8px 16px; border: none; border-radius: 6px;
+      background: var(--red); color: #fff; font-size: 13px; font-weight: 600;
+      cursor: pointer; transition: opacity .15s;
+    }
+    .btn-danger:hover { opacity: .85; }
+    .btn-danger:disabled { opacity: .45; cursor: not-allowed; }
+    .cl-color-row {
+      display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px;
+    }
+    .cl-color-swatch {
+      width: 24px; height: 24px; border-radius: 4px; border: 2px solid transparent;
+      cursor: pointer; transition: border-color .12s, transform .1s;
+    }
+    .cl-color-swatch:hover { transform: scale(1.15); }
+    .cl-color-swatch.selected { border-color: var(--text); }
+    .cl-color-hex {
+      width: 100%; padding: 6px 8px; font-size: 12px; font-family: monospace;
+      border: 1px solid var(--border); border-radius: 4px;
+      background: var(--surface-2); color: var(--text); margin-top: 6px;
+    }
+    .cl-color-hex:focus { outline: none; border-color: var(--blue); }
+    .cl-preview {
+      display: inline-flex; align-items: center;
+      padding: 2px 9px; border-radius: 10px; font-size: 11px; font-weight: 600;
+      margin-top: 8px;
+    }
+    /* ── Close Ticket modal ── */
+    .ct-modal { width: min(400px, calc(100vw - 32px)); }
+    /* ── Create Label modal ── */
+    .cl-modal { width: min(420px, calc(100vw - 32px)); }
 
     /* ── Mobile ── */
     @media (max-width: 699px) {
@@ -1687,6 +1740,15 @@
       transition: color .15s, background .15s;
     }
     .btn-view-log:hover { color: var(--blue); background: var(--blue-bg); }
+    /* ── Ticket tab toast ── */
+    #tickets-toast {
+      position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+      background: var(--surface); border: 1px solid var(--border);
+      color: var(--text); font-size: 13px; padding: 10px 18px;
+      border-radius: 8px; box-shadow: 0 4px 16px rgba(0,0,0,.15);
+      z-index: 200; display: none; white-space: nowrap;
+    }
+    #tickets-toast.success { border-color: var(--green); color: var(--green); }
   </style>
 </head>
 <body>
@@ -2303,34 +2365,30 @@ function startSidebarRefresh() {
 }
 
 // ── Tickets loading ───────────────────────────────────────────────────────────
+let _ticketsRepo = null;
+
 async function loadTickets() {
   const container = document.getElementById('tickets-content');
   if (!container) return;
 
-  // Find full repo path from home data
-  let repo = null;
-  if (_homeData && _homeData.projects) {
-    const proj = _homeData.projects.find(p => p.slug === _slug);
-    if (proj) {
-      // We need the full owner/repo — home endpoint only gives slug
-      // Use /api/projects to get the full repo path
-    }
-  }
+  let repo = _cachedFullRepo[_slug] || null;
 
-  // Fetch the full projects list to get owner/repo
-  try {
-    const projResp = await fetch('/api/projects');
-    if (!projResp.ok) throw new Error('HTTP ' + projResp.status);
-    const projData = await projResp.json();
-    const projs = projData.projects || [];
-    const proj = projs.find(p => {
-      const s = (p.repo || '').split('/').pop();
-      return s === _slug;
-    });
-    if (proj) repo = proj.repo;
-  } catch (err) {
-    container.innerHTML = '<div class="loading-msg">Failed to load project info.</div>';
-    return;
+  if (!repo) {
+    // Fetch the full projects list to get owner/repo
+    try {
+      const projResp = await fetch('/api/projects');
+      if (!projResp.ok) throw new Error('HTTP ' + projResp.status);
+      const projData = await projResp.json();
+      const projs = projData.projects || [];
+      const proj = projs.find(p => {
+        const s = (p.repo || '').split('/').pop();
+        return s === _slug;
+      });
+      if (proj) repo = proj.repo;
+    } catch (err) {
+      container.innerHTML = '<div class="loading-msg">Failed to load project info.</div>';
+      return;
+    }
   }
 
   if (!repo) {
@@ -2338,53 +2396,243 @@ async function loadTickets() {
     return;
   }
 
+  _ticketsRepo = repo;
   container.innerHTML = '<div class="loading-msg">Loading tickets…</div>';
 
   try {
     const resp = await fetch('/api/project-details?repo=' + encodeURIComponent(repo));
     if (!resp.ok) throw new Error('HTTP ' + resp.status);
     const data = await resp.json();
-    renderTickets(data);
+    renderTickets(data, repo);
   } catch (err) {
     container.innerHTML = '<div class="loading-msg">Failed to load tickets.</div>';
   }
 }
 
-function renderTickets(data) {
+function renderTickets(data, repo) {
   const container = document.getElementById('tickets-content');
   if (!container) return;
 
   const tickets = data.tickets || [];
   const ghUrl   = data.github_url || '#';
-
-  if (tickets.length === 0) {
-    container.innerHTML = '<div class="loading-msg">No open tickets.</div>';
-    return;
-  }
+  const r = repo || _ticketsRepo || '';
 
   const groups = [
-    { label: 'SIT',         status: 'SIT',         items: tickets.filter(t => t.status === 'SIT') },
-    { label: 'UAT',         status: 'UAT',          items: tickets.filter(t => t.status === 'UAT') },
-    { label: 'In progress', status: 'in-progress',  items: tickets.filter(t => t.status === 'in-progress' || t.status === 'blocked') },
-    { label: 'Backlog',     status: 'backlog',       items: tickets.filter(t => t.status === 'backlog') },
+    { label: 'SIT',         items: tickets.filter(t => t.status === 'SIT') },
+    { label: 'UAT',         items: tickets.filter(t => t.status === 'UAT') },
+    { label: 'In progress', items: tickets.filter(t => t.status === 'in-progress' || t.status === 'blocked') },
+    { label: 'Backlog',     items: tickets.filter(t => t.status === 'backlog') },
   ].filter(g => g.items.length > 0);
 
-  const ticketsHtml = groups.map(g => {
-    const rows = g.items.map(t => `
-      <div class="ticket-row">
-        <span class="ticket-status-pill ${escHtml(t.status)}">${escHtml(t.status)}</span>
-        <a class="ticket-title" href="${escHtml(t.url)}" target="_blank" rel="noopener" title="${escHtml(t.title)}">${escHtml(t.title)}</a>
-        <span class="ticket-num">#${t.number}</span>
-      </div>`).join('');
-    return `<div class="ticket-group-hdr">${escHtml(g.label)} · ${g.items.length}</div>${rows}`;
-  }).join('');
+  let ticketsHtml;
+  if (groups.length === 0) {
+    ticketsHtml = '<div class="loading-msg">No open tickets.</div>';
+  } else {
+    ticketsHtml = groups.map(g => {
+      const rows = g.items.map(t => `
+        <div class="ticket-row" id="ticket-row-${t.number}">
+          <span class="ticket-status-pill ${escHtml(t.status)}">${escHtml(t.status)}</span>
+          <a class="ticket-title" href="${escHtml(t.url)}" target="_blank" rel="noopener" title="${escHtml(t.title)}">${escHtml(t.title)}</a>
+          <span class="ticket-num">#${t.number}</span>
+          <button class="ticket-close-btn" data-num="${t.number}" data-title="${escHtml(t.title)}" onclick="openCloseTicketModal(this)">Close</button>
+        </div>`).join('');
+      return `<div class="ticket-group-hdr">${escHtml(g.label)} · ${g.items.length}</div>${rows}`;
+    }).join('');
+  }
 
   container.innerHTML = `
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
-      <span style="font-size:13px;font-weight:600;color:var(--text-muted)">${tickets.length} open tickets</span>
-      <a href="${escHtml(ghUrl)}" target="_blank" rel="noopener" style="font-size:12px;color:var(--blue)">View on GitHub →</a>
+    <div class="tickets-toolbar">
+      <div class="tickets-toolbar-left">
+        <span style="font-size:13px;font-weight:600;color:var(--text-muted)">${tickets.length} open ticket${tickets.length !== 1 ? 's' : ''}</span>
+      </div>
+      <div class="tickets-toolbar-right">
+        <button class="btn-create-label" onclick="openCreateLabelModal()">
+          <i class="ti ti-tag"></i> Create Label
+        </button>
+        <a href="${escHtml(ghUrl)}" target="_blank" rel="noopener" style="font-size:12px;color:var(--blue)">View on GitHub →</a>
+      </div>
     </div>
     ${ticketsHtml}`;
+}
+
+// ── Close Ticket flow ─────────────────────────────────────────────────────────
+let _closeTicketNum  = null;
+let _closeTicketTitle = null;
+
+function openCloseTicketModal(el) {
+  const issueNum = parseInt(el.dataset.num, 10);
+  const title    = el.dataset.title || '';
+  _closeTicketNum   = issueNum;
+  _closeTicketTitle = title;
+  const bodyEl   = document.getElementById('ct-modal-body');
+  if (bodyEl) bodyEl.textContent = `Close ticket #${issueNum}: "${title}"?`;
+  const errEl    = document.getElementById('ct-modal-error');
+  if (errEl) errEl.classList.add('hidden');
+  const confirmBtn = document.getElementById('ct-confirm-btn');
+  if (confirmBtn) { confirmBtn.disabled = false; confirmBtn.textContent = 'Close ticket'; }
+  document.getElementById('ct-backdrop')?.classList.remove('hidden');
+  document.getElementById('ct-modal')?.classList.remove('hidden');
+}
+
+function closeTicketModalCancel() {
+  document.getElementById('ct-backdrop')?.classList.add('hidden');
+  document.getElementById('ct-modal')?.classList.add('hidden');
+  _closeTicketNum   = null;
+  _closeTicketTitle = null;
+}
+
+async function closeTicketModalConfirm() {
+  if (!_closeTicketNum || !_ticketsRepo) return;
+  const btn    = document.getElementById('ct-confirm-btn');
+  const errEl  = document.getElementById('ct-modal-error');
+  if (btn) { btn.disabled = true; btn.textContent = 'Closing…'; }
+  if (errEl) errEl.classList.add('hidden');
+  try {
+    const res = await fetch(
+      `/api/issues/${_closeTicketNum}/close?repo=${encodeURIComponent(_ticketsRepo)}`,
+      { method: 'POST' }
+    );
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      throw new Error(text || `HTTP ${res.status}`);
+    }
+    const closedNum = _closeTicketNum;
+    closeTicketModalCancel();
+    document.getElementById(`ticket-row-${closedNum}`)?.remove();
+    // Update ticket count in toolbar
+    const countEl = document.querySelector('#tickets-content .tickets-toolbar .tickets-toolbar-left span');
+    if (countEl) {
+      const cur = parseInt(countEl.textContent) || 0;
+      const n   = Math.max(0, cur - 1);
+      countEl.textContent = `${n} open ticket${n !== 1 ? 's' : ''}`;
+    }
+    _ticketsShowSuccess('Ticket closed successfully.');
+  } catch (e) {
+    if (errEl) { errEl.textContent = 'Failed to close ticket: ' + e.message; errEl.classList.remove('hidden'); }
+    if (btn) { btn.disabled = false; btn.textContent = 'Close ticket'; }
+  }
+}
+
+// ── Create Label flow ─────────────────────────────────────────────────────────
+const _PRESET_COLORS = [
+  'e11d48','f97316','eab308','22c55e','06b6d4','3b82f6','8b5cf6','ec4899',
+  'd1d5db','6b7280','a2eeef','0075ca',
+];
+let _clSelectedColor = 'a2eeef';
+
+function openCreateLabelModal() {
+  _clSelectedColor = 'a2eeef';
+  const nameEl = document.getElementById('cl-name-input');
+  if (nameEl) nameEl.value = '';
+  const hexEl = document.getElementById('cl-hex-input');
+  if (hexEl) hexEl.value = _clSelectedColor;
+  _clRenderSwatches();
+  _clUpdatePreview();
+  const errEl = document.getElementById('cl-modal-error');
+  if (errEl) errEl.classList.add('hidden');
+  const btn = document.getElementById('cl-submit-btn');
+  if (btn) { btn.disabled = false; btn.textContent = 'Create label'; }
+  document.getElementById('cl-backdrop')?.classList.remove('hidden');
+  document.getElementById('cl-modal')?.classList.remove('hidden');
+  setTimeout(() => nameEl?.focus(), 50);
+}
+
+function createLabelModalCancel() {
+  document.getElementById('cl-backdrop')?.classList.add('hidden');
+  document.getElementById('cl-modal')?.classList.add('hidden');
+}
+
+function _clRenderSwatches() {
+  const row = document.getElementById('cl-color-row');
+  if (!row) return;
+  row.innerHTML = _PRESET_COLORS.map(c => `
+    <div class="cl-color-swatch${c === _clSelectedColor ? ' selected' : ''}"
+         style="background:#${c};"
+         title="#${c}"
+         onclick="_clSelectColor('${c}')"></div>
+  `).join('');
+}
+
+function _clSelectColor(hex) {
+  _clSelectedColor = hex;
+  const hexEl = document.getElementById('cl-hex-input');
+  if (hexEl) hexEl.value = hex;
+  _clRenderSwatches();
+  _clUpdatePreview();
+}
+
+function _clOnHexInput(val) {
+  const clean = val.replace(/^#/, '').slice(0, 6);
+  _clSelectedColor = clean || 'a2eeef';
+  _clRenderSwatches();
+  _clUpdatePreview();
+}
+
+function _clUpdatePreview() {
+  const nameEl    = document.getElementById('cl-name-input');
+  const previewEl = document.getElementById('cl-preview');
+  if (!previewEl) return;
+  const name = (nameEl?.value || '').trim() || 'label name';
+  previewEl.textContent = name;
+  previewEl.style.background = `#${_clSelectedColor}`;
+  // Pick contrasting text color
+  const r = parseInt(_clSelectedColor.slice(0,2), 16) || 0;
+  const g = parseInt(_clSelectedColor.slice(2,4), 16) || 0;
+  const b = parseInt(_clSelectedColor.slice(4,6), 16) || 0;
+  const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  previewEl.style.color = luminance > 0.55 ? '#000' : '#fff';
+}
+
+async function createLabelModalSubmit() {
+  const nameEl = document.getElementById('cl-name-input');
+  const errEl  = document.getElementById('cl-modal-error');
+  const btn    = document.getElementById('cl-submit-btn');
+  const name   = (nameEl?.value || '').trim();
+  if (!name) {
+    if (errEl) { errEl.textContent = 'Label name is required.'; errEl.classList.remove('hidden'); }
+    nameEl?.focus();
+    return;
+  }
+  if (!_ticketsRepo) {
+    if (errEl) { errEl.textContent = 'No project selected.'; errEl.classList.remove('hidden'); }
+    return;
+  }
+  if (btn) { btn.disabled = true; btn.textContent = 'Creating…'; }
+  if (errEl) errEl.classList.add('hidden');
+  try {
+    const res = await fetch('/api/github/labels', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ name, color: _clSelectedColor, repo: _ticketsRepo }),
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      throw new Error(text || `HTTP ${res.status}`);
+    }
+    createLabelModalCancel();
+    _ticketsShowSuccess(`Label "${name}" created.`);
+  } catch (e) {
+    if (errEl) { errEl.textContent = 'Failed to create label: ' + e.message; errEl.classList.remove('hidden'); }
+    if (btn) { btn.disabled = false; btn.textContent = 'Create label'; }
+  }
+}
+
+function _ticketsShowSuccess(msg) {
+  const t = document.getElementById('tickets-toast');
+  if (!t) return;
+  t.textContent = msg;
+  t.className = 'success';
+  t.style.display = 'block';
+  setTimeout(() => { t.style.display = 'none'; }, 4000);
+}
+
+function _ticketsShowError(msg) {
+  const t = document.getElementById('tickets-toast');
+  if (!t) return;
+  t.textContent = msg;
+  t.className = '';
+  t.style.display = 'block';
+  setTimeout(() => { t.style.display = 'none'; }, 5000);
 }
 
 // ── Header button handlers ─────────────────────────────────────────────────
@@ -4687,7 +4935,11 @@ function _setupModals() {
   // Global Escape handler
   document.addEventListener('keydown', function(e) {
     if (e.key === 'Escape') {
-      if (!document.getElementById('ns-modal').classList.contains('hidden')) {
+      if (!document.getElementById('ct-modal').classList.contains('hidden')) {
+        closeTicketModalCancel();
+      } else if (!document.getElementById('cl-modal').classList.contains('hidden')) {
+        createLabelModalCancel();
+      } else if (!document.getElementById('ns-modal').classList.contains('hidden')) {
         _nsClose(false);
       } else if (!document.getElementById('nt-modal').classList.contains('hidden')) {
         _ntClose();
@@ -5918,6 +6170,57 @@ document.addEventListener('DOMContentLoaded', init);
       <button class="btn-ghost" id="nt-post-cancel-btn" type="button">Cancel</button>
       <button class="btn-primary" id="nt-post-btn" type="button">Post to GitHub</button>
     </div>
+  </div>
+</div>
+
+<div id="tickets-toast"></div>
+
+<!-- ── Close Ticket modal ── -->
+<div class="modal-backdrop hidden" id="ct-backdrop" onclick="closeTicketModalCancel()"></div>
+<div class="modal ct-modal hidden" id="ct-modal">
+  <div class="modal-header">
+    <span class="modal-title">Close ticket</span>
+    <button class="modal-close" onclick="closeTicketModalCancel()" aria-label="Close">&times;</button>
+  </div>
+  <div class="modal-body">
+    <p id="ct-modal-body" style="font-size:13px;color:var(--text);margin:0 0 4px;"></p>
+    <p style="font-size:12px;color:var(--text-muted);margin:8px 0 0;">This will close the ticket on GitHub. This action cannot be undone from the dashboard.</p>
+    <div class="modal-error hidden" id="ct-modal-error"></div>
+  </div>
+  <div class="modal-footer">
+    <button class="btn-ghost" onclick="closeTicketModalCancel()" type="button">Cancel</button>
+    <button class="btn-danger" id="ct-confirm-btn" onclick="closeTicketModalConfirm()" type="button">Close ticket</button>
+  </div>
+</div>
+
+<!-- ── Create Label modal ── -->
+<div class="modal-backdrop hidden" id="cl-backdrop" onclick="createLabelModalCancel()"></div>
+<div class="modal cl-modal hidden" id="cl-modal">
+  <div class="modal-header">
+    <span class="modal-title">Create label</span>
+    <button class="modal-close" onclick="createLabelModalCancel()" aria-label="Close">&times;</button>
+  </div>
+  <div class="modal-body">
+    <div class="modal-field">
+      <label class="modal-label" for="cl-name-input">Label name</label>
+      <input class="modal-input" id="cl-name-input" type="text" placeholder="e.g. bug, needs-review"
+             oninput="_clUpdatePreview()" />
+    </div>
+    <div class="modal-field">
+      <label class="modal-label">Color</label>
+      <div class="cl-color-row" id="cl-color-row"></div>
+      <input class="cl-color-hex" id="cl-hex-input" type="text" maxlength="6"
+             placeholder="hex without #" oninput="_clOnHexInput(this.value)" />
+    </div>
+    <div class="modal-field">
+      <label class="modal-label">Preview</label>
+      <span class="cl-preview" id="cl-preview">label name</span>
+    </div>
+    <div class="modal-error hidden" id="cl-modal-error"></div>
+  </div>
+  <div class="modal-footer">
+    <button class="btn-ghost" onclick="createLabelModalCancel()" type="button">Cancel</button>
+    <button class="btn-primary" id="cl-submit-btn" onclick="createLabelModalSubmit()" type="button">Create label</button>
   </div>
 </div>
 

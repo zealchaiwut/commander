@@ -29,6 +29,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from services.run_id import mint_run_id
 from services.logging import log as structured_log
+from services.sprint_manager.sizing import SIZE_TO_MINUTES, letter_from_minutes, minutes_from_letter
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -161,6 +162,14 @@ Output ONLY the JSON object. No other text."""
                 structured_log.error("estimator_parse_error", "could not parse JSON from agent output", issue_num=issue_num, output_preview=result.stdout[:200])
                 return None
             parsed["issue_number"] = issue_num
+            # Ensure both size and minutes are present; derive whichever is missing.
+            if "size" in parsed and "minutes" not in parsed:
+                parsed["minutes"] = minutes_from_letter(parsed["size"]) or SIZE_TO_MINUTES.get(parsed["size"], 15)
+            elif "minutes" in parsed and "size" not in parsed:
+                parsed["size"] = letter_from_minutes(int(parsed["minutes"]))
+            elif "minutes" not in parsed and "size" not in parsed:
+                parsed["minutes"] = 15
+                parsed["size"] = "M"
             return parsed
 
         # Non-zero exit — transient failure; retry if attempts remain.
@@ -183,6 +192,7 @@ Output ONLY the JSON object. No other text."""
 def post_comment(issue_num: int, repo: str, estimate: dict) -> None:
     """Post the estimate as a structured comment on the issue."""
     size       = estimate.get("size", "?")
+    minutes    = estimate.get("minutes")
     hours      = estimate.get("estimated_hours", "?")
     confidence = estimate.get("confidence", "?")
     files      = estimate.get("files_likely_affected", [])
@@ -196,11 +206,17 @@ def post_comment(issue_num: int, repo: str, estimate: dict) -> None:
     deps_str   = ", ".join(f"#{d}" for d in depends_on) if depends_on else "none"
     blocks_str = ", ".join(f"#{b}" for b in blocks) if blocks else "none"
 
+    # Derive minutes for display if not stored
+    if minutes is None and size != "?":
+        minutes = SIZE_TO_MINUTES.get(size)
+    minutes_str = f"{minutes} min" if minutes is not None else "?"
+
     body = f"""## Estimate
 
 | Field | Value |
 |---|---|
 | Size | **{size}** |
+| Minutes | {minutes_str} |
 | Estimated hours | {hours}h |
 | Confidence | {confidence} |
 | Risk flags | {risk_str} |
@@ -262,12 +278,12 @@ def apply_label(issue_num: int, repo: str, size: str) -> None:
         structured_log.warn("estimate_invalid_size", f"unknown size {size!r}, skipping label", issue_num=issue_num, size=size)
         return
 
-    size_descriptions = {"S": "1–5 min", "M": "~15 min", "L": "~30 min", "XL": ">30 min"}
     label = f"size-{size}"
+    mins = SIZE_TO_MINUTES.get(size, "?")
     subprocess.run(
         [
             "gh", "label", "create", label, "--repo", repo, "--force",
-            "--color", "0075ca", "--description", f"Estimated size {size} ({size_descriptions.get(size, size)})",
+            "--color", "0075ca", "--description", f"Estimated size {size} (~{mins} min)",
         ],
         capture_output=True,
     )

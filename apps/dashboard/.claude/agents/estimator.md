@@ -14,6 +14,7 @@ You MUST output ONLY a valid JSON object with this exact schema:
 {
   "issue_number": 7,
   "size": "M",
+  "minutes": 15,
   "estimated_hours": 3,
   "confidence": "medium",
   "files_likely_affected": ["backend/main.py", "backend/db.py", "requirements.txt"],
@@ -24,16 +25,20 @@ You MUST output ONLY a valid JSON object with this exact schema:
 }
 ```
 
+Both `size` (one of S/M/L/XL) and `minutes` (integer) are REQUIRED.  `minutes`
+is the estimated implementation time in minutes for this specific ticket —
+not the midpoint of the bucket, but your best estimate within the range.
+
 Output ONLY the JSON — no preamble, no explanation, no markdown wrapper.
 
 ## Size scale
 
-| Size | Definition |
-|------|-----------|
-| S    | ~1–5 min — trivial change, single file, well-understood scope |
-| M    | ~15 min — typical feature, a few files, clear requirements |
-| L    | ~30 min — complex feature, multiple subsystems, some uncertainty |
-| XL   | >30 min — major feature, high uncertainty, many dependencies |
+| Size | Minutes range | Definition |
+|------|--------------|-----------|
+| S    | 1–10 min     | trivial change, single file, well-understood scope |
+| M    | 11–19 min    | typical feature, a few files, clear requirements |
+| L    | 20–32 min    | complex feature, multiple subsystems, some uncertainty |
+| XL   | 33+ min      | major feature, high uncertainty, many dependencies |
 
 ## Confidence levels
 
@@ -76,6 +81,7 @@ For an issue "Add login endpoint with JWT tokens":
 {
   "issue_number": 42,
   "size": "M",
+  "minutes": 18,
   "estimated_hours": 2,
   "confidence": "high",
   "files_likely_affected": ["apps/dashboard/main.py", "apps/dashboard/auth.py", "requirements.txt"],

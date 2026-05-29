@@ -3472,7 +3472,13 @@ function _smgmtRunningCardHtml(label, n, tickets) {
     const issueUrl = t.url || (cardRepo ? `https://github.com/${cardRepo}/issues/${t.number}` : '#');
 
     const sizePillHtml = (liveIss && liveIss.size)
-      ? `<span class="smgmt-ticket-size-pill">${escHtml(liveIss.size)}</span>`
+      ? (() => {
+          const mins = liveIss.minutes != null
+            ? liveIss.minutes
+            : (SIZE_MINUTES[liveIss.size] || null);
+          const tooltip = mins != null ? ` title="≈${mins} min"` : '';
+          return `<span class="smgmt-ticket-size-pill"${tooltip}>${escHtml(liveIss.size)}</span>`;
+        })()
       : '';
     const agentTagHtml = (liveIss && liveIss.agent)
       ? `<span class="smgmt-ticket-agent-tag ${_smgmtAgentTagClass(liveIss.agent)}">${escHtml(liveIss.agent.toUpperCase())}</span>`

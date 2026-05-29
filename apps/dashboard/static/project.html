@@ -3726,8 +3726,11 @@ function _smgmtLivePatch(label, live) {
         row.className = 'smgmt-ticket';
         row.dataset.issue = String(t.number);
         row.draggable = false;
-        const initSizePill = t.size
-          ? `<span class="smgmt-ticket-size-pill">${escHtml(t.size)}</span>` : '';
+        const initSizePill = t.size ? (() => {
+          const m = t.minutes != null ? t.minutes : (SIZE_MINUTES[t.size] || null);
+          const tip = m != null ? ` title="≈${m} min"` : '';
+          return `<span class="smgmt-ticket-size-pill"${tip}>${escHtml(t.size)}</span>`;
+        })() : '';
         const initAgentTag = t.agent
           ? `<span class="smgmt-ticket-agent-tag ${_smgmtAgentTagClass(t.agent)}">${escHtml(t.agent.toUpperCase())}</span>` : '';
         const initElapsedStr = _fmtTicketElapsed(t.elapsed_secs);
@@ -3771,6 +3774,8 @@ function _smgmtLivePatch(label, live) {
         if (titleEl) titleEl.after(sizePillEl);
       }
       sizePillEl.textContent = liveIss.size;
+      const _ttMins = liveIss.minutes != null ? liveIss.minutes : (SIZE_MINUTES[liveIss.size] || null);
+      sizePillEl.title = _ttMins != null ? `≈${_ttMins} min` : '';
     } else if (sizePillEl) {
       sizePillEl.remove();
     }
@@ -6233,7 +6238,11 @@ function _bcRenderCard(t) {
     actions = `<a class="bc-action-btn" href="${escHtml(issueUrl)}" target="_blank" rel="noopener" title="Open on GitHub">&#x2197;</a>`;
   } else if (t.state === 'sized') {
     const issueUrl = t.issue_url || '#';
-    const sizeBadge = t.estimate_size ? `<span class="bc-size-badge">${escHtml(t.estimate_size)}</span>` : '';
+    const sizeBadge = t.estimate_size ? (() => {
+      const m = t.estimate_minutes != null ? t.estimate_minutes : (SIZE_MINUTES[t.estimate_size] || null);
+      const tip = m != null ? ` title="≈${m} min"` : '';
+      return `<span class="bc-size-badge"${tip}>${escHtml(t.estimate_size)}</span>`;
+    })() : '';
     head    = `<a class="bc-issue-badge" href="${escHtml(issueUrl)}" target="_blank" rel="noopener">#${t.issue_num}</a>${sizeBadge}`;
     preview = escHtml((t.body_preview || t.body || '').slice(0, 200));
     label   = t.estimate_size ? `Sized: ${t.estimate_size}` : 'Sized';

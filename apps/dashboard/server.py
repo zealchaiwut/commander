@@ -2799,8 +2799,11 @@ def get_sprint_management_issues(repo: str):
     project_root = _project_root_path(repo)
     order = _load_sprint_order(project_root, non_empty_sprint_labels)
 
-    # Placeholder sprint = max plain sprint number + 1 (or 1 if none)
-    placeholder_sprint = (max(sprints) if sprints else 0) + 1
+    # Placeholder sprint = lowest positive N such that no sprint-N label exists (issue #364)
+    _used = set(sprints)
+    placeholder_sprint = 1
+    while placeholder_sprint in _used:
+        placeholder_sprint += 1
 
     return {
         "sprints": sprints,

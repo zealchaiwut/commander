@@ -108,6 +108,10 @@ ALERTS_DIR           = DASHBOARD_DIR / "alerts"
 _HAIKU_INPUT_COST_PER_M  = 0.80   # claude-haiku-4-5-20251001 input (reference)
 _HAIKU_OUTPUT_COST_PER_M = 4.00   # claude-haiku-4-5-20251001 output (reference)
 
+# Set to True by _sigterm_handler when the user cancels the sprint (issue #365).
+# Checked in write_sprint_summary and in main()'s SystemExit handler.
+_sprint_user_cancelled: bool = False
+
 
 # ── SprintConfig dataclass + loader ──────────────────────────────────────────
 
@@ -2736,6 +2740,48 @@ def create_summary_github_issue(
         return None, None
 
 
+def _close_cancelled_sprint_summary(
+    sprint_number: Optional[int],
+    sprint_label: str,
+    repo_name: Optional[str] = None,
+) -> None:
+    """Close any open sprint summary issue created before cancellation arrived (AC-4 issue #365).
+
+    Called from main()'s SystemExit handler when _sprint_user_cancelled is True.
+    Searches by title so it catches issues created in the same run even if their
+    number/URL was never persisted to the state JSON.
+    """
+    n = sprint_number if sprint_number is not None else sprint_label
+    title = f"Sprint {n} Executive Summary"
+    try:
+        existing = github_client.search_issues_by_title(title, repo_name=repo_name)
+    except Exception as exc:
+        structured_log.warn(
+            "cancel_summary_search_failed",
+            f"could not search for summary issue to close: {exc}",
+            exc=str(exc),
+        )
+        return
+    for issue in existing:
+        if issue.get("state") == "open":
+            num = issue.get("number")
+            try:
+                github_client.add_comment(
+                    num,
+                    "Sprint was cancelled; summary not applicable",
+                    repo_name=repo_name,
+                )
+                github_client.close_issue(num, repo_name=repo_name)
+                print(f"  [cancel] Closed summary issue #{num} — sprint was cancelled.")
+            except Exception as exc:
+                structured_log.warn(
+                    "cancel_summary_close_failed",
+                    f"could not close summary issue #{num}: {exc}",
+                    issue_num=num,
+                    exc=str(exc),
+                )
+
+
 def _prompt_learnings(
     content: str,
     path: Path,
@@ -2819,13 +2865,21 @@ def write_sprint_summary(
     cfg: Optional["SprintConfig"] = None,
     dry_run: bool = False,
     force_summary: bool = False,
-) -> Path:
+) -> Optional[Path]:
     """Write summary file, create GitHub issue, prompt for learnings (AC-1/2/3).
 
     AC-5: When dry_run=True the function writes the local summary file and
     prints a dry-run notice, but does NOT create or search GitHub issues.
+
+    Returns None when end_reason is "cancelled" (issue #365 AC-3/AC-5).
     """
     eff_repo = repo_name or (cfg.repo_name if cfg else None)
+
+    # Guard: skip local file and GitHub issue for cancelled sprints (issue #365 AC-3, AC-5).
+    if end_reason == "cancelled":
+        print("  [cancel] Sprint was cancelled — skipping summary file and GitHub issue.")
+        return None
+
     content = generate_sprint_summary(
         state,
         elapsed_secs,
@@ -4579,12 +4633,11 @@ def main() -> None:
 
     atexit.register(_cleanup_pid)
 
-    _orig_sigterm = signal.getsignal(signal.SIGTERM)
-
     def _sigterm_handler(signum: int, frame: object) -> None:
+        global _sprint_user_cancelled
+        _sprint_user_cancelled = True
         _cleanup_pid()
-        signal.signal(signal.SIGTERM, _orig_sigterm or signal.SIG_DFL)
-        os.kill(os.getpid(), signal.SIGTERM)
+        raise SystemExit(130)
 
     signal.signal(signal.SIGTERM, _sigterm_handler)
 
@@ -4610,46 +4663,66 @@ def main() -> None:
             p.error(f"Rerun manifest not found: {_manifest_path}")
         _rerun_manifest = json.loads(_manifest_path.read_text(encoding="utf-8"))
 
-    summary, state = run_sprint(
-        label                = args.label,
-        skip_gates           = args.skip_gates,
-        gate_pytest          = args.gate_pytest,
-        gate_lint            = args.gate_lint,
-        gate_merge_preview   = args.gate_merge_preview,
-        alert_modes          = alert_modes,
-        repo_name            = eff_repo,
-        dry_run              = args.dry_run,
-        resume               = args.resume,
-        retry_failed         = args.retry_failed,
-        target_branch        = args.target_branch,
-        cfg                  = cfg,
-        preflight_approved   = preflight_approved,
-        gate_scope           = args.gate_scope,
-        token_budget         = args.budget,
-        skip_estimator       = args.skip_estimator,
-        rerun_manifest       = _rerun_manifest,
-    )
+    # Pre-initialize so the except block can reference them if run_sprint() raises.
+    summary: Optional[SprintSummary] = None
+    state: Optional[SprintState] = None
+    summary_path: Optional[Path] = None
+    sprint_branch: str = f"sprint/{args.label}"
+    effective_target: str = args.target_branch or sprint_branch
 
-    # Derive sprint_branch for summary (mirrors run_sprint logic)
-    sprint_branch = f"sprint/{args.label}"
-    effective_target = args.target_branch or sprint_branch
-
-    # AC-1/2/3: write extended summary, create GitHub issue, prompt for learnings
-    if state.issues:
-        end_reason   = "complete" if not summary.skipped else "stopped"
-        summary_path = write_sprint_summary(
-            state         = state,
-            elapsed_secs  = state.wall_clock_secs,
-            alert_modes   = alert_modes,
-            end_reason    = end_reason,
-            repo_name     = eff_repo,
-            cfg           = cfg,
-            sprint_branch = effective_target,
-            dry_run       = args.dry_run,
-            force_summary = args.force_summary,
+    try:
+        summary, state = run_sprint(
+            label                = args.label,
+            skip_gates           = args.skip_gates,
+            gate_pytest          = args.gate_pytest,
+            gate_lint            = args.gate_lint,
+            gate_merge_preview   = args.gate_merge_preview,
+            alert_modes          = alert_modes,
+            repo_name            = eff_repo,
+            dry_run              = args.dry_run,
+            resume               = args.resume,
+            retry_failed         = args.retry_failed,
+            target_branch        = args.target_branch,
+            cfg                  = cfg,
+            preflight_approved   = preflight_approved,
+            gate_scope           = args.gate_scope,
+            token_budget         = args.budget,
+            skip_estimator       = args.skip_estimator,
+            rerun_manifest       = _rerun_manifest,
         )
-    else:
-        summary_path = None
+
+        # Derive sprint_branch for summary (mirrors run_sprint logic)
+        sprint_branch = f"sprint/{args.label}"
+        effective_target = args.target_branch or sprint_branch
+
+        # AC-1/2/3: write extended summary, create GitHub issue, prompt for learnings
+        if state.issues:
+            end_reason   = "complete" if not summary.skipped else "stopped"
+            summary_path = write_sprint_summary(
+                state         = state,
+                elapsed_secs  = state.wall_clock_secs,
+                alert_modes   = alert_modes,
+                end_reason    = end_reason,
+                repo_name     = eff_repo,
+                cfg           = cfg,
+                sprint_branch = effective_target,
+                dry_run       = args.dry_run,
+                force_summary = args.force_summary,
+            )
+        else:
+            summary_path = None
+
+    except SystemExit:
+        if _sprint_user_cancelled:
+            # Race condition (issue #365 AC-4): SIGTERM arrived while write_sprint_summary
+            # was executing inside create_summary_github_issue.  Close any open summary
+            # issue that was created in this run before the signal was processed.
+            _close_cancelled_sprint_summary(
+                state.sprint_number if state is not None else None,
+                args.label,
+                eff_repo,
+            )
+        raise
 
     # Dispatch documenter after sprint summary, before sprint PR (issue #165)
     if not args.skip_documenter and not args.dry_run and state.issues:

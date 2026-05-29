@@ -108,9 +108,10 @@ ALERTS_DIR           = DASHBOARD_DIR / "alerts"
 _HAIKU_INPUT_COST_PER_M  = 0.80   # claude-haiku-4-5-20251001 input (reference)
 _HAIKU_OUTPUT_COST_PER_M = 4.00   # claude-haiku-4-5-20251001 output (reference)
 
-# Set to True by _sigterm_handler when the user cancels the sprint (issue #365).
+# Set by _sigterm_handler when the user cancels the sprint (issue #365).
 # Checked in write_sprint_summary and in main()'s SystemExit handler.
-_sprint_user_cancelled: bool = False
+# threading.Event ensures thread-safe signaling (issue #389).
+_sprint_user_cancelled: threading.Event = threading.Event()
 
 
 # ── SprintConfig dataclass + loader ──────────────────────────────────────────
@@ -2806,7 +2807,7 @@ def _close_cancelled_sprint_summary(
 ) -> None:
     """Close any open sprint summary issue created before cancellation arrived (AC-4 issue #365).
 
-    Called from main()'s SystemExit handler when _sprint_user_cancelled is True.
+    Called from main()'s SystemExit handler when _sprint_user_cancelled is set.
     Searches by title so it catches issues created in the same run even if their
     number/URL was never persisted to the state JSON.
     """
@@ -4700,8 +4701,7 @@ def main() -> None:
     atexit.register(_cleanup_pid)
 
     def _sigterm_handler(signum: int, frame: object) -> None:
-        global _sprint_user_cancelled
-        _sprint_user_cancelled = True
+        _sprint_user_cancelled.set()
         _cleanup_pid()
         # Best-effort: write cancelled state before exiting (issue #380)
         try:
@@ -4798,7 +4798,7 @@ def main() -> None:
             pass
 
     except SystemExit:
-        if _sprint_user_cancelled:
+        if _sprint_user_cancelled.is_set():
             # Race condition (issue #365 AC-4): SIGTERM arrived while write_sprint_summary
             # was executing inside create_summary_github_issue.  Close any open summary
             # issue that was created in this run before the signal was processed.

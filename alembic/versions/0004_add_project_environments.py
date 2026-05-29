@@ -61,7 +61,7 @@ def upgrade() -> None:
     if _PROJECTS_JSON.exists():
         try:
             projects = json.loads(_PROJECTS_JSON.read_text())
-        except Exception:
+        except (json.JSONDecodeError, OSError):
             projects = []
         for proj in projects:
             repo = (proj.get("repo") or "").strip()

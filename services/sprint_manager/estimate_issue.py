@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import subprocess
 import sys
@@ -22,6 +23,12 @@ from typing import Optional
 # Repo root is two levels up
 REPO_ROOT = Path(__file__).parent.parent.parent
 AGENT_PATH = REPO_ROOT / "apps" / "dashboard" / ".claude" / "agents" / "estimator.md"
+
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from services.run_id import mint_run_id
+from services.logging import log as structured_log
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -93,8 +100,19 @@ def fetch_issue(issue_num: int, repo: str) -> dict:
     return json.loads(result.stdout)
 
 
+_ESTIMATOR_MAX_RETRIES = 3
+_ESTIMATOR_RETRY_DELAY_SECS = 5
+
+
 def run_estimator(issue_num: int, issue_data: dict) -> Optional[dict]:
-    """Invoke the estimator agent via `claude -p` and return parsed JSON."""
+    """Invoke the estimator agent via `claude -p` and return parsed JSON.
+
+    Retries up to _ESTIMATOR_MAX_RETRIES times on transient agent failures
+    (non-zero exit code). --no-session-persistence prevents session-file
+    conflicts when multiple estimations run concurrently during bulk create.
+    """
+    import time as _time
+
     instructions = load_agent_instructions()
 
     title = issue_data.get("title", "")
@@ -118,37 +136,48 @@ Output ONLY the JSON object. No other text."""
         "claude",
         "--model", "claude-haiku-4-5-20251001",
         "--dangerously-skip-permissions",
+        "--no-session-persistence",
         "-p", prompt,
     ]
 
-    try:
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=180,
-        )
-    except subprocess.TimeoutExpired:
-        print("Error: estimator agent timed out after 180s", file=sys.stderr)
-        return None
-    except FileNotFoundError:
-        print("Error: claude CLI not found in PATH", file=sys.stderr)
-        return None
+    for attempt in range(1, _ESTIMATOR_MAX_RETRIES + 1):
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=180,
+            )
+        except subprocess.TimeoutExpired:
+            structured_log.error("estimator_timeout", "estimator agent timed out after 180s", issue_num=issue_num, timeout_secs=180)
+            return None
+        except FileNotFoundError:
+            print("Error: claude CLI not found in PATH", file=sys.stderr)
+            return None
 
-    if result.returncode != 0:
+        if result.returncode == 0:
+            parsed = extract_json(result.stdout)
+            if not parsed:
+                structured_log.error("estimator_parse_error", "could not parse JSON from agent output", issue_num=issue_num, output_preview=result.stdout[:200])
+                return None
+            parsed["issue_number"] = issue_num
+            return parsed
+
+        # Non-zero exit — transient failure; retry if attempts remain.
+        if attempt < _ESTIMATOR_MAX_RETRIES:
+            print(
+                f"Warning: agent exited {result.returncode} for #{issue_num} "
+                f"(attempt {attempt}/{_ESTIMATOR_MAX_RETRIES}), retrying in {_ESTIMATOR_RETRY_DELAY_SECS}s…",
+                file=sys.stderr,
+            )
+            _time.sleep(_ESTIMATOR_RETRY_DELAY_SECS)
+            continue
+
         print(f"Error: agent exited {result.returncode}", file=sys.stderr)
         if result.stderr:
             print(result.stderr[:500], file=sys.stderr)
-        return None
 
-    parsed = extract_json(result.stdout)
-    if not parsed:
-        print("Error: could not parse JSON from agent output:", file=sys.stderr)
-        print(result.stdout[:800], file=sys.stderr)
-        return None
-
-    parsed["issue_number"] = issue_num
-    return parsed
+    return None
 
 
 def post_comment(issue_num: int, repo: str, estimate: dict) -> None:
@@ -230,7 +259,7 @@ def apply_label(issue_num: int, repo: str, size: str) -> None:
     """Apply size-S/M/L/XL label to the issue, creating it if needed."""
     valid = {"S", "M", "L", "XL"}
     if size not in valid:
-        print(f"Warning: unknown size {size!r}, skipping label", file=sys.stderr)
+        structured_log.warn("estimate_invalid_size", f"unknown size {size!r}, skipping label", issue_num=issue_num, size=size)
         return
 
     size_descriptions = {"S": "1–5 min", "M": "~15 min", "L": "~30 min", "XL": ">30 min"}
@@ -259,6 +288,11 @@ def main() -> None:
     p.add_argument("--save-label", action="store_true", help="Apply size-S/M/L/XL label to issue")
     p.add_argument("--force", action="store_true", help="Re-run estimator even if cached result exists")
     args = p.parse_args()
+
+    # Mint or adopt run_id for this invocation
+    _run_id = mint_run_id("manual")
+    os.environ["COMMANDER_RUN_ID"] = _run_id
+    structured_log.set_context(run_id=_run_id, source="manual")
 
     # Auto-detect repo
     repo = args.repo

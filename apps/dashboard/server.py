@@ -47,6 +47,43 @@ except ImportError:
     _backup_module = None  # type: ignore[assignment]
     _BACKUP_AVAILABLE = False
 
+try:
+    import sprint_repo as _sprint_repo
+    _SPRINT_REPO_AVAILABLE = True
+except Exception:
+    _sprint_repo = None  # type: ignore[assignment]
+    _SPRINT_REPO_AVAILABLE = False
+
+try:
+    import sync_projects_to_neon as _sync_projects_module
+    _SYNC_PROJECTS_AVAILABLE = True
+except Exception:
+    _sync_projects_module = None  # type: ignore[assignment]
+    _SYNC_PROJECTS_AVAILABLE = False
+
+
+def _sprint_json_path(project_root: Path, sprint_label: str) -> Path:
+    return _commander_dir(project_root) / "sprints" / f"{sprint_label}.json"
+
+
+def _sprint_json_write(path: Path, data: dict) -> None:
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        os.replace(str(tmp), str(path))
+    except OSError as _e:
+        print(f"[sprint-json] WARNING: could not write {path}: {_e}")
+
+
+def _sprint_json_read(path: Path) -> dict:
+    if path.exists():
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    return {}
+
 STATIC_DIR = Path(__file__).parent / "static"
 ENVIRONMENT = os.environ.get("ENVIRONMENT", "prd").lower()
 
@@ -57,6 +94,21 @@ _TIMEOUT_CHECK_INTERVAL: int = 60  # run the check every 60 seconds
 
 _subscribers: list[asyncio.Queue] = []
 _start_time: float = 0.0
+
+
+# ── Git startup metadata (issue #329) ─────────────────────────────────────────
+# Captured once at process start; never re-runs git per request.
+
+def _capture_git_value(cmd: list) -> str:
+    try:
+        return subprocess.check_output(cmd, stderr=subprocess.DEVNULL, text=True).strip()
+    except Exception:
+        return "unknown"
+
+
+_GIT_SHA: str = _capture_git_value(["git", "rev-parse", "--short", "HEAD"])
+_GIT_BRANCH: str = _capture_git_value(["git", "rev-parse", "--abbrev-ref", "HEAD"])
+_STARTED_AT: str = datetime.now(timezone.utc).isoformat()
 
 
 # ── Build hash (cache-busting) ─────────────────────────────────────────────────
@@ -373,6 +425,14 @@ async def lifespan(app: FastAPI):
     _validate_github_repos()
     _sweep_orphan_pid_files()
     _restore_sprint_statuses_on_startup()
+    # Sync projects.json → Neon (non-blocking; warn on failure, never fatal)
+    if _SYNC_PROJECTS_AVAILABLE:
+        try:
+            _result = _sync_projects_module.sync_projects_to_neon()
+            logger.info("projects sync complete: %s", _result)
+        except Exception as _exc:
+            logger.warning("projects sync failed (non-fatal): %s", _exc)
+
     # Start backup scheduler and queue a startup backup after 30 s
     if _BACKUP_AVAILABLE:
         try:
@@ -843,16 +903,23 @@ def get_environment():
 
 @app.get("/api/version")
 def get_version():
-    """Return the build version hash for cache-busting (issue #249).
+    """Return build metadata for the running process (issue #329).
 
     Response shape:
     {
       "version": "1.0",
-      "build": "abc12345"
+      "git_sha": "abc1234",
+      "branch": "main",
+      "started_at": "2026-05-29T12:00:00+00:00"
     }
     """
     return JSONResponse(
-        content={"version": _APP_VERSION, "build": _BUILD_HASH},
+        content={
+            "version": _APP_VERSION,
+            "git_sha": _GIT_SHA[:7] if _GIT_SHA != "unknown" else "unknown",
+            "branch": _GIT_BRANCH,
+            "started_at": _STARTED_AT,
+        },
         headers={"Cache-Control": "no-cache, must-revalidate"},
     )
 
@@ -1050,6 +1117,15 @@ def reject_issue(issue_id: int, body: RejectBody, repo: Optional[str] = None):
         raise _gh_error(e)
 
 
+@app.post("/api/issues/{issue_id}/close")
+def close_issue_endpoint(issue_id: int, repo: Optional[str] = None):
+    try:
+        github_client.close_issue(issue_id, repo_name=repo)
+        return {"ok": True}
+    except subprocess.CalledProcessError as e:
+        raise _gh_error(e)
+
+
 @app.get("/api/issues/{issue_id}/test-report")
 def get_test_report(issue_id: int, repo: Optional[str] = None):
     try:
@@ -1147,6 +1223,20 @@ async def remove_project(owner: str, repo_name: str, body: RemoveProjectBody):
             pass  # backup trigger failures never affect the response
 
     return {"ok": True, "removed": removed}
+
+
+@app.post("/api/projects/sync-to-db")
+async def sync_projects_to_db():
+    """Trigger a manual sync of projects.json → Neon.
+
+    Returns a JSON summary: {projects_synced, projects_skipped, envs_synced, envs_skipped, errors}.
+    """
+    if not _SYNC_PROJECTS_AVAILABLE:
+        raise HTTPException(status_code=503, detail="sync module not available")
+    try:
+        return _sync_projects_module.sync_projects_to_neon()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
 
 
 @app.post("/api/projects/{owner}/{repo_name}/approve-batch")
@@ -1639,7 +1729,19 @@ def _home_project_data(proj: dict, running_sprints: list[dict]) -> dict:
     uat_issues = [i for i in all_open if any(l["name"] == "UAT" for l in i.get("labels", []))]
     backlog_issues = [i for i in all_open if github_client.classify_issue(i) == "backlog"]
 
-    if proj_running:
+    # Supplement PID-based check with Neon: if Neon says a sprint is running for
+    # this project, the sidebar dot is green even if the JSON file was deleted.
+    neon_running = False
+    if not proj_running and _SPRINT_REPO_AVAILABLE and _sprint_repo is not None:
+        try:
+            neon_running = any(
+                s.status == "running"
+                for s in _sprint_repo.list_sprints(project=repo)
+            )
+        except Exception:
+            pass
+
+    if proj_running or neon_running:
         status = "running"
     elif uat_issues:
         status = "uat-pending"
@@ -2988,6 +3090,19 @@ def kill_sprint(sprint_label: str, project: str):
         except OSError:
             pass
 
+    # Neon + JSON: mark sprint as cancelled (best-effort — don't fail the kill).
+    if _SPRINT_REPO_AVAILABLE and _sprint_repo is not None:
+        try:
+            _sprint_repo.update_sprint_status(sprint_label, "cancelled")
+        except Exception as _e:
+            print(f"[neon] WARNING: could not mark sprint {sprint_label!r} cancelled: {_e}")
+    project_root = _project_root_path(project)
+    json_path = _sprint_json_path(project_root, sprint_label)
+    data = _sprint_json_read(json_path)
+    if data:
+        data["status"] = "cancelled"
+        _sprint_json_write(json_path, data)
+
     return {"ok": True}
 
 
@@ -3414,13 +3529,66 @@ async def create_sprint_label(body: SprintCreateBody):
     except ValueError as e:
         raise HTTPException(400, detail=str(e))
     sprint_label = f"sprint-{target_num}"
-    # Persist goal if provided
+    eff_goal = (body.goal or sprint_label).strip() or sprint_label
+
+    # Neon write must succeed before any JSON is written (AC-6).
+    if _SPRINT_REPO_AVAILABLE and _sprint_repo is not None:
+        try:
+            _sprint_repo.get_or_create_sprint(
+                label=sprint_label,
+                goal=eff_goal,
+                project=body.project,
+            )
+        except Exception as _e:
+            raise HTTPException(500, detail=f"Neon write failed: {_e}")
+
+    # JSON writes are best-effort (AC-7).
+    project_root = _project_root_path(body.project)
     if body.goal is not None:
-        project_root = _project_root_path(body.project)
         goal_path = _sprint_goal_path(project_root, sprint_label)
         goal_path.parent.mkdir(parents=True, exist_ok=True)
         goal_path.write_text(body.goal.strip(), encoding="utf-8")
+    _sprint_json_write(
+        _sprint_json_path(project_root, sprint_label),
+        {"label": sprint_label, "goal": eff_goal, "project": body.project, "status": "pending", "tickets": []},
+    )
     return {"ok": True, "sprint_label": sprint_label}
+
+
+class SprintTicketReorderBody(BaseModel):
+    issue_numbers: list[int]
+    project: str
+
+
+@app.post("/api/sprints/{sprint_label}/tickets/reorder")
+def reorder_sprint_tickets(sprint_label: str, body: SprintTicketReorderBody):
+    """Reorder tickets within a sprint. Writes to Neon first, then JSON fallback."""
+    if not _SPRINT_LABEL_RE.match(sprint_label):
+        raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")
+
+    # Neon write must succeed (AC-6).
+    if _SPRINT_REPO_AVAILABLE and _sprint_repo is not None:
+        try:
+            _sprint_repo.reorder_tickets(sprint_label, body.issue_numbers)
+        except Exception as _e:
+            if "SprintNotFound" in type(_e).__name__ or "not found" in str(_e).lower():
+                raise HTTPException(404, detail=f"Sprint {sprint_label!r} not found in DB")
+            raise HTTPException(500, detail=f"Neon write failed: {_e}")
+
+    # JSON fallback (AC-7).
+    project_root = _project_root_path(body.project)
+    json_path = _sprint_json_path(project_root, sprint_label)
+    data = _sprint_json_read(json_path)
+    if "tickets" in data:
+        by_num = {t["issue_number"]: t for t in data["tickets"]}
+        data["tickets"] = [
+            {**by_num[n], "position": pos}
+            for pos, n in enumerate(body.issue_numbers)
+            if n in by_num
+        ]
+        _sprint_json_write(json_path, data)
+
+    return {"ok": True}
 
 
 class SprintDeleteBody(BaseModel):
@@ -3494,8 +3662,26 @@ async def delete_empty_sprints(body: SprintDeleteBody):
     return result
 
 
-_RERUN_STRIP_LABELS = {"released", "SIT", "in-progress", "need-rework"}
-_RERUN_SKIP_LABELS = {"UAT", "UAT-approved"}
+def _rerun_policy(labels: set[str]) -> tuple[str, list[str]]:
+    """Return (action, labels_to_strip) for a sprint ticket based on its current labels.
+
+    action:
+        'skip'             — UAT / UAT-approved; leave ticket and labels untouched
+        'dispatch_tester'  — SIT ticket; send to tester directly; SIT label preserved
+        'dispatch_coder'   — all other states; send to coder; strip appropriate labels
+    """
+    if labels & {"UAT", "UAT-approved"}:
+        return "skip", []
+    if "SIT" in labels:
+        return "dispatch_tester", []
+    if "tester-rejected" in labels:
+        return "dispatch_coder", ["tester-rejected"]
+    if "needs-rework" in labels or "need-rework" in labels:
+        to_strip = ["in-progress"] if "in-progress" in labels else []
+        return "dispatch_coder", to_strip
+    if "in-progress" in labels:
+        return "dispatch_coder", ["in-progress"]
+    return "dispatch_coder", []
 
 
 @app.get("/api/sprints/{sprint_label}/estimate")
@@ -3754,27 +3940,84 @@ class SprintRerunBody(BaseModel):
     confirm: bool
 
 
+@app.get("/api/sprints/{sprint_label}/rerun/preview")
+def rerun_sprint_preview(sprint_label: str, project: str):
+    """Return per-ticket rerun preview counts without executing anything.
+
+    Response schema:
+      { redispatch_count, tester_count, skip_count, by_ticket: [
+          { issue_num, issue_title, action }  # action: dispatch_coder|dispatch_tester|skip
+        ]
+      }
+    """
+    if not _SPRINT_LABEL_RE.match(sprint_label):
+        raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")
+
+    try:
+        issues = github_client.list_open_issues_with_body(repo_name=project, limit=200)
+    except subprocess.CalledProcessError as e:
+        raise _gh_error(e)
+
+    sprint_issues = [
+        iss for iss in issues
+        if any(lbl["name"] == sprint_label for lbl in iss.get("labels", []))
+    ]
+
+    redispatch_count = 0
+    tester_count = 0
+    skip_count = 0
+    by_ticket: list[dict] = []
+
+    for iss in sprint_issues:
+        current_labels = {lbl["name"] for lbl in iss.get("labels", [])}
+        action, _ = _rerun_policy(current_labels)
+        if action == "dispatch_coder":
+            redispatch_count += 1
+        elif action == "dispatch_tester":
+            tester_count += 1
+        else:
+            skip_count += 1
+        by_ticket.append({
+            "issue_num": iss["number"],
+            "issue_title": iss["title"],
+            "action": action,
+        })
+
+    return {
+        "redispatch_count": redispatch_count,
+        "tester_count": tester_count,
+        "skip_count": skip_count,
+        "by_ticket": by_ticket,
+    }
+
+
 @app.post("/api/sprints/{sprint_label}/rerun")
 def rerun_sprint(sprint_label: str, project: str, body: SprintRerunBody):
-    """Strip status labels from all completed tickets in a sprint and delete the state file.
+    """Apply per-ticket re-run policy and dispatch agents selectively.
 
-    Does NOT spawn any sprint subprocess — user clicks Run sprint afterward.
+    Per-ticket routing:
+      no-label / in-progress  → coder (strips in-progress)
+      tester-rejected         → coder (strips tester-rejected)
+      needs-rework            → coder (preserves needs-rework)
+      SIT                     → tester directly (preserves SIT label)
+      UAT / UAT-approved      → skipped; no agent invoked, no label change
     """
     if not _SPRINT_LABEL_RE.match(sprint_label):
         raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")
     if not body.confirm:
         raise HTTPException(400, detail="confirm must be true")
 
-    if _is_sprint_running(_project_root_path(project), sprint_label):
+    project_root = _project_root_path(project)
+    if _is_sprint_running(project_root, sprint_label):
         raise HTTPException(409, detail="Cannot reset a sprint that is currently running")
 
-    project_root = _project_root_path(project)
     commander = _commander_dir(project_root)
-
     log_dir = commander / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
     ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
-    log_path = log_dir / f"sprint-rerun-{sprint_label}-{ts}.log"
+    run_id = str(uuid.uuid4())
+    decision_log_path = log_dir / f"sprint-rerun-{sprint_label}-{ts}.log"
+    manifest_path = log_dir / f"sprint-rerun-{sprint_label}-{ts}-manifest.json"
     log_lines: list[str] = []
 
     try:
@@ -3787,37 +4030,127 @@ def rerun_sprint(sprint_label: str, project: str, body: SprintRerunBody):
         if any(lbl["name"] == sprint_label for lbl in iss.get("labels", []))
     ]
 
-    affected: list[dict] = []
+    decisions: list[dict] = []
     errors: list[str] = []
 
     for iss in sprint_issues:
         current_labels = {lbl["name"] for lbl in iss.get("labels", [])}
-        if current_labels & _RERUN_SKIP_LABELS:
-            log_lines.append(f"#{iss['number']} {iss['title']}: skipped (UAT/UAT-approved)")
-            continue
-        to_remove = list(current_labels & _RERUN_STRIP_LABELS)
-        if not to_remove:
-            continue
-        try:
-            github_client.update_labels(iss["number"], add=[], remove=to_remove, repo_name=project)
-            affected.append({"number": iss["number"], "removed_labels": to_remove})
-            log_lines.append(f"#{iss['number']} {iss['title']}: removed {to_remove}")
-        except subprocess.CalledProcessError as e:
-            msg = f"#{iss['number']} failed: {e.stderr.strip()}"
-            errors.append(msg)
-            log_lines.append(f"ERROR {msg}")
+        action, to_strip = _rerun_policy(current_labels)
+
+        if to_strip:
+            try:
+                github_client.update_labels(iss["number"], add=[], remove=to_strip, repo_name=project)
+            except subprocess.CalledProcessError as e:
+                msg = f"#{iss['number']} failed: {e.stderr.strip()}"
+                errors.append(msg)
+                log_lines.append(json.dumps({
+                    "run_id": run_id, "tag": "rerun_decision", "ts": ts,
+                    "issue": iss["number"], "action": "error", "error": msg,
+                }))
+                continue
+
+        decisions.append({
+            "issue_num": iss["number"],
+            "issue_title": iss["title"],
+            "action": action,
+            "stripped": to_strip,
+        })
+        log_lines.append(json.dumps({
+            "run_id": run_id, "tag": "rerun_decision", "ts": ts,
+            "issue": iss["number"], "action": action,
+        }))
+
+    manifest = {
+        "run_id": run_id,
+        "sprint_label": sprint_label,
+        "created_at": ts,
+        "decisions": decisions,
+    }
+    manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 
     state_file = commander / "sprints" / f"{sprint_label}-state.json"
     state_file.unlink(missing_ok=True)
-    log_lines.append(f"Deleted state file: {state_file}")
-
-    log_path.write_text("\n".join(log_lines) + "\n", encoding="utf-8")
+    log_lines.append(json.dumps({"run_id": run_id, "tag": "state_deleted", "ts": ts}))
+    decision_log_path.write_text("\n".join(log_lines) + "\n", encoding="utf-8")
 
     github_client.invalidate(f"open_issues_body:")
     github_client.invalidate(f"open_issues:")
     github_client.invalidate(f"issues:")
 
-    result: dict = {"reset_count": len(affected), "affected_issues": affected}
+    if not SPRINT_MANAGER_PATH.exists():
+        raise HTTPException(502, detail=f"sprint_manager.py not found at {SPRINT_MANAGER_PATH}")
+
+    coder_path = _coder_clone_path(project_root)
+    sprints_dir = commander / "sprints"
+    sprints_dir.mkdir(parents=True, exist_ok=True)
+    pid_path = sprints_dir / f"{sprint_label}-pid"
+    pending_path = sprints_dir / f"{sprint_label}-pid.pending"
+    run_log_path = log_dir / f"sprint-run-{sprint_label}-{ts}.log"
+
+    try:
+        fd = os.open(str(pending_path), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
+        os.write(fd, b"0")
+        os.close(fd)
+    except FileExistsError:
+        raise HTTPException(409, detail=f"Sprint {sprint_label} is already running on {project}")
+
+    stripped_env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
+    goal_path = _sprint_goal_path(project_root, sprint_label)
+    if goal_path.exists():
+        stripped_env["SPRINT_GOAL"] = goal_path.read_text(encoding="utf-8").strip()
+
+    run_log_fh = open(run_log_path, "w")
+    try:
+        proc = subprocess.Popen(
+            [
+                sys.executable, str(SPRINT_MANAGER_PATH), sprint_label,
+                "--skip-gates", "--rerun-manifest", str(manifest_path),
+            ],
+            env=stripped_env,
+            cwd=str(coder_path),
+            stdout=run_log_fh,
+            stderr=run_log_fh,
+            start_new_session=True,
+        )
+    except Exception:
+        try:
+            pending_path.unlink()
+        except OSError:
+            pass
+        raise
+
+    pending_path.write_text(str(proc.pid), encoding="utf-8")
+    os.replace(str(pending_path), str(pid_path))
+
+    try:
+        proc.wait(timeout=2.0)
+        run_log_fh.flush()
+        try:
+            log_text = run_log_path.read_text(encoding="utf-8", errors="replace")
+            tail = "\n".join(log_text.splitlines()[-30:]) if log_text else "(no output)"
+        except OSError:
+            tail = "(could not read log)"
+        try:
+            pid_path.unlink()
+        except OSError:
+            pass
+        raise HTTPException(
+            502,
+            detail=f"Sprint subprocess exited immediately (rc={proc.returncode}). Log tail:\n{tail}",
+        )
+    except subprocess.TimeoutExpired:
+        pass
+
+    dispatch_count = sum(1 for d in decisions if d["action"] != "skip")
+    skip_count = sum(1 for d in decisions if d["action"] == "skip")
+    result: dict = {
+        "run_id": run_id,
+        "decisions": decisions,
+        "dispatch_count": dispatch_count,
+        "skip_count": skip_count,
+        "pid": proc.pid,
+        "log": str(run_log_path),
+    }
     if errors:
         result["errors"] = errors
     return result
@@ -5316,6 +5649,17 @@ async def _bulk_flusher(job_id: str) -> None:
                     )
                 )
                 estimation_tasks.append(est_task)
+            elif created_issue_number is not None:
+                # Estimation cannot start — surface a clear reason so job_done still fires
+                # instead of leaving the ticket in "created" (non-terminal) forever.
+                if not created_issue_repo:
+                    _est_err = "could not resolve repository for estimation"
+                else:
+                    _est_err = "estimate_issue.py not found"
+                ticket["state"] = "estimate_failed"
+                ticket["estimate_error"] = _est_err
+                _persist_bulk_job(job)
+                await _broadcast_bulk_event(job_id, {"type": "ticket_update", "ticket": dict(ticket)})
 
             flush_idx += 1
 

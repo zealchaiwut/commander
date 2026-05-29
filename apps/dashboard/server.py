@@ -23,7 +23,7 @@ except ImportError:
 
 from dotenv import load_dotenv
 from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, model_validator
 
@@ -1211,6 +1211,54 @@ async def sync_projects_to_db():
         return _sync_projects_module.sync_projects_to_neon()
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/api/projects/{project}/running-sprint")
+def get_running_sprint(project: str):
+    """Return the currently running sprint for the given project slug.
+
+    200 — { label, started_at (ISO 8601 UTC), pid }
+    204 — no sprint running (or only stale PID files)
+    404 — project not registered
+    """
+    try:
+        all_projects = projects_module.load_projects()
+    except Exception:
+        all_projects = []
+
+    matched = next(
+        (p for p in all_projects
+         if p["repo"].split("/")[-1] == project or p["repo"] == project),
+        None,
+    )
+    if matched is None:
+        raise HTTPException(status_code=404, detail=f"Project '{project}' not found")
+
+    project_root = _project_root_path(matched["repo"])
+    sprints_dir = _commander_dir(project_root) / "sprints"
+
+    if not sprints_dir.exists():
+        return Response(status_code=204)
+
+    seen: set[str] = set()
+    for pid_file in list(sprints_dir.glob("*-pid")) + list(sprints_dir.glob("*-pid.pending")):
+        label = pid_file.name.removesuffix("-pid.pending").removesuffix("-pid")
+        if label in seen:
+            continue
+        seen.add(label)
+        if _is_sprint_running(project_root, label):
+            try:
+                pid = int(pid_file.read_text(encoding="utf-8").strip())
+            except (ValueError, OSError):
+                pid = 0
+            try:
+                mtime = pid_file.stat().st_mtime
+                started_at = datetime.fromtimestamp(mtime, tz=timezone.utc).isoformat().replace("+00:00", "Z")
+            except OSError:
+                started_at = datetime.now(tz=timezone.utc).isoformat().replace("+00:00", "Z")
+            return {"label": label, "started_at": started_at, "pid": pid}
+
+    return Response(status_code=204)
 
 
 @app.post("/api/projects/{owner}/{repo_name}/approve-batch")

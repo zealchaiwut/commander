@@ -1777,6 +1777,39 @@
   </div>
 </div>
 
+<!-- Ghost-drop confirm modal (issue #364) -->
+<div class="modal-backdrop hidden" id="smgmt-ghost-backdrop" onclick="smgmtGhostConfirmClose()"></div>
+<div class="modal hidden" id="smgmt-ghost-modal" role="dialog" aria-modal="true">
+  <div class="modal-header">
+    <span class="modal-title">Create <span id="smgmt-ghost-modal-sprint-name">Sprint N</span>?</span>
+    <button class="modal-close" onclick="smgmtGhostConfirmClose()" aria-label="Close">&times;</button>
+  </div>
+  <div class="modal-field">
+    <span class="modal-label">New sprint</span>
+    <div id="smgmt-ghost-modal-sprint-badge"
+         style="font-size:13px; font-weight:600; color:var(--blue);"></div>
+  </div>
+  <div class="modal-field">
+    <span class="modal-label">Ticket(s) being moved</span>
+    <ul id="smgmt-ghost-modal-tickets" style="margin:0; padding-left:18px; font-size:13px;"></ul>
+  </div>
+  <div class="modal-field">
+    <span class="modal-label">From</span>
+    <div id="smgmt-ghost-modal-source" style="font-size:13px;"></div>
+  </div>
+  <div class="modal-hint" style="font-size:11px; color:var(--text-muted); margin-top:4px;">
+    Sprint number is the lowest free slot — not necessarily max+1.
+    To use a different number, drag directly onto an existing empty pane.
+  </div>
+  <div id="smgmt-ghost-modal-error" class="modal-error" style="display:none;"></div>
+  <div class="modal-footer">
+    <button class="btn-ghost" id="smgmt-ghost-cancel-btn" onclick="smgmtGhostConfirmClose()">Cancel</button>
+    <button class="btn-blue" id="smgmt-ghost-confirm-btn" onclick="smgmtGhostConfirmCreate()">
+      Create <span id="smgmt-ghost-confirm-label">sprint-N</span> &amp; move
+    </button>
+  </div>
+</div>
+
 <!-- Bulk "Move to sprint" modal (issue #206) -->
 <div class="modal-backdrop hidden" id="smgmt-moveto-backdrop" onclick="smgmtBulkMoveToClose()"></div>
 <div class="modal hidden" id="smgmt-moveto-modal" role="dialog" aria-modal="true">
@@ -2823,28 +2856,42 @@
   }
   .smgmt-cleanup-link:hover { opacity: .8; }
 
-  /* ── Placeholder sprint card ── */
+  /* ── Placeholder / ghost sprint card (issue #364) ── */
   .smgmt-sprint-placeholder {
-    border: 2px dashed var(--border) !important;
-    background: var(--surface) !important;
-    opacity: 0.7;
-  }
-  .smgmt-sprint-placeholder.drag-over-sprint {
-    border-color: var(--blue) !important;
-    opacity: 1;
+    border: 2px dashed var(--blue) !important;
     background: var(--blue-bg) !important;
+    opacity: 1;
+    transition: background 0.15s, border-color 0.15s, box-shadow 0.15s, transform 0.1s;
+    cursor: copy;
   }
-  .smgmt-placeholder-header { cursor: default !important; }
-  .smgmt-placeholder-name { color: var(--text-muted) !important; font-style: italic; }
-  .smgmt-placeholder-badge {
-    font-size: 11px; font-style: italic; color: var(--text-muted);
-    background: none; border: none; padding: 0;
+  .smgmt-sprint-placeholder.ghost-hot {
+    background: var(--blue) !important;
+    border-color: var(--blue) !important;
+    box-shadow: 0 4px 18px rgba(37,99,235,.35);
+    transform: scale(1.012);
   }
-  .smgmt-placeholder-hint {
-    color: var(--text-muted); font-style: italic; font-size: 12px;
-    text-align: center; padding: 12px;
+  .smgmt-sprint-placeholder.ghost-hot .smgmt-ghost-title { color: #fff !important; }
+  .smgmt-sprint-placeholder.ghost-hot .smgmt-ghost-sub   { color: rgba(255,255,255,.8) !important; }
+  .smgmt-ghost-content {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    padding: 20px 16px; gap: 6px; pointer-events: none;
   }
-  .smgmt-placeholder-tickets { min-height: 52px; }
+  .smgmt-ghost-title {
+    font-size: 14px; font-weight: 600; color: var(--blue);
+    text-align: center; pointer-events: none;
+  }
+  .smgmt-ghost-sub {
+    font-size: 11px; color: var(--blue); opacity: .75;
+    text-align: center; pointer-events: none;
+  }
+  /* btn-blue: primary action button using --blue token */
+  .btn-blue {
+    padding: 6px 14px; border: none; border-radius: 6px;
+    background: var(--blue); color: #fff; font-size: 12px; font-weight: 600;
+    transition: opacity .15s; cursor: pointer;
+  }
+  .btn-blue:hover { opacity: .82; }
+  .btn-blue:disabled { opacity: .5; cursor: not-allowed; }
 
   /* ── Multi-select checkboxes (issue #206) ── */
   .smgmt-ticket-cb {

@@ -4299,6 +4299,152 @@ async function smgmtRerunSprint(label) {
   }
 }
 
+// ── Inline sprint rename (issue #341 parity) ─────────────────────────────────
+
+function smgmtStartRename(label, event) {
+  event.stopPropagation();
+  const card = document.getElementById(`smgmt-card-${label}`);
+  if (!card) return;
+  const nameEl = card.querySelector('.smgmt-sprint-name');
+  if (!nameEl || nameEl.querySelector('.smgmt-rename-wrap')) return; // already editing
+
+  const m = label.match(/^sprint-(\d+)/);
+  const origN = m ? parseInt(m[1], 10) : NaN;
+  if (isNaN(origN)) return;
+
+  nameEl.innerHTML = `
+    <span class="smgmt-rename-wrap">
+      <span class="smgmt-rename-prefix">Sprint </span>
+      <input class="smgmt-rename-input" id="smgmt-rename-input-${label}"
+             type="text" inputmode="numeric" pattern="[0-9]*"
+             value="${origN}" autocomplete="off" />
+      <span class="smgmt-rename-error" id="smgmt-rename-err-${label}"></span>
+    </span>`;
+
+  const input = document.getElementById(`smgmt-rename-input-${label}`);
+  input.focus();
+  input.select();
+
+  input.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      smgmtCommitRename(label, origN, nameEl);
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      smgmtCancelRename(label, origN, nameEl);
+    }
+  });
+
+  input.addEventListener('input', function() {
+    this.value = this.value.replace(/[^0-9]/g, '');
+  });
+
+  input.addEventListener('blur', function() {
+    const el = this;
+    setTimeout(() => {
+      if (el.disabled) return;
+      const wrap = nameEl.querySelector('.smgmt-rename-wrap');
+      if (wrap) smgmtCancelRename(label, origN, nameEl);
+    }, 150);
+  });
+}
+
+function _smgmtSetRenameError(label, msg) {
+  const errEl = document.getElementById(`smgmt-rename-err-${label}`);
+  const input = document.getElementById(`smgmt-rename-input-${label}`);
+  if (errEl) errEl.textContent = msg;
+  if (input) input.classList.toggle('is-invalid', !!msg);
+}
+
+async function smgmtCommitRename(label, origN, nameEl) {
+  const input = document.getElementById(`smgmt-rename-input-${label}`);
+  if (!input) return;
+  const raw = input.value.trim();
+
+  if (raw === '') {
+    _smgmtSetRenameError(label, 'Sprint number cannot be empty');
+    input.focus();
+    return;
+  }
+  const newN = parseInt(raw, 10);
+  if (isNaN(newN) || newN <= 0) {
+    _smgmtSetRenameError(label, 'Only numbers are allowed');
+    input.focus();
+    return;
+  }
+  if (newN === origN) {
+    smgmtCancelRename(label, origN, nameEl);
+    return;
+  }
+
+  // Check conflict against all existing sprint base numbers
+  const existingNums = (_smgmtData?.order || []).map(l => {
+    const m2 = l.match(/^sprint-(\d+)/);
+    return m2 ? parseInt(m2[1], 10) : NaN;
+  }).filter(n => !isNaN(n));
+  if (existingNums.includes(newN)) {
+    _smgmtSetRenameError(label, `Sprint ${newN} already exists`);
+    input.focus();
+    return;
+  }
+
+  _smgmtSetRenameError(label, '');
+  input.disabled = true;
+
+  try {
+    const res = await fetch(`/api/sprints/${encodeURIComponent(label)}/rename`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ new_sprint_number: newN, project: _smgmtRepo() }),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      _smgmtSetRenameError(label, data.detail || `Error ${res.status}`);
+      if (input) input.disabled = false;
+      input.focus();
+      return;
+    }
+  } catch (err) {
+    _smgmtSetRenameError(label, 'Network error');
+    if (input) input.disabled = false;
+    input.focus();
+    return;
+  }
+
+  // Update in-memory data and re-render without a full fetch
+  const newLabel = `sprint-${newN}`;
+  if (_smgmtData?.order) {
+    _smgmtData.order = _smgmtData.order.map(l => l === label ? newLabel : l);
+  }
+  if (_smgmtData?.sprints) {
+    _smgmtData.sprints = _smgmtData.sprints.map(n => n === origN ? newN : n);
+  }
+  if (_smgmtData?.issues) {
+    _smgmtData.issues.forEach(iss => {
+      if (iss.sprint_label === label) {
+        iss.sprint_label = newLabel;
+        iss.sprint = newN;
+      }
+    });
+  }
+  // Migrate caches to the new label key
+  if (_smgmtOutcomeCache[label] !== undefined) {
+    _smgmtOutcomeCache[newLabel] = _smgmtOutcomeCache[label];
+    delete _smgmtOutcomeCache[label];
+  }
+  if (_smgmtRunningLabels.has(label)) {
+    _smgmtRunningLabels.delete(label);
+    _smgmtRunningLabels.add(newLabel);
+  }
+
+  _smgmtRender(_smgmtData);
+}
+
+function smgmtCancelRename(label, origN, nameEl) {
+  if (!nameEl) return;
+  nameEl.textContent = sprintLabelDisplay(label);
+}
+
 async function smgmtDeleteSprint(label) {
   const repo = _smgmtRepo();
   if (!repo) return;
@@ -4524,6 +4670,14 @@ async function _smgmtMoveSelectedTo(targetLabel) {
 
 // ── Drag-and-drop ──────────────────────────────────────────────────────────
 function _smgmtTicketDragStart(event, issueNum, fromSprint) {
+  // Suppress drag while an inline rename is active on the source sprint
+  if (fromSprint) {
+    const card = document.getElementById(`smgmt-card-${fromSprint}`);
+    if (card && card.querySelector('.smgmt-rename-wrap')) {
+      event.preventDefault();
+      return;
+    }
+  }
   const isChecked = _smgmtSelectedIssues.has(issueNum);
 
   if (isChecked && _smgmtSelectedIssues.size > 1) {

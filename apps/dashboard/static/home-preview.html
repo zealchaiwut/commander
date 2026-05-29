@@ -624,6 +624,71 @@
       color: var(--text-muted);
     }
 
+    /* ── Add Project Modal ── */
+    .ap-backdrop {
+      position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 200;
+    }
+    .ap-backdrop.hidden { display: none; }
+    .ap-modal {
+      position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+      z-index: 201; background: var(--surface); border: 1px solid var(--border);
+      border-radius: 10px; width: min(460px, calc(100vw - 32px));
+      box-shadow: 0 8px 32px rgba(0,0,0,.18);
+    }
+    .ap-modal.hidden { display: none; }
+    .ap-modal-header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 20px 20px 0;
+    }
+    .ap-modal-title { font-size: 15px; font-weight: 700; color: var(--text); }
+    .ap-modal-close {
+      background: none; border: none; font-size: 20px; color: var(--text-muted);
+      line-height: 1; padding: 2px 6px; border-radius: 4px; cursor: pointer;
+    }
+    .ap-modal-close:hover { background: var(--surface-2); color: var(--text); }
+    .ap-breadcrumb {
+      padding: 6px 20px 0; font-size: 12px; color: var(--text-sub);
+      display: flex; align-items: center; gap: 5px;
+    }
+    .ap-breadcrumb a { color: var(--blue); text-decoration: none; }
+    .ap-breadcrumb a:hover { text-decoration: underline; }
+    .ap-modal-body { padding: 18px 20px; }
+    .ap-field { margin-bottom: 14px; }
+    .ap-field:last-child { margin-bottom: 0; }
+    .ap-label {
+      display: block; font-size: 12px; font-weight: 600; color: var(--text);
+      margin-bottom: 5px;
+    }
+    .ap-hint { font-weight: 400; font-size: 11px; color: var(--text-muted); }
+    .ap-required { color: var(--red); }
+    .ap-input {
+      width: 100%; padding: 8px 10px;
+      background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px;
+      color: var(--text); font-size: 13px; font-family: inherit; outline: none;
+      transition: border-color .15s;
+    }
+    .ap-input:focus { border-color: var(--blue); background: var(--surface); }
+    .ap-input.error { border-color: var(--red); }
+    .ap-field-error { font-size: 12px; color: var(--red); margin-top: 5px; }
+    .ap-field-error.hidden { display: none; }
+    .ap-footer {
+      display: flex; gap: 8px; justify-content: flex-end;
+      padding: 0 20px 20px;
+    }
+    .ap-btn-ghost {
+      padding: 7px 14px; border: 1px solid var(--border); border-radius: 6px;
+      background: none; color: var(--text-muted); font-size: 13px; font-weight: 500; cursor: pointer;
+      transition: background .15s, color .15s;
+    }
+    .ap-btn-ghost:hover { background: var(--surface-2); color: var(--text); }
+    .ap-btn-primary {
+      padding: 7px 16px; border: none; border-radius: 6px;
+      background: var(--text); color: var(--surface); font-size: 13px; font-weight: 600;
+      cursor: pointer; transition: opacity .15s;
+    }
+    .ap-btn-primary:hover:not(:disabled) { opacity: .85; }
+    .ap-btn-primary:disabled { opacity: .55; cursor: not-allowed; }
+
   </style>
 </head>
 <body>
@@ -792,6 +857,39 @@
   </section>
 
 </main>
+
+<!-- ── Add Project Modal ── -->
+<div class="ap-backdrop hidden" id="ap-backdrop" onclick="closeAddProjectModal()"></div>
+<div class="ap-modal hidden" id="ap-modal" role="dialog" aria-modal="true" aria-labelledby="ap-title">
+  <div class="ap-modal-header">
+    <span class="ap-modal-title" id="ap-title">Add Project</span>
+    <button class="ap-modal-close" onclick="closeAddProjectModal()" aria-label="Close">&times;</button>
+  </div>
+  <div class="ap-breadcrumb">
+    <a href="/" id="ap-home-link" onclick="closeAddProjectModal()">&#8592; Home</a>
+    <span>&#8250;</span>
+    <span>Add project</span>
+  </div>
+  <form id="ap-form" class="ap-modal-body" onsubmit="submitAddProject(event)">
+    <div class="ap-field">
+      <label class="ap-label" for="ap-repo">GitHub Repo URL <span class="ap-required">*</span></label>
+      <input class="ap-input" id="ap-repo" type="text" placeholder="https://github.com/owner/repo" autocomplete="off">
+      <div class="ap-field-error hidden" id="ap-repo-error"></div>
+    </div>
+    <div class="ap-field">
+      <label class="ap-label" for="ap-icon">Icon <span class="ap-hint">(Tabler icon class, default: ti-folder)</span></label>
+      <input class="ap-input" id="ap-icon" type="text" placeholder="ti-folder">
+    </div>
+    <div class="ap-field">
+      <label class="ap-label" for="ap-color">Color <span class="ap-hint">(blue, green, purple, amber, red, pink, cyan, gray)</span></label>
+      <input class="ap-input" id="ap-color" type="text" placeholder="gray">
+    </div>
+  </form>
+  <div class="ap-footer">
+    <button type="button" class="ap-btn-ghost" onclick="closeAddProjectModal()">Cancel</button>
+    <button type="submit" class="ap-btn-primary" id="ap-submit" form="ap-form">Add Project</button>
+  </div>
+</div>
 
 <script>
   // ── State ──────────────────────────────────────────────────────────────────
@@ -1044,7 +1142,88 @@
   }
 
   function openAddProjectFlow() {
-    window.location.href = '/';
+    openAddProjectModal();
+  }
+
+  function openAddProjectModal() {
+    document.getElementById('ap-repo').value  = '';
+    document.getElementById('ap-icon').value  = '';
+    document.getElementById('ap-color').value = '';
+    _apClearError();
+    document.getElementById('ap-backdrop').classList.remove('hidden');
+    document.getElementById('ap-modal').classList.remove('hidden');
+    document.getElementById('ap-repo').focus();
+  }
+
+  function closeAddProjectModal() {
+    document.getElementById('ap-backdrop').classList.add('hidden');
+    document.getElementById('ap-modal').classList.add('hidden');
+  }
+
+  function _apClearError() {
+    const el  = document.getElementById('ap-repo-error');
+    const inp = document.getElementById('ap-repo');
+    el.textContent = '';
+    el.classList.add('hidden');
+    inp.classList.remove('error');
+  }
+
+  function _apShowError(msg) {
+    const el  = document.getElementById('ap-repo-error');
+    const inp = document.getElementById('ap-repo');
+    el.textContent = msg;
+    el.classList.remove('hidden');
+    inp.classList.add('error');
+  }
+
+  async function submitAddProject(event) {
+    event.preventDefault();
+    _apClearError();
+
+    const repoUrl = document.getElementById('ap-repo').value.trim();
+    const icon    = document.getElementById('ap-icon').value.trim()  || 'ti-folder';
+    const color   = document.getElementById('ap-color').value.trim() || 'gray';
+
+    if (!repoUrl) {
+      _apShowError('GitHub repo URL is required.');
+      return;
+    }
+
+    const submitBtn = document.getElementById('ap-submit');
+    submitBtn.disabled    = true;
+    submitBtn.textContent = 'Adding…';
+
+    try {
+      const res = await fetch('/api/projects', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ repo_url: repoUrl, icon, color }),
+      });
+
+      if (res.status === 409) {
+        const data = await res.json().catch(() => ({}));
+        _apShowError(data.detail || 'Project already added.');
+        return;
+      }
+      if (res.status === 422) {
+        const data = await res.json().catch(() => ({}));
+        _apShowError(data.detail || 'Invalid repo or repo not found on GitHub.');
+        return;
+      }
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        _apShowError(data.detail || 'Error ' + res.status);
+        return;
+      }
+
+      closeAddProjectModal();
+      loadHomeData();
+    } catch (e) {
+      _apShowError('Network error: ' + e.message);
+    } finally {
+      submitBtn.disabled    = false;
+      submitBtn.textContent = 'Add Project';
+    }
   }
 
   // ── Projects render ────────────────────────────────────────────────────────
@@ -1394,6 +1573,9 @@
     loadHomeData();
     pollHealth();
     setInterval(pollHealth, 30000);
+    document.addEventListener('keydown', e => {
+      if (e.key === 'Escape') closeAddProjectModal();
+    });
   });
 </script>
 

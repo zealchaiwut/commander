@@ -171,4 +171,4 @@ class TestCloseRaceSummaryIssue:
 class TestCancellationFlag:
     def test_flag_exists_and_defaults_false(self):
         assert hasattr(sm, "_sprint_user_cancelled")
-        assert sm._sprint_user_cancelled is False
+        assert not sm._sprint_user_cancelled.is_set()

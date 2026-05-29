@@ -5243,6 +5243,14 @@ let _ntSelectedLabel = null; // currently applied label name
 let _ntDropdownFocus = -1;   // keyboard-focused dropdown item index
 let _ntFiles = [];           // queued attachment files
 
+// Allowed extensions for new-ticket attachments (broader than BC which is images-only).
+const NT_ALLOWED_EXTS = new Set([
+  '.html','.htm','.md','.txt','.csv','.json','.yaml','.yml',
+  '.png','.jpg','.jpeg','.gif','.svg','.webp','.pdf',
+  '.py','.js','.ts','.tsx','.css','.sh','.log',
+  '.drawio','.xlsx','.pptx','.docx','.zip',
+]);
+
 function _ntUpdateWarnings() {
   if (!_ntDraftGenerated) return;
   document.getElementById('nt-warn-label').classList.toggle('hidden', !!_ntSelectedLabel);
@@ -5272,7 +5280,7 @@ function _ntAddFiles(incoming) {
   for (const f of incoming) {
     if (_ntFiles.length >= 10) break;
     const ext = '.' + f.name.split('.').pop().toLowerCase();
-    if (!BC_ALLOWED_EXTS.has(ext)) {
+    if (!NT_ALLOWED_EXTS.has(ext)) {
       if (errEl) {
         errEl.textContent = `File '${f.name}' has a disallowed extension ('${ext}').`;
         errEl.classList.remove('hidden');

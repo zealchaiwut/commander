@@ -7,16 +7,21 @@ Usage:
 Run from the git root of the repository being worked on (NOT from dashboard/).
 """
 import argparse
+import os
 import re
 import subprocess
 import sys
 from pathlib import Path
 
-_DASHBOARD_DIR = Path(__file__).parent.parent / "apps" / "dashboard"
+_REPO_ROOT = Path(__file__).parent.parent
+_DASHBOARD_DIR = _REPO_ROOT / "apps" / "dashboard"
+sys.path.insert(0, str(_REPO_ROOT))
 sys.path.insert(0, str(_DASHBOARD_DIR))
 from dotenv import load_dotenv
 load_dotenv(_DASHBOARD_DIR / ".env")
 import github_client
+from services.run_id import mint_run_id
+from services.logging import log as structured_log
 
 
 def _run(*cmd) -> str:
@@ -56,6 +61,10 @@ def ensure_develop(repo_name: str | None) -> None:
 
 
 def main():
+    _run_id = mint_run_id("manual")
+    os.environ["COMMANDER_RUN_ID"] = _run_id
+    structured_log.set_context(run_id=_run_id, source="start_feature")
+
     p = argparse.ArgumentParser(description="Create a feature branch for a GitHub issue")
     p.add_argument("--issue", type=int, required=True, help="Issue number")
     p.add_argument("--repo",  default=None,            help="owner/repo override")
@@ -65,6 +74,8 @@ def main():
         help="Branch to base the feature branch off (default: develop)",
     )
     args = p.parse_args()
+    structured_log.set_context(issue_num=args.issue)
+    structured_log.info("feature_start", f"starting feature branch for issue #{args.issue}", issue_num=args.issue)
 
     issue = github_client.get_issue(args.issue, repo_name=args.repo)
     title  = issue.get("title", f"issue-{args.issue}")

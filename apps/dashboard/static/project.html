@@ -627,6 +627,7 @@
       display: flex; align-items: center; gap: 8px;
       font-size: 13px; font-weight: 600; color: var(--text);
       margin-bottom: 4px;
+      user-select: none; /* prevent text-selection drag on sprint header */
     }
     .smgmt-sprint-count {
       font-size: 11px; color: var(--text-sub); font-weight: 400;
@@ -3984,6 +3985,8 @@ function _smgmtCardHtml(label, n, tickets, outcome, isNext) {
 
   return `
     <div class="smgmt-sprint-card${outcomeCardClass}" id="smgmt-card-${escHtml(label)}"
+         draggable="false"
+         ondragstart="event.preventDefault()"
          ondragover="_smgmtDragOver(event, '${escHtml(label)}')"
          ondragleave="_smgmtDragLeave(event)"
          ondrop="_smgmtDropOnSprint(event, '${escHtml(label)}')">
@@ -4082,14 +4085,15 @@ function _smgmtRunningCardHtml(label, n, tickets) {
     return `<div class="smgmt-ticket" data-issue="${t.number}" draggable="false">
       ${indicator}
       <a class="smgmt-ticket-num" href="${escHtml(issueUrl)}" target="_blank"
-         rel="noopener">#${t.number}</a>
+         rel="noopener" draggable="false">#${t.number}</a>
       <span class="smgmt-ticket-title" title="${escHtml(t.title)}">${escHtml(t.title)}</span>
       ${sizePillHtml}${agentTagHtml}${elapsedHtml}
     </div>`;
   }).join('');
 
   return `
-    <div class="smgmt-sprint-card smgmt-running" id="smgmt-card-${escHtml(label)}">
+    <div class="smgmt-sprint-card smgmt-running" id="smgmt-card-${escHtml(label)}"
+         draggable="false" ondragstart="event.preventDefault()">
       <div class="smgmt-running-stripe"></div>
       <div class="smgmt-sprint-header">
         <div class="smgmt-sprint-header-left">
@@ -4465,7 +4469,7 @@ function _smgmtTicketRowHtml(ticket, label) {
              onchange="_smgmtToggleSelect(${ticket.number}, this.checked)">
       <i class="ti ti-grip-vertical smgmt-ticket-grip"></i>
       <a class="smgmt-ticket-num" href="${escHtml(ticket.url || '#')}" target="_blank"
-         rel="noopener" onclick="event.stopPropagation()">#${ticket.number}</a>
+         rel="noopener" draggable="false" onclick="event.stopPropagation()">#${ticket.number}</a>
       <span class="smgmt-ticket-title" title="${escHtml(ticket.title)}">${escHtml(ticket.title)}</span>
       <span class="smgmt-ticket-status ${statusClass}">${escHtml(statusLabel)}</span>
       <button class="btn-view-log" tabindex="0" title="View issue log"
@@ -5404,7 +5408,7 @@ function _smgmtBacklogTicketHtml(ticket, sprintNums) {
              onchange="_smgmtToggleSelect(${ticket.number}, this.checked)">
       <i class="ti ti-grip-vertical smgmt-ticket-grip"></i>
       <a class="smgmt-ticket-num" href="${escHtml(ticket.url || '#')}" target="_blank"
-         rel="noopener" onclick="event.stopPropagation()">#${ticket.number}</a>
+         rel="noopener" draggable="false" onclick="event.stopPropagation()">#${ticket.number}</a>
       <span class="smgmt-ticket-title" title="${escHtml(ticket.title)}">${escHtml(ticket.title)}</span>
       <button class="smgmt-moveto-pill" tabindex="0"
               onclick="event.stopPropagation();_smgmtMoveToOpen(event, ${ticket.number}, null)"

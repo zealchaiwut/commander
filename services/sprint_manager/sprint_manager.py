@@ -412,7 +412,7 @@ HANG_CHECK_SECS = 5  * 60   # check every 5 minutes
 # All other label additions are deferred to post-run; sprint-N is never
 # removed from a ticket until the sprint run ends.
 RUN_MUTABLE_LABELS: frozenset[str] = frozenset({
-    "in-progress", "sit", "uat", "needs-rework",
+    "in-progress", "SIT", "UAT", "needs-rework",
 })
 
 # Actual GitHub label strings (as applied on issues) that correspond to
@@ -455,6 +455,22 @@ def _guard_sprint_labels(
         safe_add = add
 
     return safe_add, safe_remove
+
+
+def _assert_run_mutable(labels: list[str], op: str) -> None:
+    """Raise ValueError if any label is not in RUN_MUTABLE_LABELS.
+
+    Logs the refusal before raising.  Callers catch ValueError, skip the
+    operation, and continue the sprint loop without crashing.
+    """
+    for lbl in labels:
+        if lbl not in RUN_MUTABLE_LABELS:
+            msg = (
+                f"Refused to {op} label {lbl!r} during sprint run"
+                " — outside RUN_MUTABLE_LABELS"
+            )
+            print(f"  [label-guard] {msg}", file=sys.stderr)
+            raise ValueError(msg)
 
 # ── end sprint-label protection ───────────────────────────────────────────────
 
@@ -1157,24 +1173,25 @@ def _add_blocked_label(
     repo_name: Optional[str] = None,
     sprint_label: Optional[str] = None,
 ) -> None:
-    safe_add, _ = _guard_sprint_labels(["blocked"], [], sprint_label=sprint_label)
-    if not safe_add:
-        # "blocked" is outside RUN_MUTABLE_LABELS — suppressed during active run
-        print(
-            f"  [label-guard] 'blocked' label suppressed for #{issue_num} during active sprint run",
-            file=sys.stderr,
-        )
+    if sprint_label is not None:
         try:
-            github_client.add_comment(
-                issue_num,
-                f"Issue hung (HANG): {reason}. 'blocked' label deferred — applied post-run.",
-                repo_name=repo_name,
+            _assert_run_mutable(["blocked"], "add")
+        except ValueError:
+            print(
+                f"  [label-guard] 'blocked' label suppressed for #{issue_num} during active sprint run",
+                file=sys.stderr,
             )
-        except Exception as e:
-            structured_log.warn("hang_comment_failed", f"failed to post hang comment: {e}", exc=str(e))
-        return
+            try:
+                github_client.add_comment(
+                    issue_num,
+                    f"Issue hung (HANG): {reason}. 'blocked' label deferred — applied post-run.",
+                    repo_name=repo_name,
+                )
+            except Exception as e:
+                structured_log.warn("hang_comment_failed", f"failed to post hang comment: {e}", exc=str(e))
+            return
     try:
-        github_client.update_labels(issue_num, add=safe_add, repo_name=repo_name)
+        github_client.update_labels(issue_num, add=["blocked"], repo_name=repo_name)
         github_client.add_comment(
             issue_num,
             f"Issue blocked by sprint manager (HANG): {reason}",
@@ -1974,6 +1991,8 @@ def _dispatch_coder(
     sub_env.pop("ANTHROPIC_API_KEY", None)
     if eff_repo:
         sub_env["COMMANDER_PROJECT"] = eff_repo
+    if sprint_label:
+        sub_env["COMMANDER_SPRINT_RUNNING"] = sprint_label
     if sprint_branch not in ("develop",):
         sub_env["COMMANDER_MERGE_TARGET"] = sprint_branch
         # Always append sprint-mode instructions regardless of whether a custom
@@ -2194,6 +2213,8 @@ def _dispatch_tester(
     sub_env.pop("ANTHROPIC_API_KEY", None)
     if eff_repo:
         sub_env["COMMANDER_PROJECT"] = eff_repo
+    if sprint_label:
+        sub_env["COMMANDER_SPRINT_RUNNING"] = sprint_label
     if sprint_branch not in ("develop",):
         sub_env["COMMANDER_MERGE_TARGET"] = sprint_branch
         # Always append sprint-mode instructions regardless of whether a custom
@@ -4135,6 +4156,10 @@ def run_sprint(
 
     start_time = time.monotonic()
 
+    # AC-4 (issue #379): set env var so all child subprocesses (coder, tester,
+    # update_ticket.py, finish_feature.py) inherit the sprint-running guard.
+    os.environ["COMMANDER_SPRINT_RUNNING"] = label
+
     total_issues = len(state.issues)
     for idx, issue_state in enumerate(state.issues, start=1):
         num   = issue_state.number
@@ -4422,6 +4447,9 @@ def run_sprint(
         state.wall_clock_secs = elapsed
         state.save(state_path)
         _post_sprint_status(state, api_url=api_url, project=eff_repo)
+
+    # Sprint loop ended; clear the running guard so post-sprint agents are unrestricted.
+    os.environ.pop("COMMANDER_SPRINT_RUNNING", None)
 
     # Final elapsed time
     state.wall_clock_secs = time.monotonic() - start_time

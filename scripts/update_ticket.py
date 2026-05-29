@@ -35,6 +35,12 @@ from services.run_id import mint_run_id
 # status transition. This guard matches any "sprint-<digits>" label name.
 _SPRINT_LABEL_RE = re.compile(r"^sprint-\d+$")
 
+# Labels that may be added or removed while COMMANDER_SPRINT_RUNNING is set.
+# Matches RUN_MUTABLE_LABELS in sprint_manager.py (both need-rework spellings included).
+_RUN_MUTABLE_LABELS: frozenset[str] = frozenset({
+    "in-progress", "SIT", "UAT", "needs-rework", "need-rework",
+})
+
 STATUS_MAP = {
     "in-progress": {
         "add":    ["in-progress"],
@@ -224,6 +230,36 @@ def main():
 
     mapping = STATUS_MAP[args.status]
 
+    # AC-5 (issue #379): when COMMANDER_SPRINT_RUNNING is set, restrict labels
+    # to RUN_MUTABLE_LABELS so sprint-N and other protected labels are never
+    # touched during an active sprint run.
+    add_labels = list(mapping["add"])
+    remove_labels = list(mapping["remove"])
+    sprint_running = os.environ.get("COMMANDER_SPRINT_RUNNING", "")
+    if sprint_running:
+        safe_add = []
+        for lbl in add_labels:
+            if lbl in _RUN_MUTABLE_LABELS:
+                safe_add.append(lbl)
+            else:
+                print(
+                    f'[label-guard] Refused to add "{lbl}" during sprint run'
+                    " — outside RUN_MUTABLE_LABELS",
+                    file=sys.stderr,
+                )
+        safe_remove = []
+        for lbl in remove_labels:
+            if lbl in _RUN_MUTABLE_LABELS:
+                safe_remove.append(lbl)
+            else:
+                print(
+                    f'[label-guard] Refused to remove "{lbl}" during sprint run'
+                    " — outside RUN_MUTABLE_LABELS",
+                    file=sys.stderr,
+                )
+        add_labels = safe_add
+        remove_labels = safe_remove
+
     # Pre-fetch current labels to allow smart skipping of removes
     current_labels = _fetch_current_labels(args.issue, repo)
 
@@ -231,7 +267,7 @@ def main():
     attempted_ops = []
 
     # Apply each add label individually with retry
-    for lbl in mapping["add"]:
+    for lbl in add_labels:
         op = f'add "{lbl}"'
         attempted_ops.append(op)
         cmd = ["gh", "issue", "edit", str(args.issue), "--repo", repo, "--add-label", lbl]
@@ -243,7 +279,7 @@ def main():
             failed_ops.append((op, last_stderr))
 
     # Handle each remove label individually
-    for lbl in mapping["remove"]:
+    for lbl in remove_labels:
         op = f'remove "{lbl}"'
         if _SPRINT_LABEL_RE.match(lbl):
             print(f'skipped remove "{lbl}" (sprint label protected)', file=sys.stderr)

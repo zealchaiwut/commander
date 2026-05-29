@@ -58,7 +58,7 @@ except ImportError:  # pragma: no cover
 try:
     from services.sprint_manager import sprint_repo as _sprint_repo
     _SPRINT_REPO_AVAILABLE = True
-except Exception:  # pragma: no cover
+except (ImportError, ModuleNotFoundError):  # pragma: no cover
     _sprint_repo = None  # type: ignore[assignment]
     _SPRINT_REPO_AVAILABLE = False
 

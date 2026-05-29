@@ -492,6 +492,31 @@
     }
     .smgmt-finish-btn:hover { opacity: .85; }
     .smgmt-finish-btn.hidden { display: none; }
+    /* ── Sprint inline rename ── */
+    .smgmt-rename-btn {
+      background: none; border: none; padding: 0 2px; cursor: pointer;
+      color: var(--text-sub); font-size: 12px; line-height: 1;
+      opacity: 0; transition: opacity .15s; flex-shrink: 0;
+      display: inline-flex; align-items: center;
+    }
+    .smgmt-sprint-header-left:hover .smgmt-rename-btn { opacity: 1; }
+    .smgmt-rename-btn:hover { color: var(--blue); }
+    .smgmt-rename-wrap {
+      display: inline-flex; align-items: center; gap: 2px;
+    }
+    .smgmt-rename-prefix {
+      font-size: 15px; font-weight: 700; color: var(--text);
+    }
+    .smgmt-rename-input {
+      width: 3.5em; font-size: 15px; font-weight: 700; color: var(--text);
+      background: var(--surface-2); border: 1.5px solid var(--blue);
+      border-radius: 4px; padding: 1px 4px; outline: none;
+      font-family: inherit;
+    }
+    .smgmt-rename-input.is-invalid { border-color: var(--red); }
+    .smgmt-rename-error {
+      font-size: 11px; color: var(--red); margin-left: 4px;
+    }
     /* ── Ticket list ── */
     .smgmt-sprint-tickets {
       padding: 4px 0; min-height: 48px; display: flex; flex-direction: column;
@@ -996,6 +1021,36 @@
       margin-right: 6px; vertical-align: middle;
     }
     @keyframes nt-spin { to { transform: rotate(360deg); } }
+    /* Label searchable dropdown */
+    .nt-label-wrap { position: relative; }
+    .nt-label-wrap.hidden { display: none; }
+    .nt-label-dropdown {
+      position: absolute; top: calc(100% + 4px); left: 0; right: 0;
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 7px; z-index: 600; max-height: 196px; overflow-y: auto;
+      box-shadow: 0 4px 16px rgba(0,0,0,.14);
+    }
+    .nt-label-dropdown.hidden { display: none; }
+    .nt-label-opt {
+      display: flex; align-items: center; gap: 8px;
+      padding: 7px 12px; cursor: pointer; font-size: 13px; color: var(--text);
+    }
+    .nt-label-opt + .nt-label-opt { border-top: 1px solid var(--border); }
+    .nt-label-opt:hover, .nt-label-opt.focused { background: var(--surface-hover); }
+    .nt-label-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+    .nt-label-chip {
+      display: inline-flex; align-items: center; gap: 6px;
+      background: var(--surface-2); border: 1px solid var(--border);
+      border-radius: 12px; padding: 3px 10px 3px 8px; font-size: 12px;
+      color: var(--text); margin-bottom: 8px;
+    }
+    .nt-label-chip.hidden { display: none; }
+    .nt-label-chip-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+    .nt-label-chip-rm {
+      background: none; border: none; cursor: pointer;
+      color: var(--text-muted); font-size: 16px; padding: 0; line-height: 1; margin-left: 2px;
+    }
+    .nt-label-chip-rm:hover { color: var(--red); }
 
     /* ── Board move overlay (issue #276) ── */
     #pane-sprint-mgmt { position: relative; }
@@ -4389,21 +4444,131 @@ function _nsShowError(msg) {
 // ── New Ticket modal ──────────────────────────────────────────────────────
 let _ntDraftId = null;
 let _ntDraftGenerated = false;
+let _ntLabels = [];          // [{name, color}, ...] from GitHub
+let _ntSelectedLabel = null; // currently applied label name
+let _ntDropdownFocus = -1;   // keyboard-focused dropdown item index
 
 function _ntUpdateWarnings() {
   if (!_ntDraftGenerated) return;
-  const labelEmpty = !document.getElementById('nt-label').value.trim();
-  const attachEmpty = document.getElementById('nt-files').files.length === 0;
-  document.getElementById('nt-warn-label').classList.toggle('hidden', !labelEmpty);
-  document.getElementById('nt-warn-attach').classList.toggle('hidden', !attachEmpty);
+  document.getElementById('nt-warn-label').classList.toggle('hidden', !!_ntSelectedLabel);
+  document.getElementById('nt-warn-attach').classList.toggle('hidden', document.getElementById('nt-files').files.length > 0);
+}
+
+async function _ntFetchLabels(repo) {
+  try {
+    const url = '/api/github/labels' + (repo ? '?repo=' + encodeURIComponent(repo) : '');
+    const r = await fetch(url);
+    if (r.ok) _ntLabels = await r.json();
+  } catch (_) {}
+}
+
+function _ntLabelColor(name) {
+  const found = _ntLabels.find(l => l.name === name);
+  return found ? '#' + found.color : '#888888';
+}
+
+function _ntRenderDropdown(query) {
+  const dd = document.getElementById('nt-label-dropdown');
+  const input = document.getElementById('nt-label');
+  const q = (query || '').toLowerCase().trim();
+  const filtered = q ? _ntLabels.filter(l => l.name.toLowerCase().includes(q)) : _ntLabels.slice(0, 20);
+  const exactMatch = _ntLabels.some(l => l.name.toLowerCase() === q);
+
+  let html = '';
+  filtered.slice(0, 12).forEach(l => {
+    html += `<div class="nt-label-opt" role="option" data-name="${escHtml(l.name)}">
+      <span class="nt-label-dot" style="background:#${l.color}"></span>${escHtml(l.name)}
+    </div>`;
+  });
+  if (q && !exactMatch) {
+    html += `<div class="nt-label-opt nt-label-opt-create" role="option" data-create="${escHtml(q)}">
+      <i class="ti ti-plus"></i> Create "${escHtml(q)}"
+    </div>`;
+  }
+  if (!html) {
+    dd.classList.add('hidden');
+    input.setAttribute('aria-expanded', 'false');
+    return;
+  }
+  dd.innerHTML = html;
+  dd.classList.remove('hidden');
+  input.setAttribute('aria-expanded', 'true');
+  _ntDropdownFocus = -1;
+}
+
+function _ntSelectLabel(name) {
+  _ntSelectedLabel = name;
+  const color = _ntLabelColor(name);
+  const chip = document.getElementById('nt-label-chip');
+  chip.innerHTML = `<span class="nt-label-chip-dot" style="background:${color}"></span>${escHtml(name)}<button class="nt-label-chip-rm" type="button" aria-label="Remove label">&times;</button>`;
+  chip.classList.remove('hidden');
+  document.getElementById('nt-label-wrap').classList.add('hidden');
+  document.getElementById('nt-label').value = '';
+  document.getElementById('nt-label-dropdown').classList.add('hidden');
+  document.getElementById('nt-label').setAttribute('aria-expanded', 'false');
+  _ntDropdownFocus = -1;
+  _ntUpdateWarnings();
+}
+
+function _ntClearLabel() {
+  _ntSelectedLabel = null;
+  document.getElementById('nt-label-chip').classList.add('hidden');
+  document.getElementById('nt-label-wrap').classList.remove('hidden');
+  document.getElementById('nt-label').focus();
+  _ntUpdateWarnings();
+}
+
+async function _ntCreateLabel(name) {
+  const repo = document.getElementById('nt-project').value;
+  const palette = ['0075ca', 'e4e669', 'd73a4a', 'a2eeef', '7057ff', '008672', 'e99695', 'fbca04'];
+  const color = palette[Math.floor(Math.random() * palette.length)];
+  try {
+    const resp = await fetch('/api/github/labels', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, color, repo }),
+    });
+    if (resp.ok) _ntLabels = await resp.json();
+  } catch (_) {}
+  _ntSelectLabel(name);
+}
+
+function _ntAutoSuggestLabel() {
+  if (_ntSelectedLabel || !_ntLabels.length) return;
+  const title = (document.getElementById('nt-title').value || '').toLowerCase();
+  const body = (document.getElementById('nt-body').value || '').toLowerCase();
+  const text = title + ' ' + body;
+  const MAP = [
+    { kw: ['bug', 'fix', 'error', 'crash', 'broken', 'fail', 'incorrect'],    preferred: ['bug'] },
+    { kw: ['doc', 'readme', 'documentation', 'guide'],                        preferred: ['documentation'] },
+    { kw: ['test', 'testing', 'coverage', 'spec'],                            preferred: ['test', 'testing'] },
+    { kw: ['refactor', 'cleanup', 'clean up', 'optimize', 'performance'],     preferred: ['refactor', 'cleanup'] },
+    { kw: ['feature', 'add', 'new', 'implement', 'improve', 'enhance', 'ui'], preferred: ['enhancement', 'feature'] },
+  ];
+  for (const { kw, preferred } of MAP) {
+    if (kw.some(k => text.includes(k))) {
+      for (const p of preferred) {
+        const found = _ntLabels.find(l => l.name.toLowerCase() === p);
+        if (found) { _ntSelectLabel(found.name); return; }
+      }
+    }
+  }
+  const fallback = _ntLabels.find(l => l.name.toLowerCase() === 'enhancement');
+  if (fallback) _ntSelectLabel(fallback.name);
 }
 
 async function smgmtOpenNewTicket() {
   // Reset to input state
   _ntDraftId = null;
   _ntDraftGenerated = false;
+  _ntSelectedLabel = null;
+  _ntLabels = [];
+  _ntDropdownFocus = -1;
   document.getElementById('nt-description').value = '';
   document.getElementById('nt-label').value = '';
+  document.getElementById('nt-label-chip').classList.add('hidden');
+  document.getElementById('nt-label-wrap').classList.remove('hidden');
+  document.getElementById('nt-label-dropdown').classList.add('hidden');
   document.getElementById('nt-files').value = '';
   document.getElementById('nt-warn-label').classList.add('hidden');
   document.getElementById('nt-warn-attach').classList.add('hidden');
@@ -4428,6 +4593,9 @@ async function smgmtOpenNewTicket() {
       `<option value="${escHtml(p.repo)}"${p.repo === currentRepo ? ' selected' : ''}>${escHtml(p.name || p.repo)}</option>`
     ).join('');
     sel.disabled = false;
+    // Pre-fetch labels for the selected project
+    const selectedRepo = sel.value;
+    if (selectedRepo) _ntFetchLabels(selectedRepo);
   } catch (e) {
     sel.innerHTML = '<option value="">Could not load projects</option>';
     sel.disabled = false;
@@ -4514,8 +4682,73 @@ function _setupModals() {
   document.getElementById('nt-cancel-btn').addEventListener('click', _ntClose);
   document.getElementById('nt-post-cancel-btn').addEventListener('click', _ntClose);
   document.getElementById('nt-backdrop').addEventListener('click', _ntClose);
-  document.getElementById('nt-label').addEventListener('input', _ntUpdateWarnings);
   document.getElementById('nt-files').addEventListener('change', _ntUpdateWarnings);
+
+  // Project change → re-fetch labels
+  document.getElementById('nt-project').addEventListener('change', function() {
+    if (this.value) _ntFetchLabels(this.value);
+  });
+
+  // Label chip removal (delegated)
+  document.getElementById('nt-label-chip').addEventListener('click', function(e) {
+    if (e.target.classList.contains('nt-label-chip-rm')) _ntClearLabel();
+  });
+
+  // Label input → filter dropdown
+  document.getElementById('nt-label').addEventListener('input', function() {
+    _ntRenderDropdown(this.value);
+  });
+  document.getElementById('nt-label').addEventListener('focus', function() {
+    if (!_ntDraftGenerated) return;
+    _ntRenderDropdown(this.value);
+  });
+  document.getElementById('nt-label').addEventListener('blur', function() {
+    setTimeout(() => {
+      document.getElementById('nt-label-dropdown').classList.add('hidden');
+      document.getElementById('nt-label').setAttribute('aria-expanded', 'false');
+      _ntDropdownFocus = -1;
+    }, 150);
+  });
+
+  // Dropdown keyboard navigation
+  document.getElementById('nt-label').addEventListener('keydown', function(e) {
+    const dd = document.getElementById('nt-label-dropdown');
+    if (dd.classList.contains('hidden')) {
+      if (e.key === 'ArrowDown') { e.preventDefault(); _ntRenderDropdown(this.value); }
+      return;
+    }
+    const items = Array.from(dd.querySelectorAll('.nt-label-opt'));
+    if (!items.length) return;
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      _ntDropdownFocus = Math.min(_ntDropdownFocus + 1, items.length - 1);
+      items.forEach((el, i) => el.classList.toggle('focused', i === _ntDropdownFocus));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      _ntDropdownFocus = Math.max(_ntDropdownFocus - 1, 0);
+      items.forEach((el, i) => el.classList.toggle('focused', i === _ntDropdownFocus));
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      const focused = _ntDropdownFocus >= 0 ? items[_ntDropdownFocus] : (items.length === 1 ? items[0] : null);
+      if (focused) focused.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+    } else if (e.key === 'Escape') {
+      dd.classList.add('hidden');
+      this.setAttribute('aria-expanded', 'false');
+      _ntDropdownFocus = -1;
+    }
+  });
+
+  // Dropdown item selection (mousedown fires before blur)
+  document.getElementById('nt-label-dropdown').addEventListener('mousedown', function(e) {
+    const opt = e.target.closest('.nt-label-opt');
+    if (!opt) return;
+    e.preventDefault();
+    if (opt.dataset.create) {
+      _ntCreateLabel(opt.dataset.create);
+    } else if (opt.dataset.name) {
+      _ntSelectLabel(opt.dataset.name);
+    }
+  });
 
   document.getElementById('nt-modal').addEventListener('keydown', function(e) {
     if (e.key !== 'Tab') return;
@@ -4556,6 +4789,7 @@ function _setupModals() {
       document.getElementById('nt-title').value = data.title || '';
       document.getElementById('nt-body').value = data.body || '';
       _ntDraftGenerated = true;
+      _ntAutoSuggestLabel();
       _ntUpdateWarnings();
       document.getElementById('nt-draft-section').classList.remove('hidden');
       requestAnimationFrame(() => {
@@ -4590,8 +4824,7 @@ function _setupModals() {
       formData.append('title', title);
       formData.append('body', document.getElementById('nt-body').value);
       formData.append('project', repo);
-      const labelVal = document.getElementById('nt-label').value.trim();
-      if (labelVal) formData.append('extra_labels', labelVal);
+      if (_ntSelectedLabel) formData.append('extra_labels', _ntSelectedLabel);
       for (const f of document.getElementById('nt-files').files) {
         formData.append('files', f);
       }
@@ -5556,20 +5789,12 @@ document.addEventListener('DOMContentLoaded', init);
       <label class="modal-label" for="nt-project">Project <span style="color:var(--red)">*</span></label>
       <select class="modal-input" id="nt-project" aria-required="true"></select>
     </div>
-    <div class="modal-field">
+    <div class="modal-field" style="margin-bottom:0">
       <label class="modal-label" for="nt-description">Description <span style="color:var(--red)">*</span></label>
       <textarea class="modal-input nt-textarea" id="nt-description"
                 rows="4"
                 placeholder="Describe the feature or bug you want to file…"
                 aria-required="true"></textarea>
-    </div>
-    <div class="modal-field">
-      <label class="modal-label" for="nt-label">Label <span class="modal-hint" style="font-weight:normal;color:var(--text-muted)">(optional)</span></label>
-      <input class="modal-input" id="nt-label" type="text" placeholder="e.g. enhancement, bug…" autocomplete="off">
-    </div>
-    <div class="modal-field" style="margin-bottom:0">
-      <label class="modal-label" for="nt-files">Attachments <span class="modal-hint" style="font-weight:normal;color:var(--text-muted)">(optional — .png .jpg .pdf .md and others, max 25 MB per file)</span></label>
-      <input class="modal-input nt-file-input" id="nt-files" type="file" multiple>
     </div>
     <div class="modal-error hidden" id="nt-error"></div>
   </div>
@@ -5590,10 +5815,24 @@ document.addEventListener('DOMContentLoaded', init);
         <label class="modal-label" for="nt-body">Body <span class="modal-hint" style="font-weight:normal;color:var(--text-muted)">(edit before posting)</span></label>
         <textarea class="modal-input nt-body-textarea" id="nt-body" rows="10"></textarea>
       </div>
+      <div class="modal-field">
+        <label class="modal-label" for="nt-label">Label <span class="modal-hint" style="font-weight:normal;color:var(--text-muted)">(optional)</span></label>
+        <div id="nt-label-chip" class="nt-label-chip hidden" role="status" aria-live="polite"></div>
+        <div class="nt-label-wrap" id="nt-label-wrap">
+          <input class="modal-input" id="nt-label" type="text"
+                 placeholder="Search labels…" autocomplete="off" role="combobox"
+                 aria-expanded="false" aria-controls="nt-label-dropdown" aria-autocomplete="list">
+          <div class="nt-label-dropdown hidden" id="nt-label-dropdown" role="listbox"></div>
+        </div>
+      </div>
+      <div class="modal-field" style="margin-bottom:0">
+        <label class="modal-label" for="nt-files">Attachments <span class="modal-hint" style="font-weight:normal;color:var(--text-muted)">(optional — .png .jpg .pdf .md and others, max 25 MB per file)</span></label>
+        <input class="modal-input nt-file-input" id="nt-files" type="file" multiple>
+      </div>
     </div>
     <div style="padding: 0 20px 4px">
-      <div id="nt-warn-label" class="nt-warn-item hidden">&#9888; No label assigned — add one above or leave blank.</div>
-      <div id="nt-warn-attach" class="nt-warn-item hidden">&#9888; No attachments added — add files above or leave blank.</div>
+      <div id="nt-warn-label" class="nt-warn-item hidden"><i class="ti ti-alert-triangle"></i> No label assigned — add one below or leave blank.</div>
+      <div id="nt-warn-attach" class="nt-warn-item hidden"><i class="ti ti-alert-triangle"></i> No attachments added — add files below or leave blank.</div>
     </div>
     <div class="modal-footer">
       <button class="btn-ghost" id="nt-post-cancel-btn" type="button">Cancel</button>

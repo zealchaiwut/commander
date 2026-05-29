@@ -182,7 +182,7 @@ commander/
 
 Commander automatically backs up your config files (`projects.json`, `sprint.yaml`, and `.env` if
 present) to a private GitHub gist. This protects against accidental data loss from `rm -rf`,
-disk failure, or a machine wipe — since both files are gitignored by design.
+disk failure, or a machine wipe — since both files are gitignored via `.gitignore`.
 
 ### What gets backed up
 

@@ -420,11 +420,11 @@ The dashboard has two UI surfaces and a legacy redirect layer.
 | `/project/{slug}/{tab}` | `static/project.html` | Current UI — use this for all new links |
 | `/project/{slug}` | — | Redirects to `/project/{slug}/sprint-mgmt` (302) |
 | `/legacy/{slug}/{tab}` | `static/index.html` | Legacy UI (deprecated) — emits a server warning on every hit |
-| `/projects/{slug}/{tab}` | — | Redirects to `/project/{slug}/{tab}` (301) — for old bookmarks only |
-| `/projects/{slug}` | — | Redirects to `/project/{slug}/sprint-mgmt` (301) |
-| `/projects/` | — | Redirects to `/` (301) |
+| `/projects/{slug}/{tab}` | — | Legacy redirect → `/project/{slug}/{tab}` (301) — pending removal |
+| `/projects/{slug}` | — | Legacy redirect → `/project/{slug}/sprint-mgmt` (301) — pending removal |
+| `/projects/` | — | Legacy redirect → `/` (301) — pending removal |
 
-> Do not use `/projects/` in new code or links. Use `/project/` for the current UI or `/legacy/` to reach the deprecated index.html interface.
+> `/projects/` is a legacy path pending removal. Do not use it in new code or links. Use `/project/` for the current UI or `/legacy/` to reach the deprecated index.html interface.
 
 ---
 

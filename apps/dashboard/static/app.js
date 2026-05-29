@@ -2348,7 +2348,7 @@ function _pspRowHtml(iss, { conflicting }) {
         <div class="psp-row-labels">${labelPills}</div>
         <span class="psp-size-pill ${sizeClass}">${escapeHtml(size)}</span>
         <span class="psp-token-est">${tokens} k</span>
-        <span class="psp-conflict-icon" title="File conflict">&#9888;</span>
+        <span class="psp-conflict-icon" title="File conflict"><i class="ti ti-alert-triangle"></i></span>
         <button class="psp-row-add" onclick="event.stopPropagation(); pspAddRowToSprint(${iss.number})">Add</button>
       </div>
     </div>`;
@@ -2724,12 +2724,31 @@ let _smgmtAutoRefreshTimer     = null; // interval timer for auto-refresh pollin
 let _smgmtAutoRefreshInterval  = 15;  // seconds between refreshes (5|15|30|60)
 let _smgmtAutoRefreshEnabled   = true; // whether auto-refresh is active
 let _smgmtSelectedIssues       = new Set(); // issue numbers currently selected (multi-select, issue #206)
+let _smgmtDragTickets          = [];   // [{number,fromSprint}] for multi-ticket drag (issue #363)
+let _smgmtLastClickedIssue     = null; // last clicked issue for Shift+Click range select (issue #363)
 
 function _rerunPolicyAction(labelNames) {
   const s = new Set(labelNames);
   if (s.has('UAT') || s.has('UAT-approved')) return 'skip';
   if (s.has('SIT')) return 'dispatch_tester';
   return 'dispatch_coder';
+}
+
+function sprintLabelCompare(a, b) {
+  const parse = (l) => {
+    const m = l.match(/^sprint-(\d+)(?:\.(\d+))?$/);
+    if (!m) return [0, 0];
+    return [parseInt(m[1], 10), m[2] ? parseInt(m[2], 10) : 0];
+  };
+  const [an, ax] = parse(a);
+  const [bn, bx] = parse(b);
+  return an !== bn ? an - bn : ax - bx;
+}
+
+function sprintLabelDisplay(label) {
+  const m = label.match(/^sprint-(\d+)(?:\.(\d+))?$/);
+  if (!m) return label;
+  return m[2] ? `Sprint ${m[1]}.${m[2]}` : `Sprint ${m[1]}`;
 }
 
 async function smgmtInit() {
@@ -3082,7 +3101,8 @@ function smgmtRender() {
   for (const label of order) bySprintLabel[label] = [];
   const unassigned = [];
   for (const iss of issues) {
-    const label = iss.sprint != null ? `sprint-${iss.sprint}` : null;
+    // Prefer the exact sprint_label field (supports dotted sub-labels like sprint-15.1)
+    const label = iss.sprint_label || (iss.sprint != null ? `sprint-${iss.sprint}` : null);
     if (label && bySprintLabel[label]) {
       bySprintLabel[label].push(iss);
     } else if (label == null) {
@@ -3090,52 +3110,49 @@ function smgmtRender() {
     }
   }
 
-  // NEXT-UP: lowest-numbered sprint with >= 1 ticket (issue #242: no goal required)
-  const allNums = order.map(l => parseInt(l.split('-')[1], 10)).filter(n => !isNaN(n));
-  allNums.sort((a, b) => a - b);
+  // NEXT-UP: lowest sprint label with >= 1 ticket (natural sort order)
+  const sortedOrderForNext = [...order].sort(sprintLabelCompare);
   let lowestLabel = null;
-  for (const n of allNums) {
-    const lbl = `sprint-${n}`;
-    const tickets = bySprintLabel[lbl] || [];
-    if (tickets.length >= 1) {
+  for (const lbl of sortedOrderForNext) {
+    if ((bySprintLabel[lbl] || []).length >= 1) {
       lowestLabel = lbl;
       break;
     }
   }
 
-  // Identify empty sprints that exist on GitHub but have no tickets (not in order)
-  // These should be rendered as droppable placeholder blocks so users can drop into them (issue #206)
-  const orderNums = new Set(order.map(l => parseInt(l.split('-')[1], 10)));
-  const placeholderN = placeholder_sprint || ((order.length > 0 ? Math.max(...allNums) : 0) + 1);
+  // Identify empty plain sprint-N labels that exist on GitHub but have no tickets
+  // These should be rendered as droppable placeholder blocks (issue #206)
+  const orderBaseNums = new Set(
+    order.map(l => { const m = l.match(/^sprint-(\d+)$/); return m ? parseInt(m[1], 10) : null; })
+         .filter(n => n !== null)
+  );
+  const allBaseNums = order.length > 0
+    ? Math.max(...order.map(l => { const m = l.match(/^sprint-(\d+)/); return m ? parseInt(m[1], 10) : 0; }))
+    : 0;
+  const placeholderN = placeholder_sprint || (allBaseNums + 1);
   const emptySprintNums = (_smgmtData.sprints || [])
-    .filter(n => !orderNums.has(n) && n !== placeholderN)
+    .filter(n => !orderBaseNums.has(n) && n !== placeholderN)
     .sort((a, b) => a - b);
 
-  // Sort non-empty sprints ascending by sprint number (issue #207).
-  // Empty sprints are interleaved into the correct sorted position.
-  const sortedOrder = [...order].sort((a, b) => {
-    const na = parseInt(a.split('-')[1], 10);
-    const nb = parseInt(b.split('-')[1], 10);
-    return na - nb;
-  });
+  // Sort non-empty sprint labels naturally (sprint-N before sprint-N.1 before sprint-N+1)
+  const sortedOrder = [...order].sort(sprintLabelCompare);
 
-  // Build a merged list of all sprint numbers (non-empty + empty), sorted ascending.
-  // Each entry is: { num, isEmpty }
-  const allSprintNums = [
-    ...sortedOrder.map(l => ({ num: parseInt(l.split('-')[1], 10), isEmpty: false })),
-    ...emptySprintNums.map(n => ({ num: n, isEmpty: true })),
-  ].sort((a, b) => a.num - b.num);
+  // Build a merged list of all sprint entries (non-empty labels + empty plain sprints), sorted.
+  // Each entry is: { label, isEmpty }
+  const allSprintEntries = [
+    ...sortedOrder.map(l => ({ label: l, isEmpty: false })),
+    ...emptySprintNums.map(n => ({ label: `sprint-${n}`, isEmpty: true })),
+  ].sort((a, b) => sprintLabelCompare(a.label, b.label));
 
-  // Render sprint blocks (only non-empty sprints are in order)
+  // Render sprint blocks (non-empty sprints and empty plain sprints)
   let blocksHtml = '';
   if (sortedOrder.length === 0 && emptySprintNums.length === 0) {
     blocksHtml = '<div class="smgmt-loading">No sprints found. Use "+ New sprint" to create one.</div>';
   } else {
-    // Render all sprints (non-empty and empty) interleaved in ascending number order.
-    // Empty sprints that exist on GitHub use the full pane (with Delete + disabled Run);
+    // Render all sprint entries (non-empty and empty) in natural sort order.
+    // Empty sprints use the full pane (with Delete + disabled Run);
     // only the trailing placeholder uses smgmtPlaceholderBlockHtml.
-    blocksHtml = allSprintNums.map(({ num }) => {
-      const label = `sprint-${num}`;
+    blocksHtml = allSprintEntries.map(({ label }) => {
       return smgmtSprintBlockHtml(label, bySprintLabel[label] || [], label === lowestLabel);
     }).join('');
   }
@@ -3163,7 +3180,7 @@ function smgmtRender() {
 
   smgmtRenderBacklog(unassigned);
   // Count total visible sprint blocks (non-placeholder) for sticky decision (issue #225)
-  const totalSprints = allSprintNums.length; // includes both non-empty and empty sprints
+  const totalSprints = allSprintEntries.length; // includes both non-empty and empty sprints
   smgmtBacklogApplyMode(totalSprints);
   smgmtApplyRunState();
   smgmtApplyDurationBadges();
@@ -3179,12 +3196,14 @@ function smgmtHasCompletedTickets(tickets) {
 }
 
 function smgmtSprintBlockHtml(label, tickets, isNext) {
-  const n = parseInt(label.split('-')[1], 10);
+  const displayName = sprintLabelDisplay(label);
+  // Sanitize label for use in HTML element IDs (replace hyphens and dots with underscores)
+  const safeIdSuffix = label.replace(/-/g, '_').replace(/\./g, '_');
   // Unified Run/Re-run button replaces the separate run + rerun buttons (issue #186)
-  const actionBtnId  = `smgmt-run-btn-${label.replace('-', '_')}`;
-  const deleteBtnId  = `smgmt-delete-btn-${label.replace('-', '_')}`;
-  const finishBtnId  = `smgmt-finish-btn-${label.replace('-', '_')}`;
-  const goalId       = `smgmt-goal-${label.replace('-', '_')}`;
+  const actionBtnId  = `smgmt-run-btn-${safeIdSuffix}`;
+  const deleteBtnId  = `smgmt-delete-btn-${safeIdSuffix}`;
+  const finishBtnId  = `smgmt-finish-btn-${safeIdSuffix}`;
+  const goalId       = `smgmt-goal-${safeIdSuffix}`;
   const savedGoal    = _smgmtGoals[label] || '';
   const hasCompleted = smgmtHasCompletedTickets(tickets);
   // hasCompleted → unified button shows "Re-run Sprint" and calls smgmtRerunSprint
@@ -3247,7 +3266,9 @@ function smgmtSprintBlockHtml(label, tickets, isNext) {
            ondragend="smgmtSprintDragEnd(event)">
         <div class="smgmt-sprint-header-left">
           <i class="ti ti-grip-vertical smgmt-sprint-grip"></i>
-          <span class="smgmt-sprint-name">Sprint ${n}</span>
+          <span class="smgmt-sprint-name">${displayName}</span>
+          <button class="smgmt-rename-btn" title="Rename sprint"
+                  onclick="smgmtStartRename('${label}', event)"><i class="ti ti-pencil"></i></button>
           ${nextBadge}
           ${estimateSummaryHtml}
           <span class="smgmt-sprint-count">${tickets.length === 0 ? 'empty' : `${tickets.length} ticket${tickets.length !== 1 ? 's' : ''}`}</span>
@@ -3264,7 +3285,7 @@ function smgmtSprintBlockHtml(label, tickets, isNext) {
           ${actionBtn}
         </div>
       </div>
-      <div class="${goalBarClass}" id="smgmt-goal-bar-${label.replace('-', '_')}" style="display:none">${goalBarText}</div>
+      <div class="${goalBarClass}" id="smgmt-goal-bar-${safeIdSuffix}" style="display:none">${goalBarText}</div>
       <div class="smgmt-sprint-goal-row" style="display:none">
         <input class="smgmt-goal-input" id="${goalId}" type="text"
                placeholder="Sprint goal (required to run) — e.g. Dashboard UX cleanup"
@@ -3295,6 +3316,145 @@ function smgmtPlaceholderBlockHtml(n) {
     </div>`;
 }
 
+// ── Sprint inline rename (issue #341) ────────────────────────────────────────
+
+function smgmtStartRename(label, event) {
+  event.stopPropagation();
+  const block = document.getElementById(`smgmt-block-${label}`);
+  if (!block) return;
+  const nameEl = block.querySelector('.smgmt-sprint-name');
+  if (!nameEl || nameEl.querySelector('.smgmt-rename-wrap')) return; // already editing
+
+  const origN = parseInt(label.split('-')[1], 10);
+
+  nameEl.innerHTML = `
+    <span class="smgmt-rename-wrap">
+      <span class="smgmt-rename-prefix">Sprint </span>
+      <input class="smgmt-rename-input" id="smgmt-rename-input-${label}"
+             type="text" inputmode="numeric" pattern="[0-9]*"
+             value="${origN}" autocomplete="off" />
+      <span class="smgmt-rename-error" id="smgmt-rename-err-${label}"></span>
+    </span>`;
+
+  const input = document.getElementById(`smgmt-rename-input-${label}`);
+  input.focus();
+  input.select();
+
+  input.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      smgmtCommitRename(label, origN, nameEl);
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      smgmtCancelRename(label, origN, nameEl);
+    }
+  });
+
+  input.addEventListener('input', function() {
+    // strip non-numeric characters on input
+    this.value = this.value.replace(/[^0-9]/g, '');
+  });
+
+  input.addEventListener('blur', function() {
+    // Defer so Enter-key commit isn't pre-empted; skip if API call is in flight
+    const el = this;
+    setTimeout(() => {
+      if (el.disabled) return;
+      const wrap = nameEl.querySelector('.smgmt-rename-wrap');
+      if (wrap) smgmtCancelRename(label, origN, nameEl);
+    }, 150);
+  });
+}
+
+function _smgmtSetRenameError(label, msg) {
+  const errEl = document.getElementById(`smgmt-rename-err-${label}`);
+  const input = document.getElementById(`smgmt-rename-input-${label}`);
+  if (errEl) errEl.textContent = msg;
+  if (input) input.classList.toggle('is-invalid', !!msg);
+}
+
+async function smgmtCommitRename(label, origN, nameEl) {
+  const input = document.getElementById(`smgmt-rename-input-${label}`);
+  if (!input) return;
+  const raw = input.value.trim();
+
+  if (raw === '') {
+    _smgmtSetRenameError(label, 'Sprint number cannot be empty');
+    input.focus();
+    return;
+  }
+  const newN = parseInt(raw, 10);
+  if (isNaN(newN) || newN <= 0) {
+    _smgmtSetRenameError(label, 'Only numbers are allowed');
+    input.focus();
+    return;
+  }
+  if (newN === origN) {
+    smgmtCancelRename(label, origN, nameEl);
+    return;
+  }
+  const existingNums = (_smgmtData?.order || []).map(l => parseInt(l.split('-')[1], 10));
+  if (existingNums.includes(newN)) {
+    _smgmtSetRenameError(label, `Sprint ${newN} already exists`);
+    input.focus();
+    return;
+  }
+
+  _smgmtSetRenameError(label, '');
+  input.disabled = true;
+
+  try {
+    const res = await fetch(`/api/sprints/${label}/rename`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ new_sprint_number: newN, project: _smgmtCurrentRepo }),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      _smgmtSetRenameError(label, data.detail || `Error ${res.status}`);
+      if (input) input.disabled = false;
+      input.focus();
+      return;
+    }
+  } catch (err) {
+    _smgmtSetRenameError(label, 'Network error');
+    if (input) input.disabled = false;
+    input.focus();
+    return;
+  }
+
+  // Update in-memory data order immediately
+  const newLabel = `sprint-${newN}`;
+  if (_smgmtData?.order) {
+    _smgmtData.order = _smgmtData.order.map(l => l === label ? newLabel : l);
+  }
+  if (_smgmtData?.issues) {
+    _smgmtData.issues.forEach(iss => {
+      if (iss.sprint === label) iss.sprint = newLabel;
+    });
+  }
+  // Migrate goals/estimates/states to new label key
+  if (_smgmtGoals[label] !== undefined) {
+    _smgmtGoals[newLabel] = _smgmtGoals[label];
+    delete _smgmtGoals[label];
+  }
+  if (_smgmtEstimates[label] !== undefined) {
+    _smgmtEstimates[newLabel] = _smgmtEstimates[label];
+    delete _smgmtEstimates[label];
+  }
+  if (_smgmtSprintStates[label] !== undefined) {
+    _smgmtSprintStates[newLabel] = _smgmtSprintStates[label];
+    delete _smgmtSprintStates[label];
+  }
+
+  smgmtRender();
+}
+
+function smgmtCancelRename(label, origN, nameEl) {
+  if (!nameEl) return;
+  nameEl.textContent = `Sprint ${origN}`;
+}
+
 function smgmtTicketCardHtml(ticket, currentSprint) {
   const hasNeedsReworkLabel = (ticket.labels || []).some(l => l.name === 'need-rework' || l.name === 'needs-rework');
   const statusClass = hasNeedsReworkLabel ? 'smgmt-status-need-rework' : ({
@@ -3322,6 +3482,9 @@ function smgmtTicketCardHtml(ticket, currentSprint) {
          draggable="true"
          data-issue="${ticket.number}"
          data-sprint="${currentSprint || ''}"
+         tabindex="0"
+         onclick="smgmtTicketClick(event, ${ticket.number})"
+         onkeydown="smgmtTicketKeyDown(event, ${ticket.number})"
          ondragstart="smgmtTicketDragStart(event, ${ticket.number}, '${currentSprint || ''}')"
          ondragend="smgmtTicketDragEnd(event)">
       <input type="checkbox" class="smgmt-ticket-cb"
@@ -3534,6 +3697,9 @@ function smgmtBacklogTicketHtml(ticket, sprintLabels) {
          draggable="true"
          data-issue="${ticket.number}"
          data-sprint=""
+         tabindex="0"
+         onclick="smgmtTicketClick(event, ${ticket.number})"
+         onkeydown="smgmtTicketKeyDown(event, ${ticket.number})"
          ondragstart="smgmtBacklogTicketDragStart(event, ${ticket.number})"
          ondragend="smgmtBacklogTicketDragEnd(event)">
       <input type="checkbox" class="smgmt-ticket-cb"
@@ -3626,29 +3792,37 @@ function smgmtBacklogMoveToClose() {
 async function smgmtBacklogMoveTicketTo(issueNum, sprintLabel) {
   smgmtBacklogMoveToClose();
   if (!sprintLabel || !_smgmtData) return;
-  const sprintNum = parseInt(sprintLabel.split('-')[1], 10);
+  const baseMatch = sprintLabel.match(/^sprint-(\d+)/);
+  const sprintNum = baseMatch ? parseInt(baseMatch[1], 10) : null;
+  const isDotted = /^sprint-\d+\.\d+$/.test(sprintLabel);
 
   // Optimistic update
   const iss = _smgmtData.issues.find(i => i.number === issueNum);
-  if (iss) iss.sprint = sprintNum;
+  if (iss) {
+    iss.sprint = sprintNum;
+    iss.sprint_label = sprintLabel;
+  }
   // Add sprint to order if needed
   if (!_smgmtData.order.includes(sprintLabel)) {
     _smgmtData.order.push(sprintLabel);
   }
   smgmtRender();
 
+  const apiBody = isDotted
+    ? { issue: issueNum, sprint_label: sprintLabel }
+    : { issue: issueNum, sprint: sprintNum };
   try {
     const res = await fetch('/api/sprint-planning/assign', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ issue: issueNum, sprint: sprintNum }),
+      body: JSON.stringify(apiBody),
     });
     if (!res.ok) throw new Error(await res.text());
     await smgmtRefreshBoard();
   } catch (e) {
     // Rollback optimistic update
     const iss2 = _smgmtData.issues.find(i => i.number === issueNum);
-    if (iss2) iss2.sprint = null;
+    if (iss2) { iss2.sprint = null; iss2.sprint_label = null; }
     smgmtRender();
     smgmtShowError(`Failed to move ticket #${issueNum}: ${e.message}`);
     _showToast(`Failed to move #${issueNum}: ${e.message}`, 'error');
@@ -3669,20 +3843,33 @@ function smgmtBacklogTicketDragStart(event, issueNum) {
   // Auto-expand the backlog and remove sticky while dragging
   const block = document.getElementById('smgmt-backlog');
   if (block) {
-    // Save pre-drag state
     block.dataset.preDragExpanded = String(_smgmtBacklogExpanded);
-    // Force expanded + non-sticky
     _smgmtBacklogExpanded = true;
     block.classList.add('smgmt-backlog-expanded', 'is-drag-active');
     const hdr = document.getElementById('smgmt-backlog-header');
     if (hdr) hdr.setAttribute('aria-expanded', 'true');
   }
-  // Reuse standard ticket drag start
   _smgmtDragTicket = { number: issueNum, fromSprint: null };
   event.dataTransfer.effectAllowed = 'move';
   event.dataTransfer.setData('text/smgmt-ticket', String(issueNum));
-  const el = document.getElementById(`smgmt-ticket-${issueNum}`);
-  if (el) setTimeout(() => el.classList.add('dragging-ticket'), 0);
+
+  if (_smgmtSelectedIssues.has(issueNum) && _smgmtSelectedIssues.size > 1) {
+    // Multi-drag: collect all selected tickets in DOM order
+    const allRows = [...document.querySelectorAll('#smgmt-backlog-tickets .smgmt-ticket, #smgmt-body .smgmt-ticket')];
+    _smgmtDragTickets = allRows
+      .map(r => ({ number: parseInt(r.dataset.issue, 10), fromSprint: r.dataset.sprint || null }))
+      .filter(t => _smgmtSelectedIssues.has(t.number));
+    setTimeout(() => {
+      _smgmtDragTickets.forEach(t => {
+        document.getElementById(`smgmt-ticket-${t.number}`)?.classList.add('dragging-ticket');
+      });
+    }, 0);
+    _smgmtSetMultiDragGhost(event, _smgmtDragTickets.length);
+  } else {
+    _smgmtDragTickets = [];
+    const el = document.getElementById(`smgmt-ticket-${issueNum}`);
+    if (el) setTimeout(() => el.classList.add('dragging-ticket'), 0);
+  }
   // Show the N+1 ghost sprint pane only while a ticket drag is active (issue #340)
   document.querySelectorAll('.smgmt-sprint-placeholder').forEach(p => { p.style.display = 'block'; });
 }
@@ -3758,7 +3945,7 @@ function smgmtGoalInput(label, value) {
   _smgmtGoals[label] = value;
 
   // Update the visible goal bar
-  const safeLabel = label.replace('-', '_');
+  const safeLabel = label.replace(/-/g, '_').replace(/\./g, '_');
   const goalBar = document.getElementById(`smgmt-goal-bar-${safeLabel}`);
   if (goalBar) {
     const hasGoal = value.trim().length > 0;
@@ -3775,7 +3962,7 @@ function smgmtGoalInput(label, value) {
   const btn = document.getElementById(runBtnId);
   if (btn) {
     const sprintTickets = (_smgmtData?.issues || []).filter(
-      t => t.sprint != null && `sprint-${t.sprint}` === label
+      t => (t.sprint_label || (t.sprint != null ? `sprint-${t.sprint}` : null)) === label
     );
     const hasTickets = sprintTickets.length >= 1;
     const hasCompleted = smgmtHasCompletedTickets(sprintTickets);
@@ -3821,10 +4008,15 @@ function smgmtSprintDragStart(event, label) {
     event.preventDefault();
     return;
   }
+  // Suppress drag while an inline rename is active (issue #341)
+  const block = document.getElementById(`smgmt-block-${label}`);
+  if (block && block.querySelector('.smgmt-rename-wrap')) {
+    event.preventDefault();
+    return;
+  }
   _smgmtDragSprintLabel = label;
   event.dataTransfer.effectAllowed = 'move';
   event.dataTransfer.setData('text/smgmt-sprint', label);
-  const block = document.getElementById(`smgmt-block-${label}`);
   if (block) setTimeout(() => block.classList.add('dragging-sprint'), 0);
 }
 
@@ -3850,18 +4042,38 @@ function smgmtTicketDragStart(event, issueNum, fromSprint) {
   _smgmtDragTicket = { number: issueNum, fromSprint: fromSprint || null };
   event.dataTransfer.effectAllowed = 'move';
   event.dataTransfer.setData('text/smgmt-ticket', String(issueNum));
-  const el = document.getElementById(`smgmt-ticket-${issueNum}`);
-  if (el) setTimeout(() => el.classList.add('dragging-ticket'), 0);
+
+  if (_smgmtSelectedIssues.has(issueNum) && _smgmtSelectedIssues.size > 1) {
+    const allRows = [...document.querySelectorAll('#smgmt-backlog-tickets .smgmt-ticket, #smgmt-body .smgmt-ticket')];
+    _smgmtDragTickets = allRows
+      .map(r => ({ number: parseInt(r.dataset.issue, 10), fromSprint: r.dataset.sprint || null }))
+      .filter(t => _smgmtSelectedIssues.has(t.number));
+    setTimeout(() => {
+      _smgmtDragTickets.forEach(t => {
+        document.getElementById(`smgmt-ticket-${t.number}`)?.classList.add('dragging-ticket');
+      });
+    }, 0);
+    _smgmtSetMultiDragGhost(event, _smgmtDragTickets.length);
+  } else {
+    _smgmtDragTickets = [];
+    const el = document.getElementById(`smgmt-ticket-${issueNum}`);
+    if (el) setTimeout(() => el.classList.add('dragging-ticket'), 0);
+  }
   // Show the N+1 ghost sprint pane only while a ticket drag is active (issue #340)
   document.querySelectorAll('.smgmt-sprint-placeholder').forEach(p => { p.style.display = 'block'; });
 }
 
 function smgmtTicketDragEnd(event) {
-  if (_smgmtDragTicket) {
+  if (_smgmtDragTickets.length > 1) {
+    _smgmtDragTickets.forEach(t => {
+      document.getElementById(`smgmt-ticket-${t.number}`)?.classList.remove('dragging-ticket');
+    });
+  } else if (_smgmtDragTicket) {
     const el = document.getElementById(`smgmt-ticket-${_smgmtDragTicket.number}`);
     if (el) el.classList.remove('dragging-ticket');
   }
   _smgmtDragTicket = null;
+  _smgmtDragTickets = [];
   // Clear all hover states
   document.querySelectorAll('.smgmt-sprint-block').forEach(el => {
     el.classList.remove('drag-over-sprint', 'drag-over-zone');
@@ -3924,17 +4136,60 @@ async function smgmtDropOnPlaceholder(event, placeholderN) {
   });
   document.getElementById('smgmt-backlog')?.classList.remove('drag-over-sprint', 'drag-over-zone');
 
-  if (!_smgmtDragTicket || !_smgmtCurrentRepo) return;
+  if (!_smgmtCurrentRepo) return;
+  const newSprintLabel = `sprint-${placeholderN}`;
+
+  // Multi-ticket drop
+  if (_smgmtDragTickets.length > 1) {
+    const ticketsToMove = [..._smgmtDragTickets];
+    _smgmtDragTickets = [];
+    _smgmtDragTicket = null;
+
+    for (const t of ticketsToMove) {
+      const iss = _smgmtData.issues.find(i => i.number === t.number);
+      if (iss) iss.sprint = placeholderN;
+    }
+    if (!_smgmtData.sprints.includes(placeholderN)) {
+      _smgmtData.sprints.push(placeholderN);
+      _smgmtData.sprints.sort((a, b) => a - b);
+    }
+    if (!_smgmtData.order.includes(newSprintLabel)) _smgmtData.order.push(newSprintLabel);
+    const maxSprint = Math.max(..._smgmtData.sprints);
+    _smgmtData.placeholder_sprint = Math.max(placeholderN + 1, maxSprint + 1);
+    smgmtRender();
+    smgmtClearSelection();
+
+    const failures = [];
+    await Promise.all(ticketsToMove.map(async (t) => {
+      try {
+        const res = await fetch('/api/sprint-planning/assign', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ issue: t.number, sprint: placeholderN }),
+        });
+        if (!res.ok) throw new Error(await res.text());
+      } catch (e) { failures.push({ t, err: e.message }); }
+    }));
+
+    if (failures.length > 0) {
+      for (const { t } of failures) {
+        const iss2 = _smgmtData.issues.find(i => i.number === t.number);
+        if (iss2) iss2.sprint = t.fromSprint ? parseInt(t.fromSprint.split('-')[1], 10) : null;
+      }
+      smgmtRender();
+      smgmtShowError(`Failed to move ticket(s) #${failures.map(f => f.t.number).join(', #')}.`);
+    }
+    await smgmtRefreshBoard();
+    return;
+  }
+
+  if (!_smgmtDragTicket) return;
   const { number, fromSprint } = _smgmtDragTicket;
   _smgmtDragTicket = null;
-
-  const newSprintLabel = `sprint-${placeholderN}`;
 
   // Optimistic: add ticket to data and convert placeholder to real sprint
   const iss = _smgmtData.issues.find(i => i.number === number);
   if (iss) iss.sprint = placeholderN;
 
-  // Add new sprint to sprints list and order (sprint may already exist on GitHub for empty sprints)
   if (!_smgmtData.sprints.includes(placeholderN)) {
     _smgmtData.sprints.push(placeholderN);
     _smgmtData.sprints.sort((a, b) => a - b);
@@ -3942,16 +4197,12 @@ async function smgmtDropOnPlaceholder(event, placeholderN) {
   if (!_smgmtData.order.includes(newSprintLabel)) {
     _smgmtData.order.push(newSprintLabel);
   }
-  // Update placeholder: advance past the dropped sprint and any higher existing sprints
-  // (placeholderN + 1 is correct for the trailing placeholder; for existing empty sprints
-  //  smgmtRefreshBoard will re-sync the correct value from the server)
   const maxExistingSprint = Math.max(..._smgmtData.sprints);
   _smgmtData.placeholder_sprint = Math.max(placeholderN + 1, maxExistingSprint + 1);
 
   smgmtRender();
 
   try {
-    // Create the sprint label on GitHub and assign the ticket
     const res = await fetch('/api/sprint-planning/assign', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -3960,7 +4211,6 @@ async function smgmtDropOnPlaceholder(event, placeholderN) {
     if (!res.ok) throw new Error(await res.text());
     await smgmtRefreshBoard();
   } catch (e) {
-    // Rollback optimistic update
     const iss2 = _smgmtData.issues.find(i => i.number === number);
     if (iss2) {
       const origNum = fromSprint ? parseInt(fromSprint.split('-')[1], 10) : null;
@@ -3989,45 +4239,104 @@ async function smgmtDropOnSprint(event, targetSprintLabel) {
     return;
   }
 
-  // Ticket drop
+  // Multi-ticket drop
+  if (_smgmtDragTickets.length > 1) {
+    const ticketsToMove = [..._smgmtDragTickets];
+    _smgmtDragTickets = [];
+    _smgmtDragTicket = null;
+
+    const toMove = ticketsToMove.filter(t => (t.fromSprint || null) !== targetSprintLabel);
+    if (toMove.length === 0) { smgmtClearSelection(); return; }
+
+    const wasInOrder = !targetSprintLabel || _smgmtData.order.includes(targetSprintLabel);
+    const prevData = toMove.map(t => {
+      const iss = _smgmtData.issues.find(i => i.number === t.number);
+      return { number: t.number, sprint: iss?.sprint ?? null, sprint_label: iss?.sprint_label ?? null };
+    });
+
+    for (const t of toMove) {
+      const iss = _smgmtData.issues.find(i => i.number === t.number);
+      if (iss) {
+        const m = targetSprintLabel ? targetSprintLabel.match(/^sprint-(\d+)/) : null;
+        iss.sprint = m ? parseInt(m[1], 10) : null;
+        iss.sprint_label = targetSprintLabel || null;
+      }
+    }
+    if (targetSprintLabel && !wasInOrder) _smgmtData.order.push(targetSprintLabel);
+    smgmtRender();
+    smgmtClearSelection();
+
+    const isDotted = targetSprintLabel && /^sprint-\d+\.\d+$/.test(targetSprintLabel);
+    const failures = [];
+    await Promise.all(toMove.map(async (t) => {
+      const apiBody = isDotted || targetSprintLabel === null
+        ? { issue: t.number, sprint_label: targetSprintLabel }
+        : { issue: t.number, sprint: targetSprintLabel ? parseInt(targetSprintLabel.split('-')[1], 10) : null };
+      try {
+        const res = await fetch('/api/sprint-planning/assign', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(apiBody),
+        });
+        if (!res.ok) throw new Error(await res.text());
+      } catch (e) { failures.push(t.number); }
+    }));
+
+    if (failures.length > 0) {
+      for (const prev of prevData) {
+        if (failures.includes(prev.number)) {
+          const iss2 = _smgmtData.issues.find(i => i.number === prev.number);
+          if (iss2) { iss2.sprint = prev.sprint; iss2.sprint_label = prev.sprint_label; }
+        }
+      }
+      if (targetSprintLabel && !wasInOrder) {
+        _smgmtData.order = _smgmtData.order.filter(l => l !== targetSprintLabel);
+      }
+      smgmtRender();
+      smgmtShowError(`Failed to move ticket(s) #${failures.join(', #')}.`);
+    }
+    await smgmtRefreshBoard();
+    return;
+  }
+
+  // Single ticket drop
   if (_smgmtDragTicket) {
     const { number, fromSprint } = _smgmtDragTicket;
     _smgmtDragTicket = null;
 
     if (fromSprint === targetSprintLabel) return; // no-op
 
-    // Track whether this sprint was already in order before the optimistic update (for rollback)
     const wasInOrder = !targetSprintLabel || _smgmtData.order.includes(targetSprintLabel);
 
-    // Optimistic: move ticket in local data
     const iss = _smgmtData.issues.find(i => i.number === number);
+    const prevSprintLabel = iss ? (iss.sprint_label || (iss.sprint != null ? `sprint-${iss.sprint}` : null)) : fromSprint;
     if (iss) {
-      const targetNum = targetSprintLabel ? parseInt(targetSprintLabel.split('-')[1], 10) : null;
-      iss.sprint = targetNum;
+      const targetBaseMatch = targetSprintLabel ? targetSprintLabel.match(/^sprint-(\d+)/) : null;
+      iss.sprint = targetBaseMatch ? parseInt(targetBaseMatch[1], 10) : null;
+      iss.sprint_label = targetSprintLabel || null;
     }
-    // If dropping onto an existing empty sprint (not yet in order), promote it optimistically
-    // so the ticket appears in the pane immediately after smgmtRender().
     if (targetSprintLabel && !wasInOrder) {
       _smgmtData.order.push(targetSprintLabel);
     }
     smgmtRender();
 
-    // API call
-    const targetSprintNum = targetSprintLabel ? parseInt(targetSprintLabel.split('-')[1], 10) : null;
+    const isDotted = targetSprintLabel && /^sprint-\d+\.\d+$/.test(targetSprintLabel);
+    const apiBody = isDotted || targetSprintLabel === null
+      ? { issue: number, sprint_label: targetSprintLabel }
+      : { issue: number, sprint: targetSprintLabel ? parseInt(targetSprintLabel.split('-')[1], 10) : null };
     try {
       const res = await fetch('/api/sprint-planning/assign', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ issue: number, sprint: targetSprintNum }),
+        body: JSON.stringify(apiBody),
       });
       if (!res.ok) throw new Error(await res.text());
       await smgmtRefreshBoard();
     } catch (e) {
-      // Rollback: restore original sprint and order
       const iss2 = _smgmtData.issues.find(i => i.number === number);
       if (iss2) {
-        const origNum = fromSprint ? parseInt(fromSprint.split('-')[1], 10) : null;
-        iss2.sprint = origNum;
+        const origBaseMatch = prevSprintLabel ? prevSprintLabel.match(/^sprint-(\d+)/) : null;
+        iss2.sprint = origBaseMatch ? parseInt(origBaseMatch[1], 10) : null;
+        iss2.sprint_label = prevSprintLabel || null;
       }
       if (targetSprintLabel && !wasInOrder) {
         _smgmtData.order = _smgmtData.order.filter(l => l !== targetSprintLabel);
@@ -4101,6 +4410,7 @@ function smgmtToggleSelectAll(checkboxEl) {
 
 function smgmtClearSelection() {
   _smgmtSelectedIssues.clear();
+  _smgmtLastClickedIssue = null;
   _smgmtUpdateSelectionUI();
   // Uncheck all visible checkboxes without full re-render
   document.querySelectorAll('.smgmt-ticket-cb').forEach(cb => { cb.checked = false; });
@@ -4144,15 +4454,15 @@ function smgmtBulkMoveToOpen() {
   if (select) {
     select.innerHTML = '<option value="">— choose a sprint —</option>';
     const order = _smgmtData?.order || [];
-    const allNums = [...new Set([
-      ...order.map(l => parseInt(l.split('-')[1], 10)),
-      ...(_smgmtData?.sprints || []),
-    ])].filter(n => !isNaN(n)).sort((a, b) => a - b);
+    // Build all sprint labels (from order + plain sprint numbers), sorted naturally
+    const orderSet = new Set(order);
+    const plainFromSprints = (_smgmtData?.sprints || []).map(n => `sprint-${n}`);
+    const allLabels = [...new Set([...order, ...plainFromSprints])].sort(sprintLabelCompare);
 
-    for (const n of allNums) {
+    for (const lbl of allLabels) {
       const opt = document.createElement('option');
-      opt.value = `sprint-${n}`;
-      opt.textContent = `Sprint ${n}`;
+      opt.value = lbl;
+      opt.textContent = sprintLabelDisplay(lbl);
       select.appendChild(opt);
     }
     // Add backlog option
@@ -4190,23 +4500,31 @@ async function smgmtBulkMoveToConfirm() {
 
   if (confirmBtn) { confirmBtn.disabled = true; confirmBtn.textContent = 'Moving…'; }
 
-  const sprintNum = destination === 'backlog' ? null : parseInt(destination.split('-')[1], 10);
+  const isDottedDest = destination !== 'backlog' && /^sprint-\d+\.\d+$/.test(destination);
+  const sprintNum = destination === 'backlog' ? null
+    : parseInt(destination.match(/^sprint-(\d+)/)?.[1] || '0', 10);
 
   // Optimistic update: update local data
   for (const num of issueNums) {
     const iss = _smgmtData?.issues.find(i => i.number === num);
-    if (iss) iss.sprint = sprintNum;
+    if (iss) {
+      iss.sprint = sprintNum;
+      iss.sprint_label = destination === 'backlog' ? null : destination;
+    }
   }
   smgmtRender();
 
   // API calls — fire in parallel
+  const apiBodyForDest = isDottedDest || destination === 'backlog'
+    ? (num) => ({ issue: num, sprint_label: destination === 'backlog' ? null : destination })
+    : (num) => ({ issue: num, sprint: sprintNum });
   const failures = [];
   await Promise.all(issueNums.map(async num => {
     try {
       const res = await fetch('/api/sprint-planning/assign', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ issue: num, sprint: sprintNum }),
+        body: JSON.stringify(apiBodyForDest(num)),
       });
       if (!res.ok) throw new Error(await res.text());
     } catch (e) {
@@ -4229,7 +4547,82 @@ async function smgmtBulkMoveToConfirm() {
 // Clear selection when navigating away from sprint-mgmt tab
 function smgmtClearSelectionOnNav() {
   _smgmtSelectedIssues.clear();
+  _smgmtLastClickedIssue = null;
   _smgmtUpdateSelectionUI();
+}
+
+// ── Multi-select click / keyboard / drag helpers (issue #363) ─────────────────
+
+function smgmtTicketClick(event, issueNum) {
+  if (event.target.classList.contains('smgmt-ticket-cb') ||
+      event.target.closest('a') ||
+      event.target.closest('button')) return;
+
+  if (event.shiftKey && _smgmtLastClickedIssue !== null) {
+    event.preventDefault();
+    smgmtRangeSelect(_smgmtLastClickedIssue, issueNum);
+  } else if (event.ctrlKey || event.metaKey) {
+    event.preventDefault();
+    const nowSelected = !_smgmtSelectedIssues.has(issueNum);
+    smgmtToggleIssueSelect(issueNum, nowSelected);
+    _smgmtLastClickedIssue = issueNum;
+  } else {
+    _smgmtLastClickedIssue = issueNum;
+  }
+}
+
+function smgmtRangeSelect(fromIssue, toIssue) {
+  const allRows = [...document.querySelectorAll('#smgmt-backlog-tickets .smgmt-ticket, #smgmt-body .smgmt-ticket')];
+  const nums = allRows.map(r => parseInt(r.dataset.issue, 10));
+  const fromIdx = nums.indexOf(fromIssue);
+  const toIdx   = nums.indexOf(toIssue);
+  if (fromIdx === -1 || toIdx === -1) return;
+  const start = Math.min(fromIdx, toIdx);
+  const end   = Math.max(fromIdx, toIdx);
+  for (let i = start; i <= end; i++) {
+    _smgmtSelectedIssues.add(nums[i]);
+    const cb = allRows[i].querySelector('.smgmt-ticket-cb');
+    if (cb) cb.checked = true;
+    allRows[i].classList.add('is-selected');
+  }
+  _smgmtUpdateSelectionUI();
+}
+
+function smgmtTicketKeyDown(event, issueNum) {
+  if (!event.shiftKey || (event.key !== 'ArrowDown' && event.key !== 'ArrowUp')) return;
+  const allRows = [...document.querySelectorAll('#smgmt-backlog-tickets .smgmt-ticket, #smgmt-body .smgmt-ticket')];
+  const nums = allRows.map(r => parseInt(r.dataset.issue, 10));
+  const idx = nums.indexOf(issueNum);
+  if (idx === -1) return;
+  const targetIdx = event.key === 'ArrowDown' ? idx + 1 : idx - 1;
+  if (targetIdx < 0 || targetIdx >= nums.length) return;
+  event.preventDefault();
+  _smgmtSelectedIssues.add(issueNum);
+  _smgmtSelectedIssues.add(nums[targetIdx]);
+  allRows[idx].classList.add('is-selected');
+  const cb1 = allRows[idx].querySelector('.smgmt-ticket-cb');
+  if (cb1) cb1.checked = true;
+  allRows[targetIdx].classList.add('is-selected');
+  const cb2 = allRows[targetIdx].querySelector('.smgmt-ticket-cb');
+  if (cb2) cb2.checked = true;
+  _smgmtLastClickedIssue = nums[targetIdx];
+  allRows[targetIdx].focus();
+  _smgmtUpdateSelectionUI();
+}
+
+function smgmtContainerClick(event) {
+  if (!event.target.closest('.smgmt-ticket') && _smgmtSelectedIssues.size > 0) {
+    smgmtClearSelection();
+  }
+}
+
+function _smgmtSetMultiDragGhost(event, count) {
+  const ghost = document.createElement('div');
+  ghost.className = 'smgmt-multi-drag-ghost';
+  ghost.textContent = `${count} tickets`;
+  document.body.appendChild(ghost);
+  event.dataTransfer.setDragImage(ghost, 20, 20);
+  setTimeout(() => ghost.remove(), 0);
 }
 
 // ── Run sprint ────────────────────────────────────────────────────────────────
@@ -4247,16 +4640,25 @@ async function smgmtRunSprint(sprintLabel) {
   // issue #242: goal is no longer required to run a sprint
 
   // Determine target sprint number and gather earlier sprints for migration
-  const targetNum = parseInt(sprintLabel.split('-')[1], 10);
+  const [targetNum, targetSuffix] = (() => {
+    const m = sprintLabel.match(/^sprint-(\d+)(?:\.(\d+))?$/);
+    return m ? [parseInt(m[1], 10), m[2] ? parseInt(m[2], 10) : 0] : [0, 0];
+  })();
   const allIssues = _smgmtData?.issues || [];
   const earlierWithTickets = [];  // [ { sprintNum, sprintLabel, tickets: [] } ]
 
   const { order } = _smgmtData || {};
   if (order) {
     for (const lbl of order) {
-      const n = parseInt(lbl.split('-')[1], 10);
-      if (isNaN(n) || n >= targetNum) continue;
-      const tickets = allIssues.filter(t => t.sprint === n && t.status !== 'done');
+      const m = lbl.match(/^sprint-(\d+)(?:\.(\d+))?$/);
+      if (!m) continue;
+      const [n, s] = [parseInt(m[1], 10), m[2] ? parseInt(m[2], 10) : 0];
+      // Only show earlier plain sprints for migration (not sub-labels)
+      if (s !== 0 || n >= targetNum) continue;
+      const tickets = allIssues.filter(
+        t => (t.sprint_label || (t.sprint != null ? `sprint-${t.sprint}` : null)) === lbl
+             && t.status !== 'done'
+      );
       if (tickets.length > 0) {
         earlierWithTickets.push({ sprintNum: n, sprintLabel: lbl, tickets });
       }
@@ -4386,8 +4788,7 @@ function smgmtMigrateOpen(targetLabel, earlierSprints) {
   _smgmtMigrateTargetLabel = targetLabel;
   _smgmtMigrateChoices = {};
 
-  const targetNum = parseInt(targetLabel.split('-')[1], 10);
-  document.getElementById('smgmt-migrate-title').textContent = `Run Sprint ${targetNum}?`;
+  document.getElementById('smgmt-migrate-title').textContent = `Run ${sprintLabelDisplay(targetLabel)}?`;
 
   const bodyEl = document.getElementById('smgmt-migrate-body');
   let html = '';
@@ -4462,7 +4863,7 @@ async function smgmtMigrateConfirm() {
 }
 
 async function smgmtDispatchRun(sprintLabel, migrateFrom) {
-  const runBtnId = `smgmt-run-btn-${sprintLabel.replace('-', '_')}`;
+  const runBtnId = `smgmt-run-btn-${sprintLabel.replace(/-/g, '_').replace(/\./g, '_')}`;
   const btn = document.getElementById(runBtnId);
   if (btn) { btn.disabled = true; btn.textContent = 'Starting…'; }
 
@@ -4485,7 +4886,7 @@ async function smgmtDispatchRun(sprintLabel, migrateFrom) {
 
     if (data.migrated_count > 0) {
       const fromNums = (data.migrate_from || []).join(', ');
-      showSuccessToast(`Migrated ${data.migrated_count} ticket${data.migrated_count !== 1 ? 's' : ''} from Sprint ${fromNums} to Sprint ${sprintLabel.split('-')[1]}. Dispatching sprint…`);
+      showSuccessToast(`Migrated ${data.migrated_count} ticket${data.migrated_count !== 1 ? 's' : ''} from Sprint ${fromNums} to ${sprintLabelDisplay(sprintLabel)}. Dispatching sprint…`);
     } else {
       showSuccessToast('Sprint dispatched. Watching for progress...');
     }
@@ -4597,9 +4998,9 @@ function smgmtApplyRunState(sprintStatusMap) {
       goalInput.classList.remove('smgmt-goal-readonly');
     }
     // Restore delete button
-    const blockId = block.id; // "smgmt-block-sprint-N"
+    const blockId = block.id; // "smgmt-block-sprint-N" or "smgmt-block-sprint-N.X"
     const blockLabel = blockId.replace('smgmt-block-', '');
-    const safeLabel = blockLabel.replace(/-/g, '_');
+    const safeLabel = blockLabel.replace(/-/g, '_').replace(/\./g, '_');
     const deleteBtn = document.getElementById(`smgmt-delete-btn-${safeLabel}`);
     if (deleteBtn) {
       deleteBtn.disabled = false;
@@ -4616,7 +5017,7 @@ function smgmtApplyRunState(sprintStatusMap) {
     const { project: runProj, sprint_label: runLabel } = entry;
     if (runProj !== _smgmtCurrentRepo) continue;  // not the currently viewed project
 
-    const safeLabel = runLabel.replace(/-/g, '_');
+    const safeLabel = runLabel.replace(/-/g, '_').replace(/\./g, '_');
     const block = document.getElementById(`smgmt-block-${runLabel}`);
     if (!block) continue;
 
@@ -5282,7 +5683,7 @@ async function smgmtRerunSprint(label) {
   if (!_smgmtCurrentRepo) return;
 
   _smgmtRerunLabel = label;
-  document.getElementById('smgmt-rerun-title').textContent = `Re-run Sprint ${label}?`;
+  document.getElementById('smgmt-rerun-title').textContent = `Re-run ${sprintLabelDisplay(label)}?`;
 
   const bodyEl = document.getElementById('smgmt-rerun-body');
   bodyEl.innerHTML = '<p style="color:var(--text-muted);padding:8px 0;">Loading preview…</p>';
@@ -5330,13 +5731,17 @@ async function smgmtRerunSprint(label) {
       </div>`);
     }
 
+    const isNoop = preview.redispatch_count === 0 && preview.tester_count === 0 && preview.skip_count > 0;
     if (rows.length === 0) {
       bodyEl.innerHTML = '<em style="color:var(--text-muted)">No tickets in this sprint.</em>';
+      if (confirmBtn) { confirmBtn.disabled = true; }
     } else {
+      if (isNoop) {
+        rows.unshift('<p style="color:var(--amber,#d97706);padding-bottom:6px">All tickets are in UAT — nothing to re-run. Confirming will return a no-op.</p>');
+      }
       bodyEl.innerHTML = rows.join('');
+      if (confirmBtn) { confirmBtn.disabled = false; }
     }
-
-    if (confirmBtn) { confirmBtn.disabled = false; }
   } catch (e) {
     clearTimeout(_rerunPreviewTimeout);
     const msg = e.name === 'AbortError'
@@ -5381,7 +5786,12 @@ async function smgmtRerunConfirm() {
       if (coderCount) parts.push(`${coderCount} coding`);
       if (testerCount) parts.push(`${testerCount} testing`);
       if (skipCount) parts.push(`${skipCount} skipped`);
-      showSuccessToast(`Re-run started: ${parts.join(', ') || '0 dispatched'}.`);
+      if (data.noop) {
+        showSuccessToast(data.message || 'Nothing to re-run — all tickets are in UAT.');
+      } else {
+        const subLabel = data.sub_label ? ` → ${sprintLabelDisplay(data.sub_label)}` : '';
+        showSuccessToast(`Re-run started${subLabel}: ${parts.join(', ') || '0 dispatched'}.`);
+      }
     }
 
     await smgmtSelectProject(_smgmtCurrentRepo);
@@ -5398,15 +5808,15 @@ let _smgmtFinishLabel = null;
 function smgmtFinishSprint(label) {
   if (!_smgmtCurrentRepo || !_smgmtData) return;
   _smgmtFinishLabel = label;
-  const n = parseInt(label.split('-')[1], 10);
+  const displayName = sprintLabelDisplay(label);
 
   // Count open issues in this sprint (from current data)
   const sprintTickets = (_smgmtData.issues || []).filter(
-    t => t.sprint != null && `sprint-${t.sprint}` === label
+    t => (t.sprint_label || (t.sprint != null ? `sprint-${t.sprint}` : null)) === label
   );
   const openCount = sprintTickets.length;
 
-  document.getElementById('smgmt-finish-title').textContent = `Finish Sprint ${n}?`;
+  document.getElementById('smgmt-finish-title').textContent = `Finish ${displayName}?`;
   const bodyEl = document.getElementById('smgmt-finish-body');
   if (openCount === 0) {
     bodyEl.innerHTML = '<em style="color:var(--text-muted)">No open issues in this sprint. The operation will succeed with 0 closures.</em>';
@@ -5427,34 +5837,48 @@ function smgmtFinishClose() {
   _smgmtFinishLabel = null;
 }
 
+function _smgmtFinishShowLoading() {
+  const overlay = document.getElementById('smgmt-finish-loading-overlay');
+  if (overlay) overlay.classList.remove('hidden');
+}
+
+function _smgmtFinishHideLoading() {
+  const overlay = document.getElementById('smgmt-finish-loading-overlay');
+  if (overlay) overlay.classList.add('hidden');
+}
+
 async function smgmtFinishConfirm() {
   if (!_smgmtFinishLabel || !_smgmtCurrentRepo) return;
-  const confirmBtn = document.getElementById('smgmt-finish-confirm');
-  if (confirmBtn) { confirmBtn.disabled = true; confirmBtn.textContent = 'Finishing…'; }
 
-  // Parse owner/repo from _smgmtCurrentRepo ("owner/repo")
+  const label = _smgmtFinishLabel;
+  smgmtFinishClose();
+  _smgmtFinishShowLoading();
+
   const parts = _smgmtCurrentRepo.split('/');
   const owner = parts[0];
   const repoName = parts.slice(1).join('/');
 
   try {
     const res = await fetch(
-      `/api/projects/${encodeURIComponent(owner)}/${encodeURIComponent(repoName)}/sprints/${encodeURIComponent(_smgmtFinishLabel)}/finish`,
+      `/api/projects/${encodeURIComponent(owner)}/${encodeURIComponent(repoName)}/sprints/${encodeURIComponent(label)}/finish`,
       { method: 'POST' }
     );
     const data = await res.json();
-    smgmtFinishClose();
+    _smgmtFinishHideLoading();
 
+    const mr = data.merge_result || {};
     if (data.errors && data.errors.length > 0) {
       smgmtShowError(`Closed ${data.closed} issue${data.closed !== 1 ? 's' : ''}; ${data.errors.length} error${data.errors.length !== 1 ? 's' : ''}: ${data.errors.join('; ')}`);
     } else {
-      showSuccessToast(`Sprint finished — ${data.closed} issue${data.closed !== 1 ? 's' : ''} moved to UAT and closed.`);
+      let msg = `Sprint finished — ${data.closed} issue${data.closed !== 1 ? 's' : ''} moved to UAT and closed.`;
+      if (mr.merged) msg += ` PR #${mr.pr_number} merged into develop.`;
+      showSuccessToast(msg);
     }
 
     await smgmtSelectProject(_smgmtCurrentRepo);
   } catch (e) {
+    _smgmtFinishHideLoading();
     smgmtShowError('Failed to finish sprint: ' + e.message);
-    if (confirmBtn) { confirmBtn.disabled = false; confirmBtn.textContent = 'Finish Sprint'; }
   }
 }
 
@@ -5509,16 +5933,16 @@ let _smgmtDeleteLabel = null;
 function smgmtDeleteSprint(label) {
   if (!_smgmtCurrentRepo || !_smgmtData) return;
   _smgmtDeleteLabel = label;
-  const n = parseInt(label.split('-')[1], 10);
+  const displayName = sprintLabelDisplay(label);
   const sprintTickets = (_smgmtData.issues || []).filter(
-    t => t.sprint != null && `sprint-${t.sprint}` === label
+    t => (t.sprint_label || (t.sprint != null ? `sprint-${t.sprint}` : null)) === label
   );
-  document.getElementById('smgmt-delete-title').textContent = `Delete Sprint ${n}?`;
+  document.getElementById('smgmt-delete-title').textContent = `Delete ${displayName}?`;
   const bodyEl = document.getElementById('smgmt-delete-body');
   const ticketCount = sprintTickets.length;
   bodyEl.innerHTML = ticketCount > 0
-    ? `<p>This will delete the <strong>sprint-${n}</strong> GitHub label and remove it from <strong>${ticketCount} ticket${ticketCount !== 1 ? 's' : ''}</strong>. The tickets themselves are not deleted.</p>`
-    : `<p>This will delete the <strong>sprint-${n}</strong> GitHub label. No tickets are attached to this sprint.</p>`;
+    ? `<p>This will delete the <strong>${label}</strong> GitHub label and remove it from <strong>${ticketCount} ticket${ticketCount !== 1 ? 's' : ''}</strong>. The tickets themselves are not deleted.</p>`
+    : `<p>This will delete the <strong>${label}</strong> GitHub label. No tickets are attached to this sprint.</p>`;
   const confirmBtn = document.getElementById('smgmt-delete-confirm');
   if (confirmBtn) { confirmBtn.disabled = false; confirmBtn.textContent = 'Delete sprint'; }
   document.getElementById('smgmt-delete-backdrop').classList.remove('hidden');
@@ -6866,6 +7290,13 @@ function _bcConnectSSE(jobId) {
         _bcEventSource = null;
         localStorage.removeItem('bc_job_id');
         _bcJobId = null;
+        // Clear saved input when all tickets were created successfully so the
+        // recovery banner doesn't appear on the next modal open (issue #353)
+        const failed = (_bcJobState.tickets || []).filter(t => t.state === 'failed').length;
+        if (failed === 0) {
+          try { localStorage.removeItem('bc_last_input'); } catch (_) {}
+          _bcLastInput = null;
+        }
       }
     } catch (_) {}
   });
@@ -7204,7 +7635,10 @@ function bcRecreate() {
     try {
       const saved = localStorage.getItem('bc_last_input');
       if (saved) _bcLastInput = JSON.parse(saved);
-    } catch (_) {}
+    } catch (e) {
+      console.warn('[bcRecreate] Failed to parse bc_last_input from localStorage — data may be corrupted. Clearing entry.', e);
+      localStorage.removeItem('bc_last_input');
+    }
   }
 
   // Always hide the recovery banner when Recreate is used (data is about to be restored)
@@ -7238,6 +7672,12 @@ function bcRestoreLastInput() {
     const saved = localStorage.getItem('bc_last_input');
     if (!saved) return;
     const input = JSON.parse(saved);
+    if (!input.repo || typeof input.repo !== 'string' || !input.repo.trim() ||
+        !input.text || typeof input.text !== 'string' || !input.text.trim()) {
+      console.warn('[bcRestoreLastInput] bc_last_input missing required fields (repo, text) — clearing entry.');
+      localStorage.removeItem('bc_last_input');
+      return;
+    }
     _bcLastInput = input;
     const sel = document.getElementById('bc-repo');
     if (sel && input.repo) sel.value = input.repo;
@@ -7249,7 +7689,10 @@ function bcRestoreLastInput() {
     if (concEl) concEl.value = String(input.concurrency || 3);
     document.getElementById('bc-recovery-banner').classList.add('hidden');
     _bcUpdateCounter();
-  } catch (_) {}
+  } catch (e) {
+    console.warn('[bcRestoreLastInput] Failed to parse bc_last_input from localStorage — data may be corrupted. Clearing entry.', e);
+    localStorage.removeItem('bc_last_input');
+  }
 }
 
 // Dismiss recovery banner and clear saved inputs (issue #335)

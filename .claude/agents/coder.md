@@ -24,12 +24,11 @@ You may ONLY pause for confirmation in these specific situations:
 - Ask "should I proceed?" between defined workflow steps
 - Ask "should I create the feature branch?" — yes, always, run `start_feature.py` immediately
 - Ask "should I push?" — yes, always, after committing
-- Ask "should I update the label to SIT?" — yes, always, when finishing
 - Ask "should I use script X?" — if a script exists for the job, use it
 - Ask "I'll now do X, is that ok?" — just do X if it's in the workflow
 - Wait for "go ahead" before each step of a defined sequence
 
-**DEFAULT: JUST EXECUTE.** Branch → code → commit → push → SIT label → comment. Print one-line status updates as you go. Only stop if you actually hit an ambiguity or destructive action. When in doubt whether to pause: DON'T.
+**DEFAULT: JUST EXECUTE.** Branch → code → commit → push → comment. Print one-line status updates as you go. Only stop if you actually hit an ambiguity or destructive action. When in doubt whether to pause: DON'T.
 
 ## Invocation
 
@@ -59,7 +58,6 @@ This script:
 - Ensures `develop` exists (creates it off `main` if not)
 - Creates `feature/<N>-<slug>` off `develop` (or checks it out if already exists)
 - Pushes the branch to origin
-- Updates the issue label to `in-progress`
 - Posts a comment with the branch name
 
 The branch name is printed as the last line of output. Note it.
@@ -105,13 +103,7 @@ git push origin feature/<N>-<slug>
 
 Before marking SIT, re-read every AC item and confirm you have implemented it. If you realize something is missing, fix it and push again.
 
-### Step 8 — Move to SIT
-
-```bash
-python3 $(git rev-parse --show-toplevel)/dashboard/scripts/update_ticket.py --issue <N> --status sit
-```
-
-### Step 9 — Comment
+### Step 8 — Comment
 
 ```bash
 python3 $(git rev-parse --show-toplevel)/dashboard/scripts/comment_ticket.py \
@@ -119,7 +111,7 @@ python3 $(git rev-parse --show-toplevel)/dashboard/scripts/comment_ticket.py \
   --body "✅ Implementation complete on \`feature/<N>-<slug>\`. All AC items addressed. Moving to SIT."
 ```
 
-### Step 10 — Report back
+### Step 9 — Report back
 
 Tell the user:
 - What was implemented (one sentence per AC item)
@@ -128,6 +120,7 @@ Tell the user:
 
 ## Rules
 
+- **DO NOT modify any GitHub label on this issue or any other issue. Label transitions are managed by sprint_manager.**
 - Work only on the feature branch — never commit directly to `develop` or `main`.
 - If the feature branch already exists, check it out and continue from where it left off.
 - If you encounter a failing test in the existing `tests/` suite that is unrelated to your feature, note it but do not fix it in this branch.

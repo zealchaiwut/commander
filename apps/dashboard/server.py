@@ -2453,6 +2453,9 @@ _SUMMARY_TITLE_RE = re.compile(r"^Sprint \d+(\.\d+)?\s+Executive Summary$")
 _REPO_ROOT = Path(__file__).parent.parent.parent
 SPRINT_MANAGER_PATH = _REPO_ROOT / "services" / "sprint_manager" / "sprint_manager.py"
 SPRINT_LOG_PATH = Path(__file__).parent / "sprints" / "sprint_run.log"
+# Read once; default covers both dashboard banner and ntfy push notifications.
+# sprint_manager validates the value — no validation added here.
+_ALERT_MODES = os.environ.get("COMMANDER_ALERT_MODES", "dashboard_banner,ntfy")
 
 
 def _sprint_label_sort_key(label: str) -> tuple[int, int]:
@@ -2497,6 +2500,7 @@ def run_sprint(body: SprintRunBody):
     cmd = [sys.executable, str(SPRINT_MANAGER_PATH), body.label]
     if body.budget is not None:
         cmd += [f"--budget={body.budget}"]
+    cmd += ["--alert-mode", _ALERT_MODES]
 
     subprocess.Popen(
         cmd,
@@ -3209,7 +3213,8 @@ def run_sprint_managed(body: SprintMgmtRunBody):
     log_fh = open(log_path, "w")
     try:
         proc = subprocess.Popen(
-            [sys.executable, str(SPRINT_MANAGER_PATH), body.sprint_label, "--skip-gates"],
+            [sys.executable, str(SPRINT_MANAGER_PATH), body.sprint_label, "--skip-gates",
+             "--alert-mode", _ALERT_MODES],
             env=stripped_env,
             cwd=str(coder_path),
             stdout=log_fh,
@@ -4741,6 +4746,7 @@ def rerun_sprint(sprint_label: str, project: str, body: SprintRerunBody):
             [
                 sys.executable, str(SPRINT_MANAGER_PATH), sub_label,
                 "--skip-gates", "--rerun-manifest", str(manifest_path),
+                "--alert-mode", _ALERT_MODES,
             ],
             env=stripped_env,
             cwd=str(coder_path),

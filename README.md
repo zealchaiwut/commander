@@ -180,11 +180,13 @@ an agent reports an error.
 
 1. Install the ntfy app on your iPad or phone.
 2. Choose a unique topic name (e.g. `commander-yourname`).
-3. Set `NTFY_TOPIC=<your-topic>` in `apps/dashboard/.env`.
-4. Send a test notification to confirm delivery:
+3. In the ntfy app, subscribe using the URL: `https://ntfy.sh/<your-topic>`
+4. Set `NTFY_TOPIC=<your-topic>` in `apps/dashboard/.env`.
+5. Send a test notification to confirm delivery:
    ```bash
    curl -d "Commander test" ntfy.sh/<your-topic>
    ```
+   Expected: a notification appears on your iPad or phone within a few seconds.
 
 > Self-hosted ntfy setup is out of scope. Use the public ntfy.sh service for simplicity.
 

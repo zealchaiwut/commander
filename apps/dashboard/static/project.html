@@ -2877,16 +2877,16 @@ function updateProjectHeader(proj) {
 async function updateSidebarFooter() {
   const footer = document.getElementById('sidebar-footer');
   if (!footer) return;
-  const host = window.location.host;
   try {
     const resp = await fetch('/api/version', { cache: 'no-store' });
     if (resp.ok) {
       const data = await resp.json();
-      footer.textContent = `v${data.version} · ${host} · build ${data.build}`;
+      const sha = data.git_sha && data.git_sha !== 'unknown' ? data.git_sha.slice(0, 7) : 'unknown';
+      footer.textContent = `v ${data.branch}@${sha} built ${data.build_timestamp}`;
       return;
     }
   } catch (_) { /* fall through */ }
-  footer.textContent = `v— · ${host}`;
+  footer.textContent = 'v unknown';
 }
 
 // ── Load home data ────────────────────────────────────────────────────────────

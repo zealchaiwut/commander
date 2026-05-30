@@ -117,9 +117,10 @@ def _capture_git_value(cmd: list) -> str:
         return "unknown"
 
 
-_GIT_SHA: str = _capture_git_value(["git", "rev-parse", "--short", "HEAD"])
+_GIT_SHA: str = _capture_git_value(["git", "rev-parse", "HEAD"])
 _GIT_BRANCH: str = _capture_git_value(["git", "rev-parse", "--abbrev-ref", "HEAD"])
 _STARTED_AT: str = datetime.now(timezone.utc).isoformat()
+_BUILD_TIMESTAMP: str = _STARTED_AT
 
 
 # ── Build hash (cache-busting) ─────────────────────────────────────────────────
@@ -931,22 +932,20 @@ def get_environment():
 
 @app.get("/api/version")
 def get_version():
-    """Return build metadata for the running process (issue #329).
+    """Return build metadata for the running process (issue #421).
 
     Response shape:
     {
-      "version": "1.0",
-      "git_sha": "abc1234",
+      "git_sha": "<full-commit-hash>",
       "branch": "main",
-      "started_at": "2026-05-29T12:00:00+00:00"
+      "build_timestamp": "2026-05-30T12:00:00+00:00"
     }
     """
     return JSONResponse(
         content={
-            "version": _APP_VERSION,
-            "git_sha": _GIT_SHA[:7] if _GIT_SHA != "unknown" else "unknown",
+            "git_sha": _GIT_SHA,
             "branch": _GIT_BRANCH,
-            "started_at": _STARTED_AT,
+            "build_timestamp": _BUILD_TIMESTAMP,
         },
         headers={"Cache-Control": "no-cache, must-revalidate"},
     )

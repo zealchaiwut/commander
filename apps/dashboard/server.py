@@ -4531,7 +4531,7 @@ def rerun_sprint_preview(sprint_label: str, project: str):
     """Return per-ticket rerun preview counts without executing anything.
 
     Response schema:
-      { redispatch_count, tester_count, skip_count, by_ticket: [
+      { new_label, redispatch_count, tester_count, skip_count, by_ticket: [
           { issue_num, issue_title, action }  # action: dispatch_coder|dispatch_tester|skip
         ]
       }
@@ -4569,7 +4569,11 @@ def rerun_sprint_preview(sprint_label: str, project: str):
             "action": action,
         })
 
+    existing_label_names = {lbl["name"] for lbl in github_client.list_labels(repo_name=project)}
+    new_label = _next_sprint_sublabel(sprint_label, existing_label_names)
+
     return {
+        "new_label": new_label,
         "redispatch_count": redispatch_count,
         "tester_count": tester_count,
         "skip_count": skip_count,

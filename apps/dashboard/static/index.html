@@ -1720,19 +1720,19 @@
   </div>
 </div>
 
-<!-- Kill sprint confirmation modal -->
+<!-- Stop process confirmation modal -->
 <div class="modal-backdrop hidden" id="smgmt-kill-backdrop" onclick="smgmtKillClose()"></div>
 <div class="modal hidden" id="smgmt-kill-modal" role="dialog" aria-modal="true">
   <div class="modal-header">
-    <span class="modal-title">Kill Sprint?</span>
+    <span class="modal-title">Stop Process?</span>
     <button class="modal-close" onclick="smgmtKillClose()" aria-label="Close">&times;</button>
   </div>
   <div style="padding: 0 4px 8px; font-size: 13px; color: var(--text-muted);">
-    Are you sure? This will SIGTERM then SIGKILL the sprint subprocess.
+    Are you sure? This will SIGTERM then SIGKILL the sprint process by PID.
   </div>
   <div class="modal-footer">
     <button class="btn-ghost" onclick="smgmtKillClose()">Cancel</button>
-    <button class="btn-danger" id="smgmt-kill-confirm" onclick="smgmtKillConfirm()">Yes, kill it</button>
+    <button class="btn-danger" id="smgmt-kill-confirm" onclick="smgmtKillConfirm()">Yes, stop it</button>
   </div>
 </div>
 
@@ -2294,15 +2294,15 @@
   .smgmt-finish-body p + p { margin-top: 8px; }
 
   /* Cancel sprint button (replaces Run/Kill on the running card) */
-  .smgmt-kill-btn {
+  .smgmt-stop-btn {
     padding: 4px 10px; font-size: 11px; font-weight: 600;
     background: var(--surface); color: var(--red);
     border: 1px solid var(--red); border-radius: 5px;
     cursor: pointer; flex-shrink: 0; transition: all .15s;
     display: flex; align-items: center; gap: 4px;
   }
-  .smgmt-kill-btn:hover { background: var(--red); color: #fff; }
-  .smgmt-kill-btn:focus-visible { outline: 2px solid var(--red); outline-offset: 2px; }
+  .smgmt-stop-btn:hover { background: var(--red); color: #fff; }
+  .smgmt-stop-btn:focus-visible { outline: 2px solid var(--red); outline-offset: 2px; }
 
   /* Running sprint card state — green border + glow + animated top stripe */
   .smgmt-sprint-block.smgmt-running {

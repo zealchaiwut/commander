@@ -2709,8 +2709,8 @@ let _smgmtData           = null;   // { sprints, order, issues, empty_sprint_lab
 let _smgmtDragSprint     = null;   // sprint label currently being drag-reordered
 let _smgmtDragTicket     = null;   // { number, fromSprint } being dragged
 // Per-#123: replaced single _smgmtRunningInfo with a map of ALL running sprints:
-//   key = "project:sprint_label", value = { project, sprint_label }
-let _smgmtAllRunning     = {};     // map: "project:sprint_label" -> {project, sprint_label}
+//   key = "project:sprint_label", value = { project, sprint_label, pid }
+let _smgmtAllRunning     = {};     // map: "project:sprint_label" -> {project, sprint_label, pid}
 let _smgmtPollTimer      = null;
 let _smgmtGoals          = {};     // sprint_label -> goal string
 let _smgmtGoalSaveTimers = {};     // sprint_label -> debounce timer id
@@ -5388,7 +5388,7 @@ function smgmtApplyRunState(sprintStatusMap) {
       hdr.setAttribute('draggable', 'true');
     }
     // Remove injected running elements (badge, progress section, kill btn)
-    block.querySelectorAll('.smgmt-running-badge, .smgmt-progress-text, .smgmt-kill-btn, .smgmt-progress-section').forEach(el => el.remove());
+    block.querySelectorAll('.smgmt-running-badge, .smgmt-progress-text, .smgmt-stop-btn, .smgmt-progress-section').forEach(el => el.remove());
     // Remove status circles injected on ticket rows
     block.querySelectorAll('.smgmt-ticket-status-circle, .smgmt-agent-pill, .smgmt-ticket-elapsed-time').forEach(el => el.remove());
     // Remove running/pending/done classes from ticket rows
@@ -5424,7 +5424,7 @@ function smgmtApplyRunState(sprintStatusMap) {
 
   // ── Pass 2: Apply RUNNING state to each running sprint in this project ────────
   for (const [key, entry] of Object.entries(_smgmtAllRunning)) {
-    const { project: runProj, sprint_label: runLabel } = entry;
+    const { project: runProj, sprint_label: runLabel, pid: runPid } = entry;
     if (runProj !== _smgmtCurrentRepo) continue;  // not the currently viewed project
 
     const safeLabel = runLabel.replace(/-/g, '_').replace(/\./g, '_');
@@ -5487,12 +5487,18 @@ function smgmtApplyRunState(sprintStatusMap) {
     if (deleteBtn2) deleteBtn2.style.display = 'none';
 
     const hdrRight = hdr.querySelector('.smgmt-sprint-header-right') || hdr;
-    // Only add one Cancel button (guard against double-apply)
-    if (!hdrRight.querySelector('.smgmt-kill-btn')) {
+    // Only add one Stop button (guard against double-apply)
+    if (!hdrRight.querySelector('.smgmt-stop-btn')) {
       const killBtn = document.createElement('button');
-      killBtn.className = 'smgmt-kill-btn';
-      killBtn.innerHTML = '<i class="ti ti-player-stop-filled"></i> Cancel sprint';
-      killBtn.onclick = () => smgmtKillSprint(runLabel);
+      killBtn.className = 'smgmt-stop-btn';
+      if (runPid) {
+        killBtn.innerHTML = '<i class="ti ti-player-stop-filled"></i> Stop Process';
+        killBtn.onclick = () => smgmtKillSprint(runLabel);
+      } else {
+        killBtn.innerHTML = '<i class="ti ti-player-stop-filled"></i> Stop Process';
+        killBtn.disabled = true;
+        killBtn.title = 'No process running';
+      }
       hdrRight.appendChild(killBtn);
     }
 
@@ -5950,7 +5956,7 @@ function _smgmtShowStallWarning(sprintLabel) {
 
   const cancelBtn = document.createElement('button');
   cancelBtn.className = 'smgmt-stall-btn smgmt-stall-btn-cancel';
-  cancelBtn.textContent = 'Cancel sprint';
+  cancelBtn.textContent = 'Stop Process';
   cancelBtn.addEventListener('click', async (e) => {
     e.stopPropagation();
     if (!_smgmtCurrentRepo) return;
@@ -6304,14 +6310,14 @@ async function smgmtFinishConfirm() {
   }
 }
 
-// ── Kill sprint ───────────────────────────────────────────────────────────────
+// ── Stop process (PID-based termination) ─────────────────────────────────────
 
 let _smgmtKillLabel = null;
 
 function smgmtKillSprint(label) {
   _smgmtKillLabel = label;
   const confirmBtn = document.getElementById('smgmt-kill-confirm');
-  if (confirmBtn) { confirmBtn.disabled = false; confirmBtn.textContent = 'Yes, kill it'; }
+  if (confirmBtn) { confirmBtn.disabled = false; confirmBtn.textContent = 'Yes, stop it'; }
   document.getElementById('smgmt-kill-backdrop').classList.remove('hidden');
   document.getElementById('smgmt-kill-modal').classList.remove('hidden');
 }
@@ -6325,7 +6331,7 @@ function smgmtKillClose() {
 async function smgmtKillConfirm() {
   if (!_smgmtKillLabel || !_smgmtCurrentRepo) return;
   const confirmBtn = document.getElementById('smgmt-kill-confirm');
-  if (confirmBtn) { confirmBtn.disabled = true; confirmBtn.textContent = 'Killing…'; }
+  if (confirmBtn) { confirmBtn.disabled = true; confirmBtn.textContent = 'Stopping…'; }
 
   try {
     const res = await fetch(
@@ -6340,11 +6346,11 @@ async function smgmtKillConfirm() {
     smgmtApplyRunState(null);
     _updateRunningBanner();
     _updateOverviewRunningBadges();
-    showSuccessToast('Sprint killed. Run button restored.');
+    showSuccessToast('Process stopped. Run button restored.');
     await smgmtSelectProject(_smgmtCurrentRepo);
   } catch (e) {
-    smgmtShowError('Failed to kill sprint: ' + e.message);
-    if (confirmBtn) { confirmBtn.disabled = false; confirmBtn.textContent = 'Yes, kill it'; }
+    smgmtShowError('Failed to stop process: ' + e.message);
+    if (confirmBtn) { confirmBtn.disabled = false; confirmBtn.textContent = 'Yes, stop it'; }
   }
 }
 

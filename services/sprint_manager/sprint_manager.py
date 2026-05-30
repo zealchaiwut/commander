@@ -1251,6 +1251,12 @@ def _was_feature_merged_via_log(issue_num: int, target: str) -> bool:
     finish_feature.py creates commits of the form:
         "Merge feature/<N>-<slug> into <target> (issue #<N>)"
     so we search the recent merge history of the target for that pattern.
+
+    Case-sensitivity note: ``git log --grep`` is case-sensitive by default.
+    The ``issue #<N>`` grep is unaffected (numerics don't vary in case).
+    The branch-name grep uses ``--regexp-ignore-case`` so that unusual branch
+    prefixes (e.g. ``Feature/`` instead of ``feature/``) are still matched,
+    even though project convention requires lowercase kebab-case branch names.
     """
     target_ref = f"origin/{target}"
     ok, _, _ = _try("git", "rev-parse", "--verify", target_ref)
@@ -1265,10 +1271,11 @@ def _was_feature_merged_via_log(issue_num: int, target: str) -> bool:
     if ok and out.strip():
         return True
 
-    # Also match branch name directly (covers non-standard merge messages)
+    # Also match branch name directly (covers non-standard merge messages).
+    # --regexp-ignore-case guards against uppercase branch prefixes.
     ok, out, _ = _try(
         "git", "log", target_ref, "--merges", "--oneline",
-        f"--grep=feature/{issue_num}-", "-1",
+        "--regexp-ignore-case", f"--grep=feature/{issue_num}-", "-1",
     )
     return ok and bool(out.strip())
 

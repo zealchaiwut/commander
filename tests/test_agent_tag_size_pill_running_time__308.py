@@ -268,18 +268,19 @@ class TestAC6SizeMinutesConstant:
         assert "M:" in body or "M :" in body
         assert "L:" in body or "L :" in body
         assert "XL:" in body or "XL :" in body
-        assert "7" in body
+        # Values must match sizing.py SIZE_TO_MINUTES: S=5, M=15, L=30, XL=60
+        assert "5" in body
         assert "15" in body
-        assert "25" in body
-        assert "40" in body
+        assert "30" in body
+        assert "60" in body
 
-    def test_size_minutes_has_placeholder_comment(self):
-        # The comment must appear near the SIZE_MINUTES constant
+    def test_size_minutes_has_design_comment(self):
+        # A comment near SIZE_MINUTES must indicate it references sizing.py or is hardcoded by design
         idx = _HTML.find("const SIZE_MINUTES")
         assert idx != -1, "SIZE_MINUTES not found"
         surrounding = _HTML[max(0, idx - 200): idx + 300]
-        assert "placeholder" in surrounding.lower() or "configurable" in surrounding.lower(), \
-            "No placeholder comment found near SIZE_MINUTES"
+        assert "sizing.py" in surrounding or "hardcoded" in surrounding.lower() or "design" in surrounding.lower(), \
+            "No design-intent comment found near SIZE_MINUTES"
 
     def test_size_minutes_not_used_in_display_logic(self):
         # SIZE_MINUTES must not appear in render/display functions for this ticket

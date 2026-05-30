@@ -14,7 +14,7 @@ Agents may ONLY pause for confirmation for: (1) ambiguous requirements where a w
 Commander is:
 - A FastAPI web dashboard that tracks Claude Code agents in real time
 - - A GitHub Issues-based sprint board (BA → Coder → Tester → UAT flow)
-- - Mobile-accessible via Tailscale
+- - Mobile-accessible via Tailscale (device enrolled with `tailscale up`, macOS Application Firewall configured to block direct connections to port 8000 so only Tailscale-routed traffic reaches the service)
 - - The repo is github.com/zealchaiwut/commander
 -
 - ## Tech Stack

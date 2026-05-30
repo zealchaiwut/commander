@@ -9,90 +9,91 @@ actionable for 90% of issues that come up at 3am in a foreign timezone.
 
 ## Pre-Travel Checklist
 
-Work through this list on the Mac mini the day before departure.
+Run these steps in order on the Mac mini the day before departure. Each step depends
+on the previous one — do not skip or reorder.
 
-### Mac mini stability
+1. **Prevent sleep on AC power.**
+   ```bash
+   sudo pmset -c sleep 0
+   ```
+   Verify: `pmset -g | grep " sleep"` shows `sleep 0` in the AC section.
 
-- [ ] Sleep disabled:
-  ```bash
-  sudo pmset -a disablesleep 1
-  ```
-  Verify: `pmset -g | grep disablesleep` should show `disablesleep 1`
+2. **Enable auto-login.**
+   System Settings → General → Login Items & Extensions → enable auto-login for your user account.
+   Required for launchd to start the service after a reboot without manual login.
 
-- [ ] Auto-login on boot enabled:
-  System Settings > General > Login Items & Extensions > enable auto-login for your user account.
+3. **Install and start the launchd service** (run from the PRD clone directory):
+   ```bash
+   bash scripts/install_launchd.sh
+   ```
 
-- [ ] launchd service installed and running:
-  ```bash
-  bash scripts/install_launchd.sh
-  launchctl list | grep commander
-  ```
-  Expected: a line with `com.commander.dashboard` and exit code `0`.
+4. **Verify the service is registered and running.**
+   ```bash
+   launchctl list | grep commander
+   ```
+   Expected: a line containing `com.commander.dashboard` with exit code `0`.
 
-### Network
+5. **Verify port 8000 is bound.**
+   ```bash
+   lsof -ti tcp:8000
+   ```
+   Expected: prints a PID. Empty output means nothing is listening — restart the service
+   with `launchctl kickstart -k gui/$(id -u)/com.commander.dashboard`.
 
-- [ ] Tailscale up on Mac mini:
-  ```bash
-  tailscale status
-  ```
-  Expected: your Mac mini appears in the peer list with a `100.x.x.x` address.
+6. **Verify Tailscale is enrolled and connected.**
+   ```bash
+   tailscale status
+   ```
+   Expected: Mac mini appears in the peer list with a `100.x.x.x` address and status `Connected`.
 
-- [ ] MagicDNS enabled in Tailscale admin console (`https://login.tailscale.com/admin/dns`).
+7. **Confirm MagicDNS is enabled** in the Tailscale admin console (`https://login.tailscale.com/admin/dns`).
 
-- [ ] Tailscale installed and logged in on iPad.
+8. **Confirm Tailscale is installed and logged in on iPad.**
 
-- [ ] **Critical:** tested dashboard access from iPad on **cellular** (disable WiFi before testing):
-  Open `http://<mac-mini>.tail-xxxx.ts.net:8000` in browser. Dashboard must load.
+9. **Enable SSH on Mac mini.**
+   System Settings → General → Sharing → Remote Login: On
 
-### SSH
+10. **Add iPad SSH key to `~/.ssh/authorized_keys` on Mac mini.**
+    ```bash
+    cat ~/.ssh/authorized_keys   # should contain your iPad's public key
+    ```
 
-- [ ] SSH enabled on Mac mini:
-  System Settings > General > Sharing > Remote Login: On
+11. **Verify SSH login from iPad over Tailscale** — do this on cellular (disable WiFi first):
+    ```
+    ssh <your-user>@<mac-mini>.tail-xxxx.ts.net
+    ```
 
-- [ ] SSH key from iPad terminal app (Blink or Termius) added to `~/.ssh/authorized_keys` on Mac mini:
-  ```bash
-  cat ~/.ssh/authorized_keys   # should contain your iPad's public key
-  ```
+12. **Verify dashboard access from iPad on cellular** (disable WiFi before testing):
+    Open `http://<mac-mini>.tail-xxxx.ts.net:8000` in browser. Dashboard must load.
 
-- [ ] Verified SSH login from iPad over Tailscale (on cellular, not local WiFi):
-  ```
-  ssh <your-user>@<mac-mini>.tail-xxxx.ts.net
-  ```
+13. **Verify GitHub auth is valid.**
+    ```bash
+    gh auth status
+    ```
+    Expected: `Logged in to github.com as zealchaiwut`
 
-### Auth tokens
+14. **Verify Claude Code auth is fresh.**
+    ```bash
+    claude --version
+    claude auth status
+    ```
 
-- [ ] GitHub auth is valid:
-  ```bash
-  gh auth status
-  ```
-  Expected: `Logged in to github.com as zealchaiwut`
+15. **Verify dashboard health.**
+    ```bash
+    curl -s http://localhost:8000/api/health | python3 -m json.tool
+    ```
+    Expected: `"status": "ok"`
 
-- [ ] Claude Code auth is fresh:
-  ```bash
-  claude --version
-  claude auth status
-  ```
+16. **Confirm backup gist is recent.**
+    ```bash
+    curl -s http://localhost:8000/api/backup/status
+    ```
+    Note the gist URL — save it in 1Password or a note on iPad.
 
-### Dashboard health
-
-- [ ] `/api/health` returns 200:
-  ```bash
-  curl -s http://localhost:8000/api/health | python3 -m json.tool
-  ```
-  Expected: `"status": "ok"`
-
-- [ ] Backup gist exists and is recent:
-  ```bash
-  curl -s http://localhost:8000/api/backup/status
-  ```
-  Note the gist URL — save it in 1Password or a note on iPad.
-
-### Sprint state
-
-- [ ] All in-flight sprints completed or cancelled. Do not leave a sprint mid-run.
-  ```bash
-  cat .commander/sprint.yaml
-  ```
+17. **Confirm no sprints are mid-run.** Do not leave a sprint in progress.
+    ```bash
+    cat .commander/sprint.yaml
+    ```
 
 ---
 
@@ -320,9 +321,6 @@ Not available when Mac is unreachable. Physical access is required.
 ```bash
 # Connect to Mac mini over Tailscale:
 ssh <your-user>@<mac-mini>.tail-xxxx.ts.net
-
-# Attach to the live tmux session:
-tmux attach -t commander
 
 # Follow the dashboard stdout log:
 tail -f ~/Library/Logs/commander-dashboard.out.log

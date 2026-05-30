@@ -35,6 +35,12 @@ import db
 import github_client
 import projects as projects_module
 
+# Structured event logging (services/logging.py at repo root)
+_REPO_ROOT = Path(__file__).parent.parent.parent
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+from services.logging import log as _slog
+
 # Backup module lives in services/sprint_manager/ — add it to sys.path
 import sys as _sys
 _SERVICES_DIR = Path(__file__).parent.parent.parent / "services" / "sprint_manager"
@@ -430,6 +436,14 @@ async def _periodic_orphan_sweep_loop() -> None:
 async def lifespan(app: FastAPI):
     global _start_time
     _start_time = time.monotonic()
+    _slog.event(
+        "server.startup",
+        project="dashboard",
+        request_id=str(uuid.uuid4()),
+        environment=ENVIRONMENT,
+        git_sha=_GIT_SHA,
+        git_branch=_GIT_BRANCH,
+    )
     db.init_db()
     _validate_github_repos()
     _sweep_orphan_pid_files()
@@ -471,6 +485,12 @@ logger = logging.getLogger(__name__)
 # ── API no-cache middleware (issue #249) ──────────────────────────────────────
 # Ensure all /api/* responses carry Cache-Control: no-cache so browsers and
 # proxies never serve stale API data on auto-refresh or manual refresh.
+
+@app.middleware("http")
+async def _attach_request_id(request: Request, call_next):
+    request.state.request_id = str(uuid.uuid4())
+    return await call_next(request)
+
 
 @app.middleware("http")
 async def add_api_no_cache_headers(request: Request, call_next):
@@ -742,7 +762,8 @@ async def broadcast(data: dict):
 # ── agent endpoints ───────────────────────────────────────────────────────────
 
 @app.get("/")
-async def root():
+async def root(request: Request):
+    _slog.event("route.entry", project="dashboard", request_id=request.state.request_id, route="/", method="GET")
     return _serve_html(STATIC_DIR / "home-preview.html")
 
 
@@ -819,13 +840,14 @@ async def project_slug_tab(slug: str, tab: str):
 
 
 @app.get("/api/health")
-async def health_check():
+async def health_check(request: Request):
     """GET /api/health — rich dependency health check (issue #229).
 
     Runs 6 checks concurrently: dashboard, database, github_auth, claude_code_auth,
     disk, stuck_sprints.  Response is cached 10 s.  Returns 200 for ok/degraded,
     503 for down.  No authentication required.
     """
+    _slog.event("route.entry", project="dashboard", request_id=request.state.request_id, route="/api/health", method="GET")
     global _health_cache
     now = time.monotonic()
     if _health_cache is not None:
@@ -949,7 +971,8 @@ def get_backup_status():
 
 
 @app.post("/api/agent-event")
-async def receive_event(event: AgentEvent):
+async def receive_event(request: Request, event: AgentEvent):
+    _slog.event("route.entry", project="dashboard", request_id=request.state.request_id, route="/api/agent-event", method="POST", event_type=event.event_type)
     db.upsert_agent(event.session_id, event.working_dir, event.status, event.tool_name, event.name)
     db.add_event(event.session_id, event.event_type, event.model_dump())
     await broadcast({"type": "update", "event": event.model_dump()})
@@ -1100,40 +1123,48 @@ def get_issues(sprint: Optional[int] = None):
 
 
 @app.post("/api/issues/{issue_id}/approve")
-def approve_issue(issue_id: int, repo: Optional[str] = None):
+def approve_issue(request: Request, issue_id: int, repo: Optional[str] = None):
+    _slog.event("route.entry", project="dashboard", request_id=request.state.request_id, route="/api/issues/{issue_id}/approve", method="POST", issue_id=issue_id)
     try:
         github_client.approve_issue(issue_id, repo_name=repo)
         return {"ok": True}
     except subprocess.CalledProcessError as e:
+        _slog.event("route.error", project="dashboard", request_id=request.state.request_id, route="/api/issues/{issue_id}/approve", level="error", issue_id=issue_id, error=str(e))
         raise _gh_error(e)
 
 
 @app.post("/api/tickets/{issue_id}/approve")
-async def approve_ticket(issue_id: int, repo: Optional[str] = None):
+async def approve_ticket(request: Request, issue_id: int, repo: Optional[str] = None):
     """Close a UAT-labelled ticket on GitHub and remove the UAT label."""
+    _slog.event("route.entry", project="dashboard", request_id=request.state.request_id, route="/api/tickets/{issue_id}/approve", method="POST", issue_id=issue_id)
     try:
         github_client.approve_issue(issue_id, repo_name=repo)
     except subprocess.CalledProcessError as e:
+        _slog.event("route.error", project="dashboard", request_id=request.state.request_id, route="/api/tickets/{issue_id}/approve", level="error", issue_id=issue_id, error=str(e))
         raise _gh_error(e)
     await broadcast({"type": "update", "event": {"event_type": "ticket_approved", "issue": issue_id}})
     return {"ok": True}
 
 
 @app.post("/api/issues/{issue_id}/reject")
-def reject_issue(issue_id: int, body: RejectBody, repo: Optional[str] = None):
+def reject_issue(request: Request, issue_id: int, body: RejectBody, repo: Optional[str] = None):
+    _slog.event("route.entry", project="dashboard", request_id=request.state.request_id, route="/api/issues/{issue_id}/reject", method="POST", issue_id=issue_id)
     try:
         github_client.reject_issue(issue_id, body.reason, repo_name=repo)
         return {"ok": True}
     except subprocess.CalledProcessError as e:
+        _slog.event("route.error", project="dashboard", request_id=request.state.request_id, route="/api/issues/{issue_id}/reject", level="error", issue_id=issue_id, error=str(e))
         raise _gh_error(e)
 
 
 @app.post("/api/issues/{issue_id}/close")
-def close_issue_endpoint(issue_id: int, repo: Optional[str] = None):
+def close_issue_endpoint(request: Request, issue_id: int, repo: Optional[str] = None):
+    _slog.event("route.entry", project="dashboard", request_id=request.state.request_id, route="/api/issues/{issue_id}/close", method="POST", issue_id=issue_id)
     try:
         github_client.close_issue(issue_id, repo_name=repo)
         return {"ok": True}
     except subprocess.CalledProcessError as e:
+        _slog.event("route.error", project="dashboard", request_id=request.state.request_id, route="/api/issues/{issue_id}/close", level="error", issue_id=issue_id, error=str(e))
         raise _gh_error(e)
 
 
@@ -2497,11 +2528,14 @@ class SprintRunBody(BaseModel):
 
 
 @app.post("/api/sprint-run")
-def run_sprint(body: SprintRunBody):
+def run_sprint(request: Request, body: SprintRunBody):
     """Spawn sprint_manager.py as a detached background process."""
+    _slog.event("route.entry", project="dashboard", request_id=request.state.request_id, route="/api/sprint-run", method="POST", sprint_label=body.label)
     if not _SPRINT_LABEL_RE.match(body.label):
+        _slog.event("route.error", project="dashboard", request_id=request.state.request_id, route="/api/sprint-run", level="error", sprint_label=body.label, error="invalid sprint label")
         raise HTTPException(400, detail=f"Invalid sprint label: {body.label!r}")
     if not SPRINT_MANAGER_PATH.exists():
+        _slog.event("route.error", project="dashboard", request_id=request.state.request_id, route="/api/sprint-run", level="error", sprint_label=body.label, error="sprint_manager.py not found")
         raise HTTPException(502, detail=f"sprint_manager.py not found at {SPRINT_MANAGER_PATH}")
 
     SPRINT_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -2519,6 +2553,7 @@ def run_sprint(body: SprintRunBody):
         stderr=log_fh,
         start_new_session=True,
     )
+    _slog.event("sprint.dispatch", project="dashboard", request_id=request.state.request_id, sprint_label=body.label, dispatch_type="simple")
     return {"ok": True, "label": body.label}
 
 
@@ -3054,7 +3089,7 @@ def get_sprint_estimate_summary(sprint_label: str, project: str):
 
 
 @app.post("/api/sprints/run", status_code=202)
-def run_sprint_managed(body: SprintMgmtRunBody):
+def run_sprint_managed(request: Request, body: SprintMgmtRunBody):
     """Spawn sprint_manager.py for the given project + sprint.
 
     - cwd = project's coder clone
@@ -3064,14 +3099,18 @@ def run_sprint_managed(body: SprintMgmtRunBody):
     - migrate_from: list of sprint numbers whose open tickets are moved to target sprint
       before dispatch; rollback on any failure.
     """
+    _slog.event("route.entry", project="dashboard", request_id=request.state.request_id, route="/api/sprints/run", method="POST", sprint_label=body.sprint_label, target_project=body.project)
     if not _SPRINT_LABEL_RE.match(body.sprint_label):
+        _slog.event("route.error", project="dashboard", request_id=request.state.request_id, route="/api/sprints/run", level="error", sprint_label=body.sprint_label, error="invalid sprint label")
         raise HTTPException(400, detail=f"Invalid sprint label: {body.sprint_label!r}")
     if not SPRINT_MANAGER_PATH.exists():
+        _slog.event("route.error", project="dashboard", request_id=request.state.request_id, route="/api/sprints/run", level="error", sprint_label=body.sprint_label, error="sprint_manager.py not found")
         raise HTTPException(502, detail=f"sprint_manager.py not found at {SPRINT_MANAGER_PATH}")
 
     project_root = _project_root_path(body.project)
     running = _any_sprint_running()
     if running:
+        _slog.event("route.error", project="dashboard", request_id=request.state.request_id, route="/api/sprints/run", level="error", sprint_label=body.sprint_label, error="sprint already running", running_sprint=running.get("sprint_label"))
         raise HTTPException(
             409,
             detail=(
@@ -3236,6 +3275,7 @@ def run_sprint_managed(body: SprintMgmtRunBody):
             pid_path.unlink()
         except OSError:
             pass
+        _slog.event("route.error", project="dashboard", request_id=request.state.request_id, route="/api/sprints/run", level="error", sprint_label=body.sprint_label, target_project=body.project, error=f"subprocess exited immediately rc={proc.returncode}")
         raise HTTPException(
             502,
             detail=f"Sprint subprocess exited immediately (rc={proc.returncode}). Log tail:\n{tail}",
@@ -3244,6 +3284,7 @@ def run_sprint_managed(body: SprintMgmtRunBody):
         # Still running after 2 seconds — normal startup, return 202.
         pass
 
+    _slog.event("sprint.dispatch", project="dashboard", request_id=request.state.request_id, sprint_label=body.sprint_label, target_project=body.project, dispatch_type="managed", pid=proc.pid)
     return {
         "ok": True,
         "sprint_label": body.sprint_label,

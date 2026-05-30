@@ -2652,7 +2652,7 @@ def _is_sprint_running(project_root: Path, sprint_label: str) -> bool:
 
 def _all_sprints_running() -> list[dict]:
     """Scan all projects for running sprints. Returns list of {project, sprint_label, pid}."""
-    result = []
+    result: list[dict] = []
     projects = projects_module.load_projects()
     for proj in projects:
         root = _project_root_path(proj["repo"])
@@ -2662,7 +2662,6 @@ def _all_sprints_running() -> list[dict]:
         seen: set[str] = set()
         # Check both fully-claimed files (*-pid) and pending-claim files (*-pid.pending)
         for pid_file in list(sprints_dir.glob("*-pid")) + list(sprints_dir.glob("*-pid.pending")):
-            # Derive label: strip trailing "-pid.pending" or "-pid"
             label = pid_file.name.removesuffix("-pid.pending").removesuffix("-pid")
             if label in seen:
                 continue
@@ -2680,27 +2679,6 @@ def _any_sprint_running() -> Optional[dict]:
     """Scan all projects for a running sprint. Returns first found or None."""
     running = _all_sprints_running()
     return running[0] if running else None
-
-
-def _all_sprints_running() -> list[dict]:
-    """Scan all projects for running sprints. Returns list of {project, sprint_label}."""
-    result: list[dict] = []
-    projects = projects_module.load_projects()
-    for proj in projects:
-        root = _project_root_path(proj["repo"])
-        sprints_dir = _commander_dir(root) / "sprints"
-        if not sprints_dir.exists():
-            continue
-        seen: set[str] = set()
-        # Check both fully-claimed files (*-pid) and pending-claim files (*-pid.pending)
-        for pid_file in list(sprints_dir.glob("*-pid")) + list(sprints_dir.glob("*-pid.pending")):
-            label = pid_file.name.removesuffix("-pid.pending").removesuffix("-pid")
-            if label in seen:
-                continue
-            seen.add(label)
-            if _is_sprint_running(root, label):
-                result.append({"project": proj["repo"], "sprint_label": label})
-    return result
 
 
 class SprintMgmtRunBody(BaseModel):

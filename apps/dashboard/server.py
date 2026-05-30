@@ -1,5 +1,6 @@
 import asyncio
 import hashlib
+import importlib.util as _importlib_util
 import json
 import logging
 import os
@@ -15,6 +16,39 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
+
+
+def _auto_install_deps() -> None:
+    """Install requirements.txt if any key dependency is missing."""
+    if _importlib_util.find_spec("fastapi") is not None:
+        return
+
+    _repo_root = Path(__file__).parent.parent.parent
+    if str(_repo_root) not in sys.path:
+        sys.path.insert(0, str(_repo_root))
+    from services.logging import log as _install_log  # noqa: PLC0415
+
+    _req = _repo_root / "requirements.txt"
+    _result = subprocess.run(
+        [sys.executable, "-m", "pip", "install", "-r", str(_req)],
+        capture_output=True,
+        text=True,
+    )
+    if _result.returncode == 0:
+        _install_log.info(
+            "deps_auto_install",
+            f"auto-installed dependencies from {_req}",
+            output=_result.stdout.strip() or None,
+        )
+    else:
+        _install_log.error(
+            "deps_auto_install",
+            f"pip install failed (exit {_result.returncode}): {_result.stderr.strip()}",
+        )
+        sys.exit(_result.returncode)
+
+
+_auto_install_deps()
 
 try:
     import psutil as _psutil

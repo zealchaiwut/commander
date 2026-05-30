@@ -1994,6 +1994,16 @@ def _dispatch_coder(
     cwd_path = cfg.worktree_coder if cfg else WORKTESTER_DASHBOARD
 
     print(f"  Dispatching coder for issue #{issue_num} ...", flush=True)
+    try:
+        structured_log.event(
+            "coder.dispatch",
+            run_id=os.environ.get("COMMANDER_RUN_ID"),
+            issue_num=issue_num,
+            sprint_label=sprint_label,
+            agent_role="coder",
+        )
+    except Exception:
+        pass
     _post_agent_event(f"coder:issue-{issue_num}", api_url=api_url)
 
     log_path = _issue_log_path(issue_num, cfg=cfg)
@@ -2206,6 +2216,16 @@ def _dispatch_tester(
     cwd_path = cfg.worktree_tester_app if cfg else WORKTESTER_DASHBOARD
 
     print(f"  Dispatching tester for issue #{issue_num} ...", flush=True)
+    try:
+        structured_log.event(
+            "tester.dispatch",
+            run_id=os.environ.get("COMMANDER_RUN_ID"),
+            issue_num=issue_num,
+            sprint_label=sprint_label,
+            agent_role="tester",
+        )
+    except Exception:
+        pass
     _post_agent_event(f"tester:issue-{issue_num}", api_url=api_url)
 
     log_path = _issue_log_path(issue_num, cfg=cfg)
@@ -4152,6 +4172,18 @@ def run_sprint(
     print(f"\n=== Sprint Manager: label={label} ===")
     print(f"Target branch: {target_branch}")
     print(f"Found {len(state.issues)} issue(s): {[i.number for i in state.issues]}")
+    try:
+        structured_log.event(
+            "sprint.start",
+            run_id=_run_id,
+            issue_num=None,
+            sprint_label=label,
+            agent_role="sprint",
+            issue_count=len(state.issues),
+            target_branch=target_branch,
+        )
+    except Exception:
+        pass
 
     # AC-1: Create sprint branch off develop (idempotent)
     if target_branch == sprint_branch:
@@ -4222,6 +4254,17 @@ def run_sprint(
         # Resume: skip already-done/skipped
         if resume and issue_state.status in ("done", "skipped"):
             print(f"\n--- {progress} Issue #{num}: {title} --- [SKIP: already {issue_state.status}]")
+            try:
+                structured_log.event(
+                    "issue.skip",
+                    run_id=_run_id,
+                    issue_num=num,
+                    sprint_label=label,
+                    agent_role="sprint",
+                    skip_reason=f"already {issue_state.status}",
+                )
+            except Exception:
+                pass
             summary.processed.append(f"#{num}")
             if issue_state.status == "done":
                 summary.merged.append(f"#{num}")
@@ -4232,11 +4275,32 @@ def run_sprint(
         # retry_failed: skip only done issues
         if retry_failed and issue_state.status == "done":
             print(f"\n--- {progress} Issue #{num}: {title} --- [SKIP: already done]")
+            try:
+                structured_log.event(
+                    "issue.skip",
+                    run_id=_run_id,
+                    issue_num=num,
+                    sprint_label=label,
+                    agent_role="sprint",
+                    skip_reason="already done",
+                )
+            except Exception:
+                pass
             summary.processed.append(f"#{num}")
             summary.merged.append(f"#{num}")
             continue
 
         print(f"\n--- {progress} Issue #{num}: {title} ---")
+        try:
+            structured_log.event(
+                "issue.start",
+                run_id=_run_id,
+                issue_num=num,
+                sprint_label=label,
+                agent_role="sprint",
+            )
+        except Exception:
+            pass
         summary.processed.append(f"#{num}")
 
         # AC-3: check for pause file before dispatching this issue
@@ -4264,6 +4328,17 @@ def run_sprint(
         # Preflight filter: skip issues not approved by pre-flight review
         if preflight_approved is not None and num not in preflight_approved:
             print("  [preflight] skipped by pre-flight review")
+            try:
+                structured_log.event(
+                    "issue.skip",
+                    run_id=_run_id,
+                    issue_num=num,
+                    sprint_label=label,
+                    agent_role="sprint",
+                    skip_reason="preflight-skipped",
+                )
+            except Exception:
+                pass
             issue_state.set_agent_status("failed")
             issue_state.failure_reason  = "preflight-skipped"
             issue_state.status          = "skipped"
@@ -4276,6 +4351,16 @@ def run_sprint(
 
         if dry_run:
             print("  [dry-run] would dispatch coder + tester")
+            try:
+                structured_log.event(
+                    "issue.dry_run",
+                    run_id=_run_id,
+                    issue_num=num,
+                    sprint_label=label,
+                    agent_role="sprint",
+                )
+            except Exception:
+                pass
             issue_state.status = "skipped"
             issue_state.skip_reason = "dry-run"
             summary.skipped.append(f"#{num} (dry-run)")
@@ -4331,6 +4416,18 @@ def run_sprint(
             _coder_elapsed = time.monotonic() - _coder_t0
             _coder_m, _coder_s = divmod(int(_coder_elapsed), 60)
             print(f"  Total time used on coder dispatch: {_coder_m}m {_coder_s}s")
+            try:
+                structured_log.event(
+                    "coder.done",
+                    run_id=_run_id,
+                    issue_num=num,
+                    sprint_label=label,
+                    agent_role="coder",
+                    elapsed_secs=round(_coder_elapsed),
+                    success=coder_ok,
+                )
+            except Exception:
+                pass
 
             if not coder_ok:
                 category = coder_category or FailureCategory.CRASH
@@ -4339,6 +4436,18 @@ def run_sprint(
                 else:
                     reason = f"Coder failed with category {category}"
                 structured_log.error("coder_failed", f"coder failed for #{num}: {category}", issue_num=num, category=category)
+                try:
+                    structured_log.event(
+                        "coder.failed",
+                        run_id=_run_id,
+                        issue_num=num,
+                        sprint_label=label,
+                        agent_role="coder",
+                        category=category,
+                        reason=reason,
+                    )
+                except Exception:
+                    pass
                 issue_state.set_agent_status("failed")
                 issue_state.coder_finished_at = issue_state.status_changed_at
                 issue_state.failure_reason    = reason
@@ -4417,6 +4526,18 @@ def run_sprint(
         _tester_elapsed = time.monotonic() - _tester_t0
         _tester_m, _tester_s = divmod(int(_tester_elapsed), 60)
         print(f"  Total time used on tester dispatch: {_tester_m}m {_tester_s}s")
+        try:
+            structured_log.event(
+                "tester.done",
+                run_id=_run_id,
+                issue_num=num,
+                sprint_label=label,
+                agent_role="tester",
+                elapsed_secs=round(_tester_elapsed),
+                exit_code=tester_rc,
+            )
+        except Exception:
+            pass
 
         if hang_category == FailureCategory.HANG:
             issue_state.set_agent_status("failed")
@@ -4467,6 +4588,17 @@ def run_sprint(
             alert_modes        = alert_modes,
         )
         print(f"  {summary_line}")
+        try:
+            structured_log.event(
+                "issue.merged" if merged else "issue.skipped",
+                run_id=_run_id,
+                issue_num=num,
+                sprint_label=label,
+                agent_role="sprint",
+                summary_line=summary_line,
+            )
+        except Exception:
+            pass
 
         if merged:
             issue_state.set_agent_status("completed")

@@ -141,6 +141,7 @@ def main():
 
     # Capture merge commit SHA now — passed to update_ticket.py so the UAT
     # safeguard uses ancestry check instead of branch-ref presence (no race).
+    merge_sha = None
     ok, merge_sha = _try("git", "rev-parse", "HEAD")
     if not ok or not merge_sha:
         print("Warning: could not capture merge SHA; UAT safeguard will fall back to branch-ref check.", file=sys.stderr)

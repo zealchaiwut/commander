@@ -61,6 +61,11 @@ except Exception:
     _sync_projects_module = None  # type: ignore[assignment]
     _SYNC_PROJECTS_AVAILABLE = False
 
+try:
+    from sizing import SIZE_TO_MINUTES as _SIZE_TO_MINUTES
+except ImportError:
+    _SIZE_TO_MINUTES = {"S": 5, "M": 15, "L": 30, "XL": 60}  # fallback if sizing unavailable
+
 
 def _sprint_json_path(project_root: Path, sprint_label: str) -> Path:
     return _commander_dir(project_root) / "sprints" / f"{sprint_label}.json"
@@ -2453,6 +2458,9 @@ _SUMMARY_TITLE_RE = re.compile(r"^Sprint \d+(\.\d+)?\s+Executive Summary$")
 _REPO_ROOT = Path(__file__).parent.parent.parent
 SPRINT_MANAGER_PATH = _REPO_ROOT / "services" / "sprint_manager" / "sprint_manager.py"
 SPRINT_LOG_PATH = Path(__file__).parent / "sprints" / "sprint_run.log"
+# Read once; default covers both dashboard banner and ntfy push notifications.
+# sprint_manager validates the value — no validation added here.
+_ALERT_MODES = os.environ.get("COMMANDER_ALERT_MODES", "dashboard_banner,ntfy")
 
 
 def _sprint_label_sort_key(label: str) -> tuple[int, int]:
@@ -2463,18 +2471,23 @@ def _sprint_label_sort_key(label: str) -> tuple[int, int]:
     return (int(m.group(1)), int(m.group(2)) if m.group(2) else 0)
 
 
-def _next_sprint_sublabel(sprint_label: str) -> str:
-    """Compute the next sub-label for a sprint re-run.
+def _next_sprint_sublabel(sprint_label: str, existing_label_names: set[str]) -> str:
+    """Compute the next sub-label for a sprint re-run, skipping already-existing labels.
 
-    sprint-15   → sprint-15.1
-    sprint-15.3 → sprint-15.4
+    sprint-15   → sprint-15.1 (or sprint-15.2 if sprint-15.1 already exists)
+    sprint-15.3 → sprint-15.4 (or higher if those already exist)
     """
     m = re.match(r"^sprint-(\d+)(?:\.(\d+))?$", sprint_label)
     if not m:
         raise ValueError(f"Invalid sprint label: {sprint_label!r}")
     base = int(m.group(1))
     suffix = int(m.group(2)) if m.group(2) else 0
-    return f"sprint-{base}.{suffix + 1}"
+    candidate = suffix + 1
+    while True:
+        label = f"sprint-{base}.{candidate}"
+        if label not in existing_label_names:
+            return label
+        candidate += 1
 
 
 class SprintRunBody(BaseModel):
@@ -2497,6 +2510,7 @@ def run_sprint(body: SprintRunBody):
     cmd = [sys.executable, str(SPRINT_MANAGER_PATH), body.label]
     if body.budget is not None:
         cmd += [f"--budget={body.budget}"]
+    cmd += ["--alert-mode", _ALERT_MODES]
 
     subprocess.Popen(
         cmd,
@@ -2998,13 +3012,8 @@ _MIGRATION_STATUS_LABELS = {"UAT", "UAT-approved", "SIT", "in-progress", "needs-
 # ── Estimate-summary helpers (issue #211) ────────────────────────────────────
 
 def _size_to_minutes(size: str) -> int:
-    """Map a T-shirt size label to wall-clock minutes.
-
-    S = 30 min, M = 2 h (120 min), L = 8 h (480 min).
-    Change this single function to adjust all size mappings.
-    """
-    mapping = {"S": 30, "M": 120, "L": 480}
-    return mapping.get(size, 0)
+    """Map a T-shirt size label to agent-effort minutes via SIZE_TO_MINUTES."""
+    return _SIZE_TO_MINUTES.get(size, 0)
 
 
 @app.get("/api/sprints/{sprint_label}/estimate-summary")
@@ -3209,7 +3218,8 @@ def run_sprint_managed(body: SprintMgmtRunBody):
     log_fh = open(log_path, "w")
     try:
         proc = subprocess.Popen(
-            [sys.executable, str(SPRINT_MANAGER_PATH), body.sprint_label, "--skip-gates"],
+            [sys.executable, str(SPRINT_MANAGER_PATH), body.sprint_label, "--skip-gates",
+             "--alert-mode", _ALERT_MODES],
             env=stripped_env,
             cwd=str(coder_path),
             stdout=log_fh,
@@ -4521,7 +4531,7 @@ def rerun_sprint_preview(sprint_label: str, project: str):
     """Return per-ticket rerun preview counts without executing anything.
 
     Response schema:
-      { redispatch_count, tester_count, skip_count, by_ticket: [
+      { new_label, redispatch_count, tester_count, skip_count, by_ticket: [
           { issue_num, issue_title, action }  # action: dispatch_coder|dispatch_tester|skip
         ]
       }
@@ -4559,7 +4569,11 @@ def rerun_sprint_preview(sprint_label: str, project: str):
             "action": action,
         })
 
+    existing_label_names = {lbl["name"] for lbl in github_client.list_labels(repo_name=project)}
+    new_label = _next_sprint_sublabel(sprint_label, existing_label_names)
+
     return {
+        "new_label": new_label,
         "redispatch_count": redispatch_count,
         "tester_count": tester_count,
         "skip_count": skip_count,
@@ -4629,8 +4643,9 @@ def rerun_sprint(sprint_label: str, project: str, body: SprintRerunBody):
             "skip_count": len(decisions),
         }
 
-    # Compute the sub-label for this re-run
-    sub_label = _next_sprint_sublabel(sprint_label)
+    # Compute the sub-label for this re-run, skipping any labels that already exist
+    existing_label_names = {lbl["name"] for lbl in github_client.list_labels(repo_name=project)}
+    sub_label = _next_sprint_sublabel(sprint_label, existing_label_names)
 
     # Create the sub-label on GitHub with the same color as the parent sprint label
     parent_color = github_client.get_label_color(sprint_label, repo_name=project) or "0075ca"
@@ -4741,6 +4756,7 @@ def rerun_sprint(sprint_label: str, project: str, body: SprintRerunBody):
             [
                 sys.executable, str(SPRINT_MANAGER_PATH), sub_label,
                 "--skip-gates", "--rerun-manifest", str(manifest_path),
+                "--alert-mode", _ALERT_MODES,
             ],
             env=stripped_env,
             cwd=str(coder_path),

@@ -617,9 +617,10 @@ class AlertMode:
     EMAIL            = "email"
     DISCORD          = "discord"
     FILE             = "file"
+    NTFY             = "ntfy"
     NONE             = "none"
 
-    ALL_MODES = {DASHBOARD_BANNER, EMAIL, DISCORD, FILE, NONE}
+    ALL_MODES = {DASHBOARD_BANNER, EMAIL, DISCORD, FILE, NTFY, NONE}
 
 
 # ── data structures ───────────────────────────────────────────────────────────
@@ -938,6 +939,8 @@ def dispatch_alerts(
                 _alert_discord(title, body)
             elif mode == AlertMode.FILE:
                 _alert_file(title, body, alerts_dir=alerts_dir)
+            elif mode == AlertMode.NTFY:
+                _alert_ntfy(title, body, category)
         except Exception as e:
             structured_log.error("alert_dispatch_error", f"[alert:{mode}] error: {e}", mode=mode, exc=str(e))
 
@@ -996,6 +999,25 @@ def _alert_discord(title: str, body: str) -> None:
         webhook,
         data=payload,
         headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    urllib.request.urlopen(req, timeout=5)
+
+
+def _alert_ntfy(title: str, body: str, category: Optional[str] = None) -> None:
+    topic_url = os.environ.get("NTFY_TOPIC_URL", "")
+    if not topic_url:
+        return
+    priority = "4" if category in ("failure", "needs-rework") else "3"
+    payload  = body.encode()
+    req      = urllib.request.Request(
+        topic_url,
+        data=payload,
+        headers={
+            "Title":    title,
+            "Priority": priority,
+            "Tags":     category or "sprint",
+        },
         method="POST",
     )
     urllib.request.urlopen(req, timeout=5)
@@ -1229,6 +1251,12 @@ def _was_feature_merged_via_log(issue_num: int, target: str) -> bool:
     finish_feature.py creates commits of the form:
         "Merge feature/<N>-<slug> into <target> (issue #<N>)"
     so we search the recent merge history of the target for that pattern.
+
+    Case-sensitivity note: ``git log --grep`` is case-sensitive by default.
+    The ``issue #<N>`` grep is unaffected (numerics don't vary in case).
+    The branch-name grep uses ``--regexp-ignore-case`` so that unusual branch
+    prefixes (e.g. ``Feature/`` instead of ``feature/``) are still matched,
+    even though project convention requires lowercase kebab-case branch names.
     """
     target_ref = f"origin/{target}"
     ok, _, _ = _try("git", "rev-parse", "--verify", target_ref)
@@ -1243,10 +1271,11 @@ def _was_feature_merged_via_log(issue_num: int, target: str) -> bool:
     if ok and out.strip():
         return True
 
-    # Also match branch name directly (covers non-standard merge messages)
+    # Also match branch name directly (covers non-standard merge messages).
+    # --regexp-ignore-case guards against uppercase branch prefixes.
     ok, out, _ = _try(
         "git", "log", target_ref, "--merges", "--oneline",
-        f"--grep=feature/{issue_num}-", "-1",
+        "--regexp-ignore-case", f"--grep=feature/{issue_num}-", "-1",
     )
     return ok and bool(out.strip())
 

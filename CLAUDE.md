@@ -14,7 +14,7 @@ Agents may ONLY pause for confirmation for: (1) ambiguous requirements where a w
 Commander is:
 - A FastAPI web dashboard that tracks Claude Code agents in real time
 - - A GitHub Issues-based sprint board (BA → Coder → Tester → UAT flow)
-- - Mobile-accessible via Tailscale
+- - Mobile-accessible via Tailscale — launchd is the authoritative unattended runner (tmux is attended local dev only); device must be enrolled (`tailscale up`) and logged in; macOS Application Firewall blocks direct incoming connections for Python/uvicorn on port 8000; Tailscale operates below the Application Firewall layer so Tailscale-routed traffic reaches the service regardless of that block
 - - The repo is github.com/zealchaiwut/commander
 -
 - ## Tech Stack

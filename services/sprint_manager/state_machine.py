@@ -38,7 +38,7 @@ STATE_LABELS: dict[TicketState, frozenset[str]] = {
     TicketState.IN_PROGRESS:  frozenset({"in-progress"}),
     TicketState.SIT:          frozenset({"SIT"}),
     TicketState.UAT:          frozenset({"UAT"}),
-    TicketState.NEEDS_REWORK: frozenset({"need-rework"}),
+    TicketState.NEEDS_REWORK: frozenset({"needs-rework"}),
     TicketState.DONE:         frozenset(),
 }
 

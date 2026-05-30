@@ -67,12 +67,12 @@ on the previous one — do not skip or reorder.
     Open `http://<mac-mini>.tail-xxxx.ts.net:8000` in browser. Dashboard must load.
 
 13. **Verify ntfy push notifications reach your iPad.**
-    Send a test notification (replace `<your-topic>` with the value of `NTFY_TOPIC` in `.env`):
+    Send a test notification (replace `<your-topic>` with the value of `NTFY_TOPIC_URL` in `.env`):
     ```bash
-    source apps/dashboard/.env && curl -d "Commander travel test" ntfy.sh/$NTFY_TOPIC
+    source apps/dashboard/.env && curl -d "Commander travel test" $NTFY_TOPIC_URL
     ```
     Expected: notification appears on your iPad within a few seconds. If it does not, confirm the ntfy
-    app is subscribed to `https://ntfy.sh/<your-topic>` and `NTFY_TOPIC` is set in `.env`.
+    app is subscribed to `https://ntfy.sh/<your-topic>` and `NTFY_TOPIC_URL` is set in `.env`.
 
 14. **Verify GitHub auth is valid.**
     ```bash

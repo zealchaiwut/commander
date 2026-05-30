@@ -45,29 +45,29 @@ class TestNextSprintSublabel:
     """_next_sprint_sublabel() must increment suffix correctly."""
 
     def test_plain_sprint_produces_dot_one(self):
-        assert _next_sprint_sublabel("sprint-15") == "sprint-15.1"
+        assert _next_sprint_sublabel("sprint-15", set()) == "sprint-15.1"
 
     def test_plain_sprint_one(self):
-        assert _next_sprint_sublabel("sprint-1") == "sprint-1.1"
+        assert _next_sprint_sublabel("sprint-1", set()) == "sprint-1.1"
 
     def test_dot_one_produces_dot_two(self):
-        assert _next_sprint_sublabel("sprint-15.1") == "sprint-15.2"
+        assert _next_sprint_sublabel("sprint-15.1", set()) == "sprint-15.2"
 
     def test_dot_three_produces_dot_four(self):
-        assert _next_sprint_sublabel("sprint-15.3") == "sprint-15.4"
+        assert _next_sprint_sublabel("sprint-15.3", set()) == "sprint-15.4"
 
     def test_sprint_n_five_produces_n_six(self):
         # AC-6: sprint-N.5 → sprint-N.6
-        assert _next_sprint_sublabel("sprint-25.5") == "sprint-25.6"
+        assert _next_sprint_sublabel("sprint-25.5", set()) == "sprint-25.6"
 
     def test_different_base_number(self):
-        assert _next_sprint_sublabel("sprint-100.9") == "sprint-100.10"
+        assert _next_sprint_sublabel("sprint-100.9", set()) == "sprint-100.10"
 
     def test_invalid_label_raises(self):
         with pytest.raises(ValueError):
-            _next_sprint_sublabel("not-a-sprint")
+            _next_sprint_sublabel("not-a-sprint", set())
         with pytest.raises(ValueError):
-            _next_sprint_sublabel("sprint-abc")
+            _next_sprint_sublabel("sprint-abc", set())
 
 
 # ── AC-2: _SPRINT_LABEL_RE accepts dotted labels ─────────────────────────────
@@ -249,6 +249,7 @@ class TestRerunSubLabel:
             "labels": [{"name": "sprint-15"}, {"name": "in-progress"}],
         }
         gc.list_open_issues_with_body = MagicMock(return_value=[uat_issue, inprog_issue])
+        gc.list_labels = MagicMock(return_value=[])
         gc.get_label_color = MagicMock(return_value="0075ca")
         created_labels = []
         gc.create_label = MagicMock(side_effect=lambda n, *a, **kw: created_labels.append(n))
@@ -307,6 +308,7 @@ class TestRerunSubLabel:
             "labels": [{"name": "sprint-15.1"}, {"name": "needs-rework"}],
         }
         gc.list_open_issues_with_body = MagicMock(return_value=[issue])
+        gc.list_labels = MagicMock(return_value=[])
         gc.get_label_color = MagicMock(return_value="0075ca")
         created = []
         gc.create_label = MagicMock(side_effect=lambda n, *a, **kw: created.append(n))
@@ -346,6 +348,7 @@ class TestRerunSubLabel:
             "labels": [{"name": "sprint-15"}, {"name": "SIT"}],
         }
         gc.list_open_issues_with_body = MagicMock(return_value=[issue])
+        gc.list_labels = MagicMock(return_value=[])
         gc.get_label_color = MagicMock(return_value="0075ca")
         gc.create_label = MagicMock()
         gc.update_labels = MagicMock()
@@ -397,6 +400,7 @@ class TestRerunSubLabel:
             "labels": [{"name": "sprint-15"}, {"name": "in-progress"}],
         }
         gc.list_open_issues_with_body = MagicMock(return_value=[issue])
+        gc.list_labels = MagicMock(return_value=[])
         parent_color = "ff5733"
         gc.get_label_color = MagicMock(return_value=parent_color)
         create_calls = []
@@ -445,6 +449,7 @@ class TestRerunTicketRouting:
             for i, lbls in enumerate(issue_labels)
         ]
         gc.list_open_issues_with_body = MagicMock(return_value=issues)
+        gc.list_labels = MagicMock(return_value=[])
         gc.get_label_color = MagicMock(return_value="0075ca")
         gc.create_label = MagicMock()
         gc.update_labels = MagicMock()

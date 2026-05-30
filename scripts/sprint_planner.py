@@ -22,11 +22,14 @@ from typing import Optional
 SCRIPTS_DIR = Path(__file__).parent
 REPO_ROOT = SCRIPTS_DIR.parent
 DASHBOARD_DIR = REPO_ROOT / "apps" / "dashboard"
+SPRINT_MANAGER_DIR = REPO_ROOT / "services" / "sprint_manager"
 
 sys.path.insert(0, str(DASHBOARD_DIR))
+sys.path.insert(0, str(SPRINT_MANAGER_DIR))
 from dotenv import load_dotenv
 load_dotenv(DASHBOARD_DIR / ".env")
 import github_client
+from sizing import SIZE_TO_MINUTES
 
 
 # ── size estimation ───────────────────────────────────────────────────────────
@@ -34,8 +37,7 @@ import github_client
 SIZES = ["S", "M", "L", "XL"]
 SIZE_IDX = {s: i for i, s in enumerate(SIZES)}
 
-# Minutes per size for estimation
-SIZE_MINUTES = {"S": 5, "M": 15, "L": 30, "XL": 60}
+SIZE_MINUTES = SIZE_TO_MINUTES
 
 
 def _estimate_size(issue: dict) -> str:

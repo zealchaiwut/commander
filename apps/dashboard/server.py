@@ -61,6 +61,11 @@ except Exception:
     _sync_projects_module = None  # type: ignore[assignment]
     _SYNC_PROJECTS_AVAILABLE = False
 
+try:
+    from sizing import SIZE_TO_MINUTES as _SIZE_TO_MINUTES
+except ImportError:
+    _SIZE_TO_MINUTES = {"S": 5, "M": 15, "L": 30, "XL": 60}  # fallback if sizing unavailable
+
 
 def _sprint_json_path(project_root: Path, sprint_label: str) -> Path:
     return _commander_dir(project_root) / "sprints" / f"{sprint_label}.json"
@@ -3007,13 +3012,8 @@ _MIGRATION_STATUS_LABELS = {"UAT", "UAT-approved", "SIT", "in-progress", "needs-
 # ── Estimate-summary helpers (issue #211) ────────────────────────────────────
 
 def _size_to_minutes(size: str) -> int:
-    """Map a T-shirt size label to wall-clock minutes.
-
-    S = 30 min, M = 2 h (120 min), L = 8 h (480 min).
-    Change this single function to adjust all size mappings.
-    """
-    mapping = {"S": 30, "M": 120, "L": 480}
-    return mapping.get(size, 0)
+    """Map a T-shirt size label to agent-effort minutes via SIZE_TO_MINUTES."""
+    return _SIZE_TO_MINUTES.get(size, 0)
 
 
 @app.get("/api/sprints/{sprint_label}/estimate-summary")

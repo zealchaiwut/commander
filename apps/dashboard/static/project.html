@@ -4123,8 +4123,8 @@ function _smgmtCardHtml(label, n, tickets, outcome, isNext) {
 
 // ── Running sprint card (issue #277) ──────────────────────────────────────
 
-// Configurable placeholder — to be replaced by stats-derived values (issue #308)
-const SIZE_MINUTES = { S: 7, M: 15, L: 25, XL: 40 };
+// Hardcoded by design. Matches sizing.py SIZE_TO_MINUTES. Per-project overrides are out of scope (#386).
+const SIZE_MINUTES = { S: 5, M: 15, L: 30, XL: 60 };
 
 /** Build the animated running sprint card HTML. Live data patched separately by _smgmtLivePatch. */
 function _smgmtRunningCardHtml(label, n, tickets) {

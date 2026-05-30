@@ -3373,6 +3373,133 @@ def kill_sprint(sprint_label: str, project: str):
     return {"ok": True}
 
 
+# ── Logs: run history (issue #419) ───────────────────────────────────────────
+
+@app.get("/api/logs/runs")
+def get_logs_runs(
+    project: Optional[str] = None,
+    sprint_label: Optional[str] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    page: int = 1,
+    page_size: int = 20,
+):
+    """Return paginated sprint run history read from sprint state JSON files."""
+    # Validate and parse date filters
+    start_dt: Optional[datetime] = None
+    end_dt: Optional[datetime] = None
+
+    if start_date:
+        try:
+            start_dt = datetime.fromisoformat(start_date)
+            if start_dt.tzinfo is None:
+                start_dt = start_dt.replace(tzinfo=timezone.utc)
+        except ValueError:
+            raise HTTPException(
+                400,
+                detail=f"Invalid start_date {start_date!r}. Use ISO 8601 format, e.g. 2024-06-01.",
+            )
+
+    if end_date:
+        try:
+            parsed_end = datetime.fromisoformat(end_date)
+            if parsed_end.tzinfo is None:
+                parsed_end = parsed_end.replace(tzinfo=timezone.utc)
+            # Date-only string: extend to end of day
+            if "T" not in end_date:
+                parsed_end = parsed_end.replace(hour=23, minute=59, second=59, microsecond=999999)
+            end_dt = parsed_end
+        except ValueError:
+            raise HTTPException(
+                400,
+                detail=f"Invalid end_date {end_date!r}. Use ISO 8601 format, e.g. 2024-06-30.",
+            )
+
+    items: list[dict] = []
+
+    try:
+        all_projects = projects_module.load_projects()
+    except Exception:
+        all_projects = []
+
+    for proj in all_projects:
+        repo = proj.get("repo", "")
+        project_root = _project_root_path(repo)
+        sprints_dir = _commander_dir(project_root) / "sprints"
+
+        if not sprints_dir.exists():
+            continue
+
+        for state_path in sprints_dir.glob("sprint-*-state.json"):
+            try:
+                state_data = json.loads(state_path.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError):
+                continue
+
+            state_project = state_data.get("project") or repo
+            state_sprint_label = state_data.get("sprint_label", "")
+            start_ts_str = state_data.get("start_timestamp")
+            wall_clock = float(state_data.get("wall_clock_secs") or 0.0)
+            issues = state_data.get("issues") or []
+
+            if not start_ts_str:
+                continue
+
+            try:
+                start_time_dt = datetime.fromisoformat(start_ts_str.rstrip("Z"))
+                if start_time_dt.tzinfo is None:
+                    start_time_dt = start_time_dt.replace(tzinfo=timezone.utc)
+            except ValueError:
+                continue
+
+            end_time_dt = start_time_dt + timedelta(seconds=wall_clock)
+
+            compact_ts = start_time_dt.strftime("%Y%m%dT%H%M%S")
+            run_id = f"sprint-{state_sprint_label}-{compact_ts}"
+
+            has_failed = any(
+                i.get("agent_status") == "failed"
+                or i.get("failure_reason")
+                or i.get("status") == "skipped"
+                for i in issues
+            )
+            all_done = bool(issues) and all(i.get("status") == "done" for i in issues)
+            if all_done and not has_failed:
+                outcome = "success"
+            elif has_failed:
+                outcome = "partial"
+            else:
+                outcome = "unknown"
+
+            # Apply filters
+            if project and state_project != project:
+                continue
+            if sprint_label and state_sprint_label != sprint_label:
+                continue
+            if start_dt and start_time_dt < start_dt:
+                continue
+            if end_dt and start_time_dt > end_dt:
+                continue
+
+            items.append({
+                "run_id": run_id,
+                "project": state_project,
+                "sprint_label": state_sprint_label,
+                "start_time": start_time_dt.isoformat(),
+                "end_time": end_time_dt.isoformat(),
+                "ticket_count": len(issues),
+                "outcome": outcome,
+            })
+
+    items.sort(key=lambda x: x["start_time"], reverse=True)
+
+    total = len(items)
+    offset = (page - 1) * page_size
+    paged = items[offset: offset + page_size]
+
+    return {"items": paged, "page": page, "page_size": page_size, "total": total}
+
+
 @app.get("/api/sprints/{sprint_label}/dispatch-log")
 def get_dispatch_log(sprint_label: str, project: str, tail_lines: int = 200):
     """Return the last N lines of the most recent sprint-run-<label>-*.log."""

@@ -2097,6 +2097,102 @@
       transition: border-color .15s;
     }
     .sm-model-select:focus { outline: none; border-color: var(--blue); }
+
+    /* ── Logs tab (issue #420) ── */
+    .logs-pane { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+    .logs-toolbar {
+      display: flex; flex-direction: column; gap: 8px;
+      padding: 14px 20px 12px; border-bottom: 1px solid var(--border); flex-shrink: 0;
+    }
+    .logs-filter-bar { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+    .logs-chip-group { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+    .logs-chip-label {
+      font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em;
+      color: var(--text-sub); margin-right: 2px; white-space: nowrap;
+    }
+    .logs-chip {
+      display: inline-flex; align-items: center; padding: 3px 10px;
+      border-radius: 20px; border: 1px solid var(--border); background: none;
+      color: var(--text-muted); font-size: 12px; font-family: inherit;
+      cursor: pointer; transition: background .12s, border-color .12s, color .12s; white-space: nowrap;
+    }
+    .logs-chip:hover { background: var(--surface-2); color: var(--text); }
+    .logs-chip.active { background: var(--blue-bg); border-color: var(--blue); color: var(--blue); font-weight: 600; }
+    .logs-toolbar-row2 { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .logs-search-wrap { position: relative; flex: 1; max-width: 320px; }
+    .logs-search-icon {
+      position: absolute; left: 8px; top: 50%; transform: translateY(-50%);
+      color: var(--text-sub); font-size: 14px; pointer-events: none;
+    }
+    .logs-search {
+      width: 100%; padding: 6px 10px 6px 28px;
+      border: 1px solid var(--border); border-radius: 6px;
+      background: var(--surface-2); color: var(--text); font-size: 13px; font-family: inherit;
+      transition: border-color .15s;
+    }
+    .logs-search:focus { outline: none; border-color: var(--blue); background: var(--surface); }
+    .logs-view-toggle { display: flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+    .logs-view-btn {
+      padding: 5px 12px; background: none; border: none;
+      border-right: 1px solid var(--border); color: var(--text-muted);
+      font-size: 12px; font-family: inherit; cursor: pointer; transition: background .12s, color .12s;
+      display: flex; align-items: center; gap: 4px;
+    }
+    .logs-view-btn:last-child { border-right: none; }
+    .logs-view-btn:hover { background: var(--surface-2); color: var(--text); }
+    .logs-view-btn.active { background: var(--surface-2); color: var(--text); font-weight: 600; }
+    .logs-body { flex: 1; overflow-y: auto; min-height: 0; }
+    .logs-empty { padding: 40px 20px; text-align: center; color: var(--text-sub); font-size: 13px; }
+    .logs-run-row { border-bottom: 1px solid var(--border); }
+    .logs-run-header {
+      display: flex; align-items: center; gap: 10px; padding: 10px 20px;
+      cursor: pointer; transition: background .12s; user-select: none;
+    }
+    .logs-run-header:hover { background: var(--surface-hover); }
+    .logs-run-chevron { color: var(--text-sub); font-size: 12px; transition: transform .15s; flex-shrink: 0; }
+    .logs-run-row.expanded .logs-run-chevron { transform: rotate(90deg); }
+    .logs-run-id {
+      font-family: var(--mono); font-size: 12px; color: var(--text); font-weight: 600;
+      flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .logs-run-meta { display: flex; align-items: center; gap: 12px; flex-shrink: 0; font-size: 11px; color: var(--text-muted); }
+    .logs-status-badge {
+      display: inline-flex; align-items: center; padding: 2px 8px;
+      border-radius: 10px; font-size: 11px; font-weight: 600;
+    }
+    .logs-status-badge.success { background: var(--green-bg); color: var(--green); }
+    .logs-status-badge.partial { background: var(--amber-bg); color: var(--amber); }
+    .logs-status-badge.unknown { background: var(--surface-2); color: var(--text-muted); }
+    .logs-run-events {
+      display: none; background: var(--bg); border-top: 1px solid var(--border);
+      max-height: 400px; overflow-y: auto;
+      font-family: var(--mono); font-size: 11px; line-height: 1.7;
+      padding: 8px 20px 8px 44px;
+    }
+    .logs-run-row.expanded .logs-run-events { display: block; }
+    .logs-event-line { display: flex; gap: 8px; }
+    .logs-event-ts { color: var(--text-sub); flex-shrink: 0; }
+    .logs-event-line.dispatch .logs-event-msg { color: var(--blue); }
+    .logs-event-line.success .logs-event-msg { color: var(--green); }
+    .logs-event-line.warn .logs-event-msg { color: var(--amber); }
+    .logs-event-line.fail .logs-event-msg { color: var(--red); }
+    .logs-event-line.event .logs-event-msg { color: var(--text-muted); }
+    .logs-raw-stream {
+      font-family: var(--mono); font-size: 11px; line-height: 1.7;
+      max-height: 60vh; overflow-y: auto; padding: 12px 20px;
+    }
+    .logs-raw-line { color: var(--text-muted); white-space: pre-wrap; word-break: break-all; }
+    .logs-live-dot {
+      width: 6px; height: 6px; border-radius: 50%; background: var(--green); flex-shrink: 0;
+      animation: smgmt-running-badge-pulse 2s ease-in-out infinite;
+    }
+    @media (max-width: 768px) {
+      .logs-toolbar { padding: 10px 12px 8px; }
+      .logs-run-header { padding: 10px 12px; }
+      .logs-run-events { padding: 8px 12px 8px 28px; }
+      .logs-raw-stream { padding: 8px 12px; }
+      .logs-search-wrap { max-width: 100%; }
+    }
   </style>
 </head>
 <body>
@@ -2335,9 +2431,56 @@
 
       <!-- Logs tab -->
       <div class="tab-pane" id="pane-logs" role="tabpanel" aria-labelledby="stab-logs">
-        <div class="placeholder-msg">
-          <i class="ti ti-terminal-2"></i>
-          Logs view coming soon
+        <div class="logs-pane">
+          <!-- Toolbar -->
+          <div class="logs-toolbar">
+            <div class="logs-filter-bar">
+              <div class="logs-chip-group">
+                <span class="logs-chip-label">Sprint</span>
+                <div id="logs-chips-sprint" style="display:contents"></div>
+              </div>
+              <div class="logs-chip-group">
+                <span class="logs-chip-label">Role</span>
+                <button class="logs-chip" data-group="agent_role" data-value="coder" onclick="logsToggleChip(this)">coder</button>
+                <button class="logs-chip" data-group="agent_role" data-value="tester" onclick="logsToggleChip(this)">tester</button>
+                <button class="logs-chip" data-group="agent_role" data-value="ba" onclick="logsToggleChip(this)">ba</button>
+              </div>
+              <div class="logs-chip-group">
+                <span class="logs-chip-label">Level</span>
+                <button class="logs-chip" data-group="event_level" data-value="dispatch" onclick="logsToggleChip(this)">dispatch</button>
+                <button class="logs-chip" data-group="event_level" data-value="success" onclick="logsToggleChip(this)">success</button>
+                <button class="logs-chip" data-group="event_level" data-value="warn" onclick="logsToggleChip(this)">warn</button>
+                <button class="logs-chip" data-group="event_level" data-value="fail" onclick="logsToggleChip(this)">fail</button>
+              </div>
+            </div>
+            <div class="logs-toolbar-row2">
+              <div class="logs-search-wrap">
+                <i class="ti ti-search logs-search-icon"></i>
+                <input type="text" class="logs-search" id="logs-search"
+                       placeholder="Search run ID or issue #…" autocomplete="off"
+                       oninput="logsOnSearch(this.value)">
+              </div>
+              <div class="logs-view-toggle">
+                <button class="logs-view-btn active" id="logs-view-timeline" onclick="logsSetView('timeline')">
+                  <i class="ti ti-timeline"></i> Timeline
+                </button>
+                <button class="logs-view-btn" id="logs-view-raw" onclick="logsSetView('raw')">
+                  <i class="ti ti-terminal-2"></i> Raw
+                </button>
+              </div>
+            </div>
+          </div>
+          <!-- Body -->
+          <div class="logs-body">
+            <div id="logs-timeline">
+              <div class="logs-empty" id="logs-empty">Loading runs…</div>
+            </div>
+            <div id="logs-raw" class="hidden">
+              <div class="logs-raw-stream" id="logs-raw-stream">
+                <div class="logs-raw-line" style="color:var(--text-sub)">Select a sprint run to view raw output…</div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -2563,6 +2706,11 @@ function switchTab(tab, pushHistory) {
     }
   }
 
+  // Pause logs polling when leaving logs tab
+  if (_activeTab === 'logs' && tab !== 'logs') {
+    logsDestroy();
+  }
+
   _activeTab = tab;
 
   // Update aria-selected + active class on tabs
@@ -2604,6 +2752,11 @@ function switchTab(tab, pushHistory) {
   // Init bulk-create tab on first visit
   if (tab === 'bulk-create') {
     _bcInitTab();
+  }
+
+  // Init logs tab
+  if (tab === 'logs') {
+    logsInit();
   }
 }
 
@@ -3185,6 +3338,11 @@ async function init() {
     _sprintMgmtLoaded = true;
     await loadSprintMgmt();
     _smgmtArInit();
+  }
+
+  // If logs tab was active before _projectData was available, now fetch runs
+  if (_activeTab === 'logs' && _logsState.runs.length === 0) {
+    logsFetchRuns();
   }
 }
 
@@ -7340,6 +7498,344 @@ function _smOnChange(sel) {
 }
 
 document.addEventListener('DOMContentLoaded', init);
+
+// ── Logs Tab (issue #420) ─────────────────────────────────────────────────────
+
+const _logsState = {
+  runs: [],
+  chips: { sprint_label: new Set(), agent_role: new Set(), event_level: new Set() },
+  search: '',
+  expanded: new Set(),
+  events: {},
+  loadingEvents: new Set(),
+  viewMode: 'timeline',
+  pollTimer: null,
+  liveEs: null,
+  liveRunId: null,
+};
+let _logsLoaded = false;
+let _logsSearchTimer = null;
+
+function logsInit() {
+  const searchEl = document.getElementById('logs-search');
+  if (searchEl && !_logsLoaded) searchEl.value = '';
+
+  if (!_logsLoaded) {
+    _logsLoaded = true;
+    logsFetchRuns();
+  }
+
+  if (!_logsState.pollTimer) {
+    _logsState.pollTimer = setInterval(logsFetchRuns, 15000);
+  }
+}
+
+function logsDestroy() {
+  if (_logsState.pollTimer) {
+    clearInterval(_logsState.pollTimer);
+    _logsState.pollTimer = null;
+  }
+  _logsDisconnectLive();
+}
+
+async function logsFetchRuns() {
+  if (!_projectData) return;
+  const project = _projectData.repo;
+  try {
+    const resp = await fetch(`/api/logs/runs?project=${encodeURIComponent(project)}&page_size=100`);
+    if (!resp.ok) return;
+    const data = await resp.json();
+    const newRuns = data.items || [];
+    const existingIds = new Set(_logsState.runs.map(r => r.run_id));
+    const added = newRuns.filter(r => !existingIds.has(r.run_id));
+
+    _logsState.runs = newRuns;
+    _logsPopulateSprintChips();
+
+    if (!_logsLoaded || existingIds.size === 0) {
+      logsRenderTimeline();
+    } else if (added.length > 0) {
+      for (const run of added) {
+        _logsAppendRunRow(run);
+      }
+    }
+
+    const emptyEl = document.getElementById('logs-empty');
+    if (emptyEl && newRuns.length === 0) {
+      emptyEl.textContent = 'No sprint runs found for this project.';
+    }
+  } catch (_) {}
+}
+
+function _logsPopulateSprintChips() {
+  const container = document.getElementById('logs-chips-sprint');
+  if (!container) return;
+  const labels = [...new Set(_logsState.runs.map(r => r.sprint_label))].sort();
+  const existing = new Set([...container.querySelectorAll('.logs-chip')].map(c => c.dataset.value));
+  for (const label of labels) {
+    if (existing.has(label)) continue;
+    const btn = document.createElement('button');
+    btn.className = 'logs-chip';
+    btn.dataset.group = 'sprint_label';
+    btn.dataset.value = label;
+    btn.onclick = () => logsToggleChip(btn);
+    btn.textContent = label;
+    container.appendChild(btn);
+  }
+}
+
+function logsToggleChip(btn) {
+  const group = btn.dataset.group;
+  const value = btn.dataset.value;
+  const set = _logsState.chips[group];
+  if (set.has(value)) { set.delete(value); btn.classList.remove('active'); }
+  else { set.add(value); btn.classList.add('active'); }
+  logsRenderTimeline();
+  if (_logsState.viewMode === 'raw') logsLoadRawView();
+}
+
+function logsOnSearch(value) {
+  clearTimeout(_logsSearchTimer);
+  _logsSearchTimer = setTimeout(() => {
+    _logsState.search = value.trim().toLowerCase();
+    logsRenderTimeline();
+  }, 280);
+}
+
+function logsSetView(mode) {
+  _logsState.viewMode = mode;
+  const timelineEl = document.getElementById('logs-timeline');
+  const rawEl = document.getElementById('logs-raw');
+  document.getElementById('logs-view-timeline')?.classList.toggle('active', mode === 'timeline');
+  document.getElementById('logs-view-raw')?.classList.toggle('active', mode === 'raw');
+  timelineEl?.classList.toggle('hidden', mode !== 'timeline');
+  rawEl?.classList.toggle('hidden', mode !== 'raw');
+  if (mode === 'raw') logsLoadRawView();
+}
+
+function _logsFilteredRuns() {
+  let runs = _logsState.runs;
+  const { sprint_label } = _logsState.chips;
+  const q = _logsState.search;
+  if (sprint_label.size > 0) runs = runs.filter(r => sprint_label.has(r.sprint_label));
+  if (q) runs = runs.filter(r => r.run_id.toLowerCase().includes(q) || r.sprint_label.toLowerCase().includes(q));
+  return runs;
+}
+
+function _logsFilterEvents(events) {
+  let filtered = events;
+  const { agent_role, event_level } = _logsState.chips;
+  const q = _logsState.search;
+  if (event_level.size > 0) filtered = filtered.filter(e => event_level.has(e.type));
+  if (agent_role.size > 0) filtered = filtered.filter(e => [...agent_role].some(r => e.message.toLowerCase().includes(r)));
+  if (q) filtered = filtered.filter(e => e.message.toLowerCase().includes(q));
+  return filtered;
+}
+
+function logsRenderTimeline() {
+  const container = document.getElementById('logs-timeline');
+  if (!container) return;
+  const runs = _logsFilteredRuns();
+  if (runs.length === 0) {
+    container.innerHTML = `<div class="logs-empty">${
+      _logsState.runs.length === 0 ? 'No sprint runs found.' : 'No runs match current filters.'
+    }</div>`;
+    return;
+  }
+  container.innerHTML = runs.map(_logsRunRowHtml).join('');
+  for (const runId of _logsState.expanded) {
+    const row = container.querySelector(`[data-run-id="${CSS.escape(runId)}"]`);
+    if (!row) continue;
+    row.classList.add('expanded');
+    const eventsEl = row.querySelector('.logs-run-events');
+    if (eventsEl && _logsState.events[runId]) {
+      eventsEl.innerHTML = _logsEventsHtml(_logsState.events[runId]);
+    }
+  }
+}
+
+function _logsRunRowHtml(run) {
+  const startDt = new Date(run.start_time);
+  const startStr = startDt.toLocaleDateString() + ' ' +
+    startDt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const badge = `<span class="logs-status-badge ${escHtml(run.outcome)}">${escHtml(run.outcome)}</span>`;
+  const isExpanded = _logsState.expanded.has(run.run_id);
+  const eventsContent = isExpanded && _logsState.events[run.run_id]
+    ? _logsEventsHtml(_logsState.events[run.run_id])
+    : '<div class="logs-empty" style="padding:6px 0;font-size:11px">Loading events…</div>';
+
+  return `<div class="logs-run-row${isExpanded ? ' expanded' : ''}" data-run-id="${escHtml(run.run_id)}" data-sprint="${escHtml(run.sprint_label)}" data-project="${escHtml(run.project)}">
+  <div class="logs-run-header" onclick="logsToggleRun(this)">
+    <i class="ti ti-chevron-right logs-run-chevron"></i>
+    <span class="logs-run-id">${escHtml(run.run_id)}</span>
+    <div class="logs-run-meta">
+      <span>${escHtml(startStr)}</span>
+      <span>${run.ticket_count} ticket${run.ticket_count !== 1 ? 's' : ''}</span>
+      ${badge}
+    </div>
+  </div>
+  <div class="logs-run-events" id="logs-events-${escHtml(run.run_id)}">${isExpanded ? eventsContent : ''}</div>
+</div>`;
+}
+
+function _logsEventsHtml(events) {
+  const filtered = _logsFilterEvents(events);
+  if (filtered.length === 0) {
+    return '<div class="logs-empty" style="padding:6px 0;font-size:11px">No events match current filters.</div>';
+  }
+  return filtered.map(e =>
+    `<div class="logs-event-line ${escHtml(e.type)}">` +
+    `<span class="logs-event-ts">${escHtml(e.timestamp)}</span>` +
+    `<span class="logs-event-msg">${escHtml(e.message)}</span>` +
+    `</div>`
+  ).join('');
+}
+
+async function logsToggleRun(headerEl) {
+  const row = headerEl.closest('[data-run-id]');
+  if (!row) return;
+  const runId = row.dataset.runId;
+  const sprintLabel = row.dataset.sprint;
+  const project = row.dataset.project;
+
+  if (_logsState.expanded.has(runId)) {
+    _logsState.expanded.delete(runId);
+    row.classList.remove('expanded');
+    if (_logsState.liveRunId === runId) _logsDisconnectLive();
+    return;
+  }
+
+  _logsState.expanded.add(runId);
+  row.classList.add('expanded');
+
+  const eventsEl = document.getElementById(`logs-events-${runId}`);
+
+  if (_logsState.events[runId]) {
+    if (eventsEl) eventsEl.innerHTML = _logsEventsHtml(_logsState.events[runId]);
+  } else if (!_logsState.loadingEvents.has(runId)) {
+    _logsState.loadingEvents.add(runId);
+    const events = await _logsFetchRunEvents(sprintLabel, project);
+    _logsState.loadingEvents.delete(runId);
+    _logsState.events[runId] = events;
+    const el = document.getElementById(`logs-events-${runId}`);
+    if (el && _logsState.expanded.has(runId)) el.innerHTML = _logsEventsHtml(events);
+  }
+
+  if (_smgmtRunningLabels && _smgmtRunningLabels.has(sprintLabel)) {
+    _logsConnectLive(runId, sprintLabel, project);
+  }
+}
+
+async function _logsFetchRunEvents(sprintLabel, project) {
+  try {
+    const url = `/api/sprints/${encodeURIComponent(sprintLabel)}/dispatch-log?project=${encodeURIComponent(project)}&tail_lines=500`;
+    const resp = await fetch(url);
+    if (!resp.ok) return [];
+    const data = await resp.json();
+    if (!data.found || !data.tail) return [];
+    return _logsParseLines(data.tail.split('\n'));
+  } catch (_) { return []; }
+}
+
+function _logsParseLines(lines) {
+  const entries = [];
+  for (const raw of lines) {
+    const s = raw.trim();
+    if (!s) continue;
+    let type = 'event';
+    if (s.startsWith('→') || s.startsWith('---') || s.includes('start_feature') || s.includes('Dispatching')) type = 'dispatch';
+    else if (s.startsWith('✓') || /promoted|merged|completed|done/i.test(s)) type = 'success';
+    else if (/warning|\[retry\]/i.test(s) || /^warn/i.test(s)) type = 'warn';
+    else if (/error|fail|skipped/i.test(s) || /^err/i.test(s)) type = 'fail';
+    entries.push({ timestamp: '—', type, message: s });
+  }
+  return entries;
+}
+
+function _logsAppendRunRow(run) {
+  const timeline = document.getElementById('logs-timeline');
+  if (!timeline) return;
+  const emptyEl = timeline.querySelector('.logs-empty');
+  if (emptyEl) emptyEl.remove();
+  const filteredRuns = _logsFilteredRuns();
+  if (!filteredRuns.find(r => r.run_id === run.run_id)) return;
+  const div = document.createElement('div');
+  div.innerHTML = _logsRunRowHtml(run);
+  timeline.insertBefore(div.firstElementChild, timeline.firstChild);
+}
+
+async function logsLoadRawView() {
+  const streamEl = document.getElementById('logs-raw-stream');
+  if (!streamEl) return;
+  let sprintLabel = null;
+  let project = _projectData?.repo;
+  if (_logsState.chips.sprint_label.size === 1) {
+    sprintLabel = [..._logsState.chips.sprint_label][0];
+    const run = _logsState.runs.find(r => r.sprint_label === sprintLabel);
+    if (run) project = run.project;
+  } else if (_logsState.runs.length > 0) {
+    sprintLabel = _logsState.runs[0].sprint_label;
+    project = _logsState.runs[0].project;
+  }
+  if (!sprintLabel) {
+    streamEl.innerHTML = '<div class="logs-raw-line" style="color:var(--text-sub)">Select a Sprint chip to load its raw log output.</div>';
+    return;
+  }
+  streamEl.innerHTML = '<div class="logs-raw-line" style="color:var(--text-sub)">Loading…</div>';
+  try {
+    const url = `/api/sprints/${encodeURIComponent(sprintLabel)}/dispatch-log?project=${encodeURIComponent(project)}&tail_lines=2000`;
+    const resp = await fetch(url);
+    if (!resp.ok) { streamEl.innerHTML = '<div class="logs-raw-line" style="color:var(--red)">Failed to load log.</div>'; return; }
+    const data = await resp.json();
+    if (!data.found || !data.tail) { streamEl.innerHTML = '<div class="logs-raw-line" style="color:var(--text-sub)">No log file found for this sprint.</div>'; return; }
+    streamEl.innerHTML = data.tail.split('\n').map(line => `<div class="logs-raw-line">${escHtml(line)}</div>`).join('');
+    streamEl.scrollTop = streamEl.scrollHeight;
+  } catch (_) { streamEl.innerHTML = '<div class="logs-raw-line" style="color:var(--red)">Error loading log.</div>'; }
+}
+
+function _logsConnectLive(runId, sprintLabel, project) {
+  _logsDisconnectLive();
+  _logsState.liveRunId = runId;
+  const url = `/api/sprints/${encodeURIComponent(sprintLabel)}/live/stream?project=${encodeURIComponent(project)}`;
+  const es = new EventSource(url);
+  _logsState.liveEs = es;
+
+  es.addEventListener('log_line', ev => {
+    try {
+      const entry = JSON.parse(ev.data);
+      if (!_logsState.events[runId]) _logsState.events[runId] = [];
+      _logsState.events[runId].push(entry);
+      if (_logsState.expanded.has(runId)) {
+        const eventsEl = document.getElementById(`logs-events-${runId}`);
+        if (eventsEl) {
+          const filtered = _logsFilterEvents([entry]);
+          if (filtered.length > 0) {
+            const div = document.createElement('div');
+            div.className = `logs-event-line ${escHtml(entry.type)}`;
+            div.innerHTML = `<span class="logs-event-ts">${escHtml(entry.timestamp)}</span><span class="logs-event-msg">${escHtml(entry.message)}</span>`;
+            eventsEl.appendChild(div);
+            eventsEl.scrollTop = eventsEl.scrollHeight;
+          }
+        }
+      }
+    } catch (_) {}
+  });
+
+  es.addEventListener('complete', () => {
+    _logsDisconnectLive();
+    logsFetchRuns();
+  });
+
+  es.onerror = () => _logsDisconnectLive();
+}
+
+function _logsDisconnectLive() {
+  if (_logsState.liveEs) {
+    _logsState.liveEs.close();
+    _logsState.liveEs = null;
+    _logsState.liveRunId = null;
+  }
+}
 </script>
 
 <!-- ── Inline multi-select action bar (rendered inside sprint list by JS) ── -->

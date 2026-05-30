@@ -237,7 +237,12 @@
       color: var(--text-sub);
       line-height: 1.4;
       flex-shrink: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 6px;
     }
+    .sb-footer-version { font-size: 10px; color: var(--text-sub); line-height: 1.4; }
 
     /* ── Main content area ── */
     .main-area {
@@ -2074,6 +2079,24 @@
       z-index: 200; display: none; white-space: nowrap;
     }
     #tickets-toast.success { border-color: var(--green); color: var(--green); }
+
+    /* ── Settings modal (issue #396) ── */
+    .sm-modal { width: min(420px, calc(100vw - 32px)); }
+    .sm-agent-row {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 10px 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .sm-agent-row:last-child { border-bottom: none; }
+    .sm-agent-name { font-size: 13px; font-weight: 500; color: var(--text); }
+    .sm-agent-label { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+    .sm-model-select {
+      padding: 6px 10px; border: 1px solid var(--border);
+      border-radius: 6px; background: var(--surface-2); color: var(--text);
+      font-size: 12px; font-family: inherit; cursor: pointer;
+      transition: border-color .15s;
+    }
+    .sm-model-select:focus { outline: none; border-color: var(--blue); }
   </style>
 </head>
 <body>
@@ -2117,8 +2140,11 @@
       </button>
 
     </div>
-    <footer class="sidebar-footer" id="sidebar-footer">
-      <!-- version · host populated by JS -->
+    <footer class="sidebar-footer">
+      <button class="btn-icon" onclick="openSettingsModal()" title="Global settings" aria-label="Global settings">
+        <i class="ti ti-settings"></i>
+      </button>
+      <span class="sb-footer-version" id="sidebar-footer"></span>
     </footer>
   </aside>
 
@@ -6144,7 +6170,9 @@ function _setupModals() {
   // Global Escape handler
   document.addEventListener('keydown', function(e) {
     if (e.key === 'Escape') {
-      if (!document.getElementById('ct-modal').classList.contains('hidden')) {
+      if (!document.getElementById('sm-modal').classList.contains('hidden')) {
+        closeSettingsModal();
+      } else if (!document.getElementById('ct-modal').classList.contains('hidden')) {
         closeTicketModalCancel();
       } else if (!document.getElementById('cl-modal').classList.contains('hidden')) {
         createLabelModalCancel();
@@ -7257,6 +7285,60 @@ document.addEventListener('keydown', function(e) {
   }
 });
 
+// ── Settings modal (issue #396) ──────────────────────────────────────────────
+const SM_AGENTS = [
+  { key: 'ba',               label: 'BA',               hint: 'Business Analyst',        default: 'claude-sonnet-4-6' },
+  { key: 'coder',            label: 'Coder',            hint: 'Feature implementation',   default: 'claude-sonnet-4-6' },
+  { key: 'tester',           label: 'Tester',           hint: 'Test runner & verifier',   default: 'claude-haiku-4-5'  },
+  { key: 'estimator',        label: 'Estimator',        hint: 'Per-issue sizing',         default: 'claude-haiku-4-5'  },
+  { key: 'sprint-estimator', label: 'Sprint Estimator', hint: 'Bulk sprint sizing',       default: 'claude-sonnet-4-6' },
+  { key: 'sprint-review',    label: 'Sprint Review',    hint: 'Sprint report generation', default: 'claude-haiku-4-5'  },
+];
+const SM_MODELS = ['claude-sonnet-4-6', 'claude-opus-4-8', 'claude-haiku-4-5'];
+const SM_STORAGE_KEY = 'commander_agent_models';
+
+function _smLoadModels() {
+  try { return JSON.parse(localStorage.getItem(SM_STORAGE_KEY) || '{}'); }
+  catch (_) { return {}; }
+}
+
+function getAgentModel(agentKey) {
+  const saved = _smLoadModels();
+  const agent = SM_AGENTS.find(a => a.key === agentKey);
+  return saved[agentKey] || (agent ? agent.default : SM_MODELS[0]);
+}
+
+function openSettingsModal() {
+  const saved = _smLoadModels();
+  const rows = SM_AGENTS.map(a => {
+    const current = saved[a.key] || a.default;
+    const opts = SM_MODELS.map(m =>
+      `<option value="${m}"${m === current ? ' selected' : ''}>${m}</option>`
+    ).join('');
+    return `<div class="sm-agent-row">
+      <div>
+        <div class="sm-agent-name">${a.label}</div>
+        <div class="sm-agent-label">${a.hint}</div>
+      </div>
+      <select class="sm-model-select" data-agent="${a.key}" onchange="_smOnChange(this)">${opts}</select>
+    </div>`;
+  }).join('');
+  document.getElementById('sm-body').innerHTML = rows;
+  document.getElementById('sm-backdrop').classList.remove('hidden');
+  document.getElementById('sm-modal').classList.remove('hidden');
+}
+
+function closeSettingsModal() {
+  document.getElementById('sm-backdrop').classList.add('hidden');
+  document.getElementById('sm-modal').classList.add('hidden');
+}
+
+function _smOnChange(sel) {
+  const saved = _smLoadModels();
+  saved[sel.dataset.agent] = sel.value;
+  localStorage.setItem(SM_STORAGE_KEY, JSON.stringify(saved));
+}
+
 document.addEventListener('DOMContentLoaded', init);
 </script>
 
@@ -7468,6 +7550,24 @@ document.addEventListener('DOMContentLoaded', init);
   <div class="modal-footer">
     <button class="btn-ghost" onclick="createLabelModalCancel()" type="button">Cancel</button>
     <button class="btn-primary" id="cl-submit-btn" onclick="createLabelModalSubmit()" type="button">Create label</button>
+  </div>
+</div>
+
+<!-- ── Global Settings modal (issue #396) ── -->
+<div class="modal-backdrop hidden" id="sm-backdrop" onclick="closeSettingsModal()"></div>
+<div class="modal sm-modal hidden" id="sm-modal"
+     role="dialog" aria-modal="true" aria-labelledby="sm-modal-title">
+  <div class="modal-header">
+    <span class="modal-title" id="sm-modal-title">
+      <i class="ti ti-settings" style="margin-right:8px;font-size:16px;vertical-align:-2px;"></i>Global Settings
+    </span>
+    <button class="modal-close" onclick="closeSettingsModal()" aria-label="Close">&times;</button>
+  </div>
+  <div class="modal-body" id="sm-body">
+    <!-- populated by openSettingsModal() -->
+  </div>
+  <div class="modal-footer">
+    <button class="btn-primary" onclick="closeSettingsModal()" type="button">Done</button>
   </div>
 </div>
 

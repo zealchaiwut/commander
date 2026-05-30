@@ -129,7 +129,7 @@ class TestTransitionReturnValue(unittest.TestCase):
             TicketState.IN_PROGRESS:  "in-progress",
             TicketState.SIT:          "SIT",
             TicketState.UAT:          "UAT",
-            TicketState.NEEDS_REWORK: "need-rework",
+            TicketState.NEEDS_REWORK: "needs-rework",
         }
         for state, label in state_label_map.items():
             view_response = MagicMock(

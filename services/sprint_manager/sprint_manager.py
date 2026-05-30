@@ -617,9 +617,10 @@ class AlertMode:
     EMAIL            = "email"
     DISCORD          = "discord"
     FILE             = "file"
+    NTFY             = "ntfy"
     NONE             = "none"
 
-    ALL_MODES = {DASHBOARD_BANNER, EMAIL, DISCORD, FILE, NONE}
+    ALL_MODES = {DASHBOARD_BANNER, EMAIL, DISCORD, FILE, NTFY, NONE}
 
 
 # ── data structures ───────────────────────────────────────────────────────────
@@ -938,6 +939,8 @@ def dispatch_alerts(
                 _alert_discord(title, body)
             elif mode == AlertMode.FILE:
                 _alert_file(title, body, alerts_dir=alerts_dir)
+            elif mode == AlertMode.NTFY:
+                _alert_ntfy(title, body, category)
         except Exception as e:
             structured_log.error("alert_dispatch_error", f"[alert:{mode}] error: {e}", mode=mode, exc=str(e))
 
@@ -996,6 +999,25 @@ def _alert_discord(title: str, body: str) -> None:
         webhook,
         data=payload,
         headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    urllib.request.urlopen(req, timeout=5)
+
+
+def _alert_ntfy(title: str, body: str, category: Optional[str] = None) -> None:
+    topic_url = os.environ.get("NTFY_TOPIC_URL", "")
+    if not topic_url:
+        return
+    priority = "4" if category in ("failure", "needs-rework") else "3"
+    payload  = body.encode()
+    req      = urllib.request.Request(
+        topic_url,
+        data=payload,
+        headers={
+            "Title":    title,
+            "Priority": priority,
+            "Tags":     category or "sprint",
+        },
         method="POST",
     )
     urllib.request.urlopen(req, timeout=5)

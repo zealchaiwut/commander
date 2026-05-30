@@ -7457,7 +7457,7 @@ const SM_STORAGE_KEY = 'commander_agent_models';
 
 function _smLoadModels() {
   try { return JSON.parse(localStorage.getItem(SM_STORAGE_KEY) || '{}'); }
-  catch (_) { return {}; }
+  catch (err) { console.warn('[commander] _smLoadModels: localStorage read failed', err); return {}; }
 }
 
 function getAgentModel(agentKey) {

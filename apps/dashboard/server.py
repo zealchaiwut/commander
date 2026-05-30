@@ -2466,18 +2466,23 @@ def _sprint_label_sort_key(label: str) -> tuple[int, int]:
     return (int(m.group(1)), int(m.group(2)) if m.group(2) else 0)
 
 
-def _next_sprint_sublabel(sprint_label: str) -> str:
-    """Compute the next sub-label for a sprint re-run.
+def _next_sprint_sublabel(sprint_label: str, existing_label_names: set[str]) -> str:
+    """Compute the next sub-label for a sprint re-run, skipping already-existing labels.
 
-    sprint-15   → sprint-15.1
-    sprint-15.3 → sprint-15.4
+    sprint-15   → sprint-15.1 (or sprint-15.2 if sprint-15.1 already exists)
+    sprint-15.3 → sprint-15.4 (or higher if those already exist)
     """
     m = re.match(r"^sprint-(\d+)(?:\.(\d+))?$", sprint_label)
     if not m:
         raise ValueError(f"Invalid sprint label: {sprint_label!r}")
     base = int(m.group(1))
     suffix = int(m.group(2)) if m.group(2) else 0
-    return f"sprint-{base}.{suffix + 1}"
+    candidate = suffix + 1
+    while True:
+        label = f"sprint-{base}.{candidate}"
+        if label not in existing_label_names:
+            return label
+        candidate += 1
 
 
 class SprintRunBody(BaseModel):
@@ -4634,8 +4639,9 @@ def rerun_sprint(sprint_label: str, project: str, body: SprintRerunBody):
             "skip_count": len(decisions),
         }
 
-    # Compute the sub-label for this re-run
-    sub_label = _next_sprint_sublabel(sprint_label)
+    # Compute the sub-label for this re-run, skipping any labels that already exist
+    existing_label_names = {lbl["name"] for lbl in github_client.list_labels(repo_name=project)}
+    sub_label = _next_sprint_sublabel(sprint_label, existing_label_names)
 
     # Create the sub-label on GitHub with the same color as the parent sprint label
     parent_color = github_client.get_label_color(sprint_label, repo_name=project) or "0075ca"

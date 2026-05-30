@@ -6122,6 +6122,11 @@ async function smgmtRerunSprint(label) {
     if (!res.ok) throw new Error(await res.text());
     const preview = await res.json();
 
+    if (preview.new_label) {
+      document.getElementById('smgmt-rerun-title').textContent =
+        `Re-run ${sprintLabelDisplay(label)} as ${preview.new_label}?`;
+    }
+
     const rows = [];
     if (preview.redispatch_count > 0) {
       const n = preview.redispatch_count;

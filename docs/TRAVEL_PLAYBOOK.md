@@ -66,31 +66,39 @@ on the previous one — do not skip or reorder.
 12. **Verify dashboard access from iPad on cellular** (disable WiFi before testing):
     Open `http://<mac-mini>.tail-xxxx.ts.net:8000` in browser. Dashboard must load.
 
-13. **Verify GitHub auth is valid.**
+13. **Verify ntfy push notifications reach your iPad.**
+    Send a test notification (replace `<your-topic>` with the value of `NTFY_TOPIC` in `.env`):
+    ```bash
+    source apps/dashboard/.env && curl -d "Commander travel test" ntfy.sh/$NTFY_TOPIC
+    ```
+    Expected: notification appears on your iPad within a few seconds. If it does not, confirm the ntfy
+    app is subscribed to `https://ntfy.sh/<your-topic>` and `NTFY_TOPIC` is set in `.env`.
+
+14. **Verify GitHub auth is valid.**
     ```bash
     gh auth status
     ```
     Expected: `Logged in to github.com as zealchaiwut`
 
-14. **Verify Claude Code auth is fresh.**
+15. **Verify Claude Code auth is fresh.**
     ```bash
     claude --version
     claude auth status
     ```
 
-15. **Verify dashboard health.**
+16. **Verify dashboard health.**
     ```bash
     curl -s http://localhost:8000/api/health | python3 -m json.tool
     ```
     Expected: `"status": "ok"`
 
-16. **Confirm backup gist is recent.**
+17. **Confirm backup gist is recent.**
     ```bash
     curl -s http://localhost:8000/api/backup/status
     ```
     Note the gist URL — save it in 1Password or a note on iPad.
 
-17. **Confirm no sprints are mid-run.** Do not leave a sprint in progress.
+18. **Confirm no sprints are mid-run.** Do not leave a sprint in progress.
     ```bash
     cat .commander/sprint.yaml
     ```

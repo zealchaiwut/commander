@@ -3472,6 +3472,11 @@ def kill_sprint(sprint_label: str, project: str):
     Unix only (macOS, Linux). Windows is not a supported platform for process
     termination — os.kill() with SIGTERM/SIGKILL is unavailable there.
     """
+    if sys.platform == "win32":
+        raise HTTPException(
+            status_code=501,
+            detail="Process termination via SIGTERM/SIGKILL is not supported on Windows. Run Commander on macOS or Linux.",
+        )
     if not _SPRINT_LABEL_RE.match(sprint_label):
         raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")
 

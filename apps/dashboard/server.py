@@ -528,7 +528,7 @@ def _check_gh_auth() -> None:
             scope_present=False,
             remediation="gh auth status",
         )
-    except Exception as exc:
+    except OSError as exc:
         _GH_AUTH_STATUS = {
             "ok": False,
             "event": "gh_auth_check_failed",
@@ -537,7 +537,7 @@ def _check_gh_auth() -> None:
         }
         _slog.warn(
             "gh_auth_check_failed",
-            f"gh auth check unexpected error: {exc}",
+            f"gh auth check OS error: {exc}",
             scope_required="repo",
             scope_present=False,
             remediation="Check gh CLI installation",

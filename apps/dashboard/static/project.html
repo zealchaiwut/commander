@@ -2873,20 +2873,36 @@ function updateProjectHeader(proj) {
   document.title = `Commander — ${proj.name || _slug}`;
 }
 
+// ── GitHub CLI auth warning banner (issue #424) ──────────────────────────────
+
+async function checkGhAuthStatus() {
+  try {
+    const res = await fetch('/api/gh-auth-status');
+    if (!res.ok) return;
+    const data = await res.json();
+    if (!data.ok) {
+      const banner = document.getElementById('gh-auth-banner');
+      if (!banner) return;
+      banner.textContent = `⚠ GitHub CLI: ${data.message}. Fix: ${data.remediation}`;
+      banner.style.display = 'block';
+    }
+  } catch { /* banner is optional */ }
+}
+
 // ── Sidebar footer ────────────────────────────────────────────────────────────
 async function updateSidebarFooter() {
   const footer = document.getElementById('sidebar-footer');
   if (!footer) return;
-  const host = window.location.host;
   try {
     const resp = await fetch('/api/version', { cache: 'no-store' });
     if (resp.ok) {
       const data = await resp.json();
-      footer.textContent = `v${data.version} · ${host} · build ${data.build}`;
+      const sha = data.git_sha && data.git_sha !== 'unknown' ? data.git_sha.slice(0, 7) : 'unknown';
+      footer.textContent = `v ${data.branch}@${sha} built ${data.build_timestamp}`;
       return;
     }
   } catch (_) { /* fall through */ }
-  footer.textContent = `v— · ${host}`;
+  footer.textContent = 'v unknown';
 }
 
 // ── Load home data ────────────────────────────────────────────────────────────
@@ -3274,6 +3290,7 @@ async function _prefetchFullRepo() {
 async function init() {
   initTheme();
   updateSidebarFooter();
+  checkGhAuthStatus().catch(() => {});
 
   const { slug, tab } = parseUrl();
 
@@ -8066,6 +8083,23 @@ function _logsDisconnectLive() {
     <button class="btn-primary" onclick="closeSettingsModal()" type="button">Done</button>
   </div>
 </div>
+
+<!-- ── GitHub CLI auth warning banner (issue #424) ── -->
+<div id="gh-auth-banner" style="
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  padding: 8px 16px;
+  background: #fef3c7;
+  border-bottom: 2px solid #d97706;
+  color: #92400e;
+  font-size: 13px;
+  z-index: 1000;
+  text-align: center;
+  font-family: monospace;
+"></div>
 
 </body>
 </html>

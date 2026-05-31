@@ -3032,6 +3032,90 @@ def get_sprint_management_issues(repo: str):
     }
 
 
+@app.get("/api/sprints/timeline")
+def get_sprint_timeline(project: str):
+    """Return Gantt-ready timeline data for all ran sprints in a project (issue #431).
+
+    Reads sprint-N-state.json files from the commander directory.
+    Each entry includes: sprint_label, display_name, state, start_date, end_date, ticket_count.
+
+    State values: "running" | "cancelled" | "completed"
+    """
+    project_root = _project_root_path(project)
+    commander = _commander_dir(project_root)
+    sprints_dir = commander / "sprints"
+
+    if not sprints_dir.exists():
+        return {"sprints": []}
+
+    def _parse_iso_ts(s: Optional[str]) -> Optional[float]:
+        if not s:
+            return None
+        try:
+            dt = datetime.fromisoformat(s.rstrip("Z"))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt.timestamp()
+        except Exception:
+            return None
+
+    def _to_iso(ts: float) -> str:
+        return datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    results = []
+    state_label_re = re.compile(r"^sprint-(\d+(?:\.\d+)?)-state\.json$")
+
+    for state_file in sprints_dir.glob("sprint-*-state.json"):
+        m = state_label_re.match(state_file.name)
+        if not m:
+            continue
+        sprint_num_str = m.group(1)
+        sprint_label = f"sprint-{sprint_num_str}"
+
+        try:
+            state_data = json.loads(state_file.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            continue
+
+        start_ts_str = state_data.get("start_timestamp")
+        start_ts = _parse_iso_ts(start_ts_str)
+        if start_ts is None:
+            continue
+
+        wall_clock = state_data.get("wall_clock_secs", 0.0) or 0.0
+        issues = state_data.get("issues", [])
+        ticket_count = len(issues)
+
+        is_running = _is_sprint_running(project_root, sprint_label)
+
+        if is_running:
+            state = "running"
+            end_ts = datetime.now(timezone.utc).timestamp()
+        else:
+            # Check cancelled flag from sprint JSON
+            json_path = _sprint_json_path(project_root, sprint_label)
+            sprint_json = _sprint_json_read(json_path)
+            if sprint_json.get("status") == "cancelled":
+                state = "cancelled"
+            else:
+                state = "completed"
+            end_ts = start_ts + wall_clock if wall_clock > 0 else start_ts
+
+        results.append({
+            "label": sprint_label,
+            "display_name": f"Sprint {sprint_num_str}",
+            "state": state,
+            "start_date": _to_iso(start_ts),
+            "end_date": _to_iso(end_ts),
+            "ticket_count": ticket_count,
+        })
+
+    # Sort chronologically by start_date
+    results.sort(key=lambda s: s["start_date"])
+
+    return {"sprints": results}
+
+
 @app.get("/api/sprints/summaries")
 def get_sprint_summaries(project: str):
     """Return all sprint-summary issues for a project (open + optionally closed).

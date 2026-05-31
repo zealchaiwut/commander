@@ -2479,6 +2479,70 @@
       font-size: 13px; font-family: inherit; transition: border-color .15s;
     }
     .settings-input:focus, .settings-select:focus { outline: none; border-color: var(--blue); }
+
+    /* ── Timeline / Gantt tab (issue #431) ── */
+    #pane-timeline { overflow-y: auto; }
+    .gantt-wrap { padding: 28px; }
+    .gantt-empty {
+      display: flex; align-items: center; justify-content: center;
+      height: 180px; color: var(--text-sub); font-size: 14px; gap: 8px;
+    }
+    .gantt-scroller { overflow-x: auto; overflow-y: hidden; }
+    .gantt-chart {
+      position: relative; min-width: 600px;
+    }
+    .gantt-row {
+      display: flex; align-items: center; margin-bottom: 10px; min-height: 36px;
+    }
+    .gantt-label {
+      width: 84px; flex-shrink: 0; font-size: 12px; font-weight: 600;
+      color: var(--text); text-align: right; padding-right: 12px;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .gantt-track {
+      flex: 1; position: relative; height: 32px; background: var(--surface-2);
+      border-radius: 4px; overflow: visible;
+    }
+    .gantt-bar {
+      position: absolute; top: 4px; height: 24px; border-radius: 4px;
+      min-width: 4px; cursor: default;
+      transition: filter .15s, box-shadow .15s;
+    }
+    .gantt-bar:hover { filter: brightness(1.08); box-shadow: 0 2px 8px rgba(0,0,0,.18); }
+    .gantt-bar--running  { background: var(--green); }
+    .gantt-bar--completed{ background: var(--steel); }
+    .gantt-bar--has_rework { background: var(--yellow); }
+    .gantt-bar--cancelled{ background: var(--amber); }
+    .gantt-bar-label {
+      position: absolute; top: 50%; transform: translateY(-50%);
+      left: 8px; font-size: 10px; font-weight: 600; color: #fff;
+      white-space: nowrap; pointer-events: none; line-height: 1;
+    }
+    .gantt-tooltip {
+      position: fixed; z-index: 9999;
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 8px; padding: 10px 14px; box-shadow: 0 4px 16px rgba(0,0,0,.16);
+      font-size: 12px; pointer-events: none; max-width: 260px;
+      display: none;
+    }
+    .gantt-tooltip.visible { display: block; }
+    .gantt-tooltip-name { font-weight: 700; font-size: 13px; color: var(--text); margin-bottom: 6px; }
+    .gantt-tooltip-row { display: flex; justify-content: space-between; gap: 16px; color: var(--text-muted); margin-bottom: 3px; }
+    .gantt-tooltip-row:last-child { margin-bottom: 0; }
+    .gantt-tooltip-key { color: var(--text-sub); }
+    .gantt-tooltip-outcome {
+      display: inline-block; padding: 1px 7px; border-radius: 10px;
+      font-size: 11px; font-weight: 600;
+    }
+    .gantt-tooltip-outcome--running   { background: var(--green-bg); color: var(--green); }
+    .gantt-tooltip-outcome--completed { background: var(--steel-bg); color: var(--steel); }
+    .gantt-tooltip-outcome--has_rework{ background: var(--yellow-bg); color: var(--yellow); }
+    .gantt-tooltip-outcome--cancelled { background: var(--amber-bg); color: var(--amber); }
+    .gantt-axis {
+      display: flex; margin-left: 84px; padding-bottom: 4px;
+      border-bottom: 1px solid var(--border); margin-bottom: 10px;
+      font-size: 10px; color: var(--text-muted); user-select: none;
+    }
   </style>
 </head>
 <body>
@@ -2584,6 +2648,10 @@
         <button class="stab" role="tab" id="stab-bulk-create"
                 aria-selected="false" onclick="switchTab('bulk-create')">
           <i class="ti ti-stack-2"></i>Bulk Create<span id="bc-tab-badge" class="bc-tab-badge hidden"></span>
+        </button>
+        <button class="stab" role="tab" id="stab-timeline"
+                aria-selected="false" onclick="switchTab('timeline')">
+          <i class="ti ti-timeline-event"></i>Timeline
         </button>
         <button class="stab disabled" role="tab" id="stab-sprint-history"
                 aria-selected="false" aria-disabled="true"
@@ -2905,6 +2973,11 @@
 
       </div><!-- /pane-bulk-create -->
 
+      <!-- Timeline tab (issue #431) -->
+      <div class="tab-pane" id="pane-timeline" role="tabpanel" aria-labelledby="stab-timeline">
+        <div id="gantt-wrap"></div>
+      </div>
+
     </div>
   </div>
 
@@ -3213,6 +3286,7 @@ function parseUrl() {
   const tab = (rawTab === 'tickets')     ? 'tickets'
             : (rawTab === 'logs')        ? 'logs'
             : (rawTab === 'bulk-create') ? 'bulk-create'
+            : (rawTab === 'timeline')    ? 'timeline'
             : 'sprint-mgmt';
   return { slug, tab };
 }
@@ -3271,7 +3345,7 @@ function switchTab(tab, pushHistory) {
   _activeTab = tab;
 
   // Update aria-selected + active class on tabs
-  ['sprint-mgmt', 'tickets', 'logs', 'bulk-create'].forEach(t => {
+  ['sprint-mgmt', 'tickets', 'logs', 'bulk-create', 'timeline'].forEach(t => {
     const btn = document.getElementById('stab-' + t);
     if (!btn) return;
     const isActive = t === tab;
@@ -3280,7 +3354,7 @@ function switchTab(tab, pushHistory) {
   });
 
   // Show/hide panes
-  ['sprint-mgmt', 'tickets', 'logs', 'bulk-create'].forEach(t => {
+  ['sprint-mgmt', 'tickets', 'logs', 'bulk-create', 'timeline'].forEach(t => {
     const pane = document.getElementById('pane-' + t);
     if (pane) pane.classList.toggle('active', t === tab);
   });
@@ -3315,11 +3389,16 @@ function switchTab(tab, pushHistory) {
   if (tab === 'logs') {
     logsInit();
   }
+
+  // Init timeline tab
+  if (tab === 'timeline') {
+    ganttInit();
+  }
 }
 
 // ── Keyboard navigation for sub-tabs ─────────────────────────────────────────
 document.getElementById('sub-tabs').addEventListener('keydown', function(e) {
-  const enabledTabs = ['sprint-mgmt', 'tickets', 'logs', 'bulk-create'];
+  const enabledTabs = ['sprint-mgmt', 'tickets', 'logs', 'bulk-create', 'timeline'];
   const focused = document.activeElement;
   const currentId = focused ? focused.id.replace('stab-', '') : null;
   const currentIdx = enabledTabs.indexOf(currentId);
@@ -8928,6 +9007,168 @@ function _logsDisconnectLive() {
     });
 
     container.appendChild(toast);
+  };
+}());
+
+// ── Timeline / Gantt tab (issue #431) ────────────────────────────────────────
+(function () {
+  let _ganttLoaded = false;
+  let _ganttData   = null;
+  const _tt        = document.createElement('div');
+  _tt.className    = 'gantt-tooltip';
+  document.body.appendChild(_tt);
+
+  function _fmtDate(iso) {
+    if (!iso) return '—';
+    const d = new Date(iso);
+    return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+  }
+
+  function _outcomeLabel(state) {
+    if (state === 'running')    return 'Running';
+    if (state === 'has_rework') return 'Has Rework';
+    if (state === 'cancelled')  return 'Cancelled';
+    return 'Finished';
+  }
+
+  function _resolveState(label, baseState) {
+    // Enrich with outcome cache data if available (picks up has_rework from Sprint Mgmt)
+    const cached = _smgmtOutcomeCache[label];
+    if (cached && cached.state && cached.state !== 'running') return cached.state;
+    return baseState;
+  }
+
+  function _showTooltip(e, sprint) {
+    const state = _resolveState(sprint.label, sprint.state);
+    _tt.innerHTML = `
+      <div class="gantt-tooltip-name">${escHtml(sprint.display_name)}</div>
+      <div class="gantt-tooltip-row">
+        <span class="gantt-tooltip-key">Outcome</span>
+        <span class="gantt-tooltip-outcome gantt-tooltip-outcome--${escHtml(state)}">${escHtml(_outcomeLabel(state))}</span>
+      </div>
+      <div class="gantt-tooltip-row">
+        <span class="gantt-tooltip-key">Tickets</span>
+        <span>${sprint.ticket_count}</span>
+      </div>
+      <div class="gantt-tooltip-row">
+        <span class="gantt-tooltip-key">Start</span>
+        <span>${escHtml(_fmtDate(sprint.start_date))}</span>
+      </div>
+      <div class="gantt-tooltip-row">
+        <span class="gantt-tooltip-key">End</span>
+        <span>${escHtml(_fmtDate(sprint.end_date))}</span>
+      </div>`;
+    _tt.classList.add('visible');
+    _positionTooltip(e);
+  }
+
+  function _positionTooltip(e) {
+    const margin = 12;
+    const tw = _tt.offsetWidth  || 220;
+    const th = _tt.offsetHeight || 110;
+    let left = e.clientX + margin;
+    let top  = e.clientY + margin;
+    if (left + tw > window.innerWidth)  left = e.clientX - tw - margin;
+    if (top  + th > window.innerHeight) top  = e.clientY - th - margin;
+    _tt.style.left = left + 'px';
+    _tt.style.top  = top  + 'px';
+  }
+
+  function _hideTooltip() {
+    _tt.classList.remove('visible');
+  }
+
+  function _renderGantt(sprints) {
+    const wrap = document.getElementById('gantt-wrap');
+    if (!wrap) return;
+
+    if (!sprints || sprints.length === 0) {
+      wrap.innerHTML = '<div class="gantt-empty"><i class="ti ti-timeline-event"></i>No sprints to display</div>';
+      return;
+    }
+
+    // Compute time domain
+    const minTs = Math.min(...sprints.map(s => new Date(s.start_date).getTime()));
+    const maxTs = Math.max(...sprints.map(s => new Date(s.end_date).getTime()));
+    const span  = maxTs - minTs || 1;
+
+    const rows = sprints.map(sprint => {
+      const state    = _resolveState(sprint.label, sprint.state);
+      const startPct = ((new Date(sprint.start_date).getTime() - minTs) / span) * 100;
+      const widthPct = Math.max(
+        0.5,
+        ((new Date(sprint.end_date).getTime() - new Date(sprint.start_date).getTime()) / span) * 100
+      );
+
+      return `<div class="gantt-row">
+        <div class="gantt-label" title="${escHtml(sprint.display_name)}">${escHtml(sprint.display_name)}</div>
+        <div class="gantt-track">
+          <div class="gantt-bar gantt-bar--${escHtml(state)}"
+               style="left:${startPct.toFixed(2)}%;width:${widthPct.toFixed(2)}%"
+               data-label="${escHtml(sprint.label)}">
+            ${widthPct > 8 ? `<span class="gantt-bar-label">${escHtml(sprint.display_name)}</span>` : ''}
+          </div>
+        </div>
+      </div>`;
+    }).join('');
+
+    const axisLeft  = _fmtDate(sprints[0].start_date);
+    const axisRight = _fmtDate(sprints[sprints.length - 1].end_date);
+
+    wrap.innerHTML = `
+      <div class="gantt-wrap">
+        <div class="gantt-axis">
+          <span style="flex:0 0 auto">${escHtml(axisLeft)}</span>
+          <span style="flex:1"></span>
+          <span style="flex:0 0 auto">${escHtml(axisRight)}</span>
+        </div>
+        <div class="gantt-scroller">
+          <div class="gantt-chart">${rows}</div>
+        </div>
+      </div>`;
+
+    // Tooltip event delegation
+    const chart = wrap.querySelector('.gantt-chart');
+    if (chart) {
+      chart.addEventListener('mouseover', function(e) {
+        const bar = e.target.closest('.gantt-bar');
+        if (!bar) return;
+        const label = bar.dataset.label;
+        const sprint = _ganttData && _ganttData.find(s => s.label === label);
+        if (sprint) _showTooltip(e, sprint);
+      });
+      chart.addEventListener('mousemove', function(e) {
+        if (_tt.classList.contains('visible')) _positionTooltip(e);
+      });
+      chart.addEventListener('mouseout', function(e) {
+        if (!e.target.closest('.gantt-bar')) _hideTooltip();
+        else if (e.relatedTarget && !e.relatedTarget.closest('.gantt-bar')) _hideTooltip();
+      });
+    }
+  }
+
+  window.ganttInit = async function() {
+    if (_ganttLoaded) {
+      // Re-render to pick up any newly cached outcome states
+      if (_ganttData) _renderGantt(_ganttData);
+      return;
+    }
+    const repo = _cachedFullRepo[_slug];
+    if (!repo) return;
+
+    const wrap = document.getElementById('gantt-wrap');
+    if (wrap) wrap.innerHTML = '<div class="gantt-empty"><i class="ti ti-loader" style="animation:bc-badge-spin .9s linear infinite;display:inline-block"></i>Loading timeline…</div>';
+
+    try {
+      const resp = await fetch('/api/sprints/timeline?project=' + encodeURIComponent(repo));
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      const data = await resp.json();
+      _ganttLoaded = true;
+      _ganttData   = data.sprints || [];
+      _renderGantt(_ganttData);
+    } catch (err) {
+      if (wrap) wrap.innerHTML = '<div class="gantt-empty">Failed to load timeline.</div>';
+    }
   };
 }());
 </script>

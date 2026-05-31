@@ -469,6 +469,89 @@
     /* Sprint Mgmt pane manages its own padding via toolbar + smgmt-content */
     #pane-sprint-mgmt { padding: 0; }
 
+    /* ── Compare Sprints tab (issue #435) ── */
+    .cmp-page-hdr { margin-bottom: 24px; }
+    .cmp-page-hdr h2 { font-size: 18px; font-weight: 700; margin: 0 0 4px; }
+    .cmp-page-hdr p  { font-size: 13px; color: var(--text-sub); margin: 0; }
+    .cmp-picker-row {
+      display: flex; align-items: center; gap: 12px;
+      margin-bottom: 28px; flex-wrap: wrap;
+    }
+    .cmp-picker-label { font-size: 13px; font-weight: 600; color: var(--text-sub); white-space: nowrap; }
+    .cmp-picker-select {
+      appearance: none; background: var(--surface); color: var(--text);
+      border: 1px solid var(--border); border-radius: 6px;
+      padding: 7px 32px 7px 10px; font-size: 13px; cursor: pointer;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236b7280' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+      background-repeat: no-repeat; background-position: right 10px center; min-width: 160px;
+    }
+    .cmp-picker-select:focus { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .cmp-picker-vs { font-size: 13px; font-weight: 700; color: var(--text-sub); padding: 0 4px; }
+    .cmp-warn-banner {
+      display: flex; align-items: center; gap: 8px;
+      background: color-mix(in srgb, #f59e0b 12%, transparent);
+      border: 1px solid color-mix(in srgb, #f59e0b 40%, transparent);
+      border-radius: 6px; padding: 10px 14px; font-size: 13px; margin-bottom: 20px;
+    }
+    .cmp-warn-banner .ti { color: #f59e0b; flex-shrink: 0; }
+    .cmp-columns {
+      display: grid; grid-template-columns: 1fr 1fr;
+      gap: 16px; margin-bottom: 32px;
+    }
+    @media (max-width: 680px) { .cmp-columns { grid-template-columns: 1fr; } }
+    .cmp-col {
+      border: 1px solid var(--border); border-radius: 8px;
+      padding: 20px; background: var(--surface);
+    }
+    .cmp-col-hdr {
+      display: flex; align-items: center; gap: 10px;
+      margin-bottom: 16px;
+    }
+    .cmp-col-label { font-size: 16px; font-weight: 700; flex: 1; }
+    .cmp-badge {
+      display: inline-flex; align-items: center; gap: 4px;
+      padding: 3px 8px; border-radius: 20px; font-size: 11px; font-weight: 700;
+      text-transform: uppercase; letter-spacing: .04em;
+    }
+    .cmp-badge-success { background: color-mix(in srgb, #16a34a 15%, transparent); color: #16a34a; }
+    .cmp-badge-partial  { background: color-mix(in srgb, #f59e0b 15%, transparent); color: #d97706; }
+    .cmp-badge-failed   { background: color-mix(in srgb, #dc2626 15%, transparent); color: #dc2626; }
+    .cmp-badge-unknown  { background: color-mix(in srgb, #6b7280 15%, transparent); color: #6b7280; }
+    .cmp-metrics { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .cmp-metric {
+      background: var(--bg); border-radius: 6px; padding: 12px;
+    }
+    .cmp-metric-val { font-size: 20px; font-weight: 700; line-height: 1.1; }
+    .cmp-metric-lbl { font-size: 11px; color: var(--text-sub); margin-top: 4px; }
+    .cmp-section-title {
+      font-size: 13px; font-weight: 700; color: var(--text-sub);
+      text-transform: uppercase; letter-spacing: .06em; margin: 0 0 12px;
+    }
+    .cmp-ticket-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .cmp-ticket-table thead th {
+      text-align: left; padding: 8px 12px;
+      font-size: 11px; font-weight: 700; color: var(--text-sub);
+      border-bottom: 1px solid var(--border); text-transform: uppercase; letter-spacing: .05em;
+    }
+    .cmp-ticket-table tbody td {
+      padding: 9px 12px; border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+      vertical-align: middle;
+    }
+    .cmp-ticket-table tbody tr:last-child td { border-bottom: none; }
+    .cmp-ticket-table tbody tr:hover { background: color-mix(in srgb, var(--accent) 6%, transparent); }
+    .cmp-ticket-num { color: var(--text-sub); font-size: 11px; }
+    .cmp-cell-done    { color: #16a34a; font-weight: 600; }
+    .cmp-cell-skipped { color: #f59e0b; font-weight: 600; }
+    .cmp-cell-failed  { color: #dc2626; font-weight: 600; }
+    .cmp-cell-absent  { color: var(--text-sub); }
+    .cmp-empty-state {
+      text-align: center; padding: 64px 0; color: var(--text-sub);
+    }
+    .cmp-empty-state .ti { font-size: 40px; display: block; margin-bottom: 12px; color: var(--text-sub); }
+    .cmp-empty-state p { margin: 0; font-size: 14px; line-height: 1.6; }
+    @keyframes cmp-spin { to { transform: rotate(360deg); } }
+    .cmp-spin { display: inline-block; animation: cmp-spin .9s linear infinite; }
+
     /* Placeholder text */
     .placeholder-msg {
       padding: 48px 0;
@@ -2765,6 +2848,10 @@
                 aria-selected="false" onclick="switchTab('timeline')">
           <i class="ti ti-timeline-event"></i>Timeline
         </button>
+        <button class="stab" role="tab" id="stab-compare"
+                aria-selected="false" onclick="switchTab('compare')">
+          <i class="ti ti-git-compare"></i>Compare
+        </button>
         <button class="stab disabled" role="tab" id="stab-sprint-history"
                 aria-selected="false" aria-disabled="true"
                 onclick="return false" tabindex="-1">
@@ -3090,6 +3177,26 @@
         <div id="gantt-wrap"></div>
       </div>
 
+      <!-- Compare Sprints tab (issue #435) -->
+      <div class="tab-pane" id="pane-compare" role="tabpanel" aria-labelledby="stab-compare">
+        <div class="cmp-page-hdr">
+          <h2><i class="ti ti-git-compare" style="margin-right:8px;vertical-align:-2px;"></i>Compare Sprints</h2>
+          <p>Select two finished sprints to compare side-by-side.</p>
+        </div>
+        <div class="cmp-picker-row">
+          <span class="cmp-picker-label">Sprint A</span>
+          <select class="cmp-picker-select" id="cmp-select-a" onchange="cmpOnPickerChange()">
+            <option value="">— select sprint —</option>
+          </select>
+          <span class="cmp-picker-vs">vs</span>
+          <span class="cmp-picker-label">Sprint B</span>
+          <select class="cmp-picker-select" id="cmp-select-b" onchange="cmpOnPickerChange()">
+            <option value="">— select sprint —</option>
+          </select>
+        </div>
+        <div id="cmp-result"></div>
+      </div>
+
     </div>
   </div>
 
@@ -3407,10 +3514,13 @@ function parseUrl() {
   const slug = decodeURIComponent(m[1]);
   const rawTab = m[2] || '';
   // sprint-history is disabled → redirect to sprint-mgmt
+  const hash = window.location.hash;
   const tab = (rawTab === 'tickets')     ? 'tickets'
             : (rawTab === 'logs')        ? 'logs'
             : (rawTab === 'bulk-create') ? 'bulk-create'
             : (rawTab === 'timeline')    ? 'timeline'
+            : (rawTab === 'compare')     ? 'compare'
+            : (hash === '#compare')      ? 'compare'
             : 'sprint-mgmt';
   return { slug, tab };
 }
@@ -3469,7 +3579,7 @@ function switchTab(tab, pushHistory) {
   _activeTab = tab;
 
   // Update aria-selected + active class on tabs
-  ['sprint-mgmt', 'tickets', 'logs', 'bulk-create', 'timeline'].forEach(t => {
+  ['sprint-mgmt', 'tickets', 'logs', 'bulk-create', 'timeline', 'compare'].forEach(t => {
     const btn = document.getElementById('stab-' + t);
     if (!btn) return;
     const isActive = t === tab;
@@ -3478,7 +3588,7 @@ function switchTab(tab, pushHistory) {
   });
 
   // Show/hide panes
-  ['sprint-mgmt', 'tickets', 'logs', 'bulk-create', 'timeline'].forEach(t => {
+  ['sprint-mgmt', 'tickets', 'logs', 'bulk-create', 'timeline', 'compare'].forEach(t => {
     const pane = document.getElementById('pane-' + t);
     if (pane) pane.classList.toggle('active', t === tab);
   });
@@ -3518,11 +3628,16 @@ function switchTab(tab, pushHistory) {
   if (tab === 'timeline') {
     ganttInit();
   }
+
+  // Init compare tab
+  if (tab === 'compare') {
+    compareInit();
+  }
 }
 
 // ── Keyboard navigation for sub-tabs ─────────────────────────────────────────
 document.getElementById('sub-tabs').addEventListener('keydown', function(e) {
-  const enabledTabs = ['sprint-mgmt', 'tickets', 'logs', 'bulk-create', 'timeline'];
+  const enabledTabs = ['sprint-mgmt', 'tickets', 'logs', 'bulk-create', 'timeline', 'compare'];
   const focused = document.activeElement;
   const currentId = focused ? focused.id.replace('stab-', '') : null;
   const currentIdx = enabledTabs.indexOf(currentId);
@@ -4379,6 +4494,12 @@ async function init() {
   // If logs tab was active before _projectData was available, now fetch runs
   if (_activeTab === 'logs' && _logsState.runs.length === 0) {
     logsFetchRuns();
+  }
+
+  // If compare tab loaded before _projectData was ready, re-init now with correct project
+  if (_activeTab === 'compare') {
+    _cmpInitialized = false;
+    compareInit();
   }
 }
 
@@ -9045,6 +9166,258 @@ function _logsDisconnectLive() {
     _logsState.liveEs = null;
     _logsState.liveRunId = null;
   }
+}
+
+// ── Compare Sprints tab (issue #435) ─────────────────────────────────────────
+
+let _cmpInitialized = false;
+let _cmpRuns = [];      // finished sprint summaries from /api/logs/runs
+let _cmpStateA = null;  // full state for sprint A
+let _cmpStateB = null;  // full state for sprint B
+let _cmpRunsWarnShown = false;
+
+async function compareInit() {
+  if (_cmpInitialized) {
+    // Re-entering tab — re-render in case project changed
+    _cmpRenderPickers();
+    return;
+  }
+  _cmpInitialized = true;
+  await _cmpLoadRuns();
+  _cmpRenderPickers();
+  // Check URL hash for pre-selected sprints (e.g. #compare?a=sprint-1&b=sprint-2)
+  const params = new URLSearchParams(window.location.hash.replace(/^#compare\??/, ''));
+  const a = params.get('a');
+  const b = params.get('b');
+  if (a && b) {
+    const selA = document.getElementById('cmp-select-a');
+    const selB = document.getElementById('cmp-select-b');
+    if (selA) selA.value = a;
+    if (selB) selB.value = b;
+    await _cmpLoadAndRender();
+  }
+}
+
+async function _cmpLoadRuns() {
+  _cmpRunsWarnShown = false;
+  try {
+    const project = _projectData ? _projectData.repo : _slug;
+    const params = project ? '?project=' + encodeURIComponent(project) + '&page_size=100' : '?page_size=100';
+    const res = await fetch('/api/logs/runs' + params);
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    _cmpRuns = (data.items || []).sort((a, b) => a.sprint_label.localeCompare(b.sprint_label, undefined, { numeric: true }));
+  } catch (e) {
+    _cmpRuns = [];
+    _cmpRunsWarnShown = true;
+  }
+}
+
+function _cmpRenderPickers() {
+  const selA = document.getElementById('cmp-select-a');
+  const selB = document.getElementById('cmp-select-b');
+  if (!selA || !selB) return;
+
+  const makeOptions = (selected) => {
+    let html = '<option value="">— select sprint —</option>';
+    for (const run of _cmpRuns) {
+      const sel = run.sprint_label === selected ? ' selected' : '';
+      html += `<option value="${escHtml(run.sprint_label)}"${sel}>${escHtml(run.sprint_label)}</option>`;
+    }
+    return html;
+  };
+
+  const prevA = selA.value;
+  const prevB = selB.value;
+  selA.innerHTML = makeOptions(prevA);
+  selB.innerHTML = makeOptions(prevB);
+
+  if (_cmpRuns.length < 2) {
+    document.getElementById('cmp-result').innerHTML = _cmpEmptyState(
+      'Two finished sprints required',
+      'At least two completed sprints are needed to compare. Run more sprints and come back.'
+    );
+  }
+}
+
+async function cmpOnPickerChange() {
+  await _cmpLoadAndRender();
+}
+
+async function _cmpLoadAndRender() {
+  const selA = document.getElementById('cmp-select-a');
+  const selB = document.getElementById('cmp-select-b');
+  const labelA = selA ? selA.value : '';
+  const labelB = selB ? selB.value : '';
+  const result = document.getElementById('cmp-result');
+
+  if (!labelA || !labelB) {
+    result.innerHTML = '';
+    return;
+  }
+  if (labelA === labelB) {
+    result.innerHTML = `<div class="cmp-warn-banner"><i class="ti ti-alert-triangle"></i>Select two different sprints to compare.</div>`;
+    return;
+  }
+
+  result.innerHTML = '<div class="placeholder-msg"><i class="ti ti-loader-2 cmp-spin"></i>Loading…</div>';
+
+  const project = _projectData ? _projectData.repo : _slug;
+  const qs = project ? '?project=' + encodeURIComponent(project) : '';
+  let warnMsg = '';
+
+  // Load state files for both sprints in parallel
+  const [resA, resB] = await Promise.all([
+    fetch(`/api/sprints/${encodeURIComponent(labelA)}/state-full${qs}`).catch(() => null),
+    fetch(`/api/sprints/${encodeURIComponent(labelB)}/state-full${qs}`).catch(() => null),
+  ]);
+
+  _cmpStateA = resA && resA.ok ? await resA.json().catch(() => null) : null;
+  _cmpStateB = resB && resB.ok ? await resB.json().catch(() => null) : null;
+
+  // Supplement with /api/logs/runs data if state-full unavailable
+  const runA = _cmpRuns.find(r => r.sprint_label === labelA) || null;
+  const runB = _cmpRuns.find(r => r.sprint_label === labelB) || null;
+
+  if (!_cmpStateA && !_cmpStateB) {
+    warnMsg = 'Sprint state files unavailable — showing partial data from run history only.';
+  } else if (!_cmpStateA || !_cmpStateB) {
+    const missing = !_cmpStateA ? labelA : labelB;
+    warnMsg = `State file for ${missing} unavailable — showing partial data.`;
+  }
+  if (_cmpRunsWarnShown) {
+    warnMsg = (warnMsg ? warnMsg + ' ' : '') + 'Agent dispatch data unavailable (could not reach /api/logs/runs).';
+  }
+
+  result.innerHTML = _cmpRenderPanel(labelA, labelB, _cmpStateA, _cmpStateB, runA, runB, warnMsg);
+}
+
+function _cmpRenderPanel(labelA, labelB, stateA, stateB, runA, runB, warnMsg) {
+  let html = '';
+  if (warnMsg) {
+    html += `<div class="cmp-warn-banner"><i class="ti ti-alert-triangle"></i>${escHtml(warnMsg)}</div>`;
+  }
+
+  html += '<div class="cmp-columns">';
+  html += _cmpColHtml(labelA, stateA, runA);
+  html += _cmpColHtml(labelB, stateB, runB);
+  html += '</div>';
+
+  html += '<p class="cmp-section-title"><i class="ti ti-list" style="margin-right:6px;"></i>Ticket diff</p>';
+  html += _cmpTicketTableHtml(labelA, labelB, stateA, stateB);
+
+  return html;
+}
+
+function _cmpColHtml(label, state, run) {
+  const issues   = state ? (state.issues || []) : [];
+  const shipped  = issues.filter(i => i.status === 'done').length;
+  const rejected = issues.filter(i => i.agent_status === 'failed' || i.failure_reason).length;
+  const skipped  = issues.filter(i => i.status === 'skipped' && i.agent_status !== 'failed').length;
+  const dispatches = state ? (state.dispatch_count || 0) : (run ? run.ticket_count : 0);
+
+  let duration = '—';
+  if (state && state.wall_clock_secs) {
+    duration = _cmpFmtDuration(state.wall_clock_secs);
+  } else if (run && run.start_time && run.end_time) {
+    const secs = (new Date(run.end_time) - new Date(run.start_time)) / 1000;
+    duration = _cmpFmtDuration(secs);
+  }
+
+  const outcome = state ? state.outcome : (run ? run.outcome : 'unknown');
+  const badge = _cmpBadgeHtml(outcome);
+
+  const ticketCount = issues.length || (run ? run.ticket_count : 0);
+
+  return `
+    <div class="cmp-col">
+      <div class="cmp-col-hdr">
+        <span class="cmp-col-label">${escHtml(label)}</span>
+        ${badge}
+      </div>
+      <div class="cmp-metrics">
+        <div class="cmp-metric"><div class="cmp-metric-val">${escHtml(String(duration))}</div><div class="cmp-metric-lbl">Duration</div></div>
+        <div class="cmp-metric"><div class="cmp-metric-val">${ticketCount}</div><div class="cmp-metric-lbl">Total tickets</div></div>
+        <div class="cmp-metric"><div class="cmp-metric-val" style="color:#16a34a">${shipped}</div><div class="cmp-metric-lbl">Shipped</div></div>
+        <div class="cmp-metric"><div class="cmp-metric-val" style="color:#dc2626">${rejected}</div><div class="cmp-metric-lbl">Rejected / failed</div></div>
+        <div class="cmp-metric"><div class="cmp-metric-val" style="color:#f59e0b">${skipped}</div><div class="cmp-metric-lbl">Skipped</div></div>
+        <div class="cmp-metric"><div class="cmp-metric-val">${dispatches}</div><div class="cmp-metric-lbl">Agent dispatches</div></div>
+      </div>
+    </div>`;
+}
+
+function _cmpBadgeHtml(outcome) {
+  const map = {
+    success: ['cmp-badge-success', 'ti-circle-check', 'Completed'],
+    partial:  ['cmp-badge-partial',  'ti-alert-triangle', 'Partial'],
+    failed:   ['cmp-badge-failed',   'ti-circle-x', 'Failed'],
+    unknown:  ['cmp-badge-unknown',  'ti-help-circle', 'Unknown'],
+  };
+  const [cls, icon, text] = map[outcome] || map.unknown;
+  return `<span class="cmp-badge ${cls}"><i class="ti ${icon}"></i>${text}</span>`;
+}
+
+function _cmpTicketTableHtml(labelA, labelB, stateA, stateB) {
+  const issuesA = stateA ? (stateA.issues || []) : [];
+  const issuesB = stateB ? (stateB.issues || []) : [];
+
+  if (!issuesA.length && !issuesB.length) {
+    return `<p style="color:var(--text-sub);font-size:13px;">No per-ticket data available.</p>`;
+  }
+
+  // Build union of all ticket numbers
+  const byNumA = Object.fromEntries(issuesA.map(i => [i.number, i]));
+  const byNumB = Object.fromEntries(issuesB.map(i => [i.number, i]));
+  const allNums = [...new Set([...Object.keys(byNumA), ...Object.keys(byNumB)])].sort((a, b) => Number(a) - Number(b));
+
+  let rows = '';
+  for (const num of allNums) {
+    const issA = byNumA[num];
+    const issB = byNumB[num];
+    const title = (issA || issB).title || '';
+    rows += `<tr>
+      <td><span class="cmp-ticket-num">#${escHtml(String(num))}</span></td>
+      <td>${escHtml(title)}</td>
+      <td>${_cmpTicketCell(issA)}</td>
+      <td>${_cmpTicketCell(issB)}</td>
+    </tr>`;
+  }
+
+  return `<div style="overflow-x:auto;">
+  <table class="cmp-ticket-table">
+    <thead><tr>
+      <th>#</th><th>Title</th>
+      <th>${escHtml(labelA)}</th>
+      <th>${escHtml(labelB)}</th>
+    </tr></thead>
+    <tbody>${rows}</tbody>
+  </table></div>`;
+}
+
+function _cmpTicketCell(issue) {
+  if (!issue) return '<span class="cmp-cell-absent">—</span>';
+  if (issue.status === 'done') return '<span class="cmp-cell-done">Shipped</span>';
+  if (issue.agent_status === 'failed' || issue.failure_reason) return '<span class="cmp-cell-failed">Failed</span>';
+  if (issue.status === 'skipped') return '<span class="cmp-cell-skipped">Skipped</span>';
+  return `<span style="color:var(--text-sub)">${escHtml(issue.status || 'pending')}</span>`;
+}
+
+function _cmpFmtDuration(secs) {
+  secs = Math.round(secs);
+  if (secs < 60) return secs + 's';
+  const m = Math.floor(secs / 60);
+  const s = secs % 60;
+  if (m < 60) return m + 'm ' + (s > 0 ? s + 's' : '');
+  const h = Math.floor(m / 60);
+  const rm = m % 60;
+  return h + 'h ' + (rm > 0 ? rm + 'm' : '');
+}
+
+function _cmpEmptyState(title, msg) {
+  return `<div class="cmp-empty-state">
+    <i class="ti ti-git-compare"></i>
+    <p><strong>${escHtml(title)}</strong><br>${escHtml(msg)}</p>
+  </div>`;
 }
 </script>
 

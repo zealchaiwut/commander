@@ -3781,6 +3781,47 @@ def get_dispatch_log(sprint_label: str, project: str, tail_lines: int = 200):
     return read_log("dispatch", project_root, label=sprint_label, tail_lines=tail_lines)
 
 
+@app.get("/api/sprints/{sprint_label}/state-full")
+def get_sprint_state_full(sprint_label: str, project: str):
+    """Return full sprint state including per-ticket issues for the comparison view (issue #435)."""
+    if not _SPRINT_LABEL_RE.match(sprint_label):
+        raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")
+
+    project_root = _project_root_path(project)
+    sprints_dir = _commander_dir(project_root) / "sprints"
+
+    if not sprints_dir.exists():
+        raise HTTPException(404, detail="No sprints directory found")
+
+    for state_path in sprints_dir.glob("sprint-*-state.json"):
+        try:
+            state_data = json.loads(state_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            continue
+        if state_data.get("sprint_label") != sprint_label:
+            continue
+
+        issues = state_data.get("issues") or []
+        dispatch_count = sum(1 for i in issues if i.get("coder_started_at") is not None)
+        has_failed = any(
+            i.get("agent_status") == "failed"
+            or i.get("failure_reason")
+            or i.get("status") == "skipped"
+            for i in issues
+        )
+        all_done = bool(issues) and all(i.get("status") == "done" for i in issues)
+        if all_done and not has_failed:
+            outcome = "success"
+        elif has_failed:
+            outcome = "partial"
+        else:
+            outcome = "unknown"
+
+        return {**state_data, "outcome": outcome, "dispatch_count": dispatch_count}
+
+    raise HTTPException(404, detail=f"Sprint state not found for {sprint_label!r}")
+
+
 @app.get("/api/sprints/{sprint_label}/issue/{issue_num}/log")
 def get_issue_log(sprint_label: str, project: str, issue_num: int, tail_lines: int = 200):
     """Return the last N lines of sprint-issue-<N>.log for the given sprint."""

@@ -432,7 +432,7 @@ def get_project_details(repo: str, agents: list[dict]) -> dict:
 
     # Always fetch all open issues (no sprint filter) — sorted by status priority then updatedAt
     try:
-        all_open = github_client.list_open_issues(repo_name=repo, limit=100)
+        all_open = github_client.list_open_issues_with_body(repo_name=repo, limit=100)
     except Exception:
         all_open = []
 
@@ -463,6 +463,7 @@ def get_project_details(repo: str, agents: list[dict]) -> dict:
             "feature_branch": feature_branches.get(issue["number"]),
             "sprint_label":   _ticket_sprint_label(issue),
             "labels":         [l["name"] for l in issue.get("labels", [])],
+            "body":           issue.get("body") or "",
         })
 
     proj_agents = _project_agents(proj, agents)

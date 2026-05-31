@@ -525,6 +525,67 @@
       flex-shrink: 0; white-space: nowrap;
     }
     .ticket-close-btn:hover { background: var(--red-bg); color: var(--red); border-color: var(--red); }
+    /* ── Dependency chips (issue #432) ── */
+    .ticket-row { flex-wrap: wrap; }
+    .dep-chips-row {
+      display: flex; align-items: center; gap: 5px; flex-wrap: wrap;
+      width: 100%; padding-bottom: 4px;
+    }
+    .dep-chip-sep { width: 10px; }
+    .dep-chip-label {
+      font-size: 10px; font-weight: 700; color: var(--text-sub);
+      text-transform: uppercase; letter-spacing: .06em; flex-shrink: 0;
+    }
+    .dep-chip {
+      font-size: 11px; font-weight: 600;
+      padding: 1px 7px; border-radius: 10px;
+      cursor: pointer; border: none; font-family: inherit;
+      transition: opacity .12s;
+    }
+    .dep-chip:hover { opacity: .72; }
+    .dep-chip--blocks    { background: var(--red-bg); color: var(--red); }
+    .dep-chip--blocked-by { background: var(--purple-bg); color: var(--purple); }
+    .dep-chip--missing   { opacity: .55; cursor: default; text-decoration: line-through; }
+    /* ── Ticket detail panel (issue #432) ── */
+    .tdp {
+      display: none; position: fixed;
+      top: 48px; right: 0; bottom: 0; width: 500px; max-width: 100%;
+      background: var(--bg); border-left: 1px solid var(--border);
+      z-index: 60; overflow-y: auto;
+      box-shadow: -4px 0 24px rgba(0,0,0,.12);
+    }
+    .tdp.open { display: block; }
+    .tdp-header {
+      display: flex; align-items: flex-start; gap: 10px;
+      padding: 16px 20px; border-bottom: 1px solid var(--border);
+      position: sticky; top: 0; background: var(--bg); z-index: 1;
+    }
+    .tdp-num { font-size: 11px; color: var(--text-sub); margin-bottom: 3px; }
+    .tdp-title { font-size: 15px; font-weight: 700; line-height: 1.35; }
+    .tdp-close {
+      width: 28px; height: 28px; flex-shrink: 0;
+      display: flex; align-items: center; justify-content: center;
+      border: 1px solid var(--border); border-radius: 6px; background: none;
+      color: var(--text-muted); cursor: pointer; font-family: inherit; font-size: 14px;
+    }
+    .tdp-close:hover { background: var(--surface-2); color: var(--text); }
+    .tdp-body { padding: 20px; }
+    .tdp-section { margin-bottom: 20px; }
+    .tdp-section-title {
+      font-size: 10px; font-weight: 700; letter-spacing: .1em;
+      text-transform: uppercase; color: var(--text-sub); margin-bottom: 10px;
+    }
+    .tdp-dep-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
+    .tdp-dep-row:last-child { margin-bottom: 0; }
+    .tdp-gh-link { font-size: 12px; color: var(--blue); text-decoration: none; }
+    .tdp-gh-link:hover { text-decoration: underline; }
+    .tdp-desc {
+      font-size: 12px; color: var(--text-muted); line-height: 1.65;
+      white-space: pre-wrap; word-break: break-word;
+      max-height: 320px; overflow-y: auto;
+      background: var(--surface-2); padding: 12px; border-radius: 6px;
+      border: 1px solid var(--border);
+    }
     .tickets-toolbar {
       display: flex; align-items: center; justify-content: space-between;
       margin-bottom: 12px;
@@ -3042,6 +3103,18 @@
   </div>
 </div>
 
+<!-- ── Ticket detail panel (issue #432) ── -->
+<div class="tdp" id="tdp" role="complementary" aria-label="Ticket detail">
+  <div class="tdp-header">
+    <div style="flex:1;min-width:0">
+      <div class="tdp-num" id="tdp-num"></div>
+      <div class="tdp-title" id="tdp-title"></div>
+    </div>
+    <button class="tdp-close" onclick="tdpClose()" aria-label="Close"><i class="ti ti-x"></i></button>
+  </div>
+  <div class="tdp-body" id="tdp-body"></div>
+</div>
+
 <script>
 // ── Theme (issue #430) ────────────────────────────────────────────────────────
 function _settingsKey(name) {
@@ -3621,6 +3694,109 @@ function startSidebarRefresh() {
   _sidebarRefreshTimer = setInterval(() => loadHomeData(true), 30000);
 }
 
+// ── Dependency chip parser (issue #432) ──────────────────────────────────────
+function _parseDeps(body) {
+  if (!body) return { blocks: [], blockedBy: [] };
+  const blocks = [];
+  const blockedBy = [];
+  for (const line of body.split('\n')) {
+    const m1 = line.match(/^blocks?:\s*(.+)/i);
+    if (m1) { for (const ref of m1[1].matchAll(/#(\d+)/g)) blocks.push(parseInt(ref[1], 10)); }
+    const m2 = line.match(/^blocked[\s-]by:\s*(.+)/i);
+    if (m2) { for (const ref of m2[1].matchAll(/#(\d+)/g)) blockedBy.push(parseInt(ref[1], 10)); }
+  }
+  return { blocks: [...new Set(blocks)], blockedBy: [...new Set(blockedBy)] };
+}
+
+function _depChipsHtml(deps, ticketNums) {
+  if (!deps.blocks.length && !deps.blockedBy.length) return '';
+  let html = '';
+  if (deps.blocks.length) {
+    html += `<span class="dep-chip-label">Blocks</span>`;
+    for (const n of deps.blocks) {
+      const missing = !ticketNums.has(n) ? ' dep-chip--missing' : '';
+      html += `<button class="dep-chip dep-chip--blocks${missing}" onclick="tdpOpen(${n})">#${n}</button>`;
+    }
+  }
+  if (deps.blockedBy.length) {
+    if (html) html += `<span class="dep-chip-sep"></span>`;
+    html += `<span class="dep-chip-label">Blocked by</span>`;
+    for (const n of deps.blockedBy) {
+      const missing = !ticketNums.has(n) ? ' dep-chip--missing' : '';
+      html += `<button class="dep-chip dep-chip--blocked-by${missing}" onclick="tdpOpen(${n})">#${n}</button>`;
+    }
+  }
+  return `<div class="dep-chips-row">${html}</div>`;
+}
+
+// ── Ticket detail panel (issue #432) ─────────────────────────────────────────
+let _tdpTickets = [];
+
+function tdpOpen(num) {
+  const panel   = document.getElementById('tdp');
+  const numEl   = document.getElementById('tdp-num');
+  const titleEl = document.getElementById('tdp-title');
+  const bodyEl  = document.getElementById('tdp-body');
+  if (!panel || !numEl || !titleEl || !bodyEl) return;
+
+  numEl.textContent = `#${num}`;
+  const ticket = _tdpTickets.find(t => t.number === num);
+
+  if (!ticket) {
+    titleEl.textContent = 'Ticket not found';
+    bodyEl.innerHTML = `<p style="color:var(--text-sub);font-size:13px;padding:4px 0">
+      Ticket #${num} is not in this project's open issues.</p>`;
+    panel.classList.add('open');
+    return;
+  }
+
+  titleEl.textContent = ticket.title;
+  const ticketNums = new Set(_tdpTickets.map(t => t.number));
+  const deps = _parseDeps(ticket.body || '');
+
+  let html = `<div class="tdp-section">
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+      <span class="ticket-status-pill ${escHtml(ticket.status)}">${escHtml(ticket.status)}</span>
+      <a class="tdp-gh-link" href="${escHtml(ticket.url)}" target="_blank" rel="noopener">View on GitHub →</a>
+    </div>
+  </div>`;
+
+  if (deps.blocks.length || deps.blockedBy.length) {
+    html += `<div class="tdp-section"><div class="tdp-section-title">Dependencies</div>`;
+    if (deps.blocks.length) {
+      html += `<div class="tdp-dep-row"><span class="dep-chip-label">Blocks</span>`;
+      for (const n of deps.blocks) {
+        const missing = !ticketNums.has(n) ? ' dep-chip--missing' : '';
+        html += `<button class="dep-chip dep-chip--blocks${missing}" onclick="tdpOpen(${n})">#${n}</button>`;
+      }
+      html += `</div>`;
+    }
+    if (deps.blockedBy.length) {
+      html += `<div class="tdp-dep-row"><span class="dep-chip-label">Blocked by</span>`;
+      for (const n of deps.blockedBy) {
+        const missing = !ticketNums.has(n) ? ' dep-chip--missing' : '';
+        html += `<button class="dep-chip dep-chip--blocked-by${missing}" onclick="tdpOpen(${n})">#${n}</button>`;
+      }
+      html += `</div>`;
+    }
+    html += `</div>`;
+  }
+
+  if (ticket.body) {
+    html += `<div class="tdp-section">
+      <div class="tdp-section-title">Description</div>
+      <div class="tdp-desc">${escHtml(ticket.body)}</div>
+    </div>`;
+  }
+
+  bodyEl.innerHTML = html;
+  panel.classList.add('open');
+}
+
+function tdpClose() {
+  document.getElementById('tdp')?.classList.remove('open');
+}
+
 // ── Tickets loading ───────────────────────────────────────────────────────────
 let _ticketsRepo = null;
 
@@ -3677,6 +3853,10 @@ function renderTickets(data, repo) {
   const ghUrl   = data.github_url || '#';
   const r = repo || _ticketsRepo || '';
 
+  // Cache tickets for detail panel & chip navigation (issue #432)
+  _tdpTickets = tickets;
+  const ticketNums = new Set(tickets.map(t => t.number));
+
   const groups = [
     { label: 'SIT',         items: tickets.filter(t => t.status === 'SIT') },
     { label: 'UAT',         items: tickets.filter(t => t.status === 'UAT') },
@@ -3689,14 +3869,19 @@ function renderTickets(data, repo) {
     ticketsHtml = '<div class="loading-msg">No open tickets.</div>';
   } else {
     ticketsHtml = groups.map(g => {
-      const rows = g.items.map(t => `
+      const rows = g.items.map(t => {
+        const deps = _parseDeps(t.body || '');
+        const chipsHtml = _depChipsHtml(deps, ticketNums);
+        return `
         <div class="ticket-row" id="ticket-row-${t.number}">
           <input type="checkbox" class="ticket-checkbox" data-num="${t.number}" data-title="${escHtml(t.title)}" onchange="_onTicketCheckbox(this)">
           <span class="ticket-status-pill ${escHtml(t.status)}">${escHtml(t.status)}</span>
           <a class="ticket-title" href="${escHtml(t.url)}" target="_blank" rel="noopener" title="${escHtml(t.title)}">${escHtml(t.title)}</a>
           <span class="ticket-num">#${t.number}</span>
           <button class="ticket-close-btn" data-num="${t.number}" data-title="${escHtml(t.title)}" onclick="openCloseTicketModal(this)">Close</button>
-        </div>`).join('');
+          ${chipsHtml}
+        </div>`;
+      }).join('');
       return `<div class="ticket-group-hdr">${escHtml(g.label)} · ${g.items.length}</div>${rows}`;
     }).join('');
   }

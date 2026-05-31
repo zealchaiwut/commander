@@ -161,6 +161,9 @@ Output ONLY the JSON object. No other text."""
                 structured_log.error("estimator_parse_error", "could not parse JSON from agent output", issue_num=issue_num, output_preview=result.stdout[:200])
                 return None
             parsed["issue_number"] = issue_num
+            # Normalize files_touched: absent or non-list → []
+            if not isinstance(parsed.get("files_touched"), list):
+                parsed["files_touched"] = []
             return parsed
 
         # Non-zero exit — transient failure; retry if attempts remain.

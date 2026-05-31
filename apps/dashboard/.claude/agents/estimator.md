@@ -17,6 +17,7 @@ You MUST output ONLY a valid JSON object with this exact schema:
   "estimated_hours": 3,
   "confidence": "medium",
   "files_likely_affected": ["backend/main.py", "backend/db.py", "requirements.txt"],
+  "files_touched": ["backend/main.py", "backend/db.py", "requirements.txt"],
   "depends_on": [],
   "blocks": [],
   "risk_flags": ["touches-db-schema", "new-dependency"],
@@ -25,6 +26,10 @@ You MUST output ONLY a valid JSON object with this exact schema:
 ```
 
 Output ONLY the JSON — no preamble, no explanation, no markdown wrapper.
+
+### `files_touched`
+
+A JSON array of repo-relative file paths that the implementation will likely modify. List every file that will need to be created or edited to satisfy the acceptance criteria. Use paths relative to the repo root (e.g. `services/sprint_manager/estimate_issue.py`). If no files can be predicted, return an empty array `[]`.
 
 ## Size scale
 
@@ -79,6 +84,7 @@ For an issue "Add login endpoint with JWT tokens":
   "estimated_hours": 2,
   "confidence": "high",
   "files_likely_affected": ["apps/dashboard/main.py", "apps/dashboard/auth.py", "requirements.txt"],
+  "files_touched": ["apps/dashboard/main.py", "apps/dashboard/auth.py", "requirements.txt"],
   "depends_on": [],
   "blocks": [],
   "risk_flags": ["new-dependency", "security-sensitive", "modifies-public-api"],

@@ -2777,6 +2777,10 @@ def _sprint_goal_path(project_root: Path, sprint_label: str) -> Path:
     return _commander_dir(project_root) / "sprints" / f"{sprint_label}-goal.txt"
 
 
+def _sprint_plan_path(project_root: Path, sprint_label: str) -> Path:
+    return _commander_dir(project_root) / "sprints" / f"{sprint_label}-plan.json"
+
+
 def _load_sprint_order(project_root: Path, all_sprint_labels: list[str]) -> list[str]:
     """Load sprint order from file; fill missing/new sprint labels in natural order."""
     order_path = _sprint_order_path(project_root)
@@ -3017,6 +3021,31 @@ def get_sprint_management_issues(repo: str):
     project_root = _project_root_path(repo)
     order = _load_sprint_order(project_root, non_empty_sprint_labels)
 
+    # Apply per-sprint plan.json ordering; fallback to ascending issue number (issue #441)
+    sprint_issues_map: dict[str, list] = {}
+    unassigned_issues = []
+    for iss in result_issues:
+        lbl = iss.get("sprint_label")
+        if lbl:
+            sprint_issues_map.setdefault(lbl, []).append(iss)
+        else:
+            unassigned_issues.append(iss)
+    ordered_result: list = []
+    for lbl, iss_list in sprint_issues_map.items():
+        plan_path = _sprint_plan_path(project_root, lbl)
+        if plan_path.exists():
+            try:
+                plan_order: list[int] = json.loads(plan_path.read_text(encoding="utf-8"))
+                plan_idx = {n: i for i, n in enumerate(plan_order)}
+                iss_list.sort(key=lambda i: plan_idx.get(i["number"], len(plan_order)))
+            except Exception:
+                iss_list.sort(key=lambda i: i["number"])
+        else:
+            iss_list.sort(key=lambda i: i["number"])
+        ordered_result.extend(iss_list)
+    ordered_result.extend(unassigned_issues)
+    result_issues = ordered_result
+
     # Placeholder sprint = lowest positive N such that no sprint-N label exists (issue #364)
     _used = set(sprints)
     placeholder_sprint = 1
@@ -3030,6 +3059,90 @@ def get_sprint_management_issues(repo: str):
         "empty_sprint_labels": empty_sprint_labels,
         "placeholder_sprint": placeholder_sprint,
     }
+
+
+@app.get("/api/sprints/timeline")
+def get_sprint_timeline(project: str):
+    """Return Gantt-ready timeline data for all ran sprints in a project (issue #431).
+
+    Reads sprint-N-state.json files from the commander directory.
+    Each entry includes: sprint_label, display_name, state, start_date, end_date, ticket_count.
+
+    State values: "running" | "cancelled" | "completed"
+    """
+    project_root = _project_root_path(project)
+    commander = _commander_dir(project_root)
+    sprints_dir = commander / "sprints"
+
+    if not sprints_dir.exists():
+        return {"sprints": []}
+
+    def _parse_iso_ts(s: Optional[str]) -> Optional[float]:
+        if not s:
+            return None
+        try:
+            dt = datetime.fromisoformat(s.rstrip("Z"))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt.timestamp()
+        except Exception:
+            return None
+
+    def _to_iso(ts: float) -> str:
+        return datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    results = []
+    state_label_re = re.compile(r"^sprint-(\d+(?:\.\d+)?)-state\.json$")
+
+    for state_file in sprints_dir.glob("sprint-*-state.json"):
+        m = state_label_re.match(state_file.name)
+        if not m:
+            continue
+        sprint_num_str = m.group(1)
+        sprint_label = f"sprint-{sprint_num_str}"
+
+        try:
+            state_data = json.loads(state_file.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            continue
+
+        start_ts_str = state_data.get("start_timestamp")
+        start_ts = _parse_iso_ts(start_ts_str)
+        if start_ts is None:
+            continue
+
+        wall_clock = state_data.get("wall_clock_secs", 0.0) or 0.0
+        issues = state_data.get("issues", [])
+        ticket_count = len(issues)
+
+        is_running = _is_sprint_running(project_root, sprint_label)
+
+        if is_running:
+            state = "running"
+            end_ts = datetime.now(timezone.utc).timestamp()
+        else:
+            # Check cancelled flag from sprint JSON
+            json_path = _sprint_json_path(project_root, sprint_label)
+            sprint_json = _sprint_json_read(json_path)
+            if sprint_json.get("status") == "cancelled":
+                state = "cancelled"
+            else:
+                state = "completed"
+            end_ts = start_ts + wall_clock if wall_clock > 0 else start_ts
+
+        results.append({
+            "label": sprint_label,
+            "display_name": f"Sprint {sprint_num_str}",
+            "state": state,
+            "start_date": _to_iso(start_ts),
+            "end_date": _to_iso(end_ts),
+            "ticket_count": ticket_count,
+        })
+
+    # Sort chronologically by start_date
+    results.sort(key=lambda s: s["start_date"])
+
+    return {"sprints": results}
 
 
 @app.get("/api/sprints/summaries")
@@ -3697,6 +3810,47 @@ def get_dispatch_log(sprint_label: str, project: str, tail_lines: int = 200):
     return read_log("dispatch", project_root, label=sprint_label, tail_lines=tail_lines)
 
 
+@app.get("/api/sprints/{sprint_label}/state-full")
+def get_sprint_state_full(sprint_label: str, project: str):
+    """Return full sprint state including per-ticket issues for the comparison view (issue #435)."""
+    if not _SPRINT_LABEL_RE.match(sprint_label):
+        raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")
+
+    project_root = _project_root_path(project)
+    sprints_dir = _commander_dir(project_root) / "sprints"
+
+    if not sprints_dir.exists():
+        raise HTTPException(404, detail="No sprints directory found")
+
+    for state_path in sprints_dir.glob("sprint-*-state.json"):
+        try:
+            state_data = json.loads(state_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            continue
+        if state_data.get("sprint_label") != sprint_label:
+            continue
+
+        issues = state_data.get("issues") or []
+        dispatch_count = sum(1 for i in issues if i.get("coder_started_at") is not None)
+        has_failed = any(
+            i.get("agent_status") == "failed"
+            or i.get("failure_reason")
+            or i.get("status") == "skipped"
+            for i in issues
+        )
+        all_done = bool(issues) and all(i.get("status") == "done" for i in issues)
+        if all_done and not has_failed:
+            outcome = "success"
+        elif has_failed:
+            outcome = "partial"
+        else:
+            outcome = "unknown"
+
+        return {**state_data, "outcome": outcome, "dispatch_count": dispatch_count}
+
+    raise HTTPException(404, detail=f"Sprint state not found for {sprint_label!r}")
+
+
 @app.get("/api/sprints/{sprint_label}/issue/{issue_num}/log")
 def get_issue_log(sprint_label: str, project: str, issue_num: int, tail_lines: int = 200):
     """Return the last N lines of sprint-issue-<N>.log for the given sprint."""
@@ -4247,6 +4401,26 @@ def reorder_sprint_tickets(sprint_label: str, body: SprintTicketReorderBody):
     return {"ok": True}
 
 
+@app.post("/api/sprints/{sprint_label}/plan")
+async def save_sprint_plan(sprint_label: str, project: str, request: Request):
+    """Persist ticket execution order to sprint-{label}-plan.json (issue #441)."""
+    if not _SPRINT_LABEL_RE.match(sprint_label):
+        raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(400, detail="Body must be a JSON array of integers")
+    if not isinstance(body, list) or not all(isinstance(n, int) for n in body):
+        raise HTTPException(400, detail="Body must be a JSON array of integers")
+    project_root = _project_root_path(project)
+    plan_path = _sprint_plan_path(project_root, sprint_label)
+    plan_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = plan_path.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(body), encoding="utf-8")
+    os.replace(str(tmp), str(plan_path))
+    return {"ok": True}
+
+
 class SprintDeleteBody(BaseModel):
     labels: list[str]  # list of sprint-N label names to delete
     project: str
@@ -4371,6 +4545,49 @@ def get_sprint_estimate(sprint_label: str, project: str):
         raise HTTPException(500, detail=f"Could not read estimate file: {e}")
 
     return data
+
+
+@app.get("/api/estimates/batch")
+def get_estimates_batch(project: str, issues: str = ""):
+    """Return summed estimated_hours for a list of issue numbers from .commander/estimates/.
+
+    Query params:
+      - project: repo slug (owner/repo)
+      - issues: comma-separated issue numbers, e.g. "431,432,433"
+
+    Returns {total_hours: float|null, complete: bool}.
+    complete=true and total_hours is the sum when every issue has an estimate file with
+    an estimated_hours value.  complete=false and total_hours is null when any issue is
+    missing or the estimates directory is absent/unreadable.
+    """
+    issue_nums = [int(p) for p in issues.split(",") if p.strip().isdigit()]
+
+    if not issue_nums:
+        return {"total_hours": 0.0, "complete": True}
+
+    try:
+        project_root = _project_root_path(project)
+        estimates_dir = _commander_dir(project_root) / "estimates"
+        if not estimates_dir.is_dir():
+            return {"total_hours": None, "complete": False}
+    except Exception:
+        return {"total_hours": None, "complete": False}
+
+    total = 0.0
+    for num in issue_nums:
+        path = estimates_dir / f"issue-{num}.json"
+        if not path.exists():
+            return {"total_hours": None, "complete": False}
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            h = data.get("estimated_hours")
+            if h is None:
+                return {"total_hours": None, "complete": False}
+            total += float(h)
+        except (json.JSONDecodeError, OSError, ValueError):
+            return {"total_hours": None, "complete": False}
+
+    return {"total_hours": total, "complete": True}
 
 
 @app.get("/api/sprints/{sprint_label}/state")

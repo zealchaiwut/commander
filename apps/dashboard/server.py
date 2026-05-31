@@ -528,7 +528,7 @@ def _check_gh_auth() -> None:
             scope_present=False,
             remediation="gh auth status",
         )
-    except Exception as exc:
+    except OSError as exc:
         _GH_AUTH_STATUS = {
             "ok": False,
             "event": "gh_auth_check_failed",
@@ -537,7 +537,7 @@ def _check_gh_auth() -> None:
         }
         _slog.warn(
             "gh_auth_check_failed",
-            f"gh auth check unexpected error: {exc}",
+            f"gh auth check OS error: {exc}",
             scope_required="repo",
             scope_present=False,
             remediation="Check gh CLI installation",
@@ -580,6 +580,16 @@ async def _periodic_orphan_sweep_loop() -> None:
             _sweep_orphan_pid_files()
         except Exception as exc:
             print(f"[periodic-sweep] unexpected error: {exc}")
+
+
+# ── Log event naming convention ──────────────────────────────────────────────
+# Event names use a <namespace>.<action> pattern with three namespaces:
+#   server.*  — server lifecycle events (startup, shutdown)
+#   route.*   — HTTP route handler events (entry, error)
+#   sprint.*  — sprint workflow events (dispatch)
+# The namespaces are intentionally distinct; route.* events carry request_id
+# and route/method fields, while server.* events carry environment/git metadata.
+# ─────────────────────────────────────────────────────────────────────────────
 
 
 @asynccontextmanager
@@ -626,6 +636,15 @@ async def lifespan(app: FastAPI):
             await t
         except asyncio.CancelledError:
             pass
+    _slog.event(
+        "server.shutdown",
+        project="dashboard",
+        request_id=str(uuid.uuid4()),
+        environment=ENVIRONMENT,
+        git_sha=_GIT_SHA,
+        git_branch=_GIT_BRANCH,
+        uptime_seconds=round(time.monotonic() - _start_time, 1),
+    )
 
 
 app = FastAPI(lifespan=lifespan)
@@ -2960,6 +2979,7 @@ def get_sprint_management_issues(repo: str):
         result_issues.append({
             "number": iss["number"],
             "title": iss["title"],
+            "body": iss.get("body", "") or "",
             "labels": iss.get("labels", []),
             "sprint": sprint_num,
             "sprint_label": found_sprint_label,
@@ -3466,7 +3486,16 @@ def get_all_running_sprints():
 
 @app.delete("/api/sprints/run/{sprint_label}", status_code=200)
 def kill_sprint(sprint_label: str, project: str):
-    """SIGTERM then SIGKILL the running sprint process for the given project/label."""
+    """SIGTERM then SIGKILL the running sprint process for the given project/label.
+
+    Unix only (macOS, Linux). Windows is not a supported platform for process
+    termination — os.kill() with SIGTERM/SIGKILL is unavailable there.
+    """
+    if sys.platform == "win32":
+        raise HTTPException(
+            status_code=501,
+            detail="Process termination via SIGTERM/SIGKILL is not supported on Windows. Run Commander on macOS or Linux.",
+        )
     if not _SPRINT_LABEL_RE.match(sprint_label):
         raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")
 
@@ -3490,7 +3519,7 @@ def kill_sprint(sprint_label: str, project: str):
                 pass
         raise HTTPException(404, detail=f"Invalid PID file for {sprint_label}")
 
-    # SIGTERM first, then wait up to 5 s for graceful exit, then SIGKILL
+    # Unix-only: SIGTERM first, wait up to 5 s for graceful exit, then SIGKILL
     if pid > 0:
         try:
             os.kill(pid, signal.SIGTERM)
@@ -3551,7 +3580,7 @@ def get_logs_runs(
         try:
             start_dt = datetime.fromisoformat(start_date)
             if start_dt.tzinfo is None:
-                start_dt = start_dt.replace(tzinfo=timezone.utc)
+                start_dt = start_dt.replace(tzinfo=timezone.utc)  # naive input: assume UTC
         except ValueError:
             raise HTTPException(
                 400,
@@ -3562,7 +3591,7 @@ def get_logs_runs(
         try:
             parsed_end = datetime.fromisoformat(end_date)
             if parsed_end.tzinfo is None:
-                parsed_end = parsed_end.replace(tzinfo=timezone.utc)
+                parsed_end = parsed_end.replace(tzinfo=timezone.utc)  # naive input: assume UTC
             # Date-only string: extend to end of day
             if "T" not in end_date:
                 parsed_end = parsed_end.replace(hour=23, minute=59, second=59, microsecond=999999)
@@ -3606,7 +3635,7 @@ def get_logs_runs(
             try:
                 start_time_dt = datetime.fromisoformat(start_ts_str.rstrip("Z"))
                 if start_time_dt.tzinfo is None:
-                    start_time_dt = start_time_dt.replace(tzinfo=timezone.utc)
+                    start_time_dt = start_time_dt.replace(tzinfo=timezone.utc)  # DB stores naive UTC
             except ValueError:
                 continue
 
@@ -3786,7 +3815,7 @@ def get_sprint_live_snapshot(sprint_label: str, project: str):
         try:
             started_at_dt = datetime.fromisoformat(started_at_str.rstrip("Z"))
             if started_at_dt.tzinfo is None:
-                started_at_dt = started_at_dt.replace(tzinfo=timezone.utc)
+                started_at_dt = started_at_dt.replace(tzinfo=timezone.utc)  # DB stores naive UTC
         except Exception:
             started_at_dt = None
 
@@ -3860,6 +3889,7 @@ def get_sprint_live_snapshot(sprint_label: str, project: str):
     })
 
     def _parse_ts_utc(s: Optional[str]) -> Optional[datetime]:
+        # DB timestamps are stored without tzinfo; strip trailing Z and assume UTC.
         if not s:
             return None
         try:

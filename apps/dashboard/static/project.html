@@ -34,6 +34,14 @@
       --yellow:       #a16207;
       --yellow-bg:    #fefce8;
       --sidebar-width: 220px;
+      --color-success:    #dcfce7;
+      --color-success-fg: #16a34a;
+      --color-error:      #fee2e2;
+      --color-error-fg:   #dc2626;
+      --color-info:       #dbeafe;
+      --color-info-fg:    #2563eb;
+      --color-warning:    #fef3c7;
+      --color-warning-fg: #d97706;
     }
 
     [data-theme="dark"] {
@@ -61,6 +69,14 @@
       --steel-bg:     rgba(122,163,212,.13);
       --yellow:       #facc15;
       --yellow-bg:    rgba(250,204,21,.13);
+      --color-success:    rgba(34,197,94,.15);
+      --color-success-fg: #22c55e;
+      --color-error:      rgba(239,68,68,.15);
+      --color-error-fg:   #f87171;
+      --color-info:       rgba(96,165,250,.15);
+      --color-info-fg:    #60a5fa;
+      --color-warning:    rgba(234,179,8,.15);
+      --color-warning-fg: #eab308;
     }
 
     /* ── Reset ── */
@@ -103,6 +119,79 @@
       color: var(--text-muted); font-size: 15px; transition: background .15s, color .15s;
     }
     .btn-icon:hover { background: var(--surface-2); color: var(--text); }
+
+    /* ── Global search ── */
+    .global-search-wrap {
+      position: relative;
+      flex: 1;
+      max-width: 320px;
+    }
+    .global-search-input {
+      width: 100%;
+      height: 32px;
+      padding: 0 10px 0 32px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--surface-2);
+      color: var(--text);
+      font-size: 13px;
+      outline: none;
+      transition: border-color .15s, background .15s;
+    }
+    .global-search-input:focus {
+      border-color: var(--blue);
+      background: var(--surface);
+    }
+    .global-search-icon {
+      position: absolute;
+      left: 9px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: var(--text-muted);
+      font-size: 15px;
+      pointer-events: none;
+    }
+    .global-search-dropdown {
+      position: absolute;
+      top: calc(100% + 4px);
+      left: 0;
+      right: 0;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      box-shadow: 0 8px 24px rgba(0,0,0,.12);
+      max-height: 400px;
+      overflow-y: auto;
+      z-index: 100;
+      display: none;
+    }
+    .global-search-dropdown.open { display: block; }
+    .global-search-result {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      cursor: pointer;
+      border-bottom: 1px solid var(--border);
+      font-size: 13px;
+    }
+    .global-search-result:last-child { border-bottom: none; }
+    .global-search-result:hover { background: var(--surface-hover); }
+    .gs-num { color: var(--text-muted); font-weight: 600; flex-shrink: 0; font-family: var(--mono); font-size: 12px; }
+    .gs-title { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .gs-sprint { flex-shrink: 0; font-size: 11px; padding: 1px 6px; border-radius: 10px; background: var(--steel-bg); color: var(--steel); }
+    .gs-status { flex-shrink: 0; font-size: 11px; padding: 1px 6px; border-radius: 10px; }
+    .gs-status-backlog     { background: var(--surface-2); color: var(--text-muted); }
+    .gs-status-in-progress { background: var(--amber-bg); color: var(--amber); }
+    .gs-status-sit         { background: var(--blue-bg); color: var(--blue); }
+    .gs-status-uat         { background: var(--purple-bg); color: var(--purple); }
+    .gs-status-done        { background: var(--green-bg); color: var(--green); }
+    .global-search-no-results {
+      padding: 12px;
+      text-align: center;
+      color: var(--text-muted);
+      font-size: 13px;
+    }
 
     /* ── Page layout ── */
     .page-layout {
@@ -469,6 +558,48 @@
     .ct-modal { width: min(400px, calc(100vw - 32px)); }
     /* ── Create Label modal ── */
     .cl-modal { width: min(420px, calc(100vw - 32px)); }
+    /* ── Bulk close action bar ── */
+    .bulk-action-bar {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 200;
+      background: var(--bg); border-bottom: 2px solid var(--amber);
+      padding: 10px 20px; display: flex; align-items: center; gap: 12px;
+      box-shadow: 0 2px 8px rgba(0,0,0,.15);
+    }
+    .bulk-action-bar.hidden { display: none; }
+    .bab-label { font-size: 13px; font-weight: 600; color: var(--text); }
+    .bab-spacer { flex: 1; }
+    .bab-results { display: flex; flex-direction: column; gap: 2px; flex: 1; overflow: hidden; }
+    .bab-result-item { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .bab-result-item.ok  { color: var(--green); }
+    .bab-result-item.err { color: var(--red); }
+    .bab-close-btn {
+      padding: 6px 14px; font-size: 12px; font-weight: 600; white-space: nowrap;
+      border: none; border-radius: 6px;
+      background: var(--red); color: #fff; cursor: pointer; transition: opacity .15s;
+    }
+    .bab-close-btn:hover { opacity: .85; }
+    .bab-close-btn:disabled { opacity: .45; cursor: not-allowed; }
+    .bab-dismiss-btn {
+      padding: 6px 10px; font-size: 12px; white-space: nowrap;
+      border: 1px solid var(--border); border-radius: 6px;
+      background: none; color: var(--text-muted); cursor: pointer; transition: background .12s;
+    }
+    .bab-dismiss-btn:hover { background: var(--surface-2); }
+    /* ── Bulk close confirm modal ── */
+    .bcm-modal { width: min(480px, calc(100vw - 32px)); }
+    .bcm-ticket-list {
+      max-height: 240px; overflow-y: auto;
+      border: 1px solid var(--border); border-radius: 6px; margin: 8px 0;
+    }
+    .bcm-ticket-item {
+      display: flex; align-items: center; gap: 8px;
+      padding: 8px 12px; border-bottom: 1px solid var(--border); font-size: 13px;
+    }
+    .bcm-ticket-item:last-child { border-bottom: none; }
+    .bcm-ticket-num  { font-size: 11px; color: var(--text-sub); flex-shrink: 0; }
+    .bcm-ticket-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+    /* checkbox styling for ticket rows */
+    .ticket-checkbox { flex-shrink: 0; width: 15px; height: 15px; cursor: pointer; accent-color: var(--red); }
 
     /* ── Mobile ── */
     @media (max-width: 699px) {
@@ -2193,6 +2324,74 @@
       .logs-raw-stream { padding: 8px 12px; }
       .logs-search-wrap { max-width: 100%; }
     }
+
+    /* ── Toast notifications (issue #426) ── */
+    #toast-container {
+      position: fixed;
+      bottom: 16px;
+      right: 16px;
+      z-index: 9999;
+      display: flex;
+      flex-direction: column-reverse;
+      gap: 8px;
+      pointer-events: none;
+      max-width: 360px;
+    }
+    .toast {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      padding: 10px 12px;
+      border-radius: 8px;
+      min-width: 240px;
+      max-width: 360px;
+      box-shadow: 0 4px 12px rgba(0,0,0,.15);
+      pointer-events: all;
+      font-size: 13px;
+      line-height: 1.4;
+      animation: toast-in .18s ease;
+    }
+    @keyframes toast-in {
+      from { opacity: 0; transform: translateY(6px); }
+      to   { opacity: 1; transform: translateY(0);   }
+    }
+    .toast.toast-removing {
+      animation: toast-out .18s ease forwards;
+    }
+    @keyframes toast-out {
+      to { opacity: 0; transform: translateY(6px); }
+    }
+    .toast-icon   { flex-shrink: 0; font-size: 15px; line-height: 1.4; }
+    .toast-body   { flex: 1; min-width: 0; }
+    .toast-action {
+      display: inline-block;
+      margin-top: 5px;
+      padding: 2px 8px;
+      border-radius: 4px;
+      border: 1px solid currentColor;
+      background: transparent;
+      color: inherit;
+      font-size: 12px;
+      font-family: inherit;
+      cursor: pointer;
+    }
+    .toast-action:hover { opacity: .75; }
+    .toast-dismiss {
+      flex-shrink: 0;
+      background: none;
+      border: none;
+      padding: 0;
+      font-size: 16px;
+      line-height: 1.3;
+      cursor: pointer;
+      opacity: .55;
+      color: inherit;
+    }
+    .toast-dismiss:hover { opacity: 1; }
+    .toast-success { background: var(--color-success); color: var(--color-success-fg); }
+    .toast-error   { background: var(--color-error);   color: var(--color-error-fg);   }
+    .toast-info    { background: var(--color-info);    color: var(--color-info-fg);    }
+    .toast-warning { background: var(--color-warning); color: var(--color-warning-fg); }
   </style>
 </head>
 <body>
@@ -2202,6 +2401,13 @@
   <div class="top-nav-left">
     <a href="/" class="brand-mark" title="Commander Home"><i class="ti ti-bolt"></i></a>
     <span class="brand-wordmark">Commander</span>
+  </div>
+  <div class="global-search-wrap">
+    <i class="ti ti-search global-search-icon"></i>
+    <input type="search" class="global-search-input" id="global-search-input"
+           placeholder="Search tickets…" autocomplete="off" aria-label="Search tickets"
+           oninput="_gsOnInput(event)" onkeydown="_gsOnKeydown(event)">
+    <div class="global-search-dropdown" id="global-search-dropdown"></div>
   </div>
   <div class="top-nav-right">
     <button class="btn-icon" onclick="toggleTheme()" id="theme-toggle-btn" title="Toggle theme" aria-label="Toggle dark/light theme">
@@ -2628,6 +2834,81 @@ function _syncThemeIcon(theme) {
   if (icon) icon.className = theme === 'dark' ? 'ti ti-sun' : 'ti ti-moon';
 }
 
+// ── Global fuzzy search ───────────────────────────────────────────────────────
+let _gsDebounceTimer = null;
+
+function _gsFuzzyScore(query, text) {
+  const q = query.toLowerCase();
+  const t = (text || '').toLowerCase();
+  if (t.includes(q)) return 2;
+  let qi = 0;
+  for (let i = 0; i < t.length && qi < q.length; i++) {
+    if (t[i] === q[qi]) qi++;
+  }
+  return qi === q.length ? 1 : 0;
+}
+
+function _gsStatusClass(status) {
+  return ({ 'in-progress': 'gs-status-in-progress', sit: 'gs-status-sit', uat: 'gs-status-uat', done: 'gs-status-done' })[status] || 'gs-status-backlog';
+}
+
+function _gsSearch(query) {
+  const drop = document.getElementById('global-search-dropdown');
+  if (!drop) return;
+  const q = query.trim();
+  if (!q) { drop.classList.remove('open'); drop.innerHTML = ''; return; }
+  const issues = _smgmtData?.issues || [];
+  const scored = [];
+  for (const iss of issues) {
+    const score = Math.max(_gsFuzzyScore(q, iss.title || ''), _gsFuzzyScore(q, iss.body || ''));
+    if (score > 0) scored.push({ iss, score });
+  }
+  scored.sort((a, b) => b.score - a.score);
+  const results = scored.slice(0, 20).map(s => s.iss);
+  if (results.length === 0) {
+    drop.innerHTML = '<div class="global-search-no-results">No results</div>';
+    drop.classList.add('open');
+    return;
+  }
+  drop.innerHTML = results.map(iss => {
+    const statusCls = _gsStatusClass(iss.status);
+    const sprint = iss.sprint_label ? `<span class="gs-sprint">${escHtml(iss.sprint_label)}</span>` : '';
+    return `<div class="global-search-result" onclick="_gsNavigate('${escHtml(iss.url || '')}')">
+      <span class="gs-num">#${iss.number}</span>
+      <span class="gs-title">${escHtml(iss.title)}</span>
+      ${sprint}
+      <span class="gs-status ${statusCls}">${escHtml(iss.status || 'backlog')}</span>
+    </div>`;
+  }).join('');
+  drop.classList.add('open');
+}
+
+function _gsNavigate(url) {
+  if (url) window.open(url, '_blank', 'noopener');
+  _gsClose();
+}
+
+function _gsClose() {
+  const drop = document.getElementById('global-search-dropdown');
+  if (drop) drop.classList.remove('open');
+}
+
+function _gsOnInput(e) {
+  clearTimeout(_gsDebounceTimer);
+  const q = e.target.value;
+  if (!q.trim()) { _gsClose(); return; }
+  _gsDebounceTimer = setTimeout(() => _gsSearch(q), 200);
+}
+
+function _gsOnKeydown(e) {
+  if (e.key === 'Escape') { _gsClose(); e.target.blur(); }
+}
+
+document.addEventListener('click', function(e) {
+  const wrap = document.querySelector('.global-search-wrap');
+  if (wrap && !wrap.contains(e.target)) _gsClose();
+});
+
 // ── Utilities ─────────────────────────────────────────────────────────────────
 function escHtml(s) {
   return String(s == null ? '' : s)
@@ -3033,6 +3314,9 @@ async function loadTickets() {
 function renderTickets(data, repo) {
   const container = document.getElementById('tickets-content');
   if (!container) return;
+  // Re-render clears selection state
+  _bulkSelected.clear();
+  document.getElementById('bulk-action-bar')?.classList.add('hidden');
 
   const tickets = data.tickets || [];
   const ghUrl   = data.github_url || '#';
@@ -3052,6 +3336,7 @@ function renderTickets(data, repo) {
     ticketsHtml = groups.map(g => {
       const rows = g.items.map(t => `
         <div class="ticket-row" id="ticket-row-${t.number}">
+          <input type="checkbox" class="ticket-checkbox" data-num="${t.number}" data-title="${escHtml(t.title)}" onchange="_onTicketCheckbox(this)">
           <span class="ticket-status-pill ${escHtml(t.status)}">${escHtml(t.status)}</span>
           <a class="ticket-title" href="${escHtml(t.url)}" target="_blank" rel="noopener" title="${escHtml(t.title)}">${escHtml(t.title)}</a>
           <span class="ticket-num">#${t.number}</span>
@@ -3131,6 +3416,149 @@ async function closeTicketModalConfirm() {
   } catch (e) {
     if (errEl) { errEl.textContent = 'Failed to close ticket: ' + e.message; errEl.classList.remove('hidden'); }
     if (btn) { btn.disabled = false; btn.textContent = 'Close ticket'; }
+  }
+}
+
+// ── Bulk Close flow ───────────────────────────────────────────────────────────
+const _bulkSelected = new Map(); // num → title
+
+function _onTicketCheckbox(el) {
+  const num   = parseInt(el.dataset.num, 10);
+  const title = el.dataset.title || '';
+  if (el.checked) {
+    _bulkSelected.set(num, title);
+  } else {
+    _bulkSelected.delete(num);
+  }
+  _bulkUpdateActionBar();
+}
+
+function _bulkUpdateActionBar() {
+  const bar      = document.getElementById('bulk-action-bar');
+  const labelEl  = document.getElementById('bab-label');
+  const closeBtn = document.getElementById('bab-close-btn');
+  if (!bar) return;
+  const n = _bulkSelected.size;
+  if (n === 0) {
+    bar.classList.add('hidden');
+    return;
+  }
+  bar.classList.remove('hidden');
+  document.getElementById('bab-result-list')?.classList.add('hidden');
+  if (labelEl) labelEl.textContent = `${n} ticket${n !== 1 ? 's' : ''} selected`;
+  if (closeBtn) {
+    closeBtn.disabled    = false;
+    closeBtn.textContent = `Close ${n} Ticket${n !== 1 ? 's' : ''}`;
+    closeBtn.classList.remove('hidden');
+  }
+  const dismissBtn = document.getElementById('bab-dismiss-btn');
+  if (dismissBtn) dismissBtn.textContent = '✕ Clear';
+}
+
+function _bulkDeselectAll() {
+  _bulkSelected.clear();
+  document.querySelectorAll('.ticket-checkbox:checked').forEach(cb => { cb.checked = false; });
+  _bulkUpdateActionBar();
+}
+
+function openBulkCloseModal() {
+  if (_bulkSelected.size === 0) return;
+  const listEl = document.getElementById('bcm-ticket-list');
+  if (listEl) {
+    listEl.innerHTML = Array.from(_bulkSelected.entries()).map(([num, title]) =>
+      `<div class="bcm-ticket-item">
+        <span class="bcm-ticket-num">#${num}</span>
+        <span class="bcm-ticket-title" title="${escHtml(title)}">${escHtml(title)}</span>
+      </div>`
+    ).join('');
+  }
+  const errEl = document.getElementById('bcm-modal-error');
+  if (errEl) errEl.classList.add('hidden');
+  const confirmBtn = document.getElementById('bcm-confirm-btn');
+  if (confirmBtn) { confirmBtn.disabled = false; confirmBtn.textContent = `Close ${_bulkSelected.size} Ticket${_bulkSelected.size !== 1 ? 's' : ''}`; }
+  document.getElementById('bcm-backdrop')?.classList.remove('hidden');
+  document.getElementById('bcm-modal')?.classList.remove('hidden');
+}
+
+function _bulkCloseCancel() {
+  document.getElementById('bcm-backdrop')?.classList.add('hidden');
+  document.getElementById('bcm-modal')?.classList.add('hidden');
+}
+
+async function _bulkCloseConfirm() {
+  if (_bulkSelected.size === 0 || !_ticketsRepo) return;
+  const confirmBtn = document.getElementById('bcm-confirm-btn');
+  if (confirmBtn) { confirmBtn.disabled = true; confirmBtn.textContent = 'Closing…'; }
+
+  const tickets  = Array.from(_bulkSelected.entries()); // [[num,title],…]
+  const results  = [];
+
+  for (const [num, title] of tickets) {
+    try {
+      const res = await fetch(
+        `/api/issues/${num}/close?repo=${encodeURIComponent(_ticketsRepo)}`,
+        { method: 'POST' }
+      );
+      if (!res.ok) {
+        const text = await res.text().catch(() => '');
+        throw new Error(text || `HTTP ${res.status}`);
+      }
+      results.push({ num, title, ok: true });
+    } catch (e) {
+      results.push({ num, title, ok: false, err: e.message });
+    }
+  }
+
+  _bulkCloseCancel();
+
+  // Build inline result list in action bar
+  const resultListEl = document.getElementById('bab-result-list');
+  const closeBtnEl   = document.getElementById('bab-close-btn');
+  if (resultListEl) {
+    resultListEl.innerHTML = results.map(r =>
+      r.ok
+        ? `<div class="bab-result-item ok">✓ #${r.num} ${escHtml(r.title)}</div>`
+        : `<div class="bab-result-item err">✗ #${r.num}: ${escHtml(r.err)}</div>`
+    ).join('');
+    resultListEl.classList.remove('hidden');
+  }
+  if (closeBtnEl) closeBtnEl.classList.add('hidden');
+
+  // Remove successful tickets from selection and DOM
+  const successNums = results.filter(r => r.ok).map(r => r.num);
+  successNums.forEach(num => {
+    _bulkSelected.delete(num);
+    document.getElementById(`ticket-row-${num}`)?.remove();
+    document.querySelector(`.ticket-checkbox[data-num="${num}"]`)?.closest('.ticket-row')?.remove();
+  });
+
+  // Update ticket count in toolbar
+  if (successNums.length > 0) {
+    const countEl = document.querySelector('#tickets-content .tickets-toolbar .tickets-toolbar-left span');
+    if (countEl) {
+      const cur = parseInt(countEl.textContent) || 0;
+      const n   = Math.max(0, cur - successNums.length);
+      countEl.textContent = `${n} open ticket${n !== 1 ? 's' : ''}`;
+    }
+  }
+
+  // Update dismiss button to plain "Dismiss"
+  const dismissBtn = document.getElementById('bab-dismiss-btn');
+  if (dismissBtn) dismissBtn.textContent = 'Dismiss';
+
+  // Hide bar if nothing failed
+  if (_bulkSelected.size === 0 && results.every(r => r.ok)) {
+    setTimeout(() => {
+      document.getElementById('bulk-action-bar')?.classList.add('hidden');
+    }, 2500);
+  }
+
+  // Show overall toast
+  const failCount = results.filter(r => !r.ok).length;
+  if (failCount === 0) {
+    _ticketsShowSuccess(`${successNums.length} ticket${successNums.length !== 1 ? 's' : ''} closed.`);
+  } else {
+    _ticketsShowError(`${successNums.length} closed, ${failCount} failed.`);
   }
 }
 
@@ -8017,6 +8445,15 @@ function _logsDisconnectLive() {
 
 <div id="tickets-toast"></div>
 
+<!-- ── Bulk close action bar ── -->
+<div class="bulk-action-bar hidden" id="bulk-action-bar">
+  <span class="bab-label" id="bab-label">0 tickets selected</span>
+  <div class="bab-results hidden" id="bab-result-list"></div>
+  <div class="bab-spacer"></div>
+  <button class="bab-close-btn" id="bab-close-btn" onclick="openBulkCloseModal()">Close Tickets</button>
+  <button class="bab-dismiss-btn" id="bab-dismiss-btn" onclick="_bulkDeselectAll()">✕ Clear</button>
+</div>
+
 <!-- ── Close Ticket modal ── -->
 <div class="modal-backdrop hidden" id="ct-backdrop" onclick="closeTicketModalCancel()"></div>
 <div class="modal ct-modal hidden" id="ct-modal">
@@ -8032,6 +8469,24 @@ function _logsDisconnectLive() {
   <div class="modal-footer">
     <button class="btn-ghost" onclick="closeTicketModalCancel()" type="button">Cancel</button>
     <button class="btn-danger" id="ct-confirm-btn" onclick="closeTicketModalConfirm()" type="button">Close ticket</button>
+  </div>
+</div>
+
+<!-- ── Bulk Close modal ── -->
+<div class="modal-backdrop hidden" id="bcm-backdrop" onclick="_bulkCloseCancel()"></div>
+<div class="modal bcm-modal hidden" id="bcm-modal">
+  <div class="modal-header">
+    <span class="modal-title">Close tickets</span>
+    <button class="modal-close" onclick="_bulkCloseCancel()" aria-label="Close">&times;</button>
+  </div>
+  <div class="modal-body">
+    <p style="font-size:13px;color:var(--text);margin:0 0 4px;">The following tickets will be closed on GitHub. This cannot be undone from the dashboard.</p>
+    <div class="bcm-ticket-list" id="bcm-ticket-list"></div>
+    <div class="modal-error hidden" id="bcm-modal-error"></div>
+  </div>
+  <div class="modal-footer">
+    <button class="btn-ghost" onclick="_bulkCloseCancel()" type="button">Cancel</button>
+    <button class="btn-danger" id="bcm-confirm-btn" onclick="_bulkCloseConfirm()" type="button">Close Tickets</button>
   </div>
 </div>
 
@@ -8100,6 +8555,99 @@ function _logsDisconnectLive() {
   text-align: center;
   font-family: monospace;
 "></div>
+
+<!-- ── Toast notification container (issue #426) ── -->
+<div id="toast-container" role="region" aria-label="Notifications" aria-live="polite"></div>
+
+<script>
+(function () {
+  var ICONS = {
+    success: 'ti-circle-check',
+    error:   'ti-circle-x',
+    info:    'ti-info-circle',
+    warning: 'ti-alert-triangle'
+  };
+  var VALID_KINDS = ['success', 'error', 'info', 'warning'];
+  var MAX_TOASTS = 5;
+  var AUTO_DISMISS_MS = 4000;
+
+  function escapeHtml(str) {
+    var d = document.createElement('div');
+    d.textContent = str;
+    return d.innerHTML;
+  }
+
+  function removeToast(toast) {
+    if (!toast.isConnected) return;
+    toast.classList.add('toast-removing');
+    toast.addEventListener('animationend', function () {
+      if (toast.parentNode) toast.parentNode.removeChild(toast);
+    }, { once: true });
+  }
+
+  window.showToast = function (message, kind, action) {
+    if (VALID_KINDS.indexOf(kind) === -1) kind = 'info';
+
+    var container = document.getElementById('toast-container');
+    var existing = container.querySelectorAll('.toast:not(.toast-removing)');
+    if (existing.length >= MAX_TOASTS) {
+      removeToast(existing[0]);
+    }
+
+    var toast = document.createElement('div');
+    toast.className = 'toast toast-' + kind;
+    toast.setAttribute('role', 'alert');
+
+    var iconEl = document.createElement('i');
+    iconEl.className = 'ti ' + ICONS[kind] + ' toast-icon';
+    iconEl.setAttribute('aria-hidden', 'true');
+
+    var bodyEl = document.createElement('div');
+    bodyEl.className = 'toast-body';
+
+    var msgEl = document.createElement('div');
+    msgEl.className = 'toast-message';
+    msgEl.innerHTML = escapeHtml(message);
+    bodyEl.appendChild(msgEl);
+
+    if (action && action.label && typeof action.handler === 'function') {
+      var actionBtn = document.createElement('button');
+      actionBtn.className = 'toast-action';
+      actionBtn.type = 'button';
+      actionBtn.textContent = action.label;
+      actionBtn.addEventListener('click', function () {
+        removeToast(toast);
+        action.handler();
+      });
+      bodyEl.appendChild(actionBtn);
+    }
+
+    var dismissBtn = document.createElement('button');
+    dismissBtn.className = 'toast-dismiss';
+    dismissBtn.type = 'button';
+    dismissBtn.setAttribute('aria-label', 'Dismiss');
+    dismissBtn.textContent = '×';
+    dismissBtn.addEventListener('click', function () {
+      removeToast(toast);
+    });
+
+    toast.appendChild(iconEl);
+    toast.appendChild(bodyEl);
+    toast.appendChild(dismissBtn);
+
+    var timerId = setTimeout(function () { removeToast(toast); }, AUTO_DISMISS_MS);
+
+    toast.addEventListener('mouseenter', function () {
+      clearTimeout(timerId);
+    });
+    toast.addEventListener('mouseleave', function () {
+      timerId = setTimeout(function () { removeToast(toast); }, AUTO_DISMISS_MS);
+    });
+
+    container.appendChild(toast);
+  };
+}());
+</script>
 
 </body>
 </html>

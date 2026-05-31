@@ -179,6 +179,10 @@ def _compute_build_hash() -> str:
 _BUILD_HASH: str = _compute_build_hash()
 _APP_VERSION: str = "1.0"
 
+# ── GitHub CLI auth preflight state (issue #424) ──────────────────────────────
+# Populated once at startup by _check_gh_auth(); served via /api/gh-auth-status.
+_GH_AUTH_STATUS: dict = {"ok": True, "message": ""}
+
 
 def _inject_version_into_html(html: str) -> str:
     """Inject ?v=<hash> query string on local /static/*.js and /static/*.css URLs."""
@@ -429,6 +433,117 @@ def _check_repo_accessible(repo: str) -> bool:
         return False
 
 
+def _check_gh_auth() -> None:
+    """Preflight check: verify gh CLI is installed and has the repo scope.
+
+    Never raises; never exits. On failure, populates _GH_AUTH_STATUS and
+    emits a structured warning via _slog with the required fields from issue #424.
+    """
+    global _GH_AUTH_STATUS
+
+    if not shutil.which("gh"):
+        _GH_AUTH_STATUS = {
+            "ok": False,
+            "event": "gh_auth_check_failed",
+            "message": "GitHub CLI (gh) is not installed",
+            "remediation": "Install from https://cli.github.com",
+        }
+        _slog.warn(
+            "gh_auth_check_failed",
+            "gh CLI not found in PATH",
+            scope_required="repo",
+            scope_present=False,
+            remediation="Install GitHub CLI: https://cli.github.com",
+        )
+        return
+
+    try:
+        result = subprocess.run(
+            ["gh", "auth", "status"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        output = result.stdout + result.stderr
+
+        if result.returncode != 0:
+            _GH_AUTH_STATUS = {
+                "ok": False,
+                "event": "gh_auth_check_failed",
+                "message": "GitHub CLI is not authenticated",
+                "remediation": "Run: gh auth login",
+            }
+            _slog.warn(
+                "gh_auth_check_failed",
+                "gh CLI not authenticated",
+                scope_required="repo",
+                scope_present=False,
+                remediation="gh auth login",
+            )
+            return
+
+        scope_match = re.search(r"Token scopes:\s*(.+)", output)
+        if scope_match:
+            raw_scopes = scope_match.group(1)
+            scopes = [s.strip().strip("'\",") for s in raw_scopes.split(",")]
+            scope_present = "repo" in scopes
+        else:
+            scope_present = False
+
+        if not scope_present:
+            _GH_AUTH_STATUS = {
+                "ok": False,
+                "event": "gh_auth_check_failed",
+                "message": "GitHub CLI token is missing the 'repo' scope",
+                "remediation": "Run: gh auth refresh -s repo",
+            }
+            _slog.warn(
+                "gh_auth_check_failed",
+                "gh CLI token missing 'repo' scope",
+                scope_required="repo",
+                scope_present=False,
+                remediation="gh auth refresh -s repo",
+            )
+            return
+
+        _GH_AUTH_STATUS = {"ok": True, "message": ""}
+        _slog.info(
+            "gh_auth_check_passed",
+            "gh CLI authenticated with repo scope",
+            scope_required="repo",
+            scope_present=True,
+        )
+
+    except subprocess.TimeoutExpired:
+        _GH_AUTH_STATUS = {
+            "ok": False,
+            "event": "gh_auth_check_failed",
+            "message": "GitHub CLI auth check timed out",
+            "remediation": "Run: gh auth status",
+        }
+        _slog.warn(
+            "gh_auth_check_failed",
+            "gh auth status timed out after 10s",
+            scope_required="repo",
+            scope_present=False,
+            remediation="gh auth status",
+        )
+    except Exception as exc:
+        _GH_AUTH_STATUS = {
+            "ok": False,
+            "event": "gh_auth_check_failed",
+            "message": f"gh auth check error: {exc}",
+            "remediation": "Check gh CLI installation",
+        }
+        _slog.warn(
+            "gh_auth_check_failed",
+            f"gh auth check unexpected error: {exc}",
+            scope_required="repo",
+            scope_present=False,
+            remediation="Check gh CLI installation",
+        )
+
+
 def _validate_github_repos() -> None:
     """Validate GITHUB_REPO and GITHUB_ISSUE_TEST_REPO at startup.
 
@@ -480,6 +595,7 @@ async def lifespan(app: FastAPI):
         git_branch=_GIT_BRANCH,
     )
     db.init_db()
+    _check_gh_auth()
     _validate_github_repos()
     _sweep_orphan_pid_files()
     _restore_sprint_statuses_on_startup()
@@ -981,6 +1097,15 @@ def get_version():
             "branch": _GIT_BRANCH,
             "build_timestamp": _BUILD_TIMESTAMP,
         },
+        headers={"Cache-Control": "no-cache, must-revalidate"},
+    )
+
+
+@app.get("/api/gh-auth-status")
+def get_gh_auth_status():
+    """Return the GitHub CLI auth preflight result from startup (issue #424)."""
+    return JSONResponse(
+        content=_GH_AUTH_STATUS,
         headers={"Cache-Control": "no-cache, must-revalidate"},
     )
 

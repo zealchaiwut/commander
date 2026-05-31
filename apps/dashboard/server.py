@@ -3331,11 +3331,85 @@ def get_sprint_cycle_check(sprint_label: str, project: str):
 def get_sprint_preflight(sprint_label: str, project: str):
     """Preflight check returned before running a sprint.
 
-    Response contract is defined by a sibling ticket; this stub returns {"ok": true}.
+    Returns DAG visualization data (layers, edges, ticket metadata) alongside ok flag.
     """
     if not _SPRINT_LABEL_RE.match(sprint_label):
         raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")
-    return {"ok": True, "sprint_label": sprint_label, "project": project}
+
+    dag_payload: dict | None = None
+    try:
+        issues = github_client.list_open_issues_with_body(repo_name=project, limit=200)
+        sprint_issues = [
+            iss for iss in issues
+            if any(lbl["name"] == sprint_label for lbl in iss.get("labels", []))
+        ]
+        if sprint_issues:
+            project_root = _project_root_path(project)
+            estimates_dir = _commander_dir(project_root) / "estimates"
+
+            ticket_map: dict[str, dict] = {}
+            for iss in sprint_issues:
+                num = iss["number"]
+                label_names = {lbl["name"] for lbl in iss.get("labels", [])}
+                if "blocked" in label_names:
+                    state = "blocked"
+                elif "UAT" in label_names:
+                    state = "UAT"
+                elif "SIT" in label_names:
+                    state = "SIT"
+                elif "in-progress" in label_names:
+                    state = "in-progress"
+                else:
+                    state = "backlog"
+
+                size: str | None = None
+                files_touched: list[str] = []
+                est_path = estimates_dir / f"issue-{num}.json"
+                if est_path.exists():
+                    try:
+                        est = json.loads(est_path.read_text(encoding="utf-8"))
+                        size = est.get("size")
+                        files_touched = est.get("files_likely_affected") or []
+                    except (json.JSONDecodeError, OSError):
+                        pass
+
+                tid = f"#{num}"
+                ticket_map[tid] = {
+                    "id": tid,
+                    "number": num,
+                    "title": iss.get("title", ""),
+                    "state": state,
+                    "size": size,
+                    "files_touched": files_touched,
+                }
+
+            layers: list[list[str]]
+            edges: list[list[str]]
+            if _DAG_BUILDER_AVAILABLE:
+                dag_tickets = [
+                    {"id": tid, "files_touched": ticket_map[tid]["files_touched"]}
+                    for tid in ticket_map
+                ]
+                dag_result = _build_dag(dag_tickets)
+                if isinstance(dag_result, _CycleError):
+                    layers = [list(ticket_map.keys())]
+                    edges = []
+                else:
+                    layers = dag_result.layers
+                    edges = [[e[0], e[1]] for e in dag_result.edges]
+            else:
+                layers = [list(ticket_map.keys())]
+                edges = []
+
+            dag_payload = {
+                "layers": layers,
+                "edges": edges,
+                "tickets": list(ticket_map.values()),
+            }
+    except subprocess.CalledProcessError:
+        pass  # DAG is decorative — don't fail the preflight
+
+    return {"ok": True, "sprint_label": sprint_label, "project": project, "dag": dag_payload}
 
 
 @app.post("/api/sprints/run", status_code=202)

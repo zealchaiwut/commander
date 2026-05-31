@@ -1313,8 +1313,8 @@
     .nt-warn-item.hidden { display: none; }
     .nt-file-input { padding: 4px 8px; cursor: pointer; }
 
-    /* ── Run Sprint preflight modal (issue #446) ── */
-    .pf-modal { width: min(480px, calc(100vw - 32px)); }
+    /* ── Run Sprint preflight modal (issue #446 / #447) ── */
+    .pf-modal { width: min(1100px, calc(100vw - 48px)); }
     .pf-spinner {
       display: inline-block; width: 22px; height: 22px;
       border: 3px solid var(--border); border-top-color: var(--blue);
@@ -1322,6 +1322,47 @@
       vertical-align: middle;
     }
     @keyframes pf-spin { to { transform: rotate(360deg); } }
+    /* ── DAG visualization (issue #447) ── */
+    .pf-dag-section { margin-top: 16px; }
+    .pf-dag-section-label {
+      font-size: 11px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: .06em; color: var(--text-muted); margin-bottom: 10px;
+    }
+    .pf-dag-wrap { position: relative; }
+    .pf-dag-svg {
+      position: absolute; top: 0; left: 0;
+      pointer-events: none; overflow: visible;
+    }
+    .pf-dag-levels { display: flex; gap: 48px; align-items: flex-start; padding: 4px 2px 8px; }
+    .pf-dag-col { display: flex; flex-direction: column; gap: 10px; min-width: 200px; flex-shrink: 0; }
+    .pf-dag-col-label {
+      font-size: 10px; font-weight: 600; text-transform: uppercase;
+      letter-spacing: .05em; color: var(--text-muted); padding-bottom: 2px;
+      border-bottom: 1px solid var(--border); margin-bottom: 2px;
+    }
+    .pf-dag-card {
+      border: 1px solid var(--border); border-radius: 6px;
+      background: var(--surface); padding: 8px 10px;
+      display: flex; flex-direction: column; gap: 4px;
+    }
+    .pf-dag-card-num {
+      font-size: 10px; color: var(--text-muted);
+      font-family: var(--mono); font-weight: 600;
+    }
+    .pf-dag-card-title {
+      font-size: 12px; font-weight: 600; color: var(--text);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .pf-dag-card-meta { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; margin-top: 1px; }
+    .pf-dag-size-badge {
+      font-size: 9px; font-weight: 700; padding: 1px 5px; border-radius: 4px;
+      background: var(--surface-2); color: var(--text-muted); border: 1px solid var(--border);
+    }
+    .pf-dag-card-files { margin-top: 3px; }
+    .pf-dag-card-files span {
+      display: block; font-size: 10px; color: var(--text-muted);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
 
     /* ── Backlog pane (issue #274) ── */
     .smgmt-backlog-pane {
@@ -5226,6 +5267,7 @@ function smgmtRunSprint(label) {
 let _pfCurrentLabel = null;
 let _pfCurrentRepo  = null;
 let _pfState        = 'idle'; // 'loading' | 'success' | 'error'
+let _pfDagData      = null;
 
 function _pfOpen(label) {
   const repo = _smgmtRepo();
@@ -5246,6 +5288,7 @@ function _pfReset() {
   document.getElementById('pf-footer').classList.add('hidden');
   document.getElementById('pf-confirm-btn').disabled = true;
   document.getElementById('pf-confirm-btn').textContent = 'Run Sprint';
+  _pfDagData = null;
 }
 
 function _pfClose() {
@@ -5254,6 +5297,7 @@ function _pfClose() {
   _pfCurrentLabel = null;
   _pfCurrentRepo  = null;
   _pfState        = 'idle';
+  _pfDagData      = null;
 }
 
 async function _pfFetch() {
@@ -5266,6 +5310,8 @@ async function _pfFetch() {
     );
     if (!res.ok) throw new Error(await res.text());
     if (_pfCurrentLabel !== label) return; // modal closed while in flight
+    const data = await res.json();
+    _pfDagData = data.dag || null;
     _pfState = 'success';
     _pfShowSuccess();
   } catch (e) {
@@ -5279,12 +5325,111 @@ function _pfShowSuccess() {
   document.getElementById('pf-loading').classList.add('hidden');
   document.getElementById('pf-error').classList.add('hidden');
   const n = parseInt((_pfCurrentLabel || '').split('-')[1], 10);
+  const dagHtml = _pfDagData && (_pfDagData.tickets || []).length > 0
+    ? _pfBuildDAGHtml(_pfDagData)
+    : '';
   document.getElementById('pf-content').innerHTML =
-    `<p style="font-size:13px;color:var(--text);margin:0;">Ready to run <strong>Sprint ${n}</strong>.</p>`;
+    `<p style="font-size:13px;color:var(--text);margin:0;">Ready to run <strong>Sprint ${n}</strong>.</p>${dagHtml}`;
   document.getElementById('pf-content').classList.remove('hidden');
   document.getElementById('pf-footer').classList.remove('hidden');
   document.getElementById('pf-confirm-btn').disabled = false;
   document.getElementById('pf-cancel-btn').focus();
+  if (_pfDagData && (_pfDagData.edges || []).length > 0) {
+    requestAnimationFrame(() => _pfDrawDAGArrows(_pfDagData.edges));
+  }
+}
+
+function _pfBuildDAGHtml(dag) {
+  const ticketMap = {};
+  for (const t of (dag.tickets || [])) ticketMap[t.id] = t;
+  const layers = dag.layers || [];
+  if (!layers.length) return '';
+
+  let colsHtml = '';
+  for (let i = 0; i < layers.length; i++) {
+    const layer = layers[i];
+    let cardsHtml = '';
+    for (const id of layer) {
+      const t = ticketMap[id] || { id, number: id.replace('#', ''), title: id, state: 'backlog', size: null, files_touched: [] };
+      const stateClass = t.state || 'backlog';
+      const stateBadge = `<span class="ticket-status-pill ${escHtml(stateClass)}">${escHtml(stateClass)}</span>`;
+      const sizeBadge  = t.size ? `<span class="pf-dag-size-badge">${escHtml(t.size)}</span>` : '';
+      const files = (t.files_touched || []);
+      const shown = files.slice(0, 3).map(f => `<span>${escHtml(f.split('/').slice(-1)[0])}</span>`).join('');
+      const more  = files.length > 3 ? `<span>+${files.length - 3} more</span>` : '';
+      const filesHtml = (shown || more)
+        ? `<div class="pf-dag-card-files">${shown}${more}</div>`
+        : '';
+      cardsHtml += `<div class="pf-dag-card" data-dag-id="${escHtml(id)}">
+          <div class="pf-dag-card-num">#${escHtml(String(t.number))}</div>
+          <div class="pf-dag-card-title" title="${escHtml(t.title)}">${escHtml(t.title)}</div>
+          <div class="pf-dag-card-meta">${stateBadge}${sizeBadge}</div>
+          ${filesHtml}
+        </div>`;
+    }
+    colsHtml += `<div class="pf-dag-col">
+        <div class="pf-dag-col-label">Level ${i}</div>
+        ${cardsHtml}
+      </div>`;
+  }
+
+  return `<div class="pf-dag-section">
+    <div class="pf-dag-section-label">Execution Order</div>
+    <div class="pf-dag-wrap" id="pf-dag-wrap">
+      <svg class="pf-dag-svg" id="pf-dag-svg" aria-hidden="true"></svg>
+      <div class="pf-dag-levels" id="pf-dag-levels">${colsHtml}</div>
+    </div>
+  </div>`;
+}
+
+function _pfDrawDAGArrows(edges) {
+  if (!edges || !edges.length) return;
+  const wrap   = document.getElementById('pf-dag-wrap');
+  const svg    = document.getElementById('pf-dag-svg');
+  const levels = document.getElementById('pf-dag-levels');
+  if (!wrap || !svg || !levels) return;
+
+  const wrapRect = wrap.getBoundingClientRect();
+  const h = levels.getBoundingClientRect().height;
+  svg.setAttribute('width',  String(wrapRect.width));
+  svg.setAttribute('height', String(h));
+
+  const defs   = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+  const marker = document.createElementNS('http://www.w3.org/2000/svg', 'marker');
+  marker.setAttribute('id', 'pf-arrow');
+  marker.setAttribute('markerWidth',  '7');
+  marker.setAttribute('markerHeight', '7');
+  marker.setAttribute('refX', '6');
+  marker.setAttribute('refY', '3.5');
+  marker.setAttribute('orient', 'auto');
+  const arrowPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  arrowPath.setAttribute('d', 'M0,0 L0,7 L7,3.5 z');
+  arrowPath.setAttribute('fill', 'var(--text-muted)');
+  marker.appendChild(arrowPath);
+  defs.appendChild(marker);
+  svg.appendChild(defs);
+
+  for (const [fromId, toId] of edges) {
+    const fromEl = wrap.querySelector(`[data-dag-id="${fromId}"]`);
+    const toEl   = wrap.querySelector(`[data-dag-id="${toId}"]`);
+    if (!fromEl || !toEl) continue;
+
+    const fr = fromEl.getBoundingClientRect();
+    const tr = toEl.getBoundingClientRect();
+    const x1 = fr.right  - wrapRect.left;
+    const y1 = fr.top    + fr.height / 2 - wrapRect.top;
+    const x2 = tr.left   - wrapRect.left - 7;
+    const y2 = tr.top    + tr.height / 2 - wrapRect.top;
+    const mx = (x1 + x2) / 2;
+
+    const line = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    line.setAttribute('d', `M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}`);
+    line.setAttribute('stroke', 'var(--text-muted)');
+    line.setAttribute('stroke-width', '1.5');
+    line.setAttribute('fill', 'none');
+    line.setAttribute('marker-end', 'url(#pf-arrow)');
+    svg.appendChild(line);
+  }
 }
 
 function _pfShowError(msg) {

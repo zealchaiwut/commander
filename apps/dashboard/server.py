@@ -3580,7 +3580,7 @@ def get_logs_runs(
         try:
             start_dt = datetime.fromisoformat(start_date)
             if start_dt.tzinfo is None:
-                start_dt = start_dt.replace(tzinfo=timezone.utc)
+                start_dt = start_dt.replace(tzinfo=timezone.utc)  # naive input: assume UTC
         except ValueError:
             raise HTTPException(
                 400,
@@ -3591,7 +3591,7 @@ def get_logs_runs(
         try:
             parsed_end = datetime.fromisoformat(end_date)
             if parsed_end.tzinfo is None:
-                parsed_end = parsed_end.replace(tzinfo=timezone.utc)
+                parsed_end = parsed_end.replace(tzinfo=timezone.utc)  # naive input: assume UTC
             # Date-only string: extend to end of day
             if "T" not in end_date:
                 parsed_end = parsed_end.replace(hour=23, minute=59, second=59, microsecond=999999)
@@ -3635,7 +3635,7 @@ def get_logs_runs(
             try:
                 start_time_dt = datetime.fromisoformat(start_ts_str.rstrip("Z"))
                 if start_time_dt.tzinfo is None:
-                    start_time_dt = start_time_dt.replace(tzinfo=timezone.utc)
+                    start_time_dt = start_time_dt.replace(tzinfo=timezone.utc)  # DB stores naive UTC
             except ValueError:
                 continue
 
@@ -3815,7 +3815,7 @@ def get_sprint_live_snapshot(sprint_label: str, project: str):
         try:
             started_at_dt = datetime.fromisoformat(started_at_str.rstrip("Z"))
             if started_at_dt.tzinfo is None:
-                started_at_dt = started_at_dt.replace(tzinfo=timezone.utc)
+                started_at_dt = started_at_dt.replace(tzinfo=timezone.utc)  # DB stores naive UTC
         except Exception:
             started_at_dt = None
 
@@ -3889,6 +3889,7 @@ def get_sprint_live_snapshot(sprint_label: str, project: str):
     })
 
     def _parse_ts_utc(s: Optional[str]) -> Optional[datetime]:
+        # DB timestamps are stored without tzinfo; strip trailing Z and assume UTC.
         if not s:
             return None
         try:

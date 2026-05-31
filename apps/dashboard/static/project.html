@@ -1931,6 +1931,24 @@
       background: var(--surface-2); color: var(--text-sub);
     }
 
+    /* Retry estimation pill and spinner (issue #451) */
+    .smgmt-retry-pill {
+      padding: 1px 5px; font-size: 10px; font-weight: 600;
+      background: var(--yellow-bg); color: var(--yellow);
+      border: 1px solid var(--yellow); border-radius: 3px;
+      cursor: pointer; flex-shrink: 0; white-space: nowrap;
+      font-family: var(--mono);
+    }
+    .smgmt-retry-pill:hover { opacity: .75; }
+    .smgmt-retry-spinner {
+      width: 12px; height: 12px; flex-shrink: 0;
+      border: 2px solid rgba(161,98,7,.25);
+      border-top-color: var(--yellow);
+      border-radius: 50%;
+      animation: smgmt-ring-spin .6s linear infinite;
+      display: inline-block;
+    }
+
     /* Generic utility used by Bulk Create */
     .hidden { display: none !important; }
     .btn-primary:disabled { opacity: .45; cursor: not-allowed; }
@@ -6123,6 +6141,13 @@ function _smgmtTicketRowHtml(ticket, label) {
   const statusLabel = hasRework ? 'needs rework' : (ticket.status || 'backlog');
   const isSelected = _smgmtSelectedIssues.has(ticket.number);
 
+  const sizeLabel = (ticket.labels || []).find(l => /^size-[SMLX]+$/.test(l.name));
+  const estimatePillHtml = sizeLabel
+    ? `<span class="smgmt-ticket-size-pill">${escHtml(sizeLabel.name.replace('size-', ''))}</span>`
+    : `<button class="smgmt-retry-pill" tabindex="0" title="Estimate this ticket"
+               onclick="event.stopPropagation();_smgmtRetryEstimation(${ticket.number},this)"
+               onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();_smgmtRetryEstimation(${ticket.number},this);}">Retry estimation</button>`;
+
   return `
     <div class="smgmt-ticket${isSelected ? ' is-selected' : ''}" id="smgmt-ticket-${ticket.number}"
          draggable="true"
@@ -6141,6 +6166,7 @@ function _smgmtTicketRowHtml(ticket, label) {
       <a class="smgmt-ticket-num" href="${escHtml(ticket.url || '#')}" target="_blank"
          rel="noopener" onclick="event.stopPropagation()">#${ticket.number}</a>
       <span class="smgmt-ticket-title" title="${escHtml(ticket.title)}">${escHtml(ticket.title)}</span>
+      ${estimatePillHtml}
       <span class="smgmt-ticket-status ${statusClass}">${escHtml(statusLabel)}</span>
       <button class="btn-view-log" tabindex="0" title="View issue log"
               onclick="event.stopPropagation();openLvIssueLog(${ticket.number},'${escHtml(label)}',_smgmtRepo()||'')">
@@ -6149,6 +6175,42 @@ function _smgmtTicketRowHtml(ticket, label) {
               onclick="event.stopPropagation();_smgmtMoveToOpen(event, ${ticket.number}, '${escHtml(label)}')"
               onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();_smgmtMoveToOpen(event,${ticket.number},'${escHtml(label)}');}">Move to &#9660;</button>
     </div>`;
+}
+
+// ── Retry estimation (issue #451) ─────────────────────────────────────────────
+async function _smgmtRetryEstimation(issueNum, btn) {
+  const row = document.getElementById(`smgmt-ticket-${issueNum}`);
+  if (!row || row.querySelector('.smgmt-retry-spinner')) return;
+
+  const spinner = document.createElement('span');
+  spinner.className = 'smgmt-retry-spinner';
+  btn.replaceWith(spinner);
+
+  const repo = _smgmtRepo() || '';
+  try {
+    const resp = await fetch(
+      `/api/issues/${issueNum}/estimate?repo=${encodeURIComponent(repo)}`,
+      { method: 'POST' }
+    );
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+    if (!data.ok || !data.size) throw new Error('no size');
+    const pill = document.createElement('span');
+    pill.className = 'smgmt-ticket-size-pill';
+    pill.textContent = data.size;
+    spinner.replaceWith(pill);
+  } catch (_) {
+    const newBtn = document.createElement('button');
+    newBtn.className = 'smgmt-retry-pill';
+    newBtn.tabIndex = 0;
+    newBtn.title = 'Estimate this ticket';
+    newBtn.textContent = 'Retry estimation';
+    newBtn.onclick = (ev) => { ev.stopPropagation(); _smgmtRetryEstimation(issueNum, newBtn); };
+    newBtn.onkeydown = (ev) => {
+      if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); ev.stopPropagation(); _smgmtRetryEstimation(issueNum, newBtn); }
+    };
+    spinner.replaceWith(newBtn);
+  }
 }
 
 // ── Sprint action handlers ─────────────────────────────────────────────────

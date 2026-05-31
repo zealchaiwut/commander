@@ -4594,6 +4594,9 @@ function _smgmtRender(data) {
 
   // Fetch outcome data for sprints that look completed (no open tickets)
   _smgmtFetchMissingOutcomes(orderedLabels, bySprint);
+
+  // Load estimated hours from .commander/estimates/ for each sprint header
+  _smgmtLoadEstimates(orderedLabels, bySprint);
 }
 
 async function _smgmtFetchMissingOutcomes(orderedLabels, bySprint) {
@@ -4621,6 +4624,33 @@ async function _smgmtFetchMissingOutcomes(orderedLabels, bySprint) {
       }
     } catch (_) {
       _smgmtOutcomeCache[label] = null;
+    }
+  }
+}
+
+async function _smgmtLoadEstimates(orderedLabels, bySprint) {
+  const repo = _smgmtRepo();
+  if (!repo) return;
+  for (const label of orderedLabels) {
+    const tickets = bySprint[label] || [];
+    if (tickets.length === 0) continue;
+    const issueNums = tickets.map(t => t.number).join(',');
+    try {
+      const resp = await fetch(
+        `/api/estimates/batch?project=${encodeURIComponent(repo)}&issues=${issueNums}`
+      );
+      if (!resp.ok) continue;
+      const data = await resp.json();
+      const estEl = document.getElementById(`smgmt-est-${label}`);
+      if (!estEl) continue;
+      if (data.complete && data.total_hours !== null) {
+        const h = data.total_hours;
+        const display = Number.isInteger(h) ? `${h}h` : `${parseFloat(h.toFixed(1))}h`;
+        estEl.textContent = `${display} estimated`;
+      }
+      // else: leave as "— estimated"
+    } catch (_) {
+      // fail silently — leave as "— estimated"
     }
   }
 }
@@ -5244,7 +5274,7 @@ function _smgmtCardHtml(label, n, tickets, outcome, isNext) {
                   onclick="smgmtStartRename('${escHtml(label)}', event)"><i class="ti ti-pencil"></i></button>
           ${isNext ? '<span class="smgmt-next-badge" aria-label="Next up">NEXT UP</span>' : ''}
           ${outcomeBadgeHtml}
-          <span class="smgmt-sprint-count">&middot; ${ticketCount} ticket${ticketCount !== 1 ? 's' : ''}</span>
+          <span class="smgmt-sprint-count"><span id="smgmt-est-${escHtml(label)}" class="smgmt-sprint-est-val">— estimated</span> &middot; ${ticketCount} ticket${ticketCount !== 1 ? 's' : ''}</span>
         </div>
         <div class="smgmt-sprint-header-right">
           <button class="smgmt-finish-btn ${finishHidden}"
@@ -5347,7 +5377,7 @@ function _smgmtRunningCardHtml(label, n, tickets) {
           <span class="smgmt-running-badge" id="smgmt-running-badge-${escHtml(label)}">
             <span class="smgmt-running-badge-dot"></span>${totalCount > 0 ? `${doneCount + skippedCount}/${totalCount}` : '—'}
           </span>
-          <span class="smgmt-sprint-count">&middot; ${sourceTickets.length} ticket${sourceTickets.length !== 1 ? 's' : ''}</span>
+          <span class="smgmt-sprint-count"><span id="smgmt-est-${escHtml(label)}" class="smgmt-sprint-est-val">— estimated</span> &middot; ${sourceTickets.length} ticket${sourceTickets.length !== 1 ? 's' : ''}</span>
         </div>
         <div class="smgmt-sprint-header-right">
           <button class="smgmt-run-btn" disabled title="Sprint is currently running">

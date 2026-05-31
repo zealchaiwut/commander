@@ -6919,11 +6919,14 @@ async function _smgmtTicketReorderDrop(event, targetIssue, sprintLabel) {
 
   _smgmtDragTicket = null;
   try {
-    const res = await fetch(`/api/sprints/${encodeURIComponent(sprintLabel)}/tickets/reorder`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ issue_numbers: order, project: repo }),
-    });
+    const res = await fetch(
+      `/api/sprints/${encodeURIComponent(sprintLabel)}/plan?project=${encodeURIComponent(repo)}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(order),
+      }
+    );
     if (!res.ok) throw new Error(await res.text());
     await loadSprintMgmt();
   } catch (e) {

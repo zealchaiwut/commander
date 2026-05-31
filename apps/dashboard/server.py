@@ -582,6 +582,16 @@ async def _periodic_orphan_sweep_loop() -> None:
             print(f"[periodic-sweep] unexpected error: {exc}")
 
 
+# ── Log event naming convention ──────────────────────────────────────────────
+# Event names use a <namespace>.<action> pattern with three namespaces:
+#   server.*  — server lifecycle events (startup, shutdown)
+#   route.*   — HTTP route handler events (entry, error)
+#   sprint.*  — sprint workflow events (dispatch)
+# The namespaces are intentionally distinct; route.* events carry request_id
+# and route/method fields, while server.* events carry environment/git metadata.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global _start_time
@@ -626,6 +636,15 @@ async def lifespan(app: FastAPI):
             await t
         except asyncio.CancelledError:
             pass
+    _slog.event(
+        "server.shutdown",
+        project="dashboard",
+        request_id=str(uuid.uuid4()),
+        environment=ENVIRONMENT,
+        git_sha=_GIT_SHA,
+        git_branch=_GIT_BRANCH,
+        uptime_seconds=round(time.monotonic() - _start_time, 1),
+    )
 
 
 app = FastAPI(lifespan=lifespan)

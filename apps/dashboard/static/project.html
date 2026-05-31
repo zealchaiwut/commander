@@ -1949,6 +1949,36 @@
       display: inline-block;
     }
 
+    /* Re-estimate action button (issue #452) */
+    .smgmt-reestimate-btn {
+      padding: 1px 5px; font-size: 10px; font-weight: 600;
+      background: transparent; color: var(--blue);
+      border: 1px solid var(--blue); border-radius: 3px;
+      cursor: pointer; flex-shrink: 0; white-space: nowrap;
+      font-family: var(--mono);
+      opacity: 0; transition: opacity .15s;
+    }
+    .smgmt-ticket:hover .smgmt-reestimate-btn { opacity: 1; }
+    .smgmt-reestimate-btn:hover { background: var(--blue-bg); }
+    .smgmt-reestimate-btn:disabled { opacity: .4 !important; cursor: not-allowed; }
+    .smgmt-reestimate-spinner {
+      width: 12px; height: 12px; flex-shrink: 0;
+      border: 2px solid rgba(37,99,235,.2);
+      border-top-color: var(--blue);
+      border-radius: 50%;
+      animation: smgmt-ring-spin .6s linear infinite;
+      display: inline-block;
+    }
+    .tdp-reestimate-btn {
+      padding: 4px 10px; font-size: 12px; font-weight: 600;
+      background: transparent; color: var(--blue);
+      border: 1px solid var(--blue); border-radius: 5px;
+      cursor: pointer;
+    }
+    .tdp-reestimate-btn:hover { background: var(--blue-bg); }
+    .tdp-reestimate-btn:disabled { opacity: .45; cursor: not-allowed; }
+    .re-est-modal { width: min(360px, calc(100vw - 32px)); }
+
     /* Generic utility used by Bulk Create */
     .hidden { display: none !important; }
     .btn-primary:disabled { opacity: .45; cursor: not-allowed; }
@@ -4038,12 +4068,25 @@ function tdpOpen(num) {
   const ticketNums = new Set(_tdpTickets.map(t => t.number));
   const deps = _parseDeps(ticket.body || '');
 
+  const tdpSizeLabel = (ticket.labels || []).find(l => /^size-[SMLX]+$/.test(l.name));
+
   let html = `<div class="tdp-section">
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
       <span class="ticket-status-pill ${escHtml(ticket.status)}">${escHtml(ticket.status)}</span>
       <a class="tdp-gh-link" href="${escHtml(ticket.url)}" target="_blank" rel="noopener">View on GitHub →</a>
     </div>
   </div>`;
+
+  if (tdpSizeLabel) {
+    html += `<div class="tdp-section">
+      <div class="tdp-section-title">Estimate</div>
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:4px">
+        <span class="smgmt-ticket-size-pill" id="tdp-estimate-size">${escHtml(tdpSizeLabel.name.replace('size-', ''))}</span>
+        <button class="tdp-reestimate-btn" id="tdp-reestimate-btn"
+                onclick="_smgmtReEstimate(${num})">Re-estimate</button>
+      </div>
+    </div>`;
+  }
 
   if (deps.blocks.length || deps.blockedBy.length) {
     html += `<div class="tdp-section"><div class="tdp-section-title">Dependencies</div>`;
@@ -6143,7 +6186,10 @@ function _smgmtTicketRowHtml(ticket, label) {
 
   const sizeLabel = (ticket.labels || []).find(l => /^size-[SMLX]+$/.test(l.name));
   const estimatePillHtml = sizeLabel
-    ? `<span class="smgmt-ticket-size-pill">${escHtml(sizeLabel.name.replace('size-', ''))}</span>`
+    ? `<span class="smgmt-ticket-size-pill">${escHtml(sizeLabel.name.replace('size-', ''))}</span>` +
+      `<button class="smgmt-reestimate-btn" tabindex="0" title="Re-estimate this ticket"
+               onclick="event.stopPropagation();_smgmtReEstimate(${ticket.number},this)"
+               onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();_smgmtReEstimate(${ticket.number},this);}">Re-estimate</button>`
     : `<button class="smgmt-retry-pill" tabindex="0" title="Estimate this ticket"
                onclick="event.stopPropagation();_smgmtRetryEstimation(${ticket.number},this)"
                onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();_smgmtRetryEstimation(${ticket.number},this);}">Retry estimation</button>`;
@@ -6210,6 +6256,105 @@ async function _smgmtRetryEstimation(issueNum, btn) {
       if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); ev.stopPropagation(); _smgmtRetryEstimation(issueNum, newBtn); }
     };
     spinner.replaceWith(newBtn);
+  }
+}
+
+// ── Re-estimate action (issue #452) ───────────────────────────────────────────
+let _reEstIssueNum = null;
+let _reEstRowBtn   = null;
+
+function _makeReEstimateBtn(issueNum) {
+  const btn = document.createElement('button');
+  btn.className = 'smgmt-reestimate-btn';
+  btn.tabIndex = 0;
+  btn.title = 'Re-estimate this ticket';
+  btn.textContent = 'Re-estimate';
+  btn.onclick = (ev) => { ev.stopPropagation(); _smgmtReEstimate(issueNum, btn); };
+  btn.onkeydown = (ev) => {
+    if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); ev.stopPropagation(); _smgmtReEstimate(issueNum, btn); }
+  };
+  return btn;
+}
+
+function _smgmtReEstimate(issueNum, rowBtn) {
+  _reEstIssueNum = issueNum;
+  _reEstRowBtn   = rowBtn || null;
+
+  // Check if estimate still present at click time (edge case: cleared between render and click)
+  const row = document.getElementById(`smgmt-ticket-${issueNum}`);
+  const hasEstimate = row
+    ? row.querySelector('.smgmt-ticket-size-pill') !== null
+    : _tdpTickets.some(t => t.number === issueNum && (t.labels || []).some(l => /^size-[SMLX]+$/.test(l.name)));
+
+  if (!hasEstimate) {
+    _smgmtReEstimateRun(issueNum, rowBtn || null);
+    return;
+  }
+
+  document.getElementById('re-est-backdrop').classList.remove('hidden');
+  document.getElementById('re-est-modal').classList.remove('hidden');
+  document.getElementById('re-est-confirm-btn').focus();
+}
+
+function _smgmtReEstimateClose() {
+  document.getElementById('re-est-backdrop').classList.add('hidden');
+  document.getElementById('re-est-modal').classList.add('hidden');
+  _reEstIssueNum = null;
+  _reEstRowBtn   = null;
+}
+
+function _smgmtReEstimateConfirm() {
+  const issueNum = _reEstIssueNum;
+  const rowBtn   = _reEstRowBtn;
+  _smgmtReEstimateClose();
+  _smgmtReEstimateRun(issueNum, rowBtn);
+}
+
+async function _smgmtReEstimateRun(issueNum, rowBtn) {
+  const repo   = _smgmtRepo() || '';
+  const tdpBtn = document.getElementById('tdp-reestimate-btn');
+
+  // Loading: replace row button with spinner
+  let rowSpinner = null;
+  if (rowBtn) {
+    rowSpinner = document.createElement('span');
+    rowSpinner.className = 'smgmt-reestimate-spinner';
+    rowBtn.replaceWith(rowSpinner);
+  }
+  // Loading: disable detail panel button
+  if (tdpBtn) { tdpBtn.disabled = true; tdpBtn.textContent = 'Re-estimating…'; }
+
+  try {
+    const resp = await fetch(
+      `/api/issues/${issueNum}/estimate?repo=${encodeURIComponent(repo)}`,
+      { method: 'POST' }
+    );
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+    if (!data.ok || !data.size) throw new Error('no size returned');
+
+    // Update size pill in row
+    const row = document.getElementById(`smgmt-ticket-${issueNum}`);
+    if (row) {
+      const pill = row.querySelector('.smgmt-ticket-size-pill');
+      if (pill) pill.textContent = data.size;
+    }
+    // Restore row re-estimate button
+    if (rowSpinner) rowSpinner.replaceWith(_makeReEstimateBtn(issueNum));
+
+    // Update detail panel
+    if (tdpBtn) {
+      tdpBtn.disabled = false;
+      tdpBtn.textContent = 'Re-estimate';
+      const sizeEl = document.getElementById('tdp-estimate-size');
+      if (sizeEl) sizeEl.textContent = data.size;
+    }
+  } catch (err) {
+    // Restore row button
+    if (rowSpinner) rowSpinner.replaceWith(_makeReEstimateBtn(issueNum));
+    // Restore detail panel button
+    if (tdpBtn) { tdpBtn.disabled = false; tdpBtn.textContent = 'Re-estimate'; }
+    _smgmtShowToast(`Re-estimate failed: ${err.message}`);
   }
 }
 
@@ -10196,6 +10341,25 @@ function _cmpEmptyState(title, msg) {
   <div class="modal-footer hidden" id="pf-footer">
     <button class="btn-ghost" id="pf-cancel-btn" type="button" onclick="_pfClose()">Cancel</button>
     <button class="btn-primary" id="pf-confirm-btn" type="button" onclick="_pfConfirm()" disabled>Run Sprint</button>
+  </div>
+</div>
+
+<!-- ── Re-estimate confirmation modal (issue #452) ── -->
+<div class="modal-backdrop hidden" id="re-est-backdrop" onclick="_smgmtReEstimateClose()"></div>
+<div class="modal re-est-modal hidden" id="re-est-modal"
+     role="dialog" aria-modal="true" aria-labelledby="re-est-modal-title">
+  <div class="modal-header">
+    <span class="modal-title" id="re-est-modal-title">Replace existing estimate?</span>
+    <button class="modal-close" aria-label="Close" onclick="_smgmtReEstimateClose()">&times;</button>
+  </div>
+  <div class="modal-body">
+    <p style="font-size:13px;color:var(--text-sub);margin:0">
+      This will overwrite the current estimate with a fresh one.
+    </p>
+  </div>
+  <div class="modal-footer">
+    <button class="btn-ghost" type="button" onclick="_smgmtReEstimateClose()">Cancel</button>
+    <button class="btn-blue" type="button" id="re-est-confirm-btn" onclick="_smgmtReEstimateConfirm()">Confirm</button>
   </div>
 </div>
 

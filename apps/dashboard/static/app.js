@@ -5074,15 +5074,16 @@ async function smgmtEstOpen(sprintLabel, earlierWithTickets) {
   document.getElementById('smgmt-est-modal').classList.remove('hidden');
   document.getElementById('smgmt-est-confirm').disabled = true;
 
-  // Fetch estimate summary from server
+  // Fetch estimate summary and cycle check in parallel
   let summary = null;
+  let cycleCheck = null;
   try {
-    const res = await fetch(
-      `/api/sprints/${encodeURIComponent(sprintLabel)}/estimate-summary?project=${encodeURIComponent(_smgmtCurrentRepo)}`
-    );
-    if (res.ok) {
-      summary = await res.json();
-    }
+    const [summaryRes, cycleRes] = await Promise.all([
+      fetch(`/api/sprints/${encodeURIComponent(sprintLabel)}/estimate-summary?project=${encodeURIComponent(_smgmtCurrentRepo)}`),
+      fetch(`/api/sprints/${encodeURIComponent(sprintLabel)}/cycle-check?project=${encodeURIComponent(_smgmtCurrentRepo)}`),
+    ]);
+    if (summaryRes.ok) summary = await summaryRes.json();
+    if (cycleRes.ok) cycleCheck = await cycleRes.json();
   } catch (_e) {
     // silently ignore; we'll render without summary data
   }
@@ -5096,6 +5097,24 @@ async function smgmtEstOpen(sprintLabel, earlierWithTickets) {
   if (titleEl) titleEl.textContent = `${sprintName} — ${totalTickets} ticket${totalTickets !== 1 ? 's' : ''}`;
 
   let html = '';
+
+  // Cycle error blocks run — render error and keep confirm disabled
+  if (cycleCheck && cycleCheck.has_cycle) {
+    const allCycles = cycleCheck.cycles || [];
+    const cycleLines = allCycles.map(cycle =>
+      `<li>${cycle.map(id => escapeHtml(String(id))).join(' → ')}</li>`
+    ).join('');
+    html += `
+      <div class="smgmt-est-cycle-error">
+        <strong>Cycle detected — sprint cannot run.</strong>
+        <p>The following ticket dependency cycles must be resolved before running:</p>
+        <ul class="smgmt-est-cycle-list">${cycleLines}</ul>
+        <span>Remove one dependency from each cycle and try again.</span>
+      </div>`;
+    bodyEl.innerHTML = html;
+    document.getElementById('smgmt-est-modal').focus();
+    return;
+  }
 
   if (summary) {
     const { size_counts, total_minutes, unsized_numbers } = summary;

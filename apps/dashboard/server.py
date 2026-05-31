@@ -106,6 +106,14 @@ try:
 except ImportError:
     _SIZE_TO_MINUTES = {"S": 5, "M": 15, "L": 30, "XL": 60}  # fallback if sizing unavailable
 
+try:
+    from dag_builder import CycleError as _CycleError, build_dag as _build_dag
+    _DAG_BUILDER_AVAILABLE = True
+except ImportError:
+    _CycleError = None  # type: ignore[assignment,misc]
+    _build_dag = None  # type: ignore[assignment]
+    _DAG_BUILDER_AVAILABLE = False
+
 
 def _sprint_json_path(project_root: Path, sprint_label: str) -> Path:
     return _commander_dir(project_root) / "sprints" / f"{sprint_label}.json"
@@ -3266,6 +3274,59 @@ def get_sprint_estimate_summary(sprint_label: str, project: str):
     }
 
 
+def _sprint_dag_tickets(project_root: Path, sprint_issues: list[dict]) -> list[dict]:
+    """Build the ticket list for build_dag from sprint issues + their estimate files."""
+    estimates_dir = _commander_dir(project_root) / "estimates"
+    tickets = []
+    for iss in sprint_issues:
+        num = iss["number"]
+        estimate_path = estimates_dir / f"issue-{num}.json"
+        files_touched: list[str] = []
+        if estimate_path.exists():
+            try:
+                est = json.loads(estimate_path.read_text(encoding="utf-8"))
+                files_touched = est.get("files_likely_affected") or []
+            except (json.JSONDecodeError, OSError):
+                pass
+        tickets.append({"id": f"#{num}", "files_touched": files_touched})
+    return tickets
+
+
+@app.get("/api/sprints/{sprint_label}/cycle-check")
+def get_sprint_cycle_check(sprint_label: str, project: str):
+    """Run DAG cycle detection for a sprint before dispatch.
+
+    Returns {"has_cycle": false} when acyclic.
+    Returns {"has_cycle": true, "error": "cycle_detected", "cycles": [...]} when cycle(s) found.
+    Returns {"has_cycle": false, "warning": "dag_builder_unavailable"} if dag_builder not loaded.
+    """
+    if not _SPRINT_LABEL_RE.match(sprint_label):
+        raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")
+
+    if not _DAG_BUILDER_AVAILABLE:
+        return {"has_cycle": False, "warning": "dag_builder_unavailable"}
+
+    try:
+        issues = github_client.list_open_issues_with_body(repo_name=project, limit=200)
+    except subprocess.CalledProcessError as e:
+        raise _gh_error(e)
+
+    sprint_issues = [
+        iss for iss in issues
+        if any(lbl["name"] == sprint_label for lbl in iss.get("labels", []))
+    ]
+
+    project_root = _project_root_path(project)
+    tickets = _sprint_dag_tickets(project_root, sprint_issues)
+    result = _build_dag(tickets)
+
+    if isinstance(result, _CycleError):
+        payload = result.to_payload()
+        return {"has_cycle": True, **payload}
+
+    return {"has_cycle": False}
+
+
 @app.post("/api/sprints/run", status_code=202)
 def run_sprint_managed(request: Request, body: SprintMgmtRunBody):
     """Spawn sprint_manager.py for the given project + sprint.
@@ -3298,6 +3359,25 @@ def run_sprint_managed(request: Request, body: SprintMgmtRunBody):
         )
     coder_path   = _coder_clone_path(project_root)
     commander    = _commander_dir(project_root)
+
+    # ── Cycle detection: hard-block run if dependency graph has cycles ────────
+    if _DAG_BUILDER_AVAILABLE:
+        try:
+            _cycle_issues = github_client.list_open_issues_with_body(repo_name=body.project, limit=200)
+            _cycle_sprint_issues = [
+                iss for iss in _cycle_issues
+                if any(lbl["name"] == body.sprint_label for lbl in iss.get("labels", []))
+            ]
+            _cycle_tickets = _sprint_dag_tickets(project_root, _cycle_sprint_issues)
+            _dag_result = _build_dag(_cycle_tickets)
+            if isinstance(_dag_result, _CycleError):
+                _payload = _dag_result.to_payload()
+                _slog.event("route.error", project="dashboard", request_id=request.state.request_id, route="/api/sprints/run", level="error", sprint_label=body.sprint_label, error="cycle_detected", cycles=_payload["cycles"])
+                raise HTTPException(422, detail=_payload)
+        except HTTPException:
+            raise
+        except subprocess.CalledProcessError as e:
+            raise _gh_error(e)
 
     # ── Migration: move open tickets from earlier sprints to target ───────────
     migration_log_lines: list[str] = []

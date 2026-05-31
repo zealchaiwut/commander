@@ -1077,6 +1077,57 @@
       font-family: var(--mono); font-size: 11px; color: var(--text-sub);
       min-width: 60px; text-align: right; flex-shrink: 0;
     }
+    /* ── Pre-flight check banner (issue #434) ── */
+    .smgmt-preflight-banner {
+      margin: 0 12px 10px;
+      padding: 10px 12px;
+      background: var(--yellow-bg);
+      border: 1px solid rgba(161,98,7,.30);
+      border-radius: 6px;
+      font-size: 13px;
+    }
+    .smgmt-preflight-header {
+      display: flex; align-items: center; gap: 6px;
+      margin-bottom: 6px;
+    }
+    .smgmt-preflight-title {
+      font-weight: 600; color: var(--yellow); flex: 1;
+    }
+    .smgmt-preflight-dismiss {
+      background: none; border: none; cursor: pointer;
+      color: var(--text-muted); font-size: 16px; line-height: 1;
+      padding: 0 2px; flex-shrink: 0;
+    }
+    .smgmt-preflight-dismiss:hover { color: var(--text); }
+    .smgmt-preflight-items { display: flex; flex-direction: column; gap: 3px; }
+    .smgmt-preflight-item {
+      display: flex; align-items: center; gap: 6px;
+      background: none; border: none; text-align: left;
+      cursor: pointer; padding: 4px 6px; border-radius: 4px;
+      width: 100%; font-size: 12px; color: var(--text);
+    }
+    .smgmt-preflight-item:hover { background: rgba(0,0,0,.06); }
+    .smgmt-preflight-item-id {
+      font-family: var(--mono); color: var(--text-muted); flex-shrink: 0;
+    }
+    .smgmt-preflight-item-title {
+      flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .smgmt-preflight-item-type {
+      color: var(--yellow); font-size: 11px; flex-shrink: 0;
+      background: var(--yellow-bg);
+      border: 1px solid rgba(161,98,7,.25);
+      padding: 1px 6px; border-radius: 3px; font-family: var(--mono);
+    }
+    @keyframes smgmt-preflight-highlight-anim {
+      0%   { box-shadow: 0 0 0 3px rgba(161,98,7,.55); background: var(--yellow-bg); }
+      100% { box-shadow: 0 0 0 0px rgba(161,98,7,0);  background: transparent; }
+    }
+    .smgmt-preflight-highlight {
+      animation: smgmt-preflight-highlight-anim 3s ease-out forwards;
+      border-radius: 6px;
+    }
+
     /* TESTER REJECTED label */
     .smgmt-lbl-rejected {
       font-family: var(--mono); font-size: 10px; padding: 2px 6px; border-radius: 3px;
@@ -4597,6 +4648,9 @@ function _smgmtRender(data) {
 
   // Load estimated hours from .commander/estimates/ for each sprint header
   _smgmtLoadEstimates(orderedLabels, bySprint);
+
+  // Inject pre-flight check banners for non-running sprint panes (issue #434)
+  _preflightLoadBanners(orderedLabels, bySprint);
 }
 
 async function _smgmtFetchMissingOutcomes(orderedLabels, bySprint) {
@@ -4652,6 +4706,126 @@ async function _smgmtLoadEstimates(orderedLabels, bySprint) {
     } catch (_) {
       // fail silently — leave as "— estimated"
     }
+  }
+}
+
+// ── Pre-flight check banner (issue #434) ─────────────────────────────────────
+
+/** Session-dismissed banner labels — not persisted across page reloads. */
+const _preflightDismissed = new Set();
+
+/** Synchronous checks: body, AC, conflicting labels. Returns flat items array. */
+function _preflightCheckTickets(tickets) {
+  const items = [];
+  for (const t of tickets) {
+    const body = (t.body || '').trim();
+    if (!body) {
+      items.push({ number: t.number, title: t.title, type: 'Missing body' });
+      continue;
+    }
+    if (!/^##\s*(acceptance criteria|ac)\s*$/im.test(body)) {
+      items.push({ number: t.number, title: t.title, type: 'Missing acceptance criteria' });
+    }
+    const lbls = (t.labels || []).map(l => l.name);
+    if (lbls.includes('uat') && (lbls.includes('needs-rework') || lbls.includes('need-rework'))) {
+      items.push({ number: t.number, title: t.title, type: 'Conflicting labels' });
+    }
+  }
+  return items;
+}
+
+/** Async: returns Set of issue numbers whose estimate file is absent or incomplete. */
+async function _preflightCheckEstimates(tickets, repo) {
+  const missing = new Set();
+  if (!repo || tickets.length === 0) return missing;
+  await Promise.all(tickets.map(async t => {
+    try {
+      const resp = await fetch(
+        `/api/estimates/batch?project=${encodeURIComponent(repo)}&issues=${t.number}`
+      );
+      if (!resp.ok) { missing.add(t.number); return; }
+      const d = await resp.json();
+      if (!d.complete || d.total_hours === null) missing.add(t.number);
+    } catch (_) { missing.add(t.number); }
+  }));
+  return missing;
+}
+
+/** Scroll to ticket row and briefly highlight it. */
+function _preflightScrollToTicket(num) {
+  const el = document.getElementById(`smgmt-ticket-${num}`);
+  if (!el) return;
+  el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  el.classList.remove('smgmt-preflight-highlight');
+  void el.offsetWidth; // restart animation
+  el.classList.add('smgmt-preflight-highlight');
+  setTimeout(() => el.classList.remove('smgmt-preflight-highlight'), 3100);
+}
+
+/** Remove this sprint's banner for the session. */
+function _preflightDismiss(label) {
+  _preflightDismissed.add(label);
+  const el = document.getElementById(`smgmt-preflight-${label}`);
+  if (el) el.remove();
+}
+
+function _preflightBannerHtml(label, items) {
+  if (items.length === 0 || _preflightDismissed.has(label)) return '';
+  const trunc = (s, n) => s && s.length > n ? s.slice(0, n) + '…' : (s || '');
+  const rowsHtml = items.map(item =>
+    `<button class="smgmt-preflight-item" onclick="_preflightScrollToTicket(${item.number})">
+      <span class="smgmt-preflight-item-id">#${item.number}</span>
+      <span class="smgmt-preflight-item-title">${escHtml(trunc(item.title, 50))}</span>
+      <span class="smgmt-preflight-item-type">${escHtml(item.type)}</span>
+    </button>`
+  ).join('');
+  return `<div class="smgmt-preflight-banner" id="smgmt-preflight-${escHtml(label)}">
+    <div class="smgmt-preflight-header">
+      <i class="ti ti-alert-triangle" style="color:var(--yellow);font-size:14px;flex-shrink:0"></i>
+      <span class="smgmt-preflight-title">Pre-flight issues (${items.length})</span>
+      <button class="smgmt-preflight-dismiss" onclick="_preflightDismiss('${escHtml(label)}')" title="Dismiss">&times;</button>
+    </div>
+    <div class="smgmt-preflight-items">${rowsHtml}</div>
+  </div>`;
+}
+
+/** Run all checks for one sprint pane and inject/update the banner in the DOM. */
+async function _preflightInjectBanner(label, tickets, repo) {
+  if (_preflightDismissed.has(label)) return;
+  const card = document.getElementById(`smgmt-card-${label}`);
+  if (!card) return;
+
+  const existing = card.querySelector('.smgmt-preflight-banner');
+  if (existing) existing.remove();
+
+  const syncItems = _preflightCheckTickets(tickets);
+  const missingEst = await _preflightCheckEstimates(tickets, repo);
+
+  const items = [...syncItems];
+  const byNum = {};
+  tickets.forEach(t => { byNum[t.number] = t; });
+  for (const num of missingEst) {
+    const t = byNum[num];
+    if (t) items.push({ number: num, title: t.title, type: 'No estimator output' });
+  }
+
+  if (items.length === 0 || _preflightDismissed.has(label)) return;
+
+  const html = _preflightBannerHtml(label, items);
+  if (!html) return;
+
+  const header = card.querySelector('.smgmt-sprint-header');
+  if (header) header.insertAdjacentHTML('afterend', html);
+}
+
+/** Kick off pre-flight banner loading for all non-running sprint panes. */
+function _preflightLoadBanners(orderedLabels, bySprint) {
+  const repo = _smgmtRepo();
+  for (const label of orderedLabels) {
+    if (_smgmtRunningLabels.has(label)) continue;
+    const tickets = bySprint[label] || [];
+    if (tickets.length === 0) continue;
+    _preflightInjectBanner(label, tickets, repo);
   }
 }
 

@@ -2441,6 +2441,85 @@
     }
     .sm-model-select:focus { outline: none; border-color: var(--blue); }
 
+    /* ── Run Sprint preflight modal (issue #448) ── */
+    .pf-modal { width: min(1100px, calc(100vw - 48px)); max-height: calc(100vh - 64px); display: flex; flex-direction: column; }
+    .pf-modal .modal-body { flex: 1; min-height: 0; overflow-y: auto; }
+    .pf-spinner {
+      display: inline-block; width: 20px; height: 20px;
+      border: 2px solid var(--border); border-top-color: var(--text-muted);
+      border-radius: 50%; animation: pf-spin 0.7s linear infinite;
+    }
+    @keyframes pf-spin { to { transform: rotate(360deg); } }
+
+    /* DAG visualization */
+    .pf-dag-section { margin-top: 16px; }
+    .pf-dag-section-label {
+      font-size: 11px; font-weight: 600; text-transform: uppercase;
+      letter-spacing: .06em; color: var(--text-muted); margin-bottom: 8px;
+    }
+    .pf-dag-wrap { position: relative; overflow-x: auto; }
+    .pf-dag-svg {
+      position: absolute; top: 0; left: 0; pointer-events: none;
+      overflow: visible;
+    }
+    .pf-dag-levels { display: flex; gap: 48px; align-items: flex-start; padding: 4px 2px 8px; }
+    .pf-dag-col { display: flex; flex-direction: column; gap: 10px; min-width: 200px; flex-shrink: 0; }
+    .pf-dag-col-label {
+      font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em;
+      color: var(--text-muted); padding: 0 2px 4px;
+    }
+    .pf-dag-card {
+      background: var(--surface-2); border: 1px solid var(--border);
+      border-radius: 8px; padding: 10px 12px; cursor: pointer;
+      transition: border-color .15s, background .15s;
+    }
+    .pf-dag-card:hover { border-color: var(--blue); }
+    .pf-dag-card.pf-deselected { opacity: .45; }
+    .pf-dag-card-header { display: flex; align-items: center; gap: 6px; margin-bottom: 2px; }
+    .pf-dag-card-check { width: 14px; height: 14px; flex-shrink: 0; cursor: pointer; }
+    .pf-dag-card-num {
+      font-size: 11px; font-weight: 700; color: var(--blue); white-space: nowrap;
+    }
+    .pf-dag-card-title {
+      font-size: 12px; color: var(--text); white-space: nowrap;
+      overflow: hidden; text-overflow: ellipsis; max-width: 170px;
+    }
+    .pf-dag-card-meta { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; margin-top: 3px; }
+    .pf-dag-size-badge {
+      font-size: 10px; font-weight: 700; padding: 1px 5px;
+      border-radius: 4px; background: var(--surface); border: 1px solid var(--border);
+      color: var(--text-muted);
+    }
+    .pf-dag-card-files { margin-top: 4px; display: flex; flex-wrap: wrap; gap: 3px; }
+    .pf-dag-card-files span {
+      font-size: 10px; color: var(--text-muted); background: var(--surface);
+      border: 1px solid var(--border); border-radius: 3px; padding: 1px 4px;
+    }
+
+    /* Conflicts and Proposed Order sections */
+    .pf-section { margin-top: 20px; }
+    .pf-section-label {
+      font-size: 11px; font-weight: 600; text-transform: uppercase;
+      letter-spacing: .06em; color: var(--text-muted); margin-bottom: 8px;
+    }
+    .pf-section-body { font-size: 13px; color: var(--text); }
+    .pf-no-conflict { color: var(--text-muted); font-style: italic; margin: 0; }
+    .pf-conflict-item {
+      margin: 0 0 5px; padding: 6px 10px;
+      background: rgba(220, 38, 38, .07); border-left: 3px solid #ef4444;
+      border-radius: 0 4px 4px 0;
+    }
+    .pf-conflict-item code {
+      font-family: var(--font-mono, monospace); font-size: 11px;
+      background: var(--surface); padding: 1px 4px; border-radius: 3px;
+      border: 1px solid var(--border);
+    }
+    .pf-order-list { margin: 0; padding-left: 20px; }
+    .pf-order-item { margin-bottom: 4px; font-size: 13px; color: var(--text); }
+    .pf-order-item code {
+      font-family: var(--font-mono, monospace); font-size: 11px;
+    }
+
     /* ── Logs tab (issue #420) ── */
     .logs-pane { display: flex; flex-direction: column; height: 100%; min-height: 0; }
     .logs-toolbar {
@@ -6072,11 +6151,288 @@ function smgmtRunBlockedToast() {
   _smgmtShowToast('Another sprint is running — wait for it to finish or cancel it');
 }
 
-async function smgmtRunSprint(label) {
+function smgmtRunSprint(label) {
+  _pfOpen(label);
+}
+
+// ── Run Sprint preflight modal (issue #448) ─────────────────────────────────
+
+let _pfCurrentLabel = null;
+let _pfCurrentRepo  = null;
+let _pfState        = 'idle'; // 'loading' | 'success' | 'error'
+let _pfDagData      = null;
+let _pfSelectedIds  = new Set();
+
+function _pfOpen(label) {
   const repo = _smgmtRepo();
   if (!repo) return;
-  const n = parseInt(label.split('-')[1], 10);
-  if (!confirm(`Run Sprint ${n}?\n\nThis will dispatch coder and tester agents for all tickets in this sprint.`)) return;
+  _pfCurrentLabel = label;
+  _pfCurrentRepo  = repo;
+  _pfReset();
+  document.getElementById('pf-backdrop').classList.remove('hidden');
+  document.getElementById('pf-modal').classList.remove('hidden');
+  document.getElementById('pf-close-btn').focus();
+  _pfFetch();
+}
+
+function _pfReset() {
+  document.getElementById('pf-loading').classList.remove('hidden');
+  document.getElementById('pf-content').classList.add('hidden');
+  document.getElementById('pf-error').classList.add('hidden');
+  document.getElementById('pf-footer').classList.add('hidden');
+  document.getElementById('pf-confirm-btn').disabled = true;
+  document.getElementById('pf-confirm-btn').textContent = 'Run Sprint';
+  _pfDagData = null;
+  _pfSelectedIds = new Set();
+}
+
+function _pfClose() {
+  document.getElementById('pf-backdrop').classList.add('hidden');
+  document.getElementById('pf-modal').classList.add('hidden');
+  _pfCurrentLabel = null;
+  _pfCurrentRepo  = null;
+  _pfState        = 'idle';
+  _pfDagData      = null;
+  _pfSelectedIds  = new Set();
+}
+
+async function _pfFetch() {
+  _pfState = 'loading';
+  const label = _pfCurrentLabel;
+  const repo  = _pfCurrentRepo;
+  try {
+    const res = await fetch(
+      `/api/sprints/${encodeURIComponent(label)}/preflight?project=${encodeURIComponent(repo)}`
+    );
+    if (!res.ok) throw new Error(await res.text());
+    if (_pfCurrentLabel !== label) return;
+    const data = await res.json();
+    _pfDagData = data.dag || null;
+    if (_pfDagData) {
+      for (const t of (_pfDagData.tickets || [])) _pfSelectedIds.add(t.id);
+    }
+    _pfState = 'success';
+    _pfShowSuccess();
+  } catch (e) {
+    if (_pfCurrentLabel !== label) return;
+    _pfState = 'error';
+    _pfShowError(e.message || 'Preflight check failed.');
+  }
+}
+
+function _pfShowSuccess() {
+  document.getElementById('pf-loading').classList.add('hidden');
+  document.getElementById('pf-error').classList.add('hidden');
+  const n = parseInt((_pfCurrentLabel || '').split('-')[1], 10);
+  const dagHtml = _pfDagData && (_pfDagData.tickets || []).length > 0
+    ? _pfBuildDAGHtml(_pfDagData)
+    : '';
+  const conflictsHtml = _pfBuildConflictsHtml();
+  const orderHtml     = _pfBuildOrderHtml();
+  document.getElementById('pf-content').innerHTML =
+    `<p style="font-size:13px;color:var(--text);margin:0;">Ready to run <strong>Sprint ${n}</strong>.</p>
+     ${dagHtml}
+     <div class="pf-section">
+       <div class="pf-section-label">Conflicts</div>
+       <div class="pf-section-body" id="pf-conflicts">${conflictsHtml}</div>
+     </div>
+     <div class="pf-section">
+       <div class="pf-section-label">Proposed Execution Order</div>
+       <div class="pf-section-body" id="pf-order">${orderHtml}</div>
+     </div>`;
+  document.getElementById('pf-content').classList.remove('hidden');
+  document.getElementById('pf-footer').classList.remove('hidden');
+  document.getElementById('pf-confirm-btn').disabled = false;
+  document.getElementById('pf-cancel-btn').focus();
+  if (_pfDagData && (_pfDagData.edges || []).length > 0) {
+    requestAnimationFrame(() => _pfDrawDAGArrows(_pfDagData.edges));
+  }
+}
+
+function _pfBuildDAGHtml(dag) {
+  const ticketMap = {};
+  for (const t of (dag.tickets || [])) ticketMap[t.id] = t;
+  const layers = dag.layers || [];
+  if (!layers.length) return '';
+
+  let colsHtml = '';
+  for (let i = 0; i < layers.length; i++) {
+    const layer = layers[i];
+    let cardsHtml = '';
+    for (const id of layer) {
+      const t = ticketMap[id] || { id, number: id.replace('#', ''), title: id, state: 'backlog', size: null, files_touched: [] };
+      const stateClass = t.state || 'backlog';
+      const stateBadge = `<span class="ticket-status-pill ${escHtml(stateClass)}">${escHtml(stateClass)}</span>`;
+      const sizeBadge  = t.size ? `<span class="pf-dag-size-badge">${escHtml(t.size)}</span>` : '';
+      const files      = (t.files_touched || []);
+      const shown      = files.slice(0, 3).map(f => `<span>${escHtml(f.split('/').slice(-1)[0])}</span>`).join('');
+      const more       = files.length > 3 ? `<span>+${files.length - 3} more</span>` : '';
+      const filesHtml  = (shown || more) ? `<div class="pf-dag-card-files">${shown}${more}</div>` : '';
+      cardsHtml += `<div class="pf-dag-card" id="pf-card-${escHtml(id)}" data-dag-id="${escHtml(id)}">
+          <div class="pf-dag-card-header">
+            <input type="checkbox" class="pf-dag-card-check" checked
+              onchange="_pfToggleTicket('${escHtml(id)}')" aria-label="Include ticket ${escHtml(id)}">
+            <span class="pf-dag-card-num">${escHtml(id)}</span>
+          </div>
+          <div class="pf-dag-card-title" title="${escHtml(t.title)}">${escHtml(t.title)}</div>
+          <div class="pf-dag-card-meta">${stateBadge}${sizeBadge}</div>
+          ${filesHtml}
+        </div>`;
+    }
+    colsHtml += `<div class="pf-dag-col">
+        <div class="pf-dag-col-label">Level ${i + 1}</div>
+        ${cardsHtml}
+      </div>`;
+  }
+
+  return `<div class="pf-dag-section">
+    <div class="pf-dag-section-label">Execution Graph</div>
+    <div class="pf-dag-wrap" id="pf-dag-wrap">
+      <svg class="pf-dag-svg" id="pf-dag-svg" aria-hidden="true"></svg>
+      <div class="pf-dag-levels" id="pf-dag-levels">${colsHtml}</div>
+    </div>
+  </div>`;
+}
+
+function _pfDrawDAGArrows(edges) {
+  if (!edges || !edges.length) return;
+  const wrap   = document.getElementById('pf-dag-wrap');
+  const svg    = document.getElementById('pf-dag-svg');
+  const levels = document.getElementById('pf-dag-levels');
+  if (!wrap || !svg || !levels) return;
+
+  const wrapRect = wrap.getBoundingClientRect();
+  const h = levels.getBoundingClientRect().height;
+  svg.setAttribute('width',  String(wrapRect.width));
+  svg.setAttribute('height', String(h));
+
+  const defs   = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+  const marker = document.createElementNS('http://www.w3.org/2000/svg', 'marker');
+  marker.setAttribute('id', 'pf-arrow');
+  marker.setAttribute('markerWidth',  '7');
+  marker.setAttribute('markerHeight', '7');
+  marker.setAttribute('refX', '6');
+  marker.setAttribute('refY', '3.5');
+  marker.setAttribute('orient', 'auto');
+  const arrowPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  arrowPath.setAttribute('d', 'M0,0 L0,7 L7,3.5 z');
+  arrowPath.setAttribute('fill', 'var(--text-muted)');
+  marker.appendChild(arrowPath);
+  defs.appendChild(marker);
+  svg.appendChild(defs);
+
+  for (const [fromId, toId] of edges) {
+    const fromEl = wrap.querySelector(`[data-dag-id="${fromId}"]`);
+    const toEl   = wrap.querySelector(`[data-dag-id="${toId}"]`);
+    if (!fromEl || !toEl) continue;
+
+    const fr = fromEl.getBoundingClientRect();
+    const tr = toEl.getBoundingClientRect();
+    const x1 = fr.right  - wrapRect.left;
+    const y1 = fr.top    + fr.height / 2 - wrapRect.top;
+    const x2 = tr.left   - wrapRect.left - 7;
+    const y2 = tr.top    + tr.height / 2 - wrapRect.top;
+    const mx = (x1 + x2) / 2;
+
+    const line = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    line.setAttribute('d', `M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}`);
+    line.setAttribute('stroke', 'var(--text-muted)');
+    line.setAttribute('stroke-width', '1.5');
+    line.setAttribute('fill', 'none');
+    line.setAttribute('marker-end', 'url(#pf-arrow)');
+    svg.appendChild(line);
+  }
+}
+
+function _pfToggleTicket(id) {
+  if (_pfSelectedIds.has(id)) {
+    _pfSelectedIds.delete(id);
+  } else {
+    _pfSelectedIds.add(id);
+  }
+  const card = document.getElementById(`pf-card-${id}`);
+  if (card) card.classList.toggle('pf-deselected', !_pfSelectedIds.has(id));
+  _pfUpdateSections();
+}
+
+function _pfGetSelectedTickets() {
+  if (!_pfDagData) return [];
+  return (_pfDagData.tickets || []).filter(t => _pfSelectedIds.has(t.id));
+}
+
+function _pfComputeConflicts(tickets) {
+  const conflicts = [];
+  for (let i = 0; i < tickets.length; i++) {
+    for (let j = i + 1; j < tickets.length; j++) {
+      const filesA = tickets[i].files_touched || [];
+      const filesB = tickets[j].files_touched || [];
+      const shared = filesA.filter(f => filesB.includes(f));
+      for (const file of shared) {
+        conflicts.push({ a: tickets[i], b: tickets[j], file });
+      }
+    }
+  }
+  return conflicts;
+}
+
+function _pfBuildConflictsHtml() {
+  const selected = _pfGetSelectedTickets();
+  const conflicts = _pfComputeConflicts(selected);
+  if (!conflicts.length) {
+    return '<p class="pf-no-conflict">No file conflicts detected.</p>';
+  }
+  return conflicts.map(c =>
+    `<p class="pf-conflict-item">Tickets #${c.a.number} and #${c.b.number} both touch <code>${escHtml(c.file)}</code></p>`
+  ).join('');
+}
+
+function _pfBuildOrderHtml() {
+  if (!_pfDagData) return '<p class="pf-no-conflict">No order data available.</p>';
+  const layers = (_pfDagData.layers || [])
+    .map(layer => layer.filter(id => _pfSelectedIds.has(id)))
+    .filter(l => l.length > 0);
+  if (!layers.length) return '<p class="pf-no-conflict">No tickets selected.</p>';
+
+  let html = '<ol class="pf-order-list">';
+  for (let i = 0; i < layers.length; i++) {
+    const nums = layers[i].map(id => id);
+    const descriptor = i === 0 ? 'parallel-eligible' : `runs after Level ${i}`;
+    html += `<li class="pf-order-item">Level ${i + 1}: ${escHtml(nums.join(', '))} — ${escHtml(descriptor)}.</li>`;
+  }
+  html += '</ol>';
+  return html;
+}
+
+function _pfUpdateSections() {
+  const conflictsEl = document.getElementById('pf-conflicts');
+  const orderEl     = document.getElementById('pf-order');
+  if (conflictsEl) conflictsEl.innerHTML = _pfBuildConflictsHtml();
+  if (orderEl)     orderEl.innerHTML     = _pfBuildOrderHtml();
+}
+
+function _pfShowError(msg) {
+  document.getElementById('pf-loading').classList.add('hidden');
+  document.getElementById('pf-content').classList.add('hidden');
+  document.getElementById('pf-error-msg').textContent = msg;
+  document.getElementById('pf-error').classList.remove('hidden');
+  document.getElementById('pf-footer').classList.remove('hidden');
+  document.getElementById('pf-confirm-btn').disabled = true;
+  document.getElementById('pf-retry-btn').focus();
+}
+
+function _pfRetry() {
+  _pfReset();
+  _pfFetch();
+}
+
+async function _pfConfirm() {
+  if (_pfState !== 'success') return;
+  const label = _pfCurrentLabel;
+  const repo  = _pfCurrentRepo;
+  if (!label || !repo) return;
+  const confirmBtn = document.getElementById('pf-confirm-btn');
+  confirmBtn.disabled = true;
+  confirmBtn.innerHTML = '<span class="pf-spinner" style="width:12px;height:12px;border-width:2px;"></span> Running…';
   try {
     const res = await fetch('/api/sprints/run', {
       method: 'POST',
@@ -6084,10 +6440,13 @@ async function smgmtRunSprint(label) {
       body: JSON.stringify({ project: repo, sprint_label: label }),
     });
     if (!res.ok) throw new Error(await res.text());
+    _pfClose();
+    const n = parseInt(label.split('-')[1], 10);
     _smgmtShowToast(`Sprint ${n} dispatched.`);
     await loadSprintMgmt();
   } catch (e) {
-    alert('Failed to run sprint: ' + e.message);
+    _pfState = 'error';
+    _pfShowError('Failed to run sprint: ' + e.message);
   }
 }
 
@@ -9677,6 +10036,33 @@ function _cmpEmptyState(title, msg) {
   </div>
   <div class="modal-footer">
     <button class="btn-primary" onclick="closeSettingsModal()" type="button">Done</button>
+  </div>
+</div>
+
+<!-- ── Run Sprint preflight modal (issue #448) ── -->
+<div class="modal-backdrop hidden" id="pf-backdrop" onclick="_pfClose()"></div>
+<div class="modal pf-modal hidden" id="pf-modal"
+     role="dialog" aria-modal="true" aria-labelledby="pf-modal-title">
+  <div class="modal-header">
+    <span class="modal-title" id="pf-modal-title">Run Sprint</span>
+    <button class="modal-close" id="pf-close-btn" onclick="_pfClose()" aria-label="Close">&times;</button>
+  </div>
+  <div class="modal-body" id="pf-body">
+    <div id="pf-loading" style="text-align:center;padding:24px 0;">
+      <span class="pf-spinner" aria-label="Loading…"></span>
+      <p style="margin:12px 0 0;font-size:13px;color:var(--text-muted);">Checking sprint…</p>
+    </div>
+    <div id="pf-content" class="hidden"></div>
+    <div id="pf-error" class="hidden">
+      <div class="modal-error" id="pf-error-msg"></div>
+      <div style="margin-top:10px;">
+        <button class="btn-ghost" id="pf-retry-btn" type="button" onclick="_pfRetry()">Retry</button>
+      </div>
+    </div>
+  </div>
+  <div class="modal-footer hidden" id="pf-footer">
+    <button class="btn-ghost" id="pf-cancel-btn" type="button" onclick="_pfClose()">Cancel</button>
+    <button class="btn-primary" id="pf-confirm-btn" type="button" onclick="_pfConfirm()" disabled>Run Sprint</button>
   </div>
 </div>
 

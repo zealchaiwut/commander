@@ -2050,6 +2050,22 @@ async function fetchBuildStamp() {
   } catch { /* footer is optional */ }
 }
 
+// ── GitHub CLI auth warning banner (issue #424) ──────────────────────────────
+
+async function checkGhAuthStatus() {
+  try {
+    const res = await fetch('/api/gh-auth-status');
+    if (!res.ok) return;
+    const data = await res.json();
+    if (!data.ok) {
+      const banner = document.getElementById('gh-auth-banner');
+      if (!banner) return;
+      banner.textContent = `⚠ GitHub CLI: ${data.message}. Fix: ${data.remediation}`;
+      banner.style.display = 'block';
+    }
+  } catch { /* banner is optional */ }
+}
+
 // ── Sprint History view (AC-5) ────────────────────────────────────────────────
 
 let _sprintHistoryData = [];
@@ -6973,6 +6989,7 @@ function showErrorToast(msg) {
   initTheme();
   fetchEnvironment();
   fetchBuildStamp().catch(() => {});
+  checkGhAuthStatus().catch(() => {});
 
   // Load projects first, then route (so project view can show project data)
   loadProjects()

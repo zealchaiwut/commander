@@ -74,6 +74,12 @@ _REPO_ROOT = Path(__file__).parent.parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 from services.logging import log as _slog
+from services.sprint_manager.estimate_issue import (
+    fetch_issue as _ei_fetch_issue,
+    run_estimator as _ei_run_estimator,
+    apply_label as _ei_apply_label,
+    apply_estimated_status as _ei_apply_estimated_status,
+)
 
 # Backup module lives in services/sprint_manager/ — add it to sys.path
 import sys as _sys
@@ -1361,6 +1367,43 @@ def get_test_report(issue_id: int, repo: Optional[str] = None):
         raise _gh_error(e)
     except ValueError as e:
         raise HTTPException(400, detail=str(e))
+
+
+@app.post("/api/issues/{issue_id}/estimate")
+def estimate_issue_on_demand(request: Request, issue_id: int, repo: str):
+    """Run the issue estimator on demand and apply the size label.
+
+    Returns {"ok": True, "size": "S"|"M"|"L"|"XL"} on success.
+    """
+    _slog.event("route.entry", project="dashboard", request_id=request.state.request_id,
+                route="/api/issues/{issue_id}/estimate", method="POST", issue_id=issue_id)
+    try:
+        issue_data = _ei_fetch_issue(issue_id, repo)
+    except subprocess.CalledProcessError as e:
+        raise HTTPException(404, detail=f"Could not fetch issue #{issue_id}: {e}")
+
+    estimate = _ei_run_estimator(issue_id, issue_data)
+    if estimate is None:
+        raise HTTPException(500, detail=f"Estimation failed for #{issue_id}")
+
+    size = estimate.get("size")
+    if not size:
+        raise HTTPException(500, detail="Estimator returned no size")
+
+    try:
+        _ei_apply_label(issue_id, repo, size)
+    except subprocess.CalledProcessError as e:
+        raise HTTPException(500, detail=f"Failed to apply size label: {e}")
+
+    _ei_apply_estimated_status(issue_id, repo)
+
+    project_root = _project_root_path(repo)
+    estimates_dir = _commander_dir(project_root) / "estimates"
+    estimates_dir.mkdir(parents=True, exist_ok=True)
+    estimate_path = estimates_dir / f"issue-{issue_id}.json"
+    estimate_path.write_text(json.dumps(estimate, indent=2), encoding="utf-8")
+
+    return {"ok": True, "size": size}
 
 
 # ── project endpoints ─────────────────────────────────────────────────────────

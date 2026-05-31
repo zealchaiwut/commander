@@ -4457,6 +4457,49 @@ def get_sprint_estimate(sprint_label: str, project: str):
     return data
 
 
+@app.get("/api/estimates/batch")
+def get_estimates_batch(project: str, issues: str = ""):
+    """Return summed estimated_hours for a list of issue numbers from .commander/estimates/.
+
+    Query params:
+      - project: repo slug (owner/repo)
+      - issues: comma-separated issue numbers, e.g. "431,432,433"
+
+    Returns {total_hours: float|null, complete: bool}.
+    complete=true and total_hours is the sum when every issue has an estimate file with
+    an estimated_hours value.  complete=false and total_hours is null when any issue is
+    missing or the estimates directory is absent/unreadable.
+    """
+    issue_nums = [int(p) for p in issues.split(",") if p.strip().isdigit()]
+
+    if not issue_nums:
+        return {"total_hours": 0.0, "complete": True}
+
+    try:
+        project_root = _project_root_path(project)
+        estimates_dir = _commander_dir(project_root) / "estimates"
+        if not estimates_dir.is_dir():
+            return {"total_hours": None, "complete": False}
+    except Exception:
+        return {"total_hours": None, "complete": False}
+
+    total = 0.0
+    for num in issue_nums:
+        path = estimates_dir / f"issue-{num}.json"
+        if not path.exists():
+            return {"total_hours": None, "complete": False}
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            h = data.get("estimated_hours")
+            if h is None:
+                return {"total_hours": None, "complete": False}
+            total += float(h)
+        except (json.JSONDecodeError, OSError, ValueError):
+            return {"total_hours": None, "complete": False}
+
+    return {"total_hours": total, "complete": True}
+
+
 @app.get("/api/sprints/{sprint_label}/state")
 def get_sprint_state(sprint_label: str, project: str):
     """Return timing data from sprint-N-state.json for duration display (issue #212).

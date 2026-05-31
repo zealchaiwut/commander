@@ -62,6 +62,19 @@ except (ImportError, ModuleNotFoundError):  # pragma: no cover
     _sprint_repo = None  # type: ignore[assignment]
     _SPRINT_REPO_AVAILABLE = False
 
+try:
+    from services.sprint_manager.dag_builder import (  # noqa: PLC0415
+        build_dag as _dag_build,
+        DAGResult as _DAGResult,
+        CycleError as _DAGCycleError,
+    )
+    _DAG_BUILDER_AVAILABLE = True
+except (ImportError, ModuleNotFoundError):  # pragma: no cover
+    _dag_build = None  # type: ignore[assignment]
+    _DAGResult = None  # type: ignore[assignment]
+    _DAGCycleError = None  # type: ignore[assignment]
+    _DAG_BUILDER_AVAILABLE = False
+
 # ── path setup ────────────────────────────────────────────────────────────────
 
 # This file lives at services/sprint_manager/sprint_manager.py
@@ -3834,6 +3847,78 @@ def _load_estimate(issue_num: int) -> Optional[dict]:
     return None
 
 
+def _load_sprint_plan(sprints_dir: Path, label: str) -> Optional[list[int]]:
+    """Read sprint-{label}-plan.json; return issue-number list or None on failure."""
+    path = sprints_dir / f"sprint-{label}-plan.json"
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(data, list) and all(isinstance(n, int) for n in data):
+            return data
+    except (OSError, json.JSONDecodeError):
+        pass
+    return None
+
+
+def _build_sprint_dag_layers(issues: list["IssueState"]) -> Optional[list[list[int]]]:
+    """Build topological layers from file-overlap estimates.
+
+    Returns list of layers (each a list of issue numbers) or None if dag_builder
+    is unavailable, building fails, or a cycle is detected.
+    """
+    if not _DAG_BUILDER_AVAILABLE:
+        return None
+    try:
+        tickets = []
+        for iss in issues:
+            est = _load_estimate(iss.number)
+            files = (est or {}).get("files_likely_affected") or []
+            tickets.append({"id": str(iss.number), "files_touched": files})
+        result = _dag_build(tickets)  # type: ignore[misc]
+        if isinstance(result, _DAGCycleError):  # type: ignore[arg-type]
+            return None
+        return [[int(tid) for tid in layer] for layer in result.layers]
+    except Exception:
+        return None
+
+
+def _compute_dispatch_levels(
+    issues: list["IssueState"],
+    plan_order: Optional[list[int]],
+    dag_layers: Optional[list[list[int]]],
+) -> list[list["IssueState"]]:
+    """Arrange issues into dispatch levels.
+
+    Uses dag_layers for level grouping when available. Within each level, sorts
+    by plan_order (if present) then ascending issue number. Issues absent from
+    the DAG are appended as a trailing level.
+    """
+    issue_map = {iss.number: iss for iss in issues}
+
+    if plan_order:
+        plan_idx: dict[int, int] = {n: i for i, n in enumerate(plan_order)}
+        def _sort_key(num: int) -> tuple:
+            return (plan_idx.get(num, len(plan_order)), num)
+    else:
+        def _sort_key(num: int) -> tuple:  # type: ignore[misc]
+            return (num,)
+
+    if dag_layers:
+        levels: list[list["IssueState"]] = []
+        placed: set[int] = set()
+        for layer in dag_layers:
+            layer_nums = sorted([n for n in layer if n in issue_map], key=_sort_key)
+            placed.update(layer_nums)
+            if layer_nums:
+                levels.append([issue_map[n] for n in layer_nums])
+        trailing = sorted([n for n in issue_map if n not in placed], key=_sort_key)
+        if trailing:
+            levels.append([issue_map[n] for n in trailing])
+        return levels or [[issue_map[n] for n in sorted(issue_map, key=_sort_key)]]
+
+    all_nums = sorted(issue_map.keys(), key=_sort_key)
+    return [[issue_map[n] for n in all_nums]]
+
+
 def _warn_file_conflicts(issues: list["IssueState"]) -> None:
     """Warn when multiple pending issues share files in their estimates."""
     file_to_issues: dict[str, list[int]] = {}
@@ -4243,10 +4328,72 @@ def run_sprint(
         state.estimator_status = "skipped"
     # ── end estimator ──────────────────────────────────────────────────────────
 
+    # -- Topological dispatch setup (issue #445) --
+    _plan_order = _load_sprint_plan(_eff_sprints_dir, label)
+    if _plan_order is None:
+        structured_log.warn(
+            "dispatch_plan_missing",
+            "plan.json missing or unreadable — falling back to ascending issue-number order",
+            sprint_label=label,
+        )
+
+    _dag_layers = _build_sprint_dag_layers(state.issues)
+    if _dag_layers is None:
+        structured_log.warn(
+            "dispatch_dag_missing",
+            "DAG data missing or unreadable — falling back to ascending issue-number order",
+            sprint_label=label,
+        )
+
+    _dispatch_levels = _compute_dispatch_levels(state.issues, _plan_order, _dag_layers)
+    _level_nums_by_idx = [[iss.number for iss in lvl] for lvl in _dispatch_levels]
+
     start_time = time.monotonic()
 
     total_issues = len(state.issues)
-    for idx, issue_state in enumerate(state.issues, start=1):
+    # Flat iteration preserving level boundaries for level_start / level_complete events.
+    _flat_dispatch: list[tuple[int, IssueState]] = [
+        (lvl_idx, iss)
+        for lvl_idx, lvl in enumerate(_dispatch_levels)
+        for iss in lvl
+    ]
+    _prev_level_idx = -1
+    _level_merged_before = 0
+    _level_skipped_before = 0
+    for _flat_pos, (_cur_level_idx, issue_state) in enumerate(_flat_dispatch):
+        if _cur_level_idx != _prev_level_idx:
+            if _prev_level_idx >= 0:
+                try:
+                    structured_log.event(
+                        "level_complete",
+                        run_id=_run_id,
+                        issue_num=None,
+                        sprint_label=label,
+                        agent_role="sprint",
+                        level_index=_prev_level_idx,
+                        merged=summary.merged[_level_merged_before:],
+                        skipped=summary.skipped[_level_skipped_before:],
+                        total=len(_level_nums_by_idx[_prev_level_idx]),
+                    )
+                except Exception:
+                    pass
+            _level_merged_before = len(summary.merged)
+            _level_skipped_before = len(summary.skipped)
+            _prev_level_idx = _cur_level_idx
+            try:
+                structured_log.event(
+                    "level_start",
+                    run_id=_run_id,
+                    issue_num=None,
+                    sprint_label=label,
+                    agent_role="sprint",
+                    level_index=_cur_level_idx,
+                    tickets=_level_nums_by_idx[_cur_level_idx],
+                )
+            except Exception:
+                pass
+            print(f"\n=== Dispatch level {_cur_level_idx}: tickets {_level_nums_by_idx[_cur_level_idx]} ===")
+        idx = _flat_pos + 1
         num   = issue_state.number
         title = issue_state.title
         progress = f"[{idx}/{total_issues}]"
@@ -4632,6 +4779,23 @@ def run_sprint(
         state.wall_clock_secs = elapsed
         state.save(state_path)
         _post_sprint_status(state, api_url=api_url, project=eff_repo)
+
+    # Emit level_complete for the last level
+    if _prev_level_idx >= 0:
+        try:
+            structured_log.event(
+                "level_complete",
+                run_id=_run_id,
+                issue_num=None,
+                sprint_label=label,
+                agent_role="sprint",
+                level_index=_prev_level_idx,
+                merged=summary.merged[_level_merged_before:],
+                skipped=summary.skipped[_level_skipped_before:],
+                total=len(_level_nums_by_idx[_prev_level_idx]),
+            )
+        except Exception:
+            pass
 
     # Final elapsed time
     state.wall_clock_secs = time.monotonic() - start_time

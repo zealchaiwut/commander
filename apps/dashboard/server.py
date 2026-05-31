@@ -3467,7 +3467,11 @@ def get_all_running_sprints():
 
 @app.delete("/api/sprints/run/{sprint_label}", status_code=200)
 def kill_sprint(sprint_label: str, project: str):
-    """SIGTERM then SIGKILL the running sprint process for the given project/label."""
+    """SIGTERM then SIGKILL the running sprint process for the given project/label.
+
+    Unix only (macOS, Linux). Windows is not a supported platform for process
+    termination — os.kill() with SIGTERM/SIGKILL is unavailable there.
+    """
     if not _SPRINT_LABEL_RE.match(sprint_label):
         raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")
 
@@ -3491,7 +3495,7 @@ def kill_sprint(sprint_label: str, project: str):
                 pass
         raise HTTPException(404, detail=f"Invalid PID file for {sprint_label}")
 
-    # SIGTERM first, then wait up to 5 s for graceful exit, then SIGKILL
+    # Unix-only: SIGTERM first, wait up to 5 s for graceful exit, then SIGKILL
     if pid > 0:
         try:
             os.kill(pid, signal.SIGTERM)

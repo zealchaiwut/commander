@@ -120,6 +120,79 @@
     }
     .btn-icon:hover { background: var(--surface-2); color: var(--text); }
 
+    /* ── Global search ── */
+    .global-search-wrap {
+      position: relative;
+      flex: 1;
+      max-width: 320px;
+    }
+    .global-search-input {
+      width: 100%;
+      height: 32px;
+      padding: 0 10px 0 32px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--surface-2);
+      color: var(--text);
+      font-size: 13px;
+      outline: none;
+      transition: border-color .15s, background .15s;
+    }
+    .global-search-input:focus {
+      border-color: var(--blue);
+      background: var(--surface);
+    }
+    .global-search-icon {
+      position: absolute;
+      left: 9px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: var(--text-muted);
+      font-size: 15px;
+      pointer-events: none;
+    }
+    .global-search-dropdown {
+      position: absolute;
+      top: calc(100% + 4px);
+      left: 0;
+      right: 0;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      box-shadow: 0 8px 24px rgba(0,0,0,.12);
+      max-height: 400px;
+      overflow-y: auto;
+      z-index: 100;
+      display: none;
+    }
+    .global-search-dropdown.open { display: block; }
+    .global-search-result {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      cursor: pointer;
+      border-bottom: 1px solid var(--border);
+      font-size: 13px;
+    }
+    .global-search-result:last-child { border-bottom: none; }
+    .global-search-result:hover { background: var(--surface-hover); }
+    .gs-num { color: var(--text-muted); font-weight: 600; flex-shrink: 0; font-family: var(--mono); font-size: 12px; }
+    .gs-title { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .gs-sprint { flex-shrink: 0; font-size: 11px; padding: 1px 6px; border-radius: 10px; background: var(--steel-bg); color: var(--steel); }
+    .gs-status { flex-shrink: 0; font-size: 11px; padding: 1px 6px; border-radius: 10px; }
+    .gs-status-backlog     { background: var(--surface-2); color: var(--text-muted); }
+    .gs-status-in-progress { background: var(--amber-bg); color: var(--amber); }
+    .gs-status-sit         { background: var(--blue-bg); color: var(--blue); }
+    .gs-status-uat         { background: var(--purple-bg); color: var(--purple); }
+    .gs-status-done        { background: var(--green-bg); color: var(--green); }
+    .global-search-no-results {
+      padding: 12px;
+      text-align: center;
+      color: var(--text-muted);
+      font-size: 13px;
+    }
+
     /* ── Page layout ── */
     .page-layout {
       display: flex;
@@ -2329,6 +2402,13 @@
     <a href="/" class="brand-mark" title="Commander Home"><i class="ti ti-bolt"></i></a>
     <span class="brand-wordmark">Commander</span>
   </div>
+  <div class="global-search-wrap">
+    <i class="ti ti-search global-search-icon"></i>
+    <input type="search" class="global-search-input" id="global-search-input"
+           placeholder="Search tickets…" autocomplete="off" aria-label="Search tickets"
+           oninput="_gsOnInput(event)" onkeydown="_gsOnKeydown(event)">
+    <div class="global-search-dropdown" id="global-search-dropdown"></div>
+  </div>
   <div class="top-nav-right">
     <button class="btn-icon" onclick="toggleTheme()" id="theme-toggle-btn" title="Toggle theme" aria-label="Toggle dark/light theme">
       <i class="ti ti-moon" id="theme-icon"></i>
@@ -2753,6 +2833,81 @@ function _syncThemeIcon(theme) {
   const icon = document.getElementById('theme-icon');
   if (icon) icon.className = theme === 'dark' ? 'ti ti-sun' : 'ti ti-moon';
 }
+
+// ── Global fuzzy search ───────────────────────────────────────────────────────
+let _gsDebounceTimer = null;
+
+function _gsFuzzyScore(query, text) {
+  const q = query.toLowerCase();
+  const t = (text || '').toLowerCase();
+  if (t.includes(q)) return 2;
+  let qi = 0;
+  for (let i = 0; i < t.length && qi < q.length; i++) {
+    if (t[i] === q[qi]) qi++;
+  }
+  return qi === q.length ? 1 : 0;
+}
+
+function _gsStatusClass(status) {
+  return ({ 'in-progress': 'gs-status-in-progress', sit: 'gs-status-sit', uat: 'gs-status-uat', done: 'gs-status-done' })[status] || 'gs-status-backlog';
+}
+
+function _gsSearch(query) {
+  const drop = document.getElementById('global-search-dropdown');
+  if (!drop) return;
+  const q = query.trim();
+  if (!q) { drop.classList.remove('open'); drop.innerHTML = ''; return; }
+  const issues = _smgmtData?.issues || [];
+  const scored = [];
+  for (const iss of issues) {
+    const score = Math.max(_gsFuzzyScore(q, iss.title || ''), _gsFuzzyScore(q, iss.body || ''));
+    if (score > 0) scored.push({ iss, score });
+  }
+  scored.sort((a, b) => b.score - a.score);
+  const results = scored.slice(0, 20).map(s => s.iss);
+  if (results.length === 0) {
+    drop.innerHTML = '<div class="global-search-no-results">No results</div>';
+    drop.classList.add('open');
+    return;
+  }
+  drop.innerHTML = results.map(iss => {
+    const statusCls = _gsStatusClass(iss.status);
+    const sprint = iss.sprint_label ? `<span class="gs-sprint">${escHtml(iss.sprint_label)}</span>` : '';
+    return `<div class="global-search-result" onclick="_gsNavigate('${escHtml(iss.url || '')}')">
+      <span class="gs-num">#${iss.number}</span>
+      <span class="gs-title">${escHtml(iss.title)}</span>
+      ${sprint}
+      <span class="gs-status ${statusCls}">${escHtml(iss.status || 'backlog')}</span>
+    </div>`;
+  }).join('');
+  drop.classList.add('open');
+}
+
+function _gsNavigate(url) {
+  if (url) window.open(url, '_blank', 'noopener');
+  _gsClose();
+}
+
+function _gsClose() {
+  const drop = document.getElementById('global-search-dropdown');
+  if (drop) drop.classList.remove('open');
+}
+
+function _gsOnInput(e) {
+  clearTimeout(_gsDebounceTimer);
+  const q = e.target.value;
+  if (!q.trim()) { _gsClose(); return; }
+  _gsDebounceTimer = setTimeout(() => _gsSearch(q), 200);
+}
+
+function _gsOnKeydown(e) {
+  if (e.key === 'Escape') { _gsClose(); e.target.blur(); }
+}
+
+document.addEventListener('click', function(e) {
+  const wrap = document.querySelector('.global-search-wrap');
+  if (wrap && !wrap.contains(e.target)) _gsClose();
+});
 
 // ── Utilities ─────────────────────────────────────────────────────────────────
 function escHtml(s) {

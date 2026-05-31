@@ -7,7 +7,7 @@ import pytest
 REPO_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
-from services.sprint_manager.dag_builder import CyclicDependencyError, DAGResult, build_dag
+from services.sprint_manager.dag_builder import CycleError, CyclicDependencyError, DAGResult, build_dag
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -131,48 +131,23 @@ def test_dagresult_iterable():
             assert isinstance(tid, str)
 
 
-# ── AC: cycle guard (manual construction via monkeypatch) ─────────────────────
+# ── AC: cycle guard returns CycleError (not exception) ────────────────────────
 
-def test_cyclic_dependency_error_raised(monkeypatch):
-    """Force a cycle by patching in_degree after build_dag runs partial setup."""
+def test_cyclic_dependency_returns_cycle_error(monkeypatch):
+    """build_dag returns CycleError (not raises) when a cycle exists."""
     from services.sprint_manager import dag_builder
 
-    original_build = dag_builder.build_dag
+    def patched_find_cycles(adj, ids):
+        return [["A", "B"]]
 
-    def patched_build(tickets):
-        import collections
-        if not tickets:
-            return DAGResult()
-        ids = [t["id"] for t in tickets]
-        file_sets = {t["id"]: set(t.get("files_touched") or []) for t in tickets}
-        adj = collections.defaultdict(list)
-        in_degree = collections.defaultdict(int)
-        edges = []
-        for tid in ids:
-            in_degree[tid] = in_degree.get(tid, 0)
-        # Introduce artificial cycle: A→B and B→A
-        adj["A"].append("B")
-        adj["B"].append("A")
-        in_degree["A"] = 1
-        in_degree["B"] = 1
-        edges = [("A", "B"), ("B", "A")]
-        queue = collections.deque(tid for tid in ids if in_degree[tid] == 0)
-        layers = []
-        visited = 0
-        while queue:
-            layer = list(queue)
-            layers.append(layer)
-            queue.clear()
-            for node in layer:
-                visited += 1
-                for neighbour in adj[node]:
-                    in_degree[neighbour] -= 1
-                    if in_degree[neighbour] == 0:
-                        queue.append(neighbour)
-        if visited != len(ids):
-            raise CyclicDependencyError("Cycle detected in ticket file-overlap graph")
-        return DAGResult(layers=layers, edges=edges)
+    monkeypatch.setattr(dag_builder, "_find_all_cycles", patched_find_cycles)
+    result = dag_builder.build_dag([_ticket("A", ["f.py"]), _ticket("B", ["g.py"])])
+    assert isinstance(result, CycleError)
+    assert result.cycles == [["A", "B"]]
 
-    monkeypatch.setattr(dag_builder, "build_dag", patched_build)
-    with pytest.raises(CyclicDependencyError):
-        dag_builder.build_dag([_ticket("A", ["f.py"]), _ticket("B", ["f.py"])])
+
+def test_cycle_error_payload():
+    err = CycleError(cycles=[["#1", "#2"]])
+    payload = err.to_payload()
+    assert payload["error"] == "cycle_detected"
+    assert payload["cycles"] == [["#1", "#2"]]

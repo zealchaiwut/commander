@@ -2777,6 +2777,10 @@ def _sprint_goal_path(project_root: Path, sprint_label: str) -> Path:
     return _commander_dir(project_root) / "sprints" / f"{sprint_label}-goal.txt"
 
 
+def _sprint_plan_path(project_root: Path, sprint_label: str) -> Path:
+    return _commander_dir(project_root) / "sprints" / f"{sprint_label}-plan.json"
+
+
 def _load_sprint_order(project_root: Path, all_sprint_labels: list[str]) -> list[str]:
     """Load sprint order from file; fill missing/new sprint labels in natural order."""
     order_path = _sprint_order_path(project_root)
@@ -3016,6 +3020,31 @@ def get_sprint_management_issues(repo: str):
     ]
     project_root = _project_root_path(repo)
     order = _load_sprint_order(project_root, non_empty_sprint_labels)
+
+    # Apply per-sprint plan.json ordering; fallback to ascending issue number (issue #441)
+    sprint_issues_map: dict[str, list] = {}
+    unassigned_issues = []
+    for iss in result_issues:
+        lbl = iss.get("sprint_label")
+        if lbl:
+            sprint_issues_map.setdefault(lbl, []).append(iss)
+        else:
+            unassigned_issues.append(iss)
+    ordered_result: list = []
+    for lbl, iss_list in sprint_issues_map.items():
+        plan_path = _sprint_plan_path(project_root, lbl)
+        if plan_path.exists():
+            try:
+                plan_order: list[int] = json.loads(plan_path.read_text(encoding="utf-8"))
+                plan_idx = {n: i for i, n in enumerate(plan_order)}
+                iss_list.sort(key=lambda i: plan_idx.get(i["number"], len(plan_order)))
+            except Exception:
+                iss_list.sort(key=lambda i: i["number"])
+        else:
+            iss_list.sort(key=lambda i: i["number"])
+        ordered_result.extend(iss_list)
+    ordered_result.extend(unassigned_issues)
+    result_issues = ordered_result
 
     # Placeholder sprint = lowest positive N such that no sprint-N label exists (issue #364)
     _used = set(sprints)
@@ -4369,6 +4398,26 @@ def reorder_sprint_tickets(sprint_label: str, body: SprintTicketReorderBody):
         ]
         _sprint_json_write(json_path, data)
 
+    return {"ok": True}
+
+
+@app.post("/api/sprints/{sprint_label}/plan")
+async def save_sprint_plan(sprint_label: str, project: str, request: Request):
+    """Persist ticket execution order to sprint-{label}-plan.json (issue #441)."""
+    if not _SPRINT_LABEL_RE.match(sprint_label):
+        raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(400, detail="Body must be a JSON array of integers")
+    if not isinstance(body, list) or not all(isinstance(n, int) for n in body):
+        raise HTTPException(400, detail="Body must be a JSON array of integers")
+    project_root = _project_root_path(project)
+    plan_path = _sprint_plan_path(project_root, sprint_label)
+    plan_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = plan_path.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(body), encoding="utf-8")
+    os.replace(str(tmp), str(plan_path))
     return {"ok": True}
 
 

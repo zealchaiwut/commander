@@ -352,6 +352,44 @@ class TestRunIdNoneGraceful:
             else:
                 os.environ.pop("COMMANDER_RUN_ID", None)
 
+    def test_dispatch_log_event_with_unset_commander_run_id_does_not_raise(
+        self, monkeypatch, tmp_path
+    ):
+        """COMMANDER_RUN_ID unset → os.environ.get() returns None → log.event() must not crash.
+
+        Mirrors the exact pattern in dispatch_coder / dispatch_tester where run_id is
+        read as os.environ.get("COMMANDER_RUN_ID") and passed directly to log.event().
+        """
+        from services.logging import _Logger
+
+        monkeypatch.delenv("COMMANDER_RUN_ID", raising=False)
+
+        run_id = os.environ.get("COMMANDER_RUN_ID")
+        assert run_id is None, "precondition: COMMANDER_RUN_ID must be unset"
+
+        logger = _Logger()
+        log_dir = tmp_path / ".commander" / "logs"
+        log_dir.mkdir(parents=True)
+
+        with patch("services.logging._resolve_log_dir", return_value=log_dir):
+            for event_name, role in (
+                ("coder.dispatch", "coder"),
+                ("tester.dispatch", "tester"),
+            ):
+                try:
+                    logger.event(
+                        event_name,
+                        run_id=run_id,
+                        issue_num=464,
+                        sprint_label="sprint-32",
+                        agent_role=role,
+                    )
+                except Exception as exc:
+                    pytest.fail(
+                        f"log.event({event_name!r}) raised when COMMANDER_RUN_ID "
+                        f"unset (run_id=None): {exc}"
+                    )
+
 
 # ── Integration: log.event() writes valid JSON-lines ─────────────────────────
 

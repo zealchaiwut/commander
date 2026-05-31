@@ -485,6 +485,48 @@
     .ct-modal { width: min(400px, calc(100vw - 32px)); }
     /* ── Create Label modal ── */
     .cl-modal { width: min(420px, calc(100vw - 32px)); }
+    /* ── Bulk close action bar ── */
+    .bulk-action-bar {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 200;
+      background: var(--bg); border-bottom: 2px solid var(--amber);
+      padding: 10px 20px; display: flex; align-items: center; gap: 12px;
+      box-shadow: 0 2px 8px rgba(0,0,0,.15);
+    }
+    .bulk-action-bar.hidden { display: none; }
+    .bab-label { font-size: 13px; font-weight: 600; color: var(--text); }
+    .bab-spacer { flex: 1; }
+    .bab-results { display: flex; flex-direction: column; gap: 2px; flex: 1; overflow: hidden; }
+    .bab-result-item { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .bab-result-item.ok  { color: var(--green); }
+    .bab-result-item.err { color: var(--red); }
+    .bab-close-btn {
+      padding: 6px 14px; font-size: 12px; font-weight: 600; white-space: nowrap;
+      border: none; border-radius: 6px;
+      background: var(--red); color: #fff; cursor: pointer; transition: opacity .15s;
+    }
+    .bab-close-btn:hover { opacity: .85; }
+    .bab-close-btn:disabled { opacity: .45; cursor: not-allowed; }
+    .bab-dismiss-btn {
+      padding: 6px 10px; font-size: 12px; white-space: nowrap;
+      border: 1px solid var(--border); border-radius: 6px;
+      background: none; color: var(--text-muted); cursor: pointer; transition: background .12s;
+    }
+    .bab-dismiss-btn:hover { background: var(--surface-2); }
+    /* ── Bulk close confirm modal ── */
+    .bcm-modal { width: min(480px, calc(100vw - 32px)); }
+    .bcm-ticket-list {
+      max-height: 240px; overflow-y: auto;
+      border: 1px solid var(--border); border-radius: 6px; margin: 8px 0;
+    }
+    .bcm-ticket-item {
+      display: flex; align-items: center; gap: 8px;
+      padding: 8px 12px; border-bottom: 1px solid var(--border); font-size: 13px;
+    }
+    .bcm-ticket-item:last-child { border-bottom: none; }
+    .bcm-ticket-num  { font-size: 11px; color: var(--text-sub); flex-shrink: 0; }
+    .bcm-ticket-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+    /* checkbox styling for ticket rows */
+    .ticket-checkbox { flex-shrink: 0; width: 15px; height: 15px; cursor: pointer; accent-color: var(--red); }
 
     /* ── Mobile ── */
     @media (max-width: 699px) {
@@ -3117,6 +3159,9 @@ async function loadTickets() {
 function renderTickets(data, repo) {
   const container = document.getElementById('tickets-content');
   if (!container) return;
+  // Re-render clears selection state
+  _bulkSelected.clear();
+  document.getElementById('bulk-action-bar')?.classList.add('hidden');
 
   const tickets = data.tickets || [];
   const ghUrl   = data.github_url || '#';
@@ -3136,6 +3181,7 @@ function renderTickets(data, repo) {
     ticketsHtml = groups.map(g => {
       const rows = g.items.map(t => `
         <div class="ticket-row" id="ticket-row-${t.number}">
+          <input type="checkbox" class="ticket-checkbox" data-num="${t.number}" data-title="${escHtml(t.title)}" onchange="_onTicketCheckbox(this)">
           <span class="ticket-status-pill ${escHtml(t.status)}">${escHtml(t.status)}</span>
           <a class="ticket-title" href="${escHtml(t.url)}" target="_blank" rel="noopener" title="${escHtml(t.title)}">${escHtml(t.title)}</a>
           <span class="ticket-num">#${t.number}</span>
@@ -3215,6 +3261,149 @@ async function closeTicketModalConfirm() {
   } catch (e) {
     if (errEl) { errEl.textContent = 'Failed to close ticket: ' + e.message; errEl.classList.remove('hidden'); }
     if (btn) { btn.disabled = false; btn.textContent = 'Close ticket'; }
+  }
+}
+
+// ── Bulk Close flow ───────────────────────────────────────────────────────────
+const _bulkSelected = new Map(); // num → title
+
+function _onTicketCheckbox(el) {
+  const num   = parseInt(el.dataset.num, 10);
+  const title = el.dataset.title || '';
+  if (el.checked) {
+    _bulkSelected.set(num, title);
+  } else {
+    _bulkSelected.delete(num);
+  }
+  _bulkUpdateActionBar();
+}
+
+function _bulkUpdateActionBar() {
+  const bar      = document.getElementById('bulk-action-bar');
+  const labelEl  = document.getElementById('bab-label');
+  const closeBtn = document.getElementById('bab-close-btn');
+  if (!bar) return;
+  const n = _bulkSelected.size;
+  if (n === 0) {
+    bar.classList.add('hidden');
+    return;
+  }
+  bar.classList.remove('hidden');
+  document.getElementById('bab-result-list')?.classList.add('hidden');
+  if (labelEl) labelEl.textContent = `${n} ticket${n !== 1 ? 's' : ''} selected`;
+  if (closeBtn) {
+    closeBtn.disabled    = false;
+    closeBtn.textContent = `Close ${n} Ticket${n !== 1 ? 's' : ''}`;
+    closeBtn.classList.remove('hidden');
+  }
+  const dismissBtn = document.getElementById('bab-dismiss-btn');
+  if (dismissBtn) dismissBtn.textContent = '✕ Clear';
+}
+
+function _bulkDeselectAll() {
+  _bulkSelected.clear();
+  document.querySelectorAll('.ticket-checkbox:checked').forEach(cb => { cb.checked = false; });
+  _bulkUpdateActionBar();
+}
+
+function openBulkCloseModal() {
+  if (_bulkSelected.size === 0) return;
+  const listEl = document.getElementById('bcm-ticket-list');
+  if (listEl) {
+    listEl.innerHTML = Array.from(_bulkSelected.entries()).map(([num, title]) =>
+      `<div class="bcm-ticket-item">
+        <span class="bcm-ticket-num">#${num}</span>
+        <span class="bcm-ticket-title" title="${escHtml(title)}">${escHtml(title)}</span>
+      </div>`
+    ).join('');
+  }
+  const errEl = document.getElementById('bcm-modal-error');
+  if (errEl) errEl.classList.add('hidden');
+  const confirmBtn = document.getElementById('bcm-confirm-btn');
+  if (confirmBtn) { confirmBtn.disabled = false; confirmBtn.textContent = `Close ${_bulkSelected.size} Ticket${_bulkSelected.size !== 1 ? 's' : ''}`; }
+  document.getElementById('bcm-backdrop')?.classList.remove('hidden');
+  document.getElementById('bcm-modal')?.classList.remove('hidden');
+}
+
+function _bulkCloseCancel() {
+  document.getElementById('bcm-backdrop')?.classList.add('hidden');
+  document.getElementById('bcm-modal')?.classList.add('hidden');
+}
+
+async function _bulkCloseConfirm() {
+  if (_bulkSelected.size === 0 || !_ticketsRepo) return;
+  const confirmBtn = document.getElementById('bcm-confirm-btn');
+  if (confirmBtn) { confirmBtn.disabled = true; confirmBtn.textContent = 'Closing…'; }
+
+  const tickets  = Array.from(_bulkSelected.entries()); // [[num,title],…]
+  const results  = [];
+
+  for (const [num, title] of tickets) {
+    try {
+      const res = await fetch(
+        `/api/issues/${num}/close?repo=${encodeURIComponent(_ticketsRepo)}`,
+        { method: 'POST' }
+      );
+      if (!res.ok) {
+        const text = await res.text().catch(() => '');
+        throw new Error(text || `HTTP ${res.status}`);
+      }
+      results.push({ num, title, ok: true });
+    } catch (e) {
+      results.push({ num, title, ok: false, err: e.message });
+    }
+  }
+
+  _bulkCloseCancel();
+
+  // Build inline result list in action bar
+  const resultListEl = document.getElementById('bab-result-list');
+  const closeBtnEl   = document.getElementById('bab-close-btn');
+  if (resultListEl) {
+    resultListEl.innerHTML = results.map(r =>
+      r.ok
+        ? `<div class="bab-result-item ok">✓ #${r.num} ${escHtml(r.title)}</div>`
+        : `<div class="bab-result-item err">✗ #${r.num}: ${escHtml(r.err)}</div>`
+    ).join('');
+    resultListEl.classList.remove('hidden');
+  }
+  if (closeBtnEl) closeBtnEl.classList.add('hidden');
+
+  // Remove successful tickets from selection and DOM
+  const successNums = results.filter(r => r.ok).map(r => r.num);
+  successNums.forEach(num => {
+    _bulkSelected.delete(num);
+    document.getElementById(`ticket-row-${num}`)?.remove();
+    document.querySelector(`.ticket-checkbox[data-num="${num}"]`)?.closest('.ticket-row')?.remove();
+  });
+
+  // Update ticket count in toolbar
+  if (successNums.length > 0) {
+    const countEl = document.querySelector('#tickets-content .tickets-toolbar .tickets-toolbar-left span');
+    if (countEl) {
+      const cur = parseInt(countEl.textContent) || 0;
+      const n   = Math.max(0, cur - successNums.length);
+      countEl.textContent = `${n} open ticket${n !== 1 ? 's' : ''}`;
+    }
+  }
+
+  // Update dismiss button to plain "Dismiss"
+  const dismissBtn = document.getElementById('bab-dismiss-btn');
+  if (dismissBtn) dismissBtn.textContent = 'Dismiss';
+
+  // Hide bar if nothing failed
+  if (_bulkSelected.size === 0 && results.every(r => r.ok)) {
+    setTimeout(() => {
+      document.getElementById('bulk-action-bar')?.classList.add('hidden');
+    }, 2500);
+  }
+
+  // Show overall toast
+  const failCount = results.filter(r => !r.ok).length;
+  if (failCount === 0) {
+    _ticketsShowSuccess(`${successNums.length} ticket${successNums.length !== 1 ? 's' : ''} closed.`);
+  } else {
+    _ticketsShowError(`${successNums.length} closed, ${failCount} failed.`);
   }
 }
 
@@ -8101,6 +8290,15 @@ function _logsDisconnectLive() {
 
 <div id="tickets-toast"></div>
 
+<!-- ── Bulk close action bar ── -->
+<div class="bulk-action-bar hidden" id="bulk-action-bar">
+  <span class="bab-label" id="bab-label">0 tickets selected</span>
+  <div class="bab-results hidden" id="bab-result-list"></div>
+  <div class="bab-spacer"></div>
+  <button class="bab-close-btn" id="bab-close-btn" onclick="openBulkCloseModal()">Close Tickets</button>
+  <button class="bab-dismiss-btn" id="bab-dismiss-btn" onclick="_bulkDeselectAll()">✕ Clear</button>
+</div>
+
 <!-- ── Close Ticket modal ── -->
 <div class="modal-backdrop hidden" id="ct-backdrop" onclick="closeTicketModalCancel()"></div>
 <div class="modal ct-modal hidden" id="ct-modal">
@@ -8116,6 +8314,24 @@ function _logsDisconnectLive() {
   <div class="modal-footer">
     <button class="btn-ghost" onclick="closeTicketModalCancel()" type="button">Cancel</button>
     <button class="btn-danger" id="ct-confirm-btn" onclick="closeTicketModalConfirm()" type="button">Close ticket</button>
+  </div>
+</div>
+
+<!-- ── Bulk Close modal ── -->
+<div class="modal-backdrop hidden" id="bcm-backdrop" onclick="_bulkCloseCancel()"></div>
+<div class="modal bcm-modal hidden" id="bcm-modal">
+  <div class="modal-header">
+    <span class="modal-title">Close tickets</span>
+    <button class="modal-close" onclick="_bulkCloseCancel()" aria-label="Close">&times;</button>
+  </div>
+  <div class="modal-body">
+    <p style="font-size:13px;color:var(--text);margin:0 0 4px;">The following tickets will be closed on GitHub. This cannot be undone from the dashboard.</p>
+    <div class="bcm-ticket-list" id="bcm-ticket-list"></div>
+    <div class="modal-error hidden" id="bcm-modal-error"></div>
+  </div>
+  <div class="modal-footer">
+    <button class="btn-ghost" onclick="_bulkCloseCancel()" type="button">Cancel</button>
+    <button class="btn-danger" id="bcm-confirm-btn" onclick="_bulkCloseConfirm()" type="button">Close Tickets</button>
   </div>
 </div>
 

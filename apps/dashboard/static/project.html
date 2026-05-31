@@ -1313,6 +1313,16 @@
     .nt-warn-item.hidden { display: none; }
     .nt-file-input { padding: 4px 8px; cursor: pointer; }
 
+    /* ── Run Sprint preflight modal (issue #446) ── */
+    .pf-modal { width: min(480px, calc(100vw - 32px)); }
+    .pf-spinner {
+      display: inline-block; width: 22px; height: 22px;
+      border: 3px solid var(--border); border-top-color: var(--blue);
+      border-radius: 50%; animation: pf-spin 0.7s linear infinite;
+      vertical-align: middle;
+    }
+    @keyframes pf-spin { to { transform: rotate(360deg); } }
+
     /* ── Backlog pane (issue #274) ── */
     .smgmt-backlog-pane {
       border: 2px dashed var(--border);
@@ -5207,11 +5217,99 @@ function smgmtRunBlockedToast() {
   _smgmtShowToast('Another sprint is running — wait for it to finish or cancel it');
 }
 
-async function smgmtRunSprint(label) {
+function smgmtRunSprint(label) {
+  _pfOpen(label);
+}
+
+// ── Run Sprint preflight modal (issue #446) ─────────────────────────────────
+
+let _pfCurrentLabel = null;
+let _pfCurrentRepo  = null;
+let _pfState        = 'idle'; // 'loading' | 'success' | 'error'
+
+function _pfOpen(label) {
   const repo = _smgmtRepo();
   if (!repo) return;
-  const n = parseInt(label.split('-')[1], 10);
-  if (!confirm(`Run Sprint ${n}?\n\nThis will dispatch coder and tester agents for all tickets in this sprint.`)) return;
+  _pfCurrentLabel = label;
+  _pfCurrentRepo  = repo;
+  _pfReset();
+  document.getElementById('pf-backdrop').classList.remove('hidden');
+  document.getElementById('pf-modal').classList.remove('hidden');
+  document.getElementById('pf-close-btn').focus();
+  _pfFetch();
+}
+
+function _pfReset() {
+  document.getElementById('pf-loading').classList.remove('hidden');
+  document.getElementById('pf-content').classList.add('hidden');
+  document.getElementById('pf-error').classList.add('hidden');
+  document.getElementById('pf-footer').classList.add('hidden');
+  document.getElementById('pf-confirm-btn').disabled = true;
+  document.getElementById('pf-confirm-btn').textContent = 'Run Sprint';
+}
+
+function _pfClose() {
+  document.getElementById('pf-backdrop').classList.add('hidden');
+  document.getElementById('pf-modal').classList.add('hidden');
+  _pfCurrentLabel = null;
+  _pfCurrentRepo  = null;
+  _pfState        = 'idle';
+}
+
+async function _pfFetch() {
+  _pfState = 'loading';
+  const label = _pfCurrentLabel;
+  const repo  = _pfCurrentRepo;
+  try {
+    const res = await fetch(
+      `/api/sprints/${encodeURIComponent(label)}/preflight?project=${encodeURIComponent(repo)}`
+    );
+    if (!res.ok) throw new Error(await res.text());
+    if (_pfCurrentLabel !== label) return; // modal closed while in flight
+    _pfState = 'success';
+    _pfShowSuccess();
+  } catch (e) {
+    if (_pfCurrentLabel !== label) return;
+    _pfState = 'error';
+    _pfShowError(e.message || 'Preflight check failed.');
+  }
+}
+
+function _pfShowSuccess() {
+  document.getElementById('pf-loading').classList.add('hidden');
+  document.getElementById('pf-error').classList.add('hidden');
+  const n = parseInt((_pfCurrentLabel || '').split('-')[1], 10);
+  document.getElementById('pf-content').innerHTML =
+    `<p style="font-size:13px;color:var(--text);margin:0;">Ready to run <strong>Sprint ${n}</strong>.</p>`;
+  document.getElementById('pf-content').classList.remove('hidden');
+  document.getElementById('pf-footer').classList.remove('hidden');
+  document.getElementById('pf-confirm-btn').disabled = false;
+  document.getElementById('pf-cancel-btn').focus();
+}
+
+function _pfShowError(msg) {
+  document.getElementById('pf-loading').classList.add('hidden');
+  document.getElementById('pf-content').classList.add('hidden');
+  document.getElementById('pf-error-msg').textContent = msg;
+  document.getElementById('pf-error').classList.remove('hidden');
+  document.getElementById('pf-footer').classList.remove('hidden');
+  document.getElementById('pf-confirm-btn').disabled = true;
+  document.getElementById('pf-retry-btn').focus();
+}
+
+function _pfRetry() {
+  _pfReset();
+  _pfFetch();
+}
+
+async function _pfConfirm() {
+  if (_pfState !== 'success') return;
+  const label = _pfCurrentLabel;
+  const repo  = _pfCurrentRepo;
+  if (!label || !repo) return;
+  const confirmBtn = document.getElementById('pf-confirm-btn');
+  confirmBtn.disabled = true;
+  confirmBtn.innerHTML = '<span class="pf-spinner" style="width:12px;height:12px;border-width:2px;"></span> Running…';
   try {
     const res = await fetch('/api/sprints/run', {
       method: 'POST',
@@ -5219,10 +5317,13 @@ async function smgmtRunSprint(label) {
       body: JSON.stringify({ project: repo, sprint_label: label }),
     });
     if (!res.ok) throw new Error(await res.text());
+    _pfClose();
+    const n = parseInt(label.split('-')[1], 10);
     _smgmtShowToast(`Sprint ${n} dispatched.`);
     await loadSprintMgmt();
   } catch (e) {
-    alert('Failed to run sprint: ' + e.message);
+    _pfState = 'error';
+    _pfShowError('Failed to run sprint: ' + e.message);
   }
 }
 
@@ -6773,7 +6874,9 @@ function _setupModals() {
   // Global Escape handler
   document.addEventListener('keydown', function(e) {
     if (e.key === 'Escape') {
-      if (!document.getElementById('sm-modal').classList.contains('hidden')) {
+      if (!document.getElementById('pf-modal').classList.contains('hidden')) {
+        _pfClose();
+      } else if (!document.getElementById('sm-modal').classList.contains('hidden')) {
         closeSettingsModal();
       } else if (!document.getElementById('ct-modal').classList.contains('hidden')) {
         closeTicketModalCancel();
@@ -7012,6 +7115,24 @@ function _setupModals() {
       this.disabled = false;
       this.textContent = 'Post to GitHub';
     }
+  });
+
+  // ── Run Sprint preflight modal wiring ──
+  document.getElementById('pf-close-btn').addEventListener('click', _pfClose);
+  document.getElementById('pf-cancel-btn').addEventListener('click', _pfClose);
+  document.getElementById('pf-backdrop').addEventListener('click', _pfClose);
+  document.getElementById('pf-retry-btn').addEventListener('click', _pfRetry);
+  document.getElementById('pf-confirm-btn').addEventListener('click', _pfConfirm);
+
+  document.getElementById('pf-modal').addEventListener('keydown', function(e) {
+    if (e.key !== 'Tab') return;
+    const focusable = Array.from(this.querySelectorAll(
+      'button:not([disabled]), textarea, input, [tabindex]:not([tabindex="-1"])'
+    ));
+    if (!focusable.length) return;
+    const first = focusable[0], last = focusable[focusable.length - 1];
+    if (e.shiftKey) { if (document.activeElement === first) { e.preventDefault(); last.focus(); } }
+    else            { if (document.activeElement === last)  { e.preventDefault(); first.focus(); } }
   });
 }
 
@@ -8536,6 +8657,33 @@ function _logsDisconnectLive() {
   </div>
   <div class="modal-footer">
     <button class="btn-primary" onclick="closeSettingsModal()" type="button">Done</button>
+  </div>
+</div>
+
+<!-- ── Run Sprint preflight modal (issue #446) ── -->
+<div class="modal-backdrop hidden" id="pf-backdrop"></div>
+<div class="modal pf-modal hidden" id="pf-modal"
+     role="dialog" aria-modal="true" aria-labelledby="pf-modal-title">
+  <div class="modal-header">
+    <span class="modal-title" id="pf-modal-title">Run Sprint</span>
+    <button class="modal-close" id="pf-close-btn" aria-label="Close">&times;</button>
+  </div>
+  <div class="modal-body" id="pf-body">
+    <div id="pf-loading" style="text-align:center;padding:24px 0;">
+      <span class="pf-spinner" aria-label="Loading…"></span>
+      <p style="margin:12px 0 0;font-size:13px;color:var(--text-muted);">Checking sprint…</p>
+    </div>
+    <div id="pf-content" class="hidden"></div>
+    <div id="pf-error" class="hidden">
+      <div class="modal-error" id="pf-error-msg"></div>
+      <div style="margin-top:10px;">
+        <button class="btn-ghost" id="pf-retry-btn" type="button">Retry</button>
+      </div>
+    </div>
+  </div>
+  <div class="modal-footer hidden" id="pf-footer">
+    <button class="btn-ghost" id="pf-cancel-btn" type="button">Cancel</button>
+    <button class="btn-primary" id="pf-confirm-btn" type="button" disabled>Run Sprint</button>
   </div>
 </div>
 

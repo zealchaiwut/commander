@@ -3327,6 +3327,17 @@ def get_sprint_cycle_check(sprint_label: str, project: str):
     return {"has_cycle": False}
 
 
+@app.get("/api/sprints/{sprint_label}/preflight")
+def get_sprint_preflight(sprint_label: str, project: str):
+    """Preflight check returned before running a sprint.
+
+    Response contract is defined by a sibling ticket; this stub returns {"ok": true}.
+    """
+    if not _SPRINT_LABEL_RE.match(sprint_label):
+        raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")
+    return {"ok": True, "sprint_label": sprint_label, "project": project}
+
+
 @app.post("/api/sprints/run", status_code=202)
 def run_sprint_managed(request: Request, body: SprintMgmtRunBody):
     """Spawn sprint_manager.py for the given project + sprint.

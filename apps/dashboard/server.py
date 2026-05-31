@@ -2960,6 +2960,7 @@ def get_sprint_management_issues(repo: str):
         result_issues.append({
             "number": iss["number"],
             "title": iss["title"],
+            "body": iss.get("body", "") or "",
             "labels": iss.get("labels", []),
             "sprint": sprint_num,
             "sprint_label": found_sprint_label,

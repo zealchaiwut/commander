@@ -3405,16 +3405,23 @@ def _sprint_dag_tickets(project_root: Path, sprint_issues: list[dict]) -> list[d
     return tickets
 
 
+_STALE_ESTIMATE_DAYS = 7
+
+
 @app.get("/api/sprints/{sprint_label}/preflight")
 def get_sprint_preflight(sprint_label: str, project: str):
     """Preflight check returned before running a sprint.
 
-    Returns DAG visualization data (layers, edges, ticket metadata) alongside ok flag.
+    Returns DAG visualization data (layers, edges, ticket metadata) alongside ok flag,
+    warnings (unestimated, stale_estimates, missing_ac), and cycle path if detected.
     """
     if not _SPRINT_LABEL_RE.match(sprint_label):
         raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")
 
     dag_payload: dict | None = None
+    warnings: dict = {"unestimated": [], "stale_estimates": [], "missing_ac": []}
+    cycle_path: list[str] | None = None
+
     try:
         issues = github_client.list_open_issues_with_body(repo_name=project, limit=200)
         sprint_issues = [
@@ -3424,6 +3431,7 @@ def get_sprint_preflight(sprint_label: str, project: str):
         if sprint_issues:
             project_root = _project_root_path(project)
             estimates_dir = _commander_dir(project_root) / "estimates"
+            stale_cutoff = datetime.now(timezone.utc) - timedelta(days=_STALE_ESTIMATE_DAYS)
 
             ticket_map: dict[str, dict] = {}
             for iss in sprint_issues:
@@ -3442,14 +3450,20 @@ def get_sprint_preflight(sprint_label: str, project: str):
 
                 size: str | None = None
                 files_touched: list[str] = []
+                est_stale = False
                 est_path = estimates_dir / f"issue-{num}.json"
                 if est_path.exists():
                     try:
                         est = json.loads(est_path.read_text(encoding="utf-8"))
                         size = est.get("size")
                         files_touched = est.get("files_likely_affected") or []
+                        mtime = datetime.fromtimestamp(est_path.stat().st_mtime, tz=timezone.utc)
+                        est_stale = mtime < stale_cutoff
                     except (json.JSONDecodeError, OSError):
                         pass
+
+                body = iss.get("body") or ""
+                has_ac = "## Acceptance Criteria" in body
 
                 tid = f"#{num}"
                 ticket_map[tid] = {
@@ -3460,6 +3474,13 @@ def get_sprint_preflight(sprint_label: str, project: str):
                     "size": size,
                     "files_touched": files_touched,
                 }
+
+                if size is None:
+                    warnings["unestimated"].append(tid)
+                if est_stale:
+                    warnings["stale_estimates"].append(tid)
+                if not has_ac:
+                    warnings["missing_ac"].append(tid)
 
             layers: list[list[str]]
             edges: list[list[str]]
@@ -3472,6 +3493,8 @@ def get_sprint_preflight(sprint_label: str, project: str):
                 if isinstance(dag_result, _CycleError):
                     layers = [list(ticket_map.keys())]
                     edges = []
+                    if dag_result.cycles:
+                        cycle_path = dag_result.cycles[0]
                 else:
                     layers = dag_result.layers
                     edges = [[e[0], e[1]] for e in dag_result.edges]
@@ -3487,7 +3510,15 @@ def get_sprint_preflight(sprint_label: str, project: str):
     except subprocess.CalledProcessError:
         pass  # DAG is decorative — don't fail the preflight
 
-    return {"ok": True, "sprint_label": sprint_label, "project": project, "dag": dag_payload}
+    return {
+        "ok": True,
+        "sprint_label": sprint_label,
+        "project": project,
+        "dag": dag_payload,
+        "warnings": warnings,
+        "cycle": cycle_path,
+        "stale_threshold_days": _STALE_ESTIMATE_DAYS,
+    }
 
 
 @app.post("/api/sprints/run", status_code=202)

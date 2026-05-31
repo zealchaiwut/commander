@@ -1320,7 +1320,7 @@
 <div id="sc-stop-dialog-backdrop" class="hidden" onclick="scStopCancel()"></div>
 <div id="sc-stop-dialog" class="hidden">
   <h3>Stop sprint?</h3>
-  <p>This will send SIGTERM to the sprint manager process. In-flight issues may be left incomplete.</p>
+  <p>This will send SIGTERM to the sprint manager process (macOS/Linux only). In-flight issues may be left incomplete.</p>
   <div class="modal-footer">
     <button class="btn-ghost" onclick="scStopCancel()">Cancel</button>
     <button class="btn-danger" id="sc-stop-confirm-btn" onclick="scStopExecute()">Stop sprint</button>
@@ -1728,7 +1728,7 @@
     <button class="modal-close" onclick="smgmtKillClose()" aria-label="Close">&times;</button>
   </div>
   <div style="padding: 0 4px 8px; font-size: 13px; color: var(--text-muted);">
-    Are you sure? This will SIGTERM then SIGKILL the sprint process by PID.
+    Are you sure? This will SIGTERM then SIGKILL the sprint process by PID (macOS/Linux only).
   </div>
   <div class="modal-footer">
     <button class="btn-ghost" onclick="smgmtKillClose()">Cancel</button>

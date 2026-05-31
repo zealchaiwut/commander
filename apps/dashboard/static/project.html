@@ -2520,6 +2520,27 @@
       font-family: var(--font-mono, monospace); font-size: 11px;
     }
 
+    /* Warnings section */
+    .pf-warnings-section { margin-top: 14px; }
+    .pf-warnings-label {
+      font-size: 11px; font-weight: 600; text-transform: uppercase;
+      letter-spacing: .06em; color: #b45309; margin-bottom: 6px;
+    }
+    .pf-warning-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+    .pf-warning-chip {
+      font-size: 12px; padding: 3px 10px; border-radius: 99px;
+      background: rgba(234, 179, 8, .12); border: 1px solid rgba(234, 179, 8, .45);
+      color: #92400e;
+    }
+
+    /* Cycle banner */
+    .pf-cycle-banner {
+      margin-top: 14px; padding: 10px 14px;
+      background: rgba(220, 38, 38, .08); border: 1px solid rgba(220, 38, 38, .35);
+      border-radius: 6px; font-size: 13px; color: #b91c1c;
+    }
+    .pf-cycle-banner strong { font-weight: 700; }
+
     /* ── Logs tab (issue #420) ── */
     .logs-pane { display: flex; flex-direction: column; height: 100%; min-height: 0; }
     .logs-toolbar {
@@ -6161,6 +6182,8 @@ let _pfCurrentLabel = null;
 let _pfCurrentRepo  = null;
 let _pfState        = 'idle'; // 'loading' | 'success' | 'error'
 let _pfDagData      = null;
+let _pfWarnings     = null;
+let _pfCycle        = null;
 let _pfSelectedIds  = new Set();
 
 function _pfOpen(label) {
@@ -6183,6 +6206,8 @@ function _pfReset() {
   document.getElementById('pf-confirm-btn').disabled = true;
   document.getElementById('pf-confirm-btn').textContent = 'Run Sprint';
   _pfDagData = null;
+  _pfWarnings = null;
+  _pfCycle = null;
   _pfSelectedIds = new Set();
 }
 
@@ -6193,6 +6218,8 @@ function _pfClose() {
   _pfCurrentRepo  = null;
   _pfState        = 'idle';
   _pfDagData      = null;
+  _pfWarnings     = null;
+  _pfCycle        = null;
   _pfSelectedIds  = new Set();
 }
 
@@ -6207,7 +6234,9 @@ async function _pfFetch() {
     if (!res.ok) throw new Error(await res.text());
     if (_pfCurrentLabel !== label) return;
     const data = await res.json();
-    _pfDagData = data.dag || null;
+    _pfDagData  = data.dag      || null;
+    _pfWarnings = data.warnings || null;
+    _pfCycle    = data.cycle    || null;
     if (_pfDagData) {
       for (const t of (_pfDagData.tickets || [])) _pfSelectedIds.add(t.id);
     }
@@ -6224,13 +6253,17 @@ function _pfShowSuccess() {
   document.getElementById('pf-loading').classList.add('hidden');
   document.getElementById('pf-error').classList.add('hidden');
   const n = parseInt((_pfCurrentLabel || '').split('-')[1], 10);
-  const dagHtml = _pfDagData && (_pfDagData.tickets || []).length > 0
+  const dagHtml       = _pfDagData && (_pfDagData.tickets || []).length > 0
     ? _pfBuildDAGHtml(_pfDagData)
     : '';
+  const warningsHtml  = _pfBuildWarningsHtml();
+  const cycleHtml     = _pfBuildCycleHtml();
   const conflictsHtml = _pfBuildConflictsHtml();
   const orderHtml     = _pfBuildOrderHtml();
   document.getElementById('pf-content').innerHTML =
     `<p style="font-size:13px;color:var(--text);margin:0;">Ready to run <strong>Sprint ${n}</strong>.</p>
+     ${warningsHtml}
+     ${cycleHtml}
      ${dagHtml}
      <div class="pf-section">
        <div class="pf-section-label">Conflicts</div>
@@ -6242,11 +6275,49 @@ function _pfShowSuccess() {
      </div>`;
   document.getElementById('pf-content').classList.remove('hidden');
   document.getElementById('pf-footer').classList.remove('hidden');
-  document.getElementById('pf-confirm-btn').disabled = false;
+  const hasCycle  = !!(_pfCycle && _pfCycle.length);
+  const confirmBtn = document.getElementById('pf-confirm-btn');
+  confirmBtn.disabled = hasCycle;
+  if (hasCycle) {
+    confirmBtn.title = 'Cannot run: dependency cycle detected. Resolve the cycle first.';
+    confirmBtn.setAttribute('aria-label', 'Run Sprint — disabled: dependency cycle detected');
+  } else {
+    confirmBtn.title = '';
+    confirmBtn.setAttribute('aria-label', 'Run Sprint');
+  }
   document.getElementById('pf-cancel-btn').focus();
   if (_pfDagData && (_pfDagData.edges || []).length > 0) {
     requestAnimationFrame(() => _pfDrawDAGArrows(_pfDagData.edges));
   }
+}
+
+function _pfBuildWarningsHtml() {
+  if (!_pfWarnings) return '';
+  const chips = [];
+  const unestimated    = _pfWarnings.unestimated    || [];
+  const staleEstimates = _pfWarnings.stale_estimates || [];
+  const missingAc      = _pfWarnings.missing_ac      || [];
+  if (unestimated.length) {
+    chips.push(`<span class="pf-warning-chip">${unestimated.length} unestimated: ${escHtml(unestimated.join(', '))}</span>`);
+  }
+  if (staleEstimates.length) {
+    chips.push(`<span class="pf-warning-chip">${staleEstimates.length} stale estimate${staleEstimates.length > 1 ? 's' : ''}: ${escHtml(staleEstimates.join(', '))}</span>`);
+  }
+  if (missingAc.length) {
+    chips.push(`<span class="pf-warning-chip">${missingAc.length} missing AC: ${escHtml(missingAc.join(', '))}</span>`);
+  }
+  if (!chips.length) return '';
+  return `<div class="pf-warnings-section">
+    <div class="pf-warnings-label">Warnings</div>
+    <div class="pf-warning-chips">${chips.join('')}</div>
+  </div>`;
+}
+
+function _pfBuildCycleHtml() {
+  if (!_pfCycle || !_pfCycle.length) return '';
+  return `<div class="pf-cycle-banner">
+    <strong>Cycle detected:</strong> ${escHtml(_pfCycle.join(' → '))}
+  </div>`;
 }
 
 function _pfBuildDAGHtml(dag) {

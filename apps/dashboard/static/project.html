@@ -3905,6 +3905,10 @@ document.getElementById('sub-tabs').addEventListener('keydown', function(e) {
 window.addEventListener('popstate', function(e) {
   const state = e.state;
   if (state && state.slug && state.tab) {
+    if (state.slug !== _slug) {
+      _ticketsRepo = null;
+      _ticketsLoaded = false;
+    }
     _slug = state.slug;
     switchTab(state.tab, false);
   }
@@ -4226,6 +4230,8 @@ let _ticketsRepo = null;
 async function loadTickets() {
   const container = document.getElementById('tickets-content');
   if (!container) return;
+
+  _ticketsRepo = null;
 
   let repo = _cachedFullRepo[_slug] || null;
 

@@ -153,6 +153,7 @@ _TIMEOUT_CHECK_INTERVAL: int = 60  # run the check every 60 seconds
 
 _subscribers: list[asyncio.Queue] = []
 _start_time: float = 0.0
+_orphans_removed_total: int = 0
 
 
 # ── Git startup metadata (issue #329) ─────────────────────────────────────────
@@ -253,7 +254,7 @@ async def _timeout_loop() -> None:
 
 
 def _sweep_orphan_pid_files() -> None:
-    """On startup: scan all projects' PID files and remove orphans.
+    """Scan all projects' PID files and remove orphans.
 
     A PID file is orphaned when:
     - The process no longer exists (ProcessLookupError from os.kill(pid, 0))
@@ -262,13 +263,33 @@ def _sweep_orphan_pid_files() -> None:
 
     Live sprint_manager.py processes for the correct label are left untouched.
     """
+    global _orphans_removed_total
     sweep_start = time.monotonic()
     scanned = 0
     cleaned = 0
+
+    def _remove_orphan(pid_file: Path, pid: int | None, reason: str) -> None:
+        nonlocal cleaned
+        global _orphans_removed_total
+        _slog.event(
+            "orphan_pid_detected",
+            project="dashboard",
+            event="orphan_pid_detected",
+            pid=pid,
+            file_path=str(pid_file),
+            reason=reason,
+        )
+        try:
+            pid_file.unlink()
+        except OSError:
+            pass
+        cleaned += 1
+        _orphans_removed_total += 1
+
     try:
         projects = projects_module.load_projects()
     except Exception as exc:
-        print(f"[startup-sweep] could not load projects: {exc}")
+        logger.warning("[startup-sweep] could not load projects: %s", exc)
         elapsed_ms = (time.monotonic() - sweep_start) * 1000
         print(f"[startup-sweep] scanned {scanned} PID files, cleaned {cleaned} orphans in {elapsed_ms:.1f}ms")
         return
@@ -284,30 +305,20 @@ def _sweep_orphan_pid_files() -> None:
                 sprint_label = pid_file.name.removesuffix("-pid")  # e.g. "sprint-9"
                 try:
                     pid = int(pid_file.read_text(encoding="utf-8").strip())
-                except (ValueError, OSError):
-                    # Unreadable/corrupt PID file — remove it.
-                    try:
-                        pid_file.unlink()
-                    except OSError:
-                        pass
-                    cleaned += 1
-                    print(f"Sweeping orphan PID file: {pid_file} (pid unknown, unreadable)")
+                except (ValueError, OSError) as exc:
+                    logger.warning("[startup-sweep] malformed PID file %s: %s", pid_file, exc)
+                    _remove_orphan(pid_file, None, "unreadable")
                     continue
 
                 # Check if the process exists.
                 try:
                     os.kill(pid, 0)
                 except ProcessLookupError:
-                    try:
-                        pid_file.unlink()
-                    except OSError:
-                        pass
-                    cleaned += 1
-                    print(f"Sweeping orphan PID file: {pid_file} (pid {pid} not alive)")
+                    _remove_orphan(pid_file, pid, "process_not_found")
                     continue
-                except PermissionError:
+                except PermissionError as exc:
                     # Process exists but we can't signal it (different user).
-                    # Leave it; it may be legitimate.
+                    logger.warning("[startup-sweep] permission denied checking pid %s in %s: %s", pid, pid_file, exc)
                     continue
                 except OSError:
                     continue
@@ -335,14 +346,9 @@ def _sweep_orphan_pid_files() -> None:
                     label_present = False
 
                 if not label_present:
-                    try:
-                        pid_file.unlink()
-                    except OSError:
-                        pass
-                    cleaned += 1
-                    print(f"Sweeping orphan PID file: {pid_file} (pid {pid} not alive)")
+                    _remove_orphan(pid_file, pid, "pid_reuse")
         except Exception as exc:
-            print(f"[startup-sweep] error scanning project {proj.get('repo')}: {exc}")
+            logger.warning("[startup-sweep] error scanning project %s: %s", proj.get("repo"), exc)
 
     elapsed_ms = (time.monotonic() - sweep_start) * 1000
     print(f"[startup-sweep] scanned {scanned} PID files, cleaned {cleaned} orphans in {elapsed_ms:.1f}ms")
@@ -587,9 +593,9 @@ def _validate_github_repos() -> None:
 
 
 async def _periodic_orphan_sweep_loop() -> None:
-    """Sweep orphan PID files every 60 seconds while the dashboard is running."""
+    """Sweep orphan PID files every 5 minutes while the dashboard is running."""
     while True:
-        await asyncio.sleep(60)
+        await asyncio.sleep(300)
         try:
             _sweep_orphan_pid_files()
         except Exception as exc:
@@ -1036,6 +1042,7 @@ async def health_check(request: Request):
         "disk": disk,
         "sprints": sprints,
         "orphan_pids": orphan_pids,
+        "orphans_removed": _orphans_removed_total,
         "recent_dispatches": recent_dispatches,
         "checked_at": checked_at,
     }

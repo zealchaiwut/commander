@@ -347,6 +347,67 @@ def _sweep_orphan_pid_files() -> None:
     elapsed_ms = (time.monotonic() - sweep_start) * 1000
     print(f"[startup-sweep] scanned {scanned} PID files, cleaned {cleaned} orphans in {elapsed_ms:.1f}ms")
 
+    # Reconcile any plan.json files left in state=running with no alive PID (issue #507)
+    _sweep_plan_json_states(projects)
+
+
+def _sweep_plan_json_states(projects: list) -> None:
+    """Reconcile plan.json files with state=running that have no alive PID (issue #507).
+
+    Called once on startup after PID sweeping completes.  Any sprint whose
+    plan.json says running but whose PID is dead gets reconciled to cancelled.
+    """
+    reconciled = 0
+    for proj in projects:
+        try:
+            project_root = _project_root_path(proj["repo"])
+            sprints_dir = _commander_dir(project_root) / "sprints"
+            if not sprints_dir.exists():
+                continue
+            for plan_file in sprints_dir.glob("*-plan.json"):
+                label = plan_file.name.removesuffix("-plan.json")
+                try:
+                    data = json.loads(plan_file.read_text(encoding="utf-8"))
+                except (OSError, json.JSONDecodeError):
+                    continue
+                if not isinstance(data, dict) or data.get("state") != "running":
+                    continue
+                pid_file    = sprints_dir / f"{label}-pid"
+                pending_file = sprints_dir / f"{label}-pid.pending"
+                pid_alive = False
+                for candidate in (pid_file, pending_file):
+                    if not candidate.exists():
+                        continue
+                    try:
+                        raw = candidate.read_text(encoding="utf-8").strip()
+                        if raw in ("", "0"):
+                            pid_alive = True
+                            break
+                        pid = int(raw)
+                        os.kill(pid, 0)
+                        pid_alive = True
+                        break
+                    except (ProcessLookupError, ValueError, OSError):
+                        pass
+                    except PermissionError:
+                        pid_alive = True
+                        break
+                if not pid_alive:
+                    data["state"] = "cancelled"
+                    data["end_reason"] = "orphan-pid"
+                    try:
+                        tmp = plan_file.with_suffix(".json.tmp")
+                        tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
+                        os.replace(str(tmp), str(plan_file))
+                        reconciled += 1
+                        print(f"[startup-sweep] reconciled {label} plan.json: running→cancelled (PID dead)")
+                    except Exception as exc:
+                        print(f"[startup-sweep] could not reconcile {label} plan.json: {exc}")
+        except Exception as exc:
+            print(f"[startup-sweep] plan.json sweep error for {proj.get('repo')}: {exc}")
+    if reconciled:
+        print(f"[startup-sweep] reconciled {reconciled} stale running plan.json entries")
+
 
 def _sprint_status_file_path(project: str, sprint_label: str) -> Optional[Path]:
     """Return the path to the persisted sprint-status JSON file for a project/label.
@@ -2832,6 +2893,63 @@ def _sprint_plan_path(project_root: Path, sprint_label: str) -> Path:
     return _commander_dir(project_root) / "sprints" / f"{sprint_label}-plan.json"
 
 
+_VALID_PLAN_STATES: frozenset[str] = frozenset({"planning", "running", "completed", "cancelled"})
+
+
+def _read_plan_json(project_root: Path, sprint_label: str) -> Optional[dict]:
+    """Read plan.json; handles old list format (returns {"tickets":[...]}) and new dict format."""
+    path = _sprint_plan_path(project_root, sprint_label)
+    if not path.exists():
+        return None
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(raw, list):
+            return {"tickets": raw}
+        if isinstance(raw, dict):
+            return raw
+    except (OSError, json.JSONDecodeError):
+        pass
+    return None
+
+
+def _write_plan_json(project_root: Path, sprint_label: str, data: dict) -> None:
+    """Write plan.json atomically."""
+    path = _sprint_plan_path(project_root, sprint_label)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    os.replace(str(tmp), str(path))
+
+
+def _plan_json_set_state(
+    project_root: Path,
+    sprint_label: str,
+    state: str,
+    **extra_fields,
+) -> None:
+    """Update state in plan.json, creating the file if missing."""
+    existing = _read_plan_json(project_root, sprint_label) or {}
+    existing["state"] = state
+    existing.update(extra_fields)
+    _write_plan_json(project_root, sprint_label, existing)
+
+
+def _get_sprint_pid(project_root: Path, sprint_label: str) -> Optional[int]:
+    """Return PID from PID file, or None if missing/unset."""
+    sprints_dir = _commander_dir(project_root) / "sprints"
+    for f in (
+        sprints_dir / f"{sprint_label}-pid",
+        sprints_dir / f"{sprint_label}-pid.pending",
+    ):
+        if f.exists():
+            try:
+                raw = f.read_text(encoding="utf-8").strip()
+                return int(raw) if raw not in ("", "0") else None
+            except (ValueError, OSError):
+                pass
+    return None
+
+
 def _load_sprint_order(project_root: Path, all_sprint_labels: list[str]) -> list[str]:
     """Load sprint order from file; fill missing/new sprint labels in natural order."""
     order_path = _sprint_order_path(project_root)
@@ -2854,22 +2972,80 @@ def _load_sprint_order(project_root: Path, all_sprint_labels: list[str]) -> list
 
 
 def _is_sprint_running(project_root: Path, sprint_label: str) -> bool:
-    """Check if a sprint process is running by reading its PID file.
+    """Check if a sprint is running.
 
-    Accepts both ``<label>-pid`` (fully claimed) and ``<label>-pid.pending``
-    (claim written by server before subprocess startup completes) so there is
-    no transient window where a sprint appears not running.
+    Reads plan.json state as the authoritative source.  Falls back to PID-file
+    scanning only for legacy sprints that have no plan.json yet.
 
-    Stale files (process dead) are cleaned up and logged so no manual ``rm``
-    is ever required.
+    Reconciles "plan.json=running but PID dead" to state=cancelled so the next
+    caller sees the correct state without manual intervention.
     """
-    sprints_dir = _commander_dir(project_root) / "sprints"
-    pid_file    = sprints_dir / f"{sprint_label}-pid"
-    pending_file = sprints_dir / f"{sprint_label}-pid.pending"
-
     import logging as _logging
     _log = _logging.getLogger(__name__)
 
+    plan = _read_plan_json(project_root, sprint_label)
+    if plan is not None:
+        plan_state = plan.get("state")
+        if plan_state in ("completed", "cancelled", "planning"):
+            return False
+        if plan_state == "running":
+            sprints_dir = _commander_dir(project_root) / "sprints"
+            pid_file     = sprints_dir / f"{sprint_label}-pid"
+            pending_file = sprints_dir / f"{sprint_label}-pid.pending"
+            for candidate in (pid_file, pending_file):
+                if not candidate.exists():
+                    continue
+                raw = ""
+                try:
+                    raw = candidate.read_text(encoding="utf-8").strip()
+                except OSError:
+                    continue
+                if raw in ("", "0"):
+                    return True  # pending claim — still starting up
+                try:
+                    pid = int(raw)
+                except ValueError:
+                    try:
+                        candidate.unlink()
+                    except OSError:
+                        pass
+                    continue
+                try:
+                    os.kill(pid, 0)
+                    return True
+                except ProcessLookupError:
+                    _log.warning(
+                        "Stale sprint lock: %s (PID %s dead) — cleaning up",
+                        candidate.name,
+                        raw,
+                    )
+                    try:
+                        candidate.unlink()
+                    except OSError:
+                        pass
+                except PermissionError:
+                    return True
+                except OSError:
+                    pass
+            # plan.json=running but no alive PID — reconcile to cancelled
+            _log.warning(
+                "Sprint %s: plan.json=running but no alive PID — reconciling to cancelled",
+                sprint_label,
+            )
+            try:
+                _plan_json_set_state(project_root, sprint_label, "cancelled",
+                                     end_reason="orphan-pid")
+            except Exception:
+                pass
+            return False
+        # Unknown state value — fall through to PID check below
+
+    # ── Legacy path: no plan.json (or unknown state) — scan PID files ────────
+    sprints_dir  = _commander_dir(project_root) / "sprints"
+    pid_file     = sprints_dir / f"{sprint_label}-pid"
+    pending_file = sprints_dir / f"{sprint_label}-pid.pending"
+
+    pid_alive = False
     for candidate in (pid_file, pending_file):
         if not candidate.exists():
             continue
@@ -2878,29 +3054,24 @@ def _is_sprint_running(project_root: Path, sprint_label: str) -> bool:
             raw = candidate.read_text(encoding="utf-8").strip()
         except OSError:
             continue
-
-        # pid == 0 means server wrote the pending file right before Popen;
-        # the process is being spawned — treat as running to block duplicates.
-        if raw == "" or raw == "0":
-            return True
-
+        if raw in ("", "0"):
+            pid_alive = True
+            break
         try:
             pid = int(raw)
         except ValueError:
-            # Unreadable content — clean up and continue.
             try:
                 candidate.unlink()
             except OSError:
                 pass
             continue
-
         try:
-            os.kill(pid, 0)  # signal 0 = check if process exists
-            return True
+            os.kill(pid, 0)
+            pid_alive = True
+            break
         except ProcessLookupError:
-            # Process is dead — clean up stale file and log recovery.
             _log.warning(
-                "Stale sprint lock detected: %s (PID %s dead) — cleaning up",
+                "Stale sprint lock: %s (PID %s dead) — cleaning up",
                 candidate.name,
                 raw,
             )
@@ -2909,16 +3080,39 @@ def _is_sprint_running(project_root: Path, sprint_label: str) -> bool:
             except OSError:
                 pass
         except PermissionError:
-            # Process exists but owned by another user — treat as running.
-            return True
+            pid_alive = True
+            break
         except OSError:
             pass
 
-    return False
+    if plan is None:
+        # Lazy migration: create plan.json for this legacy sprint
+        try:
+            if pid_alive:
+                _plan_json_set_state(project_root, sprint_label, "running",
+                                     started_at=datetime.now(timezone.utc).isoformat())
+                _log.info("[plan-migrate] %s: created plan.json state=running (legacy PID)", sprint_label)
+            else:
+                _plan_json_set_state(project_root, sprint_label, "completed")
+                _log.info("[plan-migrate] %s: created plan.json state=completed (no PID, historical)", sprint_label)
+        except Exception:
+            pass
+
+    return pid_alive
 
 
 def _all_sprints_running() -> list[dict]:
-    """Scan all projects for running sprints. Returns list of {project, sprint_label, pid}."""
+    """Scan all projects for running sprints.
+
+    Primary: reads plan.json state=running (authoritative).
+    Fallback: checks PID files for legacy sprints with no plan.json yet.
+    PID files whose process is dead are reconciled to state=cancelled as a side-effect.
+
+    Returns list of {project, sprint_label, pid}.
+    """
+    import logging as _logging
+    _log = _logging.getLogger(__name__)
+
     result: list[dict] = []
     projects = projects_module.load_projects()
     for proj in projects:
@@ -2927,18 +3121,68 @@ def _all_sprints_running() -> list[dict]:
         if not sprints_dir.exists():
             continue
         seen: set[str] = set()
-        # Check both fully-claimed files (*-pid) and pending-claim files (*-pid.pending)
+
+        # Primary: plan.json files with state=running
+        for plan_file in sprints_dir.glob("*-plan.json"):
+            label = plan_file.name.removesuffix("-plan.json")
+            seen.add(label)
+            try:
+                data = json.loads(plan_file.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            if not isinstance(data, dict) or data.get("state") != "running":
+                continue
+            # Verify PID alive; reconcile dead ones to cancelled
+            pid = _get_sprint_pid(root, label)
+            pid_alive = False
+            if pid is not None:
+                try:
+                    os.kill(pid, 0)
+                    pid_alive = True
+                except ProcessLookupError:
+                    pass
+                except PermissionError:
+                    pid_alive = True
+            else:
+                # No PID yet (pending claim with "0") — treat as running
+                pid_pending = sprints_dir / f"{label}-pid.pending"
+                pid_file = sprints_dir / f"{label}-pid"
+                for f in (pid_file, pid_pending):
+                    if f.exists():
+                        try:
+                            raw = f.read_text(encoding="utf-8").strip()
+                            if raw in ("", "0"):
+                                pid_alive = True
+                        except OSError:
+                            pass
+
+            if pid_alive:
+                result.append({"project": proj["repo"], "sprint_label": label, "pid": pid})
+            else:
+                # plan.json=running but no alive PID — reconcile
+                _log.warning(
+                    "Sprint %s: plan.json=running but PID dead — reconciling to cancelled",
+                    label,
+                )
+                try:
+                    data["state"] = "cancelled"
+                    data["end_reason"] = "orphan-pid"
+                    tmp = plan_file.with_suffix(".json.tmp")
+                    tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
+                    os.replace(str(tmp), str(plan_file))
+                except Exception:
+                    pass
+
+        # Fallback: PID files for sprints with no plan.json (legacy running sprints)
         for pid_file in list(sprints_dir.glob("*-pid")) + list(sprints_dir.glob("*-pid.pending")):
             label = pid_file.name.removesuffix("-pid.pending").removesuffix("-pid")
             if label in seen:
                 continue
             seen.add(label)
             if _is_sprint_running(root, label):
-                try:
-                    pid = int(pid_file.read_text(encoding="utf-8").strip())
-                except (ValueError, OSError):
-                    pid = None
+                pid = _get_sprint_pid(root, label)
                 result.append({"project": proj["repo"], "sprint_label": label, "pid": pid})
+
     return result
 
 
@@ -3096,10 +3340,11 @@ def get_sprint_management_issues(repo: str):
             unassigned_issues.append(iss)
     ordered_result: list = []
     for lbl, iss_list in sprint_issues_map.items():
-        plan_path = _sprint_plan_path(project_root, lbl)
-        if plan_path.exists():
+        plan_data = _read_plan_json(project_root, lbl)
+        if plan_data is not None:
             try:
-                plan_order: list[int] = json.loads(plan_path.read_text(encoding="utf-8"))
+                raw_tickets = plan_data.get("tickets", plan_data) if isinstance(plan_data, dict) else plan_data
+                plan_order: list[int] = raw_tickets if isinstance(raw_tickets, list) else []
                 plan_idx = {n: i for i, n in enumerate(plan_order)}
                 iss_list.sort(key=lambda i: plan_idx.get(i["number"], len(plan_order)))
             except Exception:
@@ -3791,6 +4036,17 @@ def run_sprint_managed(request: Request, body: SprintMgmtRunBody):
             detail=f"Sprint {body.sprint_label} is already running on {body.project}",
         )
 
+    # Write state=running before spawning subprocess (issue #507)
+    try:
+        _plan_json_set_state(
+            project_root,
+            body.sprint_label,
+            "running",
+            started_at=datetime.now(timezone.utc).isoformat(),
+        )
+    except Exception:
+        pass
+
     stripped_env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
     goal_path = _sprint_goal_path(project_root, body.sprint_label)
     if goal_path.exists():
@@ -3861,13 +4117,49 @@ def run_sprint_managed(request: Request, body: SprintMgmtRunBody):
 
 @app.get("/api/sprints/running-all")
 def get_all_running_sprints():
-    """Return ALL currently running sprints across all projects (per-project PID files).
+    """Return ALL currently running sprints across all projects.
+
+    Reads plan.json state=running as the authoritative source (issue #507).
+    PID files are retained only for process-killing.
 
     Returns: {"running": [{"project": ..., "sprint_label": ...}, ...]}
     Empty list means no sprints are running.
     """
     all_running = _all_sprints_running()
     return {"running": all_running}
+
+
+@app.get("/api/sprints/{sprint_label}/state")
+def get_sprint_state(sprint_label: str, project: str):
+    """Return the full plan.json payload for a sprint (issue #507).
+
+    Creates plan.json lazily on first access for legacy sprints that pre-date
+    this feature.  State values: planning | running | completed | cancelled.
+    """
+    if not _SPRINT_LABEL_RE.match(sprint_label):
+        raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")
+    import logging as _logging
+    _log = _logging.getLogger(__name__)
+    project_root = _project_root_path(project)
+    plan = _read_plan_json(project_root, sprint_label)
+    if plan is None:
+        # Lazy migration for legacy sprint (issue #507)
+        sprints_dir = _commander_dir(project_root) / "sprints"
+        has_pid = (sprints_dir / f"{sprint_label}-pid").exists() or \
+                  (sprints_dir / f"{sprint_label}-pid.pending").exists()
+        if has_pid and _is_sprint_running(project_root, sprint_label):
+            new_state = "running"
+        else:
+            new_state = "completed"
+        try:
+            _plan_json_set_state(project_root, sprint_label, new_state)
+            _log.info("[plan-migrate] %s: created plan.json state=%s (lazy, first state access)", sprint_label, new_state)
+        except Exception:
+            pass
+        plan = _read_plan_json(project_root, sprint_label)
+    if plan is None:
+        raise HTTPException(404, detail=f"Could not read or create plan.json for {sprint_label}")
+    return plan
 
 
 @app.delete("/api/sprints/run/{sprint_label}", status_code=200)
@@ -3942,6 +4234,12 @@ def kill_sprint(sprint_label: str, project: str):
     if data:
         data["status"] = "cancelled"
         _sprint_json_write(json_path, data)
+
+    # Write state=cancelled to plan.json (issue #507)
+    try:
+        _plan_json_set_state(project_root, sprint_label, "cancelled")
+    except Exception:
+        pass
 
     return {"ok": True}
 
@@ -4561,6 +4859,16 @@ async def create_sprint_label(body: SprintCreateBody):
         _sprint_json_path(project_root, sprint_label),
         {"label": sprint_label, "goal": eff_goal, "project": body.project, "status": "pending", "tickets": []},
     )
+    # Write plan.json with state=planning (issue #507)
+    try:
+        _plan_json_set_state(
+            project_root,
+            sprint_label,
+            "planning",
+            created_at=datetime.now(timezone.utc).isoformat(),
+        )
+    except Exception:
+        pass
     return {"ok": True, "sprint_label": sprint_label}
 
 
@@ -4612,7 +4920,7 @@ async def rename_sprint_label(sprint_label: str, body: SprintRenameBody):
     # Rename local files
     commander = _commander_dir(project_root)
     sprints_dir = commander / "sprints"
-    for suffix in ("-goal.txt", "-state.json"):
+    for suffix in ("-goal.txt", "-state.json", "-plan.json"):
         old_path = sprints_dir / f"{sprint_label}{suffix}"
         new_path = sprints_dir / f"{new_label}{suffix}"
         if old_path.exists():
@@ -4676,7 +4984,10 @@ def reorder_sprint_tickets(sprint_label: str, body: SprintTicketReorderBody):
 
 @app.post("/api/sprints/{sprint_label}/plan")
 async def save_sprint_plan(sprint_label: str, project: str, request: Request):
-    """Persist ticket execution order to sprint-{label}-plan.json (issue #441)."""
+    """Persist ticket execution order to {label}-plan.json (issue #441).
+
+    Preserves existing state/timestamp fields (issue #507) when updating tickets.
+    """
     if not _SPRINT_LABEL_RE.match(sprint_label):
         raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")
     try:
@@ -4686,11 +4997,9 @@ async def save_sprint_plan(sprint_label: str, project: str, request: Request):
     if not isinstance(body, list) or not all(isinstance(n, int) for n in body):
         raise HTTPException(400, detail="Body must be a JSON array of integers")
     project_root = _project_root_path(project)
-    plan_path = _sprint_plan_path(project_root, sprint_label)
-    plan_path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = plan_path.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(body), encoding="utf-8")
-    os.replace(str(tmp), str(plan_path))
+    existing = _read_plan_json(project_root, sprint_label) or {}
+    existing["tickets"] = body
+    _write_plan_json(project_root, sprint_label, existing)
     return {"ok": True}
 
 

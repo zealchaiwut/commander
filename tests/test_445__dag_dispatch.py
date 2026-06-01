@@ -44,8 +44,16 @@ class _FakeIssueState:
 
 def test_load_sprint_plan_valid(tmp_path):
     order = [3, 1, 2]
-    plan = tmp_path / "sprint-sprint-5-plan.json"
+    plan = tmp_path / "sprint-5-plan.json"
     plan.write_text(json.dumps(order), encoding="utf-8")
+    result = _load_sprint_plan(tmp_path, "sprint-5")
+    assert result == order
+
+
+def test_load_sprint_plan_dict_format(tmp_path):
+    order = [3, 1, 2]
+    plan = tmp_path / "sprint-5-plan.json"
+    plan.write_text(json.dumps({"state": "running", "tickets": order}), encoding="utf-8")
     result = _load_sprint_plan(tmp_path, "sprint-5")
     assert result == order
 
@@ -56,14 +64,14 @@ def test_load_sprint_plan_missing(tmp_path):
 
 
 def test_load_sprint_plan_invalid_json(tmp_path):
-    plan = tmp_path / "sprint-sprint-5-plan.json"
+    plan = tmp_path / "sprint-5-plan.json"
     plan.write_text("not json", encoding="utf-8")
     result = _load_sprint_plan(tmp_path, "sprint-5")
     assert result is None
 
 
 def test_load_sprint_plan_not_int_list(tmp_path):
-    plan = tmp_path / "sprint-sprint-5-plan.json"
+    plan = tmp_path / "sprint-5-plan.json"
     plan.write_text(json.dumps(["a", "b"]), encoding="utf-8")
     result = _load_sprint_plan(tmp_path, "sprint-5")
     assert result is None

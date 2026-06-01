@@ -271,12 +271,6 @@ def _sweep_orphan_pid_files() -> None:
     def _remove_orphan(pid_file: Path, pid: int | None, reason: str) -> None:
         nonlocal cleaned
         global _orphans_removed_total
-        try:
-            pid_file.unlink()
-        except OSError:
-            pass
-        cleaned += 1
-        _orphans_removed_total += 1
         _slog.event(
             "orphan_pid_detected",
             project="dashboard",
@@ -285,6 +279,12 @@ def _sweep_orphan_pid_files() -> None:
             file_path=str(pid_file),
             reason=reason,
         )
+        try:
+            pid_file.unlink()
+        except OSError:
+            pass
+        cleaned += 1
+        _orphans_removed_total += 1
 
     try:
         projects = projects_module.load_projects()
@@ -316,9 +316,9 @@ def _sweep_orphan_pid_files() -> None:
                 except ProcessLookupError:
                     _remove_orphan(pid_file, pid, "process_not_found")
                     continue
-                except PermissionError:
+                except PermissionError as exc:
                     # Process exists but we can't signal it (different user).
-                    # Leave it; it may be legitimate.
+                    logger.warning("[startup-sweep] permission denied checking pid %s in %s: %s", pid, pid_file, exc)
                     continue
                 except OSError:
                     continue

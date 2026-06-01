@@ -1768,6 +1768,67 @@
     .smgmt-moveto-option:hover { background: var(--surface-hover); }
     .smgmt-moveto-option.is-backlog { color: var(--text-muted); }
     .smgmt-moveto-divider { border: none; border-top: 1px solid var(--border); margin: 4px 0; }
+
+    /* ── Per-row ≡ actions menu (issue #275 follow-up) ── */
+    .smgmt-row-menu-btn {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 26px; height: 24px; padding: 0;
+      background: none; border: 1px solid transparent; border-radius: 5px;
+      color: var(--text-muted); cursor: pointer;
+      opacity: .5; transition: opacity .15s, background .15s, color .15s;
+      flex-shrink: 0;
+    }
+    /* Always visible (works on touch), emphasised on hover/open */
+    .smgmt-ticket:hover .smgmt-row-menu-btn,
+    .smgmt-row-menu-btn[aria-expanded="true"] { opacity: 1; }
+    .smgmt-row-menu-btn:hover { background: var(--surface-hover); color: var(--text); opacity: 1; }
+    .smgmt-row-menu-btn .ti { font-size: 16px; }
+
+    .smgmt-row-menu {
+      position: fixed; z-index: 500;
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 8px; box-shadow: 0 6px 20px rgba(0,0,0,.16);
+      min-width: 170px; padding: 4px 0;
+    }
+    .smgmt-row-menu.hidden { display: none; }
+    .smgmt-row-menu-item {
+      display: flex; align-items: center; gap: 9px; width: 100%;
+      text-align: left; padding: 8px 14px; font-size: 13px;
+      background: none; border: none; color: var(--text);
+      cursor: pointer; font-family: inherit;
+    }
+    .smgmt-row-menu-item:hover { background: var(--surface-hover); }
+    .smgmt-row-menu-item .ti { font-size: 15px; color: var(--text-muted); }
+    .smgmt-row-menu-item.is-danger { color: var(--red); }
+    .smgmt-row-menu-item.is-danger .ti { color: var(--red); }
+    .smgmt-row-menu-item.is-danger:hover { background: var(--red-bg); }
+    .smgmt-row-menu-divider { border-top: 1px solid var(--border); margin: 4px 0; }
+
+    /* "Move to" modal options */
+    .mt-modal { min-width: 320px; max-width: 420px; }
+    .mt-options { display: flex; flex-direction: column; gap: 4px; margin-top: 12px; }
+    .mt-option {
+      display: flex; align-items: center; gap: 8px;
+      text-align: left; padding: 9px 12px; font-size: 13px; font-weight: 500;
+      background: var(--surface-2); border: 1px solid var(--border);
+      border-radius: 6px; color: var(--text); cursor: pointer; font-family: inherit;
+      transition: background .12s, border-color .12s;
+    }
+    .mt-option:hover:not(:disabled) { background: var(--surface-hover); border-color: var(--text-muted); }
+    .mt-option:disabled { opacity: .5; cursor: default; }
+    .mt-option .ti { font-size: 15px; }
+    .mt-option-new { color: var(--blue); border-color: rgba(37,99,235,.3); }
+    .mt-option-new:hover:not(:disabled) { background: var(--blue-bg); border-color: var(--blue); }
+    .mt-option-backlog { color: var(--text-muted); }
+
+    /* Danger button (close issue) */
+    .btn-danger {
+      background: var(--red); color: #fff; border: none; border-radius: 6px;
+      padding: 7px 18px; font-size: 13px; font-weight: 600; cursor: pointer;
+      transition: background .15s;
+    }
+    .btn-danger:hover { background: #b91c1c; }
+    .btn-danger:disabled { opacity: .55; cursor: default; }
     .nt-textarea { resize: vertical; min-height: 80px; font-family: inherit; }
     .nt-body-textarea { resize: vertical; min-height: 140px; font-family: monospace; font-size: 12px; }
     .nt-draft-divider { border-top: 1px solid var(--border); margin: 20px 0; }
@@ -6323,14 +6384,11 @@ function _smgmtTicketRowHtml(ticket, label) {
   const isSelected = _smgmtSelectedIssues.has(ticket.number);
 
   const sizeLabel = (ticket.labels || []).find(l => /^size-[SMLX]+$/.test(l.name));
-  const estimatePillHtml = sizeLabel
-    ? `<span class="smgmt-ticket-size-pill">${escHtml(sizeLabel.name.replace('size-', ''))}</span>` +
-      `<button class="smgmt-reestimate-btn" tabindex="0" title="Re-estimate this ticket"
-               onclick="event.stopPropagation();_smgmtReEstimate(${ticket.number},this)"
-               onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();_smgmtReEstimate(${ticket.number},this);}">Re-estimate</button>`
-    : `<button class="smgmt-retry-pill" tabindex="0" title="Estimate this ticket"
-               onclick="event.stopPropagation();_smgmtRetryEstimation(${ticket.number},this)"
-               onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();_smgmtRetryEstimation(${ticket.number},this);}">Retry estimation</button>`;
+  const hasEstimate = !!sizeLabel;
+  // Size badge only — the re-estimate action now lives in the per-row ≡ menu (issue #275 follow-up)
+  const sizePillHtml = sizeLabel
+    ? `<span class="smgmt-ticket-size-pill">${escHtml(sizeLabel.name.replace('size-', ''))}</span>`
+    : '';
 
   return `
     <div class="smgmt-ticket${isSelected ? ' is-selected' : ''}" id="smgmt-ticket-${ticket.number}"
@@ -6350,14 +6408,15 @@ function _smgmtTicketRowHtml(ticket, label) {
       <a class="smgmt-ticket-num" href="${escHtml(ticket.url || '#')}" target="_blank"
          rel="noopener" onclick="event.stopPropagation()">#${ticket.number}</a>
       <span class="smgmt-ticket-title" title="${escHtml(ticket.title)}">${escHtml(ticket.title)}</span>
-      ${estimatePillHtml}
+      ${sizePillHtml}
       <span class="smgmt-ticket-status ${statusClass}">${escHtml(statusLabel)}</span>
       <button class="btn-view-log" tabindex="0" title="View issue log"
               onclick="event.stopPropagation();openLvIssueLog(${ticket.number},'${escHtml(label)}',_smgmtRepo()||'')">
         <i class="ti ti-file-text"></i></button>
-      <button class="smgmt-moveto-pill" tabindex="0"
-              onclick="event.stopPropagation();_smgmtMoveToOpen(event, ${ticket.number}, '${escHtml(label)}')"
-              onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();_smgmtMoveToOpen(event,${ticket.number},'${escHtml(label)}');}">Move to &#9660;</button>
+      <button class="smgmt-row-menu-btn" tabindex="0" title="Ticket actions" aria-haspopup="true" aria-expanded="false"
+              onclick="event.stopPropagation();_smgmtRowMenuOpen(event, ${ticket.number}, '${escHtml(label)}', ${hasEstimate})"
+              onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();_smgmtRowMenuOpen(event,${ticket.number},'${escHtml(label)}',${hasEstimate});}">
+        <i class="ti ti-menu-2"></i></button>
     </div>`;
 }
 
@@ -7813,6 +7872,7 @@ function _smgmtRenderBacklog(tickets) {
 
 function _smgmtBacklogTicketHtml(ticket, sprintNums) {
   const isSelected = _smgmtSelectedIssues.has(ticket.number);
+  const hasEstimate = (ticket.labels || []).some(l => /^size-[SMLX]+$/.test(l.name));
   return `
     <div class="smgmt-ticket${isSelected ? ' is-selected' : ''}" id="smgmt-ticket-${ticket.number}"
          draggable="true"
@@ -7828,9 +7888,10 @@ function _smgmtBacklogTicketHtml(ticket, sprintNums) {
       <a class="smgmt-ticket-num" href="${escHtml(ticket.url || '#')}" target="_blank"
          rel="noopener" onclick="event.stopPropagation()">#${ticket.number}</a>
       <span class="smgmt-ticket-title" title="${escHtml(ticket.title)}">${escHtml(ticket.title)}</span>
-      <button class="smgmt-moveto-pill" tabindex="0"
-              onclick="event.stopPropagation();_smgmtMoveToOpen(event, ${ticket.number}, null)"
-              onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();_smgmtMoveToOpen(event,${ticket.number},null);}">Move to &#9660;</button>
+      <button class="smgmt-row-menu-btn" tabindex="0" title="Ticket actions" aria-haspopup="true" aria-expanded="false"
+              onclick="event.stopPropagation();_smgmtRowMenuOpen(event, ${ticket.number}, null, ${hasEstimate})"
+              onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();_smgmtRowMenuOpen(event,${ticket.number},null,${hasEstimate});}">
+        <i class="ti ti-menu-2"></i></button>
     </div>`;
 }
 
@@ -7948,6 +8009,248 @@ async function _smgmtMoveToConfirm(issueNum, targetLabel) {
   }
 }
 
+// ── Per-row ≡ actions menu (issue #275 follow-up) ──────────────────────────
+// Consolidates Move to / Re-estimate / Close issue into one menu at the row end.
+
+let _smgmtRowMenuIssue = null;
+
+function _smgmtRowMenuOpen(event, issueNum, fromLabel, hasEstimate) {
+  event.stopPropagation();
+  const menu = document.getElementById('smgmt-row-menu');
+  const btn  = event.currentTarget || event.target;
+  if (!menu) return;
+
+  // Toggle closed if clicking the same row's button again
+  if (_smgmtRowMenuIssue === issueNum && !menu.classList.contains('hidden')) {
+    _smgmtRowMenuClose();
+    return;
+  }
+  _smgmtRowMenuIssue = issueNum;
+
+  const fl = fromLabel ? `'${fromLabel}'` : 'null';
+  menu.innerHTML =
+    `<button class="smgmt-row-menu-item" role="menuitem" onclick="_smgmtMoveToModalOpen(${issueNum}, ${fl})">` +
+      `<i class="ti ti-arrows-move"></i> Move to…</button>` +
+    `<button class="smgmt-row-menu-item" role="menuitem" onclick="_smgmtMenuEstimate(${issueNum}, ${!!hasEstimate})">` +
+      `<i class="ti ti-ruler-measure"></i> ${hasEstimate ? 'Re-estimate' : 'Estimate'}</button>` +
+    `<div class="smgmt-row-menu-divider"></div>` +
+    `<button class="smgmt-row-menu-item is-danger" role="menuitem" onclick="_smgmtCloseIssueOpen(${issueNum})">` +
+      `<i class="ti ti-circle-x"></i> Close issue</button>`;
+
+  menu.classList.remove('hidden');
+  if (btn) btn.setAttribute('aria-expanded', 'true');
+
+  // Position the menu beneath the kebab, right-aligned, flipping up if low on space
+  const rect  = btn.getBoundingClientRect();
+  const menuH = menu.offsetHeight || 130;
+  const menuW = menu.offsetWidth  || 170;
+  let top = rect.bottom + 4;
+  if (window.innerHeight - rect.bottom < menuH + 8) top = rect.top - menuH - 4;
+  menu.style.top  = Math.max(8, top) + 'px';
+  menu.style.left = Math.max(8, rect.right - menuW) + 'px';
+
+  setTimeout(() => document.addEventListener('click', _smgmtRowMenuOutside), 0);
+}
+
+function _smgmtRowMenuOutside(event) {
+  const menu = document.getElementById('smgmt-row-menu');
+  if (!menu || menu.contains(event.target)) return;
+  _smgmtRowMenuClose();
+}
+
+function _smgmtRowMenuClose() {
+  const menu = document.getElementById('smgmt-row-menu');
+  if (menu) menu.classList.add('hidden');
+  _smgmtRowMenuIssue = null;
+  document.querySelectorAll('.smgmt-row-menu-btn[aria-expanded="true"]')
+    .forEach(b => b.setAttribute('aria-expanded', 'false'));
+  document.removeEventListener('click', _smgmtRowMenuOutside);
+}
+
+/** Menu → Estimate / Re-estimate. Reuses the confirm modal when an estimate already exists. */
+function _smgmtMenuEstimate(issueNum, hasEstimate) {
+  _smgmtRowMenuClose();
+  if (hasEstimate) {
+    _reEstIssueNum = issueNum;
+    _reEstRowBtn   = null;
+    document.getElementById('re-est-backdrop').classList.remove('hidden');
+    document.getElementById('re-est-modal').classList.remove('hidden');
+    const cb = document.getElementById('re-est-confirm-btn');
+    if (cb) cb.focus();
+  } else {
+    _smgmtRunEstimate(issueNum);
+  }
+}
+
+/** Fire the estimator for an un-estimated ticket and refresh the board to show the size. */
+async function _smgmtRunEstimate(issueNum) {
+  const repo = _smgmtRepo() || '';
+  _smgmtShowToast(`Estimating #${issueNum}…`);
+  try {
+    const resp = await fetch(
+      `/api/issues/${issueNum}/estimate?repo=${encodeURIComponent(repo)}`,
+      { method: 'POST' }
+    );
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+    if (!data.ok || !data.size) throw new Error('no size returned');
+    await loadSprintMgmt();
+    _smgmtShowToast(`#${issueNum} estimated: ${data.size}`);
+  } catch (err) {
+    _smgmtShowToast(`Estimate failed: ${err.message}`);
+  }
+}
+
+// ── "Move to" modal (issue #275 follow-up) ─────────────────────────────────
+
+let _smgmtMoveModalIssue = null;
+let _smgmtMoveModalFrom  = null;
+
+function _smgmtMoveToModalOpen(issueNum, fromLabel) {
+  _smgmtRowMenuClose();
+  _smgmtMoveModalIssue = issueNum;
+  _smgmtMoveModalFrom  = fromLabel || null;
+
+  const issue = (_smgmtData?.issues || []).find(i => i.number === issueNum);
+  document.getElementById('mt-ticket-info').textContent =
+    issue ? `#${issue.number} — ${issue.title}` : `#${issueNum}`;
+
+  const sprintNums = (_smgmtData?.sprints || []).slice().sort((a, b) => a - b);
+  const nextNum    = _smgmtGhostComputeNextFree();
+
+  let html = '';
+  sprintNums.forEach(n => {
+    const lbl       = `sprint-${n}`;
+    const isCurrent = lbl === fromLabel;
+    html += `<button class="mt-option" ${isCurrent ? 'disabled' : ''} onclick="_smgmtMoveModalPick('${lbl}', false)">` +
+            `<i class="ti ti-flag"></i> Sprint ${n}${isCurrent ? ' (current)' : ''}</button>`;
+  });
+  html += `<button class="mt-option mt-option-new" onclick="_smgmtMoveModalPick('sprint-${nextNum}', true)">` +
+          `<i class="ti ti-plus"></i> Create new sprint (Sprint ${nextNum})</button>`;
+  const inSprint = !!fromLabel;
+  html += `<button class="mt-option mt-option-backlog" ${inSprint ? '' : 'disabled'} onclick="_smgmtMoveModalPick(null, false)">` +
+          `<i class="ti ti-inbox"></i> Backlog${inSprint ? '' : ' (current)'}</button>`;
+
+  document.getElementById('mt-options').innerHTML = html;
+  const errEl = document.getElementById('mt-error');
+  errEl.textContent = '';
+  errEl.classList.add('hidden');
+
+  document.getElementById('mt-backdrop').classList.remove('hidden');
+  document.getElementById('mt-modal').classList.remove('hidden');
+}
+
+function _smgmtMoveToModalClose() {
+  document.getElementById('mt-backdrop').classList.add('hidden');
+  document.getElementById('mt-modal').classList.add('hidden');
+  _smgmtMoveModalIssue = null;
+  _smgmtMoveModalFrom  = null;
+}
+
+/** Apply a move chosen in the modal. isNew creates the sprint label first. */
+async function _smgmtMoveModalPick(targetLabel, isNew) {
+  if (_smgmtMoveLock) return;
+  const issueNum  = _smgmtMoveModalIssue;
+  const fromLabel = _smgmtMoveModalFrom;
+  if (issueNum == null) return;
+
+  const repo      = _smgmtRepo();
+  const targetNum = targetLabel ? parseInt(targetLabel.split('-')[1], 10) : null;
+
+  // Close the modal first, then lock the board (mirrors the drag/popup move flow)
+  _smgmtMoveToModalClose();
+
+  // Optimistic move
+  if (_smgmtData) {
+    const iss = _smgmtData.issues.find(i => i.number === issueNum);
+    if (iss) iss.sprint = targetNum;
+    _smgmtRender(_smgmtData);
+  }
+
+  _smgmtBoardLock();
+  try {
+    if (isNew) {
+      const createRes = await fetch('/api/sprints/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ project: repo, sprint_number: targetNum }),
+      });
+      if (!createRes.ok && createRes.status !== 409) {
+        const d = await createRes.json().catch(() => ({}));
+        throw new Error(d.detail || 'HTTP ' + createRes.status);
+      }
+    }
+    const res = await fetch(`/api/issues/${issueNum}/sprint-label`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sprint_label: targetLabel || 'backlog', project: repo }),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    await loadSprintMgmt();
+    _smgmtShowToast(`#${issueNum} moved to ${targetLabel ? 'Sprint ' + targetNum : 'Backlog'}`);
+  } catch (e) {
+    // Rollback optimistic move
+    if (_smgmtData) {
+      const iss = _smgmtData.issues.find(i => i.number === issueNum);
+      if (iss) iss.sprint = fromLabel ? parseInt(fromLabel.split('-')[1], 10) : null;
+      _smgmtRender(_smgmtData);
+    }
+    _smgmtShowToast(`Failed to move #${issueNum}: ${e.message}`);
+  } finally {
+    _smgmtBoardUnlock();
+  }
+}
+
+// ── Close-issue confirm (issue #275 follow-up) ─────────────────────────────
+
+let _smgmtCloseIssueNum = null;
+
+function _smgmtCloseIssueOpen(issueNum) {
+  _smgmtRowMenuClose();
+  _smgmtCloseIssueNum = issueNum;
+  const issue = (_smgmtData?.issues || []).find(i => i.number === issueNum);
+  document.getElementById('ci-ticket-info').textContent =
+    issue ? `#${issue.number} — ${issue.title}` : `#${issueNum}`;
+  const errEl = document.getElementById('ci-error');
+  errEl.textContent = '';
+  errEl.classList.add('hidden');
+  const btn = document.getElementById('ci-confirm-btn');
+  btn.disabled = false;
+  btn.textContent = 'Close issue';
+  document.getElementById('ci-backdrop').classList.remove('hidden');
+  document.getElementById('ci-modal').classList.remove('hidden');
+  btn.focus();
+}
+
+function _smgmtCloseIssueCancel() {
+  document.getElementById('ci-backdrop').classList.add('hidden');
+  document.getElementById('ci-modal').classList.add('hidden');
+  _smgmtCloseIssueNum = null;
+}
+
+async function _smgmtCloseIssueConfirm() {
+  const issueNum = _smgmtCloseIssueNum;
+  if (issueNum == null) return;
+  const repo  = _smgmtRepo() || '';
+  const btn   = document.getElementById('ci-confirm-btn');
+  const errEl = document.getElementById('ci-error');
+  btn.disabled = true;
+  btn.textContent = 'Closing…';
+  errEl.classList.add('hidden');
+  try {
+    const res = await fetch(`/api/issues/${issueNum}/close?repo=${encodeURIComponent(repo)}`, { method: 'POST' });
+    if (!res.ok) throw new Error(await res.text());
+    _smgmtCloseIssueCancel();
+    await loadSprintMgmt();
+    _smgmtShowToast(`#${issueNum} closed`);
+  } catch (e) {
+    btn.disabled = false;
+    btn.textContent = 'Close issue';
+    errEl.textContent = `Failed: ${e.message}`;
+    errEl.classList.remove('hidden');
+  }
+}
+
 // ── Backlog drag handlers ──────────────────────────────────────────────────
 
 function _smgmtBacklogTicketDragStart(event, issueNum) {
@@ -8059,6 +8362,13 @@ document.addEventListener('keydown', function(e) {
     if (popup && !popup.classList.contains('hidden')) {
       _smgmtMoveToClose();
     }
+    // Close the per-row ≡ menu and its modals
+    const rowMenu = document.getElementById('smgmt-row-menu');
+    if (rowMenu && !rowMenu.classList.contains('hidden')) _smgmtRowMenuClose();
+    const mtModal = document.getElementById('mt-modal');
+    if (mtModal && !mtModal.classList.contains('hidden')) _smgmtMoveToModalClose();
+    const ciModal = document.getElementById('ci-modal');
+    if (ciModal && !ciModal.classList.contains('hidden')) _smgmtCloseIssueCancel();
     // Dismiss ghost mid-drag
     if (_smgmtDragTicket) {
       _smgmtGhostHide();
@@ -10334,6 +10644,49 @@ function _cmpEmptyState(title, msg) {
   <div class="modal-footer">
     <button class="btn-ghost" id="gc-cancel-btn" type="button" onclick="_gcClose()">Cancel</button>
     <button class="btn-blue" id="gc-confirm-btn" type="button">Create sprint-1 &amp; move</button>
+  </div>
+</div>
+
+<!-- ── Per-row ≡ actions menu (issue #275 follow-up) ── -->
+<div class="smgmt-row-menu hidden" id="smgmt-row-menu" role="menu" aria-label="Ticket actions"></div>
+
+<!-- ── "Move to" modal (issue #275 follow-up) ── -->
+<div class="modal-backdrop hidden" id="mt-backdrop" onclick="_smgmtMoveToModalClose()"></div>
+<div class="modal mt-modal hidden" id="mt-modal"
+     role="dialog" aria-modal="true" aria-labelledby="mt-modal-title">
+  <div class="modal-header">
+    <span class="modal-title" id="mt-modal-title">Move ticket to…</span>
+    <button class="modal-close" aria-label="Close" onclick="_smgmtMoveToModalClose()">&times;</button>
+  </div>
+  <div class="modal-body">
+    <div class="gc-detail-row">
+      <span class="gc-detail-label">Ticket:</span>&nbsp;
+      <span id="mt-ticket-info"></span>
+    </div>
+    <div class="mt-options" id="mt-options"></div>
+    <div class="gc-error hidden" id="mt-error"></div>
+  </div>
+</div>
+
+<!-- ── Close-issue confirm modal (issue #275 follow-up) ── -->
+<div class="modal-backdrop hidden" id="ci-backdrop" onclick="_smgmtCloseIssueCancel()"></div>
+<div class="modal ci-modal hidden" id="ci-modal"
+     role="dialog" aria-modal="true" aria-labelledby="ci-modal-title">
+  <div class="modal-header">
+    <span class="modal-title" id="ci-modal-title">Close issue?</span>
+    <button class="modal-close" aria-label="Close" onclick="_smgmtCloseIssueCancel()">&times;</button>
+  </div>
+  <div class="modal-body">
+    <div class="gc-detail-row">
+      <span class="gc-detail-label">Closing:</span>&nbsp;
+      <span id="ci-ticket-info"></span>
+    </div>
+    <div class="gc-note">This closes the issue on GitHub. You can reopen it from GitHub if needed.</div>
+    <div class="gc-error hidden" id="ci-error"></div>
+  </div>
+  <div class="modal-footer">
+    <button class="btn-ghost" type="button" onclick="_smgmtCloseIssueCancel()">Cancel</button>
+    <button class="btn-danger" id="ci-confirm-btn" type="button" onclick="_smgmtCloseIssueConfirm()">Close issue</button>
   </div>
 </div>
 

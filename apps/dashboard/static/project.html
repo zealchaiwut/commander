@@ -3070,6 +3070,12 @@
                 <button class="smgmt-ar-menu-item smgmt-ar-turn-off" onclick="_smgmtArTurnOff()">Turn off</button>
               </div>
             </div>
+            <button class="btn-ghost" id="smgmt-cleanup-empty-btn"
+                    onclick="_smgmtCleanupEmpty()" title="Delete sprint labels with no tickets"
+                    aria-label="Clean up empty sprints" style="display:none">
+              <i class="ti ti-trash"></i>
+              Clean up empty sprints
+            </button>
             <button class="btn-ghost" id="smgmt-new-ticket-btn"
                     onclick="smgmtOpenNewTicket()" title="Create a new ticket"
                     aria-label="New Ticket">
@@ -4952,6 +4958,9 @@ function _smgmtRender(data) {
 
   // Inject pre-flight check banners for non-running sprint panes (issue #434)
   _preflightLoadBanners(orderedLabels, bySprint);
+
+  // Update cleanup button visibility (issue #457)
+  _smgmtUpdateCleanupBtn(data);
 }
 
 async function _smgmtFetchMissingOutcomes(orderedLabels, bySprint) {
@@ -6987,6 +6996,66 @@ async function smgmtDeleteSprint(label) {
     alert('Failed to delete sprint: ' + e.message);
   }
 }
+
+// ── Clean up empty sprints (issue #457) ────────────────────────────────────
+let _smgmtEmptyLabels = [];
+
+function _smgmtUpdateCleanupBtn(data) {
+  const sprints = data.sprints || [];
+  const order   = data.order   || [];
+  const issues  = data.issues  || [];
+  const orderedLabels = order.length > 0
+    ? order.filter(l => /^sprint-\d+(\.\d+)?$/.test(l))
+    : [...sprints].sort((a, b) => a - b).map(n => `sprint-${n}`);
+  const labeled = new Set(issues.map(i => i.sprint_label).filter(Boolean));
+  _smgmtEmptyLabels = orderedLabels.filter(l => !labeled.has(l));
+  const btn = document.getElementById('smgmt-cleanup-empty-btn');
+  if (btn) btn.style.display = _smgmtEmptyLabels.length > 0 ? '' : 'none';
+}
+
+function _smgmtCleanupEmpty() {
+  const names = _smgmtEmptyLabels.join(', ');
+  document.getElementById('cleanup-empty-modal-msg').textContent =
+    `${names} will be removed.`;
+  const errEl = document.getElementById('cleanup-empty-modal-error');
+  errEl.textContent = '';
+  errEl.classList.add('hidden');
+  document.getElementById('cleanup-empty-confirm-btn').disabled = false;
+  document.getElementById('cleanup-empty-backdrop').classList.remove('hidden');
+  document.getElementById('cleanup-empty-modal').classList.remove('hidden');
+}
+
+function _smgmtCleanupModalClose() {
+  document.getElementById('cleanup-empty-backdrop').classList.add('hidden');
+  document.getElementById('cleanup-empty-modal').classList.add('hidden');
+}
+
+async function _smgmtCleanupConfirm() {
+  const btn = document.getElementById('cleanup-empty-confirm-btn');
+  btn.disabled = true;
+  const errEl = document.getElementById('cleanup-empty-modal-error');
+  errEl.textContent = '';
+  errEl.classList.add('hidden');
+  const repo = _smgmtRepo();
+  try {
+    const resp = await fetch('/api/sprints/cleanup-empty', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({project: repo}),
+    });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.detail || 'HTTP ' + resp.status);
+    }
+    _smgmtCleanupModalClose();
+    await loadSprintMgmt();
+  } catch (e) {
+    errEl.textContent = 'Error: ' + e.message;
+    errEl.classList.remove('hidden');
+    btn.disabled = false;
+  }
+}
+// ───────────────────────────────────────────────────────────────────────────
 
 async function smgmtFinishSprint(label) {
   const repo = _smgmtRepo();
@@ -10428,6 +10497,24 @@ function _cmpEmptyState(title, msg) {
   <div class="modal-footer">
     <button class="btn-ghost" type="button" onclick="_smgmtReEstimateClose()">Cancel</button>
     <button class="btn-blue" type="button" id="re-est-confirm-btn" onclick="_smgmtReEstimateConfirm()">Confirm</button>
+  </div>
+</div>
+
+<!-- ── Clean up empty sprints confirmation modal (issue #457) ── -->
+<div class="modal-backdrop hidden" id="cleanup-empty-backdrop" onclick="_smgmtCleanupModalClose()"></div>
+<div class="modal hidden" id="cleanup-empty-modal"
+     role="dialog" aria-modal="true" aria-labelledby="cleanup-empty-modal-title">
+  <div class="modal-header">
+    <span class="modal-title" id="cleanup-empty-modal-title">Clean Up Empty Sprints</span>
+    <button class="modal-close" aria-label="Close" onclick="_smgmtCleanupModalClose()">&times;</button>
+  </div>
+  <div class="modal-body">
+    <p id="cleanup-empty-modal-msg" style="font-size:13px;color:var(--text-sub);margin:0"></p>
+    <div class="modal-error hidden" id="cleanup-empty-modal-error"></div>
+  </div>
+  <div class="modal-footer">
+    <button class="btn-ghost" type="button" onclick="_smgmtCleanupModalClose()">Cancel</button>
+    <button class="btn-danger" type="button" id="cleanup-empty-confirm-btn" onclick="_smgmtCleanupConfirm()">Delete</button>
   </div>
 </div>
 

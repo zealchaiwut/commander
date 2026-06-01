@@ -4713,6 +4713,48 @@ async def delete_empty_sprints(body: SprintDeleteBody):
     return result
 
 
+class SprintCleanupBody(BaseModel):
+    project: str
+
+
+@app.post("/api/sprints/cleanup-empty")
+async def cleanup_empty_sprints(body: SprintCleanupBody):
+    """Delete all sprint labels with zero open tickets from GitHub."""
+    try:
+        all_sprint_labels = github_client.list_sprint_labels(repo_name=body.project)
+    except subprocess.CalledProcessError as e:
+        raise _gh_error(e)
+
+    try:
+        issues = github_client.list_open_issues_with_body(repo_name=body.project, limit=200)
+    except subprocess.CalledProcessError as e:
+        raise _gh_error(e)
+
+    sprint_re_local = re.compile(r"^sprint-\d+(\.\d+)?$")
+    labeled_sprints: set[str] = set()
+    for iss in issues:
+        for lbl in iss.get("labels", []):
+            if sprint_re_local.match(lbl["name"]):
+                labeled_sprints.add(lbl["name"])
+
+    empty_labels = [l for l in all_sprint_labels if l not in labeled_sprints]
+
+    deleted = []
+    errors = []
+    for label in empty_labels:
+        try:
+            github_client.delete_label(label, repo_name=body.project)
+            deleted.append(label)
+        except subprocess.CalledProcessError as e:
+            errors.append(f"{label}: {e.stderr.strip() if e.stderr else str(e)}")
+
+    github_client.invalidate("sprints:")
+    result: dict = {"ok": True, "deleted": deleted}
+    if errors:
+        result["errors"] = errors
+    return result
+
+
 def _rerun_policy(labels: set[str]) -> tuple[str, list[str]]:
     """Return (action, labels_to_strip) for a sprint ticket based on its current labels.
 

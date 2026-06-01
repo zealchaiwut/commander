@@ -5591,7 +5591,10 @@ def delete_sprint(sprint_label: str, project: str):
         raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")
 
     if _is_sprint_running(_project_root_path(project), sprint_label):
-        raise HTTPException(409, detail="Cannot delete a sprint that is currently running")
+        return JSONResponse(
+            status_code=409,
+            content={"error": "Sprint is currently running.", "suggestion": "Cancel the sprint first, then delete."},
+        )
 
     project_root = _project_root_path(project)
     commander = _commander_dir(project_root)

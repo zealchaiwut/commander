@@ -11,6 +11,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -183,6 +184,7 @@ Output ONLY the JSON object. No other text."""
                     # Normalize files_touched: absent or non-list → []
                     if not isinstance(parsed.get("files_touched"), list):
                         parsed["files_touched"] = []
+                    parsed["body_hash"] = hashlib.sha256(body.encode()).hexdigest()
                     return parsed
 
         # error_type is set — decide whether to retry or fail.

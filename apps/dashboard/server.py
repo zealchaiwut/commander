@@ -3016,6 +3016,14 @@ def get_sprint_management_issues(repo: str):
     result_issues = []
     # Count open tickets per sprint label (both plain and dotted)
     sprint_ticket_counts: dict[str, int] = {lbl: 0 for lbl in all_sprint_labels}
+
+    # Resolve estimates dir once for stale-hash checks (issue #453)
+    try:
+        _est_project_root = _project_root_path(repo)
+        _estimates_dir = _commander_dir(_est_project_root) / "estimates"
+    except Exception:
+        _estimates_dir = None
+
     for iss in issues:
         _is_summary = (
             any(lbl["name"] == "sprint-summary" for lbl in iss.get("labels", []))
@@ -3031,15 +3039,20 @@ def get_sprint_management_issues(repo: str):
                 found_sprint_label = lbl["name"]
                 sprint_num = int(m.group(1))
                 break
+
+        iss_body = iss.get("body", "") or ""
+        estimate_stale = _check_estimate_stale(iss["number"], iss_body, _estimates_dir)
+
         result_issues.append({
             "number": iss["number"],
             "title": iss["title"],
-            "body": iss.get("body", "") or "",
+            "body": iss_body,
             "labels": iss.get("labels", []),
             "sprint": sprint_num,
             "sprint_label": found_sprint_label,
             "status": github_client.classify_issue(iss),
             "url": iss.get("url", ""),
+            "estimate_stale": estimate_stale,
         })
         if found_sprint_label is not None and found_sprint_label in sprint_ticket_counts:
             sprint_ticket_counts[found_sprint_label] += 1
@@ -3446,6 +3459,29 @@ def _sprint_dag_tickets(project_root: Path, sprint_issues: list[dict]) -> list[d
                 pass
         tickets.append({"id": f"#{num}", "files_touched": files_touched})
     return tickets
+
+
+def _check_estimate_stale(issue_num: int, current_body: str, estimates_dir) -> bool:
+    """Return True if the stored estimate is stale (body changed or hash missing).
+
+    Returns False when no estimate exists (no badge needed) or when the body
+    hash matches the stored value.  Returns True when an estimate exists but
+    lacks a body_hash field, or when the hash differs from the current body.
+    """
+    if estimates_dir is None:
+        return False
+    est_path = estimates_dir / f"issue-{issue_num}.json"
+    if not est_path.exists():
+        return False
+    try:
+        est = json.loads(est_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return False
+    stored_hash = est.get("body_hash")
+    if not stored_hash:
+        return True  # missing hash → treat as stale (AC: existing records without body_hash)
+    current_hash = hashlib.sha256(current_body.encode()).hexdigest()
+    return current_hash != stored_hash
 
 
 _STALE_ESTIMATE_DAYS = 7

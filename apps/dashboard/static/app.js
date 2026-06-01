@@ -588,10 +588,16 @@ function ticketCardHtml(ticket, repo) {
   const updated  = ticket.updated_at ? `<span>${shortTime(ticket.updated_at)}</span>` : '';
   const sep      = assignee && updated ? '<span> · </span>' : '';
 
+  const n = ticket.number;
+  const r = escapeHtml(repo);
+  const labels = ticket.labels || [];
+  const sizeLabel = labels.find(l => /^size-/.test(l));
+  const reestimateBtn = sizeLabel
+    ? `<button class="btn-estimate-sm" onclick="showReestimateConfirm(${n}, '${r}')">Re-estimate</button>`
+    : '';
+
   let actionsHtml = '';
   if (ticket.is_uat) {
-    const n = ticket.number;
-    const r = escapeHtml(repo);
     actionsHtml = `
       <div class="uat-report" id="tr-${n}">
         <div class="tr-loading">Loading test report…</div>
@@ -599,6 +605,7 @@ function ticketCardHtml(ticket, repo) {
       <div class="ticket-actions" id="tact-${n}">
         <button class="btn-approve-sm" id="approve-btn-${n}" onclick="confirmApprove(${n}, '${r}')">Approve ✓</button>
         <button class="btn-reject-sm"  onclick="showRejectInline(${n})">Reject…</button>
+        ${reestimateBtn}
       </div>
       <div class="reject-inline hidden" id="reject-inline-${n}">
         <textarea id="reject-reason-${n}" rows="2" placeholder="Reason for rejection…"></textarea>
@@ -607,6 +614,8 @@ function ticketCardHtml(ticket, repo) {
           <button class="btn-cancel-sm" onclick="hideRejectInline(${n})">Cancel</button>
         </div>
       </div>`;
+  } else if (reestimateBtn) {
+    actionsHtml = `<div class="ticket-actions" id="tact-${n}">${reestimateBtn}</div>`;
   }
 
   const branchChip = ticket.feature_branch
@@ -623,9 +632,7 @@ function ticketCardHtml(ticket, repo) {
 
   // Size / estimating badge (issue #267): show size-S/M/L/XL when available,
   // or an "estimating…" placeholder while the background task runs.
-  const labels = ticket.labels || [];
   const hasEstimated = labels.includes('estimated');
-  const sizeLabel = labels.find(l => /^size-/.test(l));
   let sizeBadgeHtml = '';
   if (sizeLabel) {
     const sizeVal = sizeLabel.replace('size-', '');
@@ -3756,6 +3763,11 @@ function smgmtTicketCardHtml(ticket, currentSprint) {
     }
   }
 
+  // Stale estimate badge (issue #453): shown when body changed after last estimate
+  const staleBadgeHtml = ticket.estimate_stale
+    ? `<span class="smgmt-stale-estimate-badge" title="Ticket body changed since last estimate">Stale Estimate</span>`
+    : '';
+
   const isSelected = _smgmtSelectedIssues.has(ticket.number);
   return `
     <div class="smgmt-ticket${isSelected ? ' is-selected' : ''}" id="smgmt-ticket-${ticket.number}"
@@ -3776,6 +3788,7 @@ function smgmtTicketCardHtml(ticket, currentSprint) {
          rel="noopener" onclick="event.stopPropagation()">#${ticket.number}</a>
       <span class="smgmt-ticket-title" title="${escapeHtml(ticket.title)}">${escapeHtml(ticket.title)}</span>
       ${estimateBadgeHtml}
+      ${staleBadgeHtml}
       <span class="smgmt-ticket-status ${statusClass}">${escapeHtml(statusLabel)}</span>
     </div>`;
 }

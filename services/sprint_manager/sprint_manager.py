@@ -414,6 +414,46 @@ def _release_pid_lock(pid_path: Path) -> None:
         pass
 
 
+# ── Plan.json state helpers (issue #507) ─────────────────────────────────────
+
+def _plan_json_path(label: str, cfg: Optional["SprintConfig"] = None) -> Path:
+    """Return path to {label}-plan.json in the sprints directory."""
+    sprints_dir = cfg.sprints_dir if cfg is not None else REPO_ROOT / ".commander" / "sprints"
+    return sprints_dir / f"{label}-plan.json"
+
+
+def _plan_json_set_state_sm(
+    label: str,
+    state: str,
+    cfg: Optional["SprintConfig"] = None,
+    **extra_fields,
+) -> None:
+    """Best-effort update of plan.json state from sprint_manager side.
+
+    Reads existing file (handling both old list format and new dict format),
+    merges the new state + extra fields, and writes atomically.  All errors
+    are swallowed — this must never interrupt the sprint run.
+    """
+    path = _plan_json_path(label, cfg)
+    try:
+        existing: dict = {}
+        if path.exists():
+            raw = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(raw, dict):
+                existing = raw
+            elif isinstance(raw, list):
+                existing = {"tickets": raw}
+        existing["state"] = state
+        existing.update(extra_fields)
+        tmp = path.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(existing, indent=2), encoding="utf-8")
+        os.replace(str(tmp), str(path))
+    except Exception:
+        pass
+
+
+# ── end plan.json helpers ─────────────────────────────────────────────────────
+
 # Hang detection constants (in seconds)
 HANG_WARN_SECS  = 30 * 60   # 30 minutes
 HANG_KILL_SECS  = 60 * 60   # 60 minutes
@@ -3880,12 +3920,20 @@ def _load_estimate(issue_num: int) -> Optional[dict]:
 
 
 def _load_sprint_plan(sprints_dir: Path, label: str) -> Optional[list[int]]:
-    """Read sprint-{label}-plan.json; return issue-number list or None on failure."""
-    path = sprints_dir / f"sprint-{label}-plan.json"
+    """Read {label}-plan.json; return issue-number list or None on failure.
+
+    Handles both old list format ([42, 17, 88]) and new dict format
+    ({"state": "...", "tickets": [42, 17, 88], ...}).
+    """
+    path = sprints_dir / f"{label}-plan.json"
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
         if isinstance(data, list) and all(isinstance(n, int) for n in data):
             return data
+        if isinstance(data, dict):
+            tickets = data.get("tickets")
+            if isinstance(tickets, list) and all(isinstance(n, int) for n in tickets):
+                return tickets
     except (OSError, json.JSONDecodeError):
         pass
     return None
@@ -5066,9 +5114,21 @@ def main() -> None:
         global _sprint_user_cancelled
         _sprint_user_cancelled = True
         _cleanup_pid()
+        # Best-effort state write before exit (issue #507)
+        _plan_json_set_state_sm(
+            args.label, "cancelled", cfg=cfg,
+            ended_at=datetime.now(timezone.utc).isoformat(),
+        )
         raise SystemExit(130)
 
     signal.signal(signal.SIGTERM, _sigterm_handler)
+
+    # Write state=running now that PID lock is confirmed (issue #507)
+    if not args.dry_run:
+        _plan_json_set_state_sm(
+            args.label, "running", cfg=cfg,
+            started_at=datetime.now(timezone.utc).isoformat(),
+        )
 
     # ── Pre-flight review (AC-1 of issue #33) ────────────────────────────────
     preflight_approved: Optional[list] = None  # None = no preflight, list = approved numbers
@@ -5152,6 +5212,14 @@ def main() -> None:
                 eff_repo,
             )
         raise
+
+    # Clean exit: write state=completed (issue #507)
+    if not args.dry_run:
+        _plan_json_set_state_sm(
+            args.label, "completed", cfg=cfg,
+            ended_at=datetime.now(timezone.utc).isoformat(),
+            end_reason="natural",
+        )
 
     # Dispatch documenter after sprint summary, before sprint PR (issue #165)
     if not args.skip_documenter and not args.dry_run and state.issues:

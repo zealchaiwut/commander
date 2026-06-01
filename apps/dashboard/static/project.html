@@ -4408,7 +4408,7 @@ async function _bulkCloseConfirm() {
 
   _bulkCloseCancel();
 
-  // Build inline result list in action bar
+  // Render result summary (success/error per ticket) in action bar results list
   const resultListEl = document.getElementById('bab-result-list');
   const closeBtnEl   = document.getElementById('bab-close-btn');
   if (resultListEl) {

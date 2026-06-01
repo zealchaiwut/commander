@@ -1861,32 +1861,32 @@
     }
     .nt-label-chip-rm:hover { color: var(--red); }
 
-    /* ── Board move overlay (issue #276) ── */
+    /* ── Blocking operation overlay (issue #276; full-screen, generalised) ── */
     #pane-sprint-mgmt { position: relative; }
     .smgmt-move-overlay {
       display: none;
-      position: absolute;
+      position: fixed;
       inset: 0;
-      background: rgba(0,0,0,.35);
-      z-index: 500;
+      background: rgba(0,0,0,.4);
+      z-index: 9000;                 /* above sidebar, header, modals */
       align-items: center;
       justify-content: center;
-      border-radius: 0;
     }
     .smgmt-move-overlay.active { display: flex; }
     .smgmt-move-overlay-pill {
-      display: flex; align-items: center; gap: 10px;
+      display: flex; align-items: center; gap: 12px;
       background: var(--surface);
       border: 1px solid var(--border);
-      border-radius: 999px;
-      padding: 10px 20px;
-      font-size: 13px; font-weight: 600;
+      border-radius: 12px;
+      padding: 16px 24px;
+      font-size: 14px; font-weight: 600;
       color: var(--text);
-      box-shadow: 0 4px 16px rgba(0,0,0,.18);
+      box-shadow: 0 8px 32px rgba(0,0,0,.28);
       pointer-events: none;
+      max-width: 80vw;
     }
     .smgmt-move-spinner {
-      display: inline-block; width: 14px; height: 14px;
+      display: inline-block; width: 16px; height: 16px;
       border: 2px solid var(--border); border-top-color: var(--blue);
       border-radius: 50%; animation: smgmt-spin .7s linear infinite;
       flex-shrink: 0;
@@ -3150,11 +3150,11 @@
       <!-- Sprint Mgmt tab -->
       <div class="tab-pane active" id="pane-sprint-mgmt" role="tabpanel" aria-labelledby="stab-sprint-mgmt">
 
-        <!-- Board move overlay (issue #276) -->
-        <div class="smgmt-move-overlay" id="smgmt-move-overlay" aria-live="assertive" aria-label="Moving ticket, please wait">
+        <!-- Blocking operation overlay (issue #276) — full-screen, message set per operation -->
+        <div class="smgmt-move-overlay" id="smgmt-move-overlay" role="alertdialog" aria-busy="true" aria-live="assertive" aria-label="Working, please wait">
           <div class="smgmt-move-overlay-pill">
             <span class="smgmt-move-spinner"></span>
-            Moving…
+            <span id="smgmt-move-overlay-msg">Working…</span>
           </div>
         </div>
 
@@ -6915,6 +6915,7 @@ async function smgmtRerunSprint(label) {
   if (!repo) return;
   const n = parseInt(label.split('-')[1], 10);
   if (!confirm(`Re-run Sprint ${n}?\n\nAgents will be dispatched selectively based on each ticket's current state:\n• UAT tickets are skipped\n• SIT tickets go directly to tester\n• All others go to coder`)) return;
+  _smgmtBoardLock(`Re-running Sprint ${n}…`);
   try {
     const res = await fetch(`/api/sprints/${encodeURIComponent(label)}/rerun?project=${encodeURIComponent(repo)}`, {
       method: 'POST',
@@ -6936,6 +6937,8 @@ async function smgmtRerunSprint(label) {
     await loadSprintMgmt();
   } catch (e) {
     alert('Failed to re-run sprint: ' + e.message);
+  } finally {
+    _smgmtBoardUnlock();
   }
 }
 
@@ -7094,6 +7097,7 @@ async function smgmtDeleteSprint(label) {
     ? `Delete ${displayName}?\n\nThis will delete the ${label} label and remove it from ${tickets.length} ticket${tickets.length !== 1 ? 's' : ''}. The tickets themselves are not deleted.`
     : `Delete ${displayName}?\n\nThis will delete the ${label} GitHub label. No tickets are attached.`;
   if (!confirm(confirmMsg)) return;
+  _smgmtBoardLock(`Deleting ${displayName}…`);
   try {
     const res = await fetch(`/api/sprints/${encodeURIComponent(label)}?project=${encodeURIComponent(repo)}`, { method: 'DELETE' });
     if (!res.ok) throw new Error(await res.text());
@@ -7105,6 +7109,8 @@ async function smgmtDeleteSprint(label) {
     await loadSprintMgmt();
   } catch (e) {
     alert('Failed to delete sprint: ' + e.message);
+  } finally {
+    _smgmtBoardUnlock();
   }
 }
 
@@ -7148,6 +7154,7 @@ async function _smgmtCleanupConfirm() {
   errEl.textContent = '';
   errEl.classList.add('hidden');
   const repo = _smgmtRepo();
+  _smgmtBoardLock('Cleaning up empty sprints…');
   try {
     const resp = await fetch('/api/sprints/cleanup-empty', {
       method: 'POST',
@@ -7164,6 +7171,8 @@ async function _smgmtCleanupConfirm() {
     errEl.textContent = 'Error: ' + e.message;
     errEl.classList.remove('hidden');
     btn.disabled = false;
+  } finally {
+    _smgmtBoardUnlock();
   }
 }
 // ───────────────────────────────────────────────────────────────────────────
@@ -7177,6 +7186,7 @@ async function smgmtFinishSprint(label) {
   const parts = repo.split('/');
   const owner = parts[0];
   const repoName = parts.slice(1).join('/');
+  _smgmtBoardLock(`Finishing ${displayName}…`);
   try {
     const res = await fetch(
       `/api/projects/${encodeURIComponent(owner)}/${encodeURIComponent(repoName)}/sprints/${encodeURIComponent(label)}/finish`,
@@ -7191,6 +7201,8 @@ async function smgmtFinishSprint(label) {
     await loadSprintMgmt();
   } catch (e) {
     alert('Failed to finish sprint: ' + e.message);
+  } finally {
+    _smgmtBoardUnlock();
   }
 }
 
@@ -7315,6 +7327,7 @@ async function _smgmtDeleteSelected() {
   if (_smgmtData) _smgmtData.issues = _smgmtData.issues.filter(i => i.number !== num);
   _smgmtClearSelection();
   _smgmtRender(_smgmtData);
+  _smgmtBoardLock(`Deleting #${num}…`);
   try {
     const res = await fetch(`/api/issues/${num}/close?repo=${encodeURIComponent(repo)}`, {
       method: 'POST',
@@ -7324,6 +7337,8 @@ async function _smgmtDeleteSelected() {
   } catch (e) {
     alert('Failed to delete issue: ' + e.message);
     await loadSprintMgmt();
+  } finally {
+    _smgmtBoardUnlock();
   }
 }
 
@@ -7334,6 +7349,7 @@ async function _smgmtMoveSelectedTo(targetLabel) {
 
   const nums = Array.from(_smgmtSelectedIssues);
   const changes = nums.map(n => ({ issue_num: n, sprint_label: targetLabel }));
+  const dest = targetLabel === 'backlog' ? 'Backlog' : `Sprint ${targetLabel.split('-')[1]}`;
 
   // Optimistic UI update
   if (_smgmtData) {
@@ -7346,6 +7362,7 @@ async function _smgmtMoveSelectedTo(targetLabel) {
     _smgmtRender(_smgmtData);
   }
 
+  _smgmtBoardLock(`Moving ${nums.length} ticket${nums.length !== 1 ? 's' : ''} to ${dest}…`);
   try {
     const res = await fetch('/api/sprints/batch-labels', {
       method: 'POST',
@@ -7357,6 +7374,8 @@ async function _smgmtMoveSelectedTo(targetLabel) {
   } catch (e) {
     alert('Failed to move tickets: ' + e.message);
     await loadSprintMgmt();
+  } finally {
+    _smgmtBoardUnlock();
   }
 }
 
@@ -8214,6 +8233,7 @@ async function _smgmtCloseIssueConfirm() {
   btn.disabled = true;
   btn.textContent = 'Closing…';
   errEl.classList.add('hidden');
+  _smgmtBoardLock(`Closing #${issueNum}…`);
   try {
     const res = await fetch(`/api/issues/${issueNum}/close?repo=${encodeURIComponent(repo)}`, { method: 'POST' });
     if (!res.ok) throw new Error(await res.text());
@@ -8225,6 +8245,8 @@ async function _smgmtCloseIssueConfirm() {
     btn.textContent = 'Close issue';
     errEl.textContent = `Failed: ${e.message}`;
     errEl.classList.remove('hidden');
+  } finally {
+    _smgmtBoardUnlock();
   }
 }
 
@@ -8361,13 +8383,24 @@ document.addEventListener('keydown', function(e) {
 // ── Board move lock (issue #276) ──────────────────────────────────────────
 let _smgmtMoveLock = false;
 
-/** Show the full-board overlay and suppress auto-refresh for the duration of a move. */
-function _smgmtBoardLock() {
+/**
+ * Show the full-screen blocking overlay and suppress auto-refresh while a
+ * GitHub-backed operation runs. Pass a message describing the operation
+ * (defaults to "Moving…" for the drag/move callers). Always pair with
+ * _smgmtBoardUnlock() in a finally block.
+ */
+function _smgmtBoardLock(message) {
   _smgmtMoveLock = true;
   // Pause the auto-refresh ticker without changing the user's chosen interval
   _smgmtArStopTicker();
   const overlay = document.getElementById('smgmt-move-overlay');
-  if (overlay) overlay.classList.add('active');
+  const msgEl   = document.getElementById('smgmt-move-overlay-msg');
+  const text    = message || 'Moving…';
+  if (msgEl) msgEl.textContent = text;
+  if (overlay) {
+    overlay.setAttribute('aria-label', text.replace(/…$/, '') + ', please wait');
+    overlay.classList.add('active');
+  }
 }
 
 /** Hide the overlay and resume auto-refresh at the previously chosen interval. */

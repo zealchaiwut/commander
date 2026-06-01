@@ -108,9 +108,17 @@ except Exception:
     _SYNC_PROJECTS_AVAILABLE = False
 
 try:
-    from sizing import SIZE_TO_MINUTES as _SIZE_TO_MINUTES
+    from sizing import SIZE_TO_MINUTES as _SIZE_TO_MINUTES, letter_from_minutes as _letter_from_minutes, minutes_from_letter as _minutes_from_letter
 except ImportError:
-    _SIZE_TO_MINUTES = {"S": 5, "M": 15, "L": 30, "XL": 60}  # fallback if sizing unavailable
+    _SIZE_TO_MINUTES = {"S": 5, "M": 15, "L": 30, "XL": 60}
+    def _letter_from_minutes(minutes: int) -> str:  # type: ignore[misc]
+        result = "S"
+        for threshold, letter in [(5, "S"), (15, "M"), (30, "L"), (60, "XL")]:
+            if minutes >= threshold:
+                result = letter
+        return result
+    def _minutes_from_letter(size: str) -> int:  # type: ignore[misc]
+        return _SIZE_TO_MINUTES.get(size, 0)
 
 try:
     from dag_builder import CycleError as _CycleError, build_dag as _build_dag
@@ -1451,6 +1459,10 @@ def estimate_issue_on_demand(request: Request, issue_id: int, repo: str):
     if not size:
         raise HTTPException(500, detail="Estimator returned no size")
 
+    minutes: int = estimate.get("minutes") or _minutes_from_letter(size)
+    if not estimate.get("minutes"):
+        estimate["minutes"] = minutes
+
     try:
         _ei_apply_label(issue_id, repo, size)
     except subprocess.CalledProcessError as e:
@@ -1464,7 +1476,7 @@ def estimate_issue_on_demand(request: Request, issue_id: int, repo: str):
     estimate_path = estimates_dir / f"issue-{issue_id}.json"
     estimate_path.write_text(json.dumps(estimate, indent=2), encoding="utf-8")
 
-    return {"ok": True, "size": size}
+    return {"ok": True, "size": size, "minutes": minutes}
 
 
 # ── project endpoints ─────────────────────────────────────────────────────────
@@ -4592,7 +4604,11 @@ def get_sprint_live_snapshot(sprint_label: str, project: str):
             if est_entry:
                 has_any_estimate = True
                 if not terminal:
-                    rem_minutes += int(est_entry.get("minutes", 0))
+                    stored_mins = est_entry.get("minutes")
+                    if stored_mins and isinstance(stored_mins, (int, float)) and stored_mins > 0:
+                        rem_minutes += int(stored_mins)
+                    else:
+                        rem_minutes += _minutes_from_letter(est_entry.get("size", ""))
         if has_any_estimate:
             est_remaining_minutes = rem_minutes
 
@@ -4658,9 +4674,14 @@ def get_sprint_live_snapshot(sprint_label: str, project: str):
         else:
             issue_elapsed = None
 
-        # size: from estimates only — never derived from minutes
+        # size + minutes: populate both; derive missing field from the present one
         est_entry = estimates.get(str(num)) or estimates.get(num)
-        size: Optional[str] = est_entry.get("size") if est_entry else None
+        raw_size: Optional[str] = est_entry.get("size") if est_entry else None
+        raw_minutes: Optional[int] = est_entry.get("minutes") if est_entry else None
+        if raw_size and not raw_minutes:
+            raw_minutes = _minutes_from_letter(raw_size)
+        elif raw_minutes and not raw_size:
+            raw_size = _letter_from_minutes(raw_minutes)
 
         issues_out.append({
             "number":       num,
@@ -4669,7 +4690,8 @@ def get_sprint_live_snapshot(sprint_label: str, project: str):
             "agent_status": public_agent_status,
             "agent":        active_role,
             "elapsed_secs": issue_elapsed,
-            "size":         size,
+            "size":         raw_size,
+            "minutes":      raw_minutes,
         })
 
     # ── active_agent: derive from sprint state JSON (coder/tester transition) ──

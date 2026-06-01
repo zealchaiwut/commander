@@ -32,6 +32,15 @@ if str(REPO_ROOT) not in sys.path:
 from services.run_id import mint_run_id
 from services.logging import log as structured_log
 
+_SIZING_DIR = Path(__file__).parent
+if str(_SIZING_DIR) not in sys.path:
+    sys.path.insert(0, str(_SIZING_DIR))
+try:
+    from sizing import minutes_from_letter as _minutes_from_letter
+except ImportError:
+    def _minutes_from_letter(size: str) -> int:  # type: ignore[misc]
+        return {"S": 5, "M": 15, "L": 30, "XL": 60}.get(size, 0)
+
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -184,6 +193,10 @@ Output ONLY the JSON object. No other text."""
                     # Normalize files_touched: absent or non-list → []
                     if not isinstance(parsed.get("files_touched"), list):
                         parsed["files_touched"] = []
+                    # Ensure both size and minutes are present; derive missing field
+                    size_val = parsed.get("size", "")
+                    if "minutes" not in parsed or not isinstance(parsed.get("minutes"), int):
+                        parsed["minutes"] = _minutes_from_letter(size_val)
                     parsed["body_hash"] = hashlib.sha256(body.encode()).hexdigest()
                     return parsed
 
@@ -229,6 +242,7 @@ Output ONLY the JSON object. No other text."""
 def post_comment(issue_num: int, repo: str, estimate: dict) -> None:
     """Post the estimate as a structured comment on the issue."""
     size       = estimate.get("size", "?")
+    minutes    = estimate.get("minutes") or _minutes_from_letter(size) if size != "?" else "?"
     hours      = estimate.get("estimated_hours", "?")
     confidence = estimate.get("confidence", "?")
     files      = estimate.get("files_likely_affected", [])
@@ -247,6 +261,7 @@ def post_comment(issue_num: int, repo: str, estimate: dict) -> None:
 | Field | Value |
 |---|---|
 | Size | **{size}** |
+| Minutes | {minutes} |
 | Estimated hours | {hours}h |
 | Confidence | {confidence} |
 | Risk flags | {risk_str} |

@@ -4155,7 +4155,7 @@ function tdpOpen(num) {
     html += `<div class="tdp-section">
       <div class="tdp-section-title">Estimate</div>
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:4px">
-        <span class="smgmt-ticket-size-pill" id="tdp-estimate-size">${escHtml(tdpSizeLabel.name.replace('size-', ''))}</span>
+        <span class="smgmt-ticket-size-pill" id="tdp-estimate-size" title="≈${_sizeMinutes(tdpSizeLabel.name.replace('size-', ''))} min">${escHtml(tdpSizeLabel.name.replace('size-', ''))}</span>
         <button class="tdp-reestimate-btn" id="tdp-reestimate-btn"
                 onclick="_smgmtReEstimate(${num})">Re-estimate</button>
       </div>
@@ -5922,7 +5922,7 @@ function _smgmtRunningCardHtml(label, n, tickets) {
     const issueUrl = t.url || (cardRepo ? `https://github.com/${cardRepo}/issues/${t.number}` : '#');
 
     const sizePillHtml = (liveIss && liveIss.size)
-      ? `<span class="smgmt-ticket-size-pill">${escHtml(liveIss.size)}</span>`
+      ? `<span class="smgmt-ticket-size-pill" title="≈${liveIss.minutes || _sizeMinutes(liveIss.size)} min">${escHtml(liveIss.size)}</span>`
       : '';
     const agentTagHtml = (liveIss && liveIss.agent)
       ? `<span class="smgmt-ticket-agent-tag ${_smgmtAgentTagClass(liveIss.agent)}">${escHtml(liveIss.agent.toUpperCase())}</span>`
@@ -6065,6 +6065,11 @@ function _fmtTicketElapsed(secs) {
   return `${m}m ${s}s`;
 }
 
+/** Return canonical minutes for a size letter (S/M/L/XL). Returns 0 for unknown. */
+function _sizeMinutes(letter) {
+  return {S: 5, M: 15, L: 30, XL: 60}[letter] || 0;
+}
+
 /** CSS class for agent role tag: purple for coder-class, amber for tester-class. */
 function _smgmtAgentTagClass(role) {
   if (!role) return 'unknown-class';
@@ -6141,7 +6146,7 @@ function _smgmtLivePatch(label, live) {
         row.dataset.issue = String(t.number);
         row.draggable = false;
         const initSizePill = t.size
-          ? `<span class="smgmt-ticket-size-pill">${escHtml(t.size)}</span>` : '';
+          ? `<span class="smgmt-ticket-size-pill" title="≈${t.minutes || _sizeMinutes(t.size)} min">${escHtml(t.size)}</span>` : '';
         const initAgentTag = t.agent
           ? `<span class="smgmt-ticket-agent-tag ${_smgmtAgentTagClass(t.agent)}">${escHtml(t.agent.toUpperCase())}</span>` : '';
         const initElapsedStr = _fmtTicketElapsed(t.elapsed_secs);
@@ -6185,6 +6190,7 @@ function _smgmtLivePatch(label, live) {
         if (titleEl) titleEl.after(sizePillEl);
       }
       sizePillEl.textContent = liveIss.size;
+      sizePillEl.title = `≈${liveIss.minutes || _sizeMinutes(liveIss.size)} min`;
     } else if (sizePillEl) {
       sizePillEl.remove();
     }
@@ -6306,7 +6312,7 @@ function _smgmtTicketRowHtml(ticket, label) {
 
   const sizeLabel = (ticket.labels || []).find(l => /^size-[SMLX]+$/.test(l.name));
   const estimatePillHtml = sizeLabel
-    ? `<span class="smgmt-ticket-size-pill">${escHtml(sizeLabel.name.replace('size-', ''))}</span>` +
+    ? `<span class="smgmt-ticket-size-pill" title="≈${_sizeMinutes(sizeLabel.name.replace('size-', ''))} min">${escHtml(sizeLabel.name.replace('size-', ''))}</span>` +
       `<button class="smgmt-reestimate-btn" tabindex="0" title="Re-estimate this ticket"
                onclick="event.stopPropagation();_smgmtReEstimate(${ticket.number},this)"
                onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();_smgmtReEstimate(${ticket.number},this);}">Re-estimate</button>`
@@ -6364,6 +6370,7 @@ async function _smgmtRetryEstimation(issueNum, btn) {
     const pill = document.createElement('span');
     pill.className = 'smgmt-ticket-size-pill';
     pill.textContent = data.size;
+    pill.title = `≈${data.minutes || _sizeMinutes(data.size)} min`;
     spinner.replaceWith(pill);
   } catch (_) {
     const newBtn = document.createElement('button');
@@ -6457,7 +6464,10 @@ async function _smgmtReEstimateRun(issueNum, rowBtn) {
     const row = document.getElementById(`smgmt-ticket-${issueNum}`);
     if (row) {
       const pill = row.querySelector('.smgmt-ticket-size-pill');
-      if (pill) pill.textContent = data.size;
+      if (pill) {
+        pill.textContent = data.size;
+        pill.title = `≈${data.minutes || _sizeMinutes(data.size)} min`;
+      }
     }
     // Restore row re-estimate button
     if (rowSpinner) rowSpinner.replaceWith(_makeReEstimateBtn(issueNum));
@@ -6467,7 +6477,10 @@ async function _smgmtReEstimateRun(issueNum, rowBtn) {
       tdpBtn.disabled = false;
       tdpBtn.textContent = 'Re-estimate';
       const sizeEl = document.getElementById('tdp-estimate-size');
-      if (sizeEl) sizeEl.textContent = data.size;
+      if (sizeEl) {
+        sizeEl.textContent = data.size;
+        sizeEl.title = `≈${data.minutes || _sizeMinutes(data.size)} min`;
+      }
     }
   } catch (err) {
     // Restore row button

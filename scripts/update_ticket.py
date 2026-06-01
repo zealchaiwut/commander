@@ -35,6 +35,13 @@ from services.run_id import mint_run_id
 # status transition. This guard matches any "sprint-<digits>" label name.
 _SPRINT_LABEL_RE = re.compile(r"^sprint-\d+$")
 
+# Labels that may be mutated while a sprint run is active (COMMANDER_SPRINT_RUNNING).
+# Any operation on a label outside this set is refused and logged when the guard
+# is active.  Matches RUN_MUTABLE_LABELS in sprint_manager.py.
+_RUN_MUTABLE_LABELS: frozenset[str] = frozenset({
+    "in-progress", "SIT", "UAT", "needs-rework",
+})
+
 STATUS_MAP = {
     "in-progress": {
         "add":    ["in-progress"],
@@ -251,6 +258,29 @@ def main():
             sys.exit(str(e))
 
     mapping = STATUS_MAP[args.status]
+
+    # When running inside an active sprint (COMMANDER_SPRINT_RUNNING is set), filter
+    # out any label operations that touch labels outside _RUN_MUTABLE_LABELS.  This
+    # prevents sprint-N and other protected labels from being stripped mid-run.
+    sprint_running = os.environ.get("COMMANDER_SPRINT_RUNNING", "").strip()
+    if sprint_running:
+        _add_orig = mapping["add"]
+        _remove_orig = mapping["remove"]
+        add_labels = [lbl for lbl in _add_orig if lbl in _RUN_MUTABLE_LABELS]
+        remove_labels = [lbl for lbl in _remove_orig if lbl in _RUN_MUTABLE_LABELS]
+        for lbl in [l for l in _add_orig if l not in _RUN_MUTABLE_LABELS]:
+            print(
+                f'Refused to add label "{lbl}" during sprint run — outside RUN_MUTABLE_LABELS',
+                file=sys.stderr,
+            )
+        for lbl in [l for l in _remove_orig if l not in _RUN_MUTABLE_LABELS]:
+            print(
+                f'Refused to remove label "{lbl}" during sprint run — outside RUN_MUTABLE_LABELS',
+                file=sys.stderr,
+            )
+        mapping = dict(mapping)
+        mapping["add"] = add_labels
+        mapping["remove"] = remove_labels
 
     # Pre-fetch current labels to allow smart skipping of removes
     current_labels = _fetch_current_labels(args.issue, repo)

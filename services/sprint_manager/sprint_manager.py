@@ -425,13 +425,7 @@ HANG_CHECK_SECS = 5  * 60   # check every 5 minutes
 # All other label additions are deferred to post-run; sprint-N is never
 # removed from a ticket until the sprint run ends.
 RUN_MUTABLE_LABELS: frozenset[str] = frozenset({
-    "in-progress", "sit", "uat", "needs-rework",
-})
-
-# Actual GitHub label strings (as applied on issues) that correspond to
-# RUN_MUTABLE_LABELS.  Used as the allowlist when filtering add-label calls.
-_RUN_MUTABLE_GITHUB_LABELS: frozenset[str] = frozenset({
-    "in-progress", "SIT", "UAT", "needs-rework", "need-rework",  # READ-only: backward compat
+    "in-progress", "SIT", "UAT", "needs-rework",
 })
 
 _SPRINT_LABEL_RE = re.compile(r"^sprint-\d+$")
@@ -447,7 +441,7 @@ def _guard_sprint_labels(
 
     Always: sprint-N labels are stripped from *remove* and never deleted.
     Active run (sprint_label provided): *add* is restricted to
-    _RUN_MUTABLE_GITHUB_LABELS; any other additions are logged and dropped.
+    RUN_MUTABLE_LABELS; any other additions are logged and dropped.
     """
     safe_remove = [lbl for lbl in remove if not _SPRINT_LABEL_RE.match(lbl)]
     blocked_removes = [lbl for lbl in remove if _SPRINT_LABEL_RE.match(lbl)]
@@ -458,8 +452,8 @@ def _guard_sprint_labels(
         )
 
     if sprint_label is not None:
-        safe_add = [lbl for lbl in add if lbl in _RUN_MUTABLE_GITHUB_LABELS]
-        deferred = [lbl for lbl in add if lbl not in _RUN_MUTABLE_GITHUB_LABELS]
+        safe_add = [lbl for lbl in add if lbl in RUN_MUTABLE_LABELS]
+        deferred = [lbl for lbl in add if lbl not in RUN_MUTABLE_LABELS]
         if deferred:
             print(
                 f"  [label-guard] Deferred non-mutable label addition(s) until post-run: {deferred}",
@@ -469,6 +463,21 @@ def _guard_sprint_labels(
         safe_add = add
 
     return safe_add, safe_remove
+
+
+def _assert_run_mutable(labels: list[str], op: str) -> None:
+    """Raise ValueError if any label in `labels` is outside RUN_MUTABLE_LABELS.
+
+    Caller must catch ValueError and skip the operation so the sprint loop
+    continues without crashing.
+    """
+    violations = [lbl for lbl in labels if lbl not in RUN_MUTABLE_LABELS]
+    for lbl in violations:
+        msg = f"Refused to {op} label {lbl!r} during sprint run — outside RUN_MUTABLE_LABELS"
+        print(f"  [run-mutable-guard] {msg}", file=sys.stderr)
+        structured_log.warn("run_mutable_guard", msg, label=lbl, op=op)
+    if violations:
+        raise ValueError(f"Label mutation blocked: {violations!r} outside RUN_MUTABLE_LABELS")
 
 # ── end sprint-label protection ───────────────────────────────────────────────
 
@@ -1131,6 +1140,7 @@ def _get_issue_labels(issue_num: int, repo_name: Optional[str] = None) -> set[st
 def _apply_in_progress_label(
     issue_num: int,
     cfg: Optional["SprintConfig"] = None,
+    sprint_label: Optional[str] = None,
 ) -> None:
     """Apply the in-progress label via update_ticket.py (best-effort, issue #311 AC-5).
 
@@ -1145,8 +1155,11 @@ def _apply_in_progress_label(
         "--issue", str(issue_num),
         "--status", "in-progress",
     ]
+    sub_env = os.environ.copy()
+    if sprint_label:
+        sub_env["COMMANDER_SPRINT_RUNNING"] = sprint_label
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60, env=sub_env)
         if result.returncode in (0, 2):
             print(f"  [in-progress] label applied for #{issue_num}")
         else:
@@ -1159,6 +1172,7 @@ def _apply_needs_rework_label(
     issue_num: int,
     category: Optional[str],
     cfg: Optional["SprintConfig"] = None,
+    sprint_label: Optional[str] = None,
 ) -> None:
     """Apply the needs-rework label via update_ticket.py (best-effort).
 
@@ -1176,8 +1190,11 @@ def _apply_needs_rework_label(
         "--status", "needs-rework",
         "--force",
     ]
+    sub_env = os.environ.copy()
+    if sprint_label:
+        sub_env["COMMANDER_SPRINT_RUNNING"] = sprint_label
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60, env=sub_env)
         if result.returncode in (0, 2):
             # exit 2 means label ops partially failed but a warning comment was posted
             structured_log.info("needs_rework_label_applied", f"needs-rework label applied for #{issue_num}", issue_num=issue_num, category=category)
@@ -1623,6 +1640,7 @@ def _call_finish_feature(
     target_branch: str = "develop",
     repo_name: Optional[str] = None,
     cfg: Optional["SprintConfig"] = None,
+    sprint_label: Optional[str] = None,
 ) -> None:
     """Call finish_feature.py as a subprocess from the worktester root."""
     if cfg is not None:
@@ -1640,8 +1658,12 @@ def _call_finish_feature(
     if repo_name:
         cmd += ["--repo", repo_name]
 
+    sub_env = os.environ.copy()
+    if sprint_label:
+        sub_env["COMMANDER_SPRINT_RUNNING"] = sprint_label
+
     print(f"  Calling finish_feature.py --issue {issue_num} --target-branch {target_branch} ...")
-    result = subprocess.run(cmd, cwd=str(wt_root), capture_output=True, text=True)
+    result = subprocess.run(cmd, cwd=str(wt_root), capture_output=True, text=True, env=sub_env)
     if result.stdout:
         print(result.stdout.rstrip())
     if result.returncode != 0:
@@ -1708,6 +1730,7 @@ def handle_post_tester(
     gate_scope: str = "changed",
     documentor_enabled: bool = False,
     alert_modes: Optional[list] = None,
+    sprint_label: Optional[str] = None,
 ) -> tuple[bool, str, Optional[str]]:
     """Called after a tester subprocess exits.
 
@@ -1774,11 +1797,14 @@ def handle_post_tester(
             scripts_dir = cfg.scripts_dir if cfg is not None else SCRIPTS_DIR
             update_script = scripts_dir / "update_ticket.py"
             _UAT_RECOVERY_BACKOFFS = (2, 5, 10)
+            _recovery_env = os.environ.copy()
+            if sprint_label:
+                _recovery_env["COMMANDER_SPRINT_RUNNING"] = sprint_label
             label_result = None
             for attempt in range(len(_UAT_RECOVERY_BACKOFFS) + 1):
                 label_result = subprocess.run(
                     [sys.executable, str(update_script), "--issue", str(issue_num), "--status", "uat"],
-                    capture_output=True, text=True,
+                    capture_output=True, text=True, env=_recovery_env,
                 )
                 if label_result.returncode == 0:
                     break
@@ -1860,7 +1886,7 @@ def handle_post_tester(
         if eff_documentor:
             _run_documentor(issue_num, eff_repo, cfg=cfg)
         if not already_merged_by_tester:
-            _call_finish_feature(issue_num, wt_root, target_branch=target_branch, repo_name=eff_repo, cfg=cfg)
+            _call_finish_feature(issue_num, wt_root, target_branch=target_branch, repo_name=eff_repo, cfg=cfg, sprint_label=sprint_label)
         _post_agent_event("gate:merging", api_url=api_url)
         all_skipped = [
             GateResult(gate="pytest",        passed=True, skipped=True),
@@ -1899,7 +1925,7 @@ def handle_post_tester(
         if eff_documentor:
             _run_documentor(issue_num, eff_repo, cfg=cfg)
         if not already_merged_by_tester:
-            _call_finish_feature(issue_num, wt_root, target_branch=target_branch, repo_name=eff_repo, cfg=cfg)
+            _call_finish_feature(issue_num, wt_root, target_branch=target_branch, repo_name=eff_repo, cfg=cfg, sprint_label=sprint_label)
         _post_success_comment(issue_num, results, repo_name=eff_repo)
         if already_merged_by_tester:
             return True, f"Tester promoted issue #{issue_num} to UAT; merge already done by tester, comment posted", None
@@ -2059,11 +2085,14 @@ def _dispatch_coder(
 
     # Build subprocess environment: inherit current env, set COMMANDER_MERGE_TARGET
     # when in sprint mode (AC2), COMMANDER_APP_PORT if a port was chosen (issue #62),
-    # and COMMANDER_PROJECT so log output is tagged by project (issue #122).
+    # COMMANDER_PROJECT so log output is tagged by project (issue #122), and
+    # COMMANDER_SPRINT_RUNNING so child scripts enforce RUN_MUTABLE_LABELS (issue #506).
     sub_env = os.environ.copy()
     sub_env.pop("ANTHROPIC_API_KEY", None)
     if eff_repo:
         sub_env["COMMANDER_PROJECT"] = eff_repo
+    if sprint_label:
+        sub_env["COMMANDER_SPRINT_RUNNING"] = sprint_label
     if sprint_branch not in ("develop",):
         sub_env["COMMANDER_MERGE_TARGET"] = sprint_branch
         # Always append sprint-mode instructions regardless of whether a custom
@@ -2289,11 +2318,14 @@ def _dispatch_tester(
 
     # Build subprocess environment: inherit current env, set COMMANDER_MERGE_TARGET
     # when in sprint mode (AC2), COMMANDER_APP_PORT if a port was chosen (issue #62),
-    # and COMMANDER_PROJECT so log output is tagged by project (issue #122).
+    # COMMANDER_PROJECT so log output is tagged by project (issue #122), and
+    # COMMANDER_SPRINT_RUNNING so child scripts enforce RUN_MUTABLE_LABELS (issue #506).
     sub_env = os.environ.copy()
     sub_env.pop("ANTHROPIC_API_KEY", None)
     if eff_repo:
         sub_env["COMMANDER_PROJECT"] = eff_repo
+    if sprint_label:
+        sub_env["COMMANDER_SPRINT_RUNNING"] = sprint_label
     if sprint_branch not in ("develop",):
         sub_env["COMMANDER_MERGE_TARGET"] = sprint_branch
         # Always append sprint-mode instructions regardless of whether a custom
@@ -4553,7 +4585,7 @@ def run_sprint(
             # AC-5 (issue #311): apply in-progress label when coder starts so the
             # board reflects active work during coding.  Best-effort — never blocks
             # the sprint on label failure.
-            _apply_in_progress_label(num, cfg=cfg)
+            _apply_in_progress_label(num, cfg=cfg, sprint_label=label)
 
             def _on_coder_running(
                 _is=issue_state, _st=state, _sp=state_path, _api=api_url,
@@ -4621,7 +4653,7 @@ def run_sprint(
                     cfg=cfg,
                     repo=eff_repo,
                 )
-                _apply_needs_rework_label(num, category, cfg=cfg)
+                _apply_needs_rework_label(num, category, cfg=cfg, sprint_label=label)
                 _neon_ticket_status(label, num, "failed", _eff_sprints_dir)
                 state.save(state_path)
                 _post_sprint_status(state, api_url=api_url, project=eff_repo)
@@ -4648,7 +4680,7 @@ def run_sprint(
                     cfg=cfg,
                     repo=eff_repo,
                 )
-                _apply_needs_rework_label(num, category, cfg=cfg)
+                _apply_needs_rework_label(num, category, cfg=cfg, sprint_label=label)
                 _neon_ticket_status(label, num, "failed", _eff_sprints_dir)
                 state.save(state_path)
                 _post_sprint_status(state, api_url=api_url, project=eff_repo)
@@ -4743,6 +4775,7 @@ def run_sprint(
             gate_scope         = gate_scope,
             documentor_enabled = cfg.documentor_enabled if cfg else False,
             alert_modes        = alert_modes,
+            sprint_label       = label,
         )
         print(f"  {summary_line}")
         try:

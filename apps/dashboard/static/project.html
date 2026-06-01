@@ -9,7 +9,7 @@
   (function() {
     var m = window.location.pathname.match(/^\/project\/([^/]+)/);
     var slug = m ? decodeURIComponent(m[1]) : '';
-    var k = slug ? ('settings:' + slug + ':theme') : 'theme';
+    var k = 'settings:' + slug + ':theme';
     var v = localStorage.getItem(k) || localStorage.getItem('theme') || 'light';
     var theme = v === 'system'
       ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
@@ -958,6 +958,7 @@
       display: inline-flex; align-items: center; gap: 4px;
     }
     .smgmt-delete-btn:hover { background: var(--red-bg); }
+    .smgmt-delete-btn:disabled { opacity: .45; cursor: not-allowed; }
     .smgmt-finish-btn {
       padding: 4px 10px; font-size: 11px; font-weight: 600;
       background: var(--amber-bg); color: var(--amber); border: 0.5px solid var(--amber);
@@ -1210,6 +1211,24 @@
       animation: smgmt-preflight-highlight-anim 3s ease-out forwards;
       border-radius: 6px;
     }
+
+    /* ── Cancellation banner (issue #454) ── */
+    .smgmt-cancel-banner {
+      margin: 0 12px 10px;
+      padding: 10px 12px;
+      background: var(--yellow-bg);
+      border: 1px solid rgba(161,98,7,.25);
+      border-radius: 6px;
+      display: flex; align-items: center; gap: 8px;
+      font-size: 13px;
+    }
+    .smgmt-cancel-banner-msg { flex: 1; color: var(--yellow); }
+    .smgmt-cancel-banner-dismiss {
+      background: none; border: none; cursor: pointer;
+      color: var(--text-muted); font-size: 16px; line-height: 1;
+      padding: 0 2px; flex-shrink: 0;
+    }
+    .smgmt-cancel-banner-dismiss:hover { color: var(--text); }
 
     /* TESTER REJECTED label */
     .smgmt-lbl-rejected {
@@ -2448,12 +2467,7 @@
       white-space: pre-wrap;
       word-break: break-all;
     }
-    [data-theme="dark"] .lv-stream {
-      background: #0d1117; color: #c9d1d9;
-      border-color: rgba(255,255,255,.08);
-    }
     .lv-stream:empty::after { content: 'Loading…'; color: var(--text-sub); }
-    [data-theme="dark"] .lv-stream:empty::after { color: #6e7681; }
     .btn-view-log {
       background: none; border: none; padding: 2px 4px; cursor: pointer;
       color: var(--text-sub); font-size: 13px; border-radius: 4px;
@@ -3051,6 +3065,12 @@
                 <button class="smgmt-ar-menu-item smgmt-ar-turn-off" onclick="_smgmtArTurnOff()">Turn off</button>
               </div>
             </div>
+            <button class="btn-ghost" id="smgmt-cleanup-empty-btn"
+                    onclick="_smgmtCleanupEmpty()" title="Delete sprint labels with no tickets"
+                    aria-label="Clean up empty sprints" style="display:none">
+              <i class="ti ti-trash"></i>
+              Clean up empty sprints
+            </button>
             <button class="btn-ghost" id="smgmt-new-ticket-btn"
                     onclick="smgmtOpenNewTicket()" title="Create a new ticket"
                     aria-label="New Ticket">
@@ -3435,16 +3455,19 @@ function _applyTheme(value) {
   _syncThemeIcon(actual);
 }
 
+let _themeMediaListener = null;
+
 function initTheme() {
-  const m = window.location.pathname.match(/^\/project\/([^/]+)/);
-  const slug = m ? decodeURIComponent(m[1]) : '';
-  const key = 'settings:' + slug + ':theme';
+  const key = _settingsKey('theme');
   const saved = localStorage.getItem(key) || localStorage.getItem('theme') || 'light';
   _applyTheme(saved);
-  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function() {
+  const mq = window.matchMedia('(prefers-color-scheme: dark)');
+  if (_themeMediaListener) mq.removeEventListener('change', _themeMediaListener);
+  _themeMediaListener = function() {
     const cur = localStorage.getItem(_settingsKey('theme'));
     if (cur === 'system') _applyTheme('system');
-  });
+  };
+  mq.addEventListener('change', _themeMediaListener);
 }
 
 function toggleTheme() {
@@ -4014,9 +4037,9 @@ function _parseDeps(body) {
   const blocks = [];
   const blockedBy = [];
   for (const line of body.split('\n')) {
-    const m1 = line.match(/^blocks?:\s*(.+)/i);
+    const m1 = line.match(/^\s*blocks?:\s*(.+)/i);
     if (m1) { for (const ref of m1[1].matchAll(/#(\d+)/g)) blocks.push(parseInt(ref[1], 10)); }
-    const m2 = line.match(/^blocked[\s-]by:\s*(.+)/i);
+    const m2 = line.match(/^\s*blocked[\s-]by:\s*(.+)/i);
     if (m2) { for (const ref of m2[1].matchAll(/#(\d+)/g)) blockedBy.push(parseInt(ref[1], 10)); }
   }
   return { blocks: [...new Set(blocks)], blockedBy: [...new Set(blockedBy)] };
@@ -4583,10 +4606,6 @@ async function _prefetchFullRepo() {
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 async function init() {
-  initTheme();
-  updateSidebarFooter();
-  checkGhAuthStatus().catch(() => {});
-
   const { slug, tab } = parseUrl();
 
   if (!slug) {
@@ -4596,6 +4615,10 @@ async function init() {
 
   _slug = slug;
   _activeTab = tab;
+
+  initTheme();
+  updateSidebarFooter();
+  checkGhAuthStatus().catch(() => {});
 
   // Replace URL if needed (e.g. sprint-history → sprint-mgmt)
   const expected = '/project/' + encodeURIComponent(slug) + '/' + tab;
@@ -4933,6 +4956,9 @@ function _smgmtRender(data) {
 
   // Inject pre-flight check banners for non-running sprint panes (issue #434)
   _preflightLoadBanners(orderedLabels, bySprint);
+
+  // Update cleanup button visibility (issue #457)
+  _smgmtUpdateCleanupBtn(data);
 }
 
 async function _smgmtFetchMissingOutcomes(orderedLabels, bySprint) {
@@ -5005,7 +5031,7 @@ function _preflightCheckTickets(tickets) {
       items.push({ number: t.number, title: t.title, type: 'Missing body' });
       continue;
     }
-    if (!/^##\s*(acceptance criteria|ac)\s*$/im.test(body)) {
+    if (!/^##\s+(acceptance criteria|ac)/im.test(body)) {
       items.push({ number: t.number, title: t.title, type: 'Missing acceptance criteria' });
     }
     const lbls = (t.labels || []).map(l => l.name);
@@ -5111,6 +5137,34 @@ function _preflightLoadBanners(orderedLabels, bySprint) {
   }
 }
 
+// ── Cancellation banner (issue #454) ─────────────────────────────────────
+
+const _cancelBannerDismissed = new Set();
+
+function _smgmtIsCancelled(outcome) {
+  if (!outcome) return false;
+  if (outcome.state === 'cancelled') return true;
+  // Fallback: lifecycle state field absent, state file present, sprint stopped mid-run
+  if (!outcome.state && outcome.sprint_status === 'stopped') return true;
+  return false;
+}
+
+function _smgmtCancelBannerDismiss(label) {
+  _cancelBannerDismissed.add(label);
+  const el = document.getElementById(`smgmt-cancel-banner-${label}`);
+  if (el) el.remove();
+}
+
+function _smgmtCancelBannerHtml(label) {
+  if (_cancelBannerDismissed.has(label)) return '';
+  const safeLabel = escHtml(label);
+  return `<div class="smgmt-cancel-banner" id="smgmt-cancel-banner-${safeLabel}">
+    <i class="ti ti-alert-triangle" style="color:var(--yellow);font-size:14px;flex-shrink:0"></i>
+    <span class="smgmt-cancel-banner-msg">Sprint cancelled mid-run. Ticket labels were not modified. Click Re-run to continue from where it stopped.</span>
+    <button class="smgmt-cancel-banner-dismiss" onclick="_smgmtCancelBannerDismiss('${safeLabel}')" title="Dismiss">&times;</button>
+  </div>`;
+}
+
 function _smgmtInjectOutcomeBand(label, outcome) {
   if (!outcome || !(outcome.sprint_status || outcome.state)) return;
   const card = document.getElementById(`smgmt-card-${label}`);
@@ -5178,6 +5232,17 @@ function _smgmtInjectOutcomeBand(label, outcome) {
     const logEl = document.createElement('div');
     logEl.innerHTML = logHtml;
     card.appendChild(logEl.firstElementChild);
+  }
+
+  // Inject cancellation banner (issue #454): insert after header so it appears above outcome band
+  const existingCancelBanner = card.querySelector('.smgmt-cancel-banner');
+  if (existingCancelBanner) existingCancelBanner.remove();
+  if (_smgmtIsCancelled(outcome)) {
+    const bannerHtml = _smgmtCancelBannerHtml(label);
+    if (bannerHtml) {
+      const sprintHeader = card.querySelector('.smgmt-sprint-header');
+      if (sprintHeader) sprintHeader.insertAdjacentHTML('afterend', bannerHtml);
+    }
   }
 }
 
@@ -5716,6 +5781,7 @@ function _smgmtCardHtml(label, n, tickets, outcome, isNext) {
   }
 
   const logHtml = (outcome && outcome.sprint_status) ? _smgmtOutcomeLogHtml(label, outcome) : '';
+  const cancelBannerHtml = _smgmtIsCancelled(outcome) ? _smgmtCancelBannerHtml(label) : '';
 
   return `
     <div class="smgmt-sprint-card${outcomeCardClass}" id="smgmt-card-${escHtml(label)}"
@@ -5742,6 +5808,7 @@ function _smgmtCardHtml(label, n, tickets, outcome, isNext) {
           ${actionBtn}
         </div>
       </div>
+      ${cancelBannerHtml}
       ${outcomeBandHtml}
       <div class="smgmt-sprint-tickets" id="smgmt-tickets-${escHtml(label)}">
         ${ticketsContainerHtml}
@@ -5836,6 +5903,8 @@ function _smgmtRunningCardHtml(label, n, tickets) {
           <span class="smgmt-sprint-count"><span id="smgmt-est-${escHtml(label)}" class="smgmt-sprint-est-val">— estimated</span> &middot; ${sourceTickets.length} ticket${sourceTickets.length !== 1 ? 's' : ''}</span>
         </div>
         <div class="smgmt-sprint-header-right">
+          <button class="smgmt-delete-btn" disabled title="Cancel sprint first">
+            <i class="ti ti-trash"></i> Delete</button>
           <button class="smgmt-run-btn" disabled title="Sprint is currently running">
             <i class="ti ti-player-play"></i> Running…</button>
         </div>
@@ -6926,6 +6995,66 @@ async function smgmtDeleteSprint(label) {
   }
 }
 
+// ── Clean up empty sprints (issue #457) ────────────────────────────────────
+let _smgmtEmptyLabels = [];
+
+function _smgmtUpdateCleanupBtn(data) {
+  const sprints = data.sprints || [];
+  const order   = data.order   || [];
+  const issues  = data.issues  || [];
+  const orderedLabels = order.length > 0
+    ? order.filter(l => /^sprint-\d+(\.\d+)?$/.test(l))
+    : [...sprints].sort((a, b) => a - b).map(n => `sprint-${n}`);
+  const labeled = new Set(issues.map(i => i.sprint_label).filter(Boolean));
+  _smgmtEmptyLabels = orderedLabels.filter(l => !labeled.has(l));
+  const btn = document.getElementById('smgmt-cleanup-empty-btn');
+  if (btn) btn.style.display = _smgmtEmptyLabels.length > 0 ? '' : 'none';
+}
+
+function _smgmtCleanupEmpty() {
+  const names = _smgmtEmptyLabels.join(', ');
+  document.getElementById('cleanup-empty-modal-msg').textContent =
+    `${names} will be removed.`;
+  const errEl = document.getElementById('cleanup-empty-modal-error');
+  errEl.textContent = '';
+  errEl.classList.add('hidden');
+  document.getElementById('cleanup-empty-confirm-btn').disabled = false;
+  document.getElementById('cleanup-empty-backdrop').classList.remove('hidden');
+  document.getElementById('cleanup-empty-modal').classList.remove('hidden');
+}
+
+function _smgmtCleanupModalClose() {
+  document.getElementById('cleanup-empty-backdrop').classList.add('hidden');
+  document.getElementById('cleanup-empty-modal').classList.add('hidden');
+}
+
+async function _smgmtCleanupConfirm() {
+  const btn = document.getElementById('cleanup-empty-confirm-btn');
+  btn.disabled = true;
+  const errEl = document.getElementById('cleanup-empty-modal-error');
+  errEl.textContent = '';
+  errEl.classList.add('hidden');
+  const repo = _smgmtRepo();
+  try {
+    const resp = await fetch('/api/sprints/cleanup-empty', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({project: repo}),
+    });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.detail || 'HTTP ' + resp.status);
+    }
+    _smgmtCleanupModalClose();
+    await loadSprintMgmt();
+  } catch (e) {
+    errEl.textContent = 'Error: ' + e.message;
+    errEl.classList.remove('hidden');
+    btn.disabled = false;
+  }
+}
+// ───────────────────────────────────────────────────────────────────────────
+
 async function smgmtFinishSprint(label) {
   const repo = _smgmtRepo();
   if (!repo) return;
@@ -7211,6 +7340,10 @@ function _smgmtGhostComputeNextFree() {
 
 /** Show the ghost pane below the sprint list, pre-computing next-free number. */
 function _smgmtGhostShow() {
+  if (_smgmtRunningLabels.size > 0) {
+    showToast('Cannot create new sprint while one is running.', 'warning');
+    return;
+  }
   _smgmtGhostNextNum = _smgmtGhostComputeNextFree();
   const ghost = document.getElementById('smgmt-ghost-pane');
   const titleEl = document.getElementById('smgmt-ghost-title');
@@ -7245,6 +7378,7 @@ function _smgmtGhostHide() {
 
 function _smgmtGhostDragOver(event) {
   if (!_smgmtDragTicket) return;
+  if (_smgmtRunningLabels.size > 0) return;
   event.preventDefault();
   event.dataTransfer.dropEffect = 'move';
   const ghost = document.getElementById('smgmt-ghost-pane');
@@ -7279,6 +7413,7 @@ function _smgmtGhostDragLeave(event) {
 async function _smgmtGhostDrop(event) {
   event.preventDefault();
   if (!_smgmtDragTicket) return;
+  if (_smgmtRunningLabels.size > 0) return;
   const dragInfo = _smgmtDragTicket;
   const nextNum = _smgmtGhostNextNum;
   _smgmtGhostHide();
@@ -8003,11 +8138,22 @@ document.addEventListener('click', function(e) {
   if (wrap && !wrap.contains(e.target)) _smgmtArCloseMenu();
 });
 
+// ── Modal inert helpers ───────────────────────────────────────────────────
+function _setBodyInert(exceptIds) {
+  Array.from(document.body.children).forEach(el => {
+    if (!exceptIds.includes(el.id)) el.inert = true;
+  });
+}
+function _clearBodyInert() {
+  Array.from(document.body.children).forEach(el => { el.inert = false; });
+}
+
 // ── New Sprint modal ──────────────────────────────────────────────────────
 function smgmtOpenNewSprint() {
   document.getElementById('ns-label').value = '';
   document.getElementById('ns-error').classList.add('hidden');
   document.getElementById('ns-submit-btn').disabled = true;
+  _setBodyInert(['ns-backdrop', 'ns-modal']);
   document.getElementById('ns-backdrop').classList.remove('hidden');
   document.getElementById('ns-modal').classList.remove('hidden');
   document.getElementById('ns-label').focus();
@@ -8020,6 +8166,7 @@ function _nsClose(force) {
   }
   document.getElementById('ns-backdrop').classList.add('hidden');
   document.getElementById('ns-modal').classList.add('hidden');
+  _clearBodyInert();
 }
 
 function _parseSprintNum(str) {
@@ -8254,6 +8401,7 @@ async function smgmtOpenNewTicket() {
   document.getElementById('nt-submit-btn').disabled = false;
   document.getElementById('nt-submit-btn').textContent = 'Generate Draft';
   document.getElementById('nt-draft-section').classList.add('hidden');
+  _setBodyInert(['nt-backdrop', 'nt-modal']);
   document.getElementById('nt-backdrop').classList.remove('hidden');
   document.getElementById('nt-modal').classList.remove('hidden');
 
@@ -8285,6 +8433,7 @@ async function smgmtOpenNewTicket() {
 function _ntClose() {
   document.getElementById('nt-backdrop').classList.add('hidden');
   document.getElementById('nt-modal').classList.add('hidden');
+  _clearBodyInert();
 }
 
 // ── Modal event-binding (called once from init after DOM is ready) ─────────
@@ -8320,17 +8469,6 @@ function _setupModals() {
   document.getElementById('ns-close-btn').addEventListener('click', () => _nsClose(false));
   document.getElementById('ns-cancel-btn').addEventListener('click', () => _nsClose(false));
   document.getElementById('ns-backdrop').addEventListener('click', () => _nsClose(false));
-
-  document.getElementById('ns-modal').addEventListener('keydown', function(e) {
-    if (e.key !== 'Tab') return;
-    const focusable = Array.from(this.querySelectorAll(
-      'button:not([disabled]), textarea, input, [tabindex]:not([tabindex="-1"])'
-    ));
-    if (!focusable.length) return;
-    const first = focusable[0], last = focusable[focusable.length - 1];
-    if (e.shiftKey) { if (document.activeElement === first) { e.preventDefault(); last.focus(); } }
-    else            { if (document.activeElement === last)  { e.preventDefault(); first.focus(); } }
-  });
 
   document.getElementById('ns-submit-btn').addEventListener('click', async function() {
     const labelVal = (document.getElementById('ns-label').value || '').trim();
@@ -8437,17 +8575,6 @@ function _setupModals() {
     } else if (opt.dataset.name) {
       _ntSelectLabel(opt.dataset.name);
     }
-  });
-
-  document.getElementById('nt-modal').addEventListener('keydown', function(e) {
-    if (e.key !== 'Tab') return;
-    const focusable = Array.from(this.querySelectorAll(
-      'button:not([disabled]), select, textarea, input, [tabindex]:not([tabindex="-1"])'
-    ));
-    if (!focusable.length) return;
-    const first = focusable[0], last = focusable[focusable.length - 1];
-    if (e.shiftKey) { if (document.activeElement === first) { e.preventDefault(); last.focus(); } }
-    else            { if (document.activeElement === last)  { e.preventDefault(); first.focus(); } }
   });
 
   document.getElementById('nt-submit-btn').addEventListener('click', async function() {
@@ -10360,6 +10487,24 @@ function _cmpEmptyState(title, msg) {
   <div class="modal-footer">
     <button class="btn-ghost" type="button" onclick="_smgmtReEstimateClose()">Cancel</button>
     <button class="btn-blue" type="button" id="re-est-confirm-btn" onclick="_smgmtReEstimateConfirm()">Confirm</button>
+  </div>
+</div>
+
+<!-- ── Clean up empty sprints confirmation modal (issue #457) ── -->
+<div class="modal-backdrop hidden" id="cleanup-empty-backdrop" onclick="_smgmtCleanupModalClose()"></div>
+<div class="modal hidden" id="cleanup-empty-modal"
+     role="dialog" aria-modal="true" aria-labelledby="cleanup-empty-modal-title">
+  <div class="modal-header">
+    <span class="modal-title" id="cleanup-empty-modal-title">Clean Up Empty Sprints</span>
+    <button class="modal-close" aria-label="Close" onclick="_smgmtCleanupModalClose()">&times;</button>
+  </div>
+  <div class="modal-body">
+    <p id="cleanup-empty-modal-msg" style="font-size:13px;color:var(--text-sub);margin:0"></p>
+    <div class="modal-error hidden" id="cleanup-empty-modal-error"></div>
+  </div>
+  <div class="modal-footer">
+    <button class="btn-ghost" type="button" onclick="_smgmtCleanupModalClose()">Cancel</button>
+    <button class="btn-danger" type="button" id="cleanup-empty-confirm-btn" onclick="_smgmtCleanupConfirm()">Delete</button>
   </div>
 </div>
 

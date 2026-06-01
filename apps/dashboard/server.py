@@ -3016,6 +3016,14 @@ def get_sprint_management_issues(repo: str):
     result_issues = []
     # Count open tickets per sprint label (both plain and dotted)
     sprint_ticket_counts: dict[str, int] = {lbl: 0 for lbl in all_sprint_labels}
+
+    # Resolve estimates dir once for stale-hash checks (issue #453)
+    try:
+        _est_project_root = _project_root_path(repo)
+        _estimates_dir = _commander_dir(_est_project_root) / "estimates"
+    except Exception:
+        _estimates_dir = None
+
     for iss in issues:
         _is_summary = (
             any(lbl["name"] == "sprint-summary" for lbl in iss.get("labels", []))
@@ -3031,15 +3039,20 @@ def get_sprint_management_issues(repo: str):
                 found_sprint_label = lbl["name"]
                 sprint_num = int(m.group(1))
                 break
+
+        iss_body = iss.get("body", "") or ""
+        estimate_stale = _check_estimate_stale(iss["number"], iss_body, _estimates_dir)
+
         result_issues.append({
             "number": iss["number"],
             "title": iss["title"],
-            "body": iss.get("body", "") or "",
+            "body": iss_body,
             "labels": iss.get("labels", []),
             "sprint": sprint_num,
             "sprint_label": found_sprint_label,
             "status": github_client.classify_issue(iss),
             "url": iss.get("url", ""),
+            "estimate_stale": estimate_stale,
         })
         if found_sprint_label is not None and found_sprint_label in sprint_ticket_counts:
             sprint_ticket_counts[found_sprint_label] += 1
@@ -3364,6 +3377,14 @@ def save_sprint_order(project: str, body: SprintOrderBody):
 _MIGRATION_STATUS_LABELS = {"UAT", "UAT-approved", "SIT", "in-progress", "needs-rework", "need-rework"}
 
 
+# ── Sprint-issues helpers ─────────────────────────────────────────────────────
+
+def _get_sprint_issues(project: str, sprint_label: str) -> list[dict]:
+    """Fetch open GitHub issues and filter to those carrying sprint_label."""
+    issues = github_client.list_open_issues_with_body(repo_name=project, limit=200)
+    return [iss for iss in issues if any(lbl["name"] == sprint_label for lbl in iss.get("labels", []))]
+
+
 # ── Estimate-summary helpers (issue #211) ────────────────────────────────────
 
 def _size_to_minutes(size: str) -> int:
@@ -3387,15 +3408,9 @@ def get_sprint_estimate_summary(sprint_label: str, project: str):
         raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")
 
     try:
-        issues = github_client.list_open_issues_with_body(repo_name=project, limit=200)
+        sprint_issues = _get_sprint_issues(project, sprint_label)
     except subprocess.CalledProcessError as e:
         raise _gh_error(e)
-
-    # Filter to issues belonging to this sprint
-    sprint_issues = [
-        iss for iss in issues
-        if any(lbl["name"] == sprint_label for lbl in iss.get("labels", []))
-    ]
 
     _SIZE_LABELS = ["S", "M", "L", "XL"]  # ordered smallest to largest
     size_counts: dict[str, int] = {}
@@ -3448,6 +3463,29 @@ def _sprint_dag_tickets(project_root: Path, sprint_issues: list[dict]) -> list[d
     return tickets
 
 
+def _check_estimate_stale(issue_num: int, current_body: str, estimates_dir) -> bool:
+    """Return True if the stored estimate is stale (body changed or hash missing).
+
+    Returns False when no estimate exists (no badge needed) or when the body
+    hash matches the stored value.  Returns True when an estimate exists but
+    lacks a body_hash field, or when the hash differs from the current body.
+    """
+    if estimates_dir is None:
+        return False
+    est_path = estimates_dir / f"issue-{issue_num}.json"
+    if not est_path.exists():
+        return False
+    try:
+        est = json.loads(est_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return False
+    stored_hash = est.get("body_hash")
+    if not stored_hash:
+        return True  # missing hash → treat as stale (AC: existing records without body_hash)
+    current_hash = hashlib.sha256(current_body.encode()).hexdigest()
+    return current_hash != stored_hash
+
+
 _STALE_ESTIMATE_DAYS = 7
 
 
@@ -3466,11 +3504,7 @@ def get_sprint_preflight(sprint_label: str, project: str):
     cycle_path: list[str] | None = None
 
     try:
-        issues = github_client.list_open_issues_with_body(repo_name=project, limit=200)
-        sprint_issues = [
-            iss for iss in issues
-            if any(lbl["name"] == sprint_label for lbl in iss.get("labels", []))
-        ]
+        sprint_issues = _get_sprint_issues(project, sprint_label)
         if sprint_issues:
             project_root = _project_root_path(project)
             estimates_dir = _commander_dir(project_root) / "estimates"
@@ -4677,6 +4711,48 @@ async def delete_empty_sprints(body: SprintDeleteBody):
     return result
 
 
+class SprintCleanupBody(BaseModel):
+    project: str
+
+
+@app.post("/api/sprints/cleanup-empty")
+async def cleanup_empty_sprints(body: SprintCleanupBody):
+    """Delete all sprint labels with zero open tickets from GitHub."""
+    try:
+        all_sprint_labels = github_client.list_sprint_labels(repo_name=body.project)
+    except subprocess.CalledProcessError as e:
+        raise _gh_error(e)
+
+    try:
+        issues = github_client.list_open_issues_with_body(repo_name=body.project, limit=200)
+    except subprocess.CalledProcessError as e:
+        raise _gh_error(e)
+
+    sprint_re_local = re.compile(r"^sprint-\d+(\.\d+)?$")
+    labeled_sprints: set[str] = set()
+    for iss in issues:
+        for lbl in iss.get("labels", []):
+            if sprint_re_local.match(lbl["name"]):
+                labeled_sprints.add(lbl["name"])
+
+    empty_labels = [l for l in all_sprint_labels if l not in labeled_sprints]
+
+    deleted = []
+    errors = []
+    for label in empty_labels:
+        try:
+            github_client.delete_label(label, repo_name=body.project)
+            deleted.append(label)
+        except subprocess.CalledProcessError as e:
+            errors.append(f"{label}: {e.stderr.strip() if e.stderr else str(e)}")
+
+    github_client.invalidate("sprints:")
+    result: dict = {"ok": True, "deleted": deleted}
+    if errors:
+        result["errors"] = errors
+    return result
+
+
 def _rerun_policy(labels: set[str]) -> tuple[str, list[str]]:
     """Return (action, labels_to_strip) for a sprint ticket based on its current labels.
 
@@ -5276,14 +5352,9 @@ def rerun_sprint_preview(sprint_label: str, project: str):
         raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")
 
     try:
-        issues = github_client.list_open_issues_with_body(repo_name=project, limit=200)
+        sprint_issues = _get_sprint_issues(project, sprint_label)
     except subprocess.CalledProcessError as e:
         raise _gh_error(e)
-
-    sprint_issues = [
-        iss for iss in issues
-        if any(lbl["name"] == sprint_label for lbl in iss.get("labels", []))
-    ]
 
     redispatch_count = 0
     tester_count = 0
@@ -5347,14 +5418,9 @@ def rerun_sprint(sprint_label: str, project: str, body: SprintRerunBody):
     run_id = str(uuid.uuid4())
 
     try:
-        issues = github_client.list_open_issues_with_body(repo_name=project, limit=200)
+        sprint_issues = _get_sprint_issues(project, sprint_label)
     except subprocess.CalledProcessError as e:
         raise _gh_error(e)
-
-    sprint_issues = [
-        iss for iss in issues
-        if any(lbl["name"] == sprint_label for lbl in iss.get("labels", []))
-    ]
 
     # Evaluate per-ticket policy
     decisions: list[dict] = []
@@ -5555,20 +5621,18 @@ def delete_sprint(sprint_label: str, project: str):
         raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")
 
     if _is_sprint_running(_project_root_path(project), sprint_label):
-        raise HTTPException(409, detail="Cannot delete a sprint that is currently running")
+        return JSONResponse(
+            status_code=409,
+            content={"error": "Sprint is currently running.", "suggestion": "Cancel the sprint first, then delete."},
+        )
 
     project_root = _project_root_path(project)
     commander = _commander_dir(project_root)
 
     try:
-        issues = github_client.list_open_issues_with_body(repo_name=project, limit=200)
+        sprint_issues = _get_sprint_issues(project, sprint_label)
     except subprocess.CalledProcessError as e:
         raise _gh_error(e)
-
-    sprint_issues = [
-        iss for iss in issues
-        if any(lbl["name"] == sprint_label for lbl in iss.get("labels", []))
-    ]
 
     errors: list[str] = []
     unlabelled_count = 0
@@ -5626,17 +5690,10 @@ async def finish_sprint(owner: str, repo_name: str, label: str):
     if _is_sprint_running(project_root, label):
         raise HTTPException(409, detail=f"Sprint {label} is currently running — finish it after the run completes")
 
-    # Fetch all open issues for the repo
     try:
-        all_issues = github_client.list_open_issues_with_body(repo_name=repo, limit=200)
+        sprint_issues = _get_sprint_issues(repo, label)
     except subprocess.CalledProcessError as e:
         raise _gh_error(e)
-
-    # Filter to issues belonging to this sprint label
-    sprint_issues = [
-        iss for iss in all_issues
-        if any(lbl["name"] == label for lbl in iss.get("labels", []))
-    ]
 
     closed = 0
     errors: list[str] = []

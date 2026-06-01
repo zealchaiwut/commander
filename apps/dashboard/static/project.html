@@ -1386,13 +1386,14 @@
       font-size: 12px;
       font-weight: 600;
       background: var(--surface);
-      color: var(--text-sub);
-      border: 1px solid var(--border);
+      color: var(--blue);
+      border: 1px solid var(--blue);
       border-radius: 5px;
       cursor: pointer;
+      display: inline-flex; align-items: center; gap: 4px;
       transition: background .15s, color .15s, border-color .15s;
     }
-    .smgmt-selection-bar-deselect:hover { background: var(--surface-hover); color: var(--text); border-color: var(--border); }
+    .smgmt-selection-bar-deselect:hover { background: var(--blue); color: #fff; border-color: var(--blue); }
     .smgmt-selection-bar-delete {
       display: none;
       padding: 5px 10px;
@@ -1450,16 +1451,6 @@
       font-family: inherit;
     }
     .smgmt-move-to-item:hover { background: var(--surface-hover); }
-
-    /* ── Toolbar deselect button ── */
-    .smgmt-deselect-btn {
-      padding: 5px 12px; font-size: 11px; font-weight: 600;
-      background: var(--blue-bg); color: var(--blue); border: 1px solid var(--blue);
-      border-radius: 5px; cursor: pointer; flex-shrink: 0;
-      display: none; align-items: center; gap: 4px; transition: opacity .15s;
-    }
-    .smgmt-deselect-btn.visible { display: inline-flex; }
-    .smgmt-deselect-btn:hover { opacity: .8; }
 
     /* ── Multi-drag floating pill ── */
     .smgmt-drag-pill {
@@ -3171,12 +3162,6 @@
         <div class="smgmt-toolbar" id="smgmt-toolbar">
           <span class="smgmt-toolbar-title">Sprint Management</span>
           <div class="smgmt-toolbar-actions">
-            <button class="smgmt-deselect-btn" id="smgmt-deselect-btn"
-                    onclick="_smgmtClearSelection()" title="Clear all selections"
-                    aria-label="Deselect all">
-              <i class="ti ti-x"></i>
-              Deselect (<span id="smgmt-deselect-count">0</span>)
-            </button>
             <!-- Auto-refresh pill (issue #275) -->
             <div class="smgmt-ar-pill-wrap" id="smgmt-ar-pill-wrap">
               <button class="smgmt-ar-pill is-on" id="smgmt-ar-pill"
@@ -7258,14 +7243,6 @@ function _smgmtUpdateSelectionUI() {
     }
   } else {
     if (bar) bar.classList.remove('show');
-  }
-
-  // Toolbar deselect button
-  const deselectBtn = document.getElementById('smgmt-deselect-btn');
-  if (deselectBtn) {
-    deselectBtn.classList.toggle('visible', count > 0);
-    const countSpan = document.getElementById('smgmt-deselect-count');
-    if (countSpan) countSpan.textContent = String(count);
   }
 }
 

@@ -1539,6 +1539,57 @@
     .nt-warn-item.hidden { display: none; }
     .nt-file-input { padding: 4px 8px; cursor: pointer; }
 
+    /* ── Run Sprint preflight modal (issue #446 / #447) ── */
+    .pf-modal { width: min(1100px, calc(100vw - 48px)); }
+    .pf-spinner {
+      display: inline-block; width: 22px; height: 22px;
+      border: 3px solid var(--border); border-top-color: var(--blue);
+      border-radius: 50%; animation: pf-spin 0.7s linear infinite;
+      vertical-align: middle;
+    }
+    @keyframes pf-spin { to { transform: rotate(360deg); } }
+    /* ── DAG visualization (issue #447) ── */
+    .pf-dag-section { margin-top: 16px; }
+    .pf-dag-section-label {
+      font-size: 11px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: .06em; color: var(--text-muted); margin-bottom: 10px;
+    }
+    .pf-dag-wrap { position: relative; }
+    .pf-dag-svg {
+      position: absolute; top: 0; left: 0;
+      pointer-events: none; overflow: visible;
+    }
+    .pf-dag-levels { display: flex; gap: 48px; align-items: flex-start; padding: 4px 2px 8px; }
+    .pf-dag-col { display: flex; flex-direction: column; gap: 10px; min-width: 200px; flex-shrink: 0; }
+    .pf-dag-col-label {
+      font-size: 10px; font-weight: 600; text-transform: uppercase;
+      letter-spacing: .05em; color: var(--text-muted); padding-bottom: 2px;
+      border-bottom: 1px solid var(--border); margin-bottom: 2px;
+    }
+    .pf-dag-card {
+      border: 1px solid var(--border); border-radius: 6px;
+      background: var(--surface); padding: 8px 10px;
+      display: flex; flex-direction: column; gap: 4px;
+    }
+    .pf-dag-card-num {
+      font-size: 10px; color: var(--text-muted);
+      font-family: var(--mono); font-weight: 600;
+    }
+    .pf-dag-card-title {
+      font-size: 12px; font-weight: 600; color: var(--text);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .pf-dag-card-meta { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; margin-top: 1px; }
+    .pf-dag-size-badge {
+      font-size: 9px; font-weight: 700; padding: 1px 5px; border-radius: 4px;
+      background: var(--surface-2); color: var(--text-muted); border: 1px solid var(--border);
+    }
+    .pf-dag-card-files { margin-top: 3px; }
+    .pf-dag-card-files span {
+      display: block; font-size: 10px; color: var(--text-muted);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+
     /* ── Backlog pane (issue #274) ── */
     .smgmt-backlog-pane {
       border: 2px dashed var(--border);
@@ -8661,6 +8712,24 @@ function _setupModals() {
       this.disabled = false;
       this.textContent = 'Post to GitHub';
     }
+  });
+
+  // ── Run Sprint preflight modal wiring ──
+  document.getElementById('pf-close-btn').addEventListener('click', _pfClose);
+  document.getElementById('pf-cancel-btn').addEventListener('click', _pfClose);
+  document.getElementById('pf-backdrop').addEventListener('click', _pfClose);
+  document.getElementById('pf-retry-btn').addEventListener('click', _pfRetry);
+  document.getElementById('pf-confirm-btn').addEventListener('click', _pfConfirm);
+
+  document.getElementById('pf-modal').addEventListener('keydown', function(e) {
+    if (e.key !== 'Tab') return;
+    const focusable = Array.from(this.querySelectorAll(
+      'button:not([disabled]), textarea, input, [tabindex]:not([tabindex="-1"])'
+    ));
+    if (!focusable.length) return;
+    const first = focusable[0], last = focusable[focusable.length - 1];
+    if (e.shiftKey) { if (document.activeElement === first) { e.preventDefault(); last.focus(); } }
+    else            { if (document.activeElement === last)  { e.preventDefault(); first.focus(); } }
   });
 }
 

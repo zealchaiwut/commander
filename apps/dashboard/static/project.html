@@ -1310,11 +1310,29 @@
       background: var(--green-bg, #dcfce7); border-color: var(--green, #16a34a);
     }
     .smgmt-ar-pill.is-off {
-      background: var(--surface-2); color: var(--text-muted);
-      border-color: var(--border);
+      background: var(--red-bg, #fff0f0); color: var(--red, #dc2626);
+      border-color: rgba(220,38,38,.35);
     }
-    .smgmt-ar-pill.is-off:hover { background: var(--surface); color: var(--text); }
+    .smgmt-ar-pill.is-off:hover {
+      background: var(--red-bg, #fee2e2); border-color: var(--red, #dc2626);
+    }
     .smgmt-ar-chevron { font-size: 10px; opacity: .7; }
+    /* Countdown label — keep width stable as the number changes, and pop on each tick */
+    #smgmt-ar-pill-label {
+      display: inline-block; min-width: 2.4em; text-align: center;
+      font-variant-numeric: tabular-nums;
+    }
+    #smgmt-ar-pill-label.is-counting { animation: smgmtArPop .42s ease-out; }
+    @keyframes smgmtArPop {
+      0%   { transform: scale(1.4); opacity: .5; }
+      100% { transform: scale(1);   opacity: 1; }
+    }
+    /* Spin the refresh icon at the moment a refresh fires */
+    .smgmt-ar-pill .ti-refresh.is-spinning { animation: smgmtArSpin .6s ease-in-out; }
+    @keyframes smgmtArSpin {
+      from { transform: rotate(0deg); }
+      to   { transform: rotate(360deg); }
+    }
     .smgmt-ar-menu {
       position: absolute; right: 0; top: calc(100% + 4px); z-index: 200;
       background: var(--surface); border: 1px solid var(--border);
@@ -8079,7 +8097,8 @@ const _AR_LS_KEY    = 'smgmt-ar-interval';
 const _AR_INTERVALS = [1, 2, 5, 10, 15, 30, 60]; // valid interval values in seconds
 
 let _arInterval  = 15;  // active interval in seconds (0 = off)
-let _arTickerId  = null; // setInterval handle
+let _arTickerId  = null; // setInterval handle (fires every 1s)
+let _arRemaining = 0;    // seconds left until the next refresh
 
 /** Initialise the pill from localStorage and start the ticker. */
 function _smgmtArInit() {
@@ -8099,17 +8118,33 @@ async function _smgmtArDoRefresh() {
   window.scrollTo({ top: scrollY, behavior: 'instant' });
 }
 
-/** Called by setInterval each tick. */
+/** Fires every second: count down, refresh when we reach zero. */
 function _smgmtArTick() {
-  if (_smgmtMoveLock) return;
-  _smgmtArDoRefresh();
+  if (_smgmtMoveLock) return; // freeze the countdown while a ticket move is in flight
+  _arRemaining -= 1;
+  if (_arRemaining <= 0) {
+    _arRemaining = _arInterval;
+    _smgmtArSpinIcon();
+    _smgmtArDoRefresh();
+  }
+  _smgmtArUpdatePill();
 }
 
-/** Start the ticker for the current _arInterval. */
+/** Start the 1-second countdown ticker for the current _arInterval. */
 function _smgmtArStartTicker() {
   _smgmtArStopTicker();
   if (_arInterval <= 0) return;
-  _arTickerId = setInterval(_smgmtArTick, _arInterval * 1000);
+  _arRemaining = _arInterval;
+  _arTickerId = setInterval(_smgmtArTick, 1000);
+}
+
+/** Re-trigger the refresh icon's one-shot spin animation. */
+function _smgmtArSpinIcon() {
+  const icon = document.querySelector('#smgmt-ar-pill .ti-refresh');
+  if (!icon) return;
+  icon.classList.remove('is-spinning');
+  void icon.offsetWidth; // force reflow so the animation restarts
+  icon.classList.add('is-spinning');
 }
 
 /** Stop the ticker. */
@@ -8128,10 +8163,18 @@ function _smgmtArUpdatePill() {
   if (_arInterval > 0) {
     pill.classList.replace('is-off', 'is-on');
     pill.classList.add('is-on');
-    label.textContent = _arInterval >= 60 ? `${_arInterval / 60}m` : `${_arInterval}s`;
+    const next = `${_arRemaining}s`;
+    if (label.textContent !== next) {
+      label.textContent = next;
+      // re-trigger the pop animation each time the number changes
+      label.classList.remove('is-counting');
+      void label.offsetWidth; // force reflow so the animation restarts
+      label.classList.add('is-counting');
+    }
   } else {
     pill.classList.replace('is-on', 'is-off');
     pill.classList.add('is-off');
+    label.classList.remove('is-counting');
     label.textContent = 'off';
   }
   document.querySelectorAll('.smgmt-ar-menu-item[data-interval]').forEach(item => {

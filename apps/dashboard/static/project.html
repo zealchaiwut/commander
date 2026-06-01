@@ -8138,11 +8138,22 @@ document.addEventListener('click', function(e) {
   if (wrap && !wrap.contains(e.target)) _smgmtArCloseMenu();
 });
 
+// ── Modal inert helpers ───────────────────────────────────────────────────
+function _setBodyInert(exceptIds) {
+  Array.from(document.body.children).forEach(el => {
+    if (!exceptIds.includes(el.id)) el.inert = true;
+  });
+}
+function _clearBodyInert() {
+  Array.from(document.body.children).forEach(el => { el.inert = false; });
+}
+
 // ── New Sprint modal ──────────────────────────────────────────────────────
 function smgmtOpenNewSprint() {
   document.getElementById('ns-label').value = '';
   document.getElementById('ns-error').classList.add('hidden');
   document.getElementById('ns-submit-btn').disabled = true;
+  _setBodyInert(['ns-backdrop', 'ns-modal']);
   document.getElementById('ns-backdrop').classList.remove('hidden');
   document.getElementById('ns-modal').classList.remove('hidden');
   document.getElementById('ns-label').focus();
@@ -8155,6 +8166,7 @@ function _nsClose(force) {
   }
   document.getElementById('ns-backdrop').classList.add('hidden');
   document.getElementById('ns-modal').classList.add('hidden');
+  _clearBodyInert();
 }
 
 function _parseSprintNum(str) {
@@ -8389,6 +8401,7 @@ async function smgmtOpenNewTicket() {
   document.getElementById('nt-submit-btn').disabled = false;
   document.getElementById('nt-submit-btn').textContent = 'Generate Draft';
   document.getElementById('nt-draft-section').classList.add('hidden');
+  _setBodyInert(['nt-backdrop', 'nt-modal']);
   document.getElementById('nt-backdrop').classList.remove('hidden');
   document.getElementById('nt-modal').classList.remove('hidden');
 
@@ -8420,6 +8433,7 @@ async function smgmtOpenNewTicket() {
 function _ntClose() {
   document.getElementById('nt-backdrop').classList.add('hidden');
   document.getElementById('nt-modal').classList.add('hidden');
+  _clearBodyInert();
 }
 
 // ── Modal event-binding (called once from init after DOM is ready) ─────────
@@ -8455,17 +8469,6 @@ function _setupModals() {
   document.getElementById('ns-close-btn').addEventListener('click', () => _nsClose(false));
   document.getElementById('ns-cancel-btn').addEventListener('click', () => _nsClose(false));
   document.getElementById('ns-backdrop').addEventListener('click', () => _nsClose(false));
-
-  document.getElementById('ns-modal').addEventListener('keydown', function(e) {
-    if (e.key !== 'Tab') return;
-    const focusable = Array.from(this.querySelectorAll(
-      'button:not([disabled]), textarea, input, [tabindex]:not([tabindex="-1"])'
-    ));
-    if (!focusable.length) return;
-    const first = focusable[0], last = focusable[focusable.length - 1];
-    if (e.shiftKey) { if (document.activeElement === first) { e.preventDefault(); last.focus(); } }
-    else            { if (document.activeElement === last)  { e.preventDefault(); first.focus(); } }
-  });
 
   document.getElementById('ns-submit-btn').addEventListener('click', async function() {
     const labelVal = (document.getElementById('ns-label').value || '').trim();
@@ -8572,17 +8575,6 @@ function _setupModals() {
     } else if (opt.dataset.name) {
       _ntSelectLabel(opt.dataset.name);
     }
-  });
-
-  document.getElementById('nt-modal').addEventListener('keydown', function(e) {
-    if (e.key !== 'Tab') return;
-    const focusable = Array.from(this.querySelectorAll(
-      'button:not([disabled]), select, textarea, input, [tabindex]:not([tabindex="-1"])'
-    ));
-    if (!focusable.length) return;
-    const first = focusable[0], last = focusable[focusable.length - 1];
-    if (e.shiftKey) { if (document.activeElement === first) { e.preventDefault(); last.focus(); } }
-    else            { if (document.activeElement === last)  { e.preventDefault(); first.focus(); } }
   });
 
   document.getElementById('nt-submit-btn').addEventListener('click', async function() {

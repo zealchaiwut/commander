@@ -1211,6 +1211,24 @@
       border-radius: 6px;
     }
 
+    /* ── Cancellation banner (issue #454) ── */
+    .smgmt-cancel-banner {
+      margin: 0 12px 10px;
+      padding: 10px 12px;
+      background: var(--yellow-bg);
+      border: 1px solid rgba(161,98,7,.25);
+      border-radius: 6px;
+      display: flex; align-items: center; gap: 8px;
+      font-size: 13px;
+    }
+    .smgmt-cancel-banner-msg { flex: 1; color: var(--yellow); }
+    .smgmt-cancel-banner-dismiss {
+      background: none; border: none; cursor: pointer;
+      color: var(--text-muted); font-size: 16px; line-height: 1;
+      padding: 0 2px; flex-shrink: 0;
+    }
+    .smgmt-cancel-banner-dismiss:hover { color: var(--text); }
+
     /* TESTER REJECTED label */
     .smgmt-lbl-rejected {
       font-family: var(--mono); font-size: 10px; padding: 2px 6px; border-radius: 3px;
@@ -5111,6 +5129,34 @@ function _preflightLoadBanners(orderedLabels, bySprint) {
   }
 }
 
+// ── Cancellation banner (issue #454) ─────────────────────────────────────
+
+const _cancelBannerDismissed = new Set();
+
+function _smgmtIsCancelled(outcome) {
+  if (!outcome) return false;
+  if (outcome.state === 'cancelled') return true;
+  // Fallback: lifecycle state field absent, state file present, sprint stopped mid-run
+  if (!outcome.state && outcome.sprint_status === 'stopped') return true;
+  return false;
+}
+
+function _smgmtCancelBannerDismiss(label) {
+  _cancelBannerDismissed.add(label);
+  const el = document.getElementById(`smgmt-cancel-banner-${label}`);
+  if (el) el.remove();
+}
+
+function _smgmtCancelBannerHtml(label) {
+  if (_cancelBannerDismissed.has(label)) return '';
+  const safeLabel = escHtml(label);
+  return `<div class="smgmt-cancel-banner" id="smgmt-cancel-banner-${safeLabel}">
+    <i class="ti ti-alert-triangle" style="color:var(--yellow);font-size:14px;flex-shrink:0"></i>
+    <span class="smgmt-cancel-banner-msg">Sprint cancelled mid-run. Ticket labels were not modified. Click Re-run to continue from where it stopped.</span>
+    <button class="smgmt-cancel-banner-dismiss" onclick="_smgmtCancelBannerDismiss('${safeLabel}')" title="Dismiss">&times;</button>
+  </div>`;
+}
+
 function _smgmtInjectOutcomeBand(label, outcome) {
   if (!outcome || !(outcome.sprint_status || outcome.state)) return;
   const card = document.getElementById(`smgmt-card-${label}`);
@@ -5178,6 +5224,17 @@ function _smgmtInjectOutcomeBand(label, outcome) {
     const logEl = document.createElement('div');
     logEl.innerHTML = logHtml;
     card.appendChild(logEl.firstElementChild);
+  }
+
+  // Inject cancellation banner (issue #454): insert after header so it appears above outcome band
+  const existingCancelBanner = card.querySelector('.smgmt-cancel-banner');
+  if (existingCancelBanner) existingCancelBanner.remove();
+  if (_smgmtIsCancelled(outcome)) {
+    const bannerHtml = _smgmtCancelBannerHtml(label);
+    if (bannerHtml) {
+      const sprintHeader = card.querySelector('.smgmt-sprint-header');
+      if (sprintHeader) sprintHeader.insertAdjacentHTML('afterend', bannerHtml);
+    }
   }
 }
 
@@ -5716,6 +5773,7 @@ function _smgmtCardHtml(label, n, tickets, outcome, isNext) {
   }
 
   const logHtml = (outcome && outcome.sprint_status) ? _smgmtOutcomeLogHtml(label, outcome) : '';
+  const cancelBannerHtml = _smgmtIsCancelled(outcome) ? _smgmtCancelBannerHtml(label) : '';
 
   return `
     <div class="smgmt-sprint-card${outcomeCardClass}" id="smgmt-card-${escHtml(label)}"
@@ -5742,6 +5800,7 @@ function _smgmtCardHtml(label, n, tickets, outcome, isNext) {
           ${actionBtn}
         </div>
       </div>
+      ${cancelBannerHtml}
       ${outcomeBandHtml}
       <div class="smgmt-sprint-tickets" id="smgmt-tickets-${escHtml(label)}">
         ${ticketsContainerHtml}

@@ -3455,14 +3455,19 @@ function _applyTheme(value) {
   _syncThemeIcon(actual);
 }
 
+let _themeMediaListener = null;
+
 function initTheme() {
   const key = _settingsKey('theme');
   const saved = localStorage.getItem(key) || localStorage.getItem('theme') || 'light';
   _applyTheme(saved);
-  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function() {
+  const mq = window.matchMedia('(prefers-color-scheme: dark)');
+  if (_themeMediaListener) mq.removeEventListener('change', _themeMediaListener);
+  _themeMediaListener = function() {
     const cur = localStorage.getItem(_settingsKey('theme'));
     if (cur === 'system') _applyTheme('system');
-  });
+  };
+  mq.addEventListener('change', _themeMediaListener);
 }
 
 function toggleTheme() {

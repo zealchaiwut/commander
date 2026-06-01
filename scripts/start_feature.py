@@ -95,8 +95,7 @@ def main():
     if ok:
         print(f"Branch {branch} already exists locally — checking out.")
         _run("git", "checkout", branch)
-        github_client.update_labels(short, add=["in-progress"], remove=[], repo_name=args.repo)
-        print(f"✅  Checked out {branch} (label: in-progress)")
+        print(f"✅  Checked out {branch}")
         return
 
     # Already exists on remote → track it
@@ -105,8 +104,7 @@ def main():
         print(f"Branch {branch} exists on remote — checking out.")
         _run("git", "fetch", "origin")
         _run("git", "checkout", "--track", f"origin/{branch}")
-        github_client.update_labels(short, add=["in-progress"], remove=[], repo_name=args.repo)
-        print(f"✅  Checked out {branch} (label: in-progress)")
+        print(f"✅  Checked out {branch}")
         return
 
     # Fresh branch off base branch
@@ -121,12 +119,6 @@ def main():
     _run("git", "checkout", "-b", branch)
     _run("git", "push", "-u", "origin", branch)
 
-    github_client.update_labels(
-        short,
-        add=["in-progress"],
-        remove=["backlog", "needs-rework"],
-        repo_name=args.repo,
-    )
     github_client.add_comment(
         short,
         f"🌿 Started work on branch `{branch}` (based off `{base}`)",
@@ -134,7 +126,6 @@ def main():
     )
 
     print(f"✅  Created and pushed {branch} (based off {base})")
-    print(f"    Label updated to: in-progress")
     print(branch)   # last line: branch name for scripts that capture output
 
 

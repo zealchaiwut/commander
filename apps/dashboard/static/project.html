@@ -9,7 +9,7 @@
   (function() {
     var m = window.location.pathname.match(/^\/project\/([^/]+)/);
     var slug = m ? decodeURIComponent(m[1]) : '';
-    var k = slug ? ('settings:' + slug + ':theme') : 'theme';
+    var k = 'settings:' + slug + ':theme';
     var v = localStorage.getItem(k) || localStorage.getItem('theme') || 'light';
     var theme = v === 'system'
       ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')

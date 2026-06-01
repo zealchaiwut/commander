@@ -35,11 +35,7 @@ from services.logging import log as structured_log
 _SIZING_DIR = Path(__file__).parent
 if str(_SIZING_DIR) not in sys.path:
     sys.path.insert(0, str(_SIZING_DIR))
-try:
-    from sizing import minutes_from_letter as _minutes_from_letter
-except ImportError:
-    def _minutes_from_letter(size: str) -> int:  # type: ignore[misc]
-        return {"S": 5, "M": 15, "L": 30, "XL": 60}.get(size, 0)
+from sizing import minutes_from_letter as _minutes_from_letter
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────

@@ -112,18 +112,7 @@ except Exception:
     _sync_projects_module = None  # type: ignore[assignment]
     _SYNC_PROJECTS_AVAILABLE = False
 
-try:
-    from sizing import SIZE_TO_MINUTES as _SIZE_TO_MINUTES, letter_from_minutes as _letter_from_minutes, minutes_from_letter as _minutes_from_letter
-except ImportError:
-    _SIZE_TO_MINUTES = {"S": 5, "M": 15, "L": 30, "XL": 60}
-    def _letter_from_minutes(minutes: int) -> str:  # type: ignore[misc]
-        result = "S"
-        for threshold, letter in [(5, "S"), (15, "M"), (30, "L"), (60, "XL")]:
-            if minutes >= threshold:
-                result = letter
-        return result
-    def _minutes_from_letter(size: str) -> int:  # type: ignore[misc]
-        return _SIZE_TO_MINUTES.get(size, 0)
+from sizing import SIZE_TO_MINUTES as _SIZE_TO_MINUTES, letter_from_minutes as _letter_from_minutes, minutes_from_letter as _minutes_from_letter
 
 try:
     from dag_builder import CycleError as _CycleError, build_dag as _build_dag

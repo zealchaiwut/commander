@@ -5800,7 +5800,10 @@ function _smgmtCardHtml(label, n, tickets, outcome, isNext) {
                   <i class="ti ti-player-play"></i> Run Sprint</button>`;
   }
 
-  const finishHidden = hasCompleted ? '' : 'hidden';
+  const outcomeState = outcome && (outcome.state || (outcome.sprint_status === 'completed' ? 'completed' : null));
+  const isPostRun = outcomeState === 'completed' || outcomeState === 'has_rework';
+  const finishHidden = isPostRun ? '' : 'hidden';
+  const finishDisabled = isPostRun && tickets.length === 0 ? 'disabled' : '';
 
   // Outcome state: build band + ticket rows if outcome is cached
   let outcomeBandHtml = '';
@@ -5850,7 +5853,8 @@ function _smgmtCardHtml(label, n, tickets, outcome, isNext) {
           <span class="smgmt-sprint-count"><span id="smgmt-est-${escHtml(label)}" class="smgmt-sprint-est-val">— estimated</span> &middot; ${ticketCount} ticket${ticketCount !== 1 ? 's' : ''}</span>
         </div>
         <div class="smgmt-sprint-header-right">
-          <button class="smgmt-finish-btn ${finishHidden}"
+          <button class="smgmt-finish-btn ${finishHidden}" ${finishDisabled}
+                  title="${finishDisabled ? 'No open tickets' : 'Finish sprint'}"
                   onclick="smgmtFinishSprint('${escHtml(label)}')">
             <i class="ti ti-flag-check"></i> Finish Sprint</button>
           <button class="smgmt-delete-btn"
@@ -7123,21 +7127,60 @@ async function smgmtFinishSprint(label) {
   const repo = _smgmtRepo();
   if (!repo) return;
   const displayName = sprintLabelDisplay(label);
-  const tickets = (_smgmtData?.issues || []).filter(t => t.sprint_label === label);
-  if (!confirm(`Finish ${displayName}?\n\n${tickets.length} open issue${tickets.length !== 1 ? 's' : ''} will be moved to UAT and closed. This cannot be undone.`)) return;
   const parts = repo.split('/');
   const owner = parts[0];
   const repoName = parts.slice(1).join('/');
+
+  let preview;
+  try {
+    const res = await fetch(
+      `/api/projects/${encodeURIComponent(owner)}/${encodeURIComponent(repoName)}/sprints/${encodeURIComponent(label)}/finish-preview`
+    );
+    preview = await res.json();
+    if (!res.ok) { alert('Error: ' + (preview.detail || 'unknown error')); return; }
+  } catch (e) {
+    alert('Failed to load preview: ' + e.message);
+    return;
+  }
+
+  if (preview.conflict_error) { alert(preview.conflict_error); return; }
+
+  const uatTickets = preview.uat_tickets || [];
+  const nonUatTickets = preview.non_uat_tickets || [];
+  const totalOpen = uatTickets.length + nonUatTickets.length;
+
+  let msg;
+  if (totalOpen === 0) {
+    msg = `Finish ${displayName}?\n\nNo open issues in this sprint.`;
+  } else if (nonUatTickets.length === 0) {
+    msg = `Finish ${displayName}?\n\nThis will close ${uatTickets.length} ticket${uatTickets.length !== 1 ? 's' : ''} currently in UAT (they've passed sprint-branch testing).`;
+  } else {
+    const createNote = preview.next_sprint_exists ? '' : ' (will be created)';
+    const nonUatList = nonUatTickets.map(t => `  #${t.number} [${t.status}] ${t.title}`).join('\n');
+    const uatLine = uatTickets.length > 0 ? `\n\n${uatTickets.length} UAT ticket${uatTickets.length !== 1 ? 's' : ''} will be closed as completed.` : '';
+    msg = `Finish ${displayName}?\n\n${nonUatTickets.length} ticket${nonUatTickets.length !== 1 ? 's' : ''} not in UAT will be moved to ${preview.next_sprint_label}${createNote}:\n${nonUatList}${uatLine}`;
+  }
+
+  if (!confirm(msg)) return;
+
   try {
     const res = await fetch(
       `/api/projects/${encodeURIComponent(owner)}/${encodeURIComponent(repoName)}/sprints/${encodeURIComponent(label)}/finish`,
-      { method: 'POST' }
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confirmed: true, move_non_uat_to: preview.next_sprint_label }),
+      }
     );
     const data = await res.json();
     if (data.errors && data.errors.length > 0) {
-      alert(`Closed ${data.closed} issue${data.closed !== 1 ? 's' : ''}; ${data.errors.length} error(s): ${data.errors.join('; ')}`);
+      alert(`Finished with errors — closed ${data.closed}, moved ${data.moved}: ${data.errors.join('; ')}`);
     } else {
-      _smgmtShowToast(`Sprint finished — ${data.closed} issue${data.closed !== 1 ? 's' : ''} moved to UAT and closed.`);
+      const moved = data.moved || 0;
+      const closed = data.closed || 0;
+      let toastMsg = `Sprint finished — ${closed} UAT ticket${closed !== 1 ? 's' : ''} closed`;
+      if (moved > 0) toastMsg += `, ${moved} ticket${moved !== 1 ? 's' : ''} moved to ${data.next_sprint_label}`;
+      _smgmtShowToast(toastMsg + '.');
     }
     await loadSprintMgmt();
   } catch (e) {

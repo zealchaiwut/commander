@@ -558,9 +558,12 @@ def update_labels(issue_id: int, add: list[str], remove: list[str],
     invalidate(f"issues:{r}:")
 
 
-def close_issue(issue_id: int, repo_name: str | None = None):
+def close_issue(issue_id: int, repo_name: str | None = None, reason: str | None = None):
     r = _r(repo_name)
-    _run("issue", "close", str(issue_id), "--repo", r)
+    cmd = ["issue", "close", str(issue_id), "--repo", r]
+    if reason:
+        cmd += ["--reason", reason]
+    _run(*cmd)
     invalidate(f"issues:{r}:")
     invalidate(f"latest_sprint:{r}")
 

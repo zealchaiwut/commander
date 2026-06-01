@@ -134,9 +134,10 @@ ALERTS_DIR           = DASHBOARD_DIR / "alerts"
 _HAIKU_INPUT_COST_PER_M  = 0.80   # claude-haiku-4-5-20251001 input (reference)
 _HAIKU_OUTPUT_COST_PER_M = 4.00   # claude-haiku-4-5-20251001 output (reference)
 
-# Set to True by _sigterm_handler when the user cancels the sprint (issue #365).
+# Set by _sigterm_handler when the user cancels the sprint (issue #365, #514).
 # Checked in write_sprint_summary and in main()'s SystemExit handler.
-_sprint_user_cancelled: bool = False
+# threading.Event for thread-safe signaling across worker threads.
+_sprint_user_cancelled: threading.Event = threading.Event()
 
 
 # ── SprintConfig dataclass + loader ──────────────────────────────────────────
@@ -5086,8 +5087,7 @@ def main() -> None:
     atexit.register(_cleanup_pid)
 
     def _sigterm_handler(signum: int, frame: object) -> None:
-        global _sprint_user_cancelled
-        _sprint_user_cancelled = True
+        _sprint_user_cancelled.set()
         _cleanup_pid()
         # Best-effort state write before exit (issue #507)
         _plan_json_set_state_sm(
@@ -5177,7 +5177,7 @@ def main() -> None:
             summary_path = None
 
     except SystemExit:
-        if _sprint_user_cancelled:
+        if _sprint_user_cancelled.is_set():
             # Race condition (issue #365 AC-4): SIGTERM arrived while write_sprint_summary
             # was executing inside create_summary_github_issue.  Close any open summary
             # issue that was created in this run before the signal was processed.

@@ -267,12 +267,13 @@ class TestAC6SizeFromEstimates:
         assert data["issues"][0]["size"] is None   # ticket 1
         assert data["issues"][1]["size"] == "L"    # ticket 2
 
-    def test_size_not_derived_from_minutes(self, client):
-        # Estimate entry has minutes but no size key → size must be null
+    def test_size_derived_from_minutes_when_absent(self, client):
+        # Estimate entry has minutes but no size key → size derived via letter_from_minutes
         estimates = {"1": {"number": 1, "title": "x", "minutes": 25}}
         _post_status(client, _sprint_status([_issue(1)], estimates=estimates))
         data = _get_live(client)
-        assert data["issues"][0]["size"] is None
+        assert data["issues"][0]["size"] == "M"   # letter_from_minutes(25) == "M"
+        assert data["issues"][0]["minutes"] == 25
 
 
 # ---------------------------------------------------------------------------

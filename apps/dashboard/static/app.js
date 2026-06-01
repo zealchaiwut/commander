@@ -3131,6 +3131,25 @@ function smgmtApplyOutcomeStates() {
     }
 
     const state = _smgmtOutcomeStates[label];
+
+    // Update finish button visibility based on plan state
+    const safeLabel = label.replace(/-/g, '_').replace(/\./g, '_');
+    const finishBtn = document.getElementById(`smgmt-finish-btn-${safeLabel}`);
+    if (finishBtn) {
+      const postRunStates = new Set(['completed', 'has_rework']);
+      const isPostRun = postRunStates.has(state);
+      finishBtn.classList.toggle('hidden', !isPostRun);
+      if (isPostRun) {
+        const sprintTickets = (_smgmtData?.issues || []).filter(
+          t => (t.sprint_label || (t.sprint != null ? `sprint-${t.sprint}` : null)) === label
+        );
+        finishBtn.disabled = sprintTickets.length === 0;
+        finishBtn.title = sprintTickets.length === 0
+          ? 'No open tickets in this sprint'
+          : 'Finish sprint — close UAT tickets, move others to next sprint';
+      }
+    }
+
     if (!state || state === 'running') return;
 
     const blockClass = state === 'has_rework' ? 'smgmt-has-rework' : `smgmt-${state}`;
@@ -3564,8 +3583,8 @@ function smgmtSprintBlockHtml(label, tickets, isNext) {
           <span class="smgmt-sprint-count">${tickets.length === 0 ? 'empty' : `${tickets.length} ticket${tickets.length !== 1 ? 's' : ''}`}</span>
         </div>
         <div class="smgmt-sprint-header-right">
-          <button class="smgmt-finish-btn${hasCompleted ? '' : ' hidden'}" id="${finishBtnId}"
-                  title="Finish sprint — add UAT label and close all open issues"
+          <button class="smgmt-finish-btn hidden" id="${finishBtnId}"
+                  title="Finish sprint — close UAT tickets, move others to next sprint"
                   onclick="smgmtFinishSprint('${label}')">
             <i class="ti ti-flag-check"></i> Finish Sprint</button>
           <button class="smgmt-delete-btn" id="${deleteBtnId}"
@@ -5447,7 +5466,7 @@ function smgmtApplyRunState(sprintStatusMap) {
     block.querySelectorAll('.smgmt-run-btn').forEach(btn => btn.style.display = '');
     // Restore hidden delete buttons
     block.querySelectorAll('.smgmt-delete-btn').forEach(btn => btn.style.display = '');
-    // Restore finish sprint button visibility (re-hidden by the HTML class if not hasCompleted)
+    // Finish sprint button visibility is controlled by smgmtApplyOutcomeStates; reset inline override only
     block.querySelectorAll('.smgmt-finish-btn').forEach(btn => btn.style.display = '');
     // Restore goal input
     const goalInput = block.querySelector('.smgmt-goal-input');
@@ -6280,37 +6299,83 @@ async function smgmtRerunConfirm() {
 // ── Finish sprint (issue #195) ────────────────────────────────────────────────
 
 let _smgmtFinishLabel = null;
+let _smgmtFinishPreview = null;
 
-function smgmtFinishSprint(label) {
-  if (!_smgmtCurrentRepo || !_smgmtData) return;
+async function smgmtFinishSprint(label) {
+  if (!_smgmtCurrentRepo) return;
   _smgmtFinishLabel = label;
+  _smgmtFinishPreview = null;
   const displayName = sprintLabelDisplay(label);
-
-  // Count open issues in this sprint (from current data)
-  const sprintTickets = (_smgmtData.issues || []).filter(
-    t => (t.sprint_label || (t.sprint != null ? `sprint-${t.sprint}` : null)) === label
-  );
-  const openCount = sprintTickets.length;
 
   document.getElementById('smgmt-finish-title').textContent = `Finish ${displayName}?`;
   const bodyEl = document.getElementById('smgmt-finish-body');
-  if (openCount === 0) {
-    bodyEl.innerHTML = '<em style="color:var(--text-muted)">No open issues in this sprint. The operation will succeed with 0 closures.</em>';
-  } else {
-    bodyEl.innerHTML = `<p>${openCount} open issue${openCount !== 1 ? 's' : ''} will be moved to <strong>UAT</strong> and closed.</p>` +
-      '<p style="margin-top:6px;color:var(--text-muted);font-size:12px;">Labels <code>in-progress</code>, <code>sit</code>, and <code>needs-rework</code> will be removed. This action cannot be undone.</p>';
-  }
-
+  bodyEl.innerHTML = '<em style="color:var(--text-muted)">Loading preview...</em>';
   const confirmBtn = document.getElementById('smgmt-finish-confirm');
-  if (confirmBtn) { confirmBtn.disabled = false; confirmBtn.textContent = 'Finish Sprint'; }
+  if (confirmBtn) { confirmBtn.disabled = true; confirmBtn.textContent = 'Finish Sprint'; }
   document.getElementById('smgmt-finish-backdrop').classList.remove('hidden');
   document.getElementById('smgmt-finish-modal').classList.remove('hidden');
+
+  const parts = _smgmtCurrentRepo.split('/');
+  const owner = parts[0];
+  const repoName = parts.slice(1).join('/');
+
+  try {
+    const res = await fetch(
+      `/api/projects/${encodeURIComponent(owner)}/${encodeURIComponent(repoName)}/sprints/${encodeURIComponent(label)}/finish-preview`
+    );
+    const data = await res.json();
+
+    if (!res.ok) {
+      bodyEl.innerHTML = `<p style="color:var(--error-color,#c0392b)">Error: ${escapeHtml(data.detail || 'unknown error')}</p>`;
+      return;
+    }
+
+    _smgmtFinishPreview = data;
+
+    if (data.conflict_error) {
+      bodyEl.innerHTML = `<p style="color:var(--error-color,#c0392b)">${escapeHtml(data.conflict_error)}</p>`;
+      return;
+    }
+
+    const uatTickets = data.uat_tickets || [];
+    const nonUatTickets = data.non_uat_tickets || [];
+    const totalOpen = uatTickets.length + nonUatTickets.length;
+
+    if (totalOpen === 0) {
+      bodyEl.innerHTML = '<em style="color:var(--text-muted)">No open issues in this sprint.</em>';
+      return;
+    }
+
+    if (nonUatTickets.length === 0) {
+      const c = uatTickets.length;
+      bodyEl.innerHTML = `<p>Finish ${escapeHtml(displayName)}? This will close ${c} ticket${c !== 1 ? 's' : ''} currently in UAT (they've passed sprint-branch testing).</p>`;
+    } else {
+      const nextLabel = data.next_sprint_label;
+      const createNote = data.next_sprint_exists ? '' : ' (will be created)';
+      let listHtml = '<ul style="margin:6px 0 10px 18px;font-size:13px">';
+      for (const t of nonUatTickets) {
+        listHtml += `<li><strong>#${t.number}</strong> <code style="font-size:11px">${escapeHtml(t.status)}</code> — ${escapeHtml(t.title)}</li>`;
+      }
+      listHtml += '</ul>';
+      const nc = nonUatTickets.length;
+      const uc = uatTickets.length;
+      bodyEl.innerHTML =
+        `<p>${nc} ticket${nc !== 1 ? 's' : ''} not in UAT will be moved to <strong>${escapeHtml(nextLabel)}</strong>${escapeHtml(createNote)}:</p>` +
+        listHtml +
+        (uc > 0 ? `<p>${uc} UAT ticket${uc !== 1 ? 's' : ''} will be closed as completed.</p>` : '');
+    }
+
+    if (confirmBtn) confirmBtn.disabled = false;
+  } catch (e) {
+    bodyEl.innerHTML = `<p style="color:var(--error-color,#c0392b)">Failed to load preview: ${escapeHtml(e.message)}</p>`;
+  }
 }
 
 function smgmtFinishClose() {
   document.getElementById('smgmt-finish-backdrop').classList.add('hidden');
   document.getElementById('smgmt-finish-modal').classList.add('hidden');
   _smgmtFinishLabel = null;
+  _smgmtFinishPreview = null;
 }
 
 function _smgmtFinishShowLoading() {
@@ -6324,9 +6389,10 @@ function _smgmtFinishHideLoading() {
 }
 
 async function smgmtFinishConfirm() {
-  if (!_smgmtFinishLabel || !_smgmtCurrentRepo) return;
+  if (!_smgmtFinishLabel || !_smgmtCurrentRepo || !_smgmtFinishPreview) return;
 
   const label = _smgmtFinishLabel;
+  const preview = _smgmtFinishPreview;
   smgmtFinishClose();
   _smgmtFinishShowLoading();
 
@@ -6337,17 +6403,23 @@ async function smgmtFinishConfirm() {
   try {
     const res = await fetch(
       `/api/projects/${encodeURIComponent(owner)}/${encodeURIComponent(repoName)}/sprints/${encodeURIComponent(label)}/finish`,
-      { method: 'POST' }
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confirmed: true, move_non_uat_to: preview.next_sprint_label }),
+      }
     );
     const data = await res.json();
     _smgmtFinishHideLoading();
 
-    const mr = data.merge_result || {};
     if (data.errors && data.errors.length > 0) {
-      smgmtShowError(`Closed ${data.closed} issue${data.closed !== 1 ? 's' : ''}; ${data.errors.length} error${data.errors.length !== 1 ? 's' : ''}: ${data.errors.join('; ')}`);
+      smgmtShowError(`Finished with errors — closed ${data.closed}, moved ${data.moved}: ${data.errors.join('; ')}`);
     } else {
-      let msg = `Sprint finished — ${data.closed} issue${data.closed !== 1 ? 's' : ''} moved to UAT and closed.`;
-      if (mr.merged) msg += ` PR #${mr.pr_number} merged into develop.`;
+      const moved = data.moved || 0;
+      const closed = data.closed || 0;
+      let msg = `Sprint finished — ${closed} UAT ticket${closed !== 1 ? 's' : ''} closed`;
+      if (moved > 0) msg += `, ${moved} ticket${moved !== 1 ? 's' : ''} moved to ${data.next_sprint_label}`;
+      msg += '.';
       showSuccessToast(msg);
     }
 

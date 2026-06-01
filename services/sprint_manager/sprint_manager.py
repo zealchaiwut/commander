@@ -63,6 +63,19 @@ except (ImportError, ModuleNotFoundError):  # pragma: no cover
     _SPRINT_REPO_AVAILABLE = False
 
 try:
+    from services.sprint_manager.state_machine import (  # noqa: PLC0415
+        transition as _sm_transition,
+        TicketState as _TicketState,
+        TransitionError as _TransitionError,
+    )
+    _STATE_MACHINE_AVAILABLE = True
+except (ImportError, ModuleNotFoundError):  # pragma: no cover
+    _sm_transition = None  # type: ignore[assignment]
+    _TicketState = None  # type: ignore[assignment]
+    _TransitionError = Exception  # type: ignore[assignment,misc]
+    _STATE_MACHINE_AVAILABLE = False
+
+try:
     from services.sprint_manager.dag_builder import (  # noqa: PLC0415
         build_dag as _dag_build,
         DAGResult as _DAGResult,
@@ -121,9 +134,10 @@ ALERTS_DIR           = DASHBOARD_DIR / "alerts"
 _HAIKU_INPUT_COST_PER_M  = 0.80   # claude-haiku-4-5-20251001 input (reference)
 _HAIKU_OUTPUT_COST_PER_M = 4.00   # claude-haiku-4-5-20251001 output (reference)
 
-# Set to True by _sigterm_handler when the user cancels the sprint (issue #365).
+# Set by _sigterm_handler when the user cancels the sprint (issue #365, #514).
 # Checked in write_sprint_summary and in main()'s SystemExit handler.
-_sprint_user_cancelled: bool = False
+# threading.Event for thread-safe signaling across worker threads.
+_sprint_user_cancelled: threading.Event = threading.Event()
 
 
 # ── SprintConfig dataclass + loader ──────────────────────────────────────────
@@ -414,6 +428,46 @@ def _release_pid_lock(pid_path: Path) -> None:
         pass
 
 
+# ── Plan.json state helpers (issue #507) ─────────────────────────────────────
+
+def _plan_json_path(label: str, cfg: Optional["SprintConfig"] = None) -> Path:
+    """Return path to {label}-plan.json in the sprints directory."""
+    sprints_dir = cfg.sprints_dir if cfg is not None else REPO_ROOT / ".commander" / "sprints"
+    return sprints_dir / f"{label}-plan.json"
+
+
+def _plan_json_set_state_sm(
+    label: str,
+    state: str,
+    cfg: Optional["SprintConfig"] = None,
+    **extra_fields,
+) -> None:
+    """Best-effort update of plan.json state from sprint_manager side.
+
+    Reads existing file (handling both old list format and new dict format),
+    merges the new state + extra fields, and writes atomically.  All errors
+    are swallowed — this must never interrupt the sprint run.
+    """
+    path = _plan_json_path(label, cfg)
+    try:
+        existing: dict = {}
+        if path.exists():
+            raw = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(raw, dict):
+                existing = raw
+            elif isinstance(raw, list):
+                existing = {"tickets": raw}
+        existing["state"] = state
+        existing.update(extra_fields)
+        tmp = path.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(existing, indent=2), encoding="utf-8")
+        os.replace(str(tmp), str(path))
+    except Exception:
+        pass
+
+
+# ── end plan.json helpers ─────────────────────────────────────────────────────
+
 # Hang detection constants (in seconds)
 HANG_WARN_SECS  = 30 * 60   # 30 minutes
 HANG_KILL_SECS  = 60 * 60   # 60 minutes
@@ -425,13 +479,7 @@ HANG_CHECK_SECS = 5  * 60   # check every 5 minutes
 # All other label additions are deferred to post-run; sprint-N is never
 # removed from a ticket until the sprint run ends.
 RUN_MUTABLE_LABELS: frozenset[str] = frozenset({
-    "in-progress", "sit", "uat", "needs-rework",
-})
-
-# Actual GitHub label strings (as applied on issues) that correspond to
-# RUN_MUTABLE_LABELS.  Used as the allowlist when filtering add-label calls.
-_RUN_MUTABLE_GITHUB_LABELS: frozenset[str] = frozenset({
-    "in-progress", "SIT", "UAT", "needs-rework", "need-rework",  # READ-only: backward compat
+    "in-progress", "SIT", "UAT", "needs-rework",
 })
 
 _SPRINT_LABEL_RE = re.compile(r"^sprint-\d+$")
@@ -447,7 +495,7 @@ def _guard_sprint_labels(
 
     Always: sprint-N labels are stripped from *remove* and never deleted.
     Active run (sprint_label provided): *add* is restricted to
-    _RUN_MUTABLE_GITHUB_LABELS; any other additions are logged and dropped.
+    RUN_MUTABLE_LABELS; any other additions are logged and dropped.
     """
     safe_remove = [lbl for lbl in remove if not _SPRINT_LABEL_RE.match(lbl)]
     blocked_removes = [lbl for lbl in remove if _SPRINT_LABEL_RE.match(lbl)]
@@ -458,8 +506,8 @@ def _guard_sprint_labels(
         )
 
     if sprint_label is not None:
-        safe_add = [lbl for lbl in add if lbl in _RUN_MUTABLE_GITHUB_LABELS]
-        deferred = [lbl for lbl in add if lbl not in _RUN_MUTABLE_GITHUB_LABELS]
+        safe_add = [lbl for lbl in add if lbl in RUN_MUTABLE_LABELS]
+        deferred = [lbl for lbl in add if lbl not in RUN_MUTABLE_LABELS]
         if deferred:
             print(
                 f"  [label-guard] Deferred non-mutable label addition(s) until post-run: {deferred}",
@@ -469,6 +517,21 @@ def _guard_sprint_labels(
         safe_add = add
 
     return safe_add, safe_remove
+
+
+def _assert_run_mutable(labels: list[str], op: str) -> None:
+    """Raise ValueError if any label in `labels` is outside RUN_MUTABLE_LABELS.
+
+    Caller must catch ValueError and skip the operation so the sprint loop
+    continues without crashing.
+    """
+    violations = [lbl for lbl in labels if lbl not in RUN_MUTABLE_LABELS]
+    for lbl in violations:
+        msg = f"Refused to {op} label {lbl!r} during sprint run — outside RUN_MUTABLE_LABELS"
+        print(f"  [run-mutable-guard] {msg}", file=sys.stderr)
+        structured_log.warn("run_mutable_guard", msg, label=lbl, op=op)
+    if violations:
+        raise ValueError(f"Label mutation blocked: {violations!r} outside RUN_MUTABLE_LABELS")
 
 # ── end sprint-label protection ───────────────────────────────────────────────
 
@@ -1128,63 +1191,46 @@ def _get_issue_labels(issue_num: int, repo_name: Optional[str] = None) -> set[st
         return set()
 
 
-def _apply_in_progress_label(
+def _transition_safe(
     issue_num: int,
-    cfg: Optional["SprintConfig"] = None,
+    target_state: "_TicketState",
+    actor: str,
+    repo_name: Optional[str] = None,
+    note: Optional[str] = None,
 ) -> None:
-    """Apply the in-progress label via update_ticket.py (best-effort, issue #311 AC-5).
-
-    Called when coder_started_at is set so the board reflects active work.
-    Exceptions are caught and printed as warnings so a missing label never
-    blocks the sprint.
-    """
-    scripts_dir = cfg.scripts_dir if cfg is not None else SCRIPTS_DIR
-    update_script = scripts_dir / "update_ticket.py"
-    cmd = [
-        sys.executable, str(update_script),
-        "--issue", str(issue_num),
-        "--status", "in-progress",
-    ]
-    try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
-        if result.returncode in (0, 2):
-            print(f"  [in-progress] label applied for #{issue_num}")
-        else:
-            structured_log.warn("label_apply_failed", f"update_ticket.py exited {result.returncode} for #{issue_num}", issue_num=issue_num, label="in-progress", exit_code=result.returncode, subprocess_stderr=result.stderr.strip()[:400] if result.stderr else "")
-    except Exception as e:
-        structured_log.warn("label_apply_failed", f"failed to apply in-progress label for #{issue_num}: {e}", issue_num=issue_num, label="in-progress", exc=str(e))
-
-
-def _apply_needs_rework_label(
-    issue_num: int,
-    category: Optional[str],
-    cfg: Optional["SprintConfig"] = None,
-) -> None:
-    """Apply the needs-rework label via update_ticket.py (best-effort).
-
-    Only called for logic failure categories; exceptions are caught and printed
-    as warnings so a missing label never breaks the sprint.
-    """
-    if category not in _LOGIC_FAILURE_CATEGORIES:
+    """Call state_machine.transition() best-effort; log warnings on failure."""
+    if not _STATE_MACHINE_AVAILABLE or _sm_transition is None:
+        structured_log.warn(
+            "state_machine_unavailable",
+            f"state_machine not available; skipping {target_state} transition for #{issue_num}",
+            issue_num=issue_num,
+        )
         return
-
-    scripts_dir = cfg.scripts_dir if cfg is not None else SCRIPTS_DIR
-    update_script = scripts_dir / "update_ticket.py"
-    cmd = [
-        sys.executable, str(update_script),
-        "--issue", str(issue_num),
-        "--status", "needs-rework",
-        "--force",
-    ]
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
-        if result.returncode in (0, 2):
-            # exit 2 means label ops partially failed but a warning comment was posted
-            structured_log.info("needs_rework_label_applied", f"needs-rework label applied for #{issue_num}", issue_num=issue_num, category=category)
-        else:
-            structured_log.warn("label_apply_failed", f"update_ticket.py exited {result.returncode} for #{issue_num}", issue_num=issue_num, label="needs-rework", exit_code=result.returncode, subprocess_stderr=result.stderr.strip()[:400] if result.stderr else "")
+        _sm_transition(issue_num, target_state, actor=actor, repo=repo_name, note=note)
+        structured_log.info(
+            "ticket_transition",
+            f"transition #{issue_num} → {target_state.value} actor={actor!r}",
+            issue_num=issue_num,
+            target_state=target_state.value,
+            actor=actor,
+        )
+    except _TransitionError as e:
+        structured_log.warn(
+            "label_apply_failed",
+            f"transition {target_state.value} failed for #{issue_num}: {e}",
+            issue_num=issue_num,
+            target_state=target_state.value,
+            exc=str(e),
+        )
     except Exception as e:
-        structured_log.warn("label_apply_failed", f"failed to apply needs-rework label for #{issue_num}: {e}", issue_num=issue_num, label="needs-rework", exc=str(e))
+        structured_log.warn(
+            "label_apply_failed",
+            f"unexpected error in transition {target_state.value} for #{issue_num}: {e}",
+            issue_num=issue_num,
+            target_state=target_state.value,
+            exc=str(e),
+        )
 
 
 def _add_blocked_label(
@@ -1324,17 +1370,11 @@ def _revert_to_sit(issue_num: int, gate_name: str, output: str,
         except Exception as e:
             structured_log.error("failure_sidecar_write_error", f"failure parsing/sidecar failed: {e}", issue_num=issue_num, exc=str(e))
 
-    safe_add, safe_remove = _guard_sprint_labels(["SIT"], ["UAT", "in-progress"])
+    _transition_safe(issue_num, _TicketState.SIT, actor="sprint_manager:gate_fail", repo_name=repo_name)
     try:
-        github_client.update_labels(
-            issue_num,
-            add=safe_add,
-            remove=safe_remove,
-            repo_name=repo_name,
-        )
         github_client.add_comment(issue_num, comment, repo_name=repo_name)
     except Exception as e:
-        structured_log.warn("github_update_failed", f"failed to update GitHub: {e}", issue_num=issue_num, exc=str(e))
+        structured_log.warn("github_update_failed", f"failed to post gate failure comment: {e}", issue_num=issue_num, exc=str(e))
 
 
 def _post_success_comment(issue_num: int, results: list[GateResult],
@@ -1623,6 +1663,7 @@ def _call_finish_feature(
     target_branch: str = "develop",
     repo_name: Optional[str] = None,
     cfg: Optional["SprintConfig"] = None,
+    sprint_label: Optional[str] = None,
 ) -> None:
     """Call finish_feature.py as a subprocess from the worktester root."""
     if cfg is not None:
@@ -1640,8 +1681,12 @@ def _call_finish_feature(
     if repo_name:
         cmd += ["--repo", repo_name]
 
+    sub_env = os.environ.copy()
+    if sprint_label:
+        sub_env["COMMANDER_SPRINT_RUNNING"] = sprint_label
+
     print(f"  Calling finish_feature.py --issue {issue_num} --target-branch {target_branch} ...")
-    result = subprocess.run(cmd, cwd=str(wt_root), capture_output=True, text=True)
+    result = subprocess.run(cmd, cwd=str(wt_root), capture_output=True, text=True, env=sub_env)
     if result.stdout:
         print(result.stdout.rstrip())
     if result.returncode != 0:
@@ -1708,6 +1753,7 @@ def handle_post_tester(
     gate_scope: str = "changed",
     documentor_enabled: bool = False,
     alert_modes: Optional[list] = None,
+    sprint_label: Optional[str] = None,
 ) -> tuple[bool, str, Optional[str]]:
     """Called after a tester subprocess exits.
 
@@ -1736,99 +1782,33 @@ def handle_post_tester(
                 f"Issue #{issue_num}: tester exited {tester_exit_code}, skipping gates",
                 FailureCategory.CRASH)
 
-    # Re-fetch current labels (AC-1)
-    labels = _get_issue_labels(issue_num, repo_name=eff_repo)
-    if "UAT" not in labels:
-        current = ", ".join(sorted(labels)) or "(none)"
-        print(f"  Issue #{issue_num}: tester exited 0 but label is [{current}], not UAT -- checking merge status")
+    # Determine merge status by branch presence and git log — no label check.
+    # sprint_manager is the sole UAT label writer via transition().
+    found_branch = _find_feature_branch(issue_num)
+    branch_is_merged = False
 
-        # Check whether the feature branch has already been merged into the target
-        # (agent may have merged outside finish_feature.py, leaving UAT label absent)
-        found_branch = _find_feature_branch(issue_num)
-        branch_is_merged = False
-        if found_branch:
-            branch_is_merged = _is_branch_merged_into(found_branch, target_branch)
-            print(
-                f"  Issue #{issue_num}: feature branch '{found_branch}' merged into "
-                f"'{target_branch}': {branch_is_merged}"
-            )
-        else:
-            # Branch not found locally or remotely — check git history for a merge commit.
-            # finish_feature.py creates: "Merge feature/<N>-* into <target> (issue #<N>)"
-            branch_is_merged = _was_feature_merged_via_log(issue_num, target_branch)
-            if branch_is_merged:
-                print(
-                    f"  Issue #{issue_num}: feature branch not found but merge commit "
-                    f"found in '{target_branch}' history — treating as merged "
-                    f"(likely a transient label-apply failure after merge+delete)"
-                )
-            else:
-                print(
-                    f"  Issue #{issue_num}: feature branch not found and no merge "
-                    f"commit found in '{target_branch}' — treating as genuine tester skip"
-                )
-
-        if branch_is_merged:
-            # Auto-recovery: branch is merged (or was merged and deleted) but UAT label absent
-            print(f"  Issue #{issue_num}: branch is merged — auto-applying UAT label")
-            scripts_dir = cfg.scripts_dir if cfg is not None else SCRIPTS_DIR
-            update_script = scripts_dir / "update_ticket.py"
-            _UAT_RECOVERY_BACKOFFS = (2, 5, 10)
-            label_result = None
-            for attempt in range(len(_UAT_RECOVERY_BACKOFFS) + 1):
-                label_result = subprocess.run(
-                    [sys.executable, str(update_script), "--issue", str(issue_num), "--status", "uat"],
-                    capture_output=True, text=True,
-                )
-                if label_result.returncode == 0:
-                    break
-                if attempt < len(_UAT_RECOVERY_BACKOFFS):
-                    wait = _UAT_RECOVERY_BACKOFFS[attempt]
-                    print(
-                        f"  Warning: UAT label recovery attempt {attempt + 1} failed — retrying in {wait}s…",
-                        file=sys.stderr,
-                    )
-                    time.sleep(wait)
-
-            recovery_comment = (
-                "Detected merged feature branch without UAT label — applied UAT automatically "
-                "(likely a transient label-apply failure)."
-            )
-            try:
-                github_client.add_comment(issue_num, recovery_comment, repo_name=eff_repo)
-            except Exception as exc:
-                structured_log.warn("uat_recovery_comment_failed", f"failed to post UAT recovery comment: {exc}", issue_num=issue_num, exc=str(exc))
-
-            if label_result is None or label_result.returncode != 0:
-                stderr_text = label_result.stderr.strip() if label_result else "unknown error"
-                print(
-                    f"  Warning: UAT label auto-recovery failed after "
-                    f"{len(_UAT_RECOVERY_BACKOFFS) + 1} attempts — {stderr_text}",
-                    file=sys.stderr,
-                )
-            else:
-                print(f"  Issue #{issue_num}: UAT label applied via auto-recovery")
-
-            # Treat as a successful merge — gates may run below
-            print(f"\nTester promoted issue #{issue_num} to UAT (auto-recovered) -- running quality gates...")
-        else:
-            # Branch is not merged (or not found and not in log) — genuine tester skip
+    if found_branch:
+        branch_is_merged = _is_branch_merged_into(found_branch, target_branch)
+        print(
+            f"  Issue #{issue_num}: feature branch '{found_branch}' merged into "
+            f"'{target_branch}': {branch_is_merged}"
+        )
+        if not branch_is_merged:
             warning_body = (
-                f"**Tester exited 0 but not UAT — label missing.**\n\n"
-                f"The tester subprocess finished successfully (exit code 0), "
-                f"but the UAT label was never applied. Current labels: [{current}].\n\n"
-                f"This almost always means the tester agent skipped running `finish_feature.py`. "
-                f"Please either re-run the tester or apply the **UAT** label manually to move this "
-                f"ticket to the UAT queue."
+                f"**Tester exited 0 but feature branch not merged.**\n\n"
+                f"Tester subprocess finished successfully (exit code 0), but "
+                f"`{found_branch}` has not been merged into `{target_branch}`. "
+                f"This almost always means the tester agent skipped running "
+                f"`finish_feature.py`. Re-run the tester to proceed."
             )
             try:
                 github_client.add_comment(issue_num, warning_body, repo_name=eff_repo)
             except Exception as exc:
-                structured_log.warn("missing_uat_comment_failed", f"failed to post missing-UAT comment: {exc}", issue_num=issue_num, exc=str(exc))
+                structured_log.warn("missing_merge_comment_failed", f"failed to post missing-merge comment: {exc}", issue_num=issue_num, exc=str(exc))
             if alert_modes:
                 dispatch_alerts(
                     alert_modes,
-                    title=f"Issue #{issue_num} skipped: tester exited 0 but not UAT",
+                    title=f"Issue #{issue_num} skipped: tester exited 0 but branch not merged",
                     body=warning_body[:500],
                     issue_num=issue_num,
                     category=FailureCategory.TESTER_REJECTED,
@@ -1836,21 +1816,59 @@ def handle_post_tester(
                     repo=eff_repo,
                 )
             return (False,
-                    f"Issue #{issue_num}: tester exited 0 but not UAT -- no merge",
+                    f"Issue #{issue_num}: tester exited 0 but feature branch not merged",
                     FailureCategory.TESTER_REJECTED)
     else:
-        print(f"\nTester promoted issue #{issue_num} to UAT -- running quality gates...")
+        # Branch not found locally or remotely — check git log for merge commit.
+        branch_is_merged = _was_feature_merged_via_log(issue_num, target_branch)
+        if branch_is_merged:
+            print(
+                f"  Issue #{issue_num}: feature branch not found but merge commit "
+                f"found in '{target_branch}' history — treating as merged"
+            )
+        else:
+            print(
+                f"  Issue #{issue_num}: feature branch not found and no merge "
+                f"commit found in '{target_branch}' — treating as genuine tester skip"
+            )
+            warning_body = (
+                f"**Tester exited 0 but feature branch not found and not merged.**\n\n"
+                f"Tester subprocess finished successfully (exit code 0), but no "
+                f"`feature/{issue_num}-*` branch exists locally or on origin, and no "
+                f"merge commit was found in `{target_branch}`. Re-run the tester."
+            )
+            try:
+                github_client.add_comment(issue_num, warning_body, repo_name=eff_repo)
+            except Exception as exc:
+                structured_log.warn("missing_merge_comment_failed", f"failed to post missing-merge comment: {exc}", issue_num=issue_num, exc=str(exc))
+            if alert_modes:
+                dispatch_alerts(
+                    alert_modes,
+                    title=f"Issue #{issue_num} skipped: tester exited 0 but not merged",
+                    body=warning_body[:500],
+                    issue_num=issue_num,
+                    category=FailureCategory.TESTER_REJECTED,
+                    cfg=cfg,
+                    repo=eff_repo,
+                )
+            return (False,
+                    f"Issue #{issue_num}: tester exited 0 but feature branch missing and not merged",
+                    FailureCategory.TESTER_REJECTED)
 
-    # Find the feature branch; None means the tester agent already merged via finish_feature.py
-    feature_branch = _find_feature_branch(issue_num)
-    already_merged_by_tester = feature_branch is None
+    # Merge confirmed. Determine if tester already merged (branch deleted) or if
+    # sprint_manager needs to call finish_feature.py after gates pass.
+    already_merged_by_tester = (found_branch is None)
     if already_merged_by_tester:
         print(
-            f"  Issue #{issue_num}: feature branch not found — "
+            f"  Issue #{issue_num}: feature branch deleted — "
             f"tester already merged via finish_feature.py; skipping re-merge"
         )
-        # Use a placeholder so pytest/lint gates can still run; merge-preview will be skipped
+        # Placeholder so pytest/lint gates can still run; merge-preview will be skipped
         feature_branch = f"feature/{issue_num}-unknown"
+    else:
+        feature_branch = found_branch
+
+    print(f"\nTester finished for issue #{issue_num} -- running quality gates...")
 
     # Resolve documentor_enabled: explicit param wins, then cfg, then False
     eff_documentor = documentor_enabled or (cfg.documentor_enabled if cfg is not None else False)
@@ -1860,17 +1878,18 @@ def handle_post_tester(
         if eff_documentor:
             _run_documentor(issue_num, eff_repo, cfg=cfg)
         if not already_merged_by_tester:
-            _call_finish_feature(issue_num, wt_root, target_branch=target_branch, repo_name=eff_repo, cfg=cfg)
+            _call_finish_feature(issue_num, wt_root, target_branch=target_branch, repo_name=eff_repo, cfg=cfg, sprint_label=sprint_label)
         _post_agent_event("gate:merging", api_url=api_url)
         all_skipped = [
             GateResult(gate="pytest",        passed=True, skipped=True),
             GateResult(gate="lint",          passed=True, skipped=True),
             GateResult(gate="merge-preview", passed=True, skipped=True),
         ]
+        _transition_safe(issue_num, _TicketState.UAT, actor="sprint_manager", repo_name=eff_repo)
         _post_success_comment(issue_num, all_skipped, repo_name=eff_repo)
         if already_merged_by_tester:
-            return True, f"Tester promoted issue #{issue_num} to UAT; merge already done by tester, comment posted", None
-        return True, f"Tester promoted issue #{issue_num} to UAT; all gates skipped, merged into {target_branch}", None
+            return True, f"Issue #{issue_num}: merge already done by tester, UAT applied, comment posted", None
+        return True, f"Issue #{issue_num}: all gates skipped, merged into {target_branch}, UAT applied", None
 
     results = _run_quality_gates(
         issue_num=issue_num,
@@ -1899,11 +1918,12 @@ def handle_post_tester(
         if eff_documentor:
             _run_documentor(issue_num, eff_repo, cfg=cfg)
         if not already_merged_by_tester:
-            _call_finish_feature(issue_num, wt_root, target_branch=target_branch, repo_name=eff_repo, cfg=cfg)
+            _call_finish_feature(issue_num, wt_root, target_branch=target_branch, repo_name=eff_repo, cfg=cfg, sprint_label=sprint_label)
+        _transition_safe(issue_num, _TicketState.UAT, actor="sprint_manager", repo_name=eff_repo)
         _post_success_comment(issue_num, results, repo_name=eff_repo)
         if already_merged_by_tester:
-            return True, f"Tester promoted issue #{issue_num} to UAT; merge already done by tester, comment posted", None
-        return True, f"Tester promoted issue #{issue_num} to UAT; all gates passed, merged into {target_branch}", None
+            return True, f"Issue #{issue_num}: all gates passed, merge already done by tester, UAT applied", None
+        return True, f"Issue #{issue_num}: all gates passed, merged into {target_branch}, UAT applied", None
     else:
         failed = next((r for r in results if not r.passed), None)
         gate_name = failed.gate if failed else "unknown"
@@ -2043,6 +2063,14 @@ def _dispatch_coder(
             " finish_feature.py. Merging is exclusively the tester's job via"
             " `scripts/finish_feature.py` after tests pass."
         )
+    # Label boundary (issue #509): coder must never touch GitHub labels.
+    if "DO NOT modify any GitHub label" not in prompt:
+        prompt += (
+            " DO NOT modify any GitHub label on this issue or any other issue."
+            " Label transitions are managed by sprint_manager."
+            " Do not run update_ticket.py, gh issue edit --add-label, or any other"
+            " label-mutation command."
+        )
 
     # Inject failure context from sidecar if available (AC: sprint manager reads sidecar)
     failure_suffix = _build_failure_suffix(issue_num)
@@ -2059,11 +2087,14 @@ def _dispatch_coder(
 
     # Build subprocess environment: inherit current env, set COMMANDER_MERGE_TARGET
     # when in sprint mode (AC2), COMMANDER_APP_PORT if a port was chosen (issue #62),
-    # and COMMANDER_PROJECT so log output is tagged by project (issue #122).
+    # COMMANDER_PROJECT so log output is tagged by project (issue #122), and
+    # COMMANDER_SPRINT_RUNNING so child scripts enforce RUN_MUTABLE_LABELS (issue #506).
     sub_env = os.environ.copy()
     sub_env.pop("ANTHROPIC_API_KEY", None)
     if eff_repo:
         sub_env["COMMANDER_PROJECT"] = eff_repo
+    if sprint_label:
+        sub_env["COMMANDER_SPRINT_RUNNING"] = sprint_label
     if sprint_branch not in ("develop",):
         sub_env["COMMANDER_MERGE_TARGET"] = sprint_branch
         # Always append sprint-mode instructions regardless of whether a custom
@@ -2266,7 +2297,8 @@ def _dispatch_tester(
             f" you MUST immediately run `python3 dashboard/scripts/finish_feature.py --issue {issue_num}`"
             " from the repo root without asking. The script reads COMMANDER_MERGE_TARGET from its"
             " own env to pick the merge target — do not override with --target-branch."
-            " finish_feature.py applies the UAT label automatically — do NOT separately edit labels or close the issue."
+            " finish_feature.py merges the branch; do NOT separately apply any label — the"
+            " UAT label is applied automatically by sprint_manager after merge confirmation."
             " NEVER apply the UAT-approved label or close the issue — UAT-approved is set ONLY by the human"
             " via the dashboard Approve button or scripts/approve_ticket.py."
             " Do NOT output language like 'let me know if you want me to...' —"
@@ -2275,9 +2307,16 @@ def _dispatch_tester(
             " MERGE PATH ENFORCEMENT (issue #311): `scripts/finish_feature.py` is the ONLY"
             " sanctioned merge path. You are FORBIDDEN from running `git merge`, opening"
             " or merging a PR directly, or pushing commits to the target branch by any"
-            " means other than finish_feature.py. Merging by any other path will skip the"
-            " UAT label entirely and constitutes a workflow failure — halt immediately and"
-            " report the violation rather than proceeding."
+            " means other than finish_feature.py. Merging by any other path constitutes a"
+            " workflow failure — halt immediately and report the violation rather than proceeding."
+        )
+    # Label boundary (issue #509): tester must never touch GitHub labels.
+    if "DO NOT modify any GitHub label" not in prompt:
+        prompt += (
+            " DO NOT modify any GitHub label on this issue or any other issue."
+            " Label transitions are managed by sprint_manager."
+            " Do not run update_ticket.py, gh issue edit --add-label, or any other"
+            " label-mutation command."
         )
     cmd = [
         "claude",
@@ -2289,11 +2328,14 @@ def _dispatch_tester(
 
     # Build subprocess environment: inherit current env, set COMMANDER_MERGE_TARGET
     # when in sprint mode (AC2), COMMANDER_APP_PORT if a port was chosen (issue #62),
-    # and COMMANDER_PROJECT so log output is tagged by project (issue #122).
+    # COMMANDER_PROJECT so log output is tagged by project (issue #122), and
+    # COMMANDER_SPRINT_RUNNING so child scripts enforce RUN_MUTABLE_LABELS (issue #506).
     sub_env = os.environ.copy()
     sub_env.pop("ANTHROPIC_API_KEY", None)
     if eff_repo:
         sub_env["COMMANDER_PROJECT"] = eff_repo
+    if sprint_label:
+        sub_env["COMMANDER_SPRINT_RUNNING"] = sprint_label
     if sprint_branch not in ("develop",):
         sub_env["COMMANDER_MERGE_TARGET"] = sprint_branch
         # Always append sprint-mode instructions regardless of whether a custom
@@ -3848,12 +3890,20 @@ def _load_estimate(issue_num: int) -> Optional[dict]:
 
 
 def _load_sprint_plan(sprints_dir: Path, label: str) -> Optional[list[int]]:
-    """Read sprint-{label}-plan.json; return issue-number list or None on failure."""
-    path = sprints_dir / f"sprint-{label}-plan.json"
+    """Read {label}-plan.json; return issue-number list or None on failure.
+
+    Handles both old list format ([42, 17, 88]) and new dict format
+    ({"state": "...", "tickets": [42, 17, 88], ...}).
+    """
+    path = sprints_dir / f"{label}-plan.json"
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
         if isinstance(data, list) and all(isinstance(n, int) for n in data):
             return data
+        if isinstance(data, dict):
+            tickets = data.get("tickets")
+            if isinstance(tickets, list) and all(isinstance(n, int) for n in tickets):
+                return tickets
     except (OSError, json.JSONDecodeError):
         pass
     return None
@@ -4553,7 +4603,7 @@ def run_sprint(
             # AC-5 (issue #311): apply in-progress label when coder starts so the
             # board reflects active work during coding.  Best-effort — never blocks
             # the sprint on label failure.
-            _apply_in_progress_label(num, cfg=cfg)
+            _transition_safe(num, _TicketState.IN_PROGRESS, actor="sprint_manager", repo_name=eff_repo)
 
             def _on_coder_running(
                 _is=issue_state, _st=state, _sp=state_path, _api=api_url,
@@ -4621,7 +4671,8 @@ def run_sprint(
                     cfg=cfg,
                     repo=eff_repo,
                 )
-                _apply_needs_rework_label(num, category, cfg=cfg)
+                if category in _LOGIC_FAILURE_CATEGORIES:
+                    _transition_safe(num, _TicketState.NEEDS_REWORK, actor="sprint_manager", repo_name=eff_repo)
                 _neon_ticket_status(label, num, "failed", _eff_sprints_dir)
                 state.save(state_path)
                 _post_sprint_status(state, api_url=api_url, project=eff_repo)
@@ -4648,7 +4699,8 @@ def run_sprint(
                     cfg=cfg,
                     repo=eff_repo,
                 )
-                _apply_needs_rework_label(num, category, cfg=cfg)
+                if category in _LOGIC_FAILURE_CATEGORIES:
+                    _transition_safe(num, _TicketState.NEEDS_REWORK, actor="sprint_manager", repo_name=eff_repo)
                 _neon_ticket_status(label, num, "failed", _eff_sprints_dir)
                 state.save(state_path)
                 _post_sprint_status(state, api_url=api_url, project=eff_repo)
@@ -4659,6 +4711,9 @@ def run_sprint(
             issue_state.coder_finished_at = issue_state.status_changed_at
             state.save(state_path)
             _post_sprint_status(state, api_url=api_url)
+
+        # Transition to SIT before dispatching the tester (issue #509).
+        _transition_safe(num, _TicketState.SIT, actor="sprint_manager", repo_name=eff_repo)
 
         # -- Lifecycle: tester_dispatched --
         issue_state.set_agent_status("tester_dispatched")
@@ -4743,6 +4798,7 @@ def run_sprint(
             gate_scope         = gate_scope,
             documentor_enabled = cfg.documentor_enabled if cfg else False,
             alert_modes        = alert_modes,
+            sprint_label       = label,
         )
         print(f"  {summary_line}")
         try:
@@ -4782,7 +4838,8 @@ def run_sprint(
                 cfg=cfg,
                 repo=eff_repo,
             )
-            _apply_needs_rework_label(num, category, cfg=cfg)
+            if category in _LOGIC_FAILURE_CATEGORIES:
+                _transition_safe(num, _TicketState.NEEDS_REWORK, actor="sprint_manager", repo_name=eff_repo)
             _neon_ticket_status(label, num, "failed", _eff_sprints_dir)
 
         elapsed = time.monotonic() - start_time
@@ -5030,12 +5087,23 @@ def main() -> None:
     atexit.register(_cleanup_pid)
 
     def _sigterm_handler(signum: int, frame: object) -> None:
-        global _sprint_user_cancelled
-        _sprint_user_cancelled = True
+        _sprint_user_cancelled.set()
         _cleanup_pid()
+        # Best-effort state write before exit (issue #507)
+        _plan_json_set_state_sm(
+            args.label, "cancelled", cfg=cfg,
+            ended_at=datetime.now(timezone.utc).isoformat(),
+        )
         raise SystemExit(130)
 
     signal.signal(signal.SIGTERM, _sigterm_handler)
+
+    # Write state=running now that PID lock is confirmed (issue #507)
+    if not args.dry_run:
+        _plan_json_set_state_sm(
+            args.label, "running", cfg=cfg,
+            started_at=datetime.now(timezone.utc).isoformat(),
+        )
 
     # ── Pre-flight review (AC-1 of issue #33) ────────────────────────────────
     preflight_approved: Optional[list] = None  # None = no preflight, list = approved numbers
@@ -5109,7 +5177,7 @@ def main() -> None:
             summary_path = None
 
     except SystemExit:
-        if _sprint_user_cancelled:
+        if _sprint_user_cancelled.is_set():
             # Race condition (issue #365 AC-4): SIGTERM arrived while write_sprint_summary
             # was executing inside create_summary_github_issue.  Close any open summary
             # issue that was created in this run before the signal was processed.
@@ -5119,6 +5187,14 @@ def main() -> None:
                 eff_repo,
             )
         raise
+
+    # Clean exit: write state=completed (issue #507)
+    if not args.dry_run:
+        _plan_json_set_state_sm(
+            args.label, "completed", cfg=cfg,
+            ended_at=datetime.now(timezone.utc).isoformat(),
+            end_reason="natural",
+        )
 
     # Dispatch documenter after sprint summary, before sprint PR (issue #165)
     if not args.skip_documenter and not args.dry_run and state.issues:

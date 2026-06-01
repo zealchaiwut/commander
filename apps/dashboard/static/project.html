@@ -950,7 +950,24 @@
     .smgmt-run-btn.smgmt-run-btn--rerun {
       background: var(--surface); color: var(--amber); border: 1px solid var(--amber);
     }
-    .smgmt-run-btn.smgmt-run-btn--rerun:hover { background: var(--amber-bg); }
+    .smgmt-run-btn.smgmt-run-btn--rerun:hover:not(:disabled) { background: var(--amber-bg); }
+    .smgmt-run-btn.smgmt-run-btn--rerun:disabled { opacity: .45; cursor: not-allowed; }
+    /* Rerun modal ticket list */
+    .rr-ticket-list { max-height: 280px; overflow-y: auto; border: 1px solid var(--border); border-radius: 6px; margin-top: 8px; }
+    .rr-ticket-row { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-bottom: 1px solid var(--border); cursor: pointer; user-select: none; }
+    .rr-ticket-row:last-child { border-bottom: none; }
+    .rr-ticket-row:hover { background: var(--surface-2); }
+    .rr-ticket-row input[type=checkbox] { flex-shrink: 0; cursor: pointer; }
+    .rr-ticket-num { font-family: var(--mono); font-size: 11px; color: var(--text-muted); flex-shrink: 0; min-width: 36px; }
+    .rr-ticket-title { font-size: 13px; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .rr-ticket-cat { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; padding: 1px 6px; border-radius: 4px; flex-shrink: 0; }
+    .rr-cat-uat { background: var(--blue-bg,#eff6ff); color: var(--blue,#2563eb); }
+    .rr-cat-sit { background: var(--purple-bg,#f5f3ff); color: var(--purple,#7c3aed); }
+    .rr-cat-rework { background: var(--yellow-bg); color: var(--yellow); }
+    .rr-cat-queued { background: var(--surface-2); color: var(--text-sub); }
+    .rr-controls { display: flex; gap: 10px; align-items: center; margin-bottom: 6px; }
+    .rr-controls a { font-size: 12px; color: var(--accent); cursor: pointer; text-decoration: underline; }
+    .rr-uat-warning { font-size: 12px; color: var(--amber); margin-top: 8px; min-height: 18px; }
     .smgmt-delete-btn {
       padding: 4px 10px; font-size: 11px; font-weight: 600;
       background: var(--surface); color: var(--red); border: 1px solid var(--red);
@@ -1081,6 +1098,11 @@
       text-transform: uppercase; letter-spacing: .08em;
       background: var(--green-bg); color: var(--green); padding: 2px 7px; border-radius: 4px;
       flex-shrink: 0;
+    }
+    /* Parent sprint lineage indicator */
+    .smgmt-sprint-lineage {
+      font-size: 11px; color: var(--text-muted); flex-shrink: 0;
+      opacity: .8;
     }
     /* ── Finish-report card (the "hat" above a finished pane, issue #367 parity) ── */
     .smgmt-sprint-unit { display: flex; flex-direction: column; }
@@ -3883,6 +3905,10 @@ document.getElementById('sub-tabs').addEventListener('keydown', function(e) {
 window.addEventListener('popstate', function(e) {
   const state = e.state;
   if (state && state.slug && state.tab) {
+    if (state.slug !== _slug) {
+      _ticketsRepo = null;
+      _ticketsLoaded = false;
+    }
     _slug = state.slug;
     switchTab(state.tab, false);
   }
@@ -4155,7 +4181,7 @@ function tdpOpen(num) {
     html += `<div class="tdp-section">
       <div class="tdp-section-title">Estimate</div>
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:4px">
-        <span class="smgmt-ticket-size-pill" id="tdp-estimate-size">${escHtml(tdpSizeLabel.name.replace('size-', ''))}</span>
+        <span class="smgmt-ticket-size-pill" id="tdp-estimate-size" title="≈${_sizeMinutes(tdpSizeLabel.name.replace('size-', ''))} min">${escHtml(tdpSizeLabel.name.replace('size-', ''))}</span>
         <button class="tdp-reestimate-btn" id="tdp-reestimate-btn"
                 onclick="_smgmtReEstimate(${num})">Re-estimate</button>
       </div>
@@ -4204,6 +4230,8 @@ let _ticketsRepo = null;
 async function loadTickets() {
   const container = document.getElementById('tickets-content');
   if (!container) return;
+
+  _ticketsRepo = null;
 
   let repo = _cachedFullRepo[_slug] || null;
 
@@ -4927,8 +4955,9 @@ async function loadSprintMgmt(silent) {
 }
 
 function _smgmtSprintLabelSortKey(label) {
-  const m = String(label).match(/^sprint-(\d+)(?:\.(\d+))?$/);
-  return m ? [parseInt(m[1], 10), m[2] ? parseInt(m[2], 10) : 0] : [Infinity, 0];
+  const m = String(label).match(/^sprint-(\d+(?:\.\d+)*)$/);
+  if (!m) return [Infinity];
+  return m[1].split('.').map(n => parseInt(n, 10));
 }
 
 function _smgmtRender(data) {
@@ -4963,15 +4992,21 @@ function _smgmtRender(data) {
 
   // Use order list if available (includes sub-labels), else build from integer sprints ascending
   const orderedLabels = order.length > 0
-    ? order.filter(l => /^sprint-\d+(\.\d+)?$/.test(l))
+    ? order.filter(l => /^sprint-\d+(\.\d+)*$/.test(l))
     : [...sprints].sort((a, b) => a - b).map(n => `sprint-${n}`);
+
+  const _sprintParents = data.sprint_parents || {};
 
   // NEXT UP: lowest label with >= 1 ticket that isn't currently running (sprint-26 parity)
   let _smgmtNextUpLabel = null;
   const sortedForNext = [...orderedLabels].sort((a, b) => {
-    const [a1, a2] = _smgmtSprintLabelSortKey(a);
-    const [b1, b2] = _smgmtSprintLabelSortKey(b);
-    return a1 - b1 || a2 - b2;
+    const ka = _smgmtSprintLabelSortKey(a);
+    const kb = _smgmtSprintLabelSortKey(b);
+    for (let i = 0; i < Math.max(ka.length, kb.length); i++) {
+      const d = (ka[i] ?? Infinity) - (kb[i] ?? Infinity);
+      if (d !== 0) return d;
+    }
+    return 0;
   });
   for (const lbl of sortedForNext) {
     if (_smgmtRunningLabels.has(lbl)) continue;
@@ -4981,7 +5016,8 @@ function _smgmtRender(data) {
   const cards = orderedLabels.map(label => {
     const tickets = bySprint[label] || [];
     const outcome = _smgmtOutcomeCache[label] || null;
-    const cardHtml = _smgmtCardHtml(label, null, tickets, outcome, label === _smgmtNextUpLabel);
+    const parent = _sprintParents[label] || null;
+    const cardHtml = _smgmtCardHtml(label, null, tickets, outcome, label === _smgmtNextUpLabel, parent);
     // Wrap each pane in a unit with a hidden finish-report card "hat" above it (issue #367 parity)
     return `<div class="smgmt-sprint-unit" id="smgmt-unit-${escHtml(label)}">` +
            `<div class="smgmt-finish-card sfc-hidden" id="smgmt-finish-card-${escHtml(label)}" style="display:none"></div>` +
@@ -5766,7 +5802,7 @@ function smgmtCancelRename(label, origN, nameEl) {
   nameEl.textContent = sprintLabelDisplay(label);
 }
 
-function _smgmtCardHtml(label, n, tickets, outcome, isNext) {
+function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent) {
   const isRunning = _smgmtRunningLabels.has(label);
 
   // Running sprint gets special animated treatment (issue #277)
@@ -5776,17 +5812,21 @@ function _smgmtCardHtml(label, n, tickets, outcome, isNext) {
 
   const hasCompleted = _smgmtHasCompletedTickets(tickets);
   const canRun = !hasCompleted && tickets.length >= 1;
+  const isPostRun = !!((outcome && (outcome.sprint_status || outcome.state)) || hasCompleted);
 
+  // Re-run Sprint button: always visible on non-running cards per issue #512
+  const rerunDisabled = _smgmtAnySprintRunning ? 'disabled' : '';
+  const rerunTitle = _smgmtAnySprintRunning
+    ? 'title="Cannot re-run: another sprint is currently running."'
+    : '';
+  const rerunBtn = `<button class="smgmt-run-btn smgmt-run-btn--rerun" ${rerunDisabled} ${rerunTitle}
+                    onclick="smgmtRerunSprint('${escHtml(label)}')">
+                    <i class="ti ti-refresh"></i> Re-run Sprint</button>`;
+
+  // Action button: post-run cards show Re-run only; planning cards show Run Sprint
   let actionBtn;
-  if (hasCompleted) {
-    actionBtn = `<button class="smgmt-run-btn smgmt-run-btn--rerun"
-                  onclick="smgmtRerunSprint('${label}')">
-                  <i class="ti ti-refresh"></i> Re-run Sprint</button>`;
-  } else if (outcome && outcome.sprint_status) {
-    // Post-run frozen sprint: offer Re-run
-    actionBtn = `<button class="smgmt-run-btn smgmt-run-btn--rerun"
-                  onclick="smgmtRerunSprint('${label}')">
-                  <i class="ti ti-refresh"></i> Re-run Sprint</button>`;
+  if (isPostRun) {
+    actionBtn = rerunBtn;
   } else if (_smgmtAnySprintRunning) {
     actionBtn = `<button class="smgmt-run-btn smgmt-run-btn--blocked"
                   title="Another sprint is running"
@@ -5800,7 +5840,9 @@ function _smgmtCardHtml(label, n, tickets, outcome, isNext) {
                   <i class="ti ti-player-play"></i> Run Sprint</button>`;
   }
 
-  const finishHidden = hasCompleted ? '' : 'hidden';
+  const outcomeState = outcome && (outcome.state || (outcome.sprint_status === 'completed' ? 'completed' : null));
+  const finishHidden = (outcomeState === 'completed' || outcomeState === 'has_rework') ? '' : 'hidden';
+  const finishDisabled = (outcomeState === 'completed' || outcomeState === 'has_rework') && tickets.length === 0 ? 'disabled' : '';
 
   // Outcome state: build band + ticket rows if outcome is cached
   let outcomeBandHtml = '';
@@ -5833,6 +5875,9 @@ function _smgmtCardHtml(label, n, tickets, outcome, isNext) {
 
   const logHtml = (outcome && outcome.sprint_status) ? _smgmtOutcomeLogHtml(label, outcome) : '';
   const cancelBannerHtml = _smgmtIsCancelled(outcome) ? _smgmtCancelBannerHtml(label) : '';
+  const parentLineage = parent
+    ? `<span class="smgmt-sprint-lineage" title="Child sprint spawned from ${escHtml(parent)}">← from ${escHtml(sprintLabelDisplay(parent))}</span>`
+    : '';
 
   return `
     <div class="smgmt-sprint-card${outcomeCardClass}" id="smgmt-card-${escHtml(label)}"
@@ -5847,16 +5892,19 @@ function _smgmtCardHtml(label, n, tickets, outcome, isNext) {
                   onclick="smgmtStartRename('${escHtml(label)}', event)"><i class="ti ti-pencil"></i></button>
           ${isNext ? '<span class="smgmt-next-badge" aria-label="Next up">NEXT UP</span>' : ''}
           ${outcomeBadgeHtml}
+          ${parentLineage}
           <span class="smgmt-sprint-count"><span id="smgmt-est-${escHtml(label)}" class="smgmt-sprint-est-val">— estimated</span> &middot; ${ticketCount} ticket${ticketCount !== 1 ? 's' : ''}</span>
         </div>
         <div class="smgmt-sprint-header-right">
-          <button class="smgmt-finish-btn ${finishHidden}"
+          <button class="smgmt-finish-btn ${finishHidden}" ${finishDisabled}
+                  title="${finishDisabled ? 'No open tickets' : 'Finish sprint'}"
                   onclick="smgmtFinishSprint('${escHtml(label)}')">
             <i class="ti ti-flag-check"></i> Finish Sprint</button>
           <button class="smgmt-delete-btn"
                   onclick="smgmtDeleteSprint('${escHtml(label)}')">
             <i class="ti ti-trash"></i> Delete</button>
           ${actionBtn}
+          ${!isPostRun ? rerunBtn : ''}
         </div>
       </div>
       ${cancelBannerHtml}
@@ -5922,7 +5970,7 @@ function _smgmtRunningCardHtml(label, n, tickets) {
     const issueUrl = t.url || (cardRepo ? `https://github.com/${cardRepo}/issues/${t.number}` : '#');
 
     const sizePillHtml = (liveIss && liveIss.size)
-      ? `<span class="smgmt-ticket-size-pill">${escHtml(liveIss.size)}</span>`
+      ? `<span class="smgmt-ticket-size-pill" title="≈${liveIss.minutes || _sizeMinutes(liveIss.size)} min">${escHtml(liveIss.size)}</span>`
       : '';
     const agentTagHtml = (liveIss && liveIss.agent)
       ? `<span class="smgmt-ticket-agent-tag ${_smgmtAgentTagClass(liveIss.agent)}">${escHtml(liveIss.agent.toUpperCase())}</span>`
@@ -6065,6 +6113,11 @@ function _fmtTicketElapsed(secs) {
   return `${m}m ${s}s`;
 }
 
+/** Return canonical minutes for a size letter (S/M/L/XL). Returns 0 for unknown. */
+function _sizeMinutes(letter) {
+  return {S: 5, M: 15, L: 30, XL: 60}[letter] || 0;
+}
+
 /** CSS class for agent role tag: purple for coder-class, amber for tester-class. */
 function _smgmtAgentTagClass(role) {
   if (!role) return 'unknown-class';
@@ -6141,7 +6194,7 @@ function _smgmtLivePatch(label, live) {
         row.dataset.issue = String(t.number);
         row.draggable = false;
         const initSizePill = t.size
-          ? `<span class="smgmt-ticket-size-pill">${escHtml(t.size)}</span>` : '';
+          ? `<span class="smgmt-ticket-size-pill" title="≈${t.minutes || _sizeMinutes(t.size)} min">${escHtml(t.size)}</span>` : '';
         const initAgentTag = t.agent
           ? `<span class="smgmt-ticket-agent-tag ${_smgmtAgentTagClass(t.agent)}">${escHtml(t.agent.toUpperCase())}</span>` : '';
         const initElapsedStr = _fmtTicketElapsed(t.elapsed_secs);
@@ -6185,6 +6238,7 @@ function _smgmtLivePatch(label, live) {
         if (titleEl) titleEl.after(sizePillEl);
       }
       sizePillEl.textContent = liveIss.size;
+      sizePillEl.title = `≈${liveIss.minutes || _sizeMinutes(liveIss.size)} min`;
     } else if (sizePillEl) {
       sizePillEl.remove();
     }
@@ -6306,7 +6360,7 @@ function _smgmtTicketRowHtml(ticket, label) {
 
   const sizeLabel = (ticket.labels || []).find(l => /^size-[SMLX]+$/.test(l.name));
   const estimatePillHtml = sizeLabel
-    ? `<span class="smgmt-ticket-size-pill">${escHtml(sizeLabel.name.replace('size-', ''))}</span>` +
+    ? `<span class="smgmt-ticket-size-pill" title="≈${_sizeMinutes(sizeLabel.name.replace('size-', ''))} min">${escHtml(sizeLabel.name.replace('size-', ''))}</span>` +
       `<button class="smgmt-reestimate-btn" tabindex="0" title="Re-estimate this ticket"
                onclick="event.stopPropagation();_smgmtReEstimate(${ticket.number},this)"
                onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();_smgmtReEstimate(${ticket.number},this);}">Re-estimate</button>`
@@ -6364,6 +6418,7 @@ async function _smgmtRetryEstimation(issueNum, btn) {
     const pill = document.createElement('span');
     pill.className = 'smgmt-ticket-size-pill';
     pill.textContent = data.size;
+    pill.title = `≈${data.minutes || _sizeMinutes(data.size)} min`;
     spinner.replaceWith(pill);
   } catch (_) {
     const newBtn = document.createElement('button');
@@ -6457,7 +6512,10 @@ async function _smgmtReEstimateRun(issueNum, rowBtn) {
     const row = document.getElementById(`smgmt-ticket-${issueNum}`);
     if (row) {
       const pill = row.querySelector('.smgmt-ticket-size-pill');
-      if (pill) pill.textContent = data.size;
+      if (pill) {
+        pill.textContent = data.size;
+        pill.title = `≈${data.minutes || _sizeMinutes(data.size)} min`;
+      }
     }
     // Restore row re-estimate button
     if (rowSpinner) rowSpinner.replaceWith(_makeReEstimateBtn(issueNum));
@@ -6467,7 +6525,10 @@ async function _smgmtReEstimateRun(issueNum, rowBtn) {
       tdpBtn.disabled = false;
       tdpBtn.textContent = 'Re-estimate';
       const sizeEl = document.getElementById('tdp-estimate-size');
-      if (sizeEl) sizeEl.textContent = data.size;
+      if (sizeEl) {
+        sizeEl.textContent = data.size;
+        sizeEl.title = `≈${data.minutes || _sizeMinutes(data.size)} min`;
+      }
     }
   } catch (err) {
     // Restore row button
@@ -6848,32 +6909,146 @@ async function _pfConfirm() {
   }
 }
 
+// ── Re-run Sprint modal (issue #512) ─────────────────────────────────────
+
+let _rrLabel = null;
+let _rrVersionedLabel = null;
+
+function _rrOpen() {
+  _setBodyInert(['rr-backdrop', 'rr-modal']);
+  document.getElementById('rr-backdrop').classList.remove('hidden');
+  document.getElementById('rr-modal').classList.remove('hidden');
+}
+
+function _rrClose() {
+  document.getElementById('rr-backdrop').classList.add('hidden');
+  document.getElementById('rr-modal').classList.add('hidden');
+  _clearBodyInert();
+  _rrLabel = null;
+  _rrVersionedLabel = null;
+}
+
+function _rrCatClass(cat) {
+  if (cat === 'UAT') return 'rr-cat-uat';
+  if (cat === 'SIT') return 'rr-cat-sit';
+  if (cat === 'needs-rework') return 'rr-cat-rework';
+  return 'rr-cat-queued';
+}
+
+function _rrUpdateState() {
+  const checkboxes = document.querySelectorAll('#rr-ticket-list input[type=checkbox]');
+  const checked = Array.from(checkboxes).filter(c => c.checked);
+  const uatChecked = Array.from(checkboxes).filter(c => c.checked && c.dataset.cat === 'UAT').length;
+
+  const confirmBtn = document.getElementById('rr-confirm-btn');
+  if (confirmBtn) confirmBtn.disabled = checked.length === 0;
+
+  const warnEl = document.getElementById('rr-uat-warning');
+  if (warnEl) {
+    if (uatChecked > 0) {
+      warnEl.textContent = `${uatChecked} ticket${uatChecked !== 1 ? 's' : ''} in UAT will be re-tested from scratch.`;
+    } else {
+      warnEl.textContent = '';
+    }
+  }
+}
+
+function _rrSelectAll(checked) {
+  document.querySelectorAll('#rr-ticket-list input[type=checkbox]').forEach(cb => { cb.checked = checked; });
+  _rrUpdateState();
+}
+
 async function smgmtRerunSprint(label) {
   const repo = _smgmtRepo();
   if (!repo) return;
-  const n = parseInt(label.split('-')[1], 10);
-  if (!confirm(`Re-run Sprint ${n}?\n\nAgents will be dispatched selectively based on each ticket's current state:\n• UAT tickets are skipped\n• SIT tickets go directly to tester\n• All others go to coder`)) return;
+
+  _rrLabel = label;
+  _rrVersionedLabel = null;
+
+  document.getElementById('rr-modal-title').textContent = `Re-run ${sprintLabelDisplay(label)}?`;
+  document.getElementById('rr-loading').classList.remove('hidden');
+  document.getElementById('rr-content').classList.add('hidden');
+  document.getElementById('rr-error').classList.add('hidden');
+  document.getElementById('rr-error').textContent = '';
+  const confirmBtn = document.getElementById('rr-confirm-btn');
+  if (confirmBtn) { confirmBtn.disabled = true; confirmBtn.textContent = 'Create sprint and run'; }
+  _rrOpen();
+
   try {
-    const res = await fetch(`/api/sprints/${encodeURIComponent(label)}/rerun?project=${encodeURIComponent(repo)}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ confirm: true }),
-    });
+    const res = await fetch(
+      `/api/sprints/${encodeURIComponent(label)}/rerun-preview?project=${encodeURIComponent(repo)}`
+    );
+    if (!res.ok) throw new Error(await res.text());
+    const preview = await res.json();
+
+    _rrVersionedLabel = preview.suggested_versioned_label;
+    document.getElementById('rr-modal-title').textContent =
+      `Re-run ${sprintLabelDisplay(label)} as ${sprintLabelDisplay(_rrVersionedLabel)}?`;
+    if (confirmBtn) confirmBtn.textContent = `Create ${sprintLabelDisplay(_rrVersionedLabel)} and Run`;
+
+    const listEl = document.getElementById('rr-ticket-list');
+    if ((preview.tickets || []).length === 0) {
+      listEl.innerHTML = '<div style="padding:10px;color:var(--text-muted);font-size:13px">No tickets in this sprint.</div>';
+    } else {
+      listEl.innerHTML = (preview.tickets || []).map(t => {
+        const checked = t.checked ? 'checked' : '';
+        const catClass = _rrCatClass(t.category);
+        return `<label class="rr-ticket-row">
+          <input type="checkbox" ${checked} data-issue="${t.number}" data-cat="${escHtml(t.category)}" onchange="_rrUpdateState()">
+          <span class="rr-ticket-num">#${t.number}</span>
+          <span class="rr-ticket-title" title="${escHtml(t.title)}">${escHtml(t.title)}</span>
+          <span class="rr-ticket-cat ${catClass}">${escHtml(t.category)}</span>
+        </label>`;
+      }).join('');
+    }
+
+    document.getElementById('rr-loading').classList.add('hidden');
+    document.getElementById('rr-content').classList.remove('hidden');
+    _rrUpdateState();
+  } catch (e) {
+    document.getElementById('rr-loading').classList.add('hidden');
+    const errEl = document.getElementById('rr-error');
+    errEl.textContent = 'Failed to load preview: ' + e.message;
+    errEl.classList.remove('hidden');
+  }
+}
+
+async function _rrConfirm() {
+  const repo = _smgmtRepo();
+  if (!_rrLabel || !repo) return;
+
+  const checkboxes = Array.from(document.querySelectorAll('#rr-ticket-list input[type=checkbox]'));
+  const ticketNumbers = checkboxes.filter(c => c.checked).map(c => parseInt(c.dataset.issue, 10));
+  if (ticketNumbers.length === 0) return;
+
+  const confirmBtn = document.getElementById('rr-confirm-btn');
+  if (confirmBtn) { confirmBtn.disabled = true; confirmBtn.textContent = 'Starting…'; }
+
+  try {
+    const res = await fetch(
+      `/api/sprints/${encodeURIComponent(_rrLabel)}/rerun?project=${encodeURIComponent(repo)}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ticket_numbers: ticketNumbers, auto_run: true }),
+      }
+    );
     if (!res.ok) throw new Error(await res.text());
     const data = await res.json();
-    const coderCount = (data.decisions || []).filter(d => d.action === 'dispatch_coder').length;
-    const testerCount = (data.decisions || []).filter(d => d.action === 'dispatch_tester').length;
-    const skipCount = data.skip_count || 0;
-    const parts = [];
-    if (coderCount) parts.push(`${coderCount} coding`);
-    if (testerCount) parts.push(`${testerCount} testing`);
-    if (skipCount) parts.push(`${skipCount} skipped`);
-    _smgmtShowToast(`Re-run started: ${parts.join(', ') || '0 dispatched'}.`);
-    // Clear cached outcome so the band disappears after rerun
-    delete _smgmtOutcomeCache[label];
+    _rrClose();
+    delete _smgmtOutcomeCache[_rrLabel];
+    const subLabel = data.sub_label ? sprintLabelDisplay(data.sub_label) : '';
+    if (data.errors && data.errors.length > 0) {
+      _smgmtShowToast(`Re-run started with errors on ${subLabel}. Check labels manually.`);
+    } else {
+      _smgmtShowToast(`Re-run started → ${subLabel}: ${ticketNumbers.length} ticket${ticketNumbers.length !== 1 ? 's' : ''} dispatched.`);
+    }
     await loadSprintMgmt();
   } catch (e) {
-    alert('Failed to re-run sprint: ' + e.message);
+    const errEl = document.getElementById('rr-error');
+    errEl.textContent = 'Failed to re-run sprint: ' + e.message;
+    errEl.classList.remove('hidden');
+    if (confirmBtn) { confirmBtn.disabled = false; confirmBtn.textContent = _rrVersionedLabel ? `Create ${sprintLabelDisplay(_rrVersionedLabel)} and Run` : 'Create sprint and run'; }
   }
 }
 
@@ -7110,21 +7285,60 @@ async function smgmtFinishSprint(label) {
   const repo = _smgmtRepo();
   if (!repo) return;
   const displayName = sprintLabelDisplay(label);
-  const tickets = (_smgmtData?.issues || []).filter(t => t.sprint_label === label);
-  if (!confirm(`Finish ${displayName}?\n\n${tickets.length} open issue${tickets.length !== 1 ? 's' : ''} will be moved to UAT and closed. This cannot be undone.`)) return;
   const parts = repo.split('/');
   const owner = parts[0];
   const repoName = parts.slice(1).join('/');
+
+  let preview;
+  try {
+    const res = await fetch(
+      `/api/projects/${encodeURIComponent(owner)}/${encodeURIComponent(repoName)}/sprints/${encodeURIComponent(label)}/finish-preview`
+    );
+    preview = await res.json();
+    if (!res.ok) { alert('Error: ' + (preview.detail || 'unknown error')); return; }
+  } catch (e) {
+    alert('Failed to load preview: ' + e.message);
+    return;
+  }
+
+  if (preview.conflict_error) { alert(preview.conflict_error); return; }
+
+  const uatTickets = preview.uat_tickets || [];
+  const nonUatTickets = preview.non_uat_tickets || [];
+  const totalOpen = uatTickets.length + nonUatTickets.length;
+
+  let msg;
+  if (totalOpen === 0) {
+    msg = `Finish ${displayName}?\n\nNo open issues in this sprint.`;
+  } else if (nonUatTickets.length === 0) {
+    msg = `Finish ${displayName}?\n\nThis will close ${uatTickets.length} ticket${uatTickets.length !== 1 ? 's' : ''} currently in UAT (they've passed sprint-branch testing).`;
+  } else {
+    const createNote = preview.next_sprint_exists ? '' : ' (will be created)';
+    const nonUatList = nonUatTickets.map(t => `  #${t.number} [${t.status}] ${t.title}`).join('\n');
+    const uatLine = uatTickets.length > 0 ? `\n\n${uatTickets.length} UAT ticket${uatTickets.length !== 1 ? 's' : ''} will be closed as completed.` : '';
+    msg = `Finish ${displayName}?\n\n${nonUatTickets.length} ticket${nonUatTickets.length !== 1 ? 's' : ''} not in UAT will be moved to ${preview.next_sprint_label}${createNote}:\n${nonUatList}${uatLine}`;
+  }
+
+  if (!confirm(msg)) return;
+
   try {
     const res = await fetch(
       `/api/projects/${encodeURIComponent(owner)}/${encodeURIComponent(repoName)}/sprints/${encodeURIComponent(label)}/finish`,
-      { method: 'POST' }
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confirmed: true, move_non_uat_to: preview.next_sprint_label }),
+      }
     );
     const data = await res.json();
     if (data.errors && data.errors.length > 0) {
-      alert(`Closed ${data.closed} issue${data.closed !== 1 ? 's' : ''}; ${data.errors.length} error(s): ${data.errors.join('; ')}`);
+      alert(`Finished with errors — closed ${data.closed}, moved ${data.moved}: ${data.errors.join('; ')}`);
     } else {
-      _smgmtShowToast(`Sprint finished — ${data.closed} issue${data.closed !== 1 ? 's' : ''} moved to UAT and closed.`);
+      const moved = data.moved || 0;
+      const closed = data.closed || 0;
+      let toastMsg = `Sprint finished — ${closed} UAT ticket${closed !== 1 ? 's' : ''} closed`;
+      if (moved > 0) toastMsg += `, ${moved} ticket${moved !== 1 ? 's' : ''} moved to ${data.next_sprint_label}`;
+      _smgmtShowToast(toastMsg + '.');
     }
     await loadSprintMgmt();
   } catch (e) {
@@ -8233,6 +8447,13 @@ function _nsShowError(msg) {
   el.classList.remove('hidden');
 }
 
+// ── Shared attachment constants ───────────────────────────────────────────
+// Single source of truth for allowed file extensions in both the New Ticket
+// (NT) and Bulk Create (BC) attachment flows.  Must stay in sync with the
+// `accept` attributes on #nt-files and #bc-file-input, and with the
+// `--attachment` flag accepted by scripts/create_ticket.py.
+const BC_ALLOWED_EXTS = new Set(['.png', '.jpg', '.jpeg', '.pdf', '.md', '.html', '.htm']);
+
 // ── New Ticket modal ──────────────────────────────────────────────────────
 let _ntDraftId = null;
 let _ntDraftGenerated = false;
@@ -8263,6 +8484,9 @@ function _ntOnDrop(event) {
 }
 
 function _ntAddFiles(incoming) {
+  if (typeof BC_ALLOWED_EXTS === 'undefined') {
+    throw new Error('BC_ALLOWED_EXTS is not defined — cannot validate attachment extensions');
+  }
   const errEl = document.getElementById('nt-file-error');
   if (errEl) { errEl.textContent = ''; errEl.classList.add('hidden'); }
   let totalSize = _ntFiles.reduce((s, f) => s + f.size, 0);
@@ -8517,6 +8741,11 @@ function _setupModals() {
     document.getElementById('ns-submit-btn').disabled = _parseSprintNum(this.value) === null;
   });
 
+  document.getElementById('rr-close-btn').addEventListener('click', _rrClose);
+  document.getElementById('rr-cancel-btn').addEventListener('click', _rrClose);
+  document.getElementById('rr-backdrop').addEventListener('click', _rrClose);
+  document.getElementById('rr-confirm-btn').addEventListener('click', _rrConfirm);
+
   document.getElementById('ns-close-btn').addEventListener('click', () => _nsClose(false));
   document.getElementById('ns-cancel-btn').addEventListener('click', () => _nsClose(false));
   document.getElementById('ns-backdrop').addEventListener('click', () => _nsClose(false));
@@ -8748,7 +8977,6 @@ let _bcLastInput    = null;      // preserved Step 1 inputs for Recreate
 let _bcTabInited    = false;     // whether the tab has been populated once
 
 const BC_MAX_PROMPTS = 25;
-const BC_ALLOWED_EXTS = new Set(['.png', '.jpg', '.jpeg']);
 
 /** Called each time the Bulk Create tab becomes active. */
 function _bcInitTab() {
@@ -8903,7 +9131,7 @@ function _bcAddFiles(incoming) {
     const ext = '.' + f.name.split('.').pop().toLowerCase();
     if (!BC_ALLOWED_EXTS.has(ext)) {
       if (errEl) {
-        errEl.textContent = `File '${f.name}' is not a PNG or JPG image.`;
+        errEl.textContent = `File '${f.name}' has a disallowed extension ('${ext}').`;
         errEl.classList.remove('hidden');
       }
       continue;
@@ -10318,6 +10546,33 @@ function _cmpEmptyState(title, msg) {
   </div>
 </div>
 
+<!-- ── Re-run Sprint modal (issue #512) ── -->
+<div class="modal-backdrop hidden" id="rr-backdrop"></div>
+<div class="modal hidden" id="rr-modal"
+     role="dialog" aria-modal="true" aria-labelledby="rr-modal-title">
+  <div class="modal-header">
+    <span class="modal-title" id="rr-modal-title">Re-run Sprint?</span>
+    <button class="modal-close" id="rr-close-btn" aria-label="Close">&times;</button>
+  </div>
+  <div class="modal-body">
+    <div id="rr-loading" style="color:var(--text-muted);padding:8px 0">Loading preview…</div>
+    <div id="rr-content" class="hidden">
+      <div class="rr-controls">
+        <span style="font-size:13px;color:var(--text-secondary)">Select tickets to move to child sprint:</span>
+        <a onclick="_rrSelectAll(true)">Select all</a>
+        <a onclick="_rrSelectAll(false)">Select none</a>
+      </div>
+      <div class="rr-ticket-list" id="rr-ticket-list"></div>
+      <div class="rr-uat-warning" id="rr-uat-warning"></div>
+    </div>
+    <div class="modal-error hidden" id="rr-error"></div>
+  </div>
+  <div class="modal-footer">
+    <button class="btn-ghost" id="rr-cancel-btn" type="button">Cancel</button>
+    <button class="btn-warning" id="rr-confirm-btn" type="button" disabled>Create sprint and run</button>
+  </div>
+</div>
+
 <!-- ── New Sprint modal ── -->
 <div class="modal-backdrop hidden" id="ns-backdrop"></div>
 <div class="modal ns-modal hidden" id="ns-modal"
@@ -10400,7 +10655,9 @@ function _cmpEmptyState(title, msg) {
              ondrop="_ntOnDrop(event)"
              onclick="_ntPickFiles()">
           <span class="dt-dropzone-hint">Drop files here or click to attach</span>
-          <input type="file" id="nt-files" multiple style="display:none" onchange="_ntOnFileInput(event)">
+          <input type="file" id="nt-files" multiple style="display:none"
+                 accept=".png,.jpg,.jpeg,.pdf,.md,.html,.htm"
+                 onchange="_ntOnFileInput(event)">
         </div>
         <div class="bc-file-queue" id="nt-file-queue"></div>
         <div class="bc-file-error hidden" id="nt-file-error"></div>

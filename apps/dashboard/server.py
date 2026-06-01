@@ -74,6 +74,12 @@ _REPO_ROOT = Path(__file__).parent.parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 from services.logging import log as _slog
+from services.sprint_manager.estimate_issue import (
+    fetch_issue as _ei_fetch_issue,
+    run_estimator as _ei_run_estimator,
+    apply_label as _ei_apply_label,
+    apply_estimated_status as _ei_apply_estimated_status,
+)
 
 # Backup module lives in services/sprint_manager/ — add it to sys.path
 import sys as _sys
@@ -1361,6 +1367,43 @@ def get_test_report(issue_id: int, repo: Optional[str] = None):
         raise _gh_error(e)
     except ValueError as e:
         raise HTTPException(400, detail=str(e))
+
+
+@app.post("/api/issues/{issue_id}/estimate")
+def estimate_issue_on_demand(request: Request, issue_id: int, repo: str):
+    """Run the issue estimator on demand and apply the size label.
+
+    Returns {"ok": True, "size": "S"|"M"|"L"|"XL"} on success.
+    """
+    _slog.event("route.entry", project="dashboard", request_id=request.state.request_id,
+                route="/api/issues/{issue_id}/estimate", method="POST", issue_id=issue_id)
+    try:
+        issue_data = _ei_fetch_issue(issue_id, repo)
+    except subprocess.CalledProcessError as e:
+        raise HTTPException(404, detail=f"Could not fetch issue #{issue_id}: {e}")
+
+    estimate = _ei_run_estimator(issue_id, issue_data)
+    if estimate is None:
+        raise HTTPException(500, detail=f"Estimation failed for #{issue_id}")
+
+    size = estimate.get("size")
+    if not size:
+        raise HTTPException(500, detail="Estimator returned no size")
+
+    try:
+        _ei_apply_label(issue_id, repo, size)
+    except subprocess.CalledProcessError as e:
+        raise HTTPException(500, detail=f"Failed to apply size label: {e}")
+
+    _ei_apply_estimated_status(issue_id, repo)
+
+    project_root = _project_root_path(repo)
+    estimates_dir = _commander_dir(project_root) / "estimates"
+    estimates_dir.mkdir(parents=True, exist_ok=True)
+    estimate_path = estimates_dir / f"issue-{issue_id}.json"
+    estimate_path.write_text(json.dumps(estimate, indent=2), encoding="utf-8")
+
+    return {"ok": True, "size": size}
 
 
 # ── project endpoints ─────────────────────────────────────────────────────────
@@ -2785,6 +2828,10 @@ def _sprint_goal_path(project_root: Path, sprint_label: str) -> Path:
     return _commander_dir(project_root) / "sprints" / f"{sprint_label}-goal.txt"
 
 
+def _sprint_plan_path(project_root: Path, sprint_label: str) -> Path:
+    return _commander_dir(project_root) / "sprints" / f"{sprint_label}-plan.json"
+
+
 def _load_sprint_order(project_root: Path, all_sprint_labels: list[str]) -> list[str]:
     """Load sprint order from file; fill missing/new sprint labels in natural order."""
     order_path = _sprint_order_path(project_root)
@@ -2969,6 +3016,14 @@ def get_sprint_management_issues(repo: str):
     result_issues = []
     # Count open tickets per sprint label (both plain and dotted)
     sprint_ticket_counts: dict[str, int] = {lbl: 0 for lbl in all_sprint_labels}
+
+    # Resolve estimates dir once for stale-hash checks (issue #453)
+    try:
+        _est_project_root = _project_root_path(repo)
+        _estimates_dir = _commander_dir(_est_project_root) / "estimates"
+    except Exception:
+        _estimates_dir = None
+
     for iss in issues:
         _is_summary = (
             any(lbl["name"] == "sprint-summary" for lbl in iss.get("labels", []))
@@ -2984,15 +3039,20 @@ def get_sprint_management_issues(repo: str):
                 found_sprint_label = lbl["name"]
                 sprint_num = int(m.group(1))
                 break
+
+        iss_body = iss.get("body", "") or ""
+        estimate_stale = _check_estimate_stale(iss["number"], iss_body, _estimates_dir)
+
         result_issues.append({
             "number": iss["number"],
             "title": iss["title"],
-            "body": iss.get("body", "") or "",
+            "body": iss_body,
             "labels": iss.get("labels", []),
             "sprint": sprint_num,
             "sprint_label": found_sprint_label,
             "status": github_client.classify_issue(iss),
             "url": iss.get("url", ""),
+            "estimate_stale": estimate_stale,
         })
         if found_sprint_label is not None and found_sprint_label in sprint_ticket_counts:
             sprint_ticket_counts[found_sprint_label] += 1
@@ -3025,6 +3085,31 @@ def get_sprint_management_issues(repo: str):
     project_root = _project_root_path(repo)
     order = _load_sprint_order(project_root, non_empty_sprint_labels)
 
+    # Apply per-sprint plan.json ordering; fallback to ascending issue number (issue #441)
+    sprint_issues_map: dict[str, list] = {}
+    unassigned_issues = []
+    for iss in result_issues:
+        lbl = iss.get("sprint_label")
+        if lbl:
+            sprint_issues_map.setdefault(lbl, []).append(iss)
+        else:
+            unassigned_issues.append(iss)
+    ordered_result: list = []
+    for lbl, iss_list in sprint_issues_map.items():
+        plan_path = _sprint_plan_path(project_root, lbl)
+        if plan_path.exists():
+            try:
+                plan_order: list[int] = json.loads(plan_path.read_text(encoding="utf-8"))
+                plan_idx = {n: i for i, n in enumerate(plan_order)}
+                iss_list.sort(key=lambda i: plan_idx.get(i["number"], len(plan_order)))
+            except Exception:
+                iss_list.sort(key=lambda i: i["number"])
+        else:
+            iss_list.sort(key=lambda i: i["number"])
+        ordered_result.extend(iss_list)
+    ordered_result.extend(unassigned_issues)
+    result_issues = ordered_result
+
     # Placeholder sprint = lowest positive N such that no sprint-N label exists (issue #364)
     _used = set(sprints)
     placeholder_sprint = 1
@@ -3038,6 +3123,90 @@ def get_sprint_management_issues(repo: str):
         "empty_sprint_labels": empty_sprint_labels,
         "placeholder_sprint": placeholder_sprint,
     }
+
+
+@app.get("/api/sprints/timeline")
+def get_sprint_timeline(project: str):
+    """Return Gantt-ready timeline data for all ran sprints in a project (issue #431).
+
+    Reads sprint-N-state.json files from the commander directory.
+    Each entry includes: sprint_label, display_name, state, start_date, end_date, ticket_count.
+
+    State values: "running" | "cancelled" | "completed"
+    """
+    project_root = _project_root_path(project)
+    commander = _commander_dir(project_root)
+    sprints_dir = commander / "sprints"
+
+    if not sprints_dir.exists():
+        return {"sprints": []}
+
+    def _parse_iso_ts(s: Optional[str]) -> Optional[float]:
+        if not s:
+            return None
+        try:
+            dt = datetime.fromisoformat(s.rstrip("Z"))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt.timestamp()
+        except Exception:
+            return None
+
+    def _to_iso(ts: float) -> str:
+        return datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    results = []
+    state_label_re = re.compile(r"^sprint-(\d+(?:\.\d+)?)-state\.json$")
+
+    for state_file in sprints_dir.glob("sprint-*-state.json"):
+        m = state_label_re.match(state_file.name)
+        if not m:
+            continue
+        sprint_num_str = m.group(1)
+        sprint_label = f"sprint-{sprint_num_str}"
+
+        try:
+            state_data = json.loads(state_file.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            continue
+
+        start_ts_str = state_data.get("start_timestamp")
+        start_ts = _parse_iso_ts(start_ts_str)
+        if start_ts is None:
+            continue
+
+        wall_clock = state_data.get("wall_clock_secs", 0.0) or 0.0
+        issues = state_data.get("issues", [])
+        ticket_count = len(issues)
+
+        is_running = _is_sprint_running(project_root, sprint_label)
+
+        if is_running:
+            state = "running"
+            end_ts = datetime.now(timezone.utc).timestamp()
+        else:
+            # Check cancelled flag from sprint JSON
+            json_path = _sprint_json_path(project_root, sprint_label)
+            sprint_json = _sprint_json_read(json_path)
+            if sprint_json.get("status") == "cancelled":
+                state = "cancelled"
+            else:
+                state = "completed"
+            end_ts = start_ts + wall_clock if wall_clock > 0 else start_ts
+
+        results.append({
+            "label": sprint_label,
+            "display_name": f"Sprint {sprint_num_str}",
+            "state": state,
+            "start_date": _to_iso(start_ts),
+            "end_date": _to_iso(end_ts),
+            "ticket_count": ticket_count,
+        })
+
+    # Sort chronologically by start_date
+    results.sort(key=lambda s: s["start_date"])
+
+    return {"sprints": results}
 
 
 @app.get("/api/sprints/summaries")
@@ -3208,6 +3377,14 @@ def save_sprint_order(project: str, body: SprintOrderBody):
 _MIGRATION_STATUS_LABELS = {"UAT", "UAT-approved", "SIT", "in-progress", "needs-rework", "need-rework"}
 
 
+# ── Sprint-issues helpers ─────────────────────────────────────────────────────
+
+def _get_sprint_issues(project: str, sprint_label: str) -> list[dict]:
+    """Fetch open GitHub issues and filter to those carrying sprint_label."""
+    issues = github_client.list_open_issues_with_body(repo_name=project, limit=200)
+    return [iss for iss in issues if any(lbl["name"] == sprint_label for lbl in iss.get("labels", []))]
+
+
 # ── Estimate-summary helpers (issue #211) ────────────────────────────────────
 
 def _size_to_minutes(size: str) -> int:
@@ -3231,15 +3408,9 @@ def get_sprint_estimate_summary(sprint_label: str, project: str):
         raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")
 
     try:
-        issues = github_client.list_open_issues_with_body(repo_name=project, limit=200)
+        sprint_issues = _get_sprint_issues(project, sprint_label)
     except subprocess.CalledProcessError as e:
         raise _gh_error(e)
-
-    # Filter to issues belonging to this sprint
-    sprint_issues = [
-        iss for iss in issues
-        if any(lbl["name"] == sprint_label for lbl in iss.get("labels", []))
-    ]
 
     _SIZE_LABELS = ["S", "M", "L", "XL"]  # ordered smallest to largest
     size_counts: dict[str, int] = {}
@@ -3327,25 +3498,52 @@ def get_sprint_cycle_check(sprint_label: str, project: str):
     return {"has_cycle": False}
 
 
+def _check_estimate_stale(issue_num: int, current_body: str, estimates_dir) -> bool:
+    """Return True if the stored estimate is stale (body changed or hash missing).
+
+    Returns False when no estimate exists (no badge needed) or when the body
+    hash matches the stored value.  Returns True when an estimate exists but
+    lacks a body_hash field, or when the hash differs from the current body.
+    """
+    if estimates_dir is None:
+        return False
+    est_path = estimates_dir / f"issue-{issue_num}.json"
+    if not est_path.exists():
+        return False
+    try:
+        est = json.loads(est_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return False
+    stored_hash = est.get("body_hash")
+    if not stored_hash:
+        return True  # missing hash → treat as stale (AC: existing records without body_hash)
+    current_hash = hashlib.sha256(current_body.encode()).hexdigest()
+    return current_hash != stored_hash
+
+
+_STALE_ESTIMATE_DAYS = 7
+
+
 @app.get("/api/sprints/{sprint_label}/preflight")
 def get_sprint_preflight(sprint_label: str, project: str):
     """Preflight check returned before running a sprint.
 
-    Returns DAG visualization data (layers, edges, ticket metadata) alongside ok flag.
+    Returns DAG visualization data (layers, edges, ticket metadata) alongside ok flag,
+    warnings (unestimated, stale_estimates, missing_ac), and cycle path if detected.
     """
     if not _SPRINT_LABEL_RE.match(sprint_label):
         raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")
 
     dag_payload: dict | None = None
+    warnings: dict = {"unestimated": [], "stale_estimates": [], "missing_ac": []}
+    cycle_path: list[str] | None = None
+
     try:
-        issues = github_client.list_open_issues_with_body(repo_name=project, limit=200)
-        sprint_issues = [
-            iss for iss in issues
-            if any(lbl["name"] == sprint_label for lbl in iss.get("labels", []))
-        ]
+        sprint_issues = _get_sprint_issues(project, sprint_label)
         if sprint_issues:
             project_root = _project_root_path(project)
             estimates_dir = _commander_dir(project_root) / "estimates"
+            stale_cutoff = datetime.now(timezone.utc) - timedelta(days=_STALE_ESTIMATE_DAYS)
 
             ticket_map: dict[str, dict] = {}
             for iss in sprint_issues:
@@ -3364,14 +3562,20 @@ def get_sprint_preflight(sprint_label: str, project: str):
 
                 size: str | None = None
                 files_touched: list[str] = []
+                est_stale = False
                 est_path = estimates_dir / f"issue-{num}.json"
                 if est_path.exists():
                     try:
                         est = json.loads(est_path.read_text(encoding="utf-8"))
                         size = est.get("size")
                         files_touched = est.get("files_likely_affected") or []
+                        mtime = datetime.fromtimestamp(est_path.stat().st_mtime, tz=timezone.utc)
+                        est_stale = mtime < stale_cutoff
                     except (json.JSONDecodeError, OSError):
                         pass
+
+                body = iss.get("body") or ""
+                has_ac = "## Acceptance Criteria" in body
 
                 tid = f"#{num}"
                 ticket_map[tid] = {
@@ -3382,6 +3586,13 @@ def get_sprint_preflight(sprint_label: str, project: str):
                     "size": size,
                     "files_touched": files_touched,
                 }
+
+                if size is None:
+                    warnings["unestimated"].append(tid)
+                if est_stale:
+                    warnings["stale_estimates"].append(tid)
+                if not has_ac:
+                    warnings["missing_ac"].append(tid)
 
             layers: list[list[str]]
             edges: list[list[str]]
@@ -3394,6 +3605,8 @@ def get_sprint_preflight(sprint_label: str, project: str):
                 if isinstance(dag_result, _CycleError):
                     layers = [list(ticket_map.keys())]
                     edges = []
+                    if dag_result.cycles:
+                        cycle_path = dag_result.cycles[0]
                 else:
                     layers = dag_result.layers
                     edges = [[e[0], e[1]] for e in dag_result.edges]
@@ -3409,7 +3622,15 @@ def get_sprint_preflight(sprint_label: str, project: str):
     except subprocess.CalledProcessError:
         pass  # DAG is decorative — don't fail the preflight
 
-    return {"ok": True, "sprint_label": sprint_label, "project": project, "dag": dag_payload}
+    return {
+        "ok": True,
+        "sprint_label": sprint_label,
+        "project": project,
+        "dag": dag_payload,
+        "warnings": warnings,
+        "cycle": cycle_path,
+        "stale_threshold_days": _STALE_ESTIMATE_DAYS,
+    }
 
 
 @app.post("/api/sprints/run", status_code=202)
@@ -3860,6 +4081,47 @@ def get_dispatch_log(sprint_label: str, project: str, tail_lines: int = 200):
     from log_source import read_log  # local import keeps startup fast
     project_root = _project_root_path(project)
     return read_log("dispatch", project_root, label=sprint_label, tail_lines=tail_lines)
+
+
+@app.get("/api/sprints/{sprint_label}/state-full")
+def get_sprint_state_full(sprint_label: str, project: str):
+    """Return full sprint state including per-ticket issues for the comparison view (issue #435)."""
+    if not _SPRINT_LABEL_RE.match(sprint_label):
+        raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")
+
+    project_root = _project_root_path(project)
+    sprints_dir = _commander_dir(project_root) / "sprints"
+
+    if not sprints_dir.exists():
+        raise HTTPException(404, detail="No sprints directory found")
+
+    for state_path in sprints_dir.glob("sprint-*-state.json"):
+        try:
+            state_data = json.loads(state_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            continue
+        if state_data.get("sprint_label") != sprint_label:
+            continue
+
+        issues = state_data.get("issues") or []
+        dispatch_count = sum(1 for i in issues if i.get("coder_started_at") is not None)
+        has_failed = any(
+            i.get("agent_status") == "failed"
+            or i.get("failure_reason")
+            or i.get("status") == "skipped"
+            for i in issues
+        )
+        all_done = bool(issues) and all(i.get("status") == "done" for i in issues)
+        if all_done and not has_failed:
+            outcome = "success"
+        elif has_failed:
+            outcome = "partial"
+        else:
+            outcome = "unknown"
+
+        return {**state_data, "outcome": outcome, "dispatch_count": dispatch_count}
+
+    raise HTTPException(404, detail=f"Sprint state not found for {sprint_label!r}")
 
 
 @app.get("/api/sprints/{sprint_label}/issue/{issue_num}/log")
@@ -4412,6 +4674,26 @@ def reorder_sprint_tickets(sprint_label: str, body: SprintTicketReorderBody):
     return {"ok": True}
 
 
+@app.post("/api/sprints/{sprint_label}/plan")
+async def save_sprint_plan(sprint_label: str, project: str, request: Request):
+    """Persist ticket execution order to sprint-{label}-plan.json (issue #441)."""
+    if not _SPRINT_LABEL_RE.match(sprint_label):
+        raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(400, detail="Body must be a JSON array of integers")
+    if not isinstance(body, list) or not all(isinstance(n, int) for n in body):
+        raise HTTPException(400, detail="Body must be a JSON array of integers")
+    project_root = _project_root_path(project)
+    plan_path = _sprint_plan_path(project_root, sprint_label)
+    plan_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = plan_path.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(body), encoding="utf-8")
+    os.replace(str(tmp), str(plan_path))
+    return {"ok": True}
+
+
 class SprintDeleteBody(BaseModel):
     labels: list[str]  # list of sprint-N label names to delete
     project: str
@@ -4483,6 +4765,48 @@ async def delete_empty_sprints(body: SprintDeleteBody):
     return result
 
 
+class SprintCleanupBody(BaseModel):
+    project: str
+
+
+@app.post("/api/sprints/cleanup-empty")
+async def cleanup_empty_sprints(body: SprintCleanupBody):
+    """Delete all sprint labels with zero open tickets from GitHub."""
+    try:
+        all_sprint_labels = github_client.list_sprint_labels(repo_name=body.project)
+    except subprocess.CalledProcessError as e:
+        raise _gh_error(e)
+
+    try:
+        issues = github_client.list_open_issues_with_body(repo_name=body.project, limit=200)
+    except subprocess.CalledProcessError as e:
+        raise _gh_error(e)
+
+    sprint_re_local = re.compile(r"^sprint-\d+(\.\d+)?$")
+    labeled_sprints: set[str] = set()
+    for iss in issues:
+        for lbl in iss.get("labels", []):
+            if sprint_re_local.match(lbl["name"]):
+                labeled_sprints.add(lbl["name"])
+
+    empty_labels = [l for l in all_sprint_labels if l not in labeled_sprints]
+
+    deleted = []
+    errors = []
+    for label in empty_labels:
+        try:
+            github_client.delete_label(label, repo_name=body.project)
+            deleted.append(label)
+        except subprocess.CalledProcessError as e:
+            errors.append(f"{label}: {e.stderr.strip() if e.stderr else str(e)}")
+
+    github_client.invalidate("sprints:")
+    result: dict = {"ok": True, "deleted": deleted}
+    if errors:
+        result["errors"] = errors
+    return result
+
+
 def _rerun_policy(labels: set[str]) -> tuple[str, list[str]]:
     """Return (action, labels_to_strip) for a sprint ticket based on its current labels.
 
@@ -4536,6 +4860,49 @@ def get_sprint_estimate(sprint_label: str, project: str):
         raise HTTPException(500, detail=f"Could not read estimate file: {e}")
 
     return data
+
+
+@app.get("/api/estimates/batch")
+def get_estimates_batch(project: str, issues: str = ""):
+    """Return summed estimated_hours for a list of issue numbers from .commander/estimates/.
+
+    Query params:
+      - project: repo slug (owner/repo)
+      - issues: comma-separated issue numbers, e.g. "431,432,433"
+
+    Returns {total_hours: float|null, complete: bool}.
+    complete=true and total_hours is the sum when every issue has an estimate file with
+    an estimated_hours value.  complete=false and total_hours is null when any issue is
+    missing or the estimates directory is absent/unreadable.
+    """
+    issue_nums = [int(p) for p in issues.split(",") if p.strip().isdigit()]
+
+    if not issue_nums:
+        return {"total_hours": 0.0, "complete": True}
+
+    try:
+        project_root = _project_root_path(project)
+        estimates_dir = _commander_dir(project_root) / "estimates"
+        if not estimates_dir.is_dir():
+            return {"total_hours": None, "complete": False}
+    except Exception:
+        return {"total_hours": None, "complete": False}
+
+    total = 0.0
+    for num in issue_nums:
+        path = estimates_dir / f"issue-{num}.json"
+        if not path.exists():
+            return {"total_hours": None, "complete": False}
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            h = data.get("estimated_hours")
+            if h is None:
+                return {"total_hours": None, "complete": False}
+            total += float(h)
+        except (json.JSONDecodeError, OSError, ValueError):
+            return {"total_hours": None, "complete": False}
+
+    return {"total_hours": total, "complete": True}
 
 
 @app.get("/api/sprints/{sprint_label}/state")
@@ -5039,14 +5406,9 @@ def rerun_sprint_preview(sprint_label: str, project: str):
         raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")
 
     try:
-        issues = github_client.list_open_issues_with_body(repo_name=project, limit=200)
+        sprint_issues = _get_sprint_issues(project, sprint_label)
     except subprocess.CalledProcessError as e:
         raise _gh_error(e)
-
-    sprint_issues = [
-        iss for iss in issues
-        if any(lbl["name"] == sprint_label for lbl in iss.get("labels", []))
-    ]
 
     redispatch_count = 0
     tester_count = 0
@@ -5110,14 +5472,9 @@ def rerun_sprint(sprint_label: str, project: str, body: SprintRerunBody):
     run_id = str(uuid.uuid4())
 
     try:
-        issues = github_client.list_open_issues_with_body(repo_name=project, limit=200)
+        sprint_issues = _get_sprint_issues(project, sprint_label)
     except subprocess.CalledProcessError as e:
         raise _gh_error(e)
-
-    sprint_issues = [
-        iss for iss in issues
-        if any(lbl["name"] == sprint_label for lbl in iss.get("labels", []))
-    ]
 
     # Evaluate per-ticket policy
     decisions: list[dict] = []
@@ -5318,20 +5675,18 @@ def delete_sprint(sprint_label: str, project: str):
         raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")
 
     if _is_sprint_running(_project_root_path(project), sprint_label):
-        raise HTTPException(409, detail="Cannot delete a sprint that is currently running")
+        return JSONResponse(
+            status_code=409,
+            content={"error": "Sprint is currently running.", "suggestion": "Cancel the sprint first, then delete."},
+        )
 
     project_root = _project_root_path(project)
     commander = _commander_dir(project_root)
 
     try:
-        issues = github_client.list_open_issues_with_body(repo_name=project, limit=200)
+        sprint_issues = _get_sprint_issues(project, sprint_label)
     except subprocess.CalledProcessError as e:
         raise _gh_error(e)
-
-    sprint_issues = [
-        iss for iss in issues
-        if any(lbl["name"] == sprint_label for lbl in iss.get("labels", []))
-    ]
 
     errors: list[str] = []
     unlabelled_count = 0
@@ -5389,17 +5744,10 @@ async def finish_sprint(owner: str, repo_name: str, label: str):
     if _is_sprint_running(project_root, label):
         raise HTTPException(409, detail=f"Sprint {label} is currently running — finish it after the run completes")
 
-    # Fetch all open issues for the repo
     try:
-        all_issues = github_client.list_open_issues_with_body(repo_name=repo, limit=200)
+        sprint_issues = _get_sprint_issues(repo, label)
     except subprocess.CalledProcessError as e:
         raise _gh_error(e)
-
-    # Filter to issues belonging to this sprint label
-    sprint_issues = [
-        iss for iss in all_issues
-        if any(lbl["name"] == label for lbl in iss.get("labels", []))
-    ]
 
     closed = 0
     errors: list[str] = []

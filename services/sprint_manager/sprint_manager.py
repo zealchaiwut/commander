@@ -4533,6 +4533,16 @@ def run_sprint(
 
         if _skip_coder:
             print(f"  [rerun] SIT ticket: dispatching tester directly for #{num}")
+            try:
+                structured_log.event(
+                    "issue.rerun_tester_direct",
+                    run_id=_run_id,
+                    issue_num=num,
+                    sprint_label=label,
+                    agent_role="sprint",
+                )
+            except Exception:
+                pass
         else:
             # -- Dispatch coder --
             issue_state.set_agent_status("coder_dispatched")

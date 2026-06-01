@@ -5,6 +5,18 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Commander — Project</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.30.0/dist/tabler-icons.min.css">
+  <script>
+  (function() {
+    var m = window.location.pathname.match(/^\/project\/([^/]+)/);
+    var slug = m ? decodeURIComponent(m[1]) : '';
+    var k = 'settings:' + slug + ':theme';
+    var v = localStorage.getItem(k) || localStorage.getItem('theme') || 'light';
+    var theme = v === 'system'
+      ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+      : (v === 'dark' ? 'dark' : 'light');
+    document.documentElement.setAttribute('data-theme', theme);
+  })();
+  </script>
   <style>
     /* ── Variables ── */
     :root {
@@ -457,6 +469,89 @@
     /* Sprint Mgmt pane manages its own padding via toolbar + smgmt-content */
     #pane-sprint-mgmt { padding: 0; }
 
+    /* ── Compare Sprints tab (issue #435) ── */
+    .cmp-page-hdr { margin-bottom: 24px; }
+    .cmp-page-hdr h2 { font-size: 18px; font-weight: 700; margin: 0 0 4px; }
+    .cmp-page-hdr p  { font-size: 13px; color: var(--text-sub); margin: 0; }
+    .cmp-picker-row {
+      display: flex; align-items: center; gap: 12px;
+      margin-bottom: 28px; flex-wrap: wrap;
+    }
+    .cmp-picker-label { font-size: 13px; font-weight: 600; color: var(--text-sub); white-space: nowrap; }
+    .cmp-picker-select {
+      appearance: none; background: var(--surface); color: var(--text);
+      border: 1px solid var(--border); border-radius: 6px;
+      padding: 7px 32px 7px 10px; font-size: 13px; cursor: pointer;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236b7280' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+      background-repeat: no-repeat; background-position: right 10px center; min-width: 160px;
+    }
+    .cmp-picker-select:focus { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .cmp-picker-vs { font-size: 13px; font-weight: 700; color: var(--text-sub); padding: 0 4px; }
+    .cmp-warn-banner {
+      display: flex; align-items: center; gap: 8px;
+      background: color-mix(in srgb, #f59e0b 12%, transparent);
+      border: 1px solid color-mix(in srgb, #f59e0b 40%, transparent);
+      border-radius: 6px; padding: 10px 14px; font-size: 13px; margin-bottom: 20px;
+    }
+    .cmp-warn-banner .ti { color: #f59e0b; flex-shrink: 0; }
+    .cmp-columns {
+      display: grid; grid-template-columns: 1fr 1fr;
+      gap: 16px; margin-bottom: 32px;
+    }
+    @media (max-width: 680px) { .cmp-columns { grid-template-columns: 1fr; } }
+    .cmp-col {
+      border: 1px solid var(--border); border-radius: 8px;
+      padding: 20px; background: var(--surface);
+    }
+    .cmp-col-hdr {
+      display: flex; align-items: center; gap: 10px;
+      margin-bottom: 16px;
+    }
+    .cmp-col-label { font-size: 16px; font-weight: 700; flex: 1; }
+    .cmp-badge {
+      display: inline-flex; align-items: center; gap: 4px;
+      padding: 3px 8px; border-radius: 20px; font-size: 11px; font-weight: 700;
+      text-transform: uppercase; letter-spacing: .04em;
+    }
+    .cmp-badge-success { background: color-mix(in srgb, #16a34a 15%, transparent); color: #16a34a; }
+    .cmp-badge-partial  { background: color-mix(in srgb, #f59e0b 15%, transparent); color: #d97706; }
+    .cmp-badge-failed   { background: color-mix(in srgb, #dc2626 15%, transparent); color: #dc2626; }
+    .cmp-badge-unknown  { background: color-mix(in srgb, #6b7280 15%, transparent); color: #6b7280; }
+    .cmp-metrics { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .cmp-metric {
+      background: var(--bg); border-radius: 6px; padding: 12px;
+    }
+    .cmp-metric-val { font-size: 20px; font-weight: 700; line-height: 1.1; }
+    .cmp-metric-lbl { font-size: 11px; color: var(--text-sub); margin-top: 4px; }
+    .cmp-section-title {
+      font-size: 13px; font-weight: 700; color: var(--text-sub);
+      text-transform: uppercase; letter-spacing: .06em; margin: 0 0 12px;
+    }
+    .cmp-ticket-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .cmp-ticket-table thead th {
+      text-align: left; padding: 8px 12px;
+      font-size: 11px; font-weight: 700; color: var(--text-sub);
+      border-bottom: 1px solid var(--border); text-transform: uppercase; letter-spacing: .05em;
+    }
+    .cmp-ticket-table tbody td {
+      padding: 9px 12px; border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+      vertical-align: middle;
+    }
+    .cmp-ticket-table tbody tr:last-child td { border-bottom: none; }
+    .cmp-ticket-table tbody tr:hover { background: color-mix(in srgb, var(--accent) 6%, transparent); }
+    .cmp-ticket-num { color: var(--text-sub); font-size: 11px; }
+    .cmp-cell-done    { color: #16a34a; font-weight: 600; }
+    .cmp-cell-skipped { color: #f59e0b; font-weight: 600; }
+    .cmp-cell-failed  { color: #dc2626; font-weight: 600; }
+    .cmp-cell-absent  { color: var(--text-sub); }
+    .cmp-empty-state {
+      text-align: center; padding: 64px 0; color: var(--text-sub);
+    }
+    .cmp-empty-state .ti { font-size: 40px; display: block; margin-bottom: 12px; color: var(--text-sub); }
+    .cmp-empty-state p { margin: 0; font-size: 14px; line-height: 1.6; }
+    @keyframes cmp-spin { to { transform: rotate(360deg); } }
+    .cmp-spin { display: inline-block; animation: cmp-spin .9s linear infinite; }
+
     /* Placeholder text */
     .placeholder-msg {
       padding: 48px 0;
@@ -513,6 +608,67 @@
       flex-shrink: 0; white-space: nowrap;
     }
     .ticket-close-btn:hover { background: var(--red-bg); color: var(--red); border-color: var(--red); }
+    /* ── Dependency chips (issue #432) ── */
+    .ticket-row { flex-wrap: wrap; }
+    .dep-chips-row {
+      display: flex; align-items: center; gap: 5px; flex-wrap: wrap;
+      width: 100%; padding-bottom: 4px;
+    }
+    .dep-chip-sep { width: 10px; }
+    .dep-chip-label {
+      font-size: 10px; font-weight: 700; color: var(--text-sub);
+      text-transform: uppercase; letter-spacing: .06em; flex-shrink: 0;
+    }
+    .dep-chip {
+      font-size: 11px; font-weight: 600;
+      padding: 1px 7px; border-radius: 10px;
+      cursor: pointer; border: none; font-family: inherit;
+      transition: opacity .12s;
+    }
+    .dep-chip:hover { opacity: .72; }
+    .dep-chip--blocks    { background: var(--red-bg); color: var(--red); }
+    .dep-chip--blocked-by { background: var(--purple-bg); color: var(--purple); }
+    .dep-chip--missing   { opacity: .55; cursor: default; text-decoration: line-through; }
+    /* ── Ticket detail panel (issue #432) ── */
+    .tdp {
+      display: none; position: fixed;
+      top: 48px; right: 0; bottom: 0; width: 500px; max-width: 100%;
+      background: var(--bg); border-left: 1px solid var(--border);
+      z-index: 60; overflow-y: auto;
+      box-shadow: -4px 0 24px rgba(0,0,0,.12);
+    }
+    .tdp.open { display: block; }
+    .tdp-header {
+      display: flex; align-items: flex-start; gap: 10px;
+      padding: 16px 20px; border-bottom: 1px solid var(--border);
+      position: sticky; top: 0; background: var(--bg); z-index: 1;
+    }
+    .tdp-num { font-size: 11px; color: var(--text-sub); margin-bottom: 3px; }
+    .tdp-title { font-size: 15px; font-weight: 700; line-height: 1.35; }
+    .tdp-close {
+      width: 28px; height: 28px; flex-shrink: 0;
+      display: flex; align-items: center; justify-content: center;
+      border: 1px solid var(--border); border-radius: 6px; background: none;
+      color: var(--text-muted); cursor: pointer; font-family: inherit; font-size: 14px;
+    }
+    .tdp-close:hover { background: var(--surface-2); color: var(--text); }
+    .tdp-body { padding: 20px; }
+    .tdp-section { margin-bottom: 20px; }
+    .tdp-section-title {
+      font-size: 10px; font-weight: 700; letter-spacing: .1em;
+      text-transform: uppercase; color: var(--text-sub); margin-bottom: 10px;
+    }
+    .tdp-dep-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
+    .tdp-dep-row:last-child { margin-bottom: 0; }
+    .tdp-gh-link { font-size: 12px; color: var(--blue); text-decoration: none; }
+    .tdp-gh-link:hover { text-decoration: underline; }
+    .tdp-desc {
+      font-size: 12px; color: var(--text-muted); line-height: 1.65;
+      white-space: pre-wrap; word-break: break-word;
+      max-height: 320px; overflow-y: auto;
+      background: var(--surface-2); padding: 12px; border-radius: 6px;
+      border: 1px solid var(--border);
+    }
     .tickets-toolbar {
       display: flex; align-items: center; justify-content: space-between;
       margin-bottom: 12px;
@@ -802,6 +958,7 @@
       display: inline-flex; align-items: center; gap: 4px;
     }
     .smgmt-delete-btn:hover { background: var(--red-bg); }
+    .smgmt-delete-btn:disabled { opacity: .45; cursor: not-allowed; }
     .smgmt-finish-btn {
       padding: 4px 10px; font-size: 11px; font-weight: 600;
       background: var(--amber-bg); color: var(--amber); border: 0.5px solid var(--amber);
@@ -895,7 +1052,7 @@
     .smgmt-status-sit        { background: var(--amber-bg); color: var(--amber); }
     .smgmt-status-uat        { background: var(--purple-bg); color: var(--purple); }
     .smgmt-status-done       { background: var(--green-bg); color: var(--green); }
-    .smgmt-status-need-rework { background: #fef2f2; color: #dc2626; border: 1px solid #fca5a5; }
+    .smgmt-status-need-rework { background: var(--red-bg); color: var(--red); border: 1px solid rgba(239,68,68,.35); }
 
     /* ── Outcome band + 4-state pane coloring (sprint-26 parity port) ── */
     .smgmt-sprint-card.smgmt-completed { border-color: var(--steel); box-shadow: 0 0 0 3px var(--steel-bg), 0 1px 3px rgba(0,0,0,0.05); }
@@ -1004,6 +1161,75 @@
       font-family: var(--mono); font-size: 11px; color: var(--text-sub);
       min-width: 60px; text-align: right; flex-shrink: 0;
     }
+    /* ── Pre-flight check banner (issue #434) ── */
+    .smgmt-preflight-banner {
+      margin: 0 12px 10px;
+      padding: 10px 12px;
+      background: var(--yellow-bg);
+      border: 1px solid rgba(161,98,7,.30);
+      border-radius: 6px;
+      font-size: 13px;
+    }
+    .smgmt-preflight-header {
+      display: flex; align-items: center; gap: 6px;
+      margin-bottom: 6px;
+    }
+    .smgmt-preflight-title {
+      font-weight: 600; color: var(--yellow); flex: 1;
+    }
+    .smgmt-preflight-dismiss {
+      background: none; border: none; cursor: pointer;
+      color: var(--text-muted); font-size: 16px; line-height: 1;
+      padding: 0 2px; flex-shrink: 0;
+    }
+    .smgmt-preflight-dismiss:hover { color: var(--text); }
+    .smgmt-preflight-items { display: flex; flex-direction: column; gap: 3px; }
+    .smgmt-preflight-item {
+      display: flex; align-items: center; gap: 6px;
+      background: none; border: none; text-align: left;
+      cursor: pointer; padding: 4px 6px; border-radius: 4px;
+      width: 100%; font-size: 12px; color: var(--text);
+    }
+    .smgmt-preflight-item:hover { background: rgba(0,0,0,.06); }
+    .smgmt-preflight-item-id {
+      font-family: var(--mono); color: var(--text-muted); flex-shrink: 0;
+    }
+    .smgmt-preflight-item-title {
+      flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .smgmt-preflight-item-type {
+      color: var(--yellow); font-size: 11px; flex-shrink: 0;
+      background: var(--yellow-bg);
+      border: 1px solid rgba(161,98,7,.25);
+      padding: 1px 6px; border-radius: 3px; font-family: var(--mono);
+    }
+    @keyframes smgmt-preflight-highlight-anim {
+      0%   { box-shadow: 0 0 0 3px rgba(161,98,7,.55); background: var(--yellow-bg); }
+      100% { box-shadow: 0 0 0 0px rgba(161,98,7,0);  background: transparent; }
+    }
+    .smgmt-preflight-highlight {
+      animation: smgmt-preflight-highlight-anim 3s ease-out forwards;
+      border-radius: 6px;
+    }
+
+    /* ── Cancellation banner (issue #454) ── */
+    .smgmt-cancel-banner {
+      margin: 0 12px 10px;
+      padding: 10px 12px;
+      background: var(--yellow-bg);
+      border: 1px solid rgba(161,98,7,.25);
+      border-radius: 6px;
+      display: flex; align-items: center; gap: 8px;
+      font-size: 13px;
+    }
+    .smgmt-cancel-banner-msg { flex: 1; color: var(--yellow); }
+    .smgmt-cancel-banner-dismiss {
+      background: none; border: none; cursor: pointer;
+      color: var(--text-muted); font-size: 16px; line-height: 1;
+      padding: 0 2px; flex-shrink: 0;
+    }
+    .smgmt-cancel-banner-dismiss:hover { color: var(--text); }
+
     /* TESTER REJECTED label */
     .smgmt-lbl-rejected {
       font-family: var(--mono); font-size: 10px; padding: 2px 6px; border-radius: 3px;
@@ -1775,6 +2001,54 @@
       background: var(--surface-2); color: var(--text-sub);
     }
 
+    /* Retry estimation pill and spinner (issue #451) */
+    .smgmt-retry-pill {
+      padding: 1px 5px; font-size: 10px; font-weight: 600;
+      background: var(--yellow-bg); color: var(--yellow);
+      border: 1px solid var(--yellow); border-radius: 3px;
+      cursor: pointer; flex-shrink: 0; white-space: nowrap;
+      font-family: var(--mono);
+    }
+    .smgmt-retry-pill:hover { opacity: .75; }
+    .smgmt-retry-spinner {
+      width: 12px; height: 12px; flex-shrink: 0;
+      border: 2px solid rgba(161,98,7,.25);
+      border-top-color: var(--yellow);
+      border-radius: 50%;
+      animation: smgmt-ring-spin .6s linear infinite;
+      display: inline-block;
+    }
+
+    /* Re-estimate action button (issue #452) */
+    .smgmt-reestimate-btn {
+      padding: 1px 5px; font-size: 10px; font-weight: 600;
+      background: transparent; color: var(--blue);
+      border: 1px solid var(--blue); border-radius: 3px;
+      cursor: pointer; flex-shrink: 0; white-space: nowrap;
+      font-family: var(--mono);
+      opacity: 0; transition: opacity .15s;
+    }
+    .smgmt-ticket:hover .smgmt-reestimate-btn { opacity: 1; }
+    .smgmt-reestimate-btn:hover { background: var(--blue-bg); }
+    .smgmt-reestimate-btn:disabled { opacity: .4 !important; cursor: not-allowed; }
+    .smgmt-reestimate-spinner {
+      width: 12px; height: 12px; flex-shrink: 0;
+      border: 2px solid rgba(37,99,235,.2);
+      border-top-color: var(--blue);
+      border-radius: 50%;
+      animation: smgmt-ring-spin .6s linear infinite;
+      display: inline-block;
+    }
+    .tdp-reestimate-btn {
+      padding: 4px 10px; font-size: 12px; font-weight: 600;
+      background: transparent; color: var(--blue);
+      border: 1px solid var(--blue); border-radius: 5px;
+      cursor: pointer;
+    }
+    .tdp-reestimate-btn:hover { background: var(--blue-bg); }
+    .tdp-reestimate-btn:disabled { opacity: .45; cursor: not-allowed; }
+    .re-est-modal { width: min(360px, calc(100vw - 32px)); }
+
     /* Generic utility used by Bulk Create */
     .hidden { display: none !important; }
     .btn-primary:disabled { opacity: .45; cursor: not-allowed; }
@@ -2233,18 +2507,18 @@
       color: var(--text-muted); font-style: italic;
     }
     .lv-stream {
-      background: #0d1117; color: #c9d1d9;
+      background: var(--surface-2); color: var(--text);
       font-family: var(--mono); font-size: 12px; line-height: 1.65;
       padding: 12px 16px;
       overflow-y: auto;
       max-height: 400px;
       margin: 12px 20px 20px;
       border-radius: 6px;
-      border: 1px solid rgba(255,255,255,.08);
+      border: 1px solid var(--border);
       white-space: pre-wrap;
       word-break: break-all;
     }
-    .lv-stream:empty::after { content: 'Loading…'; color: #6e7681; }
+    .lv-stream:empty::after { content: 'Loading…'; color: var(--text-sub); }
     .btn-view-log {
       background: none; border: none; padding: 2px 4px; cursor: pointer;
       color: var(--text-sub); font-size: 13px; border-radius: 4px;
@@ -2279,6 +2553,106 @@
       transition: border-color .15s;
     }
     .sm-model-select:focus { outline: none; border-color: var(--blue); }
+
+    /* ── Run Sprint preflight modal (issue #448) ── */
+    .pf-modal { width: min(1100px, calc(100vw - 48px)); max-height: calc(100vh - 64px); display: flex; flex-direction: column; }
+    .pf-modal .modal-body { flex: 1; min-height: 0; overflow-y: auto; }
+    .pf-spinner {
+      display: inline-block; width: 20px; height: 20px;
+      border: 2px solid var(--border); border-top-color: var(--text-muted);
+      border-radius: 50%; animation: pf-spin 0.7s linear infinite;
+    }
+    @keyframes pf-spin { to { transform: rotate(360deg); } }
+
+    /* DAG visualization */
+    .pf-dag-section { margin-top: 16px; }
+    .pf-dag-section-label {
+      font-size: 11px; font-weight: 600; text-transform: uppercase;
+      letter-spacing: .06em; color: var(--text-muted); margin-bottom: 8px;
+    }
+    .pf-dag-wrap { position: relative; overflow-x: auto; }
+    .pf-dag-svg {
+      position: absolute; top: 0; left: 0; pointer-events: none;
+      overflow: visible;
+    }
+    .pf-dag-levels { display: flex; gap: 48px; align-items: flex-start; padding: 4px 2px 8px; }
+    .pf-dag-col { display: flex; flex-direction: column; gap: 10px; min-width: 200px; flex-shrink: 0; }
+    .pf-dag-col-label {
+      font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em;
+      color: var(--text-muted); padding: 0 2px 4px;
+    }
+    .pf-dag-card {
+      background: var(--surface-2); border: 1px solid var(--border);
+      border-radius: 8px; padding: 10px 12px; cursor: pointer;
+      transition: border-color .15s, background .15s;
+    }
+    .pf-dag-card:hover { border-color: var(--blue); }
+    .pf-dag-card.pf-deselected { opacity: .45; }
+    .pf-dag-card-header { display: flex; align-items: center; gap: 6px; margin-bottom: 2px; }
+    .pf-dag-card-check { width: 14px; height: 14px; flex-shrink: 0; cursor: pointer; }
+    .pf-dag-card-num {
+      font-size: 11px; font-weight: 700; color: var(--blue); white-space: nowrap;
+    }
+    .pf-dag-card-title {
+      font-size: 12px; color: var(--text); white-space: nowrap;
+      overflow: hidden; text-overflow: ellipsis; max-width: 170px;
+    }
+    .pf-dag-card-meta { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; margin-top: 3px; }
+    .pf-dag-size-badge {
+      font-size: 10px; font-weight: 700; padding: 1px 5px;
+      border-radius: 4px; background: var(--surface); border: 1px solid var(--border);
+      color: var(--text-muted);
+    }
+    .pf-dag-card-files { margin-top: 4px; display: flex; flex-wrap: wrap; gap: 3px; }
+    .pf-dag-card-files span {
+      font-size: 10px; color: var(--text-muted); background: var(--surface);
+      border: 1px solid var(--border); border-radius: 3px; padding: 1px 4px;
+    }
+
+    /* Conflicts and Proposed Order sections */
+    .pf-section { margin-top: 20px; }
+    .pf-section-label {
+      font-size: 11px; font-weight: 600; text-transform: uppercase;
+      letter-spacing: .06em; color: var(--text-muted); margin-bottom: 8px;
+    }
+    .pf-section-body { font-size: 13px; color: var(--text); }
+    .pf-no-conflict { color: var(--text-muted); font-style: italic; margin: 0; }
+    .pf-conflict-item {
+      margin: 0 0 5px; padding: 6px 10px;
+      background: rgba(220, 38, 38, .07); border-left: 3px solid #ef4444;
+      border-radius: 0 4px 4px 0;
+    }
+    .pf-conflict-item code {
+      font-family: var(--font-mono, monospace); font-size: 11px;
+      background: var(--surface); padding: 1px 4px; border-radius: 3px;
+      border: 1px solid var(--border);
+    }
+    .pf-order-list { margin: 0; padding-left: 20px; }
+    .pf-order-item { margin-bottom: 4px; font-size: 13px; color: var(--text); }
+    .pf-order-item code {
+      font-family: var(--font-mono, monospace); font-size: 11px;
+    }
+
+    /* Warnings section */
+    .pf-warnings-section { margin-top: 14px; }
+    .pf-warnings-label {
+      font-size: 11px; font-weight: 600; text-transform: uppercase;
+      letter-spacing: .06em; color: #b45309; margin-bottom: 6px;
+    }
+    .pf-warning-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+    .pf-warning-chip {
+      font-size: 12px; padding: 3px 10px; border-radius: 99px;
+      background: rgba(234, 179, 8, .12); border: 1px solid rgba(234, 179, 8, .45);
+      color: #92400e;
+    }
+
+    /* Cycle banner */
+    .pf-cycle-banner {
+      margin-top: 14px; padding: 10px 14px;
+      background: rgba(220, 38, 38, .08); border: 1px solid rgba(220, 38, 38, .35);
+      border-radius: 6px; font-size: 13px; color: #b91c1c;
+    }
+    .pf-cycle-banner strong { font-weight: 700; }
 
     /* ── Logs tab (issue #420) ── */
     .logs-pane { display: flex; flex-direction: column; height: 100%; min-height: 0; }
@@ -2443,6 +2817,140 @@
     .toast-error   { background: var(--color-error);   color: var(--color-error-fg);   }
     .toast-info    { background: var(--color-info);    color: var(--color-info-fg);    }
     .toast-warning { background: var(--color-warning); color: var(--color-warning-fg); }
+
+    /* ── gh-auth-banner dark-mode safe (issue #430) ── */
+    .gh-auth-banner {
+      display: none;
+      position: fixed; top: 0; left: 0; right: 0;
+      padding: 8px 16px;
+      background: var(--amber-bg); border-bottom: 2px solid var(--amber); color: var(--text);
+      font-size: 13px; z-index: 1000; text-align: center; font-family: monospace;
+    }
+
+    /* ── Settings sidebar link (issue #430) ── */
+    .sb-settings-link {
+      display: flex; align-items: center; gap: 9px;
+      padding: 7px 16px;
+      color: var(--text-muted); font-size: 13px; font-weight: 500;
+      transition: background .15s, color .15s; cursor: pointer;
+      border: none; background: none; width: 100%; text-align: left;
+      font-family: inherit;
+    }
+    .sb-settings-link:hover { background: var(--surface-hover); color: var(--text); }
+    .sb-settings-link.active {
+      background: var(--surface-2); box-shadow: inset 2px 0 0 var(--text);
+      color: var(--text); font-weight: 700;
+    }
+    .sb-settings-link .ti { font-size: 16px; }
+
+    /* ── Settings panel (issue #430) ── */
+    .settings-panel {
+      display: none;
+      position: fixed;
+      top: 48px; left: var(--sidebar-width); right: 0; bottom: 0;
+      background: var(--bg); z-index: 50; overflow-y: auto;
+    }
+    .settings-panel.open { display: block; }
+    .settings-header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 20px 28px 16px; border-bottom: 1px solid var(--border);
+      position: sticky; top: 0; background: var(--bg); z-index: 1;
+    }
+    .settings-title { font-size: 18px; font-weight: 700; }
+    .settings-close-btn {
+      width: 32px; height: 32px; display: flex; align-items: center; justify-content: center;
+      border: 1px solid var(--border); border-radius: 6px; background: none;
+      color: var(--text-muted); font-size: 15px; cursor: pointer; font-family: inherit;
+    }
+    .settings-close-btn:hover { background: var(--surface-2); color: var(--text); }
+    .settings-content { padding: 24px 28px; max-width: 520px; }
+    .settings-section { margin-bottom: 28px; }
+    .settings-section-title {
+      font-size: 10px; font-weight: 700; letter-spacing: .1em;
+      text-transform: uppercase; color: var(--text-sub); margin-bottom: 16px;
+    }
+    .settings-row { margin-bottom: 18px; }
+    .settings-row:last-child { margin-bottom: 0; }
+    .settings-label { display: block; font-size: 13px; font-weight: 500; color: var(--text); margin-bottom: 6px; }
+    .settings-hint { display: block; font-size: 11px; color: var(--text-muted); margin-top: 5px; line-height: 1.5; }
+    .settings-btn-group { display: flex; gap: 6px; flex-wrap: wrap; }
+    .settings-btn {
+      padding: 6px 14px; border: 1px solid var(--border); border-radius: 6px;
+      background: var(--surface-2); color: var(--text-muted); font-size: 13px; font-weight: 500;
+      cursor: pointer; transition: background .15s, color .15s, border-color .15s; font-family: inherit;
+    }
+    .settings-btn:hover { background: var(--surface-hover); color: var(--text); }
+    .settings-btn.active { background: var(--blue-bg); color: var(--blue); border-color: var(--blue); font-weight: 600; }
+    .settings-input, .settings-select {
+      width: 100%; padding: 8px 10px; border: 1px solid var(--border);
+      border-radius: 6px; background: var(--surface-2); color: var(--text);
+      font-size: 13px; font-family: inherit; transition: border-color .15s;
+    }
+    .settings-input:focus, .settings-select:focus { outline: none; border-color: var(--blue); }
+
+    /* ── Timeline / Gantt tab (issue #431) ── */
+    #pane-timeline { overflow-y: auto; }
+    .gantt-wrap { padding: 28px; }
+    .gantt-empty {
+      display: flex; align-items: center; justify-content: center;
+      height: 180px; color: var(--text-sub); font-size: 14px; gap: 8px;
+    }
+    .gantt-scroller { overflow-x: auto; overflow-y: hidden; }
+    .gantt-chart {
+      position: relative; min-width: 600px;
+    }
+    .gantt-row {
+      display: flex; align-items: center; margin-bottom: 10px; min-height: 36px;
+    }
+    .gantt-label {
+      width: 84px; flex-shrink: 0; font-size: 12px; font-weight: 600;
+      color: var(--text); text-align: right; padding-right: 12px;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .gantt-track {
+      flex: 1; position: relative; height: 32px; background: var(--surface-2);
+      border-radius: 4px; overflow: visible;
+    }
+    .gantt-bar {
+      position: absolute; top: 4px; height: 24px; border-radius: 4px;
+      min-width: 4px; cursor: default;
+      transition: filter .15s, box-shadow .15s;
+    }
+    .gantt-bar:hover { filter: brightness(1.08); box-shadow: 0 2px 8px rgba(0,0,0,.18); }
+    .gantt-bar--running  { background: var(--green); }
+    .gantt-bar--completed{ background: var(--steel); }
+    .gantt-bar--has_rework { background: var(--yellow); }
+    .gantt-bar--cancelled{ background: var(--amber); }
+    .gantt-bar-label {
+      position: absolute; top: 50%; transform: translateY(-50%);
+      left: 8px; font-size: 10px; font-weight: 600; color: #fff;
+      white-space: nowrap; pointer-events: none; line-height: 1;
+    }
+    .gantt-tooltip {
+      position: fixed; z-index: 9999;
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 8px; padding: 10px 14px; box-shadow: 0 4px 16px rgba(0,0,0,.16);
+      font-size: 12px; pointer-events: none; max-width: 260px;
+      display: none;
+    }
+    .gantt-tooltip.visible { display: block; }
+    .gantt-tooltip-name { font-weight: 700; font-size: 13px; color: var(--text); margin-bottom: 6px; }
+    .gantt-tooltip-row { display: flex; justify-content: space-between; gap: 16px; color: var(--text-muted); margin-bottom: 3px; }
+    .gantt-tooltip-row:last-child { margin-bottom: 0; }
+    .gantt-tooltip-key { color: var(--text-sub); }
+    .gantt-tooltip-outcome {
+      display: inline-block; padding: 1px 7px; border-radius: 10px;
+      font-size: 11px; font-weight: 600;
+    }
+    .gantt-tooltip-outcome--running   { background: var(--green-bg); color: var(--green); }
+    .gantt-tooltip-outcome--completed { background: var(--steel-bg); color: var(--steel); }
+    .gantt-tooltip-outcome--has_rework{ background: var(--yellow-bg); color: var(--yellow); }
+    .gantt-tooltip-outcome--cancelled { background: var(--amber-bg); color: var(--amber); }
+    .gantt-axis {
+      display: flex; margin-left: 84px; padding-bottom: 4px;
+      border-bottom: 1px solid var(--border); margin-bottom: 10px;
+      font-size: 10px; color: var(--text-muted); user-select: none;
+    }
   </style>
 </head>
 <body>
@@ -2490,6 +2998,13 @@
       <button class="sb-add-tile" onclick="window.location.href='/'" title="Add a new project" aria-label="Add project">
         <i class="ti ti-plus"></i>
         <span>Add project</span>
+      </button>
+
+      <!-- Settings link -->
+      <button class="sb-settings-link" id="sb-settings-link"
+              onclick="openSettingsPanel(event)" title="Project settings" aria-label="Settings">
+        <i class="ti ti-settings-2"></i>
+        <span>Settings</span>
       </button>
 
     </div>
@@ -2542,6 +3057,14 @@
                 aria-selected="false" onclick="switchTab('bulk-create')">
           <i class="ti ti-stack-2"></i>Bulk Create<span id="bc-tab-badge" class="bc-tab-badge hidden"></span>
         </button>
+        <button class="stab" role="tab" id="stab-timeline"
+                aria-selected="false" onclick="switchTab('timeline')">
+          <i class="ti ti-timeline-event"></i>Timeline
+        </button>
+        <button class="stab" role="tab" id="stab-compare"
+                aria-selected="false" onclick="switchTab('compare')">
+          <i class="ti ti-git-compare"></i>Compare
+        </button>
         <button class="stab disabled" role="tab" id="stab-sprint-history"
                 aria-selected="false" aria-disabled="true"
                 onclick="return false" tabindex="-1">
@@ -2593,6 +3116,12 @@
                 <button class="smgmt-ar-menu-item smgmt-ar-turn-off" onclick="_smgmtArTurnOff()">Turn off</button>
               </div>
             </div>
+            <button class="btn-ghost" id="smgmt-cleanup-empty-btn"
+                    onclick="_smgmtCleanupEmpty()" title="Delete sprint labels with no tickets"
+                    aria-label="Clean up empty sprints" style="display:none">
+              <i class="ti ti-trash"></i>
+              Clean up empty sprints
+            </button>
             <button class="btn-ghost" id="smgmt-new-ticket-btn"
                     onclick="smgmtOpenNewTicket()" title="Create a new ticket"
                     aria-label="New Ticket">
@@ -2862,27 +3391,249 @@
 
       </div><!-- /pane-bulk-create -->
 
+      <!-- Timeline tab (issue #431) -->
+      <div class="tab-pane" id="pane-timeline" role="tabpanel" aria-labelledby="stab-timeline">
+        <div id="gantt-wrap"></div>
+      </div>
+
+      <!-- Compare Sprints tab (issue #435) -->
+      <div class="tab-pane" id="pane-compare" role="tabpanel" aria-labelledby="stab-compare">
+        <div class="cmp-page-hdr">
+          <h2><i class="ti ti-git-compare" style="margin-right:8px;vertical-align:-2px;"></i>Compare Sprints</h2>
+          <p>Select two finished sprints to compare side-by-side.</p>
+        </div>
+        <div class="cmp-picker-row">
+          <span class="cmp-picker-label">Sprint A</span>
+          <select class="cmp-picker-select" id="cmp-select-a" onchange="cmpOnPickerChange()">
+            <option value="">— select sprint —</option>
+          </select>
+          <span class="cmp-picker-vs">vs</span>
+          <span class="cmp-picker-label">Sprint B</span>
+          <select class="cmp-picker-select" id="cmp-select-b" onchange="cmpOnPickerChange()">
+            <option value="">— select sprint —</option>
+          </select>
+        </div>
+        <div id="cmp-result"></div>
+      </div>
+
     </div>
   </div>
 
 </div>
 
+<!-- ── Settings panel (issue #430) ── -->
+<div class="settings-panel" id="settings-panel" role="region" aria-label="Project settings">
+  <div class="settings-header">
+    <span class="settings-title">
+      <i class="ti ti-settings-2" style="margin-right:8px;font-size:16px;vertical-align:-2px;"></i>Settings
+    </span>
+    <button class="settings-close-btn" onclick="closeSettingsPanel()" aria-label="Close settings">
+      <i class="ti ti-x"></i>
+    </button>
+  </div>
+  <div class="settings-content">
+
+    <div class="settings-section">
+      <div class="settings-section-title">Appearance</div>
+      <div class="settings-row">
+        <label class="settings-label">Theme</label>
+        <div class="settings-btn-group" id="settings-theme-btns">
+          <button class="settings-btn" data-value="light" onclick="settingsSetTheme('light')">Light</button>
+          <button class="settings-btn" data-value="dark" onclick="settingsSetTheme('dark')">Dark</button>
+          <button class="settings-btn" data-value="system" onclick="settingsSetTheme('system')">System</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="settings-section">
+      <div class="settings-section-title">Refresh</div>
+      <div class="settings-row">
+        <label class="settings-label">Auto-refresh interval</label>
+        <div class="settings-btn-group" id="settings-ar-btns">
+          <button class="settings-btn" data-value="0"  onclick="settingsSetAutoRefresh(0)">Off</button>
+          <button class="settings-btn" data-value="1"  onclick="settingsSetAutoRefresh(1)">1s</button>
+          <button class="settings-btn" data-value="2"  onclick="settingsSetAutoRefresh(2)">2s</button>
+          <button class="settings-btn" data-value="5"  onclick="settingsSetAutoRefresh(5)">5s</button>
+          <button class="settings-btn" data-value="10" onclick="settingsSetAutoRefresh(10)">10s</button>
+        </div>
+        <span class="settings-hint">Controls the Sprint Mgmt board refresh rate</span>
+      </div>
+    </div>
+
+    <div class="settings-section">
+      <div class="settings-section-title">Ticket Defaults</div>
+      <div class="settings-row">
+        <label class="settings-label" for="settings-default-labels">Default labels</label>
+        <input class="settings-input" id="settings-default-labels" type="text"
+               placeholder="enhancement, bug" autocomplete="off"
+               oninput="settingsSaveDefaultLabels(this.value)">
+        <span class="settings-hint">Comma-separated labels pre-populated on new ticket creation</span>
+      </div>
+      <div class="settings-row">
+        <label class="settings-label" for="settings-default-repo">Default repo</label>
+        <select class="settings-select" id="settings-default-repo"
+                onchange="settingsSaveDefaultRepo(this.value)"></select>
+        <span class="settings-hint">Pre-selects the repo in the Bulk Create modal</span>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ── Ticket detail panel (issue #432) ── -->
+<div class="tdp" id="tdp" role="complementary" aria-label="Ticket detail">
+  <div class="tdp-header">
+    <div style="flex:1;min-width:0">
+      <div class="tdp-num" id="tdp-num"></div>
+      <div class="tdp-title" id="tdp-title"></div>
+    </div>
+    <button class="tdp-close" onclick="tdpClose()" aria-label="Close"><i class="ti ti-x"></i></button>
+  </div>
+  <div class="tdp-body" id="tdp-body"></div>
+</div>
+
 <script>
-// ── Theme ─────────────────────────────────────────────────────────────────────
+// ── Theme (issue #430) ────────────────────────────────────────────────────────
+function _settingsKey(name) {
+  return 'settings:' + (_slug || '') + ':' + name;
+}
+
+function _applyTheme(value) {
+  let actual = value === 'system'
+    ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+    : (value === 'dark' ? 'dark' : 'light');
+  document.documentElement.setAttribute('data-theme', actual);
+  _syncThemeIcon(actual);
+}
+
+let _themeMediaListener = null;
+
 function initTheme() {
-  const saved = localStorage.getItem('theme') || 'light';
-  document.documentElement.setAttribute('data-theme', saved);
-  _syncThemeIcon(saved);
+  const key = _settingsKey('theme');
+  const saved = localStorage.getItem(key) || localStorage.getItem('theme') || 'light';
+  _applyTheme(saved);
+  const mq = window.matchMedia('(prefers-color-scheme: dark)');
+  if (_themeMediaListener) mq.removeEventListener('change', _themeMediaListener);
+  _themeMediaListener = function() {
+    const cur = localStorage.getItem(_settingsKey('theme'));
+    if (cur === 'system') _applyTheme('system');
+  };
+  mq.addEventListener('change', _themeMediaListener);
 }
+
 function toggleTheme() {
-  const next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
-  document.documentElement.setAttribute('data-theme', next);
-  localStorage.setItem('theme', next);
-  _syncThemeIcon(next);
+  const key = _settingsKey('theme');
+  const actual = document.documentElement.getAttribute('data-theme');
+  const next = actual === 'dark' ? 'light' : 'dark';
+  localStorage.setItem(key, next);
+  _applyTheme(next);
+  settingsUpdateThemeBtns(next);
 }
+
 function _syncThemeIcon(theme) {
   const icon = document.getElementById('theme-icon');
   if (icon) icon.className = theme === 'dark' ? 'ti ti-sun' : 'ti ti-moon';
+}
+
+// ── Settings panel (issue #430) ───────────────────────────────────────────────
+function openSettingsPanel(e) {
+  if (e) e.preventDefault();
+  const panel = document.getElementById('settings-panel');
+  if (!panel) return;
+  panel.classList.add('open');
+  const link = document.getElementById('sb-settings-link');
+  if (link) link.classList.add('active');
+  settingsInitValues();
+  settingsPopulateRepos();
+}
+
+function closeSettingsPanel() {
+  const panel = document.getElementById('settings-panel');
+  if (panel) panel.classList.remove('open');
+  const link = document.getElementById('sb-settings-link');
+  if (link) link.classList.remove('active');
+}
+
+function settingsInitValues() {
+  const theme = localStorage.getItem(_settingsKey('theme')) || localStorage.getItem('theme') || 'light';
+  settingsUpdateThemeBtns(theme);
+
+  const arSettings = localStorage.getItem(_settingsKey('autoRefresh'));
+  const arLegacy   = localStorage.getItem('smgmt-ar-interval');
+  const ar = arSettings !== null ? arSettings : (arLegacy !== null ? arLegacy : '0');
+  settingsUpdateArBtns(ar);
+
+  const labels = localStorage.getItem(_settingsKey('defaultLabels')) || '';
+  const labelsEl = document.getElementById('settings-default-labels');
+  if (labelsEl) labelsEl.value = labels;
+}
+
+function settingsUpdateThemeBtns(value) {
+  document.querySelectorAll('#settings-theme-btns .settings-btn').forEach(function(btn) {
+    btn.classList.toggle('active', btn.dataset.value === value);
+  });
+}
+
+function settingsUpdateArBtns(value) {
+  const v = String(value);
+  document.querySelectorAll('#settings-ar-btns .settings-btn').forEach(function(btn) {
+    btn.classList.toggle('active', btn.dataset.value === v);
+  });
+}
+
+function settingsSetTheme(value) {
+  localStorage.setItem(_settingsKey('theme'), value);
+  _applyTheme(value);
+  settingsUpdateThemeBtns(value);
+}
+
+function settingsSetAutoRefresh(value) {
+  const n = Number(value);
+  localStorage.setItem(_settingsKey('autoRefresh'), String(n));
+  settingsUpdateArBtns(n);
+  if (n === 0) {
+    _smgmtArTurnOff();
+  } else {
+    _smgmtArSelect(n);
+  }
+}
+
+function settingsSaveDefaultLabels(value) {
+  localStorage.setItem(_settingsKey('defaultLabels'), value);
+}
+
+function settingsSaveDefaultRepo(value) {
+  localStorage.setItem(_settingsKey('defaultRepo'), value);
+  const bcRepo = document.getElementById('bc-repo');
+  if (bcRepo) bcRepo.value = value;
+}
+
+async function settingsPopulateRepos() {
+  const sel = document.getElementById('settings-default-repo');
+  if (!sel) return;
+  const savedRepo = localStorage.getItem(_settingsKey('defaultRepo')) || '';
+  const projects = (_homeData && _homeData.projects) ? _homeData.projects : [];
+  let html = '<option value="">None</option>';
+  if (projects.length > 0) {
+    html += projects.map(function(p) {
+      const repo = _cachedFullRepo[p.slug] || p.slug;
+      const selected = repo === savedRepo ? ' selected' : '';
+      return '<option value="' + escHtml(repo) + '"' + selected + '>' + escHtml(p.name || p.slug) + '</option>';
+    }).join('');
+  } else {
+    try {
+      const r = await fetch('/api/projects');
+      if (r.ok) {
+        const d = await r.json();
+        html += (d.projects || []).map(function(p) {
+          const selected = p.repo === savedRepo ? ' selected' : '';
+          return '<option value="' + escHtml(p.repo) + '"' + selected + '>' + escHtml(p.name || p.repo) + '</option>';
+        }).join('');
+      }
+    } catch (_) {}
+  }
+  sel.innerHTML = html;
+  if (savedRepo) sel.value = savedRepo;
 }
 
 // ── Global fuzzy search ───────────────────────────────────────────────────────
@@ -2985,9 +3736,13 @@ function parseUrl() {
   const slug = decodeURIComponent(m[1]);
   const rawTab = m[2] || '';
   // sprint-history is disabled → redirect to sprint-mgmt
+  const hash = window.location.hash;
   const tab = (rawTab === 'tickets')     ? 'tickets'
             : (rawTab === 'logs')        ? 'logs'
             : (rawTab === 'bulk-create') ? 'bulk-create'
+            : (rawTab === 'timeline')    ? 'timeline'
+            : (rawTab === 'compare')     ? 'compare'
+            : (hash === '#compare')      ? 'compare'
             : 'sprint-mgmt';
   return { slug, tab };
 }
@@ -3046,7 +3801,7 @@ function switchTab(tab, pushHistory) {
   _activeTab = tab;
 
   // Update aria-selected + active class on tabs
-  ['sprint-mgmt', 'tickets', 'logs', 'bulk-create'].forEach(t => {
+  ['sprint-mgmt', 'tickets', 'logs', 'bulk-create', 'timeline', 'compare'].forEach(t => {
     const btn = document.getElementById('stab-' + t);
     if (!btn) return;
     const isActive = t === tab;
@@ -3055,7 +3810,7 @@ function switchTab(tab, pushHistory) {
   });
 
   // Show/hide panes
-  ['sprint-mgmt', 'tickets', 'logs', 'bulk-create'].forEach(t => {
+  ['sprint-mgmt', 'tickets', 'logs', 'bulk-create', 'timeline', 'compare'].forEach(t => {
     const pane = document.getElementById('pane-' + t);
     if (pane) pane.classList.toggle('active', t === tab);
   });
@@ -3090,11 +3845,21 @@ function switchTab(tab, pushHistory) {
   if (tab === 'logs') {
     logsInit();
   }
+
+  // Init timeline tab
+  if (tab === 'timeline') {
+    ganttInit();
+  }
+
+  // Init compare tab
+  if (tab === 'compare') {
+    compareInit();
+  }
 }
 
 // ── Keyboard navigation for sub-tabs ─────────────────────────────────────────
 document.getElementById('sub-tabs').addEventListener('keydown', function(e) {
-  const enabledTabs = ['sprint-mgmt', 'tickets', 'logs', 'bulk-create'];
+  const enabledTabs = ['sprint-mgmt', 'tickets', 'logs', 'bulk-create', 'timeline', 'compare'];
   const focused = document.activeElement;
   const currentId = focused ? focused.id.replace('stab-', '') : null;
   const currentIdx = enabledTabs.indexOf(currentId);
@@ -3317,6 +4082,122 @@ function startSidebarRefresh() {
   _sidebarRefreshTimer = setInterval(() => loadHomeData(true), 30000);
 }
 
+// ── Dependency chip parser (issue #432) ──────────────────────────────────────
+function _parseDeps(body) {
+  if (!body) return { blocks: [], blockedBy: [] };
+  const blocks = [];
+  const blockedBy = [];
+  for (const line of body.split('\n')) {
+    const m1 = line.match(/^\s*blocks?:\s*(.+)/i);
+    if (m1) { for (const ref of m1[1].matchAll(/#(\d+)/g)) blocks.push(parseInt(ref[1], 10)); }
+    const m2 = line.match(/^\s*blocked[\s-]by:\s*(.+)/i);
+    if (m2) { for (const ref of m2[1].matchAll(/#(\d+)/g)) blockedBy.push(parseInt(ref[1], 10)); }
+  }
+  return { blocks: [...new Set(blocks)], blockedBy: [...new Set(blockedBy)] };
+}
+
+function _depChipsHtml(deps, ticketNums) {
+  if (!deps.blocks.length && !deps.blockedBy.length) return '';
+  let html = '';
+  if (deps.blocks.length) {
+    html += `<span class="dep-chip-label">Blocks</span>`;
+    for (const n of deps.blocks) {
+      const missing = !ticketNums.has(n) ? ' dep-chip--missing' : '';
+      html += `<button class="dep-chip dep-chip--blocks${missing}" onclick="tdpOpen(${n})">#${n}</button>`;
+    }
+  }
+  if (deps.blockedBy.length) {
+    if (html) html += `<span class="dep-chip-sep"></span>`;
+    html += `<span class="dep-chip-label">Blocked by</span>`;
+    for (const n of deps.blockedBy) {
+      const missing = !ticketNums.has(n) ? ' dep-chip--missing' : '';
+      html += `<button class="dep-chip dep-chip--blocked-by${missing}" onclick="tdpOpen(${n})">#${n}</button>`;
+    }
+  }
+  return `<div class="dep-chips-row">${html}</div>`;
+}
+
+// ── Ticket detail panel (issue #432) ─────────────────────────────────────────
+let _tdpTickets = [];
+
+function tdpOpen(num) {
+  const panel   = document.getElementById('tdp');
+  const numEl   = document.getElementById('tdp-num');
+  const titleEl = document.getElementById('tdp-title');
+  const bodyEl  = document.getElementById('tdp-body');
+  if (!panel || !numEl || !titleEl || !bodyEl) return;
+
+  numEl.textContent = `#${num}`;
+  const ticket = _tdpTickets.find(t => t.number === num);
+
+  if (!ticket) {
+    titleEl.textContent = 'Ticket not found';
+    bodyEl.innerHTML = `<p style="color:var(--text-sub);font-size:13px;padding:4px 0">
+      Ticket #${num} is not in this project's open issues.</p>`;
+    panel.classList.add('open');
+    return;
+  }
+
+  titleEl.textContent = ticket.title;
+  const ticketNums = new Set(_tdpTickets.map(t => t.number));
+  const deps = _parseDeps(ticket.body || '');
+
+  const tdpSizeLabel = (ticket.labels || []).find(l => /^size-[SMLX]+$/.test(l.name));
+
+  let html = `<div class="tdp-section">
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+      <span class="ticket-status-pill ${escHtml(ticket.status)}">${escHtml(ticket.status)}</span>
+      <a class="tdp-gh-link" href="${escHtml(ticket.url)}" target="_blank" rel="noopener">View on GitHub →</a>
+    </div>
+  </div>`;
+
+  if (tdpSizeLabel) {
+    html += `<div class="tdp-section">
+      <div class="tdp-section-title">Estimate</div>
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:4px">
+        <span class="smgmt-ticket-size-pill" id="tdp-estimate-size">${escHtml(tdpSizeLabel.name.replace('size-', ''))}</span>
+        <button class="tdp-reestimate-btn" id="tdp-reestimate-btn"
+                onclick="_smgmtReEstimate(${num})">Re-estimate</button>
+      </div>
+    </div>`;
+  }
+
+  if (deps.blocks.length || deps.blockedBy.length) {
+    html += `<div class="tdp-section"><div class="tdp-section-title">Dependencies</div>`;
+    if (deps.blocks.length) {
+      html += `<div class="tdp-dep-row"><span class="dep-chip-label">Blocks</span>`;
+      for (const n of deps.blocks) {
+        const missing = !ticketNums.has(n) ? ' dep-chip--missing' : '';
+        html += `<button class="dep-chip dep-chip--blocks${missing}" onclick="tdpOpen(${n})">#${n}</button>`;
+      }
+      html += `</div>`;
+    }
+    if (deps.blockedBy.length) {
+      html += `<div class="tdp-dep-row"><span class="dep-chip-label">Blocked by</span>`;
+      for (const n of deps.blockedBy) {
+        const missing = !ticketNums.has(n) ? ' dep-chip--missing' : '';
+        html += `<button class="dep-chip dep-chip--blocked-by${missing}" onclick="tdpOpen(${n})">#${n}</button>`;
+      }
+      html += `</div>`;
+    }
+    html += `</div>`;
+  }
+
+  if (ticket.body) {
+    html += `<div class="tdp-section">
+      <div class="tdp-section-title">Description</div>
+      <div class="tdp-desc">${escHtml(ticket.body)}</div>
+    </div>`;
+  }
+
+  bodyEl.innerHTML = html;
+  panel.classList.add('open');
+}
+
+function tdpClose() {
+  document.getElementById('tdp')?.classList.remove('open');
+}
+
 // ── Tickets loading ───────────────────────────────────────────────────────────
 let _ticketsRepo = null;
 
@@ -3373,6 +4254,10 @@ function renderTickets(data, repo) {
   const ghUrl   = data.github_url || '#';
   const r = repo || _ticketsRepo || '';
 
+  // Cache tickets for detail panel & chip navigation (issue #432)
+  _tdpTickets = tickets;
+  const ticketNums = new Set(tickets.map(t => t.number));
+
   const groups = [
     { label: 'SIT',         items: tickets.filter(t => t.status === 'SIT') },
     { label: 'UAT',         items: tickets.filter(t => t.status === 'UAT') },
@@ -3385,14 +4270,19 @@ function renderTickets(data, repo) {
     ticketsHtml = '<div class="loading-msg">No open tickets.</div>';
   } else {
     ticketsHtml = groups.map(g => {
-      const rows = g.items.map(t => `
+      const rows = g.items.map(t => {
+        const deps = _parseDeps(t.body || '');
+        const chipsHtml = _depChipsHtml(deps, ticketNums);
+        return `
         <div class="ticket-row" id="ticket-row-${t.number}">
           <input type="checkbox" class="ticket-checkbox" data-num="${t.number}" data-title="${escHtml(t.title)}" onchange="_onTicketCheckbox(this)">
           <span class="ticket-status-pill ${escHtml(t.status)}">${escHtml(t.status)}</span>
           <a class="ticket-title" href="${escHtml(t.url)}" target="_blank" rel="noopener" title="${escHtml(t.title)}">${escHtml(t.title)}</a>
           <span class="ticket-num">#${t.number}</span>
           <button class="ticket-close-btn" data-num="${t.number}" data-title="${escHtml(t.title)}" onclick="openCloseTicketModal(this)">Close</button>
-        </div>`).join('');
+          ${chipsHtml}
+        </div>`;
+      }).join('');
       return `<div class="ticket-group-hdr">${escHtml(g.label)} · ${g.items.length}</div>${rows}`;
     }).join('');
   }
@@ -3767,10 +4657,6 @@ async function _prefetchFullRepo() {
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 async function init() {
-  initTheme();
-  updateSidebarFooter();
-  checkGhAuthStatus().catch(() => {});
-
   const { slug, tab } = parseUrl();
 
   if (!slug) {
@@ -3780,6 +4666,10 @@ async function init() {
 
   _slug = slug;
   _activeTab = tab;
+
+  initTheme();
+  updateSidebarFooter();
+  checkGhAuthStatus().catch(() => {});
 
   // Replace URL if needed (e.g. sprint-history → sprint-mgmt)
   const expected = '/project/' + encodeURIComponent(slug) + '/' + tab;
@@ -3839,6 +4729,12 @@ async function init() {
   // If logs tab was active before _projectData was available, now fetch runs
   if (_activeTab === 'logs' && _logsState.runs.length === 0) {
     logsFetchRuns();
+  }
+
+  // If compare tab loaded before _projectData was ready, re-init now with correct project
+  if (_activeTab === 'compare') {
+    _cmpInitialized = false;
+    compareInit();
   }
 }
 
@@ -4105,6 +5001,15 @@ function _smgmtRender(data) {
 
   // Fetch outcome data for sprints that look completed (no open tickets)
   _smgmtFetchMissingOutcomes(orderedLabels, bySprint);
+
+  // Load estimated hours from .commander/estimates/ for each sprint header
+  _smgmtLoadEstimates(orderedLabels, bySprint);
+
+  // Inject pre-flight check banners for non-running sprint panes (issue #434)
+  _preflightLoadBanners(orderedLabels, bySprint);
+
+  // Update cleanup button visibility (issue #457)
+  _smgmtUpdateCleanupBtn(data);
 }
 
 async function _smgmtFetchMissingOutcomes(orderedLabels, bySprint) {
@@ -4134,6 +5039,181 @@ async function _smgmtFetchMissingOutcomes(orderedLabels, bySprint) {
       _smgmtOutcomeCache[label] = null;
     }
   }
+}
+
+async function _smgmtLoadEstimates(orderedLabels, bySprint) {
+  const repo = _smgmtRepo();
+  if (!repo) return;
+  for (const label of orderedLabels) {
+    const tickets = bySprint[label] || [];
+    if (tickets.length === 0) continue;
+    const issueNums = tickets.map(t => t.number).join(',');
+    try {
+      const resp = await fetch(
+        `/api/estimates/batch?project=${encodeURIComponent(repo)}&issues=${issueNums}`
+      );
+      if (!resp.ok) continue;
+      const data = await resp.json();
+      const estEl = document.getElementById(`smgmt-est-${label}`);
+      if (!estEl) continue;
+      if (data.complete && data.total_hours !== null) {
+        const h = data.total_hours;
+        const display = Number.isInteger(h) ? `${h}h` : `${parseFloat(h.toFixed(1))}h`;
+        estEl.textContent = `${display} estimated`;
+      }
+      // else: leave as "— estimated"
+    } catch (_) {
+      // fail silently — leave as "— estimated"
+    }
+  }
+}
+
+// ── Pre-flight check banner (issue #434) ─────────────────────────────────────
+
+/** Session-dismissed banner labels — not persisted across page reloads. */
+const _preflightDismissed = new Set();
+
+/** Synchronous checks: body, AC, conflicting labels. Returns flat items array. */
+function _preflightCheckTickets(tickets) {
+  const items = [];
+  for (const t of tickets) {
+    const body = (t.body || '').trim();
+    if (!body) {
+      items.push({ number: t.number, title: t.title, type: 'Missing body' });
+      continue;
+    }
+    if (!/^##\s+(acceptance criteria|ac)/im.test(body)) {
+      items.push({ number: t.number, title: t.title, type: 'Missing acceptance criteria' });
+    }
+    const lbls = (t.labels || []).map(l => l.name);
+    if (lbls.includes('uat') && (lbls.includes('needs-rework') || lbls.includes('need-rework'))) {
+      items.push({ number: t.number, title: t.title, type: 'Conflicting labels' });
+    }
+  }
+  return items;
+}
+
+/** Async: returns Set of issue numbers whose estimate file is absent or incomplete. */
+async function _preflightCheckEstimates(tickets, repo) {
+  const missing = new Set();
+  if (!repo || tickets.length === 0) return missing;
+  await Promise.all(tickets.map(async t => {
+    try {
+      const resp = await fetch(
+        `/api/estimates/batch?project=${encodeURIComponent(repo)}&issues=${t.number}`
+      );
+      if (!resp.ok) { missing.add(t.number); return; }
+      const d = await resp.json();
+      if (!d.complete || d.total_hours === null) missing.add(t.number);
+    } catch (_) { missing.add(t.number); }
+  }));
+  return missing;
+}
+
+/** Scroll to ticket row and briefly highlight it. */
+function _preflightScrollToTicket(num) {
+  const el = document.getElementById(`smgmt-ticket-${num}`);
+  if (!el) return;
+  el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  el.classList.remove('smgmt-preflight-highlight');
+  void el.offsetWidth; // restart animation
+  el.classList.add('smgmt-preflight-highlight');
+  setTimeout(() => el.classList.remove('smgmt-preflight-highlight'), 3100);
+}
+
+/** Remove this sprint's banner for the session. */
+function _preflightDismiss(label) {
+  _preflightDismissed.add(label);
+  const el = document.getElementById(`smgmt-preflight-${label}`);
+  if (el) el.remove();
+}
+
+function _preflightBannerHtml(label, items) {
+  if (items.length === 0 || _preflightDismissed.has(label)) return '';
+  const trunc = (s, n) => s && s.length > n ? s.slice(0, n) + '…' : (s || '');
+  const rowsHtml = items.map(item =>
+    `<button class="smgmt-preflight-item" onclick="_preflightScrollToTicket(${item.number})">
+      <span class="smgmt-preflight-item-id">#${item.number}</span>
+      <span class="smgmt-preflight-item-title">${escHtml(trunc(item.title, 50))}</span>
+      <span class="smgmt-preflight-item-type">${escHtml(item.type)}</span>
+    </button>`
+  ).join('');
+  return `<div class="smgmt-preflight-banner" id="smgmt-preflight-${escHtml(label)}">
+    <div class="smgmt-preflight-header">
+      <i class="ti ti-alert-triangle" style="color:var(--yellow);font-size:14px;flex-shrink:0"></i>
+      <span class="smgmt-preflight-title">Pre-flight issues (${items.length})</span>
+      <button class="smgmt-preflight-dismiss" onclick="_preflightDismiss('${escHtml(label)}')" title="Dismiss">&times;</button>
+    </div>
+    <div class="smgmt-preflight-items">${rowsHtml}</div>
+  </div>`;
+}
+
+/** Run all checks for one sprint pane and inject/update the banner in the DOM. */
+async function _preflightInjectBanner(label, tickets, repo) {
+  if (_preflightDismissed.has(label)) return;
+  const card = document.getElementById(`smgmt-card-${label}`);
+  if (!card) return;
+
+  const existing = card.querySelector('.smgmt-preflight-banner');
+  if (existing) existing.remove();
+
+  const syncItems = _preflightCheckTickets(tickets);
+  const missingEst = await _preflightCheckEstimates(tickets, repo);
+
+  const items = [...syncItems];
+  const byNum = {};
+  tickets.forEach(t => { byNum[t.number] = t; });
+  for (const num of missingEst) {
+    const t = byNum[num];
+    if (t) items.push({ number: num, title: t.title, type: 'No estimator output' });
+  }
+
+  if (items.length === 0 || _preflightDismissed.has(label)) return;
+
+  const html = _preflightBannerHtml(label, items);
+  if (!html) return;
+
+  const header = card.querySelector('.smgmt-sprint-header');
+  if (header) header.insertAdjacentHTML('afterend', html);
+}
+
+/** Kick off pre-flight banner loading for all non-running sprint panes. */
+function _preflightLoadBanners(orderedLabels, bySprint) {
+  const repo = _smgmtRepo();
+  for (const label of orderedLabels) {
+    if (_smgmtRunningLabels.has(label)) continue;
+    const tickets = bySprint[label] || [];
+    if (tickets.length === 0) continue;
+    _preflightInjectBanner(label, tickets, repo);
+  }
+}
+
+// ── Cancellation banner (issue #454) ─────────────────────────────────────
+
+const _cancelBannerDismissed = new Set();
+
+function _smgmtIsCancelled(outcome) {
+  if (!outcome) return false;
+  if (outcome.state === 'cancelled') return true;
+  // Fallback: lifecycle state field absent, state file present, sprint stopped mid-run
+  if (!outcome.state && outcome.sprint_status === 'stopped') return true;
+  return false;
+}
+
+function _smgmtCancelBannerDismiss(label) {
+  _cancelBannerDismissed.add(label);
+  const el = document.getElementById(`smgmt-cancel-banner-${label}`);
+  if (el) el.remove();
+}
+
+function _smgmtCancelBannerHtml(label) {
+  if (_cancelBannerDismissed.has(label)) return '';
+  const safeLabel = escHtml(label);
+  return `<div class="smgmt-cancel-banner" id="smgmt-cancel-banner-${safeLabel}">
+    <i class="ti ti-alert-triangle" style="color:var(--yellow);font-size:14px;flex-shrink:0"></i>
+    <span class="smgmt-cancel-banner-msg">Sprint cancelled mid-run. Ticket labels were not modified. Click Re-run to continue from where it stopped.</span>
+    <button class="smgmt-cancel-banner-dismiss" onclick="_smgmtCancelBannerDismiss('${safeLabel}')" title="Dismiss">&times;</button>
+  </div>`;
 }
 
 function _smgmtInjectOutcomeBand(label, outcome) {
@@ -4203,6 +5283,17 @@ function _smgmtInjectOutcomeBand(label, outcome) {
     const logEl = document.createElement('div');
     logEl.innerHTML = logHtml;
     card.appendChild(logEl.firstElementChild);
+  }
+
+  // Inject cancellation banner (issue #454): insert after header so it appears above outcome band
+  const existingCancelBanner = card.querySelector('.smgmt-cancel-banner');
+  if (existingCancelBanner) existingCancelBanner.remove();
+  if (_smgmtIsCancelled(outcome)) {
+    const bannerHtml = _smgmtCancelBannerHtml(label);
+    if (bannerHtml) {
+      const sprintHeader = card.querySelector('.smgmt-sprint-header');
+      if (sprintHeader) sprintHeader.insertAdjacentHTML('afterend', bannerHtml);
+    }
   }
 }
 
@@ -4741,6 +5832,7 @@ function _smgmtCardHtml(label, n, tickets, outcome, isNext) {
   }
 
   const logHtml = (outcome && outcome.sprint_status) ? _smgmtOutcomeLogHtml(label, outcome) : '';
+  const cancelBannerHtml = _smgmtIsCancelled(outcome) ? _smgmtCancelBannerHtml(label) : '';
 
   return `
     <div class="smgmt-sprint-card${outcomeCardClass}" id="smgmt-card-${escHtml(label)}"
@@ -4755,7 +5847,7 @@ function _smgmtCardHtml(label, n, tickets, outcome, isNext) {
                   onclick="smgmtStartRename('${escHtml(label)}', event)"><i class="ti ti-pencil"></i></button>
           ${isNext ? '<span class="smgmt-next-badge" aria-label="Next up">NEXT UP</span>' : ''}
           ${outcomeBadgeHtml}
-          <span class="smgmt-sprint-count">&middot; ${ticketCount} ticket${ticketCount !== 1 ? 's' : ''}</span>
+          <span class="smgmt-sprint-count"><span id="smgmt-est-${escHtml(label)}" class="smgmt-sprint-est-val">— estimated</span> &middot; ${ticketCount} ticket${ticketCount !== 1 ? 's' : ''}</span>
         </div>
         <div class="smgmt-sprint-header-right">
           <button class="smgmt-finish-btn ${finishHidden}"
@@ -4767,6 +5859,7 @@ function _smgmtCardHtml(label, n, tickets, outcome, isNext) {
           ${actionBtn}
         </div>
       </div>
+      ${cancelBannerHtml}
       ${outcomeBandHtml}
       <div class="smgmt-sprint-tickets" id="smgmt-tickets-${escHtml(label)}">
         ${ticketsContainerHtml}
@@ -4858,9 +5951,11 @@ function _smgmtRunningCardHtml(label, n, tickets) {
           <span class="smgmt-running-badge" id="smgmt-running-badge-${escHtml(label)}">
             <span class="smgmt-running-badge-dot"></span>${totalCount > 0 ? `${doneCount + skippedCount}/${totalCount}` : '—'}
           </span>
-          <span class="smgmt-sprint-count">&middot; ${sourceTickets.length} ticket${sourceTickets.length !== 1 ? 's' : ''}</span>
+          <span class="smgmt-sprint-count"><span id="smgmt-est-${escHtml(label)}" class="smgmt-sprint-est-val">— estimated</span> &middot; ${sourceTickets.length} ticket${sourceTickets.length !== 1 ? 's' : ''}</span>
         </div>
         <div class="smgmt-sprint-header-right">
+          <button class="smgmt-delete-btn" disabled title="Cancel sprint first">
+            <i class="ti ti-trash"></i> Delete</button>
           <button class="smgmt-run-btn" disabled title="Sprint is currently running">
             <i class="ti ti-player-play"></i> Running…</button>
         </div>
@@ -5209,6 +6304,16 @@ function _smgmtTicketRowHtml(ticket, label) {
   const statusLabel = hasRework ? 'needs rework' : (ticket.status || 'backlog');
   const isSelected = _smgmtSelectedIssues.has(ticket.number);
 
+  const sizeLabel = (ticket.labels || []).find(l => /^size-[SMLX]+$/.test(l.name));
+  const estimatePillHtml = sizeLabel
+    ? `<span class="smgmt-ticket-size-pill">${escHtml(sizeLabel.name.replace('size-', ''))}</span>` +
+      `<button class="smgmt-reestimate-btn" tabindex="0" title="Re-estimate this ticket"
+               onclick="event.stopPropagation();_smgmtReEstimate(${ticket.number},this)"
+               onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();_smgmtReEstimate(${ticket.number},this);}">Re-estimate</button>`
+    : `<button class="smgmt-retry-pill" tabindex="0" title="Estimate this ticket"
+               onclick="event.stopPropagation();_smgmtRetryEstimation(${ticket.number},this)"
+               onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();_smgmtRetryEstimation(${ticket.number},this);}">Retry estimation</button>`;
+
   return `
     <div class="smgmt-ticket${isSelected ? ' is-selected' : ''}" id="smgmt-ticket-${ticket.number}"
          draggable="true"
@@ -5227,6 +6332,7 @@ function _smgmtTicketRowHtml(ticket, label) {
       <a class="smgmt-ticket-num" href="${escHtml(ticket.url || '#')}" target="_blank"
          rel="noopener" onclick="event.stopPropagation()">#${ticket.number}</a>
       <span class="smgmt-ticket-title" title="${escHtml(ticket.title)}">${escHtml(ticket.title)}</span>
+      ${estimatePillHtml}
       <span class="smgmt-ticket-status ${statusClass}">${escHtml(statusLabel)}</span>
       <button class="btn-view-log" tabindex="0" title="View issue log"
               onclick="event.stopPropagation();openLvIssueLog(${ticket.number},'${escHtml(label)}',_smgmtRepo()||'')">
@@ -5235,6 +6341,141 @@ function _smgmtTicketRowHtml(ticket, label) {
               onclick="event.stopPropagation();_smgmtMoveToOpen(event, ${ticket.number}, '${escHtml(label)}')"
               onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();_smgmtMoveToOpen(event,${ticket.number},'${escHtml(label)}');}">Move to &#9660;</button>
     </div>`;
+}
+
+// ── Retry estimation (issue #451) ─────────────────────────────────────────────
+async function _smgmtRetryEstimation(issueNum, btn) {
+  const row = document.getElementById(`smgmt-ticket-${issueNum}`);
+  if (!row || row.querySelector('.smgmt-retry-spinner')) return;
+
+  const spinner = document.createElement('span');
+  spinner.className = 'smgmt-retry-spinner';
+  btn.replaceWith(spinner);
+
+  const repo = _smgmtRepo() || '';
+  try {
+    const resp = await fetch(
+      `/api/issues/${issueNum}/estimate?repo=${encodeURIComponent(repo)}`,
+      { method: 'POST' }
+    );
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+    if (!data.ok || !data.size) throw new Error('no size');
+    const pill = document.createElement('span');
+    pill.className = 'smgmt-ticket-size-pill';
+    pill.textContent = data.size;
+    spinner.replaceWith(pill);
+  } catch (_) {
+    const newBtn = document.createElement('button');
+    newBtn.className = 'smgmt-retry-pill';
+    newBtn.tabIndex = 0;
+    newBtn.title = 'Estimate this ticket';
+    newBtn.textContent = 'Retry estimation';
+    newBtn.onclick = (ev) => { ev.stopPropagation(); _smgmtRetryEstimation(issueNum, newBtn); };
+    newBtn.onkeydown = (ev) => {
+      if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); ev.stopPropagation(); _smgmtRetryEstimation(issueNum, newBtn); }
+    };
+    spinner.replaceWith(newBtn);
+  }
+}
+
+// ── Re-estimate action (issue #452) ───────────────────────────────────────────
+let _reEstIssueNum = null;
+let _reEstRowBtn   = null;
+
+function _makeReEstimateBtn(issueNum) {
+  const btn = document.createElement('button');
+  btn.className = 'smgmt-reestimate-btn';
+  btn.tabIndex = 0;
+  btn.title = 'Re-estimate this ticket';
+  btn.textContent = 'Re-estimate';
+  btn.onclick = (ev) => { ev.stopPropagation(); _smgmtReEstimate(issueNum, btn); };
+  btn.onkeydown = (ev) => {
+    if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); ev.stopPropagation(); _smgmtReEstimate(issueNum, btn); }
+  };
+  return btn;
+}
+
+function _smgmtReEstimate(issueNum, rowBtn) {
+  _reEstIssueNum = issueNum;
+  _reEstRowBtn   = rowBtn || null;
+
+  // Check if estimate still present at click time (edge case: cleared between render and click)
+  const row = document.getElementById(`smgmt-ticket-${issueNum}`);
+  const hasEstimate = row
+    ? row.querySelector('.smgmt-ticket-size-pill') !== null
+    : _tdpTickets.some(t => t.number === issueNum && (t.labels || []).some(l => /^size-[SMLX]+$/.test(l.name)));
+
+  if (!hasEstimate) {
+    _smgmtReEstimateRun(issueNum, rowBtn || null);
+    return;
+  }
+
+  document.getElementById('re-est-backdrop').classList.remove('hidden');
+  document.getElementById('re-est-modal').classList.remove('hidden');
+  document.getElementById('re-est-confirm-btn').focus();
+}
+
+function _smgmtReEstimateClose() {
+  document.getElementById('re-est-backdrop').classList.add('hidden');
+  document.getElementById('re-est-modal').classList.add('hidden');
+  _reEstIssueNum = null;
+  _reEstRowBtn   = null;
+}
+
+function _smgmtReEstimateConfirm() {
+  const issueNum = _reEstIssueNum;
+  const rowBtn   = _reEstRowBtn;
+  _smgmtReEstimateClose();
+  _smgmtReEstimateRun(issueNum, rowBtn);
+}
+
+async function _smgmtReEstimateRun(issueNum, rowBtn) {
+  const repo   = _smgmtRepo() || '';
+  const tdpBtn = document.getElementById('tdp-reestimate-btn');
+
+  // Loading: replace row button with spinner
+  let rowSpinner = null;
+  if (rowBtn) {
+    rowSpinner = document.createElement('span');
+    rowSpinner.className = 'smgmt-reestimate-spinner';
+    rowBtn.replaceWith(rowSpinner);
+  }
+  // Loading: disable detail panel button
+  if (tdpBtn) { tdpBtn.disabled = true; tdpBtn.textContent = 'Re-estimating…'; }
+
+  try {
+    const resp = await fetch(
+      `/api/issues/${issueNum}/estimate?repo=${encodeURIComponent(repo)}`,
+      { method: 'POST' }
+    );
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+    if (!data.ok || !data.size) throw new Error('no size returned');
+
+    // Update size pill in row
+    const row = document.getElementById(`smgmt-ticket-${issueNum}`);
+    if (row) {
+      const pill = row.querySelector('.smgmt-ticket-size-pill');
+      if (pill) pill.textContent = data.size;
+    }
+    // Restore row re-estimate button
+    if (rowSpinner) rowSpinner.replaceWith(_makeReEstimateBtn(issueNum));
+
+    // Update detail panel
+    if (tdpBtn) {
+      tdpBtn.disabled = false;
+      tdpBtn.textContent = 'Re-estimate';
+      const sizeEl = document.getElementById('tdp-estimate-size');
+      if (sizeEl) sizeEl.textContent = data.size;
+    }
+  } catch (err) {
+    // Restore row button
+    if (rowSpinner) rowSpinner.replaceWith(_makeReEstimateBtn(issueNum));
+    // Restore detail panel button
+    if (tdpBtn) { tdpBtn.disabled = false; tdpBtn.textContent = 'Re-estimate'; }
+    _smgmtShowToast(`Re-estimate failed: ${err.message}`);
+  }
 }
 
 // ── Sprint action handlers ─────────────────────────────────────────────────
@@ -5262,12 +6503,15 @@ function smgmtRunSprint(label) {
   _pfOpen(label);
 }
 
-// ── Run Sprint preflight modal (issue #446) ─────────────────────────────────
+// ── Run Sprint preflight modal (issue #448) ─────────────────────────────────
 
 let _pfCurrentLabel = null;
 let _pfCurrentRepo  = null;
 let _pfState        = 'idle'; // 'loading' | 'success' | 'error'
 let _pfDagData      = null;
+let _pfWarnings     = null;
+let _pfCycle        = null;
+let _pfSelectedIds  = new Set();
 
 function _pfOpen(label) {
   const repo = _smgmtRepo();
@@ -5289,6 +6533,9 @@ function _pfReset() {
   document.getElementById('pf-confirm-btn').disabled = true;
   document.getElementById('pf-confirm-btn').textContent = 'Run Sprint';
   _pfDagData = null;
+  _pfWarnings = null;
+  _pfCycle = null;
+  _pfSelectedIds = new Set();
 }
 
 function _pfClose() {
@@ -5298,6 +6545,9 @@ function _pfClose() {
   _pfCurrentRepo  = null;
   _pfState        = 'idle';
   _pfDagData      = null;
+  _pfWarnings     = null;
+  _pfCycle        = null;
+  _pfSelectedIds  = new Set();
 }
 
 async function _pfFetch() {
@@ -5309,9 +6559,14 @@ async function _pfFetch() {
       `/api/sprints/${encodeURIComponent(label)}/preflight?project=${encodeURIComponent(repo)}`
     );
     if (!res.ok) throw new Error(await res.text());
-    if (_pfCurrentLabel !== label) return; // modal closed while in flight
+    if (_pfCurrentLabel !== label) return;
     const data = await res.json();
-    _pfDagData = data.dag || null;
+    _pfDagData  = data.dag      || null;
+    _pfWarnings = data.warnings || null;
+    _pfCycle    = data.cycle    || null;
+    if (_pfDagData) {
+      for (const t of (_pfDagData.tickets || [])) _pfSelectedIds.add(t.id);
+    }
     _pfState = 'success';
     _pfShowSuccess();
   } catch (e) {
@@ -5325,18 +6580,71 @@ function _pfShowSuccess() {
   document.getElementById('pf-loading').classList.add('hidden');
   document.getElementById('pf-error').classList.add('hidden');
   const n = parseInt((_pfCurrentLabel || '').split('-')[1], 10);
-  const dagHtml = _pfDagData && (_pfDagData.tickets || []).length > 0
+  const dagHtml       = _pfDagData && (_pfDagData.tickets || []).length > 0
     ? _pfBuildDAGHtml(_pfDagData)
     : '';
+  const warningsHtml  = _pfBuildWarningsHtml();
+  const cycleHtml     = _pfBuildCycleHtml();
+  const conflictsHtml = _pfBuildConflictsHtml();
+  const orderHtml     = _pfBuildOrderHtml();
   document.getElementById('pf-content').innerHTML =
-    `<p style="font-size:13px;color:var(--text);margin:0;">Ready to run <strong>Sprint ${n}</strong>.</p>${dagHtml}`;
+    `<p style="font-size:13px;color:var(--text);margin:0;">Ready to run <strong>Sprint ${n}</strong>.</p>
+     ${warningsHtml}
+     ${cycleHtml}
+     ${dagHtml}
+     <div class="pf-section">
+       <div class="pf-section-label">Conflicts</div>
+       <div class="pf-section-body" id="pf-conflicts">${conflictsHtml}</div>
+     </div>
+     <div class="pf-section">
+       <div class="pf-section-label">Proposed Execution Order</div>
+       <div class="pf-section-body" id="pf-order">${orderHtml}</div>
+     </div>`;
   document.getElementById('pf-content').classList.remove('hidden');
   document.getElementById('pf-footer').classList.remove('hidden');
-  document.getElementById('pf-confirm-btn').disabled = false;
+  const hasCycle  = !!(_pfCycle && _pfCycle.length);
+  const confirmBtn = document.getElementById('pf-confirm-btn');
+  confirmBtn.disabled = hasCycle;
+  if (hasCycle) {
+    confirmBtn.title = 'Cannot run: dependency cycle detected. Resolve the cycle first.';
+    confirmBtn.setAttribute('aria-label', 'Run Sprint — disabled: dependency cycle detected');
+  } else {
+    confirmBtn.title = '';
+    confirmBtn.setAttribute('aria-label', 'Run Sprint');
+  }
   document.getElementById('pf-cancel-btn').focus();
   if (_pfDagData && (_pfDagData.edges || []).length > 0) {
     requestAnimationFrame(() => _pfDrawDAGArrows(_pfDagData.edges));
   }
+}
+
+function _pfBuildWarningsHtml() {
+  if (!_pfWarnings) return '';
+  const chips = [];
+  const unestimated    = _pfWarnings.unestimated    || [];
+  const staleEstimates = _pfWarnings.stale_estimates || [];
+  const missingAc      = _pfWarnings.missing_ac      || [];
+  if (unestimated.length) {
+    chips.push(`<span class="pf-warning-chip">${unestimated.length} unestimated: ${escHtml(unestimated.join(', '))}</span>`);
+  }
+  if (staleEstimates.length) {
+    chips.push(`<span class="pf-warning-chip">${staleEstimates.length} stale estimate${staleEstimates.length > 1 ? 's' : ''}: ${escHtml(staleEstimates.join(', '))}</span>`);
+  }
+  if (missingAc.length) {
+    chips.push(`<span class="pf-warning-chip">${missingAc.length} missing AC: ${escHtml(missingAc.join(', '))}</span>`);
+  }
+  if (!chips.length) return '';
+  return `<div class="pf-warnings-section">
+    <div class="pf-warnings-label">Warnings</div>
+    <div class="pf-warning-chips">${chips.join('')}</div>
+  </div>`;
+}
+
+function _pfBuildCycleHtml() {
+  if (!_pfCycle || !_pfCycle.length) return '';
+  return `<div class="pf-cycle-banner">
+    <strong>Cycle detected:</strong> ${escHtml(_pfCycle.join(' → '))}
+  </div>`;
 }
 
 function _pfBuildDAGHtml(dag) {
@@ -5354,27 +6662,29 @@ function _pfBuildDAGHtml(dag) {
       const stateClass = t.state || 'backlog';
       const stateBadge = `<span class="ticket-status-pill ${escHtml(stateClass)}">${escHtml(stateClass)}</span>`;
       const sizeBadge  = t.size ? `<span class="pf-dag-size-badge">${escHtml(t.size)}</span>` : '';
-      const files = (t.files_touched || []);
-      const shown = files.slice(0, 3).map(f => `<span>${escHtml(f.split('/').slice(-1)[0])}</span>`).join('');
-      const more  = files.length > 3 ? `<span>+${files.length - 3} more</span>` : '';
-      const filesHtml = (shown || more)
-        ? `<div class="pf-dag-card-files">${shown}${more}</div>`
-        : '';
-      cardsHtml += `<div class="pf-dag-card" data-dag-id="${escHtml(id)}">
-          <div class="pf-dag-card-num">#${escHtml(String(t.number))}</div>
+      const files      = (t.files_touched || []);
+      const shown      = files.slice(0, 3).map(f => `<span>${escHtml(f.split('/').slice(-1)[0])}</span>`).join('');
+      const more       = files.length > 3 ? `<span>+${files.length - 3} more</span>` : '';
+      const filesHtml  = (shown || more) ? `<div class="pf-dag-card-files">${shown}${more}</div>` : '';
+      cardsHtml += `<div class="pf-dag-card" id="pf-card-${escHtml(id)}" data-dag-id="${escHtml(id)}">
+          <div class="pf-dag-card-header">
+            <input type="checkbox" class="pf-dag-card-check" checked
+              onchange="_pfToggleTicket('${escHtml(id)}')" aria-label="Include ticket ${escHtml(id)}">
+            <span class="pf-dag-card-num">${escHtml(id)}</span>
+          </div>
           <div class="pf-dag-card-title" title="${escHtml(t.title)}">${escHtml(t.title)}</div>
           <div class="pf-dag-card-meta">${stateBadge}${sizeBadge}</div>
           ${filesHtml}
         </div>`;
     }
     colsHtml += `<div class="pf-dag-col">
-        <div class="pf-dag-col-label">Level ${i}</div>
+        <div class="pf-dag-col-label">Level ${i + 1}</div>
         ${cardsHtml}
       </div>`;
   }
 
   return `<div class="pf-dag-section">
-    <div class="pf-dag-section-label">Execution Order</div>
+    <div class="pf-dag-section-label">Execution Graph</div>
     <div class="pf-dag-wrap" id="pf-dag-wrap">
       <svg class="pf-dag-svg" id="pf-dag-svg" aria-hidden="true"></svg>
       <div class="pf-dag-levels" id="pf-dag-levels">${colsHtml}</div>
@@ -5430,6 +6740,72 @@ function _pfDrawDAGArrows(edges) {
     line.setAttribute('marker-end', 'url(#pf-arrow)');
     svg.appendChild(line);
   }
+}
+
+function _pfToggleTicket(id) {
+  if (_pfSelectedIds.has(id)) {
+    _pfSelectedIds.delete(id);
+  } else {
+    _pfSelectedIds.add(id);
+  }
+  const card = document.getElementById(`pf-card-${id}`);
+  if (card) card.classList.toggle('pf-deselected', !_pfSelectedIds.has(id));
+  _pfUpdateSections();
+}
+
+function _pfGetSelectedTickets() {
+  if (!_pfDagData) return [];
+  return (_pfDagData.tickets || []).filter(t => _pfSelectedIds.has(t.id));
+}
+
+function _pfComputeConflicts(tickets) {
+  const conflicts = [];
+  for (let i = 0; i < tickets.length; i++) {
+    for (let j = i + 1; j < tickets.length; j++) {
+      const filesA = tickets[i].files_touched || [];
+      const filesB = tickets[j].files_touched || [];
+      const shared = filesA.filter(f => filesB.includes(f));
+      for (const file of shared) {
+        conflicts.push({ a: tickets[i], b: tickets[j], file });
+      }
+    }
+  }
+  return conflicts;
+}
+
+function _pfBuildConflictsHtml() {
+  const selected = _pfGetSelectedTickets();
+  const conflicts = _pfComputeConflicts(selected);
+  if (!conflicts.length) {
+    return '<p class="pf-no-conflict">No file conflicts detected.</p>';
+  }
+  return conflicts.map(c =>
+    `<p class="pf-conflict-item">Tickets #${c.a.number} and #${c.b.number} both touch <code>${escHtml(c.file)}</code></p>`
+  ).join('');
+}
+
+function _pfBuildOrderHtml() {
+  if (!_pfDagData) return '<p class="pf-no-conflict">No order data available.</p>';
+  const layers = (_pfDagData.layers || [])
+    .map(layer => layer.filter(id => _pfSelectedIds.has(id)))
+    .filter(l => l.length > 0);
+  if (!layers.length) return '<p class="pf-no-conflict">No tickets selected.</p>';
+
+  let html = '<ol class="pf-order-list">';
+  for (let i = 0; i < layers.length; i++) {
+    const nums = layers[i].map(id => id);
+    const descriptor = i === 0 ? 'parallel-eligible' : `runs after Level ${i}`;
+    html += `<li class="pf-order-item">Level ${i + 1}: ${escHtml(nums.join(', '))} — ${escHtml(descriptor)}.</li>`;
+  }
+  html += '</ol>';
+  return html;
+}
+
+function _pfUpdateSections() {
+  const conflictsEl = document.getElementById('pf-conflicts');
+  const orderEl     = document.getElementById('pf-order');
+  if (conflictsEl) conflictsEl.innerHTML = _pfBuildConflictsHtml();
+  if (orderEl)     orderEl.innerHTML     = _pfBuildOrderHtml();
 }
 
 function _pfShowError(msg) {
@@ -5669,6 +7045,66 @@ async function smgmtDeleteSprint(label) {
     alert('Failed to delete sprint: ' + e.message);
   }
 }
+
+// ── Clean up empty sprints (issue #457) ────────────────────────────────────
+let _smgmtEmptyLabels = [];
+
+function _smgmtUpdateCleanupBtn(data) {
+  const sprints = data.sprints || [];
+  const order   = data.order   || [];
+  const issues  = data.issues  || [];
+  const orderedLabels = order.length > 0
+    ? order.filter(l => /^sprint-\d+(\.\d+)?$/.test(l))
+    : [...sprints].sort((a, b) => a - b).map(n => `sprint-${n}`);
+  const labeled = new Set(issues.map(i => i.sprint_label).filter(Boolean));
+  _smgmtEmptyLabels = orderedLabels.filter(l => !labeled.has(l));
+  const btn = document.getElementById('smgmt-cleanup-empty-btn');
+  if (btn) btn.style.display = _smgmtEmptyLabels.length > 0 ? '' : 'none';
+}
+
+function _smgmtCleanupEmpty() {
+  const names = _smgmtEmptyLabels.join(', ');
+  document.getElementById('cleanup-empty-modal-msg').textContent =
+    `${names} will be removed.`;
+  const errEl = document.getElementById('cleanup-empty-modal-error');
+  errEl.textContent = '';
+  errEl.classList.add('hidden');
+  document.getElementById('cleanup-empty-confirm-btn').disabled = false;
+  document.getElementById('cleanup-empty-backdrop').classList.remove('hidden');
+  document.getElementById('cleanup-empty-modal').classList.remove('hidden');
+}
+
+function _smgmtCleanupModalClose() {
+  document.getElementById('cleanup-empty-backdrop').classList.add('hidden');
+  document.getElementById('cleanup-empty-modal').classList.add('hidden');
+}
+
+async function _smgmtCleanupConfirm() {
+  const btn = document.getElementById('cleanup-empty-confirm-btn');
+  btn.disabled = true;
+  const errEl = document.getElementById('cleanup-empty-modal-error');
+  errEl.textContent = '';
+  errEl.classList.add('hidden');
+  const repo = _smgmtRepo();
+  try {
+    const resp = await fetch('/api/sprints/cleanup-empty', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({project: repo}),
+    });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.detail || 'HTTP ' + resp.status);
+    }
+    _smgmtCleanupModalClose();
+    await loadSprintMgmt();
+  } catch (e) {
+    errEl.textContent = 'Error: ' + e.message;
+    errEl.classList.remove('hidden');
+    btn.disabled = false;
+  }
+}
+// ───────────────────────────────────────────────────────────────────────────
 
 async function smgmtFinishSprint(label) {
   const repo = _smgmtRepo();
@@ -5955,6 +7391,10 @@ function _smgmtGhostComputeNextFree() {
 
 /** Show the ghost pane below the sprint list, pre-computing next-free number. */
 function _smgmtGhostShow() {
+  if (_smgmtRunningLabels.size > 0) {
+    showToast('Cannot create new sprint while one is running.', 'warning');
+    return;
+  }
   _smgmtGhostNextNum = _smgmtGhostComputeNextFree();
   const ghost = document.getElementById('smgmt-ghost-pane');
   const titleEl = document.getElementById('smgmt-ghost-title');
@@ -5989,6 +7429,7 @@ function _smgmtGhostHide() {
 
 function _smgmtGhostDragOver(event) {
   if (!_smgmtDragTicket) return;
+  if (_smgmtRunningLabels.size > 0) return;
   event.preventDefault();
   event.dataTransfer.dropEffect = 'move';
   const ghost = document.getElementById('smgmt-ghost-pane');
@@ -6023,6 +7464,7 @@ function _smgmtGhostDragLeave(event) {
 async function _smgmtGhostDrop(event) {
   event.preventDefault();
   if (!_smgmtDragTicket) return;
+  if (_smgmtRunningLabels.size > 0) return;
   const dragInfo = _smgmtDragTicket;
   const nextNum = _smgmtGhostNextNum;
   _smgmtGhostHide();
@@ -6300,11 +7742,14 @@ async function _smgmtTicketReorderDrop(event, targetIssue, sprintLabel) {
 
   _smgmtDragTicket = null;
   try {
-    const res = await fetch(`/api/sprints/${encodeURIComponent(sprintLabel)}/tickets/reorder`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ issue_numbers: order, project: repo }),
-    });
+    const res = await fetch(
+      `/api/sprints/${encodeURIComponent(sprintLabel)}/plan?project=${encodeURIComponent(repo)}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(order),
+      }
+    );
     if (!res.ok) throw new Error(await res.text());
     await loadSprintMgmt();
   } catch (e) {
@@ -6631,15 +8076,18 @@ function _smgmtBoardUnlock() {
 
 // ── Auto-refresh pill (issue #275) ────────────────────────────────────────
 const _AR_LS_KEY    = 'smgmt-ar-interval';
-const _AR_INTERVALS = [5, 15, 30, 60]; // valid interval values in seconds
+const _AR_INTERVALS = [1, 2, 5, 10, 15, 30, 60]; // valid interval values in seconds
 
 let _arInterval  = 15;  // active interval in seconds (0 = off)
 let _arTickerId  = null; // setInterval handle
 
 /** Initialise the pill from localStorage and start the ticker. */
 function _smgmtArInit() {
-  const saved = parseInt(localStorage.getItem(_AR_LS_KEY), 10);
-  _arInterval = _AR_INTERVALS.includes(saved) ? saved : (saved === 0 ? 0 : 15);
+  // Settings-level preference takes priority over the sprint-mgmt pill legacy key
+  const settingRaw = parseInt(localStorage.getItem(_settingsKey('autoRefresh')), 10);
+  const legacyRaw  = parseInt(localStorage.getItem(_AR_LS_KEY), 10);
+  const raw = !isNaN(settingRaw) ? settingRaw : legacyRaw;
+  _arInterval = _AR_INTERVALS.includes(raw) ? raw : (raw === 0 ? 0 : 15);
   _smgmtArStartTicker();
   _smgmtArUpdatePill();
 }
@@ -6741,11 +8189,22 @@ document.addEventListener('click', function(e) {
   if (wrap && !wrap.contains(e.target)) _smgmtArCloseMenu();
 });
 
+// ── Modal inert helpers ───────────────────────────────────────────────────
+function _setBodyInert(exceptIds) {
+  Array.from(document.body.children).forEach(el => {
+    if (!exceptIds.includes(el.id)) el.inert = true;
+  });
+}
+function _clearBodyInert() {
+  Array.from(document.body.children).forEach(el => { el.inert = false; });
+}
+
 // ── New Sprint modal ──────────────────────────────────────────────────────
 function smgmtOpenNewSprint() {
   document.getElementById('ns-label').value = '';
   document.getElementById('ns-error').classList.add('hidden');
   document.getElementById('ns-submit-btn').disabled = true;
+  _setBodyInert(['ns-backdrop', 'ns-modal']);
   document.getElementById('ns-backdrop').classList.remove('hidden');
   document.getElementById('ns-modal').classList.remove('hidden');
   document.getElementById('ns-label').focus();
@@ -6758,6 +8217,7 @@ function _nsClose(force) {
   }
   document.getElementById('ns-backdrop').classList.add('hidden');
   document.getElementById('ns-modal').classList.add('hidden');
+  _clearBodyInert();
 }
 
 function _parseSprintNum(str) {
@@ -6860,7 +8320,18 @@ async function _ntFetchLabels(repo) {
   try {
     const url = '/api/github/labels' + (repo ? '?repo=' + encodeURIComponent(repo) : '');
     const r = await fetch(url);
-    if (r.ok) _ntLabels = await r.json();
+    if (r.ok) {
+      _ntLabels = await r.json();
+      // Pre-select first default label from settings if no label chosen yet
+      if (!_ntSelectedLabel) {
+        const defaults = localStorage.getItem(_settingsKey('defaultLabels')) || '';
+        const first = defaults.split(',').map(function(s) { return s.trim(); }).find(function(s) { return s; });
+        if (first) {
+          const match = _ntLabels.find(function(l) { return l.name.toLowerCase() === first.toLowerCase(); });
+          if (match) _ntSelectLabel(match.name);
+        }
+      }
+    }
   } catch (_) {}
 }
 
@@ -6981,6 +8452,7 @@ async function smgmtOpenNewTicket() {
   document.getElementById('nt-submit-btn').disabled = false;
   document.getElementById('nt-submit-btn').textContent = 'Generate Draft';
   document.getElementById('nt-draft-section').classList.add('hidden');
+  _setBodyInert(['nt-backdrop', 'nt-modal']);
   document.getElementById('nt-backdrop').classList.remove('hidden');
   document.getElementById('nt-modal').classList.remove('hidden');
 
@@ -7012,6 +8484,7 @@ async function smgmtOpenNewTicket() {
 function _ntClose() {
   document.getElementById('nt-backdrop').classList.add('hidden');
   document.getElementById('nt-modal').classList.add('hidden');
+  _clearBodyInert();
 }
 
 // ── Modal event-binding (called once from init after DOM is ready) ─────────
@@ -7019,8 +8492,9 @@ function _setupModals() {
   // Global Escape handler
   document.addEventListener('keydown', function(e) {
     if (e.key === 'Escape') {
-      if (!document.getElementById('pf-modal').classList.contains('hidden')) {
-        _pfClose();
+      const settingsPanel = document.getElementById('settings-panel');
+      if (settingsPanel && settingsPanel.classList.contains('open')) {
+        closeSettingsPanel();
       } else if (!document.getElementById('sm-modal').classList.contains('hidden')) {
         closeSettingsModal();
       } else if (!document.getElementById('ct-modal').classList.contains('hidden')) {
@@ -7046,17 +8520,6 @@ function _setupModals() {
   document.getElementById('ns-close-btn').addEventListener('click', () => _nsClose(false));
   document.getElementById('ns-cancel-btn').addEventListener('click', () => _nsClose(false));
   document.getElementById('ns-backdrop').addEventListener('click', () => _nsClose(false));
-
-  document.getElementById('ns-modal').addEventListener('keydown', function(e) {
-    if (e.key !== 'Tab') return;
-    const focusable = Array.from(this.querySelectorAll(
-      'button:not([disabled]), textarea, input, [tabindex]:not([tabindex="-1"])'
-    ));
-    if (!focusable.length) return;
-    const first = focusable[0], last = focusable[focusable.length - 1];
-    if (e.shiftKey) { if (document.activeElement === first) { e.preventDefault(); last.focus(); } }
-    else            { if (document.activeElement === last)  { e.preventDefault(); first.focus(); } }
-  });
 
   document.getElementById('ns-submit-btn').addEventListener('click', async function() {
     const labelVal = (document.getElementById('ns-label').value || '').trim();
@@ -7163,17 +8626,6 @@ function _setupModals() {
     } else if (opt.dataset.name) {
       _ntSelectLabel(opt.dataset.name);
     }
-  });
-
-  document.getElementById('nt-modal').addEventListener('keydown', function(e) {
-    if (e.key !== 'Tab') return;
-    const focusable = Array.from(this.querySelectorAll(
-      'button:not([disabled]), select, textarea, input, [tabindex]:not([tabindex="-1"])'
-    ));
-    if (!focusable.length) return;
-    const first = focusable[0], last = focusable[focusable.length - 1];
-    if (e.shiftKey) { if (document.activeElement === first) { e.preventDefault(); last.focus(); } }
-    else            { if (document.activeElement === last)  { e.preventDefault(); first.focus(); } }
   });
 
   document.getElementById('nt-submit-btn').addEventListener('click', async function() {
@@ -7328,6 +8780,7 @@ function _bcInitTab() {
 function _bcPopulateRepo() {
   const sel = document.getElementById('bc-repo');
   if (!sel) return;
+  const savedRepo = localStorage.getItem(_settingsKey('defaultRepo')) || '';
   // Use _cachedFullRepo (keyed by slug) to build list
   const repos = Object.values(_cachedFullRepo);
   if (repos.length === 0) {
@@ -7343,13 +8796,15 @@ function _bcPopulateRepo() {
   if (projects.length > 0) {
     sel.innerHTML = projects.map(p => {
       const repo = _cachedFullRepo[p.slug] || p.slug;
-      const selected = p.slug === _slug ? ' selected' : '';
+      const defaulted = savedRepo ? repo === savedRepo : p.slug === _slug;
+      const selected = defaulted ? ' selected' : '';
       return `<option value="${escHtml(repo)}"${selected}>${escHtml(p.name || p.slug)}</option>`;
     }).join('');
   } else {
     sel.innerHTML = repos.map(repo => {
       const slug = repo.split('/').pop();
-      const selected = slug === _slug ? ' selected' : '';
+      const defaulted = savedRepo ? repo === savedRepo : slug === _slug;
+      const selected = defaulted ? ' selected' : '';
       return `<option value="${escHtml(repo)}"${selected}>${escHtml(slug)}</option>`;
     }).join('');
   }
@@ -8131,7 +9586,8 @@ function bcRecreate() {
     const textarea = document.getElementById('bc-textarea');
     if (textarea) textarea.value = '';
     const labelsEl = document.getElementById('bc-default-labels');
-    if (labelsEl) labelsEl.value = 'enhancement';
+    const savedLabels = localStorage.getItem(_settingsKey('defaultLabels')) || '';
+    if (labelsEl) labelsEl.value = savedLabels || 'enhancement';
     const concEl = document.getElementById('bc-concurrency');
     if (concEl) concEl.value = '3';
   }
@@ -8547,6 +10003,258 @@ function _logsDisconnectLive() {
     _logsState.liveRunId = null;
   }
 }
+
+// ── Compare Sprints tab (issue #435) ─────────────────────────────────────────
+
+let _cmpInitialized = false;
+let _cmpRuns = [];      // finished sprint summaries from /api/logs/runs
+let _cmpStateA = null;  // full state for sprint A
+let _cmpStateB = null;  // full state for sprint B
+let _cmpRunsWarnShown = false;
+
+async function compareInit() {
+  if (_cmpInitialized) {
+    // Re-entering tab — re-render in case project changed
+    _cmpRenderPickers();
+    return;
+  }
+  _cmpInitialized = true;
+  await _cmpLoadRuns();
+  _cmpRenderPickers();
+  // Check URL hash for pre-selected sprints (e.g. #compare?a=sprint-1&b=sprint-2)
+  const params = new URLSearchParams(window.location.hash.replace(/^#compare\??/, ''));
+  const a = params.get('a');
+  const b = params.get('b');
+  if (a && b) {
+    const selA = document.getElementById('cmp-select-a');
+    const selB = document.getElementById('cmp-select-b');
+    if (selA) selA.value = a;
+    if (selB) selB.value = b;
+    await _cmpLoadAndRender();
+  }
+}
+
+async function _cmpLoadRuns() {
+  _cmpRunsWarnShown = false;
+  try {
+    const project = _projectData ? _projectData.repo : _slug;
+    const params = project ? '?project=' + encodeURIComponent(project) + '&page_size=100' : '?page_size=100';
+    const res = await fetch('/api/logs/runs' + params);
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    _cmpRuns = (data.items || []).sort((a, b) => a.sprint_label.localeCompare(b.sprint_label, undefined, { numeric: true }));
+  } catch (e) {
+    _cmpRuns = [];
+    _cmpRunsWarnShown = true;
+  }
+}
+
+function _cmpRenderPickers() {
+  const selA = document.getElementById('cmp-select-a');
+  const selB = document.getElementById('cmp-select-b');
+  if (!selA || !selB) return;
+
+  const makeOptions = (selected) => {
+    let html = '<option value="">— select sprint —</option>';
+    for (const run of _cmpRuns) {
+      const sel = run.sprint_label === selected ? ' selected' : '';
+      html += `<option value="${escHtml(run.sprint_label)}"${sel}>${escHtml(run.sprint_label)}</option>`;
+    }
+    return html;
+  };
+
+  const prevA = selA.value;
+  const prevB = selB.value;
+  selA.innerHTML = makeOptions(prevA);
+  selB.innerHTML = makeOptions(prevB);
+
+  if (_cmpRuns.length < 2) {
+    document.getElementById('cmp-result').innerHTML = _cmpEmptyState(
+      'Two finished sprints required',
+      'At least two completed sprints are needed to compare. Run more sprints and come back.'
+    );
+  }
+}
+
+async function cmpOnPickerChange() {
+  await _cmpLoadAndRender();
+}
+
+async function _cmpLoadAndRender() {
+  const selA = document.getElementById('cmp-select-a');
+  const selB = document.getElementById('cmp-select-b');
+  const labelA = selA ? selA.value : '';
+  const labelB = selB ? selB.value : '';
+  const result = document.getElementById('cmp-result');
+
+  if (!labelA || !labelB) {
+    result.innerHTML = '';
+    return;
+  }
+  if (labelA === labelB) {
+    result.innerHTML = `<div class="cmp-warn-banner"><i class="ti ti-alert-triangle"></i>Select two different sprints to compare.</div>`;
+    return;
+  }
+
+  result.innerHTML = '<div class="placeholder-msg"><i class="ti ti-loader-2 cmp-spin"></i>Loading…</div>';
+
+  const project = _projectData ? _projectData.repo : _slug;
+  const qs = project ? '?project=' + encodeURIComponent(project) : '';
+  let warnMsg = '';
+
+  // Load state files for both sprints in parallel
+  const [resA, resB] = await Promise.all([
+    fetch(`/api/sprints/${encodeURIComponent(labelA)}/state-full${qs}`).catch(() => null),
+    fetch(`/api/sprints/${encodeURIComponent(labelB)}/state-full${qs}`).catch(() => null),
+  ]);
+
+  _cmpStateA = resA && resA.ok ? await resA.json().catch(() => null) : null;
+  _cmpStateB = resB && resB.ok ? await resB.json().catch(() => null) : null;
+
+  // Supplement with /api/logs/runs data if state-full unavailable
+  const runA = _cmpRuns.find(r => r.sprint_label === labelA) || null;
+  const runB = _cmpRuns.find(r => r.sprint_label === labelB) || null;
+
+  if (!_cmpStateA && !_cmpStateB) {
+    warnMsg = 'Sprint state files unavailable — showing partial data from run history only.';
+  } else if (!_cmpStateA || !_cmpStateB) {
+    const missing = !_cmpStateA ? labelA : labelB;
+    warnMsg = `State file for ${missing} unavailable — showing partial data.`;
+  }
+  if (_cmpRunsWarnShown) {
+    warnMsg = (warnMsg ? warnMsg + ' ' : '') + 'Agent dispatch data unavailable (could not reach /api/logs/runs).';
+  }
+
+  result.innerHTML = _cmpRenderPanel(labelA, labelB, _cmpStateA, _cmpStateB, runA, runB, warnMsg);
+}
+
+function _cmpRenderPanel(labelA, labelB, stateA, stateB, runA, runB, warnMsg) {
+  let html = '';
+  if (warnMsg) {
+    html += `<div class="cmp-warn-banner"><i class="ti ti-alert-triangle"></i>${escHtml(warnMsg)}</div>`;
+  }
+
+  html += '<div class="cmp-columns">';
+  html += _cmpColHtml(labelA, stateA, runA);
+  html += _cmpColHtml(labelB, stateB, runB);
+  html += '</div>';
+
+  html += '<p class="cmp-section-title"><i class="ti ti-list" style="margin-right:6px;"></i>Ticket diff</p>';
+  html += _cmpTicketTableHtml(labelA, labelB, stateA, stateB);
+
+  return html;
+}
+
+function _cmpColHtml(label, state, run) {
+  const issues   = state ? (state.issues || []) : [];
+  const shipped  = issues.filter(i => i.status === 'done').length;
+  const rejected = issues.filter(i => i.agent_status === 'failed' || i.failure_reason).length;
+  const skipped  = issues.filter(i => i.status === 'skipped' && i.agent_status !== 'failed').length;
+  const dispatches = state ? (state.dispatch_count || 0) : (run ? run.ticket_count : 0);
+
+  let duration = '—';
+  if (state && state.wall_clock_secs) {
+    duration = _cmpFmtDuration(state.wall_clock_secs);
+  } else if (run && run.start_time && run.end_time) {
+    const secs = (new Date(run.end_time) - new Date(run.start_time)) / 1000;
+    duration = _cmpFmtDuration(secs);
+  }
+
+  const outcome = state ? state.outcome : (run ? run.outcome : 'unknown');
+  const badge = _cmpBadgeHtml(outcome);
+
+  const ticketCount = issues.length || (run ? run.ticket_count : 0);
+
+  return `
+    <div class="cmp-col">
+      <div class="cmp-col-hdr">
+        <span class="cmp-col-label">${escHtml(label)}</span>
+        ${badge}
+      </div>
+      <div class="cmp-metrics">
+        <div class="cmp-metric"><div class="cmp-metric-val">${escHtml(String(duration))}</div><div class="cmp-metric-lbl">Duration</div></div>
+        <div class="cmp-metric"><div class="cmp-metric-val">${ticketCount}</div><div class="cmp-metric-lbl">Total tickets</div></div>
+        <div class="cmp-metric"><div class="cmp-metric-val" style="color:#16a34a">${shipped}</div><div class="cmp-metric-lbl">Shipped</div></div>
+        <div class="cmp-metric"><div class="cmp-metric-val" style="color:#dc2626">${rejected}</div><div class="cmp-metric-lbl">Rejected / failed</div></div>
+        <div class="cmp-metric"><div class="cmp-metric-val" style="color:#f59e0b">${skipped}</div><div class="cmp-metric-lbl">Skipped</div></div>
+        <div class="cmp-metric"><div class="cmp-metric-val">${dispatches}</div><div class="cmp-metric-lbl">Agent dispatches</div></div>
+      </div>
+    </div>`;
+}
+
+function _cmpBadgeHtml(outcome) {
+  const map = {
+    success: ['cmp-badge-success', 'ti-circle-check', 'Completed'],
+    partial:  ['cmp-badge-partial',  'ti-alert-triangle', 'Partial'],
+    failed:   ['cmp-badge-failed',   'ti-circle-x', 'Failed'],
+    unknown:  ['cmp-badge-unknown',  'ti-help-circle', 'Unknown'],
+  };
+  const [cls, icon, text] = map[outcome] || map.unknown;
+  return `<span class="cmp-badge ${cls}"><i class="ti ${icon}"></i>${text}</span>`;
+}
+
+function _cmpTicketTableHtml(labelA, labelB, stateA, stateB) {
+  const issuesA = stateA ? (stateA.issues || []) : [];
+  const issuesB = stateB ? (stateB.issues || []) : [];
+
+  if (!issuesA.length && !issuesB.length) {
+    return `<p style="color:var(--text-sub);font-size:13px;">No per-ticket data available.</p>`;
+  }
+
+  // Build union of all ticket numbers
+  const byNumA = Object.fromEntries(issuesA.map(i => [i.number, i]));
+  const byNumB = Object.fromEntries(issuesB.map(i => [i.number, i]));
+  const allNums = [...new Set([...Object.keys(byNumA), ...Object.keys(byNumB)])].sort((a, b) => Number(a) - Number(b));
+
+  let rows = '';
+  for (const num of allNums) {
+    const issA = byNumA[num];
+    const issB = byNumB[num];
+    const title = (issA || issB).title || '';
+    rows += `<tr>
+      <td><span class="cmp-ticket-num">#${escHtml(String(num))}</span></td>
+      <td>${escHtml(title)}</td>
+      <td>${_cmpTicketCell(issA)}</td>
+      <td>${_cmpTicketCell(issB)}</td>
+    </tr>`;
+  }
+
+  return `<div style="overflow-x:auto;">
+  <table class="cmp-ticket-table">
+    <thead><tr>
+      <th>#</th><th>Title</th>
+      <th>${escHtml(labelA)}</th>
+      <th>${escHtml(labelB)}</th>
+    </tr></thead>
+    <tbody>${rows}</tbody>
+  </table></div>`;
+}
+
+function _cmpTicketCell(issue) {
+  if (!issue) return '<span class="cmp-cell-absent">—</span>';
+  if (issue.status === 'done') return '<span class="cmp-cell-done">Shipped</span>';
+  if (issue.agent_status === 'failed' || issue.failure_reason) return '<span class="cmp-cell-failed">Failed</span>';
+  if (issue.status === 'skipped') return '<span class="cmp-cell-skipped">Skipped</span>';
+  return `<span style="color:var(--text-sub)">${escHtml(issue.status || 'pending')}</span>`;
+}
+
+function _cmpFmtDuration(secs) {
+  secs = Math.round(secs);
+  if (secs < 60) return secs + 's';
+  const m = Math.floor(secs / 60);
+  const s = secs % 60;
+  if (m < 60) return m + 'm ' + (s > 0 ? s + 's' : '');
+  const h = Math.floor(m / 60);
+  const rm = m % 60;
+  return h + 'h ' + (rm > 0 ? rm + 'm' : '');
+}
+
+function _cmpEmptyState(title, msg) {
+  return `<div class="cmp-empty-state">
+    <i class="ti ti-git-compare"></i>
+    <p><strong>${escHtml(title)}</strong><br>${escHtml(msg)}</p>
+  </div>`;
+}
 </script>
 
 <!-- ── Inline multi-select action bar (rendered inside sprint list by JS) ── -->
@@ -8805,13 +10513,13 @@ function _logsDisconnectLive() {
   </div>
 </div>
 
-<!-- ── Run Sprint preflight modal (issue #446) ── -->
-<div class="modal-backdrop hidden" id="pf-backdrop"></div>
+<!-- ── Run Sprint preflight modal (issue #448) ── -->
+<div class="modal-backdrop hidden" id="pf-backdrop" onclick="_pfClose()"></div>
 <div class="modal pf-modal hidden" id="pf-modal"
      role="dialog" aria-modal="true" aria-labelledby="pf-modal-title">
   <div class="modal-header">
     <span class="modal-title" id="pf-modal-title">Run Sprint</span>
-    <button class="modal-close" id="pf-close-btn" aria-label="Close">&times;</button>
+    <button class="modal-close" id="pf-close-btn" onclick="_pfClose()" aria-label="Close">&times;</button>
   </div>
   <div class="modal-body" id="pf-body">
     <div id="pf-loading" style="text-align:center;padding:24px 0;">
@@ -8822,32 +10530,55 @@ function _logsDisconnectLive() {
     <div id="pf-error" class="hidden">
       <div class="modal-error" id="pf-error-msg"></div>
       <div style="margin-top:10px;">
-        <button class="btn-ghost" id="pf-retry-btn" type="button">Retry</button>
+        <button class="btn-ghost" id="pf-retry-btn" type="button" onclick="_pfRetry()">Retry</button>
       </div>
     </div>
   </div>
   <div class="modal-footer hidden" id="pf-footer">
-    <button class="btn-ghost" id="pf-cancel-btn" type="button">Cancel</button>
-    <button class="btn-primary" id="pf-confirm-btn" type="button" disabled>Run Sprint</button>
+    <button class="btn-ghost" id="pf-cancel-btn" type="button" onclick="_pfClose()">Cancel</button>
+    <button class="btn-primary" id="pf-confirm-btn" type="button" onclick="_pfConfirm()" disabled>Run Sprint</button>
+  </div>
+</div>
+
+<!-- ── Re-estimate confirmation modal (issue #452) ── -->
+<div class="modal-backdrop hidden" id="re-est-backdrop" onclick="_smgmtReEstimateClose()"></div>
+<div class="modal re-est-modal hidden" id="re-est-modal"
+     role="dialog" aria-modal="true" aria-labelledby="re-est-modal-title">
+  <div class="modal-header">
+    <span class="modal-title" id="re-est-modal-title">Replace existing estimate?</span>
+    <button class="modal-close" aria-label="Close" onclick="_smgmtReEstimateClose()">&times;</button>
+  </div>
+  <div class="modal-body">
+    <p style="font-size:13px;color:var(--text-sub);margin:0">
+      This will overwrite the current estimate with a fresh one.
+    </p>
+  </div>
+  <div class="modal-footer">
+    <button class="btn-ghost" type="button" onclick="_smgmtReEstimateClose()">Cancel</button>
+    <button class="btn-blue" type="button" id="re-est-confirm-btn" onclick="_smgmtReEstimateConfirm()">Confirm</button>
+  </div>
+</div>
+
+<!-- ── Clean up empty sprints confirmation modal (issue #457) ── -->
+<div class="modal-backdrop hidden" id="cleanup-empty-backdrop" onclick="_smgmtCleanupModalClose()"></div>
+<div class="modal hidden" id="cleanup-empty-modal"
+     role="dialog" aria-modal="true" aria-labelledby="cleanup-empty-modal-title">
+  <div class="modal-header">
+    <span class="modal-title" id="cleanup-empty-modal-title">Clean Up Empty Sprints</span>
+    <button class="modal-close" aria-label="Close" onclick="_smgmtCleanupModalClose()">&times;</button>
+  </div>
+  <div class="modal-body">
+    <p id="cleanup-empty-modal-msg" style="font-size:13px;color:var(--text-sub);margin:0"></p>
+    <div class="modal-error hidden" id="cleanup-empty-modal-error"></div>
+  </div>
+  <div class="modal-footer">
+    <button class="btn-ghost" type="button" onclick="_smgmtCleanupModalClose()">Cancel</button>
+    <button class="btn-danger" type="button" id="cleanup-empty-confirm-btn" onclick="_smgmtCleanupConfirm()">Delete</button>
   </div>
 </div>
 
 <!-- ── GitHub CLI auth warning banner (issue #424) ── -->
-<div id="gh-auth-banner" style="
-  display: none;
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  padding: 8px 16px;
-  background: #fef3c7;
-  border-bottom: 2px solid #d97706;
-  color: #92400e;
-  font-size: 13px;
-  z-index: 1000;
-  text-align: center;
-  font-family: monospace;
-"></div>
+<div id="gh-auth-banner" class="gh-auth-banner"></div>
 
 <!-- ── Toast notification container (issue #426) ── -->
 <div id="toast-container" role="region" aria-label="Notifications" aria-live="polite"></div>
@@ -8938,6 +10669,168 @@ function _logsDisconnectLive() {
     });
 
     container.appendChild(toast);
+  };
+}());
+
+// ── Timeline / Gantt tab (issue #431) ────────────────────────────────────────
+(function () {
+  let _ganttLoaded = false;
+  let _ganttData   = null;
+  const _tt        = document.createElement('div');
+  _tt.className    = 'gantt-tooltip';
+  document.body.appendChild(_tt);
+
+  function _fmtDate(iso) {
+    if (!iso) return '—';
+    const d = new Date(iso);
+    return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+  }
+
+  function _outcomeLabel(state) {
+    if (state === 'running')    return 'Running';
+    if (state === 'has_rework') return 'Has Rework';
+    if (state === 'cancelled')  return 'Cancelled';
+    return 'Finished';
+  }
+
+  function _resolveState(label, baseState) {
+    // Enrich with outcome cache data if available (picks up has_rework from Sprint Mgmt)
+    const cached = _smgmtOutcomeCache[label];
+    if (cached && cached.state && cached.state !== 'running') return cached.state;
+    return baseState;
+  }
+
+  function _showTooltip(e, sprint) {
+    const state = _resolveState(sprint.label, sprint.state);
+    _tt.innerHTML = `
+      <div class="gantt-tooltip-name">${escHtml(sprint.display_name)}</div>
+      <div class="gantt-tooltip-row">
+        <span class="gantt-tooltip-key">Outcome</span>
+        <span class="gantt-tooltip-outcome gantt-tooltip-outcome--${escHtml(state)}">${escHtml(_outcomeLabel(state))}</span>
+      </div>
+      <div class="gantt-tooltip-row">
+        <span class="gantt-tooltip-key">Tickets</span>
+        <span>${sprint.ticket_count}</span>
+      </div>
+      <div class="gantt-tooltip-row">
+        <span class="gantt-tooltip-key">Start</span>
+        <span>${escHtml(_fmtDate(sprint.start_date))}</span>
+      </div>
+      <div class="gantt-tooltip-row">
+        <span class="gantt-tooltip-key">End</span>
+        <span>${escHtml(_fmtDate(sprint.end_date))}</span>
+      </div>`;
+    _tt.classList.add('visible');
+    _positionTooltip(e);
+  }
+
+  function _positionTooltip(e) {
+    const margin = 12;
+    const tw = _tt.offsetWidth  || 220;
+    const th = _tt.offsetHeight || 110;
+    let left = e.clientX + margin;
+    let top  = e.clientY + margin;
+    if (left + tw > window.innerWidth)  left = e.clientX - tw - margin;
+    if (top  + th > window.innerHeight) top  = e.clientY - th - margin;
+    _tt.style.left = left + 'px';
+    _tt.style.top  = top  + 'px';
+  }
+
+  function _hideTooltip() {
+    _tt.classList.remove('visible');
+  }
+
+  function _renderGantt(sprints) {
+    const wrap = document.getElementById('gantt-wrap');
+    if (!wrap) return;
+
+    if (!sprints || sprints.length === 0) {
+      wrap.innerHTML = '<div class="gantt-empty"><i class="ti ti-timeline-event"></i>No sprints to display</div>';
+      return;
+    }
+
+    // Compute time domain
+    const minTs = Math.min(...sprints.map(s => new Date(s.start_date).getTime()));
+    const maxTs = Math.max(...sprints.map(s => new Date(s.end_date).getTime()));
+    const span  = maxTs - minTs || 1;
+
+    const rows = sprints.map(sprint => {
+      const state    = _resolveState(sprint.label, sprint.state);
+      const startPct = ((new Date(sprint.start_date).getTime() - minTs) / span) * 100;
+      const widthPct = Math.max(
+        0.5,
+        ((new Date(sprint.end_date).getTime() - new Date(sprint.start_date).getTime()) / span) * 100
+      );
+
+      return `<div class="gantt-row">
+        <div class="gantt-label" title="${escHtml(sprint.display_name)}">${escHtml(sprint.display_name)}</div>
+        <div class="gantt-track">
+          <div class="gantt-bar gantt-bar--${escHtml(state)}"
+               style="left:${startPct.toFixed(2)}%;width:${widthPct.toFixed(2)}%"
+               data-label="${escHtml(sprint.label)}">
+            ${widthPct > 8 ? `<span class="gantt-bar-label">${escHtml(sprint.display_name)}</span>` : ''}
+          </div>
+        </div>
+      </div>`;
+    }).join('');
+
+    const axisLeft  = _fmtDate(sprints[0].start_date);
+    const axisRight = _fmtDate(sprints[sprints.length - 1].end_date);
+
+    wrap.innerHTML = `
+      <div class="gantt-wrap">
+        <div class="gantt-axis">
+          <span style="flex:0 0 auto">${escHtml(axisLeft)}</span>
+          <span style="flex:1"></span>
+          <span style="flex:0 0 auto">${escHtml(axisRight)}</span>
+        </div>
+        <div class="gantt-scroller">
+          <div class="gantt-chart">${rows}</div>
+        </div>
+      </div>`;
+
+    // Tooltip event delegation
+    const chart = wrap.querySelector('.gantt-chart');
+    if (chart) {
+      chart.addEventListener('mouseover', function(e) {
+        const bar = e.target.closest('.gantt-bar');
+        if (!bar) return;
+        const label = bar.dataset.label;
+        const sprint = _ganttData && _ganttData.find(s => s.label === label);
+        if (sprint) _showTooltip(e, sprint);
+      });
+      chart.addEventListener('mousemove', function(e) {
+        if (_tt.classList.contains('visible')) _positionTooltip(e);
+      });
+      chart.addEventListener('mouseout', function(e) {
+        if (!e.target.closest('.gantt-bar')) _hideTooltip();
+        else if (e.relatedTarget && !e.relatedTarget.closest('.gantt-bar')) _hideTooltip();
+      });
+    }
+  }
+
+  window.ganttInit = async function() {
+    if (_ganttLoaded) {
+      // Re-render to pick up any newly cached outcome states
+      if (_ganttData) _renderGantt(_ganttData);
+      return;
+    }
+    const repo = _cachedFullRepo[_slug];
+    if (!repo) return;
+
+    const wrap = document.getElementById('gantt-wrap');
+    if (wrap) wrap.innerHTML = '<div class="gantt-empty"><i class="ti ti-loader" style="animation:bc-badge-spin .9s linear infinite;display:inline-block"></i>Loading timeline…</div>';
+
+    try {
+      const resp = await fetch('/api/sprints/timeline?project=' + encodeURIComponent(repo));
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      const data = await resp.json();
+      _ganttLoaded = true;
+      _ganttData   = data.sprints || [];
+      _renderGantt(_ganttData);
+    } catch (err) {
+      if (wrap) wrap.innerHTML = '<div class="gantt-empty">Failed to load timeline.</div>';
+    }
   };
 }());
 </script>

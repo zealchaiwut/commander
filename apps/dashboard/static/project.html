@@ -7273,6 +7273,10 @@ function _smgmtGhostComputeNextFree() {
 
 /** Show the ghost pane below the sprint list, pre-computing next-free number. */
 function _smgmtGhostShow() {
+  if (_smgmtRunningLabels.size > 0) {
+    showToast('Cannot create new sprint while one is running.', 'warning');
+    return;
+  }
   _smgmtGhostNextNum = _smgmtGhostComputeNextFree();
   const ghost = document.getElementById('smgmt-ghost-pane');
   const titleEl = document.getElementById('smgmt-ghost-title');
@@ -7307,6 +7311,7 @@ function _smgmtGhostHide() {
 
 function _smgmtGhostDragOver(event) {
   if (!_smgmtDragTicket) return;
+  if (_smgmtRunningLabels.size > 0) return;
   event.preventDefault();
   event.dataTransfer.dropEffect = 'move';
   const ghost = document.getElementById('smgmt-ghost-pane');
@@ -7341,6 +7346,7 @@ function _smgmtGhostDragLeave(event) {
 async function _smgmtGhostDrop(event) {
   event.preventDefault();
   if (!_smgmtDragTicket) return;
+  if (_smgmtRunningLabels.size > 0) return;
   const dragInfo = _smgmtDragTicket;
   const nextNum = _smgmtGhostNextNum;
   _smgmtGhostHide();

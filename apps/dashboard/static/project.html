@@ -4037,9 +4037,9 @@ function _parseDeps(body) {
   const blocks = [];
   const blockedBy = [];
   for (const line of body.split('\n')) {
-    const m1 = line.match(/^blocks?:\s*(.+)/i);
+    const m1 = line.match(/^\s*blocks?:\s*(.+)/i);
     if (m1) { for (const ref of m1[1].matchAll(/#(\d+)/g)) blocks.push(parseInt(ref[1], 10)); }
-    const m2 = line.match(/^blocked[\s-]by:\s*(.+)/i);
+    const m2 = line.match(/^\s*blocked[\s-]by:\s*(.+)/i);
     if (m2) { for (const ref of m2[1].matchAll(/#(\d+)/g)) blockedBy.push(parseInt(ref[1], 10)); }
   }
   return { blocks: [...new Set(blocks)], blockedBy: [...new Set(blockedBy)] };

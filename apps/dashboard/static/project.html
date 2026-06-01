@@ -5031,7 +5031,7 @@ function _preflightCheckTickets(tickets) {
       items.push({ number: t.number, title: t.title, type: 'Missing body' });
       continue;
     }
-    if (!/^##\s*(acceptance criteria|ac)\s*$/im.test(body)) {
+    if (!/^##\s+(acceptance criteria|ac)/im.test(body)) {
       items.push({ number: t.number, title: t.title, type: 'Missing acceptance criteria' });
     }
     const lbls = (t.labels || []).map(l => l.name);

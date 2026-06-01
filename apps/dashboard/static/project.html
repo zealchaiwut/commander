@@ -8441,6 +8441,13 @@ function _nsShowError(msg) {
   el.classList.remove('hidden');
 }
 
+// ── Shared attachment constants ───────────────────────────────────────────
+// Single source of truth for allowed file extensions in both the New Ticket
+// (NT) and Bulk Create (BC) attachment flows.  Must stay in sync with the
+// `accept` attributes on #nt-files and #bc-file-input, and with the
+// `--attachment` flag accepted by scripts/create_ticket.py.
+const BC_ALLOWED_EXTS = new Set(['.png', '.jpg', '.jpeg', '.pdf', '.md', '.html', '.htm']);
+
 // ── New Ticket modal ──────────────────────────────────────────────────────
 let _ntDraftId = null;
 let _ntDraftGenerated = false;
@@ -8471,6 +8478,9 @@ function _ntOnDrop(event) {
 }
 
 function _ntAddFiles(incoming) {
+  if (typeof BC_ALLOWED_EXTS === 'undefined') {
+    throw new Error('BC_ALLOWED_EXTS is not defined — cannot validate attachment extensions');
+  }
   const errEl = document.getElementById('nt-file-error');
   if (errEl) { errEl.textContent = ''; errEl.classList.add('hidden'); }
   let totalSize = _ntFiles.reduce((s, f) => s + f.size, 0);
@@ -8961,7 +8971,6 @@ let _bcLastInput    = null;      // preserved Step 1 inputs for Recreate
 let _bcTabInited    = false;     // whether the tab has been populated once
 
 const BC_MAX_PROMPTS = 25;
-const BC_ALLOWED_EXTS = new Set(['.png', '.jpg', '.jpeg']);
 
 /** Called each time the Bulk Create tab becomes active. */
 function _bcInitTab() {
@@ -9116,7 +9125,7 @@ function _bcAddFiles(incoming) {
     const ext = '.' + f.name.split('.').pop().toLowerCase();
     if (!BC_ALLOWED_EXTS.has(ext)) {
       if (errEl) {
-        errEl.textContent = `File '${f.name}' is not a PNG or JPG image.`;
+        errEl.textContent = `File '${f.name}' has a disallowed extension ('${ext}').`;
         errEl.classList.remove('hidden');
       }
       continue;
@@ -10640,7 +10649,9 @@ function _cmpEmptyState(title, msg) {
              ondrop="_ntOnDrop(event)"
              onclick="_ntPickFiles()">
           <span class="dt-dropzone-hint">Drop files here or click to attach</span>
-          <input type="file" id="nt-files" multiple style="display:none" onchange="_ntOnFileInput(event)">
+          <input type="file" id="nt-files" multiple style="display:none"
+                 accept=".png,.jpg,.jpeg,.pdf,.md,.html,.htm"
+                 onchange="_ntOnFileInput(event)">
         </div>
         <div class="bc-file-queue" id="nt-file-queue"></div>
         <div class="bc-file-error hidden" id="nt-file-error"></div>

@@ -3635,7 +3635,14 @@ function _gsSearch(query) {
 }
 
 function _gsNavigate(url) {
-  if (url) window.open(url, '_blank', 'noopener');
+  if (!url) { _gsClose(); return; }
+  const win = window.open(url, '_blank', 'noopener');
+  if (!win) {
+    showToast('Popup blocked. Copy the link to open it manually.', 'warning', {
+      label: 'Copy link',
+      handler: function () { navigator.clipboard.writeText(url); }
+    });
+  }
   _gsClose();
 }
 

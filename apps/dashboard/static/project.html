@@ -2837,6 +2837,34 @@
     }
     .settings-input:focus, .settings-select:focus { outline: none; border-color: var(--blue); }
 
+    /* ── Metrics tab (issue #476) ── */
+    .metrics-page-hdr { margin-bottom: 24px; }
+    .metrics-page-hdr h2 { font-size: 18px; font-weight: 700; margin: 0 0 4px; }
+    .metrics-page-hdr p { margin: 0; font-size: 13px; color: var(--text-sub); }
+    .metrics-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+      gap: 20px;
+    }
+    .metrics-card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 8px; padding: 20px;
+    }
+    .metrics-card-title {
+      font-size: 13px; font-weight: 700; color: var(--text);
+      margin: 0 0 16px; text-transform: uppercase; letter-spacing: .04em;
+    }
+    .metrics-chart-wrap {
+      position: relative; width: 100%; height: 220px;
+    }
+    .metrics-empty {
+      display: flex; align-items: center; justify-content: center;
+      height: 180px; color: var(--text-sub); font-size: 13px;
+    }
+    @media (max-width: 900px) {
+      .metrics-grid { grid-template-columns: 1fr; }
+    }
+
     /* ── Timeline / Gantt tab (issue #431) ── */
     #pane-timeline { overflow-y: auto; }
     .gantt-wrap { padding: 28px; }
@@ -3013,6 +3041,10 @@
         <button class="stab" role="tab" id="stab-compare"
                 aria-selected="false" onclick="switchTab('compare')">
           <i class="ti ti-git-compare"></i>Compare
+        </button>
+        <button class="stab" role="tab" id="stab-metrics"
+                aria-selected="false" onclick="switchTab('metrics')">
+          <i class="ti ti-chart-line"></i>Metrics
         </button>
         <button class="stab disabled" role="tab" id="stab-sprint-history"
                 aria-selected="false" aria-disabled="true"
@@ -3363,6 +3395,34 @@
           </select>
         </div>
         <div id="cmp-result"></div>
+      </div>
+
+      <!-- Metrics tab (issue #476) -->
+      <div class="tab-pane" id="pane-metrics" role="tabpanel" aria-labelledby="stab-metrics">
+        <div class="metrics-page-hdr">
+          <h2><i class="ti ti-chart-line" style="margin-right:8px;vertical-align:-2px;"></i>Metrics</h2>
+          <p>Sprint velocity, failure rate, and agent dispatch duration across recent sprints.</p>
+        </div>
+        <div class="metrics-grid">
+          <div class="metrics-card">
+            <div class="metrics-card-title">Sprint Velocity</div>
+            <div class="metrics-chart-wrap" id="metrics-velocity-wrap">
+              <canvas id="metrics-velocity-chart"></canvas>
+            </div>
+          </div>
+          <div class="metrics-card">
+            <div class="metrics-card-title">Failure Rate Trend</div>
+            <div class="metrics-chart-wrap" id="metrics-failure-wrap">
+              <canvas id="metrics-failure-chart"></canvas>
+            </div>
+          </div>
+          <div class="metrics-card">
+            <div class="metrics-card-title">Avg Dispatch Duration</div>
+            <div class="metrics-chart-wrap" id="metrics-duration-wrap">
+              <canvas id="metrics-duration-chart"></canvas>
+            </div>
+          </div>
+        </div>
       </div>
 
     </div>
@@ -3757,7 +3817,7 @@ function switchTab(tab, pushHistory) {
   _activeTab = tab;
 
   // Update aria-selected + active class on tabs
-  ['sprint-mgmt', 'tickets', 'logs', 'bulk-create', 'timeline', 'compare'].forEach(t => {
+  ['sprint-mgmt', 'tickets', 'logs', 'bulk-create', 'timeline', 'compare', 'metrics'].forEach(t => {
     const btn = document.getElementById('stab-' + t);
     if (!btn) return;
     const isActive = t === tab;
@@ -3766,7 +3826,7 @@ function switchTab(tab, pushHistory) {
   });
 
   // Show/hide panes
-  ['sprint-mgmt', 'tickets', 'logs', 'bulk-create', 'timeline', 'compare'].forEach(t => {
+  ['sprint-mgmt', 'tickets', 'logs', 'bulk-create', 'timeline', 'compare', 'metrics'].forEach(t => {
     const pane = document.getElementById('pane-' + t);
     if (pane) pane.classList.toggle('active', t === tab);
   });
@@ -3810,6 +3870,11 @@ function switchTab(tab, pushHistory) {
   // Init compare tab
   if (tab === 'compare') {
     compareInit();
+  }
+
+  // Init metrics tab
+  if (tab === 'metrics') {
+    metricsInit();
   }
 }
 
@@ -10769,6 +10834,171 @@ function _cmpEmptyState(title, msg) {
     } catch (err) {
       if (wrap) wrap.innerHTML = '<div class="gantt-empty">Failed to load timeline.</div>';
     }
+  };
+}());
+
+// ── Metrics tab (issue #476) ──────────────────────────────────────────────────
+(function () {
+  let _metricsLoaded = false;
+  let _metricsData = null;
+  const _charts = {};
+
+  function _loadChartJs(cb) {
+    if (window.Chart) { cb(); return; }
+    const s = document.createElement('script');
+    s.src = 'https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js';
+    s.onload = cb;
+    s.onerror = function () {
+      ['velocity', 'failure', 'duration'].forEach(k => _showMsg(k, 'Failed to load Chart.js'));
+    };
+    document.head.appendChild(s);
+  }
+
+  function _colors() {
+    const cs = getComputedStyle(document.documentElement);
+    const get = v => cs.getPropertyValue(v).trim();
+    return {
+      text: get('--text') || '#e2e8f0',
+      sub:  get('--text-sub') || '#94a3b8',
+      border: get('--border') || '#334155',
+      accent: get('--accent') || '#6366f1',
+      green: get('--green') || '#22c55e',
+      red: '#ef4444',
+      orange: '#f59e0b',
+      purple: '#8b5cf6',
+    };
+  }
+
+  function _showMsg(key, msg) {
+    const w = document.getElementById('metrics-' + key + '-wrap');
+    if (w) w.innerHTML = '<div class="metrics-empty">' + escHtml(msg) + '</div>';
+  }
+
+  function _resetCanvas(key) {
+    const w = document.getElementById('metrics-' + key + '-wrap');
+    if (w) w.innerHTML = '<canvas id="metrics-' + key + '-chart" style="width:100%;height:220px;"></canvas>';
+  }
+
+  function _chartOpts(yCallback) {
+    const c = _colors();
+    const tickStyle = { color: c.sub, font: { size: 11 } };
+    const gridStyle = { color: c.border };
+    return {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { ticks: tickStyle, grid: gridStyle },
+        y: { beginAtZero: true, ticks: Object.assign({}, tickStyle, yCallback ? { callback: yCallback } : {}), grid: gridStyle },
+      },
+    };
+  }
+
+  function _renderVelocity(data) {
+    if (!data.length) { _showMsg('velocity', 'No data available'); return; }
+    _resetCanvas('velocity');
+    const c = _colors();
+    if (_charts.velocity) _charts.velocity.destroy();
+    const opts = _chartOpts();
+    opts.plugins.tooltip = { callbacks: { label: ctx => ctx.parsed.y + ' tickets done' } };
+    _charts.velocity = new Chart(
+      document.getElementById('metrics-velocity-chart'),
+      {
+        type: 'line',
+        data: {
+          labels: data.map(d => d.sprint_label),
+          datasets: [{ label: 'Tickets done', data: data.map(d => d.ticket_outcomes_breakdown.done || 0),
+            borderColor: c.accent, backgroundColor: c.accent + '33', fill: true, tension: 0.3, pointRadius: 4 }],
+        },
+        options: opts,
+      }
+    );
+  }
+
+  function _renderFailure(data) {
+    if (!data.length) { _showMsg('failure', 'No data available'); return; }
+    _resetCanvas('failure');
+    const c = _colors();
+    if (_charts.failure) _charts.failure.destroy();
+    const pcts = data.map(d => {
+      const total = d.ticket_count || 0;
+      const failed = d.ticket_outcomes_breakdown.failed || 0;
+      return total > 0 ? Math.round((failed / total) * 1000) / 10 : 0;
+    });
+    const opts = _chartOpts(v => v + '%');
+    opts.scales.y.max = 100;
+    opts.plugins.tooltip = { callbacks: { label: ctx => ctx.parsed.y + '%' } };
+    _charts.failure = new Chart(
+      document.getElementById('metrics-failure-chart'),
+      {
+        type: 'line',
+        data: {
+          labels: data.map(d => d.sprint_label),
+          datasets: [{ label: 'Failure rate', data: pcts,
+            borderColor: c.red, backgroundColor: c.red + '33', fill: true, tension: 0.3, pointRadius: 4 }],
+        },
+        options: opts,
+      }
+    );
+  }
+
+  function _renderDuration(data) {
+    if (!data.length) { _showMsg('duration', 'No data available'); return; }
+    _resetCanvas('duration');
+    const c = _colors();
+    if (_charts.duration) _charts.duration.destroy();
+    const roles = ['coder', 'tester', 'reviewer', 'documenter'];
+    const roleLabels = ['Coder', 'Tester', 'Reviewer', 'Documenter'];
+    const bgColors = [c.accent + 'cc', c.green + 'cc', c.orange + 'cc', c.purple + 'cc'];
+    const vals = roles.map(role => {
+      const active = data.filter(d => (d.agent_dispatch_counts[role] || 0) > 0);
+      if (!active.length) return 0;
+      const sum = active.reduce((acc, d) => acc + d.duration_minutes / Math.max(1, d.ticket_count), 0);
+      return Math.round((sum / active.length) * 10) / 10;
+    });
+    const opts = _chartOpts();
+    opts.plugins.tooltip = { callbacks: { label: ctx => ctx.parsed.y + ' min/ticket' } };
+    _charts.duration = new Chart(
+      document.getElementById('metrics-duration-chart'),
+      {
+        type: 'bar',
+        data: {
+          labels: roleLabels,
+          datasets: [{ label: 'Avg min/ticket', data: vals, backgroundColor: bgColors, borderRadius: 4 }],
+        },
+        options: opts,
+      }
+    );
+  }
+
+  function _renderAll(data) {
+    _renderVelocity(data);
+    _renderFailure(data);
+    _renderDuration(data);
+  }
+
+  window.metricsInit = async function () {
+    if (_metricsLoaded && _metricsData !== null) {
+      _loadChartJs(() => _renderAll(_metricsData));
+      return;
+    }
+
+    ['velocity', 'failure', 'duration'].forEach(k => {
+      const w = document.getElementById('metrics-' + k + '-wrap');
+      if (w) w.innerHTML = '<div class="metrics-empty"><i class="ti ti-loader" style="display:inline-block;animation:bc-badge-spin .9s linear infinite;"></i> Loading…</div>';
+    });
+
+    try {
+      const res = await fetch('/api/metrics/sprints');
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      _metricsData = await res.json();
+    } catch (e) {
+      _metricsData = [];
+      ['velocity', 'failure', 'duration'].forEach(k => _showMsg(k, 'Failed to load metrics'));
+      return;
+    }
+    _metricsLoaded = true;
+    _loadChartJs(() => _renderAll(_metricsData));
   };
 }());
 </script>

@@ -1406,6 +1406,114 @@ def estimate_issue_on_demand(request: Request, issue_id: int, repo: str):
     return {"ok": True, "size": size}
 
 
+def _parse_ac_sections(output: str) -> str:
+    """Extract the markdown 'sections' string from the BA agent's JSON output.
+
+    Falls back to the raw output when it already looks like the AC markdown.
+    Returns '' when nothing usable was produced.
+    """
+    clean = re.sub(r"^```(?:json)?\s*", "", output.strip(), flags=re.MULTILINE)
+    clean = re.sub(r"\s*```\s*$", "", clean.strip(), flags=re.MULTILINE).strip()
+
+    for candidate in (clean, _outermost_json(clean)):
+        if not candidate:
+            continue
+        try:
+            data = json.loads(candidate)
+            sections = str(data.get("sections", "")).strip()
+            if sections:
+                return sections
+        except json.JSONDecodeError:
+            pass
+
+    # Fallback: the agent emitted the markdown directly without JSON wrapping
+    if re.search(r"^##\s+acceptance criteria", clean, re.IGNORECASE | re.MULTILINE):
+        return clean
+    return ""
+
+
+def _outermost_json(text: str) -> str:
+    start = text.find("{")
+    end = text.rfind("}")
+    return text[start : end + 1] if start >= 0 and end > start else ""
+
+
+@app.post("/api/issues/{issue_id}/acceptance-criteria")
+async def regenerate_acceptance_criteria(request: Request, issue_id: int, repo: str):
+    """Generate Acceptance Criteria + UAT Test Steps for an issue and APPEND them
+    to the existing body (existing body text is preserved verbatim).
+
+    Used by the pre-flight "Fix all" action for tickets missing AC (e.g. issues
+    filed by the reviewer). Returns {"ok": True, "appended": True}.
+    """
+    _slog.event("route.entry", project="dashboard", request_id=request.state.request_id,
+                route="/api/issues/{issue_id}/acceptance-criteria", method="POST", issue_id=issue_id)
+    try:
+        issue = github_client.get_issue(issue_id, repo_name=repo)
+    except subprocess.CalledProcessError as e:
+        raise HTTPException(404, detail=f"Could not fetch issue #{issue_id}: {e}")
+
+    title = (issue.get("title") or "").strip()
+    body = (issue.get("body") or "").strip()
+
+    prompt = (
+        "You are a BA (Business Analyst) agent improving an existing GitHub issue.\n\n"
+        f"Issue title: {title}\n\n"
+        f"Existing issue body:\n{body or '(empty)'}\n\n"
+        "Write ONLY the following two sections, based on the title and existing body:\n"
+        "  - ## Acceptance Criteria (checkbox list, specific and testable)\n"
+        "  - ## UAT Test Steps (numbered, each with an 'Expected:' line)\n\n"
+        "Do NOT repeat or rewrite the existing body — output only the two new sections.\n"
+        'Output ONLY valid JSON with exactly one string field: "sections".\n'
+        "The sections field must be GitHub-flavored markdown containing exactly the\n"
+        "two ## headings above and their content. No text outside the JSON."
+    )
+
+    cmd = [
+        "claude",
+        "--model", "claude-sonnet-4-6",
+        "--dangerously-skip-permissions",
+        "-p", prompt,
+    ]
+    sub_env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            cwd=tempfile.gettempdir(),
+            env=sub_env,
+        )
+        try:
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=180.0)
+        except asyncio.TimeoutError:
+            proc.kill()
+            raise HTTPException(504, detail="BA agent timed out after 180s")
+    except FileNotFoundError:
+        raise HTTPException(503, detail="claude CLI not found")
+
+    if proc.returncode != 0:
+        err = stderr.decode("utf-8", errors="replace").strip()[:300]
+        out = stdout.decode("utf-8", errors="replace").strip()[:300]
+        raise HTTPException(502, detail=f"BA agent failed: {err or out or proc.returncode}")
+
+    output = stdout.decode("utf-8", errors="replace").strip()
+    sections = _parse_ac_sections(output)
+    if not sections:
+        raise HTTPException(
+            502,
+            detail=f"BA returned no usable sections. Raw output starts with: {output[:120]!r}",
+        )
+
+    new_body = (body + "\n\n" + sections).strip() if body else sections
+    try:
+        github_client.update_issue_body(issue_id, new_body, repo_name=repo)
+    except subprocess.CalledProcessError as e:
+        raise HTTPException(500, detail=f"Failed to update issue body: {e}")
+
+    return {"ok": True, "appended": True}
+
+
 # ── project endpoints ─────────────────────────────────────────────────────────
 
 @app.get("/api/projects")

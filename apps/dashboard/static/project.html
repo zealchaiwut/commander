@@ -1183,6 +1183,21 @@
       padding: 0 2px; flex-shrink: 0;
     }
     .smgmt-preflight-dismiss:hover { color: var(--text); }
+    .smgmt-preflight-fix {
+      display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0;
+      background: var(--yellow); color: #fff; border: none;
+      border-radius: 5px; padding: 3px 9px; font-size: 11px; font-weight: 700;
+      cursor: pointer; transition: filter .15s;
+    }
+    .smgmt-preflight-fix:hover { filter: brightness(.92); }
+    .smgmt-preflight-fix .ti { font-size: 13px; }
+    .smgmt-preflight-toggle {
+      margin-top: 6px; align-self: flex-start;
+      background: none; border: none; cursor: pointer;
+      color: var(--yellow); font-size: 11px; font-weight: 600;
+      padding: 2px 6px; border-radius: 4px;
+    }
+    .smgmt-preflight-toggle:hover { background: rgba(161,98,7,.12); }
     .smgmt-preflight-items { display: flex; flex-direction: column; gap: 3px; }
     .smgmt-preflight-item {
       display: flex; align-items: center; gap: 6px;
@@ -1874,7 +1889,7 @@
     }
     .smgmt-move-overlay.active { display: flex; }
     .smgmt-move-overlay-pill {
-      display: flex; align-items: center; gap: 12px;
+      display: flex; flex-direction: column; align-items: center; gap: 12px;
       background: var(--surface);
       border: 1px solid var(--border);
       border-radius: 12px;
@@ -1883,8 +1898,9 @@
       color: var(--text);
       box-shadow: 0 8px 32px rgba(0,0,0,.28);
       pointer-events: none;
-      max-width: 80vw;
+      max-width: 80vw; min-width: 220px;
     }
+    .smgmt-move-overlay-row { display: flex; align-items: center; gap: 12px; }
     .smgmt-move-spinner {
       display: inline-block; width: 16px; height: 16px;
       border: 2px solid var(--border); border-top-color: var(--blue);
@@ -1892,6 +1908,20 @@
       flex-shrink: 0;
     }
     @keyframes smgmt-spin { to { transform: rotate(360deg); } }
+    .smgmt-move-progress { display: flex; flex-direction: column; align-items: center; gap: 6px; width: 100%; }
+    .smgmt-move-progress.hidden { display: none; }
+    .smgmt-move-progress-track {
+      width: 100%; height: 6px; background: var(--border);
+      border-radius: 999px; overflow: hidden;
+    }
+    .smgmt-move-progress-fill {
+      height: 100%; width: 0%; background: var(--blue);
+      border-radius: 999px; transition: width .3s ease;
+    }
+    .smgmt-move-progress-count {
+      font-size: 12px; font-weight: 600; color: var(--text-muted);
+      font-variant-numeric: tabular-nums;
+    }
 
     /* ── Running sprint block (issue #277) ── */
 
@@ -3153,8 +3183,14 @@
         <!-- Blocking operation overlay (issue #276) — full-screen, message set per operation -->
         <div class="smgmt-move-overlay" id="smgmt-move-overlay" role="alertdialog" aria-busy="true" aria-live="assertive" aria-label="Working, please wait">
           <div class="smgmt-move-overlay-pill">
-            <span class="smgmt-move-spinner"></span>
-            <span id="smgmt-move-overlay-msg">Working…</span>
+            <div class="smgmt-move-overlay-row">
+              <span class="smgmt-move-spinner"></span>
+              <span id="smgmt-move-overlay-msg">Working…</span>
+            </div>
+            <div class="smgmt-move-progress hidden" id="smgmt-move-progress">
+              <div class="smgmt-move-progress-track"><div class="smgmt-move-progress-fill" id="smgmt-move-progress-fill"></div></div>
+              <span class="smgmt-move-progress-count" id="smgmt-move-progress-count">0/0</span>
+            </div>
           </div>
         </div>
 
@@ -5136,6 +5172,18 @@ async function _smgmtLoadEstimates(orderedLabels, bySprint) {
 
 /** Session-dismissed banner labels — not persisted across page reloads. */
 const _preflightDismissed = new Set();
+const _preflightItems    = {};         // label -> items[] (latest computed)
+const _preflightExpanded = new Set();  // labels currently showing all items
+const _PREFLIGHT_COLLAPSED = 3;        // items shown before "Show all"
+
+/** Items the "Fix all" action can auto-resolve (estimate + missing AC/body). */
+function _preflightFixableItems(label) {
+  return (_preflightItems[label] || []).filter(it =>
+    it.type === 'No estimator output' ||
+    it.type === 'Missing acceptance criteria' ||
+    it.type === 'Missing body'
+  );
+}
 
 /** Synchronous checks: body, AC, conflicting labels. Returns flat items array. */
 function _preflightCheckTickets(tickets) {
@@ -5194,22 +5242,100 @@ function _preflightDismiss(label) {
 
 function _preflightBannerHtml(label, items) {
   if (items.length === 0 || _preflightDismissed.has(label)) return '';
+  _preflightItems[label] = items;
   const trunc = (s, n) => s && s.length > n ? s.slice(0, n) + '…' : (s || '');
-  const rowsHtml = items.map(item =>
+  const expanded = _preflightExpanded.has(label);
+  const shown = expanded ? items : items.slice(0, _PREFLIGHT_COLLAPSED);
+  const rowsHtml = shown.map(item =>
     `<button class="smgmt-preflight-item" onclick="_preflightScrollToTicket(${item.number})">
       <span class="smgmt-preflight-item-id">#${item.number}</span>
       <span class="smgmt-preflight-item-title">${escHtml(trunc(item.title, 50))}</span>
       <span class="smgmt-preflight-item-type">${escHtml(item.type)}</span>
     </button>`
   ).join('');
+  const toggleHtml = items.length > _PREFLIGHT_COLLAPSED
+    ? `<button class="smgmt-preflight-toggle" onclick="_preflightToggleExpand('${escHtml(label)}')">${expanded ? 'Show less' : `Show all (${items.length})`}</button>`
+    : '';
+  const fixCount = _preflightFixableItems(label).length;
+  const fixHtml = fixCount > 0
+    ? `<button class="smgmt-preflight-fix" onclick="_preflightFixAll('${escHtml(label)}')"
+              title="Re-estimate and add missing acceptance criteria for all fixable issues">
+        <i class="ti ti-wand"></i> Fix all (${fixCount})</button>`
+    : '';
   return `<div class="smgmt-preflight-banner" id="smgmt-preflight-${escHtml(label)}">
     <div class="smgmt-preflight-header">
       <i class="ti ti-alert-triangle" style="color:var(--yellow);font-size:14px;flex-shrink:0"></i>
       <span class="smgmt-preflight-title">Pre-flight issues (${items.length})</span>
+      ${fixHtml}
       <button class="smgmt-preflight-dismiss" onclick="_preflightDismiss('${escHtml(label)}')" title="Dismiss">&times;</button>
     </div>
     <div class="smgmt-preflight-items">${rowsHtml}</div>
+    ${toggleHtml}
   </div>`;
+}
+
+/** Toggle a banner between collapsed (first N) and show-all, re-rendering in place. */
+function _preflightToggleExpand(label) {
+  if (_preflightExpanded.has(label)) _preflightExpanded.delete(label);
+  else _preflightExpanded.add(label);
+  const el = document.getElementById(`smgmt-preflight-${label}`);
+  if (el) el.outerHTML = _preflightBannerHtml(label, _preflightItems[label] || []);
+}
+
+/**
+ * Fix all auto-resolvable pre-flight issues for a sprint: re-estimate the
+ * unestimated tickets and append acceptance criteria to those missing them.
+ * Runs serially behind the full-screen overlay with a progress bar.
+ */
+async function _preflightFixAll(label) {
+  const fixable = _preflightFixableItems(label);
+  if (fixable.length === 0) return;
+  const repo = _smgmtRepo();
+  if (!repo) return;
+
+  // Collapse the per-issue items into one job each (an issue can need both fixes)
+  const jobs = {};
+  for (const it of fixable) {
+    const j = jobs[it.number] || (jobs[it.number] = { number: it.number, estimate: false, ac: false });
+    if (it.type === 'No estimator output') j.estimate = true;
+    if (it.type === 'Missing acceptance criteria' || it.type === 'Missing body') j.ac = true;
+  }
+  const jobList = Object.values(jobs);
+  const total = jobList.reduce((n, j) => n + (j.ac ? 1 : 0) + (j.estimate ? 1 : 0), 0);
+
+  let done = 0;
+  const failures = [];
+  _smgmtBoardLockProgress('Fixing pre-flight issues…', 0, total);
+  try {
+    for (const job of jobList) {
+      // Acceptance criteria first (re-estimation reads the body)
+      if (job.ac) {
+        _smgmtBoardLockProgress(`Adding acceptance criteria to #${job.number}…`, done, total);
+        try {
+          const r = await fetch(`/api/issues/${job.number}/acceptance-criteria?repo=${encodeURIComponent(repo)}`, { method: 'POST' });
+          if (!r.ok) throw new Error((await r.text()) || `HTTP ${r.status}`);
+        } catch (e) { failures.push(`#${job.number} AC: ${e.message}`); }
+        _smgmtBoardLockProgress(`Adding acceptance criteria to #${job.number}…`, ++done, total);
+      }
+      if (job.estimate) {
+        _smgmtBoardLockProgress(`Estimating #${job.number}…`, done, total);
+        try {
+          const r = await fetch(`/api/issues/${job.number}/estimate?repo=${encodeURIComponent(repo)}`, { method: 'POST' });
+          if (!r.ok) throw new Error((await r.text()) || `HTTP ${r.status}`);
+        } catch (e) { failures.push(`#${job.number} estimate: ${e.message}`); }
+        _smgmtBoardLockProgress(`Estimating #${job.number}…`, ++done, total);
+      }
+    }
+    await loadSprintMgmt();
+  } finally {
+    _smgmtBoardUnlock();
+  }
+
+  if (failures.length) {
+    _smgmtShowToast(`Pre-flight fixes done with ${failures.length} error(s): ${failures.slice(0, 2).join('; ')}${failures.length > 2 ? '…' : ''}`);
+  } else {
+    _smgmtShowToast(`Pre-flight fixes complete — ${total} task${total !== 1 ? 's' : ''} on ${jobList.length} issue${jobList.length !== 1 ? 's' : ''}.`);
+  }
 }
 
 /** Run all checks for one sprint pane and inject/update the banner in the DOM. */
@@ -8408,8 +8534,26 @@ function _smgmtBoardUnlock() {
   _smgmtMoveLock = false;
   const overlay = document.getElementById('smgmt-move-overlay');
   if (overlay) overlay.classList.remove('active');
+  // Reset the progress bar so the next plain lock doesn't show a stale bar
+  const prog = document.getElementById('smgmt-move-progress');
+  if (prog) prog.classList.add('hidden');
   // Resume auto-refresh if an interval is selected
   if (_arInterval > 0) _smgmtArStartTicker();
+}
+
+/**
+ * Like _smgmtBoardLock, but also shows a determinate progress bar with a
+ * "current/total" count. Call repeatedly to update progress during a loop.
+ */
+function _smgmtBoardLockProgress(message, current, total) {
+  _smgmtBoardLock(message);
+  const prog = document.getElementById('smgmt-move-progress');
+  const fill = document.getElementById('smgmt-move-progress-fill');
+  const cnt  = document.getElementById('smgmt-move-progress-count');
+  if (prog) prog.classList.remove('hidden');
+  const pct = total > 0 ? Math.round((current / total) * 100) : 0;
+  if (fill) fill.style.width = pct + '%';
+  if (cnt) cnt.textContent = `${current}/${total}`;
 }
 
 // ── Auto-refresh pill (issue #275) ────────────────────────────────────────

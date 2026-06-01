@@ -958,6 +958,7 @@
       display: inline-flex; align-items: center; gap: 4px;
     }
     .smgmt-delete-btn:hover { background: var(--red-bg); }
+    .smgmt-delete-btn:disabled { opacity: .45; cursor: not-allowed; }
     .smgmt-finish-btn {
       padding: 4px 10px; font-size: 11px; font-weight: 600;
       background: var(--amber-bg); color: var(--amber); border: 0.5px solid var(--amber);
@@ -5895,6 +5896,8 @@ function _smgmtRunningCardHtml(label, n, tickets) {
           <span class="smgmt-sprint-count"><span id="smgmt-est-${escHtml(label)}" class="smgmt-sprint-est-val">— estimated</span> &middot; ${sourceTickets.length} ticket${sourceTickets.length !== 1 ? 's' : ''}</span>
         </div>
         <div class="smgmt-sprint-header-right">
+          <button class="smgmt-delete-btn" disabled title="Cancel sprint first">
+            <i class="ti ti-trash"></i> Delete</button>
           <button class="smgmt-run-btn" disabled title="Sprint is currently running">
             <i class="ti ti-player-play"></i> Running…</button>
         </div>

@@ -171,4 +171,7 @@ class TestCloseRaceSummaryIssue:
 class TestCancellationFlag:
     def test_flag_exists_and_defaults_false(self):
         assert hasattr(sm, "_sprint_user_cancelled")
-        assert sm._sprint_user_cancelled is False
+        # Migrated to threading.Event in #514; default state is unset (falsy).
+        import threading
+        assert isinstance(sm._sprint_user_cancelled, threading.Event)
+        assert not sm._sprint_user_cancelled.is_set()

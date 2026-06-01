@@ -5229,6 +5229,56 @@ def get_sprint_metrics(request: Request):
     return results
 
 
+# ── Daily report endpoint (issue #478) ───────────────────────────────────────
+
+@app.post("/api/reports/daily")
+async def generate_daily_report(request: Request):
+    """Trigger daily summary report generation.
+
+    Optional JSON body: {"date": "YYYY-MM-DD"} (default: today).
+    Writes .commander/reports/YYYY-MM-DD.md and returns the file path.
+    """
+    target_date_str: Optional[str] = None
+    try:
+        body = await request.json()
+        if isinstance(body, dict):
+            target_date_str = body.get("date")
+    except Exception:
+        pass
+
+    cmd = [sys.executable, str(Path(__file__).parent.parent.parent / "scripts" / "generate_daily_report.py")]
+    if target_date_str:
+        cmd.extend(["--date", target_date_str])
+
+    env = os.environ.copy()
+    if "DB_PATH" not in env or not env["DB_PATH"].strip():
+        db_candidate = Path(__file__).parent / "commander.db"
+        if db_candidate.exists():
+            env["DB_PATH"] = str(db_candidate)
+
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            cwd=str(Path(__file__).parent.parent.parent),
+            env=env,
+        )
+    except subprocess.TimeoutExpired:
+        raise HTTPException(500, detail="Report generation timed out after 30 s")
+
+    if result.returncode != 0:
+        raise HTTPException(
+            500,
+            detail=f"Report generation failed: {result.stderr.strip() or result.stdout.strip()}",
+        )
+
+    out_line = result.stdout.strip()
+    report_path = out_line.removeprefix("Report written to ").strip()
+    return {"ok": True, "path": report_path, "message": out_line}
+
+
 @app.get("/api/sprints/{sprint_label}/finish-card")
 def get_sprint_finish_card(sprint_label: str, project: str):
     """Return data for the floating finish-report card above a sprint pane.

@@ -16,6 +16,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -101,18 +102,18 @@ def fetch_issue(issue_num: int, repo: str) -> dict:
 
 
 _ESTIMATOR_MAX_RETRIES = 3
-_ESTIMATOR_RETRY_DELAY_SECS = 5
+_ESTIMATOR_RETRY_DELAYS = [2, 4, 8]  # exponential backoff seconds before retry attempts 2, 3, 4
 
 
 def run_estimator(issue_num: int, issue_data: dict) -> Optional[dict]:
     """Invoke the estimator agent via `claude -p` and return parsed JSON.
 
-    Retries up to _ESTIMATOR_MAX_RETRIES times on transient agent failures
-    (non-zero exit code). --no-session-persistence prevents session-file
+    Retries up to _ESTIMATOR_MAX_RETRIES times on network errors, model errors
+    (non-zero exit), and parse errors.  Delays follow exponential backoff
+    (2s, 4s, 8s).  Each retry emits a structured log entry with attempt number,
+    error type, and delay_seconds.  --no-session-persistence prevents session-file
     conflicts when multiple estimations run concurrently during bulk create.
     """
-    import time as _time
-
     instructions = load_agent_instructions()
 
     title = issue_data.get("title", "")
@@ -140,7 +141,11 @@ Output ONLY the JSON object. No other text."""
         "-p", prompt,
     ]
 
-    for attempt in range(1, _ESTIMATOR_MAX_RETRIES + 1):
+    # Total attempts = initial + _ESTIMATOR_MAX_RETRIES (e.g. 4 = 1 + 3).
+    total_attempts = _ESTIMATOR_MAX_RETRIES + 1
+    for attempt in range(1, total_attempts + 1):
+        error_type: Optional[str] = None
+
         try:
             result = subprocess.run(
                 cmd,
@@ -149,36 +154,72 @@ Output ONLY the JSON object. No other text."""
                 timeout=180,
             )
         except subprocess.TimeoutExpired:
-            structured_log.error("estimator_timeout", "estimator agent timed out after 180s", issue_num=issue_num, timeout_secs=180)
-            return None
+            error_type = "network_error"
+            structured_log.error(
+                "estimator_timeout",
+                "estimator agent timed out after 180s",
+                issue_num=issue_num,
+                timeout_secs=180,
+            )
         except FileNotFoundError:
             print("Error: claude CLI not found in PATH", file=sys.stderr)
             return None
 
-        if result.returncode == 0:
-            parsed = extract_json(result.stdout)
-            if not parsed:
-                structured_log.error("estimator_parse_error", "could not parse JSON from agent output", issue_num=issue_num, output_preview=result.stdout[:200])
-                return None
-            parsed["issue_number"] = issue_num
-            # Normalize files_touched: absent or non-list → []
-            if not isinstance(parsed.get("files_touched"), list):
-                parsed["files_touched"] = []
-            return parsed
+        if error_type is None:
+            if result.returncode != 0:
+                error_type = "model_error"
+            else:
+                parsed = extract_json(result.stdout)
+                if parsed is None:
+                    error_type = "parse_error"
+                    structured_log.error(
+                        "estimator_parse_error",
+                        "could not parse JSON from agent output",
+                        issue_num=issue_num,
+                        output_preview=result.stdout[:200],
+                    )
+                else:
+                    parsed["issue_number"] = issue_num
+                    # Normalize files_touched: absent or non-list → []
+                    if not isinstance(parsed.get("files_touched"), list):
+                        parsed["files_touched"] = []
+                    return parsed
 
-        # Non-zero exit — transient failure; retry if attempts remain.
-        if attempt < _ESTIMATOR_MAX_RETRIES:
+        # error_type is set — decide whether to retry or fail.
+        retries_used = attempt - 1
+        retries_remaining = _ESTIMATOR_MAX_RETRIES - retries_used
+
+        if retries_remaining > 0:
+            delay = _ESTIMATOR_RETRY_DELAYS[retries_used]
+            structured_log.warn(
+                "estimator_retry",
+                "estimation failed, retrying",
+                issue_num=issue_num,
+                attempt=attempt,
+                error_type=error_type,
+                delay_seconds=delay,
+            )
             print(
-                f"Warning: agent exited {result.returncode} for #{issue_num} "
-                f"(attempt {attempt}/{_ESTIMATOR_MAX_RETRIES}), retrying in {_ESTIMATOR_RETRY_DELAY_SECS}s…",
+                f"Warning: estimator failed for #{issue_num} (attempt {attempt}/{total_attempts},"
+                f" error_type={error_type}), retrying in {delay}s…",
                 file=sys.stderr,
             )
-            _time.sleep(_ESTIMATOR_RETRY_DELAY_SECS)
-            continue
-
-        print(f"Error: agent exited {result.returncode}", file=sys.stderr)
-        if result.stderr:
-            print(result.stderr[:500], file=sys.stderr)
+            time.sleep(delay)
+        else:
+            structured_log.error(
+                "estimator_failed",
+                "all retries exhausted",
+                issue_num=issue_num,
+                attempt=attempt,
+                error_type=error_type,
+            )
+            if error_type == "model_error" and result.stderr:
+                print(result.stderr[:500], file=sys.stderr)
+            print(
+                f"Error: estimator failed for #{issue_num} after {_ESTIMATOR_MAX_RETRIES} retries"
+                f" (final error_type={error_type})",
+                file=sys.stderr,
+            )
 
     return None
 

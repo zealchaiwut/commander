@@ -74,6 +74,12 @@ _REPO_ROOT = Path(__file__).parent.parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 from services.logging import log as _slog
+from services.sprint_manager.estimate_issue import (
+    fetch_issue as _ei_fetch_issue,
+    run_estimator as _ei_run_estimator,
+    apply_label as _ei_apply_label,
+    apply_estimated_status as _ei_apply_estimated_status,
+)
 
 # Backup module lives in services/sprint_manager/ — add it to sys.path
 import sys as _sys
@@ -105,6 +111,14 @@ try:
     from sizing import SIZE_TO_MINUTES as _SIZE_TO_MINUTES
 except ImportError:
     _SIZE_TO_MINUTES = {"S": 5, "M": 15, "L": 30, "XL": 60}  # fallback if sizing unavailable
+
+try:
+    from dag_builder import CycleError as _CycleError, build_dag as _build_dag
+    _DAG_BUILDER_AVAILABLE = True
+except ImportError:
+    _CycleError = None  # type: ignore[assignment,misc]
+    _build_dag = None  # type: ignore[assignment]
+    _DAG_BUILDER_AVAILABLE = False
 
 
 def _sprint_json_path(project_root: Path, sprint_label: str) -> Path:
@@ -1353,6 +1367,43 @@ def get_test_report(issue_id: int, repo: Optional[str] = None):
         raise _gh_error(e)
     except ValueError as e:
         raise HTTPException(400, detail=str(e))
+
+
+@app.post("/api/issues/{issue_id}/estimate")
+def estimate_issue_on_demand(request: Request, issue_id: int, repo: str):
+    """Run the issue estimator on demand and apply the size label.
+
+    Returns {"ok": True, "size": "S"|"M"|"L"|"XL"} on success.
+    """
+    _slog.event("route.entry", project="dashboard", request_id=request.state.request_id,
+                route="/api/issues/{issue_id}/estimate", method="POST", issue_id=issue_id)
+    try:
+        issue_data = _ei_fetch_issue(issue_id, repo)
+    except subprocess.CalledProcessError as e:
+        raise HTTPException(404, detail=f"Could not fetch issue #{issue_id}: {e}")
+
+    estimate = _ei_run_estimator(issue_id, issue_data)
+    if estimate is None:
+        raise HTTPException(500, detail=f"Estimation failed for #{issue_id}")
+
+    size = estimate.get("size")
+    if not size:
+        raise HTTPException(500, detail="Estimator returned no size")
+
+    try:
+        _ei_apply_label(issue_id, repo, size)
+    except subprocess.CalledProcessError as e:
+        raise HTTPException(500, detail=f"Failed to apply size label: {e}")
+
+    _ei_apply_estimated_status(issue_id, repo)
+
+    project_root = _project_root_path(repo)
+    estimates_dir = _commander_dir(project_root) / "estimates"
+    estimates_dir.mkdir(parents=True, exist_ok=True)
+    estimate_path = estimates_dir / f"issue-{issue_id}.json"
+    estimate_path.write_text(json.dumps(estimate, indent=2), encoding="utf-8")
+
+    return {"ok": True, "size": size}
 
 
 # ── project endpoints ─────────────────────────────────────────────────────────
@@ -3376,6 +3427,140 @@ def get_sprint_estimate_summary(sprint_label: str, project: str):
         "size_counts": size_counts,
         "total_minutes": total_minutes,
         "unsized_numbers": unsized_numbers,
+    }
+
+
+def _sprint_dag_tickets(project_root: Path, sprint_issues: list[dict]) -> list[dict]:
+    """Build the ticket list for build_dag from sprint issues + their estimate files."""
+    estimates_dir = _commander_dir(project_root) / "estimates"
+    tickets = []
+    for iss in sprint_issues:
+        num = iss["number"]
+        estimate_path = estimates_dir / f"issue-{num}.json"
+        files_touched: list[str] = []
+        if estimate_path.exists():
+            try:
+                est = json.loads(estimate_path.read_text(encoding="utf-8"))
+                files_touched = est.get("files_likely_affected") or []
+            except (json.JSONDecodeError, OSError):
+                pass
+        tickets.append({"id": f"#{num}", "files_touched": files_touched})
+    return tickets
+
+
+_STALE_ESTIMATE_DAYS = 7
+
+
+@app.get("/api/sprints/{sprint_label}/preflight")
+def get_sprint_preflight(sprint_label: str, project: str):
+    """Preflight check returned before running a sprint.
+
+    Returns DAG visualization data (layers, edges, ticket metadata) alongside ok flag,
+    warnings (unestimated, stale_estimates, missing_ac), and cycle path if detected.
+    """
+    if not _SPRINT_LABEL_RE.match(sprint_label):
+        raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")
+
+    dag_payload: dict | None = None
+    warnings: dict = {"unestimated": [], "stale_estimates": [], "missing_ac": []}
+    cycle_path: list[str] | None = None
+
+    try:
+        issues = github_client.list_open_issues_with_body(repo_name=project, limit=200)
+        sprint_issues = [
+            iss for iss in issues
+            if any(lbl["name"] == sprint_label for lbl in iss.get("labels", []))
+        ]
+        if sprint_issues:
+            project_root = _project_root_path(project)
+            estimates_dir = _commander_dir(project_root) / "estimates"
+            stale_cutoff = datetime.now(timezone.utc) - timedelta(days=_STALE_ESTIMATE_DAYS)
+
+            ticket_map: dict[str, dict] = {}
+            for iss in sprint_issues:
+                num = iss["number"]
+                label_names = {lbl["name"] for lbl in iss.get("labels", [])}
+                if "blocked" in label_names:
+                    state = "blocked"
+                elif "UAT" in label_names:
+                    state = "UAT"
+                elif "SIT" in label_names:
+                    state = "SIT"
+                elif "in-progress" in label_names:
+                    state = "in-progress"
+                else:
+                    state = "backlog"
+
+                size: str | None = None
+                files_touched: list[str] = []
+                est_stale = False
+                est_path = estimates_dir / f"issue-{num}.json"
+                if est_path.exists():
+                    try:
+                        est = json.loads(est_path.read_text(encoding="utf-8"))
+                        size = est.get("size")
+                        files_touched = est.get("files_likely_affected") or []
+                        mtime = datetime.fromtimestamp(est_path.stat().st_mtime, tz=timezone.utc)
+                        est_stale = mtime < stale_cutoff
+                    except (json.JSONDecodeError, OSError):
+                        pass
+
+                body = iss.get("body") or ""
+                has_ac = "## Acceptance Criteria" in body
+
+                tid = f"#{num}"
+                ticket_map[tid] = {
+                    "id": tid,
+                    "number": num,
+                    "title": iss.get("title", ""),
+                    "state": state,
+                    "size": size,
+                    "files_touched": files_touched,
+                }
+
+                if size is None:
+                    warnings["unestimated"].append(tid)
+                if est_stale:
+                    warnings["stale_estimates"].append(tid)
+                if not has_ac:
+                    warnings["missing_ac"].append(tid)
+
+            layers: list[list[str]]
+            edges: list[list[str]]
+            if _DAG_BUILDER_AVAILABLE:
+                dag_tickets = [
+                    {"id": tid, "files_touched": ticket_map[tid]["files_touched"]}
+                    for tid in ticket_map
+                ]
+                dag_result = _build_dag(dag_tickets)
+                if isinstance(dag_result, _CycleError):
+                    layers = [list(ticket_map.keys())]
+                    edges = []
+                    if dag_result.cycles:
+                        cycle_path = dag_result.cycles[0]
+                else:
+                    layers = dag_result.layers
+                    edges = [[e[0], e[1]] for e in dag_result.edges]
+            else:
+                layers = [list(ticket_map.keys())]
+                edges = []
+
+            dag_payload = {
+                "layers": layers,
+                "edges": edges,
+                "tickets": list(ticket_map.values()),
+            }
+    except subprocess.CalledProcessError:
+        pass  # DAG is decorative — don't fail the preflight
+
+    return {
+        "ok": True,
+        "sprint_label": sprint_label,
+        "project": project,
+        "dag": dag_payload,
+        "warnings": warnings,
+        "cycle": cycle_path,
+        "stale_threshold_days": _STALE_ESTIMATE_DAYS,
     }
 
 

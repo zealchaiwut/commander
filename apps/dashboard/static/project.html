@@ -3461,9 +3461,7 @@ function _applyTheme(value) {
 }
 
 function initTheme() {
-  const m = window.location.pathname.match(/^\/project\/([^/]+)/);
-  const slug = m ? decodeURIComponent(m[1]) : '';
-  const key = 'settings:' + slug + ':theme';
+  const key = _settingsKey('theme');
   const saved = localStorage.getItem(key) || localStorage.getItem('theme') || 'light';
   _applyTheme(saved);
   window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function() {
@@ -4608,10 +4606,6 @@ async function _prefetchFullRepo() {
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 async function init() {
-  initTheme();
-  updateSidebarFooter();
-  checkGhAuthStatus().catch(() => {});
-
   const { slug, tab } = parseUrl();
 
   if (!slug) {
@@ -4621,6 +4615,10 @@ async function init() {
 
   _slug = slug;
   _activeTab = tab;
+
+  initTheme();
+  updateSidebarFooter();
+  checkGhAuthStatus().catch(() => {});
 
   // Replace URL if needed (e.g. sprint-history → sprint-mgmt)
   const expected = '/project/' + encodeURIComponent(slug) + '/' + tab;

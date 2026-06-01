@@ -2049,12 +2049,38 @@ async function fetchBuildStamp() {
     if (!res.ok) return;
     const data = await res.json();
     _buildStampCache = data;
-    const el = document.getElementById('build-stamp-footer');
+    const el = document.getElementById('build-stamp-text') || document.getElementById('build-stamp-footer');
     if (!el) return;
     const host = window.location.host;
     const sha  = (data.git_sha || 'unknown').slice(0, 7);
     el.textContent = `v${data.version || '?'} · ${host} · build ${sha} · ${data.branch || 'unknown'}`;
   } catch { /* footer is optional */ }
+}
+
+// ── Daily report button (issue #478) ─────────────────────────────────────────
+
+async function generateDailyReport() {
+  const btn = document.getElementById('btn-generate-daily-report');
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Generating…';
+  }
+  try {
+    const res = await fetch('/api/reports/daily', { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) {
+      alert(`Report generation failed:\n${data.detail || JSON.stringify(data)}`);
+    } else {
+      alert(`Daily report generated:\n${data.path || data.message}`);
+    }
+  } catch (err) {
+    alert(`Report generation error: ${err.message}`);
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = 'Generate Daily Report';
+    }
+  }
 }
 
 // ── GitHub CLI auth warning banner (issue #424) ──────────────────────────────

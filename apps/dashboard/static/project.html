@@ -406,6 +406,26 @@
       display: flex; align-items: center; gap: 8px;
       margin-left: auto; flex-shrink: 0;
     }
+    /* "+ Create" dropdown (New ticket / Bulk create) */
+    .proj-create-wrap { position: relative; display: inline-block; }
+    .proj-create-menu {
+      position: absolute; right: 0; top: calc(100% + 6px); z-index: 300;
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 9px; box-shadow: 0 6px 22px rgba(0,0,0,.18);
+      min-width: 220px; padding: 5px; overflow: hidden;
+    }
+    .proj-create-menu.hidden { display: none; }
+    .proj-create-item {
+      display: flex; align-items: center; gap: 11px; width: 100%;
+      padding: 9px 11px; background: none; border: none; border-radius: 6px;
+      cursor: pointer; text-align: left; font-family: inherit; color: var(--text);
+      transition: background .12s;
+    }
+    .proj-create-item:hover { background: var(--surface-hover); }
+    .proj-create-item > .ti { font-size: 17px; color: var(--blue); flex-shrink: 0; }
+    .proj-create-item span { display: flex; flex-direction: column; line-height: 1.3; }
+    .proj-create-item strong { font-size: 13px; font-weight: 600; }
+    .proj-create-item small { font-size: 11px; color: var(--text-muted); }
     .btn-ghost {
       padding: 6px 12px; border: 1px solid var(--border); border-radius: 6px;
       background: none; color: var(--text-muted); font-size: 12px; font-weight: 500;
@@ -3211,14 +3231,26 @@
         <span class="proj-header-name" id="proj-header-name">Loading…</span>
         <span id="proj-header-pill"></span>
         <div class="proj-header-actions">
-          <button class="btn-ghost" onclick="openBulkCreate()" title="Bulk create tickets">
-            <i class="ti ti-stack-2"></i>
-            Bulk create
-          </button>
-          <button class="btn-primary" onclick="openNewTicket()" title="Create a new ticket">
-            <i class="ti ti-plus"></i>
-            New ticket
-          </button>
+          <div class="proj-create-wrap" id="proj-create-wrap">
+            <button class="btn-primary" id="proj-create-btn" onclick="toggleCreateMenu(event)"
+                    aria-haspopup="true" aria-expanded="false" title="Create tickets">
+              <i class="ti ti-plus"></i>
+              Create
+              <i class="ti ti-chevron-down" style="font-size:11px;opacity:.7;margin-left:2px"></i>
+            </button>
+            <div class="proj-create-menu hidden" id="proj-create-menu" role="menu">
+              <button class="proj-create-item" role="menuitem"
+                      onclick="closeCreateMenu();openNewTicket()">
+                <i class="ti ti-file-plus"></i>
+                <span><strong>New ticket</strong><small>Draft one issue with the BA</small></span>
+              </button>
+              <button class="proj-create-item" role="menuitem"
+                      onclick="closeCreateMenu();openBulkCreate()">
+                <i class="ti ti-stack-2"></i>
+                <span><strong>Bulk create</strong><small>Draft many issues at once</small></span>
+              </button>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -4996,6 +5028,29 @@ function openNewTicket() {
   // Open the New Ticket modal (same as the toolbar button)
   smgmtOpenNewTicket();
 }
+
+// ── "+ Create" header dropdown (New ticket / Bulk create) ────────────────────
+function toggleCreateMenu(e) {
+  if (e) e.stopPropagation();
+  const menu = document.getElementById('proj-create-menu');
+  const btn  = document.getElementById('proj-create-btn');
+  if (!menu) return;
+  const open = !menu.classList.contains('hidden');
+  menu.classList.toggle('hidden', open);
+  if (btn) btn.setAttribute('aria-expanded', String(!open));
+}
+
+function closeCreateMenu() {
+  const menu = document.getElementById('proj-create-menu');
+  const btn  = document.getElementById('proj-create-btn');
+  if (menu) menu.classList.add('hidden');
+  if (btn) btn.setAttribute('aria-expanded', 'false');
+}
+
+document.addEventListener('click', function(e) {
+  const wrap = document.getElementById('proj-create-wrap');
+  if (wrap && !wrap.contains(e.target)) closeCreateMenu();
+});
 
 function _findFullRepo(slug) {
   if (!_homeData) return null;

@@ -80,6 +80,11 @@ from services.sprint_manager.estimate_issue import (
     apply_label as _ei_apply_label,
     apply_estimated_status as _ei_apply_estimated_status,
 )
+from services.sprint_manager.state_machine import (
+    TicketState as _TicketState,
+    transition as _sm_transition,
+    TransitionError as _TransitionError,
+)
 
 # Backup module lives in services/sprint_manager/ — add it to sys.path
 import sys as _sys
@@ -6048,22 +6053,33 @@ def delete_sprint(sprint_label: str, project: str):
     return result
 
 
-# ── Finish Sprint endpoint (issue #195) ──────────────────────────────────────
+# ── Finish Sprint endpoints (issue #511) ─────────────────────────────────────
 
-_FINISH_SPRINT_REMOVE_LABELS = {"in-progress", "sit", "needs-rework"}
+_FINISH_SPRINT_STATUS_LABELS = frozenset({
+    "backlog", "in-progress", "SIT", "UAT", "UAT-approved",
+    "needs-rework", "need-rework", "blocked",
+})
 
 
-@app.post("/api/projects/{owner}/{repo_name}/sprints/{label}/finish")
-async def finish_sprint(owner: str, repo_name: str, label: str):
-    """Bulk-close all open issues for a sprint, moving them to UAT first.
+def _next_sprint_number(sprint_label: str) -> int:
+    """Return the next sprint number for a given sprint label (sprint-N → N+1)."""
+    m = re.match(r"^sprint-(\d+)(?:\.\d+)?$", sprint_label)
+    if not m:
+        raise ValueError(f"Invalid sprint label: {sprint_label!r}")
+    return int(m.group(1)) + 1
 
-    AC: iterates all open issues with the sprint label, adds 'UAT' label
-    (removing 'in-progress', 'sit', 'needs-rework' if present), then closes each
-    issue via gh issue close.
 
-    Returns: { "closed": N, "errors": [] }
-      - HTTP 200 on full success (including zero-issue case)
-      - HTTP 207 if any individual issue operation failed
+@app.get("/api/projects/{owner}/{repo_name}/sprints/{label}/finish-preview")
+def get_sprint_finish_preview(owner: str, repo_name: str, label: str):
+    """Return preview data for the Finish Sprint dialog.
+
+    Returns: {
+      uat_tickets: [{number, title}],
+      non_uat_tickets: [{number, title, status}],
+      next_sprint_label: str,
+      next_sprint_exists: bool,
+      conflict_error: str | null,
+    }
     """
     if not _SPRINT_LABEL_RE.match(label):
         raise HTTPException(400, detail=f"Invalid sprint label: {label!r}")
@@ -6071,77 +6087,173 @@ async def finish_sprint(owner: str, repo_name: str, label: str):
     repo = f"{owner}/{repo_name}"
     project_root = _project_root_path(repo)
 
-    # Block if this sprint is currently running
-    if _is_sprint_running(project_root, label):
-        raise HTTPException(409, detail=f"Sprint {label} is currently running — finish it after the run completes")
+    next_num = _next_sprint_number(label)
+    next_sprint_label = f"sprint-{next_num}"
+
+    try:
+        existing_sprints = github_client.list_sprints(repo_name=repo)
+    except subprocess.CalledProcessError as e:
+        raise _gh_error(e)
+
+    next_sprint_exists = next_num in existing_sprints
+    conflict_error: str | None = None
+    if next_sprint_exists and _is_sprint_running(project_root, next_sprint_label):
+        conflict_error = (
+            f"Sprint {next_num} is currently running — cannot move tickets into it. "
+            f"Wait for it to finish."
+        )
 
     try:
         sprint_issues = _get_sprint_issues(repo, label)
     except subprocess.CalledProcessError as e:
         raise _gh_error(e)
 
+    uat_tickets = []
+    non_uat_tickets = []
+    for iss in sprint_issues:
+        label_names = {lbl["name"] for lbl in iss.get("labels", [])}
+        number = iss["number"]
+        title = iss.get("title", "")
+        if "UAT" in label_names:
+            uat_tickets.append({"number": number, "title": title})
+        else:
+            status = next(
+                (lbl for lbl in sorted(label_names) if lbl in _FINISH_SPRINT_STATUS_LABELS and lbl != "UAT"),
+                "queued",
+            )
+            non_uat_tickets.append({"number": number, "title": title, "status": status})
+
+    return {
+        "uat_tickets": uat_tickets,
+        "non_uat_tickets": non_uat_tickets,
+        "next_sprint_label": next_sprint_label,
+        "next_sprint_exists": next_sprint_exists,
+        "conflict_error": conflict_error,
+    }
+
+
+class FinishSprintBody(BaseModel):
+    confirmed: bool
+    move_non_uat_to: str = ""
+
+
+@app.post("/api/projects/{owner}/{repo_name}/sprints/{label}/finish")
+async def finish_sprint(owner: str, repo_name: str, label: str, body: FinishSprintBody):
+    """Finish a sprint: close UAT tickets as completed, move non-UAT tickets to next sprint.
+
+    Body: { confirmed: true, move_non_uat_to: "sprint-N+1" }
+
+    Returns: { closed, moved, errors, next_sprint_label }
+    """
+    if not body.confirmed:
+        raise HTTPException(400, detail="Request must have confirmed=true")
+
+    if not _SPRINT_LABEL_RE.match(label):
+        raise HTTPException(400, detail=f"Invalid sprint label: {label!r}")
+
+    next_sprint_label = body.move_non_uat_to or f"sprint-{_next_sprint_number(label)}"
+    if not _SPRINT_LABEL_RE.match(next_sprint_label):
+        raise HTTPException(400, detail=f"Invalid next sprint label: {next_sprint_label!r}")
+
+    repo = f"{owner}/{repo_name}"
+    project_root = _project_root_path(repo)
+
+    if _is_sprint_running(project_root, label):
+        raise HTTPException(409, detail=f"Sprint {label} is currently running — finish it after the run completes")
+
+    # Conflict guard: next sprint must not be running
+    if _is_sprint_running(project_root, next_sprint_label):
+        m_next = re.match(r"^sprint-(\d+)", next_sprint_label)
+        next_num_str = m_next.group(1) if m_next else next_sprint_label
+        raise HTTPException(
+            409,
+            detail=(
+                f"Sprint {next_num_str} is currently running — cannot move tickets into it. "
+                f"Wait for it to finish."
+            ),
+        )
+
+    try:
+        sprint_issues = _get_sprint_issues(repo, label)
+    except subprocess.CalledProcessError as e:
+        raise _gh_error(e)
+
+    uat_issues = [iss for iss in sprint_issues if any(lbl["name"] == "UAT" for lbl in iss.get("labels", []))]
+    non_uat_issues = [iss for iss in sprint_issues if not any(lbl["name"] == "UAT" for lbl in iss.get("labels", []))]
+
     closed = 0
+    moved = 0
     errors: list[str] = []
 
-    for iss in sprint_issues:
-        issue_num = iss["number"]
-        current_labels = {lbl["name"] for lbl in iss.get("labels", [])}
-        to_remove = list(current_labels & _FINISH_SPRINT_REMOVE_LABELS)
+    # Ensure next sprint label exists when there are non-UAT tickets to move
+    if non_uat_issues:
+        m_next = re.match(r"^sprint-(\d+)$", next_sprint_label)
+        if m_next:
+            try:
+                github_client.ensure_sprint_label(int(m_next.group(1)), repo_name=repo)
+                github_client.invalidate("sprints:")
+            except Exception as exc:
+                errors.append(f"Failed to create label {next_sprint_label}: {exc}")
+        # Create plan.json for next sprint if absent
         try:
-            # Add UAT and strip workflow labels in one gh call
-            github_client.update_labels(issue_num, add=["UAT"], remove=to_remove, repo_name=repo)
-            github_client.close_issue(issue_num, repo_name=repo)
+            if not _read_plan_json(project_root, next_sprint_label):
+                _plan_json_set_state(
+                    project_root, next_sprint_label, "planning",
+                    created_at=datetime.now(timezone.utc).isoformat(),
+                )
+        except Exception:
+            pass
+
+    # Move non-UAT tickets: transition to QUEUED, swap sprint labels
+    for iss in non_uat_issues:
+        issue_num = iss["number"]
+        try:
+            _sm_transition(issue_num, _TicketState.QUEUED, actor="finish_button", repo=repo)
+            github_client.update_labels(
+                issue_num,
+                add=[next_sprint_label],
+                remove=[label],
+                repo_name=repo,
+            )
+            moved += 1
+        except (_TransitionError, subprocess.CalledProcessError, Exception) as exc:
+            errors.append(f"#{issue_num}: {exc}")
+
+    # Close UAT tickets with reason=completed
+    for iss in uat_issues:
+        issue_num = iss["number"]
+        try:
+            github_client.close_issue(issue_num, repo_name=repo, reason="completed")
             closed += 1
-        except subprocess.CalledProcessError as e:
-            err_msg = e.stderr.strip() if e.stderr else str(e)
+        except subprocess.CalledProcessError as exc:
+            err_msg = exc.stderr.strip() if exc.stderr else str(exc)
             errors.append(f"#{issue_num}: {err_msg}")
 
-    # Invalidate caches so the board refreshes
-    github_client.invalidate(f"open_issues_body:")
-    github_client.invalidate(f"open_issues:")
-    github_client.invalidate(f"issues:")
-    github_client.invalidate(f"recent_closed:")
-
-    # Delete the sprint label from GitHub; failure is non-fatal (AC4)
-    label_deleted = False
-    label_delete_error: str | None = None
+    # Mark current sprint as completed in plan.json
     try:
-        github_client.delete_label(label, repo_name=repo)
-        label_deleted = True
+        _plan_json_set_state(
+            project_root, label, "completed",
+            ended_at=datetime.now(timezone.utc).isoformat(),
+            end_reason="finish_button",
+        )
     except Exception as exc:
-        label_delete_error = str(exc).strip() or "label deletion failed"
-        github_client.invalidate("sprints:")
+        errors.append(f"plan.json update failed: {exc}")
 
-    # Merge the sprint branch PR into develop (issue #361)
-    sprint_branch = f"sprint/{label}"  # e.g., sprint/sprint-25
-    merge_result: dict = {}
-    try:
-        pr = github_client.find_open_pr_for_head(sprint_branch, repo_name=repo)
-        if pr:
-            try:
-                github_client.merge_pr(pr["number"], repo_name=repo)
-                merge_result = {"merged": True, "pr_number": pr["number"], "pr_url": pr["url"]}
-            except subprocess.CalledProcessError as merge_exc:
-                merge_err = merge_exc.stderr.strip() if merge_exc.stderr else str(merge_exc)
-                merge_result = {"merged": False, "pr_number": pr["number"], "pr_url": pr["url"], "merge_error": merge_err}
-                errors.append(f"PR #{pr['number']} merge failed: {merge_err}")
-        else:
-            merge_result = {"merged": False, "merge_error": f"no open PR found for {sprint_branch}"}
-    except Exception as exc:
-        merge_result = {"merged": False, "merge_error": str(exc)}
+    # Invalidate caches so board refreshes
+    github_client.invalidate("open_issues_body:")
+    github_client.invalidate("open_issues:")
+    github_client.invalidate("issues:")
+    github_client.invalidate("recent_closed:")
 
     await broadcast({
         "type": "update",
         "event": {
             "event_type": "sprint_finished",
             "sprint_label": label,
-            "label_deleted": label_deleted,
         },
     })
 
-    result: dict = {"closed": closed, "errors": errors, "label_deleted": label_deleted, "merge_result": merge_result}
-    if label_delete_error is not None:
-        result["label_delete_error"] = label_delete_error
+    result: dict = {"closed": closed, "moved": moved, "errors": errors, "next_sprint_label": next_sprint_label}
     status_code = 207 if errors else 200
     return JSONResponse(content=result, status_code=status_code)
 

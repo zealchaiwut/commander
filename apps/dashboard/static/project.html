@@ -6499,11 +6499,16 @@ async function _smgmtRetryEstimation(issueNum, btn) {
   const row = document.getElementById(`smgmt-ticket-${issueNum}`);
   if (!row || row.querySelector('.smgmt-retry-spinner')) return;
 
+  const repo = _smgmtRepo();
+  if (!repo) {
+    _smgmtShowToast('No repo configured — cannot estimate');
+    return;
+  }
+
   const spinner = document.createElement('span');
   spinner.className = 'smgmt-retry-spinner';
   btn.replaceWith(spinner);
 
-  const repo = _smgmtRepo() || '';
   try {
     const resp = await fetch(
       `/api/issues/${issueNum}/estimate?repo=${encodeURIComponent(repo)}`,

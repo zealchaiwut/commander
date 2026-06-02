@@ -1392,9 +1392,12 @@ def estimate_issue_on_demand(request: Request, issue_id: int, repo: str):
             detail += f" — stderr: {stderr}"
         raise HTTPException(404, detail=detail)
 
-    estimate = _ei_run_estimator(issue_id, issue_data)
+    estimate, error_type = _ei_run_estimator(issue_id, issue_data)
     if estimate is None:
-        raise HTTPException(500, detail=f"Estimation failed for #{issue_id}")
+        raise HTTPException(
+            500,
+            detail={"message": f"Estimation failed for #{issue_id}", "error_type": error_type},
+        )
 
     size = estimate.get("size")
     if not size:

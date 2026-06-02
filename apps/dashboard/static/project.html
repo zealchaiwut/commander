@@ -1772,6 +1772,27 @@
     .smgmt-moveto-option:hover { background: var(--surface-hover); }
     .smgmt-moveto-option.is-backlog { color: var(--text-muted); }
     .smgmt-moveto-divider { border: none; border-top: 1px solid var(--border); margin: 4px 0; }
+    /* Ticket row context menu (issue #500) */
+    .smgmt-ctx-menu {
+      position: fixed;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      box-shadow: 0 4px 16px rgba(0,0,0,.12);
+      z-index: 450;
+      min-width: 160px;
+      padding: 4px 0;
+    }
+    .smgmt-ctx-menu.hidden { display: none; }
+    .smgmt-ctx-menu-option {
+      display: block; width: 100%;
+      text-align: left; padding: 7px 14px;
+      font-size: 13px;
+      background: none; border: none;
+      color: var(--text); cursor: pointer;
+      font-family: inherit;
+    }
+    .smgmt-ctx-menu-option:hover { background: var(--surface-hover); }
     .nt-textarea { resize: vertical; min-height: 80px; font-family: inherit; }
     .nt-body-textarea { resize: vertical; min-height: 140px; font-family: monospace; font-size: 12px; }
     .nt-draft-divider { border-top: 1px solid var(--border); margin: 20px 0; }
@@ -3259,6 +3280,9 @@
         <!-- "Move to" popup (shared for backlog and sprint tickets) -->
         <div class="smgmt-moveto-popup hidden" id="smgmt-moveto-popup" role="listbox" aria-label="Move to sprint">
         </div>
+
+        <!-- Ticket row context menu (issue #500) -->
+        <div class="smgmt-ctx-menu hidden" id="smgmt-ctx-menu" role="menu"></div>
 
       </div>
 
@@ -6449,7 +6473,8 @@ function _smgmtTicketRowHtml(ticket, label) {
          ondragend="_smgmtTicketDragEnd(event)"
          ondragover="_smgmtTicketReorderDragOver(event)"
          ondragleave="_smgmtTicketReorderDragLeave(event)"
-         ondrop="_smgmtTicketReorderDrop(event, ${ticket.number}, '${escHtml(label)}')">
+         ondrop="_smgmtTicketReorderDrop(event, ${ticket.number}, '${escHtml(label)}')"
+         oncontextmenu="_smgmtCtxMenuOpen(event,${ticket.number})">
       <input type="checkbox" class="smgmt-ticket-cb"
              ${isSelected ? 'checked' : ''}
              onclick="event.stopPropagation()"
@@ -6609,6 +6634,57 @@ async function _smgmtReEstimateRun(issueNum, rowBtn) {
     if (tdpBtn) { tdpBtn.disabled = false; tdpBtn.textContent = 'Re-estimate'; }
     _smgmtShowToast(`Re-estimate failed: ${err.message}`);
   }
+}
+
+// ── Ticket row context menu (issue #500) ──────────────────────────────────
+let _ctxMenuIssueNum = null;
+
+function _smgmtCtxMenuOpen(event, issueNum) {
+  const row = document.getElementById(`smgmt-ticket-${issueNum}`);
+  const hasEstimate = row
+    ? row.querySelector('.smgmt-ticket-size-pill') !== null
+    : _tdpTickets.some(t => t.number === issueNum && (t.labels || []).some(l => /^size-[SMLX]+$/.test(l.name)));
+  if (!hasEstimate) return;
+
+  event.preventDefault();
+  event.stopPropagation();
+
+  const menu = document.getElementById('smgmt-ctx-menu');
+  if (!menu) return;
+
+  _ctxMenuIssueNum = issueNum;
+
+  menu.innerHTML = `<button class="smgmt-ctx-menu-option"
+    onclick="_smgmtCtxMenuClose();_smgmtReEstimate(${issueNum})">Re-estimate</button>`;
+  menu.classList.remove('hidden');
+
+  const menuW = 160;
+  const menuH = 38;
+  let left = event.clientX + window.scrollX;
+  let top  = event.clientY + window.scrollY;
+  if (event.clientX + menuW > window.innerWidth)  left = event.clientX + window.scrollX - menuW;
+  if (event.clientY + menuH > window.innerHeight) top  = event.clientY + window.scrollY - menuH;
+  menu.style.left = left + 'px';
+  menu.style.top  = top  + 'px';
+
+  setTimeout(() => {
+    document.addEventListener('click',       _smgmtCtxMenuOutsideHandler);
+    document.addEventListener('contextmenu', _smgmtCtxMenuOutsideHandler);
+  }, 0);
+}
+
+function _smgmtCtxMenuOutsideHandler(event) {
+  const menu = document.getElementById('smgmt-ctx-menu');
+  if (!menu || menu.contains(event.target)) return;
+  _smgmtCtxMenuClose();
+}
+
+function _smgmtCtxMenuClose() {
+  const menu = document.getElementById('smgmt-ctx-menu');
+  if (menu) menu.classList.add('hidden');
+  _ctxMenuIssueNum = null;
+  document.removeEventListener('click',       _smgmtCtxMenuOutsideHandler);
+  document.removeEventListener('contextmenu', _smgmtCtxMenuOutsideHandler);
 }
 
 // ── Sprint action handlers ─────────────────────────────────────────────────
@@ -8087,7 +8163,8 @@ function _smgmtBacklogTicketHtml(ticket, sprintNums) {
          data-issue="${ticket.number}"
          data-sprint=""
          ondragstart="_smgmtBacklogTicketDragStart(event, ${ticket.number})"
-         ondragend="_smgmtTicketDragEnd(event)">
+         ondragend="_smgmtTicketDragEnd(event)"
+         oncontextmenu="_smgmtCtxMenuOpen(event,${ticket.number})">
       <input type="checkbox" class="smgmt-ticket-cb"
              ${isSelected ? 'checked' : ''}
              onclick="event.stopPropagation()"

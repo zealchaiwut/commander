@@ -13,126 +13,132 @@ Agents may ONLY pause for confirmation for: (1) ambiguous requirements where a w
 
 Commander is:
 - A FastAPI web dashboard that tracks Claude Code agents in real time
-- - A GitHub Issues-based sprint board (BA → Coder → Tester → UAT flow)
-- - Mobile-accessible via Tailscale — launchd is the authoritative unattended runner (tmux is attended local dev only); device must be enrolled (`tailscale up`) and logged in; macOS Application Firewall blocks direct incoming connections for Python/uvicorn on port 8000; Tailscale operates below the Application Firewall layer so Tailscale-routed traffic reaches the service regardless of that block
-- - The repo is github.com/zealchaiwut/commander
--
-- ## Tech Stack
--
-- - Python 3.12, FastAPI, Uvicorn
-- - SQLite for agent event history
-- - Plain HTML + vanilla JS (no React, no build step)
-- - Server-Sent Events for live updates
-- - GitHub CLI (`gh`) for issue management
-- - Pytest + httpx for tests
--
-- ## Branching Workflow
--
-- This project uses a three-tier branching model:
--
-- - `master` — production, signed-off code only. Only I (the human) merge here.
-- - `develop` — integration branch. SIT-passed code lives here. Tester merges 
--   feature branches into this after tests pass.
--   - `feature/<issue-N>-<slug>` — short-lived branches for individual features.
--     Coders create these off `develop`. Naming: kebab-case, includes issue number.
--
--     DO NOT commit directly to `master`. DO NOT merge feature branches to master.
--
--     ## Roles
--
--     - **BA** writes acceptance criteria + UAT steps, creates GitHub issues using 
--       `scripts/create_ticket.py`. Uses `.github/ISSUE_TEMPLATE/feature.md`.
--       Pass `--attachment <path>` (repeatable) to attach supporting files; each file
--       is copied to `references/issue-<N>/`, committed, and linked in the issue body.
--
--       - **Coder** creates a feature branch off develop, implements the feature, 
--         pushes the branch, updates label to SIT. Does NOT merge.
--
--         - **Tester** checks out feature branch, writes pytest tests for each 
--           acceptance criterion, runs them, posts structured test report, merges 
--             to develop if tests pass and moves label to UAT.
--
--             - **The human** signs off on UAT from the dashboard, then merges develop 
--               to master manually.
--
--               ## Code Conventions
--
--               - Test files in `tests/` named `test_<feature>__<criterion>.py`
--               - Helper scripts in `scripts/` are pure Python, args via argparse
--               - Hook scripts in `hooks/` POST to localhost:8000, fail silently if server down
--               - No new Python dependencies without adding to requirements.txt
--               - No new frontend frameworks — keep static HTML + JS minimal
--
--               ## MCP Servers (available in all sessions)
--
--               Three MCP servers are installed at user scope — prefer them over shell fallbacks:
--
--               | Server | Tools prefix | Use for |
--               |--------|-------------|---------|
--               | **codedb** | `mcp__codedb__*` | Code navigation, symbol search, file reads (faster than Bash+Read) |
--               | **github** | `mcp__github__*` | List/view/create/edit issues, create PRs, check workflow runs. Prefer over shelling out to `gh`. |
--               | **sqlite** | `mcp__sqlite__*` | Query `dashboard.db` (tables: `agents`, `events`, `token_usage`). Use for debugging DB state instead of `sqlite3` via Bash. |
--
--               **Tool preference rules:**
--               - To read/search code → `mcp__codedb__*` over `Read`/`Bash grep`
--               - To work with GitHub issues/PRs → `mcp__github__*` over `gh` CLI in Bash (existing scripts like `create_ticket.py` / `update_ticket.py` may still use `gh` internally — do not refactor them)
--               - To inspect live DB state → `mcp__sqlite__*` over `sqlite3` in Bash
--
--               ## When Working on This Project
--
--               - Always run agents with CLAUDE_AGENT_ROLE env var set (ba, coder, tester)
--               - The dashboard runs at localhost:8000 — assume it's already running
--               - Use codedb MCP tools for code navigation when available (faster than Read)
--               - Read the issue body carefully before implementing — acceptance criteria 
--                 is the contract
--
--                 ## Standard Project Layout
--
--                 Two layouts are supported. Use `--nested` with `init_project.py` for new projects.
--
--                 **Nested layout** (`--nested`, recommended for new projects):
--                 ```
--                 ~/dev/<project>/
--                   main/              # primary working clone (master branch)
--                   coder/             # coder agent clone (develop branch)
--                   tester/            # tester agent clone (develop branch)
--                   uat/               # UAT clone (develop branch) — optional
--                   .commander/        # sprint config at project root, outside any clone
--                     sprint.yaml
--                     logs/
--                     sprints/
--                     alerts/
--                 ```
--
--                 **Flat layout** (default, backward compatible):
--                 ```
--                 ~/dev/<project>/          # main clone — master branch
--                 ~/dev/<project>/uat/      # UAT clone — develop branch
--                 ~/dev/<project>-coder/    # coder agent clone — develop branch
--                 ~/dev/<project>-tester/   # tester agent clone — develop branch
--                 ~/dev/<project>/.commander/sprint.yaml   # inside main clone
--                 ```
--
--                 The sprint manager auto-discovers `.commander/sprint.yaml` by walking UP
--                 from the current working directory, so it works from inside any clone in
--                 both layouts.
--
--                 To migrate an existing flat project to nested:
--                 `scripts/migrate_project_layout.py <project-name>`
--
--                 ## Useful Scripts
--
--                 - `scripts/create_ticket.py` — file a new issue with template
--                 - `scripts/update_ticket.py` — change labels (in-progress, sit, uat, blocked)
--                 - `scripts/comment_ticket.py` — add comment to issue
--                 - `scripts/post_test_report.py` — tester uses this for structured reports
--                 - `scripts/start_feature.py` — coder uses this to create feature branch
--                 - `scripts/finish_feature.py` — tester uses this to merge to develop
--                 - `scripts/init_project.py` — onboard a new project (`--nested` for nested layout)
--                 - `scripts/migrate_project_layout.py` — migrate flat project to nested layout
--                 - `scripts/migrate_add_uat.py` — add UAT clone to an existing project
--
--                 ## Issue Estimator
+- A GitHub Issues-based sprint board (BA → Coder → Tester → UAT flow)
+- Mobile-accessible via Tailscale — launchd is the authoritative unattended runner (tmux is attended local dev only); device must be enrolled (`tailscale up`) and logged in; macOS Application Firewall blocks direct incoming connections for Python/uvicorn on port 8000; Tailscale operates below the Application Firewall layer so Tailscale-routed traffic reaches the service regardless of that block
+- The repo is github.com/zealchaiwut/commander
+
+## Tech Stack
+
+- Python 3.12, FastAPI, Uvicorn
+- SQLite for agent event history
+- Plain HTML + vanilla JS (no React, no build step)
+- Server-Sent Events for live updates
+- GitHub CLI (`gh`) for issue management
+- Pytest + httpx for tests
+
+## Dashboard deploy model — frontend vs backend
+
+The dashboard has no build step, so its two layers deploy differently:
+
+- **Frontend** (`apps/dashboard/static/*.html`, plus inline JS/CSS) is served from disk per request. Edits take effect on the **next page refresh** — no server restart needed. A running dashboard, including the unattended launchd instance, picks up static changes immediately.
+- **Backend** (`apps/dashboard/server.py`, `services/sprint_manager/*.py`, any Python) requires a **uvicorn restart / redeploy** to take effect.
+
+When sequencing work for a running instance you can't restart (e.g. a remote launchd dashboard), prefer frontend-only tickets — they go live without a redeploy.
+
+## Branching Workflow
+
+This project uses a three-tier branching model:
+
+- `master` — production, signed-off code only. Only I (the human) merge here.
+- `develop` — integration branch. SIT-passed code lives here. Tester merges 
+  feature branches into this after tests pass.
+  - `feature/<issue-N>-<slug>` — short-lived branches for individual features.
+    Coders create these off `develop`. Naming: kebab-case, includes issue number.
+
+DO NOT commit directly to `master`. DO NOT merge feature branches to master.
+
+## Roles
+
+- **BA** writes acceptance criteria + UAT steps, creates GitHub issues using 
+  `scripts/create_ticket.py`. Uses `.github/ISSUE_TEMPLATE/feature.md`.
+  Pass `--attachment <path>` (repeatable) to attach supporting files; each file
+  is copied to `references/issue-<N>/`, committed, and linked in the issue body.
+- **Coder** creates a feature branch off develop, implements the feature, 
+  pushes the branch, updates label to SIT. Does NOT merge.
+- **Tester** checks out feature branch, writes pytest tests for each 
+  acceptance criterion, runs them, posts structured test report, merges 
+  to develop if tests pass and moves label to UAT.
+- **The human** signs off on UAT from the dashboard, then merges develop 
+  to master manually.
+
+## Code Conventions
+
+- Test files in `tests/` named `test_<feature>__<criterion>.py`
+- Helper scripts in `scripts/` are pure Python, args via argparse
+- Hook scripts in `hooks/` POST to localhost:8000, fail silently if server down
+- No new Python dependencies without adding to requirements.txt
+- No new frontend frameworks — keep static HTML + JS minimal
+
+## MCP Servers (available in all sessions)
+
+Three MCP servers are installed at user scope — prefer them over shell fallbacks:
+
+| Server | Tools prefix | Use for |
+|--------|-------------|---------|
+| **codedb** | `mcp__codedb__*` | Code navigation, symbol search, file reads (faster than Bash+Read) |
+| **github** | `mcp__github__*` | List/view/create/edit issues, create PRs, check workflow runs. Prefer over shelling out to `gh`. |
+| **sqlite** | `mcp__sqlite__*` | Query `dashboard.db` (tables: `agents`, `events`, `token_usage`). Use for debugging DB state instead of `sqlite3` via Bash. |
+
+**Tool preference rules:**
+- To read/search code → `mcp__codedb__*` over `Read`/`Bash grep`
+- To work with GitHub issues/PRs → `mcp__github__*` over `gh` CLI in Bash (existing scripts like `create_ticket.py` / `update_ticket.py` may still use `gh` internally — do not refactor them)
+- To inspect live DB state → `mcp__sqlite__*` over `sqlite3` in Bash
+
+## When Working on This Project
+
+- Always run agents with CLAUDE_AGENT_ROLE env var set (ba, coder, tester)
+- The dashboard runs at localhost:8000 — assume it's already running
+- Use codedb MCP tools for code navigation when available (faster than Read)
+- Read the issue body carefully before implementing — acceptance criteria 
+  is the contract
+
+## Standard Project Layout
+
+Two layouts are supported. Use `--nested` with `init_project.py` for new projects.
+
+**Nested layout** (`--nested`, recommended for new projects):
+```
+~/dev/<project>/
+  main/              # primary working clone (master branch)
+  coder/             # coder agent clone (develop branch)
+  tester/            # tester agent clone (develop branch)
+  uat/               # UAT clone (develop branch) — optional
+  .commander/        # sprint config at project root, outside any clone
+    sprint.yaml
+    logs/
+    sprints/
+    alerts/
+```
+
+**Flat layout** (default, backward compatible):
+```
+~/dev/<project>/          # main clone — master branch
+~/dev/<project>/uat/      # UAT clone — develop branch
+~/dev/<project>-coder/    # coder agent clone — develop branch
+~/dev/<project>-tester/   # tester agent clone — develop branch
+~/dev/<project>/.commander/sprint.yaml   # inside main clone
+```
+
+The sprint manager auto-discovers `.commander/sprint.yaml` by walking UP
+from the current working directory, so it works from inside any clone in
+both layouts.
+
+To migrate an existing flat project to nested:
+`scripts/migrate_project_layout.py <project-name>`
+
+## Useful Scripts
+
+- `scripts/create_ticket.py` — file a new issue with template
+- `scripts/update_ticket.py` — change labels (in-progress, sit, uat, blocked)
+- `scripts/comment_ticket.py` — add comment to issue
+- `scripts/post_test_report.py` — tester uses this for structured reports
+- `scripts/start_feature.py` — coder uses this to create feature branch
+- `scripts/finish_feature.py` — tester uses this to merge to develop
+- `scripts/init_project.py` — onboard a new project (`--nested` for nested layout)
+- `scripts/migrate_project_layout.py` — migrate flat project to nested layout
+- `scripts/migrate_add_uat.py` — add UAT clone to an existing project
+
+## Issue Estimator
 
 The Issue Estimator agent reads a ticket after it is created and produces structured sizing metadata: size estimate, confidence, files likely affected, dependency graph, and risk flags.
 
@@ -157,14 +163,14 @@ The Issue Estimator agent reads a ticket after it is created and produces struct
 **Agent definition:** `apps/dashboard/.claude/agents/estimator.md`
 
 ## Out of Scope
--
--                 - DO NOT add Discord, Slack, or other notification systems (separate sprint)
--                 - DO NOT add auth (single-user, local only for now)
--                 - DO NOT add caching layers beyond the existing 30s GitHub cache
--
--                 ## When in Doubt
--
--                 Default is **execute**, not ask. Only stop for genuine ambiguity or destructive actions. See "Confirmation Policy — STRICT" at the top of this file.
+
+- DO NOT add Discord, Slack, or other notification systems (separate sprint)
+- DO NOT add auth (single-user, local only for now)
+- DO NOT add caching layers beyond the existing 30s GitHub cache
+
+## When in Doubt
+
+Default is **execute**, not ask. Only stop for genuine ambiguity or destructive actions. See "Confirmation Policy — STRICT" at the top of this file.
 
 ## API Cost and Model Selection
 

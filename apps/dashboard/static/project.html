@@ -2631,6 +2631,14 @@
     }
     .bc-btn-retry-this:hover { opacity: 0.85; }
     .bc-btn-retry-this:disabled { opacity: 0.5; cursor: not-allowed; }
+    .bc-btn-regenerate {
+      font-size: 11px; padding: 4px 10px; border-radius: 5px; cursor: pointer;
+      background: none; color: var(--blue); border: 1px solid var(--blue);
+      transition: background .12s, color .12s; margin-top: 6px;
+    }
+    .bc-btn-regenerate:hover { background: var(--blue-bg, rgba(59,130,246,.08)); }
+    .bc-btn-regenerate:disabled { opacity: 0.5; cursor: not-allowed; }
+    .bc-regen-err { font-size: 10px; color: var(--red); margin-top: 4px; }
     .bc-btn-skip-this {
       font-size: 11px; padding: 4px 10px; border-radius: 5px; cursor: pointer;
       background: none; color: var(--text-muted); border: 1px solid var(--border);
@@ -10457,6 +10465,8 @@ function _bcRenderCard(t) {
     const titleVal  = t.title || '';
     const bodyVal   = t.body  || '';
     const isChecked = _bcDraftSelections.has(t.index) ? 'checked' : '';
+    const regenErrHtml = t._regen_error
+      ? `<div class="bc-regen-err">${escHtml(t._regen_error)}</div>` : '';
     return `
       <div class="bc-card bc-card--draft_ready" id="bc-card-${t.index}">
         <div class="bc-status-dot bc-status-dot--draft_ready"></div>
@@ -10471,6 +10481,9 @@ function _bcRenderCard(t) {
           <div class="bc-draft-title-err hidden" id="bc-draft-title-err-${t.index}">Title is required</div>
           <textarea class="bc-draft-edit-body" id="bc-draft-body-${t.index}"
                     tabindex="0">${escHtml(bodyVal)}</textarea>
+          ${regenErrHtml}
+          <button class="bc-btn-regenerate" id="bc-btn-regen-${t.index}"
+                  onclick="bcRegenerateDraft(${t.index})">Regenerate draft</button>
         </div>
       </div>`;
   } else if (t.state === 'skipped') {
@@ -10530,6 +10543,41 @@ async function bcRetryTicket(index) {
       body: JSON.stringify({ index }),
     });
   } catch (_) {}
+}
+
+async function bcRegenerateDraft(index) {
+  if (!_bcJobId || !_bcJobState) return;
+  const ticket = _bcJobState.tickets[index];
+  if (!ticket || ticket.state !== 'draft_ready') return;
+
+  // Read current DOM values (user may have edited them)
+  const titleEl = document.getElementById(`bc-draft-title-${index}`);
+  const bodyEl  = document.getElementById(`bc-draft-body-${index}`);
+  const savedTitle = titleEl ? titleEl.value : (ticket.title || '');
+  const savedBody  = bodyEl  ? bodyEl.value  : (ticket.body  || '');
+
+  // Optimistically show loading state; SSE takes over once backend fires
+  ticket.state = 'pending';
+  ticket.title = null;
+  ticket.body  = null;
+  delete ticket._regen_error;
+  _bcRenderStep2();
+
+  try {
+    const resp = await fetch(`/api/tickets/bulk/${_bcJobId}/redraft`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ index }),
+    });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  } catch (_) {
+    // Restore previous draft and show inline error
+    ticket.state = 'draft_ready';
+    ticket.title = savedTitle;
+    ticket.body  = savedBody;
+    ticket._regen_error = 'Regeneration request failed. Previous draft preserved.';
+    _bcRenderStep2();
+  }
 }
 
 function bcEditorInput(index) {

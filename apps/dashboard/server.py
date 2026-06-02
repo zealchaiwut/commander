@@ -155,6 +155,7 @@ _TIMEOUT_CHECK_INTERVAL: int = 60  # run the check every 60 seconds
 
 _subscribers: list[asyncio.Queue] = []
 _start_time: float = 0.0
+_orphans_removed_total: int = 0
 
 
 # ── Git startup metadata (issue #329) ─────────────────────────────────────────
@@ -255,7 +256,7 @@ async def _timeout_loop() -> None:
 
 
 def _sweep_orphan_pid_files() -> None:
-    """On startup: scan all projects' PID files and remove orphans.
+    """Scan all projects' PID files and remove orphans.
 
     A PID file is orphaned when:
     - The process no longer exists (ProcessLookupError from os.kill(pid, 0))
@@ -264,13 +265,33 @@ def _sweep_orphan_pid_files() -> None:
 
     Live sprint_manager.py processes for the correct label are left untouched.
     """
+    global _orphans_removed_total
     sweep_start = time.monotonic()
     scanned = 0
     cleaned = 0
+
+    def _remove_orphan(pid_file: Path, pid: int | None, reason: str) -> None:
+        nonlocal cleaned
+        global _orphans_removed_total
+        _slog.event(
+            "orphan_pid_detected",
+            project="dashboard",
+            event="orphan_pid_detected",
+            pid=pid,
+            file_path=str(pid_file),
+            reason=reason,
+        )
+        try:
+            pid_file.unlink()
+        except OSError:
+            pass
+        cleaned += 1
+        _orphans_removed_total += 1
+
     try:
         projects = projects_module.load_projects()
     except Exception as exc:
-        print(f"[startup-sweep] could not load projects: {exc}")
+        logger.warning("[startup-sweep] could not load projects: %s", exc)
         elapsed_ms = (time.monotonic() - sweep_start) * 1000
         print(f"[startup-sweep] scanned {scanned} PID files, cleaned {cleaned} orphans in {elapsed_ms:.1f}ms")
         return
@@ -286,30 +307,20 @@ def _sweep_orphan_pid_files() -> None:
                 sprint_label = pid_file.name.removesuffix("-pid")  # e.g. "sprint-9"
                 try:
                     pid = int(pid_file.read_text(encoding="utf-8").strip())
-                except (ValueError, OSError):
-                    # Unreadable/corrupt PID file — remove it.
-                    try:
-                        pid_file.unlink()
-                    except OSError:
-                        pass
-                    cleaned += 1
-                    print(f"Sweeping orphan PID file: {pid_file} (pid unknown, unreadable)")
+                except (ValueError, OSError) as exc:
+                    logger.warning("[startup-sweep] malformed PID file %s: %s", pid_file, exc)
+                    _remove_orphan(pid_file, None, "unreadable")
                     continue
 
                 # Check if the process exists.
                 try:
                     os.kill(pid, 0)
                 except ProcessLookupError:
-                    try:
-                        pid_file.unlink()
-                    except OSError:
-                        pass
-                    cleaned += 1
-                    print(f"Sweeping orphan PID file: {pid_file} (pid {pid} not alive)")
+                    _remove_orphan(pid_file, pid, "process_not_found")
                     continue
-                except PermissionError:
+                except PermissionError as exc:
                     # Process exists but we can't signal it (different user).
-                    # Leave it; it may be legitimate.
+                    logger.warning("[startup-sweep] permission denied checking pid %s in %s: %s", pid, pid_file, exc)
                     continue
                 except OSError:
                     continue
@@ -337,14 +348,9 @@ def _sweep_orphan_pid_files() -> None:
                     label_present = False
 
                 if not label_present:
-                    try:
-                        pid_file.unlink()
-                    except OSError:
-                        pass
-                    cleaned += 1
-                    print(f"Sweeping orphan PID file: {pid_file} (pid {pid} not alive)")
+                    _remove_orphan(pid_file, pid, "pid_reuse")
         except Exception as exc:
-            print(f"[startup-sweep] error scanning project {proj.get('repo')}: {exc}")
+            logger.warning("[startup-sweep] error scanning project %s: %s", proj.get("repo"), exc)
 
     elapsed_ms = (time.monotonic() - sweep_start) * 1000
     print(f"[startup-sweep] scanned {scanned} PID files, cleaned {cleaned} orphans in {elapsed_ms:.1f}ms")
@@ -650,9 +656,9 @@ def _validate_github_repos() -> None:
 
 
 async def _periodic_orphan_sweep_loop() -> None:
-    """Sweep orphan PID files every 60 seconds while the dashboard is running."""
+    """Sweep orphan PID files every 5 minutes while the dashboard is running."""
     while True:
-        await asyncio.sleep(60)
+        await asyncio.sleep(300)
         try:
             _sweep_orphan_pid_files()
         except Exception as exc:
@@ -817,185 +823,145 @@ class HealthResponse(BaseModel):
 # Global cache: (timestamp, response_dict)
 _health_cache: tuple[float, dict] | None = None
 _HEALTH_CACHE_TTL = 10.0  # seconds
-_GITHUB_AUTH_CACHE: tuple[float, dict] | None = None
-_GITHUB_AUTH_CACHE_TTL = 60.0  # seconds
-_CHECK_TIMEOUT = 0.5  # 500 ms per individual check
-_HEALTH_TOTAL_TIMEOUT = 2.0  # 2 s overall
 
 
-async def _check_dashboard() -> dict:
-    uptime = time.monotonic() - _start_time
-    return {"status": "ok", "uptime_sec": int(uptime)}
-
-
-async def _check_database() -> dict:
+def _health_collect_gh_auth_scopes() -> dict | None:
     try:
-        loop = asyncio.get_event_loop()
-        def _run():
-            conn = db.get_conn()
-            try:
-                conn.execute("SELECT 1")
-            finally:
-                conn.close()
-        await asyncio.wait_for(loop.run_in_executor(None, _run), timeout=_CHECK_TIMEOUT)
-        return {"status": "ok"}
-    except asyncio.TimeoutError:
-        return {"status": "timeout"}
-    except Exception as exc:
-        return {"status": "down", "error": str(exc)}
-
-
-async def _check_github_auth() -> dict:
-    global _GITHUB_AUTH_CACHE
-    now = time.monotonic()
-    if _GITHUB_AUTH_CACHE is not None:
-        ts, cached = _GITHUB_AUTH_CACHE
-        if now - ts < _GITHUB_AUTH_CACHE_TTL:
-            return cached
-
-    async def _run() -> dict:
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                "gh", "auth", "status",
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            stdout, stderr = await proc.communicate()
-            combined = (stdout + stderr).decode("utf-8", errors="replace")
-            if proc.returncode == 0:
-                # Parse logged-in user from output like "Logged in to github.com as <user>"
-                import re as _re
-                m = _re.search(r"Logged in to \S+ as (\S+)", combined)
-                user = m.group(1) if m else None
-                result = {"status": "ok"}
-                if user:
-                    result["user"] = user
-                return result
-            # Non-zero exit — determine if expired or missing
-            combined_lower = combined.lower()
-            if "expired" in combined_lower or "token" in combined_lower:
-                return {"status": "expired"}
-            return {"status": "missing"}
-        except FileNotFoundError:
-            return {"status": "missing"}
-        except Exception as exc:
-            return {"status": "missing", "error": str(exc)}
-
-    try:
-        result = await asyncio.wait_for(_run(), timeout=_CHECK_TIMEOUT)
-    except asyncio.TimeoutError:
-        result = {"status": "timeout"}
-
-    _GITHUB_AUTH_CACHE = (now, result)
-    return result
-
-
-async def _check_claude_code_auth() -> dict:
-    credentials_path = Path.home() / ".claude" / "credentials.json"
-    if not credentials_path.exists():
-        # Try running `claude --version` as fallback
-        try:
-            proc = await asyncio.wait_for(
-                asyncio.create_subprocess_exec(
-                    "claude", "--version",
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                ),
-                timeout=_CHECK_TIMEOUT,
-            )
-            await proc.communicate()
-            if proc.returncode == 0:
-                return {"status": "ok"}
-            return {"status": "expired"}
-        except asyncio.TimeoutError:
-            return {"status": "timeout"}
-        except FileNotFoundError:
-            return {"status": "missing"}
-        except Exception:
-            return {"status": "missing"}
-
-    # credentials.json exists — check it's valid JSON and non-empty
-    try:
-        data = json.loads(credentials_path.read_text(encoding="utf-8"))
-        if not data:
-            return {"status": "expired"}
-        return {"status": "ok"}
-    except Exception:
-        return {"status": "expired"}
-
-
-async def _check_disk() -> dict:
-    try:
-        loop = asyncio.get_event_loop()
-        usage = await asyncio.wait_for(
-            loop.run_in_executor(None, lambda: shutil.disk_usage(Path(__file__).parent)),
-            timeout=_CHECK_TIMEOUT,
+        result = subprocess.run(
+            ["gh", "auth", "status"],
+            capture_output=True, text=True, timeout=5,
         )
-        free_gb = usage.free / (1024 ** 3)
-        total_gb = usage.total / (1024 ** 3)
-        if free_gb < 2.0:
-            status = "critical"
-        elif free_gb < 10.0:
-            status = "warn"
-        else:
-            status = "ok"
-        return {
-            "status": status,
-            "free_gb": round(free_gb, 2),
-            "total_gb": round(total_gb, 2),
-        }
-    except asyncio.TimeoutError:
-        return {"status": "timeout"}
-    except Exception as exc:
-        return {"status": "warn", "error": str(exc)}
+        output = result.stdout + result.stderr
+        authorized = result.returncode == 0
+        scopes: list[str] = []
+        m = re.search(r"Token scopes:\s*(.+)", output)
+        if m:
+            scopes = [s.strip().strip("'\",") for s in m.group(1).split(",") if s.strip()]
+        return {"authorized": authorized, "scopes": scopes}
+    except Exception:
+        return None
 
 
-async def _check_stuck_sprints() -> dict:
-    """Check for sprints in 'running' state whose state file mtime is > 2 hours old."""
+def _health_collect_disk() -> dict | None:
     try:
-        loop = asyncio.get_event_loop()
+        partition_path: Path | None = None
+        try:
+            projs = projects_module.load_projects()
+            for p in projs:
+                candidate = _commander_dir(_project_root_path(p["repo"]))
+                if candidate.exists():
+                    partition_path = candidate
+                    break
+        except Exception:
+            pass
+        if partition_path is None:
+            partition_path = _PROJECTS_BASE
+        usage = shutil.disk_usage(partition_path)
+        free_percent = usage.free / usage.total * 100.0
+        return {"partition": str(partition_path), "free_percent": round(free_percent, 2)}
+    except Exception:
+        return None
 
-        def _scan() -> dict:
-            two_hours_ago = time.time() - 7200
-            stuck_labels: list[str] = []
-            try:
-                projects = projects_module.load_projects()
-            except Exception:
-                return {"status": "ok", "count": 0, "labels": []}
-            for proj in projects:
+
+def _health_collect_sprints() -> dict | None:
+    try:
+        return {"running_count": len(_all_sprints_running())}
+    except Exception:
+        return None
+
+
+def _health_collect_orphan_pids() -> dict | None:
+    try:
+        count = 0
+        projs = projects_module.load_projects()
+        for proj in projs:
+            root = _project_root_path(proj["repo"])
+            sprints_dir = _commander_dir(root) / "sprints"
+            if not sprints_dir.exists():
+                continue
+            for pid_file in sprints_dir.glob("*-pid"):
                 try:
-                    project_root = _project_root_path(proj["repo"])
-                    sprints_dir = _commander_dir(project_root) / "sprints"
-                    if not sprints_dir.exists():
-                        continue
-                    for state_file in sprints_dir.glob("*-state.json"):
-                        try:
-                            data = json.loads(state_file.read_text(encoding="utf-8"))
-                        except Exception:
-                            continue
-                        if data.get("status") != "running":
-                            continue
-                        # Check mtime
-                        mtime = state_file.stat().st_mtime
-                        if mtime < two_hours_ago:
-                            # Extract sprint label from filename: sprint-N-state.json
-                            label = state_file.name.removesuffix("-state.json")
-                            stuck_labels.append(label)
+                    pid = int(pid_file.read_text(encoding="utf-8").strip())
+                except (ValueError, OSError):
+                    count += 1
+                    continue
+                try:
+                    os.kill(pid, 0)
+                except (ProcessLookupError, OSError):
+                    count += 1
+        return {"count": count}
+    except Exception:
+        return None
+
+
+def _health_collect_recent_dispatches() -> list | None:
+    try:
+        entries: list[dict] = []
+        projs = projects_module.load_projects()
+        for proj in projs:
+            root = _project_root_path(proj["repo"])
+            sprints_dir = _commander_dir(root) / "sprints"
+            if not sprints_dir.exists():
+                continue
+            for state_file in sprints_dir.glob("*-state.json"):
+                try:
+                    data = json.loads(state_file.read_text(encoding="utf-8"))
                 except Exception:
                     continue
-            if stuck_labels:
-                return {"status": "warn", "count": len(stuck_labels), "labels": stuck_labels}
-            return {"status": "ok", "count": 0, "labels": []}
+                sprint_label = state_file.name.removesuffix("-state.json")
+                issues = data.get("issues") or []
+                has_failed = any(
+                    i.get("agent_status") == "failed" or i.get("failure_reason") or i.get("status") == "skipped"
+                    for i in issues
+                )
+                all_done = bool(issues) and all(i.get("status") == "done" for i in issues)
+                outcome = "success" if (all_done and not has_failed) else "failure"
+                ts_str = data.get("start_timestamp")
+                try:
+                    if ts_str:
+                        ts_dt = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+                        timestamp = ts_dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+                        sort_key = ts_str
+                    else:
+                        raise ValueError("no start_timestamp")
+                except Exception:
+                    mtime = state_file.stat().st_mtime
+                    timestamp = datetime.fromtimestamp(mtime, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+                    sort_key = str(mtime)
+                entries.append({
+                    "timestamp": timestamp,
+                    "outcome": outcome,
+                    "target": f"{proj['repo']}/{sprint_label}",
+                    "_sort_key": sort_key,
+                })
+        entries.sort(key=lambda e: e["_sort_key"], reverse=True)
+        return [{"timestamp": e["timestamp"], "outcome": e["outcome"], "target": e["target"]} for e in entries[:5]]
+    except Exception:
+        return None
 
-        result = await asyncio.wait_for(
-            loop.run_in_executor(None, _scan),
-            timeout=_CHECK_TIMEOUT,
-        )
-        return result
-    except asyncio.TimeoutError:
-        return {"status": "timeout"}
-    except Exception as exc:
-        return {"status": "ok", "count": 0, "labels": [], "error": str(exc)}
+
+def _compute_health_status(
+    gh_auth: dict | None,
+    disk: dict | None,
+    orphan_pids: dict | None,
+    recent_dispatches: list | None,
+) -> str:
+    has_null = any(x is None for x in [gh_auth, disk, orphan_pids, recent_dispatches])
+    disk_critical = disk is not None and disk["free_percent"] < 5.0
+    gh_unauthorized = gh_auth is not None and not gh_auth["authorized"]
+    orphan_critical = orphan_pids is not None and orphan_pids["count"] >= 3
+    if disk_critical or gh_unauthorized or orphan_critical:
+        return "unhealthy"
+    disk_degraded = disk is not None and disk["free_percent"] < 15.0
+    last_dispatch_failure = (
+        recent_dispatches is not None
+        and len(recent_dispatches) > 0
+        and recent_dispatches[0]["outcome"] == "failure"
+    )
+    any_orphans = orphan_pids is not None and orphan_pids["count"] > 0
+    if has_null or disk_degraded or last_dispatch_failure or any_orphans:
+        return "degraded"
+    return "ok"
 
 
 # ── SSE broadcast ─────────────────────────────────────────────────────────────
@@ -1075,11 +1041,12 @@ async def project_slug_tab(slug: str, tab: str):
 
 @app.get("/api/health")
 async def health_check(request: Request):
-    """GET /api/health — rich dependency health check (issue #229).
+    """GET /api/health — structured operational health check (issue #474).
 
-    Runs 6 checks concurrently: dashboard, database, github_auth, claude_code_auth,
-    disk, stuck_sprints.  Response is cached 10 s.  Returns 200 for ok/degraded,
-    503 for down.  No authentication required.
+    Checks uptime, gh auth scopes, disk pressure, running sprints, orphan PIDs,
+    and recent dispatch outcomes.  Always returns HTTP 200; the status field
+    carries the health signal ("ok", "degraded", or "unhealthy").
+    Response is cached 10 s.  No authentication required.
     """
     _slog.event("route.entry", project="dashboard", request_id=request.state.request_id, route="/api/health", method="GET")
     global _health_cache
@@ -1087,74 +1054,50 @@ async def health_check(request: Request):
     if _health_cache is not None:
         ts, cached = _health_cache
         if now - ts < _HEALTH_CACHE_TTL:
-            status_code = 503 if cached["status"] == "down" else 200
-            return JSONResponse(content=cached, status_code=status_code)
+            return JSONResponse(content=cached, status_code=200)
 
     checked_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    loop = asyncio.get_event_loop()
 
     try:
         results = await asyncio.wait_for(
             asyncio.gather(
-                _check_dashboard(),
-                _check_database(),
-                _check_github_auth(),
-                _check_claude_code_auth(),
-                _check_disk(),
-                _check_stuck_sprints(),
+                loop.run_in_executor(None, _health_collect_gh_auth_scopes),
+                loop.run_in_executor(None, _health_collect_disk),
+                loop.run_in_executor(None, _health_collect_sprints),
+                loop.run_in_executor(None, _health_collect_orphan_pids),
+                loop.run_in_executor(None, _health_collect_recent_dispatches),
                 return_exceptions=True,
             ),
-            timeout=_HEALTH_TOTAL_TIMEOUT,
+            timeout=5.0,
         )
     except asyncio.TimeoutError:
-        results = [
-            {"status": "timeout"},
-            {"status": "timeout"},
-            {"status": "timeout"},
-            {"status": "timeout"},
-            {"status": "timeout"},
-            {"status": "timeout"},
-        ]
+        results = [None, None, None, None, None]
 
-    # Unpack results; replace any unexpected exceptions with error dicts
-    def _safe(r, fallback_status: str = "down") -> dict:
-        if isinstance(r, Exception):
-            return {"status": fallback_status, "error": str(r)}
-        return r
+    def _safe(r):
+        return None if isinstance(r, Exception) else r
 
-    checks = {
-        "dashboard":        _safe(results[0], "down"),
-        "database":         _safe(results[1], "down"),
-        "github_auth":      _safe(results[2], "missing"),
-        "claude_code_auth": _safe(results[3], "missing"),
-        "disk":             _safe(results[4], "warn"),
-        "stuck_sprints":    _safe(results[5], "ok"),
-    }
+    gh_auth = _safe(results[0])
+    disk = _safe(results[1])
+    sprints = _safe(results[2])
+    orphan_pids = _safe(results[3])
+    recent_dispatches = _safe(results[4])
 
-    # Determine overall status
-    # "down" if database or github_auth failed
-    critical_down = checks["database"]["status"] in ("down", "timeout") or \
-                    checks["github_auth"]["status"] in ("expired", "missing", "timeout")
-    has_warn = any(
-        c.get("status") in ("warn", "critical", "expired", "missing", "timeout")
-        for c in checks.values()
-    )
-
-    if critical_down:
-        overall = "down"
-    elif has_warn:
-        overall = "degraded"
-    else:
-        overall = "ok"
+    status = _compute_health_status(gh_auth, disk, orphan_pids, recent_dispatches)
 
     response = {
-        "status": overall,
+        "status": status,
+        "uptime_seconds": int(time.monotonic() - _start_time),
+        "gh_auth_scopes": gh_auth,
+        "disk": disk,
+        "sprints": sprints,
+        "orphan_pids": orphan_pids,
+        "orphans_removed": _orphans_removed_total,
+        "recent_dispatches": recent_dispatches,
         "checked_at": checked_at,
-        "checks": checks,
     }
     _health_cache = (now, response)
-
-    status_code = 503 if overall == "down" else 200
-    return JSONResponse(content=response, status_code=status_code)
+    return JSONResponse(content=response, status_code=200)
 
 
 @app.get("/api/environment")
@@ -5510,6 +5453,196 @@ def _count_rework_tickets(sprint_label: str, project: str) -> int:
     except Exception:
         pass
     return 0
+
+
+# ── Sprint metrics endpoint (issue #475) ─────────────────────────────────────
+
+@app.get("/api/metrics/sprints")
+def get_sprint_metrics(request: Request):
+    """Return per-sprint aggregate metrics across all registered projects.
+
+    Query params:
+      from=YYYY-MM-DD  (default: 30 days ago)
+      to=YYYY-MM-DD    (default: today)
+
+    Response: JSON array of sprint metric objects.
+    """
+    today = datetime.now(tz=timezone.utc).date()
+
+    raw_from = request.query_params.get("from")
+    raw_to = request.query_params.get("to")
+
+    if raw_from is None and raw_to is None:
+        from_date = today - timedelta(days=30)
+        to_date = today
+    else:
+        if raw_from is not None:
+            try:
+                from_date = datetime.strptime(raw_from, "%Y-%m-%d").date()
+            except ValueError:
+                raise HTTPException(
+                    400,
+                    detail=f"Invalid 'from' date {raw_from!r} — expected YYYY-MM-DD",
+                )
+        else:
+            from_date = today - timedelta(days=30)
+
+        if raw_to is not None:
+            try:
+                to_date = datetime.strptime(raw_to, "%Y-%m-%d").date()
+            except ValueError:
+                raise HTTPException(
+                    400,
+                    detail=f"Invalid 'to' date {raw_to!r} — expected YYYY-MM-DD",
+                )
+        else:
+            to_date = today
+
+    if from_date > to_date:
+        raise HTTPException(
+            400,
+            detail=f"'from' date ({from_date}) must not be after 'to' date ({to_date})",
+        )
+
+    from_dt = datetime(from_date.year, from_date.month, from_date.day, tzinfo=timezone.utc)
+    to_dt = datetime(to_date.year, to_date.month, to_date.day, 23, 59, 59, tzinfo=timezone.utc)
+
+    try:
+        all_projects = projects_module.load_projects()
+    except Exception:
+        all_projects = []
+
+    results = []
+    seen_paths: set[Path] = set()
+
+    for proj in all_projects:
+        repo = proj.get("repo", "")
+        if not repo:
+            continue
+
+        project_root = _project_root_path(repo)
+        sprints_dir = _commander_dir(project_root) / "sprints"
+
+        if not sprints_dir.exists():
+            continue
+
+        for state_file in sorted(sprints_dir.glob("sprint-*-state.json")):
+            if state_file in seen_paths:
+                continue
+            seen_paths.add(state_file)
+
+            try:
+                state_data = json.loads(state_file.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+
+            start_ts_str = state_data.get("start_timestamp")
+            if not start_ts_str:
+                continue
+            try:
+                start_dt = datetime.fromisoformat(start_ts_str.rstrip("Z")).replace(
+                    tzinfo=timezone.utc
+                )
+            except Exception:
+                continue
+
+            if not (from_dt <= start_dt <= to_dt):
+                continue
+
+            sprint_label_val = state_data.get(
+                "sprint_label",
+                state_file.stem.replace("-state", ""),
+            )
+            project_val = state_data.get("project") or repo
+
+            wall_clock_secs = float(state_data.get("wall_clock_secs") or 0.0)
+            issues = state_data.get("issues", [])
+
+            done_count = sum(1 for i in issues if i.get("status") == "done")
+            failed_count = sum(1 for i in issues if i.get("status") == "failed")
+            skipped_count = sum(1 for i in issues if i.get("status") == "skipped")
+
+            coder_count = sum(1 for i in issues if i.get("coder_started_at"))
+            tester_count = sum(1 for i in issues if i.get("tester_started_at"))
+            reviewer_count = 1 if state_data.get("reviewer_status") not in (None, "") else 0
+            documenter_count = 1 if state_data.get("documenter_status") not in (None, "") else 0
+
+            tokens_in = int(state_data.get("total_tokens_in") or 0)
+            tokens_out = int(state_data.get("total_tokens_out") or 0)
+            total_tokens = tokens_in + tokens_out
+            token_estimate = total_tokens if total_tokens > 0 else None
+
+            results.append({
+                "sprint_label": sprint_label_val,
+                "project": project_val,
+                "duration_minutes": round(wall_clock_secs / 60, 2),
+                "ticket_count": len(issues),
+                "ticket_outcomes_breakdown": {
+                    "done": done_count,
+                    "failed": failed_count,
+                    "skipped": skipped_count,
+                    "needs_rework": 0,
+                },
+                "agent_dispatch_counts": {
+                    "coder": coder_count,
+                    "tester": tester_count,
+                    "reviewer": reviewer_count,
+                    "documenter": documenter_count,
+                },
+                "total_token_estimate": token_estimate,
+            })
+
+    return results
+
+
+# ── Daily report endpoint (issue #478) ───────────────────────────────────────
+
+@app.post("/api/reports/daily")
+async def generate_daily_report(request: Request):
+    """Trigger daily summary report generation.
+
+    Optional JSON body: {"date": "YYYY-MM-DD"} (default: today).
+    Writes .commander/reports/YYYY-MM-DD.md and returns the file path.
+    """
+    target_date_str: Optional[str] = None
+    try:
+        body = await request.json()
+        if isinstance(body, dict):
+            target_date_str = body.get("date")
+    except Exception:
+        pass
+
+    cmd = [sys.executable, str(Path(__file__).parent.parent.parent / "scripts" / "generate_daily_report.py")]
+    if target_date_str:
+        cmd.extend(["--date", target_date_str])
+
+    env = os.environ.copy()
+    if "DB_PATH" not in env or not env["DB_PATH"].strip():
+        db_candidate = Path(__file__).parent / "commander.db"
+        if db_candidate.exists():
+            env["DB_PATH"] = str(db_candidate)
+
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            cwd=str(Path(__file__).parent.parent.parent),
+            env=env,
+        )
+    except subprocess.TimeoutExpired:
+        raise HTTPException(500, detail="Report generation timed out after 30 s")
+
+    if result.returncode != 0:
+        raise HTTPException(
+            500,
+            detail=f"Report generation failed: {result.stderr.strip() or result.stdout.strip()}",
+        )
+
+    out_line = result.stdout.strip()
+    report_path = out_line.removeprefix("Report written to ").strip()
+    return {"ok": True, "path": report_path, "message": out_line}
 
 
 @app.get("/api/sprints/{sprint_label}/finish-card")

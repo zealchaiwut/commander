@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+
+  <!-- Service identity -->
+  <key>Label</key>
+  <string>com.commander.daily-report</string>
+
+  <!-- Fire at 23:55 local time every day -->
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key>
+    <integer>23</integer>
+    <key>Minute</key>
+    <integer>55</integer>
+  </dict>
+
+  <!-- Working directory: repo root (installer substitutes __REPO_ROOT__) -->
+  <key>WorkingDirectory</key>
+  <string>__REPO_ROOT__</string>
+
+  <!-- Launch command -->
+  <key>ProgramArguments</key>
+  <array>
+    <string>__VENV_BIN__/python3</string>
+    <string>scripts/generate_daily_report.py</string>
+  </array>
+
+  <!-- Environment: PATH + DB_PATH pointing to commander.db -->
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>__VENV_BIN__:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>DB_PATH</key>
+    <string>__DASHBOARD_DIR__/commander.db</string>
+  </dict>
+
+  <!-- Log files -->
+  <key>StandardOutPath</key>
+  <string>__HOME__/Library/Logs/commander-daily-report.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>__HOME__/Library/Logs/commander-daily-report.err.log</string>
+
+</dict>
+</plist>

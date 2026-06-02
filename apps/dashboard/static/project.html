@@ -2942,15 +2942,12 @@
     }
 
     /* Touch devices have no hover, so hover-revealed row actions never appear.
-       Keep the actionable buttons visible (the drag grip is intentionally left
-       hidden — HTML5 drag-and-drop doesn't work on touch; use "Move to" instead). */
+       Keep the actionable controls visible (the drag grip is intentionally left
+       hidden — HTML5 drag-and-drop doesn't work on touch; use the ≡ row menu). */
     @media (hover: none) {
-      .smgmt-moveto-pill,
-      .smgmt-reestimate-btn,
+      .smgmt-row-menu-btn,
       .smgmt-rename-btn,
       .smgmt-summary-row-action { opacity: 1; }
-      /* Larger tap target for the per-ticket Move-to pill on touch. */
-      .smgmt-moveto-pill { padding: 5px 12px; font-size: 12px; }
     }
 
     /* ── Toast notifications (issue #426) ── */

@@ -1489,6 +1489,52 @@
       z-index: 100;
     }
     .modal-backdrop.hidden { display: none; }
+    /* ====================================================================== */
+    /* Add Project modal — CANONICAL block. Keep BYTE-IDENTICAL with the copy  */
+    /* in home-preview.html (CSS + markup + JS). This modal replaced the old   */
+    /* legacy index.html/app.js "New Project" modal (issue #425).              */
+    /* ====================================================================== */
+    .apm-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 800; }
+    .apm-backdrop.hidden { display: none; }
+    .apm-modal {
+      position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%);
+      width: 440px; max-width: calc(100vw - 32px); max-height: calc(100vh - 48px);
+      display: flex; flex-direction: column; overflow: hidden;
+      background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+      box-shadow: 0 12px 48px rgba(0,0,0,.3); z-index: 801;
+    }
+    .apm-modal.hidden { display: none; }
+    .apm-header { display: flex; align-items: center; justify-content: space-between; padding: 16px 18px 0; }
+    .apm-title { font-size: 15px; font-weight: 700; color: var(--text); }
+    .apm-close { background: none; border: none; color: var(--text-muted); font-size: 22px; line-height: 1; cursor: pointer; padding: 0 4px; }
+    .apm-close:hover { color: var(--text); }
+    .apm-tabs { display: flex; margin: 12px 18px 0; border-bottom: 1px solid var(--border); }
+    .apm-tab { background: none; border: none; border-bottom: 2px solid transparent; padding: 8px 14px; font-size: 13px; font-weight: 500; color: var(--text-muted); cursor: pointer; margin-bottom: -1px; font-family: inherit; }
+    .apm-tab:hover { color: var(--text); }
+    .apm-tab.active { color: var(--blue); border-bottom-color: var(--blue); }
+    .apm-body { padding: 16px 18px; overflow-y: auto; }
+    .apm-body.hidden { display: none; }
+    .apm-field { margin-bottom: 14px; }
+    .apm-field:last-child { margin-bottom: 0; }
+    .apm-label { display: block; font-size: 12px; font-weight: 600; color: var(--text); margin-bottom: 5px; }
+    .apm-hint { font-weight: 400; font-size: 11px; color: var(--text-muted); }
+    .apm-req { color: var(--red); }
+    .apm-input { width: 100%; padding: 8px 10px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px; color: var(--text); font-size: 13px; font-family: inherit; outline: none; transition: border-color .15s; box-sizing: border-box; }
+    .apm-input:focus { border-color: var(--blue); background: var(--surface); }
+    .apm-input.error { border-color: var(--red); }
+    .apm-error { font-size: 12px; color: var(--red); margin-top: 5px; }
+    .apm-error.hidden { display: none; }
+    .apm-checks { display: flex; gap: 20px; align-items: center; }
+    .apm-check { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text); cursor: pointer; }
+    .apm-log-wrap { margin-bottom: 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface-2); max-height: 180px; overflow: hidden; }
+    .apm-log-wrap.hidden { display: none; }
+    .apm-log { margin: 0; padding: 10px; font-size: 11px; font-family: var(--mono, monospace); color: var(--text); white-space: pre-wrap; word-break: break-all; max-height: 180px; overflow-y: auto; overflow-x: hidden; }
+    .apm-footer { display: flex; gap: 8px; justify-content: flex-end; padding: 0 18px 16px; }
+    .apm-btn-ghost { padding: 7px 14px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--text); font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit; }
+    .apm-btn-ghost:hover { background: var(--surface-hover); }
+    .apm-btn-primary { padding: 7px 14px; border: none; border-radius: 6px; background: var(--blue); color: #fff; font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit; }
+    .apm-btn-primary:hover:not(:disabled) { opacity: .9; }
+    .apm-btn-primary:disabled { opacity: .5; cursor: not-allowed; }
     .modal {
       position: fixed;
       top: 50%; left: 50%;
@@ -2772,6 +2818,18 @@
       .logs-search-wrap { max-width: 100%; }
     }
 
+    /* Touch devices have no hover, so hover-revealed row actions never appear.
+       Keep the actionable buttons visible (the drag grip is intentionally left
+       hidden — HTML5 drag-and-drop doesn't work on touch; use "Move to" instead). */
+    @media (hover: none) {
+      .smgmt-moveto-pill,
+      .smgmt-reestimate-btn,
+      .smgmt-rename-btn,
+      .smgmt-summary-row-action { opacity: 1; }
+      /* Larger tap target for the per-ticket Move-to pill on touch. */
+      .smgmt-moveto-pill { padding: 5px 12px; font-size: 12px; }
+    }
+
     /* ── Toast notifications (issue #426) ── */
     #toast-container {
       position: fixed;
@@ -3017,7 +3075,7 @@
       </div>
 
       <!-- Add project tile -->
-      <button class="sb-add-tile" onclick="window.location.href='/'" title="Add a new project" aria-label="Add project">
+      <button class="sb-add-tile" onclick="openAddProjectModal()" title="Add a new project" aria-label="Add project">
         <i class="ti ti-plus"></i>
         <span>Add project</span>
       </button>
@@ -3952,6 +4010,173 @@ function buildSidebar(projects, runningBySlug = {}) {
       ${statusHtml}
     </a>`;
   }).join('');
+}
+
+// ========================================================================
+// Add Project modal — CANONICAL JS. Keep BYTE-IDENTICAL with the copy in
+// home-preview.html. Two tabs: "Create new project" (streams init_project.py)
+// and "Add existing repo" (POST /api/projects). Replaced the legacy
+// index.html/app.js modal (issue #425).
+// ========================================================================
+let _apmTab = 'init';
+
+function openAddProjectModal() {
+  document.getElementById('apm-repo').value         = '';
+  document.getElementById('apm-icon').value         = '';
+  document.getElementById('apm-color').value        = '';
+  document.getElementById('apm-name').value         = '';
+  document.getElementById('apm-projects-dir').value = '~/dev';
+  document.getElementById('apm-nested').checked     = false;
+  document.getElementById('apm-skip-uat').checked   = false;
+  _apmClearError('apm-repo');
+  _apmClearError('apm-name');
+  _apmResetLog();
+  document.getElementById('apm-backdrop').classList.remove('hidden');
+  document.getElementById('apm-modal').classList.remove('hidden');
+  apmSwitchTab(_apmTab);
+}
+
+function closeAddProjectModal() {
+  document.getElementById('apm-backdrop').classList.add('hidden');
+  document.getElementById('apm-modal').classList.add('hidden');
+}
+
+function apmSwitchTab(tab) {
+  _apmTab = tab;
+  const init = tab === 'init';
+  document.getElementById('apm-init-form').classList.toggle('hidden', !init);
+  document.getElementById('apm-add-form').classList.toggle('hidden', init);
+  document.getElementById('apm-tab-init').classList.toggle('active', init);
+  document.getElementById('apm-tab-add').classList.toggle('active', !init);
+  document.getElementById('apm-init-submit').classList.toggle('hidden', !init);
+  document.getElementById('apm-add-submit').classList.toggle('hidden', init);
+  document.getElementById(init ? 'apm-name' : 'apm-repo').focus();
+}
+
+function _apmErrId(inputId) { return inputId === 'apm-name' ? 'apm-init-error' : 'apm-repo-error'; }
+
+function _apmClearError(inputId) {
+  const err = document.getElementById(_apmErrId(inputId));
+  const inp = document.getElementById(inputId);
+  if (err) { err.textContent = ''; err.classList.add('hidden'); }
+  if (inp) inp.classList.remove('error');
+}
+
+function _apmShowError(inputId, msg) {
+  const err = document.getElementById(_apmErrId(inputId));
+  const inp = document.getElementById(inputId);
+  if (err) { err.textContent = msg; err.classList.remove('hidden'); }
+  if (inp) inp.classList.add('error');
+}
+
+function _apmResetLog() {
+  const w = document.getElementById('apm-log-wrap');
+  const l = document.getElementById('apm-log');
+  if (w) w.classList.add('hidden');
+  if (l) l.textContent = '';
+}
+
+function _apmAppendLog(line) {
+  const w = document.getElementById('apm-log-wrap');
+  const l = document.getElementById('apm-log');
+  if (w) w.classList.remove('hidden');
+  if (l) { l.textContent += line + '\n'; l.scrollTop = l.scrollHeight; }
+}
+
+function _apmAfterSuccess() {
+  closeAddProjectModal();
+  if (typeof loadHomeData === 'function') loadHomeData(true);
+}
+
+async function apmSubmitAdd(event) {
+  event.preventDefault();
+  _apmClearError('apm-repo');
+
+  const repoUrl = document.getElementById('apm-repo').value.trim();
+  const icon    = document.getElementById('apm-icon').value.trim()  || 'ti-folder';
+  const color   = document.getElementById('apm-color').value.trim() || 'gray';
+
+  if (!repoUrl) { _apmShowError('apm-repo', 'GitHub repo URL is required.'); return; }
+
+  const btn = document.getElementById('apm-add-submit');
+  btn.disabled = true; btn.textContent = 'Adding…';
+  try {
+    const res = await fetch('/api/projects', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ repo_url: repoUrl, icon, color }),
+    });
+    if (res.status === 409) { const d = await res.json().catch(() => ({})); _apmShowError('apm-repo', d.detail || 'Project already added.'); return; }
+    if (res.status === 422) { const d = await res.json().catch(() => ({})); _apmShowError('apm-repo', d.detail || 'Invalid repo or repo not found on GitHub.'); return; }
+    if (!res.ok)            { const d = await res.json().catch(() => ({})); _apmShowError('apm-repo', d.detail || 'Error ' + res.status); return; }
+    _apmAfterSuccess();
+  } catch (e) {
+    _apmShowError('apm-repo', 'Network error: ' + e.message);
+  } finally {
+    btn.disabled = false; btn.textContent = 'Add Project';
+  }
+}
+
+async function apmSubmitInit(event) {
+  event.preventDefault();
+  _apmClearError('apm-name');
+  _apmResetLog();
+
+  const repoName    = document.getElementById('apm-name').value.trim();
+  const projectsDir = document.getElementById('apm-projects-dir').value.trim() || '~/dev';
+  const nested      = document.getElementById('apm-nested').checked;
+  const skipUat     = document.getElementById('apm-skip-uat').checked;
+
+  if (!repoName) { _apmShowError('apm-name', 'Project name is required.'); return; }
+  if (repoName.includes('/') || repoName.includes('\\')) {
+    _apmShowError('apm-name', 'Project name must not contain path separators (/ or \\).');
+    return;
+  }
+
+  const btn = document.getElementById('apm-init-submit');
+  btn.disabled = true; btn.textContent = 'Creating…';
+  try {
+    const res = await fetch('/api/projects/init', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ repo_name: repoName, projects_dir: projectsDir, nested, skip_uat: skipUat }),
+    });
+    if (res.status === 400 || res.status === 409 || res.status === 422) {
+      const d = await res.json().catch(() => ({})); _apmShowError('apm-name', d.detail || 'Error ' + res.status); return;
+    }
+    if (!res.ok) { const d = await res.json().catch(() => ({})); _apmShowError('apm-name', d.detail || 'Server error ' + res.status); return; }
+
+    // Stream the init_project.py SSE log.
+    const reader  = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '', success = false, lastErr = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const chunks = buffer.split('\n\n');
+      buffer = chunks.pop();
+      for (const chunk of chunks) {
+        let eventType = 'log', dataLine = '';
+        for (const l of chunk.split('\n')) {
+          if (l.startsWith('event: ')) eventType = l.slice(7).trim();
+          if (l.startsWith('data: '))  dataLine  = l.slice(6).trim();
+        }
+        if (!dataLine) continue;
+        let payload = dataLine;
+        try { payload = JSON.parse(dataLine); } catch { /* raw */ }
+        if (eventType === 'log')        _apmAppendLog(payload);
+        else if (eventType === 'done')  success = true;
+        else if (eventType === 'error') lastErr = payload;
+      }
+    }
+    if (success) _apmAfterSuccess();
+    else _apmShowError('apm-name', lastErr || 'init_project.py failed. Check the log above.');
+  } catch (e) {
+    _apmShowError('apm-name', 'Network error: ' + e.message);
+  } finally {
+    btn.disabled = false; btn.textContent = 'Create';
+  }
 }
 
 // ── Project header ────────────────────────────────────────────────────────────
@@ -8072,18 +8297,25 @@ function _smgmtMoveToOpen(event, issueNum, fromSprintLabel) {
   popup.classList.remove('hidden');
   popup.setAttribute('aria-label', `Move ticket #${issueNum} to sprint`);
 
-  // Position popup near clicked button
+  // Position popup near clicked button. The popup is position:fixed, so it is
+  // anchored to the viewport — use raw getBoundingClientRect() values and do NOT
+  // add window.scrollX/scrollY (doing so misplaced it whenever the page was
+  // scrolled, which is the common case on mobile).
   const btn = event.currentTarget || event.target;
   const rect = btn.getBoundingClientRect();
   const popupH = 200;
+  const popupW = Math.max(rect.width, 160);
   const spaceBelow = window.innerHeight - rect.bottom;
-  if (spaceBelow < popupH) {
-    popup.style.top  = (rect.top + window.scrollY - popupH) + 'px';
-  } else {
-    popup.style.top  = (rect.bottom + window.scrollY) + 'px';
+  popup.style.top = (spaceBelow < popupH
+    ? Math.max(8, rect.top - popupH)
+    : rect.bottom) + 'px';
+  // Clamp horizontally so the popup never spills off a narrow (mobile) viewport.
+  let left = rect.left;
+  if (left + popupW > window.innerWidth - 8) {
+    left = Math.max(8, window.innerWidth - popupW - 8);
   }
-  popup.style.left     = (rect.left + window.scrollX) + 'px';
-  popup.style.minWidth = Math.max(rect.width, 160) + 'px';
+  popup.style.left     = left + 'px';
+  popup.style.minWidth = popupW + 'px';
 
   // Close on outside click
   setTimeout(() => {
@@ -8729,6 +8961,8 @@ function _setupModals() {
         _nsClose(false);
       } else if (!document.getElementById('nt-modal').classList.contains('hidden')) {
         _ntClose();
+      } else if (!document.getElementById('apm-modal').classList.contains('hidden')) {
+        closeAddProjectModal();
       } else if (_smgmtSelectedIssues.size > 0) {
         // Clear multi-select when Escape pressed and no modal is open
         _smgmtClearSelection();
@@ -10519,6 +10753,63 @@ function _cmpEmptyState(title, msg) {
   <div class="modal-footer">
     <button class="btn-ghost" id="gc-cancel-btn" type="button" onclick="_gcClose()">Cancel</button>
     <button class="btn-blue" id="gc-confirm-btn" type="button">Create sprint-1 &amp; move</button>
+  </div>
+</div>
+
+<!-- ====================================================================== -->
+<!-- Add Project modal — CANONICAL markup. Keep BYTE-IDENTICAL with the copy -->
+<!-- in home-preview.html. Replaced the legacy index.html modal (issue #425). -->
+<!-- ====================================================================== -->
+<div class="apm-backdrop hidden" id="apm-backdrop" onclick="closeAddProjectModal()"></div>
+<div class="apm-modal hidden" id="apm-modal" role="dialog" aria-modal="true" aria-labelledby="apm-title">
+  <div class="apm-header">
+    <span class="apm-title" id="apm-title">New Project</span>
+    <button class="apm-close" onclick="closeAddProjectModal()" aria-label="Close">&times;</button>
+  </div>
+  <div class="apm-tabs">
+    <button class="apm-tab active" id="apm-tab-init" onclick="apmSwitchTab('init')">Create new project</button>
+    <button class="apm-tab" id="apm-tab-add" onclick="apmSwitchTab('add')">Add existing repo</button>
+  </div>
+
+  <!-- Create new project (runs init_project.py, streams its log) -->
+  <form id="apm-init-form" class="apm-body" onsubmit="apmSubmitInit(event)">
+    <div class="apm-field">
+      <label class="apm-label" for="apm-name">Project name <span class="apm-req">*</span></label>
+      <input class="apm-input" id="apm-name" type="text" placeholder="my-app" autocomplete="off">
+      <div class="apm-error hidden" id="apm-init-error"></div>
+    </div>
+    <div class="apm-field">
+      <label class="apm-label" for="apm-projects-dir">Projects directory <span class="apm-req">*</span></label>
+      <input class="apm-input" id="apm-projects-dir" type="text" placeholder="~/dev" value="~/dev" autocomplete="off">
+    </div>
+    <div class="apm-field apm-checks">
+      <label class="apm-check"><input type="checkbox" id="apm-nested"> Nested layout (--nested)</label>
+      <label class="apm-check"><input type="checkbox" id="apm-skip-uat"> Skip UAT clone (--skip-uat)</label>
+    </div>
+    <div class="apm-log-wrap hidden" id="apm-log-wrap"><pre class="apm-log" id="apm-log"></pre></div>
+  </form>
+
+  <!-- Add existing repo (POST /api/projects) -->
+  <form id="apm-add-form" class="apm-body hidden" onsubmit="apmSubmitAdd(event)">
+    <div class="apm-field">
+      <label class="apm-label" for="apm-repo">GitHub Repo URL <span class="apm-req">*</span></label>
+      <input class="apm-input" id="apm-repo" type="text" placeholder="https://github.com/owner/repo" autocomplete="off">
+      <div class="apm-error hidden" id="apm-repo-error"></div>
+    </div>
+    <div class="apm-field">
+      <label class="apm-label" for="apm-icon">Icon <span class="apm-hint">(Tabler icon class, default: ti-folder)</span></label>
+      <input class="apm-input" id="apm-icon" type="text" placeholder="ti-folder">
+    </div>
+    <div class="apm-field">
+      <label class="apm-label" for="apm-color">Color <span class="apm-hint">(blue, green, purple, amber, red, pink, cyan, gray)</span></label>
+      <input class="apm-input" id="apm-color" type="text" placeholder="gray">
+    </div>
+  </form>
+
+  <div class="apm-footer">
+    <button type="button" class="apm-btn-ghost" onclick="closeAddProjectModal()">Cancel</button>
+    <button type="submit" class="apm-btn-primary" id="apm-init-submit" form="apm-init-form">Create</button>
+    <button type="submit" class="apm-btn-primary hidden" id="apm-add-submit" form="apm-add-form">Add Project</button>
   </div>
 </div>
 

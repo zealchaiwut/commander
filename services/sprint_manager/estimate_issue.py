@@ -111,8 +111,12 @@ _ESTIMATOR_MAX_RETRIES = 3
 _ESTIMATOR_RETRY_DELAYS = [2, 4, 8]  # exponential backoff seconds before retry attempts 2, 3, 4
 
 
-def run_estimator(issue_num: int, issue_data: dict) -> Optional[dict]:
-    """Invoke the estimator agent via `claude -p` and return parsed JSON.
+def run_estimator(issue_num: int, issue_data: dict) -> tuple[Optional[dict], Optional[str]]:
+    """Invoke the estimator agent via `claude -p` and return (result, error_type).
+
+    On success returns (parsed_dict, None).
+    On failure returns (None, error_type) where error_type is one of:
+      "network_error", "model_error", "parse_error", "missing_claude".
 
     Retries up to _ESTIMATOR_MAX_RETRIES times on network errors, model errors
     (non-zero exit), and parse errors.  Delays follow exponential backoff
@@ -169,7 +173,7 @@ Output ONLY the JSON object. No other text."""
             )
         except FileNotFoundError:
             print("Error: claude CLI not found in PATH", file=sys.stderr)
-            return None
+            return None, "missing_claude"
 
         if error_type is None:
             if result.returncode != 0:
@@ -194,7 +198,7 @@ Output ONLY the JSON object. No other text."""
                     if "minutes" not in parsed or not isinstance(parsed.get("minutes"), int):
                         parsed["minutes"] = _minutes_from_letter(size_val)
                     parsed["body_hash"] = hashlib.sha256(body.encode()).hexdigest()
-                    return parsed
+                    return parsed, None
 
         # error_type is set — decide whether to retry or fail.
         retries_used = attempt - 1
@@ -232,7 +236,7 @@ Output ONLY the JSON object. No other text."""
                 file=sys.stderr,
             )
 
-    return None
+    return None, error_type
 
 
 def post_comment(issue_num: int, repo: str, estimate: dict) -> None:
@@ -396,7 +400,7 @@ def main() -> None:
         sys.exit(1)
 
     print(f"Running estimator (Haiku 4.5) for #{args.issue} ...")
-    estimate = run_estimator(args.issue, issue_data)
+    estimate, _ = run_estimator(args.issue, issue_data)
     if not estimate:
         sys.exit(1)
 

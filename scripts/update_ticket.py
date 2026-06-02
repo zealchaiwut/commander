@@ -99,7 +99,18 @@ def main():
         sys.exit(1)
 
     target_state = STATUS_TO_STATE[args.status]
+
+    _RUN_MUTABLE_STATES = frozenset({
+        TicketState.IN_PROGRESS, TicketState.SIT, TicketState.UAT, TicketState.NEEDS_REWORK,
+    })
+
     try:
+        if sprint_label := os.environ.get("COMMANDER_SPRINT_RUNNING"):
+            if target_state not in _RUN_MUTABLE_STATES:
+                raise ValueError(
+                    f"Cannot transition to {target_state} during sprint run "
+                    f"({sprint_label!r}); outside RUN_MUTABLE_LABELS"
+                )
         changed = transition(
             args.issue,
             target_state,
@@ -110,6 +121,9 @@ def main():
             print(f"transition: #{args.issue} → {args.status}")
         else:
             print(f"transition: #{args.issue} already in {args.status} (no-op)")
+    except ValueError as e:
+        print(f"transition blocked: {e}", file=sys.stderr)
+        sys.exit(1)
     except TransitionError as e:
         print(f"transition failed: {e}", file=sys.stderr)
         sys.exit(1)

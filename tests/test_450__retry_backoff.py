@@ -68,10 +68,11 @@ def test_success_first_attempt():
          patch("services.sprint_manager.estimate_issue.load_agent_instructions", return_value=""), \
          patch("services.sprint_manager.estimate_issue.time") as mock_time:
         mock_run.return_value = _ok()
-        result = run_estimator(1, _ISSUE_DATA)
+        estimate, error_type = run_estimator(1, _ISSUE_DATA)
 
-    assert result is not None
-    assert result["size"] == "S"
+    assert estimate is not None
+    assert error_type is None
+    assert estimate["size"] == "S"
     assert mock_run.call_count == 1
     mock_time.sleep.assert_not_called()
 
@@ -83,9 +84,10 @@ def test_success_second_attempt_model_error():
          patch("services.sprint_manager.estimate_issue.load_agent_instructions", return_value=""), \
          patch("services.sprint_manager.estimate_issue.time") as mock_time:
         mock_run.side_effect = [_fail(), _ok()]
-        result = run_estimator(1, _ISSUE_DATA)
+        estimate, error_type = run_estimator(1, _ISSUE_DATA)
 
-    assert result is not None
+    assert estimate is not None
+    assert error_type is None
     assert mock_run.call_count == 2
     mock_time.sleep.assert_called_once_with(2)
 
@@ -95,9 +97,10 @@ def test_success_second_attempt_parse_error():
          patch("services.sprint_manager.estimate_issue.load_agent_instructions", return_value=""), \
          patch("services.sprint_manager.estimate_issue.time") as mock_time:
         mock_run.side_effect = [_parse_fail(), _ok()]
-        result = run_estimator(1, _ISSUE_DATA)
+        estimate, error_type = run_estimator(1, _ISSUE_DATA)
 
-    assert result is not None
+    assert estimate is not None
+    assert error_type is None
     assert mock_run.call_count == 2
     mock_time.sleep.assert_called_once_with(2)
 
@@ -107,9 +110,10 @@ def test_success_second_attempt_network_error():
          patch("services.sprint_manager.estimate_issue.load_agent_instructions", return_value=""), \
          patch("services.sprint_manager.estimate_issue.time") as mock_time:
         mock_run.side_effect = [subprocess.TimeoutExpired(cmd="claude", timeout=180), _ok()]
-        result = run_estimator(1, _ISSUE_DATA)
+        estimate, error_type = run_estimator(1, _ISSUE_DATA)
 
-    assert result is not None
+    assert estimate is not None
+    assert error_type is None
     assert mock_run.call_count == 2
     mock_time.sleep.assert_called_once_with(2)
 
@@ -121,9 +125,10 @@ def test_all_retries_exhausted_model_error():
          patch("services.sprint_manager.estimate_issue.load_agent_instructions", return_value=""), \
          patch("services.sprint_manager.estimate_issue.time") as mock_time:
         mock_run.return_value = _fail()
-        result = run_estimator(1, _ISSUE_DATA)
+        estimate, error_type = run_estimator(1, _ISSUE_DATA)
 
-    assert result is None
+    assert estimate is None
+    assert error_type == "model_error"
     assert mock_run.call_count == 4  # 1 initial + 3 retries
     assert mock_time.sleep.call_count == 3
     mock_time.sleep.assert_any_call(2)
@@ -136,9 +141,10 @@ def test_all_retries_exhausted_parse_error():
          patch("services.sprint_manager.estimate_issue.load_agent_instructions", return_value=""), \
          patch("services.sprint_manager.estimate_issue.time") as mock_time:
         mock_run.return_value = _parse_fail()
-        result = run_estimator(1, _ISSUE_DATA)
+        estimate, error_type = run_estimator(1, _ISSUE_DATA)
 
-    assert result is None
+    assert estimate is None
+    assert error_type == "parse_error"
     assert mock_run.call_count == 4
     assert mock_time.sleep.call_args_list == [call(2), call(4), call(8)]
 
@@ -148,9 +154,10 @@ def test_all_retries_exhausted_network_error():
          patch("services.sprint_manager.estimate_issue.load_agent_instructions", return_value=""), \
          patch("services.sprint_manager.estimate_issue.time") as mock_time:
         mock_run.side_effect = subprocess.TimeoutExpired(cmd="claude", timeout=180)
-        result = run_estimator(1, _ISSUE_DATA)
+        estimate, error_type = run_estimator(1, _ISSUE_DATA)
 
-    assert result is None
+    assert estimate is None
+    assert error_type == "network_error"
     assert mock_run.call_count == 4
     assert mock_time.sleep.call_args_list == [call(2), call(4), call(8)]
 

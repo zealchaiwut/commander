@@ -76,10 +76,11 @@ def test_run_estimator_normalizes_missing_files_touched():
     with patch("services.sprint_manager.estimate_issue.subprocess.run") as mock_run, \
          patch("services.sprint_manager.estimate_issue.load_agent_instructions", return_value=""):
         mock_run.return_value = _mock_completed_process(json.dumps(payload))
-        result = run_estimator(1, issue_data)
+        estimate, error_type = run_estimator(1, issue_data)
 
-    assert result is not None
-    assert result["files_touched"] == []
+    assert estimate is not None
+    assert error_type is None
+    assert estimate["files_touched"] == []
 
 
 def test_run_estimator_preserves_files_touched_when_present():
@@ -101,10 +102,11 @@ def test_run_estimator_preserves_files_touched_when_present():
     with patch("services.sprint_manager.estimate_issue.subprocess.run") as mock_run, \
          patch("services.sprint_manager.estimate_issue.load_agent_instructions", return_value=""):
         mock_run.return_value = _mock_completed_process(json.dumps(payload))
-        result = run_estimator(1, issue_data)
+        estimate, error_type = run_estimator(1, issue_data)
 
-    assert result is not None
-    assert result["files_touched"] == expected_files
+    assert estimate is not None
+    assert error_type is None
+    assert estimate["files_touched"] == expected_files
 
 
 def test_run_estimator_normalizes_empty_files_touched():
@@ -125,7 +127,8 @@ def test_run_estimator_normalizes_empty_files_touched():
     with patch("services.sprint_manager.estimate_issue.subprocess.run") as mock_run, \
          patch("services.sprint_manager.estimate_issue.load_agent_instructions", return_value=""):
         mock_run.return_value = _mock_completed_process(json.dumps(payload))
-        result = run_estimator(1, issue_data)
+        estimate, error_type = run_estimator(1, issue_data)
 
-    assert result is not None
-    assert result["files_touched"] == []
+    assert estimate is not None
+    assert error_type is None
+    assert estimate["files_touched"] == []

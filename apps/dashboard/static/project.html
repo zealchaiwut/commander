@@ -1850,6 +1850,27 @@
     .smgmt-moveto-option:hover { background: var(--surface-hover); }
     .smgmt-moveto-option.is-backlog { color: var(--text-muted); }
     .smgmt-moveto-divider { border: none; border-top: 1px solid var(--border); margin: 4px 0; }
+    /* Ticket row context menu (issue #500) */
+    .smgmt-ctx-menu {
+      position: fixed;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      box-shadow: 0 4px 16px rgba(0,0,0,.12);
+      z-index: 450;
+      min-width: 160px;
+      padding: 4px 0;
+    }
+    .smgmt-ctx-menu.hidden { display: none; }
+    .smgmt-ctx-menu-option {
+      display: block; width: 100%;
+      text-align: left; padding: 7px 14px;
+      font-size: 13px;
+      background: none; border: none;
+      color: var(--text); cursor: pointer;
+      font-family: inherit;
+    }
+    .smgmt-ctx-menu-option:hover { background: var(--surface-hover); }
 
     /* ── Per-row ≡ actions menu (issue #275 follow-up) ── */
     .smgmt-row-menu-btn {
@@ -3112,6 +3133,20 @@
       display: flex; align-items: center; justify-content: center;
       height: 180px; color: var(--text-sub); font-size: 13px;
     }
+    .metrics-fallback-table {
+      width: 100%; border-collapse: collapse; font-size: 12px;
+      color: var(--text); font-family: var(--mono);
+    }
+    .metrics-fallback-table th {
+      text-align: left; padding: 6px 10px;
+      border-bottom: 1px solid var(--border);
+      color: var(--text-sub); font-weight: 600; text-transform: uppercase;
+      letter-spacing: .04em; font-size: 11px;
+    }
+    .metrics-fallback-table td {
+      padding: 6px 10px; border-bottom: 1px solid var(--border);
+    }
+    .metrics-fallback-table tr:last-child td { border-bottom: none; }
     @media (max-width: 900px) {
       .metrics-grid { grid-template-columns: 1fr; }
     }
@@ -3427,6 +3462,9 @@
         <!-- "Move to" popup (shared for backlog and sprint tickets) -->
         <div class="smgmt-moveto-popup hidden" id="smgmt-moveto-popup" role="listbox" aria-label="Move to sprint">
         </div>
+
+        <!-- Ticket row context menu (issue #500) -->
+        <div class="smgmt-ctx-menu hidden" id="smgmt-ctx-menu" role="menu"></div>
 
       </div>
 
@@ -3965,7 +4003,13 @@ function _gsNavigate(url) {
   if (!win) {
     showToast('Popup blocked. Copy the link to open it manually.', 'warning', {
       label: 'Copy link',
-      handler: function () { navigator.clipboard.writeText(url); }
+      handler: function () {
+        navigator.clipboard.writeText(url).then(function () {
+          showToast('Link copied to clipboard.', 'success');
+        }).catch(function () {
+          showToast('Clipboard unavailable. Copy manually: ' + url, 'error');
+        });
+      }
     });
   }
   _gsClose();
@@ -6874,7 +6918,8 @@ function _smgmtTicketRowHtml(ticket, label) {
          ondragend="_smgmtTicketDragEnd(event)"
          ondragover="_smgmtTicketReorderDragOver(event)"
          ondragleave="_smgmtTicketReorderDragLeave(event)"
-         ondrop="_smgmtTicketReorderDrop(event, ${ticket.number}, '${escHtml(label)}')">
+         ondrop="_smgmtTicketReorderDrop(event, ${ticket.number}, '${escHtml(label)}')"
+         oncontextmenu="_smgmtCtxMenuOpen(event,${ticket.number})">
       <input type="checkbox" class="smgmt-ticket-cb"
              ${isSelected ? 'checked' : ''}
              onclick="event.stopPropagation()"
@@ -6900,11 +6945,16 @@ async function _smgmtRetryEstimation(issueNum, btn) {
   const row = document.getElementById(`smgmt-ticket-${issueNum}`);
   if (!row || row.querySelector('.smgmt-retry-spinner')) return;
 
+  const repo = _smgmtRepo();
+  if (!repo) {
+    _smgmtShowToast('No repo configured — cannot estimate');
+    return;
+  }
+
   const spinner = document.createElement('span');
   spinner.className = 'smgmt-retry-spinner';
   btn.replaceWith(spinner);
 
-  const repo = _smgmtRepo() || '';
   try {
     const resp = await fetch(
       `/api/issues/${issueNum}/estimate?repo=${encodeURIComponent(repo)}`,
@@ -7035,6 +7085,57 @@ async function _smgmtReEstimateRun(issueNum, rowBtn) {
     if (tdpBtn) { tdpBtn.disabled = false; tdpBtn.textContent = 'Re-estimate'; }
     _smgmtShowToast(`Re-estimate failed: ${err.message}`);
   }
+}
+
+// ── Ticket row context menu (issue #500) ──────────────────────────────────
+let _ctxMenuIssueNum = null;
+
+function _smgmtCtxMenuOpen(event, issueNum) {
+  const row = document.getElementById(`smgmt-ticket-${issueNum}`);
+  const hasEstimate = row
+    ? row.querySelector('.smgmt-ticket-size-pill') !== null
+    : _tdpTickets.some(t => t.number === issueNum && (t.labels || []).some(l => /^size-[SMLX]+$/.test(l.name)));
+  if (!hasEstimate) return;
+
+  event.preventDefault();
+  event.stopPropagation();
+
+  const menu = document.getElementById('smgmt-ctx-menu');
+  if (!menu) return;
+
+  _ctxMenuIssueNum = issueNum;
+
+  menu.innerHTML = `<button class="smgmt-ctx-menu-option"
+    onclick="_smgmtCtxMenuClose();_smgmtReEstimate(${issueNum})">Re-estimate</button>`;
+  menu.classList.remove('hidden');
+
+  const menuW = 160;
+  const menuH = 38;
+  let left = event.clientX + window.scrollX;
+  let top  = event.clientY + window.scrollY;
+  if (event.clientX + menuW > window.innerWidth)  left = event.clientX + window.scrollX - menuW;
+  if (event.clientY + menuH > window.innerHeight) top  = event.clientY + window.scrollY - menuH;
+  menu.style.left = left + 'px';
+  menu.style.top  = top  + 'px';
+
+  setTimeout(() => {
+    document.addEventListener('click',       _smgmtCtxMenuOutsideHandler);
+    document.addEventListener('contextmenu', _smgmtCtxMenuOutsideHandler);
+  }, 0);
+}
+
+function _smgmtCtxMenuOutsideHandler(event) {
+  const menu = document.getElementById('smgmt-ctx-menu');
+  if (!menu || menu.contains(event.target)) return;
+  _smgmtCtxMenuClose();
+}
+
+function _smgmtCtxMenuClose() {
+  const menu = document.getElementById('smgmt-ctx-menu');
+  if (menu) menu.classList.add('hidden');
+  _ctxMenuIssueNum = null;
+  document.removeEventListener('click',       _smgmtCtxMenuOutsideHandler);
+  document.removeEventListener('contextmenu', _smgmtCtxMenuOutsideHandler);
 }
 
 // ── Sprint action handlers ─────────────────────────────────────────────────
@@ -8523,7 +8624,8 @@ function _smgmtBacklogTicketHtml(ticket, sprintNums) {
          data-issue="${ticket.number}"
          data-sprint=""
          ondragstart="_smgmtBacklogTicketDragStart(event, ${ticket.number})"
-         ondragend="_smgmtTicketDragEnd(event)">
+         ondragend="_smgmtTicketDragEnd(event)"
+         oncontextmenu="_smgmtCtxMenuOpen(event,${ticket.number})">
       <input type="checkbox" class="smgmt-ticket-cb"
              ${isSelected ? 'checked' : ''}
              onclick="event.stopPropagation()"
@@ -12096,15 +12198,66 @@ function _cmpEmptyState(title, msg) {
   let _metricsData = null;
   const _charts = {};
 
-  function _loadChartJs(cb) {
+  function _loadChartJs(cb, fallback) {
     if (window.Chart) { cb(); return; }
-    const s = document.createElement('script');
-    s.src = 'https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js';
-    s.onload = cb;
-    s.onerror = function () {
-      ['velocity', 'failure', 'duration'].forEach(k => _showMsg(k, 'Failed to load Chart.js'));
-    };
-    document.head.appendChild(s);
+    const cdns = [
+      'https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js',
+      'https://unpkg.com/chart.js@4.4.7/dist/chart.umd.min.js',
+    ];
+    function tryLoad(idx) {
+      if (idx >= cdns.length) { fallback(); return; }
+      const s = document.createElement('script');
+      s.src = cdns[idx];
+      s.onload = cb;
+      s.onerror = function () { tryLoad(idx + 1); };
+      document.head.appendChild(s);
+    }
+    tryLoad(0);
+  }
+
+  function _tableVelocity(data) {
+    if (!data.length) { _showMsg('velocity', 'No data available'); return; }
+    const w = document.getElementById('metrics-velocity-wrap');
+    if (!w) return;
+    const rows = data.map(d =>
+      '<tr><td>' + escHtml(d.sprint_label) + '</td><td>' + (d.ticket_outcomes_breakdown.done || 0) + '</td></tr>'
+    ).join('');
+    w.innerHTML = '<table class="metrics-fallback-table"><thead><tr><th>Sprint</th><th>Tickets done</th></tr></thead><tbody>' + rows + '</tbody></table>';
+  }
+
+  function _tableFailure(data) {
+    if (!data.length) { _showMsg('failure', 'No data available'); return; }
+    const w = document.getElementById('metrics-failure-wrap');
+    if (!w) return;
+    const rows = data.map(d => {
+      const total = d.ticket_count || 0;
+      const failed = d.ticket_outcomes_breakdown.failed || 0;
+      const pct = total > 0 ? Math.round((failed / total) * 1000) / 10 : 0;
+      return '<tr><td>' + escHtml(d.sprint_label) + '</td><td>' + total + '</td><td>' + failed + '</td><td>' + pct + '%</td></tr>';
+    }).join('');
+    w.innerHTML = '<table class="metrics-fallback-table"><thead><tr><th>Sprint</th><th>Total</th><th>Failed</th><th>Failure rate</th></tr></thead><tbody>' + rows + '</tbody></table>';
+  }
+
+  function _tableDuration(data) {
+    if (!data.length) { _showMsg('duration', 'No data available'); return; }
+    const w = document.getElementById('metrics-duration-wrap');
+    if (!w) return;
+    const roles = ['coder', 'tester', 'reviewer', 'documenter'];
+    const roleLabels = ['Coder', 'Tester', 'Reviewer', 'Documenter'];
+    const rows = roles.map((role, i) => {
+      const active = data.filter(d => (d.agent_dispatch_counts[role] || 0) > 0);
+      if (!active.length) return '<tr><td>' + roleLabels[i] + '</td><td>—</td></tr>';
+      const sum = active.reduce((acc, d) => acc + d.duration_minutes / Math.max(1, d.ticket_count), 0);
+      const avg = Math.round((sum / active.length) * 10) / 10;
+      return '<tr><td>' + roleLabels[i] + '</td><td>' + avg + ' min/ticket</td></tr>';
+    }).join('');
+    w.innerHTML = '<table class="metrics-fallback-table"><thead><tr><th>Role</th><th>Avg min/ticket</th></tr></thead><tbody>' + rows + '</tbody></table>';
+  }
+
+  function _tableFallback(data) {
+    _tableVelocity(data);
+    _tableFailure(data);
+    _tableDuration(data);
   }
 
   function _colors() {
@@ -12232,7 +12385,7 @@ function _cmpEmptyState(title, msg) {
 
   window.metricsInit = async function () {
     if (_metricsLoaded && _metricsData !== null) {
-      _loadChartJs(() => _renderAll(_metricsData));
+      _loadChartJs(() => _renderAll(_metricsData), () => _tableFallback(_metricsData));
       return;
     }
 
@@ -12251,7 +12404,7 @@ function _cmpEmptyState(title, msg) {
       return;
     }
     _metricsLoaded = true;
-    _loadChartJs(() => _renderAll(_metricsData));
+    _loadChartJs(() => _renderAll(_metricsData), () => _tableFallback(_metricsData));
   };
 }());
 </script>

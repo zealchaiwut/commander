@@ -1373,11 +1373,18 @@ def estimate_issue_on_demand(request: Request, issue_id: int, repo: str):
     try:
         issue_data = _ei_fetch_issue(issue_id, repo)
     except subprocess.CalledProcessError as e:
-        raise HTTPException(404, detail=f"Could not fetch issue #{issue_id}: {e}")
+        stderr = (e.stderr or "").strip()
+        detail = f"Could not fetch issue #{issue_id}: {e}"
+        if stderr:
+            detail += f" — stderr: {stderr}"
+        raise HTTPException(404, detail=detail)
 
-    estimate = _ei_run_estimator(issue_id, issue_data)
+    estimate, error_type = _ei_run_estimator(issue_id, issue_data)
     if estimate is None:
-        raise HTTPException(500, detail=f"Estimation failed for #{issue_id}")
+        raise HTTPException(
+            500,
+            detail={"message": f"Estimation failed for #{issue_id}", "error_type": error_type},
+        )
 
     size = estimate.get("size")
     if not size:
@@ -1390,7 +1397,11 @@ def estimate_issue_on_demand(request: Request, issue_id: int, repo: str):
     try:
         _ei_apply_label(issue_id, repo, size)
     except subprocess.CalledProcessError as e:
-        raise HTTPException(500, detail=f"Failed to apply size label: {e}")
+        stderr = (e.stderr or "").strip()
+        detail = f"Failed to apply size label: {e}"
+        if stderr:
+            detail += f" — stderr: {stderr}"
+        raise HTTPException(500, detail=detail)
 
     _ei_apply_estimated_status(issue_id, repo)
 

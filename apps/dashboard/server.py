@@ -8228,6 +8228,8 @@ async def bulk_redraft_ticket(job_id: str, body: BulkRedraftBody):
 class BulkPostSelectedItem(BaseModel):
     index: int
     labels: list[str] = []
+    title: str | None = None  # override drafted title (issue #526)
+    body: str | None = None   # override drafted body (issue #526)
 
 
 class BulkPostSelectedBody(BaseModel):
@@ -8270,6 +8272,14 @@ async def bulk_post_selected(job_id: str, body: BulkPostSelectedBody):
             labels = ["backlog"] + [lbl for lbl in item.labels if lbl]
             t = job["tickets"][idx]
             issue_repo = job.get("repo") or None
+
+            # Apply user edits from the frontend (issue #526)
+            if item.title is not None:
+                stripped_title = item.title.strip()
+                if stripped_title:
+                    t["title"] = stripped_title
+            if item.body is not None:
+                t["body"] = item.body
 
             t["state"] = "drafting"
             _persist_bulk_job(job)

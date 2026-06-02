@@ -2366,6 +2366,24 @@
     }
     .bc-ticket-label-input:focus { border-color: var(--blue); }
 
+    /* Draft-ready inline editing (issue #526) */
+    .bc-draft-check-wrap { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+    .bc-draft-check { cursor: pointer; flex-shrink: 0; width: 14px; height: 14px; }
+    .bc-draft-edit-title {
+      width: 100%; font-size: 12px; color: var(--text); font-weight: 600;
+      background: var(--surface); border: 1px solid var(--border); border-radius: 4px;
+      padding: 4px 7px; margin-top: 2px; box-sizing: border-box;
+    }
+    .bc-draft-edit-title:focus { border-color: var(--blue); outline: none; }
+    .bc-draft-title-err { font-size: 10px; color: var(--red); margin-top: 2px; }
+    .bc-draft-edit-body {
+      width: 100%; font-size: 11px; color: var(--text);
+      background: var(--surface); border: 1px solid var(--border); border-radius: 4px;
+      padding: 4px 7px; margin-top: 4px; box-sizing: border-box;
+      resize: vertical; min-height: 80px; font-family: inherit; line-height: 1.4;
+    }
+    .bc-draft-edit-body:focus { border-color: var(--blue); outline: none; }
+
     /* Review overlay (issue #374) */
     .bc-review-overlay {
       position: absolute; inset: 0; z-index: 10;
@@ -9786,6 +9804,7 @@ let _bcFileAssignments  = [];    // parallel to _bcFiles: "all" | ticket_index (
 let _bcRetryFiles       = {};    // ticket_index -> File for retry image attach
 let _bcLastInput    = null;      // preserved Step 1 inputs for Recreate
 let _bcTabInited    = false;     // whether the tab has been populated once
+let _bcDraftSelections = new Set(); // indices of draft_ready tickets checked for posting
 
 const BC_MAX_PROMPTS = 25;
 
@@ -10057,6 +10076,7 @@ async function bcRunAll() {
 
     _bcStartTimes = {};
     _bcAvgMs = null;
+    _bcDraftSelections = new Set();
 
     _bcShowStep(2);
     _bcConnectSSE(_bcJobId);
@@ -10085,6 +10105,10 @@ function _bcUpdateBadge() {
   if (job.status === 'running') {
     badge.className = 'bc-tab-badge';
     badge.innerHTML = `<span class="bc-tab-badge-spin">&#x27F3;</span>${fullyDone}/${total}`;
+  } else if (job.status === 'drafts_ready') {
+    const draftCount = tickets.filter(t => t.state === 'draft_ready').length;
+    badge.className = 'bc-tab-badge';
+    badge.textContent = `${draftCount} ready`;
   } else if (job.status === 'done' || job.status === 'stopped') {
     const issues = failed + sizeWarn + estimateFailed;
     if (issues > 0) {
@@ -10117,6 +10141,10 @@ function _bcConnectSSE(jobId) {
       const event = JSON.parse(e.data);
       if (event.type === 'ticket_update' && _bcJobState) {
         _bcJobState.tickets[event.ticket.index] = event.ticket;
+        _bcRenderStep2();
+        _bcUpdateBadge();
+      } else if (event.type === 'job_drafts_ready' && _bcJobState) {
+        _bcJobState.status = 'drafts_ready';
         _bcRenderStep2();
         _bcUpdateBadge();
       } else if (event.type === 'job_done' && _bcJobState) {
@@ -10160,6 +10188,9 @@ function _bcRenderStep2() {
       banner.innerHTML = `BA is drafting ${total} tickets in parallel — ` +
         `${sized + estimateFailed} done, ${drafting + estimating + created} running, ${pending} queued` +
         `<span class="bc-concurrency-pill">concurrency: ${concurrency}</span>`;
+    } else if (job.status === 'drafts_ready') {
+      const draftCount = tickets.filter(t => t.state === 'draft_ready').length;
+      banner.innerHTML = `${draftCount} draft${draftCount !== 1 ? 's' : ''} ready — edit title and body, then post to GitHub.`;
     } else if (job.status === 'done') {
       if (sizeWarning > 0) {
         banner.innerHTML = `All tickets processed. ${sizeWarning} ticket${sizeWarning > 1 ? 's' : ''} need size remediation.`;
@@ -10206,27 +10237,50 @@ function _bcRenderStep2() {
           t.body = editor.value;
         }
       }
+      if (t.state === 'draft_ready') {
+        const titleEl = document.getElementById(`bc-draft-title-${t.index}`);
+        const bodyEl  = document.getElementById(`bc-draft-body-${t.index}`);
+        if (titleEl) t.title = titleEl.value;
+        if (bodyEl)  t.body  = bodyEl.value;
+        // Auto-select newly drafted tickets
+        if (!_bcDraftSelections.has(t.index)) _bcDraftSelections.add(t.index);
+      }
     });
     list.innerHTML = tickets.map(t => _bcRenderCard(t)).join('');
   }
 
   // Footer buttons
-  const stopBtn      = document.getElementById('bc-stop-btn');
-  const doneBtn      = document.getElementById('bc-done-btn');
-  const recreateBtn  = document.getElementById('bc-recreate-btn');
-  const retryAllBtn  = document.getElementById('bc-retry-all-btn');
+  const stopBtn       = document.getElementById('bc-stop-btn');
+  const doneBtn       = document.getElementById('bc-done-btn');
+  const recreateBtn   = document.getElementById('bc-recreate-btn');
+  const retryAllBtn   = document.getElementById('bc-retry-all-btn');
+  const reviewPostBtn = document.getElementById('bc-review-post-btn');
   if (stopBtn && doneBtn) {
     if (job.status === 'running') {
       stopBtn.disabled = false;
       doneBtn.disabled = true;
       doneBtn.textContent = 'Running...';
+      if (recreateBtn)   recreateBtn.classList.add('hidden');
+      if (reviewPostBtn) reviewPostBtn.classList.add('hidden');
+    } else if (job.status === 'drafts_ready') {
+      stopBtn.disabled = true;
+      doneBtn.disabled = true;
+      doneBtn.textContent = 'Running...';
       if (recreateBtn) recreateBtn.classList.add('hidden');
+      if (reviewPostBtn) {
+        const draftReadyTickets = tickets.filter(t => t.state === 'draft_ready');
+        const selCount = draftReadyTickets.filter(t => _bcDraftSelections.has(t.index)).length;
+        reviewPostBtn.textContent = selCount > 0 ? `Post to GitHub (${selCount})` : 'Post to GitHub';
+        reviewPostBtn.disabled = selCount === 0;
+        reviewPostBtn.classList.remove('hidden');
+      }
     } else {
       stopBtn.disabled = true;
       doneBtn.disabled = false;
       doneBtn.textContent = 'Done';
       doneBtn.onclick = () => { _bcShowStep(1); };
-      if (recreateBtn) recreateBtn.classList.remove('hidden');
+      if (recreateBtn)   recreateBtn.classList.remove('hidden');
+      if (reviewPostBtn) reviewPostBtn.classList.add('hidden');
     }
   }
   if (retryAllBtn) {
@@ -10397,6 +10451,26 @@ function _bcRenderCard(t) {
               <button class="bc-btn-skip-this" onclick="bcSkipTicket(${t.index})">Skip</button>
             </div>
           </div>
+        </div>
+      </div>`;
+  } else if (t.state === 'draft_ready') {
+    const titleVal  = t.title || '';
+    const bodyVal   = t.body  || '';
+    const isChecked = _bcDraftSelections.has(t.index) ? 'checked' : '';
+    return `
+      <div class="bc-card bc-card--draft_ready" id="bc-card-${t.index}">
+        <div class="bc-status-dot bc-status-dot--draft_ready"></div>
+        <div class="bc-card-body" style="min-width:0;flex:1;">
+          <div class="bc-draft-check-wrap">
+            <input type="checkbox" class="bc-draft-check" id="bc-check-${t.index}" ${isChecked}
+                   onchange="_bcDraftCheckChange(${t.index}, this.checked)">
+            <span class="bc-card-label bc-card-label--draft">Draft ready</span>
+          </div>
+          <input class="bc-draft-edit-title" id="bc-draft-title-${t.index}" type="text"
+                 value="${escHtml(titleVal)}" placeholder="Title (required)" tabindex="0">
+          <div class="bc-draft-title-err hidden" id="bc-draft-title-err-${t.index}">Title is required</div>
+          <textarea class="bc-draft-edit-body" id="bc-draft-body-${t.index}"
+                    tabindex="0">${escHtml(bodyVal)}</textarea>
         </div>
       </div>`;
   } else if (t.state === 'skipped') {
@@ -10605,6 +10679,7 @@ function bcRecreate() {
   localStorage.removeItem('bc_job_id');
   _bcJobId = null;
   _bcJobState = null;
+  _bcDraftSelections = new Set();
   _bcStartTimes = {};
   _bcAvgMs = null;
   _bcUpdateBadge();
@@ -10634,6 +10709,131 @@ function bcRecreate() {
   const errEl = document.getElementById('bc-step1-error');
   if (errEl) errEl.classList.add('hidden');
   _bcUpdateCounter();
+}
+
+// ── Draft-ready inline editing helpers (issue #526) ──────────────────────────
+
+function _bcDraftCheckChange(index, checked) {
+  if (checked) _bcDraftSelections.add(index);
+  else _bcDraftSelections.delete(index);
+  // Keep the Post button count in sync
+  const reviewPostBtn = document.getElementById('bc-review-post-btn');
+  if (reviewPostBtn && _bcJobState && _bcJobState.status === 'drafts_ready') {
+    const tickets = _bcJobState.tickets || [];
+    const selCount = tickets.filter(t => t.state === 'draft_ready' && _bcDraftSelections.has(t.index)).length;
+    reviewPostBtn.textContent = selCount > 0 ? `Post to GitHub (${selCount})` : 'Post to GitHub';
+    reviewPostBtn.disabled = selCount === 0;
+  }
+}
+
+function bcReviewAndPost() {
+  if (!_bcJobState) return;
+  const tickets = (_bcJobState.tickets || []).filter(t => t.state === 'draft_ready');
+
+  const listEl = document.getElementById('bc-review-list');
+  if (listEl) {
+    listEl.innerHTML = tickets.map(t => {
+      const titleEl = document.getElementById(`bc-draft-title-${t.index}`);
+      const title = titleEl ? titleEl.value.trim() : (t.title || '');
+      const isChecked = _bcDraftSelections.has(t.index) ? 'checked' : '';
+      return `
+        <div class="bc-review-item">
+          <label class="bc-review-check-wrap">
+            <input type="checkbox" class="bc-review-check" data-index="${t.index}" ${isChecked}
+                   onchange="_bcReviewOverlayCheck(${t.index}, this.checked)">
+            <span class="bc-review-title">${escHtml(title || '(no title)')}</span>
+          </label>
+        </div>`;
+    }).join('');
+  }
+
+  const selCount = tickets.filter(t => _bcDraftSelections.has(t.index)).length;
+  const postBtn = document.getElementById('bc-post-github-btn');
+  if (postBtn) {
+    postBtn.disabled = selCount === 0;
+    postBtn.textContent = selCount > 0 ? `Post ${selCount} to GitHub` : 'Post to GitHub';
+  }
+
+  const overlay = document.getElementById('bc-review-overlay');
+  if (overlay) overlay.classList.remove('hidden');
+}
+
+function _bcReviewOverlayCheck(index, checked) {
+  if (checked) _bcDraftSelections.add(index);
+  else _bcDraftSelections.delete(index);
+  // Sync main list checkbox
+  const mainCheck = document.getElementById(`bc-check-${index}`);
+  if (mainCheck) mainCheck.checked = checked;
+  // Update Post button in overlay
+  const tickets = (_bcJobState && _bcJobState.tickets) || [];
+  const selCount = tickets.filter(t => t.state === 'draft_ready' && _bcDraftSelections.has(t.index)).length;
+  const postBtn = document.getElementById('bc-post-github-btn');
+  if (postBtn) {
+    postBtn.disabled = selCount === 0;
+    postBtn.textContent = selCount > 0 ? `Post ${selCount} to GitHub` : 'Post to GitHub';
+  }
+}
+
+function bcCancelReview() {
+  const overlay = document.getElementById('bc-review-overlay');
+  if (overlay) overlay.classList.add('hidden');
+}
+
+async function bcPostSelected() {
+  if (!_bcJobId || !_bcJobState) return;
+  const tickets = _bcJobState.tickets || [];
+
+  const toPost = [];
+  let hasValidationError = false;
+
+  for (const t of tickets) {
+    if (t.state !== 'draft_ready') continue;
+    if (!_bcDraftSelections.has(t.index)) continue;
+
+    const titleEl = document.getElementById(`bc-draft-title-${t.index}`);
+    const bodyEl  = document.getElementById(`bc-draft-body-${t.index}`);
+    const title = titleEl ? titleEl.value.trim() : (t.title || '').trim();
+
+    if (!title) {
+      const errEl = document.getElementById(`bc-draft-title-err-${t.index}`);
+      if (errEl) errEl.classList.remove('hidden');
+      // Scroll card into view
+      const card = document.getElementById(`bc-card-${t.index}`);
+      if (card) card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      hasValidationError = true;
+      continue;
+    }
+    const body = bodyEl ? bodyEl.value : (t.body || '');
+    const labels = t._default_labels || [];
+    toPost.push({ index: t.index, title, body, labels });
+  }
+
+  if (hasValidationError) {
+    bcCancelReview();
+    return;
+  }
+  if (toPost.length === 0) return;
+
+  const postBtn   = document.getElementById('bc-post-github-btn');
+  const reviewBtn = document.getElementById('bc-review-post-btn');
+  if (postBtn) { postBtn.disabled = true; postBtn.textContent = 'Posting…'; }
+  if (reviewBtn) { reviewBtn.disabled = true; reviewBtn.textContent = 'Posting…'; }
+
+  try {
+    const resp = await fetch(`/api/tickets/bulk/${_bcJobId}/post-selected`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tickets: toPost }),
+    });
+    if (!resp.ok) {
+      const data = await resp.json().catch(() => ({}));
+      console.error('[bc] post-selected failed:', data.detail || resp.status);
+    }
+  } catch (e) {
+    console.error('[bc] post-selected error:', e);
+  }
+
+  bcCancelReview();
 }
 
 // Keyboard: Cmd/Ctrl+Enter triggers Run when Bulk Create tab is active and step 1 is shown

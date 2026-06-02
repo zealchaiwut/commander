@@ -3797,7 +3797,13 @@ function _gsNavigate(url) {
   if (!win) {
     showToast('Popup blocked. Copy the link to open it manually.', 'warning', {
       label: 'Copy link',
-      handler: function () { navigator.clipboard.writeText(url); }
+      handler: function () {
+        navigator.clipboard.writeText(url).then(function () {
+          showToast('Link copied to clipboard.', 'success');
+        }).catch(function () {
+          showToast('Clipboard unavailable. Copy manually: ' + url, 'error');
+        });
+      }
     });
   }
   _gsClose();

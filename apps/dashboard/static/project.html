@@ -3148,11 +3148,9 @@
                 aria-selected="false" onclick="switchTab('compare')">
           <i class="ti ti-git-compare"></i>Compare
         </button>
-        <button class="stab disabled" role="tab" id="stab-sprint-history"
-                aria-selected="false" aria-disabled="true"
-                onclick="return false" tabindex="-1">
+        <button class="stab" role="tab" id="stab-sprint-history"
+                aria-selected="false" onclick="switchTab('sprint-history')">
           <i class="ti ti-history"></i>Sprint history
-          <span class="stab-soon">soon</span>
         </button>
       </nav>
     </header>
@@ -3229,27 +3227,6 @@
 
         <!-- Sprint list -->
         <div class="smgmt-content">
-
-          <!-- Sprint Summaries pane (always at top) -->
-          <div class="smgmt-summary-pane" id="smgmt-summary-pane" style="display:none">
-            <div class="smgmt-summary-header">
-              <div class="smgmt-summary-header-left">
-                <div class="smgmt-summary-icon"><i class="ti ti-file-description"></i></div>
-                <span class="smgmt-summary-title">Sprint Summaries</span>
-                <span class="smgmt-summary-count" id="smgmt-summary-count"></span>
-              </div>
-              <div class="smgmt-summary-header-actions">
-                <button class="smgmt-archived-toggle" id="smgmt-archived-toggle"
-                        onclick="_smgmtSummaryToggleArchived()"></button>
-                <button class="smgmt-summary-collapse-btn" id="smgmt-summary-collapse-btn"
-                        onclick="_smgmtSummaryToggleCollapse()"
-                        title="Collapse">
-                  <i class="ti ti-chevron-up" id="smgmt-summary-chevron"></i>
-                </button>
-              </div>
-            </div>
-            <div class="smgmt-summary-rows" id="smgmt-summary-rows"></div>
-          </div>
 
           <div id="smgmt-sprint-list" class="smgmt-sprint-list">
             <div class="loading-msg" id="smgmt-loading">Loading sprints…</div>
@@ -3504,6 +3481,24 @@
           </select>
         </div>
         <div id="cmp-result"></div>
+      </div>
+
+      <!-- Sprint History tab — sprint summaries (moved off the Sprint Mgmt screen) -->
+      <div class="tab-pane" id="pane-sprint-history" role="tabpanel" aria-labelledby="stab-sprint-history">
+        <div class="smgmt-summary-pane" id="smgmt-summary-pane">
+          <div class="smgmt-summary-header">
+            <div class="smgmt-summary-header-left">
+              <div class="smgmt-summary-icon"><i class="ti ti-file-description"></i></div>
+              <span class="smgmt-summary-title">Sprint Summaries</span>
+              <span class="smgmt-summary-count" id="smgmt-summary-count"></span>
+            </div>
+            <div class="smgmt-summary-header-actions">
+              <button class="smgmt-archived-toggle" id="smgmt-archived-toggle"
+                      onclick="_smgmtSummaryToggleArchived()"></button>
+            </div>
+          </div>
+          <div class="smgmt-summary-rows" id="smgmt-summary-rows"></div>
+        </div>
       </div>
 
     </div>
@@ -3825,14 +3820,14 @@ function parseUrl() {
   if (!m) return { slug: null, tab: 'sprint-mgmt' };
   const slug = decodeURIComponent(m[1]);
   const rawTab = m[2] || '';
-  // sprint-history is disabled → redirect to sprint-mgmt
   const hash = window.location.hash;
-  const tab = (rawTab === 'tickets')     ? 'tickets'
-            : (rawTab === 'logs')        ? 'logs'
-            : (rawTab === 'bulk-create') ? 'bulk-create'
-            : (rawTab === 'timeline')    ? 'timeline'
-            : (rawTab === 'compare')     ? 'compare'
-            : (hash === '#compare')      ? 'compare'
+  const tab = (rawTab === 'tickets')        ? 'tickets'
+            : (rawTab === 'logs')           ? 'logs'
+            : (rawTab === 'bulk-create')    ? 'bulk-create'
+            : (rawTab === 'timeline')       ? 'timeline'
+            : (rawTab === 'compare')        ? 'compare'
+            : (rawTab === 'sprint-history') ? 'sprint-history'
+            : (hash === '#compare')         ? 'compare'
             : 'sprint-mgmt';
   return { slug, tab };
 }
@@ -3868,8 +3863,6 @@ const _smgmtFinishCards = {};
 
 // ── Tab navigation ────────────────────────────────────────────────────────────
 function switchTab(tab, pushHistory) {
-  if (tab === 'sprint-history') return; // disabled
-
   // Pause auto-refresh and live polling when leaving sprint-mgmt
   if (_activeTab === 'sprint-mgmt' && tab !== 'sprint-mgmt') {
     _smgmtArStopTicker();
@@ -3891,7 +3884,7 @@ function switchTab(tab, pushHistory) {
   _activeTab = tab;
 
   // Update aria-selected + active class on tabs
-  ['sprint-mgmt', 'tickets', 'logs', 'bulk-create', 'timeline', 'compare'].forEach(t => {
+  ['sprint-mgmt', 'tickets', 'logs', 'bulk-create', 'timeline', 'compare', 'sprint-history'].forEach(t => {
     const btn = document.getElementById('stab-' + t);
     if (!btn) return;
     const isActive = t === tab;
@@ -3900,7 +3893,7 @@ function switchTab(tab, pushHistory) {
   });
 
   // Show/hide panes
-  ['sprint-mgmt', 'tickets', 'logs', 'bulk-create', 'timeline', 'compare'].forEach(t => {
+  ['sprint-mgmt', 'tickets', 'logs', 'bulk-create', 'timeline', 'compare', 'sprint-history'].forEach(t => {
     const pane = document.getElementById('pane-' + t);
     if (pane) pane.classList.toggle('active', t === tab);
   });
@@ -3945,11 +3938,17 @@ function switchTab(tab, pushHistory) {
   if (tab === 'compare') {
     compareInit();
   }
+
+  // Load sprint history (summaries) tab. No-ops if repo isn't cached yet —
+  // init() loads it once _cachedFullRepo is populated.
+  if (tab === 'sprint-history') {
+    _smgmtLoadSummaries(_cachedFullRepo[_slug]);
+  }
 }
 
 // ── Keyboard navigation for sub-tabs ─────────────────────────────────────────
 document.getElementById('sub-tabs').addEventListener('keydown', function(e) {
-  const enabledTabs = ['sprint-mgmt', 'tickets', 'logs', 'bulk-create', 'timeline', 'compare'];
+  const enabledTabs = ['sprint-mgmt', 'tickets', 'logs', 'bulk-create', 'timeline', 'compare', 'sprint-history'];
   const focused = document.activeElement;
   const currentId = focused ? focused.id.replace('stab-', '') : null;
   const currentIdx = enabledTabs.indexOf(currentId);
@@ -4999,6 +4998,11 @@ async function init() {
     _cmpInitialized = false;
     compareInit();
   }
+
+  // If sprint-history tab was active before the repo was cached, load summaries now
+  if (_activeTab === 'sprint-history') {
+    _smgmtLoadSummaries(_cachedFullRepo[_slug]);
+  }
 }
 
 // ── Sprint Mgmt toolbar height calculation ─────────────────────────────────
@@ -5178,9 +5182,6 @@ async function loadSprintMgmt(silent) {
     }
 
     _smgmtRender(data);
-
-    // Load summaries pane in parallel (non-blocking)
-    _smgmtLoadSummaries(repo);
 
     // Start (or restart) live polling if there are running sprints
     _smgmtLivePollRestart();

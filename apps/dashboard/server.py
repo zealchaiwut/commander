@@ -1056,7 +1056,7 @@ async def projects_redirect(path: str):
 
 # ── Slug-based project routes (/project/<slug>/...) ───────────────────────────
 
-_VALID_PROJECT_TABS = {"sprint-mgmt", "tickets", "logs"}
+_VALID_PROJECT_TABS = {"sprint-mgmt", "tickets", "logs", "sprint-history"}
 
 
 @app.get("/project/{slug}")

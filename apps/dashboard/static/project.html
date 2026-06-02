@@ -834,6 +834,9 @@
       font-family: var(--mono); font-weight: 600; margin-left: 4px;
     }
     .smgmt-summary-header-actions { display: flex; align-items: center; gap: 4px; }
+    /* Pre-flight checks toggle (off = muted) */
+    .smgmt-preflight-toggle.is-off { color: var(--text-muted); }
+    .smgmt-preflight-toggle.is-off .ti { opacity: .7; }
     .smgmt-archived-toggle {
       font-size: 11px; color: var(--text-muted);
       background: var(--surface-2); padding: 4px 9px;
@@ -3196,6 +3199,13 @@
                 <button class="smgmt-ar-menu-item smgmt-ar-turn-off" onclick="_smgmtArTurnOff()">Turn off</button>
               </div>
             </div>
+            <!-- Pre-flight checks show/hide toggle -->
+            <button class="btn-ghost smgmt-preflight-toggle" id="smgmt-preflight-toggle"
+                    onclick="_smgmtTogglePreflight()" aria-pressed="true"
+                    title="Pre-flight checks on — click to hide banners">
+              <i class="ti ti-checklist"></i>
+              <span id="smgmt-preflight-toggle-label">Pre-flight: on</span>
+            </button>
             <button class="btn-ghost" id="smgmt-cleanup-empty-btn"
                     onclick="_smgmtCleanupEmpty()" title="Delete sprint labels with no tickets"
                     aria-label="Clean up empty sprints" style="display:none">
@@ -5438,8 +5448,48 @@ async function _preflightInjectBanner(label, tickets, repo) {
   if (header) header.insertAdjacentHTML('afterend', html);
 }
 
+/** Last args passed to _preflightLoadBanners, so the toggle can re-render. */
+let _preflightLastArgs = null;
+
+/** Pre-flight banners on by default; persisted per-project via localStorage. */
+function _preflightEnabled() {
+  return localStorage.getItem(_settingsKey('preflight')) !== 'off';
+}
+
+/** Toggle pre-flight banner visibility, persist, and re-render in place. */
+function _smgmtTogglePreflight() {
+  const next = _preflightEnabled() ? 'off' : 'on';
+  localStorage.setItem(_settingsKey('preflight'), next);
+  _smgmtUpdatePreflightToggleUI();
+  if (next === 'off') {
+    document.querySelectorAll('.smgmt-preflight-banner').forEach(el => el.remove());
+  } else if (_preflightLastArgs) {
+    _preflightLoadBanners(_preflightLastArgs.orderedLabels, _preflightLastArgs.bySprint);
+  }
+}
+
+/** Sync the toolbar toggle button to the current setting. */
+function _smgmtUpdatePreflightToggleUI() {
+  const btn = document.getElementById('smgmt-preflight-toggle');
+  if (!btn) return;
+  const on = _preflightEnabled();
+  btn.classList.toggle('is-off', !on);
+  btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+  btn.title = on
+    ? 'Pre-flight checks on — click to hide banners'
+    : 'Pre-flight checks off — click to show banners';
+  const lbl = document.getElementById('smgmt-preflight-toggle-label');
+  if (lbl) lbl.textContent = on ? 'Pre-flight: on' : 'Pre-flight: off';
+}
+
 /** Kick off pre-flight banner loading for all non-running sprint panes. */
 function _preflightLoadBanners(orderedLabels, bySprint) {
+  _preflightLastArgs = { orderedLabels, bySprint };
+  _smgmtUpdatePreflightToggleUI();
+  if (!_preflightEnabled()) {
+    document.querySelectorAll('.smgmt-preflight-banner').forEach(el => el.remove());
+    return;
+  }
   const repo = _smgmtRepo();
   for (const label of orderedLabels) {
     if (_smgmtRunningLabels.has(label)) continue;

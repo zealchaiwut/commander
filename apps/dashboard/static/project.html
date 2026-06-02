@@ -2955,6 +2955,20 @@
       display: flex; align-items: center; justify-content: center;
       height: 180px; color: var(--text-sub); font-size: 13px;
     }
+    .metrics-fallback-table {
+      width: 100%; border-collapse: collapse; font-size: 12px;
+      color: var(--text); font-family: var(--mono);
+    }
+    .metrics-fallback-table th {
+      text-align: left; padding: 6px 10px;
+      border-bottom: 1px solid var(--border);
+      color: var(--text-sub); font-weight: 600; text-transform: uppercase;
+      letter-spacing: .04em; font-size: 11px;
+    }
+    .metrics-fallback-table td {
+      padding: 6px 10px; border-bottom: 1px solid var(--border);
+    }
+    .metrics-fallback-table tr:last-child td { border-bottom: none; }
     @media (max-width: 900px) {
       .metrics-grid { grid-template-columns: 1fr; }
     }
@@ -11257,15 +11271,66 @@ function _cmpEmptyState(title, msg) {
   let _metricsData = null;
   const _charts = {};
 
-  function _loadChartJs(cb) {
+  function _loadChartJs(cb, fallback) {
     if (window.Chart) { cb(); return; }
-    const s = document.createElement('script');
-    s.src = 'https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js';
-    s.onload = cb;
-    s.onerror = function () {
-      ['velocity', 'failure', 'duration'].forEach(k => _showMsg(k, 'Failed to load Chart.js'));
-    };
-    document.head.appendChild(s);
+    const cdns = [
+      'https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js',
+      'https://unpkg.com/chart.js@4.4.7/dist/chart.umd.min.js',
+    ];
+    function tryLoad(idx) {
+      if (idx >= cdns.length) { fallback(); return; }
+      const s = document.createElement('script');
+      s.src = cdns[idx];
+      s.onload = cb;
+      s.onerror = function () { tryLoad(idx + 1); };
+      document.head.appendChild(s);
+    }
+    tryLoad(0);
+  }
+
+  function _tableVelocity(data) {
+    if (!data.length) { _showMsg('velocity', 'No data available'); return; }
+    const w = document.getElementById('metrics-velocity-wrap');
+    if (!w) return;
+    const rows = data.map(d =>
+      '<tr><td>' + escHtml(d.sprint_label) + '</td><td>' + (d.ticket_outcomes_breakdown.done || 0) + '</td></tr>'
+    ).join('');
+    w.innerHTML = '<table class="metrics-fallback-table"><thead><tr><th>Sprint</th><th>Tickets done</th></tr></thead><tbody>' + rows + '</tbody></table>';
+  }
+
+  function _tableFailure(data) {
+    if (!data.length) { _showMsg('failure', 'No data available'); return; }
+    const w = document.getElementById('metrics-failure-wrap');
+    if (!w) return;
+    const rows = data.map(d => {
+      const total = d.ticket_count || 0;
+      const failed = d.ticket_outcomes_breakdown.failed || 0;
+      const pct = total > 0 ? Math.round((failed / total) * 1000) / 10 : 0;
+      return '<tr><td>' + escHtml(d.sprint_label) + '</td><td>' + total + '</td><td>' + failed + '</td><td>' + pct + '%</td></tr>';
+    }).join('');
+    w.innerHTML = '<table class="metrics-fallback-table"><thead><tr><th>Sprint</th><th>Total</th><th>Failed</th><th>Failure rate</th></tr></thead><tbody>' + rows + '</tbody></table>';
+  }
+
+  function _tableDuration(data) {
+    if (!data.length) { _showMsg('duration', 'No data available'); return; }
+    const w = document.getElementById('metrics-duration-wrap');
+    if (!w) return;
+    const roles = ['coder', 'tester', 'reviewer', 'documenter'];
+    const roleLabels = ['Coder', 'Tester', 'Reviewer', 'Documenter'];
+    const rows = roles.map((role, i) => {
+      const active = data.filter(d => (d.agent_dispatch_counts[role] || 0) > 0);
+      if (!active.length) return '<tr><td>' + roleLabels[i] + '</td><td>—</td></tr>';
+      const sum = active.reduce((acc, d) => acc + d.duration_minutes / Math.max(1, d.ticket_count), 0);
+      const avg = Math.round((sum / active.length) * 10) / 10;
+      return '<tr><td>' + roleLabels[i] + '</td><td>' + avg + ' min/ticket</td></tr>';
+    }).join('');
+    w.innerHTML = '<table class="metrics-fallback-table"><thead><tr><th>Role</th><th>Avg min/ticket</th></tr></thead><tbody>' + rows + '</tbody></table>';
+  }
+
+  function _tableFallback(data) {
+    _tableVelocity(data);
+    _tableFailure(data);
+    _tableDuration(data);
   }
 
   function _colors() {
@@ -11393,7 +11458,7 @@ function _cmpEmptyState(title, msg) {
 
   window.metricsInit = async function () {
     if (_metricsLoaded && _metricsData !== null) {
-      _loadChartJs(() => _renderAll(_metricsData));
+      _loadChartJs(() => _renderAll(_metricsData), () => _tableFallback(_metricsData));
       return;
     }
 
@@ -11412,7 +11477,7 @@ function _cmpEmptyState(title, msg) {
       return;
     }
     _metricsLoaded = true;
-    _loadChartJs(() => _renderAll(_metricsData));
+    _loadChartJs(() => _renderAll(_metricsData), () => _tableFallback(_metricsData));
   };
 }());
 </script>

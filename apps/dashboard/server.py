@@ -996,19 +996,6 @@ async def diagnostics_page():
     return _serve_html(STATIC_DIR / "diagnostics.html")
 
 
-# ── Legacy UI route (/legacy/<slug>/<tab>) ────────────────────────────────────
-# Deprecated legacy route: serves the old index.html UI.
-# Emits a warning on every hit so operators can track usage before removal.
-# New-ticket creation no longer navigates here — all ticket creation goes
-# through the current-UI modal on /project/ pages (issue #272).
-
-@app.get("/legacy/{path:path}")
-async def legacy_project_route(path: str):
-    """Serve the legacy index.html UI at /legacy/. DEPRECATED — use /project/ instead."""
-    logger.warning("Deprecated /legacy/ route hit: /%s", path)
-    return _serve_html(STATIC_DIR / "index.html")
-
-
 # ── /projects/ redirect — 301 to current /project/ UI ─────────────────────────
 # Old /projects/<slug>/<tab> bookmarks are redirected to /project/<slug>/<tab>.
 # Paths that cannot be cleanly mapped (no slug/tab) go to the dashboard home.
@@ -1035,7 +1022,7 @@ async def projects_redirect(path: str):
 
 # ── Slug-based project routes (/project/<slug>/...) ───────────────────────────
 
-_VALID_PROJECT_TABS = {"sprint-mgmt", "tickets", "logs"}
+_VALID_PROJECT_TABS = {"sprint-mgmt", "tickets", "logs", "sprint-history"}
 
 
 @app.get("/project/{slug}")
@@ -8930,7 +8917,7 @@ async def static_assets(filename: str):
     """Serve static files with appropriate cache headers.
 
     JS and CSS files get Cache-Control: public, max-age=31536000, immutable
-    because index.html always references them with a versioned query string.
+    because the HTML pages reference them with a versioned query string.
     Other files fall through to a plain FileResponse with no special caching.
     """
     file_path = STATIC_DIR / filename

@@ -478,6 +478,7 @@ HANG_CHECK_SECS = 5  * 60   # check every 5 minutes
 # Status labels that may be added or removed while a sprint run is active.
 # All other label additions are deferred to post-run; sprint-N is never
 # removed from a ticket until the sprint run ends.
+# Consolidated from old _RUN_MUTABLE_GITHUB_LABELS constant (issue #506, Wave 1 label protection).
 RUN_MUTABLE_LABELS: frozenset[str] = frozenset({
     "in-progress", "SIT", "UAT", "needs-rework",
 })

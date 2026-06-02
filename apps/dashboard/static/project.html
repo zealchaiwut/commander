@@ -2639,6 +2639,15 @@
     .bc-btn-regenerate:hover { background: var(--blue-bg, rgba(59,130,246,.08)); }
     .bc-btn-regenerate:disabled { opacity: 0.5; cursor: not-allowed; }
     .bc-regen-err { font-size: 10px; color: var(--red); margin-top: 4px; }
+    .bc-draft-card-actions { display: flex; align-items: center; gap: 6px; margin-top: 4px; }
+    .bc-btn-remove-row {
+      font-size: 11px; padding: 3px 8px; border: 1px solid var(--border);
+      border-radius: 4px; cursor: pointer; color: var(--text-muted); background: transparent;
+      transition: color .12s, border-color .12s;
+    }
+    .bc-btn-remove-row:hover { color: var(--red); border-color: var(--red); }
+    .bc-action-btn--remove { color: var(--text-muted); }
+    .bc-action-btn--remove:hover { color: var(--red); background: var(--surface-2); }
     .bc-btn-skip-this {
       font-size: 11px; padding: 4px 10px; border-radius: 5px; cursor: pointer;
       background: none; color: var(--text-muted); border: 1px solid var(--border);
@@ -9813,6 +9822,7 @@ let _bcRetryFiles       = {};    // ticket_index -> File for retry image attach
 let _bcLastInput    = null;      // preserved Step 1 inputs for Recreate
 let _bcTabInited    = false;     // whether the tab has been populated once
 let _bcDraftSelections = new Set(); // indices of draft_ready tickets checked for posting
+let _bcRemovedRows = new Set();     // indices of rows hidden by the Remove control (issue #528)
 
 const BC_MAX_PROMPTS = 25;
 
@@ -10085,6 +10095,7 @@ async function bcRunAll() {
     _bcStartTimes = {};
     _bcAvgMs = null;
     _bcDraftSelections = new Set();
+    _bcRemovedRows = new Set();
 
     _bcShowStep(2);
     _bcConnectSSE(_bcJobId);
@@ -10197,7 +10208,7 @@ function _bcRenderStep2() {
         `${sized + estimateFailed} done, ${drafting + estimating + created} running, ${pending} queued` +
         `<span class="bc-concurrency-pill">concurrency: ${concurrency}</span>`;
     } else if (job.status === 'drafts_ready') {
-      const draftCount = tickets.filter(t => t.state === 'draft_ready').length;
+      const draftCount = tickets.filter(t => t.state === 'draft_ready' && !_bcRemovedRows.has(t.index)).length;
       banner.innerHTML = `${draftCount} draft${draftCount !== 1 ? 's' : ''} ready — edit title and body, then post to GitHub.`;
     } else if (job.status === 'done') {
       if (sizeWarning > 0) {
@@ -10254,7 +10265,7 @@ function _bcRenderStep2() {
         if (!_bcDraftSelections.has(t.index)) _bcDraftSelections.add(t.index);
       }
     });
-    list.innerHTML = tickets.map(t => _bcRenderCard(t)).join('');
+    list.innerHTML = tickets.filter(t => !_bcRemovedRows.has(t.index)).map(t => _bcRenderCard(t)).join('');
   }
 
   // Footer buttons
@@ -10276,7 +10287,7 @@ function _bcRenderStep2() {
       doneBtn.textContent = 'Running...';
       if (recreateBtn) recreateBtn.classList.add('hidden');
       if (reviewPostBtn) {
-        const draftReadyTickets = tickets.filter(t => t.state === 'draft_ready');
+        const draftReadyTickets = tickets.filter(t => t.state === 'draft_ready' && !_bcRemovedRows.has(t.index));
         const selCount = draftReadyTickets.filter(t => _bcDraftSelections.has(t.index)).length;
         reviewPostBtn.textContent = selCount > 0 ? `Post to GitHub (${selCount})` : 'Post to GitHub';
         reviewPostBtn.disabled = selCount === 0;
@@ -10422,6 +10433,7 @@ function _bcRenderCard(t) {
             <div class="bc-fail-actions">
               <button class="bc-btn-retry-this" onclick="bcRetryWithBody(${t.index})">Retry this ticket</button>
               <button class="bc-btn-skip-this" onclick="bcSkipTicket(${t.index})">Skip</button>
+              <button class="bc-btn-remove-row" onclick="bcRemoveRow(${t.index})" title="Remove">Remove</button>
             </div>
           </div>
         </div>
@@ -10457,6 +10469,7 @@ function _bcRenderCard(t) {
                   onclick="bcSizeRemedyComment(${t.index})">Move detail to follow-up comment</button>
               ${remedyImagesBtn}
               <button class="bc-btn-skip-this" onclick="bcSkipTicket(${t.index})">Skip</button>
+              <button class="bc-btn-remove-row" onclick="bcRemoveRow(${t.index})" title="Remove">Remove</button>
             </div>
           </div>
         </div>
@@ -10482,8 +10495,11 @@ function _bcRenderCard(t) {
           <textarea class="bc-draft-edit-body" id="bc-draft-body-${t.index}"
                     tabindex="0">${escHtml(bodyVal)}</textarea>
           ${regenErrHtml}
-          <button class="bc-btn-regenerate" id="bc-btn-regen-${t.index}"
-                  onclick="bcRegenerateDraft(${t.index})">Regenerate draft</button>
+          <div class="bc-draft-card-actions">
+            <button class="bc-btn-regenerate" id="bc-btn-regen-${t.index}"
+                    onclick="bcRegenerateDraft(${t.index})">Regenerate draft</button>
+            <button class="bc-btn-remove-row" onclick="bcRemoveRow(${t.index})" title="Remove this draft">Remove</button>
+          </div>
         </div>
       </div>`;
   } else if (t.state === 'skipped') {
@@ -10491,6 +10507,10 @@ function _bcRenderCard(t) {
     label   = 'Skipped';
     actions = `<button class="bc-action-btn" title="Undo skip" onclick="bcUndoSkip(${t.index})">&#x21A9;</button>`;
   }
+
+  // Add Remove control to all generic-template rows (issue #528)
+  const removeBtn = `<button class="bc-action-btn bc-action-btn--remove" title="Remove" onclick="bcRemoveRow(${t.index})"><i class="ti ti-trash"></i></button>`;
+  actions = actions ? `${actions} ${removeBtn}` : removeBtn;
 
   const headHtml = head
     ? `<div class="bc-card-head">${head}<span class="bc-card-label">${escHtml(label)}</span></div>`
@@ -10506,7 +10526,7 @@ function _bcRenderCard(t) {
         <div class="${previewClass}">${preview}</div>
         ${tags}
       </div>
-      ${actions ? `<div class="bc-card-actions">${actions}</div>` : ''}
+      <div class="bc-card-actions">${actions}</div>
     </div>`;
 }
 
@@ -10761,17 +10781,29 @@ function bcRecreate() {
 
 // ── Draft-ready inline editing helpers (issue #526) ──────────────────────────
 
+function _bcSyncPostBtn() {
+  const reviewPostBtn = document.getElementById('bc-review-post-btn');
+  if (!reviewPostBtn || !_bcJobState || _bcJobState.status !== 'drafts_ready') return;
+  const tickets = _bcJobState.tickets || [];
+  const selCount = tickets.filter(t =>
+    t.state === 'draft_ready' && _bcDraftSelections.has(t.index) && !_bcRemovedRows.has(t.index)
+  ).length;
+  reviewPostBtn.textContent = selCount > 0 ? `Post to GitHub (${selCount})` : 'Post to GitHub';
+  reviewPostBtn.disabled = selCount === 0;
+}
+
+function bcRemoveRow(index) {
+  _bcRemovedRows.add(index);
+  _bcDraftSelections.delete(index);
+  const card = document.getElementById(`bc-card-${index}`);
+  if (card) card.remove();
+  _bcSyncPostBtn();
+}
+
 function _bcDraftCheckChange(index, checked) {
   if (checked) _bcDraftSelections.add(index);
   else _bcDraftSelections.delete(index);
-  // Keep the Post button count in sync
-  const reviewPostBtn = document.getElementById('bc-review-post-btn');
-  if (reviewPostBtn && _bcJobState && _bcJobState.status === 'drafts_ready') {
-    const tickets = _bcJobState.tickets || [];
-    const selCount = tickets.filter(t => t.state === 'draft_ready' && _bcDraftSelections.has(t.index)).length;
-    reviewPostBtn.textContent = selCount > 0 ? `Post to GitHub (${selCount})` : 'Post to GitHub';
-    reviewPostBtn.disabled = selCount === 0;
-  }
+  _bcSyncPostBtn();
 }
 
 function bcReviewAndPost() {
@@ -10795,7 +10827,7 @@ function bcReviewAndPost() {
     }).join('');
   }
 
-  const selCount = tickets.filter(t => _bcDraftSelections.has(t.index)).length;
+  const selCount = tickets.filter(t => _bcDraftSelections.has(t.index) && !_bcRemovedRows.has(t.index)).length;
   const postBtn = document.getElementById('bc-post-github-btn');
   if (postBtn) {
     postBtn.disabled = selCount === 0;
@@ -10814,7 +10846,7 @@ function _bcReviewOverlayCheck(index, checked) {
   if (mainCheck) mainCheck.checked = checked;
   // Update Post button in overlay
   const tickets = (_bcJobState && _bcJobState.tickets) || [];
-  const selCount = tickets.filter(t => t.state === 'draft_ready' && _bcDraftSelections.has(t.index)).length;
+  const selCount = tickets.filter(t => t.state === 'draft_ready' && _bcDraftSelections.has(t.index) && !_bcRemovedRows.has(t.index)).length;
   const postBtn = document.getElementById('bc-post-github-btn');
   if (postBtn) {
     postBtn.disabled = selCount === 0;
@@ -10837,6 +10869,7 @@ async function bcPostSelected() {
   for (const t of tickets) {
     if (t.state !== 'draft_ready') continue;
     if (!_bcDraftSelections.has(t.index)) continue;
+    if (_bcRemovedRows.has(t.index)) continue;
 
     const titleEl = document.getElementById(`bc-draft-title-${t.index}`);
     const bodyEl  = document.getElementById(`bc-draft-body-${t.index}`);

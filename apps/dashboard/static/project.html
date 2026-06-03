@@ -966,6 +966,11 @@
     .smgmt-sprint-count {
       font-size: 11px; color: var(--text-sub); font-weight: 400;
     }
+    .smgmt-sprint-token-val {
+      font-size: 11px; color: var(--text-muted); font-weight: 400;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 200px;
+      display: inline-block; vertical-align: bottom;
+    }
     .smgmt-sprint-header { justify-content: space-between; }
     .smgmt-sprint-header-left {
       display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0;
@@ -4455,6 +4460,10 @@ const RERUN_STRIP_LABELS = new Set(['UAT','UAT-approved','released','SIT','in-pr
 const _smgmtOutcomeCache = {};
 // Per-issue estimate cache: issueNum (int) → {size, confidence} | null (null = confirmed no estimate)
 const _estDataCache = {};
+// Sprint ticket map for token header reactivity: label → [ticket, ...]
+let _smgmtBySprint = {};
+// Reverse lookup: issueNum (int) → sprint label
+const _smgmtTicketToSprint = {};
 
 // ── Running sprint live state (issue #277) ────────────────────────────────
 // Set of sprint labels that are currently running, populated on each render
@@ -5888,6 +5897,7 @@ function _smgmtRender(data) {
       unassigned.push(iss);
     }
   });
+  _smgmtBySprint = bySprint;
 
   // Always render the backlog pane regardless of sprint count
   _smgmtRenderBacklog(unassigned);
@@ -5993,6 +6003,8 @@ async function _smgmtLoadEstimates(orderedLabels, bySprint) {
   for (const label of orderedLabels) {
     const tickets = bySprint[label] || [];
     if (tickets.length === 0) continue;
+    // Populate reverse lookup for reactivity
+    for (const t of tickets) _smgmtTicketToSprint[t.number] = label;
     const issueNums = tickets.map(t => t.number).join(',');
     try {
       const resp = await fetch(
@@ -6006,6 +6018,7 @@ async function _smgmtLoadEstimates(orderedLabels, bySprint) {
         const display = Number.isInteger(h) ? `${h}h` : `${parseFloat(h.toFixed(1))}h`;
         estEl.textContent = `${display} estimated`;
       }
+      _smgmtSetSprintTokenEl(label, data);
       // Cache per-issue size/confidence and update visible rows
       if (data.issues) {
         for (const [numStr, est] of Object.entries(data.issues)) {
@@ -6019,6 +6032,49 @@ async function _smgmtLoadEstimates(orderedLabels, bySprint) {
       // fail silently — leave as "— estimated"
     }
   }
+}
+
+function _smgmtSetSprintTokenEl(label, data) {
+  const el = document.getElementById(`smgmt-tokens-${label}`);
+  if (!el) return;
+  const tokens = data.total_tokens;
+  const cost   = data.total_cost_usd;
+  if (tokens === null || tokens === undefined || (data.estimated_count ?? 0) === 0) {
+    el.style.display = 'none';
+    el.textContent = '';
+    return;
+  }
+  const partialStr = data.partial ? ' (partial)' : '';
+  const tokFmt  = tokens.toLocaleString();
+  const costFmt = cost !== null && cost !== undefined
+    ? ` · ~$${cost < 0.01 ? cost.toFixed(4) : cost.toFixed(2)}`
+    : '';
+  el.textContent = ` · ~${tokFmt} tokens${partialStr}${costFmt}`;
+  el.style.display = 'inline-block';
+}
+
+async function _smgmtRefreshSprintTokens(issueNum) {
+  const label = _smgmtTicketToSprint[issueNum];
+  if (!label) return;
+  const tickets = _smgmtBySprint[label] || [];
+  if (tickets.length === 0) return;
+  const repo = _smgmtRepo();
+  if (!repo) return;
+  try {
+    const issueNums = tickets.map(t => t.number).join(',');
+    const resp = await fetch(
+      `/api/estimates/batch?project=${encodeURIComponent(repo)}&issues=${issueNums}`
+    );
+    if (!resp.ok) return;
+    const data = await resp.json();
+    const estEl = document.getElementById(`smgmt-est-${label}`);
+    if (estEl && data.complete && data.total_hours !== null) {
+      const h = data.total_hours;
+      const display = Number.isInteger(h) ? `${h}h` : `${parseFloat(h.toFixed(1))}h`;
+      estEl.textContent = `${display} estimated`;
+    }
+    _smgmtSetSprintTokenEl(label, data);
+  } catch (_) { /* fail silently */ }
 }
 
 function _capitalizeFirst(s) {
@@ -6947,7 +7003,7 @@ function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent) {
           ${isNext ? '<span class="smgmt-next-badge" aria-label="Next up">NEXT UP</span>' : ''}
           ${outcomeBadgeHtml}
           ${parentLineage}
-          <span class="smgmt-sprint-count"><span id="smgmt-est-${escHtml(label)}" class="smgmt-sprint-est-val">— estimated</span> &middot; ${ticketCount} ticket${ticketCount !== 1 ? 's' : ''}</span>
+          <span class="smgmt-sprint-count"><span id="smgmt-est-${escHtml(label)}" class="smgmt-sprint-est-val">— estimated</span> &middot; ${ticketCount} ticket${ticketCount !== 1 ? 's' : ''}<span id="smgmt-tokens-${escHtml(label)}" class="smgmt-sprint-token-val" style="display:none"></span></span>
         </div>
         <div class="smgmt-sprint-header-right">
           <button class="smgmt-finish-btn ${finishHidden}" ${finishDisabled}
@@ -7621,6 +7677,10 @@ async function _smgmtReEstimateRun(issueNum, rowBtn) {
     }
     // Restore row re-estimate button
     if (rowSpinner) rowSpinner.replaceWith(_makeReEstimateBtn(issueNum));
+
+    // Update local cache and sprint token header
+    if (_estDataCache[issueNum]) _estDataCache[issueNum].size = data.size;
+    _smgmtRefreshSprintTokens(issueNum);
 
     // Update detail panel
     if (tdpBtn) {

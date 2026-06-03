@@ -20,7 +20,8 @@ Commander is:
 ## Tech Stack
 
 - Python 3.12, FastAPI, Uvicorn
-- SQLite for agent event history
+- SQLite (`DB_PATH`, e.g. `dashboard.db`) for agent event history — tables `agents`, `events`, `token_usage`
+- Optional Neon/Postgres layer (`DATABASE_URL`, via `services/sprint_manager/sprint_repo.py`) that mirrors sprint metadata. It is **secondary** — the dashboard runs fully without it. Disable per-machine with `COMMANDER_DISABLE_NEON=1` (see below).
 - Plain HTML + vanilla JS (no React, no build step)
 - Server-Sent Events for live updates
 - GitHub CLI (`gh`) for issue management
@@ -34,6 +35,10 @@ The dashboard has no build step, so its two layers deploy differently:
 - **Backend** (`apps/dashboard/server.py`, `services/sprint_manager/*.py`, any Python) requires a **uvicorn restart / redeploy** to take effect.
 
 When sequencing work for a running instance you can't restart (e.g. a remote launchd dashboard), prefer frontend-only tickets — they go live without a redeploy.
+
+## Neon/Postgres kill switch
+
+The Neon layer is optional and currently **disabled on the local authoring machine** (its schema is unmigrated, so writes error). Setting `COMMANDER_DISABLE_NEON=1` (in `apps/dashboard/.env`, read at import time) makes the dashboard run purely off GitHub + SQLite + local JSON: no Neon reads/writes and no startup `projects` sync. Symptoms when it's *not* disabled but the schema is missing: a 500 on sprint create (`Neon write failed`) and a startup warning `relation "projects" does not exist`. Re-enable (and migrate the schema) when that work is picked up.
 
 ## Branching Workflow
 
@@ -60,6 +65,11 @@ DO NOT commit directly to `master`. DO NOT merge feature branches to master.
   to develop if tests pass and moves label to UAT.
 - **The human** signs off on UAT from the dashboard, then merges develop 
   to master manually.
+
+**UAT is the "done" state for progress/completion UI.** There is no separately
+tracked "done" stage before the human sign-off, so any "X/Y done" count or
+completion percentage should use `done + uat` as the numerator (surface UAT
+separately as the awaiting-sign-off count). Applied in the sprint nav pill.
 
 ## Code Conventions
 

@@ -132,6 +132,76 @@
     }
     .btn-icon:hover { background: var(--surface-2); color: var(--text); }
 
+    /* ── Sprint status pill (sits at the tab-strip level) ── */
+    .snav-wrap { position: relative; flex-shrink: 0; margin-bottom: 5px; }
+    .snav-pill {
+      display: inline-flex; align-items: center; gap: 6px;
+      height: 32px; padding: 0 10px; border-radius: 16px;
+      border: 1px solid var(--border); background: var(--surface-2);
+      color: var(--text); font-size: 12px; font-weight: 500; cursor: pointer;
+      white-space: nowrap; transition: background .15s, border-color .15s;
+    }
+    .snav-pill:hover { background: var(--surface); border-color: var(--text-sub); }
+    .snav-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-sub); flex-shrink: 0; }
+    .snav-dot--running { background: #16a34a; box-shadow: 0 0 0 3px rgba(22,163,74,.15); }
+    .snav-dot--finished { background: #2563eb; }
+    .snav-uat { color: #f59e0b; font-weight: 600; }
+    .snav-caret { font-size: 12px; color: var(--text-muted); }
+    .snav-panel {
+      position: absolute; right: 0; top: 38px; z-index: 60;
+      width: 380px; max-height: 70vh; overflow-y: auto;
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 8px; box-shadow: 0 8px 28px rgba(0,0,0,.18);
+    }
+    .snav-panel-head {
+      padding: 12px 14px; border-bottom: 1px solid var(--border);
+      font-size: 13px; font-weight: 600; color: var(--text);
+      display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    }
+    .snav-panel-body { padding: 12px 14px; font-size: 12px; color: var(--text); }
+    /* Stats row */
+    .snav-stats { display: flex; gap: 14px; margin-bottom: 12px; flex-wrap: wrap; }
+    .snav-stat { display: flex; flex-direction: column; }
+    .snav-stat-val { font-size: 16px; font-weight: 700; color: var(--text); }
+    .snav-stat-lbl { font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .03em; }
+    /* Donut + legend */
+    .snav-donut-wrap { display: flex; align-items: center; gap: 16px; }
+    .snav-donut { position: relative; width: 92px; height: 92px; flex-shrink: 0; }
+    .snav-donut-center {
+      position: absolute; inset: 0; display: flex; flex-direction: column;
+      align-items: center; justify-content: center; pointer-events: none;
+    }
+    .snav-donut-pct { font-size: 18px; font-weight: 700; color: var(--text); line-height: 1; }
+    .snav-donut-sub { font-size: 9px; color: var(--text-muted); text-transform: uppercase; }
+    .snav-legend { display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 0; }
+    .snav-legend-row { display: flex; align-items: center; gap: 7px; }
+    .snav-legend-dot { width: 9px; height: 9px; border-radius: 2px; flex-shrink: 0; }
+    .snav-legend-label { flex: 1; color: var(--text-muted); }
+    .snav-legend-val { color: var(--text); font-variant-numeric: tabular-nums; }
+    /* Rendered summary markdown */
+    .snav-summary-md {
+      margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border);
+      max-height: 340px; overflow-y: auto;
+    }
+    .md-body { font-size: 11px; line-height: 1.55; color: var(--text); word-break: break-word; }
+    .md-body .md-h { font-size: 12px; font-weight: 700; margin: 10px 0 4px; }
+    .md-body .md-p { margin: 6px 0; }
+    .md-body .md-ul, .md-body .md-ol { margin: 6px 0; padding-left: 18px; }
+    .md-body .md-hr { border: none; border-top: 1px solid var(--border); margin: 8px 0; }
+    .md-body code { background: var(--surface-2); padding: 0 3px; border-radius: 3px; font-family: var(--mono); font-size: 10px; }
+    .md-body .md-pre { background: var(--surface-2); padding: 8px; border-radius: 4px; overflow-x: auto; }
+    .md-body .md-pre code { background: none; padding: 0; }
+    .md-body .md-table { border-collapse: collapse; width: 100%; margin: 8px 0; font-size: 10.5px; }
+    .md-body .md-table th, .md-body .md-table td {
+      border: 1px solid var(--border); padding: 3px 7px; text-align: left; vertical-align: top;
+    }
+    .md-body .md-table th { background: var(--surface-2); font-weight: 600; }
+    .md-body a { color: var(--blue, #2563eb); text-decoration: none; }
+    .md-body a:hover { text-decoration: underline; }
+    .snav-link { font-size: 11px; color: var(--blue, #2563eb); text-decoration: none; }
+    .snav-link:hover { text-decoration: underline; }
+    .snav-muted { color: var(--text-muted); }
+
     /* ── Global search ── */
     .global-search-wrap {
       position: relative;
@@ -444,11 +514,15 @@
     .btn-primary .ti { font-size: 14px; }
 
     /* ── Sub-tab strip ── */
+    /* Row that holds the scrolling tab strip + the right-aligned sprint pill.
+       The pill lives OUTSIDE the overflow:auto nav so its dropdown isn't clipped. */
+    .sub-tabs-row { display: flex; align-items: flex-end; gap: 12px; }
     .sub-tabs {
       display: flex; align-items: flex-end;
       padding: 0 0; gap: 0;
       background: var(--surface);
       overflow-x: auto; scrollbar-width: none;
+      flex: 1 1 auto; min-width: 0;
     }
     .sub-tabs::-webkit-scrollbar { display: none; }
     .stab {
@@ -479,6 +553,7 @@
       white-space: nowrap; line-height: 1.6;
     }
     .bc-tab-badge--warn { background: #f59e0b; }
+    .bc-tab-badge--ready { background: #2563eb; }
     @keyframes bc-badge-spin { to { transform: rotate(360deg); } }
     .bc-tab-badge-spin { display: inline-block; animation: bc-badge-spin .9s linear infinite; }
 
@@ -1371,6 +1446,12 @@
       border: 1px solid rgba(161,98,7,.25);
       padding: 1px 6px; border-radius: 3px; font-family: var(--mono);
     }
+    .smgmt-preflight-toggle-more {
+      margin-top: 5px; padding: 2px 4px; background: none; border: none;
+      color: var(--text-muted); font-size: 11px; font-weight: 500;
+      cursor: pointer; align-self: flex-start;
+    }
+    .smgmt-preflight-toggle-more:hover { color: var(--text); text-decoration: underline; }
     @keyframes smgmt-preflight-highlight-anim {
       0%   { box-shadow: 0 0 0 3px rgba(161,98,7,.55); background: var(--yellow-bg); }
       100% { box-shadow: 0 0 0 0px rgba(161,98,7,0);  background: transparent; }
@@ -2419,6 +2500,8 @@
       transition: background .15s, color .15s;
     }
     .bc-step-chip.active { background: var(--text); color: var(--surface); }
+    .bc-step-chip.done { background: var(--surface-2); color: var(--accent, #16a34a); }
+    .bc-step-chip.done .bc-step-n { background: var(--accent, #16a34a); color: #fff; }
     .bc-step-n {
       width: 16px; height: 16px; border-radius: 50%;
       background: rgba(0,0,0,.10);
@@ -2923,6 +3006,11 @@
     .bc-tag {
       font-size: 10px; padding: 1px 6px; border-radius: 8px;
       background: var(--surface-2); border: 1px solid var(--border); color: var(--text-muted);
+    }
+    /* BA-suggested label, shown hashtag-style on draft cards */
+    .bc-tag--hash {
+      background: transparent; border-color: transparent;
+      color: var(--blue, #2563eb); padding: 1px 2px; font-weight: 500;
     }
 
     /* Card actions */
@@ -3671,7 +3759,8 @@
         </div>
       </div>
 
-      <!-- Sub-tab strip -->
+      <!-- Sub-tab strip (+ project-scoped sprint status pill, right-aligned) -->
+      <div class="sub-tabs-row">
       <nav class="sub-tabs" role="tablist" aria-label="Project sections" id="sub-tabs">
         <button class="stab active" role="tab" id="stab-sprint-mgmt"
                 aria-selected="true" onclick="switchTab('sprint-mgmt')">
@@ -3706,6 +3795,20 @@
           <i class="ti ti-history"></i>Sprint history
         </button>
       </nav>
+      <!-- Sprint status pill (GitHub-backed; works cross-machine while traveling) -->
+      <div class="snav-wrap">
+        <button class="snav-pill hidden" id="snav-pill" onclick="snavTogglePanel(event)"
+                title="Sprint status" aria-label="Sprint status">
+          <span class="snav-dot" id="snav-dot"></span>
+          <span id="snav-pill-text">Sprint</span>
+          <i class="ti ti-chevron-down snav-caret"></i>
+        </button>
+        <div class="snav-panel hidden" id="snav-panel">
+          <div class="snav-panel-head" id="snav-panel-head"></div>
+          <div class="snav-panel-body" id="snav-panel-body"></div>
+        </div>
+      </div>
+      </div><!-- /sub-tabs-row -->
     </header>
 
     <!-- Tab content -->
@@ -4523,6 +4626,7 @@ let _ticketsLoaded    = false;
 let _sprintMgmtLoaded = false;
 let _smgmtData           = null;
 let _smgmtSelectedIssues = new Set();
+let _smgmtLastSelectedNum = null;  // anchor for shift+click range selection
 let _smgmtDragTicket     = null;
 let _smgmtDragSprintLabel = null;
 const RERUN_STRIP_LABELS = new Set(['UAT','UAT-approved','released','SIT','in-progress','needs-rework']);
@@ -4542,6 +4646,8 @@ let _smgmtLivePollId = null;
 let _smgmtLogPollId = null;
 // Finish-report card cache: sprint label → {card, branch} (sprint-26 parity port, issue #367)
 const _smgmtFinishCards = {};
+/** Sprint labels with a posted summary issue (finished). From the board API. */
+let _smgmtFinishedLabels = new Set();
 
 // ── Tab navigation ────────────────────────────────────────────────────────────
 function switchTab(tab, pushHistory) {
@@ -5684,6 +5790,10 @@ async function init() {
   // Start 30s sidebar refresh
   startSidebarRefresh();
 
+  // Sprint status pill (GitHub-backed) — initial load + 30s refresh
+  snavRefresh();
+  setInterval(snavRefresh, 30000);
+
   // Update toolbar sticky top based on actual header height
   _smgmtUpdateToolbarTop();
 
@@ -5946,7 +6056,11 @@ function _smgmtRender(data) {
 
   const _sprintParents = data.sprint_parents || {};
 
-  // NEXT UP: lowest label with >= 1 ticket that isn't currently running (sprint-26 parity)
+  // Finished sprints (a summary issue exists) — the same GitHub-backed signal
+  // the nav pill uses. Finished sprints are not "NEXT UP" and skip pre-flight.
+  _smgmtFinishedLabels = new Set(data.finished_sprints || []);
+
+  // NEXT UP: lowest label with >= 1 ticket that isn't running or finished (sprint-26 parity)
   let _smgmtNextUpLabel = null;
   const sortedForNext = [...orderedLabels].sort((a, b) => {
     const ka = _smgmtSprintLabelSortKey(a);
@@ -5959,6 +6073,7 @@ function _smgmtRender(data) {
   });
   for (const lbl of sortedForNext) {
     if (_smgmtRunningLabels.has(lbl)) continue;
+    if (_smgmtFinishedLabels.has(lbl)) continue;
     if ((bySprint[lbl] || []).length >= 1) { _smgmtNextUpLabel = lbl; break; }
   }
 
@@ -5966,7 +6081,7 @@ function _smgmtRender(data) {
     const tickets = bySprint[label] || [];
     const outcome = _smgmtOutcomeCache[label] || null;
     const parent = _sprintParents[label] || null;
-    const cardHtml = _smgmtCardHtml(label, null, tickets, outcome, label === _smgmtNextUpLabel, parent);
+    const cardHtml = _smgmtCardHtml(label, null, tickets, outcome, label === _smgmtNextUpLabel, parent, _smgmtFinishedLabels.has(label));
     // Wrap each pane in a unit with a hidden finish-report card "hat" above it (issue #367 parity)
     return `<div class="smgmt-sprint-unit" id="smgmt-unit-${escHtml(label)}">` +
            `<div class="smgmt-finish-card sfc-hidden" id="smgmt-finish-card-${escHtml(label)}" style="display:none"></div>` +
@@ -6393,6 +6508,14 @@ async function _smgmtLoadGoals(orderedLabels) {
 /** Session-dismissed banner labels — not persisted across page reloads. */
 const _preflightDismissed = new Set();
 
+/** How many pre-flight items to show before "Show more". */
+const _PREFLIGHT_COLLAPSED_COUNT = 2;
+/** Labels whose pre-flight list is expanded (show all). */
+const _preflightExpanded = new Set();
+/** Cache of computed items per label so the show-more toggle can re-render
+    without recomputing the (async) estimator checks. */
+const _preflightItemsCache = {};
+
 /** Synchronous checks: body, AC, conflicting labels. Returns flat items array. */
 function _preflightCheckTickets(tickets) {
   const items = [];
@@ -6414,19 +6537,17 @@ function _preflightCheckTickets(tickets) {
 }
 
 /** Async: returns Set of issue numbers whose estimate file is absent or incomplete. */
-async function _preflightCheckEstimates(tickets, repo) {
+// Single source of truth for "has an estimate": the GitHub size-* label — the
+// SAME signal the per-ticket size badge uses (_smgmtTicketRowHtml). Previously
+// this fetched local .commander/estimates JSON, which doesn't exist on a machine
+// that isn't running the sprint, so it falsely reported "No estimator output"
+// even when the size badge already showed M/L/etc. Now they always agree.
+function _preflightCheckEstimates(tickets) {
   const missing = new Set();
-  if (!repo || tickets.length === 0) return missing;
-  await Promise.all(tickets.map(async t => {
-    try {
-      const resp = await fetch(
-        `/api/estimates/batch?project=${encodeURIComponent(repo)}&issues=${t.number}`
-      );
-      if (!resp.ok) { missing.add(t.number); return; }
-      const d = await resp.json();
-      if (!d.complete || d.total_hours === null) missing.add(t.number);
-    } catch (_) { missing.add(t.number); }
-  }));
+  (tickets || []).forEach(t => {
+    const hasSize = (t.labels || []).some(l => /^size-[SMLX]+$/.test((l && l.name) || l));
+    if (!hasSize) missing.add(t.number);
+  });
   return missing;
 }
 
@@ -6451,13 +6572,27 @@ function _preflightDismiss(label) {
 function _preflightBannerHtml(label, items) {
   if (items.length === 0 || _preflightDismissed.has(label)) return '';
   const trunc = (s, n) => s && s.length > n ? s.slice(0, n) + '…' : (s || '');
-  const rowsHtml = items.map(item =>
+
+  // Collapsed by default to the first N items; "Show more" reveals the rest.
+  const expanded = _preflightExpanded.has(label);
+  const shown = expanded ? items : items.slice(0, _PREFLIGHT_COLLAPSED_COUNT);
+  const hiddenCount = items.length - shown.length;
+
+  const rowsHtml = shown.map(item =>
     `<button class="smgmt-preflight-item" onclick="_preflightScrollToTicket(${item.number})">
       <span class="smgmt-preflight-item-id">#${item.number}</span>
       <span class="smgmt-preflight-item-title">${escHtml(trunc(item.title, 50))}</span>
       <span class="smgmt-preflight-item-type">${escHtml(item.type)}</span>
     </button>`
   ).join('');
+
+  let toggleHtml = '';
+  if (items.length > _PREFLIGHT_COLLAPSED_COUNT) {
+    toggleHtml = expanded
+      ? `<button class="smgmt-preflight-toggle-more" onclick="_preflightToggleExpand('${escHtml(label)}')">Show less</button>`
+      : `<button class="smgmt-preflight-toggle-more" onclick="_preflightToggleExpand('${escHtml(label)}')">Show ${hiddenCount} more</button>`;
+  }
+
   return `<div class="smgmt-preflight-banner" id="smgmt-preflight-${escHtml(label)}">
     <div class="smgmt-preflight-header">
       <i class="ti ti-alert-triangle" style="color:var(--yellow);font-size:14px;flex-shrink:0"></i>
@@ -6465,12 +6600,27 @@ function _preflightBannerHtml(label, items) {
       <button class="smgmt-preflight-dismiss" onclick="_preflightDismiss('${escHtml(label)}')" title="Dismiss">&times;</button>
     </div>
     <div class="smgmt-preflight-items">${rowsHtml}</div>
+    ${toggleHtml}
   </div>`;
+}
+
+/** Expand/collapse a sprint's pre-flight list and re-render it in place. */
+function _preflightToggleExpand(label) {
+  if (_preflightExpanded.has(label)) _preflightExpanded.delete(label);
+  else _preflightExpanded.add(label);
+  const items = _preflightItemsCache[label];
+  if (!items) return;
+  const el = document.getElementById(`smgmt-preflight-${label}`);
+  if (!el) return;
+  const html = _preflightBannerHtml(label, items);
+  if (html) el.outerHTML = html;
 }
 
 /** Run all checks for one sprint pane and inject/update the banner in the DOM. */
 async function _preflightInjectBanner(label, tickets, repo) {
   if (_preflightDismissed.has(label)) return;
+  // Finished sprints (summary issue exists) don't need a pre-flight check.
+  if (_smgmtFinishedLabels.has(label)) return;
   const card = document.getElementById(`smgmt-card-${label}`);
   if (!card) return;
 
@@ -6478,7 +6628,7 @@ async function _preflightInjectBanner(label, tickets, repo) {
   if (existing) existing.remove();
 
   const syncItems = _preflightCheckTickets(tickets);
-  const missingEst = await _preflightCheckEstimates(tickets, repo);
+  const missingEst = _preflightCheckEstimates(tickets);
 
   const items = [...syncItems];
   const byNum = {};
@@ -6489,6 +6639,9 @@ async function _preflightInjectBanner(label, tickets, repo) {
   }
 
   if (items.length === 0 || _preflightDismissed.has(label)) return;
+
+  // Cache for the show-more/less toggle (avoids recomputing async checks).
+  _preflightItemsCache[label] = items;
 
   const html = _preflightBannerHtml(label, items);
   if (!html) return;
@@ -7154,7 +7307,7 @@ function smgmtCancelRename(label, origN, nameEl) {
   nameEl.textContent = sprintLabelDisplay(label);
 }
 
-function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent) {
+function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent, finished) {
   const isRunning = _smgmtRunningLabels.has(label);
   let isCollapsed = false;
   try { isCollapsed = localStorage.getItem('sprintColumn_' + label + '_collapsed') === '1'; } catch (_) {}
@@ -7227,6 +7380,11 @@ function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent) {
     ticketsContainerHtml = tickets.length > 0
       ? tickets.map(t => _smgmtTicketRowHtml(t, label)).join('')
       : '<div class="smgmt-drop-hint">Drop tickets here</div>';
+    // A summary issue exists but no detailed outcome cached — still mark finished
+    // so the board agrees with the nav pill (and NEXT UP/pre-flight are suppressed).
+    if (finished) {
+      outcomeBadgeHtml = `<span class="smgmt-state-badge state-finished">Finished</span>`;
+    }
   }
 
   // Sprint summary: progress bar + goal
@@ -7282,7 +7440,6 @@ function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent) {
                   onclick="smgmtDeleteSprint('${escHtml(label)}')">
             <i class="ti ti-trash"></i> Delete</button>
           ${actionBtn}
-          ${!isPostRun ? rerunBtn : ''}
         </div>
       </div>
       ${summaryHtml}
@@ -7770,15 +7927,15 @@ function _smgmtTicketRowHtml(ticket, label) {
          ondragover="_smgmtTicketReorderDragOver(event)"
          ondragleave="_smgmtTicketReorderDragLeave(event)"
          ondrop="_smgmtTicketReorderDrop(event, ${ticket.number}, '${escHtml(label)}')"
-         oncontextmenu="_smgmtCtxMenuOpen(event,${ticket.number})"
-         onclick="if(event.ctrlKey||event.metaKey){event.preventDefault();_smgmtToggleSelect(${ticket.number},!_smgmtSelectedIssues.has(${ticket.number}));}">
+         onclick="_smgmtRowClick(event, ${ticket.number}, '${escHtml(label)}')"
+         oncontextmenu="_smgmtCtxMenuOpen(event,${ticket.number})">
       <input type="checkbox" class="smgmt-ticket-cb"
              ${isSelected ? 'checked' : ''}
              onclick="event.stopPropagation()"
              onchange="_smgmtToggleSelect(${ticket.number}, this.checked)">
       <i class="ti ti-grip-vertical smgmt-ticket-grip"></i>
       <a class="smgmt-ticket-num" href="${escHtml(ticket.url || '#')}" target="_blank"
-         rel="noopener" onclick="event.stopPropagation()">#${ticket.number}</a>
+         rel="noopener" draggable="false" onclick="event.stopPropagation()">#${ticket.number}</a>
       <span class="smgmt-ticket-title" title="${escHtml(ticket.title)}">${escHtml(ticket.title)}</span>
       ${sizePillHtml}
       <span class="smgmt-ticket-status ${statusClass}">${escHtml(statusLabel)}</span>
@@ -8937,15 +9094,51 @@ function _smgmtClearSelection() {
   _smgmtUpdateSelectionUI();
 }
 
-function _smgmtToggleSelect(number, checked) {
-  if (checked) _smgmtSelectedIssues.add(number);
+function _smgmtSetSelected(number, selected) {
+  if (selected) _smgmtSelectedIssues.add(number);
   else _smgmtSelectedIssues.delete(number);
   const el = document.getElementById(`smgmt-ticket-${number}`);
   if (el) {
-    el.classList.toggle('is-selected', checked);
+    el.classList.toggle('is-selected', selected);
     const cb = el.querySelector('.smgmt-ticket-cb');
-    if (cb) cb.checked = checked;
+    if (cb) cb.checked = selected;
   }
+}
+
+function _smgmtToggleSelect(number, checked) {
+  _smgmtSetSelected(number, checked);
+  _smgmtLastSelectedNum = checked ? number : null;
+  _smgmtUpdateSelectionUI();
+}
+
+// Click a ticket row to select/deselect it (toggle). Shift+click extends the
+// selection from the last-clicked ticket to this one, like a file picker.
+// Clicks on the checkbox/link/menu don't reach here (they stopPropagation).
+function _smgmtRowClick(event, number, label) {
+  const container = label
+    ? document.getElementById(`smgmt-tickets-${label}`)
+    : document.getElementById('smgmt-backlog-tickets');
+
+  if (event.shiftKey && _smgmtLastSelectedNum != null && container) {
+    const nums = Array.from(container.querySelectorAll('.smgmt-ticket[data-issue]'))
+      .map(r => parseInt(r.dataset.issue, 10));
+    const a = nums.indexOf(_smgmtLastSelectedNum);
+    const b = nums.indexOf(number);
+    if (a !== -1 && b !== -1) {
+      const [lo, hi] = a <= b ? [a, b] : [b, a];
+      for (let i = lo; i <= hi; i++) _smgmtSetSelected(nums[i], true);
+      _smgmtLastSelectedNum = number;
+      _smgmtUpdateSelectionUI();
+      const sel = window.getSelection && window.getSelection();
+      if (sel) sel.removeAllRanges();  // clear the text highlight shift-click makes
+      return;
+    }
+  }
+
+  // Plain click: toggle this ticket on/off.
+  const nowSelected = !_smgmtSelectedIssues.has(number);
+  _smgmtSetSelected(number, nowSelected);
+  _smgmtLastSelectedNum = nowSelected ? number : null;
   _smgmtUpdateSelectionUI();
 }
 
@@ -9098,15 +9291,16 @@ function _smgmtDragMovePill(event) {
 let _smgmtGhostNextNum = null;
 
 /**
- * Compute the lowest positive integer N such that no label sprint-N already
- * exists (plain integer labels only; sub-labels like sprint-N.M are ignored).
- * Result is cached at drag-start — call once, reuse during session.
+ * Next sprint number = max existing + 1. Uses the server's placeholder_sprint
+ * (computed over sprint labels AND finished-summary numbers, so a deleted early
+ * label never resets it to 1). Falls back to a client-side max if absent.
  */
 function _smgmtGhostComputeNextFree() {
-  const existing = new Set((_smgmtData?.sprints || []).map(n => Number(n)));
-  let n = 1;
-  while (existing.has(n)) n++;
-  return n;
+  if (_smgmtData && Number.isInteger(_smgmtData.placeholder_sprint)) {
+    return _smgmtData.placeholder_sprint;
+  }
+  const nums = (_smgmtData?.sprints || []).map(Number).filter(n => !isNaN(n));
+  return nums.length ? Math.max(...nums) + 1 : 1;
 }
 
 /** Show the ghost pane below the sprint list, pre-computing next-free number. */
@@ -9122,19 +9316,7 @@ function _smgmtGhostShow() {
   if (!ghost) return;
 
   titleEl.textContent = `Drop here to create Sprint ${_smgmtGhostNextNum}`;
-
-  // Build sub-text: identify skipped empty sprints
-  const existing = new Set((_smgmtData?.sprints || []).map(n => Number(n)));
-  const skipped = [];
-  for (let i = 1; i < _smgmtGhostNextNum; i++) {
-    if (!existing.has(i)) skipped.push(i);
-  }
-  if (skipped.length > 0) {
-    const skippedStr = skipped.map(s => `Sprint ${s}`).join(', ');
-    subEl.textContent = `next free number · skipped empty ${skippedStr}`;
-  } else {
-    subEl.textContent = `next free number`;
-  }
+  subEl.textContent = 'next sprint number';
 
   ghost.classList.add('ghost-visible');
 }
@@ -9542,15 +9724,15 @@ function _smgmtBacklogTicketHtml(ticket, sprintNums) {
          data-labels="${escHtml(backlogLabelNames)}"
          ondragstart="_smgmtBacklogTicketDragStart(event, ${ticket.number})"
          ondragend="_smgmtTicketDragEnd(event)"
-         oncontextmenu="_smgmtCtxMenuOpen(event,${ticket.number})"
-         onclick="if(event.ctrlKey||event.metaKey){event.preventDefault();_smgmtToggleSelect(${ticket.number},!_smgmtSelectedIssues.has(${ticket.number}));}">
-      <input type="checkbox" class="smgmt-ticket-cb"
+         onclick="_smgmtRowClick(event, ${ticket.number}, null)"
+         oncontextmenu="_smgmtCtxMenuOpen(event,${ticket.number})">
+      <input type="checkbox" class="smgmt-ticket-cb" draggable="false"
              ${isSelected ? 'checked' : ''}
              onclick="event.stopPropagation()"
              onchange="_smgmtToggleSelect(${ticket.number}, this.checked)">
       <i class="ti ti-grip-vertical smgmt-ticket-grip"></i>
       <a class="smgmt-ticket-num" href="${escHtml(ticket.url || '#')}" target="_blank"
-         rel="noopener" onclick="event.stopPropagation()">#${ticket.number}</a>
+         rel="noopener" draggable="false" onclick="event.stopPropagation()">#${ticket.number}</a>
       <span class="smgmt-ticket-title" title="${escHtml(ticket.title)}">${escHtml(ticket.title)}</span>
       <button class="smgmt-row-menu-btn" tabindex="0" title="Ticket actions" aria-haspopup="true" aria-expanded="false"
               onclick="event.stopPropagation();_smgmtRowMenuOpen(event, ${ticket.number}, null, ${hasEstimate})"
@@ -10490,13 +10672,34 @@ function _clearBodyInert() {
 
 // ── New Sprint modal ──────────────────────────────────────────────────────
 function smgmtOpenNewSprint() {
-  document.getElementById('ns-label').value = '';
+  // Prefill with the next sprint number (max + 1, robust against deleted labels).
+  const next = _smgmtGhostComputeNextFree();
+  document.getElementById('ns-label').value = `sprint-${next}`;
+  const countEl = document.getElementById('ns-count');
+  if (countEl) countEl.value = '1';
+  _nsUpdateHint();
   document.getElementById('ns-error').classList.add('hidden');
-  document.getElementById('ns-submit-btn').disabled = true;
+  const submitBtn = document.getElementById('ns-submit-btn');
+  submitBtn.disabled = false;
+  submitBtn.textContent = 'Create Sprint';
   _setBodyInert(['ns-backdrop', 'ns-modal']);
   document.getElementById('ns-backdrop').classList.remove('hidden');
   document.getElementById('ns-modal').classList.remove('hidden');
-  document.getElementById('ns-label').focus();
+  const inp = document.getElementById('ns-label');
+  inp.focus();
+  inp.select();
+}
+
+// Show which sprint labels will be created given the start + count.
+function _nsUpdateHint() {
+  const hintEl = document.getElementById('ns-hint');
+  if (!hintEl) return;
+  const start = _parseSprintNum(document.getElementById('ns-label').value || '');
+  const count = parseInt((document.getElementById('ns-count') || {}).value || '1', 10);
+  if (start === null) { hintEl.textContent = ''; return; }
+  const labels = [];
+  for (let i = 0; i < count; i++) labels.push(`sprint-${start + i}`);
+  hintEl.textContent = count > 1 ? `Will create: ${labels.join(', ')}` : '';
 }
 
 function _nsClose(force) {
@@ -10817,7 +11020,9 @@ function _setupModals() {
   // ── New Sprint modal wiring ──
   document.getElementById('ns-label').addEventListener('input', function() {
     document.getElementById('ns-submit-btn').disabled = _parseSprintNum(this.value) === null;
+    _nsUpdateHint();
   });
+  document.getElementById('ns-count').addEventListener('change', _nsUpdateHint);
 
   document.getElementById('rr-close-btn').addEventListener('click', _rrClose);
   document.getElementById('rr-cancel-btn').addEventListener('click', _rrClose);
@@ -10830,8 +11035,9 @@ function _setupModals() {
 
   document.getElementById('ns-submit-btn').addEventListener('click', async function() {
     const labelVal = (document.getElementById('ns-label').value || '').trim();
-    const sprintNum = _parseSprintNum(labelVal);
-    if (sprintNum === null) return;
+    const startNum = _parseSprintNum(labelVal);
+    if (startNum === null) return;
+    const count = parseInt((document.getElementById('ns-count') || {}).value || '1', 10);
 
     const repo = _cachedFullRepo[_slug] || null;
     if (!repo) { _nsShowError('Project not found — please reload the page.'); return; }
@@ -10840,15 +11046,23 @@ function _setupModals() {
     this.textContent = 'Creating…';
     document.getElementById('ns-error').classList.add('hidden');
 
+    // Create count sequential sprints starting at startNum. A number that already
+    // exists (409) is skipped rather than aborting the batch.
+    const created = [];
     try {
-      const resp = await fetch('/api/sprints/create', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ project: repo, sprint_number: sprintNum }),
-      });
-      if (!resp.ok) {
-        const data = await resp.json().catch(() => ({}));
-        throw new Error(data.detail || 'HTTP ' + resp.status);
+      for (let i = 0; i < count; i++) {
+        const num = startNum + i;
+        const resp = await fetch('/api/sprints/create', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ project: repo, sprint_number: num }),
+        });
+        if (resp.status === 409) continue;  // already exists — skip
+        if (!resp.ok) {
+          const data = await resp.json().catch(() => ({}));
+          throw new Error(data.detail || 'HTTP ' + resp.status);
+        }
+        created.push(num);
       }
       document.getElementById('ns-backdrop').classList.add('hidden');
       document.getElementById('ns-modal').classList.add('hidden');
@@ -12744,6 +12958,241 @@ function _smOnChange(sel) {
   localStorage.setItem(SM_STORAGE_KEY, JSON.stringify(saved));
 }
 
+// ── Sprint status pill (GitHub-backed; works cross-machine while traveling) ──
+let _snavState = null;
+let _snavPanelOpen = false;
+
+function _snavRepo() {
+  return _cachedFullRepo[_slug] || '';
+}
+
+async function snavRefresh() {
+  const repo = _snavRepo();
+  if (!repo) return;
+  try {
+    const res = await fetch(`/api/sprint-nav-status?repo=${encodeURIComponent(repo)}`);
+    if (!res.ok) return;
+    _snavState = await res.json();
+    _snavRenderPill();
+    if (_snavPanelOpen) _snavRenderPanel();
+  } catch (_) { /* leave last-known pill state */ }
+}
+
+function _snavRenderPill() {
+  const pill = document.getElementById('snav-pill');
+  const dot  = document.getElementById('snav-dot');
+  const text = document.getElementById('snav-pill-text');
+  if (!pill || !dot || !text) return;
+  const d = _snavState;
+  if (!d || !d.has_sprint) { pill.classList.add('hidden'); return; }
+  pill.classList.remove('hidden');
+  if (d.state === 'finished') {
+    dot.className = 'snav-dot snav-dot--finished';
+    text.textContent = `S${d.sprint} · done`;
+  } else {
+    dot.className = 'snav-dot snav-dot--running';
+    // UAT counts as "done" — this project tracks UAT (awaiting sign-off) as the
+    // completed state, not a separate closed state.
+    const completed = (d.done || 0) + (d.uat || 0);
+    const uatHtml = d.uat > 0 ? ` · <span class="snav-uat">${d.uat} UAT</span>` : '';
+    text.innerHTML = `S${d.sprint} · ${completed}/${d.total}${uatHtml}`;
+  }
+}
+
+function snavTogglePanel(event) {
+  if (event) event.stopPropagation();
+  const panel = document.getElementById('snav-panel');
+  if (!panel) return;
+  _snavPanelOpen = panel.classList.contains('hidden'); // true if we're opening it
+  panel.classList.toggle('hidden');
+  if (_snavPanelOpen) _snavRenderPanel();
+}
+
+function _snavRenderPanel() {
+  const head = document.getElementById('snav-panel-head');
+  const body = document.getElementById('snav-panel-body');
+  const d = _snavState;
+  if (!head || !body) return;
+  if (!d || !d.has_sprint) {
+    head.textContent = 'Sprint status';
+    body.innerHTML = '<span class="snav-muted">No sprint found on GitHub yet.</span>';
+    return;
+  }
+  const finished = d.state === 'finished';
+  head.innerHTML = `<span>Sprint ${d.sprint} · ${finished ? 'Finished' : 'Running'}</span>`
+    + (d.summary_issue
+        ? `<a class="snav-link" href="${escHtml(d.summary_issue.url)}" target="_blank" rel="noopener">Issue ↗</a>`
+        : '');
+
+  const cols  = d.columns || {};
+  const total = d.total || 0;
+
+  // Stats row: ticket totals, plus total time once the summary loads (finished).
+  const statsRow = `<div class="snav-stats">
+    <div class="snav-stat"><span class="snav-stat-val">${total}</span><span class="snav-stat-lbl">tickets</span></div>
+    <div class="snav-stat"><span class="snav-stat-val">${(d.done || 0) + (d.uat || 0)}</span><span class="snav-stat-lbl">done</span></div>
+    <div class="snav-stat"><span class="snav-stat-val snav-uat">${d.uat || 0}</span><span class="snav-stat-lbl">in UAT</span></div>
+    ${finished ? `<div class="snav-stat" id="snav-duration"><span class="snav-stat-val">…</span><span class="snav-stat-lbl">total time</span></div>` : ''}
+  </div>`;
+
+  const tail = (finished && d.summary_issue)
+    ? `<div class="snav-summary-md md-body" id="snav-summary-md"><span class="snav-muted">Loading summary…</span></div>`
+    : `<div class="snav-muted" style="margin-top:8px;">Live progress is inferred from GitHub labels (≈30s). The sprint itself runs on the Mac mini.</div>`;
+
+  body.innerHTML = statsRow + _snavDonutHtml(cols, total) + tail;
+
+  if (finished && d.summary_issue) _snavLoadSummary(d.summary_issue.number);
+}
+
+// Donut chart of the sprint's tickets by workflow column, with a legend.
+function _snavDonutHtml(cols, total) {
+  const segs = [
+    { key: 'done',        label: 'Done',        color: '#16a34a' },
+    { key: 'uat',         label: 'UAT',         color: '#f59e0b' },
+    { key: 'sit',         label: 'SIT',         color: '#8b5cf6' },
+    { key: 'in-progress', label: 'In progress', color: '#2563eb' },
+    { key: 'backlog',     label: 'Backlog',     color: '#94a3b8' },
+  ];
+  const r = 42, cx = 50, cy = 50, circ = 2 * Math.PI * r;
+  let offset = 0, circles = '';
+  if (total > 0) {
+    segs.forEach(s => {
+      const v = cols[s.key] || 0;
+      if (v <= 0) return;
+      const len = (v / total) * circ;
+      circles += `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${s.color}" stroke-width="14"`
+        + ` stroke-dasharray="${len.toFixed(2)} ${(circ - len).toFixed(2)}" stroke-dashoffset="${(-offset).toFixed(2)}"`
+        + ` transform="rotate(-90 ${cx} ${cy})"></circle>`;
+      offset += len;
+    });
+  } else {
+    circles = `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="var(--surface-2)" stroke-width="14"></circle>`;
+  }
+  // UAT counts as done (project tracks UAT as the completed state).
+  const donePct = total > 0 ? Math.round(((cols.done || 0) + (cols.uat || 0)) / total * 100) : 0;
+  const legend = segs.filter(s => (cols[s.key] || 0) > 0).map(s => {
+    const v = cols[s.key] || 0;
+    const pct = total > 0 ? Math.round(v / total * 100) : 0;
+    return `<div class="snav-legend-row">
+      <span class="snav-legend-dot" style="background:${s.color}"></span>
+      <span class="snav-legend-label">${s.label}</span>
+      <span class="snav-legend-val">${v} · ${pct}%</span>
+    </div>`;
+  }).join('');
+  return `<div class="snav-donut-wrap">
+    <div class="snav-donut">
+      <svg viewBox="0 0 100 100" width="92" height="92" aria-hidden="true">${circles}</svg>
+      <div class="snav-donut-center"><span class="snav-donut-pct">${donePct}%</span><span class="snav-donut-sub">done</span></div>
+    </div>
+    <div class="snav-legend">${legend || '<span class="snav-muted">No tickets</span>'}</div>
+  </div>`;
+}
+
+function _snavExtractDuration(md) {
+  const m = (md || '').match(/\|\s*Duration\s*\|\s*([^|]+?)\s*\|/i);
+  return m ? m[1].trim() : '';
+}
+
+async function _snavLoadSummary(number) {
+  const el = document.getElementById('snav-summary-md');
+  const repo = _snavRepo();
+  try {
+    const res = await fetch(`/api/sprint-nav-summary?number=${number}&repo=${encodeURIComponent(repo)}`);
+    if (!res.ok) { if (el) el.innerHTML = '<span class="snav-muted">Could not load summary.</span>'; return; }
+    const data = await res.json();
+    const bodyMd = data.body || '';
+    if (el) el.innerHTML = _mdToHtml(bodyMd) || '<span class="snav-muted">(empty summary)</span>';
+    // Total time stat — read "Duration" straight from the summary table.
+    const durEl = document.getElementById('snav-duration');
+    if (durEl) {
+      const dur = _snavExtractDuration(bodyMd);
+      const valEl = durEl.querySelector('.snav-stat-val');
+      if (valEl) valEl.textContent = dur || '—';
+    }
+  } catch (_) {
+    if (el) el.innerHTML = '<span class="snav-muted">Could not load summary.</span>';
+  }
+}
+
+// ── Minimal markdown → HTML (sprint summaries: headings, bold/italic/code,
+//    links, lists, GitHub tables, hr). Input is escaped first, so it is safe
+//    to inject. Not full CommonMark — only what summaries use. ──
+function _mdInline(s) {
+  return s
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+    .replace(/(^|[^*])\*([^*\s][^*]*)\*/g, '$1<em>$2</em>')
+    .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+}
+function _mdToHtml(md) {
+  const lines = escHtml(md || '').split('\n');
+  const out = [];
+  const isTableSep = (s) => /^\s*\|?[\s:|-]*-[\s:|-]*\|?\s*$/.test(s || '');
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+
+    if (/^```/.test(line.trim())) {
+      const buf = [];
+      i++;
+      while (i < lines.length && !/^```/.test(lines[i].trim())) { buf.push(lines[i]); i++; }
+      i++;
+      out.push(`<pre class="md-pre"><code>${buf.join('\n')}</code></pre>`);
+      continue;
+    }
+
+    if (line.includes('|') && isTableSep(lines[i + 1])) {
+      const parseRow = (r) => r.trim().replace(/^\||\|$/g, '').split('|').map(c => c.trim());
+      const headers = parseRow(line);
+      i += 2;
+      const rows = [];
+      while (i < lines.length && lines[i].includes('|') && lines[i].trim() !== '') { rows.push(parseRow(lines[i])); i++; }
+      const th = headers.map(h => `<th>${_mdInline(h)}</th>`).join('');
+      const trs = rows.map(c => `<tr>${c.map(x => `<td>${_mdInline(x)}</td>`).join('')}</tr>`).join('');
+      out.push(`<table class="md-table"><thead><tr>${th}</tr></thead><tbody>${trs}</tbody></table>`);
+      continue;
+    }
+
+    const h = line.match(/^(#{1,6})\s+(.*)$/);
+    if (h) { const lvl = Math.min(6, h[1].length); out.push(`<h${lvl} class="md-h">${_mdInline(h[2])}</h${lvl}>`); i++; continue; }
+
+    if (/^\s*([-*_])(\s*\1){2,}\s*$/.test(line)) { out.push('<hr class="md-hr">'); i++; continue; }
+
+    if (/^\s*[-*]\s+/.test(line)) {
+      const items = [];
+      while (i < lines.length && /^\s*[-*]\s+/.test(lines[i])) { items.push(`<li>${_mdInline(lines[i].replace(/^\s*[-*]\s+/, ''))}</li>`); i++; }
+      out.push(`<ul class="md-ul">${items.join('')}</ul>`);
+      continue;
+    }
+
+    if (/^\s*\d+\.\s+/.test(line)) {
+      const items = [];
+      while (i < lines.length && /^\s*\d+\.\s+/.test(lines[i])) { items.push(`<li>${_mdInline(lines[i].replace(/^\s*\d+\.\s+/, ''))}</li>`); i++; }
+      out.push(`<ol class="md-ol">${items.join('')}</ol>`);
+      continue;
+    }
+
+    if (line.trim() === '') { i++; continue; }
+
+    const para = [];
+    while (i < lines.length && lines[i].trim() !== '' && !/^```/.test(lines[i].trim())
+           && !/^(#{1,6})\s+/.test(lines[i]) && !/^\s*[-*]\s+/.test(lines[i]) && !/^\s*\d+\.\s+/.test(lines[i])
+           && !(lines[i].includes('|') && isTableSep(lines[i + 1]))) {
+      para.push(lines[i]); i++;
+    }
+    out.push(`<p class="md-p">${_mdInline(para.join(' '))}</p>`);
+  }
+  return out.join('\n');
+}
+
+// Close the panel when clicking outside it.
+document.addEventListener('click', function(e) {
+  const wrap  = document.querySelector('.snav-wrap');
+  const panel = document.getElementById('snav-panel');
+  if (!wrap || !panel || panel.classList.contains('hidden')) return;
+  if (!wrap.contains(e.target)) { panel.classList.add('hidden'); _snavPanelOpen = false; }
+});
+
 document.addEventListener('DOMContentLoaded', init);
 
 // ── Logs Tab (issue #420) ─────────────────────────────────────────────────────
@@ -13632,10 +14081,19 @@ function _cmpEmptyState(title, msg) {
   </div>
   <div class="modal-body">
     <div class="modal-field">
-      <label class="modal-label" for="ns-label">Sprint label <span style="color:var(--red)">*</span></label>
+      <label class="modal-label" for="ns-label">Starting sprint <span style="color:var(--red)">*</span></label>
       <input class="modal-input" id="ns-label" type="text"
              placeholder="e.g. Sprint 25 or sprint-25"
              aria-required="true">
+      <div class="modal-hint" id="ns-hint" style="font-size:11px;color:var(--text-muted);margin-top:4px;"></div>
+    </div>
+    <div class="modal-field">
+      <label class="modal-label" for="ns-count">How many (ahead)</label>
+      <select class="modal-input" id="ns-count">
+        <option value="1" selected>1 sprint</option>
+        <option value="2">2 sprints</option>
+        <option value="3">3 sprints</option>
+      </select>
     </div>
     <div class="modal-error hidden" id="ns-error"></div>
   </div>

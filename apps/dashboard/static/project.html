@@ -2342,6 +2342,61 @@
     .bc-prompt-row.bc-dup { background: #fffbeb; border: 1px solid #fcd34d; border-bottom-color: #fcd34d; }
     .bc-prompt-row.bc-dup .bc-prompt-row-num { color: #92400e; }
 
+    /* Prompt templates (issue #531) */
+    .bc-tpl-section { border-top: 1px solid var(--border); }
+    .bc-tpl-header { padding: 8px 28px; display: flex; align-items: center; justify-content: space-between; }
+    .bc-tpl-save-btn {
+      background: none; border: 1px solid var(--border); border-radius: 6px;
+      padding: 3px 10px; font-size: 11px; color: var(--text-sub); cursor: pointer;
+      display: flex; align-items: center; gap: 4px; transition: border-color .1s, color .1s;
+    }
+    .bc-tpl-save-btn:hover { border-color: var(--blue); color: var(--blue); }
+    .bc-tpl-save-form { display: flex; align-items: center; gap: 6px; padding: 0 28px 8px; flex-wrap: wrap; }
+    .bc-tpl-name-input {
+      flex: 1; min-width: 120px; font-size: 12px; font-family: inherit;
+      border: 1px solid var(--border); border-radius: 6px;
+      padding: 4px 10px; background: var(--surface); color: var(--text);
+      outline: none; transition: border-color .1s;
+    }
+    .bc-tpl-name-input:focus { border-color: var(--blue); }
+    .bc-tpl-confirm-btn {
+      font-size: 11px; padding: 4px 12px; border-radius: 6px;
+      background: var(--blue); color: #fff; border: none; cursor: pointer;
+      flex-shrink: 0; transition: opacity .1s;
+    }
+    .bc-tpl-confirm-btn:hover { opacity: .85; }
+    .bc-tpl-cancel-btn {
+      font-size: 11px; padding: 4px 10px; border-radius: 6px;
+      background: none; border: 1px solid var(--border); color: var(--text-sub);
+      cursor: pointer; flex-shrink: 0; transition: border-color .1s, color .1s;
+    }
+    .bc-tpl-cancel-btn:hover { border-color: var(--text-sub); color: var(--text); }
+    .bc-tpl-name-error { font-size: 11px; color: var(--red); flex: 0 0 100%; padding-left: 2px; }
+    .bc-tpl-list { padding: 0 28px 8px; display: flex; flex-direction: column; gap: 4px; }
+    .bc-tpl-empty { font-size: 11px; color: var(--text-muted); padding: 2px 0; }
+    .bc-tpl-row {
+      display: flex; align-items: center; gap: 6px;
+      padding: 4px 8px 4px 10px; border-radius: 6px;
+      border: 1px solid var(--border); background: var(--surface-2);
+    }
+    .bc-tpl-row-name {
+      flex: 1; min-width: 0; font-size: 12px; color: var(--text);
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .bc-tpl-row-insert {
+      font-size: 11px; padding: 2px 8px; border-radius: 5px;
+      border: 1px solid var(--border); background: var(--surface);
+      color: var(--text-sub); cursor: pointer; flex-shrink: 0;
+      transition: border-color .1s, color .1s, background .1s;
+    }
+    .bc-tpl-row-insert:hover { border-color: var(--blue); color: var(--blue); background: var(--blue-bg); }
+    .bc-tpl-row-delete {
+      background: none; border: none; padding: 2px 4px; cursor: pointer;
+      color: var(--text-muted); font-size: 14px; flex-shrink: 0;
+      transition: color .1s; border-radius: 4px; line-height: 1;
+    }
+    .bc-tpl-row-delete:hover { color: var(--red); background: var(--red-bg); }
+
     /* Attachments */
     .bc-attach-section { padding: 10px 28px 6px; border-top: 1px solid var(--border); }
     .bc-attach-header { margin-bottom: 6px; }
@@ -3627,6 +3682,26 @@
 
           <div class="bc-info-note">
             Split prompts using <code>---</code> on its own line. All created tickets go to backlog &mdash; assign them to a sprint later via Sprint Mgmt.
+          </div>
+
+          <!-- Prompt templates (issue #531) -->
+          <div class="bc-tpl-section" id="bc-tpl-section">
+            <div class="bc-tpl-header">
+              <span class="bc-settings-label">Templates</span>
+              <button type="button" class="bc-tpl-save-btn" id="bc-tpl-save-btn"
+                      onclick="_bcTplShowSaveForm()" aria-label="Save current textarea as a template">
+                <i class="ti ti-bookmark-plus"></i> Save as template
+              </button>
+            </div>
+            <div class="bc-tpl-save-form hidden" id="bc-tpl-save-form" role="form" aria-label="Template name">
+              <input class="bc-tpl-name-input" id="bc-tpl-name-input" type="text"
+                     placeholder="Template name" autocomplete="off" maxlength="80"
+                     onkeydown="_bcTplNameKeydown(event)" oninput="_bcTplClearError()">
+              <button type="button" class="bc-tpl-confirm-btn" onclick="_bcTplConfirmSave()">Save</button>
+              <button type="button" class="bc-tpl-cancel-btn" onclick="_bcTplCancelSave()">Cancel</button>
+              <span class="bc-tpl-name-error hidden" id="bc-tpl-name-error" role="alert"></span>
+            </div>
+            <div class="bc-tpl-list" id="bc-tpl-list" role="list"></div>
           </div>
 
           <!-- Prompt reorder list (issue #529) -->
@@ -9919,6 +9994,7 @@ function _bcInitTab() {
     _bcShowStep(1);
     _bcPopulateRepo();
     _bcUpdateCounter();
+    _bcTplRender();
   }
 }
 
@@ -9981,7 +10057,124 @@ function _bcGoToStep1() {
 }
 
 function bcRepoChanged() {
-  // Nothing extra needed — repo is read at run time
+  _bcTplRender();
+}
+
+// ── Prompt templates (issue #531) ────────────────────────────────────────────
+
+function _bcTplKey() {
+  const sel = document.getElementById('bc-repo');
+  const repo = (sel && sel.value) ? sel.value : (_slug || '');
+  return 'bulk_templates_' + repo;
+}
+
+function _bcTplLoad() {
+  try { return JSON.parse(localStorage.getItem(_bcTplKey()) || '[]'); }
+  catch { return []; }
+}
+
+function _bcTplSaveAll(templates) {
+  localStorage.setItem(_bcTplKey(), JSON.stringify(templates));
+}
+
+function _bcTplRender() {
+  const list = document.getElementById('bc-tpl-list');
+  if (!list) return;
+  const templates = _bcTplLoad();
+  if (templates.length === 0) {
+    list.innerHTML = '<div class="bc-tpl-empty" aria-live="polite">No saved templates</div>';
+    return;
+  }
+  list.innerHTML = templates.map((t, i) => `
+    <div class="bc-tpl-row" role="listitem">
+      <span class="bc-tpl-row-name" title="${escHtml(t.name)}">${escHtml(t.name)}</span>
+      <button type="button" class="bc-tpl-row-insert" tabindex="0"
+              onclick="_bcTplInsert(${i})"
+              aria-label="Insert template ${escHtml(t.name)}">Insert</button>
+      <button type="button" class="bc-tpl-row-delete" tabindex="0"
+              onclick="_bcTplDelete(${i})"
+              aria-label="Delete template ${escHtml(t.name)}" title="Delete">
+        <i class="ti ti-trash"></i>
+      </button>
+    </div>
+  `).join('');
+}
+
+function _bcTplShowSaveForm() {
+  const form = document.getElementById('bc-tpl-save-form');
+  const btn  = document.getElementById('bc-tpl-save-btn');
+  const input = document.getElementById('bc-tpl-name-input');
+  if (!form) return;
+  form.classList.remove('hidden');
+  if (btn) btn.classList.add('hidden');
+  if (input) { input.value = ''; input.focus(); }
+  _bcTplClearError();
+}
+
+function _bcTplCancelSave() {
+  document.getElementById('bc-tpl-save-form')?.classList.add('hidden');
+  document.getElementById('bc-tpl-save-btn')?.classList.remove('hidden');
+  _bcTplClearError();
+}
+
+function _bcTplClearError() {
+  const err = document.getElementById('bc-tpl-name-error');
+  if (err) { err.textContent = ''; err.classList.add('hidden'); }
+}
+
+function _bcTplShowError(msg) {
+  const err = document.getElementById('bc-tpl-name-error');
+  if (err) { err.textContent = msg; err.classList.remove('hidden'); }
+}
+
+function _bcTplConfirmSave() {
+  const input = document.getElementById('bc-tpl-name-input');
+  const name = (input ? input.value : '').trim();
+  if (!name) {
+    _bcTplShowError('Template name cannot be empty.');
+    if (input) input.focus();
+    return;
+  }
+  const templates = _bcTplLoad();
+  if (templates.some(t => t.name === name)) {
+    _bcTplShowError(`"${name}" already exists. Choose a different name.`);
+    if (input) input.focus();
+    return;
+  }
+  const textarea = document.getElementById('bc-textarea');
+  const content = textarea ? textarea.value : '';
+  templates.push({ name, content });
+  _bcTplSaveAll(templates);
+  _bcTplCancelSave();
+  _bcTplRender();
+}
+
+function _bcTplNameKeydown(e) {
+  if (e.key === 'Enter')  { e.preventDefault(); _bcTplConfirmSave(); }
+  if (e.key === 'Escape') { e.preventDefault(); _bcTplCancelSave(); }
+}
+
+function _bcTplInsert(index) {
+  const templates = _bcTplLoad();
+  const tpl = templates[index];
+  if (!tpl) return;
+  const textarea = document.getElementById('bc-textarea');
+  if (!textarea) return;
+  if (textarea.value.trim()) {
+    if (!confirm(`Replace textarea content with template "${tpl.name}"?`)) return;
+  }
+  textarea.value = tpl.content;
+  textarea.dispatchEvent(new Event('input'));
+}
+
+function _bcTplDelete(index) {
+  const templates = _bcTplLoad();
+  const tpl = templates[index];
+  if (!tpl) return;
+  if (!confirm(`Delete template "${tpl.name}"?`)) return;
+  templates.splice(index, 1);
+  _bcTplSaveAll(templates);
+  _bcTplRender();
 }
 
 function _bcNormalizePrompt(s) {

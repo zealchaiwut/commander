@@ -1042,6 +1042,19 @@
     }
     .smgmt-sprint-header-left:hover .smgmt-rename-btn { opacity: 1; }
     .smgmt-rename-btn:hover { color: var(--blue); }
+    /* ── Sprint column collapse toggle ── */
+    .smgmt-collapse-btn {
+      background: none; border: none; cursor: pointer; padding: 0 2px;
+      color: var(--text-muted); font-size: 14px; display: inline-flex; align-items: center;
+      flex-shrink: 0; border-radius: 4px; line-height: 1;
+    }
+    .smgmt-collapse-btn:hover { color: var(--text); background: var(--surface-2); }
+    .smgmt-collapse-btn .ti { transition: transform .18s; }
+    .smgmt-sprint-card.smgmt-collapsed .smgmt-collapse-btn .ti { transform: rotate(-90deg); }
+    .smgmt-sprint-card.smgmt-collapsed > *:not(.smgmt-sprint-header):not(.smgmt-running-stripe) {
+      display: none;
+    }
+    .smgmt-sprint-card.smgmt-collapsed .smgmt-sprint-header { margin-bottom: 0; }
     .smgmt-rename-wrap {
       display: inline-flex; align-items: center; gap: 2px;
     }
@@ -6647,6 +6660,8 @@ function smgmtCancelRename(label, origN, nameEl) {
 
 function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent) {
   const isRunning = _smgmtRunningLabels.has(label);
+  let isCollapsed = false;
+  try { isCollapsed = localStorage.getItem('sprintColumn_' + label + '_collapsed') === '1'; } catch (_) {}
 
   // Running sprint gets special animated treatment (issue #277)
   if (isRunning) {
@@ -6737,13 +6752,21 @@ function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent) {
     ? `<span class="smgmt-sprint-lineage" title="Child sprint spawned from ${escHtml(parent)}">← from ${escHtml(sprintLabelDisplay(parent))}</span>`
     : '';
 
+  const collapsedClass = isCollapsed ? ' smgmt-collapsed' : '';
+  const collapseLabel = (isCollapsed ? 'Expand ' : 'Collapse ') + escHtml(sprintLabelDisplay(label));
   return `
-    <div class="smgmt-sprint-card${outcomeCardClass}" id="smgmt-card-${escHtml(label)}"
+    <div class="smgmt-sprint-card${outcomeCardClass}${collapsedClass}" id="smgmt-card-${escHtml(label)}"
          ondragover="_smgmtDragOver(event, '${escHtml(label)}')"
          ondragleave="_smgmtDragLeave(event)"
          ondrop="_smgmtDropOnSprint(event, '${escHtml(label)}')">
       <div class="smgmt-sprint-header">
         <div class="smgmt-sprint-header-left">
+          <button class="smgmt-collapse-btn" id="smgmt-collapse-btn-${escHtml(label)}"
+                  onclick="smgmtToggleCollapse('${escHtml(label)}')"
+                  aria-label="${collapseLabel}"
+                  title="${collapseLabel}"
+                  onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();smgmtToggleCollapse('${escHtml(label)}');}">
+            <i class="ti ti-chevron-down"></i></button>
           <i class="ti ti-layout-kanban" style="font-size:14px;color:var(--text-muted)"></i>
           <span class="smgmt-sprint-name" style="font-size:15px;font-weight:700;">${escHtml(sprintLabelDisplay(label))}</span>
           <button class="smgmt-rename-btn" title="Rename sprint"
@@ -6782,6 +6805,8 @@ const SIZE_MINUTES = { S: 5, M: 15, L: 30, XL: 60 };
 
 /** Build the animated running sprint card HTML. Live data patched separately by _smgmtLivePatch. */
 function _smgmtRunningCardHtml(label, n, tickets) {
+  let isCollapsed = false;
+  try { isCollapsed = localStorage.getItem('sprintColumn_' + label + '_collapsed') === '1'; } catch (_) {}
   const live = _smgmtLiveCache[label] || null;
 
   // Stat strip values (use live data if available, else zeros)
@@ -6848,11 +6873,19 @@ function _smgmtRunningCardHtml(label, n, tickets) {
     </div>`;
   }).join('');
 
+  const runCollapsedClass = isCollapsed ? ' smgmt-collapsed' : '';
+  const runCollapseLabel = (isCollapsed ? 'Expand ' : 'Collapse ') + escHtml(sprintLabelDisplay(label));
   return `
-    <div class="smgmt-sprint-card smgmt-running" id="smgmt-card-${escHtml(label)}">
+    <div class="smgmt-sprint-card smgmt-running${runCollapsedClass}" id="smgmt-card-${escHtml(label)}">
       <div class="smgmt-running-stripe"></div>
       <div class="smgmt-sprint-header">
         <div class="smgmt-sprint-header-left">
+          <button class="smgmt-collapse-btn" id="smgmt-collapse-btn-${escHtml(label)}"
+                  onclick="smgmtToggleCollapse('${escHtml(label)}')"
+                  aria-label="${runCollapseLabel}"
+                  title="${runCollapseLabel}"
+                  onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();smgmtToggleCollapse('${escHtml(label)}');}">
+            <i class="ti ti-chevron-down"></i></button>
           <i class="ti ti-layout-kanban" style="font-size:14px;color:var(--green)"></i>
           <span class="smgmt-sprint-name" style="font-size:15px;font-weight:700;">${escHtml(sprintLabelDisplay(label))}</span>
           <span class="smgmt-running-badge" id="smgmt-running-badge-${escHtml(label)}">
@@ -8943,6 +8976,23 @@ async function _smgmtTicketReorderDrop(event, targetIssue, sprintLabel) {
 }
 
 // ── Backlog pane (issue #274) ──────────────────────────────────────────────
+
+function smgmtToggleCollapse(label) {
+  const card = document.getElementById('smgmt-card-' + label);
+  if (!card) return;
+  const btn = document.getElementById('smgmt-collapse-btn-' + label);
+  const isCollapsed = card.classList.toggle('smgmt-collapsed');
+  const displayName = sprintLabelDisplay(label);
+  if (btn) btn.setAttribute('aria-label', (isCollapsed ? 'Expand ' : 'Collapse ') + displayName);
+  if (btn) btn.setAttribute('title', (isCollapsed ? 'Expand ' : 'Collapse ') + displayName);
+  try {
+    if (isCollapsed) {
+      localStorage.setItem('sprintColumn_' + label + '_collapsed', '1');
+    } else {
+      localStorage.removeItem('sprintColumn_' + label + '_collapsed');
+    }
+  } catch (_) {}
+}
 
 function _smgmtBacklogToggle() {
   const pane = document.getElementById('smgmt-backlog-pane');

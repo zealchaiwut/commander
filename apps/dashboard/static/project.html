@@ -602,6 +602,11 @@
       font-size: 10px; font-weight: 700; letter-spacing: .08em;
       text-transform: uppercase; color: var(--text-muted);
     }
+    .ticket-group-rollup {
+      margin-left: auto;
+      font-size: 10px; font-weight: 500; letter-spacing: 0; text-transform: none;
+      color: var(--text-sub); font-family: var(--mono); white-space: nowrap;
+    }
     .ticket-row {
       display: flex; align-items: center; gap: 10px;
       padding: 10px 0;
@@ -4364,6 +4369,8 @@ const RERUN_STRIP_LABELS = new Set(['UAT','UAT-approved','released','SIT','in-pr
 const _smgmtOutcomeCache = {};
 // Per-issue estimate cache: issueNum (int) → {size, confidence} | null (null = confirmed no estimate)
 const _estDataCache = {};
+// Groups last rendered in the tickets kanban view (used for rollup updates)
+let _ticketGroups = [];
 
 // ── Running sprint live state (issue #277) ────────────────────────────────
 // Set of sprint labels that are currently running, populated on each render
@@ -5050,6 +5057,7 @@ function renderTickets(data, repo) {
     { label: 'In progress', items: tickets.filter(t => t.status === 'in-progress' || t.status === 'blocked') },
     { label: 'Backlog',     items: tickets.filter(t => t.status === 'backlog') },
   ].filter(g => g.items.length > 0);
+  _ticketGroups = groups;
 
   let ticketsHtml;
   if (groups.length === 0) {
@@ -5070,7 +5078,8 @@ function renderTickets(data, repo) {
           ${chipsHtml}
         </div>`;
       }).join('');
-      return `<div class="ticket-group-hdr">${escHtml(g.label)} · ${g.items.length}</div>${rows}`;
+      const gid = g.label.replace(/\s+/g, '-');
+      return `<div class="ticket-group-hdr" id="ticket-grp-hdr-${gid}">${escHtml(g.label)} · ${g.items.length}<span class="ticket-group-rollup" id="ticket-grp-rollup-${gid}"></span></div>${rows}`;
     }).join('');
   }
 
@@ -5118,7 +5127,34 @@ async function _ticketsLoadEstimates(tickets, repo) {
         wrapEl.innerHTML = '<span class="ticket-no-estimate">Not Estimated</span>';
       }
     }
+    _ticketsUpdateGroupHeaders();
   } catch (_) { /* silent */ }
+}
+
+function _ticketsRollupText(items) {
+  const total = items.length;
+  if (total === 0) return '0 tickets';
+  let totalMins = 0, unestimated = 0;
+  for (const t of items) {
+    const est = _estDataCache[t.number];
+    const mins = est && est.size ? _sizeMinutes(est.size) : 0;
+    if (mins > 0) totalMins += mins;
+    else unestimated++;
+  }
+  const countStr = `${total} ticket${total !== 1 ? 's' : ''}`;
+  if (unestimated === total) return `${countStr}, no estimates`;
+  const h = totalMins / 60;
+  const timeStr = h < 1
+    ? `~${totalMins}m`
+    : `~${parseFloat((Math.round(h * 10) / 10).toFixed(1))}h`;
+  return `${timeStr}, ${countStr}${unestimated > 0 ? ` (${unestimated} unestimated)` : ''}`;
+}
+
+function _ticketsUpdateGroupHeaders() {
+  for (const g of _ticketGroups) {
+    const el = document.getElementById(`ticket-grp-rollup-${g.label.replace(/\s+/g, '-')}`);
+    if (el) el.textContent = _ticketsRollupText(g.items);
+  }
 }
 
 // ── Close Ticket flow ─────────────────────────────────────────────────────────
@@ -7447,6 +7483,9 @@ async function _smgmtReEstimateRun(issueNum, rowBtn) {
         sizeEl.title = `≈${data.minutes || _sizeMinutes(data.size)} min`;
       }
     }
+    // Update estimate cache and refresh kanban column rollups
+    _estDataCache[issueNum] = Object.assign({}, _estDataCache[issueNum] || {}, { size: data.size });
+    _ticketsUpdateGroupHeaders();
   } catch (err) {
     // Restore row button
     if (rowSpinner) rowSpinner.replaceWith(_makeReEstimateBtn(issueNum));

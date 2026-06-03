@@ -2509,6 +2509,28 @@
     }
     .bc-draft-edit-body:focus { border-color: var(--blue); outline: none; }
 
+    /* Bulk selection controls (issue #534) */
+    .bc-bulk-controls {
+      display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+      padding: 8px 20px;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface-2);
+    }
+    .bc-bulk-select-all-wrap {
+      display: flex; align-items: center; gap: 6px; cursor: pointer;
+      font-size: 12px; color: var(--text); user-select: none;
+    }
+    .bc-bulk-select-all-wrap input[type="checkbox"] { cursor: pointer; }
+    .bc-bulk-btn {
+      padding: 3px 10px; border: 1px solid var(--border); border-radius: 5px;
+      background: transparent; color: var(--text); font-size: 11px; cursor: pointer;
+      transition: background .15s;
+    }
+    .bc-bulk-btn:hover:not(:disabled) { background: var(--surface); }
+    .bc-bulk-btn:disabled { opacity: .45; cursor: not-allowed; }
+    .bc-select-failed-btn { color: var(--red); border-color: var(--red); }
+    .bc-select-failed-btn:hover:not(:disabled) { background: var(--red-bg); }
+
     /* Review overlay (issue #374) */
     .bc-review-overlay {
       position: absolute; inset: 0; z-index: 10;
@@ -3783,6 +3805,17 @@
         <div id="bc-step2" class="hidden">
           <div class="bc-parallel-banner" id="bc-parallel-banner"></div>
           <div class="bc-summary-strip" id="bc-summary-strip"></div>
+
+          <!-- Bulk selection controls (issue #534) -->
+          <div class="bc-bulk-controls hidden" id="bc-bulk-controls" role="group" aria-label="Bulk selection controls">
+            <label class="bc-bulk-select-all-wrap">
+              <input type="checkbox" id="bc-select-all-check" onchange="bcToggleSelectAll(this.checked)" aria-label="Select all drafts">
+              <span>Select all</span>
+            </label>
+            <button type="button" class="bc-bulk-btn" onclick="bcDeselectAll()">Deselect all</button>
+            <button type="button" class="bc-bulk-btn bc-select-failed-btn hidden" id="bc-select-failed-btn" onclick="bcSelectFailed()">Select failed</button>
+          </div>
+
           <div class="bc-ticket-list" id="bc-ticket-list"></div>
 
           <!-- Review overlay: shown when user clicks Review & Post (issue #374) -->
@@ -10820,7 +10853,7 @@ function _bcRenderStep2() {
       if (reviewPostBtn) {
         const draftReadyTickets = tickets.filter(t => t.state === 'draft_ready' && !_bcRemovedRows.has(t.index));
         const selCount = draftReadyTickets.filter(t => _bcDraftSelections.has(t.index)).length;
-        reviewPostBtn.textContent = selCount > 0 ? `Post to GitHub (${selCount})` : 'Post to GitHub';
+        reviewPostBtn.textContent = selCount > 0 ? `Post Selected (${selCount})` : 'Post Selected';
         reviewPostBtn.disabled = selCount === 0;
         reviewPostBtn.classList.remove('hidden');
       }
@@ -10854,6 +10887,8 @@ function _bcRenderStep2() {
       }
     }
   });
+
+  _bcSyncBulkControls();
 }
 
 function _bcRenderCard(t) {
@@ -11319,7 +11354,7 @@ function _bcSyncPostBtn() {
   const selCount = tickets.filter(t =>
     t.state === 'draft_ready' && _bcDraftSelections.has(t.index) && !_bcRemovedRows.has(t.index)
   ).length;
-  reviewPostBtn.textContent = selCount > 0 ? `Post to GitHub (${selCount})` : 'Post to GitHub';
+  reviewPostBtn.textContent = selCount > 0 ? `Post Selected (${selCount})` : 'Post Selected';
   reviewPostBtn.disabled = selCount === 0;
 }
 
@@ -11329,12 +11364,98 @@ function bcRemoveRow(index) {
   const card = document.getElementById(`bc-card-${index}`);
   if (card) card.remove();
   _bcSyncPostBtn();
+  _bcSyncBulkControls();
 }
 
 function _bcDraftCheckChange(index, checked) {
   if (checked) _bcDraftSelections.add(index);
   else _bcDraftSelections.delete(index);
   _bcSyncPostBtn();
+  _bcSyncBulkControls();
+}
+
+// ── Bulk selection controls (issue #534) ─────────────────────────────────────
+
+function bcToggleSelectAll(checked) {
+  if (checked) bcSelectAll();
+  else bcDeselectAll();
+}
+
+function bcSelectAll() {
+  if (!_bcJobState) return;
+  const tickets = _bcJobState.tickets || [];
+  tickets.filter(t => t.state === 'draft_ready' && !_bcRemovedRows.has(t.index))
+    .forEach(t => {
+      _bcDraftSelections.add(t.index);
+      const el = document.getElementById(`bc-check-${t.index}`);
+      if (el) el.checked = true;
+    });
+  _bcSyncPostBtn();
+  _bcSyncBulkControls();
+}
+
+function bcDeselectAll() {
+  if (!_bcJobState) return;
+  _bcDraftSelections.clear();
+  (_bcJobState.tickets || []).forEach(t => {
+    const el = document.getElementById(`bc-check-${t.index}`);
+    if (el) el.checked = false;
+  });
+  _bcSyncPostBtn();
+  _bcSyncBulkControls();
+}
+
+function bcSelectFailed() {
+  if (!_bcJobState) return;
+  const tickets = _bcJobState.tickets || [];
+  tickets.filter(t => t.state === 'draft_ready' && !_bcRemovedRows.has(t.index) && t._regen_error)
+    .forEach(t => {
+      _bcDraftSelections.add(t.index);
+      const el = document.getElementById(`bc-check-${t.index}`);
+      if (el) el.checked = true;
+    });
+  _bcSyncPostBtn();
+  _bcSyncBulkControls();
+}
+
+function _bcSyncBulkControls() {
+  if (!_bcJobState) return;
+  const tickets = _bcJobState.tickets || [];
+  const draftReady = tickets.filter(t => t.state === 'draft_ready' && !_bcRemovedRows.has(t.index));
+  const selected = draftReady.filter(t => _bcDraftSelections.has(t.index));
+  const hasFailed = draftReady.some(t => t._regen_error);
+
+  const controlsEl = document.getElementById('bc-bulk-controls');
+  if (controlsEl) {
+    if (_bcJobState.status === 'drafts_ready' && draftReady.length > 0) {
+      controlsEl.classList.remove('hidden');
+    } else {
+      controlsEl.classList.add('hidden');
+    }
+  }
+
+  const selectAllCheck = document.getElementById('bc-select-all-check');
+  if (selectAllCheck) {
+    if (selected.length === 0) {
+      selectAllCheck.checked = false;
+      selectAllCheck.indeterminate = false;
+    } else if (selected.length === draftReady.length) {
+      selectAllCheck.checked = true;
+      selectAllCheck.indeterminate = false;
+    } else {
+      selectAllCheck.checked = false;
+      selectAllCheck.indeterminate = true;
+    }
+  }
+
+  const selectFailedBtn = document.getElementById('bc-select-failed-btn');
+  if (selectFailedBtn) {
+    if (hasFailed) {
+      selectFailedBtn.classList.remove('hidden');
+    } else {
+      selectFailedBtn.classList.add('hidden');
+    }
+  }
 }
 
 function bcReviewAndPost() {

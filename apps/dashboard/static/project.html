@@ -945,6 +945,22 @@
     .smgmt-lf-chip.is-active { background: var(--blue-bg); border-color: var(--blue); color: var(--blue); }
     .smgmt-lf-chip.is-inactive { opacity: .45; }
     .smgmt-lf-chip-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+    /* ── Compact/dense view toggle (issue #547) ── */
+    #pane-sprint-mgmt.smgmt-compact .smgmt-ticket {
+      padding: 5px 10px;
+    }
+    #pane-sprint-mgmt.smgmt-compact .smgmt-ticket-size-pill,
+    #pane-sprint-mgmt.smgmt-compact .smgmt-ticket-status,
+    #pane-sprint-mgmt.smgmt-compact .btn-view-log,
+    #pane-sprint-mgmt.smgmt-compact .smgmt-ticket-indicator,
+    #pane-sprint-mgmt.smgmt-compact .smgmt-ticket-agent-tag,
+    #pane-sprint-mgmt.smgmt-compact .smgmt-ticket-elapsed,
+    #pane-sprint-mgmt.smgmt-compact .smgmt-reestimate-btn,
+    #pane-sprint-mgmt.smgmt-compact .smgmt-retry-pill,
+    #pane-sprint-mgmt.smgmt-compact .smgmt-moveto-pill {
+      display: none !important;
+    }
+
     .smgmt-sprint-list {
       display: flex; flex-direction: column; gap: 12px;
       margin-top: 16px;
@@ -3641,6 +3657,14 @@
               <i class="ti ti-checklist"></i>
               <span id="smgmt-preflight-toggle-label">Pre-flight: on</span>
             </button>
+            <!-- Compact/dense view toggle (issue #547) -->
+            <button class="btn-ghost" id="smgmt-density-toggle"
+                    onclick="_smgmtDensityToggle()" aria-pressed="false"
+                    title="Compact view — click to toggle"
+                    aria-label="Compact view">
+              <i class="ti ti-layout-list"></i>
+              <span id="smgmt-density-label">Compact</span>
+            </button>
             <button class="btn-ghost" id="smgmt-cleanup-empty-btn"
                     onclick="_smgmtCleanupEmpty()" title="Delete sprint labels with no tickets"
                     aria-label="Clean up empty sprints" style="display:none">
@@ -5535,6 +5559,9 @@ async function init() {
   // Set up sticky toolbar shadow
   _smgmtInitScrollShadow();
 
+  // Restore compact/dense density from localStorage (issue #547)
+  _smgmtDensityInit();
+
   // Load data in parallel
   await Promise.all([
     loadHomeData(false),
@@ -6175,6 +6202,34 @@ function _smgmtUpdatePreflightToggleUI() {
     : 'Pre-flight checks off — click to show banners';
   const lbl = document.getElementById('smgmt-preflight-toggle-label');
   if (lbl) lbl.textContent = on ? 'Pre-flight: on' : 'Pre-flight: off';
+}
+
+// ── Compact/dense view toggle (issue #547) ────────────────────────────────────
+
+const _SMGMT_DENSITY_KEY = 'sprintBoard.density';
+
+function _smgmtDensityInit() {
+  if (localStorage.getItem(_SMGMT_DENSITY_KEY) === 'compact') _smgmtDensityApply(true);
+}
+
+function _smgmtDensityApply(compact) {
+  const pane = document.getElementById('pane-sprint-mgmt');
+  const btn  = document.getElementById('smgmt-density-toggle');
+  if (!pane || !btn) return;
+  pane.classList.toggle('smgmt-compact', compact);
+  btn.setAttribute('aria-pressed', String(compact));
+  btn.title = compact
+    ? 'Normal view — click to toggle'
+    : 'Compact view — click to toggle';
+  const lbl = document.getElementById('smgmt-density-label');
+  if (lbl) lbl.textContent = compact ? 'Normal' : 'Compact';
+}
+
+function _smgmtDensityToggle() {
+  const pane = document.getElementById('pane-sprint-mgmt');
+  const compact = !pane.classList.contains('smgmt-compact');
+  _smgmtDensityApply(compact);
+  localStorage.setItem(_SMGMT_DENSITY_KEY, compact ? 'compact' : 'normal');
 }
 
 /** Kick off pre-flight banner loading for all non-running sprint panes. */

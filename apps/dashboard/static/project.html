@@ -858,6 +858,7 @@
       .sub-tabs { position: static; }
       .main-area { overflow-y: visible; }
       .proj-header { position: static; }
+      .smgmt-sticky-area { position: static; }
       .tickets-grid { grid-template-columns: 1fr; }
       .tickets-main { border-right: none; border-bottom: 1px solid var(--border); }
     }
@@ -872,19 +873,23 @@
       color: var(--text-sub); font-size: 13px; padding: 48px 0; text-align: center;
     }
 
+    /* ── Sprint Mgmt sticky area (toolbar + label filters) ── */
+    .smgmt-sticky-area {
+      position: sticky;
+      top: var(--proj-header-height, 88px);
+      z-index: 15;
+      background: var(--bg);
+      box-shadow: none;
+      transition: box-shadow .15s;
+    }
+    .smgmt-sticky-area.scrolled {
+      box-shadow: 0 2px 4px rgba(0,0,0,0.04);
+    }
     /* ── Sprint Mgmt toolbar ── */
     .smgmt-toolbar {
       display: flex; align-items: center; justify-content: space-between;
       padding: 14px 28px;
       background: var(--bg);
-      position: sticky;
-      top: var(--proj-header-height, 88px); /* placed after sub-tab strip */
-      z-index: 15;
-      box-shadow: none;
-      transition: box-shadow .15s;
-    }
-    .smgmt-toolbar.scrolled {
-      box-shadow: 0 2px 4px rgba(0,0,0,0.04);
     }
     .smgmt-toolbar-title {
       font-size: 15px; font-weight: 700; color: var(--text); line-height: 1;
@@ -1003,6 +1008,82 @@
     .smgmt-content {
       padding: 0 28px 28px;
     }
+    /* ── Label filter chip row (issue #546) ── */
+    .smgmt-label-filter-row {
+      display: flex; flex-wrap: wrap; gap: 6px;
+      padding: 10px 28px 4px;
+    }
+    .smgmt-label-filter-row.is-empty { display: none; }
+    .smgmt-lf-chip {
+      display: inline-flex; align-items: center; gap: 5px;
+      padding: 3px 9px; border-radius: 20px; font-size: 12px; font-weight: 500;
+      border: 1px solid var(--border); background: var(--surface-2); color: var(--text);
+      cursor: pointer; user-select: none; transition: background .12s, border-color .12s, color .12s, opacity .12s;
+      white-space: nowrap;
+    }
+    .smgmt-lf-chip:hover { border-color: var(--text-muted); }
+    .smgmt-lf-chip.is-active { background: var(--blue-bg); border-color: var(--blue); color: var(--blue); }
+    .smgmt-lf-chip.is-inactive { opacity: .45; }
+    .smgmt-lf-chip-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+    /* ── Compact/dense view toggle (issue #547) ── */
+    #pane-sprint-mgmt.smgmt-compact .smgmt-ticket {
+      padding: 5px 10px;
+    }
+    #pane-sprint-mgmt.smgmt-compact .smgmt-ticket-size-pill,
+    #pane-sprint-mgmt.smgmt-compact .smgmt-ticket-status,
+    #pane-sprint-mgmt.smgmt-compact .btn-view-log,
+    #pane-sprint-mgmt.smgmt-compact .smgmt-ticket-indicator,
+    #pane-sprint-mgmt.smgmt-compact .smgmt-ticket-agent-tag,
+    #pane-sprint-mgmt.smgmt-compact .smgmt-ticket-elapsed,
+    #pane-sprint-mgmt.smgmt-compact .smgmt-reestimate-btn,
+    #pane-sprint-mgmt.smgmt-compact .smgmt-retry-pill,
+    #pane-sprint-mgmt.smgmt-compact .smgmt-moveto-pill {
+      display: none !important;
+    }
+
+    /* ── Keyboard navigation focus ring (issue #549) ── */
+    .smgmt-ticket.smgmt-kb-focused {
+      outline: 3px solid var(--blue);
+      outline-offset: -2px;
+      position: relative;
+      z-index: 2;
+      box-shadow: 0 0 0 5px var(--blue-bg);
+    }
+
+    /* ── Search/filter bar (issue #552) ── */
+    .smgmt-filter-bar {
+      display: flex; align-items: center; gap: 8px;
+      padding: 0 28px 10px;
+    }
+    .smgmt-filter-input-wrap {
+      position: relative; flex: 1; max-width: 400px;
+    }
+    .smgmt-filter-input {
+      width: 100%; height: 32px;
+      padding: 0 30px 0 10px;
+      border: 1px solid var(--border); border-radius: 6px;
+      background: var(--surface-2); color: var(--text);
+      font-size: 13px; font-family: inherit;
+      outline: none; box-sizing: border-box;
+      transition: border-color .12s, background .12s;
+    }
+    .smgmt-filter-input:focus { border-color: var(--blue); background: var(--surface); }
+    .smgmt-filter-input::placeholder { color: var(--text-muted); }
+    .smgmt-filter-clear-btn {
+      position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
+      background: none; border: none; padding: 2px 4px;
+      color: var(--text-muted); cursor: pointer; font-size: 16px; line-height: 1;
+      display: none;
+    }
+    .smgmt-filter-clear-btn:hover { color: var(--text); }
+    .smgmt-filter-clear-btn.visible { display: block; }
+    .smgmt-filter-empty-state {
+      display: none; padding: 12px 14px;
+      font-size: 12px; color: var(--text-muted);
+      font-style: italic; text-align: center;
+    }
+    .smgmt-filter-empty-state.visible { display: block; }
+
     .smgmt-sprint-list {
       display: flex; flex-direction: column; gap: 12px;
       margin-top: 16px;
@@ -1022,6 +1103,32 @@
       font-size: 11px; color: var(--text-sub); font-weight: 400;
     }
     .smgmt-sprint-header { justify-content: space-between; }
+    .smgmt-sprint-summary {
+      margin: 6px 0 4px;
+      display: flex; flex-direction: column; gap: 4px;
+    }
+    .smgmt-progress-row {
+      display: flex; align-items: center; gap: 8px;
+    }
+    .smgmt-progress-bar-wrap {
+      flex: 1; height: 5px;
+      background: var(--surface-2, #e5e7eb);
+      border-radius: 3px; overflow: hidden;
+    }
+    .smgmt-progress-bar-fill {
+      height: 100%; background: var(--green);
+      border-radius: 3px; transition: width .3s ease;
+      min-width: 0;
+    }
+    .smgmt-progress-label {
+      font-size: 11px; color: var(--text-sub);
+      white-space: nowrap; flex-shrink: 0;
+    }
+    .smgmt-sprint-goal-text {
+      font-size: 12px; color: var(--text-muted);
+      font-style: italic;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
     .smgmt-sprint-header-left {
       display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0;
     }
@@ -1091,6 +1198,19 @@
     }
     .smgmt-sprint-header-left:hover .smgmt-rename-btn { opacity: 1; }
     .smgmt-rename-btn:hover { color: var(--blue); }
+    /* ── Sprint column collapse toggle ── */
+    .smgmt-collapse-btn {
+      background: none; border: none; cursor: pointer; padding: 0 2px;
+      color: var(--text-muted); font-size: 14px; display: inline-flex; align-items: center;
+      flex-shrink: 0; border-radius: 4px; line-height: 1;
+    }
+    .smgmt-collapse-btn:hover { color: var(--text); background: var(--surface-2); }
+    .smgmt-collapse-btn .ti { transition: transform .18s; }
+    .smgmt-sprint-card.smgmt-collapsed .smgmt-collapse-btn .ti { transform: rotate(-90deg); }
+    .smgmt-sprint-card.smgmt-collapsed > *:not(.smgmt-sprint-header):not(.smgmt-running-stripe) {
+      display: none;
+    }
+    .smgmt-sprint-card.smgmt-collapsed .smgmt-sprint-header { margin-bottom: 0; }
     .smgmt-rename-wrap {
       display: inline-flex; align-items: center; gap: 2px;
     }
@@ -1148,7 +1268,10 @@
     }
     .smgmt-ticket[draggable="false"] .smgmt-ticket-grip { opacity: 0 !important; cursor: default; }
     .smgmt-ticket-grip:active { cursor: grabbing; }
-    .smgmt-ticket-cb { cursor: pointer; flex-shrink: 0; }
+    .smgmt-ticket-cb { cursor: pointer; flex-shrink: 0; opacity: 0; transition: opacity .12s; }
+    .smgmt-ticket:hover .smgmt-ticket-cb,
+    .smgmt-ticket.is-selected .smgmt-ticket-cb,
+    .smgmt-sprint-list.has-selection .smgmt-ticket-cb { opacity: 1; }
     .smgmt-ticket-num {
       font-family: var(--mono); font-size: 12px; color: var(--text-sub);
       text-decoration: none; flex-shrink: 0; min-width: 42px;
@@ -1988,6 +2111,39 @@
     .smgmt-row-menu-item.is-danger:hover { background: var(--red-bg); }
     .smgmt-row-menu-divider { border-top: 1px solid var(--border); margin: 4px 0; }
 
+    /* ── Per-column sort control (issue #550) ── */
+    .smgmt-sort-btn {
+      display: inline-flex; align-items: center; gap: 4px;
+      padding: 0 8px; height: 26px;
+      background: none; border: 1px solid var(--border); border-radius: 5px;
+      color: var(--text-muted); cursor: pointer; font-size: 12px; font-family: inherit;
+      transition: background .15s, color .15s, border-color .15s;
+      white-space: nowrap; flex-shrink: 0;
+    }
+    .smgmt-sort-btn:hover, .smgmt-sort-btn[aria-expanded="true"] {
+      background: var(--surface-hover); color: var(--text); border-color: var(--border-strong, var(--border));
+    }
+    .smgmt-sort-btn.is-active { color: var(--blue); border-color: var(--blue); }
+    .smgmt-sort-btn .ti { font-size: 13px; }
+    .smgmt-sort-menu {
+      position: fixed; z-index: 520;
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 8px; box-shadow: 0 6px 20px rgba(0,0,0,.16);
+      min-width: 160px; padding: 4px 0;
+    }
+    .smgmt-sort-menu.hidden { display: none; }
+    .smgmt-sort-menu-item {
+      display: flex; align-items: center; gap: 8px; width: 100%;
+      text-align: left; padding: 7px 12px; font-size: 13px;
+      background: none; border: none; color: var(--text);
+      cursor: pointer; font-family: inherit;
+    }
+    .smgmt-sort-menu-item:hover { background: var(--surface-hover); }
+    .smgmt-sort-menu-item.is-active { color: var(--blue); }
+    .smgmt-sort-menu-item .ti { font-size: 14px; color: var(--text-muted); width: 15px; flex-shrink: 0; }
+    .smgmt-sort-menu-item.is-active .ti { color: var(--blue); }
+    .smgmt-sort-menu-divider { border-top: 1px solid var(--border); margin: 4px 0; }
+
     /* "Move to" modal options */
     .mt-modal { min-width: 320px; max-width: 420px; }
     .mt-options { display: flex; flex-direction: column; gap: 4px; margin-top: 12px; }
@@ -2263,6 +2419,19 @@
       font-family: var(--mono);
       background: var(--surface-2); color: var(--text-sub);
     }
+    .smgmt-ticket-size-pill--S  { background: #dcfce7; color: #166534; }
+    .smgmt-ticket-size-pill--M  { background: #dbeafe; color: #1e40af; }
+    .smgmt-ticket-size-pill--L  { background: #fef9c3; color: #854d0e; }
+    .smgmt-ticket-size-pill--XL { background: #fee2e2; color: #991b1b; }
+    .smgmt-ticket-size-pill--unestimated {
+      background: var(--surface-2); color: #4b5563;
+      border: 1px dashed var(--border); font-weight: 600;
+    }
+    [data-theme="dark"] .smgmt-ticket-size-pill--S  { background: #14532d; color: #86efac; }
+    [data-theme="dark"] .smgmt-ticket-size-pill--M  { background: #1e3a5f; color: #93c5fd; }
+    [data-theme="dark"] .smgmt-ticket-size-pill--L  { background: #422006; color: #fde68a; }
+    [data-theme="dark"] .smgmt-ticket-size-pill--XL { background: #450a0a; color: #fca5a5; }
+    [data-theme="dark"] .smgmt-ticket-size-pill--unestimated { color: #9ca3af; }
 
     /* Retry estimation pill and spinner (issue #451) */
     .smgmt-retry-pill {
@@ -2365,8 +2534,14 @@
     .bc-select:focus, .bc-text-input:focus { outline: none; border-color: var(--blue); }
 
     /* Counter */
-    .bc-counter-row { padding: 8px 28px 4px; }
+    .bc-counter-row { padding: 8px 28px 4px; display: flex; align-items: center; gap: 12px; }
     .bc-counter { font-size: 11px; color: var(--text-muted); font-weight: 500; }
+    .bc-clear-draft-btn {
+      font-size: 11px; padding: 2px 8px; border-radius: 4px;
+      border: 1px solid var(--border); background: transparent;
+      color: var(--text-muted); cursor: pointer;
+    }
+    .bc-clear-draft-btn:hover { border-color: var(--red, #c0392b); color: var(--red, #c0392b); }
 
     /* Textarea */
     .bc-textarea {
@@ -2391,6 +2566,131 @@
       font-family: var(--mono); background: var(--surface-2);
       padding: 1px 5px; border-radius: 3px; font-size: 11px;
     }
+
+    /* Prompt reorder list (issue #529) */
+    .bc-prompt-reorder { border-top: 1px solid var(--border); }
+    .bc-prompt-reorder-header { padding: 8px 28px 4px; display: flex; align-items: center; gap: 8px; }
+    .bc-prompt-rows {
+      display: flex; flex-direction: column;
+      padding: 4px 28px 8px;
+      max-height: 360px; overflow-y: auto;
+      scrollbar-width: thin; scrollbar-color: var(--border) transparent;
+    }
+    .bc-prompt-rows::-webkit-scrollbar { width: 4px; }
+    .bc-prompt-rows::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+    .bc-prompt-row {
+      display: flex; align-items: flex-start; gap: 8px;
+      padding: 6px 0; border-bottom: 1px solid var(--border);
+      border-radius: 4px; transition: background .1s;
+    }
+    .bc-prompt-row:last-child { border-bottom: none; }
+    .bc-prompt-row.bc-row-dragging { opacity: .4; }
+    .bc-prompt-row.bc-row-over { background: var(--blue-bg); }
+    .bc-prompt-row-handle {
+      cursor: grab; color: var(--text-muted); font-size: 14px;
+      padding-top: 7px; flex-shrink: 0; user-select: none; touch-action: none;
+    }
+    .bc-prompt-row-handle:active { cursor: grabbing; }
+    .bc-prompt-row-num {
+      font-size: 11px; color: var(--text-muted); font-family: var(--mono);
+      padding-top: 7px; flex-shrink: 0; min-width: 18px; text-align: right;
+    }
+    .bc-prompt-row-text {
+      flex: 1; min-width: 0; font-size: 12px; font-family: var(--mono);
+      border: 1px solid var(--border); border-radius: 4px;
+      padding: 5px 8px; background: var(--surface-2); color: var(--text);
+      resize: vertical; min-height: 44px; max-height: 160px;
+      outline: none; line-height: 1.4; box-sizing: border-box;
+    }
+    .bc-prompt-row-text:focus { border-color: var(--blue); }
+    .bc-prompt-row-moves { display: flex; flex-direction: column; gap: 2px; flex-shrink: 0; padding-top: 2px; }
+    .bc-prompt-move-btn {
+      background: none; border: 1px solid var(--border); border-radius: 4px;
+      width: 24px; height: 24px; cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      color: var(--text-muted); font-size: 10px; line-height: 1;
+      transition: color .1s, border-color .1s, background .1s;
+    }
+    .bc-prompt-move-btn:hover:not(:disabled) { color: var(--text); border-color: var(--text-sub); background: var(--surface-2); }
+    .bc-prompt-move-btn:disabled { opacity: .3; cursor: not-allowed; }
+    .bc-dup-warning {
+      font-size: 12px; color: #92400e; background: #fffbeb;
+      border: 1px solid #fcd34d; border-radius: 4px;
+      padding: 6px 10px; margin: 0 28px 6px;
+    }
+    .bc-prompt-row.bc-dup { background: #fffbeb; border: 1px solid #fcd34d; border-bottom-color: #fcd34d; }
+    .bc-prompt-row.bc-dup .bc-prompt-row-num { color: #92400e; }
+    .bc-limit-banner {
+      display: flex; align-items: center; gap: 6px;
+      margin: 0 28px 6px; padding: 6px 10px;
+      border-radius: 4px; font-size: 12px; font-weight: 500;
+    }
+    .bc-limit-banner--warn {
+      color: #92400e; background: #fffbeb; border: 1px solid #fcd34d;
+    }
+    .bc-limit-banner--error {
+      color: #991b1b; background: #fef2f2; border: 1px solid #fca5a5;
+    }
+    .bc-prompt-row-stats {
+      font-size: 10px; color: var(--text-muted); font-family: var(--mono);
+      white-space: nowrap; padding-top: 9px; flex-shrink: 0; line-height: 1.3;
+      text-align: right;
+    }
+
+    /* Prompt templates (issue #531) */
+    .bc-tpl-section { border-top: 1px solid var(--border); }
+    .bc-tpl-header { padding: 8px 28px; display: flex; align-items: center; justify-content: space-between; }
+    .bc-tpl-save-btn {
+      background: none; border: 1px solid var(--border); border-radius: 6px;
+      padding: 3px 10px; font-size: 11px; color: var(--text-sub); cursor: pointer;
+      display: flex; align-items: center; gap: 4px; transition: border-color .1s, color .1s;
+    }
+    .bc-tpl-save-btn:hover { border-color: var(--blue); color: var(--blue); }
+    .bc-tpl-save-form { display: flex; align-items: center; gap: 6px; padding: 0 28px 8px; flex-wrap: wrap; }
+    .bc-tpl-name-input {
+      flex: 1; min-width: 120px; font-size: 12px; font-family: inherit;
+      border: 1px solid var(--border); border-radius: 6px;
+      padding: 4px 10px; background: var(--surface); color: var(--text);
+      outline: none; transition: border-color .1s;
+    }
+    .bc-tpl-name-input:focus { border-color: var(--blue); }
+    .bc-tpl-confirm-btn {
+      font-size: 11px; padding: 4px 12px; border-radius: 6px;
+      background: var(--blue); color: #fff; border: none; cursor: pointer;
+      flex-shrink: 0; transition: opacity .1s;
+    }
+    .bc-tpl-confirm-btn:hover { opacity: .85; }
+    .bc-tpl-cancel-btn {
+      font-size: 11px; padding: 4px 10px; border-radius: 6px;
+      background: none; border: 1px solid var(--border); color: var(--text-sub);
+      cursor: pointer; flex-shrink: 0; transition: border-color .1s, color .1s;
+    }
+    .bc-tpl-cancel-btn:hover { border-color: var(--text-sub); color: var(--text); }
+    .bc-tpl-name-error { font-size: 11px; color: var(--red); flex: 0 0 100%; padding-left: 2px; }
+    .bc-tpl-list { padding: 0 28px 8px; display: flex; flex-direction: column; gap: 4px; }
+    .bc-tpl-empty { font-size: 11px; color: var(--text-muted); padding: 2px 0; }
+    .bc-tpl-row {
+      display: flex; align-items: center; gap: 6px;
+      padding: 4px 8px 4px 10px; border-radius: 6px;
+      border: 1px solid var(--border); background: var(--surface-2);
+    }
+    .bc-tpl-row-name {
+      flex: 1; min-width: 0; font-size: 12px; color: var(--text);
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .bc-tpl-row-insert {
+      font-size: 11px; padding: 2px 8px; border-radius: 5px;
+      border: 1px solid var(--border); background: var(--surface);
+      color: var(--text-sub); cursor: pointer; flex-shrink: 0;
+      transition: border-color .1s, color .1s, background .1s;
+    }
+    .bc-tpl-row-insert:hover { border-color: var(--blue); color: var(--blue); background: var(--blue-bg); }
+    .bc-tpl-row-delete {
+      background: none; border: none; padding: 2px 4px; cursor: pointer;
+      color: var(--text-muted); font-size: 14px; flex-shrink: 0;
+      transition: color .1s; border-radius: 4px; line-height: 1;
+    }
+    .bc-tpl-row-delete:hover { color: var(--red); background: var(--red-bg); }
 
     /* Attachments */
     .bc-attach-section { padding: 10px 28px 6px; border-top: 1px solid var(--border); }
@@ -2469,6 +2769,46 @@
       background: var(--surface-2); color: var(--text); outline: none; min-width: 0;
     }
     .bc-ticket-label-input:focus { border-color: var(--blue); }
+
+    /* Draft-ready inline editing (issue #526) */
+    .bc-draft-check-wrap { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+    .bc-draft-check { cursor: pointer; flex-shrink: 0; width: 14px; height: 14px; }
+    .bc-draft-edit-title {
+      width: 100%; font-size: 12px; color: var(--text); font-weight: 600;
+      background: var(--surface); border: 1px solid var(--border); border-radius: 4px;
+      padding: 4px 7px; margin-top: 2px; box-sizing: border-box;
+    }
+    .bc-draft-edit-title:focus { border-color: var(--blue); outline: none; }
+    .bc-draft-title-err { font-size: 10px; color: var(--red); margin-top: 2px; }
+    .bc-draft-edit-body {
+      width: 100%; font-size: 11px; color: var(--text);
+      background: var(--surface); border: 1px solid var(--border); border-radius: 4px;
+      padding: 4px 7px; margin-top: 4px; box-sizing: border-box;
+      resize: vertical; min-height: 80px; font-family: inherit; line-height: 1.4;
+    }
+    .bc-draft-edit-body:focus { border-color: var(--blue); outline: none; }
+
+    /* Bulk selection controls (issue #534) */
+    .bc-bulk-controls {
+      display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+      padding: 8px 20px;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface-2);
+    }
+    .bc-bulk-select-all-wrap {
+      display: flex; align-items: center; gap: 6px; cursor: pointer;
+      font-size: 12px; color: var(--text); user-select: none;
+    }
+    .bc-bulk-select-all-wrap input[type="checkbox"] { cursor: pointer; }
+    .bc-bulk-btn {
+      padding: 3px 10px; border: 1px solid var(--border); border-radius: 5px;
+      background: transparent; color: var(--text); font-size: 11px; cursor: pointer;
+      transition: background .15s;
+    }
+    .bc-bulk-btn:hover:not(:disabled) { background: var(--surface); }
+    .bc-bulk-btn:disabled { opacity: .45; cursor: not-allowed; }
+    .bc-select-failed-btn { color: var(--red); border-color: var(--red); }
+    .bc-select-failed-btn:hover:not(:disabled) { background: var(--red-bg); }
 
     /* Review overlay (issue #374) */
     .bc-review-overlay {
@@ -2722,6 +3062,23 @@
     }
     .bc-btn-retry-this:hover { opacity: 0.85; }
     .bc-btn-retry-this:disabled { opacity: 0.5; cursor: not-allowed; }
+    .bc-btn-regenerate {
+      font-size: 11px; padding: 4px 10px; border-radius: 5px; cursor: pointer;
+      background: none; color: var(--blue); border: 1px solid var(--blue);
+      transition: background .12s, color .12s; margin-top: 6px;
+    }
+    .bc-btn-regenerate:hover { background: var(--blue-bg, rgba(59,130,246,.08)); }
+    .bc-btn-regenerate:disabled { opacity: 0.5; cursor: not-allowed; }
+    .bc-regen-err { font-size: 10px; color: var(--red); margin-top: 4px; }
+    .bc-draft-card-actions { display: flex; align-items: center; gap: 6px; margin-top: 4px; }
+    .bc-btn-remove-row {
+      font-size: 11px; padding: 3px 8px; border: 1px solid var(--border);
+      border-radius: 4px; cursor: pointer; color: var(--text-muted); background: transparent;
+      transition: color .12s, border-color .12s;
+    }
+    .bc-btn-remove-row:hover { color: var(--red); border-color: var(--red); }
+    .bc-action-btn--remove { color: var(--text-muted); }
+    .bc-action-btn--remove:hover { color: var(--red); background: var(--surface-2); }
     .bc-btn-skip-this {
       font-size: 11px; padding: 4px 10px; border-radius: 5px; cursor: pointer;
       background: none; color: var(--text-muted); border: 1px solid var(--border);
@@ -3468,53 +3825,80 @@
           </div>
         </div>
 
-        <!-- Toolbar -->
-        <div class="smgmt-toolbar" id="smgmt-toolbar">
-          <span class="smgmt-toolbar-title">Sprint Management</span>
-          <div class="smgmt-toolbar-actions">
-            <!-- Auto-refresh pill (issue #275) -->
-            <div class="smgmt-ar-pill-wrap" id="smgmt-ar-pill-wrap">
-              <button class="smgmt-ar-pill is-on" id="smgmt-ar-pill"
-                      onclick="_smgmtArPillClick(event)" aria-haspopup="true" aria-expanded="false"
-                      aria-label="Auto-refresh interval">
-                <i class="ti ti-refresh"></i>
-                <span id="smgmt-ar-pill-label">15s</span>
-                <i class="ti ti-chevron-down smgmt-ar-chevron"></i>
-              </button>
-              <div class="smgmt-ar-menu hidden" id="smgmt-ar-menu" role="menu">
-                <button class="smgmt-ar-menu-item" data-interval="5"  onclick="_smgmtArSelect(5)">5s</button>
-                <button class="smgmt-ar-menu-item" data-interval="15" onclick="_smgmtArSelect(15)">15s</button>
-                <button class="smgmt-ar-menu-item" data-interval="30" onclick="_smgmtArSelect(30)">30s</button>
-                <button class="smgmt-ar-menu-item" data-interval="60" onclick="_smgmtArSelect(60)">1m</button>
-                <div class="smgmt-ar-menu-divider"></div>
-                <button class="smgmt-ar-menu-item smgmt-ar-turn-off" onclick="_smgmtArTurnOff()">Turn off</button>
+        <!-- Sticky area: toolbar + label filters stick together below the project header -->
+        <div class="smgmt-sticky-area" id="smgmt-sticky-area">
+          <!-- Toolbar -->
+          <div class="smgmt-toolbar" id="smgmt-toolbar">
+            <span class="smgmt-toolbar-title">Sprint Management</span>
+            <div class="smgmt-toolbar-actions">
+              <!-- Auto-refresh pill (issue #275) -->
+              <div class="smgmt-ar-pill-wrap" id="smgmt-ar-pill-wrap">
+                <button class="smgmt-ar-pill is-on" id="smgmt-ar-pill"
+                        onclick="_smgmtArPillClick(event)" aria-haspopup="true" aria-expanded="false"
+                        aria-label="Auto-refresh interval">
+                  <i class="ti ti-refresh"></i>
+                  <span id="smgmt-ar-pill-label">15s</span>
+                  <i class="ti ti-chevron-down smgmt-ar-chevron"></i>
+                </button>
+                <div class="smgmt-ar-menu hidden" id="smgmt-ar-menu" role="menu">
+                  <button class="smgmt-ar-menu-item" data-interval="5"  onclick="_smgmtArSelect(5)">5s</button>
+                  <button class="smgmt-ar-menu-item" data-interval="15" onclick="_smgmtArSelect(15)">15s</button>
+                  <button class="smgmt-ar-menu-item" data-interval="30" onclick="_smgmtArSelect(30)">30s</button>
+                  <button class="smgmt-ar-menu-item" data-interval="60" onclick="_smgmtArSelect(60)">1m</button>
+                  <div class="smgmt-ar-menu-divider"></div>
+                  <button class="smgmt-ar-menu-item smgmt-ar-turn-off" onclick="_smgmtArTurnOff()">Turn off</button>
+                </div>
               </div>
+              <!-- Pre-flight checks show/hide toggle -->
+              <button class="btn-ghost smgmt-preflight-toggle" id="smgmt-preflight-toggle"
+                      onclick="_smgmtTogglePreflight()" aria-pressed="true"
+                      title="Pre-flight checks on — click to hide banners">
+                <i class="ti ti-checklist"></i>
+                <span id="smgmt-preflight-toggle-label">Pre-flight: on</span>
+              </button>
+              <!-- Compact/dense view toggle (issue #547) -->
+              <button class="btn-ghost" id="smgmt-density-toggle"
+                      onclick="_smgmtDensityToggle()" aria-pressed="false"
+                      title="Compact view — click to toggle"
+                      aria-label="Compact view">
+                <i class="ti ti-layout-list"></i>
+                <span id="smgmt-density-label">Compact</span>
+              </button>
+              <button class="btn-ghost" id="smgmt-cleanup-empty-btn"
+                      onclick="_smgmtCleanupEmpty()" title="Delete sprint labels with no tickets"
+                      aria-label="Clean up empty sprints" style="display:none">
+                <i class="ti ti-trash"></i>
+                Clean up empty sprints
+              </button>
+              <button class="btn-ghost" id="smgmt-new-ticket-btn"
+                      onclick="smgmtOpenNewTicket()" title="Create a new ticket"
+                      aria-label="New Ticket">
+                <i class="ti ti-plus"></i>
+                New Ticket
+              </button>
+              <button class="btn-primary" id="smgmt-new-sprint-btn"
+                      onclick="smgmtOpenNewSprint()" title="Create a new sprint"
+                      aria-label="New Sprint">
+                <i class="ti ti-plus"></i>
+                New Sprint
+              </button>
             </div>
-            <!-- Pre-flight checks show/hide toggle -->
-            <button class="btn-ghost smgmt-preflight-toggle" id="smgmt-preflight-toggle"
-                    onclick="_smgmtTogglePreflight()" aria-pressed="true"
-                    title="Pre-flight checks on — click to hide banners">
-              <i class="ti ti-checklist"></i>
-              <span id="smgmt-preflight-toggle-label">Pre-flight: on</span>
-            </button>
-            <button class="btn-ghost" id="smgmt-cleanup-empty-btn"
-                    onclick="_smgmtCleanupEmpty()" title="Delete sprint labels with no tickets"
-                    aria-label="Clean up empty sprints" style="display:none">
-              <i class="ti ti-trash"></i>
-              Clean up empty sprints
-            </button>
-            <button class="btn-ghost" id="smgmt-new-ticket-btn"
-                    onclick="smgmtOpenNewTicket()" title="Create a new ticket"
-                    aria-label="New Ticket">
-              <i class="ti ti-plus"></i>
-              New Ticket
-            </button>
-            <button class="btn-primary" id="smgmt-new-sprint-btn"
-                    onclick="smgmtOpenNewSprint()" title="Create a new sprint"
-                    aria-label="New Sprint">
-              <i class="ti ti-plus"></i>
-              New Sprint
-            </button>
+          </div>
+
+          <!-- Label filter chips (issue #546) — inside sticky area so they scroll with toolbar -->
+          <div class="smgmt-label-filter-row is-empty" id="smgmt-label-filter-row" role="toolbar" aria-label="Filter by label"></div>
+
+          <!-- Search/filter bar (issue #552) -->
+          <div class="smgmt-filter-bar" id="smgmt-filter-bar">
+            <div class="smgmt-filter-input-wrap">
+              <input type="search" class="smgmt-filter-input" id="smgmt-filter-input"
+                     placeholder="Filter tickets by title, #number, or label…"
+                     aria-label="Filter tickets by title, issue number, or label"
+                     autocomplete="off" spellcheck="false"
+                     oninput="_smgmtFilterApply()">
+              <button class="smgmt-filter-clear-btn" id="smgmt-filter-clear-btn"
+                      onclick="_smgmtFilterClear()" title="Clear filter" aria-label="Clear filter">×</button>
+            </div>
           </div>
         </div>
 
@@ -3568,6 +3952,9 @@
 
         <!-- Ticket row context menu (issue #500) -->
         <div class="smgmt-ctx-menu hidden" id="smgmt-ctx-menu" role="menu"></div>
+
+        <!-- Per-column sort menu (issue #550) -->
+        <div class="smgmt-sort-menu hidden" id="smgmt-sort-menu" role="menu" aria-label="Sort column"></div>
 
       </div>
 
@@ -3649,15 +4036,7 @@
           </span>
           <span class="bc-step-arrow"><i class="ti ti-arrow-right"></i></span>
           <span class="bc-step-chip" id="bc-chip-2" data-step="2">
-            <span class="bc-step-n">2</span> Review
-          </span>
-          <span class="bc-step-arrow"><i class="ti ti-arrow-right"></i></span>
-          <span class="bc-step-chip" id="bc-chip-3" data-step="3">
-            <span class="bc-step-n">3</span> Created
-          </span>
-          <span class="bc-step-arrow"><i class="ti ti-arrow-right"></i></span>
-          <span class="bc-step-chip" id="bc-chip-4" data-step="4">
-            <span class="bc-step-n">4</span> Estimate
+            <span class="bc-step-n">2</span> Review &amp; create
           </span>
         </div>
 
@@ -3668,23 +4047,66 @@
               <label class="bc-settings-label" for="bc-repo">Repo</label>
               <select class="bc-select" id="bc-repo" onchange="bcRepoChanged()"></select>
             </div>
+            <div class="bc-settings-field">
+              <label class="bc-settings-label" for="bc-split-mode">Split mode</label>
+              <select class="bc-select" id="bc-split-mode" onchange="_bcOnSplitModeChange()">
+                <option value="separator">By separator ---</option>
+                <option value="heading">By heading #/##</option>
+              </select>
+            </div>
             <div class="bc-settings-field bc-settings-field--labels" style="display:none">
               <label class="bc-settings-label" for="bc-default-labels">Default labels</label>
               <input class="bc-text-input" id="bc-default-labels" type="text"
-                     placeholder="enhancement, frontend" autocomplete="off" value="enhancement">
+                     placeholder="enhancement, frontend" autocomplete="off" value="enhancement"
+                     oninput="bcOnLabelsInput()">
             </div>
           </div>
 
           <div class="bc-counter-row">
-            <span class="bc-counter" id="bc-counter">0 tickets detected &middot; 0 chars</span>
+            <span class="bc-counter" id="bc-counter">0 / 50 prompts</span>
+            <button type="button" class="bc-clear-draft-btn hidden" id="bc-clear-draft-btn"
+                    onclick="bcClearDraft()">Clear saved draft</button>
           </div>
+
+          <div id="bc-limit-banner" class="bc-limit-banner hidden" role="alert" aria-live="polite"></div>
 
           <textarea class="bc-textarea" id="bc-textarea"
                     placeholder="Paste your ticket prompts here, separated by --- on its own line..."
                     oninput="bcOnTextareaInput()"></textarea>
 
-          <div class="bc-info-note">
+          <div id="bc-dup-warning" class="bc-dup-warning hidden"></div>
+
+          <div class="bc-info-note" id="bc-info-note">
             Split prompts using <code>---</code> on its own line. All created tickets go to backlog &mdash; assign them to a sprint later via Sprint Mgmt.
+          </div>
+
+          <!-- Prompt templates (issue #531) -->
+          <div class="bc-tpl-section" id="bc-tpl-section">
+            <div class="bc-tpl-header">
+              <span class="bc-settings-label">Templates</span>
+              <button type="button" class="bc-tpl-save-btn" id="bc-tpl-save-btn"
+                      onclick="_bcTplShowSaveForm()" aria-label="Save current textarea as a template">
+                <i class="ti ti-bookmark-plus"></i> Save as template
+              </button>
+            </div>
+            <div class="bc-tpl-save-form hidden" id="bc-tpl-save-form" role="form" aria-label="Template name">
+              <input class="bc-tpl-name-input" id="bc-tpl-name-input" type="text"
+                     placeholder="Template name" autocomplete="off" maxlength="80"
+                     onkeydown="_bcTplNameKeydown(event)" oninput="_bcTplClearError()">
+              <button type="button" class="bc-tpl-confirm-btn" onclick="_bcTplConfirmSave()">Save</button>
+              <button type="button" class="bc-tpl-cancel-btn" onclick="_bcTplCancelSave()">Cancel</button>
+              <span class="bc-tpl-name-error hidden" id="bc-tpl-name-error" role="alert"></span>
+            </div>
+            <div class="bc-tpl-list" id="bc-tpl-list" role="list"></div>
+          </div>
+
+          <!-- Prompt reorder list (issue #529) -->
+          <div id="bc-prompt-reorder" class="bc-prompt-reorder hidden">
+            <div class="bc-prompt-reorder-header">
+              <span class="bc-settings-label">Prompts</span>
+              <span class="bc-label-hint">— drag or use <kbd style="font-size:10px;background:var(--surface-2);border:1px solid var(--border);border-radius:3px;padding:1px 4px;font-family:var(--mono)">Alt+↑/↓</kbd> on a focused row to reorder</span>
+            </div>
+            <div id="bc-prompt-rows" class="bc-prompt-rows"></div>
           </div>
 
           <!-- Image Attachments -->
@@ -3716,7 +4138,8 @@
           <div class="bc-step-actions">
             <div class="bc-step-actions-left">
               <label class="bc-concurrency-label">Run BA in parallel:</label>
-              <select class="bc-concurrency-select" id="bc-concurrency">
+              <select class="bc-concurrency-select" id="bc-concurrency"
+                      onchange="bcOnConcurrencyChange()">
                 <option value="1">1 at a time (serial)</option>
                 <option value="3" selected>3 at a time</option>
                 <option value="5">5 at a time</option>
@@ -3732,6 +4155,17 @@
         <div id="bc-step2" class="hidden">
           <div class="bc-parallel-banner" id="bc-parallel-banner"></div>
           <div class="bc-summary-strip" id="bc-summary-strip"></div>
+
+          <!-- Bulk selection controls (issue #534) -->
+          <div class="bc-bulk-controls hidden" id="bc-bulk-controls" role="group" aria-label="Bulk selection controls">
+            <label class="bc-bulk-select-all-wrap">
+              <input type="checkbox" id="bc-select-all-check" onchange="bcToggleSelectAll(this.checked)" aria-label="Select all drafts">
+              <span>Select all</span>
+            </label>
+            <button type="button" class="bc-bulk-btn" onclick="bcDeselectAll()">Deselect all</button>
+            <button type="button" class="bc-bulk-btn bc-select-failed-btn hidden" id="bc-select-failed-btn" onclick="bcSelectFailed()">Select failed</button>
+          </div>
+
           <div class="bc-ticket-list" id="bc-ticket-list"></div>
 
           <!-- Review overlay: shown when user clicks Review & Post (issue #374) -->
@@ -5344,6 +5778,9 @@ async function init() {
   // Set up sticky toolbar shadow
   _smgmtInitScrollShadow();
 
+  // Restore compact/dense density from localStorage (issue #547)
+  _smgmtDensityInit();
+
   // Load data in parallel
   await Promise.all([
     loadHomeData(false),
@@ -5392,23 +5829,23 @@ async function init() {
 }
 
 // ── Sprint Mgmt toolbar height calculation ─────────────────────────────────
-// Compute top offset for the sticky toolbar (proj-header height)
+// Compute top offset for the sticky area (proj-header height)
 function _smgmtUpdateToolbarTop() {
-  const header = document.getElementById('proj-header');
-  const toolbar = document.getElementById('smgmt-toolbar');
-  if (header && toolbar) {
-    toolbar.style.top = header.offsetHeight + 'px';
+  const header     = document.getElementById('proj-header');
+  const stickyArea = document.getElementById('smgmt-sticky-area');
+  if (header && stickyArea) {
+    stickyArea.style.top = header.offsetHeight + 'px';
   }
 }
 
 // ── Sprint Mgmt scroll-shadow ─────────────────────────────────────────────
 function _smgmtInitScrollShadow() {
-  const mainArea = document.getElementById('main-area');
-  const toolbar  = document.getElementById('smgmt-toolbar');
-  if (!mainArea || !toolbar) return;
+  const mainArea   = document.getElementById('main-area');
+  const stickyArea = document.getElementById('smgmt-sticky-area');
+  if (!mainArea || !stickyArea) return;
 
   mainArea.addEventListener('scroll', function() {
-    toolbar.classList.toggle('scrolled', mainArea.scrollTop > 4);
+    stickyArea.classList.toggle('scrolled', mainArea.scrollTop > 4);
   }, { passive: true });
 }
 
@@ -5668,11 +6105,295 @@ function _smgmtRender(data) {
   // Load estimated hours from .commander/estimates/ for each sprint header
   _smgmtLoadEstimates(orderedLabels, bySprint);
 
+  // Load sprint goals for header summary
+  _smgmtLoadGoals(orderedLabels);
+
   // Inject pre-flight check banners for non-running sprint panes (issue #434)
   _preflightLoadBanners(orderedLabels, bySprint);
 
   // Update cleanup button visibility (issue #457)
   _smgmtUpdateCleanupBtn(data);
+
+  // Render label filter chips and re-apply current filter state (issue #546)
+  _smgmtLabelFilterRender(issues);
+  _smgmtLabelFilterApply();
+
+  // Restore keyboard navigation focus ring after DOM rebuild (issue #549)
+  _smgmtKbRestoreFocus();
+
+  // Restore per-column sort state (issue #550)
+  orderedLabels.forEach(lbl => _smgmtApplySort(lbl));
+
+  // Re-apply search filter after DOM rebuild (issue #552)
+  _smgmtFilterApply();
+}
+
+// ── Per-column sort controls (issue #550) ────────────────────────────────────
+
+const _SMGMT_SIZE_ORDER = { S: 1, M: 2, L: 3, XL: 4 };
+
+const _SMGMT_SORT_LABELS = {
+  'default':      'Sort',
+  'number:asc':   'Issue # ↑',
+  'number:desc':  'Issue # ↓',
+  'size:asc':     'Size ↑',
+  'size:desc':    'Size ↓',
+  'title:asc':    'A → Z',
+  'title:desc':   'Z → A',
+};
+
+function _smgmtGetSortState(label) {
+  try {
+    const v = sessionStorage.getItem('smgmt-sort-' + label);
+    return v ? JSON.parse(v) : null;
+  } catch (_) { return null; }
+}
+
+function _smgmtSetSortState(label, state) {
+  try {
+    if (state) sessionStorage.setItem('smgmt-sort-' + label, JSON.stringify(state));
+    else sessionStorage.removeItem('smgmt-sort-' + label);
+  } catch (_) {}
+}
+
+function _smgmtSortBtnHtml(label) {
+  const state = _smgmtGetSortState(label);
+  const key   = state ? `${state.field}:${state.dir}` : 'default';
+  const isActive = !!state;
+  const btnLabel = _SMGMT_SORT_LABELS[key] || 'Sort';
+  const safeLabel = escHtml(label);
+  const dispLabel = escHtml(sprintLabelDisplay(label));
+  return `<button class="smgmt-sort-btn${isActive ? ' is-active' : ''}"
+    id="smgmt-sort-btn-${safeLabel}"
+    aria-haspopup="true" aria-expanded="false"
+    aria-label="Sort ${dispLabel} tickets, current order: ${escHtml(btnLabel)}"
+    title="Sort tickets in this column"
+    onclick="event.stopPropagation();smgmtOpenSortMenu('${safeLabel}',this)"
+    onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();smgmtOpenSortMenu('${safeLabel}',this);}">
+    <i class="ti ti-arrows-sort" aria-hidden="true"></i>${isActive ? ' ' + escHtml(btnLabel) : ' Sort'}
+  </button>`;
+}
+
+function smgmtOpenSortMenu(label, btn) {
+  _smgmtCloseSortMenu();
+  const state = _smgmtGetSortState(label);
+  const cur   = state ? `${state.field}:${state.dir}` : 'default';
+
+  const items = [
+    { key: 'default',     icon: 'ti-list',                    text: 'Default order' },
+    null,
+    { key: 'number:asc',  icon: 'ti-sort-ascending-numbers',  text: 'Issue # ↑' },
+    { key: 'number:desc', icon: 'ti-sort-descending-numbers', text: 'Issue # ↓' },
+    null,
+    { key: 'size:asc',    icon: 'ti-sort-ascending-letters',  text: 'Size S → XL' },
+    { key: 'size:desc',   icon: 'ti-sort-descending-letters', text: 'Size XL → S' },
+    null,
+    { key: 'title:asc',   icon: 'ti-sort-ascending-letters',  text: 'Title A → Z' },
+    { key: 'title:desc',  icon: 'ti-sort-descending-letters', text: 'Title Z → A' },
+  ];
+
+  const menu = document.getElementById('smgmt-sort-menu');
+  const safeLabel = escHtml(label);
+  menu.innerHTML = items.map(item => {
+    if (!item) return '<div class="smgmt-sort-menu-divider" role="separator"></div>';
+    const isActive = item.key === cur;
+    return `<button class="smgmt-sort-menu-item${isActive ? ' is-active' : ''}"
+      role="menuitem"
+      onclick="smgmtSetSort('${safeLabel}','${escHtml(item.key)}')">
+      <i class="ti ${escHtml(item.icon)}" aria-hidden="true"></i>${escHtml(item.text)}
+    </button>`;
+  }).join('');
+
+  btn.setAttribute('aria-expanded', 'true');
+  menu.dataset.forLabel = label;
+
+  const rect      = btn.getBoundingClientRect();
+  const menuWidth = 170;
+  let left = rect.left;
+  if (left + menuWidth > window.innerWidth - 8) left = window.innerWidth - menuWidth - 8;
+  menu.style.top  = (rect.bottom + 4) + 'px';
+  menu.style.left = left + 'px';
+  menu.classList.remove('hidden');
+
+  const first = menu.querySelector('.smgmt-sort-menu-item');
+  if (first) setTimeout(() => first.focus(), 0);
+
+  setTimeout(() => document.addEventListener('click', _smgmtSortMenuOutside, { once: true }), 0);
+}
+
+function _smgmtSortMenuOutside(e) {
+  const menu = document.getElementById('smgmt-sort-menu');
+  if (menu && !menu.contains(e.target)) _smgmtCloseSortMenu();
+}
+
+function _smgmtCloseSortMenu() {
+  const menu = document.getElementById('smgmt-sort-menu');
+  if (!menu || menu.classList.contains('hidden')) return;
+  const label = menu.dataset.forLabel;
+  if (label) {
+    const btn = document.getElementById('smgmt-sort-btn-' + label);
+    if (btn) btn.setAttribute('aria-expanded', 'false');
+  }
+  menu.classList.add('hidden');
+  menu.dataset.forLabel = '';
+}
+
+function smgmtSetSort(label, key) {
+  _smgmtCloseSortMenu();
+  if (key === 'default') {
+    _smgmtSetSortState(label, null);
+    _smgmtRestoreDefaultOrder(label);
+  } else {
+    const [field, dir] = key.split(':');
+    _smgmtSetSortState(label, { field, dir });
+    _smgmtApplySort(label);
+  }
+  _smgmtUpdateSortBtn(label);
+}
+
+function _smgmtUpdateSortBtn(label) {
+  const btn = document.getElementById('smgmt-sort-btn-' + label);
+  if (!btn) return;
+  const state    = _smgmtGetSortState(label);
+  const key      = state ? `${state.field}:${state.dir}` : 'default';
+  const isActive = !!state;
+  const btnLabel = _SMGMT_SORT_LABELS[key] || 'Sort';
+  btn.className  = 'smgmt-sort-btn' + (isActive ? ' is-active' : '');
+  btn.setAttribute('aria-label', `Sort ${escHtml(sprintLabelDisplay(label))} tickets, current order: ${btnLabel}`);
+  btn.innerHTML  = `<i class="ti ti-arrows-sort" aria-hidden="true"></i>${isActive ? ' ' + btnLabel : ' Sort'}`;
+}
+
+function _smgmtApplySort(label) {
+  const container = document.getElementById('smgmt-tickets-' + label);
+  if (!container) return;
+  const state = _smgmtGetSortState(label);
+  if (!state) return;
+
+  const rows = Array.from(container.querySelectorAll('.smgmt-ticket'));
+  if (rows.length < 2) return;
+
+  rows.sort((a, b) => {
+    let va, vb;
+    if (state.field === 'number') {
+      va = parseInt(a.dataset.issue || '0', 10);
+      vb = parseInt(b.dataset.issue || '0', 10);
+    } else if (state.field === 'size') {
+      const pillA = a.querySelector('.smgmt-ticket-size-pill');
+      const pillB = b.querySelector('.smgmt-ticket-size-pill');
+      va = _SMGMT_SIZE_ORDER[pillA ? pillA.textContent.trim() : ''] || 99;
+      vb = _SMGMT_SIZE_ORDER[pillB ? pillB.textContent.trim() : ''] || 99;
+    } else {
+      va = (a.querySelector('.smgmt-ticket-title')?.textContent || '').trim().toLowerCase();
+      vb = (b.querySelector('.smgmt-ticket-title')?.textContent || '').trim().toLowerCase();
+    }
+    if (va < vb) return state.dir === 'asc' ? -1 : 1;
+    if (va > vb) return state.dir === 'asc' ?  1 : -1;
+    return 0;
+  });
+
+  rows.forEach(r => container.appendChild(r));
+}
+
+function _smgmtRestoreDefaultOrder(label) {
+  const container = document.getElementById('smgmt-tickets-' + label);
+  if (!container || !_smgmtData) return;
+  const issues  = _smgmtData.issues || [];
+  const tickets = issues.filter(i => i.sprint_label === label);
+  if (tickets.length === 0) {
+    container.innerHTML = '<div class="smgmt-drop-hint">Drop tickets here</div>';
+    return;
+  }
+  container.innerHTML = tickets.map(t => _smgmtTicketRowHtml(t, label)).join('');
+}
+
+// ── Label filter chip row (issue #546) ────────────────────────────────────────
+
+// Session-scoped set of *deactivated* label names. Empty = all active (default).
+const _smgmtDeactivatedLabels = new Set();
+
+// Labels to always show as chips (in display order) even if no tickets carry them yet.
+const _SMGMT_FILTER_PRIORITY = ['backlog', 'in-progress', 'sit', 'uat'];
+
+// Map label-name → color (hex) for dot rendering
+const _smgmtLabelColors = {};
+
+function _smgmtLabelFilterRender(issues) {
+  const row = document.getElementById('smgmt-label-filter-row');
+  if (!row) return;
+
+  // Collect all label names from tickets
+  const seen = new Set();
+  (issues || []).forEach(iss => {
+    (iss.labels || []).forEach(l => {
+      seen.add(l.name);
+      if (l.color) _smgmtLabelColors[l.name] = '#' + l.color;
+    });
+  });
+
+  // Build ordered list: priority labels first (if present), then remainder alphabetically
+  const priority = _SMGMT_FILTER_PRIORITY.filter(n => seen.has(n));
+  const rest = [...seen].filter(n => !_SMGMT_FILTER_PRIORITY.includes(n)).sort();
+  const allLabels = [...priority, ...rest];
+
+  if (allLabels.length === 0) {
+    row.classList.add('is-empty');
+    row.innerHTML = '';
+    return;
+  }
+
+  row.classList.remove('is-empty');
+  row.innerHTML = allLabels.map(name => {
+    const active = !_smgmtDeactivatedLabels.has(name);
+    const color = _smgmtLabelColors[name] || 'var(--text-muted)';
+    return `<button class="smgmt-lf-chip ${active ? 'is-active' : 'is-inactive'}"
+               data-label="${escHtml(name)}"
+               aria-pressed="${active}"
+               title="${active ? 'Hide' : 'Show'} tickets labeled &quot;${escHtml(name)}&quot;"
+               onclick="_smgmtLabelFilterToggle('${escHtml(name)}')">
+              <span class="smgmt-lf-chip-dot" style="background:${color}"></span>
+              ${escHtml(name)}
+            </button>`;
+  }).join('');
+}
+
+function _smgmtLabelFilterToggle(labelName) {
+  if (_smgmtDeactivatedLabels.has(labelName)) {
+    _smgmtDeactivatedLabels.delete(labelName);
+  } else {
+    _smgmtDeactivatedLabels.add(labelName);
+  }
+  // Update chip appearance
+  const chip = document.querySelector(`.smgmt-lf-chip[data-label="${CSS.escape(labelName)}"]`);
+  if (chip) {
+    const active = !_smgmtDeactivatedLabels.has(labelName);
+    chip.classList.toggle('is-active', active);
+    chip.classList.toggle('is-inactive', !active);
+    chip.setAttribute('aria-pressed', String(active));
+    chip.title = `${active ? 'Hide' : 'Show'} tickets labeled "${labelName}"`;
+  }
+  _smgmtLabelFilterApply();
+}
+
+function _smgmtLabelFilterApply() {
+  if (_smgmtDeactivatedLabels.size === 0) {
+    // Fast path: all active — show everything
+    document.querySelectorAll('.smgmt-ticket[data-labels]').forEach(el => {
+      el.style.display = '';
+    });
+    return;
+  }
+  document.querySelectorAll('.smgmt-ticket[data-labels]').forEach(el => {
+    const raw = el.getAttribute('data-labels') || '';
+    const ticketLabels = raw ? raw.split(',') : [];
+    if (ticketLabels.length === 0) {
+      // No labels → always visible
+      el.style.display = '';
+      return;
+    }
+    // Hidden only when every ticket label that appears as a chip is deactivated
+    const allDeactivated = ticketLabels.every(n => _smgmtDeactivatedLabels.has(n));
+    el.style.display = allDeactivated ? 'none' : '';
+  });
 }
 
 async function _smgmtFetchMissingOutcomes(orderedLabels, bySprint) {
@@ -5718,15 +6439,66 @@ async function _smgmtLoadEstimates(orderedLabels, bySprint) {
       if (!resp.ok) continue;
       const data = await resp.json();
       const estEl = document.getElementById(`smgmt-est-${label}`);
-      if (!estEl) continue;
-      if (data.complete && data.total_hours !== null) {
+      if (estEl && data.complete && data.total_hours !== null) {
         const h = data.total_hours;
         const display = Number.isInteger(h) ? `${h}h` : `${parseFloat(h.toFixed(1))}h`;
         estEl.textContent = `${display} estimated`;
       }
-      // else: leave as "— estimated"
+      // Apply per-ticket size badges from cached estimate JSON
+      if (data.sizes) _smgmtApplySizeBadges(label, data.sizes, tickets);
     } catch (_) {
       // fail silently — leave as "— estimated"
+    }
+  }
+}
+
+function _smgmtApplySizeBadges(label, sizes, tickets) {
+  const card = document.getElementById(`smgmt-card-${label}`);
+  for (const ticket of tickets) {
+    const row = (card && card.querySelector(`.smgmt-ticket[data-issue="${ticket.number}"]`))
+      || document.getElementById(`smgmt-ticket-${ticket.number}`);
+    if (!row) continue;
+    const size = sizes[String(ticket.number)];
+    let pill = row.querySelector('.smgmt-ticket-size-pill');
+    if (!pill) {
+      pill = document.createElement('span');
+      pill.className = 'smgmt-ticket-size-pill';
+      const titleEl = row.querySelector('.smgmt-ticket-title');
+      if (titleEl) titleEl.after(pill);
+      else row.appendChild(pill);
+    }
+    if (size) {
+      pill.textContent = size;
+      pill.title = `≈${_sizeMinutes(size)} min`;
+      pill.className = `smgmt-ticket-size-pill smgmt-ticket-size-pill--${size}`;
+    } else {
+      pill.textContent = 'Unestimated';
+      pill.title = 'No estimate in cache';
+      pill.className = 'smgmt-ticket-size-pill smgmt-ticket-size-pill--unestimated';
+    }
+  }
+}
+
+async function _smgmtLoadGoals(orderedLabels) {
+  const repo = _smgmtRepo();
+  if (!repo) return;
+  for (const label of orderedLabels) {
+    const goalEl = document.getElementById(`smgmt-goal-${label}`);
+    if (!goalEl) continue;
+    try {
+      const resp = await fetch(
+        `/api/sprints/goal?project=${encodeURIComponent(repo)}&sprint=${encodeURIComponent(label)}`
+      );
+      if (!resp.ok) continue;
+      const data = await resp.json();
+      const goal = (data.goal || '').trim();
+      if (goal) {
+        goalEl.textContent = goal;
+        goalEl.title = goal;
+        goalEl.style.display = '';
+      }
+    } catch (_) {
+      // fail silently
     }
   }
 }
@@ -5912,6 +6684,34 @@ function _smgmtUpdatePreflightToggleUI() {
   if (lbl) lbl.textContent = on ? 'Pre-flight: on' : 'Pre-flight: off';
 }
 
+// ── Compact/dense view toggle (issue #547) ────────────────────────────────────
+
+const _SMGMT_DENSITY_KEY = 'sprintBoard.density';
+
+function _smgmtDensityInit() {
+  if (localStorage.getItem(_SMGMT_DENSITY_KEY) === 'compact') _smgmtDensityApply(true);
+}
+
+function _smgmtDensityApply(compact) {
+  const pane = document.getElementById('pane-sprint-mgmt');
+  const btn  = document.getElementById('smgmt-density-toggle');
+  if (!pane || !btn) return;
+  pane.classList.toggle('smgmt-compact', compact);
+  btn.setAttribute('aria-pressed', String(compact));
+  btn.title = compact
+    ? 'Normal view — click to toggle'
+    : 'Compact view — click to toggle';
+  const lbl = document.getElementById('smgmt-density-label');
+  if (lbl) lbl.textContent = compact ? 'Normal' : 'Compact';
+}
+
+function _smgmtDensityToggle() {
+  const pane = document.getElementById('pane-sprint-mgmt');
+  const compact = !pane.classList.contains('smgmt-compact');
+  _smgmtDensityApply(compact);
+  localStorage.setItem(_SMGMT_DENSITY_KEY, compact ? 'compact' : 'normal');
+}
+
 /** Kick off pre-flight banner loading for all non-running sprint panes. */
 function _preflightLoadBanners(orderedLabels, bySprint) {
   _preflightLastArgs = { orderedLabels, bySprint };
@@ -6093,7 +6893,7 @@ function _smgmtOutcomeTicketListHtml(issues, label, repo) {
            <i class="ti ti-file-text"></i></button>`
       : '';
 
-    return `<div class="smgmt-ticket" data-issue="${iss.number}" draggable="false">
+    return `<div class="smgmt-ticket" data-issue="${iss.number}" data-labels="" draggable="false">
       ${circle}
       <a class="smgmt-ticket-num" href="https://github.com/issues/${iss.number}" target="_blank" rel="noopener">#${iss.number}</a>
       <span class="smgmt-ticket-title" title="${escHtml(iss.title)}">${escHtml(iss.title)}</span>
@@ -6509,6 +7309,8 @@ function smgmtCancelRename(label, origN, nameEl) {
 
 function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent, finished) {
   const isRunning = _smgmtRunningLabels.has(label);
+  let isCollapsed = false;
+  try { isCollapsed = localStorage.getItem('sprintColumn_' + label + '_collapsed') === '1'; } catch (_) {}
 
   // Running sprint gets special animated treatment (issue #277)
   if (isRunning) {
@@ -6555,6 +7357,7 @@ function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent, finished) {
   let outcomeBadgeHtml = '';
   let ticketCount = tickets.length;
   let ticketsContainerHtml = '';
+  let isOutcomeView = false;
 
   if (outcome && (outcome.sprint_status || outcome.state)) {
     const meta = _smgmtStateMeta(outcome);
@@ -6570,6 +7373,7 @@ function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent, finished) {
       const issueList = outcome.issues || [];
       ticketCount = issueList.length;
       ticketsContainerHtml = _smgmtOutcomeTicketListHtml(issueList, label, _smgmtRepo());
+      isOutcomeView = true;
     }
   } else {
     // Planning view ticket rows
@@ -6583,19 +7387,40 @@ function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent, finished) {
     }
   }
 
+  // Sprint summary: progress bar + goal
+  const summaryDone = isOutcomeView
+    ? (outcome.issues || []).filter(i => i.outcome === 'done').length
+    : tickets.filter(t => t.status === 'done').length;
+  const summaryPct = ticketCount > 0 ? Math.round((summaryDone / ticketCount) * 100) : 0;
+  const summaryHtml = `<div class="smgmt-sprint-summary">
+    <div class="smgmt-progress-row">
+      <div class="smgmt-progress-bar-wrap"><div class="smgmt-progress-bar-fill" style="width:${summaryPct}%"></div></div>
+      <span class="smgmt-progress-label">${summaryDone} / ${ticketCount} done</span>
+    </div>
+    <div class="smgmt-sprint-goal-text" id="smgmt-goal-${escHtml(label)}" style="display:none"></div>
+  </div>`;
+
   const logHtml = (outcome && outcome.sprint_status) ? _smgmtOutcomeLogHtml(label, outcome) : '';
   const cancelBannerHtml = _smgmtIsCancelled(outcome) ? _smgmtCancelBannerHtml(label) : '';
   const parentLineage = parent
     ? `<span class="smgmt-sprint-lineage" title="Child sprint spawned from ${escHtml(parent)}">← from ${escHtml(sprintLabelDisplay(parent))}</span>`
     : '';
 
+  const collapsedClass = isCollapsed ? ' smgmt-collapsed' : '';
+  const collapseLabel = (isCollapsed ? 'Expand ' : 'Collapse ') + escHtml(sprintLabelDisplay(label));
   return `
-    <div class="smgmt-sprint-card${outcomeCardClass}" id="smgmt-card-${escHtml(label)}"
+    <div class="smgmt-sprint-card${outcomeCardClass}${collapsedClass}" id="smgmt-card-${escHtml(label)}"
          ondragover="_smgmtDragOver(event, '${escHtml(label)}')"
          ondragleave="_smgmtDragLeave(event)"
          ondrop="_smgmtDropOnSprint(event, '${escHtml(label)}')">
       <div class="smgmt-sprint-header">
         <div class="smgmt-sprint-header-left">
+          <button class="smgmt-collapse-btn" id="smgmt-collapse-btn-${escHtml(label)}"
+                  onclick="smgmtToggleCollapse('${escHtml(label)}')"
+                  aria-label="${collapseLabel}"
+                  title="${collapseLabel}"
+                  onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();smgmtToggleCollapse('${escHtml(label)}');}">
+            <i class="ti ti-chevron-down"></i></button>
           <i class="ti ti-layout-kanban" style="font-size:14px;color:var(--text-muted)"></i>
           <span class="smgmt-sprint-name" style="font-size:15px;font-weight:700;">${escHtml(sprintLabelDisplay(label))}</span>
           <button class="smgmt-rename-btn" title="Rename sprint"
@@ -6606,6 +7431,7 @@ function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent, finished) {
           <span class="smgmt-sprint-count"><span id="smgmt-est-${escHtml(label)}" class="smgmt-sprint-est-val">— estimated</span> &middot; ${ticketCount} ticket${ticketCount !== 1 ? 's' : ''}</span>
         </div>
         <div class="smgmt-sprint-header-right">
+          ${_smgmtSortBtnHtml(label)}
           <button class="smgmt-finish-btn ${finishHidden}" ${finishDisabled}
                   title="${finishDisabled ? 'No open tickets' : 'Finish sprint'}"
                   onclick="smgmtFinishSprint('${escHtml(label)}')">
@@ -6616,6 +7442,7 @@ function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent, finished) {
           ${actionBtn}
         </div>
       </div>
+      ${summaryHtml}
       ${cancelBannerHtml}
       ${outcomeBandHtml}
       <div class="smgmt-sprint-tickets" id="smgmt-tickets-${escHtml(label)}">
@@ -6632,6 +7459,8 @@ const SIZE_MINUTES = { S: 5, M: 15, L: 30, XL: 60 };
 
 /** Build the animated running sprint card HTML. Live data patched separately by _smgmtLivePatch. */
 function _smgmtRunningCardHtml(label, n, tickets) {
+  let isCollapsed = false;
+  try { isCollapsed = localStorage.getItem('sprintColumn_' + label + '_collapsed') === '1'; } catch (_) {}
   const live = _smgmtLiveCache[label] || null;
 
   // Stat strip values (use live data if available, else zeros)
@@ -6689,7 +7518,8 @@ function _smgmtRunningCardHtml(label, n, tickets) {
       ? `<span class="smgmt-ticket-elapsed">${elapsedStr}</span>`
       : '';
 
-    return `<div class="smgmt-ticket" data-issue="${t.number}" draggable="false">
+    const runTicketLabels = escHtml((t.labels || []).map(l => l.name).join(','));
+    return `<div class="smgmt-ticket" data-issue="${t.number}" data-labels="${runTicketLabels}" draggable="false">
       ${indicator}
       <a class="smgmt-ticket-num" href="${escHtml(issueUrl)}" target="_blank"
          rel="noopener">#${t.number}</a>
@@ -6698,11 +7528,19 @@ function _smgmtRunningCardHtml(label, n, tickets) {
     </div>`;
   }).join('');
 
+  const runCollapsedClass = isCollapsed ? ' smgmt-collapsed' : '';
+  const runCollapseLabel = (isCollapsed ? 'Expand ' : 'Collapse ') + escHtml(sprintLabelDisplay(label));
   return `
-    <div class="smgmt-sprint-card smgmt-running" id="smgmt-card-${escHtml(label)}">
+    <div class="smgmt-sprint-card smgmt-running${runCollapsedClass}" id="smgmt-card-${escHtml(label)}">
       <div class="smgmt-running-stripe"></div>
       <div class="smgmt-sprint-header">
         <div class="smgmt-sprint-header-left">
+          <button class="smgmt-collapse-btn" id="smgmt-collapse-btn-${escHtml(label)}"
+                  onclick="smgmtToggleCollapse('${escHtml(label)}')"
+                  aria-label="${runCollapseLabel}"
+                  title="${runCollapseLabel}"
+                  onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();smgmtToggleCollapse('${escHtml(label)}');}">
+            <i class="ti ti-chevron-down"></i></button>
           <i class="ti ti-layout-kanban" style="font-size:14px;color:var(--green)"></i>
           <span class="smgmt-sprint-name" style="font-size:15px;font-weight:700;">${escHtml(sprintLabelDisplay(label))}</span>
           <span class="smgmt-running-badge" id="smgmt-running-badge-${escHtml(label)}">
@@ -7069,16 +7907,21 @@ function _smgmtTicketRowHtml(ticket, label) {
 
   const sizeLabel = (ticket.labels || []).find(l => /^size-[SMLX]+$/.test(l.name));
   const hasEstimate = !!sizeLabel;
-  // Size badge only — the re-estimate action now lives in the per-row ≡ menu (issue #275 follow-up)
-  const sizePillHtml = sizeLabel
-    ? `<span class="smgmt-ticket-size-pill">${escHtml(sizeLabel.name.replace('size-', ''))}</span>`
+  // Size badge: show from GitHub label immediately; _smgmtApplySizeBadges overlays JSON data after load
+  const sizeVal = sizeLabel ? sizeLabel.name.replace('size-', '') : null;
+  const sizePillHtml = sizeVal
+    ? `<span class="smgmt-ticket-size-pill smgmt-ticket-size-pill--${escHtml(sizeVal)}" title="≈${_sizeMinutes(sizeVal)} min">${escHtml(sizeVal)}</span>`
     : '';
+
+  const ticketLabelNames = (ticket.labels || []).map(l => l.name).join(',');
 
   return `
     <div class="smgmt-ticket${isSelected ? ' is-selected' : ''}" id="smgmt-ticket-${ticket.number}"
+         tabindex="-1"
          draggable="true"
          data-issue="${ticket.number}"
          data-sprint="${escHtml(label)}"
+         data-labels="${escHtml(ticketLabelNames)}"
          ondragstart="_smgmtTicketDragStart(event, ${ticket.number}, '${escHtml(label)}')"
          ondragend="_smgmtTicketDragEnd(event)"
          ondragover="_smgmtTicketReorderDragOver(event)"
@@ -7319,6 +8162,23 @@ function _smgmtShowToast(msg) {
   el.classList.add('show');
   clearTimeout(el._timer);
   el._timer = setTimeout(() => el.classList.remove('show'), 2800);
+}
+
+function _smgmtShowInlineError(msg) {
+  const listEl = document.getElementById('smgmt-sprint-list');
+  if (!listEl) { _smgmtShowToast(msg); return; }
+  let errEl = document.getElementById('smgmt-bulk-move-error');
+  if (!errEl) {
+    errEl = document.createElement('div');
+    errEl.id = 'smgmt-bulk-move-error';
+    errEl.style.cssText = 'background:var(--red-bg);border:1px solid var(--red);border-radius:8px;padding:10px 14px;font-size:12px;color:var(--red);white-space:pre-wrap;margin-bottom:10px;position:relative;';
+    errEl.innerHTML = '<button onclick="this.parentElement.remove()" style="position:absolute;top:6px;right:8px;background:none;border:none;color:var(--red);cursor:pointer;font-size:14px;line-height:1;">✕</button>';
+    listEl.insertBefore(errEl, listEl.firstChild);
+  }
+  const txt = document.createElement('span');
+  txt.textContent = msg;
+  errEl.prepend(txt);
+  errEl.style.display = 'block';
 }
 
 function smgmtRunBlockedToast() {
@@ -8152,13 +9012,14 @@ function _smgmtUpdateSelectionUI() {
           </button>
           <button class="smgmt-move-to-btn" id="smgmt-move-to-btn"
                   onclick="_smgmtToggleMoveToMenu(event)">
-            Move to &#9660;
+            <i class="ti ti-send"></i> Move to Sprint &#9660;
           </button>
           <div class="smgmt-move-to-menu" id="smgmt-move-to-menu"></div>
         </div>`;
       if (listEl) listEl.insertBefore(bar, listEl.firstChild);
     }
     bar.classList.add('show');
+    if (listEl) listEl.classList.add('has-selection');
     const countEl = document.getElementById('smgmt-sel-count');
     if (countEl) countEl.textContent = count === 1 ? '1 ticket selected' : `${count} tickets selected`;
     _smgmtPopulateMoveToMenu();
@@ -8170,6 +9031,7 @@ function _smgmtUpdateSelectionUI() {
     }
   } else {
     if (bar) bar.classList.remove('show');
+    if (listEl) listEl.classList.remove('has-selection');
   }
 }
 
@@ -8180,13 +9042,24 @@ function _smgmtPopulateSelectionDropdown() {
 function _smgmtPopulateMoveToMenu() {
   const menu = document.getElementById('smgmt-move-to-menu');
   if (!menu || !_smgmtData) return;
+
+  // Sprints that contain at least one selected ticket — exclude from the target list
+  const selectedNums = Array.from(_smgmtSelectedIssues);
+  const occupiedSprints = new Set(
+    selectedNums.map(n => {
+      const iss = (_smgmtData.issues || []).find(i => i.number === n);
+      return iss ? iss.sprint : undefined;
+    }).filter(s => s != null)
+  );
+
   const sprints = (_smgmtData.sprints || []).sort((a, b) => a - b);
   let html = '';
   sprints.forEach(n => {
+    if (occupiedSprints.has(n)) return;
     html += `<button class="smgmt-move-to-item" onclick="_smgmtMoveSelectedTo('sprint-${n}');_smgmtCloseMoveToMenu()">Sprint ${n}</button>`;
   });
   html += `<button class="smgmt-move-to-item" onclick="_smgmtMoveSelectedTo('backlog');_smgmtCloseMoveToMenu()">Backlog (no sprint)</button>`;
-  menu.innerHTML = html;
+  menu.innerHTML = html || '<span style="display:block;padding:8px 14px;font-size:12px;color:var(--text-muted)">No other sprints available</span>';
 }
 
 function _smgmtToggleMoveToMenu(event) {
@@ -8201,6 +9074,12 @@ function _smgmtCloseMoveToMenu() {
   const menu = document.getElementById('smgmt-move-to-menu');
   if (menu) menu.classList.remove('open');
 }
+
+// Close bulk-move dropdown when clicking outside the selection bar
+document.addEventListener('click', function(e) {
+  const bar = document.getElementById('smgmt-selection-bar');
+  if (bar && !bar.contains(e.target)) _smgmtCloseMoveToMenu();
+});
 
 function _smgmtClearSelection() {
   _smgmtSelectedIssues.forEach(num => {
@@ -8325,9 +9204,15 @@ async function _smgmtMoveSelectedTo(targetLabel) {
       body: JSON.stringify({ changes, project: repo }),
     });
     if (!res.ok) throw new Error(await res.text());
+    const data = await res.json();
+    if (data.failed > 0 && data.errors && data.errors.length > 0) {
+      _smgmtShowInlineError(`${data.failed} ticket${data.failed !== 1 ? 's' : ''} failed to move:\n${data.errors.join('\n')}`);
+    } else if (data.applied > 0) {
+      _smgmtShowToast(`Moved ${data.applied} ticket${data.applied !== 1 ? 's' : ''} to ${dest}.`);
+    }
     await loadSprintMgmt();
   } catch (e) {
-    alert('Failed to move tickets: ' + e.message);
+    _smgmtShowToast('Failed to move tickets: ' + e.message);
     await loadSprintMgmt();
   } finally {
     _smgmtBoardUnlock();
@@ -8777,6 +9662,23 @@ async function _smgmtTicketReorderDrop(event, targetIssue, sprintLabel) {
 
 // ── Backlog pane (issue #274) ──────────────────────────────────────────────
 
+function smgmtToggleCollapse(label) {
+  const card = document.getElementById('smgmt-card-' + label);
+  if (!card) return;
+  const btn = document.getElementById('smgmt-collapse-btn-' + label);
+  const isCollapsed = card.classList.toggle('smgmt-collapsed');
+  const displayName = sprintLabelDisplay(label);
+  if (btn) btn.setAttribute('aria-label', (isCollapsed ? 'Expand ' : 'Collapse ') + displayName);
+  if (btn) btn.setAttribute('title', (isCollapsed ? 'Expand ' : 'Collapse ') + displayName);
+  try {
+    if (isCollapsed) {
+      localStorage.setItem('sprintColumn_' + label + '_collapsed', '1');
+    } else {
+      localStorage.removeItem('sprintColumn_' + label + '_collapsed');
+    }
+  } catch (_) {}
+}
+
 function _smgmtBacklogToggle() {
   const pane = document.getElementById('smgmt-backlog-pane');
   const hdr  = document.getElementById('smgmt-backlog-header-row');
@@ -8813,11 +9715,13 @@ function _smgmtRenderBacklog(tickets) {
 function _smgmtBacklogTicketHtml(ticket, sprintNums) {
   const isSelected = _smgmtSelectedIssues.has(ticket.number);
   const hasEstimate = (ticket.labels || []).some(l => /^size-[SMLX]+$/.test(l.name));
+  const backlogLabelNames = (ticket.labels || []).map(l => l.name).join(',');
   return `
     <div class="smgmt-ticket${isSelected ? ' is-selected' : ''}" id="smgmt-ticket-${ticket.number}"
          draggable="true"
          data-issue="${ticket.number}"
          data-sprint=""
+         data-labels="${escHtml(backlogLabelNames)}"
          ondragstart="_smgmtBacklogTicketDragStart(event, ${ticket.number})"
          ondragend="_smgmtTicketDragEnd(event)"
          onclick="_smgmtRowClick(event, ${ticket.number}, null)"
@@ -9365,6 +10269,257 @@ function _smgmtBoardUnlock() {
   if (_arInterval > 0) _smgmtArStartTicker();
 }
 
+// ── Keyboard navigation for sprint board (issue #549) ────────────────────────
+
+let _smgmtKbFocusedIssue = null;
+
+/** Returns the ordered list of sprint labels currently visible on the board. */
+function _smgmtKbSprintOrder() {
+  if (!_smgmtData) return [];
+  return (_smgmtData.order && _smgmtData.order.length)
+    ? _smgmtData.order
+    : (_smgmtData.sprints || []).map(n => `sprint-${n}`);
+}
+
+/** Returns visible ticket DOM elements in a sprint column (in DOM order). */
+function _smgmtKbColTickets(label) {
+  const container = document.getElementById(`smgmt-tickets-${label}`);
+  if (!container) return [];
+  return Array.from(container.querySelectorAll('.smgmt-ticket[data-issue]'))
+    .filter(el => el.style.display !== 'none');
+}
+
+/** Returns true if any modal, dialog, or dropdown is open. */
+function _smgmtKbAnyModalOpen() {
+  const backdropIds = ['mt-backdrop', 'pf-backdrop', 'ci-backdrop', 'lv-backdrop', 'rr-backdrop', 'gc-backdrop', 'apm-backdrop'];
+  if (backdropIds.some(id => { const el = document.getElementById(id); return el && !el.classList.contains('hidden'); })) return true;
+  const menuIds = ['smgmt-row-menu', 'smgmt-moveto-popup', 'smgmt-ctx-menu', 'smgmt-ar-menu', 'proj-create-menu'];
+  if (menuIds.some(id => { const el = document.getElementById(id); return el && !el.classList.contains('hidden'); })) return true;
+  return false;
+}
+
+/** Move keyboard focus to a ticket by issue number. */
+function _smgmtKbSetFocus(issueNum) {
+  if (_smgmtKbFocusedIssue !== null) {
+    const old = document.getElementById(`smgmt-ticket-${_smgmtKbFocusedIssue}`);
+    if (old) { old.classList.remove('smgmt-kb-focused'); old.tabIndex = -1; }
+  }
+  _smgmtKbFocusedIssue = issueNum;
+  if (issueNum === null) return;
+  const el = document.getElementById(`smgmt-ticket-${issueNum}`);
+  if (!el) { _smgmtKbFocusedIssue = null; return; }
+  el.tabIndex = 0;
+  el.classList.add('smgmt-kb-focused');
+  el.focus({ preventScroll: false });
+  _smgmtKbAnnounce(issueNum, el);
+}
+
+/** Re-apply the focus class after DOM rebuild (called from _smgmtRender). */
+function _smgmtKbRestoreFocus() {
+  if (_smgmtKbFocusedIssue === null) return;
+  const el = document.getElementById(`smgmt-ticket-${_smgmtKbFocusedIssue}`);
+  if (!el) { _smgmtKbFocusedIssue = null; return; }
+  el.tabIndex = 0;
+  el.classList.add('smgmt-kb-focused');
+}
+
+/** Announce focused card details to screen readers via aria-live region. */
+function _smgmtKbAnnounce(issueNum, el) {
+  let live = document.getElementById('smgmt-kb-announce');
+  if (!live) return;
+  const sprint = el.dataset.sprint || '';
+  const sprintName = sprintLabelDisplay(sprint);
+  const titleEl = el.querySelector('.smgmt-ticket-title');
+  const title = titleEl ? titleEl.textContent.trim() : '';
+  const container = el.parentElement;
+  const all = container
+    ? Array.from(container.querySelectorAll('.smgmt-ticket[data-issue]')).filter(t => t.style.display !== 'none')
+    : [];
+  const pos = all.indexOf(el) + 1;
+  live.textContent = '';
+  requestAnimationFrame(() => {
+    live.textContent = `#${issueNum}: ${title}, ${sprintName}, ${pos} of ${all.length}`;
+  });
+}
+
+/** Announce a plain message to screen readers. */
+function _smgmtKbAnnounceMsg(msg) {
+  const live = document.getElementById('smgmt-kb-announce');
+  if (!live) return;
+  live.textContent = '';
+  requestAnimationFrame(() => { live.textContent = msg; });
+}
+
+/** Move the focused ticket to an adjacent sprint (delta: +1 = next, -1 = previous). */
+async function _smgmtKbMoveSprint(delta) {
+  if (_smgmtMoveLock) return;
+  if (_smgmtKbFocusedIssue === null) return;
+  const repo = _smgmtRepo();
+  if (!repo || !_smgmtData) return;
+
+  const issueNum = _smgmtKbFocusedIssue;
+  const focusedEl = document.getElementById(`smgmt-ticket-${issueNum}`);
+  if (!focusedEl) return;
+  const currentSprint = focusedEl.dataset.sprint;
+
+  const sprints = _smgmtKbSprintOrder();
+  const colIdx = sprints.indexOf(currentSprint);
+  if (colIdx < 0) return;
+
+  const targetIdx = colIdx + delta;
+  if (targetIdx < 0 || targetIdx >= sprints.length) {
+    const msg = delta > 0
+      ? 'No next sprint — card is already in the last sprint'
+      : 'No previous sprint — card is already in the first sprint';
+    _smgmtShowToast(msg);
+    _smgmtKbAnnounceMsg(msg);
+    return;
+  }
+
+  const targetLabel = sprints[targetIdx];
+  const targetNum   = parseInt(String(targetLabel).split('-')[1], 10);
+  const fromNum     = parseInt(String(currentSprint).split('-')[1], 10);
+
+  // Optimistic update
+  if (_smgmtData) {
+    const iss = _smgmtData.issues.find(i => i.number === issueNum);
+    if (iss) { iss.sprint = targetNum; iss.sprint_label = targetLabel; }
+    _smgmtRender(_smgmtData);
+  }
+
+  _smgmtBoardLock(`Moving #${issueNum} to ${sprintLabelDisplay(targetLabel)}…`);
+  try {
+    const res = await fetch(`/api/issues/${issueNum}/sprint-label`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sprint_label: targetLabel, project: repo }),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    await loadSprintMgmt();
+    _smgmtKbSetFocus(issueNum);
+    _smgmtShowToast(`Moved #${issueNum} to ${sprintLabelDisplay(targetLabel)}`);
+  } catch (err) {
+    if (_smgmtData) {
+      const iss = _smgmtData.issues.find(i => i.number === issueNum);
+      if (iss) { iss.sprint = fromNum; iss.sprint_label = currentSprint; }
+      _smgmtRender(_smgmtData);
+    }
+    _smgmtShowToast(`Failed to move #${issueNum}: ${err.message}`);
+  } finally {
+    _smgmtBoardUnlock();
+  }
+}
+
+/** Global keydown handler for sprint board keyboard navigation (issue #549). */
+document.addEventListener('keydown', function _smgmtKbKeydown(e) {
+  if (_activeTab !== 'sprint-mgmt') return;
+  if (!_smgmtData) return;
+
+  const isArrow = e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'ArrowLeft' || e.key === 'ArrowRight';
+  if (!isArrow) return;
+
+  // Inert when any modal/dropdown is open
+  if (_smgmtKbAnyModalOpen()) return;
+
+  // Don't steal keys from interactive elements (except ticket divs themselves)
+  const tag = (document.activeElement?.tagName || '').toLowerCase();
+  if (tag === 'input' || tag === 'textarea' || tag === 'select' || tag === 'button' || tag === 'a') return;
+
+  e.preventDefault();
+
+  const sprints = _smgmtKbSprintOrder();
+  if (!sprints.length) return;
+
+  // Shift+ArrowRight/Left: move focused ticket to adjacent sprint
+  if (e.shiftKey) {
+    if (e.key === 'ArrowRight') { _smgmtKbMoveSprint(1); return; }
+    if (e.key === 'ArrowLeft')  { _smgmtKbMoveSprint(-1); return; }
+    return;
+  }
+
+  // No focused ticket yet: focus first ticket of first sprint
+  if (_smgmtKbFocusedIssue === null) {
+    for (const label of sprints) {
+      const tickets = _smgmtKbColTickets(label);
+      if (tickets.length) { _smgmtKbSetFocus(parseInt(tickets[0].dataset.issue, 10)); return; }
+    }
+    return;
+  }
+
+  const focusedEl = document.getElementById(`smgmt-ticket-${_smgmtKbFocusedIssue}`);
+  if (!focusedEl) { _smgmtKbFocusedIssue = null; return; }
+  const currentSprint = focusedEl.dataset.sprint;
+
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    const tickets = _smgmtKbColTickets(currentSprint);
+    if (!tickets.length) return;
+    const idx = tickets.findIndex(t => parseInt(t.dataset.issue, 10) === _smgmtKbFocusedIssue);
+    const next = e.key === 'ArrowDown'
+      ? (idx + 1) % tickets.length
+      : (idx - 1 + tickets.length) % tickets.length;
+    _smgmtKbSetFocus(parseInt(tickets[next].dataset.issue, 10));
+    return;
+  }
+
+  if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+    const colIdx = sprints.indexOf(currentSprint);
+    const delta  = e.key === 'ArrowRight' ? 1 : -1;
+    const nextColIdx = (colIdx + delta + sprints.length) % sprints.length;
+    const nextTickets = _smgmtKbColTickets(sprints[nextColIdx]);
+    if (nextTickets.length) _smgmtKbSetFocus(parseInt(nextTickets[0].dataset.issue, 10));
+    return;
+  }
+});
+
+// ── Search/filter bar (issue #552) ────────────────────────────────────────
+
+function _smgmtFilterApply() {
+  const input = document.getElementById('smgmt-filter-input');
+  const clearBtn = document.getElementById('smgmt-filter-clear-btn');
+  const q = (input ? input.value : '').trim().toLowerCase();
+
+  if (clearBtn) clearBtn.classList.toggle('visible', q.length > 0);
+
+  const allTickets = document.querySelectorAll('#pane-sprint-mgmt .smgmt-ticket[data-issue]');
+  allTickets.forEach(el => {
+    if (!q) { el.style.display = ''; return; }
+    const issueNum = (el.dataset.issue || '').toLowerCase();
+    const titleEl  = el.querySelector('.smgmt-ticket-title');
+    const title    = (titleEl ? titleEl.textContent : '').toLowerCase();
+    const labels   = (el.dataset.labels || '').toLowerCase();
+    el.style.display = (title.includes(q) || issueNum.includes(q) || labels.includes(q)) ? '' : 'none';
+  });
+
+  _smgmtFilterUpdateEmptyStates();
+}
+
+function _smgmtFilterUpdateEmptyStates() {
+  document.querySelectorAll('#smgmt-sprint-list .smgmt-sprint-tickets').forEach(container => {
+    _smgmtFilterHandleContainer(container);
+  });
+  const backlog = document.getElementById('smgmt-backlog-tickets-container');
+  if (backlog) _smgmtFilterHandleContainer(backlog);
+}
+
+function _smgmtFilterHandleContainer(container) {
+  const tickets = Array.from(container.querySelectorAll('.smgmt-ticket[data-issue]'));
+  const allHidden = tickets.length > 0 && tickets.every(t => t.style.display === 'none');
+  let emptyState = container.querySelector('.smgmt-filter-empty-state');
+  if (!emptyState) {
+    emptyState = document.createElement('div');
+    emptyState.className = 'smgmt-filter-empty-state';
+    emptyState.textContent = 'No matching tickets';
+    container.appendChild(emptyState);
+  }
+  emptyState.classList.toggle('visible', allHidden);
+}
+
+function _smgmtFilterClear() {
+  const input = document.getElementById('smgmt-filter-input');
+  if (input) { input.value = ''; input.focus(); }
+  _smgmtFilterApply();
+}
+
 // ── Auto-refresh pill (issue #275) ────────────────────────────────────────
 const _AR_LS_KEY    = 'smgmt-ar-interval';
 const _AR_INTERVALS = [1, 2, 5, 10, 15, 30, 60]; // valid interval values in seconds
@@ -9856,6 +11011,7 @@ function _setupModals() {
         closeAddProjectModal();
       } else if (_smgmtSelectedIssues.size > 0) {
         // Clear multi-select when Escape pressed and no modal is open
+        _smgmtCloseMoveToMenu();
         _smgmtClearSelection();
       }
     }
@@ -10111,8 +11267,16 @@ let _bcFileAssignments  = [];    // parallel to _bcFiles: "all" | ticket_index (
 let _bcRetryFiles       = {};    // ticket_index -> File for retry image attach
 let _bcLastInput    = null;      // preserved Step 1 inputs for Recreate
 let _bcTabInited    = false;     // whether the tab has been populated once
+let _bcDraftSelections = new Set(); // indices of draft_ready tickets checked for posting
+let _bcRemovedRows = new Set();     // indices of rows hidden by the Remove control (issue #528)
+let _bcPromptOrder   = [];          // ordered prompt texts before drafting (issue #529)
+let _bcDupTimer      = null;
+let _bcDragSrcIdx    = null;        // HTML5 drag source row index
+let _bcTouchSrcIdx   = null;        // touch drag source row index
+let _bcTouchGhost    = null;        // floating ghost element during touch drag
 
-const BC_MAX_PROMPTS = 25;
+const BC_MAX_PROMPTS = 50;
+const BC_WARN_PROMPTS = 40;
 
 /** Called each time the Bulk Create tab becomes active. */
 function _bcInitTab() {
@@ -10136,7 +11300,9 @@ function _bcInitTab() {
     _bcTabInited = true;
     _bcShowStep(1);
     _bcPopulateRepo();
+    _bcRestoreDraft();
     _bcUpdateCounter();
+    _bcTplRender();
   }
 }
 
@@ -10174,31 +11340,23 @@ function _bcPopulateRepo() {
   }
 }
 
-// Highlight a single chip (1=Input, 2=Review, 3=Created, 4=Estimate) and mark
-// earlier chips as completed so the rail reads as a progress trail.
-function _bcSetActiveChip(n) {
-  for (let i = 1; i <= 4; i++) {
-    const chip = document.getElementById(`bc-chip-${i}`);
-    if (!chip) continue;
-    chip.classList.toggle('active', i === n);
-    chip.classList.toggle('done', i < n);
-  }
-}
-
 function _bcShowStep(n) {
   const step1 = document.getElementById('bc-step1');
   const step2 = document.getElementById('bc-step2');
-  if (!step1 || !step2) return;
+  const chip1 = document.getElementById('bc-chip-1');
+  const chip2 = document.getElementById('bc-chip-2');
+  if (!step1 || !step2 || !chip1 || !chip2) return;
 
   if (n === 1) {
     step1.classList.remove('hidden');
     step2.classList.add('hidden');
-    _bcSetActiveChip(1);
+    chip1.classList.add('active');
+    chip2.classList.remove('active');
   } else {
     step1.classList.add('hidden');
     step2.classList.remove('hidden');
-    // The active chip within step 2 is derived from job state in _bcRenderStep2.
-    _bcSetActiveChip(2);
+    chip1.classList.remove('active');
+    chip2.classList.add('active');
   }
 }
 
@@ -10207,25 +11365,305 @@ function _bcGoToStep1() {
 }
 
 function bcRepoChanged() {
-  // Nothing extra needed — repo is read at run time
+  _bcTplRender();
+}
+
+// ── Prompt templates (issue #531) ────────────────────────────────────────────
+
+function _bcTplKey() {
+  const sel = document.getElementById('bc-repo');
+  const repo = (sel && sel.value) ? sel.value : (_slug || '');
+  return 'bulk_templates_' + repo;
+}
+
+function _bcTplLoad() {
+  try { return JSON.parse(localStorage.getItem(_bcTplKey()) || '[]'); }
+  catch { return []; }
+}
+
+function _bcTplSaveAll(templates) {
+  localStorage.setItem(_bcTplKey(), JSON.stringify(templates));
+}
+
+function _bcTplRender() {
+  const list = document.getElementById('bc-tpl-list');
+  if (!list) return;
+  const templates = _bcTplLoad();
+  if (templates.length === 0) {
+    list.innerHTML = '<div class="bc-tpl-empty" aria-live="polite">No saved templates</div>';
+    return;
+  }
+  list.innerHTML = templates.map((t, i) => `
+    <div class="bc-tpl-row" role="listitem">
+      <span class="bc-tpl-row-name" title="${escHtml(t.name)}">${escHtml(t.name)}</span>
+      <button type="button" class="bc-tpl-row-insert" tabindex="0"
+              onclick="_bcTplInsert(${i})"
+              aria-label="Insert template ${escHtml(t.name)}">Insert</button>
+      <button type="button" class="bc-tpl-row-delete" tabindex="0"
+              onclick="_bcTplDelete(${i})"
+              aria-label="Delete template ${escHtml(t.name)}" title="Delete">
+        <i class="ti ti-trash"></i>
+      </button>
+    </div>
+  `).join('');
+}
+
+function _bcTplShowSaveForm() {
+  const form = document.getElementById('bc-tpl-save-form');
+  const btn  = document.getElementById('bc-tpl-save-btn');
+  const input = document.getElementById('bc-tpl-name-input');
+  if (!form) return;
+  form.classList.remove('hidden');
+  if (btn) btn.classList.add('hidden');
+  if (input) { input.value = ''; input.focus(); }
+  _bcTplClearError();
+}
+
+function _bcTplCancelSave() {
+  document.getElementById('bc-tpl-save-form')?.classList.add('hidden');
+  document.getElementById('bc-tpl-save-btn')?.classList.remove('hidden');
+  _bcTplClearError();
+}
+
+function _bcTplClearError() {
+  const err = document.getElementById('bc-tpl-name-error');
+  if (err) { err.textContent = ''; err.classList.add('hidden'); }
+}
+
+function _bcTplShowError(msg) {
+  const err = document.getElementById('bc-tpl-name-error');
+  if (err) { err.textContent = msg; err.classList.remove('hidden'); }
+}
+
+function _bcTplConfirmSave() {
+  const input = document.getElementById('bc-tpl-name-input');
+  const name = (input ? input.value : '').trim();
+  if (!name) {
+    _bcTplShowError('Template name cannot be empty.');
+    if (input) input.focus();
+    return;
+  }
+  const templates = _bcTplLoad();
+  if (templates.some(t => t.name === name)) {
+    _bcTplShowError(`"${name}" already exists. Choose a different name.`);
+    if (input) input.focus();
+    return;
+  }
+  const textarea = document.getElementById('bc-textarea');
+  const content = textarea ? textarea.value : '';
+  templates.push({ name, content });
+  _bcTplSaveAll(templates);
+  _bcTplCancelSave();
+  _bcTplRender();
+}
+
+function _bcTplNameKeydown(e) {
+  if (e.key === 'Enter')  { e.preventDefault(); _bcTplConfirmSave(); }
+  if (e.key === 'Escape') { e.preventDefault(); _bcTplCancelSave(); }
+}
+
+function _bcTplInsert(index) {
+  const templates = _bcTplLoad();
+  const tpl = templates[index];
+  if (!tpl) return;
+  const textarea = document.getElementById('bc-textarea');
+  if (!textarea) return;
+  if (textarea.value.trim()) {
+    if (!confirm(`Replace textarea content with template "${tpl.name}"?`)) return;
+  }
+  textarea.value = tpl.content;
+  textarea.dispatchEvent(new Event('input'));
+}
+
+function _bcTplDelete(index) {
+  const templates = _bcTplLoad();
+  const tpl = templates[index];
+  if (!tpl) return;
+  if (!confirm(`Delete template "${tpl.name}"?`)) return;
+  templates.splice(index, 1);
+  _bcTplSaveAll(templates);
+  _bcTplRender();
+}
+
+function _bcNormalizePrompt(s) {
+  return s.trim().replace(/\s+/g, ' ').toLowerCase();
+}
+
+function _bcUpdateDupWarning(dupSet) {
+  const el = document.getElementById('bc-dup-warning');
+  if (!el) return;
+  const count = dupSet.size;
+  if (count === 0) { el.classList.add('hidden'); return; }
+  el.classList.remove('hidden');
+  el.textContent = `${count} duplicate prompt${count === 1 ? '' : 's'} detected`;
+}
+
+function _bcRefreshDups() {
+  const seen = new Map();
+  const dupSet = new Set();
+  _bcPromptOrder.forEach((text, i) => {
+    const norm = _bcNormalizePrompt(text);
+    if (!norm) return;
+    if (seen.has(norm)) { dupSet.add(i); } else { seen.set(norm, i); }
+  });
+  _bcUpdateDupWarning(dupSet);
+  document.querySelectorAll('#bc-prompt-rows .bc-prompt-row').forEach(row => {
+    const idx = parseInt(row.dataset.idx, 10);
+    row.classList.toggle('bc-dup', dupSet.has(idx));
+  });
+}
+
+// ── Draft persistence (issue #535) ───────────────────────────────────────────
+
+let _bcDraftTimer = null;
+
+function _bcDraftKey(field) {
+  return _settingsKey('bc-draft:' + field);
+}
+
+function _bcScheduleSaveDraft() {
+  clearTimeout(_bcDraftTimer);
+  _bcDraftTimer = setTimeout(_bcSaveDraftNow, 400);
+}
+
+function _bcSaveDraftNow() {
+  const textarea = document.getElementById('bc-textarea');
+  const labelsEl = document.getElementById('bc-default-labels');
+  const concEl   = document.getElementById('bc-concurrency');
+  if (textarea) localStorage.setItem(_bcDraftKey('textarea'), textarea.value);
+  if (labelsEl) localStorage.setItem(_bcDraftKey('labels'), labelsEl.value);
+  if (concEl)   localStorage.setItem(_bcDraftKey('concurrency'), concEl.value);
+  _bcSyncClearDraftBtn();
+}
+
+function _bcSyncClearDraftBtn() {
+  const hasDraft = localStorage.getItem(_bcDraftKey('textarea')) !== null
+    || localStorage.getItem(_bcDraftKey('labels')) !== null
+    || localStorage.getItem(_bcDraftKey('concurrency')) !== null;
+  const btn = document.getElementById('bc-clear-draft-btn');
+  if (btn) btn.classList.toggle('hidden', !hasDraft);
+}
+
+function _bcRestoreDraft() {
+  const text   = localStorage.getItem(_bcDraftKey('textarea'));
+  const labels = localStorage.getItem(_bcDraftKey('labels'));
+  const conc   = localStorage.getItem(_bcDraftKey('concurrency'));
+  if (text === null && labels === null && conc === null) return;
+  const textarea = document.getElementById('bc-textarea');
+  const labelsEl = document.getElementById('bc-default-labels');
+  const concEl   = document.getElementById('bc-concurrency');
+  if (textarea && text !== null) textarea.value = text;
+  if (labelsEl && labels !== null) labelsEl.value = labels;
+  if (concEl && conc !== null) concEl.value = conc;
+  _bcSyncClearDraftBtn();
+}
+
+function _bcClearDraftStorage() {
+  localStorage.removeItem(_bcDraftKey('textarea'));
+  localStorage.removeItem(_bcDraftKey('labels'));
+  localStorage.removeItem(_bcDraftKey('concurrency'));
+}
+
+function bcClearDraft() {
+  _bcClearDraftStorage();
+  const textarea = document.getElementById('bc-textarea');
+  const labelsEl = document.getElementById('bc-default-labels');
+  const concEl   = document.getElementById('bc-concurrency');
+  if (textarea) textarea.value = '';
+  if (labelsEl) labelsEl.value = 'enhancement';
+  if (concEl)   concEl.value = '3';
+  _bcSyncClearDraftBtn();
+  _bcUpdateCounter();
 }
 
 function bcOnTextareaInput() {
   clearTimeout(_bcCounterTimer);
   _bcCounterTimer = setTimeout(_bcUpdateCounter, 200);
+  _bcScheduleSaveDraft();
+}
+
+function bcOnLabelsInput() {
+  _bcScheduleSaveDraft();
+}
+
+function bcOnConcurrencyChange() {
+  _bcScheduleSaveDraft();
 }
 
 function _bcParsePrompts(text) {
+  const mode = (document.getElementById('bc-split-mode') || {}).value || 'separator';
+  if (mode === 'heading') return _bcParseHeadingPrompts(text);
   return text.split(/^---$/m).map(s => s.trim()).filter(s => s.length > 0);
+}
+
+function _bcParseHeadingPrompts(text) {
+  const lines = text.split('\n');
+  const tickets = [];
+  let title = null;
+  let bodyLines = [];
+
+  function flush() {
+    const body = bodyLines.join('\n').trim();
+    const prompt = title !== null ? (body ? title + '\n\n' + body : title) : body;
+    if (prompt) tickets.push(prompt);
+  }
+
+  for (const line of lines) {
+    const m = line.match(/^(#{1,2})\s+(.*)/);
+    if (m) {
+      flush();
+      title = m[2].trim();
+      bodyLines = [];
+    } else {
+      bodyLines.push(line);
+    }
+  }
+  flush();
+
+  return tickets.filter(s => s.length > 0);
+}
+
+function _bcOnSplitModeChange() {
+  const mode = (document.getElementById('bc-split-mode') || {}).value || 'separator';
+  const textarea = document.getElementById('bc-textarea');
+  const infoNote = document.getElementById('bc-info-note');
+  if (textarea) {
+    textarea.placeholder = mode === 'heading'
+      ? 'Paste a markdown document here. Each # or ## heading becomes a separate ticket.'
+      : 'Paste your ticket prompts here, separated by --- on its own line...';
+  }
+  if (infoNote) {
+    infoNote.innerHTML = mode === 'heading'
+      ? 'Each <code>#</code> or <code>##</code> heading becomes a ticket title. Deeper headings (<code>###</code>+) are treated as body content. All created tickets go to backlog.'
+      : 'Split prompts using <code>---</code> on its own line. All created tickets go to backlog &mdash; assign them to a sprint later via Sprint Mgmt.';
+  }
+  _bcUpdateCounter();
 }
 
 function _bcUpdateCounter() {
   const text = (document.getElementById('bc-textarea') || {}).value || '';
   const prompts = _bcParsePrompts(text);
+  _bcPromptOrder = prompts.slice();
+  _bcRenderPromptList();
   const n = prompts.length;
-  const chars = text.length;
   const counterEl = document.getElementById('bc-counter');
-  if (counterEl) counterEl.textContent = `${n} tickets detected · ${chars} chars`;
+  if (counterEl) counterEl.textContent = `${n} / ${BC_MAX_PROMPTS} prompts`;
+
+  const bannerEl = document.getElementById('bc-limit-banner');
+  if (bannerEl) {
+    bannerEl.classList.remove('bc-limit-banner--warn', 'bc-limit-banner--error');
+    if (n >= BC_MAX_PROMPTS) {
+      bannerEl.innerHTML = '&#9888; <strong>Batch cap reached</strong> — additional prompts will be ignored';
+      bannerEl.classList.add('bc-limit-banner--error');
+      bannerEl.classList.remove('hidden');
+    } else if (n >= BC_WARN_PROMPTS) {
+      bannerEl.innerHTML = '&#9888; <strong>Approaching 50-prompt limit</strong>';
+      bannerEl.classList.add('bc-limit-banner--warn');
+      bannerEl.classList.remove('hidden');
+    } else {
+      bannerEl.classList.add('hidden');
+    }
+  }
 
   const runBtn = document.getElementById('bc-run-btn');
   if (runBtn) {
@@ -10247,6 +11685,156 @@ function _bcUpdateCounter() {
   // Refresh assignment dropdowns when ticket count changes
   if (_bcFiles.length > 0) _bcRenderFileQueue();
 }
+
+// ── Prompt reorder list (issue #529) ────────────────────────────────────────
+
+function _bcRenderPromptList() {
+  const wrap = document.getElementById('bc-prompt-reorder');
+  const rows = document.getElementById('bc-prompt-rows');
+  if (!wrap || !rows) return;
+  const n = _bcPromptOrder.length;
+  if (n === 0) { wrap.classList.add('hidden'); rows.innerHTML = ''; _bcUpdateDupWarning(new Set()); return; }
+  wrap.classList.remove('hidden');
+
+  const _seen = new Map();
+  const _dupSet = new Set();
+  _bcPromptOrder.forEach((text, i) => {
+    const norm = _bcNormalizePrompt(text);
+    if (!norm) return;
+    if (_seen.has(norm)) { _dupSet.add(i); } else { _seen.set(norm, i); }
+  });
+  _bcUpdateDupWarning(_dupSet);
+
+  rows.innerHTML = _bcPromptOrder.map((text, i) => {
+    const words = text.trim() ? text.trim().split(/\s+/).length : 0;
+    const chars = text.length;
+    return `
+    <div class="bc-prompt-row${_dupSet.has(i) ? ' bc-dup' : ''}" data-idx="${i}" draggable="true" tabindex="0"
+         aria-label="Prompt ${i+1} of ${n}, ${words} words, ${chars} chars${_dupSet.has(i) ? ', duplicate' : ''}" onkeydown="_bcRowKey(event,${i})">
+      <span class="bc-prompt-row-handle" title="Drag to reorder" aria-hidden="true">⠿</span>
+      <span class="bc-prompt-row-num">${i+1}</span>
+      <textarea class="bc-prompt-row-text" rows="2"
+                oninput="_bcRowTextInput(${i},this.value)">${escHtml(text)}</textarea>
+      <span class="bc-prompt-row-stats" aria-hidden="true">${words}w<br>${chars}c</span>
+      <div class="bc-prompt-row-moves">
+        <button class="bc-prompt-move-btn" title="Move up" onclick="_bcMovePrompt(${i},-1)"
+                ${i === 0 ? 'disabled' : ''} aria-label="Move prompt ${i+1} up">▲</button>
+        <button class="bc-prompt-move-btn" title="Move down" onclick="_bcMovePrompt(${i},1)"
+                ${i === n-1 ? 'disabled' : ''} aria-label="Move prompt ${i+1} down">▼</button>
+      </div>
+    </div>`;
+  }).join('');
+  rows.querySelectorAll('.bc-prompt-row').forEach(row => {
+    const idx = parseInt(row.dataset.idx, 10);
+    row.addEventListener('dragstart', e => _bcDragStart(e, idx));
+    row.addEventListener('dragover',  e => _bcDragOver(e, idx));
+    row.addEventListener('dragleave', () => row.classList.remove('bc-row-over'));
+    row.addEventListener('drop',      e => _bcDrop(e, idx));
+    row.addEventListener('dragend',   () => _bcDragEnd());
+    const handle = row.querySelector('.bc-prompt-row-handle');
+    if (handle) handle.addEventListener('touchstart', e => _bcTouchStart(e, idx), {passive: false});
+  });
+}
+
+function _bcMovePrompt(i, dir) {
+  const j = i + dir;
+  if (j < 0 || j >= _bcPromptOrder.length) return;
+  [_bcPromptOrder[i], _bcPromptOrder[j]] = [_bcPromptOrder[j], _bcPromptOrder[i]];
+  _bcRenderPromptList();
+  const rows = document.getElementById('bc-prompt-rows');
+  if (rows) {
+    const moved = rows.querySelector(`[data-idx="${j}"]`);
+    if (moved) { const ta = moved.querySelector('.bc-prompt-row-text'); (ta || moved).focus(); }
+  }
+}
+
+function _bcRowTextInput(i, val) {
+  _bcPromptOrder[i] = val;
+  clearTimeout(_bcDupTimer);
+  _bcDupTimer = setTimeout(_bcRefreshDups, 200);
+}
+
+function _bcRowKey(e, i) {
+  if (!e.altKey) return;
+  if (e.key === 'ArrowUp')   { e.preventDefault(); _bcMovePrompt(i, -1); }
+  if (e.key === 'ArrowDown') { e.preventDefault(); _bcMovePrompt(i,  1); }
+}
+
+function _bcDragStart(e, i) {
+  _bcDragSrcIdx = i;
+  e.dataTransfer.effectAllowed = 'move';
+  setTimeout(() => e.currentTarget.classList.add('bc-row-dragging'), 0);
+}
+function _bcDragOver(e, i) {
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+  document.querySelectorAll('#bc-prompt-rows .bc-prompt-row').forEach(r => r.classList.remove('bc-row-over'));
+  if (i !== _bcDragSrcIdx) e.currentTarget.classList.add('bc-row-over');
+}
+function _bcDrop(e, i) {
+  e.preventDefault();
+  if (_bcDragSrcIdx === null || _bcDragSrcIdx === i) { _bcDragEnd(); return; }
+  const moved = _bcPromptOrder.splice(_bcDragSrcIdx, 1)[0];
+  _bcPromptOrder.splice(i, 0, moved);
+  _bcDragEnd();
+  _bcRenderPromptList();
+}
+function _bcDragEnd() {
+  _bcDragSrcIdx = null;
+  document.querySelectorAll('#bc-prompt-rows .bc-prompt-row').forEach(r => {
+    r.classList.remove('bc-row-dragging'); r.classList.remove('bc-row-over');
+  });
+}
+
+function _bcTouchStart(e, i) {
+  _bcTouchSrcIdx = i;
+  e.preventDefault();
+  const touch = e.touches[0];
+  const ghost = document.createElement('div');
+  ghost.style.cssText = 'position:fixed;opacity:.75;pointer-events:none;z-index:9999;background:var(--surface-2);border:1px solid var(--border);border-radius:4px;padding:4px 10px;font-size:12px;max-width:220px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-family:var(--mono)';
+  ghost.textContent = '#' + (i + 1) + ' ' + (_bcPromptOrder[i] || '').slice(0, 50);
+  ghost.style.left = (touch.clientX + 12) + 'px';
+  ghost.style.top  = (touch.clientY + 12) + 'px';
+  document.body.appendChild(ghost);
+  _bcTouchGhost = ghost;
+  document.addEventListener('touchmove',   _bcTouchMove,   {passive: false});
+  document.addEventListener('touchend',    _bcTouchEnd,    {passive: false});
+  document.addEventListener('touchcancel', _bcTouchEnd,    {passive: false});
+}
+function _bcTouchMove(e) {
+  e.preventDefault();
+  const touch = e.touches[0];
+  if (_bcTouchGhost) { _bcTouchGhost.style.left = (touch.clientX + 12) + 'px'; _bcTouchGhost.style.top = (touch.clientY + 12) + 'px'; }
+  document.querySelectorAll('#bc-prompt-rows .bc-prompt-row').forEach(r => r.classList.remove('bc-row-over'));
+  const el = document.elementFromPoint(touch.clientX, touch.clientY);
+  const row = el && el.closest('.bc-prompt-row');
+  if (row) { const tgt = parseInt(row.dataset.idx, 10); if (tgt !== _bcTouchSrcIdx) row.classList.add('bc-row-over'); }
+}
+function _bcTouchEnd(e) {
+  document.removeEventListener('touchmove',   _bcTouchMove);
+  document.removeEventListener('touchend',    _bcTouchEnd);
+  document.removeEventListener('touchcancel', _bcTouchEnd);
+  if (_bcTouchGhost) { _bcTouchGhost.remove(); _bcTouchGhost = null; }
+  document.querySelectorAll('#bc-prompt-rows .bc-prompt-row').forEach(r => r.classList.remove('bc-row-over'));
+  if (_bcTouchSrcIdx !== null) {
+    const touch = (e.changedTouches || e.touches)[0];
+    if (touch) {
+      const el = document.elementFromPoint(touch.clientX, touch.clientY);
+      const row = el && el.closest('.bc-prompt-row');
+      if (row) {
+        const tgt = parseInt(row.dataset.idx, 10);
+        if (tgt !== _bcTouchSrcIdx) {
+          const moved = _bcPromptOrder.splice(_bcTouchSrcIdx, 1)[0];
+          _bcPromptOrder.splice(tgt, 0, moved);
+          _bcRenderPromptList();
+        }
+      }
+    }
+  }
+  _bcTouchSrcIdx = null;
+}
+
+// ────────────────────────────────────────────────────────────────────────────
 
 function _bcPickFiles() {
   const inp = document.getElementById('bc-file-input');
@@ -10339,7 +11927,7 @@ async function bcRunAll() {
   const textarea = document.getElementById('bc-textarea');
   if (!textarea) return;
   const text = textarea.value;
-  const prompts = _bcParsePrompts(text);
+  const prompts = _bcPromptOrder.length > 0 ? _bcPromptOrder.slice() : _bcParsePrompts(text);
   if (prompts.length === 0) return;
   if (prompts.length > BC_MAX_PROMPTS) return;
 
@@ -10387,9 +11975,13 @@ async function bcRunAll() {
     const data = await res.json();
     _bcJobId = data.job_id;
     localStorage.setItem('bc_job_id', _bcJobId);
+    _bcClearDraftStorage();
 
     _bcStartTimes = {};
     _bcAvgMs = null;
+    _bcDraftSelections = new Set();
+    _bcRemovedRows = new Set();
+    _bcPromptOrder = [];
 
     _bcShowStep(2);
     _bcConnectSSE(_bcJobId);
@@ -10415,14 +12007,13 @@ function _bcUpdateBadge() {
   const sizeWarn       = tickets.filter(t => t.state === 'size_warning').length;
   const fullyDone      = sized + estimateFailed + failed;
 
-  const draftReady = tickets.filter(t => t.state === 'draft_ready').length;
-
   if (job.status === 'running') {
     badge.className = 'bc-tab-badge';
     badge.innerHTML = `<span class="bc-tab-badge-spin">&#x27F3;</span>${fullyDone}/${total}`;
   } else if (job.status === 'drafts_ready') {
-    badge.className = 'bc-tab-badge bc-tab-badge--ready';
-    badge.textContent = draftReady > 0 ? `${draftReady} to review` : 'review';
+    const draftCount = tickets.filter(t => t.state === 'draft_ready').length;
+    badge.className = 'bc-tab-badge';
+    badge.textContent = `${draftCount} ready`;
   } else if (job.status === 'done' || job.status === 'stopped') {
     const issues = failed + sizeWarn + estimateFailed;
     if (issues > 0) {
@@ -10458,8 +12049,6 @@ function _bcConnectSSE(jobId) {
         _bcRenderStep2();
         _bcUpdateBadge();
       } else if (event.type === 'job_drafts_ready' && _bcJobState) {
-        // BA finished drafting all tickets — backend is now waiting for the
-        // user to review and post selected drafts. Keep the SSE + job id alive.
         _bcJobState.status = 'drafts_ready';
         _bcRenderStep2();
         _bcUpdateBadge();
@@ -10489,7 +12078,6 @@ function _bcRenderStep2() {
   const sized        = tickets.filter(t => t.state === 'sized').length;
   const estimateFailed = tickets.filter(t => t.state === 'estimate_failed').length;
   const drafting     = tickets.filter(t => t.state === 'drafting').length;
-  const draftReady   = tickets.filter(t => t.state === 'draft_ready').length;
   const pending      = tickets.filter(t => t.state === 'pending').length;
   const failed       = tickets.filter(t => t.state === 'failed').length;
   const skipped      = tickets.filter(t => t.state === 'skipped').length;
@@ -10498,37 +12086,16 @@ function _bcRenderStep2() {
   // Terminal states: sized, estimate_failed, failed, skipped
   const fullyDone    = sized + estimateFailed + failed + skipped;
 
-  // Drive the step rail (Input → Review → Created → Estimate) from job state.
-  const anyCreated   = created > 0 || estimating > 0 || sized > 0 || estimateFailed > 0;
-  const anyEstimate  = estimating > 0 || sized > 0 || estimateFailed > 0;
-  if (job.status === 'drafts_ready') {
-    _bcSetActiveChip(2);                 // waiting on user review
-  } else if (anyEstimate) {
-    _bcSetActiveChip(4);                 // estimation underway / done
-  } else if (anyCreated) {
-    _bcSetActiveChip(3);                 // issues being created
-  } else {
-    _bcSetActiveChip(2);                 // BA still drafting → review phase
-  }
-
   // Banner
   const banner = document.getElementById('bc-parallel-banner');
   if (banner) {
     if (job.status === 'running') {
-      if (anyCreated) {
-        banner.innerHTML = `Posting to GitHub & estimating — ` +
-          `${sized + estimateFailed} sized, ${drafting + estimating + created} in progress`;
-      } else {
-        banner.innerHTML = `BA is drafting ${total} tickets in parallel — ` +
-          `${draftReady} drafted, ${drafting + pending} remaining` +
-          `<span class="bc-concurrency-pill">concurrency: ${concurrency}</span>`;
-      }
+      banner.innerHTML = `BA is drafting ${total} tickets in parallel — ` +
+        `${sized + estimateFailed} done, ${drafting + estimating + created} running, ${pending} queued` +
+        `<span class="bc-concurrency-pill">concurrency: ${concurrency}</span>`;
     } else if (job.status === 'drafts_ready') {
-      const postable = draftReady;
-      banner.innerHTML = postable > 0
-        ? `${postable} draft${postable > 1 ? 's' : ''} ready — review and post to GitHub.` +
-          (failed + skipped > 0 ? ` (${failed} failed, ${skipped} skipped)` : '')
-        : `No drafts ready to post. ${failed} failed, ${skipped} skipped.`;
+      const draftCount = tickets.filter(t => t.state === 'draft_ready' && !_bcRemovedRows.has(t.index)).length;
+      banner.innerHTML = `${draftCount} draft${draftCount !== 1 ? 's' : ''} ready — edit title and body, then post to GitHub.`;
     } else if (job.status === 'done') {
       if (sizeWarning > 0) {
         banner.innerHTML = `All tickets processed. ${sizeWarning} ticket${sizeWarning > 1 ? 's' : ''} need size remediation.`;
@@ -10575,53 +12142,50 @@ function _bcRenderStep2() {
           t.body = editor.value;
         }
       }
+      if (t.state === 'draft_ready') {
+        const titleEl = document.getElementById(`bc-draft-title-${t.index}`);
+        const bodyEl  = document.getElementById(`bc-draft-body-${t.index}`);
+        if (titleEl) t.title = titleEl.value;
+        if (bodyEl)  t.body  = bodyEl.value;
+        // Auto-select newly drafted tickets
+        if (!_bcDraftSelections.has(t.index)) _bcDraftSelections.add(t.index);
+      }
     });
-    list.innerHTML = tickets.map(t => _bcRenderCard(t)).join('');
+    list.innerHTML = tickets.filter(t => !_bcRemovedRows.has(t.index)).map(t => _bcRenderCard(t)).join('');
   }
 
   // Footer buttons
-  const stopBtn      = document.getElementById('bc-stop-btn');
-  const doneBtn      = document.getElementById('bc-done-btn');
-  const reviewBtn    = document.getElementById('bc-review-post-btn');
-  const recreateBtn  = document.getElementById('bc-recreate-btn');
-  const retryAllBtn  = document.getElementById('bc-retry-all-btn');
+  const stopBtn       = document.getElementById('bc-stop-btn');
+  const doneBtn       = document.getElementById('bc-done-btn');
+  const recreateBtn   = document.getElementById('bc-recreate-btn');
+  const retryAllBtn   = document.getElementById('bc-retry-all-btn');
+  const reviewPostBtn = document.getElementById('bc-review-post-btn');
   if (stopBtn && doneBtn) {
     if (job.status === 'running') {
-      // BA drafting, or posting/estimating after the user posted selections.
-      stopBtn.classList.remove('hidden');
-      stopBtn.disabled = anyCreated;   // can't stop once GitHub posting started
-      doneBtn.classList.remove('hidden');
+      stopBtn.disabled = false;
       doneBtn.disabled = true;
-      doneBtn.textContent = anyCreated ? 'Working…' : 'Drafting…';
-      if (reviewBtn) reviewBtn.classList.add('hidden');
-      if (recreateBtn) recreateBtn.classList.add('hidden');
+      doneBtn.textContent = 'Running...';
+      if (recreateBtn)   recreateBtn.classList.add('hidden');
+      if (reviewPostBtn) reviewPostBtn.classList.add('hidden');
     } else if (job.status === 'drafts_ready') {
-      // Waiting for the user to review drafts and post the ones they want.
-      stopBtn.classList.add('hidden');
-      doneBtn.classList.add('hidden');
-      if (reviewBtn) {
-        reviewBtn.classList.remove('hidden');
-        reviewBtn.disabled = draftReady === 0;
-        reviewBtn.textContent = draftReady > 0
-          ? `Review & Post (${draftReady})`
-          : 'Review & Post';
-      }
+      stopBtn.disabled = true;
+      doneBtn.disabled = true;
+      doneBtn.textContent = 'Running...';
       if (recreateBtn) recreateBtn.classList.add('hidden');
+      if (reviewPostBtn) {
+        const draftReadyTickets = tickets.filter(t => t.state === 'draft_ready' && !_bcRemovedRows.has(t.index));
+        const selCount = draftReadyTickets.filter(t => _bcDraftSelections.has(t.index)).length;
+        reviewPostBtn.textContent = selCount > 0 ? `Post Selected (${selCount})` : 'Post Selected';
+        reviewPostBtn.disabled = selCount === 0;
+        reviewPostBtn.classList.remove('hidden');
+      }
     } else {
-      // done / stopped
-      stopBtn.classList.add('hidden');
-      doneBtn.classList.remove('hidden');
+      stopBtn.disabled = true;
       doneBtn.disabled = false;
       doneBtn.textContent = 'Done';
-      // Jump back to the Sprint Mgmt board and refresh it so the newly-created
-      // tickets show up in the backlog.
-      doneBtn.onclick = () => {
-        const wasLoaded = _sprintMgmtLoaded;
-        switchTab('sprint-mgmt');
-        if (wasLoaded) loadSprintMgmt(true);
-      };
-      if (reviewBtn) reviewBtn.classList.add('hidden');
-      if (recreateBtn) recreateBtn.classList.remove('hidden');
+      doneBtn.onclick = () => { _bcShowStep(1); };
+      if (recreateBtn)   recreateBtn.classList.remove('hidden');
+      if (reviewPostBtn) reviewPostBtn.classList.add('hidden');
     }
   }
   if (retryAllBtn) {
@@ -10645,6 +12209,8 @@ function _bcRenderStep2() {
       }
     }
   });
+
+  _bcSyncBulkControls();
 }
 
 function _bcRenderCard(t) {
@@ -10666,15 +12232,6 @@ function _bcRenderCard(t) {
     const now   = Date.now();
     const start = _bcStartTimes[t.index] || (t.started_at ? new Date(t.started_at).getTime() : now);
     label = `Started ${Math.round((now - start) / 1000)}s ago`;
-  } else if (t.state === 'draft_ready') {
-    const titleText = t.title ? escHtml(t.title) : `Ticket #${t.index + 1}`;
-    head    = `<span class="bc-card-title">${titleText}</span>`;
-    preview = escHtml((t.body_preview || t.body || '').slice(0, 200));
-    label   = 'Draft ready';
-    const sl = t.suggested_labels || [];
-    if (sl.length > 0) {
-      tags = `<div class="bc-card-tags">${sl.map(l => `<span class="bc-tag bc-tag--hash">#${escHtml(l)}</span>`).join('')}</div>`;
-    }
   } else if (t.state === 'created') {
     const issueUrl = t.issue_url || '#';
     head    = `<a class="bc-issue-badge" href="${escHtml(issueUrl)}" target="_blank" rel="noopener">#${t.issue_num}</a>`;
@@ -10719,18 +12276,36 @@ function _bcRenderCard(t) {
     }
     actions = `<a class="bc-action-btn" href="${escHtml(issueUrl)}" target="_blank" rel="noopener" title="Open on GitHub">&#x2197;</a>`;
   } else if (t.state === 'failed') {
-    // Failed during BA drafting (no valid draft produced). Retry re-runs the BA
-    // draft (→ draft_ready for review); it does NOT post to GitHub. Posting a
-    // failed ticket directly created empty issues, so that path is removed.
+    label   = 'Failed';
+    // Expanded failed card: error banner + editable body + char counter + actions
     const retryCount = t.retry_count || 0;
     const lastErr = t.last_error || t.error || '';
+    const bodyVal = escHtml(t.body || '');
+    const charLen = (t.body || '').length;
+    const GH_LIMIT = 65536;
+    const counterClass = charLen > GH_LIMIT ? 'bc-char-counter bc-char-counter--over' : 'bc-char-counter';
     const retryMetaHtml = retryCount > 0
       ? `<div class="bc-retry-meta">Retry #${retryCount} — last attempt: ${escHtml(lastErr.slice(0, 80))}</div>`
       : '';
-    const titleText = t.title ? escHtml(t.title.slice(0, 80)) : escHtml((t.prompt || '').slice(0, 80));
+
+    // Build the expanded detail section (appended after the standard card body)
+    preview = escHtml((t.error || 'Unknown error').slice(0, 200));
+    actions = `<button class="bc-action-btn bc-action-btn--skip" title="Skip" onclick="bcSkipTicket(${t.index})">&#x00D7;</button>`;
+
+    // We'll return a custom card HTML for failed state
+    const titleText = t.title ? escHtml(t.title.slice(0, 80)) : '';
     const headHtmlFailed = titleText
       ? `<div class="bc-card-head"><span class="bc-card-label">Failed</span><span class="bc-card-preview" style="flex:1;margin-left:6px;">${titleText}</span></div>`
       : `<div class="bc-card-head"><span class="bc-card-label">Failed</span></div>`;
+    const retryImgFile = _bcRetryFiles[t.index];
+    const imgChipHtml = retryImgFile
+      ? `<span class="bc-file-chip bc-file-chip--retry">
+           <span class="bc-file-chip-name">${escHtml(retryImgFile.name)}</span>
+           <button class="bc-file-chip-remove" onclick="_bcRetryRemoveImage(${t.index})" title="Remove">&times;</button>
+         </span>`
+      : `<button class="bc-btn-attach-img" onclick="_bcRetryPickImage(${t.index})">Attach image</button>
+         <input type="file" id="bc-retry-img-input-${t.index}" accept=".png,.jpg,.jpeg"
+                style="display:none" onchange="_bcRetryFileSelected(${t.index}, event)">`;
     return `
       <div class="bc-card bc-card--failed" id="bc-card-${t.index}">
         <div class="bc-status-dot bc-status-dot--failed"></div>
@@ -10739,9 +12314,14 @@ function _bcRenderCard(t) {
           <div class="bc-fail-detail">
             <div class="bc-fail-banner">${escHtml((t.error || 'Unknown error'))}</div>
             ${retryMetaHtml}
+            <textarea class="bc-fail-body-editor" id="bc-editor-${t.index}"
+              oninput="bcEditorInput(${t.index})">${bodyVal}</textarea>
+            <div class="${counterClass}" id="bc-counter-${t.index}">${charLen.toLocaleString()} / ${GH_LIMIT.toLocaleString()}</div>
+            <div class="bc-fail-img-row">${imgChipHtml}</div>
             <div class="bc-fail-actions">
-              <button class="bc-btn-retry-this" onclick="bcRetryTicket(${t.index})">Retry draft</button>
+              <button class="bc-btn-retry-this" onclick="bcRetryWithBody(${t.index})">Retry this ticket</button>
               <button class="bc-btn-skip-this" onclick="bcSkipTicket(${t.index})">Skip</button>
+              <button class="bc-btn-remove-row" onclick="bcRemoveRow(${t.index})" title="Remove">Remove</button>
             </div>
           </div>
         </div>
@@ -10777,7 +12357,36 @@ function _bcRenderCard(t) {
                   onclick="bcSizeRemedyComment(${t.index})">Move detail to follow-up comment</button>
               ${remedyImagesBtn}
               <button class="bc-btn-skip-this" onclick="bcSkipTicket(${t.index})">Skip</button>
+              <button class="bc-btn-remove-row" onclick="bcRemoveRow(${t.index})" title="Remove">Remove</button>
             </div>
+          </div>
+        </div>
+      </div>`;
+  } else if (t.state === 'draft_ready') {
+    const titleVal  = t.title || '';
+    const bodyVal   = t.body  || '';
+    const isChecked = _bcDraftSelections.has(t.index) ? 'checked' : '';
+    const regenErrHtml = t._regen_error
+      ? `<div class="bc-regen-err">${escHtml(t._regen_error)}</div>` : '';
+    return `
+      <div class="bc-card bc-card--draft_ready" id="bc-card-${t.index}">
+        <div class="bc-status-dot bc-status-dot--draft_ready"></div>
+        <div class="bc-card-body" style="min-width:0;flex:1;">
+          <div class="bc-draft-check-wrap">
+            <input type="checkbox" class="bc-draft-check" id="bc-check-${t.index}" ${isChecked}
+                   onchange="_bcDraftCheckChange(${t.index}, this.checked)">
+            <span class="bc-card-label bc-card-label--draft">Draft ready</span>
+          </div>
+          <input class="bc-draft-edit-title" id="bc-draft-title-${t.index}" type="text"
+                 value="${escHtml(titleVal)}" placeholder="Title (required)" tabindex="0">
+          <div class="bc-draft-title-err hidden" id="bc-draft-title-err-${t.index}">Title is required</div>
+          <textarea class="bc-draft-edit-body" id="bc-draft-body-${t.index}"
+                    tabindex="0">${escHtml(bodyVal)}</textarea>
+          ${regenErrHtml}
+          <div class="bc-draft-card-actions">
+            <button class="bc-btn-regenerate" id="bc-btn-regen-${t.index}"
+                    onclick="bcRegenerateDraft(${t.index})">Regenerate draft</button>
+            <button class="bc-btn-remove-row" onclick="bcRemoveRow(${t.index})" title="Remove this draft">Remove</button>
           </div>
         </div>
       </div>`;
@@ -10786,6 +12395,10 @@ function _bcRenderCard(t) {
     label   = 'Skipped';
     actions = `<button class="bc-action-btn" title="Undo skip" onclick="bcUndoSkip(${t.index})">&#x21A9;</button>`;
   }
+
+  // Add Remove control to all generic-template rows (issue #528)
+  const removeBtn = `<button class="bc-action-btn bc-action-btn--remove" title="Remove" onclick="bcRemoveRow(${t.index})"><i class="ti ti-trash"></i></button>`;
+  actions = actions ? `${actions} ${removeBtn}` : removeBtn;
 
   const headHtml = head
     ? `<div class="bc-card-head">${head}<span class="bc-card-label">${escHtml(label)}</span></div>`
@@ -10801,99 +12414,8 @@ function _bcRenderCard(t) {
         <div class="${previewClass}">${preview}</div>
         ${tags}
       </div>
-      ${actions ? `<div class="bc-card-actions">${actions}</div>` : ''}
+      <div class="bc-card-actions">${actions}</div>
     </div>`;
-}
-
-// ── Review & post (issue #374 draft-review flow) ─────────────────────────────
-// Open the review overlay listing every draft_ready ticket with a checkbox so
-// the user can choose which drafts to post to GitHub.
-function bcReviewAndPost() {
-  if (!_bcJobState) return;
-  const drafts = (_bcJobState.tickets || []).filter(t => t.state === 'draft_ready');
-  const list = document.getElementById('bc-review-list');
-  const overlay = document.getElementById('bc-review-overlay');
-  if (!list || !overlay) return;
-  if (drafts.length === 0) return;
-
-  list.innerHTML = drafts.map(t => {
-    const title = t.title ? escHtml(t.title) : `Ticket #${t.index + 1}`;
-    // Effective labels = backlog + project defaults + BA-suggested (deduped).
-    const labels = _bcEffectiveLabels(t);
-    const labelsText = escHtml(['backlog', ...labels].join(', '));
-    return `<div class="bc-review-item">
-      <label class="bc-review-check-wrap">
-        <input type="checkbox" class="bc-review-check" data-index="${t.index}" checked onchange="_bcUpdatePostBtn()">
-        <span class="bc-review-title">${title}</span>
-      </label>
-      <span class="bc-review-labels">${labelsText}</span>
-    </div>`;
-  }).join('');
-
-  overlay.classList.remove('hidden');
-  _bcUpdatePostBtn();
-}
-
-// Project default labels + the BA's per-ticket suggestions, deduped. ("backlog"
-// is added by the backend, so it's not included here.)
-function _bcEffectiveLabels(t) {
-  const defaults = (_bcJobState && _bcJobState.default_labels) || [];
-  const suggested = (t && t.suggested_labels) || [];
-  return [...new Set([...defaults, ...suggested])];
-}
-
-function _bcUpdatePostBtn() {
-  const checked = document.querySelectorAll('.bc-review-check:checked').length;
-  const btn = document.getElementById('bc-post-github-btn');
-  if (btn) {
-    btn.disabled = checked === 0;
-    btn.textContent = checked > 0 ? `Post to GitHub (${checked})` : 'Post to GitHub';
-  }
-}
-
-function bcCancelReview() {
-  const overlay = document.getElementById('bc-review-overlay');
-  if (overlay) overlay.classList.add('hidden');
-}
-
-async function bcPostSelected() {
-  if (!_bcJobId || !_bcJobState) return;
-  const checks = Array.from(document.querySelectorAll('.bc-review-check:checked'));
-  if (checks.length === 0) return;
-
-  const ticketsPayload = checks.map(c => {
-    const idx = parseInt(c.dataset.index, 10);
-    const t = _bcJobState.tickets[idx] || {};
-    return { index: idx, labels: _bcEffectiveLabels(t) };
-  });
-
-  const btn = document.getElementById('bc-post-github-btn');
-  if (btn) { btn.disabled = true; btn.textContent = 'Posting…'; }
-
-  try {
-    const res = await fetch(`/api/tickets/bulk/${_bcJobId}/post-selected`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tickets: ticketsPayload }),
-    });
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
-      if (btn) { btn.disabled = false; }
-      _bcUpdatePostBtn();
-      alert(data.detail || `Failed to post (server error ${res.status})`);
-      return;
-    }
-    // Backend flips the job to running and will stream created/estimating/done
-    // events. Reflect that locally so the footer leaves the review state at once.
-    bcCancelReview();
-    _bcJobState.status = 'running';
-    _bcRenderStep2();
-    _bcUpdateBadge();
-  } catch (e) {
-    if (btn) { btn.disabled = false; }
-    _bcUpdatePostBtn();
-    alert('Failed to post: ' + e.message);
-  }
 }
 
 async function bcSkipTicket(index) {
@@ -10929,6 +12451,41 @@ async function bcRetryTicket(index) {
       body: JSON.stringify({ index }),
     });
   } catch (_) {}
+}
+
+async function bcRegenerateDraft(index) {
+  if (!_bcJobId || !_bcJobState) return;
+  const ticket = _bcJobState.tickets[index];
+  if (!ticket || ticket.state !== 'draft_ready') return;
+
+  // Read current DOM values (user may have edited them)
+  const titleEl = document.getElementById(`bc-draft-title-${index}`);
+  const bodyEl  = document.getElementById(`bc-draft-body-${index}`);
+  const savedTitle = titleEl ? titleEl.value : (ticket.title || '');
+  const savedBody  = bodyEl  ? bodyEl.value  : (ticket.body  || '');
+
+  // Optimistically show loading state; SSE takes over once backend fires
+  ticket.state = 'pending';
+  ticket.title = null;
+  ticket.body  = null;
+  delete ticket._regen_error;
+  _bcRenderStep2();
+
+  try {
+    const resp = await fetch(`/api/tickets/bulk/${_bcJobId}/redraft`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ index }),
+    });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  } catch (_) {
+    // Restore previous draft and show inline error
+    ticket.state = 'draft_ready';
+    ticket.title = savedTitle;
+    ticket.body  = savedBody;
+    ticket._regen_error = 'Regeneration request failed. Previous draft preserved.';
+    _bcRenderStep2();
+  }
 }
 
 function bcEditorInput(index) {
@@ -11002,21 +12559,25 @@ async function bcRetryWithBody(index) {
 async function bcRetryAllFailed() {
   if (!_bcJobId || !_bcJobState) return;
   const tickets = _bcJobState.tickets || [];
-  const failedIdx = tickets.filter(t => t.state === 'failed').map(t => t.index);
-  if (failedIdx.length === 0) return;
+
+  // Collect current body from each failed ticket's editor (or in-memory state)
+  const bodies = {};
+  tickets.forEach(t => {
+    if (t.state !== 'failed') return;
+    const editor = document.getElementById(`bc-editor-${t.index}`);
+    bodies[String(t.index)] = editor ? editor.value : (t.body || '');
+  });
+
+  if (Object.keys(bodies).length === 0) return;
 
   const btn = document.getElementById('bc-retry-all-btn');
   if (btn) { btn.disabled = true; }
 
-  // Re-run the BA draft for each failed ticket (→ draft_ready). This does NOT
-  // post to GitHub — failed tickets have no valid body and would post empty.
   try {
-    await Promise.all(failedIdx.map(index =>
-      fetch(`/api/tickets/bulk/${_bcJobId}/retry`, {
-        method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ index }),
-      })
-    ));
+    await fetch(`/api/tickets/bulk/${_bcJobId}/retry-all`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ bodies }),
+    });
   } catch (_) {}
 
   if (btn) { btn.disabled = false; }
@@ -11074,6 +12635,7 @@ function bcRecreate() {
   localStorage.removeItem('bc_job_id');
   _bcJobId = null;
   _bcJobState = null;
+  _bcDraftSelections = new Set();
   _bcStartTimes = {};
   _bcAvgMs = null;
   _bcUpdateBadge();
@@ -11103,6 +12665,230 @@ function bcRecreate() {
   const errEl = document.getElementById('bc-step1-error');
   if (errEl) errEl.classList.add('hidden');
   _bcUpdateCounter();
+}
+
+// ── Draft-ready inline editing helpers (issue #526) ──────────────────────────
+
+function _bcSyncPostBtn() {
+  const reviewPostBtn = document.getElementById('bc-review-post-btn');
+  if (!reviewPostBtn || !_bcJobState || _bcJobState.status !== 'drafts_ready') return;
+  const tickets = _bcJobState.tickets || [];
+  const selCount = tickets.filter(t =>
+    t.state === 'draft_ready' && _bcDraftSelections.has(t.index) && !_bcRemovedRows.has(t.index)
+  ).length;
+  reviewPostBtn.textContent = selCount > 0 ? `Post Selected (${selCount})` : 'Post Selected';
+  reviewPostBtn.disabled = selCount === 0;
+}
+
+function bcRemoveRow(index) {
+  _bcRemovedRows.add(index);
+  _bcDraftSelections.delete(index);
+  const card = document.getElementById(`bc-card-${index}`);
+  if (card) card.remove();
+  _bcSyncPostBtn();
+  _bcSyncBulkControls();
+}
+
+function _bcDraftCheckChange(index, checked) {
+  if (checked) _bcDraftSelections.add(index);
+  else _bcDraftSelections.delete(index);
+  _bcSyncPostBtn();
+  _bcSyncBulkControls();
+}
+
+// ── Bulk selection controls (issue #534) ─────────────────────────────────────
+
+function bcToggleSelectAll(checked) {
+  if (checked) bcSelectAll();
+  else bcDeselectAll();
+}
+
+function bcSelectAll() {
+  if (!_bcJobState) return;
+  const tickets = _bcJobState.tickets || [];
+  tickets.filter(t => t.state === 'draft_ready' && !_bcRemovedRows.has(t.index))
+    .forEach(t => {
+      _bcDraftSelections.add(t.index);
+      const el = document.getElementById(`bc-check-${t.index}`);
+      if (el) el.checked = true;
+    });
+  _bcSyncPostBtn();
+  _bcSyncBulkControls();
+}
+
+function bcDeselectAll() {
+  if (!_bcJobState) return;
+  _bcDraftSelections.clear();
+  (_bcJobState.tickets || []).forEach(t => {
+    const el = document.getElementById(`bc-check-${t.index}`);
+    if (el) el.checked = false;
+  });
+  _bcSyncPostBtn();
+  _bcSyncBulkControls();
+}
+
+function bcSelectFailed() {
+  if (!_bcJobState) return;
+  const tickets = _bcJobState.tickets || [];
+  tickets.filter(t => t.state === 'draft_ready' && !_bcRemovedRows.has(t.index) && t._regen_error)
+    .forEach(t => {
+      _bcDraftSelections.add(t.index);
+      const el = document.getElementById(`bc-check-${t.index}`);
+      if (el) el.checked = true;
+    });
+  _bcSyncPostBtn();
+  _bcSyncBulkControls();
+}
+
+function _bcSyncBulkControls() {
+  if (!_bcJobState) return;
+  const tickets = _bcJobState.tickets || [];
+  const draftReady = tickets.filter(t => t.state === 'draft_ready' && !_bcRemovedRows.has(t.index));
+  const selected = draftReady.filter(t => _bcDraftSelections.has(t.index));
+  const hasFailed = draftReady.some(t => t._regen_error);
+
+  const controlsEl = document.getElementById('bc-bulk-controls');
+  if (controlsEl) {
+    if (_bcJobState.status === 'drafts_ready' && draftReady.length > 0) {
+      controlsEl.classList.remove('hidden');
+    } else {
+      controlsEl.classList.add('hidden');
+    }
+  }
+
+  const selectAllCheck = document.getElementById('bc-select-all-check');
+  if (selectAllCheck) {
+    if (selected.length === 0) {
+      selectAllCheck.checked = false;
+      selectAllCheck.indeterminate = false;
+    } else if (selected.length === draftReady.length) {
+      selectAllCheck.checked = true;
+      selectAllCheck.indeterminate = false;
+    } else {
+      selectAllCheck.checked = false;
+      selectAllCheck.indeterminate = true;
+    }
+  }
+
+  const selectFailedBtn = document.getElementById('bc-select-failed-btn');
+  if (selectFailedBtn) {
+    if (hasFailed) {
+      selectFailedBtn.classList.remove('hidden');
+    } else {
+      selectFailedBtn.classList.add('hidden');
+    }
+  }
+}
+
+function bcReviewAndPost() {
+  if (!_bcJobState) return;
+  const tickets = (_bcJobState.tickets || []).filter(t => t.state === 'draft_ready');
+
+  const listEl = document.getElementById('bc-review-list');
+  if (listEl) {
+    listEl.innerHTML = tickets.map(t => {
+      const titleEl = document.getElementById(`bc-draft-title-${t.index}`);
+      const title = titleEl ? titleEl.value.trim() : (t.title || '');
+      const isChecked = _bcDraftSelections.has(t.index) ? 'checked' : '';
+      return `
+        <div class="bc-review-item">
+          <label class="bc-review-check-wrap">
+            <input type="checkbox" class="bc-review-check" data-index="${t.index}" ${isChecked}
+                   onchange="_bcReviewOverlayCheck(${t.index}, this.checked)">
+            <span class="bc-review-title">${escHtml(title || '(no title)')}</span>
+          </label>
+        </div>`;
+    }).join('');
+  }
+
+  const selCount = tickets.filter(t => _bcDraftSelections.has(t.index) && !_bcRemovedRows.has(t.index)).length;
+  const postBtn = document.getElementById('bc-post-github-btn');
+  if (postBtn) {
+    postBtn.disabled = selCount === 0;
+    postBtn.textContent = selCount > 0 ? `Post ${selCount} to GitHub` : 'Post to GitHub';
+  }
+
+  const overlay = document.getElementById('bc-review-overlay');
+  if (overlay) overlay.classList.remove('hidden');
+}
+
+function _bcReviewOverlayCheck(index, checked) {
+  if (checked) _bcDraftSelections.add(index);
+  else _bcDraftSelections.delete(index);
+  // Sync main list checkbox
+  const mainCheck = document.getElementById(`bc-check-${index}`);
+  if (mainCheck) mainCheck.checked = checked;
+  // Update Post button in overlay
+  const tickets = (_bcJobState && _bcJobState.tickets) || [];
+  const selCount = tickets.filter(t => t.state === 'draft_ready' && _bcDraftSelections.has(t.index) && !_bcRemovedRows.has(t.index)).length;
+  const postBtn = document.getElementById('bc-post-github-btn');
+  if (postBtn) {
+    postBtn.disabled = selCount === 0;
+    postBtn.textContent = selCount > 0 ? `Post ${selCount} to GitHub` : 'Post to GitHub';
+  }
+}
+
+function bcCancelReview() {
+  const overlay = document.getElementById('bc-review-overlay');
+  if (overlay) overlay.classList.add('hidden');
+}
+
+async function bcPostSelected() {
+  if (!_bcJobId || !_bcJobState) return;
+  const tickets = _bcJobState.tickets || [];
+
+  const toPost = [];
+  let hasValidationError = false;
+
+  for (const t of tickets) {
+    if (t.state !== 'draft_ready') continue;
+    if (!_bcDraftSelections.has(t.index)) continue;
+    if (_bcRemovedRows.has(t.index)) continue;
+
+    const titleEl = document.getElementById(`bc-draft-title-${t.index}`);
+    const bodyEl  = document.getElementById(`bc-draft-body-${t.index}`);
+    const title = titleEl ? titleEl.value.trim() : (t.title || '').trim();
+
+    if (!title) {
+      const errEl = document.getElementById(`bc-draft-title-err-${t.index}`);
+      if (errEl) errEl.classList.remove('hidden');
+      // Scroll card into view
+      const card = document.getElementById(`bc-card-${t.index}`);
+      if (card) card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      hasValidationError = true;
+      continue;
+    }
+    const body = bodyEl ? bodyEl.value : (t.body || '');
+    const labels = t._default_labels || [];
+    toPost.push({ index: t.index, title, body, labels });
+  }
+
+  if (hasValidationError) {
+    bcCancelReview();
+    return;
+  }
+  if (toPost.length === 0) return;
+
+  const postBtn   = document.getElementById('bc-post-github-btn');
+  const reviewBtn = document.getElementById('bc-review-post-btn');
+  if (postBtn) { postBtn.disabled = true; postBtn.textContent = 'Posting…'; }
+  if (reviewBtn) { reviewBtn.disabled = true; reviewBtn.textContent = 'Posting…'; }
+
+  try {
+    const resp = await fetch(`/api/tickets/bulk/${_bcJobId}/post-selected`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tickets: toPost }),
+    });
+    if (!resp.ok) {
+      const data = await resp.json().catch(() => ({}));
+      console.error('[bc] post-selected failed:', data.detail || resp.status);
+    }
+  } catch (e) {
+    console.error('[bc] post-selected error:', e);
+  }
+
+  bcCancelReview();
 }
 
 // Keyboard: Cmd/Ctrl+Enter triggers Run when Bulk Create tab is active and step 1 is shown
@@ -12189,6 +13975,10 @@ function _cmpEmptyState(title, msg) {
 
 <!-- ── Per-row ≡ actions menu (issue #275 follow-up) ── -->
 <div class="smgmt-row-menu hidden" id="smgmt-row-menu" role="menu" aria-label="Ticket actions"></div>
+
+<!-- ── Keyboard navigation screen-reader announce region (issue #549) ── -->
+<div id="smgmt-kb-announce" aria-live="polite" aria-atomic="true"
+     style="position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0;"></div>
 
 <!-- ── "Move to" modal (issue #275 follow-up) ── -->
 <div class="modal-backdrop hidden" id="mt-backdrop" onclick="_smgmtMoveToModalClose()"></div>

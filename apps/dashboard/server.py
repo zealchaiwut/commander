@@ -5279,45 +5279,52 @@ def get_sprint_estimate(sprint_label: str, project: str):
 
 @app.get("/api/estimates/batch")
 def get_estimates_batch(project: str, issues: str = ""):
-    """Return summed estimated_hours for a list of issue numbers from .commander/estimates/.
+    """Return summed estimated_hours and per-ticket sizes from .commander/estimates/.
 
     Query params:
       - project: repo slug (owner/repo)
       - issues: comma-separated issue numbers, e.g. "431,432,433"
 
-    Returns {total_hours: float|null, complete: bool}.
-    complete=true and total_hours is the sum when every issue has an estimate file with
-    an estimated_hours value.  complete=false and total_hours is null when any issue is
-    missing or the estimates directory is absent/unreadable.
+    Returns {total_hours: float|null, complete: bool, sizes: {str(num): size|null}}.
+    complete=true when every issue has an estimate file with an estimated_hours value.
+    sizes maps each issue number (as string) to its size ("S"/"M"/"L"/"XL") or null.
     """
     issue_nums = [int(p) for p in issues.split(",") if p.strip().isdigit()]
 
     if not issue_nums:
-        return {"total_hours": 0.0, "complete": True}
+        return {"total_hours": 0.0, "complete": True, "sizes": {}}
 
     try:
         project_root = _project_root_path(project)
         estimates_dir = _commander_dir(project_root) / "estimates"
         if not estimates_dir.is_dir():
-            return {"total_hours": None, "complete": False}
+            return {"total_hours": None, "complete": False, "sizes": {str(n): None for n in issue_nums}}
     except Exception:
-        return {"total_hours": None, "complete": False}
+        return {"total_hours": None, "complete": False, "sizes": {str(n): None for n in issue_nums}}
 
     total = 0.0
+    complete = True
+    sizes: dict[str, str | None] = {}
     for num in issue_nums:
         path = estimates_dir / f"issue-{num}.json"
         if not path.exists():
-            return {"total_hours": None, "complete": False}
+            complete = False
+            sizes[str(num)] = None
+            continue
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
             h = data.get("estimated_hours")
             if h is None:
-                return {"total_hours": None, "complete": False}
-            total += float(h)
+                complete = False
+            else:
+                total += float(h)
+            size = data.get("size")
+            sizes[str(num)] = size if isinstance(size, str) and size in ("S", "M", "L", "XL") else None
         except (json.JSONDecodeError, OSError, ValueError):
-            return {"total_hours": None, "complete": False}
+            complete = False
+            sizes[str(num)] = None
 
-    return {"total_hours": total, "complete": True}
+    return {"total_hours": total if complete else None, "complete": complete, "sizes": sizes}
 
 
 @app.get("/api/sprints/{sprint_label}/state")
@@ -8458,6 +8465,8 @@ async def bulk_redraft_ticket(job_id: str, body: BulkRedraftBody):
 class BulkPostSelectedItem(BaseModel):
     index: int
     labels: list[str] = []
+    title: str | None = None  # override drafted title (issue #526)
+    body: str | None = None   # override drafted body (issue #526)
 
 
 class BulkPostSelectedBody(BaseModel):
@@ -8500,6 +8509,14 @@ async def bulk_post_selected(job_id: str, body: BulkPostSelectedBody):
             labels = ["backlog"] + [lbl for lbl in item.labels if lbl]
             t = job["tickets"][idx]
             issue_repo = job.get("repo") or None
+
+            # Apply user edits from the frontend (issue #526)
+            if item.title is not None:
+                stripped_title = item.title.strip()
+                if stripped_title:
+                    t["title"] = stripped_title
+            if item.body is not None:
+                t["body"] = item.body
 
             t["state"] = "drafting"
             _persist_bulk_job(job)

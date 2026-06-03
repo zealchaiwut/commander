@@ -783,6 +783,7 @@
       .sub-tabs { position: static; }
       .main-area { overflow-y: visible; }
       .proj-header { position: static; }
+      .smgmt-sticky-area { position: static; }
       .tickets-grid { grid-template-columns: 1fr; }
       .tickets-main { border-right: none; border-bottom: 1px solid var(--border); }
     }
@@ -797,19 +798,23 @@
       color: var(--text-sub); font-size: 13px; padding: 48px 0; text-align: center;
     }
 
+    /* ── Sprint Mgmt sticky area (toolbar + label filters) ── */
+    .smgmt-sticky-area {
+      position: sticky;
+      top: var(--proj-header-height, 88px);
+      z-index: 15;
+      background: var(--bg);
+      box-shadow: none;
+      transition: box-shadow .15s;
+    }
+    .smgmt-sticky-area.scrolled {
+      box-shadow: 0 2px 4px rgba(0,0,0,0.04);
+    }
     /* ── Sprint Mgmt toolbar ── */
     .smgmt-toolbar {
       display: flex; align-items: center; justify-content: space-between;
       padding: 14px 28px;
       background: var(--bg);
-      position: sticky;
-      top: var(--proj-header-height, 88px); /* placed after sub-tab strip */
-      z-index: 15;
-      box-shadow: none;
-      transition: box-shadow .15s;
-    }
-    .smgmt-toolbar.scrolled {
-      box-shadow: 0 2px 4px rgba(0,0,0,0.04);
     }
     .smgmt-toolbar-title {
       font-size: 15px; font-weight: 700; color: var(--text); line-height: 1;
@@ -931,7 +936,7 @@
     /* ── Label filter chip row (issue #546) ── */
     .smgmt-label-filter-row {
       display: flex; flex-wrap: wrap; gap: 6px;
-      padding: 10px 0 4px;
+      padding: 10px 28px 4px;
     }
     .smgmt-label-filter-row.is-empty { display: none; }
     .smgmt-lf-chip {
@@ -3683,69 +3688,72 @@
           </div>
         </div>
 
-        <!-- Toolbar -->
-        <div class="smgmt-toolbar" id="smgmt-toolbar">
-          <span class="smgmt-toolbar-title">Sprint Management</span>
-          <div class="smgmt-toolbar-actions">
-            <!-- Auto-refresh pill (issue #275) -->
-            <div class="smgmt-ar-pill-wrap" id="smgmt-ar-pill-wrap">
-              <button class="smgmt-ar-pill is-on" id="smgmt-ar-pill"
-                      onclick="_smgmtArPillClick(event)" aria-haspopup="true" aria-expanded="false"
-                      aria-label="Auto-refresh interval">
-                <i class="ti ti-refresh"></i>
-                <span id="smgmt-ar-pill-label">15s</span>
-                <i class="ti ti-chevron-down smgmt-ar-chevron"></i>
-              </button>
-              <div class="smgmt-ar-menu hidden" id="smgmt-ar-menu" role="menu">
-                <button class="smgmt-ar-menu-item" data-interval="5"  onclick="_smgmtArSelect(5)">5s</button>
-                <button class="smgmt-ar-menu-item" data-interval="15" onclick="_smgmtArSelect(15)">15s</button>
-                <button class="smgmt-ar-menu-item" data-interval="30" onclick="_smgmtArSelect(30)">30s</button>
-                <button class="smgmt-ar-menu-item" data-interval="60" onclick="_smgmtArSelect(60)">1m</button>
-                <div class="smgmt-ar-menu-divider"></div>
-                <button class="smgmt-ar-menu-item smgmt-ar-turn-off" onclick="_smgmtArTurnOff()">Turn off</button>
+        <!-- Sticky area: toolbar + label filters stick together below the project header -->
+        <div class="smgmt-sticky-area" id="smgmt-sticky-area">
+          <!-- Toolbar -->
+          <div class="smgmt-toolbar" id="smgmt-toolbar">
+            <span class="smgmt-toolbar-title">Sprint Management</span>
+            <div class="smgmt-toolbar-actions">
+              <!-- Auto-refresh pill (issue #275) -->
+              <div class="smgmt-ar-pill-wrap" id="smgmt-ar-pill-wrap">
+                <button class="smgmt-ar-pill is-on" id="smgmt-ar-pill"
+                        onclick="_smgmtArPillClick(event)" aria-haspopup="true" aria-expanded="false"
+                        aria-label="Auto-refresh interval">
+                  <i class="ti ti-refresh"></i>
+                  <span id="smgmt-ar-pill-label">15s</span>
+                  <i class="ti ti-chevron-down smgmt-ar-chevron"></i>
+                </button>
+                <div class="smgmt-ar-menu hidden" id="smgmt-ar-menu" role="menu">
+                  <button class="smgmt-ar-menu-item" data-interval="5"  onclick="_smgmtArSelect(5)">5s</button>
+                  <button class="smgmt-ar-menu-item" data-interval="15" onclick="_smgmtArSelect(15)">15s</button>
+                  <button class="smgmt-ar-menu-item" data-interval="30" onclick="_smgmtArSelect(30)">30s</button>
+                  <button class="smgmt-ar-menu-item" data-interval="60" onclick="_smgmtArSelect(60)">1m</button>
+                  <div class="smgmt-ar-menu-divider"></div>
+                  <button class="smgmt-ar-menu-item smgmt-ar-turn-off" onclick="_smgmtArTurnOff()">Turn off</button>
+                </div>
               </div>
+              <!-- Pre-flight checks show/hide toggle -->
+              <button class="btn-ghost smgmt-preflight-toggle" id="smgmt-preflight-toggle"
+                      onclick="_smgmtTogglePreflight()" aria-pressed="true"
+                      title="Pre-flight checks on — click to hide banners">
+                <i class="ti ti-checklist"></i>
+                <span id="smgmt-preflight-toggle-label">Pre-flight: on</span>
+              </button>
+              <!-- Compact/dense view toggle (issue #547) -->
+              <button class="btn-ghost" id="smgmt-density-toggle"
+                      onclick="_smgmtDensityToggle()" aria-pressed="false"
+                      title="Compact view — click to toggle"
+                      aria-label="Compact view">
+                <i class="ti ti-layout-list"></i>
+                <span id="smgmt-density-label">Compact</span>
+              </button>
+              <button class="btn-ghost" id="smgmt-cleanup-empty-btn"
+                      onclick="_smgmtCleanupEmpty()" title="Delete sprint labels with no tickets"
+                      aria-label="Clean up empty sprints" style="display:none">
+                <i class="ti ti-trash"></i>
+                Clean up empty sprints
+              </button>
+              <button class="btn-ghost" id="smgmt-new-ticket-btn"
+                      onclick="smgmtOpenNewTicket()" title="Create a new ticket"
+                      aria-label="New Ticket">
+                <i class="ti ti-plus"></i>
+                New Ticket
+              </button>
+              <button class="btn-primary" id="smgmt-new-sprint-btn"
+                      onclick="smgmtOpenNewSprint()" title="Create a new sprint"
+                      aria-label="New Sprint">
+                <i class="ti ti-plus"></i>
+                New Sprint
+              </button>
             </div>
-            <!-- Pre-flight checks show/hide toggle -->
-            <button class="btn-ghost smgmt-preflight-toggle" id="smgmt-preflight-toggle"
-                    onclick="_smgmtTogglePreflight()" aria-pressed="true"
-                    title="Pre-flight checks on — click to hide banners">
-              <i class="ti ti-checklist"></i>
-              <span id="smgmt-preflight-toggle-label">Pre-flight: on</span>
-            </button>
-            <!-- Compact/dense view toggle (issue #547) -->
-            <button class="btn-ghost" id="smgmt-density-toggle"
-                    onclick="_smgmtDensityToggle()" aria-pressed="false"
-                    title="Compact view — click to toggle"
-                    aria-label="Compact view">
-              <i class="ti ti-layout-list"></i>
-              <span id="smgmt-density-label">Compact</span>
-            </button>
-            <button class="btn-ghost" id="smgmt-cleanup-empty-btn"
-                    onclick="_smgmtCleanupEmpty()" title="Delete sprint labels with no tickets"
-                    aria-label="Clean up empty sprints" style="display:none">
-              <i class="ti ti-trash"></i>
-              Clean up empty sprints
-            </button>
-            <button class="btn-ghost" id="smgmt-new-ticket-btn"
-                    onclick="smgmtOpenNewTicket()" title="Create a new ticket"
-                    aria-label="New Ticket">
-              <i class="ti ti-plus"></i>
-              New Ticket
-            </button>
-            <button class="btn-primary" id="smgmt-new-sprint-btn"
-                    onclick="smgmtOpenNewSprint()" title="Create a new sprint"
-                    aria-label="New Sprint">
-              <i class="ti ti-plus"></i>
-              New Sprint
-            </button>
           </div>
+
+          <!-- Label filter chips (issue #546) — inside sticky area so they scroll with toolbar -->
+          <div class="smgmt-label-filter-row is-empty" id="smgmt-label-filter-row" role="toolbar" aria-label="Filter by label"></div>
         </div>
 
         <!-- Sprint list -->
         <div class="smgmt-content">
-
-          <!-- Label filter chips (issue #546) -->
-          <div class="smgmt-label-filter-row is-empty" id="smgmt-label-filter-row" role="toolbar" aria-label="Filter by label"></div>
 
           <div id="smgmt-sprint-list" class="smgmt-sprint-list">
             <div class="loading-msg" id="smgmt-loading">Loading sprints…</div>
@@ -5664,23 +5672,23 @@ async function init() {
 }
 
 // ── Sprint Mgmt toolbar height calculation ─────────────────────────────────
-// Compute top offset for the sticky toolbar (proj-header height)
+// Compute top offset for the sticky area (proj-header height)
 function _smgmtUpdateToolbarTop() {
-  const header = document.getElementById('proj-header');
-  const toolbar = document.getElementById('smgmt-toolbar');
-  if (header && toolbar) {
-    toolbar.style.top = header.offsetHeight + 'px';
+  const header     = document.getElementById('proj-header');
+  const stickyArea = document.getElementById('smgmt-sticky-area');
+  if (header && stickyArea) {
+    stickyArea.style.top = header.offsetHeight + 'px';
   }
 }
 
 // ── Sprint Mgmt scroll-shadow ─────────────────────────────────────────────
 function _smgmtInitScrollShadow() {
-  const mainArea = document.getElementById('main-area');
-  const toolbar  = document.getElementById('smgmt-toolbar');
-  if (!mainArea || !toolbar) return;
+  const mainArea   = document.getElementById('main-area');
+  const stickyArea = document.getElementById('smgmt-sticky-area');
+  if (!mainArea || !stickyArea) return;
 
   mainArea.addEventListener('scroll', function() {
-    toolbar.classList.toggle('scrolled', mainArea.scrollTop > 4);
+    stickyArea.classList.toggle('scrolled', mainArea.scrollTop > 4);
   }, { passive: true });
 }
 

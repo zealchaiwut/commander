@@ -628,6 +628,26 @@
       flex-shrink: 0; white-space: nowrap;
     }
     .ticket-close-btn:hover { background: var(--red-bg); color: var(--red); border-color: var(--red); }
+    .ticket-est-size-pill {
+      flex-shrink: 0;
+      padding: 1px 5px; border-radius: 3px;
+      font-size: 10px; font-weight: 700;
+      font-family: var(--mono);
+      background: var(--surface-2); color: var(--text-sub);
+    }
+    .ticket-est-confidence-pill {
+      flex-shrink: 0;
+      padding: 1px 5px; border-radius: 3px;
+      font-size: 10px; font-weight: 600;
+      font-family: var(--mono);
+    }
+    .ticket-est-confidence-pill.conf-high   { background: var(--green-bg); color: var(--green); }
+    .ticket-est-confidence-pill.conf-medium { background: var(--amber-bg); color: var(--amber); }
+    .ticket-est-confidence-pill.conf-low    { background: var(--red-bg);   color: var(--red); }
+    .ticket-no-estimate {
+      flex-shrink: 0; font-size: 10px; color: var(--text-sub);
+      font-style: italic; white-space: nowrap;
+    }
     /* ── Dependency chips (issue #432) ── */
     .ticket-row { flex-wrap: wrap; }
     .dep-chips-row {
@@ -2181,6 +2201,19 @@
       font-size: 10px; font-weight: 700;
       font-family: var(--mono);
       background: var(--surface-2); color: var(--text-sub);
+    }
+    .smgmt-ticket-confidence-pill {
+      flex-shrink: 0;
+      padding: 1px 5px; border-radius: 3px;
+      font-size: 10px; font-weight: 600;
+      font-family: var(--mono);
+    }
+    .smgmt-ticket-confidence-pill.conf-high   { background: var(--green-bg); color: var(--green); }
+    .smgmt-ticket-confidence-pill.conf-medium { background: var(--amber-bg); color: var(--amber); }
+    .smgmt-ticket-confidence-pill.conf-low    { background: var(--red-bg);   color: var(--red); }
+    .smgmt-ticket-no-estimate {
+      flex-shrink: 0; font-size: 10px; color: var(--text-sub);
+      font-style: italic; white-space: nowrap;
     }
 
     /* Retry estimation pill and spinner (issue #451) */
@@ -4329,6 +4362,8 @@ let _smgmtDragSprintLabel = null;
 const RERUN_STRIP_LABELS = new Set(['UAT','UAT-approved','released','SIT','in-progress','needs-rework']);
 // Cache for sprint outcome data: key = sprint label, value = outcome object
 const _smgmtOutcomeCache = {};
+// Per-issue estimate cache: issueNum (int) → {size, confidence} | null (null = confirmed no estimate)
+const _estDataCache = {};
 
 // ── Running sprint live state (issue #277) ────────────────────────────────
 // Set of sprint labels that are currently running, populated on each render
@@ -4988,6 +5023,7 @@ async function loadTickets() {
     if (!resp.ok) throw new Error('HTTP ' + resp.status);
     const data = await resp.json();
     renderTickets(data, repo);
+    _ticketsLoadEstimates(data.tickets || [], repo).catch(() => {});
   } catch (err) {
     container.innerHTML = '<div class="loading-msg">Failed to load tickets.</div>';
   }
@@ -5029,6 +5065,7 @@ function renderTickets(data, repo) {
           <span class="ticket-status-pill ${escHtml(t.status)}">${escHtml(t.status)}</span>
           <a class="ticket-title" href="${escHtml(t.url)}" target="_blank" rel="noopener" title="${escHtml(t.title)}">${escHtml(t.title)}</a>
           <span class="ticket-num">#${t.number}</span>
+          <span class="ticket-est-wrap" id="ticket-est-${t.number}"></span>
           <button class="ticket-close-btn" data-num="${t.number}" data-title="${escHtml(t.title)}" onclick="openCloseTicketModal(this)">Close</button>
           ${chipsHtml}
         </div>`;
@@ -5050,6 +5087,38 @@ function renderTickets(data, repo) {
       </div>
     </div>
     ${ticketsHtml}`;
+}
+
+async function _ticketsLoadEstimates(tickets, repo) {
+  if (!repo || tickets.length === 0) return;
+  const issueNums = tickets.map(t => t.number).join(',');
+  try {
+    const resp = await fetch(
+      `/api/estimates/batch?project=${encodeURIComponent(repo)}&issues=${issueNums}`
+    );
+    if (!resp.ok) return;
+    const data = await resp.json();
+    if (!data.issues) return;
+    for (const [numStr, est] of Object.entries(data.issues)) {
+      const num = parseInt(numStr, 10);
+      _estDataCache[num] = est;
+      const wrapEl = document.getElementById(`ticket-est-${num}`);
+      if (!wrapEl) continue;
+      if (est && (est.size || est.confidence)) {
+        let html = '';
+        if (est.size) {
+          html += `<span class="ticket-est-size-pill">${escHtml(est.size)}</span>`;
+        }
+        if (est.confidence) {
+          const confClass = `conf-${est.confidence.toLowerCase()}`;
+          html += `<span class="ticket-est-confidence-pill ${escHtml(confClass)}">${escHtml(_capitalizeFirst(est.confidence))}</span>`;
+        }
+        wrapEl.innerHTML = html;
+      } else {
+        wrapEl.innerHTML = '<span class="ticket-no-estimate">Not Estimated</span>';
+      }
+    }
+  } catch (_) { /* silent */ }
 }
 
 // ── Close Ticket flow ─────────────────────────────────────────────────────────
@@ -5838,16 +5907,72 @@ async function _smgmtLoadEstimates(orderedLabels, bySprint) {
       if (!resp.ok) continue;
       const data = await resp.json();
       const estEl = document.getElementById(`smgmt-est-${label}`);
-      if (!estEl) continue;
-      if (data.complete && data.total_hours !== null) {
+      if (estEl && data.complete && data.total_hours !== null) {
         const h = data.total_hours;
         const display = Number.isInteger(h) ? `${h}h` : `${parseFloat(h.toFixed(1))}h`;
         estEl.textContent = `${display} estimated`;
       }
-      // else: leave as "— estimated"
+      // Cache per-issue size/confidence and update visible rows
+      if (data.issues) {
+        for (const [numStr, est] of Object.entries(data.issues)) {
+          _estDataCache[parseInt(numStr, 10)] = est;
+        }
+        for (const t of tickets) {
+          _smgmtUpdateEstimateBadge(t.number);
+        }
+      }
     } catch (_) {
       // fail silently — leave as "— estimated"
     }
+  }
+}
+
+function _capitalizeFirst(s) {
+  return s ? s.charAt(0).toUpperCase() + s.slice(1).toLowerCase() : '';
+}
+
+function _smgmtEstimateBadgeHtml(issueNum) {
+  if (!Object.prototype.hasOwnProperty.call(_estDataCache, issueNum)) return '';
+  const est = _estDataCache[issueNum];
+  if (!est) return '<span class="smgmt-ticket-no-estimate">Not Estimated</span>';
+  let html = '';
+  if (est.confidence) {
+    const confClass = `conf-${est.confidence.toLowerCase()}`;
+    html += `<span class="smgmt-ticket-confidence-pill ${escHtml(confClass)}">${escHtml(_capitalizeFirst(est.confidence))}</span>`;
+  }
+  return html;
+}
+
+function _smgmtUpdateEstimateBadge(issueNum) {
+  const row = document.getElementById(`smgmt-ticket-${issueNum}`);
+  if (!row) return;
+
+  row.querySelector('.smgmt-ticket-confidence-pill')?.remove();
+  row.querySelector('.smgmt-ticket-no-estimate')?.remove();
+
+  const est = Object.prototype.hasOwnProperty.call(_estDataCache, issueNum)
+    ? _estDataCache[issueNum] : undefined;
+  if (est === undefined) return;
+
+  if (est && est.confidence) {
+    const confClass = `conf-${est.confidence.toLowerCase()}`;
+    const confEl = document.createElement('span');
+    confEl.className = `smgmt-ticket-confidence-pill ${confClass}`;
+    confEl.textContent = _capitalizeFirst(est.confidence);
+    const sizePill = row.querySelector('.smgmt-ticket-size-pill');
+    if (sizePill) {
+      sizePill.after(confEl);
+    } else {
+      const titleEl = row.querySelector('.smgmt-ticket-title');
+      if (titleEl) titleEl.after(confEl);
+    }
+  } else if (est === null) {
+    const noEstEl = document.createElement('span');
+    noEstEl.className = 'smgmt-ticket-no-estimate';
+    noEstEl.textContent = 'Not Estimated';
+    const sizePill = row.querySelector('.smgmt-ticket-size-pill');
+    const anchor = sizePill || row.querySelector('.smgmt-ticket-title');
+    if (anchor) anchor.after(noEstEl);
   }
 }
 
@@ -7151,6 +7276,7 @@ function _smgmtTicketRowHtml(ticket, label) {
   const sizePillHtml = sizeLabel
     ? `<span class="smgmt-ticket-size-pill">${escHtml(sizeLabel.name.replace('size-', ''))}</span>`
     : '';
+  const estimateBadgeHtml = _smgmtEstimateBadgeHtml(ticket.number);
 
   return `
     <div class="smgmt-ticket${isSelected ? ' is-selected' : ''}" id="smgmt-ticket-${ticket.number}"
@@ -7171,7 +7297,7 @@ function _smgmtTicketRowHtml(ticket, label) {
       <a class="smgmt-ticket-num" href="${escHtml(ticket.url || '#')}" target="_blank"
          rel="noopener" onclick="event.stopPropagation()">#${ticket.number}</a>
       <span class="smgmt-ticket-title" title="${escHtml(ticket.title)}">${escHtml(ticket.title)}</span>
-      ${sizePillHtml}
+      ${sizePillHtml}${estimateBadgeHtml}
       <span class="smgmt-ticket-status ${statusClass}">${escHtml(statusLabel)}</span>
       <button class="btn-view-log" tabindex="0" title="View issue log"
               onclick="event.stopPropagation();openLvIssueLog(${ticket.number},'${escHtml(label)}',_smgmtRepo()||'')">

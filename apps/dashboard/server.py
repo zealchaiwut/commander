@@ -5130,45 +5130,55 @@ def get_sprint_estimate(sprint_label: str, project: str):
 
 @app.get("/api/estimates/batch")
 def get_estimates_batch(project: str, issues: str = ""):
-    """Return summed estimated_hours for a list of issue numbers from .commander/estimates/.
+    """Return summed estimated_hours and per-issue size/confidence for a list of issue numbers.
 
     Query params:
       - project: repo slug (owner/repo)
       - issues: comma-separated issue numbers, e.g. "431,432,433"
 
-    Returns {total_hours: float|null, complete: bool}.
-    complete=true and total_hours is the sum when every issue has an estimate file with
-    an estimated_hours value.  complete=false and total_hours is null when any issue is
-    missing or the estimates directory is absent/unreadable.
+    Returns {total_hours: float|null, complete: bool, issues: {num_str: {size, confidence}|null}}.
+    complete=true when every issue has an estimate file with an estimated_hours value.
+    issues maps each number to its size/confidence, or null when the file is missing/unreadable.
     """
     issue_nums = [int(p) for p in issues.split(",") if p.strip().isdigit()]
 
     if not issue_nums:
-        return {"total_hours": 0.0, "complete": True}
+        return {"total_hours": 0.0, "complete": True, "issues": {}}
 
     try:
         project_root = _project_root_path(project)
         estimates_dir = _commander_dir(project_root) / "estimates"
         if not estimates_dir.is_dir():
-            return {"total_hours": None, "complete": False}
+            return {"total_hours": None, "complete": False,
+                    "issues": {str(n): None for n in issue_nums}}
     except Exception:
-        return {"total_hours": None, "complete": False}
+        return {"total_hours": None, "complete": False,
+                "issues": {str(n): None for n in issue_nums}}
 
     total = 0.0
+    complete = True
+    per_issue: dict = {}
     for num in issue_nums:
         path = estimates_dir / f"issue-{num}.json"
         if not path.exists():
-            return {"total_hours": None, "complete": False}
+            complete = False
+            per_issue[str(num)] = None
+            continue
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
             h = data.get("estimated_hours")
+            size = data.get("size")
+            confidence = data.get("confidence")
             if h is None:
-                return {"total_hours": None, "complete": False}
-            total += float(h)
+                complete = False
+            else:
+                total += float(h)
+            per_issue[str(num)] = {"size": size, "confidence": confidence}
         except (json.JSONDecodeError, OSError, ValueError):
-            return {"total_hours": None, "complete": False}
+            complete = False
+            per_issue[str(num)] = None
 
-    return {"total_hours": total, "complete": True}
+    return {"total_hours": total if complete else None, "complete": complete, "issues": per_issue}
 
 
 @app.get("/api/sprints/{sprint_label}/state")

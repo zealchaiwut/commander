@@ -2334,6 +2334,13 @@
     }
     .bc-prompt-move-btn:hover:not(:disabled) { color: var(--text); border-color: var(--text-sub); background: var(--surface-2); }
     .bc-prompt-move-btn:disabled { opacity: .3; cursor: not-allowed; }
+    .bc-dup-warning {
+      font-size: 12px; color: #92400e; background: #fffbeb;
+      border: 1px solid #fcd34d; border-radius: 4px;
+      padding: 6px 10px; margin: 0 28px 6px;
+    }
+    .bc-prompt-row.bc-dup { background: #fffbeb; border: 1px solid #fcd34d; border-bottom-color: #fcd34d; }
+    .bc-prompt-row.bc-dup .bc-prompt-row-num { color: #92400e; }
 
     /* Attachments */
     .bc-attach-section { padding: 10px 28px 6px; border-top: 1px solid var(--border); }
@@ -3615,6 +3622,8 @@
           <textarea class="bc-textarea" id="bc-textarea"
                     placeholder="Paste your ticket prompts here, separated by --- on its own line..."
                     oninput="bcOnTextareaInput()"></textarea>
+
+          <div id="bc-dup-warning" class="bc-dup-warning hidden"></div>
 
           <div class="bc-info-note">
             Split prompts using <code>---</code> on its own line. All created tickets go to backlog &mdash; assign them to a sprint later via Sprint Mgmt.
@@ -9880,6 +9889,7 @@ let _bcTabInited    = false;     // whether the tab has been populated once
 let _bcDraftSelections = new Set(); // indices of draft_ready tickets checked for posting
 let _bcRemovedRows = new Set();     // indices of rows hidden by the Remove control (issue #528)
 let _bcPromptOrder   = [];          // ordered prompt texts before drafting (issue #529)
+let _bcDupTimer      = null;
 let _bcDragSrcIdx    = null;        // HTML5 drag source row index
 let _bcTouchSrcIdx   = null;        // touch drag source row index
 let _bcTouchGhost    = null;        // floating ghost element during touch drag
@@ -9974,6 +9984,34 @@ function bcRepoChanged() {
   // Nothing extra needed — repo is read at run time
 }
 
+function _bcNormalizePrompt(s) {
+  return s.trim().replace(/\s+/g, ' ').toLowerCase();
+}
+
+function _bcUpdateDupWarning(dupSet) {
+  const el = document.getElementById('bc-dup-warning');
+  if (!el) return;
+  const count = dupSet.size;
+  if (count === 0) { el.classList.add('hidden'); return; }
+  el.classList.remove('hidden');
+  el.textContent = `${count} duplicate prompt${count === 1 ? '' : 's'} detected`;
+}
+
+function _bcRefreshDups() {
+  const seen = new Map();
+  const dupSet = new Set();
+  _bcPromptOrder.forEach((text, i) => {
+    const norm = _bcNormalizePrompt(text);
+    if (!norm) return;
+    if (seen.has(norm)) { dupSet.add(i); } else { seen.set(norm, i); }
+  });
+  _bcUpdateDupWarning(dupSet);
+  document.querySelectorAll('#bc-prompt-rows .bc-prompt-row').forEach(row => {
+    const idx = parseInt(row.dataset.idx, 10);
+    row.classList.toggle('bc-dup', dupSet.has(idx));
+  });
+}
+
 function bcOnTextareaInput() {
   clearTimeout(_bcCounterTimer);
   _bcCounterTimer = setTimeout(_bcUpdateCounter, 200);
@@ -10021,11 +10059,21 @@ function _bcRenderPromptList() {
   const rows = document.getElementById('bc-prompt-rows');
   if (!wrap || !rows) return;
   const n = _bcPromptOrder.length;
-  if (n === 0) { wrap.classList.add('hidden'); rows.innerHTML = ''; return; }
+  if (n === 0) { wrap.classList.add('hidden'); rows.innerHTML = ''; _bcUpdateDupWarning(new Set()); return; }
   wrap.classList.remove('hidden');
+
+  const _seen = new Map();
+  const _dupSet = new Set();
+  _bcPromptOrder.forEach((text, i) => {
+    const norm = _bcNormalizePrompt(text);
+    if (!norm) return;
+    if (_seen.has(norm)) { _dupSet.add(i); } else { _seen.set(norm, i); }
+  });
+  _bcUpdateDupWarning(_dupSet);
+
   rows.innerHTML = _bcPromptOrder.map((text, i) => `
-    <div class="bc-prompt-row" data-idx="${i}" draggable="true" tabindex="0"
-         aria-label="Prompt ${i+1} of ${n}" onkeydown="_bcRowKey(event,${i})">
+    <div class="bc-prompt-row${_dupSet.has(i) ? ' bc-dup' : ''}" data-idx="${i}" draggable="true" tabindex="0"
+         aria-label="Prompt ${i+1} of ${n}${_dupSet.has(i) ? ' (duplicate)' : ''}" onkeydown="_bcRowKey(event,${i})">
       <span class="bc-prompt-row-handle" title="Drag to reorder" aria-hidden="true">⠿</span>
       <span class="bc-prompt-row-num">${i+1}</span>
       <textarea class="bc-prompt-row-text" rows="2"
@@ -10063,6 +10111,8 @@ function _bcMovePrompt(i, dir) {
 
 function _bcRowTextInput(i, val) {
   _bcPromptOrder[i] = val;
+  clearTimeout(_bcDupTimer);
+  _bcDupTimer = setTimeout(_bcRefreshDups, 200);
 }
 
 function _bcRowKey(e, i) {

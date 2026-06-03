@@ -2264,6 +2264,47 @@
     .tdp-reestimate-btn:disabled { opacity: .45; cursor: not-allowed; }
     .re-est-modal { width: min(360px, calc(100vw - 32px)); }
 
+    /* Estimate detail affordance + popover (issue #557) */
+    .smgmt-est-detail-btn {
+      flex-shrink: 0;
+      padding: 1px 5px; border-radius: 3px;
+      font-size: 10px; font-weight: 600;
+      font-family: var(--mono);
+      cursor: pointer; white-space: nowrap;
+      border: none; outline: none;
+    }
+    .smgmt-est-detail-btn.conf-high   { background: var(--green-bg); color: var(--green); }
+    .smgmt-est-detail-btn.conf-medium { background: var(--amber-bg); color: var(--amber); }
+    .smgmt-est-detail-btn.conf-low    { background: var(--red-bg);   color: var(--red); }
+    .smgmt-est-detail-btn:not([class*="conf-"]) { background: var(--surface-2); color: var(--text-sub); }
+    .smgmt-est-detail-btn:hover { filter: brightness(1.08); }
+    .smgmt-est-detail-btn:focus-visible { outline: 2px solid var(--blue); outline-offset: 1px; }
+    .smgmt-est-popover {
+      position: fixed; z-index: 9998;
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 8px; padding: 12px 14px; box-shadow: 0 4px 20px rgba(0,0,0,.18);
+      font-size: 12px; min-width: 220px; max-width: 300px;
+    }
+    .smgmt-est-popover.hidden { display: none; }
+    .smgmt-est-popover-title {
+      font-size: 11px; font-weight: 700; color: var(--text-sub);
+      text-transform: uppercase; letter-spacing: .04em; margin-bottom: 10px;
+    }
+    .smgmt-est-popover-row { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; margin-bottom: 6px; }
+    .smgmt-est-popover-row:last-child { margin-bottom: 0; }
+    .smgmt-est-popover-key { color: var(--text-sub); font-size: 11px; flex-shrink: 0; padding-top: 1px; }
+    .smgmt-est-popover-val { color: var(--text); text-align: right; font-size: 12px; }
+    .smgmt-est-popover-list { color: var(--text); font-size: 11px; font-family: var(--mono); text-align: right; }
+    .smgmt-est-popover-list-item { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 190px; }
+    .smgmt-est-popover-empty { color: var(--text-muted); font-style: italic; font-size: 11px; }
+    .smgmt-est-popover-flag {
+      display: inline-block; padding: 1px 6px; border-radius: 10px;
+      font-size: 10px; font-weight: 600;
+      background: var(--red-bg); color: var(--red); margin: 1px 2px 1px 0;
+    }
+    .smgmt-est-popover-divider { border: none; border-top: 1px solid var(--border); margin: 8px 0; }
+    .smgmt-est-popover-summary { color: var(--text-sub); font-size: 11px; line-height: 1.45; }
+
     /* Generic utility used by Bulk Create */
     .hidden { display: none !important; }
     .btn-primary:disabled { opacity: .45; cursor: not-allowed; }
@@ -3686,6 +3727,9 @@
 
         <!-- Ticket row context menu (issue #500) -->
         <div class="smgmt-ctx-menu hidden" id="smgmt-ctx-menu" role="menu"></div>
+
+        <!-- Estimate detail popover (issue #557) -->
+        <div class="smgmt-est-popover hidden" id="smgmt-est-popover" role="dialog" aria-modal="false" aria-label="Estimate details"></div>
 
       </div>
 
@@ -5935,36 +5979,48 @@ function _smgmtEstimateBadgeHtml(issueNum) {
   if (!Object.prototype.hasOwnProperty.call(_estDataCache, issueNum)) return '';
   const est = _estDataCache[issueNum];
   if (!est) return '<span class="smgmt-ticket-no-estimate">Not Estimated</span>';
-  let html = '';
-  if (est.confidence) {
-    const confClass = `conf-${est.confidence.toLowerCase()}`;
-    html += `<span class="smgmt-ticket-confidence-pill ${escHtml(confClass)}">${escHtml(_capitalizeFirst(est.confidence))}</span>`;
-  }
-  return html;
+  if (!est.confidence && !est.size) return '';
+  const confClass = est.confidence ? `conf-${est.confidence.toLowerCase()}` : '';
+  const label = est.confidence ? _capitalizeFirst(est.confidence) : (est.size || 'Est');
+  return `<button class="smgmt-est-detail-btn ${escHtml(confClass)}" tabindex="0"
+    title="View estimate details"
+    onclick="event.stopPropagation();_smgmtEstimatePopoverOpen(event,${issueNum})"
+    onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();_smgmtEstimatePopoverOpen(event,${issueNum});}">
+    ${escHtml(label)}</button>`;
 }
 
 function _smgmtUpdateEstimateBadge(issueNum) {
   const row = document.getElementById(`smgmt-ticket-${issueNum}`);
   if (!row) return;
 
-  row.querySelector('.smgmt-ticket-confidence-pill')?.remove();
+  row.querySelector('.smgmt-est-detail-btn')?.remove();
   row.querySelector('.smgmt-ticket-no-estimate')?.remove();
 
   const est = Object.prototype.hasOwnProperty.call(_estDataCache, issueNum)
     ? _estDataCache[issueNum] : undefined;
   if (est === undefined) return;
 
-  if (est && est.confidence) {
-    const confClass = `conf-${est.confidence.toLowerCase()}`;
-    const confEl = document.createElement('span');
-    confEl.className = `smgmt-ticket-confidence-pill ${confClass}`;
-    confEl.textContent = _capitalizeFirst(est.confidence);
+  if (est && (est.confidence || est.size)) {
+    const confClass = est.confidence ? `conf-${est.confidence.toLowerCase()}` : '';
+    const label = est.confidence ? _capitalizeFirst(est.confidence) : (est.size || 'Est');
+    const btn = document.createElement('button');
+    btn.className = `smgmt-est-detail-btn ${confClass}`.trim();
+    btn.textContent = label;
+    btn.tabIndex = 0;
+    btn.title = 'View estimate details';
+    btn.onclick = (ev) => { ev.stopPropagation(); _smgmtEstimatePopoverOpen(ev, issueNum); };
+    btn.onkeydown = (ev) => {
+      if (ev.key === 'Enter' || ev.key === ' ') {
+        ev.preventDefault(); ev.stopPropagation();
+        _smgmtEstimatePopoverOpen(ev, issueNum);
+      }
+    };
     const sizePill = row.querySelector('.smgmt-ticket-size-pill');
     if (sizePill) {
-      sizePill.after(confEl);
+      sizePill.after(btn);
     } else {
       const titleEl = row.querySelector('.smgmt-ticket-title');
-      if (titleEl) titleEl.after(confEl);
+      if (titleEl) titleEl.after(btn);
     }
   } else if (est === null) {
     const noEstEl = document.createElement('span');
@@ -7505,6 +7561,105 @@ function _smgmtCtxMenuClose() {
   _ctxMenuIssueNum = null;
   document.removeEventListener('click',       _smgmtCtxMenuOutsideHandler);
   document.removeEventListener('contextmenu', _smgmtCtxMenuOutsideHandler);
+}
+
+// ── Estimate detail popover (issue #557) ─────────────────────────────────────
+
+let _estPopoverIssueNum = null;
+
+function _smgmtEstimatePopoverOpen(event, issueNum) {
+  const popover = document.getElementById('smgmt-est-popover');
+  if (!popover) return;
+
+  const est = _estDataCache[issueNum];
+  if (!est) return;
+
+  _estPopoverIssueNum = issueNum;
+
+  const sizeStr = est.size || '<span class="smgmt-est-popover-empty">—</span>';
+  const confStr = est.confidence
+    ? _capitalizeFirst(est.confidence)
+    : '<span class="smgmt-est-popover-empty">—</span>';
+
+  const files = Array.isArray(est.files_likely_affected) ? est.files_likely_affected : [];
+  const filesHtml = files.length
+    ? `<span class="smgmt-est-popover-list">${files.map(f =>
+        `<span class="smgmt-est-popover-list-item" title="${escHtml(f)}">${escHtml(f)}</span>`
+      ).join('')}</span>`
+    : '<span class="smgmt-est-popover-empty">None listed</span>';
+
+  const flags = Array.isArray(est.risk_flags) ? est.risk_flags : [];
+  const flagsHtml = flags.length
+    ? flags.map(f => `<span class="smgmt-est-popover-flag">${escHtml(f)}</span>`).join('')
+    : '<span class="smgmt-est-popover-empty">No risk flags</span>';
+
+  const summaryHtml = est.summary
+    ? `<hr class="smgmt-est-popover-divider">
+       <div class="smgmt-est-popover-summary">${escHtml(est.summary)}</div>`
+    : '';
+
+  popover.innerHTML = `
+    <div class="smgmt-est-popover-title">Estimate #${issueNum}</div>
+    <div class="smgmt-est-popover-row">
+      <span class="smgmt-est-popover-key">Size</span>
+      <span class="smgmt-est-popover-val">${sizeStr}</span>
+    </div>
+    <div class="smgmt-est-popover-row">
+      <span class="smgmt-est-popover-key">Confidence</span>
+      <span class="smgmt-est-popover-val">${confStr}</span>
+    </div>
+    <div class="smgmt-est-popover-row" style="align-items:flex-start">
+      <span class="smgmt-est-popover-key">Files</span>
+      ${filesHtml}
+    </div>
+    <div class="smgmt-est-popover-row" style="align-items:flex-start;flex-wrap:wrap">
+      <span class="smgmt-est-popover-key" style="width:100%;margin-bottom:4px">Risk flags</span>
+      <div>${flagsHtml}</div>
+    </div>
+    ${summaryHtml}`;
+
+  popover.classList.remove('hidden');
+
+  // Position: prefer below the button, flip up if off-screen
+  const btn = event.currentTarget || event.target;
+  const rect = btn.getBoundingClientRect ? btn.getBoundingClientRect() : null;
+  const popW = 300;
+  const popH = 220;
+  let left, top;
+  if (rect) {
+    left = rect.left + window.scrollX;
+    top  = rect.bottom + window.scrollY + 4;
+    if (rect.left + popW > window.innerWidth) left = Math.max(4, rect.right + window.scrollX - popW);
+    if (rect.bottom + popH > window.innerHeight) top = rect.top + window.scrollY - popH - 4;
+  } else {
+    left = event.clientX + window.scrollX;
+    top  = event.clientY + window.scrollY + 4;
+  }
+  popover.style.left = left + 'px';
+  popover.style.top  = top  + 'px';
+
+  setTimeout(() => {
+    document.addEventListener('click',   _smgmtEstimatePopoverOutside);
+    document.addEventListener('keydown', _smgmtEstimatePopoverKeydown);
+  }, 0);
+}
+
+function _smgmtEstimatePopoverOutside(event) {
+  const popover = document.getElementById('smgmt-est-popover');
+  if (!popover || popover.contains(event.target)) return;
+  _smgmtEstimatePopoverClose();
+}
+
+function _smgmtEstimatePopoverKeydown(event) {
+  if (event.key === 'Escape') _smgmtEstimatePopoverClose();
+}
+
+function _smgmtEstimatePopoverClose() {
+  const popover = document.getElementById('smgmt-est-popover');
+  if (popover) popover.classList.add('hidden');
+  _estPopoverIssueNum = null;
+  document.removeEventListener('click',   _smgmtEstimatePopoverOutside);
+  document.removeEventListener('keydown', _smgmtEstimatePopoverKeydown);
 }
 
 // ── Sprint action handlers ─────────────────────────────────────────────────

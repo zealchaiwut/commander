@@ -3663,6 +3663,13 @@
               <label class="bc-settings-label" for="bc-repo">Repo</label>
               <select class="bc-select" id="bc-repo" onchange="bcRepoChanged()"></select>
             </div>
+            <div class="bc-settings-field">
+              <label class="bc-settings-label" for="bc-split-mode">Split mode</label>
+              <select class="bc-select" id="bc-split-mode" onchange="_bcOnSplitModeChange()">
+                <option value="separator">By separator ---</option>
+                <option value="heading">By heading #/##</option>
+              </select>
+            </div>
             <div class="bc-settings-field bc-settings-field--labels" style="display:none">
               <label class="bc-settings-label" for="bc-default-labels">Default labels</label>
               <input class="bc-text-input" id="bc-default-labels" type="text"
@@ -3680,7 +3687,7 @@
 
           <div id="bc-dup-warning" class="bc-dup-warning hidden"></div>
 
-          <div class="bc-info-note">
+          <div class="bc-info-note" id="bc-info-note">
             Split prompts using <code>---</code> on its own line. All created tickets go to backlog &mdash; assign them to a sprint later via Sprint Mgmt.
           </div>
 
@@ -10211,7 +10218,53 @@ function bcOnTextareaInput() {
 }
 
 function _bcParsePrompts(text) {
+  const mode = (document.getElementById('bc-split-mode') || {}).value || 'separator';
+  if (mode === 'heading') return _bcParseHeadingPrompts(text);
   return text.split(/^---$/m).map(s => s.trim()).filter(s => s.length > 0);
+}
+
+function _bcParseHeadingPrompts(text) {
+  const lines = text.split('\n');
+  const tickets = [];
+  let title = null;
+  let bodyLines = [];
+
+  function flush() {
+    const body = bodyLines.join('\n').trim();
+    const prompt = title !== null ? (body ? title + '\n\n' + body : title) : body;
+    if (prompt) tickets.push(prompt);
+  }
+
+  for (const line of lines) {
+    const m = line.match(/^(#{1,2})\s+(.*)/);
+    if (m) {
+      flush();
+      title = m[2].trim();
+      bodyLines = [];
+    } else {
+      bodyLines.push(line);
+    }
+  }
+  flush();
+
+  return tickets.filter(s => s.length > 0);
+}
+
+function _bcOnSplitModeChange() {
+  const mode = (document.getElementById('bc-split-mode') || {}).value || 'separator';
+  const textarea = document.getElementById('bc-textarea');
+  const infoNote = document.getElementById('bc-info-note');
+  if (textarea) {
+    textarea.placeholder = mode === 'heading'
+      ? 'Paste a markdown document here. Each # or ## heading becomes a separate ticket.'
+      : 'Paste your ticket prompts here, separated by --- on its own line...';
+  }
+  if (infoNote) {
+    infoNote.innerHTML = mode === 'heading'
+      ? 'Each <code>#</code> or <code>##</code> heading becomes a ticket title. Deeper headings (<code>###</code>+) are treated as body content. All created tickets go to backlog.'
+      : 'Split prompts using <code>---</code> on its own line. All created tickets go to backlog &mdash; assign them to a sprint later via Sprint Mgmt.';
+  }
+  _bcUpdateCounter();
 }
 
 function _bcUpdateCounter() {

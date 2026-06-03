@@ -947,6 +947,32 @@
       font-size: 11px; color: var(--text-sub); font-weight: 400;
     }
     .smgmt-sprint-header { justify-content: space-between; }
+    .smgmt-sprint-summary {
+      margin: 6px 0 4px;
+      display: flex; flex-direction: column; gap: 4px;
+    }
+    .smgmt-progress-row {
+      display: flex; align-items: center; gap: 8px;
+    }
+    .smgmt-progress-bar-wrap {
+      flex: 1; height: 5px;
+      background: var(--surface-2, #e5e7eb);
+      border-radius: 3px; overflow: hidden;
+    }
+    .smgmt-progress-bar-fill {
+      height: 100%; background: var(--green);
+      border-radius: 3px; transition: width .3s ease;
+      min-width: 0;
+    }
+    .smgmt-progress-label {
+      font-size: 11px; color: var(--text-sub);
+      white-space: nowrap; flex-shrink: 0;
+    }
+    .smgmt-sprint-goal-text {
+      font-size: 12px; color: var(--text-muted);
+      font-style: italic;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
     .smgmt-sprint-header-left {
       display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0;
     }
@@ -5791,6 +5817,9 @@ function _smgmtRender(data) {
   // Load estimated hours from .commander/estimates/ for each sprint header
   _smgmtLoadEstimates(orderedLabels, bySprint);
 
+  // Load sprint goals for header summary
+  _smgmtLoadGoals(orderedLabels);
+
   // Inject pre-flight check banners for non-running sprint panes (issue #434)
   _preflightLoadBanners(orderedLabels, bySprint);
 
@@ -5850,6 +5879,30 @@ async function _smgmtLoadEstimates(orderedLabels, bySprint) {
       // else: leave as "— estimated"
     } catch (_) {
       // fail silently — leave as "— estimated"
+    }
+  }
+}
+
+async function _smgmtLoadGoals(orderedLabels) {
+  const repo = _smgmtRepo();
+  if (!repo) return;
+  for (const label of orderedLabels) {
+    const goalEl = document.getElementById(`smgmt-goal-${label}`);
+    if (!goalEl) continue;
+    try {
+      const resp = await fetch(
+        `/api/sprints/goal?project=${encodeURIComponent(repo)}&sprint=${encodeURIComponent(label)}`
+      );
+      if (!resp.ok) continue;
+      const data = await resp.json();
+      const goal = (data.goal || '').trim();
+      if (goal) {
+        goalEl.textContent = goal;
+        goalEl.title = goal;
+        goalEl.style.display = '';
+      }
+    } catch (_) {
+      // fail silently
     }
   }
 }
@@ -6640,6 +6693,7 @@ function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent) {
   let outcomeBadgeHtml = '';
   let ticketCount = tickets.length;
   let ticketsContainerHtml = '';
+  let isOutcomeView = false;
 
   if (outcome && (outcome.sprint_status || outcome.state)) {
     const meta = _smgmtStateMeta(outcome);
@@ -6655,6 +6709,7 @@ function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent) {
       const issueList = outcome.issues || [];
       ticketCount = issueList.length;
       ticketsContainerHtml = _smgmtOutcomeTicketListHtml(issueList, label, _smgmtRepo());
+      isOutcomeView = true;
     }
   } else {
     // Planning view ticket rows
@@ -6662,6 +6717,19 @@ function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent) {
       ? tickets.map(t => _smgmtTicketRowHtml(t, label)).join('')
       : '<div class="smgmt-drop-hint">Drop tickets here</div>';
   }
+
+  // Sprint summary: progress bar + goal
+  const summaryDone = isOutcomeView
+    ? (outcome.issues || []).filter(i => i.outcome === 'done').length
+    : tickets.filter(t => t.status === 'done').length;
+  const summaryPct = ticketCount > 0 ? Math.round((summaryDone / ticketCount) * 100) : 0;
+  const summaryHtml = `<div class="smgmt-sprint-summary">
+    <div class="smgmt-progress-row">
+      <div class="smgmt-progress-bar-wrap"><div class="smgmt-progress-bar-fill" style="width:${summaryPct}%"></div></div>
+      <span class="smgmt-progress-label">${summaryDone} / ${ticketCount} done</span>
+    </div>
+    <div class="smgmt-sprint-goal-text" id="smgmt-goal-${escHtml(label)}" style="display:none"></div>
+  </div>`;
 
   const logHtml = (outcome && outcome.sprint_status) ? _smgmtOutcomeLogHtml(label, outcome) : '';
   const cancelBannerHtml = _smgmtIsCancelled(outcome) ? _smgmtCancelBannerHtml(label) : '';
@@ -6697,6 +6765,7 @@ function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent) {
           ${!isPostRun ? rerunBtn : ''}
         </div>
       </div>
+      ${summaryHtml}
       ${cancelBannerHtml}
       ${outcomeBandHtml}
       <div class="smgmt-sprint-tickets" id="smgmt-tickets-${escHtml(label)}">

@@ -2341,6 +2341,22 @@
     }
     .bc-prompt-row.bc-dup { background: #fffbeb; border: 1px solid #fcd34d; border-bottom-color: #fcd34d; }
     .bc-prompt-row.bc-dup .bc-prompt-row-num { color: #92400e; }
+    .bc-limit-banner {
+      display: flex; align-items: center; gap: 6px;
+      margin: 0 28px 6px; padding: 6px 10px;
+      border-radius: 4px; font-size: 12px; font-weight: 500;
+    }
+    .bc-limit-banner--warn {
+      color: #92400e; background: #fffbeb; border: 1px solid #fcd34d;
+    }
+    .bc-limit-banner--error {
+      color: #991b1b; background: #fef2f2; border: 1px solid #fca5a5;
+    }
+    .bc-prompt-row-stats {
+      font-size: 10px; color: var(--text-muted); font-family: var(--mono);
+      white-space: nowrap; padding-top: 9px; flex-shrink: 0; line-height: 1.3;
+      text-align: right;
+    }
 
     /* Prompt templates (issue #531) */
     .bc-tpl-section { border-top: 1px solid var(--border); }
@@ -3678,8 +3694,10 @@
           </div>
 
           <div class="bc-counter-row">
-            <span class="bc-counter" id="bc-counter">0 tickets detected &middot; 0 chars</span>
+            <span class="bc-counter" id="bc-counter">0 / 50 prompts</span>
           </div>
+
+          <div id="bc-limit-banner" class="bc-limit-banner hidden" role="alert" aria-live="polite"></div>
 
           <textarea class="bc-textarea" id="bc-textarea"
                     placeholder="Paste your ticket prompts here, separated by --- on its own line..."
@@ -9976,7 +9994,8 @@ let _bcDragSrcIdx    = null;        // HTML5 drag source row index
 let _bcTouchSrcIdx   = null;        // touch drag source row index
 let _bcTouchGhost    = null;        // floating ghost element during touch drag
 
-const BC_MAX_PROMPTS = 25;
+const BC_MAX_PROMPTS = 50;
+const BC_WARN_PROMPTS = 40;
 
 /** Called each time the Bulk Create tab becomes active. */
 function _bcInitTab() {
@@ -10273,9 +10292,24 @@ function _bcUpdateCounter() {
   _bcPromptOrder = prompts.slice();
   _bcRenderPromptList();
   const n = prompts.length;
-  const chars = text.length;
   const counterEl = document.getElementById('bc-counter');
-  if (counterEl) counterEl.textContent = `${n} tickets detected · ${chars} chars`;
+  if (counterEl) counterEl.textContent = `${n} / ${BC_MAX_PROMPTS} prompts`;
+
+  const bannerEl = document.getElementById('bc-limit-banner');
+  if (bannerEl) {
+    bannerEl.classList.remove('bc-limit-banner--warn', 'bc-limit-banner--error');
+    if (n >= BC_MAX_PROMPTS) {
+      bannerEl.innerHTML = '&#9888; <strong>Batch cap reached</strong> — additional prompts will be ignored';
+      bannerEl.classList.add('bc-limit-banner--error');
+      bannerEl.classList.remove('hidden');
+    } else if (n >= BC_WARN_PROMPTS) {
+      bannerEl.innerHTML = '&#9888; <strong>Approaching 50-prompt limit</strong>';
+      bannerEl.classList.add('bc-limit-banner--warn');
+      bannerEl.classList.remove('hidden');
+    } else {
+      bannerEl.classList.add('hidden');
+    }
+  }
 
   const runBtn = document.getElementById('bc-run-btn');
   if (runBtn) {
@@ -10317,20 +10351,25 @@ function _bcRenderPromptList() {
   });
   _bcUpdateDupWarning(_dupSet);
 
-  rows.innerHTML = _bcPromptOrder.map((text, i) => `
+  rows.innerHTML = _bcPromptOrder.map((text, i) => {
+    const words = text.trim() ? text.trim().split(/\s+/).length : 0;
+    const chars = text.length;
+    return `
     <div class="bc-prompt-row${_dupSet.has(i) ? ' bc-dup' : ''}" data-idx="${i}" draggable="true" tabindex="0"
-         aria-label="Prompt ${i+1} of ${n}${_dupSet.has(i) ? ' (duplicate)' : ''}" onkeydown="_bcRowKey(event,${i})">
+         aria-label="Prompt ${i+1} of ${n}, ${words} words, ${chars} chars${_dupSet.has(i) ? ', duplicate' : ''}" onkeydown="_bcRowKey(event,${i})">
       <span class="bc-prompt-row-handle" title="Drag to reorder" aria-hidden="true">⠿</span>
       <span class="bc-prompt-row-num">${i+1}</span>
       <textarea class="bc-prompt-row-text" rows="2"
                 oninput="_bcRowTextInput(${i},this.value)">${escHtml(text)}</textarea>
+      <span class="bc-prompt-row-stats" aria-hidden="true">${words}w<br>${chars}c</span>
       <div class="bc-prompt-row-moves">
         <button class="bc-prompt-move-btn" title="Move up" onclick="_bcMovePrompt(${i},-1)"
                 ${i === 0 ? 'disabled' : ''} aria-label="Move prompt ${i+1} up">▲</button>
         <button class="bc-prompt-move-btn" title="Move down" onclick="_bcMovePrompt(${i},1)"
                 ${i === n-1 ? 'disabled' : ''} aria-label="Move prompt ${i+1} down">▼</button>
       </div>
-    </div>`).join('');
+    </div>`;
+  }).join('');
   rows.querySelectorAll('.bc-prompt-row').forEach(row => {
     const idx = parseInt(row.dataset.idx, 10);
     row.addEventListener('dragstart', e => _bcDragStart(e, idx));

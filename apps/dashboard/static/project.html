@@ -2288,6 +2288,53 @@
       padding: 1px 5px; border-radius: 3px; font-size: 11px;
     }
 
+    /* Prompt reorder list (issue #529) */
+    .bc-prompt-reorder { border-top: 1px solid var(--border); }
+    .bc-prompt-reorder-header { padding: 8px 28px 4px; display: flex; align-items: center; gap: 8px; }
+    .bc-prompt-rows {
+      display: flex; flex-direction: column;
+      padding: 4px 28px 8px;
+      max-height: 360px; overflow-y: auto;
+      scrollbar-width: thin; scrollbar-color: var(--border) transparent;
+    }
+    .bc-prompt-rows::-webkit-scrollbar { width: 4px; }
+    .bc-prompt-rows::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+    .bc-prompt-row {
+      display: flex; align-items: flex-start; gap: 8px;
+      padding: 6px 0; border-bottom: 1px solid var(--border);
+      border-radius: 4px; transition: background .1s;
+    }
+    .bc-prompt-row:last-child { border-bottom: none; }
+    .bc-prompt-row.bc-row-dragging { opacity: .4; }
+    .bc-prompt-row.bc-row-over { background: var(--blue-bg); }
+    .bc-prompt-row-handle {
+      cursor: grab; color: var(--text-muted); font-size: 14px;
+      padding-top: 7px; flex-shrink: 0; user-select: none; touch-action: none;
+    }
+    .bc-prompt-row-handle:active { cursor: grabbing; }
+    .bc-prompt-row-num {
+      font-size: 11px; color: var(--text-muted); font-family: var(--mono);
+      padding-top: 7px; flex-shrink: 0; min-width: 18px; text-align: right;
+    }
+    .bc-prompt-row-text {
+      flex: 1; min-width: 0; font-size: 12px; font-family: var(--mono);
+      border: 1px solid var(--border); border-radius: 4px;
+      padding: 5px 8px; background: var(--surface-2); color: var(--text);
+      resize: vertical; min-height: 44px; max-height: 160px;
+      outline: none; line-height: 1.4; box-sizing: border-box;
+    }
+    .bc-prompt-row-text:focus { border-color: var(--blue); }
+    .bc-prompt-row-moves { display: flex; flex-direction: column; gap: 2px; flex-shrink: 0; padding-top: 2px; }
+    .bc-prompt-move-btn {
+      background: none; border: 1px solid var(--border); border-radius: 4px;
+      width: 24px; height: 24px; cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      color: var(--text-muted); font-size: 10px; line-height: 1;
+      transition: color .1s, border-color .1s, background .1s;
+    }
+    .bc-prompt-move-btn:hover:not(:disabled) { color: var(--text); border-color: var(--text-sub); background: var(--surface-2); }
+    .bc-prompt-move-btn:disabled { opacity: .3; cursor: not-allowed; }
+
     /* Attachments */
     .bc-attach-section { padding: 10px 28px 6px; border-top: 1px solid var(--border); }
     .bc-attach-header { margin-bottom: 6px; }
@@ -3571,6 +3618,15 @@
 
           <div class="bc-info-note">
             Split prompts using <code>---</code> on its own line. All created tickets go to backlog &mdash; assign them to a sprint later via Sprint Mgmt.
+          </div>
+
+          <!-- Prompt reorder list (issue #529) -->
+          <div id="bc-prompt-reorder" class="bc-prompt-reorder hidden">
+            <div class="bc-prompt-reorder-header">
+              <span class="bc-settings-label">Prompts</span>
+              <span class="bc-label-hint">— drag or use <kbd style="font-size:10px;background:var(--surface-2);border:1px solid var(--border);border-radius:3px;padding:1px 4px;font-family:var(--mono)">Alt+↑/↓</kbd> on a focused row to reorder</span>
+            </div>
+            <div id="bc-prompt-rows" class="bc-prompt-rows"></div>
           </div>
 
           <!-- Image Attachments -->
@@ -9823,6 +9879,10 @@ let _bcLastInput    = null;      // preserved Step 1 inputs for Recreate
 let _bcTabInited    = false;     // whether the tab has been populated once
 let _bcDraftSelections = new Set(); // indices of draft_ready tickets checked for posting
 let _bcRemovedRows = new Set();     // indices of rows hidden by the Remove control (issue #528)
+let _bcPromptOrder   = [];          // ordered prompt texts before drafting (issue #529)
+let _bcDragSrcIdx    = null;        // HTML5 drag source row index
+let _bcTouchSrcIdx   = null;        // touch drag source row index
+let _bcTouchGhost    = null;        // floating ghost element during touch drag
 
 const BC_MAX_PROMPTS = 25;
 
@@ -9926,6 +9986,8 @@ function _bcParsePrompts(text) {
 function _bcUpdateCounter() {
   const text = (document.getElementById('bc-textarea') || {}).value || '';
   const prompts = _bcParsePrompts(text);
+  _bcPromptOrder = prompts.slice();
+  _bcRenderPromptList();
   const n = prompts.length;
   const chars = text.length;
   const counterEl = document.getElementById('bc-counter');
@@ -9951,6 +10013,139 @@ function _bcUpdateCounter() {
   // Refresh assignment dropdowns when ticket count changes
   if (_bcFiles.length > 0) _bcRenderFileQueue();
 }
+
+// ── Prompt reorder list (issue #529) ────────────────────────────────────────
+
+function _bcRenderPromptList() {
+  const wrap = document.getElementById('bc-prompt-reorder');
+  const rows = document.getElementById('bc-prompt-rows');
+  if (!wrap || !rows) return;
+  const n = _bcPromptOrder.length;
+  if (n === 0) { wrap.classList.add('hidden'); rows.innerHTML = ''; return; }
+  wrap.classList.remove('hidden');
+  rows.innerHTML = _bcPromptOrder.map((text, i) => `
+    <div class="bc-prompt-row" data-idx="${i}" draggable="true" tabindex="0"
+         aria-label="Prompt ${i+1} of ${n}" onkeydown="_bcRowKey(event,${i})">
+      <span class="bc-prompt-row-handle" title="Drag to reorder" aria-hidden="true">⠿</span>
+      <span class="bc-prompt-row-num">${i+1}</span>
+      <textarea class="bc-prompt-row-text" rows="2"
+                oninput="_bcRowTextInput(${i},this.value)">${escHtml(text)}</textarea>
+      <div class="bc-prompt-row-moves">
+        <button class="bc-prompt-move-btn" title="Move up" onclick="_bcMovePrompt(${i},-1)"
+                ${i === 0 ? 'disabled' : ''} aria-label="Move prompt ${i+1} up">▲</button>
+        <button class="bc-prompt-move-btn" title="Move down" onclick="_bcMovePrompt(${i},1)"
+                ${i === n-1 ? 'disabled' : ''} aria-label="Move prompt ${i+1} down">▼</button>
+      </div>
+    </div>`).join('');
+  rows.querySelectorAll('.bc-prompt-row').forEach(row => {
+    const idx = parseInt(row.dataset.idx, 10);
+    row.addEventListener('dragstart', e => _bcDragStart(e, idx));
+    row.addEventListener('dragover',  e => _bcDragOver(e, idx));
+    row.addEventListener('dragleave', () => row.classList.remove('bc-row-over'));
+    row.addEventListener('drop',      e => _bcDrop(e, idx));
+    row.addEventListener('dragend',   () => _bcDragEnd());
+    const handle = row.querySelector('.bc-prompt-row-handle');
+    if (handle) handle.addEventListener('touchstart', e => _bcTouchStart(e, idx), {passive: false});
+  });
+}
+
+function _bcMovePrompt(i, dir) {
+  const j = i + dir;
+  if (j < 0 || j >= _bcPromptOrder.length) return;
+  [_bcPromptOrder[i], _bcPromptOrder[j]] = [_bcPromptOrder[j], _bcPromptOrder[i]];
+  _bcRenderPromptList();
+  const rows = document.getElementById('bc-prompt-rows');
+  if (rows) {
+    const moved = rows.querySelector(`[data-idx="${j}"]`);
+    if (moved) { const ta = moved.querySelector('.bc-prompt-row-text'); (ta || moved).focus(); }
+  }
+}
+
+function _bcRowTextInput(i, val) {
+  _bcPromptOrder[i] = val;
+}
+
+function _bcRowKey(e, i) {
+  if (!e.altKey) return;
+  if (e.key === 'ArrowUp')   { e.preventDefault(); _bcMovePrompt(i, -1); }
+  if (e.key === 'ArrowDown') { e.preventDefault(); _bcMovePrompt(i,  1); }
+}
+
+function _bcDragStart(e, i) {
+  _bcDragSrcIdx = i;
+  e.dataTransfer.effectAllowed = 'move';
+  setTimeout(() => e.currentTarget.classList.add('bc-row-dragging'), 0);
+}
+function _bcDragOver(e, i) {
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+  document.querySelectorAll('#bc-prompt-rows .bc-prompt-row').forEach(r => r.classList.remove('bc-row-over'));
+  if (i !== _bcDragSrcIdx) e.currentTarget.classList.add('bc-row-over');
+}
+function _bcDrop(e, i) {
+  e.preventDefault();
+  if (_bcDragSrcIdx === null || _bcDragSrcIdx === i) { _bcDragEnd(); return; }
+  const moved = _bcPromptOrder.splice(_bcDragSrcIdx, 1)[0];
+  _bcPromptOrder.splice(i, 0, moved);
+  _bcDragEnd();
+  _bcRenderPromptList();
+}
+function _bcDragEnd() {
+  _bcDragSrcIdx = null;
+  document.querySelectorAll('#bc-prompt-rows .bc-prompt-row').forEach(r => {
+    r.classList.remove('bc-row-dragging'); r.classList.remove('bc-row-over');
+  });
+}
+
+function _bcTouchStart(e, i) {
+  _bcTouchSrcIdx = i;
+  e.preventDefault();
+  const touch = e.touches[0];
+  const ghost = document.createElement('div');
+  ghost.style.cssText = 'position:fixed;opacity:.75;pointer-events:none;z-index:9999;background:var(--surface-2);border:1px solid var(--border);border-radius:4px;padding:4px 10px;font-size:12px;max-width:220px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-family:var(--mono)';
+  ghost.textContent = '#' + (i + 1) + ' ' + (_bcPromptOrder[i] || '').slice(0, 50);
+  ghost.style.left = (touch.clientX + 12) + 'px';
+  ghost.style.top  = (touch.clientY + 12) + 'px';
+  document.body.appendChild(ghost);
+  _bcTouchGhost = ghost;
+  document.addEventListener('touchmove',   _bcTouchMove,   {passive: false});
+  document.addEventListener('touchend',    _bcTouchEnd,    {passive: false});
+  document.addEventListener('touchcancel', _bcTouchEnd,    {passive: false});
+}
+function _bcTouchMove(e) {
+  e.preventDefault();
+  const touch = e.touches[0];
+  if (_bcTouchGhost) { _bcTouchGhost.style.left = (touch.clientX + 12) + 'px'; _bcTouchGhost.style.top = (touch.clientY + 12) + 'px'; }
+  document.querySelectorAll('#bc-prompt-rows .bc-prompt-row').forEach(r => r.classList.remove('bc-row-over'));
+  const el = document.elementFromPoint(touch.clientX, touch.clientY);
+  const row = el && el.closest('.bc-prompt-row');
+  if (row) { const tgt = parseInt(row.dataset.idx, 10); if (tgt !== _bcTouchSrcIdx) row.classList.add('bc-row-over'); }
+}
+function _bcTouchEnd(e) {
+  document.removeEventListener('touchmove',   _bcTouchMove);
+  document.removeEventListener('touchend',    _bcTouchEnd);
+  document.removeEventListener('touchcancel', _bcTouchEnd);
+  if (_bcTouchGhost) { _bcTouchGhost.remove(); _bcTouchGhost = null; }
+  document.querySelectorAll('#bc-prompt-rows .bc-prompt-row').forEach(r => r.classList.remove('bc-row-over'));
+  if (_bcTouchSrcIdx !== null) {
+    const touch = (e.changedTouches || e.touches)[0];
+    if (touch) {
+      const el = document.elementFromPoint(touch.clientX, touch.clientY);
+      const row = el && el.closest('.bc-prompt-row');
+      if (row) {
+        const tgt = parseInt(row.dataset.idx, 10);
+        if (tgt !== _bcTouchSrcIdx) {
+          const moved = _bcPromptOrder.splice(_bcTouchSrcIdx, 1)[0];
+          _bcPromptOrder.splice(tgt, 0, moved);
+          _bcRenderPromptList();
+        }
+      }
+    }
+  }
+  _bcTouchSrcIdx = null;
+}
+
+// ────────────────────────────────────────────────────────────────────────────
 
 function _bcPickFiles() {
   const inp = document.getElementById('bc-file-input');
@@ -10043,7 +10238,7 @@ async function bcRunAll() {
   const textarea = document.getElementById('bc-textarea');
   if (!textarea) return;
   const text = textarea.value;
-  const prompts = _bcParsePrompts(text);
+  const prompts = _bcPromptOrder.length > 0 ? _bcPromptOrder.slice() : _bcParsePrompts(text);
   if (prompts.length === 0) return;
   if (prompts.length > BC_MAX_PROMPTS) return;
 
@@ -10096,6 +10291,7 @@ async function bcRunAll() {
     _bcAvgMs = null;
     _bcDraftSelections = new Set();
     _bcRemovedRows = new Set();
+    _bcPromptOrder = [];
 
     _bcShowStep(2);
     _bcConnectSSE(_bcJobId);

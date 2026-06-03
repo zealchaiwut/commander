@@ -2282,8 +2282,14 @@
     .bc-select:focus, .bc-text-input:focus { outline: none; border-color: var(--blue); }
 
     /* Counter */
-    .bc-counter-row { padding: 8px 28px 4px; }
+    .bc-counter-row { padding: 8px 28px 4px; display: flex; align-items: center; gap: 12px; }
     .bc-counter { font-size: 11px; color: var(--text-muted); font-weight: 500; }
+    .bc-clear-draft-btn {
+      font-size: 11px; padding: 2px 8px; border-radius: 4px;
+      border: 1px solid var(--border); background: transparent;
+      color: var(--text-muted); cursor: pointer;
+    }
+    .bc-clear-draft-btn:hover { border-color: var(--red, #c0392b); color: var(--red, #c0392b); }
 
     /* Textarea */
     .bc-textarea {
@@ -2308,6 +2314,131 @@
       font-family: var(--mono); background: var(--surface-2);
       padding: 1px 5px; border-radius: 3px; font-size: 11px;
     }
+
+    /* Prompt reorder list (issue #529) */
+    .bc-prompt-reorder { border-top: 1px solid var(--border); }
+    .bc-prompt-reorder-header { padding: 8px 28px 4px; display: flex; align-items: center; gap: 8px; }
+    .bc-prompt-rows {
+      display: flex; flex-direction: column;
+      padding: 4px 28px 8px;
+      max-height: 360px; overflow-y: auto;
+      scrollbar-width: thin; scrollbar-color: var(--border) transparent;
+    }
+    .bc-prompt-rows::-webkit-scrollbar { width: 4px; }
+    .bc-prompt-rows::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+    .bc-prompt-row {
+      display: flex; align-items: flex-start; gap: 8px;
+      padding: 6px 0; border-bottom: 1px solid var(--border);
+      border-radius: 4px; transition: background .1s;
+    }
+    .bc-prompt-row:last-child { border-bottom: none; }
+    .bc-prompt-row.bc-row-dragging { opacity: .4; }
+    .bc-prompt-row.bc-row-over { background: var(--blue-bg); }
+    .bc-prompt-row-handle {
+      cursor: grab; color: var(--text-muted); font-size: 14px;
+      padding-top: 7px; flex-shrink: 0; user-select: none; touch-action: none;
+    }
+    .bc-prompt-row-handle:active { cursor: grabbing; }
+    .bc-prompt-row-num {
+      font-size: 11px; color: var(--text-muted); font-family: var(--mono);
+      padding-top: 7px; flex-shrink: 0; min-width: 18px; text-align: right;
+    }
+    .bc-prompt-row-text {
+      flex: 1; min-width: 0; font-size: 12px; font-family: var(--mono);
+      border: 1px solid var(--border); border-radius: 4px;
+      padding: 5px 8px; background: var(--surface-2); color: var(--text);
+      resize: vertical; min-height: 44px; max-height: 160px;
+      outline: none; line-height: 1.4; box-sizing: border-box;
+    }
+    .bc-prompt-row-text:focus { border-color: var(--blue); }
+    .bc-prompt-row-moves { display: flex; flex-direction: column; gap: 2px; flex-shrink: 0; padding-top: 2px; }
+    .bc-prompt-move-btn {
+      background: none; border: 1px solid var(--border); border-radius: 4px;
+      width: 24px; height: 24px; cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      color: var(--text-muted); font-size: 10px; line-height: 1;
+      transition: color .1s, border-color .1s, background .1s;
+    }
+    .bc-prompt-move-btn:hover:not(:disabled) { color: var(--text); border-color: var(--text-sub); background: var(--surface-2); }
+    .bc-prompt-move-btn:disabled { opacity: .3; cursor: not-allowed; }
+    .bc-dup-warning {
+      font-size: 12px; color: #92400e; background: #fffbeb;
+      border: 1px solid #fcd34d; border-radius: 4px;
+      padding: 6px 10px; margin: 0 28px 6px;
+    }
+    .bc-prompt-row.bc-dup { background: #fffbeb; border: 1px solid #fcd34d; border-bottom-color: #fcd34d; }
+    .bc-prompt-row.bc-dup .bc-prompt-row-num { color: #92400e; }
+    .bc-limit-banner {
+      display: flex; align-items: center; gap: 6px;
+      margin: 0 28px 6px; padding: 6px 10px;
+      border-radius: 4px; font-size: 12px; font-weight: 500;
+    }
+    .bc-limit-banner--warn {
+      color: #92400e; background: #fffbeb; border: 1px solid #fcd34d;
+    }
+    .bc-limit-banner--error {
+      color: #991b1b; background: #fef2f2; border: 1px solid #fca5a5;
+    }
+    .bc-prompt-row-stats {
+      font-size: 10px; color: var(--text-muted); font-family: var(--mono);
+      white-space: nowrap; padding-top: 9px; flex-shrink: 0; line-height: 1.3;
+      text-align: right;
+    }
+
+    /* Prompt templates (issue #531) */
+    .bc-tpl-section { border-top: 1px solid var(--border); }
+    .bc-tpl-header { padding: 8px 28px; display: flex; align-items: center; justify-content: space-between; }
+    .bc-tpl-save-btn {
+      background: none; border: 1px solid var(--border); border-radius: 6px;
+      padding: 3px 10px; font-size: 11px; color: var(--text-sub); cursor: pointer;
+      display: flex; align-items: center; gap: 4px; transition: border-color .1s, color .1s;
+    }
+    .bc-tpl-save-btn:hover { border-color: var(--blue); color: var(--blue); }
+    .bc-tpl-save-form { display: flex; align-items: center; gap: 6px; padding: 0 28px 8px; flex-wrap: wrap; }
+    .bc-tpl-name-input {
+      flex: 1; min-width: 120px; font-size: 12px; font-family: inherit;
+      border: 1px solid var(--border); border-radius: 6px;
+      padding: 4px 10px; background: var(--surface); color: var(--text);
+      outline: none; transition: border-color .1s;
+    }
+    .bc-tpl-name-input:focus { border-color: var(--blue); }
+    .bc-tpl-confirm-btn {
+      font-size: 11px; padding: 4px 12px; border-radius: 6px;
+      background: var(--blue); color: #fff; border: none; cursor: pointer;
+      flex-shrink: 0; transition: opacity .1s;
+    }
+    .bc-tpl-confirm-btn:hover { opacity: .85; }
+    .bc-tpl-cancel-btn {
+      font-size: 11px; padding: 4px 10px; border-radius: 6px;
+      background: none; border: 1px solid var(--border); color: var(--text-sub);
+      cursor: pointer; flex-shrink: 0; transition: border-color .1s, color .1s;
+    }
+    .bc-tpl-cancel-btn:hover { border-color: var(--text-sub); color: var(--text); }
+    .bc-tpl-name-error { font-size: 11px; color: var(--red); flex: 0 0 100%; padding-left: 2px; }
+    .bc-tpl-list { padding: 0 28px 8px; display: flex; flex-direction: column; gap: 4px; }
+    .bc-tpl-empty { font-size: 11px; color: var(--text-muted); padding: 2px 0; }
+    .bc-tpl-row {
+      display: flex; align-items: center; gap: 6px;
+      padding: 4px 8px 4px 10px; border-radius: 6px;
+      border: 1px solid var(--border); background: var(--surface-2);
+    }
+    .bc-tpl-row-name {
+      flex: 1; min-width: 0; font-size: 12px; color: var(--text);
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .bc-tpl-row-insert {
+      font-size: 11px; padding: 2px 8px; border-radius: 5px;
+      border: 1px solid var(--border); background: var(--surface);
+      color: var(--text-sub); cursor: pointer; flex-shrink: 0;
+      transition: border-color .1s, color .1s, background .1s;
+    }
+    .bc-tpl-row-insert:hover { border-color: var(--blue); color: var(--blue); background: var(--blue-bg); }
+    .bc-tpl-row-delete {
+      background: none; border: none; padding: 2px 4px; cursor: pointer;
+      color: var(--text-muted); font-size: 14px; flex-shrink: 0;
+      transition: color .1s; border-radius: 4px; line-height: 1;
+    }
+    .bc-tpl-row-delete:hover { color: var(--red); background: var(--red-bg); }
 
     /* Attachments */
     .bc-attach-section { padding: 10px 28px 6px; border-top: 1px solid var(--border); }
@@ -2386,6 +2517,46 @@
       background: var(--surface-2); color: var(--text); outline: none; min-width: 0;
     }
     .bc-ticket-label-input:focus { border-color: var(--blue); }
+
+    /* Draft-ready inline editing (issue #526) */
+    .bc-draft-check-wrap { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+    .bc-draft-check { cursor: pointer; flex-shrink: 0; width: 14px; height: 14px; }
+    .bc-draft-edit-title {
+      width: 100%; font-size: 12px; color: var(--text); font-weight: 600;
+      background: var(--surface); border: 1px solid var(--border); border-radius: 4px;
+      padding: 4px 7px; margin-top: 2px; box-sizing: border-box;
+    }
+    .bc-draft-edit-title:focus { border-color: var(--blue); outline: none; }
+    .bc-draft-title-err { font-size: 10px; color: var(--red); margin-top: 2px; }
+    .bc-draft-edit-body {
+      width: 100%; font-size: 11px; color: var(--text);
+      background: var(--surface); border: 1px solid var(--border); border-radius: 4px;
+      padding: 4px 7px; margin-top: 4px; box-sizing: border-box;
+      resize: vertical; min-height: 80px; font-family: inherit; line-height: 1.4;
+    }
+    .bc-draft-edit-body:focus { border-color: var(--blue); outline: none; }
+
+    /* Bulk selection controls (issue #534) */
+    .bc-bulk-controls {
+      display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+      padding: 8px 20px;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface-2);
+    }
+    .bc-bulk-select-all-wrap {
+      display: flex; align-items: center; gap: 6px; cursor: pointer;
+      font-size: 12px; color: var(--text); user-select: none;
+    }
+    .bc-bulk-select-all-wrap input[type="checkbox"] { cursor: pointer; }
+    .bc-bulk-btn {
+      padding: 3px 10px; border: 1px solid var(--border); border-radius: 5px;
+      background: transparent; color: var(--text); font-size: 11px; cursor: pointer;
+      transition: background .15s;
+    }
+    .bc-bulk-btn:hover:not(:disabled) { background: var(--surface); }
+    .bc-bulk-btn:disabled { opacity: .45; cursor: not-allowed; }
+    .bc-select-failed-btn { color: var(--red); border-color: var(--red); }
+    .bc-select-failed-btn:hover:not(:disabled) { background: var(--red-bg); }
 
     /* Review overlay (issue #374) */
     .bc-review-overlay {
@@ -2634,6 +2805,23 @@
     }
     .bc-btn-retry-this:hover { opacity: 0.85; }
     .bc-btn-retry-this:disabled { opacity: 0.5; cursor: not-allowed; }
+    .bc-btn-regenerate {
+      font-size: 11px; padding: 4px 10px; border-radius: 5px; cursor: pointer;
+      background: none; color: var(--blue); border: 1px solid var(--blue);
+      transition: background .12s, color .12s; margin-top: 6px;
+    }
+    .bc-btn-regenerate:hover { background: var(--blue-bg, rgba(59,130,246,.08)); }
+    .bc-btn-regenerate:disabled { opacity: 0.5; cursor: not-allowed; }
+    .bc-regen-err { font-size: 10px; color: var(--red); margin-top: 4px; }
+    .bc-draft-card-actions { display: flex; align-items: center; gap: 6px; margin-top: 4px; }
+    .bc-btn-remove-row {
+      font-size: 11px; padding: 3px 8px; border: 1px solid var(--border);
+      border-radius: 4px; cursor: pointer; color: var(--text-muted); background: transparent;
+      transition: color .12s, border-color .12s;
+    }
+    .bc-btn-remove-row:hover { color: var(--red); border-color: var(--red); }
+    .bc-action-btn--remove { color: var(--text-muted); }
+    .bc-action-btn--remove:hover { color: var(--red); background: var(--surface-2); }
     .bc-btn-skip-this {
       font-size: 11px; padding: 4px 10px; border-radius: 5px; cursor: pointer;
       background: none; color: var(--text-muted); border: 1px solid var(--border);
@@ -3557,23 +3745,66 @@
               <label class="bc-settings-label" for="bc-repo">Repo</label>
               <select class="bc-select" id="bc-repo" onchange="bcRepoChanged()"></select>
             </div>
+            <div class="bc-settings-field">
+              <label class="bc-settings-label" for="bc-split-mode">Split mode</label>
+              <select class="bc-select" id="bc-split-mode" onchange="_bcOnSplitModeChange()">
+                <option value="separator">By separator ---</option>
+                <option value="heading">By heading #/##</option>
+              </select>
+            </div>
             <div class="bc-settings-field bc-settings-field--labels" style="display:none">
               <label class="bc-settings-label" for="bc-default-labels">Default labels</label>
               <input class="bc-text-input" id="bc-default-labels" type="text"
-                     placeholder="enhancement, frontend" autocomplete="off" value="enhancement">
+                     placeholder="enhancement, frontend" autocomplete="off" value="enhancement"
+                     oninput="bcOnLabelsInput()">
             </div>
           </div>
 
           <div class="bc-counter-row">
-            <span class="bc-counter" id="bc-counter">0 tickets detected &middot; 0 chars</span>
+            <span class="bc-counter" id="bc-counter">0 / 50 prompts</span>
+            <button type="button" class="bc-clear-draft-btn hidden" id="bc-clear-draft-btn"
+                    onclick="bcClearDraft()">Clear saved draft</button>
           </div>
+
+          <div id="bc-limit-banner" class="bc-limit-banner hidden" role="alert" aria-live="polite"></div>
 
           <textarea class="bc-textarea" id="bc-textarea"
                     placeholder="Paste your ticket prompts here, separated by --- on its own line..."
                     oninput="bcOnTextareaInput()"></textarea>
 
-          <div class="bc-info-note">
+          <div id="bc-dup-warning" class="bc-dup-warning hidden"></div>
+
+          <div class="bc-info-note" id="bc-info-note">
             Split prompts using <code>---</code> on its own line. All created tickets go to backlog &mdash; assign them to a sprint later via Sprint Mgmt.
+          </div>
+
+          <!-- Prompt templates (issue #531) -->
+          <div class="bc-tpl-section" id="bc-tpl-section">
+            <div class="bc-tpl-header">
+              <span class="bc-settings-label">Templates</span>
+              <button type="button" class="bc-tpl-save-btn" id="bc-tpl-save-btn"
+                      onclick="_bcTplShowSaveForm()" aria-label="Save current textarea as a template">
+                <i class="ti ti-bookmark-plus"></i> Save as template
+              </button>
+            </div>
+            <div class="bc-tpl-save-form hidden" id="bc-tpl-save-form" role="form" aria-label="Template name">
+              <input class="bc-tpl-name-input" id="bc-tpl-name-input" type="text"
+                     placeholder="Template name" autocomplete="off" maxlength="80"
+                     onkeydown="_bcTplNameKeydown(event)" oninput="_bcTplClearError()">
+              <button type="button" class="bc-tpl-confirm-btn" onclick="_bcTplConfirmSave()">Save</button>
+              <button type="button" class="bc-tpl-cancel-btn" onclick="_bcTplCancelSave()">Cancel</button>
+              <span class="bc-tpl-name-error hidden" id="bc-tpl-name-error" role="alert"></span>
+            </div>
+            <div class="bc-tpl-list" id="bc-tpl-list" role="list"></div>
+          </div>
+
+          <!-- Prompt reorder list (issue #529) -->
+          <div id="bc-prompt-reorder" class="bc-prompt-reorder hidden">
+            <div class="bc-prompt-reorder-header">
+              <span class="bc-settings-label">Prompts</span>
+              <span class="bc-label-hint">— drag or use <kbd style="font-size:10px;background:var(--surface-2);border:1px solid var(--border);border-radius:3px;padding:1px 4px;font-family:var(--mono)">Alt+↑/↓</kbd> on a focused row to reorder</span>
+            </div>
+            <div id="bc-prompt-rows" class="bc-prompt-rows"></div>
           </div>
 
           <!-- Image Attachments -->
@@ -3605,7 +3836,8 @@
           <div class="bc-step-actions">
             <div class="bc-step-actions-left">
               <label class="bc-concurrency-label">Run BA in parallel:</label>
-              <select class="bc-concurrency-select" id="bc-concurrency">
+              <select class="bc-concurrency-select" id="bc-concurrency"
+                      onchange="bcOnConcurrencyChange()">
                 <option value="1">1 at a time (serial)</option>
                 <option value="3" selected>3 at a time</option>
                 <option value="5">5 at a time</option>
@@ -3621,6 +3853,17 @@
         <div id="bc-step2" class="hidden">
           <div class="bc-parallel-banner" id="bc-parallel-banner"></div>
           <div class="bc-summary-strip" id="bc-summary-strip"></div>
+
+          <!-- Bulk selection controls (issue #534) -->
+          <div class="bc-bulk-controls hidden" id="bc-bulk-controls" role="group" aria-label="Bulk selection controls">
+            <label class="bc-bulk-select-all-wrap">
+              <input type="checkbox" id="bc-select-all-check" onchange="bcToggleSelectAll(this.checked)" aria-label="Select all drafts">
+              <span>Select all</span>
+            </label>
+            <button type="button" class="bc-bulk-btn" onclick="bcDeselectAll()">Deselect all</button>
+            <button type="button" class="bc-bulk-btn bc-select-failed-btn hidden" id="bc-select-failed-btn" onclick="bcSelectFailed()">Select failed</button>
+          </div>
+
           <div class="bc-ticket-list" id="bc-ticket-list"></div>
 
           <!-- Review overlay: shown when user clicks Review & Post (issue #374) -->
@@ -9883,8 +10126,16 @@ let _bcFileAssignments  = [];    // parallel to _bcFiles: "all" | ticket_index (
 let _bcRetryFiles       = {};    // ticket_index -> File for retry image attach
 let _bcLastInput    = null;      // preserved Step 1 inputs for Recreate
 let _bcTabInited    = false;     // whether the tab has been populated once
+let _bcDraftSelections = new Set(); // indices of draft_ready tickets checked for posting
+let _bcRemovedRows = new Set();     // indices of rows hidden by the Remove control (issue #528)
+let _bcPromptOrder   = [];          // ordered prompt texts before drafting (issue #529)
+let _bcDupTimer      = null;
+let _bcDragSrcIdx    = null;        // HTML5 drag source row index
+let _bcTouchSrcIdx   = null;        // touch drag source row index
+let _bcTouchGhost    = null;        // floating ghost element during touch drag
 
-const BC_MAX_PROMPTS = 25;
+const BC_MAX_PROMPTS = 50;
+const BC_WARN_PROMPTS = 40;
 
 /** Called each time the Bulk Create tab becomes active. */
 function _bcInitTab() {
@@ -9908,7 +10159,9 @@ function _bcInitTab() {
     _bcTabInited = true;
     _bcShowStep(1);
     _bcPopulateRepo();
+    _bcRestoreDraft();
     _bcUpdateCounter();
+    _bcTplRender();
   }
 }
 
@@ -9971,25 +10224,305 @@ function _bcGoToStep1() {
 }
 
 function bcRepoChanged() {
-  // Nothing extra needed — repo is read at run time
+  _bcTplRender();
+}
+
+// ── Prompt templates (issue #531) ────────────────────────────────────────────
+
+function _bcTplKey() {
+  const sel = document.getElementById('bc-repo');
+  const repo = (sel && sel.value) ? sel.value : (_slug || '');
+  return 'bulk_templates_' + repo;
+}
+
+function _bcTplLoad() {
+  try { return JSON.parse(localStorage.getItem(_bcTplKey()) || '[]'); }
+  catch { return []; }
+}
+
+function _bcTplSaveAll(templates) {
+  localStorage.setItem(_bcTplKey(), JSON.stringify(templates));
+}
+
+function _bcTplRender() {
+  const list = document.getElementById('bc-tpl-list');
+  if (!list) return;
+  const templates = _bcTplLoad();
+  if (templates.length === 0) {
+    list.innerHTML = '<div class="bc-tpl-empty" aria-live="polite">No saved templates</div>';
+    return;
+  }
+  list.innerHTML = templates.map((t, i) => `
+    <div class="bc-tpl-row" role="listitem">
+      <span class="bc-tpl-row-name" title="${escHtml(t.name)}">${escHtml(t.name)}</span>
+      <button type="button" class="bc-tpl-row-insert" tabindex="0"
+              onclick="_bcTplInsert(${i})"
+              aria-label="Insert template ${escHtml(t.name)}">Insert</button>
+      <button type="button" class="bc-tpl-row-delete" tabindex="0"
+              onclick="_bcTplDelete(${i})"
+              aria-label="Delete template ${escHtml(t.name)}" title="Delete">
+        <i class="ti ti-trash"></i>
+      </button>
+    </div>
+  `).join('');
+}
+
+function _bcTplShowSaveForm() {
+  const form = document.getElementById('bc-tpl-save-form');
+  const btn  = document.getElementById('bc-tpl-save-btn');
+  const input = document.getElementById('bc-tpl-name-input');
+  if (!form) return;
+  form.classList.remove('hidden');
+  if (btn) btn.classList.add('hidden');
+  if (input) { input.value = ''; input.focus(); }
+  _bcTplClearError();
+}
+
+function _bcTplCancelSave() {
+  document.getElementById('bc-tpl-save-form')?.classList.add('hidden');
+  document.getElementById('bc-tpl-save-btn')?.classList.remove('hidden');
+  _bcTplClearError();
+}
+
+function _bcTplClearError() {
+  const err = document.getElementById('bc-tpl-name-error');
+  if (err) { err.textContent = ''; err.classList.add('hidden'); }
+}
+
+function _bcTplShowError(msg) {
+  const err = document.getElementById('bc-tpl-name-error');
+  if (err) { err.textContent = msg; err.classList.remove('hidden'); }
+}
+
+function _bcTplConfirmSave() {
+  const input = document.getElementById('bc-tpl-name-input');
+  const name = (input ? input.value : '').trim();
+  if (!name) {
+    _bcTplShowError('Template name cannot be empty.');
+    if (input) input.focus();
+    return;
+  }
+  const templates = _bcTplLoad();
+  if (templates.some(t => t.name === name)) {
+    _bcTplShowError(`"${name}" already exists. Choose a different name.`);
+    if (input) input.focus();
+    return;
+  }
+  const textarea = document.getElementById('bc-textarea');
+  const content = textarea ? textarea.value : '';
+  templates.push({ name, content });
+  _bcTplSaveAll(templates);
+  _bcTplCancelSave();
+  _bcTplRender();
+}
+
+function _bcTplNameKeydown(e) {
+  if (e.key === 'Enter')  { e.preventDefault(); _bcTplConfirmSave(); }
+  if (e.key === 'Escape') { e.preventDefault(); _bcTplCancelSave(); }
+}
+
+function _bcTplInsert(index) {
+  const templates = _bcTplLoad();
+  const tpl = templates[index];
+  if (!tpl) return;
+  const textarea = document.getElementById('bc-textarea');
+  if (!textarea) return;
+  if (textarea.value.trim()) {
+    if (!confirm(`Replace textarea content with template "${tpl.name}"?`)) return;
+  }
+  textarea.value = tpl.content;
+  textarea.dispatchEvent(new Event('input'));
+}
+
+function _bcTplDelete(index) {
+  const templates = _bcTplLoad();
+  const tpl = templates[index];
+  if (!tpl) return;
+  if (!confirm(`Delete template "${tpl.name}"?`)) return;
+  templates.splice(index, 1);
+  _bcTplSaveAll(templates);
+  _bcTplRender();
+}
+
+function _bcNormalizePrompt(s) {
+  return s.trim().replace(/\s+/g, ' ').toLowerCase();
+}
+
+function _bcUpdateDupWarning(dupSet) {
+  const el = document.getElementById('bc-dup-warning');
+  if (!el) return;
+  const count = dupSet.size;
+  if (count === 0) { el.classList.add('hidden'); return; }
+  el.classList.remove('hidden');
+  el.textContent = `${count} duplicate prompt${count === 1 ? '' : 's'} detected`;
+}
+
+function _bcRefreshDups() {
+  const seen = new Map();
+  const dupSet = new Set();
+  _bcPromptOrder.forEach((text, i) => {
+    const norm = _bcNormalizePrompt(text);
+    if (!norm) return;
+    if (seen.has(norm)) { dupSet.add(i); } else { seen.set(norm, i); }
+  });
+  _bcUpdateDupWarning(dupSet);
+  document.querySelectorAll('#bc-prompt-rows .bc-prompt-row').forEach(row => {
+    const idx = parseInt(row.dataset.idx, 10);
+    row.classList.toggle('bc-dup', dupSet.has(idx));
+  });
+}
+
+// ── Draft persistence (issue #535) ───────────────────────────────────────────
+
+let _bcDraftTimer = null;
+
+function _bcDraftKey(field) {
+  return _settingsKey('bc-draft:' + field);
+}
+
+function _bcScheduleSaveDraft() {
+  clearTimeout(_bcDraftTimer);
+  _bcDraftTimer = setTimeout(_bcSaveDraftNow, 400);
+}
+
+function _bcSaveDraftNow() {
+  const textarea = document.getElementById('bc-textarea');
+  const labelsEl = document.getElementById('bc-default-labels');
+  const concEl   = document.getElementById('bc-concurrency');
+  if (textarea) localStorage.setItem(_bcDraftKey('textarea'), textarea.value);
+  if (labelsEl) localStorage.setItem(_bcDraftKey('labels'), labelsEl.value);
+  if (concEl)   localStorage.setItem(_bcDraftKey('concurrency'), concEl.value);
+  _bcSyncClearDraftBtn();
+}
+
+function _bcSyncClearDraftBtn() {
+  const hasDraft = localStorage.getItem(_bcDraftKey('textarea')) !== null
+    || localStorage.getItem(_bcDraftKey('labels')) !== null
+    || localStorage.getItem(_bcDraftKey('concurrency')) !== null;
+  const btn = document.getElementById('bc-clear-draft-btn');
+  if (btn) btn.classList.toggle('hidden', !hasDraft);
+}
+
+function _bcRestoreDraft() {
+  const text   = localStorage.getItem(_bcDraftKey('textarea'));
+  const labels = localStorage.getItem(_bcDraftKey('labels'));
+  const conc   = localStorage.getItem(_bcDraftKey('concurrency'));
+  if (text === null && labels === null && conc === null) return;
+  const textarea = document.getElementById('bc-textarea');
+  const labelsEl = document.getElementById('bc-default-labels');
+  const concEl   = document.getElementById('bc-concurrency');
+  if (textarea && text !== null) textarea.value = text;
+  if (labelsEl && labels !== null) labelsEl.value = labels;
+  if (concEl && conc !== null) concEl.value = conc;
+  _bcSyncClearDraftBtn();
+}
+
+function _bcClearDraftStorage() {
+  localStorage.removeItem(_bcDraftKey('textarea'));
+  localStorage.removeItem(_bcDraftKey('labels'));
+  localStorage.removeItem(_bcDraftKey('concurrency'));
+}
+
+function bcClearDraft() {
+  _bcClearDraftStorage();
+  const textarea = document.getElementById('bc-textarea');
+  const labelsEl = document.getElementById('bc-default-labels');
+  const concEl   = document.getElementById('bc-concurrency');
+  if (textarea) textarea.value = '';
+  if (labelsEl) labelsEl.value = 'enhancement';
+  if (concEl)   concEl.value = '3';
+  _bcSyncClearDraftBtn();
+  _bcUpdateCounter();
 }
 
 function bcOnTextareaInput() {
   clearTimeout(_bcCounterTimer);
   _bcCounterTimer = setTimeout(_bcUpdateCounter, 200);
+  _bcScheduleSaveDraft();
+}
+
+function bcOnLabelsInput() {
+  _bcScheduleSaveDraft();
+}
+
+function bcOnConcurrencyChange() {
+  _bcScheduleSaveDraft();
 }
 
 function _bcParsePrompts(text) {
+  const mode = (document.getElementById('bc-split-mode') || {}).value || 'separator';
+  if (mode === 'heading') return _bcParseHeadingPrompts(text);
   return text.split(/^---$/m).map(s => s.trim()).filter(s => s.length > 0);
+}
+
+function _bcParseHeadingPrompts(text) {
+  const lines = text.split('\n');
+  const tickets = [];
+  let title = null;
+  let bodyLines = [];
+
+  function flush() {
+    const body = bodyLines.join('\n').trim();
+    const prompt = title !== null ? (body ? title + '\n\n' + body : title) : body;
+    if (prompt) tickets.push(prompt);
+  }
+
+  for (const line of lines) {
+    const m = line.match(/^(#{1,2})\s+(.*)/);
+    if (m) {
+      flush();
+      title = m[2].trim();
+      bodyLines = [];
+    } else {
+      bodyLines.push(line);
+    }
+  }
+  flush();
+
+  return tickets.filter(s => s.length > 0);
+}
+
+function _bcOnSplitModeChange() {
+  const mode = (document.getElementById('bc-split-mode') || {}).value || 'separator';
+  const textarea = document.getElementById('bc-textarea');
+  const infoNote = document.getElementById('bc-info-note');
+  if (textarea) {
+    textarea.placeholder = mode === 'heading'
+      ? 'Paste a markdown document here. Each # or ## heading becomes a separate ticket.'
+      : 'Paste your ticket prompts here, separated by --- on its own line...';
+  }
+  if (infoNote) {
+    infoNote.innerHTML = mode === 'heading'
+      ? 'Each <code>#</code> or <code>##</code> heading becomes a ticket title. Deeper headings (<code>###</code>+) are treated as body content. All created tickets go to backlog.'
+      : 'Split prompts using <code>---</code> on its own line. All created tickets go to backlog &mdash; assign them to a sprint later via Sprint Mgmt.';
+  }
+  _bcUpdateCounter();
 }
 
 function _bcUpdateCounter() {
   const text = (document.getElementById('bc-textarea') || {}).value || '';
   const prompts = _bcParsePrompts(text);
+  _bcPromptOrder = prompts.slice();
+  _bcRenderPromptList();
   const n = prompts.length;
-  const chars = text.length;
   const counterEl = document.getElementById('bc-counter');
-  if (counterEl) counterEl.textContent = `${n} tickets detected · ${chars} chars`;
+  if (counterEl) counterEl.textContent = `${n} / ${BC_MAX_PROMPTS} prompts`;
+
+  const bannerEl = document.getElementById('bc-limit-banner');
+  if (bannerEl) {
+    bannerEl.classList.remove('bc-limit-banner--warn', 'bc-limit-banner--error');
+    if (n >= BC_MAX_PROMPTS) {
+      bannerEl.innerHTML = '&#9888; <strong>Batch cap reached</strong> — additional prompts will be ignored';
+      bannerEl.classList.add('bc-limit-banner--error');
+      bannerEl.classList.remove('hidden');
+    } else if (n >= BC_WARN_PROMPTS) {
+      bannerEl.innerHTML = '&#9888; <strong>Approaching 50-prompt limit</strong>';
+      bannerEl.classList.add('bc-limit-banner--warn');
+      bannerEl.classList.remove('hidden');
+    } else {
+      bannerEl.classList.add('hidden');
+    }
+  }
 
   const runBtn = document.getElementById('bc-run-btn');
   if (runBtn) {
@@ -10011,6 +10544,156 @@ function _bcUpdateCounter() {
   // Refresh assignment dropdowns when ticket count changes
   if (_bcFiles.length > 0) _bcRenderFileQueue();
 }
+
+// ── Prompt reorder list (issue #529) ────────────────────────────────────────
+
+function _bcRenderPromptList() {
+  const wrap = document.getElementById('bc-prompt-reorder');
+  const rows = document.getElementById('bc-prompt-rows');
+  if (!wrap || !rows) return;
+  const n = _bcPromptOrder.length;
+  if (n === 0) { wrap.classList.add('hidden'); rows.innerHTML = ''; _bcUpdateDupWarning(new Set()); return; }
+  wrap.classList.remove('hidden');
+
+  const _seen = new Map();
+  const _dupSet = new Set();
+  _bcPromptOrder.forEach((text, i) => {
+    const norm = _bcNormalizePrompt(text);
+    if (!norm) return;
+    if (_seen.has(norm)) { _dupSet.add(i); } else { _seen.set(norm, i); }
+  });
+  _bcUpdateDupWarning(_dupSet);
+
+  rows.innerHTML = _bcPromptOrder.map((text, i) => {
+    const words = text.trim() ? text.trim().split(/\s+/).length : 0;
+    const chars = text.length;
+    return `
+    <div class="bc-prompt-row${_dupSet.has(i) ? ' bc-dup' : ''}" data-idx="${i}" draggable="true" tabindex="0"
+         aria-label="Prompt ${i+1} of ${n}, ${words} words, ${chars} chars${_dupSet.has(i) ? ', duplicate' : ''}" onkeydown="_bcRowKey(event,${i})">
+      <span class="bc-prompt-row-handle" title="Drag to reorder" aria-hidden="true">⠿</span>
+      <span class="bc-prompt-row-num">${i+1}</span>
+      <textarea class="bc-prompt-row-text" rows="2"
+                oninput="_bcRowTextInput(${i},this.value)">${escHtml(text)}</textarea>
+      <span class="bc-prompt-row-stats" aria-hidden="true">${words}w<br>${chars}c</span>
+      <div class="bc-prompt-row-moves">
+        <button class="bc-prompt-move-btn" title="Move up" onclick="_bcMovePrompt(${i},-1)"
+                ${i === 0 ? 'disabled' : ''} aria-label="Move prompt ${i+1} up">▲</button>
+        <button class="bc-prompt-move-btn" title="Move down" onclick="_bcMovePrompt(${i},1)"
+                ${i === n-1 ? 'disabled' : ''} aria-label="Move prompt ${i+1} down">▼</button>
+      </div>
+    </div>`;
+  }).join('');
+  rows.querySelectorAll('.bc-prompt-row').forEach(row => {
+    const idx = parseInt(row.dataset.idx, 10);
+    row.addEventListener('dragstart', e => _bcDragStart(e, idx));
+    row.addEventListener('dragover',  e => _bcDragOver(e, idx));
+    row.addEventListener('dragleave', () => row.classList.remove('bc-row-over'));
+    row.addEventListener('drop',      e => _bcDrop(e, idx));
+    row.addEventListener('dragend',   () => _bcDragEnd());
+    const handle = row.querySelector('.bc-prompt-row-handle');
+    if (handle) handle.addEventListener('touchstart', e => _bcTouchStart(e, idx), {passive: false});
+  });
+}
+
+function _bcMovePrompt(i, dir) {
+  const j = i + dir;
+  if (j < 0 || j >= _bcPromptOrder.length) return;
+  [_bcPromptOrder[i], _bcPromptOrder[j]] = [_bcPromptOrder[j], _bcPromptOrder[i]];
+  _bcRenderPromptList();
+  const rows = document.getElementById('bc-prompt-rows');
+  if (rows) {
+    const moved = rows.querySelector(`[data-idx="${j}"]`);
+    if (moved) { const ta = moved.querySelector('.bc-prompt-row-text'); (ta || moved).focus(); }
+  }
+}
+
+function _bcRowTextInput(i, val) {
+  _bcPromptOrder[i] = val;
+  clearTimeout(_bcDupTimer);
+  _bcDupTimer = setTimeout(_bcRefreshDups, 200);
+}
+
+function _bcRowKey(e, i) {
+  if (!e.altKey) return;
+  if (e.key === 'ArrowUp')   { e.preventDefault(); _bcMovePrompt(i, -1); }
+  if (e.key === 'ArrowDown') { e.preventDefault(); _bcMovePrompt(i,  1); }
+}
+
+function _bcDragStart(e, i) {
+  _bcDragSrcIdx = i;
+  e.dataTransfer.effectAllowed = 'move';
+  setTimeout(() => e.currentTarget.classList.add('bc-row-dragging'), 0);
+}
+function _bcDragOver(e, i) {
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+  document.querySelectorAll('#bc-prompt-rows .bc-prompt-row').forEach(r => r.classList.remove('bc-row-over'));
+  if (i !== _bcDragSrcIdx) e.currentTarget.classList.add('bc-row-over');
+}
+function _bcDrop(e, i) {
+  e.preventDefault();
+  if (_bcDragSrcIdx === null || _bcDragSrcIdx === i) { _bcDragEnd(); return; }
+  const moved = _bcPromptOrder.splice(_bcDragSrcIdx, 1)[0];
+  _bcPromptOrder.splice(i, 0, moved);
+  _bcDragEnd();
+  _bcRenderPromptList();
+}
+function _bcDragEnd() {
+  _bcDragSrcIdx = null;
+  document.querySelectorAll('#bc-prompt-rows .bc-prompt-row').forEach(r => {
+    r.classList.remove('bc-row-dragging'); r.classList.remove('bc-row-over');
+  });
+}
+
+function _bcTouchStart(e, i) {
+  _bcTouchSrcIdx = i;
+  e.preventDefault();
+  const touch = e.touches[0];
+  const ghost = document.createElement('div');
+  ghost.style.cssText = 'position:fixed;opacity:.75;pointer-events:none;z-index:9999;background:var(--surface-2);border:1px solid var(--border);border-radius:4px;padding:4px 10px;font-size:12px;max-width:220px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-family:var(--mono)';
+  ghost.textContent = '#' + (i + 1) + ' ' + (_bcPromptOrder[i] || '').slice(0, 50);
+  ghost.style.left = (touch.clientX + 12) + 'px';
+  ghost.style.top  = (touch.clientY + 12) + 'px';
+  document.body.appendChild(ghost);
+  _bcTouchGhost = ghost;
+  document.addEventListener('touchmove',   _bcTouchMove,   {passive: false});
+  document.addEventListener('touchend',    _bcTouchEnd,    {passive: false});
+  document.addEventListener('touchcancel', _bcTouchEnd,    {passive: false});
+}
+function _bcTouchMove(e) {
+  e.preventDefault();
+  const touch = e.touches[0];
+  if (_bcTouchGhost) { _bcTouchGhost.style.left = (touch.clientX + 12) + 'px'; _bcTouchGhost.style.top = (touch.clientY + 12) + 'px'; }
+  document.querySelectorAll('#bc-prompt-rows .bc-prompt-row').forEach(r => r.classList.remove('bc-row-over'));
+  const el = document.elementFromPoint(touch.clientX, touch.clientY);
+  const row = el && el.closest('.bc-prompt-row');
+  if (row) { const tgt = parseInt(row.dataset.idx, 10); if (tgt !== _bcTouchSrcIdx) row.classList.add('bc-row-over'); }
+}
+function _bcTouchEnd(e) {
+  document.removeEventListener('touchmove',   _bcTouchMove);
+  document.removeEventListener('touchend',    _bcTouchEnd);
+  document.removeEventListener('touchcancel', _bcTouchEnd);
+  if (_bcTouchGhost) { _bcTouchGhost.remove(); _bcTouchGhost = null; }
+  document.querySelectorAll('#bc-prompt-rows .bc-prompt-row').forEach(r => r.classList.remove('bc-row-over'));
+  if (_bcTouchSrcIdx !== null) {
+    const touch = (e.changedTouches || e.touches)[0];
+    if (touch) {
+      const el = document.elementFromPoint(touch.clientX, touch.clientY);
+      const row = el && el.closest('.bc-prompt-row');
+      if (row) {
+        const tgt = parseInt(row.dataset.idx, 10);
+        if (tgt !== _bcTouchSrcIdx) {
+          const moved = _bcPromptOrder.splice(_bcTouchSrcIdx, 1)[0];
+          _bcPromptOrder.splice(tgt, 0, moved);
+          _bcRenderPromptList();
+        }
+      }
+    }
+  }
+  _bcTouchSrcIdx = null;
+}
+
+// ────────────────────────────────────────────────────────────────────────────
 
 function _bcPickFiles() {
   const inp = document.getElementById('bc-file-input');
@@ -10103,7 +10786,7 @@ async function bcRunAll() {
   const textarea = document.getElementById('bc-textarea');
   if (!textarea) return;
   const text = textarea.value;
-  const prompts = _bcParsePrompts(text);
+  const prompts = _bcPromptOrder.length > 0 ? _bcPromptOrder.slice() : _bcParsePrompts(text);
   if (prompts.length === 0) return;
   if (prompts.length > BC_MAX_PROMPTS) return;
 
@@ -10151,9 +10834,13 @@ async function bcRunAll() {
     const data = await res.json();
     _bcJobId = data.job_id;
     localStorage.setItem('bc_job_id', _bcJobId);
+    _bcClearDraftStorage();
 
     _bcStartTimes = {};
     _bcAvgMs = null;
+    _bcDraftSelections = new Set();
+    _bcRemovedRows = new Set();
+    _bcPromptOrder = [];
 
     _bcShowStep(2);
     _bcConnectSSE(_bcJobId);
@@ -10182,6 +10869,10 @@ function _bcUpdateBadge() {
   if (job.status === 'running') {
     badge.className = 'bc-tab-badge';
     badge.innerHTML = `<span class="bc-tab-badge-spin">&#x27F3;</span>${fullyDone}/${total}`;
+  } else if (job.status === 'drafts_ready') {
+    const draftCount = tickets.filter(t => t.state === 'draft_ready').length;
+    badge.className = 'bc-tab-badge';
+    badge.textContent = `${draftCount} ready`;
   } else if (job.status === 'done' || job.status === 'stopped') {
     const issues = failed + sizeWarn + estimateFailed;
     if (issues > 0) {
@@ -10214,6 +10905,10 @@ function _bcConnectSSE(jobId) {
       const event = JSON.parse(e.data);
       if (event.type === 'ticket_update' && _bcJobState) {
         _bcJobState.tickets[event.ticket.index] = event.ticket;
+        _bcRenderStep2();
+        _bcUpdateBadge();
+      } else if (event.type === 'job_drafts_ready' && _bcJobState) {
+        _bcJobState.status = 'drafts_ready';
         _bcRenderStep2();
         _bcUpdateBadge();
       } else if (event.type === 'job_done' && _bcJobState) {
@@ -10257,6 +10952,9 @@ function _bcRenderStep2() {
       banner.innerHTML = `BA is drafting ${total} tickets in parallel — ` +
         `${sized + estimateFailed} done, ${drafting + estimating + created} running, ${pending} queued` +
         `<span class="bc-concurrency-pill">concurrency: ${concurrency}</span>`;
+    } else if (job.status === 'drafts_ready') {
+      const draftCount = tickets.filter(t => t.state === 'draft_ready' && !_bcRemovedRows.has(t.index)).length;
+      banner.innerHTML = `${draftCount} draft${draftCount !== 1 ? 's' : ''} ready — edit title and body, then post to GitHub.`;
     } else if (job.status === 'done') {
       if (sizeWarning > 0) {
         banner.innerHTML = `All tickets processed. ${sizeWarning} ticket${sizeWarning > 1 ? 's' : ''} need size remediation.`;
@@ -10303,27 +11001,50 @@ function _bcRenderStep2() {
           t.body = editor.value;
         }
       }
+      if (t.state === 'draft_ready') {
+        const titleEl = document.getElementById(`bc-draft-title-${t.index}`);
+        const bodyEl  = document.getElementById(`bc-draft-body-${t.index}`);
+        if (titleEl) t.title = titleEl.value;
+        if (bodyEl)  t.body  = bodyEl.value;
+        // Auto-select newly drafted tickets
+        if (!_bcDraftSelections.has(t.index)) _bcDraftSelections.add(t.index);
+      }
     });
-    list.innerHTML = tickets.map(t => _bcRenderCard(t)).join('');
+    list.innerHTML = tickets.filter(t => !_bcRemovedRows.has(t.index)).map(t => _bcRenderCard(t)).join('');
   }
 
   // Footer buttons
-  const stopBtn      = document.getElementById('bc-stop-btn');
-  const doneBtn      = document.getElementById('bc-done-btn');
-  const recreateBtn  = document.getElementById('bc-recreate-btn');
-  const retryAllBtn  = document.getElementById('bc-retry-all-btn');
+  const stopBtn       = document.getElementById('bc-stop-btn');
+  const doneBtn       = document.getElementById('bc-done-btn');
+  const recreateBtn   = document.getElementById('bc-recreate-btn');
+  const retryAllBtn   = document.getElementById('bc-retry-all-btn');
+  const reviewPostBtn = document.getElementById('bc-review-post-btn');
   if (stopBtn && doneBtn) {
     if (job.status === 'running') {
       stopBtn.disabled = false;
       doneBtn.disabled = true;
       doneBtn.textContent = 'Running...';
+      if (recreateBtn)   recreateBtn.classList.add('hidden');
+      if (reviewPostBtn) reviewPostBtn.classList.add('hidden');
+    } else if (job.status === 'drafts_ready') {
+      stopBtn.disabled = true;
+      doneBtn.disabled = true;
+      doneBtn.textContent = 'Running...';
       if (recreateBtn) recreateBtn.classList.add('hidden');
+      if (reviewPostBtn) {
+        const draftReadyTickets = tickets.filter(t => t.state === 'draft_ready' && !_bcRemovedRows.has(t.index));
+        const selCount = draftReadyTickets.filter(t => _bcDraftSelections.has(t.index)).length;
+        reviewPostBtn.textContent = selCount > 0 ? `Post Selected (${selCount})` : 'Post Selected';
+        reviewPostBtn.disabled = selCount === 0;
+        reviewPostBtn.classList.remove('hidden');
+      }
     } else {
       stopBtn.disabled = true;
       doneBtn.disabled = false;
       doneBtn.textContent = 'Done';
       doneBtn.onclick = () => { _bcShowStep(1); };
-      if (recreateBtn) recreateBtn.classList.remove('hidden');
+      if (recreateBtn)   recreateBtn.classList.remove('hidden');
+      if (reviewPostBtn) reviewPostBtn.classList.add('hidden');
     }
   }
   if (retryAllBtn) {
@@ -10347,6 +11068,8 @@ function _bcRenderStep2() {
       }
     }
   });
+
+  _bcSyncBulkControls();
 }
 
 function _bcRenderCard(t) {
@@ -10457,6 +11180,7 @@ function _bcRenderCard(t) {
             <div class="bc-fail-actions">
               <button class="bc-btn-retry-this" onclick="bcRetryWithBody(${t.index})">Retry this ticket</button>
               <button class="bc-btn-skip-this" onclick="bcSkipTicket(${t.index})">Skip</button>
+              <button class="bc-btn-remove-row" onclick="bcRemoveRow(${t.index})" title="Remove">Remove</button>
             </div>
           </div>
         </div>
@@ -10492,7 +11216,36 @@ function _bcRenderCard(t) {
                   onclick="bcSizeRemedyComment(${t.index})">Move detail to follow-up comment</button>
               ${remedyImagesBtn}
               <button class="bc-btn-skip-this" onclick="bcSkipTicket(${t.index})">Skip</button>
+              <button class="bc-btn-remove-row" onclick="bcRemoveRow(${t.index})" title="Remove">Remove</button>
             </div>
+          </div>
+        </div>
+      </div>`;
+  } else if (t.state === 'draft_ready') {
+    const titleVal  = t.title || '';
+    const bodyVal   = t.body  || '';
+    const isChecked = _bcDraftSelections.has(t.index) ? 'checked' : '';
+    const regenErrHtml = t._regen_error
+      ? `<div class="bc-regen-err">${escHtml(t._regen_error)}</div>` : '';
+    return `
+      <div class="bc-card bc-card--draft_ready" id="bc-card-${t.index}">
+        <div class="bc-status-dot bc-status-dot--draft_ready"></div>
+        <div class="bc-card-body" style="min-width:0;flex:1;">
+          <div class="bc-draft-check-wrap">
+            <input type="checkbox" class="bc-draft-check" id="bc-check-${t.index}" ${isChecked}
+                   onchange="_bcDraftCheckChange(${t.index}, this.checked)">
+            <span class="bc-card-label bc-card-label--draft">Draft ready</span>
+          </div>
+          <input class="bc-draft-edit-title" id="bc-draft-title-${t.index}" type="text"
+                 value="${escHtml(titleVal)}" placeholder="Title (required)" tabindex="0">
+          <div class="bc-draft-title-err hidden" id="bc-draft-title-err-${t.index}">Title is required</div>
+          <textarea class="bc-draft-edit-body" id="bc-draft-body-${t.index}"
+                    tabindex="0">${escHtml(bodyVal)}</textarea>
+          ${regenErrHtml}
+          <div class="bc-draft-card-actions">
+            <button class="bc-btn-regenerate" id="bc-btn-regen-${t.index}"
+                    onclick="bcRegenerateDraft(${t.index})">Regenerate draft</button>
+            <button class="bc-btn-remove-row" onclick="bcRemoveRow(${t.index})" title="Remove this draft">Remove</button>
           </div>
         </div>
       </div>`;
@@ -10501,6 +11254,10 @@ function _bcRenderCard(t) {
     label   = 'Skipped';
     actions = `<button class="bc-action-btn" title="Undo skip" onclick="bcUndoSkip(${t.index})">&#x21A9;</button>`;
   }
+
+  // Add Remove control to all generic-template rows (issue #528)
+  const removeBtn = `<button class="bc-action-btn bc-action-btn--remove" title="Remove" onclick="bcRemoveRow(${t.index})"><i class="ti ti-trash"></i></button>`;
+  actions = actions ? `${actions} ${removeBtn}` : removeBtn;
 
   const headHtml = head
     ? `<div class="bc-card-head">${head}<span class="bc-card-label">${escHtml(label)}</span></div>`
@@ -10516,7 +11273,7 @@ function _bcRenderCard(t) {
         <div class="${previewClass}">${preview}</div>
         ${tags}
       </div>
-      ${actions ? `<div class="bc-card-actions">${actions}</div>` : ''}
+      <div class="bc-card-actions">${actions}</div>
     </div>`;
 }
 
@@ -10553,6 +11310,41 @@ async function bcRetryTicket(index) {
       body: JSON.stringify({ index }),
     });
   } catch (_) {}
+}
+
+async function bcRegenerateDraft(index) {
+  if (!_bcJobId || !_bcJobState) return;
+  const ticket = _bcJobState.tickets[index];
+  if (!ticket || ticket.state !== 'draft_ready') return;
+
+  // Read current DOM values (user may have edited them)
+  const titleEl = document.getElementById(`bc-draft-title-${index}`);
+  const bodyEl  = document.getElementById(`bc-draft-body-${index}`);
+  const savedTitle = titleEl ? titleEl.value : (ticket.title || '');
+  const savedBody  = bodyEl  ? bodyEl.value  : (ticket.body  || '');
+
+  // Optimistically show loading state; SSE takes over once backend fires
+  ticket.state = 'pending';
+  ticket.title = null;
+  ticket.body  = null;
+  delete ticket._regen_error;
+  _bcRenderStep2();
+
+  try {
+    const resp = await fetch(`/api/tickets/bulk/${_bcJobId}/redraft`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ index }),
+    });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  } catch (_) {
+    // Restore previous draft and show inline error
+    ticket.state = 'draft_ready';
+    ticket.title = savedTitle;
+    ticket.body  = savedBody;
+    ticket._regen_error = 'Regeneration request failed. Previous draft preserved.';
+    _bcRenderStep2();
+  }
 }
 
 function bcEditorInput(index) {
@@ -10702,6 +11494,7 @@ function bcRecreate() {
   localStorage.removeItem('bc_job_id');
   _bcJobId = null;
   _bcJobState = null;
+  _bcDraftSelections = new Set();
   _bcStartTimes = {};
   _bcAvgMs = null;
   _bcUpdateBadge();
@@ -10731,6 +11524,230 @@ function bcRecreate() {
   const errEl = document.getElementById('bc-step1-error');
   if (errEl) errEl.classList.add('hidden');
   _bcUpdateCounter();
+}
+
+// ── Draft-ready inline editing helpers (issue #526) ──────────────────────────
+
+function _bcSyncPostBtn() {
+  const reviewPostBtn = document.getElementById('bc-review-post-btn');
+  if (!reviewPostBtn || !_bcJobState || _bcJobState.status !== 'drafts_ready') return;
+  const tickets = _bcJobState.tickets || [];
+  const selCount = tickets.filter(t =>
+    t.state === 'draft_ready' && _bcDraftSelections.has(t.index) && !_bcRemovedRows.has(t.index)
+  ).length;
+  reviewPostBtn.textContent = selCount > 0 ? `Post Selected (${selCount})` : 'Post Selected';
+  reviewPostBtn.disabled = selCount === 0;
+}
+
+function bcRemoveRow(index) {
+  _bcRemovedRows.add(index);
+  _bcDraftSelections.delete(index);
+  const card = document.getElementById(`bc-card-${index}`);
+  if (card) card.remove();
+  _bcSyncPostBtn();
+  _bcSyncBulkControls();
+}
+
+function _bcDraftCheckChange(index, checked) {
+  if (checked) _bcDraftSelections.add(index);
+  else _bcDraftSelections.delete(index);
+  _bcSyncPostBtn();
+  _bcSyncBulkControls();
+}
+
+// ── Bulk selection controls (issue #534) ─────────────────────────────────────
+
+function bcToggleSelectAll(checked) {
+  if (checked) bcSelectAll();
+  else bcDeselectAll();
+}
+
+function bcSelectAll() {
+  if (!_bcJobState) return;
+  const tickets = _bcJobState.tickets || [];
+  tickets.filter(t => t.state === 'draft_ready' && !_bcRemovedRows.has(t.index))
+    .forEach(t => {
+      _bcDraftSelections.add(t.index);
+      const el = document.getElementById(`bc-check-${t.index}`);
+      if (el) el.checked = true;
+    });
+  _bcSyncPostBtn();
+  _bcSyncBulkControls();
+}
+
+function bcDeselectAll() {
+  if (!_bcJobState) return;
+  _bcDraftSelections.clear();
+  (_bcJobState.tickets || []).forEach(t => {
+    const el = document.getElementById(`bc-check-${t.index}`);
+    if (el) el.checked = false;
+  });
+  _bcSyncPostBtn();
+  _bcSyncBulkControls();
+}
+
+function bcSelectFailed() {
+  if (!_bcJobState) return;
+  const tickets = _bcJobState.tickets || [];
+  tickets.filter(t => t.state === 'draft_ready' && !_bcRemovedRows.has(t.index) && t._regen_error)
+    .forEach(t => {
+      _bcDraftSelections.add(t.index);
+      const el = document.getElementById(`bc-check-${t.index}`);
+      if (el) el.checked = true;
+    });
+  _bcSyncPostBtn();
+  _bcSyncBulkControls();
+}
+
+function _bcSyncBulkControls() {
+  if (!_bcJobState) return;
+  const tickets = _bcJobState.tickets || [];
+  const draftReady = tickets.filter(t => t.state === 'draft_ready' && !_bcRemovedRows.has(t.index));
+  const selected = draftReady.filter(t => _bcDraftSelections.has(t.index));
+  const hasFailed = draftReady.some(t => t._regen_error);
+
+  const controlsEl = document.getElementById('bc-bulk-controls');
+  if (controlsEl) {
+    if (_bcJobState.status === 'drafts_ready' && draftReady.length > 0) {
+      controlsEl.classList.remove('hidden');
+    } else {
+      controlsEl.classList.add('hidden');
+    }
+  }
+
+  const selectAllCheck = document.getElementById('bc-select-all-check');
+  if (selectAllCheck) {
+    if (selected.length === 0) {
+      selectAllCheck.checked = false;
+      selectAllCheck.indeterminate = false;
+    } else if (selected.length === draftReady.length) {
+      selectAllCheck.checked = true;
+      selectAllCheck.indeterminate = false;
+    } else {
+      selectAllCheck.checked = false;
+      selectAllCheck.indeterminate = true;
+    }
+  }
+
+  const selectFailedBtn = document.getElementById('bc-select-failed-btn');
+  if (selectFailedBtn) {
+    if (hasFailed) {
+      selectFailedBtn.classList.remove('hidden');
+    } else {
+      selectFailedBtn.classList.add('hidden');
+    }
+  }
+}
+
+function bcReviewAndPost() {
+  if (!_bcJobState) return;
+  const tickets = (_bcJobState.tickets || []).filter(t => t.state === 'draft_ready');
+
+  const listEl = document.getElementById('bc-review-list');
+  if (listEl) {
+    listEl.innerHTML = tickets.map(t => {
+      const titleEl = document.getElementById(`bc-draft-title-${t.index}`);
+      const title = titleEl ? titleEl.value.trim() : (t.title || '');
+      const isChecked = _bcDraftSelections.has(t.index) ? 'checked' : '';
+      return `
+        <div class="bc-review-item">
+          <label class="bc-review-check-wrap">
+            <input type="checkbox" class="bc-review-check" data-index="${t.index}" ${isChecked}
+                   onchange="_bcReviewOverlayCheck(${t.index}, this.checked)">
+            <span class="bc-review-title">${escHtml(title || '(no title)')}</span>
+          </label>
+        </div>`;
+    }).join('');
+  }
+
+  const selCount = tickets.filter(t => _bcDraftSelections.has(t.index) && !_bcRemovedRows.has(t.index)).length;
+  const postBtn = document.getElementById('bc-post-github-btn');
+  if (postBtn) {
+    postBtn.disabled = selCount === 0;
+    postBtn.textContent = selCount > 0 ? `Post ${selCount} to GitHub` : 'Post to GitHub';
+  }
+
+  const overlay = document.getElementById('bc-review-overlay');
+  if (overlay) overlay.classList.remove('hidden');
+}
+
+function _bcReviewOverlayCheck(index, checked) {
+  if (checked) _bcDraftSelections.add(index);
+  else _bcDraftSelections.delete(index);
+  // Sync main list checkbox
+  const mainCheck = document.getElementById(`bc-check-${index}`);
+  if (mainCheck) mainCheck.checked = checked;
+  // Update Post button in overlay
+  const tickets = (_bcJobState && _bcJobState.tickets) || [];
+  const selCount = tickets.filter(t => t.state === 'draft_ready' && _bcDraftSelections.has(t.index) && !_bcRemovedRows.has(t.index)).length;
+  const postBtn = document.getElementById('bc-post-github-btn');
+  if (postBtn) {
+    postBtn.disabled = selCount === 0;
+    postBtn.textContent = selCount > 0 ? `Post ${selCount} to GitHub` : 'Post to GitHub';
+  }
+}
+
+function bcCancelReview() {
+  const overlay = document.getElementById('bc-review-overlay');
+  if (overlay) overlay.classList.add('hidden');
+}
+
+async function bcPostSelected() {
+  if (!_bcJobId || !_bcJobState) return;
+  const tickets = _bcJobState.tickets || [];
+
+  const toPost = [];
+  let hasValidationError = false;
+
+  for (const t of tickets) {
+    if (t.state !== 'draft_ready') continue;
+    if (!_bcDraftSelections.has(t.index)) continue;
+    if (_bcRemovedRows.has(t.index)) continue;
+
+    const titleEl = document.getElementById(`bc-draft-title-${t.index}`);
+    const bodyEl  = document.getElementById(`bc-draft-body-${t.index}`);
+    const title = titleEl ? titleEl.value.trim() : (t.title || '').trim();
+
+    if (!title) {
+      const errEl = document.getElementById(`bc-draft-title-err-${t.index}`);
+      if (errEl) errEl.classList.remove('hidden');
+      // Scroll card into view
+      const card = document.getElementById(`bc-card-${t.index}`);
+      if (card) card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      hasValidationError = true;
+      continue;
+    }
+    const body = bodyEl ? bodyEl.value : (t.body || '');
+    const labels = t._default_labels || [];
+    toPost.push({ index: t.index, title, body, labels });
+  }
+
+  if (hasValidationError) {
+    bcCancelReview();
+    return;
+  }
+  if (toPost.length === 0) return;
+
+  const postBtn   = document.getElementById('bc-post-github-btn');
+  const reviewBtn = document.getElementById('bc-review-post-btn');
+  if (postBtn) { postBtn.disabled = true; postBtn.textContent = 'Posting…'; }
+  if (reviewBtn) { reviewBtn.disabled = true; reviewBtn.textContent = 'Posting…'; }
+
+  try {
+    const resp = await fetch(`/api/tickets/bulk/${_bcJobId}/post-selected`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tickets: toPost }),
+    });
+    if (!resp.ok) {
+      const data = await resp.json().catch(() => ({}));
+      console.error('[bc] post-selected failed:', data.detail || resp.status);
+    }
+  } catch (e) {
+    console.error('[bc] post-selected error:', e);
+  }
+
+  bcCancelReview();
 }
 
 // Keyboard: Cmd/Ctrl+Enter triggers Run when Bulk Create tab is active and step 1 is shown

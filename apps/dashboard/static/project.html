@@ -4192,6 +4192,7 @@ let _ticketsLoaded    = false;
 let _sprintMgmtLoaded = false;
 let _smgmtData           = null;
 let _smgmtSelectedIssues = new Set();
+let _smgmtLastSelectedNum = null;  // anchor for shift+click range selection
 let _smgmtDragTicket     = null;
 let _smgmtDragSprintLabel = null;
 const RERUN_STRIP_LABELS = new Set(['UAT','UAT-approved','released','SIT','in-progress','needs-rework']);
@@ -6613,7 +6614,6 @@ function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent, finished) {
                   onclick="smgmtDeleteSprint('${escHtml(label)}')">
             <i class="ti ti-trash"></i> Delete</button>
           ${actionBtn}
-          ${!isPostRun ? rerunBtn : ''}
         </div>
       </div>
       ${cancelBannerHtml}
@@ -7084,6 +7084,7 @@ function _smgmtTicketRowHtml(ticket, label) {
          ondragover="_smgmtTicketReorderDragOver(event)"
          ondragleave="_smgmtTicketReorderDragLeave(event)"
          ondrop="_smgmtTicketReorderDrop(event, ${ticket.number}, '${escHtml(label)}')"
+         onclick="_smgmtRowClick(event, ${ticket.number}, '${escHtml(label)}')"
          oncontextmenu="_smgmtCtxMenuOpen(event,${ticket.number})">
       <input type="checkbox" class="smgmt-ticket-cb"
              ${isSelected ? 'checked' : ''}
@@ -7091,7 +7092,7 @@ function _smgmtTicketRowHtml(ticket, label) {
              onchange="_smgmtToggleSelect(${ticket.number}, this.checked)">
       <i class="ti ti-grip-vertical smgmt-ticket-grip"></i>
       <a class="smgmt-ticket-num" href="${escHtml(ticket.url || '#')}" target="_blank"
-         rel="noopener" onclick="event.stopPropagation()">#${ticket.number}</a>
+         rel="noopener" draggable="false" onclick="event.stopPropagation()">#${ticket.number}</a>
       <span class="smgmt-ticket-title" title="${escHtml(ticket.title)}">${escHtml(ticket.title)}</span>
       ${sizePillHtml}
       <span class="smgmt-ticket-status ${statusClass}">${escHtml(statusLabel)}</span>
@@ -8214,11 +8215,51 @@ function _smgmtClearSelection() {
   _smgmtUpdateSelectionUI();
 }
 
-function _smgmtToggleSelect(number, checked) {
-  if (checked) _smgmtSelectedIssues.add(number);
+function _smgmtSetSelected(number, selected) {
+  if (selected) _smgmtSelectedIssues.add(number);
   else _smgmtSelectedIssues.delete(number);
   const el = document.getElementById(`smgmt-ticket-${number}`);
-  if (el) el.classList.toggle('is-selected', checked);
+  if (el) {
+    el.classList.toggle('is-selected', selected);
+    const cb = el.querySelector('.smgmt-ticket-cb');
+    if (cb) cb.checked = selected;
+  }
+}
+
+function _smgmtToggleSelect(number, checked) {
+  _smgmtSetSelected(number, checked);
+  _smgmtLastSelectedNum = checked ? number : null;
+  _smgmtUpdateSelectionUI();
+}
+
+// Click a ticket row to select/deselect it (toggle). Shift+click extends the
+// selection from the last-clicked ticket to this one, like a file picker.
+// Clicks on the checkbox/link/menu don't reach here (they stopPropagation).
+function _smgmtRowClick(event, number, label) {
+  const container = label
+    ? document.getElementById(`smgmt-tickets-${label}`)
+    : document.getElementById('smgmt-backlog-tickets');
+
+  if (event.shiftKey && _smgmtLastSelectedNum != null && container) {
+    const nums = Array.from(container.querySelectorAll('.smgmt-ticket[data-issue]'))
+      .map(r => parseInt(r.dataset.issue, 10));
+    const a = nums.indexOf(_smgmtLastSelectedNum);
+    const b = nums.indexOf(number);
+    if (a !== -1 && b !== -1) {
+      const [lo, hi] = a <= b ? [a, b] : [b, a];
+      for (let i = lo; i <= hi; i++) _smgmtSetSelected(nums[i], true);
+      _smgmtLastSelectedNum = number;
+      _smgmtUpdateSelectionUI();
+      const sel = window.getSelection && window.getSelection();
+      if (sel) sel.removeAllRanges();  // clear the text highlight shift-click makes
+      return;
+    }
+  }
+
+  // Plain click: toggle this ticket on/off.
+  const nowSelected = !_smgmtSelectedIssues.has(number);
+  _smgmtSetSelected(number, nowSelected);
+  _smgmtLastSelectedNum = nowSelected ? number : null;
   _smgmtUpdateSelectionUI();
 }
 
@@ -8779,6 +8820,7 @@ function _smgmtBacklogTicketHtml(ticket, sprintNums) {
          data-sprint=""
          ondragstart="_smgmtBacklogTicketDragStart(event, ${ticket.number})"
          ondragend="_smgmtTicketDragEnd(event)"
+         onclick="_smgmtRowClick(event, ${ticket.number}, null)"
          oncontextmenu="_smgmtCtxMenuOpen(event,${ticket.number})">
       <input type="checkbox" class="smgmt-ticket-cb" draggable="false"
              ${isSelected ? 'checked' : ''}
@@ -11163,8 +11205,11 @@ function _snavRenderPill() {
     text.textContent = `S${d.sprint} · done`;
   } else {
     dot.className = 'snav-dot snav-dot--running';
+    // UAT counts as "done" — this project tracks UAT (awaiting sign-off) as the
+    // completed state, not a separate closed state.
+    const completed = (d.done || 0) + (d.uat || 0);
     const uatHtml = d.uat > 0 ? ` · <span class="snav-uat">${d.uat} UAT</span>` : '';
-    text.innerHTML = `S${d.sprint} · ${d.done}/${d.total}${uatHtml}`;
+    text.innerHTML = `S${d.sprint} · ${completed}/${d.total}${uatHtml}`;
   }
 }
 
@@ -11199,8 +11244,8 @@ function _snavRenderPanel() {
   // Stats row: ticket totals, plus total time once the summary loads (finished).
   const statsRow = `<div class="snav-stats">
     <div class="snav-stat"><span class="snav-stat-val">${total}</span><span class="snav-stat-lbl">tickets</span></div>
-    <div class="snav-stat"><span class="snav-stat-val">${d.done || 0}</span><span class="snav-stat-lbl">done</span></div>
-    <div class="snav-stat"><span class="snav-stat-val snav-uat">${d.uat || 0}</span><span class="snav-stat-lbl">UAT</span></div>
+    <div class="snav-stat"><span class="snav-stat-val">${(d.done || 0) + (d.uat || 0)}</span><span class="snav-stat-lbl">done</span></div>
+    <div class="snav-stat"><span class="snav-stat-val snav-uat">${d.uat || 0}</span><span class="snav-stat-lbl">in UAT</span></div>
     ${finished ? `<div class="snav-stat" id="snav-duration"><span class="snav-stat-val">…</span><span class="snav-stat-lbl">total time</span></div>` : ''}
   </div>`;
 
@@ -11237,7 +11282,8 @@ function _snavDonutHtml(cols, total) {
   } else {
     circles = `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="var(--surface-2)" stroke-width="14"></circle>`;
   }
-  const donePct = total > 0 ? Math.round((cols.done || 0) / total * 100) : 0;
+  // UAT counts as done (project tracks UAT as the completed state).
+  const donePct = total > 0 ? Math.round(((cols.done || 0) + (cols.uat || 0)) / total * 100) : 0;
   const legend = segs.filter(s => (cols[s.key] || 0) > 0).map(s => {
     const v = cols[s.key] || 0;
     const pct = total > 0 ? Math.round(v / total * 100) : 0;

@@ -975,6 +975,40 @@
       box-shadow: 0 0 0 5px var(--blue-bg);
     }
 
+    /* ── Search/filter bar (issue #552) ── */
+    .smgmt-filter-bar {
+      display: flex; align-items: center; gap: 8px;
+      padding: 0 28px 10px;
+    }
+    .smgmt-filter-input-wrap {
+      position: relative; flex: 1; max-width: 400px;
+    }
+    .smgmt-filter-input {
+      width: 100%; height: 32px;
+      padding: 0 30px 0 10px;
+      border: 1px solid var(--border); border-radius: 6px;
+      background: var(--surface-2); color: var(--text);
+      font-size: 13px; font-family: inherit;
+      outline: none; box-sizing: border-box;
+      transition: border-color .12s, background .12s;
+    }
+    .smgmt-filter-input:focus { border-color: var(--blue); background: var(--surface); }
+    .smgmt-filter-input::placeholder { color: var(--text-muted); }
+    .smgmt-filter-clear-btn {
+      position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
+      background: none; border: none; padding: 2px 4px;
+      color: var(--text-muted); cursor: pointer; font-size: 16px; line-height: 1;
+      display: none;
+    }
+    .smgmt-filter-clear-btn:hover { color: var(--text); }
+    .smgmt-filter-clear-btn.visible { display: block; }
+    .smgmt-filter-empty-state {
+      display: none; padding: 12px 14px;
+      font-size: 12px; color: var(--text-muted);
+      font-style: italic; text-align: center;
+    }
+    .smgmt-filter-empty-state.visible { display: block; }
+
     .smgmt-sprint-list {
       display: flex; flex-direction: column; gap: 12px;
       margin-top: 16px;
@@ -3750,6 +3784,19 @@
 
           <!-- Label filter chips (issue #546) — inside sticky area so they scroll with toolbar -->
           <div class="smgmt-label-filter-row is-empty" id="smgmt-label-filter-row" role="toolbar" aria-label="Filter by label"></div>
+
+          <!-- Search/filter bar (issue #552) -->
+          <div class="smgmt-filter-bar" id="smgmt-filter-bar">
+            <div class="smgmt-filter-input-wrap">
+              <input type="search" class="smgmt-filter-input" id="smgmt-filter-input"
+                     placeholder="Filter tickets by title, #number, or label…"
+                     aria-label="Filter tickets by title, issue number, or label"
+                     autocomplete="off" spellcheck="false"
+                     oninput="_smgmtFilterApply()">
+              <button class="smgmt-filter-clear-btn" id="smgmt-filter-clear-btn"
+                      onclick="_smgmtFilterClear()" title="Clear filter" aria-label="Clear filter">×</button>
+            </div>
+          </div>
         </div>
 
         <!-- Sprint list -->
@@ -5961,6 +6008,9 @@ function _smgmtRender(data) {
 
   // Restore per-column sort state (issue #550)
   orderedLabels.forEach(lbl => _smgmtApplySort(lbl));
+
+  // Re-apply search filter after DOM rebuild (issue #552)
+  _smgmtFilterApply();
 }
 
 // ── Per-column sort controls (issue #550) ────────────────────────────────────
@@ -6690,7 +6740,7 @@ function _smgmtOutcomeTicketListHtml(issues, label, repo) {
            <i class="ti ti-file-text"></i></button>`
       : '';
 
-    return `<div class="smgmt-ticket" data-issue="${iss.number}" draggable="false">
+    return `<div class="smgmt-ticket" data-issue="${iss.number}" data-labels="" draggable="false">
       ${circle}
       <a class="smgmt-ticket-num" href="https://github.com/issues/${iss.number}" target="_blank" rel="noopener">#${iss.number}</a>
       <span class="smgmt-ticket-title" title="${escHtml(iss.title)}">${escHtml(iss.title)}</span>
@@ -7311,7 +7361,8 @@ function _smgmtRunningCardHtml(label, n, tickets) {
       ? `<span class="smgmt-ticket-elapsed">${elapsedStr}</span>`
       : '';
 
-    return `<div class="smgmt-ticket" data-issue="${t.number}" draggable="false">
+    const runTicketLabels = escHtml((t.labels || []).map(l => l.name).join(','));
+    return `<div class="smgmt-ticket" data-issue="${t.number}" data-labels="${runTicketLabels}" draggable="false">
       ${indicator}
       <a class="smgmt-ticket-num" href="${escHtml(issueUrl)}" target="_blank"
          rel="noopener">#${t.number}</a>
@@ -10237,6 +10288,55 @@ document.addEventListener('keydown', function _smgmtKbKeydown(e) {
     return;
   }
 });
+
+// ── Search/filter bar (issue #552) ────────────────────────────────────────
+
+function _smgmtFilterApply() {
+  const input = document.getElementById('smgmt-filter-input');
+  const clearBtn = document.getElementById('smgmt-filter-clear-btn');
+  const q = (input ? input.value : '').trim().toLowerCase();
+
+  if (clearBtn) clearBtn.classList.toggle('visible', q.length > 0);
+
+  const allTickets = document.querySelectorAll('#pane-sprint-mgmt .smgmt-ticket[data-issue]');
+  allTickets.forEach(el => {
+    if (!q) { el.style.display = ''; return; }
+    const issueNum = (el.dataset.issue || '').toLowerCase();
+    const titleEl  = el.querySelector('.smgmt-ticket-title');
+    const title    = (titleEl ? titleEl.textContent : '').toLowerCase();
+    const labels   = (el.dataset.labels || '').toLowerCase();
+    el.style.display = (title.includes(q) || issueNum.includes(q) || labels.includes(q)) ? '' : 'none';
+  });
+
+  _smgmtFilterUpdateEmptyStates();
+}
+
+function _smgmtFilterUpdateEmptyStates() {
+  document.querySelectorAll('#smgmt-sprint-list .smgmt-sprint-tickets').forEach(container => {
+    _smgmtFilterHandleContainer(container);
+  });
+  const backlog = document.getElementById('smgmt-backlog-tickets-container');
+  if (backlog) _smgmtFilterHandleContainer(backlog);
+}
+
+function _smgmtFilterHandleContainer(container) {
+  const tickets = Array.from(container.querySelectorAll('.smgmt-ticket[data-issue]'));
+  const allHidden = tickets.length > 0 && tickets.every(t => t.style.display === 'none');
+  let emptyState = container.querySelector('.smgmt-filter-empty-state');
+  if (!emptyState) {
+    emptyState = document.createElement('div');
+    emptyState.className = 'smgmt-filter-empty-state';
+    emptyState.textContent = 'No matching tickets';
+    container.appendChild(emptyState);
+  }
+  emptyState.classList.toggle('visible', allHidden);
+}
+
+function _smgmtFilterClear() {
+  const input = document.getElementById('smgmt-filter-input');
+  if (input) { input.value = ''; input.focus(); }
+  _smgmtFilterApply();
+}
 
 // ── Auto-refresh pill (issue #275) ────────────────────────────────────────
 const _AR_LS_KEY    = 'smgmt-ar-interval';

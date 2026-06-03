@@ -12064,7 +12064,47 @@ function _bcConnectSSE(jobId) {
     } catch (_) {}
   });
 
-  es.onerror = () => { /* SSE auto-reconnects */ };
+  es.onerror = () => {
+    // A 404 (job no longer exists server-side — server restarted or pruned) is a
+    // FATAL EventSource error: the browser sets readyState=CLOSED and does NOT
+    // auto-reconnect. Without recovery the tab is stranded on a dead Step 2 —
+    // and it's sticky because bc_job_id lives in localStorage, which Safari's
+    // "Empty Caches" doesn't clear (Chrome works only because its own
+    // localStorage never held the dead id). If the socket is permanently closed
+    // and we never received any state, treat the saved job as gone and fall back
+    // to the input step. (readyState CONNECTING means a transient blip the
+    // browser is already retrying — leave that alone.)
+    if (es.readyState === 2 /* CLOSED */ && !_bcJobState) {
+      es.close();
+      if (_bcEventSource === es) _bcEventSource = null;
+      _bcRecoverFromStaleJob();
+    }
+  };
+}
+
+/**
+ * Recover from a saved bulk job that no longer exists on the server.
+ * Clears the stale localStorage id and, if the user is currently looking at the
+ * (now dead) bulk-create tab, resets it to a usable Step 1 input.
+ */
+function _bcRecoverFromStaleJob() {
+  localStorage.removeItem('bc_job_id');
+  _bcJobId = null;
+  _bcJobState = null;
+  _bcUpdateBadge();
+
+  const pane = document.getElementById('pane-bulk-create');
+  const onBulkTab = pane && !pane.classList.contains('hidden');
+  if (onBulkTab) {
+    _bcShowStep(1);
+    // _bcInitTab may have early-returned into Step 2 before this fired, so make
+    // sure Step 1's controls are populated and interactive again.
+    _bcPopulateRepo();
+    _bcRestoreDraft();
+    _bcUpdateCounter();
+    _bcTplRender();
+  }
+  _bcTabInited = true;
 }
 
 function _bcRenderStep2() {

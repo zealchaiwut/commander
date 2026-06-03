@@ -112,6 +112,17 @@ except Exception:
     _sync_projects_module = None  # type: ignore[assignment]
     _SYNC_PROJECTS_AVAILABLE = False
 
+# Per-machine kill switch for the Neon/Postgres layer. While its schema is
+# unmigrated, the writes error out (e.g. relation "projects" does not exist) and
+# block sprint creation. Setting COMMANDER_DISABLE_NEON makes the dashboard run
+# purely off GitHub + local JSON: no Neon reads/writes, no startup projects sync.
+# (.env is loaded above at import time via load_dotenv, so this sees it.)
+if os.environ.get("COMMANDER_DISABLE_NEON", "").strip().lower() in ("1", "true", "yes", "on"):
+    _sprint_repo = None  # type: ignore[assignment]
+    _SPRINT_REPO_AVAILABLE = False
+    _sync_projects_module = None  # type: ignore[assignment]
+    _SYNC_PROJECTS_AVAILABLE = False
+
 from sizing import SIZE_TO_MINUTES as _SIZE_TO_MINUTES, letter_from_minutes as _letter_from_minutes, minutes_from_letter as _minutes_from_letter
 
 try:
@@ -3415,16 +3426,27 @@ def get_sprint_management_issues(repo: str):
     ordered_result.extend(unassigned_issues)
     result_issues = ordered_result
 
-    # Placeholder sprint = lowest positive N such that no sprint-N label exists (issue #364)
-    _used = set(sprints)
-    placeholder_sprint = 1
-    while placeholder_sprint in _used:
-        placeholder_sprint += 1
-
     # Finished sprints = those with a posted "Sprint N Executive Summary" issue.
     # Surfaced so the board marks them finished and stops showing NEXT UP /
     # pre-flight — same GitHub-backed signal the nav pill uses (cross-machine).
-    finished_sprints = sorted(_finished_sprint_summaries(repo).keys())
+    finished_map = _finished_sprint_summaries(repo)
+    finished_sprints = sorted(finished_map.keys())
+
+    # Placeholder/next sprint = max existing + 1 (not the lowest free number — a
+    # deleted early label must not reset the next sprint back to 1). The max is
+    # taken over both sprint labels AND finished-summary numbers, so it stays
+    # correct even if a finished sprint's label was later removed.
+    _max_num = 0
+    for n in sprints:
+        try:
+            _max_num = max(_max_num, int(n))
+        except (TypeError, ValueError):
+            pass
+    for lbl in finished_map:
+        m = sprint_label_re.match(lbl)
+        if m:
+            _max_num = max(_max_num, int(m.group(1).split(".")[0]))
+    placeholder_sprint = _max_num + 1
 
     return {
         "sprints": sprints,

@@ -8365,15 +8365,16 @@ function _smgmtDragMovePill(event) {
 let _smgmtGhostNextNum = null;
 
 /**
- * Compute the lowest positive integer N such that no label sprint-N already
- * exists (plain integer labels only; sub-labels like sprint-N.M are ignored).
- * Result is cached at drag-start — call once, reuse during session.
+ * Next sprint number = max existing + 1. Uses the server's placeholder_sprint
+ * (computed over sprint labels AND finished-summary numbers, so a deleted early
+ * label never resets it to 1). Falls back to a client-side max if absent.
  */
 function _smgmtGhostComputeNextFree() {
-  const existing = new Set((_smgmtData?.sprints || []).map(n => Number(n)));
-  let n = 1;
-  while (existing.has(n)) n++;
-  return n;
+  if (_smgmtData && Number.isInteger(_smgmtData.placeholder_sprint)) {
+    return _smgmtData.placeholder_sprint;
+  }
+  const nums = (_smgmtData?.sprints || []).map(Number).filter(n => !isNaN(n));
+  return nums.length ? Math.max(...nums) + 1 : 1;
 }
 
 /** Show the ghost pane below the sprint list, pre-computing next-free number. */
@@ -8389,19 +8390,7 @@ function _smgmtGhostShow() {
   if (!ghost) return;
 
   titleEl.textContent = `Drop here to create Sprint ${_smgmtGhostNextNum}`;
-
-  // Build sub-text: identify skipped empty sprints
-  const existing = new Set((_smgmtData?.sprints || []).map(n => Number(n)));
-  const skipped = [];
-  for (let i = 1; i < _smgmtGhostNextNum; i++) {
-    if (!existing.has(i)) skipped.push(i);
-  }
-  if (skipped.length > 0) {
-    const skippedStr = skipped.map(s => `Sprint ${s}`).join(', ');
-    subEl.textContent = `next free number · skipped empty ${skippedStr}`;
-  } else {
-    subEl.textContent = `next free number`;
-  }
+  subEl.textContent = 'next sprint number';
 
   ghost.classList.add('ghost-visible');
 }
@@ -8791,13 +8780,13 @@ function _smgmtBacklogTicketHtml(ticket, sprintNums) {
          ondragstart="_smgmtBacklogTicketDragStart(event, ${ticket.number})"
          ondragend="_smgmtTicketDragEnd(event)"
          oncontextmenu="_smgmtCtxMenuOpen(event,${ticket.number})">
-      <input type="checkbox" class="smgmt-ticket-cb"
+      <input type="checkbox" class="smgmt-ticket-cb" draggable="false"
              ${isSelected ? 'checked' : ''}
              onclick="event.stopPropagation()"
              onchange="_smgmtToggleSelect(${ticket.number}, this.checked)">
       <i class="ti ti-grip-vertical smgmt-ticket-grip"></i>
       <a class="smgmt-ticket-num" href="${escHtml(ticket.url || '#')}" target="_blank"
-         rel="noopener" onclick="event.stopPropagation()">#${ticket.number}</a>
+         rel="noopener" draggable="false" onclick="event.stopPropagation()">#${ticket.number}</a>
       <span class="smgmt-ticket-title" title="${escHtml(ticket.title)}">${escHtml(ticket.title)}</span>
       <button class="smgmt-row-menu-btn" tabindex="0" title="Ticket actions" aria-haspopup="true" aria-expanded="false"
               onclick="event.stopPropagation();_smgmtRowMenuOpen(event, ${ticket.number}, null, ${hasEstimate})"
@@ -9486,13 +9475,34 @@ function _clearBodyInert() {
 
 // ── New Sprint modal ──────────────────────────────────────────────────────
 function smgmtOpenNewSprint() {
-  document.getElementById('ns-label').value = '';
+  // Prefill with the next sprint number (max + 1, robust against deleted labels).
+  const next = _smgmtGhostComputeNextFree();
+  document.getElementById('ns-label').value = `sprint-${next}`;
+  const countEl = document.getElementById('ns-count');
+  if (countEl) countEl.value = '1';
+  _nsUpdateHint();
   document.getElementById('ns-error').classList.add('hidden');
-  document.getElementById('ns-submit-btn').disabled = true;
+  const submitBtn = document.getElementById('ns-submit-btn');
+  submitBtn.disabled = false;
+  submitBtn.textContent = 'Create Sprint';
   _setBodyInert(['ns-backdrop', 'ns-modal']);
   document.getElementById('ns-backdrop').classList.remove('hidden');
   document.getElementById('ns-modal').classList.remove('hidden');
-  document.getElementById('ns-label').focus();
+  const inp = document.getElementById('ns-label');
+  inp.focus();
+  inp.select();
+}
+
+// Show which sprint labels will be created given the start + count.
+function _nsUpdateHint() {
+  const hintEl = document.getElementById('ns-hint');
+  if (!hintEl) return;
+  const start = _parseSprintNum(document.getElementById('ns-label').value || '');
+  const count = parseInt((document.getElementById('ns-count') || {}).value || '1', 10);
+  if (start === null) { hintEl.textContent = ''; return; }
+  const labels = [];
+  for (let i = 0; i < count; i++) labels.push(`sprint-${start + i}`);
+  hintEl.textContent = count > 1 ? `Will create: ${labels.join(', ')}` : '';
 }
 
 function _nsClose(force) {
@@ -9812,7 +9822,9 @@ function _setupModals() {
   // ── New Sprint modal wiring ──
   document.getElementById('ns-label').addEventListener('input', function() {
     document.getElementById('ns-submit-btn').disabled = _parseSprintNum(this.value) === null;
+    _nsUpdateHint();
   });
+  document.getElementById('ns-count').addEventListener('change', _nsUpdateHint);
 
   document.getElementById('rr-close-btn').addEventListener('click', _rrClose);
   document.getElementById('rr-cancel-btn').addEventListener('click', _rrClose);
@@ -9825,8 +9837,9 @@ function _setupModals() {
 
   document.getElementById('ns-submit-btn').addEventListener('click', async function() {
     const labelVal = (document.getElementById('ns-label').value || '').trim();
-    const sprintNum = _parseSprintNum(labelVal);
-    if (sprintNum === null) return;
+    const startNum = _parseSprintNum(labelVal);
+    if (startNum === null) return;
+    const count = parseInt((document.getElementById('ns-count') || {}).value || '1', 10);
 
     const repo = _cachedFullRepo[_slug] || null;
     if (!repo) { _nsShowError('Project not found — please reload the page.'); return; }
@@ -9835,15 +9848,23 @@ function _setupModals() {
     this.textContent = 'Creating…';
     document.getElementById('ns-error').classList.add('hidden');
 
+    // Create count sequential sprints starting at startNum. A number that already
+    // exists (409) is skipped rather than aborting the batch.
+    const created = [];
     try {
-      const resp = await fetch('/api/sprints/create', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ project: repo, sprint_number: sprintNum }),
-      });
-      if (!resp.ok) {
-        const data = await resp.json().catch(() => ({}));
-        throw new Error(data.detail || 'HTTP ' + resp.status);
+      for (let i = 0; i < count; i++) {
+        const num = startNum + i;
+        const resp = await fetch('/api/sprints/create', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ project: repo, sprint_number: num }),
+        });
+        if (resp.status === 409) continue;  // already exists — skip
+        if (!resp.ok) {
+          const data = await resp.json().catch(() => ({}));
+          throw new Error(data.detail || 'HTTP ' + resp.status);
+        }
+        created.push(num);
       }
       document.getElementById('ns-backdrop').classList.add('hidden');
       document.getElementById('ns-modal').classList.add('hidden');
@@ -12224,10 +12245,19 @@ function _cmpEmptyState(title, msg) {
   </div>
   <div class="modal-body">
     <div class="modal-field">
-      <label class="modal-label" for="ns-label">Sprint label <span style="color:var(--red)">*</span></label>
+      <label class="modal-label" for="ns-label">Starting sprint <span style="color:var(--red)">*</span></label>
       <input class="modal-input" id="ns-label" type="text"
              placeholder="e.g. Sprint 25 or sprint-25"
              aria-required="true">
+      <div class="modal-hint" id="ns-hint" style="font-size:11px;color:var(--text-muted);margin-top:4px;"></div>
+    </div>
+    <div class="modal-field">
+      <label class="modal-label" for="ns-count">How many (ahead)</label>
+      <select class="modal-input" id="ns-count">
+        <option value="1" selected>1 sprint</option>
+        <option value="2">2 sprints</option>
+        <option value="3">3 sprints</option>
+      </select>
     </div>
     <div class="modal-error hidden" id="ns-error"></div>
   </div>

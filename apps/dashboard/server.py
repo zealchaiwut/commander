@@ -1326,20 +1326,11 @@ def get_sprint_nav_status(repo: str = ""):
     if current is None:
         return {"has_sprint": False}
 
-    # Split out the sprint-summary issue (it carries the sprint-N label too) so
-    # it doesn't inflate the work-ticket counts.
-    summary_issue = None
-    work_issues: list[dict] = []
-    for i in raw_issues:
-        labels = {l["name"] for l in i.get("labels", [])}
-        if "sprint-summary" in labels:
-            summary_issue = {
-                "number": i.get("number"),
-                "url": i.get("url"),
-                "title": i.get("title"),
-            }
-        else:
-            work_issues.append(i)
+    # The "Sprint N Executive Summary" issue is labeled sprint-summary/docs (not
+    # sprint-N), so it isn't in raw_issues and won't inflate counts. Detect it by
+    # title to decide finished vs running.
+    summary_issue = _finished_sprint_summaries(repo_name).get(f"sprint-{current}")
+    work_issues = raw_issues
 
     columns = {"backlog": 0, "in-progress": 0, "sit": 0, "uat": 0, "done": 0}
     for i in work_issues:
@@ -2803,6 +2794,47 @@ async def batch_sprint_labels(body: BatchLabelsBody):
 
 _SPRINT_LABEL_RE = re.compile(r"^sprint-\d+(\.\d+)*$")
 _SUMMARY_TITLE_RE = re.compile(r"^Sprint \d+(\.\d+)*\s+Executive Summary$")
+_SUMMARY_TITLE_NUM_RE = re.compile(r"^Sprint (\d+(?:\.\d+)*)\s+Executive Summary$")
+
+
+def _finished_sprint_summaries(repo_name: str | None) -> dict[str, dict]:
+    """Map ``sprint-<N>`` label -> summary issue {number,url,title} for sprints
+    that have a posted "Sprint N Executive Summary" issue.
+
+    These summary issues are labeled ``sprint-summary``/``docs`` (NOT ``sprint-N``),
+    so the sprint number is parsed from the TITLE. This is the single
+    GitHub-backed signal used by both the nav pill and the board to mark a
+    sprint finished (works cross-machine).
+    """
+    try:
+        repo = github_client.get_repo_for_operation(repo_name)
+    except Exception:
+        return {}
+    try:
+        r = subprocess.run(
+            ["gh", "issue", "list", "--repo", repo,
+             "--label", "sprint-summary", "--state", "all",
+             "--json", "number,title,url", "--limit", "200"],
+            capture_output=True, text=True, timeout=15,
+        )
+        issues = json.loads(r.stdout or "[]") if r.returncode == 0 else []
+    except Exception:
+        issues = []
+
+    result: dict[str, dict] = {}
+    for iss in issues:
+        m = _SUMMARY_TITLE_NUM_RE.match(iss.get("title", "") or "")
+        if not m:
+            continue  # e.g. a feature ticket that merely carries the label
+        label = f"sprint-{m.group(1)}"
+        prev = result.get(label)
+        if prev is None or (iss.get("number") or 0) > (prev.get("number") or 0):
+            result[label] = {
+                "number": iss.get("number"),
+                "url": iss.get("url"),
+                "title": iss.get("title"),
+            }
+    return result
 
 _REPO_ROOT = Path(__file__).parent.parent.parent
 SPRINT_MANAGER_PATH = _REPO_ROOT / "services" / "sprint_manager" / "sprint_manager.py"
@@ -3389,6 +3421,11 @@ def get_sprint_management_issues(repo: str):
     while placeholder_sprint in _used:
         placeholder_sprint += 1
 
+    # Finished sprints = those with a posted "Sprint N Executive Summary" issue.
+    # Surfaced so the board marks them finished and stops showing NEXT UP /
+    # pre-flight — same GitHub-backed signal the nav pill uses (cross-machine).
+    finished_sprints = sorted(_finished_sprint_summaries(repo).keys())
+
     return {
         "sprints": sprints,
         "order": order,
@@ -3396,6 +3433,7 @@ def get_sprint_management_issues(repo: str):
         "empty_sprint_labels": empty_sprint_labels,
         "placeholder_sprint": placeholder_sprint,
         "sprint_parents": sprint_parents,
+        "finished_sprints": finished_sprints,
     }
 
 

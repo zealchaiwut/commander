@@ -2261,8 +2261,14 @@
     .bc-select:focus, .bc-text-input:focus { outline: none; border-color: var(--blue); }
 
     /* Counter */
-    .bc-counter-row { padding: 8px 28px 4px; }
+    .bc-counter-row { padding: 8px 28px 4px; display: flex; align-items: center; gap: 12px; }
     .bc-counter { font-size: 11px; color: var(--text-muted); font-weight: 500; }
+    .bc-clear-draft-btn {
+      font-size: 11px; padding: 2px 8px; border-radius: 4px;
+      border: 1px solid var(--border); background: transparent;
+      color: var(--text-muted); cursor: pointer;
+    }
+    .bc-clear-draft-btn:hover { border-color: var(--red, #c0392b); color: var(--red, #c0392b); }
 
     /* Textarea */
     .bc-textarea {
@@ -3711,12 +3717,15 @@
             <div class="bc-settings-field bc-settings-field--labels" style="display:none">
               <label class="bc-settings-label" for="bc-default-labels">Default labels</label>
               <input class="bc-text-input" id="bc-default-labels" type="text"
-                     placeholder="enhancement, frontend" autocomplete="off" value="enhancement">
+                     placeholder="enhancement, frontend" autocomplete="off" value="enhancement"
+                     oninput="bcOnLabelsInput()">
             </div>
           </div>
 
           <div class="bc-counter-row">
             <span class="bc-counter" id="bc-counter">0 / 50 prompts</span>
+            <button type="button" class="bc-clear-draft-btn hidden" id="bc-clear-draft-btn"
+                    onclick="bcClearDraft()">Clear saved draft</button>
           </div>
 
           <div id="bc-limit-banner" class="bc-limit-banner hidden" role="alert" aria-live="polite"></div>
@@ -3789,7 +3798,8 @@
           <div class="bc-step-actions">
             <div class="bc-step-actions-left">
               <label class="bc-concurrency-label">Run BA in parallel:</label>
-              <select class="bc-concurrency-select" id="bc-concurrency">
+              <select class="bc-concurrency-select" id="bc-concurrency"
+                      onchange="bcOnConcurrencyChange()">
                 <option value="1">1 at a time (serial)</option>
                 <option value="3" selected>3 at a time</option>
                 <option value="5">5 at a time</option>
@@ -10052,6 +10062,7 @@ function _bcInitTab() {
     _bcTabInited = true;
     _bcShowStep(1);
     _bcPopulateRepo();
+    _bcRestoreDraft();
     _bcUpdateCounter();
     _bcTplRender();
   }
@@ -10264,9 +10275,81 @@ function _bcRefreshDups() {
   });
 }
 
+// ── Draft persistence (issue #535) ───────────────────────────────────────────
+
+let _bcDraftTimer = null;
+
+function _bcDraftKey(field) {
+  return _settingsKey('bc-draft:' + field);
+}
+
+function _bcScheduleSaveDraft() {
+  clearTimeout(_bcDraftTimer);
+  _bcDraftTimer = setTimeout(_bcSaveDraftNow, 400);
+}
+
+function _bcSaveDraftNow() {
+  const textarea = document.getElementById('bc-textarea');
+  const labelsEl = document.getElementById('bc-default-labels');
+  const concEl   = document.getElementById('bc-concurrency');
+  if (textarea) localStorage.setItem(_bcDraftKey('textarea'), textarea.value);
+  if (labelsEl) localStorage.setItem(_bcDraftKey('labels'), labelsEl.value);
+  if (concEl)   localStorage.setItem(_bcDraftKey('concurrency'), concEl.value);
+  _bcSyncClearDraftBtn();
+}
+
+function _bcSyncClearDraftBtn() {
+  const hasDraft = localStorage.getItem(_bcDraftKey('textarea')) !== null
+    || localStorage.getItem(_bcDraftKey('labels')) !== null
+    || localStorage.getItem(_bcDraftKey('concurrency')) !== null;
+  const btn = document.getElementById('bc-clear-draft-btn');
+  if (btn) btn.classList.toggle('hidden', !hasDraft);
+}
+
+function _bcRestoreDraft() {
+  const text   = localStorage.getItem(_bcDraftKey('textarea'));
+  const labels = localStorage.getItem(_bcDraftKey('labels'));
+  const conc   = localStorage.getItem(_bcDraftKey('concurrency'));
+  if (text === null && labels === null && conc === null) return;
+  const textarea = document.getElementById('bc-textarea');
+  const labelsEl = document.getElementById('bc-default-labels');
+  const concEl   = document.getElementById('bc-concurrency');
+  if (textarea && text !== null) textarea.value = text;
+  if (labelsEl && labels !== null) labelsEl.value = labels;
+  if (concEl && conc !== null) concEl.value = conc;
+  _bcSyncClearDraftBtn();
+}
+
+function _bcClearDraftStorage() {
+  localStorage.removeItem(_bcDraftKey('textarea'));
+  localStorage.removeItem(_bcDraftKey('labels'));
+  localStorage.removeItem(_bcDraftKey('concurrency'));
+}
+
+function bcClearDraft() {
+  _bcClearDraftStorage();
+  const textarea = document.getElementById('bc-textarea');
+  const labelsEl = document.getElementById('bc-default-labels');
+  const concEl   = document.getElementById('bc-concurrency');
+  if (textarea) textarea.value = '';
+  if (labelsEl) labelsEl.value = 'enhancement';
+  if (concEl)   concEl.value = '3';
+  _bcSyncClearDraftBtn();
+  _bcUpdateCounter();
+}
+
 function bcOnTextareaInput() {
   clearTimeout(_bcCounterTimer);
   _bcCounterTimer = setTimeout(_bcUpdateCounter, 200);
+  _bcScheduleSaveDraft();
+}
+
+function bcOnLabelsInput() {
+  _bcScheduleSaveDraft();
+}
+
+function bcOnConcurrencyChange() {
+  _bcScheduleSaveDraft();
 }
 
 function _bcParsePrompts(text) {
@@ -10654,6 +10737,7 @@ async function bcRunAll() {
     const data = await res.json();
     _bcJobId = data.job_id;
     localStorage.setItem('bc_job_id', _bcJobId);
+    _bcClearDraftStorage();
 
     _bcStartTimes = {};
     _bcAvgMs = null;

@@ -132,6 +132,48 @@
     }
     .btn-icon:hover { background: var(--surface-2); color: var(--text); }
 
+    /* ── Sprint status pill (sits at the tab-strip level) ── */
+    .snav-wrap { position: relative; flex-shrink: 0; margin-bottom: 5px; }
+    .snav-pill {
+      display: inline-flex; align-items: center; gap: 6px;
+      height: 32px; padding: 0 10px; border-radius: 16px;
+      border: 1px solid var(--border); background: var(--surface-2);
+      color: var(--text); font-size: 12px; font-weight: 500; cursor: pointer;
+      white-space: nowrap; transition: background .15s, border-color .15s;
+    }
+    .snav-pill:hover { background: var(--surface); border-color: var(--text-sub); }
+    .snav-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-sub); flex-shrink: 0; }
+    .snav-dot--running { background: #16a34a; box-shadow: 0 0 0 3px rgba(22,163,74,.15); }
+    .snav-dot--finished { background: #2563eb; }
+    .snav-uat { color: #f59e0b; font-weight: 600; }
+    .snav-caret { font-size: 12px; color: var(--text-muted); }
+    .snav-panel {
+      position: absolute; right: 0; top: 38px; z-index: 60;
+      width: 380px; max-height: 70vh; overflow-y: auto;
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 8px; box-shadow: 0 8px 28px rgba(0,0,0,.18);
+    }
+    .snav-panel-head {
+      padding: 12px 14px; border-bottom: 1px solid var(--border);
+      font-size: 13px; font-weight: 600; color: var(--text);
+      display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    }
+    .snav-panel-body { padding: 12px 14px; font-size: 12px; color: var(--text); }
+    .snav-bars { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
+    .snav-bar-row { display: flex; align-items: center; gap: 8px; }
+    .snav-bar-label { width: 78px; color: var(--text-muted); flex-shrink: 0; text-transform: capitalize; }
+    .snav-bar-track { flex: 1; height: 8px; border-radius: 4px; background: var(--surface-2); overflow: hidden; }
+    .snav-bar-fill { height: 100%; background: var(--text-sub); }
+    .snav-bar-count { width: 28px; text-align: right; color: var(--text-muted); flex-shrink: 0; }
+    .snav-summary-md {
+      margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border);
+      font-size: 11px; line-height: 1.5; white-space: pre-wrap; word-break: break-word;
+      color: var(--text-muted); max-height: 320px; overflow-y: auto;
+    }
+    .snav-link { font-size: 11px; color: var(--blue, #2563eb); text-decoration: none; }
+    .snav-link:hover { text-decoration: underline; }
+    .snav-muted { color: var(--text-muted); }
+
     /* ── Global search ── */
     .global-search-wrap {
       position: relative;
@@ -444,11 +486,15 @@
     .btn-primary .ti { font-size: 14px; }
 
     /* ── Sub-tab strip ── */
+    /* Row that holds the scrolling tab strip + the right-aligned sprint pill.
+       The pill lives OUTSIDE the overflow:auto nav so its dropdown isn't clipped. */
+    .sub-tabs-row { display: flex; align-items: flex-end; gap: 12px; }
     .sub-tabs {
       display: flex; align-items: flex-end;
       padding: 0 0; gap: 0;
       background: var(--surface);
       overflow-x: auto; scrollbar-width: none;
+      flex: 1 1 auto; min-width: 0;
     }
     .sub-tabs::-webkit-scrollbar { display: none; }
     .stab {
@@ -479,6 +525,7 @@
       white-space: nowrap; line-height: 1.6;
     }
     .bc-tab-badge--warn { background: #f59e0b; }
+    .bc-tab-badge--ready { background: #2563eb; }
     @keyframes bc-badge-spin { to { transform: rotate(360deg); } }
     .bc-tab-badge-spin { display: inline-block; animation: bc-badge-spin .9s linear infinite; }
 
@@ -1248,6 +1295,12 @@
       border: 1px solid rgba(161,98,7,.25);
       padding: 1px 6px; border-radius: 3px; font-family: var(--mono);
     }
+    .smgmt-preflight-toggle-more {
+      margin-top: 5px; padding: 2px 4px; background: none; border: none;
+      color: var(--text-muted); font-size: 11px; font-weight: 500;
+      cursor: pointer; align-self: flex-start;
+    }
+    .smgmt-preflight-toggle-more:hover { color: var(--text); text-decoration: underline; }
     @keyframes smgmt-preflight-highlight-anim {
       0%   { box-shadow: 0 0 0 3px rgba(161,98,7,.55); background: var(--yellow-bg); }
       100% { box-shadow: 0 0 0 0px rgba(161,98,7,0);  background: transparent; }
@@ -2250,6 +2303,8 @@
       transition: background .15s, color .15s;
     }
     .bc-step-chip.active { background: var(--text); color: var(--surface); }
+    .bc-step-chip.done { background: var(--surface-2); color: var(--accent, #16a34a); }
+    .bc-step-chip.done .bc-step-n { background: var(--accent, #16a34a); color: #fff; }
     .bc-step-n {
       width: 16px; height: 16px; border-radius: 50%;
       background: rgba(0,0,0,.10);
@@ -2583,6 +2638,11 @@
     .bc-tag {
       font-size: 10px; padding: 1px 6px; border-radius: 8px;
       background: var(--surface-2); border: 1px solid var(--border); color: var(--text-muted);
+    }
+    /* BA-suggested label, shown hashtag-style on draft cards */
+    .bc-tag--hash {
+      background: transparent; border-color: transparent;
+      color: var(--blue, #2563eb); padding: 1px 2px; font-weight: 500;
     }
 
     /* Card actions */
@@ -3314,7 +3374,8 @@
         </div>
       </div>
 
-      <!-- Sub-tab strip -->
+      <!-- Sub-tab strip (+ project-scoped sprint status pill, right-aligned) -->
+      <div class="sub-tabs-row">
       <nav class="sub-tabs" role="tablist" aria-label="Project sections" id="sub-tabs">
         <button class="stab active" role="tab" id="stab-sprint-mgmt"
                 aria-selected="true" onclick="switchTab('sprint-mgmt')">
@@ -3349,6 +3410,20 @@
           <i class="ti ti-history"></i>Sprint history
         </button>
       </nav>
+      <!-- Sprint status pill (GitHub-backed; works cross-machine while traveling) -->
+      <div class="snav-wrap">
+        <button class="snav-pill hidden" id="snav-pill" onclick="snavTogglePanel(event)"
+                title="Sprint status" aria-label="Sprint status">
+          <span class="snav-dot" id="snav-dot"></span>
+          <span id="snav-pill-text">Sprint</span>
+          <i class="ti ti-chevron-down snav-caret"></i>
+        </button>
+        <div class="snav-panel hidden" id="snav-panel">
+          <div class="snav-panel-head" id="snav-panel-head"></div>
+          <div class="snav-panel-body" id="snav-panel-body"></div>
+        </div>
+      </div>
+      </div><!-- /sub-tabs-row -->
     </header>
 
     <!-- Tab content -->
@@ -3546,7 +3621,15 @@
           </span>
           <span class="bc-step-arrow"><i class="ti ti-arrow-right"></i></span>
           <span class="bc-step-chip" id="bc-chip-2" data-step="2">
-            <span class="bc-step-n">2</span> Review &amp; create
+            <span class="bc-step-n">2</span> Review
+          </span>
+          <span class="bc-step-arrow"><i class="ti ti-arrow-right"></i></span>
+          <span class="bc-step-chip" id="bc-chip-3" data-step="3">
+            <span class="bc-step-n">3</span> Created
+          </span>
+          <span class="bc-step-arrow"><i class="ti ti-arrow-right"></i></span>
+          <span class="bc-step-chip" id="bc-chip-4" data-step="4">
+            <span class="bc-step-n">4</span> Estimate
           </span>
         </div>
 
@@ -5239,6 +5322,10 @@ async function init() {
   // Start 30s sidebar refresh
   startSidebarRefresh();
 
+  // Sprint status pill (GitHub-backed) — initial load + 30s refresh
+  snavRefresh();
+  setInterval(snavRefresh, 30000);
+
   // Update toolbar sticky top based on actual header height
   _smgmtUpdateToolbarTop();
 
@@ -5613,6 +5700,14 @@ async function _smgmtLoadEstimates(orderedLabels, bySprint) {
 /** Session-dismissed banner labels — not persisted across page reloads. */
 const _preflightDismissed = new Set();
 
+/** How many pre-flight items to show before "Show more". */
+const _PREFLIGHT_COLLAPSED_COUNT = 2;
+/** Labels whose pre-flight list is expanded (show all). */
+const _preflightExpanded = new Set();
+/** Cache of computed items per label so the show-more toggle can re-render
+    without recomputing the (async) estimator checks. */
+const _preflightItemsCache = {};
+
 /** Synchronous checks: body, AC, conflicting labels. Returns flat items array. */
 function _preflightCheckTickets(tickets) {
   const items = [];
@@ -5671,13 +5766,27 @@ function _preflightDismiss(label) {
 function _preflightBannerHtml(label, items) {
   if (items.length === 0 || _preflightDismissed.has(label)) return '';
   const trunc = (s, n) => s && s.length > n ? s.slice(0, n) + '…' : (s || '');
-  const rowsHtml = items.map(item =>
+
+  // Collapsed by default to the first N items; "Show more" reveals the rest.
+  const expanded = _preflightExpanded.has(label);
+  const shown = expanded ? items : items.slice(0, _PREFLIGHT_COLLAPSED_COUNT);
+  const hiddenCount = items.length - shown.length;
+
+  const rowsHtml = shown.map(item =>
     `<button class="smgmt-preflight-item" onclick="_preflightScrollToTicket(${item.number})">
       <span class="smgmt-preflight-item-id">#${item.number}</span>
       <span class="smgmt-preflight-item-title">${escHtml(trunc(item.title, 50))}</span>
       <span class="smgmt-preflight-item-type">${escHtml(item.type)}</span>
     </button>`
   ).join('');
+
+  let toggleHtml = '';
+  if (items.length > _PREFLIGHT_COLLAPSED_COUNT) {
+    toggleHtml = expanded
+      ? `<button class="smgmt-preflight-toggle-more" onclick="_preflightToggleExpand('${escHtml(label)}')">Show less</button>`
+      : `<button class="smgmt-preflight-toggle-more" onclick="_preflightToggleExpand('${escHtml(label)}')">Show ${hiddenCount} more</button>`;
+  }
+
   return `<div class="smgmt-preflight-banner" id="smgmt-preflight-${escHtml(label)}">
     <div class="smgmt-preflight-header">
       <i class="ti ti-alert-triangle" style="color:var(--yellow);font-size:14px;flex-shrink:0"></i>
@@ -5685,7 +5794,20 @@ function _preflightBannerHtml(label, items) {
       <button class="smgmt-preflight-dismiss" onclick="_preflightDismiss('${escHtml(label)}')" title="Dismiss">&times;</button>
     </div>
     <div class="smgmt-preflight-items">${rowsHtml}</div>
+    ${toggleHtml}
   </div>`;
+}
+
+/** Expand/collapse a sprint's pre-flight list and re-render it in place. */
+function _preflightToggleExpand(label) {
+  if (_preflightExpanded.has(label)) _preflightExpanded.delete(label);
+  else _preflightExpanded.add(label);
+  const items = _preflightItemsCache[label];
+  if (!items) return;
+  const el = document.getElementById(`smgmt-preflight-${label}`);
+  if (!el) return;
+  const html = _preflightBannerHtml(label, items);
+  if (html) el.outerHTML = html;
 }
 
 /** Run all checks for one sprint pane and inject/update the banner in the DOM. */
@@ -5709,6 +5831,9 @@ async function _preflightInjectBanner(label, tickets, repo) {
   }
 
   if (items.length === 0 || _preflightDismissed.has(label)) return;
+
+  // Cache for the show-more/less toggle (avoids recomputing async checks).
+  _preflightItemsCache[label] = items;
 
   const html = _preflightBannerHtml(label, items);
   if (!html) return;
@@ -9946,23 +10071,31 @@ function _bcPopulateRepo() {
   }
 }
 
+// Highlight a single chip (1=Input, 2=Review, 3=Created, 4=Estimate) and mark
+// earlier chips as completed so the rail reads as a progress trail.
+function _bcSetActiveChip(n) {
+  for (let i = 1; i <= 4; i++) {
+    const chip = document.getElementById(`bc-chip-${i}`);
+    if (!chip) continue;
+    chip.classList.toggle('active', i === n);
+    chip.classList.toggle('done', i < n);
+  }
+}
+
 function _bcShowStep(n) {
   const step1 = document.getElementById('bc-step1');
   const step2 = document.getElementById('bc-step2');
-  const chip1 = document.getElementById('bc-chip-1');
-  const chip2 = document.getElementById('bc-chip-2');
-  if (!step1 || !step2 || !chip1 || !chip2) return;
+  if (!step1 || !step2) return;
 
   if (n === 1) {
     step1.classList.remove('hidden');
     step2.classList.add('hidden');
-    chip1.classList.add('active');
-    chip2.classList.remove('active');
+    _bcSetActiveChip(1);
   } else {
     step1.classList.add('hidden');
     step2.classList.remove('hidden');
-    chip1.classList.remove('active');
-    chip2.classList.add('active');
+    // The active chip within step 2 is derived from job state in _bcRenderStep2.
+    _bcSetActiveChip(2);
   }
 }
 
@@ -10179,9 +10312,14 @@ function _bcUpdateBadge() {
   const sizeWarn       = tickets.filter(t => t.state === 'size_warning').length;
   const fullyDone      = sized + estimateFailed + failed;
 
+  const draftReady = tickets.filter(t => t.state === 'draft_ready').length;
+
   if (job.status === 'running') {
     badge.className = 'bc-tab-badge';
     badge.innerHTML = `<span class="bc-tab-badge-spin">&#x27F3;</span>${fullyDone}/${total}`;
+  } else if (job.status === 'drafts_ready') {
+    badge.className = 'bc-tab-badge bc-tab-badge--ready';
+    badge.textContent = draftReady > 0 ? `${draftReady} to review` : 'review';
   } else if (job.status === 'done' || job.status === 'stopped') {
     const issues = failed + sizeWarn + estimateFailed;
     if (issues > 0) {
@@ -10216,6 +10354,12 @@ function _bcConnectSSE(jobId) {
         _bcJobState.tickets[event.ticket.index] = event.ticket;
         _bcRenderStep2();
         _bcUpdateBadge();
+      } else if (event.type === 'job_drafts_ready' && _bcJobState) {
+        // BA finished drafting all tickets — backend is now waiting for the
+        // user to review and post selected drafts. Keep the SSE + job id alive.
+        _bcJobState.status = 'drafts_ready';
+        _bcRenderStep2();
+        _bcUpdateBadge();
       } else if (event.type === 'job_done' && _bcJobState) {
         _bcJobState.status = 'done';
         _bcRenderStep2();
@@ -10242,6 +10386,7 @@ function _bcRenderStep2() {
   const sized        = tickets.filter(t => t.state === 'sized').length;
   const estimateFailed = tickets.filter(t => t.state === 'estimate_failed').length;
   const drafting     = tickets.filter(t => t.state === 'drafting').length;
+  const draftReady   = tickets.filter(t => t.state === 'draft_ready').length;
   const pending      = tickets.filter(t => t.state === 'pending').length;
   const failed       = tickets.filter(t => t.state === 'failed').length;
   const skipped      = tickets.filter(t => t.state === 'skipped').length;
@@ -10250,13 +10395,37 @@ function _bcRenderStep2() {
   // Terminal states: sized, estimate_failed, failed, skipped
   const fullyDone    = sized + estimateFailed + failed + skipped;
 
+  // Drive the step rail (Input → Review → Created → Estimate) from job state.
+  const anyCreated   = created > 0 || estimating > 0 || sized > 0 || estimateFailed > 0;
+  const anyEstimate  = estimating > 0 || sized > 0 || estimateFailed > 0;
+  if (job.status === 'drafts_ready') {
+    _bcSetActiveChip(2);                 // waiting on user review
+  } else if (anyEstimate) {
+    _bcSetActiveChip(4);                 // estimation underway / done
+  } else if (anyCreated) {
+    _bcSetActiveChip(3);                 // issues being created
+  } else {
+    _bcSetActiveChip(2);                 // BA still drafting → review phase
+  }
+
   // Banner
   const banner = document.getElementById('bc-parallel-banner');
   if (banner) {
     if (job.status === 'running') {
-      banner.innerHTML = `BA is drafting ${total} tickets in parallel — ` +
-        `${sized + estimateFailed} done, ${drafting + estimating + created} running, ${pending} queued` +
-        `<span class="bc-concurrency-pill">concurrency: ${concurrency}</span>`;
+      if (anyCreated) {
+        banner.innerHTML = `Posting to GitHub & estimating — ` +
+          `${sized + estimateFailed} sized, ${drafting + estimating + created} in progress`;
+      } else {
+        banner.innerHTML = `BA is drafting ${total} tickets in parallel — ` +
+          `${draftReady} drafted, ${drafting + pending} remaining` +
+          `<span class="bc-concurrency-pill">concurrency: ${concurrency}</span>`;
+      }
+    } else if (job.status === 'drafts_ready') {
+      const postable = draftReady;
+      banner.innerHTML = postable > 0
+        ? `${postable} draft${postable > 1 ? 's' : ''} ready — review and post to GitHub.` +
+          (failed + skipped > 0 ? ` (${failed} failed, ${skipped} skipped)` : '')
+        : `No drafts ready to post. ${failed} failed, ${skipped} skipped.`;
     } else if (job.status === 'done') {
       if (sizeWarning > 0) {
         banner.innerHTML = `All tickets processed. ${sizeWarning} ticket${sizeWarning > 1 ? 's' : ''} need size remediation.`;
@@ -10310,19 +10479,45 @@ function _bcRenderStep2() {
   // Footer buttons
   const stopBtn      = document.getElementById('bc-stop-btn');
   const doneBtn      = document.getElementById('bc-done-btn');
+  const reviewBtn    = document.getElementById('bc-review-post-btn');
   const recreateBtn  = document.getElementById('bc-recreate-btn');
   const retryAllBtn  = document.getElementById('bc-retry-all-btn');
   if (stopBtn && doneBtn) {
     if (job.status === 'running') {
-      stopBtn.disabled = false;
+      // BA drafting, or posting/estimating after the user posted selections.
+      stopBtn.classList.remove('hidden');
+      stopBtn.disabled = anyCreated;   // can't stop once GitHub posting started
+      doneBtn.classList.remove('hidden');
       doneBtn.disabled = true;
-      doneBtn.textContent = 'Running...';
+      doneBtn.textContent = anyCreated ? 'Working…' : 'Drafting…';
+      if (reviewBtn) reviewBtn.classList.add('hidden');
+      if (recreateBtn) recreateBtn.classList.add('hidden');
+    } else if (job.status === 'drafts_ready') {
+      // Waiting for the user to review drafts and post the ones they want.
+      stopBtn.classList.add('hidden');
+      doneBtn.classList.add('hidden');
+      if (reviewBtn) {
+        reviewBtn.classList.remove('hidden');
+        reviewBtn.disabled = draftReady === 0;
+        reviewBtn.textContent = draftReady > 0
+          ? `Review & Post (${draftReady})`
+          : 'Review & Post';
+      }
       if (recreateBtn) recreateBtn.classList.add('hidden');
     } else {
-      stopBtn.disabled = true;
+      // done / stopped
+      stopBtn.classList.add('hidden');
+      doneBtn.classList.remove('hidden');
       doneBtn.disabled = false;
       doneBtn.textContent = 'Done';
-      doneBtn.onclick = () => { _bcShowStep(1); };
+      // Jump back to the Sprint Mgmt board and refresh it so the newly-created
+      // tickets show up in the backlog.
+      doneBtn.onclick = () => {
+        const wasLoaded = _sprintMgmtLoaded;
+        switchTab('sprint-mgmt');
+        if (wasLoaded) loadSprintMgmt(true);
+      };
+      if (reviewBtn) reviewBtn.classList.add('hidden');
       if (recreateBtn) recreateBtn.classList.remove('hidden');
     }
   }
@@ -10368,6 +10563,15 @@ function _bcRenderCard(t) {
     const now   = Date.now();
     const start = _bcStartTimes[t.index] || (t.started_at ? new Date(t.started_at).getTime() : now);
     label = `Started ${Math.round((now - start) / 1000)}s ago`;
+  } else if (t.state === 'draft_ready') {
+    const titleText = t.title ? escHtml(t.title) : `Ticket #${t.index + 1}`;
+    head    = `<span class="bc-card-title">${titleText}</span>`;
+    preview = escHtml((t.body_preview || t.body || '').slice(0, 200));
+    label   = 'Draft ready';
+    const sl = t.suggested_labels || [];
+    if (sl.length > 0) {
+      tags = `<div class="bc-card-tags">${sl.map(l => `<span class="bc-tag bc-tag--hash">#${escHtml(l)}</span>`).join('')}</div>`;
+    }
   } else if (t.state === 'created') {
     const issueUrl = t.issue_url || '#';
     head    = `<a class="bc-issue-badge" href="${escHtml(issueUrl)}" target="_blank" rel="noopener">#${t.issue_num}</a>`;
@@ -10412,36 +10616,18 @@ function _bcRenderCard(t) {
     }
     actions = `<a class="bc-action-btn" href="${escHtml(issueUrl)}" target="_blank" rel="noopener" title="Open on GitHub">&#x2197;</a>`;
   } else if (t.state === 'failed') {
-    label   = 'Failed';
-    // Expanded failed card: error banner + editable body + char counter + actions
+    // Failed during BA drafting (no valid draft produced). Retry re-runs the BA
+    // draft (→ draft_ready for review); it does NOT post to GitHub. Posting a
+    // failed ticket directly created empty issues, so that path is removed.
     const retryCount = t.retry_count || 0;
     const lastErr = t.last_error || t.error || '';
-    const bodyVal = escHtml(t.body || '');
-    const charLen = (t.body || '').length;
-    const GH_LIMIT = 65536;
-    const counterClass = charLen > GH_LIMIT ? 'bc-char-counter bc-char-counter--over' : 'bc-char-counter';
     const retryMetaHtml = retryCount > 0
       ? `<div class="bc-retry-meta">Retry #${retryCount} — last attempt: ${escHtml(lastErr.slice(0, 80))}</div>`
       : '';
-
-    // Build the expanded detail section (appended after the standard card body)
-    preview = escHtml((t.error || 'Unknown error').slice(0, 200));
-    actions = `<button class="bc-action-btn bc-action-btn--skip" title="Skip" onclick="bcSkipTicket(${t.index})">&#x00D7;</button>`;
-
-    // We'll return a custom card HTML for failed state
-    const titleText = t.title ? escHtml(t.title.slice(0, 80)) : '';
+    const titleText = t.title ? escHtml(t.title.slice(0, 80)) : escHtml((t.prompt || '').slice(0, 80));
     const headHtmlFailed = titleText
       ? `<div class="bc-card-head"><span class="bc-card-label">Failed</span><span class="bc-card-preview" style="flex:1;margin-left:6px;">${titleText}</span></div>`
       : `<div class="bc-card-head"><span class="bc-card-label">Failed</span></div>`;
-    const retryImgFile = _bcRetryFiles[t.index];
-    const imgChipHtml = retryImgFile
-      ? `<span class="bc-file-chip bc-file-chip--retry">
-           <span class="bc-file-chip-name">${escHtml(retryImgFile.name)}</span>
-           <button class="bc-file-chip-remove" onclick="_bcRetryRemoveImage(${t.index})" title="Remove">&times;</button>
-         </span>`
-      : `<button class="bc-btn-attach-img" onclick="_bcRetryPickImage(${t.index})">Attach image</button>
-         <input type="file" id="bc-retry-img-input-${t.index}" accept=".png,.jpg,.jpeg"
-                style="display:none" onchange="_bcRetryFileSelected(${t.index}, event)">`;
     return `
       <div class="bc-card bc-card--failed" id="bc-card-${t.index}">
         <div class="bc-status-dot bc-status-dot--failed"></div>
@@ -10450,12 +10636,8 @@ function _bcRenderCard(t) {
           <div class="bc-fail-detail">
             <div class="bc-fail-banner">${escHtml((t.error || 'Unknown error'))}</div>
             ${retryMetaHtml}
-            <textarea class="bc-fail-body-editor" id="bc-editor-${t.index}"
-              oninput="bcEditorInput(${t.index})">${bodyVal}</textarea>
-            <div class="${counterClass}" id="bc-counter-${t.index}">${charLen.toLocaleString()} / ${GH_LIMIT.toLocaleString()}</div>
-            <div class="bc-fail-img-row">${imgChipHtml}</div>
             <div class="bc-fail-actions">
-              <button class="bc-btn-retry-this" onclick="bcRetryWithBody(${t.index})">Retry this ticket</button>
+              <button class="bc-btn-retry-this" onclick="bcRetryTicket(${t.index})">Retry draft</button>
               <button class="bc-btn-skip-this" onclick="bcSkipTicket(${t.index})">Skip</button>
             </div>
           </div>
@@ -10518,6 +10700,97 @@ function _bcRenderCard(t) {
       </div>
       ${actions ? `<div class="bc-card-actions">${actions}</div>` : ''}
     </div>`;
+}
+
+// ── Review & post (issue #374 draft-review flow) ─────────────────────────────
+// Open the review overlay listing every draft_ready ticket with a checkbox so
+// the user can choose which drafts to post to GitHub.
+function bcReviewAndPost() {
+  if (!_bcJobState) return;
+  const drafts = (_bcJobState.tickets || []).filter(t => t.state === 'draft_ready');
+  const list = document.getElementById('bc-review-list');
+  const overlay = document.getElementById('bc-review-overlay');
+  if (!list || !overlay) return;
+  if (drafts.length === 0) return;
+
+  list.innerHTML = drafts.map(t => {
+    const title = t.title ? escHtml(t.title) : `Ticket #${t.index + 1}`;
+    // Effective labels = backlog + project defaults + BA-suggested (deduped).
+    const labels = _bcEffectiveLabels(t);
+    const labelsText = escHtml(['backlog', ...labels].join(', '));
+    return `<div class="bc-review-item">
+      <label class="bc-review-check-wrap">
+        <input type="checkbox" class="bc-review-check" data-index="${t.index}" checked onchange="_bcUpdatePostBtn()">
+        <span class="bc-review-title">${title}</span>
+      </label>
+      <span class="bc-review-labels">${labelsText}</span>
+    </div>`;
+  }).join('');
+
+  overlay.classList.remove('hidden');
+  _bcUpdatePostBtn();
+}
+
+// Project default labels + the BA's per-ticket suggestions, deduped. ("backlog"
+// is added by the backend, so it's not included here.)
+function _bcEffectiveLabels(t) {
+  const defaults = (_bcJobState && _bcJobState.default_labels) || [];
+  const suggested = (t && t.suggested_labels) || [];
+  return [...new Set([...defaults, ...suggested])];
+}
+
+function _bcUpdatePostBtn() {
+  const checked = document.querySelectorAll('.bc-review-check:checked').length;
+  const btn = document.getElementById('bc-post-github-btn');
+  if (btn) {
+    btn.disabled = checked === 0;
+    btn.textContent = checked > 0 ? `Post to GitHub (${checked})` : 'Post to GitHub';
+  }
+}
+
+function bcCancelReview() {
+  const overlay = document.getElementById('bc-review-overlay');
+  if (overlay) overlay.classList.add('hidden');
+}
+
+async function bcPostSelected() {
+  if (!_bcJobId || !_bcJobState) return;
+  const checks = Array.from(document.querySelectorAll('.bc-review-check:checked'));
+  if (checks.length === 0) return;
+
+  const ticketsPayload = checks.map(c => {
+    const idx = parseInt(c.dataset.index, 10);
+    const t = _bcJobState.tickets[idx] || {};
+    return { index: idx, labels: _bcEffectiveLabels(t) };
+  });
+
+  const btn = document.getElementById('bc-post-github-btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Posting…'; }
+
+  try {
+    const res = await fetch(`/api/tickets/bulk/${_bcJobId}/post-selected`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tickets: ticketsPayload }),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      if (btn) { btn.disabled = false; }
+      _bcUpdatePostBtn();
+      alert(data.detail || `Failed to post (server error ${res.status})`);
+      return;
+    }
+    // Backend flips the job to running and will stream created/estimating/done
+    // events. Reflect that locally so the footer leaves the review state at once.
+    bcCancelReview();
+    _bcJobState.status = 'running';
+    _bcRenderStep2();
+    _bcUpdateBadge();
+  } catch (e) {
+    if (btn) { btn.disabled = false; }
+    _bcUpdatePostBtn();
+    alert('Failed to post: ' + e.message);
+  }
 }
 
 async function bcSkipTicket(index) {
@@ -10626,25 +10899,21 @@ async function bcRetryWithBody(index) {
 async function bcRetryAllFailed() {
   if (!_bcJobId || !_bcJobState) return;
   const tickets = _bcJobState.tickets || [];
-
-  // Collect current body from each failed ticket's editor (or in-memory state)
-  const bodies = {};
-  tickets.forEach(t => {
-    if (t.state !== 'failed') return;
-    const editor = document.getElementById(`bc-editor-${t.index}`);
-    bodies[String(t.index)] = editor ? editor.value : (t.body || '');
-  });
-
-  if (Object.keys(bodies).length === 0) return;
+  const failedIdx = tickets.filter(t => t.state === 'failed').map(t => t.index);
+  if (failedIdx.length === 0) return;
 
   const btn = document.getElementById('bc-retry-all-btn');
   if (btn) { btn.disabled = true; }
 
+  // Re-run the BA draft for each failed ticket (→ draft_ready). This does NOT
+  // post to GitHub — failed tickets have no valid body and would post empty.
   try {
-    await fetch(`/api/tickets/bulk/${_bcJobId}/retry-all`, {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ bodies }),
-    });
+    await Promise.all(failedIdx.map(index =>
+      fetch(`/api/tickets/bulk/${_bcJobId}/retry`, {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ index }),
+      })
+    ));
   } catch (_) {}
 
   if (btn) { btn.disabled = false; }
@@ -10799,6 +11068,113 @@ function _smOnChange(sel) {
   saved[sel.dataset.agent] = sel.value;
   localStorage.setItem(SM_STORAGE_KEY, JSON.stringify(saved));
 }
+
+// ── Sprint status pill (GitHub-backed; works cross-machine while traveling) ──
+let _snavState = null;
+let _snavPanelOpen = false;
+
+function _snavRepo() {
+  return _cachedFullRepo[_slug] || '';
+}
+
+async function snavRefresh() {
+  const repo = _snavRepo();
+  if (!repo) return;
+  try {
+    const res = await fetch(`/api/sprint-nav-status?repo=${encodeURIComponent(repo)}`);
+    if (!res.ok) return;
+    _snavState = await res.json();
+    _snavRenderPill();
+    if (_snavPanelOpen) _snavRenderPanel();
+  } catch (_) { /* leave last-known pill state */ }
+}
+
+function _snavRenderPill() {
+  const pill = document.getElementById('snav-pill');
+  const dot  = document.getElementById('snav-dot');
+  const text = document.getElementById('snav-pill-text');
+  if (!pill || !dot || !text) return;
+  const d = _snavState;
+  if (!d || !d.has_sprint) { pill.classList.add('hidden'); return; }
+  pill.classList.remove('hidden');
+  if (d.state === 'finished') {
+    dot.className = 'snav-dot snav-dot--finished';
+    text.textContent = `S${d.sprint} · done`;
+  } else {
+    dot.className = 'snav-dot snav-dot--running';
+    const uatHtml = d.uat > 0 ? ` · <span class="snav-uat">${d.uat} UAT</span>` : '';
+    text.innerHTML = `S${d.sprint} · ${d.done}/${d.total}${uatHtml}`;
+  }
+}
+
+function snavTogglePanel(event) {
+  if (event) event.stopPropagation();
+  const panel = document.getElementById('snav-panel');
+  if (!panel) return;
+  _snavPanelOpen = panel.classList.contains('hidden'); // true if we're opening it
+  panel.classList.toggle('hidden');
+  if (_snavPanelOpen) _snavRenderPanel();
+}
+
+function _snavRenderPanel() {
+  const head = document.getElementById('snav-panel-head');
+  const body = document.getElementById('snav-panel-body');
+  const d = _snavState;
+  if (!head || !body) return;
+  if (!d || !d.has_sprint) {
+    head.textContent = 'Sprint status';
+    body.innerHTML = '<span class="snav-muted">No sprint found on GitHub yet.</span>';
+    return;
+  }
+  const stateLabel = d.state === 'finished' ? 'Finished' : 'Running';
+  head.innerHTML = `<span>Sprint ${d.sprint} · ${stateLabel}</span>`
+    + (d.summary_issue
+        ? `<a class="snav-link" href="${escHtml(d.summary_issue.url)}" target="_blank" rel="noopener">Summary issue ↗</a>`
+        : '');
+
+  const cols  = d.columns || {};
+  const total = d.total || 0;
+  const order = ['backlog', 'in-progress', 'sit', 'uat', 'done'];
+  const bars = order.map(k => {
+    const c = cols[k] || 0;
+    const pct = total > 0 ? Math.round((c / total) * 100) : 0;
+    return `<div class="snav-bar-row">
+      <span class="snav-bar-label">${k}</span>
+      <span class="snav-bar-track"><span class="snav-bar-fill" style="width:${pct}%"></span></span>
+      <span class="snav-bar-count">${c}</span>
+    </div>`;
+  }).join('');
+
+  const tail = (d.state === 'finished' && d.summary_issue)
+    ? `<div class="snav-summary-md" id="snav-summary-md"><span class="snav-muted">Loading summary…</span></div>`
+    : `<div class="snav-muted" style="margin-top:8px;">Live progress is inferred from GitHub labels (≈30s). The sprint itself runs on the Mac mini.</div>`;
+
+  body.innerHTML = `<div class="snav-bars">${bars}</div>${tail}`;
+
+  if (d.state === 'finished' && d.summary_issue) _snavLoadSummary(d.summary_issue.number);
+}
+
+async function _snavLoadSummary(number) {
+  const el = document.getElementById('snav-summary-md');
+  if (!el) return;
+  const repo = _snavRepo();
+  try {
+    const res = await fetch(`/api/sprint-nav-summary?number=${number}&repo=${encodeURIComponent(repo)}`);
+    if (!res.ok) { el.innerHTML = '<span class="snav-muted">Could not load summary.</span>'; return; }
+    const data = await res.json();
+    el.textContent = data.body || '(empty summary)';
+  } catch (_) {
+    el.innerHTML = '<span class="snav-muted">Could not load summary.</span>';
+  }
+}
+
+// Close the panel when clicking outside it.
+document.addEventListener('click', function(e) {
+  const wrap  = document.querySelector('.snav-wrap');
+  const panel = document.getElementById('snav-panel');
+  if (!wrap || !panel || panel.classList.contains('hidden')) return;
+  if (!wrap.contains(e.target)) { panel.classList.add('hidden'); _snavPanelOpen = false; }
+});
 
 document.addEventListener('DOMContentLoaded', init);
 

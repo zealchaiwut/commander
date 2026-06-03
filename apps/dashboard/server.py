@@ -1294,6 +1294,88 @@ def get_sprints():
         raise HTTPException(400, detail=str(e))
 
 
+@app.get("/api/sprint-nav-status")
+def get_sprint_nav_status(repo: str = ""):
+    """GitHub-backed sprint status for the nav-bar pill.
+
+    Read-only and derived entirely from GitHub labels/issues, so it works on a
+    machine that is NOT running the sprint (the runner's local state.json/PID
+    files are never shared cross-machine). Cached 30s via github_client.
+
+    A sprint is "finished" when its "Sprint N Executive Summary" issue exists
+    (label ``sprint-summary``); otherwise it is "running" and progress is
+    inferred from each ticket's workflow column.
+    """
+    repo_name = repo or None
+    try:
+        sprint_nums = github_client.list_sprints(repo_name=repo_name)
+    except subprocess.CalledProcessError as e:
+        raise _gh_error(e)
+    if not sprint_nums:
+        return {"has_sprint": False}
+
+    # Current sprint = highest-numbered sprint label that actually has issues.
+    current = None
+    raw_issues: list[dict] = []
+    for n in reversed(sprint_nums):
+        issues = github_client.list_issues(n, repo_name=repo_name)
+        if issues:
+            current = n
+            raw_issues = issues
+            break
+    if current is None:
+        return {"has_sprint": False}
+
+    # Split out the sprint-summary issue (it carries the sprint-N label too) so
+    # it doesn't inflate the work-ticket counts.
+    summary_issue = None
+    work_issues: list[dict] = []
+    for i in raw_issues:
+        labels = {l["name"] for l in i.get("labels", [])}
+        if "sprint-summary" in labels:
+            summary_issue = {
+                "number": i.get("number"),
+                "url": i.get("url"),
+                "title": i.get("title"),
+            }
+        else:
+            work_issues.append(i)
+
+    columns = {"backlog": 0, "in-progress": 0, "sit": 0, "uat": 0, "done": 0}
+    for i in work_issues:
+        col = i.get("column", "backlog")
+        columns[col] = columns.get(col, 0) + 1
+
+    return {
+        "has_sprint": True,
+        "repo": github_client.get_repo_for_operation(repo_name),
+        "sprint": current,
+        "state": "finished" if summary_issue else "running",
+        "total": len(work_issues),
+        "done": columns["done"],
+        "uat": columns["uat"],
+        "columns": columns,
+        "summary_issue": summary_issue,
+    }
+
+
+@app.get("/api/sprint-nav-summary")
+def get_sprint_nav_summary(number: int, repo: str = ""):
+    """Return a sprint-summary issue's markdown body (GitHub-backed), fetched on
+    demand when the user opens the nav panel."""
+    repo_name = repo or None
+    try:
+        issue = github_client.get_issue(number, repo_name=repo_name)
+    except subprocess.CalledProcessError as e:
+        raise _gh_error(e)
+    return {
+        "number": issue.get("number"),
+        "title": issue.get("title"),
+        "url": issue.get("url"),
+        "body": issue.get("body") or "",
+    }
+
+
 @app.get("/api/issues")
 def get_issues(sprint: Optional[int] = None):
     try:
@@ -6941,6 +7023,45 @@ def _parse_ba_draft(output: str) -> tuple[str, str, bool]:
     return first_line or "Draft Ticket", output, False
 
 
+def _extract_ba_labels(output: str, allowed: set[str]) -> list[str]:
+    """Extract a 'labels' array from BA JSON output, keeping only labels that
+    already exist in the repo (`allowed`). Returns [] on any parse failure or
+    when no allowed set is provided — BA never invents new repo labels.
+    """
+    if not allowed:
+        return []
+    clean = re.sub(r"^```(?:json)?\s*", "", output.strip(), flags=re.MULTILINE)
+    clean = re.sub(r"\s*```\s*$", "", clean.strip(), flags=re.MULTILINE)
+    clean = clean.strip()
+
+    data = None
+    try:
+        data = json.loads(clean)
+    except json.JSONDecodeError:
+        start = clean.find("{")
+        end = clean.rfind("}")
+        if start >= 0 and end > start:
+            try:
+                data = json.loads(clean[start : end + 1])
+            except json.JSONDecodeError:
+                data = None
+
+    if not isinstance(data, dict):
+        return []
+    raw = data.get("labels", [])
+    if not isinstance(raw, list):
+        return []
+
+    result: list[str] = []
+    seen: set[str] = set()
+    for lbl in raw:
+        name = str(lbl).strip()
+        if name in allowed and name not in seen:
+            seen.add(name)
+            result.append(name)
+    return result
+
+
 @app.post("/api/tickets/draft")
 async def create_ticket_draft(
     description: str = Form(...),
@@ -7547,6 +7668,25 @@ async def _run_single_ba_ticket(
     _persist_bulk_job(job)
     await _broadcast_bulk_event(job_id, {"type": "ticket_update", "ticket": dict(ticket)})
 
+    allowed_labels = list(job.get("allowed_labels") or [])
+    if allowed_labels:
+        labels_clause = (
+            "\nAvailable repo labels (pick ONLY from these, do not invent new ones): "
+            + ", ".join(allowed_labels) + "\n"
+        )
+        json_spec = (
+            'Output ONLY valid JSON with these fields: "title" (string), '
+            '"body" (string, GitHub-flavored markdown), and "labels" (array of 1-3 '
+            "strings chosen ONLY from the available repo labels above that best "
+            "categorize this ticket — use [] if none clearly fit). No text outside the JSON."
+        )
+    else:
+        labels_clause = ""
+        json_spec = (
+            'Output ONLY valid JSON with exactly two string fields: "title" and "body".\n'
+            "The body field must be GitHub-flavored markdown. No text outside the JSON."
+        )
+
     prompt_text = (
         "You are a BA (Business Analyst) agent writing a GitHub issue.\n\n"
         f"User description: {prompt}\n\n"
@@ -7555,9 +7695,9 @@ async def _run_single_ba_ticket(
         "  - ## What & Why (1-3 sentences)\n"
         "  - ## Acceptance Criteria (checkbox list, specific and testable)\n"
         "  - ## UAT Test Steps (numbered, each with Expected: line)\n"
-        "  - ## Out of Scope (brief list)\n\n"
-        'Output ONLY valid JSON with exactly two string fields: "title" and "body".\n'
-        "The body field must be GitHub-flavored markdown. No text outside the JSON."
+        "  - ## Out of Scope (brief list)\n"
+        + labels_clause + "\n"
+        + json_spec
     )
 
     cmd = [
@@ -7630,6 +7770,7 @@ async def _run_single_ba_ticket(
     # Store draft result — issue creation happens in-order via the flusher
     ticket["title"] = title
     ticket["body"] = body
+    ticket["suggested_labels"] = _extract_ba_labels(output, set(allowed_labels))
     ticket["state"] = "draft_ready"  # internal state — flusher picks up from here
     ticket["finished_at"] = datetime.now(timezone.utc).isoformat()
     ticket["_default_labels"] = default_labels
@@ -7871,10 +8012,18 @@ async def bulk_create_start(
             detail=f"Batch limit is {_MAX_BULK_PROMPTS} prompts (got {len(clean_prompts)})"
         )
 
+    # Fetch the repo's labels once: used to (a) validate default_labels and
+    # (b) give the BA the existing label set so it can suggest labels per ticket
+    # without ever inventing new ones.
+    try:
+        existing_label_names = sorted(lbl["name"] for lbl in github_client.list_labels(repo_name=repo))
+    except Exception:
+        existing_label_names = []
+    existing_label_set = set(existing_label_names)
+
     # Validate default_labels — each must already exist in the repo
-    if default_labels_list:
-        existing_labels = {lbl["name"] for lbl in github_client.list_labels(repo_name=repo)}
-        bad = [lbl for lbl in default_labels_list if lbl not in existing_labels]
+    if default_labels_list and existing_label_set:
+        bad = [lbl for lbl in default_labels_list if lbl not in existing_label_set]
         if bad:
             raise HTTPException(
                 422,
@@ -7947,6 +8096,7 @@ async def bulk_create_start(
             "issue_num": None,
             "issue_url": None,
             "label_pills": None,
+            "suggested_labels": None,
             "error": None,
             "attachment_warning": None,
             "started_at": None,
@@ -7962,6 +8112,7 @@ async def bulk_create_start(
         "status": "running",
         "repo": repo,
         "default_labels": default_labels_list,
+        "allowed_labels": existing_label_names,
         "concurrency": concurrency,
         "created_at": now,
         "stop_requested": False,
@@ -8005,6 +8156,7 @@ async def bulk_get_job(job_id: str):
         "job_id": job["job_id"],
         "status": job["status"],
         "concurrency": job["concurrency"],
+        "default_labels": job.get("default_labels", []),
         "tickets": tickets,
     }
 

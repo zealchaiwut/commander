@@ -783,6 +783,7 @@
       .sub-tabs { position: static; }
       .main-area { overflow-y: visible; }
       .proj-header { position: static; }
+      .smgmt-sticky-area { position: static; }
       .tickets-grid { grid-template-columns: 1fr; }
       .tickets-main { border-right: none; border-bottom: 1px solid var(--border); }
     }
@@ -797,19 +798,23 @@
       color: var(--text-sub); font-size: 13px; padding: 48px 0; text-align: center;
     }
 
+    /* ── Sprint Mgmt sticky area (toolbar + label filters) ── */
+    .smgmt-sticky-area {
+      position: sticky;
+      top: var(--proj-header-height, 88px);
+      z-index: 15;
+      background: var(--bg);
+      box-shadow: none;
+      transition: box-shadow .15s;
+    }
+    .smgmt-sticky-area.scrolled {
+      box-shadow: 0 2px 4px rgba(0,0,0,0.04);
+    }
     /* ── Sprint Mgmt toolbar ── */
     .smgmt-toolbar {
       display: flex; align-items: center; justify-content: space-between;
       padding: 14px 28px;
       background: var(--bg);
-      position: sticky;
-      top: var(--proj-header-height, 88px); /* placed after sub-tab strip */
-      z-index: 15;
-      box-shadow: none;
-      transition: box-shadow .15s;
-    }
-    .smgmt-toolbar.scrolled {
-      box-shadow: 0 2px 4px rgba(0,0,0,0.04);
     }
     .smgmt-toolbar-title {
       font-size: 15px; font-weight: 700; color: var(--text); line-height: 1;
@@ -928,6 +933,82 @@
     .smgmt-content {
       padding: 0 28px 28px;
     }
+    /* ── Label filter chip row (issue #546) ── */
+    .smgmt-label-filter-row {
+      display: flex; flex-wrap: wrap; gap: 6px;
+      padding: 10px 28px 4px;
+    }
+    .smgmt-label-filter-row.is-empty { display: none; }
+    .smgmt-lf-chip {
+      display: inline-flex; align-items: center; gap: 5px;
+      padding: 3px 9px; border-radius: 20px; font-size: 12px; font-weight: 500;
+      border: 1px solid var(--border); background: var(--surface-2); color: var(--text);
+      cursor: pointer; user-select: none; transition: background .12s, border-color .12s, color .12s, opacity .12s;
+      white-space: nowrap;
+    }
+    .smgmt-lf-chip:hover { border-color: var(--text-muted); }
+    .smgmt-lf-chip.is-active { background: var(--blue-bg); border-color: var(--blue); color: var(--blue); }
+    .smgmt-lf-chip.is-inactive { opacity: .45; }
+    .smgmt-lf-chip-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+    /* ── Compact/dense view toggle (issue #547) ── */
+    #pane-sprint-mgmt.smgmt-compact .smgmt-ticket {
+      padding: 5px 10px;
+    }
+    #pane-sprint-mgmt.smgmt-compact .smgmt-ticket-size-pill,
+    #pane-sprint-mgmt.smgmt-compact .smgmt-ticket-status,
+    #pane-sprint-mgmt.smgmt-compact .btn-view-log,
+    #pane-sprint-mgmt.smgmt-compact .smgmt-ticket-indicator,
+    #pane-sprint-mgmt.smgmt-compact .smgmt-ticket-agent-tag,
+    #pane-sprint-mgmt.smgmt-compact .smgmt-ticket-elapsed,
+    #pane-sprint-mgmt.smgmt-compact .smgmt-reestimate-btn,
+    #pane-sprint-mgmt.smgmt-compact .smgmt-retry-pill,
+    #pane-sprint-mgmt.smgmt-compact .smgmt-moveto-pill {
+      display: none !important;
+    }
+
+    /* ── Keyboard navigation focus ring (issue #549) ── */
+    .smgmt-ticket.smgmt-kb-focused {
+      outline: 3px solid var(--blue);
+      outline-offset: -2px;
+      position: relative;
+      z-index: 2;
+      box-shadow: 0 0 0 5px var(--blue-bg);
+    }
+
+    /* ── Search/filter bar (issue #552) ── */
+    .smgmt-filter-bar {
+      display: flex; align-items: center; gap: 8px;
+      padding: 0 28px 10px;
+    }
+    .smgmt-filter-input-wrap {
+      position: relative; flex: 1; max-width: 400px;
+    }
+    .smgmt-filter-input {
+      width: 100%; height: 32px;
+      padding: 0 30px 0 10px;
+      border: 1px solid var(--border); border-radius: 6px;
+      background: var(--surface-2); color: var(--text);
+      font-size: 13px; font-family: inherit;
+      outline: none; box-sizing: border-box;
+      transition: border-color .12s, background .12s;
+    }
+    .smgmt-filter-input:focus { border-color: var(--blue); background: var(--surface); }
+    .smgmt-filter-input::placeholder { color: var(--text-muted); }
+    .smgmt-filter-clear-btn {
+      position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
+      background: none; border: none; padding: 2px 4px;
+      color: var(--text-muted); cursor: pointer; font-size: 16px; line-height: 1;
+      display: none;
+    }
+    .smgmt-filter-clear-btn:hover { color: var(--text); }
+    .smgmt-filter-clear-btn.visible { display: block; }
+    .smgmt-filter-empty-state {
+      display: none; padding: 12px 14px;
+      font-size: 12px; color: var(--text-muted);
+      font-style: italic; text-align: center;
+    }
+    .smgmt-filter-empty-state.visible { display: block; }
+
     .smgmt-sprint-list {
       display: flex; flex-direction: column; gap: 12px;
       margin-top: 16px;
@@ -947,6 +1028,32 @@
       font-size: 11px; color: var(--text-sub); font-weight: 400;
     }
     .smgmt-sprint-header { justify-content: space-between; }
+    .smgmt-sprint-summary {
+      margin: 6px 0 4px;
+      display: flex; flex-direction: column; gap: 4px;
+    }
+    .smgmt-progress-row {
+      display: flex; align-items: center; gap: 8px;
+    }
+    .smgmt-progress-bar-wrap {
+      flex: 1; height: 5px;
+      background: var(--surface-2, #e5e7eb);
+      border-radius: 3px; overflow: hidden;
+    }
+    .smgmt-progress-bar-fill {
+      height: 100%; background: var(--green);
+      border-radius: 3px; transition: width .3s ease;
+      min-width: 0;
+    }
+    .smgmt-progress-label {
+      font-size: 11px; color: var(--text-sub);
+      white-space: nowrap; flex-shrink: 0;
+    }
+    .smgmt-sprint-goal-text {
+      font-size: 12px; color: var(--text-muted);
+      font-style: italic;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
     .smgmt-sprint-header-left {
       display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0;
     }
@@ -1016,6 +1123,19 @@
     }
     .smgmt-sprint-header-left:hover .smgmt-rename-btn { opacity: 1; }
     .smgmt-rename-btn:hover { color: var(--blue); }
+    /* ── Sprint column collapse toggle ── */
+    .smgmt-collapse-btn {
+      background: none; border: none; cursor: pointer; padding: 0 2px;
+      color: var(--text-muted); font-size: 14px; display: inline-flex; align-items: center;
+      flex-shrink: 0; border-radius: 4px; line-height: 1;
+    }
+    .smgmt-collapse-btn:hover { color: var(--text); background: var(--surface-2); }
+    .smgmt-collapse-btn .ti { transition: transform .18s; }
+    .smgmt-sprint-card.smgmt-collapsed .smgmt-collapse-btn .ti { transform: rotate(-90deg); }
+    .smgmt-sprint-card.smgmt-collapsed > *:not(.smgmt-sprint-header):not(.smgmt-running-stripe) {
+      display: none;
+    }
+    .smgmt-sprint-card.smgmt-collapsed .smgmt-sprint-header { margin-bottom: 0; }
     .smgmt-rename-wrap {
       display: inline-flex; align-items: center; gap: 2px;
     }
@@ -1073,7 +1193,10 @@
     }
     .smgmt-ticket[draggable="false"] .smgmt-ticket-grip { opacity: 0 !important; cursor: default; }
     .smgmt-ticket-grip:active { cursor: grabbing; }
-    .smgmt-ticket-cb { cursor: pointer; flex-shrink: 0; }
+    .smgmt-ticket-cb { cursor: pointer; flex-shrink: 0; opacity: 0; transition: opacity .12s; }
+    .smgmt-ticket:hover .smgmt-ticket-cb,
+    .smgmt-ticket.is-selected .smgmt-ticket-cb,
+    .smgmt-sprint-list.has-selection .smgmt-ticket-cb { opacity: 1; }
     .smgmt-ticket-num {
       font-family: var(--mono); font-size: 12px; color: var(--text-sub);
       text-decoration: none; flex-shrink: 0; min-width: 42px;
@@ -1907,6 +2030,39 @@
     .smgmt-row-menu-item.is-danger:hover { background: var(--red-bg); }
     .smgmt-row-menu-divider { border-top: 1px solid var(--border); margin: 4px 0; }
 
+    /* ── Per-column sort control (issue #550) ── */
+    .smgmt-sort-btn {
+      display: inline-flex; align-items: center; gap: 4px;
+      padding: 0 8px; height: 26px;
+      background: none; border: 1px solid var(--border); border-radius: 5px;
+      color: var(--text-muted); cursor: pointer; font-size: 12px; font-family: inherit;
+      transition: background .15s, color .15s, border-color .15s;
+      white-space: nowrap; flex-shrink: 0;
+    }
+    .smgmt-sort-btn:hover, .smgmt-sort-btn[aria-expanded="true"] {
+      background: var(--surface-hover); color: var(--text); border-color: var(--border-strong, var(--border));
+    }
+    .smgmt-sort-btn.is-active { color: var(--blue); border-color: var(--blue); }
+    .smgmt-sort-btn .ti { font-size: 13px; }
+    .smgmt-sort-menu {
+      position: fixed; z-index: 520;
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 8px; box-shadow: 0 6px 20px rgba(0,0,0,.16);
+      min-width: 160px; padding: 4px 0;
+    }
+    .smgmt-sort-menu.hidden { display: none; }
+    .smgmt-sort-menu-item {
+      display: flex; align-items: center; gap: 8px; width: 100%;
+      text-align: left; padding: 7px 12px; font-size: 13px;
+      background: none; border: none; color: var(--text);
+      cursor: pointer; font-family: inherit;
+    }
+    .smgmt-sort-menu-item:hover { background: var(--surface-hover); }
+    .smgmt-sort-menu-item.is-active { color: var(--blue); }
+    .smgmt-sort-menu-item .ti { font-size: 14px; color: var(--text-muted); width: 15px; flex-shrink: 0; }
+    .smgmt-sort-menu-item.is-active .ti { color: var(--blue); }
+    .smgmt-sort-menu-divider { border-top: 1px solid var(--border); margin: 4px 0; }
+
     /* "Move to" modal options */
     .mt-modal { min-width: 320px; max-width: 420px; }
     .mt-options { display: flex; flex-direction: column; gap: 4px; margin-top: 12px; }
@@ -2182,6 +2338,19 @@
       font-family: var(--mono);
       background: var(--surface-2); color: var(--text-sub);
     }
+    .smgmt-ticket-size-pill--S  { background: #dcfce7; color: #166534; }
+    .smgmt-ticket-size-pill--M  { background: #dbeafe; color: #1e40af; }
+    .smgmt-ticket-size-pill--L  { background: #fef9c3; color: #854d0e; }
+    .smgmt-ticket-size-pill--XL { background: #fee2e2; color: #991b1b; }
+    .smgmt-ticket-size-pill--unestimated {
+      background: var(--surface-2); color: #4b5563;
+      border: 1px dashed var(--border); font-weight: 600;
+    }
+    [data-theme="dark"] .smgmt-ticket-size-pill--S  { background: #14532d; color: #86efac; }
+    [data-theme="dark"] .smgmt-ticket-size-pill--M  { background: #1e3a5f; color: #93c5fd; }
+    [data-theme="dark"] .smgmt-ticket-size-pill--L  { background: #422006; color: #fde68a; }
+    [data-theme="dark"] .smgmt-ticket-size-pill--XL { background: #450a0a; color: #fca5a5; }
+    [data-theme="dark"] .smgmt-ticket-size-pill--unestimated { color: #9ca3af; }
 
     /* Retry estimation pill and spinner (issue #451) */
     .smgmt-retry-pill {
@@ -3553,53 +3722,80 @@
           </div>
         </div>
 
-        <!-- Toolbar -->
-        <div class="smgmt-toolbar" id="smgmt-toolbar">
-          <span class="smgmt-toolbar-title">Sprint Management</span>
-          <div class="smgmt-toolbar-actions">
-            <!-- Auto-refresh pill (issue #275) -->
-            <div class="smgmt-ar-pill-wrap" id="smgmt-ar-pill-wrap">
-              <button class="smgmt-ar-pill is-on" id="smgmt-ar-pill"
-                      onclick="_smgmtArPillClick(event)" aria-haspopup="true" aria-expanded="false"
-                      aria-label="Auto-refresh interval">
-                <i class="ti ti-refresh"></i>
-                <span id="smgmt-ar-pill-label">15s</span>
-                <i class="ti ti-chevron-down smgmt-ar-chevron"></i>
-              </button>
-              <div class="smgmt-ar-menu hidden" id="smgmt-ar-menu" role="menu">
-                <button class="smgmt-ar-menu-item" data-interval="5"  onclick="_smgmtArSelect(5)">5s</button>
-                <button class="smgmt-ar-menu-item" data-interval="15" onclick="_smgmtArSelect(15)">15s</button>
-                <button class="smgmt-ar-menu-item" data-interval="30" onclick="_smgmtArSelect(30)">30s</button>
-                <button class="smgmt-ar-menu-item" data-interval="60" onclick="_smgmtArSelect(60)">1m</button>
-                <div class="smgmt-ar-menu-divider"></div>
-                <button class="smgmt-ar-menu-item smgmt-ar-turn-off" onclick="_smgmtArTurnOff()">Turn off</button>
+        <!-- Sticky area: toolbar + label filters stick together below the project header -->
+        <div class="smgmt-sticky-area" id="smgmt-sticky-area">
+          <!-- Toolbar -->
+          <div class="smgmt-toolbar" id="smgmt-toolbar">
+            <span class="smgmt-toolbar-title">Sprint Management</span>
+            <div class="smgmt-toolbar-actions">
+              <!-- Auto-refresh pill (issue #275) -->
+              <div class="smgmt-ar-pill-wrap" id="smgmt-ar-pill-wrap">
+                <button class="smgmt-ar-pill is-on" id="smgmt-ar-pill"
+                        onclick="_smgmtArPillClick(event)" aria-haspopup="true" aria-expanded="false"
+                        aria-label="Auto-refresh interval">
+                  <i class="ti ti-refresh"></i>
+                  <span id="smgmt-ar-pill-label">15s</span>
+                  <i class="ti ti-chevron-down smgmt-ar-chevron"></i>
+                </button>
+                <div class="smgmt-ar-menu hidden" id="smgmt-ar-menu" role="menu">
+                  <button class="smgmt-ar-menu-item" data-interval="5"  onclick="_smgmtArSelect(5)">5s</button>
+                  <button class="smgmt-ar-menu-item" data-interval="15" onclick="_smgmtArSelect(15)">15s</button>
+                  <button class="smgmt-ar-menu-item" data-interval="30" onclick="_smgmtArSelect(30)">30s</button>
+                  <button class="smgmt-ar-menu-item" data-interval="60" onclick="_smgmtArSelect(60)">1m</button>
+                  <div class="smgmt-ar-menu-divider"></div>
+                  <button class="smgmt-ar-menu-item smgmt-ar-turn-off" onclick="_smgmtArTurnOff()">Turn off</button>
+                </div>
               </div>
+              <!-- Pre-flight checks show/hide toggle -->
+              <button class="btn-ghost smgmt-preflight-toggle" id="smgmt-preflight-toggle"
+                      onclick="_smgmtTogglePreflight()" aria-pressed="true"
+                      title="Pre-flight checks on — click to hide banners">
+                <i class="ti ti-checklist"></i>
+                <span id="smgmt-preflight-toggle-label">Pre-flight: on</span>
+              </button>
+              <!-- Compact/dense view toggle (issue #547) -->
+              <button class="btn-ghost" id="smgmt-density-toggle"
+                      onclick="_smgmtDensityToggle()" aria-pressed="false"
+                      title="Compact view — click to toggle"
+                      aria-label="Compact view">
+                <i class="ti ti-layout-list"></i>
+                <span id="smgmt-density-label">Compact</span>
+              </button>
+              <button class="btn-ghost" id="smgmt-cleanup-empty-btn"
+                      onclick="_smgmtCleanupEmpty()" title="Delete sprint labels with no tickets"
+                      aria-label="Clean up empty sprints" style="display:none">
+                <i class="ti ti-trash"></i>
+                Clean up empty sprints
+              </button>
+              <button class="btn-ghost" id="smgmt-new-ticket-btn"
+                      onclick="smgmtOpenNewTicket()" title="Create a new ticket"
+                      aria-label="New Ticket">
+                <i class="ti ti-plus"></i>
+                New Ticket
+              </button>
+              <button class="btn-primary" id="smgmt-new-sprint-btn"
+                      onclick="smgmtOpenNewSprint()" title="Create a new sprint"
+                      aria-label="New Sprint">
+                <i class="ti ti-plus"></i>
+                New Sprint
+              </button>
             </div>
-            <!-- Pre-flight checks show/hide toggle -->
-            <button class="btn-ghost smgmt-preflight-toggle" id="smgmt-preflight-toggle"
-                    onclick="_smgmtTogglePreflight()" aria-pressed="true"
-                    title="Pre-flight checks on — click to hide banners">
-              <i class="ti ti-checklist"></i>
-              <span id="smgmt-preflight-toggle-label">Pre-flight: on</span>
-            </button>
-            <button class="btn-ghost" id="smgmt-cleanup-empty-btn"
-                    onclick="_smgmtCleanupEmpty()" title="Delete sprint labels with no tickets"
-                    aria-label="Clean up empty sprints" style="display:none">
-              <i class="ti ti-trash"></i>
-              Clean up empty sprints
-            </button>
-            <button class="btn-ghost" id="smgmt-new-ticket-btn"
-                    onclick="smgmtOpenNewTicket()" title="Create a new ticket"
-                    aria-label="New Ticket">
-              <i class="ti ti-plus"></i>
-              New Ticket
-            </button>
-            <button class="btn-primary" id="smgmt-new-sprint-btn"
-                    onclick="smgmtOpenNewSprint()" title="Create a new sprint"
-                    aria-label="New Sprint">
-              <i class="ti ti-plus"></i>
-              New Sprint
-            </button>
+          </div>
+
+          <!-- Label filter chips (issue #546) — inside sticky area so they scroll with toolbar -->
+          <div class="smgmt-label-filter-row is-empty" id="smgmt-label-filter-row" role="toolbar" aria-label="Filter by label"></div>
+
+          <!-- Search/filter bar (issue #552) -->
+          <div class="smgmt-filter-bar" id="smgmt-filter-bar">
+            <div class="smgmt-filter-input-wrap">
+              <input type="search" class="smgmt-filter-input" id="smgmt-filter-input"
+                     placeholder="Filter tickets by title, #number, or label…"
+                     aria-label="Filter tickets by title, issue number, or label"
+                     autocomplete="off" spellcheck="false"
+                     oninput="_smgmtFilterApply()">
+              <button class="smgmt-filter-clear-btn" id="smgmt-filter-clear-btn"
+                      onclick="_smgmtFilterClear()" title="Clear filter" aria-label="Clear filter">×</button>
+            </div>
           </div>
         </div>
 
@@ -3653,6 +3849,9 @@
 
         <!-- Ticket row context menu (issue #500) -->
         <div class="smgmt-ctx-menu hidden" id="smgmt-ctx-menu" role="menu"></div>
+
+        <!-- Per-column sort menu (issue #550) -->
+        <div class="smgmt-sort-menu hidden" id="smgmt-sort-menu" role="menu" aria-label="Sort column"></div>
 
       </div>
 
@@ -5473,6 +5672,9 @@ async function init() {
   // Set up sticky toolbar shadow
   _smgmtInitScrollShadow();
 
+  // Restore compact/dense density from localStorage (issue #547)
+  _smgmtDensityInit();
+
   // Load data in parallel
   await Promise.all([
     loadHomeData(false),
@@ -5517,23 +5719,23 @@ async function init() {
 }
 
 // ── Sprint Mgmt toolbar height calculation ─────────────────────────────────
-// Compute top offset for the sticky toolbar (proj-header height)
+// Compute top offset for the sticky area (proj-header height)
 function _smgmtUpdateToolbarTop() {
-  const header = document.getElementById('proj-header');
-  const toolbar = document.getElementById('smgmt-toolbar');
-  if (header && toolbar) {
-    toolbar.style.top = header.offsetHeight + 'px';
+  const header     = document.getElementById('proj-header');
+  const stickyArea = document.getElementById('smgmt-sticky-area');
+  if (header && stickyArea) {
+    stickyArea.style.top = header.offsetHeight + 'px';
   }
 }
 
 // ── Sprint Mgmt scroll-shadow ─────────────────────────────────────────────
 function _smgmtInitScrollShadow() {
-  const mainArea = document.getElementById('main-area');
-  const toolbar  = document.getElementById('smgmt-toolbar');
-  if (!mainArea || !toolbar) return;
+  const mainArea   = document.getElementById('main-area');
+  const stickyArea = document.getElementById('smgmt-sticky-area');
+  if (!mainArea || !stickyArea) return;
 
   mainArea.addEventListener('scroll', function() {
-    toolbar.classList.toggle('scrolled', mainArea.scrollTop > 4);
+    stickyArea.classList.toggle('scrolled', mainArea.scrollTop > 4);
   }, { passive: true });
 }
 
@@ -5788,11 +5990,295 @@ function _smgmtRender(data) {
   // Load estimated hours from .commander/estimates/ for each sprint header
   _smgmtLoadEstimates(orderedLabels, bySprint);
 
+  // Load sprint goals for header summary
+  _smgmtLoadGoals(orderedLabels);
+
   // Inject pre-flight check banners for non-running sprint panes (issue #434)
   _preflightLoadBanners(orderedLabels, bySprint);
 
   // Update cleanup button visibility (issue #457)
   _smgmtUpdateCleanupBtn(data);
+
+  // Render label filter chips and re-apply current filter state (issue #546)
+  _smgmtLabelFilterRender(issues);
+  _smgmtLabelFilterApply();
+
+  // Restore keyboard navigation focus ring after DOM rebuild (issue #549)
+  _smgmtKbRestoreFocus();
+
+  // Restore per-column sort state (issue #550)
+  orderedLabels.forEach(lbl => _smgmtApplySort(lbl));
+
+  // Re-apply search filter after DOM rebuild (issue #552)
+  _smgmtFilterApply();
+}
+
+// ── Per-column sort controls (issue #550) ────────────────────────────────────
+
+const _SMGMT_SIZE_ORDER = { S: 1, M: 2, L: 3, XL: 4 };
+
+const _SMGMT_SORT_LABELS = {
+  'default':      'Sort',
+  'number:asc':   'Issue # ↑',
+  'number:desc':  'Issue # ↓',
+  'size:asc':     'Size ↑',
+  'size:desc':    'Size ↓',
+  'title:asc':    'A → Z',
+  'title:desc':   'Z → A',
+};
+
+function _smgmtGetSortState(label) {
+  try {
+    const v = sessionStorage.getItem('smgmt-sort-' + label);
+    return v ? JSON.parse(v) : null;
+  } catch (_) { return null; }
+}
+
+function _smgmtSetSortState(label, state) {
+  try {
+    if (state) sessionStorage.setItem('smgmt-sort-' + label, JSON.stringify(state));
+    else sessionStorage.removeItem('smgmt-sort-' + label);
+  } catch (_) {}
+}
+
+function _smgmtSortBtnHtml(label) {
+  const state = _smgmtGetSortState(label);
+  const key   = state ? `${state.field}:${state.dir}` : 'default';
+  const isActive = !!state;
+  const btnLabel = _SMGMT_SORT_LABELS[key] || 'Sort';
+  const safeLabel = escHtml(label);
+  const dispLabel = escHtml(sprintLabelDisplay(label));
+  return `<button class="smgmt-sort-btn${isActive ? ' is-active' : ''}"
+    id="smgmt-sort-btn-${safeLabel}"
+    aria-haspopup="true" aria-expanded="false"
+    aria-label="Sort ${dispLabel} tickets, current order: ${escHtml(btnLabel)}"
+    title="Sort tickets in this column"
+    onclick="event.stopPropagation();smgmtOpenSortMenu('${safeLabel}',this)"
+    onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();smgmtOpenSortMenu('${safeLabel}',this);}">
+    <i class="ti ti-arrows-sort" aria-hidden="true"></i>${isActive ? ' ' + escHtml(btnLabel) : ' Sort'}
+  </button>`;
+}
+
+function smgmtOpenSortMenu(label, btn) {
+  _smgmtCloseSortMenu();
+  const state = _smgmtGetSortState(label);
+  const cur   = state ? `${state.field}:${state.dir}` : 'default';
+
+  const items = [
+    { key: 'default',     icon: 'ti-list',                    text: 'Default order' },
+    null,
+    { key: 'number:asc',  icon: 'ti-sort-ascending-numbers',  text: 'Issue # ↑' },
+    { key: 'number:desc', icon: 'ti-sort-descending-numbers', text: 'Issue # ↓' },
+    null,
+    { key: 'size:asc',    icon: 'ti-sort-ascending-letters',  text: 'Size S → XL' },
+    { key: 'size:desc',   icon: 'ti-sort-descending-letters', text: 'Size XL → S' },
+    null,
+    { key: 'title:asc',   icon: 'ti-sort-ascending-letters',  text: 'Title A → Z' },
+    { key: 'title:desc',  icon: 'ti-sort-descending-letters', text: 'Title Z → A' },
+  ];
+
+  const menu = document.getElementById('smgmt-sort-menu');
+  const safeLabel = escHtml(label);
+  menu.innerHTML = items.map(item => {
+    if (!item) return '<div class="smgmt-sort-menu-divider" role="separator"></div>';
+    const isActive = item.key === cur;
+    return `<button class="smgmt-sort-menu-item${isActive ? ' is-active' : ''}"
+      role="menuitem"
+      onclick="smgmtSetSort('${safeLabel}','${escHtml(item.key)}')">
+      <i class="ti ${escHtml(item.icon)}" aria-hidden="true"></i>${escHtml(item.text)}
+    </button>`;
+  }).join('');
+
+  btn.setAttribute('aria-expanded', 'true');
+  menu.dataset.forLabel = label;
+
+  const rect      = btn.getBoundingClientRect();
+  const menuWidth = 170;
+  let left = rect.left;
+  if (left + menuWidth > window.innerWidth - 8) left = window.innerWidth - menuWidth - 8;
+  menu.style.top  = (rect.bottom + 4) + 'px';
+  menu.style.left = left + 'px';
+  menu.classList.remove('hidden');
+
+  const first = menu.querySelector('.smgmt-sort-menu-item');
+  if (first) setTimeout(() => first.focus(), 0);
+
+  setTimeout(() => document.addEventListener('click', _smgmtSortMenuOutside, { once: true }), 0);
+}
+
+function _smgmtSortMenuOutside(e) {
+  const menu = document.getElementById('smgmt-sort-menu');
+  if (menu && !menu.contains(e.target)) _smgmtCloseSortMenu();
+}
+
+function _smgmtCloseSortMenu() {
+  const menu = document.getElementById('smgmt-sort-menu');
+  if (!menu || menu.classList.contains('hidden')) return;
+  const label = menu.dataset.forLabel;
+  if (label) {
+    const btn = document.getElementById('smgmt-sort-btn-' + label);
+    if (btn) btn.setAttribute('aria-expanded', 'false');
+  }
+  menu.classList.add('hidden');
+  menu.dataset.forLabel = '';
+}
+
+function smgmtSetSort(label, key) {
+  _smgmtCloseSortMenu();
+  if (key === 'default') {
+    _smgmtSetSortState(label, null);
+    _smgmtRestoreDefaultOrder(label);
+  } else {
+    const [field, dir] = key.split(':');
+    _smgmtSetSortState(label, { field, dir });
+    _smgmtApplySort(label);
+  }
+  _smgmtUpdateSortBtn(label);
+}
+
+function _smgmtUpdateSortBtn(label) {
+  const btn = document.getElementById('smgmt-sort-btn-' + label);
+  if (!btn) return;
+  const state    = _smgmtGetSortState(label);
+  const key      = state ? `${state.field}:${state.dir}` : 'default';
+  const isActive = !!state;
+  const btnLabel = _SMGMT_SORT_LABELS[key] || 'Sort';
+  btn.className  = 'smgmt-sort-btn' + (isActive ? ' is-active' : '');
+  btn.setAttribute('aria-label', `Sort ${escHtml(sprintLabelDisplay(label))} tickets, current order: ${btnLabel}`);
+  btn.innerHTML  = `<i class="ti ti-arrows-sort" aria-hidden="true"></i>${isActive ? ' ' + btnLabel : ' Sort'}`;
+}
+
+function _smgmtApplySort(label) {
+  const container = document.getElementById('smgmt-tickets-' + label);
+  if (!container) return;
+  const state = _smgmtGetSortState(label);
+  if (!state) return;
+
+  const rows = Array.from(container.querySelectorAll('.smgmt-ticket'));
+  if (rows.length < 2) return;
+
+  rows.sort((a, b) => {
+    let va, vb;
+    if (state.field === 'number') {
+      va = parseInt(a.dataset.issue || '0', 10);
+      vb = parseInt(b.dataset.issue || '0', 10);
+    } else if (state.field === 'size') {
+      const pillA = a.querySelector('.smgmt-ticket-size-pill');
+      const pillB = b.querySelector('.smgmt-ticket-size-pill');
+      va = _SMGMT_SIZE_ORDER[pillA ? pillA.textContent.trim() : ''] || 99;
+      vb = _SMGMT_SIZE_ORDER[pillB ? pillB.textContent.trim() : ''] || 99;
+    } else {
+      va = (a.querySelector('.smgmt-ticket-title')?.textContent || '').trim().toLowerCase();
+      vb = (b.querySelector('.smgmt-ticket-title')?.textContent || '').trim().toLowerCase();
+    }
+    if (va < vb) return state.dir === 'asc' ? -1 : 1;
+    if (va > vb) return state.dir === 'asc' ?  1 : -1;
+    return 0;
+  });
+
+  rows.forEach(r => container.appendChild(r));
+}
+
+function _smgmtRestoreDefaultOrder(label) {
+  const container = document.getElementById('smgmt-tickets-' + label);
+  if (!container || !_smgmtData) return;
+  const issues  = _smgmtData.issues || [];
+  const tickets = issues.filter(i => i.sprint_label === label);
+  if (tickets.length === 0) {
+    container.innerHTML = '<div class="smgmt-drop-hint">Drop tickets here</div>';
+    return;
+  }
+  container.innerHTML = tickets.map(t => _smgmtTicketRowHtml(t, label)).join('');
+}
+
+// ── Label filter chip row (issue #546) ────────────────────────────────────────
+
+// Session-scoped set of *deactivated* label names. Empty = all active (default).
+const _smgmtDeactivatedLabels = new Set();
+
+// Labels to always show as chips (in display order) even if no tickets carry them yet.
+const _SMGMT_FILTER_PRIORITY = ['backlog', 'in-progress', 'sit', 'uat'];
+
+// Map label-name → color (hex) for dot rendering
+const _smgmtLabelColors = {};
+
+function _smgmtLabelFilterRender(issues) {
+  const row = document.getElementById('smgmt-label-filter-row');
+  if (!row) return;
+
+  // Collect all label names from tickets
+  const seen = new Set();
+  (issues || []).forEach(iss => {
+    (iss.labels || []).forEach(l => {
+      seen.add(l.name);
+      if (l.color) _smgmtLabelColors[l.name] = '#' + l.color;
+    });
+  });
+
+  // Build ordered list: priority labels first (if present), then remainder alphabetically
+  const priority = _SMGMT_FILTER_PRIORITY.filter(n => seen.has(n));
+  const rest = [...seen].filter(n => !_SMGMT_FILTER_PRIORITY.includes(n)).sort();
+  const allLabels = [...priority, ...rest];
+
+  if (allLabels.length === 0) {
+    row.classList.add('is-empty');
+    row.innerHTML = '';
+    return;
+  }
+
+  row.classList.remove('is-empty');
+  row.innerHTML = allLabels.map(name => {
+    const active = !_smgmtDeactivatedLabels.has(name);
+    const color = _smgmtLabelColors[name] || 'var(--text-muted)';
+    return `<button class="smgmt-lf-chip ${active ? 'is-active' : 'is-inactive'}"
+               data-label="${escHtml(name)}"
+               aria-pressed="${active}"
+               title="${active ? 'Hide' : 'Show'} tickets labeled &quot;${escHtml(name)}&quot;"
+               onclick="_smgmtLabelFilterToggle('${escHtml(name)}')">
+              <span class="smgmt-lf-chip-dot" style="background:${color}"></span>
+              ${escHtml(name)}
+            </button>`;
+  }).join('');
+}
+
+function _smgmtLabelFilterToggle(labelName) {
+  if (_smgmtDeactivatedLabels.has(labelName)) {
+    _smgmtDeactivatedLabels.delete(labelName);
+  } else {
+    _smgmtDeactivatedLabels.add(labelName);
+  }
+  // Update chip appearance
+  const chip = document.querySelector(`.smgmt-lf-chip[data-label="${CSS.escape(labelName)}"]`);
+  if (chip) {
+    const active = !_smgmtDeactivatedLabels.has(labelName);
+    chip.classList.toggle('is-active', active);
+    chip.classList.toggle('is-inactive', !active);
+    chip.setAttribute('aria-pressed', String(active));
+    chip.title = `${active ? 'Hide' : 'Show'} tickets labeled "${labelName}"`;
+  }
+  _smgmtLabelFilterApply();
+}
+
+function _smgmtLabelFilterApply() {
+  if (_smgmtDeactivatedLabels.size === 0) {
+    // Fast path: all active — show everything
+    document.querySelectorAll('.smgmt-ticket[data-labels]').forEach(el => {
+      el.style.display = '';
+    });
+    return;
+  }
+  document.querySelectorAll('.smgmt-ticket[data-labels]').forEach(el => {
+    const raw = el.getAttribute('data-labels') || '';
+    const ticketLabels = raw ? raw.split(',') : [];
+    if (ticketLabels.length === 0) {
+      // No labels → always visible
+      el.style.display = '';
+      return;
+    }
+    // Hidden only when every ticket label that appears as a chip is deactivated
+    const allDeactivated = ticketLabels.every(n => _smgmtDeactivatedLabels.has(n));
+    el.style.display = allDeactivated ? 'none' : '';
+  });
 }
 
 async function _smgmtFetchMissingOutcomes(orderedLabels, bySprint) {
@@ -5838,15 +6324,66 @@ async function _smgmtLoadEstimates(orderedLabels, bySprint) {
       if (!resp.ok) continue;
       const data = await resp.json();
       const estEl = document.getElementById(`smgmt-est-${label}`);
-      if (!estEl) continue;
-      if (data.complete && data.total_hours !== null) {
+      if (estEl && data.complete && data.total_hours !== null) {
         const h = data.total_hours;
         const display = Number.isInteger(h) ? `${h}h` : `${parseFloat(h.toFixed(1))}h`;
         estEl.textContent = `${display} estimated`;
       }
-      // else: leave as "— estimated"
+      // Apply per-ticket size badges from cached estimate JSON
+      if (data.sizes) _smgmtApplySizeBadges(label, data.sizes, tickets);
     } catch (_) {
       // fail silently — leave as "— estimated"
+    }
+  }
+}
+
+function _smgmtApplySizeBadges(label, sizes, tickets) {
+  const card = document.getElementById(`smgmt-card-${label}`);
+  for (const ticket of tickets) {
+    const row = (card && card.querySelector(`.smgmt-ticket[data-issue="${ticket.number}"]`))
+      || document.getElementById(`smgmt-ticket-${ticket.number}`);
+    if (!row) continue;
+    const size = sizes[String(ticket.number)];
+    let pill = row.querySelector('.smgmt-ticket-size-pill');
+    if (!pill) {
+      pill = document.createElement('span');
+      pill.className = 'smgmt-ticket-size-pill';
+      const titleEl = row.querySelector('.smgmt-ticket-title');
+      if (titleEl) titleEl.after(pill);
+      else row.appendChild(pill);
+    }
+    if (size) {
+      pill.textContent = size;
+      pill.title = `≈${_sizeMinutes(size)} min`;
+      pill.className = `smgmt-ticket-size-pill smgmt-ticket-size-pill--${size}`;
+    } else {
+      pill.textContent = 'Unestimated';
+      pill.title = 'No estimate in cache';
+      pill.className = 'smgmt-ticket-size-pill smgmt-ticket-size-pill--unestimated';
+    }
+  }
+}
+
+async function _smgmtLoadGoals(orderedLabels) {
+  const repo = _smgmtRepo();
+  if (!repo) return;
+  for (const label of orderedLabels) {
+    const goalEl = document.getElementById(`smgmt-goal-${label}`);
+    if (!goalEl) continue;
+    try {
+      const resp = await fetch(
+        `/api/sprints/goal?project=${encodeURIComponent(repo)}&sprint=${encodeURIComponent(label)}`
+      );
+      if (!resp.ok) continue;
+      const data = await resp.json();
+      const goal = (data.goal || '').trim();
+      if (goal) {
+        goalEl.textContent = goal;
+        goalEl.title = goal;
+        goalEl.style.display = '';
+      }
+    } catch (_) {
+      // fail silently
     }
   }
 }
@@ -5992,6 +6529,34 @@ function _smgmtUpdatePreflightToggleUI() {
     : 'Pre-flight checks off — click to show banners';
   const lbl = document.getElementById('smgmt-preflight-toggle-label');
   if (lbl) lbl.textContent = on ? 'Pre-flight: on' : 'Pre-flight: off';
+}
+
+// ── Compact/dense view toggle (issue #547) ────────────────────────────────────
+
+const _SMGMT_DENSITY_KEY = 'sprintBoard.density';
+
+function _smgmtDensityInit() {
+  if (localStorage.getItem(_SMGMT_DENSITY_KEY) === 'compact') _smgmtDensityApply(true);
+}
+
+function _smgmtDensityApply(compact) {
+  const pane = document.getElementById('pane-sprint-mgmt');
+  const btn  = document.getElementById('smgmt-density-toggle');
+  if (!pane || !btn) return;
+  pane.classList.toggle('smgmt-compact', compact);
+  btn.setAttribute('aria-pressed', String(compact));
+  btn.title = compact
+    ? 'Normal view — click to toggle'
+    : 'Compact view — click to toggle';
+  const lbl = document.getElementById('smgmt-density-label');
+  if (lbl) lbl.textContent = compact ? 'Normal' : 'Compact';
+}
+
+function _smgmtDensityToggle() {
+  const pane = document.getElementById('pane-sprint-mgmt');
+  const compact = !pane.classList.contains('smgmt-compact');
+  _smgmtDensityApply(compact);
+  localStorage.setItem(_SMGMT_DENSITY_KEY, compact ? 'compact' : 'normal');
 }
 
 /** Kick off pre-flight banner loading for all non-running sprint panes. */
@@ -6175,7 +6740,7 @@ function _smgmtOutcomeTicketListHtml(issues, label, repo) {
            <i class="ti ti-file-text"></i></button>`
       : '';
 
-    return `<div class="smgmt-ticket" data-issue="${iss.number}" draggable="false">
+    return `<div class="smgmt-ticket" data-issue="${iss.number}" data-labels="" draggable="false">
       ${circle}
       <a class="smgmt-ticket-num" href="https://github.com/issues/${iss.number}" target="_blank" rel="noopener">#${iss.number}</a>
       <span class="smgmt-ticket-title" title="${escHtml(iss.title)}">${escHtml(iss.title)}</span>
@@ -6591,6 +7156,8 @@ function smgmtCancelRename(label, origN, nameEl) {
 
 function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent) {
   const isRunning = _smgmtRunningLabels.has(label);
+  let isCollapsed = false;
+  try { isCollapsed = localStorage.getItem('sprintColumn_' + label + '_collapsed') === '1'; } catch (_) {}
 
   // Running sprint gets special animated treatment (issue #277)
   if (isRunning) {
@@ -6637,6 +7204,7 @@ function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent) {
   let outcomeBadgeHtml = '';
   let ticketCount = tickets.length;
   let ticketsContainerHtml = '';
+  let isOutcomeView = false;
 
   if (outcome && (outcome.sprint_status || outcome.state)) {
     const meta = _smgmtStateMeta(outcome);
@@ -6652,6 +7220,7 @@ function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent) {
       const issueList = outcome.issues || [];
       ticketCount = issueList.length;
       ticketsContainerHtml = _smgmtOutcomeTicketListHtml(issueList, label, _smgmtRepo());
+      isOutcomeView = true;
     }
   } else {
     // Planning view ticket rows
@@ -6660,19 +7229,40 @@ function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent) {
       : '<div class="smgmt-drop-hint">Drop tickets here</div>';
   }
 
+  // Sprint summary: progress bar + goal
+  const summaryDone = isOutcomeView
+    ? (outcome.issues || []).filter(i => i.outcome === 'done').length
+    : tickets.filter(t => t.status === 'done').length;
+  const summaryPct = ticketCount > 0 ? Math.round((summaryDone / ticketCount) * 100) : 0;
+  const summaryHtml = `<div class="smgmt-sprint-summary">
+    <div class="smgmt-progress-row">
+      <div class="smgmt-progress-bar-wrap"><div class="smgmt-progress-bar-fill" style="width:${summaryPct}%"></div></div>
+      <span class="smgmt-progress-label">${summaryDone} / ${ticketCount} done</span>
+    </div>
+    <div class="smgmt-sprint-goal-text" id="smgmt-goal-${escHtml(label)}" style="display:none"></div>
+  </div>`;
+
   const logHtml = (outcome && outcome.sprint_status) ? _smgmtOutcomeLogHtml(label, outcome) : '';
   const cancelBannerHtml = _smgmtIsCancelled(outcome) ? _smgmtCancelBannerHtml(label) : '';
   const parentLineage = parent
     ? `<span class="smgmt-sprint-lineage" title="Child sprint spawned from ${escHtml(parent)}">← from ${escHtml(sprintLabelDisplay(parent))}</span>`
     : '';
 
+  const collapsedClass = isCollapsed ? ' smgmt-collapsed' : '';
+  const collapseLabel = (isCollapsed ? 'Expand ' : 'Collapse ') + escHtml(sprintLabelDisplay(label));
   return `
-    <div class="smgmt-sprint-card${outcomeCardClass}" id="smgmt-card-${escHtml(label)}"
+    <div class="smgmt-sprint-card${outcomeCardClass}${collapsedClass}" id="smgmt-card-${escHtml(label)}"
          ondragover="_smgmtDragOver(event, '${escHtml(label)}')"
          ondragleave="_smgmtDragLeave(event)"
          ondrop="_smgmtDropOnSprint(event, '${escHtml(label)}')">
       <div class="smgmt-sprint-header">
         <div class="smgmt-sprint-header-left">
+          <button class="smgmt-collapse-btn" id="smgmt-collapse-btn-${escHtml(label)}"
+                  onclick="smgmtToggleCollapse('${escHtml(label)}')"
+                  aria-label="${collapseLabel}"
+                  title="${collapseLabel}"
+                  onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();smgmtToggleCollapse('${escHtml(label)}');}">
+            <i class="ti ti-chevron-down"></i></button>
           <i class="ti ti-layout-kanban" style="font-size:14px;color:var(--text-muted)"></i>
           <span class="smgmt-sprint-name" style="font-size:15px;font-weight:700;">${escHtml(sprintLabelDisplay(label))}</span>
           <button class="smgmt-rename-btn" title="Rename sprint"
@@ -6683,6 +7273,7 @@ function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent) {
           <span class="smgmt-sprint-count"><span id="smgmt-est-${escHtml(label)}" class="smgmt-sprint-est-val">— estimated</span> &middot; ${ticketCount} ticket${ticketCount !== 1 ? 's' : ''}</span>
         </div>
         <div class="smgmt-sprint-header-right">
+          ${_smgmtSortBtnHtml(label)}
           <button class="smgmt-finish-btn ${finishHidden}" ${finishDisabled}
                   title="${finishDisabled ? 'No open tickets' : 'Finish sprint'}"
                   onclick="smgmtFinishSprint('${escHtml(label)}')">
@@ -6694,6 +7285,7 @@ function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent) {
           ${!isPostRun ? rerunBtn : ''}
         </div>
       </div>
+      ${summaryHtml}
       ${cancelBannerHtml}
       ${outcomeBandHtml}
       <div class="smgmt-sprint-tickets" id="smgmt-tickets-${escHtml(label)}">
@@ -6710,6 +7302,8 @@ const SIZE_MINUTES = { S: 5, M: 15, L: 30, XL: 60 };
 
 /** Build the animated running sprint card HTML. Live data patched separately by _smgmtLivePatch. */
 function _smgmtRunningCardHtml(label, n, tickets) {
+  let isCollapsed = false;
+  try { isCollapsed = localStorage.getItem('sprintColumn_' + label + '_collapsed') === '1'; } catch (_) {}
   const live = _smgmtLiveCache[label] || null;
 
   // Stat strip values (use live data if available, else zeros)
@@ -6767,7 +7361,8 @@ function _smgmtRunningCardHtml(label, n, tickets) {
       ? `<span class="smgmt-ticket-elapsed">${elapsedStr}</span>`
       : '';
 
-    return `<div class="smgmt-ticket" data-issue="${t.number}" draggable="false">
+    const runTicketLabels = escHtml((t.labels || []).map(l => l.name).join(','));
+    return `<div class="smgmt-ticket" data-issue="${t.number}" data-labels="${runTicketLabels}" draggable="false">
       ${indicator}
       <a class="smgmt-ticket-num" href="${escHtml(issueUrl)}" target="_blank"
          rel="noopener">#${t.number}</a>
@@ -6776,11 +7371,19 @@ function _smgmtRunningCardHtml(label, n, tickets) {
     </div>`;
   }).join('');
 
+  const runCollapsedClass = isCollapsed ? ' smgmt-collapsed' : '';
+  const runCollapseLabel = (isCollapsed ? 'Expand ' : 'Collapse ') + escHtml(sprintLabelDisplay(label));
   return `
-    <div class="smgmt-sprint-card smgmt-running" id="smgmt-card-${escHtml(label)}">
+    <div class="smgmt-sprint-card smgmt-running${runCollapsedClass}" id="smgmt-card-${escHtml(label)}">
       <div class="smgmt-running-stripe"></div>
       <div class="smgmt-sprint-header">
         <div class="smgmt-sprint-header-left">
+          <button class="smgmt-collapse-btn" id="smgmt-collapse-btn-${escHtml(label)}"
+                  onclick="smgmtToggleCollapse('${escHtml(label)}')"
+                  aria-label="${runCollapseLabel}"
+                  title="${runCollapseLabel}"
+                  onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();smgmtToggleCollapse('${escHtml(label)}');}">
+            <i class="ti ti-chevron-down"></i></button>
           <i class="ti ti-layout-kanban" style="font-size:14px;color:var(--green)"></i>
           <span class="smgmt-sprint-name" style="font-size:15px;font-weight:700;">${escHtml(sprintLabelDisplay(label))}</span>
           <span class="smgmt-running-badge" id="smgmt-running-badge-${escHtml(label)}">
@@ -7147,22 +7750,28 @@ function _smgmtTicketRowHtml(ticket, label) {
 
   const sizeLabel = (ticket.labels || []).find(l => /^size-[SMLX]+$/.test(l.name));
   const hasEstimate = !!sizeLabel;
-  // Size badge only — the re-estimate action now lives in the per-row ≡ menu (issue #275 follow-up)
-  const sizePillHtml = sizeLabel
-    ? `<span class="smgmt-ticket-size-pill">${escHtml(sizeLabel.name.replace('size-', ''))}</span>`
+  // Size badge: show from GitHub label immediately; _smgmtApplySizeBadges overlays JSON data after load
+  const sizeVal = sizeLabel ? sizeLabel.name.replace('size-', '') : null;
+  const sizePillHtml = sizeVal
+    ? `<span class="smgmt-ticket-size-pill smgmt-ticket-size-pill--${escHtml(sizeVal)}" title="≈${_sizeMinutes(sizeVal)} min">${escHtml(sizeVal)}</span>`
     : '';
+
+  const ticketLabelNames = (ticket.labels || []).map(l => l.name).join(',');
 
   return `
     <div class="smgmt-ticket${isSelected ? ' is-selected' : ''}" id="smgmt-ticket-${ticket.number}"
+         tabindex="-1"
          draggable="true"
          data-issue="${ticket.number}"
          data-sprint="${escHtml(label)}"
+         data-labels="${escHtml(ticketLabelNames)}"
          ondragstart="_smgmtTicketDragStart(event, ${ticket.number}, '${escHtml(label)}')"
          ondragend="_smgmtTicketDragEnd(event)"
          ondragover="_smgmtTicketReorderDragOver(event)"
          ondragleave="_smgmtTicketReorderDragLeave(event)"
          ondrop="_smgmtTicketReorderDrop(event, ${ticket.number}, '${escHtml(label)}')"
-         oncontextmenu="_smgmtCtxMenuOpen(event,${ticket.number})">
+         oncontextmenu="_smgmtCtxMenuOpen(event,${ticket.number})"
+         onclick="if(event.ctrlKey||event.metaKey){event.preventDefault();_smgmtToggleSelect(${ticket.number},!_smgmtSelectedIssues.has(${ticket.number}));}">
       <input type="checkbox" class="smgmt-ticket-cb"
              ${isSelected ? 'checked' : ''}
              onclick="event.stopPropagation()"
@@ -7396,6 +8005,23 @@ function _smgmtShowToast(msg) {
   el.classList.add('show');
   clearTimeout(el._timer);
   el._timer = setTimeout(() => el.classList.remove('show'), 2800);
+}
+
+function _smgmtShowInlineError(msg) {
+  const listEl = document.getElementById('smgmt-sprint-list');
+  if (!listEl) { _smgmtShowToast(msg); return; }
+  let errEl = document.getElementById('smgmt-bulk-move-error');
+  if (!errEl) {
+    errEl = document.createElement('div');
+    errEl.id = 'smgmt-bulk-move-error';
+    errEl.style.cssText = 'background:var(--red-bg);border:1px solid var(--red);border-radius:8px;padding:10px 14px;font-size:12px;color:var(--red);white-space:pre-wrap;margin-bottom:10px;position:relative;';
+    errEl.innerHTML = '<button onclick="this.parentElement.remove()" style="position:absolute;top:6px;right:8px;background:none;border:none;color:var(--red);cursor:pointer;font-size:14px;line-height:1;">✕</button>';
+    listEl.insertBefore(errEl, listEl.firstChild);
+  }
+  const txt = document.createElement('span');
+  txt.textContent = msg;
+  errEl.prepend(txt);
+  errEl.style.display = 'block';
 }
 
 function smgmtRunBlockedToast() {
@@ -8229,13 +8855,14 @@ function _smgmtUpdateSelectionUI() {
           </button>
           <button class="smgmt-move-to-btn" id="smgmt-move-to-btn"
                   onclick="_smgmtToggleMoveToMenu(event)">
-            Move to &#9660;
+            <i class="ti ti-send"></i> Move to Sprint &#9660;
           </button>
           <div class="smgmt-move-to-menu" id="smgmt-move-to-menu"></div>
         </div>`;
       if (listEl) listEl.insertBefore(bar, listEl.firstChild);
     }
     bar.classList.add('show');
+    if (listEl) listEl.classList.add('has-selection');
     const countEl = document.getElementById('smgmt-sel-count');
     if (countEl) countEl.textContent = count === 1 ? '1 ticket selected' : `${count} tickets selected`;
     _smgmtPopulateMoveToMenu();
@@ -8247,6 +8874,7 @@ function _smgmtUpdateSelectionUI() {
     }
   } else {
     if (bar) bar.classList.remove('show');
+    if (listEl) listEl.classList.remove('has-selection');
   }
 }
 
@@ -8257,13 +8885,24 @@ function _smgmtPopulateSelectionDropdown() {
 function _smgmtPopulateMoveToMenu() {
   const menu = document.getElementById('smgmt-move-to-menu');
   if (!menu || !_smgmtData) return;
+
+  // Sprints that contain at least one selected ticket — exclude from the target list
+  const selectedNums = Array.from(_smgmtSelectedIssues);
+  const occupiedSprints = new Set(
+    selectedNums.map(n => {
+      const iss = (_smgmtData.issues || []).find(i => i.number === n);
+      return iss ? iss.sprint : undefined;
+    }).filter(s => s != null)
+  );
+
   const sprints = (_smgmtData.sprints || []).sort((a, b) => a - b);
   let html = '';
   sprints.forEach(n => {
+    if (occupiedSprints.has(n)) return;
     html += `<button class="smgmt-move-to-item" onclick="_smgmtMoveSelectedTo('sprint-${n}');_smgmtCloseMoveToMenu()">Sprint ${n}</button>`;
   });
   html += `<button class="smgmt-move-to-item" onclick="_smgmtMoveSelectedTo('backlog');_smgmtCloseMoveToMenu()">Backlog (no sprint)</button>`;
-  menu.innerHTML = html;
+  menu.innerHTML = html || '<span style="display:block;padding:8px 14px;font-size:12px;color:var(--text-muted)">No other sprints available</span>';
 }
 
 function _smgmtToggleMoveToMenu(event) {
@@ -8278,6 +8917,12 @@ function _smgmtCloseMoveToMenu() {
   const menu = document.getElementById('smgmt-move-to-menu');
   if (menu) menu.classList.remove('open');
 }
+
+// Close bulk-move dropdown when clicking outside the selection bar
+document.addEventListener('click', function(e) {
+  const bar = document.getElementById('smgmt-selection-bar');
+  if (bar && !bar.contains(e.target)) _smgmtCloseMoveToMenu();
+});
 
 function _smgmtClearSelection() {
   _smgmtSelectedIssues.forEach(num => {
@@ -8296,7 +8941,11 @@ function _smgmtToggleSelect(number, checked) {
   if (checked) _smgmtSelectedIssues.add(number);
   else _smgmtSelectedIssues.delete(number);
   const el = document.getElementById(`smgmt-ticket-${number}`);
-  if (el) el.classList.toggle('is-selected', checked);
+  if (el) {
+    el.classList.toggle('is-selected', checked);
+    const cb = el.querySelector('.smgmt-ticket-cb');
+    if (cb) cb.checked = checked;
+  }
   _smgmtUpdateSelectionUI();
 }
 
@@ -8362,9 +9011,15 @@ async function _smgmtMoveSelectedTo(targetLabel) {
       body: JSON.stringify({ changes, project: repo }),
     });
     if (!res.ok) throw new Error(await res.text());
+    const data = await res.json();
+    if (data.failed > 0 && data.errors && data.errors.length > 0) {
+      _smgmtShowInlineError(`${data.failed} ticket${data.failed !== 1 ? 's' : ''} failed to move:\n${data.errors.join('\n')}`);
+    } else if (data.applied > 0) {
+      _smgmtShowToast(`Moved ${data.applied} ticket${data.applied !== 1 ? 's' : ''} to ${dest}.`);
+    }
     await loadSprintMgmt();
   } catch (e) {
-    alert('Failed to move tickets: ' + e.message);
+    _smgmtShowToast('Failed to move tickets: ' + e.message);
     await loadSprintMgmt();
   } finally {
     _smgmtBoardUnlock();
@@ -8825,6 +9480,23 @@ async function _smgmtTicketReorderDrop(event, targetIssue, sprintLabel) {
 
 // ── Backlog pane (issue #274) ──────────────────────────────────────────────
 
+function smgmtToggleCollapse(label) {
+  const card = document.getElementById('smgmt-card-' + label);
+  if (!card) return;
+  const btn = document.getElementById('smgmt-collapse-btn-' + label);
+  const isCollapsed = card.classList.toggle('smgmt-collapsed');
+  const displayName = sprintLabelDisplay(label);
+  if (btn) btn.setAttribute('aria-label', (isCollapsed ? 'Expand ' : 'Collapse ') + displayName);
+  if (btn) btn.setAttribute('title', (isCollapsed ? 'Expand ' : 'Collapse ') + displayName);
+  try {
+    if (isCollapsed) {
+      localStorage.setItem('sprintColumn_' + label + '_collapsed', '1');
+    } else {
+      localStorage.removeItem('sprintColumn_' + label + '_collapsed');
+    }
+  } catch (_) {}
+}
+
 function _smgmtBacklogToggle() {
   const pane = document.getElementById('smgmt-backlog-pane');
   const hdr  = document.getElementById('smgmt-backlog-header-row');
@@ -8861,14 +9533,17 @@ function _smgmtRenderBacklog(tickets) {
 function _smgmtBacklogTicketHtml(ticket, sprintNums) {
   const isSelected = _smgmtSelectedIssues.has(ticket.number);
   const hasEstimate = (ticket.labels || []).some(l => /^size-[SMLX]+$/.test(l.name));
+  const backlogLabelNames = (ticket.labels || []).map(l => l.name).join(',');
   return `
     <div class="smgmt-ticket${isSelected ? ' is-selected' : ''}" id="smgmt-ticket-${ticket.number}"
          draggable="true"
          data-issue="${ticket.number}"
          data-sprint=""
+         data-labels="${escHtml(backlogLabelNames)}"
          ondragstart="_smgmtBacklogTicketDragStart(event, ${ticket.number})"
          ondragend="_smgmtTicketDragEnd(event)"
-         oncontextmenu="_smgmtCtxMenuOpen(event,${ticket.number})">
+         oncontextmenu="_smgmtCtxMenuOpen(event,${ticket.number})"
+         onclick="if(event.ctrlKey||event.metaKey){event.preventDefault();_smgmtToggleSelect(${ticket.number},!_smgmtSelectedIssues.has(${ticket.number}));}">
       <input type="checkbox" class="smgmt-ticket-cb"
              ${isSelected ? 'checked' : ''}
              onclick="event.stopPropagation()"
@@ -9412,6 +10087,257 @@ function _smgmtBoardUnlock() {
   if (_arInterval > 0) _smgmtArStartTicker();
 }
 
+// ── Keyboard navigation for sprint board (issue #549) ────────────────────────
+
+let _smgmtKbFocusedIssue = null;
+
+/** Returns the ordered list of sprint labels currently visible on the board. */
+function _smgmtKbSprintOrder() {
+  if (!_smgmtData) return [];
+  return (_smgmtData.order && _smgmtData.order.length)
+    ? _smgmtData.order
+    : (_smgmtData.sprints || []).map(n => `sprint-${n}`);
+}
+
+/** Returns visible ticket DOM elements in a sprint column (in DOM order). */
+function _smgmtKbColTickets(label) {
+  const container = document.getElementById(`smgmt-tickets-${label}`);
+  if (!container) return [];
+  return Array.from(container.querySelectorAll('.smgmt-ticket[data-issue]'))
+    .filter(el => el.style.display !== 'none');
+}
+
+/** Returns true if any modal, dialog, or dropdown is open. */
+function _smgmtKbAnyModalOpen() {
+  const backdropIds = ['mt-backdrop', 'pf-backdrop', 'ci-backdrop', 'lv-backdrop', 'rr-backdrop', 'gc-backdrop', 'apm-backdrop'];
+  if (backdropIds.some(id => { const el = document.getElementById(id); return el && !el.classList.contains('hidden'); })) return true;
+  const menuIds = ['smgmt-row-menu', 'smgmt-moveto-popup', 'smgmt-ctx-menu', 'smgmt-ar-menu', 'proj-create-menu'];
+  if (menuIds.some(id => { const el = document.getElementById(id); return el && !el.classList.contains('hidden'); })) return true;
+  return false;
+}
+
+/** Move keyboard focus to a ticket by issue number. */
+function _smgmtKbSetFocus(issueNum) {
+  if (_smgmtKbFocusedIssue !== null) {
+    const old = document.getElementById(`smgmt-ticket-${_smgmtKbFocusedIssue}`);
+    if (old) { old.classList.remove('smgmt-kb-focused'); old.tabIndex = -1; }
+  }
+  _smgmtKbFocusedIssue = issueNum;
+  if (issueNum === null) return;
+  const el = document.getElementById(`smgmt-ticket-${issueNum}`);
+  if (!el) { _smgmtKbFocusedIssue = null; return; }
+  el.tabIndex = 0;
+  el.classList.add('smgmt-kb-focused');
+  el.focus({ preventScroll: false });
+  _smgmtKbAnnounce(issueNum, el);
+}
+
+/** Re-apply the focus class after DOM rebuild (called from _smgmtRender). */
+function _smgmtKbRestoreFocus() {
+  if (_smgmtKbFocusedIssue === null) return;
+  const el = document.getElementById(`smgmt-ticket-${_smgmtKbFocusedIssue}`);
+  if (!el) { _smgmtKbFocusedIssue = null; return; }
+  el.tabIndex = 0;
+  el.classList.add('smgmt-kb-focused');
+}
+
+/** Announce focused card details to screen readers via aria-live region. */
+function _smgmtKbAnnounce(issueNum, el) {
+  let live = document.getElementById('smgmt-kb-announce');
+  if (!live) return;
+  const sprint = el.dataset.sprint || '';
+  const sprintName = sprintLabelDisplay(sprint);
+  const titleEl = el.querySelector('.smgmt-ticket-title');
+  const title = titleEl ? titleEl.textContent.trim() : '';
+  const container = el.parentElement;
+  const all = container
+    ? Array.from(container.querySelectorAll('.smgmt-ticket[data-issue]')).filter(t => t.style.display !== 'none')
+    : [];
+  const pos = all.indexOf(el) + 1;
+  live.textContent = '';
+  requestAnimationFrame(() => {
+    live.textContent = `#${issueNum}: ${title}, ${sprintName}, ${pos} of ${all.length}`;
+  });
+}
+
+/** Announce a plain message to screen readers. */
+function _smgmtKbAnnounceMsg(msg) {
+  const live = document.getElementById('smgmt-kb-announce');
+  if (!live) return;
+  live.textContent = '';
+  requestAnimationFrame(() => { live.textContent = msg; });
+}
+
+/** Move the focused ticket to an adjacent sprint (delta: +1 = next, -1 = previous). */
+async function _smgmtKbMoveSprint(delta) {
+  if (_smgmtMoveLock) return;
+  if (_smgmtKbFocusedIssue === null) return;
+  const repo = _smgmtRepo();
+  if (!repo || !_smgmtData) return;
+
+  const issueNum = _smgmtKbFocusedIssue;
+  const focusedEl = document.getElementById(`smgmt-ticket-${issueNum}`);
+  if (!focusedEl) return;
+  const currentSprint = focusedEl.dataset.sprint;
+
+  const sprints = _smgmtKbSprintOrder();
+  const colIdx = sprints.indexOf(currentSprint);
+  if (colIdx < 0) return;
+
+  const targetIdx = colIdx + delta;
+  if (targetIdx < 0 || targetIdx >= sprints.length) {
+    const msg = delta > 0
+      ? 'No next sprint — card is already in the last sprint'
+      : 'No previous sprint — card is already in the first sprint';
+    _smgmtShowToast(msg);
+    _smgmtKbAnnounceMsg(msg);
+    return;
+  }
+
+  const targetLabel = sprints[targetIdx];
+  const targetNum   = parseInt(String(targetLabel).split('-')[1], 10);
+  const fromNum     = parseInt(String(currentSprint).split('-')[1], 10);
+
+  // Optimistic update
+  if (_smgmtData) {
+    const iss = _smgmtData.issues.find(i => i.number === issueNum);
+    if (iss) { iss.sprint = targetNum; iss.sprint_label = targetLabel; }
+    _smgmtRender(_smgmtData);
+  }
+
+  _smgmtBoardLock(`Moving #${issueNum} to ${sprintLabelDisplay(targetLabel)}…`);
+  try {
+    const res = await fetch(`/api/issues/${issueNum}/sprint-label`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sprint_label: targetLabel, project: repo }),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    await loadSprintMgmt();
+    _smgmtKbSetFocus(issueNum);
+    _smgmtShowToast(`Moved #${issueNum} to ${sprintLabelDisplay(targetLabel)}`);
+  } catch (err) {
+    if (_smgmtData) {
+      const iss = _smgmtData.issues.find(i => i.number === issueNum);
+      if (iss) { iss.sprint = fromNum; iss.sprint_label = currentSprint; }
+      _smgmtRender(_smgmtData);
+    }
+    _smgmtShowToast(`Failed to move #${issueNum}: ${err.message}`);
+  } finally {
+    _smgmtBoardUnlock();
+  }
+}
+
+/** Global keydown handler for sprint board keyboard navigation (issue #549). */
+document.addEventListener('keydown', function _smgmtKbKeydown(e) {
+  if (_activeTab !== 'sprint-mgmt') return;
+  if (!_smgmtData) return;
+
+  const isArrow = e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'ArrowLeft' || e.key === 'ArrowRight';
+  if (!isArrow) return;
+
+  // Inert when any modal/dropdown is open
+  if (_smgmtKbAnyModalOpen()) return;
+
+  // Don't steal keys from interactive elements (except ticket divs themselves)
+  const tag = (document.activeElement?.tagName || '').toLowerCase();
+  if (tag === 'input' || tag === 'textarea' || tag === 'select' || tag === 'button' || tag === 'a') return;
+
+  e.preventDefault();
+
+  const sprints = _smgmtKbSprintOrder();
+  if (!sprints.length) return;
+
+  // Shift+ArrowRight/Left: move focused ticket to adjacent sprint
+  if (e.shiftKey) {
+    if (e.key === 'ArrowRight') { _smgmtKbMoveSprint(1); return; }
+    if (e.key === 'ArrowLeft')  { _smgmtKbMoveSprint(-1); return; }
+    return;
+  }
+
+  // No focused ticket yet: focus first ticket of first sprint
+  if (_smgmtKbFocusedIssue === null) {
+    for (const label of sprints) {
+      const tickets = _smgmtKbColTickets(label);
+      if (tickets.length) { _smgmtKbSetFocus(parseInt(tickets[0].dataset.issue, 10)); return; }
+    }
+    return;
+  }
+
+  const focusedEl = document.getElementById(`smgmt-ticket-${_smgmtKbFocusedIssue}`);
+  if (!focusedEl) { _smgmtKbFocusedIssue = null; return; }
+  const currentSprint = focusedEl.dataset.sprint;
+
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    const tickets = _smgmtKbColTickets(currentSprint);
+    if (!tickets.length) return;
+    const idx = tickets.findIndex(t => parseInt(t.dataset.issue, 10) === _smgmtKbFocusedIssue);
+    const next = e.key === 'ArrowDown'
+      ? (idx + 1) % tickets.length
+      : (idx - 1 + tickets.length) % tickets.length;
+    _smgmtKbSetFocus(parseInt(tickets[next].dataset.issue, 10));
+    return;
+  }
+
+  if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+    const colIdx = sprints.indexOf(currentSprint);
+    const delta  = e.key === 'ArrowRight' ? 1 : -1;
+    const nextColIdx = (colIdx + delta + sprints.length) % sprints.length;
+    const nextTickets = _smgmtKbColTickets(sprints[nextColIdx]);
+    if (nextTickets.length) _smgmtKbSetFocus(parseInt(nextTickets[0].dataset.issue, 10));
+    return;
+  }
+});
+
+// ── Search/filter bar (issue #552) ────────────────────────────────────────
+
+function _smgmtFilterApply() {
+  const input = document.getElementById('smgmt-filter-input');
+  const clearBtn = document.getElementById('smgmt-filter-clear-btn');
+  const q = (input ? input.value : '').trim().toLowerCase();
+
+  if (clearBtn) clearBtn.classList.toggle('visible', q.length > 0);
+
+  const allTickets = document.querySelectorAll('#pane-sprint-mgmt .smgmt-ticket[data-issue]');
+  allTickets.forEach(el => {
+    if (!q) { el.style.display = ''; return; }
+    const issueNum = (el.dataset.issue || '').toLowerCase();
+    const titleEl  = el.querySelector('.smgmt-ticket-title');
+    const title    = (titleEl ? titleEl.textContent : '').toLowerCase();
+    const labels   = (el.dataset.labels || '').toLowerCase();
+    el.style.display = (title.includes(q) || issueNum.includes(q) || labels.includes(q)) ? '' : 'none';
+  });
+
+  _smgmtFilterUpdateEmptyStates();
+}
+
+function _smgmtFilterUpdateEmptyStates() {
+  document.querySelectorAll('#smgmt-sprint-list .smgmt-sprint-tickets').forEach(container => {
+    _smgmtFilterHandleContainer(container);
+  });
+  const backlog = document.getElementById('smgmt-backlog-tickets-container');
+  if (backlog) _smgmtFilterHandleContainer(backlog);
+}
+
+function _smgmtFilterHandleContainer(container) {
+  const tickets = Array.from(container.querySelectorAll('.smgmt-ticket[data-issue]'));
+  const allHidden = tickets.length > 0 && tickets.every(t => t.style.display === 'none');
+  let emptyState = container.querySelector('.smgmt-filter-empty-state');
+  if (!emptyState) {
+    emptyState = document.createElement('div');
+    emptyState.className = 'smgmt-filter-empty-state';
+    emptyState.textContent = 'No matching tickets';
+    container.appendChild(emptyState);
+  }
+  emptyState.classList.toggle('visible', allHidden);
+}
+
+function _smgmtFilterClear() {
+  const input = document.getElementById('smgmt-filter-input');
+  if (input) { input.value = ''; input.focus(); }
+  _smgmtFilterApply();
+}
+
 // ── Auto-refresh pill (issue #275) ────────────────────────────────────────
 const _AR_LS_KEY    = 'smgmt-ar-interval';
 const _AR_INTERVALS = [1, 2, 5, 10, 15, 30, 60]; // valid interval values in seconds
@@ -9882,6 +10808,7 @@ function _setupModals() {
         closeAddProjectModal();
       } else if (_smgmtSelectedIssues.size > 0) {
         // Clear multi-select when Escape pressed and no modal is open
+        _smgmtCloseMoveToMenu();
         _smgmtClearSelection();
       }
     }
@@ -12599,6 +13526,10 @@ function _cmpEmptyState(title, msg) {
 
 <!-- ── Per-row ≡ actions menu (issue #275 follow-up) ── -->
 <div class="smgmt-row-menu hidden" id="smgmt-row-menu" role="menu" aria-label="Ticket actions"></div>
+
+<!-- ── Keyboard navigation screen-reader announce region (issue #549) ── -->
+<div id="smgmt-kb-announce" aria-live="polite" aria-atomic="true"
+     style="position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0;"></div>
 
 <!-- ── "Move to" modal (issue #275 follow-up) ── -->
 <div class="modal-backdrop hidden" id="mt-backdrop" onclick="_smgmtMoveToModalClose()"></div>

@@ -1081,6 +1081,11 @@
     }
     .smgmt-ticket.drag-before { box-shadow: inset 0 2px 0 var(--blue); }
     .smgmt-ticket.drag-after  { box-shadow: inset 0 -2px 0 var(--blue); }
+    /* Size-based left border (issue #562) */
+    .smgmt-ticket[data-size="S"]  { border-left: 3px solid var(--green); }
+    .smgmt-ticket[data-size="M"]  { border-left: 3px solid var(--blue); }
+    .smgmt-ticket[data-size="L"]  { border-left: 3px solid var(--amber); }
+    .smgmt-ticket[data-size="XL"] { border-left: 3px solid var(--red); }
     .smgmt-ticket.is-selected { background: var(--blue-bg); border-left: 3px solid var(--blue); }
     .smgmt-ticket-grip {
       color: var(--text-sub); font-size: 13px; flex-shrink: 0;
@@ -2202,6 +2207,26 @@
       font-family: var(--mono);
       background: var(--surface-2); color: var(--text-sub);
     }
+    /* Size-colored pills (issue #562) */
+    .smgmt-ticket[data-size="S"]  .smgmt-ticket-size-pill { background: var(--green-bg); color: var(--green); }
+    .smgmt-ticket[data-size="M"]  .smgmt-ticket-size-pill { background: var(--blue-bg);  color: var(--blue); }
+    .smgmt-ticket[data-size="L"]  .smgmt-ticket-size-pill { background: var(--amber-bg); color: var(--amber); }
+    .smgmt-ticket[data-size="XL"] .smgmt-ticket-size-pill { background: var(--red-bg);   color: var(--red); }
+    /* Size legend (issue #562) */
+    .smgmt-size-legend {
+      display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+      padding: 6px 28px; border-bottom: 1px solid var(--border);
+      background: var(--bg); font-size: 11px; color: var(--text-sub);
+    }
+    .smgmt-size-legend-label { font-weight: 600; color: var(--text-sub); white-space: nowrap; }
+    .smgmt-size-legend-item  { display: flex; align-items: center; gap: 5px; white-space: nowrap; }
+    .smgmt-size-legend-swatch {
+      width: 10px; height: 10px; border-radius: 2px; flex-shrink: 0;
+    }
+    .smgmt-size-legend-swatch.sz-S  { background: var(--green); }
+    .smgmt-size-legend-swatch.sz-M  { background: var(--blue); }
+    .smgmt-size-legend-swatch.sz-L  { background: var(--amber); }
+    .smgmt-size-legend-swatch.sz-XL { background: var(--red); }
     .smgmt-ticket-confidence-pill {
       flex-shrink: 0;
       padding: 1px 5px; border-radius: 3px;
@@ -3688,6 +3713,15 @@
               New Sprint
             </button>
           </div>
+        </div>
+
+        <!-- Size legend (issue #562) -->
+        <div class="smgmt-size-legend" id="smgmt-size-legend" aria-label="Ticket size color legend">
+          <span class="smgmt-size-legend-label">Size:</span>
+          <span class="smgmt-size-legend-item"><span class="smgmt-size-legend-swatch sz-S"></span> S — small</span>
+          <span class="smgmt-size-legend-item"><span class="smgmt-size-legend-swatch sz-M"></span> M — medium</span>
+          <span class="smgmt-size-legend-item"><span class="smgmt-size-legend-swatch sz-L"></span> L — large</span>
+          <span class="smgmt-size-legend-item"><span class="smgmt-size-legend-swatch sz-XL"></span> XL — extra large</span>
         </div>
 
         <!-- Sprint list -->
@@ -6989,9 +7023,11 @@ function _smgmtRunningCardHtml(label, n, tickets) {
 
     const issueUrl = t.url || (cardRepo ? `https://github.com/${cardRepo}/issues/${t.number}` : '#');
 
-    const sizePillHtml = (liveIss && liveIss.size)
-      ? `<span class="smgmt-ticket-size-pill" title="≈${liveIss.minutes || _sizeMinutes(liveIss.size)} min">${escHtml(liveIss.size)}</span>`
+    const sizeVal = (liveIss && liveIss.size) || t.size || '';
+    const sizePillHtml = sizeVal
+      ? `<span class="smgmt-ticket-size-pill" title="≈${(liveIss && liveIss.minutes) || _sizeMinutes(sizeVal)} min">${escHtml(sizeVal)}</span>`
       : '';
+    const runSizeAttr = sizeVal ? ` data-size="${escHtml(sizeVal)}"` : '';
     const agentTagHtml = (liveIss && liveIss.agent)
       ? `<span class="smgmt-ticket-agent-tag ${_smgmtAgentTagClass(liveIss.agent)}">${escHtml(liveIss.agent.toUpperCase())}</span>`
       : '';
@@ -7000,7 +7036,7 @@ function _smgmtRunningCardHtml(label, n, tickets) {
       ? `<span class="smgmt-ticket-elapsed">${elapsedStr}</span>`
       : '';
 
-    return `<div class="smgmt-ticket" data-issue="${t.number}" draggable="false">
+    return `<div class="smgmt-ticket" data-issue="${t.number}" draggable="false"${runSizeAttr}>
       ${indicator}
       <a class="smgmt-ticket-num" href="${escHtml(issueUrl)}" target="_blank"
          rel="noopener">#${t.number}</a>
@@ -7212,6 +7248,7 @@ function _smgmtLivePatch(label, live) {
         const row = document.createElement('div');
         row.className = 'smgmt-ticket';
         row.dataset.issue = String(t.number);
+        if (t.size) row.dataset.size = t.size;
         row.draggable = false;
         const initSizePill = t.size
           ? `<span class="smgmt-ticket-size-pill" title="≈${t.minutes || _sizeMinutes(t.size)} min">${escHtml(t.size)}</span>` : '';
@@ -7259,8 +7296,10 @@ function _smgmtLivePatch(label, live) {
       }
       sizePillEl.textContent = liveIss.size;
       sizePillEl.title = `≈${liveIss.minutes || _sizeMinutes(liveIss.size)} min`;
+      row.dataset.size = liveIss.size;
     } else if (sizePillEl) {
       sizePillEl.remove();
+      delete row.dataset.size;
     }
 
     // Update agent tag — only on tickets with an active agent
@@ -7380,9 +7419,11 @@ function _smgmtTicketRowHtml(ticket, label) {
 
   const sizeLabel = (ticket.labels || []).find(l => /^size-[SMLX]+$/.test(l.name));
   const hasEstimate = !!sizeLabel;
+  const sizeValue = sizeLabel ? sizeLabel.name.replace('size-', '') : '';
   const sizePillHtml = sizeLabel
-    ? `<span class="smgmt-ticket-size-pill">${escHtml(sizeLabel.name.replace('size-', ''))}</span>`
+    ? `<span class="smgmt-ticket-size-pill">${escHtml(sizeValue)}</span>`
     : '';
+  const sizeAttr = sizeValue ? ` data-size="${escHtml(sizeValue)}"` : '';
   const estimateBadgeHtml = _smgmtEstimateBadgeHtml(ticket.number);
   const reEstBtnHtml = (hasEstimate && _smgmtEstimatorAvailable)
     ? `<button class="smgmt-reestimate-btn" tabindex="0" title="Re-estimate this ticket"
@@ -7395,7 +7436,7 @@ function _smgmtTicketRowHtml(ticket, label) {
     <div class="smgmt-ticket${isSelected ? ' is-selected' : ''}" id="smgmt-ticket-${ticket.number}"
          draggable="true"
          data-issue="${ticket.number}"
-         data-sprint="${escHtml(label)}"
+         data-sprint="${escHtml(label)}"${sizeAttr}
          ondragstart="_smgmtTicketDragStart(event, ${ticket.number}, '${escHtml(label)}')"
          ondragend="_smgmtTicketDragEnd(event)"
          ondragover="_smgmtTicketReorderDragOver(event)"
@@ -7445,11 +7486,13 @@ async function _smgmtRetryEstimation(issueNum, btn) {
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const data = await resp.json();
     if (!data.ok || !data.size) throw new Error('no size');
+    const retryRow = spinner.closest('.smgmt-ticket');
     const pill = document.createElement('span');
     pill.className = 'smgmt-ticket-size-pill';
     pill.textContent = data.size;
     pill.title = `≈${data.minutes || _sizeMinutes(data.size)} min`;
     spinner.replaceWith(pill);
+    if (retryRow) retryRow.dataset.size = data.size;
   } catch (_) {
     const newBtn = document.createElement('button');
     newBtn.className = 'smgmt-retry-pill';
@@ -7574,6 +7617,7 @@ async function _smgmtReEstimateRun(issueNum, rowBtn) {
         pill.textContent = data.size;
         pill.title = `≈${data.minutes || _sizeMinutes(data.size)} min`;
       }
+      row.dataset.size = data.size;
     }
     // Restore row re-estimate button
     if (rowSpinner) rowSpinner.replaceWith(_makeReEstimateBtn(issueNum));

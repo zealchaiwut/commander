@@ -961,6 +961,15 @@
       display: none !important;
     }
 
+    /* ── Keyboard navigation focus ring (issue #549) ── */
+    .smgmt-ticket.smgmt-kb-focused {
+      outline: 3px solid var(--blue);
+      outline-offset: -2px;
+      position: relative;
+      z-index: 2;
+      box-shadow: 0 0 0 5px var(--blue-bg);
+    }
+
     .smgmt-sprint-list {
       display: flex; flex-direction: column; gap: 12px;
       margin-top: 16px;
@@ -5902,6 +5911,9 @@ function _smgmtRender(data) {
   // Render label filter chips and re-apply current filter state (issue #546)
   _smgmtLabelFilterRender(issues);
   _smgmtLabelFilterApply();
+
+  // Restore keyboard navigation focus ring after DOM rebuild (issue #549)
+  _smgmtKbRestoreFocus();
 }
 
 // ── Label filter chip row (issue #546) ────────────────────────────────────────
@@ -7471,6 +7483,7 @@ function _smgmtTicketRowHtml(ticket, label) {
 
   return `
     <div class="smgmt-ticket${isSelected ? ' is-selected' : ''}" id="smgmt-ticket-${ticket.number}"
+         tabindex="-1"
          draggable="true"
          data-issue="${ticket.number}"
          data-sprint="${escHtml(label)}"
@@ -9796,6 +9809,208 @@ function _smgmtBoardUnlock() {
   // Resume auto-refresh if an interval is selected
   if (_arInterval > 0) _smgmtArStartTicker();
 }
+
+// ── Keyboard navigation for sprint board (issue #549) ────────────────────────
+
+let _smgmtKbFocusedIssue = null;
+
+/** Returns the ordered list of sprint labels currently visible on the board. */
+function _smgmtKbSprintOrder() {
+  if (!_smgmtData) return [];
+  return (_smgmtData.order && _smgmtData.order.length)
+    ? _smgmtData.order
+    : (_smgmtData.sprints || []).map(n => `sprint-${n}`);
+}
+
+/** Returns visible ticket DOM elements in a sprint column (in DOM order). */
+function _smgmtKbColTickets(label) {
+  const container = document.getElementById(`smgmt-tickets-${label}`);
+  if (!container) return [];
+  return Array.from(container.querySelectorAll('.smgmt-ticket[data-issue]'))
+    .filter(el => el.style.display !== 'none');
+}
+
+/** Returns true if any modal, dialog, or dropdown is open. */
+function _smgmtKbAnyModalOpen() {
+  const backdropIds = ['mt-backdrop', 'pf-backdrop', 'ci-backdrop', 'lv-backdrop', 'rr-backdrop', 'gc-backdrop', 'apm-backdrop'];
+  if (backdropIds.some(id => { const el = document.getElementById(id); return el && !el.classList.contains('hidden'); })) return true;
+  const menuIds = ['smgmt-row-menu', 'smgmt-moveto-popup', 'smgmt-ctx-menu', 'smgmt-ar-menu', 'proj-create-menu'];
+  if (menuIds.some(id => { const el = document.getElementById(id); return el && !el.classList.contains('hidden'); })) return true;
+  return false;
+}
+
+/** Move keyboard focus to a ticket by issue number. */
+function _smgmtKbSetFocus(issueNum) {
+  if (_smgmtKbFocusedIssue !== null) {
+    const old = document.getElementById(`smgmt-ticket-${_smgmtKbFocusedIssue}`);
+    if (old) { old.classList.remove('smgmt-kb-focused'); old.tabIndex = -1; }
+  }
+  _smgmtKbFocusedIssue = issueNum;
+  if (issueNum === null) return;
+  const el = document.getElementById(`smgmt-ticket-${issueNum}`);
+  if (!el) { _smgmtKbFocusedIssue = null; return; }
+  el.tabIndex = 0;
+  el.classList.add('smgmt-kb-focused');
+  el.focus({ preventScroll: false });
+  _smgmtKbAnnounce(issueNum, el);
+}
+
+/** Re-apply the focus class after DOM rebuild (called from _smgmtRender). */
+function _smgmtKbRestoreFocus() {
+  if (_smgmtKbFocusedIssue === null) return;
+  const el = document.getElementById(`smgmt-ticket-${_smgmtKbFocusedIssue}`);
+  if (!el) { _smgmtKbFocusedIssue = null; return; }
+  el.tabIndex = 0;
+  el.classList.add('smgmt-kb-focused');
+}
+
+/** Announce focused card details to screen readers via aria-live region. */
+function _smgmtKbAnnounce(issueNum, el) {
+  let live = document.getElementById('smgmt-kb-announce');
+  if (!live) return;
+  const sprint = el.dataset.sprint || '';
+  const sprintName = sprintLabelDisplay(sprint);
+  const titleEl = el.querySelector('.smgmt-ticket-title');
+  const title = titleEl ? titleEl.textContent.trim() : '';
+  const container = el.parentElement;
+  const all = container
+    ? Array.from(container.querySelectorAll('.smgmt-ticket[data-issue]')).filter(t => t.style.display !== 'none')
+    : [];
+  const pos = all.indexOf(el) + 1;
+  live.textContent = '';
+  requestAnimationFrame(() => {
+    live.textContent = `#${issueNum}: ${title}, ${sprintName}, ${pos} of ${all.length}`;
+  });
+}
+
+/** Announce a plain message to screen readers. */
+function _smgmtKbAnnounceMsg(msg) {
+  const live = document.getElementById('smgmt-kb-announce');
+  if (!live) return;
+  live.textContent = '';
+  requestAnimationFrame(() => { live.textContent = msg; });
+}
+
+/** Move the focused ticket to an adjacent sprint (delta: +1 = next, -1 = previous). */
+async function _smgmtKbMoveSprint(delta) {
+  if (_smgmtMoveLock) return;
+  if (_smgmtKbFocusedIssue === null) return;
+  const repo = _smgmtRepo();
+  if (!repo || !_smgmtData) return;
+
+  const issueNum = _smgmtKbFocusedIssue;
+  const focusedEl = document.getElementById(`smgmt-ticket-${issueNum}`);
+  if (!focusedEl) return;
+  const currentSprint = focusedEl.dataset.sprint;
+
+  const sprints = _smgmtKbSprintOrder();
+  const colIdx = sprints.indexOf(currentSprint);
+  if (colIdx < 0) return;
+
+  const targetIdx = colIdx + delta;
+  if (targetIdx < 0 || targetIdx >= sprints.length) {
+    const msg = delta > 0
+      ? 'No next sprint — card is already in the last sprint'
+      : 'No previous sprint — card is already in the first sprint';
+    _smgmtShowToast(msg);
+    _smgmtKbAnnounceMsg(msg);
+    return;
+  }
+
+  const targetLabel = sprints[targetIdx];
+  const targetNum   = parseInt(String(targetLabel).split('-')[1], 10);
+  const fromNum     = parseInt(String(currentSprint).split('-')[1], 10);
+
+  // Optimistic update
+  if (_smgmtData) {
+    const iss = _smgmtData.issues.find(i => i.number === issueNum);
+    if (iss) { iss.sprint = targetNum; iss.sprint_label = targetLabel; }
+    _smgmtRender(_smgmtData);
+  }
+
+  _smgmtBoardLock(`Moving #${issueNum} to ${sprintLabelDisplay(targetLabel)}…`);
+  try {
+    const res = await fetch(`/api/issues/${issueNum}/sprint-label`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sprint_label: targetLabel, project: repo }),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    await loadSprintMgmt();
+    _smgmtKbSetFocus(issueNum);
+    _smgmtShowToast(`Moved #${issueNum} to ${sprintLabelDisplay(targetLabel)}`);
+  } catch (err) {
+    if (_smgmtData) {
+      const iss = _smgmtData.issues.find(i => i.number === issueNum);
+      if (iss) { iss.sprint = fromNum; iss.sprint_label = currentSprint; }
+      _smgmtRender(_smgmtData);
+    }
+    _smgmtShowToast(`Failed to move #${issueNum}: ${err.message}`);
+  } finally {
+    _smgmtBoardUnlock();
+  }
+}
+
+/** Global keydown handler for sprint board keyboard navigation (issue #549). */
+document.addEventListener('keydown', function _smgmtKbKeydown(e) {
+  if (_activeTab !== 'sprint-mgmt') return;
+  if (!_smgmtData) return;
+
+  const isArrow = e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'ArrowLeft' || e.key === 'ArrowRight';
+  if (!isArrow) return;
+
+  // Inert when any modal/dropdown is open
+  if (_smgmtKbAnyModalOpen()) return;
+
+  // Don't steal keys from interactive elements (except ticket divs themselves)
+  const tag = (document.activeElement?.tagName || '').toLowerCase();
+  if (tag === 'input' || tag === 'textarea' || tag === 'select' || tag === 'button' || tag === 'a') return;
+
+  e.preventDefault();
+
+  const sprints = _smgmtKbSprintOrder();
+  if (!sprints.length) return;
+
+  // Shift+ArrowRight/Left: move focused ticket to adjacent sprint
+  if (e.shiftKey) {
+    if (e.key === 'ArrowRight') { _smgmtKbMoveSprint(1); return; }
+    if (e.key === 'ArrowLeft')  { _smgmtKbMoveSprint(-1); return; }
+    return;
+  }
+
+  // No focused ticket yet: focus first ticket of first sprint
+  if (_smgmtKbFocusedIssue === null) {
+    for (const label of sprints) {
+      const tickets = _smgmtKbColTickets(label);
+      if (tickets.length) { _smgmtKbSetFocus(parseInt(tickets[0].dataset.issue, 10)); return; }
+    }
+    return;
+  }
+
+  const focusedEl = document.getElementById(`smgmt-ticket-${_smgmtKbFocusedIssue}`);
+  if (!focusedEl) { _smgmtKbFocusedIssue = null; return; }
+  const currentSprint = focusedEl.dataset.sprint;
+
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    const tickets = _smgmtKbColTickets(currentSprint);
+    if (!tickets.length) return;
+    const idx = tickets.findIndex(t => parseInt(t.dataset.issue, 10) === _smgmtKbFocusedIssue);
+    const next = e.key === 'ArrowDown'
+      ? (idx + 1) % tickets.length
+      : (idx - 1 + tickets.length) % tickets.length;
+    _smgmtKbSetFocus(parseInt(tickets[next].dataset.issue, 10));
+    return;
+  }
+
+  if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+    const colIdx = sprints.indexOf(currentSprint);
+    const delta  = e.key === 'ArrowRight' ? 1 : -1;
+    const nextColIdx = (colIdx + delta + sprints.length) % sprints.length;
+    const nextTickets = _smgmtKbColTickets(sprints[nextColIdx]);
+    if (nextTickets.length) _smgmtKbSetFocus(parseInt(nextTickets[0].dataset.issue, 10));
+    return;
+  }
+});
 
 // ── Auto-refresh pill (issue #275) ────────────────────────────────────────
 const _AR_LS_KEY    = 'smgmt-ar-interval';
@@ -12985,6 +13200,10 @@ function _cmpEmptyState(title, msg) {
 
 <!-- ── Per-row ≡ actions menu (issue #275 follow-up) ── -->
 <div class="smgmt-row-menu hidden" id="smgmt-row-menu" role="menu" aria-label="Ticket actions"></div>
+
+<!-- ── Keyboard navigation screen-reader announce region (issue #549) ── -->
+<div id="smgmt-kb-announce" aria-live="polite" aria-atomic="true"
+     style="position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0;"></div>
 
 <!-- ── "Move to" modal (issue #275 follow-up) ── -->
 <div class="modal-backdrop hidden" id="mt-backdrop" onclick="_smgmtMoveToModalClose()"></div>

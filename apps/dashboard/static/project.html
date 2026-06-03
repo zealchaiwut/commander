@@ -928,6 +928,23 @@
     .smgmt-content {
       padding: 0 28px 28px;
     }
+    /* ── Label filter chip row (issue #546) ── */
+    .smgmt-label-filter-row {
+      display: flex; flex-wrap: wrap; gap: 6px;
+      padding: 10px 0 4px;
+    }
+    .smgmt-label-filter-row.is-empty { display: none; }
+    .smgmt-lf-chip {
+      display: inline-flex; align-items: center; gap: 5px;
+      padding: 3px 9px; border-radius: 20px; font-size: 12px; font-weight: 500;
+      border: 1px solid var(--border); background: var(--surface-2); color: var(--text);
+      cursor: pointer; user-select: none; transition: background .12s, border-color .12s, color .12s, opacity .12s;
+      white-space: nowrap;
+    }
+    .smgmt-lf-chip:hover { border-color: var(--text-muted); }
+    .smgmt-lf-chip.is-active { background: var(--blue-bg); border-color: var(--blue); color: var(--blue); }
+    .smgmt-lf-chip.is-inactive { opacity: .45; }
+    .smgmt-lf-chip-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
     .smgmt-sprint-list {
       display: flex; flex-direction: column; gap: 12px;
       margin-top: 16px;
@@ -3648,6 +3665,9 @@
         <!-- Sprint list -->
         <div class="smgmt-content">
 
+          <!-- Label filter chips (issue #546) -->
+          <div class="smgmt-label-filter-row is-empty" id="smgmt-label-filter-row" role="toolbar" aria-label="Filter by label"></div>
+
           <div id="smgmt-sprint-list" class="smgmt-sprint-list">
             <div class="loading-msg" id="smgmt-loading">Loading sprints…</div>
           </div>
@@ -5838,6 +5858,100 @@ function _smgmtRender(data) {
 
   // Update cleanup button visibility (issue #457)
   _smgmtUpdateCleanupBtn(data);
+
+  // Render label filter chips and re-apply current filter state (issue #546)
+  _smgmtLabelFilterRender(issues);
+  _smgmtLabelFilterApply();
+}
+
+// ── Label filter chip row (issue #546) ────────────────────────────────────────
+
+// Session-scoped set of *deactivated* label names. Empty = all active (default).
+const _smgmtDeactivatedLabels = new Set();
+
+// Labels to always show as chips (in display order) even if no tickets carry them yet.
+const _SMGMT_FILTER_PRIORITY = ['backlog', 'in-progress', 'sit', 'uat'];
+
+// Map label-name → color (hex) for dot rendering
+const _smgmtLabelColors = {};
+
+function _smgmtLabelFilterRender(issues) {
+  const row = document.getElementById('smgmt-label-filter-row');
+  if (!row) return;
+
+  // Collect all label names from tickets
+  const seen = new Set();
+  (issues || []).forEach(iss => {
+    (iss.labels || []).forEach(l => {
+      seen.add(l.name);
+      if (l.color) _smgmtLabelColors[l.name] = '#' + l.color;
+    });
+  });
+
+  // Build ordered list: priority labels first (if present), then remainder alphabetically
+  const priority = _SMGMT_FILTER_PRIORITY.filter(n => seen.has(n));
+  const rest = [...seen].filter(n => !_SMGMT_FILTER_PRIORITY.includes(n)).sort();
+  const allLabels = [...priority, ...rest];
+
+  if (allLabels.length === 0) {
+    row.classList.add('is-empty');
+    row.innerHTML = '';
+    return;
+  }
+
+  row.classList.remove('is-empty');
+  row.innerHTML = allLabels.map(name => {
+    const active = !_smgmtDeactivatedLabels.has(name);
+    const color = _smgmtLabelColors[name] || 'var(--text-muted)';
+    return `<button class="smgmt-lf-chip ${active ? 'is-active' : 'is-inactive'}"
+               data-label="${escHtml(name)}"
+               aria-pressed="${active}"
+               title="${active ? 'Hide' : 'Show'} tickets labeled &quot;${escHtml(name)}&quot;"
+               onclick="_smgmtLabelFilterToggle('${escHtml(name)}')">
+              <span class="smgmt-lf-chip-dot" style="background:${color}"></span>
+              ${escHtml(name)}
+            </button>`;
+  }).join('');
+}
+
+function _smgmtLabelFilterToggle(labelName) {
+  if (_smgmtDeactivatedLabels.has(labelName)) {
+    _smgmtDeactivatedLabels.delete(labelName);
+  } else {
+    _smgmtDeactivatedLabels.add(labelName);
+  }
+  // Update chip appearance
+  const chip = document.querySelector(`.smgmt-lf-chip[data-label="${CSS.escape(labelName)}"]`);
+  if (chip) {
+    const active = !_smgmtDeactivatedLabels.has(labelName);
+    chip.classList.toggle('is-active', active);
+    chip.classList.toggle('is-inactive', !active);
+    chip.setAttribute('aria-pressed', String(active));
+    chip.title = `${active ? 'Hide' : 'Show'} tickets labeled "${labelName}"`;
+  }
+  _smgmtLabelFilterApply();
+}
+
+function _smgmtLabelFilterApply() {
+  if (_smgmtDeactivatedLabels.size === 0) {
+    // Fast path: all active — show everything
+    document.querySelectorAll('.smgmt-ticket[data-labels]').forEach(el => {
+      el.style.display = '';
+    });
+    return;
+  }
+  document.querySelectorAll('.smgmt-ticket[data-labels]').forEach(el => {
+    const raw = el.getAttribute('data-labels') || '';
+    const ticketLabels = raw ? raw.split(',') : [];
+    if (ticketLabels.length === 0) {
+      // No labels → always visible
+      el.style.display = '';
+      return;
+    }
+    // Hidden only when every ticket label that appears as a chip is deactivated
+    const allDeactivated = ticketLabels.every(n => _smgmtDeactivatedLabels.has(n));
+    el.style.display = allDeactivated ? 'none' : '';
+  });
 }
 
 async function _smgmtFetchMissingOutcomes(orderedLabels, bySprint) {
@@ -7257,11 +7371,14 @@ function _smgmtTicketRowHtml(ticket, label) {
     ? `<span class="smgmt-ticket-size-pill">${escHtml(sizeLabel.name.replace('size-', ''))}</span>`
     : '';
 
+  const ticketLabelNames = (ticket.labels || []).map(l => l.name).join(',');
+
   return `
     <div class="smgmt-ticket${isSelected ? ' is-selected' : ''}" id="smgmt-ticket-${ticket.number}"
          draggable="true"
          data-issue="${ticket.number}"
          data-sprint="${escHtml(label)}"
+         data-labels="${escHtml(ticketLabelNames)}"
          ondragstart="_smgmtTicketDragStart(event, ${ticket.number}, '${escHtml(label)}')"
          ondragend="_smgmtTicketDragEnd(event)"
          ondragover="_smgmtTicketReorderDragOver(event)"
@@ -9030,11 +9147,13 @@ function _smgmtRenderBacklog(tickets) {
 function _smgmtBacklogTicketHtml(ticket, sprintNums) {
   const isSelected = _smgmtSelectedIssues.has(ticket.number);
   const hasEstimate = (ticket.labels || []).some(l => /^size-[SMLX]+$/.test(l.name));
+  const backlogLabelNames = (ticket.labels || []).map(l => l.name).join(',');
   return `
     <div class="smgmt-ticket${isSelected ? ' is-selected' : ''}" id="smgmt-ticket-${ticket.number}"
          draggable="true"
          data-issue="${ticket.number}"
          data-sprint=""
+         data-labels="${escHtml(backlogLabelNames)}"
          ondragstart="_smgmtBacklogTicketDragStart(event, ${ticket.number})"
          ondragend="_smgmtTicketDragEnd(event)"
          oncontextmenu="_smgmtCtxMenuOpen(event,${ticket.number})"

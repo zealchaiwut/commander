@@ -1991,6 +1991,39 @@
     .smgmt-row-menu-item.is-danger:hover { background: var(--red-bg); }
     .smgmt-row-menu-divider { border-top: 1px solid var(--border); margin: 4px 0; }
 
+    /* ── Per-column sort control (issue #550) ── */
+    .smgmt-sort-btn {
+      display: inline-flex; align-items: center; gap: 4px;
+      padding: 0 8px; height: 26px;
+      background: none; border: 1px solid var(--border); border-radius: 5px;
+      color: var(--text-muted); cursor: pointer; font-size: 12px; font-family: inherit;
+      transition: background .15s, color .15s, border-color .15s;
+      white-space: nowrap; flex-shrink: 0;
+    }
+    .smgmt-sort-btn:hover, .smgmt-sort-btn[aria-expanded="true"] {
+      background: var(--surface-hover); color: var(--text); border-color: var(--border-strong, var(--border));
+    }
+    .smgmt-sort-btn.is-active { color: var(--blue); border-color: var(--blue); }
+    .smgmt-sort-btn .ti { font-size: 13px; }
+    .smgmt-sort-menu {
+      position: fixed; z-index: 520;
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 8px; box-shadow: 0 6px 20px rgba(0,0,0,.16);
+      min-width: 160px; padding: 4px 0;
+    }
+    .smgmt-sort-menu.hidden { display: none; }
+    .smgmt-sort-menu-item {
+      display: flex; align-items: center; gap: 8px; width: 100%;
+      text-align: left; padding: 7px 12px; font-size: 13px;
+      background: none; border: none; color: var(--text);
+      cursor: pointer; font-family: inherit;
+    }
+    .smgmt-sort-menu-item:hover { background: var(--surface-hover); }
+    .smgmt-sort-menu-item.is-active { color: var(--blue); }
+    .smgmt-sort-menu-item .ti { font-size: 14px; color: var(--text-muted); width: 15px; flex-shrink: 0; }
+    .smgmt-sort-menu-item.is-active .ti { color: var(--blue); }
+    .smgmt-sort-menu-divider { border-top: 1px solid var(--border); margin: 4px 0; }
+
     /* "Move to" modal options */
     .mt-modal { min-width: 320px; max-width: 420px; }
     .mt-options { display: flex; flex-direction: column; gap: 4px; margin-top: 12px; }
@@ -3761,6 +3794,9 @@
 
         <!-- Ticket row context menu (issue #500) -->
         <div class="smgmt-ctx-menu hidden" id="smgmt-ctx-menu" role="menu"></div>
+
+        <!-- Per-column sort menu (issue #550) -->
+        <div class="smgmt-sort-menu hidden" id="smgmt-sort-menu" role="menu" aria-label="Sort column"></div>
 
       </div>
 
@@ -5914,6 +5950,187 @@ function _smgmtRender(data) {
 
   // Restore keyboard navigation focus ring after DOM rebuild (issue #549)
   _smgmtKbRestoreFocus();
+
+  // Restore per-column sort state (issue #550)
+  orderedLabels.forEach(lbl => _smgmtApplySort(lbl));
+}
+
+// ── Per-column sort controls (issue #550) ────────────────────────────────────
+
+const _SMGMT_SIZE_ORDER = { S: 1, M: 2, L: 3, XL: 4 };
+
+const _SMGMT_SORT_LABELS = {
+  'default':      'Sort',
+  'number:asc':   'Issue # ↑',
+  'number:desc':  'Issue # ↓',
+  'size:asc':     'Size ↑',
+  'size:desc':    'Size ↓',
+  'title:asc':    'A → Z',
+  'title:desc':   'Z → A',
+};
+
+function _smgmtGetSortState(label) {
+  try {
+    const v = sessionStorage.getItem('smgmt-sort-' + label);
+    return v ? JSON.parse(v) : null;
+  } catch (_) { return null; }
+}
+
+function _smgmtSetSortState(label, state) {
+  try {
+    if (state) sessionStorage.setItem('smgmt-sort-' + label, JSON.stringify(state));
+    else sessionStorage.removeItem('smgmt-sort-' + label);
+  } catch (_) {}
+}
+
+function _smgmtSortBtnHtml(label) {
+  const state = _smgmtGetSortState(label);
+  const key   = state ? `${state.field}:${state.dir}` : 'default';
+  const isActive = !!state;
+  const btnLabel = _SMGMT_SORT_LABELS[key] || 'Sort';
+  const safeLabel = escHtml(label);
+  const dispLabel = escHtml(sprintLabelDisplay(label));
+  return `<button class="smgmt-sort-btn${isActive ? ' is-active' : ''}"
+    id="smgmt-sort-btn-${safeLabel}"
+    aria-haspopup="true" aria-expanded="false"
+    aria-label="Sort ${dispLabel} tickets, current order: ${escHtml(btnLabel)}"
+    title="Sort tickets in this column"
+    onclick="event.stopPropagation();smgmtOpenSortMenu('${safeLabel}',this)"
+    onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();smgmtOpenSortMenu('${safeLabel}',this);}">
+    <i class="ti ti-arrows-sort" aria-hidden="true"></i>${isActive ? ' ' + escHtml(btnLabel) : ' Sort'}
+  </button>`;
+}
+
+function smgmtOpenSortMenu(label, btn) {
+  _smgmtCloseSortMenu();
+  const state = _smgmtGetSortState(label);
+  const cur   = state ? `${state.field}:${state.dir}` : 'default';
+
+  const items = [
+    { key: 'default',     icon: 'ti-list',                    text: 'Default order' },
+    null,
+    { key: 'number:asc',  icon: 'ti-sort-ascending-numbers',  text: 'Issue # ↑' },
+    { key: 'number:desc', icon: 'ti-sort-descending-numbers', text: 'Issue # ↓' },
+    null,
+    { key: 'size:asc',    icon: 'ti-sort-ascending-letters',  text: 'Size S → XL' },
+    { key: 'size:desc',   icon: 'ti-sort-descending-letters', text: 'Size XL → S' },
+    null,
+    { key: 'title:asc',   icon: 'ti-sort-ascending-letters',  text: 'Title A → Z' },
+    { key: 'title:desc',  icon: 'ti-sort-descending-letters', text: 'Title Z → A' },
+  ];
+
+  const menu = document.getElementById('smgmt-sort-menu');
+  const safeLabel = escHtml(label);
+  menu.innerHTML = items.map(item => {
+    if (!item) return '<div class="smgmt-sort-menu-divider" role="separator"></div>';
+    const isActive = item.key === cur;
+    return `<button class="smgmt-sort-menu-item${isActive ? ' is-active' : ''}"
+      role="menuitem"
+      onclick="smgmtSetSort('${safeLabel}','${escHtml(item.key)}')">
+      <i class="ti ${escHtml(item.icon)}" aria-hidden="true"></i>${escHtml(item.text)}
+    </button>`;
+  }).join('');
+
+  btn.setAttribute('aria-expanded', 'true');
+  menu.dataset.forLabel = label;
+
+  const rect      = btn.getBoundingClientRect();
+  const menuWidth = 170;
+  let left = rect.left;
+  if (left + menuWidth > window.innerWidth - 8) left = window.innerWidth - menuWidth - 8;
+  menu.style.top  = (rect.bottom + 4) + 'px';
+  menu.style.left = left + 'px';
+  menu.classList.remove('hidden');
+
+  const first = menu.querySelector('.smgmt-sort-menu-item');
+  if (first) setTimeout(() => first.focus(), 0);
+
+  setTimeout(() => document.addEventListener('click', _smgmtSortMenuOutside, { once: true }), 0);
+}
+
+function _smgmtSortMenuOutside(e) {
+  const menu = document.getElementById('smgmt-sort-menu');
+  if (menu && !menu.contains(e.target)) _smgmtCloseSortMenu();
+}
+
+function _smgmtCloseSortMenu() {
+  const menu = document.getElementById('smgmt-sort-menu');
+  if (!menu || menu.classList.contains('hidden')) return;
+  const label = menu.dataset.forLabel;
+  if (label) {
+    const btn = document.getElementById('smgmt-sort-btn-' + label);
+    if (btn) btn.setAttribute('aria-expanded', 'false');
+  }
+  menu.classList.add('hidden');
+  menu.dataset.forLabel = '';
+}
+
+function smgmtSetSort(label, key) {
+  _smgmtCloseSortMenu();
+  if (key === 'default') {
+    _smgmtSetSortState(label, null);
+    _smgmtRestoreDefaultOrder(label);
+  } else {
+    const [field, dir] = key.split(':');
+    _smgmtSetSortState(label, { field, dir });
+    _smgmtApplySort(label);
+  }
+  _smgmtUpdateSortBtn(label);
+}
+
+function _smgmtUpdateSortBtn(label) {
+  const btn = document.getElementById('smgmt-sort-btn-' + label);
+  if (!btn) return;
+  const state    = _smgmtGetSortState(label);
+  const key      = state ? `${state.field}:${state.dir}` : 'default';
+  const isActive = !!state;
+  const btnLabel = _SMGMT_SORT_LABELS[key] || 'Sort';
+  btn.className  = 'smgmt-sort-btn' + (isActive ? ' is-active' : '');
+  btn.setAttribute('aria-label', `Sort ${escHtml(sprintLabelDisplay(label))} tickets, current order: ${btnLabel}`);
+  btn.innerHTML  = `<i class="ti ti-arrows-sort" aria-hidden="true"></i>${isActive ? ' ' + btnLabel : ' Sort'}`;
+}
+
+function _smgmtApplySort(label) {
+  const container = document.getElementById('smgmt-tickets-' + label);
+  if (!container) return;
+  const state = _smgmtGetSortState(label);
+  if (!state) return;
+
+  const rows = Array.from(container.querySelectorAll('.smgmt-ticket'));
+  if (rows.length < 2) return;
+
+  rows.sort((a, b) => {
+    let va, vb;
+    if (state.field === 'number') {
+      va = parseInt(a.dataset.issue || '0', 10);
+      vb = parseInt(b.dataset.issue || '0', 10);
+    } else if (state.field === 'size') {
+      const pillA = a.querySelector('.smgmt-ticket-size-pill');
+      const pillB = b.querySelector('.smgmt-ticket-size-pill');
+      va = _SMGMT_SIZE_ORDER[pillA ? pillA.textContent.trim() : ''] || 99;
+      vb = _SMGMT_SIZE_ORDER[pillB ? pillB.textContent.trim() : ''] || 99;
+    } else {
+      va = (a.querySelector('.smgmt-ticket-title')?.textContent || '').trim().toLowerCase();
+      vb = (b.querySelector('.smgmt-ticket-title')?.textContent || '').trim().toLowerCase();
+    }
+    if (va < vb) return state.dir === 'asc' ? -1 : 1;
+    if (va > vb) return state.dir === 'asc' ?  1 : -1;
+    return 0;
+  });
+
+  rows.forEach(r => container.appendChild(r));
+}
+
+function _smgmtRestoreDefaultOrder(label) {
+  const container = document.getElementById('smgmt-tickets-' + label);
+  if (!container || !_smgmtData) return;
+  const issues  = _smgmtData.issues || [];
+  const tickets = issues.filter(i => i.sprint_label === label);
+  if (tickets.length === 0) {
+    container.innerHTML = '<div class="smgmt-drop-hint">Drop tickets here</div>';
+    return;
+  }
+  container.innerHTML = tickets.map(t => _smgmtTicketRowHtml(t, label)).join('');
 }
 
 // ── Label filter chip row (issue #546) ────────────────────────────────────────
@@ -6998,6 +7215,7 @@ function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent) {
           <span class="smgmt-sprint-count"><span id="smgmt-est-${escHtml(label)}" class="smgmt-sprint-est-val">— estimated</span> &middot; ${ticketCount} ticket${ticketCount !== 1 ? 's' : ''}</span>
         </div>
         <div class="smgmt-sprint-header-right">
+          ${_smgmtSortBtnHtml(label)}
           <button class="smgmt-finish-btn ${finishHidden}" ${finishDisabled}
                   title="${finishDisabled ? 'No open tickets' : 'Finish sprint'}"
                   onclick="smgmtFinishSprint('${escHtml(label)}')">

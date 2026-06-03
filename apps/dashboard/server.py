@@ -5173,7 +5173,13 @@ def get_estimates_batch(project: str, issues: str = ""):
                 complete = False
             else:
                 total += float(h)
-            per_issue[str(num)] = {"size": size, "confidence": confidence}
+            per_issue[str(num)] = {
+                "size": size,
+                "confidence": confidence,
+                "files_likely_affected": data.get("files_likely_affected", []),
+                "risk_flags": data.get("risk_flags", []),
+                "summary": data.get("summary", ""),
+            }
         except (json.JSONDecodeError, OSError, ValueError):
             complete = False
             per_issue[str(num)] = None

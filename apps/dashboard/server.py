@@ -1362,11 +1362,20 @@ def get_test_report(issue_id: int, repo: Optional[str] = None):
         raise HTTPException(400, detail=str(e))
 
 
+@app.get("/api/estimator/health")
+def estimator_health():
+    """Check whether the estimator agent (claude CLI) is available."""
+    import shutil
+    available = shutil.which("claude") is not None
+    return {"available": available}
+
+
 @app.post("/api/issues/{issue_id}/estimate")
-def estimate_issue_on_demand(request: Request, issue_id: int, repo: str):
+def estimate_issue_on_demand(request: Request, issue_id: int, repo: str, force: bool = True):
     """Run the issue estimator on demand and apply the size label.
 
     Returns {"ok": True, "size": "S"|"M"|"L"|"XL"} on success.
+    The force param is accepted for API compatibility; the endpoint always runs fresh.
     """
     _slog.event("route.entry", project="dashboard", request_id=request.state.request_id,
                 route="/api/issues/{issue_id}/estimate", method="POST", issue_id=issue_id)

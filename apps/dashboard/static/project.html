@@ -2246,6 +2246,10 @@
     .smgmt-ticket:hover .smgmt-reestimate-btn { opacity: 1; }
     .smgmt-reestimate-btn:hover { background: var(--blue-bg); }
     .smgmt-reestimate-btn:disabled { opacity: .4 !important; cursor: not-allowed; }
+    .smgmt-reestimate-error {
+      font-size: 10px; font-weight: 600; font-family: var(--mono);
+      color: var(--red); flex-shrink: 0; white-space: nowrap;
+    }
     .smgmt-reestimate-spinner {
       width: 12px; height: 12px; flex-shrink: 0;
       border: 2px solid rgba(37,99,235,.2);
@@ -5910,6 +5914,9 @@ function _smgmtRender(data) {
   // Load estimated hours from .commander/estimates/ for each sprint header
   _smgmtLoadEstimates(orderedLabels, bySprint);
 
+  // Check estimator availability and inject re-estimate buttons (issue #561)
+  _smgmtCheckEstimatorHealth();
+
   // Inject pre-flight check banners for non-running sprint panes (issue #434)
   _preflightLoadBanners(orderedLabels, bySprint);
 
@@ -7373,11 +7380,15 @@ function _smgmtTicketRowHtml(ticket, label) {
 
   const sizeLabel = (ticket.labels || []).find(l => /^size-[SMLX]+$/.test(l.name));
   const hasEstimate = !!sizeLabel;
-  // Size badge only — the re-estimate action now lives in the per-row ≡ menu (issue #275 follow-up)
   const sizePillHtml = sizeLabel
     ? `<span class="smgmt-ticket-size-pill">${escHtml(sizeLabel.name.replace('size-', ''))}</span>`
     : '';
   const estimateBadgeHtml = _smgmtEstimateBadgeHtml(ticket.number);
+  const reEstBtnHtml = (hasEstimate && _smgmtEstimatorAvailable)
+    ? `<button class="smgmt-reestimate-btn" tabindex="0" title="Re-estimate this ticket"
+         onclick="event.stopPropagation();_smgmtReEstimate(${ticket.number},this)"
+         onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();_smgmtReEstimate(${ticket.number},this);}">Re-estimate</button>`
+    : '';
   const riskFlagIconsHtml = _smgmtRiskFlagIconsHtml(ticket.number);
 
   return `
@@ -7399,7 +7410,7 @@ function _smgmtTicketRowHtml(ticket, label) {
       <a class="smgmt-ticket-num" href="${escHtml(ticket.url || '#')}" target="_blank"
          rel="noopener" onclick="event.stopPropagation()">#${ticket.number}</a>
       <span class="smgmt-ticket-title" title="${escHtml(ticket.title)}">${escHtml(ticket.title)}</span>
-      ${sizePillHtml}${estimateBadgeHtml}${riskFlagIconsHtml}
+      ${sizePillHtml}${estimateBadgeHtml}${riskFlagIconsHtml}${reEstBtnHtml}
       <span class="smgmt-ticket-status ${statusClass}">${escHtml(statusLabel)}</span>
       <button class="btn-view-log" tabindex="0" title="View issue log"
               onclick="event.stopPropagation();openLvIssueLog(${ticket.number},'${escHtml(label)}',_smgmtRepo()||'')">
@@ -7453,9 +7464,37 @@ async function _smgmtRetryEstimation(issueNum, btn) {
   }
 }
 
-// ── Re-estimate action (issue #452) ───────────────────────────────────────────
+// ── Re-estimate action (issue #452, extended by #561) ────────────────────────
 let _reEstIssueNum = null;
 let _reEstRowBtn   = null;
+let _smgmtEstimatorAvailable = false;
+let _smgmtEstimatorHealthChecked = false;
+
+async function _smgmtCheckEstimatorHealth() {
+  if (_smgmtEstimatorHealthChecked) return;
+  _smgmtEstimatorHealthChecked = true;
+  try {
+    const resp = await fetch('/api/estimator/health');
+    if (!resp.ok) return;
+    const data = await resp.json();
+    if (data.available) {
+      _smgmtEstimatorAvailable = true;
+      _smgmtInjectReEstimateButtons();
+    }
+  } catch (_) {}
+}
+
+function _smgmtInjectReEstimateButtons() {
+  document.querySelectorAll('.smgmt-ticket').forEach(row => {
+    if (!row.querySelector('.smgmt-ticket-size-pill')) return;
+    if (row.querySelector('.smgmt-reestimate-btn, .smgmt-reestimate-spinner, .smgmt-reestimate-error')) return;
+    const issueNum = parseInt(row.dataset.issue, 10);
+    if (!issueNum) return;
+    const statusEl = row.querySelector('.smgmt-ticket-status');
+    if (statusEl) statusEl.before(_makeReEstimateBtn(issueNum));
+    else row.appendChild(_makeReEstimateBtn(issueNum));
+  });
+}
 
 function _makeReEstimateBtn(issueNum) {
   const btn = document.createElement('button');
@@ -7520,7 +7559,7 @@ async function _smgmtReEstimateRun(issueNum, rowBtn) {
 
   try {
     const resp = await fetch(
-      `/api/issues/${issueNum}/estimate?repo=${encodeURIComponent(repo)}`,
+      `/api/issues/${issueNum}/estimate?repo=${encodeURIComponent(repo)}&force=true`,
       { method: 'POST' }
     );
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
@@ -7550,11 +7589,17 @@ async function _smgmtReEstimateRun(issueNum, rowBtn) {
       }
     }
   } catch (err) {
-    // Restore row button
-    if (rowSpinner) rowSpinner.replaceWith(_makeReEstimateBtn(issueNum));
+    // Show inline error near the button, then restore it after 3 s
+    if (rowSpinner) {
+      const errBadge = document.createElement('span');
+      errBadge.className = 'smgmt-reestimate-error';
+      errBadge.title = err.message;
+      errBadge.textContent = 'Failed';
+      rowSpinner.replaceWith(errBadge);
+      setTimeout(() => errBadge.replaceWith(_makeReEstimateBtn(issueNum)), 3000);
+    }
     // Restore detail panel button
     if (tdpBtn) { tdpBtn.disabled = false; tdpBtn.textContent = 'Re-estimate'; }
-    _smgmtShowToast(`Re-estimate failed: ${err.message}`);
   }
 }
 

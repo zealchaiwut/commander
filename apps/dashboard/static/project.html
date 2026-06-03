@@ -1073,7 +1073,10 @@
     }
     .smgmt-ticket[draggable="false"] .smgmt-ticket-grip { opacity: 0 !important; cursor: default; }
     .smgmt-ticket-grip:active { cursor: grabbing; }
-    .smgmt-ticket-cb { cursor: pointer; flex-shrink: 0; }
+    .smgmt-ticket-cb { cursor: pointer; flex-shrink: 0; opacity: 0; transition: opacity .12s; }
+    .smgmt-ticket:hover .smgmt-ticket-cb,
+    .smgmt-ticket.is-selected .smgmt-ticket-cb,
+    .smgmt-sprint-list.has-selection .smgmt-ticket-cb { opacity: 1; }
     .smgmt-ticket-num {
       font-family: var(--mono); font-size: 12px; color: var(--text-sub);
       text-decoration: none; flex-shrink: 0; min-width: 42px;
@@ -7162,7 +7165,8 @@ function _smgmtTicketRowHtml(ticket, label) {
          ondragover="_smgmtTicketReorderDragOver(event)"
          ondragleave="_smgmtTicketReorderDragLeave(event)"
          ondrop="_smgmtTicketReorderDrop(event, ${ticket.number}, '${escHtml(label)}')"
-         oncontextmenu="_smgmtCtxMenuOpen(event,${ticket.number})">
+         oncontextmenu="_smgmtCtxMenuOpen(event,${ticket.number})"
+         onclick="if(event.ctrlKey||event.metaKey){event.preventDefault();_smgmtToggleSelect(${ticket.number},!_smgmtSelectedIssues.has(${ticket.number}));}">
       <input type="checkbox" class="smgmt-ticket-cb"
              ${isSelected ? 'checked' : ''}
              onclick="event.stopPropagation()"
@@ -7396,6 +7400,23 @@ function _smgmtShowToast(msg) {
   el.classList.add('show');
   clearTimeout(el._timer);
   el._timer = setTimeout(() => el.classList.remove('show'), 2800);
+}
+
+function _smgmtShowInlineError(msg) {
+  const listEl = document.getElementById('smgmt-sprint-list');
+  if (!listEl) { _smgmtShowToast(msg); return; }
+  let errEl = document.getElementById('smgmt-bulk-move-error');
+  if (!errEl) {
+    errEl = document.createElement('div');
+    errEl.id = 'smgmt-bulk-move-error';
+    errEl.style.cssText = 'background:var(--red-bg);border:1px solid var(--red);border-radius:8px;padding:10px 14px;font-size:12px;color:var(--red);white-space:pre-wrap;margin-bottom:10px;position:relative;';
+    errEl.innerHTML = '<button onclick="this.parentElement.remove()" style="position:absolute;top:6px;right:8px;background:none;border:none;color:var(--red);cursor:pointer;font-size:14px;line-height:1;">✕</button>';
+    listEl.insertBefore(errEl, listEl.firstChild);
+  }
+  const txt = document.createElement('span');
+  txt.textContent = msg;
+  errEl.prepend(txt);
+  errEl.style.display = 'block';
 }
 
 function smgmtRunBlockedToast() {
@@ -8229,13 +8250,14 @@ function _smgmtUpdateSelectionUI() {
           </button>
           <button class="smgmt-move-to-btn" id="smgmt-move-to-btn"
                   onclick="_smgmtToggleMoveToMenu(event)">
-            Move to &#9660;
+            <i class="ti ti-send"></i> Move to Sprint &#9660;
           </button>
           <div class="smgmt-move-to-menu" id="smgmt-move-to-menu"></div>
         </div>`;
       if (listEl) listEl.insertBefore(bar, listEl.firstChild);
     }
     bar.classList.add('show');
+    if (listEl) listEl.classList.add('has-selection');
     const countEl = document.getElementById('smgmt-sel-count');
     if (countEl) countEl.textContent = count === 1 ? '1 ticket selected' : `${count} tickets selected`;
     _smgmtPopulateMoveToMenu();
@@ -8247,6 +8269,7 @@ function _smgmtUpdateSelectionUI() {
     }
   } else {
     if (bar) bar.classList.remove('show');
+    if (listEl) listEl.classList.remove('has-selection');
   }
 }
 
@@ -8257,13 +8280,24 @@ function _smgmtPopulateSelectionDropdown() {
 function _smgmtPopulateMoveToMenu() {
   const menu = document.getElementById('smgmt-move-to-menu');
   if (!menu || !_smgmtData) return;
+
+  // Sprints that contain at least one selected ticket — exclude from the target list
+  const selectedNums = Array.from(_smgmtSelectedIssues);
+  const occupiedSprints = new Set(
+    selectedNums.map(n => {
+      const iss = (_smgmtData.issues || []).find(i => i.number === n);
+      return iss ? iss.sprint : undefined;
+    }).filter(s => s != null)
+  );
+
   const sprints = (_smgmtData.sprints || []).sort((a, b) => a - b);
   let html = '';
   sprints.forEach(n => {
+    if (occupiedSprints.has(n)) return;
     html += `<button class="smgmt-move-to-item" onclick="_smgmtMoveSelectedTo('sprint-${n}');_smgmtCloseMoveToMenu()">Sprint ${n}</button>`;
   });
   html += `<button class="smgmt-move-to-item" onclick="_smgmtMoveSelectedTo('backlog');_smgmtCloseMoveToMenu()">Backlog (no sprint)</button>`;
-  menu.innerHTML = html;
+  menu.innerHTML = html || '<span style="display:block;padding:8px 14px;font-size:12px;color:var(--text-muted)">No other sprints available</span>';
 }
 
 function _smgmtToggleMoveToMenu(event) {
@@ -8278,6 +8312,12 @@ function _smgmtCloseMoveToMenu() {
   const menu = document.getElementById('smgmt-move-to-menu');
   if (menu) menu.classList.remove('open');
 }
+
+// Close bulk-move dropdown when clicking outside the selection bar
+document.addEventListener('click', function(e) {
+  const bar = document.getElementById('smgmt-selection-bar');
+  if (bar && !bar.contains(e.target)) _smgmtCloseMoveToMenu();
+});
 
 function _smgmtClearSelection() {
   _smgmtSelectedIssues.forEach(num => {
@@ -8296,7 +8336,11 @@ function _smgmtToggleSelect(number, checked) {
   if (checked) _smgmtSelectedIssues.add(number);
   else _smgmtSelectedIssues.delete(number);
   const el = document.getElementById(`smgmt-ticket-${number}`);
-  if (el) el.classList.toggle('is-selected', checked);
+  if (el) {
+    el.classList.toggle('is-selected', checked);
+    const cb = el.querySelector('.smgmt-ticket-cb');
+    if (cb) cb.checked = checked;
+  }
   _smgmtUpdateSelectionUI();
 }
 
@@ -8362,9 +8406,15 @@ async function _smgmtMoveSelectedTo(targetLabel) {
       body: JSON.stringify({ changes, project: repo }),
     });
     if (!res.ok) throw new Error(await res.text());
+    const data = await res.json();
+    if (data.failed > 0 && data.errors && data.errors.length > 0) {
+      _smgmtShowInlineError(`${data.failed} ticket${data.failed !== 1 ? 's' : ''} failed to move:\n${data.errors.join('\n')}`);
+    } else if (data.applied > 0) {
+      _smgmtShowToast(`Moved ${data.applied} ticket${data.applied !== 1 ? 's' : ''} to ${dest}.`);
+    }
     await loadSprintMgmt();
   } catch (e) {
-    alert('Failed to move tickets: ' + e.message);
+    _smgmtShowToast('Failed to move tickets: ' + e.message);
     await loadSprintMgmt();
   } finally {
     _smgmtBoardUnlock();
@@ -8868,7 +8918,8 @@ function _smgmtBacklogTicketHtml(ticket, sprintNums) {
          data-sprint=""
          ondragstart="_smgmtBacklogTicketDragStart(event, ${ticket.number})"
          ondragend="_smgmtTicketDragEnd(event)"
-         oncontextmenu="_smgmtCtxMenuOpen(event,${ticket.number})">
+         oncontextmenu="_smgmtCtxMenuOpen(event,${ticket.number})"
+         onclick="if(event.ctrlKey||event.metaKey){event.preventDefault();_smgmtToggleSelect(${ticket.number},!_smgmtSelectedIssues.has(${ticket.number}));}">
       <input type="checkbox" class="smgmt-ticket-cb"
              ${isSelected ? 'checked' : ''}
              onclick="event.stopPropagation()"
@@ -9882,6 +9933,7 @@ function _setupModals() {
         closeAddProjectModal();
       } else if (_smgmtSelectedIssues.size > 0) {
         // Clear multi-select when Escape pressed and no modal is open
+        _smgmtCloseMoveToMenu();
         _smgmtClearSelection();
       }
     }

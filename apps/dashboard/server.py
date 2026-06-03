@@ -3390,12 +3390,20 @@ def get_sprint_management_issues(repo: str):
         and n < min_active_sprint
     ]
 
-    # Build order from all sprint labels (plain and dotted) that have tickets
-    non_empty_sprint_labels = [
-        lbl for lbl in all_sprint_labels if sprint_ticket_counts.get(lbl, 0) > 0
+    # Finished sprints = those with a posted "Sprint N Executive Summary" issue.
+    finished_map = _finished_sprint_summaries(repo)
+    finished_set = set(finished_map.keys())
+
+    # Sprint labels to render as panes: any with tickets, PLUS empty labels that
+    # are NOT finished — so a freshly-created sprint (0 tickets, no summary) still
+    # shows as a drop target. Finished sprints whose tickets are all closed are
+    # not resurrected as empty planning panes.
+    renderable_sprint_labels = [
+        lbl for lbl in all_sprint_labels
+        if sprint_ticket_counts.get(lbl, 0) > 0 or lbl not in finished_set
     ]
     project_root = _project_root_path(repo)
-    order = _load_sprint_order(project_root, non_empty_sprint_labels)
+    order = _load_sprint_order(project_root, renderable_sprint_labels)
 
     # Apply per-sprint plan.json ordering; fallback to ascending issue number (issue #441)
     sprint_issues_map: dict[str, list] = {}
@@ -3426,11 +3434,10 @@ def get_sprint_management_issues(repo: str):
     ordered_result.extend(unassigned_issues)
     result_issues = ordered_result
 
-    # Finished sprints = those with a posted "Sprint N Executive Summary" issue.
-    # Surfaced so the board marks them finished and stops showing NEXT UP /
-    # pre-flight — same GitHub-backed signal the nav pill uses (cross-machine).
-    finished_map = _finished_sprint_summaries(repo)
-    finished_sprints = sorted(finished_map.keys())
+    # Finished sprints (computed above) are surfaced so the board marks them
+    # finished and stops showing NEXT UP / pre-flight — same GitHub-backed signal
+    # the nav pill uses (cross-machine).
+    finished_sprints = sorted(finished_set)
 
     # Placeholder/next sprint = max existing + 1 (not the lowest free number — a
     # deleted early label must not reset the next sprint back to 1). The max is

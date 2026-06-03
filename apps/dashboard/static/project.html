@@ -2257,6 +2257,19 @@
       font-family: var(--mono);
       background: var(--surface-2); color: var(--text-sub);
     }
+    .smgmt-ticket-size-pill--S  { background: #dcfce7; color: #166534; }
+    .smgmt-ticket-size-pill--M  { background: #dbeafe; color: #1e40af; }
+    .smgmt-ticket-size-pill--L  { background: #fef9c3; color: #854d0e; }
+    .smgmt-ticket-size-pill--XL { background: #fee2e2; color: #991b1b; }
+    .smgmt-ticket-size-pill--unestimated {
+      background: var(--surface-2); color: #4b5563;
+      border: 1px dashed var(--border); font-weight: 600;
+    }
+    [data-theme="dark"] .smgmt-ticket-size-pill--S  { background: #14532d; color: #86efac; }
+    [data-theme="dark"] .smgmt-ticket-size-pill--M  { background: #1e3a5f; color: #93c5fd; }
+    [data-theme="dark"] .smgmt-ticket-size-pill--L  { background: #422006; color: #fde68a; }
+    [data-theme="dark"] .smgmt-ticket-size-pill--XL { background: #450a0a; color: #fca5a5; }
+    [data-theme="dark"] .smgmt-ticket-size-pill--unestimated { color: #9ca3af; }
 
     /* Retry estimation pill and spinner (issue #451) */
     .smgmt-retry-pill {
@@ -6024,15 +6037,42 @@ async function _smgmtLoadEstimates(orderedLabels, bySprint) {
       if (!resp.ok) continue;
       const data = await resp.json();
       const estEl = document.getElementById(`smgmt-est-${label}`);
-      if (!estEl) continue;
-      if (data.complete && data.total_hours !== null) {
+      if (estEl && data.complete && data.total_hours !== null) {
         const h = data.total_hours;
         const display = Number.isInteger(h) ? `${h}h` : `${parseFloat(h.toFixed(1))}h`;
         estEl.textContent = `${display} estimated`;
       }
-      // else: leave as "— estimated"
+      // Apply per-ticket size badges from cached estimate JSON
+      if (data.sizes) _smgmtApplySizeBadges(label, data.sizes, tickets);
     } catch (_) {
       // fail silently — leave as "— estimated"
+    }
+  }
+}
+
+function _smgmtApplySizeBadges(label, sizes, tickets) {
+  const card = document.getElementById(`smgmt-card-${label}`);
+  for (const ticket of tickets) {
+    const row = (card && card.querySelector(`.smgmt-ticket[data-issue="${ticket.number}"]`))
+      || document.getElementById(`smgmt-ticket-${ticket.number}`);
+    if (!row) continue;
+    const size = sizes[String(ticket.number)];
+    let pill = row.querySelector('.smgmt-ticket-size-pill');
+    if (!pill) {
+      pill = document.createElement('span');
+      pill.className = 'smgmt-ticket-size-pill';
+      const titleEl = row.querySelector('.smgmt-ticket-title');
+      if (titleEl) titleEl.after(pill);
+      else row.appendChild(pill);
+    }
+    if (size) {
+      pill.textContent = size;
+      pill.title = `≈${_sizeMinutes(size)} min`;
+      pill.className = `smgmt-ticket-size-pill smgmt-ticket-size-pill--${size}`;
+    } else {
+      pill.textContent = 'Unestimated';
+      pill.title = 'No estimate in cache';
+      pill.className = 'smgmt-ticket-size-pill smgmt-ticket-size-pill--unestimated';
     }
   }
 }
@@ -7421,9 +7461,10 @@ function _smgmtTicketRowHtml(ticket, label) {
 
   const sizeLabel = (ticket.labels || []).find(l => /^size-[SMLX]+$/.test(l.name));
   const hasEstimate = !!sizeLabel;
-  // Size badge only — the re-estimate action now lives in the per-row ≡ menu (issue #275 follow-up)
-  const sizePillHtml = sizeLabel
-    ? `<span class="smgmt-ticket-size-pill">${escHtml(sizeLabel.name.replace('size-', ''))}</span>`
+  // Size badge: show from GitHub label immediately; _smgmtApplySizeBadges overlays JSON data after load
+  const sizeVal = sizeLabel ? sizeLabel.name.replace('size-', '') : null;
+  const sizePillHtml = sizeVal
+    ? `<span class="smgmt-ticket-size-pill smgmt-ticket-size-pill--${escHtml(sizeVal)}" title="≈${_sizeMinutes(sizeVal)} min">${escHtml(sizeVal)}</span>`
     : '';
 
   const ticketLabelNames = (ticket.labels || []).map(l => l.name).join(',');

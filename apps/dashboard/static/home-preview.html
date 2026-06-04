@@ -153,6 +153,41 @@
       cursor: pointer;
     }
 
+    /* ── Stale-docs warnings ── */
+    #section-stale-docs { display: none; }
+    .stale-docs-list {
+      display: flex; flex-direction: column; gap: 8px;
+    }
+    .stale-docs-item {
+      display: flex; align-items: center; gap: 12px;
+      background: var(--amber-bg);
+      border: 1px solid var(--amber);
+      border-radius: 8px;
+      padding: 11px 14px;
+      font-size: 13px;
+    }
+    .stale-docs-item i { color: var(--amber); flex-shrink: 0; }
+    .stale-docs-item-body { flex: 1; min-width: 0; }
+    .stale-docs-item-doc {
+      font-weight: 600; color: var(--text);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .stale-docs-item-meta { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+    .stale-docs-item-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+    .stale-docs-item-link {
+      font-size: 11px; font-weight: 600; color: var(--blue);
+      text-decoration: none; padding: 3px 8px;
+      border: 1px solid var(--blue); border-radius: 4px;
+      white-space: nowrap;
+    }
+    .stale-docs-item-link:hover { background: var(--blue-bg); }
+    .stale-docs-dismiss {
+      background: none; border: none; padding: 3px 6px;
+      color: var(--text-muted); font-size: 14px; border-radius: 4px;
+      cursor: pointer;
+    }
+    .stale-docs-dismiss:hover { background: var(--surface-2); color: var(--text); }
+
     /* ── Stat card grid ── */
     .stat-grid {
       display: grid;
@@ -802,6 +837,12 @@
       </div>
 
     </div>
+  </section>
+
+  <!-- ── Stale-docs warnings ── -->
+  <section id="section-stale-docs">
+    <div class="section-heading">Stale docs</div>
+    <div class="stale-docs-list" id="stale-docs-list"></div>
   </section>
 
   <!-- ── Projects ── -->
@@ -1560,6 +1601,84 @@
 
   // ── Data fetching ──────────────────────────────────────────────────────────
 
+  // ── Stale-docs warnings ────────────────────────────────────────────────────
+
+  function _repoFileUrl(repo, docPath) {
+    if (!repo) return null;
+    return `https://github.com/${repo}/blob/master/${encodeURIComponent(docPath)}`;
+  }
+
+  function _formatRelTime(isoStr) {
+    if (!isoStr) return '';
+    const diff = Date.now() - new Date(isoStr + 'Z').getTime();
+    const mins = Math.floor(diff / 60000);
+    if (mins < 2) return 'just now';
+    if (mins < 60) return `${mins}m ago`;
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 24) return `${hrs}h ago`;
+    return `${Math.floor(hrs / 24)}d ago`;
+  }
+
+  async function loadStaleDocs() {
+    try {
+      const resp = await fetch('/api/docs-freshness/warnings');
+      if (!resp.ok) return;
+      const warnings = await resp.json();
+      renderStaleDocs(warnings);
+    } catch (e) {
+      // Silently fail — stale-docs section is non-critical
+    }
+  }
+
+  function renderStaleDocs(warnings) {
+    const section = document.getElementById('section-stale-docs');
+    const list = document.getElementById('stale-docs-list');
+    if (!section || !list) return;
+    if (!warnings || warnings.length === 0) {
+      section.style.display = 'none';
+      return;
+    }
+    section.style.display = '';
+    list.innerHTML = warnings.map((w, idx) => {
+      const fileUrl = _repoFileUrl(w.repo, w.doc_path);
+      const linkHtml = fileUrl
+        ? `<a class="stale-docs-item-link" href="${fileUrl}" target="_blank" rel="noopener">View doc</a>`
+        : '';
+      const triggerLabel = w.trigger_type === 'pull_request'
+        ? `PR ${w.trigger_ref}`
+        : `commit ${(w.trigger_ref || '').slice(0, 8)}`;
+      const triggerHtml = w.trigger_url
+        ? `<a href="${w.trigger_url}" target="_blank" rel="noopener" style="color:inherit">${triggerLabel}</a>`
+        : triggerLabel;
+      return `
+        <div class="stale-docs-item" data-warning-id="${w.id}">
+          <i class="ti ti-file-alert"></i>
+          <div class="stale-docs-item-body">
+            <div class="stale-docs-item-doc">${w.doc_path}</div>
+            <div class="stale-docs-item-meta">
+              Flagged ${_formatRelTime(w.flagged_at)} · triggered by ${triggerHtml}
+              ${w.repo ? ` · ${w.repo}` : ''}
+            </div>
+          </div>
+          <div class="stale-docs-item-actions">
+            ${linkHtml}
+            <button class="stale-docs-dismiss" title="Dismiss" onclick="dismissStaleDoc(${w.id})">
+              <i class="ti ti-x"></i>
+            </button>
+          </div>
+        </div>`;
+    }).join('');
+  }
+
+  async function dismissStaleDoc(warningId) {
+    try {
+      await fetch(`/api/docs-freshness/warnings/${warningId}`, { method: 'DELETE' });
+      await loadStaleDocs();
+    } catch (e) {
+      console.error('Failed to dismiss stale-docs warning:', e);
+    }
+  }
+
   async function loadHomeData() {
     hideError();
     showSkeleton();
@@ -1662,6 +1781,8 @@
   // ── Init ───────────────────────────────────────────────────────────────────
   document.addEventListener('DOMContentLoaded', () => {
     loadHomeData();
+    loadStaleDocs();
+    setInterval(loadStaleDocs, 60000);
     pollHealth();
     setInterval(pollHealth, 30000);
     document.addEventListener('keydown', e => {

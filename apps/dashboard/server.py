@@ -9918,6 +9918,50 @@ def update_mis_sizing_config(body: MisSizingConfigBody, project: str):
     return config
 
 
+# ── Per-project notes (NOTES.md) ──────────────────────────────────────────────
+
+class SaveNotesBody(BaseModel):
+    content: str
+    expected_mtime: Optional[float] = None
+
+
+def _notes_path(repo: str) -> Path:
+    return _project_root_path(repo) / "NOTES.md"
+
+
+@app.get("/api/projects/notes")
+def get_project_notes(repo: str = ""):
+    if not repo:
+        raise HTTPException(status_code=400, detail="repo required")
+    path = _notes_path(repo)
+    if not path.exists():
+        return {"content": "", "mtime": None, "exists": False}
+    mtime = path.stat().st_mtime
+    content = path.read_text(encoding="utf-8")
+    return {"content": content, "mtime": mtime, "exists": True}
+
+
+@app.post("/api/projects/notes")
+def save_project_notes(repo: str = "", body: SaveNotesBody = ...):
+    if not repo:
+        raise HTTPException(status_code=400, detail="repo required")
+    path = _notes_path(repo)
+    if path.exists() and body.expected_mtime is not None:
+        current_mtime = path.stat().st_mtime
+        if abs(current_mtime - body.expected_mtime) > 0.5:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "error": "conflict",
+                    "message": "NOTES.md changed on disk since last load.",
+                    "current_mtime": current_mtime,
+                },
+            )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(body.content, encoding="utf-8")
+    return {"ok": True, "mtime": path.stat().st_mtime}
+
+
 # ── Static asset routes with long-lived cache headers (issue #249) ────────────
 # Explicit routes for JS and CSS files must appear before the StaticFiles mount.
 # Browsers can cache these indefinitely because the build hash in the query

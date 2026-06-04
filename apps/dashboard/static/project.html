@@ -841,6 +841,68 @@
       font-size: 11px; color: var(--text-sub); text-align: right; margin-top: 16px;
     }
 
+    /* ── Notes tab ── */
+    .notes-hdr {
+      display: flex; align-items: flex-start; justify-content: space-between;
+      margin-bottom: 16px; gap: 16px;
+    }
+    .notes-hdr-left h2 { font-size: 18px; font-weight: 700; margin: 0 0 4px; }
+    .notes-hdr-left p  { font-size: 13px; color: var(--text-sub); margin: 0; }
+    .notes-hdr-actions { display: flex; gap: 8px; flex-shrink: 0; }
+    .notes-refresh-btn {
+      display: inline-flex; align-items: center; gap: 5px;
+      padding: 6px 12px; border-radius: 6px; border: 1px solid var(--border);
+      background: var(--surface); color: var(--text-muted);
+      font-size: 13px; cursor: pointer; transition: background .15s;
+    }
+    .notes-refresh-btn:hover { background: var(--surface-2); }
+    .notes-refresh-btn.spinning .ti { animation: bc-badge-spin .7s linear infinite; }
+    .notes-save-btn { display: inline-flex; align-items: center; gap: 5px; }
+    .notes-conflict-banner {
+      display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+      padding: 10px 14px; margin-bottom: 12px;
+      background: var(--color-warning); color: var(--color-warning-fg);
+      border-radius: 8px; font-size: 13px;
+    }
+    .notes-conflict-banner .ti { font-size: 16px; flex-shrink: 0; }
+    .notes-conflict-banner > span { flex: 1; min-width: 0; }
+    .notes-conflict-actions { display: flex; gap: 6px; margin-left: auto; }
+    .notes-conflict-btn {
+      padding: 4px 10px; border-radius: 5px; border: 1px solid currentColor;
+      background: transparent; color: inherit; font-size: 12px; cursor: pointer;
+    }
+    .notes-conflict-btn--danger {
+      background: var(--color-error); color: var(--color-error-fg);
+      border-color: var(--color-error-fg);
+    }
+    .notes-status-bar {
+      font-size: 12px; color: var(--text-sub); min-height: 18px;
+      margin-bottom: 8px;
+    }
+    .notes-status-bar.ok   { color: var(--color-success-fg); }
+    .notes-status-bar.err  { color: var(--color-error-fg); }
+    .notes-editor-wrap { position: relative; }
+    .notes-empty-state {
+      display: flex; flex-direction: column; align-items: center;
+      justify-content: center; text-align: center;
+      padding: 48px 24px; color: var(--text-muted); font-size: 13px;
+      border: 2px dashed var(--border); border-radius: 10px;
+      background: var(--surface);
+    }
+    .notes-empty-state code {
+      background: var(--surface-2); padding: 1px 5px; border-radius: 4px;
+      font-family: var(--mono); font-size: 12px;
+    }
+    .notes-textarea {
+      width: 100%; min-height: 480px; padding: 14px 16px;
+      border: 1px solid var(--border); border-radius: 8px;
+      background: var(--surface); color: var(--text);
+      font-family: var(--mono); font-size: 13px; line-height: 1.6;
+      resize: vertical; outline: none; transition: border-color .15s;
+    }
+    .notes-textarea:focus { border-color: var(--blue); }
+    .notes-textarea.hidden { display: none; }
+
     /* ── Tickets tab ── */
     .tickets-grid {
       display: grid;
@@ -4396,6 +4458,10 @@
                 aria-selected="false" onclick="switchTab('status')">
           <i class="ti ti-pulse"></i>Status
         </button>
+        <button class="stab" role="tab" id="stab-notes"
+                aria-selected="false" onclick="switchTab('notes')">
+          <i class="ti ti-notes"></i>Notes
+        </button>
       </nav>
       <!-- Sprint status pill (GitHub-backed; works cross-machine while traveling) -->
       <div class="snav-wrap">
@@ -5046,6 +5112,44 @@
       </div>
 
       <!-- Status tab (issue #585) -->
+      <!-- Notes tab -->
+      <div class="tab-pane" id="pane-notes" role="tabpanel" aria-labelledby="stab-notes">
+        <div class="notes-hdr">
+          <div class="notes-hdr-left">
+            <h2><i class="ti ti-notes" style="margin-right:8px;vertical-align:-2px;"></i>Notes</h2>
+            <p>Persistent project notes — decisions, todos, and context that survives across sessions.</p>
+          </div>
+          <div class="notes-hdr-actions">
+            <button class="notes-refresh-btn" id="notes-refresh-btn"
+                    onclick="notesLoad()" aria-label="Reload notes from disk">
+              <i class="ti ti-refresh"></i>Reload
+            </button>
+            <button class="btn-primary notes-save-btn" id="notes-save-btn"
+                    onclick="notesSave()" aria-label="Save notes">
+              <i class="ti ti-device-floppy"></i>Save
+            </button>
+          </div>
+        </div>
+        <div id="notes-conflict-banner" class="notes-conflict-banner hidden" role="alert">
+          <i class="ti ti-alert-triangle"></i>
+          <span id="notes-conflict-msg">NOTES.md changed on disk since last load. Reload to see latest, or save to overwrite.</span>
+          <div class="notes-conflict-actions">
+            <button class="notes-conflict-btn" onclick="notesLoad()">Reload</button>
+            <button class="notes-conflict-btn notes-conflict-btn--danger" onclick="notesSaveForce()">Overwrite</button>
+          </div>
+        </div>
+        <div id="notes-status-bar" class="notes-status-bar" aria-live="polite"></div>
+        <div id="notes-editor-wrap" class="notes-editor-wrap">
+          <div id="notes-empty-state" class="notes-empty-state hidden">
+            <i class="ti ti-notes" style="font-size:32px;color:var(--text-sub);margin-bottom:8px;"></i>
+            <div>No notes yet. Start writing to create <code>NOTES.md</code> in the project root.</div>
+          </div>
+          <textarea id="notes-textarea" class="notes-textarea"
+                    placeholder="# Project Notes&#10;&#10;Write your notes in Markdown…"
+                    aria-label="Project notes editor" spellcheck="true"></textarea>
+        </div>
+      </div>
+
       <div class="tab-pane" id="pane-status" role="tabpanel" aria-labelledby="stab-status">
         <div class="status-page-hdr">
           <div class="status-page-hdr-left">
@@ -5512,7 +5616,7 @@ function switchTab(tab, pushHistory) {
   _activeTab = tab;
 
   // Update aria-selected + active class on tabs
-  ['sprint-mgmt', 'tickets', 'logs', 'bulk-create', 'timeline', 'compare', 'metrics', 'sprint-history', 'est-vs-actual', 'calibration', 'status'].forEach(t => {
+  ['sprint-mgmt', 'tickets', 'logs', 'bulk-create', 'timeline', 'compare', 'metrics', 'sprint-history', 'est-vs-actual', 'calibration', 'status', 'notes'].forEach(t => {
     const btn = document.getElementById('stab-' + t);
     if (!btn) return;
     const isActive = t === tab;
@@ -5521,7 +5625,7 @@ function switchTab(tab, pushHistory) {
   });
 
   // Show/hide panes
-  ['sprint-mgmt', 'tickets', 'logs', 'bulk-create', 'timeline', 'compare', 'metrics', 'sprint-history', 'est-vs-actual', 'calibration', 'status'].forEach(t => {
+  ['sprint-mgmt', 'tickets', 'logs', 'bulk-create', 'timeline', 'compare', 'metrics', 'sprint-history', 'est-vs-actual', 'calibration', 'status', 'notes'].forEach(t => {
     const pane = document.getElementById('pane-' + t);
     if (pane) pane.classList.toggle('active', t === tab);
   });
@@ -5593,11 +5697,16 @@ function switchTab(tab, pushHistory) {
   if (tab === 'status') {
     statusInit();
   }
+
+  // Init notes tab
+  if (tab === 'notes') {
+    notesInit();
+  }
 }
 
 // ── Keyboard navigation for sub-tabs ─────────────────────────────────────────
 document.getElementById('sub-tabs').addEventListener('keydown', function(e) {
-  const enabledTabs = ['sprint-mgmt', 'tickets', 'logs', 'bulk-create', 'timeline', 'compare', 'sprint-history', 'est-vs-actual', 'calibration', 'status'];
+  const enabledTabs = ['sprint-mgmt', 'tickets', 'logs', 'bulk-create', 'timeline', 'compare', 'sprint-history', 'est-vs-actual', 'calibration', 'status', 'notes'];
   const focused = document.activeElement;
   const currentId = focused ? focused.id.replace('stab-', '') : null;
   const currentIdx = enabledTabs.indexOf(currentId);
@@ -17640,6 +17749,116 @@ function _statusRenderInflight(issues, err) {
 
 function _statusErrHtml(msg) {
   return `<div class="status-inline-error" role="alert"><i class="ti ti-alert-circle"></i>${escHtml(msg)}</div>`;
+}
+
+// ── Notes tab ────────────────────────────────────────────────────────────────
+let _notesLoaded = false;
+let _notesMtime = null;
+let _notesPendingConflict = false;
+
+async function notesInit() {
+  if (_notesLoaded) return;
+  _notesLoaded = true;
+  await notesLoad();
+}
+
+async function notesLoad() {
+  const repo = _cachedFullRepo[_slug] || '';
+  const refreshBtn = document.getElementById('notes-refresh-btn');
+  if (refreshBtn) refreshBtn.classList.add('spinning');
+  _notesSetStatus('');
+  _notesHideConflict();
+  _notesPendingConflict = false;
+
+  try {
+    const r = await fetch('/api/projects/notes?repo=' + encodeURIComponent(repo));
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const data = await r.json();
+    const textarea = document.getElementById('notes-textarea');
+    const emptyState = document.getElementById('notes-empty-state');
+    _notesMtime = data.mtime;
+    if (!data.exists || data.content === '') {
+      if (textarea) textarea.classList.add('hidden');
+      if (emptyState) emptyState.classList.remove('hidden');
+      if (textarea) textarea.value = '';
+    } else {
+      if (emptyState) emptyState.classList.add('hidden');
+      if (textarea) {
+        textarea.classList.remove('hidden');
+        textarea.value = data.content;
+      }
+    }
+  } catch (e) {
+    _notesSetStatus('Failed to load notes: ' + e.message, 'err');
+  } finally {
+    if (refreshBtn) refreshBtn.classList.remove('spinning');
+  }
+}
+
+async function notesSave() {
+  if (_notesPendingConflict) return;
+  const repo = _cachedFullRepo[_slug] || '';
+  const textarea = document.getElementById('notes-textarea');
+  const emptyState = document.getElementById('notes-empty-state');
+  const content = textarea ? textarea.value : '';
+
+  const saveBtn = document.getElementById('notes-save-btn');
+  if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Saving…'; }
+
+  try {
+    const r = await fetch('/api/projects/notes?repo=' + encodeURIComponent(repo), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content, expected_mtime: _notesMtime }),
+    });
+    if (r.status === 409) {
+      const data = await r.json();
+      _notesPendingConflict = true;
+      _notesShowConflict(data.detail ? (data.detail.message || 'Conflict detected.') : 'Conflict detected.');
+      _notesSetStatus('');
+      return;
+    }
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const data = await r.json();
+    _notesMtime = data.mtime;
+    if (content && emptyState) emptyState.classList.add('hidden');
+    if (content && textarea) textarea.classList.remove('hidden');
+    _notesSetStatus('Saved.', 'ok');
+    setTimeout(() => _notesSetStatus(''), 3000);
+  } catch (e) {
+    _notesSetStatus('Save failed: ' + e.message, 'err');
+  } finally {
+    if (saveBtn) {
+      saveBtn.disabled = false;
+      saveBtn.innerHTML = '<i class="ti ti-device-floppy"></i>Save';
+    }
+  }
+}
+
+async function notesSaveForce() {
+  _notesMtime = null;
+  _notesPendingConflict = false;
+  _notesHideConflict();
+  await notesSave();
+}
+
+function _notesSetStatus(msg, cls) {
+  const bar = document.getElementById('notes-status-bar');
+  if (!bar) return;
+  bar.textContent = msg;
+  bar.className = 'notes-status-bar' + (cls ? ' ' + cls : '');
+}
+
+function _notesShowConflict(msg) {
+  const banner = document.getElementById('notes-conflict-banner');
+  const msgEl = document.getElementById('notes-conflict-msg');
+  if (msgEl) msgEl.textContent = msg;
+  if (banner) banner.classList.remove('hidden');
+}
+
+function _notesHideConflict() {
+  const banner = document.getElementById('notes-conflict-banner');
+  if (banner) banner.classList.add('hidden');
 }
 </script>
 

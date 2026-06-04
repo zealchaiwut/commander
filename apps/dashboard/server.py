@@ -683,6 +683,38 @@ async def _periodic_orphan_sweep_loop() -> None:
             print(f"[periodic-sweep] unexpected error: {exc}")
 
 
+_STATUS_SYNC_INTERVAL = 30  # seconds
+
+
+async def _status_md_sync_loop() -> None:
+    """Regenerate and commit STATUS.md every 30 s when sprint progress changes."""
+    await asyncio.sleep(30)  # let server finish startup before first run
+    _sync_script = _REPO_ROOT / "scripts" / "sync_status_md.py"
+    while True:
+        try:
+            if _sync_script.exists():
+                proc = await asyncio.create_subprocess_exec(
+                    sys.executable, str(_sync_script),
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                try:
+                    stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=55)
+                except asyncio.TimeoutError:
+                    proc.kill()
+                    await proc.communicate()
+                    logger.warning("[status-sync] timed out")
+                else:
+                    if proc.returncode == 0:
+                        logger.info("[status-sync] %s", stdout.decode().strip())
+                    elif proc.returncode == 2:
+                        logger.warning("[status-sync] error: %s", stderr.decode().strip())
+                    # exit 1 = no change, normal
+        except Exception as exc:
+            logger.warning("[status-sync] unexpected error: %s", exc)
+        await asyncio.sleep(_STATUS_SYNC_INTERVAL)
+
+
 # ── Log event naming convention ──────────────────────────────────────────────
 # Event names use a <namespace>.<action> pattern with three namespaces:
 #   server.*  — server lifecycle events (startup, shutdown)
@@ -728,11 +760,13 @@ async def lifespan(app: FastAPI):
     task1 = asyncio.create_task(_cache_refresh_loop())
     task2 = asyncio.create_task(_timeout_loop())
     task3 = asyncio.create_task(_periodic_orphan_sweep_loop())
+    task4 = asyncio.create_task(_status_md_sync_loop())
     yield
     task1.cancel()
     task2.cancel()
     task3.cancel()
-    for t in (task1, task2, task3):
+    task4.cancel()
+    for t in (task1, task2, task3, task4):
         try:
             await t
         except asyncio.CancelledError:

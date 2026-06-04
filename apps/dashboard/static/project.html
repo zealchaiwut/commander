@@ -132,6 +132,76 @@
     }
     .btn-icon:hover { background: var(--surface-2); color: var(--text); }
 
+    /* ── Sprint status pill (sits at the tab-strip level) ── */
+    .snav-wrap { position: relative; flex-shrink: 0; margin-bottom: 5px; }
+    .snav-pill {
+      display: inline-flex; align-items: center; gap: 6px;
+      height: 32px; padding: 0 10px; border-radius: 16px;
+      border: 1px solid var(--border); background: var(--surface-2);
+      color: var(--text); font-size: 12px; font-weight: 500; cursor: pointer;
+      white-space: nowrap; transition: background .15s, border-color .15s;
+    }
+    .snav-pill:hover { background: var(--surface); border-color: var(--text-sub); }
+    .snav-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-sub); flex-shrink: 0; }
+    .snav-dot--running { background: #16a34a; box-shadow: 0 0 0 3px rgba(22,163,74,.15); }
+    .snav-dot--finished { background: #2563eb; }
+    .snav-uat { color: #f59e0b; font-weight: 600; }
+    .snav-caret { font-size: 12px; color: var(--text-muted); }
+    .snav-panel {
+      position: absolute; right: 0; top: 38px; z-index: 60;
+      width: 380px; max-height: 70vh; overflow-y: auto;
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 8px; box-shadow: 0 8px 28px rgba(0,0,0,.18);
+    }
+    .snav-panel-head {
+      padding: 12px 14px; border-bottom: 1px solid var(--border);
+      font-size: 13px; font-weight: 600; color: var(--text);
+      display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    }
+    .snav-panel-body { padding: 12px 14px; font-size: 12px; color: var(--text); }
+    /* Stats row */
+    .snav-stats { display: flex; gap: 14px; margin-bottom: 12px; flex-wrap: wrap; }
+    .snav-stat { display: flex; flex-direction: column; }
+    .snav-stat-val { font-size: 16px; font-weight: 700; color: var(--text); }
+    .snav-stat-lbl { font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .03em; }
+    /* Donut + legend */
+    .snav-donut-wrap { display: flex; align-items: center; gap: 16px; }
+    .snav-donut { position: relative; width: 92px; height: 92px; flex-shrink: 0; }
+    .snav-donut-center {
+      position: absolute; inset: 0; display: flex; flex-direction: column;
+      align-items: center; justify-content: center; pointer-events: none;
+    }
+    .snav-donut-pct { font-size: 18px; font-weight: 700; color: var(--text); line-height: 1; }
+    .snav-donut-sub { font-size: 9px; color: var(--text-muted); text-transform: uppercase; }
+    .snav-legend { display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 0; }
+    .snav-legend-row { display: flex; align-items: center; gap: 7px; }
+    .snav-legend-dot { width: 9px; height: 9px; border-radius: 2px; flex-shrink: 0; }
+    .snav-legend-label { flex: 1; color: var(--text-muted); }
+    .snav-legend-val { color: var(--text); font-variant-numeric: tabular-nums; }
+    /* Rendered summary markdown */
+    .snav-summary-md {
+      margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border);
+      max-height: 340px; overflow-y: auto;
+    }
+    .md-body { font-size: 11px; line-height: 1.55; color: var(--text); word-break: break-word; }
+    .md-body .md-h { font-size: 12px; font-weight: 700; margin: 10px 0 4px; }
+    .md-body .md-p { margin: 6px 0; }
+    .md-body .md-ul, .md-body .md-ol { margin: 6px 0; padding-left: 18px; }
+    .md-body .md-hr { border: none; border-top: 1px solid var(--border); margin: 8px 0; }
+    .md-body code { background: var(--surface-2); padding: 0 3px; border-radius: 3px; font-family: var(--mono); font-size: 10px; }
+    .md-body .md-pre { background: var(--surface-2); padding: 8px; border-radius: 4px; overflow-x: auto; }
+    .md-body .md-pre code { background: none; padding: 0; }
+    .md-body .md-table { border-collapse: collapse; width: 100%; margin: 8px 0; font-size: 10.5px; }
+    .md-body .md-table th, .md-body .md-table td {
+      border: 1px solid var(--border); padding: 3px 7px; text-align: left; vertical-align: top;
+    }
+    .md-body .md-table th { background: var(--surface-2); font-weight: 600; }
+    .md-body a { color: var(--blue, #2563eb); text-decoration: none; }
+    .md-body a:hover { text-decoration: underline; }
+    .snav-link { font-size: 11px; color: var(--blue, #2563eb); text-decoration: none; }
+    .snav-link:hover { text-decoration: underline; }
+    .snav-muted { color: var(--text-muted); }
+
     /* ── Global search ── */
     .global-search-wrap {
       position: relative;
@@ -444,11 +514,15 @@
     .btn-primary .ti { font-size: 14px; }
 
     /* ── Sub-tab strip ── */
+    /* Row that holds the scrolling tab strip + the right-aligned sprint pill.
+       The pill lives OUTSIDE the overflow:auto nav so its dropdown isn't clipped. */
+    .sub-tabs-row { display: flex; align-items: flex-end; gap: 12px; }
     .sub-tabs {
       display: flex; align-items: flex-end;
       padding: 0 0; gap: 0;
       background: var(--surface);
       overflow-x: auto; scrollbar-width: none;
+      flex: 1 1 auto; min-width: 0;
     }
     .sub-tabs::-webkit-scrollbar { display: none; }
     .stab {
@@ -479,6 +553,7 @@
       white-space: nowrap; line-height: 1.6;
     }
     .bc-tab-badge--warn { background: #f59e0b; }
+    .bc-tab-badge--ready { background: #2563eb; }
     @keyframes bc-badge-spin { to { transform: rotate(360deg); } }
     .bc-tab-badge-spin { display: inline-block; animation: bc-badge-spin .9s linear infinite; }
 
@@ -803,6 +878,7 @@
       .sub-tabs { position: static; }
       .main-area { overflow-y: visible; }
       .proj-header { position: static; }
+      .smgmt-sticky-area { position: static; }
       .tickets-grid { grid-template-columns: 1fr; }
       .tickets-main { border-right: none; border-bottom: 1px solid var(--border); }
     }
@@ -817,19 +893,23 @@
       color: var(--text-sub); font-size: 13px; padding: 48px 0; text-align: center;
     }
 
+    /* ── Sprint Mgmt sticky area (toolbar + label filters) ── */
+    .smgmt-sticky-area {
+      position: sticky;
+      top: var(--proj-header-height, 88px);
+      z-index: 15;
+      background: var(--bg);
+      box-shadow: none;
+      transition: box-shadow .15s;
+    }
+    .smgmt-sticky-area.scrolled {
+      box-shadow: 0 2px 4px rgba(0,0,0,0.04);
+    }
     /* ── Sprint Mgmt toolbar ── */
     .smgmt-toolbar {
       display: flex; align-items: center; justify-content: space-between;
       padding: 14px 28px;
       background: var(--bg);
-      position: sticky;
-      top: var(--proj-header-height, 88px); /* placed after sub-tab strip */
-      z-index: 15;
-      box-shadow: none;
-      transition: box-shadow .15s;
-    }
-    .smgmt-toolbar.scrolled {
-      box-shadow: 0 2px 4px rgba(0,0,0,0.04);
     }
     .smgmt-toolbar-title {
       font-size: 15px; font-weight: 700; color: var(--text); line-height: 1;
@@ -948,6 +1028,82 @@
     .smgmt-content {
       padding: 0 28px 28px;
     }
+    /* ── Label filter chip row (issue #546) ── */
+    .smgmt-label-filter-row {
+      display: flex; flex-wrap: wrap; gap: 6px;
+      padding: 10px 28px 4px;
+    }
+    .smgmt-label-filter-row.is-empty { display: none; }
+    .smgmt-lf-chip {
+      display: inline-flex; align-items: center; gap: 5px;
+      padding: 3px 9px; border-radius: 20px; font-size: 12px; font-weight: 500;
+      border: 1px solid var(--border); background: var(--surface-2); color: var(--text);
+      cursor: pointer; user-select: none; transition: background .12s, border-color .12s, color .12s, opacity .12s;
+      white-space: nowrap;
+    }
+    .smgmt-lf-chip:hover { border-color: var(--text-muted); }
+    .smgmt-lf-chip.is-active { background: var(--blue-bg); border-color: var(--blue); color: var(--blue); }
+    .smgmt-lf-chip.is-inactive { opacity: .45; }
+    .smgmt-lf-chip-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+    /* ── Compact/dense view toggle (issue #547) ── */
+    #pane-sprint-mgmt.smgmt-compact .smgmt-ticket {
+      padding: 5px 10px;
+    }
+    #pane-sprint-mgmt.smgmt-compact .smgmt-ticket-size-pill,
+    #pane-sprint-mgmt.smgmt-compact .smgmt-ticket-status,
+    #pane-sprint-mgmt.smgmt-compact .btn-view-log,
+    #pane-sprint-mgmt.smgmt-compact .smgmt-ticket-indicator,
+    #pane-sprint-mgmt.smgmt-compact .smgmt-ticket-agent-tag,
+    #pane-sprint-mgmt.smgmt-compact .smgmt-ticket-elapsed,
+    #pane-sprint-mgmt.smgmt-compact .smgmt-reestimate-btn,
+    #pane-sprint-mgmt.smgmt-compact .smgmt-retry-pill,
+    #pane-sprint-mgmt.smgmt-compact .smgmt-moveto-pill {
+      display: none !important;
+    }
+
+    /* ── Keyboard navigation focus ring (issue #549) ── */
+    .smgmt-ticket.smgmt-kb-focused {
+      outline: 3px solid var(--blue);
+      outline-offset: -2px;
+      position: relative;
+      z-index: 2;
+      box-shadow: 0 0 0 5px var(--blue-bg);
+    }
+
+    /* ── Search/filter bar (issue #552) ── */
+    .smgmt-filter-bar {
+      display: flex; align-items: center; gap: 8px;
+      padding: 0 28px 10px;
+    }
+    .smgmt-filter-input-wrap {
+      position: relative; flex: 1; max-width: 400px;
+    }
+    .smgmt-filter-input {
+      width: 100%; height: 32px;
+      padding: 0 30px 0 10px;
+      border: 1px solid var(--border); border-radius: 6px;
+      background: var(--surface-2); color: var(--text);
+      font-size: 13px; font-family: inherit;
+      outline: none; box-sizing: border-box;
+      transition: border-color .12s, background .12s;
+    }
+    .smgmt-filter-input:focus { border-color: var(--blue); background: var(--surface); }
+    .smgmt-filter-input::placeholder { color: var(--text-muted); }
+    .smgmt-filter-clear-btn {
+      position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
+      background: none; border: none; padding: 2px 4px;
+      color: var(--text-muted); cursor: pointer; font-size: 16px; line-height: 1;
+      display: none;
+    }
+    .smgmt-filter-clear-btn:hover { color: var(--text); }
+    .smgmt-filter-clear-btn.visible { display: block; }
+    .smgmt-filter-empty-state {
+      display: none; padding: 12px 14px;
+      font-size: 12px; color: var(--text-muted);
+      font-style: italic; text-align: center;
+    }
+    .smgmt-filter-empty-state.visible { display: block; }
+
     .smgmt-sprint-list {
       display: flex; flex-direction: column; gap: 12px;
       margin-top: 16px;
@@ -972,6 +1128,32 @@
       display: inline-block; vertical-align: bottom;
     }
     .smgmt-sprint-header { justify-content: space-between; }
+    .smgmt-sprint-summary {
+      margin: 6px 0 4px;
+      display: flex; flex-direction: column; gap: 4px;
+    }
+    .smgmt-progress-row {
+      display: flex; align-items: center; gap: 8px;
+    }
+    .smgmt-progress-bar-wrap {
+      flex: 1; height: 5px;
+      background: var(--surface-2, #e5e7eb);
+      border-radius: 3px; overflow: hidden;
+    }
+    .smgmt-progress-bar-fill {
+      height: 100%; background: var(--green);
+      border-radius: 3px; transition: width .3s ease;
+      min-width: 0;
+    }
+    .smgmt-progress-label {
+      font-size: 11px; color: var(--text-sub);
+      white-space: nowrap; flex-shrink: 0;
+    }
+    .smgmt-sprint-goal-text {
+      font-size: 12px; color: var(--text-muted);
+      font-style: italic;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
     .smgmt-sprint-header-left {
       display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0;
     }
@@ -1041,6 +1223,19 @@
     }
     .smgmt-sprint-header-left:hover .smgmt-rename-btn { opacity: 1; }
     .smgmt-rename-btn:hover { color: var(--blue); }
+    /* ── Sprint column collapse toggle ── */
+    .smgmt-collapse-btn {
+      background: none; border: none; cursor: pointer; padding: 0 2px;
+      color: var(--text-muted); font-size: 14px; display: inline-flex; align-items: center;
+      flex-shrink: 0; border-radius: 4px; line-height: 1;
+    }
+    .smgmt-collapse-btn:hover { color: var(--text); background: var(--surface-2); }
+    .smgmt-collapse-btn .ti { transition: transform .18s; }
+    .smgmt-sprint-card.smgmt-collapsed .smgmt-collapse-btn .ti { transform: rotate(-90deg); }
+    .smgmt-sprint-card.smgmt-collapsed > *:not(.smgmt-sprint-header):not(.smgmt-running-stripe) {
+      display: none;
+    }
+    .smgmt-sprint-card.smgmt-collapsed .smgmt-sprint-header { margin-bottom: 0; }
     .smgmt-rename-wrap {
       display: inline-flex; align-items: center; gap: 2px;
     }
@@ -1103,7 +1298,10 @@
     }
     .smgmt-ticket[draggable="false"] .smgmt-ticket-grip { opacity: 0 !important; cursor: default; }
     .smgmt-ticket-grip:active { cursor: grabbing; }
-    .smgmt-ticket-cb { cursor: pointer; flex-shrink: 0; }
+    .smgmt-ticket-cb { cursor: pointer; flex-shrink: 0; opacity: 0; transition: opacity .12s; }
+    .smgmt-ticket:hover .smgmt-ticket-cb,
+    .smgmt-ticket.is-selected .smgmt-ticket-cb,
+    .smgmt-sprint-list.has-selection .smgmt-ticket-cb { opacity: 1; }
     .smgmt-ticket-num {
       font-family: var(--mono); font-size: 12px; color: var(--text-sub);
       text-decoration: none; flex-shrink: 0; min-width: 42px;
@@ -1278,6 +1476,12 @@
       border: 1px solid rgba(161,98,7,.25);
       padding: 1px 6px; border-radius: 3px; font-family: var(--mono);
     }
+    .smgmt-preflight-toggle-more {
+      margin-top: 5px; padding: 2px 4px; background: none; border: none;
+      color: var(--text-muted); font-size: 11px; font-weight: 500;
+      cursor: pointer; align-self: flex-start;
+    }
+    .smgmt-preflight-toggle-more:hover { color: var(--text); text-decoration: underline; }
     @keyframes smgmt-preflight-highlight-anim {
       0%   { box-shadow: 0 0 0 3px rgba(161,98,7,.55); background: var(--yellow-bg); }
       100% { box-shadow: 0 0 0 0px rgba(161,98,7,0);  background: transparent; }
@@ -1937,6 +2141,39 @@
     .smgmt-row-menu-item.is-danger:hover { background: var(--red-bg); }
     .smgmt-row-menu-divider { border-top: 1px solid var(--border); margin: 4px 0; }
 
+    /* ── Per-column sort control (issue #550) ── */
+    .smgmt-sort-btn {
+      display: inline-flex; align-items: center; gap: 4px;
+      padding: 0 8px; height: 26px;
+      background: none; border: 1px solid var(--border); border-radius: 5px;
+      color: var(--text-muted); cursor: pointer; font-size: 12px; font-family: inherit;
+      transition: background .15s, color .15s, border-color .15s;
+      white-space: nowrap; flex-shrink: 0;
+    }
+    .smgmt-sort-btn:hover, .smgmt-sort-btn[aria-expanded="true"] {
+      background: var(--surface-hover); color: var(--text); border-color: var(--border-strong, var(--border));
+    }
+    .smgmt-sort-btn.is-active { color: var(--blue); border-color: var(--blue); }
+    .smgmt-sort-btn .ti { font-size: 13px; }
+    .smgmt-sort-menu {
+      position: fixed; z-index: 520;
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 8px; box-shadow: 0 6px 20px rgba(0,0,0,.16);
+      min-width: 160px; padding: 4px 0;
+    }
+    .smgmt-sort-menu.hidden { display: none; }
+    .smgmt-sort-menu-item {
+      display: flex; align-items: center; gap: 8px; width: 100%;
+      text-align: left; padding: 7px 12px; font-size: 13px;
+      background: none; border: none; color: var(--text);
+      cursor: pointer; font-family: inherit;
+    }
+    .smgmt-sort-menu-item:hover { background: var(--surface-hover); }
+    .smgmt-sort-menu-item.is-active { color: var(--blue); }
+    .smgmt-sort-menu-item .ti { font-size: 14px; color: var(--text-muted); width: 15px; flex-shrink: 0; }
+    .smgmt-sort-menu-item.is-active .ti { color: var(--blue); }
+    .smgmt-sort-menu-divider { border-top: 1px solid var(--border); margin: 4px 0; }
+
     /* "Move to" modal options */
     .mt-modal { min-width: 320px; max-width: 420px; }
     .mt-options { display: flex; flex-direction: column; gap: 4px; margin-top: 12px; }
@@ -2367,6 +2604,8 @@
       transition: background .15s, color .15s;
     }
     .bc-step-chip.active { background: var(--text); color: var(--surface); }
+    .bc-step-chip.done { background: var(--surface-2); color: var(--accent, #16a34a); }
+    .bc-step-chip.done .bc-step-n { background: var(--accent, #16a34a); color: #fff; }
     .bc-step-n {
       width: 16px; height: 16px; border-radius: 50%;
       background: rgba(0,0,0,.10);
@@ -2871,6 +3110,11 @@
     .bc-tag {
       font-size: 10px; padding: 1px 6px; border-radius: 8px;
       background: var(--surface-2); border: 1px solid var(--border); color: var(--text-muted);
+    }
+    /* BA-suggested label, shown hashtag-style on draft cards */
+    .bc-tag--hash {
+      background: transparent; border-color: transparent;
+      color: var(--blue, #2563eb); padding: 1px 2px; font-weight: 500;
     }
 
     /* Card actions */
@@ -3619,7 +3863,8 @@
         </div>
       </div>
 
-      <!-- Sub-tab strip -->
+      <!-- Sub-tab strip (+ project-scoped sprint status pill, right-aligned) -->
+      <div class="sub-tabs-row">
       <nav class="sub-tabs" role="tablist" aria-label="Project sections" id="sub-tabs">
         <button class="stab active" role="tab" id="stab-sprint-mgmt"
                 aria-selected="true" onclick="switchTab('sprint-mgmt')">
@@ -3654,6 +3899,20 @@
           <i class="ti ti-history"></i>Sprint history
         </button>
       </nav>
+      <!-- Sprint status pill (GitHub-backed; works cross-machine while traveling) -->
+      <div class="snav-wrap">
+        <button class="snav-pill hidden" id="snav-pill" onclick="snavTogglePanel(event)"
+                title="Sprint status" aria-label="Sprint status">
+          <span class="snav-dot" id="snav-dot"></span>
+          <span id="snav-pill-text">Sprint</span>
+          <i class="ti ti-chevron-down snav-caret"></i>
+        </button>
+        <div class="snav-panel hidden" id="snav-panel">
+          <div class="snav-panel-head" id="snav-panel-head"></div>
+          <div class="snav-panel-body" id="snav-panel-body"></div>
+        </div>
+      </div>
+      </div><!-- /sub-tabs-row -->
     </header>
 
     <!-- Tab content -->
@@ -3670,53 +3929,80 @@
           </div>
         </div>
 
-        <!-- Toolbar -->
-        <div class="smgmt-toolbar" id="smgmt-toolbar">
-          <span class="smgmt-toolbar-title">Sprint Management</span>
-          <div class="smgmt-toolbar-actions">
-            <!-- Auto-refresh pill (issue #275) -->
-            <div class="smgmt-ar-pill-wrap" id="smgmt-ar-pill-wrap">
-              <button class="smgmt-ar-pill is-on" id="smgmt-ar-pill"
-                      onclick="_smgmtArPillClick(event)" aria-haspopup="true" aria-expanded="false"
-                      aria-label="Auto-refresh interval">
-                <i class="ti ti-refresh"></i>
-                <span id="smgmt-ar-pill-label">15s</span>
-                <i class="ti ti-chevron-down smgmt-ar-chevron"></i>
-              </button>
-              <div class="smgmt-ar-menu hidden" id="smgmt-ar-menu" role="menu">
-                <button class="smgmt-ar-menu-item" data-interval="5"  onclick="_smgmtArSelect(5)">5s</button>
-                <button class="smgmt-ar-menu-item" data-interval="15" onclick="_smgmtArSelect(15)">15s</button>
-                <button class="smgmt-ar-menu-item" data-interval="30" onclick="_smgmtArSelect(30)">30s</button>
-                <button class="smgmt-ar-menu-item" data-interval="60" onclick="_smgmtArSelect(60)">1m</button>
-                <div class="smgmt-ar-menu-divider"></div>
-                <button class="smgmt-ar-menu-item smgmt-ar-turn-off" onclick="_smgmtArTurnOff()">Turn off</button>
+        <!-- Sticky area: toolbar + label filters stick together below the project header -->
+        <div class="smgmt-sticky-area" id="smgmt-sticky-area">
+          <!-- Toolbar -->
+          <div class="smgmt-toolbar" id="smgmt-toolbar">
+            <span class="smgmt-toolbar-title">Sprint Management</span>
+            <div class="smgmt-toolbar-actions">
+              <!-- Auto-refresh pill (issue #275) -->
+              <div class="smgmt-ar-pill-wrap" id="smgmt-ar-pill-wrap">
+                <button class="smgmt-ar-pill is-on" id="smgmt-ar-pill"
+                        onclick="_smgmtArPillClick(event)" aria-haspopup="true" aria-expanded="false"
+                        aria-label="Auto-refresh interval">
+                  <i class="ti ti-refresh"></i>
+                  <span id="smgmt-ar-pill-label">15s</span>
+                  <i class="ti ti-chevron-down smgmt-ar-chevron"></i>
+                </button>
+                <div class="smgmt-ar-menu hidden" id="smgmt-ar-menu" role="menu">
+                  <button class="smgmt-ar-menu-item" data-interval="5"  onclick="_smgmtArSelect(5)">5s</button>
+                  <button class="smgmt-ar-menu-item" data-interval="15" onclick="_smgmtArSelect(15)">15s</button>
+                  <button class="smgmt-ar-menu-item" data-interval="30" onclick="_smgmtArSelect(30)">30s</button>
+                  <button class="smgmt-ar-menu-item" data-interval="60" onclick="_smgmtArSelect(60)">1m</button>
+                  <div class="smgmt-ar-menu-divider"></div>
+                  <button class="smgmt-ar-menu-item smgmt-ar-turn-off" onclick="_smgmtArTurnOff()">Turn off</button>
+                </div>
               </div>
+              <!-- Pre-flight checks show/hide toggle -->
+              <button class="btn-ghost smgmt-preflight-toggle" id="smgmt-preflight-toggle"
+                      onclick="_smgmtTogglePreflight()" aria-pressed="true"
+                      title="Pre-flight checks on — click to hide banners">
+                <i class="ti ti-checklist"></i>
+                <span id="smgmt-preflight-toggle-label">Pre-flight: on</span>
+              </button>
+              <!-- Compact/dense view toggle (issue #547) -->
+              <button class="btn-ghost" id="smgmt-density-toggle"
+                      onclick="_smgmtDensityToggle()" aria-pressed="false"
+                      title="Compact view — click to toggle"
+                      aria-label="Compact view">
+                <i class="ti ti-layout-list"></i>
+                <span id="smgmt-density-label">Compact</span>
+              </button>
+              <button class="btn-ghost" id="smgmt-cleanup-empty-btn"
+                      onclick="_smgmtCleanupEmpty()" title="Delete sprint labels with no tickets"
+                      aria-label="Clean up empty sprints" style="display:none">
+                <i class="ti ti-trash"></i>
+                Clean up empty sprints
+              </button>
+              <button class="btn-ghost" id="smgmt-new-ticket-btn"
+                      onclick="smgmtOpenNewTicket()" title="Create a new ticket"
+                      aria-label="New Ticket">
+                <i class="ti ti-plus"></i>
+                New Ticket
+              </button>
+              <button class="btn-primary" id="smgmt-new-sprint-btn"
+                      onclick="smgmtOpenNewSprint()" title="Create a new sprint"
+                      aria-label="New Sprint">
+                <i class="ti ti-plus"></i>
+                New Sprint
+              </button>
             </div>
-            <!-- Pre-flight checks show/hide toggle -->
-            <button class="btn-ghost smgmt-preflight-toggle" id="smgmt-preflight-toggle"
-                    onclick="_smgmtTogglePreflight()" aria-pressed="true"
-                    title="Pre-flight checks on — click to hide banners">
-              <i class="ti ti-checklist"></i>
-              <span id="smgmt-preflight-toggle-label">Pre-flight: on</span>
-            </button>
-            <button class="btn-ghost" id="smgmt-cleanup-empty-btn"
-                    onclick="_smgmtCleanupEmpty()" title="Delete sprint labels with no tickets"
-                    aria-label="Clean up empty sprints" style="display:none">
-              <i class="ti ti-trash"></i>
-              Clean up empty sprints
-            </button>
-            <button class="btn-ghost" id="smgmt-new-ticket-btn"
-                    onclick="smgmtOpenNewTicket()" title="Create a new ticket"
-                    aria-label="New Ticket">
-              <i class="ti ti-plus"></i>
-              New Ticket
-            </button>
-            <button class="btn-primary" id="smgmt-new-sprint-btn"
-                    onclick="smgmtOpenNewSprint()" title="Create a new sprint"
-                    aria-label="New Sprint">
-              <i class="ti ti-plus"></i>
-              New Sprint
-            </button>
+          </div>
+
+          <!-- Label filter chips (issue #546) — inside sticky area so they scroll with toolbar -->
+          <div class="smgmt-label-filter-row is-empty" id="smgmt-label-filter-row" role="toolbar" aria-label="Filter by label"></div>
+
+          <!-- Search/filter bar (issue #552) -->
+          <div class="smgmt-filter-bar" id="smgmt-filter-bar">
+            <div class="smgmt-filter-input-wrap">
+              <input type="search" class="smgmt-filter-input" id="smgmt-filter-input"
+                     placeholder="Filter tickets by title, #number, or label…"
+                     aria-label="Filter tickets by title, issue number, or label"
+                     autocomplete="off" spellcheck="false"
+                     oninput="_smgmtFilterApply()">
+              <button class="smgmt-filter-clear-btn" id="smgmt-filter-clear-btn"
+                      onclick="_smgmtFilterClear()" title="Clear filter" aria-label="Clear filter">×</button>
+            </div>
           </div>
         </div>
 
@@ -3782,6 +4068,8 @@
 
         <!-- Estimate detail popover (issue #557) -->
         <div class="smgmt-est-popover hidden" id="smgmt-est-popover" role="dialog" aria-modal="false" aria-label="Estimate details"></div>
+        <!-- Per-column sort menu (issue #550) -->
+        <div class="smgmt-sort-menu hidden" id="smgmt-sort-menu" role="menu" aria-label="Sort column"></div>
 
       </div>
 
@@ -3863,7 +4151,15 @@
           </span>
           <span class="bc-step-arrow"><i class="ti ti-arrow-right"></i></span>
           <span class="bc-step-chip" id="bc-chip-2" data-step="2">
-            <span class="bc-step-n">2</span> Review &amp; create
+            <span class="bc-step-n">2</span> Review
+          </span>
+          <span class="bc-step-arrow"><i class="ti ti-arrow-right"></i></span>
+          <span class="bc-step-chip" id="bc-chip-3" data-step="3">
+            <span class="bc-step-n">3</span> Created
+          </span>
+          <span class="bc-step-arrow"><i class="ti ti-arrow-right"></i></span>
+          <span class="bc-step-chip" id="bc-chip-4" data-step="4">
+            <span class="bc-step-n">4</span> Estimate
           </span>
         </div>
 
@@ -4453,6 +4749,7 @@ let _ticketsLoaded    = false;
 let _sprintMgmtLoaded = false;
 let _smgmtData           = null;
 let _smgmtSelectedIssues = new Set();
+let _smgmtLastSelectedNum = null;  // anchor for shift+click range selection
 let _smgmtDragTicket     = null;
 let _smgmtDragSprintLabel = null;
 const RERUN_STRIP_LABELS = new Set(['UAT','UAT-approved','released','SIT','in-progress','needs-rework']);
@@ -4478,6 +4775,8 @@ let _smgmtLivePollId = null;
 let _smgmtLogPollId = null;
 // Finish-report card cache: sprint label → {card, branch} (sprint-26 parity port, issue #367)
 const _smgmtFinishCards = {};
+/** Sprint labels with a posted summary issue (finished). From the board API. */
+let _smgmtFinishedLabels = new Set();
 
 // ── Tab navigation ────────────────────────────────────────────────────────────
 function switchTab(tab, pushHistory) {
@@ -5642,6 +5941,9 @@ async function init() {
   // Set up sticky toolbar shadow
   _smgmtInitScrollShadow();
 
+  // Restore compact/dense density from localStorage (issue #547)
+  _smgmtDensityInit();
+
   // Load data in parallel
   await Promise.all([
     loadHomeData(false),
@@ -5650,6 +5952,10 @@ async function init() {
 
   // Start 30s sidebar refresh
   startSidebarRefresh();
+
+  // Sprint status pill (GitHub-backed) — initial load + 30s refresh
+  snavRefresh();
+  setInterval(snavRefresh, 30000);
 
   // Update toolbar sticky top based on actual header height
   _smgmtUpdateToolbarTop();
@@ -5686,23 +5992,23 @@ async function init() {
 }
 
 // ── Sprint Mgmt toolbar height calculation ─────────────────────────────────
-// Compute top offset for the sticky toolbar (proj-header height)
+// Compute top offset for the sticky area (proj-header height)
 function _smgmtUpdateToolbarTop() {
-  const header = document.getElementById('proj-header');
-  const toolbar = document.getElementById('smgmt-toolbar');
-  if (header && toolbar) {
-    toolbar.style.top = header.offsetHeight + 'px';
+  const header     = document.getElementById('proj-header');
+  const stickyArea = document.getElementById('smgmt-sticky-area');
+  if (header && stickyArea) {
+    stickyArea.style.top = header.offsetHeight + 'px';
   }
 }
 
 // ── Sprint Mgmt scroll-shadow ─────────────────────────────────────────────
 function _smgmtInitScrollShadow() {
-  const mainArea = document.getElementById('main-area');
-  const toolbar  = document.getElementById('smgmt-toolbar');
-  if (!mainArea || !toolbar) return;
+  const mainArea   = document.getElementById('main-area');
+  const stickyArea = document.getElementById('smgmt-sticky-area');
+  if (!mainArea || !stickyArea) return;
 
   mainArea.addEventListener('scroll', function() {
-    toolbar.classList.toggle('scrolled', mainArea.scrollTop > 4);
+    stickyArea.classList.toggle('scrolled', mainArea.scrollTop > 4);
   }, { passive: true });
 }
 
@@ -5914,7 +6220,11 @@ function _smgmtRender(data) {
 
   const _sprintParents = data.sprint_parents || {};
 
-  // NEXT UP: lowest label with >= 1 ticket that isn't currently running (sprint-26 parity)
+  // Finished sprints (a summary issue exists) — the same GitHub-backed signal
+  // the nav pill uses. Finished sprints are not "NEXT UP" and skip pre-flight.
+  _smgmtFinishedLabels = new Set(data.finished_sprints || []);
+
+  // NEXT UP: lowest label with >= 1 ticket that isn't running or finished (sprint-26 parity)
   let _smgmtNextUpLabel = null;
   const sortedForNext = [...orderedLabels].sort((a, b) => {
     const ka = _smgmtSprintLabelSortKey(a);
@@ -5927,6 +6237,7 @@ function _smgmtRender(data) {
   });
   for (const lbl of sortedForNext) {
     if (_smgmtRunningLabels.has(lbl)) continue;
+    if (_smgmtFinishedLabels.has(lbl)) continue;
     if ((bySprint[lbl] || []).length >= 1) { _smgmtNextUpLabel = lbl; break; }
   }
 
@@ -5934,7 +6245,7 @@ function _smgmtRender(data) {
     const tickets = bySprint[label] || [];
     const outcome = _smgmtOutcomeCache[label] || null;
     const parent = _sprintParents[label] || null;
-    const cardHtml = _smgmtCardHtml(label, null, tickets, outcome, label === _smgmtNextUpLabel, parent);
+    const cardHtml = _smgmtCardHtml(label, null, tickets, outcome, label === _smgmtNextUpLabel, parent, _smgmtFinishedLabels.has(label));
     // Wrap each pane in a unit with a hidden finish-report card "hat" above it (issue #367 parity)
     return `<div class="smgmt-sprint-unit" id="smgmt-unit-${escHtml(label)}">` +
            `<div class="smgmt-finish-card sfc-hidden" id="smgmt-finish-card-${escHtml(label)}" style="display:none"></div>` +
@@ -5960,12 +6271,295 @@ function _smgmtRender(data) {
 
   // Check estimator availability and inject re-estimate buttons (issue #561)
   _smgmtCheckEstimatorHealth();
+  // Load sprint goals for header summary
+  _smgmtLoadGoals(orderedLabels);
 
   // Inject pre-flight check banners for non-running sprint panes (issue #434)
   _preflightLoadBanners(orderedLabels, bySprint);
 
   // Update cleanup button visibility (issue #457)
   _smgmtUpdateCleanupBtn(data);
+
+  // Render label filter chips and re-apply current filter state (issue #546)
+  _smgmtLabelFilterRender(issues);
+  _smgmtLabelFilterApply();
+
+  // Restore keyboard navigation focus ring after DOM rebuild (issue #549)
+  _smgmtKbRestoreFocus();
+
+  // Restore per-column sort state (issue #550)
+  orderedLabels.forEach(lbl => _smgmtApplySort(lbl));
+
+  // Re-apply search filter after DOM rebuild (issue #552)
+  _smgmtFilterApply();
+}
+
+// ── Per-column sort controls (issue #550) ────────────────────────────────────
+
+const _SMGMT_SIZE_ORDER = { S: 1, M: 2, L: 3, XL: 4 };
+
+const _SMGMT_SORT_LABELS = {
+  'default':      'Sort',
+  'number:asc':   'Issue # ↑',
+  'number:desc':  'Issue # ↓',
+  'size:asc':     'Size ↑',
+  'size:desc':    'Size ↓',
+  'title:asc':    'A → Z',
+  'title:desc':   'Z → A',
+};
+
+function _smgmtGetSortState(label) {
+  try {
+    const v = sessionStorage.getItem('smgmt-sort-' + label);
+    return v ? JSON.parse(v) : null;
+  } catch (_) { return null; }
+}
+
+function _smgmtSetSortState(label, state) {
+  try {
+    if (state) sessionStorage.setItem('smgmt-sort-' + label, JSON.stringify(state));
+    else sessionStorage.removeItem('smgmt-sort-' + label);
+  } catch (_) {}
+}
+
+function _smgmtSortBtnHtml(label) {
+  const state = _smgmtGetSortState(label);
+  const key   = state ? `${state.field}:${state.dir}` : 'default';
+  const isActive = !!state;
+  const btnLabel = _SMGMT_SORT_LABELS[key] || 'Sort';
+  const safeLabel = escHtml(label);
+  const dispLabel = escHtml(sprintLabelDisplay(label));
+  return `<button class="smgmt-sort-btn${isActive ? ' is-active' : ''}"
+    id="smgmt-sort-btn-${safeLabel}"
+    aria-haspopup="true" aria-expanded="false"
+    aria-label="Sort ${dispLabel} tickets, current order: ${escHtml(btnLabel)}"
+    title="Sort tickets in this column"
+    onclick="event.stopPropagation();smgmtOpenSortMenu('${safeLabel}',this)"
+    onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();smgmtOpenSortMenu('${safeLabel}',this);}">
+    <i class="ti ti-arrows-sort" aria-hidden="true"></i>${isActive ? ' ' + escHtml(btnLabel) : ' Sort'}
+  </button>`;
+}
+
+function smgmtOpenSortMenu(label, btn) {
+  _smgmtCloseSortMenu();
+  const state = _smgmtGetSortState(label);
+  const cur   = state ? `${state.field}:${state.dir}` : 'default';
+
+  const items = [
+    { key: 'default',     icon: 'ti-list',                    text: 'Default order' },
+    null,
+    { key: 'number:asc',  icon: 'ti-sort-ascending-numbers',  text: 'Issue # ↑' },
+    { key: 'number:desc', icon: 'ti-sort-descending-numbers', text: 'Issue # ↓' },
+    null,
+    { key: 'size:asc',    icon: 'ti-sort-ascending-letters',  text: 'Size S → XL' },
+    { key: 'size:desc',   icon: 'ti-sort-descending-letters', text: 'Size XL → S' },
+    null,
+    { key: 'title:asc',   icon: 'ti-sort-ascending-letters',  text: 'Title A → Z' },
+    { key: 'title:desc',  icon: 'ti-sort-descending-letters', text: 'Title Z → A' },
+  ];
+
+  const menu = document.getElementById('smgmt-sort-menu');
+  const safeLabel = escHtml(label);
+  menu.innerHTML = items.map(item => {
+    if (!item) return '<div class="smgmt-sort-menu-divider" role="separator"></div>';
+    const isActive = item.key === cur;
+    return `<button class="smgmt-sort-menu-item${isActive ? ' is-active' : ''}"
+      role="menuitem"
+      onclick="smgmtSetSort('${safeLabel}','${escHtml(item.key)}')">
+      <i class="ti ${escHtml(item.icon)}" aria-hidden="true"></i>${escHtml(item.text)}
+    </button>`;
+  }).join('');
+
+  btn.setAttribute('aria-expanded', 'true');
+  menu.dataset.forLabel = label;
+
+  const rect      = btn.getBoundingClientRect();
+  const menuWidth = 170;
+  let left = rect.left;
+  if (left + menuWidth > window.innerWidth - 8) left = window.innerWidth - menuWidth - 8;
+  menu.style.top  = (rect.bottom + 4) + 'px';
+  menu.style.left = left + 'px';
+  menu.classList.remove('hidden');
+
+  const first = menu.querySelector('.smgmt-sort-menu-item');
+  if (first) setTimeout(() => first.focus(), 0);
+
+  setTimeout(() => document.addEventListener('click', _smgmtSortMenuOutside, { once: true }), 0);
+}
+
+function _smgmtSortMenuOutside(e) {
+  const menu = document.getElementById('smgmt-sort-menu');
+  if (menu && !menu.contains(e.target)) _smgmtCloseSortMenu();
+}
+
+function _smgmtCloseSortMenu() {
+  const menu = document.getElementById('smgmt-sort-menu');
+  if (!menu || menu.classList.contains('hidden')) return;
+  const label = menu.dataset.forLabel;
+  if (label) {
+    const btn = document.getElementById('smgmt-sort-btn-' + label);
+    if (btn) btn.setAttribute('aria-expanded', 'false');
+  }
+  menu.classList.add('hidden');
+  menu.dataset.forLabel = '';
+}
+
+function smgmtSetSort(label, key) {
+  _smgmtCloseSortMenu();
+  if (key === 'default') {
+    _smgmtSetSortState(label, null);
+    _smgmtRestoreDefaultOrder(label);
+  } else {
+    const [field, dir] = key.split(':');
+    _smgmtSetSortState(label, { field, dir });
+    _smgmtApplySort(label);
+  }
+  _smgmtUpdateSortBtn(label);
+}
+
+function _smgmtUpdateSortBtn(label) {
+  const btn = document.getElementById('smgmt-sort-btn-' + label);
+  if (!btn) return;
+  const state    = _smgmtGetSortState(label);
+  const key      = state ? `${state.field}:${state.dir}` : 'default';
+  const isActive = !!state;
+  const btnLabel = _SMGMT_SORT_LABELS[key] || 'Sort';
+  btn.className  = 'smgmt-sort-btn' + (isActive ? ' is-active' : '');
+  btn.setAttribute('aria-label', `Sort ${escHtml(sprintLabelDisplay(label))} tickets, current order: ${btnLabel}`);
+  btn.innerHTML  = `<i class="ti ti-arrows-sort" aria-hidden="true"></i>${isActive ? ' ' + btnLabel : ' Sort'}`;
+}
+
+function _smgmtApplySort(label) {
+  const container = document.getElementById('smgmt-tickets-' + label);
+  if (!container) return;
+  const state = _smgmtGetSortState(label);
+  if (!state) return;
+
+  const rows = Array.from(container.querySelectorAll('.smgmt-ticket'));
+  if (rows.length < 2) return;
+
+  rows.sort((a, b) => {
+    let va, vb;
+    if (state.field === 'number') {
+      va = parseInt(a.dataset.issue || '0', 10);
+      vb = parseInt(b.dataset.issue || '0', 10);
+    } else if (state.field === 'size') {
+      const pillA = a.querySelector('.smgmt-ticket-size-pill');
+      const pillB = b.querySelector('.smgmt-ticket-size-pill');
+      va = _SMGMT_SIZE_ORDER[pillA ? pillA.textContent.trim() : ''] || 99;
+      vb = _SMGMT_SIZE_ORDER[pillB ? pillB.textContent.trim() : ''] || 99;
+    } else {
+      va = (a.querySelector('.smgmt-ticket-title')?.textContent || '').trim().toLowerCase();
+      vb = (b.querySelector('.smgmt-ticket-title')?.textContent || '').trim().toLowerCase();
+    }
+    if (va < vb) return state.dir === 'asc' ? -1 : 1;
+    if (va > vb) return state.dir === 'asc' ?  1 : -1;
+    return 0;
+  });
+
+  rows.forEach(r => container.appendChild(r));
+}
+
+function _smgmtRestoreDefaultOrder(label) {
+  const container = document.getElementById('smgmt-tickets-' + label);
+  if (!container || !_smgmtData) return;
+  const issues  = _smgmtData.issues || [];
+  const tickets = issues.filter(i => i.sprint_label === label);
+  if (tickets.length === 0) {
+    container.innerHTML = '<div class="smgmt-drop-hint">Drop tickets here</div>';
+    return;
+  }
+  container.innerHTML = tickets.map(t => _smgmtTicketRowHtml(t, label)).join('');
+}
+
+// ── Label filter chip row (issue #546) ────────────────────────────────────────
+
+// Session-scoped set of *deactivated* label names. Empty = all active (default).
+const _smgmtDeactivatedLabels = new Set();
+
+// Labels to always show as chips (in display order) even if no tickets carry them yet.
+const _SMGMT_FILTER_PRIORITY = ['backlog', 'in-progress', 'sit', 'uat'];
+
+// Map label-name → color (hex) for dot rendering
+const _smgmtLabelColors = {};
+
+function _smgmtLabelFilterRender(issues) {
+  const row = document.getElementById('smgmt-label-filter-row');
+  if (!row) return;
+
+  // Collect all label names from tickets
+  const seen = new Set();
+  (issues || []).forEach(iss => {
+    (iss.labels || []).forEach(l => {
+      seen.add(l.name);
+      if (l.color) _smgmtLabelColors[l.name] = '#' + l.color;
+    });
+  });
+
+  // Build ordered list: priority labels first (if present), then remainder alphabetically
+  const priority = _SMGMT_FILTER_PRIORITY.filter(n => seen.has(n));
+  const rest = [...seen].filter(n => !_SMGMT_FILTER_PRIORITY.includes(n)).sort();
+  const allLabels = [...priority, ...rest];
+
+  if (allLabels.length === 0) {
+    row.classList.add('is-empty');
+    row.innerHTML = '';
+    return;
+  }
+
+  row.classList.remove('is-empty');
+  row.innerHTML = allLabels.map(name => {
+    const active = !_smgmtDeactivatedLabels.has(name);
+    const color = _smgmtLabelColors[name] || 'var(--text-muted)';
+    return `<button class="smgmt-lf-chip ${active ? 'is-active' : 'is-inactive'}"
+               data-label="${escHtml(name)}"
+               aria-pressed="${active}"
+               title="${active ? 'Hide' : 'Show'} tickets labeled &quot;${escHtml(name)}&quot;"
+               onclick="_smgmtLabelFilterToggle('${escHtml(name)}')">
+              <span class="smgmt-lf-chip-dot" style="background:${color}"></span>
+              ${escHtml(name)}
+            </button>`;
+  }).join('');
+}
+
+function _smgmtLabelFilterToggle(labelName) {
+  if (_smgmtDeactivatedLabels.has(labelName)) {
+    _smgmtDeactivatedLabels.delete(labelName);
+  } else {
+    _smgmtDeactivatedLabels.add(labelName);
+  }
+  // Update chip appearance
+  const chip = document.querySelector(`.smgmt-lf-chip[data-label="${CSS.escape(labelName)}"]`);
+  if (chip) {
+    const active = !_smgmtDeactivatedLabels.has(labelName);
+    chip.classList.toggle('is-active', active);
+    chip.classList.toggle('is-inactive', !active);
+    chip.setAttribute('aria-pressed', String(active));
+    chip.title = `${active ? 'Hide' : 'Show'} tickets labeled "${labelName}"`;
+  }
+  _smgmtLabelFilterApply();
+}
+
+function _smgmtLabelFilterApply() {
+  if (_smgmtDeactivatedLabels.size === 0) {
+    // Fast path: all active — show everything
+    document.querySelectorAll('.smgmt-ticket[data-labels]').forEach(el => {
+      el.style.display = '';
+    });
+    return;
+  }
+  document.querySelectorAll('.smgmt-ticket[data-labels]').forEach(el => {
+    const raw = el.getAttribute('data-labels') || '';
+    const ticketLabels = raw ? raw.split(',') : [];
+    if (ticketLabels.length === 0) {
+      // No labels → always visible
+      el.style.display = '';
+      return;
+    }
+    // Hidden only when every ticket label that appears as a chip is deactivated
+    const allDeactivated = ticketLabels.every(n => _smgmtDeactivatedLabels.has(n));
+    el.style.display = allDeactivated ? 'none' : '';
+  });
 }
 
 async function _smgmtFetchMissingOutcomes(orderedLabels, bySprint) {
@@ -6174,10 +6768,42 @@ function _smgmtUpdateEstimateBadge(issueNum) {
   }
 }
 
+async function _smgmtLoadGoals(orderedLabels) {
+  const repo = _smgmtRepo();
+  if (!repo) return;
+  for (const label of orderedLabels) {
+    const goalEl = document.getElementById(`smgmt-goal-${label}`);
+    if (!goalEl) continue;
+    try {
+      const resp = await fetch(
+        `/api/sprints/goal?project=${encodeURIComponent(repo)}&sprint=${encodeURIComponent(label)}`
+      );
+      if (!resp.ok) continue;
+      const data = await resp.json();
+      const goal = (data.goal || '').trim();
+      if (goal) {
+        goalEl.textContent = goal;
+        goalEl.title = goal;
+        goalEl.style.display = '';
+      }
+    } catch (_) {
+      // fail silently
+    }
+  }
+}
+
 // ── Pre-flight check banner (issue #434) ─────────────────────────────────────
 
 /** Session-dismissed banner labels — not persisted across page reloads. */
 const _preflightDismissed = new Set();
+
+/** How many pre-flight items to show before "Show more". */
+const _PREFLIGHT_COLLAPSED_COUNT = 2;
+/** Labels whose pre-flight list is expanded (show all). */
+const _preflightExpanded = new Set();
+/** Cache of computed items per label so the show-more toggle can re-render
+    without recomputing the (async) estimator checks. */
+const _preflightItemsCache = {};
 
 /** Synchronous checks: body, AC, conflicting labels. Returns flat items array. */
 function _preflightCheckTickets(tickets) {
@@ -6200,19 +6826,17 @@ function _preflightCheckTickets(tickets) {
 }
 
 /** Async: returns Set of issue numbers whose estimate file is absent or incomplete. */
-async function _preflightCheckEstimates(tickets, repo) {
+// Single source of truth for "has an estimate": the GitHub size-* label — the
+// SAME signal the per-ticket size badge uses (_smgmtTicketRowHtml). Previously
+// this fetched local .commander/estimates JSON, which doesn't exist on a machine
+// that isn't running the sprint, so it falsely reported "No estimator output"
+// even when the size badge already showed M/L/etc. Now they always agree.
+function _preflightCheckEstimates(tickets) {
   const missing = new Set();
-  if (!repo || tickets.length === 0) return missing;
-  await Promise.all(tickets.map(async t => {
-    try {
-      const resp = await fetch(
-        `/api/estimates/batch?project=${encodeURIComponent(repo)}&issues=${t.number}`
-      );
-      if (!resp.ok) { missing.add(t.number); return; }
-      const d = await resp.json();
-      if (!d.complete || d.total_hours === null) missing.add(t.number);
-    } catch (_) { missing.add(t.number); }
-  }));
+  (tickets || []).forEach(t => {
+    const hasSize = (t.labels || []).some(l => /^size-[SMLX]+$/.test((l && l.name) || l));
+    if (!hasSize) missing.add(t.number);
+  });
   return missing;
 }
 
@@ -6237,13 +6861,27 @@ function _preflightDismiss(label) {
 function _preflightBannerHtml(label, items) {
   if (items.length === 0 || _preflightDismissed.has(label)) return '';
   const trunc = (s, n) => s && s.length > n ? s.slice(0, n) + '…' : (s || '');
-  const rowsHtml = items.map(item =>
+
+  // Collapsed by default to the first N items; "Show more" reveals the rest.
+  const expanded = _preflightExpanded.has(label);
+  const shown = expanded ? items : items.slice(0, _PREFLIGHT_COLLAPSED_COUNT);
+  const hiddenCount = items.length - shown.length;
+
+  const rowsHtml = shown.map(item =>
     `<button class="smgmt-preflight-item" onclick="_preflightScrollToTicket(${item.number})">
       <span class="smgmt-preflight-item-id">#${item.number}</span>
       <span class="smgmt-preflight-item-title">${escHtml(trunc(item.title, 50))}</span>
       <span class="smgmt-preflight-item-type">${escHtml(item.type)}</span>
     </button>`
   ).join('');
+
+  let toggleHtml = '';
+  if (items.length > _PREFLIGHT_COLLAPSED_COUNT) {
+    toggleHtml = expanded
+      ? `<button class="smgmt-preflight-toggle-more" onclick="_preflightToggleExpand('${escHtml(label)}')">Show less</button>`
+      : `<button class="smgmt-preflight-toggle-more" onclick="_preflightToggleExpand('${escHtml(label)}')">Show ${hiddenCount} more</button>`;
+  }
+
   return `<div class="smgmt-preflight-banner" id="smgmt-preflight-${escHtml(label)}">
     <div class="smgmt-preflight-header">
       <i class="ti ti-alert-triangle" style="color:var(--yellow);font-size:14px;flex-shrink:0"></i>
@@ -6251,12 +6889,27 @@ function _preflightBannerHtml(label, items) {
       <button class="smgmt-preflight-dismiss" onclick="_preflightDismiss('${escHtml(label)}')" title="Dismiss">&times;</button>
     </div>
     <div class="smgmt-preflight-items">${rowsHtml}</div>
+    ${toggleHtml}
   </div>`;
+}
+
+/** Expand/collapse a sprint's pre-flight list and re-render it in place. */
+function _preflightToggleExpand(label) {
+  if (_preflightExpanded.has(label)) _preflightExpanded.delete(label);
+  else _preflightExpanded.add(label);
+  const items = _preflightItemsCache[label];
+  if (!items) return;
+  const el = document.getElementById(`smgmt-preflight-${label}`);
+  if (!el) return;
+  const html = _preflightBannerHtml(label, items);
+  if (html) el.outerHTML = html;
 }
 
 /** Run all checks for one sprint pane and inject/update the banner in the DOM. */
 async function _preflightInjectBanner(label, tickets, repo) {
   if (_preflightDismissed.has(label)) return;
+  // Finished sprints (summary issue exists) don't need a pre-flight check.
+  if (_smgmtFinishedLabels.has(label)) return;
   const card = document.getElementById(`smgmt-card-${label}`);
   if (!card) return;
 
@@ -6264,7 +6917,7 @@ async function _preflightInjectBanner(label, tickets, repo) {
   if (existing) existing.remove();
 
   const syncItems = _preflightCheckTickets(tickets);
-  const missingEst = await _preflightCheckEstimates(tickets, repo);
+  const missingEst = _preflightCheckEstimates(tickets);
 
   const items = [...syncItems];
   const byNum = {};
@@ -6275,6 +6928,9 @@ async function _preflightInjectBanner(label, tickets, repo) {
   }
 
   if (items.length === 0 || _preflightDismissed.has(label)) return;
+
+  // Cache for the show-more/less toggle (avoids recomputing async checks).
+  _preflightItemsCache[label] = items;
 
   const html = _preflightBannerHtml(label, items);
   if (!html) return;
@@ -6315,6 +6971,34 @@ function _smgmtUpdatePreflightToggleUI() {
     : 'Pre-flight checks off — click to show banners';
   const lbl = document.getElementById('smgmt-preflight-toggle-label');
   if (lbl) lbl.textContent = on ? 'Pre-flight: on' : 'Pre-flight: off';
+}
+
+// ── Compact/dense view toggle (issue #547) ────────────────────────────────────
+
+const _SMGMT_DENSITY_KEY = 'sprintBoard.density';
+
+function _smgmtDensityInit() {
+  if (localStorage.getItem(_SMGMT_DENSITY_KEY) === 'compact') _smgmtDensityApply(true);
+}
+
+function _smgmtDensityApply(compact) {
+  const pane = document.getElementById('pane-sprint-mgmt');
+  const btn  = document.getElementById('smgmt-density-toggle');
+  if (!pane || !btn) return;
+  pane.classList.toggle('smgmt-compact', compact);
+  btn.setAttribute('aria-pressed', String(compact));
+  btn.title = compact
+    ? 'Normal view — click to toggle'
+    : 'Compact view — click to toggle';
+  const lbl = document.getElementById('smgmt-density-label');
+  if (lbl) lbl.textContent = compact ? 'Normal' : 'Compact';
+}
+
+function _smgmtDensityToggle() {
+  const pane = document.getElementById('pane-sprint-mgmt');
+  const compact = !pane.classList.contains('smgmt-compact');
+  _smgmtDensityApply(compact);
+  localStorage.setItem(_SMGMT_DENSITY_KEY, compact ? 'compact' : 'normal');
 }
 
 /** Kick off pre-flight banner loading for all non-running sprint panes. */
@@ -6498,7 +7182,7 @@ function _smgmtOutcomeTicketListHtml(issues, label, repo) {
            <i class="ti ti-file-text"></i></button>`
       : '';
 
-    return `<div class="smgmt-ticket" data-issue="${iss.number}" draggable="false">
+    return `<div class="smgmt-ticket" data-issue="${iss.number}" data-labels="" draggable="false">
       ${circle}
       <a class="smgmt-ticket-num" href="https://github.com/issues/${iss.number}" target="_blank" rel="noopener">#${iss.number}</a>
       <span class="smgmt-ticket-title" title="${escHtml(iss.title)}">${escHtml(iss.title)}</span>
@@ -6912,8 +7596,10 @@ function smgmtCancelRename(label, origN, nameEl) {
   nameEl.textContent = sprintLabelDisplay(label);
 }
 
-function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent) {
+function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent, finished) {
   const isRunning = _smgmtRunningLabels.has(label);
+  let isCollapsed = false;
+  try { isCollapsed = localStorage.getItem('sprintColumn_' + label + '_collapsed') === '1'; } catch (_) {}
 
   // Running sprint gets special animated treatment (issue #277)
   if (isRunning) {
@@ -6960,6 +7646,7 @@ function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent) {
   let outcomeBadgeHtml = '';
   let ticketCount = tickets.length;
   let ticketsContainerHtml = '';
+  let isOutcomeView = false;
 
   if (outcome && (outcome.sprint_status || outcome.state)) {
     const meta = _smgmtStateMeta(outcome);
@@ -6975,13 +7662,32 @@ function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent) {
       const issueList = outcome.issues || [];
       ticketCount = issueList.length;
       ticketsContainerHtml = _smgmtOutcomeTicketListHtml(issueList, label, _smgmtRepo());
+      isOutcomeView = true;
     }
   } else {
     // Planning view ticket rows
     ticketsContainerHtml = tickets.length > 0
       ? tickets.map(t => _smgmtTicketRowHtml(t, label)).join('')
       : '<div class="smgmt-drop-hint">Drop tickets here</div>';
+    // A summary issue exists but no detailed outcome cached — still mark finished
+    // so the board agrees with the nav pill (and NEXT UP/pre-flight are suppressed).
+    if (finished) {
+      outcomeBadgeHtml = `<span class="smgmt-state-badge state-finished">Finished</span>`;
+    }
   }
+
+  // Sprint summary: progress bar + goal
+  const summaryDone = isOutcomeView
+    ? (outcome.issues || []).filter(i => i.outcome === 'done').length
+    : tickets.filter(t => t.status === 'done').length;
+  const summaryPct = ticketCount > 0 ? Math.round((summaryDone / ticketCount) * 100) : 0;
+  const summaryHtml = `<div class="smgmt-sprint-summary">
+    <div class="smgmt-progress-row">
+      <div class="smgmt-progress-bar-wrap"><div class="smgmt-progress-bar-fill" style="width:${summaryPct}%"></div></div>
+      <span class="smgmt-progress-label">${summaryDone} / ${ticketCount} done</span>
+    </div>
+    <div class="smgmt-sprint-goal-text" id="smgmt-goal-${escHtml(label)}" style="display:none"></div>
+  </div>`;
 
   const logHtml = (outcome && outcome.sprint_status) ? _smgmtOutcomeLogHtml(label, outcome) : '';
   const cancelBannerHtml = _smgmtIsCancelled(outcome) ? _smgmtCancelBannerHtml(label) : '';
@@ -6989,13 +7695,21 @@ function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent) {
     ? `<span class="smgmt-sprint-lineage" title="Child sprint spawned from ${escHtml(parent)}">← from ${escHtml(sprintLabelDisplay(parent))}</span>`
     : '';
 
+  const collapsedClass = isCollapsed ? ' smgmt-collapsed' : '';
+  const collapseLabel = (isCollapsed ? 'Expand ' : 'Collapse ') + escHtml(sprintLabelDisplay(label));
   return `
-    <div class="smgmt-sprint-card${outcomeCardClass}" id="smgmt-card-${escHtml(label)}"
+    <div class="smgmt-sprint-card${outcomeCardClass}${collapsedClass}" id="smgmt-card-${escHtml(label)}"
          ondragover="_smgmtDragOver(event, '${escHtml(label)}')"
          ondragleave="_smgmtDragLeave(event)"
          ondrop="_smgmtDropOnSprint(event, '${escHtml(label)}')">
       <div class="smgmt-sprint-header">
         <div class="smgmt-sprint-header-left">
+          <button class="smgmt-collapse-btn" id="smgmt-collapse-btn-${escHtml(label)}"
+                  onclick="smgmtToggleCollapse('${escHtml(label)}')"
+                  aria-label="${collapseLabel}"
+                  title="${collapseLabel}"
+                  onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();smgmtToggleCollapse('${escHtml(label)}');}">
+            <i class="ti ti-chevron-down"></i></button>
           <i class="ti ti-layout-kanban" style="font-size:14px;color:var(--text-muted)"></i>
           <span class="smgmt-sprint-name" style="font-size:15px;font-weight:700;">${escHtml(sprintLabelDisplay(label))}</span>
           <button class="smgmt-rename-btn" title="Rename sprint"
@@ -7006,6 +7720,7 @@ function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent) {
           <span class="smgmt-sprint-count"><span id="smgmt-est-${escHtml(label)}" class="smgmt-sprint-est-val">— estimated</span> &middot; ${ticketCount} ticket${ticketCount !== 1 ? 's' : ''}<span id="smgmt-tokens-${escHtml(label)}" class="smgmt-sprint-token-val" style="display:none"></span></span>
         </div>
         <div class="smgmt-sprint-header-right">
+          ${_smgmtSortBtnHtml(label)}
           <button class="smgmt-finish-btn ${finishHidden}" ${finishDisabled}
                   title="${finishDisabled ? 'No open tickets' : 'Finish sprint'}"
                   onclick="smgmtFinishSprint('${escHtml(label)}')">
@@ -7014,9 +7729,9 @@ function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent) {
                   onclick="smgmtDeleteSprint('${escHtml(label)}')">
             <i class="ti ti-trash"></i> Delete</button>
           ${actionBtn}
-          ${!isPostRun ? rerunBtn : ''}
         </div>
       </div>
+      ${summaryHtml}
       ${cancelBannerHtml}
       ${outcomeBandHtml}
       <div class="smgmt-sprint-tickets" id="smgmt-tickets-${escHtml(label)}">
@@ -7033,6 +7748,8 @@ const SIZE_MINUTES = { S: 5, M: 15, L: 30, XL: 60 };
 
 /** Build the animated running sprint card HTML. Live data patched separately by _smgmtLivePatch. */
 function _smgmtRunningCardHtml(label, n, tickets) {
+  let isCollapsed = false;
+  try { isCollapsed = localStorage.getItem('sprintColumn_' + label + '_collapsed') === '1'; } catch (_) {}
   const live = _smgmtLiveCache[label] || null;
 
   // Stat strip values (use live data if available, else zeros)
@@ -7092,7 +7809,8 @@ function _smgmtRunningCardHtml(label, n, tickets) {
       ? `<span class="smgmt-ticket-elapsed">${elapsedStr}</span>`
       : '';
 
-    return `<div class="smgmt-ticket" data-issue="${t.number}" draggable="false"${runSizeAttr}>
+    const runTicketLabels = escHtml((t.labels || []).map(l => l.name).join(','));
+    return `<div class="smgmt-ticket" data-issue="${t.number}" data-labels="${runTicketLabels}" draggable="false"${runSizeAttr}>
       ${indicator}
       <a class="smgmt-ticket-num" href="${escHtml(issueUrl)}" target="_blank"
          rel="noopener">#${t.number}</a>
@@ -7101,11 +7819,19 @@ function _smgmtRunningCardHtml(label, n, tickets) {
     </div>`;
   }).join('');
 
+  const runCollapsedClass = isCollapsed ? ' smgmt-collapsed' : '';
+  const runCollapseLabel = (isCollapsed ? 'Expand ' : 'Collapse ') + escHtml(sprintLabelDisplay(label));
   return `
-    <div class="smgmt-sprint-card smgmt-running" id="smgmt-card-${escHtml(label)}">
+    <div class="smgmt-sprint-card smgmt-running${runCollapsedClass}" id="smgmt-card-${escHtml(label)}">
       <div class="smgmt-running-stripe"></div>
       <div class="smgmt-sprint-header">
         <div class="smgmt-sprint-header-left">
+          <button class="smgmt-collapse-btn" id="smgmt-collapse-btn-${escHtml(label)}"
+                  onclick="smgmtToggleCollapse('${escHtml(label)}')"
+                  aria-label="${runCollapseLabel}"
+                  title="${runCollapseLabel}"
+                  onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();smgmtToggleCollapse('${escHtml(label)}');}">
+            <i class="ti ti-chevron-down"></i></button>
           <i class="ti ti-layout-kanban" style="font-size:14px;color:var(--green)"></i>
           <span class="smgmt-sprint-name" style="font-size:15px;font-weight:700;">${escHtml(sprintLabelDisplay(label))}</span>
           <span class="smgmt-running-badge" id="smgmt-running-badge-${escHtml(label)}">
@@ -7488,16 +8214,21 @@ function _smgmtTicketRowHtml(ticket, label) {
     : '';
   const riskFlagIconsHtml = _smgmtRiskFlagIconsHtml(ticket.number);
 
+  const ticketLabelNames = (ticket.labels || []).map(l => l.name).join(',');
+
   return `
     <div class="smgmt-ticket${isSelected ? ' is-selected' : ''}" id="smgmt-ticket-${ticket.number}"
+         tabindex="-1"
          draggable="true"
          data-issue="${ticket.number}"
          data-sprint="${escHtml(label)}"${sizeAttr}
+         data-labels="${escHtml(ticketLabelNames)}"
          ondragstart="_smgmtTicketDragStart(event, ${ticket.number}, '${escHtml(label)}')"
          ondragend="_smgmtTicketDragEnd(event)"
          ondragover="_smgmtTicketReorderDragOver(event)"
          ondragleave="_smgmtTicketReorderDragLeave(event)"
          ondrop="_smgmtTicketReorderDrop(event, ${ticket.number}, '${escHtml(label)}')"
+         onclick="_smgmtRowClick(event, ${ticket.number}, '${escHtml(label)}')"
          oncontextmenu="_smgmtCtxMenuOpen(event,${ticket.number})">
       <input type="checkbox" class="smgmt-ticket-cb"
              ${isSelected ? 'checked' : ''}
@@ -7505,7 +8236,7 @@ function _smgmtTicketRowHtml(ticket, label) {
              onchange="_smgmtToggleSelect(${ticket.number}, this.checked)">
       <i class="ti ti-grip-vertical smgmt-ticket-grip"></i>
       <a class="smgmt-ticket-num" href="${escHtml(ticket.url || '#')}" target="_blank"
-         rel="noopener" onclick="event.stopPropagation()">#${ticket.number}</a>
+         rel="noopener" draggable="false" onclick="event.stopPropagation()">#${ticket.number}</a>
       <span class="smgmt-ticket-title" title="${escHtml(ticket.title)}">${escHtml(ticket.title)}</span>
       ${sizePillHtml}${estimateBadgeHtml}${riskFlagIconsHtml}${reEstBtnHtml}
       <span class="smgmt-ticket-status ${statusClass}">${escHtml(statusLabel)}</span>
@@ -7872,6 +8603,23 @@ function _smgmtShowToast(msg) {
   el.classList.add('show');
   clearTimeout(el._timer);
   el._timer = setTimeout(() => el.classList.remove('show'), 2800);
+}
+
+function _smgmtShowInlineError(msg) {
+  const listEl = document.getElementById('smgmt-sprint-list');
+  if (!listEl) { _smgmtShowToast(msg); return; }
+  let errEl = document.getElementById('smgmt-bulk-move-error');
+  if (!errEl) {
+    errEl = document.createElement('div');
+    errEl.id = 'smgmt-bulk-move-error';
+    errEl.style.cssText = 'background:var(--red-bg);border:1px solid var(--red);border-radius:8px;padding:10px 14px;font-size:12px;color:var(--red);white-space:pre-wrap;margin-bottom:10px;position:relative;';
+    errEl.innerHTML = '<button onclick="this.parentElement.remove()" style="position:absolute;top:6px;right:8px;background:none;border:none;color:var(--red);cursor:pointer;font-size:14px;line-height:1;">✕</button>';
+    listEl.insertBefore(errEl, listEl.firstChild);
+  }
+  const txt = document.createElement('span');
+  txt.textContent = msg;
+  errEl.prepend(txt);
+  errEl.style.display = 'block';
 }
 
 function smgmtRunBlockedToast() {
@@ -8705,13 +9453,14 @@ function _smgmtUpdateSelectionUI() {
           </button>
           <button class="smgmt-move-to-btn" id="smgmt-move-to-btn"
                   onclick="_smgmtToggleMoveToMenu(event)">
-            Move to &#9660;
+            <i class="ti ti-send"></i> Move to Sprint &#9660;
           </button>
           <div class="smgmt-move-to-menu" id="smgmt-move-to-menu"></div>
         </div>`;
       if (listEl) listEl.insertBefore(bar, listEl.firstChild);
     }
     bar.classList.add('show');
+    if (listEl) listEl.classList.add('has-selection');
     const countEl = document.getElementById('smgmt-sel-count');
     if (countEl) countEl.textContent = count === 1 ? '1 ticket selected' : `${count} tickets selected`;
     _smgmtPopulateMoveToMenu();
@@ -8723,6 +9472,7 @@ function _smgmtUpdateSelectionUI() {
     }
   } else {
     if (bar) bar.classList.remove('show');
+    if (listEl) listEl.classList.remove('has-selection');
   }
 }
 
@@ -8733,13 +9483,24 @@ function _smgmtPopulateSelectionDropdown() {
 function _smgmtPopulateMoveToMenu() {
   const menu = document.getElementById('smgmt-move-to-menu');
   if (!menu || !_smgmtData) return;
+
+  // Sprints that contain at least one selected ticket — exclude from the target list
+  const selectedNums = Array.from(_smgmtSelectedIssues);
+  const occupiedSprints = new Set(
+    selectedNums.map(n => {
+      const iss = (_smgmtData.issues || []).find(i => i.number === n);
+      return iss ? iss.sprint : undefined;
+    }).filter(s => s != null)
+  );
+
   const sprints = (_smgmtData.sprints || []).sort((a, b) => a - b);
   let html = '';
   sprints.forEach(n => {
+    if (occupiedSprints.has(n)) return;
     html += `<button class="smgmt-move-to-item" onclick="_smgmtMoveSelectedTo('sprint-${n}');_smgmtCloseMoveToMenu()">Sprint ${n}</button>`;
   });
   html += `<button class="smgmt-move-to-item" onclick="_smgmtMoveSelectedTo('backlog');_smgmtCloseMoveToMenu()">Backlog (no sprint)</button>`;
-  menu.innerHTML = html;
+  menu.innerHTML = html || '<span style="display:block;padding:8px 14px;font-size:12px;color:var(--text-muted)">No other sprints available</span>';
 }
 
 function _smgmtToggleMoveToMenu(event) {
@@ -8755,6 +9516,12 @@ function _smgmtCloseMoveToMenu() {
   if (menu) menu.classList.remove('open');
 }
 
+// Close bulk-move dropdown when clicking outside the selection bar
+document.addEventListener('click', function(e) {
+  const bar = document.getElementById('smgmt-selection-bar');
+  if (bar && !bar.contains(e.target)) _smgmtCloseMoveToMenu();
+});
+
 function _smgmtClearSelection() {
   _smgmtSelectedIssues.forEach(num => {
     const el = document.getElementById(`smgmt-ticket-${num}`);
@@ -8768,11 +9535,51 @@ function _smgmtClearSelection() {
   _smgmtUpdateSelectionUI();
 }
 
-function _smgmtToggleSelect(number, checked) {
-  if (checked) _smgmtSelectedIssues.add(number);
+function _smgmtSetSelected(number, selected) {
+  if (selected) _smgmtSelectedIssues.add(number);
   else _smgmtSelectedIssues.delete(number);
   const el = document.getElementById(`smgmt-ticket-${number}`);
-  if (el) el.classList.toggle('is-selected', checked);
+  if (el) {
+    el.classList.toggle('is-selected', selected);
+    const cb = el.querySelector('.smgmt-ticket-cb');
+    if (cb) cb.checked = selected;
+  }
+}
+
+function _smgmtToggleSelect(number, checked) {
+  _smgmtSetSelected(number, checked);
+  _smgmtLastSelectedNum = checked ? number : null;
+  _smgmtUpdateSelectionUI();
+}
+
+// Click a ticket row to select/deselect it (toggle). Shift+click extends the
+// selection from the last-clicked ticket to this one, like a file picker.
+// Clicks on the checkbox/link/menu don't reach here (they stopPropagation).
+function _smgmtRowClick(event, number, label) {
+  const container = label
+    ? document.getElementById(`smgmt-tickets-${label}`)
+    : document.getElementById('smgmt-backlog-tickets');
+
+  if (event.shiftKey && _smgmtLastSelectedNum != null && container) {
+    const nums = Array.from(container.querySelectorAll('.smgmt-ticket[data-issue]'))
+      .map(r => parseInt(r.dataset.issue, 10));
+    const a = nums.indexOf(_smgmtLastSelectedNum);
+    const b = nums.indexOf(number);
+    if (a !== -1 && b !== -1) {
+      const [lo, hi] = a <= b ? [a, b] : [b, a];
+      for (let i = lo; i <= hi; i++) _smgmtSetSelected(nums[i], true);
+      _smgmtLastSelectedNum = number;
+      _smgmtUpdateSelectionUI();
+      const sel = window.getSelection && window.getSelection();
+      if (sel) sel.removeAllRanges();  // clear the text highlight shift-click makes
+      return;
+    }
+  }
+
+  // Plain click: toggle this ticket on/off.
+  const nowSelected = !_smgmtSelectedIssues.has(number);
+  _smgmtSetSelected(number, nowSelected);
+  _smgmtLastSelectedNum = nowSelected ? number : null;
   _smgmtUpdateSelectionUI();
 }
 
@@ -8838,9 +9645,15 @@ async function _smgmtMoveSelectedTo(targetLabel) {
       body: JSON.stringify({ changes, project: repo }),
     });
     if (!res.ok) throw new Error(await res.text());
+    const data = await res.json();
+    if (data.failed > 0 && data.errors && data.errors.length > 0) {
+      _smgmtShowInlineError(`${data.failed} ticket${data.failed !== 1 ? 's' : ''} failed to move:\n${data.errors.join('\n')}`);
+    } else if (data.applied > 0) {
+      _smgmtShowToast(`Moved ${data.applied} ticket${data.applied !== 1 ? 's' : ''} to ${dest}.`);
+    }
     await loadSprintMgmt();
   } catch (e) {
-    alert('Failed to move tickets: ' + e.message);
+    _smgmtShowToast('Failed to move tickets: ' + e.message);
     await loadSprintMgmt();
   } finally {
     _smgmtBoardUnlock();
@@ -8919,15 +9732,16 @@ function _smgmtDragMovePill(event) {
 let _smgmtGhostNextNum = null;
 
 /**
- * Compute the lowest positive integer N such that no label sprint-N already
- * exists (plain integer labels only; sub-labels like sprint-N.M are ignored).
- * Result is cached at drag-start — call once, reuse during session.
+ * Next sprint number = max existing + 1. Uses the server's placeholder_sprint
+ * (computed over sprint labels AND finished-summary numbers, so a deleted early
+ * label never resets it to 1). Falls back to a client-side max if absent.
  */
 function _smgmtGhostComputeNextFree() {
-  const existing = new Set((_smgmtData?.sprints || []).map(n => Number(n)));
-  let n = 1;
-  while (existing.has(n)) n++;
-  return n;
+  if (_smgmtData && Number.isInteger(_smgmtData.placeholder_sprint)) {
+    return _smgmtData.placeholder_sprint;
+  }
+  const nums = (_smgmtData?.sprints || []).map(Number).filter(n => !isNaN(n));
+  return nums.length ? Math.max(...nums) + 1 : 1;
 }
 
 /** Show the ghost pane below the sprint list, pre-computing next-free number. */
@@ -8943,19 +9757,7 @@ function _smgmtGhostShow() {
   if (!ghost) return;
 
   titleEl.textContent = `Drop here to create Sprint ${_smgmtGhostNextNum}`;
-
-  // Build sub-text: identify skipped empty sprints
-  const existing = new Set((_smgmtData?.sprints || []).map(n => Number(n)));
-  const skipped = [];
-  for (let i = 1; i < _smgmtGhostNextNum; i++) {
-    if (!existing.has(i)) skipped.push(i);
-  }
-  if (skipped.length > 0) {
-    const skippedStr = skipped.map(s => `Sprint ${s}`).join(', ');
-    subEl.textContent = `next free number · skipped empty ${skippedStr}`;
-  } else {
-    subEl.textContent = `next free number`;
-  }
+  subEl.textContent = 'next sprint number';
 
   ghost.classList.add('ghost-visible');
 }
@@ -9301,6 +10103,23 @@ async function _smgmtTicketReorderDrop(event, targetIssue, sprintLabel) {
 
 // ── Backlog pane (issue #274) ──────────────────────────────────────────────
 
+function smgmtToggleCollapse(label) {
+  const card = document.getElementById('smgmt-card-' + label);
+  if (!card) return;
+  const btn = document.getElementById('smgmt-collapse-btn-' + label);
+  const isCollapsed = card.classList.toggle('smgmt-collapsed');
+  const displayName = sprintLabelDisplay(label);
+  if (btn) btn.setAttribute('aria-label', (isCollapsed ? 'Expand ' : 'Collapse ') + displayName);
+  if (btn) btn.setAttribute('title', (isCollapsed ? 'Expand ' : 'Collapse ') + displayName);
+  try {
+    if (isCollapsed) {
+      localStorage.setItem('sprintColumn_' + label + '_collapsed', '1');
+    } else {
+      localStorage.removeItem('sprintColumn_' + label + '_collapsed');
+    }
+  } catch (_) {}
+}
+
 function _smgmtBacklogToggle() {
   const pane = document.getElementById('smgmt-backlog-pane');
   const hdr  = document.getElementById('smgmt-backlog-header-row');
@@ -9337,21 +10156,24 @@ function _smgmtRenderBacklog(tickets) {
 function _smgmtBacklogTicketHtml(ticket, sprintNums) {
   const isSelected = _smgmtSelectedIssues.has(ticket.number);
   const hasEstimate = (ticket.labels || []).some(l => /^size-[SMLX]+$/.test(l.name));
+  const backlogLabelNames = (ticket.labels || []).map(l => l.name).join(',');
   return `
     <div class="smgmt-ticket${isSelected ? ' is-selected' : ''}" id="smgmt-ticket-${ticket.number}"
          draggable="true"
          data-issue="${ticket.number}"
          data-sprint=""
+         data-labels="${escHtml(backlogLabelNames)}"
          ondragstart="_smgmtBacklogTicketDragStart(event, ${ticket.number})"
          ondragend="_smgmtTicketDragEnd(event)"
+         onclick="_smgmtRowClick(event, ${ticket.number}, null)"
          oncontextmenu="_smgmtCtxMenuOpen(event,${ticket.number})">
-      <input type="checkbox" class="smgmt-ticket-cb"
+      <input type="checkbox" class="smgmt-ticket-cb" draggable="false"
              ${isSelected ? 'checked' : ''}
              onclick="event.stopPropagation()"
              onchange="_smgmtToggleSelect(${ticket.number}, this.checked)">
       <i class="ti ti-grip-vertical smgmt-ticket-grip"></i>
       <a class="smgmt-ticket-num" href="${escHtml(ticket.url || '#')}" target="_blank"
-         rel="noopener" onclick="event.stopPropagation()">#${ticket.number}</a>
+         rel="noopener" draggable="false" onclick="event.stopPropagation()">#${ticket.number}</a>
       <span class="smgmt-ticket-title" title="${escHtml(ticket.title)}">${escHtml(ticket.title)}</span>
       <button class="smgmt-row-menu-btn" tabindex="0" title="Ticket actions" aria-haspopup="true" aria-expanded="false"
               onclick="event.stopPropagation();_smgmtRowMenuOpen(event, ${ticket.number}, null, ${hasEstimate})"
@@ -9888,6 +10710,257 @@ function _smgmtBoardUnlock() {
   if (_arInterval > 0) _smgmtArStartTicker();
 }
 
+// ── Keyboard navigation for sprint board (issue #549) ────────────────────────
+
+let _smgmtKbFocusedIssue = null;
+
+/** Returns the ordered list of sprint labels currently visible on the board. */
+function _smgmtKbSprintOrder() {
+  if (!_smgmtData) return [];
+  return (_smgmtData.order && _smgmtData.order.length)
+    ? _smgmtData.order
+    : (_smgmtData.sprints || []).map(n => `sprint-${n}`);
+}
+
+/** Returns visible ticket DOM elements in a sprint column (in DOM order). */
+function _smgmtKbColTickets(label) {
+  const container = document.getElementById(`smgmt-tickets-${label}`);
+  if (!container) return [];
+  return Array.from(container.querySelectorAll('.smgmt-ticket[data-issue]'))
+    .filter(el => el.style.display !== 'none');
+}
+
+/** Returns true if any modal, dialog, or dropdown is open. */
+function _smgmtKbAnyModalOpen() {
+  const backdropIds = ['mt-backdrop', 'pf-backdrop', 'ci-backdrop', 'lv-backdrop', 'rr-backdrop', 'gc-backdrop', 'apm-backdrop'];
+  if (backdropIds.some(id => { const el = document.getElementById(id); return el && !el.classList.contains('hidden'); })) return true;
+  const menuIds = ['smgmt-row-menu', 'smgmt-moveto-popup', 'smgmt-ctx-menu', 'smgmt-ar-menu', 'proj-create-menu'];
+  if (menuIds.some(id => { const el = document.getElementById(id); return el && !el.classList.contains('hidden'); })) return true;
+  return false;
+}
+
+/** Move keyboard focus to a ticket by issue number. */
+function _smgmtKbSetFocus(issueNum) {
+  if (_smgmtKbFocusedIssue !== null) {
+    const old = document.getElementById(`smgmt-ticket-${_smgmtKbFocusedIssue}`);
+    if (old) { old.classList.remove('smgmt-kb-focused'); old.tabIndex = -1; }
+  }
+  _smgmtKbFocusedIssue = issueNum;
+  if (issueNum === null) return;
+  const el = document.getElementById(`smgmt-ticket-${issueNum}`);
+  if (!el) { _smgmtKbFocusedIssue = null; return; }
+  el.tabIndex = 0;
+  el.classList.add('smgmt-kb-focused');
+  el.focus({ preventScroll: false });
+  _smgmtKbAnnounce(issueNum, el);
+}
+
+/** Re-apply the focus class after DOM rebuild (called from _smgmtRender). */
+function _smgmtKbRestoreFocus() {
+  if (_smgmtKbFocusedIssue === null) return;
+  const el = document.getElementById(`smgmt-ticket-${_smgmtKbFocusedIssue}`);
+  if (!el) { _smgmtKbFocusedIssue = null; return; }
+  el.tabIndex = 0;
+  el.classList.add('smgmt-kb-focused');
+}
+
+/** Announce focused card details to screen readers via aria-live region. */
+function _smgmtKbAnnounce(issueNum, el) {
+  let live = document.getElementById('smgmt-kb-announce');
+  if (!live) return;
+  const sprint = el.dataset.sprint || '';
+  const sprintName = sprintLabelDisplay(sprint);
+  const titleEl = el.querySelector('.smgmt-ticket-title');
+  const title = titleEl ? titleEl.textContent.trim() : '';
+  const container = el.parentElement;
+  const all = container
+    ? Array.from(container.querySelectorAll('.smgmt-ticket[data-issue]')).filter(t => t.style.display !== 'none')
+    : [];
+  const pos = all.indexOf(el) + 1;
+  live.textContent = '';
+  requestAnimationFrame(() => {
+    live.textContent = `#${issueNum}: ${title}, ${sprintName}, ${pos} of ${all.length}`;
+  });
+}
+
+/** Announce a plain message to screen readers. */
+function _smgmtKbAnnounceMsg(msg) {
+  const live = document.getElementById('smgmt-kb-announce');
+  if (!live) return;
+  live.textContent = '';
+  requestAnimationFrame(() => { live.textContent = msg; });
+}
+
+/** Move the focused ticket to an adjacent sprint (delta: +1 = next, -1 = previous). */
+async function _smgmtKbMoveSprint(delta) {
+  if (_smgmtMoveLock) return;
+  if (_smgmtKbFocusedIssue === null) return;
+  const repo = _smgmtRepo();
+  if (!repo || !_smgmtData) return;
+
+  const issueNum = _smgmtKbFocusedIssue;
+  const focusedEl = document.getElementById(`smgmt-ticket-${issueNum}`);
+  if (!focusedEl) return;
+  const currentSprint = focusedEl.dataset.sprint;
+
+  const sprints = _smgmtKbSprintOrder();
+  const colIdx = sprints.indexOf(currentSprint);
+  if (colIdx < 0) return;
+
+  const targetIdx = colIdx + delta;
+  if (targetIdx < 0 || targetIdx >= sprints.length) {
+    const msg = delta > 0
+      ? 'No next sprint — card is already in the last sprint'
+      : 'No previous sprint — card is already in the first sprint';
+    _smgmtShowToast(msg);
+    _smgmtKbAnnounceMsg(msg);
+    return;
+  }
+
+  const targetLabel = sprints[targetIdx];
+  const targetNum   = parseInt(String(targetLabel).split('-')[1], 10);
+  const fromNum     = parseInt(String(currentSprint).split('-')[1], 10);
+
+  // Optimistic update
+  if (_smgmtData) {
+    const iss = _smgmtData.issues.find(i => i.number === issueNum);
+    if (iss) { iss.sprint = targetNum; iss.sprint_label = targetLabel; }
+    _smgmtRender(_smgmtData);
+  }
+
+  _smgmtBoardLock(`Moving #${issueNum} to ${sprintLabelDisplay(targetLabel)}…`);
+  try {
+    const res = await fetch(`/api/issues/${issueNum}/sprint-label`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sprint_label: targetLabel, project: repo }),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    await loadSprintMgmt();
+    _smgmtKbSetFocus(issueNum);
+    _smgmtShowToast(`Moved #${issueNum} to ${sprintLabelDisplay(targetLabel)}`);
+  } catch (err) {
+    if (_smgmtData) {
+      const iss = _smgmtData.issues.find(i => i.number === issueNum);
+      if (iss) { iss.sprint = fromNum; iss.sprint_label = currentSprint; }
+      _smgmtRender(_smgmtData);
+    }
+    _smgmtShowToast(`Failed to move #${issueNum}: ${err.message}`);
+  } finally {
+    _smgmtBoardUnlock();
+  }
+}
+
+/** Global keydown handler for sprint board keyboard navigation (issue #549). */
+document.addEventListener('keydown', function _smgmtKbKeydown(e) {
+  if (_activeTab !== 'sprint-mgmt') return;
+  if (!_smgmtData) return;
+
+  const isArrow = e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'ArrowLeft' || e.key === 'ArrowRight';
+  if (!isArrow) return;
+
+  // Inert when any modal/dropdown is open
+  if (_smgmtKbAnyModalOpen()) return;
+
+  // Don't steal keys from interactive elements (except ticket divs themselves)
+  const tag = (document.activeElement?.tagName || '').toLowerCase();
+  if (tag === 'input' || tag === 'textarea' || tag === 'select' || tag === 'button' || tag === 'a') return;
+
+  e.preventDefault();
+
+  const sprints = _smgmtKbSprintOrder();
+  if (!sprints.length) return;
+
+  // Shift+ArrowRight/Left: move focused ticket to adjacent sprint
+  if (e.shiftKey) {
+    if (e.key === 'ArrowRight') { _smgmtKbMoveSprint(1); return; }
+    if (e.key === 'ArrowLeft')  { _smgmtKbMoveSprint(-1); return; }
+    return;
+  }
+
+  // No focused ticket yet: focus first ticket of first sprint
+  if (_smgmtKbFocusedIssue === null) {
+    for (const label of sprints) {
+      const tickets = _smgmtKbColTickets(label);
+      if (tickets.length) { _smgmtKbSetFocus(parseInt(tickets[0].dataset.issue, 10)); return; }
+    }
+    return;
+  }
+
+  const focusedEl = document.getElementById(`smgmt-ticket-${_smgmtKbFocusedIssue}`);
+  if (!focusedEl) { _smgmtKbFocusedIssue = null; return; }
+  const currentSprint = focusedEl.dataset.sprint;
+
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    const tickets = _smgmtKbColTickets(currentSprint);
+    if (!tickets.length) return;
+    const idx = tickets.findIndex(t => parseInt(t.dataset.issue, 10) === _smgmtKbFocusedIssue);
+    const next = e.key === 'ArrowDown'
+      ? (idx + 1) % tickets.length
+      : (idx - 1 + tickets.length) % tickets.length;
+    _smgmtKbSetFocus(parseInt(tickets[next].dataset.issue, 10));
+    return;
+  }
+
+  if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+    const colIdx = sprints.indexOf(currentSprint);
+    const delta  = e.key === 'ArrowRight' ? 1 : -1;
+    const nextColIdx = (colIdx + delta + sprints.length) % sprints.length;
+    const nextTickets = _smgmtKbColTickets(sprints[nextColIdx]);
+    if (nextTickets.length) _smgmtKbSetFocus(parseInt(nextTickets[0].dataset.issue, 10));
+    return;
+  }
+});
+
+// ── Search/filter bar (issue #552) ────────────────────────────────────────
+
+function _smgmtFilterApply() {
+  const input = document.getElementById('smgmt-filter-input');
+  const clearBtn = document.getElementById('smgmt-filter-clear-btn');
+  const q = (input ? input.value : '').trim().toLowerCase();
+
+  if (clearBtn) clearBtn.classList.toggle('visible', q.length > 0);
+
+  const allTickets = document.querySelectorAll('#pane-sprint-mgmt .smgmt-ticket[data-issue]');
+  allTickets.forEach(el => {
+    if (!q) { el.style.display = ''; return; }
+    const issueNum = (el.dataset.issue || '').toLowerCase();
+    const titleEl  = el.querySelector('.smgmt-ticket-title');
+    const title    = (titleEl ? titleEl.textContent : '').toLowerCase();
+    const labels   = (el.dataset.labels || '').toLowerCase();
+    el.style.display = (title.includes(q) || issueNum.includes(q) || labels.includes(q)) ? '' : 'none';
+  });
+
+  _smgmtFilterUpdateEmptyStates();
+}
+
+function _smgmtFilterUpdateEmptyStates() {
+  document.querySelectorAll('#smgmt-sprint-list .smgmt-sprint-tickets').forEach(container => {
+    _smgmtFilterHandleContainer(container);
+  });
+  const backlog = document.getElementById('smgmt-backlog-tickets-container');
+  if (backlog) _smgmtFilterHandleContainer(backlog);
+}
+
+function _smgmtFilterHandleContainer(container) {
+  const tickets = Array.from(container.querySelectorAll('.smgmt-ticket[data-issue]'));
+  const allHidden = tickets.length > 0 && tickets.every(t => t.style.display === 'none');
+  let emptyState = container.querySelector('.smgmt-filter-empty-state');
+  if (!emptyState) {
+    emptyState = document.createElement('div');
+    emptyState.className = 'smgmt-filter-empty-state';
+    emptyState.textContent = 'No matching tickets';
+    container.appendChild(emptyState);
+  }
+  emptyState.classList.toggle('visible', allHidden);
+}
+
+function _smgmtFilterClear() {
+  const input = document.getElementById('smgmt-filter-input');
+  if (input) { input.value = ''; input.focus(); }
+  _smgmtFilterApply();
+}
+
 // ── Auto-refresh pill (issue #275) ────────────────────────────────────────
 const _AR_LS_KEY    = 'smgmt-ar-interval';
 const _AR_INTERVALS = [1, 2, 5, 10, 15, 30, 60]; // valid interval values in seconds
@@ -10040,13 +11113,34 @@ function _clearBodyInert() {
 
 // ── New Sprint modal ──────────────────────────────────────────────────────
 function smgmtOpenNewSprint() {
-  document.getElementById('ns-label').value = '';
+  // Prefill with the next sprint number (max + 1, robust against deleted labels).
+  const next = _smgmtGhostComputeNextFree();
+  document.getElementById('ns-label').value = `sprint-${next}`;
+  const countEl = document.getElementById('ns-count');
+  if (countEl) countEl.value = '1';
+  _nsUpdateHint();
   document.getElementById('ns-error').classList.add('hidden');
-  document.getElementById('ns-submit-btn').disabled = true;
+  const submitBtn = document.getElementById('ns-submit-btn');
+  submitBtn.disabled = false;
+  submitBtn.textContent = 'Create Sprint';
   _setBodyInert(['ns-backdrop', 'ns-modal']);
   document.getElementById('ns-backdrop').classList.remove('hidden');
   document.getElementById('ns-modal').classList.remove('hidden');
-  document.getElementById('ns-label').focus();
+  const inp = document.getElementById('ns-label');
+  inp.focus();
+  inp.select();
+}
+
+// Show which sprint labels will be created given the start + count.
+function _nsUpdateHint() {
+  const hintEl = document.getElementById('ns-hint');
+  if (!hintEl) return;
+  const start = _parseSprintNum(document.getElementById('ns-label').value || '');
+  const count = parseInt((document.getElementById('ns-count') || {}).value || '1', 10);
+  if (start === null) { hintEl.textContent = ''; return; }
+  const labels = [];
+  for (let i = 0; i < count; i++) labels.push(`sprint-${start + i}`);
+  hintEl.textContent = count > 1 ? `Will create: ${labels.join(', ')}` : '';
 }
 
 function _nsClose(force) {
@@ -10358,6 +11452,7 @@ function _setupModals() {
         closeAddProjectModal();
       } else if (_smgmtSelectedIssues.size > 0) {
         // Clear multi-select when Escape pressed and no modal is open
+        _smgmtCloseMoveToMenu();
         _smgmtClearSelection();
       }
     }
@@ -10366,7 +11461,9 @@ function _setupModals() {
   // ── New Sprint modal wiring ──
   document.getElementById('ns-label').addEventListener('input', function() {
     document.getElementById('ns-submit-btn').disabled = _parseSprintNum(this.value) === null;
+    _nsUpdateHint();
   });
+  document.getElementById('ns-count').addEventListener('change', _nsUpdateHint);
 
   document.getElementById('rr-close-btn').addEventListener('click', _rrClose);
   document.getElementById('rr-cancel-btn').addEventListener('click', _rrClose);
@@ -10379,8 +11476,9 @@ function _setupModals() {
 
   document.getElementById('ns-submit-btn').addEventListener('click', async function() {
     const labelVal = (document.getElementById('ns-label').value || '').trim();
-    const sprintNum = _parseSprintNum(labelVal);
-    if (sprintNum === null) return;
+    const startNum = _parseSprintNum(labelVal);
+    if (startNum === null) return;
+    const count = parseInt((document.getElementById('ns-count') || {}).value || '1', 10);
 
     const repo = _cachedFullRepo[_slug] || null;
     if (!repo) { _nsShowError('Project not found — please reload the page.'); return; }
@@ -10389,15 +11487,23 @@ function _setupModals() {
     this.textContent = 'Creating…';
     document.getElementById('ns-error').classList.add('hidden');
 
+    // Create count sequential sprints starting at startNum. A number that already
+    // exists (409) is skipped rather than aborting the batch.
+    const created = [];
     try {
-      const resp = await fetch('/api/sprints/create', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ project: repo, sprint_number: sprintNum }),
-      });
-      if (!resp.ok) {
-        const data = await resp.json().catch(() => ({}));
-        throw new Error(data.detail || 'HTTP ' + resp.status);
+      for (let i = 0; i < count; i++) {
+        const num = startNum + i;
+        const resp = await fetch('/api/sprints/create', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ project: repo, sprint_number: num }),
+        });
+        if (resp.status === 409) continue;  // already exists — skip
+        if (!resp.ok) {
+          const data = await resp.json().catch(() => ({}));
+          throw new Error(data.detail || 'HTTP ' + resp.status);
+        }
+        created.push(num);
       }
       document.getElementById('ns-backdrop').classList.add('hidden');
       document.getElementById('ns-modal').classList.add('hidden');
@@ -10675,23 +11781,32 @@ function _bcPopulateRepo() {
   }
 }
 
+// Highlight a single chip (1=Input, 2=Review, 3=Created, 4=Estimate) and mark
+// earlier chips as completed so the rail reads as a progress trail.
+function _bcSetActiveChip(n) {
+  for (let i = 1; i <= 4; i++) {
+    const chip = document.getElementById(`bc-chip-${i}`);
+    if (!chip) continue;
+    chip.classList.toggle('active', i === n);
+    chip.classList.toggle('done', i < n);
+  }
+}
+
 function _bcShowStep(n) {
   const step1 = document.getElementById('bc-step1');
   const step2 = document.getElementById('bc-step2');
-  const chip1 = document.getElementById('bc-chip-1');
-  const chip2 = document.getElementById('bc-chip-2');
-  if (!step1 || !step2 || !chip1 || !chip2) return;
+  if (!step1 || !step2) return;
 
   if (n === 1) {
     step1.classList.remove('hidden');
     step2.classList.add('hidden');
-    chip1.classList.add('active');
-    chip2.classList.remove('active');
+    _bcSetActiveChip(1);
   } else {
     step1.classList.add('hidden');
     step2.classList.remove('hidden');
-    chip1.classList.remove('active');
-    chip2.classList.add('active');
+    // The active chip within step 2 (Review/Created/Estimate) is derived from
+    // job state in _bcRenderStep2.
+    _bcSetActiveChip(2);
   }
 }
 
@@ -11346,9 +12461,9 @@ function _bcUpdateBadge() {
     badge.className = 'bc-tab-badge';
     badge.innerHTML = `<span class="bc-tab-badge-spin">&#x27F3;</span>${fullyDone}/${total}`;
   } else if (job.status === 'drafts_ready') {
-    const draftCount = tickets.filter(t => t.state === 'draft_ready').length;
-    badge.className = 'bc-tab-badge';
-    badge.textContent = `${draftCount} ready`;
+    const draftReady = tickets.filter(t => t.state === 'draft_ready').length;
+    badge.className = 'bc-tab-badge bc-tab-badge--ready';
+    badge.textContent = draftReady > 0 ? `${draftReady} to review` : 'review';
   } else if (job.status === 'done' || job.status === 'stopped') {
     const issues = failed + sizeWarn + estimateFailed;
     if (issues > 0) {
@@ -11420,6 +12535,19 @@ function _bcRenderStep2() {
   const total        = tickets.length;
   // Terminal states: sized, estimate_failed, failed, skipped
   const fullyDone    = sized + estimateFailed + failed + skipped;
+
+  // Drive the step rail (Input → Review → Created → Estimate) from job state.
+  const anyCreated   = created > 0 || estimating > 0 || sized > 0 || estimateFailed > 0;
+  const anyEstimate  = estimating > 0 || sized > 0 || estimateFailed > 0;
+  if (job.status === 'drafts_ready') {
+    _bcSetActiveChip(2);                 // waiting on user review
+  } else if (anyEstimate) {
+    _bcSetActiveChip(4);                 // estimation underway / done
+  } else if (anyCreated) {
+    _bcSetActiveChip(3);                 // issues being created
+  } else {
+    _bcSetActiveChip(2);                 // BA still drafting → review phase
+  }
 
   // Banner
   const banner = document.getElementById('bc-parallel-banner');
@@ -12293,6 +13421,241 @@ function _smOnChange(sel) {
   localStorage.setItem(SM_STORAGE_KEY, JSON.stringify(saved));
 }
 
+// ── Sprint status pill (GitHub-backed; works cross-machine while traveling) ──
+let _snavState = null;
+let _snavPanelOpen = false;
+
+function _snavRepo() {
+  return _cachedFullRepo[_slug] || '';
+}
+
+async function snavRefresh() {
+  const repo = _snavRepo();
+  if (!repo) return;
+  try {
+    const res = await fetch(`/api/sprint-nav-status?repo=${encodeURIComponent(repo)}`);
+    if (!res.ok) return;
+    _snavState = await res.json();
+    _snavRenderPill();
+    if (_snavPanelOpen) _snavRenderPanel();
+  } catch (_) { /* leave last-known pill state */ }
+}
+
+function _snavRenderPill() {
+  const pill = document.getElementById('snav-pill');
+  const dot  = document.getElementById('snav-dot');
+  const text = document.getElementById('snav-pill-text');
+  if (!pill || !dot || !text) return;
+  const d = _snavState;
+  if (!d || !d.has_sprint) { pill.classList.add('hidden'); return; }
+  pill.classList.remove('hidden');
+  if (d.state === 'finished') {
+    dot.className = 'snav-dot snav-dot--finished';
+    text.textContent = `S${d.sprint} · done`;
+  } else {
+    dot.className = 'snav-dot snav-dot--running';
+    // UAT counts as "done" — this project tracks UAT (awaiting sign-off) as the
+    // completed state, not a separate closed state.
+    const completed = (d.done || 0) + (d.uat || 0);
+    const uatHtml = d.uat > 0 ? ` · <span class="snav-uat">${d.uat} UAT</span>` : '';
+    text.innerHTML = `S${d.sprint} · ${completed}/${d.total}${uatHtml}`;
+  }
+}
+
+function snavTogglePanel(event) {
+  if (event) event.stopPropagation();
+  const panel = document.getElementById('snav-panel');
+  if (!panel) return;
+  _snavPanelOpen = panel.classList.contains('hidden'); // true if we're opening it
+  panel.classList.toggle('hidden');
+  if (_snavPanelOpen) _snavRenderPanel();
+}
+
+function _snavRenderPanel() {
+  const head = document.getElementById('snav-panel-head');
+  const body = document.getElementById('snav-panel-body');
+  const d = _snavState;
+  if (!head || !body) return;
+  if (!d || !d.has_sprint) {
+    head.textContent = 'Sprint status';
+    body.innerHTML = '<span class="snav-muted">No sprint found on GitHub yet.</span>';
+    return;
+  }
+  const finished = d.state === 'finished';
+  head.innerHTML = `<span>Sprint ${d.sprint} · ${finished ? 'Finished' : 'Running'}</span>`
+    + (d.summary_issue
+        ? `<a class="snav-link" href="${escHtml(d.summary_issue.url)}" target="_blank" rel="noopener">Issue ↗</a>`
+        : '');
+
+  const cols  = d.columns || {};
+  const total = d.total || 0;
+
+  // Stats row: ticket totals, plus total time once the summary loads (finished).
+  const statsRow = `<div class="snav-stats">
+    <div class="snav-stat"><span class="snav-stat-val">${total}</span><span class="snav-stat-lbl">tickets</span></div>
+    <div class="snav-stat"><span class="snav-stat-val">${(d.done || 0) + (d.uat || 0)}</span><span class="snav-stat-lbl">done</span></div>
+    <div class="snav-stat"><span class="snav-stat-val snav-uat">${d.uat || 0}</span><span class="snav-stat-lbl">in UAT</span></div>
+    ${finished ? `<div class="snav-stat" id="snav-duration"><span class="snav-stat-val">…</span><span class="snav-stat-lbl">total time</span></div>` : ''}
+  </div>`;
+
+  const tail = (finished && d.summary_issue)
+    ? `<div class="snav-summary-md md-body" id="snav-summary-md"><span class="snav-muted">Loading summary…</span></div>`
+    : `<div class="snav-muted" style="margin-top:8px;">Live progress is inferred from GitHub labels (≈30s). The sprint itself runs on the Mac mini.</div>`;
+
+  body.innerHTML = statsRow + _snavDonutHtml(cols, total) + tail;
+
+  if (finished && d.summary_issue) _snavLoadSummary(d.summary_issue.number);
+}
+
+// Donut chart of the sprint's tickets by workflow column, with a legend.
+function _snavDonutHtml(cols, total) {
+  const segs = [
+    { key: 'done',        label: 'Done',        color: '#16a34a' },
+    { key: 'uat',         label: 'UAT',         color: '#f59e0b' },
+    { key: 'sit',         label: 'SIT',         color: '#8b5cf6' },
+    { key: 'in-progress', label: 'In progress', color: '#2563eb' },
+    { key: 'backlog',     label: 'Backlog',     color: '#94a3b8' },
+  ];
+  const r = 42, cx = 50, cy = 50, circ = 2 * Math.PI * r;
+  let offset = 0, circles = '';
+  if (total > 0) {
+    segs.forEach(s => {
+      const v = cols[s.key] || 0;
+      if (v <= 0) return;
+      const len = (v / total) * circ;
+      circles += `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${s.color}" stroke-width="14"`
+        + ` stroke-dasharray="${len.toFixed(2)} ${(circ - len).toFixed(2)}" stroke-dashoffset="${(-offset).toFixed(2)}"`
+        + ` transform="rotate(-90 ${cx} ${cy})"></circle>`;
+      offset += len;
+    });
+  } else {
+    circles = `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="var(--surface-2)" stroke-width="14"></circle>`;
+  }
+  // UAT counts as done (project tracks UAT as the completed state).
+  const donePct = total > 0 ? Math.round(((cols.done || 0) + (cols.uat || 0)) / total * 100) : 0;
+  const legend = segs.filter(s => (cols[s.key] || 0) > 0).map(s => {
+    const v = cols[s.key] || 0;
+    const pct = total > 0 ? Math.round(v / total * 100) : 0;
+    return `<div class="snav-legend-row">
+      <span class="snav-legend-dot" style="background:${s.color}"></span>
+      <span class="snav-legend-label">${s.label}</span>
+      <span class="snav-legend-val">${v} · ${pct}%</span>
+    </div>`;
+  }).join('');
+  return `<div class="snav-donut-wrap">
+    <div class="snav-donut">
+      <svg viewBox="0 0 100 100" width="92" height="92" aria-hidden="true">${circles}</svg>
+      <div class="snav-donut-center"><span class="snav-donut-pct">${donePct}%</span><span class="snav-donut-sub">done</span></div>
+    </div>
+    <div class="snav-legend">${legend || '<span class="snav-muted">No tickets</span>'}</div>
+  </div>`;
+}
+
+function _snavExtractDuration(md) {
+  const m = (md || '').match(/\|\s*Duration\s*\|\s*([^|]+?)\s*\|/i);
+  return m ? m[1].trim() : '';
+}
+
+async function _snavLoadSummary(number) {
+  const el = document.getElementById('snav-summary-md');
+  const repo = _snavRepo();
+  try {
+    const res = await fetch(`/api/sprint-nav-summary?number=${number}&repo=${encodeURIComponent(repo)}`);
+    if (!res.ok) { if (el) el.innerHTML = '<span class="snav-muted">Could not load summary.</span>'; return; }
+    const data = await res.json();
+    const bodyMd = data.body || '';
+    if (el) el.innerHTML = _mdToHtml(bodyMd) || '<span class="snav-muted">(empty summary)</span>';
+    // Total time stat — read "Duration" straight from the summary table.
+    const durEl = document.getElementById('snav-duration');
+    if (durEl) {
+      const dur = _snavExtractDuration(bodyMd);
+      const valEl = durEl.querySelector('.snav-stat-val');
+      if (valEl) valEl.textContent = dur || '—';
+    }
+  } catch (_) {
+    if (el) el.innerHTML = '<span class="snav-muted">Could not load summary.</span>';
+  }
+}
+
+// ── Minimal markdown → HTML (sprint summaries: headings, bold/italic/code,
+//    links, lists, GitHub tables, hr). Input is escaped first, so it is safe
+//    to inject. Not full CommonMark — only what summaries use. ──
+function _mdInline(s) {
+  return s
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+    .replace(/(^|[^*])\*([^*\s][^*]*)\*/g, '$1<em>$2</em>')
+    .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+}
+function _mdToHtml(md) {
+  const lines = escHtml(md || '').split('\n');
+  const out = [];
+  const isTableSep = (s) => /^\s*\|?[\s:|-]*-[\s:|-]*\|?\s*$/.test(s || '');
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+
+    if (/^```/.test(line.trim())) {
+      const buf = [];
+      i++;
+      while (i < lines.length && !/^```/.test(lines[i].trim())) { buf.push(lines[i]); i++; }
+      i++;
+      out.push(`<pre class="md-pre"><code>${buf.join('\n')}</code></pre>`);
+      continue;
+    }
+
+    if (line.includes('|') && isTableSep(lines[i + 1])) {
+      const parseRow = (r) => r.trim().replace(/^\||\|$/g, '').split('|').map(c => c.trim());
+      const headers = parseRow(line);
+      i += 2;
+      const rows = [];
+      while (i < lines.length && lines[i].includes('|') && lines[i].trim() !== '') { rows.push(parseRow(lines[i])); i++; }
+      const th = headers.map(h => `<th>${_mdInline(h)}</th>`).join('');
+      const trs = rows.map(c => `<tr>${c.map(x => `<td>${_mdInline(x)}</td>`).join('')}</tr>`).join('');
+      out.push(`<table class="md-table"><thead><tr>${th}</tr></thead><tbody>${trs}</tbody></table>`);
+      continue;
+    }
+
+    const h = line.match(/^(#{1,6})\s+(.*)$/);
+    if (h) { const lvl = Math.min(6, h[1].length); out.push(`<h${lvl} class="md-h">${_mdInline(h[2])}</h${lvl}>`); i++; continue; }
+
+    if (/^\s*([-*_])(\s*\1){2,}\s*$/.test(line)) { out.push('<hr class="md-hr">'); i++; continue; }
+
+    if (/^\s*[-*]\s+/.test(line)) {
+      const items = [];
+      while (i < lines.length && /^\s*[-*]\s+/.test(lines[i])) { items.push(`<li>${_mdInline(lines[i].replace(/^\s*[-*]\s+/, ''))}</li>`); i++; }
+      out.push(`<ul class="md-ul">${items.join('')}</ul>`);
+      continue;
+    }
+
+    if (/^\s*\d+\.\s+/.test(line)) {
+      const items = [];
+      while (i < lines.length && /^\s*\d+\.\s+/.test(lines[i])) { items.push(`<li>${_mdInline(lines[i].replace(/^\s*\d+\.\s+/, ''))}</li>`); i++; }
+      out.push(`<ol class="md-ol">${items.join('')}</ol>`);
+      continue;
+    }
+
+    if (line.trim() === '') { i++; continue; }
+
+    const para = [];
+    while (i < lines.length && lines[i].trim() !== '' && !/^```/.test(lines[i].trim())
+           && !/^(#{1,6})\s+/.test(lines[i]) && !/^\s*[-*]\s+/.test(lines[i]) && !/^\s*\d+\.\s+/.test(lines[i])
+           && !(lines[i].includes('|') && isTableSep(lines[i + 1]))) {
+      para.push(lines[i]); i++;
+    }
+    out.push(`<p class="md-p">${_mdInline(para.join(' '))}</p>`);
+  }
+  return out.join('\n');
+}
+
+// Close the panel when clicking outside it.
+document.addEventListener('click', function(e) {
+  const wrap  = document.querySelector('.snav-wrap');
+  const panel = document.getElementById('snav-panel');
+  if (!wrap || !panel || panel.classList.contains('hidden')) return;
+  if (!wrap.contains(e.target)) { panel.classList.add('hidden'); _snavPanelOpen = false; }
+});
+
 document.addEventListener('DOMContentLoaded', init);
 
 // ── Logs Tab (issue #420) ─────────────────────────────────────────────────────
@@ -13076,6 +14439,10 @@ function _cmpEmptyState(title, msg) {
 <!-- ── Per-row ≡ actions menu (issue #275 follow-up) ── -->
 <div class="smgmt-row-menu hidden" id="smgmt-row-menu" role="menu" aria-label="Ticket actions"></div>
 
+<!-- ── Keyboard navigation screen-reader announce region (issue #549) ── -->
+<div id="smgmt-kb-announce" aria-live="polite" aria-atomic="true"
+     style="position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0;"></div>
+
 <!-- ── "Move to" modal (issue #275 follow-up) ── -->
 <div class="modal-backdrop hidden" id="mt-backdrop" onclick="_smgmtMoveToModalClose()"></div>
 <div class="modal mt-modal hidden" id="mt-modal"
@@ -13177,10 +14544,19 @@ function _cmpEmptyState(title, msg) {
   </div>
   <div class="modal-body">
     <div class="modal-field">
-      <label class="modal-label" for="ns-label">Sprint label <span style="color:var(--red)">*</span></label>
+      <label class="modal-label" for="ns-label">Starting sprint <span style="color:var(--red)">*</span></label>
       <input class="modal-input" id="ns-label" type="text"
              placeholder="e.g. Sprint 25 or sprint-25"
              aria-required="true">
+      <div class="modal-hint" id="ns-hint" style="font-size:11px;color:var(--text-muted);margin-top:4px;"></div>
+    </div>
+    <div class="modal-field">
+      <label class="modal-label" for="ns-count">How many (ahead)</label>
+      <select class="modal-input" id="ns-count">
+        <option value="1" selected>1 sprint</option>
+        <option value="2">2 sprints</option>
+        <option value="3">3 sprints</option>
+      </select>
     </div>
     <div class="modal-error hidden" id="ns-error"></div>
   </div>

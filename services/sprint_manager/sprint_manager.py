@@ -96,6 +96,38 @@ REPO_ROOT     = Path(__file__).parent.parent.parent
 DASHBOARD_DIR = REPO_ROOT / "apps" / "dashboard"
 SCRIPTS_DIR   = REPO_ROOT / "scripts"
 
+
+def _load_agent_persona(role: str, base_dir: "Path | None" = None) -> str:
+    """Return the .claude/agents/<role>.md persona (minus YAML frontmatter).
+
+    A headless ``claude -p`` run does NOT auto-load project subagents and cannot
+    use the interactive ``/coder`` // ``/tester`` slash commands, so without this
+    the dispatched agent runs with only a terse inline prompt — markedly weaker
+    than a manual session that delegates to the rich subagent persona. We read
+    the same .md the interactive agent uses and pass it via --append-system-prompt.
+
+    Looks in ``base_dir`` (the clone the agent runs in) first, then REPO_ROOT.
+    Returns "" if not found, so callers degrade gracefully to the old behaviour.
+    """
+    candidates = []
+    if base_dir is not None:
+        candidates.append(Path(base_dir) / ".claude" / "agents" / f"{role}.md")
+    candidates.append(REPO_ROOT / ".claude" / "agents" / f"{role}.md")
+    for path in candidates:
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        # Strip leading YAML frontmatter (--- ... ---) if present.
+        if text.startswith("---"):
+            end = text.find("\n---", 3)
+            if end != -1:
+                text = text[end + 4:]
+        text = text.strip()
+        if text:
+            return text
+    return ""
+
 sys.path.insert(0, str(REPO_ROOT))      # allow `from services.*` imports
 sys.path.insert(0, str(DASHBOARD_DIR))
 from dotenv import load_dotenv
@@ -2078,13 +2110,18 @@ def _dispatch_coder(
     if failure_suffix:
         prompt = prompt + failure_suffix
 
+    # Give the headless run the same coder persona an interactive /coder session
+    # would (subagents/slash-commands don't load in `claude -p`). Keep `-p PROMPT`
+    # last so the later `cmd[-1] += sprint_hint` append still targets the prompt.
     cmd = [
         "claude",
         "--model", "claude-sonnet-4-6",
         "--dangerously-skip-permissions",
-        "-p",
-        prompt,
     ]
+    coder_persona = _load_agent_persona("coder", cwd_path)
+    if coder_persona:
+        cmd += ["--append-system-prompt", coder_persona]
+    cmd += ["-p", prompt]
 
     # Build subprocess environment: inherit current env, set COMMANDER_MERGE_TARGET
     # when in sprint mode (AC2), COMMANDER_APP_PORT if a port was chosen (issue #62),
@@ -2092,6 +2129,7 @@ def _dispatch_coder(
     # COMMANDER_SPRINT_RUNNING so child scripts enforce RUN_MUTABLE_LABELS (issue #506).
     sub_env = os.environ.copy()
     sub_env.pop("ANTHROPIC_API_KEY", None)
+    sub_env["CLAUDE_AGENT_ROLE"] = "coder"  # tag hooks/telemetry as the docs prescribe
     if eff_repo:
         sub_env["COMMANDER_PROJECT"] = eff_repo
     if sprint_label:
@@ -2319,13 +2357,16 @@ def _dispatch_tester(
             " Do not run update_ticket.py, gh issue edit --add-label, or any other"
             " label-mutation command."
         )
+    # Same persona fix as the coder: load the tester subagent for the headless run.
     cmd = [
         "claude",
         "--model", "claude-sonnet-4-6",
         "--dangerously-skip-permissions",
-        "-p",
-        prompt,
     ]
+    tester_persona = _load_agent_persona("tester", cwd_path)
+    if tester_persona:
+        cmd += ["--append-system-prompt", tester_persona]
+    cmd += ["-p", prompt]
 
     # Build subprocess environment: inherit current env, set COMMANDER_MERGE_TARGET
     # when in sprint mode (AC2), COMMANDER_APP_PORT if a port was chosen (issue #62),
@@ -2333,6 +2374,7 @@ def _dispatch_tester(
     # COMMANDER_SPRINT_RUNNING so child scripts enforce RUN_MUTABLE_LABELS (issue #506).
     sub_env = os.environ.copy()
     sub_env.pop("ANTHROPIC_API_KEY", None)
+    sub_env["CLAUDE_AGENT_ROLE"] = "tester"  # tag hooks/telemetry as the docs prescribe
     if eff_repo:
         sub_env["COMMANDER_PROJECT"] = eff_repo
     if sprint_label:

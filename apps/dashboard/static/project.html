@@ -1342,6 +1342,11 @@
       display: flex; align-items: center; gap: 8px;
       padding: 9px 16px; background: var(--surface); font-size: 12px;
       cursor: default; transition: background 0.15s, box-shadow 0.12s;
+      /* WebKit/Safari starts a TEXT selection instead of an element drag when a
+         draggable="true" row contains selectable text, so dragging silently
+         fails (Chrome drags fine). Suppressing text selection lets the native
+         drag initiate. The #num link/title remain clickable. */
+      -webkit-user-select: none; user-select: none;
     }
     .smgmt-ticket:hover { background: var(--surface-hover); }
     .smgmt-ticket[draggable="true"]:hover { cursor: grab; }
@@ -2859,6 +2864,51 @@
     }
     .bc-step-chip.active .bc-step-n { background: rgba(255,255,255,.22); }
     .bc-step-arrow { color: var(--text-sub); font-size: 13px; }
+
+    /* Review & Create sub-stage rail (right side of the Step 2 footer) */
+    .bc-stage-rail {
+      display: inline-flex; align-items: center; gap: 6px;
+      font-size: 11px; font-family: var(--mono); margin-right: 8px;
+    }
+    .bc-stage-chip {
+      display: inline-flex; align-items: center; gap: 5px;
+      padding: 3px 9px; border-radius: 999px;
+      background: var(--surface-2); color: var(--text-muted);
+      transition: background .15s, color .15s; white-space: nowrap;
+    }
+    .bc-stage-chip.active { background: var(--text); color: var(--surface); }
+    .bc-stage-chip.done { color: var(--accent, #16a34a); }
+    .bc-stage-chip.done .bc-stage-n { background: var(--accent, #16a34a); color: #fff; }
+    .bc-stage-chip--clickable.done { cursor: pointer; }
+    .bc-stage-chip--clickable.done:hover { background: var(--surface-3, var(--surface-2)); }
+    .bc-stage-n {
+      width: 15px; height: 15px; border-radius: 50%;
+      background: rgba(0,0,0,.10);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 9px; flex-shrink: 0;
+    }
+    .bc-stage-chip.active .bc-stage-n { background: rgba(255,255,255,.22); }
+    .bc-stage-sep { color: var(--text-sub); font-size: 12px; }
+
+    /* Draft-card size pill (pre-post estimate) */
+    .bc-size-pill {
+      display: inline-flex; align-items: center; gap: 4px;
+      padding: 1px 7px; border-radius: 999px;
+      font-size: 10px; font-weight: 700; font-family: var(--mono);
+      background: var(--surface-2); color: var(--text-sub);
+    }
+    .bc-size-pill--S  { background: var(--green-bg); color: var(--green); }
+    .bc-size-pill--M  { background: var(--blue-bg);  color: var(--blue); }
+    .bc-size-pill--L  { background: var(--amber-bg); color: var(--amber); }
+    .bc-size-pill--XL { background: var(--red-bg);   color: var(--red); }
+    .bc-size-pill--est { color: var(--text-sub); font-weight: 600; }
+    .bc-size-pill--failed { background: var(--red-bg); color: var(--red); font-weight: 600; }
+    .bc-size-spin {
+      width: 9px; height: 9px; border-radius: 50%;
+      border: 2px solid var(--border); border-top-color: var(--text-sub);
+      display: inline-block; animation: bc-size-spin .7s linear infinite;
+    }
+    @keyframes bc-size-spin { to { transform: rotate(360deg); } }
 
     /* Settings bar */
     .bc-settings-bar {
@@ -4649,7 +4699,7 @@
           <div id="bc-dup-warning" class="bc-dup-warning hidden"></div>
 
           <div class="bc-info-note" id="bc-info-note">
-            Split prompts using <code>---</code> on its own line. All created tickets go to backlog &mdash; assign them to a sprint later via Sprint Mgmt.
+            Split prompts using <code>---</code> on its own line. You'll review drafts, see their estimates, and pick a Sprint before posting.
           </div>
 
           <!-- Prompt templates (issue #531) -->
@@ -4816,11 +4866,25 @@
               <span class="bc-hint">Job continues if you switch tabs.</span>
             </div>
             <div class="bc-step-actions-right">
+              <div class="bc-stage-rail" id="bc-stage-rail" role="list" aria-label="Review &amp; create stages">
+                <span class="bc-stage-chip" id="bc-stage-1" role="listitem"><span class="bc-stage-n">1</span> Draft</span>
+                <i class="ti ti-chevron-right bc-stage-sep"></i>
+                <span class="bc-stage-chip" id="bc-stage-2" role="listitem"><span class="bc-stage-n">2</span> Estimate</span>
+                <i class="ti ti-chevron-right bc-stage-sep"></i>
+                <span class="bc-stage-chip bc-stage-chip--clickable" id="bc-stage-3" role="listitem" tabindex="0"
+                      onclick="bcGoToSprintStage()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();bcGoToSprintStage();}"><span class="bc-stage-n">3</span> Sprint</span>
+                <i class="ti ti-chevron-right bc-stage-sep"></i>
+                <span class="bc-stage-chip" id="bc-stage-4" role="listitem"><span class="bc-stage-n">4</span> Post</span>
+              </div>
+              <select class="bc-select hidden" id="bc-sprint" aria-label="Target sprint">
+                <option value="">Backlog (no sprint)</option>
+              </select>
               <button type="button" class="bc-btn-retry-all hidden" id="bc-retry-all-btn" onclick="bcRetryAllFailed()">Retry all failed (0)</button>
               <button type="button" class="bc-stop-btn" id="bc-stop-btn" onclick="bcStop()">
                 <i class="ti ti-player-stop"></i> Stop after current
               </button>
-              <button type="button" class="btn-secondary hidden" id="bc-review-post-btn" onclick="bcReviewAndPost()">Review &amp; Post</button>
+              <button type="button" class="btn-primary hidden" id="bc-continue-btn" onclick="bcConfirmSprint()">Continue &rarr;</button>
+              <button type="button" class="btn-primary hidden" id="bc-review-post-btn" onclick="bcReviewAndPost()">Post Selected</button>
               <button type="button" class="btn-primary" id="bc-done-btn" disabled>Running...</button>
             </div>
           </div>
@@ -11990,6 +12054,12 @@ async function _smgmtArDoRefresh() {
 /** Fires every second: count down, refresh when we reach zero. */
 function _smgmtArTick() {
   if (_smgmtMoveLock) return; // freeze the countdown while a ticket move is in flight
+  // Freeze while a drag is in progress: a mid-drag board re-render (this tick
+  // calls loadSprintMgmt → _smgmtRenderBacklog, which rebuilds the rows via
+  // innerHTML) replaces the dragged DOM node, and the browser immediately
+  // cancels the drag. With a short refresh interval that clobbers nearly every
+  // attempt, making the board feel permanently un-draggable in all browsers.
+  if (_smgmtDragTicket) return;
   _arRemaining -= 1;
   if (_arRemaining <= 0) {
     _arRemaining = _arInterval;
@@ -13009,6 +13079,10 @@ let _bcDupTimer      = null;
 let _bcDragSrcIdx    = null;        // HTML5 drag source row index
 let _bcTouchSrcIdx   = null;        // touch drag source row index
 let _bcTouchGhost    = null;        // floating ghost element during touch drag
+let _bcSprintConfirmed = false;     // Sprint stage → Post stage gate
+let _bcPosting         = false;     // true while posting to GitHub (→ jump to Sprint Mgmt on done)
+let _bcSprintsLoadedFor = null;     // repo the Sprint dropdown was last populated for
+let _bcReestimateTimers = {};       // index -> debounce timer for auto re-estimate on edit
 let _bcWarnDismissed = false;       // true after user dismisses the prompt-size warning (issue #568)
 let _bcSkipLint  = false;           // set true when user clicks "Proceed anyway" on linter warning
 let _bcLintToPost = null;           // tickets pending post while lint overlay is shown
@@ -13138,9 +13212,98 @@ function _bcGoToStep1() {
   _bcShowStep(1);
 }
 
+// ── Review & Create sub-stages (Draft → Estimate → Sprint → Post) ─────────────
+
+/** Current stage of the Review & Create flow: 1..4 | 'posting' | 'done'. */
+function _bcComputeStage(job) {
+  if (!job) return 1;
+  if (job.status === 'done') return 'done';
+  if (_bcPosting) return 'posting';
+  const active = (job.tickets || []).filter(t => !_bcRemovedRows.has(t.index));
+  // ① Draft — any ticket still being generated by the BA. A stopped job won't
+  // make further progress, so its leftover pending tickets don't hold stage ①.
+  if (job.status !== 'stopped' && active.some(t => t.state === 'pending' || t.state === 'drafting')) return 1;
+  // ② Estimate — drafts are ready but some haven't been sized yet.
+  const draftable = active.filter(t => t.state === 'draft_ready');
+  if (draftable.some(t => !t.estimate_state || t.estimate_state === 'estimating')) return 2;
+  // ③ Sprint until confirmed, then ④ Post.
+  return _bcSprintConfirmed ? 4 : 3;
+}
+
+/** Light up the 4-stage rail for the current stage. */
+function _bcUpdateStageRail(stage) {
+  const cur = (stage === 'posting' || stage === 'done') ? 4 : stage;
+  const allDone = stage === 'done';
+  for (let i = 1; i <= 4; i++) {
+    const chip = document.getElementById(`bc-stage-${i}`);
+    if (!chip) continue;
+    const isActive = !allDone && stage !== 'posting' && i === cur;
+    const isDone = allDone || i < cur || (stage === 'posting' && i <= cur);
+    chip.classList.toggle('active', isActive);
+    chip.classList.toggle('done', isDone && !isActive);
+  }
+}
+
+/** Populate the Sprint dropdown once per repo when the Sprint stage opens. */
+function _bcEnsureSprintsLoaded(job) {
+  const repo = job && job.repo;
+  if (!repo || _bcSprintsLoadedFor === repo) return;
+  _bcSprintsLoadedFor = repo;
+  _bcLoadSprints(repo);
+}
+
+/** Sprint stage → Post stage. */
+function bcConfirmSprint() {
+  _bcSprintConfirmed = true;
+  _bcRenderStep2();
+}
+
+/** Post stage → back to Sprint stage (via the clickable Sprint chip). */
+function bcGoToSprintStage() {
+  if (!_bcSprintConfirmed) return;  // chip only acts once we're past Sprint
+  _bcSprintConfirmed = false;
+  _bcRenderStep2();
+}
+
 function bcRepoChanged() {
   _bcTplRender();
   _lpRenderBc();
+}
+
+/** Populate the Sprint dropdown for the selected repo (issue: bulk-create sprint assignment).
+ *  Lists existing sprints (flagging empty ones) plus a "New sprint (N+1)" option. */
+async function _bcLoadSprints(repo) {
+  const sel = document.getElementById('bc-sprint');
+  if (!sel) return;
+  const prev = sel.value;
+  if (!repo) {
+    sel.innerHTML = '<option value="">Backlog (no sprint)</option>';
+    return;
+  }
+  try {
+    const resp = await fetch('/api/sprint-management/issues?repo=' + encodeURIComponent(repo));
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const data = await resp.json();
+    const sprints = (data.sprints || []).slice().sort((a, b) => a - b);
+    const counts = {};
+    (data.issues || []).forEach(i => {
+      if (i.sprint != null) counts[i.sprint] = (counts[i.sprint] || 0) + 1;
+    });
+    const placeholder = data.placeholder_sprint
+      || ((sprints.length ? Math.max(...sprints) : 0) + 1);
+    let html = '<option value="">Backlog (no sprint)</option>';
+    sprints.forEach(n => {
+      const c = counts[n] || 0;
+      const tag = c === 0 ? ' · empty' : ` · ${c} ticket${c !== 1 ? 's' : ''}`;
+      html += `<option value="sprint-${n}">Sprint ${n}${tag}</option>`;
+    });
+    html += `<option value="NEW">➕ New sprint (Sprint ${placeholder})</option>`;
+    sel.innerHTML = html;
+    // Preserve the prior choice across repo refreshes when still valid
+    if (prev && sel.querySelector(`option[value="${CSS.escape(prev)}"]`)) sel.value = prev;
+  } catch (_) {
+    sel.innerHTML = '<option value="">Backlog (no sprint)</option>';
+  }
 }
 
 // ── Prompt templates (issue #531) ────────────────────────────────────────────
@@ -13779,6 +13942,9 @@ async function bcRunAll() {
     _bcDraftSelections = new Set();
     _bcRemovedRows = new Set();
     _bcPromptOrder = [];
+    _bcSprintConfirmed = false;
+    _bcPosting = false;
+    _bcSprintsLoadedFor = null;
 
     _bcShowStep(2);
     _bcConnectSSE(_bcJobId);
@@ -13857,11 +14023,57 @@ function _bcConnectSSE(jobId) {
         _bcEventSource = null;
         localStorage.removeItem('bc_job_id');
         _bcJobId = null;
+        // After posting, the tickets now live on the board — jump to Sprint Mgmt
+        // so the user lands where their new (sprint-assigned) tickets appear.
+        if (_bcPosting) {
+          _bcPosting = false;
+          switchTab('sprint-mgmt');
+        }
       }
     } catch (_) {}
   });
 
-  es.onerror = () => { /* SSE auto-reconnects */ };
+  es.onerror = () => {
+    // A 404 (job no longer exists server-side — server restarted or pruned) is a
+    // FATAL EventSource error: the browser sets readyState=CLOSED and does NOT
+    // auto-reconnect. Without recovery the tab is stranded on a dead Step 2 —
+    // and it's sticky because bc_job_id lives in localStorage, which Safari's
+    // "Empty Caches" doesn't clear (Chrome works only because its own
+    // localStorage never held the dead id). If the socket is permanently closed
+    // and we never received any state, treat the saved job as gone and fall back
+    // to the input step. (readyState CONNECTING means a transient blip the
+    // browser is already retrying — leave that alone.)
+    if (es.readyState === 2 /* CLOSED */ && !_bcJobState) {
+      es.close();
+      if (_bcEventSource === es) _bcEventSource = null;
+      _bcRecoverFromStaleJob();
+    }
+  };
+}
+
+/**
+ * Recover from a saved bulk job that no longer exists on the server.
+ * Clears the stale localStorage id and, if the user is currently looking at the
+ * (now dead) bulk-create tab, resets it to a usable Step 1 input.
+ */
+function _bcRecoverFromStaleJob() {
+  localStorage.removeItem('bc_job_id');
+  _bcJobId = null;
+  _bcJobState = null;
+  _bcUpdateBadge();
+
+  const pane = document.getElementById('pane-bulk-create');
+  const onBulkTab = pane && !pane.classList.contains('hidden');
+  if (onBulkTab) {
+    _bcShowStep(1);
+    // _bcInitTab may have early-returned into Step 2 before this fired, so make
+    // sure Step 1's controls are populated and interactive again.
+    _bcPopulateRepo();
+    _bcRestoreDraft();
+    _bcUpdateCounter();
+    _bcTplRender();
+  }
+  _bcTabInited = true;
 }
 
 function _bcRenderStep2() {
@@ -13961,41 +14173,68 @@ function _bcRenderStep2() {
         if (!_bcDraftSelections.has(t.index)) _bcDraftSelections.add(t.index);
       }
     });
+    // Remember focus + caret so a background re-render (e.g. an estimate landing
+    // while the user edits another draft) doesn't interrupt typing.
+    const _focused = document.activeElement;
+    const _focusId = _focused && list.contains(_focused) ? _focused.id : null;
+    const _selS = (_focused && 'selectionStart' in _focused) ? _focused.selectionStart : null;
+    const _selE = (_focused && 'selectionEnd' in _focused) ? _focused.selectionEnd : null;
     list.innerHTML = tickets.filter(t => !_bcRemovedRows.has(t.index)).map(t => _bcRenderCard(t)).join('');
+    if (_focusId) {
+      const _el = document.getElementById(_focusId);
+      if (_el) {
+        _el.focus();
+        if (_selS != null && 'setSelectionRange' in _el) {
+          try { _el.setSelectionRange(_selS, _selE); } catch (_) {}
+        }
+      }
+    }
   }
 
-  // Footer buttons
+  // Footer right side: a 4-stage rail (Draft → Estimate → Sprint → Post) with a
+  // single contextual control per stage. Left-side buttons are unchanged.
   const stopBtn       = document.getElementById('bc-stop-btn');
   const doneBtn       = document.getElementById('bc-done-btn');
-  const recreateBtn   = document.getElementById('bc-recreate-btn');
   const retryAllBtn   = document.getElementById('bc-retry-all-btn');
   const reviewPostBtn = document.getElementById('bc-review-post-btn');
-  if (stopBtn && doneBtn) {
-    if (job.status === 'running') {
-      stopBtn.disabled = false;
-      doneBtn.disabled = true;
-      doneBtn.textContent = 'Running...';
-      if (recreateBtn)   recreateBtn.classList.add('hidden');
-      if (reviewPostBtn) reviewPostBtn.classList.add('hidden');
-    } else if (job.status === 'drafts_ready') {
-      stopBtn.disabled = true;
-      doneBtn.disabled = true;
-      doneBtn.textContent = 'Running...';
-      if (recreateBtn) recreateBtn.classList.add('hidden');
-      if (reviewPostBtn) {
-        const draftReadyTickets = tickets.filter(t => t.state === 'draft_ready' && !_bcRemovedRows.has(t.index));
-        const selCount = draftReadyTickets.filter(t => _bcDraftSelections.has(t.index)).length;
-        reviewPostBtn.textContent = selCount > 0 ? `Post Selected (${selCount})` : 'Post Selected';
-        reviewPostBtn.disabled = selCount === 0;
-        reviewPostBtn.classList.remove('hidden');
-      }
-    } else {
-      stopBtn.disabled = true;
+  const continueBtn   = document.getElementById('bc-continue-btn');
+  const sprintSel     = document.getElementById('bc-sprint');
+  const stage = _bcComputeStage(job);
+  _bcUpdateStageRail(stage);
+
+  // Hide every right-side control, then reveal only the ones for this stage.
+  [stopBtn, doneBtn, reviewPostBtn, continueBtn, sprintSel].forEach(el => el && el.classList.add('hidden'));
+
+  const activeTickets = tickets.filter(t => !_bcRemovedRows.has(t.index));
+  if (stage === 1) {                                    // ① Draft (auto)
+    const total = activeTickets.length;
+    const drafted = activeTickets.filter(t => t.state !== 'pending' && t.state !== 'drafting').length;
+    if (stopBtn) { stopBtn.disabled = false; stopBtn.classList.remove('hidden'); }
+    if (doneBtn) { doneBtn.disabled = true; doneBtn.textContent = `Generating… ${drafted}/${total}`; doneBtn.classList.remove('hidden'); }
+  } else if (stage === 2) {                             // ② Estimate (auto)
+    const draftable = activeTickets.filter(t => t.state === 'draft_ready');
+    const sized = draftable.filter(t => t.estimate_state === 'sized' || t.estimate_state === 'estimate_failed').length;
+    if (doneBtn) { doneBtn.disabled = true; doneBtn.textContent = `Estimating… ${sized}/${draftable.length}`; doneBtn.classList.remove('hidden'); }
+  } else if (stage === 3) {                             // ③ Sprint (you)
+    _bcEnsureSprintsLoaded(job);
+    if (sprintSel)   sprintSel.classList.remove('hidden');
+    if (continueBtn) continueBtn.classList.remove('hidden');
+  } else if (stage === 4) {                             // ④ Post (you)
+    if (reviewPostBtn) {
+      const draftReadyTickets = activeTickets.filter(t => t.state === 'draft_ready');
+      const selCount = draftReadyTickets.filter(t => _bcDraftSelections.has(t.index)).length;
+      reviewPostBtn.textContent = selCount > 0 ? `Post Selected (${selCount})` : 'Post Selected';
+      reviewPostBtn.disabled = selCount === 0;
+      reviewPostBtn.classList.remove('hidden');
+    }
+  } else if (stage === 'posting') {                     // posting to GitHub
+    if (doneBtn) { doneBtn.disabled = true; doneBtn.textContent = 'Posting…'; doneBtn.classList.remove('hidden'); }
+  } else {                                              // 'done'
+    if (doneBtn) {
       doneBtn.disabled = false;
       doneBtn.textContent = 'Done';
       doneBtn.onclick = () => { _bcShowStep(1); };
-      if (recreateBtn)   recreateBtn.classList.remove('hidden');
-      if (reviewPostBtn) reviewPostBtn.classList.add('hidden');
+      doneBtn.classList.remove('hidden');
     }
   }
   if (retryAllBtn) {
@@ -14186,12 +14425,14 @@ function _bcRenderCard(t) {
             <input type="checkbox" class="bc-draft-check" id="bc-check-${t.index}" ${isChecked}
                    onchange="_bcDraftCheckChange(${t.index}, this.checked)">
             <span class="bc-card-label bc-card-label--draft">Draft ready</span>
+            ${_bcSizePillHtml(t)}
           </div>
           <input class="bc-draft-edit-title" id="bc-draft-title-${t.index}" type="text"
-                 value="${escHtml(titleVal)}" placeholder="Title (required)" tabindex="0">
+                 value="${escHtml(titleVal)}" placeholder="Title (required)" tabindex="0"
+                 oninput="_bcOnDraftEdit(${t.index})">
           <div class="bc-draft-title-err hidden" id="bc-draft-title-err-${t.index}">Title is required</div>
           <textarea class="bc-draft-edit-body" id="bc-draft-body-${t.index}"
-                    tabindex="0">${escHtml(bodyVal)}</textarea>
+                    tabindex="0" oninput="_bcOnDraftEdit(${t.index})">${escHtml(bodyVal)}</textarea>
           ${regenErrHtml}
           <div class="bc-draft-card-actions">
             <button class="bc-btn-regenerate" id="bc-btn-regen-${t.index}"
@@ -14255,6 +14496,48 @@ function _bcRenderCard(t) {
       </div>
       <div class="bc-card-actions">${actions}</div>
     </div>`;
+}
+
+/** Estimate/size pill for a draft_ready card: spinner while sizing, S/M/L/XL when done. */
+function _bcSizePillHtml(t) {
+  const st = t.estimate_state;
+  if (st === 'estimating') {
+    return `<span class="bc-size-pill bc-size-pill--est"><span class="bc-size-spin"></span> Sizing…</span>`;
+  }
+  if (st === 'sized' && t.estimate_size) {
+    return `<span class="bc-size-pill bc-size-pill--${escHtml(t.estimate_size)}" title="Estimated size">${escHtml(t.estimate_size)}</span>`;
+  }
+  if (st === 'estimate_failed') {
+    return `<span class="bc-size-pill bc-size-pill--failed" title="${escHtml(t.estimate_error || 'Estimation failed')}">size ?</span>`;
+  }
+  return '';
+}
+
+/** Debounced auto re-estimate when a draft's title/body is edited. */
+function _bcOnDraftEdit(index) {
+  if (_bcReestimateTimers[index]) clearTimeout(_bcReestimateTimers[index]);
+  _bcReestimateTimers[index] = setTimeout(() => {
+    delete _bcReestimateTimers[index];
+    _bcReestimateDraft(index);
+  }, 900);
+}
+
+async function _bcReestimateDraft(index) {
+  if (!_bcJobId) return;
+  const titleEl = document.getElementById(`bc-draft-title-${index}`);
+  const bodyEl  = document.getElementById(`bc-draft-body-${index}`);
+  if (!titleEl && !bodyEl) return;
+  try {
+    await fetch(`/api/tickets/bulk/${_bcJobId}/estimate-draft`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        index,
+        title: titleEl ? titleEl.value : undefined,
+        body:  bodyEl  ? bodyEl.value  : undefined,
+      }),
+    });
+    // The SSE ticket_update refreshes the size pill when sizing completes.
+  } catch (_) {}
 }
 
 async function bcSkipTicket(index) {
@@ -14647,6 +14930,20 @@ function bcReviewAndPost() {
     postBtn.textContent = selCount > 0 ? `Post ${selCount} to GitHub` : 'Post to GitHub';
   }
 
+  // Reflect the batch's target sprint in the review header
+  const sprintVal = (document.getElementById('bc-sprint') || {}).value || '';
+  const subEl = document.querySelector('#bc-review-overlay .bc-review-sub');
+  if (subEl) {
+    let target = 'Backlog (no sprint)';
+    if (sprintVal === 'NEW') {
+      const opt = document.querySelector('#bc-sprint option[value="NEW"]');
+      target = opt ? opt.textContent.replace('➕ ', '') : 'a new sprint';
+    } else if (sprintVal) {
+      target = 'Sprint ' + sprintVal.replace('sprint-', '');
+    }
+    subEl.textContent = `Select which tickets to create → ${target}`;
+  }
+
   const overlay = document.getElementById('bc-review-overlay');
   if (overlay) overlay.classList.remove('hidden');
 }
@@ -14752,17 +15049,22 @@ async function bcPostSelected() {
   if (postBtn) { postBtn.disabled = true; postBtn.textContent = 'Posting…'; }
   if (reviewBtn) { reviewBtn.disabled = true; reviewBtn.textContent = 'Posting…'; }
 
+  const sprintLabel = (document.getElementById('bc-sprint') || {}).value || '';
+  _bcPosting = true;  // → footer shows "Posting…", and we jump to Sprint Mgmt on done
+
   try {
     const resp = await fetch(`/api/tickets/bulk/${_bcJobId}/post-selected`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tickets: toPost }),
+      body: JSON.stringify({ tickets: toPost, sprint_label: sprintLabel }),
     });
     if (!resp.ok) {
+      _bcPosting = false;
       const data = await resp.json().catch(() => ({}));
       console.error('[bc] post-selected failed:', data.detail || resp.status);
     }
   } catch (e) {
+    _bcPosting = false;
     console.error('[bc] post-selected error:', e);
   }
 

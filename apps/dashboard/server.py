@@ -7934,6 +7934,169 @@ async def _run_bulk_estimator_for_ticket(
     github_client.invalidate("issues:")
 
 
+def _draft_body_hash(title: str, body: str) -> str:
+    """Stable hash of a draft's text, used to detect edits that need re-sizing."""
+    return hashlib.sha256(f"{title}\n\n{body}".encode("utf-8")).hexdigest()
+
+
+async def _run_bulk_draft_estimator_for_ticket(job_id: str, index: int) -> None:
+    """Estimate one bulk draft from its current title+body, before it is posted.
+
+    Sizes are computed on the draft text (no GitHub issue exists yet), stored on
+    the ticket, and surfaced so they can inform sprint assignment. The result is
+    materialised onto the real issue (size label + cache) at post time.
+
+    Tracks progress in parallel fields, leaving ticket["state"] == "draft_ready"
+    untouched so the post-selected flow keeps working:
+      estimate_state: None → "estimating" → "sized" | "estimate_failed"
+      estimate_size:  "S"/"M"/"L"/"XL"
+      estimate:       full estimator JSON (persisted to the cache at post)
+      estimate_body_hash: hash of the text that was sized (stale-edit detection)
+    """
+    import logging as _logging
+
+    job = _bulk_jobs.get(job_id)
+    if not job or index < 0 or index >= len(job["tickets"]):
+        return
+    ticket = job["tickets"][index]
+    title = ticket.get("title") or ""
+    body = ticket.get("body") or ""
+    body_hash = _draft_body_hash(title, body)
+
+    # Already sized for this exact text — nothing to do.
+    if ticket.get("estimate_state") == "sized" and ticket.get("estimate_body_hash") == body_hash:
+        return
+
+    if not _ESTIMATE_ISSUE_SCRIPT.exists():
+        ticket["estimate_state"] = "estimate_failed"
+        ticket["estimate_error"] = "estimate_issue.py not found"
+        _persist_bulk_job(job)
+        await _broadcast_bulk_event(job_id, {"type": "ticket_update", "ticket": dict(ticket)})
+        return
+
+    ticket["estimate_state"] = "estimating"
+    _persist_bulk_job(job)
+    await _broadcast_bulk_event(job_id, {"type": "ticket_update", "ticket": dict(ticket)})
+
+    semaphore = _get_bulk_estimator_semaphore()
+    tmp_path: str | None = None
+    stdout_bytes = b""
+    stderr_bytes = b""
+    returncode = -1
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".json", delete=False, encoding="utf-8"
+        ) as tf:
+            json.dump({"title": title, "body": body}, tf)
+            tmp_path = tf.name
+        async with semaphore:
+            proc = await asyncio.create_subprocess_exec(
+                sys.executable, str(_ESTIMATE_ISSUE_SCRIPT), "--draft-file", tmp_path,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            try:
+                stdout_bytes, stderr_bytes = await asyncio.wait_for(
+                    proc.communicate(), timeout=240.0
+                )
+                returncode = proc.returncode or 0
+            except asyncio.TimeoutError:
+                proc.kill()
+                returncode = -1
+                stderr_bytes = b"draft estimation timed out after 240s"
+    except Exception as exc:
+        _logging.warning(f"[bulk-estimator] draft estimation (job {job_id} #{index}) failed: {exc}")
+        stderr_bytes = str(exc).encode("utf-8")
+    finally:
+        if tmp_path:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+
+    job = _bulk_jobs.get(job_id)
+    if not job or index >= len(job["tickets"]):
+        return
+    ticket = job["tickets"][index]
+
+    estimate: dict | None = None
+    if returncode == 0:
+        try:
+            estimate = json.loads(stdout_bytes.decode("utf-8", errors="replace").strip())
+        except (json.JSONDecodeError, ValueError):
+            estimate = None
+
+    if not estimate or not isinstance(estimate, dict):
+        reason = stderr_bytes.decode("utf-8", errors="replace").strip()[:300] or "could not parse estimate"
+        ticket["estimate_state"] = "estimate_failed"
+        ticket["estimate_error"] = reason
+        ticket["estimate_body_hash"] = body_hash
+        _persist_bulk_job(job)
+        await _broadcast_bulk_event(job_id, {"type": "ticket_update", "ticket": dict(ticket)})
+        return
+
+    ticket["estimate_state"] = "sized"
+    ticket["estimate_size"] = estimate.get("size")
+    ticket["estimate"] = estimate
+    ticket["estimate_body_hash"] = body_hash
+    ticket.pop("estimate_error", None)
+    _persist_bulk_job(job)
+    await _broadcast_bulk_event(job_id, {"type": "ticket_update", "ticket": dict(ticket)})
+
+
+async def _materialise_bulk_estimate(
+    job_id: str,
+    index: int,
+    issue_number: int,
+    repo: str,
+    estimate: dict,
+) -> None:
+    """Persist a pre-computed draft estimate onto the freshly-posted issue.
+
+    Writes the estimate to .commander/estimates/issue-<N>.json, then runs
+    estimate_issue.py with --save-label/--save-comment, which takes the cached
+    path (no model re-run) to apply the size-S/M/L/XL label, the estimate
+    comment, and the 'estimated' status. Falls back to a live estimation if the
+    cache can't be written.
+    """
+    import logging as _logging
+
+    try:
+        estimates_dir = _commander_dir(_project_root_path(repo)) / "estimates"
+        estimates_dir.mkdir(parents=True, exist_ok=True)
+        record = dict(estimate)
+        record["issue_number"] = issue_number
+        (estimates_dir / f"issue-{issue_number}.json").write_text(
+            json.dumps(record, indent=2), encoding="utf-8"
+        )
+    except Exception as exc:
+        _logging.warning(f"[bulk-estimator] could not cache estimate for #{issue_number}: {exc}")
+        # No cache → fall back to a full (model) estimation of the posted issue.
+        if _ESTIMATE_ISSUE_SCRIPT.exists():
+            await _run_bulk_estimator_for_ticket(job_id, index, issue_number, repo)
+        return
+
+    if not _ESTIMATE_ISSUE_SCRIPT.exists():
+        return
+    semaphore = _get_bulk_estimator_semaphore()
+    try:
+        async with semaphore:
+            proc = await asyncio.create_subprocess_exec(
+                sys.executable, str(_ESTIMATE_ISSUE_SCRIPT),
+                "--issue", str(issue_number), "--repo", repo,
+                "--save-comment", "--save-label",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            await asyncio.wait_for(proc.communicate(), timeout=120.0)
+    except Exception as exc:
+        _logging.warning(f"[bulk-estimator] applying cached estimate to #{issue_number} failed: {exc}")
+
+    github_client.invalidate("open_issues_body:")
+    github_client.invalidate("open_issues:")
+    github_client.invalidate("issues:")
+
+
 @app.post("/api/tickets/create", status_code=201)
 async def create_ticket_from_draft(
     background_tasks: BackgroundTasks,
@@ -8368,6 +8531,13 @@ async def _bulk_flusher(job_id: str) -> None:
 
             _persist_bulk_job(job)
             await _broadcast_bulk_event(job_id, {"type": "ticket_update", "ticket": dict(ticket)})
+
+            # Auto-size the draft as soon as it's ready, so estimates inform the
+            # sprint choice before posting (Estimate stage). Runs in the
+            # background — the size label is materialised onto the issue at post.
+            if ticket["state"] == "draft_ready" and ticket.get("estimate_state") != "sized":
+                asyncio.create_task(_run_bulk_draft_estimator_for_ticket(job_id, flush_idx))
+
             flush_idx += 1
 
         elif ticket["state"] in ("pending", "drafting"):
@@ -8495,6 +8665,7 @@ async def bulk_create_start(
     concurrency: int = Form(default=3),
     files: list[UploadFile] = File(default=[]),
     assignments: str = Form(default=""),
+    sprint_label: str = Form(default=""),
 ):
     """Start a bulk ticket creation job.
 
@@ -8520,6 +8691,13 @@ async def bulk_create_start(
                 raise ValueError("not a list")
         except (json.JSONDecodeError, ValueError):
             raise HTTPException(422, detail="'default_labels' must be a JSON array of strings")
+
+    # Validate sprint_label: "" (backlog), "NEW" (create next sprint at post
+    # time), or an existing "sprint-N" label. Resolved lazily on post so an
+    # abandoned draft never leaves a ghost sprint label behind.
+    sprint_label = (sprint_label or "").strip()
+    if sprint_label and sprint_label != "NEW" and not re.match(r"^sprint-\d+$", sprint_label):
+        raise HTTPException(422, detail="'sprint_label' must be empty, 'NEW', or 'sprint-N'")
 
     # Validate repo
     projects = projects_module.load_projects()
@@ -8640,6 +8818,7 @@ async def bulk_create_start(
         "status": "running",
         "repo": repo,
         "default_labels": default_labels_list,
+        "sprint_label": sprint_label,
         "allowed_labels": existing_label_names,
         "concurrency": concurrency,
         "created_at": now,
@@ -8693,6 +8872,17 @@ async def bulk_get_job(job_id: str):
 async def bulk_job_stream(job_id: str, request: Request):
     """SSE stream of state-change events for a bulk job."""
     job = _bulk_jobs.get(job_id)
+    if not job:
+        # Rehydrate from disk if the job was persisted but evicted from memory
+        # (e.g. server restart). Mirrors bulk_get_job so a reconnecting client
+        # doesn't get a fatal 404 for a job that still exists on disk.
+        try:
+            path = _bulk_jobs_dir() / f"{job_id}.json"
+            if path.exists():
+                job = json.loads(path.read_text())
+                _bulk_jobs[job_id] = job
+        except Exception:
+            pass
     if not job:
         raise HTTPException(404, detail="Job not found")
 
@@ -8750,6 +8940,45 @@ async def bulk_stop_job(job_id: str):
 
 class BulkSkipBody(BaseModel):
     index: int
+
+
+class BulkEstimateDraftBody(BaseModel):
+    index: int
+    title: str | None = None
+    body: str | None = None
+
+
+@app.post("/api/tickets/bulk/{job_id}/estimate-draft")
+async def bulk_estimate_draft(job_id: str, body: BulkEstimateDraftBody):
+    """(Re-)estimate a draft from its current text (auto re-estimate on edit).
+
+    Applies any edited title/body, then re-sizes only if the text actually
+    changed since the last estimate. Sizing runs in the background; the caller
+    gets the new estimate via the SSE ticket_update stream.
+    """
+    job = _bulk_jobs.get(job_id)
+    if not job:
+        raise HTTPException(404, detail="Job not found")
+    tickets = job["tickets"]
+    if body.index < 0 or body.index >= len(tickets):
+        raise HTTPException(422, detail="Invalid ticket index")
+    ticket = tickets[body.index]
+    if ticket.get("state") != "draft_ready":
+        # Only draft_ready tickets are sizeable pre-post; ignore otherwise.
+        return {"ok": True, "estimating": False}
+
+    if body.title is not None:
+        ticket["title"] = body.title
+    if body.body is not None:
+        ticket["body"] = body.body
+
+    new_hash = _draft_body_hash(ticket.get("title") or "", ticket.get("body") or "")
+    if ticket.get("estimate_state") == "sized" and ticket.get("estimate_body_hash") == new_hash:
+        return {"ok": True, "estimating": False}  # text unchanged — keep current size
+
+    _persist_bulk_job(job)
+    asyncio.create_task(_run_bulk_draft_estimator_for_ticket(job_id, body.index))
+    return {"ok": True, "estimating": True}
 
 
 @app.post("/api/tickets/bulk/{job_id}/skip")
@@ -8925,6 +9154,46 @@ class BulkPostSelectedItem(BaseModel):
 
 class BulkPostSelectedBody(BaseModel):
     tickets: list[BulkPostSelectedItem]
+    # Target sprint chosen at the Sprint stage: "" (backlog), "NEW", or "sprint-N".
+    # Falls back to the job's stored sprint_label when omitted.
+    sprint_label: str | None = None
+
+
+_SPRINT_LABEL_RE = re.compile(r"^sprint-\d+$")
+
+
+def _resolve_bulk_sprint_label(sprint_label: str | None, repo: str | None) -> str:
+    """Resolve a bulk job's sprint selection to a concrete label.
+
+    "" → "" (backlog). "NEW" → create the next sprint-N label (max existing + 1)
+    and return it. A concrete "sprint-N" is returned unchanged. Returns "" if
+    sprint creation fails, so a failed lookup falls back to the backlog.
+    """
+    sprint_label = (sprint_label or "").strip()
+    if sprint_label != "NEW":
+        return sprint_label
+    try:
+        existing = github_client.list_sprints(repo_name=repo)
+        next_num = (max(existing) if existing else 0) + 1
+        github_client.ensure_sprint_label(next_num, repo_name=repo)
+        return f"sprint-{next_num}"
+    except Exception:
+        return ""
+
+
+def _compose_ticket_labels(sprint_label: str, item_labels: list[str]) -> list[str]:
+    """Build the GitHub label list for one bulk-created ticket.
+
+    A ticket assigned to a sprint gets ``[sprint_label, *extras]`` and skips the
+    ``backlog`` label — mirroring assign_sprint(), which removes ``backlog`` when
+    moving a ticket into a sprint. Otherwise it gets ``["backlog", *extras]``.
+    Any ``sprint-N`` already present in ``item_labels`` is dropped so the chosen
+    sprint wins (and we never apply two sprint labels).
+    """
+    extras = [lbl for lbl in item_labels if lbl and not _SPRINT_LABEL_RE.match(lbl)]
+    if sprint_label:
+        return [sprint_label] + extras
+    return ["backlog"] + extras
 
 
 @app.post("/api/tickets/bulk/{job_id}/post-selected")
@@ -8958,9 +9227,19 @@ async def bulk_post_selected(job_id: str, body: BulkPostSelectedBody):
     async def _post_task():
         estimation_tasks: list[asyncio.Task] = []
 
+        # Resolve the batch's target sprint once ("NEW" → create the next
+        # sprint-N label), then persist the concrete label back onto the job.
+        # The Sprint stage sends the choice in the request body; fall back to the
+        # job for resilience (e.g. resumed sessions).
+        chosen = body.sprint_label if body.sprint_label is not None else job.get("sprint_label")
+        sprint_label = _resolve_bulk_sprint_label(chosen, job.get("repo") or None)
+        if sprint_label != (job.get("sprint_label") or ""):
+            job["sprint_label"] = sprint_label
+            _persist_bulk_job(job)
+
         for item in body.tickets:
             idx = item.index
-            labels = ["backlog"] + [lbl for lbl in item.labels if lbl]
+            labels = _compose_ticket_labels(sprint_label, item.labels)
             t = job["tickets"][idx]
             issue_repo = job.get("repo") or None
 
@@ -8991,6 +9270,7 @@ async def bulk_post_selected(job_id: str, body: BulkPostSelectedBody):
                 continue
 
             created_issue_number: int | None = None
+            pre_estimate = t.get("estimate") if t.get("estimate_state") == "sized" else None
             try:
                 number, url = github_client.create_issue(
                     title=t["title"],
@@ -9013,27 +9293,27 @@ async def bulk_post_selected(job_id: str, body: BulkPostSelectedBody):
             _persist_bulk_job(job)
             await _broadcast_bulk_event(job_id, {"type": "ticket_update", "ticket": dict(t)})
 
-            # Kick off background estimation
-            if created_issue_number is not None and _ESTIMATE_ISSUE_SCRIPT.exists():
+            # Materialise the estimate onto the new issue. Tickets sized at the
+            # Estimate stage just need the size label + cache written (no model
+            # re-run); anything that wasn't sized pre-post falls back to a live
+            # estimation of the posted issue.
+            if created_issue_number is not None:
                 try:
                     resolved_repo = issue_repo or github_client.get_repo_for_operation(None)
                 except Exception:
                     resolved_repo = None
-                if resolved_repo:
+                if not resolved_repo:
+                    pass  # leave un-estimated; sprint board can size it later
+                elif pre_estimate:
+                    est_task = asyncio.create_task(
+                        _materialise_bulk_estimate(job_id, idx, created_issue_number, resolved_repo, pre_estimate)
+                    )
+                    estimation_tasks.append(est_task)
+                elif _ESTIMATE_ISSUE_SCRIPT.exists():
                     est_task = asyncio.create_task(
                         _run_bulk_estimator_for_ticket(job_id, idx, created_issue_number, resolved_repo)
                     )
                     estimation_tasks.append(est_task)
-                else:
-                    t["state"] = "estimate_failed"
-                    t["estimate_error"] = "could not resolve repository for estimation"
-                    _persist_bulk_job(job)
-                    await _broadcast_bulk_event(job_id, {"type": "ticket_update", "ticket": dict(t)})
-            elif created_issue_number is not None:
-                t["state"] = "estimate_failed"
-                t["estimate_error"] = "estimate_issue.py not found"
-                _persist_bulk_job(job)
-                await _broadcast_bulk_event(job_id, {"type": "ticket_update", "ticket": dict(t)})
 
         if estimation_tasks:
             await asyncio.gather(*estimation_tasks, return_exceptions=True)

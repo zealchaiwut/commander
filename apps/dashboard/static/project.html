@@ -2197,6 +2197,46 @@
     .nt-textarea { resize: vertical; min-height: 80px; font-family: inherit; }
     .nt-body-textarea { resize: vertical; min-height: 140px; font-family: monospace; font-size: 12px; }
     .nt-draft-divider { border-top: 1px solid var(--border); margin: 20px 0; }
+
+    /* ── AC Template Picker (issue #567) ── */
+    .ac-tpl-toolbar { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+    .ac-tpl-wrap { position: relative; }
+    .ac-tpl-btn {
+      display: inline-flex; align-items: center; gap: 5px;
+      padding: 3px 9px; font-size: 12px; font-weight: 500;
+      border: 1px solid var(--border); border-radius: 5px;
+      background: var(--surface-2); color: var(--text-muted);
+      cursor: pointer; transition: background .15s, color .15s, border-color .15s;
+      white-space: nowrap;
+    }
+    .ac-tpl-btn:hover { background: var(--surface-hover); color: var(--text); border-color: var(--blue); }
+    .ac-tpl-btn.has-default { color: var(--blue); border-color: color-mix(in srgb, var(--blue) 30%, transparent); background: var(--blue-bg); }
+    .ac-tpl-btn:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+    .ac-tpl-menu {
+      position: absolute; top: calc(100% + 4px); left: 0; z-index: 700;
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 7px; box-shadow: 0 4px 16px rgba(0,0,0,.14);
+      padding: 6px; min-width: 220px;
+    }
+    .ac-tpl-menu.hidden { display: none; }
+    .ac-tpl-opt {
+      display: flex; align-items: flex-start; gap: 8px;
+      padding: 7px 10px; border-radius: 5px; cursor: pointer;
+      font-size: 13px; color: var(--text); width: 100%; text-align: left;
+      background: none; border: none;
+      transition: background .12s;
+    }
+    .ac-tpl-opt:hover, .ac-tpl-opt:focus { background: var(--surface-2); outline: none; }
+    .ac-tpl-opt:focus-visible { outline: 2px solid var(--blue); outline-offset: 1px; }
+    .ac-tpl-opt-icon { font-size: 15px; color: var(--text-muted); flex-shrink: 0; padding-top: 1px; }
+    .ac-tpl-opt-label { flex: 1; }
+    .ac-tpl-opt-name { font-weight: 500; display: block; }
+    .ac-tpl-opt-desc { font-size: 11px; color: var(--text-muted); }
+    .ac-tpl-opt.is-default .ac-tpl-opt-name::after { content: ' ✓'; color: var(--blue); }
+    .ac-tpl-menu-divider { height: 1px; background: var(--border); margin: 4px 0; }
+    .bc-ac-tpl-toolbar { display: flex; align-items: center; gap: 6px; padding: 8px 28px 4px; }
+    .bc-ac-global-wrap { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+    .bc-ac-global-label { font-size: 12px; color: var(--text-muted); }
     .nt-spinner {
       display: inline-block; width: 12px; height: 12px;
       border: 2px solid currentColor; border-top-color: transparent;
@@ -4108,6 +4148,37 @@
 
           <div id="bc-limit-banner" class="bc-limit-banner hidden" role="alert" aria-live="polite"></div>
 
+          <div class="bc-ac-tpl-toolbar">
+            <div class="ac-tpl-wrap" id="bc-ac-tpl-wrap">
+              <button type="button" class="ac-tpl-btn" id="bc-ac-tpl-btn"
+                      aria-haspopup="true" aria-expanded="false"
+                      aria-label="Insert AC template into prompts (Ctrl+Shift+A)"
+                      title="Insert AC template (Ctrl/Cmd+Shift+A)"
+                      onclick="bcAcTplOpen()">
+                <i class="ti ti-template"></i> Insert AC Template
+              </button>
+              <div class="ac-tpl-menu hidden" id="bc-ac-tpl-menu" role="menu" aria-label="AC template options">
+                <button type="button" class="ac-tpl-opt" role="menuitem" data-tpl="gwt"
+                        onclick="bcAcTplSelect('gwt')" tabindex="-1">
+                  <i class="ti ti-list-details ac-tpl-opt-icon"></i>
+                  <span class="ac-tpl-opt-label">
+                    <span class="ac-tpl-opt-name">Given / When / Then</span>
+                    <span class="ac-tpl-opt-desc">BDD-style acceptance criteria</span>
+                  </span>
+                </button>
+                <button type="button" class="ac-tpl-opt" role="menuitem" data-tpl="checklist"
+                        onclick="bcAcTplSelect('checklist')" tabindex="-1">
+                  <i class="ti ti-checkbox ac-tpl-opt-icon"></i>
+                  <span class="ac-tpl-opt-label">
+                    <span class="ac-tpl-opt-name">Checklist</span>
+                    <span class="ac-tpl-opt-desc">Markdown checkbox criteria</span>
+                  </span>
+                </button>
+              </div>
+            </div>
+            <span class="bc-ac-global-label">Appends AC scaffold to each ticket prompt</span>
+          </div>
+
           <textarea class="bc-textarea" id="bc-textarea"
                     placeholder="Paste your ticket prompts here, separated by --- on its own line..."
                     oninput="bcOnTextareaInput()"></textarea>
@@ -4202,6 +4273,33 @@
             </label>
             <button type="button" class="bc-bulk-btn" onclick="bcDeselectAll()">Deselect all</button>
             <button type="button" class="bc-bulk-btn bc-select-failed-btn hidden" id="bc-select-failed-btn" onclick="bcSelectFailed()">Select failed</button>
+            <div class="ac-tpl-wrap" id="bc-bulk-ac-tpl-wrap" style="margin-left:auto">
+              <button type="button" class="ac-tpl-btn" id="bc-bulk-ac-tpl-btn"
+                      aria-haspopup="true" aria-expanded="false"
+                      aria-label="Apply AC template to all draft tickets"
+                      title="Apply AC template to all draft tickets"
+                      onclick="bcBulkAcTplOpen()">
+                <i class="ti ti-template"></i> Apply AC to all drafts
+              </button>
+              <div class="ac-tpl-menu hidden" id="bc-bulk-ac-tpl-menu" role="menu" aria-label="AC template options">
+                <button type="button" class="ac-tpl-opt" role="menuitem" data-tpl="gwt"
+                        onclick="bcBulkAcTplSelect('gwt')" tabindex="-1">
+                  <i class="ti ti-list-details ac-tpl-opt-icon"></i>
+                  <span class="ac-tpl-opt-label">
+                    <span class="ac-tpl-opt-name">Given / When / Then</span>
+                    <span class="ac-tpl-opt-desc">BDD-style acceptance criteria</span>
+                  </span>
+                </button>
+                <button type="button" class="ac-tpl-opt" role="menuitem" data-tpl="checklist"
+                        onclick="bcBulkAcTplSelect('checklist')" tabindex="-1">
+                  <i class="ti ti-checkbox ac-tpl-opt-icon"></i>
+                  <span class="ac-tpl-opt-label">
+                    <span class="ac-tpl-opt-name">Checklist</span>
+                    <span class="ac-tpl-opt-desc">Markdown checkbox criteria</span>
+                  </span>
+                </button>
+              </div>
+            </div>
           </div>
 
           <div class="bc-ticket-list" id="bc-ticket-list"></div>
@@ -12567,6 +12665,30 @@ function _bcRenderCard(t) {
           <div class="bc-draft-card-actions">
             <button class="bc-btn-regenerate" id="bc-btn-regen-${t.index}"
                     onclick="bcRegenerateDraft(${t.index})">Regenerate draft</button>
+            <div class="ac-tpl-wrap" id="bc-card-ac-wrap-${t.index}" style="position:relative">
+              <button type="button" class="ac-tpl-btn" id="bc-card-ac-btn-${t.index}"
+                      aria-haspopup="true" aria-expanded="false"
+                      aria-label="Insert AC template into this ticket"
+                      onclick="bcCardAcTplOpen(${t.index})">
+                <i class="ti ti-template"></i> AC template
+              </button>
+              <div class="ac-tpl-menu hidden" id="bc-card-ac-menu-${t.index}" role="menu">
+                <button type="button" class="ac-tpl-opt" role="menuitem" data-tpl="gwt"
+                        onclick="bcCardAcTplSelect(${t.index},'gwt')" tabindex="-1">
+                  <i class="ti ti-list-details ac-tpl-opt-icon"></i>
+                  <span class="ac-tpl-opt-label">
+                    <span class="ac-tpl-opt-name">Given / When / Then</span>
+                  </span>
+                </button>
+                <button type="button" class="ac-tpl-opt" role="menuitem" data-tpl="checklist"
+                        onclick="bcCardAcTplSelect(${t.index},'checklist')" tabindex="-1">
+                  <i class="ti ti-checkbox ac-tpl-opt-icon"></i>
+                  <span class="ac-tpl-opt-label">
+                    <span class="ac-tpl-opt-name">Checklist</span>
+                  </span>
+                </button>
+              </div>
+            </div>
             <button class="bc-btn-remove-row" onclick="bcRemoveRow(${t.index})" title="Remove this draft">Remove</button>
           </div>
         </div>
@@ -14058,6 +14180,218 @@ function _cmpEmptyState(title, msg) {
     <p><strong>${escHtml(title)}</strong><br>${escHtml(msg)}</p>
   </div>`;
 }
+
+// ── AC Template Picker (issue #567) ───────────────────────────────────────
+
+const _acTplTemplates = {
+  gwt:
+`## Acceptance Criteria
+
+**Given** *[context]*
+**When** *[action]*
+**Then** *[outcome]*`,
+  checklist:
+`## Acceptance Criteria
+
+- [ ] *[AC 1: describe criterion]*
+- [ ] *[AC 2: describe criterion]*
+- [ ] *[AC 3: describe criterion]*`
+};
+
+const _acTplLabels = { gwt: 'Given / When / Then', checklist: 'Checklist' };
+
+let _acSessionDefault = null;
+
+const _AC_BLOCK_RE = /##\s*acceptance criteria/i;
+
+function _acHasAcBlock(text) { return _AC_BLOCK_RE.test(text); }
+
+function _acInsertAtCursor(textarea, text) {
+  const start = textarea.selectionStart;
+  const end   = textarea.selectionEnd;
+  const before = textarea.value.substring(0, start);
+  const after  = textarea.value.substring(end);
+  const sep = (before.length > 0 && !before.endsWith('\n\n'))
+    ? (before.endsWith('\n') ? '\n' : '\n\n') : '';
+  const insert = sep + text + '\n';
+  textarea.value = before + insert + after;
+  const newPos = before.length + insert.length;
+  textarea.selectionStart = textarea.selectionEnd = newPos;
+  textarea.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
+function _acOpenMenu(menuId, btnId) {
+  const menu = document.getElementById(menuId);
+  const btn  = document.getElementById(btnId);
+  if (!menu || !btn) return;
+  const isOpen = !menu.classList.contains('hidden');
+  _acCloseAllMenus();
+  if (!isOpen) {
+    menu.classList.remove('hidden');
+    btn.setAttribute('aria-expanded', 'true');
+    menu.querySelectorAll('.ac-tpl-opt').forEach(o => o.setAttribute('tabindex', '0'));
+    const first = menu.querySelector('.ac-tpl-opt');
+    if (first) first.focus();
+  }
+}
+
+function _acCloseAllMenus() {
+  document.querySelectorAll('.ac-tpl-menu').forEach(m => {
+    m.classList.add('hidden');
+    m.querySelectorAll('.ac-tpl-opt').forEach(o => o.setAttribute('tabindex', '-1'));
+  });
+  document.querySelectorAll('.ac-tpl-btn').forEach(b => {
+    b.setAttribute('aria-expanded', 'false');
+  });
+}
+
+function _acApplyTemplate(tplKey, textareaId, btnId, skipWarn) {
+  const textarea = document.getElementById(textareaId);
+  if (!textarea) return;
+  const tplText = _acTplTemplates[tplKey];
+  if (!tplText) return;
+  if (!skipWarn && _acHasAcBlock(textarea.value)) {
+    if (!confirm('This body already contains an Acceptance Criteria block. Insert another one?')) {
+      _acCloseAllMenus();
+      return;
+    }
+  }
+  _acInsertAtCursor(textarea, tplText);
+  _acSessionDefault = tplKey;
+  if (btnId) _acUpdateBtnLabel(btnId, tplKey);
+  _acCloseAllMenus();
+  textarea.focus();
+}
+
+function _acUpdateBtnLabel(btnId, tplKey) {
+  const btn = document.getElementById(btnId);
+  if (!btn) return;
+  if (tplKey) {
+    btn.innerHTML = `<i class="ti ti-template"></i> ${_acTplLabels[tplKey]} <span style="font-size:10px;opacity:.6">(change)</span>`;
+    btn.classList.add('has-default');
+  } else {
+    btn.innerHTML = `<i class="ti ti-template"></i> Insert AC Template`;
+    btn.classList.remove('has-default');
+  }
+}
+
+function _acSyncMenuChecks(menuId, activeTpl) {
+  const menu = document.getElementById(menuId);
+  if (!menu) return;
+  menu.querySelectorAll('.ac-tpl-opt').forEach(opt => {
+    opt.classList.toggle('is-default', opt.dataset.tpl === activeTpl);
+  });
+}
+
+// NT modal
+function ntAcTplOpen() {
+  _acSyncMenuChecks('nt-ac-tpl-menu', _acSessionDefault);
+  _acOpenMenu('nt-ac-tpl-menu', 'nt-ac-tpl-btn');
+}
+function ntAcTplSelect(tplKey) {
+  _acApplyTemplate(tplKey, 'nt-body', 'nt-ac-tpl-btn');
+}
+
+// BC step 1 (prompt textarea)
+function bcAcTplOpen() {
+  _acSyncMenuChecks('bc-ac-tpl-menu', _acSessionDefault);
+  _acOpenMenu('bc-ac-tpl-menu', 'bc-ac-tpl-btn');
+}
+function bcAcTplSelect(tplKey) {
+  _acApplyTemplate(tplKey, 'bc-textarea', 'bc-ac-tpl-btn');
+}
+
+// BC step 2 — apply to ALL draft bodies
+function bcBulkAcTplOpen() {
+  _acSyncMenuChecks('bc-bulk-ac-tpl-menu', _acSessionDefault);
+  _acOpenMenu('bc-bulk-ac-tpl-menu', 'bc-bulk-ac-tpl-btn');
+}
+function bcBulkAcTplSelect(tplKey) {
+  _acCloseAllMenus();
+  if (!_bcJobState) return;
+  const tickets = (_bcJobState.tickets || []).filter(
+    t => t.state === 'draft_ready' && !_bcRemovedRows.has(t.index)
+  );
+  if (tickets.length === 0) return;
+  const anyHasBlock = tickets.some(t => {
+    const el = document.getElementById(`bc-draft-body-${t.index}`);
+    return el && _acHasAcBlock(el.value);
+  });
+  if (anyHasBlock) {
+    if (!confirm(`One or more drafts already contain an Acceptance Criteria block. Apply ${_acTplLabels[tplKey]} template to all ${tickets.length} drafts anyway?`)) return;
+  }
+  tickets.forEach(t => {
+    const el = document.getElementById(`bc-draft-body-${t.index}`);
+    if (el) _acInsertAtCursor(el, _acTplTemplates[tplKey]);
+  });
+  _acSessionDefault = tplKey;
+  _acUpdateBtnLabel('bc-bulk-ac-tpl-btn', tplKey);
+}
+
+// BC step 2 — per-ticket
+function bcCardAcTplOpen(index) {
+  _acSyncMenuChecks(`bc-card-ac-menu-${index}`, _acSessionDefault);
+  _acOpenMenu(`bc-card-ac-menu-${index}`, `bc-card-ac-btn-${index}`);
+}
+function bcCardAcTplSelect(index, tplKey) {
+  _acApplyTemplate(tplKey, `bc-draft-body-${index}`, `bc-card-ac-btn-${index}`);
+}
+
+// Keyboard shortcut: Ctrl/Cmd+Shift+A opens picker from body editors
+document.addEventListener('keydown', function(e) {
+  if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'A' || e.key === 'a')) {
+    const ntModal   = document.getElementById('nt-modal');
+    const ntBody    = document.getElementById('nt-body');
+    const bcPane    = document.getElementById('pane-bulk-create');
+    const bcTextarea = document.getElementById('bc-textarea');
+    if (ntModal && !ntModal.classList.contains('hidden') &&
+        document.activeElement === ntBody) {
+      e.preventDefault();
+      ntAcTplOpen();
+      return;
+    }
+    if (bcPane && bcPane.classList.contains('active') &&
+        document.activeElement === bcTextarea) {
+      e.preventDefault();
+      bcAcTplOpen();
+      return;
+    }
+    // Per-ticket body in BC step 2
+    const active = document.activeElement;
+    if (active && active.id && active.id.startsWith('bc-draft-body-')) {
+      const idx = parseInt(active.id.replace('bc-draft-body-', ''), 10);
+      if (!isNaN(idx)) {
+        e.preventDefault();
+        bcCardAcTplOpen(idx);
+        return;
+      }
+    }
+  }
+});
+
+// Close menus on outside click
+document.addEventListener('click', function(e) {
+  if (!e.target.closest('.ac-tpl-wrap')) _acCloseAllMenus();
+});
+
+// Arrow key navigation within open menu
+document.addEventListener('keydown', function(e) {
+  const openMenu = document.querySelector('.ac-tpl-menu:not(.hidden)');
+  if (!openMenu) return;
+  const opts = Array.from(openMenu.querySelectorAll('.ac-tpl-opt'));
+  if (opts.length === 0) return;
+  const idx = opts.indexOf(document.activeElement);
+  if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    opts[(idx + 1) % opts.length].focus();
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    opts[(idx - 1 + opts.length) % opts.length].focus();
+  } else if (e.key === 'Escape') {
+    e.preventDefault();
+    _acCloseAllMenus();
+  }
+});
 </script>
 
 <!-- ── Inline multi-select action bar (rendered inside sprint list by JS) ── -->
@@ -14322,7 +14656,36 @@ function _cmpEmptyState(title, msg) {
         <input class="modal-input" id="nt-title" type="text" autocomplete="off">
       </div>
       <div class="modal-field">
-        <label class="modal-label" for="nt-body">Body <span class="modal-hint" style="font-weight:normal;color:var(--text-muted)">(edit before posting)</span></label>
+        <div class="ac-tpl-toolbar">
+          <label class="modal-label" for="nt-body" style="margin:0">Body <span class="modal-hint" style="font-weight:normal;color:var(--text-muted)">(edit before posting)</span></label>
+          <div class="ac-tpl-wrap" id="nt-ac-tpl-wrap" style="margin-left:auto">
+            <button type="button" class="ac-tpl-btn" id="nt-ac-tpl-btn"
+                    aria-haspopup="true" aria-expanded="false"
+                    aria-label="Insert AC template (Ctrl+Shift+A)"
+                    title="Insert AC template (Ctrl/Cmd+Shift+A)"
+                    onclick="ntAcTplOpen()">
+              <i class="ti ti-template"></i> Insert AC Template
+            </button>
+            <div class="ac-tpl-menu hidden" id="nt-ac-tpl-menu" role="menu" aria-label="AC template options">
+              <button type="button" class="ac-tpl-opt" role="menuitem" data-tpl="gwt"
+                      onclick="ntAcTplSelect('gwt')" tabindex="-1">
+                <i class="ti ti-list-details ac-tpl-opt-icon"></i>
+                <span class="ac-tpl-opt-label">
+                  <span class="ac-tpl-opt-name">Given / When / Then</span>
+                  <span class="ac-tpl-opt-desc">BDD-style acceptance criteria</span>
+                </span>
+              </button>
+              <button type="button" class="ac-tpl-opt" role="menuitem" data-tpl="checklist"
+                      onclick="ntAcTplSelect('checklist')" tabindex="-1">
+                <i class="ti ti-checkbox ac-tpl-opt-icon"></i>
+                <span class="ac-tpl-opt-label">
+                  <span class="ac-tpl-opt-name">Checklist</span>
+                  <span class="ac-tpl-opt-desc">Markdown checkbox criteria</span>
+                </span>
+              </button>
+            </div>
+          </div>
+        </div>
         <textarea class="modal-input nt-body-textarea" id="nt-body" rows="10"></textarea>
       </div>
       <div class="modal-field">

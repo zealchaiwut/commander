@@ -4165,6 +4165,24 @@ def _neon_ticket_status(
         _neon_sprint_json_write(json_path, data)
 
 
+def _regenerate_status_md(cfg: Optional["SprintConfig"], dry_run: bool = False) -> None:
+    """Regenerate STATUS.md at the project root after sprint completes (#584)."""
+    if dry_run:
+        return
+    script = SCRIPTS_DIR / "generate_status.py"
+    if not script.exists():
+        structured_log.warning("status_md_skip", "generate_status.py not found; skipping STATUS.md regeneration")
+        return
+    try:
+        subprocess.run(
+            [sys.executable, str(script)],
+            check=False,
+            timeout=60,
+        )
+    except Exception as exc:
+        structured_log.warning("status_md_error", f"STATUS.md regeneration failed: {exc}")
+
+
 def _neon_sprint_status(sprint_label: str, neon_status: str, sprints_dir: Path) -> None:
     """Update sprint Neon status + patch the sprint JSON mirror."""
     _neon_update("update_sprint_status", sprint_label, neon_status)
@@ -5214,6 +5232,9 @@ def main() -> None:
             ended_at=datetime.now(timezone.utc).isoformat(),
             end_reason="natural",
         )
+
+    # Regenerate STATUS.md after sprint closes (#584)
+    _regenerate_status_md(cfg=cfg, dry_run=args.dry_run)
 
     # Dispatch documenter after sprint summary, before sprint PR (issue #165)
     if not args.skip_documenter and not args.dry_run and state.issues:

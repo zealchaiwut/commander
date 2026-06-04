@@ -1446,11 +1446,20 @@ def get_test_report(issue_id: int, repo: Optional[str] = None):
         raise HTTPException(400, detail=str(e))
 
 
+@app.get("/api/estimator/health")
+def estimator_health():
+    """Check whether the estimator agent (claude CLI) is available."""
+    import shutil
+    available = shutil.which("claude") is not None
+    return {"available": available}
+
+
 @app.post("/api/issues/{issue_id}/estimate")
-def estimate_issue_on_demand(request: Request, issue_id: int, repo: str):
+def estimate_issue_on_demand(request: Request, issue_id: int, repo: str, force: bool = True):
     """Run the issue estimator on demand and apply the size label.
 
     Returns {"ok": True, "size": "S"|"M"|"L"|"XL"} on success.
+    The force param is accepted for API compatibility; the endpoint always runs fresh.
     """
     _slog.event("route.entry", project="dashboard", request_id=request.state.request_id,
                 route="/api/issues/{issue_id}/estimate", method="POST", issue_id=issue_id)
@@ -5285,27 +5294,45 @@ def get_estimates_batch(project: str, issues: str = ""):
       - project: repo slug (owner/repo)
       - issues: comma-separated issue numbers, e.g. "431,432,433"
 
-    Returns {total_hours: float|null, complete: bool, issues: {num_str: {size, confidence}|null}}.
-    complete=true when every issue has an estimate file with an estimated_hours value.
-    issues maps each number to its size/confidence, or null when the file is missing/unreadable.
+    Returns:
+      total_hours: float|null — null when any issue lacks an estimate
+      complete: bool — true when every issue has an estimate
+      issues: {num_str: {size, confidence, ...}|null}
+      total_tokens: int|null — aggregated estimated tokens; null when no issue has an estimate
+      total_cost_usd: float|null — estimated cost at Haiku 4.5 rates; null when no estimate
+      estimated_count: int — number of issues with a cached estimate
+      partial: bool — true when some but not all issues have an estimate
     """
+    # Estimated tokens per size (mirrors SIZE_TO_MINUTES * 1000 ratio from sizing.py).
+    # Haiku 4.5 blended cost: 60 % input at $0.80/M + 40 % output at $4.00/M = $2.08/M.
+    _SIZE_TOKENS: dict[str, int] = {"S": 5_000, "M": 15_000, "L": 30_000, "XL": 60_000}
+    _COST_PER_TOKEN: float = (0.80 * 0.6 + 4.00 * 0.4) / 1_000_000  # $2.08 per million
+
     issue_nums = [int(p) for p in issues.split(",") if p.strip().isdigit()]
 
     if not issue_nums:
-        return {"total_hours": 0.0, "complete": True, "issues": {}}
+        return {"total_hours": 0.0, "complete": True, "issues": {},
+                "total_tokens": None, "total_cost_usd": None,
+                "estimated_count": 0, "partial": False}
 
     try:
         project_root = _project_root_path(project)
         estimates_dir = _commander_dir(project_root) / "estimates"
         if not estimates_dir.is_dir():
             return {"total_hours": None, "complete": False,
-                    "issues": {str(n): None for n in issue_nums}}
+                    "issues": {str(n): None for n in issue_nums},
+                    "total_tokens": None, "total_cost_usd": None,
+                    "estimated_count": 0, "partial": False}
     except Exception:
         return {"total_hours": None, "complete": False,
-                "issues": {str(n): None for n in issue_nums}}
+                "issues": {str(n): None for n in issue_nums},
+                "total_tokens": None, "total_cost_usd": None,
+                "estimated_count": 0, "partial": False}
 
     total = 0.0
+    total_tokens = 0
     complete = True
+    estimated_count = 0
     per_issue: dict = {}
     for num in issue_nums:
         path = estimates_dir / f"issue-{num}.json"
@@ -5322,12 +5349,30 @@ def get_estimates_batch(project: str, issues: str = ""):
                 complete = False
             else:
                 total += float(h)
-            per_issue[str(num)] = {"size": size, "confidence": confidence}
+            tokens = _SIZE_TOKENS.get(size or "", 0)
+            total_tokens += tokens
+            estimated_count += 1
+            per_issue[str(num)] = {
+                "size": size,
+                "confidence": confidence,
+                "files_likely_affected": data.get("files_likely_affected", []),
+                "risk_flags": data.get("risk_flags", []),
+                "summary": data.get("summary", ""),
+            }
         except (json.JSONDecodeError, OSError, ValueError):
             complete = False
             per_issue[str(num)] = None
 
-    return {"total_hours": total if complete else None, "complete": complete, "issues": per_issue}
+    has_any = estimated_count > 0
+    return {
+        "total_hours": total if complete else None,
+        "complete": complete,
+        "issues": per_issue,
+        "total_tokens": total_tokens if has_any else None,
+        "total_cost_usd": total_tokens * _COST_PER_TOKEN if has_any else None,
+        "estimated_count": estimated_count,
+        "partial": has_any and estimated_count < len(issue_nums),
+    }
 
 
 @app.get("/api/sprints/{sprint_label}/state")

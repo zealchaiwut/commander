@@ -1127,6 +1127,11 @@
     .smgmt-sprint-count {
       font-size: 11px; color: var(--text-sub); font-weight: 400;
     }
+    .smgmt-sprint-token-val {
+      font-size: 11px; color: var(--text-muted); font-weight: 400;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 200px;
+      display: inline-block; vertical-align: bottom;
+    }
     .smgmt-sprint-header { justify-content: space-between; }
     .smgmt-sprint-summary {
       margin: 6px 0 4px;
@@ -1281,6 +1286,11 @@
     }
     .smgmt-ticket.drag-before { box-shadow: inset 0 2px 0 var(--blue); }
     .smgmt-ticket.drag-after  { box-shadow: inset 0 -2px 0 var(--blue); }
+    /* Size-based left border (issue #562) */
+    .smgmt-ticket[data-size="S"]  { border-left: 3px solid var(--green); }
+    .smgmt-ticket[data-size="M"]  { border-left: 3px solid var(--blue); }
+    .smgmt-ticket[data-size="L"]  { border-left: 3px solid var(--amber); }
+    .smgmt-ticket[data-size="XL"] { border-left: 3px solid var(--red); }
     .smgmt-ticket.is-selected { background: var(--blue-bg); border-left: 3px solid var(--blue); }
     .smgmt-ticket-grip {
       color: var(--text-sub); font-size: 13px; flex-shrink: 0;
@@ -2590,19 +2600,26 @@
       font-family: var(--mono);
       background: var(--surface-2); color: var(--text-sub);
     }
-    .smgmt-ticket-size-pill--S  { background: #dcfce7; color: #166534; }
-    .smgmt-ticket-size-pill--M  { background: #dbeafe; color: #1e40af; }
-    .smgmt-ticket-size-pill--L  { background: #fef9c3; color: #854d0e; }
-    .smgmt-ticket-size-pill--XL { background: #fee2e2; color: #991b1b; }
-    .smgmt-ticket-size-pill--unestimated {
-      background: var(--surface-2); color: #4b5563;
-      border: 1px dashed var(--border); font-weight: 600;
+    /* Size-colored pills (issue #562) */
+    .smgmt-ticket[data-size="S"]  .smgmt-ticket-size-pill { background: var(--green-bg); color: var(--green); }
+    .smgmt-ticket[data-size="M"]  .smgmt-ticket-size-pill { background: var(--blue-bg);  color: var(--blue); }
+    .smgmt-ticket[data-size="L"]  .smgmt-ticket-size-pill { background: var(--amber-bg); color: var(--amber); }
+    .smgmt-ticket[data-size="XL"] .smgmt-ticket-size-pill { background: var(--red-bg);   color: var(--red); }
+    /* Size legend (issue #562) */
+    .smgmt-size-legend {
+      display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+      padding: 6px 28px; border-bottom: 1px solid var(--border);
+      background: var(--bg); font-size: 11px; color: var(--text-sub);
     }
-    [data-theme="dark"] .smgmt-ticket-size-pill--S  { background: #14532d; color: #86efac; }
-    [data-theme="dark"] .smgmt-ticket-size-pill--M  { background: #1e3a5f; color: #93c5fd; }
-    [data-theme="dark"] .smgmt-ticket-size-pill--L  { background: #422006; color: #fde68a; }
-    [data-theme="dark"] .smgmt-ticket-size-pill--XL { background: #450a0a; color: #fca5a5; }
-    [data-theme="dark"] .smgmt-ticket-size-pill--unestimated { color: #9ca3af; }
+    .smgmt-size-legend-label { font-weight: 600; color: var(--text-sub); white-space: nowrap; }
+    .smgmt-size-legend-item  { display: flex; align-items: center; gap: 5px; white-space: nowrap; }
+    .smgmt-size-legend-swatch {
+      width: 10px; height: 10px; border-radius: 2px; flex-shrink: 0;
+    }
+    .smgmt-size-legend-swatch.sz-S  { background: var(--green); }
+    .smgmt-size-legend-swatch.sz-M  { background: var(--blue); }
+    .smgmt-size-legend-swatch.sz-L  { background: var(--amber); }
+    .smgmt-size-legend-swatch.sz-XL { background: var(--red); }
     .smgmt-ticket-confidence-pill {
       flex-shrink: 0;
       padding: 1px 5px; border-radius: 3px;
@@ -2647,6 +2664,10 @@
     .smgmt-ticket:hover .smgmt-reestimate-btn { opacity: 1; }
     .smgmt-reestimate-btn:hover { background: var(--blue-bg); }
     .smgmt-reestimate-btn:disabled { opacity: .4 !important; cursor: not-allowed; }
+    .smgmt-reestimate-error {
+      font-size: 10px; font-weight: 600; font-family: var(--mono);
+      color: var(--red); flex-shrink: 0; white-space: nowrap;
+    }
     .smgmt-reestimate-spinner {
       width: 12px; height: 12px; flex-shrink: 0;
       border: 2px solid rgba(37,99,235,.2);
@@ -2664,6 +2685,56 @@
     .tdp-reestimate-btn:hover { background: var(--blue-bg); }
     .tdp-reestimate-btn:disabled { opacity: .45; cursor: not-allowed; }
     .re-est-modal { width: min(360px, calc(100vw - 32px)); }
+
+    /* Estimate detail affordance + popover (issue #557) */
+    .smgmt-est-detail-btn {
+      flex-shrink: 0;
+      padding: 1px 5px; border-radius: 3px;
+      font-size: 10px; font-weight: 600;
+      font-family: var(--mono);
+      cursor: pointer; white-space: nowrap;
+      border: none; outline: none;
+    }
+    .smgmt-est-detail-btn.conf-high   { background: var(--green-bg); color: var(--green); }
+    .smgmt-est-detail-btn.conf-medium { background: var(--amber-bg); color: var(--amber); }
+    .smgmt-est-detail-btn.conf-low    { background: var(--red-bg);   color: var(--red); }
+    .smgmt-est-detail-btn:not([class*="conf-"]) { background: var(--surface-2); color: var(--text-sub); }
+    .smgmt-est-detail-btn:hover { filter: brightness(1.08); }
+    .smgmt-est-detail-btn:focus-visible { outline: 2px solid var(--blue); outline-offset: 1px; }
+    /* Risk flag warning icons — issue #559 */
+    .smgmt-risk-flag-icon {
+      flex-shrink: 0;
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 16px; height: 16px;
+      color: #d97706; font-size: 13px; cursor: default;
+    }
+    .smgmt-risk-flag-icon:focus-visible { outline: 2px solid var(--blue); outline-offset: 1px; border-radius: 2px; }
+    [data-theme="dark"] .smgmt-risk-flag-icon { color: #fbbf24; }
+    .smgmt-est-popover {
+      position: fixed; z-index: 9998;
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 8px; padding: 12px 14px; box-shadow: 0 4px 20px rgba(0,0,0,.18);
+      font-size: 12px; min-width: 220px; max-width: 300px;
+    }
+    .smgmt-est-popover.hidden { display: none; }
+    .smgmt-est-popover-title {
+      font-size: 11px; font-weight: 700; color: var(--text-sub);
+      text-transform: uppercase; letter-spacing: .04em; margin-bottom: 10px;
+    }
+    .smgmt-est-popover-row { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; margin-bottom: 6px; }
+    .smgmt-est-popover-row:last-child { margin-bottom: 0; }
+    .smgmt-est-popover-key { color: var(--text-sub); font-size: 11px; flex-shrink: 0; padding-top: 1px; }
+    .smgmt-est-popover-val { color: var(--text); text-align: right; font-size: 12px; }
+    .smgmt-est-popover-list { color: var(--text); font-size: 11px; font-family: var(--mono); text-align: right; }
+    .smgmt-est-popover-list-item { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 190px; }
+    .smgmt-est-popover-empty { color: var(--text-muted); font-style: italic; font-size: 11px; }
+    .smgmt-est-popover-flag {
+      display: inline-block; padding: 1px 6px; border-radius: 10px;
+      font-size: 10px; font-weight: 600;
+      background: var(--red-bg); color: var(--red); margin: 1px 2px 1px 0;
+    }
+    .smgmt-est-popover-divider { border: none; border-top: 1px solid var(--border); margin: 8px 0; }
+    .smgmt-est-popover-summary { color: var(--text-sub); font-size: 11px; line-height: 1.45; }
 
     /* Generic utility used by Bulk Create */
     .hidden { display: none !important; }
@@ -4142,6 +4213,15 @@
           </div>
         </div>
 
+        <!-- Size legend (issue #562) -->
+        <div class="smgmt-size-legend" id="smgmt-size-legend" aria-label="Ticket size color legend">
+          <span class="smgmt-size-legend-label">Size:</span>
+          <span class="smgmt-size-legend-item"><span class="smgmt-size-legend-swatch sz-S"></span> S — small</span>
+          <span class="smgmt-size-legend-item"><span class="smgmt-size-legend-swatch sz-M"></span> M — medium</span>
+          <span class="smgmt-size-legend-item"><span class="smgmt-size-legend-swatch sz-L"></span> L — large</span>
+          <span class="smgmt-size-legend-item"><span class="smgmt-size-legend-swatch sz-XL"></span> XL — extra large</span>
+        </div>
+
         <!-- Sprint list -->
         <div class="smgmt-content">
 
@@ -4193,6 +4273,8 @@
         <!-- Ticket row context menu (issue #500) -->
         <div class="smgmt-ctx-menu hidden" id="smgmt-ctx-menu" role="menu"></div>
 
+        <!-- Estimate detail popover (issue #557) -->
+        <div class="smgmt-est-popover hidden" id="smgmt-est-popover" role="dialog" aria-modal="false" aria-label="Estimate details"></div>
         <!-- Per-column sort menu (issue #550) -->
         <div class="smgmt-sort-menu hidden" id="smgmt-sort-menu" role="menu" aria-label="Sort column"></div>
 
@@ -4276,7 +4358,15 @@
           </span>
           <span class="bc-step-arrow"><i class="ti ti-arrow-right"></i></span>
           <span class="bc-step-chip" id="bc-chip-2" data-step="2">
-            <span class="bc-step-n">2</span> Review &amp; create
+            <span class="bc-step-n">2</span> Review
+          </span>
+          <span class="bc-step-arrow"><i class="ti ti-arrow-right"></i></span>
+          <span class="bc-step-chip" id="bc-chip-3" data-step="3">
+            <span class="bc-step-n">3</span> Created
+          </span>
+          <span class="bc-step-arrow"><i class="ti ti-arrow-right"></i></span>
+          <span class="bc-step-chip" id="bc-chip-4" data-step="4">
+            <span class="bc-step-n">4</span> Estimate
           </span>
         </div>
 
@@ -5001,6 +5091,10 @@ const _smgmtOutcomeCache = {};
 const _estDataCache = {};
 // Groups last rendered in the tickets kanban view (used for rollup updates)
 let _ticketGroups = [];
+// Sprint ticket map for token header reactivity: label → [ticket, ...]
+let _smgmtBySprint = {};
+// Reverse lookup: issueNum (int) → sprint label
+const _smgmtTicketToSprint = {};
 
 // ── Running sprint live state (issue #277) ────────────────────────────────
 // Set of sprint labels that are currently running, populated on each render
@@ -6478,6 +6572,7 @@ function _smgmtRender(data) {
       unassigned.push(iss);
     }
   });
+  _smgmtBySprint = bySprint;
 
   // Always render the backlog pane regardless of sprint count
   _smgmtRenderBacklog(unassigned);
@@ -6543,6 +6638,8 @@ function _smgmtRender(data) {
   // Load estimated hours from .commander/estimates/ for each sprint header
   _smgmtLoadEstimates(orderedLabels, bySprint);
 
+  // Check estimator availability and inject re-estimate buttons (issue #561)
+  _smgmtCheckEstimatorHealth();
   // Load sprint goals for header summary
   _smgmtLoadGoals(orderedLabels);
 
@@ -6869,6 +6966,8 @@ async function _smgmtLoadEstimates(orderedLabels, bySprint) {
   for (const label of orderedLabels) {
     const tickets = bySprint[label] || [];
     if (tickets.length === 0) continue;
+    // Populate reverse lookup for reactivity
+    for (const t of tickets) _smgmtTicketToSprint[t.number] = label;
     const issueNums = tickets.map(t => t.number).join(',');
     try {
       const resp = await fetch(
@@ -6876,6 +6975,13 @@ async function _smgmtLoadEstimates(orderedLabels, bySprint) {
       );
       if (!resp.ok) continue;
       const data = await resp.json();
+      const estEl = document.getElementById(`smgmt-est-${label}`);
+      if (estEl && data.complete && data.total_hours !== null) {
+        const h = data.total_hours;
+        const display = Number.isInteger(h) ? `${h}h` : `${parseFloat(h.toFixed(1))}h`;
+        estEl.textContent = `${display} estimated`;
+      }
+      _smgmtSetSprintTokenEl(label, data);
       // Cache per-issue size/confidence and update visible rows
       if (data.issues) {
         for (const [numStr, est] of Object.entries(data.issues)) {
@@ -6892,6 +6998,49 @@ async function _smgmtLoadEstimates(orderedLabels, bySprint) {
   }
 }
 
+function _smgmtSetSprintTokenEl(label, data) {
+  const el = document.getElementById(`smgmt-tokens-${label}`);
+  if (!el) return;
+  const tokens = data.total_tokens;
+  const cost   = data.total_cost_usd;
+  if (tokens === null || tokens === undefined || (data.estimated_count ?? 0) === 0) {
+    el.style.display = 'none';
+    el.textContent = '';
+    return;
+  }
+  const partialStr = data.partial ? ' (partial)' : '';
+  const tokFmt  = tokens.toLocaleString();
+  const costFmt = cost !== null && cost !== undefined
+    ? ` · ~$${cost < 0.01 ? cost.toFixed(4) : cost.toFixed(2)}`
+    : '';
+  el.textContent = ` · ~${tokFmt} tokens${partialStr}${costFmt}`;
+  el.style.display = 'inline-block';
+}
+
+async function _smgmtRefreshSprintTokens(issueNum) {
+  const label = _smgmtTicketToSprint[issueNum];
+  if (!label) return;
+  const tickets = _smgmtBySprint[label] || [];
+  if (tickets.length === 0) return;
+  const repo = _smgmtRepo();
+  if (!repo) return;
+  try {
+    const issueNums = tickets.map(t => t.number).join(',');
+    const resp = await fetch(
+      `/api/estimates/batch?project=${encodeURIComponent(repo)}&issues=${issueNums}`
+    );
+    if (!resp.ok) return;
+    const data = await resp.json();
+    const estEl = document.getElementById(`smgmt-est-${label}`);
+    if (estEl && data.complete && data.total_hours !== null) {
+      const h = data.total_hours;
+      const display = Number.isInteger(h) ? `${h}h` : `${parseFloat(h.toFixed(1))}h`;
+      estEl.textContent = `${display} estimated`;
+    }
+    _smgmtSetSprintTokenEl(label, data);
+  } catch (_) { /* fail silently */ }
+}
+
 function _capitalizeFirst(s) {
   return s ? s.charAt(0).toUpperCase() + s.slice(1).toLowerCase() : '';
 }
@@ -6900,12 +7049,27 @@ function _smgmtEstimateBadgeHtml(issueNum) {
   if (!Object.prototype.hasOwnProperty.call(_estDataCache, issueNum)) return '';
   const est = _estDataCache[issueNum];
   if (!est) return '<span class="smgmt-ticket-no-estimate">Not Estimated</span>';
-  let html = '';
-  if (est.confidence) {
-    const confClass = `conf-${est.confidence.toLowerCase()}`;
-    html += `<span class="smgmt-ticket-confidence-pill ${escHtml(confClass)}">${escHtml(_capitalizeFirst(est.confidence))}</span>`;
-  }
-  return html;
+  if (!est.confidence && !est.size) return '';
+  const confClass = est.confidence ? `conf-${est.confidence.toLowerCase()}` : '';
+  const label = est.confidence ? _capitalizeFirst(est.confidence) : (est.size || 'Est');
+  return `<button class="smgmt-est-detail-btn ${escHtml(confClass)}" tabindex="0"
+    title="View estimate details"
+    onclick="event.stopPropagation();_smgmtEstimatePopoverOpen(event,${issueNum})"
+    onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();_smgmtEstimatePopoverOpen(event,${issueNum});}">
+    ${escHtml(label)}</button>`;
+}
+
+const _RISK_FLAGS_SERIOUS = ['touches-db-schema', 'security-sensitive', 'breaks-tests'];
+
+function _smgmtRiskFlagIconsHtml(issueNum) {
+  if (!Object.prototype.hasOwnProperty.call(_estDataCache, issueNum)) return '';
+  const est = _estDataCache[issueNum];
+  if (!est || !Array.isArray(est.risk_flags)) return '';
+  return est.risk_flags
+    .filter(f => _RISK_FLAGS_SERIOUS.includes(f))
+    .map(f => `<span class="smgmt-risk-flag-icon" tabindex="0" role="img"
+      aria-label="${escHtml(f)}" title="${escHtml(f)}"><i class="ti ti-alert-triangle"></i></span>`)
+    .join('');
 }
 
 async function _smgmtLoadGoals(orderedLabels) {
@@ -6936,24 +7100,35 @@ function _smgmtUpdateEstimateBadge(issueNum) {
   const row = document.getElementById(`smgmt-ticket-${issueNum}`);
   if (!row) return;
 
-  row.querySelector('.smgmt-ticket-confidence-pill')?.remove();
+  row.querySelector('.smgmt-est-detail-btn')?.remove();
   row.querySelector('.smgmt-ticket-no-estimate')?.remove();
+  row.querySelectorAll('.smgmt-risk-flag-icon').forEach(el => el.remove());
 
   const est = Object.prototype.hasOwnProperty.call(_estDataCache, issueNum)
     ? _estDataCache[issueNum] : undefined;
   if (est === undefined) return;
 
-  if (est && est.confidence) {
-    const confClass = `conf-${est.confidence.toLowerCase()}`;
-    const confEl = document.createElement('span');
-    confEl.className = `smgmt-ticket-confidence-pill ${confClass}`;
-    confEl.textContent = _capitalizeFirst(est.confidence);
+  if (est && (est.confidence || est.size)) {
+    const confClass = est.confidence ? `conf-${est.confidence.toLowerCase()}` : '';
+    const label = est.confidence ? _capitalizeFirst(est.confidence) : (est.size || 'Est');
+    const btn = document.createElement('button');
+    btn.className = `smgmt-est-detail-btn ${confClass}`.trim();
+    btn.textContent = label;
+    btn.tabIndex = 0;
+    btn.title = 'View estimate details';
+    btn.onclick = (ev) => { ev.stopPropagation(); _smgmtEstimatePopoverOpen(ev, issueNum); };
+    btn.onkeydown = (ev) => {
+      if (ev.key === 'Enter' || ev.key === ' ') {
+        ev.preventDefault(); ev.stopPropagation();
+        _smgmtEstimatePopoverOpen(ev, issueNum);
+      }
+    };
     const sizePill = row.querySelector('.smgmt-ticket-size-pill');
     if (sizePill) {
-      sizePill.after(confEl);
+      sizePill.after(btn);
     } else {
       const titleEl = row.querySelector('.smgmt-ticket-title');
-      if (titleEl) titleEl.after(confEl);
+      if (titleEl) titleEl.after(btn);
     }
   } else if (est === null) {
     const noEstEl = document.createElement('span');
@@ -6962,6 +7137,28 @@ function _smgmtUpdateEstimateBadge(issueNum) {
     const sizePill = row.querySelector('.smgmt-ticket-size-pill');
     const anchor = sizePill || row.querySelector('.smgmt-ticket-title');
     if (anchor) anchor.after(noEstEl);
+  }
+
+  // Insert risk flag icons after estimate badge (or size pill / title if no badge)
+  if (est && Array.isArray(est.risk_flags)) {
+    const seriousFlags = est.risk_flags.filter(f => _RISK_FLAGS_SERIOUS.includes(f));
+    if (seriousFlags.length > 0) {
+      const anchor = row.querySelector('.smgmt-est-detail-btn')
+        || row.querySelector('.smgmt-ticket-size-pill')
+        || row.querySelector('.smgmt-ticket-title');
+      if (anchor) {
+        seriousFlags.slice().reverse().forEach(f => {
+          const span = document.createElement('span');
+          span.className = 'smgmt-risk-flag-icon';
+          span.tabIndex = 0;
+          span.setAttribute('role', 'img');
+          span.setAttribute('aria-label', f);
+          span.title = f;
+          span.innerHTML = '<i class="ti ti-alert-triangle"></i>';
+          anchor.after(span);
+        });
+      }
+    }
   }
 }
 
@@ -7971,9 +8168,11 @@ function _smgmtRunningCardHtml(label, n, tickets) {
 
     const issueUrl = t.url || (cardRepo ? `https://github.com/${cardRepo}/issues/${t.number}` : '#');
 
-    const sizePillHtml = (liveIss && liveIss.size)
-      ? `<span class="smgmt-ticket-size-pill" title="≈${liveIss.minutes || _sizeMinutes(liveIss.size)} min">${escHtml(liveIss.size)}</span>`
+    const sizeVal = (liveIss && liveIss.size) || t.size || '';
+    const sizePillHtml = sizeVal
+      ? `<span class="smgmt-ticket-size-pill" title="≈${(liveIss && liveIss.minutes) || _sizeMinutes(sizeVal)} min">${escHtml(sizeVal)}</span>`
       : '';
+    const runSizeAttr = sizeVal ? ` data-size="${escHtml(sizeVal)}"` : '';
     const agentTagHtml = (liveIss && liveIss.agent)
       ? `<span class="smgmt-ticket-agent-tag ${_smgmtAgentTagClass(liveIss.agent)}">${escHtml(liveIss.agent.toUpperCase())}</span>`
       : '';
@@ -7983,7 +8182,7 @@ function _smgmtRunningCardHtml(label, n, tickets) {
       : '';
 
     const runTicketLabels = escHtml((t.labels || []).map(l => l.name).join(','));
-    return `<div class="smgmt-ticket" data-issue="${t.number}" data-labels="${runTicketLabels}" draggable="false">
+    return `<div class="smgmt-ticket" data-issue="${t.number}" data-labels="${runTicketLabels}" draggable="false"${runSizeAttr}>
       ${indicator}
       <a class="smgmt-ticket-num" href="${escHtml(issueUrl)}" target="_blank"
          rel="noopener">#${t.number}</a>
@@ -8237,6 +8436,7 @@ function _smgmtLivePatch(label, live) {
         const row = document.createElement('div');
         row.className = 'smgmt-ticket';
         row.dataset.issue = String(t.number);
+        if (t.size) row.dataset.size = t.size;
         row.draggable = false;
         const initSizePill = t.size
           ? `<span class="smgmt-ticket-size-pill" title="≈${t.minutes || _sizeMinutes(t.size)} min">${escHtml(t.size)}</span>` : '';
@@ -8284,8 +8484,10 @@ function _smgmtLivePatch(label, live) {
       }
       sizePillEl.textContent = liveIss.size;
       sizePillEl.title = `≈${liveIss.minutes || _sizeMinutes(liveIss.size)} min`;
+      row.dataset.size = liveIss.size;
     } else if (sizePillEl) {
       sizePillEl.remove();
+      delete row.dataset.size;
     }
 
     // Update agent tag — only on tickets with an active agent
@@ -8405,12 +8607,18 @@ function _smgmtTicketRowHtml(ticket, label) {
 
   const sizeLabel = (ticket.labels || []).find(l => /^size-[SMLX]+$/.test(l.name));
   const hasEstimate = !!sizeLabel;
-  // Size badge: show from GitHub label immediately; _smgmtApplySizeBadges overlays JSON data after load
-  const sizeVal = sizeLabel ? sizeLabel.name.replace('size-', '') : null;
-  const sizePillHtml = sizeVal
-    ? `<span class="smgmt-ticket-size-pill smgmt-ticket-size-pill--${escHtml(sizeVal)}" title="≈${_sizeMinutes(sizeVal)} min">${escHtml(sizeVal)}</span>`
+  const sizeValue = sizeLabel ? sizeLabel.name.replace('size-', '') : '';
+  const sizePillHtml = sizeLabel
+    ? `<span class="smgmt-ticket-size-pill">${escHtml(sizeValue)}</span>`
     : '';
+  const sizeAttr = sizeValue ? ` data-size="${escHtml(sizeValue)}"` : '';
   const estimateBadgeHtml = _smgmtEstimateBadgeHtml(ticket.number);
+  const reEstBtnHtml = (hasEstimate && _smgmtEstimatorAvailable)
+    ? `<button class="smgmt-reestimate-btn" tabindex="0" title="Re-estimate this ticket"
+         onclick="event.stopPropagation();_smgmtReEstimate(${ticket.number},this)"
+         onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();_smgmtReEstimate(${ticket.number},this);}">Re-estimate</button>`
+    : '';
+  const riskFlagIconsHtml = _smgmtRiskFlagIconsHtml(ticket.number);
 
   const ticketLabelNames = (ticket.labels || []).map(l => l.name).join(',');
 
@@ -8419,7 +8627,7 @@ function _smgmtTicketRowHtml(ticket, label) {
          tabindex="-1"
          draggable="true"
          data-issue="${ticket.number}"
-         data-sprint="${escHtml(label)}"
+         data-sprint="${escHtml(label)}"${sizeAttr}
          data-labels="${escHtml(ticketLabelNames)}"
          ondragstart="_smgmtTicketDragStart(event, ${ticket.number}, '${escHtml(label)}')"
          ondragend="_smgmtTicketDragEnd(event)"
@@ -8436,7 +8644,7 @@ function _smgmtTicketRowHtml(ticket, label) {
       <a class="smgmt-ticket-num" href="${escHtml(ticket.url || '#')}" target="_blank"
          rel="noopener" draggable="false" onclick="event.stopPropagation()">#${ticket.number}</a>
       <span class="smgmt-ticket-title" title="${escHtml(ticket.title)}">${escHtml(ticket.title)}</span>
-      ${sizePillHtml}${estimateBadgeHtml}
+      ${sizePillHtml}${estimateBadgeHtml}${riskFlagIconsHtml}${reEstBtnHtml}
       <span class="smgmt-ticket-status ${statusClass}">${escHtml(statusLabel)}</span>
       <button class="btn-view-log" tabindex="0" title="View issue log"
               onclick="event.stopPropagation();openLvIssueLog(${ticket.number},'${escHtml(label)}',_smgmtRepo()||'')">
@@ -8471,11 +8679,13 @@ async function _smgmtRetryEstimation(issueNum, btn) {
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const data = await resp.json();
     if (!data.ok || !data.size) throw new Error('no size');
+    const retryRow = spinner.closest('.smgmt-ticket');
     const pill = document.createElement('span');
     pill.className = 'smgmt-ticket-size-pill';
     pill.textContent = data.size;
     pill.title = `≈${data.minutes || _sizeMinutes(data.size)} min`;
     spinner.replaceWith(pill);
+    if (retryRow) retryRow.dataset.size = data.size;
   } catch (_) {
     const newBtn = document.createElement('button');
     newBtn.className = 'smgmt-retry-pill';
@@ -8490,9 +8700,37 @@ async function _smgmtRetryEstimation(issueNum, btn) {
   }
 }
 
-// ── Re-estimate action (issue #452) ───────────────────────────────────────────
+// ── Re-estimate action (issue #452, extended by #561) ────────────────────────
 let _reEstIssueNum = null;
 let _reEstRowBtn   = null;
+let _smgmtEstimatorAvailable = false;
+let _smgmtEstimatorHealthChecked = false;
+
+async function _smgmtCheckEstimatorHealth() {
+  if (_smgmtEstimatorHealthChecked) return;
+  _smgmtEstimatorHealthChecked = true;
+  try {
+    const resp = await fetch('/api/estimator/health');
+    if (!resp.ok) return;
+    const data = await resp.json();
+    if (data.available) {
+      _smgmtEstimatorAvailable = true;
+      _smgmtInjectReEstimateButtons();
+    }
+  } catch (_) {}
+}
+
+function _smgmtInjectReEstimateButtons() {
+  document.querySelectorAll('.smgmt-ticket').forEach(row => {
+    if (!row.querySelector('.smgmt-ticket-size-pill')) return;
+    if (row.querySelector('.smgmt-reestimate-btn, .smgmt-reestimate-spinner, .smgmt-reestimate-error')) return;
+    const issueNum = parseInt(row.dataset.issue, 10);
+    if (!issueNum) return;
+    const statusEl = row.querySelector('.smgmt-ticket-status');
+    if (statusEl) statusEl.before(_makeReEstimateBtn(issueNum));
+    else row.appendChild(_makeReEstimateBtn(issueNum));
+  });
+}
 
 function _makeReEstimateBtn(issueNum) {
   const btn = document.createElement('button');
@@ -8557,7 +8795,7 @@ async function _smgmtReEstimateRun(issueNum, rowBtn) {
 
   try {
     const resp = await fetch(
-      `/api/issues/${issueNum}/estimate?repo=${encodeURIComponent(repo)}`,
+      `/api/issues/${issueNum}/estimate?repo=${encodeURIComponent(repo)}&force=true`,
       { method: 'POST' }
     );
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
@@ -8572,9 +8810,14 @@ async function _smgmtReEstimateRun(issueNum, rowBtn) {
         pill.textContent = data.size;
         pill.title = `≈${data.minutes || _sizeMinutes(data.size)} min`;
       }
+      row.dataset.size = data.size;
     }
     // Restore row re-estimate button
     if (rowSpinner) rowSpinner.replaceWith(_makeReEstimateBtn(issueNum));
+
+    // Update local cache and sprint token header
+    if (_estDataCache[issueNum]) _estDataCache[issueNum].size = data.size;
+    _smgmtRefreshSprintTokens(issueNum);
 
     // Update detail panel
     if (tdpBtn) {
@@ -8597,11 +8840,17 @@ async function _smgmtReEstimateRun(issueNum, rowBtn) {
       }
     }
   } catch (err) {
-    // Restore row button
-    if (rowSpinner) rowSpinner.replaceWith(_makeReEstimateBtn(issueNum));
+    // Show inline error near the button, then restore it after 3 s
+    if (rowSpinner) {
+      const errBadge = document.createElement('span');
+      errBadge.className = 'smgmt-reestimate-error';
+      errBadge.title = err.message;
+      errBadge.textContent = 'Failed';
+      rowSpinner.replaceWith(errBadge);
+      setTimeout(() => errBadge.replaceWith(_makeReEstimateBtn(issueNum)), 3000);
+    }
     // Restore detail panel button
     if (tdpBtn) { tdpBtn.disabled = false; tdpBtn.textContent = 'Re-estimate'; }
-    _smgmtShowToast(`Re-estimate failed: ${err.message}`);
   }
 }
 
@@ -8654,6 +8903,105 @@ function _smgmtCtxMenuClose() {
   _ctxMenuIssueNum = null;
   document.removeEventListener('click',       _smgmtCtxMenuOutsideHandler);
   document.removeEventListener('contextmenu', _smgmtCtxMenuOutsideHandler);
+}
+
+// ── Estimate detail popover (issue #557) ─────────────────────────────────────
+
+let _estPopoverIssueNum = null;
+
+function _smgmtEstimatePopoverOpen(event, issueNum) {
+  const popover = document.getElementById('smgmt-est-popover');
+  if (!popover) return;
+
+  const est = _estDataCache[issueNum];
+  if (!est) return;
+
+  _estPopoverIssueNum = issueNum;
+
+  const sizeStr = est.size || '<span class="smgmt-est-popover-empty">—</span>';
+  const confStr = est.confidence
+    ? _capitalizeFirst(est.confidence)
+    : '<span class="smgmt-est-popover-empty">—</span>';
+
+  const files = Array.isArray(est.files_likely_affected) ? est.files_likely_affected : [];
+  const filesHtml = files.length
+    ? `<span class="smgmt-est-popover-list">${files.map(f =>
+        `<span class="smgmt-est-popover-list-item" title="${escHtml(f)}">${escHtml(f)}</span>`
+      ).join('')}</span>`
+    : '<span class="smgmt-est-popover-empty">None listed</span>';
+
+  const flags = Array.isArray(est.risk_flags) ? est.risk_flags : [];
+  const flagsHtml = flags.length
+    ? flags.map(f => `<span class="smgmt-est-popover-flag">${escHtml(f)}</span>`).join('')
+    : '<span class="smgmt-est-popover-empty">No risk flags</span>';
+
+  const summaryHtml = est.summary
+    ? `<hr class="smgmt-est-popover-divider">
+       <div class="smgmt-est-popover-summary">${escHtml(est.summary)}</div>`
+    : '';
+
+  popover.innerHTML = `
+    <div class="smgmt-est-popover-title">Estimate #${issueNum}</div>
+    <div class="smgmt-est-popover-row">
+      <span class="smgmt-est-popover-key">Size</span>
+      <span class="smgmt-est-popover-val">${sizeStr}</span>
+    </div>
+    <div class="smgmt-est-popover-row">
+      <span class="smgmt-est-popover-key">Confidence</span>
+      <span class="smgmt-est-popover-val">${confStr}</span>
+    </div>
+    <div class="smgmt-est-popover-row" style="align-items:flex-start">
+      <span class="smgmt-est-popover-key">Files</span>
+      ${filesHtml}
+    </div>
+    <div class="smgmt-est-popover-row" style="align-items:flex-start;flex-wrap:wrap">
+      <span class="smgmt-est-popover-key" style="width:100%;margin-bottom:4px">Risk flags</span>
+      <div>${flagsHtml}</div>
+    </div>
+    ${summaryHtml}`;
+
+  popover.classList.remove('hidden');
+
+  // Position: prefer below the button, flip up if off-screen
+  const btn = event.currentTarget || event.target;
+  const rect = btn.getBoundingClientRect ? btn.getBoundingClientRect() : null;
+  const popW = 300;
+  const popH = 220;
+  let left, top;
+  if (rect) {
+    left = rect.left + window.scrollX;
+    top  = rect.bottom + window.scrollY + 4;
+    if (rect.left + popW > window.innerWidth) left = Math.max(4, rect.right + window.scrollX - popW);
+    if (rect.bottom + popH > window.innerHeight) top = rect.top + window.scrollY - popH - 4;
+  } else {
+    left = event.clientX + window.scrollX;
+    top  = event.clientY + window.scrollY + 4;
+  }
+  popover.style.left = left + 'px';
+  popover.style.top  = top  + 'px';
+
+  setTimeout(() => {
+    document.addEventListener('click',   _smgmtEstimatePopoverOutside);
+    document.addEventListener('keydown', _smgmtEstimatePopoverKeydown);
+  }, 0);
+}
+
+function _smgmtEstimatePopoverOutside(event) {
+  const popover = document.getElementById('smgmt-est-popover');
+  if (!popover || popover.contains(event.target)) return;
+  _smgmtEstimatePopoverClose();
+}
+
+function _smgmtEstimatePopoverKeydown(event) {
+  if (event.key === 'Escape') _smgmtEstimatePopoverClose();
+}
+
+function _smgmtEstimatePopoverClose() {
+  const popover = document.getElementById('smgmt-est-popover');
+  if (popover) popover.classList.add('hidden');
+  _estPopoverIssueNum = null;
+  document.removeEventListener('click',   _smgmtEstimatePopoverOutside);
+  document.removeEventListener('keydown', _smgmtEstimatePopoverKeydown);
 }
 
 // ── Sprint action handlers ─────────────────────────────────────────────────
@@ -12173,23 +12521,32 @@ function _bcPopulateRepo() {
   }
 }
 
+// Highlight a single chip (1=Input, 2=Review, 3=Created, 4=Estimate) and mark
+// earlier chips as completed so the rail reads as a progress trail.
+function _bcSetActiveChip(n) {
+  for (let i = 1; i <= 4; i++) {
+    const chip = document.getElementById(`bc-chip-${i}`);
+    if (!chip) continue;
+    chip.classList.toggle('active', i === n);
+    chip.classList.toggle('done', i < n);
+  }
+}
+
 function _bcShowStep(n) {
   const step1 = document.getElementById('bc-step1');
   const step2 = document.getElementById('bc-step2');
-  const chip1 = document.getElementById('bc-chip-1');
-  const chip2 = document.getElementById('bc-chip-2');
-  if (!step1 || !step2 || !chip1 || !chip2) return;
+  if (!step1 || !step2) return;
 
   if (n === 1) {
     step1.classList.remove('hidden');
     step2.classList.add('hidden');
-    chip1.classList.add('active');
-    chip2.classList.remove('active');
+    _bcSetActiveChip(1);
   } else {
     step1.classList.add('hidden');
     step2.classList.remove('hidden');
-    chip1.classList.remove('active');
-    chip2.classList.add('active');
+    // The active chip within step 2 (Review/Created/Estimate) is derived from
+    // job state in _bcRenderStep2.
+    _bcSetActiveChip(2);
   }
 }
 
@@ -12867,9 +13224,9 @@ function _bcUpdateBadge() {
     badge.className = 'bc-tab-badge';
     badge.innerHTML = `<span class="bc-tab-badge-spin">&#x27F3;</span>${fullyDone}/${total}`;
   } else if (job.status === 'drafts_ready') {
-    const draftCount = tickets.filter(t => t.state === 'draft_ready').length;
-    badge.className = 'bc-tab-badge';
-    badge.textContent = `${draftCount} ready`;
+    const draftReady = tickets.filter(t => t.state === 'draft_ready').length;
+    badge.className = 'bc-tab-badge bc-tab-badge--ready';
+    badge.textContent = draftReady > 0 ? `${draftReady} to review` : 'review';
   } else if (job.status === 'done' || job.status === 'stopped') {
     const issues = failed + sizeWarn + estimateFailed;
     if (issues > 0) {
@@ -12941,6 +13298,19 @@ function _bcRenderStep2() {
   const total        = tickets.length;
   // Terminal states: sized, estimate_failed, failed, skipped
   const fullyDone    = sized + estimateFailed + failed + skipped;
+
+  // Drive the step rail (Input → Review → Created → Estimate) from job state.
+  const anyCreated   = created > 0 || estimating > 0 || sized > 0 || estimateFailed > 0;
+  const anyEstimate  = estimating > 0 || sized > 0 || estimateFailed > 0;
+  if (job.status === 'drafts_ready') {
+    _bcSetActiveChip(2);                 // waiting on user review
+  } else if (anyEstimate) {
+    _bcSetActiveChip(4);                 // estimation underway / done
+  } else if (anyCreated) {
+    _bcSetActiveChip(3);                 // issues being created
+  } else {
+    _bcSetActiveChip(2);                 // BA still drafting → review phase
+  }
 
   // Banner
   const banner = document.getElementById('bc-parallel-banner');

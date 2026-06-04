@@ -4105,6 +4105,10 @@
                 aria-selected="false" onclick="switchTab('sprint-history')">
           <i class="ti ti-history"></i>Sprint history
         </button>
+        <button class="stab" role="tab" id="stab-est-vs-actual"
+                aria-selected="false" onclick="switchTab('est-vs-actual')">
+          <i class="ti ti-ruler-measure"></i>Est vs Actual
+        </button>
       </nav>
       <!-- Sprint status pill (GitHub-backed; works cross-machine while traveling) -->
       <div class="snav-wrap">
@@ -4700,6 +4704,21 @@
         </div>
       </div>
 
+      <!-- Estimate vs Actual tab (issue #575) -->
+      <div class="tab-pane" id="pane-est-vs-actual" role="tabpanel" aria-labelledby="stab-est-vs-actual">
+        <div class="cmp-page-hdr">
+          <h2><i class="ti ti-ruler-measure" style="margin-right:8px;vertical-align:-2px;"></i>Estimate vs Actual</h2>
+          <p>Compare estimated size against actual agent time for finished sprints.</p>
+        </div>
+        <div class="cmp-picker-row">
+          <span class="cmp-picker-label">Sprint</span>
+          <select class="cmp-picker-select" id="eva-select" onchange="evaOnPickerChange()">
+            <option value="">— select sprint —</option>
+          </select>
+        </div>
+        <div id="eva-result"></div>
+      </div>
+
       <!-- Metrics tab (issue #476) -->
       <div class="tab-pane" id="pane-metrics" role="tabpanel" aria-labelledby="stab-metrics">
         <div class="metrics-page-hdr">
@@ -5061,13 +5080,14 @@ function parseUrl() {
   const slug = decodeURIComponent(m[1]);
   const rawTab = m[2] || '';
   const hash = window.location.hash;
-  const tab = (rawTab === 'tickets')        ? 'tickets'
-            : (rawTab === 'logs')           ? 'logs'
-            : (rawTab === 'bulk-create')    ? 'bulk-create'
-            : (rawTab === 'timeline')       ? 'timeline'
-            : (rawTab === 'compare')        ? 'compare'
-            : (rawTab === 'sprint-history') ? 'sprint-history'
-            : (hash === '#compare')         ? 'compare'
+  const tab = (rawTab === 'tickets')          ? 'tickets'
+            : (rawTab === 'logs')             ? 'logs'
+            : (rawTab === 'bulk-create')      ? 'bulk-create'
+            : (rawTab === 'timeline')         ? 'timeline'
+            : (rawTab === 'compare')          ? 'compare'
+            : (rawTab === 'sprint-history')   ? 'sprint-history'
+            : (rawTab === 'est-vs-actual')    ? 'est-vs-actual'
+            : (hash === '#compare')           ? 'compare'
             : 'sprint-mgmt';
   return { slug, tab };
 }
@@ -5135,7 +5155,7 @@ function switchTab(tab, pushHistory) {
   _activeTab = tab;
 
   // Update aria-selected + active class on tabs
-  ['sprint-mgmt', 'tickets', 'logs', 'bulk-create', 'timeline', 'compare', 'metrics', 'sprint-history'].forEach(t => {
+  ['sprint-mgmt', 'tickets', 'logs', 'bulk-create', 'timeline', 'compare', 'metrics', 'sprint-history', 'est-vs-actual'].forEach(t => {
     const btn = document.getElementById('stab-' + t);
     if (!btn) return;
     const isActive = t === tab;
@@ -5144,7 +5164,7 @@ function switchTab(tab, pushHistory) {
   });
 
   // Show/hide panes
-  ['sprint-mgmt', 'tickets', 'logs', 'bulk-create', 'timeline', 'compare', 'metrics', 'sprint-history'].forEach(t => {
+  ['sprint-mgmt', 'tickets', 'logs', 'bulk-create', 'timeline', 'compare', 'metrics', 'sprint-history', 'est-vs-actual'].forEach(t => {
     const pane = document.getElementById('pane-' + t);
     if (pane) pane.classList.toggle('active', t === tab);
   });
@@ -5201,11 +5221,16 @@ function switchTab(tab, pushHistory) {
   if (tab === 'metrics') {
     metricsInit();
   }
+
+  // Init estimate-vs-actual tab
+  if (tab === 'est-vs-actual') {
+    evaInit();
+  }
 }
 
 // ── Keyboard navigation for sub-tabs ─────────────────────────────────────────
 document.getElementById('sub-tabs').addEventListener('keydown', function(e) {
-  const enabledTabs = ['sprint-mgmt', 'tickets', 'logs', 'bulk-create', 'timeline', 'compare', 'sprint-history'];
+  const enabledTabs = ['sprint-mgmt', 'tickets', 'logs', 'bulk-create', 'timeline', 'compare', 'sprint-history', 'est-vs-actual'];
   const focused = document.activeElement;
   const currentId = focused ? focused.id.replace('stab-', '') : null;
   const currentIdx = enabledTabs.indexOf(currentId);
@@ -16276,6 +16301,124 @@ document.addEventListener('keydown', function(e) {
       if (wrap) wrap.innerHTML = '<div class="gantt-empty">Failed to load timeline.</div>';
     }
   };
+}());
+
+// ── Estimate vs Actual tab (issue #575) ───────────────────────────────────────
+(function () {
+  let _evaInitialized = false;
+  let _evaFinishedSprints = [];
+
+  window.evaInit = async function () {
+    if (_evaInitialized) { _evaRenderPicker(); return; }
+    _evaInitialized = true;
+    await _evaLoadSprints();
+    _evaRenderPicker();
+  };
+
+  async function _evaLoadSprints() {
+    try {
+      const params = _slug ? `?project=${encodeURIComponent(_slug)}` : '';
+      const resp = await fetch('/api/logs/runs' + params);
+      if (!resp.ok) throw new Error('fetch failed');
+      const data = await resp.json();
+      _evaFinishedSprints = (data.items || [])
+        .filter(r => r.sprint_label)
+        .sort((a, b) => a.sprint_label.localeCompare(b.sprint_label, undefined, { numeric: true }));
+    } catch (_) {
+      _evaFinishedSprints = [];
+    }
+  }
+
+  function _evaRenderPicker() {
+    const sel = document.getElementById('eva-select');
+    if (!sel) return;
+    const prev = sel.value;
+    sel.innerHTML = '<option value="">— select sprint —</option>';
+    for (const run of _evaFinishedSprints) {
+      const opt = document.createElement('option');
+      opt.value = run.sprint_label;
+      opt.textContent = run.sprint_label;
+      sel.appendChild(opt);
+    }
+    if (prev && [...sel.options].some(o => o.value === prev)) sel.value = prev;
+    if (_evaFinishedSprints.length === 0) {
+      document.getElementById('eva-result').innerHTML = _evaEmpty('No finished sprints', 'Complete a sprint to see estimate data.');
+    }
+  }
+
+  window.evaOnPickerChange = async function () {
+    const sel = document.getElementById('eva-select');
+    const label = sel ? sel.value : '';
+    const resultEl = document.getElementById('eva-result');
+    if (!label) { resultEl.innerHTML = ''; return; }
+    resultEl.innerHTML = '<div style="padding:24px;color:var(--text-sub);font-size:13px;">Loading…</div>';
+    try {
+      const project = _slug || '';
+      const resp = await fetch(`/api/sprints/${encodeURIComponent(label)}/estimate-vs-actual?project=${encodeURIComponent(project)}`);
+      if (resp.status === 404) {
+        const err = await resp.json().catch(() => ({}));
+        resultEl.innerHTML = _evaEmpty('Not available', err.detail || 'Sprint is not finished or data is missing.');
+        return;
+      }
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const data = await resp.json();
+      resultEl.innerHTML = _evaRenderTable(data);
+    } catch (err) {
+      resultEl.innerHTML = _evaEmpty('Error', `Could not load data: ${escHtml(err.message)}`);
+    }
+  };
+
+  function _evaRenderTable(data) {
+    const tickets = data.tickets || [];
+    if (tickets.length === 0) {
+      return _evaEmpty('No tickets', 'This sprint has no ticket data recorded.');
+    }
+
+    const rows = tickets.map(t => {
+      const estSize = t.estimated_size ? `<span class="smgmt-ticket-size-pill">${escHtml(t.estimated_size)}</span>` : '<span style="color:var(--text-sub)">—</span>';
+      const estMin  = t.estimated_minutes != null ? `${t.estimated_minutes}m` : '—';
+      const actMin  = t.actual_elapsed_minutes != null ? `${t.actual_elapsed_minutes}m` : '—';
+      let deltaHtml = '—';
+      if (t.delta_minutes != null) {
+        const sign = t.delta_minutes > 0 ? '+' : '';
+        const color = t.delta_minutes > 5 ? 'var(--red)' : t.delta_minutes < -5 ? 'var(--green)' : 'var(--text)';
+        deltaHtml = `<span style="color:${color};font-weight:600">${sign}${t.delta_minutes}m</span>`;
+      }
+      const statusChip = `<span class="smgmt-outcome-chip ${escHtml(t.status || '')}" style="font-size:10px;padding:1px 6px">${escHtml(t.status || 'unknown')}</span>`;
+      return `<tr>
+        <td style="font-variant-numeric:tabular-nums;color:var(--text-sub)">#${t.ticket_id || '?'}</td>
+        <td style="max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(t.title || '')}</td>
+        <td style="text-align:center">${estSize}</td>
+        <td style="text-align:center">${escHtml(estMin)}</td>
+        <td style="text-align:center">${escHtml(actMin)}</td>
+        <td style="text-align:center">${deltaHtml}</td>
+        <td style="text-align:center">${statusChip}</td>
+      </tr>`;
+    }).join('');
+
+    return `
+      <table class="cmp-ticket-table" style="margin-top:20px">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Title</th>
+            <th style="text-align:center">Est size</th>
+            <th style="text-align:center">Est min</th>
+            <th style="text-align:center">Actual min</th>
+            <th style="text-align:center">Delta</th>
+            <th style="text-align:center">Status</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>`;
+  }
+
+  function _evaEmpty(title, msg) {
+    return `<div style="padding:40px 28px;text-align:center;color:var(--text-sub)">
+      <div style="font-weight:600;font-size:14px;margin-bottom:6px">${escHtml(title)}</div>
+      <div style="font-size:13px">${escHtml(msg)}</div>
+    </div>`;
+  }
 }());
 
 // ── Metrics tab (issue #476) ──────────────────────────────────────────────────

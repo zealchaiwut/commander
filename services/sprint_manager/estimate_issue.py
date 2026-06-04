@@ -341,14 +341,52 @@ def apply_label(issue_num: int, repo: str, size: str) -> None:
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
+def estimate_draft_file(draft_path: Path) -> None:
+    """Estimate an unposted draft from a JSON file of {title, body}.
+
+    Used by bulk-create to size a draft *before* the GitHub issue exists, so
+    sizes can inform sprint assignment. Runs the same text-based estimator as a
+    real issue (it only reads title+body), then prints the estimate JSON to
+    stdout. No GitHub writes, no label/comment, no cache file — the caller owns
+    persistence (the size label is applied at post time).
+    """
+    try:
+        draft = json.loads(draft_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as e:
+        print(f"Error: could not read draft file {draft_path}: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    issue_data = {"title": draft.get("title", ""), "body": draft.get("body", "")}
+    # issue_num=0 → used only for logging/body_hash; the estimate is text-based.
+    estimate, err = run_estimator(0, issue_data)
+    if not estimate:
+        print(f"Error: draft estimation failed ({err})", file=sys.stderr)
+        sys.exit(1)
+    estimate.pop("issue_number", None)  # no issue yet
+    print(json.dumps(estimate))
+
+
 def main() -> None:
     p = argparse.ArgumentParser(description="Estimate a GitHub issue via the Issue Estimator agent.")
-    p.add_argument("--issue", "-i", type=int, required=True, help="Issue number")
+    p.add_argument("--issue", "-i", type=int, default=None, help="Issue number")
     p.add_argument("--repo", "-r", default=None, help="owner/repo (auto-detected if omitted)")
     p.add_argument("--save-comment", action="store_true", help="Post structured estimate as issue comment")
     p.add_argument("--save-label", action="store_true", help="Apply size-S/M/L/XL label to issue")
     p.add_argument("--force", action="store_true", help="Re-run estimator even if cached result exists")
+    p.add_argument("--draft-file", default=None,
+                   help="Estimate an unposted draft from a JSON file {title, body}; prints estimate to stdout")
     args = p.parse_args()
+
+    # Draft mode: size text before any issue exists (bulk-create pre-post estimate).
+    if args.draft_file:
+        _run_id = mint_run_id("manual")
+        os.environ["COMMANDER_RUN_ID"] = _run_id
+        structured_log.set_context(run_id=_run_id, source="manual")
+        estimate_draft_file(Path(args.draft_file))
+        return
+
+    if args.issue is None:
+        p.error("--issue is required unless --draft-file is given")
 
     # Mint or adopt run_id for this invocation
     _run_id = mint_run_id("manual")

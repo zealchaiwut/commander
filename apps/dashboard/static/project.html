@@ -1244,6 +1244,11 @@
       display: flex; align-items: center; gap: 8px;
       padding: 9px 16px; background: var(--surface); font-size: 12px;
       cursor: default; transition: background 0.15s, box-shadow 0.12s;
+      /* WebKit/Safari starts a TEXT selection instead of an element drag when a
+         draggable="true" row contains selectable text, so dragging silently
+         fails (Chrome drags fine). Suppressing text selection lets the native
+         drag initiate. The #num link/title remain clickable. */
+      -webkit-user-select: none; user-select: none;
     }
     .smgmt-ticket:hover { background: var(--surface-hover); }
     .smgmt-ticket[draggable="true"]:hover { cursor: grab; }

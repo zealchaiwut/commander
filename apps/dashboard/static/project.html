@@ -3660,6 +3660,75 @@
     }
     .pf-cycle-banner strong { font-weight: 700; }
 
+    /* Mis-sizing flags section (issue #578) */
+    .pf-flags-section { margin-top: 16px; }
+    .pf-flags-label {
+      font-size: 11px; font-weight: 600; text-transform: uppercase;
+      letter-spacing: .06em; color: #b45309; margin-bottom: 8px;
+    }
+    .pf-flag-item {
+      margin-bottom: 10px; padding: 10px 12px;
+      background: rgba(234, 179, 8, .07); border: 1px solid rgba(234, 179, 8, .35);
+      border-radius: 6px;
+    }
+    .pf-flag-item.resolved {
+      background: rgba(34, 197, 94, .06); border-color: rgba(34, 197, 94, .35);
+    }
+    .pf-flag-header {
+      display: flex; align-items: center; gap: 8px; margin-bottom: 5px;
+    }
+    .pf-flag-id {
+      font-family: var(--font-mono, monospace); font-size: 12px;
+      color: var(--text-muted); flex-shrink: 0;
+    }
+    .pf-flag-title {
+      font-size: 13px; font-weight: 500; color: var(--text); flex: 1; min-width: 0;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .pf-flag-badge {
+      font-size: 11px; padding: 2px 8px; border-radius: 99px; flex-shrink: 0;
+    }
+    .pf-flag-badge-pending {
+      background: rgba(234, 179, 8, .15); color: #92400e;
+      border: 1px solid rgba(234, 179, 8, .4);
+    }
+    .pf-flag-badge-resolved {
+      background: rgba(34, 197, 94, .12); color: #166534;
+      border: 1px solid rgba(34, 197, 94, .4);
+    }
+    .pf-flag-details {
+      font-size: 12px; color: var(--text-muted); margin-bottom: 8px; line-height: 1.6;
+    }
+    .pf-flag-details strong { color: var(--text); }
+    .pf-flag-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+    .pf-flag-action-btn {
+      font-size: 12px; padding: 3px 10px; border-radius: 5px;
+      border: 1px solid var(--border); background: none;
+      color: var(--text); font-family: inherit; cursor: pointer;
+      transition: background .1s, border-color .1s;
+    }
+    .pf-flag-action-btn:hover { background: var(--surface-hover, rgba(0,0,0,.05)); }
+    .pf-flag-action-btn.approve { border-color: rgba(34,197,94,.5); color: #166534; }
+    .pf-flag-action-btn.approve:hover { background: rgba(34,197,94,.08); }
+    .pf-flag-action-btn.dismiss { color: var(--text-muted); }
+    .pf-flag-size-picker {
+      display: flex; gap: 5px; align-items: center; margin-top: 6px; flex-wrap: wrap;
+    }
+    .pf-flag-size-btn {
+      font-size: 12px; padding: 3px 12px; border-radius: 5px;
+      border: 1px solid var(--border); background: none;
+      color: var(--text); font-family: inherit; cursor: pointer;
+      transition: background .1s, border-color .1s;
+    }
+    .pf-flag-size-btn:hover { background: var(--surface-hover, rgba(0,0,0,.05)); border-color: var(--blue); }
+    .pf-flag-size-cancel {
+      font-size: 12px; padding: 3px 8px; border: none; background: none;
+      color: var(--text-muted); cursor: pointer; font-family: inherit;
+    }
+    .pf-flag-resolved-note {
+      font-size: 12px; color: var(--text-muted); font-style: italic; margin-top: 4px;
+    }
+
     /* ── Logs tab (issue #420) ── */
     .logs-pane { display: flex; flex-direction: column; height: 100%; min-height: 0; }
     .logs-toolbar {
@@ -9168,6 +9237,7 @@ let _pfState        = 'idle'; // 'loading' | 'success' | 'error'
 let _pfDagData      = null;
 let _pfWarnings     = null;
 let _pfCycle        = null;
+let _pfFlags        = null;  // mis-sizing flags (issue #578)
 let _pfSelectedIds  = new Set();
 
 function _pfOpen(label) {
@@ -9192,6 +9262,7 @@ function _pfReset() {
   _pfDagData = null;
   _pfWarnings = null;
   _pfCycle = null;
+  _pfFlags = null;
   _pfSelectedIds = new Set();
 }
 
@@ -9204,6 +9275,7 @@ function _pfClose() {
   _pfDagData      = null;
   _pfWarnings     = null;
   _pfCycle        = null;
+  _pfFlags        = null;
   _pfSelectedIds  = new Set();
 }
 
@@ -9218,9 +9290,10 @@ async function _pfFetch() {
     if (!res.ok) throw new Error(await res.text());
     if (_pfCurrentLabel !== label) return;
     const data = await res.json();
-    _pfDagData  = data.dag      || null;
-    _pfWarnings = data.warnings || null;
-    _pfCycle    = data.cycle    || null;
+    _pfDagData  = data.dag              || null;
+    _pfWarnings = data.warnings         || null;
+    _pfCycle    = data.cycle            || null;
+    _pfFlags    = data.mis_sizing_flags || null;
     if (_pfDagData) {
       for (const t of (_pfDagData.tickets || [])) _pfSelectedIds.add(t.id);
     }
@@ -9242,12 +9315,14 @@ function _pfShowSuccess() {
     : '';
   const warningsHtml  = _pfBuildWarningsHtml();
   const cycleHtml     = _pfBuildCycleHtml();
+  const flagsHtml     = _pfBuildFlagsHtml();
   const conflictsHtml = _pfBuildConflictsHtml();
   const orderHtml     = _pfBuildOrderHtml();
   document.getElementById('pf-content').innerHTML =
     `<p style="font-size:13px;color:var(--text);margin:0;">Ready to run <strong>Sprint ${n}</strong>.</p>
      ${warningsHtml}
      ${cycleHtml}
+     ${flagsHtml}
      ${dagHtml}
      <div class="pf-section">
        <div class="pf-section-label">Conflicts</div>
@@ -9259,19 +9334,29 @@ function _pfShowSuccess() {
      </div>`;
   document.getElementById('pf-content').classList.remove('hidden');
   document.getElementById('pf-footer').classList.remove('hidden');
-  const hasCycle  = !!(_pfCycle && _pfCycle.length);
-  const confirmBtn = document.getElementById('pf-confirm-btn');
-  confirmBtn.disabled = hasCycle;
-  if (hasCycle) {
-    confirmBtn.title = 'Cannot run: dependency cycle detected. Resolve the cycle first.';
-    confirmBtn.setAttribute('aria-label', 'Run Sprint — disabled: dependency cycle detected');
-  } else {
-    confirmBtn.title = '';
-    confirmBtn.setAttribute('aria-label', 'Run Sprint');
-  }
+  _pfUpdateConfirmBtn();
   document.getElementById('pf-cancel-btn').focus();
   if (_pfDagData && (_pfDagData.edges || []).length > 0) {
     requestAnimationFrame(() => _pfDrawDAGArrows(_pfDagData.edges));
+  }
+}
+
+function _pfUpdateConfirmBtn() {
+  const hasCycle = !!(_pfCycle && _pfCycle.length);
+  const pendingFlags = (_pfFlags && (_pfFlags.flags || []).filter(f => f.status === 'pending')) || [];
+  const hasPending = pendingFlags.length > 0;
+  const confirmBtn = document.getElementById('pf-confirm-btn');
+  if (!confirmBtn) return;
+  confirmBtn.disabled = hasCycle || hasPending;
+  if (hasCycle) {
+    confirmBtn.title = 'Cannot run: dependency cycle detected. Resolve the cycle first.';
+    confirmBtn.setAttribute('aria-label', 'Run Sprint — disabled: dependency cycle detected');
+  } else if (hasPending) {
+    confirmBtn.title = `Cannot run: ${pendingFlags.length} mis-sizing flag${pendingFlags.length > 1 ? 's' : ''} need review.`;
+    confirmBtn.setAttribute('aria-label', 'Run Sprint — disabled: mis-sizing flags need review');
+  } else {
+    confirmBtn.title = '';
+    confirmBtn.setAttribute('aria-label', 'Run Sprint');
   }
 }
 
@@ -9303,6 +9388,140 @@ function _pfBuildCycleHtml() {
     <strong>Cycle detected:</strong> ${escHtml(_pfCycle.join(' → '))}
   </div>`;
 }
+
+// ── Mis-sizing flags section (issue #578) ───────────────────────────────────
+
+function _pfBuildFlagsHtml() {
+  const flags = _pfFlags && (_pfFlags.flags || []);
+  if (!flags || !flags.length) return '';
+
+  const label = _pfCurrentLabel;
+  const repo  = _pfCurrentRepo;
+
+  const rows = flags.map(f => {
+    const num = f.issue_number;
+    const resolved = f.status !== 'pending';
+    const itemClass = resolved ? 'pf-flag-item resolved' : 'pf-flag-item';
+
+    const estLabel = f.current_estimate
+      ? `${escHtml(f.current_estimate)} (${f.current_estimate_minutes ?? '?'} min)`
+      : 'unknown';
+    const avgLabel = f.historical_avg_actual_size
+      ? `${escHtml(f.historical_avg_actual_size)} (${f.historical_avg_actual_minutes ?? '?'} min avg)`
+      : 'unknown';
+    const drivingLabels = (f.driving_labels || []).map(l => `<code>${escHtml(l)}</code>`).join(', ');
+    const eventCount = f.mis_sizing_event_count || 0;
+
+    let badgeHtml = '';
+    let actionsHtml = '';
+    if (resolved) {
+      const actionText = { approved: 'Approved', reestimated: 'Re-estimated', dismissed: 'Dismissed' }[f.status] || f.status;
+      badgeHtml = `<span class="pf-flag-badge pf-flag-badge-resolved">${escHtml(actionText)}</span>`;
+      const noteText = f.action_note ? ` — ${escHtml(f.action_note)}` : '';
+      const newSizeText = f.new_size ? ` New size: ${escHtml(f.new_size)}.` : '';
+      actionsHtml = `<div class="pf-flag-resolved-note">${escHtml(actionText)}${newSizeText}${noteText}</div>`;
+    } else {
+      badgeHtml = `<span class="pf-flag-badge pf-flag-badge-pending">Review needed</span>`;
+      actionsHtml = `
+        <div class="pf-flag-actions" id="pf-flag-actions-${num}">
+          <button class="pf-flag-action-btn approve" onclick="_pfFlagAction(${num}, 'approved')">Approve</button>
+          <button class="pf-flag-action-btn" onclick="_pfFlagShowSizePicker(${num}, '${escHtml(f.current_estimate || 'S')}')">Re-estimate</button>
+          <button class="pf-flag-action-btn dismiss" onclick="_pfFlagAction(${num}, 'dismissed')">Dismiss</button>
+        </div>
+        <div id="pf-flag-picker-${num}" style="display:none">
+          <div class="pf-flag-size-picker">
+            <span style="font-size:12px;color:var(--text-muted);">New size:</span>
+            ${['S','M','L','XL'].map(s =>
+              `<button class="pf-flag-size-btn" onclick="_pfFlagReestimate(${num}, '${s}')">${s}</button>`
+            ).join('')}
+            <button class="pf-flag-size-cancel" onclick="_pfFlagHidePicker(${num})">Cancel</button>
+          </div>
+        </div>`;
+    }
+
+    return `<div class="${itemClass}" id="pf-flag-item-${num}">
+      <div class="pf-flag-header">
+        <span class="pf-flag-id">#${num}</span>
+        <span class="pf-flag-title" title="${escHtml(f.title)}">${escHtml(f.title)}</span>
+        ${badgeHtml}
+      </div>
+      <div class="pf-flag-details">
+        Estimate: <strong>${estLabel}</strong> ·
+        Historical avg: <strong>${avgLabel}</strong> ·
+        ${eventCount} mis-sizing event${eventCount !== 1 ? 's' : ''} on: ${drivingLabels}
+      </div>
+      ${actionsHtml}
+    </div>`;
+  });
+
+  const pending = flags.filter(f => f.status === 'pending').length;
+  const subtitle = pending > 0
+    ? `${pending} ticket${pending > 1 ? 's' : ''} flagged for review`
+    : 'All flags resolved';
+
+  return `<div class="pf-flags-section" id="pf-flags-section">
+    <div class="pf-flags-label">Mis-sizing review — ${subtitle}</div>
+    ${rows.join('')}
+  </div>`;
+}
+
+function _pfFlagShowSizePicker(num, currentSize) {
+  const actionsEl = document.getElementById(`pf-flag-actions-${num}`);
+  const pickerEl  = document.getElementById(`pf-flag-picker-${num}`);
+  if (actionsEl) actionsEl.style.display = 'none';
+  if (pickerEl)  pickerEl.style.display  = 'block';
+}
+
+function _pfFlagHidePicker(num) {
+  const actionsEl = document.getElementById(`pf-flag-actions-${num}`);
+  const pickerEl  = document.getElementById(`pf-flag-picker-${num}`);
+  if (actionsEl) actionsEl.style.display = '';
+  if (pickerEl)  pickerEl.style.display  = 'none';
+}
+
+async function _pfFlagAction(num, action, newSize) {
+  const label = _pfCurrentLabel;
+  const repo  = _pfCurrentRepo;
+  if (!label || !repo) return;
+
+  // Disable buttons to prevent double-click
+  const itemEl = document.getElementById(`pf-flag-item-${num}`);
+  if (itemEl) itemEl.querySelectorAll('button').forEach(b => { b.disabled = true; });
+
+  try {
+    const body = { action };
+    if (newSize) body.new_size = newSize;
+    const res = await fetch(
+      `/api/sprints/${encodeURIComponent(label)}/mis-sizing-flags/${num}/action?project=${encodeURIComponent(repo)}`,
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
+    );
+    if (!res.ok) {
+      const err = await res.text();
+      _smgmtShowToast(`Flag action failed: ${err}`, 'error');
+      if (itemEl) itemEl.querySelectorAll('button').forEach(b => { b.disabled = false; });
+      return;
+    }
+    const data = await res.json();
+    // Update local state and re-render flags section
+    _pfFlags = data;
+    const flagsSection = document.getElementById('pf-flags-section');
+    if (flagsSection) {
+      const newHtml = _pfBuildFlagsHtml();
+      flagsSection.outerHTML = newHtml || '<div id="pf-flags-section"></div>';
+    }
+    _pfUpdateConfirmBtn();
+  } catch (e) {
+    _smgmtShowToast('Flag action failed: ' + e.message, 'error');
+    if (itemEl) itemEl.querySelectorAll('button').forEach(b => { b.disabled = false; });
+  }
+}
+
+function _pfFlagReestimate(num, newSize) {
+  _pfFlagHidePicker(num);
+  _pfFlagAction(num, 'reestimated', newSize);
+}
+
+// ────────────────────────────────────────────────────────────────────────────
 
 function _pfBuildDAGHtml(dag) {
   const ticketMap = {};

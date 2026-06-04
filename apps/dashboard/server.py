@@ -5759,6 +5759,99 @@ def get_sprint_estimate_vs_actual(sprint_label: str, project: str):
     }
 
 
+# ── Estimator calibration view (issue #576) ──────────────────────────────────
+
+@app.get("/api/calibration")
+def get_calibration(project: str):
+    """Return average actual time per size bucket across all finished sprints.
+
+    Scans every sprint-N-state.json in the project's .commander/sprints/
+    directory, matches each ticket's actual elapsed time with its cached
+    size estimate, then averages by bucket.
+
+    Response schema:
+      {
+        "buckets": {
+          "S":  { "avg_minutes": 8.5, "count": 5, "canonical_minutes": 5 },
+          "M":  { "avg_minutes": 18.2, "count": 3, "canonical_minutes": 15 },
+          "L":  { "avg_minutes": null, "count": 0, "canonical_minutes": 30 },
+          "XL": { "avg_minutes": null, "count": 0, "canonical_minutes": 60 }
+        }
+      }
+    avg_minutes is null for buckets with no completed tickets that have
+    both a size estimate and a recorded actual time.
+    """
+    project_root = _project_root_path(project)
+    commander = _commander_dir(project_root)
+    sprints_dir = commander / "sprints"
+    estimates_dir = commander / "estimates"
+
+    def _parse_ts(s: Optional[str]) -> Optional[float]:
+        if not s:
+            return None
+        try:
+            dt = datetime.fromisoformat(s.rstrip("Z"))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt.timestamp()
+        except Exception:
+            return None
+
+    # Accumulate (total_minutes, count) per bucket
+    buckets_raw: dict[str, list[float]] = {"S": [], "M": [], "L": [], "XL": []}
+
+    if sprints_dir.exists():
+        for state_path in sprints_dir.glob("sprint-*-state.json"):
+            try:
+                state_data = json.loads(state_path.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError):
+                continue
+
+            for iss in state_data.get("issues", []):
+                issue_num = iss.get("number")
+                if issue_num is None:
+                    continue
+
+                # Only count tickets that were actually completed
+                if iss.get("status") not in ("done", "passed"):
+                    continue
+
+                start_ts = _parse_ts(iss.get("coder_started_at"))
+                end_ts = (
+                    _parse_ts(iss.get("tester_finished_at"))
+                    or _parse_ts(iss.get("status_changed_at"))
+                )
+                if start_ts is None or end_ts is None:
+                    continue
+                elapsed_minutes = max(0.0, end_ts - start_ts) / 60.0
+
+                est_path = estimates_dir / f"issue-{issue_num}.json"
+                if not est_path.exists():
+                    continue
+                try:
+                    est_data = json.loads(est_path.read_text(encoding="utf-8"))
+                except (json.JSONDecodeError, OSError):
+                    continue
+
+                size = est_data.get("size") or None
+                if size not in buckets_raw:
+                    continue
+
+                buckets_raw[size].append(elapsed_minutes)
+
+    canonical = {"S": 5, "M": 15, "L": 30, "XL": 60}
+    result_buckets: dict[str, dict] = {}
+    for size in ("S", "M", "L", "XL"):
+        vals = buckets_raw[size]
+        result_buckets[size] = {
+            "avg_minutes": round(sum(vals) / len(vals), 1) if vals else None,
+            "count":       len(vals),
+            "canonical_minutes": canonical[size],
+        }
+
+    return {"buckets": result_buckets}
+
+
 def _has_rework_tickets(sprint_label: str, project: str) -> bool:
     """Return True if any open issue in the sprint carries a needs-rework label."""
     try:

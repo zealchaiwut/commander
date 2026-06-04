@@ -647,6 +647,74 @@
     @keyframes cmp-spin { to { transform: rotate(360deg); } }
     .cmp-spin { display: inline-block; animation: cmp-spin .9s linear infinite; }
 
+    /* ── Calibration tab (issue #576) ── */
+    .calib-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 16px;
+      padding: 0 0 32px;
+    }
+    .calib-bucket {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 20px 20px 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .calib-bucket-size {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      color: var(--text-sub);
+    }
+    .calib-bucket-avg {
+      font-size: 28px;
+      font-weight: 700;
+      color: var(--text);
+      line-height: 1.1;
+    }
+    .calib-bucket-avg.calib-no-data {
+      font-size: 14px;
+      font-weight: 400;
+      color: var(--text-sub);
+      font-style: italic;
+    }
+    .calib-bucket-unit {
+      font-size: 12px;
+      color: var(--text-sub);
+      margin-left: 3px;
+    }
+    .calib-bucket-canonical {
+      font-size: 11px;
+      color: var(--text-sub);
+    }
+    .calib-bucket-count {
+      font-size: 11px;
+      color: var(--text-sub);
+    }
+    .calib-bias {
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+      font-size: 11px;
+      font-weight: 600;
+      padding: 1px 6px;
+      border-radius: 4px;
+      margin-top: 2px;
+      width: fit-content;
+    }
+    .calib-bias-over  { background: var(--red-bg);   color: var(--red); }
+    .calib-bias-under { background: var(--green-bg); color: var(--green); }
+    .calib-bias-ok    { background: var(--surface);  color: var(--text-sub); border: 1px solid var(--border); }
+    .calib-section-note {
+      font-size: 12px;
+      color: var(--text-sub);
+      margin-bottom: 20px;
+    }
+
     /* Placeholder text */
     .placeholder-msg {
       padding: 48px 0;
@@ -4109,6 +4177,10 @@
                 aria-selected="false" onclick="switchTab('est-vs-actual')">
           <i class="ti ti-ruler-measure"></i>Est vs Actual
         </button>
+        <button class="stab" role="tab" id="stab-calibration"
+                aria-selected="false" onclick="switchTab('calibration')">
+          <i class="ti ti-adjustments-horizontal"></i>Calibration
+        </button>
       </nav>
       <!-- Sprint status pill (GitHub-backed; works cross-machine while traveling) -->
       <div class="snav-wrap">
@@ -4719,6 +4791,17 @@
         <div id="eva-result"></div>
       </div>
 
+      <!-- Calibration tab (issue #576) -->
+      <div class="tab-pane" id="pane-calibration" role="tabpanel" aria-labelledby="stab-calibration">
+        <div class="cmp-page-hdr">
+          <h2><i class="ti ti-adjustments-horizontal" style="margin-right:8px;vertical-align:-2px;"></i>Estimator Calibration</h2>
+          <p>Average actual agent time per size bucket across all finished sprints in this project.</p>
+        </div>
+        <div id="calib-result">
+          <div style="padding:24px;color:var(--text-sub);font-size:13px;">Loading…</div>
+        </div>
+      </div>
+
       <!-- Metrics tab (issue #476) -->
       <div class="tab-pane" id="pane-metrics" role="tabpanel" aria-labelledby="stab-metrics">
         <div class="metrics-page-hdr">
@@ -5087,6 +5170,7 @@ function parseUrl() {
             : (rawTab === 'compare')          ? 'compare'
             : (rawTab === 'sprint-history')   ? 'sprint-history'
             : (rawTab === 'est-vs-actual')    ? 'est-vs-actual'
+            : (rawTab === 'calibration')      ? 'calibration'
             : (hash === '#compare')           ? 'compare'
             : 'sprint-mgmt';
   return { slug, tab };
@@ -5155,7 +5239,7 @@ function switchTab(tab, pushHistory) {
   _activeTab = tab;
 
   // Update aria-selected + active class on tabs
-  ['sprint-mgmt', 'tickets', 'logs', 'bulk-create', 'timeline', 'compare', 'metrics', 'sprint-history', 'est-vs-actual'].forEach(t => {
+  ['sprint-mgmt', 'tickets', 'logs', 'bulk-create', 'timeline', 'compare', 'metrics', 'sprint-history', 'est-vs-actual', 'calibration'].forEach(t => {
     const btn = document.getElementById('stab-' + t);
     if (!btn) return;
     const isActive = t === tab;
@@ -5164,7 +5248,7 @@ function switchTab(tab, pushHistory) {
   });
 
   // Show/hide panes
-  ['sprint-mgmt', 'tickets', 'logs', 'bulk-create', 'timeline', 'compare', 'metrics', 'sprint-history', 'est-vs-actual'].forEach(t => {
+  ['sprint-mgmt', 'tickets', 'logs', 'bulk-create', 'timeline', 'compare', 'metrics', 'sprint-history', 'est-vs-actual', 'calibration'].forEach(t => {
     const pane = document.getElementById('pane-' + t);
     if (pane) pane.classList.toggle('active', t === tab);
   });
@@ -5226,11 +5310,16 @@ function switchTab(tab, pushHistory) {
   if (tab === 'est-vs-actual') {
     evaInit();
   }
+
+  // Init calibration tab
+  if (tab === 'calibration') {
+    calibInit();
+  }
 }
 
 // ── Keyboard navigation for sub-tabs ─────────────────────────────────────────
 document.getElementById('sub-tabs').addEventListener('keydown', function(e) {
-  const enabledTabs = ['sprint-mgmt', 'tickets', 'logs', 'bulk-create', 'timeline', 'compare', 'sprint-history', 'est-vs-actual'];
+  const enabledTabs = ['sprint-mgmt', 'tickets', 'logs', 'bulk-create', 'timeline', 'compare', 'sprint-history', 'est-vs-actual', 'calibration'];
   const focused = document.activeElement;
   const currentId = focused ? focused.id.replace('stab-', '') : null;
   const currentIdx = enabledTabs.indexOf(currentId);
@@ -16418,6 +16507,89 @@ document.addEventListener('keydown', function(e) {
       <div style="font-weight:600;font-size:14px;margin-bottom:6px">${escHtml(title)}</div>
       <div style="font-size:13px">${escHtml(msg)}</div>
     </div>`;
+  }
+}());
+
+// ── Calibration tab (issue #576) ─────────────────────────────────────────────
+(function () {
+  let _calibLoaded = false;
+
+  window.calibInit = async function () {
+    if (_calibLoaded) return;
+    _calibLoaded = true;
+    await _calibLoad();
+  };
+
+  async function _calibLoad() {
+    const resultEl = document.getElementById('calib-result');
+    if (!resultEl) return;
+    resultEl.innerHTML = '<div style="padding:24px;color:var(--text-sub);font-size:13px;">Loading…</div>';
+    try {
+      const project = _slug || '';
+      const resp = await fetch(`/api/calibration?project=${encodeURIComponent(project)}`);
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const data = await resp.json();
+      resultEl.innerHTML = _calibRender(data);
+    } catch (err) {
+      resultEl.innerHTML = `<div style="padding:40px 28px;text-align:center;color:var(--text-sub)">
+        <div style="font-weight:600;font-size:14px;margin-bottom:6px">Error</div>
+        <div style="font-size:13px">${escHtml(err.message)}</div>
+      </div>`;
+    }
+  }
+
+  function _calibRender(data) {
+    const buckets = data.buckets || {};
+    const sizes = ['S', 'M', 'L', 'XL'];
+    const canonicalLabel = { S: '5m canonical', M: '15m canonical', L: '30m canonical', XL: '60m canonical' };
+
+    const cards = sizes.map(size => {
+      const b = buckets[size] || {};
+      const avg = b.avg_minutes;
+      const count = b.count || 0;
+      const canonical = b.canonical_minutes;
+
+      let avgHtml;
+      if (avg == null) {
+        avgHtml = `<div class="calib-bucket-avg calib-no-data">No data yet</div>`;
+      } else {
+        const formatted = avg >= 60
+          ? `${(avg / 60).toFixed(1)}<span class="calib-bucket-unit">h</span>`
+          : `${avg}<span class="calib-bucket-unit">m</span>`;
+        avgHtml = `<div class="calib-bucket-avg">${formatted}</div>`;
+      }
+
+      let biasHtml = '';
+      if (avg != null && canonical != null) {
+        const delta = avg - canonical;
+        const pct = Math.round((delta / canonical) * 100);
+        const sign = delta > 0 ? '+' : '';
+        if (Math.abs(pct) <= 15) {
+          biasHtml = `<span class="calib-bias calib-bias-ok">≈ on target</span>`;
+        } else if (delta > 0) {
+          biasHtml = `<span class="calib-bias calib-bias-over">${sign}${pct}% over</span>`;
+        } else {
+          biasHtml = `<span class="calib-bias calib-bias-under">${sign}${pct}% under</span>`;
+        }
+      }
+
+      const countStr = count === 1 ? '1 ticket' : `${count} tickets`;
+
+      return `<div class="calib-bucket">
+        <div class="calib-bucket-size">${escHtml(size)}</div>
+        ${avgHtml}
+        ${biasHtml}
+        <div class="calib-bucket-canonical">${escHtml(canonicalLabel[size])}</div>
+        <div class="calib-bucket-count">${avg != null ? escHtml(countStr) : 'No completed tickets'}</div>
+      </div>`;
+    }).join('');
+
+    const hasAny = sizes.some(s => (buckets[s] || {}).count > 0);
+    const note = hasAny
+      ? `<p class="calib-section-note">Based on tickets with both a size estimate and recorded agent timestamps. Bias &gt;15% from canonical triggers a flag.</p>`
+      : `<p class="calib-section-note">No completed tickets with recorded times yet. Run a sprint to see calibration data.</p>`;
+
+    return `${note}<div class="calib-grid">${cards}</div>`;
   }
 }());
 

@@ -11248,6 +11248,8 @@ async function smgmtOpenNewTicket() {
   document.getElementById('nt-warn-label').classList.add('hidden');
   document.getElementById('nt-warn-attach').classList.add('hidden');
   document.getElementById('nt-error').classList.add('hidden');
+  document.getElementById('nt-title-error').classList.add('hidden');
+  document.getElementById('nt-body-error').classList.add('hidden');
   document.getElementById('nt-submit-btn').disabled = false;
   document.getElementById('nt-submit-btn').textContent = 'Generate Draft';
   document.getElementById('nt-draft-section').classList.add('hidden');
@@ -11446,6 +11448,18 @@ function _setupModals() {
     }
   });
 
+  // Live-clear per-field errors once constraint is satisfied
+  document.getElementById('nt-title').addEventListener('input', function() {
+    if ((this.value || '').trim()) {
+      document.getElementById('nt-title-error').classList.add('hidden');
+    }
+  });
+  document.getElementById('nt-body').addEventListener('input', function() {
+    if ((this.value || '').trim().length >= 20) {
+      document.getElementById('nt-body-error').classList.add('hidden');
+    }
+  });
+
   document.getElementById('nt-submit-btn').addEventListener('click', async function() {
     const repo = document.getElementById('nt-project').value;
     const description = (document.getElementById('nt-description').value || '').trim();
@@ -11491,13 +11505,29 @@ function _setupModals() {
   });
 
   document.getElementById('nt-post-btn').addEventListener('click', async function() {
-    const title = (document.getElementById('nt-title').value || '').trim();
-    const repo = document.getElementById('nt-project').value;
+    const titleEl    = document.getElementById('nt-title');
+    const bodyEl     = document.getElementById('nt-body');
+    const titleErrEl = document.getElementById('nt-title-error');
+    const bodyErrEl  = document.getElementById('nt-body-error');
+    const title = (titleEl.value || '').trim();
+    const body  = (bodyEl.value  || '').trim();
+    const repo  = document.getElementById('nt-project').value;
+    let hasError = false;
     if (!title) {
-      document.getElementById('nt-error').textContent = 'Title is required before posting.';
-      document.getElementById('nt-error').classList.remove('hidden');
-      return;
+      titleErrEl.textContent = 'Title is required.';
+      titleErrEl.classList.remove('hidden');
+      hasError = true;
+    } else {
+      titleErrEl.classList.add('hidden');
     }
+    if (body.length < 20) {
+      bodyErrEl.textContent = 'Description must be at least 20 characters.';
+      bodyErrEl.classList.remove('hidden');
+      hasError = true;
+    } else {
+      bodyErrEl.classList.add('hidden');
+    }
+    if (hasError) return;
 
     this.disabled = true;
     this.innerHTML = '<span class="nt-spinner"></span>Posting…';
@@ -14695,8 +14725,10 @@ document.addEventListener('keydown', function(e) {
     <div class="nt-draft-divider"></div>
     <div class="modal-body">
       <div class="modal-field">
-        <label class="modal-label" for="nt-title">Title</label>
-        <input class="modal-input" id="nt-title" type="text" autocomplete="off">
+        <label class="modal-label" for="nt-title">Title <span style="color:var(--red)">*</span></label>
+        <input class="modal-input" id="nt-title" type="text" autocomplete="off"
+               aria-describedby="nt-title-error" aria-required="true">
+        <div class="modal-error hidden" id="nt-title-error" role="alert"></div>
       </div>
       <div class="modal-field">
         <div class="ac-tpl-toolbar">
@@ -14729,7 +14761,9 @@ document.addEventListener('keydown', function(e) {
             </div>
           </div>
         </div>
-        <textarea class="modal-input nt-body-textarea" id="nt-body" rows="10"></textarea>
+        <textarea class="modal-input nt-body-textarea" id="nt-body" rows="10"
+                  aria-describedby="nt-body-error" aria-required="true"></textarea>
+        <div class="modal-error hidden" id="nt-body-error" role="alert"></div>
       </div>
       <div class="modal-field">
         <label class="modal-label" for="nt-label">Label <span class="modal-hint" style="font-weight:normal;color:var(--text-muted)">(optional)</span></label>

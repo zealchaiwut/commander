@@ -5201,6 +5201,11 @@ async function closeTicketModalConfirm() {
     const closedNum = _closeTicketNum;
     closeTicketModalCancel();
     document.getElementById(`ticket-row-${closedNum}`)?.remove();
+    // Remove ticket from _ticketGroups so rollup count stays accurate
+    for (const g of _ticketGroups) {
+      g.items = g.items.filter(t => t.number !== closedNum);
+    }
+    _ticketsUpdateGroupHeaders();
     // Update ticket count in toolbar
     const countEl = document.querySelector('#tickets-content .tickets-toolbar .tickets-toolbar-left span');
     if (countEl) {

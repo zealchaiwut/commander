@@ -2263,18 +2263,68 @@
     .nt-label-opt:hover, .nt-label-opt.focused { background: var(--surface-hover); }
     .nt-label-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
     .nt-label-chip {
+      display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px;
+    }
+    .nt-label-chip.hidden { display: none; }
+    .nt-label-chip-item {
       display: inline-flex; align-items: center; gap: 6px;
       background: var(--surface-2); border: 1px solid var(--border);
       border-radius: 12px; padding: 3px 10px 3px 8px; font-size: 12px;
-      color: var(--text); margin-bottom: 8px;
+      color: var(--text);
     }
-    .nt-label-chip.hidden { display: none; }
     .nt-label-chip-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
     .nt-label-chip-rm {
       background: none; border: none; cursor: pointer;
       color: var(--text-muted); font-size: 16px; padding: 0; line-height: 1; margin-left: 2px;
     }
     .nt-label-chip-rm:hover { color: var(--red); }
+
+    /* ── Label Presets panel ── */
+    .lp-section { margin-top: 4px; }
+    .bc-lp-section { margin: 8px 0 4px; }
+    .lp-hdr { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+    .lp-save-btn {
+      font-size: 11px; font-family: inherit; padding: 3px 8px;
+      background: var(--surface-2); border: 1px solid var(--border);
+      border-radius: 4px; color: var(--text-sub); cursor: pointer; white-space: nowrap;
+    }
+    .lp-save-btn:hover { border-color: var(--blue); color: var(--blue); background: var(--blue-bg); }
+    .lp-list { display: flex; flex-direction: column; gap: 4px; }
+    .lp-row {
+      display: flex; align-items: center; gap: 6px;
+      padding: 5px 8px; border: 1px solid var(--border);
+      border-radius: 6px; background: var(--surface); cursor: default;
+      user-select: none;
+    }
+    .lp-row.lp-drag-over { border-color: var(--blue); background: var(--blue-bg); }
+    .lp-row.lp-dragging { opacity: .5; }
+    .lp-drag { color: var(--text-muted); font-size: 14px; flex-shrink: 0; cursor: grab; }
+    .lp-name {
+      flex: 1; min-width: 0; font-size: 12px; font-weight: 600; color: var(--text);
+      cursor: text; outline: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      border-bottom: 1px solid transparent; border-radius: 2px;
+    }
+    .lp-name:focus { border-bottom-color: var(--blue); white-space: normal; }
+    .lp-tags { display: flex; gap: 3px; flex-wrap: wrap; flex-shrink: 0; }
+    .lp-tag {
+      font-size: 10px; padding: 1px 5px; border-radius: 8px;
+      background: var(--surface-2); border: 1px solid var(--border); color: var(--text-sub);
+    }
+    .lp-apply-btn {
+      font-size: 11px; font-family: inherit; padding: 2px 7px; flex-shrink: 0;
+      background: var(--surface-2); border: 1px solid var(--border);
+      border-radius: 4px; color: var(--text); cursor: pointer;
+    }
+    .lp-apply-btn:hover { background: var(--blue-bg); border-color: var(--blue); color: var(--blue); }
+    .lp-del-btn {
+      background: none; border: none; cursor: pointer; flex-shrink: 0;
+      color: var(--text-muted); font-size: 16px; padding: 0 2px; line-height: 1;
+    }
+    .lp-del-btn:hover { color: var(--red); }
+    .lp-empty { font-size: 12px; color: var(--text-muted); padding: 6px 0; }
+    .lp-empty.hidden { display: none; }
+    .lp-error { font-size: 12px; color: var(--red); margin-top: 4px; }
+    .lp-error.hidden { display: none; }
 
     /* ── Blocking operation overlay (issue #276; full-screen, generalised) ── */
     #pane-sprint-mgmt { position: relative; }
@@ -4153,6 +4203,16 @@
             </div>
           </div>
 
+          <div class="bc-lp-section">
+            <div class="lp-hdr">
+              <label class="bc-settings-label" style="margin:0">Label Presets</label>
+              <button type="button" class="lp-save-btn" id="bc-lp-save-btn" onclick="_lpSavePreset('bc')">Save as Preset</button>
+            </div>
+            <div class="lp-empty hidden" id="bc-lp-empty">No presets yet — set default labels and click "Save as Preset".</div>
+            <div id="bc-lp-list" class="lp-list"></div>
+            <div class="lp-error hidden" id="bc-lp-error" role="alert" aria-live="polite"></div>
+          </div>
+
           <div class="bc-counter-row">
             <span class="bc-counter" id="bc-counter">0 / 50 prompts</span>
             <button type="button" class="bc-clear-draft-btn hidden" id="bc-clear-draft-btn"
@@ -4883,6 +4943,7 @@ function switchTab(tab, pushHistory) {
   // Init bulk-create tab on first visit
   if (tab === 'bulk-create') {
     _bcInitTab();
+    _lpRenderBc();
   }
 
   // Init logs tab
@@ -11048,13 +11109,13 @@ const BC_ALLOWED_EXTS = new Set(['.png', '.jpg', '.jpeg', '.pdf', '.md', '.html'
 let _ntDraftId = null;
 let _ntDraftGenerated = false;
 let _ntLabels = [];          // [{name, color}, ...] from GitHub
-let _ntSelectedLabel = null; // currently applied label name
+let _ntSelectedLabels = []; // currently applied label names
 let _ntDropdownFocus = -1;   // keyboard-focused dropdown item index
 let _ntFiles = [];           // queued attachment files
 
 function _ntUpdateWarnings() {
   if (!_ntDraftGenerated) return;
-  document.getElementById('nt-warn-label').classList.toggle('hidden', !!_ntSelectedLabel);
+  document.getElementById('nt-warn-label').classList.toggle('hidden', _ntSelectedLabels.length > 0);
   document.getElementById('nt-warn-attach').classList.toggle('hidden', _ntFiles.length > 0);
 }
 
@@ -11137,7 +11198,7 @@ async function _ntFetchLabels(repo) {
     if (r.ok) {
       _ntLabels = await r.json();
       // Pre-select first default label from settings if no label chosen yet
-      if (!_ntSelectedLabel) {
+      if (_ntSelectedLabels.length === 0) {
         const defaults = localStorage.getItem(_settingsKey('defaultLabels')) || '';
         const first = defaults.split(',').map(function(s) { return s.trim(); }).find(function(s) { return s; });
         if (first) {
@@ -11183,13 +11244,24 @@ function _ntRenderDropdown(query) {
   _ntDropdownFocus = -1;
 }
 
+function _ntRenderChips() {
+  const container = document.getElementById('nt-label-chip');
+  if (_ntSelectedLabels.length === 0) {
+    container.innerHTML = '';
+    container.classList.add('hidden');
+    return;
+  }
+  container.classList.remove('hidden');
+  container.innerHTML = _ntSelectedLabels.map(name => {
+    const color = _ntLabelColor(name);
+    return `<span class="nt-label-chip-item"><span class="nt-label-chip-dot" style="background:${color}"></span>${escHtml(name)}<button class="nt-label-chip-rm" type="button" data-label="${escHtml(name)}" aria-label="Remove ${escHtml(name)}">×</button></span>`;
+  }).join('');
+}
+
 function _ntSelectLabel(name) {
-  _ntSelectedLabel = name;
-  const color = _ntLabelColor(name);
-  const chip = document.getElementById('nt-label-chip');
-  chip.innerHTML = `<span class="nt-label-chip-dot" style="background:${color}"></span>${escHtml(name)}<button class="nt-label-chip-rm" type="button" aria-label="Remove label">&times;</button>`;
-  chip.classList.remove('hidden');
-  document.getElementById('nt-label-wrap').classList.add('hidden');
+  if (_ntSelectedLabels.includes(name)) return;
+  _ntSelectedLabels.push(name);
+  _ntRenderChips();
   document.getElementById('nt-label').value = '';
   document.getElementById('nt-label-dropdown').classList.add('hidden');
   document.getElementById('nt-label').setAttribute('aria-expanded', 'false');
@@ -11197,11 +11269,16 @@ function _ntSelectLabel(name) {
   _ntUpdateWarnings();
 }
 
-function _ntClearLabel() {
-  _ntSelectedLabel = null;
-  document.getElementById('nt-label-chip').classList.add('hidden');
-  document.getElementById('nt-label-wrap').classList.remove('hidden');
-  document.getElementById('nt-label').focus();
+function _ntClearLabel(name) {
+  if (name !== undefined) {
+    _ntSelectedLabels = _ntSelectedLabels.filter(l => l !== name);
+  } else {
+    _ntSelectedLabels = [];
+  }
+  _ntRenderChips();
+  if (_ntSelectedLabels.length === 0) {
+    document.getElementById('nt-label').focus();
+  }
   _ntUpdateWarnings();
 }
 
@@ -11221,7 +11298,7 @@ async function _ntCreateLabel(name) {
 }
 
 function _ntAutoSuggestLabel() {
-  if (_ntSelectedLabel || !_ntLabels.length) return;
+  if (_ntSelectedLabels.length > 0 || !_ntLabels.length) return;
   const title = (document.getElementById('nt-title').value || '').toLowerCase();
   const body = (document.getElementById('nt-body').value || '').toLowerCase();
   const text = title + ' ' + body;
@@ -11244,15 +11321,190 @@ function _ntAutoSuggestLabel() {
   if (fallback) _ntSelectLabel(fallback.name);
 }
 
+// ── Label Presets ─────────────────────────────────────────────────────────
+const _LP_MAX = 50;
+const _lpStorageOk = (() => {
+  try { localStorage.setItem('__lp_t', '1'); localStorage.removeItem('__lp_t'); return true; }
+  catch (_) { return false; }
+})();
+
+function _lpKey(projectId) { return 'label-presets:' + projectId; }
+
+function _lpLoad(projectId) {
+  if (!_lpStorageOk || !projectId) return [];
+  try { return JSON.parse(localStorage.getItem(_lpKey(projectId)) || '[]'); }
+  catch (_) { return []; }
+}
+
+function _lpSave(projectId, presets) {
+  if (!_lpStorageOk || !projectId) return;
+  try { localStorage.setItem(_lpKey(projectId), JSON.stringify(presets)); }
+  catch (_) {}
+}
+
+function _lpGetNtProjectId() {
+  const sel = document.getElementById('nt-project');
+  return sel ? sel.value : '';
+}
+
+function _lpGetBcProjectId() {
+  const sel = document.getElementById('bc-repo');
+  return sel ? sel.value : '';
+}
+
+function _lpGetBcLabels() {
+  const el = document.getElementById('bc-default-labels');
+  if (!el) return [];
+  return el.value.split(',').map(l => l.trim()).filter(Boolean);
+}
+
+function _lpApplyNtLabels(names) {
+  for (const n of names) _ntSelectLabel(n);
+}
+
+function _lpApplyBcLabels(names) {
+  const el = document.getElementById('bc-default-labels');
+  if (!el) return;
+  const current = _lpGetBcLabels();
+  const merged = [...new Set([...current, ...names])];
+  el.value = merged.join(', ');
+  const field = el.closest('.bc-settings-field--labels');
+  if (field) field.style.display = '';
+  _bcScheduleSaveDraft();
+}
+
+function _lpRenderNt() {
+  _lpRender('nt', _lpGetNtProjectId, () => _ntSelectedLabels, _lpApplyNtLabels);
+}
+
+function _lpRenderBc() {
+  _lpRender('bc', _lpGetBcProjectId, _lpGetBcLabels, _lpApplyBcLabels);
+}
+
+function _lpRender(ctx, getProjectId, getLabels, applyLabels) {
+  const listEl  = document.getElementById(ctx + '-lp-list');
+  const emptyEl = document.getElementById(ctx + '-lp-empty');
+  const errEl   = document.getElementById(ctx + '-lp-error');
+  if (!listEl) return;
+  if (errEl) { errEl.classList.add('hidden'); errEl.textContent = ''; }
+  if (!_lpStorageOk) { listEl.innerHTML = ''; if (emptyEl) emptyEl.classList.add('hidden'); return; }
+  const projectId = getProjectId();
+  const presets = _lpLoad(projectId);
+  if (presets.length === 0) {
+    listEl.innerHTML = '';
+    if (emptyEl) emptyEl.classList.remove('hidden');
+    return;
+  }
+  if (emptyEl) emptyEl.classList.add('hidden');
+  listEl.innerHTML = presets.map((p, i) => {
+    const tags = p.labels.map(l => `<span class="lp-tag">${escHtml(l)}</span>`).join('');
+    return `<div class="lp-row" draggable="true" data-idx="${i}">` +
+      `<span class="lp-drag ti ti-grip-vertical" title="Drag to reorder"></span>` +
+      `<span class="lp-name" contenteditable="true" spellcheck="false" data-idx="${i}" ` +
+        `data-ctx="${escHtml(ctx)}" data-pid="${escHtml(projectId)}" ` +
+        `onblur="_lpRenameBlur(event)" onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();}"` +
+      `>${escHtml(p.name)}</span>` +
+      `<span class="lp-tags">${tags}</span>` +
+      `<button type="button" class="lp-apply-btn" onclick="_lpApplyPreset(${i},'${ctx}')">Apply</button>` +
+      `<button type="button" class="lp-del-btn" onclick="_lpDeletePreset(${i},'${ctx}')" aria-label="Delete preset">×</button>` +
+      `</div>`;
+  }).join('');
+  _lpWireDrag(listEl, ctx, projectId);
+}
+
+function _lpSavePreset(ctx) {
+  if (!_lpStorageOk) { _lpShowError(ctx, 'Presets unavailable (storage disabled).'); return; }
+  const getProjectId = ctx === 'nt' ? _lpGetNtProjectId : _lpGetBcProjectId;
+  const getLabels    = ctx === 'nt' ? (() => _ntSelectedLabels) : _lpGetBcLabels;
+  const projectId = getProjectId();
+  if (!projectId) { _lpShowError(ctx, 'Select a project first.'); return; }
+  const labels = getLabels();
+  if (!labels || labels.length === 0) { _lpShowError(ctx, 'Select at least one label first.'); return; }
+  const presets = _lpLoad(projectId);
+  if (presets.length >= _LP_MAX) { _lpShowError(ctx, `Preset limit reached (${_LP_MAX} max)`); return; }
+  presets.push({ name: 'Preset ' + (presets.length + 1), labels: [...labels] });
+  _lpSave(projectId, presets);
+  if (ctx === 'nt') _lpRenderNt(); else _lpRenderBc();
+}
+
+function _lpApplyPreset(idx, ctx) {
+  const getProjectId = ctx === 'nt' ? _lpGetNtProjectId : _lpGetBcProjectId;
+  const applyLabels  = ctx === 'nt' ? _lpApplyNtLabels  : _lpApplyBcLabels;
+  const projectId = getProjectId();
+  if (!projectId) return;
+  const presets = _lpLoad(projectId);
+  if (!presets[idx]) return;
+  applyLabels(presets[idx].labels);
+  if (ctx === 'nt') _lpRenderNt(); else _lpRenderBc();
+}
+
+function _lpDeletePreset(idx, ctx) {
+  if (!confirm('Delete this preset?')) return;
+  const getProjectId = ctx === 'nt' ? _lpGetNtProjectId : _lpGetBcProjectId;
+  const projectId = getProjectId();
+  if (!projectId) return;
+  const presets = _lpLoad(projectId);
+  presets.splice(idx, 1);
+  _lpSave(projectId, presets);
+  if (ctx === 'nt') _lpRenderNt(); else _lpRenderBc();
+}
+
+function _lpRenameBlur(event) {
+  const el = event.target;
+  const idx = parseInt(el.dataset.idx, 10);
+  const projectId = el.dataset.pid;
+  const newName = el.textContent.trim();
+  if (!newName) { el.textContent = 'Preset'; return; }
+  const presets = _lpLoad(projectId);
+  if (!presets[idx] || presets[idx].name === newName) return;
+  presets[idx].name = newName;
+  _lpSave(projectId, presets);
+}
+
+function _lpShowError(ctx, msg) {
+  const el = document.getElementById(ctx + '-lp-error');
+  if (!el) return;
+  el.textContent = msg;
+  el.classList.remove('hidden');
+  setTimeout(() => el.classList.add('hidden'), 4000);
+}
+
+function _lpWireDrag(listEl, ctx, projectId) {
+  let dragSrc = null;
+  listEl.querySelectorAll('.lp-row').forEach(row => {
+    row.addEventListener('dragstart', e => {
+      dragSrc = parseInt(row.dataset.idx, 10);
+      e.dataTransfer.effectAllowed = 'move';
+      row.classList.add('lp-dragging');
+    });
+    row.addEventListener('dragend', () => row.classList.remove('lp-dragging'));
+    row.addEventListener('dragover', e => { e.preventDefault(); row.classList.add('lp-drag-over'); });
+    row.addEventListener('dragleave', () => row.classList.remove('lp-drag-over'));
+    row.addEventListener('drop', e => {
+      e.preventDefault();
+      row.classList.remove('lp-drag-over');
+      const tgt = parseInt(row.dataset.idx, 10);
+      if (dragSrc === null || dragSrc === tgt) return;
+      const presets = _lpLoad(projectId);
+      const [moved] = presets.splice(dragSrc, 1);
+      presets.splice(tgt, 0, moved);
+      _lpSave(projectId, presets);
+      if (ctx === 'nt') _lpRenderNt(); else _lpRenderBc();
+      dragSrc = null;
+    });
+  });
+}
+
 async function smgmtOpenNewTicket() {
   // Reset to input state
   _ntDraftId = null;
   _ntDraftGenerated = false;
-  _ntSelectedLabel = null;
+  _ntSelectedLabels = [];
   _ntLabels = [];
   _ntDropdownFocus = -1;
   document.getElementById('nt-description').value = '';
   document.getElementById('nt-label').value = '';
+  document.getElementById('nt-label-chip').innerHTML = '';
   document.getElementById('nt-label-chip').classList.add('hidden');
   document.getElementById('nt-label-wrap').classList.remove('hidden');
   document.getElementById('nt-label-dropdown').classList.add('hidden');
@@ -11289,9 +11541,11 @@ async function smgmtOpenNewTicket() {
     // Pre-fetch labels for the selected project
     const selectedRepo = sel.value;
     if (selectedRepo) _ntFetchLabels(selectedRepo);
+    _lpRenderNt();
   } catch (e) {
     sel.innerHTML = '<option value="">Could not load projects</option>';
     sel.disabled = false;
+    _lpRenderNt();
   }
 
   document.getElementById('nt-description').focus();
@@ -11397,14 +11651,15 @@ function _setupModals() {
   document.getElementById('nt-cancel-btn').addEventListener('click', _ntClose);
   document.getElementById('nt-post-cancel-btn').addEventListener('click', _ntClose);
   document.getElementById('nt-backdrop').addEventListener('click', _ntClose);
-  // Project change → re-fetch labels
+  // Project change → re-fetch labels and re-render presets
   document.getElementById('nt-project').addEventListener('change', function() {
     if (this.value) _ntFetchLabels(this.value);
+    _lpRenderNt();
   });
 
-  // Label chip removal (delegated)
+  // Label chip removal (delegated — per-chip by data-label)
   document.getElementById('nt-label-chip').addEventListener('click', function(e) {
-    if (e.target.classList.contains('nt-label-chip-rm')) _ntClearLabel();
+    if (e.target.classList.contains('nt-label-chip-rm')) _ntClearLabel(e.target.dataset.label);
   });
 
   // Label input → filter dropdown
@@ -11554,7 +11809,7 @@ function _setupModals() {
       formData.append('title', title);
       formData.append('body', document.getElementById('nt-body').value);
       formData.append('project', repo);
-      if (_ntSelectedLabel) formData.append('extra_labels', _ntSelectedLabel);
+      for (const lbl of _ntSelectedLabels) formData.append('extra_labels', lbl);
       for (const f of _ntFiles) {
         formData.append('files', f);
       }
@@ -11648,6 +11903,7 @@ function _bcInitTab() {
     _bcRestoreDraft();
     _bcUpdateCounter();
     _bcTplRender();
+    _lpRenderBc();
   }
 }
 
@@ -11711,6 +11967,7 @@ function _bcGoToStep1() {
 
 function bcRepoChanged() {
   _bcTplRender();
+  _lpRenderBc();
 }
 
 // ── Prompt templates (issue #531) ────────────────────────────────────────────
@@ -14864,6 +15121,16 @@ document.addEventListener('keydown', function(e) {
           <div class="nt-label-dropdown hidden" id="nt-label-dropdown" role="listbox"></div>
         </div>
       </div>
+      <div class="modal-field lp-section">
+        <div class="lp-hdr">
+          <label class="modal-label" style="margin:0">Label Presets</label>
+          <button type="button" class="lp-save-btn" id="nt-lp-save-btn" onclick="_lpSavePreset('nt')">Save as Preset</button>
+        </div>
+        <div class="lp-empty hidden" id="nt-lp-empty">No presets yet — select labels and click "Save as Preset".</div>
+        <div id="nt-lp-list" class="lp-list"></div>
+        <div class="lp-error hidden" id="nt-lp-error" role="alert" aria-live="polite"></div>
+      </div>
+
       <div class="modal-field" style="margin-bottom:0">
         <label class="modal-label">Attachments <span class="modal-hint" style="font-weight:normal;color:var(--text-muted)">(optional — max 25 MB per file, 50 MB total)</span></label>
         <div class="dt-dropzone nt-dropzone" id="nt-dropzone"

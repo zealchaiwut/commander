@@ -647,6 +647,74 @@
     @keyframes cmp-spin { to { transform: rotate(360deg); } }
     .cmp-spin { display: inline-block; animation: cmp-spin .9s linear infinite; }
 
+    /* ── Calibration tab (issue #576) ── */
+    .calib-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 16px;
+      padding: 0 0 32px;
+    }
+    .calib-bucket {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 20px 20px 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .calib-bucket-size {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      color: var(--text-sub);
+    }
+    .calib-bucket-avg {
+      font-size: 28px;
+      font-weight: 700;
+      color: var(--text);
+      line-height: 1.1;
+    }
+    .calib-bucket-avg.calib-no-data {
+      font-size: 14px;
+      font-weight: 400;
+      color: var(--text-sub);
+      font-style: italic;
+    }
+    .calib-bucket-unit {
+      font-size: 12px;
+      color: var(--text-sub);
+      margin-left: 3px;
+    }
+    .calib-bucket-canonical {
+      font-size: 11px;
+      color: var(--text-sub);
+    }
+    .calib-bucket-count {
+      font-size: 11px;
+      color: var(--text-sub);
+    }
+    .calib-bias {
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+      font-size: 11px;
+      font-weight: 600;
+      padding: 1px 6px;
+      border-radius: 4px;
+      margin-top: 2px;
+      width: fit-content;
+    }
+    .calib-bias-over  { background: var(--red-bg);   color: var(--red); }
+    .calib-bias-under { background: var(--green-bg); color: var(--green); }
+    .calib-bias-ok    { background: var(--surface);  color: var(--text-sub); border: 1px solid var(--border); }
+    .calib-section-note {
+      font-size: 12px;
+      color: var(--text-sub);
+      margin-bottom: 20px;
+    }
+
     /* Placeholder text */
     .placeholder-msg {
       padding: 48px 0;
@@ -677,6 +745,11 @@
       font-size: 10px; font-weight: 700; letter-spacing: .08em;
       text-transform: uppercase; color: var(--text-muted);
     }
+    .ticket-group-rollup {
+      margin-left: auto;
+      font-size: 10px; font-weight: 500; letter-spacing: 0; text-transform: none;
+      color: var(--text-sub); font-family: var(--mono); white-space: nowrap;
+    }
     .ticket-row {
       display: flex; align-items: center; gap: 10px;
       padding: 10px 0;
@@ -703,6 +776,26 @@
       flex-shrink: 0; white-space: nowrap;
     }
     .ticket-close-btn:hover { background: var(--red-bg); color: var(--red); border-color: var(--red); }
+    .ticket-est-size-pill {
+      flex-shrink: 0;
+      padding: 1px 5px; border-radius: 3px;
+      font-size: 10px; font-weight: 700;
+      font-family: var(--mono);
+      background: var(--surface-2); color: var(--text-sub);
+    }
+    .ticket-est-confidence-pill {
+      flex-shrink: 0;
+      padding: 1px 5px; border-radius: 3px;
+      font-size: 10px; font-weight: 600;
+      font-family: var(--mono);
+    }
+    .ticket-est-confidence-pill.conf-high   { background: var(--green-bg); color: var(--green); }
+    .ticket-est-confidence-pill.conf-medium { background: var(--amber-bg); color: var(--amber); }
+    .ticket-est-confidence-pill.conf-low    { background: var(--red-bg);   color: var(--red); }
+    .ticket-no-estimate {
+      flex-shrink: 0; font-size: 10px; color: var(--text-sub);
+      font-style: italic; white-space: nowrap;
+    }
     /* ── Dependency chips (issue #432) ── */
     .ticket-row { flex-wrap: wrap; }
     .dep-chips-row {
@@ -1102,6 +1195,11 @@
     .smgmt-sprint-count {
       font-size: 11px; color: var(--text-sub); font-weight: 400;
     }
+    .smgmt-sprint-token-val {
+      font-size: 11px; color: var(--text-muted); font-weight: 400;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 200px;
+      display: inline-block; vertical-align: bottom;
+    }
     .smgmt-sprint-header { justify-content: space-between; }
     .smgmt-sprint-summary {
       margin: 6px 0 4px;
@@ -1261,6 +1359,11 @@
     }
     .smgmt-ticket.drag-before { box-shadow: inset 0 2px 0 var(--blue); }
     .smgmt-ticket.drag-after  { box-shadow: inset 0 -2px 0 var(--blue); }
+    /* Size-based left border (issue #562) */
+    .smgmt-ticket[data-size="S"]  { border-left: 3px solid var(--green); }
+    .smgmt-ticket[data-size="M"]  { border-left: 3px solid var(--blue); }
+    .smgmt-ticket[data-size="L"]  { border-left: 3px solid var(--amber); }
+    .smgmt-ticket[data-size="XL"] { border-left: 3px solid var(--red); }
     .smgmt-ticket.is-selected { background: var(--blue-bg); border-left: 3px solid var(--blue); }
     .smgmt-ticket-grip {
       color: var(--text-sub); font-size: 13px; flex-shrink: 0;
@@ -1847,6 +1950,39 @@
     }
     .nt-warn-item.hidden { display: none; }
     .nt-file-input { padding: 4px 8px; cursor: pointer; }
+    /* ── Ticket quality linter (issue #574) ── */
+    .lint-warn-box {
+      background: var(--amber-bg);
+      border: 1px solid color-mix(in srgb, var(--amber) 40%, transparent);
+      border-radius: 8px; padding: 12px 14px;
+      margin: 0 20px 8px;
+    }
+    .lint-warn-heading {
+      display: flex; align-items: center; gap: 6px;
+      font-size: 13px; font-weight: 600; color: var(--amber); margin-bottom: 8px;
+    }
+    .lint-warn-list {
+      margin: 0 0 10px 0; padding: 0 0 0 18px;
+      font-size: 12px; color: var(--text); line-height: 1.7;
+    }
+    .lint-warn-actions { display: flex; gap: 8px; justify-content: flex-end; }
+    .bc-lint-overlay {
+      position: absolute; inset: 0; z-index: 20;
+      background: var(--surface);
+      display: flex; flex-direction: column;
+      border-top: 2px solid var(--amber);
+    }
+    .bc-lint-overlay-list {
+      flex: 1; overflow-y: auto; padding: 8px 16px;
+      display: flex; flex-direction: column; gap: 8px;
+    }
+    .bc-lint-ticket-item {
+      border: 1px solid color-mix(in srgb, var(--amber) 40%, transparent);
+      border-radius: 6px; padding: 10px 12px;
+      background: var(--amber-bg); font-size: 12px;
+    }
+    .bc-lint-ticket-title { font-weight: 600; color: var(--text); margin-bottom: 4px; }
+    .bc-lint-ticket-issues { margin: 0; padding: 0 0 0 16px; color: var(--text); line-height: 1.6; }
 
     /* ── Run Sprint preflight modal (issue #446 / #447) ── */
     .pf-modal { width: min(1100px, calc(100vw - 48px)); }
@@ -2177,6 +2313,69 @@
     .nt-textarea { resize: vertical; min-height: 80px; font-family: inherit; }
     .nt-body-textarea { resize: vertical; min-height: 140px; font-family: monospace; font-size: 12px; }
     .nt-draft-divider { border-top: 1px solid var(--border); margin: 20px 0; }
+
+    /* ── New Ticket body: Write/Preview tabs & char count (issue #573) ── */
+    .nt-body-tabs {
+      display: flex; gap: 0; border-bottom: 2px solid var(--border);
+      margin-bottom: 4px;
+    }
+    .nt-body-tab {
+      padding: 4px 12px; font-size: 12px; font-weight: 500; cursor: pointer;
+      background: none; border: none; border-bottom: 2px solid transparent;
+      margin-bottom: -2px; color: var(--text-muted); font-family: inherit;
+      transition: color .15s, border-color .15s;
+    }
+    .nt-body-tab:hover { color: var(--text); }
+    .nt-body-tab.active { color: var(--text); border-bottom-color: var(--text); font-weight: 600; }
+    .nt-body-preview {
+      min-height: 140px; max-height: 340px; overflow-y: auto;
+      padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px;
+      background: var(--surface-2); font-size: 12px; line-height: 1.55; color: var(--text);
+    }
+    .nt-body-preview-empty { color: var(--text-muted); font-style: italic; }
+    .nt-char-count { font-size: 11px; color: var(--text-muted); text-align: right; margin-top: 3px; }
+    .md-body .task-item input[type=checkbox] { margin-right: 4px; vertical-align: middle; cursor: default; }
+
+    /* ── AC Template Picker (issue #567) ── */
+    .ac-tpl-toolbar { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+    .ac-tpl-wrap { position: relative; }
+    .ac-tpl-btn {
+      display: inline-flex; align-items: center; gap: 5px;
+      padding: 3px 9px; font-size: 12px; font-weight: 500;
+      border: 1px solid var(--border); border-radius: 5px;
+      background: var(--surface-2); color: var(--text-muted);
+      cursor: pointer; transition: background .15s, color .15s, border-color .15s;
+      white-space: nowrap;
+    }
+    .ac-tpl-btn:hover { background: var(--surface-hover); color: var(--text); border-color: var(--blue); }
+    .ac-tpl-btn.has-default { color: var(--blue); border-color: color-mix(in srgb, var(--blue) 30%, transparent); background: var(--blue-bg); }
+    .uat-tpl-btn.has-default { color: #059669; border-color: color-mix(in srgb, #059669 30%, transparent); background: color-mix(in srgb, #059669 10%, transparent); }
+    .ac-tpl-btn:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+    .ac-tpl-menu {
+      position: absolute; top: calc(100% + 4px); left: 0; z-index: 700;
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 7px; box-shadow: 0 4px 16px rgba(0,0,0,.14);
+      padding: 6px; min-width: 220px;
+    }
+    .ac-tpl-menu.hidden { display: none; }
+    .ac-tpl-opt {
+      display: flex; align-items: flex-start; gap: 8px;
+      padding: 7px 10px; border-radius: 5px; cursor: pointer;
+      font-size: 13px; color: var(--text); width: 100%; text-align: left;
+      background: none; border: none;
+      transition: background .12s;
+    }
+    .ac-tpl-opt:hover, .ac-tpl-opt:focus { background: var(--surface-2); outline: none; }
+    .ac-tpl-opt:focus-visible { outline: 2px solid var(--blue); outline-offset: 1px; }
+    .ac-tpl-opt-icon { font-size: 15px; color: var(--text-muted); flex-shrink: 0; padding-top: 1px; }
+    .ac-tpl-opt-label { flex: 1; }
+    .ac-tpl-opt-name { font-weight: 500; display: block; }
+    .ac-tpl-opt-desc { font-size: 11px; color: var(--text-muted); }
+    .ac-tpl-opt.is-default .ac-tpl-opt-name::after { content: ' ✓'; color: var(--blue); }
+    .ac-tpl-menu-divider { height: 1px; background: var(--border); margin: 4px 0; }
+    .bc-ac-tpl-toolbar { display: flex; align-items: center; gap: 6px; padding: 8px 28px 4px; }
+    .bc-ac-global-wrap { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+    .bc-ac-global-label { font-size: 12px; color: var(--text-muted); }
     .nt-spinner {
       display: inline-block; width: 12px; height: 12px;
       border: 2px solid currentColor; border-top-color: transparent;
@@ -2202,18 +2401,68 @@
     .nt-label-opt:hover, .nt-label-opt.focused { background: var(--surface-hover); }
     .nt-label-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
     .nt-label-chip {
+      display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px;
+    }
+    .nt-label-chip.hidden { display: none; }
+    .nt-label-chip-item {
       display: inline-flex; align-items: center; gap: 6px;
       background: var(--surface-2); border: 1px solid var(--border);
       border-radius: 12px; padding: 3px 10px 3px 8px; font-size: 12px;
-      color: var(--text); margin-bottom: 8px;
+      color: var(--text);
     }
-    .nt-label-chip.hidden { display: none; }
     .nt-label-chip-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
     .nt-label-chip-rm {
       background: none; border: none; cursor: pointer;
       color: var(--text-muted); font-size: 16px; padding: 0; line-height: 1; margin-left: 2px;
     }
     .nt-label-chip-rm:hover { color: var(--red); }
+
+    /* ── Label Presets panel ── */
+    .lp-section { margin-top: 4px; }
+    .bc-lp-section { margin: 8px 0 4px; }
+    .lp-hdr { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+    .lp-save-btn {
+      font-size: 11px; font-family: inherit; padding: 3px 8px;
+      background: var(--surface-2); border: 1px solid var(--border);
+      border-radius: 4px; color: var(--text-sub); cursor: pointer; white-space: nowrap;
+    }
+    .lp-save-btn:hover { border-color: var(--blue); color: var(--blue); background: var(--blue-bg); }
+    .lp-list { display: flex; flex-direction: column; gap: 4px; }
+    .lp-row {
+      display: flex; align-items: center; gap: 6px;
+      padding: 5px 8px; border: 1px solid var(--border);
+      border-radius: 6px; background: var(--surface); cursor: default;
+      user-select: none;
+    }
+    .lp-row.lp-drag-over { border-color: var(--blue); background: var(--blue-bg); }
+    .lp-row.lp-dragging { opacity: .5; }
+    .lp-drag { color: var(--text-muted); font-size: 14px; flex-shrink: 0; cursor: grab; }
+    .lp-name {
+      flex: 1; min-width: 0; font-size: 12px; font-weight: 600; color: var(--text);
+      cursor: text; outline: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      border-bottom: 1px solid transparent; border-radius: 2px;
+    }
+    .lp-name:focus { border-bottom-color: var(--blue); white-space: normal; }
+    .lp-tags { display: flex; gap: 3px; flex-wrap: wrap; flex-shrink: 0; }
+    .lp-tag {
+      font-size: 10px; padding: 1px 5px; border-radius: 8px;
+      background: var(--surface-2); border: 1px solid var(--border); color: var(--text-sub);
+    }
+    .lp-apply-btn {
+      font-size: 11px; font-family: inherit; padding: 2px 7px; flex-shrink: 0;
+      background: var(--surface-2); border: 1px solid var(--border);
+      border-radius: 4px; color: var(--text); cursor: pointer;
+    }
+    .lp-apply-btn:hover { background: var(--blue-bg); border-color: var(--blue); color: var(--blue); }
+    .lp-del-btn {
+      background: none; border: none; cursor: pointer; flex-shrink: 0;
+      color: var(--text-muted); font-size: 16px; padding: 0 2px; line-height: 1;
+    }
+    .lp-del-btn:hover { color: var(--red); }
+    .lp-empty { font-size: 12px; color: var(--text-muted); padding: 6px 0; }
+    .lp-empty.hidden { display: none; }
+    .lp-error { font-size: 12px; color: var(--red); margin-top: 4px; }
+    .lp-error.hidden { display: none; }
 
     /* ── Blocking operation overlay (issue #276; full-screen, generalised) ── */
     #pane-sprint-mgmt { position: relative; }
@@ -2424,19 +2673,39 @@
       font-family: var(--mono);
       background: var(--surface-2); color: var(--text-sub);
     }
-    .smgmt-ticket-size-pill--S  { background: #dcfce7; color: #166534; }
-    .smgmt-ticket-size-pill--M  { background: #dbeafe; color: #1e40af; }
-    .smgmt-ticket-size-pill--L  { background: #fef9c3; color: #854d0e; }
-    .smgmt-ticket-size-pill--XL { background: #fee2e2; color: #991b1b; }
-    .smgmt-ticket-size-pill--unestimated {
-      background: var(--surface-2); color: #4b5563;
-      border: 1px dashed var(--border); font-weight: 600;
+    /* Size-colored pills (issue #562) */
+    .smgmt-ticket[data-size="S"]  .smgmt-ticket-size-pill { background: var(--green-bg); color: var(--green); }
+    .smgmt-ticket[data-size="M"]  .smgmt-ticket-size-pill { background: var(--blue-bg);  color: var(--blue); }
+    .smgmt-ticket[data-size="L"]  .smgmt-ticket-size-pill { background: var(--amber-bg); color: var(--amber); }
+    .smgmt-ticket[data-size="XL"] .smgmt-ticket-size-pill { background: var(--red-bg);   color: var(--red); }
+    /* Size legend (issue #562) */
+    .smgmt-size-legend {
+      display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+      padding: 6px 28px; border-bottom: 1px solid var(--border);
+      background: var(--bg); font-size: 11px; color: var(--text-sub);
     }
-    [data-theme="dark"] .smgmt-ticket-size-pill--S  { background: #14532d; color: #86efac; }
-    [data-theme="dark"] .smgmt-ticket-size-pill--M  { background: #1e3a5f; color: #93c5fd; }
-    [data-theme="dark"] .smgmt-ticket-size-pill--L  { background: #422006; color: #fde68a; }
-    [data-theme="dark"] .smgmt-ticket-size-pill--XL { background: #450a0a; color: #fca5a5; }
-    [data-theme="dark"] .smgmt-ticket-size-pill--unestimated { color: #9ca3af; }
+    .smgmt-size-legend-label { font-weight: 600; color: var(--text-sub); white-space: nowrap; }
+    .smgmt-size-legend-item  { display: flex; align-items: center; gap: 5px; white-space: nowrap; }
+    .smgmt-size-legend-swatch {
+      width: 10px; height: 10px; border-radius: 2px; flex-shrink: 0;
+    }
+    .smgmt-size-legend-swatch.sz-S  { background: var(--green); }
+    .smgmt-size-legend-swatch.sz-M  { background: var(--blue); }
+    .smgmt-size-legend-swatch.sz-L  { background: var(--amber); }
+    .smgmt-size-legend-swatch.sz-XL { background: var(--red); }
+    .smgmt-ticket-confidence-pill {
+      flex-shrink: 0;
+      padding: 1px 5px; border-radius: 3px;
+      font-size: 10px; font-weight: 600;
+      font-family: var(--mono);
+    }
+    .smgmt-ticket-confidence-pill.conf-high   { background: var(--green-bg); color: var(--green); }
+    .smgmt-ticket-confidence-pill.conf-medium { background: var(--amber-bg); color: var(--amber); }
+    .smgmt-ticket-confidence-pill.conf-low    { background: var(--red-bg);   color: var(--red); }
+    .smgmt-ticket-no-estimate {
+      flex-shrink: 0; font-size: 10px; color: var(--text-sub);
+      font-style: italic; white-space: nowrap;
+    }
 
     /* Retry estimation pill and spinner (issue #451) */
     .smgmt-retry-pill {
@@ -2468,6 +2737,10 @@
     .smgmt-ticket:hover .smgmt-reestimate-btn { opacity: 1; }
     .smgmt-reestimate-btn:hover { background: var(--blue-bg); }
     .smgmt-reestimate-btn:disabled { opacity: .4 !important; cursor: not-allowed; }
+    .smgmt-reestimate-error {
+      font-size: 10px; font-weight: 600; font-family: var(--mono);
+      color: var(--red); flex-shrink: 0; white-space: nowrap;
+    }
     .smgmt-reestimate-spinner {
       width: 12px; height: 12px; flex-shrink: 0;
       border: 2px solid rgba(37,99,235,.2);
@@ -2485,6 +2758,82 @@
     .tdp-reestimate-btn:hover { background: var(--blue-bg); }
     .tdp-reestimate-btn:disabled { opacity: .45; cursor: not-allowed; }
     .re-est-modal { width: min(360px, calc(100vw - 32px)); }
+
+    /* Estimate detail affordance + popover (issue #557) */
+    .smgmt-est-detail-btn {
+      flex-shrink: 0;
+      padding: 1px 5px; border-radius: 3px;
+      font-size: 10px; font-weight: 600;
+      font-family: var(--mono);
+      cursor: pointer; white-space: nowrap;
+      border: none; outline: none;
+    }
+    .smgmt-est-detail-btn.conf-high   { background: var(--green-bg); color: var(--green); }
+    .smgmt-est-detail-btn.conf-medium { background: var(--amber-bg); color: var(--amber); }
+    .smgmt-est-detail-btn.conf-low    { background: var(--red-bg);   color: var(--red); }
+    .smgmt-est-detail-btn:not([class*="conf-"]) { background: var(--surface-2); color: var(--text-sub); }
+    .smgmt-est-detail-btn:hover { filter: brightness(1.08); }
+    .smgmt-est-detail-btn:focus-visible { outline: 2px solid var(--blue); outline-offset: 1px; }
+    /* Risk flag warning icons — issue #559 */
+    .smgmt-risk-flag-icon {
+      flex-shrink: 0;
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 16px; height: 16px;
+      color: #d97706; font-size: 13px; cursor: default;
+    }
+    .smgmt-risk-flag-icon:focus-visible { outline: 2px solid var(--blue); outline-offset: 1px; border-radius: 2px; }
+    [data-theme="dark"] .smgmt-risk-flag-icon { color: #fbbf24; }
+    .smgmt-conflict-badge {
+      flex-shrink: 0; display: inline-flex; align-items: center; gap: 3px;
+      font-size: 11px; font-weight: 600; padding: 1px 5px; border-radius: 3px;
+      background: var(--red-bg, #fef2f2); color: var(--red, #dc2626);
+      border: 1px solid color-mix(in srgb, var(--red, #dc2626) 30%, transparent);
+      cursor: pointer; white-space: nowrap;
+    }
+    .smgmt-conflict-badge:hover { filter: brightness(1.05); }
+    .smgmt-conflict-badge:focus-visible { outline: 2px solid var(--blue); outline-offset: 1px; border-radius: 3px; }
+    [data-theme="dark"] .smgmt-conflict-badge { background: rgba(220,38,38,.15); color: #f87171; }
+    /* Dependency order hint badge (issue #581) */
+    .smgmt-dep-order-badge {
+      flex-shrink: 0; display: inline-flex; align-items: center; gap: 3px;
+      font-size: 11px; font-weight: 600; padding: 1px 5px; border-radius: 3px;
+      background: rgba(99,102,241,.1); color: #6366f1;
+      border: 1px solid rgba(99,102,241,.28);
+      cursor: pointer; white-space: nowrap;
+    }
+    .smgmt-dep-order-badge:hover { filter: brightness(1.05); }
+    .smgmt-dep-order-badge:focus-visible { outline: 2px solid var(--blue); outline-offset: 1px; border-radius: 3px; }
+    .smgmt-dep-order-badge.is-cycle {
+      background: rgba(202,138,4,.1); color: #b45309;
+      border-color: rgba(202,138,4,.28);
+    }
+    [data-theme="dark"] .smgmt-dep-order-badge { background: rgba(99,102,241,.15); color: #a5b4fc; }
+    [data-theme="dark"] .smgmt-dep-order-badge.is-cycle { background: rgba(234,179,8,.12); color: #fcd34d; }
+    .smgmt-est-popover {
+      position: fixed; z-index: 9998;
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 8px; padding: 12px 14px; box-shadow: 0 4px 20px rgba(0,0,0,.18);
+      font-size: 12px; min-width: 220px; max-width: 300px;
+    }
+    .smgmt-est-popover.hidden { display: none; }
+    .smgmt-est-popover-title {
+      font-size: 11px; font-weight: 700; color: var(--text-sub);
+      text-transform: uppercase; letter-spacing: .04em; margin-bottom: 10px;
+    }
+    .smgmt-est-popover-row { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; margin-bottom: 6px; }
+    .smgmt-est-popover-row:last-child { margin-bottom: 0; }
+    .smgmt-est-popover-key { color: var(--text-sub); font-size: 11px; flex-shrink: 0; padding-top: 1px; }
+    .smgmt-est-popover-val { color: var(--text); text-align: right; font-size: 12px; }
+    .smgmt-est-popover-list { color: var(--text); font-size: 11px; font-family: var(--mono); text-align: right; }
+    .smgmt-est-popover-list-item { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 190px; }
+    .smgmt-est-popover-empty { color: var(--text-muted); font-style: italic; font-size: 11px; }
+    .smgmt-est-popover-flag {
+      display: inline-block; padding: 1px 6px; border-radius: 10px;
+      font-size: 10px; font-weight: 600;
+      background: var(--red-bg); color: var(--red); margin: 1px 2px 1px 0;
+    }
+    .smgmt-est-popover-divider { border: none; border-top: 1px solid var(--border); margin: 8px 0; }
+    .smgmt-est-popover-summary { color: var(--text-sub); font-size: 11px; line-height: 1.45; }
 
     /* Generic utility used by Bulk Create */
     .hidden { display: none !important; }
@@ -2607,6 +2956,50 @@
     }
     .bc-textarea:focus { border-color: var(--blue); }
 
+    /* Prompt Tips (issue #572) */
+    .bc-tips-toggle {
+      display: flex; align-items: center; gap: 6px;
+      padding: 6px 28px; width: 100%; text-align: left;
+      background: none; border: none; border-bottom: 1px solid var(--border);
+      font-family: inherit; font-size: 12px;
+      color: var(--text-muted); cursor: pointer;
+    }
+    .bc-tips-toggle:hover { color: var(--text); background: var(--surface-hover); }
+    .bc-tips-toggle:focus-visible { outline: 2px solid var(--blue); outline-offset: -2px; }
+    .bc-tips-toggle-chevron { transition: transform 0.2s ease; font-size: 13px; }
+    .bc-tips-toggle[aria-expanded="true"] .bc-tips-toggle-chevron { transform: rotate(90deg); }
+    .bc-tips-panel {
+      overflow: hidden; max-height: 0;
+      transition: max-height 0.25s ease;
+    }
+    .bc-tips-panel.open { max-height: 600px; }
+    .bc-tips-panel-inner {
+      padding: 12px 28px 16px;
+      display: grid; grid-template-columns: 1fr 1fr; gap: 12px;
+      border-bottom: 1px solid var(--border);
+    }
+    @media (max-width: 480px) {
+      .bc-tips-panel-inner { grid-template-columns: 1fr; }
+    }
+    .bc-tips-example {
+      border: 1px solid var(--border); border-radius: 6px;
+      padding: 10px 12px; background: var(--surface-2);
+    }
+    .bc-tips-example-label {
+      font-size: 11px; font-weight: 700; margin: 0 0 6px;
+      display: flex; align-items: center; gap: 4px;
+    }
+    .bc-tips-example--bad .bc-tips-example-label { color: var(--red); }
+    .bc-tips-example--good .bc-tips-example-label { color: var(--green); }
+    .bc-tips-example-text {
+      font-family: var(--mono); font-size: 11px;
+      color: var(--text); line-height: 1.5;
+      white-space: pre-wrap; word-break: break-word;
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 4px; padding: 6px 8px; margin: 0 0 6px;
+    }
+    .bc-tips-example-desc { font-size: 11px; color: var(--text-muted); line-height: 1.4; margin: 0; }
+
     /* Info note */
     .bc-info-note {
       padding: 8px 28px;
@@ -2681,6 +3074,18 @@
     .bc-limit-banner--error {
       color: #991b1b; background: #fef2f2; border: 1px solid #fca5a5;
     }
+    .bc-prompt-warn {
+      display: flex; align-items: center; justify-content: space-between; gap: 6px;
+      margin: 0 28px 6px; padding: 6px 10px;
+      border-radius: 4px; font-size: 12px; font-weight: 500;
+      color: #92400e; background: #fffbeb; border: 1px solid #fcd34d;
+    }
+    .bc-prompt-warn-dismiss {
+      flex-shrink: 0; padding: 2px 8px;
+      border: 1px solid #fcd34d; border-radius: 4px;
+      background: transparent; color: #92400e; font-size: 11px; cursor: pointer;
+    }
+    .bc-prompt-warn-dismiss:hover { background: #fef9c3; }
     .bc-prompt-row-stats {
       font-size: 10px; color: var(--text-muted); font-family: var(--mono);
       white-space: nowrap; padding-top: 9px; flex-shrink: 0; line-height: 1.3;
@@ -3331,6 +3736,75 @@
     }
     .pf-cycle-banner strong { font-weight: 700; }
 
+    /* Mis-sizing flags section (issue #578) */
+    .pf-flags-section { margin-top: 16px; }
+    .pf-flags-label {
+      font-size: 11px; font-weight: 600; text-transform: uppercase;
+      letter-spacing: .06em; color: #b45309; margin-bottom: 8px;
+    }
+    .pf-flag-item {
+      margin-bottom: 10px; padding: 10px 12px;
+      background: rgba(234, 179, 8, .07); border: 1px solid rgba(234, 179, 8, .35);
+      border-radius: 6px;
+    }
+    .pf-flag-item.resolved {
+      background: rgba(34, 197, 94, .06); border-color: rgba(34, 197, 94, .35);
+    }
+    .pf-flag-header {
+      display: flex; align-items: center; gap: 8px; margin-bottom: 5px;
+    }
+    .pf-flag-id {
+      font-family: var(--font-mono, monospace); font-size: 12px;
+      color: var(--text-muted); flex-shrink: 0;
+    }
+    .pf-flag-title {
+      font-size: 13px; font-weight: 500; color: var(--text); flex: 1; min-width: 0;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .pf-flag-badge {
+      font-size: 11px; padding: 2px 8px; border-radius: 99px; flex-shrink: 0;
+    }
+    .pf-flag-badge-pending {
+      background: rgba(234, 179, 8, .15); color: #92400e;
+      border: 1px solid rgba(234, 179, 8, .4);
+    }
+    .pf-flag-badge-resolved {
+      background: rgba(34, 197, 94, .12); color: #166534;
+      border: 1px solid rgba(34, 197, 94, .4);
+    }
+    .pf-flag-details {
+      font-size: 12px; color: var(--text-muted); margin-bottom: 8px; line-height: 1.6;
+    }
+    .pf-flag-details strong { color: var(--text); }
+    .pf-flag-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+    .pf-flag-action-btn {
+      font-size: 12px; padding: 3px 10px; border-radius: 5px;
+      border: 1px solid var(--border); background: none;
+      color: var(--text); font-family: inherit; cursor: pointer;
+      transition: background .1s, border-color .1s;
+    }
+    .pf-flag-action-btn:hover { background: var(--surface-hover, rgba(0,0,0,.05)); }
+    .pf-flag-action-btn.approve { border-color: rgba(34,197,94,.5); color: #166534; }
+    .pf-flag-action-btn.approve:hover { background: rgba(34,197,94,.08); }
+    .pf-flag-action-btn.dismiss { color: var(--text-muted); }
+    .pf-flag-size-picker {
+      display: flex; gap: 5px; align-items: center; margin-top: 6px; flex-wrap: wrap;
+    }
+    .pf-flag-size-btn {
+      font-size: 12px; padding: 3px 12px; border-radius: 5px;
+      border: 1px solid var(--border); background: none;
+      color: var(--text); font-family: inherit; cursor: pointer;
+      transition: background .1s, border-color .1s;
+    }
+    .pf-flag-size-btn:hover { background: var(--surface-hover, rgba(0,0,0,.05)); border-color: var(--blue); }
+    .pf-flag-size-cancel {
+      font-size: 12px; padding: 3px 8px; border: none; background: none;
+      color: var(--text-muted); cursor: pointer; font-family: inherit;
+    }
+    .pf-flag-resolved-note {
+      font-size: 12px; color: var(--text-muted); font-style: italic; margin-top: 4px;
+    }
+
     /* ── Logs tab (issue #420) ── */
     .logs-pane { display: flex; flex-direction: column; height: 100%; min-height: 0; }
     .logs-toolbar {
@@ -3844,6 +4318,14 @@
                 aria-selected="false" onclick="switchTab('sprint-history')">
           <i class="ti ti-history"></i>Sprint history
         </button>
+        <button class="stab" role="tab" id="stab-est-vs-actual"
+                aria-selected="false" onclick="switchTab('est-vs-actual')">
+          <i class="ti ti-ruler-measure"></i>Est vs Actual
+        </button>
+        <button class="stab" role="tab" id="stab-calibration"
+                aria-selected="false" onclick="switchTab('calibration')">
+          <i class="ti ti-adjustments-horizontal"></i>Calibration
+        </button>
       </nav>
       <!-- Sprint status pill (GitHub-backed; works cross-machine while traveling) -->
       <div class="snav-wrap">
@@ -3952,6 +4434,15 @@
           </div>
         </div>
 
+        <!-- Size legend (issue #562) -->
+        <div class="smgmt-size-legend" id="smgmt-size-legend" aria-label="Ticket size color legend">
+          <span class="smgmt-size-legend-label">Size:</span>
+          <span class="smgmt-size-legend-item"><span class="smgmt-size-legend-swatch sz-S"></span> S — small</span>
+          <span class="smgmt-size-legend-item"><span class="smgmt-size-legend-swatch sz-M"></span> M — medium</span>
+          <span class="smgmt-size-legend-item"><span class="smgmt-size-legend-swatch sz-L"></span> L — large</span>
+          <span class="smgmt-size-legend-item"><span class="smgmt-size-legend-swatch sz-XL"></span> XL — extra large</span>
+        </div>
+
         <!-- Sprint list -->
         <div class="smgmt-content">
 
@@ -4003,6 +4494,8 @@
         <!-- Ticket row context menu (issue #500) -->
         <div class="smgmt-ctx-menu hidden" id="smgmt-ctx-menu" role="menu"></div>
 
+        <!-- Estimate detail popover (issue #557) -->
+        <div class="smgmt-est-popover hidden" id="smgmt-est-popover" role="dialog" aria-modal="false" aria-label="Estimate details"></div>
         <!-- Per-column sort menu (issue #550) -->
         <div class="smgmt-sort-menu hidden" id="smgmt-sort-menu" role="menu" aria-label="Sort column"></div>
 
@@ -4086,7 +4579,15 @@
           </span>
           <span class="bc-step-arrow"><i class="ti ti-arrow-right"></i></span>
           <span class="bc-step-chip" id="bc-chip-2" data-step="2">
-            <span class="bc-step-n">2</span> Review &amp; create
+            <span class="bc-step-n">2</span> Review
+          </span>
+          <span class="bc-step-arrow"><i class="ti ti-arrow-right"></i></span>
+          <span class="bc-step-chip" id="bc-chip-3" data-step="3">
+            <span class="bc-step-n">3</span> Created
+          </span>
+          <span class="bc-step-arrow"><i class="ti ti-arrow-right"></i></span>
+          <span class="bc-step-chip" id="bc-chip-4" data-step="4">
+            <span class="bc-step-n">4</span> Estimate
           </span>
         </div>
 
@@ -4112,6 +4613,16 @@
             </div>
           </div>
 
+          <div class="bc-lp-section">
+            <div class="lp-hdr">
+              <label class="bc-settings-label" style="margin:0">Label Presets</label>
+              <button type="button" class="lp-save-btn" id="bc-lp-save-btn" onclick="_lpSavePreset('bc')">Save as Preset</button>
+            </div>
+            <div class="lp-empty hidden" id="bc-lp-empty">No presets yet — set default labels and click "Save as Preset".</div>
+            <div id="bc-lp-list" class="lp-list"></div>
+            <div class="lp-error hidden" id="bc-lp-error" role="alert" aria-live="polite"></div>
+          </div>
+
           <div class="bc-counter-row">
             <span class="bc-counter" id="bc-counter">0 / 50 prompts</span>
             <button type="button" class="bc-clear-draft-btn hidden" id="bc-clear-draft-btn"
@@ -4119,6 +4630,67 @@
           </div>
 
           <div id="bc-limit-banner" class="bc-limit-banner hidden" role="alert" aria-live="polite"></div>
+
+          <div class="bc-ac-tpl-toolbar">
+            <div class="ac-tpl-wrap" id="bc-ac-tpl-wrap">
+              <button type="button" class="ac-tpl-btn" id="bc-ac-tpl-btn"
+                      aria-haspopup="true" aria-expanded="false"
+                      aria-label="Insert AC template into prompts (Ctrl+Shift+A)"
+                      title="Insert AC template (Ctrl/Cmd+Shift+A)"
+                      onclick="bcAcTplOpen()">
+                <i class="ti ti-template"></i> Insert AC Template
+              </button>
+              <div class="ac-tpl-menu hidden" id="bc-ac-tpl-menu" role="menu" aria-label="AC template options">
+                <button type="button" class="ac-tpl-opt" role="menuitem" data-tpl="gwt"
+                        onclick="bcAcTplSelect('gwt')" tabindex="-1">
+                  <i class="ti ti-list-details ac-tpl-opt-icon"></i>
+                  <span class="ac-tpl-opt-label">
+                    <span class="ac-tpl-opt-name">Given / When / Then</span>
+                    <span class="ac-tpl-opt-desc">BDD-style acceptance criteria</span>
+                  </span>
+                </button>
+                <button type="button" class="ac-tpl-opt" role="menuitem" data-tpl="checklist"
+                        onclick="bcAcTplSelect('checklist')" tabindex="-1">
+                  <i class="ti ti-checkbox ac-tpl-opt-icon"></i>
+                  <span class="ac-tpl-opt-label">
+                    <span class="ac-tpl-opt-name">Checklist</span>
+                    <span class="ac-tpl-opt-desc">Markdown checkbox criteria</span>
+                  </span>
+                </button>
+              </div>
+            </div>
+            <button type="button" class="ac-tpl-btn uat-tpl-btn" id="bc-uat-tpl-btn"
+                    aria-label="Insert UAT Steps template into prompts"
+                    title="Insert UAT Steps template"
+                    onclick="bcUatTplInsert()">
+              <i class="ti ti-checklist"></i> Insert UAT Template
+            </button>
+            <span class="bc-ac-global-label">Appends scaffold to each ticket prompt</span>
+          </div>
+
+          <!-- Prompt Tips (issue #572) -->
+          <button type="button" class="bc-tips-toggle"
+                  id="bc-tips-toggle"
+                  aria-expanded="false"
+                  aria-controls="bc-tips-panel"
+                  onclick="_bcTipsToggle()">
+            <i class="ti ti-chevron-right bc-tips-toggle-chevron"></i>
+            &#9432; How to write a good prompt
+          </button>
+          <div class="bc-tips-panel" id="bc-tips-panel" role="region" aria-labelledby="bc-tips-toggle">
+            <div class="bc-tips-panel-inner">
+              <div class="bc-tips-example bc-tips-example--bad">
+                <div class="bc-tips-example-label">&#10007; Bad prompt</div>
+                <pre class="bc-tips-example-text">Add a button</pre>
+                <p class="bc-tips-example-desc">Too vague — no context, scope, or criteria for the BA to produce a useful ticket.</p>
+              </div>
+              <div class="bc-tips-example bc-tips-example--good">
+                <div class="bc-tips-example-label">&#10003; Good prompt</div>
+                <pre class="bc-tips-example-text">Add a "Mark all as done" button to the sprint board header. Clicking it sets every open ticket in the current sprint to UAT status. Show a confirmation dialog before applying. Only show the button when there are open tickets.</pre>
+                <p class="bc-tips-example-desc">Specific feature description with scope boundaries and enough context for the BA to write acceptance criteria.</p>
+              </div>
+            </div>
+          </div>
 
           <textarea class="bc-textarea" id="bc-textarea"
                     placeholder="Paste your ticket prompts here, separated by --- on its own line..."
@@ -4184,6 +4756,12 @@
 
           <div class="bc-error hidden" id="bc-step1-error"></div>
 
+          <!-- Prompt-size warning (issue #568) -->
+          <div id="bc-prompt-warn" class="bc-prompt-warn hidden" role="alert" aria-live="polite">
+            <span>&#9888; <strong>This prompt may be too large</strong> — consider splitting into separate requests</span>
+            <button type="button" class="bc-prompt-warn-dismiss" onclick="bcDismissPromptWarn()">Dismiss</button>
+          </div>
+
           <!-- Step 1 footer actions -->
           <div class="bc-step-actions">
             <div class="bc-step-actions-left">
@@ -4214,6 +4792,41 @@
             </label>
             <button type="button" class="bc-bulk-btn" onclick="bcDeselectAll()">Deselect all</button>
             <button type="button" class="bc-bulk-btn bc-select-failed-btn hidden" id="bc-select-failed-btn" onclick="bcSelectFailed()">Select failed</button>
+            <div style="display:flex;align-items:center;gap:6px;margin-left:auto">
+            <div class="ac-tpl-wrap" id="bc-bulk-ac-tpl-wrap">
+              <button type="button" class="ac-tpl-btn" id="bc-bulk-ac-tpl-btn"
+                      aria-haspopup="true" aria-expanded="false"
+                      aria-label="Apply AC template to all draft tickets"
+                      title="Apply AC template to all draft tickets"
+                      onclick="bcBulkAcTplOpen()">
+                <i class="ti ti-template"></i> Apply AC to all drafts
+              </button>
+              <div class="ac-tpl-menu hidden" id="bc-bulk-ac-tpl-menu" role="menu" aria-label="AC template options">
+                <button type="button" class="ac-tpl-opt" role="menuitem" data-tpl="gwt"
+                        onclick="bcBulkAcTplSelect('gwt')" tabindex="-1">
+                  <i class="ti ti-list-details ac-tpl-opt-icon"></i>
+                  <span class="ac-tpl-opt-label">
+                    <span class="ac-tpl-opt-name">Given / When / Then</span>
+                    <span class="ac-tpl-opt-desc">BDD-style acceptance criteria</span>
+                  </span>
+                </button>
+                <button type="button" class="ac-tpl-opt" role="menuitem" data-tpl="checklist"
+                        onclick="bcBulkAcTplSelect('checklist')" tabindex="-1">
+                  <i class="ti ti-checkbox ac-tpl-opt-icon"></i>
+                  <span class="ac-tpl-opt-label">
+                    <span class="ac-tpl-opt-name">Checklist</span>
+                    <span class="ac-tpl-opt-desc">Markdown checkbox criteria</span>
+                  </span>
+                </button>
+              </div>
+            </div>
+            <button type="button" class="ac-tpl-btn uat-tpl-btn" id="bc-bulk-uat-tpl-btn"
+                    aria-label="Apply UAT Steps template to all draft tickets"
+                    title="Apply UAT Steps template to all draft tickets"
+                    onclick="bcBulkUatTplInsert()">
+              <i class="ti ti-checklist"></i> Apply UAT to all drafts
+            </button>
+            </div>
           </div>
 
           <div class="bc-ticket-list" id="bc-ticket-list"></div>
@@ -4228,6 +4841,19 @@
             <div class="bc-review-actions">
               <button type="button" class="btn-ghost" onclick="bcCancelReview()">Cancel</button>
               <button type="button" class="btn-primary" id="bc-post-github-btn" disabled onclick="bcPostSelected()">Post to GitHub</button>
+            </div>
+          </div>
+
+          <!-- Linter warning overlay (issue #574) -->
+          <div id="bc-lint-overlay" class="bc-lint-overlay hidden">
+            <div class="bc-review-header">
+              <strong>Quality warnings</strong>
+              <span class="bc-review-sub">Some tickets may need improvement</span>
+            </div>
+            <div class="bc-lint-overlay-list" id="bc-lint-overlay-list"></div>
+            <div class="bc-review-actions">
+              <button type="button" class="btn-ghost" onclick="_bcLintGoBack()">Go back and edit</button>
+              <button type="button" class="btn-primary" onclick="_bcLintProceed()">Proceed anyway</button>
             </div>
           </div>
 
@@ -4306,6 +4932,32 @@
             </div>
           </div>
           <div class="smgmt-summary-rows" id="smgmt-summary-rows"></div>
+        </div>
+      </div>
+
+      <!-- Estimate vs Actual tab (issue #575) -->
+      <div class="tab-pane" id="pane-est-vs-actual" role="tabpanel" aria-labelledby="stab-est-vs-actual">
+        <div class="cmp-page-hdr">
+          <h2><i class="ti ti-ruler-measure" style="margin-right:8px;vertical-align:-2px;"></i>Estimate vs Actual</h2>
+          <p>Compare estimated size against actual agent time for finished sprints.</p>
+        </div>
+        <div class="cmp-picker-row">
+          <span class="cmp-picker-label">Sprint</span>
+          <select class="cmp-picker-select" id="eva-select" onchange="evaOnPickerChange()">
+            <option value="">— select sprint —</option>
+          </select>
+        </div>
+        <div id="eva-result"></div>
+      </div>
+
+      <!-- Calibration tab (issue #576) -->
+      <div class="tab-pane" id="pane-calibration" role="tabpanel" aria-labelledby="stab-calibration">
+        <div class="cmp-page-hdr">
+          <h2><i class="ti ti-adjustments-horizontal" style="margin-right:8px;vertical-align:-2px;"></i>Estimator Calibration</h2>
+          <p>Average actual agent time per size bucket across all finished sprints in this project.</p>
+        </div>
+        <div id="calib-result">
+          <div style="padding:24px;color:var(--text-sub);font-size:13px;">Loading…</div>
         </div>
       </div>
 
@@ -4670,13 +5322,15 @@ function parseUrl() {
   const slug = decodeURIComponent(m[1]);
   const rawTab = m[2] || '';
   const hash = window.location.hash;
-  const tab = (rawTab === 'tickets')        ? 'tickets'
-            : (rawTab === 'logs')           ? 'logs'
-            : (rawTab === 'bulk-create')    ? 'bulk-create'
-            : (rawTab === 'timeline')       ? 'timeline'
-            : (rawTab === 'compare')        ? 'compare'
-            : (rawTab === 'sprint-history') ? 'sprint-history'
-            : (hash === '#compare')         ? 'compare'
+  const tab = (rawTab === 'tickets')          ? 'tickets'
+            : (rawTab === 'logs')             ? 'logs'
+            : (rawTab === 'bulk-create')      ? 'bulk-create'
+            : (rawTab === 'timeline')         ? 'timeline'
+            : (rawTab === 'compare')          ? 'compare'
+            : (rawTab === 'sprint-history')   ? 'sprint-history'
+            : (rawTab === 'est-vs-actual')    ? 'est-vs-actual'
+            : (rawTab === 'calibration')      ? 'calibration'
+            : (hash === '#compare')           ? 'compare'
             : 'sprint-mgmt';
   return { slug, tab };
 }
@@ -4696,6 +5350,14 @@ let _smgmtDragSprintLabel = null;
 const RERUN_STRIP_LABELS = new Set(['UAT','UAT-approved','released','SIT','in-progress','needs-rework']);
 // Cache for sprint outcome data: key = sprint label, value = outcome object
 const _smgmtOutcomeCache = {};
+// Per-issue estimate cache: issueNum (int) → {size, confidence} | null (null = confirmed no estimate)
+const _estDataCache = {};
+// Groups last rendered in the tickets kanban view (used for rollup updates)
+let _ticketGroups = [];
+// Sprint ticket map for token header reactivity: label → [ticket, ...]
+let _smgmtBySprint = {};
+// Reverse lookup: issueNum (int) → sprint label
+const _smgmtTicketToSprint = {};
 
 // ── Running sprint live state (issue #277) ────────────────────────────────
 // Set of sprint labels that are currently running, populated on each render
@@ -4736,7 +5398,7 @@ function switchTab(tab, pushHistory) {
   _activeTab = tab;
 
   // Update aria-selected + active class on tabs
-  ['sprint-mgmt', 'tickets', 'logs', 'bulk-create', 'timeline', 'compare', 'metrics', 'sprint-history'].forEach(t => {
+  ['sprint-mgmt', 'tickets', 'logs', 'bulk-create', 'timeline', 'compare', 'metrics', 'sprint-history', 'est-vs-actual', 'calibration'].forEach(t => {
     const btn = document.getElementById('stab-' + t);
     if (!btn) return;
     const isActive = t === tab;
@@ -4745,7 +5407,7 @@ function switchTab(tab, pushHistory) {
   });
 
   // Show/hide panes
-  ['sprint-mgmt', 'tickets', 'logs', 'bulk-create', 'timeline', 'compare', 'metrics', 'sprint-history'].forEach(t => {
+  ['sprint-mgmt', 'tickets', 'logs', 'bulk-create', 'timeline', 'compare', 'metrics', 'sprint-history', 'est-vs-actual', 'calibration'].forEach(t => {
     const pane = document.getElementById('pane-' + t);
     if (pane) pane.classList.toggle('active', t === tab);
   });
@@ -4774,6 +5436,7 @@ function switchTab(tab, pushHistory) {
   // Init bulk-create tab on first visit
   if (tab === 'bulk-create') {
     _bcInitTab();
+    _lpRenderBc();
   }
 
   // Init logs tab
@@ -4801,11 +5464,21 @@ function switchTab(tab, pushHistory) {
   if (tab === 'metrics') {
     metricsInit();
   }
+
+  // Init estimate-vs-actual tab
+  if (tab === 'est-vs-actual') {
+    evaInit();
+  }
+
+  // Init calibration tab
+  if (tab === 'calibration') {
+    calibInit();
+  }
 }
 
 // ── Keyboard navigation for sub-tabs ─────────────────────────────────────────
 document.getElementById('sub-tabs').addEventListener('keydown', function(e) {
-  const enabledTabs = ['sprint-mgmt', 'tickets', 'logs', 'bulk-create', 'timeline', 'compare', 'sprint-history'];
+  const enabledTabs = ['sprint-mgmt', 'tickets', 'logs', 'bulk-create', 'timeline', 'compare', 'sprint-history', 'est-vs-actual', 'calibration'];
   const focused = document.activeElement;
   const currentId = focused ? focused.id.replace('stab-', '') : null;
   const currentIdx = enabledTabs.indexOf(currentId);
@@ -5357,6 +6030,7 @@ async function loadTickets() {
     if (!resp.ok) throw new Error('HTTP ' + resp.status);
     const data = await resp.json();
     renderTickets(data, repo);
+    _ticketsLoadEstimates(data.tickets || [], repo).catch(() => {});
   } catch (err) {
     container.innerHTML = '<div class="loading-msg">Failed to load tickets.</div>';
   }
@@ -5383,6 +6057,7 @@ function renderTickets(data, repo) {
     { label: 'In progress', items: tickets.filter(t => t.status === 'in-progress' || t.status === 'blocked') },
     { label: 'Backlog',     items: tickets.filter(t => t.status === 'backlog') },
   ].filter(g => g.items.length > 0);
+  _ticketGroups = groups;
 
   let ticketsHtml;
   if (groups.length === 0) {
@@ -5398,11 +6073,13 @@ function renderTickets(data, repo) {
           <span class="ticket-status-pill ${escHtml(t.status)}">${escHtml(t.status)}</span>
           <a class="ticket-title" href="${escHtml(t.url)}" target="_blank" rel="noopener" title="${escHtml(t.title)}">${escHtml(t.title)}</a>
           <span class="ticket-num">#${t.number}</span>
+          <span class="ticket-est-wrap" id="ticket-est-${t.number}"></span>
           <button class="ticket-close-btn" data-num="${t.number}" data-title="${escHtml(t.title)}" onclick="openCloseTicketModal(this)">Close</button>
           ${chipsHtml}
         </div>`;
       }).join('');
-      return `<div class="ticket-group-hdr">${escHtml(g.label)} · ${g.items.length}</div>${rows}`;
+      const gid = g.label.replace(/\s+/g, '-');
+      return `<div class="ticket-group-hdr" id="ticket-grp-hdr-${gid}">${escHtml(g.label)} · ${g.items.length}<span class="ticket-group-rollup" id="ticket-grp-rollup-${gid}"></span></div>${rows}`;
     }).join('');
   }
 
@@ -5419,6 +6096,65 @@ function renderTickets(data, repo) {
       </div>
     </div>
     ${ticketsHtml}`;
+}
+
+async function _ticketsLoadEstimates(tickets, repo) {
+  if (!repo || tickets.length === 0) return;
+  const issueNums = tickets.map(t => t.number).join(',');
+  try {
+    const resp = await fetch(
+      `/api/estimates/batch?project=${encodeURIComponent(repo)}&issues=${issueNums}`
+    );
+    if (!resp.ok) return;
+    const data = await resp.json();
+    if (!data.issues) return;
+    for (const [numStr, est] of Object.entries(data.issues)) {
+      const num = parseInt(numStr, 10);
+      _estDataCache[num] = est;
+      const wrapEl = document.getElementById(`ticket-est-${num}`);
+      if (!wrapEl) continue;
+      if (est && (est.size || est.confidence)) {
+        let html = '';
+        if (est.size) {
+          html += `<span class="ticket-est-size-pill">${escHtml(est.size)}</span>`;
+        }
+        if (est.confidence) {
+          const confClass = `conf-${est.confidence.toLowerCase()}`;
+          html += `<span class="ticket-est-confidence-pill ${escHtml(confClass)}">${escHtml(_capitalizeFirst(est.confidence))}</span>`;
+        }
+        wrapEl.innerHTML = html;
+      } else {
+        wrapEl.innerHTML = '<span class="ticket-no-estimate">Not Estimated</span>';
+      }
+    }
+    _ticketsUpdateGroupHeaders();
+  } catch (_) { /* silent */ }
+}
+
+function _ticketsRollupText(items) {
+  const total = items.length;
+  if (total === 0) return '0 tickets';
+  let totalMins = 0, unestimated = 0;
+  for (const t of items) {
+    const est = _estDataCache[t.number];
+    const mins = est && est.size ? _sizeMinutes(est.size) : 0;
+    if (mins > 0) totalMins += mins;
+    else unestimated++;
+  }
+  const countStr = `${total} ticket${total !== 1 ? 's' : ''}`;
+  if (unestimated === total) return `${countStr}, no estimates`;
+  const h = totalMins / 60;
+  const timeStr = h < 1
+    ? `~${totalMins}m`
+    : `~${parseFloat((Math.round(h * 10) / 10).toFixed(1))}h`;
+  return `${timeStr}, ${countStr}${unestimated > 0 ? ` (${unestimated} unestimated)` : ''}`;
+}
+
+function _ticketsUpdateGroupHeaders() {
+  for (const g of _ticketGroups) {
+    const el = document.getElementById(`ticket-grp-rollup-${g.label.replace(/\s+/g, '-')}`);
+    if (el) el.textContent = _ticketsRollupText(g.items);
+  }
 }
 
 // ── Close Ticket flow ─────────────────────────────────────────────────────────
@@ -5465,6 +6201,11 @@ async function closeTicketModalConfirm() {
     const closedNum = _closeTicketNum;
     closeTicketModalCancel();
     document.getElementById(`ticket-row-${closedNum}`)?.remove();
+    // Remove ticket from _ticketGroups so rollup count stays accurate
+    for (const g of _ticketGroups) {
+      g.items = g.items.filter(t => t.number !== closedNum);
+    }
+    _ticketsUpdateGroupHeaders();
     // Update ticket count in toolbar
     const countEl = document.querySelector('#tickets-content .tickets-toolbar .tickets-toolbar-left span');
     if (countEl) {
@@ -6104,6 +6845,7 @@ function _smgmtRender(data) {
       unassigned.push(iss);
     }
   });
+  _smgmtBySprint = bySprint;
 
   // Always render the backlog pane regardless of sprint count
   _smgmtRenderBacklog(unassigned);
@@ -6169,11 +6911,19 @@ function _smgmtRender(data) {
   // Load estimated hours from .commander/estimates/ for each sprint header
   _smgmtLoadEstimates(orderedLabels, bySprint);
 
+  // Check estimator availability and inject re-estimate buttons (issue #561)
+  _smgmtCheckEstimatorHealth();
   // Load sprint goals for header summary
   _smgmtLoadGoals(orderedLabels);
 
   // Inject pre-flight check banners for non-running sprint panes (issue #434)
   _preflightLoadBanners(orderedLabels, bySprint);
+
+  // Load file-conflict badges for pending tickets (issue #579)
+  _smgmtLoadConflicts(orderedLabels, bySprint);
+
+  // Load dependency order hints for pending tickets (issue #581)
+  _smgmtLoadDepOrder(orderedLabels, bySprint);
 
   // Update cleanup button visibility (issue #457)
   _smgmtUpdateCleanupBtn(data);
@@ -6495,6 +7245,8 @@ async function _smgmtLoadEstimates(orderedLabels, bySprint) {
   for (const label of orderedLabels) {
     const tickets = bySprint[label] || [];
     if (tickets.length === 0) continue;
+    // Populate reverse lookup for reactivity
+    for (const t of tickets) _smgmtTicketToSprint[t.number] = label;
     const issueNums = tickets.map(t => t.number).join(',');
     try {
       const resp = await fetch(
@@ -6508,37 +7260,310 @@ async function _smgmtLoadEstimates(orderedLabels, bySprint) {
         const display = Number.isInteger(h) ? `${h}h` : `${parseFloat(h.toFixed(1))}h`;
         estEl.textContent = `${display} estimated`;
       }
-      // Apply per-ticket size badges from cached estimate JSON
-      if (data.sizes) _smgmtApplySizeBadges(label, data.sizes, tickets);
+      _smgmtSetSprintTokenEl(label, data);
+      // Cache per-issue size/confidence and update visible rows
+      if (data.issues) {
+        for (const [numStr, est] of Object.entries(data.issues)) {
+          _estDataCache[parseInt(numStr, 10)] = est;
+        }
+        for (const t of tickets) {
+          _smgmtUpdateEstimateBadge(t.number);
+        }
+        _smgmtUpdateColRollup(label, tickets);
+      }
     } catch (_) {
       // fail silently — leave as "— estimated"
     }
   }
 }
 
-function _smgmtApplySizeBadges(label, sizes, tickets) {
-  const card = document.getElementById(`smgmt-card-${label}`);
-  for (const ticket of tickets) {
-    const row = (card && card.querySelector(`.smgmt-ticket[data-issue="${ticket.number}"]`))
-      || document.getElementById(`smgmt-ticket-${ticket.number}`);
-    if (!row) continue;
-    const size = sizes[String(ticket.number)];
-    let pill = row.querySelector('.smgmt-ticket-size-pill');
-    if (!pill) {
-      pill = document.createElement('span');
-      pill.className = 'smgmt-ticket-size-pill';
-      const titleEl = row.querySelector('.smgmt-ticket-title');
-      if (titleEl) titleEl.after(pill);
-      else row.appendChild(pill);
+function _smgmtSetSprintTokenEl(label, data) {
+  const el = document.getElementById(`smgmt-tokens-${label}`);
+  if (!el) return;
+  const tokens = data.total_tokens;
+  const cost   = data.total_cost_usd;
+  if (tokens === null || tokens === undefined || (data.estimated_count ?? 0) === 0) {
+    el.style.display = 'none';
+    el.textContent = '';
+    return;
+  }
+  const partialStr = data.partial ? ' (partial)' : '';
+  const tokFmt  = tokens.toLocaleString();
+  const costFmt = cost !== null && cost !== undefined
+    ? ` · ~$${cost < 0.01 ? cost.toFixed(4) : cost.toFixed(2)}`
+    : '';
+  el.textContent = ` · ~${tokFmt} tokens${partialStr}${costFmt}`;
+  el.style.display = 'inline-block';
+}
+
+async function _smgmtRefreshSprintTokens(issueNum) {
+  const label = _smgmtTicketToSprint[issueNum];
+  if (!label) return;
+  const tickets = _smgmtBySprint[label] || [];
+  if (tickets.length === 0) return;
+  const repo = _smgmtRepo();
+  if (!repo) return;
+  try {
+    const issueNums = tickets.map(t => t.number).join(',');
+    const resp = await fetch(
+      `/api/estimates/batch?project=${encodeURIComponent(repo)}&issues=${issueNums}`
+    );
+    if (!resp.ok) return;
+    const data = await resp.json();
+    const estEl = document.getElementById(`smgmt-est-${label}`);
+    if (estEl && data.complete && data.total_hours !== null) {
+      const h = data.total_hours;
+      const display = Number.isInteger(h) ? `${h}h` : `${parseFloat(h.toFixed(1))}h`;
+      estEl.textContent = `${display} estimated`;
     }
-    if (size) {
-      pill.textContent = size;
-      pill.title = `≈${_sizeMinutes(size)} min`;
-      pill.className = `smgmt-ticket-size-pill smgmt-ticket-size-pill--${size}`;
-    } else {
-      pill.textContent = 'Unestimated';
-      pill.title = 'No estimate in cache';
-      pill.className = 'smgmt-ticket-size-pill smgmt-ticket-size-pill--unestimated';
+    _smgmtSetSprintTokenEl(label, data);
+  } catch (_) { /* fail silently */ }
+}
+
+function _capitalizeFirst(s) {
+  return s ? s.charAt(0).toUpperCase() + s.slice(1).toLowerCase() : '';
+}
+
+function _smgmtEstimateBadgeHtml(issueNum) {
+  if (!Object.prototype.hasOwnProperty.call(_estDataCache, issueNum)) return '';
+  const est = _estDataCache[issueNum];
+  if (!est) return '<span class="smgmt-ticket-no-estimate">Not Estimated</span>';
+  if (!est.confidence && !est.size) return '';
+  const confClass = est.confidence ? `conf-${est.confidence.toLowerCase()}` : '';
+  const label = est.confidence ? _capitalizeFirst(est.confidence) : (est.size || 'Est');
+  return `<button class="smgmt-est-detail-btn ${escHtml(confClass)}" tabindex="0"
+    title="View estimate details"
+    onclick="event.stopPropagation();_smgmtEstimatePopoverOpen(event,${issueNum})"
+    onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();_smgmtEstimatePopoverOpen(event,${issueNum});}">
+    ${escHtml(label)}</button>`;
+}
+
+const _RISK_FLAGS_SERIOUS = ['touches-db-schema', 'security-sensitive', 'breaks-tests'];
+
+function _smgmtRiskFlagIconsHtml(issueNum) {
+  if (!Object.prototype.hasOwnProperty.call(_estDataCache, issueNum)) return '';
+  const est = _estDataCache[issueNum];
+  if (!est || !Array.isArray(est.risk_flags)) return '';
+  return est.risk_flags
+    .filter(f => _RISK_FLAGS_SERIOUS.includes(f))
+    .map(f => `<span class="smgmt-risk-flag-icon" tabindex="0" role="img"
+      aria-label="${escHtml(f)}" title="${escHtml(f)}"><i class="ti ti-alert-triangle"></i></span>`)
+    .join('');
+}
+
+// ── File-conflict detection (issue #579) ──────────────────────────────────────
+// Keyed by issue number → array of {partnerId, partnerTitle, sharedFiles}
+const _smgmtConflictsByIssue = {};
+
+function _smgmtConflictBadgeHtml(issueNum) {
+  const entries = _smgmtConflictsByIssue[issueNum];
+  if (!entries || entries.length === 0) return '';
+  const partners = entries.map(e => `#${e.partnerId}`).join(', ');
+  const files = [...new Set(entries.flatMap(e => e.sharedFiles))];
+  const tip = `Overlaps with ${partners}: ${files.join(', ')}`;
+  return `<button class="smgmt-conflict-badge" tabindex="0" title="${escHtml(tip)}"
+    onclick="event.stopPropagation();_smgmtShowConflictPopover(event,${issueNum})"
+    onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();_smgmtShowConflictPopover(event,${issueNum});}">
+    <i class="ti ti-git-merge"></i>${entries.length > 1 ? entries.length + ' conflicts' : '1 conflict'}</button>`;
+}
+
+function _smgmtUpdateConflictBadge(issueNum) {
+  const row = document.getElementById(`smgmt-ticket-${issueNum}`);
+  if (!row) return;
+  row.querySelector('.smgmt-conflict-badge')?.remove();
+  const entries = _smgmtConflictsByIssue[issueNum];
+  if (!entries || entries.length === 0) return;
+  const badge = document.createElement('button');
+  badge.className = 'smgmt-conflict-badge';
+  const partners = entries.map(e => `#${e.partnerId}`).join(', ');
+  const files = [...new Set(entries.flatMap(e => e.sharedFiles))];
+  badge.title = `Overlaps with ${partners}: ${files.join(', ')}`;
+  badge.tabIndex = 0;
+  badge.innerHTML = `<i class="ti ti-git-merge"></i>${entries.length > 1 ? entries.length + ' conflicts' : '1 conflict'}`;
+  badge.onclick = (ev) => { ev.stopPropagation(); _smgmtShowConflictPopover(ev, issueNum); };
+  badge.onkeydown = (ev) => {
+    if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); ev.stopPropagation(); _smgmtShowConflictPopover(ev, issueNum); }
+  };
+  const statusEl = row.querySelector('.smgmt-ticket-status');
+  if (statusEl) statusEl.before(badge);
+  else row.appendChild(badge);
+}
+
+function _smgmtShowConflictPopover(ev, issueNum) {
+  const entries = _smgmtConflictsByIssue[issueNum] || [];
+  if (!entries.length) return;
+  const existing = document.getElementById('smgmt-conflict-popover');
+  if (existing && existing._issueNum === issueNum) { existing.remove(); return; }
+  if (existing) existing.remove();
+  const pop = document.createElement('div');
+  pop.id = 'smgmt-conflict-popover';
+  pop._issueNum = issueNum;
+  pop.style.cssText = 'position:fixed;z-index:9999;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:12px 14px;box-shadow:0 4px 20px rgba(0,0,0,.18);max-width:340px;font-size:12px;';
+  const lines = entries.map(e =>
+    `<div style="margin-bottom:6px"><strong>#${e.partnerId}</strong> ${escHtml(e.partnerTitle)}<br>` +
+    `<span style="color:var(--text-muted)">Shared: ${e.sharedFiles.map(f => `<code style="font-size:11px">${escHtml(f)}</code>`).join(', ')}</span></div>`
+  ).join('');
+  pop.innerHTML = `<div style="font-weight:700;margin-bottom:8px;color:var(--red,#dc2626)">File conflicts for #${issueNum}</div>${lines}`;
+  document.body.appendChild(pop);
+  const rect = ev.target.getBoundingClientRect();
+  const popH = 200, popW = 340;
+  const top = rect.bottom + 4 + popH > window.innerHeight ? rect.top - popH - 4 : rect.bottom + 4;
+  const left = Math.min(rect.left, window.innerWidth - popW - 8);
+  pop.style.top = `${top}px`;
+  pop.style.left = `${Math.max(8, left)}px`;
+  const dismiss = (e) => { if (!pop.contains(e.target)) { pop.remove(); document.removeEventListener('click', dismiss, true); } };
+  setTimeout(() => document.addEventListener('click', dismiss, true), 0);
+}
+
+async function _smgmtLoadConflicts(orderedLabels, bySprint) {
+  const repo = _smgmtRepo();
+  if (!repo) return;
+  for (const label of orderedLabels) {
+    if (_smgmtRunningLabels.has(label)) continue;
+    if (_smgmtFinishedLabels.has(label)) continue;
+    const tickets = bySprint[label] || [];
+    const pending = tickets.filter(t => (t.status || 'backlog') === 'backlog');
+    if (pending.length < 2) continue;
+    // Clear stale entries for this sprint's tickets before repopulating
+    for (const t of pending) delete _smgmtConflictsByIssue[t.number];
+    try {
+      const resp = await fetch(
+        `/api/sprints/${encodeURIComponent(label)}/conflicts?project=${encodeURIComponent(repo)}`
+      );
+      if (!resp.ok) continue;
+      const data = await resp.json();
+      for (const c of (data.conflicts || [])) {
+        if (!_smgmtConflictsByIssue[c.ticket1_id]) _smgmtConflictsByIssue[c.ticket1_id] = [];
+        if (!_smgmtConflictsByIssue[c.ticket2_id]) _smgmtConflictsByIssue[c.ticket2_id] = [];
+        _smgmtConflictsByIssue[c.ticket1_id].push({ partnerId: c.ticket2_id, partnerTitle: c.ticket2_title, sharedFiles: c.shared_files });
+        _smgmtConflictsByIssue[c.ticket2_id].push({ partnerId: c.ticket1_id, partnerTitle: c.ticket1_title, sharedFiles: c.shared_files });
+      }
+      for (const t of pending) _smgmtUpdateConflictBadge(t.number);
+    } catch (_) {
+      // fail silently
+    }
+  }
+}
+
+// ── Dependency order hints (issue #581) ──────────────────────────────────────
+// Keyed by issue number → {upstream: [{id, title}], downstream: [{id, title}], inCycle: bool}
+const _smgmtDepOrderByIssue = {};
+
+function _smgmtDepOrderBadgeHtml(issueNum) {
+  const info = _smgmtDepOrderByIssue[issueNum];
+  if (!info) return '';
+  if (info.inCycle) {
+    return `<button class="smgmt-dep-order-badge is-cycle" tabindex="0"
+      aria-label="Circular dependency warning for ticket ${issueNum}"
+      title="Circular file dependency — no order prescribed"
+      onclick="event.stopPropagation();_smgmtShowDepOrderPopover(event,${issueNum})"
+      onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();_smgmtShowDepOrderPopover(event,${issueNum});}">
+      <i class="ti ti-alert-triangle"></i>cycle</button>`;
+  }
+  const total = info.upstream.length + info.downstream.length;
+  const label = total === 1 ? '1 dep' : `${total} deps`;
+  const parts = [
+    ...info.upstream.map(u => `After #${u.id}`),
+    ...info.downstream.map(d => `Before #${d.id}`),
+  ];
+  const tip = parts.join(', ');
+  return `<button class="smgmt-dep-order-badge" tabindex="0"
+    aria-label="Dependency order hint for ticket ${issueNum}: ${escHtml(tip)}"
+    title="${escHtml(tip)}"
+    onclick="event.stopPropagation();_smgmtShowDepOrderPopover(event,${issueNum})"
+    onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();_smgmtShowDepOrderPopover(event,${issueNum});}">
+    <i class="ti ti-list-tree"></i>${label}</button>`;
+}
+
+function _smgmtUpdateDepOrderBadge(issueNum) {
+  const row = document.getElementById(`smgmt-ticket-${issueNum}`);
+  if (!row) return;
+  row.querySelector('.smgmt-dep-order-badge')?.remove();
+  const html = _smgmtDepOrderBadgeHtml(issueNum);
+  if (!html) return;
+  const tmp = document.createElement('div');
+  tmp.innerHTML = html;
+  const badge = tmp.firstElementChild;
+  const conflictBadge = row.querySelector('.smgmt-conflict-badge');
+  if (conflictBadge) {
+    conflictBadge.after(badge);
+  } else {
+    const statusEl = row.querySelector('.smgmt-ticket-status');
+    if (statusEl) statusEl.before(badge);
+    else row.appendChild(badge);
+  }
+}
+
+function _smgmtShowDepOrderPopover(ev, issueNum) {
+  const info = _smgmtDepOrderByIssue[issueNum];
+  if (!info) return;
+  const existing = document.getElementById('smgmt-dep-order-popover');
+  if (existing && existing._issueNum === issueNum) { existing.remove(); return; }
+  if (existing) existing.remove();
+  const pop = document.createElement('div');
+  pop.id = 'smgmt-dep-order-popover';
+  pop._issueNum = issueNum;
+  pop.setAttribute('role', 'tooltip');
+  pop.style.cssText = 'position:fixed;z-index:9999;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:12px 14px;box-shadow:0 4px 20px rgba(0,0,0,.18);max-width:360px;font-size:12px;';
+  if (info.inCycle) {
+    pop.innerHTML = `<div style="font-weight:700;margin-bottom:8px;color:#b45309"><i class="ti ti-alert-triangle"></i> Circular dependency</div>
+      <p style="margin:0;color:var(--text-muted)">This ticket is part of a circular file-overlap dependency. No order can be prescribed. Review shared files with affected tickets.</p>`;
+  } else {
+    const afterLines = info.upstream.map(u =>
+      `<div style="margin-bottom:4px" aria-label="Should run after ticket ${u.id}">Should run after <strong>#${u.id}</strong> ${escHtml(u.title)}</div>`
+    ).join('');
+    const beforeLines = info.downstream.map(d =>
+      `<div style="margin-bottom:4px" aria-label="Should run before ticket ${d.id}">Should run before <strong>#${d.id}</strong> ${escHtml(d.title)}</div>`
+    ).join('');
+    pop.innerHTML = `<div style="font-weight:700;margin-bottom:8px;color:#6366f1"><i class="ti ti-list-tree"></i> Dependency order</div>${afterLines}${beforeLines}`;
+  }
+  document.body.appendChild(pop);
+  const rect = ev.target.getBoundingClientRect();
+  const popH = 180, popW = 360;
+  const top = rect.bottom + 4 + popH > window.innerHeight ? rect.top - popH - 4 : rect.bottom + 4;
+  const left = Math.min(rect.left, window.innerWidth - popW - 8);
+  pop.style.top = `${Math.max(8, top)}px`;
+  pop.style.left = `${Math.max(8, left)}px`;
+  const dismiss = (e) => { if (!pop.contains(e.target)) { pop.remove(); document.removeEventListener('click', dismiss, true); } };
+  setTimeout(() => document.addEventListener('click', dismiss, true), 0);
+}
+
+async function _smgmtLoadDepOrder(orderedLabels, bySprint) {
+  const repo = _smgmtRepo();
+  if (!repo) return;
+  for (const label of orderedLabels) {
+    if (_smgmtRunningLabels.has(label)) continue;
+    if (_smgmtFinishedLabels.has(label)) continue;
+    const tickets = bySprint[label] || [];
+    const pending = tickets.filter(t => (t.status || 'backlog') === 'backlog');
+    if (pending.length < 2) continue;
+    for (const t of pending) delete _smgmtDepOrderByIssue[t.number];
+    try {
+      const resp = await fetch(
+        `/api/sprints/${encodeURIComponent(label)}/dep-order?project=${encodeURIComponent(repo)}`
+      );
+      if (!resp.ok) continue;
+      const data = await resp.json();
+      if (data.has_cycle) {
+        const cycleSet = new Set((data.in_cycle_tickets || []).map(String));
+        for (const t of pending) {
+          if (cycleSet.has(String(t.number))) {
+            _smgmtDepOrderByIssue[t.number] = { upstream: [], downstream: [], inCycle: true };
+          }
+        }
+      } else {
+        for (const [idStr, hint] of Object.entries(data.dep_hints || {})) {
+          const num = parseInt(idStr, 10);
+          _smgmtDepOrderByIssue[num] = {
+            upstream: hint.upstream || [],
+            downstream: hint.downstream || [],
+            inCycle: false,
+          };
+        }
+      }
+      for (const t of pending) _smgmtUpdateDepOrderBadge(t.number);
+    } catch (_) {
+      // fail silently
     }
   }
 }
@@ -6563,6 +7588,72 @@ async function _smgmtLoadGoals(orderedLabels) {
       }
     } catch (_) {
       // fail silently
+    }
+  }
+}
+
+function _smgmtUpdateEstimateBadge(issueNum) {
+  const row = document.getElementById(`smgmt-ticket-${issueNum}`);
+  if (!row) return;
+
+  row.querySelector('.smgmt-est-detail-btn')?.remove();
+  row.querySelector('.smgmt-ticket-no-estimate')?.remove();
+  row.querySelectorAll('.smgmt-risk-flag-icon').forEach(el => el.remove());
+
+  const est = Object.prototype.hasOwnProperty.call(_estDataCache, issueNum)
+    ? _estDataCache[issueNum] : undefined;
+  if (est === undefined) return;
+
+  if (est && (est.confidence || est.size)) {
+    const confClass = est.confidence ? `conf-${est.confidence.toLowerCase()}` : '';
+    const label = est.confidence ? _capitalizeFirst(est.confidence) : (est.size || 'Est');
+    const btn = document.createElement('button');
+    btn.className = `smgmt-est-detail-btn ${confClass}`.trim();
+    btn.textContent = label;
+    btn.tabIndex = 0;
+    btn.title = 'View estimate details';
+    btn.onclick = (ev) => { ev.stopPropagation(); _smgmtEstimatePopoverOpen(ev, issueNum); };
+    btn.onkeydown = (ev) => {
+      if (ev.key === 'Enter' || ev.key === ' ') {
+        ev.preventDefault(); ev.stopPropagation();
+        _smgmtEstimatePopoverOpen(ev, issueNum);
+      }
+    };
+    const sizePill = row.querySelector('.smgmt-ticket-size-pill');
+    if (sizePill) {
+      sizePill.after(btn);
+    } else {
+      const titleEl = row.querySelector('.smgmt-ticket-title');
+      if (titleEl) titleEl.after(btn);
+    }
+  } else if (est === null) {
+    const noEstEl = document.createElement('span');
+    noEstEl.className = 'smgmt-ticket-no-estimate';
+    noEstEl.textContent = 'Not Estimated';
+    const sizePill = row.querySelector('.smgmt-ticket-size-pill');
+    const anchor = sizePill || row.querySelector('.smgmt-ticket-title');
+    if (anchor) anchor.after(noEstEl);
+  }
+
+  // Insert risk flag icons after estimate badge (or size pill / title if no badge)
+  if (est && Array.isArray(est.risk_flags)) {
+    const seriousFlags = est.risk_flags.filter(f => _RISK_FLAGS_SERIOUS.includes(f));
+    if (seriousFlags.length > 0) {
+      const anchor = row.querySelector('.smgmt-est-detail-btn')
+        || row.querySelector('.smgmt-ticket-size-pill')
+        || row.querySelector('.smgmt-ticket-title');
+      if (anchor) {
+        seriousFlags.slice().reverse().forEach(f => {
+          const span = document.createElement('span');
+          span.className = 'smgmt-risk-flag-icon';
+          span.tabIndex = 0;
+          span.setAttribute('role', 'img');
+          span.setAttribute('aria-label', f);
+          span.title = f;
+          span.innerHTML = '<i class="ti ti-alert-triangle"></i>';
+          anchor.after(span);
+        });
+      }
     }
   }
 }
@@ -7422,6 +8513,7 @@ function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent, finished) {
   let ticketCount = tickets.length;
   let ticketsContainerHtml = '';
   let isOutcomeView = false;
+  let rollupItems = tickets;
 
   if (outcome && (outcome.sprint_status || outcome.state)) {
     const meta = _smgmtStateMeta(outcome);
@@ -7438,6 +8530,7 @@ function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent, finished) {
       ticketCount = issueList.length;
       ticketsContainerHtml = _smgmtOutcomeTicketListHtml(issueList, label, _smgmtRepo());
       isOutcomeView = true;
+      rollupItems = issueList.map(i => ({ number: i.number }));
     }
   } else {
     // Planning view ticket rows
@@ -7492,7 +8585,7 @@ function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent, finished) {
           ${isNext ? '<span class="smgmt-next-badge" aria-label="Next up">NEXT UP</span>' : ''}
           ${outcomeBadgeHtml}
           ${parentLineage}
-          <span class="smgmt-sprint-count"><span id="smgmt-est-${escHtml(label)}" class="smgmt-sprint-est-val">— estimated</span> &middot; ${ticketCount} ticket${ticketCount !== 1 ? 's' : ''}</span>
+          <span class="smgmt-sprint-count" id="smgmt-col-rollup-${escHtml(label)}">${_smgmtRollupText(rollupItems)}</span>
         </div>
         <div class="smgmt-sprint-header-right">
           ${_smgmtSortBtnHtml(label)}
@@ -7571,9 +8664,11 @@ function _smgmtRunningCardHtml(label, n, tickets) {
 
     const issueUrl = t.url || (cardRepo ? `https://github.com/${cardRepo}/issues/${t.number}` : '#');
 
-    const sizePillHtml = (liveIss && liveIss.size)
-      ? `<span class="smgmt-ticket-size-pill" title="≈${liveIss.minutes || _sizeMinutes(liveIss.size)} min">${escHtml(liveIss.size)}</span>`
+    const sizeVal = (liveIss && liveIss.size) || t.size || '';
+    const sizePillHtml = sizeVal
+      ? `<span class="smgmt-ticket-size-pill" title="≈${(liveIss && liveIss.minutes) || _sizeMinutes(sizeVal)} min">${escHtml(sizeVal)}</span>`
       : '';
+    const runSizeAttr = sizeVal ? ` data-size="${escHtml(sizeVal)}"` : '';
     const agentTagHtml = (liveIss && liveIss.agent)
       ? `<span class="smgmt-ticket-agent-tag ${_smgmtAgentTagClass(liveIss.agent)}">${escHtml(liveIss.agent.toUpperCase())}</span>`
       : '';
@@ -7583,7 +8678,7 @@ function _smgmtRunningCardHtml(label, n, tickets) {
       : '';
 
     const runTicketLabels = escHtml((t.labels || []).map(l => l.name).join(','));
-    return `<div class="smgmt-ticket" data-issue="${t.number}" data-labels="${runTicketLabels}" draggable="false">
+    return `<div class="smgmt-ticket" data-issue="${t.number}" data-labels="${runTicketLabels}" draggable="false"${runSizeAttr}>
       ${indicator}
       <a class="smgmt-ticket-num" href="${escHtml(issueUrl)}" target="_blank"
          rel="noopener">#${t.number}</a>
@@ -7610,7 +8705,7 @@ function _smgmtRunningCardHtml(label, n, tickets) {
           <span class="smgmt-running-badge" id="smgmt-running-badge-${escHtml(label)}">
             <span class="smgmt-running-badge-dot"></span>${totalCount > 0 ? `${doneCount + skippedCount}/${totalCount}` : '—'}
           </span>
-          <span class="smgmt-sprint-count"><span id="smgmt-est-${escHtml(label)}" class="smgmt-sprint-est-val">— estimated</span> &middot; ${sourceTickets.length} ticket${sourceTickets.length !== 1 ? 's' : ''}</span>
+          <span class="smgmt-sprint-count" id="smgmt-col-rollup-${escHtml(label)}">${_smgmtRollupText(sourceTickets)}</span>
         </div>
         <div class="smgmt-sprint-header-right">
           <button class="smgmt-delete-btn" disabled title="Cancel sprint first">
@@ -7729,6 +8824,40 @@ function _sizeMinutes(letter) {
   return {S: 5, M: 15, L: 30, XL: 60}[letter] || 0;
 }
 
+/** Compute rollup text for a sprint column header.
+ *  items: array of {number, labels?:[{name}], size?} — size from cache takes priority over label. */
+function _smgmtRollupText(items) {
+  const count = items.length;
+  if (count === 0) return '0 tickets';
+  let totalMins = 0, unestimated = 0;
+  for (const t of items) {
+    const cached = _estDataCache[t.number];
+    let size = (cached && cached.size) ? cached.size : (t.size || null);
+    if (!size && t.labels) {
+      for (const lbl of t.labels) {
+        const m = /^size-([SMLX]+)$/.exec(lbl.name || '');
+        if (m) { size = m[1]; break; }
+      }
+    }
+    const mins = size ? _sizeMinutes(size) : 0;
+    if (mins > 0) totalMins += mins;
+    else unestimated++;
+  }
+  const countStr = `${count} ticket${count !== 1 ? 's' : ''}`;
+  if (unestimated === count) return `${countStr}, no estimates`;
+  const h = totalMins / 60;
+  const timeStr = h < 1
+    ? `~${totalMins}m`
+    : `~${parseFloat((Math.round(h * 10) / 10).toFixed(1))}h`;
+  return `${timeStr}, ${countStr}${unestimated > 0 ? ` (${unestimated} unestimated)` : ''}`;
+}
+
+/** Update the rollup span for a sprint column in-place. */
+function _smgmtUpdateColRollup(label, items) {
+  const el = document.getElementById(`smgmt-col-rollup-${label}`);
+  if (el) el.textContent = _smgmtRollupText(items);
+}
+
 /** CSS class for agent role tag: purple for coder-class, amber for tester-class. */
 function _smgmtAgentTagClass(role) {
   if (!role) return 'unknown-class';
@@ -7803,6 +8932,7 @@ function _smgmtLivePatch(label, live) {
         const row = document.createElement('div');
         row.className = 'smgmt-ticket';
         row.dataset.issue = String(t.number);
+        if (t.size) row.dataset.size = t.size;
         row.draggable = false;
         const initSizePill = t.size
           ? `<span class="smgmt-ticket-size-pill" title="≈${t.minutes || _sizeMinutes(t.size)} min">${escHtml(t.size)}</span>` : '';
@@ -7850,8 +8980,10 @@ function _smgmtLivePatch(label, live) {
       }
       sizePillEl.textContent = liveIss.size;
       sizePillEl.title = `≈${liveIss.minutes || _sizeMinutes(liveIss.size)} min`;
+      row.dataset.size = liveIss.size;
     } else if (sizePillEl) {
       sizePillEl.remove();
+      delete row.dataset.size;
     }
 
     // Update agent tag — only on tickets with an active agent
@@ -7971,11 +9103,20 @@ function _smgmtTicketRowHtml(ticket, label) {
 
   const sizeLabel = (ticket.labels || []).find(l => /^size-[SMLX]+$/.test(l.name));
   const hasEstimate = !!sizeLabel;
-  // Size badge: show from GitHub label immediately; _smgmtApplySizeBadges overlays JSON data after load
-  const sizeVal = sizeLabel ? sizeLabel.name.replace('size-', '') : null;
-  const sizePillHtml = sizeVal
-    ? `<span class="smgmt-ticket-size-pill smgmt-ticket-size-pill--${escHtml(sizeVal)}" title="≈${_sizeMinutes(sizeVal)} min">${escHtml(sizeVal)}</span>`
+  const sizeValue = sizeLabel ? sizeLabel.name.replace('size-', '') : '';
+  const sizePillHtml = sizeLabel
+    ? `<span class="smgmt-ticket-size-pill">${escHtml(sizeValue)}</span>`
     : '';
+  const sizeAttr = sizeValue ? ` data-size="${escHtml(sizeValue)}"` : '';
+  const estimateBadgeHtml = _smgmtEstimateBadgeHtml(ticket.number);
+  const reEstBtnHtml = (hasEstimate && _smgmtEstimatorAvailable)
+    ? `<button class="smgmt-reestimate-btn" tabindex="0" title="Re-estimate this ticket"
+         onclick="event.stopPropagation();_smgmtReEstimate(${ticket.number},this)"
+         onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();_smgmtReEstimate(${ticket.number},this);}">Re-estimate</button>`
+    : '';
+  const riskFlagIconsHtml = _smgmtRiskFlagIconsHtml(ticket.number);
+  const conflictBadgeHtml = _smgmtConflictBadgeHtml(ticket.number);
+  const depOrderBadgeHtml = _smgmtDepOrderBadgeHtml(ticket.number);
 
   const ticketLabelNames = (ticket.labels || []).map(l => l.name).join(',');
 
@@ -7984,7 +9125,7 @@ function _smgmtTicketRowHtml(ticket, label) {
          tabindex="-1"
          draggable="true"
          data-issue="${ticket.number}"
-         data-sprint="${escHtml(label)}"
+         data-sprint="${escHtml(label)}"${sizeAttr}
          data-labels="${escHtml(ticketLabelNames)}"
          ondragstart="_smgmtTicketDragStart(event, ${ticket.number}, '${escHtml(label)}')"
          ondragend="_smgmtTicketDragEnd(event)"
@@ -8001,7 +9142,7 @@ function _smgmtTicketRowHtml(ticket, label) {
       <a class="smgmt-ticket-num" href="${escHtml(ticket.url || '#')}" target="_blank"
          rel="noopener" draggable="false" onclick="event.stopPropagation()">#${ticket.number}</a>
       <span class="smgmt-ticket-title" title="${escHtml(ticket.title)}">${escHtml(ticket.title)}</span>
-      ${sizePillHtml}
+      ${sizePillHtml}${estimateBadgeHtml}${riskFlagIconsHtml}${conflictBadgeHtml}${depOrderBadgeHtml}${reEstBtnHtml}
       <span class="smgmt-ticket-status ${statusClass}">${escHtml(statusLabel)}</span>
       <button class="btn-view-log" tabindex="0" title="View issue log"
               onclick="event.stopPropagation();openLvIssueLog(${ticket.number},'${escHtml(label)}',_smgmtRepo()||'')">
@@ -8036,11 +9177,13 @@ async function _smgmtRetryEstimation(issueNum, btn) {
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const data = await resp.json();
     if (!data.ok || !data.size) throw new Error('no size');
+    const retryRow = spinner.closest('.smgmt-ticket');
     const pill = document.createElement('span');
     pill.className = 'smgmt-ticket-size-pill';
     pill.textContent = data.size;
     pill.title = `≈${data.minutes || _sizeMinutes(data.size)} min`;
     spinner.replaceWith(pill);
+    if (retryRow) retryRow.dataset.size = data.size;
   } catch (_) {
     const newBtn = document.createElement('button');
     newBtn.className = 'smgmt-retry-pill';
@@ -8055,9 +9198,37 @@ async function _smgmtRetryEstimation(issueNum, btn) {
   }
 }
 
-// ── Re-estimate action (issue #452) ───────────────────────────────────────────
+// ── Re-estimate action (issue #452, extended by #561) ────────────────────────
 let _reEstIssueNum = null;
 let _reEstRowBtn   = null;
+let _smgmtEstimatorAvailable = false;
+let _smgmtEstimatorHealthChecked = false;
+
+async function _smgmtCheckEstimatorHealth() {
+  if (_smgmtEstimatorHealthChecked) return;
+  _smgmtEstimatorHealthChecked = true;
+  try {
+    const resp = await fetch('/api/estimator/health');
+    if (!resp.ok) return;
+    const data = await resp.json();
+    if (data.available) {
+      _smgmtEstimatorAvailable = true;
+      _smgmtInjectReEstimateButtons();
+    }
+  } catch (_) {}
+}
+
+function _smgmtInjectReEstimateButtons() {
+  document.querySelectorAll('.smgmt-ticket').forEach(row => {
+    if (!row.querySelector('.smgmt-ticket-size-pill')) return;
+    if (row.querySelector('.smgmt-reestimate-btn, .smgmt-reestimate-spinner, .smgmt-reestimate-error')) return;
+    const issueNum = parseInt(row.dataset.issue, 10);
+    if (!issueNum) return;
+    const statusEl = row.querySelector('.smgmt-ticket-status');
+    if (statusEl) statusEl.before(_makeReEstimateBtn(issueNum));
+    else row.appendChild(_makeReEstimateBtn(issueNum));
+  });
+}
 
 function _makeReEstimateBtn(issueNum) {
   const btn = document.createElement('button');
@@ -8122,7 +9293,7 @@ async function _smgmtReEstimateRun(issueNum, rowBtn) {
 
   try {
     const resp = await fetch(
-      `/api/issues/${issueNum}/estimate?repo=${encodeURIComponent(repo)}`,
+      `/api/issues/${issueNum}/estimate?repo=${encodeURIComponent(repo)}&force=true`,
       { method: 'POST' }
     );
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
@@ -8137,9 +9308,14 @@ async function _smgmtReEstimateRun(issueNum, rowBtn) {
         pill.textContent = data.size;
         pill.title = `≈${data.minutes || _sizeMinutes(data.size)} min`;
       }
+      row.dataset.size = data.size;
     }
     // Restore row re-estimate button
     if (rowSpinner) rowSpinner.replaceWith(_makeReEstimateBtn(issueNum));
+
+    // Update local cache and sprint token header
+    if (_estDataCache[issueNum]) _estDataCache[issueNum].size = data.size;
+    _smgmtRefreshSprintTokens(issueNum);
 
     // Update detail panel
     if (tdpBtn) {
@@ -8151,12 +9327,28 @@ async function _smgmtReEstimateRun(issueNum, rowBtn) {
         sizeEl.title = `≈${data.minutes || _sizeMinutes(data.size)} min`;
       }
     }
+    // Update estimate cache and refresh kanban column rollups
+    _estDataCache[issueNum] = Object.assign({}, _estDataCache[issueNum] || {}, { size: data.size });
+    _ticketsUpdateGroupHeaders();
+    if (_smgmtData) {
+      const iss = _smgmtData.issues.find(i => i.number === issueNum);
+      if (iss && iss.sprint_label) {
+        const sprintTickets = _smgmtData.issues.filter(i => i.sprint_label === iss.sprint_label);
+        _smgmtUpdateColRollup(iss.sprint_label, sprintTickets);
+      }
+    }
   } catch (err) {
-    // Restore row button
-    if (rowSpinner) rowSpinner.replaceWith(_makeReEstimateBtn(issueNum));
+    // Show inline error near the button, then restore it after 3 s
+    if (rowSpinner) {
+      const errBadge = document.createElement('span');
+      errBadge.className = 'smgmt-reestimate-error';
+      errBadge.title = err.message;
+      errBadge.textContent = 'Failed';
+      rowSpinner.replaceWith(errBadge);
+      setTimeout(() => errBadge.replaceWith(_makeReEstimateBtn(issueNum)), 3000);
+    }
     // Restore detail panel button
     if (tdpBtn) { tdpBtn.disabled = false; tdpBtn.textContent = 'Re-estimate'; }
-    _smgmtShowToast(`Re-estimate failed: ${err.message}`);
   }
 }
 
@@ -8211,6 +9403,105 @@ function _smgmtCtxMenuClose() {
   document.removeEventListener('contextmenu', _smgmtCtxMenuOutsideHandler);
 }
 
+// ── Estimate detail popover (issue #557) ─────────────────────────────────────
+
+let _estPopoverIssueNum = null;
+
+function _smgmtEstimatePopoverOpen(event, issueNum) {
+  const popover = document.getElementById('smgmt-est-popover');
+  if (!popover) return;
+
+  const est = _estDataCache[issueNum];
+  if (!est) return;
+
+  _estPopoverIssueNum = issueNum;
+
+  const sizeStr = est.size || '<span class="smgmt-est-popover-empty">—</span>';
+  const confStr = est.confidence
+    ? _capitalizeFirst(est.confidence)
+    : '<span class="smgmt-est-popover-empty">—</span>';
+
+  const files = Array.isArray(est.files_likely_affected) ? est.files_likely_affected : [];
+  const filesHtml = files.length
+    ? `<span class="smgmt-est-popover-list">${files.map(f =>
+        `<span class="smgmt-est-popover-list-item" title="${escHtml(f)}">${escHtml(f)}</span>`
+      ).join('')}</span>`
+    : '<span class="smgmt-est-popover-empty">None listed</span>';
+
+  const flags = Array.isArray(est.risk_flags) ? est.risk_flags : [];
+  const flagsHtml = flags.length
+    ? flags.map(f => `<span class="smgmt-est-popover-flag">${escHtml(f)}</span>`).join('')
+    : '<span class="smgmt-est-popover-empty">No risk flags</span>';
+
+  const summaryHtml = est.summary
+    ? `<hr class="smgmt-est-popover-divider">
+       <div class="smgmt-est-popover-summary">${escHtml(est.summary)}</div>`
+    : '';
+
+  popover.innerHTML = `
+    <div class="smgmt-est-popover-title">Estimate #${issueNum}</div>
+    <div class="smgmt-est-popover-row">
+      <span class="smgmt-est-popover-key">Size</span>
+      <span class="smgmt-est-popover-val">${sizeStr}</span>
+    </div>
+    <div class="smgmt-est-popover-row">
+      <span class="smgmt-est-popover-key">Confidence</span>
+      <span class="smgmt-est-popover-val">${confStr}</span>
+    </div>
+    <div class="smgmt-est-popover-row" style="align-items:flex-start">
+      <span class="smgmt-est-popover-key">Files</span>
+      ${filesHtml}
+    </div>
+    <div class="smgmt-est-popover-row" style="align-items:flex-start;flex-wrap:wrap">
+      <span class="smgmt-est-popover-key" style="width:100%;margin-bottom:4px">Risk flags</span>
+      <div>${flagsHtml}</div>
+    </div>
+    ${summaryHtml}`;
+
+  popover.classList.remove('hidden');
+
+  // Position: prefer below the button, flip up if off-screen
+  const btn = event.currentTarget || event.target;
+  const rect = btn.getBoundingClientRect ? btn.getBoundingClientRect() : null;
+  const popW = 300;
+  const popH = 220;
+  let left, top;
+  if (rect) {
+    left = rect.left + window.scrollX;
+    top  = rect.bottom + window.scrollY + 4;
+    if (rect.left + popW > window.innerWidth) left = Math.max(4, rect.right + window.scrollX - popW);
+    if (rect.bottom + popH > window.innerHeight) top = rect.top + window.scrollY - popH - 4;
+  } else {
+    left = event.clientX + window.scrollX;
+    top  = event.clientY + window.scrollY + 4;
+  }
+  popover.style.left = left + 'px';
+  popover.style.top  = top  + 'px';
+
+  setTimeout(() => {
+    document.addEventListener('click',   _smgmtEstimatePopoverOutside);
+    document.addEventListener('keydown', _smgmtEstimatePopoverKeydown);
+  }, 0);
+}
+
+function _smgmtEstimatePopoverOutside(event) {
+  const popover = document.getElementById('smgmt-est-popover');
+  if (!popover || popover.contains(event.target)) return;
+  _smgmtEstimatePopoverClose();
+}
+
+function _smgmtEstimatePopoverKeydown(event) {
+  if (event.key === 'Escape') _smgmtEstimatePopoverClose();
+}
+
+function _smgmtEstimatePopoverClose() {
+  const popover = document.getElementById('smgmt-est-popover');
+  if (popover) popover.classList.add('hidden');
+  _estPopoverIssueNum = null;
+  document.removeEventListener('click',   _smgmtEstimatePopoverOutside);
+  document.removeEventListener('keydown', _smgmtEstimatePopoverKeydown);
+}
+
 // ── Sprint action handlers ─────────────────────────────────────────────────
 function _smgmtRepo() { return _cachedFullRepo[_slug] || null; }
 
@@ -8261,6 +9552,7 @@ let _pfState        = 'idle'; // 'loading' | 'success' | 'error'
 let _pfDagData      = null;
 let _pfWarnings     = null;
 let _pfCycle        = null;
+let _pfFlags        = null;  // mis-sizing flags (issue #578)
 let _pfSelectedIds  = new Set();
 
 function _pfOpen(label) {
@@ -8285,6 +9577,7 @@ function _pfReset() {
   _pfDagData = null;
   _pfWarnings = null;
   _pfCycle = null;
+  _pfFlags = null;
   _pfSelectedIds = new Set();
 }
 
@@ -8297,6 +9590,7 @@ function _pfClose() {
   _pfDagData      = null;
   _pfWarnings     = null;
   _pfCycle        = null;
+  _pfFlags        = null;
   _pfSelectedIds  = new Set();
 }
 
@@ -8311,9 +9605,10 @@ async function _pfFetch() {
     if (!res.ok) throw new Error(await res.text());
     if (_pfCurrentLabel !== label) return;
     const data = await res.json();
-    _pfDagData  = data.dag      || null;
-    _pfWarnings = data.warnings || null;
-    _pfCycle    = data.cycle    || null;
+    _pfDagData  = data.dag              || null;
+    _pfWarnings = data.warnings         || null;
+    _pfCycle    = data.cycle            || null;
+    _pfFlags    = data.mis_sizing_flags || null;
     if (_pfDagData) {
       for (const t of (_pfDagData.tickets || [])) _pfSelectedIds.add(t.id);
     }
@@ -8335,12 +9630,14 @@ function _pfShowSuccess() {
     : '';
   const warningsHtml  = _pfBuildWarningsHtml();
   const cycleHtml     = _pfBuildCycleHtml();
+  const flagsHtml     = _pfBuildFlagsHtml();
   const conflictsHtml = _pfBuildConflictsHtml();
   const orderHtml     = _pfBuildOrderHtml();
   document.getElementById('pf-content').innerHTML =
     `<p style="font-size:13px;color:var(--text);margin:0;">Ready to run <strong>Sprint ${n}</strong>.</p>
      ${warningsHtml}
      ${cycleHtml}
+     ${flagsHtml}
      ${dagHtml}
      <div class="pf-section">
        <div class="pf-section-label">Conflicts</div>
@@ -8352,19 +9649,29 @@ function _pfShowSuccess() {
      </div>`;
   document.getElementById('pf-content').classList.remove('hidden');
   document.getElementById('pf-footer').classList.remove('hidden');
-  const hasCycle  = !!(_pfCycle && _pfCycle.length);
-  const confirmBtn = document.getElementById('pf-confirm-btn');
-  confirmBtn.disabled = hasCycle;
-  if (hasCycle) {
-    confirmBtn.title = 'Cannot run: dependency cycle detected. Resolve the cycle first.';
-    confirmBtn.setAttribute('aria-label', 'Run Sprint — disabled: dependency cycle detected');
-  } else {
-    confirmBtn.title = '';
-    confirmBtn.setAttribute('aria-label', 'Run Sprint');
-  }
+  _pfUpdateConfirmBtn();
   document.getElementById('pf-cancel-btn').focus();
   if (_pfDagData && (_pfDagData.edges || []).length > 0) {
     requestAnimationFrame(() => _pfDrawDAGArrows(_pfDagData.edges));
+  }
+}
+
+function _pfUpdateConfirmBtn() {
+  const hasCycle = !!(_pfCycle && _pfCycle.length);
+  const pendingFlags = (_pfFlags && (_pfFlags.flags || []).filter(f => f.status === 'pending')) || [];
+  const hasPending = pendingFlags.length > 0;
+  const confirmBtn = document.getElementById('pf-confirm-btn');
+  if (!confirmBtn) return;
+  confirmBtn.disabled = hasCycle || hasPending;
+  if (hasCycle) {
+    confirmBtn.title = 'Cannot run: dependency cycle detected. Resolve the cycle first.';
+    confirmBtn.setAttribute('aria-label', 'Run Sprint — disabled: dependency cycle detected');
+  } else if (hasPending) {
+    confirmBtn.title = `Cannot run: ${pendingFlags.length} mis-sizing flag${pendingFlags.length > 1 ? 's' : ''} need review.`;
+    confirmBtn.setAttribute('aria-label', 'Run Sprint — disabled: mis-sizing flags need review');
+  } else {
+    confirmBtn.title = '';
+    confirmBtn.setAttribute('aria-label', 'Run Sprint');
   }
 }
 
@@ -8396,6 +9703,140 @@ function _pfBuildCycleHtml() {
     <strong>Cycle detected:</strong> ${escHtml(_pfCycle.join(' → '))}
   </div>`;
 }
+
+// ── Mis-sizing flags section (issue #578) ───────────────────────────────────
+
+function _pfBuildFlagsHtml() {
+  const flags = _pfFlags && (_pfFlags.flags || []);
+  if (!flags || !flags.length) return '';
+
+  const label = _pfCurrentLabel;
+  const repo  = _pfCurrentRepo;
+
+  const rows = flags.map(f => {
+    const num = f.issue_number;
+    const resolved = f.status !== 'pending';
+    const itemClass = resolved ? 'pf-flag-item resolved' : 'pf-flag-item';
+
+    const estLabel = f.current_estimate
+      ? `${escHtml(f.current_estimate)} (${f.current_estimate_minutes ?? '?'} min)`
+      : 'unknown';
+    const avgLabel = f.historical_avg_actual_size
+      ? `${escHtml(f.historical_avg_actual_size)} (${f.historical_avg_actual_minutes ?? '?'} min avg)`
+      : 'unknown';
+    const drivingLabels = (f.driving_labels || []).map(l => `<code>${escHtml(l)}</code>`).join(', ');
+    const eventCount = f.mis_sizing_event_count || 0;
+
+    let badgeHtml = '';
+    let actionsHtml = '';
+    if (resolved) {
+      const actionText = { approved: 'Approved', reestimated: 'Re-estimated', dismissed: 'Dismissed' }[f.status] || f.status;
+      badgeHtml = `<span class="pf-flag-badge pf-flag-badge-resolved">${escHtml(actionText)}</span>`;
+      const noteText = f.action_note ? ` — ${escHtml(f.action_note)}` : '';
+      const newSizeText = f.new_size ? ` New size: ${escHtml(f.new_size)}.` : '';
+      actionsHtml = `<div class="pf-flag-resolved-note">${escHtml(actionText)}${newSizeText}${noteText}</div>`;
+    } else {
+      badgeHtml = `<span class="pf-flag-badge pf-flag-badge-pending">Review needed</span>`;
+      actionsHtml = `
+        <div class="pf-flag-actions" id="pf-flag-actions-${num}">
+          <button class="pf-flag-action-btn approve" onclick="_pfFlagAction(${num}, 'approved')">Approve</button>
+          <button class="pf-flag-action-btn" onclick="_pfFlagShowSizePicker(${num}, '${escHtml(f.current_estimate || 'S')}')">Re-estimate</button>
+          <button class="pf-flag-action-btn dismiss" onclick="_pfFlagAction(${num}, 'dismissed')">Dismiss</button>
+        </div>
+        <div id="pf-flag-picker-${num}" style="display:none">
+          <div class="pf-flag-size-picker">
+            <span style="font-size:12px;color:var(--text-muted);">New size:</span>
+            ${['S','M','L','XL'].map(s =>
+              `<button class="pf-flag-size-btn" onclick="_pfFlagReestimate(${num}, '${s}')">${s}</button>`
+            ).join('')}
+            <button class="pf-flag-size-cancel" onclick="_pfFlagHidePicker(${num})">Cancel</button>
+          </div>
+        </div>`;
+    }
+
+    return `<div class="${itemClass}" id="pf-flag-item-${num}">
+      <div class="pf-flag-header">
+        <span class="pf-flag-id">#${num}</span>
+        <span class="pf-flag-title" title="${escHtml(f.title)}">${escHtml(f.title)}</span>
+        ${badgeHtml}
+      </div>
+      <div class="pf-flag-details">
+        Estimate: <strong>${estLabel}</strong> ·
+        Historical avg: <strong>${avgLabel}</strong> ·
+        ${eventCount} mis-sizing event${eventCount !== 1 ? 's' : ''} on: ${drivingLabels}
+      </div>
+      ${actionsHtml}
+    </div>`;
+  });
+
+  const pending = flags.filter(f => f.status === 'pending').length;
+  const subtitle = pending > 0
+    ? `${pending} ticket${pending > 1 ? 's' : ''} flagged for review`
+    : 'All flags resolved';
+
+  return `<div class="pf-flags-section" id="pf-flags-section">
+    <div class="pf-flags-label">Mis-sizing review — ${subtitle}</div>
+    ${rows.join('')}
+  </div>`;
+}
+
+function _pfFlagShowSizePicker(num, currentSize) {
+  const actionsEl = document.getElementById(`pf-flag-actions-${num}`);
+  const pickerEl  = document.getElementById(`pf-flag-picker-${num}`);
+  if (actionsEl) actionsEl.style.display = 'none';
+  if (pickerEl)  pickerEl.style.display  = 'block';
+}
+
+function _pfFlagHidePicker(num) {
+  const actionsEl = document.getElementById(`pf-flag-actions-${num}`);
+  const pickerEl  = document.getElementById(`pf-flag-picker-${num}`);
+  if (actionsEl) actionsEl.style.display = '';
+  if (pickerEl)  pickerEl.style.display  = 'none';
+}
+
+async function _pfFlagAction(num, action, newSize) {
+  const label = _pfCurrentLabel;
+  const repo  = _pfCurrentRepo;
+  if (!label || !repo) return;
+
+  // Disable buttons to prevent double-click
+  const itemEl = document.getElementById(`pf-flag-item-${num}`);
+  if (itemEl) itemEl.querySelectorAll('button').forEach(b => { b.disabled = true; });
+
+  try {
+    const body = { action };
+    if (newSize) body.new_size = newSize;
+    const res = await fetch(
+      `/api/sprints/${encodeURIComponent(label)}/mis-sizing-flags/${num}/action?project=${encodeURIComponent(repo)}`,
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
+    );
+    if (!res.ok) {
+      const err = await res.text();
+      _smgmtShowToast(`Flag action failed: ${err}`, 'error');
+      if (itemEl) itemEl.querySelectorAll('button').forEach(b => { b.disabled = false; });
+      return;
+    }
+    const data = await res.json();
+    // Update local state and re-render flags section
+    _pfFlags = data;
+    const flagsSection = document.getElementById('pf-flags-section');
+    if (flagsSection) {
+      const newHtml = _pfBuildFlagsHtml();
+      flagsSection.outerHTML = newHtml || '<div id="pf-flags-section"></div>';
+    }
+    _pfUpdateConfirmBtn();
+  } catch (e) {
+    _smgmtShowToast('Flag action failed: ' + e.message, 'error');
+    if (itemEl) itemEl.querySelectorAll('button').forEach(b => { b.disabled = false; });
+  }
+}
+
+function _pfFlagReestimate(num, newSize) {
+  _pfFlagHidePicker(num);
+  _pfFlagAction(num, 'reestimated', newSize);
+}
+
+// ────────────────────────────────────────────────────────────────────────────
 
 function _pfBuildDAGHtml(dag) {
   const ticketMap = {};
@@ -10806,13 +12247,59 @@ const BC_ALLOWED_EXTS = new Set(['.png', '.jpg', '.jpeg', '.pdf', '.md', '.html'
 let _ntDraftId = null;
 let _ntDraftGenerated = false;
 let _ntLabels = [];          // [{name, color}, ...] from GitHub
-let _ntSelectedLabel = null; // currently applied label name
+let _ntSelectedLabels = []; // currently applied label names
 let _ntDropdownFocus = -1;   // keyboard-focused dropdown item index
 let _ntFiles = [];           // queued attachment files
+let _ntSkipLint = false;     // set true when user clicks "Proceed anyway" on linter warning
+
+// ── Ticket quality linter (issue #574) ──────────────────────────────────────
+const _LINT_ACTION_VERBS = [
+  'add','fix','update','remove','implement','migrate','refactor','document',
+  'investigate','define','create','delete','change','improve','enable','disable',
+  'support','handle','integrate','replace','upgrade','convert','build','set',
+  'extend','configure','deploy','test','validate','clean','allow','block',
+  'track','display','show','hide','load','fetch','send','parse','format',
+  'move','copy','rename','merge','split','reset','restore','archive','expose',
+  'deprecate','extract','introduce','simplify','decouple','optimize',
+];
+const _LINT_ACCEPTANCE_SIGNALS = [
+  'so that','acceptance criteria','expected','done when',
+  'definition of done','ac:','- [ ]',
+];
+
+function lintTicket(title, body) {
+  const issues = [];
+  const combined = (title + ' ' + body).trim();
+  if (combined.length < 20) {
+    issues.push('Too short — add more detail (combined text under 20 characters).');
+  }
+  const titleWords = title.toLowerCase().split(/\W+/).filter(Boolean);
+  if (!_LINT_ACTION_VERBS.some(v => titleWords.includes(v))) {
+    issues.push('No action verb in title — start with a verb like: add, fix, update, implement, refactor…');
+  }
+  const bodyLower = body.toLowerCase();
+  if (!_LINT_ACCEPTANCE_SIGNALS.some(s => bodyLower.includes(s))) {
+    issues.push('No acceptance signal — include "AC:", "done when", "expected", or a checkbox list (- [ ]) in the body.');
+  }
+  return issues;
+}
+
+function _ntShowLintWarning(issues) {
+  const list = document.getElementById('nt-lint-warn-list');
+  list.innerHTML = issues.map(i => `<li>${escHtml(i)}</li>`).join('');
+  document.getElementById('nt-lint-warn').classList.remove('hidden');
+  document.getElementById('nt-post-footer').classList.add('hidden');
+}
+
+function _ntHideLintWarning() {
+  document.getElementById('nt-lint-warn').classList.add('hidden');
+  document.getElementById('nt-post-footer').classList.remove('hidden');
+}
+// ─────────────────────────────────────────────────────────────────────────────
 
 function _ntUpdateWarnings() {
   if (!_ntDraftGenerated) return;
-  document.getElementById('nt-warn-label').classList.toggle('hidden', !!_ntSelectedLabel);
+  document.getElementById('nt-warn-label').classList.toggle('hidden', _ntSelectedLabels.length > 0);
   document.getElementById('nt-warn-attach').classList.toggle('hidden', _ntFiles.length > 0);
 }
 
@@ -10895,7 +12382,7 @@ async function _ntFetchLabels(repo) {
     if (r.ok) {
       _ntLabels = await r.json();
       // Pre-select first default label from settings if no label chosen yet
-      if (!_ntSelectedLabel) {
+      if (_ntSelectedLabels.length === 0) {
         const defaults = localStorage.getItem(_settingsKey('defaultLabels')) || '';
         const first = defaults.split(',').map(function(s) { return s.trim(); }).find(function(s) { return s; });
         if (first) {
@@ -10941,13 +12428,24 @@ function _ntRenderDropdown(query) {
   _ntDropdownFocus = -1;
 }
 
+function _ntRenderChips() {
+  const container = document.getElementById('nt-label-chip');
+  if (_ntSelectedLabels.length === 0) {
+    container.innerHTML = '';
+    container.classList.add('hidden');
+    return;
+  }
+  container.classList.remove('hidden');
+  container.innerHTML = _ntSelectedLabels.map(name => {
+    const color = _ntLabelColor(name);
+    return `<span class="nt-label-chip-item"><span class="nt-label-chip-dot" style="background:${color}"></span>${escHtml(name)}<button class="nt-label-chip-rm" type="button" data-label="${escHtml(name)}" aria-label="Remove ${escHtml(name)}">×</button></span>`;
+  }).join('');
+}
+
 function _ntSelectLabel(name) {
-  _ntSelectedLabel = name;
-  const color = _ntLabelColor(name);
-  const chip = document.getElementById('nt-label-chip');
-  chip.innerHTML = `<span class="nt-label-chip-dot" style="background:${color}"></span>${escHtml(name)}<button class="nt-label-chip-rm" type="button" aria-label="Remove label">&times;</button>`;
-  chip.classList.remove('hidden');
-  document.getElementById('nt-label-wrap').classList.add('hidden');
+  if (_ntSelectedLabels.includes(name)) return;
+  _ntSelectedLabels.push(name);
+  _ntRenderChips();
   document.getElementById('nt-label').value = '';
   document.getElementById('nt-label-dropdown').classList.add('hidden');
   document.getElementById('nt-label').setAttribute('aria-expanded', 'false');
@@ -10955,11 +12453,16 @@ function _ntSelectLabel(name) {
   _ntUpdateWarnings();
 }
 
-function _ntClearLabel() {
-  _ntSelectedLabel = null;
-  document.getElementById('nt-label-chip').classList.add('hidden');
-  document.getElementById('nt-label-wrap').classList.remove('hidden');
-  document.getElementById('nt-label').focus();
+function _ntClearLabel(name) {
+  if (name !== undefined) {
+    _ntSelectedLabels = _ntSelectedLabels.filter(l => l !== name);
+  } else {
+    _ntSelectedLabels = [];
+  }
+  _ntRenderChips();
+  if (_ntSelectedLabels.length === 0) {
+    document.getElementById('nt-label').focus();
+  }
   _ntUpdateWarnings();
 }
 
@@ -10979,7 +12482,7 @@ async function _ntCreateLabel(name) {
 }
 
 function _ntAutoSuggestLabel() {
-  if (_ntSelectedLabel || !_ntLabels.length) return;
+  if (_ntSelectedLabels.length > 0 || !_ntLabels.length) return;
   const title = (document.getElementById('nt-title').value || '').toLowerCase();
   const body = (document.getElementById('nt-body').value || '').toLowerCase();
   const text = title + ' ' + body;
@@ -11002,15 +12505,190 @@ function _ntAutoSuggestLabel() {
   if (fallback) _ntSelectLabel(fallback.name);
 }
 
+// ── Label Presets ─────────────────────────────────────────────────────────
+const _LP_MAX = 50;
+const _lpStorageOk = (() => {
+  try { localStorage.setItem('__lp_t', '1'); localStorage.removeItem('__lp_t'); return true; }
+  catch (_) { return false; }
+})();
+
+function _lpKey(projectId) { return 'label-presets:' + projectId; }
+
+function _lpLoad(projectId) {
+  if (!_lpStorageOk || !projectId) return [];
+  try { return JSON.parse(localStorage.getItem(_lpKey(projectId)) || '[]'); }
+  catch (_) { return []; }
+}
+
+function _lpSave(projectId, presets) {
+  if (!_lpStorageOk || !projectId) return;
+  try { localStorage.setItem(_lpKey(projectId), JSON.stringify(presets)); }
+  catch (_) {}
+}
+
+function _lpGetNtProjectId() {
+  const sel = document.getElementById('nt-project');
+  return sel ? sel.value : '';
+}
+
+function _lpGetBcProjectId() {
+  const sel = document.getElementById('bc-repo');
+  return sel ? sel.value : '';
+}
+
+function _lpGetBcLabels() {
+  const el = document.getElementById('bc-default-labels');
+  if (!el) return [];
+  return el.value.split(',').map(l => l.trim()).filter(Boolean);
+}
+
+function _lpApplyNtLabels(names) {
+  for (const n of names) _ntSelectLabel(n);
+}
+
+function _lpApplyBcLabels(names) {
+  const el = document.getElementById('bc-default-labels');
+  if (!el) return;
+  const current = _lpGetBcLabels();
+  const merged = [...new Set([...current, ...names])];
+  el.value = merged.join(', ');
+  const field = el.closest('.bc-settings-field--labels');
+  if (field) field.style.display = '';
+  _bcScheduleSaveDraft();
+}
+
+function _lpRenderNt() {
+  _lpRender('nt', _lpGetNtProjectId, () => _ntSelectedLabels, _lpApplyNtLabels);
+}
+
+function _lpRenderBc() {
+  _lpRender('bc', _lpGetBcProjectId, _lpGetBcLabels, _lpApplyBcLabels);
+}
+
+function _lpRender(ctx, getProjectId, getLabels, applyLabels) {
+  const listEl  = document.getElementById(ctx + '-lp-list');
+  const emptyEl = document.getElementById(ctx + '-lp-empty');
+  const errEl   = document.getElementById(ctx + '-lp-error');
+  if (!listEl) return;
+  if (errEl) { errEl.classList.add('hidden'); errEl.textContent = ''; }
+  if (!_lpStorageOk) { listEl.innerHTML = ''; if (emptyEl) emptyEl.classList.add('hidden'); return; }
+  const projectId = getProjectId();
+  const presets = _lpLoad(projectId);
+  if (presets.length === 0) {
+    listEl.innerHTML = '';
+    if (emptyEl) emptyEl.classList.remove('hidden');
+    return;
+  }
+  if (emptyEl) emptyEl.classList.add('hidden');
+  listEl.innerHTML = presets.map((p, i) => {
+    const tags = p.labels.map(l => `<span class="lp-tag">${escHtml(l)}</span>`).join('');
+    return `<div class="lp-row" draggable="true" data-idx="${i}">` +
+      `<span class="lp-drag ti ti-grip-vertical" title="Drag to reorder"></span>` +
+      `<span class="lp-name" contenteditable="true" spellcheck="false" data-idx="${i}" ` +
+        `data-ctx="${escHtml(ctx)}" data-pid="${escHtml(projectId)}" ` +
+        `onblur="_lpRenameBlur(event)" onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();}"` +
+      `>${escHtml(p.name)}</span>` +
+      `<span class="lp-tags">${tags}</span>` +
+      `<button type="button" class="lp-apply-btn" onclick="_lpApplyPreset(${i},'${ctx}')">Apply</button>` +
+      `<button type="button" class="lp-del-btn" onclick="_lpDeletePreset(${i},'${ctx}')" aria-label="Delete preset">×</button>` +
+      `</div>`;
+  }).join('');
+  _lpWireDrag(listEl, ctx, projectId);
+}
+
+function _lpSavePreset(ctx) {
+  if (!_lpStorageOk) { _lpShowError(ctx, 'Presets unavailable (storage disabled).'); return; }
+  const getProjectId = ctx === 'nt' ? _lpGetNtProjectId : _lpGetBcProjectId;
+  const getLabels    = ctx === 'nt' ? (() => _ntSelectedLabels) : _lpGetBcLabels;
+  const projectId = getProjectId();
+  if (!projectId) { _lpShowError(ctx, 'Select a project first.'); return; }
+  const labels = getLabels();
+  if (!labels || labels.length === 0) { _lpShowError(ctx, 'Select at least one label first.'); return; }
+  const presets = _lpLoad(projectId);
+  if (presets.length >= _LP_MAX) { _lpShowError(ctx, `Preset limit reached (${_LP_MAX} max)`); return; }
+  presets.push({ name: 'Preset ' + (presets.length + 1), labels: [...labels] });
+  _lpSave(projectId, presets);
+  if (ctx === 'nt') _lpRenderNt(); else _lpRenderBc();
+}
+
+function _lpApplyPreset(idx, ctx) {
+  const getProjectId = ctx === 'nt' ? _lpGetNtProjectId : _lpGetBcProjectId;
+  const applyLabels  = ctx === 'nt' ? _lpApplyNtLabels  : _lpApplyBcLabels;
+  const projectId = getProjectId();
+  if (!projectId) return;
+  const presets = _lpLoad(projectId);
+  if (!presets[idx]) return;
+  applyLabels(presets[idx].labels);
+  if (ctx === 'nt') _lpRenderNt(); else _lpRenderBc();
+}
+
+function _lpDeletePreset(idx, ctx) {
+  if (!confirm('Delete this preset?')) return;
+  const getProjectId = ctx === 'nt' ? _lpGetNtProjectId : _lpGetBcProjectId;
+  const projectId = getProjectId();
+  if (!projectId) return;
+  const presets = _lpLoad(projectId);
+  presets.splice(idx, 1);
+  _lpSave(projectId, presets);
+  if (ctx === 'nt') _lpRenderNt(); else _lpRenderBc();
+}
+
+function _lpRenameBlur(event) {
+  const el = event.target;
+  const idx = parseInt(el.dataset.idx, 10);
+  const projectId = el.dataset.pid;
+  const newName = el.textContent.trim();
+  if (!newName) { el.textContent = 'Preset'; return; }
+  const presets = _lpLoad(projectId);
+  if (!presets[idx] || presets[idx].name === newName) return;
+  presets[idx].name = newName;
+  _lpSave(projectId, presets);
+}
+
+function _lpShowError(ctx, msg) {
+  const el = document.getElementById(ctx + '-lp-error');
+  if (!el) return;
+  el.textContent = msg;
+  el.classList.remove('hidden');
+  setTimeout(() => el.classList.add('hidden'), 4000);
+}
+
+function _lpWireDrag(listEl, ctx, projectId) {
+  let dragSrc = null;
+  listEl.querySelectorAll('.lp-row').forEach(row => {
+    row.addEventListener('dragstart', e => {
+      dragSrc = parseInt(row.dataset.idx, 10);
+      e.dataTransfer.effectAllowed = 'move';
+      row.classList.add('lp-dragging');
+    });
+    row.addEventListener('dragend', () => row.classList.remove('lp-dragging'));
+    row.addEventListener('dragover', e => { e.preventDefault(); row.classList.add('lp-drag-over'); });
+    row.addEventListener('dragleave', () => row.classList.remove('lp-drag-over'));
+    row.addEventListener('drop', e => {
+      e.preventDefault();
+      row.classList.remove('lp-drag-over');
+      const tgt = parseInt(row.dataset.idx, 10);
+      if (dragSrc === null || dragSrc === tgt) return;
+      const presets = _lpLoad(projectId);
+      const [moved] = presets.splice(dragSrc, 1);
+      presets.splice(tgt, 0, moved);
+      _lpSave(projectId, presets);
+      if (ctx === 'nt') _lpRenderNt(); else _lpRenderBc();
+      dragSrc = null;
+    });
+  });
+}
+
 async function smgmtOpenNewTicket() {
   // Reset to input state
   _ntDraftId = null;
   _ntDraftGenerated = false;
-  _ntSelectedLabel = null;
+  _ntSelectedLabels = [];
   _ntLabels = [];
   _ntDropdownFocus = -1;
   document.getElementById('nt-description').value = '';
   document.getElementById('nt-label').value = '';
+  document.getElementById('nt-label-chip').innerHTML = '';
   document.getElementById('nt-label-chip').classList.add('hidden');
   document.getElementById('nt-label-wrap').classList.remove('hidden');
   document.getElementById('nt-label-dropdown').classList.add('hidden');
@@ -11021,9 +12699,17 @@ async function smgmtOpenNewTicket() {
   document.getElementById('nt-warn-label').classList.add('hidden');
   document.getElementById('nt-warn-attach').classList.add('hidden');
   document.getElementById('nt-error').classList.add('hidden');
+  document.getElementById('nt-title-error').classList.add('hidden');
+  document.getElementById('nt-body-error').classList.add('hidden');
+  document.getElementById('nt-lint-warn').classList.add('hidden');
+  document.getElementById('nt-post-footer').classList.remove('hidden');
+  _ntSkipLint = false;
   document.getElementById('nt-submit-btn').disabled = false;
   document.getElementById('nt-submit-btn').textContent = 'Generate Draft';
   document.getElementById('nt-draft-section').classList.add('hidden');
+  document.getElementById('nt-body').value = '';
+  _ntBodyTab('write');
+  _ntUpdateCharCount();
   _setBodyInert(['nt-backdrop', 'nt-modal']);
   document.getElementById('nt-backdrop').classList.remove('hidden');
   document.getElementById('nt-modal').classList.remove('hidden');
@@ -11045,9 +12731,11 @@ async function smgmtOpenNewTicket() {
     // Pre-fetch labels for the selected project
     const selectedRepo = sel.value;
     if (selectedRepo) _ntFetchLabels(selectedRepo);
+    _lpRenderNt();
   } catch (e) {
     sel.innerHTML = '<option value="">Could not load projects</option>';
     sel.disabled = false;
+    _lpRenderNt();
   }
 
   document.getElementById('nt-description').focus();
@@ -11153,14 +12841,24 @@ function _setupModals() {
   document.getElementById('nt-cancel-btn').addEventListener('click', _ntClose);
   document.getElementById('nt-post-cancel-btn').addEventListener('click', _ntClose);
   document.getElementById('nt-backdrop').addEventListener('click', _ntClose);
-  // Project change → re-fetch labels
+  document.getElementById('nt-lint-back-btn').addEventListener('click', function() {
+    _ntHideLintWarning();
+    document.getElementById('nt-title').focus();
+  });
+  document.getElementById('nt-lint-proceed-btn').addEventListener('click', function() {
+    _ntHideLintWarning();
+    _ntSkipLint = true;
+    document.getElementById('nt-post-btn').click();
+  });
+  // Project change → re-fetch labels and re-render presets
   document.getElementById('nt-project').addEventListener('change', function() {
     if (this.value) _ntFetchLabels(this.value);
+    _lpRenderNt();
   });
 
-  // Label chip removal (delegated)
+  // Label chip removal (delegated — per-chip by data-label)
   document.getElementById('nt-label-chip').addEventListener('click', function(e) {
-    if (e.target.classList.contains('nt-label-chip-rm')) _ntClearLabel();
+    if (e.target.classList.contains('nt-label-chip-rm')) _ntClearLabel(e.target.dataset.label);
   });
 
   // Label input → filter dropdown
@@ -11219,6 +12917,19 @@ function _setupModals() {
     }
   });
 
+  // Live-clear per-field errors once constraint is satisfied
+  document.getElementById('nt-title').addEventListener('input', function() {
+    if ((this.value || '').trim()) {
+      document.getElementById('nt-title-error').classList.add('hidden');
+    }
+  });
+  document.getElementById('nt-body').addEventListener('input', function() {
+    if ((this.value || '').trim().length >= 20) {
+      document.getElementById('nt-body-error').classList.add('hidden');
+    }
+    _ntUpdateCharCount();
+  });
+
   document.getElementById('nt-submit-btn').addEventListener('click', async function() {
     const repo = document.getElementById('nt-project').value;
     const description = (document.getElementById('nt-description').value || '').trim();
@@ -11246,6 +12957,7 @@ function _setupModals() {
       _ntDraftId = data.draft_id;
       document.getElementById('nt-title').value = data.title || '';
       document.getElementById('nt-body').value = data.body || '';
+      _ntUpdateCharCount();
       _ntDraftGenerated = true;
       _ntAutoSuggestLabel();
       _ntUpdateWarnings();
@@ -11264,13 +12976,36 @@ function _setupModals() {
   });
 
   document.getElementById('nt-post-btn').addEventListener('click', async function() {
-    const title = (document.getElementById('nt-title').value || '').trim();
-    const repo = document.getElementById('nt-project').value;
+    const titleEl    = document.getElementById('nt-title');
+    const bodyEl     = document.getElementById('nt-body');
+    const titleErrEl = document.getElementById('nt-title-error');
+    const bodyErrEl  = document.getElementById('nt-body-error');
+    const title = (titleEl.value || '').trim();
+    const body  = (bodyEl.value  || '').trim();
+    const repo  = document.getElementById('nt-project').value;
+    let hasError = false;
     if (!title) {
-      document.getElementById('nt-error').textContent = 'Title is required before posting.';
-      document.getElementById('nt-error').classList.remove('hidden');
-      return;
+      titleErrEl.textContent = 'Title is required.';
+      titleErrEl.classList.remove('hidden');
+      hasError = true;
+    } else {
+      titleErrEl.classList.add('hidden');
     }
+    if (body.length < 20) {
+      bodyErrEl.textContent = 'Description must be at least 20 characters.';
+      bodyErrEl.classList.remove('hidden');
+      hasError = true;
+    } else {
+      bodyErrEl.classList.add('hidden');
+    }
+    if (hasError) return;
+
+    // Quality linter (non-blocking — skipped when user proceeds anyway)
+    if (!_ntSkipLint) {
+      const lintIssues = lintTicket(title, body);
+      if (lintIssues.length > 0) { _ntShowLintWarning(lintIssues); return; }
+    }
+    _ntSkipLint = false;
 
     this.disabled = true;
     this.innerHTML = '<span class="nt-spinner"></span>Posting…';
@@ -11282,7 +13017,7 @@ function _setupModals() {
       formData.append('title', title);
       formData.append('body', document.getElementById('nt-body').value);
       formData.append('project', repo);
-      if (_ntSelectedLabel) formData.append('extra_labels', _ntSelectedLabel);
+      for (const lbl of _ntSelectedLabels) formData.append('extra_labels', lbl);
       for (const f of _ntFiles) {
         formData.append('files', f);
       }
@@ -11348,9 +13083,14 @@ let _bcSprintConfirmed = false;     // Sprint stage → Post stage gate
 let _bcPosting         = false;     // true while posting to GitHub (→ jump to Sprint Mgmt on done)
 let _bcSprintsLoadedFor = null;     // repo the Sprint dropdown was last populated for
 let _bcReestimateTimers = {};       // index -> debounce timer for auto re-estimate on edit
+let _bcWarnDismissed = false;       // true after user dismisses the prompt-size warning (issue #568)
+let _bcSkipLint  = false;           // set true when user clicks "Proceed anyway" on linter warning
+let _bcLintToPost = null;           // tickets pending post while lint overlay is shown
 
 const BC_MAX_PROMPTS = 50;
 const BC_WARN_PROMPTS = 40;
+const BC_PROMPT_WARN_CHARS = 1500;  // per-prompt char threshold for size warning (issue #568)
+const BC_PROMPT_WARN_ASKS  = 3;     // per-prompt action-verb sentence count threshold (issue #568)
 
 /** Called each time the Bulk Create tab becomes active. */
 function _bcInitTab() {
@@ -11377,7 +13117,32 @@ function _bcInitTab() {
     _bcRestoreDraft();
     _bcUpdateCounter();
     _bcTplRender();
+    _lpRenderBc();
+    _bcTipsInit();
   }
+}
+
+/** Restore Prompt Tips collapsed/expanded state from sessionStorage. */
+function _bcTipsInit() {
+  if (sessionStorage.getItem('bcPromptTipsOpen') === '1') {
+    const btn = document.getElementById('bc-tips-toggle');
+    const panel = document.getElementById('bc-tips-panel');
+    if (btn && panel) {
+      btn.setAttribute('aria-expanded', 'true');
+      panel.classList.add('open');
+    }
+  }
+}
+
+/** Toggle the Prompt Tips help panel. */
+function _bcTipsToggle() {
+  const btn = document.getElementById('bc-tips-toggle');
+  const panel = document.getElementById('bc-tips-panel');
+  const open = btn.getAttribute('aria-expanded') === 'true';
+  const next = !open;
+  btn.setAttribute('aria-expanded', String(next));
+  panel.classList.toggle('open', next);
+  sessionStorage.setItem('bcPromptTipsOpen', next ? '1' : '0');
 }
 
 /** Populate the repo dropdown to the current project. */
@@ -11414,25 +13179,32 @@ function _bcPopulateRepo() {
   }
 }
 
+// Highlight a single chip (1=Input, 2=Review, 3=Created, 4=Estimate) and mark
+// earlier chips as completed so the rail reads as a progress trail.
+function _bcSetActiveChip(n) {
+  for (let i = 1; i <= 4; i++) {
+    const chip = document.getElementById(`bc-chip-${i}`);
+    if (!chip) continue;
+    chip.classList.toggle('active', i === n);
+    chip.classList.toggle('done', i < n);
+  }
+}
+
 function _bcShowStep(n) {
   const step1 = document.getElementById('bc-step1');
   const step2 = document.getElementById('bc-step2');
-  const chip1 = document.getElementById('bc-chip-1');
-  const chip2 = document.getElementById('bc-chip-2');
-  if (!step1 || !step2 || !chip1 || !chip2) return;
+  if (!step1 || !step2) return;
 
   if (n === 1) {
     step1.classList.remove('hidden');
     step2.classList.add('hidden');
-    chip1.classList.add('active');
-    chip1.classList.remove('done');
-    chip2.classList.remove('active');
+    _bcSetActiveChip(1);
   } else {
     step1.classList.add('hidden');
     step2.classList.remove('hidden');
-    chip1.classList.remove('active');
-    chip1.classList.add('done');     // Input is complete once we're reviewing
-    chip2.classList.add('active');
+    // The active chip within step 2 (Review/Created/Estimate) is derived from
+    // job state in _bcRenderStep2.
+    _bcSetActiveChip(2);
   }
 }
 
@@ -11495,6 +13267,7 @@ function bcGoToSprintStage() {
 
 function bcRepoChanged() {
   _bcTplRender();
+  _lpRenderBc();
 }
 
 /** Populate the Sprint dropdown for the selected repo (issue: bulk-create sprint assignment).
@@ -11742,6 +13515,7 @@ function bcClearDraft() {
 }
 
 function bcOnTextareaInput() {
+  _bcWarnDismissed = false;
   clearTimeout(_bcCounterTimer);
   _bcCounterTimer = setTimeout(_bcUpdateCounter, 200);
   _bcScheduleSaveDraft();
@@ -11847,8 +13621,29 @@ function _bcUpdateCounter() {
     }
   }
 
+  // Prompt-size warning (issue #568)
+  const warnEl = document.getElementById('bc-prompt-warn');
+  if (warnEl) {
+    const shouldWarn = !_bcWarnDismissed && prompts.some(
+      p => p.length > BC_PROMPT_WARN_CHARS || _bcCountAskSentences(p) >= BC_PROMPT_WARN_ASKS
+    );
+    warnEl.classList.toggle('hidden', !shouldWarn);
+  }
+
   // Refresh assignment dropdowns when ticket count changes
   if (_bcFiles.length > 0) _bcRenderFileQueue();
+}
+
+function _bcCountAskSentences(text) {
+  const sentences = text.split(/[.!?\n]+/).map(s => s.trim()).filter(s => s.length > 0);
+  const askRe = /\b(add|fix|create|update|remove)\b/i;
+  return sentences.filter(s => askRe.test(s)).length;
+}
+
+function bcDismissPromptWarn() {
+  _bcWarnDismissed = true;
+  const warnEl = document.getElementById('bc-prompt-warn');
+  if (warnEl) warnEl.classList.add('hidden');
 }
 
 // ── Prompt reorder list (issue #529) ────────────────────────────────────────
@@ -12179,9 +13974,9 @@ function _bcUpdateBadge() {
     badge.className = 'bc-tab-badge';
     badge.innerHTML = `<span class="bc-tab-badge-spin">&#x27F3;</span>${fullyDone}/${total}`;
   } else if (job.status === 'drafts_ready') {
-    const draftCount = tickets.filter(t => t.state === 'draft_ready').length;
-    badge.className = 'bc-tab-badge';
-    badge.textContent = `${draftCount} ready`;
+    const draftReady = tickets.filter(t => t.state === 'draft_ready').length;
+    badge.className = 'bc-tab-badge bc-tab-badge--ready';
+    badge.textContent = draftReady > 0 ? `${draftReady} to review` : 'review';
   } else if (job.status === 'done' || job.status === 'stopped') {
     const issues = failed + sizeWarn + estimateFailed;
     if (issues > 0) {
@@ -12299,6 +14094,19 @@ function _bcRenderStep2() {
   const total        = tickets.length;
   // Terminal states: sized, estimate_failed, failed, skipped
   const fullyDone    = sized + estimateFailed + failed + skipped;
+
+  // Drive the step rail (Input → Review → Created → Estimate) from job state.
+  const anyCreated   = created > 0 || estimating > 0 || sized > 0 || estimateFailed > 0;
+  const anyEstimate  = estimating > 0 || sized > 0 || estimateFailed > 0;
+  if (job.status === 'drafts_ready') {
+    _bcSetActiveChip(2);                 // waiting on user review
+  } else if (anyEstimate) {
+    _bcSetActiveChip(4);                 // estimation underway / done
+  } else if (anyCreated) {
+    _bcSetActiveChip(3);                 // issues being created
+  } else {
+    _bcSetActiveChip(2);                 // BA still drafting → review phase
+  }
 
   // Banner
   const banner = document.getElementById('bc-parallel-banner');
@@ -12629,6 +14437,35 @@ function _bcRenderCard(t) {
           <div class="bc-draft-card-actions">
             <button class="bc-btn-regenerate" id="bc-btn-regen-${t.index}"
                     onclick="bcRegenerateDraft(${t.index})">Regenerate draft</button>
+            <div class="ac-tpl-wrap" id="bc-card-ac-wrap-${t.index}" style="position:relative">
+              <button type="button" class="ac-tpl-btn" id="bc-card-ac-btn-${t.index}"
+                      aria-haspopup="true" aria-expanded="false"
+                      aria-label="Insert AC template into this ticket"
+                      onclick="bcCardAcTplOpen(${t.index})">
+                <i class="ti ti-template"></i> AC template
+              </button>
+              <div class="ac-tpl-menu hidden" id="bc-card-ac-menu-${t.index}" role="menu">
+                <button type="button" class="ac-tpl-opt" role="menuitem" data-tpl="gwt"
+                        onclick="bcCardAcTplSelect(${t.index},'gwt')" tabindex="-1">
+                  <i class="ti ti-list-details ac-tpl-opt-icon"></i>
+                  <span class="ac-tpl-opt-label">
+                    <span class="ac-tpl-opt-name">Given / When / Then</span>
+                  </span>
+                </button>
+                <button type="button" class="ac-tpl-opt" role="menuitem" data-tpl="checklist"
+                        onclick="bcCardAcTplSelect(${t.index},'checklist')" tabindex="-1">
+                  <i class="ti ti-checkbox ac-tpl-opt-icon"></i>
+                  <span class="ac-tpl-opt-label">
+                    <span class="ac-tpl-opt-name">Checklist</span>
+                  </span>
+                </button>
+              </div>
+            </div>
+            <button type="button" class="ac-tpl-btn uat-tpl-btn" id="bc-card-uat-btn-${t.index}"
+                    aria-label="Insert UAT Steps template into this ticket"
+                    onclick="bcCardUatTplInsert(${t.index})">
+              <i class="ti ti-checklist"></i> UAT template
+            </button>
             <button class="bc-btn-remove-row" onclick="bcRemoveRow(${t.index})" title="Remove this draft">Remove</button>
           </div>
         </div>
@@ -13130,6 +14967,36 @@ function _bcReviewOverlayCheck(index, checked) {
 function bcCancelReview() {
   const overlay = document.getElementById('bc-review-overlay');
   if (overlay) overlay.classList.add('hidden');
+  const lintOverlay = document.getElementById('bc-lint-overlay');
+  if (lintOverlay) lintOverlay.classList.add('hidden');
+  _bcSkipLint = false;
+  _bcLintToPost = null;
+}
+
+function _bcShowLintOverlay(problems, toPost) {
+  _bcLintToPost = toPost;
+  const list = document.getElementById('bc-lint-overlay-list');
+  list.innerHTML = problems.map(t => {
+    const preview = t.title.length > 50 ? t.title.slice(0, 50) + '…' : t.title;
+    const items = t.issues.map(i => `<li>${escHtml(i)}</li>`).join('');
+    return `<div class="bc-lint-ticket-item">
+      <div class="bc-lint-ticket-title">Ticket ${t.index + 1}: ${escHtml(preview)}</div>
+      <ul class="bc-lint-ticket-issues">${items}</ul>
+    </div>`;
+  }).join('');
+  document.getElementById('bc-lint-overlay').classList.remove('hidden');
+}
+
+function _bcLintGoBack() {
+  document.getElementById('bc-lint-overlay').classList.add('hidden');
+  _bcLintToPost = null;
+}
+
+async function _bcLintProceed() {
+  document.getElementById('bc-lint-overlay').classList.add('hidden');
+  _bcLintToPost = null;
+  _bcSkipLint = true;
+  await bcPostSelected();
 }
 
 async function bcPostSelected() {
@@ -13167,6 +15034,15 @@ async function bcPostSelected() {
     return;
   }
   if (toPost.length === 0) return;
+
+  // Quality linter (non-blocking — skipped when user proceeds anyway)
+  if (!_bcSkipLint) {
+    const problems = toPost
+      .map(t => ({ ...t, issues: lintTicket(t.title, t.body) }))
+      .filter(t => t.issues.length > 0);
+    if (problems.length > 0) { _bcShowLintOverlay(problems, toPost); return; }
+  }
+  _bcSkipLint = false;
 
   const postBtn   = document.getElementById('bc-post-github-btn');
   const reviewBtn = document.getElementById('bc-review-post-btn');
@@ -13464,7 +15340,17 @@ function _mdToHtml(md) {
 
     if (/^\s*[-*]\s+/.test(line)) {
       const items = [];
-      while (i < lines.length && /^\s*[-*]\s+/.test(lines[i])) { items.push(`<li>${_mdInline(lines[i].replace(/^\s*[-*]\s+/, ''))}</li>`); i++; }
+      while (i < lines.length && /^\s*[-*]\s+/.test(lines[i])) {
+        const raw = lines[i].replace(/^\s*[-*]\s+/, '');
+        const cbMatch = raw.match(/^\[([ xX])\]\s+(.*)$/);
+        if (cbMatch) {
+          const checked = cbMatch[1].toLowerCase() === 'x' ? ' checked' : '';
+          items.push(`<li class="task-item"><input type="checkbox" disabled${checked}> ${_mdInline(cbMatch[2])}</li>`);
+        } else {
+          items.push(`<li>${_mdInline(raw)}</li>`);
+        }
+        i++;
+      }
       out.push(`<ul class="md-ul">${items.join('')}</ul>`);
       continue;
     }
@@ -14181,6 +16067,314 @@ function _cmpEmptyState(title, msg) {
     <p><strong>${escHtml(title)}</strong><br>${escHtml(msg)}</p>
   </div>`;
 }
+
+// ── AC Template Picker (issue #567) ───────────────────────────────────────
+
+const _UAT_TEMPLATE =
+`## UAT Test Steps
+
+1. *[step description]*
+   **Expected:** *[expected outcome]*
+2. *[step description]*
+   **Expected:** *[expected outcome]*`;
+
+const _UAT_BLOCK_RE = /##\s*uat test steps/i;
+
+function _uatHasBlock(text) { return _UAT_BLOCK_RE.test(text); }
+
+function _uatInsert(textareaId, btnId) {
+  const textarea = document.getElementById(textareaId);
+  if (!textarea) return;
+  if (_uatHasBlock(textarea.value)) {
+    if (!confirm('This body already contains a UAT Test Steps block. Insert another one?')) return;
+  }
+  _acInsertAtCursor(textarea, _UAT_TEMPLATE);
+  if (btnId) {
+    const btn = document.getElementById(btnId);
+    if (btn) {
+      btn.innerHTML = `<i class="ti ti-checklist"></i> UAT Template <span style="font-size:10px;opacity:.6">(inserted)</span>`;
+      btn.classList.add('has-default');
+    }
+  }
+  textarea.focus();
+}
+
+function ntUatTplInsert() { _uatInsert('nt-body', 'nt-uat-tpl-btn'); }
+
+// ── New Ticket body: Write/Preview tabs & char count (issue #573) ─────────────
+const _NT_BODY_MAX = 65536;
+
+function _ntUpdateCharCount() {
+  const len = (document.getElementById('nt-body').value || '').length;
+  document.getElementById('nt-char-count').textContent = `${len} / ${_NT_BODY_MAX}`;
+}
+
+function _ntBodyTab(tab) {
+  const writeTab    = document.getElementById('nt-body-tab-write');
+  const previewTab  = document.getElementById('nt-body-tab-preview');
+  const textarea    = document.getElementById('nt-body');
+  const previewPane = document.getElementById('nt-body-preview');
+  if (tab === 'preview') {
+    writeTab.classList.remove('active');
+    writeTab.setAttribute('aria-selected', 'false');
+    previewTab.classList.add('active');
+    previewTab.setAttribute('aria-selected', 'true');
+    textarea.classList.add('hidden');
+    const md = textarea.value || '';
+    previewPane.innerHTML = md.trim()
+      ? `<div class="md-body">${_mdToHtml(md)}</div>`
+      : '<span class="nt-body-preview-empty">Nothing to preview</span>';
+    previewPane.classList.remove('hidden');
+  } else {
+    previewTab.classList.remove('active');
+    previewTab.setAttribute('aria-selected', 'false');
+    writeTab.classList.add('active');
+    writeTab.setAttribute('aria-selected', 'true');
+    previewPane.classList.add('hidden');
+    textarea.classList.remove('hidden');
+    textarea.focus();
+  }
+}
+
+function bcUatTplInsert() { _uatInsert('bc-textarea', 'bc-uat-tpl-btn'); }
+
+function bcBulkUatTplInsert() {
+  if (!_bcJobState) return;
+  const tickets = (_bcJobState.tickets || []).filter(
+    t => t.state === 'draft_ready' && !_bcRemovedRows.has(t.index)
+  );
+  if (tickets.length === 0) return;
+  const anyHasBlock = tickets.some(t => {
+    const el = document.getElementById(`bc-draft-body-${t.index}`);
+    return el && _uatHasBlock(el.value);
+  });
+  if (anyHasBlock) {
+    if (!confirm(`One or more drafts already contain a UAT Test Steps block. Apply UAT template to all ${tickets.length} drafts anyway?`)) return;
+  }
+  tickets.forEach(t => {
+    const el = document.getElementById(`bc-draft-body-${t.index}`);
+    if (el) _acInsertAtCursor(el, _UAT_TEMPLATE);
+  });
+  const btn = document.getElementById('bc-bulk-uat-tpl-btn');
+  if (btn) {
+    btn.innerHTML = `<i class="ti ti-checklist"></i> UAT applied <span style="font-size:10px;opacity:.6">(all)</span>`;
+    btn.classList.add('has-default');
+  }
+}
+
+function bcCardUatTplInsert(index) {
+  _uatInsert(`bc-draft-body-${index}`, `bc-card-uat-btn-${index}`);
+}
+
+const _acTplTemplates = {
+  gwt:
+`## Acceptance Criteria
+
+**Given** *[context]*
+**When** *[action]*
+**Then** *[outcome]*`,
+  checklist:
+`## Acceptance Criteria
+
+- [ ] *[AC 1: describe criterion]*
+- [ ] *[AC 2: describe criterion]*
+- [ ] *[AC 3: describe criterion]*`
+};
+
+const _acTplLabels = { gwt: 'Given / When / Then', checklist: 'Checklist' };
+
+let _acSessionDefault = null;
+
+const _AC_BLOCK_RE = /##\s*acceptance criteria/i;
+
+function _acHasAcBlock(text) { return _AC_BLOCK_RE.test(text); }
+
+function _acInsertAtCursor(textarea, text) {
+  const start = textarea.selectionStart;
+  const end   = textarea.selectionEnd;
+  const before = textarea.value.substring(0, start);
+  const after  = textarea.value.substring(end);
+  const sep = (before.length > 0 && !before.endsWith('\n\n'))
+    ? (before.endsWith('\n') ? '\n' : '\n\n') : '';
+  const insert = sep + text + '\n';
+  textarea.value = before + insert + after;
+  const newPos = before.length + insert.length;
+  textarea.selectionStart = textarea.selectionEnd = newPos;
+  textarea.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
+function _acOpenMenu(menuId, btnId) {
+  const menu = document.getElementById(menuId);
+  const btn  = document.getElementById(btnId);
+  if (!menu || !btn) return;
+  const isOpen = !menu.classList.contains('hidden');
+  _acCloseAllMenus();
+  if (!isOpen) {
+    menu.classList.remove('hidden');
+    btn.setAttribute('aria-expanded', 'true');
+    menu.querySelectorAll('.ac-tpl-opt').forEach(o => o.setAttribute('tabindex', '0'));
+    const first = menu.querySelector('.ac-tpl-opt');
+    if (first) first.focus();
+  }
+}
+
+function _acCloseAllMenus() {
+  document.querySelectorAll('.ac-tpl-menu').forEach(m => {
+    m.classList.add('hidden');
+    m.querySelectorAll('.ac-tpl-opt').forEach(o => o.setAttribute('tabindex', '-1'));
+  });
+  document.querySelectorAll('.ac-tpl-btn').forEach(b => {
+    b.setAttribute('aria-expanded', 'false');
+  });
+}
+
+function _acApplyTemplate(tplKey, textareaId, btnId, skipWarn) {
+  const textarea = document.getElementById(textareaId);
+  if (!textarea) return;
+  const tplText = _acTplTemplates[tplKey];
+  if (!tplText) return;
+  if (!skipWarn && _acHasAcBlock(textarea.value)) {
+    if (!confirm('This body already contains an Acceptance Criteria block. Insert another one?')) {
+      _acCloseAllMenus();
+      return;
+    }
+  }
+  _acInsertAtCursor(textarea, tplText);
+  _acSessionDefault = tplKey;
+  if (btnId) _acUpdateBtnLabel(btnId, tplKey);
+  _acCloseAllMenus();
+  textarea.focus();
+}
+
+function _acUpdateBtnLabel(btnId, tplKey) {
+  const btn = document.getElementById(btnId);
+  if (!btn) return;
+  if (tplKey) {
+    btn.innerHTML = `<i class="ti ti-template"></i> ${_acTplLabels[tplKey]} <span style="font-size:10px;opacity:.6">(change)</span>`;
+    btn.classList.add('has-default');
+  } else {
+    btn.innerHTML = `<i class="ti ti-template"></i> Insert AC Template`;
+    btn.classList.remove('has-default');
+  }
+}
+
+function _acSyncMenuChecks(menuId, activeTpl) {
+  const menu = document.getElementById(menuId);
+  if (!menu) return;
+  menu.querySelectorAll('.ac-tpl-opt').forEach(opt => {
+    opt.classList.toggle('is-default', opt.dataset.tpl === activeTpl);
+  });
+}
+
+// NT modal
+function ntAcTplOpen() {
+  _acSyncMenuChecks('nt-ac-tpl-menu', _acSessionDefault);
+  _acOpenMenu('nt-ac-tpl-menu', 'nt-ac-tpl-btn');
+}
+function ntAcTplSelect(tplKey) {
+  _acApplyTemplate(tplKey, 'nt-body', 'nt-ac-tpl-btn');
+}
+
+// BC step 1 (prompt textarea)
+function bcAcTplOpen() {
+  _acSyncMenuChecks('bc-ac-tpl-menu', _acSessionDefault);
+  _acOpenMenu('bc-ac-tpl-menu', 'bc-ac-tpl-btn');
+}
+function bcAcTplSelect(tplKey) {
+  _acApplyTemplate(tplKey, 'bc-textarea', 'bc-ac-tpl-btn');
+}
+
+// BC step 2 — apply to ALL draft bodies
+function bcBulkAcTplOpen() {
+  _acSyncMenuChecks('bc-bulk-ac-tpl-menu', _acSessionDefault);
+  _acOpenMenu('bc-bulk-ac-tpl-menu', 'bc-bulk-ac-tpl-btn');
+}
+function bcBulkAcTplSelect(tplKey) {
+  _acCloseAllMenus();
+  if (!_bcJobState) return;
+  const tickets = (_bcJobState.tickets || []).filter(
+    t => t.state === 'draft_ready' && !_bcRemovedRows.has(t.index)
+  );
+  if (tickets.length === 0) return;
+  const anyHasBlock = tickets.some(t => {
+    const el = document.getElementById(`bc-draft-body-${t.index}`);
+    return el && _acHasAcBlock(el.value);
+  });
+  if (anyHasBlock) {
+    if (!confirm(`One or more drafts already contain an Acceptance Criteria block. Apply ${_acTplLabels[tplKey]} template to all ${tickets.length} drafts anyway?`)) return;
+  }
+  tickets.forEach(t => {
+    const el = document.getElementById(`bc-draft-body-${t.index}`);
+    if (el) _acInsertAtCursor(el, _acTplTemplates[tplKey]);
+  });
+  _acSessionDefault = tplKey;
+  _acUpdateBtnLabel('bc-bulk-ac-tpl-btn', tplKey);
+}
+
+// BC step 2 — per-ticket
+function bcCardAcTplOpen(index) {
+  _acSyncMenuChecks(`bc-card-ac-menu-${index}`, _acSessionDefault);
+  _acOpenMenu(`bc-card-ac-menu-${index}`, `bc-card-ac-btn-${index}`);
+}
+function bcCardAcTplSelect(index, tplKey) {
+  _acApplyTemplate(tplKey, `bc-draft-body-${index}`, `bc-card-ac-btn-${index}`);
+}
+
+// Keyboard shortcut: Ctrl/Cmd+Shift+A opens picker from body editors
+document.addEventListener('keydown', function(e) {
+  if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'A' || e.key === 'a')) {
+    const ntModal   = document.getElementById('nt-modal');
+    const ntBody    = document.getElementById('nt-body');
+    const bcPane    = document.getElementById('pane-bulk-create');
+    const bcTextarea = document.getElementById('bc-textarea');
+    if (ntModal && !ntModal.classList.contains('hidden') &&
+        document.activeElement === ntBody) {
+      e.preventDefault();
+      ntAcTplOpen();
+      return;
+    }
+    if (bcPane && bcPane.classList.contains('active') &&
+        document.activeElement === bcTextarea) {
+      e.preventDefault();
+      bcAcTplOpen();
+      return;
+    }
+    // Per-ticket body in BC step 2
+    const active = document.activeElement;
+    if (active && active.id && active.id.startsWith('bc-draft-body-')) {
+      const idx = parseInt(active.id.replace('bc-draft-body-', ''), 10);
+      if (!isNaN(idx)) {
+        e.preventDefault();
+        bcCardAcTplOpen(idx);
+        return;
+      }
+    }
+  }
+});
+
+// Close menus on outside click
+document.addEventListener('click', function(e) {
+  if (!e.target.closest('.ac-tpl-wrap')) _acCloseAllMenus();
+});
+
+// Arrow key navigation within open menu
+document.addEventListener('keydown', function(e) {
+  const openMenu = document.querySelector('.ac-tpl-menu:not(.hidden)');
+  if (!openMenu) return;
+  const opts = Array.from(openMenu.querySelectorAll('.ac-tpl-opt'));
+  if (opts.length === 0) return;
+  const idx = opts.indexOf(document.activeElement);
+  if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    opts[(idx + 1) % opts.length].focus();
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    opts[(idx - 1 + opts.length) % opts.length].focus();
+  } else if (e.key === 'Escape') {
+    e.preventDefault();
+    _acCloseAllMenus();
+  }
+});
 </script>
 
 <!-- ── Inline multi-select action bar (rendered inside sprint list by JS) ── -->
@@ -14441,12 +16635,61 @@ function _cmpEmptyState(title, msg) {
     <div class="nt-draft-divider"></div>
     <div class="modal-body">
       <div class="modal-field">
-        <label class="modal-label" for="nt-title">Title</label>
-        <input class="modal-input" id="nt-title" type="text" autocomplete="off">
+        <label class="modal-label" for="nt-title">Title <span style="color:var(--red)">*</span></label>
+        <input class="modal-input" id="nt-title" type="text" autocomplete="off"
+               aria-describedby="nt-title-error" aria-required="true">
+        <div class="modal-error hidden" id="nt-title-error" role="alert"></div>
       </div>
       <div class="modal-field">
-        <label class="modal-label" for="nt-body">Body <span class="modal-hint" style="font-weight:normal;color:var(--text-muted)">(edit before posting)</span></label>
-        <textarea class="modal-input nt-body-textarea" id="nt-body" rows="10"></textarea>
+        <div class="ac-tpl-toolbar">
+          <label class="modal-label" for="nt-body" style="margin:0">Body <span class="modal-hint" style="font-weight:normal;color:var(--text-muted)">(edit before posting)</span></label>
+          <div style="display:flex;align-items:center;gap:6px;margin-left:auto">
+          <div class="ac-tpl-wrap" id="nt-ac-tpl-wrap">
+            <button type="button" class="ac-tpl-btn" id="nt-ac-tpl-btn"
+                    aria-haspopup="true" aria-expanded="false"
+                    aria-label="Insert AC template (Ctrl+Shift+A)"
+                    title="Insert AC template (Ctrl/Cmd+Shift+A)"
+                    onclick="ntAcTplOpen()">
+              <i class="ti ti-template"></i> Insert AC Template
+            </button>
+            <div class="ac-tpl-menu hidden" id="nt-ac-tpl-menu" role="menu" aria-label="AC template options">
+              <button type="button" class="ac-tpl-opt" role="menuitem" data-tpl="gwt"
+                      onclick="ntAcTplSelect('gwt')" tabindex="-1">
+                <i class="ti ti-list-details ac-tpl-opt-icon"></i>
+                <span class="ac-tpl-opt-label">
+                  <span class="ac-tpl-opt-name">Given / When / Then</span>
+                  <span class="ac-tpl-opt-desc">BDD-style acceptance criteria</span>
+                </span>
+              </button>
+              <button type="button" class="ac-tpl-opt" role="menuitem" data-tpl="checklist"
+                      onclick="ntAcTplSelect('checklist')" tabindex="-1">
+                <i class="ti ti-checkbox ac-tpl-opt-icon"></i>
+                <span class="ac-tpl-opt-label">
+                  <span class="ac-tpl-opt-name">Checklist</span>
+                  <span class="ac-tpl-opt-desc">Markdown checkbox criteria</span>
+                </span>
+              </button>
+            </div>
+          </div>
+          <button type="button" class="ac-tpl-btn uat-tpl-btn" id="nt-uat-tpl-btn"
+                  aria-label="Insert UAT Steps template"
+                  title="Insert UAT Steps template"
+                  onclick="ntUatTplInsert()">
+            <i class="ti ti-checklist"></i> Insert UAT Template
+          </button>
+          </div>
+        </div>
+        <div class="nt-body-tabs" role="tablist">
+          <button type="button" class="nt-body-tab active" id="nt-body-tab-write"
+                  role="tab" aria-selected="true" onclick="_ntBodyTab('write')">Write</button>
+          <button type="button" class="nt-body-tab" id="nt-body-tab-preview"
+                  role="tab" aria-selected="false" onclick="_ntBodyTab('preview')">Preview</button>
+        </div>
+        <textarea class="modal-input nt-body-textarea" id="nt-body" rows="10"
+                  aria-describedby="nt-body-error" aria-required="true"></textarea>
+        <div class="nt-body-preview hidden md-body" id="nt-body-preview" role="tabpanel" aria-labelledby="nt-body-tab-preview"></div>
+        <div class="nt-char-count" id="nt-char-count" aria-live="polite">0 / 65536</div>
+        <div class="modal-error hidden" id="nt-body-error" role="alert"></div>
       </div>
       <div class="modal-field">
         <label class="modal-label" for="nt-label">Label <span class="modal-hint" style="font-weight:normal;color:var(--text-muted)">(optional)</span></label>
@@ -14458,6 +16701,16 @@ function _cmpEmptyState(title, msg) {
           <div class="nt-label-dropdown hidden" id="nt-label-dropdown" role="listbox"></div>
         </div>
       </div>
+      <div class="modal-field lp-section">
+        <div class="lp-hdr">
+          <label class="modal-label" style="margin:0">Label Presets</label>
+          <button type="button" class="lp-save-btn" id="nt-lp-save-btn" onclick="_lpSavePreset('nt')">Save as Preset</button>
+        </div>
+        <div class="lp-empty hidden" id="nt-lp-empty">No presets yet — select labels and click "Save as Preset".</div>
+        <div id="nt-lp-list" class="lp-list"></div>
+        <div class="lp-error hidden" id="nt-lp-error" role="alert" aria-live="polite"></div>
+      </div>
+
       <div class="modal-field" style="margin-bottom:0">
         <label class="modal-label">Attachments <span class="modal-hint" style="font-weight:normal;color:var(--text-muted)">(optional — max 25 MB per file, 50 MB total)</span></label>
         <div class="dt-dropzone nt-dropzone" id="nt-dropzone"
@@ -14478,7 +16731,16 @@ function _cmpEmptyState(title, msg) {
       <div id="nt-warn-label" class="nt-warn-item hidden"><i class="ti ti-alert-triangle"></i> No label assigned — add one below or leave blank.</div>
       <div id="nt-warn-attach" class="nt-warn-item hidden"><i class="ti ti-alert-triangle"></i> No attachments added — add files below or leave blank.</div>
     </div>
-    <div class="modal-footer">
+    <!-- Linter warning (issue #574) -->
+    <div id="nt-lint-warn" class="lint-warn-box hidden">
+      <div class="lint-warn-heading"><i class="ti ti-alert-triangle"></i> Quality warnings</div>
+      <ul class="lint-warn-list" id="nt-lint-warn-list"></ul>
+      <div class="lint-warn-actions">
+        <button class="btn-ghost" id="nt-lint-back-btn" type="button">Go back and edit</button>
+        <button class="btn-primary" id="nt-lint-proceed-btn" type="button">Proceed anyway</button>
+      </div>
+    </div>
+    <div class="modal-footer" id="nt-post-footer">
       <button class="btn-ghost" id="nt-post-cancel-btn" type="button">Cancel</button>
       <button class="btn-primary" id="nt-post-btn" type="button">Post to GitHub</button>
     </div>
@@ -14900,6 +17162,207 @@ function _cmpEmptyState(title, msg) {
       if (wrap) wrap.innerHTML = '<div class="gantt-empty">Failed to load timeline.</div>';
     }
   };
+}());
+
+// ── Estimate vs Actual tab (issue #575) ───────────────────────────────────────
+(function () {
+  let _evaInitialized = false;
+  let _evaFinishedSprints = [];
+
+  window.evaInit = async function () {
+    if (_evaInitialized) { _evaRenderPicker(); return; }
+    _evaInitialized = true;
+    await _evaLoadSprints();
+    _evaRenderPicker();
+  };
+
+  async function _evaLoadSprints() {
+    try {
+      const params = _slug ? `?project=${encodeURIComponent(_slug)}` : '';
+      const resp = await fetch('/api/logs/runs' + params);
+      if (!resp.ok) throw new Error('fetch failed');
+      const data = await resp.json();
+      _evaFinishedSprints = (data.items || [])
+        .filter(r => r.sprint_label)
+        .sort((a, b) => a.sprint_label.localeCompare(b.sprint_label, undefined, { numeric: true }));
+    } catch (_) {
+      _evaFinishedSprints = [];
+    }
+  }
+
+  function _evaRenderPicker() {
+    const sel = document.getElementById('eva-select');
+    if (!sel) return;
+    const prev = sel.value;
+    sel.innerHTML = '<option value="">— select sprint —</option>';
+    for (const run of _evaFinishedSprints) {
+      const opt = document.createElement('option');
+      opt.value = run.sprint_label;
+      opt.textContent = run.sprint_label;
+      sel.appendChild(opt);
+    }
+    if (prev && [...sel.options].some(o => o.value === prev)) sel.value = prev;
+    if (_evaFinishedSprints.length === 0) {
+      document.getElementById('eva-result').innerHTML = _evaEmpty('No finished sprints', 'Complete a sprint to see estimate data.');
+    }
+  }
+
+  window.evaOnPickerChange = async function () {
+    const sel = document.getElementById('eva-select');
+    const label = sel ? sel.value : '';
+    const resultEl = document.getElementById('eva-result');
+    if (!label) { resultEl.innerHTML = ''; return; }
+    resultEl.innerHTML = '<div style="padding:24px;color:var(--text-sub);font-size:13px;">Loading…</div>';
+    try {
+      const project = _slug || '';
+      const resp = await fetch(`/api/sprints/${encodeURIComponent(label)}/estimate-vs-actual?project=${encodeURIComponent(project)}`);
+      if (resp.status === 404) {
+        const err = await resp.json().catch(() => ({}));
+        resultEl.innerHTML = _evaEmpty('Not available', err.detail || 'Sprint is not finished or data is missing.');
+        return;
+      }
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const data = await resp.json();
+      resultEl.innerHTML = _evaRenderTable(data);
+    } catch (err) {
+      resultEl.innerHTML = _evaEmpty('Error', `Could not load data: ${escHtml(err.message)}`);
+    }
+  };
+
+  function _evaRenderTable(data) {
+    const tickets = data.tickets || [];
+    if (tickets.length === 0) {
+      return _evaEmpty('No tickets', 'This sprint has no ticket data recorded.');
+    }
+
+    const rows = tickets.map(t => {
+      const estSize = t.estimated_size ? `<span class="smgmt-ticket-size-pill">${escHtml(t.estimated_size)}</span>` : '<span style="color:var(--text-sub)">—</span>';
+      const estMin  = t.estimated_minutes != null ? `${t.estimated_minutes}m` : '—';
+      const actMin  = t.actual_elapsed_minutes != null ? `${t.actual_elapsed_minutes}m` : '—';
+      let deltaHtml = '—';
+      if (t.delta_minutes != null) {
+        const sign = t.delta_minutes > 0 ? '+' : '';
+        const color = t.delta_minutes > 5 ? 'var(--red)' : t.delta_minutes < -5 ? 'var(--green)' : 'var(--text)';
+        deltaHtml = `<span style="color:${color};font-weight:600">${sign}${t.delta_minutes}m</span>`;
+      }
+      const statusChip = `<span class="smgmt-outcome-chip ${escHtml(t.status || '')}" style="font-size:10px;padding:1px 6px">${escHtml(t.status || 'unknown')}</span>`;
+      return `<tr>
+        <td style="font-variant-numeric:tabular-nums;color:var(--text-sub)">#${t.ticket_id || '?'}</td>
+        <td style="max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(t.title || '')}</td>
+        <td style="text-align:center">${estSize}</td>
+        <td style="text-align:center">${escHtml(estMin)}</td>
+        <td style="text-align:center">${escHtml(actMin)}</td>
+        <td style="text-align:center">${deltaHtml}</td>
+        <td style="text-align:center">${statusChip}</td>
+      </tr>`;
+    }).join('');
+
+    return `
+      <table class="cmp-ticket-table" style="margin-top:20px">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Title</th>
+            <th style="text-align:center">Est size</th>
+            <th style="text-align:center">Est min</th>
+            <th style="text-align:center">Actual min</th>
+            <th style="text-align:center">Delta</th>
+            <th style="text-align:center">Status</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>`;
+  }
+
+  function _evaEmpty(title, msg) {
+    return `<div style="padding:40px 28px;text-align:center;color:var(--text-sub)">
+      <div style="font-weight:600;font-size:14px;margin-bottom:6px">${escHtml(title)}</div>
+      <div style="font-size:13px">${escHtml(msg)}</div>
+    </div>`;
+  }
+}());
+
+// ── Calibration tab (issue #576) ─────────────────────────────────────────────
+(function () {
+  let _calibLoaded = false;
+
+  window.calibInit = async function () {
+    if (_calibLoaded) return;
+    _calibLoaded = true;
+    await _calibLoad();
+  };
+
+  async function _calibLoad() {
+    const resultEl = document.getElementById('calib-result');
+    if (!resultEl) return;
+    resultEl.innerHTML = '<div style="padding:24px;color:var(--text-sub);font-size:13px;">Loading…</div>';
+    try {
+      const project = _slug || '';
+      const resp = await fetch(`/api/calibration?project=${encodeURIComponent(project)}`);
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const data = await resp.json();
+      resultEl.innerHTML = _calibRender(data);
+    } catch (err) {
+      resultEl.innerHTML = `<div style="padding:40px 28px;text-align:center;color:var(--text-sub)">
+        <div style="font-weight:600;font-size:14px;margin-bottom:6px">Error</div>
+        <div style="font-size:13px">${escHtml(err.message)}</div>
+      </div>`;
+    }
+  }
+
+  function _calibRender(data) {
+    const buckets = data.buckets || {};
+    const sizes = ['S', 'M', 'L', 'XL'];
+    const canonicalLabel = { S: '5m canonical', M: '15m canonical', L: '30m canonical', XL: '60m canonical' };
+
+    const cards = sizes.map(size => {
+      const b = buckets[size] || {};
+      const avg = b.avg_minutes;
+      const count = b.count || 0;
+      const canonical = b.canonical_minutes;
+
+      let avgHtml;
+      if (avg == null) {
+        avgHtml = `<div class="calib-bucket-avg calib-no-data">No data yet</div>`;
+      } else {
+        const formatted = avg >= 60
+          ? `${(avg / 60).toFixed(1)}<span class="calib-bucket-unit">h</span>`
+          : `${avg}<span class="calib-bucket-unit">m</span>`;
+        avgHtml = `<div class="calib-bucket-avg">${formatted}</div>`;
+      }
+
+      let biasHtml = '';
+      if (avg != null && canonical != null) {
+        const delta = avg - canonical;
+        const pct = Math.round((delta / canonical) * 100);
+        const sign = delta > 0 ? '+' : '';
+        if (Math.abs(pct) <= 15) {
+          biasHtml = `<span class="calib-bias calib-bias-ok">≈ on target</span>`;
+        } else if (delta > 0) {
+          biasHtml = `<span class="calib-bias calib-bias-over">${sign}${pct}% over</span>`;
+        } else {
+          biasHtml = `<span class="calib-bias calib-bias-under">${sign}${pct}% under</span>`;
+        }
+      }
+
+      const countStr = count === 1 ? '1 ticket' : `${count} tickets`;
+
+      return `<div class="calib-bucket">
+        <div class="calib-bucket-size">${escHtml(size)}</div>
+        ${avgHtml}
+        ${biasHtml}
+        <div class="calib-bucket-canonical">${escHtml(canonicalLabel[size])}</div>
+        <div class="calib-bucket-count">${avg != null ? escHtml(countStr) : 'No completed tickets'}</div>
+      </div>`;
+    }).join('');
+
+    const hasAny = sizes.some(s => (buckets[s] || {}).count > 0);
+    const note = hasAny
+      ? `<p class="calib-section-note">Based on tickets with both a size estimate and recorded agent timestamps. Bias &gt;15% from canonical triggers a flag.</p>`
+      : `<p class="calib-section-note">No completed tickets with recorded times yet. Run a sprint to see calibration data.</p>`;
+
+    return `${note}<div class="calib-grid">${cards}</div>`;
+  }
 }());
 
 // ── Metrics tab (issue #476) ──────────────────────────────────────────────────

@@ -2788,6 +2788,22 @@
     .smgmt-conflict-badge:hover { filter: brightness(1.05); }
     .smgmt-conflict-badge:focus-visible { outline: 2px solid var(--blue); outline-offset: 1px; border-radius: 3px; }
     [data-theme="dark"] .smgmt-conflict-badge { background: rgba(220,38,38,.15); color: #f87171; }
+    /* Dependency order hint badge (issue #581) */
+    .smgmt-dep-order-badge {
+      flex-shrink: 0; display: inline-flex; align-items: center; gap: 3px;
+      font-size: 11px; font-weight: 600; padding: 1px 5px; border-radius: 3px;
+      background: rgba(99,102,241,.1); color: #6366f1;
+      border: 1px solid rgba(99,102,241,.28);
+      cursor: pointer; white-space: nowrap;
+    }
+    .smgmt-dep-order-badge:hover { filter: brightness(1.05); }
+    .smgmt-dep-order-badge:focus-visible { outline: 2px solid var(--blue); outline-offset: 1px; border-radius: 3px; }
+    .smgmt-dep-order-badge.is-cycle {
+      background: rgba(202,138,4,.1); color: #b45309;
+      border-color: rgba(202,138,4,.28);
+    }
+    [data-theme="dark"] .smgmt-dep-order-badge { background: rgba(99,102,241,.15); color: #a5b4fc; }
+    [data-theme="dark"] .smgmt-dep-order-badge.is-cycle { background: rgba(234,179,8,.12); color: #fcd34d; }
     .smgmt-est-popover {
       position: fixed; z-index: 9998;
       background: var(--surface); border: 1px solid var(--border);
@@ -6842,6 +6858,9 @@ function _smgmtRender(data) {
   // Load file-conflict badges for pending tickets (issue #579)
   _smgmtLoadConflicts(orderedLabels, bySprint);
 
+  // Load dependency order hints for pending tickets (issue #581)
+  _smgmtLoadDepOrder(orderedLabels, bySprint);
+
   // Update cleanup button visibility (issue #457)
   _smgmtUpdateCleanupBtn(data);
 
@@ -7356,6 +7375,129 @@ async function _smgmtLoadConflicts(orderedLabels, bySprint) {
         _smgmtConflictsByIssue[c.ticket2_id].push({ partnerId: c.ticket1_id, partnerTitle: c.ticket1_title, sharedFiles: c.shared_files });
       }
       for (const t of pending) _smgmtUpdateConflictBadge(t.number);
+    } catch (_) {
+      // fail silently
+    }
+  }
+}
+
+// ── Dependency order hints (issue #581) ──────────────────────────────────────
+// Keyed by issue number → {upstream: [{id, title}], downstream: [{id, title}], inCycle: bool}
+const _smgmtDepOrderByIssue = {};
+
+function _smgmtDepOrderBadgeHtml(issueNum) {
+  const info = _smgmtDepOrderByIssue[issueNum];
+  if (!info) return '';
+  if (info.inCycle) {
+    return `<button class="smgmt-dep-order-badge is-cycle" tabindex="0"
+      aria-label="Circular dependency warning for ticket ${issueNum}"
+      title="Circular file dependency — no order prescribed"
+      onclick="event.stopPropagation();_smgmtShowDepOrderPopover(event,${issueNum})"
+      onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();_smgmtShowDepOrderPopover(event,${issueNum});}">
+      <i class="ti ti-alert-triangle"></i>cycle</button>`;
+  }
+  const total = info.upstream.length + info.downstream.length;
+  const label = total === 1 ? '1 dep' : `${total} deps`;
+  const parts = [
+    ...info.upstream.map(u => `After #${u.id}`),
+    ...info.downstream.map(d => `Before #${d.id}`),
+  ];
+  const tip = parts.join(', ');
+  return `<button class="smgmt-dep-order-badge" tabindex="0"
+    aria-label="Dependency order hint for ticket ${issueNum}: ${escHtml(tip)}"
+    title="${escHtml(tip)}"
+    onclick="event.stopPropagation();_smgmtShowDepOrderPopover(event,${issueNum})"
+    onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();_smgmtShowDepOrderPopover(event,${issueNum});}">
+    <i class="ti ti-list-tree"></i>${label}</button>`;
+}
+
+function _smgmtUpdateDepOrderBadge(issueNum) {
+  const row = document.getElementById(`smgmt-ticket-${issueNum}`);
+  if (!row) return;
+  row.querySelector('.smgmt-dep-order-badge')?.remove();
+  const html = _smgmtDepOrderBadgeHtml(issueNum);
+  if (!html) return;
+  const tmp = document.createElement('div');
+  tmp.innerHTML = html;
+  const badge = tmp.firstElementChild;
+  const conflictBadge = row.querySelector('.smgmt-conflict-badge');
+  if (conflictBadge) {
+    conflictBadge.after(badge);
+  } else {
+    const statusEl = row.querySelector('.smgmt-ticket-status');
+    if (statusEl) statusEl.before(badge);
+    else row.appendChild(badge);
+  }
+}
+
+function _smgmtShowDepOrderPopover(ev, issueNum) {
+  const info = _smgmtDepOrderByIssue[issueNum];
+  if (!info) return;
+  const existing = document.getElementById('smgmt-dep-order-popover');
+  if (existing && existing._issueNum === issueNum) { existing.remove(); return; }
+  if (existing) existing.remove();
+  const pop = document.createElement('div');
+  pop.id = 'smgmt-dep-order-popover';
+  pop._issueNum = issueNum;
+  pop.setAttribute('role', 'tooltip');
+  pop.style.cssText = 'position:fixed;z-index:9999;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:12px 14px;box-shadow:0 4px 20px rgba(0,0,0,.18);max-width:360px;font-size:12px;';
+  if (info.inCycle) {
+    pop.innerHTML = `<div style="font-weight:700;margin-bottom:8px;color:#b45309"><i class="ti ti-alert-triangle"></i> Circular dependency</div>
+      <p style="margin:0;color:var(--text-muted)">This ticket is part of a circular file-overlap dependency. No order can be prescribed. Review shared files with affected tickets.</p>`;
+  } else {
+    const afterLines = info.upstream.map(u =>
+      `<div style="margin-bottom:4px" aria-label="Should run after ticket ${u.id}">Should run after <strong>#${u.id}</strong> ${escHtml(u.title)}</div>`
+    ).join('');
+    const beforeLines = info.downstream.map(d =>
+      `<div style="margin-bottom:4px" aria-label="Should run before ticket ${d.id}">Should run before <strong>#${d.id}</strong> ${escHtml(d.title)}</div>`
+    ).join('');
+    pop.innerHTML = `<div style="font-weight:700;margin-bottom:8px;color:#6366f1"><i class="ti ti-list-tree"></i> Dependency order</div>${afterLines}${beforeLines}`;
+  }
+  document.body.appendChild(pop);
+  const rect = ev.target.getBoundingClientRect();
+  const popH = 180, popW = 360;
+  const top = rect.bottom + 4 + popH > window.innerHeight ? rect.top - popH - 4 : rect.bottom + 4;
+  const left = Math.min(rect.left, window.innerWidth - popW - 8);
+  pop.style.top = `${Math.max(8, top)}px`;
+  pop.style.left = `${Math.max(8, left)}px`;
+  const dismiss = (e) => { if (!pop.contains(e.target)) { pop.remove(); document.removeEventListener('click', dismiss, true); } };
+  setTimeout(() => document.addEventListener('click', dismiss, true), 0);
+}
+
+async function _smgmtLoadDepOrder(orderedLabels, bySprint) {
+  const repo = _smgmtRepo();
+  if (!repo) return;
+  for (const label of orderedLabels) {
+    if (_smgmtRunningLabels.has(label)) continue;
+    if (_smgmtFinishedLabels.has(label)) continue;
+    const tickets = bySprint[label] || [];
+    const pending = tickets.filter(t => (t.status || 'backlog') === 'backlog');
+    if (pending.length < 2) continue;
+    for (const t of pending) delete _smgmtDepOrderByIssue[t.number];
+    try {
+      const resp = await fetch(
+        `/api/sprints/${encodeURIComponent(label)}/dep-order?project=${encodeURIComponent(repo)}`
+      );
+      if (!resp.ok) continue;
+      const data = await resp.json();
+      if (data.has_cycle) {
+        const cycleSet = new Set((data.in_cycle_tickets || []).map(String));
+        for (const t of pending) {
+          if (cycleSet.has(String(t.number))) {
+            _smgmtDepOrderByIssue[t.number] = { upstream: [], downstream: [], inCycle: true };
+          }
+        }
+      } else {
+        for (const [idStr, hint] of Object.entries(data.dep_hints || {})) {
+          const num = parseInt(idStr, 10);
+          _smgmtDepOrderByIssue[num] = {
+            upstream: hint.upstream || [],
+            downstream: hint.downstream || [],
+            inCycle: false,
+          };
+        }
+      }
+      for (const t of pending) _smgmtUpdateDepOrderBadge(t.number);
     } catch (_) {
       // fail silently
     }
@@ -8910,6 +9052,7 @@ function _smgmtTicketRowHtml(ticket, label) {
     : '';
   const riskFlagIconsHtml = _smgmtRiskFlagIconsHtml(ticket.number);
   const conflictBadgeHtml = _smgmtConflictBadgeHtml(ticket.number);
+  const depOrderBadgeHtml = _smgmtDepOrderBadgeHtml(ticket.number);
 
   const ticketLabelNames = (ticket.labels || []).map(l => l.name).join(',');
 
@@ -8935,7 +9078,7 @@ function _smgmtTicketRowHtml(ticket, label) {
       <a class="smgmt-ticket-num" href="${escHtml(ticket.url || '#')}" target="_blank"
          rel="noopener" draggable="false" onclick="event.stopPropagation()">#${ticket.number}</a>
       <span class="smgmt-ticket-title" title="${escHtml(ticket.title)}">${escHtml(ticket.title)}</span>
-      ${sizePillHtml}${estimateBadgeHtml}${riskFlagIconsHtml}${conflictBadgeHtml}${reEstBtnHtml}
+      ${sizePillHtml}${estimateBadgeHtml}${riskFlagIconsHtml}${conflictBadgeHtml}${depOrderBadgeHtml}${reEstBtnHtml}
       <span class="smgmt-ticket-status ${statusClass}">${escHtml(statusLabel)}</span>
       <button class="btn-view-log" tabindex="0" title="View issue log"
               onclick="event.stopPropagation();openLvIssueLog(${ticket.number},'${escHtml(label)}',_smgmtRepo()||'')">

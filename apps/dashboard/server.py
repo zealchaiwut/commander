@@ -3919,6 +3919,96 @@ def get_sprint_conflicts(sprint_label: str, project: str):
     return {"conflicts": conflicts, "pending_count": len(pending_issues)}
 
 
+@app.get("/api/sprints/{sprint_label}/dep-order")
+def get_sprint_dep_order(sprint_label: str, project: str):
+    """Return dependency order hints derived from file-overlap DAG for pending tickets.
+
+    For each ticket with at least one DAG edge, returns upstream (should run after)
+    and downstream (should run before) lists.  If the DAG contains cycles, returns
+    has_cycle=True with in_cycle_tickets so the frontend can render the warning.
+
+    Returns {"has_cycle": bool, "dep_hints": {...}, "pending_count": N}.
+    Returns 404 when no issues with sprint_label exist.
+    """
+    if not _SPRINT_LABEL_RE.match(sprint_label):
+        raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")
+
+    try:
+        all_issues = github_client.list_open_issues_with_body(repo_name=project, limit=200)
+    except subprocess.CalledProcessError as e:
+        raise _gh_error(e)
+
+    sprint_issues = [
+        iss for iss in all_issues
+        if any(lbl["name"] == sprint_label for lbl in iss.get("labels", []))
+    ]
+
+    if not sprint_issues:
+        raise HTTPException(404, detail=f"Sprint {sprint_label!r} not found")
+
+    pending_issues = [
+        iss for iss in sprint_issues
+        if github_client.classify_issue(iss) == "backlog"
+    ]
+
+    project_root = _project_root_path(project)
+    estimates_dir = _commander_dir(project_root) / "estimates"
+
+    ticket_files: list[dict] = []
+    for iss in pending_issues:
+        num = iss["number"]
+        files: list[str] = []
+        est_path = estimates_dir / f"issue-{num}.json"
+        if est_path.exists():
+            try:
+                est = json.loads(est_path.read_text(encoding="utf-8"))
+                files = est.get("files_likely_affected") or []
+            except (json.JSONDecodeError, OSError):
+                pass
+        ticket_files.append({"id": num, "title": iss["title"], "files": files})
+
+    if _build_dag is None:
+        return {"has_cycle": False, "cycles": [], "in_cycle_tickets": [], "dep_hints": {}, "pending_count": len(pending_issues), "warning": "dag_builder_unavailable"}
+
+    dag_tickets = [{"id": str(tf["id"]), "files_touched": tf["files"]} for tf in ticket_files]
+    title_map = {str(tf["id"]): tf["title"] for tf in ticket_files}
+
+    result = _build_dag(dag_tickets)
+
+    if isinstance(result, _CycleError):
+        in_cycle_ids = [int(tid) for cycle in result.cycles for tid in cycle]
+        return {
+            "has_cycle": True,
+            "cycles": result.cycles,
+            "in_cycle_tickets": sorted(set(in_cycle_ids)),
+            "dep_hints": {},
+            "pending_count": len(pending_issues),
+        }
+
+    # Build per-ticket upstream / downstream from DAG edges.
+    upstream: dict[str, list[dict]] = {str(tf["id"]): [] for tf in ticket_files}
+    downstream: dict[str, list[dict]] = {str(tf["id"]): [] for tf in ticket_files}
+    for src, dst in result.edges:
+        downstream[src].append({"id": int(dst), "title": title_map.get(dst, "")})
+        upstream[dst].append({"id": int(src), "title": title_map.get(src, "")})
+
+    dep_hints: dict[int, dict] = {}
+    for tf in ticket_files:
+        tid = str(tf["id"])
+        u = upstream[tid]
+        d = downstream[tid]
+        if u or d:
+            dep_hints[tf["id"]] = {"upstream": u, "downstream": d}
+
+    return {
+        "has_cycle": False,
+        "cycles": [],
+        "in_cycle_tickets": [],
+        "dep_hints": dep_hints,
+        "pending_count": len(pending_issues),
+    }
+
+
 def _check_estimate_stale(issue_num: int, current_body: str, estimates_dir) -> bool:
     """Return True if the stored estimate is stale (body changed or hash missing).
 

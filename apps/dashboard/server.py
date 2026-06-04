@@ -5632,6 +5632,133 @@ def get_sprint_outcome(sprint_label: str, project: str):
     }
 
 
+# ── Estimate-vs-Actual report (issue #575) ───────────────────────────────────
+
+@app.get("/api/sprints/{sprint_label}/estimate-vs-actual")
+def get_sprint_estimate_vs_actual(sprint_label: str, project: str):
+    """Return per-ticket estimate-vs-actual comparison for a finished sprint.
+
+    Response schema:
+      {
+        "sprint_label": "sprint-43",
+        "tickets": [
+          {
+            "ticket_id": 574,
+            "title": "...",
+            "estimated_size": "L",          # null if no estimate
+            "estimated_minutes": 30,        # null if no estimate
+            "actual_elapsed_seconds": 1234, # null if timestamps missing
+            "actual_elapsed_minutes": 20.6, # null if timestamps missing
+            "delta_minutes": -9.4,          # actual - estimated; null if either is null
+            "status": "done"
+          }
+        ]
+      }
+
+    Returns 404 if the sprint is not finished (still running, planning, or not found).
+    """
+    if not _SPRINT_LABEL_RE.match(sprint_label):
+        raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")
+
+    project_root = _project_root_path(project)
+    commander = _commander_dir(project_root)
+
+    if _is_sprint_running(project_root, sprint_label):
+        raise HTTPException(404, detail=f"Sprint {sprint_label!r} is still in progress")
+
+    plan = _read_plan_json(project_root, sprint_label)
+    plan_state = (plan or {}).get("state", "")
+    if plan_state in ("planning", "running"):
+        raise HTTPException(404, detail=f"Sprint {sprint_label!r} is not finished")
+    if plan_state == "cancelled":
+        raise HTTPException(404, detail=f"Sprint {sprint_label!r} was cancelled")
+
+    m = re.search(r"(\d+)", sprint_label)
+    n = m.group(1) if m else sprint_label
+    state_path = commander / "sprints" / f"sprint-{n}-state.json"
+
+    if not state_path.exists():
+        raise HTTPException(404, detail=f"Sprint {sprint_label!r} not found")
+
+    try:
+        state_data = json.loads(state_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as e:
+        raise HTTPException(500, detail=f"Could not read state file: {e}")
+
+    issues_raw = state_data.get("issues", [])
+
+    # If plan.json has no definitive "completed" state, derive from issue statuses
+    if plan_state != "completed" and issues_raw:
+        has_pending = any(i.get("status") == "pending" for i in issues_raw)
+        if has_pending:
+            raise HTTPException(404, detail=f"Sprint {sprint_label!r} is not finished")
+    elif plan_state != "completed" and not issues_raw:
+        raise HTTPException(404, detail=f"Sprint {sprint_label!r} not found")
+
+    def _parse_ts(s: Optional[str]) -> Optional[float]:
+        if not s:
+            return None
+        try:
+            dt = datetime.fromisoformat(s.rstrip("Z"))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt.timestamp()
+        except Exception:
+            return None
+
+    estimates_dir = commander / "estimates"
+    tickets = []
+
+    for iss in issues_raw:
+        issue_num = iss.get("number")
+        title = iss.get("title", "")
+        status = iss.get("status", "pending")
+
+        estimated_size: Optional[str] = None
+        estimated_minutes: Optional[int] = None
+        if issue_num is not None:
+            est_path = estimates_dir / f"issue-{issue_num}.json"
+            if est_path.exists():
+                try:
+                    est_data = json.loads(est_path.read_text(encoding="utf-8"))
+                    estimated_size = est_data.get("size") or None
+                    if estimated_size:
+                        estimated_minutes = _size_to_minutes(estimated_size) or None
+                except (json.JSONDecodeError, OSError):
+                    pass
+
+        start_ts = _parse_ts(iss.get("coder_started_at"))
+        end_ts = (
+            _parse_ts(iss.get("tester_finished_at"))
+            or _parse_ts(iss.get("status_changed_at"))
+        )
+        actual_elapsed_seconds: Optional[float] = None
+        actual_elapsed_minutes: Optional[float] = None
+        if start_ts is not None and end_ts is not None:
+            actual_elapsed_seconds = max(0.0, end_ts - start_ts)
+            actual_elapsed_minutes = round(actual_elapsed_seconds / 60, 1)
+
+        delta_minutes: Optional[float] = None
+        if estimated_minutes is not None and actual_elapsed_minutes is not None:
+            delta_minutes = round(actual_elapsed_minutes - estimated_minutes, 1)
+
+        tickets.append({
+            "ticket_id":              issue_num,
+            "title":                  title,
+            "estimated_size":         estimated_size,
+            "estimated_minutes":      estimated_minutes,
+            "actual_elapsed_seconds": round(actual_elapsed_seconds) if actual_elapsed_seconds is not None else None,
+            "actual_elapsed_minutes": actual_elapsed_minutes,
+            "delta_minutes":          delta_minutes,
+            "status":                 status,
+        })
+
+    return {
+        "sprint_label": sprint_label,
+        "tickets":      tickets,
+    }
+
+
 def _has_rework_tickets(sprint_label: str, project: str) -> bool:
     """Return True if any open issue in the sprint carries a needs-rework label."""
     try:

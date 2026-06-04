@@ -647,6 +647,74 @@
     @keyframes cmp-spin { to { transform: rotate(360deg); } }
     .cmp-spin { display: inline-block; animation: cmp-spin .9s linear infinite; }
 
+    /* ── Calibration tab (issue #576) ── */
+    .calib-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 16px;
+      padding: 0 0 32px;
+    }
+    .calib-bucket {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 20px 20px 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .calib-bucket-size {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      color: var(--text-sub);
+    }
+    .calib-bucket-avg {
+      font-size: 28px;
+      font-weight: 700;
+      color: var(--text);
+      line-height: 1.1;
+    }
+    .calib-bucket-avg.calib-no-data {
+      font-size: 14px;
+      font-weight: 400;
+      color: var(--text-sub);
+      font-style: italic;
+    }
+    .calib-bucket-unit {
+      font-size: 12px;
+      color: var(--text-sub);
+      margin-left: 3px;
+    }
+    .calib-bucket-canonical {
+      font-size: 11px;
+      color: var(--text-sub);
+    }
+    .calib-bucket-count {
+      font-size: 11px;
+      color: var(--text-sub);
+    }
+    .calib-bias {
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+      font-size: 11px;
+      font-weight: 600;
+      padding: 1px 6px;
+      border-radius: 4px;
+      margin-top: 2px;
+      width: fit-content;
+    }
+    .calib-bias-over  { background: var(--red-bg);   color: var(--red); }
+    .calib-bias-under { background: var(--green-bg); color: var(--green); }
+    .calib-bias-ok    { background: var(--surface);  color: var(--text-sub); border: 1px solid var(--border); }
+    .calib-section-note {
+      font-size: 12px;
+      color: var(--text-sub);
+      margin-bottom: 20px;
+    }
+
     /* Placeholder text */
     .placeholder-msg {
       padding: 48px 0;
@@ -2710,6 +2778,32 @@
     }
     .smgmt-risk-flag-icon:focus-visible { outline: 2px solid var(--blue); outline-offset: 1px; border-radius: 2px; }
     [data-theme="dark"] .smgmt-risk-flag-icon { color: #fbbf24; }
+    .smgmt-conflict-badge {
+      flex-shrink: 0; display: inline-flex; align-items: center; gap: 3px;
+      font-size: 11px; font-weight: 600; padding: 1px 5px; border-radius: 3px;
+      background: var(--red-bg, #fef2f2); color: var(--red, #dc2626);
+      border: 1px solid color-mix(in srgb, var(--red, #dc2626) 30%, transparent);
+      cursor: pointer; white-space: nowrap;
+    }
+    .smgmt-conflict-badge:hover { filter: brightness(1.05); }
+    .smgmt-conflict-badge:focus-visible { outline: 2px solid var(--blue); outline-offset: 1px; border-radius: 3px; }
+    [data-theme="dark"] .smgmt-conflict-badge { background: rgba(220,38,38,.15); color: #f87171; }
+    /* Dependency order hint badge (issue #581) */
+    .smgmt-dep-order-badge {
+      flex-shrink: 0; display: inline-flex; align-items: center; gap: 3px;
+      font-size: 11px; font-weight: 600; padding: 1px 5px; border-radius: 3px;
+      background: rgba(99,102,241,.1); color: #6366f1;
+      border: 1px solid rgba(99,102,241,.28);
+      cursor: pointer; white-space: nowrap;
+    }
+    .smgmt-dep-order-badge:hover { filter: brightness(1.05); }
+    .smgmt-dep-order-badge:focus-visible { outline: 2px solid var(--blue); outline-offset: 1px; border-radius: 3px; }
+    .smgmt-dep-order-badge.is-cycle {
+      background: rgba(202,138,4,.1); color: #b45309;
+      border-color: rgba(202,138,4,.28);
+    }
+    [data-theme="dark"] .smgmt-dep-order-badge { background: rgba(99,102,241,.15); color: #a5b4fc; }
+    [data-theme="dark"] .smgmt-dep-order-badge.is-cycle { background: rgba(234,179,8,.12); color: #fcd34d; }
     .smgmt-est-popover {
       position: fixed; z-index: 9998;
       background: var(--surface); border: 1px solid var(--border);
@@ -3592,6 +3686,75 @@
     }
     .pf-cycle-banner strong { font-weight: 700; }
 
+    /* Mis-sizing flags section (issue #578) */
+    .pf-flags-section { margin-top: 16px; }
+    .pf-flags-label {
+      font-size: 11px; font-weight: 600; text-transform: uppercase;
+      letter-spacing: .06em; color: #b45309; margin-bottom: 8px;
+    }
+    .pf-flag-item {
+      margin-bottom: 10px; padding: 10px 12px;
+      background: rgba(234, 179, 8, .07); border: 1px solid rgba(234, 179, 8, .35);
+      border-radius: 6px;
+    }
+    .pf-flag-item.resolved {
+      background: rgba(34, 197, 94, .06); border-color: rgba(34, 197, 94, .35);
+    }
+    .pf-flag-header {
+      display: flex; align-items: center; gap: 8px; margin-bottom: 5px;
+    }
+    .pf-flag-id {
+      font-family: var(--font-mono, monospace); font-size: 12px;
+      color: var(--text-muted); flex-shrink: 0;
+    }
+    .pf-flag-title {
+      font-size: 13px; font-weight: 500; color: var(--text); flex: 1; min-width: 0;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .pf-flag-badge {
+      font-size: 11px; padding: 2px 8px; border-radius: 99px; flex-shrink: 0;
+    }
+    .pf-flag-badge-pending {
+      background: rgba(234, 179, 8, .15); color: #92400e;
+      border: 1px solid rgba(234, 179, 8, .4);
+    }
+    .pf-flag-badge-resolved {
+      background: rgba(34, 197, 94, .12); color: #166534;
+      border: 1px solid rgba(34, 197, 94, .4);
+    }
+    .pf-flag-details {
+      font-size: 12px; color: var(--text-muted); margin-bottom: 8px; line-height: 1.6;
+    }
+    .pf-flag-details strong { color: var(--text); }
+    .pf-flag-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+    .pf-flag-action-btn {
+      font-size: 12px; padding: 3px 10px; border-radius: 5px;
+      border: 1px solid var(--border); background: none;
+      color: var(--text); font-family: inherit; cursor: pointer;
+      transition: background .1s, border-color .1s;
+    }
+    .pf-flag-action-btn:hover { background: var(--surface-hover, rgba(0,0,0,.05)); }
+    .pf-flag-action-btn.approve { border-color: rgba(34,197,94,.5); color: #166534; }
+    .pf-flag-action-btn.approve:hover { background: rgba(34,197,94,.08); }
+    .pf-flag-action-btn.dismiss { color: var(--text-muted); }
+    .pf-flag-size-picker {
+      display: flex; gap: 5px; align-items: center; margin-top: 6px; flex-wrap: wrap;
+    }
+    .pf-flag-size-btn {
+      font-size: 12px; padding: 3px 12px; border-radius: 5px;
+      border: 1px solid var(--border); background: none;
+      color: var(--text); font-family: inherit; cursor: pointer;
+      transition: background .1s, border-color .1s;
+    }
+    .pf-flag-size-btn:hover { background: var(--surface-hover, rgba(0,0,0,.05)); border-color: var(--blue); }
+    .pf-flag-size-cancel {
+      font-size: 12px; padding: 3px 8px; border: none; background: none;
+      color: var(--text-muted); cursor: pointer; font-family: inherit;
+    }
+    .pf-flag-resolved-note {
+      font-size: 12px; color: var(--text-muted); font-style: italic; margin-top: 4px;
+    }
+
     /* ── Logs tab (issue #420) ── */
     .logs-pane { display: flex; flex-direction: column; height: 100%; min-height: 0; }
     .logs-toolbar {
@@ -4104,6 +4267,14 @@
         <button class="stab" role="tab" id="stab-sprint-history"
                 aria-selected="false" onclick="switchTab('sprint-history')">
           <i class="ti ti-history"></i>Sprint history
+        </button>
+        <button class="stab" role="tab" id="stab-est-vs-actual"
+                aria-selected="false" onclick="switchTab('est-vs-actual')">
+          <i class="ti ti-ruler-measure"></i>Est vs Actual
+        </button>
+        <button class="stab" role="tab" id="stab-calibration"
+                aria-selected="false" onclick="switchTab('calibration')">
+          <i class="ti ti-adjustments-horizontal"></i>Calibration
         </button>
       </nav>
       <!-- Sprint status pill (GitHub-backed; works cross-machine while traveling) -->
@@ -4700,6 +4871,32 @@
         </div>
       </div>
 
+      <!-- Estimate vs Actual tab (issue #575) -->
+      <div class="tab-pane" id="pane-est-vs-actual" role="tabpanel" aria-labelledby="stab-est-vs-actual">
+        <div class="cmp-page-hdr">
+          <h2><i class="ti ti-ruler-measure" style="margin-right:8px;vertical-align:-2px;"></i>Estimate vs Actual</h2>
+          <p>Compare estimated size against actual agent time for finished sprints.</p>
+        </div>
+        <div class="cmp-picker-row">
+          <span class="cmp-picker-label">Sprint</span>
+          <select class="cmp-picker-select" id="eva-select" onchange="evaOnPickerChange()">
+            <option value="">— select sprint —</option>
+          </select>
+        </div>
+        <div id="eva-result"></div>
+      </div>
+
+      <!-- Calibration tab (issue #576) -->
+      <div class="tab-pane" id="pane-calibration" role="tabpanel" aria-labelledby="stab-calibration">
+        <div class="cmp-page-hdr">
+          <h2><i class="ti ti-adjustments-horizontal" style="margin-right:8px;vertical-align:-2px;"></i>Estimator Calibration</h2>
+          <p>Average actual agent time per size bucket across all finished sprints in this project.</p>
+        </div>
+        <div id="calib-result">
+          <div style="padding:24px;color:var(--text-sub);font-size:13px;">Loading…</div>
+        </div>
+      </div>
+
       <!-- Metrics tab (issue #476) -->
       <div class="tab-pane" id="pane-metrics" role="tabpanel" aria-labelledby="stab-metrics">
         <div class="metrics-page-hdr">
@@ -5061,13 +5258,15 @@ function parseUrl() {
   const slug = decodeURIComponent(m[1]);
   const rawTab = m[2] || '';
   const hash = window.location.hash;
-  const tab = (rawTab === 'tickets')        ? 'tickets'
-            : (rawTab === 'logs')           ? 'logs'
-            : (rawTab === 'bulk-create')    ? 'bulk-create'
-            : (rawTab === 'timeline')       ? 'timeline'
-            : (rawTab === 'compare')        ? 'compare'
-            : (rawTab === 'sprint-history') ? 'sprint-history'
-            : (hash === '#compare')         ? 'compare'
+  const tab = (rawTab === 'tickets')          ? 'tickets'
+            : (rawTab === 'logs')             ? 'logs'
+            : (rawTab === 'bulk-create')      ? 'bulk-create'
+            : (rawTab === 'timeline')         ? 'timeline'
+            : (rawTab === 'compare')          ? 'compare'
+            : (rawTab === 'sprint-history')   ? 'sprint-history'
+            : (rawTab === 'est-vs-actual')    ? 'est-vs-actual'
+            : (rawTab === 'calibration')      ? 'calibration'
+            : (hash === '#compare')           ? 'compare'
             : 'sprint-mgmt';
   return { slug, tab };
 }
@@ -5135,7 +5334,7 @@ function switchTab(tab, pushHistory) {
   _activeTab = tab;
 
   // Update aria-selected + active class on tabs
-  ['sprint-mgmt', 'tickets', 'logs', 'bulk-create', 'timeline', 'compare', 'metrics', 'sprint-history'].forEach(t => {
+  ['sprint-mgmt', 'tickets', 'logs', 'bulk-create', 'timeline', 'compare', 'metrics', 'sprint-history', 'est-vs-actual', 'calibration'].forEach(t => {
     const btn = document.getElementById('stab-' + t);
     if (!btn) return;
     const isActive = t === tab;
@@ -5144,7 +5343,7 @@ function switchTab(tab, pushHistory) {
   });
 
   // Show/hide panes
-  ['sprint-mgmt', 'tickets', 'logs', 'bulk-create', 'timeline', 'compare', 'metrics', 'sprint-history'].forEach(t => {
+  ['sprint-mgmt', 'tickets', 'logs', 'bulk-create', 'timeline', 'compare', 'metrics', 'sprint-history', 'est-vs-actual', 'calibration'].forEach(t => {
     const pane = document.getElementById('pane-' + t);
     if (pane) pane.classList.toggle('active', t === tab);
   });
@@ -5201,11 +5400,21 @@ function switchTab(tab, pushHistory) {
   if (tab === 'metrics') {
     metricsInit();
   }
+
+  // Init estimate-vs-actual tab
+  if (tab === 'est-vs-actual') {
+    evaInit();
+  }
+
+  // Init calibration tab
+  if (tab === 'calibration') {
+    calibInit();
+  }
 }
 
 // ── Keyboard navigation for sub-tabs ─────────────────────────────────────────
 document.getElementById('sub-tabs').addEventListener('keydown', function(e) {
-  const enabledTabs = ['sprint-mgmt', 'tickets', 'logs', 'bulk-create', 'timeline', 'compare', 'sprint-history'];
+  const enabledTabs = ['sprint-mgmt', 'tickets', 'logs', 'bulk-create', 'timeline', 'compare', 'sprint-history', 'est-vs-actual', 'calibration'];
   const focused = document.activeElement;
   const currentId = focused ? focused.id.replace('stab-', '') : null;
   const currentIdx = enabledTabs.indexOf(currentId);
@@ -6646,6 +6855,12 @@ function _smgmtRender(data) {
   // Inject pre-flight check banners for non-running sprint panes (issue #434)
   _preflightLoadBanners(orderedLabels, bySprint);
 
+  // Load file-conflict badges for pending tickets (issue #579)
+  _smgmtLoadConflicts(orderedLabels, bySprint);
+
+  // Load dependency order hints for pending tickets (issue #581)
+  _smgmtLoadDepOrder(orderedLabels, bySprint);
+
   // Update cleanup button visibility (issue #457)
   _smgmtUpdateCleanupBtn(data);
 
@@ -7070,6 +7285,223 @@ function _smgmtRiskFlagIconsHtml(issueNum) {
     .map(f => `<span class="smgmt-risk-flag-icon" tabindex="0" role="img"
       aria-label="${escHtml(f)}" title="${escHtml(f)}"><i class="ti ti-alert-triangle"></i></span>`)
     .join('');
+}
+
+// ── File-conflict detection (issue #579) ──────────────────────────────────────
+// Keyed by issue number → array of {partnerId, partnerTitle, sharedFiles}
+const _smgmtConflictsByIssue = {};
+
+function _smgmtConflictBadgeHtml(issueNum) {
+  const entries = _smgmtConflictsByIssue[issueNum];
+  if (!entries || entries.length === 0) return '';
+  const partners = entries.map(e => `#${e.partnerId}`).join(', ');
+  const files = [...new Set(entries.flatMap(e => e.sharedFiles))];
+  const tip = `Overlaps with ${partners}: ${files.join(', ')}`;
+  return `<button class="smgmt-conflict-badge" tabindex="0" title="${escHtml(tip)}"
+    onclick="event.stopPropagation();_smgmtShowConflictPopover(event,${issueNum})"
+    onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();_smgmtShowConflictPopover(event,${issueNum});}">
+    <i class="ti ti-git-merge"></i>${entries.length > 1 ? entries.length + ' conflicts' : '1 conflict'}</button>`;
+}
+
+function _smgmtUpdateConflictBadge(issueNum) {
+  const row = document.getElementById(`smgmt-ticket-${issueNum}`);
+  if (!row) return;
+  row.querySelector('.smgmt-conflict-badge')?.remove();
+  const entries = _smgmtConflictsByIssue[issueNum];
+  if (!entries || entries.length === 0) return;
+  const badge = document.createElement('button');
+  badge.className = 'smgmt-conflict-badge';
+  const partners = entries.map(e => `#${e.partnerId}`).join(', ');
+  const files = [...new Set(entries.flatMap(e => e.sharedFiles))];
+  badge.title = `Overlaps with ${partners}: ${files.join(', ')}`;
+  badge.tabIndex = 0;
+  badge.innerHTML = `<i class="ti ti-git-merge"></i>${entries.length > 1 ? entries.length + ' conflicts' : '1 conflict'}`;
+  badge.onclick = (ev) => { ev.stopPropagation(); _smgmtShowConflictPopover(ev, issueNum); };
+  badge.onkeydown = (ev) => {
+    if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); ev.stopPropagation(); _smgmtShowConflictPopover(ev, issueNum); }
+  };
+  const statusEl = row.querySelector('.smgmt-ticket-status');
+  if (statusEl) statusEl.before(badge);
+  else row.appendChild(badge);
+}
+
+function _smgmtShowConflictPopover(ev, issueNum) {
+  const entries = _smgmtConflictsByIssue[issueNum] || [];
+  if (!entries.length) return;
+  const existing = document.getElementById('smgmt-conflict-popover');
+  if (existing && existing._issueNum === issueNum) { existing.remove(); return; }
+  if (existing) existing.remove();
+  const pop = document.createElement('div');
+  pop.id = 'smgmt-conflict-popover';
+  pop._issueNum = issueNum;
+  pop.style.cssText = 'position:fixed;z-index:9999;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:12px 14px;box-shadow:0 4px 20px rgba(0,0,0,.18);max-width:340px;font-size:12px;';
+  const lines = entries.map(e =>
+    `<div style="margin-bottom:6px"><strong>#${e.partnerId}</strong> ${escHtml(e.partnerTitle)}<br>` +
+    `<span style="color:var(--text-muted)">Shared: ${e.sharedFiles.map(f => `<code style="font-size:11px">${escHtml(f)}</code>`).join(', ')}</span></div>`
+  ).join('');
+  pop.innerHTML = `<div style="font-weight:700;margin-bottom:8px;color:var(--red,#dc2626)">File conflicts for #${issueNum}</div>${lines}`;
+  document.body.appendChild(pop);
+  const rect = ev.target.getBoundingClientRect();
+  const popH = 200, popW = 340;
+  const top = rect.bottom + 4 + popH > window.innerHeight ? rect.top - popH - 4 : rect.bottom + 4;
+  const left = Math.min(rect.left, window.innerWidth - popW - 8);
+  pop.style.top = `${top}px`;
+  pop.style.left = `${Math.max(8, left)}px`;
+  const dismiss = (e) => { if (!pop.contains(e.target)) { pop.remove(); document.removeEventListener('click', dismiss, true); } };
+  setTimeout(() => document.addEventListener('click', dismiss, true), 0);
+}
+
+async function _smgmtLoadConflicts(orderedLabels, bySprint) {
+  const repo = _smgmtRepo();
+  if (!repo) return;
+  for (const label of orderedLabels) {
+    if (_smgmtRunningLabels.has(label)) continue;
+    if (_smgmtFinishedLabels.has(label)) continue;
+    const tickets = bySprint[label] || [];
+    const pending = tickets.filter(t => (t.status || 'backlog') === 'backlog');
+    if (pending.length < 2) continue;
+    // Clear stale entries for this sprint's tickets before repopulating
+    for (const t of pending) delete _smgmtConflictsByIssue[t.number];
+    try {
+      const resp = await fetch(
+        `/api/sprints/${encodeURIComponent(label)}/conflicts?project=${encodeURIComponent(repo)}`
+      );
+      if (!resp.ok) continue;
+      const data = await resp.json();
+      for (const c of (data.conflicts || [])) {
+        if (!_smgmtConflictsByIssue[c.ticket1_id]) _smgmtConflictsByIssue[c.ticket1_id] = [];
+        if (!_smgmtConflictsByIssue[c.ticket2_id]) _smgmtConflictsByIssue[c.ticket2_id] = [];
+        _smgmtConflictsByIssue[c.ticket1_id].push({ partnerId: c.ticket2_id, partnerTitle: c.ticket2_title, sharedFiles: c.shared_files });
+        _smgmtConflictsByIssue[c.ticket2_id].push({ partnerId: c.ticket1_id, partnerTitle: c.ticket1_title, sharedFiles: c.shared_files });
+      }
+      for (const t of pending) _smgmtUpdateConflictBadge(t.number);
+    } catch (_) {
+      // fail silently
+    }
+  }
+}
+
+// ── Dependency order hints (issue #581) ──────────────────────────────────────
+// Keyed by issue number → {upstream: [{id, title}], downstream: [{id, title}], inCycle: bool}
+const _smgmtDepOrderByIssue = {};
+
+function _smgmtDepOrderBadgeHtml(issueNum) {
+  const info = _smgmtDepOrderByIssue[issueNum];
+  if (!info) return '';
+  if (info.inCycle) {
+    return `<button class="smgmt-dep-order-badge is-cycle" tabindex="0"
+      aria-label="Circular dependency warning for ticket ${issueNum}"
+      title="Circular file dependency — no order prescribed"
+      onclick="event.stopPropagation();_smgmtShowDepOrderPopover(event,${issueNum})"
+      onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();_smgmtShowDepOrderPopover(event,${issueNum});}">
+      <i class="ti ti-alert-triangle"></i>cycle</button>`;
+  }
+  const total = info.upstream.length + info.downstream.length;
+  const label = total === 1 ? '1 dep' : `${total} deps`;
+  const parts = [
+    ...info.upstream.map(u => `After #${u.id}`),
+    ...info.downstream.map(d => `Before #${d.id}`),
+  ];
+  const tip = parts.join(', ');
+  return `<button class="smgmt-dep-order-badge" tabindex="0"
+    aria-label="Dependency order hint for ticket ${issueNum}: ${escHtml(tip)}"
+    title="${escHtml(tip)}"
+    onclick="event.stopPropagation();_smgmtShowDepOrderPopover(event,${issueNum})"
+    onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();_smgmtShowDepOrderPopover(event,${issueNum});}">
+    <i class="ti ti-list-tree"></i>${label}</button>`;
+}
+
+function _smgmtUpdateDepOrderBadge(issueNum) {
+  const row = document.getElementById(`smgmt-ticket-${issueNum}`);
+  if (!row) return;
+  row.querySelector('.smgmt-dep-order-badge')?.remove();
+  const html = _smgmtDepOrderBadgeHtml(issueNum);
+  if (!html) return;
+  const tmp = document.createElement('div');
+  tmp.innerHTML = html;
+  const badge = tmp.firstElementChild;
+  const conflictBadge = row.querySelector('.smgmt-conflict-badge');
+  if (conflictBadge) {
+    conflictBadge.after(badge);
+  } else {
+    const statusEl = row.querySelector('.smgmt-ticket-status');
+    if (statusEl) statusEl.before(badge);
+    else row.appendChild(badge);
+  }
+}
+
+function _smgmtShowDepOrderPopover(ev, issueNum) {
+  const info = _smgmtDepOrderByIssue[issueNum];
+  if (!info) return;
+  const existing = document.getElementById('smgmt-dep-order-popover');
+  if (existing && existing._issueNum === issueNum) { existing.remove(); return; }
+  if (existing) existing.remove();
+  const pop = document.createElement('div');
+  pop.id = 'smgmt-dep-order-popover';
+  pop._issueNum = issueNum;
+  pop.setAttribute('role', 'tooltip');
+  pop.style.cssText = 'position:fixed;z-index:9999;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:12px 14px;box-shadow:0 4px 20px rgba(0,0,0,.18);max-width:360px;font-size:12px;';
+  if (info.inCycle) {
+    pop.innerHTML = `<div style="font-weight:700;margin-bottom:8px;color:#b45309"><i class="ti ti-alert-triangle"></i> Circular dependency</div>
+      <p style="margin:0;color:var(--text-muted)">This ticket is part of a circular file-overlap dependency. No order can be prescribed. Review shared files with affected tickets.</p>`;
+  } else {
+    const afterLines = info.upstream.map(u =>
+      `<div style="margin-bottom:4px" aria-label="Should run after ticket ${u.id}">Should run after <strong>#${u.id}</strong> ${escHtml(u.title)}</div>`
+    ).join('');
+    const beforeLines = info.downstream.map(d =>
+      `<div style="margin-bottom:4px" aria-label="Should run before ticket ${d.id}">Should run before <strong>#${d.id}</strong> ${escHtml(d.title)}</div>`
+    ).join('');
+    pop.innerHTML = `<div style="font-weight:700;margin-bottom:8px;color:#6366f1"><i class="ti ti-list-tree"></i> Dependency order</div>${afterLines}${beforeLines}`;
+  }
+  document.body.appendChild(pop);
+  const rect = ev.target.getBoundingClientRect();
+  const popH = 180, popW = 360;
+  const top = rect.bottom + 4 + popH > window.innerHeight ? rect.top - popH - 4 : rect.bottom + 4;
+  const left = Math.min(rect.left, window.innerWidth - popW - 8);
+  pop.style.top = `${Math.max(8, top)}px`;
+  pop.style.left = `${Math.max(8, left)}px`;
+  const dismiss = (e) => { if (!pop.contains(e.target)) { pop.remove(); document.removeEventListener('click', dismiss, true); } };
+  setTimeout(() => document.addEventListener('click', dismiss, true), 0);
+}
+
+async function _smgmtLoadDepOrder(orderedLabels, bySprint) {
+  const repo = _smgmtRepo();
+  if (!repo) return;
+  for (const label of orderedLabels) {
+    if (_smgmtRunningLabels.has(label)) continue;
+    if (_smgmtFinishedLabels.has(label)) continue;
+    const tickets = bySprint[label] || [];
+    const pending = tickets.filter(t => (t.status || 'backlog') === 'backlog');
+    if (pending.length < 2) continue;
+    for (const t of pending) delete _smgmtDepOrderByIssue[t.number];
+    try {
+      const resp = await fetch(
+        `/api/sprints/${encodeURIComponent(label)}/dep-order?project=${encodeURIComponent(repo)}`
+      );
+      if (!resp.ok) continue;
+      const data = await resp.json();
+      if (data.has_cycle) {
+        const cycleSet = new Set((data.in_cycle_tickets || []).map(String));
+        for (const t of pending) {
+          if (cycleSet.has(String(t.number))) {
+            _smgmtDepOrderByIssue[t.number] = { upstream: [], downstream: [], inCycle: true };
+          }
+        }
+      } else {
+        for (const [idStr, hint] of Object.entries(data.dep_hints || {})) {
+          const num = parseInt(idStr, 10);
+          _smgmtDepOrderByIssue[num] = {
+            upstream: hint.upstream || [],
+            downstream: hint.downstream || [],
+            inCycle: false,
+          };
+        }
+      }
+      for (const t of pending) _smgmtUpdateDepOrderBadge(t.number);
+    } catch (_) {
+      // fail silently
+    }
+  }
 }
 
 async function _smgmtLoadGoals(orderedLabels) {
@@ -8619,6 +9051,8 @@ function _smgmtTicketRowHtml(ticket, label) {
          onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();_smgmtReEstimate(${ticket.number},this);}">Re-estimate</button>`
     : '';
   const riskFlagIconsHtml = _smgmtRiskFlagIconsHtml(ticket.number);
+  const conflictBadgeHtml = _smgmtConflictBadgeHtml(ticket.number);
+  const depOrderBadgeHtml = _smgmtDepOrderBadgeHtml(ticket.number);
 
   const ticketLabelNames = (ticket.labels || []).map(l => l.name).join(',');
 
@@ -8644,7 +9078,7 @@ function _smgmtTicketRowHtml(ticket, label) {
       <a class="smgmt-ticket-num" href="${escHtml(ticket.url || '#')}" target="_blank"
          rel="noopener" draggable="false" onclick="event.stopPropagation()">#${ticket.number}</a>
       <span class="smgmt-ticket-title" title="${escHtml(ticket.title)}">${escHtml(ticket.title)}</span>
-      ${sizePillHtml}${estimateBadgeHtml}${riskFlagIconsHtml}${reEstBtnHtml}
+      ${sizePillHtml}${estimateBadgeHtml}${riskFlagIconsHtml}${conflictBadgeHtml}${depOrderBadgeHtml}${reEstBtnHtml}
       <span class="smgmt-ticket-status ${statusClass}">${escHtml(statusLabel)}</span>
       <button class="btn-view-log" tabindex="0" title="View issue log"
               onclick="event.stopPropagation();openLvIssueLog(${ticket.number},'${escHtml(label)}',_smgmtRepo()||'')">
@@ -9054,6 +9488,7 @@ let _pfState        = 'idle'; // 'loading' | 'success' | 'error'
 let _pfDagData      = null;
 let _pfWarnings     = null;
 let _pfCycle        = null;
+let _pfFlags        = null;  // mis-sizing flags (issue #578)
 let _pfSelectedIds  = new Set();
 
 function _pfOpen(label) {
@@ -9078,6 +9513,7 @@ function _pfReset() {
   _pfDagData = null;
   _pfWarnings = null;
   _pfCycle = null;
+  _pfFlags = null;
   _pfSelectedIds = new Set();
 }
 
@@ -9090,6 +9526,7 @@ function _pfClose() {
   _pfDagData      = null;
   _pfWarnings     = null;
   _pfCycle        = null;
+  _pfFlags        = null;
   _pfSelectedIds  = new Set();
 }
 
@@ -9104,9 +9541,10 @@ async function _pfFetch() {
     if (!res.ok) throw new Error(await res.text());
     if (_pfCurrentLabel !== label) return;
     const data = await res.json();
-    _pfDagData  = data.dag      || null;
-    _pfWarnings = data.warnings || null;
-    _pfCycle    = data.cycle    || null;
+    _pfDagData  = data.dag              || null;
+    _pfWarnings = data.warnings         || null;
+    _pfCycle    = data.cycle            || null;
+    _pfFlags    = data.mis_sizing_flags || null;
     if (_pfDagData) {
       for (const t of (_pfDagData.tickets || [])) _pfSelectedIds.add(t.id);
     }
@@ -9128,12 +9566,14 @@ function _pfShowSuccess() {
     : '';
   const warningsHtml  = _pfBuildWarningsHtml();
   const cycleHtml     = _pfBuildCycleHtml();
+  const flagsHtml     = _pfBuildFlagsHtml();
   const conflictsHtml = _pfBuildConflictsHtml();
   const orderHtml     = _pfBuildOrderHtml();
   document.getElementById('pf-content').innerHTML =
     `<p style="font-size:13px;color:var(--text);margin:0;">Ready to run <strong>Sprint ${n}</strong>.</p>
      ${warningsHtml}
      ${cycleHtml}
+     ${flagsHtml}
      ${dagHtml}
      <div class="pf-section">
        <div class="pf-section-label">Conflicts</div>
@@ -9145,19 +9585,29 @@ function _pfShowSuccess() {
      </div>`;
   document.getElementById('pf-content').classList.remove('hidden');
   document.getElementById('pf-footer').classList.remove('hidden');
-  const hasCycle  = !!(_pfCycle && _pfCycle.length);
-  const confirmBtn = document.getElementById('pf-confirm-btn');
-  confirmBtn.disabled = hasCycle;
-  if (hasCycle) {
-    confirmBtn.title = 'Cannot run: dependency cycle detected. Resolve the cycle first.';
-    confirmBtn.setAttribute('aria-label', 'Run Sprint — disabled: dependency cycle detected');
-  } else {
-    confirmBtn.title = '';
-    confirmBtn.setAttribute('aria-label', 'Run Sprint');
-  }
+  _pfUpdateConfirmBtn();
   document.getElementById('pf-cancel-btn').focus();
   if (_pfDagData && (_pfDagData.edges || []).length > 0) {
     requestAnimationFrame(() => _pfDrawDAGArrows(_pfDagData.edges));
+  }
+}
+
+function _pfUpdateConfirmBtn() {
+  const hasCycle = !!(_pfCycle && _pfCycle.length);
+  const pendingFlags = (_pfFlags && (_pfFlags.flags || []).filter(f => f.status === 'pending')) || [];
+  const hasPending = pendingFlags.length > 0;
+  const confirmBtn = document.getElementById('pf-confirm-btn');
+  if (!confirmBtn) return;
+  confirmBtn.disabled = hasCycle || hasPending;
+  if (hasCycle) {
+    confirmBtn.title = 'Cannot run: dependency cycle detected. Resolve the cycle first.';
+    confirmBtn.setAttribute('aria-label', 'Run Sprint — disabled: dependency cycle detected');
+  } else if (hasPending) {
+    confirmBtn.title = `Cannot run: ${pendingFlags.length} mis-sizing flag${pendingFlags.length > 1 ? 's' : ''} need review.`;
+    confirmBtn.setAttribute('aria-label', 'Run Sprint — disabled: mis-sizing flags need review');
+  } else {
+    confirmBtn.title = '';
+    confirmBtn.setAttribute('aria-label', 'Run Sprint');
   }
 }
 
@@ -9189,6 +9639,140 @@ function _pfBuildCycleHtml() {
     <strong>Cycle detected:</strong> ${escHtml(_pfCycle.join(' → '))}
   </div>`;
 }
+
+// ── Mis-sizing flags section (issue #578) ───────────────────────────────────
+
+function _pfBuildFlagsHtml() {
+  const flags = _pfFlags && (_pfFlags.flags || []);
+  if (!flags || !flags.length) return '';
+
+  const label = _pfCurrentLabel;
+  const repo  = _pfCurrentRepo;
+
+  const rows = flags.map(f => {
+    const num = f.issue_number;
+    const resolved = f.status !== 'pending';
+    const itemClass = resolved ? 'pf-flag-item resolved' : 'pf-flag-item';
+
+    const estLabel = f.current_estimate
+      ? `${escHtml(f.current_estimate)} (${f.current_estimate_minutes ?? '?'} min)`
+      : 'unknown';
+    const avgLabel = f.historical_avg_actual_size
+      ? `${escHtml(f.historical_avg_actual_size)} (${f.historical_avg_actual_minutes ?? '?'} min avg)`
+      : 'unknown';
+    const drivingLabels = (f.driving_labels || []).map(l => `<code>${escHtml(l)}</code>`).join(', ');
+    const eventCount = f.mis_sizing_event_count || 0;
+
+    let badgeHtml = '';
+    let actionsHtml = '';
+    if (resolved) {
+      const actionText = { approved: 'Approved', reestimated: 'Re-estimated', dismissed: 'Dismissed' }[f.status] || f.status;
+      badgeHtml = `<span class="pf-flag-badge pf-flag-badge-resolved">${escHtml(actionText)}</span>`;
+      const noteText = f.action_note ? ` — ${escHtml(f.action_note)}` : '';
+      const newSizeText = f.new_size ? ` New size: ${escHtml(f.new_size)}.` : '';
+      actionsHtml = `<div class="pf-flag-resolved-note">${escHtml(actionText)}${newSizeText}${noteText}</div>`;
+    } else {
+      badgeHtml = `<span class="pf-flag-badge pf-flag-badge-pending">Review needed</span>`;
+      actionsHtml = `
+        <div class="pf-flag-actions" id="pf-flag-actions-${num}">
+          <button class="pf-flag-action-btn approve" onclick="_pfFlagAction(${num}, 'approved')">Approve</button>
+          <button class="pf-flag-action-btn" onclick="_pfFlagShowSizePicker(${num}, '${escHtml(f.current_estimate || 'S')}')">Re-estimate</button>
+          <button class="pf-flag-action-btn dismiss" onclick="_pfFlagAction(${num}, 'dismissed')">Dismiss</button>
+        </div>
+        <div id="pf-flag-picker-${num}" style="display:none">
+          <div class="pf-flag-size-picker">
+            <span style="font-size:12px;color:var(--text-muted);">New size:</span>
+            ${['S','M','L','XL'].map(s =>
+              `<button class="pf-flag-size-btn" onclick="_pfFlagReestimate(${num}, '${s}')">${s}</button>`
+            ).join('')}
+            <button class="pf-flag-size-cancel" onclick="_pfFlagHidePicker(${num})">Cancel</button>
+          </div>
+        </div>`;
+    }
+
+    return `<div class="${itemClass}" id="pf-flag-item-${num}">
+      <div class="pf-flag-header">
+        <span class="pf-flag-id">#${num}</span>
+        <span class="pf-flag-title" title="${escHtml(f.title)}">${escHtml(f.title)}</span>
+        ${badgeHtml}
+      </div>
+      <div class="pf-flag-details">
+        Estimate: <strong>${estLabel}</strong> ·
+        Historical avg: <strong>${avgLabel}</strong> ·
+        ${eventCount} mis-sizing event${eventCount !== 1 ? 's' : ''} on: ${drivingLabels}
+      </div>
+      ${actionsHtml}
+    </div>`;
+  });
+
+  const pending = flags.filter(f => f.status === 'pending').length;
+  const subtitle = pending > 0
+    ? `${pending} ticket${pending > 1 ? 's' : ''} flagged for review`
+    : 'All flags resolved';
+
+  return `<div class="pf-flags-section" id="pf-flags-section">
+    <div class="pf-flags-label">Mis-sizing review — ${subtitle}</div>
+    ${rows.join('')}
+  </div>`;
+}
+
+function _pfFlagShowSizePicker(num, currentSize) {
+  const actionsEl = document.getElementById(`pf-flag-actions-${num}`);
+  const pickerEl  = document.getElementById(`pf-flag-picker-${num}`);
+  if (actionsEl) actionsEl.style.display = 'none';
+  if (pickerEl)  pickerEl.style.display  = 'block';
+}
+
+function _pfFlagHidePicker(num) {
+  const actionsEl = document.getElementById(`pf-flag-actions-${num}`);
+  const pickerEl  = document.getElementById(`pf-flag-picker-${num}`);
+  if (actionsEl) actionsEl.style.display = '';
+  if (pickerEl)  pickerEl.style.display  = 'none';
+}
+
+async function _pfFlagAction(num, action, newSize) {
+  const label = _pfCurrentLabel;
+  const repo  = _pfCurrentRepo;
+  if (!label || !repo) return;
+
+  // Disable buttons to prevent double-click
+  const itemEl = document.getElementById(`pf-flag-item-${num}`);
+  if (itemEl) itemEl.querySelectorAll('button').forEach(b => { b.disabled = true; });
+
+  try {
+    const body = { action };
+    if (newSize) body.new_size = newSize;
+    const res = await fetch(
+      `/api/sprints/${encodeURIComponent(label)}/mis-sizing-flags/${num}/action?project=${encodeURIComponent(repo)}`,
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
+    );
+    if (!res.ok) {
+      const err = await res.text();
+      _smgmtShowToast(`Flag action failed: ${err}`, 'error');
+      if (itemEl) itemEl.querySelectorAll('button').forEach(b => { b.disabled = false; });
+      return;
+    }
+    const data = await res.json();
+    // Update local state and re-render flags section
+    _pfFlags = data;
+    const flagsSection = document.getElementById('pf-flags-section');
+    if (flagsSection) {
+      const newHtml = _pfBuildFlagsHtml();
+      flagsSection.outerHTML = newHtml || '<div id="pf-flags-section"></div>';
+    }
+    _pfUpdateConfirmBtn();
+  } catch (e) {
+    _smgmtShowToast('Flag action failed: ' + e.message, 'error');
+    if (itemEl) itemEl.querySelectorAll('button').forEach(b => { b.disabled = false; });
+  }
+}
+
+function _pfFlagReestimate(num, newSize) {
+  _pfFlagHidePicker(num);
+  _pfFlagAction(num, 'reestimated', newSize);
+}
+
+// ────────────────────────────────────────────────────────────────────────────
 
 function _pfBuildDAGHtml(dag) {
   const ticketMap = {};
@@ -16276,6 +16860,207 @@ document.addEventListener('keydown', function(e) {
       if (wrap) wrap.innerHTML = '<div class="gantt-empty">Failed to load timeline.</div>';
     }
   };
+}());
+
+// ── Estimate vs Actual tab (issue #575) ───────────────────────────────────────
+(function () {
+  let _evaInitialized = false;
+  let _evaFinishedSprints = [];
+
+  window.evaInit = async function () {
+    if (_evaInitialized) { _evaRenderPicker(); return; }
+    _evaInitialized = true;
+    await _evaLoadSprints();
+    _evaRenderPicker();
+  };
+
+  async function _evaLoadSprints() {
+    try {
+      const params = _slug ? `?project=${encodeURIComponent(_slug)}` : '';
+      const resp = await fetch('/api/logs/runs' + params);
+      if (!resp.ok) throw new Error('fetch failed');
+      const data = await resp.json();
+      _evaFinishedSprints = (data.items || [])
+        .filter(r => r.sprint_label)
+        .sort((a, b) => a.sprint_label.localeCompare(b.sprint_label, undefined, { numeric: true }));
+    } catch (_) {
+      _evaFinishedSprints = [];
+    }
+  }
+
+  function _evaRenderPicker() {
+    const sel = document.getElementById('eva-select');
+    if (!sel) return;
+    const prev = sel.value;
+    sel.innerHTML = '<option value="">— select sprint —</option>';
+    for (const run of _evaFinishedSprints) {
+      const opt = document.createElement('option');
+      opt.value = run.sprint_label;
+      opt.textContent = run.sprint_label;
+      sel.appendChild(opt);
+    }
+    if (prev && [...sel.options].some(o => o.value === prev)) sel.value = prev;
+    if (_evaFinishedSprints.length === 0) {
+      document.getElementById('eva-result').innerHTML = _evaEmpty('No finished sprints', 'Complete a sprint to see estimate data.');
+    }
+  }
+
+  window.evaOnPickerChange = async function () {
+    const sel = document.getElementById('eva-select');
+    const label = sel ? sel.value : '';
+    const resultEl = document.getElementById('eva-result');
+    if (!label) { resultEl.innerHTML = ''; return; }
+    resultEl.innerHTML = '<div style="padding:24px;color:var(--text-sub);font-size:13px;">Loading…</div>';
+    try {
+      const project = _slug || '';
+      const resp = await fetch(`/api/sprints/${encodeURIComponent(label)}/estimate-vs-actual?project=${encodeURIComponent(project)}`);
+      if (resp.status === 404) {
+        const err = await resp.json().catch(() => ({}));
+        resultEl.innerHTML = _evaEmpty('Not available', err.detail || 'Sprint is not finished or data is missing.');
+        return;
+      }
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const data = await resp.json();
+      resultEl.innerHTML = _evaRenderTable(data);
+    } catch (err) {
+      resultEl.innerHTML = _evaEmpty('Error', `Could not load data: ${escHtml(err.message)}`);
+    }
+  };
+
+  function _evaRenderTable(data) {
+    const tickets = data.tickets || [];
+    if (tickets.length === 0) {
+      return _evaEmpty('No tickets', 'This sprint has no ticket data recorded.');
+    }
+
+    const rows = tickets.map(t => {
+      const estSize = t.estimated_size ? `<span class="smgmt-ticket-size-pill">${escHtml(t.estimated_size)}</span>` : '<span style="color:var(--text-sub)">—</span>';
+      const estMin  = t.estimated_minutes != null ? `${t.estimated_minutes}m` : '—';
+      const actMin  = t.actual_elapsed_minutes != null ? `${t.actual_elapsed_minutes}m` : '—';
+      let deltaHtml = '—';
+      if (t.delta_minutes != null) {
+        const sign = t.delta_minutes > 0 ? '+' : '';
+        const color = t.delta_minutes > 5 ? 'var(--red)' : t.delta_minutes < -5 ? 'var(--green)' : 'var(--text)';
+        deltaHtml = `<span style="color:${color};font-weight:600">${sign}${t.delta_minutes}m</span>`;
+      }
+      const statusChip = `<span class="smgmt-outcome-chip ${escHtml(t.status || '')}" style="font-size:10px;padding:1px 6px">${escHtml(t.status || 'unknown')}</span>`;
+      return `<tr>
+        <td style="font-variant-numeric:tabular-nums;color:var(--text-sub)">#${t.ticket_id || '?'}</td>
+        <td style="max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(t.title || '')}</td>
+        <td style="text-align:center">${estSize}</td>
+        <td style="text-align:center">${escHtml(estMin)}</td>
+        <td style="text-align:center">${escHtml(actMin)}</td>
+        <td style="text-align:center">${deltaHtml}</td>
+        <td style="text-align:center">${statusChip}</td>
+      </tr>`;
+    }).join('');
+
+    return `
+      <table class="cmp-ticket-table" style="margin-top:20px">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Title</th>
+            <th style="text-align:center">Est size</th>
+            <th style="text-align:center">Est min</th>
+            <th style="text-align:center">Actual min</th>
+            <th style="text-align:center">Delta</th>
+            <th style="text-align:center">Status</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>`;
+  }
+
+  function _evaEmpty(title, msg) {
+    return `<div style="padding:40px 28px;text-align:center;color:var(--text-sub)">
+      <div style="font-weight:600;font-size:14px;margin-bottom:6px">${escHtml(title)}</div>
+      <div style="font-size:13px">${escHtml(msg)}</div>
+    </div>`;
+  }
+}());
+
+// ── Calibration tab (issue #576) ─────────────────────────────────────────────
+(function () {
+  let _calibLoaded = false;
+
+  window.calibInit = async function () {
+    if (_calibLoaded) return;
+    _calibLoaded = true;
+    await _calibLoad();
+  };
+
+  async function _calibLoad() {
+    const resultEl = document.getElementById('calib-result');
+    if (!resultEl) return;
+    resultEl.innerHTML = '<div style="padding:24px;color:var(--text-sub);font-size:13px;">Loading…</div>';
+    try {
+      const project = _slug || '';
+      const resp = await fetch(`/api/calibration?project=${encodeURIComponent(project)}`);
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const data = await resp.json();
+      resultEl.innerHTML = _calibRender(data);
+    } catch (err) {
+      resultEl.innerHTML = `<div style="padding:40px 28px;text-align:center;color:var(--text-sub)">
+        <div style="font-weight:600;font-size:14px;margin-bottom:6px">Error</div>
+        <div style="font-size:13px">${escHtml(err.message)}</div>
+      </div>`;
+    }
+  }
+
+  function _calibRender(data) {
+    const buckets = data.buckets || {};
+    const sizes = ['S', 'M', 'L', 'XL'];
+    const canonicalLabel = { S: '5m canonical', M: '15m canonical', L: '30m canonical', XL: '60m canonical' };
+
+    const cards = sizes.map(size => {
+      const b = buckets[size] || {};
+      const avg = b.avg_minutes;
+      const count = b.count || 0;
+      const canonical = b.canonical_minutes;
+
+      let avgHtml;
+      if (avg == null) {
+        avgHtml = `<div class="calib-bucket-avg calib-no-data">No data yet</div>`;
+      } else {
+        const formatted = avg >= 60
+          ? `${(avg / 60).toFixed(1)}<span class="calib-bucket-unit">h</span>`
+          : `${avg}<span class="calib-bucket-unit">m</span>`;
+        avgHtml = `<div class="calib-bucket-avg">${formatted}</div>`;
+      }
+
+      let biasHtml = '';
+      if (avg != null && canonical != null) {
+        const delta = avg - canonical;
+        const pct = Math.round((delta / canonical) * 100);
+        const sign = delta > 0 ? '+' : '';
+        if (Math.abs(pct) <= 15) {
+          biasHtml = `<span class="calib-bias calib-bias-ok">≈ on target</span>`;
+        } else if (delta > 0) {
+          biasHtml = `<span class="calib-bias calib-bias-over">${sign}${pct}% over</span>`;
+        } else {
+          biasHtml = `<span class="calib-bias calib-bias-under">${sign}${pct}% under</span>`;
+        }
+      }
+
+      const countStr = count === 1 ? '1 ticket' : `${count} tickets`;
+
+      return `<div class="calib-bucket">
+        <div class="calib-bucket-size">${escHtml(size)}</div>
+        ${avgHtml}
+        ${biasHtml}
+        <div class="calib-bucket-canonical">${escHtml(canonicalLabel[size])}</div>
+        <div class="calib-bucket-count">${avg != null ? escHtml(countStr) : 'No completed tickets'}</div>
+      </div>`;
+    }).join('');
+
+    const hasAny = sizes.some(s => (buckets[s] || {}).count > 0);
+    const note = hasAny
+      ? `<p class="calib-section-note">Based on tickets with both a size estimate and recorded agent timestamps. Bias &gt;15% from canonical triggers a flag.</p>`
+      : `<p class="calib-section-note">No completed tickets with recorded times yet. Run a sprint to see calibration data.</p>`;
+
+    return `${note}<div class="calib-grid">${cards}</div>`;
+  }
 }());
 
 // ── Metrics tab (issue #476) ──────────────────────────────────────────────────

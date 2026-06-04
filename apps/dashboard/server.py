@@ -126,6 +126,13 @@ if os.environ.get("COMMANDER_DISABLE_NEON", "").strip().lower() in ("1", "true",
 from sizing import SIZE_TO_MINUTES as _SIZE_TO_MINUTES, letter_from_minutes as _letter_from_minutes, minutes_from_letter as _minutes_from_letter
 
 try:
+    import mis_sizing as _mis_sizing
+    _MIS_SIZING_AVAILABLE = True
+except ImportError:
+    _mis_sizing = None  # type: ignore[assignment]
+    _MIS_SIZING_AVAILABLE = False
+
+try:
     from dag_builder import CycleError as _CycleError, build_dag as _build_dag
     _DAG_BUILDER_AVAILABLE = True
 except ImportError:
@@ -3848,6 +3855,160 @@ def get_sprint_cycle_check(sprint_label: str, project: str):
     return {"has_cycle": False}
 
 
+@app.get("/api/sprints/{sprint_label}/conflicts")
+def get_sprint_conflicts(sprint_label: str, project: str):
+    """Return all pairs of pending tickets in a sprint that share at least one file path.
+
+    Pending = issues with no in-progress/sit/uat/done label (i.e. backlog status).
+    File paths are sourced from .commander/estimates/issue-<N>.json files_likely_affected.
+
+    Returns {"conflicts": [...], "pending_count": N} on success.
+    Returns 404 when no issues with sprint_label exist.
+    """
+    if not _SPRINT_LABEL_RE.match(sprint_label):
+        raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")
+
+    try:
+        all_issues = github_client.list_open_issues_with_body(repo_name=project, limit=200)
+    except subprocess.CalledProcessError as e:
+        raise _gh_error(e)
+
+    sprint_issues = [
+        iss for iss in all_issues
+        if any(lbl["name"] == sprint_label for lbl in iss.get("labels", []))
+    ]
+
+    if not sprint_issues:
+        raise HTTPException(404, detail=f"Sprint {sprint_label!r} not found")
+
+    pending_issues = [
+        iss for iss in sprint_issues
+        if github_client.classify_issue(iss) == "backlog"
+    ]
+
+    project_root = _project_root_path(project)
+    estimates_dir = _commander_dir(project_root) / "estimates"
+
+    ticket_files: list[dict] = []
+    for iss in pending_issues:
+        num = iss["number"]
+        files: list[str] = []
+        est_path = estimates_dir / f"issue-{num}.json"
+        if est_path.exists():
+            try:
+                est = json.loads(est_path.read_text(encoding="utf-8"))
+                files = est.get("files_likely_affected") or []
+            except (json.JSONDecodeError, OSError):
+                pass
+        ticket_files.append({"id": num, "title": iss["title"], "files": set(files)})
+
+    conflicts = []
+    for i in range(len(ticket_files)):
+        for j in range(i + 1, len(ticket_files)):
+            a, b = ticket_files[i], ticket_files[j]
+            shared = sorted(a["files"] & b["files"])
+            if shared:
+                conflicts.append({
+                    "ticket1_id": a["id"],
+                    "ticket1_title": a["title"],
+                    "ticket2_id": b["id"],
+                    "ticket2_title": b["title"],
+                    "shared_files": shared,
+                })
+
+    return {"conflicts": conflicts, "pending_count": len(pending_issues)}
+
+
+@app.get("/api/sprints/{sprint_label}/dep-order")
+def get_sprint_dep_order(sprint_label: str, project: str):
+    """Return dependency order hints derived from file-overlap DAG for pending tickets.
+
+    For each ticket with at least one DAG edge, returns upstream (should run after)
+    and downstream (should run before) lists.  If the DAG contains cycles, returns
+    has_cycle=True with in_cycle_tickets so the frontend can render the warning.
+
+    Returns {"has_cycle": bool, "dep_hints": {...}, "pending_count": N}.
+    Returns 404 when no issues with sprint_label exist.
+    """
+    if not _SPRINT_LABEL_RE.match(sprint_label):
+        raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")
+
+    try:
+        all_issues = github_client.list_open_issues_with_body(repo_name=project, limit=200)
+    except subprocess.CalledProcessError as e:
+        raise _gh_error(e)
+
+    sprint_issues = [
+        iss for iss in all_issues
+        if any(lbl["name"] == sprint_label for lbl in iss.get("labels", []))
+    ]
+
+    if not sprint_issues:
+        raise HTTPException(404, detail=f"Sprint {sprint_label!r} not found")
+
+    pending_issues = [
+        iss for iss in sprint_issues
+        if github_client.classify_issue(iss) == "backlog"
+    ]
+
+    project_root = _project_root_path(project)
+    estimates_dir = _commander_dir(project_root) / "estimates"
+
+    ticket_files: list[dict] = []
+    for iss in pending_issues:
+        num = iss["number"]
+        files: list[str] = []
+        est_path = estimates_dir / f"issue-{num}.json"
+        if est_path.exists():
+            try:
+                est = json.loads(est_path.read_text(encoding="utf-8"))
+                files = est.get("files_likely_affected") or []
+            except (json.JSONDecodeError, OSError):
+                pass
+        ticket_files.append({"id": num, "title": iss["title"], "files": files})
+
+    if _build_dag is None:
+        return {"has_cycle": False, "cycles": [], "in_cycle_tickets": [], "dep_hints": {}, "pending_count": len(pending_issues), "warning": "dag_builder_unavailable"}
+
+    dag_tickets = [{"id": str(tf["id"]), "files_touched": tf["files"]} for tf in ticket_files]
+    title_map = {str(tf["id"]): tf["title"] for tf in ticket_files}
+
+    result = _build_dag(dag_tickets)
+
+    if isinstance(result, _CycleError):
+        in_cycle_ids = [int(tid) for cycle in result.cycles for tid in cycle]
+        return {
+            "has_cycle": True,
+            "cycles": result.cycles,
+            "in_cycle_tickets": sorted(set(in_cycle_ids)),
+            "dep_hints": {},
+            "pending_count": len(pending_issues),
+        }
+
+    # Build per-ticket upstream / downstream from DAG edges.
+    upstream: dict[str, list[dict]] = {str(tf["id"]): [] for tf in ticket_files}
+    downstream: dict[str, list[dict]] = {str(tf["id"]): [] for tf in ticket_files}
+    for src, dst in result.edges:
+        downstream[src].append({"id": int(dst), "title": title_map.get(dst, "")})
+        upstream[dst].append({"id": int(src), "title": title_map.get(src, "")})
+
+    dep_hints: dict[int, dict] = {}
+    for tf in ticket_files:
+        tid = str(tf["id"])
+        u = upstream[tid]
+        d = downstream[tid]
+        if u or d:
+            dep_hints[tf["id"]] = {"upstream": u, "downstream": d}
+
+    return {
+        "has_cycle": False,
+        "cycles": [],
+        "in_cycle_tickets": [],
+        "dep_hints": dep_hints,
+        "pending_count": len(pending_issues),
+    }
+
+
 def _check_estimate_stale(issue_num: int, current_body: str, estimates_dir) -> bool:
     """Return True if the stored estimate is stale (body changed or hash missing).
 
@@ -3887,6 +4048,7 @@ def get_sprint_preflight(sprint_label: str, project: str):
     dag_payload: dict | None = None
     warnings: dict = {"unestimated": [], "stale_estimates": [], "missing_ac": []}
     cycle_path: list[str] | None = None
+    sprint_issues: list[dict] = []
 
     try:
         sprint_issues = _get_sprint_issues(project, sprint_label)
@@ -3972,6 +4134,18 @@ def get_sprint_preflight(sprint_label: str, project: str):
     except subprocess.CalledProcessError:
         pass  # DAG is decorative — don't fail the preflight
 
+    # Generate mis-sizing flags using the sprint issues already fetched above
+    mis_sizing_flags: dict | None = None
+    if _MIS_SIZING_AVAILABLE:
+        try:
+            _ms_commander = _commander_dir(_project_root_path(project))
+            _ms_issues = sprint_issues if sprint_issues else []
+            mis_sizing_flags = _mis_sizing.generate_and_save_flags(
+                _ms_commander, sprint_label, _ms_issues
+            )
+        except Exception:
+            pass  # Flags are decorative — don't fail the preflight
+
     return {
         "ok": True,
         "sprint_label": sprint_label,
@@ -3980,6 +4154,7 @@ def get_sprint_preflight(sprint_label: str, project: str):
         "warnings": warnings,
         "cycle": cycle_path,
         "stale_threshold_days": _STALE_ESTIMATE_DAYS,
+        "mis_sizing_flags": mis_sizing_flags,
     }
 
 
@@ -4034,6 +4209,17 @@ def run_sprint_managed(request: Request, body: SprintMgmtRunBody):
             raise
         except subprocess.CalledProcessError as e:
             raise _gh_error(e)
+
+    # ── Mis-sizing flags: hard-block run if pending flags remain ─────────────
+    if _MIS_SIZING_AVAILABLE:
+        if _mis_sizing.has_unresolved_flags(commander, body.sprint_label):
+            raise HTTPException(
+                422,
+                detail=(
+                    "Cannot start sprint: unresolved mis-sizing flags in review queue. "
+                    "Open the Run Sprint dialog and resolve all flagged tickets first."
+                ),
+            )
 
     # ── Migration: move open tickets from earlier sprints to target ───────────
     migration_log_lines: list[str] = []
@@ -5630,6 +5816,226 @@ def get_sprint_outcome(sprint_label: str, project: str):
         "issues":          result_issues,
         "log_line_count":  log_line_count,
     }
+
+
+# ── Estimate-vs-Actual report (issue #575) ───────────────────────────────────
+
+@app.get("/api/sprints/{sprint_label}/estimate-vs-actual")
+def get_sprint_estimate_vs_actual(sprint_label: str, project: str):
+    """Return per-ticket estimate-vs-actual comparison for a finished sprint.
+
+    Response schema:
+      {
+        "sprint_label": "sprint-43",
+        "tickets": [
+          {
+            "ticket_id": 574,
+            "title": "...",
+            "estimated_size": "L",          # null if no estimate
+            "estimated_minutes": 30,        # null if no estimate
+            "actual_elapsed_seconds": 1234, # null if timestamps missing
+            "actual_elapsed_minutes": 20.6, # null if timestamps missing
+            "delta_minutes": -9.4,          # actual - estimated; null if either is null
+            "status": "done"
+          }
+        ]
+      }
+
+    Returns 404 if the sprint is not finished (still running, planning, or not found).
+    """
+    if not _SPRINT_LABEL_RE.match(sprint_label):
+        raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")
+
+    project_root = _project_root_path(project)
+    commander = _commander_dir(project_root)
+
+    if _is_sprint_running(project_root, sprint_label):
+        raise HTTPException(404, detail=f"Sprint {sprint_label!r} is still in progress")
+
+    plan = _read_plan_json(project_root, sprint_label)
+    plan_state = (plan or {}).get("state", "")
+    if plan_state in ("planning", "running"):
+        raise HTTPException(404, detail=f"Sprint {sprint_label!r} is not finished")
+    if plan_state == "cancelled":
+        raise HTTPException(404, detail=f"Sprint {sprint_label!r} was cancelled")
+
+    m = re.search(r"(\d+)", sprint_label)
+    n = m.group(1) if m else sprint_label
+    state_path = commander / "sprints" / f"sprint-{n}-state.json"
+
+    if not state_path.exists():
+        raise HTTPException(404, detail=f"Sprint {sprint_label!r} not found")
+
+    try:
+        state_data = json.loads(state_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as e:
+        raise HTTPException(500, detail=f"Could not read state file: {e}")
+
+    issues_raw = state_data.get("issues", [])
+
+    # If plan.json has no definitive "completed" state, derive from issue statuses
+    if plan_state != "completed" and issues_raw:
+        has_pending = any(i.get("status") == "pending" for i in issues_raw)
+        if has_pending:
+            raise HTTPException(404, detail=f"Sprint {sprint_label!r} is not finished")
+    elif plan_state != "completed" and not issues_raw:
+        raise HTTPException(404, detail=f"Sprint {sprint_label!r} not found")
+
+    def _parse_ts(s: Optional[str]) -> Optional[float]:
+        if not s:
+            return None
+        try:
+            dt = datetime.fromisoformat(s.rstrip("Z"))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt.timestamp()
+        except Exception:
+            return None
+
+    estimates_dir = commander / "estimates"
+    tickets = []
+
+    for iss in issues_raw:
+        issue_num = iss.get("number")
+        title = iss.get("title", "")
+        status = iss.get("status", "pending")
+
+        estimated_size: Optional[str] = None
+        estimated_minutes: Optional[int] = None
+        if issue_num is not None:
+            est_path = estimates_dir / f"issue-{issue_num}.json"
+            if est_path.exists():
+                try:
+                    est_data = json.loads(est_path.read_text(encoding="utf-8"))
+                    estimated_size = est_data.get("size") or None
+                    if estimated_size:
+                        estimated_minutes = _size_to_minutes(estimated_size) or None
+                except (json.JSONDecodeError, OSError):
+                    pass
+
+        start_ts = _parse_ts(iss.get("coder_started_at"))
+        end_ts = (
+            _parse_ts(iss.get("tester_finished_at"))
+            or _parse_ts(iss.get("status_changed_at"))
+        )
+        actual_elapsed_seconds: Optional[float] = None
+        actual_elapsed_minutes: Optional[float] = None
+        if start_ts is not None and end_ts is not None:
+            actual_elapsed_seconds = max(0.0, end_ts - start_ts)
+            actual_elapsed_minutes = round(actual_elapsed_seconds / 60, 1)
+
+        delta_minutes: Optional[float] = None
+        if estimated_minutes is not None and actual_elapsed_minutes is not None:
+            delta_minutes = round(actual_elapsed_minutes - estimated_minutes, 1)
+
+        tickets.append({
+            "ticket_id":              issue_num,
+            "title":                  title,
+            "estimated_size":         estimated_size,
+            "estimated_minutes":      estimated_minutes,
+            "actual_elapsed_seconds": round(actual_elapsed_seconds) if actual_elapsed_seconds is not None else None,
+            "actual_elapsed_minutes": actual_elapsed_minutes,
+            "delta_minutes":          delta_minutes,
+            "status":                 status,
+        })
+
+    return {
+        "sprint_label": sprint_label,
+        "tickets":      tickets,
+    }
+
+
+# ── Estimator calibration view (issue #576) ──────────────────────────────────
+
+@app.get("/api/calibration")
+def get_calibration(project: str):
+    """Return average actual time per size bucket across all finished sprints.
+
+    Scans every sprint-N-state.json in the project's .commander/sprints/
+    directory, matches each ticket's actual elapsed time with its cached
+    size estimate, then averages by bucket.
+
+    Response schema:
+      {
+        "buckets": {
+          "S":  { "avg_minutes": 8.5, "count": 5, "canonical_minutes": 5 },
+          "M":  { "avg_minutes": 18.2, "count": 3, "canonical_minutes": 15 },
+          "L":  { "avg_minutes": null, "count": 0, "canonical_minutes": 30 },
+          "XL": { "avg_minutes": null, "count": 0, "canonical_minutes": 60 }
+        }
+      }
+    avg_minutes is null for buckets with no completed tickets that have
+    both a size estimate and a recorded actual time.
+    """
+    project_root = _project_root_path(project)
+    commander = _commander_dir(project_root)
+    sprints_dir = commander / "sprints"
+    estimates_dir = commander / "estimates"
+
+    def _parse_ts(s: Optional[str]) -> Optional[float]:
+        if not s:
+            return None
+        try:
+            dt = datetime.fromisoformat(s.rstrip("Z"))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt.timestamp()
+        except Exception:
+            return None
+
+    # Accumulate (total_minutes, count) per bucket
+    buckets_raw: dict[str, list[float]] = {"S": [], "M": [], "L": [], "XL": []}
+
+    if sprints_dir.exists():
+        for state_path in sprints_dir.glob("sprint-*-state.json"):
+            try:
+                state_data = json.loads(state_path.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError):
+                continue
+
+            for iss in state_data.get("issues", []):
+                issue_num = iss.get("number")
+                if issue_num is None:
+                    continue
+
+                # Only count tickets that were actually completed
+                if iss.get("status") not in ("done", "passed"):
+                    continue
+
+                start_ts = _parse_ts(iss.get("coder_started_at"))
+                end_ts = (
+                    _parse_ts(iss.get("tester_finished_at"))
+                    or _parse_ts(iss.get("status_changed_at"))
+                )
+                if start_ts is None or end_ts is None:
+                    continue
+                elapsed_minutes = max(0.0, end_ts - start_ts) / 60.0
+
+                est_path = estimates_dir / f"issue-{issue_num}.json"
+                if not est_path.exists():
+                    continue
+                try:
+                    est_data = json.loads(est_path.read_text(encoding="utf-8"))
+                except (json.JSONDecodeError, OSError):
+                    continue
+
+                size = est_data.get("size") or None
+                if size not in buckets_raw:
+                    continue
+
+                buckets_raw[size].append(elapsed_minutes)
+
+    canonical = {"S": 5, "M": 15, "L": 30, "XL": 60}
+    result_buckets: dict[str, dict] = {}
+    for size in ("S", "M", "L", "XL"):
+        vals = buckets_raw[size]
+        result_buckets[size] = {
+            "avg_minutes": round(sum(vals) / len(vals), 1) if vals else None,
+            "count":       len(vals),
+            "canonical_minutes": canonical[size],
+        }
+
+    return {"buckets": result_buckets}
 
 
 def _has_rework_tickets(sprint_label: str, project: str) -> bool:
@@ -9189,6 +9595,240 @@ def promote_to_master(body: PromoteBody):
     else:
         err = result.stderr.strip() or result.stdout.strip() or "GitHub API failure"
         raise HTTPException(502, detail=err)
+
+
+# ── Mis-sizing flag endpoints (issue #578) ───────────────────────────────────
+
+
+class MisSizingActionBody(BaseModel):
+    action: str
+    new_size: Optional[str] = None
+    note: Optional[str] = None
+
+
+class MisSizingConfigBody(BaseModel):
+    tier_threshold: int
+    min_events: int
+
+
+@app.get("/api/sprints/{sprint_label}/mis-sizing-flags")
+def get_mis_sizing_flags(sprint_label: str, project: str):
+    """Return the current mis-sizing flags for a sprint.
+
+    Does NOT regenerate; returns whatever is persisted on disk.
+    Call POST /generate to regenerate from current sprint issues.
+    """
+    if not _SPRINT_LABEL_RE.match(sprint_label):
+        raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")
+    if not _MIS_SIZING_AVAILABLE:
+        return {"sprint_label": sprint_label, "flags": [], "audit_log": [], "generated_at": None, "config": {}}
+    project_root = _project_root_path(project)
+    commander = _commander_dir(project_root)
+    return _mis_sizing.load_flags(commander, sprint_label)
+
+
+@app.post("/api/sprints/{sprint_label}/mis-sizing-flags/generate")
+def generate_mis_sizing_flags(sprint_label: str, project: str):
+    """Regenerate mis-sizing flags for a sprint from current GitHub issue data."""
+    if not _SPRINT_LABEL_RE.match(sprint_label):
+        raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")
+    if not _MIS_SIZING_AVAILABLE:
+        return {"sprint_label": sprint_label, "flags": [], "audit_log": [], "generated_at": None, "config": {}}
+
+    project_root = _project_root_path(project)
+    commander = _commander_dir(project_root)
+
+    try:
+        sprint_issues = _get_sprint_issues(project, sprint_label)
+    except subprocess.CalledProcessError as e:
+        raise _gh_error(e)
+
+    return _mis_sizing.generate_and_save_flags(commander, sprint_label, sprint_issues)
+
+
+@app.post("/api/sprints/{sprint_label}/mis-sizing-flags/{issue_id}/action")
+def act_on_mis_sizing_flag(sprint_label: str, issue_id: int, body: MisSizingActionBody, project: str):
+    """Take an action on a mis-sizing flag: approved, reestimated, or dismissed.
+
+    For reestimated, also updates the estimate file and GitHub size label.
+    """
+    if not _SPRINT_LABEL_RE.match(sprint_label):
+        raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")
+    if not _MIS_SIZING_AVAILABLE:
+        raise HTTPException(501, detail="Mis-sizing module not available")
+
+    project_root = _project_root_path(project)
+    commander = _commander_dir(project_root)
+
+    try:
+        data = _mis_sizing.record_action(
+            commander,
+            sprint_label,
+            issue_id,
+            body.action,
+            new_size=body.new_size,
+            note=body.note,
+        )
+    except ValueError as e:
+        raise HTTPException(400, detail=str(e))
+    except KeyError as e:
+        raise HTTPException(404, detail=str(e))
+
+    # If re-estimating, update the estimate file and GitHub label
+    if body.action == "reestimated" and body.new_size:
+        estimates_dir = commander / "estimates"
+        est_path = estimates_dir / f"issue-{issue_id}.json"
+        if est_path.exists():
+            try:
+                est_data = json.loads(est_path.read_text(encoding="utf-8"))
+                old_size = est_data.get("size")
+                est_data["size"] = body.new_size
+                est_data["minutes"] = _mis_sizing.CANONICAL_MINUTES.get(body.new_size, 0)
+                est_path.write_text(json.dumps(est_data, indent=2), encoding="utf-8")
+            except (json.JSONDecodeError, OSError):
+                pass
+        # Update GitHub label: remove old size-*, add new size-*
+        try:
+            size_labels = [f"size-{s}" for s in _mis_sizing.SIZE_TIERS]
+            github_client.update_labels(
+                issue_id,
+                add=[f"size-{body.new_size}"],
+                remove=size_labels,
+                repo_name=project,
+            )
+        except subprocess.CalledProcessError:
+            pass  # Label update is best-effort
+
+    return data
+
+
+@app.get("/api/mis-sizing/history")
+def get_mis_sizing_history(project: str):
+    """Return the full mis-sizing history for a project."""
+    if not _MIS_SIZING_AVAILABLE:
+        return {"version": 1, "events_by_label": {}, "last_rebuilt": None}
+    project_root = _project_root_path(project)
+    commander = _commander_dir(project_root)
+    return _mis_sizing.load_history(commander)
+
+
+@app.post("/api/mis-sizing/rebuild")
+def rebuild_mis_sizing_history(project: str):
+    """Rebuild mis-sizing history by scanning all sprint state files.
+
+    Fetches issue labels from GitHub for completed tickets (one batch call).
+    This is an expensive operation — run once or when history is stale.
+    """
+    if not _MIS_SIZING_AVAILABLE:
+        raise HTTPException(501, detail="Mis-sizing module not available")
+
+    project_root = _project_root_path(project)
+    commander = _commander_dir(project_root)
+    sprints_dir = commander / "sprints"
+    estimates_dir = commander / "estimates"
+
+    # Collect all completed tickets from sprint state files
+    raw_completed: list[dict] = []
+    if sprints_dir.exists():
+        for state_path in sorted(sprints_dir.glob("sprint-*-state.json")):
+            m = re.search(r"sprint-(\d+)-state", state_path.name)
+            sprint_label_str = f"sprint-{m.group(1)}" if m else state_path.stem
+            try:
+                state_data = json.loads(state_path.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError):
+                continue
+            for iss in state_data.get("issues", []):
+                if iss.get("status") not in ("done", "passed"):
+                    continue
+                num = iss.get("number")
+                if num is None:
+                    continue
+                # Only include tickets that have an estimate file
+                est_path = estimates_dir / f"issue-{num}.json"
+                if not est_path.exists():
+                    continue
+                try:
+                    est_data = json.loads(est_path.read_text(encoding="utf-8"))
+                    estimated_size = est_data.get("size") or None
+                except (json.JSONDecodeError, OSError):
+                    continue
+                if not estimated_size:
+                    continue
+                raw_completed.append({
+                    "number": num,
+                    "sprint": sprint_label_str,
+                    "estimated_size": estimated_size,
+                    "coder_started_at": iss.get("coder_started_at"),
+                    "tester_finished_at": iss.get("tester_finished_at"),
+                    "status_changed_at": iss.get("status_changed_at"),
+                })
+
+    if not raw_completed:
+        history = _mis_sizing.build_history_from_completed([])
+        _mis_sizing.save_history(commander, history)
+        return {"message": "No completed estimated tickets found", "total_events": 0, "labels_with_history": 0}
+
+    # Batch-fetch labels for all completed issues from GitHub
+    issue_numbers = {c["number"] for c in raw_completed}
+    labels_by_num: dict[int, list[str]] = {}
+    try:
+        repo = github_client.get_repo_for_operation(project)
+        result = subprocess.run(
+            ["gh", "issue", "list", "--repo", repo,
+             "--state", "all", "--json", "number,labels", "--limit", "1000"],
+            capture_output=True, text=True, timeout=60,
+        )
+        if result.returncode == 0:
+            for iss in json.loads(result.stdout or "[]"):
+                n = iss.get("number")
+                if n in issue_numbers:
+                    labels_by_num[n] = [
+                        lbl["name"] for lbl in iss.get("labels", [])
+                    ]
+    except Exception:
+        pass  # Proceed without labels — events will be skipped
+
+    # Attach labels to completed tickets
+    for rec in raw_completed:
+        rec["labels"] = labels_by_num.get(rec["number"], [])
+
+    history = _mis_sizing.build_history_from_completed(raw_completed)
+    _mis_sizing.save_history(commander, history)
+
+    total_events = sum(len(v) for v in history.get("events_by_label", {}).values())
+    labels_count = len(history.get("events_by_label", {}))
+    return {
+        "message": f"History rebuilt: {total_events} events across {labels_count} labels",
+        "labels_with_history": labels_count,
+        "total_events": total_events,
+        "last_rebuilt": history.get("last_rebuilt"),
+    }
+
+
+@app.get("/api/mis-sizing/config")
+def get_mis_sizing_config(project: str):
+    """Return the current mis-sizing detection thresholds."""
+    if not _MIS_SIZING_AVAILABLE:
+        return {"tier_threshold": 2, "min_events": 2}
+    project_root = _project_root_path(project)
+    commander = _commander_dir(project_root)
+    return _mis_sizing.load_config(commander)
+
+
+@app.post("/api/mis-sizing/config")
+def update_mis_sizing_config(body: MisSizingConfigBody, project: str):
+    """Update the mis-sizing detection thresholds."""
+    if not _MIS_SIZING_AVAILABLE:
+        raise HTTPException(501, detail="Mis-sizing module not available")
+    if body.tier_threshold < 1 or body.tier_threshold > 3:
+        raise HTTPException(400, detail="tier_threshold must be 1–3")
+    if body.min_events < 1:
+        raise HTTPException(400, detail="min_events must be >= 1")
+    project_root = _project_root_path(project)
+    commander = _commander_dir(project_root)
+    config = {"tier_threshold": body.tier_threshold, "min_events": body.min_events}
+    _mis_sizing.save_config(commander, config)
+    return config
 
 
 # ── Static asset routes with long-lived cache headers (issue #249) ────────────

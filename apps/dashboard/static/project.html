@@ -10554,6 +10554,12 @@ async function _smgmtArDoRefresh() {
 /** Fires every second: count down, refresh when we reach zero. */
 function _smgmtArTick() {
   if (_smgmtMoveLock) return; // freeze the countdown while a ticket move is in flight
+  // Freeze while a drag is in progress: a mid-drag board re-render (this tick
+  // calls loadSprintMgmt → _smgmtRenderBacklog, which rebuilds the rows via
+  // innerHTML) replaces the dragged DOM node, and the browser immediately
+  // cancels the drag. With a short refresh interval that clobbers nearly every
+  // attempt, making the board feel permanently un-draggable in all browsers.
+  if (_smgmtDragTicket) return;
   _arRemaining -= 1;
   if (_arRemaining <= 0) {
     _arRemaining = _arInterval;

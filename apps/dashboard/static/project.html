@@ -2709,6 +2709,18 @@
     .bc-limit-banner--error {
       color: #991b1b; background: #fef2f2; border: 1px solid #fca5a5;
     }
+    .bc-prompt-warn {
+      display: flex; align-items: center; justify-content: space-between; gap: 6px;
+      margin: 0 28px 6px; padding: 6px 10px;
+      border-radius: 4px; font-size: 12px; font-weight: 500;
+      color: #92400e; background: #fffbeb; border: 1px solid #fcd34d;
+    }
+    .bc-prompt-warn-dismiss {
+      flex-shrink: 0; padding: 2px 8px;
+      border: 1px solid #fcd34d; border-radius: 4px;
+      background: transparent; color: #92400e; font-size: 11px; cursor: pointer;
+    }
+    .bc-prompt-warn-dismiss:hover { background: #fef9c3; }
     .bc-prompt-row-stats {
       font-size: 10px; color: var(--text-muted); font-family: var(--mono);
       white-space: nowrap; padding-top: 9px; flex-shrink: 0; line-height: 1.3;
@@ -4242,6 +4254,12 @@
           </div>
 
           <div class="bc-error hidden" id="bc-step1-error"></div>
+
+          <!-- Prompt-size warning (issue #568) -->
+          <div id="bc-prompt-warn" class="bc-prompt-warn hidden" role="alert" aria-live="polite">
+            <span>&#9888; <strong>This prompt may be too large</strong> — consider splitting into separate requests</span>
+            <button type="button" class="bc-prompt-warn-dismiss" onclick="bcDismissPromptWarn()">Dismiss</button>
+          </div>
 
           <!-- Step 1 footer actions -->
           <div class="bc-step-actions">
@@ -11553,9 +11571,12 @@ let _bcDupTimer      = null;
 let _bcDragSrcIdx    = null;        // HTML5 drag source row index
 let _bcTouchSrcIdx   = null;        // touch drag source row index
 let _bcTouchGhost    = null;        // floating ghost element during touch drag
+let _bcWarnDismissed = false;       // true after user dismisses the prompt-size warning (issue #568)
 
 const BC_MAX_PROMPTS = 50;
 const BC_WARN_PROMPTS = 40;
+const BC_PROMPT_WARN_CHARS = 1500;  // per-prompt char threshold for size warning (issue #568)
+const BC_PROMPT_WARN_ASKS  = 3;     // per-prompt action-verb sentence count threshold (issue #568)
 
 /** Called each time the Bulk Create tab becomes active. */
 function _bcInitTab() {
@@ -11856,6 +11877,7 @@ function bcClearDraft() {
 }
 
 function bcOnTextareaInput() {
+  _bcWarnDismissed = false;
   clearTimeout(_bcCounterTimer);
   _bcCounterTimer = setTimeout(_bcUpdateCounter, 200);
   _bcScheduleSaveDraft();
@@ -11961,8 +11983,29 @@ function _bcUpdateCounter() {
     }
   }
 
+  // Prompt-size warning (issue #568)
+  const warnEl = document.getElementById('bc-prompt-warn');
+  if (warnEl) {
+    const shouldWarn = !_bcWarnDismissed && prompts.some(
+      p => p.length > BC_PROMPT_WARN_CHARS || _bcCountAskSentences(p) >= BC_PROMPT_WARN_ASKS
+    );
+    warnEl.classList.toggle('hidden', !shouldWarn);
+  }
+
   // Refresh assignment dropdowns when ticket count changes
   if (_bcFiles.length > 0) _bcRenderFileQueue();
+}
+
+function _bcCountAskSentences(text) {
+  const sentences = text.split(/[.!?\n]+/).map(s => s.trim()).filter(s => s.length > 0);
+  const askRe = /\b(add|fix|create|update|remove)\b/i;
+  return sentences.filter(s => askRe.test(s)).length;
+}
+
+function bcDismissPromptWarn() {
+  _bcWarnDismissed = true;
+  const warnEl = document.getElementById('bc-prompt-warn');
+  if (warnEl) warnEl.classList.add('hidden');
 }
 
 // ── Prompt reorder list (issue #529) ────────────────────────────────────────

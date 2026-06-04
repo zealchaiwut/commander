@@ -5942,12 +5942,6 @@ async function _smgmtLoadEstimates(orderedLabels, bySprint) {
       );
       if (!resp.ok) continue;
       const data = await resp.json();
-      const estEl = document.getElementById(`smgmt-est-${label}`);
-      if (estEl && data.complete && data.total_hours !== null) {
-        const h = data.total_hours;
-        const display = Number.isInteger(h) ? `${h}h` : `${parseFloat(h.toFixed(1))}h`;
-        estEl.textContent = `${display} estimated`;
-      }
       // Cache per-issue size/confidence and update visible rows
       if (data.issues) {
         for (const [numStr, est] of Object.entries(data.issues)) {
@@ -5956,6 +5950,7 @@ async function _smgmtLoadEstimates(orderedLabels, bySprint) {
         for (const t of tickets) {
           _smgmtUpdateEstimateBadge(t.number);
         }
+        _smgmtUpdateColRollup(label, tickets);
       }
     } catch (_) {
       // fail silently — leave as "— estimated"
@@ -6798,6 +6793,7 @@ function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent) {
   let outcomeBadgeHtml = '';
   let ticketCount = tickets.length;
   let ticketsContainerHtml = '';
+  let rollupItems = tickets;
 
   if (outcome && (outcome.sprint_status || outcome.state)) {
     const meta = _smgmtStateMeta(outcome);
@@ -6813,6 +6809,7 @@ function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent) {
       const issueList = outcome.issues || [];
       ticketCount = issueList.length;
       ticketsContainerHtml = _smgmtOutcomeTicketListHtml(issueList, label, _smgmtRepo());
+      rollupItems = issueList.map(i => ({ number: i.number }));
     }
   } else {
     // Planning view ticket rows
@@ -6841,7 +6838,7 @@ function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent) {
           ${isNext ? '<span class="smgmt-next-badge" aria-label="Next up">NEXT UP</span>' : ''}
           ${outcomeBadgeHtml}
           ${parentLineage}
-          <span class="smgmt-sprint-count"><span id="smgmt-est-${escHtml(label)}" class="smgmt-sprint-est-val">— estimated</span> &middot; ${ticketCount} ticket${ticketCount !== 1 ? 's' : ''}</span>
+          <span class="smgmt-sprint-count" id="smgmt-col-rollup-${escHtml(label)}">${_smgmtRollupText(rollupItems)}</span>
         </div>
         <div class="smgmt-sprint-header-right">
           <button class="smgmt-finish-btn ${finishHidden}" ${finishDisabled}
@@ -6947,7 +6944,7 @@ function _smgmtRunningCardHtml(label, n, tickets) {
           <span class="smgmt-running-badge" id="smgmt-running-badge-${escHtml(label)}">
             <span class="smgmt-running-badge-dot"></span>${totalCount > 0 ? `${doneCount + skippedCount}/${totalCount}` : '—'}
           </span>
-          <span class="smgmt-sprint-count"><span id="smgmt-est-${escHtml(label)}" class="smgmt-sprint-est-val">— estimated</span> &middot; ${sourceTickets.length} ticket${sourceTickets.length !== 1 ? 's' : ''}</span>
+          <span class="smgmt-sprint-count" id="smgmt-col-rollup-${escHtml(label)}">${_smgmtRollupText(sourceTickets)}</span>
         </div>
         <div class="smgmt-sprint-header-right">
           <button class="smgmt-delete-btn" disabled title="Cancel sprint first">
@@ -7064,6 +7061,40 @@ function _fmtTicketElapsed(secs) {
 /** Return canonical minutes for a size letter (S/M/L/XL). Returns 0 for unknown. */
 function _sizeMinutes(letter) {
   return {S: 5, M: 15, L: 30, XL: 60}[letter] || 0;
+}
+
+/** Compute rollup text for a sprint column header.
+ *  items: array of {number, labels?:[{name}], size?} — size from cache takes priority over label. */
+function _smgmtRollupText(items) {
+  const count = items.length;
+  if (count === 0) return '0 tickets';
+  let totalMins = 0, unestimated = 0;
+  for (const t of items) {
+    const cached = _estDataCache[t.number];
+    let size = (cached && cached.size) ? cached.size : (t.size || null);
+    if (!size && t.labels) {
+      for (const lbl of t.labels) {
+        const m = /^size-([SMLX]+)$/.exec(lbl.name || '');
+        if (m) { size = m[1]; break; }
+      }
+    }
+    const mins = size ? _sizeMinutes(size) : 0;
+    if (mins > 0) totalMins += mins;
+    else unestimated++;
+  }
+  const countStr = `${count} ticket${count !== 1 ? 's' : ''}`;
+  if (unestimated === count) return `${countStr}, no estimates`;
+  const h = totalMins / 60;
+  const timeStr = h < 1
+    ? `~${totalMins}m`
+    : `~${parseFloat((Math.round(h * 10) / 10).toFixed(1))}h`;
+  return `${timeStr}, ${countStr}${unestimated > 0 ? ` (${unestimated} unestimated)` : ''}`;
+}
+
+/** Update the rollup span for a sprint column in-place. */
+function _smgmtUpdateColRollup(label, items) {
+  const el = document.getElementById(`smgmt-col-rollup-${label}`);
+  if (el) el.textContent = _smgmtRollupText(items);
 }
 
 /** CSS class for agent role tag: purple for coder-class, amber for tester-class. */
@@ -7486,6 +7517,13 @@ async function _smgmtReEstimateRun(issueNum, rowBtn) {
     // Update estimate cache and refresh kanban column rollups
     _estDataCache[issueNum] = Object.assign({}, _estDataCache[issueNum] || {}, { size: data.size });
     _ticketsUpdateGroupHeaders();
+    if (_smgmtData) {
+      const iss = _smgmtData.issues.find(i => i.number === issueNum);
+      if (iss && iss.sprint_label) {
+        const sprintTickets = _smgmtData.issues.filter(i => i.sprint_label === iss.sprint_label);
+        _smgmtUpdateColRollup(iss.sprint_label, sprintTickets);
+      }
+    }
   } catch (err) {
     // Restore row button
     if (rowSpinner) rowSpinner.replaceWith(_makeReEstimateBtn(issueNum));

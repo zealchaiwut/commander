@@ -2778,6 +2778,16 @@
     }
     .smgmt-risk-flag-icon:focus-visible { outline: 2px solid var(--blue); outline-offset: 1px; border-radius: 2px; }
     [data-theme="dark"] .smgmt-risk-flag-icon { color: #fbbf24; }
+    .smgmt-conflict-badge {
+      flex-shrink: 0; display: inline-flex; align-items: center; gap: 3px;
+      font-size: 11px; font-weight: 600; padding: 1px 5px; border-radius: 3px;
+      background: var(--red-bg, #fef2f2); color: var(--red, #dc2626);
+      border: 1px solid color-mix(in srgb, var(--red, #dc2626) 30%, transparent);
+      cursor: pointer; white-space: nowrap;
+    }
+    .smgmt-conflict-badge:hover { filter: brightness(1.05); }
+    .smgmt-conflict-badge:focus-visible { outline: 2px solid var(--blue); outline-offset: 1px; border-radius: 3px; }
+    [data-theme="dark"] .smgmt-conflict-badge { background: rgba(220,38,38,.15); color: #f87171; }
     .smgmt-est-popover {
       position: fixed; z-index: 9998;
       background: var(--surface); border: 1px solid var(--border);
@@ -6829,6 +6839,9 @@ function _smgmtRender(data) {
   // Inject pre-flight check banners for non-running sprint panes (issue #434)
   _preflightLoadBanners(orderedLabels, bySprint);
 
+  // Load file-conflict badges for pending tickets (issue #579)
+  _smgmtLoadConflicts(orderedLabels, bySprint);
+
   // Update cleanup button visibility (issue #457)
   _smgmtUpdateCleanupBtn(data);
 
@@ -7253,6 +7266,100 @@ function _smgmtRiskFlagIconsHtml(issueNum) {
     .map(f => `<span class="smgmt-risk-flag-icon" tabindex="0" role="img"
       aria-label="${escHtml(f)}" title="${escHtml(f)}"><i class="ti ti-alert-triangle"></i></span>`)
     .join('');
+}
+
+// ── File-conflict detection (issue #579) ──────────────────────────────────────
+// Keyed by issue number → array of {partnerId, partnerTitle, sharedFiles}
+const _smgmtConflictsByIssue = {};
+
+function _smgmtConflictBadgeHtml(issueNum) {
+  const entries = _smgmtConflictsByIssue[issueNum];
+  if (!entries || entries.length === 0) return '';
+  const partners = entries.map(e => `#${e.partnerId}`).join(', ');
+  const files = [...new Set(entries.flatMap(e => e.sharedFiles))];
+  const tip = `Overlaps with ${partners}: ${files.join(', ')}`;
+  return `<button class="smgmt-conflict-badge" tabindex="0" title="${escHtml(tip)}"
+    onclick="event.stopPropagation();_smgmtShowConflictPopover(event,${issueNum})"
+    onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();_smgmtShowConflictPopover(event,${issueNum});}">
+    <i class="ti ti-git-merge"></i>${entries.length > 1 ? entries.length + ' conflicts' : '1 conflict'}</button>`;
+}
+
+function _smgmtUpdateConflictBadge(issueNum) {
+  const row = document.getElementById(`smgmt-ticket-${issueNum}`);
+  if (!row) return;
+  row.querySelector('.smgmt-conflict-badge')?.remove();
+  const entries = _smgmtConflictsByIssue[issueNum];
+  if (!entries || entries.length === 0) return;
+  const badge = document.createElement('button');
+  badge.className = 'smgmt-conflict-badge';
+  const partners = entries.map(e => `#${e.partnerId}`).join(', ');
+  const files = [...new Set(entries.flatMap(e => e.sharedFiles))];
+  badge.title = `Overlaps with ${partners}: ${files.join(', ')}`;
+  badge.tabIndex = 0;
+  badge.innerHTML = `<i class="ti ti-git-merge"></i>${entries.length > 1 ? entries.length + ' conflicts' : '1 conflict'}`;
+  badge.onclick = (ev) => { ev.stopPropagation(); _smgmtShowConflictPopover(ev, issueNum); };
+  badge.onkeydown = (ev) => {
+    if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); ev.stopPropagation(); _smgmtShowConflictPopover(ev, issueNum); }
+  };
+  const statusEl = row.querySelector('.smgmt-ticket-status');
+  if (statusEl) statusEl.before(badge);
+  else row.appendChild(badge);
+}
+
+function _smgmtShowConflictPopover(ev, issueNum) {
+  const entries = _smgmtConflictsByIssue[issueNum] || [];
+  if (!entries.length) return;
+  const existing = document.getElementById('smgmt-conflict-popover');
+  if (existing && existing._issueNum === issueNum) { existing.remove(); return; }
+  if (existing) existing.remove();
+  const pop = document.createElement('div');
+  pop.id = 'smgmt-conflict-popover';
+  pop._issueNum = issueNum;
+  pop.style.cssText = 'position:fixed;z-index:9999;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:12px 14px;box-shadow:0 4px 20px rgba(0,0,0,.18);max-width:340px;font-size:12px;';
+  const lines = entries.map(e =>
+    `<div style="margin-bottom:6px"><strong>#${e.partnerId}</strong> ${escHtml(e.partnerTitle)}<br>` +
+    `<span style="color:var(--text-muted)">Shared: ${e.sharedFiles.map(f => `<code style="font-size:11px">${escHtml(f)}</code>`).join(', ')}</span></div>`
+  ).join('');
+  pop.innerHTML = `<div style="font-weight:700;margin-bottom:8px;color:var(--red,#dc2626)">File conflicts for #${issueNum}</div>${lines}`;
+  document.body.appendChild(pop);
+  const rect = ev.target.getBoundingClientRect();
+  const popH = 200, popW = 340;
+  const top = rect.bottom + 4 + popH > window.innerHeight ? rect.top - popH - 4 : rect.bottom + 4;
+  const left = Math.min(rect.left, window.innerWidth - popW - 8);
+  pop.style.top = `${top}px`;
+  pop.style.left = `${Math.max(8, left)}px`;
+  const dismiss = (e) => { if (!pop.contains(e.target)) { pop.remove(); document.removeEventListener('click', dismiss, true); } };
+  setTimeout(() => document.addEventListener('click', dismiss, true), 0);
+}
+
+async function _smgmtLoadConflicts(orderedLabels, bySprint) {
+  const repo = _smgmtRepo();
+  if (!repo) return;
+  for (const label of orderedLabels) {
+    if (_smgmtRunningLabels.has(label)) continue;
+    if (_smgmtFinishedLabels.has(label)) continue;
+    const tickets = bySprint[label] || [];
+    const pending = tickets.filter(t => (t.status || 'backlog') === 'backlog');
+    if (pending.length < 2) continue;
+    // Clear stale entries for this sprint's tickets before repopulating
+    for (const t of pending) delete _smgmtConflictsByIssue[t.number];
+    try {
+      const resp = await fetch(
+        `/api/sprints/${encodeURIComponent(label)}/conflicts?project=${encodeURIComponent(repo)}`
+      );
+      if (!resp.ok) continue;
+      const data = await resp.json();
+      for (const c of (data.conflicts || [])) {
+        if (!_smgmtConflictsByIssue[c.ticket1_id]) _smgmtConflictsByIssue[c.ticket1_id] = [];
+        if (!_smgmtConflictsByIssue[c.ticket2_id]) _smgmtConflictsByIssue[c.ticket2_id] = [];
+        _smgmtConflictsByIssue[c.ticket1_id].push({ partnerId: c.ticket2_id, partnerTitle: c.ticket2_title, sharedFiles: c.shared_files });
+        _smgmtConflictsByIssue[c.ticket2_id].push({ partnerId: c.ticket1_id, partnerTitle: c.ticket1_title, sharedFiles: c.shared_files });
+      }
+      for (const t of pending) _smgmtUpdateConflictBadge(t.number);
+    } catch (_) {
+      // fail silently
+    }
+  }
 }
 
 async function _smgmtLoadGoals(orderedLabels) {
@@ -8802,6 +8909,7 @@ function _smgmtTicketRowHtml(ticket, label) {
          onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();_smgmtReEstimate(${ticket.number},this);}">Re-estimate</button>`
     : '';
   const riskFlagIconsHtml = _smgmtRiskFlagIconsHtml(ticket.number);
+  const conflictBadgeHtml = _smgmtConflictBadgeHtml(ticket.number);
 
   const ticketLabelNames = (ticket.labels || []).map(l => l.name).join(',');
 
@@ -8827,7 +8935,7 @@ function _smgmtTicketRowHtml(ticket, label) {
       <a class="smgmt-ticket-num" href="${escHtml(ticket.url || '#')}" target="_blank"
          rel="noopener" draggable="false" onclick="event.stopPropagation()">#${ticket.number}</a>
       <span class="smgmt-ticket-title" title="${escHtml(ticket.title)}">${escHtml(ticket.title)}</span>
-      ${sizePillHtml}${estimateBadgeHtml}${riskFlagIconsHtml}${reEstBtnHtml}
+      ${sizePillHtml}${estimateBadgeHtml}${riskFlagIconsHtml}${conflictBadgeHtml}${reEstBtnHtml}
       <span class="smgmt-ticket-status ${statusClass}">${escHtml(statusLabel)}</span>
       <button class="btn-view-log" tabindex="0" title="View issue log"
               onclick="event.stopPropagation();openLvIssueLog(${ticket.number},'${escHtml(label)}',_smgmtRepo()||'')">

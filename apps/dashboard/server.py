@@ -3855,6 +3855,70 @@ def get_sprint_cycle_check(sprint_label: str, project: str):
     return {"has_cycle": False}
 
 
+@app.get("/api/sprints/{sprint_label}/conflicts")
+def get_sprint_conflicts(sprint_label: str, project: str):
+    """Return all pairs of pending tickets in a sprint that share at least one file path.
+
+    Pending = issues with no in-progress/sit/uat/done label (i.e. backlog status).
+    File paths are sourced from .commander/estimates/issue-<N>.json files_likely_affected.
+
+    Returns {"conflicts": [...], "pending_count": N} on success.
+    Returns 404 when no issues with sprint_label exist.
+    """
+    if not _SPRINT_LABEL_RE.match(sprint_label):
+        raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")
+
+    try:
+        all_issues = github_client.list_open_issues_with_body(repo_name=project, limit=200)
+    except subprocess.CalledProcessError as e:
+        raise _gh_error(e)
+
+    sprint_issues = [
+        iss for iss in all_issues
+        if any(lbl["name"] == sprint_label for lbl in iss.get("labels", []))
+    ]
+
+    if not sprint_issues:
+        raise HTTPException(404, detail=f"Sprint {sprint_label!r} not found")
+
+    pending_issues = [
+        iss for iss in sprint_issues
+        if github_client.classify_issue(iss) == "backlog"
+    ]
+
+    project_root = _project_root_path(project)
+    estimates_dir = _commander_dir(project_root) / "estimates"
+
+    ticket_files: list[dict] = []
+    for iss in pending_issues:
+        num = iss["number"]
+        files: list[str] = []
+        est_path = estimates_dir / f"issue-{num}.json"
+        if est_path.exists():
+            try:
+                est = json.loads(est_path.read_text(encoding="utf-8"))
+                files = est.get("files_likely_affected") or []
+            except (json.JSONDecodeError, OSError):
+                pass
+        ticket_files.append({"id": num, "title": iss["title"], "files": set(files)})
+
+    conflicts = []
+    for i in range(len(ticket_files)):
+        for j in range(i + 1, len(ticket_files)):
+            a, b = ticket_files[i], ticket_files[j]
+            shared = sorted(a["files"] & b["files"])
+            if shared:
+                conflicts.append({
+                    "ticket1_id": a["id"],
+                    "ticket1_title": a["title"],
+                    "ticket2_id": b["id"],
+                    "ticket2_title": b["title"],
+                    "shared_files": shared,
+                })
+
+    return {"conflicts": conflicts, "pending_count": len(pending_issues)}
+
+
 def _check_estimate_stale(issue_num: int, current_body: str, estimates_dir) -> bool:
     """Return True if the stored estimate is stale (body changed or hash missing).
 

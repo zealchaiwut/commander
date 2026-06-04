@@ -1118,7 +1118,9 @@ class HangDetector:
     issue_num: int
     log_path:  Optional[Path]
     proc:      subprocess.Popen
+    max_total_secs: Optional[int] = None  # hard wall-clock cap (None = disabled)
 
+    _start_time:   float = field(default_factory=time.monotonic, init=False)
     _last_size:    int   = field(default=0, init=False)
     _last_change:  float = field(default_factory=time.monotonic, init=False)
     _warned:       bool  = field(default=False, init=False)
@@ -1127,6 +1129,7 @@ class HangDetector:
     _killed:       bool  = field(default=False, init=False)
 
     def start(self) -> None:
+        self._start_time  = time.monotonic()
         self._last_change = time.monotonic()
         self._last_size   = self._log_size()
         self._thread      = threading.Thread(target=self._loop, daemon=True)
@@ -1151,6 +1154,20 @@ class HangDetector:
             self._stop_event.wait(timeout=HANG_CHECK_SECS)
             if self._stop_event.is_set():
                 break
+
+            # Hard wall-clock timeout (used by documenter for ≤5 min budget)
+            if self.max_total_secs is not None:
+                total_elapsed = time.monotonic() - self._start_time
+                if total_elapsed >= self.max_total_secs:
+                    structured_log.error("subprocess_timeout", f"subprocess exceeded {self.max_total_secs}s wall-clock limit — KILLING", issue_num=self.issue_num, timeout_secs=self.max_total_secs)
+                    try:
+                        self.proc.kill()
+                    except ProcessLookupError:
+                        pass
+                    self._killed = True
+                    self._stop_event.set()
+                    return
+
             size = self._log_size()
             if size != self._last_size:
                 self._last_size   = size
@@ -3523,7 +3540,7 @@ For each doc file that needs updating:
 If you made any doc changes, stage and commit them:
 ```
 git add <doc files changed>
-git commit -m "docs: update docs for sprint {sprint_label} (auto-documenter)"
+git commit -m "docs: auto-update from sprint-{sprint_label} diff"
 ```
 
 Then print a line in this exact format so sprint_manager can parse it:
@@ -3552,11 +3569,13 @@ def _dispatch_documenter(
     head_sha: str,
     cfg: Optional["SprintConfig"],
     repo_name: Optional[str],
+    timeout_secs: int = 300,
 ) -> None:
     """Dispatch the documenter agent after write_sprint_summary() and before _create_sprint_pr().
 
     Updates state.documenter_status, state.documenter_files_touched, and
-    state.documenter_commit_sha in-place. Does NOT raise — failure is advisory.
+    state.documenter_commit_sha in-place. Raises RuntimeError on failure so the
+    sprint pipeline fails loudly (AC6).
     """
     # Skip: nothing merged this sprint
     merged = [i for i in state.issues if i.status == "done"]
@@ -3657,25 +3676,28 @@ def _dispatch_documenter(
                 env=sub_env,
             )
     except FileNotFoundError:
-        structured_log.warn("claude_cli_not_found", "[documenter] claude CLI not found — skipping", subprocess="documenter")
-        state.documenter_status = "skipped"
-        return
+        state.documenter_status = "failed"
+        raise RuntimeError("[documenter] claude CLI not found — cannot run documenter (AC6)")
 
-    # Use HangDetector with issue_num=0 as a sentinel for the documenter
-    detector = HangDetector(issue_num=0, log_path=log_path, proc=proc)
+    # 5-minute wall-clock cap (AC7) via max_total_secs
+    detector = HangDetector(issue_num=0, log_path=log_path, proc=proc, max_total_secs=timeout_secs)
     detector.start()
     rc = proc.wait()
     detector.stop()
 
     if detector.killed:
-        structured_log.warn("subprocess_killed", "[documenter] documenter hung and was killed", subprocess="documenter")
         state.documenter_status = "failed"
-        return
+        raise RuntimeError(
+            f"[documenter] documenter exceeded {timeout_secs}s wall-clock limit and was killed"
+            f" — check {log_path} for details (AC6, AC7)"
+        )
 
     if rc != 0:
-        structured_log.error("subprocess_nonzero_exit", f"[documenter] documenter exited with code {rc}", subprocess="documenter", exit_code=rc)
         state.documenter_status = "failed"
-        return
+        raise RuntimeError(
+            f"[documenter] documenter exited with code {rc}"
+            f" — check {log_path} for details (AC6)"
+        )
 
     # Parse exit line: "Documenter complete: <files or 'none'>"
     files_touched: list[str] = []
@@ -3703,6 +3725,18 @@ def _dispatch_documenter(
                 doc_commit_sha = r.stdout.strip()
         except Exception:
             pass
+
+        # Push the doc commit to remote so it's included in the sprint PR (AC3)
+        print(f"  [documenter] Pushing doc commit to {sprint_branch} ...", flush=True)
+        push_r = subprocess.run(
+            ["git", "push", "origin", sprint_branch],
+            cwd=str(cwd_path), capture_output=True, text=True, check=False,
+        )
+        if push_r.returncode != 0:
+            state.documenter_status = "failed"
+            raise RuntimeError(
+                f"[documenter] git push failed (rc={push_r.returncode}): {push_r.stderr.strip()} (AC3, AC6)"
+            )
 
     state.documenter_status        = "succeeded"
     state.documenter_files_touched = files_touched
@@ -5264,19 +5298,22 @@ def main() -> None:
                 cfg           = cfg,
                 repo_name     = eff_repo,
             )
-            # Persist documenter outcome into the state JSON
-            if state_path_doc.exists():
-                try:
-                    sd3 = json.loads(state_path_doc.read_text())
-                    sd3["documenter_status"]        = state.documenter_status
-                    sd3["documenter_files_touched"] = state.documenter_files_touched
-                    sd3["documenter_commit_sha"]    = state.documenter_commit_sha
-                    state_path_doc.write_text(json.dumps(sd3, indent=2))
-                except Exception as e_persist:
-                    structured_log.warn("documenter_state_persist_failed", f"could not persist documenter outcome: {e_persist}", exc=str(e_persist))
-        except Exception as e_doc:
-            structured_log.warn("documenter_error", f"documenter raised unexpectedly: {e_doc}", exc=str(e_doc))
-            state.documenter_status = "failed"
+        except RuntimeError as e_doc:
+            # AC6: documenter errors must fail the pipeline loudly, not silently skip
+            structured_log.error("documenter_failed", f"documenter failed: {e_doc}", exc=str(e_doc))
+            print(f"\n[ERROR] Documenter failed: {e_doc}", flush=True)
+            raise
+
+        # Persist documenter outcome into the state JSON
+        if state_path_doc.exists():
+            try:
+                sd3 = json.loads(state_path_doc.read_text())
+                sd3["documenter_status"]        = state.documenter_status
+                sd3["documenter_files_touched"] = state.documenter_files_touched
+                sd3["documenter_commit_sha"]    = state.documenter_commit_sha
+                state_path_doc.write_text(json.dumps(sd3, indent=2))
+            except Exception as e_persist:
+                structured_log.warn("documenter_state_persist_failed", f"could not persist documenter outcome: {e_persist}", exc=str(e_persist))
 
     # AC6, AC7: auto-create PR sprint/sprint-N → develop at sprint end,
     # but only when we were running in sprint-branch mode (not manual 'develop' override)

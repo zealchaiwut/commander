@@ -85,7 +85,7 @@ Prepend the new sprint section ABOVE any existing entries. Never duplicate. If a
 One commit, one push:
 
     git add -A
-    git commit -m "docs: update for sprint-9" -m "Files changed:
+    git commit -m "docs: auto-update from sprint-9 diff" -m "Files changed:
     - CHANGELOG.md (new section for sprint-9)
     - README.md (API table for new endpoint)
     - docs/SCHEMA.md (added daily_metrics table)"

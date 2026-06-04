@@ -2211,6 +2211,7 @@
     }
     .ac-tpl-btn:hover { background: var(--surface-hover); color: var(--text); border-color: var(--blue); }
     .ac-tpl-btn.has-default { color: var(--blue); border-color: color-mix(in srgb, var(--blue) 30%, transparent); background: var(--blue-bg); }
+    .uat-tpl-btn.has-default { color: #059669; border-color: color-mix(in srgb, #059669 30%, transparent); background: color-mix(in srgb, #059669 10%, transparent); }
     .ac-tpl-btn:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
     .ac-tpl-menu {
       position: absolute; top: calc(100% + 4px); left: 0; z-index: 700;
@@ -4188,7 +4189,13 @@
                 </button>
               </div>
             </div>
-            <span class="bc-ac-global-label">Appends AC scaffold to each ticket prompt</span>
+            <button type="button" class="ac-tpl-btn uat-tpl-btn" id="bc-uat-tpl-btn"
+                    aria-label="Insert UAT Steps template into prompts"
+                    title="Insert UAT Steps template"
+                    onclick="bcUatTplInsert()">
+              <i class="ti ti-checklist"></i> Insert UAT Template
+            </button>
+            <span class="bc-ac-global-label">Appends scaffold to each ticket prompt</span>
           </div>
 
           <textarea class="bc-textarea" id="bc-textarea"
@@ -4291,7 +4298,8 @@
             </label>
             <button type="button" class="bc-bulk-btn" onclick="bcDeselectAll()">Deselect all</button>
             <button type="button" class="bc-bulk-btn bc-select-failed-btn hidden" id="bc-select-failed-btn" onclick="bcSelectFailed()">Select failed</button>
-            <div class="ac-tpl-wrap" id="bc-bulk-ac-tpl-wrap" style="margin-left:auto">
+            <div style="display:flex;align-items:center;gap:6px;margin-left:auto">
+            <div class="ac-tpl-wrap" id="bc-bulk-ac-tpl-wrap">
               <button type="button" class="ac-tpl-btn" id="bc-bulk-ac-tpl-btn"
                       aria-haspopup="true" aria-expanded="false"
                       aria-label="Apply AC template to all draft tickets"
@@ -4317,6 +4325,13 @@
                   </span>
                 </button>
               </div>
+            </div>
+            <button type="button" class="ac-tpl-btn uat-tpl-btn" id="bc-bulk-uat-tpl-btn"
+                    aria-label="Apply UAT Steps template to all draft tickets"
+                    title="Apply UAT Steps template to all draft tickets"
+                    onclick="bcBulkUatTplInsert()">
+              <i class="ti ti-checklist"></i> Apply UAT to all drafts
+            </button>
             </div>
           </div>
 
@@ -12762,6 +12777,11 @@ function _bcRenderCard(t) {
                 </button>
               </div>
             </div>
+            <button type="button" class="ac-tpl-btn uat-tpl-btn" id="bc-card-uat-btn-${t.index}"
+                    aria-label="Insert UAT Steps template into this ticket"
+                    onclick="bcCardUatTplInsert(${t.index})">
+              <i class="ti ti-checklist"></i> UAT template
+            </button>
             <button class="bc-btn-remove-row" onclick="bcRemoveRow(${t.index})" title="Remove this draft">Remove</button>
           </div>
         </div>
@@ -14256,6 +14276,67 @@ function _cmpEmptyState(title, msg) {
 
 // ── AC Template Picker (issue #567) ───────────────────────────────────────
 
+const _UAT_TEMPLATE =
+`## UAT Test Steps
+
+1. *[step description]*
+   **Expected:** *[expected outcome]*
+2. *[step description]*
+   **Expected:** *[expected outcome]*`;
+
+const _UAT_BLOCK_RE = /##\s*uat test steps/i;
+
+function _uatHasBlock(text) { return _UAT_BLOCK_RE.test(text); }
+
+function _uatInsert(textareaId, btnId) {
+  const textarea = document.getElementById(textareaId);
+  if (!textarea) return;
+  if (_uatHasBlock(textarea.value)) {
+    if (!confirm('This body already contains a UAT Test Steps block. Insert another one?')) return;
+  }
+  _acInsertAtCursor(textarea, _UAT_TEMPLATE);
+  if (btnId) {
+    const btn = document.getElementById(btnId);
+    if (btn) {
+      btn.innerHTML = `<i class="ti ti-checklist"></i> UAT Template <span style="font-size:10px;opacity:.6">(inserted)</span>`;
+      btn.classList.add('has-default');
+    }
+  }
+  textarea.focus();
+}
+
+function ntUatTplInsert() { _uatInsert('nt-body', 'nt-uat-tpl-btn'); }
+
+function bcUatTplInsert() { _uatInsert('bc-textarea', 'bc-uat-tpl-btn'); }
+
+function bcBulkUatTplInsert() {
+  if (!_bcJobState) return;
+  const tickets = (_bcJobState.tickets || []).filter(
+    t => t.state === 'draft_ready' && !_bcRemovedRows.has(t.index)
+  );
+  if (tickets.length === 0) return;
+  const anyHasBlock = tickets.some(t => {
+    const el = document.getElementById(`bc-draft-body-${t.index}`);
+    return el && _uatHasBlock(el.value);
+  });
+  if (anyHasBlock) {
+    if (!confirm(`One or more drafts already contain a UAT Test Steps block. Apply UAT template to all ${tickets.length} drafts anyway?`)) return;
+  }
+  tickets.forEach(t => {
+    const el = document.getElementById(`bc-draft-body-${t.index}`);
+    if (el) _acInsertAtCursor(el, _UAT_TEMPLATE);
+  });
+  const btn = document.getElementById('bc-bulk-uat-tpl-btn');
+  if (btn) {
+    btn.innerHTML = `<i class="ti ti-checklist"></i> UAT applied <span style="font-size:10px;opacity:.6">(all)</span>`;
+    btn.classList.add('has-default');
+  }
+}
+
+function bcCardUatTplInsert(index) {
+  _uatInsert(`bc-draft-body-${index}`, `bc-card-uat-btn-${index}`);
+}
+
 const _acTplTemplates = {
   gwt:
 `## Acceptance Criteria
@@ -14733,7 +14814,8 @@ document.addEventListener('keydown', function(e) {
       <div class="modal-field">
         <div class="ac-tpl-toolbar">
           <label class="modal-label" for="nt-body" style="margin:0">Body <span class="modal-hint" style="font-weight:normal;color:var(--text-muted)">(edit before posting)</span></label>
-          <div class="ac-tpl-wrap" id="nt-ac-tpl-wrap" style="margin-left:auto">
+          <div style="display:flex;align-items:center;gap:6px;margin-left:auto">
+          <div class="ac-tpl-wrap" id="nt-ac-tpl-wrap">
             <button type="button" class="ac-tpl-btn" id="nt-ac-tpl-btn"
                     aria-haspopup="true" aria-expanded="false"
                     aria-label="Insert AC template (Ctrl+Shift+A)"
@@ -14759,6 +14841,13 @@ document.addEventListener('keydown', function(e) {
                 </span>
               </button>
             </div>
+          </div>
+          <button type="button" class="ac-tpl-btn uat-tpl-btn" id="nt-uat-tpl-btn"
+                  aria-label="Insert UAT Steps template"
+                  title="Insert UAT Steps template"
+                  onclick="ntUatTplInsert()">
+            <i class="ti ti-checklist"></i> Insert UAT Template
+          </button>
           </div>
         </div>
         <textarea class="modal-input nt-body-textarea" id="nt-body" rows="10"

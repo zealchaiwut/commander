@@ -2686,6 +2686,50 @@
     }
     .bc-textarea:focus { border-color: var(--blue); }
 
+    /* Prompt Tips (issue #572) */
+    .bc-tips-toggle {
+      display: flex; align-items: center; gap: 6px;
+      padding: 6px 28px; width: 100%; text-align: left;
+      background: none; border: none; border-bottom: 1px solid var(--border);
+      font-family: inherit; font-size: 12px;
+      color: var(--text-muted); cursor: pointer;
+    }
+    .bc-tips-toggle:hover { color: var(--text); background: var(--surface-hover); }
+    .bc-tips-toggle:focus-visible { outline: 2px solid var(--blue); outline-offset: -2px; }
+    .bc-tips-toggle-chevron { transition: transform 0.2s ease; font-size: 13px; }
+    .bc-tips-toggle[aria-expanded="true"] .bc-tips-toggle-chevron { transform: rotate(90deg); }
+    .bc-tips-panel {
+      overflow: hidden; max-height: 0;
+      transition: max-height 0.25s ease;
+    }
+    .bc-tips-panel.open { max-height: 600px; }
+    .bc-tips-panel-inner {
+      padding: 12px 28px 16px;
+      display: grid; grid-template-columns: 1fr 1fr; gap: 12px;
+      border-bottom: 1px solid var(--border);
+    }
+    @media (max-width: 480px) {
+      .bc-tips-panel-inner { grid-template-columns: 1fr; }
+    }
+    .bc-tips-example {
+      border: 1px solid var(--border); border-radius: 6px;
+      padding: 10px 12px; background: var(--surface-2);
+    }
+    .bc-tips-example-label {
+      font-size: 11px; font-weight: 700; margin: 0 0 6px;
+      display: flex; align-items: center; gap: 4px;
+    }
+    .bc-tips-example--bad .bc-tips-example-label { color: var(--red); }
+    .bc-tips-example--good .bc-tips-example-label { color: var(--green); }
+    .bc-tips-example-text {
+      font-family: var(--mono); font-size: 11px;
+      color: var(--text); line-height: 1.5;
+      white-space: pre-wrap; word-break: break-word;
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 4px; padding: 6px 8px; margin: 0 0 6px;
+    }
+    .bc-tips-example-desc { font-size: 11px; color: var(--text-muted); line-height: 1.4; margin: 0; }
+
     /* Info note */
     .bc-info-note {
       padding: 8px 28px;
@@ -4256,6 +4300,30 @@
               <i class="ti ti-checklist"></i> Insert UAT Template
             </button>
             <span class="bc-ac-global-label">Appends scaffold to each ticket prompt</span>
+          </div>
+
+          <!-- Prompt Tips (issue #572) -->
+          <button type="button" class="bc-tips-toggle"
+                  id="bc-tips-toggle"
+                  aria-expanded="false"
+                  aria-controls="bc-tips-panel"
+                  onclick="_bcTipsToggle()">
+            <i class="ti ti-chevron-right bc-tips-toggle-chevron"></i>
+            &#9432; How to write a good prompt
+          </button>
+          <div class="bc-tips-panel" id="bc-tips-panel" role="region" aria-labelledby="bc-tips-toggle">
+            <div class="bc-tips-panel-inner">
+              <div class="bc-tips-example bc-tips-example--bad">
+                <div class="bc-tips-example-label">&#10007; Bad prompt</div>
+                <pre class="bc-tips-example-text">Add a button</pre>
+                <p class="bc-tips-example-desc">Too vague — no context, scope, or criteria for the BA to produce a useful ticket.</p>
+              </div>
+              <div class="bc-tips-example bc-tips-example--good">
+                <div class="bc-tips-example-label">&#10003; Good prompt</div>
+                <pre class="bc-tips-example-text">Add a "Mark all as done" button to the sprint board header. Clicking it sets every open ticket in the current sprint to UAT status. Show a confirmation dialog before applying. Only show the button when there are open tickets.</pre>
+                <p class="bc-tips-example-desc">Specific feature description with scope boundaries and enough context for the BA to write acceptance criteria.</p>
+              </div>
+            </div>
           </div>
 
           <textarea class="bc-textarea" id="bc-textarea"
@@ -11904,7 +11972,31 @@ function _bcInitTab() {
     _bcUpdateCounter();
     _bcTplRender();
     _lpRenderBc();
+    _bcTipsInit();
   }
+}
+
+/** Restore Prompt Tips collapsed/expanded state from sessionStorage. */
+function _bcTipsInit() {
+  if (sessionStorage.getItem('bcPromptTipsOpen') === '1') {
+    const btn = document.getElementById('bc-tips-toggle');
+    const panel = document.getElementById('bc-tips-panel');
+    if (btn && panel) {
+      btn.setAttribute('aria-expanded', 'true');
+      panel.classList.add('open');
+    }
+  }
+}
+
+/** Toggle the Prompt Tips help panel. */
+function _bcTipsToggle() {
+  const btn = document.getElementById('bc-tips-toggle');
+  const panel = document.getElementById('bc-tips-panel');
+  const open = btn.getAttribute('aria-expanded') === 'true';
+  const next = !open;
+  btn.setAttribute('aria-expanded', String(next));
+  panel.classList.toggle('open', next);
+  sessionStorage.setItem('bcPromptTipsOpen', next ? '1' : '0');
 }
 
 /** Populate the repo dropdown to the current project. */

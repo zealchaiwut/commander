@@ -4205,7 +4205,7 @@
               <button type="button" class="bc-stop-btn" id="bc-stop-btn" onclick="bcStop()">
                 <i class="ti ti-player-stop"></i> Stop after current
               </button>
-              <button type="button" class="btn-secondary hidden" id="bc-review-post-btn" onclick="bcReviewAndPost()">Review &amp; Post</button>
+              <button type="button" class="btn-primary hidden" id="bc-review-post-btn" onclick="bcReviewAndPost()">Review &amp; Post</button>
               <button type="button" class="btn-primary" id="bc-done-btn" disabled>Running...</button>
             </div>
           </div>
@@ -12263,12 +12263,15 @@ function _bcRenderStep2() {
       stopBtn.disabled = false;
       doneBtn.disabled = true;
       doneBtn.textContent = 'Running...';
+      doneBtn.classList.remove('hidden');
       if (recreateBtn)   recreateBtn.classList.add('hidden');
       if (reviewPostBtn) reviewPostBtn.classList.add('hidden');
     } else if (job.status === 'drafts_ready') {
+      // Drafts are generated — the primary action is now posting, so promote
+      // "Post Selected" to the primary button and drop the redundant
+      // "Running..." placeholder (it returns only while actually running).
       stopBtn.disabled = true;
-      doneBtn.disabled = true;
-      doneBtn.textContent = 'Running...';
+      doneBtn.classList.add('hidden');
       if (recreateBtn) recreateBtn.classList.add('hidden');
       if (reviewPostBtn) {
         const draftReadyTickets = tickets.filter(t => t.state === 'draft_ready' && !_bcRemovedRows.has(t.index));
@@ -12282,6 +12285,7 @@ function _bcRenderStep2() {
       doneBtn.disabled = false;
       doneBtn.textContent = 'Done';
       doneBtn.onclick = () => { _bcShowStep(1); };
+      doneBtn.classList.remove('hidden');
       if (recreateBtn)   recreateBtn.classList.remove('hidden');
       if (reviewPostBtn) reviewPostBtn.classList.add('hidden');
     }

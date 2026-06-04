@@ -36,7 +36,7 @@ _SIZING_DIR = Path(__file__).parent
 if str(_SIZING_DIR) not in sys.path:
     sys.path.insert(0, str(_SIZING_DIR))
 from sizing import minutes_from_letter as _minutes_from_letter
-from calibration import CalibrationResult, load_calibration, calibration_prompt_section
+from calibration import CalibrationResult, load_calibration, calibration_prompt_section, db_calibration_records
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -359,6 +359,7 @@ def main() -> None:
     p.add_argument("--save-comment", action="store_true", help="Post structured estimate as issue comment")
     p.add_argument("--save-label", action="store_true", help="Apply size-S/M/L/XL label to issue")
     p.add_argument("--force", action="store_true", help="Re-run estimator even if cached result exists")
+    p.add_argument("--calibration-sprint", default=None, help="Past sprint label to pull DB calibration records from")
     args = p.parse_args()
 
     # Mint or adopt run_id for this invocation
@@ -389,8 +390,13 @@ def main() -> None:
     estimates_dir.mkdir(parents=True, exist_ok=True)
     estimate_path = estimates_dir / f"issue-{args.issue}.json"
 
-    # Load calibration data (warns but does not fail if absent)
-    calibration = load_calibration(commander_dir)
+    # Load calibration data — prefer DB records when --calibration-sprint given.
+    _db_cal_records: list = []
+    if args.calibration_sprint:
+        _db_cal_records = db_calibration_records(args.calibration_sprint, estimates_dir)
+        if _db_cal_records:
+            print(f"Calibration (DB): {len(_db_cal_records)} records from sprint {args.calibration_sprint!r}")
+    calibration = load_calibration(commander_dir, db_records=_db_cal_records or None)
     for w in calibration.warnings:
         print(f"Warning [calibration]: {w}", file=sys.stderr)
     if calibration.calibration_path:

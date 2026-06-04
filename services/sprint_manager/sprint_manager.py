@@ -2541,11 +2541,27 @@ def generate_sprint_summary(
     skipped   = [i for i in state.issues if i.status == "skipped"]
     pending   = [i for i in state.issues if i.status == "pending"]
 
-    total_tokens     = state.total_tokens_in + state.total_tokens_out
+    # Prefer DB-backed rollup for per-ticket metrics; fall back to in-memory state.
+    _db_rollup: Optional[dict] = None
+    if _SPRINT_REPO_AVAILABLE and _sprint_repo is not None:
+        try:
+            _db_rollup = _sprint_repo.get_sprint_rollup(state.sprint_label)
+        except Exception:
+            _db_rollup = None
+
+    if _db_rollup is not None and _db_rollup["sum_tokens"] > 0:
+        total_tokens = _db_rollup["sum_tokens"]
+    else:
+        total_tokens = state.total_tokens_in + state.total_tokens_out
+
     # cost_estimate: all agents (coder, tester, preflight) run via Claude Code CLI
     # which is subscription-funded — no raw API charges.
     cost_estimate_usd = 0.0
-    avg_ticket_secs  = (elapsed_secs / len(completed)) if completed else 0
+
+    if _db_rollup is not None and _db_rollup["avg_elapsed_seconds"] is not None:
+        avg_ticket_secs = _db_rollup["avg_elapsed_seconds"]
+    else:
+        avg_ticket_secs = (elapsed_secs / len(completed)) if completed else 0
     avg_h, avg_r     = divmod(int(avg_ticket_secs), 3600)
     avg_m, avg_s     = divmod(avg_r, 60)
     avg_ticket_str   = f"{avg_h}h {avg_m}m {avg_s}s" if completed else "--"
@@ -4134,9 +4150,10 @@ def _neon_ticket_status(
     issue_number: int,
     neon_status: str,
     sprints_dir: Path,
+    total_tokens: int = 0,
 ) -> None:
     """Update a ticket's Neon status + patch the sprint JSON mirror."""
-    _neon_update("update_ticket_status", sprint_label, issue_number, neon_status)
+    _neon_update("update_ticket_status", sprint_label, issue_number, neon_status, total_tokens)
 
     json_path = _neon_sprint_json_path(sprint_label, sprints_dir)
     data = _neon_sprint_json_read(json_path)
@@ -4814,11 +4831,12 @@ def run_sprint(
         except Exception:
             pass
 
+        _issue_tokens = issue_state.tokens_in + issue_state.tokens_out
         if merged:
             issue_state.set_agent_status("completed")
             issue_state.status = "done"
             summary.merged.append(f"#{num}")
-            _neon_ticket_status(label, num, "done", _eff_sprints_dir)
+            _neon_ticket_status(label, num, "done", _eff_sprints_dir, total_tokens=_issue_tokens)
         else:
             category = gate_category or FailureCategory.CRASH
             issue_state.set_agent_status("failed")
@@ -4841,7 +4859,7 @@ def run_sprint(
             )
             if category in _LOGIC_FAILURE_CATEGORIES:
                 _transition_safe(num, _TicketState.NEEDS_REWORK, actor="sprint_manager", repo_name=eff_repo)
-            _neon_ticket_status(label, num, "failed", _eff_sprints_dir)
+            _neon_ticket_status(label, num, "failed", _eff_sprints_dir, total_tokens=_issue_tokens)
 
         elapsed = time.monotonic() - start_time
         state.wall_clock_secs = elapsed

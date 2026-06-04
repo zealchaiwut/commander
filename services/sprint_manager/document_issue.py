@@ -178,6 +178,59 @@ def _parse_json_output(raw: str) -> dict:
     return json.loads(stripped[start:end + 1])
 
 
+def _append_changelog_entry(
+    issue_num: int,
+    issue_title: str,
+    repo: str,
+    git_root: Path,
+    ship_date: Optional[str] = None,
+) -> bool:
+    """Prepend a new entry to CHANGELOG.md (newest-first). Returns True if modified."""
+    from datetime import date as _date
+
+    changelog = git_root / "CHANGELOG.md"
+    date_str = ship_date or _date.today().isoformat()
+    issue_url = f"https://github.com/{repo}/issues/{issue_num}"
+    entry_line = f"- [#{issue_num}]({issue_url}) {issue_title} — {date_str}\n"
+
+    if not changelog.exists():
+        changelog.write_text(f"# Changelog\n\n{entry_line}", encoding="utf-8")
+        print(f"  [documentor] created CHANGELOG.md with first entry for #{issue_num}")
+        return True
+
+    text = changelog.read_text(encoding="utf-8")
+
+    if f"[#{issue_num}](" in text:
+        print(f"  [documentor] CHANGELOG.md already has entry for #{issue_num} — skipping")
+        return False
+
+    lines = text.splitlines(keepends=True)
+
+    # Find line right after the top-level heading
+    insert_at = 0
+    for i, line in enumerate(lines):
+        if re.match(r"^# ", line):
+            insert_at = i + 1
+            break
+
+    # Skip blank lines to find first content after heading
+    content_start = insert_at
+    while content_start < len(lines) and lines[content_start].strip() == "":
+        content_start += 1
+
+    # Insert newest entry first
+    lines.insert(content_start, entry_line)
+
+    # Ensure a blank line separates from non-entry content that follows
+    next_idx = content_start + 1
+    if next_idx < len(lines) and lines[next_idx].strip() and not lines[next_idx].startswith("- [#"):
+        lines.insert(content_start + 1, "\n")
+
+    changelog.write_text("".join(lines), encoding="utf-8")
+    print(f"  [documentor] prepended CHANGELOG.md entry for #{issue_num}")
+    return True
+
+
 def _apply_change(file_path: Path, change: dict) -> bool:
     """Apply a single change dict to a file. Returns True if the file was modified."""
     change_type = change.get("type", "add_bullet")
@@ -260,8 +313,8 @@ def _apply_doc_changes(
 
 
 def _commit_doc_changes(issue_num: int, cwd: Path) -> None:
-    """Stage and commit README.md and CLAUDE.md changes to the feature branch."""
-    files = ["README.md", "CLAUDE.md"]
+    """Stage and commit README.md, CLAUDE.md, and CHANGELOG.md changes to the feature branch."""
+    files = ["README.md", "CLAUDE.md", "CHANGELOG.md"]
     staged = []
     for f in files:
         path = cwd / f
@@ -302,6 +355,7 @@ def run_documentor(
     mode: str = "both",
     skip_readme: bool = False,
     skip_uat_comment: bool = False,
+    skip_changelog: bool = False,
     git_root: Optional[Path] = None,
     base_branch: str = "develop",
 ) -> dict:
@@ -367,6 +421,8 @@ def run_documentor(
     print(f"  [documentor] output cached to {cache_path}")
 
     # Apply README / CLAUDE.md changes
+    readme_modified = False
+    claude_modified = False
     if mode in ("readme", "both") and not skip_readme:
         readme_modified = _apply_doc_changes(
             result.get("readme_changes", []),
@@ -378,8 +434,15 @@ def run_documentor(
             git_root / "CLAUDE.md",
             "CLAUDE.md",
         )
-        if readme_modified or claude_modified:
-            _commit_doc_changes(issue_num, cwd=git_root)
+
+    # Append CHANGELOG entry
+    changelog_modified = False
+    if not skip_changelog:
+        changelog_modified = _append_changelog_entry(issue_num, title, repo, git_root)
+
+    # Commit all doc changes together
+    if readme_modified or claude_modified or changelog_modified:
+        _commit_doc_changes(issue_num, cwd=git_root)
 
     # Post UAT comment
     if mode in ("uat", "both") and not skip_uat_comment:
@@ -401,6 +464,8 @@ def main() -> None:
                    help="Skip README/CLAUDE.md updates")
     p.add_argument("--skip-uat-comment", action="store_true",
                    help="Skip posting UAT comment to issue")
+    p.add_argument("--skip-changelog", action="store_true",
+                   help="Skip appending entry to CHANGELOG.md")
     p.add_argument("--mode", default="both", choices=["readme", "uat", "both"],
                    help="What to produce (default: both)")
     p.add_argument("--base-branch", default="develop",
@@ -428,13 +493,14 @@ def main() -> None:
         sys.exit("Must be run from inside a git repository.")
 
     result = run_documentor(
-        issue_num      = args.issue,
-        repo           = repo,
-        mode           = args.mode,
-        skip_readme    = args.skip_readme,
+        issue_num        = args.issue,
+        repo             = repo,
+        mode             = args.mode,
+        skip_readme      = args.skip_readme,
         skip_uat_comment = args.skip_uat_comment,
-        git_root       = git_root,
-        base_branch    = args.base_branch,
+        skip_changelog   = args.skip_changelog,
+        git_root         = git_root,
+        base_branch      = args.base_branch,
     )
 
     readme_count  = len(result.get("readme_changes", []))

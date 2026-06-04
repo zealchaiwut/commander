@@ -4065,6 +4065,12 @@
                      placeholder="enhancement, frontend" autocomplete="off" value="enhancement"
                      oninput="bcOnLabelsInput()">
             </div>
+            <div class="bc-settings-field">
+              <label class="bc-settings-label" for="bc-sprint">Sprint</label>
+              <select class="bc-select" id="bc-sprint">
+                <option value="">Backlog (no sprint)</option>
+              </select>
+            </div>
           </div>
 
           <div class="bc-counter-row">
@@ -4082,7 +4088,7 @@
           <div id="bc-dup-warning" class="bc-dup-warning hidden"></div>
 
           <div class="bc-info-note" id="bc-info-note">
-            Split prompts using <code>---</code> on its own line. All created tickets go to backlog &mdash; assign them to a sprint later via Sprint Mgmt.
+            Split prompts using <code>---</code> on its own line. Tickets are assigned to the Sprint selected above (or left in Backlog).
           </div>
 
           <!-- Prompt templates (issue #531) -->
@@ -11330,6 +11336,7 @@ function _bcPopulateRepo() {
     if (repo) {
       sel.innerHTML = `<option value="${escHtml(repo)}">${escHtml(_slug)}</option>`;
     }
+    _bcLoadSprints(sel.value);
     return;
   }
   // Build from _homeData if available, else fall back to cached repos
@@ -11349,6 +11356,7 @@ function _bcPopulateRepo() {
       return `<option value="${escHtml(repo)}"${selected}>${escHtml(slug)}</option>`;
     }).join('');
   }
+  _bcLoadSprints(sel.value);
 }
 
 function _bcShowStep(n) {
@@ -11377,6 +11385,44 @@ function _bcGoToStep1() {
 
 function bcRepoChanged() {
   _bcTplRender();
+  const sel = document.getElementById('bc-repo');
+  _bcLoadSprints(sel ? sel.value : '');
+}
+
+/** Populate the Sprint dropdown for the selected repo (issue: bulk-create sprint assignment).
+ *  Lists existing sprints (flagging empty ones) plus a "New sprint (N+1)" option. */
+async function _bcLoadSprints(repo) {
+  const sel = document.getElementById('bc-sprint');
+  if (!sel) return;
+  const prev = sel.value;
+  if (!repo) {
+    sel.innerHTML = '<option value="">Backlog (no sprint)</option>';
+    return;
+  }
+  try {
+    const resp = await fetch('/api/sprint-management/issues?repo=' + encodeURIComponent(repo));
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const data = await resp.json();
+    const sprints = (data.sprints || []).slice().sort((a, b) => a - b);
+    const counts = {};
+    (data.issues || []).forEach(i => {
+      if (i.sprint != null) counts[i.sprint] = (counts[i.sprint] || 0) + 1;
+    });
+    const placeholder = data.placeholder_sprint
+      || ((sprints.length ? Math.max(...sprints) : 0) + 1);
+    let html = '<option value="">Backlog (no sprint)</option>';
+    sprints.forEach(n => {
+      const c = counts[n] || 0;
+      const tag = c === 0 ? ' · empty' : ` · ${c} ticket${c !== 1 ? 's' : ''}`;
+      html += `<option value="sprint-${n}">Sprint ${n}${tag}</option>`;
+    });
+    html += `<option value="NEW">➕ New sprint (Sprint ${placeholder})</option>`;
+    sel.innerHTML = html;
+    // Preserve the prior choice across repo refreshes when still valid
+    if (prev && sel.querySelector(`option[value="${CSS.escape(prev)}"]`)) sel.value = prev;
+  } catch (_) {
+    sel.innerHTML = '<option value="">Backlog (no sprint)</option>';
+  }
 }
 
 // ── Prompt templates (issue #531) ────────────────────────────────────────────
@@ -11972,6 +12018,7 @@ async function bcRunAll() {
     formData.append('default_labels', JSON.stringify(uniqueLabels));
     formData.append('concurrency', String(concurrency));
     formData.append('assignments', JSON.stringify(assignments));
+    formData.append('sprint_label', (document.getElementById('bc-sprint') || {}).value || '');
     for (const f of _bcFiles) {
       formData.append('files', f);
     }
@@ -12857,6 +12904,20 @@ function bcReviewAndPost() {
   if (postBtn) {
     postBtn.disabled = selCount === 0;
     postBtn.textContent = selCount > 0 ? `Post ${selCount} to GitHub` : 'Post to GitHub';
+  }
+
+  // Reflect the batch's target sprint in the review header
+  const sprintVal = (document.getElementById('bc-sprint') || {}).value || '';
+  const subEl = document.querySelector('#bc-review-overlay .bc-review-sub');
+  if (subEl) {
+    let target = 'Backlog (no sprint)';
+    if (sprintVal === 'NEW') {
+      const opt = document.querySelector('#bc-sprint option[value="NEW"]');
+      target = opt ? opt.textContent.replace('➕ ', '') : 'a new sprint';
+    } else if (sprintVal) {
+      target = 'Sprint ' + sprintVal.replace('sprint-', '');
+    }
+    subEl.textContent = `Select which tickets to create → ${target}`;
   }
 
   const overlay = document.getElementById('bc-review-overlay');

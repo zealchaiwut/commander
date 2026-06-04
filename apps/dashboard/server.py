@@ -8041,6 +8041,7 @@ async def bulk_create_start(
     concurrency: int = Form(default=3),
     files: list[UploadFile] = File(default=[]),
     assignments: str = Form(default=""),
+    sprint_label: str = Form(default=""),
 ):
     """Start a bulk ticket creation job.
 
@@ -8066,6 +8067,13 @@ async def bulk_create_start(
                 raise ValueError("not a list")
         except (json.JSONDecodeError, ValueError):
             raise HTTPException(422, detail="'default_labels' must be a JSON array of strings")
+
+    # Validate sprint_label: "" (backlog), "NEW" (create next sprint at post
+    # time), or an existing "sprint-N" label. Resolved lazily on post so an
+    # abandoned draft never leaves a ghost sprint label behind.
+    sprint_label = (sprint_label or "").strip()
+    if sprint_label and sprint_label != "NEW" and not re.match(r"^sprint-\d+$", sprint_label):
+        raise HTTPException(422, detail="'sprint_label' must be empty, 'NEW', or 'sprint-N'")
 
     # Validate repo
     projects = projects_module.load_projects()
@@ -8186,6 +8194,7 @@ async def bulk_create_start(
         "status": "running",
         "repo": repo,
         "default_labels": default_labels_list,
+        "sprint_label": sprint_label,
         "allowed_labels": existing_label_names,
         "concurrency": concurrency,
         "created_at": now,
@@ -8484,6 +8493,43 @@ class BulkPostSelectedBody(BaseModel):
     tickets: list[BulkPostSelectedItem]
 
 
+_SPRINT_LABEL_RE = re.compile(r"^sprint-\d+$")
+
+
+def _resolve_bulk_sprint_label(sprint_label: str | None, repo: str | None) -> str:
+    """Resolve a bulk job's sprint selection to a concrete label.
+
+    "" → "" (backlog). "NEW" → create the next sprint-N label (max existing + 1)
+    and return it. A concrete "sprint-N" is returned unchanged. Returns "" if
+    sprint creation fails, so a failed lookup falls back to the backlog.
+    """
+    sprint_label = (sprint_label or "").strip()
+    if sprint_label != "NEW":
+        return sprint_label
+    try:
+        existing = github_client.list_sprints(repo_name=repo)
+        next_num = (max(existing) if existing else 0) + 1
+        github_client.ensure_sprint_label(next_num, repo_name=repo)
+        return f"sprint-{next_num}"
+    except Exception:
+        return ""
+
+
+def _compose_ticket_labels(sprint_label: str, item_labels: list[str]) -> list[str]:
+    """Build the GitHub label list for one bulk-created ticket.
+
+    A ticket assigned to a sprint gets ``[sprint_label, *extras]`` and skips the
+    ``backlog`` label — mirroring assign_sprint(), which removes ``backlog`` when
+    moving a ticket into a sprint. Otherwise it gets ``["backlog", *extras]``.
+    Any ``sprint-N`` already present in ``item_labels`` is dropped so the chosen
+    sprint wins (and we never apply two sprint labels).
+    """
+    extras = [lbl for lbl in item_labels if lbl and not _SPRINT_LABEL_RE.match(lbl)]
+    if sprint_label:
+        return [sprint_label] + extras
+    return ["backlog"] + extras
+
+
 @app.post("/api/tickets/bulk/{job_id}/post-selected")
 async def bulk_post_selected(job_id: str, body: BulkPostSelectedBody):
     """Post selected draft_ready tickets to GitHub (issue #374 review-then-post flow).
@@ -8515,9 +8561,18 @@ async def bulk_post_selected(job_id: str, body: BulkPostSelectedBody):
     async def _post_task():
         estimation_tasks: list[asyncio.Task] = []
 
+        # Resolve the batch's target sprint once ("NEW" → create the next
+        # sprint-N label), then persist the concrete label back onto the job.
+        sprint_label = _resolve_bulk_sprint_label(
+            job.get("sprint_label"), job.get("repo") or None
+        )
+        if sprint_label != (job.get("sprint_label") or ""):
+            job["sprint_label"] = sprint_label
+            _persist_bulk_job(job)
+
         for item in body.tickets:
             idx = item.index
-            labels = ["backlog"] + [lbl for lbl in item.labels if lbl]
+            labels = _compose_ticket_labels(sprint_label, item.labels)
             t = job["tickets"][idx]
             issue_repo = job.get("repo") or None
 

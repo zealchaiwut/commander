@@ -14,8 +14,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
+import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -64,6 +66,16 @@ def _fetch_open_issues(repo: str) -> list[dict]:
     out = _gh([
         "issue", "list", "--repo", repo, "--state", "open",
         "--json", "number,title,labels,assignees", "--limit", "200",
+    ])
+    return json.loads(out) if out else []
+
+
+def _fetch_closed_sprint_issues(repo: str, sprint_label: str) -> list[dict]:
+    """Return closed issues carrying the given sprint label."""
+    out = _gh([
+        "issue", "list", "--repo", repo, "--state", "closed",
+        "--label", sprint_label,
+        "--json", "number,title,labels", "--limit", "200",
     ])
     return json.loads(out) if out else []
 
@@ -137,6 +149,31 @@ def _issue_line(issue: dict) -> str:
     return f"- #{issue['number']} {issue['title']}{suffix}"
 
 
+def _build_progress_lines(
+    sprint_open: list[dict], sprint_closed: list[dict]
+) -> list[str]:
+    """Return markdown lines for the Progress section of a sprint."""
+    total = len(sprint_open) + len(sprint_closed)
+    in_prog = sum(1 for i in sprint_open if "in-progress" in _label_names(i))
+    sit = sum(1 for i in sprint_open if "SIT" in _label_names(i))
+    uat = sum(1 for i in sprint_open if "UAT" in _label_names(i))
+    done = len(sprint_closed)
+    to_do = total - in_prog - sit - uat - done
+
+    def _fmt(n: int) -> str:
+        pct = round(100 * n / total) if total else 0
+        return f"{n}/{total} ({pct}%)"
+
+    lines: list[str] = ["## Progress", ""]
+    lines.append(f"- To Do: {_fmt(to_do)}")
+    lines.append(f"- In Progress: {_fmt(in_prog)}")
+    lines.append(f"- SIT: {_fmt(sit)}")
+    lines.append(f"- UAT: {_fmt(uat)}")
+    lines.append(f"- Done: {_fmt(done)}")
+    lines.append("")
+    return lines
+
+
 # ── core generator ────────────────────────────────────────────────────────────
 
 def generate(repo: str, sprints_dir: Path, out_path: Path) -> None:
@@ -149,6 +186,13 @@ def generate(repo: str, sprints_dir: Path, out_path: Path) -> None:
     issues = _fetch_open_issues(repo)
     sit_issues = [i for i in issues if "SIT" in _label_names(i)]
     uat_issues = [i for i in issues if "UAT" in _label_names(i)]
+
+    # Sprint-scoped issues for Progress section
+    sprint_open: list[dict] = []
+    sprint_closed: list[dict] = []
+    if sprint_label:
+        sprint_open = [i for i in issues if sprint_label in _label_names(i)]
+        sprint_closed = _fetch_closed_sprint_issues(repo, sprint_label)
 
     # Open issues grouped by sprint label, excluding SIT/UAT
     open_by_sprint: dict[str, list[dict]] = {}
@@ -176,8 +220,16 @@ def generate(repo: str, sprints_dir: Path, out_path: Path) -> None:
         lines.append("")
         lines.append(sprint_goal if sprint_goal else "_No goal recorded._")
     else:
-        lines.append("_No active sprint detected._")
+        lines.append("No active sprint.")
     lines.append("")
+
+    if sprint_label:
+        lines.extend(_build_progress_lines(sprint_open, sprint_closed))
+    else:
+        lines.append("## Progress")
+        lines.append("")
+        lines.append("No active sprint.")
+        lines.append("")
 
     lines.append("## SIT")
     if sit_issues:
@@ -219,7 +271,18 @@ def generate(repo: str, sprints_dir: Path, out_path: Path) -> None:
     lines.append("")
 
     content = "\n".join(lines)
-    out_path.write_text(content, encoding="utf-8")
+    # Atomic write: write to a sibling temp file, then rename
+    tmp_fd, tmp_name = tempfile.mkstemp(dir=out_path.parent, suffix=".tmp")
+    try:
+        with os.fdopen(tmp_fd, "w", encoding="utf-8") as fh:
+            fh.write(content)
+        os.replace(tmp_name, out_path)
+    except Exception:
+        try:
+            os.unlink(tmp_name)
+        except OSError:
+            pass
+        raise
     print(f"STATUS.md written → {out_path}")
 
 

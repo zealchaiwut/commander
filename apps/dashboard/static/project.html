@@ -1867,6 +1867,39 @@
     }
     .nt-warn-item.hidden { display: none; }
     .nt-file-input { padding: 4px 8px; cursor: pointer; }
+    /* ── Ticket quality linter (issue #574) ── */
+    .lint-warn-box {
+      background: var(--amber-bg);
+      border: 1px solid color-mix(in srgb, var(--amber) 40%, transparent);
+      border-radius: 8px; padding: 12px 14px;
+      margin: 0 20px 8px;
+    }
+    .lint-warn-heading {
+      display: flex; align-items: center; gap: 6px;
+      font-size: 13px; font-weight: 600; color: var(--amber); margin-bottom: 8px;
+    }
+    .lint-warn-list {
+      margin: 0 0 10px 0; padding: 0 0 0 18px;
+      font-size: 12px; color: var(--text); line-height: 1.7;
+    }
+    .lint-warn-actions { display: flex; gap: 8px; justify-content: flex-end; }
+    .bc-lint-overlay {
+      position: absolute; inset: 0; z-index: 20;
+      background: var(--surface);
+      display: flex; flex-direction: column;
+      border-top: 2px solid var(--amber);
+    }
+    .bc-lint-overlay-list {
+      flex: 1; overflow-y: auto; padding: 8px 16px;
+      display: flex; flex-direction: column; gap: 8px;
+    }
+    .bc-lint-ticket-item {
+      border: 1px solid color-mix(in srgb, var(--amber) 40%, transparent);
+      border-radius: 6px; padding: 10px 12px;
+      background: var(--amber-bg); font-size: 12px;
+    }
+    .bc-lint-ticket-title { font-weight: 600; color: var(--text); margin-bottom: 4px; }
+    .bc-lint-ticket-issues { margin: 0; padding: 0 0 0 16px; color: var(--text); line-height: 1.6; }
 
     /* ── Run Sprint preflight modal (issue #446 / #447) ── */
     .pf-modal { width: min(1100px, calc(100vw - 48px)); }
@@ -4497,6 +4530,19 @@
             <div class="bc-review-actions">
               <button type="button" class="btn-ghost" onclick="bcCancelReview()">Cancel</button>
               <button type="button" class="btn-primary" id="bc-post-github-btn" disabled onclick="bcPostSelected()">Post to GitHub</button>
+            </div>
+          </div>
+
+          <!-- Linter warning overlay (issue #574) -->
+          <div id="bc-lint-overlay" class="bc-lint-overlay hidden">
+            <div class="bc-review-header">
+              <strong>Quality warnings</strong>
+              <span class="bc-review-sub">Some tickets may need improvement</span>
+            </div>
+            <div class="bc-lint-overlay-list" id="bc-lint-overlay-list"></div>
+            <div class="bc-review-actions">
+              <button type="button" class="btn-ghost" onclick="_bcLintGoBack()">Go back and edit</button>
+              <button type="button" class="btn-primary" onclick="_bcLintProceed()">Proceed anyway</button>
             </div>
           </div>
 
@@ -11202,6 +11248,52 @@ let _ntLabels = [];          // [{name, color}, ...] from GitHub
 let _ntSelectedLabels = []; // currently applied label names
 let _ntDropdownFocus = -1;   // keyboard-focused dropdown item index
 let _ntFiles = [];           // queued attachment files
+let _ntSkipLint = false;     // set true when user clicks "Proceed anyway" on linter warning
+
+// ── Ticket quality linter (issue #574) ──────────────────────────────────────
+const _LINT_ACTION_VERBS = [
+  'add','fix','update','remove','implement','migrate','refactor','document',
+  'investigate','define','create','delete','change','improve','enable','disable',
+  'support','handle','integrate','replace','upgrade','convert','build','set',
+  'extend','configure','deploy','test','validate','clean','allow','block',
+  'track','display','show','hide','load','fetch','send','parse','format',
+  'move','copy','rename','merge','split','reset','restore','archive','expose',
+  'deprecate','extract','introduce','simplify','decouple','optimize',
+];
+const _LINT_ACCEPTANCE_SIGNALS = [
+  'so that','acceptance criteria','expected','done when',
+  'definition of done','ac:','- [ ]',
+];
+
+function lintTicket(title, body) {
+  const issues = [];
+  const combined = (title + ' ' + body).trim();
+  if (combined.length < 20) {
+    issues.push('Too short — add more detail (combined text under 20 characters).');
+  }
+  const titleWords = title.toLowerCase().split(/\W+/).filter(Boolean);
+  if (!_LINT_ACTION_VERBS.some(v => titleWords.includes(v))) {
+    issues.push('No action verb in title — start with a verb like: add, fix, update, implement, refactor…');
+  }
+  const bodyLower = body.toLowerCase();
+  if (!_LINT_ACCEPTANCE_SIGNALS.some(s => bodyLower.includes(s))) {
+    issues.push('No acceptance signal — include "AC:", "done when", "expected", or a checkbox list (- [ ]) in the body.');
+  }
+  return issues;
+}
+
+function _ntShowLintWarning(issues) {
+  const list = document.getElementById('nt-lint-warn-list');
+  list.innerHTML = issues.map(i => `<li>${escHtml(i)}</li>`).join('');
+  document.getElementById('nt-lint-warn').classList.remove('hidden');
+  document.getElementById('nt-post-footer').classList.add('hidden');
+}
+
+function _ntHideLintWarning() {
+  document.getElementById('nt-lint-warn').classList.add('hidden');
+  document.getElementById('nt-post-footer').classList.remove('hidden');
+}
+// ─────────────────────────────────────────────────────────────────────────────
 
 function _ntUpdateWarnings() {
   if (!_ntDraftGenerated) return;
@@ -11607,6 +11699,9 @@ async function smgmtOpenNewTicket() {
   document.getElementById('nt-error').classList.add('hidden');
   document.getElementById('nt-title-error').classList.add('hidden');
   document.getElementById('nt-body-error').classList.add('hidden');
+  document.getElementById('nt-lint-warn').classList.add('hidden');
+  document.getElementById('nt-post-footer').classList.remove('hidden');
+  _ntSkipLint = false;
   document.getElementById('nt-submit-btn').disabled = false;
   document.getElementById('nt-submit-btn').textContent = 'Generate Draft';
   document.getElementById('nt-draft-section').classList.add('hidden');
@@ -11744,6 +11839,15 @@ function _setupModals() {
   document.getElementById('nt-cancel-btn').addEventListener('click', _ntClose);
   document.getElementById('nt-post-cancel-btn').addEventListener('click', _ntClose);
   document.getElementById('nt-backdrop').addEventListener('click', _ntClose);
+  document.getElementById('nt-lint-back-btn').addEventListener('click', function() {
+    _ntHideLintWarning();
+    document.getElementById('nt-title').focus();
+  });
+  document.getElementById('nt-lint-proceed-btn').addEventListener('click', function() {
+    _ntHideLintWarning();
+    _ntSkipLint = true;
+    document.getElementById('nt-post-btn').click();
+  });
   // Project change → re-fetch labels and re-render presets
   document.getElementById('nt-project').addEventListener('change', function() {
     if (this.value) _ntFetchLabels(this.value);
@@ -11894,6 +11998,13 @@ function _setupModals() {
     }
     if (hasError) return;
 
+    // Quality linter (non-blocking — skipped when user proceeds anyway)
+    if (!_ntSkipLint) {
+      const lintIssues = lintTicket(title, body);
+      if (lintIssues.length > 0) { _ntShowLintWarning(lintIssues); return; }
+    }
+    _ntSkipLint = false;
+
     this.disabled = true;
     this.innerHTML = '<span class="nt-spinner"></span>Posting…';
     document.getElementById('nt-error').classList.add('hidden');
@@ -11967,6 +12078,8 @@ let _bcDragSrcIdx    = null;        // HTML5 drag source row index
 let _bcTouchSrcIdx   = null;        // touch drag source row index
 let _bcTouchGhost    = null;        // floating ghost element during touch drag
 let _bcWarnDismissed = false;       // true after user dismisses the prompt-size warning (issue #568)
+let _bcSkipLint  = false;           // set true when user clicks "Proceed anyway" on linter warning
+let _bcLintToPost = null;           // tickets pending post while lint overlay is shown
 
 const BC_MAX_PROMPTS = 50;
 const BC_WARN_PROMPTS = 40;
@@ -13603,6 +13716,36 @@ function _bcReviewOverlayCheck(index, checked) {
 function bcCancelReview() {
   const overlay = document.getElementById('bc-review-overlay');
   if (overlay) overlay.classList.add('hidden');
+  const lintOverlay = document.getElementById('bc-lint-overlay');
+  if (lintOverlay) lintOverlay.classList.add('hidden');
+  _bcSkipLint = false;
+  _bcLintToPost = null;
+}
+
+function _bcShowLintOverlay(problems, toPost) {
+  _bcLintToPost = toPost;
+  const list = document.getElementById('bc-lint-overlay-list');
+  list.innerHTML = problems.map(t => {
+    const preview = t.title.length > 50 ? t.title.slice(0, 50) + '…' : t.title;
+    const items = t.issues.map(i => `<li>${escHtml(i)}</li>`).join('');
+    return `<div class="bc-lint-ticket-item">
+      <div class="bc-lint-ticket-title">Ticket ${t.index + 1}: ${escHtml(preview)}</div>
+      <ul class="bc-lint-ticket-issues">${items}</ul>
+    </div>`;
+  }).join('');
+  document.getElementById('bc-lint-overlay').classList.remove('hidden');
+}
+
+function _bcLintGoBack() {
+  document.getElementById('bc-lint-overlay').classList.add('hidden');
+  _bcLintToPost = null;
+}
+
+async function _bcLintProceed() {
+  document.getElementById('bc-lint-overlay').classList.add('hidden');
+  _bcLintToPost = null;
+  _bcSkipLint = true;
+  await bcPostSelected();
 }
 
 async function bcPostSelected() {
@@ -13640,6 +13783,15 @@ async function bcPostSelected() {
     return;
   }
   if (toPost.length === 0) return;
+
+  // Quality linter (non-blocking — skipped when user proceeds anyway)
+  if (!_bcSkipLint) {
+    const problems = toPost
+      .map(t => ({ ...t, issues: lintTicket(t.title, t.body) }))
+      .filter(t => t.issues.length > 0);
+    if (problems.length > 0) { _bcShowLintOverlay(problems, toPost); return; }
+  }
+  _bcSkipLint = false;
 
   const postBtn   = document.getElementById('bc-post-github-btn');
   const reviewBtn = document.getElementById('bc-review-post-btn');
@@ -15323,7 +15475,16 @@ document.addEventListener('keydown', function(e) {
       <div id="nt-warn-label" class="nt-warn-item hidden"><i class="ti ti-alert-triangle"></i> No label assigned — add one below or leave blank.</div>
       <div id="nt-warn-attach" class="nt-warn-item hidden"><i class="ti ti-alert-triangle"></i> No attachments added — add files below or leave blank.</div>
     </div>
-    <div class="modal-footer">
+    <!-- Linter warning (issue #574) -->
+    <div id="nt-lint-warn" class="lint-warn-box hidden">
+      <div class="lint-warn-heading"><i class="ti ti-alert-triangle"></i> Quality warnings</div>
+      <ul class="lint-warn-list" id="nt-lint-warn-list"></ul>
+      <div class="lint-warn-actions">
+        <button class="btn-ghost" id="nt-lint-back-btn" type="button">Go back and edit</button>
+        <button class="btn-primary" id="nt-lint-proceed-btn" type="button">Proceed anyway</button>
+      </div>
+    </div>
+    <div class="modal-footer" id="nt-post-footer">
       <button class="btn-ghost" id="nt-post-cancel-btn" type="button">Cancel</button>
       <button class="btn-primary" id="nt-post-btn" type="button">Post to GitHub</button>
     </div>

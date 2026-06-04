@@ -11370,11 +11370,13 @@ function _bcShowStep(n) {
     step1.classList.remove('hidden');
     step2.classList.add('hidden');
     chip1.classList.add('active');
+    chip1.classList.remove('done');
     chip2.classList.remove('active');
   } else {
     step1.classList.add('hidden');
     step2.classList.remove('hidden');
     chip1.classList.remove('active');
+    chip1.classList.add('done');     // Input is complete once we're reviewing
     chip2.classList.add('active');
   }
 }
@@ -12252,27 +12254,28 @@ function _bcRenderStep2() {
     list.innerHTML = tickets.filter(t => !_bcRemovedRows.has(t.index)).map(t => _bcRenderCard(t)).join('');
   }
 
-  // Footer buttons
+  // Footer buttons. Each phase shows only the buttons that apply:
+  //   running      → [Stop after current] [Running... (disabled)]
+  //   drafts_ready → [Post Selected (N)]            (primary action = post)
+  //   done/posted  → [Done]                          (returns to Input)
   const stopBtn       = document.getElementById('bc-stop-btn');
   const doneBtn       = document.getElementById('bc-done-btn');
-  const recreateBtn   = document.getElementById('bc-recreate-btn');
   const retryAllBtn   = document.getElementById('bc-retry-all-btn');
   const reviewPostBtn = document.getElementById('bc-review-post-btn');
   if (stopBtn && doneBtn) {
     if (job.status === 'running') {
       stopBtn.disabled = false;
+      stopBtn.classList.remove('hidden');
       doneBtn.disabled = true;
       doneBtn.textContent = 'Running...';
       doneBtn.classList.remove('hidden');
-      if (recreateBtn)   recreateBtn.classList.add('hidden');
       if (reviewPostBtn) reviewPostBtn.classList.add('hidden');
     } else if (job.status === 'drafts_ready') {
       // Drafts are generated — the primary action is now posting, so promote
-      // "Post Selected" to the primary button and drop the redundant
-      // "Running..." placeholder (it returns only while actually running).
-      stopBtn.disabled = true;
+      // "Post Selected" to the primary button and drop both the "Stop" control
+      // (nothing is running) and the redundant "Running..." placeholder.
+      stopBtn.classList.add('hidden');
       doneBtn.classList.add('hidden');
-      if (recreateBtn) recreateBtn.classList.add('hidden');
       if (reviewPostBtn) {
         const draftReadyTickets = tickets.filter(t => t.state === 'draft_ready' && !_bcRemovedRows.has(t.index));
         const selCount = draftReadyTickets.filter(t => _bcDraftSelections.has(t.index)).length;
@@ -12281,12 +12284,11 @@ function _bcRenderStep2() {
         reviewPostBtn.classList.remove('hidden');
       }
     } else {
-      stopBtn.disabled = true;
+      stopBtn.classList.add('hidden');
       doneBtn.disabled = false;
       doneBtn.textContent = 'Done';
       doneBtn.onclick = () => { _bcShowStep(1); };
       doneBtn.classList.remove('hidden');
-      if (recreateBtn)   recreateBtn.classList.remove('hidden');
       if (reviewPostBtn) reviewPostBtn.classList.add('hidden');
     }
   }

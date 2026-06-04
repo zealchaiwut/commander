@@ -677,6 +677,11 @@
       font-size: 10px; font-weight: 700; letter-spacing: .08em;
       text-transform: uppercase; color: var(--text-muted);
     }
+    .ticket-group-rollup {
+      margin-left: auto;
+      font-size: 10px; font-weight: 500; letter-spacing: 0; text-transform: none;
+      color: var(--text-sub); font-family: var(--mono); white-space: nowrap;
+    }
     .ticket-row {
       display: flex; align-items: center; gap: 10px;
       padding: 10px 0;
@@ -1872,6 +1877,39 @@
     }
     .nt-warn-item.hidden { display: none; }
     .nt-file-input { padding: 4px 8px; cursor: pointer; }
+    /* ── Ticket quality linter (issue #574) ── */
+    .lint-warn-box {
+      background: var(--amber-bg);
+      border: 1px solid color-mix(in srgb, var(--amber) 40%, transparent);
+      border-radius: 8px; padding: 12px 14px;
+      margin: 0 20px 8px;
+    }
+    .lint-warn-heading {
+      display: flex; align-items: center; gap: 6px;
+      font-size: 13px; font-weight: 600; color: var(--amber); margin-bottom: 8px;
+    }
+    .lint-warn-list {
+      margin: 0 0 10px 0; padding: 0 0 0 18px;
+      font-size: 12px; color: var(--text); line-height: 1.7;
+    }
+    .lint-warn-actions { display: flex; gap: 8px; justify-content: flex-end; }
+    .bc-lint-overlay {
+      position: absolute; inset: 0; z-index: 20;
+      background: var(--surface);
+      display: flex; flex-direction: column;
+      border-top: 2px solid var(--amber);
+    }
+    .bc-lint-overlay-list {
+      flex: 1; overflow-y: auto; padding: 8px 16px;
+      display: flex; flex-direction: column; gap: 8px;
+    }
+    .bc-lint-ticket-item {
+      border: 1px solid color-mix(in srgb, var(--amber) 40%, transparent);
+      border-radius: 6px; padding: 10px 12px;
+      background: var(--amber-bg); font-size: 12px;
+    }
+    .bc-lint-ticket-title { font-weight: 600; color: var(--text); margin-bottom: 4px; }
+    .bc-lint-ticket-issues { margin: 0; padding: 0 0 0 16px; color: var(--text); line-height: 1.6; }
 
     /* ── Run Sprint preflight modal (issue #446 / #447) ── */
     .pf-modal { width: min(1100px, calc(100vw - 48px)); }
@@ -2202,6 +2240,69 @@
     .nt-textarea { resize: vertical; min-height: 80px; font-family: inherit; }
     .nt-body-textarea { resize: vertical; min-height: 140px; font-family: monospace; font-size: 12px; }
     .nt-draft-divider { border-top: 1px solid var(--border); margin: 20px 0; }
+
+    /* ── New Ticket body: Write/Preview tabs & char count (issue #573) ── */
+    .nt-body-tabs {
+      display: flex; gap: 0; border-bottom: 2px solid var(--border);
+      margin-bottom: 4px;
+    }
+    .nt-body-tab {
+      padding: 4px 12px; font-size: 12px; font-weight: 500; cursor: pointer;
+      background: none; border: none; border-bottom: 2px solid transparent;
+      margin-bottom: -2px; color: var(--text-muted); font-family: inherit;
+      transition: color .15s, border-color .15s;
+    }
+    .nt-body-tab:hover { color: var(--text); }
+    .nt-body-tab.active { color: var(--text); border-bottom-color: var(--text); font-weight: 600; }
+    .nt-body-preview {
+      min-height: 140px; max-height: 340px; overflow-y: auto;
+      padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px;
+      background: var(--surface-2); font-size: 12px; line-height: 1.55; color: var(--text);
+    }
+    .nt-body-preview-empty { color: var(--text-muted); font-style: italic; }
+    .nt-char-count { font-size: 11px; color: var(--text-muted); text-align: right; margin-top: 3px; }
+    .md-body .task-item input[type=checkbox] { margin-right: 4px; vertical-align: middle; cursor: default; }
+
+    /* ── AC Template Picker (issue #567) ── */
+    .ac-tpl-toolbar { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+    .ac-tpl-wrap { position: relative; }
+    .ac-tpl-btn {
+      display: inline-flex; align-items: center; gap: 5px;
+      padding: 3px 9px; font-size: 12px; font-weight: 500;
+      border: 1px solid var(--border); border-radius: 5px;
+      background: var(--surface-2); color: var(--text-muted);
+      cursor: pointer; transition: background .15s, color .15s, border-color .15s;
+      white-space: nowrap;
+    }
+    .ac-tpl-btn:hover { background: var(--surface-hover); color: var(--text); border-color: var(--blue); }
+    .ac-tpl-btn.has-default { color: var(--blue); border-color: color-mix(in srgb, var(--blue) 30%, transparent); background: var(--blue-bg); }
+    .uat-tpl-btn.has-default { color: #059669; border-color: color-mix(in srgb, #059669 30%, transparent); background: color-mix(in srgb, #059669 10%, transparent); }
+    .ac-tpl-btn:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+    .ac-tpl-menu {
+      position: absolute; top: calc(100% + 4px); left: 0; z-index: 700;
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 7px; box-shadow: 0 4px 16px rgba(0,0,0,.14);
+      padding: 6px; min-width: 220px;
+    }
+    .ac-tpl-menu.hidden { display: none; }
+    .ac-tpl-opt {
+      display: flex; align-items: flex-start; gap: 8px;
+      padding: 7px 10px; border-radius: 5px; cursor: pointer;
+      font-size: 13px; color: var(--text); width: 100%; text-align: left;
+      background: none; border: none;
+      transition: background .12s;
+    }
+    .ac-tpl-opt:hover, .ac-tpl-opt:focus { background: var(--surface-2); outline: none; }
+    .ac-tpl-opt:focus-visible { outline: 2px solid var(--blue); outline-offset: 1px; }
+    .ac-tpl-opt-icon { font-size: 15px; color: var(--text-muted); flex-shrink: 0; padding-top: 1px; }
+    .ac-tpl-opt-label { flex: 1; }
+    .ac-tpl-opt-name { font-weight: 500; display: block; }
+    .ac-tpl-opt-desc { font-size: 11px; color: var(--text-muted); }
+    .ac-tpl-opt.is-default .ac-tpl-opt-name::after { content: ' ✓'; color: var(--blue); }
+    .ac-tpl-menu-divider { height: 1px; background: var(--border); margin: 4px 0; }
+    .bc-ac-tpl-toolbar { display: flex; align-items: center; gap: 6px; padding: 8px 28px 4px; }
+    .bc-ac-global-wrap { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+    .bc-ac-global-label { font-size: 12px; color: var(--text-muted); }
     .nt-spinner {
       display: inline-block; width: 12px; height: 12px;
       border: 2px solid currentColor; border-top-color: transparent;
@@ -2227,18 +2328,68 @@
     .nt-label-opt:hover, .nt-label-opt.focused { background: var(--surface-hover); }
     .nt-label-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
     .nt-label-chip {
+      display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px;
+    }
+    .nt-label-chip.hidden { display: none; }
+    .nt-label-chip-item {
       display: inline-flex; align-items: center; gap: 6px;
       background: var(--surface-2); border: 1px solid var(--border);
       border-radius: 12px; padding: 3px 10px 3px 8px; font-size: 12px;
-      color: var(--text); margin-bottom: 8px;
+      color: var(--text);
     }
-    .nt-label-chip.hidden { display: none; }
     .nt-label-chip-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
     .nt-label-chip-rm {
       background: none; border: none; cursor: pointer;
       color: var(--text-muted); font-size: 16px; padding: 0; line-height: 1; margin-left: 2px;
     }
     .nt-label-chip-rm:hover { color: var(--red); }
+
+    /* ── Label Presets panel ── */
+    .lp-section { margin-top: 4px; }
+    .bc-lp-section { margin: 8px 0 4px; }
+    .lp-hdr { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+    .lp-save-btn {
+      font-size: 11px; font-family: inherit; padding: 3px 8px;
+      background: var(--surface-2); border: 1px solid var(--border);
+      border-radius: 4px; color: var(--text-sub); cursor: pointer; white-space: nowrap;
+    }
+    .lp-save-btn:hover { border-color: var(--blue); color: var(--blue); background: var(--blue-bg); }
+    .lp-list { display: flex; flex-direction: column; gap: 4px; }
+    .lp-row {
+      display: flex; align-items: center; gap: 6px;
+      padding: 5px 8px; border: 1px solid var(--border);
+      border-radius: 6px; background: var(--surface); cursor: default;
+      user-select: none;
+    }
+    .lp-row.lp-drag-over { border-color: var(--blue); background: var(--blue-bg); }
+    .lp-row.lp-dragging { opacity: .5; }
+    .lp-drag { color: var(--text-muted); font-size: 14px; flex-shrink: 0; cursor: grab; }
+    .lp-name {
+      flex: 1; min-width: 0; font-size: 12px; font-weight: 600; color: var(--text);
+      cursor: text; outline: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      border-bottom: 1px solid transparent; border-radius: 2px;
+    }
+    .lp-name:focus { border-bottom-color: var(--blue); white-space: normal; }
+    .lp-tags { display: flex; gap: 3px; flex-wrap: wrap; flex-shrink: 0; }
+    .lp-tag {
+      font-size: 10px; padding: 1px 5px; border-radius: 8px;
+      background: var(--surface-2); border: 1px solid var(--border); color: var(--text-sub);
+    }
+    .lp-apply-btn {
+      font-size: 11px; font-family: inherit; padding: 2px 7px; flex-shrink: 0;
+      background: var(--surface-2); border: 1px solid var(--border);
+      border-radius: 4px; color: var(--text); cursor: pointer;
+    }
+    .lp-apply-btn:hover { background: var(--blue-bg); border-color: var(--blue); color: var(--blue); }
+    .lp-del-btn {
+      background: none; border: none; cursor: pointer; flex-shrink: 0;
+      color: var(--text-muted); font-size: 16px; padding: 0 2px; line-height: 1;
+    }
+    .lp-del-btn:hover { color: var(--red); }
+    .lp-empty { font-size: 12px; color: var(--text-muted); padding: 6px 0; }
+    .lp-empty.hidden { display: none; }
+    .lp-error { font-size: 12px; color: var(--red); margin-top: 4px; }
+    .lp-error.hidden { display: none; }
 
     /* ── Blocking operation overlay (issue #276; full-screen, generalised) ── */
     #pane-sprint-mgmt { position: relative; }
@@ -2661,6 +2812,50 @@
     }
     .bc-textarea:focus { border-color: var(--blue); }
 
+    /* Prompt Tips (issue #572) */
+    .bc-tips-toggle {
+      display: flex; align-items: center; gap: 6px;
+      padding: 6px 28px; width: 100%; text-align: left;
+      background: none; border: none; border-bottom: 1px solid var(--border);
+      font-family: inherit; font-size: 12px;
+      color: var(--text-muted); cursor: pointer;
+    }
+    .bc-tips-toggle:hover { color: var(--text); background: var(--surface-hover); }
+    .bc-tips-toggle:focus-visible { outline: 2px solid var(--blue); outline-offset: -2px; }
+    .bc-tips-toggle-chevron { transition: transform 0.2s ease; font-size: 13px; }
+    .bc-tips-toggle[aria-expanded="true"] .bc-tips-toggle-chevron { transform: rotate(90deg); }
+    .bc-tips-panel {
+      overflow: hidden; max-height: 0;
+      transition: max-height 0.25s ease;
+    }
+    .bc-tips-panel.open { max-height: 600px; }
+    .bc-tips-panel-inner {
+      padding: 12px 28px 16px;
+      display: grid; grid-template-columns: 1fr 1fr; gap: 12px;
+      border-bottom: 1px solid var(--border);
+    }
+    @media (max-width: 480px) {
+      .bc-tips-panel-inner { grid-template-columns: 1fr; }
+    }
+    .bc-tips-example {
+      border: 1px solid var(--border); border-radius: 6px;
+      padding: 10px 12px; background: var(--surface-2);
+    }
+    .bc-tips-example-label {
+      font-size: 11px; font-weight: 700; margin: 0 0 6px;
+      display: flex; align-items: center; gap: 4px;
+    }
+    .bc-tips-example--bad .bc-tips-example-label { color: var(--red); }
+    .bc-tips-example--good .bc-tips-example-label { color: var(--green); }
+    .bc-tips-example-text {
+      font-family: var(--mono); font-size: 11px;
+      color: var(--text); line-height: 1.5;
+      white-space: pre-wrap; word-break: break-word;
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 4px; padding: 6px 8px; margin: 0 0 6px;
+    }
+    .bc-tips-example-desc { font-size: 11px; color: var(--text-muted); line-height: 1.4; margin: 0; }
+
     /* Info note */
     .bc-info-note {
       padding: 8px 28px;
@@ -2735,6 +2930,18 @@
     .bc-limit-banner--error {
       color: #991b1b; background: #fef2f2; border: 1px solid #fca5a5;
     }
+    .bc-prompt-warn {
+      display: flex; align-items: center; justify-content: space-between; gap: 6px;
+      margin: 0 28px 6px; padding: 6px 10px;
+      border-radius: 4px; font-size: 12px; font-weight: 500;
+      color: #92400e; background: #fffbeb; border: 1px solid #fcd34d;
+    }
+    .bc-prompt-warn-dismiss {
+      flex-shrink: 0; padding: 2px 8px;
+      border: 1px solid #fcd34d; border-radius: 4px;
+      background: transparent; color: #92400e; font-size: 11px; cursor: pointer;
+    }
+    .bc-prompt-warn-dismiss:hover { background: #fef9c3; }
     .bc-prompt-row-stats {
       font-size: 10px; color: var(--text-muted); font-family: var(--mono);
       white-space: nowrap; padding-top: 9px; flex-shrink: 0; line-height: 1.3;
@@ -4185,6 +4392,16 @@
             </div>
           </div>
 
+          <div class="bc-lp-section">
+            <div class="lp-hdr">
+              <label class="bc-settings-label" style="margin:0">Label Presets</label>
+              <button type="button" class="lp-save-btn" id="bc-lp-save-btn" onclick="_lpSavePreset('bc')">Save as Preset</button>
+            </div>
+            <div class="lp-empty hidden" id="bc-lp-empty">No presets yet — set default labels and click "Save as Preset".</div>
+            <div id="bc-lp-list" class="lp-list"></div>
+            <div class="lp-error hidden" id="bc-lp-error" role="alert" aria-live="polite"></div>
+          </div>
+
           <div class="bc-counter-row">
             <span class="bc-counter" id="bc-counter">0 / 50 prompts</span>
             <button type="button" class="bc-clear-draft-btn hidden" id="bc-clear-draft-btn"
@@ -4192,6 +4409,67 @@
           </div>
 
           <div id="bc-limit-banner" class="bc-limit-banner hidden" role="alert" aria-live="polite"></div>
+
+          <div class="bc-ac-tpl-toolbar">
+            <div class="ac-tpl-wrap" id="bc-ac-tpl-wrap">
+              <button type="button" class="ac-tpl-btn" id="bc-ac-tpl-btn"
+                      aria-haspopup="true" aria-expanded="false"
+                      aria-label="Insert AC template into prompts (Ctrl+Shift+A)"
+                      title="Insert AC template (Ctrl/Cmd+Shift+A)"
+                      onclick="bcAcTplOpen()">
+                <i class="ti ti-template"></i> Insert AC Template
+              </button>
+              <div class="ac-tpl-menu hidden" id="bc-ac-tpl-menu" role="menu" aria-label="AC template options">
+                <button type="button" class="ac-tpl-opt" role="menuitem" data-tpl="gwt"
+                        onclick="bcAcTplSelect('gwt')" tabindex="-1">
+                  <i class="ti ti-list-details ac-tpl-opt-icon"></i>
+                  <span class="ac-tpl-opt-label">
+                    <span class="ac-tpl-opt-name">Given / When / Then</span>
+                    <span class="ac-tpl-opt-desc">BDD-style acceptance criteria</span>
+                  </span>
+                </button>
+                <button type="button" class="ac-tpl-opt" role="menuitem" data-tpl="checklist"
+                        onclick="bcAcTplSelect('checklist')" tabindex="-1">
+                  <i class="ti ti-checkbox ac-tpl-opt-icon"></i>
+                  <span class="ac-tpl-opt-label">
+                    <span class="ac-tpl-opt-name">Checklist</span>
+                    <span class="ac-tpl-opt-desc">Markdown checkbox criteria</span>
+                  </span>
+                </button>
+              </div>
+            </div>
+            <button type="button" class="ac-tpl-btn uat-tpl-btn" id="bc-uat-tpl-btn"
+                    aria-label="Insert UAT Steps template into prompts"
+                    title="Insert UAT Steps template"
+                    onclick="bcUatTplInsert()">
+              <i class="ti ti-checklist"></i> Insert UAT Template
+            </button>
+            <span class="bc-ac-global-label">Appends scaffold to each ticket prompt</span>
+          </div>
+
+          <!-- Prompt Tips (issue #572) -->
+          <button type="button" class="bc-tips-toggle"
+                  id="bc-tips-toggle"
+                  aria-expanded="false"
+                  aria-controls="bc-tips-panel"
+                  onclick="_bcTipsToggle()">
+            <i class="ti ti-chevron-right bc-tips-toggle-chevron"></i>
+            &#9432; How to write a good prompt
+          </button>
+          <div class="bc-tips-panel" id="bc-tips-panel" role="region" aria-labelledby="bc-tips-toggle">
+            <div class="bc-tips-panel-inner">
+              <div class="bc-tips-example bc-tips-example--bad">
+                <div class="bc-tips-example-label">&#10007; Bad prompt</div>
+                <pre class="bc-tips-example-text">Add a button</pre>
+                <p class="bc-tips-example-desc">Too vague — no context, scope, or criteria for the BA to produce a useful ticket.</p>
+              </div>
+              <div class="bc-tips-example bc-tips-example--good">
+                <div class="bc-tips-example-label">&#10003; Good prompt</div>
+                <pre class="bc-tips-example-text">Add a "Mark all as done" button to the sprint board header. Clicking it sets every open ticket in the current sprint to UAT status. Show a confirmation dialog before applying. Only show the button when there are open tickets.</pre>
+                <p class="bc-tips-example-desc">Specific feature description with scope boundaries and enough context for the BA to write acceptance criteria.</p>
+              </div>
+            </div>
+          </div>
 
           <textarea class="bc-textarea" id="bc-textarea"
                     placeholder="Paste your ticket prompts here, separated by --- on its own line..."
@@ -4257,6 +4535,12 @@
 
           <div class="bc-error hidden" id="bc-step1-error"></div>
 
+          <!-- Prompt-size warning (issue #568) -->
+          <div id="bc-prompt-warn" class="bc-prompt-warn hidden" role="alert" aria-live="polite">
+            <span>&#9888; <strong>This prompt may be too large</strong> — consider splitting into separate requests</span>
+            <button type="button" class="bc-prompt-warn-dismiss" onclick="bcDismissPromptWarn()">Dismiss</button>
+          </div>
+
           <!-- Step 1 footer actions -->
           <div class="bc-step-actions">
             <div class="bc-step-actions-left">
@@ -4287,6 +4571,41 @@
             </label>
             <button type="button" class="bc-bulk-btn" onclick="bcDeselectAll()">Deselect all</button>
             <button type="button" class="bc-bulk-btn bc-select-failed-btn hidden" id="bc-select-failed-btn" onclick="bcSelectFailed()">Select failed</button>
+            <div style="display:flex;align-items:center;gap:6px;margin-left:auto">
+            <div class="ac-tpl-wrap" id="bc-bulk-ac-tpl-wrap">
+              <button type="button" class="ac-tpl-btn" id="bc-bulk-ac-tpl-btn"
+                      aria-haspopup="true" aria-expanded="false"
+                      aria-label="Apply AC template to all draft tickets"
+                      title="Apply AC template to all draft tickets"
+                      onclick="bcBulkAcTplOpen()">
+                <i class="ti ti-template"></i> Apply AC to all drafts
+              </button>
+              <div class="ac-tpl-menu hidden" id="bc-bulk-ac-tpl-menu" role="menu" aria-label="AC template options">
+                <button type="button" class="ac-tpl-opt" role="menuitem" data-tpl="gwt"
+                        onclick="bcBulkAcTplSelect('gwt')" tabindex="-1">
+                  <i class="ti ti-list-details ac-tpl-opt-icon"></i>
+                  <span class="ac-tpl-opt-label">
+                    <span class="ac-tpl-opt-name">Given / When / Then</span>
+                    <span class="ac-tpl-opt-desc">BDD-style acceptance criteria</span>
+                  </span>
+                </button>
+                <button type="button" class="ac-tpl-opt" role="menuitem" data-tpl="checklist"
+                        onclick="bcBulkAcTplSelect('checklist')" tabindex="-1">
+                  <i class="ti ti-checkbox ac-tpl-opt-icon"></i>
+                  <span class="ac-tpl-opt-label">
+                    <span class="ac-tpl-opt-name">Checklist</span>
+                    <span class="ac-tpl-opt-desc">Markdown checkbox criteria</span>
+                  </span>
+                </button>
+              </div>
+            </div>
+            <button type="button" class="ac-tpl-btn uat-tpl-btn" id="bc-bulk-uat-tpl-btn"
+                    aria-label="Apply UAT Steps template to all draft tickets"
+                    title="Apply UAT Steps template to all draft tickets"
+                    onclick="bcBulkUatTplInsert()">
+              <i class="ti ti-checklist"></i> Apply UAT to all drafts
+            </button>
+            </div>
           </div>
 
           <div class="bc-ticket-list" id="bc-ticket-list"></div>
@@ -4301,6 +4620,19 @@
             <div class="bc-review-actions">
               <button type="button" class="btn-ghost" onclick="bcCancelReview()">Cancel</button>
               <button type="button" class="btn-primary" id="bc-post-github-btn" disabled onclick="bcPostSelected()">Post to GitHub</button>
+            </div>
+          </div>
+
+          <!-- Linter warning overlay (issue #574) -->
+          <div id="bc-lint-overlay" class="bc-lint-overlay hidden">
+            <div class="bc-review-header">
+              <strong>Quality warnings</strong>
+              <span class="bc-review-sub">Some tickets may need improvement</span>
+            </div>
+            <div class="bc-lint-overlay-list" id="bc-lint-overlay-list"></div>
+            <div class="bc-review-actions">
+              <button type="button" class="btn-ghost" onclick="_bcLintGoBack()">Go back and edit</button>
+              <button type="button" class="btn-primary" onclick="_bcLintProceed()">Proceed anyway</button>
             </div>
           </div>
 
@@ -4757,6 +5089,8 @@ const RERUN_STRIP_LABELS = new Set(['UAT','UAT-approved','released','SIT','in-pr
 const _smgmtOutcomeCache = {};
 // Per-issue estimate cache: issueNum (int) → {size, confidence} | null (null = confirmed no estimate)
 const _estDataCache = {};
+// Groups last rendered in the tickets kanban view (used for rollup updates)
+let _ticketGroups = [];
 // Sprint ticket map for token header reactivity: label → [ticket, ...]
 let _smgmtBySprint = {};
 // Reverse lookup: issueNum (int) → sprint label
@@ -4839,6 +5173,7 @@ function switchTab(tab, pushHistory) {
   // Init bulk-create tab on first visit
   if (tab === 'bulk-create') {
     _bcInitTab();
+    _lpRenderBc();
   }
 
   // Init logs tab
@@ -5449,6 +5784,7 @@ function renderTickets(data, repo) {
     { label: 'In progress', items: tickets.filter(t => t.status === 'in-progress' || t.status === 'blocked') },
     { label: 'Backlog',     items: tickets.filter(t => t.status === 'backlog') },
   ].filter(g => g.items.length > 0);
+  _ticketGroups = groups;
 
   let ticketsHtml;
   if (groups.length === 0) {
@@ -5469,7 +5805,8 @@ function renderTickets(data, repo) {
           ${chipsHtml}
         </div>`;
       }).join('');
-      return `<div class="ticket-group-hdr">${escHtml(g.label)} · ${g.items.length}</div>${rows}`;
+      const gid = g.label.replace(/\s+/g, '-');
+      return `<div class="ticket-group-hdr" id="ticket-grp-hdr-${gid}">${escHtml(g.label)} · ${g.items.length}<span class="ticket-group-rollup" id="ticket-grp-rollup-${gid}"></span></div>${rows}`;
     }).join('');
   }
 
@@ -5517,7 +5854,34 @@ async function _ticketsLoadEstimates(tickets, repo) {
         wrapEl.innerHTML = '<span class="ticket-no-estimate">Not Estimated</span>';
       }
     }
+    _ticketsUpdateGroupHeaders();
   } catch (_) { /* silent */ }
+}
+
+function _ticketsRollupText(items) {
+  const total = items.length;
+  if (total === 0) return '0 tickets';
+  let totalMins = 0, unestimated = 0;
+  for (const t of items) {
+    const est = _estDataCache[t.number];
+    const mins = est && est.size ? _sizeMinutes(est.size) : 0;
+    if (mins > 0) totalMins += mins;
+    else unestimated++;
+  }
+  const countStr = `${total} ticket${total !== 1 ? 's' : ''}`;
+  if (unestimated === total) return `${countStr}, no estimates`;
+  const h = totalMins / 60;
+  const timeStr = h < 1
+    ? `~${totalMins}m`
+    : `~${parseFloat((Math.round(h * 10) / 10).toFixed(1))}h`;
+  return `${timeStr}, ${countStr}${unestimated > 0 ? ` (${unestimated} unestimated)` : ''}`;
+}
+
+function _ticketsUpdateGroupHeaders() {
+  for (const g of _ticketGroups) {
+    const el = document.getElementById(`ticket-grp-rollup-${g.label.replace(/\s+/g, '-')}`);
+    if (el) el.textContent = _ticketsRollupText(g.items);
+  }
 }
 
 // ── Close Ticket flow ─────────────────────────────────────────────────────────
@@ -5564,6 +5928,11 @@ async function closeTicketModalConfirm() {
     const closedNum = _closeTicketNum;
     closeTicketModalCancel();
     document.getElementById(`ticket-row-${closedNum}`)?.remove();
+    // Remove ticket from _ticketGroups so rollup count stays accurate
+    for (const g of _ticketGroups) {
+      g.items = g.items.filter(t => t.number !== closedNum);
+    }
+    _ticketsUpdateGroupHeaders();
     // Update ticket count in toolbar
     const countEl = document.querySelector('#tickets-content .tickets-toolbar .tickets-toolbar-left span');
     if (countEl) {
@@ -6621,6 +6990,7 @@ async function _smgmtLoadEstimates(orderedLabels, bySprint) {
         for (const t of tickets) {
           _smgmtUpdateEstimateBadge(t.number);
         }
+        _smgmtUpdateColRollup(label, tickets);
       }
     } catch (_) {
       // fail silently — leave as "— estimated"
@@ -6702,6 +7072,30 @@ function _smgmtRiskFlagIconsHtml(issueNum) {
     .join('');
 }
 
+async function _smgmtLoadGoals(orderedLabels) {
+  const repo = _smgmtRepo();
+  if (!repo) return;
+  for (const label of orderedLabels) {
+    const goalEl = document.getElementById(`smgmt-goal-${label}`);
+    if (!goalEl) continue;
+    try {
+      const resp = await fetch(
+        `/api/sprints/goal?project=${encodeURIComponent(repo)}&sprint=${encodeURIComponent(label)}`
+      );
+      if (!resp.ok) continue;
+      const data = await resp.json();
+      const goal = (data.goal || '').trim();
+      if (goal) {
+        goalEl.textContent = goal;
+        goalEl.title = goal;
+        goalEl.style.display = '';
+      }
+    } catch (_) {
+      // fail silently
+    }
+  }
+}
+
 function _smgmtUpdateEstimateBadge(issueNum) {
   const row = document.getElementById(`smgmt-ticket-${issueNum}`);
   if (!row) return;
@@ -6764,30 +7158,6 @@ function _smgmtUpdateEstimateBadge(issueNum) {
           anchor.after(span);
         });
       }
-    }
-  }
-}
-
-async function _smgmtLoadGoals(orderedLabels) {
-  const repo = _smgmtRepo();
-  if (!repo) return;
-  for (const label of orderedLabels) {
-    const goalEl = document.getElementById(`smgmt-goal-${label}`);
-    if (!goalEl) continue;
-    try {
-      const resp = await fetch(
-        `/api/sprints/goal?project=${encodeURIComponent(repo)}&sprint=${encodeURIComponent(label)}`
-      );
-      if (!resp.ok) continue;
-      const data = await resp.json();
-      const goal = (data.goal || '').trim();
-      if (goal) {
-        goalEl.textContent = goal;
-        goalEl.title = goal;
-        goalEl.style.display = '';
-      }
-    } catch (_) {
-      // fail silently
     }
   }
 }
@@ -7647,6 +8017,7 @@ function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent, finished) {
   let ticketCount = tickets.length;
   let ticketsContainerHtml = '';
   let isOutcomeView = false;
+  let rollupItems = tickets;
 
   if (outcome && (outcome.sprint_status || outcome.state)) {
     const meta = _smgmtStateMeta(outcome);
@@ -7663,6 +8034,7 @@ function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent, finished) {
       ticketCount = issueList.length;
       ticketsContainerHtml = _smgmtOutcomeTicketListHtml(issueList, label, _smgmtRepo());
       isOutcomeView = true;
+      rollupItems = issueList.map(i => ({ number: i.number }));
     }
   } else {
     // Planning view ticket rows
@@ -7717,7 +8089,7 @@ function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent, finished) {
           ${isNext ? '<span class="smgmt-next-badge" aria-label="Next up">NEXT UP</span>' : ''}
           ${outcomeBadgeHtml}
           ${parentLineage}
-          <span class="smgmt-sprint-count"><span id="smgmt-est-${escHtml(label)}" class="smgmt-sprint-est-val">— estimated</span> &middot; ${ticketCount} ticket${ticketCount !== 1 ? 's' : ''}<span id="smgmt-tokens-${escHtml(label)}" class="smgmt-sprint-token-val" style="display:none"></span></span>
+          <span class="smgmt-sprint-count" id="smgmt-col-rollup-${escHtml(label)}">${_smgmtRollupText(rollupItems)}</span>
         </div>
         <div class="smgmt-sprint-header-right">
           ${_smgmtSortBtnHtml(label)}
@@ -7837,7 +8209,7 @@ function _smgmtRunningCardHtml(label, n, tickets) {
           <span class="smgmt-running-badge" id="smgmt-running-badge-${escHtml(label)}">
             <span class="smgmt-running-badge-dot"></span>${totalCount > 0 ? `${doneCount + skippedCount}/${totalCount}` : '—'}
           </span>
-          <span class="smgmt-sprint-count"><span id="smgmt-est-${escHtml(label)}" class="smgmt-sprint-est-val">— estimated</span> &middot; ${sourceTickets.length} ticket${sourceTickets.length !== 1 ? 's' : ''}</span>
+          <span class="smgmt-sprint-count" id="smgmt-col-rollup-${escHtml(label)}">${_smgmtRollupText(sourceTickets)}</span>
         </div>
         <div class="smgmt-sprint-header-right">
           <button class="smgmt-delete-btn" disabled title="Cancel sprint first">
@@ -7954,6 +8326,40 @@ function _fmtTicketElapsed(secs) {
 /** Return canonical minutes for a size letter (S/M/L/XL). Returns 0 for unknown. */
 function _sizeMinutes(letter) {
   return {S: 5, M: 15, L: 30, XL: 60}[letter] || 0;
+}
+
+/** Compute rollup text for a sprint column header.
+ *  items: array of {number, labels?:[{name}], size?} — size from cache takes priority over label. */
+function _smgmtRollupText(items) {
+  const count = items.length;
+  if (count === 0) return '0 tickets';
+  let totalMins = 0, unestimated = 0;
+  for (const t of items) {
+    const cached = _estDataCache[t.number];
+    let size = (cached && cached.size) ? cached.size : (t.size || null);
+    if (!size && t.labels) {
+      for (const lbl of t.labels) {
+        const m = /^size-([SMLX]+)$/.exec(lbl.name || '');
+        if (m) { size = m[1]; break; }
+      }
+    }
+    const mins = size ? _sizeMinutes(size) : 0;
+    if (mins > 0) totalMins += mins;
+    else unestimated++;
+  }
+  const countStr = `${count} ticket${count !== 1 ? 's' : ''}`;
+  if (unestimated === count) return `${countStr}, no estimates`;
+  const h = totalMins / 60;
+  const timeStr = h < 1
+    ? `~${totalMins}m`
+    : `~${parseFloat((Math.round(h * 10) / 10).toFixed(1))}h`;
+  return `${timeStr}, ${countStr}${unestimated > 0 ? ` (${unestimated} unestimated)` : ''}`;
+}
+
+/** Update the rollup span for a sprint column in-place. */
+function _smgmtUpdateColRollup(label, items) {
+  const el = document.getElementById(`smgmt-col-rollup-${label}`);
+  if (el) el.textContent = _smgmtRollupText(items);
 }
 
 /** CSS class for agent role tag: purple for coder-class, amber for tester-class. */
@@ -8421,6 +8827,16 @@ async function _smgmtReEstimateRun(issueNum, rowBtn) {
       if (sizeEl) {
         sizeEl.textContent = data.size;
         sizeEl.title = `≈${data.minutes || _sizeMinutes(data.size)} min`;
+      }
+    }
+    // Update estimate cache and refresh kanban column rollups
+    _estDataCache[issueNum] = Object.assign({}, _estDataCache[issueNum] || {}, { size: data.size });
+    _ticketsUpdateGroupHeaders();
+    if (_smgmtData) {
+      const iss = _smgmtData.issues.find(i => i.number === issueNum);
+      if (iss && iss.sprint_label) {
+        const sprintTickets = _smgmtData.issues.filter(i => i.sprint_label === iss.sprint_label);
+        _smgmtUpdateColRollup(iss.sprint_label, sprintTickets);
       }
     }
   } catch (err) {
@@ -11177,13 +11593,59 @@ const BC_ALLOWED_EXTS = new Set(['.png', '.jpg', '.jpeg', '.pdf', '.md', '.html'
 let _ntDraftId = null;
 let _ntDraftGenerated = false;
 let _ntLabels = [];          // [{name, color}, ...] from GitHub
-let _ntSelectedLabel = null; // currently applied label name
+let _ntSelectedLabels = []; // currently applied label names
 let _ntDropdownFocus = -1;   // keyboard-focused dropdown item index
 let _ntFiles = [];           // queued attachment files
+let _ntSkipLint = false;     // set true when user clicks "Proceed anyway" on linter warning
+
+// ── Ticket quality linter (issue #574) ──────────────────────────────────────
+const _LINT_ACTION_VERBS = [
+  'add','fix','update','remove','implement','migrate','refactor','document',
+  'investigate','define','create','delete','change','improve','enable','disable',
+  'support','handle','integrate','replace','upgrade','convert','build','set',
+  'extend','configure','deploy','test','validate','clean','allow','block',
+  'track','display','show','hide','load','fetch','send','parse','format',
+  'move','copy','rename','merge','split','reset','restore','archive','expose',
+  'deprecate','extract','introduce','simplify','decouple','optimize',
+];
+const _LINT_ACCEPTANCE_SIGNALS = [
+  'so that','acceptance criteria','expected','done when',
+  'definition of done','ac:','- [ ]',
+];
+
+function lintTicket(title, body) {
+  const issues = [];
+  const combined = (title + ' ' + body).trim();
+  if (combined.length < 20) {
+    issues.push('Too short — add more detail (combined text under 20 characters).');
+  }
+  const titleWords = title.toLowerCase().split(/\W+/).filter(Boolean);
+  if (!_LINT_ACTION_VERBS.some(v => titleWords.includes(v))) {
+    issues.push('No action verb in title — start with a verb like: add, fix, update, implement, refactor…');
+  }
+  const bodyLower = body.toLowerCase();
+  if (!_LINT_ACCEPTANCE_SIGNALS.some(s => bodyLower.includes(s))) {
+    issues.push('No acceptance signal — include "AC:", "done when", "expected", or a checkbox list (- [ ]) in the body.');
+  }
+  return issues;
+}
+
+function _ntShowLintWarning(issues) {
+  const list = document.getElementById('nt-lint-warn-list');
+  list.innerHTML = issues.map(i => `<li>${escHtml(i)}</li>`).join('');
+  document.getElementById('nt-lint-warn').classList.remove('hidden');
+  document.getElementById('nt-post-footer').classList.add('hidden');
+}
+
+function _ntHideLintWarning() {
+  document.getElementById('nt-lint-warn').classList.add('hidden');
+  document.getElementById('nt-post-footer').classList.remove('hidden');
+}
+// ─────────────────────────────────────────────────────────────────────────────
 
 function _ntUpdateWarnings() {
   if (!_ntDraftGenerated) return;
-  document.getElementById('nt-warn-label').classList.toggle('hidden', !!_ntSelectedLabel);
+  document.getElementById('nt-warn-label').classList.toggle('hidden', _ntSelectedLabels.length > 0);
   document.getElementById('nt-warn-attach').classList.toggle('hidden', _ntFiles.length > 0);
 }
 
@@ -11266,7 +11728,7 @@ async function _ntFetchLabels(repo) {
     if (r.ok) {
       _ntLabels = await r.json();
       // Pre-select first default label from settings if no label chosen yet
-      if (!_ntSelectedLabel) {
+      if (_ntSelectedLabels.length === 0) {
         const defaults = localStorage.getItem(_settingsKey('defaultLabels')) || '';
         const first = defaults.split(',').map(function(s) { return s.trim(); }).find(function(s) { return s; });
         if (first) {
@@ -11312,13 +11774,24 @@ function _ntRenderDropdown(query) {
   _ntDropdownFocus = -1;
 }
 
+function _ntRenderChips() {
+  const container = document.getElementById('nt-label-chip');
+  if (_ntSelectedLabels.length === 0) {
+    container.innerHTML = '';
+    container.classList.add('hidden');
+    return;
+  }
+  container.classList.remove('hidden');
+  container.innerHTML = _ntSelectedLabels.map(name => {
+    const color = _ntLabelColor(name);
+    return `<span class="nt-label-chip-item"><span class="nt-label-chip-dot" style="background:${color}"></span>${escHtml(name)}<button class="nt-label-chip-rm" type="button" data-label="${escHtml(name)}" aria-label="Remove ${escHtml(name)}">×</button></span>`;
+  }).join('');
+}
+
 function _ntSelectLabel(name) {
-  _ntSelectedLabel = name;
-  const color = _ntLabelColor(name);
-  const chip = document.getElementById('nt-label-chip');
-  chip.innerHTML = `<span class="nt-label-chip-dot" style="background:${color}"></span>${escHtml(name)}<button class="nt-label-chip-rm" type="button" aria-label="Remove label">&times;</button>`;
-  chip.classList.remove('hidden');
-  document.getElementById('nt-label-wrap').classList.add('hidden');
+  if (_ntSelectedLabels.includes(name)) return;
+  _ntSelectedLabels.push(name);
+  _ntRenderChips();
   document.getElementById('nt-label').value = '';
   document.getElementById('nt-label-dropdown').classList.add('hidden');
   document.getElementById('nt-label').setAttribute('aria-expanded', 'false');
@@ -11326,11 +11799,16 @@ function _ntSelectLabel(name) {
   _ntUpdateWarnings();
 }
 
-function _ntClearLabel() {
-  _ntSelectedLabel = null;
-  document.getElementById('nt-label-chip').classList.add('hidden');
-  document.getElementById('nt-label-wrap').classList.remove('hidden');
-  document.getElementById('nt-label').focus();
+function _ntClearLabel(name) {
+  if (name !== undefined) {
+    _ntSelectedLabels = _ntSelectedLabels.filter(l => l !== name);
+  } else {
+    _ntSelectedLabels = [];
+  }
+  _ntRenderChips();
+  if (_ntSelectedLabels.length === 0) {
+    document.getElementById('nt-label').focus();
+  }
   _ntUpdateWarnings();
 }
 
@@ -11350,7 +11828,7 @@ async function _ntCreateLabel(name) {
 }
 
 function _ntAutoSuggestLabel() {
-  if (_ntSelectedLabel || !_ntLabels.length) return;
+  if (_ntSelectedLabels.length > 0 || !_ntLabels.length) return;
   const title = (document.getElementById('nt-title').value || '').toLowerCase();
   const body = (document.getElementById('nt-body').value || '').toLowerCase();
   const text = title + ' ' + body;
@@ -11373,15 +11851,190 @@ function _ntAutoSuggestLabel() {
   if (fallback) _ntSelectLabel(fallback.name);
 }
 
+// ── Label Presets ─────────────────────────────────────────────────────────
+const _LP_MAX = 50;
+const _lpStorageOk = (() => {
+  try { localStorage.setItem('__lp_t', '1'); localStorage.removeItem('__lp_t'); return true; }
+  catch (_) { return false; }
+})();
+
+function _lpKey(projectId) { return 'label-presets:' + projectId; }
+
+function _lpLoad(projectId) {
+  if (!_lpStorageOk || !projectId) return [];
+  try { return JSON.parse(localStorage.getItem(_lpKey(projectId)) || '[]'); }
+  catch (_) { return []; }
+}
+
+function _lpSave(projectId, presets) {
+  if (!_lpStorageOk || !projectId) return;
+  try { localStorage.setItem(_lpKey(projectId), JSON.stringify(presets)); }
+  catch (_) {}
+}
+
+function _lpGetNtProjectId() {
+  const sel = document.getElementById('nt-project');
+  return sel ? sel.value : '';
+}
+
+function _lpGetBcProjectId() {
+  const sel = document.getElementById('bc-repo');
+  return sel ? sel.value : '';
+}
+
+function _lpGetBcLabels() {
+  const el = document.getElementById('bc-default-labels');
+  if (!el) return [];
+  return el.value.split(',').map(l => l.trim()).filter(Boolean);
+}
+
+function _lpApplyNtLabels(names) {
+  for (const n of names) _ntSelectLabel(n);
+}
+
+function _lpApplyBcLabels(names) {
+  const el = document.getElementById('bc-default-labels');
+  if (!el) return;
+  const current = _lpGetBcLabels();
+  const merged = [...new Set([...current, ...names])];
+  el.value = merged.join(', ');
+  const field = el.closest('.bc-settings-field--labels');
+  if (field) field.style.display = '';
+  _bcScheduleSaveDraft();
+}
+
+function _lpRenderNt() {
+  _lpRender('nt', _lpGetNtProjectId, () => _ntSelectedLabels, _lpApplyNtLabels);
+}
+
+function _lpRenderBc() {
+  _lpRender('bc', _lpGetBcProjectId, _lpGetBcLabels, _lpApplyBcLabels);
+}
+
+function _lpRender(ctx, getProjectId, getLabels, applyLabels) {
+  const listEl  = document.getElementById(ctx + '-lp-list');
+  const emptyEl = document.getElementById(ctx + '-lp-empty');
+  const errEl   = document.getElementById(ctx + '-lp-error');
+  if (!listEl) return;
+  if (errEl) { errEl.classList.add('hidden'); errEl.textContent = ''; }
+  if (!_lpStorageOk) { listEl.innerHTML = ''; if (emptyEl) emptyEl.classList.add('hidden'); return; }
+  const projectId = getProjectId();
+  const presets = _lpLoad(projectId);
+  if (presets.length === 0) {
+    listEl.innerHTML = '';
+    if (emptyEl) emptyEl.classList.remove('hidden');
+    return;
+  }
+  if (emptyEl) emptyEl.classList.add('hidden');
+  listEl.innerHTML = presets.map((p, i) => {
+    const tags = p.labels.map(l => `<span class="lp-tag">${escHtml(l)}</span>`).join('');
+    return `<div class="lp-row" draggable="true" data-idx="${i}">` +
+      `<span class="lp-drag ti ti-grip-vertical" title="Drag to reorder"></span>` +
+      `<span class="lp-name" contenteditable="true" spellcheck="false" data-idx="${i}" ` +
+        `data-ctx="${escHtml(ctx)}" data-pid="${escHtml(projectId)}" ` +
+        `onblur="_lpRenameBlur(event)" onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();}"` +
+      `>${escHtml(p.name)}</span>` +
+      `<span class="lp-tags">${tags}</span>` +
+      `<button type="button" class="lp-apply-btn" onclick="_lpApplyPreset(${i},'${ctx}')">Apply</button>` +
+      `<button type="button" class="lp-del-btn" onclick="_lpDeletePreset(${i},'${ctx}')" aria-label="Delete preset">×</button>` +
+      `</div>`;
+  }).join('');
+  _lpWireDrag(listEl, ctx, projectId);
+}
+
+function _lpSavePreset(ctx) {
+  if (!_lpStorageOk) { _lpShowError(ctx, 'Presets unavailable (storage disabled).'); return; }
+  const getProjectId = ctx === 'nt' ? _lpGetNtProjectId : _lpGetBcProjectId;
+  const getLabels    = ctx === 'nt' ? (() => _ntSelectedLabels) : _lpGetBcLabels;
+  const projectId = getProjectId();
+  if (!projectId) { _lpShowError(ctx, 'Select a project first.'); return; }
+  const labels = getLabels();
+  if (!labels || labels.length === 0) { _lpShowError(ctx, 'Select at least one label first.'); return; }
+  const presets = _lpLoad(projectId);
+  if (presets.length >= _LP_MAX) { _lpShowError(ctx, `Preset limit reached (${_LP_MAX} max)`); return; }
+  presets.push({ name: 'Preset ' + (presets.length + 1), labels: [...labels] });
+  _lpSave(projectId, presets);
+  if (ctx === 'nt') _lpRenderNt(); else _lpRenderBc();
+}
+
+function _lpApplyPreset(idx, ctx) {
+  const getProjectId = ctx === 'nt' ? _lpGetNtProjectId : _lpGetBcProjectId;
+  const applyLabels  = ctx === 'nt' ? _lpApplyNtLabels  : _lpApplyBcLabels;
+  const projectId = getProjectId();
+  if (!projectId) return;
+  const presets = _lpLoad(projectId);
+  if (!presets[idx]) return;
+  applyLabels(presets[idx].labels);
+  if (ctx === 'nt') _lpRenderNt(); else _lpRenderBc();
+}
+
+function _lpDeletePreset(idx, ctx) {
+  if (!confirm('Delete this preset?')) return;
+  const getProjectId = ctx === 'nt' ? _lpGetNtProjectId : _lpGetBcProjectId;
+  const projectId = getProjectId();
+  if (!projectId) return;
+  const presets = _lpLoad(projectId);
+  presets.splice(idx, 1);
+  _lpSave(projectId, presets);
+  if (ctx === 'nt') _lpRenderNt(); else _lpRenderBc();
+}
+
+function _lpRenameBlur(event) {
+  const el = event.target;
+  const idx = parseInt(el.dataset.idx, 10);
+  const projectId = el.dataset.pid;
+  const newName = el.textContent.trim();
+  if (!newName) { el.textContent = 'Preset'; return; }
+  const presets = _lpLoad(projectId);
+  if (!presets[idx] || presets[idx].name === newName) return;
+  presets[idx].name = newName;
+  _lpSave(projectId, presets);
+}
+
+function _lpShowError(ctx, msg) {
+  const el = document.getElementById(ctx + '-lp-error');
+  if (!el) return;
+  el.textContent = msg;
+  el.classList.remove('hidden');
+  setTimeout(() => el.classList.add('hidden'), 4000);
+}
+
+function _lpWireDrag(listEl, ctx, projectId) {
+  let dragSrc = null;
+  listEl.querySelectorAll('.lp-row').forEach(row => {
+    row.addEventListener('dragstart', e => {
+      dragSrc = parseInt(row.dataset.idx, 10);
+      e.dataTransfer.effectAllowed = 'move';
+      row.classList.add('lp-dragging');
+    });
+    row.addEventListener('dragend', () => row.classList.remove('lp-dragging'));
+    row.addEventListener('dragover', e => { e.preventDefault(); row.classList.add('lp-drag-over'); });
+    row.addEventListener('dragleave', () => row.classList.remove('lp-drag-over'));
+    row.addEventListener('drop', e => {
+      e.preventDefault();
+      row.classList.remove('lp-drag-over');
+      const tgt = parseInt(row.dataset.idx, 10);
+      if (dragSrc === null || dragSrc === tgt) return;
+      const presets = _lpLoad(projectId);
+      const [moved] = presets.splice(dragSrc, 1);
+      presets.splice(tgt, 0, moved);
+      _lpSave(projectId, presets);
+      if (ctx === 'nt') _lpRenderNt(); else _lpRenderBc();
+      dragSrc = null;
+    });
+  });
+}
+
 async function smgmtOpenNewTicket() {
   // Reset to input state
   _ntDraftId = null;
   _ntDraftGenerated = false;
-  _ntSelectedLabel = null;
+  _ntSelectedLabels = [];
   _ntLabels = [];
   _ntDropdownFocus = -1;
   document.getElementById('nt-description').value = '';
   document.getElementById('nt-label').value = '';
+  document.getElementById('nt-label-chip').innerHTML = '';
   document.getElementById('nt-label-chip').classList.add('hidden');
   document.getElementById('nt-label-wrap').classList.remove('hidden');
   document.getElementById('nt-label-dropdown').classList.add('hidden');
@@ -11392,9 +12045,17 @@ async function smgmtOpenNewTicket() {
   document.getElementById('nt-warn-label').classList.add('hidden');
   document.getElementById('nt-warn-attach').classList.add('hidden');
   document.getElementById('nt-error').classList.add('hidden');
+  document.getElementById('nt-title-error').classList.add('hidden');
+  document.getElementById('nt-body-error').classList.add('hidden');
+  document.getElementById('nt-lint-warn').classList.add('hidden');
+  document.getElementById('nt-post-footer').classList.remove('hidden');
+  _ntSkipLint = false;
   document.getElementById('nt-submit-btn').disabled = false;
   document.getElementById('nt-submit-btn').textContent = 'Generate Draft';
   document.getElementById('nt-draft-section').classList.add('hidden');
+  document.getElementById('nt-body').value = '';
+  _ntBodyTab('write');
+  _ntUpdateCharCount();
   _setBodyInert(['nt-backdrop', 'nt-modal']);
   document.getElementById('nt-backdrop').classList.remove('hidden');
   document.getElementById('nt-modal').classList.remove('hidden');
@@ -11416,9 +12077,11 @@ async function smgmtOpenNewTicket() {
     // Pre-fetch labels for the selected project
     const selectedRepo = sel.value;
     if (selectedRepo) _ntFetchLabels(selectedRepo);
+    _lpRenderNt();
   } catch (e) {
     sel.innerHTML = '<option value="">Could not load projects</option>';
     sel.disabled = false;
+    _lpRenderNt();
   }
 
   document.getElementById('nt-description').focus();
@@ -11524,14 +12187,24 @@ function _setupModals() {
   document.getElementById('nt-cancel-btn').addEventListener('click', _ntClose);
   document.getElementById('nt-post-cancel-btn').addEventListener('click', _ntClose);
   document.getElementById('nt-backdrop').addEventListener('click', _ntClose);
-  // Project change → re-fetch labels
+  document.getElementById('nt-lint-back-btn').addEventListener('click', function() {
+    _ntHideLintWarning();
+    document.getElementById('nt-title').focus();
+  });
+  document.getElementById('nt-lint-proceed-btn').addEventListener('click', function() {
+    _ntHideLintWarning();
+    _ntSkipLint = true;
+    document.getElementById('nt-post-btn').click();
+  });
+  // Project change → re-fetch labels and re-render presets
   document.getElementById('nt-project').addEventListener('change', function() {
     if (this.value) _ntFetchLabels(this.value);
+    _lpRenderNt();
   });
 
-  // Label chip removal (delegated)
+  // Label chip removal (delegated — per-chip by data-label)
   document.getElementById('nt-label-chip').addEventListener('click', function(e) {
-    if (e.target.classList.contains('nt-label-chip-rm')) _ntClearLabel();
+    if (e.target.classList.contains('nt-label-chip-rm')) _ntClearLabel(e.target.dataset.label);
   });
 
   // Label input → filter dropdown
@@ -11590,6 +12263,19 @@ function _setupModals() {
     }
   });
 
+  // Live-clear per-field errors once constraint is satisfied
+  document.getElementById('nt-title').addEventListener('input', function() {
+    if ((this.value || '').trim()) {
+      document.getElementById('nt-title-error').classList.add('hidden');
+    }
+  });
+  document.getElementById('nt-body').addEventListener('input', function() {
+    if ((this.value || '').trim().length >= 20) {
+      document.getElementById('nt-body-error').classList.add('hidden');
+    }
+    _ntUpdateCharCount();
+  });
+
   document.getElementById('nt-submit-btn').addEventListener('click', async function() {
     const repo = document.getElementById('nt-project').value;
     const description = (document.getElementById('nt-description').value || '').trim();
@@ -11617,6 +12303,7 @@ function _setupModals() {
       _ntDraftId = data.draft_id;
       document.getElementById('nt-title').value = data.title || '';
       document.getElementById('nt-body').value = data.body || '';
+      _ntUpdateCharCount();
       _ntDraftGenerated = true;
       _ntAutoSuggestLabel();
       _ntUpdateWarnings();
@@ -11635,13 +12322,36 @@ function _setupModals() {
   });
 
   document.getElementById('nt-post-btn').addEventListener('click', async function() {
-    const title = (document.getElementById('nt-title').value || '').trim();
-    const repo = document.getElementById('nt-project').value;
+    const titleEl    = document.getElementById('nt-title');
+    const bodyEl     = document.getElementById('nt-body');
+    const titleErrEl = document.getElementById('nt-title-error');
+    const bodyErrEl  = document.getElementById('nt-body-error');
+    const title = (titleEl.value || '').trim();
+    const body  = (bodyEl.value  || '').trim();
+    const repo  = document.getElementById('nt-project').value;
+    let hasError = false;
     if (!title) {
-      document.getElementById('nt-error').textContent = 'Title is required before posting.';
-      document.getElementById('nt-error').classList.remove('hidden');
-      return;
+      titleErrEl.textContent = 'Title is required.';
+      titleErrEl.classList.remove('hidden');
+      hasError = true;
+    } else {
+      titleErrEl.classList.add('hidden');
     }
+    if (body.length < 20) {
+      bodyErrEl.textContent = 'Description must be at least 20 characters.';
+      bodyErrEl.classList.remove('hidden');
+      hasError = true;
+    } else {
+      bodyErrEl.classList.add('hidden');
+    }
+    if (hasError) return;
+
+    // Quality linter (non-blocking — skipped when user proceeds anyway)
+    if (!_ntSkipLint) {
+      const lintIssues = lintTicket(title, body);
+      if (lintIssues.length > 0) { _ntShowLintWarning(lintIssues); return; }
+    }
+    _ntSkipLint = false;
 
     this.disabled = true;
     this.innerHTML = '<span class="nt-spinner"></span>Posting…';
@@ -11653,7 +12363,7 @@ function _setupModals() {
       formData.append('title', title);
       formData.append('body', document.getElementById('nt-body').value);
       formData.append('project', repo);
-      if (_ntSelectedLabel) formData.append('extra_labels', _ntSelectedLabel);
+      for (const lbl of _ntSelectedLabels) formData.append('extra_labels', lbl);
       for (const f of _ntFiles) {
         formData.append('files', f);
       }
@@ -11715,9 +12425,14 @@ let _bcDupTimer      = null;
 let _bcDragSrcIdx    = null;        // HTML5 drag source row index
 let _bcTouchSrcIdx   = null;        // touch drag source row index
 let _bcTouchGhost    = null;        // floating ghost element during touch drag
+let _bcWarnDismissed = false;       // true after user dismisses the prompt-size warning (issue #568)
+let _bcSkipLint  = false;           // set true when user clicks "Proceed anyway" on linter warning
+let _bcLintToPost = null;           // tickets pending post while lint overlay is shown
 
 const BC_MAX_PROMPTS = 50;
 const BC_WARN_PROMPTS = 40;
+const BC_PROMPT_WARN_CHARS = 1500;  // per-prompt char threshold for size warning (issue #568)
+const BC_PROMPT_WARN_ASKS  = 3;     // per-prompt action-verb sentence count threshold (issue #568)
 
 /** Called each time the Bulk Create tab becomes active. */
 function _bcInitTab() {
@@ -11744,7 +12459,32 @@ function _bcInitTab() {
     _bcRestoreDraft();
     _bcUpdateCounter();
     _bcTplRender();
+    _lpRenderBc();
+    _bcTipsInit();
   }
+}
+
+/** Restore Prompt Tips collapsed/expanded state from sessionStorage. */
+function _bcTipsInit() {
+  if (sessionStorage.getItem('bcPromptTipsOpen') === '1') {
+    const btn = document.getElementById('bc-tips-toggle');
+    const panel = document.getElementById('bc-tips-panel');
+    if (btn && panel) {
+      btn.setAttribute('aria-expanded', 'true');
+      panel.classList.add('open');
+    }
+  }
+}
+
+/** Toggle the Prompt Tips help panel. */
+function _bcTipsToggle() {
+  const btn = document.getElementById('bc-tips-toggle');
+  const panel = document.getElementById('bc-tips-panel');
+  const open = btn.getAttribute('aria-expanded') === 'true';
+  const next = !open;
+  btn.setAttribute('aria-expanded', String(next));
+  panel.classList.toggle('open', next);
+  sessionStorage.setItem('bcPromptTipsOpen', next ? '1' : '0');
 }
 
 /** Populate the repo dropdown to the current project. */
@@ -11816,6 +12556,7 @@ function _bcGoToStep1() {
 
 function bcRepoChanged() {
   _bcTplRender();
+  _lpRenderBc();
 }
 
 // ── Prompt templates (issue #531) ────────────────────────────────────────────
@@ -12027,6 +12768,7 @@ function bcClearDraft() {
 }
 
 function bcOnTextareaInput() {
+  _bcWarnDismissed = false;
   clearTimeout(_bcCounterTimer);
   _bcCounterTimer = setTimeout(_bcUpdateCounter, 200);
   _bcScheduleSaveDraft();
@@ -12132,8 +12874,29 @@ function _bcUpdateCounter() {
     }
   }
 
+  // Prompt-size warning (issue #568)
+  const warnEl = document.getElementById('bc-prompt-warn');
+  if (warnEl) {
+    const shouldWarn = !_bcWarnDismissed && prompts.some(
+      p => p.length > BC_PROMPT_WARN_CHARS || _bcCountAskSentences(p) >= BC_PROMPT_WARN_ASKS
+    );
+    warnEl.classList.toggle('hidden', !shouldWarn);
+  }
+
   // Refresh assignment dropdowns when ticket count changes
   if (_bcFiles.length > 0) _bcRenderFileQueue();
+}
+
+function _bcCountAskSentences(text) {
+  const sentences = text.split(/[.!?\n]+/).map(s => s.trim()).filter(s => s.length > 0);
+  const askRe = /\b(add|fix|create|update|remove)\b/i;
+  return sentences.filter(s => askRe.test(s)).length;
+}
+
+function bcDismissPromptWarn() {
+  _bcWarnDismissed = true;
+  const warnEl = document.getElementById('bc-prompt-warn');
+  if (warnEl) warnEl.classList.add('hidden');
 }
 
 // ── Prompt reorder list (issue #529) ────────────────────────────────────────
@@ -12849,6 +13612,35 @@ function _bcRenderCard(t) {
           <div class="bc-draft-card-actions">
             <button class="bc-btn-regenerate" id="bc-btn-regen-${t.index}"
                     onclick="bcRegenerateDraft(${t.index})">Regenerate draft</button>
+            <div class="ac-tpl-wrap" id="bc-card-ac-wrap-${t.index}" style="position:relative">
+              <button type="button" class="ac-tpl-btn" id="bc-card-ac-btn-${t.index}"
+                      aria-haspopup="true" aria-expanded="false"
+                      aria-label="Insert AC template into this ticket"
+                      onclick="bcCardAcTplOpen(${t.index})">
+                <i class="ti ti-template"></i> AC template
+              </button>
+              <div class="ac-tpl-menu hidden" id="bc-card-ac-menu-${t.index}" role="menu">
+                <button type="button" class="ac-tpl-opt" role="menuitem" data-tpl="gwt"
+                        onclick="bcCardAcTplSelect(${t.index},'gwt')" tabindex="-1">
+                  <i class="ti ti-list-details ac-tpl-opt-icon"></i>
+                  <span class="ac-tpl-opt-label">
+                    <span class="ac-tpl-opt-name">Given / When / Then</span>
+                  </span>
+                </button>
+                <button type="button" class="ac-tpl-opt" role="menuitem" data-tpl="checklist"
+                        onclick="bcCardAcTplSelect(${t.index},'checklist')" tabindex="-1">
+                  <i class="ti ti-checkbox ac-tpl-opt-icon"></i>
+                  <span class="ac-tpl-opt-label">
+                    <span class="ac-tpl-opt-name">Checklist</span>
+                  </span>
+                </button>
+              </div>
+            </div>
+            <button type="button" class="ac-tpl-btn uat-tpl-btn" id="bc-card-uat-btn-${t.index}"
+                    aria-label="Insert UAT Steps template into this ticket"
+                    onclick="bcCardUatTplInsert(${t.index})">
+              <i class="ti ti-checklist"></i> UAT template
+            </button>
             <button class="bc-btn-remove-row" onclick="bcRemoveRow(${t.index})" title="Remove this draft">Remove</button>
           </div>
         </div>
@@ -13294,6 +14086,36 @@ function _bcReviewOverlayCheck(index, checked) {
 function bcCancelReview() {
   const overlay = document.getElementById('bc-review-overlay');
   if (overlay) overlay.classList.add('hidden');
+  const lintOverlay = document.getElementById('bc-lint-overlay');
+  if (lintOverlay) lintOverlay.classList.add('hidden');
+  _bcSkipLint = false;
+  _bcLintToPost = null;
+}
+
+function _bcShowLintOverlay(problems, toPost) {
+  _bcLintToPost = toPost;
+  const list = document.getElementById('bc-lint-overlay-list');
+  list.innerHTML = problems.map(t => {
+    const preview = t.title.length > 50 ? t.title.slice(0, 50) + '…' : t.title;
+    const items = t.issues.map(i => `<li>${escHtml(i)}</li>`).join('');
+    return `<div class="bc-lint-ticket-item">
+      <div class="bc-lint-ticket-title">Ticket ${t.index + 1}: ${escHtml(preview)}</div>
+      <ul class="bc-lint-ticket-issues">${items}</ul>
+    </div>`;
+  }).join('');
+  document.getElementById('bc-lint-overlay').classList.remove('hidden');
+}
+
+function _bcLintGoBack() {
+  document.getElementById('bc-lint-overlay').classList.add('hidden');
+  _bcLintToPost = null;
+}
+
+async function _bcLintProceed() {
+  document.getElementById('bc-lint-overlay').classList.add('hidden');
+  _bcLintToPost = null;
+  _bcSkipLint = true;
+  await bcPostSelected();
 }
 
 async function bcPostSelected() {
@@ -13331,6 +14153,15 @@ async function bcPostSelected() {
     return;
   }
   if (toPost.length === 0) return;
+
+  // Quality linter (non-blocking — skipped when user proceeds anyway)
+  if (!_bcSkipLint) {
+    const problems = toPost
+      .map(t => ({ ...t, issues: lintTicket(t.title, t.body) }))
+      .filter(t => t.issues.length > 0);
+    if (problems.length > 0) { _bcShowLintOverlay(problems, toPost); return; }
+  }
+  _bcSkipLint = false;
 
   const postBtn   = document.getElementById('bc-post-github-btn');
   const reviewBtn = document.getElementById('bc-review-post-btn');
@@ -13623,7 +14454,17 @@ function _mdToHtml(md) {
 
     if (/^\s*[-*]\s+/.test(line)) {
       const items = [];
-      while (i < lines.length && /^\s*[-*]\s+/.test(lines[i])) { items.push(`<li>${_mdInline(lines[i].replace(/^\s*[-*]\s+/, ''))}</li>`); i++; }
+      while (i < lines.length && /^\s*[-*]\s+/.test(lines[i])) {
+        const raw = lines[i].replace(/^\s*[-*]\s+/, '');
+        const cbMatch = raw.match(/^\[([ xX])\]\s+(.*)$/);
+        if (cbMatch) {
+          const checked = cbMatch[1].toLowerCase() === 'x' ? ' checked' : '';
+          items.push(`<li class="task-item"><input type="checkbox" disabled${checked}> ${_mdInline(cbMatch[2])}</li>`);
+        } else {
+          items.push(`<li>${_mdInline(raw)}</li>`);
+        }
+        i++;
+      }
       out.push(`<ul class="md-ul">${items.join('')}</ul>`);
       continue;
     }
@@ -14340,6 +15181,314 @@ function _cmpEmptyState(title, msg) {
     <p><strong>${escHtml(title)}</strong><br>${escHtml(msg)}</p>
   </div>`;
 }
+
+// ── AC Template Picker (issue #567) ───────────────────────────────────────
+
+const _UAT_TEMPLATE =
+`## UAT Test Steps
+
+1. *[step description]*
+   **Expected:** *[expected outcome]*
+2. *[step description]*
+   **Expected:** *[expected outcome]*`;
+
+const _UAT_BLOCK_RE = /##\s*uat test steps/i;
+
+function _uatHasBlock(text) { return _UAT_BLOCK_RE.test(text); }
+
+function _uatInsert(textareaId, btnId) {
+  const textarea = document.getElementById(textareaId);
+  if (!textarea) return;
+  if (_uatHasBlock(textarea.value)) {
+    if (!confirm('This body already contains a UAT Test Steps block. Insert another one?')) return;
+  }
+  _acInsertAtCursor(textarea, _UAT_TEMPLATE);
+  if (btnId) {
+    const btn = document.getElementById(btnId);
+    if (btn) {
+      btn.innerHTML = `<i class="ti ti-checklist"></i> UAT Template <span style="font-size:10px;opacity:.6">(inserted)</span>`;
+      btn.classList.add('has-default');
+    }
+  }
+  textarea.focus();
+}
+
+function ntUatTplInsert() { _uatInsert('nt-body', 'nt-uat-tpl-btn'); }
+
+// ── New Ticket body: Write/Preview tabs & char count (issue #573) ─────────────
+const _NT_BODY_MAX = 65536;
+
+function _ntUpdateCharCount() {
+  const len = (document.getElementById('nt-body').value || '').length;
+  document.getElementById('nt-char-count').textContent = `${len} / ${_NT_BODY_MAX}`;
+}
+
+function _ntBodyTab(tab) {
+  const writeTab    = document.getElementById('nt-body-tab-write');
+  const previewTab  = document.getElementById('nt-body-tab-preview');
+  const textarea    = document.getElementById('nt-body');
+  const previewPane = document.getElementById('nt-body-preview');
+  if (tab === 'preview') {
+    writeTab.classList.remove('active');
+    writeTab.setAttribute('aria-selected', 'false');
+    previewTab.classList.add('active');
+    previewTab.setAttribute('aria-selected', 'true');
+    textarea.classList.add('hidden');
+    const md = textarea.value || '';
+    previewPane.innerHTML = md.trim()
+      ? `<div class="md-body">${_mdToHtml(md)}</div>`
+      : '<span class="nt-body-preview-empty">Nothing to preview</span>';
+    previewPane.classList.remove('hidden');
+  } else {
+    previewTab.classList.remove('active');
+    previewTab.setAttribute('aria-selected', 'false');
+    writeTab.classList.add('active');
+    writeTab.setAttribute('aria-selected', 'true');
+    previewPane.classList.add('hidden');
+    textarea.classList.remove('hidden');
+    textarea.focus();
+  }
+}
+
+function bcUatTplInsert() { _uatInsert('bc-textarea', 'bc-uat-tpl-btn'); }
+
+function bcBulkUatTplInsert() {
+  if (!_bcJobState) return;
+  const tickets = (_bcJobState.tickets || []).filter(
+    t => t.state === 'draft_ready' && !_bcRemovedRows.has(t.index)
+  );
+  if (tickets.length === 0) return;
+  const anyHasBlock = tickets.some(t => {
+    const el = document.getElementById(`bc-draft-body-${t.index}`);
+    return el && _uatHasBlock(el.value);
+  });
+  if (anyHasBlock) {
+    if (!confirm(`One or more drafts already contain a UAT Test Steps block. Apply UAT template to all ${tickets.length} drafts anyway?`)) return;
+  }
+  tickets.forEach(t => {
+    const el = document.getElementById(`bc-draft-body-${t.index}`);
+    if (el) _acInsertAtCursor(el, _UAT_TEMPLATE);
+  });
+  const btn = document.getElementById('bc-bulk-uat-tpl-btn');
+  if (btn) {
+    btn.innerHTML = `<i class="ti ti-checklist"></i> UAT applied <span style="font-size:10px;opacity:.6">(all)</span>`;
+    btn.classList.add('has-default');
+  }
+}
+
+function bcCardUatTplInsert(index) {
+  _uatInsert(`bc-draft-body-${index}`, `bc-card-uat-btn-${index}`);
+}
+
+const _acTplTemplates = {
+  gwt:
+`## Acceptance Criteria
+
+**Given** *[context]*
+**When** *[action]*
+**Then** *[outcome]*`,
+  checklist:
+`## Acceptance Criteria
+
+- [ ] *[AC 1: describe criterion]*
+- [ ] *[AC 2: describe criterion]*
+- [ ] *[AC 3: describe criterion]*`
+};
+
+const _acTplLabels = { gwt: 'Given / When / Then', checklist: 'Checklist' };
+
+let _acSessionDefault = null;
+
+const _AC_BLOCK_RE = /##\s*acceptance criteria/i;
+
+function _acHasAcBlock(text) { return _AC_BLOCK_RE.test(text); }
+
+function _acInsertAtCursor(textarea, text) {
+  const start = textarea.selectionStart;
+  const end   = textarea.selectionEnd;
+  const before = textarea.value.substring(0, start);
+  const after  = textarea.value.substring(end);
+  const sep = (before.length > 0 && !before.endsWith('\n\n'))
+    ? (before.endsWith('\n') ? '\n' : '\n\n') : '';
+  const insert = sep + text + '\n';
+  textarea.value = before + insert + after;
+  const newPos = before.length + insert.length;
+  textarea.selectionStart = textarea.selectionEnd = newPos;
+  textarea.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
+function _acOpenMenu(menuId, btnId) {
+  const menu = document.getElementById(menuId);
+  const btn  = document.getElementById(btnId);
+  if (!menu || !btn) return;
+  const isOpen = !menu.classList.contains('hidden');
+  _acCloseAllMenus();
+  if (!isOpen) {
+    menu.classList.remove('hidden');
+    btn.setAttribute('aria-expanded', 'true');
+    menu.querySelectorAll('.ac-tpl-opt').forEach(o => o.setAttribute('tabindex', '0'));
+    const first = menu.querySelector('.ac-tpl-opt');
+    if (first) first.focus();
+  }
+}
+
+function _acCloseAllMenus() {
+  document.querySelectorAll('.ac-tpl-menu').forEach(m => {
+    m.classList.add('hidden');
+    m.querySelectorAll('.ac-tpl-opt').forEach(o => o.setAttribute('tabindex', '-1'));
+  });
+  document.querySelectorAll('.ac-tpl-btn').forEach(b => {
+    b.setAttribute('aria-expanded', 'false');
+  });
+}
+
+function _acApplyTemplate(tplKey, textareaId, btnId, skipWarn) {
+  const textarea = document.getElementById(textareaId);
+  if (!textarea) return;
+  const tplText = _acTplTemplates[tplKey];
+  if (!tplText) return;
+  if (!skipWarn && _acHasAcBlock(textarea.value)) {
+    if (!confirm('This body already contains an Acceptance Criteria block. Insert another one?')) {
+      _acCloseAllMenus();
+      return;
+    }
+  }
+  _acInsertAtCursor(textarea, tplText);
+  _acSessionDefault = tplKey;
+  if (btnId) _acUpdateBtnLabel(btnId, tplKey);
+  _acCloseAllMenus();
+  textarea.focus();
+}
+
+function _acUpdateBtnLabel(btnId, tplKey) {
+  const btn = document.getElementById(btnId);
+  if (!btn) return;
+  if (tplKey) {
+    btn.innerHTML = `<i class="ti ti-template"></i> ${_acTplLabels[tplKey]} <span style="font-size:10px;opacity:.6">(change)</span>`;
+    btn.classList.add('has-default');
+  } else {
+    btn.innerHTML = `<i class="ti ti-template"></i> Insert AC Template`;
+    btn.classList.remove('has-default');
+  }
+}
+
+function _acSyncMenuChecks(menuId, activeTpl) {
+  const menu = document.getElementById(menuId);
+  if (!menu) return;
+  menu.querySelectorAll('.ac-tpl-opt').forEach(opt => {
+    opt.classList.toggle('is-default', opt.dataset.tpl === activeTpl);
+  });
+}
+
+// NT modal
+function ntAcTplOpen() {
+  _acSyncMenuChecks('nt-ac-tpl-menu', _acSessionDefault);
+  _acOpenMenu('nt-ac-tpl-menu', 'nt-ac-tpl-btn');
+}
+function ntAcTplSelect(tplKey) {
+  _acApplyTemplate(tplKey, 'nt-body', 'nt-ac-tpl-btn');
+}
+
+// BC step 1 (prompt textarea)
+function bcAcTplOpen() {
+  _acSyncMenuChecks('bc-ac-tpl-menu', _acSessionDefault);
+  _acOpenMenu('bc-ac-tpl-menu', 'bc-ac-tpl-btn');
+}
+function bcAcTplSelect(tplKey) {
+  _acApplyTemplate(tplKey, 'bc-textarea', 'bc-ac-tpl-btn');
+}
+
+// BC step 2 — apply to ALL draft bodies
+function bcBulkAcTplOpen() {
+  _acSyncMenuChecks('bc-bulk-ac-tpl-menu', _acSessionDefault);
+  _acOpenMenu('bc-bulk-ac-tpl-menu', 'bc-bulk-ac-tpl-btn');
+}
+function bcBulkAcTplSelect(tplKey) {
+  _acCloseAllMenus();
+  if (!_bcJobState) return;
+  const tickets = (_bcJobState.tickets || []).filter(
+    t => t.state === 'draft_ready' && !_bcRemovedRows.has(t.index)
+  );
+  if (tickets.length === 0) return;
+  const anyHasBlock = tickets.some(t => {
+    const el = document.getElementById(`bc-draft-body-${t.index}`);
+    return el && _acHasAcBlock(el.value);
+  });
+  if (anyHasBlock) {
+    if (!confirm(`One or more drafts already contain an Acceptance Criteria block. Apply ${_acTplLabels[tplKey]} template to all ${tickets.length} drafts anyway?`)) return;
+  }
+  tickets.forEach(t => {
+    const el = document.getElementById(`bc-draft-body-${t.index}`);
+    if (el) _acInsertAtCursor(el, _acTplTemplates[tplKey]);
+  });
+  _acSessionDefault = tplKey;
+  _acUpdateBtnLabel('bc-bulk-ac-tpl-btn', tplKey);
+}
+
+// BC step 2 — per-ticket
+function bcCardAcTplOpen(index) {
+  _acSyncMenuChecks(`bc-card-ac-menu-${index}`, _acSessionDefault);
+  _acOpenMenu(`bc-card-ac-menu-${index}`, `bc-card-ac-btn-${index}`);
+}
+function bcCardAcTplSelect(index, tplKey) {
+  _acApplyTemplate(tplKey, `bc-draft-body-${index}`, `bc-card-ac-btn-${index}`);
+}
+
+// Keyboard shortcut: Ctrl/Cmd+Shift+A opens picker from body editors
+document.addEventListener('keydown', function(e) {
+  if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'A' || e.key === 'a')) {
+    const ntModal   = document.getElementById('nt-modal');
+    const ntBody    = document.getElementById('nt-body');
+    const bcPane    = document.getElementById('pane-bulk-create');
+    const bcTextarea = document.getElementById('bc-textarea');
+    if (ntModal && !ntModal.classList.contains('hidden') &&
+        document.activeElement === ntBody) {
+      e.preventDefault();
+      ntAcTplOpen();
+      return;
+    }
+    if (bcPane && bcPane.classList.contains('active') &&
+        document.activeElement === bcTextarea) {
+      e.preventDefault();
+      bcAcTplOpen();
+      return;
+    }
+    // Per-ticket body in BC step 2
+    const active = document.activeElement;
+    if (active && active.id && active.id.startsWith('bc-draft-body-')) {
+      const idx = parseInt(active.id.replace('bc-draft-body-', ''), 10);
+      if (!isNaN(idx)) {
+        e.preventDefault();
+        bcCardAcTplOpen(idx);
+        return;
+      }
+    }
+  }
+});
+
+// Close menus on outside click
+document.addEventListener('click', function(e) {
+  if (!e.target.closest('.ac-tpl-wrap')) _acCloseAllMenus();
+});
+
+// Arrow key navigation within open menu
+document.addEventListener('keydown', function(e) {
+  const openMenu = document.querySelector('.ac-tpl-menu:not(.hidden)');
+  if (!openMenu) return;
+  const opts = Array.from(openMenu.querySelectorAll('.ac-tpl-opt'));
+  if (opts.length === 0) return;
+  const idx = opts.indexOf(document.activeElement);
+  if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    opts[(idx + 1) % opts.length].focus();
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    opts[(idx - 1 + opts.length) % opts.length].focus();
+  } else if (e.key === 'Escape') {
+    e.preventDefault();
+    _acCloseAllMenus();
+  }
+});
 </script>
 
 <!-- ── Inline multi-select action bar (rendered inside sprint list by JS) ── -->
@@ -14600,12 +15749,61 @@ function _cmpEmptyState(title, msg) {
     <div class="nt-draft-divider"></div>
     <div class="modal-body">
       <div class="modal-field">
-        <label class="modal-label" for="nt-title">Title</label>
-        <input class="modal-input" id="nt-title" type="text" autocomplete="off">
+        <label class="modal-label" for="nt-title">Title <span style="color:var(--red)">*</span></label>
+        <input class="modal-input" id="nt-title" type="text" autocomplete="off"
+               aria-describedby="nt-title-error" aria-required="true">
+        <div class="modal-error hidden" id="nt-title-error" role="alert"></div>
       </div>
       <div class="modal-field">
-        <label class="modal-label" for="nt-body">Body <span class="modal-hint" style="font-weight:normal;color:var(--text-muted)">(edit before posting)</span></label>
-        <textarea class="modal-input nt-body-textarea" id="nt-body" rows="10"></textarea>
+        <div class="ac-tpl-toolbar">
+          <label class="modal-label" for="nt-body" style="margin:0">Body <span class="modal-hint" style="font-weight:normal;color:var(--text-muted)">(edit before posting)</span></label>
+          <div style="display:flex;align-items:center;gap:6px;margin-left:auto">
+          <div class="ac-tpl-wrap" id="nt-ac-tpl-wrap">
+            <button type="button" class="ac-tpl-btn" id="nt-ac-tpl-btn"
+                    aria-haspopup="true" aria-expanded="false"
+                    aria-label="Insert AC template (Ctrl+Shift+A)"
+                    title="Insert AC template (Ctrl/Cmd+Shift+A)"
+                    onclick="ntAcTplOpen()">
+              <i class="ti ti-template"></i> Insert AC Template
+            </button>
+            <div class="ac-tpl-menu hidden" id="nt-ac-tpl-menu" role="menu" aria-label="AC template options">
+              <button type="button" class="ac-tpl-opt" role="menuitem" data-tpl="gwt"
+                      onclick="ntAcTplSelect('gwt')" tabindex="-1">
+                <i class="ti ti-list-details ac-tpl-opt-icon"></i>
+                <span class="ac-tpl-opt-label">
+                  <span class="ac-tpl-opt-name">Given / When / Then</span>
+                  <span class="ac-tpl-opt-desc">BDD-style acceptance criteria</span>
+                </span>
+              </button>
+              <button type="button" class="ac-tpl-opt" role="menuitem" data-tpl="checklist"
+                      onclick="ntAcTplSelect('checklist')" tabindex="-1">
+                <i class="ti ti-checkbox ac-tpl-opt-icon"></i>
+                <span class="ac-tpl-opt-label">
+                  <span class="ac-tpl-opt-name">Checklist</span>
+                  <span class="ac-tpl-opt-desc">Markdown checkbox criteria</span>
+                </span>
+              </button>
+            </div>
+          </div>
+          <button type="button" class="ac-tpl-btn uat-tpl-btn" id="nt-uat-tpl-btn"
+                  aria-label="Insert UAT Steps template"
+                  title="Insert UAT Steps template"
+                  onclick="ntUatTplInsert()">
+            <i class="ti ti-checklist"></i> Insert UAT Template
+          </button>
+          </div>
+        </div>
+        <div class="nt-body-tabs" role="tablist">
+          <button type="button" class="nt-body-tab active" id="nt-body-tab-write"
+                  role="tab" aria-selected="true" onclick="_ntBodyTab('write')">Write</button>
+          <button type="button" class="nt-body-tab" id="nt-body-tab-preview"
+                  role="tab" aria-selected="false" onclick="_ntBodyTab('preview')">Preview</button>
+        </div>
+        <textarea class="modal-input nt-body-textarea" id="nt-body" rows="10"
+                  aria-describedby="nt-body-error" aria-required="true"></textarea>
+        <div class="nt-body-preview hidden md-body" id="nt-body-preview" role="tabpanel" aria-labelledby="nt-body-tab-preview"></div>
+        <div class="nt-char-count" id="nt-char-count" aria-live="polite">0 / 65536</div>
+        <div class="modal-error hidden" id="nt-body-error" role="alert"></div>
       </div>
       <div class="modal-field">
         <label class="modal-label" for="nt-label">Label <span class="modal-hint" style="font-weight:normal;color:var(--text-muted)">(optional)</span></label>
@@ -14617,6 +15815,16 @@ function _cmpEmptyState(title, msg) {
           <div class="nt-label-dropdown hidden" id="nt-label-dropdown" role="listbox"></div>
         </div>
       </div>
+      <div class="modal-field lp-section">
+        <div class="lp-hdr">
+          <label class="modal-label" style="margin:0">Label Presets</label>
+          <button type="button" class="lp-save-btn" id="nt-lp-save-btn" onclick="_lpSavePreset('nt')">Save as Preset</button>
+        </div>
+        <div class="lp-empty hidden" id="nt-lp-empty">No presets yet — select labels and click "Save as Preset".</div>
+        <div id="nt-lp-list" class="lp-list"></div>
+        <div class="lp-error hidden" id="nt-lp-error" role="alert" aria-live="polite"></div>
+      </div>
+
       <div class="modal-field" style="margin-bottom:0">
         <label class="modal-label">Attachments <span class="modal-hint" style="font-weight:normal;color:var(--text-muted)">(optional — max 25 MB per file, 50 MB total)</span></label>
         <div class="dt-dropzone nt-dropzone" id="nt-dropzone"
@@ -14637,7 +15845,16 @@ function _cmpEmptyState(title, msg) {
       <div id="nt-warn-label" class="nt-warn-item hidden"><i class="ti ti-alert-triangle"></i> No label assigned — add one below or leave blank.</div>
       <div id="nt-warn-attach" class="nt-warn-item hidden"><i class="ti ti-alert-triangle"></i> No attachments added — add files below or leave blank.</div>
     </div>
-    <div class="modal-footer">
+    <!-- Linter warning (issue #574) -->
+    <div id="nt-lint-warn" class="lint-warn-box hidden">
+      <div class="lint-warn-heading"><i class="ti ti-alert-triangle"></i> Quality warnings</div>
+      <ul class="lint-warn-list" id="nt-lint-warn-list"></ul>
+      <div class="lint-warn-actions">
+        <button class="btn-ghost" id="nt-lint-back-btn" type="button">Go back and edit</button>
+        <button class="btn-primary" id="nt-lint-proceed-btn" type="button">Proceed anyway</button>
+      </div>
+    </div>
+    <div class="modal-footer" id="nt-post-footer">
       <button class="btn-ghost" id="nt-post-cancel-btn" type="button">Cancel</button>
       <button class="btn-primary" id="nt-post-btn" type="button">Post to GitHub</button>
     </div>

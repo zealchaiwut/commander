@@ -54,8 +54,16 @@ def _calibration_path_from_env() -> Optional[Path]:
     return p if p.is_absolute() else Path.cwd() / p
 
 
-def load_calibration(commander_dir: Optional[Path] = None) -> CalibrationResult:
+def load_calibration(
+    commander_dir: Optional[Path] = None,
+    db_records: Optional[list] = None,
+) -> CalibrationResult:
     """Load calibration data and return effective per-size minutes with sources.
+
+    db_records: optional list of {size, actual_minutes[, total_tokens]} dicts
+        from the persistent DB store (via sprint_repo.build_calibration_records).
+        When provided, these are merged with any file records; DB records take
+        precedence over file records for tiers that have enough samples.
 
     If calibration file is absent or unreadable, all sizes fall back to defaults
     and a warning is added to CalibrationResult.warnings.
@@ -67,8 +75,8 @@ def load_calibration(commander_dir: Optional[Path] = None) -> CalibrationResult:
     if cal_path is None and commander_dir is not None:
         cal_path = commander_dir / "calibration.json"
 
-    # Attempt to load records
-    raw_records: list[dict] = []
+    # Attempt to load records from file
+    file_records: list[dict] = []
     if cal_path is None:
         warns.append("No calibration path configured; using generic defaults.")
     elif not cal_path.exists():
@@ -79,26 +87,42 @@ def load_calibration(commander_dir: Optional[Path] = None) -> CalibrationResult:
     else:
         try:
             data = json.loads(cal_path.read_text())
-            raw_records = data.get("records", [])
-            if not isinstance(raw_records, list):
+            file_records = data.get("records", [])
+            if not isinstance(file_records, list):
                 warns.append(
                     f"Calibration file {cal_path} has invalid 'records' field; using generic defaults."
                 )
-                raw_records = []
+                file_records = []
         except (json.JSONDecodeError, OSError) as exc:
             warns.append(
                 f"Could not read calibration file {cal_path}: {exc}; using generic defaults."
             )
-            raw_records = []
+            file_records = []
             cal_path = None
 
-    # Group actual_minutes by size
-    buckets: dict[str, list[float]] = {s: [] for s in VALID_SIZES}
-    for rec in raw_records:
+    # DB records take priority: use DB buckets first; fill remaining from file.
+    db_buckets: dict[str, list[float]] = {s: [] for s in VALID_SIZES}
+    for rec in (db_records or []):
         size = rec.get("size", "")
         mins = rec.get("actual_minutes")
-        if size in buckets and isinstance(mins, (int, float)) and mins > 0:
-            buckets[size].append(float(mins))
+        if size in db_buckets and isinstance(mins, (int, float)) and mins > 0:
+            db_buckets[size].append(float(mins))
+
+    file_buckets: dict[str, list[float]] = {s: [] for s in VALID_SIZES}
+    for rec in file_records:
+        size = rec.get("size", "")
+        mins = rec.get("actual_minutes")
+        if size in file_buckets and isinstance(mins, (int, float)) and mins > 0:
+            file_buckets[size].append(float(mins))
+
+    # Merge: for each tier, prefer DB samples when DB has enough; else combine.
+    raw_records: list[dict] = list(db_records or []) + file_records
+    buckets: dict[str, list[float]] = {s: [] for s in VALID_SIZES}
+    for size in VALID_SIZES:
+        if len(db_buckets[size]) >= MIN_SAMPLES:
+            buckets[size] = db_buckets[size]
+        else:
+            buckets[size] = db_buckets[size] + file_buckets[size]
 
     # Build effective mappings
     effective: dict[str, int] = {}
@@ -150,3 +174,51 @@ Use the minutes values below when estimating. They replace generic defaults.
 |------|---------|--------|
 {rows}
 """
+
+
+def db_calibration_records(sprint_label: str, estimates_dir: Path) -> list:
+    """Return [{size, actual_minutes, total_tokens}] from DB for a past sprint.
+
+    Reads actual_elapsed_seconds and total_tokens from sprint_tickets, then
+    resolves each ticket's size from its estimate JSON in estimates_dir.
+    Returns only tickets that have both a DB record and an estimate file.
+    Silently returns [] if sprint_repo is unavailable or Neon is disabled.
+    """
+    try:
+        import sys
+        _sm_dir = Path(__file__).parent
+        if str(_sm_dir.parent.parent) not in sys.path:
+            sys.path.insert(0, str(_sm_dir.parent.parent))
+        from services.sprint_manager import sprint_repo
+    except Exception:
+        return []
+
+    try:
+        rollup = sprint_repo.get_sprint_rollup(sprint_label)
+    except Exception:
+        return []
+
+    records = []
+    for row in rollup["tickets"]:
+        num = row["issue_number"]
+        elapsed = row["actual_elapsed_seconds"]
+        if elapsed is None:
+            continue
+        est_path = estimates_dir / f"issue-{num}.json"
+        if not est_path.exists():
+            continue
+        try:
+            est = json.loads(est_path.read_text())
+            size = est.get("size", "")
+        except (json.JSONDecodeError, OSError):
+            continue
+        if size not in VALID_SIZES:
+            continue
+        rec: dict = {
+            "size": size,
+            "actual_minutes": round(elapsed / 60, 1),
+        }
+        if row.get("total_tokens") is not None:
+            rec["total_tokens"] = row["total_tokens"]
+        records.append(rec)
+    return records

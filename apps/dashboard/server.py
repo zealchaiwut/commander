@@ -1945,6 +1945,59 @@ def dismiss_alert(idx: int):
     return {"ok": True, "count": len(_alerts)}
 
 
+# ── docs freshness endpoints (#589) ──────────────────────────────────────────
+
+class DocsFreshnessWarning(BaseModel):
+    repo: str
+    doc_path: str
+    trigger_ref: str
+    trigger_type: str = "push"
+    trigger_url: Optional[str] = None
+
+
+class DocsFreshnessCheckPayload(BaseModel):
+    repo: str
+    trigger_ref: str
+    trigger_type: str = "push"
+    trigger_url: Optional[str] = None
+    stale_docs: list[str] = []
+    cleared_docs: list[str] = []
+
+
+@app.post("/api/docs-freshness/check", status_code=200)
+def docs_freshness_check(payload: DocsFreshnessCheckPayload):
+    """Receive a freshness check result and update the warnings table.
+
+    stale_docs — doc paths that are now stale (upsert warnings).
+    cleared_docs — doc paths that have been updated (clear warnings).
+    """
+    upserted, cleared = [], []
+    for doc in payload.stale_docs:
+        db.upsert_docs_warning(
+            repo=payload.repo,
+            doc_path=doc,
+            trigger_ref=payload.trigger_ref,
+            trigger_type=payload.trigger_type,
+            trigger_url=payload.trigger_url,
+        )
+        upserted.append(doc)
+    for doc in payload.cleared_docs:
+        db.clear_docs_warning(repo=payload.repo, doc_path=doc)
+        cleared.append(doc)
+    return {"ok": True, "upserted": upserted, "cleared": cleared}
+
+
+@app.get("/api/docs-freshness/warnings")
+def get_docs_freshness_warnings(repo: Optional[str] = None):
+    return db.get_active_docs_warnings(repo=repo)
+
+
+@app.delete("/api/docs-freshness/warnings/{warning_id}")
+def clear_docs_freshness_warning(warning_id: int):
+    found = db.clear_docs_warning_by_id(warning_id)
+    return {"ok": True, "cleared": found}
+
+
 # ── sprint status endpoint (AC-6 from #24) ───────────────────────────────────
 
 # Keyed by (project, sprint_label); populated by POST /api/sprint-status from sprint_manager.py

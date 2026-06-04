@@ -36,6 +36,7 @@ _SIZING_DIR = Path(__file__).parent
 if str(_SIZING_DIR) not in sys.path:
     sys.path.insert(0, str(_SIZING_DIR))
 from sizing import minutes_from_letter as _minutes_from_letter
+from calibration import CalibrationResult, load_calibration, calibration_prompt_section
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -111,7 +112,11 @@ _ESTIMATOR_MAX_RETRIES = 3
 _ESTIMATOR_RETRY_DELAYS = [2, 4, 8]  # exponential backoff seconds before retry attempts 2, 3, 4
 
 
-def run_estimator(issue_num: int, issue_data: dict) -> tuple[Optional[dict], Optional[str]]:
+def run_estimator(
+    issue_num: int,
+    issue_data: dict,
+    calibration: Optional[CalibrationResult] = None,
+) -> tuple[Optional[dict], Optional[str]]:
     """Invoke the estimator agent via `claude -p` and return (result, error_type).
 
     On success returns (parsed_dict, None).
@@ -129,8 +134,11 @@ def run_estimator(issue_num: int, issue_data: dict) -> tuple[Optional[dict], Opt
     title = issue_data.get("title", "")
     body  = issue_data.get("body") or "(no body)"
 
+    cal_section = calibration_prompt_section(calibration) if calibration is not None else ""
+
     prompt = f"""{instructions}
 
+{cal_section}
 ---
 
 Now estimate this issue:
@@ -198,6 +206,9 @@ Output ONLY the JSON object. No other text."""
                     if "minutes" not in parsed or not isinstance(parsed.get("minutes"), int):
                         parsed["minutes"] = _minutes_from_letter(size_val)
                     parsed["body_hash"] = hashlib.sha256(body.encode()).hexdigest()
+                    # Attach calibration sources so consumers know which tiers were calibrated
+                    if calibration is not None:
+                        parsed["calibration_sources"] = calibration.sources
                     return parsed, None
 
         # error_type is set — decide whether to retry or fail.
@@ -378,6 +389,15 @@ def main() -> None:
     estimates_dir.mkdir(parents=True, exist_ok=True)
     estimate_path = estimates_dir / f"issue-{args.issue}.json"
 
+    # Load calibration data (warns but does not fail if absent)
+    calibration = load_calibration(commander_dir)
+    for w in calibration.warnings:
+        print(f"Warning [calibration]: {w}", file=sys.stderr)
+    if calibration.calibration_path:
+        print(f"Calibration: {calibration.calibration_path} ({calibration.record_count} records)")
+    else:
+        print("Calibration: none loaded — using generic defaults")
+
     # Return cached result unless --force
     if estimate_path.exists() and not args.force:
         print(f"Cached: {estimate_path}")
@@ -400,7 +420,7 @@ def main() -> None:
         sys.exit(1)
 
     print(f"Running estimator (Haiku 4.5) for #{args.issue} ...")
-    estimate, _ = run_estimator(args.issue, issue_data)
+    estimate, _ = run_estimator(args.issue, issue_data, calibration=calibration)
     if not estimate:
         sys.exit(1)
 

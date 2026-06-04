@@ -2198,6 +2198,28 @@
     .nt-body-textarea { resize: vertical; min-height: 140px; font-family: monospace; font-size: 12px; }
     .nt-draft-divider { border-top: 1px solid var(--border); margin: 20px 0; }
 
+    /* ── New Ticket body: Write/Preview tabs & char count (issue #573) ── */
+    .nt-body-tabs {
+      display: flex; gap: 0; border-bottom: 2px solid var(--border);
+      margin-bottom: 4px;
+    }
+    .nt-body-tab {
+      padding: 4px 12px; font-size: 12px; font-weight: 500; cursor: pointer;
+      background: none; border: none; border-bottom: 2px solid transparent;
+      margin-bottom: -2px; color: var(--text-muted); font-family: inherit;
+      transition: color .15s, border-color .15s;
+    }
+    .nt-body-tab:hover { color: var(--text); }
+    .nt-body-tab.active { color: var(--text); border-bottom-color: var(--text); font-weight: 600; }
+    .nt-body-preview {
+      min-height: 140px; max-height: 340px; overflow-y: auto;
+      padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px;
+      background: var(--surface-2); font-size: 12px; line-height: 1.55; color: var(--text);
+    }
+    .nt-body-preview-empty { color: var(--text-muted); font-style: italic; }
+    .nt-char-count { font-size: 11px; color: var(--text-muted); text-align: right; margin-top: 3px; }
+    .md-body .task-item input[type=checkbox] { margin-right: 4px; vertical-align: middle; cursor: default; }
+
     /* ── AC Template Picker (issue #567) ── */
     .ac-tpl-toolbar { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
     .ac-tpl-wrap { position: relative; }
@@ -11588,6 +11610,9 @@ async function smgmtOpenNewTicket() {
   document.getElementById('nt-submit-btn').disabled = false;
   document.getElementById('nt-submit-btn').textContent = 'Generate Draft';
   document.getElementById('nt-draft-section').classList.add('hidden');
+  document.getElementById('nt-body').value = '';
+  _ntBodyTab('write');
+  _ntUpdateCharCount();
   _setBodyInert(['nt-backdrop', 'nt-modal']);
   document.getElementById('nt-backdrop').classList.remove('hidden');
   document.getElementById('nt-modal').classList.remove('hidden');
@@ -11796,6 +11821,7 @@ function _setupModals() {
     if ((this.value || '').trim().length >= 20) {
       document.getElementById('nt-body-error').classList.add('hidden');
     }
+    _ntUpdateCharCount();
   });
 
   document.getElementById('nt-submit-btn').addEventListener('click', async function() {
@@ -11825,6 +11851,7 @@ function _setupModals() {
       _ntDraftId = data.draft_id;
       document.getElementById('nt-title').value = data.title || '';
       document.getElementById('nt-body').value = data.body || '';
+      _ntUpdateCharCount();
       _ntDraftGenerated = true;
       _ntAutoSuggestLabel();
       _ntUpdateWarnings();
@@ -13905,7 +13932,17 @@ function _mdToHtml(md) {
 
     if (/^\s*[-*]\s+/.test(line)) {
       const items = [];
-      while (i < lines.length && /^\s*[-*]\s+/.test(lines[i])) { items.push(`<li>${_mdInline(lines[i].replace(/^\s*[-*]\s+/, ''))}</li>`); i++; }
+      while (i < lines.length && /^\s*[-*]\s+/.test(lines[i])) {
+        const raw = lines[i].replace(/^\s*[-*]\s+/, '');
+        const cbMatch = raw.match(/^\[([ xX])\]\s+(.*)$/);
+        if (cbMatch) {
+          const checked = cbMatch[1].toLowerCase() === 'x' ? ' checked' : '';
+          items.push(`<li class="task-item"><input type="checkbox" disabled${checked}> ${_mdInline(cbMatch[2])}</li>`);
+        } else {
+          items.push(`<li>${_mdInline(raw)}</li>`);
+        }
+        i++;
+      }
       out.push(`<ul class="md-ul">${items.join('')}</ul>`);
       continue;
     }
@@ -14656,6 +14693,41 @@ function _uatInsert(textareaId, btnId) {
 
 function ntUatTplInsert() { _uatInsert('nt-body', 'nt-uat-tpl-btn'); }
 
+// ── New Ticket body: Write/Preview tabs & char count (issue #573) ─────────────
+const _NT_BODY_MAX = 65536;
+
+function _ntUpdateCharCount() {
+  const len = (document.getElementById('nt-body').value || '').length;
+  document.getElementById('nt-char-count').textContent = `${len} / ${_NT_BODY_MAX}`;
+}
+
+function _ntBodyTab(tab) {
+  const writeTab    = document.getElementById('nt-body-tab-write');
+  const previewTab  = document.getElementById('nt-body-tab-preview');
+  const textarea    = document.getElementById('nt-body');
+  const previewPane = document.getElementById('nt-body-preview');
+  if (tab === 'preview') {
+    writeTab.classList.remove('active');
+    writeTab.setAttribute('aria-selected', 'false');
+    previewTab.classList.add('active');
+    previewTab.setAttribute('aria-selected', 'true');
+    textarea.classList.add('hidden');
+    const md = textarea.value || '';
+    previewPane.innerHTML = md.trim()
+      ? `<div class="md-body">${_mdToHtml(md)}</div>`
+      : '<span class="nt-body-preview-empty">Nothing to preview</span>';
+    previewPane.classList.remove('hidden');
+  } else {
+    previewTab.classList.remove('active');
+    previewTab.setAttribute('aria-selected', 'false');
+    writeTab.classList.add('active');
+    writeTab.setAttribute('aria-selected', 'true');
+    previewPane.classList.add('hidden');
+    textarea.classList.remove('hidden');
+    textarea.focus();
+  }
+}
+
 function bcUatTplInsert() { _uatInsert('bc-textarea', 'bc-uat-tpl-btn'); }
 
 function bcBulkUatTplInsert() {
@@ -15199,8 +15271,16 @@ document.addEventListener('keydown', function(e) {
           </button>
           </div>
         </div>
+        <div class="nt-body-tabs" role="tablist">
+          <button type="button" class="nt-body-tab active" id="nt-body-tab-write"
+                  role="tab" aria-selected="true" onclick="_ntBodyTab('write')">Write</button>
+          <button type="button" class="nt-body-tab" id="nt-body-tab-preview"
+                  role="tab" aria-selected="false" onclick="_ntBodyTab('preview')">Preview</button>
+        </div>
         <textarea class="modal-input nt-body-textarea" id="nt-body" rows="10"
                   aria-describedby="nt-body-error" aria-required="true"></textarea>
+        <div class="nt-body-preview hidden md-body" id="nt-body-preview" role="tabpanel" aria-labelledby="nt-body-tab-preview"></div>
+        <div class="nt-char-count" id="nt-char-count" aria-live="polite">0 / 65536</div>
         <div class="modal-error hidden" id="nt-body-error" role="alert"></div>
       </div>
       <div class="modal-field">

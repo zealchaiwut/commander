@@ -683,6 +683,38 @@ async def _periodic_orphan_sweep_loop() -> None:
             print(f"[periodic-sweep] unexpected error: {exc}")
 
 
+_STATUS_SYNC_INTERVAL = 30  # seconds
+
+
+async def _status_md_sync_loop() -> None:
+    """Regenerate and commit STATUS.md every 30 s when sprint progress changes."""
+    await asyncio.sleep(30)  # let server finish startup before first run
+    _sync_script = _REPO_ROOT / "scripts" / "sync_status_md.py"
+    while True:
+        try:
+            if _sync_script.exists():
+                proc = await asyncio.create_subprocess_exec(
+                    sys.executable, str(_sync_script),
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                try:
+                    stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=55)
+                except asyncio.TimeoutError:
+                    proc.kill()
+                    await proc.communicate()
+                    logger.warning("[status-sync] timed out")
+                else:
+                    if proc.returncode == 0:
+                        logger.info("[status-sync] %s", stdout.decode().strip())
+                    elif proc.returncode == 2:
+                        logger.warning("[status-sync] error: %s", stderr.decode().strip())
+                    # exit 1 = no change, normal
+        except Exception as exc:
+            logger.warning("[status-sync] unexpected error: %s", exc)
+        await asyncio.sleep(_STATUS_SYNC_INTERVAL)
+
+
 # ── Log event naming convention ──────────────────────────────────────────────
 # Event names use a <namespace>.<action> pattern with three namespaces:
 #   server.*  — server lifecycle events (startup, shutdown)
@@ -728,11 +760,13 @@ async def lifespan(app: FastAPI):
     task1 = asyncio.create_task(_cache_refresh_loop())
     task2 = asyncio.create_task(_timeout_loop())
     task3 = asyncio.create_task(_periodic_orphan_sweep_loop())
+    task4 = asyncio.create_task(_status_md_sync_loop())
     yield
     task1.cancel()
     task2.cancel()
     task3.cancel()
-    for t in (task1, task2, task3):
+    task4.cancel()
+    for t in (task1, task2, task3, task4):
         try:
             await t
         except asyncio.CancelledError:
@@ -1040,7 +1074,7 @@ async def projects_redirect(path: str):
 
 # ── Slug-based project routes (/project/<slug>/...) ───────────────────────────
 
-_VALID_PROJECT_TABS = {"sprint-mgmt", "tickets", "logs", "sprint-history"}
+_VALID_PROJECT_TABS = {"sprint-mgmt", "tickets", "logs", "sprint-history", "status"}
 
 
 @app.get("/project/{slug}")
@@ -1943,6 +1977,59 @@ def dismiss_alert(idx: int):
     if 0 <= idx < len(_alerts):
         _alerts.pop(idx)
     return {"ok": True, "count": len(_alerts)}
+
+
+# ── docs freshness endpoints (#589) ──────────────────────────────────────────
+
+class DocsFreshnessWarning(BaseModel):
+    repo: str
+    doc_path: str
+    trigger_ref: str
+    trigger_type: str = "push"
+    trigger_url: Optional[str] = None
+
+
+class DocsFreshnessCheckPayload(BaseModel):
+    repo: str
+    trigger_ref: str
+    trigger_type: str = "push"
+    trigger_url: Optional[str] = None
+    stale_docs: list[str] = []
+    cleared_docs: list[str] = []
+
+
+@app.post("/api/docs-freshness/check", status_code=200)
+def docs_freshness_check(payload: DocsFreshnessCheckPayload):
+    """Receive a freshness check result and update the warnings table.
+
+    stale_docs — doc paths that are now stale (upsert warnings).
+    cleared_docs — doc paths that have been updated (clear warnings).
+    """
+    upserted, cleared = [], []
+    for doc in payload.stale_docs:
+        db.upsert_docs_warning(
+            repo=payload.repo,
+            doc_path=doc,
+            trigger_ref=payload.trigger_ref,
+            trigger_type=payload.trigger_type,
+            trigger_url=payload.trigger_url,
+        )
+        upserted.append(doc)
+    for doc in payload.cleared_docs:
+        db.clear_docs_warning(repo=payload.repo, doc_path=doc)
+        cleared.append(doc)
+    return {"ok": True, "upserted": upserted, "cleared": cleared}
+
+
+@app.get("/api/docs-freshness/warnings")
+def get_docs_freshness_warnings(repo: Optional[str] = None):
+    return db.get_active_docs_warnings(repo=repo)
+
+
+@app.delete("/api/docs-freshness/warnings/{warning_id}")
+def clear_docs_freshness_warning(warning_id: int):
+    found = db.clear_docs_warning_by_id(warning_id)
+    return {"ok": True, "cleared": found}
 
 
 # ── sprint status endpoint (AC-6 from #24) ───────────────────────────────────
@@ -10109,6 +10196,50 @@ def update_mis_sizing_config(body: MisSizingConfigBody, project: str):
     config = {"tier_threshold": body.tier_threshold, "min_events": body.min_events}
     _mis_sizing.save_config(commander, config)
     return config
+
+
+# ── Per-project notes (NOTES.md) ──────────────────────────────────────────────
+
+class SaveNotesBody(BaseModel):
+    content: str
+    expected_mtime: Optional[float] = None
+
+
+def _notes_path(repo: str) -> Path:
+    return _project_root_path(repo) / "NOTES.md"
+
+
+@app.get("/api/projects/notes")
+def get_project_notes(repo: str = ""):
+    if not repo:
+        raise HTTPException(status_code=400, detail="repo required")
+    path = _notes_path(repo)
+    if not path.exists():
+        return {"content": "", "mtime": None, "exists": False}
+    mtime = path.stat().st_mtime
+    content = path.read_text(encoding="utf-8")
+    return {"content": content, "mtime": mtime, "exists": True}
+
+
+@app.post("/api/projects/notes")
+def save_project_notes(repo: str = "", body: SaveNotesBody = ...):
+    if not repo:
+        raise HTTPException(status_code=400, detail="repo required")
+    path = _notes_path(repo)
+    if path.exists() and body.expected_mtime is not None:
+        current_mtime = path.stat().st_mtime
+        if abs(current_mtime - body.expected_mtime) > 0.5:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "error": "conflict",
+                    "message": "NOTES.md changed on disk since last load.",
+                    "current_mtime": current_mtime,
+                },
+            )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(body.content, encoding="utf-8")
+    return {"ok": True, "mtime": path.stat().st_mtime}
 
 
 # ── Static asset routes with long-lived cache headers (issue #249) ────────────

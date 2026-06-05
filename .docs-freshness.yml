@@ -1,0 +1,28 @@
+# Docs freshness configuration for Commander.
+# Maps code paths to documentation files that must be kept in sync.
+# When files matching a code pattern change without the corresponding docs
+# changing, a stale-docs warning is raised on the dashboard.
+
+mappings:
+  - code:
+      - "apps/**"
+      - "services/**"
+      - "scripts/**"
+    docs:
+      - "README.md"
+      - "CLAUDE.md"
+
+  - code:
+      - "db/migrations/**"
+      - "migrations/**"
+    docs:
+      - "SCHEMA.md"
+
+# Paths to exclude from triggering any doc checks.
+# Supports glob patterns.
+exclude:
+  - "**/__pycache__/**"
+  - "**/*.pyc"
+  - "**/node_modules/**"
+  - ".commander/**"
+  - "tests/**"

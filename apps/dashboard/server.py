@@ -9267,6 +9267,16 @@ async def bulk_post_selected(job_id: str, body: BulkPostSelectedBody):
                 await _broadcast_bulk_event(job_id, {"type": "ticket_update", "ticket": dict(t)})
                 continue
 
+            # Never create a blank issue (defense-in-depth alongside the
+            # frontend's title validation).
+            if not (t.get("title") or "").strip():
+                t["state"] = "failed"
+                t["error"] = "Refusing to post a ticket with no title."
+                t["finished_at"] = datetime.now(timezone.utc).isoformat()
+                _persist_bulk_job(job)
+                await _broadcast_bulk_event(job_id, {"type": "ticket_update", "ticket": dict(t)})
+                continue
+
             created_issue_number: int | None = None
             pre_estimate = t.get("estimate") if t.get("estimate_state") == "sized" else None
             try:
@@ -9354,7 +9364,19 @@ async def _post_ticket_body_to_github(job_id: str, index: int, body_text: str) -
     title = t.get("title") or ""
     if not title:
         first_line = (body_text.strip().splitlines() or [""])[0]
-        title = first_line.lstrip("# ").strip()[:120] or "Untitled ticket"
+        title = first_line.lstrip("# ").strip()[:120]
+
+    # Never create an empty/"Untitled" GitHub issue: a retry on a draft with no
+    # body used to silently post a blank ticket. Refuse instead and leave the
+    # ticket failed so the user can regenerate it.
+    if not (body_text or "").strip() and not title:
+        t["state"] = "failed"
+        t["error"] = "Refusing to post an empty ticket — regenerate the draft before retrying."
+        t["last_error"] = t["error"]
+        t["finished_at"] = datetime.now(timezone.utc).isoformat()
+        _persist_bulk_job(job)
+        await _broadcast_bulk_event(job_id, {"type": "ticket_update", "ticket": dict(t)})
+        return
 
     # Body size guard (issue #261)
     if len(body_text) > _BC_BODY_SIZE_THRESHOLD:

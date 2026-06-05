@@ -8532,11 +8532,9 @@ async def _bulk_flusher(job_id: str) -> None:
             _persist_bulk_job(job)
             await _broadcast_bulk_event(job_id, {"type": "ticket_update", "ticket": dict(ticket)})
 
-            # Auto-size the draft as soon as it's ready, so estimates inform the
-            # sprint choice before posting (Estimate stage). Runs in the
-            # background — the size label is materialised onto the issue at post.
-            if ticket["state"] == "draft_ready" and ticket.get("estimate_state") != "sized":
-                asyncio.create_task(_run_bulk_draft_estimator_for_ticket(job_id, flush_idx))
+            # Estimation is NOT auto-started here. The user triggers it at the
+            # Estimate stage (POST /estimate-draft), so drafting never blocks on
+            # the estimator and the "continue" button is always available.
 
             flush_idx += 1
 

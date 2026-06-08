@@ -757,6 +757,7 @@ class IssueState:
     tester_started_at:    Optional[str] = None
     tester_finished_at:   Optional[str] = None
     failure_reason:       Optional[str] = None
+    dispatch_level:       int           = 0   # 1-based execution level; 0 = unset
 
     def to_dict(self) -> dict:
         return {
@@ -774,11 +775,12 @@ class IssueState:
             "tester_started_at":  self.tester_started_at,
             "tester_finished_at": self.tester_finished_at,
             "failure_reason":     self.failure_reason,
+            "dispatch_level":     self.dispatch_level,
         }
 
     @staticmethod
     def from_dict(d: dict) -> "IssueState":
-        return IssueState(
+        iss = IssueState(
             number             = d["number"],
             title              = d["title"],
             status             = d.get("status", "pending"),
@@ -794,6 +796,8 @@ class IssueState:
             tester_finished_at = d.get("tester_finished_at"),
             failure_reason     = d.get("failure_reason"),
         )
+        iss.dispatch_level = d.get("dispatch_level", 0)
+        return iss
 
     def set_agent_status(self, status: str) -> None:
         """Set agent_status and record ISO 8601 UTC timestamp on status_changed_at."""
@@ -4880,6 +4884,11 @@ def run_sprint(
 
     _dispatch_levels = _compute_dispatch_levels(state.issues, _plan_order, _dag_layers)
     _level_nums_by_idx = [[iss.number for iss in lvl] for lvl in _dispatch_levels]
+
+    # Tag each IssueState with its 1-based execution level (issue #613: seg bar / level-sep UI)
+    for _lvl_idx, _lvl_issues in enumerate(_dispatch_levels):
+        for _lvl_iss in _lvl_issues:
+            _lvl_iss.dispatch_level = _lvl_idx + 1
 
     start_time = time.monotonic()
 

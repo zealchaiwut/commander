@@ -5070,14 +5070,15 @@ def get_sprint_live_snapshot(sprint_label: str, project: str):
             raw_size = _letter_from_minutes(raw_minutes)
 
         issues_out.append({
-            "number":       num,
-            "title":        iss.get("title", ""),
-            "status":       derived_status,
-            "agent_status": public_agent_status,
-            "agent":        active_role,
-            "elapsed_secs": issue_elapsed,
-            "size":         raw_size,
-            "minutes":      raw_minutes,
+            "number":         num,
+            "title":          iss.get("title", ""),
+            "status":         derived_status,
+            "agent_status":   public_agent_status,
+            "agent":          active_role,
+            "elapsed_secs":   issue_elapsed,
+            "size":           raw_size,
+            "minutes":        raw_minutes,
+            "dispatch_level": iss.get("dispatch_level", 0),
         })
 
     # ── active_agent: derive from sprint state JSON (coder/tester transition) ──
@@ -5909,19 +5910,29 @@ def get_sprint_outcome(sprint_label: str, project: str):
             except OSError:
                 pass
 
+    # Sprint Summary issue (issue #613: finished outcome band links)
+    summary_issue_url: Optional[str] = state_data.get("summary_issue_url")
+    summary_issue_num: Optional[int] = None
+    if summary_issue_url:
+        m_sn = re.search(r"/issues/(\d+)", summary_issue_url)
+        if m_sn:
+            summary_issue_num = int(m_sn.group(1))
+
     return {
-        "sprint_label":   sprint_label,
-        "state":          pane_state,
-        "sprint_status":  sprint_status,
+        "sprint_label":      sprint_label,
+        "state":             pane_state,
+        "sprint_status":     sprint_status,
         "counts": {
             "done":    done_count,
             "failed":  failed_count,
             "skipped": skipped_count,
         },
-        "wall_clock_secs": state_data.get("wall_clock_secs", 0.0),
-        "ended_at":        _fmt_iso(ended_ts),
-        "issues":          result_issues,
-        "log_line_count":  log_line_count,
+        "wall_clock_secs":   state_data.get("wall_clock_secs", 0.0),
+        "ended_at":          _fmt_iso(ended_ts),
+        "issues":            result_issues,
+        "log_line_count":    log_line_count,
+        "summary_issue_url": summary_issue_url,
+        "summary_issue_num": summary_issue_num,
     }
 
 

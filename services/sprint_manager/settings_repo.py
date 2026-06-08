@@ -61,6 +61,23 @@ def get_setting(key: str, project: Optional[str] = None) -> Any:
         return {**global_val, **_load(project_row[0])}
 
 
+def get_setting_scoped(scope: str, key: str, project: Optional[str] = None) -> Any:
+    """Return the raw stored value for a specific scope/project without merging.
+
+    Returns {} if no matching row exists.
+    """
+    with _open_session() as session:
+        row = session.execute(
+            text(
+                "SELECT value FROM settings"
+                " WHERE scope = :scope AND key = :key"
+                " AND (project = :project OR (project IS NULL AND :project IS NULL))"
+            ),
+            {"scope": scope, "key": key, "project": project},
+        ).fetchone()
+        return _load(row[0]) if row else {}
+
+
 def set_setting(
     scope: str,
     key: str,

@@ -189,6 +189,8 @@ Repository: {repo}
    gh label create estimated --repo {repo} --color "e4e669" --force
    gh issue edit <N> --repo {repo} --add-label estimated
    ```
+   ⚠️  LABEL SAFETY: Use ONLY `--add-label`. NEVER use `gh issue edit --label "..."` (the bare
+   `--label` flag REPLACES ALL existing labels and will destroy sprint/size/type labels).
 
 ## Output
 

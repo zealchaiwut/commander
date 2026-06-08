@@ -50,6 +50,12 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
+# Ensure repo root is in sys.path early so `from services.*` imports work
+# regardless of how the script is invoked (direct path, cwd, etc.)
+_early_repo_root = str(Path(__file__).parent.parent.parent)
+if _early_repo_root not in sys.path:
+    sys.path.insert(0, _early_repo_root)
+
 try:
     import yaml  # PyYAML — already in requirements.txt
 except ImportError:  # pragma: no cover
@@ -1743,6 +1749,7 @@ def _call_finish_feature(
         structured_log.error("subprocess_nonzero_exit", f"finish_feature.py exited {result.returncode}", issue_num=issue_num, subprocess="finish_feature.py", exit_code=result.returncode, subprocess_stderr=result.stderr.rstrip() if result.stderr else "")
     else:
         print("  finish_feature.py completed successfully")
+    return result.returncode == 0
 
 
 # ── documentor integration (issue #103) ──────────────────────────────────────
@@ -1844,30 +1851,39 @@ def handle_post_tester(
             f"'{target_branch}': {branch_is_merged}"
         )
         if not branch_is_merged:
-            warning_body = (
-                f"**Tester exited 0 but feature branch not merged.**\n\n"
-                f"Tester subprocess finished successfully (exit code 0), but "
-                f"`{found_branch}` has not been merged into `{target_branch}`. "
-                f"This almost always means the tester agent skipped running "
-                f"`finish_feature.py`. Re-run the tester to proceed."
+            # Tester exited 0 but skipped finish_feature.py — attempt auto-merge.
+            print(f"  Issue #{issue_num}: branch not merged — attempting auto-merge via finish_feature.py ...")
+            merge_ok = _call_finish_feature(
+                issue_num, wt_root, target_branch, eff_repo, cfg, sprint_label
             )
-            try:
-                github_client.add_comment(issue_num, warning_body, repo_name=eff_repo)
-            except Exception as exc:
-                structured_log.warn("missing_merge_comment_failed", f"failed to post missing-merge comment: {exc}", issue_num=issue_num, exc=str(exc))
-            if alert_modes:
-                dispatch_alerts(
-                    alert_modes,
-                    title=f"Issue #{issue_num} skipped: tester exited 0 but branch not merged",
-                    body=warning_body[:500],
-                    issue_num=issue_num,
-                    category=FailureCategory.TESTER_REJECTED,
-                    cfg=cfg,
-                    repo=eff_repo,
+            if merge_ok:
+                branch_is_merged = _is_branch_merged_into(found_branch, target_branch)
+                print(f"  Issue #{issue_num}: auto-merge {'succeeded' if branch_is_merged else 'ran but branch still not merged'}")
+            if not branch_is_merged:
+                warning_body = (
+                    f"**Tester exited 0 but feature branch not merged.**\n\n"
+                    f"Tester subprocess finished successfully (exit code 0), but "
+                    f"`{found_branch}` has not been merged into `{target_branch}`. "
+                    f"Auto-merge via finish_feature.py {'also failed' if not merge_ok else 'ran but branch still not detected as merged'}. "
+                    f"Re-run the tester to proceed."
                 )
-            return (False,
-                    f"Issue #{issue_num}: tester exited 0 but feature branch not merged",
-                    FailureCategory.TESTER_REJECTED)
+                try:
+                    github_client.add_comment(issue_num, warning_body, repo_name=eff_repo)
+                except Exception as exc:
+                    structured_log.warn("missing_merge_comment_failed", f"failed to post missing-merge comment: {exc}", issue_num=issue_num, exc=str(exc))
+                if alert_modes:
+                    dispatch_alerts(
+                        alert_modes,
+                        title=f"Issue #{issue_num} skipped: tester exited 0 but branch not merged",
+                        body=warning_body[:500],
+                        issue_num=issue_num,
+                        category=FailureCategory.TESTER_REJECTED,
+                        cfg=cfg,
+                        repo=eff_repo,
+                    )
+                return (False,
+                        f"Issue #{issue_num}: tester exited 0 but feature branch not merged",
+                        FailureCategory.TESTER_REJECTED)
     else:
         # Branch not found locally or remotely — check git log for merge commit.
         branch_is_merged = _was_feature_merged_via_log(issue_num, target_branch)

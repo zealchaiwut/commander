@@ -143,9 +143,12 @@
     }
     .snav-pill:hover { background: var(--surface); border-color: var(--text-sub); }
     .snav-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-sub); flex-shrink: 0; }
-    .snav-dot--running { background: #16a34a; box-shadow: 0 0 0 3px rgba(22,163,74,.15); }
+    .snav-dot--running  { background: #16a34a; box-shadow: 0 0 0 3px rgba(22,163,74,.15); }
     .snav-dot--finished { background: #2563eb; }
-    .snav-uat { color: #f59e0b; font-weight: 600; }
+    .snav-dot--rework   { background: #ef4444; box-shadow: 0 0 0 3px rgba(239,68,68,.15); }
+    .snav-uat        { color: #f59e0b; font-weight: 600; }
+    .snav-inprogress { color: #2563eb; font-weight: 600; }
+    .snav-rework     { color: #ef4444; font-weight: 600; }
     .snav-caret { font-size: 12px; color: var(--text-muted); }
     .snav-panel {
       position: absolute; right: 0; top: 38px; z-index: 60;
@@ -384,6 +387,38 @@
       50%      { box-shadow: 0 0 0 4px var(--green-bg); }
     }
 
+    /* Sprint status badge (sidebar, linked to nav pill / _snavState) */
+    .sb-sprint-badge {
+      display: inline-flex; align-items: center; gap: 4px;
+      font-size: 10px; font-weight: 600;
+      padding: 1px 6px 1px 4px; border-radius: 8px;
+      flex-shrink: 0; white-space: nowrap;
+    }
+    .sb-sprint-badge .sb-sprint-dot {
+      width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0;
+    }
+    .sb-sprint-badge--running {
+      background: rgba(22,163,74,.12); color: #16a34a;
+      border: 1px solid rgba(22,163,74,.30);
+      animation: sbGlow 2s ease-in-out infinite;
+    }
+    .sb-sprint-badge--running .sb-sprint-dot  { background: #16a34a; }
+    .sb-sprint-badge--finished {
+      background: rgba(37,99,235,.10); color: #2563eb;
+      border: 1px solid rgba(37,99,235,.25);
+    }
+    .sb-sprint-badge--finished .sb-sprint-dot { background: #2563eb; }
+    .sb-sprint-badge--rework {
+      background: rgba(239,68,68,.10); color: #ef4444;
+      border: 1px solid rgba(239,68,68,.25);
+    }
+    .sb-sprint-badge--rework .sb-sprint-dot   { background: #ef4444; }
+    .sb-sprint-badge--preflight {
+      background: rgba(245,158,11,.10); color: #d97706;
+      border: 1px solid rgba(245,158,11,.25);
+    }
+    .sb-sprint-badge--preflight .sb-sprint-dot { background: #d97706; }
+
     /* Add project tile */
     .sb-add-tile {
       display: flex; align-items: center; gap: 9px;
@@ -521,10 +556,9 @@
       display: flex; align-items: flex-end;
       padding: 0 0; gap: 0;
       background: var(--surface);
-      overflow-x: auto; scrollbar-width: none;
+      overflow: visible;
       flex: 1 1 auto; min-width: 0;
     }
-    .sub-tabs::-webkit-scrollbar { display: none; }
     .stab {
       display: flex; align-items: center; gap: 6px;
       padding: 10px 0; margin-right: 24px; flex-shrink: 0;
@@ -545,6 +579,23 @@
       background: var(--surface-2); color: var(--text-sub);
       padding: 1px 5px; border-radius: 4px;
     }
+    /* ── Dropdown tab groups ── */
+    .stab-group { position: relative; display: flex; align-items: flex-end; }
+    .stab-trigger .stab-caret { font-size: 11px; margin-left: -2px; transition: transform .15s; }
+    .stab-group.open > .stab-trigger .stab-caret { transform: rotate(180deg); }
+    .stab-dropdown {
+      display: none; position: absolute; top: calc(100% + 2px); left: 0; z-index: 300;
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 8px; box-shadow: 0 4px 16px rgba(0,0,0,.15);
+      padding: 4px; min-width: 170px; flex-direction: column; gap: 1px;
+    }
+    .stab-group.open > .stab-dropdown { display: flex; }
+    .stab-dropdown .stab {
+      margin-right: 0; padding: 8px 10px; border-radius: 6px; border-bottom: none;
+      width: 100%; justify-content: flex-start;
+    }
+    .stab-dropdown .stab.active { color: var(--text); font-weight: 700; background: var(--surface-2); border-bottom: none; }
+    .stab-dropdown .stab:hover:not(.active):not(.disabled) { background: var(--surface-2); color: var(--text); border-bottom: none; }
     .bc-tab-badge {
       display: inline-flex; align-items: center; gap: 2px;
       font-size: 10px; font-weight: 600; letter-spacing: .02em;
@@ -1159,6 +1210,7 @@
     /* ── Sprint Mgmt toolbar ── */
     .smgmt-toolbar {
       display: flex; align-items: center; justify-content: space-between;
+      flex-wrap: wrap; gap: 8px;
       padding: 14px 28px;
       background: var(--bg);
     }
@@ -1166,8 +1218,26 @@
       font-size: 15px; font-weight: 700; color: var(--text); line-height: 1;
     }
     .smgmt-toolbar-actions {
-      display: flex; align-items: center; gap: 8px;
+      display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
     }
+    /* Grouped button segment (Pre-flight + Compact) */
+    .smgmt-toolbar-group {
+      display: flex; align-items: stretch;
+      border: 1px solid var(--border); border-radius: 8px; overflow: hidden;
+    }
+    .smgmt-toolbar-group .btn-ghost {
+      border-radius: 0; border: none; border-right: 1px solid var(--border);
+      margin: 0;
+    }
+    .smgmt-toolbar-group .btn-ghost:last-child { border-right: none; }
+    /* Show-more toggle for label chips */
+    .smgmt-lf-show-more {
+      display: inline-flex; align-items: center; gap: 4px;
+      padding: 3px 9px; border-radius: 20px; font-size: 12px; font-weight: 500;
+      border: 1px dashed var(--border); background: none; color: var(--text-muted);
+      cursor: pointer; white-space: nowrap; transition: color .12s, border-color .12s;
+    }
+    .smgmt-lf-show-more:hover { color: var(--text); border-color: var(--text-muted); }
 
     /* ── Sprint Summaries pane ── */
     .smgmt-summary-pane {
@@ -1537,11 +1607,6 @@
     }
     .smgmt-ticket.drag-before { box-shadow: inset 0 2px 0 var(--blue); }
     .smgmt-ticket.drag-after  { box-shadow: inset 0 -2px 0 var(--blue); }
-    /* Size-based left border (issue #562) */
-    .smgmt-ticket[data-size="S"]  { border-left: 3px solid var(--green); }
-    .smgmt-ticket[data-size="M"]  { border-left: 3px solid var(--blue); }
-    .smgmt-ticket[data-size="L"]  { border-left: 3px solid var(--amber); }
-    .smgmt-ticket[data-size="XL"] { border-left: 3px solid var(--red); }
     .smgmt-ticket.is-selected { background: var(--blue-bg); border-left: 3px solid var(--blue); }
     .smgmt-ticket-grip {
       color: var(--text-sub); font-size: 13px; flex-shrink: 0;
@@ -1577,6 +1642,13 @@
     .smgmt-status-uat        { background: var(--purple-bg); color: var(--purple); }
     .smgmt-status-done       { background: var(--green-bg); color: var(--green); }
     .smgmt-status-need-rework { background: var(--red-bg); color: var(--red); border: 1px solid rgba(239,68,68,.35); }
+
+    /* Per-ticket outcome icon */
+    .smgmt-outcome-icon { font-size: 14px; flex-shrink: 0; line-height: 1; }
+    .smgmt-outcome-icon.outcome-success  { color: #16a34a; }
+    .smgmt-outcome-icon.outcome-rework   { color: #ef4444; }
+    .smgmt-outcome-icon.outcome-active   { color: #2563eb; }
+    .smgmt-outcome-icon.outcome-backlog  { color: var(--text-sub); opacity: .45; }
 
     /* ── Outcome band + 4-state pane coloring (sprint-26 parity port) ── */
     .smgmt-sprint-card.smgmt-completed { border-color: var(--steel); box-shadow: 0 0 0 3px var(--steel-bg), 0 1px 3px rgba(0,0,0,0.05); }
@@ -1649,8 +1721,13 @@
     .sfc-branch-link:hover { text-decoration: underline; }
     .sfc-branch-link--warn { color: var(--amber); border: 1px solid var(--amber); border-radius: 4px; padding: 1px 6px; }
     .sfc-branch-link--warn:hover { opacity: .8; text-decoration: none; }
-    .sfc-summary-link  { color: var(--blue); text-decoration: none; }
+    .sfc-summary-link  { display: flex; align-items: center; gap: 4px; color: var(--blue); text-decoration: none; }
     .sfc-summary-link:hover { text-decoration: underline; }
+    .sfc-summary-disabled { display: flex; align-items: center; gap: 4px; color: var(--text-sub); }
+    .sfc-pr-link       { display: flex; align-items: center; gap: 4px; }
+    .sfc-pr-link--open { color: var(--green); text-decoration: none; }
+    .sfc-pr-link--open:hover { text-decoration: underline; }
+    .sfc-pr-link--none { color: var(--text-sub); }
     .sfc-summary-disabled { color: var(--text-muted); font-style: italic; cursor: default; }
     .sfc-summary-none  { display: inline-flex; align-items: center; gap: 5px; color: var(--text-muted); border: 1px dashed var(--border); border-radius: 4px; padding: 2px 8px; cursor: default; }
     .sfc-rework-tertiary { color: var(--text-sub); font-size: 11px; opacity: .7; cursor: default; }
@@ -2904,15 +2981,17 @@
     }
 
     /* Re-estimate action button (issue #452) */
+    .smgmt-est-wrap { display: inline-flex; align-items: center; gap: 4px; }
     .smgmt-reestimate-btn {
       padding: 1px 5px; font-size: 10px; font-weight: 600;
       background: transparent; color: var(--blue);
       border: 1px solid var(--blue); border-radius: 3px;
       cursor: pointer; flex-shrink: 0; white-space: nowrap;
       font-family: var(--mono);
-      opacity: 0; transition: opacity .15s;
+      display: none;
     }
-    .smgmt-ticket:hover .smgmt-reestimate-btn { opacity: 1; }
+    .smgmt-est-wrap:hover .smgmt-reestimate-btn,
+    .smgmt-reestimate-btn:focus-visible { display: inline-flex; align-items: center; }
     .smgmt-reestimate-btn:hover { background: var(--blue-bg); }
     .smgmt-reestimate-btn:disabled { opacity: .4 !important; cursor: not-allowed; }
     .smgmt-reestimate-error {
@@ -4476,42 +4555,60 @@
                 aria-selected="false" onclick="switchTab('logs')">
           <i class="ti ti-terminal-2"></i>Logs
         </button>
-        <button class="stab" role="tab" id="stab-bulk-create"
-                aria-selected="false" onclick="switchTab('bulk-create')">
-          <i class="ti ti-stack-2"></i>Bulk Create<span id="bc-tab-badge" class="bc-tab-badge hidden"></span>
-        </button>
-        <button class="stab" role="tab" id="stab-timeline"
-                aria-selected="false" onclick="switchTab('timeline')">
-          <i class="ti ti-timeline-event"></i>Timeline
-        </button>
-        <button class="stab" role="tab" id="stab-compare"
-                aria-selected="false" onclick="switchTab('compare')">
-          <i class="ti ti-git-compare"></i>Compare
-        </button>
-        <button class="stab" role="tab" id="stab-metrics"
-                aria-selected="false" onclick="switchTab('metrics')">
-          <i class="ti ti-chart-line"></i>Metrics
-        </button>
-        <button class="stab" role="tab" id="stab-sprint-history"
-                aria-selected="false" onclick="switchTab('sprint-history')">
-          <i class="ti ti-history"></i>Sprint history
-        </button>
-        <button class="stab" role="tab" id="stab-est-vs-actual"
-                aria-selected="false" onclick="switchTab('est-vs-actual')">
-          <i class="ti ti-ruler-measure"></i>Est vs Actual
-        </button>
-        <button class="stab" role="tab" id="stab-calibration"
-                aria-selected="false" onclick="switchTab('calibration')">
-          <i class="ti ti-adjustments-horizontal"></i>Calibration
-        </button>
-        <button class="stab" role="tab" id="stab-status"
-                aria-selected="false" onclick="switchTab('status')">
-          <i class="ti ti-pulse"></i>Status
-        </button>
-        <button class="stab" role="tab" id="stab-notes"
-                aria-selected="false" onclick="switchTab('notes')">
-          <i class="ti ti-notes"></i>Notes
-        </button>
+        <!-- Analytics dropdown group -->
+        <div class="stab-group" id="stab-group-analytics">
+          <button class="stab stab-trigger" role="tab" aria-haspopup="true"
+                  onclick="toggleStabDropdown('analytics', event)">
+            <i class="ti ti-chart-bar"></i>Analytics<i class="ti ti-chevron-down stab-caret"></i>
+          </button>
+          <div class="stab-dropdown" id="stab-dropdown-analytics">
+            <button class="stab" role="tab" id="stab-timeline"
+                    aria-selected="false" onclick="switchTab('timeline')">
+              <i class="ti ti-timeline-event"></i>Timeline
+            </button>
+            <button class="stab" role="tab" id="stab-compare"
+                    aria-selected="false" onclick="switchTab('compare')">
+              <i class="ti ti-git-compare"></i>Compare
+            </button>
+            <button class="stab" role="tab" id="stab-metrics"
+                    aria-selected="false" onclick="switchTab('metrics')">
+              <i class="ti ti-chart-line"></i>Metrics
+            </button>
+            <button class="stab" role="tab" id="stab-est-vs-actual"
+                    aria-selected="false" onclick="switchTab('est-vs-actual')">
+              <i class="ti ti-ruler-measure"></i>Est vs Actual
+            </button>
+            <button class="stab" role="tab" id="stab-calibration"
+                    aria-selected="false" onclick="switchTab('calibration')">
+              <i class="ti ti-adjustments-horizontal"></i>Calibration
+            </button>
+          </div>
+        </div>
+        <!-- More dropdown group -->
+        <div class="stab-group" id="stab-group-more">
+          <button class="stab stab-trigger" role="tab" aria-haspopup="true"
+                  onclick="toggleStabDropdown('more', event)">
+            <i class="ti ti-dots"></i>More<i class="ti ti-chevron-down stab-caret"></i>
+          </button>
+          <div class="stab-dropdown" id="stab-dropdown-more">
+            <button class="stab" role="tab" id="stab-bulk-create"
+                    aria-selected="false" onclick="switchTab('bulk-create')">
+              <i class="ti ti-stack-2"></i>Bulk Create<span id="bc-tab-badge" class="bc-tab-badge hidden"></span>
+            </button>
+            <button class="stab" role="tab" id="stab-sprint-history"
+                    aria-selected="false" onclick="switchTab('sprint-history')">
+              <i class="ti ti-history"></i>Sprint history
+            </button>
+            <button class="stab" role="tab" id="stab-status"
+                    aria-selected="false" onclick="switchTab('status')">
+              <i class="ti ti-pulse"></i>Status
+            </button>
+            <button class="stab" role="tab" id="stab-notes"
+                    aria-selected="false" onclick="switchTab('notes')">
+              <i class="ti ti-notes"></i>Notes
+            </button>
+          </div>
+        </div>
       </nav>
       <!-- Sprint status pill (GitHub-backed; works cross-machine while traveling) -->
       <div class="snav-wrap">
@@ -4567,32 +4664,27 @@
                   <button class="smgmt-ar-menu-item smgmt-ar-turn-off" onclick="_smgmtArTurnOff()">Turn off</button>
                 </div>
               </div>
-              <!-- Pre-flight checks show/hide toggle -->
-              <button class="btn-ghost smgmt-preflight-toggle" id="smgmt-preflight-toggle"
-                      onclick="_smgmtTogglePreflight()" aria-pressed="true"
-                      title="Pre-flight checks on — click to hide banners">
-                <i class="ti ti-checklist"></i>
-                <span id="smgmt-preflight-toggle-label">Pre-flight: on</span>
-              </button>
-              <!-- Compact/dense view toggle (issue #547) -->
-              <button class="btn-ghost" id="smgmt-density-toggle"
-                      onclick="_smgmtDensityToggle()" aria-pressed="false"
-                      title="Compact view — click to toggle"
-                      aria-label="Compact view">
-                <i class="ti ti-layout-list"></i>
-                <span id="smgmt-density-label">Compact</span>
-              </button>
+              <!-- Pre-flight + Compact grouped -->
+              <div class="smgmt-toolbar-group">
+                <button class="btn-ghost smgmt-preflight-toggle" id="smgmt-preflight-toggle"
+                        onclick="_smgmtTogglePreflight()" aria-pressed="true"
+                        title="Pre-flight checks on — click to hide banners">
+                  <i class="ti ti-checklist"></i>
+                  <span id="smgmt-preflight-toggle-label">Pre-flight: on</span>
+                </button>
+                <button class="btn-ghost" id="smgmt-density-toggle"
+                        onclick="_smgmtDensityToggle()" aria-pressed="false"
+                        title="Compact view — click to toggle"
+                        aria-label="Compact view">
+                  <i class="ti ti-layout-list"></i>
+                  <span id="smgmt-density-label">Compact</span>
+                </button>
+              </div>
               <button class="btn-ghost" id="smgmt-cleanup-empty-btn"
                       onclick="_smgmtCleanupEmpty()" title="Delete sprint labels with no tickets"
                       aria-label="Clean up empty sprints" style="display:none">
                 <i class="ti ti-trash"></i>
                 Clean up empty sprints
-              </button>
-              <button class="btn-ghost" id="smgmt-new-ticket-btn"
-                      onclick="smgmtOpenNewTicket()" title="Create a new ticket"
-                      aria-label="New Ticket">
-                <i class="ti ti-plus"></i>
-                New Ticket
               </button>
               <button class="btn-primary" id="smgmt-new-sprint-btn"
                       onclick="smgmtOpenNewSprint()" title="Create a new sprint"
@@ -5687,6 +5779,14 @@ function switchTab(tab, pushHistory) {
     btn.classList.toggle('active', isActive);
     btn.setAttribute('aria-selected', String(isActive));
   });
+  // Sync dropdown group trigger active state + close open dropdowns
+  closeAllStabDropdowns();
+  ['analytics', 'more'].forEach(groupName => {
+    const group = document.getElementById('stab-group-' + groupName);
+    if (!group) return;
+    const trigger = group.querySelector('.stab-trigger');
+    if (trigger) trigger.classList.toggle('active', !!group.querySelector('.stab.active'));
+  });
 
   // Show/hide panes
   ['sprint-mgmt', 'tickets', 'logs', 'bulk-create', 'timeline', 'compare', 'metrics', 'sprint-history', 'est-vs-actual', 'calibration', 'status', 'notes'].forEach(t => {
@@ -5767,6 +5867,19 @@ function switchTab(tab, pushHistory) {
     notesInit();
   }
 }
+
+// ── Dropdown tab group helpers ────────────────────────────────────────────────
+function toggleStabDropdown(name, e) {
+  e.stopPropagation();
+  const group = document.getElementById('stab-group-' + name);
+  const isOpen = group.classList.contains('open');
+  closeAllStabDropdowns();
+  if (!isOpen) group.classList.add('open');
+}
+function closeAllStabDropdowns() {
+  document.querySelectorAll('.stab-group.open').forEach(g => g.classList.remove('open'));
+}
+document.addEventListener('click', closeAllStabDropdowns);
 
 // ── Keyboard navigation for sub-tabs ─────────────────────────────────────────
 document.getElementById('sub-tabs').addEventListener('keydown', function(e) {
@@ -6113,6 +6226,8 @@ async function loadHomeData(silent) {
 
     buildSidebar(projects, runningBySlug);
     updateProjectHeader(_projectData);
+    // Re-apply sprint status badge after sidebar rebuild (uses same _snavState as nav pill)
+    if (_snavState) _snavUpdateSidebarBadge();
   } catch (err) {
     // Degrade gracefully: sidebar shows without dots, header may be empty
     if (!silent) console.warn('Home data unavailable:', err);
@@ -6129,6 +6244,8 @@ function _updateSidebarRunningBadges(runningData) {
   }
   document.querySelectorAll('.sb-proj-item[data-slug]').forEach(item => {
     const slug  = item.getAttribute('data-slug');
+    // Current project badge is managed by _snavUpdateSidebarBadge — skip it here
+    if (slug === _slug && item.querySelector('.sb-sprint-badge')) return;
     const badge = item.querySelector('.sb-running-badge');
     const count = runningBySlug[slug] || 0;
     if (count > 0) {
@@ -7423,7 +7540,9 @@ const _SMGMT_FILTER_PRIORITY = ['backlog', 'in-progress', 'sit', 'uat'];
 // Map label-name → color (hex) for dot rendering
 const _smgmtLabelColors = {};
 
+let _smgmtLastLabelIssues = [];
 function _smgmtLabelFilterRender(issues) {
+  _smgmtLastLabelIssues = issues || [];
   const row = document.getElementById('smgmt-label-filter-row');
   if (!row) return;
 
@@ -7447,8 +7566,13 @@ function _smgmtLabelFilterRender(issues) {
     return;
   }
 
+  const _SMGMT_LABEL_VISIBLE = 5;
+  const expanded = row.dataset.expanded === 'true';
+  const visible = expanded ? allLabels : allLabels.slice(0, _SMGMT_LABEL_VISIBLE);
+  const hidden = allLabels.length - _SMGMT_LABEL_VISIBLE;
+
   row.classList.remove('is-empty');
-  row.innerHTML = allLabels.map(name => {
+  row.innerHTML = visible.map(name => {
     const active = !_smgmtDeactivatedLabels.has(name);
     const color = _smgmtLabelColors[name] || 'var(--text-muted)';
     return `<button class="smgmt-lf-chip ${active ? 'is-active' : 'is-inactive'}"
@@ -7459,7 +7583,19 @@ function _smgmtLabelFilterRender(issues) {
               <span class="smgmt-lf-chip-dot" style="background:${color}"></span>
               ${escHtml(name)}
             </button>`;
-  }).join('');
+  }).join('') + (hidden > 0 && !expanded
+    ? `<button class="smgmt-lf-show-more" onclick="_smgmtLabelFilterToggleExpand(true)">+${hidden} more</button>`
+    : hidden > 0 && expanded
+    ? `<button class="smgmt-lf-show-more" onclick="_smgmtLabelFilterToggleExpand(false)">Show less</button>`
+    : '');
+}
+
+function _smgmtLabelFilterToggleExpand(expand) {
+  const row = document.getElementById('smgmt-label-filter-row');
+  if (row) {
+    row.dataset.expanded = String(expand);
+    _smgmtLabelFilterRender(_smgmtLastLabelIssues);
+  }
 }
 
 function _smgmtLabelFilterToggle(labelName) {
@@ -7510,8 +7646,9 @@ async function _smgmtFetchMissingOutcomes(orderedLabels, bySprint) {
     // Only fetch if not cached and the sprint isn't an active planning sprint
     if (_smgmtOutcomeCache[label] !== undefined) continue;
     const tickets = bySprint[label] || [];
-    const hasRework = tickets.some(t => (t.labels || []).some(l => l.name === 'need-rework' || l.name === 'needs-rework'));
-    if (tickets.length > 0 && !hasRework) continue; // open non-rework tickets → still active planning sprint
+    const hasRework    = tickets.some(t => (t.labels || []).some(l => l.name === 'need-rework' || l.name === 'needs-rework'));
+    const hasCompleted = _smgmtHasCompletedTickets(tickets);
+    if (tickets.length > 0 && !hasRework && !hasCompleted) continue; // open non-rework/non-completed tickets → still planning
     try {
       const resp = await fetch(
         `/api/sprints/${encodeURIComponent(label)}/outcome?project=${encodeURIComponent(repo)}`
@@ -7616,18 +7753,35 @@ function _capitalizeFirst(s) {
   return s ? s.charAt(0).toUpperCase() + s.slice(1).toLowerCase() : '';
 }
 
-function _smgmtEstimateBadgeHtml(issueNum) {
-  if (!Object.prototype.hasOwnProperty.call(_estDataCache, issueNum)) return '';
-  const est = _estDataCache[issueNum];
-  if (!est) return '<span class="smgmt-ticket-no-estimate">Not Estimated</span>';
-  if (!est.confidence && !est.size) return '';
-  const confClass = est.confidence ? `conf-${est.confidence.toLowerCase()}` : '';
-  const label = est.confidence ? _capitalizeFirst(est.confidence) : (est.size || 'Est');
-  return `<button class="smgmt-est-detail-btn ${escHtml(confClass)}" tabindex="0"
-    title="View estimate details"
-    onclick="event.stopPropagation();_smgmtEstimatePopoverOpen(event,${issueNum})"
-    onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();_smgmtEstimatePopoverOpen(event,${issueNum});}">
-    ${escHtml(label)}</button>`;
+function _smgmtEstimateBadgeHtml(issueNum, ticket) {
+  // JSON estimate takes priority — shows size as label, confidence as color + tooltip
+  if (Object.prototype.hasOwnProperty.call(_estDataCache, issueNum)) {
+    const est = _estDataCache[issueNum];
+    if (est && est.size) {
+      const confClass = est.confidence ? `conf-${est.confidence.toLowerCase()}` : '';
+      const confText  = est.confidence ? `${_capitalizeFirst(est.confidence)} confidence` : '';
+      const timeText  = `~${_sizeMinutes(est.size)} min`;
+      const tooltip   = [timeText, confText].filter(Boolean).join(' · ');
+      return `<button class="smgmt-est-detail-btn ${escHtml(confClass)}" tabindex="0"
+        title="${escHtml(tooltip)}"
+        onclick="event.stopPropagation();_smgmtEstimatePopoverOpen(event,${issueNum})"
+        onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();_smgmtEstimatePopoverOpen(event,${issueNum});}">
+        ${escHtml(est.size)}</button>`;
+    }
+  }
+  // Fallback: size-* GitHub label exists but no local JSON — show neutral size pill
+  if (ticket) {
+    const sizeLabel = (ticket.labels || []).find(l => /^size-[SMLX]+$/.test(l.name));
+    if (sizeLabel) {
+      const sizeVal = sizeLabel.name.replace('size-', '');
+      return `<span class="smgmt-ticket-size-pill" title="Size from label · click Re-estimate for details">${escHtml(sizeVal)}</span>`;
+    }
+  }
+  // No data at all
+  if (Object.prototype.hasOwnProperty.call(_estDataCache, issueNum)) {
+    return '<span class="smgmt-ticket-no-estimate">Not Estimated</span>';
+  }
+  return '';
 }
 
 const _RISK_FLAGS_SERIOUS = ['touches-db-schema', 'security-sensitive', 'breaks-tests'];
@@ -7896,14 +8050,15 @@ function _smgmtUpdateEstimateBadge(issueNum) {
     ? _estDataCache[issueNum] : undefined;
   if (est === undefined) return;
 
-  if (est && (est.confidence || est.size)) {
-    const confClass = est.confidence ? `conf-${est.confidence.toLowerCase()}` : '';
-    const label = est.confidence ? _capitalizeFirst(est.confidence) : (est.size || 'Est');
+  if (est && est.size) {
+    const confClass  = est.confidence ? `conf-${est.confidence.toLowerCase()}` : '';
+    const confText   = est.confidence ? `${_capitalizeFirst(est.confidence)} confidence` : '';
+    const tooltip    = [`~${_sizeMinutes(est.size)} min`, confText].filter(Boolean).join(' · ');
     const btn = document.createElement('button');
     btn.className = `smgmt-est-detail-btn ${confClass}`.trim();
-    btn.textContent = label;
+    btn.textContent = est.size;
     btn.tabIndex = 0;
-    btn.title = 'View estimate details';
+    btn.title = tooltip;
     btn.onclick = (ev) => { ev.stopPropagation(); _smgmtEstimatePopoverOpen(ev, issueNum); };
     btn.onkeydown = (ev) => {
       if (ev.key === 'Enter' || ev.key === ' ') {
@@ -7911,20 +8066,19 @@ function _smgmtUpdateEstimateBadge(issueNum) {
         _smgmtEstimatePopoverOpen(ev, issueNum);
       }
     };
-    const sizePill = row.querySelector('.smgmt-ticket-size-pill');
-    if (sizePill) {
-      sizePill.after(btn);
-    } else {
-      const titleEl = row.querySelector('.smgmt-ticket-title');
-      if (titleEl) titleEl.after(btn);
-    }
+    // Remove stale size-pill fallback (was showing label-only before JSON loaded)
+    row.querySelector('.smgmt-ticket-size-pill')?.remove();
+    const titleEl = row.querySelector('.smgmt-ticket-title');
+    if (titleEl) titleEl.after(btn);
   } else if (est === null) {
-    const noEstEl = document.createElement('span');
-    noEstEl.className = 'smgmt-ticket-no-estimate';
-    noEstEl.textContent = 'Not Estimated';
-    const sizePill = row.querySelector('.smgmt-ticket-size-pill');
-    const anchor = sizePill || row.querySelector('.smgmt-ticket-title');
-    if (anchor) anchor.after(noEstEl);
+    // No JSON and no label fallback already shown — add Not Estimated text
+    if (!row.querySelector('.smgmt-ticket-size-pill')) {
+      const noEstEl = document.createElement('span');
+      noEstEl.className = 'smgmt-ticket-no-estimate';
+      noEstEl.textContent = 'Not Estimated';
+      const titleEl = row.querySelector('.smgmt-ticket-title');
+      if (titleEl) titleEl.after(noEstEl);
+    }
   }
 
   // Insert risk flag icons after estimate badge (or size pill / title if no badge)
@@ -8342,7 +8496,7 @@ function _smgmtOutcomeTicketListHtml(issues, label, repo) {
 
     return `<div class="smgmt-ticket" data-issue="${iss.number}" data-labels="" draggable="false">
       ${circle}
-      <a class="smgmt-ticket-num" href="https://github.com/issues/${iss.number}" target="_blank" rel="noopener">#${iss.number}</a>
+      <a class="smgmt-ticket-num" href="${safeRepo ? `https://github.com/${safeRepo}/issues/${iss.number}` : '#'}" target="_blank" rel="noopener">#${iss.number}</a>
       <span class="smgmt-ticket-title" title="${escHtml(iss.title)}">${escHtml(iss.title)}</span>
       ${rejLabel}
       ${viewLogBtn}
@@ -8550,7 +8704,15 @@ function _smgmtRenderFinishCard(label, cardData, branchData, repo) {
   const cardEl  = document.getElementById(`smgmt-finish-card-${label}`);
   const blockEl = document.getElementById(`smgmt-card-${label}`);
   if (!cardEl || !blockEl) return;
-  cardEl.style.display = ''; // remove inline display:none so CSS flex takes over
+  // Only show completed/has_rework finish card when PR + summary issue both exist
+  const isFinished = cardData.state === 'completed' || cardData.state === 'has_rework';
+  const hasPr      = !!(branchData && branchData.pr_url);
+  const hasSummary = !!cardData.summary_issue_num;
+  if (isFinished && !(hasPr && hasSummary)) {
+    cardEl.style.display = 'none';
+    return;
+  }
+  cardEl.style.display = '';
   cardEl.className = `smgmt-finish-card sfc-${cardData.state}`;
   cardEl.innerHTML  = _smgmtFinishCardInnerHtml(cardData, branchData, repo);
   blockEl.classList.add('smgmt-has-card');
@@ -8565,8 +8727,8 @@ function _smgmtFinishCardInnerHtml(cardData, branchData, repo) {
     ? `<a href="${branchUrl}" target="_blank" rel="noopener" class="sfc-branch-link"><i class="ti ti-git-branch"></i> ${escHtml(branchName)}</a>`
     : `<a href="${branchUrl}" target="_blank" rel="noopener" class="sfc-branch-link sfc-branch-link--warn" title="Could not verify branch exists on GitHub"><i class="ti ti-alert-triangle"></i> ${escHtml(branchName)}</a>`;
   if (state === 'running')    return _sfcRunningHtml(cardData, branchLink, n);
-  if (state === 'completed')  return _sfcCompletedHtml(cardData, branchLink, n);
-  if (state === 'has_rework') return _sfcHasReworkHtml(cardData, branchLink, n);
+  if (state === 'completed')  return _sfcCompletedHtml(cardData, branchLink, n, branchData);
+  if (state === 'has_rework') return _sfcHasReworkHtml(cardData, branchLink, n, branchData);
   if (state === 'cancelled')  return _sfcCancelledHtml(cardData, branchLink, n);
   return '';
 }
@@ -8591,11 +8753,19 @@ function _sfcRunningHtml(d, branchLink, n) {
     </div>`;
 }
 
-function _sfcCompletedHtml(d, branchLink, n) {
+function _sfcPrLink(branchData) {
+  if (!branchData) return '';
+  if (branchData.pr_url) {
+    return `<a href="${escHtml(branchData.pr_url)}" target="_blank" rel="noopener" class="sfc-pr-link sfc-pr-link--open"><i class="ti ti-git-pull-request"></i> PR #${branchData.pr_number} ready</a>`;
+  }
+  return `<span class="sfc-pr-link sfc-pr-link--none"><i class="ti ti-git-pull-request"></i> No PR yet</span>`;
+}
+
+function _sfcCompletedHtml(d, branchLink, n, branchData) {
   const total = d.wall_clock_secs > 0 ? `<div class="sfc-time">Total: ${_fmtWallClock(d.wall_clock_secs)}</div>` : '';
   const summaryHtml = d.summary_issue_num
-    ? `<a href="${escHtml(d.summary_issue_url)}" target="_blank" rel="noopener" class="sfc-summary-link"><i class="ti ti-file-description"></i> #${d.summary_issue_num} Executive Summary</a>`
-    : `<span class="sfc-summary-disabled">Summary not available</span>`;
+    ? `<a href="${escHtml(d.summary_issue_url)}" target="_blank" rel="noopener" class="sfc-summary-link"><i class="ti ti-file-description"></i> #${d.summary_issue_num} Sprint Summary</a>`
+    : `<span class="sfc-summary-disabled"><i class="ti ti-file-description"></i> Summary not available</span>`;
   return `
     <div class="sfc-header">
       <span class="sfc-icon"><i class="ti ti-circle-check"></i></span>
@@ -8611,15 +8781,16 @@ function _sfcCompletedHtml(d, branchLink, n) {
     ${total}
     <div class="sfc-links">
       ${branchLink}
+      ${_sfcPrLink(branchData)}
       ${summaryHtml}
     </div>`;
 }
 
-function _sfcHasReworkHtml(d, branchLink, n) {
+function _sfcHasReworkHtml(d, branchLink, n, branchData) {
   const total = d.wall_clock_secs > 0 ? `<div class="sfc-time">Total: ${_fmtWallClock(d.wall_clock_secs)}</div>` : '';
   const summaryHtml = d.summary_issue_num
-    ? `<a href="${escHtml(d.summary_issue_url)}" target="_blank" rel="noopener" class="sfc-summary-link"><i class="ti ti-file-description"></i> #${d.summary_issue_num} Executive Summary</a>`
-    : `<span class="sfc-summary-disabled">Summary not available</span>`;
+    ? `<a href="${escHtml(d.summary_issue_url)}" target="_blank" rel="noopener" class="sfc-summary-link"><i class="ti ti-file-description"></i> #${d.summary_issue_num} Sprint Summary</a>`
+    : `<span class="sfc-summary-disabled"><i class="ti ti-file-description"></i> Summary not available</span>`;
   return `
     <div class="sfc-header">
       <span class="sfc-icon"><i class="ti ti-bolt"></i></span>
@@ -8636,6 +8807,7 @@ function _sfcHasReworkHtml(d, branchLink, n) {
     ${total}
     <div class="sfc-links">
       ${branchLink}
+      ${_sfcPrLink(branchData)}
       ${summaryHtml}
       <span class="sfc-rework-tertiary" title="Available after re-run sub-label ships">Re-run rework → sprint-${n}.1</span>
     </div>`;
@@ -9393,14 +9565,22 @@ function _smgmtTicketRowHtml(ticket, label) {
   const statusLabel = hasRework ? 'needs rework' : (ticket.status || 'backlog');
   const isSelected = _smgmtSelectedIssues.has(ticket.number);
 
+  // Outcome icon: green check (done/uat), red X (needs-rework), blue dot (active), gray circle (backlog)
+  const _outcomeMap = {
+    'done':         ['ti-circle-check', 'outcome-success'],
+    'uat':          ['ti-circle-check', 'outcome-success'],
+    'needs-rework': ['ti-circle-x',     'outcome-rework'],
+    'in-progress':  ['ti-circle-dot',   'outcome-active'],
+    'sit':          ['ti-circle-dot',   'outcome-active'],
+  };
+  const _oc = hasRework ? ['ti-circle-x', 'outcome-rework'] : (_outcomeMap[ticket.status] || ['ti-circle', 'outcome-backlog']);
+  const outcomeIconHtml = `<i class="ti ${_oc[0]} smgmt-outcome-icon ${_oc[1]}" title="${escHtml(statusLabel)}"></i>`;
+
   const sizeLabel = (ticket.labels || []).find(l => /^size-[SMLX]+$/.test(l.name));
   const hasEstimate = !!sizeLabel;
   const sizeValue = sizeLabel ? sizeLabel.name.replace('size-', '') : '';
-  const sizePillHtml = sizeLabel
-    ? `<span class="smgmt-ticket-size-pill">${escHtml(sizeValue)}</span>`
-    : '';
   const sizeAttr = sizeValue ? ` data-size="${escHtml(sizeValue)}"` : '';
-  const estimateBadgeHtml = _smgmtEstimateBadgeHtml(ticket.number);
+  const estimateBadgeHtml = _smgmtEstimateBadgeHtml(ticket.number, ticket);
   const reEstBtnHtml = (hasEstimate && _smgmtEstimatorAvailable)
     ? `<button class="smgmt-reestimate-btn" tabindex="0" title="Re-estimate this ticket"
          onclick="event.stopPropagation();_smgmtReEstimate(${ticket.number},this)"
@@ -9431,14 +9611,16 @@ function _smgmtTicketRowHtml(ticket, label) {
              onclick="event.stopPropagation()"
              onchange="_smgmtToggleSelect(${ticket.number}, this.checked)">
       <i class="ti ti-grip-vertical smgmt-ticket-grip"></i>
+      ${outcomeIconHtml}
       <a class="smgmt-ticket-num" href="${escHtml(ticket.url || '#')}" target="_blank"
          rel="noopener" draggable="false" onclick="event.stopPropagation()">#${ticket.number}</a>
-      <span class="smgmt-ticket-title" title="${escHtml(ticket.title)}">${escHtml(ticket.title)}</span>
-      ${sizePillHtml}${estimateBadgeHtml}${riskFlagIconsHtml}${conflictBadgeHtml}${depOrderBadgeHtml}${reEstBtnHtml}
-      <span class="smgmt-ticket-status ${statusClass}">${escHtml(statusLabel)}</span>
       <button class="btn-view-log" tabindex="0" title="View issue log"
               onclick="event.stopPropagation();openLvIssueLog(${ticket.number},'${escHtml(label)}',_smgmtRepo()||'')">
         <i class="ti ti-file-text"></i></button>
+      <span class="smgmt-ticket-title" title="${escHtml(ticket.title)}">${escHtml(ticket.title)}</span>
+      ${conflictBadgeHtml}${depOrderBadgeHtml}${riskFlagIconsHtml}
+      <span class="smgmt-est-wrap">${estimateBadgeHtml}${reEstBtnHtml}</span>
+      ${statusLabel !== 'backlog' ? `<span class="smgmt-ticket-status ${statusClass}">${escHtml(statusLabel)}</span>` : ''}
       <button class="smgmt-row-menu-btn" tabindex="0" title="Ticket actions" aria-haspopup="true" aria-expanded="false"
               onclick="event.stopPropagation();_smgmtRowMenuOpen(event, ${ticket.number}, '${escHtml(label)}', ${hasEstimate})"
               onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();_smgmtRowMenuOpen(event,${ticket.number},'${escHtml(label)}',${hasEstimate});}">
@@ -9512,10 +9694,12 @@ async function _smgmtCheckEstimatorHealth() {
 
 function _smgmtInjectReEstimateButtons() {
   document.querySelectorAll('.smgmt-ticket').forEach(row => {
-    if (!row.querySelector('.smgmt-ticket-size-pill')) return;
+    if (!row.querySelector('.smgmt-ticket-size-pill, .smgmt-est-detail-btn')) return;
     if (row.querySelector('.smgmt-reestimate-btn, .smgmt-reestimate-spinner, .smgmt-reestimate-error')) return;
     const issueNum = parseInt(row.dataset.issue, 10);
     if (!issueNum) return;
+    const wrap = row.querySelector('.smgmt-est-wrap');
+    if (wrap) { wrap.appendChild(_makeReEstimateBtn(issueNum)); return; }
     const statusEl = row.querySelector('.smgmt-ticket-status');
     if (statusEl) statusEl.before(_makeReEstimateBtn(issueNum));
     else row.appendChild(_makeReEstimateBtn(issueNum));
@@ -15438,6 +15622,54 @@ function _snavRepo() {
   return _cachedFullRepo[_slug] || '';
 }
 
+/** Sync the sidebar project badge for the current project with _snavState.
+ *  Single source of truth: same data as the nav pill. */
+function _snavUpdateSidebarBadge() {
+  const d = _snavState;
+  const item = document.querySelector(`.sb-proj-item[data-slug="${CSS.escape(_slug)}"]`);
+  if (!item) return;
+
+  // Clear all previous badges for this project
+  item.querySelector('.sb-sprint-badge')?.remove();
+  item.querySelector('.sb-running-badge')?.remove();
+  item.querySelector('.sb-status-dot')?.remove();
+
+  if (!d || !d.has_sprint) return;
+
+  const cols = d.columns || {};
+  const rework  = cols['needs-rework'] || 0;
+  const active  = (cols['in-progress'] || 0) + (cols['sit'] || 0) + (cols['uat'] || 0);
+
+  let badgeClass, label;
+  if (d.state === 'finished') {
+    badgeClass = 'sb-sprint-badge--finished';
+    label = 'Finished';
+  } else if (rework > 0) {
+    badgeClass = 'sb-sprint-badge--rework';
+    label = 'Has rework';
+  } else if (active > 0) {
+    badgeClass = 'sb-sprint-badge--running';
+    label = 'Running';
+  } else {
+    badgeClass = 'sb-sprint-badge--preflight';
+    label = 'Pre-flight';
+  }
+
+  const cols2 = d.columns || {};
+  const total = d.total || 0;
+  // Finished: show completed (done+uat). Running: show dispatched (left backlog).
+  const num = (d.state === 'finished')
+    ? (d.done || 0) + (d.uat || 0)
+    : total - (cols2.backlog || 0);
+  const text = `S${d.sprint} ${num}/${total}`;
+
+  const badge = document.createElement('span');
+  badge.className = `sb-sprint-badge ${badgeClass}`;
+  badge.setAttribute('aria-label', `Sprint ${d.sprint}: ${num}/${total} · ${label}`);
+  badge.innerHTML = `<span class="sb-sprint-dot"></span>${escHtml(text)}`;
+  item.appendChild(badge);
+}
+
 async function snavRefresh() {
   const repo = _snavRepo();
   if (!repo) return;
@@ -15446,6 +15678,7 @@ async function snavRefresh() {
     if (!res.ok) return;
     _snavState = await res.json();
     _snavRenderPill();
+    _snavUpdateSidebarBadge();
     if (_snavPanelOpen) _snavRenderPanel();
   } catch (_) { /* leave last-known pill state */ }
 }
@@ -15460,14 +15693,18 @@ function _snavRenderPill() {
   pill.classList.remove('hidden');
   if (d.state === 'finished') {
     dot.className = 'snav-dot snav-dot--finished';
-    text.textContent = `S${d.sprint} · done`;
+    const completedF = (d.done || 0) + (d.uat || 0);
+    text.textContent = `S${d.sprint} · ${completedF}/${d.total || 0}`;
   } else {
-    dot.className = 'snav-dot snav-dot--running';
-    // UAT counts as "done" — this project tracks UAT (awaiting sign-off) as the
-    // completed state, not a separate closed state.
-    const completed = (d.done || 0) + (d.uat || 0);
+    const cols = d.columns || {};
+    // During a running sprint, show dispatched/total (tickets that have left backlog).
+    // This matches the sprint runner's "[X/N]" log counter so both stay in sync.
+    const dispatched = (d.total || 0) - (cols.backlog || 0);
     const uatHtml = d.uat > 0 ? ` · <span class="snav-uat">${d.uat} UAT</span>` : '';
-    text.innerHTML = `S${d.sprint} · ${completed}/${d.total}${uatHtml}`;
+    const rework = cols['needs-rework'] || 0;
+    const reworkHtml = rework > 0 ? ` · <span class="snav-rework">${rework} ↩</span>` : '';
+    dot.className = rework > 0 ? 'snav-dot snav-dot--rework' : 'snav-dot snav-dot--running';
+    text.innerHTML = `S${d.sprint} · ${dispatched}/${d.total || 0}${uatHtml}${reworkHtml}`;
   }
 }
 
@@ -15496,16 +15733,26 @@ function _snavRenderPanel() {
         ? `<a class="snav-link" href="${escHtml(d.summary_issue.url)}" target="_blank" rel="noopener">Issue ↗</a>`
         : '');
 
-  const cols  = d.columns || {};
   const total = d.total || 0;
 
-  // Stats row: ticket totals, plus total time once the summary loads (finished).
-  const statsRow = `<div class="snav-stats">
-    <div class="snav-stat"><span class="snav-stat-val">${total}</span><span class="snav-stat-lbl">tickets</span></div>
-    <div class="snav-stat"><span class="snav-stat-val">${(d.done || 0) + (d.uat || 0)}</span><span class="snav-stat-lbl">done</span></div>
-    <div class="snav-stat"><span class="snav-stat-val snav-uat">${d.uat || 0}</span><span class="snav-stat-lbl">in UAT</span></div>
-    ${finished ? `<div class="snav-stat" id="snav-duration"><span class="snav-stat-val">…</span><span class="snav-stat-lbl">total time</span></div>` : ''}
-  </div>`;
+  // Stats row: tickets / in-progress / UAT / needs-rework (running) or done/time (finished)
+  const cols = d.columns || {};
+  const inProgress = cols['in-progress'] || 0;
+  const uatCount   = d.uat || 0;
+  const rework     = cols['needs-rework'] || 0;
+  const statsRow = finished
+    ? `<div class="snav-stats">
+        <div class="snav-stat"><span class="snav-stat-val">${total}</span><span class="snav-stat-lbl">tickets</span></div>
+        <div class="snav-stat"><span class="snav-stat-val">${(d.done || 0) + uatCount}</span><span class="snav-stat-lbl">done</span></div>
+        <div class="snav-stat"><span class="snav-stat-val snav-uat">${uatCount}</span><span class="snav-stat-lbl">in UAT</span></div>
+        <div class="snav-stat" id="snav-duration"><span class="snav-stat-val">…</span><span class="snav-stat-lbl">total time</span></div>
+      </div>`
+    : `<div class="snav-stats">
+        <div class="snav-stat"><span class="snav-stat-val">${total}</span><span class="snav-stat-lbl">tickets</span></div>
+        <div class="snav-stat"><span class="snav-stat-val snav-inprogress">${inProgress}</span><span class="snav-stat-lbl">in-progress</span></div>
+        <div class="snav-stat"><span class="snav-stat-val snav-uat">${uatCount}</span><span class="snav-stat-lbl">UAT</span></div>
+        ${rework > 0 ? `<div class="snav-stat"><span class="snav-stat-val snav-rework">${rework}</span><span class="snav-stat-lbl">rework</span></div>` : ''}
+      </div>`;
 
   const tail = (finished && d.summary_issue)
     ? `<div class="snav-summary-md md-body" id="snav-summary-md"><span class="snav-muted">Loading summary…</span></div>`
@@ -17177,7 +17424,7 @@ document.addEventListener('keydown', function(e) {
   </div>
   <div class="modal-footer">
     <button class="btn-ghost" type="button" onclick="_smgmtReEstimateClose()">Cancel</button>
-    <button class="btn-blue" type="button" id="re-est-confirm-btn" onclick="_smgmtReEstimateConfirm()">Confirm</button>
+    <button class="btn-primary" type="button" id="re-est-confirm-btn" onclick="_smgmtReEstimateConfirm()">Confirm</button>
   </div>
 </div>
 

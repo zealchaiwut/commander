@@ -1366,25 +1366,45 @@ def get_sprint_nav_status(repo: str = ""):
     if not sprint_nums:
         return {"has_sprint": False}
 
-    # Current sprint = highest-numbered sprint label that actually has issues.
-    current = None
-    raw_issues: list[dict] = []
+    # Current sprint = sprint with active work (in-progress/SIT/UAT) if any,
+    # otherwise the highest-numbered sprint that has issues.
+    # This ensures a running sprint takes precedence over a higher-numbered
+    # planned sprint that only has backlog tickets.
+    all_sprint_issues: dict[int, list[dict]] = {}
     for n in reversed(sprint_nums):
         issues = github_client.list_issues(n, repo_name=repo_name)
         if issues:
+            all_sprint_issues[n] = issues
+
+    if not all_sprint_issues:
+        return {"has_sprint": False}
+
+    _ACTIVE_COLS = {"in-progress", "sit", "uat", "needs-rework"}
+    current = None
+    raw_issues: list[dict] = []
+    # Prefer the lowest-numbered sprint that has active (non-backlog) work
+    for n in sorted(all_sprint_issues.keys()):
+        issues = all_sprint_issues[n]
+        if any(i.get("column") in _ACTIVE_COLS for i in issues):
             current = n
             raw_issues = issues
             break
+    # Fall back to highest-numbered sprint with any issues
     if current is None:
-        return {"has_sprint": False}
+        current = max(all_sprint_issues.keys())
+        raw_issues = all_sprint_issues[current]
 
-    # The "Sprint N Executive Summary" issue is labeled sprint-summary/docs (not
-    # sprint-N), so it isn't in raw_issues and won't inflate counts. Detect it by
-    # title to decide finished vs running.
+    # The "Sprint N Executive Summary" issue may carry sprint-N label in addition
+    # to sprint-summary. Strip any sprint-summary / docs issues so they don't
+    # inflate ticket counts.
+    _NON_WORK_LABELS = {"sprint-summary", "docs", "documentation"}
+    work_issues = [
+        i for i in raw_issues
+        if not _NON_WORK_LABELS & {lbl.get("name", "") for lbl in i.get("labels", [])}
+    ]
     summary_issue = _finished_sprint_summaries(repo_name).get(f"sprint-{current}")
-    work_issues = raw_issues
 
-    columns = {"backlog": 0, "in-progress": 0, "sit": 0, "uat": 0, "done": 0}
+    columns = {"backlog": 0, "in-progress": 0, "sit": 0, "uat": 0, "done": 0, "needs-rework": 0}
     for i in work_issues:
         col = i.get("column", "backlog")
         columns[col] = columns.get(col, 0) + 1
@@ -2955,7 +2975,7 @@ SPRINT_MANAGER_PATH = _REPO_ROOT / "services" / "sprint_manager" / "sprint_manag
 SPRINT_LOG_PATH = Path(__file__).parent / "sprints" / "sprint_run.log"
 # Read once; default covers both dashboard banner and ntfy push notifications.
 # sprint_manager validates the value — no validation added here.
-_ALERT_MODES = os.environ.get("COMMANDER_ALERT_MODES", "dashboard_banner,ntfy")
+_ALERT_MODES = os.environ.get("COMMANDER_ALERT_MODES", "dashboard-banner,ntfy")
 
 
 def _sprint_label_sort_key(label: str) -> tuple:
@@ -6538,7 +6558,27 @@ def get_sprint_branch_status(sprint_label: str, project: str):
     except Exception:
         exists = False
 
-    return {"exists": exists, "branch": branch_name}
+    # Check for open PR from sprint branch → develop or master
+    pr_url: Optional[str] = None
+    pr_number: Optional[int] = None
+    pr_title: Optional[str] = None
+    try:
+        pr_result = subprocess.run(
+            ["gh", "pr", "list", "--repo", repo, "--head", branch_name,
+             "--state", "open", "--json", "number,url,title", "--limit", "1"],
+            capture_output=True, text=True, timeout=3,
+        )
+        if pr_result.returncode == 0 and pr_result.stdout.strip():
+            prs = json.loads(pr_result.stdout)
+            if prs:
+                pr_url = prs[0].get("url")
+                pr_number = prs[0].get("number")
+                pr_title = prs[0].get("title")
+    except Exception:
+        pass
+
+    return {"exists": exists, "branch": branch_name,
+            "pr_url": pr_url, "pr_number": pr_number, "pr_title": pr_title}
 
 
 class SprintRerunBody(BaseModel):
@@ -6932,10 +6972,13 @@ def get_sprint_finish_preview(owner: str, repo_name: str, label: str):
     except subprocess.CalledProcessError as e:
         raise _gh_error(e)
 
+    _NON_WORK_LABELS_FP = {"sprint-summary", "docs", "documentation"}
     uat_tickets = []
     non_uat_tickets = []
     for iss in sprint_issues:
         label_names = {lbl["name"] for lbl in iss.get("labels", [])}
+        if _NON_WORK_LABELS_FP & label_names:
+            continue
         number = iss["number"]
         title = iss.get("title", "")
         if "UAT" in label_names:
@@ -8140,11 +8183,9 @@ async def _materialise_bulk_estimate(
 ) -> None:
     """Persist a pre-computed draft estimate onto the freshly-posted issue.
 
-    Writes the estimate to .commander/estimates/issue-<N>.json, then runs
-    estimate_issue.py with --save-label/--save-comment, which takes the cached
-    path (no model re-run) to apply the size-S/M/L/XL label, the estimate
-    comment, and the 'estimated' status. Falls back to a live estimation if the
-    cache can't be written.
+    Applies directly via github_client (no second LLM call): writes the JSON
+    cache, adds the size-* + estimated labels, and posts the estimate comment.
+    Falls back to a live estimation only if the JSON write fails.
     """
     import logging as _logging
 
@@ -8158,30 +8199,69 @@ async def _materialise_bulk_estimate(
         )
     except Exception as exc:
         _logging.warning(f"[bulk-estimator] could not cache estimate for #{issue_number}: {exc}")
-        # No cache → fall back to a full (model) estimation of the posted issue.
         if _ESTIMATE_ISSUE_SCRIPT.exists():
             await _run_bulk_estimator_for_ticket(job_id, index, issue_number, repo)
         return
 
-    if not _ESTIMATE_ISSUE_SCRIPT.exists():
-        return
-    semaphore = _get_bulk_estimator_semaphore()
+    # Apply size label + estimated label directly — no subprocess, no model re-run.
+    size = estimate.get("size")
     try:
-        async with semaphore:
-            proc = await asyncio.create_subprocess_exec(
-                sys.executable, str(_ESTIMATE_ISSUE_SCRIPT),
-                "--issue", str(issue_number), "--repo", repo,
-                "--save-comment", "--save-label",
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
+        if size:
+            github_client.update_labels(
+                issue_number,
+                add=[f"size-{size}", "estimated"],
+                remove=[],
+                repo_name=repo,
             )
-            await asyncio.wait_for(proc.communicate(), timeout=120.0)
     except Exception as exc:
-        _logging.warning(f"[bulk-estimator] applying cached estimate to #{issue_number} failed: {exc}")
+        _logging.warning(f"[bulk-estimator] label apply failed for #{issue_number}: {exc}")
+
+    # Post estimate comment directly.
+    try:
+        comment_body = _format_estimate_comment(estimate)
+        await asyncio.to_thread(github_client.add_comment, issue_number, comment_body, repo)
+    except Exception as exc:
+        _logging.warning(f"[bulk-estimator] comment post failed for #{issue_number}: {exc}")
 
     github_client.invalidate("open_issues_body:")
     github_client.invalidate("open_issues:")
     github_client.invalidate("issues:")
+
+
+def _format_estimate_comment(estimate: dict) -> str:
+    """Format an estimate dict as the structured GitHub comment body."""
+    size       = estimate.get("size", "?")
+    minutes    = estimate.get("minutes") or {"S": 5, "M": 15, "L": 30, "XL": 60}.get(size, "?")
+    hours      = estimate.get("estimated_hours", "?")
+    confidence = estimate.get("confidence", "?")
+    files      = estimate.get("files_likely_affected", [])
+    depends_on = estimate.get("depends_on", [])
+    blocks     = estimate.get("blocks", [])
+    risk_flags = estimate.get("risk_flags", [])
+    summary    = estimate.get("summary", "")
+    files_str  = "\n".join(f"  - `{f}`" for f in files) if files else "  - (none)"
+    risk_str   = ", ".join(f"`{r}`" for r in risk_flags) if risk_flags else "none"
+    deps_str   = ", ".join(f"#{d}" for d in depends_on) if depends_on else "none"
+    blocks_str = ", ".join(f"#{b}" for b in blocks) if blocks else "none"
+    return f"""## Estimate
+
+| Field | Value |
+|---|---|
+| Size | **{size}** |
+| Minutes | {minutes} |
+| Estimated hours | {hours}h |
+| Confidence | {confidence} |
+| Risk flags | {risk_str} |
+| Depends on | {deps_str} |
+| Blocks | {blocks_str} |
+
+**Files likely affected:**
+{files_str}
+
+**Summary:** {summary}
+
+---
+*Generated by Issue Estimator (Haiku 4.5)*"""
 
 
 @app.post("/api/tickets/create", status_code=201)

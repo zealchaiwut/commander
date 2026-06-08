@@ -1546,6 +1546,13 @@
     .rr-controls { display: flex; gap: 10px; align-items: center; margin-bottom: 6px; }
     .rr-controls a { font-size: 12px; color: var(--accent); cursor: pointer; text-decoration: underline; }
     .rr-uat-warning { font-size: 12px; color: var(--amber); margin-top: 8px; min-height: 18px; }
+    /* Finish Sprint modal extras */
+    .rr-cat-summary { background: var(--surface-2); color: var(--text-muted); }
+    .fs-actions { margin-top: 12px; display: flex; flex-direction: column; gap: 6px; }
+    .fs-action-row { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-sub); }
+    .fs-action-row i { color: var(--green); font-size: 14px; }
+    .fs-action-row a { color: var(--accent); text-decoration: none; font-size: 12px; }
+    .fs-action-row a:hover { text-decoration: underline; }
     .smgmt-delete-btn {
       padding: 4px 10px; font-size: 11px; font-weight: 600;
       background: var(--surface); color: var(--red); border: 1px solid var(--red);
@@ -11410,72 +11417,146 @@ async function _smgmtCleanupConfirm() {
 }
 // ───────────────────────────────────────────────────────────────────────────
 
+// ── Finish Sprint modal ───────────────────────────────────────────────────────
+
+let _fsLabel = null;
+let _fsPreview = null;
+
+function _fsOpen() {
+  _setBodyInert(['fs-backdrop', 'fs-modal']);
+  document.getElementById('fs-backdrop').classList.remove('hidden');
+  document.getElementById('fs-modal').classList.remove('hidden');
+}
+function _fsClose() {
+  document.getElementById('fs-backdrop').classList.add('hidden');
+  document.getElementById('fs-modal').classList.add('hidden');
+  _clearBodyInert();
+  _fsLabel = null;
+  _fsPreview = null;
+}
+function _fsCatClass(cat) {
+  if (cat === 'UAT')            return 'rr-cat-uat';
+  if (cat === 'SIT')            return 'rr-cat-sit';
+  if (cat === 'needs-rework')   return 'rr-cat-rework';
+  if (cat === 'sprint-summary') return 'rr-cat-summary';
+  return 'rr-cat-queued';
+}
+function _fsSelectAll(checked) {
+  document.querySelectorAll('#fs-ticket-list input[type=checkbox]').forEach(cb => { cb.checked = checked; });
+}
+
 async function smgmtFinishSprint(label) {
   const repo = _smgmtRepo();
   if (!repo) return;
-  const displayName = sprintLabelDisplay(label);
+  _fsLabel = label;
+  _fsPreview = null;
   const parts = repo.split('/');
   const owner = parts[0];
   const repoName = parts.slice(1).join('/');
 
-  let preview;
+  document.getElementById('fs-modal-title').textContent = `Finish ${sprintLabelDisplay(label)}?`;
+  document.getElementById('fs-loading').classList.remove('hidden');
+  document.getElementById('fs-content').classList.add('hidden');
+  document.getElementById('fs-error').classList.add('hidden');
+  document.getElementById('fs-error').textContent = '';
+  const confirmBtn = document.getElementById('fs-confirm-btn');
+  if (confirmBtn) { confirmBtn.disabled = true; confirmBtn.textContent = 'Finish Sprint'; }
+  _fsOpen();
+
   try {
     const res = await fetch(
       `/api/projects/${encodeURIComponent(owner)}/${encodeURIComponent(repoName)}/sprints/${encodeURIComponent(label)}/finish-preview`
     );
-    preview = await res.json();
-    if (!res.ok) { alert('Error: ' + (preview.detail || 'unknown error')); return; }
+    if (!res.ok) throw new Error(await res.text());
+    const preview = await res.json();
+    _fsPreview = preview;
+
+    if (preview.conflict_error) {
+      throw new Error(preview.conflict_error);
+    }
+
+    const listEl = document.getElementById('fs-ticket-list');
+    const allTickets = preview.all_tickets || [];
+    if (allTickets.length === 0) {
+      listEl.innerHTML = '<div style="padding:10px;color:var(--text-muted);font-size:13px">No open tickets in this sprint.</div>';
+    } else {
+      listEl.innerHTML = allTickets.map(t => {
+        const catClass = _fsCatClass(t.category);
+        const catLabel = t.category === 'sprint-summary' ? 'SUMMARY' : t.category.toUpperCase();
+        return `<label class="rr-ticket-row">
+          <input type="checkbox" checked data-issue="${t.number}" onchange="">
+          <span class="rr-ticket-num">#${t.number}</span>
+          <span class="rr-ticket-title" title="${escHtml(t.title)}">${escHtml(t.title)}</span>
+          <span class="rr-ticket-cat ${catClass}">${escHtml(catLabel)}</span>
+        </label>`;
+      }).join('');
+    }
+
+    const actionsEl = document.getElementById('fs-actions');
+    const actionRows = [];
+    if (preview.sprint_pr) {
+      actionRows.push(`<div class="fs-action-row"><i class="ti ti-git-merge"></i> Merge sprint PR
+        <a href="${escHtml(preview.sprint_pr.url)}" target="_blank" rel="noopener">#${preview.sprint_pr.number}</a></div>`);
+    }
+    actionRows.push('<div class="fs-action-row"><i class="ti ti-circle-check"></i> Close all selected tickets</div>');
+    actionRows.push('<div class="fs-action-row"><i class="ti ti-tag-off"></i> Remove sprint label</div>');
+    actionsEl.innerHTML = actionRows.join('');
+
+    document.getElementById('fs-loading').classList.add('hidden');
+    document.getElementById('fs-content').classList.remove('hidden');
+    if (confirmBtn) confirmBtn.disabled = false;
   } catch (e) {
-    alert('Failed to load preview: ' + e.message);
-    return;
+    document.getElementById('fs-loading').classList.add('hidden');
+    const errEl = document.getElementById('fs-error');
+    errEl.textContent = 'Failed to load preview: ' + e.message;
+    errEl.classList.remove('hidden');
   }
+}
 
-  if (preview.conflict_error) { alert(preview.conflict_error); return; }
+async function _fsConfirm() {
+  const repo = _smgmtRepo();
+  if (!_fsLabel || !repo || !_fsPreview) return;
+  const parts = repo.split('/');
+  const owner = parts[0];
+  const repoName = parts.slice(1).join('/');
 
-  const uatTickets = preview.uat_tickets || [];
-  const nonUatTickets = preview.non_uat_tickets || [];
-  const totalOpen = uatTickets.length + nonUatTickets.length;
+  const checkboxes = Array.from(document.querySelectorAll('#fs-ticket-list input[type=checkbox]'));
+  const selectedNums = checkboxes.filter(c => c.checked).map(c => parseInt(c.dataset.issue, 10));
 
-  let msg;
-  if (totalOpen === 0) {
-    msg = `Finish ${displayName}?\n\nNo open issues in this sprint.`;
-  } else if (nonUatTickets.length === 0) {
-    msg = `Finish ${displayName}?\n\nThis will close ${uatTickets.length} ticket${uatTickets.length !== 1 ? 's' : ''} currently in UAT (they've passed sprint-branch testing).`;
-  } else {
-    const createNote = preview.next_sprint_exists ? '' : ' (will be created)';
-    const nonUatList = nonUatTickets.map(t => `  #${t.number} [${t.status}] ${t.title}`).join('\n');
-    const uatLine = uatTickets.length > 0 ? `\n\n${uatTickets.length} UAT ticket${uatTickets.length !== 1 ? 's' : ''} will be closed as completed.` : '';
-    msg = `Finish ${displayName}?\n\n${nonUatTickets.length} ticket${nonUatTickets.length !== 1 ? 's' : ''} not in UAT will be moved to ${preview.next_sprint_label}${createNote}:\n${nonUatList}${uatLine}`;
-  }
-
-  if (!confirm(msg)) return;
-
-  _smgmtBoardLock(`Finishing ${displayName}…`);
+  const confirmBtn = document.getElementById('fs-confirm-btn');
+  if (confirmBtn) { confirmBtn.disabled = true; confirmBtn.textContent = 'Finishing…'; }
 
   try {
     const res = await fetch(
-      `/api/projects/${encodeURIComponent(owner)}/${encodeURIComponent(repoName)}/sprints/${encodeURIComponent(label)}/finish`,
+      `/api/projects/${encodeURIComponent(owner)}/${encodeURIComponent(repoName)}/sprints/${encodeURIComponent(_fsLabel)}/finish`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ confirmed: true, move_non_uat_to: preview.next_sprint_label }),
+        body: JSON.stringify({
+          confirmed: true,
+          move_non_uat_to: _fsPreview.next_sprint_label,
+          selected_ticket_numbers: selectedNums,
+          merge_pr: !!_fsPreview.sprint_pr,
+          sprint_pr_url: _fsPreview.sprint_pr ? _fsPreview.sprint_pr.url : null,
+        }),
       }
     );
+    if (!res.ok) throw new Error(await res.text());
     const data = await res.json();
+    _fsClose();
     if (data.errors && data.errors.length > 0) {
-      alert(`Finished with errors — closed ${data.closed}, moved ${data.moved}: ${data.errors.join('; ')}`);
+      _smgmtShowToast(`Finished with errors — ${data.closed} closed, ${data.moved} moved.`);
     } else {
-      const moved = data.moved || 0;
-      const closed = data.closed || 0;
-      let toastMsg = `Sprint finished — ${closed} UAT ticket${closed !== 1 ? 's' : ''} closed`;
-      if (moved > 0) toastMsg += `, ${moved} ticket${moved !== 1 ? 's' : ''} moved to ${data.next_sprint_label}`;
-      _smgmtShowToast(toastMsg + '.');
+      let msg = `${sprintLabelDisplay(_fsLabel || '')} finished — ${data.closed} closed`;
+      if (data.moved > 0) msg += `, ${data.moved} moved to ${data.next_sprint_label}`;
+      _smgmtShowToast(msg + '.');
     }
     await loadSprintMgmt();
   } catch (e) {
-    alert('Failed to finish sprint: ' + e.message);
-  } finally {
-    _smgmtBoardUnlock();
+    const errEl = document.getElementById('fs-error');
+    errEl.textContent = 'Failed to finish sprint: ' + e.message;
+    errEl.classList.remove('hidden');
+    if (confirmBtn) { confirmBtn.disabled = false; confirmBtn.textContent = 'Finish Sprint'; }
   }
 }
 
@@ -13785,6 +13866,11 @@ function _setupModals() {
     _nsUpdateHint();
   });
   document.getElementById('ns-count').addEventListener('change', _nsUpdateHint);
+
+  document.getElementById('fs-close-btn').addEventListener('click', _fsClose);
+  document.getElementById('fs-cancel-btn').addEventListener('click', _fsClose);
+  document.getElementById('fs-backdrop').addEventListener('click', _fsClose);
+  document.getElementById('fs-confirm-btn').addEventListener('click', _fsConfirm);
 
   document.getElementById('rr-close-btn').addEventListener('click', _rrClose);
   document.getElementById('rr-cancel-btn').addEventListener('click', _rrClose);
@@ -17568,6 +17654,33 @@ document.addEventListener('keydown', function(e) {
     <button class="btn-primary" id="lv-refresh-btn" onclick="_lvRefresh()" type="button">
       <i class="ti ti-refresh"></i> Refresh
     </button>
+  </div>
+</div>
+
+<!-- ── Finish Sprint modal ── -->
+<div class="modal-backdrop hidden" id="fs-backdrop"></div>
+<div class="modal hidden" id="fs-modal"
+     role="dialog" aria-modal="true" aria-labelledby="fs-modal-title">
+  <div class="modal-header">
+    <span class="modal-title" id="fs-modal-title">Finish Sprint?</span>
+    <button class="modal-close" id="fs-close-btn" aria-label="Close">&times;</button>
+  </div>
+  <div class="modal-body">
+    <div id="fs-loading" style="color:var(--text-muted);padding:8px 0">Loading preview…</div>
+    <div id="fs-content" class="hidden">
+      <div class="rr-controls">
+        <span style="font-size:13px;color:var(--text-secondary)">Select tickets to close:</span>
+        <a onclick="_fsSelectAll(true)">Select all</a>
+        <a onclick="_fsSelectAll(false)">Select none</a>
+      </div>
+      <div class="rr-ticket-list" id="fs-ticket-list"></div>
+      <div class="fs-actions" id="fs-actions"></div>
+    </div>
+    <div class="modal-error hidden" id="fs-error"></div>
+  </div>
+  <div class="modal-footer">
+    <button class="btn-ghost" id="fs-cancel-btn" type="button">Cancel</button>
+    <button class="btn-primary" id="fs-confirm-btn" type="button" disabled>Finish Sprint</button>
   </div>
 </div>
 

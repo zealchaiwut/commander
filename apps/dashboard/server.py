@@ -6952,8 +6952,10 @@ def get_sprint_finish_preview(owner: str, repo_name: str, label: str):
     """Return preview data for the Finish Sprint dialog.
 
     Returns: {
+      all_tickets: [{number, title, category}],   # ALL tickets incl. sprint-summary
       uat_tickets: [{number, title}],
       non_uat_tickets: [{number, title, status}],
+      sprint_pr: {url, number, title} | null,
       next_sprint_label: str,
       next_sprint_exists: bool,
       conflict_error: str | null,
@@ -6986,27 +6988,51 @@ def get_sprint_finish_preview(owner: str, repo_name: str, label: str):
     except subprocess.CalledProcessError as e:
         raise _gh_error(e)
 
+    # Look up open sprint PR (head = sprint/sprint-N branch)
+    sprint_pr: Optional[dict] = None
+    try:
+        m_n = re.search(r"(\d+(?:\.\d+)*)", label)
+        branch_name = f"sprint/{label}" if m_n else None
+        if branch_name:
+            pr_res = subprocess.run(
+                ["gh", "pr", "list", "--repo", repo, "--head", branch_name,
+                 "--state", "open", "--json", "number,url,title", "--limit", "1"],
+                capture_output=True, text=True, timeout=4,
+            )
+            if pr_res.returncode == 0 and pr_res.stdout.strip():
+                prs = json.loads(pr_res.stdout)
+                if prs:
+                    sprint_pr = {"url": prs[0].get("url"), "number": prs[0].get("number"), "title": prs[0].get("title")}
+    except Exception:
+        pass
+
     _NON_WORK_LABELS_FP = {"sprint-summary", "docs", "documentation"}
+    all_tickets = []
     uat_tickets = []
     non_uat_tickets = []
     for iss in sprint_issues:
         label_names = {lbl["name"] for lbl in iss.get("labels", [])}
-        if _NON_WORK_LABELS_FP & label_names:
-            continue
         number = iss["number"]
         title = iss.get("title", "")
+        if _NON_WORK_LABELS_FP & label_names:
+            all_tickets.append({"number": number, "title": title, "category": "sprint-summary"})
+            continue
         if "UAT" in label_names:
+            all_tickets.append({"number": number, "title": title, "category": "UAT"})
             uat_tickets.append({"number": number, "title": title})
         else:
             status = next(
                 (lbl for lbl in sorted(label_names) if lbl in _FINISH_SPRINT_STATUS_LABELS and lbl != "UAT"),
                 "queued",
             )
+            all_tickets.append({"number": number, "title": title, "category": status})
             non_uat_tickets.append({"number": number, "title": title, "status": status})
 
     return {
+        "all_tickets": all_tickets,
         "uat_tickets": uat_tickets,
         "non_uat_tickets": non_uat_tickets,
+        "sprint_pr": sprint_pr,
         "next_sprint_label": next_sprint_label,
         "next_sprint_exists": next_sprint_exists,
         "conflict_error": conflict_error,
@@ -7016,6 +7042,9 @@ def get_sprint_finish_preview(owner: str, repo_name: str, label: str):
 class FinishSprintBody(BaseModel):
     confirmed: bool
     move_non_uat_to: str = ""
+    selected_ticket_numbers: list[int] = []
+    merge_pr: bool = False
+    sprint_pr_url: Optional[str] = None
 
 
 @app.post("/api/projects/{owner}/{repo_name}/sprints/{label}/finish")
@@ -7059,15 +7088,42 @@ async def finish_sprint(owner: str, repo_name: str, label: str, body: FinishSpri
     except subprocess.CalledProcessError as e:
         raise _gh_error(e)
 
-    uat_issues = [iss for iss in sprint_issues if any(lbl["name"] == "UAT" for lbl in iss.get("labels", []))]
-    non_uat_issues = [iss for iss in sprint_issues if not any(lbl["name"] == "UAT" for lbl in iss.get("labels", []))]
+    # Determine which tickets are selected by the user (empty list = all tickets)
+    selected_nums = set(body.selected_ticket_numbers) if body.selected_ticket_numbers else None
+
+    _NON_WORK_LABELS_FS2 = {"sprint-summary", "docs", "documentation"}
+    to_close: list[dict] = []
+    to_move: list[dict] = []
+    for iss in sprint_issues:
+        num = iss["number"]
+        label_names = {lbl["name"] for lbl in iss.get("labels", [])}
+        is_selected = selected_nums is None or num in selected_nums
+        is_summary = bool(_NON_WORK_LABELS_FS2 & label_names)
+        is_uat = "UAT" in label_names
+        if is_selected:
+            to_close.append(iss)
+        elif not is_selected and not is_uat and not is_summary:
+            # Unselected non-UAT non-summary → move to next sprint (original behavior)
+            to_move.append(iss)
 
     closed = 0
     moved = 0
     errors: list[str] = []
 
-    # Ensure next sprint label exists when there are non-UAT tickets to move
-    if non_uat_issues:
+    # Merge sprint PR first (if requested)
+    if body.merge_pr and body.sprint_pr_url:
+        try:
+            merge_res = subprocess.run(
+                ["gh", "pr", "merge", body.sprint_pr_url, "--repo", repo, "--merge", "--delete-branch"],
+                capture_output=True, text=True, check=False,
+            )
+            if merge_res.returncode != 0:
+                errors.append(f"PR merge failed: {merge_res.stderr.strip()}")
+        except Exception as exc:
+            errors.append(f"PR merge error: {exc}")
+
+    # Ensure next sprint label exists when there are non-selected non-UAT tickets to move
+    if to_move:
         m_next = re.match(r"^sprint-(\d+)$", next_sprint_label)
         if m_next:
             try:
@@ -7075,7 +7131,6 @@ async def finish_sprint(owner: str, repo_name: str, label: str, body: FinishSpri
                 github_client.invalidate("sprints:")
             except Exception as exc:
                 errors.append(f"Failed to create label {next_sprint_label}: {exc}")
-        # Create plan.json for next sprint if absent
         try:
             if not _read_plan_json(project_root, next_sprint_label):
                 _plan_json_set_state(
@@ -7085,26 +7140,25 @@ async def finish_sprint(owner: str, repo_name: str, label: str, body: FinishSpri
         except Exception:
             pass
 
-    # Move non-UAT tickets: transition to QUEUED, swap sprint labels
-    for iss in non_uat_issues:
+    # Move unselected non-UAT tickets to next sprint
+    for iss in to_move:
         issue_num = iss["number"]
         try:
             _sm_transition(issue_num, _TicketState.QUEUED, actor="finish_button", repo=repo)
-            github_client.update_labels(
-                issue_num,
-                add=[next_sprint_label],
-                remove=[label],
-                repo_name=repo,
-            )
+            github_client.update_labels(issue_num, add=[next_sprint_label], remove=[label], repo_name=repo)
             moved += 1
         except (_TransitionError, subprocess.CalledProcessError, Exception) as exc:
             errors.append(f"#{issue_num}: {exc}")
 
-    # Close UAT tickets with reason=completed
-    for iss in uat_issues:
+    # Close selected tickets and remove sprint label
+    for iss in to_close:
         issue_num = iss["number"]
         try:
             github_client.close_issue(issue_num, repo_name=repo, reason="completed")
+            try:
+                github_client.update_labels(issue_num, add=[], remove=[label], repo_name=repo)
+            except Exception:
+                pass  # label removal is best-effort
             closed += 1
         except subprocess.CalledProcessError as exc:
             err_msg = exc.stderr.strip() if exc.stderr else str(exc)
@@ -9339,7 +9393,7 @@ class BulkPostSelectedBody(BaseModel):
     sprint_label: str | None = None
 
 
-_SPRINT_LABEL_RE = re.compile(r"^sprint-\d+$")
+_SPRINT_LABEL_RE = re.compile(r"^sprint-\d+(\.\d+)*$")
 
 
 def _resolve_bulk_sprint_label(sprint_label: str | None, repo: str | None) -> str:

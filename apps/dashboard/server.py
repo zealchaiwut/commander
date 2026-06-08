@@ -1791,8 +1791,8 @@ def get_project_events(
     if matched is None:
         raise HTTPException(status_code=404, detail=f"Project '{slug}' not found")
 
-    # The events table stores project as the repo slug (last path component)
-    project_key = matched["repo"].split("/")[-1]
+    # The events table stores project as the full repo path (owner/repo)
+    project_key = matched["repo"]
 
     query = "SELECT timestamp, source, actor, type, target, action_id, detail FROM events WHERE project = ?"
     params: list = [project_key]
@@ -2427,7 +2427,7 @@ def _home_project_data(proj: dict, running_sprints: list[dict]) -> dict:
 
     def _idle() -> dict:
         sentinel: dict = {
-            "name": name, "slug": slug, "icon": icon,
+            "name": name, "slug": slug, "repo": repo, "icon": icon,
             "status": "idle", "uat_count": 0, "backlog_count": 0,
             "last_activity_at": None,
         }
@@ -2514,6 +2514,7 @@ def _home_project_data(proj: dict, running_sprints: list[dict]) -> dict:
     result: dict = {
         "name": name,
         "slug": slug,
+        "repo": repo,
         "icon": icon,
         "status": status,
         "uat_count": len(uat_issues),

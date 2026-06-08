@@ -5034,7 +5034,7 @@
                        oninput="logsOnSearch(this.value)">
               </div>
               <div class="logs-view-toggle">
-                <button class="logs-view-btn active" id="logs-view-timeline" onclick="logsSetView('timeline')">
+                <button class="logs-view-btn" id="logs-view-timeline" onclick="logsSetView('timeline')">
                   <i class="ti ti-list-tree"></i> Runs
                 </button>
                 <button class="logs-view-btn" id="logs-view-issues" onclick="logsSetView('issues')">
@@ -5043,11 +5043,11 @@
                 <button class="logs-view-btn" id="logs-view-raw" onclick="logsSetView('raw')">
                   <i class="ti ti-terminal-2"></i> Raw
                 </button>
-                <button class="logs-view-btn" id="logs-view-activity" onclick="logsSetView('activity')">
+                <button class="logs-view-btn active" id="logs-view-activity" onclick="logsSetView('activity')">
                   <i class="ti ti-activity"></i> Activity
                 </button>
               </div>
-              <div id="logs-evl-source-group" class="logs-chip-group hidden" style="margin-left:8px">
+              <div id="logs-evl-source-group" class="logs-chip-group" style="margin-left:8px">
                 <button class="logs-chip active" id="evl-filter-all" onclick="evlSetFilter('all')">All</button>
                 <button class="logs-chip" id="evl-filter-agent" onclick="evlSetFilter('agent')">Agent &amp; Sprint</button>
                 <button class="logs-chip" id="evl-filter-dashboard" onclick="evlSetFilter('dashboard')">Dashboard</button>
@@ -5060,7 +5060,7 @@
           </div>
           <!-- Body -->
           <div class="logs-body">
-            <div id="logs-timeline">
+            <div id="logs-timeline" class="hidden">
               <div class="logs-empty" id="logs-empty">Loading runs…</div>
             </div>
             <div id="logs-issues" class="hidden">
@@ -5071,7 +5071,7 @@
                 <div class="logs-raw-line" style="color:var(--text-sub)">Select a sprint run to view raw output…</div>
               </div>
             </div>
-            <div id="logs-activity" class="hidden">
+            <div id="logs-activity">
               <div id="evl-stale-banner" class="hidden"></div>
               <div class="evl-list" id="evl-list">
                 <div class="logs-empty" id="evl-empty">Loading activity…</div>
@@ -7181,6 +7181,9 @@ async function init() {
   // If logs tab was active before _projectData was available, now fetch runs
   if (_activeTab === 'logs' && _logsState.runs.length === 0) {
     logsFetchRuns();
+  }
+  if (_activeTab === 'logs' && _logsState.viewMode === 'activity' && _evlState.events === null) {
+    evlFetch();
   }
 
   // If compare tab loaded before _projectData was ready, re-init now with correct project
@@ -16581,7 +16584,7 @@ const _logsState = {
   events: {},
   loadingEvents: new Set(),
   issues: null,            // per-issue browse list (lazy-loaded)
-  viewMode: 'timeline',    // 'timeline' (Runs) | 'issues' | 'raw'
+  viewMode: 'activity',    // 'timeline' (Runs) | 'issues' | 'raw' | 'activity'
   pollTimer: null,
   liveEs: null,
   liveRunId: null,
@@ -16597,6 +16600,7 @@ function logsInit() {
     _logsLoaded = true;
     logsFetchRuns();
     logsSyncGitHub();
+    evlFetch();
   }
 
   if (!_logsState.pollTimer) {

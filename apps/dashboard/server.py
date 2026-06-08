@@ -1798,6 +1798,90 @@ def get_project_events(
     return result
 
 
+# ── Branch cleanup (issue #634) ───────────────────────────────────────────────
+
+_PROTECTED_BRANCHES: frozenset[str] = frozenset({"develop", "master", "main", "attachments"})
+_STALE_BRANCH_RE = re.compile(r"^(feat|feature|sprint)/")
+
+
+@app.get("/api/projects/{owner}/{repo_name}/branches/stale")
+def get_stale_branches(owner: str, repo_name: str):
+    """Return sorted list of feat/* or sprint/* branch names that are both
+    merged (their PR was merged) and still exist on the remote.
+    develop, master, main, and attachments are always excluded.
+    """
+    repo = f"{owner}/{repo_name}"
+
+    # 1. Collect heads of merged PRs matching the allowed patterns
+    merged_heads: set[str] = set()
+    try:
+        result = subprocess.run(
+            ["gh", "pr", "list", "--repo", repo, "--state", "merged",
+             "--limit", "200", "--json", "headRefName"],
+            capture_output=True, text=True, check=False,
+        )
+        for pr in json.loads(result.stdout or "[]"):
+            head = pr.get("headRefName", "")
+            if _STALE_BRANCH_RE.match(head) and head not in _PROTECTED_BRANCHES:
+                merged_heads.add(head)
+    except Exception:
+        pass
+
+    if not merged_heads:
+        return []
+
+    # 2. List currently existing branches that match the patterns
+    existing: set[str] = set()
+    try:
+        result = subprocess.run(
+            ["gh", "api", f"repos/{repo}/branches", "--paginate", "--jq", ".[].name"],
+            capture_output=True, text=True, check=False,
+        )
+        for name in result.stdout.splitlines():
+            name = name.strip()
+            if name and _STALE_BRANCH_RE.match(name) and name not in _PROTECTED_BRANCHES:
+                existing.add(name)
+    except Exception:
+        pass
+
+    return sorted(merged_heads & existing)
+
+
+@app.delete("/api/projects/{owner}/{repo_name}/branches/{branch:path}", status_code=200)
+def delete_project_branch(owner: str, repo_name: str, branch: str):
+    """Delete a feat/* or sprint/* branch from the remote.
+    Returns 400 for protected branches (develop/master/main/attachments) or
+    branches not matching the allowed patterns.
+    """
+    if branch in _PROTECTED_BRANCHES:
+        raise HTTPException(status_code=400,
+                            detail=f"Cannot delete protected branch: {branch!r}")
+    if not _STALE_BRANCH_RE.match(branch):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Only feat/*, feature/*, or sprint/* branches may be deleted. Got: {branch!r}",
+        )
+
+    repo = f"{owner}/{repo_name}"
+    try:
+        result = subprocess.run(
+            ["gh", "api", "--method", "DELETE",
+             f"repos/{repo}/git/refs/heads/{branch}"],
+            capture_output=True, text=True, check=False,
+        )
+        if result.returncode != 0:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to delete {branch!r}: {result.stderr.strip()}",
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    return {"ok": True, "branch": branch}
+
+
 @app.post("/api/projects/{owner}/{repo_name}/approve-batch")
 async def approve_batch(owner: str, repo_name: str):
     repo = f"{owner}/{repo_name}"

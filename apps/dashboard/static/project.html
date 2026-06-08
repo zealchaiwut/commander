@@ -8717,6 +8717,13 @@ function sprintLabelDisplay(label) {
   return m[2] ? `Sprint ${m[1]}.${m[2]}` : `Sprint ${m[1]}`;
 }
 
+function _smgmtNextChildLabel(parentLabel) {
+  const existing = Object.keys(_smgmtBySprint || {});
+  let i = 1;
+  while (existing.includes(`${parentLabel}.${i}`)) i++;
+  return `${parentLabel}.${i}`;
+}
+
 /**
  * Map a sprint outcome to its pane class + labeled badge.
  * Prefers the backend 4-state `state` (completed|has_rework|cancelled|running),
@@ -9029,9 +9036,11 @@ function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent, finished) {
   const rerunTitle = _smgmtAnySprintRunning
     ? 'title="Cannot re-run: another sprint is currently running."'
     : '';
+  const childLabel = _smgmtNextChildLabel(label);
+  const childDisplay = sprintLabelDisplay(childLabel).replace('Sprint ', '');
   const rerunBtn = `<button class="smgmt-run-btn smgmt-run-btn--rerun" ${rerunDisabled} ${rerunTitle}
                     onclick="smgmtRerunSprint('${escHtml(label)}')">
-                    <i class="ti ti-refresh"></i> Re-run Sprint</button>`;
+                    <i class="ti ti-refresh"></i> Re-run → ${escHtml(childDisplay)}</button>`;
 
   // Action button: post-run cards show Re-run only; planning cards show Run Sprint
   let actionBtn;
@@ -9058,6 +9067,7 @@ function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent, finished) {
   let outcomeBandHtml = '';
   let outcomeCardClass = '';
   let outcomeBadgeHtml = '';
+  let headerMetaHtml = '';
   let ticketCount = tickets.length;
   let ticketsContainerHtml = '';
   let isOutcomeView = false;
@@ -9068,9 +9078,18 @@ function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent, finished) {
     outcomeCardClass = ' ' + meta.cardClass;
     outcomeBadgeHtml = `<span class="smgmt-state-badge ${meta.badgeCls}">${escHtml(meta.badge)}</span>`;
     if (meta.state === 'has_rework') {
+      const _metaSecs = outcome.wall_clock_secs;
+      const _metaStopped = outcome.ended_at ? _fmtStoppedAt(outcome.ended_at) : null;
+      const _metaParts = [];
+      if (_metaSecs != null) _metaParts.push(_fmtRunningTime(_metaSecs));
+      if (_metaStopped) _metaParts.push(`stopped ${_metaStopped}`);
+      if (_metaParts.length) headerMetaHtml = `<span class="smgmt-sprint-meta">${escHtml(_metaParts.join(' · '))}</span>`;
+
+      const _elapsedByNum = {};
+      if (outcome.issues) { for (const _oi of outcome.issues) { if (_oi.elapsed_secs != null) _elapsedByNum[_oi.number] = _oi.elapsed_secs; } }
       // Keep planning view: rework tickets stay actionable; the finish-card hat shows the summary.
       ticketsContainerHtml = tickets.length > 0
-        ? tickets.map(t => _smgmtTicketRowHtml(t, label)).join('')
+        ? tickets.map(t => _smgmtTicketRowHtml(t, label, _elapsedByNum[t.number] ?? null)).join('')
         : '<div class="smgmt-drop-hint">Drop tickets here</div>';
     } else {
       outcomeBandHtml = _smgmtOutcomeBandHtml(label, outcome);
@@ -9142,20 +9161,21 @@ function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent, finished) {
 
           ${isNext ? '<span class="smgmt-next-badge" aria-label="Next up">NEXT UP</span>' : ''}
           ${outcomeBadgeHtml}
+          ${headerMetaHtml}
           ${parentLineage}
           <span class="smgmt-sprint-count" id="smgmt-col-rollup-${escHtml(label)}">${_smgmtRollupText(rollupItems)}</span>
         </div>
         <div class="smgmt-sprint-header-right">
           ${_smgmtCapacityInputHtml(label)}
           ${bulkEstBtnHtml}
-          <button class="smgmt-finish-btn ${finishHidden}" ${finishDisabled}
-                  title="${finishDisabled ? 'No open tickets' : 'Finish sprint'}"
-                  onclick="smgmtFinishSprint('${escHtml(label)}')">
-            <i class="ti ti-flag-check"></i> Finish Sprint</button>
           <button class="smgmt-delete-btn"
                   onclick="smgmtDeleteSprint('${escHtml(label)}')">
             <i class="ti ti-trash"></i> Delete</button>
           ${actionBtn}
+          <button class="smgmt-finish-btn ${finishHidden}" ${finishDisabled}
+                  title="${finishDisabled ? 'No open tickets' : 'Finish sprint'}"
+                  onclick="smgmtFinishSprint('${escHtml(label)}')">
+            <i class="ti ti-flag-check"></i> Finish Sprint</button>
         </div>
       </div>
       ${cancelBannerHtml}
@@ -9330,6 +9350,14 @@ function _fmtRunningTime(secs) {
   const s = secs % 60;
   if (h > 0) return `${h}h ${m}m`;
   return `${m}m ${s}s`;
+}
+
+/** Format an ISO timestamp as HH:MM local time. Returns null on invalid input. */
+function _fmtStoppedAt(isoStr) {
+  if (!isoStr) return null;
+  const d = new Date(isoStr);
+  if (isNaN(d)) return null;
+  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
 }
 
 /** Render recent_log_lines array to HTML for the live log stream container. */
@@ -9769,7 +9797,7 @@ function toggleTicketRow(stateKey, n) {
   }
 }
 
-function _smgmtTicketRowHtml(ticket, label) {
+function _smgmtTicketRowHtml(ticket, label, elapsedSecs = null) {
   const hasRework = (ticket.labels || []).some(l => l.name === 'need-rework' || l.name === 'needs-rework');
   const statusClass = hasRework ? 'smgmt-status-need-rework' : ({
     'backlog':      'smgmt-status-backlog',
@@ -9842,6 +9870,7 @@ function _smgmtTicketRowHtml(ticket, label) {
       <span class="smgmt-ticket-title" title="${escHtml(ticket.title)}">${escHtml(ticket.title)}</span>
       ${sizePillHtml}${staleBadgeHtml}${estimateBadgeHtml}${riskFlagIconsHtml}${schedDepHtml}${reEstBtnHtml}
       ${hasRework ? '<span class="smgmt-lbl-rejected">TESTER REJECTED</span>' : ''}
+      ${elapsedSecs != null ? `<span class="smgmt-ticket-elapsed">${_fmtRunningTime(elapsedSecs)}</span>` : ''}
       <span class="smgmt-ticket-status ${statusClass}">${escHtml(statusLabel)}</span>
       <button class="btn-view-log" tabindex="0" title="View issue log"
               onclick="event.stopPropagation();openLvIssueLog(${ticket.number},'${sk}',_smgmtRepo()||'')">

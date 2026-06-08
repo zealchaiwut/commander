@@ -1050,6 +1050,82 @@
       .ps-row-label { min-width: unset; width: 100%; }
     }
 
+    /* ── Env paths card (issue #643) ── */
+    .ps-path-inp {
+      flex: 1; font-family: var(--mono); font-size: 12px;
+      min-width: 0;
+    }
+    .ps-env-name-inp {
+      width: 130px; font-size: 13px; font-family: inherit;
+    }
+    .ps-btn-browse {
+      border: 1px solid var(--border); background: var(--surface);
+      color: var(--text-muted); padding: 6px 11px; border-radius: 6px;
+      font-size: 12px; display: inline-flex; align-items: center; gap: 5px;
+      cursor: pointer; white-space: nowrap; flex-shrink: 0; font-family: inherit;
+    }
+    .ps-btn-browse:hover { background: var(--surface-hover); color: var(--text); }
+    .ps-machine-note {
+      font-size: 11px; color: var(--text-sub); margin-top: 10px;
+      display: flex; align-items: flex-start; gap: 6px;
+    }
+    .ps-machine-note .ti { margin-top: 1px; flex-shrink: 0; }
+
+    /* ── Folder browser modal (issue #643) ── */
+    .ps-modal-overlay {
+      position: fixed; inset: 0; background: rgba(17,24,39,.45);
+      display: none; align-items: center; justify-content: center; z-index: 500;
+    }
+    .ps-modal-overlay.open { display: flex; }
+    [data-theme="dark"] .ps-modal-overlay { background: rgba(0,0,0,.6); }
+    .ps-browser {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 12px; width: 540px; max-width: 92vw; max-height: 78vh;
+      display: flex; flex-direction: column; overflow: hidden;
+      box-shadow: 0 16px 48px rgba(0,0,0,.22);
+    }
+    .ps-browser-head {
+      display: flex; align-items: center; gap: 9px;
+      padding: 13px 16px; border-bottom: 1px solid var(--border);
+      font-size: 14px; font-weight: 700;
+    }
+    .ps-browser-head .ti { color: var(--text-muted); }
+    .ps-browser-close {
+      margin-left: auto; background: none; border: none;
+      font-size: 20px; color: var(--text-muted); cursor: pointer; line-height: 1;
+    }
+    .ps-browser-pathbar {
+      padding: 9px 16px; font-family: var(--mono); font-size: 12px;
+      color: var(--text-muted); background: var(--surface-2);
+      border-bottom: 1px solid var(--border); white-space: nowrap; overflow-x: auto;
+    }
+    .ps-browser-list {
+      flex: 1; overflow-y: auto; padding: 4px 0; min-height: 180px;
+    }
+    .ps-fs-row {
+      display: flex; align-items: center; gap: 10px;
+      padding: 8px 16px; font-size: 13px; cursor: pointer;
+    }
+    .ps-fs-row:hover { background: var(--surface-hover); }
+    .ps-fs-row .ti { font-size: 16px; }
+    .ps-fs-row.up .ti { color: var(--text-sub); }
+    .ps-fs-row.folder .ti { color: var(--amber); }
+    .ps-fs-name { flex: 1; }
+    .ps-fs-row .enter { color: var(--text-sub); font-size: 13px; }
+    .ps-browser-foot {
+      display: flex; align-items: center; gap: 10px;
+      padding: 12px 16px; border-top: 1px solid var(--border);
+    }
+    .ps-browser-scope {
+      font-family: var(--mono); font-size: 11px; color: var(--text-sub);
+      display: inline-flex; align-items: center; gap: 5px;
+    }
+    .ps-browser-gap { flex: 1; }
+    .ps-browser-selected {
+      font-family: var(--mono); font-size: 11px; color: var(--text-muted);
+      max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+
     /* ── Tickets tab ── */
     .tickets-grid {
       display: grid;
@@ -5830,6 +5906,20 @@
                   </a>
                 </div>
               </div>
+            </div>
+          </div>
+
+          <!-- Environment paths card (issue #643) -->
+          <div class="proj-settings-card" id="ps-env-card">
+            <div class="proj-settings-card-head">
+              <i class="ti ti-server-2 proj-settings-card-icon"></i>
+              <div>
+                <div class="proj-settings-card-title">Environment paths</div>
+                <div class="proj-settings-card-sub">Local clone directory for each agent environment</div>
+              </div>
+            </div>
+            <div class="proj-settings-card-body" id="ps-env-body">
+              <!-- Rows injected by projEnvLoad() -->
             </div>
           </div>
 
@@ -20203,6 +20293,10 @@ async function projSettingsLoad() {
   const slug = _slug;
   if (!slug) return;
 
+  // Expose slug for env-path JS block
+  window._currentProjectSlug = slug;
+  projEnvLoad();
+
   // Show project name in inherit notice
   const nameEl = document.getElementById('ps-proj-name');
   if (nameEl) nameEl.textContent = slug;
@@ -20299,6 +20393,15 @@ async function projSettingsSave() {
       _psSetStatus('Save failed: ' + (err.detail || resp.status), 'err');
       return;
     }
+
+    // Save environment paths
+    const envResult = await projEnvSave();
+    if (envResult && !envResult.ok) {
+      const detail = (envResult.data && envResult.data.detail) || 'env save failed';
+      _psSetStatus('Settings saved. Env error: ' + detail, 'err');
+      return;
+    }
+
     _psSetStatus('Saved', 'ok');
     await _psUpdateInheritNotice(slug);
     setTimeout(() => _psSetStatus('', ''), 3000);
@@ -20368,6 +20471,263 @@ document.addEventListener('input', function(e) {
     _psUpdateColorSwatch(e.target.value.trim());
   }
 });
+</script>
+
+<!-- ── Folder browser modal (issue #643) ── -->
+<div class="ps-modal-overlay" id="envBrowserModal" role="dialog" aria-modal="true" aria-label="Select folder">
+  <div class="ps-browser">
+    <div class="ps-browser-head">
+      <i class="ti ti-folder-search"></i>
+      <span id="envBrowserTitle">Select folder</span>
+      <button class="ps-browser-close" onclick="closeBrowser()" aria-label="Close">&times;</button>
+    </div>
+    <div class="ps-browser-pathbar" id="envBrowserPath">~</div>
+    <div class="ps-browser-list" id="envBrowserList"></div>
+    <div class="ps-browser-foot">
+      <span class="ps-browser-scope"><i class="ti ti-lock" style="font-size:12px"></i> scoped to ~</span>
+      <span class="ps-browser-gap"></span>
+      <span class="ps-browser-selected" id="envBrowserSelected">~</span>
+      <button class="ps-btn ps-btn-ghost" onclick="closeBrowser()">Cancel</button>
+      <button class="ps-btn ps-btn-primary" onclick="chooseFolder()">
+        <i class="ti ti-check"></i> Select folder
+      </button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── Folder browser (issue #643) ──────────────────────────────────────────────
+
+var _envBrowserTargetInput = null;
+var _envBrowserCurrentPath = '';
+
+function openBrowser(inputId) {
+  _envBrowserTargetInput = inputId;
+  var inp = document.getElementById(inputId);
+  var seed = inp ? (inp.value || '~') : '~';
+  _envBrowserCurrentPath = seed;
+  document.getElementById('envBrowserTitle').textContent =
+    'Select folder for ' + inputId.replace('ps-env-path-', '');
+  document.getElementById('envBrowserModal').classList.add('open');
+  _fetchBrowserList(_envBrowserCurrentPath);
+}
+
+function closeBrowser() {
+  document.getElementById('envBrowserModal').classList.remove('open');
+  _envBrowserTargetInput = null;
+}
+
+function chooseFolder() {
+  if (_envBrowserTargetInput) {
+    var inp = document.getElementById(_envBrowserTargetInput);
+    if (inp) inp.value = _envBrowserCurrentPath;
+  }
+  closeBrowser();
+}
+
+function goUp() {
+  _fetchBrowserList(_envBrowserCurrentPath, true);
+}
+
+function _envEnterFolder(path) {
+  _envBrowserCurrentPath = path;
+  _fetchBrowserList(path);
+}
+
+function _fetchBrowserList(path, goingUp) {
+  var url = '/api/fs/list?path=' + encodeURIComponent(path || '');
+  if (goingUp) {
+    url = '/api/fs/list?path=' + encodeURIComponent(path || '') + '&up=1';
+  }
+  var list = document.getElementById('envBrowserList');
+  list.innerHTML = '<div class="ps-fs-row" style="cursor:default;color:var(--text-sub)"><i class="ti ti-loader-2"></i><span class="ps-fs-name">Loading…</span></div>';
+
+  fetch(goingUp ? '/api/fs/list?path=' + encodeURIComponent('__up__:' + path) : url)
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data.error || !data.entries) return;
+      _envBrowserCurrentPath = data.current || path;
+      _renderBrowserList(data.entries, data.current);
+    })
+    .catch(function() {
+      list.innerHTML = '<div class="ps-fs-row" style="cursor:default;color:var(--red)"><i class="ti ti-alert-circle"></i><span class="ps-fs-name">Error loading</span></div>';
+    });
+}
+
+function _renderBrowserList(entries, currentPath) {
+  var list = document.getElementById('envBrowserList');
+  var pathBar = document.getElementById('envBrowserPath');
+  var selected = document.getElementById('envBrowserSelected');
+
+  pathBar.textContent = currentPath || '~';
+  selected.textContent = currentPath || '~';
+
+  var html = '';
+  if (currentPath && currentPath !== '~') {
+    html += '<div class="ps-fs-row up" onclick="goUp()"><i class="ti ti-corner-left-up"></i><span class="ps-fs-name">..</span></div>';
+  }
+  if (!entries || entries.length === 0) {
+    html += '<div class="ps-fs-row" style="cursor:default;color:var(--text-sub)"><i class="ti ti-folder-off"></i><span class="ps-fs-name">No subfolders</span></div>';
+  }
+  entries.forEach(function(e) {
+    var escapedPath = e.path.replace(/'/g, "\\'");
+    html += '<div class="ps-fs-row folder" onclick="_envEnterFolder(\'' + escapedPath + '\')"><i class="ti ti-folder"></i><span class="ps-fs-name">' + e.name + '</span><span class="enter">›</span></div>';
+  });
+  list.innerHTML = html;
+}
+
+// When browser is opened, fetch the up-path for the "up" navigation
+// Override goUp to fetch the parent of currentPath
+(function() {
+  var _origGoUp = goUp;
+  window.goUp = function() {
+    if (!_envBrowserCurrentPath || _envBrowserCurrentPath === '~') return;
+    var parts = _envBrowserCurrentPath.split('/');
+    parts.pop();
+    var parent = parts.join('/') || '/';
+    _envBrowserCurrentPath = parent;
+    _fetchBrowserListDirect(parent);
+  };
+
+  function _fetchBrowserListDirect(path) {
+    var list = document.getElementById('envBrowserList');
+    list.innerHTML = '<div class="ps-fs-row" style="cursor:default;color:var(--text-sub)"><i class="ti ti-loader-2"></i><span class="ps-fs-name">Loading…</span></div>';
+    fetch('/api/fs/list?path=' + encodeURIComponent(path))
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        _envBrowserCurrentPath = data.current || path;
+        _renderBrowserList(data.entries || [], data.current || path);
+      })
+      .catch(function() {});
+  }
+
+  window._envEnterFolder = function(path) {
+    _envBrowserCurrentPath = path;
+    _fetchBrowserListDirect(path);
+  };
+
+  window._fetchBrowserList = function(path) {
+    _fetchBrowserListDirect(path);
+  };
+})();
+
+
+// ── Environment paths (issue #643) ────────────────────────────────────────────
+
+var _envAddCount = 0;
+
+function projEnvLoad() {
+  var slug = (window._currentProjectSlug || '');
+  if (!slug) return;
+  fetch('/api/projects/' + encodeURIComponent(slug) + '/environments')
+    .then(function(r) { return r.ok ? r.json() : {environments: []}; })
+    .then(function(data) {
+      _renderEnvRows(data.environments || []);
+    })
+    .catch(function() {});
+}
+
+function _renderEnvRows(envs) {
+  var body = document.getElementById('ps-env-body');
+  if (!body) return;
+
+  var defaultEnvs = ['prd', 'uat', 'coder', 'tester'];
+  var envMap = {};
+  envs.forEach(function(e) { envMap[e.env] = e.local_directory; });
+
+  // Merge: ensure default envs always appear; add any extras after
+  var allEnvs = defaultEnvs.map(function(e) {
+    return {env: e, local_directory: envMap[e] || '', fixed: true};
+  });
+  envs.forEach(function(e) {
+    if (defaultEnvs.indexOf(e.env) === -1) {
+      allEnvs.push({env: e.env, local_directory: e.local_directory, fixed: false});
+    }
+  });
+
+  var html = '';
+  allEnvs.forEach(function(e) {
+    var inputId = 'ps-env-path-' + e.env;
+    html += '<div class="ps-row" data-env-row="1">'
+      + '<div class="ps-row-label">' + e.env + '</div>'
+      + '<div class="ps-row-control">'
+      + '<input class="ps-inp ps-path-inp" id="' + inputId + '" type="text"'
+      + ' value="' + (e.local_directory || '').replace(/"/g, '&quot;') + '"'
+      + ' placeholder="/path/to/' + e.env + '">'
+      + '<button class="ps-btn-browse" onclick="openBrowser(\'' + inputId + '\')">'
+      + '<i class="ti ti-folder-search"></i> Browse</button>'
+      + '</div>'
+      + '</div>';
+  });
+
+  html += '<div style="margin-top:12px">'
+    + '<a class="ps-link" onclick="addEnvRow()"><i class="ti ti-plus" style="font-size:13px"></i> Add environment</a>'
+    + '</div>'
+    + '<div class="ps-machine-note">'
+    + '<i class="ti ti-info-circle"></i>'
+    + ' Paths are specific to this machine. Validated on save (must exist and be a git clone). Excluded from cross-machine sync.'
+    + '</div>';
+
+  body.innerHTML = html;
+  document.getElementById('ps-env-status') && (document.getElementById('ps-env-status').textContent = '');
+}
+
+function addEnvRow() {
+  _envAddCount++;
+  var body = document.getElementById('ps-env-body');
+  if (!body) return;
+  var id = 'ps-env-path-custom' + _envAddCount;
+  var row = document.createElement('div');
+  row.className = 'ps-row';
+  row.setAttribute('data-env-row', '1');
+  row.setAttribute('data-env-custom', '1');
+  row.innerHTML =
+    '<div class="ps-row-label">'
+    + '<input class="ps-inp ps-env-name-inp" placeholder="env name" data-env-name-input="1">'
+    + '</div>'
+    + '<div class="ps-row-control">'
+    + '<input class="ps-inp ps-path-inp" id="' + id + '" type="text" placeholder="path…">'
+    + '<button class="ps-btn-browse" onclick="openBrowser(\'' + id + '\')">'
+    + '<i class="ti ti-folder-search"></i> Browse</button>'
+    + '</div>';
+  var anchor = body.querySelector('div[style*="margin-top"]');
+  if (anchor) body.insertBefore(row, anchor);
+  else body.appendChild(row);
+}
+
+function projEnvSave() {
+  var body = document.getElementById('ps-env-body');
+  if (!body) return Promise.resolve();
+
+  var envs = [];
+  var rows = body.querySelectorAll('[data-env-row]');
+  rows.forEach(function(row) {
+    var nameEl = row.querySelector('[data-env-name-input]');
+    var envName;
+    if (nameEl) {
+      envName = nameEl.value.trim();
+    } else {
+      var label = row.querySelector('.ps-row-label');
+      envName = label ? label.textContent.trim() : '';
+    }
+    var pathInp = row.querySelector('.ps-path-inp');
+    var localDir = pathInp ? pathInp.value.trim() : '';
+    if (envName && localDir) {
+      envs.push({env: envName, local_directory: localDir});
+    }
+  });
+
+  var slug = window._currentProjectSlug || '';
+  return fetch('/api/projects/' + encodeURIComponent(slug) + '/environments', {
+    method: 'PUT',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({environments: envs}),
+  }).then(function(r) {
+    return r.json().then(function(data) {
+      return {ok: r.ok, status: r.status, data: data};
+    });
+  });
+}
 </script>
 
 </body>

@@ -1954,6 +1954,123 @@ def put_project_settings(slug: str, body: dict):
     return build_effective_response(effective)
 
 
+# ── Filesystem browser (issue #643) ──────────────────────────────────────────
+
+_FS_BROWSE_ROOT: Path = Path.home()
+
+
+@app.get("/api/fs/list")
+def fs_list(path: str = ""):
+    """Return immediate subdirectories of the given path.
+
+    The path must resolve to within _FS_BROWSE_ROOT.  Traversal attempts
+    (../, symlinks escaping root, absolute paths outside root) return 403.
+    Returns {"entries": [{"name": str, "path": str}], "current": str}.
+    """
+    root = _FS_BROWSE_ROOT.resolve()
+
+    if not path or path.strip() in ("~", ""):
+        target = root
+    else:
+        # Handle ~ prefix
+        if path.startswith("~/"):
+            path = str(root / path[2:])
+        elif path == "~":
+            path = str(root)
+
+        candidate = Path(path)
+        # Resolve without following symlinks first to detect symlink escapes
+        try:
+            resolved = candidate.resolve()
+        except Exception:
+            raise HTTPException(status_code=403, detail="Forbidden")
+
+        try:
+            resolved.relative_to(root)
+        except ValueError:
+            raise HTTPException(status_code=403, detail="Forbidden")
+
+        target = resolved
+
+    if not target.exists() or not target.is_dir():
+        return {"entries": [], "current": str(target)}
+
+    entries = []
+    try:
+        for item in sorted(target.iterdir()):
+            if not item.is_dir():
+                continue
+            # Skip hidden dirs
+            if item.name.startswith("."):
+                continue
+            entries.append({"name": item.name, "path": str(item)})
+    except PermissionError:
+        pass
+
+    return {"entries": entries, "current": str(target)}
+
+
+# ── Environment paths (issue #643) ────────────────────────────────────────────
+
+@app.get("/api/projects/{slug}/environments")
+def get_project_environments(slug: str):
+    """Return environment paths stored in projects.json for this project."""
+    repo = _resolve_project_slug(slug)
+    envs = projects_module.get_project_environments(repo)
+    return {
+        "environments": [
+            {"env": env, "local_directory": local_dir}
+            for env, local_dir in envs.items()
+        ]
+    }
+
+
+class _EnvEntry(BaseModel):
+    env: str
+    local_directory: str
+
+
+class _PutEnvironmentsBody(BaseModel):
+    environments: list[_EnvEntry]
+
+
+@app.put("/api/projects/{slug}/environments")
+def put_project_environments(slug: str, body: _PutEnvironmentsBody):
+    """Validate and persist environment paths for this project.
+
+    Each path must (a) exist on disk and (b) be a git working clone.
+    Returns 422 with a descriptive error for the first invalid entry.
+    Returns 404 if the project slug is not found.
+    """
+    repo = _resolve_project_slug(slug)
+
+    errors = []
+    for entry in body.environments:
+        env = entry.env.strip()
+        local_dir = entry.local_directory.strip()
+        if not env:
+            errors.append("env name must not be blank")
+            continue
+        p = Path(local_dir)
+        if not p.exists():
+            errors.append(
+                f"'{env}': path '{local_dir}' does not exist on this machine"
+            )
+            continue
+        if not (p / ".git").exists():
+            errors.append(
+                f"'{env}': path '{local_dir}' is not a git repository (.git not found)"
+            )
+            continue
+
+    if errors:
+        raise HTTPException(status_code=422, detail="; ".join(errors))
+
+    envs_dict = {e.env.strip(): e.local_directory.strip() for e in body.environments}
+    projects_module.save_project_environments(repo, envs_dict)
+    return {"ok": True, "environments": envs_dict}
+
+
 # ── Branch cleanup (issue #634) ───────────────────────────────────────────────
 
 _PROTECTED_BRANCHES: frozenset[str] = frozenset({"develop", "master", "main", "attachments"})

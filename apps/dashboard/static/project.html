@@ -4305,6 +4305,66 @@
       color: var(--text-sub); flex-shrink: 0; text-transform: uppercase; letter-spacing: .03em;
     }
 
+    /* ── Unified timeline (issue #632) ── */
+    .evl-day-head {
+      padding: 8px 16px; font-family: var(--mono); font-size: 11px; font-weight: 700;
+      letter-spacing: .05em; color: var(--text-sub); text-transform: uppercase;
+      background: var(--surface-2); border-bottom: 1px solid var(--border);
+      border-top: 1px solid var(--border);
+    }
+    .evl-day-head:first-child { border-top: none; }
+    .evl-log-row {
+      display: flex; align-items: flex-start; gap: 11px; padding: 8px 16px;
+      border-top: 1px solid var(--border); transition: background .1s;
+    }
+    .evl-log-row:hover { background: var(--surface-hover); }
+    .evl-day-head + .evl-log-row { border-top: none; }
+    .lr-time {
+      font-family: var(--mono); font-size: 11px; color: var(--text-sub);
+      min-width: 54px; padding-top: 2px; flex-shrink: 0;
+    }
+    .lr-badge {
+      font-family: var(--mono); font-size: 9px; font-weight: 700; letter-spacing: .04em;
+      padding: 2px 6px; border-radius: 3px; flex-shrink: 0; min-width: 62px; text-align: center;
+    }
+    .lr-badge.agent  { background: var(--green-bg);  color: var(--green); }
+    .lr-badge.dash   { background: var(--blue-bg);   color: var(--blue); }
+    .lr-badge.github { background: var(--purple-bg); color: var(--purple); }
+    .lr-body {
+      flex: 1; min-width: 0; display: flex; align-items: baseline;
+      gap: 8px; flex-wrap: wrap;
+    }
+    .lr-desc { font-size: 13px; color: var(--text); }
+    .lr-desc .mono { font-family: var(--mono); font-size: 12px; color: var(--text-muted); }
+    .lr-actor {
+      font-family: var(--mono); font-size: 11px; color: var(--text-sub);
+      display: inline-flex; align-items: center; gap: 4px;
+    }
+    .git-ico { font-size: 14px; vertical-align: -3px; margin-right: 4px; }
+    .git-ico.branch   { color: var(--text-muted); }
+    .git-ico.pr-open  { color: var(--green); }
+    .git-ico.pr-merged{ color: var(--purple); }
+    .branch-name {
+      font-family: var(--mono); font-size: 11px; color: var(--text-muted);
+      background: var(--surface-2); padding: 1px 6px; border-radius: 3px;
+      border: 1px solid var(--border);
+    }
+    .lbl-act {
+      display: inline-flex; width: 15px; height: 15px; border-radius: 3px;
+      align-items: center; justify-content: center; font-size: 11px;
+      vertical-align: -3px; margin-right: 2px;
+    }
+    .lbl-act.added   { background: var(--green-bg); color: var(--green); }
+    .lbl-act.removed { background: var(--red-bg);   color: var(--red); }
+    .lbl-chip {
+      font-family: var(--mono); font-size: 10px; padding: 1px 6px; border-radius: 3px;
+      font-weight: 600; display: inline-block; vertical-align: 1px;
+    }
+    .lbl-sprint  { background: var(--green-bg);  color: var(--green); }
+    .lbl-uat     { background: var(--purple-bg); color: var(--purple); }
+    .lbl-flow    { background: var(--blue-bg);   color: var(--blue); }
+    .lbl-generic { background: var(--surface-2); color: var(--text-muted); border: 1px solid var(--border); }
+
     @media (max-width: 768px) {
       .logs-toolbar { padding: 10px 12px 8px; }
       .logs-run-header { padding: 10px 12px; }
@@ -4962,9 +5022,10 @@
                 </button>
               </div>
               <div id="logs-evl-source-group" class="logs-chip-group hidden" style="margin-left:8px">
-                <span class="logs-chip-label">Source</span>
-                <button class="logs-chip active" id="evl-source-all" onclick="evlSetSource('all')">All</button>
-                <button class="logs-chip" id="evl-source-github" onclick="evlSetSource('github')">GitHub</button>
+                <button class="logs-chip active" id="evl-filter-all" onclick="evlSetFilter('all')">All</button>
+                <button class="logs-chip" id="evl-filter-agent" onclick="evlSetFilter('agent')">Agent &amp; Sprint</button>
+                <button class="logs-chip" id="evl-filter-dashboard" onclick="evlSetFilter('dashboard')">Dashboard</button>
+                <button class="logs-chip" id="evl-filter-github" onclick="evlSetFilter('github')">GitHub</button>
               </div>
               <button class="btn-sm btn-ghost" title="Refresh" onclick="logsRefresh()" style="margin-left:4px">
                 <i class="ti ti-refresh"></i>
@@ -17014,14 +17075,7 @@ function evlRender() {
     return;
   }
 
-  const rows = _evlBundleEvents(_evlState.events, _evlState.sourceFilter);
-
-  if (rows.length === 0) {
-    listEl.innerHTML = '<div class="logs-empty">No activity found.</div>';
-    return;
-  }
-
-  listEl.innerHTML = rows.map(_evlRenderRow).join('');
+  listEl.innerHTML = evlRenderTimeline(_evlState.events, _evlState.sourceFilter);
 }
 
 async function evlFetch() {
@@ -17045,6 +17099,154 @@ function evlSetSource(source) {
   document.getElementById('evl-source-all')?.classList.toggle('active', source === 'all');
   document.getElementById('evl-source-github')?.classList.toggle('active', source === 'github');
   evlRender();
+}
+
+function evlSetFilter(filter) {
+  _evlState.sourceFilter = filter;
+  ['all', 'agent', 'dashboard', 'github'].forEach(function(f) {
+    var el = document.getElementById('evl-filter-' + f);
+    if (el) el.classList.toggle('active', f === filter);
+  });
+  evlRender();
+}
+
+function _evlDayLabel(ts) {
+  if (!ts) return '';
+  var d = new Date(ts.replace('T', ' '));
+  var today = new Date(); today.setHours(0,0,0,0);
+  var yesterday = new Date(today); yesterday.setDate(today.getDate() - 1);
+  var evDay = new Date(d); evDay.setHours(0,0,0,0);
+  var days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  var base = days[d.getDay()] + ' ' + months[d.getMonth()] + ' ' + d.getDate();
+  if (evDay.getTime() === today.getTime()) return 'Today · ' + base;
+  if (evDay.getTime() === yesterday.getTime()) return 'Yesterday · ' + base;
+  return base;
+}
+
+function _evlBadgeLabel(source, type) {
+  if (source === 'github') return 'GITHUB';
+  if (source === 'dashboard') return 'DASH';
+  if (source === 'agent') {
+    if ((type || '').startsWith('sprint_')) return 'SPRINT';
+    return 'AGENT';
+  }
+  return (source || '').toUpperCase();
+}
+
+function _evlLabelChipClass(name) {
+  var n = (name || '').toLowerCase();
+  if (n.startsWith('sprint')) return 'lbl-sprint';
+  if (n === 'uat' || n === 'done' || n === 'ready') return 'lbl-uat';
+  if (n === 'in-progress' || n === 'sit' || n.indexOf('running') > -1) return 'lbl-flow';
+  return 'lbl-generic';
+}
+
+function _evlDescHtml(ev) {
+  var type = ev.type || '';
+  var detail = ev.detail || {};
+  var target = escHtml(ev.target || '');
+
+  if (type === 'label_added' || type === 'label_removed') {
+    var actCls = type === 'label_added' ? 'added' : 'removed';
+    var actIcon = type === 'label_added' ? '<i class="ti ti-plus"></i>' : '<i class="ti ti-minus"></i>';
+    var labelName = detail.label_name || ev.target || '';
+    var chipCls = _evlLabelChipClass(labelName);
+    return '<span class="lr-desc">'
+      + '<span class="lbl-act ' + actCls + '">' + actIcon + '</span>'
+      + ' label <span class="lbl-chip ' + chipCls + '">' + escHtml(labelName) + '</span>'
+      + (target ? ' on <span class="mono">' + target + '</span>' : '')
+      + '</span>';
+  }
+
+  if (type === 'pr_opened' || type === 'pr_merged') {
+    var prCls = type === 'pr_opened' ? 'pr-open' : 'pr-merged';
+    var prIcon = type === 'pr_opened' ? 'ti-git-pull-request' : 'ti-git-merge';
+    var head = detail.head ? '<span class="branch-name">' + escHtml(detail.head) + '</span>' : '';
+    var base = detail.base ? '<span class="branch-name">' + escHtml(detail.base) + '</span>' : '';
+    var arrow = head && base ? ' → ' : '';
+    var prNum = target ? '<span class="mono">' + target + '</span>' : '';
+    var action = type === 'pr_opened' ? 'opened' : 'merged';
+    return '<span class="lr-desc">'
+      + '<i class="ti ' + prIcon + ' git-ico ' + prCls + '"></i>'
+      + 'PR ' + prNum + ' ' + action
+      + (head ? ' — ' + head + arrow + base : '')
+      + '</span>';
+  }
+
+  if (type === 'branch_created') {
+    var branchRef = detail.ref || ev.target || '';
+    return '<span class="lr-desc">'
+      + '<i class="ti ti-git-branch git-ico branch"></i>'
+      + 'branch <span class="branch-name">' + escHtml(branchRef) + '</span> created'
+      + '</span>';
+  }
+
+  if (type === 'issue_opened') {
+    return '<span class="lr-desc"><span class="mono">' + target + '</span> opened</span>';
+  }
+  if (type === 'issue_closed') {
+    return '<span class="lr-desc"><span class="mono">' + target + '</span> closed</span>';
+  }
+
+  var label = type.replace(/_/g, ' ');
+  return '<span class="lr-desc">' + escHtml(label) + (target ? ' <span class="mono">' + target + '</span>' : '') + '</span>';
+}
+
+function evlRenderTimeline(events, filter) {
+  if (!events || events.length === 0) return '<div class="logs-empty">No events found.</div>';
+
+  var visible = filter === 'all'
+    ? events
+    : events.filter(function(e) { return e.source === filter; });
+
+  if (visible.length === 0) return '<div class="logs-empty">No events for this filter.</div>';
+
+  var byDay = [];
+  var dayMap = {};
+
+  for (var i = 0; i < events.length; i++) {
+    var e = events[i];
+    var ts = e.timestamp || '';
+    var dayKey = ts.substring(0, 10);
+    if (!dayMap[dayKey]) {
+      dayMap[dayKey] = [];
+      byDay.push({ key: dayKey, ts: ts, events: dayMap[dayKey] });
+    }
+    dayMap[dayKey].push(e);
+  }
+
+  var html = '';
+  for (var j = 0; j < byDay.length; j++) {
+    var bucket = byDay[j];
+    var visibleInDay = bucket.events.filter(function(e) {
+      return filter === 'all' || e.source === filter;
+    });
+    if (visibleInDay.length === 0) continue;
+
+    html += '<div class="evl-day-head">' + escHtml(_evlDayLabel(bucket.ts)) + '</div>';
+
+    for (var k = 0; k < bucket.events.length; k++) {
+      var ev = bucket.events[k];
+      if (filter !== 'all' && ev.source !== filter) continue;
+
+      var timePart = (ev.timestamp || '').substring(11, 16);
+      var badgeLabel = _evlBadgeLabel(ev.source, ev.type);
+      var badgeCls = badgeLabel === 'GITHUB' ? 'github' : (badgeLabel === 'DASH' ? 'dash' : 'agent');
+      var desc = _evlDescHtml(ev);
+      var actor = (ev.source === 'github' && ev.actor)
+        ? '<span class="lr-actor">' + escHtml(ev.actor) + '</span>'
+        : '';
+
+      html += '<div class="evl-log-row" data-source="' + escHtml(ev.source) + '">'
+        + '<span class="lr-time">' + escHtml(timePart) + '</span>'
+        + '<span class="lr-badge ' + badgeCls + '">' + badgeLabel + '</span>'
+        + '<div class="lr-body">' + desc + actor + '</div>'
+        + '</div>';
+    }
+  }
+
+  return html || '<div class="logs-empty">No events for this filter.</div>';
 }
 
 // ── Compare Sprints tab (issue #435) ─────────────────────────────────────────

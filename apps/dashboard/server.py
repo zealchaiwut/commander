@@ -67,6 +67,7 @@ load_dotenv(Path(__file__).parent / ".env")
 
 import db
 import github_client
+import github_events_sync
 import projects as projects_module
 
 # Structured event logging (services/logging.py at repo root)
@@ -4889,6 +4890,18 @@ def get_logs_runs(
     paged = items[offset: offset + page_size]
 
     return {"items": paged, "page": page, "page_size": page_size, "total": total}
+
+
+@app.post("/api/logs/sync-github")
+def post_logs_sync_github(project: Optional[str] = None):
+    """Poll GitHub Events API for the project repo and upsert into the events table."""
+    if not project:
+        return {"synced": 0, "skipped": 0, "rate_limited": False, "error": "project required"}
+    try:
+        result = github_events_sync.sync_github_events(project=project, repo=project)
+    except Exception as exc:
+        return {"synced": 0, "skipped": 0, "rate_limited": False, "error": str(exc)}
+    return result
 
 
 @app.get("/api/sprints/{sprint_label}/dispatch-log")

@@ -2248,23 +2248,6 @@
       font-size: 12px; color: var(--text); line-height: 1.7;
     }
     .lint-warn-actions { display: flex; gap: 8px; justify-content: flex-end; }
-    .bc-lint-overlay {
-      position: absolute; inset: 0; z-index: 20;
-      background: var(--surface);
-      display: flex; flex-direction: column;
-      border-top: 2px solid var(--amber);
-    }
-    .bc-lint-overlay-list {
-      flex: 1; overflow-y: auto; padding: 8px 16px;
-      display: flex; flex-direction: column; gap: 8px;
-    }
-    .bc-lint-ticket-item {
-      border: 1px solid color-mix(in srgb, var(--amber) 40%, transparent);
-      border-radius: 6px; padding: 10px 12px;
-      background: var(--amber-bg); font-size: 12px;
-    }
-    .bc-lint-ticket-title { font-weight: 600; color: var(--text); margin-bottom: 4px; }
-    .bc-lint-ticket-issues { margin: 0; padding: 0 0 0 16px; color: var(--text); line-height: 1.6; }
 
     /* ── Run Sprint preflight modal (issue #446 / #447) ── */
     .pf-modal { width: min(1100px, calc(100vw - 48px)); }
@@ -3607,13 +3590,18 @@
     .bc-review-sub { font-size: 11px; color: var(--text-muted); font-weight: 400; }
     .bc-review-list { flex: 1; overflow-y: auto; padding: 8px 16px; display: flex; flex-direction: column; gap: 6px; }
     .bc-review-item {
-      display: flex; align-items: center; justify-content: space-between; gap: 12px;
+      display: flex; flex-direction: column; gap: 4px;
       padding: 8px 12px; border: 1px solid var(--border); border-radius: 6px;
       background: var(--surface); font-size: 12px;
     }
+    .bc-review-item-top { display: flex; align-items: center; gap: 8px; min-width: 0; }
     .bc-review-check-wrap { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; cursor: pointer; }
     .bc-review-check { cursor: pointer; flex-shrink: 0; }
-    .bc-review-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
+    .bc-review-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; font-weight: 500; }
+    .bc-review-meta { display: flex; align-items: center; gap: 8px; padding-left: 22px; flex-wrap: wrap; }
+    .bc-review-meta-chip { font-size: 10px; padding: 1px 6px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface-2); color: var(--text-sub); white-space: nowrap; }
+    .bc-review-meta-chip--size { border-color: rgba(37,99,235,.3); color: #2563eb; background: rgba(37,99,235,.08); }
+    .bc-review-meta-chip--sprint { border-color: rgba(22,163,74,.3); color: #16a34a; background: rgba(22,163,74,.08); }
     .bc-review-labels { font-size: 10px; color: var(--text-muted); white-space: nowrap; flex-shrink: 0; }
     .bc-review-actions {
       display: flex; justify-content: flex-end; gap: 8px;
@@ -5115,7 +5103,6 @@
         <!-- Step 2: Review & Create -->
         <div id="bc-step2" class="hidden">
           <div class="bc-parallel-banner" id="bc-parallel-banner"></div>
-          <div class="bc-summary-strip" id="bc-summary-strip"></div>
 
           <!-- Bulk selection controls (issue #534) -->
           <div class="bc-bulk-controls hidden" id="bc-bulk-controls" role="group" aria-label="Bulk selection controls">
@@ -5174,19 +5161,6 @@
             <div class="bc-review-actions">
               <button type="button" class="btn-ghost" onclick="bcCancelReview()">Cancel</button>
               <button type="button" class="btn-primary" id="bc-post-github-btn" disabled onclick="bcPostSelected()">Post to GitHub</button>
-            </div>
-          </div>
-
-          <!-- Linter warning overlay (issue #574) -->
-          <div id="bc-lint-overlay" class="bc-lint-overlay hidden">
-            <div class="bc-review-header">
-              <strong>Quality warnings</strong>
-              <span class="bc-review-sub">Some tickets may need improvement</span>
-            </div>
-            <div class="bc-lint-overlay-list" id="bc-lint-overlay-list"></div>
-            <div class="bc-review-actions">
-              <button type="button" class="btn-ghost" onclick="_bcLintGoBack()">Go back and edit</button>
-              <button type="button" class="btn-primary" onclick="_bcLintProceed()">Proceed anyway</button>
             </div>
           </div>
 
@@ -7213,13 +7187,13 @@ async function loadSprintMgmt(silent) {
     if (runningResp && runningResp.ok) {
       const runningData = await runningResp.json();
       const running = runningData.running || [];
-      _smgmtAnySprintRunning = running.length > 0;
       running.forEach(r => {
-        // Only mark as running for live-card tracking if this is the current project
         if (r.project === repo) {
           _smgmtRunningLabels.add(r.sprint_label);
         }
       });
+      // Only block Run Sprint if THIS project has a running sprint
+      _smgmtAnySprintRunning = _smgmtRunningLabels.size > 0;
     }
 
     _smgmtRender(data);
@@ -13856,8 +13830,6 @@ let _bcPosting         = false;     // true while posting to GitHub (→ jump to
 let _bcSprintsLoadedFor = null;     // repo the Sprint dropdown was last populated for
 let _bcReestimateTimers = {};       // index -> debounce timer for auto re-estimate on edit
 let _bcWarnDismissed = false;       // true after user dismisses the prompt-size warning (issue #568)
-let _bcSkipLint  = false;           // set true when user clicks "Proceed anyway" on linter warning
-let _bcLintToPost = null;           // tickets pending post while lint overlay is shown
 
 const BC_MAX_PROMPTS = 50;
 const BC_WARN_PROMPTS = 40;
@@ -13983,10 +13955,9 @@ function _bcComputeStage(job) {
   // ① Draft — any ticket still being generated by the BA. A stopped job won't
   // make further progress, so its leftover pending tickets don't hold stage ①.
   if (job.status !== 'stopped' && active.some(t => t.state === 'pending' || t.state === 'drafting')) return 1;
-  // ② Estimate — drafts are ready; the user explicitly starts (or skips)
-  // estimation here. Estimation runs in the background and never blocks: the
-  // gate advances to ③ as soon as the user clicks, sized or not.
+  // ② Estimate — stay here until the user clicks AND all in-flight estimates finish.
   if (!_bcEstimateGatePassed) return 2;
+  if (active.some(t => t.estimate_state === 'estimating')) return 2;
   // ③ Sprint until confirmed, then ④ Post.
   return _bcSprintConfirmed ? 4 : 3;
 }
@@ -14364,7 +14335,6 @@ function _bcUpdateCounter() {
   const text = (document.getElementById('bc-textarea') || {}).value || '';
   const prompts = _bcParsePrompts(text);
   _bcPromptOrder = prompts.slice();
-  _bcRenderPromptList();
   const n = prompts.length;
   const counterEl = document.getElementById('bc-counter');
   if (counterEl) counterEl.textContent = `${n} / ${BC_MAX_PROMPTS} prompts`;
@@ -14805,11 +14775,12 @@ function _bcConnectSSE(jobId) {
         _bcEventSource = null;
         localStorage.removeItem('bc_job_id');
         _bcJobId = null;
-        // After posting, the tickets now live on the board — jump to Sprint Mgmt
-        // so the user lands where their new (sprint-assigned) tickets appear.
+        // After posting, jump to Sprint Mgmt and refresh so new tickets appear immediately.
         if (_bcPosting) {
           _bcPosting = false;
           switchTab('sprint-mgmt');
+          loadSprintMgmt();
+          _bcShowStep(1);
         }
       }
     } catch (_) {}
@@ -14898,29 +14869,6 @@ function _bcRenderStep2() {
     }
   }
 
-  // Summary strip
-  const strip = document.getElementById('bc-summary-strip');
-  if (strip) {
-    const pct = total > 0 ? Math.round((fullyDone / total) * 100) : 0;
-    let etaHtml = '';
-    if ((sized + estimateFailed) > 0 && pending > 0 && _bcAvgMs) {
-      const estMs = (_bcAvgMs / concurrency) * pending;
-      const estSec = Math.round(estMs / 1000);
-      const m = Math.floor(estSec / 60);
-      const s = estSec % 60;
-      etaHtml = `<span class="bc-eta">est. ${m > 0 ? m + 'm ' + s + 's' : s + 's'} remaining</span>`;
-    }
-    const sizeWarnHtml = sizeWarning > 0
-      ? `<span class="bc-metric" style="color:var(--amber)"><span class="bc-metric-count">${sizeWarning}</span> Oversized</span>`
-      : '';
-    strip.innerHTML = `
-      <span class="bc-metric bc-metric--created"><span class="bc-metric-count">${sized + estimateFailed}</span> Done</span>
-      <span class="bc-metric bc-metric--drafting"><span class="bc-metric-count">${drafting + estimating + created}</span> In progress</span>
-      <span class="bc-metric bc-metric--pending"><span class="bc-metric-count">${pending}</span> Pending</span>
-      ${sizeWarnHtml}
-      <div class="bc-progress-wrap"><div class="bc-progress-bar" style="width:${pct}%"></div></div>
-      ${etaHtml}`;
-  }
 
   // Ticket list — preserve any in-progress editor content before re-rendering
   const list = document.getElementById('bc-ticket-list');
@@ -14982,21 +14930,22 @@ function _bcRenderStep2() {
     const drafted = activeTickets.filter(t => t.state !== 'pending' && t.state !== 'drafting').length;
     if (stopBtn) { stopBtn.disabled = false; stopBtn.classList.remove('hidden'); }
     if (doneBtn) { doneBtn.disabled = true; doneBtn.textContent = `Generating… ${drafted}/${total}`; doneBtn.classList.remove('hidden'); }
-  } else if (stage === 2) {                             // ② Estimate (you start it)
-    // User-triggered, non-blocking: "Estimate drafts" kicks off sizing and
-    // advances; "Skip" advances without sizing. Estimates fill in live after.
-    const draftReady = activeTickets.filter(t => t.state === 'draft_ready');
-    if (estimateBtn) { estimateBtn.disabled = draftReady.length === 0; estimateBtn.classList.remove('hidden'); }
-    if (skipEstBtn)  skipEstBtn.classList.remove('hidden');
+  } else if (stage === 2) {                             // ② Estimate
+    const stillEstimating = _bcEstimateGatePassed && activeTickets.some(t => t.estimate_state === 'estimating');
+    if (stillEstimating) {
+      // Gate passed but estimates still running — show progress, hide Estimate/Skip
+      const sized = activeTickets.filter(t => t.estimate_state === 'sized' || t.estimate_state === 'estimate_failed').length;
+      const total = activeTickets.filter(t => t.estimate_state && t.estimate_state !== 'none').length || activeTickets.length;
+      if (doneBtn) { doneBtn.disabled = true; doneBtn.textContent = `Sizing… ${sized}/${total}`; doneBtn.classList.remove('hidden'); }
+    } else {
+      const draftReady = activeTickets.filter(t => t.state === 'draft_ready');
+      if (estimateBtn) { estimateBtn.disabled = draftReady.length === 0; estimateBtn.classList.remove('hidden'); }
+      if (skipEstBtn)  skipEstBtn.classList.remove('hidden');
+    }
   } else if (stage === 3) {                             // ③ Sprint (you)
     _bcEnsureSprintsLoaded(job);
-    const _stillEstimating = activeTickets.some(t => t.estimate_state === 'estimating');
     if (sprintSel)   sprintSel.classList.remove('hidden');
-    if (continueBtn) {
-      continueBtn.disabled = _stillEstimating;
-      continueBtn.title = _stillEstimating ? 'Wait for estimation to finish' : '';
-      continueBtn.classList.remove('hidden');
-    }
+    if (continueBtn) { continueBtn.disabled = false; continueBtn.title = ''; continueBtn.classList.remove('hidden'); }
   } else if (stage === 4) {                             // ④ Post (you)
     if (reviewPostBtn) {
       const draftReadyTickets = activeTickets.filter(t => t.state === 'draft_ready');
@@ -15011,7 +14960,7 @@ function _bcRenderStep2() {
     if (doneBtn) {
       doneBtn.disabled = false;
       doneBtn.textContent = 'Done';
-      doneBtn.onclick = () => { _bcShowStep(1); };
+      doneBtn.onclick = () => { _bcShowStep(1); switchTab('sprint-mgmt'); loadSprintMgmt(); };
       doneBtn.classList.remove('hidden');
     }
   }
@@ -15197,11 +15146,8 @@ function _bcRenderCard(t) {
       ? `<div class="bc-regen-err">${escHtml(t._regen_error)}</div>` : '';
     return `
       <div class="bc-card bc-card--draft_ready" id="bc-card-${t.index}">
-        <div class="bc-status-dot bc-status-dot--draft_ready"></div>
         <div class="bc-card-body" style="min-width:0;flex:1;">
           <div class="bc-draft-check-wrap">
-            <input type="checkbox" class="bc-draft-check" id="bc-check-${t.index}" ${isChecked}
-                   onchange="_bcDraftCheckChange(${t.index}, this.checked)">
             <span class="bc-card-label bc-card-label--draft">Draft ready</span>
             ${_bcSizePillHtml(t)}
           </div>
@@ -15687,19 +15633,37 @@ function bcReviewAndPost() {
   if (!_bcJobState) return;
   const tickets = (_bcJobState.tickets || []).filter(t => t.state === 'draft_ready');
 
+  // Compute target sprint label once — used both in header and per-row chips
+  const sprintVal = (document.getElementById('bc-sprint') || {}).value || '';
+  let target = 'Backlog';
+  if (sprintVal === 'NEW') {
+    const opt = document.querySelector('#bc-sprint option[value="NEW"]');
+    target = opt ? opt.textContent.replace('➕ ', '') : 'New sprint';
+  } else if (sprintVal) {
+    target = 'Sprint ' + sprintVal.replace('sprint-', '');
+  }
+
   const listEl = document.getElementById('bc-review-list');
   if (listEl) {
     listEl.innerHTML = tickets.map(t => {
       const titleEl = document.getElementById(`bc-draft-title-${t.index}`);
       const title = titleEl ? titleEl.value.trim() : (t.title || '');
       const isChecked = _bcDraftSelections.has(t.index) ? 'checked' : '';
+      const sizeChip = t.estimate_size
+        ? `<span class="bc-review-meta-chip bc-review-meta-chip--size">${escHtml(t.estimate_size)}</span>` : '';
+      const sprintChip = `<span class="bc-review-meta-chip bc-review-meta-chip--sprint">${escHtml(target)}</span>`;
+      const labelPills = (t.label_pills || (_bcJobState.default_labels || []));
+      const labelChips = labelPills.map(l => `<span class="bc-review-meta-chip">${escHtml(typeof l === 'string' ? l : l.name || '')}</span>`).join('');
       return `
         <div class="bc-review-item">
-          <label class="bc-review-check-wrap">
-            <input type="checkbox" class="bc-review-check" data-index="${t.index}" ${isChecked}
-                   onchange="_bcReviewOverlayCheck(${t.index}, this.checked)">
-            <span class="bc-review-title">${escHtml(title || '(no title)')}</span>
-          </label>
+          <div class="bc-review-item-top">
+            <label class="bc-review-check-wrap">
+              <input type="checkbox" class="bc-review-check" data-index="${t.index}" ${isChecked}
+                     onchange="_bcReviewOverlayCheck(${t.index}, this.checked)">
+              <span class="bc-review-title">${escHtml(title || '(no title)')}</span>
+            </label>
+          </div>
+          <div class="bc-review-meta">${sprintChip}${sizeChip}${labelChips}</div>
         </div>`;
     }).join('');
   }
@@ -15712,18 +15676,8 @@ function bcReviewAndPost() {
   }
 
   // Reflect the batch's target sprint in the review header
-  const sprintVal = (document.getElementById('bc-sprint') || {}).value || '';
   const subEl = document.querySelector('#bc-review-overlay .bc-review-sub');
-  if (subEl) {
-    let target = 'Backlog (no sprint)';
-    if (sprintVal === 'NEW') {
-      const opt = document.querySelector('#bc-sprint option[value="NEW"]');
-      target = opt ? opt.textContent.replace('➕ ', '') : 'a new sprint';
-    } else if (sprintVal) {
-      target = 'Sprint ' + sprintVal.replace('sprint-', '');
-    }
-    subEl.textContent = `Select which tickets to create → ${target}`;
-  }
+  if (subEl) subEl.textContent = `Select which tickets to create → ${target}`;
 
   const overlay = document.getElementById('bc-review-overlay');
   if (overlay) overlay.classList.remove('hidden');
@@ -15748,36 +15702,6 @@ function _bcReviewOverlayCheck(index, checked) {
 function bcCancelReview() {
   const overlay = document.getElementById('bc-review-overlay');
   if (overlay) overlay.classList.add('hidden');
-  const lintOverlay = document.getElementById('bc-lint-overlay');
-  if (lintOverlay) lintOverlay.classList.add('hidden');
-  _bcSkipLint = false;
-  _bcLintToPost = null;
-}
-
-function _bcShowLintOverlay(problems, toPost) {
-  _bcLintToPost = toPost;
-  const list = document.getElementById('bc-lint-overlay-list');
-  list.innerHTML = problems.map(t => {
-    const preview = t.title.length > 50 ? t.title.slice(0, 50) + '…' : t.title;
-    const items = t.issues.map(i => `<li>${escHtml(i)}</li>`).join('');
-    return `<div class="bc-lint-ticket-item">
-      <div class="bc-lint-ticket-title">Ticket ${t.index + 1}: ${escHtml(preview)}</div>
-      <ul class="bc-lint-ticket-issues">${items}</ul>
-    </div>`;
-  }).join('');
-  document.getElementById('bc-lint-overlay').classList.remove('hidden');
-}
-
-function _bcLintGoBack() {
-  document.getElementById('bc-lint-overlay').classList.add('hidden');
-  _bcLintToPost = null;
-}
-
-async function _bcLintProceed() {
-  document.getElementById('bc-lint-overlay').classList.add('hidden');
-  _bcLintToPost = null;
-  _bcSkipLint = true;
-  await bcPostSelected();
 }
 
 async function bcPostSelected() {
@@ -15816,14 +15740,7 @@ async function bcPostSelected() {
   }
   if (toPost.length === 0) return;
 
-  // Quality linter (non-blocking — skipped when user proceeds anyway)
-  if (!_bcSkipLint) {
-    const problems = toPost
-      .map(t => ({ ...t, issues: lintTicket(t.title, t.body) }))
-      .filter(t => t.issues.length > 0);
-    if (problems.length > 0) { _bcShowLintOverlay(problems, toPost); return; }
-  }
-  _bcSkipLint = false;
+
 
   const postBtn   = document.getElementById('bc-post-github-btn');
   const reviewBtn = document.getElementById('bc-review-post-btn');

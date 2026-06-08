@@ -1720,6 +1720,84 @@ def get_running_sprint(project: str):
     return Response(status_code=204)
 
 
+_VALID_EVENT_SOURCES = {"agent", "dashboard", "github"}
+
+
+@app.get("/api/projects/{slug}/events")
+def get_project_events(
+    slug: str,
+    source: Optional[str] = None,
+    target: Optional[str] = None,
+    since: Optional[str] = None,
+    until: Optional[str] = None,
+    limit: int = 100,
+):
+    """Return structured events for a project, newest-first.
+
+    Filters: source (agent|dashboard|github), target (exact), since/until (ISO date), limit.
+    404 — unknown project slug.
+    400 — invalid source value.
+    """
+    # Validate source before any DB work
+    if source is not None and source not in _VALID_EVENT_SOURCES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid source {source!r}. Must be one of: {', '.join(sorted(_VALID_EVENT_SOURCES))}",
+        )
+
+    # Resolve slug → project name stored in events table
+    try:
+        all_projects = projects_module.load_projects()
+    except Exception:
+        all_projects = []
+
+    matched = next(
+        (p for p in all_projects
+         if p["repo"].split("/")[-1] == slug or p["repo"] == slug),
+        None,
+    )
+    if matched is None:
+        raise HTTPException(status_code=404, detail=f"Project '{slug}' not found")
+
+    # The events table stores project as the repo slug (last path component)
+    project_key = matched["repo"].split("/")[-1]
+
+    query = "SELECT timestamp, source, actor, type, target, action_id, detail FROM events WHERE project = ?"
+    params: list = [project_key]
+
+    if source is not None:
+        query += " AND source = ?"
+        params.append(source)
+    if target is not None:
+        query += " AND target = ?"
+        params.append(target)
+    if since is not None:
+        query += " AND timestamp >= ?"
+        params.append(since)
+    if until is not None:
+        # include the full day by appending T23:59:59 when only a date is given
+        until_bound = until if "T" in until else f"{until}T23:59:59"
+        query += " AND timestamp <= ?"
+        params.append(until_bound)
+
+    query += " ORDER BY timestamp DESC LIMIT ?"
+    params.append(limit)
+
+    with db.get_conn() as conn:
+        rows = conn.execute(query, params).fetchall()
+
+    result = []
+    for row in rows:
+        d = dict(row)
+        try:
+            d["detail"] = json.loads(d["detail"])
+        except (TypeError, ValueError):
+            pass
+        result.append(d)
+
+    return result
+
+
 @app.post("/api/projects/{owner}/{repo_name}/approve-batch")
 async def approve_batch(owner: str, repo_name: str):
     repo = f"{owner}/{repo_name}"

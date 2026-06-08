@@ -227,7 +227,7 @@ def record_project_event(
     action_id: str | None = None,
 ) -> None:
     """Insert one row into project_events."""
-    now = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S")
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     with get_conn() as conn:
         conn.execute(
             """INSERT INTO project_events

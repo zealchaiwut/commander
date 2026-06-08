@@ -3690,9 +3690,11 @@ def _all_sprints_running() -> list[dict]:
     return result
 
 
-def _any_sprint_running() -> Optional[dict]:
-    """Scan all projects for a running sprint. Returns first found or None."""
+def _any_sprint_running(project: str | None = None) -> Optional[dict]:
+    """Scan for a running sprint. If project given, scoped to that project only."""
     running = _all_sprints_running()
+    if project:
+        running = [r for r in running if r["project"] == project]
     return running[0] if running else None
 
 
@@ -4598,7 +4600,7 @@ def run_sprint_managed(request: Request, body: SprintMgmtRunBody):
         raise HTTPException(502, detail=f"sprint_manager.py not found at {SPRINT_MANAGER_PATH}")
 
     project_root = _project_root_path(body.project)
-    running = _any_sprint_running()
+    running = _any_sprint_running(project=body.project)
     if running:
         _slog.event("route.error", project="dashboard", request_id=request.state.request_id, route="/api/sprints/run", level="error", sprint_label=body.sprint_label, error="sprint already running", running_sprint=running.get("sprint_label"))
         raise HTTPException(
@@ -7101,7 +7103,7 @@ def rerun_sprint(sprint_label: str, project: str, body: SprintRerunV2Body):
     project_root = _project_root_path(project)
 
     if body.auto_run:
-        running = _any_sprint_running()
+        running = _any_sprint_running(project=project)
         if running:
             raise HTTPException(
                 409,

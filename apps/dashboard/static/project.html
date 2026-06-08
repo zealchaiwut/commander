@@ -4302,6 +4302,138 @@
       width: 6px; height: 6px; border-radius: 50%; background: var(--green); flex-shrink: 0;
       animation: smgmt-running-badge-pulse 2s ease-in-out infinite;
     }
+    /* ── Events Activity Log (issue #633) ── */
+    .evl-bundle-row { border-bottom: 1px solid var(--border); }
+    .evl-bundle-header {
+      display: flex; align-items: center; gap: 8px;
+      padding: 10px 16px; cursor: pointer; user-select: none;
+    }
+    .evl-bundle-header:hover { background: var(--surface-hover); }
+    .evl-bundle-row.evl-single .evl-bundle-header { cursor: default; }
+    .evl-bundle-row.evl-single .evl-bundle-header:hover { background: transparent; }
+    .evl-headline { font-size: 13px; font-weight: 500; color: var(--text); flex-shrink: 0; }
+    .evl-effect-chips { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; flex: 1; min-width: 0; }
+    .evl-effect-chip {
+      font-size: 11px; font-weight: 600; padding: 1px 6px;
+      border-radius: 10px; border: 1px solid; white-space: nowrap;
+    }
+    .evl-effect-chip--added  { background: var(--green-bg);  color: var(--green);    border-color: rgba(34,197,94,.25); }
+    .evl-effect-chip--removed{ background: var(--red-bg);    color: var(--red);      border-color: rgba(239,68,68,.25); }
+    .evl-effect-chip--neutral{ background: var(--surface-2); color: var(--text-sub); border-color: var(--border); }
+    .evl-count-badge {
+      font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 10px;
+      background: var(--surface-2); color: var(--text-muted);
+      border: 1px solid var(--border); flex-shrink: 0;
+    }
+    .evl-chevron { font-size: 12px; color: var(--text-sub); transition: transform .15s; flex-shrink: 0; }
+    .evl-bundle-row.expanded .evl-chevron { transform: rotate(90deg); }
+    .evl-sub-rows { display: none; border-top: 1px solid var(--border); background: var(--surface-2); }
+    .evl-bundle-row.expanded .evl-sub-rows { display: block; }
+    .evl-sub-row {
+      display: flex; align-items: center; gap: 12px;
+      padding: 6px 32px; font-size: 12px;
+      border-bottom: 1px solid var(--border);
+    }
+    .evl-sub-row:last-child { border-bottom: none; }
+    .evl-ts { font-family: var(--mono); font-size: 11px; color: var(--text-muted); flex-shrink: 0; }
+    .evl-actor { color: var(--text-sub); flex-shrink: 0; }
+    .evl-type-label { color: var(--text-muted); flex: 1; }
+    .evl-standalone-row {
+      display: flex; align-items: center; gap: 8px;
+      padding: 10px 16px; border-bottom: 1px solid var(--border); font-size: 13px;
+    }
+    .evl-source-badge {
+      font-size: 10px; font-weight: 600; padding: 1px 6px; border-radius: 10px;
+      border: 1px solid var(--border); background: var(--surface-2);
+      color: var(--text-sub); flex-shrink: 0; text-transform: uppercase; letter-spacing: .03em;
+    }
+
+    /* ── Unified timeline (issue #632) ── */
+    .evl-day-head {
+      padding: 8px 16px; font-family: var(--mono); font-size: 11px; font-weight: 700;
+      letter-spacing: .05em; color: var(--text-sub); text-transform: uppercase;
+      background: var(--surface-2); border-bottom: 1px solid var(--border);
+      border-top: 1px solid var(--border);
+    }
+    .evl-day-head:first-child { border-top: none; }
+    .evl-log-row {
+      display: flex; align-items: flex-start; gap: 11px; padding: 8px 16px;
+      border-top: 1px solid var(--border); transition: background .1s;
+    }
+    .evl-log-row:hover { background: var(--surface-hover); }
+    .evl-day-head + .evl-log-row { border-top: none; }
+    .lr-time {
+      font-family: var(--mono); font-size: 11px; color: var(--text-sub);
+      min-width: 54px; padding-top: 2px; flex-shrink: 0;
+    }
+    .lr-badge {
+      font-family: var(--mono); font-size: 9px; font-weight: 700; letter-spacing: .04em;
+      padding: 2px 6px; border-radius: 3px; flex-shrink: 0; min-width: 62px; text-align: center;
+    }
+    .lr-badge.agent  { background: var(--green-bg);  color: var(--green); }
+    .lr-badge.dash   { background: var(--blue-bg);   color: var(--blue); }
+    .lr-badge.github { background: var(--purple-bg); color: var(--purple); }
+    .lr-body {
+      flex: 1; min-width: 0; display: flex; align-items: baseline;
+      gap: 8px; flex-wrap: wrap;
+    }
+    .lr-desc { font-size: 13px; color: var(--text); }
+    .lr-desc .mono { font-family: var(--mono); font-size: 12px; color: var(--text-muted); }
+    .lr-actor {
+      font-family: var(--mono); font-size: 11px; color: var(--text-sub);
+      display: inline-flex; align-items: center; gap: 4px;
+    }
+    .git-ico { font-size: 14px; vertical-align: -3px; margin-right: 4px; }
+    .git-ico.branch   { color: var(--text-muted); }
+    .git-ico.pr-open  { color: var(--green); }
+    .git-ico.pr-merged{ color: var(--purple); }
+    .branch-name {
+      font-family: var(--mono); font-size: 11px; color: var(--text-muted);
+      background: var(--surface-2); padding: 1px 6px; border-radius: 3px;
+      border: 1px solid var(--border);
+    }
+    .lbl-act {
+      display: inline-flex; width: 15px; height: 15px; border-radius: 3px;
+      align-items: center; justify-content: center; font-size: 11px;
+      vertical-align: -3px; margin-right: 2px;
+    }
+    .lbl-act.added   { background: var(--green-bg); color: var(--green); }
+    .lbl-act.removed { background: var(--red-bg);   color: var(--red); }
+    .lbl-chip {
+      font-family: var(--mono); font-size: 10px; padding: 1px 6px; border-radius: 3px;
+      font-weight: 600; display: inline-block; vertical-align: 1px;
+    }
+    .lbl-sprint  { background: var(--green-bg);  color: var(--green); }
+    .lbl-uat     { background: var(--purple-bg); color: var(--purple); }
+    .lbl-flow    { background: var(--blue-bg);   color: var(--blue); }
+    .lbl-generic { background: var(--surface-2); color: var(--text-muted); border: 1px solid var(--border); }
+
+    /* ── Branch cleanup controls (issue #634) ── */
+    .evl-stale-banner-inner {
+      display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+      padding: 10px 16px; background: var(--amber-bg);
+      border-bottom: 1px solid var(--amber); font-size: 13px;
+    }
+    .evl-stale-banner-inner i { color: var(--amber); font-size: 15px; flex-shrink: 0; }
+    .evl-del-btn {
+      font-size: 11px; padding: 2px 8px; border-radius: 4px;
+      border: 1px solid var(--border); background: var(--surface-2);
+      color: var(--text-muted); cursor: pointer; flex-shrink: 0; white-space: nowrap;
+    }
+    .evl-del-btn:hover { border-color: var(--red); color: var(--red); background: var(--red-bg); }
+    .evl-del-btn:disabled { opacity: .5; cursor: not-allowed; }
+    .evl-cleanup-all-btn { margin-left: auto; }
+    .evl-branch-deleted {
+      font-size: 11px; color: var(--text-muted); font-family: var(--mono); opacity: .65;
+    }
+    .evl-sprint-cleanup {
+      font-size: 11px; padding: 2px 8px; border-radius: 4px;
+      border: 1px solid var(--border); background: var(--surface-2);
+      color: var(--purple); cursor: pointer; flex-shrink: 0; white-space: nowrap;
+    }
+    .evl-sprint-cleanup:hover { border-color: var(--purple); background: var(--purple-bg); }
+    .evl-sprint-cleanup:disabled { opacity: .5; cursor: not-allowed; }
+
     @media (max-width: 768px) {
       .logs-toolbar { padding: 10px 12px 8px; }
       .logs-run-header { padding: 10px 12px; }
@@ -4945,7 +5077,7 @@
                        oninput="logsOnSearch(this.value)">
               </div>
               <div class="logs-view-toggle">
-                <button class="logs-view-btn active" id="logs-view-timeline" onclick="logsSetView('timeline')">
+                <button class="logs-view-btn" id="logs-view-timeline" onclick="logsSetView('timeline')">
                   <i class="ti ti-list-tree"></i> Runs
                 </button>
                 <button class="logs-view-btn" id="logs-view-issues" onclick="logsSetView('issues')">
@@ -4954,12 +5086,24 @@
                 <button class="logs-view-btn" id="logs-view-raw" onclick="logsSetView('raw')">
                   <i class="ti ti-terminal-2"></i> Raw
                 </button>
+                <button class="logs-view-btn active" id="logs-view-activity" onclick="logsSetView('activity')">
+                  <i class="ti ti-activity"></i> Activity
+                </button>
               </div>
+              <div id="logs-evl-source-group" class="logs-chip-group" style="margin-left:8px">
+                <button class="logs-chip active" id="evl-filter-all" onclick="evlSetFilter('all')">All</button>
+                <button class="logs-chip" id="evl-filter-agent" onclick="evlSetFilter('agent')">Agent &amp; Sprint</button>
+                <button class="logs-chip" id="evl-filter-dashboard" onclick="evlSetFilter('dashboard')">Dashboard</button>
+                <button class="logs-chip" id="evl-filter-github" onclick="evlSetFilter('github')">GitHub</button>
+              </div>
+              <button class="btn-sm btn-ghost" title="Refresh" onclick="logsRefresh()" style="margin-left:4px">
+                <i class="ti ti-refresh"></i>
+              </button>
             </div>
           </div>
           <!-- Body -->
           <div class="logs-body">
-            <div id="logs-timeline">
+            <div id="logs-timeline" class="hidden">
               <div class="logs-empty" id="logs-empty">Loading runs…</div>
             </div>
             <div id="logs-issues" class="hidden">
@@ -4968,6 +5112,12 @@
             <div id="logs-raw" class="hidden">
               <div class="logs-raw-stream" id="logs-raw-stream">
                 <div class="logs-raw-line" style="color:var(--text-sub)">Select a sprint run to view raw output…</div>
+              </div>
+            </div>
+            <div id="logs-activity">
+              <div id="evl-stale-banner" class="hidden"></div>
+              <div class="evl-list" id="evl-list">
+                <div class="logs-empty" id="evl-empty">Loading activity…</div>
               </div>
             </div>
           </div>
@@ -5225,6 +5375,7 @@
             <div id="bc-review-list" class="bc-review-list"></div>
             <div class="bc-review-actions">
               <button type="button" class="btn-ghost" onclick="bcCancelReview()">Cancel</button>
+              <span id="bc-post-error" class="hidden" style="color:var(--red);font-size:12px;margin-right:8px;"></span>
               <button type="button" class="btn-primary" id="bc-post-github-btn" disabled onclick="bcPostSelected()">Post to GitHub</button>
             </div>
           </div>
@@ -7074,6 +7225,9 @@ async function init() {
   if (_activeTab === 'logs' && _logsState.runs.length === 0) {
     logsFetchRuns();
   }
+  if (_activeTab === 'logs' && _logsState.viewMode === 'activity' && _evlState.events === null) {
+    evlFetch();
+  }
 
   // If compare tab loaded before _projectData was ready, re-init now with correct project
   if (_activeTab === 'compare') {
@@ -7684,14 +7838,17 @@ function _smgmtLabelFilterApply() {
 async function _smgmtFetchMissingOutcomes(orderedLabels, bySprint) {
   const repo = _smgmtRepo();
   if (!repo) return;
+  const toFetch = [];
   for (const label of orderedLabels) {
-    if (_smgmtRunningLabels.has(label)) continue; // running sprints show the live card
-    // Only fetch if not cached and the sprint isn't an active planning sprint
+    if (_smgmtRunningLabels.has(label)) continue;
     if (_smgmtOutcomeCache[label] !== undefined) continue;
     const tickets = bySprint[label] || [];
     const hasRework    = tickets.some(t => (t.labels || []).some(l => l.name === 'need-rework' || l.name === 'needs-rework'));
     const hasCompleted = _smgmtHasCompletedTickets(tickets);
-    if (tickets.length > 0 && !hasRework && !hasCompleted) continue; // open non-rework/non-completed tickets → still planning
+    if (tickets.length > 0 && !hasRework && !hasCompleted) continue;
+    toFetch.push(label);
+  }
+  await Promise.all(toFetch.map(async label => {
     try {
       const resp = await fetch(
         `/api/sprints/${encodeURIComponent(label)}/outcome?project=${encodeURIComponent(repo)}`
@@ -7699,16 +7856,14 @@ async function _smgmtFetchMissingOutcomes(orderedLabels, bySprint) {
       if (resp.ok) {
         const outcome = await resp.json();
         _smgmtOutcomeCache[label] = outcome;
-        // Patch the card in-place rather than re-rendering everything
         _smgmtInjectOutcomeBand(label, outcome);
       } else {
-        // 404 means no outcome data — mark as null so we don't retry
         _smgmtOutcomeCache[label] = null;
       }
     } catch (_) {
       _smgmtOutcomeCache[label] = null;
     }
-  }
+  }));
 }
 
 async function _smgmtLoadEstimates(orderedLabels, bySprint) {
@@ -8458,6 +8613,16 @@ function _smgmtInjectOutcomeBand(label, outcome) {
     card.appendChild(logEl.firstElementChild);
   }
 
+  // Update Finish Sprint button visibility now that outcome is known
+  const finishBtn = card.querySelector('.smgmt-finish-btn');
+  if (finishBtn) {
+    if (meta.state === 'completed' || meta.state === 'has_rework') {
+      finishBtn.classList.remove('hidden');
+    } else {
+      finishBtn.classList.add('hidden');
+    }
+  }
+
   // Inject cancellation banner (issue #454): insert after header so it appears above outcome band
   const existingCancelBanner = card.querySelector('.smgmt-cancel-banner');
   if (existingCancelBanner) existingCancelBanner.remove();
@@ -9090,8 +9255,10 @@ function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent, finished) {
   }
 
   const outcomeState = outcome && (outcome.state || (outcome.sprint_status === 'completed' ? 'completed' : null));
-  const finishHidden = (outcomeState === 'completed' || outcomeState === 'has_rework') ? '' : 'hidden';
-  const finishDisabled = (outcomeState === 'completed' || outcomeState === 'has_rework') && tickets.length === 0 ? 'disabled' : '';
+  const isOutcomeCompleted = outcomeState === 'completed' || outcomeState === 'has_rework';
+  // Show Finish Sprint immediately if outcome says done, OR sprint looks post-run while outcome is still loading.
+  const finishHidden = (isOutcomeCompleted || (isPostRun && !outcome)) ? '' : 'hidden';
+  const finishDisabled = isOutcomeCompleted && tickets.length === 0 ? 'disabled' : '';
 
   // Outcome state: build band + ticket rows if outcome is cached
   let outcomeBandHtml = '';
@@ -9249,7 +9416,8 @@ function _smgmtRunningCardHtml(label, n, tickets) {
   const liveByNum = {};
   liveIssues.forEach(i => { liveByNum[i.number] = i; });
 
-  const sourceTickets = liveIssues.length > 0 ? liveIssues : tickets;
+  const sourceTickets = (liveIssues.length > 0 ? liveIssues : tickets)
+    .slice().sort((a, b) => (a.dispatch_level || 0) - (b.dispatch_level || 0));
   const cardRepo = _smgmtRepo();
 
   // Segmented bar blocks — one per ticket (issue #613)
@@ -9261,7 +9429,8 @@ function _smgmtRunningCardHtml(label, n, tickets) {
           const agentStatus = liveIss ? liveIss.agent_status : null;
           let blockClass = 'seg-pending';
           if (liveStatus === 'done') blockClass = 'seg-done';
-          else if (currentTicket && t.number === currentTicket.number) blockClass = 'seg-running';
+          else if (agentStatus === 'failed' || liveStatus === 'skipped') blockClass = 'seg-failed';
+          else if (liveStatus === 'in-progress' || agentStatus === 'running' || (currentTicket && t.number === currentTicket.number)) blockClass = 'seg-running';
           return `<div class="seg-block ${blockClass}" data-issue="${t.number}"></div>`;
         }).join('')
       }</div>`
@@ -9276,7 +9445,7 @@ function _smgmtRunningCardHtml(label, n, tickets) {
     const ticketLevel = (liveIss && liveIss.dispatch_level) || (t.dispatch_level) || 0;
 
     let sepHtml = '';
-    if (ticketLevel > 0 && ticketLevel !== prevLevel && prevLevel > 0) {
+    if (ticketLevel > 0 && ticketLevel > prevLevel) {
       sepHtml = `<div class="level-sep">
         <span class="level-sep-num">Level ${ticketLevel}</span>
         <span class="level-sep-desc">· runs after level ${prevLevel} completes</span>
@@ -9290,7 +9459,7 @@ function _smgmtRunningCardHtml(label, n, tickets) {
       indicator = '<div class="smgmt-ticket-indicator"><div class="circle-done">&#10003;</div></div>';
     } else if (agentStatus === 'failed' || liveStatus === 'skipped') {
       indicator = '<div class="smgmt-ticket-indicator"><div class="circle-failed">&#10005;</div></div>';
-    } else if ((currentTicket && t.number === currentTicket.number) || isActiveAgent) {
+    } else if (liveStatus === 'in-progress' || isActiveAgent || (currentTicket && t.number === currentTicket.number)) {
       indicator = '<div class="smgmt-ticket-indicator"><div class="ring"></div></div>';
     } else {
       indicator = '<div class="smgmt-ticket-indicator"><div class="circle-pending"></div></div>';
@@ -9337,7 +9506,7 @@ function _smgmtRunningCardHtml(label, n, tickets) {
           <i class="ti ti-layout-kanban" style="font-size:14px;color:var(--green)"></i>
           <span class="smgmt-sprint-name" style="font-size:15px;font-weight:700;">${escHtml(sprintLabelDisplay(label))}</span>
           <span class="smgmt-running-badge" id="smgmt-running-badge-${escHtml(label)}">
-            <span class="smgmt-running-badge-dot"></span>${totalCount > 0 ? `${doneCount + skippedCount}/${totalCount}` : '—'}
+            <span class="smgmt-running-badge-dot"></span>${totalCount > 0 ? `${completeCount}/${totalCount}` : '—'}
           </span>
         </div>
         <div class="smgmt-sprint-header-right">
@@ -9538,7 +9707,7 @@ function _smgmtLivePatch(label, live) {
   // Update running badge X/Y ratio (sprint-26 parity, Gap 5)
   const badgeEl = document.getElementById(`smgmt-running-badge-${label}`);
   if (badgeEl) {
-    const ratio = totalCount > 0 ? `${doneCount + skippedCount}/${totalCount}` : '—';
+    const ratio = totalCount > 0 ? `${completeCount}/${totalCount}` : '—';
     badgeEl.innerHTML = `<span class="smgmt-running-badge-dot"></span>${ratio}`;
   }
 
@@ -9597,7 +9766,7 @@ function _smgmtLivePatch(label, live) {
       indicatorEl.innerHTML = '<div class="circle-done">&#10003;</div>';
     } else if (agentStatus === 'failed' || liveStatus === 'skipped') {
       indicatorEl.innerHTML = '<div class="circle-failed">&#10005;</div>';
-    } else if ((currentTicket && num === currentTicket.number) || isActive) {
+    } else if (liveStatus === 'in-progress' || isActive || (currentTicket && num === currentTicket.number)) {
       indicatorEl.innerHTML = '<div class="ring"></div>';
     } else {
       indicatorEl.innerHTML = '<div class="circle-pending"></div>';
@@ -9662,9 +9831,11 @@ function _smgmtLivePatch(label, live) {
       const bNum = parseInt(block.dataset.issue, 10);
       const liveIss = liveByNum[bNum];
       const liveStatus = liveIss ? liveIss.status : null;
+      const bAgentStatus = liveIss ? liveIss.agent_status : null;
       let blockClass = 'seg-pending';
       if (liveStatus === 'done') blockClass = 'seg-done';
-      else if (currentTicket && bNum === currentTicket.number) blockClass = 'seg-running';
+      else if (bAgentStatus === 'failed' || liveStatus === 'skipped') blockClass = 'seg-failed';
+      else if (liveStatus === 'in-progress' || bAgentStatus === 'running' || (currentTicket && bNum === currentTicket.number)) blockClass = 'seg-running';
       block.className = `seg-block ${blockClass}`;
     });
   }
@@ -9731,8 +9902,19 @@ async function _smgmtLivePollTick() {
         if (!live.issues || live.issues.length === 0) {
           live.issues = sprintIssueMap[label] || [];
         }
+        const hadLiveIssues = !!(_smgmtLiveCache[label]?.issues?.length);
         _smgmtLiveCache[label] = live;
-        _smgmtLivePatch(label, live);
+        // First time we have dispatch_level data: full re-render so the card
+        // rebuilds with correct sort order and level separators. Subsequent
+        // polls use the cheap patch path (no flicker, no full DOM rebuild).
+        if (!hadLiveIssues && live.issues?.length > 0 && _smgmtData) {
+          _smgmtRender(_smgmtData);
+        } else {
+          _smgmtLivePatch(label, live);
+        }
+        // Keep pill/panel in sync with live runner data (no GitHub-label lag).
+        _snavRenderPill();
+        if (_snavPanelOpen) _snavRenderPanel();
       }
     }
   } catch (_) { /* silently ignore poll errors */ }
@@ -16104,11 +16286,18 @@ async function bcPostSelected() {
     if (!resp.ok) {
       _bcPosting = false;
       const data = await resp.json().catch(() => ({}));
-      console.error('[bc] post-selected failed:', data.detail || resp.status);
+      const errMsg = data.detail || `HTTP ${resp.status}`;
+      console.error('[bc] post-selected failed:', errMsg);
+      if (postBtn)  { postBtn.disabled = false;  postBtn.textContent  = 'Post to GitHub'; }
+      if (reviewBtn){ reviewBtn.disabled = false; reviewBtn.textContent = 'Post to GitHub'; }
+      const errBanner = document.getElementById('bc-post-error');
+      if (errBanner) { errBanner.textContent = `Post failed: ${errMsg}. Try again.`; errBanner.classList.remove('hidden'); }
     }
   } catch (e) {
     _bcPosting = false;
     console.error('[bc] post-selected error:', e);
+    if (postBtn)  { postBtn.disabled = false;  postBtn.textContent  = 'Post to GitHub'; }
+    if (reviewBtn){ reviewBtn.disabled = false; reviewBtn.textContent = 'Post to GitHub'; }
   }
 
   bcCancelReview();
@@ -16272,15 +16461,24 @@ function _snavRenderPill() {
     const completedF = (d.done || 0) + (d.uat || 0);
     text.textContent = `S${d.sprint} · ${completedF}/${d.total || 0}`;
   } else {
-    const cols = d.columns || {};
-    // During a running sprint, show dispatched/total (tickets that have left backlog).
-    // This matches the sprint runner's "[X/N]" log counter so both stay in sync.
-    const dispatched = (d.total || 0) - (cols.backlog || 0);
-    const uatHtml = d.uat > 0 ? ` · <span class="snav-uat">${d.uat} UAT</span>` : '';
-    const rework = cols['needs-rework'] || 0;
-    const reworkHtml = rework > 0 ? ` · <span class="snav-rework">${rework} ↩</span>` : '';
-    dot.className = rework > 0 ? 'snav-dot snav-dot--rework' : 'snav-dot snav-dot--running';
-    text.innerHTML = `S${d.sprint} · ${dispatched}/${d.total || 0}${uatHtml}${reworkHtml}`;
+    // For running sprints, use live snapshot when available (single source of truth).
+    const liveData = _smgmtLiveCache[`sprint-${d.sprint}`];
+    if (liveData && (liveData.total_count || 0) > 0) {
+      const lc = _snavColsFromLive(liveData);
+      const complete = lc.done + lc.failed + lc.skipped;
+      const doneHtml = lc.done > 0 ? ` · <span class="snav-uat">${lc.done} done</span>` : '';
+      dot.className = 'snav-dot snav-dot--running';
+      text.innerHTML = `S${d.sprint} · ${complete}/${lc.total}${doneHtml}`;
+    } else {
+      const cols = d.columns || {};
+      // During a running sprint, show dispatched/total (tickets that have left backlog).
+      const dispatched = (d.total || 0) - (cols.backlog || 0);
+      const uatHtml = d.uat > 0 ? ` · <span class="snav-uat">${d.uat} UAT</span>` : '';
+      const rework = cols['needs-rework'] || 0;
+      const reworkHtml = rework > 0 ? ` · <span class="snav-rework">${rework} ↩</span>` : '';
+      dot.className = rework > 0 ? 'snav-dot snav-dot--rework' : 'snav-dot snav-dot--running';
+      text.innerHTML = `S${d.sprint} · ${dispatched}/${d.total || 0}${uatHtml}${reworkHtml}`;
+    }
   }
 }
 
@@ -16309,19 +16507,30 @@ function _snavRenderPanel() {
         ? `<a class="snav-link" href="${escHtml(d.summary_issue.url)}" target="_blank" rel="noopener">Issue ↗</a>`
         : '');
 
-  const total = d.total || 0;
+  // For running sprints use live snapshot (single source of truth); fall back to
+  // GitHub-label counts when live data is not yet available or sprint is finished.
+  const liveData = !finished ? _smgmtLiveCache[`sprint-${d.sprint}`] : null;
+  const usingLive = liveData && (liveData.total_count || 0) > 0;
+  const cols = usingLive ? _snavColsFromLive(liveData) : (d.columns || {});
+  const total = usingLive ? (liveData.total_count || 0) : (d.total || 0);
 
-  // Stats row: tickets / in-progress / UAT / needs-rework (running) or done/time (finished)
-  const cols = d.columns || {};
+  // Stats row: tickets / in-progress / done (running) or done/time (finished)
   const inProgress = cols['in-progress'] || 0;
-  const uatCount   = d.uat || 0;
-  const rework     = cols['needs-rework'] || 0;
+  const uatCount   = usingLive ? 0 : (d.uat || 0);
+  const rework     = usingLive ? 0 : (cols['needs-rework'] || 0);
   const statsRow = finished
     ? `<div class="snav-stats">
         <div class="snav-stat"><span class="snav-stat-val">${total}</span><span class="snav-stat-lbl">tickets</span></div>
         <div class="snav-stat"><span class="snav-stat-val">${(d.done || 0) + uatCount}</span><span class="snav-stat-lbl">done</span></div>
         <div class="snav-stat"><span class="snav-stat-val snav-uat">${uatCount}</span><span class="snav-stat-lbl">in UAT</span></div>
         <div class="snav-stat" id="snav-duration"><span class="snav-stat-val">…</span><span class="snav-stat-lbl">total time</span></div>
+      </div>`
+    : usingLive
+    ? `<div class="snav-stats">
+        <div class="snav-stat"><span class="snav-stat-val">${total}</span><span class="snav-stat-lbl">tickets</span></div>
+        <div class="snav-stat"><span class="snav-stat-val snav-inprogress">${inProgress}</span><span class="snav-stat-lbl">running</span></div>
+        <div class="snav-stat"><span class="snav-stat-val" style="color:var(--red)">${cols.failed || 0}</span><span class="snav-stat-lbl">failed</span></div>
+        ${cols.done > 0 ? `<div class="snav-stat"><span class="snav-stat-val snav-uat">${cols.done}</span><span class="snav-stat-lbl">done</span></div>` : ''}
       </div>`
     : `<div class="snav-stats">
         <div class="snav-stat"><span class="snav-stat-val">${total}</span><span class="snav-stat-lbl">tickets</span></div>
@@ -16332,11 +16541,40 @@ function _snavRenderPanel() {
 
   const tail = (finished && d.summary_issue)
     ? `<div class="snav-summary-md md-body" id="snav-summary-md"><span class="snav-muted">Loading summary…</span></div>`
+    : usingLive
+    ? `<div class="snav-muted" style="margin-top:8px;">Live data from sprint runner (real-time).</div>`
     : `<div class="snav-muted" style="margin-top:8px;">Live progress is inferred from GitHub labels (≈30s). The sprint itself runs on the Mac mini.</div>`;
 
   body.innerHTML = statsRow + _snavDonutHtml(cols, total) + tail;
 
   if (finished && d.summary_issue) _snavLoadSummary(d.summary_issue.number);
+}
+
+/**
+ * Convert a live snapshot (from _smgmtLiveCache) into the columns+total object
+ * used by _snavRenderPill and _snavRenderPanel so both use a single source of truth
+ * when a sprint is actively running.
+ */
+function _snavColsFromLive(live) {
+  const total = live.total_count || 0;
+  const done  = live.done_count    || 0;
+  const failed  = live.failed_count  || 0;
+  const skipped = live.skipped_count || 0;
+  let running = 0, queued = 0;
+  (live.issues || []).forEach(iss => {
+    const s = iss.status, a = iss.agent_status;
+    if (s === 'in-progress' || a === 'running' || a === 'coder_running' || a === 'tester_running') running++;
+    else if (s === 'pending') queued++;
+  });
+  return {
+    total,
+    done,
+    uat: 0,
+    'in-progress': running,
+    backlog: queued,
+    failed,
+    skipped,
+  };
 }
 
 // Donut chart of the sprint's tickets by workflow column, with a legend.
@@ -16346,7 +16584,9 @@ function _snavDonutHtml(cols, total) {
     { key: 'uat',         label: 'UAT',         color: '#f59e0b' },
     { key: 'sit',         label: 'SIT',         color: '#8b5cf6' },
     { key: 'in-progress', label: 'In progress', color: '#2563eb' },
-    { key: 'backlog',     label: 'Backlog',     color: '#94a3b8' },
+    { key: 'failed',      label: 'Failed',      color: '#dc2626' },
+    { key: 'skipped',     label: 'Skipped',     color: '#ea580c' },
+    { key: 'backlog',     label: 'Queued',      color: '#94a3b8' },
   ];
   const r = 42, cx = 50, cy = 50, circ = 2 * Math.PI * r;
   let offset = 0, circles = '';
@@ -16510,7 +16750,7 @@ const _logsState = {
   events: {},
   loadingEvents: new Set(),
   issues: null,            // per-issue browse list (lazy-loaded)
-  viewMode: 'timeline',    // 'timeline' (Runs) | 'issues' | 'raw'
+  viewMode: 'activity',    // 'timeline' (Runs) | 'issues' | 'raw' | 'activity'
   pollTimer: null,
   liveEs: null,
   liveRunId: null,
@@ -16525,10 +16765,29 @@ function logsInit() {
   if (!_logsLoaded) {
     _logsLoaded = true;
     logsFetchRuns();
+    logsSyncGitHub();
+    evlFetch();
   }
 
   if (!_logsState.pollTimer) {
     _logsState.pollTimer = setInterval(logsFetchRuns, 15000);
+  }
+}
+
+async function logsSyncGitHub() {
+  if (!_projectData) return;
+  const project = _projectData.repo;
+  try {
+    await fetch(`/api/logs/sync-github?project=${encodeURIComponent(project)}`, { method: 'POST' });
+  } catch (_) {}
+}
+
+function logsRefresh() {
+  logsFetchRuns();
+  logsSyncGitHub();
+  if (_logsState.viewMode === 'activity') {
+    _evlState.events = null;
+    evlFetch();
   }
 }
 
@@ -16612,14 +16871,20 @@ function logsSetView(mode) {
   const timelineEl = document.getElementById('logs-timeline');
   const issuesEl   = document.getElementById('logs-issues');
   const rawEl      = document.getElementById('logs-raw');
+  const activityEl = document.getElementById('logs-activity');
+  const evlSrcGrp  = document.getElementById('logs-evl-source-group');
   document.getElementById('logs-view-timeline')?.classList.toggle('active', mode === 'timeline');
   document.getElementById('logs-view-issues')?.classList.toggle('active', mode === 'issues');
   document.getElementById('logs-view-raw')?.classList.toggle('active', mode === 'raw');
+  document.getElementById('logs-view-activity')?.classList.toggle('active', mode === 'activity');
   timelineEl?.classList.toggle('hidden', mode !== 'timeline');
   issuesEl?.classList.toggle('hidden', mode !== 'issues');
   rawEl?.classList.toggle('hidden', mode !== 'raw');
-  if (mode === 'raw')    logsLoadRawView();
-  if (mode === 'issues') { if (_logsState.issues === null) _logsLoadIssues(); else _logsRenderIssues(); }
+  activityEl?.classList.toggle('hidden', mode !== 'activity');
+  evlSrcGrp?.classList.toggle('hidden', mode !== 'activity');
+  if (mode === 'raw')      logsLoadRawView();
+  if (mode === 'issues')   { if (_logsState.issues === null) _logsLoadIssues(); else _logsRenderIssues(); }
+  if (mode === 'activity') { if (_evlState.events === null) evlFetch(); else evlRender(); }
 }
 
 // ── Logs › Issues view: browse per-issue logs without typing ─────────────────
@@ -16929,6 +17194,552 @@ function _logsDisconnectLive() {
     _logsState.liveEs = null;
     _logsState.liveRunId = null;
   }
+}
+
+// ── Events Activity Log (issue #633) ──────────────────────────────────────────
+
+const _EVL_GITHUB_SOURCE = 'github';
+const _EVL_CAUSE_SOURCES = new Set(['dashboard']);
+const _EVL_LIFECYCLE_SOURCES = new Set(['sprint_manager']);
+const _EVL_PROTECTED_BRANCHES = new Set(['develop', 'master', 'main', 'attachments']);
+const _EVL_STALE_BRANCH_RE = /^(feat|feature|sprint)\//;
+
+const _evlState = {
+  events: null,
+  sourceFilter: 'all',
+  loading: false,
+  staleBranches: new Set(),
+  sprintFeatMap: {},
+};
+
+function _evlEffectChip(ev) {
+  const type = ev.type || '';
+  const detail = ev.detail || {};
+  if (type === 'label_added')   return { label: '+' + (detail.label_name || ev.target || ''), cls: 'evl-effect-chip--added' };
+  if (type === 'label_removed') return { label: '−' + (detail.label_name || ev.target || ''), cls: 'evl-effect-chip--removed' };
+  if (type === 'issue_opened')  return { label: '+' + (ev.target || 'issue'), cls: 'evl-effect-chip--added' };
+  if (type === 'issue_closed')  return { label: 'closed ' + (ev.target || ''), cls: 'evl-effect-chip--neutral' };
+  if (type === 'branch_created')return { label: 'branch', cls: 'evl-effect-chip--neutral' };
+  if (type === 'pr_opened')     return { label: 'PR opened', cls: 'evl-effect-chip--neutral' };
+  if (type === 'pr_merged')     return { label: 'PR merged', cls: 'evl-effect-chip--added' };
+  return { label: type.replace(/_/g, ' '), cls: 'evl-effect-chip--neutral' };
+}
+
+function _evlHeadlineLabel(causeEvent) {
+  const type = causeEvent.type || '';
+  const detail = causeEvent.detail || {};
+  if (type === 'ticket_moved') {
+    const from = detail.from_sprint ? '−' + detail.from_sprint : '';
+    const to   = detail.to_sprint   ? '+'     + detail.to_sprint   : '';
+    const parts = [from, to].filter(Boolean).join(' → ');
+    return 'Sprint move' + (parts ? ': ' + parts : '');
+  }
+  if (type === 'bulk_created')    return 'Bulk create';
+  if (type === 'sprint_created')  return 'Sprint created';
+  if (type === 'sprint_run')      return 'Sprint run';
+  if (type === 'sprint_cancelled')return 'Sprint cancelled';
+  return type.replace(/_/g, ' ');
+}
+
+function _evlBundleEvents(events, sourceFilter) {
+  if (sourceFilter === 'github') {
+    return events
+      .filter(e => e.source === _EVL_GITHUB_SOURCE)
+      .map(e => ({ kind: 'standalone', event: e }));
+  }
+
+  const ghByAid = {};
+  for (const e of events) {
+    if (e.source === _EVL_GITHUB_SOURCE && e.action_id) {
+      if (!ghByAid[e.action_id]) ghByAid[e.action_id] = [];
+      ghByAid[e.action_id].push(e);
+    }
+  }
+
+  const consumed = new Set();
+  const rows = [];
+
+  for (const e of events) {
+    const src = e.source || '';
+    if (src === _EVL_GITHUB_SOURCE) continue;
+    if (_EVL_LIFECYCLE_SOURCES.has(src)) { rows.push({ kind: 'standalone', event: e }); continue; }
+    if (_EVL_CAUSE_SOURCES.has(src)) {
+      const aid = e.action_id;
+      if (aid && ghByAid[aid]) {
+        const effects = ghByAid[aid];
+        effects.forEach(eff => consumed.add(eff));
+        rows.push({ kind: 'bundle', cause: e, effects, count: effects.length });
+      } else {
+        rows.push({ kind: 'standalone', event: e });
+      }
+      continue;
+    }
+    rows.push({ kind: 'standalone', event: e });
+  }
+
+  for (const e of events) {
+    if (e.source === _EVL_GITHUB_SOURCE && !consumed.has(e)) {
+      rows.push({ kind: 'standalone', event: e });
+    }
+  }
+
+  return rows;
+}
+
+function _evlFmtTs(ts) {
+  if (!ts) return '';
+  return ts.replace('T', ' ').substring(0, 19);
+}
+
+function _evlRenderRow(row) {
+  if (row.kind === 'standalone') {
+    const e = row.event;
+    const ts = _evlFmtTs(e.timestamp);
+    const src = e.source || '';
+    const type = (e.type || '').replace(/_/g, ' ');
+    const target = e.target ? ' ' + e.target : '';
+    const actor = e.actor ? `<span class="evl-actor">${escHtml(e.actor)}</span>` : '';
+    return `<div class="evl-standalone-row">
+      <span class="evl-ts">${escHtml(ts)}</span>
+      <span class="evl-source-badge">${escHtml(src)}</span>
+      <span class="evl-type-label">${escHtml(type + target)}</span>
+      ${actor}
+    </div>`;
+  }
+
+  if (row.kind === 'bundle') {
+    const { cause, effects, count } = row;
+    const headline = _evlHeadlineLabel(cause);
+    const isSingle = count === 1;
+
+    const chipsHtml = effects.map(eff => {
+      const { label, cls } = _evlEffectChip(eff);
+      return `<span class="evl-effect-chip ${cls}">${escHtml(label)}</span>`;
+    }).join('');
+
+    const singleClass = isSingle ? ' evl-single' : '';
+    const chevron = isSingle ? '' : `<i class="ti ti-chevron-right evl-chevron"></i>`;
+    const clickAttr = isSingle ? '' : ' onclick="evlToggleBundle(this)"';
+    const badge = isSingle ? '' : `<span class="evl-count-badge">${count}</span>`;
+
+    const subRowsHtml = effects.map(eff => {
+      const ts = _evlFmtTs(eff.timestamp);
+      const { label } = _evlEffectChip(eff);
+      const actor = eff.actor ? ` by ${escHtml(eff.actor)}` : '';
+      return `<div class="evl-sub-row">
+        <span class="evl-ts">${escHtml(ts)}</span>
+        <span class="evl-type-label">${escHtml(label)}</span>
+        <span class="evl-actor">${actor}</span>
+      </div>`;
+    }).join('');
+
+    return `<div class="evl-bundle-row${singleClass}">
+      <div class="evl-bundle-header"${clickAttr}>
+        ${chevron}
+        <span class="evl-headline">${escHtml(headline)}</span>
+        <div class="evl-effect-chips">${chipsHtml}</div>
+        ${badge}
+      </div>
+      ${isSingle ? '' : `<div class="evl-sub-rows">${subRowsHtml}</div>`}
+    </div>`;
+  }
+
+  return '';
+}
+
+function evlToggleBundle(headerEl) {
+  const row = headerEl.closest('.evl-bundle-row');
+  if (!row || row.classList.contains('evl-single')) return;
+  row.classList.toggle('expanded');
+}
+
+function evlRender() {
+  const listEl = document.getElementById('evl-list');
+  if (!listEl) return;
+
+  if (!_evlState.events) {
+    listEl.innerHTML = '<div class="logs-empty">Loading activity…</div>';
+    return;
+  }
+
+  listEl.innerHTML = evlRenderTimeline(_evlState.events, _evlState.sourceFilter);
+  _evlUpdateBanner();
+}
+
+async function evlFetch() {
+  if (!_projectData || _evlState.loading) return;
+  _evlState.loading = true;
+
+  const slug = (_projectData.repo || '').split('/').pop();
+  try {
+    const resp = await fetch(`/api/projects/${encodeURIComponent(slug)}/events?limit=200`);
+    _evlState.events = resp.ok ? await resp.json() : [];
+  } catch (_) {
+    _evlState.events = [];
+  }
+
+  await evlFetchStaleBranches();
+  _evlState.loading = false;
+  if (_logsState.viewMode === 'activity') evlRender();
+}
+
+async function evlFetchStaleBranches() {
+  const repo = _logsRepo();
+  if (!repo) return;
+  const parts = repo.split('/');
+  const owner = parts[0], repoName = parts[1];
+  if (!owner || !repoName) return;
+  try {
+    const resp = await fetch(
+      `/api/projects/${encodeURIComponent(owner)}/${encodeURIComponent(repoName)}/branches/stale`
+    );
+    if (resp.ok) {
+      const list = await resp.json();
+      _evlState.staleBranches = new Set(list);
+    }
+  } catch (_) {}
+}
+
+function evlSetSource(source) {
+  _evlState.sourceFilter = source;
+  document.getElementById('evl-source-all')?.classList.toggle('active', source === 'all');
+  document.getElementById('evl-source-github')?.classList.toggle('active', source === 'github');
+  evlRender();
+}
+
+function evlSetFilter(filter) {
+  _evlState.sourceFilter = filter;
+  ['all', 'agent', 'dashboard', 'github'].forEach(function(f) {
+    var el = document.getElementById('evl-filter-' + f);
+    if (el) el.classList.toggle('active', f === filter);
+  });
+  evlRender();
+}
+
+function _evlDayLabel(ts) {
+  if (!ts) return '';
+  var d = new Date(ts.replace('T', ' '));
+  var today = new Date(); today.setHours(0,0,0,0);
+  var yesterday = new Date(today); yesterday.setDate(today.getDate() - 1);
+  var evDay = new Date(d); evDay.setHours(0,0,0,0);
+  var days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  var base = days[d.getDay()] + ' ' + months[d.getMonth()] + ' ' + d.getDate();
+  if (evDay.getTime() === today.getTime()) return 'Today · ' + base;
+  if (evDay.getTime() === yesterday.getTime()) return 'Yesterday · ' + base;
+  return base;
+}
+
+function _evlBadgeLabel(source, type) {
+  if (source === 'github') return 'GITHUB';
+  if (source === 'dashboard') return 'DASH';
+  if (source === 'agent') {
+    if ((type || '').startsWith('sprint_')) return 'SPRINT';
+    return 'AGENT';
+  }
+  return (source || '').toUpperCase();
+}
+
+function _evlLabelChipClass(name) {
+  var n = (name || '').toLowerCase();
+  if (n.startsWith('sprint')) return 'lbl-sprint';
+  if (n === 'uat' || n === 'done' || n === 'ready') return 'lbl-uat';
+  if (n === 'in-progress' || n === 'sit' || n.indexOf('running') > -1) return 'lbl-flow';
+  return 'lbl-generic';
+}
+
+function _evlDescHtml(ev) {
+  var type = ev.type || '';
+  var detail = ev.detail || {};
+  var target = escHtml(ev.target || '');
+
+  if (type === 'label_added' || type === 'label_removed') {
+    var actCls = type === 'label_added' ? 'added' : 'removed';
+    var actIcon = type === 'label_added' ? '<i class="ti ti-plus"></i>' : '<i class="ti ti-minus"></i>';
+    var labelName = detail.label_name || ev.target || '';
+    var chipCls = _evlLabelChipClass(labelName);
+    return '<span class="lr-desc">'
+      + '<span class="lbl-act ' + actCls + '">' + actIcon + '</span>'
+      + ' label <span class="lbl-chip ' + chipCls + '">' + escHtml(labelName) + '</span>'
+      + (target ? ' on <span class="mono">' + target + '</span>' : '')
+      + '</span>';
+  }
+
+  if (type === 'pr_opened' || type === 'pr_merged') {
+    var prCls = type === 'pr_opened' ? 'pr-open' : 'pr-merged';
+    var prIcon = type === 'pr_opened' ? 'ti-git-pull-request' : 'ti-git-merge';
+    var head = detail.head ? '<span class="branch-name">' + escHtml(detail.head) + '</span>' : '';
+    var base = detail.base ? '<span class="branch-name">' + escHtml(detail.base) + '</span>' : '';
+    var arrow = head && base ? ' → ' : '';
+    var prNum = target ? '<span class="mono">' + target + '</span>' : '';
+    var action = type === 'pr_opened' ? 'opened' : 'merged';
+    return '<span class="lr-desc">'
+      + '<i class="ti ' + prIcon + ' git-ico ' + prCls + '"></i>'
+      + 'PR ' + prNum + ' ' + action
+      + (head ? ' — ' + head + arrow + base : '')
+      + '</span>';
+  }
+
+  if (type === 'branch_created') {
+    var branchRef = detail.ref || ev.target || '';
+    return '<span class="lr-desc">'
+      + '<i class="ti ti-git-branch git-ico branch"></i>'
+      + 'branch <span class="branch-name">' + escHtml(branchRef) + '</span> created'
+      + '</span>';
+  }
+
+  if (type === 'issue_opened') {
+    return '<span class="lr-desc"><span class="mono">' + target + '</span> opened</span>';
+  }
+  if (type === 'issue_closed') {
+    return '<span class="lr-desc"><span class="mono">' + target + '</span> closed</span>';
+  }
+
+  var label = type.replace(/_/g, ' ');
+  return '<span class="lr-desc">' + escHtml(label) + (target ? ' <span class="mono">' + target + '</span>' : '') + '</span>';
+}
+
+function evlRenderTimeline(events, filter) {
+  if (!events || events.length === 0) return '<div class="logs-empty">No events found.</div>';
+
+  var visible = filter === 'all'
+    ? events
+    : events.filter(function(e) { return e.source === filter; });
+
+  if (visible.length === 0) return '<div class="logs-empty">No events for this filter.</div>';
+
+  // Pre-compute sprint → feat branches map for bulk cleanup (issue #634)
+  var sprintFeatMap = {};
+  for (var si = 0; si < events.length; si++) {
+    var se = events[si];
+    if (se.type === 'pr_merged' && se.detail) {
+      var sBase = se.detail.base || '';
+      var sHead = se.detail.head || '';
+      if (/^sprint\//.test(sBase) && /^(feat|feature)\//.test(sHead)) {
+        if (!sprintFeatMap[sBase]) sprintFeatMap[sBase] = [];
+        sprintFeatMap[sBase].push(sHead);
+      }
+    }
+  }
+  _evlState.sprintFeatMap = sprintFeatMap;
+
+  var byDay = [];
+  var dayMap = {};
+
+  for (var i = 0; i < events.length; i++) {
+    var e = events[i];
+    var ts = e.timestamp || '';
+    var dayKey = ts.substring(0, 10);
+    if (!dayMap[dayKey]) {
+      dayMap[dayKey] = [];
+      byDay.push({ key: dayKey, ts: ts, events: dayMap[dayKey] });
+    }
+    dayMap[dayKey].push(e);
+  }
+
+  var html = '';
+  for (var j = 0; j < byDay.length; j++) {
+    var bucket = byDay[j];
+    var visibleInDay = bucket.events.filter(function(e) {
+      return filter === 'all' || e.source === filter;
+    });
+    if (visibleInDay.length === 0) continue;
+
+    html += '<div class="evl-day-head">' + escHtml(_evlDayLabel(bucket.ts)) + '</div>';
+
+    for (var k = 0; k < bucket.events.length; k++) {
+      var ev = bucket.events[k];
+      if (filter !== 'all' && ev.source !== filter) continue;
+
+      var timePart = (ev.timestamp || '').substring(11, 16);
+      var badgeLabel = _evlBadgeLabel(ev.source, ev.type);
+      var badgeCls = badgeLabel === 'GITHUB' ? 'github' : (badgeLabel === 'DASH' ? 'dash' : 'agent');
+      var desc = _evlDescHtml(ev);
+      var actor = (ev.source === 'github' && ev.actor)
+        ? '<span class="lr-actor">' + escHtml(ev.actor) + '</span>'
+        : '';
+      var cleanup = _evlBranchCleanupHtml(ev);
+
+      html += '<div class="evl-log-row" data-source="' + escHtml(ev.source) + '">'
+        + '<span class="lr-time">' + escHtml(timePart) + '</span>'
+        + '<span class="lr-badge ' + badgeCls + '">' + badgeLabel + '</span>'
+        + '<div class="lr-body">' + desc + actor + (cleanup ? cleanup : '') + '</div>'
+        + '</div>';
+    }
+  }
+
+  return html || '<div class="logs-empty">No events for this filter.</div>';
+}
+
+// ── Branch cleanup helpers (issue #634) ──────────────────────────────────────
+
+function _evlBranchCleanupHtml(ev) {
+  if (ev.type !== 'pr_merged') return '';
+  var head = (ev.detail || {}).head || '';
+  if (!head || !_EVL_STALE_BRANCH_RE.test(head) || _EVL_PROTECTED_BRANCHES.has(head)) return '';
+
+  if (/^sprint\//.test(head)) {
+    var featBranches = (_evlState.sprintFeatMap[head] || []);
+    var staleFeats = featBranches.filter(function(b) { return _evlState.staleBranches.has(b); });
+    var n = staleFeats.length + (_evlState.staleBranches.has(head) ? 1 : 0);
+    if (n === 0) return '';
+    return ' <button class="evl-sprint-cleanup" data-sprint="' + escHtml(head) + '"'
+      + ' onclick="evlCleanupSprint(this)">'
+      + 'Clean up ' + n + ' merged branch' + (n !== 1 ? 'es' : '')
+      + '</button>';
+  }
+
+  if (_evlState.staleBranches.has(head)) {
+    return ' <button class="evl-del-btn" data-branch="' + escHtml(head) + '"'
+      + ' onclick="evlDeleteBranch(this)">'
+      + '<i class="ti ti-trash"></i> Delete branch'
+      + '</button>';
+  }
+  return ' <span class="evl-branch-deleted">branch deleted</span>';
+}
+
+function _evlUpdateBanner() {
+  var banner = document.getElementById('evl-stale-banner');
+  if (!banner) return;
+  var n = _evlState.staleBranches.size;
+  if (n === 0) {
+    banner.innerHTML = '';
+    banner.classList.add('hidden');
+    return;
+  }
+  banner.classList.remove('hidden');
+  banner.innerHTML = '<div class="evl-stale-banner-inner">'
+    + '<i class="ti ti-git-branch-deleted"></i>'
+    + '<span>' + n + ' merged branch' + (n !== 1 ? 'es' : '') + ' not yet deleted</span>'
+    + '<button class="evl-del-btn evl-cleanup-all-btn" onclick="evlCleanupAll()">'
+    + 'Clean up all</button>'
+    + '</div>';
+}
+
+function _evlRepoForBranchOps() {
+  var repo = _logsRepo();
+  if (!repo) return null;
+  var parts = repo.split('/');
+  if (parts.length < 2) return null;
+  return { owner: parts[0], repoName: parts[1] };
+}
+
+function _evlRefreshSprintButtons() {
+  document.querySelectorAll('.evl-sprint-cleanup').forEach(function(btn) {
+    var sprint = btn.dataset.sprint;
+    if (!sprint) return;
+    var featBranches = (_evlState.sprintFeatMap[sprint] || []);
+    var staleFeats = featBranches.filter(function(b) { return _evlState.staleBranches.has(b); });
+    var n = staleFeats.length + (_evlState.staleBranches.has(sprint) ? 1 : 0);
+    if (n === 0) {
+      btn.remove();
+    } else {
+      btn.textContent = 'Clean up ' + n + ' merged branch' + (n !== 1 ? 'es' : '');
+    }
+  });
+}
+
+async function evlDeleteBranch(btnEl) {
+  var branch = btnEl.dataset.branch;
+  if (!branch) return;
+  if (_EVL_PROTECTED_BRANCHES.has(branch) || !_EVL_STALE_BRANCH_RE.test(branch)) {
+    console.warn('evlDeleteBranch: refusing to delete branch', branch);
+    return;
+  }
+
+  btnEl.disabled = true;
+  btnEl.textContent = 'Deleting…';
+
+  var r = _evlRepoForBranchOps();
+  if (!r) { btnEl.disabled = false; btnEl.textContent = 'Delete branch'; return; }
+
+  try {
+    var resp = await fetch(
+      '/api/projects/' + encodeURIComponent(r.owner) + '/'
+      + encodeURIComponent(r.repoName) + '/branches/'
+      + branch.split('/').map(encodeURIComponent).join('/'),
+      { method: 'DELETE' }
+    );
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+
+    _evlState.staleBranches.delete(branch);
+    btnEl.outerHTML = '<span class="evl-branch-deleted">branch deleted</span>';
+    _evlRefreshSprintButtons();
+    _evlUpdateBanner();
+  } catch (_) {
+    btnEl.disabled = false;
+    btnEl.innerHTML = '<i class="ti ti-trash"></i> Delete branch';
+  }
+}
+
+async function evlCleanupSprint(btnEl) {
+  var sprintBranch = btnEl.dataset.sprint;
+  if (!sprintBranch) return;
+
+  var featBranches = (_evlState.sprintFeatMap[sprintBranch] || []);
+  var toDelete = featBranches.filter(function(b) { return _evlState.staleBranches.has(b); });
+  if (_evlState.staleBranches.has(sprintBranch)) toDelete.push(sprintBranch);
+
+  var n = toDelete.length;
+  if (n === 0) { btnEl.remove(); return; }
+
+  if (!confirm('Delete ' + n + ' merged branch' + (n !== 1 ? 'es' : '') + '? This cannot be undone.')) return;
+
+  btnEl.disabled = true;
+
+  var r = _evlRepoForBranchOps();
+  if (!r) { btnEl.disabled = false; return; }
+
+  for (var i = 0; i < toDelete.length; i++) {
+    var branch = toDelete[i];
+    try {
+      var resp = await fetch(
+        '/api/projects/' + encodeURIComponent(r.owner) + '/'
+        + encodeURIComponent(r.repoName) + '/branches/'
+        + branch.split('/').map(encodeURIComponent).join('/'),
+        { method: 'DELETE' }
+      );
+      if (resp.ok) {
+        _evlState.staleBranches.delete(branch);
+        var rowBtn = document.querySelector('.evl-del-btn[data-branch="' + CSS.escape(branch) + '"]');
+        if (rowBtn) rowBtn.outerHTML = '<span class="evl-branch-deleted">branch deleted</span>';
+      }
+    } catch (_) {}
+  }
+
+  btnEl.remove();
+  _evlUpdateBanner();
+}
+
+async function evlCleanupAll() {
+  var all = Array.from(_evlState.staleBranches);
+  var n = all.length;
+  if (n === 0) return;
+
+  if (!confirm('Delete all ' + n + ' stale merged branch' + (n !== 1 ? 'es' : '') + '? This cannot be undone.')) return;
+
+  var r = _evlRepoForBranchOps();
+  if (!r) return;
+
+  for (var i = 0; i < all.length; i++) {
+    var branch = all[i];
+    try {
+      var resp = await fetch(
+        '/api/projects/' + encodeURIComponent(r.owner) + '/'
+        + encodeURIComponent(r.repoName) + '/branches/'
+        + branch.split('/').map(encodeURIComponent).join('/'),
+        { method: 'DELETE' }
+      );
+      if (resp.ok) {
+        _evlState.staleBranches.delete(branch);
+        var rowBtn = document.querySelector('.evl-del-btn[data-branch="' + CSS.escape(branch) + '"]');
+        if (rowBtn) rowBtn.outerHTML = '<span class="evl-branch-deleted">branch deleted</span>';
+      }
+    } catch (_) {}
+  }
+
+  document.querySelectorAll('.evl-sprint-cleanup').forEach(function(b) { b.remove(); });
+  _evlUpdateBanner();
 }
 
 // ── Compare Sprints tab (issue #435) ─────────────────────────────────────────

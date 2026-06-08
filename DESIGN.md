@@ -41,6 +41,15 @@ Error:         #ef4444  (red-500)
 - `diagnostics.html`: single-font (SF Mono only) — TODO pair with body font
 - Several pages use a single font family throughout — add typographic hierarchy
 
+## Component Naming Conventions
+
+- Use kebab-case for CSS classes and custom HTML attributes: `agent-card`, `sprint-badge`, `data-issue-num`
+- Prefix state classes with the element type: `btn--primary`, `card--active`, `badge--error`
+- Interactive containers: `<section>`, `<article>`, or `<div role="region">` + descriptive `aria-label`
+- Icon-only controls: always include a `title` attribute and `aria-label`
+- Reusable micro-components named by function, not appearance: `status-pill` not `green-circle`
+- Avoid generic class names like `container`, `wrapper`, `inner` — be specific: `sprint-header`, `issue-list`
+
 ## Design Anti-Patterns to Avoid
 
 - Flat monochrome cards with no depth or border separation

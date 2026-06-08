@@ -165,6 +165,46 @@ class TestGateLintFrontend:
         # No linter found — should pass gracefully
         assert result.passed is True
 
+    def test_gate_frontend_lint_false_skips_frontend_portion(self, tmp_path):
+        """AC: COMMANDER_GATE_FRONTEND_LINT=false skips frontend lint even when JS/TS files changed."""
+        fe_lint_called = []
+
+        def fake_run_frontend_lint(*a, **kw):
+            fe_lint_called.append(True)
+            return (True, "")
+
+        with patch("sprint_manager._changed_py_files", return_value=[]):
+            with patch("sprint_manager._changed_js_ts_files", return_value=["app.js"]):
+                with patch("sprint_manager._run_frontend_lint", fake_run_frontend_lint):
+                    result = _gate_lint(1, tmp_path, skip=False, gate_frontend_lint=False)
+        assert result.passed is True
+        assert fe_lint_called == [], "frontend lint must not run when gate_frontend_lint=False"
+
+    def test_run_quality_gates_passes_gate_frontend_lint(self, tmp_path):
+        """AC: _run_quality_gates passes gate_frontend_lint to _gate_lint."""
+        captured = {}
+
+        def fake_lint(issue_num, worktester_dashboard, skip, **kwargs):
+            captured["gate_frontend_lint"] = kwargs.get("gate_frontend_lint", True)
+            return GateResult(gate="lint", passed=True)
+
+        with patch("sprint_manager._gate_typecheck", return_value=GateResult(gate="typecheck", passed=True)):
+            with patch("sprint_manager._gate_lint", fake_lint):
+                _run_quality_gates(
+                    issue_num=1,
+                    feature_branch="feature/1-test",
+                    worktester_root=tmp_path,
+                    worktester_dashboard=tmp_path,
+                    skip_all=False,
+                    gate_pytest=False,
+                    gate_lint=True,
+                    gate_merge_preview=False,
+                    gate_typecheck=True,
+                    gate_design=False,
+                    gate_frontend_lint=False,
+                )
+        assert captured.get("gate_frontend_lint") is False
+
 
 # ── _run_quality_gates ordering ───────────────────────────────────────────────
 

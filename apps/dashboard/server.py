@@ -2791,6 +2791,18 @@ async def assign_sprint_label(body: SprintAssignBody):
     On success: invalidates cache, broadcasts SSE sprint_plan_update, returns {"ok": true}.
     Creates sprint-N label if it doesn't exist.
     """
+    action_id = str(uuid.uuid4())
+
+    # Capture current sprint labels before the change for from_sprint
+    try:
+        _issue_data = github_client.get_issue(body.issue)
+        _cur_labels = [lbl["name"] for lbl in _issue_data.get("labels", [])]
+        _from_sprint = next(
+            (lbl for lbl in _cur_labels if _SPRINT_LABEL_RE_ALL.match(lbl)), None
+        ) or "backlog"
+    except Exception:
+        _from_sprint = None
+
     try:
         if body.sprint_label is not None:
             # Dotted or plain label string — use the string-based assign function
@@ -2809,6 +2821,38 @@ async def assign_sprint_label(body: SprintAssignBody):
         raise _gh_error(e)
     except ValueError as e:
         raise HTTPException(400, detail=str(e))
+
+    _to_sprint: str | None
+    if body.sprint_label is not None:
+        _to_sprint = (body.sprint_label.strip() or None) or "backlog"
+    elif body.sprint is not None:
+        _to_sprint = f"sprint-{body.sprint}"
+    else:
+        _to_sprint = "backlog"
+
+    _emit_dashboard_event(
+        project="dashboard",
+        type="ticket_moved",
+        target=f"#{body.issue}",
+        detail={"from_sprint": _from_sprint, "to_sprint": _to_sprint},
+        action_id=action_id,
+    )
+    if _to_sprint and _to_sprint != "backlog" and _to_sprint != _from_sprint:
+        _emit_dashboard_event(
+            project="dashboard",
+            type="label_added",
+            target=f"#{body.issue}",
+            detail={"label": _to_sprint},
+            action_id=action_id,
+        )
+    if _from_sprint and _from_sprint != "backlog" and _from_sprint != _to_sprint:
+        _emit_dashboard_event(
+            project="dashboard",
+            type="label_removed",
+            target=f"#{body.issue}",
+            detail={"label": _from_sprint},
+            action_id=action_id,
+        )
 
     await broadcast({"type": "update", "event": {"event_type": "sprint_plan_update"}})
     return {"ok": True}
@@ -2853,6 +2897,18 @@ async def add_sprint_label(issue_id: int, body: SprintLabelBody):
     - sprint_label: "sprint-N" string (or null/empty to remove sprint label)
     - sprint: int (legacy; converted to "sprint-N")
     """
+    action_id = str(uuid.uuid4())
+
+    # Capture from_sprint before change
+    try:
+        _issue_data = github_client.get_issue(issue_id, repo_name=body.project or None)
+        _cur_labels = [lbl["name"] for lbl in _issue_data.get("labels", [])]
+        _from_sprint = next(
+            (lbl for lbl in _cur_labels if _SPRINT_LABEL_RE_ALL.match(lbl)), None
+        ) or "backlog"
+    except Exception:
+        _from_sprint = None
+
     # Resolve the sprint label from whichever field was provided
     if body.sprint_label is not None:
         raw = body.sprint_label.strip()
@@ -2874,6 +2930,31 @@ async def add_sprint_label(issue_id: int, body: SprintLabelBody):
         raise _gh_error(e)
     except ValueError as e:
         raise HTTPException(400, detail=str(e))
+
+    _to_sprint = label_to_assign or "backlog"
+    _emit_dashboard_event(
+        project=body.project or "dashboard",
+        type="ticket_moved",
+        target=f"#{issue_id}",
+        detail={"from_sprint": _from_sprint, "to_sprint": _to_sprint},
+        action_id=action_id,
+    )
+    if label_to_assign and label_to_assign != _from_sprint:
+        _emit_dashboard_event(
+            project=body.project or "dashboard",
+            type="label_added",
+            target=f"#{issue_id}",
+            detail={"label": label_to_assign},
+            action_id=action_id,
+        )
+    if _from_sprint and _from_sprint != "backlog" and _from_sprint != label_to_assign:
+        _emit_dashboard_event(
+            project=body.project or "dashboard",
+            type="label_removed",
+            target=f"#{issue_id}",
+            detail={"label": _from_sprint},
+            action_id=action_id,
+        )
     return {"ok": True}
 
 
@@ -2977,6 +3058,33 @@ SPRINT_LOG_PATH = Path(__file__).parent / "sprints" / "sprint_run.log"
 # sprint_manager validates the value — no validation added here.
 _ALERT_MODES = os.environ.get("COMMANDER_ALERT_MODES", "dashboard-banner,ntfy")
 
+_SPRINT_LABEL_RE_ALL = re.compile(r"^sprint-\d+(\.\d+)*$")
+
+
+def _dashboard_actor() -> str:
+    return os.environ.get("COMMANDER_USER", "dashboard")
+
+
+def _emit_dashboard_event(
+    project: str,
+    type: str,
+    target: str,
+    detail: dict,
+    action_id: str,
+) -> None:
+    try:
+        db.record_event(
+            project=project,
+            source="dashboard",
+            actor=_dashboard_actor(),
+            type=type,
+            target=target,
+            detail=detail,
+            action_id=action_id,
+        )
+    except Exception:
+        pass
+
 
 def _sprint_label_sort_key(label: str) -> tuple:
     """Return numeric components tuple for natural multi-level sprint label ordering."""
@@ -3034,6 +3142,13 @@ def run_sprint(request: Request, body: SprintRunBody):
         start_new_session=True,
     )
     _slog.event("sprint.dispatch", project="dashboard", request_id=request.state.request_id, sprint_label=body.label, dispatch_type="simple")
+    _emit_dashboard_event(
+        project="dashboard",
+        type="sprint_run",
+        target=body.label,
+        detail={"sprint_id": body.label},
+        action_id=str(uuid.uuid4()),
+    )
     return {"ok": True, "label": body.label}
 
 
@@ -4639,6 +4754,13 @@ def kill_sprint(sprint_label: str, project: str):
     except Exception:
         pass
 
+    _emit_dashboard_event(
+        project=project or "dashboard",
+        type="sprint_cancelled",
+        target=sprint_label,
+        detail={"sprint_id": sprint_label},
+        action_id=str(uuid.uuid4()),
+    )
     return {"ok": True}
 
 
@@ -5278,6 +5400,13 @@ async def create_sprint_label(body: SprintCreateBody):
         )
     except Exception:
         pass
+    _emit_dashboard_event(
+        project=body.project or "dashboard",
+        type="sprint_created",
+        target=sprint_label,
+        detail={"sprint_name": sprint_label},
+        action_id=str(uuid.uuid4()),
+    )
     return {"ok": True, "sprint_label": sprint_label}
 
 
@@ -9004,6 +9133,7 @@ async def bulk_create_start(
         "image_assignments": image_assignments,
         "image_url_map": None,
         "tickets": tickets,
+        "_action_id": str(uuid.uuid4()),
     }
     _bulk_jobs[job_id] = job
     _bulk_job_queues[job_id] = []
@@ -9514,6 +9644,17 @@ async def bulk_post_selected(job_id: str, body: BulkPostSelectedBody):
             job["status"] = "done"
             _persist_bulk_job(job)
             await _broadcast_bulk_event(job_id, {"type": "job_done", "job_id": job_id})
+            _created_ids = [
+                f"#{t['issue_num']}" for t in job["tickets"]
+                if t.get("state") == "created" and t.get("issue_num") is not None
+            ]
+            _emit_dashboard_event(
+                project=job.get("repo") or "dashboard",
+                type="bulk_created",
+                target=",".join(_created_ids),
+                detail={"ticket_ids": _created_ids},
+                action_id=job.get("_action_id") or str(uuid.uuid4()),
+            )
 
     asyncio.create_task(_post_task())
     return {"ok": True}

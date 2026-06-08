@@ -4259,6 +4259,52 @@
       width: 6px; height: 6px; border-radius: 50%; background: var(--green); flex-shrink: 0;
       animation: smgmt-running-badge-pulse 2s ease-in-out infinite;
     }
+    /* ── Events Activity Log (issue #633) ── */
+    .evl-bundle-row { border-bottom: 1px solid var(--border); }
+    .evl-bundle-header {
+      display: flex; align-items: center; gap: 8px;
+      padding: 10px 16px; cursor: pointer; user-select: none;
+    }
+    .evl-bundle-header:hover { background: var(--surface-hover); }
+    .evl-bundle-row.evl-single .evl-bundle-header { cursor: default; }
+    .evl-bundle-row.evl-single .evl-bundle-header:hover { background: transparent; }
+    .evl-headline { font-size: 13px; font-weight: 500; color: var(--text); flex-shrink: 0; }
+    .evl-effect-chips { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; flex: 1; min-width: 0; }
+    .evl-effect-chip {
+      font-size: 11px; font-weight: 600; padding: 1px 6px;
+      border-radius: 10px; border: 1px solid; white-space: nowrap;
+    }
+    .evl-effect-chip--added  { background: var(--green-bg);  color: var(--green);    border-color: rgba(34,197,94,.25); }
+    .evl-effect-chip--removed{ background: var(--red-bg);    color: var(--red);      border-color: rgba(239,68,68,.25); }
+    .evl-effect-chip--neutral{ background: var(--surface-2); color: var(--text-sub); border-color: var(--border); }
+    .evl-count-badge {
+      font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 10px;
+      background: var(--surface-2); color: var(--text-muted);
+      border: 1px solid var(--border); flex-shrink: 0;
+    }
+    .evl-chevron { font-size: 12px; color: var(--text-sub); transition: transform .15s; flex-shrink: 0; }
+    .evl-bundle-row.expanded .evl-chevron { transform: rotate(90deg); }
+    .evl-sub-rows { display: none; border-top: 1px solid var(--border); background: var(--surface-2); }
+    .evl-bundle-row.expanded .evl-sub-rows { display: block; }
+    .evl-sub-row {
+      display: flex; align-items: center; gap: 12px;
+      padding: 6px 32px; font-size: 12px;
+      border-bottom: 1px solid var(--border);
+    }
+    .evl-sub-row:last-child { border-bottom: none; }
+    .evl-ts { font-family: var(--mono); font-size: 11px; color: var(--text-muted); flex-shrink: 0; }
+    .evl-actor { color: var(--text-sub); flex-shrink: 0; }
+    .evl-type-label { color: var(--text-muted); flex: 1; }
+    .evl-standalone-row {
+      display: flex; align-items: center; gap: 8px;
+      padding: 10px 16px; border-bottom: 1px solid var(--border); font-size: 13px;
+    }
+    .evl-source-badge {
+      font-size: 10px; font-weight: 600; padding: 1px 6px; border-radius: 10px;
+      border: 1px solid var(--border); background: var(--surface-2);
+      color: var(--text-sub); flex-shrink: 0; text-transform: uppercase; letter-spacing: .03em;
+    }
+
     @media (max-width: 768px) {
       .logs-toolbar { padding: 10px 12px 8px; }
       .logs-run-header { padding: 10px 12px; }
@@ -4911,6 +4957,14 @@
                 <button class="logs-view-btn" id="logs-view-raw" onclick="logsSetView('raw')">
                   <i class="ti ti-terminal-2"></i> Raw
                 </button>
+                <button class="logs-view-btn" id="logs-view-activity" onclick="logsSetView('activity')">
+                  <i class="ti ti-activity"></i> Activity
+                </button>
+              </div>
+              <div id="logs-evl-source-group" class="logs-chip-group hidden" style="margin-left:8px">
+                <span class="logs-chip-label">Source</span>
+                <button class="logs-chip active" id="evl-source-all" onclick="evlSetSource('all')">All</button>
+                <button class="logs-chip" id="evl-source-github" onclick="evlSetSource('github')">GitHub</button>
               </div>
               <button class="btn-sm btn-ghost" title="Refresh" onclick="logsRefresh()" style="margin-left:4px">
                 <i class="ti ti-refresh"></i>
@@ -4928,6 +4982,11 @@
             <div id="logs-raw" class="hidden">
               <div class="logs-raw-stream" id="logs-raw-stream">
                 <div class="logs-raw-line" style="color:var(--text-sub)">Select a sprint run to view raw output…</div>
+              </div>
+            </div>
+            <div id="logs-activity" class="hidden">
+              <div class="evl-list" id="evl-list">
+                <div class="logs-empty" id="evl-empty">Loading activity…</div>
               </div>
             </div>
           </div>
@@ -16382,6 +16441,10 @@ async function logsSyncGitHub() {
 function logsRefresh() {
   logsFetchRuns();
   logsSyncGitHub();
+  if (_logsState.viewMode === 'activity') {
+    _evlState.events = null;
+    evlFetch();
+  }
 }
 
 function logsDestroy() {
@@ -16464,14 +16527,20 @@ function logsSetView(mode) {
   const timelineEl = document.getElementById('logs-timeline');
   const issuesEl   = document.getElementById('logs-issues');
   const rawEl      = document.getElementById('logs-raw');
+  const activityEl = document.getElementById('logs-activity');
+  const evlSrcGrp  = document.getElementById('logs-evl-source-group');
   document.getElementById('logs-view-timeline')?.classList.toggle('active', mode === 'timeline');
   document.getElementById('logs-view-issues')?.classList.toggle('active', mode === 'issues');
   document.getElementById('logs-view-raw')?.classList.toggle('active', mode === 'raw');
+  document.getElementById('logs-view-activity')?.classList.toggle('active', mode === 'activity');
   timelineEl?.classList.toggle('hidden', mode !== 'timeline');
   issuesEl?.classList.toggle('hidden', mode !== 'issues');
   rawEl?.classList.toggle('hidden', mode !== 'raw');
-  if (mode === 'raw')    logsLoadRawView();
-  if (mode === 'issues') { if (_logsState.issues === null) _logsLoadIssues(); else _logsRenderIssues(); }
+  activityEl?.classList.toggle('hidden', mode !== 'activity');
+  evlSrcGrp?.classList.toggle('hidden', mode !== 'activity');
+  if (mode === 'raw')      logsLoadRawView();
+  if (mode === 'issues')   { if (_logsState.issues === null) _logsLoadIssues(); else _logsRenderIssues(); }
+  if (mode === 'activity') { if (_evlState.events === null) evlFetch(); else evlRender(); }
 }
 
 // ── Logs › Issues view: browse per-issue logs without typing ─────────────────
@@ -16781,6 +16850,201 @@ function _logsDisconnectLive() {
     _logsState.liveEs = null;
     _logsState.liveRunId = null;
   }
+}
+
+// ── Events Activity Log (issue #633) ──────────────────────────────────────────
+
+const _EVL_GITHUB_SOURCE = 'github';
+const _EVL_CAUSE_SOURCES = new Set(['dashboard']);
+const _EVL_LIFECYCLE_SOURCES = new Set(['sprint_manager']);
+
+const _evlState = {
+  events: null,
+  sourceFilter: 'all',
+  loading: false,
+};
+
+function _evlEffectChip(ev) {
+  const type = ev.type || '';
+  const detail = ev.detail || {};
+  if (type === 'label_added')   return { label: '+' + (detail.label_name || ev.target || ''), cls: 'evl-effect-chip--added' };
+  if (type === 'label_removed') return { label: '−' + (detail.label_name || ev.target || ''), cls: 'evl-effect-chip--removed' };
+  if (type === 'issue_opened')  return { label: '+' + (ev.target || 'issue'), cls: 'evl-effect-chip--added' };
+  if (type === 'issue_closed')  return { label: 'closed ' + (ev.target || ''), cls: 'evl-effect-chip--neutral' };
+  if (type === 'branch_created')return { label: 'branch', cls: 'evl-effect-chip--neutral' };
+  if (type === 'pr_opened')     return { label: 'PR opened', cls: 'evl-effect-chip--neutral' };
+  if (type === 'pr_merged')     return { label: 'PR merged', cls: 'evl-effect-chip--added' };
+  return { label: type.replace(/_/g, ' '), cls: 'evl-effect-chip--neutral' };
+}
+
+function _evlHeadlineLabel(causeEvent) {
+  const type = causeEvent.type || '';
+  const detail = causeEvent.detail || {};
+  if (type === 'ticket_moved') {
+    const from = detail.from_sprint ? '−' + detail.from_sprint : '';
+    const to   = detail.to_sprint   ? '+'     + detail.to_sprint   : '';
+    const parts = [from, to].filter(Boolean).join(' → ');
+    return 'Sprint move' + (parts ? ': ' + parts : '');
+  }
+  if (type === 'bulk_created')    return 'Bulk create';
+  if (type === 'sprint_created')  return 'Sprint created';
+  if (type === 'sprint_run')      return 'Sprint run';
+  if (type === 'sprint_cancelled')return 'Sprint cancelled';
+  return type.replace(/_/g, ' ');
+}
+
+function _evlBundleEvents(events, sourceFilter) {
+  if (sourceFilter === 'github') {
+    return events
+      .filter(e => e.source === _EVL_GITHUB_SOURCE)
+      .map(e => ({ kind: 'standalone', event: e }));
+  }
+
+  const ghByAid = {};
+  for (const e of events) {
+    if (e.source === _EVL_GITHUB_SOURCE && e.action_id) {
+      if (!ghByAid[e.action_id]) ghByAid[e.action_id] = [];
+      ghByAid[e.action_id].push(e);
+    }
+  }
+
+  const consumed = new Set();
+  const rows = [];
+
+  for (const e of events) {
+    const src = e.source || '';
+    if (src === _EVL_GITHUB_SOURCE) continue;
+    if (_EVL_LIFECYCLE_SOURCES.has(src)) { rows.push({ kind: 'standalone', event: e }); continue; }
+    if (_EVL_CAUSE_SOURCES.has(src)) {
+      const aid = e.action_id;
+      if (aid && ghByAid[aid]) {
+        const effects = ghByAid[aid];
+        effects.forEach(eff => consumed.add(eff));
+        rows.push({ kind: 'bundle', cause: e, effects, count: effects.length });
+      } else {
+        rows.push({ kind: 'standalone', event: e });
+      }
+      continue;
+    }
+    rows.push({ kind: 'standalone', event: e });
+  }
+
+  for (const e of events) {
+    if (e.source === _EVL_GITHUB_SOURCE && !consumed.has(e)) {
+      rows.push({ kind: 'standalone', event: e });
+    }
+  }
+
+  return rows;
+}
+
+function _evlFmtTs(ts) {
+  if (!ts) return '';
+  return ts.replace('T', ' ').substring(0, 19);
+}
+
+function _evlRenderRow(row) {
+  if (row.kind === 'standalone') {
+    const e = row.event;
+    const ts = _evlFmtTs(e.timestamp);
+    const src = e.source || '';
+    const type = (e.type || '').replace(/_/g, ' ');
+    const target = e.target ? ' ' + e.target : '';
+    const actor = e.actor ? `<span class="evl-actor">${escHtml(e.actor)}</span>` : '';
+    return `<div class="evl-standalone-row">
+      <span class="evl-ts">${escHtml(ts)}</span>
+      <span class="evl-source-badge">${escHtml(src)}</span>
+      <span class="evl-type-label">${escHtml(type + target)}</span>
+      ${actor}
+    </div>`;
+  }
+
+  if (row.kind === 'bundle') {
+    const { cause, effects, count } = row;
+    const headline = _evlHeadlineLabel(cause);
+    const isSingle = count === 1;
+
+    const chipsHtml = effects.map(eff => {
+      const { label, cls } = _evlEffectChip(eff);
+      return `<span class="evl-effect-chip ${cls}">${escHtml(label)}</span>`;
+    }).join('');
+
+    const singleClass = isSingle ? ' evl-single' : '';
+    const chevron = isSingle ? '' : `<i class="ti ti-chevron-right evl-chevron"></i>`;
+    const clickAttr = isSingle ? '' : ' onclick="evlToggleBundle(this)"';
+    const badge = isSingle ? '' : `<span class="evl-count-badge">${count}</span>`;
+
+    const subRowsHtml = effects.map(eff => {
+      const ts = _evlFmtTs(eff.timestamp);
+      const { label } = _evlEffectChip(eff);
+      const actor = eff.actor ? ` by ${escHtml(eff.actor)}` : '';
+      return `<div class="evl-sub-row">
+        <span class="evl-ts">${escHtml(ts)}</span>
+        <span class="evl-type-label">${escHtml(label)}</span>
+        <span class="evl-actor">${actor}</span>
+      </div>`;
+    }).join('');
+
+    return `<div class="evl-bundle-row${singleClass}">
+      <div class="evl-bundle-header"${clickAttr}>
+        ${chevron}
+        <span class="evl-headline">${escHtml(headline)}</span>
+        <div class="evl-effect-chips">${chipsHtml}</div>
+        ${badge}
+      </div>
+      ${isSingle ? '' : `<div class="evl-sub-rows">${subRowsHtml}</div>`}
+    </div>`;
+  }
+
+  return '';
+}
+
+function evlToggleBundle(headerEl) {
+  const row = headerEl.closest('.evl-bundle-row');
+  if (!row || row.classList.contains('evl-single')) return;
+  row.classList.toggle('expanded');
+}
+
+function evlRender() {
+  const listEl = document.getElementById('evl-list');
+  if (!listEl) return;
+
+  if (!_evlState.events) {
+    listEl.innerHTML = '<div class="logs-empty">Loading activity…</div>';
+    return;
+  }
+
+  const rows = _evlBundleEvents(_evlState.events, _evlState.sourceFilter);
+
+  if (rows.length === 0) {
+    listEl.innerHTML = '<div class="logs-empty">No activity found.</div>';
+    return;
+  }
+
+  listEl.innerHTML = rows.map(_evlRenderRow).join('');
+}
+
+async function evlFetch() {
+  if (!_projectData || _evlState.loading) return;
+  _evlState.loading = true;
+
+  const slug = (_projectData.repo || '').split('/').pop();
+  try {
+    const resp = await fetch(`/api/projects/${encodeURIComponent(slug)}/events?limit=200`);
+    _evlState.events = resp.ok ? await resp.json() : [];
+  } catch (_) {
+    _evlState.events = [];
+  }
+
+  _evlState.loading = false;
+  if (_logsState.viewMode === 'activity') evlRender();
+}
+
+function evlSetSource(source) {
+  _evlState.sourceFilter = source;
+  document.getElementById('evl-source-all')?.classList.toggle('active', source === 'all');
+  document.getElementById('evl-source-github')?.classList.toggle('active', source === 'github');
+  evlRender();
 }
 
 // ── Compare Sprints tab (issue #435) ─────────────────────────────────────────

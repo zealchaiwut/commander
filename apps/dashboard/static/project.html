@@ -1307,6 +1307,7 @@
     #pane-sprint-mgmt.smgmt-compact .smgmt-ticket-agent-tag,
     #pane-sprint-mgmt.smgmt-compact .smgmt-ticket-elapsed,
     #pane-sprint-mgmt.smgmt-compact .smgmt-reestimate-btn,
+    #pane-sprint-mgmt.smgmt-compact .smgmt-stale-badge,
     #pane-sprint-mgmt.smgmt-compact .smgmt-retry-pill,
     #pane-sprint-mgmt.smgmt-compact .smgmt-moveto-pill {
       display: none !important;
@@ -2960,6 +2961,17 @@
       animation: smgmt-ring-spin .6s linear infinite;
       display: inline-block;
     }
+    /* Stale estimate badge (issue #596) */
+    .smgmt-stale-badge {
+      padding: 1px 5px; font-size: 10px; font-weight: 600;
+      background: var(--amber-bg); color: var(--amber);
+      border: 1px solid currentColor; border-radius: 3px;
+      cursor: pointer; flex-shrink: 0; white-space: nowrap;
+      font-family: var(--mono);
+    }
+    .smgmt-stale-badge:hover { filter: brightness(.85); }
+    .smgmt-stale-badge:disabled { opacity: .5; cursor: not-allowed; }
+    .smgmt-stale-badge--error { background: var(--red-bg); color: var(--red); }
     .tdp-reestimate-btn {
       padding: 4px 10px; font-size: 12px; font-weight: 600;
       background: transparent; color: var(--blue);
@@ -9441,8 +9453,14 @@ function _smgmtTicketRowHtml(ticket, label) {
     ? `<span class="smgmt-ticket-size-pill">${escHtml(sizeValue)}</span>`
     : '';
   const sizeAttr = sizeValue ? ` data-size="${escHtml(sizeValue)}"` : '';
+  const staleBadgeHtml = (ticket.estimate_stale && sizeLabel)
+    ? `<button class="smgmt-stale-badge" data-stale="true" tabindex="0"
+         title="Estimate may be outdated — issue body changed since last estimate"
+         onclick="event.stopPropagation();_smgmtReEstimate(${ticket.number},this)"
+         onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();_smgmtReEstimate(${ticket.number},this);}">stale</button>`
+    : '';
   const estimateBadgeHtml = _smgmtEstimateBadgeHtml(ticket.number);
-  const reEstBtnHtml = (hasEstimate && _smgmtEstimatorAvailable)
+  const reEstBtnHtml = (hasEstimate && _smgmtEstimatorAvailable && !ticket.estimate_stale)
     ? `<button class="smgmt-reestimate-btn" tabindex="0" title="Re-estimate this ticket"
          onclick="event.stopPropagation();_smgmtReEstimate(${ticket.number},this)"
          onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();_smgmtReEstimate(${ticket.number},this);}">Re-estimate</button>`
@@ -9475,7 +9493,7 @@ function _smgmtTicketRowHtml(ticket, label) {
       <a class="smgmt-ticket-num" href="${escHtml(ticket.url || '#')}" target="_blank"
          rel="noopener" draggable="false" onclick="event.stopPropagation()">#${ticket.number}</a>
       <span class="smgmt-ticket-title" title="${escHtml(ticket.title)}">${escHtml(ticket.title)}</span>
-      ${sizePillHtml}${estimateBadgeHtml}${riskFlagIconsHtml}${conflictBadgeHtml}${depOrderBadgeHtml}${reEstBtnHtml}
+      ${sizePillHtml}${staleBadgeHtml}${estimateBadgeHtml}${riskFlagIconsHtml}${conflictBadgeHtml}${depOrderBadgeHtml}${reEstBtnHtml}
       <span class="smgmt-ticket-status ${statusClass}">${escHtml(statusLabel)}</span>
       <button class="btn-view-log" tabindex="0" title="View issue log"
               onclick="event.stopPropagation();openLvIssueLog(${ticket.number},'${escHtml(label)}',_smgmtRepo()||'')">
@@ -9554,13 +9572,27 @@ async function _smgmtCheckEstimatorHealth() {
 function _smgmtInjectReEstimateButtons() {
   document.querySelectorAll('.smgmt-ticket').forEach(row => {
     if (!row.querySelector('.smgmt-ticket-size-pill')) return;
-    if (row.querySelector('.smgmt-reestimate-btn, .smgmt-reestimate-spinner, .smgmt-reestimate-error')) return;
+    if (row.querySelector('.smgmt-reestimate-btn, .smgmt-reestimate-spinner, .smgmt-reestimate-error, .smgmt-stale-badge')) return;
     const issueNum = parseInt(row.dataset.issue, 10);
     if (!issueNum) return;
     const statusEl = row.querySelector('.smgmt-ticket-status');
     if (statusEl) statusEl.before(_makeReEstimateBtn(issueNum));
     else row.appendChild(_makeReEstimateBtn(issueNum));
   });
+}
+
+function _makeStaleEstimateBadge(issueNum) {
+  const btn = document.createElement('button');
+  btn.className = 'smgmt-stale-badge';
+  btn.dataset.stale = 'true';
+  btn.tabIndex = 0;
+  btn.title = 'Estimate may be outdated — issue body changed since last estimate';
+  btn.textContent = 'stale';
+  btn.onclick = (ev) => { ev.stopPropagation(); _smgmtReEstimate(issueNum, btn); };
+  btn.onkeydown = (ev) => {
+    if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); ev.stopPropagation(); _smgmtReEstimate(issueNum, btn); }
+  };
+  return btn;
 }
 
 function _makeReEstimateBtn(issueNum) {
@@ -9611,8 +9643,9 @@ function _smgmtReEstimateConfirm() {
 }
 
 async function _smgmtReEstimateRun(issueNum, rowBtn) {
-  const repo   = _smgmtRepo() || '';
-  const tdpBtn = document.getElementById('tdp-reestimate-btn');
+  const repo      = _smgmtRepo() || '';
+  const tdpBtn    = document.getElementById('tdp-reestimate-btn');
+  const isStaleBtn = rowBtn && rowBtn.dataset.stale === 'true';
 
   // Loading: replace row button with spinner
   let rowSpinner = null;
@@ -9643,8 +9676,18 @@ async function _smgmtReEstimateRun(issueNum, rowBtn) {
       }
       row.dataset.size = data.size;
     }
-    // Restore row re-estimate button
-    if (rowSpinner) rowSpinner.replaceWith(_makeReEstimateBtn(issueNum));
+    // On success: stale badge simply disappears; regular btn is restored for non-stale flow
+    if (rowSpinner) {
+      if (isStaleBtn) {
+        rowSpinner.remove();
+        if (_smgmtData) {
+          const iss = _smgmtData.issues.find(i => i.number === issueNum);
+          if (iss) iss.estimate_stale = false;
+        }
+      } else {
+        rowSpinner.replaceWith(_makeReEstimateBtn(issueNum));
+      }
+    }
 
     // Update local cache and sprint token header
     if (_estDataCache[issueNum]) _estDataCache[issueNum].size = data.size;
@@ -9672,14 +9715,26 @@ async function _smgmtReEstimateRun(issueNum, rowBtn) {
       }
     }
   } catch (err) {
-    // Show inline error near the button, then restore it after 3 s
     if (rowSpinner) {
-      const errBadge = document.createElement('span');
-      errBadge.className = 'smgmt-reestimate-error';
-      errBadge.title = err.message;
-      errBadge.textContent = 'Failed';
-      rowSpinner.replaceWith(errBadge);
-      setTimeout(() => errBadge.replaceWith(_makeReEstimateBtn(issueNum)), 3000);
+      if (isStaleBtn) {
+        // Restore stale badge with error state, then reset tooltip after 3 s
+        const restored = _makeStaleEstimateBadge(issueNum);
+        restored.classList.add('smgmt-stale-badge--error');
+        restored.title = 'Re-estimate failed — click to retry';
+        rowSpinner.replaceWith(restored);
+        setTimeout(() => {
+          restored.classList.remove('smgmt-stale-badge--error');
+          restored.title = 'Estimate may be outdated — issue body changed since last estimate';
+        }, 3000);
+      } else {
+        // Show inline error near the button, then restore it after 3 s
+        const errBadge = document.createElement('span');
+        errBadge.className = 'smgmt-reestimate-error';
+        errBadge.title = err.message;
+        errBadge.textContent = 'Failed';
+        rowSpinner.replaceWith(errBadge);
+        setTimeout(() => errBadge.replaceWith(_makeReEstimateBtn(issueNum)), 3000);
+      }
     }
     // Restore detail panel button
     if (tdpBtn) { tdpBtn.disabled = false; tdpBtn.textContent = 'Re-estimate'; }

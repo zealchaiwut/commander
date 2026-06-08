@@ -1546,6 +1546,13 @@
     .rr-controls { display: flex; gap: 10px; align-items: center; margin-bottom: 6px; }
     .rr-controls a { font-size: 12px; color: var(--accent); cursor: pointer; text-decoration: underline; }
     .rr-uat-warning { font-size: 12px; color: var(--amber); margin-top: 8px; min-height: 18px; }
+    /* Finish Sprint modal extras */
+    .rr-cat-summary { background: var(--surface-2); color: var(--text-muted); }
+    .fs-actions { margin-top: 12px; display: flex; flex-direction: column; gap: 6px; }
+    .fs-action-row { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-sub); }
+    .fs-action-row i { color: var(--green); font-size: 14px; }
+    .fs-action-row a { color: var(--accent); text-decoration: none; font-size: 12px; }
+    .fs-action-row a:hover { text-decoration: underline; }
     .smgmt-delete-btn {
       padding: 4px 10px; font-size: 11px; font-weight: 600;
       background: var(--surface); color: var(--red); border: 1px solid var(--red);
@@ -1855,6 +1862,11 @@
     }
     .smgmt-log-line { display: flex; gap: 12px; color: var(--text-muted); }
     .smgmt-log-time { color: var(--text-sub); flex-shrink: 0; }
+    .smgmt-log-line.log-dispatch .smgmt-log-msg { color: var(--blue); }
+    .smgmt-log-line.log-success  .smgmt-log-msg { color: var(--green); }
+    .smgmt-log-line.log-warn     .smgmt-log-msg { color: var(--amber); }
+    .smgmt-log-line.log-fail     .smgmt-log-msg { color: var(--red); }
+    .smgmt-log-pid { font-family: var(--mono); font-size: 11px; color: var(--text-muted); margin-left: 4px; }
     /* ── Live log panel (running sprint, issue #309) ── */
     .smgmt-live-log {
       border-top: 1px solid var(--border);
@@ -1870,7 +1882,7 @@
       background: var(--green); flex-shrink: 0;
       animation: smgmt-running-badge-pulse 2s ease-in-out infinite;
     }
-    .smgmt-live-log-agent { margin-left: auto; color: var(--text-sub); }
+    .smgmt-live-log-agent { margin-left: auto; display: flex; align-items: center; gap: 6px; }
     .smgmt-live-log-stream {
       max-height: 200px; overflow-y: auto;
       font-family: var(--mono); font-size: 11px; line-height: 1.7;
@@ -2886,9 +2898,19 @@
       font-size: 10px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
       font-family: var(--mono);
     }
-    .smgmt-ticket-agent-tag.coder-class  { background: var(--purple-bg); color: var(--purple); }
-    .smgmt-ticket-agent-tag.tester-class { background: var(--amber-bg);  color: var(--amber); }
-    .smgmt-ticket-agent-tag.unknown-class { background: var(--surface-2); color: var(--text-sub); }
+    /* Live log bar agent badge — separate class so compact-mode hide rule doesn't apply */
+    .smgmt-log-agent-tag {
+      flex-shrink: 0;
+      padding: 1px 5px; border-radius: 3px;
+      font-size: 10px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+      font-family: var(--mono);
+    }
+    .smgmt-ticket-agent-tag.coder-class,
+    .smgmt-log-agent-tag.coder-class   { background: var(--purple-bg); color: var(--purple); }
+    .smgmt-ticket-agent-tag.tester-class,
+    .smgmt-log-agent-tag.tester-class  { background: var(--amber-bg);  color: var(--amber); }
+    .smgmt-ticket-agent-tag.unknown-class,
+    .smgmt-log-agent-tag.unknown-class { background: var(--surface-2); color: var(--text-sub); }
 
     /* Segmented progress bar (issue #613) */
     .smgmt-seg-bar { display: flex; gap: 2px; align-items: center; flex-shrink: 0; }
@@ -2902,6 +2924,27 @@
 
     /* Outcome band spacer — pushes seg-bar + time to the right */
     .oc-spacer { flex: 1; }
+
+    /* Inline outcome band stat labels (running card) */
+    .oc-done  { color: var(--green); font-weight: 700; }
+    .oc-fail  { color: var(--red);   font-weight: 700; }
+    .oc-fail.muted { color: var(--text-sub); font-weight: 700; }
+    .oc-skip  { color: var(--text-sub); font-weight: 700; }
+    .oc-est   { color: var(--text-sub); font-weight: 400; }
+
+    /* Cancel sprint button */
+    .smgmt-cancel-btn {
+      display: inline-flex; align-items: center; gap: 5px;
+      padding: 5px 12px; border-radius: 6px; font-size: 12px; font-weight: 500; cursor: pointer;
+      color: var(--red); border: 1px solid var(--red); background: var(--surface);
+      transition: all .12s; white-space: nowrap; font-family: inherit;
+    }
+    .smgmt-cancel-btn:hover { background: var(--red-bg); }
+
+    /* Elapsed time in running card header */
+    .smgmt-sprint-meta {
+      font-family: var(--mono); font-size: 12px; color: var(--text-muted);
+    }
 
     /* Outcome band PR / summary links (issue #613) */
     .oc-band-links { display: flex; align-items: center; gap: 10px; margin-left: 8px; }
@@ -7457,6 +7500,14 @@ function _smgmtRender(data) {
 
   listEl.innerHTML = cards || '<div class="loading-msg">No sprints found.</div>';
 
+  // Scroll live log streams to the latest line after initial render
+  requestAnimationFrame(() => {
+    _smgmtRunningLabels.forEach(lbl => {
+      const s = document.getElementById(`smgmt-live-log-stream-${lbl}`);
+      if (s) s.scrollTop = s.scrollHeight;
+    });
+  });
+
   // Populate capacity gauges (reads localStorage + estimate cache)
   _smgmtInitCapacityGauges(orderedLabels);
 
@@ -8700,9 +8751,9 @@ function _smgmtOutcomeTicketListHtml(issues, label, repo) {
         <span class="ex-exec-val">—</span>
       </div>
       <div class="ex-actions">
-        <button class="ex-btn" onclick="event.stopPropagation()">Re-estimate</button>
-        <button class="ex-btn" onclick="event.stopPropagation()">Move to sprint</button>
-        <button class="ex-btn ex-btn-danger" onclick="event.stopPropagation()">Close ticket</button>
+        <button class="ex-btn" onclick="event.stopPropagation();_smgmtReEstimate(${iss.number},this)"><i class="ti ti-sparkles" style="font-size:12px"></i> Re-estimate</button>
+        <button class="ex-btn" onclick="event.stopPropagation();_smgmtRowMenuOpen(event,${iss.number},'${safeLabel}',false)"><i class="ti ti-arrow-right" style="font-size:12px"></i> Move to sprint</button>
+        <button class="ex-btn ex-btn-danger" onclick="event.stopPropagation();_smgmtCloseIssueOpen(${iss.number})"><i class="ti ti-x" style="font-size:12px"></i> Close ticket</button>
       </div>
     </div>`;
   }).join('');
@@ -8859,6 +8910,13 @@ function sprintLabelDisplay(label) {
   const m = String(label).match(/^sprint-(\d+)(?:\.(\d+))?$/);
   if (!m) return label;
   return m[2] ? `Sprint ${m[1]}.${m[2]}` : `Sprint ${m[1]}`;
+}
+
+function _smgmtNextChildLabel(parentLabel) {
+  const existing = Object.keys(_smgmtBySprint || {});
+  let i = 1;
+  while (existing.includes(`${parentLabel}.${i}`)) i++;
+  return `${parentLabel}.${i}`;
 }
 
 /**
@@ -9173,9 +9231,11 @@ function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent, finished) {
   const rerunTitle = _smgmtAnySprintRunning
     ? 'title="Cannot re-run: another sprint is currently running."'
     : '';
+  const childLabel = _smgmtNextChildLabel(label);
+  const childDisplay = sprintLabelDisplay(childLabel).replace('Sprint ', '');
   const rerunBtn = `<button class="smgmt-run-btn smgmt-run-btn--rerun" ${rerunDisabled} ${rerunTitle}
                     onclick="smgmtRerunSprint('${escHtml(label)}')">
-                    <i class="ti ti-refresh"></i> Re-run Sprint</button>`;
+                    <i class="ti ti-refresh"></i> Re-run → ${escHtml(childDisplay)}</button>`;
 
   // Action button: post-run cards show Re-run only; planning cards show Run Sprint
   let actionBtn;
@@ -9204,6 +9264,7 @@ function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent, finished) {
   let outcomeBandHtml = '';
   let outcomeCardClass = '';
   let outcomeBadgeHtml = '';
+  let headerMetaHtml = '';
   let ticketCount = tickets.length;
   let ticketsContainerHtml = '';
   let isOutcomeView = false;
@@ -9214,9 +9275,18 @@ function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent, finished) {
     outcomeCardClass = ' ' + meta.cardClass;
     outcomeBadgeHtml = `<span class="smgmt-state-badge ${meta.badgeCls}">${escHtml(meta.badge)}</span>`;
     if (meta.state === 'has_rework') {
+      const _metaSecs = outcome.wall_clock_secs;
+      const _metaStopped = outcome.ended_at ? _fmtStoppedAt(outcome.ended_at) : null;
+      const _metaParts = [];
+      if (_metaSecs != null) _metaParts.push(_fmtRunningTime(_metaSecs));
+      if (_metaStopped) _metaParts.push(`stopped ${_metaStopped}`);
+      if (_metaParts.length) headerMetaHtml = `<span class="smgmt-sprint-meta">${escHtml(_metaParts.join(' · '))}</span>`;
+
+      const _elapsedByNum = {};
+      if (outcome.issues) { for (const _oi of outcome.issues) { if (_oi.elapsed_secs != null) _elapsedByNum[_oi.number] = _oi.elapsed_secs; } }
       // Keep planning view: rework tickets stay actionable; the finish-card hat shows the summary.
       ticketsContainerHtml = tickets.length > 0
-        ? tickets.map(t => _smgmtTicketRowHtml(t, label)).join('')
+        ? tickets.map(t => _smgmtTicketRowHtml(t, label, _elapsedByNum[t.number] ?? null)).join('')
         : '<div class="smgmt-drop-hint">Drop tickets here</div>';
     } else {
       outcomeBandHtml = _smgmtOutcomeBandHtml(label, outcome);
@@ -9288,24 +9358,23 @@ function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent, finished) {
 
           ${isNext ? '<span class="smgmt-next-badge" aria-label="Next up">NEXT UP</span>' : ''}
           ${outcomeBadgeHtml}
+          ${headerMetaHtml}
           ${parentLineage}
           <span class="smgmt-sprint-count" id="smgmt-col-rollup-${escHtml(label)}">${_smgmtRollupText(rollupItems)}</span>
         </div>
         <div class="smgmt-sprint-header-right">
           ${_smgmtCapacityInputHtml(label)}
           ${bulkEstBtnHtml}
-          <button class="smgmt-finish-btn ${finishHidden}" ${finishDisabled}
-                  title="${finishDisabled ? 'No open tickets' : 'Finish sprint'}"
-                  onclick="smgmtFinishSprint('${escHtml(label)}')">
-            <i class="ti ti-flag-check"></i> Finish Sprint</button>
           <button class="smgmt-delete-btn"
                   onclick="smgmtDeleteSprint('${escHtml(label)}')">
             <i class="ti ti-trash"></i> Delete</button>
           ${actionBtn}
+          <button class="smgmt-finish-btn ${finishHidden}" ${finishDisabled}
+                  title="${finishDisabled ? 'No open tickets' : 'Finish sprint'}"
+                  onclick="smgmtFinishSprint('${escHtml(label)}')">
+            <i class="ti ti-flag-check"></i> Finish Sprint</button>
         </div>
       </div>
-      <div class="smgmt-capacity-gauge" id="smgmt-cap-gauge-${escHtml(label)}"></div>
-      ${summaryHtml}
       ${cancelBannerHtml}
       ${outcomeBandHtml}
       <div class="smgmt-sprint-tickets" id="smgmt-tickets-${escHtml(label)}">
@@ -9384,12 +9453,13 @@ function _smgmtRunningCardHtml(label, n, tickets) {
     }
     if (ticketLevel > 0) prevLevel = ticketLevel;
 
+    const isActiveAgent = agentStatus && (agentStatus.endsWith('_running') || agentStatus.endsWith('_dispatched'));
     let indicator = '';
     if (liveStatus === 'done') {
       indicator = '<div class="smgmt-ticket-indicator"><div class="circle-done">&#10003;</div></div>';
     } else if (agentStatus === 'failed' || liveStatus === 'skipped') {
       indicator = '<div class="smgmt-ticket-indicator"><div class="circle-failed">&#10005;</div></div>';
-    } else if (liveStatus === 'in-progress' || agentStatus === 'running' || (currentTicket && t.number === currentTicket.number)) {
+    } else if (liveStatus === 'in-progress' || isActiveAgent || (currentTicket && t.number === currentTicket.number)) {
       indicator = '<div class="smgmt-ticket-indicator"><div class="ring"></div></div>';
     } else {
       indicator = '<div class="smgmt-ticket-indicator"><div class="circle-pending"></div></div>';
@@ -9440,44 +9510,19 @@ function _smgmtRunningCardHtml(label, n, tickets) {
           </span>
         </div>
         <div class="smgmt-sprint-header-right">
-          ${_smgmtCapacityInputHtml(label)}
-          <button class="smgmt-delete-btn" disabled title="Cancel sprint first">
-            <i class="ti ti-trash"></i> Delete</button>
-          <button class="smgmt-run-btn" disabled title="Sprint is currently running">
-            <i class="ti ti-player-play"></i> Running…</button>
+          <span class="smgmt-sprint-meta" id="smgmt-elapsed-${escHtml(label)}">${timeSpentSec > 0 ? `elapsed ${_fmtRunningTime(timeSpentSec)}` : ''}</span>
+          <button class="smgmt-cancel-btn" onclick="smgmtCancelSprint('${escHtml(label)}')">
+            <i class="ti ti-player-stop"></i> Cancel sprint</button>
         </div>
       </div>
-      <div class="smgmt-capacity-gauge" id="smgmt-cap-gauge-${escHtml(label)}"></div>
-      <div class="smgmt-running-stat-strip" id="smgmt-running-stats-${escHtml(label)}">
-        <div class="smgmt-running-stat">
-          <span class="rsnum green" id="smgmt-rs-done-${escHtml(label)}">${doneCount}</span>
-          <span class="rslbl">Done</span>
-        </div>
-        <div class="smgmt-running-stat">
-          <span class="rsnum ${failedCount > 0 ? 'red' : 'muted'}" id="smgmt-rs-failed-${escHtml(label)}">${failedCount}</span>
-          <span class="rslbl">Failed</span>
-        </div>
-        <div class="smgmt-running-stat">
-          <span class="rsnum muted" id="smgmt-rs-skipped-${escHtml(label)}">${skippedCount}</span>
-          <span class="rslbl">Skipped</span>
-        </div>
-        <div class="smgmt-running-stat">
-          <span class="rsnum amber" id="smgmt-rs-est-${escHtml(label)}">${estRemMins != null ? estRemMins + 'm' : '—'}</span>
-          <span class="rslbl">— EST. REMAINING</span>
-        </div>
+      <div class="smgmt-outcome-band" id="smgmt-running-stats-${escHtml(label)}">
+        <span class="oc-done" id="smgmt-rs-done-${escHtml(label)}">${doneCount} DONE</span>
+        <span class="oc-fail ${failedCount > 0 ? '' : 'muted'}" id="smgmt-rs-failed-${escHtml(label)}">${failedCount} FAILED</span>
+        <span class="oc-skip" id="smgmt-rs-skipped-${escHtml(label)}">${skippedCount} SKIPPED</span>
+        <span class="oc-est" id="smgmt-rs-est-${escHtml(label)}">${estRemMins != null ? `↩ ${estRemMins}m EST. REMAINING` : '↩ EST. REMAINING'}</span>
         <span class="oc-spacer"></span>
         ${segBarHtml}
-        <div class="smgmt-running-time" id="smgmt-rs-time-${escHtml(label)}">
-          <i class="ti ti-clock" style="font-size:12px;"></i>
-          ${_fmtRunningTime(timeSpentSec)}
-        </div>
-      </div>
-      <div class="smgmt-running-progress-wrap">
-        <div class="smgmt-running-progress-track">
-          <div class="smgmt-running-progress-fill" id="smgmt-rs-prog-${escHtml(label)}" style="width:${pct}%">
-            <div class="smgmt-running-progress-shimmer"></div>
-          </div>
-        </div>
+        <span class="smgmt-outcome-dur" id="smgmt-rs-time-${escHtml(label)}">${_fmtRunningTime(timeSpentSec)}</span>
       </div>
       <div class="smgmt-sprint-tickets" id="smgmt-tickets-${escHtml(label)}">
         ${ticketRowsHtml || '<div class="smgmt-drop-hint">No tickets in this sprint</div>'}
@@ -9487,7 +9532,7 @@ function _smgmtRunningCardHtml(label, n, tickets) {
           <span class="smgmt-live-indicator"></span>
           <span>live</span>
           <span class="smgmt-live-log-agent" id="smgmt-live-agent-${escHtml(label)}">${
-            activeAgent ? escHtml(activeAgent.name.toUpperCase() + ' · pid ' + activeAgent.pid) : ''
+            _smgmtLiveAgentBadgesHtml(live)
           }</span>
         </div>
         <div class="smgmt-live-log-stream" id="smgmt-live-log-stream-${escHtml(label)}">${
@@ -9507,17 +9552,26 @@ function _fmtRunningTime(secs) {
   return `${m}m ${s}s`;
 }
 
+/** Format an ISO timestamp as HH:MM local time. Returns null on invalid input. */
+function _fmtStoppedAt(isoStr) {
+  if (!isoStr) return null;
+  const d = new Date(isoStr);
+  if (isNaN(d)) return null;
+  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+}
+
 /** Render recent_log_lines array to HTML for the live log stream container. */
+const _LOG_TYPE_CLASS = { dispatch: 'log-dispatch', success: 'log-success', warn: 'log-warn', fail: 'log-fail' };
 function _smgmtLiveLogLinesHtml(logLines) {
   if (!logLines || logLines.length === 0) {
     return '<div class="smgmt-log-line" style="color:var(--text-sub)">Waiting for log…</div>';
   }
-  return logLines.map(l =>
-    `<div class="smgmt-log-line">` +
-    `<span class="smgmt-log-time">${escHtml(l.timestamp)}</span>` +
-    `<span class="smgmt-log-msg">${escHtml(l.message)}</span>` +
-    `</div>`
-  ).join('');
+  return logLines.map(l => {
+    const cls = _LOG_TYPE_CLASS[l.type] || '';
+    const tsHtml = l.timestamp && l.timestamp !== '—'
+      ? `<span class="smgmt-log-time">${escHtml(l.timestamp)}</span>` : '';
+    return `<div class="smgmt-log-line${cls ? ' ' + cls : ''}">${tsHtml}<span class="smgmt-log-msg">${escHtml(l.message)}</span></div>`;
+  }).join('');
 }
 
 /** Update the live log panel for a running sprint card (header agent info + log stream). */
@@ -9525,8 +9579,7 @@ function _smgmtLiveLogPatch(label, live) {
   const agentEl  = document.getElementById(`smgmt-live-agent-${label}`);
   const streamEl = document.getElementById(`smgmt-live-log-stream-${label}`);
   if (agentEl) {
-    const agent = live.active_agent;
-    agentEl.textContent = agent ? `${agent.name.toUpperCase()} · pid ${agent.pid}` : '';
+    agentEl.innerHTML = _smgmtLiveAgentBadgesHtml(live);
   }
   if (streamEl) {
     streamEl.innerHTML = _smgmtLiveLogLinesHtml(live.recent_log_lines || []);
@@ -9603,6 +9656,19 @@ function _smgmtAgentTagClass(role) {
   return 'unknown-class';
 }
 
+/** Styled agent badge(s) + PID text for the live log bar. */
+function _smgmtLiveAgentBadgesHtml(live) {
+  if (!live) return '';
+  const agents = live.active_agents || (live.active_agent ? [live.active_agent] : []);
+  if (!agents.length) return '';
+  const badges = agents.map(a =>
+    `<span class="smgmt-log-agent-tag ${_smgmtAgentTagClass(a.name)}">${escHtml(a.name ? a.name.toUpperCase() : '?')}</span>`
+  ).join(' ');
+  const pids = agents.map(a => a.pid).filter(Boolean);
+  const pidHtml = pids.length ? `<span class="smgmt-log-pid">pid ${escHtml(pids.join(' / '))}</span>` : '';
+  return badges + pidHtml;
+}
+
 /** Patch live stat strip + progress bar + ticket indicators in place (no full re-render). */
 function _smgmtLivePatch(label, live) {
   const card = document.getElementById(`smgmt-card-${label}`);
@@ -9626,17 +9692,17 @@ function _smgmtLivePatch(label, live) {
   const timeEl    = document.getElementById(`smgmt-rs-time-${label}`);
   const progEl    = document.getElementById(`smgmt-rs-prog-${label}`);
 
-  if (doneEl)    { doneEl.textContent = String(doneCount); }
+  if (doneEl)    { doneEl.textContent = `${doneCount} DONE`; }
   if (failedEl)  {
-    failedEl.textContent = String(failedCount);
-    failedEl.className = `rsnum ${failedCount > 0 ? 'red' : 'muted'}`;
+    failedEl.textContent = `${failedCount} FAILED`;
+    failedEl.className = `oc-fail${failedCount > 0 ? '' : ' muted'}`;
   }
-  if (skippedEl) { skippedEl.textContent = String(skippedCount); }
-  if (estEl)     { estEl.textContent = estRemMins != null ? estRemMins + 'm' : '—'; }
-  if (timeEl)    {
-    timeEl.innerHTML = `<i class="ti ti-clock" style="font-size:12px;"></i> ${_fmtRunningTime(timeSpentSec)}`;
-  }
-  if (progEl)    { progEl.style.width = pct + '%'; }
+  if (skippedEl) { skippedEl.textContent = `${skippedCount} SKIPPED`; }
+  if (estEl)     { estEl.textContent = estRemMins != null ? `↩ ${estRemMins}m EST. REMAINING` : '↩ EST. REMAINING'; }
+  if (timeEl)    { timeEl.textContent = _fmtRunningTime(timeSpentSec); }
+
+  const elapsedEl = document.getElementById(`smgmt-elapsed-${label}`);
+  if (elapsedEl) { elapsedEl.textContent = timeSpentSec > 0 ? `elapsed ${_fmtRunningTime(timeSpentSec)}` : ''; }
 
   // Update running badge X/Y ratio (sprint-26 parity, Gap 5)
   const badgeEl = document.getElementById(`smgmt-running-badge-${label}`);
@@ -9695,11 +9761,12 @@ function _smgmtLivePatch(label, live) {
     const liveStatus = liveIss ? liveIss.status : null;
     const agentStatus = liveIss ? liveIss.agent_status : null;
 
+    const isActive = (agentStatus && (agentStatus.endsWith('_running') || agentStatus.endsWith('_dispatched')));
     if (liveStatus === 'done') {
       indicatorEl.innerHTML = '<div class="circle-done">&#10003;</div>';
     } else if (agentStatus === 'failed' || liveStatus === 'skipped') {
       indicatorEl.innerHTML = '<div class="circle-failed">&#10005;</div>';
-    } else if (liveStatus === 'in-progress' || agentStatus === 'running' || (currentTicket && num === currentTicket.number)) {
+    } else if (liveStatus === 'in-progress' || isActive || (currentTicket && num === currentTicket.number)) {
       indicatorEl.innerHTML = '<div class="ring"></div>';
     } else {
       indicatorEl.innerHTML = '<div class="circle-pending"></div>';
@@ -9957,7 +10024,7 @@ function toggleTicketRow(stateKey, n) {
   }
 }
 
-function _smgmtTicketRowHtml(ticket, label) {
+function _smgmtTicketRowHtml(ticket, label, elapsedSecs = null) {
   const hasRework = (ticket.labels || []).some(l => l.name === 'need-rework' || l.name === 'needs-rework');
   const statusClass = hasRework ? 'smgmt-status-need-rework' : ({
     'backlog':      'smgmt-status-backlog',
@@ -10029,6 +10096,8 @@ function _smgmtTicketRowHtml(ticket, label) {
          rel="noopener" draggable="false" onclick="event.stopPropagation()">#${ticket.number}</a>
       <span class="smgmt-ticket-title" title="${escHtml(ticket.title)}">${escHtml(ticket.title)}</span>
       ${sizePillHtml}${staleBadgeHtml}${estimateBadgeHtml}${riskFlagIconsHtml}${schedDepHtml}${reEstBtnHtml}
+      ${hasRework ? '<span class="smgmt-lbl-rejected">TESTER REJECTED</span>' : ''}
+      ${elapsedSecs != null ? `<span class="smgmt-ticket-elapsed">${_fmtRunningTime(elapsedSecs)}</span>` : ''}
       <span class="smgmt-ticket-status ${statusClass}">${escHtml(statusLabel)}</span>
       <button class="btn-view-log" tabindex="0" title="View issue log"
               onclick="event.stopPropagation();openLvIssueLog(${ticket.number},'${sk}',_smgmtRepo()||'')">
@@ -10051,9 +10120,9 @@ function _smgmtTicketRowHtml(ticket, label) {
         <span class="ex-exec-val">—</span>
       </div>
       <div class="ex-actions">
-        <button class="ex-btn" onclick="event.stopPropagation()">Re-estimate</button>
-        <button class="ex-btn" onclick="event.stopPropagation()">Move to sprint</button>
-        <button class="ex-btn ex-btn-danger" onclick="event.stopPropagation()">Close ticket</button>
+        <button class="ex-btn" onclick="event.stopPropagation();_smgmtReEstimate(${ticket.number},this)"><i class="ti ti-sparkles" style="font-size:12px"></i> Re-estimate</button>
+        <button class="ex-btn" onclick="event.stopPropagation();_smgmtRowMenuOpen(event,${ticket.number},'${sk}',${hasEstimate})"><i class="ti ti-arrow-right" style="font-size:12px"></i> Move to sprint</button>
+        <button class="ex-btn ex-btn-danger" onclick="event.stopPropagation();_smgmtCloseIssueOpen(${ticket.number})"><i class="ti ti-x" style="font-size:12px"></i> Close ticket</button>
       </div>
     </div>`;
 }
@@ -10639,6 +10708,24 @@ function smgmtRunSprint(label) {
   _pfOpen(label);
 }
 
+async function smgmtCancelSprint(label) {
+  const repo = _smgmtRepo();
+  if (!repo) return;
+  if (!confirm(`Cancel sprint ${sprintLabelDisplay(label)}? The sprint will stop and tickets will not be modified.`)) return;
+  try {
+    const res = await fetch(`/api/sprints/run/${encodeURIComponent(label)}?project=${encodeURIComponent(repo)}`, { method: 'DELETE' });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      _smgmtShowToast(`Cancel failed: ${err.detail || res.status}`);
+    } else {
+      _smgmtShowToast(`Sprint ${sprintLabelDisplay(label)} cancel signal sent`);
+      setTimeout(() => loadSprintMgmt(), 2000);
+    }
+  } catch (e) {
+    _smgmtShowToast(`Cancel failed: ${e.message}`);
+  }
+}
+
 // ── Run Sprint preflight modal (issue #448) ─────────────────────────────────
 
 let _pfCurrentLabel = null;
@@ -11196,7 +11283,7 @@ async function smgmtRerunSprint(label) {
   document.getElementById('rr-error').classList.add('hidden');
   document.getElementById('rr-error').textContent = '';
   const confirmBtn = document.getElementById('rr-confirm-btn');
-  if (confirmBtn) { confirmBtn.disabled = true; confirmBtn.textContent = 'Create sprint and run'; }
+  if (confirmBtn) { confirmBtn.disabled = true; confirmBtn.textContent = 'Create sprint'; }
   _rrOpen();
 
   try {
@@ -11209,7 +11296,7 @@ async function smgmtRerunSprint(label) {
     _rrVersionedLabel = preview.suggested_versioned_label;
     document.getElementById('rr-modal-title').textContent =
       `Re-run ${sprintLabelDisplay(label)} as ${sprintLabelDisplay(_rrVersionedLabel)}?`;
-    if (confirmBtn) confirmBtn.textContent = `Create ${sprintLabelDisplay(_rrVersionedLabel)} and Run`;
+    if (confirmBtn) confirmBtn.textContent = `Create ${sprintLabelDisplay(_rrVersionedLabel)}`;
 
     const listEl = document.getElementById('rr-ticket-list');
     if ((preview.tickets || []).length === 0) {
@@ -11247,7 +11334,7 @@ async function _rrConfirm() {
   if (ticketNumbers.length === 0) return;
 
   const confirmBtn = document.getElementById('rr-confirm-btn');
-  if (confirmBtn) { confirmBtn.disabled = true; confirmBtn.textContent = 'Starting…'; }
+  if (confirmBtn) { confirmBtn.disabled = true; confirmBtn.textContent = 'Creating…'; }
 
   try {
     const res = await fetch(
@@ -11255,7 +11342,7 @@ async function _rrConfirm() {
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ticket_numbers: ticketNumbers, auto_run: true }),
+        body: JSON.stringify({ ticket_numbers: ticketNumbers, auto_run: false }),
       }
     );
     if (!res.ok) throw new Error(await res.text());
@@ -11264,16 +11351,16 @@ async function _rrConfirm() {
     delete _smgmtOutcomeCache[_rrLabel];
     const subLabel = data.sub_label ? sprintLabelDisplay(data.sub_label) : '';
     if (data.errors && data.errors.length > 0) {
-      _smgmtShowToast(`Re-run started with errors on ${subLabel}. Check labels manually.`);
+      _smgmtShowToast(`${subLabel} created with errors. Check labels manually.`);
     } else {
-      _smgmtShowToast(`Re-run started → ${subLabel}: ${ticketNumbers.length} ticket${ticketNumbers.length !== 1 ? 's' : ''} dispatched.`);
+      _smgmtShowToast(`${subLabel} created: ${ticketNumbers.length} ticket${ticketNumbers.length !== 1 ? 's' : ''} moved.`);
     }
     await loadSprintMgmt();
   } catch (e) {
     const errEl = document.getElementById('rr-error');
     errEl.textContent = 'Failed to re-run sprint: ' + e.message;
     errEl.classList.remove('hidden');
-    if (confirmBtn) { confirmBtn.disabled = false; confirmBtn.textContent = _rrVersionedLabel ? `Create ${sprintLabelDisplay(_rrVersionedLabel)} and Run` : 'Create sprint and run'; }
+    if (confirmBtn) { confirmBtn.disabled = false; confirmBtn.textContent = _rrVersionedLabel ? `Create ${sprintLabelDisplay(_rrVersionedLabel)}` : 'Create sprint'; }
   }
 }
 
@@ -11512,72 +11599,146 @@ async function _smgmtCleanupConfirm() {
 }
 // ───────────────────────────────────────────────────────────────────────────
 
+// ── Finish Sprint modal ───────────────────────────────────────────────────────
+
+let _fsLabel = null;
+let _fsPreview = null;
+
+function _fsOpen() {
+  _setBodyInert(['fs-backdrop', 'fs-modal']);
+  document.getElementById('fs-backdrop').classList.remove('hidden');
+  document.getElementById('fs-modal').classList.remove('hidden');
+}
+function _fsClose() {
+  document.getElementById('fs-backdrop').classList.add('hidden');
+  document.getElementById('fs-modal').classList.add('hidden');
+  _clearBodyInert();
+  _fsLabel = null;
+  _fsPreview = null;
+}
+function _fsCatClass(cat) {
+  if (cat === 'UAT')            return 'rr-cat-uat';
+  if (cat === 'SIT')            return 'rr-cat-sit';
+  if (cat === 'needs-rework')   return 'rr-cat-rework';
+  if (cat === 'sprint-summary') return 'rr-cat-summary';
+  return 'rr-cat-queued';
+}
+function _fsSelectAll(checked) {
+  document.querySelectorAll('#fs-ticket-list input[type=checkbox]').forEach(cb => { cb.checked = checked; });
+}
+
 async function smgmtFinishSprint(label) {
   const repo = _smgmtRepo();
   if (!repo) return;
-  const displayName = sprintLabelDisplay(label);
+  _fsLabel = label;
+  _fsPreview = null;
   const parts = repo.split('/');
   const owner = parts[0];
   const repoName = parts.slice(1).join('/');
 
-  let preview;
+  document.getElementById('fs-modal-title').textContent = `Finish ${sprintLabelDisplay(label)}?`;
+  document.getElementById('fs-loading').classList.remove('hidden');
+  document.getElementById('fs-content').classList.add('hidden');
+  document.getElementById('fs-error').classList.add('hidden');
+  document.getElementById('fs-error').textContent = '';
+  const confirmBtn = document.getElementById('fs-confirm-btn');
+  if (confirmBtn) { confirmBtn.disabled = true; confirmBtn.textContent = 'Finish Sprint'; }
+  _fsOpen();
+
   try {
     const res = await fetch(
       `/api/projects/${encodeURIComponent(owner)}/${encodeURIComponent(repoName)}/sprints/${encodeURIComponent(label)}/finish-preview`
     );
-    preview = await res.json();
-    if (!res.ok) { alert('Error: ' + (preview.detail || 'unknown error')); return; }
+    if (!res.ok) throw new Error(await res.text());
+    const preview = await res.json();
+    _fsPreview = preview;
+
+    if (preview.conflict_error) {
+      throw new Error(preview.conflict_error);
+    }
+
+    const listEl = document.getElementById('fs-ticket-list');
+    const allTickets = preview.all_tickets || [];
+    if (allTickets.length === 0) {
+      listEl.innerHTML = '<div style="padding:10px;color:var(--text-muted);font-size:13px">No open tickets in this sprint.</div>';
+    } else {
+      listEl.innerHTML = allTickets.map(t => {
+        const catClass = _fsCatClass(t.category);
+        const catLabel = t.category === 'sprint-summary' ? 'SUMMARY' : t.category.toUpperCase();
+        return `<label class="rr-ticket-row">
+          <input type="checkbox" checked data-issue="${t.number}" onchange="">
+          <span class="rr-ticket-num">#${t.number}</span>
+          <span class="rr-ticket-title" title="${escHtml(t.title)}">${escHtml(t.title)}</span>
+          <span class="rr-ticket-cat ${catClass}">${escHtml(catLabel)}</span>
+        </label>`;
+      }).join('');
+    }
+
+    const actionsEl = document.getElementById('fs-actions');
+    const actionRows = [];
+    if (preview.sprint_pr) {
+      actionRows.push(`<div class="fs-action-row"><i class="ti ti-git-merge"></i> Merge sprint PR
+        <a href="${escHtml(preview.sprint_pr.url)}" target="_blank" rel="noopener">#${preview.sprint_pr.number}</a></div>`);
+    }
+    actionRows.push('<div class="fs-action-row"><i class="ti ti-circle-check"></i> Close all selected tickets</div>');
+    actionRows.push('<div class="fs-action-row"><i class="ti ti-tag-off"></i> Remove sprint label</div>');
+    actionsEl.innerHTML = actionRows.join('');
+
+    document.getElementById('fs-loading').classList.add('hidden');
+    document.getElementById('fs-content').classList.remove('hidden');
+    if (confirmBtn) confirmBtn.disabled = false;
   } catch (e) {
-    alert('Failed to load preview: ' + e.message);
-    return;
+    document.getElementById('fs-loading').classList.add('hidden');
+    const errEl = document.getElementById('fs-error');
+    errEl.textContent = 'Failed to load preview: ' + e.message;
+    errEl.classList.remove('hidden');
   }
+}
 
-  if (preview.conflict_error) { alert(preview.conflict_error); return; }
+async function _fsConfirm() {
+  const repo = _smgmtRepo();
+  if (!_fsLabel || !repo || !_fsPreview) return;
+  const parts = repo.split('/');
+  const owner = parts[0];
+  const repoName = parts.slice(1).join('/');
 
-  const uatTickets = preview.uat_tickets || [];
-  const nonUatTickets = preview.non_uat_tickets || [];
-  const totalOpen = uatTickets.length + nonUatTickets.length;
+  const checkboxes = Array.from(document.querySelectorAll('#fs-ticket-list input[type=checkbox]'));
+  const selectedNums = checkboxes.filter(c => c.checked).map(c => parseInt(c.dataset.issue, 10));
 
-  let msg;
-  if (totalOpen === 0) {
-    msg = `Finish ${displayName}?\n\nNo open issues in this sprint.`;
-  } else if (nonUatTickets.length === 0) {
-    msg = `Finish ${displayName}?\n\nThis will close ${uatTickets.length} ticket${uatTickets.length !== 1 ? 's' : ''} currently in UAT (they've passed sprint-branch testing).`;
-  } else {
-    const createNote = preview.next_sprint_exists ? '' : ' (will be created)';
-    const nonUatList = nonUatTickets.map(t => `  #${t.number} [${t.status}] ${t.title}`).join('\n');
-    const uatLine = uatTickets.length > 0 ? `\n\n${uatTickets.length} UAT ticket${uatTickets.length !== 1 ? 's' : ''} will be closed as completed.` : '';
-    msg = `Finish ${displayName}?\n\n${nonUatTickets.length} ticket${nonUatTickets.length !== 1 ? 's' : ''} not in UAT will be moved to ${preview.next_sprint_label}${createNote}:\n${nonUatList}${uatLine}`;
-  }
-
-  if (!confirm(msg)) return;
-
-  _smgmtBoardLock(`Finishing ${displayName}…`);
+  const confirmBtn = document.getElementById('fs-confirm-btn');
+  if (confirmBtn) { confirmBtn.disabled = true; confirmBtn.textContent = 'Finishing…'; }
 
   try {
     const res = await fetch(
-      `/api/projects/${encodeURIComponent(owner)}/${encodeURIComponent(repoName)}/sprints/${encodeURIComponent(label)}/finish`,
+      `/api/projects/${encodeURIComponent(owner)}/${encodeURIComponent(repoName)}/sprints/${encodeURIComponent(_fsLabel)}/finish`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ confirmed: true, move_non_uat_to: preview.next_sprint_label }),
+        body: JSON.stringify({
+          confirmed: true,
+          move_non_uat_to: _fsPreview.next_sprint_label,
+          selected_ticket_numbers: selectedNums,
+          merge_pr: !!_fsPreview.sprint_pr,
+          sprint_pr_url: _fsPreview.sprint_pr ? _fsPreview.sprint_pr.url : null,
+        }),
       }
     );
+    if (!res.ok) throw new Error(await res.text());
     const data = await res.json();
+    _fsClose();
     if (data.errors && data.errors.length > 0) {
-      alert(`Finished with errors — closed ${data.closed}, moved ${data.moved}: ${data.errors.join('; ')}`);
+      _smgmtShowToast(`Finished with errors — ${data.closed} closed, ${data.moved} moved.`);
     } else {
-      const moved = data.moved || 0;
-      const closed = data.closed || 0;
-      let toastMsg = `Sprint finished — ${closed} UAT ticket${closed !== 1 ? 's' : ''} closed`;
-      if (moved > 0) toastMsg += `, ${moved} ticket${moved !== 1 ? 's' : ''} moved to ${data.next_sprint_label}`;
-      _smgmtShowToast(toastMsg + '.');
+      let msg = `${sprintLabelDisplay(_fsLabel || '')} finished — ${data.closed} closed`;
+      if (data.moved > 0) msg += `, ${data.moved} moved to ${data.next_sprint_label}`;
+      _smgmtShowToast(msg + '.');
     }
     await loadSprintMgmt();
   } catch (e) {
-    alert('Failed to finish sprint: ' + e.message);
-  } finally {
-    _smgmtBoardUnlock();
+    const errEl = document.getElementById('fs-error');
+    errEl.textContent = 'Failed to finish sprint: ' + e.message;
+    errEl.classList.remove('hidden');
+    if (confirmBtn) { confirmBtn.disabled = false; confirmBtn.textContent = 'Finish Sprint'; }
   }
 }
 
@@ -13887,6 +14048,11 @@ function _setupModals() {
     _nsUpdateHint();
   });
   document.getElementById('ns-count').addEventListener('change', _nsUpdateHint);
+
+  document.getElementById('fs-close-btn').addEventListener('click', _fsClose);
+  document.getElementById('fs-cancel-btn').addEventListener('click', _fsClose);
+  document.getElementById('fs-backdrop').addEventListener('click', _fsClose);
+  document.getElementById('fs-confirm-btn').addEventListener('click', _fsConfirm);
 
   document.getElementById('rr-close-btn').addEventListener('click', _rrClose);
   document.getElementById('rr-cancel-btn').addEventListener('click', _rrClose);
@@ -18299,6 +18465,33 @@ document.addEventListener('keydown', function(e) {
     <button class="btn-primary" id="lv-refresh-btn" onclick="_lvRefresh()" type="button">
       <i class="ti ti-refresh"></i> Refresh
     </button>
+  </div>
+</div>
+
+<!-- ── Finish Sprint modal ── -->
+<div class="modal-backdrop hidden" id="fs-backdrop"></div>
+<div class="modal hidden" id="fs-modal"
+     role="dialog" aria-modal="true" aria-labelledby="fs-modal-title">
+  <div class="modal-header">
+    <span class="modal-title" id="fs-modal-title">Finish Sprint?</span>
+    <button class="modal-close" id="fs-close-btn" aria-label="Close">&times;</button>
+  </div>
+  <div class="modal-body">
+    <div id="fs-loading" style="color:var(--text-muted);padding:8px 0">Loading preview…</div>
+    <div id="fs-content" class="hidden">
+      <div class="rr-controls">
+        <span style="font-size:13px;color:var(--text-secondary)">Select tickets to close:</span>
+        <a onclick="_fsSelectAll(true)">Select all</a>
+        <a onclick="_fsSelectAll(false)">Select none</a>
+      </div>
+      <div class="rr-ticket-list" id="fs-ticket-list"></div>
+      <div class="fs-actions" id="fs-actions"></div>
+    </div>
+    <div class="modal-error hidden" id="fs-error"></div>
+  </div>
+  <div class="modal-footer">
+    <button class="btn-ghost" id="fs-cancel-btn" type="button">Cancel</button>
+    <button class="btn-primary" id="fs-confirm-btn" type="button" disabled>Finish Sprint</button>
   </div>
 </div>
 

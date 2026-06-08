@@ -113,6 +113,21 @@ except Exception:
     _sync_projects_module = None  # type: ignore[assignment]
     _SYNC_PROJECTS_AVAILABLE = False
 
+try:
+    from services.sprint_manager.settings_sync import (
+        load_local_snapshot as _ss_load_local,
+        load_neon_snapshot as _ss_load_neon,
+        compute_diff as _ss_compute_diff,
+        is_already_in_sync as _ss_already_in_sync,
+        apply_upload as _ss_apply_upload,
+        apply_fetch as _ss_apply_fetch,
+        get_sync_status as _ss_get_status,
+        save_sync_status as _ss_save_status,
+    )
+    _SYNC_SETTINGS_AVAILABLE = True
+except Exception:
+    _SYNC_SETTINGS_AVAILABLE = False
+
 # Per-machine kill switch for the Neon/Postgres layer. While its schema is
 # unmigrated, the writes error out (e.g. relation "projects" does not exist) and
 # block sprint creation. Setting COMMANDER_DISABLE_NEON makes the dashboard run
@@ -1954,6 +1969,87 @@ def put_project_settings(slug: str, body: dict):
     return build_effective_response(effective)
 
 
+# ── Settings sync (issue #644) ───────────────────────────────────────────────
+
+
+@app.get("/api/settings/sync/status")
+def get_settings_sync_status():
+    """Return last-synced timestamp for settings sync.
+
+    Returns {"last_synced": str|null} where str is ISO 8601 UTC.
+    """
+    ts = _ss_get_status(_SYNC_STATUS_FILE) if _SYNC_SETTINGS_AVAILABLE else None
+    return {"last_synced": ts}
+
+
+class _SyncDiffBody(BaseModel):
+    direction: str  # "upload" or "fetch"
+
+
+@app.post("/api/settings/sync/diff")
+def post_settings_sync_diff(body: _SyncDiffBody):
+    """Compute a settings diff without applying any writes.
+
+    direction="upload" — compares local files → Neon
+    direction="fetch"  — compares Neon → local files
+
+    Returns {"diff": [...], "already_in_sync": bool}.
+    Each diff item has: status ("added"|"removed"|"unchanged"), key, value.
+    """
+    if body.direction not in ("upload", "fetch"):
+        raise HTTPException(status_code=400, detail="direction must be 'upload' or 'fetch'")
+    if not _SYNC_SETTINGS_AVAILABLE:
+        raise HTTPException(status_code=503, detail="settings sync module unavailable")
+
+    try:
+        local_snap = _ss_load_local(_PROJECTS_FILE, sprint_yaml_path=_SPRINT_YAML_PATH)
+        neon_snap = _ss_load_neon(_settings_repo)
+        diff = _ss_compute_diff(local_snap, neon_snap, body.direction)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    return {
+        "diff": diff,
+        "already_in_sync": _ss_already_in_sync(diff),
+    }
+
+
+class _SyncCommitBody(BaseModel):
+    direction: str  # "upload" or "fetch"
+
+
+@app.post("/api/settings/sync/commit")
+def post_settings_sync_commit(body: _SyncCommitBody):
+    """Apply a settings sync after user confirms the diff preview.
+
+    direction="upload" — writes changed values to Neon; local files unchanged
+    direction="fetch"  — writes changed values to local files; Neon unchanged
+
+    Returns {"ok": true, "synced_at": str (ISO 8601 UTC)}.
+    """
+    if body.direction not in ("upload", "fetch"):
+        raise HTTPException(status_code=400, detail="direction must be 'upload' or 'fetch'")
+    if not _SYNC_SETTINGS_AVAILABLE:
+        raise HTTPException(status_code=503, detail="settings sync module unavailable")
+
+    try:
+        local_snap = _ss_load_local(_PROJECTS_FILE, sprint_yaml_path=_SPRINT_YAML_PATH)
+        neon_snap = _ss_load_neon(_settings_repo)
+        diff = _ss_compute_diff(local_snap, neon_snap, body.direction)
+
+        if body.direction == "upload":
+            _ss_apply_upload(diff, _settings_repo)
+        else:
+            _ss_apply_fetch(diff, _PROJECTS_FILE, _SPRINT_YAML_PATH)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    synced_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    _ss_save_status(_SYNC_STATUS_FILE, synced_at)
+
+    return {"ok": True, "synced_at": synced_at}
+
+
 # ── Filesystem browser (issue #643) ──────────────────────────────────────────
 
 _FS_BROWSE_ROOT: Path = Path.home()
@@ -3594,6 +3690,25 @@ def run_sprint(request: Request, body: SprintRunBody):
 # ── Sprint Management endpoints (issue #95) ──────────────────────────────────
 
 _PROJECTS_BASE = Path.home() / "dev"
+
+# Sync status file — persists last-synced timestamp
+_SYNC_STATUS_FILE = Path(__file__).parent.parent.parent.parent / ".commander" / "settings.last_synced"
+
+# Sprint.yaml path discovery — walk up from the server file
+def _find_sprint_yaml() -> Optional[Path]:
+    current = Path(__file__).resolve().parent
+    while True:
+        candidate = current / ".commander" / "sprint.yaml"
+        if candidate.exists():
+            return candidate
+        parent = current.parent
+        if parent == current:
+            break
+        current = parent
+    return None
+
+_SPRINT_YAML_PATH: Optional[Path] = _find_sprint_yaml()
+_PROJECTS_FILE: Path = projects_module.PROJECTS_FILE
 
 
 def _project_root_path(repo: str) -> Path:

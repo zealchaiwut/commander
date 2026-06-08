@@ -8619,11 +8619,9 @@ async def _bulk_flusher(job_id: str) -> None:
             _persist_bulk_job(job)
             await _broadcast_bulk_event(job_id, {"type": "ticket_update", "ticket": dict(ticket)})
 
-            # Auto-size the draft as soon as it's ready, so estimates inform the
-            # sprint choice before posting (Estimate stage). Runs in the
-            # background — the size label is materialised onto the issue at post.
-            if ticket["state"] == "draft_ready" and ticket.get("estimate_state") != "sized":
-                asyncio.create_task(_run_bulk_draft_estimator_for_ticket(job_id, flush_idx))
+            # Estimation is NOT auto-started here. The user triggers it at the
+            # Estimate stage (POST /estimate-draft), so drafting never blocks on
+            # the estimator and the "continue" button is always available.
 
             flush_idx += 1
 
@@ -9356,6 +9354,16 @@ async def bulk_post_selected(job_id: str, body: BulkPostSelectedBody):
                 await _broadcast_bulk_event(job_id, {"type": "ticket_update", "ticket": dict(t)})
                 continue
 
+            # Never create a blank issue (defense-in-depth alongside the
+            # frontend's title validation).
+            if not (t.get("title") or "").strip():
+                t["state"] = "failed"
+                t["error"] = "Refusing to post a ticket with no title."
+                t["finished_at"] = datetime.now(timezone.utc).isoformat()
+                _persist_bulk_job(job)
+                await _broadcast_bulk_event(job_id, {"type": "ticket_update", "ticket": dict(t)})
+                continue
+
             created_issue_number: int | None = None
             pre_estimate = t.get("estimate") if t.get("estimate_state") == "sized" else None
             try:
@@ -9443,7 +9451,19 @@ async def _post_ticket_body_to_github(job_id: str, index: int, body_text: str) -
     title = t.get("title") or ""
     if not title:
         first_line = (body_text.strip().splitlines() or [""])[0]
-        title = first_line.lstrip("# ").strip()[:120] or "Untitled ticket"
+        title = first_line.lstrip("# ").strip()[:120]
+
+    # Never create an empty/"Untitled" GitHub issue: a retry on a draft with no
+    # body used to silently post a blank ticket. Refuse instead and leave the
+    # ticket failed so the user can regenerate it.
+    if not (body_text or "").strip() and not title:
+        t["state"] = "failed"
+        t["error"] = "Refusing to post an empty ticket — regenerate the draft before retrying."
+        t["last_error"] = t["error"]
+        t["finished_at"] = datetime.now(timezone.utc).isoformat()
+        _persist_bulk_job(job)
+        await _broadcast_bulk_event(job_id, {"type": "ticket_update", "ticket": dict(t)})
+        return
 
     # Body size guard (issue #261)
     if len(body_text) > _BC_BODY_SIZE_THRESHOLD:

@@ -715,9 +715,10 @@ class FailureCategory:
 
 
 # Logic failures signal bad code/spec and warrant needs-rework label.
-# Infrastructure failures (CRASH, HANG, RETRY_EXHAUSTED) are transient and do not.
+# Infrastructure failures (CRASH, HANG, RETRY_EXHAUSTED, TESTER_REJECTED) are transient and do not.
+# TESTER_REJECTED means tests passed (exit 0) but merge was not detected — a process/infra issue,
+# not a code quality problem, so it must not apply needs-rework.
 _LOGIC_FAILURE_CATEGORIES: frozenset[str] = frozenset({
-    FailureCategory.TESTER_REJECTED,
     FailureCategory.CODER_NO_WORK,
     FailureCategory.MERGE_CONFLICT,
     FailureCategory.LINT_FAIL,

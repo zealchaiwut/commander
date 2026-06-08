@@ -3954,12 +3954,81 @@
     }
     #tickets-toast.success { border-color: var(--green); color: var(--green); }
 
-    /* ── Settings modal (issue #396) ── */
-    .sm-modal { width: min(420px, calc(100vw - 32px)); }
+    /* ── Global Settings screen (issue #641) ── */
+    .sm-modal {
+      width: min(900px, calc(100vw - 32px));
+      max-height: calc(100vh - 48px);
+      display: flex; flex-direction: column;
+    }
+    .sm-modal .modal-body { flex: 1; min-height: 0; overflow-y: auto; padding: 20px 24px; }
+    .gss-grid { display: flex; flex-direction: column; gap: 16px; }
+    .gss-card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 10px; overflow: hidden;
+    }
+    .gss-card-head {
+      padding: 12px 16px; border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; gap: 9px;
+    }
+    .gss-card-title { font-size: 14px; font-weight: 700; }
+    .gss-card-sub { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+    .gss-card-body { padding: 14px 16px; }
+    .gss-row {
+      display: flex; align-items: center; gap: 14px;
+      padding: 9px 0; border-top: 1px solid var(--border);
+    }
+    .gss-row:first-child { border-top: none; }
+    .gss-label { min-width: 170px; font-size: 13px; color: var(--text); flex-shrink: 0; }
+    .gss-label .hint { display: block; font-size: 11px; color: var(--text-sub); font-weight: 400; margin-top: 2px; }
+    .gss-control { flex: 1; display: flex; align-items: center; gap: 10px; }
+    .gss-inp, .gss-select {
+      border: 1px solid var(--border); background: var(--surface-2); color: var(--text);
+      padding: 6px 10px; border-radius: 6px; font-size: 13px; font-family: inherit;
+    }
+    .gss-inp:focus, .gss-select:focus { outline: none; border-color: var(--blue); box-shadow: 0 0 0 3px var(--blue-bg); }
+    .gss-inp-num { width: 74px; font-family: var(--mono, monospace); text-align: right; }
+    .gss-inp-path { flex: 1; font-family: var(--mono, monospace); font-size: 12px; }
+    .gss-ro { color: var(--text-muted); font-family: var(--mono, monospace); font-size: 12px; }
+    .gss-est-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .gss-est-table th {
+      text-align: left; font-size: 10px; font-weight: 700; letter-spacing: .06em;
+      text-transform: uppercase; color: var(--text-sub);
+      padding: 6px 10px; border-bottom: 1px solid var(--border);
+    }
+    .gss-est-table td { padding: 8px 10px; border-bottom: 1px solid var(--border); }
+    .gss-est-table tr:last-child td { border-bottom: none; }
+    .gss-sz-badge { font-family: var(--mono, monospace); font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 4px; }
+    .gss-sz-S { background: var(--green-bg, #dcfce7); color: var(--green, #16a34a); }
+    .gss-sz-M { background: var(--blue-bg, #dbeafe); color: var(--blue, #2563eb); }
+    .gss-sz-L { background: var(--amber-bg, #fef3c7); color: var(--amber, #d97706); }
+    .gss-sz-XL { background: var(--red-bg, #fee2e2); color: var(--red, #dc2626); }
+    .gss-secret-row {
+      display: flex; align-items: center; gap: 10px;
+      padding: 9px 0; border-top: 1px solid var(--border); font-size: 13px;
+    }
+    .gss-secret-row:first-child { border-top: none; }
+    .gss-secret-name { min-width: 180px; font-family: var(--mono, monospace); font-size: 12px; color: var(--text); flex-shrink: 0; }
+    .gss-secret-badge {
+      display: inline-flex; align-items: center; gap: 5px;
+      font-size: 12px; font-family: var(--mono, monospace); font-weight: 600;
+      padding: 3px 10px; border-radius: 5px;
+    }
+    .gss-secret-badge--set { background: var(--green-bg, #dcfce7); color: var(--green, #16a34a); }
+    .gss-secret-badge--unset { background: var(--surface-2); color: var(--text-sub); }
+    .gss-save-bar { display: flex; justify-content: flex-end; align-items: center; gap: 10px; margin-top: 4px; }
+    .gss-feedback { font-size: 12px; color: var(--green, #16a34a); opacity: 0; transition: opacity .3s; }
+    .gss-feedback.visible { opacity: 1; }
+    .gss-feedback.error { color: var(--red, #dc2626); }
+    .gss-loading { padding: 32px; text-align: center; color: var(--text-muted); font-size: 13px; }
+    .gss-error-banner {
+      margin: 16px; padding: 12px 16px; border-radius: 8px;
+      background: var(--red-bg, #fee2e2); color: var(--red, #dc2626);
+      font-size: 13px; display: flex; align-items: center; gap: 8px;
+    }
+    /* legacy — kept for backward compat if any code still references */
     .sm-agent-row {
       display: flex; align-items: center; justify-content: space-between;
-      padding: 10px 0;
-      border-bottom: 1px solid var(--border);
+      padding: 10px 0; border-bottom: 1px solid var(--border);
     }
     .sm-agent-row:last-child { border-bottom: none; }
     .sm-agent-name { font-size: 13px; font-weight: 500; color: var(--text); }
@@ -5616,6 +5685,18 @@
         <select class="settings-select" id="settings-default-repo"
                 onchange="settingsSaveDefaultRepo(this.value)"></select>
         <span class="settings-hint">Pre-selects the repo in the Bulk Create modal</span>
+      </div>
+    </div>
+
+    <div class="settings-section">
+      <div class="settings-section-title">Agent Models</div>
+      <div class="settings-row">
+        <span class="settings-label">Model assignments</span>
+        <span style="font-size:12px;color:var(--text-muted);">configured globally</span>
+        <button class="btn-ghost" style="font-size:12px;padding:4px 10px;margin-left:8px;"
+                onclick="closeSettingsPanel();openSettingsModal();" type="button">
+          <i class="ti ti-arrow-up-right" style="font-size:13px;"></i> Global settings
+        </button>
       </div>
     </div>
 
@@ -16151,15 +16232,22 @@ document.addEventListener('keydown', function(e) {
 });
 
 // ── Settings modal (issue #396) ──────────────────────────────────────────────
+// ── Global Settings screen (issue #641) ──────────────────────────────────────
+
 const SM_AGENTS = [
-  { key: 'ba',               label: 'BA',               hint: 'Business Analyst',        default: 'claude-sonnet-4-6' },
-  { key: 'coder',            label: 'Coder',            hint: 'Feature implementation',   default: 'claude-sonnet-4-6' },
-  { key: 'tester',           label: 'Tester',           hint: 'Test runner & verifier',   default: 'claude-haiku-4-5'  },
-  { key: 'estimator',        label: 'Estimator',        hint: 'Per-issue sizing',         default: 'claude-haiku-4-5'  },
-  { key: 'sprint-estimator', label: 'Sprint Estimator', hint: 'Bulk sprint sizing',       default: 'claude-sonnet-4-6' },
-  { key: 'sprint-review',    label: 'Sprint Review',    hint: 'Sprint report generation', default: 'claude-haiku-4-5'  },
+  { key: 'ba',               label: 'BA',               hint: 'Business Analyst',        default: 'claude-sonnet-4-6', settingsKey: 'default_model'   },
+  { key: 'coder',            label: 'Coder',            hint: 'Feature implementation',   default: 'claude-sonnet-4-6', settingsKey: 'coder_model'     },
+  { key: 'tester',           label: 'Tester',           hint: 'Test runner & verifier',   default: 'claude-haiku-4-5',  settingsKey: 'tester_model'    },
+  { key: 'estimator',        label: 'Estimator',        hint: 'Per-issue sizing',         default: 'claude-haiku-4-5',  settingsKey: 'estimator_model' },
+  { key: 'sprint-estimator', label: 'Sprint Estimator', hint: 'Bulk sprint sizing',       default: 'claude-sonnet-4-6', settingsKey: null              },
+  { key: 'sprint-review',    label: 'Sprint Review',    hint: 'Sprint report generation', default: 'claude-haiku-4-5',  settingsKey: null              },
 ];
-const SM_MODELS = ['claude-sonnet-4-6', 'claude-opus-4-8', 'claude-haiku-4-5'];
+const SM_MODELS = [
+  'claude-sonnet-4-6',
+  'claude-opus-4-8',
+  'claude-haiku-4-5-20251001',
+  'claude-haiku-4-5',
+];
 const SM_STORAGE_KEY = 'commander_agent_models';
 
 function _smLoadModels() {
@@ -16173,29 +16261,209 @@ function getAgentModel(agentKey) {
   return saved[agentKey] || (agent ? agent.default : SM_MODELS[0]);
 }
 
-function openSettingsModal() {
-  const saved = _smLoadModels();
-  const rows = SM_AGENTS.map(a => {
-    const current = saved[a.key] || a.default;
-    const opts = SM_MODELS.map(m =>
-      `<option value="${m}"${m === current ? ' selected' : ''}>${m}</option>`
-    ).join('');
-    return `<div class="sm-agent-row">
-      <div>
-        <div class="sm-agent-name">${a.label}</div>
-        <div class="sm-agent-label">${a.hint}</div>
-      </div>
-      <select class="sm-model-select" data-agent="${a.key}" onchange="_smOnChange(this)">${opts}</select>
+let _gssData = null;
+
+function _gssModelOpts(current) {
+  return SM_MODELS.map(m =>
+    `<option value="${m}"${m === current ? ' selected' : ''}>${m}</option>`
+  ).join('');
+}
+
+function _gssRender(data) {
+  _gssData = data;
+
+  const modelRows = SM_AGENTS
+    .filter(a => a.settingsKey)
+    .map(a => {
+      const current = data[a.settingsKey] || a.default;
+      return `<div class="gss-row">
+        <div class="gss-label">${a.label}<span class="hint">${a.hint}</span></div>
+        <div class="gss-control">
+          <select class="gss-select gss-inp" data-gss-key="${a.settingsKey}">
+            ${_gssModelOpts(current)}
+          </select>
+        </div>
+      </div>`;
+    }).join('');
+
+  const EST_SIZES = [
+    { key: 'estimation_s_minutes',  label: 'S',  cls: 'gss-sz-S'  },
+    { key: 'estimation_m_minutes',  label: 'M',  cls: 'gss-sz-M'  },
+    { key: 'estimation_l_minutes',  label: 'L',  cls: 'gss-sz-L'  },
+    { key: 'estimation_xl_minutes', label: 'XL', cls: 'gss-sz-XL' },
+  ];
+  const estRows = EST_SIZES.map(s => `
+    <tr>
+      <td><span class="gss-sz-badge ${s.cls}">${s.label}</span></td>
+      <td><input class="gss-inp gss-inp-num" type="number" min="1" data-gss-key="${s.key}" value="${data[s.key] ?? ''}"> <span class="gss-ro">min</span></td>
+    </tr>`).join('');
+
+  const bufferRows = `
+    <div class="gss-row">
+      <div class="gss-label">Buffer<span class="hint">added to every estimate</span></div>
+      <div class="gss-control"><input class="gss-inp gss-inp-num" type="number" min="0" max="100" data-gss-key="estimation_buffer_pct" value="${data.estimation_buffer_pct ?? ''}"> <span class="gss-ro">%</span></div>
+    </div>
+    <div class="gss-row">
+      <div class="gss-label">Thin-AC buffer<span class="hint">used when AC is sparse</span></div>
+      <div class="gss-control"><input class="gss-inp gss-inp-num" type="number" min="0" max="100" data-gss-key="estimation_thin_ac_buffer_pct" value="${data.estimation_thin_ac_buffer_pct ?? ''}"> <span class="gss-ro">%</span></div>
+    </div>`;
+
+  const SECRETS = [
+    { key: 'github_token_set',  label: 'GITHUB_TOKEN'  },
+    { key: 'database_url_set',  label: 'DATABASE_URL'  },
+  ];
+  const secretRows = SECRETS.map(s => {
+    const isSet = !!data[s.key];
+    const badgeCls = isSet ? 'gss-secret-badge--set' : 'gss-secret-badge--unset';
+    const icon = isSet ? '&#x2713;' : '&#x2717;';
+    const text = isSet ? 'set' : 'not set';
+    return `<div class="gss-secret-row">
+      <span class="gss-secret-name">${s.label}</span>
+      <span class="gss-secret-badge ${badgeCls}">${icon} ${text}</span>
     </div>`;
   }).join('');
-  document.getElementById('sm-body').innerHTML = rows;
+
+  const html = `<div class="gss-grid">
+    <div class="gss-card">
+      <div class="gss-card-head">
+        <i class="ti ti-robot" style="color:var(--text-muted)"></i>
+        <div><div class="gss-card-title">Agent Models</div><div class="gss-card-sub">Model assigned to each agent role</div></div>
+      </div>
+      <div class="gss-card-body">${modelRows}</div>
+    </div>
+
+    <div class="gss-card">
+      <div class="gss-card-head">
+        <i class="ti ti-adjustments" style="color:var(--text-muted)"></i>
+        <div><div class="gss-card-title">Defaults</div><div class="gss-card-sub">Sprint and workflow defaults applied to all projects</div></div>
+      </div>
+      <div class="gss-card-body">
+        <div class="gss-row">
+          <div class="gss-label">Sprint duration<span class="hint">days</span></div>
+          <div class="gss-control"><input class="gss-inp gss-inp-num" type="number" min="1" data-gss-key="sprint_duration_days" value="${data.sprint_duration_days ?? ''}"> <span class="gss-ro">days</span></div>
+        </div>
+        <div class="gss-row">
+          <div class="gss-label">Default branch</div>
+          <div class="gss-control"><input class="gss-inp gss-inp-path" type="text" data-gss-key="default_branch" value="${data.default_branch ?? ''}" style="width:160px"></div>
+        </div>
+        <div class="gss-row">
+          <div class="gss-label">Bulk-create concurrency<span class="hint">parallel BA agents</span></div>
+          <div class="gss-control"><input class="gss-inp gss-inp-num" type="number" min="1" max="20" data-gss-key="bulk_create_concurrency" value="${data.bulk_create_concurrency ?? ''}"></div>
+        </div>
+        <div class="gss-row">
+          <div class="gss-label">Log level</div>
+          <div class="gss-control">
+            <select class="gss-select gss-inp" data-gss-key="log_level">
+              ${['DEBUG','INFO','WARNING','ERROR'].map(l => `<option${(data.log_level||'INFO')===l?' selected':''}>${l}</option>`).join('')}
+            </select>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="gss-card">
+      <div class="gss-card-head">
+        <i class="ti ti-ruler-measure" style="color:var(--text-muted)"></i>
+        <div><div class="gss-card-title">Estimation Defaults</div><div class="gss-card-sub">Size → time mapping used by the Estimator (global default; projects may override)</div></div>
+      </div>
+      <div class="gss-card-body">
+        <table class="gss-est-table">
+          <thead><tr><th style="width:80px">Size</th><th style="width:160px">Typical time</th></tr></thead>
+          <tbody>${estRows}</tbody>
+        </table>
+        <div style="margin-top:14px">${bufferRows}</div>
+      </div>
+    </div>
+
+    <div class="gss-card">
+      <div class="gss-card-head">
+        <i class="ti ti-lock" style="color:var(--text-muted)"></i>
+        <div><div class="gss-card-title">Secrets</div><div class="gss-card-sub">Presence indicators only — values are never shown or editable here</div></div>
+      </div>
+      <div class="gss-card-body">${secretRows}</div>
+    </div>
+  </div>`;
+
+  document.getElementById('sm-body').innerHTML = html;
+}
+
+async function openSettingsModal() {
   document.getElementById('sm-backdrop').classList.remove('hidden');
   document.getElementById('sm-modal').classList.remove('hidden');
+  document.getElementById('sm-body').innerHTML = '<div class="gss-loading"><i class="ti ti-loader-2" style="font-size:22px;"></i><br>Loading settings…</div>';
+  _gssHideFeedback();
+  try {
+    const resp = await fetch('/api/settings');
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+    _gssRender(data);
+  } catch (err) {
+    document.getElementById('sm-body').innerHTML =
+      `<div class="gss-error-banner"><i class="ti ti-alert-circle"></i> Failed to load settings: ${err.message}</div>`;
+  }
 }
 
 function closeSettingsModal() {
   document.getElementById('sm-backdrop').classList.add('hidden');
   document.getElementById('sm-modal').classList.add('hidden');
+  _gssData = null;
+}
+
+function _gssHideFeedback() {
+  const el = document.getElementById('gss-feedback');
+  if (el) { el.textContent = ''; el.className = 'gss-feedback'; }
+}
+
+async function _gssSave() {
+  const body = document.getElementById('sm-body');
+  const feedback = document.getElementById('gss-feedback');
+  const saveBtn = document.getElementById('gss-save-btn');
+
+  const inputs = body.querySelectorAll('[data-gss-key]');
+  const payload = {};
+  inputs.forEach(el => {
+    const key = el.dataset.gssKey;
+    const raw = el.value;
+    if (el.type === 'number') {
+      const n = parseInt(raw, 10);
+      if (!isNaN(n)) payload[key] = n;
+    } else {
+      if (raw.trim()) payload[key] = raw.trim();
+    }
+  });
+
+  if (saveBtn) saveBtn.disabled = true;
+  try {
+    const resp = await fetch('/api/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.detail || `HTTP ${resp.status}`);
+    }
+    const updated = await resp.json();
+    // Sync model selections back to localStorage for getAgentModel() callers
+    const lsModels = _smLoadModels();
+    SM_AGENTS.filter(a => a.settingsKey).forEach(a => {
+      if (updated[a.settingsKey]) lsModels[a.key] = updated[a.settingsKey];
+    });
+    localStorage.setItem(SM_STORAGE_KEY, JSON.stringify(lsModels));
+    _gssData = updated;
+    if (feedback) {
+      feedback.textContent = 'Saved';
+      feedback.className = 'gss-feedback visible';
+      setTimeout(() => { feedback.className = 'gss-feedback'; }, 2500);
+    }
+  } catch (err) {
+    if (feedback) {
+      feedback.textContent = `Save failed: ${err.message}`;
+      feedback.className = 'gss-feedback visible error';
+    }
+  } finally {
+    if (saveBtn) saveBtn.disabled = false;
+  }
 }
 
 function _smOnChange(sel) {
@@ -18585,7 +18853,7 @@ document.addEventListener('keydown', function(e) {
   </div>
 </div>
 
-<!-- ── Global Settings modal (issue #396) ── -->
+<!-- ── Global Settings screen (issue #641) ── -->
 <div class="modal-backdrop hidden" id="sm-backdrop" onclick="closeSettingsModal()"></div>
 <div class="modal sm-modal hidden" id="sm-modal"
      role="dialog" aria-modal="true" aria-labelledby="sm-modal-title">
@@ -18596,10 +18864,14 @@ document.addEventListener('keydown', function(e) {
     <button class="modal-close" onclick="closeSettingsModal()" aria-label="Close">&times;</button>
   </div>
   <div class="modal-body" id="sm-body">
-    <!-- populated by openSettingsModal() -->
+    <!-- populated by openSettingsModal() / _gssRender() -->
   </div>
   <div class="modal-footer">
-    <button class="btn-primary" onclick="closeSettingsModal()" type="button">Done</button>
+    <span class="gss-feedback" id="gss-feedback"></span>
+    <button class="btn-ghost" onclick="closeSettingsModal()" type="button">Cancel</button>
+    <button class="btn-primary" id="gss-save-btn" onclick="_gssSave()" type="button">
+      <i class="ti ti-check"></i> Save changes
+    </button>
   </div>
 </div>
 

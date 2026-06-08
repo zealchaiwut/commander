@@ -4912,6 +4912,9 @@
                   <i class="ti ti-terminal-2"></i> Raw
                 </button>
               </div>
+              <button class="btn-sm btn-ghost" title="Refresh" onclick="logsRefresh()" style="margin-left:4px">
+                <i class="ti ti-refresh"></i>
+              </button>
             </div>
           </div>
           <!-- Body -->
@@ -16360,11 +16363,25 @@ function logsInit() {
   if (!_logsLoaded) {
     _logsLoaded = true;
     logsFetchRuns();
+    logsSyncGitHub();
   }
 
   if (!_logsState.pollTimer) {
     _logsState.pollTimer = setInterval(logsFetchRuns, 15000);
   }
+}
+
+async function logsSyncGitHub() {
+  if (!_projectData) return;
+  const project = _projectData.repo;
+  try {
+    await fetch(`/api/logs/sync-github?project=${encodeURIComponent(project)}`, { method: 'POST' });
+  } catch (_) {}
+}
+
+function logsRefresh() {
+  logsFetchRuns();
+  logsSyncGitHub();
 }
 
 function logsDestroy() {

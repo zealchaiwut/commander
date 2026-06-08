@@ -1637,6 +1637,21 @@ def add_project(body: NewProjectBody):
         raise _gh_error(e)
 
 
+@app.delete("/api/projects/{slug}/settings")
+def delete_project_settings(slug: str):
+    """Clear the project-level settings override.
+
+    After deletion GET /api/projects/{slug}/settings returns global defaults.
+    Returns 404 if the project slug is not found.
+    Must be registered before DELETE /api/projects/{owner}/{repo_name} to avoid
+    first-match routing collision on two-segment paths.
+    """
+    repo = _resolve_project_slug(slug)
+    _settings_repo.delete_setting("project", APP_CONFIG_KEY, project=repo)
+    effective = _settings_repo.get_setting(APP_CONFIG_KEY, project=repo)
+    return build_effective_response(effective)
+
+
 @app.delete("/api/projects/{owner}/{repo_name}")
 async def remove_project(owner: str, repo_name: str, body: RemoveProjectBody):
     import shutil

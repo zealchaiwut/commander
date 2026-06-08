@@ -2552,6 +2552,7 @@ def _dispatch_coder(
     rate_limit_events: Optional[list] = None,
     on_running: Optional[object] = None,
     sprint_label: Optional[str] = None,
+    prior_failures: Optional[list] = None,
 ) -> tuple[bool, Optional[str]]:
     """Dispatch a coder agent for the issue.  Returns (ok, failure_category).
 
@@ -2564,6 +2565,10 @@ def _dispatch_coder(
 
     on_running: optional zero-argument callable invoked immediately after the
     subprocess is spawned (before proc.wait) to signal coder_running status.
+
+    prior_failures: accumulated failure records from the fix-loop (issue #618).
+    When provided, an accumulated context suffix is built from these records
+    instead of reading the single-failure sidecar.
     """
     eff_repo = repo_name or (cfg.repo_name if cfg else None)
     api_url  = cfg.api_url if cfg else None
@@ -2653,8 +2658,18 @@ def _dispatch_coder(
             " label-mutation command."
         )
 
-    # Inject failure context from sidecar if available (AC: sprint manager reads sidecar)
-    failure_suffix = _build_failure_suffix(issue_num)
+    # Inject failure context: accumulated history (fix-loop, issue #618) or sidecar fallback
+    if prior_failures:
+        _ctx_lines = [
+            f"\n\nThis is fix attempt {len(prior_failures) + 1}. Prior attempts failed:"
+        ]
+        for _h in prior_failures:
+            _cat = _h.get("category", "?")
+            _detail = _h.get("reason") or _h.get("summary") or ""
+            _ctx_lines.append(f"  - Attempt {_h.get('attempt', 0) + 1}: {_cat}: {_detail}")
+        failure_suffix = "\n".join(_ctx_lines)
+    else:
+        failure_suffix = _build_failure_suffix(issue_num)
     if failure_suffix:
         prompt = prompt + failure_suffix
 
@@ -5261,248 +5276,315 @@ def run_sprint(
         state.save(state_path)
         _post_sprint_status(state, api_url=api_url)
 
-        if _skip_coder:
-            print(f"  [rerun] SIT ticket: dispatching tester directly for #{num}")
-            try:
-                structured_log.event(
-                    "issue.rerun_tester_direct",
-                    run_id=_run_id,
-                    issue_num=num,
-                    sprint_label=label,
-                    agent_role="sprint",
-                )
-            except Exception:
-                pass
-        else:
-            # -- Dispatch coder --
-            issue_state.set_agent_status("coder_dispatched")
-            issue_state.coder_started_at = issue_state.status_changed_at
-            state.save(state_path)
-            _post_sprint_status(state, api_url=api_url)
+        # -- Bounded fix-loop: coder → tester → gates (issue #618) ──────────────
+        # K read from COMMANDER_MAX_FIX_ROUNDS (default 3). _skip_coder path
+        # (rerun-tester-direct) runs tester+gates once inside the same loop body
+        # but never re-dispatches coder on logic failure.
+        _max_fix_rounds  = int(os.environ.get("COMMANDER_MAX_FIX_ROUNDS", "3"))
+        _fix_rounds      = 1 if _skip_coder else _max_fix_rounds
+        _fix_history: list[dict] = []       # per-attempt failure records
+        _last_failure_sig: Optional[str] = None  # for consecutive-dup detection
+        _gate_passed  = False               # gate passed → loop exits success
+        _infra_exit   = False               # infra failure → skip to next issue
+        _loop_aborted = False               # dup/early-abort → RETRY_EXHAUSTED
 
-            # AC-5 (issue #311): apply in-progress label when coder starts so the
-            # board reflects active work during coding.  Best-effort — never blocks
-            # the sprint on label failure.
-            _transition_safe(num, _TicketState.IN_PROGRESS, actor="sprint_manager", repo_name=eff_repo)
+        for _fix_attempt in range(_fix_rounds):
 
-            def _on_coder_running(
-                _is=issue_state, _st=state, _sp=state_path, _api=api_url,
-                _lbl=label, _n=num, _sd=_eff_sprints_dir,
-            ) -> None:
-                _is.set_agent_status("coder_running")
-                _neon_ticket_status(_lbl, _n, "running", _sd)
-                _st.save(_sp)
-                _post_sprint_status(_st, api_url=_api)
-
-            _coder_t0 = time.monotonic()
-            coder_ok, coder_category = _dispatch_coder(
-                num, alert_modes, sprint_branch=target_branch, repo_name=eff_repo, cfg=cfg,
-                chosen_port=chosen_port, rate_limit_events=state.rate_limit_events,
-                on_running=_on_coder_running, sprint_label=label,
-            )
-            _coder_elapsed = time.monotonic() - _coder_t0
-            _coder_m, _coder_s = divmod(int(_coder_elapsed), 60)
-            print(f"  Total time used on coder dispatch: {_coder_m}m {_coder_s}s")
-            try:
-                structured_log.event(
-                    "coder.done",
-                    run_id=_run_id,
-                    issue_num=num,
-                    sprint_label=label,
-                    agent_role="coder",
-                    elapsed_secs=round(_coder_elapsed),
-                    success=coder_ok,
-                )
-            except Exception:
-                pass
-
-            if not coder_ok:
-                category = coder_category or FailureCategory.CRASH
-                if category == FailureCategory.RETRY_EXHAUSTED:
-                    reason = "Subscription rate limit exhausted"
-                else:
-                    reason = f"Coder failed with category {category}"
-                structured_log.error("coder_failed", f"coder failed for #{num}: {category}", issue_num=num, category=category)
+            if _skip_coder:
+                print(f"  [rerun] SIT ticket: dispatching tester directly for #{num}")
                 try:
                     structured_log.event(
-                        "coder.failed",
+                        "issue.rerun_tester_direct",
+                        run_id=_run_id,
+                        issue_num=num,
+                        sprint_label=label,
+                        agent_role="sprint",
+                    )
+                except Exception:
+                    pass
+            else:
+                # -- Dispatch coder --
+                issue_state.set_agent_status("coder_dispatched")
+                issue_state.coder_started_at = issue_state.status_changed_at
+                state.save(state_path)
+                _post_sprint_status(state, api_url=api_url)
+
+                # AC-5 (issue #311): apply in-progress label when coder starts so the
+                # board reflects active work during coding.  Best-effort — never blocks
+                # the sprint on label failure.
+                _transition_safe(num, _TicketState.IN_PROGRESS, actor="sprint_manager", repo_name=eff_repo)
+
+                def _on_coder_running(
+                    _is=issue_state, _st=state, _sp=state_path, _api=api_url,
+                    _lbl=label, _n=num, _sd=_eff_sprints_dir,
+                ) -> None:
+                    _is.set_agent_status("coder_running")
+                    _neon_ticket_status(_lbl, _n, "running", _sd)
+                    _st.save(_sp)
+                    _post_sprint_status(_st, api_url=_api)
+
+                _coder_t0 = time.monotonic()
+                coder_ok, coder_category = _dispatch_coder(
+                    num, alert_modes, sprint_branch=target_branch, repo_name=eff_repo, cfg=cfg,
+                    chosen_port=chosen_port, rate_limit_events=state.rate_limit_events,
+                    on_running=_on_coder_running, sprint_label=label,
+                    prior_failures=_fix_history if _fix_history else None,
+                )
+                _coder_elapsed = time.monotonic() - _coder_t0
+                _coder_m, _coder_s = divmod(int(_coder_elapsed), 60)
+                print(f"  Total time used on coder dispatch: {_coder_m}m {_coder_s}s")
+                try:
+                    structured_log.event(
+                        "coder.done",
                         run_id=_run_id,
                         issue_num=num,
                         sprint_label=label,
                         agent_role="coder",
-                        category=category,
-                        reason=reason,
+                        elapsed_secs=round(_coder_elapsed),
+                        success=coder_ok,
                     )
                 except Exception:
                     pass
-                issue_state.set_agent_status("failed")
-                issue_state.coder_finished_at = issue_state.status_changed_at
-                issue_state.failure_reason    = reason
-                issue_state.status            = "skipped"
-                issue_state.skip_reason       = reason
-                issue_state.category          = category
-                summary.skipped.append(f"#{num} (coder failed)")
-                dispatch_alerts(
-                    alert_modes,
-                    title=f"Issue #{num} skipped: {category}",
-                    body=reason,
-                    issue_num=num,
-                    category=category,
-                    cfg=cfg,
-                    repo=eff_repo,
-                )
-                if category in _LOGIC_FAILURE_CATEGORIES:
-                    _transition_safe(num, _TicketState.NEEDS_REWORK, actor="sprint_manager", repo_name=eff_repo)
-                _neon_ticket_status(label, num, "failed", _eff_sprints_dir)
-                state.save(state_path)
-                _post_sprint_status(state, api_url=api_url, project=eff_repo)
-                continue
 
-            # -- Detect CODER_NO_WORK: coder exited 0 but created no feature branch --
-            if _find_feature_branch(num) is None:
-                category = FailureCategory.CODER_NO_WORK
-                reason = f"Coder exited 0 but no feature/{num}-* branch was created"
-                print(f"  {reason} -- skipping to next issue")
-                issue_state.set_agent_status("failed")
-                issue_state.coder_finished_at = issue_state.status_changed_at
-                issue_state.failure_reason    = reason
-                issue_state.status            = "skipped"
-                issue_state.skip_reason       = reason
-                issue_state.category          = category
-                summary.skipped.append(f"#{num} (coder no work)")
-                dispatch_alerts(
-                    alert_modes,
-                    title=f"Issue #{num} skipped: {category}",
-                    body=reason,
-                    issue_num=num,
-                    category=category,
-                    cfg=cfg,
-                    repo=eff_repo,
-                )
-                if category in _LOGIC_FAILURE_CATEGORIES:
-                    _transition_safe(num, _TicketState.NEEDS_REWORK, actor="sprint_manager", repo_name=eff_repo)
-                _neon_ticket_status(label, num, "failed", _eff_sprints_dir)
-                state.save(state_path)
-                _post_sprint_status(state, api_url=api_url, project=eff_repo)
-                continue
+                if not coder_ok:
+                    category = coder_category or FailureCategory.CRASH
+                    if category == FailureCategory.RETRY_EXHAUSTED:
+                        reason = "Subscription rate limit exhausted"
+                    else:
+                        reason = f"Coder failed with category {category}"
+                    structured_log.error("coder_failed", f"coder failed for #{num}: {category}", issue_num=num, category=category)
+                    try:
+                        structured_log.event(
+                            "coder.failed",
+                            run_id=_run_id,
+                            issue_num=num,
+                            sprint_label=label,
+                            agent_role="coder",
+                            category=category,
+                            reason=reason,
+                        )
+                    except Exception:
+                        pass
 
-            # -- Lifecycle: coder_done --
-            issue_state.set_agent_status("coder_done")
-            issue_state.coder_finished_at = issue_state.status_changed_at
+                    if category in _LOGIC_FAILURE_CATEGORIES:
+                        # Logic failure: record, check for consecutive dup, retry
+                        record_failure(
+                            num, category,
+                            detail=_build_crash_detail(_issue_log_path(num, cfg=cfg)),
+                        )
+                        _sig = category
+                        _fix_history.append({
+                            "attempt": _fix_attempt, "category": category, "reason": reason,
+                        })
+                        if _sig == _last_failure_sig:
+                            print(
+                                f"  [fix-loop] consecutive identical coder failure ({_sig}): "
+                                f"aborting early", flush=True,
+                            )
+                            _loop_aborted = True
+                            break
+                        _last_failure_sig = _sig
+                        print(
+                            f"  [fix-loop] coder logic failure ({_sig}), "
+                            f"attempt {_fix_attempt + 1}/{_fix_rounds}: will retry",
+                            flush=True,
+                        )
+                        continue
+
+                    # Infra failure: existing path, no retry
+                    issue_state.set_agent_status("failed")
+                    issue_state.coder_finished_at = issue_state.status_changed_at
+                    issue_state.failure_reason    = reason
+                    issue_state.status            = "skipped"
+                    issue_state.skip_reason       = reason
+                    issue_state.category          = category
+                    summary.skipped.append(f"#{num} (coder failed)")
+                    dispatch_alerts(
+                        alert_modes,
+                        title=f"Issue #{num} skipped: {category}",
+                        body=reason,
+                        issue_num=num,
+                        category=category,
+                        cfg=cfg,
+                        repo=eff_repo,
+                    )
+                    _neon_ticket_status(label, num, "failed", _eff_sprints_dir)
+                    state.save(state_path)
+                    _post_sprint_status(state, api_url=api_url, project=eff_repo)
+                    _infra_exit = True
+                    break
+
+                # -- Detect CODER_NO_WORK: coder exited 0 but created no feature branch --
+                if _find_feature_branch(num) is None:
+                    category = FailureCategory.CODER_NO_WORK
+                    reason   = f"Coder exited 0 but no feature/{num}-* branch was created"
+                    print(f"  {reason}")
+                    # Logic failure: record, check dup, retry
+                    record_failure(num, category, detail=reason)
+                    _sig = category
+                    _fix_history.append({
+                        "attempt": _fix_attempt, "category": category, "reason": reason,
+                    })
+                    if _sig == _last_failure_sig:
+                        print(
+                            f"  [fix-loop] consecutive identical CODER_NO_WORK: aborting early",
+                            flush=True,
+                        )
+                        _loop_aborted = True
+                        break
+                    _last_failure_sig = _sig
+                    print(
+                        f"  [fix-loop] CODER_NO_WORK, "
+                        f"attempt {_fix_attempt + 1}/{_fix_rounds}: will retry",
+                        flush=True,
+                    )
+                    continue
+
+                # -- Lifecycle: coder_done --
+                issue_state.set_agent_status("coder_done")
+                issue_state.coder_finished_at = issue_state.status_changed_at
+                state.save(state_path)
+                _post_sprint_status(state, api_url=api_url)
+
+            # Transition to SIT before dispatching the tester (issue #509).
+            _transition_safe(num, _TicketState.SIT, actor="sprint_manager", repo_name=eff_repo)
+
+            # -- Lifecycle: tester_dispatched --
+            issue_state.set_agent_status("tester_dispatched")
+            issue_state.tester_started_at = issue_state.status_changed_at
             state.save(state_path)
             _post_sprint_status(state, api_url=api_url)
 
-        # Transition to SIT before dispatching the tester (issue #509).
-        _transition_safe(num, _TicketState.SIT, actor="sprint_manager", repo_name=eff_repo)
+            def _on_tester_running(
+                _is=issue_state, _st=state, _sp=state_path, _api=api_url
+            ) -> None:
+                _is.set_agent_status("tester_running")
+                _st.save(_sp)
+                _post_sprint_status(_st, api_url=_api)
 
-        # -- Lifecycle: tester_dispatched --
-        issue_state.set_agent_status("tester_dispatched")
-        issue_state.tester_started_at = issue_state.status_changed_at
-        state.save(state_path)
-        _post_sprint_status(state, api_url=api_url)
-
-        def _on_tester_running(
-            _is=issue_state, _st=state, _sp=state_path, _api=api_url
-        ) -> None:
-            _is.set_agent_status("tester_running")
-            _st.save(_sp)
-            _post_sprint_status(_st, api_url=_api)
-
-        # -- Dispatch tester --
-        _tester_t0 = time.monotonic()
-        tester_rc, hang_category = _dispatch_tester(
-            num, alert_modes, sprint_branch=target_branch, repo_name=eff_repo, cfg=cfg,
-            chosen_port=chosen_port, rate_limit_events=state.rate_limit_events,
-            on_running=_on_tester_running, sprint_label=label,
-        )
-        _tester_elapsed = time.monotonic() - _tester_t0
-        _tester_m, _tester_s = divmod(int(_tester_elapsed), 60)
-        print(f"  Total time used on tester dispatch: {_tester_m}m {_tester_s}s")
-        try:
-            structured_log.event(
-                "tester.done",
-                run_id=_run_id,
-                issue_num=num,
-                sprint_label=label,
-                agent_role="tester",
-                elapsed_secs=round(_tester_elapsed),
-                exit_code=tester_rc,
+            # -- Dispatch tester --
+            _tester_t0 = time.monotonic()
+            tester_rc, hang_category = _dispatch_tester(
+                num, alert_modes, sprint_branch=target_branch, repo_name=eff_repo, cfg=cfg,
+                chosen_port=chosen_port, rate_limit_events=state.rate_limit_events,
+                on_running=_on_tester_running, sprint_label=label,
             )
-        except Exception:
-            pass
+            _tester_elapsed = time.monotonic() - _tester_t0
+            _tester_m, _tester_s = divmod(int(_tester_elapsed), 60)
+            print(f"  Total time used on tester dispatch: {_tester_m}m {_tester_s}s")
+            try:
+                structured_log.event(
+                    "tester.done",
+                    run_id=_run_id,
+                    issue_num=num,
+                    sprint_label=label,
+                    agent_role="tester",
+                    elapsed_secs=round(_tester_elapsed),
+                    exit_code=tester_rc,
+                )
+            except Exception:
+                pass
 
-        if hang_category == FailureCategory.HANG:
-            issue_state.set_agent_status("failed")
-            issue_state.tester_finished_at = issue_state.status_changed_at
-            issue_state.failure_reason     = "Tester HANG detected"
-            issue_state.status             = "skipped"
-            issue_state.skip_reason        = "Tester HANG detected"
-            issue_state.category           = FailureCategory.HANG
-            summary.skipped.append(f"#{num} (tester hang)")
-            _neon_ticket_status(label, num, "failed", _eff_sprints_dir)
-            state.save(state_path)
-            _post_sprint_status(state, api_url=api_url, project=eff_repo)
-            continue
+            if hang_category == FailureCategory.HANG:
+                issue_state.set_agent_status("failed")
+                issue_state.tester_finished_at = issue_state.status_changed_at
+                issue_state.failure_reason     = "Tester HANG detected"
+                issue_state.status             = "skipped"
+                issue_state.skip_reason        = "Tester HANG detected"
+                issue_state.category           = FailureCategory.HANG
+                summary.skipped.append(f"#{num} (tester hang)")
+                _neon_ticket_status(label, num, "failed", _eff_sprints_dir)
+                state.save(state_path)
+                _post_sprint_status(state, api_url=api_url, project=eff_repo)
+                _infra_exit = True
+                break
 
-        if hang_category == FailureCategory.RETRY_EXHAUSTED:
-            issue_state.set_agent_status("failed")
+            if hang_category == FailureCategory.RETRY_EXHAUSTED:
+                issue_state.set_agent_status("failed")
+                issue_state.tester_finished_at = issue_state.status_changed_at
+                issue_state.failure_reason     = "Subscription rate limit exhausted"
+                issue_state.status             = "skipped"
+                issue_state.skip_reason        = "Subscription rate limit exhausted"
+                issue_state.category           = FailureCategory.RETRY_EXHAUSTED
+                summary.skipped.append(f"#{num} (rate limit exhausted)")
+                _neon_ticket_status(label, num, "failed", _eff_sprints_dir)
+                state.save(state_path)
+                _post_sprint_status(state, api_url=api_url)
+                _infra_exit = True
+                break
+
+            # -- Lifecycle: tester_done --
+            issue_state.set_agent_status("tester_done")
             issue_state.tester_finished_at = issue_state.status_changed_at
-            issue_state.failure_reason     = "Subscription rate limit exhausted"
-            issue_state.status             = "skipped"
-            issue_state.skip_reason        = "Subscription rate limit exhausted"
-            issue_state.category           = FailureCategory.RETRY_EXHAUSTED
-            summary.skipped.append(f"#{num} (rate limit exhausted)")
-            _neon_ticket_status(label, num, "failed", _eff_sprints_dir)
             state.save(state_path)
             _post_sprint_status(state, api_url=api_url)
-            continue
 
-        # -- Lifecycle: tester_done --
-        issue_state.set_agent_status("tester_done")
-        issue_state.tester_finished_at = issue_state.status_changed_at
-        state.save(state_path)
-        _post_sprint_status(state, api_url=api_url)
-
-        # -- Post-tester gates --
-        merged, summary_line, gate_category = handle_post_tester(
-            issue_num          = num,
-            tester_exit_code   = tester_rc,
-            skip_gates         = skip_gates,
-            gate_pytest        = gate_pytest,
-            gate_lint          = gate_lint,
-            gate_merge_preview = gate_merge_preview,
-            gate_typecheck     = gate_typecheck,
-            gate_design        = gate_design,
-            target_branch      = target_branch,
-            repo_name          = eff_repo,
-            cfg                = cfg,
-            base_branch        = target_branch or "develop",
-            gate_scope         = gate_scope,
-            documentor_enabled = cfg.documentor_enabled if cfg else False,
-            alert_modes        = alert_modes,
-            sprint_label       = label,
-        )
-        print(f"  {summary_line}")
-        try:
-            structured_log.event(
-                "issue.merged" if merged else "issue.skipped",
-                run_id=_run_id,
-                issue_num=num,
-                sprint_label=label,
-                agent_role="sprint",
-                summary_line=summary_line,
+            # -- Post-tester gates --
+            merged, summary_line, gate_category = handle_post_tester(
+                issue_num          = num,
+                tester_exit_code   = tester_rc,
+                skip_gates         = skip_gates,
+                gate_pytest        = gate_pytest,
+                gate_lint          = gate_lint,
+                gate_merge_preview = gate_merge_preview,
+                gate_typecheck     = gate_typecheck,
+                gate_design        = gate_design,
+                target_branch      = target_branch,
+                repo_name          = eff_repo,
+                cfg                = cfg,
+                base_branch        = target_branch or "develop",
+                gate_scope         = gate_scope,
+                documentor_enabled = cfg.documentor_enabled if cfg else False,
+                alert_modes        = alert_modes,
+                sprint_label       = label,
             )
-        except Exception:
-            pass
+            print(f"  {summary_line}")
+            try:
+                structured_log.event(
+                    "issue.merged" if merged else "issue.skipped",
+                    run_id=_run_id,
+                    issue_num=num,
+                    sprint_label=label,
+                    agent_role="sprint",
+                    summary_line=summary_line,
+                )
+            except Exception:
+                pass
 
-        _issue_tokens = issue_state.tokens_in + issue_state.tokens_out
-        if merged:
-            issue_state.set_agent_status("completed")
-            issue_state.status = "done"
-            summary.merged.append(f"#{num}")
-            _neon_ticket_status(label, num, "done", _eff_sprints_dir, total_tokens=_issue_tokens)
-        else:
+            _issue_tokens = issue_state.tokens_in + issue_state.tokens_out
+            if merged:
+                issue_state.set_agent_status("completed")
+                issue_state.status = "done"
+                summary.merged.append(f"#{num}")
+                _neon_ticket_status(label, num, "done", _eff_sprints_dir, total_tokens=_issue_tokens)
+                _gate_passed = True
+                break
+
+            # Gate failed
             category = gate_category or FailureCategory.CRASH
+            if not _skip_coder and category in _LOGIC_FAILURE_CATEGORIES:
+                # Logic gate failure: record, check dup, retry coder
+                record_failure(num, category, detail=summary_line)
+                _sig = f"{category}:{summary_line[:80]}"
+                _fix_history.append({
+                    "attempt": _fix_attempt, "category": category, "summary": summary_line,
+                })
+                if _sig == _last_failure_sig:
+                    print(
+                        f"  [fix-loop] consecutive identical gate failure ({category}): "
+                        f"aborting early", flush=True,
+                    )
+                    _loop_aborted = True
+                    break
+                _last_failure_sig = _sig
+                print(
+                    f"  [fix-loop] gate logic failure ({category}), "
+                    f"attempt {_fix_attempt + 1}/{_fix_rounds}: will retry coder",
+                    flush=True,
+                )
+                continue
+
+            # Non-logic gate failure or _skip_coder path: final failure handling
             issue_state.set_agent_status("failed")
             issue_state.failure_reason  = summary_line
             issue_state.status          = "skipped"
@@ -5524,6 +5606,55 @@ def run_sprint(
             if category in _LOGIC_FAILURE_CATEGORIES:
                 _transition_safe(num, _TicketState.NEEDS_REWORK, actor="sprint_manager", repo_name=eff_repo)
             _neon_ticket_status(label, num, "failed", _eff_sprints_dir, total_tokens=_issue_tokens)
+            _infra_exit = True
+            break
+
+        else:
+            # for/else: all _fix_rounds completed without a break → loop exhausted
+            _loop_aborted = True
+
+        # -- After fix-loop: handle exhaustion/early-abort ────────────────────────
+        if _loop_aborted:
+            category = FailureCategory.RETRY_EXHAUSTED
+            history_str = "; ".join(
+                f"attempt {h['attempt'] + 1}: {h.get('category', '?')}"
+                for h in _fix_history
+            )
+            reason = (
+                f"Fix-loop exhausted after {len(_fix_history)} attempt(s)"
+                + (f" ({history_str})" if history_str else "")
+            )
+            print(f"  [fix-loop] {reason} — tagging needs-rework", flush=True)
+            try:
+                structured_log.error(
+                    "fix_loop_exhausted", reason,
+                    issue_num=num, fix_history=_fix_history,
+                )
+            except Exception:
+                pass
+            issue_state.set_agent_status("failed")
+            issue_state.failure_reason = reason
+            issue_state.status         = "skipped"
+            issue_state.skip_reason    = reason
+            issue_state.category       = category
+            summary.skipped.append(f"#{num} (fix-loop exhausted)")
+            dispatch_alerts(
+                alert_modes,
+                title=f"Issue #{num} skipped: {category}",
+                body=reason,
+                issue_num=num,
+                category=category,
+                cfg=cfg,
+                repo=eff_repo,
+            )
+            _transition_safe(num, _TicketState.NEEDS_REWORK, actor="sprint_manager", repo_name=eff_repo)
+            _neon_ticket_status(label, num, "failed", _eff_sprints_dir)
+            state.save(state_path)
+            _post_sprint_status(state, api_url=api_url, project=eff_repo)
+            continue
+
+        if _infra_exit:
+            continue
 
         elapsed = time.monotonic() - start_time
         state.wall_clock_secs = elapsed

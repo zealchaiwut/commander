@@ -2891,9 +2891,19 @@
       font-size: 10px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
       font-family: var(--mono);
     }
-    .smgmt-ticket-agent-tag.coder-class  { background: var(--purple-bg); color: var(--purple); }
-    .smgmt-ticket-agent-tag.tester-class { background: var(--amber-bg);  color: var(--amber); }
-    .smgmt-ticket-agent-tag.unknown-class { background: var(--surface-2); color: var(--text-sub); }
+    /* Live log bar agent badge — separate class so compact-mode hide rule doesn't apply */
+    .smgmt-log-agent-tag {
+      flex-shrink: 0;
+      padding: 1px 5px; border-radius: 3px;
+      font-size: 10px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+      font-family: var(--mono);
+    }
+    .smgmt-ticket-agent-tag.coder-class,
+    .smgmt-log-agent-tag.coder-class   { background: var(--purple-bg); color: var(--purple); }
+    .smgmt-ticket-agent-tag.tester-class,
+    .smgmt-log-agent-tag.tester-class  { background: var(--amber-bg);  color: var(--amber); }
+    .smgmt-ticket-agent-tag.unknown-class,
+    .smgmt-log-agent-tag.unknown-class { background: var(--surface-2); color: var(--text-sub); }
 
     /* Segmented progress bar (issue #613) */
     .smgmt-seg-bar { display: flex; gap: 2px; align-items: center; flex-shrink: 0; }
@@ -7329,6 +7339,14 @@ function _smgmtRender(data) {
 
   listEl.innerHTML = cards || '<div class="loading-msg">No sprints found.</div>';
 
+  // Scroll live log streams to the latest line after initial render
+  requestAnimationFrame(() => {
+    _smgmtRunningLabels.forEach(lbl => {
+      const s = document.getElementById(`smgmt-live-log-stream-${lbl}`);
+      if (s) s.scrollTop = s.scrollHeight;
+    });
+  });
+
   // Populate capacity gauges (reads localStorage + estimate cache)
   _smgmtInitCapacityGauges(orderedLabels);
 
@@ -9468,7 +9486,7 @@ function _smgmtLiveAgentBadgesHtml(live) {
   const agents = live.active_agents || (live.active_agent ? [live.active_agent] : []);
   if (!agents.length) return '';
   const badges = agents.map(a =>
-    `<span class="smgmt-ticket-agent-tag ${_smgmtAgentTagClass(a.name)}">${escHtml(a.name.toUpperCase())}</span>`
+    `<span class="smgmt-log-agent-tag ${_smgmtAgentTagClass(a.name)}">${escHtml(a.name ? a.name.toUpperCase() : '?')}</span>`
   ).join(' ');
   const pids = agents.map(a => a.pid).filter(Boolean);
   const pidHtml = pids.length ? `<span class="smgmt-log-pid">pid ${escHtml(pids.join(' / '))}</span>` : '';

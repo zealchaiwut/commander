@@ -1710,54 +1710,7 @@
       font-size: 11px; color: var(--text-muted); flex-shrink: 0;
       opacity: .8;
     }
-    /* ── Finish-report card (the "hat" above a finished pane, issue #367 parity) ── */
     .smgmt-sprint-unit { display: flex; flex-direction: column; }
-    .smgmt-finish-card {
-      border: 1px solid var(--border); border-radius: 10px 10px 0 0;
-      overflow: hidden; padding: 10px 16px;
-      display: flex; flex-direction: column; gap: 6px;
-      transition: border-color .2s, background .2s;
-    }
-    .smgmt-finish-card.sfc-running   { border-color: var(--green);  background: linear-gradient(180deg, var(--green-bg)  0%, var(--surface) 100%); }
-    .smgmt-finish-card.sfc-completed { border-color: var(--steel);  background: linear-gradient(180deg, var(--steel-bg)  0%, var(--surface) 100%); }
-    .smgmt-finish-card.sfc-has_rework{ border-color: var(--yellow); background: linear-gradient(180deg, var(--yellow-bg) 0%, var(--surface) 100%); }
-    .smgmt-finish-card.sfc-cancelled { border-color: var(--amber);  background: linear-gradient(180deg, var(--amber-bg)  0%, var(--surface) 100%); }
-    /* Pane loses top rounding when a finish-card sits flush above it */
-    .smgmt-sprint-card.smgmt-has-card { border-top-left-radius: 0; border-top-right-radius: 0; border-top: none; }
-    .sfc-header  { display: flex; align-items: center; gap: 8px; min-width: 0; }
-    .sfc-icon    { font-size: 14px; flex-shrink: 0; }
-    .sfc-title   { font-size: 13px; font-weight: 700; flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .sfc-timestamp { font-size: 11px; color: var(--text-muted); flex-shrink: 0; }
-    .sfc-badge   { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; padding: 2px 7px; border-radius: 10px; flex-shrink: 0; white-space: nowrap; }
-    .sfc-badge--running   { background: var(--green-bg);  color: var(--green);  border: 1px solid rgba(22,163,74,.25);  animation: sfc-pulse 2s ease-in-out infinite; }
-    .sfc-badge--completed { background: var(--steel-bg);  color: var(--steel);  border: 1px solid rgba(79,122,184,.25); }
-    .sfc-badge--has_rework{ background: var(--yellow-bg); color: var(--yellow); border: 1px solid rgba(161,98,7,.25);   }
-    .sfc-badge--cancelled { background: var(--amber-bg);  color: var(--amber);  border: 1px solid rgba(217,119,6,.25);  }
-    @keyframes sfc-pulse { 0%,100% { opacity:1; } 50% { opacity:.6; } }
-    .sfc-counts  { display: flex; gap: 10px; font-family: var(--mono); font-size: 12px; flex-wrap: wrap; }
-    .sfc-count   { white-space: nowrap; }
-    .sfc-count--done    { color: var(--green); }
-    .sfc-count--failed  { color: var(--red);   font-weight: 700; }
-    .sfc-count--skipped { color: var(--text-muted); }
-    .sfc-count--rework  { color: var(--yellow); font-weight: 700; }
-    .sfc-count--pending { color: var(--text-sub); }
-    .sfc-count--inflight{ color: var(--blue); }
-    .sfc-time { font-size: 11px; color: var(--text-muted); }
-    .sfc-links         { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; font-size: 12px; }
-    .sfc-branch-link   { display: flex; align-items: center; gap: 4px; color: var(--blue); text-decoration: none; }
-    .sfc-branch-link:hover { text-decoration: underline; }
-    .sfc-branch-link--warn { color: var(--amber); border: 1px solid var(--amber); border-radius: 4px; padding: 1px 6px; }
-    .sfc-branch-link--warn:hover { opacity: .8; text-decoration: none; }
-    .sfc-summary-link  { display: flex; align-items: center; gap: 4px; color: var(--blue); text-decoration: none; }
-    .sfc-summary-link:hover { text-decoration: underline; }
-    .sfc-summary-disabled { display: flex; align-items: center; gap: 4px; color: var(--text-sub); }
-    .sfc-pr-link       { display: flex; align-items: center; gap: 4px; }
-    .sfc-pr-link--open { color: var(--green); text-decoration: none; }
-    .sfc-pr-link--open:hover { text-decoration: underline; }
-    .sfc-pr-link--none { color: var(--text-sub); }
-    .sfc-summary-disabled { color: var(--text-muted); font-style: italic; cursor: default; }
-    .sfc-summary-none  { display: inline-flex; align-items: center; gap: 5px; color: var(--text-muted); border: 1px dashed var(--border); border-radius: 4px; padding: 2px 8px; cursor: default; }
-    .sfc-rework-tertiary { color: var(--text-sub); font-size: 11px; opacity: .7; cursor: default; }
     .smgmt-done-badge {
       display: inline-flex; align-items: center; gap: 5px;
       padding: 4px 10px; border-radius: 999px; font-size: 11px;
@@ -7301,9 +7254,7 @@ function _smgmtRender(data) {
     const outcome = _smgmtOutcomeCache[label] || null;
     const parent = _sprintParents[label] || null;
     const cardHtml = _smgmtCardHtml(label, null, tickets, outcome, label === _smgmtNextUpLabel, parent, _smgmtFinishedLabels.has(label));
-    // Wrap each pane in a unit with a hidden finish-report card "hat" above it (issue #367 parity)
     return `<div class="smgmt-sprint-unit" id="smgmt-unit-${escHtml(label)}">` +
-           `<div class="smgmt-finish-card sfc-hidden" id="smgmt-finish-card-${escHtml(label)}" style="display:none"></div>` +
            cardHtml + `</div>`;
   }).join('');
 
@@ -7386,23 +7337,6 @@ function _smgmtSetSortState(label, state) {
   } catch (_) {}
 }
 
-function _smgmtSortBtnHtml(label) {
-  const state = _smgmtGetSortState(label);
-  const key   = state ? `${state.field}:${state.dir}` : 'default';
-  const isActive = !!state;
-  const btnLabel = _SMGMT_SORT_LABELS[key] || 'Sort';
-  const safeLabel = escHtml(label);
-  const dispLabel = escHtml(sprintLabelDisplay(label));
-  return `<button class="smgmt-sort-btn${isActive ? ' is-active' : ''}"
-    id="smgmt-sort-btn-${safeLabel}"
-    aria-haspopup="true" aria-expanded="false"
-    aria-label="Sort ${dispLabel} tickets, current order: ${escHtml(btnLabel)}"
-    title="Sort tickets in this column"
-    onclick="event.stopPropagation();smgmtOpenSortMenu('${safeLabel}',this)"
-    onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();smgmtOpenSortMenu('${safeLabel}',this);}">
-    <i class="ti ti-arrows-sort" aria-hidden="true"></i>${isActive ? ' ' + escHtml(btnLabel) : ' Sort'}
-  </button>`;
-}
 
 function smgmtOpenSortMenu(label, btn) {
   _smgmtCloseSortMenu();
@@ -8677,8 +8611,8 @@ function _smgmtStateMeta(outcome) {
     state = (outcome && outcome.sprint_status === 'completed') ? 'completed' : 'cancelled';
   }
   const META = {
-    completed:  { state: 'completed',  cardClass: 'smgmt-completed',  badge: 'Finished',          badgeCls: 'state-finished' },
-    has_rework: { state: 'has_rework', cardClass: 'smgmt-has-rework', badge: 'Need Fixed Sprint', badgeCls: 'state-rework'   },
+    completed:  { state: 'completed',  cardClass: 'smgmt-completed',  badge: 'COMPLETED',  badgeCls: 'state-finished' },
+    has_rework: { state: 'has_rework', cardClass: 'smgmt-has-rework', badge: 'HAS REWORK', badgeCls: 'state-rework'   },
     cancelled:  { state: 'cancelled',  cardClass: 'smgmt-cancelled',  badge: 'Idle',              badgeCls: 'state-idle'     },
     idle:       { state: 'cancelled',  cardClass: 'smgmt-cancelled',  badge: 'Idle',              badgeCls: 'state-idle'     },
   };
@@ -9012,7 +8946,7 @@ function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent, finished) {
     // A summary issue exists but no detailed outcome cached — still mark finished
     // so the board agrees with the nav pill (and NEXT UP/pre-flight are suppressed).
     if (finished) {
-      outcomeBadgeHtml = `<span class="smgmt-state-badge state-finished">Finished</span>`;
+      outcomeBadgeHtml = `<span class="smgmt-state-badge state-finished">COMPLETED</span>`;
     }
   }
 
@@ -9071,7 +9005,6 @@ function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent, finished) {
         </div>
         <div class="smgmt-sprint-header-right">
           ${_smgmtCapacityInputHtml(label)}
-          ${_smgmtSortBtnHtml(label)}
           ${bulkEstBtnHtml}
           <button class="smgmt-finish-btn ${finishHidden}" ${finishDisabled}
                   title="${finishDisabled ? 'No open tickets' : 'Finish sprint'}"

@@ -6685,9 +6685,12 @@ def rerun_sprint_preview_v2(sprint_label: str, project: str):
     existing_label_names = {lbl["name"] for lbl in github_client.list_labels(repo_name=project)}
     suggested_versioned_label = _next_sprint_sublabel(sprint_label, existing_label_names)
 
+    _NON_WORK_LABELS_RR = {"sprint-summary", "docs", "documentation"}
     tickets = []
     for iss in sprint_issues:
         current_labels = {lbl["name"] for lbl in iss.get("labels", [])}
+        if current_labels & _NON_WORK_LABELS_RR:
+            continue  # skip sprint-summary / docs tickets
         category = _ticket_rerun_category(current_labels)
         tickets.append({
             "number": iss["number"],

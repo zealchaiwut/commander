@@ -39,10 +39,31 @@ Stores per-ticket state within a sprint. Cascade-deletes with `sprints`.
 | `started_at` | timestamptz | Set when ticket starts running |
 | `completed_at` | timestamptz | Set when ticket finishes |
 | `agent_active` | text | Active agent role when ticket is running |
-| `elapsed_seconds` | integer | Total wall-clock seconds for completed ticket |
+| `actual_elapsed_seconds` | integer | Total wall-clock seconds for completed ticket |
+| `total_tokens` | integer | Cumulative tokens consumed by agents for this ticket |
+| `estimated_size` | text | Size label from estimator (`S`, `M`, `L`, `XL`); nullable |
 
 Index: `ix_sprint_tickets_sprint_position` on `(sprint_id, position)`.
 Unique constraint: `(sprint_id, issue_number)`.
+
+### settings
+
+Key-value store for project-level config overrides. Supports global defaults and per-project overrides with shallow merge semantics (project fields win over global).
+
+| Column | Type | Description |
+|---|---|---|
+| `id` | integer PK | Auto-increment |
+| `scope` | text NOT NULL | `global` or `project` |
+| `project` | text | Repo slug for project-scoped rows; NULL for global rows |
+| `key` | text NOT NULL | Setting key, e.g. `estimation` |
+| `value` | jsonb NOT NULL | JSON value; merged at read time (project over global) |
+| `updated_at` | timestamptz | Defaults to `now()`; updated on each write |
+
+Unique constraint: `(scope, project, key)`.
+
+Helpers: `get_setting(key, project=None)` and `set_setting(scope, key, value, project=None)` in `services/sprint_manager/settings_repo.py`.
+
+Global seed row: `scope='global'`, `key='estimation'`, `value={"size_minutes":{"S":5,"M":15,"L":30,"XL":60},"buffer_pct":20,"thin_ac_buffer_pct":30}`.
 
 ### projects
 
@@ -78,6 +99,9 @@ Unique constraint: `(project_id, env)`.
 | `b2c3d4e5f6a1` | Add `sprints` and `sprint_tickets` tables |
 | `c3d4e5f6a1b2` | Add `projects` table, seeded from `projects.json` |
 | `d4e5f6a1b2c3` | Add `project_environments` table, seeded from `projects.json` |
+| `e5f6a1b2c3d4` | Add `actual_elapsed_seconds` (renamed) and `total_tokens` to `sprint_tickets` |
+| `f6a7b8c9d0e1` | Add `events` table for structured log events |
+| `g7h8i9j0k1l2` | Add `settings` KV table; add `estimated_size` to `sprint_tickets`; seed global estimation row |
 
 ## SQLite Tables (local dashboard)
 

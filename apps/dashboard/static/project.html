@@ -2963,6 +2963,20 @@
       animation: smgmt-ring-spin .6s linear infinite;
       display: inline-block;
     }
+    /* Bulk estimate button (issue #598) */
+    .smgmt-bulk-est-btn {
+      font-size: 11px; padding: 3px 8px; border-radius: 4px;
+      background: var(--bg); border: 1px solid var(--border);
+      color: var(--text-sub); cursor: pointer; white-space: nowrap;
+      display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0;
+    }
+    .smgmt-bulk-est-btn:hover { background: var(--blue-bg); border-color: var(--blue); }
+    .smgmt-bulk-est-btn:disabled { opacity: .4 !important; cursor: not-allowed; }
+    .smgmt-bulk-est-progress {
+      font-size: 11px; color: var(--text-muted); white-space: nowrap;
+      display: none; flex-shrink: 0;
+    }
+    .smgmt-bulk-est-progress.show { display: inline; }
     /* Stale estimate badge (issue #596) */
     .smgmt-stale-badge {
       padding: 1px 5px; font-size: 10px; font-weight: 600;
@@ -4726,6 +4740,11 @@
                 Backlog
                 <span class="smgmt-backlog-count-badge" id="smgmt-backlog-count"></span>
               </span>
+              <button class="smgmt-bulk-est-btn hidden" id="smgmt-backlog-bulk-est-btn"
+                      onclick="event.stopPropagation();_smgmtBulkEstimate('__backlog__',this)"
+                      title="Estimate all unsized backlog tickets">
+                <i class="ti ti-calculator"></i> Estimate all unsized</button>
+              <span class="smgmt-bulk-est-progress" id="smgmt-backlog-bulk-est-progress"></span>
               <span class="smgmt-backlog-chevron-icon"><i class="ti ti-chevron-down"></i></span>
             </div>
             <div class="smgmt-backlog-tickets-container" id="smgmt-backlog-tickets-container">
@@ -8919,6 +8938,17 @@ function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent, finished) {
 
   const logHtml = (outcome && outcome.sprint_status) ? _smgmtOutcomeLogHtml(label, outcome) : '';
   const cancelBannerHtml = _smgmtIsCancelled(outcome) ? _smgmtCancelBannerHtml(label) : '';
+
+  // Bulk estimate button (issue #598): show when any ticket lacks a size-* label
+  const hasUnsizedTickets = tickets.length > 0 && tickets.some(
+    t => !(t.labels || []).find(l => /^size-[SMLX]+$/.test(l.name))
+  );
+  const bulkEstBtnHtml = `<button class="smgmt-bulk-est-btn${hasUnsizedTickets ? '' : ' hidden'}"
+                    onclick="event.stopPropagation();_smgmtBulkEstimate('${escHtml(label)}',this)"
+                    title="Estimate all unsized tickets in this sprint">
+                    <i class="ti ti-calculator"></i> Estimate all unsized</button>
+                   <span class="smgmt-bulk-est-progress"></span>`;
+
   const parentLineage = parent
     ? `<span class="smgmt-sprint-lineage" title="Child sprint spawned from ${escHtml(parent)}">← from ${escHtml(sprintLabelDisplay(parent))}</span>`
     : '';
@@ -8950,6 +8980,7 @@ function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent, finished) {
         <div class="smgmt-sprint-header-right">
           ${_smgmtCapacityInputHtml(label)}
           ${_smgmtSortBtnHtml(label)}
+          ${bulkEstBtnHtml}
           <button class="smgmt-finish-btn ${finishHidden}" ${finishDisabled}
                   title="${finishDisabled ? 'No open tickets' : 'Finish sprint'}"
                   onclick="smgmtFinishSprint('${escHtml(label)}')">
@@ -9630,6 +9661,71 @@ async function _smgmtRetryEstimation(issueNum, btn) {
     };
     spinner.replaceWith(newBtn);
   }
+}
+
+// ── Bulk estimate (issue #598) ────────────────────────────────────────────────
+async function _smgmtBulkEstimate(sprintLabel, btnEl) {
+  const repo = _smgmtRepo();
+  if (!repo) { _smgmtShowToast('No repo configured — cannot estimate'); return; }
+
+  const containerId = sprintLabel === '__backlog__'
+    ? 'smgmt-backlog-tickets'
+    : `smgmt-tickets-${sprintLabel}`;
+  const container = document.getElementById(containerId);
+  if (!container) return;
+
+  // Find unsized ticket rows (no data-size attribute)
+  const unsizedRows = Array.from(container.querySelectorAll('.smgmt-ticket[data-issue]'))
+    .filter(row => !row.dataset.size);
+  const total = unsizedRows.length;
+
+  if (total === 0) {
+    btnEl.classList.add('hidden');
+    return;
+  }
+
+  // Progress span is always the next sibling of the button
+  const progressEl = btnEl.nextElementSibling;
+
+  btnEl.disabled = true;
+  if (progressEl) {
+    progressEl.textContent = `Estimating 0 / ${total}…`;
+    progressEl.classList.add('show');
+  }
+
+  let succeeded = 0;
+  let processed = 0;
+  for (const row of unsizedRows) {
+    const issueNum = parseInt(row.dataset.issue, 10);
+    try {
+      const resp = await fetch(
+        `/api/issues/${issueNum}/estimate?repo=${encodeURIComponent(repo)}`,
+        { method: 'POST' }
+      );
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const data = await resp.json();
+      if (!data.ok || !data.size) throw new Error('no size in response');
+      succeeded++;
+      row.dataset.size = data.size;
+      _smgmtUpdateEstimateBadge(issueNum);
+    } catch (err) {
+      _smgmtShowToast(`#${issueNum} estimate failed: ${err.message}`);
+    }
+    processed++;
+    if (progressEl) progressEl.textContent = `Estimating ${processed} / ${total}…`;
+  }
+
+  // Show final count
+  if (progressEl) progressEl.textContent = `Estimated ${succeeded} / ${total}`;
+  btnEl.disabled = false;
+
+  // Hide button if no unsized remain
+  const stillUnsized = Array.from(container.querySelectorAll('.smgmt-ticket[data-issue]'))
+    .filter(r => !r.dataset.size).length;
+  if (stillUnsized === 0) btnEl.classList.add('hidden');
+
+  // Fade out progress after 3s
+  setTimeout(() => { if (progressEl) progressEl.classList.remove('show'); }, 3000);
 }
 
 // ── Re-estimate action (issue #452, extended by #561) ────────────────────────
@@ -11759,6 +11855,15 @@ function _smgmtRenderBacklog(tickets) {
     countEl.textContent = tickets.length > 0
       ? `· ${tickets.length} ticket${tickets.length !== 1 ? 's' : ''}`
       : '';
+  }
+
+  // Update bulk estimate button visibility (issue #598)
+  const backlogBulkBtn = document.getElementById('smgmt-backlog-bulk-est-btn');
+  if (backlogBulkBtn) {
+    const hasUnsized = tickets.some(
+      t => !(t.labels || []).find(l => /^size-[SMLX]+$/.test(l.name))
+    );
+    backlogBulkBtn.classList.toggle('hidden', !hasUnsized);
   }
 
   // Sort newest first (higher issue number = newer)

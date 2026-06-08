@@ -2907,6 +2907,38 @@
     .smgmt-ticket-agent-tag.tester-class { background: var(--amber-bg);  color: var(--amber); }
     .smgmt-ticket-agent-tag.unknown-class { background: var(--surface-2); color: var(--text-sub); }
 
+    /* Segmented progress bar (issue #613) */
+    .smgmt-seg-bar { display: flex; gap: 2px; align-items: center; flex-shrink: 0; }
+    .seg-block { width: 12px; height: 8px; border-radius: 2px; flex-shrink: 0; }
+    .seg-done    { background: var(--green); }
+    .seg-failed  { background: var(--red); }
+    .seg-skipped { background: var(--surface-2); opacity: 0.45; border: 1px solid var(--border); }
+    .seg-pending { background: transparent; border: 1px solid var(--border); }
+    .seg-running { background: var(--blue); animation: seg-pulse 1.1s ease-in-out infinite; }
+    @keyframes seg-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+
+    /* Outcome band spacer — pushes seg-bar + time to the right */
+    .oc-spacer { flex: 1; }
+
+    /* Outcome band PR / summary links (issue #613) */
+    .oc-band-links { display: flex; align-items: center; gap: 10px; margin-left: 8px; }
+    .oc-pr-link, .oc-summary-link {
+      display: flex; align-items: center; gap: 4px;
+      font-size: 11px; color: var(--text-muted); text-decoration: none;
+    }
+    .oc-pr-link:hover, .oc-summary-link:hover { color: var(--text); }
+
+    /* Level separator row in running sprint ticket list (issue #613) */
+    .level-sep {
+      display: flex; align-items: center; gap: 8px;
+      padding: 4px 10px; margin: 4px 0;
+      font-size: 10px; font-weight: 600; letter-spacing: .04em;
+      color: var(--text-muted); border-top: 1px solid var(--border);
+      text-transform: uppercase;
+    }
+    .level-sep-num { color: var(--text-sub); }
+    .level-sep-desc { font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--text-sub); }
+
     /* Per-ticket size pill (issue #308) */
     .smgmt-ticket-size-pill {
       flex-shrink: 0;
@@ -8350,8 +8382,18 @@ function _smgmtInjectOutcomeBand(label, outcome) {
     else headerLeft.appendChild(badge);
   }
 
-  // Has-rework sprints keep their actionable planning tickets; the finish-card hat carries the summary.
-  if (meta.state === 'has_rework') return;
+  // Has-rework sprints keep their actionable planning tickets but still show the outcome seg bar
+  if (meta.state === 'has_rework') {
+    if (outcome.issues && outcome.issues.length > 0) {
+      const reworkBandHtml = _smgmtOutcomeBandHtml(label, outcome);
+      const reworkHeaderEl = card.querySelector('.smgmt-sprint-header');
+      const reworkBandEl = document.createElement('div');
+      reworkBandEl.innerHTML = reworkBandHtml;
+      const reworkBandNode = reworkBandEl.firstElementChild;
+      if (reworkHeaderEl) reworkHeaderEl.insertAdjacentElement('afterend', reworkBandNode);
+    }
+    return;
+  }
 
   // Build outcome band HTML
   const bandHtml = _smgmtOutcomeBandHtml(label, outcome);
@@ -8418,16 +8460,56 @@ function _fmtWallClock(secs) {
 
 function _smgmtOutcomeBandHtml(label, outcome) {
   const st = outcome.sprint_status;
+  const paneState = outcome.state || '';
   const c = outcome.counts || {};
   const dur = _fmtWallClock(outcome.wall_clock_secs);
   const ts = outcome.ended_at
     ? (st === 'completed' ? `ended ${outcome.ended_at}` : `stopped ${outcome.ended_at}`)
     : '';
-  return `<div class="smgmt-outcome-band ${escHtml(st)}">
+  const issues = outcome.issues || [];
+
+  // Segmented bar: one block per ticket (issue #613)
+  let segBarHtml = '';
+  if (issues.length > 0) {
+    const blocks = issues.map(iss => {
+      const o = iss.outcome || 'skipped';
+      let blockClass = 'seg-pending';
+      if (o === 'done')    blockClass = 'seg-done';
+      else if (o === 'failed')  blockClass = 'seg-failed';
+      else if (o === 'skipped') blockClass = 'seg-skipped';
+      return `<div class="seg-block ${blockClass}"></div>`;
+    }).join('');
+    segBarHtml = `<div class="smgmt-seg-bar">${blocks}</div>`;
+  }
+
+  // PR + Sprint Summary links for finished/completed state
+  let linksHtml = '';
+  if (paneState === 'completed' || st === 'completed') {
+    const prNum = outcome.pr_number;
+    const prUrl = outcome.pr_url;
+    const sumNum = outcome.summary_issue_num;
+    const sumUrl = outcome.summary_issue_url;
+    const prLink = prNum && prUrl
+      ? `<a href="${escHtml(prUrl)}" target="_blank" rel="noopener" class="oc-pr-link"><i class="ti ti-git-pull-request"></i> PR #${prNum}</a>`
+      : '';
+    const sumLink = sumNum && sumUrl
+      ? `<a href="${escHtml(sumUrl)}" target="_blank" rel="noopener" class="oc-summary-link"><i class="ti ti-file-description"></i> #${sumNum} Sprint Summary</a>`
+      : (sumNum
+          ? `<span class="oc-summary-link"><i class="ti ti-file-description"></i> #${sumNum} Sprint Summary</span>`
+          : '');
+    if (prLink || sumLink) {
+      linksHtml = `<div class="oc-band-links">${prLink}${sumLink}</div>`;
+    }
+  }
+
+  return `<div class="smgmt-outcome-band ${escHtml(st || '')}">
     <div class="smgmt-outcome-stat"><span class="onum green">${c.done || 0}</span><span class="olbl">Completed</span></div>
     <div class="smgmt-outcome-stat"><span class="onum ${c.failed ? 'red' : 'muted'}">${c.failed || 0}</span><span class="olbl">Failed</span></div>
     <div class="smgmt-outcome-stat"><span class="onum muted">${c.skipped || 0}</span><span class="olbl">Skipped</span></div>
+    <span class="oc-spacer"></span>
+    ${segBarHtml}
     <div class="smgmt-outcome-dur"><i class="ti ti-clock" style="vertical-align:-1px;"></i> ${escHtml(dur)}${ts ? ' · ' + escHtml(ts) : ''}</div>
+    ${linksHtml}
   </div>`;
 }
 
@@ -8660,6 +8742,31 @@ async function _smgmtLoadFinishCards() {
 }
 
 function _smgmtRenderFinishCard(label, cardData, branchData, repo) {
+  // Patch PR link into outcome band if it's visible (issue #613)
+  if (branchData && branchData.pr_url && branchData.pr_number) {
+    const sprintCard = document.getElementById(`smgmt-card-${label}`);
+    if (sprintCard) {
+      let linksEl = sprintCard.querySelector('.oc-band-links');
+      if (!linksEl) {
+        const band = sprintCard.querySelector('.smgmt-outcome-band');
+        if (band) {
+          linksEl = document.createElement('div');
+          linksEl.className = 'oc-band-links';
+          band.appendChild(linksEl);
+        }
+      }
+      if (linksEl && !linksEl.querySelector('.oc-pr-link')) {
+        const prLink = document.createElement('a');
+        prLink.href = branchData.pr_url;
+        prLink.target = '_blank';
+        prLink.rel = 'noopener';
+        prLink.className = 'oc-pr-link';
+        prLink.innerHTML = `<i class="ti ti-git-pull-request"></i> PR #${branchData.pr_number}`;
+        linksEl.insertBefore(prLink, linksEl.firstChild);
+      }
+    }
+  }
+
   const cardEl  = document.getElementById(`smgmt-finish-card-${label}`);
   const blockEl = document.getElementById(`smgmt-card-${label}`);
   if (!cardEl || !blockEl) return;
@@ -9079,10 +9186,37 @@ function _smgmtRunningCardHtml(label, n, tickets) {
   const sourceTickets = liveIssues.length > 0 ? liveIssues : tickets;
   const cardRepo = _smgmtRepo();
 
+  // Segmented bar blocks — one per ticket (issue #613)
+  const segBarHtml = sourceTickets.length > 0
+    ? `<div class="smgmt-seg-bar" id="smgmt-seg-${escHtml(label)}">${
+        sourceTickets.map(t => {
+          const liveIss = liveByNum[t.number];
+          const liveStatus = liveIss ? liveIss.status : null;
+          const agentStatus = liveIss ? liveIss.agent_status : null;
+          let blockClass = 'seg-pending';
+          if (liveStatus === 'done') blockClass = 'seg-done';
+          else if (currentTicket && t.number === currentTicket.number) blockClass = 'seg-running';
+          return `<div class="seg-block ${blockClass}" data-issue="${t.number}"></div>`;
+        }).join('')
+      }</div>`
+    : '';
+
+  // Ticket rows with level-sep rows between dispatch levels (issue #613)
+  let prevLevel = 0;
   const ticketRowsHtml = sourceTickets.map(t => {
     const liveIss = liveByNum[t.number];
     const liveStatus = liveIss ? liveIss.status : null;
     const agentStatus = liveIss ? liveIss.agent_status : null;
+    const ticketLevel = (liveIss && liveIss.dispatch_level) || (t.dispatch_level) || 0;
+
+    let sepHtml = '';
+    if (ticketLevel > 0 && ticketLevel !== prevLevel && prevLevel > 0) {
+      sepHtml = `<div class="level-sep">
+        <span class="level-sep-num">Level ${ticketLevel}</span>
+        <span class="level-sep-desc">· runs after level ${prevLevel} completes</span>
+      </div>`;
+    }
+    if (ticketLevel > 0) prevLevel = ticketLevel;
 
     let indicator = '';
     if (liveStatus === 'done') {
@@ -9090,10 +9224,8 @@ function _smgmtRunningCardHtml(label, n, tickets) {
     } else if (agentStatus === 'failed' || liveStatus === 'skipped') {
       indicator = '<div class="smgmt-ticket-indicator"><div class="circle-failed">&#10005;</div></div>';
     } else if (currentTicket && t.number === currentTicket.number) {
-      // In-flight — show spinning ring
       indicator = '<div class="smgmt-ticket-indicator"><div class="ring"></div></div>';
     } else {
-      // Pending — empty circle
       indicator = '<div class="smgmt-ticket-indicator"><div class="circle-pending"></div></div>';
     }
 
@@ -9113,7 +9245,7 @@ function _smgmtRunningCardHtml(label, n, tickets) {
       : '';
 
     const runTicketLabels = escHtml((t.labels || []).map(l => l.name).join(','));
-    return `<div class="smgmt-ticket" data-issue="${t.number}" data-labels="${runTicketLabels}" draggable="false"${runSizeAttr}>
+    return sepHtml + `<div class="smgmt-ticket" data-issue="${t.number}" data-labels="${runTicketLabels}" draggable="false"${runSizeAttr}>
       ${indicator}
       <a class="smgmt-ticket-num" href="${escHtml(issueUrl)}" target="_blank"
          rel="noopener">#${t.number}</a>
@@ -9166,8 +9298,10 @@ function _smgmtRunningCardHtml(label, n, tickets) {
         </div>
         <div class="smgmt-running-stat">
           <span class="rsnum amber" id="smgmt-rs-est-${escHtml(label)}">${estRemMins != null ? estRemMins + 'm' : '—'}</span>
-          <span class="rslbl">Est. remaining</span>
+          <span class="rslbl">— EST. REMAINING</span>
         </div>
+        <span class="oc-spacer"></span>
+        ${segBarHtml}
         <div class="smgmt-running-time" id="smgmt-rs-time-${escHtml(label)}">
           <i class="ti ti-clock" style="font-size:12px;"></i>
           ${_fmtRunningTime(timeSpentSec)}
@@ -9456,6 +9590,21 @@ function _smgmtLivePatch(label, live) {
       elapsedEl.remove();
     }
   });
+
+  // Update segmented bar blocks (issue #613)
+  const segBarEl = document.getElementById(`smgmt-seg-${label}`);
+  if (segBarEl) {
+    const segBlocks = segBarEl.querySelectorAll('.seg-block[data-issue]');
+    segBlocks.forEach(block => {
+      const bNum = parseInt(block.dataset.issue, 10);
+      const liveIss = liveByNum[bNum];
+      const liveStatus = liveIss ? liveIss.status : null;
+      let blockClass = 'seg-pending';
+      if (liveStatus === 'done') blockClass = 'seg-done';
+      else if (currentTicket && bNum === currentTicket.number) blockClass = 'seg-running';
+      block.className = `seg-block ${blockClass}`;
+    });
+  }
 }
 
 /** Start or restart the live polling loop for any running sprints. */

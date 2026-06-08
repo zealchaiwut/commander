@@ -1830,6 +1830,115 @@ def get_project_events(
     return result
 
 
+# ── Settings API (issue #639) ────────────────────────────────────────────────
+
+import services.sprint_manager.settings_repo as _settings_repo
+from services.sprint_manager.settings_schema import (
+    APP_CONFIG_KEY,
+    SECRET_FIELDS,
+    KNOWN_FIELDS,
+    build_effective_response,
+)
+
+
+def _resolve_project_slug(slug: str) -> str:
+    """Resolve a project slug to the full repo string (owner/repo).
+
+    Matches by last path component or exact match (mirrors get_project_events pattern).
+    Raises HTTPException 404 if not found.
+    """
+    try:
+        all_projects = projects_module.load_projects()
+    except Exception:
+        all_projects = []
+
+    matched = next(
+        (p for p in all_projects
+         if p["repo"].split("/")[-1] == slug or p["repo"] == slug),
+        None,
+    )
+    if matched is None:
+        raise HTTPException(status_code=404, detail=f"Project '{slug}' not found")
+    return matched["repo"]
+
+
+def _validate_settings_body(body: dict) -> None:
+    """Validate a PUT settings request body.
+
+    Raises HTTPException 422 for secret fields, 400 for unknown fields.
+    """
+    for key in body:
+        if key in SECRET_FIELDS:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"Field '{key}' is a secret and cannot be written via this endpoint. "
+                    "Use the dedicated secret management endpoint."
+                ),
+            )
+    unknown = [k for k in body if k not in KNOWN_FIELDS]
+    if unknown:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown settings field(s): {', '.join(sorted(unknown))}. "
+                   f"Allowed fields: {', '.join(sorted(KNOWN_FIELDS))}",
+        )
+
+
+@app.get("/api/settings")
+def get_global_settings():
+    """Return effective global settings.
+
+    Non-secret fields are returned as-is with defaults applied.
+    Secret fields appear as boolean presence flags (<field>_set).
+    """
+    stored = _settings_repo.get_setting_scoped("global", APP_CONFIG_KEY)
+    return build_effective_response(stored)
+
+
+@app.put("/api/settings")
+def put_global_settings(body: dict):
+    """Persist a global settings override.
+
+    Only the supplied keys are written; existing keys not in the body are preserved.
+    Returns 400 for unknown keys, 422 for secret fields.
+    """
+    _validate_settings_body(body)
+    current = _settings_repo.get_setting_scoped("global", APP_CONFIG_KEY)
+    merged = {**current, **body}
+    _settings_repo.set_setting("global", APP_CONFIG_KEY, merged)
+    return build_effective_response(merged)
+
+
+@app.get("/api/projects/{slug}/settings")
+def get_project_settings(slug: str):
+    """Return effective project settings (project overrides merged over global).
+
+    Non-secret fields returned with defaults applied; secrets as boolean flags.
+    Returns 404 when the project slug does not exist.
+    """
+    repo = _resolve_project_slug(slug)
+    stored = _settings_repo.get_setting(APP_CONFIG_KEY, project=repo)
+    return build_effective_response(stored)
+
+
+@app.put("/api/projects/{slug}/settings")
+def put_project_settings(slug: str, body: dict):
+    """Persist a project-level settings override.
+
+    Only the supplied keys are written as a project override.
+    Global settings are not affected.
+    Returns 400 for unknown keys, 422 for secret fields, 404 if project not found.
+    """
+    repo = _resolve_project_slug(slug)
+    _validate_settings_body(body)
+    current_project_override = _settings_repo.get_setting_scoped("project", APP_CONFIG_KEY, project=repo)
+    merged = {**current_project_override, **body}
+    _settings_repo.set_setting("project", APP_CONFIG_KEY, merged, project=repo)
+    effective = _settings_repo.get_setting(APP_CONFIG_KEY, project=repo)
+    return build_effective_response(effective)
+
+
 # ── Branch cleanup (issue #634) ───────────────────────────────────────────────
 
 _PROTECTED_BRANCHES: frozenset[str] = frozenset({"develop", "master", "main", "attachments"})

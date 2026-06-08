@@ -978,6 +978,20 @@ def _changed_py_files(base_branch: str, cwd: Path) -> list[str]:
     return [f for f in out.splitlines() if f.endswith(".py")]
 
 
+_JS_TS_EXTENSIONS = (".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs")
+
+
+def _changed_js_ts_files(base_branch: str, cwd: Path) -> list[str]:
+    """Return JS/TS files added/modified in HEAD relative to base_branch."""
+    rc, out, _ = _run_timed(
+        "git", "diff", base_branch, "--name-only", "--diff-filter=ACM",
+        cwd=cwd,
+    )
+    if rc != 0:
+        return []
+    return [f for f in out.splitlines() if any(f.endswith(ext) for ext in _JS_TS_EXTENSIONS)]
+
+
 # ── dashboard integration ─────────────────────────────────────────────────────
 
 def _post_agent_event(
@@ -1513,52 +1527,85 @@ def _gate_lint(
     base_branch: str = "develop",
     gate_scope: str = "changed",
 ) -> GateResult:
-    """Gate 2 -- run ruff check inside the tester worktree dashboard.
+    """Gate: run ruff (Python) and eslint/biome + prettier (JS/TS).
 
-    gate_scope='changed' (default): only lint .py files changed relative to
-    base_branch. gate_scope='full': run ruff check . (legacy behaviour).
+    gate_scope='changed' (default): only lint files changed relative to
+    base_branch. gate_scope='full': run against whole codebase (legacy behaviour).
+    Skips gracefully when tools are not installed or no relevant files changed.
     """
     if skip:
         print("  [gate:lint] skipped")
         return GateResult(gate="lint", passed=True, skipped=True)
 
     _post_agent_event("gate:lint")
+    combined = ""
+    any_ran = False
 
-    # ruff is optional -- if not found, log warning and treat as passed
+    # ── Python lint via ruff ───────────────────────────────────────────────────
     ok_ruff, ruff_path, _ = _try("which", "ruff")
     if not ok_ruff:
-        # Try inside dashboard venv
         venv_ruff = worktester_dashboard / ".." / "venv" / "bin" / "ruff"
-        if venv_ruff.exists():
-            ruff_bin = str(venv_ruff.resolve())
-        else:
-            structured_log.warn("lint_tool_missing", "[gate:lint] ruff not found; treating as passed", issue_num=issue_num)
-            return GateResult(gate="lint", passed=True, skipped=False,
-                              output="ruff not found -- skipped with warning")
+        ruff_bin = str(venv_ruff.resolve()) if venv_ruff.exists() else None
     else:
         ruff_bin = ruff_path
 
-    # Determine which files to lint based on gate_scope
-    if gate_scope == "full":
-        print("  [gate:lint] running ruff check . (full scope) ...")
-        rc, stdout, stderr = _run_timed(ruff_bin, "check", ".", cwd=worktester_dashboard)
+    if ruff_bin:
+        if gate_scope == "full":
+            print("  [gate:lint] running ruff check . (full scope) ...")
+            rc, stdout, stderr = _run_timed(ruff_bin, "check", ".", cwd=worktester_dashboard)
+            combined += stdout + stderr
+            any_ran = True
+            if rc != 0:
+                structured_log.error("gate_failed", f"[gate:lint] ruff FAIL (exit {rc})",
+                                     gate="lint", issue_num=issue_num, exit_code=rc)
+                _revert_to_sit(issue_num, "lint", combined, repo_name=repo_name)
+                return GateResult(gate="lint", passed=False, output=combined)
+            print("  [gate:lint] ruff PASS")
+        else:
+            py_files = _changed_py_files(base_branch, cwd=worktester_dashboard)
+            if py_files:
+                print(f"  [gate:lint] ruff checking {len(py_files)} file(s): {', '.join(py_files)}")
+                rc, stdout, stderr = _run_timed(ruff_bin, "check", *py_files,
+                                                cwd=worktester_dashboard)
+                combined += stdout + stderr
+                any_ran = True
+                if rc != 0:
+                    structured_log.error("gate_failed", f"[gate:lint] ruff FAIL (exit {rc})",
+                                         gate="lint", issue_num=issue_num, exit_code=rc)
+                    _revert_to_sit(issue_num, "lint", combined, repo_name=repo_name)
+                    return GateResult(gate="lint", passed=False, output=combined)
+                print("  [gate:lint] ruff PASS")
+            else:
+                print("  [gate:lint] no Python files changed — ruff skipped")
     else:
-        # changed scope: only lint .py files changed relative to base_branch
-        py_files = _changed_py_files(base_branch, cwd=worktester_dashboard)
-        if not py_files:
-            print("  [gate:lint] no Python files changed — skipped")
-            return GateResult(gate="lint", passed=True, output="no Python files changed")
-        print(f"  [gate:lint] checking {len(py_files)} file(s): {', '.join(py_files)}")
-        rc, stdout, stderr = _run_timed(ruff_bin, "check", *py_files, cwd=worktester_dashboard)
+        structured_log.warn("lint_tool_missing", "[gate:lint] ruff not found; skipping Python lint",
+                            issue_num=issue_num)
 
-    combined = stdout + stderr
-    if rc == 0:
-        print("  [gate:lint] PASS")
-        return GateResult(gate="lint", passed=True, output=combined)
+    # ── Frontend lint via eslint/biome + prettier ──────────────────────────────
+    if gate_scope == "full":
+        js_ts_files_for_fe: list[str] = ["."]
     else:
-        structured_log.error("gate_failed", f"[gate:lint] FAIL (exit {rc})", gate="lint", issue_num=issue_num, exit_code=rc)
-        _revert_to_sit(issue_num, "lint", combined, repo_name=repo_name)
-        return GateResult(gate="lint", passed=False, output=combined)
+        js_ts_files_for_fe = _changed_js_ts_files(base_branch, cwd=worktester_dashboard)
+
+    if js_ts_files_for_fe:
+        fe_passed, fe_output = _run_frontend_lint(
+            issue_num, worktester_dashboard, js_ts_files_for_fe, gate_scope
+        )
+        combined += fe_output
+        if fe_output.strip():
+            any_ran = True
+        if not fe_passed:
+            _revert_to_sit(issue_num, "lint", combined, repo_name=repo_name)
+            return GateResult(gate="lint", passed=False, output=combined)
+    else:
+        print("  [gate:lint] no JS/TS files changed — frontend lint skipped")
+
+    if not any_ran:
+        print("  [gate:lint] no lintable files changed — skipped")
+        return GateResult(gate="lint", passed=True, output="no lintable files changed")
+
+    print("  [gate:lint] PASS")
+    return GateResult(gate="lint", passed=True, output=combined)
 
 
 def _gate_merge_preview(
@@ -1617,6 +1664,249 @@ def _gate_merge_preview(
     return GateResult(gate="merge-preview", passed=True, output=combined)
 
 
+def _gate_typecheck(
+    issue_num: int,
+    worktester_dashboard: Path,
+    skip: bool,
+    repo_name: Optional[str] = None,
+    base_branch: str = "develop",
+    gate_scope: str = "changed",
+) -> GateResult:
+    """Gate: run mypy (Python) and/or tsc --noEmit (TypeScript) on changed files.
+
+    Skips gracefully when the tool is not installed or no relevant files changed.
+    """
+    if skip:
+        print("  [gate:typecheck] skipped")
+        return GateResult(gate="typecheck", passed=True, skipped=True)
+
+    _post_agent_event("gate:typecheck")
+    results_passed = True
+    combined = ""
+
+    # ── Python typecheck via mypy ──────────────────────────────────────────────
+    if gate_scope == "full":
+        py_files: list[str] = ["apps/dashboard"]
+    else:
+        py_files = _changed_py_files(base_branch, cwd=worktester_dashboard)
+
+    if py_files:
+        ok_mypy, mypy_path, _ = _try("which", "mypy")
+        if not ok_mypy:
+            venv_mypy = worktester_dashboard / ".." / "venv" / "bin" / "mypy"
+            mypy_bin = str(venv_mypy.resolve()) if venv_mypy.exists() else None
+        else:
+            mypy_bin = mypy_path
+
+        if mypy_bin:
+            targets = ["."] if gate_scope == "full" else py_files
+            print(f"  [gate:typecheck] running mypy on {len(targets)} target(s) ...")
+            rc, stdout, stderr = _run_timed(mypy_bin, "--ignore-missing-imports", *targets,
+                                            cwd=worktester_dashboard)
+            combined += stdout + stderr
+            if rc != 0:
+                structured_log.error("gate_failed", f"[gate:typecheck] mypy FAIL (exit {rc})",
+                                     gate="typecheck", issue_num=issue_num, exit_code=rc)
+                results_passed = False
+            else:
+                print("  [gate:typecheck] mypy PASS")
+        else:
+            structured_log.warn("typecheck_tool_missing",
+                                "[gate:typecheck] mypy not found; skipping Python typecheck",
+                                issue_num=issue_num)
+
+    # ── TypeScript typecheck via tsc --noEmit ──────────────────────────────────
+    if gate_scope == "full":
+        ts_files: list[str] = []
+        ok_ts, ts_out, _ = _try("find", ".", "-name", "tsconfig.json", "-maxdepth", "3",
+                                 cwd=worktester_dashboard)
+        if ok_ts and ts_out.strip():
+            ts_files = ["_has_tsconfig_"]  # sentinel — just triggers tsc check
+    else:
+        ts_files = _changed_js_ts_files(base_branch, cwd=worktester_dashboard)
+
+    if ts_files:
+        ok_tsc, tsc_path, _ = _try("which", "tsc")
+        if ok_tsc:
+            print("  [gate:typecheck] running tsc --noEmit ...")
+            rc, stdout, stderr = _run_timed(tsc_path, "--noEmit", cwd=worktester_dashboard)
+            combined += stdout + stderr
+            if rc != 0:
+                structured_log.error("gate_failed", f"[gate:typecheck] tsc FAIL (exit {rc})",
+                                     gate="typecheck", issue_num=issue_num, exit_code=rc)
+                results_passed = False
+            else:
+                print("  [gate:typecheck] tsc PASS")
+        else:
+            structured_log.warn("typecheck_tool_missing",
+                                "[gate:typecheck] tsc not found; skipping TS typecheck",
+                                issue_num=issue_num)
+
+    if not py_files and not ts_files:
+        print("  [gate:typecheck] no typed files changed — skipped")
+        return GateResult(gate="typecheck", passed=True, output="no typed files changed")
+
+    if not results_passed:
+        _revert_to_sit(issue_num, "typecheck", combined, repo_name=repo_name)
+        return GateResult(gate="typecheck", passed=False, output=combined)
+
+    if not combined:
+        print("  [gate:typecheck] no typecheck tools found — skipped")
+        return GateResult(gate="typecheck", passed=True, skipped=True,
+                          output="no typecheck tools found")
+
+    return GateResult(gate="typecheck", passed=True, output=combined)
+
+
+def _run_frontend_lint(
+    issue_num: int,
+    worktester_dashboard: Path,
+    js_ts_files: list[str],
+    gate_scope: str,
+) -> tuple[bool, str]:
+    """Run eslint/biome + prettier --check on JS/TS files.
+
+    Returns (passed: bool, combined_output: str).
+    Skips gracefully when tools are missing.
+    """
+    combined = ""
+    passed = True
+
+    # eslint or biome (prefer biome if configured)
+    ok_biome, biome_path, _ = _try("which", "biome")
+    ok_eslint, eslint_path, _ = _try("which", "eslint")
+    ok_npx, npx_path, _ = _try("which", "npx")
+
+    linter_bin: Optional[str] = None
+    linter_args: list[str] = []
+    if ok_biome:
+        linter_bin = biome_path
+        linter_args = ["check"] + (["--apply=false"] if gate_scope != "full" else ["--apply=false", "."])
+    elif ok_eslint:
+        linter_bin = eslint_path
+        linter_args = ["--max-warnings=0"]
+    elif ok_npx:
+        # try biome via npx — skip if not found in project
+        rc_biome, _, _ = _run_timed(
+            npx_path, "--no", "biome", "--version", cwd=worktester_dashboard
+        )
+        if rc_biome == 0:
+            linter_bin = npx_path
+            linter_args = ["--no", "biome", "check", "--apply=false"]
+
+    if linter_bin:
+        targets = ["."] if gate_scope == "full" else js_ts_files
+        print(f"  [gate:lint-fe] running frontend linter on {len(targets)} target(s) ...")
+        rc, stdout, stderr = _run_timed(linter_bin, *linter_args, *targets,
+                                        cwd=worktester_dashboard)
+        combined += stdout + stderr
+        if rc != 0:
+            structured_log.error("gate_failed", f"[gate:lint-fe] FAIL (exit {rc})",
+                                 gate="lint", issue_num=issue_num, exit_code=rc)
+            passed = False
+        else:
+            print("  [gate:lint-fe] PASS")
+    else:
+        structured_log.warn("lint_tool_missing",
+                            "[gate:lint-fe] no eslint/biome found; skipping JS/TS lint",
+                            issue_num=issue_num)
+
+    # prettier --check
+    if passed:
+        ok_prettier, prettier_bin, _ = _try("which", "prettier")
+        if not ok_prettier and ok_npx:
+            rc_pcheck, _, _ = _run_timed(
+                npx_path, "--no", "prettier", "--version", cwd=worktester_dashboard
+            )
+            if rc_pcheck == 0:
+                prettier_bin = npx_path
+                prettier_prefix = ["--no", "prettier"]
+            else:
+                prettier_bin = None
+                prettier_prefix = []
+        else:
+            prettier_prefix = []
+
+        if ok_prettier or (not ok_prettier and ok_npx and prettier_bin):
+            targets = ["."] if gate_scope == "full" else js_ts_files
+            cmd_args = prettier_prefix + ["--check"] + targets
+            print(f"  [gate:lint-fe] running prettier --check on {len(targets)} target(s) ...")
+            rc, stdout, stderr = _run_timed(prettier_bin, *cmd_args,
+                                            cwd=worktester_dashboard)
+            combined += stdout + stderr
+            if rc != 0:
+                structured_log.error("gate_failed", f"[gate:lint-fe] prettier FAIL (exit {rc})",
+                                     gate="lint", issue_num=issue_num, exit_code=rc)
+                passed = False
+            else:
+                print("  [gate:lint-fe] prettier PASS")
+
+    return passed, combined
+
+
+def _gate_design(
+    issue_num: int,
+    worktester_dashboard: Path,
+    skip: bool,
+    repo_name: Optional[str] = None,
+) -> GateResult:
+    """Gate: run impeccable detect on the frontend for UI anti-patterns.
+
+    Uses the deterministic pattern-matching detector (no LLM).
+    Exit code 0 = no issues found; non-zero = issues detected.
+    Skips gracefully when impeccable is not installed or no HTML/CSS/JSX present.
+    """
+    if skip:
+        print("  [gate:design] skipped")
+        return GateResult(gate="design", passed=True, skipped=True)
+
+    _post_agent_event("gate:design")
+
+    ok_npx, npx_path, _ = _try("which", "npx")
+    if not ok_npx:
+        structured_log.warn("design_tool_missing",
+                            "[gate:design] npx not found; skipping design gate",
+                            issue_num=issue_num)
+        return GateResult(gate="design", passed=True, skipped=True,
+                          output="npx not found — design gate skipped")
+
+    # Detect if there is any frontend to scan
+    fe_exts = (".html", ".css", ".jsx", ".tsx")
+    has_frontend = any(
+        True for ext in fe_exts
+        for _ in worktester_dashboard.rglob(f"*{ext}")
+    ) if worktester_dashboard.exists() else False
+
+    if not has_frontend:
+        print("  [gate:design] no frontend files found — skipped")
+        return GateResult(gate="design", passed=True, skipped=True,
+                          output="no frontend files — design gate skipped")
+
+    # Determine scan target
+    static_dir = worktester_dashboard / "apps" / "dashboard" / "static"
+    if not static_dir.exists():
+        static_dir = worktester_dashboard / "static"
+    if not static_dir.exists():
+        static_dir = worktester_dashboard
+
+    print(f"  [gate:design] running impeccable detect {static_dir.name}/ ...")
+    rc, stdout, stderr = _run_timed(
+        npx_path, "--yes", "impeccable", "detect", str(static_dir), "--json",
+        cwd=worktester_dashboard,
+    )
+    combined = stdout + stderr
+
+    if rc == 0:
+        print("  [gate:design] PASS — no design anti-patterns detected")
+        return GateResult(gate="design", passed=True, output=combined)
+    else:
+        # impeccable exits non-zero when issues are found
+        structured_log.error("gate_failed", f"[gate:design] FAIL (exit {rc})",
+                             gate="design", issue_num=issue_num, exit_code=rc)
+        _revert_to_sit(issue_num, "design", combined, repo_name=repo_name)
+        return GateResult(gate="design", passed=False, output=combined)
+
+
 def _run_quality_gates(
     issue_num: int,
     feature_branch: str,
@@ -1626,13 +1916,16 @@ def _run_quality_gates(
     gate_pytest: bool,
     gate_lint: bool,
     gate_merge_preview: bool,
+    gate_typecheck: bool = True,
+    gate_design: bool = True,
     target_branch: str = "develop",
     repo_name: Optional[str] = None,
     base_branch: str = "develop",
     gate_scope: str = "changed",
 ) -> list[GateResult]:
-    """Run the three quality gates sequentially. Returns list of GateResult.
+    """Run quality gates sequentially. Returns list of GateResult.
 
+    Order (cheap/deterministic first): typecheck → lint → design → pytest → merge-preview.
     Stops early on first failure (remaining gates are not run).
     If skip_all is True, all gates are skipped.
 
@@ -1642,21 +1935,21 @@ def _run_quality_gates(
     """
     results: list[GateResult] = []
 
-    # Gate 1 -- pytest
-    r1 = _gate_pytest(
+    # Gate 1 -- typecheck (cheap, deterministic)
+    r_tc = _gate_typecheck(
         issue_num,
         worktester_dashboard,
-        skip=(skip_all or not gate_pytest),
+        skip=(skip_all or not gate_typecheck),
         repo_name=repo_name,
         base_branch=base_branch,
         gate_scope=gate_scope,
     )
-    results.append(r1)
-    if not r1.passed:
+    results.append(r_tc)
+    if not r_tc.passed:
         return results
 
-    # Gate 2 -- lint
-    r2 = _gate_lint(
+    # Gate 2 -- lint (Python ruff + frontend eslint/biome/prettier)
+    r_lint = _gate_lint(
         issue_num,
         worktester_dashboard,
         skip=(skip_all or not gate_lint),
@@ -1664,12 +1957,36 @@ def _run_quality_gates(
         base_branch=base_branch,
         gate_scope=gate_scope,
     )
-    results.append(r2)
-    if not r2.passed:
+    results.append(r_lint)
+    if not r_lint.passed:
         return results
 
-    # Gate 3 -- merge-preview
-    r3 = _gate_merge_preview(
+    # Gate 3 -- design (impeccable UI anti-pattern detector, no LLM)
+    r_design = _gate_design(
+        issue_num,
+        worktester_dashboard,
+        skip=(skip_all or not gate_design),
+        repo_name=repo_name,
+    )
+    results.append(r_design)
+    if not r_design.passed:
+        return results
+
+    # Gate 4 -- pytest
+    r_pytest = _gate_pytest(
+        issue_num,
+        worktester_dashboard,
+        skip=(skip_all or not gate_pytest),
+        repo_name=repo_name,
+        base_branch=base_branch,
+        gate_scope=gate_scope,
+    )
+    results.append(r_pytest)
+    if not r_pytest.passed:
+        return results
+
+    # Gate 5 -- merge-preview (most expensive; run last)
+    r_merge = _gate_merge_preview(
         issue_num,
         feature_branch,
         worktester_root,
@@ -1677,7 +1994,7 @@ def _run_quality_gates(
         target_branch=target_branch,
         repo_name=repo_name,
     )
-    results.append(r3)
+    results.append(r_merge)
 
     return results
 
@@ -1801,6 +2118,8 @@ def handle_post_tester(
     gate_pytest: bool,
     gate_lint: bool,
     gate_merge_preview: bool,
+    gate_typecheck: bool = True,
+    gate_design: bool = True,
     worktester_root: Optional[Path] = None,
     worktester_dashboard: Optional[Path] = None,
     target_branch: str = "develop",
@@ -1947,8 +2266,10 @@ def handle_post_tester(
             _call_finish_feature(issue_num, wt_root, target_branch=target_branch, repo_name=eff_repo, cfg=cfg, sprint_label=sprint_label)
         _post_agent_event("gate:merging", api_url=api_url)
         all_skipped = [
-            GateResult(gate="pytest",        passed=True, skipped=True),
+            GateResult(gate="typecheck",     passed=True, skipped=True),
             GateResult(gate="lint",          passed=True, skipped=True),
+            GateResult(gate="design",        passed=True, skipped=True),
+            GateResult(gate="pytest",        passed=True, skipped=True),
             GateResult(gate="merge-preview", passed=True, skipped=True),
         ]
         _transition_safe(issue_num, _TicketState.UAT, actor="sprint_manager", repo_name=eff_repo)
@@ -1966,6 +2287,8 @@ def handle_post_tester(
         gate_pytest=gate_pytest,
         gate_lint=gate_lint,
         gate_merge_preview=gate_merge_preview,
+        gate_typecheck=gate_typecheck,
+        gate_design=gate_design,
         target_branch=target_branch,
         repo_name=eff_repo,
         base_branch=base_branch,
@@ -1995,6 +2318,8 @@ def handle_post_tester(
         gate_name = failed.gate if failed else "unknown"
         # Map gate name to fine-grained failure category for needs-rework logic
         gate_category_map = {
+            "typecheck":     FailureCategory.GATE_FAIL,
+            "design":        FailureCategory.GATE_FAIL,
             "pytest":        FailureCategory.PYTEST_FAIL,
             "lint":          FailureCategory.LINT_FAIL,
             "merge-preview": FailureCategory.MERGE_CONFLICT,
@@ -2113,10 +2438,38 @@ def _dispatch_coder(
         issue_url = f"https://github.com/{_r(eff_repo)}/issues/{issue_num}"
         prompt = cfg.coder_prompt_template.format(issue_url=issue_url)
     else:
+        # Detect design context files for coder orientation
+        _design_hints = []
+        for _doc in ("PRODUCT.md", "DESIGN.md"):
+            if (cwd_path / _doc).exists():
+                _design_hints.append(_doc)
+        _design_prefix = (
+            f" If the issue touches frontend/UI, read {' and '.join(_design_hints)} first"
+            " to understand design conventions and anti-patterns to avoid."
+            if _design_hints else ""
+        )
+
         prompt = (
-            f"Read the issue at https://github.com/{_r(eff_repo)}/issues/{issue_num} "
-            "and implement it following the project's branching workflow. "
-            "Use the BA/coder/tester workflow defined in CLAUDE.md."
+            f"Read the issue at https://github.com/{_r(eff_repo)}/issues/{issue_num}"
+            " and implement it following the project's branching workflow."
+            " Use the BA/coder/tester workflow defined in CLAUDE.md."
+            " TDD WORKFLOW: before writing implementation code, read the"
+            " '## Acceptance Criteria' (or '## Acceptance') section of the issue"
+            " and translate each criterion into a pytest test in the tests/ directory."
+            " Write the tests first, then implement until all tests pass."
+            " You must NOT delete, skip, or weaken any test to make it pass —"
+            " every test must be anchored to a specific acceptance criterion and must"
+            " pass because the implementation satisfies it, not because the test was"
+            " softened."
+            f"{_design_prefix}"
+        )
+
+    # TDD guard: if custom template omits TDD instruction, append it.
+    if "TDD" not in prompt and "acceptance criteria" not in prompt.lower() and "write the tests first" not in prompt.lower():
+        prompt += (
+            " TDD WORKFLOW: translate each Acceptance Criterion into a pytest test"
+            " before writing implementation code. Tests must stay anchored to their"
+            " criterion — do not delete or weaken them to achieve a passing run."
         )
 
     # AC-3 (issue #311): always append the no-merge constraint so the coder
@@ -4294,6 +4647,8 @@ def run_sprint(
     gate_pytest: bool,
     gate_lint: bool,
     gate_merge_preview: bool,
+    gate_typecheck: bool = True,
+    gate_design: bool = True,
     alert_modes: Optional[list[str]] = None,
     repo_name: Optional[str] = None,
     dry_run: bool = False,
@@ -4919,6 +5274,8 @@ def run_sprint(
             gate_pytest        = gate_pytest,
             gate_lint          = gate_lint,
             gate_merge_preview = gate_merge_preview,
+            gate_typecheck     = gate_typecheck,
+            gate_design        = gate_design,
             target_branch      = target_branch,
             repo_name          = eff_repo,
             cfg                = cfg,
@@ -5033,16 +5390,28 @@ def main() -> None:
         help="Skip all quality gates and force auto-merge after tester passes",
     )
     p.add_argument(
-        "--gate-pytest",
+        "--gate-typecheck",
         action=argparse.BooleanOptionalAction,
-        default=True,
-        help="Enable/disable pytest gate (default: enabled)",
+        default=os.environ.get("COMMANDER_GATE_TYPECHECK", "1") != "0",
+        help="Enable/disable typecheck gate — mypy/tsc (default: enabled; env: COMMANDER_GATE_TYPECHECK=0 to disable)",
     )
     p.add_argument(
         "--gate-lint",
         action=argparse.BooleanOptionalAction,
         default=True,
-        help="Enable/disable lint gate (default: enabled)",
+        help="Enable/disable lint gate — ruff + eslint/prettier (default: enabled)",
+    )
+    p.add_argument(
+        "--gate-design",
+        action=argparse.BooleanOptionalAction,
+        default=os.environ.get("COMMANDER_GATE_DESIGN", "1") != "0",
+        help="Enable/disable design gate — impeccable UI anti-pattern detector (default: enabled; env: COMMANDER_GATE_DESIGN=0 to disable)",
+    )
+    p.add_argument(
+        "--gate-pytest",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Enable/disable pytest gate (default: enabled)",
     )
     p.add_argument(
         "--gate-merge-preview",
@@ -5270,6 +5639,8 @@ def main() -> None:
             gate_pytest          = args.gate_pytest,
             gate_lint            = args.gate_lint,
             gate_merge_preview   = args.gate_merge_preview,
+            gate_typecheck       = args.gate_typecheck,
+            gate_design          = args.gate_design,
             alert_modes          = alert_modes,
             repo_name            = eff_repo,
             dry_run              = args.dry_run,

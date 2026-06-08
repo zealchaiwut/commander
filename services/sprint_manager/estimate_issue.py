@@ -11,11 +11,13 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -29,6 +31,12 @@ if str(REPO_ROOT) not in sys.path:
 
 from services.run_id import mint_run_id
 from services.logging import log as structured_log
+
+_SIZING_DIR = Path(__file__).parent
+if str(_SIZING_DIR) not in sys.path:
+    sys.path.insert(0, str(_SIZING_DIR))
+from sizing import minutes_from_letter as _minutes_from_letter
+from calibration import CalibrationResult, load_calibration, calibration_prompt_section, db_calibration_records
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -101,25 +109,36 @@ def fetch_issue(issue_num: int, repo: str) -> dict:
 
 
 _ESTIMATOR_MAX_RETRIES = 3
-_ESTIMATOR_RETRY_DELAY_SECS = 5
+_ESTIMATOR_RETRY_DELAYS = [2, 4, 8]  # exponential backoff seconds before retry attempts 2, 3, 4
 
 
-def run_estimator(issue_num: int, issue_data: dict) -> Optional[dict]:
-    """Invoke the estimator agent via `claude -p` and return parsed JSON.
+def run_estimator(
+    issue_num: int,
+    issue_data: dict,
+    calibration: Optional[CalibrationResult] = None,
+) -> tuple[Optional[dict], Optional[str]]:
+    """Invoke the estimator agent via `claude -p` and return (result, error_type).
 
-    Retries up to _ESTIMATOR_MAX_RETRIES times on transient agent failures
-    (non-zero exit code). --no-session-persistence prevents session-file
+    On success returns (parsed_dict, None).
+    On failure returns (None, error_type) where error_type is one of:
+      "network_error", "model_error", "parse_error", "missing_claude".
+
+    Retries up to _ESTIMATOR_MAX_RETRIES times on network errors, model errors
+    (non-zero exit), and parse errors.  Delays follow exponential backoff
+    (2s, 4s, 8s).  Each retry emits a structured log entry with attempt number,
+    error type, and delay_seconds.  --no-session-persistence prevents session-file
     conflicts when multiple estimations run concurrently during bulk create.
     """
-    import time as _time
-
     instructions = load_agent_instructions()
 
     title = issue_data.get("title", "")
     body  = issue_data.get("body") or "(no body)"
 
+    cal_section = calibration_prompt_section(calibration) if calibration is not None else ""
+
     prompt = f"""{instructions}
 
+{cal_section}
 ---
 
 Now estimate this issue:
@@ -140,7 +159,11 @@ Output ONLY the JSON object. No other text."""
         "-p", prompt,
     ]
 
-    for attempt in range(1, _ESTIMATOR_MAX_RETRIES + 1):
+    # Total attempts = initial + _ESTIMATOR_MAX_RETRIES (e.g. 4 = 1 + 3).
+    total_attempts = _ESTIMATOR_MAX_RETRIES + 1
+    for attempt in range(1, total_attempts + 1):
+        error_type: Optional[str] = None
+
         try:
             result = subprocess.run(
                 cmd,
@@ -149,40 +172,88 @@ Output ONLY the JSON object. No other text."""
                 timeout=180,
             )
         except subprocess.TimeoutExpired:
-            structured_log.error("estimator_timeout", "estimator agent timed out after 180s", issue_num=issue_num, timeout_secs=180)
-            return None
+            error_type = "network_error"
+            structured_log.error(
+                "estimator_timeout",
+                "estimator agent timed out after 180s",
+                issue_num=issue_num,
+                timeout_secs=180,
+            )
         except FileNotFoundError:
             print("Error: claude CLI not found in PATH", file=sys.stderr)
-            return None
+            return None, "missing_claude"
 
-        if result.returncode == 0:
-            parsed = extract_json(result.stdout)
-            if not parsed:
-                structured_log.error("estimator_parse_error", "could not parse JSON from agent output", issue_num=issue_num, output_preview=result.stdout[:200])
-                return None
-            parsed["issue_number"] = issue_num
-            return parsed
+        if error_type is None:
+            if result.returncode != 0:
+                error_type = "model_error"
+            else:
+                parsed = extract_json(result.stdout)
+                if parsed is None:
+                    error_type = "parse_error"
+                    structured_log.error(
+                        "estimator_parse_error",
+                        "could not parse JSON from agent output",
+                        issue_num=issue_num,
+                        output_preview=result.stdout[:200],
+                    )
+                else:
+                    parsed["issue_number"] = issue_num
+                    # Normalize files_touched: absent or non-list → []
+                    if not isinstance(parsed.get("files_touched"), list):
+                        parsed["files_touched"] = []
+                    # Ensure both size and minutes are present; derive missing field
+                    size_val = parsed.get("size", "")
+                    if "minutes" not in parsed or not isinstance(parsed.get("minutes"), int):
+                        parsed["minutes"] = _minutes_from_letter(size_val)
+                    parsed["body_hash"] = hashlib.sha256(body.encode()).hexdigest()
+                    # Attach calibration sources so consumers know which tiers were calibrated
+                    if calibration is not None:
+                        parsed["calibration_sources"] = calibration.sources
+                    return parsed, None
 
-        # Non-zero exit — transient failure; retry if attempts remain.
-        if attempt < _ESTIMATOR_MAX_RETRIES:
+        # error_type is set — decide whether to retry or fail.
+        retries_used = attempt - 1
+        retries_remaining = _ESTIMATOR_MAX_RETRIES - retries_used
+
+        if retries_remaining > 0:
+            delay = _ESTIMATOR_RETRY_DELAYS[retries_used]
+            structured_log.warn(
+                "estimator_retry",
+                "estimation failed, retrying",
+                issue_num=issue_num,
+                attempt=attempt,
+                error_type=error_type,
+                delay_seconds=delay,
+            )
             print(
-                f"Warning: agent exited {result.returncode} for #{issue_num} "
-                f"(attempt {attempt}/{_ESTIMATOR_MAX_RETRIES}), retrying in {_ESTIMATOR_RETRY_DELAY_SECS}s…",
+                f"Warning: estimator failed for #{issue_num} (attempt {attempt}/{total_attempts},"
+                f" error_type={error_type}), retrying in {delay}s…",
                 file=sys.stderr,
             )
-            _time.sleep(_ESTIMATOR_RETRY_DELAY_SECS)
-            continue
+            time.sleep(delay)
+        else:
+            structured_log.error(
+                "estimator_failed",
+                "all retries exhausted",
+                issue_num=issue_num,
+                attempt=attempt,
+                error_type=error_type,
+            )
+            if error_type == "model_error" and result.stderr:
+                print(result.stderr[:500], file=sys.stderr)
+            print(
+                f"Error: estimator failed for #{issue_num} after {_ESTIMATOR_MAX_RETRIES} retries"
+                f" (final error_type={error_type})",
+                file=sys.stderr,
+            )
 
-        print(f"Error: agent exited {result.returncode}", file=sys.stderr)
-        if result.stderr:
-            print(result.stderr[:500], file=sys.stderr)
-
-    return None
+    return None, error_type
 
 
 def post_comment(issue_num: int, repo: str, estimate: dict) -> None:
     """Post the estimate as a structured comment on the issue."""
     size       = estimate.get("size", "?")
+    minutes    = estimate.get("minutes") or _minutes_from_letter(size) if size != "?" else "?"
     hours      = estimate.get("estimated_hours", "?")
     confidence = estimate.get("confidence", "?")
     files      = estimate.get("files_likely_affected", [])
@@ -201,6 +272,7 @@ def post_comment(issue_num: int, repo: str, estimate: dict) -> None:
 | Field | Value |
 |---|---|
 | Size | **{size}** |
+| Minutes | {minutes} |
 | Estimated hours | {hours}h |
 | Confidence | {confidence} |
 | Risk flags | {risk_str} |
@@ -280,14 +352,53 @@ def apply_label(issue_num: int, repo: str, size: str) -> None:
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
+def estimate_draft_file(draft_path: Path) -> None:
+    """Estimate an unposted draft from a JSON file of {title, body}.
+
+    Used by bulk-create to size a draft *before* the GitHub issue exists, so
+    sizes can inform sprint assignment. Runs the same text-based estimator as a
+    real issue (it only reads title+body), then prints the estimate JSON to
+    stdout. No GitHub writes, no label/comment, no cache file — the caller owns
+    persistence (the size label is applied at post time).
+    """
+    try:
+        draft = json.loads(draft_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as e:
+        print(f"Error: could not read draft file {draft_path}: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    issue_data = {"title": draft.get("title", ""), "body": draft.get("body", "")}
+    # issue_num=0 → used only for logging/body_hash; the estimate is text-based.
+    estimate, err = run_estimator(0, issue_data)
+    if not estimate:
+        print(f"Error: draft estimation failed ({err})", file=sys.stderr)
+        sys.exit(1)
+    estimate.pop("issue_number", None)  # no issue yet
+    print(json.dumps(estimate))
+
+
 def main() -> None:
     p = argparse.ArgumentParser(description="Estimate a GitHub issue via the Issue Estimator agent.")
-    p.add_argument("--issue", "-i", type=int, required=True, help="Issue number")
+    p.add_argument("--issue", "-i", type=int, default=None, help="Issue number")
     p.add_argument("--repo", "-r", default=None, help="owner/repo (auto-detected if omitted)")
     p.add_argument("--save-comment", action="store_true", help="Post structured estimate as issue comment")
     p.add_argument("--save-label", action="store_true", help="Apply size-S/M/L/XL label to issue")
     p.add_argument("--force", action="store_true", help="Re-run estimator even if cached result exists")
+    p.add_argument("--draft-file", default=None,
+                   help="Estimate an unposted draft from a JSON file {title, body}; prints estimate to stdout")
+    p.add_argument("--calibration-sprint", default=None, help="Past sprint label to pull DB calibration records from")
     args = p.parse_args()
+
+    # Draft mode: size text before any issue exists (bulk-create pre-post estimate).
+    if args.draft_file:
+        _run_id = mint_run_id("manual")
+        os.environ["COMMANDER_RUN_ID"] = _run_id
+        structured_log.set_context(run_id=_run_id, source="manual")
+        estimate_draft_file(Path(args.draft_file))
+        return
+
+    if args.issue is None:
+        p.error("--issue is required unless --draft-file is given")
 
     # Mint or adopt run_id for this invocation
     _run_id = mint_run_id("manual")
@@ -317,6 +428,20 @@ def main() -> None:
     estimates_dir.mkdir(parents=True, exist_ok=True)
     estimate_path = estimates_dir / f"issue-{args.issue}.json"
 
+    # Load calibration data — prefer DB records when --calibration-sprint given.
+    _db_cal_records: list = []
+    if args.calibration_sprint:
+        _db_cal_records = db_calibration_records(args.calibration_sprint, estimates_dir)
+        if _db_cal_records:
+            print(f"Calibration (DB): {len(_db_cal_records)} records from sprint {args.calibration_sprint!r}")
+    calibration = load_calibration(commander_dir, db_records=_db_cal_records or None)
+    for w in calibration.warnings:
+        print(f"Warning [calibration]: {w}", file=sys.stderr)
+    if calibration.calibration_path:
+        print(f"Calibration: {calibration.calibration_path} ({calibration.record_count} records)")
+    else:
+        print("Calibration: none loaded — using generic defaults")
+
     # Return cached result unless --force
     if estimate_path.exists() and not args.force:
         print(f"Cached: {estimate_path}")
@@ -339,7 +464,7 @@ def main() -> None:
         sys.exit(1)
 
     print(f"Running estimator (Haiku 4.5) for #{args.issue} ...")
-    estimate = run_estimator(args.issue, issue_data)
+    estimate, _ = run_estimator(args.issue, issue_data, calibration=calibration)
     if not estimate:
         sys.exit(1)
 

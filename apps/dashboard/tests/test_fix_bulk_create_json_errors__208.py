@@ -249,10 +249,12 @@ class TestCancelButton:
 
     def test_cancel_button_calls_close(self, html):
         """Cancel button calls closeBulkCreateModal()."""
-        # Find the step1 region
+        # Use the full bc-step1 region (up to bc-step2) to avoid arbitrary length limits
         step1_start = html.find('id="bc-step1"')
+        step1_end = html.find('id="bc-step2"')
         assert step1_start != -1, "bc-step1 section not found"
-        step1_region = html[step1_start: step1_start + 3000]
+        assert step1_end != -1, "bc-step2 section not found"
+        step1_region = html[step1_start:step1_end]
         assert "closeBulkCreateModal()" in step1_region, \
             "Cancel button must call closeBulkCreateModal() inside bc-step1"
 

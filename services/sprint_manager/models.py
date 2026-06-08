@@ -78,7 +78,8 @@ class SprintTicket(Base):
     started_at = Column(TIMESTAMP(timezone=True), nullable=True)
     completed_at = Column(TIMESTAMP(timezone=True), nullable=True)
     agent_active = Column(Text, nullable=True)
-    elapsed_seconds = Column(Integer, nullable=True)
+    actual_elapsed_seconds = Column(Integer, nullable=True)
+    total_tokens = Column(Integer, nullable=True)
 
     __table_args__ = (
         UniqueConstraint("sprint_id", "issue_number", name="uq_sprint_tickets_sprint_issue"),

@@ -107,17 +107,20 @@ Source `~/.commander.zsh` to get these shortcuts:
 ## Run as a service (launchd)
 
 For unattended operation — especially when running remote with iPad-only access — the
-dashboard can be registered as a macOS LaunchAgent. This starts it automatically on
-user login and restarts it if the process crashes.
+dashboard runs as a macOS LaunchAgent. This starts it automatically on user login and
+restarts it if the process crashes.
 
-> **Note:** launchd is an additional deployment option. The existing `start.sh` (tmux)
-> workflow continues to work unchanged and is still recommended for interactive
-> development.
+> **launchd is the authoritative runner for unattended operation.** Use it whenever
+> Commander runs without your direct attention — remote travel, overnight, or background.
+>
+> **tmux** is for attended local development only (interactive sessions where you are
+> watching the terminal). Do not use tmux for unattended or remote operation.
 
 ### Install
 
+Run from inside the PRD clone (`~/dev/commander/prd` or your equivalent PRD directory):
+
 ```bash
-# From the commander repo root:
 bash scripts/install_launchd.sh
 ```
 
@@ -132,6 +135,61 @@ Logs are written to:
 - `~/Library/Logs/commander-dashboard.out.log` (stdout / uvicorn output)
 - `~/Library/Logs/commander-dashboard.err.log` (stderr / errors)
 
+### Prevent sleep on AC power
+
+By default macOS may sleep even when plugged in. Prevent this so the service survives overnight:
+
+```bash
+sudo pmset -c sleep 0
+```
+
+Verify: `pmset -g | grep " sleep"` should show `sleep 0` in the AC power section.
+
+### Enable auto-login
+
+Auto-login is required for launchd user agents to start automatically after a reboot or
+power outage — without auto-login the user session never opens and the agent never loads.
+
+System Settings → General → Login Items & Extensions → enable auto-login for your service account.
+
+Reboot to confirm: after the machine powers on, the service should be running without any
+manual intervention.
+
+### Tailscale enrollment and firewall
+
+Tailscale provides the secure tunnel for remote access. The macOS Application Firewall
+restricts port 8000 so it is reachable only over Tailscale, not the open internet.
+
+**Enroll:**
+1. Install Tailscale and log in.
+2. Run `tailscale up` and complete device authorization in the Tailscale admin console.
+3. Enable MagicDNS in the Tailscale admin console (DNS tab).
+
+**Restrict to Tailscale only (Application Firewall):**
+1. System Settings → Network → Firewall → turn on the firewall.
+2. Click **Options…** and set incoming connections for Python / uvicorn to **Block all incoming connections**.
+3. Tailscale operates below the Application Firewall layer, so Tailscale-routed traffic is
+   still permitted regardless of this setting.
+
+Verify enrollment: `tailscale status` shows the node as Connected with a `100.x.x.x` address.
+
+### ntfy push notifications
+
+Commander uses [ntfy.sh](https://ntfy.sh) for mobile push alerts when a sprint finishes or
+an agent reports an error.
+
+1. Install the ntfy app on your iPad or phone.
+2. Choose a unique topic name (e.g. `commander-yourname`).
+3. In the ntfy app, subscribe using the URL: `https://ntfy.sh/<your-topic>`
+4. Set `NTFY_TOPIC_URL=https://ntfy.sh/<your-topic>` in `apps/dashboard/.env`.
+5. Send a test notification to confirm delivery:
+   ```bash
+   curl -d "Commander test" ntfy.sh/<your-topic>
+   ```
+   Expected: a notification appears on your iPad or phone within a few seconds.
+
+> Self-hosted ntfy setup is out of scope. Use the public ntfy.sh service for simplicity.
+
 ### Uninstall
 
 ```bash
@@ -143,8 +201,11 @@ Unloads the service and removes the plist from `~/Library/LaunchAgents/`.
 ### Verify
 
 ```bash
-# Service is listed:
+# Service is registered and running (exit code 0):
 launchctl list | grep commander
+
+# Port 8000 is listening (prints the PID; empty means nothing is bound):
+lsof -ti tcp:8000
 
 # Tail the log:
 tail -f ~/Library/Logs/commander-dashboard.out.log

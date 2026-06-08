@@ -63,7 +63,7 @@ Once you have enough information, produce a proposal block that contains ALL of 
 - Example: "Fix approve button auto-close on reopen" → `fix-approve-auto-close`
 
 ### Label selection rules
-Only use labels from the **approved vocabulary**: `enhancement`, `bug`, `backlog`, `in-progress`, `SIT`, `UAT`, `UAT-approved`, `need-rework`, `sprint-N`.
+Only use labels from the **approved vocabulary**: `enhancement`, `bug`, `backlog`, `in-progress`, `SIT`, `UAT`, `UAT-approved`, `needs-rework`, `sprint-N`.
 
 Apply labels as follows:
 1. **Type:** use `enhancement` for new features or improvements; use `bug` for defects or broken behaviour.

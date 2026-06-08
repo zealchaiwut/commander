@@ -44,7 +44,8 @@ def sqlite_db(monkeypatch):
                 started_at TEXT,
                 completed_at TEXT,
                 agent_active TEXT,
-                elapsed_seconds INTEGER,
+                actual_elapsed_seconds INTEGER,
+                total_tokens INTEGER,
                 UNIQUE(sprint_id, issue_number)
             )
         """))
@@ -172,7 +173,7 @@ def test_update_ticket_status_to_running_sets_started_at():
     assert t.status == "running"
     assert t.started_at is not None
     assert t.completed_at is None
-    assert t.elapsed_seconds is None
+    assert t.actual_elapsed_seconds is None
 
 
 def test_update_ticket_status_to_done_sets_completed_at_and_elapsed():
@@ -184,8 +185,8 @@ def test_update_ticket_status_to_done_sets_completed_at_and_elapsed():
     t = tickets[0]
     assert t.status == "done"
     assert t.completed_at is not None
-    assert t.elapsed_seconds is not None
-    assert t.elapsed_seconds >= 0
+    assert t.actual_elapsed_seconds is not None
+    assert t.actual_elapsed_seconds >= 0
 
 
 def test_update_ticket_status_to_failed_sets_elapsed():
@@ -194,7 +195,7 @@ def test_update_ticket_status_to_failed_sets_elapsed():
     update_ticket_status("S-1", 10, "running")
     update_ticket_status("S-1", 10, "failed")
     tickets = list_tickets("S-1")
-    assert tickets[0].elapsed_seconds is not None
+    assert tickets[0].actual_elapsed_seconds is not None
 
 
 def test_update_ticket_status_to_skipped_sets_elapsed():
@@ -203,7 +204,7 @@ def test_update_ticket_status_to_skipped_sets_elapsed():
     update_ticket_status("S-1", 7, "running")
     update_ticket_status("S-1", 7, "skipped")
     tickets = list_tickets("S-1")
-    assert tickets[0].elapsed_seconds is not None
+    assert tickets[0].actual_elapsed_seconds is not None
 
 
 def test_update_ticket_status_raises_ticket_not_found():

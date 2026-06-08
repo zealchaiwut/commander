@@ -1,0 +1,75 @@
+name: Docs Freshness Check
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  check-docs-freshness:
+    name: Check stale docs
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Determine diff base
+        id: diff-base
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "base=${{ github.event.pull_request.base.sha }}" >> $GITHUB_OUTPUT
+            echo "head=${{ github.event.pull_request.head.sha }}" >> $GITHUB_OUTPUT
+            echo "trigger_type=pull_request" >> $GITHUB_OUTPUT
+            echo "trigger_url=${{ github.event.pull_request.html_url }}" >> $GITHUB_OUTPUT
+            echo "trigger_ref=PR#${{ github.event.pull_request.number }}" >> $GITHUB_OUTPUT
+          else
+            echo "base=${{ github.event.before }}" >> $GITHUB_OUTPUT
+            echo "head=${{ github.sha }}" >> $GITHUB_OUTPUT
+            echo "trigger_type=push" >> $GITHUB_OUTPUT
+            echo "trigger_url=${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}" >> $GITHUB_OUTPUT
+            echo "trigger_ref=${{ github.sha }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Run docs freshness check
+        id: freshness
+        run: |
+          python3 scripts/check_docs_freshness.py \
+            --repo-path . \
+            --base "${{ steps.diff-base.outputs.base }}" \
+            --head "${{ steps.diff-base.outputs.head }}" \
+            --trigger-ref "${{ steps.diff-base.outputs.trigger_ref }}" \
+            --trigger-type "${{ steps.diff-base.outputs.trigger_type }}" \
+            --trigger-url "${{ steps.diff-base.outputs.trigger_url }}" \
+            --repo "${{ github.repository }}" \
+            --json > /tmp/freshness-result.json
+          cat /tmp/freshness-result.json
+        continue-on-error: true
+
+      - name: Post to Commander dashboard
+        if: env.COMMANDER_DASHBOARD_URL != ''
+        env:
+          COMMANDER_DASHBOARD_URL: ${{ secrets.COMMANDER_DASHBOARD_URL }}
+        run: |
+          python3 scripts/check_docs_freshness.py \
+            --repo-path . \
+            --base "${{ steps.diff-base.outputs.base }}" \
+            --head "${{ steps.diff-base.outputs.head }}" \
+            --trigger-ref "${{ steps.diff-base.outputs.trigger_ref }}" \
+            --trigger-type "${{ steps.diff-base.outputs.trigger_type }}" \
+            --trigger-url "${{ steps.diff-base.outputs.trigger_url }}" \
+            --repo "${{ github.repository }}" \
+            --dashboard-url "$COMMANDER_DASHBOARD_URL"
+
+      - name: Annotate PR with stale docs
+        if: github.event_name == 'pull_request'
+        run: |
+          STALE=$(python3 -c "import json,sys; d=json.load(open('/tmp/freshness-result.json')); [print(f'::warning file={doc}::Doc may be stale — update {doc} to reflect code changes in this PR') for doc in d.get('stale_docs',[])]" 2>/dev/null || true)

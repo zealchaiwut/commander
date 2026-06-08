@@ -652,7 +652,7 @@ class TestSprintInitRepoValidation:
         )
         write_line = next(
             (i for i, l in enumerate(lines) if "sprint_yaml.write_text" in l or
-             "sprint_yaml = commander_dir" in l and "write" in lines[i] if i < len(lines) else False),
+             ("sprint_yaml = commander_dir" in l and i < len(lines) and "write" in lines[i])),
             None,
         )
         # A simpler check: _validate_repo_access should appear before "sprint_yaml"

@@ -1,79 +1,44 @@
 #!/usr/bin/env python3
-"""Move a GitHub issue to a new status column by swapping labels.
+"""Thin CLI wrapper: maps --status to a TicketState and delegates to transition().
 
 Usage:
   python3 scripts/update_ticket.py --issue 42 --status in-progress
   python3 scripts/update_ticket.py --issue 42 --status sit
   python3 scripts/update_ticket.py --issue 42 --status uat
-  python3 scripts/update_ticket.py --issue 42 --status blocked
-  python3 scripts/update_ticket.py --issue 42 --status uat-approved
-  python3 scripts/update_ticket.py --issue 42 --status estimated
   python3 scripts/update_ticket.py --issue 42 --status needs-rework
 
-Prints:  #<number> <url>
-Exits with code 0 on full success, code 2 if any label operation failed after
-all retries (a warning comment is posted to the issue in that case).
+All label writes go through state_machine.transition() — the single source of
+truth for status label changes.  The --force and --merge-sha flags are accepted
+but ignored (UAT safeguard is now handled by sprint_manager, not here).
+
+Exits 0 on success, non-zero on failure.
 """
 import argparse
-import json
 import os
-import re
-import subprocess
 import sys
-import time
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).parent.parent
 _DASHBOARD_DIR = _REPO_ROOT / "apps" / "dashboard"
 sys.path.insert(0, str(_REPO_ROOT))
 sys.path.insert(0, str(_DASHBOARD_DIR))
+from dotenv import load_dotenv
+load_dotenv(_DASHBOARD_DIR / ".env")
 import github_client
-from services.logging import log as structured_log
 from services.run_id import mint_run_id
+from services.logging import log as structured_log
+from services.sprint_manager.state_machine import transition, TicketState, TransitionError
 
-# Sprint labels (sprint-N) are protected: they must never be removed by a
-# status transition. This guard matches any "sprint-<digits>" label name.
-_SPRINT_LABEL_RE = re.compile(r"^sprint-\d+$")
-
-STATUS_MAP = {
-    "in-progress": {
-        "add":    ["in-progress"],
-        "remove": ["SIT", "UAT", "need-rework", "blocked"],
-        "close":  None,
-    },
-    "sit": {
-        "add":    ["SIT"],
-        "remove": ["in-progress", "UAT", "need-rework", "blocked"],
-        "close":  None,
-    },
-    "uat": {
-        "add":    ["UAT"],
-        "remove": ["in-progress", "SIT", "need-rework", "blocked"],
-        "close":  None,
-    },
-    "blocked": {
-        "add":    ["blocked"],
-        "remove": [],
-        "close":  None,
-    },
-    "uat-approved": {
-        "add":    ["UAT-approved"],
-        "remove": ["UAT"],
-        "close":  "completed",
-    },
-    "estimated": {
-        "add":    ["estimated"],
-        "remove": [],
-        "close":  None,
-    },
-    "needs-rework": {
-        "add":    ["need-rework"],
-        "remove": ["in-progress", "SIT", "UAT", "UAT-approved"],
-        "close":  None,
-    },
+STATUS_TO_STATE: dict[str, TicketState] = {
+    "in-progress":  TicketState.IN_PROGRESS,
+    "sit":          TicketState.SIT,
+    "uat":          TicketState.UAT,
+    "needs-rework": TicketState.NEEDS_REWORK,
+    "queued":       TicketState.QUEUED,
 }
 
-_BACKOFFS = (2, 5, 10)
+# Statuses that don't map to a TicketState; handled as passthrough label ops.
+_PASSTHROUGH_STATUSES = {"blocked", "uat-approved", "estimated"}
 
 
 def _load_env():
@@ -87,112 +52,6 @@ def _load_env():
             os.environ.setdefault(k.strip(), v.strip())
 
 
-def _find_feature_branch(issue: int) -> str | None:
-    """Return the feature/<N>-* branch name if it exists locally or on origin."""
-    pattern = f"feature/{issue}-*"
-
-    r = subprocess.run(["git", "branch", "--list", pattern], capture_output=True, text=True)
-    for line in r.stdout.splitlines():
-        name = line.strip().lstrip("*+ ").strip()
-        if name:
-            return name
-
-    r = subprocess.run(["git", "branch", "-r", "--list", f"origin/{pattern}"], capture_output=True, text=True)
-    for line in r.stdout.splitlines():
-        name = line.strip().removeprefix("origin/").strip()
-        if name:
-            return name
-
-    return None
-
-
-def _branch_merged_into_develop(branch: str) -> bool:
-    """Return True if branch tip is an ancestor of origin/develop."""
-    subprocess.run(["git", "fetch", "--quiet", "origin", "develop"], capture_output=True)
-
-    for ref in (f"origin/{branch}", branch):
-        r = subprocess.run(["git", "rev-parse", ref], capture_output=True, text=True)
-        if r.returncode == 0:
-            tip = r.stdout.strip()
-            ancestor = subprocess.run(
-                ["git", "merge-base", "--is-ancestor", tip, "origin/develop"],
-                capture_output=True,
-            )
-            return ancestor.returncode == 0
-
-    return False
-
-
-def _check_uat_safeguard(issue: int, force: bool) -> None:
-    """Enforce feature-branch-merged gate before UAT label is applied."""
-    branch = _find_feature_branch(issue)
-
-    if branch is None:
-        msg = (
-            f"UAT safeguard: no branch matching 'feature/{issue}-*' found locally "
-            f"or on origin. Merge the feature branch into develop first, "
-            f"or use --force to override."
-        )
-        if force:
-            print(f"WARNING: {msg}", file=sys.stderr)
-        else:
-            sys.exit(msg)
-        return
-
-    if not _branch_merged_into_develop(branch):
-        msg = (
-            f"UAT safeguard: branch '{branch}' exists but has not been merged into "
-            f"develop. Merge it first, or use --force to override."
-        )
-        if force:
-            print(f"WARNING: {msg}", file=sys.stderr)
-        else:
-            sys.exit(msg)
-
-
-def _fetch_current_labels(issue: int, repo: str) -> set[str]:
-    """Pre-fetch the current labels on the issue from GitHub."""
-    result = subprocess.run(
-        ["gh", "issue", "view", str(issue), "--repo", repo, "--json", "labels"],
-        capture_output=True, text=True,
-    )
-    if result.returncode != 0:
-        # If we can't fetch labels, return empty set — removes will be attempted
-        return set()
-    try:
-        data = json.loads(result.stdout)
-        return {lbl["name"] for lbl in data.get("labels", [])}
-    except (json.JSONDecodeError, KeyError):
-        return set()
-
-
-def _run_with_retry(cmd: list[str], label: str, operation: str, issue_num: int = 0) -> tuple[bool, str]:
-    """Run a gh label command with up to 3 retries and backoff.
-
-    Returns (success, last_stderr).
-    """
-    last_stderr = ""
-    for attempt in range(len(_BACKOFFS) + 1):
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        if result.returncode == 0:
-            return True, ""
-        last_stderr = result.stderr.strip()
-        if attempt < len(_BACKOFFS):
-            wait = _BACKOFFS[attempt]
-            structured_log.warn(
-                "ticket_update_retry",
-                f"{operation} label \"{label}\" attempt {attempt + 1} failed — retrying in {wait}s",
-                issue_num=issue_num,
-                label=label,
-                operation=operation,
-                attempt=attempt + 1,
-                retry_delay_secs=wait,
-                subprocess_stderr=last_stderr,
-            )
-            time.sleep(wait)
-    return False, last_stderr
-
-
 def main():
     _load_env()
 
@@ -200,19 +59,26 @@ def main():
     os.environ["COMMANDER_RUN_ID"] = _run_id
     structured_log.set_context(run_id=_run_id, source="update_ticket")
 
-    parser = argparse.ArgumentParser(description="Update issue status")
+    all_statuses = sorted(STATUS_TO_STATE) + sorted(_PASSTHROUGH_STATUSES)
+    parser = argparse.ArgumentParser(description="Update issue status via transition()")
     parser.add_argument("--issue",  type=int, required=True)
-    parser.add_argument("--status", required=True, choices=list(STATUS_MAP))
+    parser.add_argument("--status", required=True, choices=all_statuses)
     parser.add_argument("--force",  action="store_true",
-                        help="Skip UAT merge safeguard (prints warning to stderr)")
+                        help="Accepted for backward compatibility; has no effect.")
     parser.add_argument("--repo",   default=None,
-                        help="Override repo (owner/name).  Defaults to auto-detected repo.")
+                        help="Override repo (owner/name). Defaults to auto-detected.")
+    parser.add_argument("--merge-sha", default=None,
+                        help="Accepted for backward compatibility; has no effect.")
+    parser.add_argument("--target-branch", default=None,
+                        help="Accepted for backward compatibility; has no effect.")
     args = parser.parse_args()
     structured_log.set_context(issue_num=args.issue)
-    structured_log.info("ticket_update_start", f"updating issue #{args.issue} to status {args.status!r}", issue_num=args.issue, status=args.status)
-
-    if args.status == "uat":
-        _check_uat_safeguard(args.issue, args.force)
+    structured_log.info(
+        "ticket_update_start",
+        f"updating issue #{args.issue} to status {args.status!r}",
+        issue_num=args.issue,
+        status=args.status,
+    )
 
     if args.repo:
         repo = args.repo
@@ -222,77 +88,45 @@ def main():
         except ValueError as e:
             sys.exit(str(e))
 
-    mapping = STATUS_MAP[args.status]
+    if args.status in _PASSTHROUGH_STATUSES:
+        # Passthrough: these statuses don't correspond to TicketState values.
+        # Emit a structured error — callers should use gh CLI directly.
+        print(
+            f"Status '{args.status}' is not managed by transition(); "
+            f"apply this label directly with 'gh issue edit --add-label {args.status}'.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
-    # Pre-fetch current labels to allow smart skipping of removes
-    current_labels = _fetch_current_labels(args.issue, repo)
+    target_state = STATUS_TO_STATE[args.status]
 
-    failed_ops = []
-    attempted_ops = []
+    _RUN_MUTABLE_STATES = frozenset({
+        TicketState.IN_PROGRESS, TicketState.SIT, TicketState.UAT, TicketState.NEEDS_REWORK,
+    })
 
-    # Apply each add label individually with retry
-    for lbl in mapping["add"]:
-        op = f'add "{lbl}"'
-        attempted_ops.append(op)
-        cmd = ["gh", "issue", "edit", str(args.issue), "--repo", repo, "--add-label", lbl]
-        success, last_stderr = _run_with_retry(cmd, lbl, "add", issue_num=args.issue)
-        if success:
-            print(f'applied label "{lbl}"')
+    try:
+        if sprint_label := os.environ.get("COMMANDER_SPRINT_RUNNING"):
+            if target_state not in _RUN_MUTABLE_STATES:
+                raise ValueError(
+                    f"Cannot transition to {target_state} during sprint run "
+                    f"({sprint_label!r}); outside RUN_MUTABLE_LABELS"
+                )
+        changed = transition(
+            args.issue,
+            target_state,
+            actor="update_ticket",
+            repo=repo,
+        )
+        if changed:
+            print(f"transition: #{args.issue} → {args.status}")
         else:
-            print(f'failed to apply label "{lbl}"', file=sys.stderr)
-            failed_ops.append((op, last_stderr))
-
-    # Handle each remove label individually
-    for lbl in mapping["remove"]:
-        op = f'remove "{lbl}"'
-        if _SPRINT_LABEL_RE.match(lbl):
-            print(f'skipped remove "{lbl}" (sprint label protected)', file=sys.stderr)
-            continue
-        if lbl not in current_labels:
-            print(f'skipped remove "{lbl}" (not present)')
-            continue
-        attempted_ops.append(op)
-        cmd = ["gh", "issue", "edit", str(args.issue), "--repo", repo, "--remove-label", lbl]
-        success, last_stderr = _run_with_retry(cmd, lbl, "remove", issue_num=args.issue)
-        if success:
-            print(f'removed label "{lbl}"')
-        else:
-            print(f'failed to remove label "{lbl}"', file=sys.stderr)
-            failed_ops.append((op, last_stderr))
-
-    if failed_ops:
-        # Post a warning comment
-        failed_lines = "\n".join(
-            f"- `{op}`: {stderr}" for op, stderr in failed_ops
-        )
-        attempted_lines = "\n".join(f"- `{op}`" for op in attempted_ops)
-        warning_comment = (
-            f"**Label update failed for `--status {args.status}`.**\n\n"
-            f"Some label operations failed after {len(_BACKOFFS) + 1} attempts "
-            f"and require manual review.\n\n"
-            f"**Target status:** `{args.status}`\n\n"
-            f"**Attempted operations:**\n{attempted_lines}\n\n"
-            f"**Failed operations (with last error):**\n{failed_lines}\n\n"
-            f"Please apply or remove the above labels manually."
-        )
-        try:
-            subprocess.run(
-                ["gh", "issue", "comment", str(args.issue), "--repo", repo,
-                 "--body", warning_comment],
-                capture_output=True,
-            )
-        except Exception:
-            pass
-        sys.exit(2)
-
-    if mapping["close"]:
-        close_result = subprocess.run(
-            ["gh", "issue", "close", str(args.issue), "--repo", repo,
-             "--reason", mapping["close"]],
-            capture_output=True, text=True,
-        )
-        if close_result.returncode != 0:
-            sys.exit(f"Error closing issue: {close_result.stderr.strip()}")
+            print(f"transition: #{args.issue} already in {args.status} (no-op)")
+    except ValueError as e:
+        print(f"transition blocked: {e}", file=sys.stderr)
+        sys.exit(1)
+    except TransitionError as e:
+        print(f"transition failed: {e}", file=sys.stderr)
+        sys.exit(1)
 
     url = f"https://github.com/{repo}/issues/{args.issue}"
     print(f"#{args.issue} {url}")

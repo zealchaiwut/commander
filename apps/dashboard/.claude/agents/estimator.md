@@ -14,9 +14,11 @@ You MUST output ONLY a valid JSON object with this exact schema:
 {
   "issue_number": 7,
   "size": "M",
+  "minutes": 15,
   "estimated_hours": 3,
   "confidence": "medium",
   "files_likely_affected": ["backend/main.py", "backend/db.py", "requirements.txt"],
+  "files_touched": ["backend/main.py", "backend/db.py", "requirements.txt"],
   "depends_on": [],
   "blocks": [],
   "risk_flags": ["touches-db-schema", "new-dependency"],
@@ -24,16 +26,22 @@ You MUST output ONLY a valid JSON object with this exact schema:
 }
 ```
 
+- `minutes`: integer — canonical agent-effort minutes for this estimate. Use the Size→Minutes table below as the baseline, then adjust within the bucket based on AC complexity.
+
 Output ONLY the JSON — no preamble, no explanation, no markdown wrapper.
+
+### `files_touched`
+
+A JSON array of repo-relative file paths that the implementation will likely modify. List every file that will need to be created or edited to satisfy the acceptance criteria. Use paths relative to the repo root (e.g. `services/sprint_manager/estimate_issue.py`). If no files can be predicted, return an empty array `[]`.
 
 ## Size scale
 
-| Size | Definition |
-|------|-----------|
-| S    | ~1–5 min — trivial change, single file, well-understood scope |
-| M    | ~15 min — typical feature, a few files, clear requirements |
-| L    | ~30 min — complex feature, multiple subsystems, some uncertainty |
-| XL   | >30 min — major feature, high uncertainty, many dependencies |
+| Size | Minutes | Definition |
+|------|---------|-----------|
+| S    | 5       | ~1–5 min — trivial change, single file, well-understood scope |
+| M    | 15      | ~15 min — typical feature, a few files, clear requirements |
+| L    | 30      | ~30 min — complex feature, multiple subsystems, some uncertainty |
+| XL   | 60      | >30 min — major feature, high uncertainty, many dependencies |
 
 ## Confidence levels
 
@@ -76,9 +84,11 @@ For an issue "Add login endpoint with JWT tokens":
 {
   "issue_number": 42,
   "size": "M",
+  "minutes": 15,
   "estimated_hours": 2,
   "confidence": "high",
   "files_likely_affected": ["apps/dashboard/main.py", "apps/dashboard/auth.py", "requirements.txt"],
+  "files_touched": ["apps/dashboard/main.py", "apps/dashboard/auth.py", "requirements.txt"],
   "depends_on": [],
   "blocks": [],
   "risk_flags": ["new-dependency", "security-sensitive", "modifies-public-api"],

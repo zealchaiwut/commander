@@ -1,15 +1,18 @@
 #!/usr/bin/env python3
-"""Merge a tested feature branch into develop and promote the ticket to UAT.
+"""Merge a tested feature branch into develop.
 
 Call this after tests pass. It:
   1. Fetches latest from origin
   2. Checks out the feature/<N>-* branch
-  3. Merges it into develop with --no-ff
-  4. Pushes develop
-  5. Applies the UAT label via update_ticket.py (branch still exists at this point)
-  6. Deletes the feature branch locally and on origin
+  3. Merges it into the target branch with --no-ff
+  4. Pushes the target branch
+  5. Deletes the feature branch locally and on origin
+
+On success, writes to stdout:
+    FINISH_FEATURE_OUTCOME merged sha=<sha> branch=<branch>
 
 On merge conflict: aborts cleanly, posts a comment, exits non-zero.
+Label transitions are managed exclusively by sprint_manager via state_machine.transition().
 
 Usage:
     python3 ~/commander/scripts/finish_feature.py --issue 42
@@ -21,7 +24,6 @@ import os
 import re
 import subprocess
 import sys
-import time
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).parent.parent
@@ -33,11 +35,6 @@ load_dotenv(_DASHBOARD_DIR / ".env")
 import github_client
 from services.run_id import mint_run_id
 from services.logging import log as structured_log
-
-# Sprint labels (sprint-N) must never be removed during or after a merge.
-# Label changes here go through update_ticket.py which enforces this too,
-# but this guard protects any future direct github_client.update_labels calls.
-_SPRINT_LABEL_RE = re.compile(r"^sprint-\d+$")
 
 
 def _run(*cmd) -> str:
@@ -139,52 +136,12 @@ def main():
             pass
         sys.exit(1)
 
+    ok, merge_sha = _try("git", "rev-parse", "HEAD")
+    if not ok or not merge_sha:
+        merge_sha = ""
+
     _run("git", "push", "origin", target)
     print(f"Pushed {target}.")
-
-    # Apply UAT label before deleting the branch so the safeguard can verify
-    # the merge-base check (it needs the branch ref to still exist on origin).
-    update_ticket = Path(__file__).parent / "update_ticket.py"
-    _UAT_BACKOFFS = (2, 5, 10)
-    label_result = None
-    for attempt in range(len(_UAT_BACKOFFS) + 1):
-        label_result = subprocess.run(
-            [sys.executable, str(update_ticket), "--issue", str(args.issue), "--status", "uat"],
-            capture_output=True, text=True,
-        )
-        if label_result.returncode == 0:
-            break
-        if attempt < len(_UAT_BACKOFFS):
-            wait = _UAT_BACKOFFS[attempt]
-            print(
-                f"Warning: UAT label attempt {attempt + 1} failed — retrying in {wait}s…",
-                file=sys.stderr,
-            )
-            time.sleep(wait)
-
-    if label_result.returncode != 0:
-        stderr_text = label_result.stderr.strip()
-        warning_comment = (
-            f"**Merge succeeded but UAT label could not be applied.**\n\n"
-            f"The merge of this feature branch into `{target}` completed successfully, "
-            f"but `update_ticket.py --status uat` failed after {len(_UAT_BACKOFFS) + 1} attempts.\n\n"
-            f"Last error:\n"
-            f"```\n"
-            f"{stderr_text}\n"
-            f"```\n\n"
-            f"Please apply the **UAT** label manually so this ticket reaches the UAT queue."
-        )
-        print(
-            f"Error: failed to apply UAT label after {len(_UAT_BACKOFFS) + 1} attempts — {stderr_text}",
-            file=sys.stderr,
-        )
-        try:
-            github_client.add_comment(args.issue, warning_comment, repo_name=args.repo)
-        except Exception as exc:
-            print(f"Warning: could not post warning comment — {exc}", file=sys.stderr)
-        sys.exit(2)
-    else:
-        print(f"UAT label applied to issue #{args.issue}.")
 
     # Clean up feature branch
     _try("git", "branch", "-d", branch)
@@ -192,6 +149,9 @@ def main():
 
     print(f"✅  Merged {branch} into {target}")
     print(f"    Feature branch deleted locally and on origin")
+    # Signal to sprint_manager that merge succeeded; label transitions are
+    # handled exclusively by sprint_manager via state_machine.transition().
+    print(f"FINISH_FEATURE_OUTCOME merged sha={merge_sha} branch={branch}")
 
 
 if __name__ == "__main__":

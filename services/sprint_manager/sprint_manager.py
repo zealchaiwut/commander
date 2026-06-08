@@ -50,6 +50,12 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
+# Ensure repo root is in sys.path early so `from services.*` imports work
+# regardless of how the script is invoked (direct path, cwd, etc.)
+_early_repo_root = str(Path(__file__).parent.parent.parent)
+if _early_repo_root not in sys.path:
+    sys.path.insert(0, _early_repo_root)
+
 try:
     import yaml  # PyYAML — already in requirements.txt
 except ImportError:  # pragma: no cover
@@ -62,6 +68,32 @@ except (ImportError, ModuleNotFoundError):  # pragma: no cover
     _sprint_repo = None  # type: ignore[assignment]
     _SPRINT_REPO_AVAILABLE = False
 
+try:
+    from services.sprint_manager.state_machine import (  # noqa: PLC0415
+        transition as _sm_transition,
+        TicketState as _TicketState,
+        TransitionError as _TransitionError,
+    )
+    _STATE_MACHINE_AVAILABLE = True
+except (ImportError, ModuleNotFoundError):  # pragma: no cover
+    _sm_transition = None  # type: ignore[assignment]
+    _TicketState = None  # type: ignore[assignment]
+    _TransitionError = Exception  # type: ignore[assignment,misc]
+    _STATE_MACHINE_AVAILABLE = False
+
+try:
+    from services.sprint_manager.dag_builder import (  # noqa: PLC0415
+        build_dag as _dag_build,
+        DAGResult as _DAGResult,
+        CycleError as _DAGCycleError,
+    )
+    _DAG_BUILDER_AVAILABLE = True
+except (ImportError, ModuleNotFoundError):  # pragma: no cover
+    _dag_build = None  # type: ignore[assignment]
+    _DAGResult = None  # type: ignore[assignment]
+    _DAGCycleError = None  # type: ignore[assignment]
+    _DAG_BUILDER_AVAILABLE = False
+
 # ── path setup ────────────────────────────────────────────────────────────────
 
 # This file lives at services/sprint_manager/sprint_manager.py
@@ -69,6 +101,38 @@ except (ImportError, ModuleNotFoundError):  # pragma: no cover
 REPO_ROOT     = Path(__file__).parent.parent.parent
 DASHBOARD_DIR = REPO_ROOT / "apps" / "dashboard"
 SCRIPTS_DIR   = REPO_ROOT / "scripts"
+
+
+def _load_agent_persona(role: str, base_dir: "Path | None" = None) -> str:
+    """Return the .claude/agents/<role>.md persona (minus YAML frontmatter).
+
+    A headless ``claude -p`` run does NOT auto-load project subagents and cannot
+    use the interactive ``/coder`` // ``/tester`` slash commands, so without this
+    the dispatched agent runs with only a terse inline prompt — markedly weaker
+    than a manual session that delegates to the rich subagent persona. We read
+    the same .md the interactive agent uses and pass it via --append-system-prompt.
+
+    Looks in ``base_dir`` (the clone the agent runs in) first, then REPO_ROOT.
+    Returns "" if not found, so callers degrade gracefully to the old behaviour.
+    """
+    candidates = []
+    if base_dir is not None:
+        candidates.append(Path(base_dir) / ".claude" / "agents" / f"{role}.md")
+    candidates.append(REPO_ROOT / ".claude" / "agents" / f"{role}.md")
+    for path in candidates:
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        # Strip leading YAML frontmatter (--- ... ---) if present.
+        if text.startswith("---"):
+            end = text.find("\n---", 3)
+            if end != -1:
+                text = text[end + 4:]
+        text = text.strip()
+        if text:
+            return text
+    return ""
 
 sys.path.insert(0, str(REPO_ROOT))      # allow `from services.*` imports
 sys.path.insert(0, str(DASHBOARD_DIR))
@@ -107,6 +171,11 @@ ALERTS_DIR           = DASHBOARD_DIR / "alerts"
 # Rates kept for reference only; not used in cost_estimate.
 _HAIKU_INPUT_COST_PER_M  = 0.80   # claude-haiku-4-5-20251001 input (reference)
 _HAIKU_OUTPUT_COST_PER_M = 4.00   # claude-haiku-4-5-20251001 output (reference)
+
+# Set by _sigterm_handler when the user cancels the sprint (issue #365, #514).
+# Checked in write_sprint_summary and in main()'s SystemExit handler.
+# threading.Event for thread-safe signaling across worker threads.
+_sprint_user_cancelled: threading.Event = threading.Event()
 
 
 # ── SprintConfig dataclass + loader ──────────────────────────────────────────
@@ -397,6 +466,46 @@ def _release_pid_lock(pid_path: Path) -> None:
         pass
 
 
+# ── Plan.json state helpers (issue #507) ─────────────────────────────────────
+
+def _plan_json_path(label: str, cfg: Optional["SprintConfig"] = None) -> Path:
+    """Return path to {label}-plan.json in the sprints directory."""
+    sprints_dir = cfg.sprints_dir if cfg is not None else REPO_ROOT / ".commander" / "sprints"
+    return sprints_dir / f"{label}-plan.json"
+
+
+def _plan_json_set_state_sm(
+    label: str,
+    state: str,
+    cfg: Optional["SprintConfig"] = None,
+    **extra_fields,
+) -> None:
+    """Best-effort update of plan.json state from sprint_manager side.
+
+    Reads existing file (handling both old list format and new dict format),
+    merges the new state + extra fields, and writes atomically.  All errors
+    are swallowed — this must never interrupt the sprint run.
+    """
+    path = _plan_json_path(label, cfg)
+    try:
+        existing: dict = {}
+        if path.exists():
+            raw = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(raw, dict):
+                existing = raw
+            elif isinstance(raw, list):
+                existing = {"tickets": raw}
+        existing["state"] = state
+        existing.update(extra_fields)
+        tmp = path.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(existing, indent=2), encoding="utf-8")
+        os.replace(str(tmp), str(path))
+    except Exception:
+        pass
+
+
+# ── end plan.json helpers ─────────────────────────────────────────────────────
+
 # Hang detection constants (in seconds)
 HANG_WARN_SECS  = 30 * 60   # 30 minutes
 HANG_KILL_SECS  = 60 * 60   # 60 minutes
@@ -407,17 +516,13 @@ HANG_CHECK_SECS = 5  * 60   # check every 5 minutes
 # Status labels that may be added or removed while a sprint run is active.
 # All other label additions are deferred to post-run; sprint-N is never
 # removed from a ticket until the sprint run ends.
+# Consolidated from old _RUN_MUTABLE_GITHUB_LABELS constant (issue #506, Wave 1 label protection).
 RUN_MUTABLE_LABELS: frozenset[str] = frozenset({
-    "in-progress", "sit", "uat", "needs-rework",
-})
-
-# Actual GitHub label strings (as applied on issues) that correspond to
-# RUN_MUTABLE_LABELS.  Used as the allowlist when filtering add-label calls.
-_RUN_MUTABLE_GITHUB_LABELS: frozenset[str] = frozenset({
-    "in-progress", "SIT", "UAT", "need-rework", "needs-rework",
+    "in-progress", "SIT", "UAT", "needs-rework",
 })
 
 _SPRINT_LABEL_RE = re.compile(r"^sprint-\d+$")
+_SUMMARY_TITLE_RE = re.compile(r"^Sprint \d+(\.\d+)?\s+Executive Summary$")
 
 
 def _guard_sprint_labels(
@@ -429,7 +534,7 @@ def _guard_sprint_labels(
 
     Always: sprint-N labels are stripped from *remove* and never deleted.
     Active run (sprint_label provided): *add* is restricted to
-    _RUN_MUTABLE_GITHUB_LABELS; any other additions are logged and dropped.
+    RUN_MUTABLE_LABELS; any other additions are logged and dropped.
     """
     safe_remove = [lbl for lbl in remove if not _SPRINT_LABEL_RE.match(lbl)]
     blocked_removes = [lbl for lbl in remove if _SPRINT_LABEL_RE.match(lbl)]
@@ -440,8 +545,8 @@ def _guard_sprint_labels(
         )
 
     if sprint_label is not None:
-        safe_add = [lbl for lbl in add if lbl in _RUN_MUTABLE_GITHUB_LABELS]
-        deferred = [lbl for lbl in add if lbl not in _RUN_MUTABLE_GITHUB_LABELS]
+        safe_add = [lbl for lbl in add if lbl in RUN_MUTABLE_LABELS]
+        deferred = [lbl for lbl in add if lbl not in RUN_MUTABLE_LABELS]
         if deferred:
             print(
                 f"  [label-guard] Deferred non-mutable label addition(s) until post-run: {deferred}",
@@ -451,6 +556,21 @@ def _guard_sprint_labels(
         safe_add = add
 
     return safe_add, safe_remove
+
+
+def _assert_run_mutable(labels: list[str], op: str) -> None:
+    """Raise ValueError if any label in `labels` is outside RUN_MUTABLE_LABELS.
+
+    Caller must catch ValueError and skip the operation so the sprint loop
+    continues without crashing.
+    """
+    violations = [lbl for lbl in labels if lbl not in RUN_MUTABLE_LABELS]
+    for lbl in violations:
+        msg = f"Refused to {op} label {lbl!r} during sprint run — outside RUN_MUTABLE_LABELS"
+        print(f"  [run-mutable-guard] {msg}", file=sys.stderr)
+        structured_log.warn("run_mutable_guard", msg, label=lbl, op=op)
+    if violations:
+        raise ValueError(f"Label mutation blocked: {violations!r} outside RUN_MUTABLE_LABELS")
 
 # ── end sprint-label protection ───────────────────────────────────────────────
 
@@ -612,9 +732,10 @@ class AlertMode:
     EMAIL            = "email"
     DISCORD          = "discord"
     FILE             = "file"
+    NTFY             = "ntfy"
     NONE             = "none"
 
-    ALL_MODES = {DASHBOARD_BANNER, EMAIL, DISCORD, FILE, NONE}
+    ALL_MODES = {DASHBOARD_BANNER, EMAIL, DISCORD, FILE, NTFY, NONE}
 
 
 # ── data structures ───────────────────────────────────────────────────────────
@@ -857,6 +978,20 @@ def _changed_py_files(base_branch: str, cwd: Path) -> list[str]:
     return [f for f in out.splitlines() if f.endswith(".py")]
 
 
+_JS_TS_EXTENSIONS = (".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs")
+
+
+def _changed_js_ts_files(base_branch: str, cwd: Path) -> list[str]:
+    """Return JS/TS files added/modified in HEAD relative to base_branch."""
+    rc, out, _ = _run_timed(
+        "git", "diff", base_branch, "--name-only", "--diff-filter=ACM",
+        cwd=cwd,
+    )
+    if rc != 0:
+        return []
+    return [f for f in out.splitlines() if any(f.endswith(ext) for ext in _JS_TS_EXTENSIONS)]
+
+
 # ── dashboard integration ─────────────────────────────────────────────────────
 
 def _post_agent_event(
@@ -933,6 +1068,8 @@ def dispatch_alerts(
                 _alert_discord(title, body)
             elif mode == AlertMode.FILE:
                 _alert_file(title, body, alerts_dir=alerts_dir)
+            elif mode == AlertMode.NTFY:
+                _alert_ntfy(title, body, category)
         except Exception as e:
             structured_log.error("alert_dispatch_error", f"[alert:{mode}] error: {e}", mode=mode, exc=str(e))
 
@@ -996,6 +1133,25 @@ def _alert_discord(title: str, body: str) -> None:
     urllib.request.urlopen(req, timeout=5)
 
 
+def _alert_ntfy(title: str, body: str, category: Optional[str] = None) -> None:
+    topic_url = os.environ.get("NTFY_TOPIC_URL", "")
+    if not topic_url:
+        return
+    priority = "4" if category in ("failure", "needs-rework") else "3"
+    payload  = body.encode()
+    req      = urllib.request.Request(
+        topic_url,
+        data=payload,
+        headers={
+            "Title":    title,
+            "Priority": priority,
+            "Tags":     category or "sprint",
+        },
+        method="POST",
+    )
+    urllib.request.urlopen(req, timeout=5)
+
+
 def _alert_file(title: str, body: str, alerts_dir: Optional[Path] = None) -> None:
     d = alerts_dir if alerts_dir is not None else ALERTS_DIR
     d.mkdir(parents=True, exist_ok=True)
@@ -1014,7 +1170,9 @@ class HangDetector:
     issue_num: int
     log_path:  Optional[Path]
     proc:      subprocess.Popen
+    max_total_secs: Optional[int] = None  # hard wall-clock cap (None = disabled)
 
+    _start_time:   float = field(default_factory=time.monotonic, init=False)
     _last_size:    int   = field(default=0, init=False)
     _last_change:  float = field(default_factory=time.monotonic, init=False)
     _warned:       bool  = field(default=False, init=False)
@@ -1023,6 +1181,7 @@ class HangDetector:
     _killed:       bool  = field(default=False, init=False)
 
     def start(self) -> None:
+        self._start_time  = time.monotonic()
         self._last_change = time.monotonic()
         self._last_size   = self._log_size()
         self._thread      = threading.Thread(target=self._loop, daemon=True)
@@ -1047,6 +1206,20 @@ class HangDetector:
             self._stop_event.wait(timeout=HANG_CHECK_SECS)
             if self._stop_event.is_set():
                 break
+
+            # Hard wall-clock timeout (used by documenter for ≤5 min budget)
+            if self.max_total_secs is not None:
+                total_elapsed = time.monotonic() - self._start_time
+                if total_elapsed >= self.max_total_secs:
+                    structured_log.error("subprocess_timeout", f"subprocess exceeded {self.max_total_secs}s wall-clock limit — KILLING", issue_num=self.issue_num, timeout_secs=self.max_total_secs)
+                    try:
+                        self.proc.kill()
+                    except ProcessLookupError:
+                        pass
+                    self._killed = True
+                    self._stop_event.set()
+                    return
+
             size = self._log_size()
             if size != self._last_size:
                 self._last_size   = size
@@ -1088,63 +1261,46 @@ def _get_issue_labels(issue_num: int, repo_name: Optional[str] = None) -> set[st
         return set()
 
 
-def _apply_in_progress_label(
+def _transition_safe(
     issue_num: int,
-    cfg: Optional["SprintConfig"] = None,
+    target_state: "_TicketState",
+    actor: str,
+    repo_name: Optional[str] = None,
+    note: Optional[str] = None,
 ) -> None:
-    """Apply the in-progress label via update_ticket.py (best-effort, issue #311 AC-5).
-
-    Called when coder_started_at is set so the board reflects active work.
-    Exceptions are caught and printed as warnings so a missing label never
-    blocks the sprint.
-    """
-    scripts_dir = cfg.scripts_dir if cfg is not None else SCRIPTS_DIR
-    update_script = scripts_dir / "update_ticket.py"
-    cmd = [
-        sys.executable, str(update_script),
-        "--issue", str(issue_num),
-        "--status", "in-progress",
-    ]
-    try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
-        if result.returncode in (0, 2):
-            print(f"  [in-progress] label applied for #{issue_num}")
-        else:
-            structured_log.warn("label_apply_failed", f"update_ticket.py exited {result.returncode} for #{issue_num}", issue_num=issue_num, label="in-progress", exit_code=result.returncode, subprocess_stderr=result.stderr.strip()[:400] if result.stderr else "")
-    except Exception as e:
-        structured_log.warn("label_apply_failed", f"failed to apply in-progress label for #{issue_num}: {e}", issue_num=issue_num, label="in-progress", exc=str(e))
-
-
-def _apply_needs_rework_label(
-    issue_num: int,
-    category: Optional[str],
-    cfg: Optional["SprintConfig"] = None,
-) -> None:
-    """Apply the need-rework label via update_ticket.py (best-effort).
-
-    Only called for logic failure categories; exceptions are caught and printed
-    as warnings so a missing label never breaks the sprint.
-    """
-    if category not in _LOGIC_FAILURE_CATEGORIES:
+    """Call state_machine.transition() best-effort; log warnings on failure."""
+    if not _STATE_MACHINE_AVAILABLE or _sm_transition is None:
+        structured_log.warn(
+            "state_machine_unavailable",
+            f"state_machine not available; skipping {target_state} transition for #{issue_num}",
+            issue_num=issue_num,
+        )
         return
-
-    scripts_dir = cfg.scripts_dir if cfg is not None else SCRIPTS_DIR
-    update_script = scripts_dir / "update_ticket.py"
-    cmd = [
-        sys.executable, str(update_script),
-        "--issue", str(issue_num),
-        "--status", "needs-rework",
-        "--force",
-    ]
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
-        if result.returncode in (0, 2):
-            # exit 2 means label ops partially failed but a warning comment was posted
-            structured_log.info("needs_rework_label_applied", f"needs-rework label applied for #{issue_num}", issue_num=issue_num, category=category)
-        else:
-            structured_log.warn("label_apply_failed", f"update_ticket.py exited {result.returncode} for #{issue_num}", issue_num=issue_num, label="needs-rework", exit_code=result.returncode, subprocess_stderr=result.stderr.strip()[:400] if result.stderr else "")
+        _sm_transition(issue_num, target_state, actor=actor, repo=repo_name, note=note)
+        structured_log.info(
+            "ticket_transition",
+            f"transition #{issue_num} → {target_state.value} actor={actor!r}",
+            issue_num=issue_num,
+            target_state=target_state.value,
+            actor=actor,
+        )
+    except _TransitionError as e:
+        structured_log.warn(
+            "label_apply_failed",
+            f"transition {target_state.value} failed for #{issue_num}: {e}",
+            issue_num=issue_num,
+            target_state=target_state.value,
+            exc=str(e),
+        )
     except Exception as e:
-        structured_log.warn("label_apply_failed", f"failed to apply needs-rework label for #{issue_num}: {e}", issue_num=issue_num, label="needs-rework", exc=str(e))
+        structured_log.warn(
+            "label_apply_failed",
+            f"unexpected error in transition {target_state.value} for #{issue_num}: {e}",
+            issue_num=issue_num,
+            target_state=target_state.value,
+            exc=str(e),
+        )
 
 
 def _add_blocked_label(
@@ -1217,6 +1373,42 @@ def _is_branch_merged_into(branch: str, target: str) -> bool:
     return False
 
 
+def _was_feature_merged_via_log(issue_num: int, target: str) -> bool:
+    """Return True if the target branch history contains a merge commit for this issue.
+
+    Used when _find_feature_branch returns None (branch was deleted after merging).
+    finish_feature.py creates commits of the form:
+        "Merge feature/<N>-<slug> into <target> (issue #<N>)"
+    so we search the recent merge history of the target for that pattern.
+
+    Case-sensitivity note: ``git log --grep`` is case-sensitive by default.
+    The ``issue #<N>`` grep is unaffected (numerics don't vary in case).
+    The branch-name grep uses ``--regexp-ignore-case`` so that unusual branch
+    prefixes (e.g. ``Feature/`` instead of ``feature/``) are still matched,
+    even though project convention requires lowercase kebab-case branch names.
+    """
+    target_ref = f"origin/{target}"
+    ok, _, _ = _try("git", "rev-parse", "--verify", target_ref)
+    if not ok:
+        target_ref = target
+
+    # Search for merge commits containing the issue reference
+    ok, out, _ = _try(
+        "git", "log", target_ref, "--merges", "--oneline",
+        f"--grep=issue #{issue_num}", "-1",
+    )
+    if ok and out.strip():
+        return True
+
+    # Also match branch name directly (covers non-standard merge messages).
+    # --regexp-ignore-case guards against uppercase branch prefixes.
+    ok, out, _ = _try(
+        "git", "log", target_ref, "--merges", "--oneline",
+        "--regexp-ignore-case", f"--grep=feature/{issue_num}-", "-1",
+    )
+    return ok and bool(out.strip())
+
+
 # ── quality gates ─────────────────────────────────────────────────────────────
 
 def _revert_to_sit(issue_num: int, gate_name: str, output: str,
@@ -1248,17 +1440,11 @@ def _revert_to_sit(issue_num: int, gate_name: str, output: str,
         except Exception as e:
             structured_log.error("failure_sidecar_write_error", f"failure parsing/sidecar failed: {e}", issue_num=issue_num, exc=str(e))
 
-    safe_add, safe_remove = _guard_sprint_labels(["SIT"], ["UAT", "in-progress"])
+    _transition_safe(issue_num, _TicketState.SIT, actor="sprint_manager:gate_fail", repo_name=repo_name)
     try:
-        github_client.update_labels(
-            issue_num,
-            add=safe_add,
-            remove=safe_remove,
-            repo_name=repo_name,
-        )
         github_client.add_comment(issue_num, comment, repo_name=repo_name)
     except Exception as e:
-        structured_log.warn("github_update_failed", f"failed to update GitHub: {e}", issue_num=issue_num, exc=str(e))
+        structured_log.warn("github_update_failed", f"failed to post gate failure comment: {e}", issue_num=issue_num, exc=str(e))
 
 
 def _post_success_comment(issue_num: int, results: list[GateResult],
@@ -1341,52 +1527,85 @@ def _gate_lint(
     base_branch: str = "develop",
     gate_scope: str = "changed",
 ) -> GateResult:
-    """Gate 2 -- run ruff check inside the tester worktree dashboard.
+    """Gate: run ruff (Python) and eslint/biome + prettier (JS/TS).
 
-    gate_scope='changed' (default): only lint .py files changed relative to
-    base_branch. gate_scope='full': run ruff check . (legacy behaviour).
+    gate_scope='changed' (default): only lint files changed relative to
+    base_branch. gate_scope='full': run against whole codebase (legacy behaviour).
+    Skips gracefully when tools are not installed or no relevant files changed.
     """
     if skip:
         print("  [gate:lint] skipped")
         return GateResult(gate="lint", passed=True, skipped=True)
 
     _post_agent_event("gate:lint")
+    combined = ""
+    any_ran = False
 
-    # ruff is optional -- if not found, log warning and treat as passed
+    # ── Python lint via ruff ───────────────────────────────────────────────────
     ok_ruff, ruff_path, _ = _try("which", "ruff")
     if not ok_ruff:
-        # Try inside dashboard venv
         venv_ruff = worktester_dashboard / ".." / "venv" / "bin" / "ruff"
-        if venv_ruff.exists():
-            ruff_bin = str(venv_ruff.resolve())
-        else:
-            structured_log.warn("lint_tool_missing", "[gate:lint] ruff not found; treating as passed", issue_num=issue_num)
-            return GateResult(gate="lint", passed=True, skipped=False,
-                              output="ruff not found -- skipped with warning")
+        ruff_bin = str(venv_ruff.resolve()) if venv_ruff.exists() else None
     else:
         ruff_bin = ruff_path
 
-    # Determine which files to lint based on gate_scope
-    if gate_scope == "full":
-        print("  [gate:lint] running ruff check . (full scope) ...")
-        rc, stdout, stderr = _run_timed(ruff_bin, "check", ".", cwd=worktester_dashboard)
+    if ruff_bin:
+        if gate_scope == "full":
+            print("  [gate:lint] running ruff check . (full scope) ...")
+            rc, stdout, stderr = _run_timed(ruff_bin, "check", ".", cwd=worktester_dashboard)
+            combined += stdout + stderr
+            any_ran = True
+            if rc != 0:
+                structured_log.error("gate_failed", f"[gate:lint] ruff FAIL (exit {rc})",
+                                     gate="lint", issue_num=issue_num, exit_code=rc)
+                _revert_to_sit(issue_num, "lint", combined, repo_name=repo_name)
+                return GateResult(gate="lint", passed=False, output=combined)
+            print("  [gate:lint] ruff PASS")
+        else:
+            py_files = _changed_py_files(base_branch, cwd=worktester_dashboard)
+            if py_files:
+                print(f"  [gate:lint] ruff checking {len(py_files)} file(s): {', '.join(py_files)}")
+                rc, stdout, stderr = _run_timed(ruff_bin, "check", *py_files,
+                                                cwd=worktester_dashboard)
+                combined += stdout + stderr
+                any_ran = True
+                if rc != 0:
+                    structured_log.error("gate_failed", f"[gate:lint] ruff FAIL (exit {rc})",
+                                         gate="lint", issue_num=issue_num, exit_code=rc)
+                    _revert_to_sit(issue_num, "lint", combined, repo_name=repo_name)
+                    return GateResult(gate="lint", passed=False, output=combined)
+                print("  [gate:lint] ruff PASS")
+            else:
+                print("  [gate:lint] no Python files changed — ruff skipped")
     else:
-        # changed scope: only lint .py files changed relative to base_branch
-        py_files = _changed_py_files(base_branch, cwd=worktester_dashboard)
-        if not py_files:
-            print("  [gate:lint] no Python files changed — skipped")
-            return GateResult(gate="lint", passed=True, output="no Python files changed")
-        print(f"  [gate:lint] checking {len(py_files)} file(s): {', '.join(py_files)}")
-        rc, stdout, stderr = _run_timed(ruff_bin, "check", *py_files, cwd=worktester_dashboard)
+        structured_log.warn("lint_tool_missing", "[gate:lint] ruff not found; skipping Python lint",
+                            issue_num=issue_num)
 
-    combined = stdout + stderr
-    if rc == 0:
-        print("  [gate:lint] PASS")
-        return GateResult(gate="lint", passed=True, output=combined)
+    # ── Frontend lint via eslint/biome + prettier ──────────────────────────────
+    if gate_scope == "full":
+        js_ts_files_for_fe: list[str] = ["."]
     else:
-        structured_log.error("gate_failed", f"[gate:lint] FAIL (exit {rc})", gate="lint", issue_num=issue_num, exit_code=rc)
-        _revert_to_sit(issue_num, "lint", combined, repo_name=repo_name)
-        return GateResult(gate="lint", passed=False, output=combined)
+        js_ts_files_for_fe = _changed_js_ts_files(base_branch, cwd=worktester_dashboard)
+
+    if js_ts_files_for_fe:
+        fe_passed, fe_output = _run_frontend_lint(
+            issue_num, worktester_dashboard, js_ts_files_for_fe, gate_scope
+        )
+        combined += fe_output
+        if fe_output.strip():
+            any_ran = True
+        if not fe_passed:
+            _revert_to_sit(issue_num, "lint", combined, repo_name=repo_name)
+            return GateResult(gate="lint", passed=False, output=combined)
+    else:
+        print("  [gate:lint] no JS/TS files changed — frontend lint skipped")
+
+    if not any_ran:
+        print("  [gate:lint] no lintable files changed — skipped")
+        return GateResult(gate="lint", passed=True, output="no lintable files changed")
+
+    print("  [gate:lint] PASS")
+    return GateResult(gate="lint", passed=True, output=combined)
 
 
 def _gate_merge_preview(
@@ -1445,6 +1664,249 @@ def _gate_merge_preview(
     return GateResult(gate="merge-preview", passed=True, output=combined)
 
 
+def _gate_typecheck(
+    issue_num: int,
+    worktester_dashboard: Path,
+    skip: bool,
+    repo_name: Optional[str] = None,
+    base_branch: str = "develop",
+    gate_scope: str = "changed",
+) -> GateResult:
+    """Gate: run mypy (Python) and/or tsc --noEmit (TypeScript) on changed files.
+
+    Skips gracefully when the tool is not installed or no relevant files changed.
+    """
+    if skip:
+        print("  [gate:typecheck] skipped")
+        return GateResult(gate="typecheck", passed=True, skipped=True)
+
+    _post_agent_event("gate:typecheck")
+    results_passed = True
+    combined = ""
+
+    # ── Python typecheck via mypy ──────────────────────────────────────────────
+    if gate_scope == "full":
+        py_files: list[str] = ["apps/dashboard"]
+    else:
+        py_files = _changed_py_files(base_branch, cwd=worktester_dashboard)
+
+    if py_files:
+        ok_mypy, mypy_path, _ = _try("which", "mypy")
+        if not ok_mypy:
+            venv_mypy = worktester_dashboard / ".." / "venv" / "bin" / "mypy"
+            mypy_bin = str(venv_mypy.resolve()) if venv_mypy.exists() else None
+        else:
+            mypy_bin = mypy_path
+
+        if mypy_bin:
+            targets = ["."] if gate_scope == "full" else py_files
+            print(f"  [gate:typecheck] running mypy on {len(targets)} target(s) ...")
+            rc, stdout, stderr = _run_timed(mypy_bin, "--ignore-missing-imports", *targets,
+                                            cwd=worktester_dashboard)
+            combined += stdout + stderr
+            if rc != 0:
+                structured_log.error("gate_failed", f"[gate:typecheck] mypy FAIL (exit {rc})",
+                                     gate="typecheck", issue_num=issue_num, exit_code=rc)
+                results_passed = False
+            else:
+                print("  [gate:typecheck] mypy PASS")
+        else:
+            structured_log.warn("typecheck_tool_missing",
+                                "[gate:typecheck] mypy not found; skipping Python typecheck",
+                                issue_num=issue_num)
+
+    # ── TypeScript typecheck via tsc --noEmit ──────────────────────────────────
+    if gate_scope == "full":
+        ts_files: list[str] = []
+        ok_ts, ts_out, _ = _try("find", ".", "-name", "tsconfig.json", "-maxdepth", "3",
+                                 cwd=worktester_dashboard)
+        if ok_ts and ts_out.strip():
+            ts_files = ["_has_tsconfig_"]  # sentinel — just triggers tsc check
+    else:
+        ts_files = _changed_js_ts_files(base_branch, cwd=worktester_dashboard)
+
+    if ts_files:
+        ok_tsc, tsc_path, _ = _try("which", "tsc")
+        if ok_tsc:
+            print("  [gate:typecheck] running tsc --noEmit ...")
+            rc, stdout, stderr = _run_timed(tsc_path, "--noEmit", cwd=worktester_dashboard)
+            combined += stdout + stderr
+            if rc != 0:
+                structured_log.error("gate_failed", f"[gate:typecheck] tsc FAIL (exit {rc})",
+                                     gate="typecheck", issue_num=issue_num, exit_code=rc)
+                results_passed = False
+            else:
+                print("  [gate:typecheck] tsc PASS")
+        else:
+            structured_log.warn("typecheck_tool_missing",
+                                "[gate:typecheck] tsc not found; skipping TS typecheck",
+                                issue_num=issue_num)
+
+    if not py_files and not ts_files:
+        print("  [gate:typecheck] no typed files changed — skipped")
+        return GateResult(gate="typecheck", passed=True, output="no typed files changed")
+
+    if not results_passed:
+        _revert_to_sit(issue_num, "typecheck", combined, repo_name=repo_name)
+        return GateResult(gate="typecheck", passed=False, output=combined)
+
+    if not combined:
+        print("  [gate:typecheck] no typecheck tools found — skipped")
+        return GateResult(gate="typecheck", passed=True, skipped=True,
+                          output="no typecheck tools found")
+
+    return GateResult(gate="typecheck", passed=True, output=combined)
+
+
+def _run_frontend_lint(
+    issue_num: int,
+    worktester_dashboard: Path,
+    js_ts_files: list[str],
+    gate_scope: str,
+) -> tuple[bool, str]:
+    """Run eslint/biome + prettier --check on JS/TS files.
+
+    Returns (passed: bool, combined_output: str).
+    Skips gracefully when tools are missing.
+    """
+    combined = ""
+    passed = True
+
+    # eslint or biome (prefer biome if configured)
+    ok_biome, biome_path, _ = _try("which", "biome")
+    ok_eslint, eslint_path, _ = _try("which", "eslint")
+    ok_npx, npx_path, _ = _try("which", "npx")
+
+    linter_bin: Optional[str] = None
+    linter_args: list[str] = []
+    if ok_biome:
+        linter_bin = biome_path
+        linter_args = ["check"] + (["--apply=false"] if gate_scope != "full" else ["--apply=false", "."])
+    elif ok_eslint:
+        linter_bin = eslint_path
+        linter_args = ["--max-warnings=0"]
+    elif ok_npx:
+        # try biome via npx — skip if not found in project
+        rc_biome, _, _ = _run_timed(
+            npx_path, "--no", "biome", "--version", cwd=worktester_dashboard
+        )
+        if rc_biome == 0:
+            linter_bin = npx_path
+            linter_args = ["--no", "biome", "check", "--apply=false"]
+
+    if linter_bin:
+        targets = ["."] if gate_scope == "full" else js_ts_files
+        print(f"  [gate:lint-fe] running frontend linter on {len(targets)} target(s) ...")
+        rc, stdout, stderr = _run_timed(linter_bin, *linter_args, *targets,
+                                        cwd=worktester_dashboard)
+        combined += stdout + stderr
+        if rc != 0:
+            structured_log.error("gate_failed", f"[gate:lint-fe] FAIL (exit {rc})",
+                                 gate="lint", issue_num=issue_num, exit_code=rc)
+            passed = False
+        else:
+            print("  [gate:lint-fe] PASS")
+    else:
+        structured_log.warn("lint_tool_missing",
+                            "[gate:lint-fe] no eslint/biome found; skipping JS/TS lint",
+                            issue_num=issue_num)
+
+    # prettier --check
+    if passed:
+        ok_prettier, prettier_bin, _ = _try("which", "prettier")
+        if not ok_prettier and ok_npx:
+            rc_pcheck, _, _ = _run_timed(
+                npx_path, "--no", "prettier", "--version", cwd=worktester_dashboard
+            )
+            if rc_pcheck == 0:
+                prettier_bin = npx_path
+                prettier_prefix = ["--no", "prettier"]
+            else:
+                prettier_bin = None
+                prettier_prefix = []
+        else:
+            prettier_prefix = []
+
+        if ok_prettier or (not ok_prettier and ok_npx and prettier_bin):
+            targets = ["."] if gate_scope == "full" else js_ts_files
+            cmd_args = prettier_prefix + ["--check"] + targets
+            print(f"  [gate:lint-fe] running prettier --check on {len(targets)} target(s) ...")
+            rc, stdout, stderr = _run_timed(prettier_bin, *cmd_args,
+                                            cwd=worktester_dashboard)
+            combined += stdout + stderr
+            if rc != 0:
+                structured_log.error("gate_failed", f"[gate:lint-fe] prettier FAIL (exit {rc})",
+                                     gate="lint", issue_num=issue_num, exit_code=rc)
+                passed = False
+            else:
+                print("  [gate:lint-fe] prettier PASS")
+
+    return passed, combined
+
+
+def _gate_design(
+    issue_num: int,
+    worktester_dashboard: Path,
+    skip: bool,
+    repo_name: Optional[str] = None,
+) -> GateResult:
+    """Gate: run impeccable detect on the frontend for UI anti-patterns.
+
+    Uses the deterministic pattern-matching detector (no LLM).
+    Exit code 0 = no issues found; non-zero = issues detected.
+    Skips gracefully when impeccable is not installed or no HTML/CSS/JSX present.
+    """
+    if skip:
+        print("  [gate:design] skipped")
+        return GateResult(gate="design", passed=True, skipped=True)
+
+    _post_agent_event("gate:design")
+
+    ok_npx, npx_path, _ = _try("which", "npx")
+    if not ok_npx:
+        structured_log.warn("design_tool_missing",
+                            "[gate:design] npx not found; skipping design gate",
+                            issue_num=issue_num)
+        return GateResult(gate="design", passed=True, skipped=True,
+                          output="npx not found — design gate skipped")
+
+    # Detect if there is any frontend to scan
+    fe_exts = (".html", ".css", ".jsx", ".tsx")
+    has_frontend = any(
+        True for ext in fe_exts
+        for _ in worktester_dashboard.rglob(f"*{ext}")
+    ) if worktester_dashboard.exists() else False
+
+    if not has_frontend:
+        print("  [gate:design] no frontend files found — skipped")
+        return GateResult(gate="design", passed=True, skipped=True,
+                          output="no frontend files — design gate skipped")
+
+    # Determine scan target
+    static_dir = worktester_dashboard / "apps" / "dashboard" / "static"
+    if not static_dir.exists():
+        static_dir = worktester_dashboard / "static"
+    if not static_dir.exists():
+        static_dir = worktester_dashboard
+
+    print(f"  [gate:design] running impeccable detect {static_dir.name}/ ...")
+    rc, stdout, stderr = _run_timed(
+        npx_path, "--yes", "impeccable", "detect", str(static_dir), "--json",
+        cwd=worktester_dashboard,
+    )
+    combined = stdout + stderr
+
+    if rc == 0:
+        print("  [gate:design] PASS — no design anti-patterns detected")
+        return GateResult(gate="design", passed=True, output=combined)
+    else:
+        # impeccable exits non-zero when issues are found
+        structured_log.error("gate_failed", f"[gate:design] FAIL (exit {rc})",
+                             gate="design", issue_num=issue_num, exit_code=rc)
+        _revert_to_sit(issue_num, "design", combined, repo_name=repo_name)
+        return GateResult(gate="design", passed=False, output=combined)
+
+
 def _run_quality_gates(
     issue_num: int,
     feature_branch: str,
@@ -1454,13 +1916,16 @@ def _run_quality_gates(
     gate_pytest: bool,
     gate_lint: bool,
     gate_merge_preview: bool,
+    gate_typecheck: bool = True,
+    gate_design: bool = True,
     target_branch: str = "develop",
     repo_name: Optional[str] = None,
     base_branch: str = "develop",
     gate_scope: str = "changed",
 ) -> list[GateResult]:
-    """Run the three quality gates sequentially. Returns list of GateResult.
+    """Run quality gates sequentially. Returns list of GateResult.
 
+    Order (cheap/deterministic first): typecheck → lint → design → pytest → merge-preview.
     Stops early on first failure (remaining gates are not run).
     If skip_all is True, all gates are skipped.
 
@@ -1470,21 +1935,21 @@ def _run_quality_gates(
     """
     results: list[GateResult] = []
 
-    # Gate 1 -- pytest
-    r1 = _gate_pytest(
+    # Gate 1 -- typecheck (cheap, deterministic)
+    r_tc = _gate_typecheck(
         issue_num,
         worktester_dashboard,
-        skip=(skip_all or not gate_pytest),
+        skip=(skip_all or not gate_typecheck),
         repo_name=repo_name,
         base_branch=base_branch,
         gate_scope=gate_scope,
     )
-    results.append(r1)
-    if not r1.passed:
+    results.append(r_tc)
+    if not r_tc.passed:
         return results
 
-    # Gate 2 -- lint
-    r2 = _gate_lint(
+    # Gate 2 -- lint (Python ruff + frontend eslint/biome/prettier)
+    r_lint = _gate_lint(
         issue_num,
         worktester_dashboard,
         skip=(skip_all or not gate_lint),
@@ -1492,12 +1957,36 @@ def _run_quality_gates(
         base_branch=base_branch,
         gate_scope=gate_scope,
     )
-    results.append(r2)
-    if not r2.passed:
+    results.append(r_lint)
+    if not r_lint.passed:
         return results
 
-    # Gate 3 -- merge-preview
-    r3 = _gate_merge_preview(
+    # Gate 3 -- design (impeccable UI anti-pattern detector, no LLM)
+    r_design = _gate_design(
+        issue_num,
+        worktester_dashboard,
+        skip=(skip_all or not gate_design),
+        repo_name=repo_name,
+    )
+    results.append(r_design)
+    if not r_design.passed:
+        return results
+
+    # Gate 4 -- pytest
+    r_pytest = _gate_pytest(
+        issue_num,
+        worktester_dashboard,
+        skip=(skip_all or not gate_pytest),
+        repo_name=repo_name,
+        base_branch=base_branch,
+        gate_scope=gate_scope,
+    )
+    results.append(r_pytest)
+    if not r_pytest.passed:
+        return results
+
+    # Gate 5 -- merge-preview (most expensive; run last)
+    r_merge = _gate_merge_preview(
         issue_num,
         feature_branch,
         worktester_root,
@@ -1505,7 +1994,7 @@ def _run_quality_gates(
         target_branch=target_branch,
         repo_name=repo_name,
     )
-    results.append(r3)
+    results.append(r_merge)
 
     return results
 
@@ -1547,6 +2036,7 @@ def _call_finish_feature(
     target_branch: str = "develop",
     repo_name: Optional[str] = None,
     cfg: Optional["SprintConfig"] = None,
+    sprint_label: Optional[str] = None,
 ) -> None:
     """Call finish_feature.py as a subprocess from the worktester root."""
     if cfg is not None:
@@ -1564,14 +2054,19 @@ def _call_finish_feature(
     if repo_name:
         cmd += ["--repo", repo_name]
 
+    sub_env = os.environ.copy()
+    if sprint_label:
+        sub_env["COMMANDER_SPRINT_RUNNING"] = sprint_label
+
     print(f"  Calling finish_feature.py --issue {issue_num} --target-branch {target_branch} ...")
-    result = subprocess.run(cmd, cwd=str(wt_root), capture_output=True, text=True)
+    result = subprocess.run(cmd, cwd=str(wt_root), capture_output=True, text=True, env=sub_env)
     if result.stdout:
         print(result.stdout.rstrip())
     if result.returncode != 0:
         structured_log.error("subprocess_nonzero_exit", f"finish_feature.py exited {result.returncode}", issue_num=issue_num, subprocess="finish_feature.py", exit_code=result.returncode, subprocess_stderr=result.stderr.rstrip() if result.stderr else "")
     else:
         print("  finish_feature.py completed successfully")
+    return result.returncode == 0
 
 
 # ── documentor integration (issue #103) ──────────────────────────────────────
@@ -1623,6 +2118,8 @@ def handle_post_tester(
     gate_pytest: bool,
     gate_lint: bool,
     gate_merge_preview: bool,
+    gate_typecheck: bool = True,
+    gate_design: bool = True,
     worktester_root: Optional[Path] = None,
     worktester_dashboard: Optional[Path] = None,
     target_branch: str = "develop",
@@ -1632,6 +2129,7 @@ def handle_post_tester(
     gate_scope: str = "changed",
     documentor_enabled: bool = False,
     alert_modes: Optional[list] = None,
+    sprint_label: Optional[str] = None,
 ) -> tuple[bool, str, Optional[str]]:
     """Called after a tester subprocess exits.
 
@@ -1660,91 +2158,78 @@ def handle_post_tester(
                 f"Issue #{issue_num}: tester exited {tester_exit_code}, skipping gates",
                 FailureCategory.CRASH)
 
-    # Re-fetch current labels (AC-1)
-    labels = _get_issue_labels(issue_num, repo_name=eff_repo)
-    if "UAT" not in labels:
-        current = ", ".join(sorted(labels)) or "(none)"
-        print(f"  Issue #{issue_num}: tester exited 0 but label is [{current}], not UAT -- checking merge status")
+    # Determine merge status by branch presence and git log — no label check.
+    # sprint_manager is the sole UAT label writer via transition().
+    found_branch = _find_feature_branch(issue_num)
+    branch_is_merged = False
 
-        # Check whether the feature branch has already been merged into the target
-        # (agent may have merged outside finish_feature.py, leaving UAT label absent)
-        found_branch = _find_feature_branch(issue_num)
-        branch_is_merged = False
-        if found_branch:
-            branch_is_merged = _is_branch_merged_into(found_branch, target_branch)
-            print(
-                f"  Issue #{issue_num}: feature branch '{found_branch}' merged into "
-                f"'{target_branch}': {branch_is_merged}"
+    if found_branch:
+        branch_is_merged = _is_branch_merged_into(found_branch, target_branch)
+        print(
+            f"  Issue #{issue_num}: feature branch '{found_branch}' merged into "
+            f"'{target_branch}': {branch_is_merged}"
+        )
+        if not branch_is_merged:
+            # Tester exited 0 but skipped finish_feature.py — attempt auto-merge.
+            print(f"  Issue #{issue_num}: branch not merged — attempting auto-merge via finish_feature.py ...")
+            merge_ok = _call_finish_feature(
+                issue_num, wt_root, target_branch, eff_repo, cfg, sprint_label
             )
-        else:
-            # Branch not found at all — cannot determine merge status; fall through
-            # to existing TESTER_REJECTED behavior.
-            print(
-                f"  Issue #{issue_num}: feature branch not found — cannot confirm merge, "
-                f"treating as genuine tester skip"
-            )
-
-        if branch_is_merged:
-            # Auto-recovery: branch was merged outside finish_feature.py, apply UAT label
-            print(f"  Issue #{issue_num}: branch is merged — auto-applying UAT label")
-            scripts_dir = cfg.scripts_dir if cfg is not None else SCRIPTS_DIR
-            update_script = scripts_dir / "update_ticket.py"
-            _UAT_RECOVERY_BACKOFFS = (2, 5, 10)
-            label_result = None
-            for attempt in range(len(_UAT_RECOVERY_BACKOFFS) + 1):
-                label_result = subprocess.run(
-                    [sys.executable, str(update_script), "--issue", str(issue_num), "--status", "uat"],
-                    capture_output=True, text=True,
+            if merge_ok:
+                branch_is_merged = _is_branch_merged_into(found_branch, target_branch)
+                print(f"  Issue #{issue_num}: auto-merge {'succeeded' if branch_is_merged else 'ran but branch still not merged'}")
+            if not branch_is_merged:
+                warning_body = (
+                    f"**Tester exited 0 but feature branch not merged.**\n\n"
+                    f"Tester subprocess finished successfully (exit code 0), but "
+                    f"`{found_branch}` has not been merged into `{target_branch}`. "
+                    f"Auto-merge via finish_feature.py {'also failed' if not merge_ok else 'ran but branch still not detected as merged'}. "
+                    f"Re-run the tester to proceed."
                 )
-                if label_result.returncode == 0:
-                    break
-                if attempt < len(_UAT_RECOVERY_BACKOFFS):
-                    wait = _UAT_RECOVERY_BACKOFFS[attempt]
-                    print(
-                        f"  Warning: UAT label recovery attempt {attempt + 1} failed — retrying in {wait}s…",
-                        file=sys.stderr,
+                try:
+                    github_client.add_comment(issue_num, warning_body, repo_name=eff_repo)
+                except Exception as exc:
+                    structured_log.warn("missing_merge_comment_failed", f"failed to post missing-merge comment: {exc}", issue_num=issue_num, exc=str(exc))
+                if alert_modes:
+                    dispatch_alerts(
+                        alert_modes,
+                        title=f"Issue #{issue_num} skipped: tester exited 0 but branch not merged",
+                        body=warning_body[:500],
+                        issue_num=issue_num,
+                        category=FailureCategory.TESTER_REJECTED,
+                        cfg=cfg,
+                        repo=eff_repo,
                     )
-                    time.sleep(wait)
-
-            recovery_comment = (
-                "Detected merged feature branch without UAT label — applied UAT automatically "
-                "(agent appears to have merged outside finish_feature.py)."
+                return (False,
+                        f"Issue #{issue_num}: tester exited 0 but feature branch not merged",
+                        FailureCategory.TESTER_REJECTED)
+    else:
+        # Branch not found locally or remotely — check git log for merge commit.
+        branch_is_merged = _was_feature_merged_via_log(issue_num, target_branch)
+        if branch_is_merged:
+            print(
+                f"  Issue #{issue_num}: feature branch not found but merge commit "
+                f"found in '{target_branch}' history — treating as merged"
             )
-            try:
-                github_client.add_comment(issue_num, recovery_comment, repo_name=eff_repo)
-            except Exception as exc:
-                structured_log.warn("uat_recovery_comment_failed", f"failed to post UAT recovery comment: {exc}", issue_num=issue_num, exc=str(exc))
-
-            if label_result is None or label_result.returncode != 0:
-                stderr_text = label_result.stderr.strip() if label_result else "unknown error"
-                print(
-                    f"  Warning: UAT label auto-recovery failed after "
-                    f"{len(_UAT_RECOVERY_BACKOFFS) + 1} attempts — {stderr_text}",
-                    file=sys.stderr,
-                )
-            else:
-                print(f"  Issue #{issue_num}: UAT label applied via auto-recovery")
-
-            # Treat as a successful merge — gates may run below
-            print(f"\nTester promoted issue #{issue_num} to UAT (auto-recovered) -- running quality gates...")
         else:
-            # Branch exists and is NOT merged — genuine tester skip, preserve existing behavior
+            print(
+                f"  Issue #{issue_num}: feature branch not found and no merge "
+                f"commit found in '{target_branch}' — treating as genuine tester skip"
+            )
             warning_body = (
-                f"**Tester exited 0 but not UAT — label missing.**\n\n"
-                f"The tester subprocess finished successfully (exit code 0), "
-                f"but the UAT label was never applied. Current labels: [{current}].\n\n"
-                f"This almost always means the tester agent skipped running `finish_feature.py`. "
-                f"Please either re-run the tester or apply the **UAT** label manually to move this "
-                f"ticket to the UAT queue."
+                f"**Tester exited 0 but feature branch not found and not merged.**\n\n"
+                f"Tester subprocess finished successfully (exit code 0), but no "
+                f"`feature/{issue_num}-*` branch exists locally or on origin, and no "
+                f"merge commit was found in `{target_branch}`. Re-run the tester."
             )
             try:
                 github_client.add_comment(issue_num, warning_body, repo_name=eff_repo)
             except Exception as exc:
-                structured_log.warn("missing_uat_comment_failed", f"failed to post missing-UAT comment: {exc}", issue_num=issue_num, exc=str(exc))
+                structured_log.warn("missing_merge_comment_failed", f"failed to post missing-merge comment: {exc}", issue_num=issue_num, exc=str(exc))
             if alert_modes:
                 dispatch_alerts(
                     alert_modes,
-                    title=f"Issue #{issue_num} skipped: tester exited 0 but not UAT",
+                    title=f"Issue #{issue_num} skipped: tester exited 0 but not merged",
                     body=warning_body[:500],
                     issue_num=issue_num,
                     category=FailureCategory.TESTER_REJECTED,
@@ -1752,21 +2237,23 @@ def handle_post_tester(
                     repo=eff_repo,
                 )
             return (False,
-                    f"Issue #{issue_num}: tester exited 0 but not UAT -- no merge",
+                    f"Issue #{issue_num}: tester exited 0 but feature branch missing and not merged",
                     FailureCategory.TESTER_REJECTED)
-    else:
-        print(f"\nTester promoted issue #{issue_num} to UAT -- running quality gates...")
 
-    # Find the feature branch; None means the tester agent already merged via finish_feature.py
-    feature_branch = _find_feature_branch(issue_num)
-    already_merged_by_tester = feature_branch is None
+    # Merge confirmed. Determine if tester already merged (branch deleted) or if
+    # sprint_manager needs to call finish_feature.py after gates pass.
+    already_merged_by_tester = (found_branch is None)
     if already_merged_by_tester:
         print(
-            f"  Issue #{issue_num}: feature branch not found — "
+            f"  Issue #{issue_num}: feature branch deleted — "
             f"tester already merged via finish_feature.py; skipping re-merge"
         )
-        # Use a placeholder so pytest/lint gates can still run; merge-preview will be skipped
+        # Placeholder so pytest/lint gates can still run; merge-preview will be skipped
         feature_branch = f"feature/{issue_num}-unknown"
+    else:
+        feature_branch = found_branch
+
+    print(f"\nTester finished for issue #{issue_num} -- running quality gates...")
 
     # Resolve documentor_enabled: explicit param wins, then cfg, then False
     eff_documentor = documentor_enabled or (cfg.documentor_enabled if cfg is not None else False)
@@ -1776,17 +2263,20 @@ def handle_post_tester(
         if eff_documentor:
             _run_documentor(issue_num, eff_repo, cfg=cfg)
         if not already_merged_by_tester:
-            _call_finish_feature(issue_num, wt_root, target_branch=target_branch, repo_name=eff_repo, cfg=cfg)
+            _call_finish_feature(issue_num, wt_root, target_branch=target_branch, repo_name=eff_repo, cfg=cfg, sprint_label=sprint_label)
         _post_agent_event("gate:merging", api_url=api_url)
         all_skipped = [
-            GateResult(gate="pytest",        passed=True, skipped=True),
+            GateResult(gate="typecheck",     passed=True, skipped=True),
             GateResult(gate="lint",          passed=True, skipped=True),
+            GateResult(gate="design",        passed=True, skipped=True),
+            GateResult(gate="pytest",        passed=True, skipped=True),
             GateResult(gate="merge-preview", passed=True, skipped=True),
         ]
+        _transition_safe(issue_num, _TicketState.UAT, actor="sprint_manager", repo_name=eff_repo)
         _post_success_comment(issue_num, all_skipped, repo_name=eff_repo)
         if already_merged_by_tester:
-            return True, f"Tester promoted issue #{issue_num} to UAT; merge already done by tester, comment posted", None
-        return True, f"Tester promoted issue #{issue_num} to UAT; all gates skipped, merged into {target_branch}", None
+            return True, f"Issue #{issue_num}: merge already done by tester, UAT applied, comment posted", None
+        return True, f"Issue #{issue_num}: all gates skipped, merged into {target_branch}, UAT applied", None
 
     results = _run_quality_gates(
         issue_num=issue_num,
@@ -1797,6 +2287,8 @@ def handle_post_tester(
         gate_pytest=gate_pytest,
         gate_lint=gate_lint,
         gate_merge_preview=gate_merge_preview,
+        gate_typecheck=gate_typecheck,
+        gate_design=gate_design,
         target_branch=target_branch,
         repo_name=eff_repo,
         base_branch=base_branch,
@@ -1815,16 +2307,19 @@ def handle_post_tester(
         if eff_documentor:
             _run_documentor(issue_num, eff_repo, cfg=cfg)
         if not already_merged_by_tester:
-            _call_finish_feature(issue_num, wt_root, target_branch=target_branch, repo_name=eff_repo, cfg=cfg)
+            _call_finish_feature(issue_num, wt_root, target_branch=target_branch, repo_name=eff_repo, cfg=cfg, sprint_label=sprint_label)
+        _transition_safe(issue_num, _TicketState.UAT, actor="sprint_manager", repo_name=eff_repo)
         _post_success_comment(issue_num, results, repo_name=eff_repo)
         if already_merged_by_tester:
-            return True, f"Tester promoted issue #{issue_num} to UAT; merge already done by tester, comment posted", None
-        return True, f"Tester promoted issue #{issue_num} to UAT; all gates passed, merged into {target_branch}", None
+            return True, f"Issue #{issue_num}: all gates passed, merge already done by tester, UAT applied", None
+        return True, f"Issue #{issue_num}: all gates passed, merged into {target_branch}, UAT applied", None
     else:
         failed = next((r for r in results if not r.passed), None)
         gate_name = failed.gate if failed else "unknown"
         # Map gate name to fine-grained failure category for needs-rework logic
         gate_category_map = {
+            "typecheck":     FailureCategory.GATE_FAIL,
+            "design":        FailureCategory.GATE_FAIL,
             "pytest":        FailureCategory.PYTEST_FAIL,
             "lint":          FailureCategory.LINT_FAIL,
             "merge-preview": FailureCategory.MERGE_CONFLICT,
@@ -1923,6 +2418,16 @@ def _dispatch_coder(
     cwd_path = cfg.worktree_coder if cfg else WORKTESTER_DASHBOARD
 
     print(f"  Dispatching coder for issue #{issue_num} ...", flush=True)
+    try:
+        structured_log.event(
+            "coder.dispatch",
+            run_id=os.environ.get("COMMANDER_RUN_ID"),
+            issue_num=issue_num,
+            sprint_label=sprint_label,
+            agent_role="coder",
+        )
+    except Exception:
+        pass
     _post_agent_event(f"coder:issue-{issue_num}", api_url=api_url)
 
     log_path = _issue_log_path(issue_num, cfg=cfg)
@@ -1933,10 +2438,38 @@ def _dispatch_coder(
         issue_url = f"https://github.com/{_r(eff_repo)}/issues/{issue_num}"
         prompt = cfg.coder_prompt_template.format(issue_url=issue_url)
     else:
+        # Detect design context files for coder orientation
+        _design_hints = []
+        for _doc in ("PRODUCT.md", "DESIGN.md"):
+            if (cwd_path / _doc).exists():
+                _design_hints.append(_doc)
+        _design_prefix = (
+            f" If the issue touches frontend/UI, read {' and '.join(_design_hints)} first"
+            " to understand design conventions and anti-patterns to avoid."
+            if _design_hints else ""
+        )
+
         prompt = (
-            f"Read the issue at https://github.com/{_r(eff_repo)}/issues/{issue_num} "
-            "and implement it following the project's branching workflow. "
-            "Use the BA/coder/tester workflow defined in CLAUDE.md."
+            f"Read the issue at https://github.com/{_r(eff_repo)}/issues/{issue_num}"
+            " and implement it following the project's branching workflow."
+            " Use the BA/coder/tester workflow defined in CLAUDE.md."
+            " TDD WORKFLOW: before writing implementation code, read the"
+            " '## Acceptance Criteria' (or '## Acceptance') section of the issue"
+            " and translate each criterion into a pytest test in the tests/ directory."
+            " Write the tests first, then implement until all tests pass."
+            " You must NOT delete, skip, or weaken any test to make it pass —"
+            " every test must be anchored to a specific acceptance criterion and must"
+            " pass because the implementation satisfies it, not because the test was"
+            " softened."
+            f"{_design_prefix}"
+        )
+
+    # TDD guard: if custom template omits TDD instruction, append it.
+    if "TDD" not in prompt and "acceptance criteria" not in prompt.lower() and "write the tests first" not in prompt.lower():
+        prompt += (
+            " TDD WORKFLOW: translate each Acceptance Criterion into a pytest test"
+            " before writing implementation code. Tests must stay anchored to their"
+            " criterion — do not delete or weaken them to achieve a passing run."
         )
 
     # AC-3 (issue #311): always append the no-merge constraint so the coder
@@ -1949,27 +2482,44 @@ def _dispatch_coder(
             " finish_feature.py. Merging is exclusively the tester's job via"
             " `scripts/finish_feature.py` after tests pass."
         )
+    # Label boundary (issue #509): coder must never touch GitHub labels.
+    if "DO NOT modify any GitHub label" not in prompt:
+        prompt += (
+            " DO NOT modify any GitHub label on this issue or any other issue."
+            " Label transitions are managed by sprint_manager."
+            " Do not run update_ticket.py, gh issue edit --add-label, or any other"
+            " label-mutation command."
+        )
 
     # Inject failure context from sidecar if available (AC: sprint manager reads sidecar)
     failure_suffix = _build_failure_suffix(issue_num)
     if failure_suffix:
         prompt = prompt + failure_suffix
 
+    # Give the headless run the same coder persona an interactive /coder session
+    # would (subagents/slash-commands don't load in `claude -p`). Keep `-p PROMPT`
+    # last so the later `cmd[-1] += sprint_hint` append still targets the prompt.
     cmd = [
         "claude",
         "--model", "claude-sonnet-4-6",
         "--dangerously-skip-permissions",
-        "-p",
-        prompt,
     ]
+    coder_persona = _load_agent_persona("coder", cwd_path)
+    if coder_persona:
+        cmd += ["--append-system-prompt", coder_persona]
+    cmd += ["-p", prompt]
 
     # Build subprocess environment: inherit current env, set COMMANDER_MERGE_TARGET
     # when in sprint mode (AC2), COMMANDER_APP_PORT if a port was chosen (issue #62),
-    # and COMMANDER_PROJECT so log output is tagged by project (issue #122).
+    # COMMANDER_PROJECT so log output is tagged by project (issue #122), and
+    # COMMANDER_SPRINT_RUNNING so child scripts enforce RUN_MUTABLE_LABELS (issue #506).
     sub_env = os.environ.copy()
     sub_env.pop("ANTHROPIC_API_KEY", None)
+    sub_env["CLAUDE_AGENT_ROLE"] = "coder"  # tag hooks/telemetry as the docs prescribe
     if eff_repo:
         sub_env["COMMANDER_PROJECT"] = eff_repo
+    if sprint_label:
+        sub_env["COMMANDER_SPRINT_RUNNING"] = sprint_label
     if sprint_branch not in ("develop",):
         sub_env["COMMANDER_MERGE_TARGET"] = sprint_branch
         # Always append sprint-mode instructions regardless of whether a custom
@@ -2135,6 +2685,16 @@ def _dispatch_tester(
     cwd_path = cfg.worktree_tester_app if cfg else WORKTESTER_DASHBOARD
 
     print(f"  Dispatching tester for issue #{issue_num} ...", flush=True)
+    try:
+        structured_log.event(
+            "tester.dispatch",
+            run_id=os.environ.get("COMMANDER_RUN_ID"),
+            issue_num=issue_num,
+            sprint_label=sprint_label,
+            agent_role="tester",
+        )
+    except Exception:
+        pass
     _post_agent_event(f"tester:issue-{issue_num}", api_url=api_url)
 
     log_path = _issue_log_path(issue_num, cfg=cfg)
@@ -2162,7 +2722,8 @@ def _dispatch_tester(
             f" you MUST immediately run `python3 dashboard/scripts/finish_feature.py --issue {issue_num}`"
             " from the repo root without asking. The script reads COMMANDER_MERGE_TARGET from its"
             " own env to pick the merge target — do not override with --target-branch."
-            " finish_feature.py applies the UAT label automatically — do NOT separately edit labels or close the issue."
+            " finish_feature.py merges the branch; do NOT separately apply any label — the"
+            " UAT label is applied automatically by sprint_manager after merge confirmation."
             " NEVER apply the UAT-approved label or close the issue — UAT-approved is set ONLY by the human"
             " via the dashboard Approve button or scripts/approve_ticket.py."
             " Do NOT output language like 'let me know if you want me to...' —"
@@ -2171,25 +2732,39 @@ def _dispatch_tester(
             " MERGE PATH ENFORCEMENT (issue #311): `scripts/finish_feature.py` is the ONLY"
             " sanctioned merge path. You are FORBIDDEN from running `git merge`, opening"
             " or merging a PR directly, or pushing commits to the target branch by any"
-            " means other than finish_feature.py. Merging by any other path will skip the"
-            " UAT label entirely and constitutes a workflow failure — halt immediately and"
-            " report the violation rather than proceeding."
+            " means other than finish_feature.py. Merging by any other path constitutes a"
+            " workflow failure — halt immediately and report the violation rather than proceeding."
         )
+    # Label boundary (issue #509): tester must never touch GitHub labels.
+    if "DO NOT modify any GitHub label" not in prompt:
+        prompt += (
+            " DO NOT modify any GitHub label on this issue or any other issue."
+            " Label transitions are managed by sprint_manager."
+            " Do not run update_ticket.py, gh issue edit --add-label, or any other"
+            " label-mutation command."
+        )
+    # Same persona fix as the coder: load the tester subagent for the headless run.
     cmd = [
         "claude",
         "--model", "claude-sonnet-4-6",
         "--dangerously-skip-permissions",
-        "-p",
-        prompt,
     ]
+    tester_persona = _load_agent_persona("tester", cwd_path)
+    if tester_persona:
+        cmd += ["--append-system-prompt", tester_persona]
+    cmd += ["-p", prompt]
 
     # Build subprocess environment: inherit current env, set COMMANDER_MERGE_TARGET
     # when in sprint mode (AC2), COMMANDER_APP_PORT if a port was chosen (issue #62),
-    # and COMMANDER_PROJECT so log output is tagged by project (issue #122).
+    # COMMANDER_PROJECT so log output is tagged by project (issue #122), and
+    # COMMANDER_SPRINT_RUNNING so child scripts enforce RUN_MUTABLE_LABELS (issue #506).
     sub_env = os.environ.copy()
     sub_env.pop("ANTHROPIC_API_KEY", None)
+    sub_env["CLAUDE_AGENT_ROLE"] = "tester"  # tag hooks/telemetry as the docs prescribe
     if eff_repo:
         sub_env["COMMANDER_PROJECT"] = eff_repo
+    if sprint_label:
+        sub_env["COMMANDER_SPRINT_RUNNING"] = sprint_label
     if sprint_branch not in ("develop",):
         sub_env["COMMANDER_MERGE_TARGET"] = sprint_branch
         # Always append sprint-mode instructions regardless of whether a custom
@@ -2394,11 +2969,27 @@ def generate_sprint_summary(
     skipped   = [i for i in state.issues if i.status == "skipped"]
     pending   = [i for i in state.issues if i.status == "pending"]
 
-    total_tokens     = state.total_tokens_in + state.total_tokens_out
+    # Prefer DB-backed rollup for per-ticket metrics; fall back to in-memory state.
+    _db_rollup: Optional[dict] = None
+    if _SPRINT_REPO_AVAILABLE and _sprint_repo is not None:
+        try:
+            _db_rollup = _sprint_repo.get_sprint_rollup(state.sprint_label)
+        except Exception:
+            _db_rollup = None
+
+    if _db_rollup is not None and _db_rollup["sum_tokens"] > 0:
+        total_tokens = _db_rollup["sum_tokens"]
+    else:
+        total_tokens = state.total_tokens_in + state.total_tokens_out
+
     # cost_estimate: all agents (coder, tester, preflight) run via Claude Code CLI
     # which is subscription-funded — no raw API charges.
     cost_estimate_usd = 0.0
-    avg_ticket_secs  = (elapsed_secs / len(completed)) if completed else 0
+
+    if _db_rollup is not None and _db_rollup["avg_elapsed_seconds"] is not None:
+        avg_ticket_secs = _db_rollup["avg_elapsed_seconds"]
+    else:
+        avg_ticket_secs = (elapsed_secs / len(completed)) if completed else 0
     avg_h, avg_r     = divmod(int(avg_ticket_secs), 3600)
     avg_m, avg_s     = divmod(avg_r, 60)
     avg_ticket_str   = f"{avg_h}h {avg_m}m {avg_s}s" if completed else "--"
@@ -2655,7 +3246,7 @@ def create_summary_github_issue(
     """
     n      = sprint_number if sprint_number is not None else sprint_label
     title  = f"Sprint {n} Executive Summary"
-    labels = ["docs", f"sprint-{n}"]
+    labels = ["docs", f"sprint-{n}", "sprint-summary"]
 
     # AC-1 / AC-6: deduplication check — search both open and closed states
     try:
@@ -2723,6 +3314,18 @@ def create_summary_github_issue(
         return existing_num, existing_url
 
     # AC-3: no duplicate found — create as normal
+    # Ensure sprint-summary label exists with muted indigo color
+    try:
+        r = _r(repo_name)
+        subprocess.run(
+            ["gh", "label", "create", "sprint-summary",
+             "--color", "6D28D9",
+             "--description", "Sprint executive summary issues",
+             "--repo", r, "--force"],
+            capture_output=True, text=True, check=False,
+        )
+    except Exception:
+        pass
     _ensure_github_labels(labels, repo_name=repo_name)
 
     try:
@@ -2734,6 +3337,48 @@ def create_summary_github_issue(
     except Exception as e:
         structured_log.warn("summary_issue_create_failed", f"failed to create summary GitHub issue: {e}", exc=str(e))
         return None, None
+
+
+def _close_cancelled_sprint_summary(
+    sprint_number: Optional[int],
+    sprint_label: str,
+    repo_name: Optional[str] = None,
+) -> None:
+    """Close any open sprint summary issue created before cancellation arrived (AC-4 issue #365).
+
+    Called from main()'s SystemExit handler when _sprint_user_cancelled is True.
+    Searches by title so it catches issues created in the same run even if their
+    number/URL was never persisted to the state JSON.
+    """
+    n = sprint_number if sprint_number is not None else sprint_label
+    title = f"Sprint {n} Executive Summary"
+    try:
+        existing = github_client.search_issues_by_title(title, repo_name=repo_name)
+    except Exception as exc:
+        structured_log.warn(
+            "cancel_summary_search_failed",
+            f"could not search for summary issue to close: {exc}",
+            exc=str(exc),
+        )
+        return
+    for issue in existing:
+        if issue.get("state") == "open":
+            num = issue.get("number")
+            try:
+                github_client.add_comment(
+                    num,
+                    "Sprint was cancelled; summary not applicable",
+                    repo_name=repo_name,
+                )
+                github_client.close_issue(num, repo_name=repo_name)
+                print(f"  [cancel] Closed summary issue #{num} — sprint was cancelled.")
+            except Exception as exc:
+                structured_log.warn(
+                    "cancel_summary_close_failed",
+                    f"could not close summary issue #{num}: {exc}",
+                    issue_num=num,
+                    exc=str(exc),
+                )
 
 
 def _prompt_learnings(
@@ -2819,13 +3464,21 @@ def write_sprint_summary(
     cfg: Optional["SprintConfig"] = None,
     dry_run: bool = False,
     force_summary: bool = False,
-) -> Path:
+) -> Optional[Path]:
     """Write summary file, create GitHub issue, prompt for learnings (AC-1/2/3).
 
     AC-5: When dry_run=True the function writes the local summary file and
     prints a dry-run notice, but does NOT create or search GitHub issues.
+
+    Returns None when end_reason is "cancelled" (issue #365 AC-3/AC-5).
     """
     eff_repo = repo_name or (cfg.repo_name if cfg else None)
+
+    # Guard: skip local file and GitHub issue for cancelled sprints (issue #365 AC-3, AC-5).
+    if end_reason == "cancelled":
+        print("  [cancel] Sprint was cancelled — skipping summary file and GitHub issue.")
+        return None
+
     content = generate_sprint_summary(
         state,
         elapsed_secs,
@@ -3298,7 +3951,7 @@ For each doc file that needs updating:
 If you made any doc changes, stage and commit them:
 ```
 git add <doc files changed>
-git commit -m "docs: update docs for sprint {sprint_label} (auto-documenter)"
+git commit -m "docs: auto-update from sprint-{sprint_label} diff"
 ```
 
 Then print a line in this exact format so sprint_manager can parse it:
@@ -3327,11 +3980,13 @@ def _dispatch_documenter(
     head_sha: str,
     cfg: Optional["SprintConfig"],
     repo_name: Optional[str],
+    timeout_secs: int = 300,
 ) -> None:
     """Dispatch the documenter agent after write_sprint_summary() and before _create_sprint_pr().
 
     Updates state.documenter_status, state.documenter_files_touched, and
-    state.documenter_commit_sha in-place. Does NOT raise — failure is advisory.
+    state.documenter_commit_sha in-place. Raises RuntimeError on failure so the
+    sprint pipeline fails loudly (AC6).
     """
     # Skip: nothing merged this sprint
     merged = [i for i in state.issues if i.status == "done"]
@@ -3432,25 +4087,28 @@ def _dispatch_documenter(
                 env=sub_env,
             )
     except FileNotFoundError:
-        structured_log.warn("claude_cli_not_found", "[documenter] claude CLI not found — skipping", subprocess="documenter")
-        state.documenter_status = "skipped"
-        return
+        state.documenter_status = "failed"
+        raise RuntimeError("[documenter] claude CLI not found — cannot run documenter (AC6)")
 
-    # Use HangDetector with issue_num=0 as a sentinel for the documenter
-    detector = HangDetector(issue_num=0, log_path=log_path, proc=proc)
+    # 5-minute wall-clock cap (AC7) via max_total_secs
+    detector = HangDetector(issue_num=0, log_path=log_path, proc=proc, max_total_secs=timeout_secs)
     detector.start()
     rc = proc.wait()
     detector.stop()
 
     if detector.killed:
-        structured_log.warn("subprocess_killed", "[documenter] documenter hung and was killed", subprocess="documenter")
         state.documenter_status = "failed"
-        return
+        raise RuntimeError(
+            f"[documenter] documenter exceeded {timeout_secs}s wall-clock limit and was killed"
+            f" — check {log_path} for details (AC6, AC7)"
+        )
 
     if rc != 0:
-        structured_log.error("subprocess_nonzero_exit", f"[documenter] documenter exited with code {rc}", subprocess="documenter", exit_code=rc)
         state.documenter_status = "failed"
-        return
+        raise RuntimeError(
+            f"[documenter] documenter exited with code {rc}"
+            f" — check {log_path} for details (AC6)"
+        )
 
     # Parse exit line: "Documenter complete: <files or 'none'>"
     files_touched: list[str] = []
@@ -3478,6 +4136,18 @@ def _dispatch_documenter(
                 doc_commit_sha = r.stdout.strip()
         except Exception:
             pass
+
+        # Push the doc commit to remote so it's included in the sprint PR (AC3)
+        print(f"  [documenter] Pushing doc commit to {sprint_branch} ...", flush=True)
+        push_r = subprocess.run(
+            ["git", "push", "origin", sprint_branch],
+            cwd=str(cwd_path), capture_output=True, text=True, check=False,
+        )
+        if push_r.returncode != 0:
+            state.documenter_status = "failed"
+            raise RuntimeError(
+                f"[documenter] git push failed (rc={push_r.returncode}): {push_r.stderr.strip()} (AC3, AC6)"
+            )
 
     state.documenter_status        = "succeeded"
     state.documenter_files_touched = files_touched
@@ -3681,6 +4351,86 @@ def _load_estimate(issue_num: int) -> Optional[dict]:
     return None
 
 
+def _load_sprint_plan(sprints_dir: Path, label: str) -> Optional[list[int]]:
+    """Read {label}-plan.json; return issue-number list or None on failure.
+
+    Handles both old list format ([42, 17, 88]) and new dict format
+    ({"state": "...", "tickets": [42, 17, 88], ...}).
+    """
+    path = sprints_dir / f"{label}-plan.json"
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(data, list) and all(isinstance(n, int) for n in data):
+            return data
+        if isinstance(data, dict):
+            tickets = data.get("tickets")
+            if isinstance(tickets, list) and all(isinstance(n, int) for n in tickets):
+                return tickets
+    except (OSError, json.JSONDecodeError):
+        pass
+    return None
+
+
+def _build_sprint_dag_layers(issues: list["IssueState"]) -> Optional[list[list[int]]]:
+    """Build topological layers from file-overlap estimates.
+
+    Returns list of layers (each a list of issue numbers) or None if dag_builder
+    is unavailable, building fails, or a cycle is detected.
+    """
+    if not _DAG_BUILDER_AVAILABLE:
+        return None
+    try:
+        tickets = []
+        for iss in issues:
+            est = _load_estimate(iss.number)
+            files = (est or {}).get("files_likely_affected") or []
+            tickets.append({"id": str(iss.number), "files_touched": files})
+        result = _dag_build(tickets)  # type: ignore[misc]
+        if isinstance(result, _DAGCycleError):  # type: ignore[arg-type]
+            return None
+        return [[int(tid) for tid in layer] for layer in result.layers]
+    except Exception:
+        return None
+
+
+def _compute_dispatch_levels(
+    issues: list["IssueState"],
+    plan_order: Optional[list[int]],
+    dag_layers: Optional[list[list[int]]],
+) -> list[list["IssueState"]]:
+    """Arrange issues into dispatch levels.
+
+    Uses dag_layers for level grouping when available. Within each level, sorts
+    by plan_order (if present) then ascending issue number. Issues absent from
+    the DAG are appended as a trailing level.
+    """
+    issue_map = {iss.number: iss for iss in issues}
+
+    if plan_order:
+        plan_idx: dict[int, int] = {n: i for i, n in enumerate(plan_order)}
+        def _sort_key(num: int) -> tuple:
+            return (plan_idx.get(num, len(plan_order)), num)
+    else:
+        def _sort_key(num: int) -> tuple:  # type: ignore[misc]
+            return (num,)
+
+    if dag_layers:
+        levels: list[list["IssueState"]] = []
+        placed: set[int] = set()
+        for layer in dag_layers:
+            layer_nums = sorted([n for n in layer if n in issue_map], key=_sort_key)
+            placed.update(layer_nums)
+            if layer_nums:
+                levels.append([issue_map[n] for n in layer_nums])
+        trailing = sorted([n for n in issue_map if n not in placed], key=_sort_key)
+        if trailing:
+            levels.append([issue_map[n] for n in trailing])
+        return levels or [[issue_map[n] for n in sorted(issue_map, key=_sort_key)]]
+
+    all_nums = sorted(issue_map.keys(), key=_sort_key)
+    return [[issue_map[n] for n in all_nums]]
+
+
 def _warn_file_conflicts(issues: list["IssueState"]) -> None:
     """Warn when multiple pending issues share files in their estimates."""
     file_to_issues: dict[str, list[int]] = {}
@@ -3729,10 +4479,21 @@ def list_backlog_issues(label: str, repo_name: Optional[str] = None) -> list[dic
             capture_output=True, text=True, check=True,
         )
         issues = json.loads(out.stdout)
-        # Only return issues in backlog state
+        # Only return issues in backlog state; skip sprint-summary documentation tickets
         result = []
         for issue in issues:
             labels_set = {lbl["name"] for lbl in issue.get("labels", [])}
+            is_summary = (
+                "sprint-summary" in labels_set
+                or bool(_SUMMARY_TITLE_RE.match(issue.get("title", "") or ""))
+            )
+            if is_summary:
+                structured_log.info(
+                    "dispatch_skipped_summary",
+                    f"skipping summary ticket #{issue['number']} from backlog",
+                    issue_num=issue["number"],
+                )
+                continue
             if _classify(labels_set) == "backlog":
                 result.append(issue)
         return sorted(result, key=lambda i: i["number"])
@@ -3834,9 +4595,10 @@ def _neon_ticket_status(
     issue_number: int,
     neon_status: str,
     sprints_dir: Path,
+    total_tokens: int = 0,
 ) -> None:
     """Update a ticket's Neon status + patch the sprint JSON mirror."""
-    _neon_update("update_ticket_status", sprint_label, issue_number, neon_status)
+    _neon_update("update_ticket_status", sprint_label, issue_number, neon_status, total_tokens)
 
     json_path = _neon_sprint_json_path(sprint_label, sprints_dir)
     data = _neon_sprint_json_read(json_path)
@@ -3846,6 +4608,24 @@ def _neon_ticket_status(
                 t["status"] = neon_status
                 break
         _neon_sprint_json_write(json_path, data)
+
+
+def _regenerate_status_md(cfg: Optional["SprintConfig"], dry_run: bool = False) -> None:
+    """Regenerate STATUS.md at the project root after sprint completes (#584)."""
+    if dry_run:
+        return
+    script = SCRIPTS_DIR / "generate_status.py"
+    if not script.exists():
+        structured_log.warning("status_md_skip", "generate_status.py not found; skipping STATUS.md regeneration")
+        return
+    try:
+        subprocess.run(
+            [sys.executable, str(script)],
+            check=False,
+            timeout=60,
+        )
+    except Exception as exc:
+        structured_log.warning("status_md_error", f"STATUS.md regeneration failed: {exc}")
 
 
 def _neon_sprint_status(sprint_label: str, neon_status: str, sprints_dir: Path) -> None:
@@ -3867,6 +4647,8 @@ def run_sprint(
     gate_pytest: bool,
     gate_lint: bool,
     gate_merge_preview: bool,
+    gate_typecheck: bool = True,
+    gate_design: bool = True,
     alert_modes: Optional[list[str]] = None,
     repo_name: Optional[str] = None,
     dry_run: bool = False,
@@ -4008,6 +4790,18 @@ def run_sprint(
     print(f"\n=== Sprint Manager: label={label} ===")
     print(f"Target branch: {target_branch}")
     print(f"Found {len(state.issues)} issue(s): {[i.number for i in state.issues]}")
+    try:
+        structured_log.event(
+            "sprint.start",
+            run_id=_run_id,
+            issue_num=None,
+            sprint_label=label,
+            agent_role="sprint",
+            issue_count=len(state.issues),
+            target_branch=target_branch,
+        )
+    except Exception:
+        pass
 
     # AC-1: Create sprint branch off develop (idempotent)
     if target_branch == sprint_branch:
@@ -4067,10 +4861,72 @@ def run_sprint(
         state.estimator_status = "skipped"
     # ── end estimator ──────────────────────────────────────────────────────────
 
+    # -- Topological dispatch setup (issue #445) --
+    _plan_order = _load_sprint_plan(_eff_sprints_dir, label)
+    if _plan_order is None:
+        structured_log.warn(
+            "dispatch_plan_missing",
+            "plan.json missing or unreadable — falling back to ascending issue-number order",
+            sprint_label=label,
+        )
+
+    _dag_layers = _build_sprint_dag_layers(state.issues)
+    if _dag_layers is None:
+        structured_log.warn(
+            "dispatch_dag_missing",
+            "DAG data missing or unreadable — falling back to ascending issue-number order",
+            sprint_label=label,
+        )
+
+    _dispatch_levels = _compute_dispatch_levels(state.issues, _plan_order, _dag_layers)
+    _level_nums_by_idx = [[iss.number for iss in lvl] for lvl in _dispatch_levels]
+
     start_time = time.monotonic()
 
     total_issues = len(state.issues)
-    for idx, issue_state in enumerate(state.issues, start=1):
+    # Flat iteration preserving level boundaries for level_start / level_complete events.
+    _flat_dispatch: list[tuple[int, IssueState]] = [
+        (lvl_idx, iss)
+        for lvl_idx, lvl in enumerate(_dispatch_levels)
+        for iss in lvl
+    ]
+    _prev_level_idx = -1
+    _level_merged_before = 0
+    _level_skipped_before = 0
+    for _flat_pos, (_cur_level_idx, issue_state) in enumerate(_flat_dispatch):
+        if _cur_level_idx != _prev_level_idx:
+            if _prev_level_idx >= 0:
+                try:
+                    structured_log.event(
+                        "level_complete",
+                        run_id=_run_id,
+                        issue_num=None,
+                        sprint_label=label,
+                        agent_role="sprint",
+                        level_index=_prev_level_idx,
+                        merged=summary.merged[_level_merged_before:],
+                        skipped=summary.skipped[_level_skipped_before:],
+                        total=len(_level_nums_by_idx[_prev_level_idx]),
+                    )
+                except Exception:
+                    pass
+            _level_merged_before = len(summary.merged)
+            _level_skipped_before = len(summary.skipped)
+            _prev_level_idx = _cur_level_idx
+            try:
+                structured_log.event(
+                    "level_start",
+                    run_id=_run_id,
+                    issue_num=None,
+                    sprint_label=label,
+                    agent_role="sprint",
+                    level_index=_cur_level_idx,
+                    tickets=_level_nums_by_idx[_cur_level_idx],
+                )
+            except Exception:
+                pass
+            print(f"\n=== Dispatch level {_cur_level_idx}: tickets {_level_nums_by_idx[_cur_level_idx]} ===")
+        idx = _flat_pos + 1
         num   = issue_state.number
         title = issue_state.title
         progress = f"[{idx}/{total_issues}]"
@@ -4078,6 +4934,17 @@ def run_sprint(
         # Resume: skip already-done/skipped
         if resume and issue_state.status in ("done", "skipped"):
             print(f"\n--- {progress} Issue #{num}: {title} --- [SKIP: already {issue_state.status}]")
+            try:
+                structured_log.event(
+                    "issue.skip",
+                    run_id=_run_id,
+                    issue_num=num,
+                    sprint_label=label,
+                    agent_role="sprint",
+                    skip_reason=f"already {issue_state.status}",
+                )
+            except Exception:
+                pass
             summary.processed.append(f"#{num}")
             if issue_state.status == "done":
                 summary.merged.append(f"#{num}")
@@ -4088,11 +4955,32 @@ def run_sprint(
         # retry_failed: skip only done issues
         if retry_failed and issue_state.status == "done":
             print(f"\n--- {progress} Issue #{num}: {title} --- [SKIP: already done]")
+            try:
+                structured_log.event(
+                    "issue.skip",
+                    run_id=_run_id,
+                    issue_num=num,
+                    sprint_label=label,
+                    agent_role="sprint",
+                    skip_reason="already done",
+                )
+            except Exception:
+                pass
             summary.processed.append(f"#{num}")
             summary.merged.append(f"#{num}")
             continue
 
         print(f"\n--- {progress} Issue #{num}: {title} ---")
+        try:
+            structured_log.event(
+                "issue.start",
+                run_id=_run_id,
+                issue_num=num,
+                sprint_label=label,
+                agent_role="sprint",
+            )
+        except Exception:
+            pass
         summary.processed.append(f"#{num}")
 
         # AC-3: check for pause file before dispatching this issue
@@ -4120,6 +5008,17 @@ def run_sprint(
         # Preflight filter: skip issues not approved by pre-flight review
         if preflight_approved is not None and num not in preflight_approved:
             print("  [preflight] skipped by pre-flight review")
+            try:
+                structured_log.event(
+                    "issue.skip",
+                    run_id=_run_id,
+                    issue_num=num,
+                    sprint_label=label,
+                    agent_role="sprint",
+                    skip_reason="preflight-skipped",
+                )
+            except Exception:
+                pass
             issue_state.set_agent_status("failed")
             issue_state.failure_reason  = "preflight-skipped"
             issue_state.status          = "skipped"
@@ -4132,6 +5031,16 @@ def run_sprint(
 
         if dry_run:
             print("  [dry-run] would dispatch coder + tester")
+            try:
+                structured_log.event(
+                    "issue.dry_run",
+                    run_id=_run_id,
+                    issue_num=num,
+                    sprint_label=label,
+                    agent_role="sprint",
+                )
+            except Exception:
+                pass
             issue_state.status = "skipped"
             issue_state.skip_reason = "dry-run"
             summary.skipped.append(f"#{num} (dry-run)")
@@ -4157,6 +5066,16 @@ def run_sprint(
 
         if _skip_coder:
             print(f"  [rerun] SIT ticket: dispatching tester directly for #{num}")
+            try:
+                structured_log.event(
+                    "issue.rerun_tester_direct",
+                    run_id=_run_id,
+                    issue_num=num,
+                    sprint_label=label,
+                    agent_role="sprint",
+                )
+            except Exception:
+                pass
         else:
             # -- Dispatch coder --
             issue_state.set_agent_status("coder_dispatched")
@@ -4167,7 +5086,7 @@ def run_sprint(
             # AC-5 (issue #311): apply in-progress label when coder starts so the
             # board reflects active work during coding.  Best-effort — never blocks
             # the sprint on label failure.
-            _apply_in_progress_label(num, cfg=cfg)
+            _transition_safe(num, _TicketState.IN_PROGRESS, actor="sprint_manager", repo_name=eff_repo)
 
             def _on_coder_running(
                 _is=issue_state, _st=state, _sp=state_path, _api=api_url,
@@ -4187,6 +5106,18 @@ def run_sprint(
             _coder_elapsed = time.monotonic() - _coder_t0
             _coder_m, _coder_s = divmod(int(_coder_elapsed), 60)
             print(f"  Total time used on coder dispatch: {_coder_m}m {_coder_s}s")
+            try:
+                structured_log.event(
+                    "coder.done",
+                    run_id=_run_id,
+                    issue_num=num,
+                    sprint_label=label,
+                    agent_role="coder",
+                    elapsed_secs=round(_coder_elapsed),
+                    success=coder_ok,
+                )
+            except Exception:
+                pass
 
             if not coder_ok:
                 category = coder_category or FailureCategory.CRASH
@@ -4195,6 +5126,18 @@ def run_sprint(
                 else:
                     reason = f"Coder failed with category {category}"
                 structured_log.error("coder_failed", f"coder failed for #{num}: {category}", issue_num=num, category=category)
+                try:
+                    structured_log.event(
+                        "coder.failed",
+                        run_id=_run_id,
+                        issue_num=num,
+                        sprint_label=label,
+                        agent_role="coder",
+                        category=category,
+                        reason=reason,
+                    )
+                except Exception:
+                    pass
                 issue_state.set_agent_status("failed")
                 issue_state.coder_finished_at = issue_state.status_changed_at
                 issue_state.failure_reason    = reason
@@ -4211,7 +5154,8 @@ def run_sprint(
                     cfg=cfg,
                     repo=eff_repo,
                 )
-                _apply_needs_rework_label(num, category, cfg=cfg)
+                if category in _LOGIC_FAILURE_CATEGORIES:
+                    _transition_safe(num, _TicketState.NEEDS_REWORK, actor="sprint_manager", repo_name=eff_repo)
                 _neon_ticket_status(label, num, "failed", _eff_sprints_dir)
                 state.save(state_path)
                 _post_sprint_status(state, api_url=api_url, project=eff_repo)
@@ -4238,7 +5182,8 @@ def run_sprint(
                     cfg=cfg,
                     repo=eff_repo,
                 )
-                _apply_needs_rework_label(num, category, cfg=cfg)
+                if category in _LOGIC_FAILURE_CATEGORIES:
+                    _transition_safe(num, _TicketState.NEEDS_REWORK, actor="sprint_manager", repo_name=eff_repo)
                 _neon_ticket_status(label, num, "failed", _eff_sprints_dir)
                 state.save(state_path)
                 _post_sprint_status(state, api_url=api_url, project=eff_repo)
@@ -4249,6 +5194,9 @@ def run_sprint(
             issue_state.coder_finished_at = issue_state.status_changed_at
             state.save(state_path)
             _post_sprint_status(state, api_url=api_url)
+
+        # Transition to SIT before dispatching the tester (issue #509).
+        _transition_safe(num, _TicketState.SIT, actor="sprint_manager", repo_name=eff_repo)
 
         # -- Lifecycle: tester_dispatched --
         issue_state.set_agent_status("tester_dispatched")
@@ -4273,6 +5221,18 @@ def run_sprint(
         _tester_elapsed = time.monotonic() - _tester_t0
         _tester_m, _tester_s = divmod(int(_tester_elapsed), 60)
         print(f"  Total time used on tester dispatch: {_tester_m}m {_tester_s}s")
+        try:
+            structured_log.event(
+                "tester.done",
+                run_id=_run_id,
+                issue_num=num,
+                sprint_label=label,
+                agent_role="tester",
+                elapsed_secs=round(_tester_elapsed),
+                exit_code=tester_rc,
+            )
+        except Exception:
+            pass
 
         if hang_category == FailureCategory.HANG:
             issue_state.set_agent_status("failed")
@@ -4314,6 +5274,8 @@ def run_sprint(
             gate_pytest        = gate_pytest,
             gate_lint          = gate_lint,
             gate_merge_preview = gate_merge_preview,
+            gate_typecheck     = gate_typecheck,
+            gate_design        = gate_design,
             target_branch      = target_branch,
             repo_name          = eff_repo,
             cfg                = cfg,
@@ -4321,14 +5283,27 @@ def run_sprint(
             gate_scope         = gate_scope,
             documentor_enabled = cfg.documentor_enabled if cfg else False,
             alert_modes        = alert_modes,
+            sprint_label       = label,
         )
         print(f"  {summary_line}")
+        try:
+            structured_log.event(
+                "issue.merged" if merged else "issue.skipped",
+                run_id=_run_id,
+                issue_num=num,
+                sprint_label=label,
+                agent_role="sprint",
+                summary_line=summary_line,
+            )
+        except Exception:
+            pass
 
+        _issue_tokens = issue_state.tokens_in + issue_state.tokens_out
         if merged:
             issue_state.set_agent_status("completed")
             issue_state.status = "done"
             summary.merged.append(f"#{num}")
-            _neon_ticket_status(label, num, "done", _eff_sprints_dir)
+            _neon_ticket_status(label, num, "done", _eff_sprints_dir, total_tokens=_issue_tokens)
         else:
             category = gate_category or FailureCategory.CRASH
             issue_state.set_agent_status("failed")
@@ -4349,13 +5324,31 @@ def run_sprint(
                 cfg=cfg,
                 repo=eff_repo,
             )
-            _apply_needs_rework_label(num, category, cfg=cfg)
-            _neon_ticket_status(label, num, "failed", _eff_sprints_dir)
+            if category in _LOGIC_FAILURE_CATEGORIES:
+                _transition_safe(num, _TicketState.NEEDS_REWORK, actor="sprint_manager", repo_name=eff_repo)
+            _neon_ticket_status(label, num, "failed", _eff_sprints_dir, total_tokens=_issue_tokens)
 
         elapsed = time.monotonic() - start_time
         state.wall_clock_secs = elapsed
         state.save(state_path)
         _post_sprint_status(state, api_url=api_url, project=eff_repo)
+
+    # Emit level_complete for the last level
+    if _prev_level_idx >= 0:
+        try:
+            structured_log.event(
+                "level_complete",
+                run_id=_run_id,
+                issue_num=None,
+                sprint_label=label,
+                agent_role="sprint",
+                level_index=_prev_level_idx,
+                merged=summary.merged[_level_merged_before:],
+                skipped=summary.skipped[_level_skipped_before:],
+                total=len(_level_nums_by_idx[_prev_level_idx]),
+            )
+        except Exception:
+            pass
 
     # Final elapsed time
     state.wall_clock_secs = time.monotonic() - start_time
@@ -4397,16 +5390,28 @@ def main() -> None:
         help="Skip all quality gates and force auto-merge after tester passes",
     )
     p.add_argument(
-        "--gate-pytest",
+        "--gate-typecheck",
         action=argparse.BooleanOptionalAction,
-        default=True,
-        help="Enable/disable pytest gate (default: enabled)",
+        default=os.environ.get("COMMANDER_GATE_TYPECHECK", "1") != "0",
+        help="Enable/disable typecheck gate — mypy/tsc (default: enabled; env: COMMANDER_GATE_TYPECHECK=0 to disable)",
     )
     p.add_argument(
         "--gate-lint",
         action=argparse.BooleanOptionalAction,
         default=True,
-        help="Enable/disable lint gate (default: enabled)",
+        help="Enable/disable lint gate — ruff + eslint/prettier (default: enabled)",
+    )
+    p.add_argument(
+        "--gate-design",
+        action=argparse.BooleanOptionalAction,
+        default=os.environ.get("COMMANDER_GATE_DESIGN", "1") != "0",
+        help="Enable/disable design gate — impeccable UI anti-pattern detector (default: enabled; env: COMMANDER_GATE_DESIGN=0 to disable)",
+    )
+    p.add_argument(
+        "--gate-pytest",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Enable/disable pytest gate (default: enabled)",
     )
     p.add_argument(
         "--gate-merge-preview",
@@ -4579,14 +5584,24 @@ def main() -> None:
 
     atexit.register(_cleanup_pid)
 
-    _orig_sigterm = signal.getsignal(signal.SIGTERM)
-
     def _sigterm_handler(signum: int, frame: object) -> None:
+        _sprint_user_cancelled.set()
         _cleanup_pid()
-        signal.signal(signal.SIGTERM, _orig_sigterm or signal.SIG_DFL)
-        os.kill(os.getpid(), signal.SIGTERM)
+        # Best-effort state write before exit (issue #507)
+        _plan_json_set_state_sm(
+            args.label, "cancelled", cfg=cfg,
+            ended_at=datetime.now(timezone.utc).isoformat(),
+        )
+        raise SystemExit(130)
 
     signal.signal(signal.SIGTERM, _sigterm_handler)
+
+    # Write state=running now that PID lock is confirmed (issue #507)
+    if not args.dry_run:
+        _plan_json_set_state_sm(
+            args.label, "running", cfg=cfg,
+            started_at=datetime.now(timezone.utc).isoformat(),
+        )
 
     # ── Pre-flight review (AC-1 of issue #33) ────────────────────────────────
     preflight_approved: Optional[list] = None  # None = no preflight, list = approved numbers
@@ -4610,46 +5625,79 @@ def main() -> None:
             p.error(f"Rerun manifest not found: {_manifest_path}")
         _rerun_manifest = json.loads(_manifest_path.read_text(encoding="utf-8"))
 
-    summary, state = run_sprint(
-        label                = args.label,
-        skip_gates           = args.skip_gates,
-        gate_pytest          = args.gate_pytest,
-        gate_lint            = args.gate_lint,
-        gate_merge_preview   = args.gate_merge_preview,
-        alert_modes          = alert_modes,
-        repo_name            = eff_repo,
-        dry_run              = args.dry_run,
-        resume               = args.resume,
-        retry_failed         = args.retry_failed,
-        target_branch        = args.target_branch,
-        cfg                  = cfg,
-        preflight_approved   = preflight_approved,
-        gate_scope           = args.gate_scope,
-        token_budget         = args.budget,
-        skip_estimator       = args.skip_estimator,
-        rerun_manifest       = _rerun_manifest,
-    )
+    # Pre-initialize so the except block can reference them if run_sprint() raises.
+    summary: Optional[SprintSummary] = None
+    state: Optional[SprintState] = None
+    summary_path: Optional[Path] = None
+    sprint_branch: str = f"sprint/{args.label}"
+    effective_target: str = args.target_branch or sprint_branch
 
-    # Derive sprint_branch for summary (mirrors run_sprint logic)
-    sprint_branch = f"sprint/{args.label}"
-    effective_target = args.target_branch or sprint_branch
-
-    # AC-1/2/3: write extended summary, create GitHub issue, prompt for learnings
-    if state.issues:
-        end_reason   = "complete" if not summary.skipped else "stopped"
-        summary_path = write_sprint_summary(
-            state         = state,
-            elapsed_secs  = state.wall_clock_secs,
-            alert_modes   = alert_modes,
-            end_reason    = end_reason,
-            repo_name     = eff_repo,
-            cfg           = cfg,
-            sprint_branch = effective_target,
-            dry_run       = args.dry_run,
-            force_summary = args.force_summary,
+    try:
+        summary, state = run_sprint(
+            label                = args.label,
+            skip_gates           = args.skip_gates,
+            gate_pytest          = args.gate_pytest,
+            gate_lint            = args.gate_lint,
+            gate_merge_preview   = args.gate_merge_preview,
+            gate_typecheck       = args.gate_typecheck,
+            gate_design          = args.gate_design,
+            alert_modes          = alert_modes,
+            repo_name            = eff_repo,
+            dry_run              = args.dry_run,
+            resume               = args.resume,
+            retry_failed         = args.retry_failed,
+            target_branch        = args.target_branch,
+            cfg                  = cfg,
+            preflight_approved   = preflight_approved,
+            gate_scope           = args.gate_scope,
+            token_budget         = args.budget,
+            skip_estimator       = args.skip_estimator,
+            rerun_manifest       = _rerun_manifest,
         )
-    else:
-        summary_path = None
+
+        # Derive sprint_branch for summary (mirrors run_sprint logic)
+        sprint_branch = f"sprint/{args.label}"
+        effective_target = args.target_branch or sprint_branch
+
+        # AC-1/2/3: write extended summary, create GitHub issue, prompt for learnings
+        if state.issues:
+            end_reason   = "complete" if not summary.skipped else "stopped"
+            summary_path = write_sprint_summary(
+                state         = state,
+                elapsed_secs  = state.wall_clock_secs,
+                alert_modes   = alert_modes,
+                end_reason    = end_reason,
+                repo_name     = eff_repo,
+                cfg           = cfg,
+                sprint_branch = effective_target,
+                dry_run       = args.dry_run,
+                force_summary = args.force_summary,
+            )
+        else:
+            summary_path = None
+
+    except SystemExit:
+        if _sprint_user_cancelled.is_set():
+            # Race condition (issue #365 AC-4): SIGTERM arrived while write_sprint_summary
+            # was executing inside create_summary_github_issue.  Close any open summary
+            # issue that was created in this run before the signal was processed.
+            _close_cancelled_sprint_summary(
+                state.sprint_number if state is not None else None,
+                args.label,
+                eff_repo,
+            )
+        raise
+
+    # Clean exit: write state=completed (issue #507)
+    if not args.dry_run:
+        _plan_json_set_state_sm(
+            args.label, "completed", cfg=cfg,
+            ended_at=datetime.now(timezone.utc).isoformat(),
+            end_reason="natural",
+        )
+
+    # Regenerate STATUS.md after sprint closes (#584)
+    _regenerate_status_md(cfg=cfg, dry_run=args.dry_run)
 
     # Dispatch documenter after sprint summary, before sprint PR (issue #165)
     if not args.skip_documenter and not args.dry_run and state.issues:
@@ -4679,19 +5727,22 @@ def main() -> None:
                 cfg           = cfg,
                 repo_name     = eff_repo,
             )
-            # Persist documenter outcome into the state JSON
-            if state_path_doc.exists():
-                try:
-                    sd3 = json.loads(state_path_doc.read_text())
-                    sd3["documenter_status"]        = state.documenter_status
-                    sd3["documenter_files_touched"] = state.documenter_files_touched
-                    sd3["documenter_commit_sha"]    = state.documenter_commit_sha
-                    state_path_doc.write_text(json.dumps(sd3, indent=2))
-                except Exception as e_persist:
-                    structured_log.warn("documenter_state_persist_failed", f"could not persist documenter outcome: {e_persist}", exc=str(e_persist))
-        except Exception as e_doc:
-            structured_log.warn("documenter_error", f"documenter raised unexpectedly: {e_doc}", exc=str(e_doc))
-            state.documenter_status = "failed"
+        except RuntimeError as e_doc:
+            # AC6: documenter errors must fail the pipeline loudly, not silently skip
+            structured_log.error("documenter_failed", f"documenter failed: {e_doc}", exc=str(e_doc))
+            print(f"\n[ERROR] Documenter failed: {e_doc}", flush=True)
+            raise
+
+        # Persist documenter outcome into the state JSON
+        if state_path_doc.exists():
+            try:
+                sd3 = json.loads(state_path_doc.read_text())
+                sd3["documenter_status"]        = state.documenter_status
+                sd3["documenter_files_touched"] = state.documenter_files_touched
+                sd3["documenter_commit_sha"]    = state.documenter_commit_sha
+                state_path_doc.write_text(json.dumps(sd3, indent=2))
+            except Exception as e_persist:
+                structured_log.warn("documenter_state_persist_failed", f"could not persist documenter outcome: {e_persist}", exc=str(e_persist))
 
     # AC6, AC7: auto-create PR sprint/sprint-N → develop at sprint end,
     # but only when we were running in sprint-branch mode (not manual 'develop' override)

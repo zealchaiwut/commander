@@ -17,7 +17,8 @@ from config import TEST_GITHUB_REPO
 CACHE_TTL = 30.0
 SPRINT_RE = re.compile(r"^sprint-(\d+)$")
 SPRINT_LABEL_RE_ALL = re.compile(r"^sprint-(\d+)(?:\.(\d+))?$")
-STATUS_LABELS = {"in-progress", "SIT", "UAT", "UAT-approved", "need-rework", "blocked"}
+# READ-only: recognises both spellings for backward compat with old tickets
+STATUS_LABELS = {"in-progress", "SIT", "UAT", "UAT-approved", "needs-rework", "need-rework", "blocked"}
 
 _cache: dict[str, tuple[float, object]] = {}
 _detected_repo: str | None = None
@@ -195,6 +196,7 @@ def ensure_sprint_label(sprint_num: int, repo_name: str | None = None) -> None:
         # Label already exists — that's fine
         pass
     invalidate(f"sprints:{r}")
+    invalidate(f"sprint_labels:{r}")
 
 
 def delete_label(label_name: str, repo_name: str | None = None) -> None:
@@ -388,6 +390,11 @@ def assign_sprint_by_label(issue_id: int, sprint_label: str | None,
             cmd += ["--remove-label", lbl]
         _run(*cmd)
     invalidate(f"issues:{r}:")
+    invalidate(f"open_issues_body:{r}")
+    invalidate(f"open_issues:{r}")
+    invalidate(f"sprints:{r}")
+    invalidate(f"sprint_labels:{r}")
+    invalidate(f"latest_sprint:{r}")
 
 
 def latest_active_sprint(repo_name: str | None = None) -> Optional[int]:
@@ -477,7 +484,7 @@ def approve_issue(issue_id: int, repo_name: str | None = None):
 def reject_issue(issue_id: int, reason: str, repo_name: str | None = None):
     r = _r(repo_name)
     _run("issue", "edit", str(issue_id), "--repo", r,
-         "--add-label", "need-rework",
+         "--add-label", "needs-rework",
          "--remove-label", "UAT")
     _run("issue", "comment", str(issue_id), "--repo", r,
          "--body", f"❌ **Rejected:** {reason}")
@@ -551,9 +558,12 @@ def update_labels(issue_id: int, add: list[str], remove: list[str],
     invalidate(f"issues:{r}:")
 
 
-def close_issue(issue_id: int, repo_name: str | None = None):
+def close_issue(issue_id: int, repo_name: str | None = None, reason: str | None = None):
     r = _r(repo_name)
-    _run("issue", "close", str(issue_id), "--repo", r)
+    cmd = ["issue", "close", str(issue_id), "--repo", r]
+    if reason:
+        cmd += ["--reason", reason]
+    _run(*cmd)
     invalidate(f"issues:{r}:")
     invalidate(f"latest_sprint:{r}")
 

@@ -1769,32 +1769,39 @@
       padding: 0 2px; flex-shrink: 0;
     }
     .smgmt-preflight-dismiss:hover { color: var(--text); }
-    .smgmt-preflight-items { display: flex; flex-direction: column; gap: 3px; }
-    .smgmt-preflight-item {
-      display: flex; align-items: center; gap: 6px;
-      background: none; border: none; text-align: left;
-      cursor: pointer; padding: 4px 6px; border-radius: 4px;
-      width: 100%; font-size: 12px; color: var(--text);
+    .smgmt-preflight-chip-row {
+      display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
     }
-    .smgmt-preflight-item:hover { background: rgba(0,0,0,.06); }
-    .smgmt-preflight-item-id {
-      font-family: var(--mono); color: var(--text-muted); flex-shrink: 0;
+    .pf-chip {
+      display: inline-flex; align-items: center; gap: 4px;
+      padding: 3px 8px; border-radius: 4px;
+      font-size: 12px; font-weight: 600; flex-shrink: 0;
     }
-    .smgmt-preflight-item-title {
-      flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    .pf-chip--amber {
+      background: var(--amber-bg); color: var(--amber);
+      border: 1px solid rgba(217,119,6,.25);
     }
-    .smgmt-preflight-item-type {
-      color: var(--yellow); font-size: 11px; flex-shrink: 0;
-      background: var(--yellow-bg);
-      border: 1px solid rgba(161,98,7,.25);
-      padding: 1px 6px; border-radius: 3px; font-family: var(--mono);
+    .pf-chip--green {
+      background: var(--green-bg); color: var(--green);
+      border: 1px solid rgba(34,197,94,.25);
     }
-    .smgmt-preflight-toggle-more {
-      margin-top: 5px; padding: 2px 4px; background: none; border: none;
-      color: var(--text-muted); font-size: 11px; font-weight: 500;
-      cursor: pointer; align-self: flex-start;
+    .pf-details-btn {
+      margin-left: auto; flex-shrink: 0;
+      display: inline-flex; align-items: center; gap: 4px;
+      background: none; border: none; cursor: pointer;
+      color: var(--text-muted); font-size: 12px; padding: 2px 4px;
+      border-radius: 3px;
     }
-    .smgmt-preflight-toggle-more:hover { color: var(--text); text-decoration: underline; }
+    .pf-details-btn:hover { color: var(--text); }
+    .pf-details { display: none; margin-top: 8px; }
+    .pf-detail-row {
+      display: flex; align-items: flex-start; gap: 6px;
+      font-size: 12px; color: var(--text-muted); padding: 3px 0;
+    }
+    .pf-detail-row i { flex-shrink: 0; margin-top: 1px; font-size: 13px; }
+    .pf-detail-nums {
+      font-family: var(--mono); color: var(--amber); flex-shrink: 0;
+    }
     @keyframes smgmt-preflight-highlight-anim {
       0%   { box-shadow: 0 0 0 3px rgba(161,98,7,.55); background: var(--yellow-bg); }
       100% { box-shadow: 0 0 0 0px rgba(161,98,7,0);  background: transparent; }
@@ -8112,51 +8119,58 @@ function _preflightDismiss(label) {
   if (el) el.remove();
 }
 
-function _preflightBannerHtml(label, items) {
-  if (items.length === 0 || _preflightDismissed.has(label)) return '';
-  const trunc = (s, n) => s && s.length > n ? s.slice(0, n) + '…' : (s || '');
+function _preflightBannerHtml(label, missingACItems, conflictItems) {
+  if ((missingACItems.length === 0 && conflictItems.length === 0) || _preflightDismissed.has(label)) return '';
+  const safeLabel = escHtml(label);
 
-  // Collapsed by default to the first N items; "Show more" reveals the rest.
-  const expanded = _preflightExpanded.has(label);
-  const shown = expanded ? items : items.slice(0, _PREFLIGHT_COLLAPSED_COUNT);
-  const hiddenCount = items.length - shown.length;
+  const acChip = missingACItems.length > 0
+    ? `<span class="pf-chip pf-chip--amber"><i class="ti ti-alert-triangle"></i>${missingACItems.length} missing AC</span>`
+    : '';
+  const conflictChip = conflictItems.length > 0
+    ? `<span class="pf-chip pf-chip--green"><i class="ti ti-git-branch"></i>${conflictItems.length} conflicts · order planned</span>`
+    : '';
 
-  const rowsHtml = shown.map(item =>
-    `<button class="smgmt-preflight-item" onclick="_preflightScrollToTicket(${item.number})">
-      <span class="smgmt-preflight-item-id">#${item.number}</span>
-      <span class="smgmt-preflight-item-title">${escHtml(trunc(item.title, 50))}</span>
-      <span class="smgmt-preflight-item-type">${escHtml(item.type)}</span>
-    </button>`
-  ).join('');
+  const acNums = missingACItems.map(i => `#${i.number}`).join(' ');
+  const detailRow1 = missingACItems.length > 0
+    ? `<div class="pf-detail-row"><i class="ti ti-pencil-off" style="color:var(--amber)"></i><span class="pf-detail-nums">${acNums}</span><span>missing acceptance criteria</span></div>`
+    : '';
+  const conflictNums = conflictItems.map(i => `#${i.number}`).join(' ');
+  const detailRow2 = conflictItems.length > 0
+    ? `<div class="pf-detail-row"><i class="ti ti-git-branch" style="color:var(--green)"></i><span class="pf-detail-nums">${conflictNums}</span><span>conflicting labels — order planned by DAG</span></div>`
+    : '';
 
-  let toggleHtml = '';
-  if (items.length > _PREFLIGHT_COLLAPSED_COUNT) {
-    toggleHtml = expanded
-      ? `<button class="smgmt-preflight-toggle-more" onclick="_preflightToggleExpand('${escHtml(label)}')">Show less</button>`
-      : `<button class="smgmt-preflight-toggle-more" onclick="_preflightToggleExpand('${escHtml(label)}')">Show ${hiddenCount} more</button>`;
-  }
-
-  return `<div class="smgmt-preflight-banner" id="smgmt-preflight-${escHtml(label)}">
+  return `<div class="smgmt-preflight-banner" id="smgmt-preflight-${safeLabel}">
     <div class="smgmt-preflight-header">
-      <i class="ti ti-alert-triangle" style="color:var(--yellow);font-size:14px;flex-shrink:0"></i>
-      <span class="smgmt-preflight-title">Pre-flight issues (${items.length})</span>
-      <button class="smgmt-preflight-dismiss" onclick="_preflightDismiss('${escHtml(label)}')" title="Dismiss">&times;</button>
+      <i class="ti ti-alert-triangle" style="color:var(--amber);font-size:14px;flex-shrink:0"></i>
+      <span class="smgmt-preflight-title">Pre-flight</span>
+      <button class="smgmt-preflight-dismiss" onclick="_preflightDismiss('${safeLabel}')" title="Dismiss">&times;</button>
     </div>
-    <div class="smgmt-preflight-items">${rowsHtml}</div>
-    ${toggleHtml}
+    <div class="smgmt-preflight-chip-row">
+      ${acChip}${conflictChip}
+      <button class="pf-details-btn" onclick="_preflightToggleDetails('${safeLabel}')">
+        <span class="pf-details-label">Show details</span>
+        <i class="ti ti-chevron-down pf-details-chevron"></i>
+      </button>
+    </div>
+    <div class="pf-details" style="display:none">${detailRow1}${detailRow2}</div>
   </div>`;
 }
 
-/** Expand/collapse a sprint's pre-flight list and re-render it in place. */
-function _preflightToggleExpand(label) {
-  if (_preflightExpanded.has(label)) _preflightExpanded.delete(label);
-  else _preflightExpanded.add(label);
-  const items = _preflightItemsCache[label];
-  if (!items) return;
-  const el = document.getElementById(`smgmt-preflight-${label}`);
-  if (!el) return;
-  const html = _preflightBannerHtml(label, items);
-  if (html) el.outerHTML = html;
+/** Toggle the expanded detail section in a pre-flight banner. */
+function _preflightToggleDetails(label) {
+  const banner = document.getElementById(`smgmt-preflight-${label}`);
+  if (!banner) return;
+  const details = banner.querySelector('.pf-details');
+  const lbl = banner.querySelector('.pf-details-label');
+  const chevron = banner.querySelector('.pf-details-chevron');
+  if (!details) return;
+  const expanded = details.style.display !== 'none';
+  details.style.display = expanded ? 'none' : 'block';
+  if (lbl) lbl.textContent = expanded ? 'Show details' : 'Hide details';
+  if (chevron) {
+    chevron.classList.toggle('ti-chevron-down', expanded);
+    chevron.classList.toggle('ti-chevron-up', !expanded);
+  }
 }
 
 /** Run all checks for one sprint pane and inject/update the banner in the DOM. */
@@ -8173,20 +8187,23 @@ async function _preflightInjectBanner(label, tickets, repo) {
   const syncItems = _preflightCheckTickets(tickets);
   const missingEst = _preflightCheckEstimates(tickets);
 
-  const items = [...syncItems];
+  // Separate into two chip groups: missing AC vs conflicts
+  const missingACItems = syncItems.filter(i =>
+    i.type === 'Missing body' || i.type === 'Missing acceptance criteria'
+  );
   const byNum = {};
   tickets.forEach(t => { byNum[t.number] = t; });
   for (const num of missingEst) {
     const t = byNum[num];
-    if (t) items.push({ number: num, title: t.title, type: 'No estimator output' });
+    if (t) missingACItems.push({ number: num, title: t.title, type: 'No estimator output' });
   }
+  const conflictItems = syncItems.filter(i => i.type === 'Conflicting labels');
 
-  if (items.length === 0 || _preflightDismissed.has(label)) return;
+  if (missingACItems.length === 0 && conflictItems.length === 0) return;
 
-  // Cache for the show-more/less toggle (avoids recomputing async checks).
-  _preflightItemsCache[label] = items;
+  _preflightItemsCache[label] = { missingACItems, conflictItems };
 
-  const html = _preflightBannerHtml(label, items);
+  const html = _preflightBannerHtml(label, missingACItems, conflictItems);
   if (!html) return;
 
   const header = card.querySelector('.smgmt-sprint-header');

@@ -33,6 +33,13 @@ KNOWN_FIELDS: dict[str, dict[str, Any]] = {
     "estimation_thin_ac_buffer_pct": {"secret": False, "default": 30},
     # Legacy scalar kept for backward compatibility
     "estimation_default_points": {"secret": False, "default": 3},
+    # Project identity / display (per-project overrides stored via settings API)
+    "display_name": {"secret": False, "default": ""},
+    "icon": {"secret": False, "default": "ti-folder"},
+    "color": {"secret": False, "default": "gray"},
+    "tracked": {"secret": False, "default": True},
+    # Per-project tester repo override (GITHUB_ISSUE_TEST_REPO equivalent)
+    "tester_test_repo": {"secret": False, "default": ""},
     # Secrets (presence-only; values never returned)
     "github_token": {"secret": True, "default": None},
     "database_url": {"secret": True, "default": None, "env_var": "DATABASE_URL"},

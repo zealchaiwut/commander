@@ -78,6 +78,24 @@ def get_setting_scoped(scope: str, key: str, project: Optional[str] = None) -> A
         return _load(row[0]) if row else {}
 
 
+def delete_setting(
+    scope: str,
+    key: str,
+    project: Optional[str] = None,
+) -> None:
+    """Delete a settings row (no-op if it doesn't exist)."""
+    with _open_session() as session:
+        session.execute(
+            text(
+                "DELETE FROM settings"
+                " WHERE scope = :scope AND key = :key"
+                " AND (project = :project OR (project IS NULL AND :project IS NULL))"
+            ),
+            {"scope": scope, "key": key, "project": project},
+        )
+        session.commit()
+
+
 def set_setting(
     scope: str,
     key: str,

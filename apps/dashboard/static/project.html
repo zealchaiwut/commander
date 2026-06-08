@@ -1855,6 +1855,11 @@
     }
     .smgmt-log-line { display: flex; gap: 12px; color: var(--text-muted); }
     .smgmt-log-time { color: var(--text-sub); flex-shrink: 0; }
+    .smgmt-log-line.log-dispatch .smgmt-log-msg { color: var(--blue); }
+    .smgmt-log-line.log-success  .smgmt-log-msg { color: var(--green); }
+    .smgmt-log-line.log-warn     .smgmt-log-msg { color: var(--amber); }
+    .smgmt-log-line.log-fail     .smgmt-log-msg { color: var(--red); }
+    .smgmt-log-pid { font-family: var(--mono); font-size: 11px; color: var(--text-muted); margin-left: 4px; }
     /* ── Live log panel (running sprint, issue #309) ── */
     .smgmt-live-log {
       border-top: 1px solid var(--border);
@@ -1870,7 +1875,7 @@
       background: var(--green); flex-shrink: 0;
       animation: smgmt-running-badge-pulse 2s ease-in-out infinite;
     }
-    .smgmt-live-log-agent { margin-left: auto; color: var(--text-sub); }
+    .smgmt-live-log-agent { margin-left: auto; display: flex; align-items: center; gap: 6px; }
     .smgmt-live-log-stream {
       max-height: 200px; overflow-y: auto;
       font-family: var(--mono); font-size: 11px; line-height: 1.7;
@@ -9254,12 +9259,13 @@ function _smgmtRunningCardHtml(label, n, tickets) {
     }
     if (ticketLevel > 0) prevLevel = ticketLevel;
 
+    const isActiveAgent = agentStatus && (agentStatus.endsWith('_running') || agentStatus.endsWith('_dispatched'));
     let indicator = '';
     if (liveStatus === 'done') {
       indicator = '<div class="smgmt-ticket-indicator"><div class="circle-done">&#10003;</div></div>';
     } else if (agentStatus === 'failed' || liveStatus === 'skipped') {
       indicator = '<div class="smgmt-ticket-indicator"><div class="circle-failed">&#10005;</div></div>';
-    } else if (currentTicket && t.number === currentTicket.number) {
+    } else if ((currentTicket && t.number === currentTicket.number) || isActiveAgent) {
       indicator = '<div class="smgmt-ticket-indicator"><div class="ring"></div></div>';
     } else {
       indicator = '<div class="smgmt-ticket-indicator"><div class="circle-pending"></div></div>';
@@ -9332,7 +9338,7 @@ function _smgmtRunningCardHtml(label, n, tickets) {
           <span class="smgmt-live-indicator"></span>
           <span>live</span>
           <span class="smgmt-live-log-agent" id="smgmt-live-agent-${escHtml(label)}">${
-            activeAgent ? escHtml(activeAgent.name.toUpperCase() + ' · pid ' + activeAgent.pid) : ''
+            _smgmtLiveAgentBadgesHtml(live)
           }</span>
         </div>
         <div class="smgmt-live-log-stream" id="smgmt-live-log-stream-${escHtml(label)}">${
@@ -9361,16 +9367,17 @@ function _fmtStoppedAt(isoStr) {
 }
 
 /** Render recent_log_lines array to HTML for the live log stream container. */
+const _LOG_TYPE_CLASS = { dispatch: 'log-dispatch', success: 'log-success', warn: 'log-warn', fail: 'log-fail' };
 function _smgmtLiveLogLinesHtml(logLines) {
   if (!logLines || logLines.length === 0) {
     return '<div class="smgmt-log-line" style="color:var(--text-sub)">Waiting for log…</div>';
   }
-  return logLines.map(l =>
-    `<div class="smgmt-log-line">` +
-    `<span class="smgmt-log-time">${escHtml(l.timestamp)}</span>` +
-    `<span class="smgmt-log-msg">${escHtml(l.message)}</span>` +
-    `</div>`
-  ).join('');
+  return logLines.map(l => {
+    const cls = _LOG_TYPE_CLASS[l.type] || '';
+    const tsHtml = l.timestamp && l.timestamp !== '—'
+      ? `<span class="smgmt-log-time">${escHtml(l.timestamp)}</span>` : '';
+    return `<div class="smgmt-log-line${cls ? ' ' + cls : ''}">${tsHtml}<span class="smgmt-log-msg">${escHtml(l.message)}</span></div>`;
+  }).join('');
 }
 
 /** Update the live log panel for a running sprint card (header agent info + log stream). */
@@ -9378,8 +9385,7 @@ function _smgmtLiveLogPatch(label, live) {
   const agentEl  = document.getElementById(`smgmt-live-agent-${label}`);
   const streamEl = document.getElementById(`smgmt-live-log-stream-${label}`);
   if (agentEl) {
-    const agent = live.active_agent;
-    agentEl.textContent = agent ? `${agent.name.toUpperCase()} · pid ${agent.pid}` : '';
+    agentEl.innerHTML = _smgmtLiveAgentBadgesHtml(live);
   }
   if (streamEl) {
     streamEl.innerHTML = _smgmtLiveLogLinesHtml(live.recent_log_lines || []);
@@ -9454,6 +9460,19 @@ function _smgmtAgentTagClass(role) {
   if (r.includes('CODER')) return 'coder-class';
   if (r.includes('TESTER')) return 'tester-class';
   return 'unknown-class';
+}
+
+/** Styled agent badge(s) + PID text for the live log bar. */
+function _smgmtLiveAgentBadgesHtml(live) {
+  if (!live) return '';
+  const agents = live.active_agents || (live.active_agent ? [live.active_agent] : []);
+  if (!agents.length) return '';
+  const badges = agents.map(a =>
+    `<span class="smgmt-ticket-agent-tag ${_smgmtAgentTagClass(a.name)}">${escHtml(a.name.toUpperCase())}</span>`
+  ).join(' ');
+  const pids = agents.map(a => a.pid).filter(Boolean);
+  const pidHtml = pids.length ? `<span class="smgmt-log-pid">pid ${escHtml(pids.join(' / '))}</span>` : '';
+  return badges + pidHtml;
 }
 
 /** Patch live stat strip + progress bar + ticket indicators in place (no full re-render). */
@@ -9548,11 +9567,12 @@ function _smgmtLivePatch(label, live) {
     const liveStatus = liveIss ? liveIss.status : null;
     const agentStatus = liveIss ? liveIss.agent_status : null;
 
+    const isActive = (agentStatus && (agentStatus.endsWith('_running') || agentStatus.endsWith('_dispatched')));
     if (liveStatus === 'done') {
       indicatorEl.innerHTML = '<div class="circle-done">&#10003;</div>';
     } else if (agentStatus === 'failed' || liveStatus === 'skipped') {
       indicatorEl.innerHTML = '<div class="circle-failed">&#10005;</div>';
-    } else if (currentTicket && num === currentTicket.number) {
+    } else if ((currentTicket && num === currentTicket.number) || isActive) {
       indicatorEl.innerHTML = '<div class="ring"></div>';
     } else {
       indicatorEl.innerHTML = '<div class="circle-pending"></div>';

@@ -508,6 +508,30 @@ def _restore_sprint_statuses_on_startup() -> None:
                 )
                 attached += 1
 
+            # Second pass: pick up running sprints whose sprint_manager posted
+            # to a different port (so *-status.json was never written).
+            for state_file in sprints_dir.glob("*-state.json"):
+                sprint_label = state_file.name.removesuffix("-state.json")
+                key = (proj["repo"], sprint_label)
+                if key in _sprint_statuses:
+                    continue  # already loaded from status.json above
+                if not _is_sprint_running(project_root, sprint_label):
+                    continue
+                try:
+                    payload = json.loads(state_file.read_text(encoding="utf-8"))
+                except (OSError, json.JSONDecodeError) as exc:
+                    print(
+                        f"[startup-restore] could not read {state_file.name}: {exc}"
+                    )
+                    skipped += 1
+                    continue
+                _sprint_statuses[key] = payload
+                print(
+                    f"[startup-restore] re-attached (state.json fallback) to running sprint"
+                    f" '{sprint_label}' on {proj['repo']}"
+                )
+                attached += 1
+
         except Exception as exc:
             print(f"[startup-restore] error scanning project {proj.get('repo')}: {exc}")
 
@@ -1380,17 +1404,25 @@ def get_sprint_nav_status(repo: str = ""):
     if not all_sprint_issues:
         return {"has_sprint": False}
 
+    # Fetch finished summaries once — used both to skip finished sprints when
+    # picking "current" and to populate the panel summary link below.
+    finished_summaries = _finished_sprint_summaries(repo_name)
+
     _ACTIVE_COLS = {"in-progress", "sit", "uat", "needs-rework"}
     current = None
     raw_issues: list[dict] = []
-    # Prefer the lowest-numbered sprint that has active (non-backlog) work
+    # Prefer the lowest-numbered UNFINISHED sprint that has active (non-backlog) work.
+    # Skipping finished sprints prevents a higher-numbered running sprint from being
+    # eclipsed by a lower-numbered sprint whose only remaining work is UAT sign-off.
     for n in sorted(all_sprint_issues.keys()):
+        if f"sprint-{n}" in finished_summaries:
+            continue  # sprint already finished — skip when looking for running sprint
         issues = all_sprint_issues[n]
         if any(i.get("column") in _ACTIVE_COLS for i in issues):
             current = n
             raw_issues = issues
             break
-    # Fall back to highest-numbered sprint with any issues
+    # Fall back to highest-numbered sprint with any issues (covers finished-only state)
     if current is None:
         current = max(all_sprint_issues.keys())
         raw_issues = all_sprint_issues[current]
@@ -1403,7 +1435,7 @@ def get_sprint_nav_status(repo: str = ""):
         i for i in raw_issues
         if not _NON_WORK_LABELS & {lbl.get("name", "") for lbl in i.get("labels", [])}
     ]
-    summary_issue = _finished_sprint_summaries(repo_name).get(f"sprint-{current}")
+    summary_issue = finished_summaries.get(f"sprint-{current}")
 
     columns = {"backlog": 0, "in-progress": 0, "sit": 0, "uat": 0, "done": 0, "needs-rework": 0}
     for i in work_issues:
@@ -3258,15 +3290,17 @@ def _sprint_label_sort_key(label: str) -> tuple:
 
 
 def _next_sprint_sublabel(sprint_label: str, existing_label_names: set[str]) -> str:
-    """Compute the next child label for a sprint re-run.
+    """Compute the next sibling sub-label for a sprint re-run.
 
     sprint-25   → sprint-25.1 (or sprint-25.2 if sprint-25.1 already exists)
-    sprint-25.1 → sprint-25.1.1 (first child of sprint-25.1)
-    sprint-25.1.1 → sprint-25.1.1.1 (first child of sprint-25.1.1)
+    sprint-25.1 → sprint-25.2 (next sibling, not a child)
+    sprint-25.2 → sprint-25.3
     """
+    base_m = re.match(r"^(sprint-\d+)", sprint_label)
+    base = base_m.group(1) if base_m else sprint_label
     candidate = 1
     while True:
-        label = f"{sprint_label}.{candidate}"
+        label = f"{base}.{candidate}"
         if label not in existing_label_names:
             return label
         candidate += 1
@@ -5229,6 +5263,19 @@ def get_sprint_live_snapshot(sprint_label: str, project: str):
     status_key = (project, sprint_label)
     status_data = _sprint_statuses.get(status_key, {})
 
+    # Disk fallback: sprint_manager writes state.json directly regardless of
+    # which port the dashboard is on. Use it when in-memory cache is empty
+    # (server restart, or sprint_manager posting to a different port).
+    if not status_data:
+        _fb_m = re.search(r"(\d+)", sprint_label)
+        _fb_n = _fb_m.group(1) if _fb_m else sprint_label
+        _fb_path = commander / "sprints" / f"sprint-{_fb_n}-state.json"
+        if _fb_path.exists():
+            try:
+                status_data = json.loads(_fb_path.read_text(encoding="utf-8"))
+            except Exception:
+                pass
+
     started_at_str: Optional[str] = status_data.get("start_timestamp")
     started_at_dt: Optional[datetime] = None
     if started_at_str:
@@ -6195,10 +6242,36 @@ def get_sprint_outcome(sprint_label: str, project: str):
             "failure_reason": failure_reason,
         })
 
+    # Retroactive label override: if an issue is marked "failed" in state.json but
+    # currently carries a UAT label on GitHub (manually applied after the sprint ran),
+    # treat it as "done" so the card reflects the true current state.
+    failed_nums = [i["number"] for i in result_issues if i["outcome"] == "failed" and i["number"]]
+    if failed_nums:
+        try:
+            repo = github_client.get_repo_for_operation(project)
+            r = subprocess.run(
+                ["gh", "issue", "list", "--repo", repo,
+                 "--state", "all", "--label", "UAT",
+                 "--json", "number",
+                 "--limit", "200"],
+                capture_output=True, text=True, timeout=10,
+            )
+            if r.returncode == 0:
+                uat_nums = {i["number"] for i in (json.loads(r.stdout) or [])}
+                for ri in result_issues:
+                    if ri["outcome"] == "failed" and ri["number"] in uat_nums:
+                        ri["outcome"] = "done"
+        except Exception:
+            pass
+
     # Counts
     done_count    = sum(1 for i in result_issues if i["outcome"] == "done")
     failed_count  = sum(1 for i in result_issues if i["outcome"] == "failed")
     skipped_count = sum(1 for i in result_issues if i["outcome"] == "skipped")
+
+    # Retroactive override may have cleared all failures — upgrade stopped → completed
+    if sprint_status == "stopped" and failed_count == 0:
+        sprint_status = "completed"
 
     # Log line count from most recent run log
     log_line_count = 0
@@ -7264,7 +7337,6 @@ def get_sprint_finish_preview(owner: str, repo_name: str, label: str):
         raise HTTPException(400, detail=f"Invalid sprint label: {label!r}")
 
     repo = f"{owner}/{repo_name}"
-    project_root = _project_root_path(repo)
 
     next_num = _next_sprint_number(label)
     next_sprint_label = f"sprint-{next_num}"
@@ -7276,11 +7348,6 @@ def get_sprint_finish_preview(owner: str, repo_name: str, label: str):
 
     next_sprint_exists = next_num in existing_sprints
     conflict_error: str | None = None
-    if next_sprint_exists and _is_sprint_running(project_root, next_sprint_label):
-        conflict_error = (
-            f"Sprint {next_num} is currently running — cannot move tickets into it. "
-            f"Wait for it to finish."
-        )
 
     try:
         sprint_issues = _get_sprint_issues(repo, label)
@@ -7342,18 +7409,6 @@ async def finish_sprint(owner: str, repo_name: str, label: str, body: FinishSpri
 
     if _is_sprint_running(project_root, label):
         raise HTTPException(409, detail=f"Sprint {label} is currently running — finish it after the run completes")
-
-    # Conflict guard: next sprint must not be running
-    if _is_sprint_running(project_root, next_sprint_label):
-        m_next = re.match(r"^sprint-(\d+)", next_sprint_label)
-        next_num_str = m_next.group(1) if m_next else next_sprint_label
-        raise HTTPException(
-            409,
-            detail=(
-                f"Sprint {next_num_str} is currently running — cannot move tickets into it. "
-                f"Wait for it to finish."
-            ),
-        )
 
     try:
         sprint_issues = _get_sprint_issues(repo, label)
@@ -7906,7 +7961,7 @@ def _do_pre_commit_bulk_images(job_id: str, repo: str) -> dict[str, str]:
     if not attach_dir or not attach_dir.exists():
         return {}
 
-    job = _bulk_jobs.get(job_id)
+    job = _get_bulk_job(job_id)
     if not job:
         return {}
 
@@ -7946,10 +8001,21 @@ def _do_pre_commit_bulk_images(job_id: str, repo: str) -> dict[str, str]:
     return url_map
 
 
+_INLINE_IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"}
+
+
 def _build_body_with_images(body: str, ticket_index: int, job: dict) -> str:
-    """Prepend image markdown links for images assigned to this ticket."""
+    """Append attachment links for files assigned to this ticket.
+
+    Images use inline syntax; all other types use plain link syntax so they
+    render as clickable links rather than broken-image icons on GitHub.
+
+    Idempotent: returns body unchanged if an Attachments section is already present.
+    """
     url_map = job.get("image_url_map") or {}
     if not url_map:
+        return body
+    if "## Attachments" in body:
         return body
     assignments = job.get("image_assignments") or []
     links: list[str] = []
@@ -7959,10 +8025,14 @@ def _build_body_with_images(body: str, ticket_index: int, job: dict) -> str:
             fname = a.get("filename", "")
             url = url_map.get(fname)
             if url:
-                links.append(f"![{fname}]({url})")
+                ext = Path(fname).suffix.lower()
+                if ext in _INLINE_IMAGE_EXTS:
+                    links.append(f"![{fname}]({url})")
+                else:
+                    links.append(f"[{fname}]({url})")
     if not links:
         return body
-    return body + "\n\n" + "\n\n".join(links)
+    return body + "\n\n## Attachments\n\n" + "\n\n".join(links)
 
 
 def _parse_ba_draft(output: str) -> tuple[str, str, bool]:
@@ -8284,7 +8354,7 @@ async def _run_bulk_estimator_for_ticket(
     """
     import logging as _logging
 
-    job = _bulk_jobs.get(job_id)
+    job = _get_bulk_job(job_id)
     if not job:
         return
     ticket = job["tickets"][index]
@@ -8327,7 +8397,7 @@ async def _run_bulk_estimator_for_ticket(
                 )
                 _post_estimator_warning(issue_number, repo, "bulk estimation timed out after 240s")
                 # Re-fetch job in case it was updated while waiting
-                job = _bulk_jobs.get(job_id)
+                job = _get_bulk_job(job_id)
                 if job:
                     ticket = job["tickets"][index]
                     ticket["state"] = "estimate_failed"
@@ -8338,7 +8408,7 @@ async def _run_bulk_estimator_for_ticket(
     except Exception as exc:
         _logging.warning(f"[bulk-estimator] estimation for #{issue_number} failed: {exc}")
         _post_estimator_warning(issue_number, repo, str(exc))
-        job = _bulk_jobs.get(job_id)
+        job = _get_bulk_job(job_id)
         if job:
             ticket = job["tickets"][index]
             ticket["state"] = "estimate_failed"
@@ -8347,7 +8417,7 @@ async def _run_bulk_estimator_for_ticket(
             await _broadcast_bulk_event(job_id, {"type": "ticket_update", "ticket": dict(ticket)})
         return
 
-    job = _bulk_jobs.get(job_id)
+    job = _get_bulk_job(job_id)
     if not job:
         return
     ticket = job["tickets"][index]
@@ -8400,7 +8470,7 @@ async def _run_bulk_draft_estimator_for_ticket(job_id: str, index: int) -> None:
     """
     import logging as _logging
 
-    job = _bulk_jobs.get(job_id)
+    job = _get_bulk_job(job_id)
     if not job or index < 0 or index >= len(job["tickets"]):
         return
     ticket = job["tickets"][index]
@@ -8459,7 +8529,7 @@ async def _run_bulk_draft_estimator_for_ticket(job_id: str, index: int) -> None:
             except OSError:
                 pass
 
-    job = _bulk_jobs.get(job_id)
+    job = _get_bulk_job(job_id)
     if not job or index >= len(job["tickets"]):
         return
     ticket = job["tickets"][index]
@@ -8784,6 +8854,28 @@ def _bulk_job_created_at(job: dict) -> float:
     return time.time()
 
 
+def _get_bulk_job(job_id: str) -> dict | None:
+    """Return job from memory, or lazy-load from disk (e.g. after server restart).
+
+    If found on disk and not in memory, the job is restored to _bulk_jobs so
+    subsequent calls hit memory. Returns None if not found anywhere.
+    """
+    job = _bulk_jobs.get(job_id)
+    if job is not None:
+        return job
+    # Disk fallback — covers server reload / restart scenarios
+    try:
+        jobs_dir = _bulk_jobs_dir()
+        path = jobs_dir / f"{job_id}.json"
+        if path.exists():
+            job = json.loads(path.read_text(encoding="utf-8"))
+            _bulk_jobs[job_id] = job
+            return job
+    except Exception:
+        pass
+    return None
+
+
 def _prune_old_bulk_jobs() -> None:
     """Remove job snapshots older than 24 hours from disk and memory."""
     cutoff = time.time() - 86400
@@ -8826,7 +8918,7 @@ async def _run_single_ba_ticket(
     default_labels: list[str],
 ) -> None:
     """Run BA polish for a single ticket and update job state. Does NOT create the issue."""
-    job = _bulk_jobs.get(job_id)
+    job = _get_bulk_job(job_id)
     if not job:
         return
 
@@ -8959,7 +9051,7 @@ async def _bulk_flusher(job_id: str) -> None:
     The flusher injects image links into the body and broadcasts; it does NOT create
     GitHub issues — that happens via /post-selected after the user reviews.
     """
-    job = _bulk_jobs.get(job_id)
+    job = _get_bulk_job(job_id)
     if not job:
         return
 
@@ -8978,7 +9070,7 @@ async def _bulk_flusher(job_id: str) -> None:
     flush_idx = 0
 
     while flush_idx < n:
-        job = _bulk_jobs.get(job_id)
+        job = _get_bulk_job(job_id)
         if not job:
             return
 
@@ -9028,7 +9120,7 @@ async def _bulk_flusher(job_id: str) -> None:
             flush_idx += 1
 
     # All drafts processed — check terminal draft states (draft_ready, failed, skipped, size_warning)
-    job = _bulk_jobs.get(job_id)
+    job = _get_bulk_job(job_id)
     if job:
         all_drafted = all(
             t["state"] in ("draft_ready", "failed", "skipped", "size_warning")
@@ -9054,7 +9146,7 @@ async def _bulk_worker(
         except asyncio.QueueEmpty:
             break
 
-        job = _bulk_jobs.get(job_id)
+        job = _get_bulk_job(job_id)
         if not job:
             break
 
@@ -9078,7 +9170,7 @@ async def _bulk_worker(
 
 async def _run_bulk_job(job_id: str) -> None:
     """Main bulk job orchestrator: runs workers + flusher concurrently."""
-    job = _bulk_jobs.get(job_id)
+    job = _get_bulk_job(job_id)
     if not job:
         return
 
@@ -9109,7 +9201,7 @@ async def _run_bulk_job(job_id: str) -> None:
     await asyncio.gather(*workers, return_exceptions=True)
 
     # Signal stop if needed — mark remaining pending as skipped
-    job = _bulk_jobs.get(job_id)
+    job = _get_bulk_job(job_id)
     if job and job.get("stop_requested"):
         for t in job["tickets"]:
             if t["state"] in ("pending", "draft_ready"):
@@ -9123,7 +9215,7 @@ async def _run_bulk_job(job_id: str) -> None:
     await flusher
 
     # Final status update — flusher handles drafts_ready; fall back if not set
-    job = _bulk_jobs.get(job_id)
+    job = _get_bulk_job(job_id)
     if job and job.get("status") not in ("done", "stopped", "drafts_ready"):
         job["status"] = "drafts_ready"
         _persist_bulk_job(job)
@@ -9323,7 +9415,7 @@ async def bulk_create_start(
 @app.get("/api/tickets/bulk/{job_id}")
 async def bulk_get_job(job_id: str):
     """Return the current state of a bulk job."""
-    job = _bulk_jobs.get(job_id)
+    job = _get_bulk_job(job_id)
     if not job:
         # Try to load from disk
         try:
@@ -9353,7 +9445,7 @@ async def bulk_get_job(job_id: str):
 @app.get("/api/tickets/bulk/{job_id}/stream")
 async def bulk_job_stream(job_id: str, request: Request):
     """SSE stream of state-change events for a bulk job."""
-    job = _bulk_jobs.get(job_id)
+    job = _get_bulk_job(job_id)
     if not job:
         # Rehydrate from disk if the job was persisted but evicted from memory
         # (e.g. server restart). Mirrors bulk_get_job so a reconnecting client
@@ -9412,7 +9504,7 @@ class BulkStopBody(BaseModel):
 @app.post("/api/tickets/bulk/{job_id}/stop")
 async def bulk_stop_job(job_id: str):
     """Graceful stop: finish in-flight BA calls, mark remaining pending as skipped."""
-    job = _bulk_jobs.get(job_id)
+    job = _get_bulk_job(job_id)
     if not job:
         raise HTTPException(404, detail="Job not found")
     job["stop_requested"] = True
@@ -9438,7 +9530,7 @@ async def bulk_estimate_draft(job_id: str, body: BulkEstimateDraftBody):
     changed since the last estimate. Sizing runs in the background; the caller
     gets the new estimate via the SSE ticket_update stream.
     """
-    job = _bulk_jobs.get(job_id)
+    job = _get_bulk_job(job_id)
     if not job:
         raise HTTPException(404, detail="Job not found")
     tickets = job["tickets"]
@@ -9466,7 +9558,7 @@ async def bulk_estimate_draft(job_id: str, body: BulkEstimateDraftBody):
 @app.post("/api/tickets/bulk/{job_id}/skip")
 async def bulk_skip_ticket(job_id: str, body: BulkSkipBody):
     """Mark a pending ticket as skipped (no-op if already past pending)."""
-    job = _bulk_jobs.get(job_id)
+    job = _get_bulk_job(job_id)
     if not job:
         raise HTTPException(404, detail="Job not found")
     tickets = job["tickets"]
@@ -9499,7 +9591,7 @@ class BulkRetryBody(BaseModel):
 @app.post("/api/tickets/bulk/{job_id}/retry")
 async def bulk_retry_ticket(job_id: str, body: BulkRetryBody):
     """Re-queue a failed ticket for retry."""
-    job = _bulk_jobs.get(job_id)
+    job = _get_bulk_job(job_id)
     if not job:
         raise HTTPException(404, detail="Job not found")
     tickets = job["tickets"]
@@ -9567,7 +9659,7 @@ async def bulk_redraft_ticket(job_id: str, body: BulkRedraftBody):
     Works on draft_ready, failed, or skipped tickets. After BA completes the
     ticket returns to draft_ready for user review — no GitHub issue is created.
     """
-    job = _bulk_jobs.get(job_id)
+    job = _get_bulk_job(job_id)
     if not job:
         raise HTTPException(404, detail="Job not found")
     tickets = job["tickets"]
@@ -9641,9 +9733,6 @@ class BulkPostSelectedBody(BaseModel):
     sprint_label: str | None = None
 
 
-_SPRINT_LABEL_RE = re.compile(r"^sprint-\d+$")
-
-
 def _resolve_bulk_sprint_label(sprint_label: str | None, repo: str | None) -> str:
     """Resolve a bulk job's sprint selection to a concrete label.
 
@@ -9685,7 +9774,7 @@ async def bulk_post_selected(job_id: str, body: BulkPostSelectedBody):
     Each item in `tickets` specifies the ticket index and the labels to apply.
     Only tickets in draft_ready state can be posted; others are ignored.
     """
-    job = _bulk_jobs.get(job_id)
+    job = _get_bulk_job(job_id)
     if not job:
         raise HTTPException(404, detail="Job not found")
 
@@ -9708,6 +9797,20 @@ async def bulk_post_selected(job_id: str, body: BulkPostSelectedBody):
 
     async def _post_task():
         estimation_tasks: list[asyncio.Task] = []
+
+        # Retry attachment pre-commit if _run_bulk_job failed to commit earlier
+        # (e.g. transient git/network error). image_url_map being falsy while
+        # has_attachments is True is the signal that the first attempt failed.
+        if job.get("has_attachments") and not job.get("image_url_map"):
+            try:
+                url_map = await asyncio.to_thread(
+                    _do_pre_commit_bulk_images, job["job_id"], job["repo"]
+                )
+                job["image_url_map"] = url_map
+                _persist_bulk_job(job)
+            except Exception as _pre_err:
+                logger.warning("Bulk image pre-commit retry failed: %s", str(_pre_err)[:200])
+                job["image_url_map"] = {}
 
         # Resolve the batch's target sprint once ("NEW" → create the next
         # sprint-N label), then persist the concrete label back onto the job.
@@ -9837,7 +9940,7 @@ async def bulk_post_selected(job_id: str, body: BulkPostSelectedBody):
 
 async def _post_ticket_body_to_github(job_id: str, index: int, body_text: str) -> None:
     """Post a ticket body directly to GitHub (no BA drafting) and update job state."""
-    job = _bulk_jobs.get(job_id)
+    job = _get_bulk_job(job_id)
     if not job:
         return
     tickets = job["tickets"]
@@ -9939,7 +10042,7 @@ class BulkRetryWithBodyBody(BaseModel):
 @app.post("/api/tickets/bulk/{job_id}/retry-with-body")
 async def bulk_retry_ticket_with_body(job_id: str, body: BulkRetryWithBodyBody):
     """Retry a failed ticket by POSTing the supplied body directly to GitHub (no BA drafting)."""
-    job = _bulk_jobs.get(job_id)
+    job = _get_bulk_job(job_id)
     if not job:
         raise HTTPException(404, detail="Job not found")
     tickets = job["tickets"]
@@ -9964,7 +10067,7 @@ async def bulk_retry_with_image(
     file: UploadFile = File(default=None),
 ):
     """Retry a failed ticket with an optional new image committed to issue-assets."""
-    job = _bulk_jobs.get(job_id)
+    job = _get_bulk_job(job_id)
     if not job:
         raise HTTPException(404, detail="Job not found")
     tickets = job["tickets"]
@@ -10025,7 +10128,7 @@ class BulkRetryAllBody(BaseModel):
 @app.post("/api/tickets/bulk/{job_id}/retry-all")
 async def bulk_retry_all_failed(job_id: str, body: BulkRetryAllBody):
     """Retry all failed tickets by POSTing each ticket's edited body directly to GitHub."""
-    job = _bulk_jobs.get(job_id)
+    job = _get_bulk_job(job_id)
     if not job:
         raise HTTPException(404, detail="Job not found")
     tickets = job["tickets"]
@@ -10064,7 +10167,7 @@ async def bulk_size_remedy_comment(job_id: str, body: SizeRemedyCommentBody):
     Accepts a ticket in size_warning state, creates the issue with a trimmed body,
     then immediately posts the overflow as a follow-up comment.
     """
-    job = _bulk_jobs.get(job_id)
+    job = _get_bulk_job(job_id)
     if not job:
         raise HTTPException(404, detail="Job not found")
     tickets = job["tickets"]
@@ -10215,7 +10318,7 @@ async def bulk_size_remedy_images(job_id: str, body: SizeRemedyImagesBody):
     After replacement the body length is rechecked. If still over threshold the ticket stays in
     size_warning state with updated counts. If under threshold the issue is created immediately.
     """
-    job = _bulk_jobs.get(job_id)
+    job = _get_bulk_job(job_id)
     if not job:
         raise HTTPException(404, detail="Job not found")
     tickets = job["tickets"]

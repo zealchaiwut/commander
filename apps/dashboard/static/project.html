@@ -5332,6 +5332,7 @@
             <div id="bc-review-list" class="bc-review-list"></div>
             <div class="bc-review-actions">
               <button type="button" class="btn-ghost" onclick="bcCancelReview()">Cancel</button>
+              <span id="bc-post-error" class="hidden" style="color:var(--red);font-size:12px;margin-right:8px;"></span>
               <button type="button" class="btn-primary" id="bc-post-github-btn" disabled onclick="bcPostSelected()">Post to GitHub</button>
             </div>
           </div>
@@ -7783,14 +7784,17 @@ function _smgmtLabelFilterApply() {
 async function _smgmtFetchMissingOutcomes(orderedLabels, bySprint) {
   const repo = _smgmtRepo();
   if (!repo) return;
+  const toFetch = [];
   for (const label of orderedLabels) {
-    if (_smgmtRunningLabels.has(label)) continue; // running sprints show the live card
-    // Only fetch if not cached and the sprint isn't an active planning sprint
+    if (_smgmtRunningLabels.has(label)) continue;
     if (_smgmtOutcomeCache[label] !== undefined) continue;
     const tickets = bySprint[label] || [];
     const hasRework    = tickets.some(t => (t.labels || []).some(l => l.name === 'need-rework' || l.name === 'needs-rework'));
     const hasCompleted = _smgmtHasCompletedTickets(tickets);
-    if (tickets.length > 0 && !hasRework && !hasCompleted) continue; // open non-rework/non-completed tickets → still planning
+    if (tickets.length > 0 && !hasRework && !hasCompleted) continue;
+    toFetch.push(label);
+  }
+  await Promise.all(toFetch.map(async label => {
     try {
       const resp = await fetch(
         `/api/sprints/${encodeURIComponent(label)}/outcome?project=${encodeURIComponent(repo)}`
@@ -7798,16 +7802,14 @@ async function _smgmtFetchMissingOutcomes(orderedLabels, bySprint) {
       if (resp.ok) {
         const outcome = await resp.json();
         _smgmtOutcomeCache[label] = outcome;
-        // Patch the card in-place rather than re-rendering everything
         _smgmtInjectOutcomeBand(label, outcome);
       } else {
-        // 404 means no outcome data — mark as null so we don't retry
         _smgmtOutcomeCache[label] = null;
       }
     } catch (_) {
       _smgmtOutcomeCache[label] = null;
     }
-  }
+  }));
 }
 
 async function _smgmtLoadEstimates(orderedLabels, bySprint) {
@@ -8557,6 +8559,16 @@ function _smgmtInjectOutcomeBand(label, outcome) {
     card.appendChild(logEl.firstElementChild);
   }
 
+  // Update Finish Sprint button visibility now that outcome is known
+  const finishBtn = card.querySelector('.smgmt-finish-btn');
+  if (finishBtn) {
+    if (meta.state === 'completed' || meta.state === 'has_rework') {
+      finishBtn.classList.remove('hidden');
+    } else {
+      finishBtn.classList.add('hidden');
+    }
+  }
+
   // Inject cancellation banner (issue #454): insert after header so it appears above outcome band
   const existingCancelBanner = card.querySelector('.smgmt-cancel-banner');
   if (existingCancelBanner) existingCancelBanner.remove();
@@ -9180,8 +9192,10 @@ function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent, finished) {
   }
 
   const outcomeState = outcome && (outcome.state || (outcome.sprint_status === 'completed' ? 'completed' : null));
-  const finishHidden = (outcomeState === 'completed' || outcomeState === 'has_rework') ? '' : 'hidden';
-  const finishDisabled = (outcomeState === 'completed' || outcomeState === 'has_rework') && tickets.length === 0 ? 'disabled' : '';
+  const isOutcomeCompleted = outcomeState === 'completed' || outcomeState === 'has_rework';
+  // Show Finish Sprint immediately if outcome says done, OR sprint looks post-run while outcome is still loading.
+  const finishHidden = (isOutcomeCompleted || (isPostRun && !outcome)) ? '' : 'hidden';
+  const finishDisabled = isOutcomeCompleted && tickets.length === 0 ? 'disabled' : '';
 
   // Outcome state: build band + ticket rows if outcome is cached
   let outcomeBandHtml = '';
@@ -9330,7 +9344,8 @@ function _smgmtRunningCardHtml(label, n, tickets) {
   const liveByNum = {};
   liveIssues.forEach(i => { liveByNum[i.number] = i; });
 
-  const sourceTickets = liveIssues.length > 0 ? liveIssues : tickets;
+  const sourceTickets = (liveIssues.length > 0 ? liveIssues : tickets)
+    .slice().sort((a, b) => (a.dispatch_level || 0) - (b.dispatch_level || 0));
   const cardRepo = _smgmtRepo();
 
   // Segmented bar blocks — one per ticket (issue #613)
@@ -9342,7 +9357,8 @@ function _smgmtRunningCardHtml(label, n, tickets) {
           const agentStatus = liveIss ? liveIss.agent_status : null;
           let blockClass = 'seg-pending';
           if (liveStatus === 'done') blockClass = 'seg-done';
-          else if (currentTicket && t.number === currentTicket.number) blockClass = 'seg-running';
+          else if (agentStatus === 'failed' || liveStatus === 'skipped') blockClass = 'seg-failed';
+          else if (liveStatus === 'in-progress' || agentStatus === 'running' || (currentTicket && t.number === currentTicket.number)) blockClass = 'seg-running';
           return `<div class="seg-block ${blockClass}" data-issue="${t.number}"></div>`;
         }).join('')
       }</div>`
@@ -9357,7 +9373,7 @@ function _smgmtRunningCardHtml(label, n, tickets) {
     const ticketLevel = (liveIss && liveIss.dispatch_level) || (t.dispatch_level) || 0;
 
     let sepHtml = '';
-    if (ticketLevel > 0 && ticketLevel !== prevLevel && prevLevel > 0) {
+    if (ticketLevel > 0 && ticketLevel > prevLevel) {
       sepHtml = `<div class="level-sep">
         <span class="level-sep-num">Level ${ticketLevel}</span>
         <span class="level-sep-desc">· runs after level ${prevLevel} completes</span>
@@ -9370,7 +9386,7 @@ function _smgmtRunningCardHtml(label, n, tickets) {
       indicator = '<div class="smgmt-ticket-indicator"><div class="circle-done">&#10003;</div></div>';
     } else if (agentStatus === 'failed' || liveStatus === 'skipped') {
       indicator = '<div class="smgmt-ticket-indicator"><div class="circle-failed">&#10005;</div></div>';
-    } else if (currentTicket && t.number === currentTicket.number) {
+    } else if (liveStatus === 'in-progress' || agentStatus === 'running' || (currentTicket && t.number === currentTicket.number)) {
       indicator = '<div class="smgmt-ticket-indicator"><div class="ring"></div></div>';
     } else {
       indicator = '<div class="smgmt-ticket-indicator"><div class="circle-pending"></div></div>';
@@ -9417,9 +9433,8 @@ function _smgmtRunningCardHtml(label, n, tickets) {
           <i class="ti ti-layout-kanban" style="font-size:14px;color:var(--green)"></i>
           <span class="smgmt-sprint-name" style="font-size:15px;font-weight:700;">${escHtml(sprintLabelDisplay(label))}</span>
           <span class="smgmt-running-badge" id="smgmt-running-badge-${escHtml(label)}">
-            <span class="smgmt-running-badge-dot"></span>${totalCount > 0 ? `${doneCount + skippedCount}/${totalCount}` : '—'}
+            <span class="smgmt-running-badge-dot"></span>${totalCount > 0 ? `${completeCount}/${totalCount}` : '—'}
           </span>
-          <span class="smgmt-sprint-count" id="smgmt-col-rollup-${escHtml(label)}">${_smgmtRollupText(sourceTickets)}</span>
         </div>
         <div class="smgmt-sprint-header-right">
           ${_smgmtCapacityInputHtml(label)}
@@ -9623,7 +9638,7 @@ function _smgmtLivePatch(label, live) {
   // Update running badge X/Y ratio (sprint-26 parity, Gap 5)
   const badgeEl = document.getElementById(`smgmt-running-badge-${label}`);
   if (badgeEl) {
-    const ratio = totalCount > 0 ? `${doneCount + skippedCount}/${totalCount}` : '—';
+    const ratio = totalCount > 0 ? `${completeCount}/${totalCount}` : '—';
     badgeEl.innerHTML = `<span class="smgmt-running-badge-dot"></span>${ratio}`;
   }
 
@@ -9681,7 +9696,7 @@ function _smgmtLivePatch(label, live) {
       indicatorEl.innerHTML = '<div class="circle-done">&#10003;</div>';
     } else if (agentStatus === 'failed' || liveStatus === 'skipped') {
       indicatorEl.innerHTML = '<div class="circle-failed">&#10005;</div>';
-    } else if (currentTicket && num === currentTicket.number) {
+    } else if (liveStatus === 'in-progress' || agentStatus === 'running' || (currentTicket && num === currentTicket.number)) {
       indicatorEl.innerHTML = '<div class="ring"></div>';
     } else {
       indicatorEl.innerHTML = '<div class="circle-pending"></div>';
@@ -9746,9 +9761,11 @@ function _smgmtLivePatch(label, live) {
       const bNum = parseInt(block.dataset.issue, 10);
       const liveIss = liveByNum[bNum];
       const liveStatus = liveIss ? liveIss.status : null;
+      const bAgentStatus = liveIss ? liveIss.agent_status : null;
       let blockClass = 'seg-pending';
       if (liveStatus === 'done') blockClass = 'seg-done';
-      else if (currentTicket && bNum === currentTicket.number) blockClass = 'seg-running';
+      else if (bAgentStatus === 'failed' || liveStatus === 'skipped') blockClass = 'seg-failed';
+      else if (liveStatus === 'in-progress' || bAgentStatus === 'running' || (currentTicket && bNum === currentTicket.number)) blockClass = 'seg-running';
       block.className = `seg-block ${blockClass}`;
     });
   }
@@ -9815,8 +9832,19 @@ async function _smgmtLivePollTick() {
         if (!live.issues || live.issues.length === 0) {
           live.issues = sprintIssueMap[label] || [];
         }
+        const hadLiveIssues = !!(_smgmtLiveCache[label]?.issues?.length);
         _smgmtLiveCache[label] = live;
-        _smgmtLivePatch(label, live);
+        // First time we have dispatch_level data: full re-render so the card
+        // rebuilds with correct sort order and level separators. Subsequent
+        // polls use the cheap patch path (no flicker, no full DOM rebuild).
+        if (!hadLiveIssues && live.issues?.length > 0 && _smgmtData) {
+          _smgmtRender(_smgmtData);
+        } else {
+          _smgmtLivePatch(label, live);
+        }
+        // Keep pill/panel in sync with live runner data (no GitHub-label lag).
+        _snavRenderPill();
+        if (_snavPanelOpen) _snavRenderPanel();
       }
     }
   } catch (_) { /* silently ignore poll errors */ }
@@ -16089,11 +16117,18 @@ async function bcPostSelected() {
     if (!resp.ok) {
       _bcPosting = false;
       const data = await resp.json().catch(() => ({}));
-      console.error('[bc] post-selected failed:', data.detail || resp.status);
+      const errMsg = data.detail || `HTTP ${resp.status}`;
+      console.error('[bc] post-selected failed:', errMsg);
+      if (postBtn)  { postBtn.disabled = false;  postBtn.textContent  = 'Post to GitHub'; }
+      if (reviewBtn){ reviewBtn.disabled = false; reviewBtn.textContent = 'Post to GitHub'; }
+      const errBanner = document.getElementById('bc-post-error');
+      if (errBanner) { errBanner.textContent = `Post failed: ${errMsg}. Try again.`; errBanner.classList.remove('hidden'); }
     }
   } catch (e) {
     _bcPosting = false;
     console.error('[bc] post-selected error:', e);
+    if (postBtn)  { postBtn.disabled = false;  postBtn.textContent  = 'Post to GitHub'; }
+    if (reviewBtn){ reviewBtn.disabled = false; reviewBtn.textContent = 'Post to GitHub'; }
   }
 
   bcCancelReview();
@@ -16257,15 +16292,24 @@ function _snavRenderPill() {
     const completedF = (d.done || 0) + (d.uat || 0);
     text.textContent = `S${d.sprint} · ${completedF}/${d.total || 0}`;
   } else {
-    const cols = d.columns || {};
-    // During a running sprint, show dispatched/total (tickets that have left backlog).
-    // This matches the sprint runner's "[X/N]" log counter so both stay in sync.
-    const dispatched = (d.total || 0) - (cols.backlog || 0);
-    const uatHtml = d.uat > 0 ? ` · <span class="snav-uat">${d.uat} UAT</span>` : '';
-    const rework = cols['needs-rework'] || 0;
-    const reworkHtml = rework > 0 ? ` · <span class="snav-rework">${rework} ↩</span>` : '';
-    dot.className = rework > 0 ? 'snav-dot snav-dot--rework' : 'snav-dot snav-dot--running';
-    text.innerHTML = `S${d.sprint} · ${dispatched}/${d.total || 0}${uatHtml}${reworkHtml}`;
+    // For running sprints, use live snapshot when available (single source of truth).
+    const liveData = _smgmtLiveCache[`sprint-${d.sprint}`];
+    if (liveData && (liveData.total_count || 0) > 0) {
+      const lc = _snavColsFromLive(liveData);
+      const complete = lc.done + lc.failed + lc.skipped;
+      const doneHtml = lc.done > 0 ? ` · <span class="snav-uat">${lc.done} done</span>` : '';
+      dot.className = 'snav-dot snav-dot--running';
+      text.innerHTML = `S${d.sprint} · ${complete}/${lc.total}${doneHtml}`;
+    } else {
+      const cols = d.columns || {};
+      // During a running sprint, show dispatched/total (tickets that have left backlog).
+      const dispatched = (d.total || 0) - (cols.backlog || 0);
+      const uatHtml = d.uat > 0 ? ` · <span class="snav-uat">${d.uat} UAT</span>` : '';
+      const rework = cols['needs-rework'] || 0;
+      const reworkHtml = rework > 0 ? ` · <span class="snav-rework">${rework} ↩</span>` : '';
+      dot.className = rework > 0 ? 'snav-dot snav-dot--rework' : 'snav-dot snav-dot--running';
+      text.innerHTML = `S${d.sprint} · ${dispatched}/${d.total || 0}${uatHtml}${reworkHtml}`;
+    }
   }
 }
 
@@ -16294,19 +16338,30 @@ function _snavRenderPanel() {
         ? `<a class="snav-link" href="${escHtml(d.summary_issue.url)}" target="_blank" rel="noopener">Issue ↗</a>`
         : '');
 
-  const total = d.total || 0;
+  // For running sprints use live snapshot (single source of truth); fall back to
+  // GitHub-label counts when live data is not yet available or sprint is finished.
+  const liveData = !finished ? _smgmtLiveCache[`sprint-${d.sprint}`] : null;
+  const usingLive = liveData && (liveData.total_count || 0) > 0;
+  const cols = usingLive ? _snavColsFromLive(liveData) : (d.columns || {});
+  const total = usingLive ? (liveData.total_count || 0) : (d.total || 0);
 
-  // Stats row: tickets / in-progress / UAT / needs-rework (running) or done/time (finished)
-  const cols = d.columns || {};
+  // Stats row: tickets / in-progress / done (running) or done/time (finished)
   const inProgress = cols['in-progress'] || 0;
-  const uatCount   = d.uat || 0;
-  const rework     = cols['needs-rework'] || 0;
+  const uatCount   = usingLive ? 0 : (d.uat || 0);
+  const rework     = usingLive ? 0 : (cols['needs-rework'] || 0);
   const statsRow = finished
     ? `<div class="snav-stats">
         <div class="snav-stat"><span class="snav-stat-val">${total}</span><span class="snav-stat-lbl">tickets</span></div>
         <div class="snav-stat"><span class="snav-stat-val">${(d.done || 0) + uatCount}</span><span class="snav-stat-lbl">done</span></div>
         <div class="snav-stat"><span class="snav-stat-val snav-uat">${uatCount}</span><span class="snav-stat-lbl">in UAT</span></div>
         <div class="snav-stat" id="snav-duration"><span class="snav-stat-val">…</span><span class="snav-stat-lbl">total time</span></div>
+      </div>`
+    : usingLive
+    ? `<div class="snav-stats">
+        <div class="snav-stat"><span class="snav-stat-val">${total}</span><span class="snav-stat-lbl">tickets</span></div>
+        <div class="snav-stat"><span class="snav-stat-val snav-inprogress">${inProgress}</span><span class="snav-stat-lbl">running</span></div>
+        <div class="snav-stat"><span class="snav-stat-val" style="color:var(--red)">${cols.failed || 0}</span><span class="snav-stat-lbl">failed</span></div>
+        ${cols.done > 0 ? `<div class="snav-stat"><span class="snav-stat-val snav-uat">${cols.done}</span><span class="snav-stat-lbl">done</span></div>` : ''}
       </div>`
     : `<div class="snav-stats">
         <div class="snav-stat"><span class="snav-stat-val">${total}</span><span class="snav-stat-lbl">tickets</span></div>
@@ -16317,11 +16372,40 @@ function _snavRenderPanel() {
 
   const tail = (finished && d.summary_issue)
     ? `<div class="snav-summary-md md-body" id="snav-summary-md"><span class="snav-muted">Loading summary…</span></div>`
+    : usingLive
+    ? `<div class="snav-muted" style="margin-top:8px;">Live data from sprint runner (real-time).</div>`
     : `<div class="snav-muted" style="margin-top:8px;">Live progress is inferred from GitHub labels (≈30s). The sprint itself runs on the Mac mini.</div>`;
 
   body.innerHTML = statsRow + _snavDonutHtml(cols, total) + tail;
 
   if (finished && d.summary_issue) _snavLoadSummary(d.summary_issue.number);
+}
+
+/**
+ * Convert a live snapshot (from _smgmtLiveCache) into the columns+total object
+ * used by _snavRenderPill and _snavRenderPanel so both use a single source of truth
+ * when a sprint is actively running.
+ */
+function _snavColsFromLive(live) {
+  const total = live.total_count || 0;
+  const done  = live.done_count    || 0;
+  const failed  = live.failed_count  || 0;
+  const skipped = live.skipped_count || 0;
+  let running = 0, queued = 0;
+  (live.issues || []).forEach(iss => {
+    const s = iss.status, a = iss.agent_status;
+    if (s === 'in-progress' || a === 'running' || a === 'coder_running' || a === 'tester_running') running++;
+    else if (s === 'pending') queued++;
+  });
+  return {
+    total,
+    done,
+    uat: 0,
+    'in-progress': running,
+    backlog: queued,
+    failed,
+    skipped,
+  };
 }
 
 // Donut chart of the sprint's tickets by workflow column, with a legend.
@@ -16331,7 +16415,9 @@ function _snavDonutHtml(cols, total) {
     { key: 'uat',         label: 'UAT',         color: '#f59e0b' },
     { key: 'sit',         label: 'SIT',         color: '#8b5cf6' },
     { key: 'in-progress', label: 'In progress', color: '#2563eb' },
-    { key: 'backlog',     label: 'Backlog',     color: '#94a3b8' },
+    { key: 'failed',      label: 'Failed',      color: '#dc2626' },
+    { key: 'skipped',     label: 'Skipped',     color: '#ea580c' },
+    { key: 'backlog',     label: 'Queued',      color: '#94a3b8' },
   ];
   const r = 42, cx = 50, cy = 50, circ = 2 * Math.PI * r;
   let offset = 0, circles = '';

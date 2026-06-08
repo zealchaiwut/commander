@@ -18487,9 +18487,12 @@ async function notesSave() {
       body: JSON.stringify({ content, expected_mtime: _notesMtime }),
     });
     if (r.status === 409) {
-      const data = await r.json();
+      const data = await r.json().catch(() => ({}));
       _notesPendingConflict = true;
-      _notesShowConflict(data.detail ? (data.detail.message || 'Conflict detected.') : 'Conflict detected.');
+      const msg = (typeof data.detail === 'object' && data.detail !== null && data.detail.message)
+        ? data.detail.message
+        : 'Conflict detected.';
+      _notesShowConflict(msg);
       _notesSetStatus('');
       return;
     }

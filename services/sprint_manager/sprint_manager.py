@@ -1415,16 +1415,23 @@ def _was_feature_merged_via_log(issue_num: int, target: str) -> bool:
 
 # ── quality gates ─────────────────────────────────────────────────────────────
 
+_GATE_FAILURE_CLASS_MAP: dict[str, str] = {
+    "pytest":        "test",
+    "lint":          "lint",
+    "ruff":          "lint",
+    "typecheck":     "typecheck",
+    "design":        "design",
+    "merge-preview": "merge",
+}
+
+
 def _revert_to_sit(issue_num: int, gate_name: str, output: str,
                    repo_name: Optional[str] = None,
                    repo_root: Optional[Path] = None) -> None:
     """Label the issue SIT and post a structured failure comment.
 
-    When failure-parsing helpers are available:
-    - Appends a ## Failure Summary table, ## Recommended Fix prose, and
-      ## Files to Inspect bulleted list to the GitHub comment.
-    - Writes a machine-readable JSON sidecar at
-      <repo-root>/.commander/runtime/last-failure-<issue>.json
+    Always calls record_failure() so the sidecar covers all gate failure classes.
+    When failure-parsing helpers are available, also appends structured tables.
     """
     truncated = output[:2000] if len(output) > 2000 else output
     comment = (
@@ -1433,16 +1440,34 @@ def _revert_to_sit(issue_num: int, gate_name: str, output: str,
         f"**{gate_name}** output:\n```\n{truncated}\n```"
     )
 
+    failure_class = _GATE_FAILURE_CLASS_MAP.get(gate_name, gate_name)
+    files_to_inspect: list[str] = []
+
     if _FAILURE_PARSING_AVAILABLE:
         try:
             effective_root = repo_root or REPO_ROOT
             failures = parse_failures(gate_name, output)
             comment += build_failure_block(gate_name, failures)
-            sidecar = write_sidecar(issue_num, gate_name, failures,
-                                    repo_root=effective_root)
-            print(f"  Wrote failure sidecar: {sidecar}")
+            files_to_inspect = sorted({
+                f"{f['file']}:{f['line']}" if f.get("line") else f["file"]
+                for f in failures if f.get("file")
+            })
         except Exception as e:
-            structured_log.error("failure_sidecar_write_error", f"failure parsing/sidecar failed: {e}", issue_num=issue_num, exc=str(e))
+            structured_log.error(
+                "failure_parsing_error",
+                f"failure parsing failed for {gate_name}: {e}",
+                issue_num=issue_num,
+                exc=str(e),
+            )
+
+    record_failure(
+        issue_num,
+        failure_class,
+        detail=truncated,
+        repo_root=repo_root,
+        summary=f"Issue #{issue_num}: {gate_name} gate failed",
+        files_to_inspect=files_to_inspect,
+    )
 
     _transition_safe(issue_num, _TicketState.SIT, actor="sprint_manager:gate_fail", repo_name=repo_name)
     try:
@@ -1530,12 +1555,14 @@ def _gate_lint(
     repo_name: Optional[str] = None,
     base_branch: str = "develop",
     gate_scope: str = "changed",
+    gate_frontend_lint: bool = True,
 ) -> GateResult:
     """Gate: run ruff (Python) and eslint/biome + prettier (JS/TS).
 
     gate_scope='changed' (default): only lint files changed relative to
     base_branch. gate_scope='full': run against whole codebase (legacy behaviour).
     Skips gracefully when tools are not installed or no relevant files changed.
+    gate_frontend_lint: when False, skips the frontend (JS/TS) lint portion.
     """
     if skip:
         print("  [gate:lint] skipped")
@@ -1586,23 +1613,26 @@ def _gate_lint(
                             issue_num=issue_num)
 
     # ── Frontend lint via eslint/biome + prettier ──────────────────────────────
-    if gate_scope == "full":
-        js_ts_files_for_fe: list[str] = ["."]
+    if not gate_frontend_lint:
+        print("  [gate:lint] frontend lint disabled (COMMANDER_GATE_FRONTEND_LINT=0)")
     else:
-        js_ts_files_for_fe = _changed_js_ts_files(base_branch, cwd=worktester_dashboard)
+        if gate_scope == "full":
+            js_ts_files_for_fe: list[str] = ["."]
+        else:
+            js_ts_files_for_fe = _changed_js_ts_files(base_branch, cwd=worktester_dashboard)
 
-    if js_ts_files_for_fe:
-        fe_passed, fe_output = _run_frontend_lint(
-            issue_num, worktester_dashboard, js_ts_files_for_fe, gate_scope
-        )
-        combined += fe_output
-        if fe_output.strip():
-            any_ran = True
-        if not fe_passed:
-            _revert_to_sit(issue_num, "lint", combined, repo_name=repo_name)
-            return GateResult(gate="lint", passed=False, output=combined)
-    else:
-        print("  [gate:lint] no JS/TS files changed — frontend lint skipped")
+        if js_ts_files_for_fe:
+            fe_passed, fe_output = _run_frontend_lint(
+                issue_num, worktester_dashboard, js_ts_files_for_fe, gate_scope
+            )
+            combined += fe_output
+            if fe_output.strip():
+                any_ran = True
+            if not fe_passed:
+                _revert_to_sit(issue_num, "lint", combined, repo_name=repo_name)
+                return GateResult(gate="lint", passed=False, output=combined)
+        else:
+            print("  [gate:lint] no JS/TS files changed — frontend lint skipped")
 
     if not any_ran:
         print("  [gate:lint] no lintable files changed — skipped")
@@ -1922,6 +1952,7 @@ def _run_quality_gates(
     gate_merge_preview: bool,
     gate_typecheck: bool = True,
     gate_design: bool = True,
+    gate_frontend_lint: bool = True,
     target_branch: str = "develop",
     repo_name: Optional[str] = None,
     base_branch: str = "develop",
@@ -1960,6 +1991,7 @@ def _run_quality_gates(
         repo_name=repo_name,
         base_branch=base_branch,
         gate_scope=gate_scope,
+        gate_frontend_lint=gate_frontend_lint,
     )
     results.append(r_lint)
     if not r_lint.passed:
@@ -2124,6 +2156,7 @@ def handle_post_tester(
     gate_merge_preview: bool,
     gate_typecheck: bool = True,
     gate_design: bool = True,
+    gate_frontend_lint: bool = True,
     worktester_root: Optional[Path] = None,
     worktester_dashboard: Optional[Path] = None,
     target_branch: str = "develop",
@@ -2278,6 +2311,7 @@ def handle_post_tester(
         ]
         _transition_safe(issue_num, _TicketState.UAT, actor="sprint_manager", repo_name=eff_repo)
         _post_success_comment(issue_num, all_skipped, repo_name=eff_repo)
+        _delete_failure_sidecar(issue_num)
         if already_merged_by_tester:
             return True, f"Issue #{issue_num}: merge already done by tester, UAT applied, comment posted", None
         return True, f"Issue #{issue_num}: all gates skipped, merged into {target_branch}, UAT applied", None
@@ -2293,6 +2327,7 @@ def handle_post_tester(
         gate_merge_preview=gate_merge_preview,
         gate_typecheck=gate_typecheck,
         gate_design=gate_design,
+        gate_frontend_lint=gate_frontend_lint,
         target_branch=target_branch,
         repo_name=eff_repo,
         base_branch=base_branch,
@@ -2314,6 +2349,7 @@ def handle_post_tester(
             _call_finish_feature(issue_num, wt_root, target_branch=target_branch, repo_name=eff_repo, cfg=cfg, sprint_label=sprint_label)
         _transition_safe(issue_num, _TicketState.UAT, actor="sprint_manager", repo_name=eff_repo)
         _post_success_comment(issue_num, results, repo_name=eff_repo)
+        _delete_failure_sidecar(issue_num)
         if already_merged_by_tester:
             return True, f"Issue #{issue_num}: all gates passed, merge already done by tester, UAT applied", None
         return True, f"Issue #{issue_num}: all gates passed, merged into {target_branch}, UAT applied", None
@@ -2339,17 +2375,14 @@ def handle_post_tester(
 def _build_failure_suffix(issue_num: int, repo_root: Optional[Path] = None) -> str:
     """Read the JSON failure sidecar for issue_num and return a prompt suffix.
 
-    Returns an empty string when:
-    - failure-parsing helpers are not available
-    - the sidecar does not exist (backward-compat: no error, just generic prompt)
+    Handles both the new unified schema (failure_class / detail) and the legacy
+    gate schema (gate / failures list) written by write_sidecar.
 
-    Logs a note when the sidecar is not found.
+    Returns an empty string when no sidecar exists.
     """
-    if not _FAILURE_PARSING_AVAILABLE:
-        return ""
-
     effective_root = repo_root or REPO_ROOT
-    sc_path = sidecar_path(issue_num, repo_root=effective_root)
+    # Resolve sidecar path independently of _FAILURE_PARSING_AVAILABLE
+    sc_path = effective_root / ".commander" / "runtime" / f"last-failure-{issue_num}.json"
 
     if not sc_path.exists():
         print(f"  [retry] failure sidecar not found at {sc_path} — using generic prompt")
@@ -2358,40 +2391,164 @@ def _build_failure_suffix(issue_num: int, repo_root: Optional[Path] = None) -> s
     try:
         data = json.loads(sc_path.read_text(encoding="utf-8"))
     except Exception as e:
-        structured_log.warn("failure_sidecar_read_error", f"could not read failure sidecar: {e}", sidecar_path=str(sc_path), exc=str(e))
+        structured_log.warn(
+            "failure_sidecar_read_error",
+            f"could not read failure sidecar: {e}",
+            sidecar_path=str(sc_path),
+            exc=str(e),
+        )
         return ""
 
-    gate      = data.get("gate", "unknown")
-    failures  = data.get("failures", [])
+    failure_class    = data.get("failure_class")
+    summary          = data.get("summary", "")
+    detail           = data.get("detail", "")
     files_to_inspect = data.get("files_to_inspect", [])
 
-    if not failures:
-        return ""
+    # Legacy schema: gate + structured failures list
+    gate     = data.get("gate", "")
+    failures = data.get("failures", [])
 
-    lines = [
-        f"\n\nPrevious gate '{gate}' failed. Fix the following before re-submitting:"
-    ]
-    for f in failures[:10]:  # cap at 10 to keep prompt concise
-        loc   = f.get("location", "")
-        ftype = f.get("type", "")
-        msg   = f.get("issue", "")
-        test  = f.get("test", "")
-        entry = f"- {ftype} at {loc}: {msg}"
-        if test:
-            entry += f" (test: {test})"
-        lines.append(entry)
+    lines: list[str] = []
+
+    if failure_class:
+        # New unified schema
+        lines.append(f"\n\nPrevious failure class: {failure_class}.")
+        if summary:
+            lines.append(f"Summary: {summary}")
+        if detail:
+            lines.append(f"\nDetail:\n{detail}")
+    elif failures:
+        # Legacy gate schema
+        lines.append(f"\n\nPrevious gate '{gate}' failed. Fix the following before re-submitting:")
+        for f in failures:  # no cap — all failures surfaced
+            loc   = f.get("location", "")
+            ftype = f.get("type", "")
+            msg   = f.get("issue", "")
+            test  = f.get("test", "")
+            entry = f"- {ftype} at {loc}: {msg}"
+            if test:
+                entry += f" (test: {test})"
+            lines.append(entry)
+    else:
+        return ""
 
     if files_to_inspect:
         lines.append("\nFiles requiring changes:")
-        for fi in files_to_inspect[:10]:
+        for fi in files_to_inspect:
             lines.append(f"  {fi}")
 
     return "\n".join(lines)
 
 
+# ── unified failure-recording chokepoint ─────────────────────────────────────
+
+def _build_crash_detail(log_path: Path, exit_code: Optional[int] = None,
+                        signal: Optional[str] = None, tail_lines: int = 50) -> str:
+    """Return a detail string for non-gate failures: log tail + exit code/signal.
+
+    Works even when the log file does not exist.
+    """
+    parts: list[str] = []
+    try:
+        text = log_path.read_text(encoding="utf-8", errors="replace")
+        lines = text.splitlines()
+        tail = lines[-tail_lines:] if len(lines) > tail_lines else lines
+        if tail:
+            parts.append("Log tail:\n" + "\n".join(tail))
+    except Exception:
+        pass
+
+    if exit_code is not None:
+        parts.append(f"Exit code: {exit_code}")
+    if signal:
+        parts.append(f"Signal: {signal}")
+
+    return "\n".join(parts) if parts else "(no detail available)"
+
+
+def record_failure(
+    issue_num: int,
+    failure_class: str,
+    detail: str,
+    repo_root: Optional[Path] = None,
+    summary: Optional[str] = None,
+    files_to_inspect: Optional[list] = None,
+) -> Optional[Path]:
+    """Write a JSON failure sidecar for any failure class.
+
+    Works independently of _FAILURE_PARSING_AVAILABLE — uses a direct path
+    construction so it never depends on the optional post_test_report import.
+
+    Returns the sidecar path on success, None on write error.
+    """
+    effective_root = repo_root or REPO_ROOT
+    try:
+        runtime_dir = effective_root / ".commander" / "runtime"
+        runtime_dir.mkdir(parents=True, exist_ok=True)
+        sc_path = runtime_dir / f"last-failure-{issue_num}.json"
+
+        payload = {
+            "issue":            issue_num,
+            "failure_class":    failure_class,
+            "summary":          summary or f"Issue #{issue_num}: {failure_class} failure",
+            "detail":           detail,
+            "files_to_inspect": files_to_inspect or [],
+            "run_id":           os.environ.get("COMMANDER_RUN_ID"),
+            "timestamp":        datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        }
+        sc_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        print(f"  [failure] Wrote sidecar ({failure_class}): {sc_path}", flush=True)
+        return sc_path
+    except Exception as e:
+        structured_log.error(
+            "record_failure_error",
+            f"failed to write failure sidecar for issue #{issue_num}: {e}",
+            issue_num=issue_num,
+            failure_class=failure_class,
+            exc=str(e),
+        )
+        return None
+
+
+def _delete_failure_sidecar(issue_num: int, repo_root: Optional[Path] = None) -> None:
+    """Delete the failure sidecar for issue_num if it exists (success path)."""
+    effective_root = repo_root or REPO_ROOT
+    sc_path = effective_root / ".commander" / "runtime" / f"last-failure-{issue_num}.json"
+    try:
+        if sc_path.exists():
+            sc_path.unlink()
+            print(f"  [failure] Deleted sidecar on success: {sc_path}", flush=True)
+    except Exception as e:
+        structured_log.warn(
+            "sidecar_delete_error",
+            f"could not delete failure sidecar for #{issue_num}: {e}",
+            issue_num=issue_num,
+            exc=str(e),
+        )
+
+
 def _issue_log_path(issue_num: int, cfg: Optional["SprintConfig"] = None) -> Path:
     logs_dir = cfg.logs_dir if cfg is not None else (DASHBOARD_DIR / "logs")
     return logs_dir / f"sprint-issue-{issue_num}.log"
+
+
+def _design_docs_guard(cwd_path: "Path") -> "Optional[str]":
+    """Return None when both PRODUCT.md and DESIGN.md exist; error message otherwise.
+
+    Both files are required so any frontend ticket dispatched to the coder always
+    has a design vocabulary to reference (AC-5, issue #621).
+    """
+    missing = [
+        doc for doc in ("PRODUCT.md", "DESIGN.md")
+        if not (Path(cwd_path) / doc).exists()
+    ]
+    if not missing:
+        return None
+    return (
+        f"Design docs missing in coder worktree ({cwd_path}): {', '.join(missing)}. "
+        "Create them (or run `npx impeccable skills install` and scaffold via "
+        "`node .github/skills/impeccable/scripts/context.mjs`) before dispatching."
+    )
 
 
 def _dispatch_coder(
@@ -2404,6 +2561,7 @@ def _dispatch_coder(
     rate_limit_events: Optional[list] = None,
     on_running: Optional[object] = None,
     sprint_label: Optional[str] = None,
+    prior_failures: Optional[list] = None,
 ) -> tuple[bool, Optional[str]]:
     """Dispatch a coder agent for the issue.  Returns (ok, failure_category).
 
@@ -2416,10 +2574,24 @@ def _dispatch_coder(
 
     on_running: optional zero-argument callable invoked immediately after the
     subprocess is spawned (before proc.wait) to signal coder_running status.
+
+    prior_failures: accumulated failure records from the fix-loop (issue #618).
+    When provided, an accumulated context suffix is built from these records
+    instead of reading the single-failure sidecar.
     """
     eff_repo = repo_name or (cfg.repo_name if cfg else None)
     api_url  = cfg.api_url if cfg else None
     cwd_path = cfg.worktree_coder if cfg else WORKTESTER_DASHBOARD
+
+    guard_err = _design_docs_guard(cwd_path)
+    if guard_err:
+        structured_log.error(
+            "design_docs_missing",
+            f"[coder] design docs guard failed for issue #{issue_num}: {guard_err}",
+            issue_num=issue_num,
+        )
+        record_failure(issue_num, "design_docs_missing", detail=guard_err)
+        return False, "design_docs_missing"
 
     print(f"  Dispatching coder for issue #{issue_num} ...", flush=True)
     try:
@@ -2495,8 +2667,18 @@ def _dispatch_coder(
             " label-mutation command."
         )
 
-    # Inject failure context from sidecar if available (AC: sprint manager reads sidecar)
-    failure_suffix = _build_failure_suffix(issue_num)
+    # Inject failure context: accumulated history (fix-loop, issue #618) or sidecar fallback
+    if prior_failures:
+        _ctx_lines = [
+            f"\n\nThis is fix attempt {len(prior_failures) + 1}. Prior attempts failed:"
+        ]
+        for _h in prior_failures:
+            _cat = _h.get("category", "?")
+            _detail = _h.get("reason") or _h.get("summary") or ""
+            _ctx_lines.append(f"  - Attempt {_h.get('attempt', 0) + 1}: {_cat}: {_detail}")
+        failure_suffix = "\n".join(_ctx_lines)
+    else:
+        failure_suffix = _build_failure_suffix(issue_num)
     if failure_suffix:
         prompt = prompt + failure_suffix
 
@@ -2612,6 +2794,12 @@ def _dispatch_coder(
                 cfg=cfg,
                 repo=eff_repo,
             )
+            record_failure(
+                issue_num,
+                "hang",
+                detail=_build_crash_detail(log_path, signal="SIGKILL"),
+                summary=f"Issue #{issue_num}: coder hung for {HANG_KILL_SECS//60} minutes and was killed",
+            )
             return False, FailureCategory.HANG
 
         if rc == 0:
@@ -2655,9 +2843,21 @@ def _dispatch_coder(
                 })
             return False, FailureCategory.RETRY_EXHAUSTED
 
+        record_failure(
+            issue_num,
+            "crash",
+            detail=_build_crash_detail(log_path, exit_code=rc),
+            summary=f"Issue #{issue_num}: coder exited with code {rc}",
+        )
         return False, FailureCategory.CRASH
 
     # Should not be reached, but satisfy the type checker
+    record_failure(
+        issue_num,
+        "crash",
+        detail=_build_crash_detail(log_path, exit_code=-1),
+        summary=f"Issue #{issue_num}: coder dispatch loop exhausted unexpectedly",
+    )
     return False, FailureCategory.CRASH
 
 
@@ -4290,11 +4490,23 @@ def _dispatch_reviewer(
     if detector.killed:
         structured_log.warn("subprocess_killed", "[reviewer] reviewer hung and was killed", subprocess="reviewer")
         state.reviewer_status = "failed"
+        record_failure(
+            0,
+            "reviewer",
+            detail=_build_crash_detail(log_path, signal="SIGKILL"),
+            summary="Sprint reviewer hung and was killed",
+        )
         return
 
     if rc != 0:
         structured_log.error("subprocess_nonzero_exit", f"[reviewer] reviewer exited with code {rc}", subprocess="reviewer", exit_code=rc)
         state.reviewer_status = "failed"
+        record_failure(
+            0,
+            "reviewer",
+            detail=_build_crash_detail(log_path, exit_code=rc),
+            summary=f"Sprint reviewer exited with code {rc}",
+        )
         return
 
     # Parse exit line: "Reviewer complete: B blockers, S suggestions, I nits, F follow-up tickets opened"
@@ -4653,6 +4865,7 @@ def run_sprint(
     gate_merge_preview: bool,
     gate_typecheck: bool = True,
     gate_design: bool = True,
+    gate_frontend_lint: bool = True,
     alert_modes: Optional[list[str]] = None,
     repo_name: Optional[str] = None,
     dry_run: bool = False,
@@ -5073,248 +5286,316 @@ def run_sprint(
         state.save(state_path)
         _post_sprint_status(state, api_url=api_url)
 
-        if _skip_coder:
-            print(f"  [rerun] SIT ticket: dispatching tester directly for #{num}")
-            try:
-                structured_log.event(
-                    "issue.rerun_tester_direct",
-                    run_id=_run_id,
-                    issue_num=num,
-                    sprint_label=label,
-                    agent_role="sprint",
-                )
-            except Exception:
-                pass
-        else:
-            # -- Dispatch coder --
-            issue_state.set_agent_status("coder_dispatched")
-            issue_state.coder_started_at = issue_state.status_changed_at
-            state.save(state_path)
-            _post_sprint_status(state, api_url=api_url)
+        # -- Bounded fix-loop: coder → tester → gates (issue #618) ──────────────
+        # K read from COMMANDER_MAX_FIX_ROUNDS (default 3). _skip_coder path
+        # (rerun-tester-direct) runs tester+gates once inside the same loop body
+        # but never re-dispatches coder on logic failure.
+        _max_fix_rounds  = int(os.environ.get("COMMANDER_MAX_FIX_ROUNDS", "3"))
+        _fix_rounds      = 1 if _skip_coder else _max_fix_rounds
+        _fix_history: list[dict] = []       # per-attempt failure records
+        _last_failure_sig: Optional[str] = None  # for consecutive-dup detection
+        _gate_passed  = False               # gate passed → loop exits success
+        _infra_exit   = False               # infra failure → skip to next issue
+        _loop_aborted = False               # dup/early-abort → RETRY_EXHAUSTED
 
-            # AC-5 (issue #311): apply in-progress label when coder starts so the
-            # board reflects active work during coding.  Best-effort — never blocks
-            # the sprint on label failure.
-            _transition_safe(num, _TicketState.IN_PROGRESS, actor="sprint_manager", repo_name=eff_repo)
+        for _fix_attempt in range(_fix_rounds):
 
-            def _on_coder_running(
-                _is=issue_state, _st=state, _sp=state_path, _api=api_url,
-                _lbl=label, _n=num, _sd=_eff_sprints_dir,
-            ) -> None:
-                _is.set_agent_status("coder_running")
-                _neon_ticket_status(_lbl, _n, "running", _sd)
-                _st.save(_sp)
-                _post_sprint_status(_st, api_url=_api)
-
-            _coder_t0 = time.monotonic()
-            coder_ok, coder_category = _dispatch_coder(
-                num, alert_modes, sprint_branch=target_branch, repo_name=eff_repo, cfg=cfg,
-                chosen_port=chosen_port, rate_limit_events=state.rate_limit_events,
-                on_running=_on_coder_running, sprint_label=label,
-            )
-            _coder_elapsed = time.monotonic() - _coder_t0
-            _coder_m, _coder_s = divmod(int(_coder_elapsed), 60)
-            print(f"  Total time used on coder dispatch: {_coder_m}m {_coder_s}s")
-            try:
-                structured_log.event(
-                    "coder.done",
-                    run_id=_run_id,
-                    issue_num=num,
-                    sprint_label=label,
-                    agent_role="coder",
-                    elapsed_secs=round(_coder_elapsed),
-                    success=coder_ok,
-                )
-            except Exception:
-                pass
-
-            if not coder_ok:
-                category = coder_category or FailureCategory.CRASH
-                if category == FailureCategory.RETRY_EXHAUSTED:
-                    reason = "Subscription rate limit exhausted"
-                else:
-                    reason = f"Coder failed with category {category}"
-                structured_log.error("coder_failed", f"coder failed for #{num}: {category}", issue_num=num, category=category)
+            if _skip_coder:
+                print(f"  [rerun] SIT ticket: dispatching tester directly for #{num}")
                 try:
                     structured_log.event(
-                        "coder.failed",
+                        "issue.rerun_tester_direct",
+                        run_id=_run_id,
+                        issue_num=num,
+                        sprint_label=label,
+                        agent_role="sprint",
+                    )
+                except Exception:
+                    pass
+            else:
+                # -- Dispatch coder --
+                issue_state.set_agent_status("coder_dispatched")
+                issue_state.coder_started_at = issue_state.status_changed_at
+                state.save(state_path)
+                _post_sprint_status(state, api_url=api_url)
+
+                # AC-5 (issue #311): apply in-progress label when coder starts so the
+                # board reflects active work during coding.  Best-effort — never blocks
+                # the sprint on label failure.
+                _transition_safe(num, _TicketState.IN_PROGRESS, actor="sprint_manager", repo_name=eff_repo)
+
+                def _on_coder_running(
+                    _is=issue_state, _st=state, _sp=state_path, _api=api_url,
+                    _lbl=label, _n=num, _sd=_eff_sprints_dir,
+                ) -> None:
+                    _is.set_agent_status("coder_running")
+                    _neon_ticket_status(_lbl, _n, "running", _sd)
+                    _st.save(_sp)
+                    _post_sprint_status(_st, api_url=_api)
+
+                _coder_t0 = time.monotonic()
+                coder_ok, coder_category = _dispatch_coder(
+                    num, alert_modes, sprint_branch=target_branch, repo_name=eff_repo, cfg=cfg,
+                    chosen_port=chosen_port, rate_limit_events=state.rate_limit_events,
+                    on_running=_on_coder_running, sprint_label=label,
+                    prior_failures=_fix_history if _fix_history else None,
+                )
+                _coder_elapsed = time.monotonic() - _coder_t0
+                _coder_m, _coder_s = divmod(int(_coder_elapsed), 60)
+                print(f"  Total time used on coder dispatch: {_coder_m}m {_coder_s}s")
+                try:
+                    structured_log.event(
+                        "coder.done",
                         run_id=_run_id,
                         issue_num=num,
                         sprint_label=label,
                         agent_role="coder",
-                        category=category,
-                        reason=reason,
+                        elapsed_secs=round(_coder_elapsed),
+                        success=coder_ok,
                     )
                 except Exception:
                     pass
-                issue_state.set_agent_status("failed")
-                issue_state.coder_finished_at = issue_state.status_changed_at
-                issue_state.failure_reason    = reason
-                issue_state.status            = "skipped"
-                issue_state.skip_reason       = reason
-                issue_state.category          = category
-                summary.skipped.append(f"#{num} (coder failed)")
-                dispatch_alerts(
-                    alert_modes,
-                    title=f"Issue #{num} skipped: {category}",
-                    body=reason,
-                    issue_num=num,
-                    category=category,
-                    cfg=cfg,
-                    repo=eff_repo,
-                )
-                if category in _LOGIC_FAILURE_CATEGORIES:
-                    _transition_safe(num, _TicketState.NEEDS_REWORK, actor="sprint_manager", repo_name=eff_repo)
-                _neon_ticket_status(label, num, "failed", _eff_sprints_dir)
-                state.save(state_path)
-                _post_sprint_status(state, api_url=api_url, project=eff_repo)
-                continue
 
-            # -- Detect CODER_NO_WORK: coder exited 0 but created no feature branch --
-            if _find_feature_branch(num) is None:
-                category = FailureCategory.CODER_NO_WORK
-                reason = f"Coder exited 0 but no feature/{num}-* branch was created"
-                print(f"  {reason} -- skipping to next issue")
-                issue_state.set_agent_status("failed")
-                issue_state.coder_finished_at = issue_state.status_changed_at
-                issue_state.failure_reason    = reason
-                issue_state.status            = "skipped"
-                issue_state.skip_reason       = reason
-                issue_state.category          = category
-                summary.skipped.append(f"#{num} (coder no work)")
-                dispatch_alerts(
-                    alert_modes,
-                    title=f"Issue #{num} skipped: {category}",
-                    body=reason,
-                    issue_num=num,
-                    category=category,
-                    cfg=cfg,
-                    repo=eff_repo,
-                )
-                if category in _LOGIC_FAILURE_CATEGORIES:
-                    _transition_safe(num, _TicketState.NEEDS_REWORK, actor="sprint_manager", repo_name=eff_repo)
-                _neon_ticket_status(label, num, "failed", _eff_sprints_dir)
-                state.save(state_path)
-                _post_sprint_status(state, api_url=api_url, project=eff_repo)
-                continue
+                if not coder_ok:
+                    category = coder_category or FailureCategory.CRASH
+                    if category == FailureCategory.RETRY_EXHAUSTED:
+                        reason = "Subscription rate limit exhausted"
+                    else:
+                        reason = f"Coder failed with category {category}"
+                    structured_log.error("coder_failed", f"coder failed for #{num}: {category}", issue_num=num, category=category)
+                    try:
+                        structured_log.event(
+                            "coder.failed",
+                            run_id=_run_id,
+                            issue_num=num,
+                            sprint_label=label,
+                            agent_role="coder",
+                            category=category,
+                            reason=reason,
+                        )
+                    except Exception:
+                        pass
 
-            # -- Lifecycle: coder_done --
-            issue_state.set_agent_status("coder_done")
-            issue_state.coder_finished_at = issue_state.status_changed_at
+                    if category in _LOGIC_FAILURE_CATEGORIES:
+                        # Logic failure: record, check for consecutive dup, retry
+                        record_failure(
+                            num, category,
+                            detail=_build_crash_detail(_issue_log_path(num, cfg=cfg)),
+                        )
+                        _sig = category
+                        _fix_history.append({
+                            "attempt": _fix_attempt, "category": category, "reason": reason,
+                        })
+                        if _sig == _last_failure_sig:
+                            print(
+                                f"  [fix-loop] consecutive identical coder failure ({_sig}): "
+                                f"aborting early", flush=True,
+                            )
+                            _loop_aborted = True
+                            break
+                        _last_failure_sig = _sig
+                        print(
+                            f"  [fix-loop] coder logic failure ({_sig}), "
+                            f"attempt {_fix_attempt + 1}/{_fix_rounds}: will retry",
+                            flush=True,
+                        )
+                        continue
+
+                    # Infra failure: existing path, no retry
+                    issue_state.set_agent_status("failed")
+                    issue_state.coder_finished_at = issue_state.status_changed_at
+                    issue_state.failure_reason    = reason
+                    issue_state.status            = "skipped"
+                    issue_state.skip_reason       = reason
+                    issue_state.category          = category
+                    summary.skipped.append(f"#{num} (coder failed)")
+                    dispatch_alerts(
+                        alert_modes,
+                        title=f"Issue #{num} skipped: {category}",
+                        body=reason,
+                        issue_num=num,
+                        category=category,
+                        cfg=cfg,
+                        repo=eff_repo,
+                    )
+                    _neon_ticket_status(label, num, "failed", _eff_sprints_dir)
+                    state.save(state_path)
+                    _post_sprint_status(state, api_url=api_url, project=eff_repo)
+                    _infra_exit = True
+                    break
+
+                # -- Detect CODER_NO_WORK: coder exited 0 but created no feature branch --
+                if _find_feature_branch(num) is None:
+                    category = FailureCategory.CODER_NO_WORK
+                    reason   = f"Coder exited 0 but no feature/{num}-* branch was created"
+                    print(f"  {reason}")
+                    # Logic failure: record, check dup, retry
+                    record_failure(num, category, detail=reason)
+                    _sig = category
+                    _fix_history.append({
+                        "attempt": _fix_attempt, "category": category, "reason": reason,
+                    })
+                    if _sig == _last_failure_sig:
+                        print(
+                            f"  [fix-loop] consecutive identical CODER_NO_WORK: aborting early",
+                            flush=True,
+                        )
+                        _loop_aborted = True
+                        break
+                    _last_failure_sig = _sig
+                    print(
+                        f"  [fix-loop] CODER_NO_WORK, "
+                        f"attempt {_fix_attempt + 1}/{_fix_rounds}: will retry",
+                        flush=True,
+                    )
+                    continue
+
+                # -- Lifecycle: coder_done --
+                issue_state.set_agent_status("coder_done")
+                issue_state.coder_finished_at = issue_state.status_changed_at
+                state.save(state_path)
+                _post_sprint_status(state, api_url=api_url)
+
+            # Transition to SIT before dispatching the tester (issue #509).
+            _transition_safe(num, _TicketState.SIT, actor="sprint_manager", repo_name=eff_repo)
+
+            # -- Lifecycle: tester_dispatched --
+            issue_state.set_agent_status("tester_dispatched")
+            issue_state.tester_started_at = issue_state.status_changed_at
             state.save(state_path)
             _post_sprint_status(state, api_url=api_url)
 
-        # Transition to SIT before dispatching the tester (issue #509).
-        _transition_safe(num, _TicketState.SIT, actor="sprint_manager", repo_name=eff_repo)
+            def _on_tester_running(
+                _is=issue_state, _st=state, _sp=state_path, _api=api_url
+            ) -> None:
+                _is.set_agent_status("tester_running")
+                _st.save(_sp)
+                _post_sprint_status(_st, api_url=_api)
 
-        # -- Lifecycle: tester_dispatched --
-        issue_state.set_agent_status("tester_dispatched")
-        issue_state.tester_started_at = issue_state.status_changed_at
-        state.save(state_path)
-        _post_sprint_status(state, api_url=api_url)
-
-        def _on_tester_running(
-            _is=issue_state, _st=state, _sp=state_path, _api=api_url
-        ) -> None:
-            _is.set_agent_status("tester_running")
-            _st.save(_sp)
-            _post_sprint_status(_st, api_url=_api)
-
-        # -- Dispatch tester --
-        _tester_t0 = time.monotonic()
-        tester_rc, hang_category = _dispatch_tester(
-            num, alert_modes, sprint_branch=target_branch, repo_name=eff_repo, cfg=cfg,
-            chosen_port=chosen_port, rate_limit_events=state.rate_limit_events,
-            on_running=_on_tester_running, sprint_label=label,
-        )
-        _tester_elapsed = time.monotonic() - _tester_t0
-        _tester_m, _tester_s = divmod(int(_tester_elapsed), 60)
-        print(f"  Total time used on tester dispatch: {_tester_m}m {_tester_s}s")
-        try:
-            structured_log.event(
-                "tester.done",
-                run_id=_run_id,
-                issue_num=num,
-                sprint_label=label,
-                agent_role="tester",
-                elapsed_secs=round(_tester_elapsed),
-                exit_code=tester_rc,
+            # -- Dispatch tester --
+            _tester_t0 = time.monotonic()
+            tester_rc, hang_category = _dispatch_tester(
+                num, alert_modes, sprint_branch=target_branch, repo_name=eff_repo, cfg=cfg,
+                chosen_port=chosen_port, rate_limit_events=state.rate_limit_events,
+                on_running=_on_tester_running, sprint_label=label,
             )
-        except Exception:
-            pass
+            _tester_elapsed = time.monotonic() - _tester_t0
+            _tester_m, _tester_s = divmod(int(_tester_elapsed), 60)
+            print(f"  Total time used on tester dispatch: {_tester_m}m {_tester_s}s")
+            try:
+                structured_log.event(
+                    "tester.done",
+                    run_id=_run_id,
+                    issue_num=num,
+                    sprint_label=label,
+                    agent_role="tester",
+                    elapsed_secs=round(_tester_elapsed),
+                    exit_code=tester_rc,
+                )
+            except Exception:
+                pass
 
-        if hang_category == FailureCategory.HANG:
-            issue_state.set_agent_status("failed")
-            issue_state.tester_finished_at = issue_state.status_changed_at
-            issue_state.failure_reason     = "Tester HANG detected"
-            issue_state.status             = "skipped"
-            issue_state.skip_reason        = "Tester HANG detected"
-            issue_state.category           = FailureCategory.HANG
-            summary.skipped.append(f"#{num} (tester hang)")
-            _neon_ticket_status(label, num, "failed", _eff_sprints_dir)
-            state.save(state_path)
-            _post_sprint_status(state, api_url=api_url, project=eff_repo)
-            continue
+            if hang_category == FailureCategory.HANG:
+                issue_state.set_agent_status("failed")
+                issue_state.tester_finished_at = issue_state.status_changed_at
+                issue_state.failure_reason     = "Tester HANG detected"
+                issue_state.status             = "skipped"
+                issue_state.skip_reason        = "Tester HANG detected"
+                issue_state.category           = FailureCategory.HANG
+                summary.skipped.append(f"#{num} (tester hang)")
+                _neon_ticket_status(label, num, "failed", _eff_sprints_dir)
+                state.save(state_path)
+                _post_sprint_status(state, api_url=api_url, project=eff_repo)
+                _infra_exit = True
+                break
 
-        if hang_category == FailureCategory.RETRY_EXHAUSTED:
-            issue_state.set_agent_status("failed")
+            if hang_category == FailureCategory.RETRY_EXHAUSTED:
+                issue_state.set_agent_status("failed")
+                issue_state.tester_finished_at = issue_state.status_changed_at
+                issue_state.failure_reason     = "Subscription rate limit exhausted"
+                issue_state.status             = "skipped"
+                issue_state.skip_reason        = "Subscription rate limit exhausted"
+                issue_state.category           = FailureCategory.RETRY_EXHAUSTED
+                summary.skipped.append(f"#{num} (rate limit exhausted)")
+                _neon_ticket_status(label, num, "failed", _eff_sprints_dir)
+                state.save(state_path)
+                _post_sprint_status(state, api_url=api_url)
+                _infra_exit = True
+                break
+
+            # -- Lifecycle: tester_done --
+            issue_state.set_agent_status("tester_done")
             issue_state.tester_finished_at = issue_state.status_changed_at
-            issue_state.failure_reason     = "Subscription rate limit exhausted"
-            issue_state.status             = "skipped"
-            issue_state.skip_reason        = "Subscription rate limit exhausted"
-            issue_state.category           = FailureCategory.RETRY_EXHAUSTED
-            summary.skipped.append(f"#{num} (rate limit exhausted)")
-            _neon_ticket_status(label, num, "failed", _eff_sprints_dir)
             state.save(state_path)
             _post_sprint_status(state, api_url=api_url)
-            continue
 
-        # -- Lifecycle: tester_done --
-        issue_state.set_agent_status("tester_done")
-        issue_state.tester_finished_at = issue_state.status_changed_at
-        state.save(state_path)
-        _post_sprint_status(state, api_url=api_url)
-
-        # -- Post-tester gates --
-        merged, summary_line, gate_category = handle_post_tester(
-            issue_num          = num,
-            tester_exit_code   = tester_rc,
-            skip_gates         = skip_gates,
-            gate_pytest        = gate_pytest,
-            gate_lint          = gate_lint,
-            gate_merge_preview = gate_merge_preview,
-            gate_typecheck     = gate_typecheck,
-            gate_design        = gate_design,
-            target_branch      = target_branch,
-            repo_name          = eff_repo,
-            cfg                = cfg,
-            base_branch        = target_branch or "develop",
-            gate_scope         = gate_scope,
-            documentor_enabled = cfg.documentor_enabled if cfg else False,
-            alert_modes        = alert_modes,
-            sprint_label       = label,
-        )
-        print(f"  {summary_line}")
-        try:
-            structured_log.event(
-                "issue.merged" if merged else "issue.skipped",
-                run_id=_run_id,
-                issue_num=num,
-                sprint_label=label,
-                agent_role="sprint",
-                summary_line=summary_line,
+            # -- Post-tester gates --
+            merged, summary_line, gate_category = handle_post_tester(
+                issue_num          = num,
+                tester_exit_code   = tester_rc,
+                skip_gates         = skip_gates,
+                gate_pytest        = gate_pytest,
+                gate_lint          = gate_lint,
+                gate_merge_preview = gate_merge_preview,
+                gate_typecheck     = gate_typecheck,
+                gate_design        = gate_design,
+                gate_frontend_lint = gate_frontend_lint,
+                target_branch      = target_branch,
+                repo_name          = eff_repo,
+                cfg                = cfg,
+                base_branch        = target_branch or "develop",
+                gate_scope         = gate_scope,
+                documentor_enabled = cfg.documentor_enabled if cfg else False,
+                alert_modes        = alert_modes,
+                sprint_label       = label,
             )
-        except Exception:
-            pass
+            print(f"  {summary_line}")
+            try:
+                structured_log.event(
+                    "issue.merged" if merged else "issue.skipped",
+                    run_id=_run_id,
+                    issue_num=num,
+                    sprint_label=label,
+                    agent_role="sprint",
+                    summary_line=summary_line,
+                )
+            except Exception:
+                pass
 
-        _issue_tokens = issue_state.tokens_in + issue_state.tokens_out
-        if merged:
-            issue_state.set_agent_status("completed")
-            issue_state.status = "done"
-            summary.merged.append(f"#{num}")
-            _neon_ticket_status(label, num, "done", _eff_sprints_dir, total_tokens=_issue_tokens)
-        else:
+            _issue_tokens = issue_state.tokens_in + issue_state.tokens_out
+            if merged:
+                issue_state.set_agent_status("completed")
+                issue_state.status = "done"
+                summary.merged.append(f"#{num}")
+                _neon_ticket_status(label, num, "done", _eff_sprints_dir, total_tokens=_issue_tokens)
+                _gate_passed = True
+                break
+
+            # Gate failed
             category = gate_category or FailureCategory.CRASH
+            if not _skip_coder and category in _LOGIC_FAILURE_CATEGORIES:
+                # Logic gate failure: record, check dup, retry coder
+                record_failure(num, category, detail=summary_line)
+                _sig = f"{category}:{summary_line[:80]}"
+                _fix_history.append({
+                    "attempt": _fix_attempt, "category": category, "summary": summary_line,
+                })
+                if _sig == _last_failure_sig:
+                    print(
+                        f"  [fix-loop] consecutive identical gate failure ({category}): "
+                        f"aborting early", flush=True,
+                    )
+                    _loop_aborted = True
+                    break
+                _last_failure_sig = _sig
+                print(
+                    f"  [fix-loop] gate logic failure ({category}), "
+                    f"attempt {_fix_attempt + 1}/{_fix_rounds}: will retry coder",
+                    flush=True,
+                )
+                continue
+
+            # Non-logic gate failure or _skip_coder path: final failure handling
             issue_state.set_agent_status("failed")
             issue_state.failure_reason  = summary_line
             issue_state.status          = "skipped"
@@ -5336,6 +5617,55 @@ def run_sprint(
             if category in _LOGIC_FAILURE_CATEGORIES:
                 _transition_safe(num, _TicketState.NEEDS_REWORK, actor="sprint_manager", repo_name=eff_repo)
             _neon_ticket_status(label, num, "failed", _eff_sprints_dir, total_tokens=_issue_tokens)
+            _infra_exit = True
+            break
+
+        else:
+            # for/else: all _fix_rounds completed without a break → loop exhausted
+            _loop_aborted = True
+
+        # -- After fix-loop: handle exhaustion/early-abort ────────────────────────
+        if _loop_aborted:
+            category = FailureCategory.RETRY_EXHAUSTED
+            history_str = "; ".join(
+                f"attempt {h['attempt'] + 1}: {h.get('category', '?')}"
+                for h in _fix_history
+            )
+            reason = (
+                f"Fix-loop exhausted after {len(_fix_history)} attempt(s)"
+                + (f" ({history_str})" if history_str else "")
+            )
+            print(f"  [fix-loop] {reason} — tagging needs-rework", flush=True)
+            try:
+                structured_log.error(
+                    "fix_loop_exhausted", reason,
+                    issue_num=num, fix_history=_fix_history,
+                )
+            except Exception:
+                pass
+            issue_state.set_agent_status("failed")
+            issue_state.failure_reason = reason
+            issue_state.status         = "skipped"
+            issue_state.skip_reason    = reason
+            issue_state.category       = category
+            summary.skipped.append(f"#{num} (fix-loop exhausted)")
+            dispatch_alerts(
+                alert_modes,
+                title=f"Issue #{num} skipped: {category}",
+                body=reason,
+                issue_num=num,
+                category=category,
+                cfg=cfg,
+                repo=eff_repo,
+            )
+            _transition_safe(num, _TicketState.NEEDS_REWORK, actor="sprint_manager", repo_name=eff_repo)
+            _neon_ticket_status(label, num, "failed", _eff_sprints_dir)
+            state.save(state_path)
+            _post_sprint_status(state, api_url=api_url, project=eff_repo)
+            continue
+
+        if _infra_exit:
+            continue
 
         elapsed = time.monotonic() - start_time
         state.wall_clock_secs = elapsed
@@ -5409,6 +5739,12 @@ def main() -> None:
         action=argparse.BooleanOptionalAction,
         default=True,
         help="Enable/disable lint gate — ruff + eslint/prettier (default: enabled)",
+    )
+    p.add_argument(
+        "--gate-frontend-lint",
+        action=argparse.BooleanOptionalAction,
+        default=os.environ.get("COMMANDER_GATE_FRONTEND_LINT", "1") != "0",
+        help="Enable/disable frontend lint portion — eslint/biome + prettier (default: enabled; env: COMMANDER_GATE_FRONTEND_LINT=0 to disable)",
     )
     p.add_argument(
         "--gate-design",
@@ -5650,6 +5986,7 @@ def main() -> None:
             gate_merge_preview   = args.gate_merge_preview,
             gate_typecheck       = args.gate_typecheck,
             gate_design          = args.gate_design,
+            gate_frontend_lint   = args.gate_frontend_lint,
             alert_modes          = alert_modes,
             repo_name            = eff_repo,
             dry_run              = args.dry_run,

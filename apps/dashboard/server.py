@@ -9026,6 +9026,7 @@ async def bulk_get_job(job_id: str):
     ]
     return {
         "job_id": job["job_id"],
+        "repo": job.get("repo", ""),
         "status": job["status"],
         "concurrency": job["concurrency"],
         "default_labels": job.get("default_labels", []),

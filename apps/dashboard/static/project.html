@@ -4206,6 +4206,24 @@
       background: var(--red-bg, #fee2e2); color: var(--red, #dc2626);
       font-size: 13px; display: flex; align-items: center; gap: 8px;
     }
+    /* ── Settings Sync card (issue #644) ── */
+    .gss-sync-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .gss-sync-last { font-size: 11px; color: var(--text-sub); margin-left: auto; }
+    .gss-sync-last span { font-family: var(--mono, monospace); }
+    .gss-diff-area { margin-top: 12px; }
+    .gss-diff-line {
+      font-family: var(--mono, monospace); font-size: 12px; line-height: 1.5;
+      padding: 2px 8px; border-radius: 3px; margin-bottom: 1px; white-space: pre-wrap;
+    }
+    .gss-diff-line--added   { background: rgba(34,197,94,.10); color: var(--green, #22c55e); }
+    .gss-diff-line--removed { background: rgba(239,68,68,.10); color: var(--red, #ef4444); }
+    .gss-diff-line--unchanged { color: var(--text-sub); }
+    .gss-diff-actions { display: flex; gap: 8px; margin-top: 10px; }
+    .gss-diff-empty {
+      font-size: 13px; color: var(--green, #22c55e); padding: 10px 0;
+      display: flex; align-items: center; gap: 7px;
+    }
+    .gss-sync-error { font-size: 12px; color: var(--red, #ef4444); margin-top: 8px; }
     /* legacy — kept for backward compat if any code still references */
     .sm-agent-row {
       display: flex; align-items: center; justify-content: space-between;
@@ -16745,9 +16763,46 @@ function _gssRender(data) {
       </div>
       <div class="gss-card-body">${secretRows}</div>
     </div>
+
+    <div class="gss-card" id="gss-sync-card">
+      <div class="gss-card-head">
+        <i class="ti ti-refresh" style="color:var(--text-muted)"></i>
+        <div>
+          <div class="gss-card-title">Settings Sync</div>
+          <div class="gss-card-sub">Sync settings between local files and Neon DB — diff preview before any write</div>
+        </div>
+      </div>
+      <div class="gss-card-body">
+        <div class="gss-sync-bar">
+          <button class="btn-ghost" id="gss-sync-upload-btn" onclick="_syncUpload()" type="button">
+            <i class="ti ti-upload"></i> Upload to DB
+          </button>
+          <button class="btn-ghost" id="gss-sync-fetch-btn" onclick="_syncFetch()" type="button">
+            <i class="ti ti-download"></i> Fetch from DB
+          </button>
+          <span class="gss-sync-last" id="gss-sync-last-synced" style="display:none">
+            Last synced: <span id="gss-sync-ts"></span>
+          </span>
+        </div>
+        <div id="gss-sync-diff-area" class="gss-diff-area" style="display:none">
+          <div id="gss-sync-diff-lines"></div>
+          <div class="gss-diff-actions" id="gss-sync-diff-actions">
+            <button class="btn-primary" id="gss-sync-confirm-btn" onclick="_syncConfirm()" type="button">
+              <i class="ti ti-check"></i> Confirm
+            </button>
+            <button class="btn-ghost" id="gss-sync-cancel-btn" onclick="_syncCancel()" type="button">Cancel</button>
+          </div>
+        </div>
+        <div id="gss-sync-already-in-sync" style="display:none" class="gss-diff-empty">
+          <i class="ti ti-circle-check"></i> Already in sync — no changes to apply.
+        </div>
+        <div id="gss-sync-error" class="gss-sync-error" style="display:none"></div>
+      </div>
+    </div>
   </div>`;
 
   document.getElementById('sm-body').innerHTML = html;
+  _syncLoadStatus();
 }
 
 async function openSettingsModal() {
@@ -16775,6 +16830,146 @@ function closeSettingsModal() {
 function _gssHideFeedback() {
   const el = document.getElementById('gss-feedback');
   if (el) { el.textContent = ''; el.className = 'gss-feedback'; }
+}
+
+// ── Settings Sync helpers (issue #644) ────────────────────────────────────────
+
+let _syncPendingDirection = null;
+
+async function _syncLoadStatus() {
+  try {
+    const resp = await fetch('/api/settings/sync/status');
+    if (!resp.ok) return;
+    const data = await resp.json();
+    _syncRenderStatus(data.last_synced);
+  } catch (_) {}
+}
+
+function _syncRenderStatus(ts) {
+  const el = document.getElementById('gss-sync-last-synced');
+  const tsEl = document.getElementById('gss-sync-ts');
+  if (!el || !tsEl) return;
+  if (ts) {
+    tsEl.textContent = ts;
+    el.style.display = '';
+  } else {
+    el.style.display = 'none';
+  }
+}
+
+function _syncSetBtnsDisabled(disabled) {
+  const u = document.getElementById('gss-sync-upload-btn');
+  const f = document.getElementById('gss-sync-fetch-btn');
+  if (u) u.disabled = disabled;
+  if (f) f.disabled = disabled;
+}
+
+function _syncShowError(msg) {
+  const el = document.getElementById('gss-sync-error');
+  if (el) { el.textContent = msg; el.style.display = ''; }
+}
+
+function _syncClearError() {
+  const el = document.getElementById('gss-sync-error');
+  if (el) { el.textContent = ''; el.style.display = 'none'; }
+}
+
+function _syncRenderDiff(diff) {
+  const area = document.getElementById('gss-sync-diff-area');
+  const linesEl = document.getElementById('gss-sync-diff-lines');
+  const alreadyEl = document.getElementById('gss-sync-already-in-sync');
+
+  const changed = diff.filter(i => i.status === 'added' || i.status === 'removed');
+
+  if (changed.length === 0) {
+    if (area) area.style.display = 'none';
+    if (alreadyEl) alreadyEl.style.display = '';
+    return;
+  }
+
+  if (alreadyEl) alreadyEl.style.display = 'none';
+
+  const lines = diff.map(item => {
+    let prefix, cls;
+    if (item.status === 'added')     { prefix = '+'; cls = 'gss-diff-line--added'; }
+    else if (item.status === 'removed') { prefix = '-'; cls = 'gss-diff-line--removed'; }
+    else                              { prefix = ' '; cls = 'gss-diff-line--unchanged'; }
+    const val = typeof item.value === 'object' ? JSON.stringify(item.value) : String(item.value ?? '');
+    return `<div class="gss-diff-line ${cls}">${prefix} ${escHtml(item.key)}: ${escHtml(val)}</div>`;
+  }).join('');
+
+  if (linesEl) linesEl.innerHTML = lines;
+  if (area) area.style.display = '';
+}
+
+async function _syncRunDiff(direction) {
+  _syncClearError();
+  _syncSetBtnsDisabled(true);
+  const area = document.getElementById('gss-sync-diff-area');
+  const alreadyEl = document.getElementById('gss-sync-already-in-sync');
+  if (area) area.style.display = 'none';
+  if (alreadyEl) alreadyEl.style.display = 'none';
+
+  try {
+    const resp = await fetch('/api/settings/sync/diff', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ direction }),
+    });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.detail || `HTTP ${resp.status}`);
+    }
+    const data = await resp.json();
+    _syncPendingDirection = direction;
+    _syncRenderDiff(data.diff);
+  } catch (err) {
+    _syncShowError(`Diff failed: ${err.message}`);
+  } finally {
+    _syncSetBtnsDisabled(false);
+  }
+}
+
+function _syncUpload() { _syncRunDiff('upload'); }
+function _syncFetch()  { _syncRunDiff('fetch'); }
+
+function _syncCancel() {
+  _syncPendingDirection = null;
+  const area = document.getElementById('gss-sync-diff-area');
+  const alreadyEl = document.getElementById('gss-sync-already-in-sync');
+  if (area) area.style.display = 'none';
+  if (alreadyEl) alreadyEl.style.display = 'none';
+  _syncClearError();
+}
+
+async function _syncConfirm() {
+  if (!_syncPendingDirection) return;
+  _syncClearError();
+  const confirmBtn = document.getElementById('gss-sync-confirm-btn');
+  const cancelBtn = document.getElementById('gss-sync-cancel-btn');
+  if (confirmBtn) confirmBtn.disabled = true;
+  if (cancelBtn) cancelBtn.disabled = true;
+
+  try {
+    const resp = await fetch('/api/settings/sync/commit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ direction: _syncPendingDirection }),
+    });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.detail || `HTTP ${resp.status}`);
+    }
+    const data = await resp.json();
+    _syncRenderStatus(data.synced_at);
+    _syncCancel();
+  } catch (err) {
+    _syncShowError(`Sync failed: ${err.message}`);
+    if (confirmBtn) confirmBtn.disabled = false;
+    if (cancelBtn) cancelBtn.disabled = false;
+  } finally {
+    _syncPendingDirection = null;
+  }
 }
 
 async function _gssSave() {

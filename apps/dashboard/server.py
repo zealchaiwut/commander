@@ -10216,8 +10216,11 @@ def get_project_notes(repo: str = ""):
     path = _notes_path(repo)
     if not path.exists():
         return {"content": "", "mtime": None, "exists": False}
-    mtime = path.stat().st_mtime
-    content = path.read_text(encoding="utf-8")
+    try:
+        mtime = path.stat().st_mtime
+        content = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail={"error": "failed to read NOTES.md", "reason": str(exc)})
     return {"content": content, "mtime": mtime, "exists": True}
 
 

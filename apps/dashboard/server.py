@@ -4285,7 +4285,7 @@ def run_sprint_managed(request: Request, body: SprintMgmtRunBody):
         raise HTTPException(502, detail=f"sprint_manager.py not found at {SPRINT_MANAGER_PATH}")
 
     project_root = _project_root_path(body.project)
-    running = _any_sprint_running()
+    running = next((r for r in _all_sprints_running() if r["project"] == body.project), None)
     if running:
         _slog.event("route.error", project="dashboard", request_id=request.state.request_id, route="/api/sprints/run", level="error", sprint_label=body.sprint_label, error="sprint already running", running_sprint=running.get("sprint_label"))
         raise HTTPException(
@@ -6709,7 +6709,7 @@ def rerun_sprint(sprint_label: str, project: str, body: SprintRerunV2Body):
     project_root = _project_root_path(project)
 
     if body.auto_run:
-        running = _any_sprint_running()
+        running = next((r for r in _all_sprints_running() if r["project"] == project), None)
         if running:
             raise HTTPException(
                 409,
@@ -7045,8 +7045,13 @@ async def finish_sprint(owner: str, repo_name: str, label: str, body: FinishSpri
     except subprocess.CalledProcessError as e:
         raise _gh_error(e)
 
-    uat_issues = [iss for iss in sprint_issues if any(lbl["name"] == "UAT" for lbl in iss.get("labels", []))]
-    non_uat_issues = [iss for iss in sprint_issues if not any(lbl["name"] == "UAT" for lbl in iss.get("labels", []))]
+    _NON_WORK_LABELS_FS = {"sprint-summary", "docs", "documentation"}
+    work_issues = [
+        iss for iss in sprint_issues
+        if not (_NON_WORK_LABELS_FS & {lbl["name"] for lbl in iss.get("labels", [])})
+    ]
+    uat_issues = [iss for iss in work_issues if any(lbl["name"] == "UAT" for lbl in iss.get("labels", []))]
+    non_uat_issues = [iss for iss in work_issues if not any(lbl["name"] == "UAT" for lbl in iss.get("labels", []))]
 
     closed = 0
     moved = 0

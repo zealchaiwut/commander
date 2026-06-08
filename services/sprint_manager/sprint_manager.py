@@ -715,9 +715,10 @@ class FailureCategory:
 
 
 # Logic failures signal bad code/spec and warrant needs-rework label.
-# Infrastructure failures (CRASH, HANG, RETRY_EXHAUSTED) are transient and do not.
+# Infrastructure failures (CRASH, HANG, RETRY_EXHAUSTED, TESTER_REJECTED) are transient and do not.
+# TESTER_REJECTED means tests passed (exit 0) but merge was not detected — a process/infra issue,
+# not a code quality problem, so it must not apply needs-rework.
 _LOGIC_FAILURE_CATEGORIES: frozenset[str] = frozenset({
-    FailureCategory.TESTER_REJECTED,
     FailureCategory.CODER_NO_WORK,
     FailureCategory.MERGE_CONFLICT,
     FailureCategory.LINT_FAIL,
@@ -3603,7 +3604,6 @@ def _create_sprint_pr(
         if result.returncode == 0:
             pr_url = result.stdout.strip()
             print(f"  Sprint PR created: {pr_url}")
-            return pr_url
         else:
             stderr = result.stderr.strip()
             # If a PR already exists for this branch, gh will print its URL in stderr
@@ -3613,9 +3613,23 @@ def _create_sprint_pr(
                 if m:
                     pr_url = m.group(0)
                     print(f"  Sprint PR already exists: {pr_url}")
-                    return pr_url
-            structured_log.error("sprint_pr_create_failed", f"failed to create sprint PR: {stderr}", subprocess_stderr=stderr)
-            return None
+                else:
+                    structured_log.error("sprint_pr_create_failed", f"failed to create sprint PR: {stderr}", subprocess_stderr=stderr)
+                    return None
+            else:
+                structured_log.error("sprint_pr_create_failed", f"failed to create sprint PR: {stderr}", subprocess_stderr=stderr)
+                return None
+
+        # Auto-merge the sprint PR into develop (sprint run is complete, no manual review needed)
+        merge_result = subprocess.run(
+            ["gh", "pr", "merge", pr_url, "--repo", r, "--merge", "--delete-branch"],
+            capture_output=True, text=True, check=False,
+        )
+        if merge_result.returncode == 0:
+            print(f"  Sprint PR auto-merged: {pr_url}")
+        else:
+            print(f"  Sprint PR created but auto-merge failed (merge manually): {merge_result.stderr.strip()}")
+        return pr_url
     except Exception as e:
         structured_log.error("sprint_pr_create_failed", f"exception creating sprint PR: {e}", exc=str(e))
         return None

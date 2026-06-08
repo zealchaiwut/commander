@@ -2903,6 +2903,27 @@
     /* Outcome band spacer — pushes seg-bar + time to the right */
     .oc-spacer { flex: 1; }
 
+    /* Inline outcome band stat labels (running card) */
+    .oc-done  { color: var(--green); font-weight: 700; }
+    .oc-fail  { color: var(--red);   font-weight: 700; }
+    .oc-fail.muted { color: var(--text-sub); font-weight: 700; }
+    .oc-skip  { color: var(--text-sub); font-weight: 700; }
+    .oc-est   { color: var(--text-sub); font-weight: 400; }
+
+    /* Cancel sprint button */
+    .smgmt-cancel-btn {
+      display: inline-flex; align-items: center; gap: 5px;
+      padding: 5px 12px; border-radius: 6px; font-size: 12px; font-weight: 500; cursor: pointer;
+      color: var(--red); border: 1px solid var(--red); background: var(--surface);
+      transition: all .12s; white-space: nowrap; font-family: inherit;
+    }
+    .smgmt-cancel-btn:hover { background: var(--red-bg); }
+
+    /* Elapsed time in running card header */
+    .smgmt-sprint-meta {
+      font-family: var(--mono); font-size: 12px; color: var(--text-muted);
+    }
+
     /* Outcome band PR / summary links (issue #613) */
     .oc-band-links { display: flex; align-items: center; gap: 10px; margin-left: 8px; }
     .oc-pr-link, .oc-summary-link {
@@ -8535,9 +8556,9 @@ function _smgmtOutcomeTicketListHtml(issues, label, repo) {
         <span class="ex-exec-val">—</span>
       </div>
       <div class="ex-actions">
-        <button class="ex-btn" onclick="event.stopPropagation()">Re-estimate</button>
-        <button class="ex-btn" onclick="event.stopPropagation()">Move to sprint</button>
-        <button class="ex-btn ex-btn-danger" onclick="event.stopPropagation()">Close ticket</button>
+        <button class="ex-btn" onclick="event.stopPropagation();_smgmtReEstimate(${iss.number},this)"><i class="ti ti-sparkles" style="font-size:12px"></i> Re-estimate</button>
+        <button class="ex-btn" onclick="event.stopPropagation();_smgmtRowMenuOpen(event,${iss.number},'${safeLabel}',false)"><i class="ti ti-arrow-right" style="font-size:12px"></i> Move to sprint</button>
+        <button class="ex-btn ex-btn-danger" onclick="event.stopPropagation();_smgmtCloseIssueOpen(${iss.number})"><i class="ti ti-x" style="font-size:12px"></i> Close ticket</button>
       </div>
     </div>`;
   }).join('');
@@ -9137,8 +9158,6 @@ function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent, finished) {
           ${actionBtn}
         </div>
       </div>
-      <div class="smgmt-capacity-gauge" id="smgmt-cap-gauge-${escHtml(label)}"></div>
-      ${summaryHtml}
       ${cancelBannerHtml}
       ${outcomeBandHtml}
       <div class="smgmt-sprint-tickets" id="smgmt-tickets-${escHtml(label)}">
@@ -9269,47 +9288,21 @@ function _smgmtRunningCardHtml(label, n, tickets) {
           <span class="smgmt-running-badge" id="smgmt-running-badge-${escHtml(label)}">
             <span class="smgmt-running-badge-dot"></span>${totalCount > 0 ? `${doneCount + skippedCount}/${totalCount}` : '—'}
           </span>
-          <span class="smgmt-sprint-count" id="smgmt-col-rollup-${escHtml(label)}">${_smgmtRollupText(sourceTickets)}</span>
         </div>
         <div class="smgmt-sprint-header-right">
-          ${_smgmtCapacityInputHtml(label)}
-          <button class="smgmt-delete-btn" disabled title="Cancel sprint first">
-            <i class="ti ti-trash"></i> Delete</button>
-          <button class="smgmt-run-btn" disabled title="Sprint is currently running">
-            <i class="ti ti-player-play"></i> Running…</button>
+          <span class="smgmt-sprint-meta" id="smgmt-elapsed-${escHtml(label)}">${timeSpentSec > 0 ? `elapsed ${_fmtRunningTime(timeSpentSec)}` : ''}</span>
+          <button class="smgmt-cancel-btn" onclick="smgmtCancelSprint('${escHtml(label)}')">
+            <i class="ti ti-player-stop"></i> Cancel sprint</button>
         </div>
       </div>
-      <div class="smgmt-capacity-gauge" id="smgmt-cap-gauge-${escHtml(label)}"></div>
-      <div class="smgmt-running-stat-strip" id="smgmt-running-stats-${escHtml(label)}">
-        <div class="smgmt-running-stat">
-          <span class="rsnum green" id="smgmt-rs-done-${escHtml(label)}">${doneCount}</span>
-          <span class="rslbl">Done</span>
-        </div>
-        <div class="smgmt-running-stat">
-          <span class="rsnum ${failedCount > 0 ? 'red' : 'muted'}" id="smgmt-rs-failed-${escHtml(label)}">${failedCount}</span>
-          <span class="rslbl">Failed</span>
-        </div>
-        <div class="smgmt-running-stat">
-          <span class="rsnum muted" id="smgmt-rs-skipped-${escHtml(label)}">${skippedCount}</span>
-          <span class="rslbl">Skipped</span>
-        </div>
-        <div class="smgmt-running-stat">
-          <span class="rsnum amber" id="smgmt-rs-est-${escHtml(label)}">${estRemMins != null ? estRemMins + 'm' : '—'}</span>
-          <span class="rslbl">— EST. REMAINING</span>
-        </div>
+      <div class="smgmt-outcome-band" id="smgmt-running-stats-${escHtml(label)}">
+        <span class="oc-done" id="smgmt-rs-done-${escHtml(label)}">${doneCount} DONE</span>
+        <span class="oc-fail ${failedCount > 0 ? '' : 'muted'}" id="smgmt-rs-failed-${escHtml(label)}">${failedCount} FAILED</span>
+        <span class="oc-skip" id="smgmt-rs-skipped-${escHtml(label)}">${skippedCount} SKIPPED</span>
+        <span class="oc-est" id="smgmt-rs-est-${escHtml(label)}">${estRemMins != null ? `↩ ${estRemMins}m EST. REMAINING` : '↩ EST. REMAINING'}</span>
         <span class="oc-spacer"></span>
         ${segBarHtml}
-        <div class="smgmt-running-time" id="smgmt-rs-time-${escHtml(label)}">
-          <i class="ti ti-clock" style="font-size:12px;"></i>
-          ${_fmtRunningTime(timeSpentSec)}
-        </div>
-      </div>
-      <div class="smgmt-running-progress-wrap">
-        <div class="smgmt-running-progress-track">
-          <div class="smgmt-running-progress-fill" id="smgmt-rs-prog-${escHtml(label)}" style="width:${pct}%">
-            <div class="smgmt-running-progress-shimmer"></div>
-          </div>
-        </div>
+        <span class="smgmt-outcome-dur" id="smgmt-rs-time-${escHtml(label)}">${_fmtRunningTime(timeSpentSec)}</span>
       </div>
       <div class="smgmt-sprint-tickets" id="smgmt-tickets-${escHtml(label)}">
         ${ticketRowsHtml || '<div class="smgmt-drop-hint">No tickets in this sprint</div>'}
@@ -9458,17 +9451,17 @@ function _smgmtLivePatch(label, live) {
   const timeEl    = document.getElementById(`smgmt-rs-time-${label}`);
   const progEl    = document.getElementById(`smgmt-rs-prog-${label}`);
 
-  if (doneEl)    { doneEl.textContent = String(doneCount); }
+  if (doneEl)    { doneEl.textContent = `${doneCount} DONE`; }
   if (failedEl)  {
-    failedEl.textContent = String(failedCount);
-    failedEl.className = `rsnum ${failedCount > 0 ? 'red' : 'muted'}`;
+    failedEl.textContent = `${failedCount} FAILED`;
+    failedEl.className = `oc-fail${failedCount > 0 ? '' : ' muted'}`;
   }
-  if (skippedEl) { skippedEl.textContent = String(skippedCount); }
-  if (estEl)     { estEl.textContent = estRemMins != null ? estRemMins + 'm' : '—'; }
-  if (timeEl)    {
-    timeEl.innerHTML = `<i class="ti ti-clock" style="font-size:12px;"></i> ${_fmtRunningTime(timeSpentSec)}`;
-  }
-  if (progEl)    { progEl.style.width = pct + '%'; }
+  if (skippedEl) { skippedEl.textContent = `${skippedCount} SKIPPED`; }
+  if (estEl)     { estEl.textContent = estRemMins != null ? `↩ ${estRemMins}m EST. REMAINING` : '↩ EST. REMAINING'; }
+  if (timeEl)    { timeEl.textContent = _fmtRunningTime(timeSpentSec); }
+
+  const elapsedEl = document.getElementById(`smgmt-elapsed-${label}`);
+  if (elapsedEl) { elapsedEl.textContent = timeSpentSec > 0 ? `elapsed ${_fmtRunningTime(timeSpentSec)}` : ''; }
 
   // Update running badge X/Y ratio (sprint-26 parity, Gap 5)
   const badgeEl = document.getElementById(`smgmt-running-badge-${label}`);
@@ -9848,6 +9841,7 @@ function _smgmtTicketRowHtml(ticket, label) {
          rel="noopener" draggable="false" onclick="event.stopPropagation()">#${ticket.number}</a>
       <span class="smgmt-ticket-title" title="${escHtml(ticket.title)}">${escHtml(ticket.title)}</span>
       ${sizePillHtml}${staleBadgeHtml}${estimateBadgeHtml}${riskFlagIconsHtml}${schedDepHtml}${reEstBtnHtml}
+      ${hasRework ? '<span class="smgmt-lbl-rejected">TESTER REJECTED</span>' : ''}
       <span class="smgmt-ticket-status ${statusClass}">${escHtml(statusLabel)}</span>
       <button class="btn-view-log" tabindex="0" title="View issue log"
               onclick="event.stopPropagation();openLvIssueLog(${ticket.number},'${sk}',_smgmtRepo()||'')">
@@ -9870,9 +9864,9 @@ function _smgmtTicketRowHtml(ticket, label) {
         <span class="ex-exec-val">—</span>
       </div>
       <div class="ex-actions">
-        <button class="ex-btn" onclick="event.stopPropagation()">Re-estimate</button>
-        <button class="ex-btn" onclick="event.stopPropagation()">Move to sprint</button>
-        <button class="ex-btn ex-btn-danger" onclick="event.stopPropagation()">Close ticket</button>
+        <button class="ex-btn" onclick="event.stopPropagation();_smgmtReEstimate(${ticket.number},this)"><i class="ti ti-sparkles" style="font-size:12px"></i> Re-estimate</button>
+        <button class="ex-btn" onclick="event.stopPropagation();_smgmtRowMenuOpen(event,${ticket.number},'${sk}',${hasEstimate})"><i class="ti ti-arrow-right" style="font-size:12px"></i> Move to sprint</button>
+        <button class="ex-btn ex-btn-danger" onclick="event.stopPropagation();_smgmtCloseIssueOpen(${ticket.number})"><i class="ti ti-x" style="font-size:12px"></i> Close ticket</button>
       </div>
     </div>`;
 }
@@ -10456,6 +10450,24 @@ function smgmtRunBlockedToast() {
 
 function smgmtRunSprint(label) {
   _pfOpen(label);
+}
+
+async function smgmtCancelSprint(label) {
+  const repo = _smgmtRepo();
+  if (!repo) return;
+  if (!confirm(`Cancel sprint ${sprintLabelDisplay(label)}? The sprint will stop and tickets will not be modified.`)) return;
+  try {
+    const res = await fetch(`/api/sprints/run/${encodeURIComponent(label)}?project=${encodeURIComponent(repo)}`, { method: 'DELETE' });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      _smgmtShowToast(`Cancel failed: ${err.detail || res.status}`);
+    } else {
+      _smgmtShowToast(`Sprint ${sprintLabelDisplay(label)} cancel signal sent`);
+      setTimeout(() => loadSprintMgmt(), 2000);
+    }
+  } catch (e) {
+    _smgmtShowToast(`Cancel failed: ${e.message}`);
+  }
 }
 
 // ── Run Sprint preflight modal (issue #448) ─────────────────────────────────

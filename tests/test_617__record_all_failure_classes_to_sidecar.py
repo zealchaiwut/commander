@@ -235,6 +235,8 @@ class TestAC2WiringAtFailureExits:
 
     def _dispatch_coder_with_crash(self, tmp_path, exit_code: int):
         """Helper: run _dispatch_coder with a subprocess that exits with exit_code."""
+        (tmp_path / "PRODUCT.md").write_text("# Product")
+        (tmp_path / "DESIGN.md").write_text("# Design")
         cfg_stub = MagicMock()
         cfg_stub.worktree_coder = tmp_path
         cfg_stub.repo_name = None
@@ -275,6 +277,8 @@ class TestAC2WiringAtFailureExits:
             calls.append((args, kwargs))
             return original(*args, **kwargs)
 
+        (tmp_path / "PRODUCT.md").write_text("# Product")
+        (tmp_path / "DESIGN.md").write_text("# Design")
         cfg_stub = MagicMock()
         cfg_stub.worktree_coder = tmp_path
         cfg_stub.repo_name = None
@@ -310,6 +314,8 @@ class TestAC2WiringAtFailureExits:
         """HangDetector.killed=True → record_failure called with hang class."""
         calls = []
 
+        (tmp_path / "PRODUCT.md").write_text("# Product")
+        (tmp_path / "DESIGN.md").write_text("# Design")
         cfg_stub = MagicMock()
         cfg_stub.worktree_coder = tmp_path
         cfg_stub.repo_name = None

@@ -2523,6 +2523,25 @@ def _issue_log_path(issue_num: int, cfg: Optional["SprintConfig"] = None) -> Pat
     return logs_dir / f"sprint-issue-{issue_num}.log"
 
 
+def _design_docs_guard(cwd_path: "Path") -> "Optional[str]":
+    """Return None when both PRODUCT.md and DESIGN.md exist; error message otherwise.
+
+    Both files are required so any frontend ticket dispatched to the coder always
+    has a design vocabulary to reference (AC-5, issue #621).
+    """
+    missing = [
+        doc for doc in ("PRODUCT.md", "DESIGN.md")
+        if not (Path(cwd_path) / doc).exists()
+    ]
+    if not missing:
+        return None
+    return (
+        f"Design docs missing in coder worktree ({cwd_path}): {', '.join(missing)}. "
+        "Create them (or run `npx impeccable skills install` and scaffold via "
+        "`node .github/skills/impeccable/scripts/context.mjs`) before dispatching."
+    )
+
+
 def _dispatch_coder(
     issue_num: int,
     alert_modes: list[str],
@@ -2549,6 +2568,16 @@ def _dispatch_coder(
     eff_repo = repo_name or (cfg.repo_name if cfg else None)
     api_url  = cfg.api_url if cfg else None
     cwd_path = cfg.worktree_coder if cfg else WORKTESTER_DASHBOARD
+
+    guard_err = _design_docs_guard(cwd_path)
+    if guard_err:
+        structured_log.error(
+            "design_docs_missing",
+            f"[coder] design docs guard failed for issue #{issue_num}: {guard_err}",
+            issue_num=issue_num,
+        )
+        record_failure(issue_num, "design_docs_missing", detail=guard_err)
+        return False, "design_docs_missing"
 
     print(f"  Dispatching coder for issue #{issue_num} ...", flush=True)
     try:

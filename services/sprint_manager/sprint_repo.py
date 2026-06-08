@@ -244,6 +244,24 @@ def list_tickets(sprint_label: str) -> List[SprintTicket]:
         return tickets
 
 
+def write_estimated_size(issue_number: int, size: str) -> None:
+    """Write estimated_size to all sprint_tickets rows for *issue_number*.
+
+    Updates every sprint that contains this issue. Best-effort: silently
+    returns if no rows match.
+    """
+    with _open_session() as session:
+        tickets = (
+            session.query(SprintTicket)
+            .filter_by(issue_number=issue_number)
+            .all()
+        )
+        for ticket in tickets:
+            ticket.estimated_size = size
+        if tickets:
+            session.commit()
+
+
 def reorder_tickets(sprint_label: str, issue_numbers: List[int]) -> None:
     with _open_session() as session:
         sprint = session.query(Sprint).filter_by(label=sprint_label).first()

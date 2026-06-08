@@ -1400,6 +1400,39 @@
       font-size: 11px; color: var(--text-sub);
       white-space: nowrap; flex-shrink: 0;
     }
+    /* ── Capacity gauge (issue #595) ── */
+    .smgmt-capacity-row {
+      display: flex; align-items: center; gap: 4px; flex-shrink: 0;
+      font-size: 11px; color: var(--text-muted);
+    }
+    .smgmt-capacity-input {
+      width: 44px; font-size: 11px; color: var(--text);
+      background: var(--surface-2); border: 1px solid var(--border);
+      border-radius: 4px; padding: 1px 4px; outline: none;
+      font-family: inherit; text-align: right;
+      -moz-appearance: textfield;
+    }
+    .smgmt-capacity-input::-webkit-inner-spin-button,
+    .smgmt-capacity-input::-webkit-outer-spin-button { -webkit-appearance: none; }
+    .smgmt-capacity-input:focus { border-color: var(--blue); }
+    .smgmt-capacity-gauge {
+      min-height: 9px; display: flex; align-items: center; gap: 6px;
+      padding: 0 0 4px;
+    }
+    .smgmt-capacity-bar-track {
+      flex: 1; height: 4px; background: var(--surface-2);
+      border-radius: 2px; overflow: hidden;
+    }
+    .smgmt-capacity-bar-fill {
+      height: 100%; border-radius: 2px;
+      transition: width .3s ease, background .2s;
+    }
+    .smgmt-capacity-bar-fill--green { background: var(--green); }
+    .smgmt-capacity-bar-fill--amber { background: var(--amber); }
+    .smgmt-capacity-bar-fill--red   { background: var(--red); }
+    .smgmt-capacity-overage {
+      font-size: 10px; font-weight: 600; flex-shrink: 0; color: var(--red);
+    }
     .smgmt-sprint-goal-text {
       font-size: 12px; color: var(--text-muted);
       font-style: italic;
@@ -7188,6 +7221,9 @@ function _smgmtRender(data) {
 
   listEl.innerHTML = cards || '<div class="loading-msg">No sprints found.</div>';
 
+  // Populate capacity gauges (reads localStorage + estimate cache)
+  _smgmtInitCapacityGauges(orderedLabels);
+
   // Re-inject selection bar if tickets are selected
   if (_smgmtSelectedIssues.size > 0) _smgmtUpdateSelectionUI();
 
@@ -7562,6 +7598,7 @@ async function _smgmtLoadEstimates(orderedLabels, bySprint) {
           _smgmtUpdateEstimateBadge(t.number);
         }
         _smgmtUpdateColRollup(label, tickets);
+        _smgmtUpdateCapacityGauge(label);
       }
     } catch (_) {
       // fail silently — leave as "— estimated"
@@ -8880,6 +8917,7 @@ function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent, finished) {
           <span class="smgmt-sprint-count" id="smgmt-col-rollup-${escHtml(label)}">${_smgmtRollupText(rollupItems)}</span>
         </div>
         <div class="smgmt-sprint-header-right">
+          ${_smgmtCapacityInputHtml(label)}
           ${_smgmtSortBtnHtml(label)}
           <button class="smgmt-finish-btn ${finishHidden}" ${finishDisabled}
                   title="${finishDisabled ? 'No open tickets' : 'Finish sprint'}"
@@ -8891,6 +8929,7 @@ function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent, finished) {
           ${actionBtn}
         </div>
       </div>
+      <div class="smgmt-capacity-gauge" id="smgmt-cap-gauge-${escHtml(label)}"></div>
       ${summaryHtml}
       ${cancelBannerHtml}
       ${outcomeBandHtml}
@@ -9000,12 +9039,14 @@ function _smgmtRunningCardHtml(label, n, tickets) {
           <span class="smgmt-sprint-count" id="smgmt-col-rollup-${escHtml(label)}">${_smgmtRollupText(sourceTickets)}</span>
         </div>
         <div class="smgmt-sprint-header-right">
+          ${_smgmtCapacityInputHtml(label)}
           <button class="smgmt-delete-btn" disabled title="Cancel sprint first">
             <i class="ti ti-trash"></i> Delete</button>
           <button class="smgmt-run-btn" disabled title="Sprint is currently running">
             <i class="ti ti-player-play"></i> Running…</button>
         </div>
       </div>
+      <div class="smgmt-capacity-gauge" id="smgmt-cap-gauge-${escHtml(label)}"></div>
       <div class="smgmt-running-stat-strip" id="smgmt-running-stats-${escHtml(label)}">
         <div class="smgmt-running-stat">
           <span class="rsnum green" id="smgmt-rs-done-${escHtml(label)}">${doneCount}</span>
@@ -9627,6 +9668,7 @@ async function _smgmtReEstimateRun(issueNum, rowBtn) {
       if (iss && iss.sprint_label) {
         const sprintTickets = _smgmtData.issues.filter(i => i.sprint_label === iss.sprint_label);
         _smgmtUpdateColRollup(iss.sprint_label, sprintTickets);
+        _smgmtUpdateCapacityGauge(iss.sprint_label);
       }
     }
   } catch (err) {
@@ -9796,6 +9838,92 @@ function _smgmtEstimatePopoverClose() {
 
 // ── Sprint action handlers ─────────────────────────────────────────────────
 function _smgmtRepo() { return _cachedFullRepo[_slug] || null; }
+
+// ── Capacity gauge (issue #595) ────────────────────────────────────────────
+
+function _smgmtCapacityKey(label) {
+  const repo = _smgmtRepo() || '';
+  return `capacity::${repo}::${label}`;
+}
+
+function _smgmtGetCapacity(label) {
+  try {
+    const v = parseFloat(localStorage.getItem(_smgmtCapacityKey(label)));
+    return (isNaN(v) || v <= 0) ? 0 : v;
+  } catch (_) { return 0; }
+}
+
+function _smgmtCapacityInputHtml(label) {
+  const cap = _smgmtGetCapacity(label);
+  const val = cap > 0 ? String(cap) : '';
+  return `<span class="smgmt-capacity-row">
+    <span>Cap:</span>
+    <input type="number" class="smgmt-capacity-input"
+           id="smgmt-cap-input-${escHtml(label)}"
+           min="0" step="0.5" placeholder="h"
+           value="${escHtml(val)}"
+           onclick="event.stopPropagation()"
+           onblur="smgmtCapacityCommit('${escHtml(label)}',this.value)"
+           onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();}">
+    <span>h</span>
+  </span>`;
+}
+
+function smgmtCapacityCommit(label, rawVal) {
+  const val = parseFloat(rawVal);
+  const key = _smgmtCapacityKey(label);
+  try {
+    if (isNaN(val) || val <= 0) {
+      localStorage.removeItem(key);
+    } else {
+      localStorage.setItem(key, String(val));
+    }
+  } catch (_) {}
+  _smgmtUpdateCapacityGauge(label);
+}
+
+function _smgmtCapacityTotalHours(label) {
+  const issues = _smgmtData ? (_smgmtData.issues || []) : [];
+  let totalMins = 0;
+  for (const t of issues.filter(i => i.sprint_label === label)) {
+    const cached = _estDataCache[t.number];
+    let size = (cached && cached.size) ? cached.size : (t.size || null);
+    if (!size && t.labels) {
+      for (const lbl of t.labels) {
+        const m = /^size-([SMLX]+)$/.exec(lbl.name || '');
+        if (m) { size = m[1]; break; }
+      }
+    }
+    totalMins += size ? _sizeMinutes(size) : 0;
+  }
+  return totalMins / 60;
+}
+
+function _smgmtUpdateCapacityGauge(label) {
+  const gaugeEl = document.getElementById(`smgmt-cap-gauge-${label}`);
+  if (!gaugeEl) return;
+  const cap = _smgmtGetCapacity(label);
+  if (cap <= 0) { gaugeEl.innerHTML = ''; return; }
+  const totalH = _smgmtCapacityTotalHours(label);
+  if (totalH <= 0) { gaugeEl.innerHTML = ''; return; }
+  const ratio = totalH / cap;
+  const pct = Math.min(ratio * 100, 100).toFixed(1);
+  let colorClass, overageHtml = '';
+  if (ratio > 1) {
+    colorClass = 'smgmt-capacity-bar-fill--red';
+    const over = parseFloat((totalH - cap).toFixed(1));
+    overageHtml = `<span class="smgmt-capacity-overage">${over}h over</span>`;
+  } else if (ratio >= 0.9) {
+    colorClass = 'smgmt-capacity-bar-fill--amber';
+  } else {
+    colorClass = 'smgmt-capacity-bar-fill--green';
+  }
+  gaugeEl.innerHTML = `<div class="smgmt-capacity-bar-track"><div class="smgmt-capacity-bar-fill ${colorClass}" style="width:${pct}%"></div></div>${overageHtml}`;
+}
+
+function _smgmtInitCapacityGauges(labels) {
+  for (const label of labels) _smgmtUpdateCapacityGauge(label);
+}
 
 function _smgmtShowToast(msg) {
   let el = document.getElementById('smgmt-toast');

@@ -1555,12 +1555,14 @@ def _gate_lint(
     repo_name: Optional[str] = None,
     base_branch: str = "develop",
     gate_scope: str = "changed",
+    gate_frontend_lint: bool = True,
 ) -> GateResult:
     """Gate: run ruff (Python) and eslint/biome + prettier (JS/TS).
 
     gate_scope='changed' (default): only lint files changed relative to
     base_branch. gate_scope='full': run against whole codebase (legacy behaviour).
     Skips gracefully when tools are not installed or no relevant files changed.
+    gate_frontend_lint: when False, skips the frontend (JS/TS) lint portion.
     """
     if skip:
         print("  [gate:lint] skipped")
@@ -1611,23 +1613,26 @@ def _gate_lint(
                             issue_num=issue_num)
 
     # ── Frontend lint via eslint/biome + prettier ──────────────────────────────
-    if gate_scope == "full":
-        js_ts_files_for_fe: list[str] = ["."]
+    if not gate_frontend_lint:
+        print("  [gate:lint] frontend lint disabled (COMMANDER_GATE_FRONTEND_LINT=0)")
     else:
-        js_ts_files_for_fe = _changed_js_ts_files(base_branch, cwd=worktester_dashboard)
+        if gate_scope == "full":
+            js_ts_files_for_fe: list[str] = ["."]
+        else:
+            js_ts_files_for_fe = _changed_js_ts_files(base_branch, cwd=worktester_dashboard)
 
-    if js_ts_files_for_fe:
-        fe_passed, fe_output = _run_frontend_lint(
-            issue_num, worktester_dashboard, js_ts_files_for_fe, gate_scope
-        )
-        combined += fe_output
-        if fe_output.strip():
-            any_ran = True
-        if not fe_passed:
-            _revert_to_sit(issue_num, "lint", combined, repo_name=repo_name)
-            return GateResult(gate="lint", passed=False, output=combined)
-    else:
-        print("  [gate:lint] no JS/TS files changed — frontend lint skipped")
+        if js_ts_files_for_fe:
+            fe_passed, fe_output = _run_frontend_lint(
+                issue_num, worktester_dashboard, js_ts_files_for_fe, gate_scope
+            )
+            combined += fe_output
+            if fe_output.strip():
+                any_ran = True
+            if not fe_passed:
+                _revert_to_sit(issue_num, "lint", combined, repo_name=repo_name)
+                return GateResult(gate="lint", passed=False, output=combined)
+        else:
+            print("  [gate:lint] no JS/TS files changed — frontend lint skipped")
 
     if not any_ran:
         print("  [gate:lint] no lintable files changed — skipped")
@@ -1947,6 +1952,7 @@ def _run_quality_gates(
     gate_merge_preview: bool,
     gate_typecheck: bool = True,
     gate_design: bool = True,
+    gate_frontend_lint: bool = True,
     target_branch: str = "develop",
     repo_name: Optional[str] = None,
     base_branch: str = "develop",
@@ -1985,6 +1991,7 @@ def _run_quality_gates(
         repo_name=repo_name,
         base_branch=base_branch,
         gate_scope=gate_scope,
+        gate_frontend_lint=gate_frontend_lint,
     )
     results.append(r_lint)
     if not r_lint.passed:
@@ -2149,6 +2156,7 @@ def handle_post_tester(
     gate_merge_preview: bool,
     gate_typecheck: bool = True,
     gate_design: bool = True,
+    gate_frontend_lint: bool = True,
     worktester_root: Optional[Path] = None,
     worktester_dashboard: Optional[Path] = None,
     target_branch: str = "develop",
@@ -2319,6 +2327,7 @@ def handle_post_tester(
         gate_merge_preview=gate_merge_preview,
         gate_typecheck=gate_typecheck,
         gate_design=gate_design,
+        gate_frontend_lint=gate_frontend_lint,
         target_branch=target_branch,
         repo_name=eff_repo,
         base_branch=base_branch,
@@ -4856,6 +4865,7 @@ def run_sprint(
     gate_merge_preview: bool,
     gate_typecheck: bool = True,
     gate_design: bool = True,
+    gate_frontend_lint: bool = True,
     alert_modes: Optional[list[str]] = None,
     repo_name: Optional[str] = None,
     dry_run: bool = False,
@@ -5529,6 +5539,7 @@ def run_sprint(
                 gate_merge_preview = gate_merge_preview,
                 gate_typecheck     = gate_typecheck,
                 gate_design        = gate_design,
+                gate_frontend_lint = gate_frontend_lint,
                 target_branch      = target_branch,
                 repo_name          = eff_repo,
                 cfg                = cfg,
@@ -5728,6 +5739,12 @@ def main() -> None:
         action=argparse.BooleanOptionalAction,
         default=True,
         help="Enable/disable lint gate — ruff + eslint/prettier (default: enabled)",
+    )
+    p.add_argument(
+        "--gate-frontend-lint",
+        action=argparse.BooleanOptionalAction,
+        default=os.environ.get("COMMANDER_GATE_FRONTEND_LINT", "1") != "0",
+        help="Enable/disable frontend lint portion — eslint/biome + prettier (default: enabled; env: COMMANDER_GATE_FRONTEND_LINT=0 to disable)",
     )
     p.add_argument(
         "--gate-design",
@@ -5969,6 +5986,7 @@ def main() -> None:
             gate_merge_preview   = args.gate_merge_preview,
             gate_typecheck       = args.gate_typecheck,
             gate_design          = args.gate_design,
+            gate_frontend_lint   = args.gate_frontend_lint,
             alert_modes          = alert_modes,
             repo_name            = eff_repo,
             dry_run              = args.dry_run,

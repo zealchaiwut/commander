@@ -67,6 +67,7 @@ load_dotenv(Path(__file__).parent / ".env")
 
 import db
 import github_client
+import github_events_sync
 import projects as projects_module
 
 # Structured event logging (services/logging.py at repo root)
@@ -1719,6 +1720,168 @@ def get_running_sprint(project: str):
     return Response(status_code=204)
 
 
+_VALID_EVENT_SOURCES = {"agent", "dashboard", "github"}
+
+
+@app.get("/api/projects/{slug}/events")
+def get_project_events(
+    slug: str,
+    source: Optional[str] = None,
+    target: Optional[str] = None,
+    since: Optional[str] = None,
+    until: Optional[str] = None,
+    limit: int = 100,
+):
+    """Return structured events for a project, newest-first.
+
+    Filters: source (agent|dashboard|github), target (exact), since/until (ISO date), limit.
+    404 — unknown project slug.
+    400 — invalid source value.
+    """
+    # Validate source before any DB work
+    if source is not None and source not in _VALID_EVENT_SOURCES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid source {source!r}. Must be one of: {', '.join(sorted(_VALID_EVENT_SOURCES))}",
+        )
+
+    # Resolve slug → project name stored in events table
+    try:
+        all_projects = projects_module.load_projects()
+    except Exception:
+        all_projects = []
+
+    matched = next(
+        (p for p in all_projects
+         if p["repo"].split("/")[-1] == slug or p["repo"] == slug),
+        None,
+    )
+    if matched is None:
+        raise HTTPException(status_code=404, detail=f"Project '{slug}' not found")
+
+    # The events table stores project as the repo slug (last path component)
+    project_key = matched["repo"].split("/")[-1]
+
+    query = "SELECT timestamp, source, actor, type, target, action_id, detail FROM events WHERE project = ?"
+    params: list = [project_key]
+
+    if source is not None:
+        query += " AND source = ?"
+        params.append(source)
+    if target is not None:
+        query += " AND target = ?"
+        params.append(target)
+    if since is not None:
+        query += " AND timestamp >= ?"
+        params.append(since)
+    if until is not None:
+        # include the full day by appending T23:59:59 when only a date is given
+        until_bound = until if "T" in until else f"{until}T23:59:59"
+        query += " AND timestamp <= ?"
+        params.append(until_bound)
+
+    query += " ORDER BY timestamp DESC LIMIT ?"
+    params.append(limit)
+
+    with db.get_conn() as conn:
+        rows = conn.execute(query, params).fetchall()
+
+    result = []
+    for row in rows:
+        d = dict(row)
+        try:
+            d["detail"] = json.loads(d["detail"])
+        except (TypeError, ValueError):
+            pass
+        result.append(d)
+
+    return result
+
+
+# ── Branch cleanup (issue #634) ───────────────────────────────────────────────
+
+_PROTECTED_BRANCHES: frozenset[str] = frozenset({"develop", "master", "main", "attachments"})
+_STALE_BRANCH_RE = re.compile(r"^(feat|feature|sprint)/")
+
+
+@app.get("/api/projects/{owner}/{repo_name}/branches/stale")
+def get_stale_branches(owner: str, repo_name: str):
+    """Return sorted list of feat/* or sprint/* branch names that are both
+    merged (their PR was merged) and still exist on the remote.
+    develop, master, main, and attachments are always excluded.
+    """
+    repo = f"{owner}/{repo_name}"
+
+    # 1. Collect heads of merged PRs matching the allowed patterns
+    merged_heads: set[str] = set()
+    try:
+        result = subprocess.run(
+            ["gh", "pr", "list", "--repo", repo, "--state", "merged",
+             "--limit", "200", "--json", "headRefName"],
+            capture_output=True, text=True, check=False,
+        )
+        for pr in json.loads(result.stdout or "[]"):
+            head = pr.get("headRefName", "")
+            if _STALE_BRANCH_RE.match(head) and head not in _PROTECTED_BRANCHES:
+                merged_heads.add(head)
+    except Exception:
+        pass
+
+    if not merged_heads:
+        return []
+
+    # 2. List currently existing branches that match the patterns
+    existing: set[str] = set()
+    try:
+        result = subprocess.run(
+            ["gh", "api", f"repos/{repo}/branches", "--paginate", "--jq", ".[].name"],
+            capture_output=True, text=True, check=False,
+        )
+        for name in result.stdout.splitlines():
+            name = name.strip()
+            if name and _STALE_BRANCH_RE.match(name) and name not in _PROTECTED_BRANCHES:
+                existing.add(name)
+    except Exception:
+        pass
+
+    return sorted(merged_heads & existing)
+
+
+@app.delete("/api/projects/{owner}/{repo_name}/branches/{branch:path}", status_code=200)
+def delete_project_branch(owner: str, repo_name: str, branch: str):
+    """Delete a feat/* or sprint/* branch from the remote.
+    Returns 400 for protected branches (develop/master/main/attachments) or
+    branches not matching the allowed patterns.
+    """
+    if branch in _PROTECTED_BRANCHES:
+        raise HTTPException(status_code=400,
+                            detail=f"Cannot delete protected branch: {branch!r}")
+    if not _STALE_BRANCH_RE.match(branch):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Only feat/*, feature/*, or sprint/* branches may be deleted. Got: {branch!r}",
+        )
+
+    repo = f"{owner}/{repo_name}"
+    try:
+        result = subprocess.run(
+            ["gh", "api", "--method", "DELETE",
+             f"repos/{repo}/git/refs/heads/{branch}"],
+            capture_output=True, text=True, check=False,
+        )
+        if result.returncode != 0:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to delete {branch!r}: {result.stderr.strip()}",
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    return {"ok": True, "branch": branch}
+
+
 @app.post("/api/projects/{owner}/{repo_name}/approve-batch")
 async def approve_batch(owner: str, repo_name: str):
     repo = f"{owner}/{repo_name}"
@@ -2791,6 +2954,18 @@ async def assign_sprint_label(body: SprintAssignBody):
     On success: invalidates cache, broadcasts SSE sprint_plan_update, returns {"ok": true}.
     Creates sprint-N label if it doesn't exist.
     """
+    action_id = str(uuid.uuid4())
+
+    # Capture current sprint labels before the change for from_sprint
+    try:
+        _issue_data = github_client.get_issue(body.issue)
+        _cur_labels = [lbl["name"] for lbl in _issue_data.get("labels", [])]
+        _from_sprint = next(
+            (lbl for lbl in _cur_labels if _SPRINT_LABEL_RE_ALL.match(lbl)), None
+        ) or "backlog"
+    except Exception:
+        _from_sprint = None
+
     try:
         if body.sprint_label is not None:
             # Dotted or plain label string — use the string-based assign function
@@ -2809,6 +2984,38 @@ async def assign_sprint_label(body: SprintAssignBody):
         raise _gh_error(e)
     except ValueError as e:
         raise HTTPException(400, detail=str(e))
+
+    _to_sprint: str | None
+    if body.sprint_label is not None:
+        _to_sprint = (body.sprint_label.strip() or None) or "backlog"
+    elif body.sprint is not None:
+        _to_sprint = f"sprint-{body.sprint}"
+    else:
+        _to_sprint = "backlog"
+
+    _emit_dashboard_event(
+        project="dashboard",
+        type="ticket_moved",
+        target=f"#{body.issue}",
+        detail={"from_sprint": _from_sprint, "to_sprint": _to_sprint},
+        action_id=action_id,
+    )
+    if _to_sprint and _to_sprint != "backlog" and _to_sprint != _from_sprint:
+        _emit_dashboard_event(
+            project="dashboard",
+            type="label_added",
+            target=f"#{body.issue}",
+            detail={"label": _to_sprint},
+            action_id=action_id,
+        )
+    if _from_sprint and _from_sprint != "backlog" and _from_sprint != _to_sprint:
+        _emit_dashboard_event(
+            project="dashboard",
+            type="label_removed",
+            target=f"#{body.issue}",
+            detail={"label": _from_sprint},
+            action_id=action_id,
+        )
 
     await broadcast({"type": "update", "event": {"event_type": "sprint_plan_update"}})
     return {"ok": True}
@@ -2853,6 +3060,18 @@ async def add_sprint_label(issue_id: int, body: SprintLabelBody):
     - sprint_label: "sprint-N" string (or null/empty to remove sprint label)
     - sprint: int (legacy; converted to "sprint-N")
     """
+    action_id = str(uuid.uuid4())
+
+    # Capture from_sprint before change
+    try:
+        _issue_data = github_client.get_issue(issue_id, repo_name=body.project or None)
+        _cur_labels = [lbl["name"] for lbl in _issue_data.get("labels", [])]
+        _from_sprint = next(
+            (lbl for lbl in _cur_labels if _SPRINT_LABEL_RE_ALL.match(lbl)), None
+        ) or "backlog"
+    except Exception:
+        _from_sprint = None
+
     # Resolve the sprint label from whichever field was provided
     if body.sprint_label is not None:
         raw = body.sprint_label.strip()
@@ -2874,6 +3093,31 @@ async def add_sprint_label(issue_id: int, body: SprintLabelBody):
         raise _gh_error(e)
     except ValueError as e:
         raise HTTPException(400, detail=str(e))
+
+    _to_sprint = label_to_assign or "backlog"
+    _emit_dashboard_event(
+        project=body.project or "dashboard",
+        type="ticket_moved",
+        target=f"#{issue_id}",
+        detail={"from_sprint": _from_sprint, "to_sprint": _to_sprint},
+        action_id=action_id,
+    )
+    if label_to_assign and label_to_assign != _from_sprint:
+        _emit_dashboard_event(
+            project=body.project or "dashboard",
+            type="label_added",
+            target=f"#{issue_id}",
+            detail={"label": label_to_assign},
+            action_id=action_id,
+        )
+    if _from_sprint and _from_sprint != "backlog" and _from_sprint != label_to_assign:
+        _emit_dashboard_event(
+            project=body.project or "dashboard",
+            type="label_removed",
+            target=f"#{issue_id}",
+            detail={"label": _from_sprint},
+            action_id=action_id,
+        )
     return {"ok": True}
 
 
@@ -2977,6 +3221,33 @@ SPRINT_LOG_PATH = Path(__file__).parent / "sprints" / "sprint_run.log"
 # sprint_manager validates the value — no validation added here.
 _ALERT_MODES = os.environ.get("COMMANDER_ALERT_MODES", "dashboard-banner,ntfy")
 
+_SPRINT_LABEL_RE_ALL = re.compile(r"^sprint-\d+(\.\d+)*$")
+
+
+def _dashboard_actor() -> str:
+    return os.environ.get("COMMANDER_USER", "dashboard")
+
+
+def _emit_dashboard_event(
+    project: str,
+    type: str,
+    target: str,
+    detail: dict,
+    action_id: str,
+) -> None:
+    try:
+        db.record_event(
+            project=project,
+            source="dashboard",
+            actor=_dashboard_actor(),
+            type=type,
+            target=target,
+            detail=detail,
+            action_id=action_id,
+        )
+    except Exception:
+        pass
+
 
 def _sprint_label_sort_key(label: str) -> tuple:
     """Return numeric components tuple for natural multi-level sprint label ordering."""
@@ -3034,6 +3305,13 @@ def run_sprint(request: Request, body: SprintRunBody):
         start_new_session=True,
     )
     _slog.event("sprint.dispatch", project="dashboard", request_id=request.state.request_id, sprint_label=body.label, dispatch_type="simple")
+    _emit_dashboard_event(
+        project="dashboard",
+        type="sprint_run",
+        target=body.label,
+        detail={"sprint_id": body.label},
+        action_id=str(uuid.uuid4()),
+    )
     return {"ok": True, "label": body.label}
 
 
@@ -4639,6 +4917,13 @@ def kill_sprint(sprint_label: str, project: str):
     except Exception:
         pass
 
+    _emit_dashboard_event(
+        project=project or "dashboard",
+        type="sprint_cancelled",
+        target=sprint_label,
+        detail={"sprint_id": sprint_label},
+        action_id=str(uuid.uuid4()),
+    )
     return {"ok": True}
 
 
@@ -4767,6 +5052,18 @@ def get_logs_runs(
     paged = items[offset: offset + page_size]
 
     return {"items": paged, "page": page, "page_size": page_size, "total": total}
+
+
+@app.post("/api/logs/sync-github")
+def post_logs_sync_github(project: Optional[str] = None):
+    """Poll GitHub Events API for the project repo and upsert into the events table."""
+    if not project:
+        return {"synced": 0, "skipped": 0, "rate_limited": False, "error": "project required"}
+    try:
+        result = github_events_sync.sync_github_events(project=project, repo=project)
+    except Exception as exc:
+        return {"synced": 0, "skipped": 0, "rate_limited": False, "error": str(exc)}
+    return result
 
 
 @app.get("/api/sprints/{sprint_label}/dispatch-log")
@@ -5278,6 +5575,13 @@ async def create_sprint_label(body: SprintCreateBody):
         )
     except Exception:
         pass
+    _emit_dashboard_event(
+        project=body.project or "dashboard",
+        type="sprint_created",
+        target=sprint_label,
+        detail={"sprint_name": sprint_label},
+        action_id=str(uuid.uuid4()),
+    )
     return {"ok": True, "sprint_label": sprint_label}
 
 
@@ -9004,6 +9308,7 @@ async def bulk_create_start(
         "image_assignments": image_assignments,
         "image_url_map": None,
         "tickets": tickets,
+        "_action_id": str(uuid.uuid4()),
     }
     _bulk_jobs[job_id] = job
     _bulk_job_queues[job_id] = []
@@ -9514,6 +9819,17 @@ async def bulk_post_selected(job_id: str, body: BulkPostSelectedBody):
             job["status"] = "done"
             _persist_bulk_job(job)
             await _broadcast_bulk_event(job_id, {"type": "job_done", "job_id": job_id})
+            _created_ids = [
+                f"#{t['issue_num']}" for t in job["tickets"]
+                if t.get("state") == "created" and t.get("issue_num") is not None
+            ]
+            _emit_dashboard_event(
+                project=job.get("repo") or "dashboard",
+                type="bulk_created",
+                target=",".join(_created_ids),
+                detail={"ticket_ids": _created_ids},
+                action_id=job.get("_action_id") or str(uuid.uuid4()),
+            )
 
     asyncio.create_task(_post_task())
     return {"ok": True}

@@ -143,6 +143,13 @@ import github_client
 from services.run_id import mint_run_id
 from services.logging import log as structured_log
 
+try:
+    from db import record_event as _db_record_event  # type: ignore[import]
+    _RECORD_EVENT_AVAILABLE = True
+except ImportError:
+    _db_record_event = None  # type: ignore[assignment]
+    _RECORD_EVENT_AVAILABLE = False
+
 # Import failure-parsing helpers from post_test_report (no circular deps)
 try:
     sys.path.insert(0, str(SCRIPTS_DIR))
@@ -176,6 +183,31 @@ _HAIKU_OUTPUT_COST_PER_M = 4.00   # claude-haiku-4-5-20251001 output (reference)
 # Checked in write_sprint_summary and in main()'s SystemExit handler.
 # threading.Event for thread-safe signaling across worker threads.
 _sprint_user_cancelled: threading.Event = threading.Event()
+
+
+def _emit_sprint_lifecycle_event(
+    type: str,
+    target: str,
+    actor: str,
+    detail: dict,
+    project: str,
+    action_id: "str | None" = None,
+) -> None:
+    """Write one lifecycle event to the events table. Silently no-ops on any error."""
+    if not _RECORD_EVENT_AVAILABLE or _db_record_event is None:
+        return
+    try:
+        _db_record_event(
+            project=project,
+            source="sprint_manager",
+            actor=actor,
+            type=type,
+            target=target,
+            detail=detail,
+            action_id=action_id,
+        )
+    except Exception:
+        pass
 
 
 # ── SprintConfig dataclass + loader ──────────────────────────────────────────
@@ -5106,6 +5138,14 @@ def run_sprint(
     start_time = time.monotonic()
 
     total_issues = len(state.issues)
+    _emit_sprint_lifecycle_event(
+        type="sprint_started",
+        target=f"sprint-{sprint_num}" if sprint_num is not None else label,
+        actor="system",
+        detail={"ticket_count": total_issues, "levels": len(_dispatch_levels)},
+        project=label,
+        action_id=_run_id,
+    )
     # Flat iteration preserving level boundaries for level_start / level_complete events.
     _flat_dispatch: list[tuple[int, IssueState]] = [
         (lvl_idx, iss)
@@ -5316,6 +5356,14 @@ def run_sprint(
                 # -- Dispatch coder --
                 issue_state.set_agent_status("coder_dispatched")
                 issue_state.coder_started_at = issue_state.status_changed_at
+                _emit_sprint_lifecycle_event(
+                    type="ticket_dispatched",
+                    target=f"#{num}",
+                    actor="system",
+                    detail={"agent": "CODER"},
+                    project=label,
+                    action_id=_run_id,
+                )
                 state.save(state_path)
                 _post_sprint_status(state, api_url=api_url)
 
@@ -5334,12 +5382,24 @@ def run_sprint(
                     _post_sprint_status(_st, api_url=_api)
 
                 _coder_t0 = time.monotonic()
-                coder_ok, coder_category = _dispatch_coder(
-                    num, alert_modes, sprint_branch=target_branch, repo_name=eff_repo, cfg=cfg,
-                    chosen_port=chosen_port, rate_limit_events=state.rate_limit_events,
-                    on_running=_on_coder_running, sprint_label=label,
-                    prior_failures=_fix_history if _fix_history else None,
-                )
+                try:
+                    coder_ok, coder_category = _dispatch_coder(
+                        num, alert_modes, sprint_branch=target_branch, repo_name=eff_repo, cfg=cfg,
+                        chosen_port=chosen_port, rate_limit_events=state.rate_limit_events,
+                        on_running=_on_coder_running, sprint_label=label,
+                        prior_failures=_fix_history if _fix_history else None,
+                    )
+                except SystemExit:
+                    _remaining = [i for i in state.issues if i.status not in ("done", "skipped")]
+                    _emit_sprint_lifecycle_event(
+                        type="sprint_cancelled",
+                        target=f"sprint-{sprint_num}" if sprint_num is not None else label,
+                        actor="system",
+                        detail={"tickets_remaining": len(_remaining)},
+                        project=label,
+                        action_id=_run_id,
+                    )
+                    raise
                 _coder_elapsed = time.monotonic() - _coder_t0
                 _coder_m, _coder_s = divmod(int(_coder_elapsed), 60)
                 print(f"  Total time used on coder dispatch: {_coder_m}m {_coder_s}s")
@@ -5453,6 +5513,14 @@ def run_sprint(
                 # -- Lifecycle: coder_done --
                 issue_state.set_agent_status("coder_done")
                 issue_state.coder_finished_at = issue_state.status_changed_at
+                _emit_sprint_lifecycle_event(
+                    type="ticket_agent_finished",
+                    target=f"#{num}",
+                    actor="system",
+                    detail={"agent": "CODER", "duration": round(_coder_elapsed)},
+                    project=label,
+                    action_id=_run_id,
+                )
                 state.save(state_path)
                 _post_sprint_status(state, api_url=api_url)
 
@@ -5462,6 +5530,14 @@ def run_sprint(
             # -- Lifecycle: tester_dispatched --
             issue_state.set_agent_status("tester_dispatched")
             issue_state.tester_started_at = issue_state.status_changed_at
+            _emit_sprint_lifecycle_event(
+                type="ticket_dispatched",
+                target=f"#{num}",
+                actor="system",
+                detail={"agent": "TESTER"},
+                project=label,
+                action_id=_run_id,
+            )
             state.save(state_path)
             _post_sprint_status(state, api_url=api_url)
 
@@ -5474,11 +5550,23 @@ def run_sprint(
 
             # -- Dispatch tester --
             _tester_t0 = time.monotonic()
-            tester_rc, hang_category = _dispatch_tester(
-                num, alert_modes, sprint_branch=target_branch, repo_name=eff_repo, cfg=cfg,
-                chosen_port=chosen_port, rate_limit_events=state.rate_limit_events,
-                on_running=_on_tester_running, sprint_label=label,
-            )
+            try:
+                tester_rc, hang_category = _dispatch_tester(
+                    num, alert_modes, sprint_branch=target_branch, repo_name=eff_repo, cfg=cfg,
+                    chosen_port=chosen_port, rate_limit_events=state.rate_limit_events,
+                    on_running=_on_tester_running, sprint_label=label,
+                )
+            except SystemExit:
+                _remaining = [i for i in state.issues if i.status not in ("done", "skipped")]
+                _emit_sprint_lifecycle_event(
+                    type="sprint_cancelled",
+                    target=f"sprint-{sprint_num}" if sprint_num is not None else label,
+                    actor="system",
+                    detail={"tickets_remaining": len(_remaining)},
+                    project=label,
+                    action_id=_run_id,
+                )
+                raise
             _tester_elapsed = time.monotonic() - _tester_t0
             _tester_m, _tester_s = divmod(int(_tester_elapsed), 60)
             print(f"  Total time used on tester dispatch: {_tester_m}m {_tester_s}s")
@@ -5526,6 +5614,14 @@ def run_sprint(
             # -- Lifecycle: tester_done --
             issue_state.set_agent_status("tester_done")
             issue_state.tester_finished_at = issue_state.status_changed_at
+            _emit_sprint_lifecycle_event(
+                type="ticket_agent_finished",
+                target=f"#{num}",
+                actor="system",
+                detail={"agent": "TESTER", "duration": round(_tester_elapsed)},
+                project=label,
+                action_id=_run_id,
+            )
             state.save(state_path)
             _post_sprint_status(state, api_url=api_url)
 
@@ -5693,6 +5789,19 @@ def run_sprint(
     state.wall_clock_secs = time.monotonic() - start_time
     _neon_sprint_status(label, "complete", _eff_sprints_dir)
     state.save(state_path)
+    _emit_sprint_lifecycle_event(
+        type="sprint_finished",
+        target=f"sprint-{sprint_num}" if sprint_num is not None else label,
+        actor="system",
+        detail={
+            "done": len(summary.merged),
+            "failed": len(summary.gate_failures),
+            "skipped": len(summary.skipped),
+            "duration": round(state.wall_clock_secs),
+        },
+        project=label,
+        action_id=_run_id,
+    )
 
     return summary, state
 

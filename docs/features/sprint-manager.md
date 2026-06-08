@@ -105,6 +105,43 @@ and `.commander/sprints/sprint-N-summary-YYYY-MM-DD.md`.
 
 ---
 
+## Quality Gates
+
+After the tester exits 0, the sprint manager runs five gates in this order
+(cheap/deterministic first so bad tickets fail before expensive gates):
+
+| # | Gate | Tool | Skip env var |
+|---|------|------|-------------|
+| 1 | **typecheck** | mypy (Python), tsc --noEmit (TypeScript) | `COMMANDER_GATE_TYPECHECK=0` |
+| 2 | **lint** | ruff (Python), eslint/biome + prettier (JS/TS) | `--no-gate-lint` |
+| 3 | **design** | `npx impeccable detect` — UI anti-pattern detector, no LLM | `COMMANDER_GATE_DESIGN=0` |
+| 4 | **pytest** | pytest -x on changed test files | `--no-gate-pytest` |
+| 5 | **merge-preview** | `git merge --no-commit --no-ff` dry run | `--no-gate-merge-preview` |
+
+Gates stop on first failure — the issue is reverted to SIT and a structured
+comment is posted. All gates are individually skippable via CLI flags or env
+vars. Pass `--skip-gates` to bypass all gates and force-merge (use with caution).
+
+Gates that don't find the required tool (mypy, tsc, eslint, impeccable) skip
+gracefully with a warning rather than failing the build.
+
+---
+
+## Coder TDD Workflow
+
+The coder prompt instructs the agent to follow TDD:
+
+1. Read the issue's `## Acceptance Criteria` section
+2. Write pytest tests that encode each criterion **before** any implementation
+3. Implement until all tests pass
+4. Tests must not be deleted, skipped, or weakened to achieve a passing run
+
+If the project has `PRODUCT.md` and `DESIGN.md` at the repo root, the coder
+reads them before touching frontend/UI files. Use these to codify design
+conventions and anti-patterns.
+
+---
+
 ## Configuration
 
 Sprint manager reads `.commander/sprint.yaml`. After cloning, run:

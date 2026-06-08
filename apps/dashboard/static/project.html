@@ -1309,7 +1309,9 @@
     #pane-sprint-mgmt.smgmt-compact .smgmt-reestimate-btn,
     #pane-sprint-mgmt.smgmt-compact .smgmt-stale-badge,
     #pane-sprint-mgmt.smgmt-compact .smgmt-retry-pill,
-    #pane-sprint-mgmt.smgmt-compact .smgmt-moveto-pill {
+    #pane-sprint-mgmt.smgmt-compact .smgmt-moveto-pill,
+    #pane-sprint-mgmt.smgmt-compact .smgmt-sched-dep-badge,
+    #pane-sprint-mgmt.smgmt-compact .smgmt-sched-dep-warn {
       display: none !important;
     }
 
@@ -3032,6 +3034,23 @@
     }
     [data-theme="dark"] .smgmt-dep-order-badge { background: rgba(99,102,241,.15); color: #a5b4fc; }
     [data-theme="dark"] .smgmt-dep-order-badge.is-cycle { background: rgba(234,179,8,.12); color: #fcd34d; }
+    /* Scheduling dependency inline badge (issue #597) */
+    .smgmt-sched-dep-badge {
+      flex-shrink: 0; display: inline-flex; align-items: center; gap: 3px;
+      font-size: 11px; font-weight: 500; padding: 1px 6px; border-radius: 3px;
+      background: rgba(99,102,241,.08); color: #6366f1;
+      border: 1px solid rgba(99,102,241,.22);
+      white-space: nowrap;
+    }
+    [data-theme="dark"] .smgmt-sched-dep-badge { background: rgba(99,102,241,.15); color: #a5b4fc; }
+    .smgmt-sched-dep-warn {
+      flex-shrink: 0; display: inline-flex; align-items: center; gap: 3px;
+      font-size: 11px; font-weight: 600; padding: 1px 5px; border-radius: 3px;
+      background: rgba(245,158,11,.1); color: #b45309;
+      border: 1px solid rgba(245,158,11,.28);
+      cursor: default; white-space: nowrap;
+    }
+    [data-theme="dark"] .smgmt-sched-dep-warn { background: rgba(234,179,8,.12); color: #fcd34d; }
     .smgmt-est-popover {
       position: fixed; z-index: 9998;
       background: var(--surface); border: 1px solid var(--border);
@@ -9434,6 +9453,69 @@ async function _smgmtLivePollTick() {
   } catch (_) { /* silently ignore poll errors */ }
 }
 
+// ── Scheduling dependency inline badges (issue #597) ──────────────────────
+function _smgmtOrderedSprintLabels() {
+  if (!_smgmtData) return [];
+  const order = _smgmtData.order || [];
+  if (order.length > 0) return order.filter(l => /^sprint-\d+(\.\d+)*$/.test(l));
+  return (_smgmtData.sprints || []).sort((a, b) => a - b).map(n => `sprint-${n}`);
+}
+
+function _smgmtSchedDepHtml(ticket) {
+  const deps = _parseDeps(ticket.body || '');
+  if (!deps.blocks.length && !deps.blockedBy.length) return '';
+  if (!_smgmtData) return '';
+
+  const allIssues = _smgmtData.issues || [];
+  const orderedLabels = _smgmtOrderedSprintLabels();
+  const issueMap = new Map(allIssues.map(i => [i.number, i]));
+  const myLabel = ticket.sprint_label || null;
+  const myIdx = myLabel ? orderedLabels.indexOf(myLabel) : -1;
+
+  const violations = [];
+
+  // AC3: dependencies this ticket depends on (blockedBy) that are out of order
+  if (myIdx !== -1) {
+    for (const n of deps.blockedBy) {
+      const dep = issueMap.get(n);
+      if (!dep) continue;
+      if (!dep.sprint_label) {
+        violations.push(`#${n} is in the backlog`);
+      } else {
+        const depIdx = orderedLabels.indexOf(dep.sprint_label);
+        if (depIdx !== -1 && depIdx > myIdx) {
+          violations.push(`#${n} is in ${dep.sprint_label}`);
+        }
+      }
+    }
+  }
+
+  // AC7: tickets that depend on this ticket (blocks) that are in an earlier sprint
+  for (const n of deps.blocks) {
+    const downstream = issueMap.get(n);
+    if (!downstream || !downstream.sprint_label) continue;
+    const downIdx = orderedLabels.indexOf(downstream.sprint_label);
+    if (myIdx === -1) {
+      violations.push(`#${n} is in ${downstream.sprint_label} (needs this first)`);
+    } else if (downIdx !== -1 && downIdx < myIdx) {
+      violations.push(`#${n} is in ${downstream.sprint_label} (needs this first)`);
+    }
+  }
+
+  // Badge label: "blocks #X / depends #Y"
+  const parts = [];
+  if (deps.blocks.length) parts.push(`blocks ${deps.blocks.map(n => `#${n}`).join(' ')}`);
+  if (deps.blockedBy.length) parts.push(`depends ${deps.blockedBy.map(n => `#${n}`).join(' ')}`);
+  const badgeText = parts.join(' / ');
+
+  if (violations.length) {
+    const tipText = violations.join('; ');
+    return `<span class="smgmt-sched-dep-warn" title="${escHtml(tipText)}"
+      aria-label="Scheduling violation: ${escHtml(tipText)}"><i class="ti ti-alert-triangle"></i>${escHtml(badgeText)}</span>`;
+  }
+  return `<span class="smgmt-sched-dep-badge">${escHtml(badgeText)}</span>`;
+}
+
 function _smgmtTicketRowHtml(ticket, label) {
   const hasRework = (ticket.labels || []).some(l => l.name === 'need-rework' || l.name === 'needs-rework');
   const statusClass = hasRework ? 'smgmt-status-need-rework' : ({
@@ -9468,6 +9550,7 @@ function _smgmtTicketRowHtml(ticket, label) {
   const riskFlagIconsHtml = _smgmtRiskFlagIconsHtml(ticket.number);
   const conflictBadgeHtml = _smgmtConflictBadgeHtml(ticket.number);
   const depOrderBadgeHtml = _smgmtDepOrderBadgeHtml(ticket.number);
+  const schedDepHtml = _smgmtSchedDepHtml(ticket);
 
   const ticketLabelNames = (ticket.labels || []).map(l => l.name).join(',');
 
@@ -9493,7 +9576,7 @@ function _smgmtTicketRowHtml(ticket, label) {
       <a class="smgmt-ticket-num" href="${escHtml(ticket.url || '#')}" target="_blank"
          rel="noopener" draggable="false" onclick="event.stopPropagation()">#${ticket.number}</a>
       <span class="smgmt-ticket-title" title="${escHtml(ticket.title)}">${escHtml(ticket.title)}</span>
-      ${sizePillHtml}${staleBadgeHtml}${estimateBadgeHtml}${riskFlagIconsHtml}${conflictBadgeHtml}${depOrderBadgeHtml}${reEstBtnHtml}
+      ${sizePillHtml}${staleBadgeHtml}${estimateBadgeHtml}${riskFlagIconsHtml}${conflictBadgeHtml}${depOrderBadgeHtml}${schedDepHtml}${reEstBtnHtml}
       <span class="smgmt-ticket-status ${statusClass}">${escHtml(statusLabel)}</span>
       <button class="btn-view-log" tabindex="0" title="View issue log"
               onclick="event.stopPropagation();openLvIssueLog(${ticket.number},'${escHtml(label)}',_smgmtRepo()||'')">
@@ -11696,6 +11779,7 @@ function _smgmtBacklogTicketHtml(ticket, sprintNums) {
   const isSelected = _smgmtSelectedIssues.has(ticket.number);
   const hasEstimate = (ticket.labels || []).some(l => /^size-[SMLX]+$/.test(l.name));
   const backlogLabelNames = (ticket.labels || []).map(l => l.name).join(',');
+  const schedDepHtml = _smgmtSchedDepHtml(ticket);
   return `
     <div class="smgmt-ticket${isSelected ? ' is-selected' : ''}" id="smgmt-ticket-${ticket.number}"
          draggable="true"
@@ -11714,6 +11798,7 @@ function _smgmtBacklogTicketHtml(ticket, sprintNums) {
       <a class="smgmt-ticket-num" href="${escHtml(ticket.url || '#')}" target="_blank"
          rel="noopener" draggable="false" onclick="event.stopPropagation()">#${ticket.number}</a>
       <span class="smgmt-ticket-title" title="${escHtml(ticket.title)}">${escHtml(ticket.title)}</span>
+      ${schedDepHtml}
       <button class="smgmt-row-menu-btn" tabindex="0" title="Ticket actions" aria-haspopup="true" aria-expanded="false"
               onclick="event.stopPropagation();_smgmtRowMenuOpen(event, ${ticket.number}, null, ${hasEstimate})"
               onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();_smgmtRowMenuOpen(event,${ticket.number},null,${hasEstimate});}">

@@ -1307,8 +1307,11 @@
     #pane-sprint-mgmt.smgmt-compact .smgmt-ticket-agent-tag,
     #pane-sprint-mgmt.smgmt-compact .smgmt-ticket-elapsed,
     #pane-sprint-mgmt.smgmt-compact .smgmt-reestimate-btn,
+    #pane-sprint-mgmt.smgmt-compact .smgmt-stale-badge,
     #pane-sprint-mgmt.smgmt-compact .smgmt-retry-pill,
-    #pane-sprint-mgmt.smgmt-compact .smgmt-moveto-pill {
+    #pane-sprint-mgmt.smgmt-compact .smgmt-moveto-pill,
+    #pane-sprint-mgmt.smgmt-compact .smgmt-sched-dep-badge,
+    #pane-sprint-mgmt.smgmt-compact .smgmt-sched-dep-warn {
       display: none !important;
     }
 
@@ -1399,6 +1402,39 @@
     .smgmt-progress-label {
       font-size: 11px; color: var(--text-sub);
       white-space: nowrap; flex-shrink: 0;
+    }
+    /* ── Capacity gauge (issue #595) ── */
+    .smgmt-capacity-row {
+      display: flex; align-items: center; gap: 4px; flex-shrink: 0;
+      font-size: 11px; color: var(--text-muted);
+    }
+    .smgmt-capacity-input {
+      width: 44px; font-size: 11px; color: var(--text);
+      background: var(--surface-2); border: 1px solid var(--border);
+      border-radius: 4px; padding: 1px 4px; outline: none;
+      font-family: inherit; text-align: right;
+      -moz-appearance: textfield;
+    }
+    .smgmt-capacity-input::-webkit-inner-spin-button,
+    .smgmt-capacity-input::-webkit-outer-spin-button { -webkit-appearance: none; }
+    .smgmt-capacity-input:focus { border-color: var(--blue); }
+    .smgmt-capacity-gauge {
+      min-height: 9px; display: flex; align-items: center; gap: 6px;
+      padding: 0 0 4px;
+    }
+    .smgmt-capacity-bar-track {
+      flex: 1; height: 4px; background: var(--surface-2);
+      border-radius: 2px; overflow: hidden;
+    }
+    .smgmt-capacity-bar-fill {
+      height: 100%; border-radius: 2px;
+      transition: width .3s ease, background .2s;
+    }
+    .smgmt-capacity-bar-fill--green { background: var(--green); }
+    .smgmt-capacity-bar-fill--amber { background: var(--amber); }
+    .smgmt-capacity-bar-fill--red   { background: var(--red); }
+    .smgmt-capacity-overage {
+      font-size: 10px; font-weight: 600; flex-shrink: 0; color: var(--red);
     }
     .smgmt-sprint-goal-text {
       font-size: 12px; color: var(--text-muted);
@@ -2927,6 +2963,31 @@
       animation: smgmt-ring-spin .6s linear infinite;
       display: inline-block;
     }
+    /* Bulk estimate button (issue #598) */
+    .smgmt-bulk-est-btn {
+      font-size: 11px; padding: 3px 8px; border-radius: 4px;
+      background: var(--bg); border: 1px solid var(--border);
+      color: var(--text-sub); cursor: pointer; white-space: nowrap;
+      display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0;
+    }
+    .smgmt-bulk-est-btn:hover { background: var(--blue-bg); border-color: var(--blue); }
+    .smgmt-bulk-est-btn:disabled { opacity: .4 !important; cursor: not-allowed; }
+    .smgmt-bulk-est-progress {
+      font-size: 11px; color: var(--text-muted); white-space: nowrap;
+      display: none; flex-shrink: 0;
+    }
+    .smgmt-bulk-est-progress.show { display: inline; }
+    /* Stale estimate badge (issue #596) */
+    .smgmt-stale-badge {
+      padding: 1px 5px; font-size: 10px; font-weight: 600;
+      background: var(--amber-bg); color: var(--amber);
+      border: 1px solid currentColor; border-radius: 3px;
+      cursor: pointer; flex-shrink: 0; white-space: nowrap;
+      font-family: var(--mono);
+    }
+    .smgmt-stale-badge:hover { filter: brightness(.85); }
+    .smgmt-stale-badge:disabled { opacity: .5; cursor: not-allowed; }
+    .smgmt-stale-badge--error { background: var(--red-bg); color: var(--red); }
     .tdp-reestimate-btn {
       padding: 4px 10px; font-size: 12px; font-weight: 600;
       background: transparent; color: var(--blue);
@@ -2987,6 +3048,23 @@
     }
     [data-theme="dark"] .smgmt-dep-order-badge { background: rgba(99,102,241,.15); color: #a5b4fc; }
     [data-theme="dark"] .smgmt-dep-order-badge.is-cycle { background: rgba(234,179,8,.12); color: #fcd34d; }
+    /* Scheduling dependency inline badge (issue #597) */
+    .smgmt-sched-dep-badge {
+      flex-shrink: 0; display: inline-flex; align-items: center; gap: 3px;
+      font-size: 11px; font-weight: 500; padding: 1px 6px; border-radius: 3px;
+      background: rgba(99,102,241,.08); color: #6366f1;
+      border: 1px solid rgba(99,102,241,.22);
+      white-space: nowrap;
+    }
+    [data-theme="dark"] .smgmt-sched-dep-badge { background: rgba(99,102,241,.15); color: #a5b4fc; }
+    .smgmt-sched-dep-warn {
+      flex-shrink: 0; display: inline-flex; align-items: center; gap: 3px;
+      font-size: 11px; font-weight: 600; padding: 1px 5px; border-radius: 3px;
+      background: rgba(245,158,11,.1); color: #b45309;
+      border: 1px solid rgba(245,158,11,.28);
+      cursor: default; white-space: nowrap;
+    }
+    [data-theme="dark"] .smgmt-sched-dep-warn { background: rgba(234,179,8,.12); color: #fcd34d; }
     .smgmt-est-popover {
       position: fixed; z-index: 9998;
       background: var(--surface); border: 1px solid var(--border);
@@ -4662,6 +4740,11 @@
                 Backlog
                 <span class="smgmt-backlog-count-badge" id="smgmt-backlog-count"></span>
               </span>
+              <button class="smgmt-bulk-est-btn hidden" id="smgmt-backlog-bulk-est-btn"
+                      onclick="event.stopPropagation();_smgmtBulkEstimate('__backlog__',this)"
+                      title="Estimate all unsized backlog tickets">
+                <i class="ti ti-calculator"></i> Estimate all unsized</button>
+              <span class="smgmt-bulk-est-progress" id="smgmt-backlog-bulk-est-progress"></span>
               <span class="smgmt-backlog-chevron-icon"><i class="ti ti-chevron-down"></i></span>
             </div>
             <div class="smgmt-backlog-tickets-container" id="smgmt-backlog-tickets-container">
@@ -7188,6 +7271,9 @@ function _smgmtRender(data) {
 
   listEl.innerHTML = cards || '<div class="loading-msg">No sprints found.</div>';
 
+  // Populate capacity gauges (reads localStorage + estimate cache)
+  _smgmtInitCapacityGauges(orderedLabels);
+
   // Re-inject selection bar if tickets are selected
   if (_smgmtSelectedIssues.size > 0) _smgmtUpdateSelectionUI();
 
@@ -7562,6 +7648,7 @@ async function _smgmtLoadEstimates(orderedLabels, bySprint) {
           _smgmtUpdateEstimateBadge(t.number);
         }
         _smgmtUpdateColRollup(label, tickets);
+        _smgmtUpdateCapacityGauge(label);
       }
     } catch (_) {
       // fail silently — leave as "— estimated"
@@ -8851,6 +8938,17 @@ function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent, finished) {
 
   const logHtml = (outcome && outcome.sprint_status) ? _smgmtOutcomeLogHtml(label, outcome) : '';
   const cancelBannerHtml = _smgmtIsCancelled(outcome) ? _smgmtCancelBannerHtml(label) : '';
+
+  // Bulk estimate button (issue #598): show when any ticket lacks a size-* label
+  const hasUnsizedTickets = tickets.length > 0 && tickets.some(
+    t => !(t.labels || []).find(l => /^size-[SMLX]+$/.test(l.name))
+  );
+  const bulkEstBtnHtml = `<button class="smgmt-bulk-est-btn${hasUnsizedTickets ? '' : ' hidden'}"
+                    onclick="event.stopPropagation();_smgmtBulkEstimate('${escHtml(label)}',this)"
+                    title="Estimate all unsized tickets in this sprint">
+                    <i class="ti ti-calculator"></i> Estimate all unsized</button>
+                   <span class="smgmt-bulk-est-progress"></span>`;
+
   const parentLineage = parent
     ? `<span class="smgmt-sprint-lineage" title="Child sprint spawned from ${escHtml(parent)}">← from ${escHtml(sprintLabelDisplay(parent))}</span>`
     : '';
@@ -8880,7 +8978,9 @@ function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent, finished) {
           <span class="smgmt-sprint-count" id="smgmt-col-rollup-${escHtml(label)}">${_smgmtRollupText(rollupItems)}</span>
         </div>
         <div class="smgmt-sprint-header-right">
+          ${_smgmtCapacityInputHtml(label)}
           ${_smgmtSortBtnHtml(label)}
+          ${bulkEstBtnHtml}
           <button class="smgmt-finish-btn ${finishHidden}" ${finishDisabled}
                   title="${finishDisabled ? 'No open tickets' : 'Finish sprint'}"
                   onclick="smgmtFinishSprint('${escHtml(label)}')">
@@ -8891,6 +8991,7 @@ function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent, finished) {
           ${actionBtn}
         </div>
       </div>
+      <div class="smgmt-capacity-gauge" id="smgmt-cap-gauge-${escHtml(label)}"></div>
       ${summaryHtml}
       ${cancelBannerHtml}
       ${outcomeBandHtml}
@@ -9000,12 +9101,14 @@ function _smgmtRunningCardHtml(label, n, tickets) {
           <span class="smgmt-sprint-count" id="smgmt-col-rollup-${escHtml(label)}">${_smgmtRollupText(sourceTickets)}</span>
         </div>
         <div class="smgmt-sprint-header-right">
+          ${_smgmtCapacityInputHtml(label)}
           <button class="smgmt-delete-btn" disabled title="Cancel sprint first">
             <i class="ti ti-trash"></i> Delete</button>
           <button class="smgmt-run-btn" disabled title="Sprint is currently running">
             <i class="ti ti-player-play"></i> Running…</button>
         </div>
       </div>
+      <div class="smgmt-capacity-gauge" id="smgmt-cap-gauge-${escHtml(label)}"></div>
       <div class="smgmt-running-stat-strip" id="smgmt-running-stats-${escHtml(label)}">
         <div class="smgmt-running-stat">
           <span class="rsnum green" id="smgmt-rs-done-${escHtml(label)}">${doneCount}</span>
@@ -9381,6 +9484,69 @@ async function _smgmtLivePollTick() {
   } catch (_) { /* silently ignore poll errors */ }
 }
 
+// ── Scheduling dependency inline badges (issue #597) ──────────────────────
+function _smgmtOrderedSprintLabels() {
+  if (!_smgmtData) return [];
+  const order = _smgmtData.order || [];
+  if (order.length > 0) return order.filter(l => /^sprint-\d+(\.\d+)*$/.test(l));
+  return (_smgmtData.sprints || []).sort((a, b) => a - b).map(n => `sprint-${n}`);
+}
+
+function _smgmtSchedDepHtml(ticket) {
+  const deps = _parseDeps(ticket.body || '');
+  if (!deps.blocks.length && !deps.blockedBy.length) return '';
+  if (!_smgmtData) return '';
+
+  const allIssues = _smgmtData.issues || [];
+  const orderedLabels = _smgmtOrderedSprintLabels();
+  const issueMap = new Map(allIssues.map(i => [i.number, i]));
+  const myLabel = ticket.sprint_label || null;
+  const myIdx = myLabel ? orderedLabels.indexOf(myLabel) : -1;
+
+  const violations = [];
+
+  // AC3: dependencies this ticket depends on (blockedBy) that are out of order
+  if (myIdx !== -1) {
+    for (const n of deps.blockedBy) {
+      const dep = issueMap.get(n);
+      if (!dep) continue;
+      if (!dep.sprint_label) {
+        violations.push(`#${n} is in the backlog`);
+      } else {
+        const depIdx = orderedLabels.indexOf(dep.sprint_label);
+        if (depIdx !== -1 && depIdx > myIdx) {
+          violations.push(`#${n} is in ${dep.sprint_label}`);
+        }
+      }
+    }
+  }
+
+  // AC7: tickets that depend on this ticket (blocks) that are in an earlier sprint
+  for (const n of deps.blocks) {
+    const downstream = issueMap.get(n);
+    if (!downstream || !downstream.sprint_label) continue;
+    const downIdx = orderedLabels.indexOf(downstream.sprint_label);
+    if (myIdx === -1) {
+      violations.push(`#${n} is in ${downstream.sprint_label} (needs this first)`);
+    } else if (downIdx !== -1 && downIdx < myIdx) {
+      violations.push(`#${n} is in ${downstream.sprint_label} (needs this first)`);
+    }
+  }
+
+  // Badge label: "blocks #X / depends #Y"
+  const parts = [];
+  if (deps.blocks.length) parts.push(`blocks ${deps.blocks.map(n => `#${n}`).join(' ')}`);
+  if (deps.blockedBy.length) parts.push(`depends ${deps.blockedBy.map(n => `#${n}`).join(' ')}`);
+  const badgeText = parts.join(' / ');
+
+  if (violations.length) {
+    const tipText = violations.join('; ');
+    return `<span class="smgmt-sched-dep-warn" title="${escHtml(tipText)}"
+      aria-label="Scheduling violation: ${escHtml(tipText)}"><i class="ti ti-alert-triangle"></i>${escHtml(badgeText)}</span>`;
+  }
+  return `<span class="smgmt-sched-dep-badge">${escHtml(badgeText)}</span>`;
+}
+
 function _smgmtTicketRowHtml(ticket, label) {
   const hasRework = (ticket.labels || []).some(l => l.name === 'need-rework' || l.name === 'needs-rework');
   const statusClass = hasRework ? 'smgmt-status-need-rework' : ({
@@ -9400,8 +9566,14 @@ function _smgmtTicketRowHtml(ticket, label) {
     ? `<span class="smgmt-ticket-size-pill">${escHtml(sizeValue)}</span>`
     : '';
   const sizeAttr = sizeValue ? ` data-size="${escHtml(sizeValue)}"` : '';
+  const staleBadgeHtml = (ticket.estimate_stale && sizeLabel)
+    ? `<button class="smgmt-stale-badge" data-stale="true" tabindex="0"
+         title="Estimate may be outdated — issue body changed since last estimate"
+         onclick="event.stopPropagation();_smgmtReEstimate(${ticket.number},this)"
+         onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();_smgmtReEstimate(${ticket.number},this);}">stale</button>`
+    : '';
   const estimateBadgeHtml = _smgmtEstimateBadgeHtml(ticket.number);
-  const reEstBtnHtml = (hasEstimate && _smgmtEstimatorAvailable)
+  const reEstBtnHtml = (hasEstimate && _smgmtEstimatorAvailable && !ticket.estimate_stale)
     ? `<button class="smgmt-reestimate-btn" tabindex="0" title="Re-estimate this ticket"
          onclick="event.stopPropagation();_smgmtReEstimate(${ticket.number},this)"
          onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();_smgmtReEstimate(${ticket.number},this);}">Re-estimate</button>`
@@ -9409,6 +9581,7 @@ function _smgmtTicketRowHtml(ticket, label) {
   const riskFlagIconsHtml = _smgmtRiskFlagIconsHtml(ticket.number);
   const conflictBadgeHtml = _smgmtConflictBadgeHtml(ticket.number);
   const depOrderBadgeHtml = _smgmtDepOrderBadgeHtml(ticket.number);
+  const schedDepHtml = _smgmtSchedDepHtml(ticket);
 
   const ticketLabelNames = (ticket.labels || []).map(l => l.name).join(',');
 
@@ -9434,7 +9607,7 @@ function _smgmtTicketRowHtml(ticket, label) {
       <a class="smgmt-ticket-num" href="${escHtml(ticket.url || '#')}" target="_blank"
          rel="noopener" draggable="false" onclick="event.stopPropagation()">#${ticket.number}</a>
       <span class="smgmt-ticket-title" title="${escHtml(ticket.title)}">${escHtml(ticket.title)}</span>
-      ${sizePillHtml}${estimateBadgeHtml}${riskFlagIconsHtml}${conflictBadgeHtml}${depOrderBadgeHtml}${reEstBtnHtml}
+      ${sizePillHtml}${staleBadgeHtml}${estimateBadgeHtml}${riskFlagIconsHtml}${conflictBadgeHtml}${depOrderBadgeHtml}${schedDepHtml}${reEstBtnHtml}
       <span class="smgmt-ticket-status ${statusClass}">${escHtml(statusLabel)}</span>
       <button class="btn-view-log" tabindex="0" title="View issue log"
               onclick="event.stopPropagation();openLvIssueLog(${ticket.number},'${escHtml(label)}',_smgmtRepo()||'')">
@@ -9490,6 +9663,71 @@ async function _smgmtRetryEstimation(issueNum, btn) {
   }
 }
 
+// ── Bulk estimate (issue #598) ────────────────────────────────────────────────
+async function _smgmtBulkEstimate(sprintLabel, btnEl) {
+  const repo = _smgmtRepo();
+  if (!repo) { _smgmtShowToast('No repo configured — cannot estimate'); return; }
+
+  const containerId = sprintLabel === '__backlog__'
+    ? 'smgmt-backlog-tickets'
+    : `smgmt-tickets-${sprintLabel}`;
+  const container = document.getElementById(containerId);
+  if (!container) return;
+
+  // Find unsized ticket rows (no data-size attribute)
+  const unsizedRows = Array.from(container.querySelectorAll('.smgmt-ticket[data-issue]'))
+    .filter(row => !row.dataset.size);
+  const total = unsizedRows.length;
+
+  if (total === 0) {
+    btnEl.classList.add('hidden');
+    return;
+  }
+
+  // Progress span is always the next sibling of the button
+  const progressEl = btnEl.nextElementSibling;
+
+  btnEl.disabled = true;
+  if (progressEl) {
+    progressEl.textContent = `Estimating 0 / ${total}…`;
+    progressEl.classList.add('show');
+  }
+
+  let succeeded = 0;
+  let processed = 0;
+  for (const row of unsizedRows) {
+    const issueNum = parseInt(row.dataset.issue, 10);
+    try {
+      const resp = await fetch(
+        `/api/issues/${issueNum}/estimate?repo=${encodeURIComponent(repo)}`,
+        { method: 'POST' }
+      );
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const data = await resp.json();
+      if (!data.ok || !data.size) throw new Error('no size in response');
+      succeeded++;
+      row.dataset.size = data.size;
+      _smgmtUpdateEstimateBadge(issueNum);
+    } catch (err) {
+      _smgmtShowToast(`#${issueNum} estimate failed: ${err.message}`);
+    }
+    processed++;
+    if (progressEl) progressEl.textContent = `Estimating ${processed} / ${total}…`;
+  }
+
+  // Show final count
+  if (progressEl) progressEl.textContent = `Estimated ${succeeded} / ${total}`;
+  btnEl.disabled = false;
+
+  // Hide button if no unsized remain
+  const stillUnsized = Array.from(container.querySelectorAll('.smgmt-ticket[data-issue]'))
+    .filter(r => !r.dataset.size).length;
+  if (stillUnsized === 0) btnEl.classList.add('hidden');
+
+  // Fade out progress after 3s
+  setTimeout(() => { if (progressEl) progressEl.classList.remove('show'); }, 3000);
+}
+
 // ── Re-estimate action (issue #452, extended by #561) ────────────────────────
 let _reEstIssueNum = null;
 let _reEstRowBtn   = null;
@@ -9513,13 +9751,27 @@ async function _smgmtCheckEstimatorHealth() {
 function _smgmtInjectReEstimateButtons() {
   document.querySelectorAll('.smgmt-ticket').forEach(row => {
     if (!row.querySelector('.smgmt-ticket-size-pill')) return;
-    if (row.querySelector('.smgmt-reestimate-btn, .smgmt-reestimate-spinner, .smgmt-reestimate-error')) return;
+    if (row.querySelector('.smgmt-reestimate-btn, .smgmt-reestimate-spinner, .smgmt-reestimate-error, .smgmt-stale-badge')) return;
     const issueNum = parseInt(row.dataset.issue, 10);
     if (!issueNum) return;
     const statusEl = row.querySelector('.smgmt-ticket-status');
     if (statusEl) statusEl.before(_makeReEstimateBtn(issueNum));
     else row.appendChild(_makeReEstimateBtn(issueNum));
   });
+}
+
+function _makeStaleEstimateBadge(issueNum) {
+  const btn = document.createElement('button');
+  btn.className = 'smgmt-stale-badge';
+  btn.dataset.stale = 'true';
+  btn.tabIndex = 0;
+  btn.title = 'Estimate may be outdated — issue body changed since last estimate';
+  btn.textContent = 'stale';
+  btn.onclick = (ev) => { ev.stopPropagation(); _smgmtReEstimate(issueNum, btn); };
+  btn.onkeydown = (ev) => {
+    if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); ev.stopPropagation(); _smgmtReEstimate(issueNum, btn); }
+  };
+  return btn;
 }
 
 function _makeReEstimateBtn(issueNum) {
@@ -9570,8 +9822,9 @@ function _smgmtReEstimateConfirm() {
 }
 
 async function _smgmtReEstimateRun(issueNum, rowBtn) {
-  const repo   = _smgmtRepo() || '';
-  const tdpBtn = document.getElementById('tdp-reestimate-btn');
+  const repo      = _smgmtRepo() || '';
+  const tdpBtn    = document.getElementById('tdp-reestimate-btn');
+  const isStaleBtn = rowBtn && rowBtn.dataset.stale === 'true';
 
   // Loading: replace row button with spinner
   let rowSpinner = null;
@@ -9602,8 +9855,18 @@ async function _smgmtReEstimateRun(issueNum, rowBtn) {
       }
       row.dataset.size = data.size;
     }
-    // Restore row re-estimate button
-    if (rowSpinner) rowSpinner.replaceWith(_makeReEstimateBtn(issueNum));
+    // On success: stale badge simply disappears; regular btn is restored for non-stale flow
+    if (rowSpinner) {
+      if (isStaleBtn) {
+        rowSpinner.remove();
+        if (_smgmtData) {
+          const iss = _smgmtData.issues.find(i => i.number === issueNum);
+          if (iss) iss.estimate_stale = false;
+        }
+      } else {
+        rowSpinner.replaceWith(_makeReEstimateBtn(issueNum));
+      }
+    }
 
     // Update local cache and sprint token header
     if (_estDataCache[issueNum]) _estDataCache[issueNum].size = data.size;
@@ -9627,17 +9890,30 @@ async function _smgmtReEstimateRun(issueNum, rowBtn) {
       if (iss && iss.sprint_label) {
         const sprintTickets = _smgmtData.issues.filter(i => i.sprint_label === iss.sprint_label);
         _smgmtUpdateColRollup(iss.sprint_label, sprintTickets);
+        _smgmtUpdateCapacityGauge(iss.sprint_label);
       }
     }
   } catch (err) {
-    // Show inline error near the button, then restore it after 3 s
     if (rowSpinner) {
-      const errBadge = document.createElement('span');
-      errBadge.className = 'smgmt-reestimate-error';
-      errBadge.title = err.message;
-      errBadge.textContent = 'Failed';
-      rowSpinner.replaceWith(errBadge);
-      setTimeout(() => errBadge.replaceWith(_makeReEstimateBtn(issueNum)), 3000);
+      if (isStaleBtn) {
+        // Restore stale badge with error state, then reset tooltip after 3 s
+        const restored = _makeStaleEstimateBadge(issueNum);
+        restored.classList.add('smgmt-stale-badge--error');
+        restored.title = 'Re-estimate failed — click to retry';
+        rowSpinner.replaceWith(restored);
+        setTimeout(() => {
+          restored.classList.remove('smgmt-stale-badge--error');
+          restored.title = 'Estimate may be outdated — issue body changed since last estimate';
+        }, 3000);
+      } else {
+        // Show inline error near the button, then restore it after 3 s
+        const errBadge = document.createElement('span');
+        errBadge.className = 'smgmt-reestimate-error';
+        errBadge.title = err.message;
+        errBadge.textContent = 'Failed';
+        rowSpinner.replaceWith(errBadge);
+        setTimeout(() => errBadge.replaceWith(_makeReEstimateBtn(issueNum)), 3000);
+      }
     }
     // Restore detail panel button
     if (tdpBtn) { tdpBtn.disabled = false; tdpBtn.textContent = 'Re-estimate'; }
@@ -9796,6 +10072,92 @@ function _smgmtEstimatePopoverClose() {
 
 // ── Sprint action handlers ─────────────────────────────────────────────────
 function _smgmtRepo() { return _cachedFullRepo[_slug] || null; }
+
+// ── Capacity gauge (issue #595) ────────────────────────────────────────────
+
+function _smgmtCapacityKey(label) {
+  const repo = _smgmtRepo() || '';
+  return `capacity::${repo}::${label}`;
+}
+
+function _smgmtGetCapacity(label) {
+  try {
+    const v = parseFloat(localStorage.getItem(_smgmtCapacityKey(label)));
+    return (isNaN(v) || v <= 0) ? 0 : v;
+  } catch (_) { return 0; }
+}
+
+function _smgmtCapacityInputHtml(label) {
+  const cap = _smgmtGetCapacity(label);
+  const val = cap > 0 ? String(cap) : '';
+  return `<span class="smgmt-capacity-row">
+    <span>Cap:</span>
+    <input type="number" class="smgmt-capacity-input"
+           id="smgmt-cap-input-${escHtml(label)}"
+           min="0" step="0.5" placeholder="h"
+           value="${escHtml(val)}"
+           onclick="event.stopPropagation()"
+           onblur="smgmtCapacityCommit('${escHtml(label)}',this.value)"
+           onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();}">
+    <span>h</span>
+  </span>`;
+}
+
+function smgmtCapacityCommit(label, rawVal) {
+  const val = parseFloat(rawVal);
+  const key = _smgmtCapacityKey(label);
+  try {
+    if (isNaN(val) || val <= 0) {
+      localStorage.removeItem(key);
+    } else {
+      localStorage.setItem(key, String(val));
+    }
+  } catch (_) {}
+  _smgmtUpdateCapacityGauge(label);
+}
+
+function _smgmtCapacityTotalHours(label) {
+  const issues = _smgmtData ? (_smgmtData.issues || []) : [];
+  let totalMins = 0;
+  for (const t of issues.filter(i => i.sprint_label === label)) {
+    const cached = _estDataCache[t.number];
+    let size = (cached && cached.size) ? cached.size : (t.size || null);
+    if (!size && t.labels) {
+      for (const lbl of t.labels) {
+        const m = /^size-([SMLX]+)$/.exec(lbl.name || '');
+        if (m) { size = m[1]; break; }
+      }
+    }
+    totalMins += size ? _sizeMinutes(size) : 0;
+  }
+  return totalMins / 60;
+}
+
+function _smgmtUpdateCapacityGauge(label) {
+  const gaugeEl = document.getElementById(`smgmt-cap-gauge-${label}`);
+  if (!gaugeEl) return;
+  const cap = _smgmtGetCapacity(label);
+  if (cap <= 0) { gaugeEl.innerHTML = ''; return; }
+  const totalH = _smgmtCapacityTotalHours(label);
+  if (totalH <= 0) { gaugeEl.innerHTML = ''; return; }
+  const ratio = totalH / cap;
+  const pct = Math.min(ratio * 100, 100).toFixed(1);
+  let colorClass, overageHtml = '';
+  if (ratio > 1) {
+    colorClass = 'smgmt-capacity-bar-fill--red';
+    const over = parseFloat((totalH - cap).toFixed(1));
+    overageHtml = `<span class="smgmt-capacity-overage">${over}h over</span>`;
+  } else if (ratio >= 0.9) {
+    colorClass = 'smgmt-capacity-bar-fill--amber';
+  } else {
+    colorClass = 'smgmt-capacity-bar-fill--green';
+  }
+  gaugeEl.innerHTML = `<div class="smgmt-capacity-bar-track"><div class="smgmt-capacity-bar-fill ${colorClass}" style="width:${pct}%"></div></div>${overageHtml}`;
+}
+
+function _smgmtInitCapacityGauges(labels) {
+  for (const label of labels) _smgmtUpdateCapacityGauge(label);
+}
 
 function _smgmtShowToast(msg) {
   let el = document.getElementById('smgmt-toast');
@@ -11495,6 +11857,15 @@ function _smgmtRenderBacklog(tickets) {
       : '';
   }
 
+  // Update bulk estimate button visibility (issue #598)
+  const backlogBulkBtn = document.getElementById('smgmt-backlog-bulk-est-btn');
+  if (backlogBulkBtn) {
+    const hasUnsized = tickets.some(
+      t => !(t.labels || []).find(l => /^size-[SMLX]+$/.test(l.name))
+    );
+    backlogBulkBtn.classList.toggle('hidden', !hasUnsized);
+  }
+
   // Sort newest first (higher issue number = newer)
   const sorted = [...tickets].sort((a, b) => b.number - a.number);
 
@@ -11513,6 +11884,7 @@ function _smgmtBacklogTicketHtml(ticket, sprintNums) {
   const isSelected = _smgmtSelectedIssues.has(ticket.number);
   const hasEstimate = (ticket.labels || []).some(l => /^size-[SMLX]+$/.test(l.name));
   const backlogLabelNames = (ticket.labels || []).map(l => l.name).join(',');
+  const schedDepHtml = _smgmtSchedDepHtml(ticket);
   return `
     <div class="smgmt-ticket${isSelected ? ' is-selected' : ''}" id="smgmt-ticket-${ticket.number}"
          draggable="true"
@@ -11531,6 +11903,7 @@ function _smgmtBacklogTicketHtml(ticket, sprintNums) {
       <a class="smgmt-ticket-num" href="${escHtml(ticket.url || '#')}" target="_blank"
          rel="noopener" draggable="false" onclick="event.stopPropagation()">#${ticket.number}</a>
       <span class="smgmt-ticket-title" title="${escHtml(ticket.title)}">${escHtml(ticket.title)}</span>
+      ${schedDepHtml}
       <button class="smgmt-row-menu-btn" tabindex="0" title="Ticket actions" aria-haspopup="true" aria-expanded="false"
               onclick="event.stopPropagation();_smgmtRowMenuOpen(event, ${ticket.number}, null, ${hasEstimate})"
               onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();_smgmtRowMenuOpen(event,${ticket.number},null,${hasEstimate});}">
@@ -18114,9 +18487,12 @@ async function notesSave() {
       body: JSON.stringify({ content, expected_mtime: _notesMtime }),
     });
     if (r.status === 409) {
-      const data = await r.json();
+      const data = await r.json().catch(() => ({}));
       _notesPendingConflict = true;
-      _notesShowConflict(data.detail ? (data.detail.message || 'Conflict detected.') : 'Conflict detected.');
+      const msg = (typeof data.detail === 'object' && data.detail !== null && data.detail.message)
+        ? data.detail.message
+        : 'Conflict detected.';
+      _notesShowConflict(msg);
       _notesSetStatus('');
       return;
     }

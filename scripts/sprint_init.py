@@ -50,6 +50,8 @@ agents:
     referenced files from the 'attachments' branch before starting — see
     the 'How to read issue attachments' section in CLAUDE.md for the
     exact `gh api` commands.
+    If the issue touches frontend/UI, read PRODUCT.md and DESIGN.md first
+    to understand design conventions and anti-patterns to avoid.
   tester_prompt_template: |
     Read the issue at {{issue_url}} and verify it as a tester following
     the project's testing workflow. Use the workflow defined in CLAUDE.md.

@@ -3119,6 +3119,36 @@
       white-space: nowrap;
     }
     [data-theme="dark"] .smgmt-sched-dep-badge { background: rgba(99,102,241,.15); color: #a5b4fc; }
+    /* ── Expandable ticket details panel (issue #614) ── */
+    .t-details-btn {
+      font-size: 11px; font-weight: 500; color: var(--text-sub);
+      background: none; border: 1px solid var(--border); border-radius: 4px;
+      padding: 2px 7px; cursor: pointer; flex-shrink: 0; white-space: nowrap;
+    }
+    .t-details-btn:hover { background: var(--surface-2); color: var(--text); }
+    .ticket-expand {
+      background: var(--surface-2); border-bottom: 1px solid var(--border);
+      padding: 8px 16px 10px; font-size: 12px;
+    }
+    .ex-row {
+      display: flex; align-items: baseline; gap: 8px; margin-bottom: 4px;
+    }
+    .ex-label {
+      color: var(--text-sub); font-size: 11px; font-weight: 600;
+      text-transform: uppercase; letter-spacing: .03em;
+      min-width: 72px; flex-shrink: 0;
+    }
+    .ex-actions {
+      display: flex; gap: 6px; margin-top: 8px;
+    }
+    .ex-btn {
+      font-size: 11px; padding: 3px 10px; border-radius: 4px;
+      border: 1px solid var(--border); background: var(--surface);
+      color: var(--text); cursor: pointer;
+    }
+    .ex-btn:hover { background: var(--surface-hover); }
+    .ex-btn-danger { color: var(--red); border-color: rgba(239,68,68,.35); }
+    .ex-btn-danger:hover { background: var(--red-bg); }
     .smgmt-sched-dep-warn {
       flex-shrink: 0; display: inline-flex; align-items: center; gap: 3px;
       font-size: 11px; font-weight: 600; padding: 1px 5px; border-radius: 3px;
@@ -7494,7 +7524,15 @@ function _smgmtApplySort(label) {
     return 0;
   });
 
-  rows.forEach(r => container.appendChild(r));
+  rows.forEach(r => {
+    container.appendChild(r);
+    const issueNum = r.dataset.issue;
+    const sprintLabel = r.dataset.sprint;
+    if (issueNum && sprintLabel) {
+      const expandEl = document.getElementById(`ex-${sprintLabel}-${issueNum}`);
+      if (expandEl) container.appendChild(expandEl);
+    }
+  });
 }
 
 function _smgmtRestoreDefaultOrder(label) {
@@ -7795,25 +7833,7 @@ function _smgmtConflictBadgeHtml(issueNum) {
 }
 
 function _smgmtUpdateConflictBadge(issueNum) {
-  const row = document.getElementById(`smgmt-ticket-${issueNum}`);
-  if (!row) return;
-  row.querySelector('.smgmt-conflict-badge')?.remove();
-  const entries = _smgmtConflictsByIssue[issueNum];
-  if (!entries || entries.length === 0) return;
-  const badge = document.createElement('button');
-  badge.className = 'smgmt-conflict-badge';
-  const partners = entries.map(e => `#${e.partnerId}`).join(', ');
-  const files = [...new Set(entries.flatMap(e => e.sharedFiles))];
-  badge.title = `Overlaps with ${partners}: ${files.join(', ')}`;
-  badge.tabIndex = 0;
-  badge.innerHTML = `<i class="ti ti-git-merge"></i>${entries.length > 1 ? entries.length + ' conflicts' : '1 conflict'}`;
-  badge.onclick = (ev) => { ev.stopPropagation(); _smgmtShowConflictPopover(ev, issueNum); };
-  badge.onkeydown = (ev) => {
-    if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); ev.stopPropagation(); _smgmtShowConflictPopover(ev, issueNum); }
-  };
-  const statusEl = row.querySelector('.smgmt-ticket-status');
-  if (statusEl) statusEl.before(badge);
-  else row.appendChild(badge);
+  // Conflict info now surfaced in the expand panel (issue #614); no inline badge insertion.
 }
 
 function _smgmtShowConflictPopover(ev, issueNum) {
@@ -7903,22 +7923,7 @@ function _smgmtDepOrderBadgeHtml(issueNum) {
 }
 
 function _smgmtUpdateDepOrderBadge(issueNum) {
-  const row = document.getElementById(`smgmt-ticket-${issueNum}`);
-  if (!row) return;
-  row.querySelector('.smgmt-dep-order-badge')?.remove();
-  const html = _smgmtDepOrderBadgeHtml(issueNum);
-  if (!html) return;
-  const tmp = document.createElement('div');
-  tmp.innerHTML = html;
-  const badge = tmp.firstElementChild;
-  const conflictBadge = row.querySelector('.smgmt-conflict-badge');
-  if (conflictBadge) {
-    conflictBadge.after(badge);
-  } else {
-    const statusEl = row.querySelector('.smgmt-ticket-status');
-    if (statusEl) statusEl.before(badge);
-    else row.appendChild(badge);
-  }
+  // Dep order info now surfaced in the expand panel (issue #614); no inline badge insertion.
 }
 
 function _smgmtShowDepOrderPopover(ev, issueNum) {
@@ -8542,6 +8547,24 @@ function _smgmtOutcomeTicketListHtml(issues, label, repo) {
       ${rejLabel}
       ${viewLogBtn}
       ${elapsed}
+      <button class="t-details-btn" onclick="event.stopPropagation();toggleTicketRow('${safeLabel}',${iss.number})">
+        <span class="t-dbtn-label">Details</span> <span id="caret-${safeLabel}-${iss.number}">▼</span>
+      </button>
+    </div>
+    <div class="ticket-expand" id="ex-${safeLabel}-${iss.number}" style="display:none">
+      <div class="ex-row">
+        <span class="ex-label">Conflicts</span>
+        <span class="ex-conflicts-val">—</span>
+      </div>
+      <div class="ex-row">
+        <span class="ex-label">Execution</span>
+        <span class="ex-exec-val">—</span>
+      </div>
+      <div class="ex-actions">
+        <button class="ex-btn" onclick="event.stopPropagation()">Re-estimate</button>
+        <button class="ex-btn" onclick="event.stopPropagation()">Move to sprint</button>
+        <button class="ex-btn ex-btn-danger" onclick="event.stopPropagation()">Close ticket</button>
+      </div>
     </div>`;
   }).join('');
 }
@@ -9738,6 +9761,47 @@ function _smgmtSchedDepHtml(ticket) {
   return `<span class="smgmt-sched-dep-badge">${escHtml(badgeText)}</span>`;
 }
 
+// ── Expandable ticket details panel (issue #614) ──────────────────────────────
+function toggleTicketRow(stateKey, n) {
+  const panel = document.getElementById(`ex-${stateKey}-${n}`);
+  const caret = document.getElementById(`caret-${stateKey}-${n}`);
+  if (!panel || !caret) return;
+  const btn = caret.parentElement;
+  const labelEl = btn ? btn.querySelector('.t-dbtn-label') : null;
+  const isOpen = panel.style.display !== 'none';
+  if (isOpen) {
+    panel.style.display = 'none';
+    caret.textContent = '▼';
+    if (labelEl) labelEl.textContent = 'Details';
+  } else {
+    const conflictEl = panel.querySelector('.ex-conflicts-val');
+    const execEl = panel.querySelector('.ex-exec-val');
+    if (conflictEl) {
+      const entries = _smgmtConflictsByIssue[n] || [];
+      if (entries.length) {
+        conflictEl.textContent = 'Overlaps with ' + entries.map(e => `#${e.partnerId}`).join(', ');
+      } else {
+        conflictEl.textContent = 'None';
+      }
+    }
+    if (execEl) {
+      const info = _smgmtDepOrderByIssue[n];
+      if (info) {
+        const parts = [
+          ...info.upstream.map(u => `after #${u.id}`),
+          ...info.downstream.map(d => `before #${d.id}`),
+        ];
+        execEl.textContent = parts.length ? parts.join(', ') : '—';
+      } else {
+        execEl.textContent = '—';
+      }
+    }
+    panel.style.display = '';
+    caret.textContent = '▲';
+    if (labelEl) labelEl.textContent = 'Close';
+  }
+}
+
 function _smgmtTicketRowHtml(ticket, label) {
   const hasRework = (ticket.labels || []).some(l => l.name === 'need-rework' || l.name === 'needs-rework');
   const statusClass = hasRework ? 'smgmt-status-need-rework' : ({
@@ -9781,25 +9845,24 @@ function _smgmtTicketRowHtml(ticket, label) {
          onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();_smgmtReEstimate(${ticket.number},this);}">Re-estimate</button>`
     : '';
   const riskFlagIconsHtml = _smgmtRiskFlagIconsHtml(ticket.number);
-  const conflictBadgeHtml = _smgmtConflictBadgeHtml(ticket.number);
-  const depOrderBadgeHtml = _smgmtDepOrderBadgeHtml(ticket.number);
   const schedDepHtml = _smgmtSchedDepHtml(ticket);
 
   const ticketLabelNames = (ticket.labels || []).map(l => l.name).join(',');
+  const sk = escHtml(label);
 
   return `
     <div class="smgmt-ticket${isSelected ? ' is-selected' : ''}" id="smgmt-ticket-${ticket.number}"
          tabindex="-1"
          draggable="true"
          data-issue="${ticket.number}"
-         data-sprint="${escHtml(label)}"${sizeAttr}
+         data-sprint="${sk}"${sizeAttr}
          data-labels="${escHtml(ticketLabelNames)}"
-         ondragstart="_smgmtTicketDragStart(event, ${ticket.number}, '${escHtml(label)}')"
+         ondragstart="_smgmtTicketDragStart(event, ${ticket.number}, '${sk}')"
          ondragend="_smgmtTicketDragEnd(event)"
          ondragover="_smgmtTicketReorderDragOver(event)"
          ondragleave="_smgmtTicketReorderDragLeave(event)"
-         ondrop="_smgmtTicketReorderDrop(event, ${ticket.number}, '${escHtml(label)}')"
-         onclick="_smgmtRowClick(event, ${ticket.number}, '${escHtml(label)}')"
+         ondrop="_smgmtTicketReorderDrop(event, ${ticket.number}, '${sk}')"
+         onclick="_smgmtRowClick(event, ${ticket.number}, '${sk}')"
          oncontextmenu="_smgmtCtxMenuOpen(event,${ticket.number})">
       <input type="checkbox" class="smgmt-ticket-cb"
              ${isSelected ? 'checked' : ''}
@@ -9810,15 +9873,33 @@ function _smgmtTicketRowHtml(ticket, label) {
       <a class="smgmt-ticket-num" href="${escHtml(ticket.url || '#')}" target="_blank"
          rel="noopener" draggable="false" onclick="event.stopPropagation()">#${ticket.number}</a>
       <span class="smgmt-ticket-title" title="${escHtml(ticket.title)}">${escHtml(ticket.title)}</span>
-      ${sizePillHtml}${staleBadgeHtml}${estimateBadgeHtml}${riskFlagIconsHtml}${conflictBadgeHtml}${depOrderBadgeHtml}${schedDepHtml}${reEstBtnHtml}
+      ${sizePillHtml}${staleBadgeHtml}${estimateBadgeHtml}${riskFlagIconsHtml}${schedDepHtml}${reEstBtnHtml}
       <span class="smgmt-ticket-status ${statusClass}">${escHtml(statusLabel)}</span>
       <button class="btn-view-log" tabindex="0" title="View issue log"
-              onclick="event.stopPropagation();openLvIssueLog(${ticket.number},'${escHtml(label)}',_smgmtRepo()||'')">
+              onclick="event.stopPropagation();openLvIssueLog(${ticket.number},'${sk}',_smgmtRepo()||'')">
         <i class="ti ti-file-text"></i></button>
       <button class="smgmt-row-menu-btn" tabindex="0" title="Ticket actions" aria-haspopup="true" aria-expanded="false"
-              onclick="event.stopPropagation();_smgmtRowMenuOpen(event, ${ticket.number}, '${escHtml(label)}', ${hasEstimate})"
-              onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();_smgmtRowMenuOpen(event,${ticket.number},'${escHtml(label)}',${hasEstimate});}">
+              onclick="event.stopPropagation();_smgmtRowMenuOpen(event, ${ticket.number}, '${sk}', ${hasEstimate})"
+              onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();_smgmtRowMenuOpen(event,${ticket.number},'${sk}',${hasEstimate});}">
         <i class="ti ti-menu-2"></i></button>
+      <button class="t-details-btn" onclick="event.stopPropagation();toggleTicketRow('${sk}',${ticket.number})">
+        <span class="t-dbtn-label">Details</span> <span id="caret-${sk}-${ticket.number}">▼</span>
+      </button>
+    </div>
+    <div class="ticket-expand" id="ex-${sk}-${ticket.number}" style="display:none">
+      <div class="ex-row">
+        <span class="ex-label">Conflicts</span>
+        <span class="ex-conflicts-val">—</span>
+      </div>
+      <div class="ex-row">
+        <span class="ex-label">Execution</span>
+        <span class="ex-exec-val">—</span>
+      </div>
+      <div class="ex-actions">
+        <button class="ex-btn" onclick="event.stopPropagation()">Re-estimate</button>
+        <button class="ex-btn" onclick="event.stopPropagation()">Move to sprint</button>
+        <button class="ex-btn ex-btn-danger" onclick="event.stopPropagation()">Close ticket</button>
+      </div>
     </div>`;
 }
 

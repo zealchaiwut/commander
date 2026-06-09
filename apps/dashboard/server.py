@@ -2300,8 +2300,8 @@ async def init_project(body: InitProjectBody):
     # AC3: expand ~ in projects_dir
     projects_dir = Path(body.projects_dir or "~/dev").expanduser()
 
-    # Build subprocess command
-    script_path = Path(__file__).parent / "scripts" / "init_project.py"
+    # Build subprocess command (scripts/ live at the repo root, not under apps/dashboard)
+    script_path = _REPO_ROOT / "scripts" / "init_project.py"
     cmd = [
         sys.executable,
         str(script_path),

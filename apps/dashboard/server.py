@@ -7543,16 +7543,19 @@ def _compute_analytics_metrics(project_root: Path,
     try:
         rows = db.get_token_usage_by_agent_model()
         for row in rows:
-            role = (row.get("agent_role") or "unknown").lower()
-            model = (row.get("model_name") or "").lower()
-            price_in, price_out = MODEL_PRICE_MAP.get(model, (0.0, 0.0))
-            cost = (row.get("total_input", 0) * price_in +
-                    row.get("total_output", 0) * price_out)
-            cost_per_sprint_total += cost
-            if role in cost_by_role:
-                cost_by_role[role] += cost
-    except Exception:
-        pass
+            try:
+                role = (row.get("agent_role") or "unknown").lower()
+                model = (row.get("model_name") or "").lower()
+                price_in, price_out = MODEL_PRICE_MAP.get(model, (0.0, 0.0))
+                cost = (row.get("total_input", 0) * price_in +
+                        row.get("total_output", 0) * price_out)
+                cost_per_sprint_total += cost
+                if role in cost_by_role:
+                    cost_by_role[role] += cost
+            except (KeyError, ValueError, TypeError) as exc:
+                logger.debug("token-usage cost: skipping row %r — %s", row, exc)
+    except Exception as exc:
+        logger.debug("token-usage cost: db query failed — %s", exc)
 
     num_sprints = len(sprint_ticket_counts) if sprint_ticket_counts else 1
     cost_per_sprint_avg = cost_per_sprint_total / num_sprints

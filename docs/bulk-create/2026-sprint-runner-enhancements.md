@@ -1,6 +1,6 @@
 # Commander Sprint-Management & Runner Enhancements — Bulk-Create Backlog
 
-Companion to [`bulk-create-backlog.md`](bulk-create-backlog.md). Paste **one code
+Companion to [`2026-frontend-first.md`](2026-frontend-first.md). Paste **one code
 block at a time** into the bulk-create tab, set the **sprint + default labels**
 from each section header, pick concurrency, and run. Prompts are `---`-separated
 exactly as the splitter expects. Review/edit the BA drafts before posting.

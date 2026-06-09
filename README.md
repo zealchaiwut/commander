@@ -232,8 +232,13 @@ commander/
 ├── scripts/                 # CLI tools (create_ticket.py, init_project.py, …)
 ├── hooks/                   # Claude Code hooks (agent_finished, tool_used, …)
 ├── services/                # Background services
-├── docs/                    # Documentation
+├── docs/                    # Documentation (standard layout, all projects)
+│   ├── quickstart.md        # 5-minute install and first run
+│   ├── tutorial.md          # Full walkthrough
+│   ├── workflow.md          # Bulk Create → Run → Finish/Rerun
+│   ├── milestones.md        # Auto-maintained sprint history
 │   ├── features/            # Per-feature guides
+│   ├── bulk-create/         # Saved bulk-create prompts and outputs
 │   ├── changelog/
 │   │   ├── uat/             # Changelogs written when a sprint finishes on develop
 │   │   └── prd/             # Changelogs written when develop is merged to master
@@ -417,10 +422,17 @@ python scripts/migrate_sprints_to_neon.py --project zealchaiwut/commander
 
 ## Docs
 
-- [Setup and tutorial](docs/tutorial.md)
+**Start here**
+- [Quick start](docs/quickstart.md) — install and first run in 5 minutes
+- [Tutorial](docs/tutorial.md) — full walkthrough and multi-clone setup
+- [Workflow](docs/workflow.md) — Bulk Create → Run Sprint → Finish/Rerun
+- [Milestones](docs/milestones.md) — what each sprint shipped
+
+**Reference**
 - [Dashboard](docs/features/dashboard.md)
 - [Sprint Manager](docs/features/sprint-manager.md)
 - [API reference](docs/features/api.md)
+- [Bulk-create records](docs/bulk-create/)
 - [UAT changelogs](docs/changelog/uat/)
 - [PRD changelogs](docs/changelog/prd/)
 - [Testing sandbox](docs/testing/sandbox-repo.md)

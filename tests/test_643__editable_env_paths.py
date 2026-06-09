@@ -216,6 +216,87 @@ def test_fs_list_rejects_symlink_escape(client_ctx, tmp_path):
     )
 
 
+def test_fs_list_rejects_nested_symlink_escape(client_ctx, tmp_path):
+    """GET /api/fs/list must return 403 for symlink in a subdirectory pointing outside root."""
+    import os
+
+    client, srv, _, _ = client_ctx
+
+    browse_root = tmp_path / "home"
+    browse_root.mkdir()
+    subdir = browse_root / "projects"
+    subdir.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+
+    # Symlink is nested inside a subdirectory, not directly in root
+    link = subdir / "escape_link"
+    os.symlink(outside, link)
+
+    with patch.object(srv, "_FS_BROWSE_ROOT", browse_root):
+        resp = client.get(f"/api/fs/list?path={link}")
+
+    assert resp.status_code == 403, (
+        f"Expected 403 for nested symlink escape, got {resp.status_code}: {resp.text}"
+    )
+
+
+def test_fs_list_rejects_traversal_into_symlink_escape(client_ctx, tmp_path):
+    """GET /api/fs/list must return 403 when path traverses INTO a symlink that escapes root."""
+    import os
+
+    client, srv, _, _ = client_ctx
+
+    browse_root = tmp_path / "home"
+    browse_root.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "secret").mkdir()
+
+    # escape_link points outside; requesting escape_link/secret traverses through it
+    link = browse_root / "escape_link"
+    os.symlink(outside, link)
+    traversal_path = link / "secret"
+
+    with patch.object(srv, "_FS_BROWSE_ROOT", browse_root):
+        resp = client.get(f"/api/fs/list?path={traversal_path}")
+
+    assert resp.status_code == 403, (
+        f"Expected 403 for traversal into escaping symlink, got {resp.status_code}: {resp.text}"
+    )
+
+
+def test_fs_list_symlinks_excluded_from_entries(client_ctx, tmp_path):
+    """GET /api/fs/list must not include symlinks in returned entries, even if they point inside root."""
+    import os
+
+    client, srv, _, _ = client_ctx
+
+    browse_root = tmp_path / "home"
+    browse_root.mkdir()
+    real_subdir = browse_root / "real_dir"
+    real_subdir.mkdir()
+
+    # Symlink pointing to a directory still inside browse root
+    link_inside = browse_root / "link_to_real"
+    os.symlink(real_subdir, link_inside)
+
+    # Symlink pointing outside browse root
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    link_outside = browse_root / "link_to_outside"
+    os.symlink(outside, link_outside)
+
+    with patch.object(srv, "_FS_BROWSE_ROOT", browse_root):
+        resp = client.get(f"/api/fs/list?path={browse_root}")
+
+    assert resp.status_code == 200, f"Expected 200, got {resp.status_code}: {resp.text}"
+    names = [e["name"] for e in resp.json()["entries"]]
+    assert "real_dir" in names, "real directory must appear in entries"
+    assert "link_to_real" not in names, "symlink pointing inside root must NOT appear in entries"
+    assert "link_to_outside" not in names, "symlink pointing outside root must NOT appear in entries"
+
+
 # ── AC7: + Add environment link ───────────────────────────────────────────────
 
 def test_add_environment_link_exists_in_html():

@@ -2051,6 +2051,7 @@ def get_project_events(
 # ── Settings API (issue #639) ────────────────────────────────────────────────
 
 import services.sprint_manager.settings_repo as _settings_repo
+import services.sprint_manager.notes_repo as _notes_repo
 from services.sprint_manager.settings_schema import (
     APP_CONFIG_KEY,
     SECRET_FIELDS,
@@ -12038,6 +12039,25 @@ def save_project_notes(repo: str = "", body: SaveNotesBody = ...):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(body.content, encoding="utf-8")
     return {"ok": True, "mtime": path.stat().st_mtime}
+
+
+# ── Global notes (.commander/notes.json) — issue #717 ─────────────────────────
+
+class GlobalNotesBody(BaseModel):
+    body: str = ""
+
+
+@app.get("/api/notes")
+def get_global_notes():
+    """Return the global notes body, or empty string if none saved yet."""
+    return {"body": _notes_repo.get_notes()}
+
+
+@app.put("/api/notes")
+def put_global_notes(body: GlobalNotesBody):
+    """Persist the full global notes body to .commander/notes.json."""
+    _notes_repo.set_notes(body.body)
+    return {"body": body.body}
 
 
 # ── Static asset routes with long-lived cache headers (issue #249) ────────────

@@ -126,6 +126,24 @@ Tell the user:
 - The feature branch name
 - Any AC items you couldn't fully implement and why
 
+## Frontend / UI implementation (issue #713)
+
+When the ticket touches frontend/UI, before writing **any** UI code:
+
+1. **Load the impeccable design skills** by running
+   `node .github/skills/impeccable/scripts/context.mjs` from the repo root and
+   follow the design rules it prints (this is the file-based skill pack, not the
+   Claude Code plugin).
+2. **If a mock HTML file is attached** under `references/issue-<N>/` (e.g.
+   `mock.html`), treat it as the **pixel/visual target** — reproduce its layout,
+   colors, spacing, and typography exactly. The AC will already carry the literal
+   token values extracted from the mock; match them.
+3. **If no mock is attached**, implement against the named impeccable rules the
+   AC cites (spacing scale, contrast ratio, component naming, breakpoints).
+4. Your UI output **must pass the `impeccable detect` gate on the first try** —
+   run `npx impeccable detect <path>` locally and fix any anti-patterns before
+   committing, so the design gate does not bounce the ticket back to SIT.
+
 ## Rules
 
 - Work only on the feature branch — never commit directly to `develop` or `main`.

@@ -356,10 +356,10 @@ def test_put_environments_persists_valid_git_path(client_ctx, tmp_path):
     """PUT /api/projects/{slug}/environments persists valid git clone paths."""
     client, _, _, projects_file = client_ctx
 
-    # Create a fake git clone dir
+    import subprocess as _sp
     git_dir = tmp_path / "my_clone"
     git_dir.mkdir()
-    (git_dir / ".git").mkdir()
+    _sp.run(["git", "init", str(git_dir)], capture_output=True, check=True)
 
     resp = client.put(
         "/api/projects/test-proj/environments",

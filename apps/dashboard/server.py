@@ -2355,6 +2355,18 @@ def put_project_environments(slug: str, body: _PutEnvironmentsBody):
                 f"'{env}': path '{local_dir}' is not a git repository (.git not found)"
             )
             continue
+        result = subprocess.run(
+            ["git", "rev-parse", "--is-inside-work-tree"],
+            cwd=str(p),
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            errors.append(
+                f"'{env}': path '{local_dir}' is not a valid git repository"
+                " (git rev-parse failed — repo may be corrupted or misconfigured)"
+            )
+            continue
 
     if errors:
         raise HTTPException(status_code=422, detail="; ".join(errors))

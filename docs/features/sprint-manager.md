@@ -176,9 +176,24 @@ dashboard:
 |---|---|---|
 | Coder | `claude-sonnet-4-6` | Via Claude Code CLI (subscription-funded) |
 | Tester | `claude-haiku-4-5` | Via Claude Code CLI (subscription-funded) |
+| Reviewer | `claude-haiku-4-5` | Via Claude Code CLI (subscription-funded) |
+| Estimator | `claude-sonnet-4-6` | Via Claude Code CLI (subscription-funded) |
+| Documentor | `claude-sonnet-4-6` | Via Claude Code CLI (subscription-funded) |
 | Sprint preflight | `claude-haiku-4-5-20251001` | Raw API (charged per token) |
 
-Override per-invocation with `--model` on the CLI or in `sprint.yaml`.
+Override per-agent in `sprint.yaml` under `agent_config`:
+
+```yaml
+agent_config:
+  default_model: claude-sonnet-4-6   # fallback for any agent without a specific override
+  coder_model: claude-sonnet-4-6
+  tester_model: claude-haiku-4-5
+  reviewer_model: claude-haiku-4-5
+  estimator_model: claude-sonnet-4-6
+  documentor_model: claude-sonnet-4-6
+```
+
+`default_model` applies to any agent that doesn't have its own key set. Per-agent keys take precedence over `default_model`.
 
 ---
 

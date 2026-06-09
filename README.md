@@ -59,10 +59,7 @@ For a full walkthrough including multi-clone setup for Coder/Tester agents, see
 
 ## How the estimator works
 
-The Sprint Estimator runs automatically at the start of every sprint (after the
-sprint branch is created, before any coder agents are dispatched). It uses a single
-Claude Code subprocess to estimate effort, files impacted, and risks for all backlog
-tickets in one pass.
+The Sprint Estimator is **skipped by default** — pass `--no-skip-estimator` to `sprint_manager.py` to enable it. When enabled it runs at the start of every sprint (after the sprint branch is created, before any coder agents are dispatched), using a single Claude Code subprocess to estimate effort, files impacted, and risks for all backlog tickets in one pass.
 
 **What it does:**
 1. Fetches all open backlog issues labeled with the sprint label (skips any already labeled `estimated`, `done`, `UAT-approved`, `needs-rework`, or `closed`).

@@ -1,5 +1,19 @@
 # Changelog
 
+## Sprint 53
+
+- [#688](https://github.com/zealchaiwut/commander/issues/688) Extract date-param validation to helper function — 2026-06-09
+- [#687](https://github.com/zealchaiwut/commander/issues/687) Document finish-card API breaking change (404 → 200 no_data) — 2026-06-09
+  - `GET /api/sprints/{label}/finish-card` now always returns HTTP 200.
+  - When a sprint has never been run it returns `state: "no_data"` instead of HTTP 404.
+  - Clients must check `response.state === "no_data"` rather than HTTP status codes.
+  - Full response shapes (no_data / running / completed / has_rework / cancelled) documented in `docs/features/api.md`.
+- [#681](https://github.com/zealchaiwut/commander/issues/681) Add Scaffold Docs action to Project Settings — 2026-06-09
+- [#670](https://github.com/zealchaiwut/commander/issues/670) Add error logging to sprint PR lookup in finish sprint — 2026-06-09
+- [#667](https://github.com/zealchaiwut/commander/issues/667) Add symlink traversal test cases to test_643 — 2026-06-09
+- [#664](https://github.com/zealchaiwut/commander/issues/664) Improve git repository validation in put_project_environments — 2026-06-09
+- [#663](https://github.com/zealchaiwut/commander/issues/663) Fix symlink escape vulnerability in /api/fs/list endpoint — 2026-06-09
+
 ## Sprint 52
 
 - [#672](https://github.com/zealchaiwut/commander/issues/672) Fix API Error on Finish Card Submission — 2026-06-09

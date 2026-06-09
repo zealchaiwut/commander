@@ -82,6 +82,7 @@ These endpoints are called by the Claude Code hooks in `hooks/`.
 | `POST` | `/api/sprints/{sprint_label}/rerun` | Reset ticket labels and rerun a sprint |
 | `GET` | `/api/sprints/{sprint_label}/live` | Live snapshot of a running sprint — counts, current ticket, active agent, last 50 log lines, and locked `issues[]` array (see below) |
 | `GET` | `/api/sprints/{sprint_label}/live/stream` | SSE stream — pushed live sprint events |
+| `GET` | `/api/sprints/{sprint_label}/finish-card` | Summary card data for a sprint — always returns HTTP 200 (see response shape below) |
 | `GET` | `/api/sprint-status` | Get current sprint run status (per-ticket states) |
 | `POST` | `/api/sprint-status` | Update sprint run status (called by sprint manager) |
 | `GET` | `/api/sprint-summary` | Get the sprint summary for the active or last sprint |
@@ -117,6 +118,58 @@ These endpoints are called by the Claude Code hooks in `hooks/`.
 tickets whose `sprint-N` label was stripped mid-run still appear. `status` is one of
 `pending`, `in-progress`, `done`, `skipped`. `agent_status` is `running`, `failed`,
 or `null`.
+
+### `/api/sprints/{sprint_label}/finish-card` response shape
+
+Always returns **HTTP 200**. The `state` field determines which other fields are present.
+
+> **Breaking change (sprint 52, issue #672):** this endpoint previously returned
+> HTTP 404 when a sprint had never been run. It now returns HTTP 200 with
+> `state: "no_data"`. Clients must check the `state` field in the response body
+> rather than relying on HTTP status codes to determine whether a sprint has run.
+
+**`state: "no_data"`** — sprint has never been run (no state file on disk):
+
+```json
+{
+  "sprint_label":  "sprint-99",
+  "sprint_number": 99,
+  "state":         "no_data"
+}
+```
+
+**`state: "running"`** — sprint is currently executing:
+
+```json
+{
+  "sprint_label":    "sprint-10",
+  "sprint_number":   10,
+  "state":           "running",
+  "in_flight_count": 1,
+  "pending_count":   3,
+  "done_count":      2,
+  "wall_clock_secs": 342.0,
+  "started_at":      "2026-05-29T00:00:00Z"
+}
+```
+
+**`state: "completed"` / `"has_rework"` / `"cancelled"`** — sprint finished:
+
+```json
+{
+  "sprint_label":      "sprint-10",
+  "sprint_number":     10,
+  "state":             "completed",
+  "done_count":        5,
+  "failed_count":      0,
+  "skipped_count":     0,
+  "rework_count":      0,
+  "wall_clock_secs":   1800.0,
+  "ended_at":          "2026-05-29T00:30:00Z",
+  "summary_issue_url": "https://github.com/owner/repo/issues/123",
+  "summary_issue_num": 123
+}
+```
 
 ---
 

@@ -142,6 +142,16 @@ if os.environ.get("COMMANDER_DISABLE_NEON", "").strip().lower() in ("1", "true",
 from sizing import SIZE_TO_MINUTES as _SIZE_TO_MINUTES, letter_from_minutes as _letter_from_minutes, minutes_from_letter as _minutes_from_letter
 
 try:
+    _SCAFFOLD_SCRIPTS_DIR = Path(__file__).parent.parent.parent / "scripts"
+    if str(_SCAFFOLD_SCRIPTS_DIR) not in sys.path:
+        sys.path.insert(0, str(_SCAFFOLD_SCRIPTS_DIR))
+    from scaffold_docs import scaffold_data as _scaffold_data
+    _SCAFFOLD_AVAILABLE = True
+except ImportError:
+    _scaffold_data = None  # type: ignore[assignment]
+    _SCAFFOLD_AVAILABLE = False
+
+try:
     import mis_sizing as _mis_sizing
     _MIS_SIZING_AVAILABLE = True
 except ImportError:
@@ -2055,7 +2065,13 @@ def _resolve_project_slug(slug: str) -> str:
     """
     try:
         all_projects = projects_module.load_projects()
-    except Exception:
+    except Exception as exc:
+        _slog.warn(
+            "resolve_project_slug.load_failed",
+            f"load_projects raised while resolving slug '{slug}': {exc}",
+            slug=slug,
+            error=str(exc),
+        )
         all_projects = []
 
     matched = next(
@@ -2251,18 +2267,27 @@ def fs_list(path: str = ""):
             path = str(root)
 
         candidate = Path(path)
-        # Resolve without following symlinks first to detect symlink escapes
-        try:
-            resolved = candidate.resolve()
-        except Exception:
+        # Normalize ../ etc without following symlinks
+        normalized = Path(os.path.normpath(str(candidate)))
+
+        # Must be under browse root before any symlink resolution
+        if not normalized.is_relative_to(root):
             raise HTTPException(status_code=403, detail="Forbidden")
 
-        try:
-            resolved.relative_to(root)
-        except ValueError:
-            raise HTTPException(status_code=403, detail="Forbidden")
+        # Walk each component; reject if any symlink escapes root.
+        # This catches escape-then-reenter chains that resolve() misses.
+        cur = root
+        for part in normalized.relative_to(root).parts:
+            cur = cur / part
+            if cur.is_symlink():
+                try:
+                    link_resolved = cur.resolve()
+                    if not link_resolved.is_relative_to(root):
+                        raise HTTPException(status_code=403, detail="Forbidden")
+                except OSError:
+                    raise HTTPException(status_code=403, detail="Forbidden")
 
-        target = resolved
+        target = normalized
 
     if not target.exists() or not target.is_dir():
         return {"entries": [], "current": str(target)}
@@ -2270,14 +2295,16 @@ def fs_list(path: str = ""):
     entries = []
     try:
         for item in sorted(target.iterdir()):
+            if item.is_symlink():
+                continue  # never follow symlinks out of browse root
             if not item.is_dir():
                 continue
             # Skip hidden dirs
             if item.name.startswith("."):
                 continue
             entries.append({"name": item.name, "path": str(item)})
-    except PermissionError:
-        pass
+    except OSError as exc:
+        logger.info("[fs_list] error listing %s: %s", target, exc)
 
     return {"entries": entries, "current": str(target)}
 
@@ -2334,6 +2361,18 @@ def put_project_environments(slug: str, body: _PutEnvironmentsBody):
                 f"'{env}': path '{local_dir}' is not a git repository (.git not found)"
             )
             continue
+        result = subprocess.run(
+            ["git", "rev-parse", "--is-inside-work-tree"],
+            cwd=str(p),
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            errors.append(
+                f"'{env}': path '{local_dir}' is not a valid git repository"
+                " (git rev-parse failed — repo may be corrupted or misconfigured)"
+            )
+            continue
 
     if errors:
         raise HTTPException(status_code=422, detail="; ".join(errors))
@@ -2341,6 +2380,76 @@ def put_project_environments(slug: str, body: _PutEnvironmentsBody):
     envs_dict = {e.env.strip(): e.local_directory.strip() for e in body.environments}
     projects_module.save_project_environments(repo, envs_dict)
     return {"ok": True, "environments": envs_dict}
+
+
+# ── Scaffold docs (issue #681) ────────────────────────────────────────────────
+
+def _scaffold_resolve_working_clone(slug: str) -> tuple[str, Path]:
+    """Resolve project slug → (repo, working_clone_path) with traversal guard.
+
+    Returns the main working clone directory and validates it is inside _PROJECTS_BASE.
+    Raises HTTPException 404 for unknown slug, 400 if path escapes _PROJECTS_BASE.
+    """
+    repo = _resolve_project_slug(slug)
+    project_root = _project_root_path(repo)
+    working_clone = _main_clone_path(project_root)
+    resolved = working_clone.resolve()
+    base_resolved = _PROJECTS_BASE.resolve()
+    if not str(resolved).startswith(str(base_resolved) + "/") and resolved != base_resolved:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Resolved project root '{resolved}' is outside the configured projects directory '{base_resolved}'",
+        )
+    return repo, working_clone
+
+
+@app.get("/api/projects/{slug}/docs/scaffold/check")
+def get_scaffold_check(slug: str):
+    """Check whether the project's working clone has the standard docs structure.
+
+    Runs scaffold_docs --check (no writes). Returns:
+      { compliant, missing, stray, project_root }
+    where missing/stray are lists of relative paths.
+    """
+    if not _SCAFFOLD_AVAILABLE:
+        raise HTTPException(status_code=503, detail="scaffold_docs module unavailable")
+    repo, working_clone = _scaffold_resolve_working_clone(slug)
+    project_name = working_clone.name
+    if project_name in ("main", "prd") and working_clone.parent != working_clone:
+        project_name = working_clone.parent.name
+    result = _scaffold_data(working_clone, project_name, check=True)
+    return {
+        "compliant": result["compliant"],
+        "missing": result["missing"],
+        "stray": result["stray"],
+        "project_root": str(working_clone),
+    }
+
+
+class _ScaffoldApplyBody(BaseModel):
+    confirm: bool = False
+
+
+@app.post("/api/projects/{slug}/docs/scaffold/apply")
+def post_scaffold_apply(slug: str, body: _ScaffoldApplyBody):
+    """Apply the standard docs scaffold to the project's working clone.
+
+    Requires { confirm: true } in the request body; returns 400 otherwise.
+    Existing files are NEVER overwritten. Returns { created, compliant }.
+    """
+    if not body.confirm:
+        raise HTTPException(status_code=400, detail="confirm must be true to apply scaffold")
+    if not _SCAFFOLD_AVAILABLE:
+        raise HTTPException(status_code=503, detail="scaffold_docs module unavailable")
+    repo, working_clone = _scaffold_resolve_working_clone(slug)
+    project_name = working_clone.name
+    if project_name in ("main", "prd") and working_clone.parent != working_clone:
+        project_name = working_clone.parent.name
+    result = _scaffold_data(working_clone, project_name, check=False)
+    return {
+        "created": result["created"],
+        "compliant": result["compliant"],
+    }
 
 
 # ── Branch cleanup (issue #634) ───────────────────────────────────────────────
@@ -3716,7 +3825,7 @@ async def batch_sprint_labels(body: BatchLabelsBody):
     return {"applied": applied, "failed": failed, "errors": errors}
 
 
-_SPRINT_LABEL_RE = re.compile(r"^sprint-\d+(\.\d+)*$")
+_SPRINT_LABEL_RE = re.compile(r"^sprint-\d+(\.\d+)?$")
 _SUMMARY_TITLE_RE = re.compile(r"^Sprint \d+(\.\d+)*\s+Executive Summary$")
 _SUMMARY_TITLE_NUM_RE = re.compile(r"^Sprint (\d+(?:\.\d+)*)\s+Executive Summary$")
 
@@ -3767,7 +3876,7 @@ SPRINT_LOG_PATH = Path(__file__).parent / "sprints" / "sprint_run.log"
 # sprint_manager validates the value — no validation added here.
 _ALERT_MODES = os.environ.get("COMMANDER_ALERT_MODES", "dashboard-banner,ntfy")
 
-_SPRINT_LABEL_RE_ALL = re.compile(r"^sprint-\d+(\.\d+)*$")
+_SPRINT_LABEL_RE_ALL = re.compile(r"^sprint-\d+(\.\d+)?$")
 
 
 def _dashboard_actor() -> str:
@@ -3796,11 +3905,14 @@ def _emit_dashboard_event(
 
 
 def _sprint_label_sort_key(label: str) -> tuple:
-    """Return numeric components tuple for natural multi-level sprint label ordering."""
-    m = re.match(r"^sprint-(\d+(?:\.\d+)*)$", label)
+    """Return (N, M) tuple for natural sprint label ordering.
+
+    Plain sprint-N returns (N, 0); dotted sprint-N.M returns (N, M).
+    """
+    m = re.match(r"^sprint-(\d+)(?:\.(\d+))?$", label)
     if not m:
-        return (0,)
-    return tuple(int(x) for x in m.group(1).split("."))
+        return (0, 0)
+    return (int(m.group(1)), int(m.group(2)) if m.group(2) else 0)
 
 
 def _next_sprint_sublabel(sprint_label: str, existing_label_names: set[str]) -> str:
@@ -3810,9 +3922,12 @@ def _next_sprint_sublabel(sprint_label: str, existing_label_names: set[str]) -> 
     sprint-25.1 → sprint-25.2 (next sibling, not a child)
     sprint-25.2 → sprint-25.3
     """
-    base_m = re.match(r"^(sprint-\d+)", sprint_label)
-    base = base_m.group(1) if base_m else sprint_label
-    candidate = 1
+    m = re.match(r"^(sprint-\d+)(?:\.(\d+))?$", sprint_label)
+    if not m:
+        raise ValueError(f"Invalid sprint label: {sprint_label!r}")
+    base = m.group(1)
+    current_suffix = int(m.group(2)) if m.group(2) else 0
+    candidate = current_suffix + 1
     while True:
         label = f"{base}.{candidate}"
         if label not in existing_label_names:
@@ -3910,6 +4025,18 @@ def _coder_clone_path(project_root: Path) -> Path:
     flat = project_root.parent / f"{project_root.name}-coder"
     if flat.exists():
         return flat
+    return project_root
+
+
+def _main_clone_path(project_root: Path) -> Path:
+    """Return the main working clone for a project root.
+
+    Nested layout: <project_root>/main/ (has .git)
+    Flat layout:   <project_root> itself
+    """
+    nested = project_root / "main"
+    if nested.is_dir() and (nested / ".git").exists():
+        return nested
     return project_root
 
 
@@ -7298,6 +7425,17 @@ MODEL_PRICE_MAP: dict[str, tuple[float, float]] = {
 }
 
 
+def _parse_iso_date(date_str: str, name: str, *, end_of_day: bool = False) -> datetime:
+    """Parse a YYYY-MM-DD string into a UTC datetime, raising HTTP 400 on bad input."""
+    try:
+        dt = datetime.strptime(date_str, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    except ValueError:
+        raise HTTPException(400, detail=f"Invalid {name!r} date {date_str!r} — expected YYYY-MM-DD")
+    if end_of_day:
+        dt = dt.replace(hour=23, minute=59, second=59)
+    return dt
+
+
 def _compute_analytics_metrics(project_root: Path,
                                 since: str | None = None,
                                 until: str | None = None,
@@ -7309,22 +7447,8 @@ def _compute_analytics_metrics(project_root: Path,
     """
     today = datetime.now(tz=timezone.utc).date()
 
-    if since:
-        try:
-            since_dt = datetime.strptime(since, "%Y-%m-%d").replace(tzinfo=timezone.utc)
-        except ValueError:
-            raise HTTPException(400, detail=f"Invalid 'since' date {since!r} — expected YYYY-MM-DD")
-    else:
-        since_dt = None
-
-    if until:
-        try:
-            until_dt = datetime.strptime(until, "%Y-%m-%d").replace(
-                tzinfo=timezone.utc).replace(hour=23, minute=59, second=59)
-        except ValueError:
-            raise HTTPException(400, detail=f"Invalid 'until' date {until!r} — expected YYYY-MM-DD")
-    else:
-        until_dt = None
+    since_dt = _parse_iso_date(since, "since") if since else None
+    until_dt = _parse_iso_date(until, "until", end_of_day=True) if until else None
 
     sprints_dir = _commander_dir(project_root) / "sprints"
 
@@ -7443,16 +7567,19 @@ def _compute_analytics_metrics(project_root: Path,
     try:
         rows = db.get_token_usage_by_agent_model()
         for row in rows:
-            role = (row.get("agent_role") or "unknown").lower()
-            model = (row.get("model_name") or "").lower()
-            price_in, price_out = MODEL_PRICE_MAP.get(model, (0.0, 0.0))
-            cost = (row.get("total_input", 0) * price_in +
-                    row.get("total_output", 0) * price_out)
-            cost_per_sprint_total += cost
-            if role in cost_by_role:
-                cost_by_role[role] += cost
-    except Exception:
-        pass
+            try:
+                role = (row.get("agent_role") or "unknown").lower()
+                model = (row.get("model_name") or "").lower()
+                price_in, price_out = MODEL_PRICE_MAP.get(model, (0.0, 0.0))
+                cost = (row.get("total_input", 0) * price_in +
+                        row.get("total_output", 0) * price_out)
+                cost_per_sprint_total += cost
+                if role in cost_by_role:
+                    cost_by_role[role] += cost
+            except (KeyError, ValueError, TypeError) as exc:
+                logger.debug("token-usage cost: skipping row %r — %s", row, exc)
+    except Exception as exc:
+        logger.debug("token-usage cost: db query failed — %s", exc)
 
     num_sprints = len(sprint_ticket_counts) if sprint_ticket_counts else 1
     cost_per_sprint_avg = cost_per_sprint_total / num_sprints
@@ -7542,22 +7669,8 @@ def _compute_calibration(
     All sizes always present; sizes with no data have count=0 and null stats.
     """
     # Validate date params first so bad input returns 400 before any DB work.
-    since_dt = None
-    until_dt = None
-    if since:
-        try:
-            since_dt = datetime.strptime(since, "%Y-%m-%d").replace(tzinfo=timezone.utc)
-        except ValueError:
-            raise HTTPException(400, detail=f"Invalid 'since' date {since!r} — expected YYYY-MM-DD")
-    if until:
-        try:
-            until_dt = (
-                datetime.strptime(until, "%Y-%m-%d")
-                .replace(tzinfo=timezone.utc)
-                .replace(hour=23, minute=59, second=59)
-            )
-        except ValueError:
-            raise HTTPException(400, detail=f"Invalid 'until' date {until!r} — expected YYYY-MM-DD")
+    since_dt = _parse_iso_date(since, "since") if since else None
+    until_dt = _parse_iso_date(until, "until", end_of_day=True) if until else None
 
     # Resolve configured_minutes from project settings (falls back to defaults).
     try:
@@ -7721,12 +7834,20 @@ async def generate_daily_report(request: Request):
 def get_sprint_finish_card(sprint_label: str, project: str):
     """Return data for the floating finish-report card above a sprint pane.
 
+    Always returns HTTP 200. Clients must check the ``state`` field in the
+    response body — do NOT rely on HTTP 404 to detect a missing sprint.
+    (Before issue #671 this endpoint returned 404 when no state file existed;
+    it now returns HTTP 200 with state="no_data" instead.)
+
     For running sprints: state="running", in_flight_count, pending_count,
     done_count, wall_clock_secs, started_at.
 
     For finished sprints: state in (completed|has_rework|cancelled),
     done_count, failed_count, skipped_count, rework_count, wall_clock_secs,
     ended_at, summary_issue_url, summary_issue_num.
+
+    When no sprint state file exists on disk: state="no_data", sprint_label,
+    sprint_number only (HTTP 200, not 404).
     """
     if not _SPRINT_LABEL_RE.match(sprint_label):
         raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")
@@ -7922,8 +8043,13 @@ def get_sprint_branch_status(sprint_label: str, project: str):
                 pr_url = prs[0].get("url")
                 pr_number = prs[0].get("number")
                 pr_title = prs[0].get("title")
-    except Exception:
-        pass
+    except Exception as _pr_err:
+        _slog.warn(
+            "sprint_pr_lookup_failed",
+            f"PR lookup for {branch_name!r} failed: {_pr_err}",
+            branch=branch_name,
+            error=str(_pr_err),
+        )
 
     return {"exists": exists, "branch": branch_name,
             "pr_url": pr_url, "pr_number": pr_number, "pr_title": pr_title}
@@ -8043,40 +8169,52 @@ def rerun_sprint_preview_v2(sprint_label: str, project: str):
 
 
 @app.post("/api/sprints/{sprint_label}/rerun")
-def rerun_sprint(sprint_label: str, project: str, body: SprintRerunV2Body):
-    """Create a hierarchically-versioned child sprint and optionally auto-run it.
+def rerun_sprint(sprint_label: str, project: str, body: SprintRerunBody):
+    """Create an independent sub-sprint from all non-UAT tickets and auto-run it.
 
-    Selected tickets are moved from sprint_label → sub_label and transitioned to
-    QUEUED state (all status labels cleared). The child sprint's plan.json records
-    parent=sprint_label. The original sprint's plan.json is NOT modified.
+    Auto-detects every non-UAT ticket carrying sprint_label, moves them to a new
+    versioned sub-sprint label (sprint-N.1, sprint-N.2, …), creates plan.json with
+    parent reference, and dispatches sprint_manager for the sub-sprint. The original
+    sprint label, plan.json, branch, and PR are NOT modified.
 
-    Body: { ticket_numbers: [int, ...], auto_run: bool = true }
+    Body: { confirm: bool }
+    Response: { sub_label, noop, dispatch_count, decisions, moved, [errors] }
     """
     if not _SPRINT_LABEL_RE.match(sprint_label):
         raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")
-    if not body.ticket_numbers:
-        raise HTTPException(400, detail="ticket_numbers must be non-empty")
 
     project_root = _project_root_path(project)
 
-    if body.auto_run:
-        running = _any_sprint_running(project=project)
-        if running:
-            raise HTTPException(
-                409,
-                detail=(
-                    f"Cannot start sprint: {running['sprint_label']} is currently running"
-                    f" on {running['project']}"
-                ),
-            )
+    if _is_sprint_running(project_root, sprint_label):
+        raise HTTPException(409, detail=f"Sprint {sprint_label} is currently running")
 
-    commander = _commander_dir(project_root)
-    sprints_dir = commander / "sprints"
-    sprints_dir.mkdir(parents=True, exist_ok=True)
-    log_dir = commander / "logs"
-    log_dir.mkdir(parents=True, exist_ok=True)
-    ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
-    run_id = str(uuid.uuid4())
+    try:
+        sprint_issues = _get_sprint_issues(project, sprint_label)
+    except subprocess.CalledProcessError as e:
+        raise _gh_error(e)
+
+    _NON_WORK_LABELS_RR = {"sprint-summary", "docs", "documentation"}
+    decisions: list[dict] = []
+    for iss in sprint_issues:
+        current_labels = {lbl["name"] for lbl in iss.get("labels", [])}
+        if current_labels & _NON_WORK_LABELS_RR:
+            continue
+        action, _ = _rerun_policy(current_labels)
+        decisions.append({
+            "issue_num": iss["number"],
+            "issue_title": iss["title"],
+            "action": action,
+        })
+
+    to_move = [d for d in decisions if d["action"] != "skip"]
+
+    if not to_move:
+        return {
+            "noop": True,
+            "dispatch_count": 0,
+            "message": "No issues require re-dispatch; all are UAT or UAT-approved.",
+            "decisions": decisions,
+        }
 
     # Compute sub-label
     existing_label_names = {lbl["name"] for lbl in github_client.list_labels(repo_name=project)}
@@ -8093,8 +8231,8 @@ def rerun_sprint(sprint_label: str, project: str, body: SprintRerunV2Body):
     errors: list[str] = []
     moved: list[int] = []
 
-    for issue_num in body.ticket_numbers:
-        # Swap sprint labels: remove parent sprint label, add sub-label
+    for d in to_move:
+        issue_num = d["issue_num"]
         try:
             github_client.update_labels(
                 issue_num,
@@ -8105,22 +8243,28 @@ def rerun_sprint(sprint_label: str, project: str, body: SprintRerunV2Body):
         except subprocess.CalledProcessError as e:
             errors.append(f"#{issue_num} label swap failed: {e.stderr.strip() if e.stderr else str(e)}")
             continue
-
-        # Clear all status labels by transitioning to QUEUED
-        try:
-            _sm_transition(issue_num, _TicketState.QUEUED, actor="rerun", repo=project)
-        except _TransitionError as e:
-            errors.append(f"#{issue_num} transition failed: {e}")
-            continue
-
         moved.append(issue_num)
 
-    # Create plan.json for sub-label with parent reference (original plan.json untouched)
+    commander = _commander_dir(project_root)
+    sprints_dir = commander / "sprints"
+    sprints_dir.mkdir(parents=True, exist_ok=True)
+
+    # Create plan.json for sub-label; original plan.json is untouched
     _write_plan_json(project_root, sub_label, {
         "state": "planning",
         "tickets": moved,
         "parent": sprint_label,
     })
+
+    # Mark parent state file with rerun_into so the board knows where the re-run went
+    parent_state_path = sprints_dir / f"{sprint_label}-state.json"
+    if parent_state_path.exists():
+        try:
+            state_data = json.loads(parent_state_path.read_text(encoding="utf-8"))
+            state_data["rerun_into"] = sub_label
+            parent_state_path.write_text(json.dumps(state_data), encoding="utf-8")
+        except Exception:
+            pass
 
     github_client.invalidate("open_issues_body:")
     github_client.invalidate("open_issues:")
@@ -8128,22 +8272,24 @@ def rerun_sprint(sprint_label: str, project: str, body: SprintRerunV2Body):
     github_client.invalidate("sprint_labels:")
 
     result: dict = {
-        "run_id": run_id,
+        "noop": False,
         "sub_label": sub_label,
         "parent_label": sprint_label,
+        "dispatch_count": len(moved),
         "moved": moved,
-        "error_count": len(errors),
+        "decisions": decisions,
     }
     if errors:
         result["errors"] = errors
 
-    if not body.auto_run:
+    # Auto-run: dispatch sprint_manager for the sub-sprint
+    if not SPRINT_MANAGER_PATH.exists():
         return result
 
-    # Auto-run: dispatch sprint_manager same code path as /api/sprints/run
-    if not SPRINT_MANAGER_PATH.exists():
-        raise HTTPException(502, detail=f"sprint_manager.py not found at {SPRINT_MANAGER_PATH}")
-
+    log_dir = commander / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
+    run_id = str(uuid.uuid4())
     coder_path = _coder_clone_path(project_root)
     pid_path = sprints_dir / f"{sub_label}-pid"
     pending_path = sprints_dir / f"{sub_label}-pid.pending"
@@ -8156,7 +8302,6 @@ def rerun_sprint(sprint_label: str, project: str, body: SprintRerunV2Body):
     except FileExistsError:
         raise HTTPException(409, detail=f"Sprint {sub_label} is already running on {project}")
 
-    # Update plan.json state to running before spawning subprocess
     try:
         _plan_json_set_state(project_root, sub_label, "running",
                              started_at=datetime.now(timezone.utc).isoformat(),
@@ -8211,6 +8356,7 @@ def rerun_sprint(sprint_label: str, project: str, body: SprintRerunV2Body):
     except subprocess.TimeoutExpired:
         pass
 
+    result["run_id"] = run_id
     result["pid"] = proc.pid
     result["log"] = str(run_log_path)
     return result

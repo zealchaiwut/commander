@@ -9671,11 +9671,27 @@ def _get_bulk_job(job_id: str) -> dict | None:
         path = jobs_dir / f"{job_id}.json"
         if path.exists():
             job = json.loads(path.read_text(encoding="utf-8"))
+            # A job that was 'running' when the server restarted can never
+            # resume — its in-flight BA processes are gone. Mark it cancelled
+            # so the client gets accurate state instead of a perpetual spinner.
+            if job.get("status") == "running":
+                _bulk_cancel_interrupted(job)
             _bulk_jobs[job_id] = job
             return job
     except Exception:
         pass
     return None
+
+
+def _bulk_cancel_interrupted(job: dict) -> None:
+    """Mark a job interrupted by a server restart as cancelled and persist to disk."""
+    _NON_TERMINAL = {"pending", "drafting", "estimating"}
+    for ticket in job.get("tickets", []):
+        if ticket.get("state") in _NON_TERMINAL:
+            ticket["state"] = "cancelled"
+            ticket["error"] = "Server restarted — job was interrupted"
+    job["status"] = "cancelled"
+    _persist_bulk_job(job)
 
 
 def _prune_old_bulk_jobs() -> None:
@@ -10400,7 +10416,7 @@ async def bulk_retry_ticket(job_id: str, body: BulkRetryBody):
     if body.index < 0 or body.index >= len(tickets):
         raise HTTPException(422, detail="Invalid ticket index")
     ticket = tickets[body.index]
-    if ticket["state"] != "failed":
+    if ticket["state"] not in ("failed", "cancelled"):
         return {"ok": True, "state": ticket["state"]}
 
     # Reset to pending and re-run as a single task
@@ -10944,7 +10960,7 @@ async def bulk_retry_all_failed(job_id: str, body: BulkRetryAllBody):
         if idx < 0 or idx >= len(tickets):
             continue
         t = tickets[idx]
-        if t["state"] != "failed":
+        if t["state"] not in ("failed", "cancelled"):
             continue
         job["status"] = "running"
         asyncio.create_task(_post_ticket_body_to_github(job_id, idx, body_text))

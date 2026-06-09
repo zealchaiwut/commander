@@ -64,3 +64,4 @@ separated by `---` exactly as the splitter expects.
 - [2026-sprint-runner-enhancements.md](2026-sprint-runner-enhancements.md) — sprint manager / runner enhancements
 - [2026-06-09-agent-browser-testing.md](2026-06-09-agent-browser-testing.md) — agent-browser live UAT + impeccable skills
 - [2026-06-09-analytics-nav-logging.md](2026-06-09-analytics-nav-logging.md) — analytics tabs/calcs, nav moves, global notes, agent logging
+- [2026-06-09-deploy-restart-env.md](2026-06-09-deploy-restart-env.md) — per-project deploy/restart (Mac mini + Render) + Render-style env editor

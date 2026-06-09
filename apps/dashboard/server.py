@@ -1123,6 +1123,12 @@ async def project_slug_no_tab(slug: str):
     return RedirectResponse(url=f"/project/{slug}/sprint-mgmt", status_code=302)
 
 
+@app.get("/project/{slug}/analytics")
+async def project_slug_analytics(slug: str):
+    """Serve the Analytics page (ANL-2 shell, issue #648)."""
+    return _serve_html(STATIC_DIR / "analytics.html")
+
+
 @app.get("/project/{slug}/{tab}")
 async def project_slug_tab(slug: str, tab: str):
     """Serve the project chrome page for valid tabs; redirect invalid tabs to sprint-mgmt."""
@@ -1246,11 +1252,68 @@ def get_backup_status():
     return _backup_module.get_backup_status()
 
 
+_seen_agent_sessions: set[str] = set()
+
+
+def _agent_project_from_name(agent_name: str | None) -> str | None:
+    """Derive the full owner/repo project key from an agent name string.
+
+    Agent names are formatted as 'role·repo·branch·#short'. We extract the
+    repo label (second component) and match it against the loaded projects list.
+    Returns None if no match is found.
+    """
+    if not agent_name:
+        return None
+    parts = agent_name.split("·")
+    if len(parts) < 2:
+        return None
+    repo_label = parts[1]
+    try:
+        all_projects = projects_module.load_projects()
+    except Exception:
+        return None
+    matched = next(
+        (p["repo"] for p in all_projects if p["repo"].split("/")[-1] == repo_label),
+        None,
+    )
+    return matched
+
+
 @app.post("/api/agent-event")
 async def receive_event(request: Request, event: AgentEvent):
     _slog.event("route.entry", project="dashboard", request_id=request.state.request_id, route="/api/agent-event", method="POST", event_type=event.event_type)
-    db.upsert_agent(event.session_id, event.working_dir, event.status, event.tool_name, event.name)
-    db.add_event(event.session_id, event.event_type, event.model_dump())
+
+    session_id = event.session_id or "unknown"
+    project = _agent_project_from_name(event.name)
+    actor = event.name or session_id
+    role = (event.name.split("·")[0] if event.name and "·" in event.name else None)
+
+    if project:
+        if event.event_type == "tool_use" and session_id not in _seen_agent_sessions:
+            _seen_agent_sessions.add(session_id)
+            db.record_event(
+                project=project,
+                source="agent",
+                actor=actor,
+                type="agent_started",
+                target=session_id,
+                detail={"role": role, "working_dir": event.working_dir},
+                action_id=session_id,
+            )
+        if event.status in ("done", "timed_out", "error") or event.event_type == "agent_stop":
+            _seen_agent_sessions.discard(session_id)
+            db.record_event(
+                project=project,
+                source="agent",
+                actor=actor,
+                type="agent_finished",
+                target=session_id,
+                detail={"status": event.status, "role": role},
+                action_id=session_id,
+            )
+
+    db.upsert_agent(session_id, event.working_dir, event.status, event.tool_name, event.name)
+    db.add_event(session_id, event.event_type, event.model_dump())
     await broadcast({"type": "update", "event": event.model_dump()})
     return {"ok": True}
 
@@ -1468,6 +1531,119 @@ def get_sprint_nav_status(repo: str = ""):
         "columns": columns,
         "summary_issue": summary_issue,
     }
+
+
+def _sprint_progress_file_path(project: str) -> Optional[Path]:
+    """Return the path to the persisted sprint-progress JSON file for a project."""
+    if not project:
+        return None
+    project_root = _project_root_path(project)
+    return _commander_dir(project_root) / "runtime" / "sprint-progress.json"
+
+
+@app.get("/api/sprint-progress")
+def get_sprint_progress(project: str = "", repo: str = ""):
+    """Unified sprint progress endpoint — single source of truth for all three pill components.
+
+    Priority:
+    1. In-memory live status from sprint_manager (most recent, pushed via POST /api/sprint-status)
+    2. Persisted JSON file (survives server restart)
+    3. GitHub-backed fallback via sprint-nav-status logic
+
+    Persists the result to .commander/runtime/sprint-progress.json so the UI
+    can re-hydrate from disk when the server restarts or live data is not yet
+    available.
+    """
+    repo_name = repo or (project or None)
+
+    # ── 1. Try live in-memory status ─────────────────────────────────────────
+    running = _all_sprints_running()
+    if project:
+        running = [r for r in running if r["project"] == project]
+
+    for r in running:
+        key = (r["project"], r["sprint_label"])
+        status = _sprint_statuses.get(key, {})
+        issues = status.get("issues", [])
+        if not issues:
+            continue
+        sprint_number = status.get("sprint_number")
+        if sprint_number is None:
+            label = r["sprint_label"]
+            m = re.search(r"\d+", label)
+            sprint_number = int(m.group()) if m else 0
+
+        done = sum(
+            1 for i in issues
+            if i.get("status") in ("done", "skipped", "failed")
+        )
+        total = len(issues)
+
+        result = {
+            "has_sprint": True,
+            "sprint_label": r["sprint_label"],
+            "sprint": sprint_number,
+            "done": done,
+            "total": total,
+            "run_state": "running",
+            "source": "live",
+            "fetched_at": datetime.now(timezone.utc).isoformat(),
+        }
+        _persist_sprint_progress(project or r["project"], result)
+        return result
+
+    # ── 2. Try persisted file ────────────────────────────────────────────────
+    file_project = project or ""
+    progress_path = _sprint_progress_file_path(file_project)
+    if progress_path and progress_path.exists():
+        try:
+            cached = json.loads(progress_path.read_text(encoding="utf-8"))
+            if cached.get("has_sprint"):
+                return cached
+        except (OSError, json.JSONDecodeError):
+            pass
+
+    # ── 3. GitHub fallback ───────────────────────────────────────────────────
+    try:
+        gh_data = get_sprint_nav_status(repo=repo or (project or ""))
+    except Exception:
+        return {"has_sprint": False}
+
+    if not gh_data.get("has_sprint"):
+        return {"has_sprint": False}
+
+    sprint_num = gh_data.get("sprint", 0)
+    gh_done = (gh_data.get("done") or 0) + (gh_data.get("uat") or 0)
+    gh_total = gh_data.get("total") or 0
+    gh_state = gh_data.get("state", "running")
+
+    result = {
+        "has_sprint": True,
+        "sprint_label": f"sprint-{sprint_num}",
+        "sprint": sprint_num,
+        "done": gh_done,
+        "total": gh_total,
+        "run_state": gh_state,
+        "columns": gh_data.get("columns", {}),
+        "source": "github",
+        "fetched_at": datetime.now(timezone.utc).isoformat(),
+    }
+    _persist_sprint_progress(file_project, result)
+    return result
+
+
+def _persist_sprint_progress(project: str, data: dict) -> None:
+    """Write sprint progress data atomically to .commander/runtime/sprint-progress.json."""
+    path = _sprint_progress_file_path(project)
+    if path is None:
+        return
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        os.replace(str(tmp), str(path))
+    except OSError:
+        pass
 
 
 @app.get("/api/sprint-nav-summary")
@@ -3749,6 +3925,20 @@ def _sprint_goal_path(project_root: Path, sprint_label: str) -> Path:
     return _commander_dir(project_root) / "sprints" / f"{sprint_label}-goal.txt"
 
 
+def _build_sprint_subprocess_env() -> dict:
+    """Build the subprocess environment for sprint_manager.
+
+    Strips ANTHROPIC_API_KEY and resolves DB_PATH to an absolute path so that
+    sprint_manager (which runs from the coder clone CWD) writes to the same
+    database that the server reads from, regardless of relative path differences.
+    """
+    env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
+    db_val = env.get("DB_PATH", "")
+    if db_val and not os.path.isabs(db_val):
+        env["DB_PATH"] = str(Path(db_val).resolve())
+    return env
+
+
 def _sprint_plan_path(project_root: Path, sprint_label: str) -> Path:
     return _commander_dir(project_root) / "sprints" / f"{sprint_label}-plan.json"
 
@@ -5116,7 +5306,7 @@ def run_sprint_managed(request: Request, body: SprintMgmtRunBody):
     except Exception:
         pass
 
-    stripped_env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
+    stripped_env = _build_sprint_subprocess_env()
     goal_path = _sprint_goal_path(project_root, body.sprint_label)
     if goal_path.exists():
         stripped_env["SPRINT_GOAL"] = goal_path.read_text(encoding="utf-8").strip()
@@ -6199,7 +6389,13 @@ class SprintCleanupBody(BaseModel):
 
 @app.post("/api/sprints/cleanup-empty")
 async def cleanup_empty_sprints(body: SprintCleanupBody):
-    """Delete all sprint labels with zero open tickets from GitHub."""
+    """Delete leading consecutive empty sprint labels from GitHub (issue #658).
+
+    Only removes sprint-N labels that appear before the first sprint with ≥ 1 open
+    ticket (in ascending number order). Trailing empty sprints — those after any
+    sprint that has tickets — are preserved. If no sprint has tickets, nothing is
+    deleted.
+    """
     try:
         all_sprint_labels = github_client.list_sprint_labels(repo_name=body.project)
     except subprocess.CalledProcessError as e:
@@ -6210,18 +6406,39 @@ async def cleanup_empty_sprints(body: SprintCleanupBody):
     except subprocess.CalledProcessError as e:
         raise _gh_error(e)
 
-    sprint_re_local = re.compile(r"^sprint-\d+(\.\d+)?$")
-    labeled_sprints: set[str] = set()
+    sprint_re_any   = re.compile(r"^sprint-(\d+)(?:\.\d+)?$")
+    sprint_re_plain = re.compile(r"^sprint-(\d+)$")
+
+    # Collect base sprint numbers that have ≥ 1 open ticket (plain or dotted sub-labels)
+    active_base_nums: set[int] = set()
     for iss in issues:
         for lbl in iss.get("labels", []):
-            if sprint_re_local.match(lbl["name"]):
-                labeled_sprints.add(lbl["name"])
+            m = sprint_re_any.match(lbl["name"])
+            if m:
+                active_base_nums.add(int(m.group(1)))
 
-    empty_labels = [l for l in all_sprint_labels if l not in labeled_sprints]
+    # Iterate plain sprint-N labels in ascending order; collect consecutive leading empties
+    plain_labels = sorted(
+        [l for l in all_sprint_labels if sprint_re_plain.match(l)],
+        key=lambda l: int(sprint_re_plain.match(l).group(1)),  # type: ignore[union-attr]
+    )
+
+    leading_empty: list[str] = []
+    found_active = False
+    for label in plain_labels:
+        base_num = int(sprint_re_plain.match(label).group(1))  # type: ignore[union-attr]
+        if base_num in active_base_nums:
+            found_active = True
+            break
+        leading_empty.append(label)
+
+    # AC3: if no sprint has tickets, nothing is eligible for cleanup
+    if not found_active:
+        leading_empty = []
 
     deleted = []
     errors = []
-    for label in empty_labels:
+    for label in leading_empty:
         try:
             github_client.delete_label(label, repo_name=body.project)
             deleted.append(label)
@@ -7070,6 +7287,386 @@ def get_sprint_metrics(request: Request):
     return results
 
 
+# ── Analytics metrics endpoint (issue #648 / ANL-3) ──────────────────────────
+
+# Per-token prices in USD (input, output). Update when model pricing changes.
+MODEL_PRICE_MAP: dict[str, tuple[float, float]] = {
+    "claude-haiku-4-5":              (0.80 / 1_000_000, 4.00 / 1_000_000),
+    "claude-haiku-4-5-20251001":     (0.80 / 1_000_000, 4.00 / 1_000_000),
+    "claude-sonnet-4-6":             (3.00 / 1_000_000, 15.00 / 1_000_000),
+    "claude-opus-4-8":               (15.00 / 1_000_000, 75.00 / 1_000_000),
+}
+
+
+def _compute_analytics_metrics(project_root: Path,
+                                since: str | None = None,
+                                until: str | None = None,
+                                sprint_filter: str | None = None) -> dict:
+    """Aggregate delivery-health metrics from sprint state files and token_usage.
+
+    Returns a dict with keys: first_pass_rate, rework_rate, avg_duration,
+    throughput, cost. All numeric fields are 0 when no data is available.
+    """
+    today = datetime.now(tz=timezone.utc).date()
+
+    if since:
+        try:
+            since_dt = datetime.strptime(since, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        except ValueError:
+            raise HTTPException(400, detail=f"Invalid 'since' date {since!r} — expected YYYY-MM-DD")
+    else:
+        since_dt = None
+
+    if until:
+        try:
+            until_dt = datetime.strptime(until, "%Y-%m-%d").replace(
+                tzinfo=timezone.utc).replace(hour=23, minute=59, second=59)
+        except ValueError:
+            raise HTTPException(400, detail=f"Invalid 'until' date {until!r} — expected YYYY-MM-DD")
+    else:
+        until_dt = None
+
+    sprints_dir = _commander_dir(project_root) / "sprints"
+
+    coder_durations_by_size: dict[str, list[float]] = {}
+    coder_all: list[float] = []
+    tester_all: list[float] = []
+
+    total_completed = 0
+    first_pass_count = 0
+    rework_count = 0
+    rework_2plus = 0
+
+    sprint_ticket_counts: list[int] = []
+    sprint_lengths: list[float] = []
+
+    estimates_dir = _commander_dir(project_root) / "estimates"
+
+    if sprints_dir.exists():
+        for state_file in sorted(sprints_dir.glob("sprint-*-state.json")):
+            try:
+                state_data = json.loads(state_file.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+
+            sprint_label_val = state_data.get("sprint_label", "")
+
+            if sprint_filter and sprint_label_val != sprint_filter:
+                continue
+
+            start_ts_str = state_data.get("start_timestamp")
+            if start_ts_str:
+                try:
+                    start_dt = datetime.fromisoformat(start_ts_str.rstrip("Z")).replace(tzinfo=timezone.utc)
+                except Exception:
+                    start_dt = None
+            else:
+                start_dt = None
+
+            if start_dt:
+                if since_dt and start_dt < since_dt:
+                    continue
+                if until_dt and start_dt > until_dt:
+                    continue
+
+            wall_clock_secs = float(state_data.get("wall_clock_secs") or 0.0)
+            issues = state_data.get("issues", [])
+            sprint_done = [i for i in issues if i.get("status") == "done"]
+
+            sprint_ticket_counts.append(len(sprint_done))
+            if wall_clock_secs > 0:
+                sprint_lengths.append(wall_clock_secs / 86400.0)
+
+            for issue in sprint_done:
+                total_completed += 1
+                attempt = int(issue.get("tester_attempt_count") or 1)
+                if attempt <= 1:
+                    first_pass_count += 1
+                else:
+                    rework_count += 1
+                    if attempt >= 3:
+                        rework_2plus += 1
+
+                # Coder duration
+                coder_start = issue.get("coder_started_at")
+                coder_end = issue.get("coder_finished_at")
+                if coder_start and coder_end:
+                    try:
+                        s = datetime.fromisoformat(coder_start.rstrip("Z")).replace(tzinfo=timezone.utc)
+                        e = datetime.fromisoformat(coder_end.rstrip("Z")).replace(tzinfo=timezone.utc)
+                        dur_min = (e - s).total_seconds() / 60.0
+                        coder_all.append(dur_min)
+
+                        issue_num = issue.get("number")
+                        size = None
+                        if issue_num and estimates_dir.exists():
+                            est_file = estimates_dir / f"issue-{issue_num}.json"
+                            if est_file.exists():
+                                try:
+                                    est = json.loads(est_file.read_text(encoding="utf-8"))
+                                    size = est.get("size")
+                                except Exception:
+                                    pass
+                        if size:
+                            coder_durations_by_size.setdefault(size, []).append(dur_min)
+                    except Exception:
+                        pass
+
+                # Tester duration
+                tester_start = issue.get("tester_started_at")
+                tester_end = issue.get("tester_finished_at")
+                if tester_start and tester_end:
+                    try:
+                        s = datetime.fromisoformat(tester_start.rstrip("Z")).replace(tzinfo=timezone.utc)
+                        e = datetime.fromisoformat(tester_end.rstrip("Z")).replace(tzinfo=timezone.utc)
+                        tester_all.append((e - s).total_seconds() / 60.0)
+                    except Exception:
+                        pass
+
+    first_pass_rate = first_pass_count / total_completed if total_completed else 0
+    rework_rate_val = rework_count / total_completed if total_completed else 0
+
+    avg_coder = sum(coder_all) / len(coder_all) if coder_all else 0
+    avg_tester = sum(tester_all) / len(tester_all) if tester_all else 0
+    coder_by_size = {
+        sz: round(sum(vals) / len(vals), 2)
+        for sz, vals in coder_durations_by_size.items()
+        if vals
+    }
+
+    avg_tickets = sum(sprint_ticket_counts) / len(sprint_ticket_counts) if sprint_ticket_counts else 0
+    avg_length = sum(sprint_lengths) / len(sprint_lengths) if sprint_lengths else 0
+
+    # Cost from token_usage table
+    cost_per_sprint_total = 0.0
+    cost_by_role: dict[str, float] = {"coder": 0.0, "tester": 0.0, "estimator": 0.0}
+    try:
+        rows = db.get_token_usage_by_agent_model()
+        for row in rows:
+            role = (row.get("agent_role") or "unknown").lower()
+            model = (row.get("model_name") or "").lower()
+            price_in, price_out = MODEL_PRICE_MAP.get(model, (0.0, 0.0))
+            cost = (row.get("total_input", 0) * price_in +
+                    row.get("total_output", 0) * price_out)
+            cost_per_sprint_total += cost
+            if role in cost_by_role:
+                cost_by_role[role] += cost
+    except Exception:
+        pass
+
+    num_sprints = len(sprint_ticket_counts) if sprint_ticket_counts else 1
+    cost_per_sprint_avg = cost_per_sprint_total / num_sprints
+    cost_per_ticket_avg = cost_per_sprint_total / total_completed if total_completed else 0
+
+    rework_cost_annotation = (
+        round(cost_per_ticket_avg * 0.32, 4) if rework_count > 0 else 0.0
+    )
+
+    return {
+        "first_pass_rate": {
+            "rate": round(first_pass_rate, 4),
+            "passed": first_pass_count,
+            "total_completed": total_completed,
+        },
+        "rework_rate": {
+            "rate": round(rework_rate_val, 4),
+            "count": rework_count,
+            "rework_2plus": rework_2plus,
+            "total": total_completed,
+        },
+        "avg_duration": {
+            "coder_minutes": round(avg_coder, 2),
+            "tester_minutes": round(avg_tester, 2),
+            "coder_by_size": coder_by_size,
+        },
+        "throughput": {
+            "avg_tickets_per_sprint": round(avg_tickets, 2),
+            "avg_sprint_length_days": round(avg_length, 4),
+            "avg_sprint_length_minutes": round(avg_length * 1440, 2),
+        },
+        "cost": {
+            "per_sprint": {
+                "total": round(cost_per_sprint_avg, 4),
+                "by_role": {k: round(v / num_sprints, 4) for k, v in cost_by_role.items()},
+            },
+            "per_ticket": {
+                "avg": round(cost_per_ticket_avg, 4),
+                "by_role": {
+                    k: round(v / total_completed, 4) if total_completed else 0.0
+                    for k, v in cost_by_role.items()
+                },
+                "rework_cost_annotation": rework_cost_annotation,
+            },
+        },
+    }
+
+
+@app.get("/api/projects/{slug}/analytics/metrics")
+def get_project_analytics_metrics(slug: str, request: Request):
+    """GET /api/projects/{slug}/analytics/metrics — ANL-3 delivery-health metrics.
+
+    Query params: since=YYYY-MM-DD, until=YYYY-MM-DD, sprint=<sprint-label>.
+    Returns 404 for unknown slugs; all numeric fields are 0 when no data.
+    """
+    repo = _resolve_project_slug(slug)
+    project_root = _project_root_path(repo)
+
+    since = request.query_params.get("since")
+    until = request.query_params.get("until")
+    sprint_filter = request.query_params.get("sprint")
+
+    return _compute_analytics_metrics(project_root, since=since, until=until,
+                                      sprint_filter=sprint_filter)
+
+
+# ── Calibration analytics endpoint (issue #649) ──────────────────────────────
+
+_CALIBRATION_SIZES = ("S", "M", "L", "XL")
+_CALIBRATION_SIZE_SETTING_KEYS = {
+    "S": "estimation_s_minutes",
+    "M": "estimation_m_minutes",
+    "L": "estimation_l_minutes",
+    "XL": "estimation_xl_minutes",
+}
+
+
+def _compute_calibration(
+    repo: str,
+    since: str | None = None,
+    until: str | None = None,
+    sprint_filter: str | None = None,
+) -> dict:
+    """Aggregate estimated vs actual time per size tier for the given project.
+
+    Returns by_size (keyed S/M/L/XL) and a flat points list.
+    All sizes always present; sizes with no data have count=0 and null stats.
+    """
+    # Validate date params first so bad input returns 400 before any DB work.
+    since_dt = None
+    until_dt = None
+    if since:
+        try:
+            since_dt = datetime.strptime(since, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        except ValueError:
+            raise HTTPException(400, detail=f"Invalid 'since' date {since!r} — expected YYYY-MM-DD")
+    if until:
+        try:
+            until_dt = (
+                datetime.strptime(until, "%Y-%m-%d")
+                .replace(tzinfo=timezone.utc)
+                .replace(hour=23, minute=59, second=59)
+            )
+        except ValueError:
+            raise HTTPException(400, detail=f"Invalid 'until' date {until!r} — expected YYYY-MM-DD")
+
+    # Resolve configured_minutes from project settings (falls back to defaults).
+    try:
+        stored = _settings_repo.get_setting(APP_CONFIG_KEY, project=repo)
+    except Exception:
+        stored = {}
+    effective = build_effective_response(stored)
+    configured_minutes = {sz: effective[key] for sz, key in _CALIBRATION_SIZE_SETTING_KEYS.items()}
+
+    # Skeleton result — all sizes always present regardless of data availability.
+    by_size = {
+        sz: {
+            "configured_minutes": configured_minutes[sz],
+            "count": 0,
+            "min_minutes": None,
+            "avg_minutes": None,
+            "max_minutes": None,
+        }
+        for sz in _CALIBRATION_SIZES
+    }
+    points: list[dict] = []
+
+    if not _SPRINT_REPO_AVAILABLE:
+        return {"by_size": by_size, "points": points}
+
+    try:
+        from sqlalchemy import text as _sa_text
+
+        where_parts = [
+            "st.estimated_size IS NOT NULL",
+            "st.actual_elapsed_seconds IS NOT NULL",
+            "s.project = :project",
+        ]
+        params: dict = {"project": repo}
+
+        if since_dt:
+            where_parts.append("st.completed_at >= :since")
+            params["since"] = since_dt.isoformat()
+        if until_dt:
+            where_parts.append("st.completed_at <= :until")
+            params["until"] = until_dt.isoformat()
+        if sprint_filter:
+            where_parts.append("s.label = :sprint")
+            params["sprint"] = sprint_filter
+
+        sql = (
+            "SELECT st.issue_number, st.estimated_size, st.actual_elapsed_seconds"
+            " FROM sprint_tickets st"
+            " JOIN sprints s ON s.id = st.sprint_id"
+            " WHERE " + " AND ".join(where_parts)
+        )
+
+        with _sprint_repo._open_session() as session:
+            rows = session.execute(_sa_text(sql), params).fetchall()
+
+    except HTTPException:
+        raise
+    except Exception:
+        return {"by_size": by_size, "points": points}
+
+    # Accumulate per-size data.
+    buckets: dict[str, list[float]] = {sz: [] for sz in _CALIBRATION_SIZES}
+    issue_rows: list[tuple] = []
+
+    for row in rows:
+        issue_number, estimated_size, actual_elapsed_seconds = row[0], row[1], row[2]
+        if estimated_size not in buckets:
+            continue
+        minutes = actual_elapsed_seconds / 60.0
+        buckets[estimated_size].append(minutes)
+        issue_rows.append((issue_number, estimated_size, minutes))
+
+    # Compute aggregates.
+    for sz in _CALIBRATION_SIZES:
+        vals = buckets[sz]
+        if vals:
+            by_size[sz]["count"] = len(vals)
+            by_size[sz]["min_minutes"] = round(min(vals), 2)
+            by_size[sz]["avg_minutes"] = round(sum(vals) / len(vals), 2)
+            by_size[sz]["max_minutes"] = round(max(vals), 2)
+
+    # Build points list.
+    for issue_number, estimated_size, actual_minutes in issue_rows:
+        points.append({
+            "issue_number": issue_number,
+            "estimated_size": estimated_size,
+            "estimated_minutes": configured_minutes[estimated_size],
+            "actual_minutes": round(actual_minutes, 2),
+        })
+
+    return {"by_size": by_size, "points": points}
+
+
+@app.get("/api/projects/{slug}/analytics/calibration")
+def get_project_analytics_calibration(slug: str, request: Request):
+    """GET /api/projects/{slug}/analytics/calibration — estimated vs actual per size tier.
+
+    Query params: since=YYYY-MM-DD, until=YYYY-MM-DD, sprint=<sprint-label>.
+    Returns 404 for unknown slugs; sizes with no data have count=0 and null stats.
+    """
+    repo = _resolve_project_slug(slug)
+
+    since = request.query_params.get("since")
+    until = request.query_params.get("until")
+    sprint_filter = request.query_params.get("sprint")
+
+    return _compute_calibration(repo, since=since, until=until, sprint_filter=sprint_filter)
+
+
 # ── Daily report endpoint (issue #478) ───────────────────────────────────────
 
 @app.post("/api/reports/daily")
@@ -7189,7 +7786,11 @@ def get_sprint_finish_card(sprint_label: str, project: str):
                 "summary_issue_url": None,
                 "summary_issue_num": None,
             }
-        raise HTTPException(404, detail=f"Finish card data not available for {sprint_label!r}")
+        return {
+            "sprint_label":  sprint_label,
+            "sprint_number": sprint_number,
+            "state":         "no_data",
+        }
 
     try:
         fc_state_data = json.loads(state_path.read_text(encoding="utf-8"))
@@ -7563,7 +8164,7 @@ def rerun_sprint(sprint_label: str, project: str, body: SprintRerunV2Body):
     except Exception:
         pass
 
-    stripped_env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
+    stripped_env = _build_sprint_subprocess_env()
     goal_path = _sprint_goal_path(project_root, sprint_label)
     if not goal_path.exists():
         goal_path = _sprint_goal_path(project_root, sub_label)
@@ -9285,11 +9886,27 @@ def _get_bulk_job(job_id: str) -> dict | None:
         path = jobs_dir / f"{job_id}.json"
         if path.exists():
             job = json.loads(path.read_text(encoding="utf-8"))
+            # A job that was 'running' when the server restarted can never
+            # resume — its in-flight BA processes are gone. Mark it cancelled
+            # so the client gets accurate state instead of a perpetual spinner.
+            if job.get("status") == "running":
+                _bulk_cancel_interrupted(job)
             _bulk_jobs[job_id] = job
             return job
     except Exception:
         pass
     return None
+
+
+def _bulk_cancel_interrupted(job: dict) -> None:
+    """Mark a job interrupted by a server restart as cancelled and persist to disk."""
+    _NON_TERMINAL = {"pending", "drafting", "estimating"}
+    for ticket in job.get("tickets", []):
+        if ticket.get("state") in _NON_TERMINAL:
+            ticket["state"] = "cancelled"
+            ticket["error"] = "Server restarted — job was interrupted"
+    job["status"] = "cancelled"
+    _persist_bulk_job(job)
 
 
 def _prune_old_bulk_jobs() -> None:
@@ -10014,7 +10631,7 @@ async def bulk_retry_ticket(job_id: str, body: BulkRetryBody):
     if body.index < 0 or body.index >= len(tickets):
         raise HTTPException(422, detail="Invalid ticket index")
     ticket = tickets[body.index]
-    if ticket["state"] != "failed":
+    if ticket["state"] not in ("failed", "cancelled"):
         return {"ok": True, "state": ticket["state"]}
 
     # Reset to pending and re-run as a single task
@@ -10558,7 +11175,7 @@ async def bulk_retry_all_failed(job_id: str, body: BulkRetryAllBody):
         if idx < 0 or idx >= len(tickets):
             continue
         t = tickets[idx]
-        if t["state"] != "failed":
+        if t["state"] not in ("failed", "cancelled"):
             continue
         job["status"] = "running"
         asyncio.create_task(_post_ticket_body_to_github(job_id, idx, body_text))

@@ -199,7 +199,7 @@ def _emit_sprint_lifecycle_event(
     try:
         _db_record_event(
             project=project,
-            source="sprint_manager",
+            source="agent",
             actor=actor,
             type=type,
             target=target,
@@ -2223,9 +2223,20 @@ def handle_post_tester(
         api_url      = None
 
     if tester_exit_code != 0:
+        print(
+            f"  Tester for issue #{issue_num} exited {tester_exit_code} — status: failed",
+            flush=True,
+        )
         return (False,
                 f"Issue #{issue_num}: tester exited {tester_exit_code}, skipping gates",
                 FailureCategory.CRASH)
+
+    # Fetch latest remote state before checking branch presence.  Without this,
+    # sprint_manager sees stale remote-tracking refs where the feature branch
+    # still appears even after the tester's finish_feature.py deleted it, and
+    # _is_branch_merged_into returns False because origin/<target> doesn't yet
+    # include the new merge commit — causing a false TESTER_REJECTED (issue #659).
+    _try("git", "fetch", "--prune", "origin")
 
     # Determine merge status by branch presence and git log — no label check.
     # sprint_manager is the sole UAT label writer via transition().
@@ -2245,8 +2256,15 @@ def handle_post_tester(
                 issue_num, wt_root, target_branch, eff_repo, cfg, sprint_label
             )
             if merge_ok:
-                branch_is_merged = _is_branch_merged_into(found_branch, target_branch)
-                print(f"  Issue #{issue_num}: auto-merge {'succeeded' if branch_is_merged else 'ran but branch still not merged'}")
+                # finish_feature.py exited 0 — trust the merge succeeded.
+                # Re-verifying via git can return False due to ref-staleness in the
+                # sprint-manager worktree, causing a false TESTER_REJECTED failure
+                # even though the merge and push completed successfully (issue #659).
+                branch_is_merged = True
+                # finish_feature.py also deletes the branch, so clear found_branch so
+                # already_merged_by_tester resolves True and prevents a double-merge call.
+                found_branch = None
+                print(f"  Issue #{issue_num}: auto-merge succeeded (finish_feature.py exited 0)")
             if not branch_is_merged:
                 warning_body = (
                     f"**Tester exited 0 but feature branch not merged.**\n\n"
@@ -2814,6 +2832,11 @@ def _dispatch_coder(
         rc = proc.wait()
         detector.stop()
 
+        # Exit code 0 means success unconditionally — check before detector.killed
+        # to guard against the same race as _dispatch_tester (see issue #659).
+        if rc == 0:
+            return True, None
+
         if detector.killed:
             reason = f"No log activity for {HANG_KILL_SECS//60} minutes"
             _add_blocked_label(issue_num, reason, repo_name=eff_repo, sprint_label=sprint_label)
@@ -2833,9 +2856,6 @@ def _dispatch_coder(
                 summary=f"Issue #{issue_num}: coder hung for {HANG_KILL_SECS//60} minutes and was killed",
             )
             return False, FailureCategory.HANG
-
-        if rc == 0:
-            return True, None
 
         # Non-zero exit: inspect log for rate-limit signal
         log_content = ""
@@ -3099,6 +3119,14 @@ def _dispatch_tester(
         rc = proc.wait()
         detector.stop()
 
+        # Exit code 0 means success unconditionally — check before detector.killed
+        # to guard against a race where the hang detector fires after the process
+        # already exited cleanly (proc.kill raises ProcessLookupError but still
+        # sets _killed=True, causing a false HANG failure on exit 0).
+        if rc == 0:
+            print(f"  Tester for issue #{issue_num} exited 0 — status: passed", flush=True)
+            return 0, None
+
         if detector.killed:
             reason = f"Tester: no log activity for {HANG_KILL_SECS//60} minutes"
             _add_blocked_label(issue_num, reason, repo_name=eff_repo, sprint_label=sprint_label)
@@ -3112,9 +3140,6 @@ def _dispatch_tester(
                 repo=eff_repo,
             )
             return -1, FailureCategory.HANG
-
-        if rc == 0:
-            return 0, None
 
         # Non-zero exit: inspect log for rate-limit signal
         log_content = ""
@@ -5143,7 +5168,7 @@ def run_sprint(
         target=f"sprint-{sprint_num}" if sprint_num is not None else label,
         actor="system",
         detail={"ticket_count": total_issues, "levels": len(_dispatch_levels)},
-        project=label,
+        project=eff_repo or label,
         action_id=_run_id,
     )
     # Flat iteration preserving level boundaries for level_start / level_complete events.
@@ -5361,7 +5386,7 @@ def run_sprint(
                     target=f"#{num}",
                     actor="system",
                     detail={"agent": "CODER"},
-                    project=label,
+                    project=eff_repo or label,
                     action_id=_run_id,
                 )
                 state.save(state_path)
@@ -5395,8 +5420,11 @@ def run_sprint(
                         type="sprint_cancelled",
                         target=f"sprint-{sprint_num}" if sprint_num is not None else label,
                         actor="system",
-                        detail={"tickets_remaining": len(_remaining)},
-                        project=label,
+                        detail={
+                            "tickets_remaining": len(_remaining),
+                            "duration": round(time.monotonic() - start_time),
+                        },
+                        project=eff_repo or label,
                         action_id=_run_id,
                     )
                     raise
@@ -5518,7 +5546,7 @@ def run_sprint(
                     target=f"#{num}",
                     actor="system",
                     detail={"agent": "CODER", "duration": round(_coder_elapsed)},
-                    project=label,
+                    project=eff_repo or label,
                     action_id=_run_id,
                 )
                 state.save(state_path)
@@ -5535,7 +5563,7 @@ def run_sprint(
                 target=f"#{num}",
                 actor="system",
                 detail={"agent": "TESTER"},
-                project=label,
+                project=eff_repo or label,
                 action_id=_run_id,
             )
             state.save(state_path)
@@ -5562,8 +5590,11 @@ def run_sprint(
                     type="sprint_cancelled",
                     target=f"sprint-{sprint_num}" if sprint_num is not None else label,
                     actor="system",
-                    detail={"tickets_remaining": len(_remaining)},
-                    project=label,
+                    detail={
+                        "tickets_remaining": len(_remaining),
+                        "duration": round(time.monotonic() - start_time),
+                    },
+                    project=eff_repo or label,
                     action_id=_run_id,
                 )
                 raise
@@ -5619,7 +5650,7 @@ def run_sprint(
                 target=f"#{num}",
                 actor="system",
                 detail={"agent": "TESTER", "duration": round(_tester_elapsed)},
-                project=label,
+                project=eff_repo or label,
                 action_id=_run_id,
             )
             state.save(state_path)
@@ -5799,7 +5830,7 @@ def run_sprint(
             "skipped": len(summary.skipped),
             "duration": round(state.wall_clock_secs),
         },
-        project=label,
+        project=eff_repo or label,
         action_id=_run_id,
     )
 

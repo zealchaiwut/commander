@@ -3930,6 +3930,7 @@
     }
     .bc-card--created { border-color: var(--green); }
     .bc-card--failed  { border-color: var(--red); }
+    .bc-card--cancelled { border-color: var(--amber); }
     .bc-card--drafting { border-color: var(--blue); }
     .bc-card--size_warning { border-color: var(--amber); }
     .bc-card--estimating { border-color: var(--blue); }
@@ -3985,6 +3986,13 @@
     }
     .bc-status-dot--failed::after {
       content: '!'; color: #fff; font-size: 7px; font-weight: 700;
+    }
+    .bc-status-dot--cancelled {
+      border-color: var(--amber); background: var(--amber);
+      display: flex; align-items: center; justify-content: center;
+    }
+    .bc-status-dot--cancelled::after {
+      content: '↺'; color: #fff; font-size: 7px; font-weight: 700;
     }
     .bc-status-dot--skipped {
       border-color: var(--text-muted); background: var(--text-muted);
@@ -4472,6 +4480,8 @@
     }
     .logs-chip:hover { background: var(--surface-2); color: var(--text); }
     .logs-chip.active { background: var(--blue-bg); border-color: var(--blue); color: var(--blue); font-weight: 600; }
+    .logs-chip--hidden { display: none !important; }
+    .logs-tags-see-more-btn { font-style: italic; color: var(--text-sub); }
     .logs-toolbar-row2 { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
     .logs-search-wrap { position: relative; flex: 1; max-width: 320px; }
     .logs-search-icon {
@@ -5084,6 +5094,11 @@
             <i class="ti ti-chart-bar"></i>Analytics<i class="ti ti-chevron-down stab-caret"></i>
           </button>
           <div class="stab-dropdown" id="stab-dropdown-analytics">
+            <a class="stab" id="stab-analytics-page" role="menuitem"
+               href="#" onclick="return false;"
+               style="text-decoration:none">
+              <i class="ti ti-chart-histogram"></i>Analytics page
+            </a>
             <button class="stab" role="tab" id="stab-timeline"
                     aria-selected="false" onclick="switchTab('timeline')">
               <i class="ti ti-timeline-event"></i>Timeline
@@ -5340,6 +5355,7 @@
                 <button class="logs-chip" data-group="event_level" data-value="warn" onclick="logsToggleChip(this)">warn</button>
                 <button class="logs-chip" data-group="event_level" data-value="fail" onclick="logsToggleChip(this)">fail</button>
               </div>
+              <button class="logs-chip logs-tags-see-more-btn hidden" id="logs-tags-see-more" onclick="_logsTagsToggle()">See more</button>
             </div>
             <div class="logs-toolbar-row2">
               <div class="logs-search-wrap">
@@ -7616,6 +7632,10 @@ async function init() {
   _slug = slug;
   _activeTab = tab;
 
+  // Wire analytics page link now that slug is known
+  const _anlPageLink = document.getElementById('stab-analytics-page');
+  if (_anlPageLink) _anlPageLink.href = '/project/' + encodeURIComponent(slug) + '/analytics';
+
   initTheme();
   updateSidebarFooter();
   checkGhAuthStatus().catch(() => {});
@@ -9414,12 +9434,16 @@ async function _smgmtLoadFinishCards() {
         fetch(`/api/sprints/${encodeURIComponent(label)}/finish-card?project=${encodeURIComponent(repo)}`),
         fetch(`/api/sprints/${encodeURIComponent(label)}/branch-status?project=${encodeURIComponent(repo)}`).catch(() => null),
       ]);
-      if (!cardRes.ok) return; // 404 = sprint never run; no card shown
+      if (!cardRes.ok) {
+        console.warn(`finish-card: unexpected ${cardRes.status} for ${label}`);
+        return;
+      }
       const cardData = await cardRes.json();
+      if (cardData.state === 'no_data') return; // sprint never run — no card shown
       const branchData = branchRes && branchRes.ok ? await branchRes.json() : { exists: false };
       _smgmtFinishCards[label] = { card: cardData, branch: branchData };
       _smgmtRenderFinishCard(label, cardData, branchData, repo);
-    } catch (_) { /* silent */ }
+    } catch (e) { console.warn('finish-card load error for', label, e); }
   }));
 }
 
@@ -9448,6 +9472,8 @@ function _smgmtRenderFinishCard(label, cardData, branchData, repo) {
       }
     }
   }
+
+  if (cardData.state === 'no_data') return; // sprint never run — nothing to display
 
   const cardEl  = document.getElementById(`smgmt-finish-card-${label}`);
   const blockEl = document.getElementById(`smgmt-card-${label}`);
@@ -10173,6 +10199,18 @@ function _smgmtLivePatch(label, live) {
     badgeEl.innerHTML = `<span class="smgmt-running-badge-dot"></span>${ratio}`;
   }
 
+  // Update shared progress store so snav-pill and sb-sprint-badge stay in sync
+  const _sprintNumFromLabel = parseInt(label.replace(/^sprint-/, ''), 10);
+  _sprintProgressStore = {
+    has_sprint: true,
+    sprint_label: label,
+    sprint: isNaN(_sprintNumFromLabel) ? 0 : _sprintNumFromLabel,
+    done: completeCount,
+    total: totalCount,
+    run_state: 'running',
+    fetched_at: Date.now(),
+  };
+
   // Update per-ticket status indicators
   const liveIssues = live.issues || [];
   const liveByNum = {};
@@ -10374,8 +10412,8 @@ async function _smgmtLivePollTick() {
         } else {
           _smgmtLivePatch(label, live);
         }
-        // Keep pill/panel in sync with live runner data (no GitHub-label lag).
-        _snavRenderPill();
+        // Keep all three pills in sync with live runner data (no GitHub-label lag).
+        _sprintProgressRender();
         if (_snavPanelOpen) _snavRenderPanel();
       }
     }
@@ -10513,7 +10551,13 @@ function _smgmtTicketRowHtml(ticket, label, elapsedSecs = null) {
   const hasEstimate = !!sizeLabel;
   const sizeValue = sizeLabel ? sizeLabel.name.replace('size-', '') : '';
   const sizeAttr = sizeValue ? ` data-size="${escHtml(sizeValue)}"` : '';
-  const sizePillHtml = sizeValue
+  // Compute estimateBadgeHtml first; when JSON cache has the size, it renders the
+  // interactive estimate button — sizePillHtml must be suppressed in that case to
+  // prevent a duplicate size indicator appearing (issue #674).
+  const estimateBadgeHtml = _smgmtEstimateBadgeHtml(ticket.number);
+  const _cachedEst = Object.prototype.hasOwnProperty.call(_estDataCache, ticket.number)
+    ? _estDataCache[ticket.number] : undefined;
+  const sizePillHtml = (sizeValue && !(_cachedEst && _cachedEst.size))
     ? `<span class="smgmt-ticket-size-pill" title="≈${_sizeMinutes(sizeValue)} min">${escHtml(sizeValue)}</span>`
     : '';
   const staleBadgeHtml = (ticket.estimate_stale && sizeLabel)
@@ -10522,7 +10566,6 @@ function _smgmtTicketRowHtml(ticket, label, elapsedSecs = null) {
          onclick="event.stopPropagation();_smgmtReEstimate(${ticket.number},this)"
          onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();_smgmtReEstimate(${ticket.number},this);}">stale</button>`
     : '';
-  const estimateBadgeHtml = _smgmtEstimateBadgeHtml(ticket.number);
   const reEstBtnHtml = (hasEstimate && _smgmtEstimatorAvailable && !ticket.estimate_stale)
     ? `<button class="smgmt-reestimate-btn" tabindex="0" title="Re-estimate this ticket"
          onclick="event.stopPropagation();_smgmtReEstimate(${ticket.number},this)"
@@ -12009,7 +12052,23 @@ function _smgmtUpdateCleanupBtn(data) {
     ? order.filter(l => /^sprint-\d+(\.\d+)?$/.test(l))
     : [...sprints].sort((a, b) => a - b).map(n => `sprint-${n}`);
   const labeled = new Set(issues.map(i => i.sprint_label).filter(Boolean));
-  _smgmtEmptyLabels = orderedLabels.filter(l => !labeled.has(l));
+  // Mark base sprint active if any sub-label sprint-N.X has tickets
+  const activeBases = new Set();
+  for (const lbl of labeled) {
+    const m = /^sprint-(\d+)/.exec(lbl);
+    if (m) activeBases.add(parseInt(m[1], 10));
+  }
+  // Collect only leading consecutive plain sprint-N labels with 0 tickets (issue #658)
+  const leadingEmpty = [];
+  let foundActive = false;
+  for (const lbl of orderedLabels) {
+    if (!/^sprint-\d+$/.test(lbl)) continue;
+    const base = parseInt(lbl.replace('sprint-', ''), 10);
+    if (activeBases.has(base)) { foundActive = true; break; }
+    leadingEmpty.push(lbl);
+  }
+  // AC3: if no active sprint found, nothing is eligible for cleanup
+  _smgmtEmptyLabels = foundActive ? leadingEmpty : [];
   const btn = document.getElementById('smgmt-cleanup-empty-btn');
   if (btn) btn.style.display = _smgmtEmptyLabels.length > 0 ? '' : 'none';
 }
@@ -12111,7 +12170,10 @@ async function smgmtFinishSprint(label) {
     const res = await fetch(
       `/api/projects/${encodeURIComponent(owner)}/${encodeURIComponent(repoName)}/sprints/${encodeURIComponent(label)}/finish-preview`
     );
-    if (!res.ok) throw new Error(await res.text());
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || `HTTP ${res.status}`);
+    }
     const preview = await res.json();
     _fsPreview = preview;
 
@@ -12185,7 +12247,10 @@ async function _fsConfirm() {
         }),
       }
     );
-    if (!res.ok) throw new Error(await res.text());
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || `HTTP ${res.status}`);
+    }
     const data = await res.json();
     _fsClose();
     if (data.errors && data.errors.length > 0) {
@@ -12336,6 +12401,7 @@ function _smgmtToggleSelect(number, checked) {
 
 // Click a ticket row to select/deselect it (toggle). Shift+click extends the
 // selection from the last-clicked ticket to this one, like a file picker.
+// Ctrl/Cmd+click toggles individual items without disturbing other selections.
 // Clicks on the checkbox/link/menu don't reach here (they stopPropagation).
 function _smgmtRowClick(event, number, label) {
   const container = label
@@ -12356,6 +12422,15 @@ function _smgmtRowClick(event, number, label) {
       if (sel) sel.removeAllRanges();  // clear the text highlight shift-click makes
       return;
     }
+  }
+
+  if (event.ctrlKey || event.metaKey) {
+    // Ctrl/Cmd+click: toggle this ticket without clearing other selections.
+    const nowSelected = !_smgmtSelectedIssues.has(number);
+    _smgmtSetSelected(number, nowSelected);
+    _smgmtLastSelectedNum = nowSelected ? number : null;
+    _smgmtUpdateSelectionUI();
+    return;
   }
 
   // Plain click: toggle this ticket on/off.
@@ -13344,11 +13419,35 @@ async function _smgmtCloseIssueConfirm() {
 // ── Backlog drag handlers ──────────────────────────────────────────────────
 
 function _smgmtBacklogTicketDragStart(event, issueNum) {
-  _smgmtDragTicket = { number: issueNum, fromSprint: null, multi: null };
-  event.dataTransfer.effectAllowed = 'move';
-  event.dataTransfer.setData('text/plain', String(issueNum));
-  const el = document.getElementById(`smgmt-ticket-${issueNum}`);
-  if (el) setTimeout(() => el.classList.add('dragging-ticket'), 0);
+  const isChecked = _smgmtSelectedIssues.has(issueNum);
+
+  if (isChecked && _smgmtSelectedIssues.size > 1) {
+    // Multi-ticket drag from backlog: pack all selected issue numbers
+    const nums = Array.from(_smgmtSelectedIssues);
+    _smgmtDragTicket = { number: issueNum, fromSprint: null, multi: nums, multiSprints: 1 };
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', nums.join(','));
+
+    const pill = document.getElementById('smgmt-drag-pill');
+    if (pill) {
+      pill.textContent = `Moving ${nums.length} tickets`;
+      pill.style.top = (event.clientY - 20) + 'px';
+      pill.style.left = (event.clientX + 12) + 'px';
+    }
+    setTimeout(() => {
+      nums.forEach(n => {
+        const el = document.getElementById(`smgmt-ticket-${n}`);
+        if (el) el.classList.add('dragging-ticket');
+      });
+    }, 0);
+  } else {
+    // Single-ticket drag (unchecked row or single selection)
+    _smgmtDragTicket = { number: issueNum, fromSprint: null, multi: null };
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', String(issueNum));
+    const el = document.getElementById(`smgmt-ticket-${issueNum}`);
+    if (el) setTimeout(() => el.classList.add('dragging-ticket'), 0);
+  }
   // Show ghost pane
   _smgmtGhostShow();
 }
@@ -14939,6 +15038,7 @@ function _bcGoToStep1() {
 function _bcComputeStage(job) {
   if (!job) return 1;
   if (job.status === 'done') return 'done';
+  if (job.status === 'cancelled') return 'cancelled';
   if (_bcPosting) return 'posting';
   const active = (job.tickets || []).filter(t => !_bcRemovedRows.has(t.index));
   // ① Draft — any ticket still being generated by the BA. A stopped job won't
@@ -15785,10 +15885,17 @@ function _bcConnectSSE(jobId) {
     // and we never received any state, treat the saved job as gone and fall back
     // to the input step. (readyState CONNECTING means a transient blip the
     // browser is already retrying — leave that alone.)
-    if (es.readyState === 2 /* CLOSED */ && !_bcJobState) {
-      es.close();
-      if (_bcEventSource === es) _bcEventSource = null;
-      _bcRecoverFromStaleJob();
+    // Also recover when we do have state but the job is still 'running' and
+    // the SSE is permanently closed — total server outage after a snapshot
+    // means the job will never complete, so show the input step rather than a
+    // frozen spinner.
+    if (es.readyState === 2 /* CLOSED */) {
+      const staleRunning = _bcJobState && _bcJobState.status === 'running';
+      if (!_bcJobState || staleRunning) {
+        es.close();
+        if (_bcEventSource === es) _bcEventSource = null;
+        _bcRecoverFromStaleJob();
+      }
     }
   };
 }
@@ -15855,6 +15962,9 @@ function _bcRenderStep2() {
       }
     } else if (job.status === 'stopped') {
       banner.innerHTML = `Stopped. ${sized + estimateFailed} estimated, ${failed} failed, ${skipped} skipped.`;
+    } else if (job.status === 'cancelled') {
+      const cancelled = tickets.filter(t => t.state === 'cancelled').length;
+      banner.innerHTML = `Job interrupted — server restarted. ${created} created, ${cancelled} not completed. Dismiss to start a new job.`;
     }
   }
 
@@ -15945,6 +16055,13 @@ function _bcRenderStep2() {
     }
   } else if (stage === 'posting') {                     // posting to GitHub
     if (doneBtn) { doneBtn.disabled = true; doneBtn.textContent = 'Posting…'; doneBtn.classList.remove('hidden'); }
+  } else if (stage === 'cancelled') {                   // interrupted by server restart
+    if (doneBtn) {
+      doneBtn.disabled = false;
+      doneBtn.textContent = 'Dismiss';
+      doneBtn.onclick = () => _bcRecoverFromStaleJob();
+      doneBtn.classList.remove('hidden');
+    }
   } else {                                              // 'done'
     if (doneBtn) {
       doneBtn.disabled = false;
@@ -15992,6 +16109,10 @@ function _bcRenderCard(t) {
     preview = escHtml((t.prompt || '').slice(0, 80));
     label   = 'Queued';
     actions = `<button class="bc-action-btn" title="Skip" onclick="bcSkipTicket(${t.index})">&#x00D7;</button>`;
+  } else if (t.state === 'cancelled') {
+    preview = escHtml((t.prompt || '').slice(0, 80));
+    label   = 'Cancelled — server restarted';
+    actions = `<button class="bc-action-btn" title="Retry" onclick="bcRetryTicket(${t.index})">&#x21BB;</button>`;
   } else if (t.state === 'drafting') {
     preview = 'BA polishing prompt → drafting AC and UAT steps...';
     const now   = Date.now();
@@ -17201,6 +17322,40 @@ let _snavState = null;
 let _snavPanelOpen = false;
 const _snavStateBySlug = {};
 
+// ── Shared sprint progress store — single source of truth for all pill components ──
+// Populated from live data (smgmt poll), explicit fetch (/api/sprint-progress), or
+// snavRefresh fallback. All three pill components read done/total/run_state from here.
+let _sprintProgressStore = null;
+
+/** Render all three sprint pill components from _sprintProgressStore. */
+function _sprintProgressRender() {
+  _snavRenderPill();
+  _snavUpdateSidebarBadge();
+  // Update smgmt running badge for the active sprint from the store
+  if (_sprintProgressStore && _sprintProgressStore.sprint_label) {
+    const label = _sprintProgressStore.sprint_label;
+    const badgeEl = document.getElementById(`smgmt-running-badge-${label}`);
+    if (badgeEl) {
+      const { done, total } = _sprintProgressStore;
+      const ratio = (total > 0) ? `${done}/${total}` : '—';
+      badgeEl.innerHTML = `<span class="smgmt-running-badge-dot"></span>${ratio}`;
+    }
+  }
+}
+
+/** Fetch unified sprint progress from /api/sprint-progress and update the store. */
+async function _sprintProgressFetch() {
+  const repo = _snavRepo();
+  if (!repo) return;
+  try {
+    const res = await fetch(`/api/sprint-progress?repo=${encodeURIComponent(repo)}`);
+    if (!res.ok) return;
+    const data = await res.json();
+    _sprintProgressStore = { ...data, fetched_at: Date.now() };
+    _sprintProgressRender();
+  } catch (_) { /* leave last-known state */ }
+}
+
 function _snavRepo() {
   return _cachedFullRepo[_slug] || '';
 }
@@ -17219,16 +17374,30 @@ function _snavRenderSidebarBadge(slug, d) {
   const rework = cols['needs-rework'] || 0;
   const active = (cols['in-progress'] || 0) + (cols['sit'] || 0) + (cols['uat'] || 0);
 
-  let badgeClass, label;
-  if (d.state === 'finished')   { badgeClass = 'sb-sprint-badge--finished';  label = 'Finished';   }
-  else if (rework > 0)          { badgeClass = 'sb-sprint-badge--rework';    label = 'Has rework'; }
-  else if (active > 0)          { badgeClass = 'sb-sprint-badge--running';   label = 'Running';    }
-  else                          { badgeClass = 'sb-sprint-badge--preflight'; label = 'Pre-flight'; }
+  // Determine run_state from the shared store (for current project) or GitHub data (others)
+  const isCurrentProject = (slug === _slug);
+  const store = isCurrentProject ? _sprintProgressStore : null;
+  const runState = (store && store.has_sprint) ? store.run_state : (d.state || 'running');
 
-  const total = d.total || 0;
-  const num = (d.state === 'finished')
-    ? (d.done || 0) + (d.uat || 0)
-    : total - (cols.backlog || 0);
+  let badgeClass, label;
+  if (runState === 'finished')   { badgeClass = 'sb-sprint-badge--finished';  label = 'Finished';   }
+  else if (rework > 0)           { badgeClass = 'sb-sprint-badge--rework';    label = 'Has rework'; }
+  else if (active > 0)           { badgeClass = 'sb-sprint-badge--running';   label = 'Running';    }
+  else                           { badgeClass = 'sb-sprint-badge--preflight'; label = 'Pre-flight'; }
+
+  // Use shared store for done/total (current project) to stay in sync with other pills
+  const total = (store && store.has_sprint && store.sprint === d.sprint) ? store.total : (d.total || 0);
+  const num = (store && store.has_sprint && store.sprint === d.sprint)
+    ? store.done
+    : (runState === 'finished')
+      ? (d.done || 0) + (d.uat || 0)
+      : (d.total || 0) - (cols.backlog || 0);
+
+  // Trigger a fresh fetch if the store is missing or stale (> 60s)
+  if (isCurrentProject && (!_sprintProgressStore || (Date.now() - (_sprintProgressStore.fetched_at || 0)) > 60000)) {
+    _sprintProgressFetch().catch(() => {});
+  }
+
   const text = `S${d.sprint} ${num}/${total}`;
 
   const badge = document.createElement('span');
@@ -17268,8 +17437,23 @@ async function snavRefresh() {
     const res = await fetch(`/api/sprint-nav-status?repo=${encodeURIComponent(repo)}`);
     if (!res.ok) return;
     _snavState = await res.json();
-    _snavRenderPill();
-    _snavUpdateSidebarBadge();
+    // Seed the shared store from GitHub data as fallback (live poll data takes precedence)
+    if (_snavState && _snavState.has_sprint && !_sprintProgressStore) {
+      const cols = _snavState.columns || {};
+      const ghDone = (_snavState.state === 'finished')
+        ? (_snavState.done || 0) + (_snavState.uat || 0)
+        : (_snavState.total || 0) - (cols.backlog || 0);
+      _sprintProgressStore = {
+        has_sprint: true,
+        sprint_label: `sprint-${_snavState.sprint}`,
+        sprint: _snavState.sprint,
+        done: ghDone,
+        total: _snavState.total || 0,
+        run_state: _snavState.state || 'running',
+        fetched_at: Date.now(),
+      };
+    }
+    _sprintProgressRender();
     if (_snavPanelOpen) _snavRenderPanel();
   } catch (_) { /* leave last-known pill state */ }
 }
@@ -17282,29 +17466,47 @@ function _snavRenderPill() {
   const d = _snavState;
   if (!d || !d.has_sprint) { pill.classList.add('hidden'); return; }
   pill.classList.remove('hidden');
-  if (d.state === 'finished') {
+
+  // Trigger fetch if store is missing or stale (> 60s)
+  if (!_sprintProgressStore || (Date.now() - (_sprintProgressStore.fetched_at || 0)) > 60000) {
+    _sprintProgressFetch().catch(() => {});
+  }
+
+  // Use shared store for done/total to stay in sync with the other two pills
+  const store = _sprintProgressStore;
+  const run_state = (store && store.has_sprint) ? store.run_state : (d.state || 'running');
+
+  if (run_state === 'finished') {
     dot.className = 'snav-dot snav-dot--finished';
-    const completedF = (d.done || 0) + (d.uat || 0);
-    text.textContent = `S${d.sprint} · ${completedF}/${d.total || 0}`;
+    const completedF = (store && store.has_sprint && store.sprint === d.sprint)
+      ? store.done
+      : (d.done || 0) + (d.uat || 0);
+    const finTotal = (store && store.has_sprint && store.sprint === d.sprint)
+      ? store.total
+      : (d.total || 0);
+    text.textContent = `S${d.sprint} · ${completedF}/${finTotal}`;
   } else {
-    // For running sprints, use live snapshot when available (single source of truth).
-    const liveData = _smgmtLiveCache[`sprint-${d.sprint}`];
-    if (liveData && (liveData.total_count || 0) > 0) {
-      const lc = _snavColsFromLive(liveData);
-      const complete = lc.done + lc.failed + lc.skipped;
-      const doneHtml = lc.done > 0 ? ` · <span class="snav-uat">${lc.done} done</span>` : '';
-      dot.className = 'snav-dot snav-dot--running';
-      text.innerHTML = `S${d.sprint} · ${complete}/${lc.total}${doneHtml}`;
-    } else {
-      const cols = d.columns || {};
-      // During a running sprint, show dispatched/total (tickets that have left backlog).
-      const dispatched = (d.total || 0) - (cols.backlog || 0);
-      const uatHtml = d.uat > 0 ? ` · <span class="snav-uat">${d.uat} UAT</span>` : '';
-      const rework = cols['needs-rework'] || 0;
-      const reworkHtml = rework > 0 ? ` · <span class="snav-rework">${rework} ↩</span>` : '';
-      dot.className = rework > 0 ? 'snav-dot snav-dot--rework' : 'snav-dot snav-dot--running';
-      text.innerHTML = `S${d.sprint} · ${dispatched}/${d.total || 0}${uatHtml}${reworkHtml}`;
-    }
+    const cols = d.columns || {};
+    const rework = cols['needs-rework'] || 0;
+    // Use shared store for the done/total fraction (single source of truth across all pills)
+    const complete = (store && store.has_sprint && store.sprint === d.sprint)
+      ? store.done
+      : (() => {
+          const liveData = _smgmtLiveCache[`sprint-${d.sprint}`];
+          if (liveData && (liveData.total_count || 0) > 0) {
+            const lc = _snavColsFromLive(liveData);
+            return lc.done + lc.failed + lc.skipped;
+          }
+          return (d.total || 0) - (cols.backlog || 0);
+        })();
+    const total = (store && store.has_sprint && store.sprint === d.sprint)
+      ? store.total
+      : (d.total || 0);
+    const doneHtml = (store && store.done > 0) ? ` · <span class="snav-uat">${store.done} done</span>` : '';
+    const uatHtml  = (!store && (d.uat || 0) > 0) ? ` · <span class="snav-uat">${d.uat} UAT</span>` : '';
+    const reworkHtml = rework > 0 ? ` · <span class="snav-rework">${rework} ↩</span>` : '';
+    dot.className = rework > 0 ? 'snav-dot snav-dot--rework' : 'snav-dot snav-dot--running';
+    text.innerHTML = `S${d.sprint} · ${complete}/${total}${doneHtml}${uatHtml}${reworkHtml}`;
   }
 }
 
@@ -17655,21 +17857,80 @@ async function logsFetchRuns() {
   } catch (_) {}
 }
 
+const LOGS_TAG_LIMIT = 10;
+let _logsTagsExpanded = false;
+
 function _logsPopulateSprintChips() {
   const container = document.getElementById('logs-chips-sprint');
   if (!container) return;
-  const labels = [...new Set(_logsState.runs.map(r => r.sprint_label))].sort();
-  const existing = new Set([...container.querySelectorAll('.logs-chip')].map(c => c.dataset.value));
-  for (const label of labels) {
-    if (existing.has(label)) continue;
-    const btn = document.createElement('button');
-    btn.className = 'logs-chip';
-    btn.dataset.group = 'sprint_label';
-    btn.dataset.value = label;
-    btn.onclick = () => logsToggleChip(btn);
-    btn.textContent = label;
-    container.appendChild(btn);
+
+  // Build sprint_label → max start_time map for recency
+  const sprintRecency = {};
+  for (const run of _logsState.runs) {
+    const label = run.sprint_label;
+    if (!sprintRecency[label] || run.start_time > sprintRecency[label]) {
+      sprintRecency[label] = run.start_time;
+    }
   }
+
+  // Create missing sprint chips with recency; update existing ones
+  const existingChips = [...container.querySelectorAll('.logs-chip')];
+  const existingMap = Object.fromEntries(existingChips.map(c => [c.dataset.value, c]));
+  for (const [label, recency] of Object.entries(sprintRecency)) {
+    if (existingMap[label]) {
+      existingMap[label].dataset.tagRecency = recency;
+    } else {
+      const btn = document.createElement('button');
+      btn.className = 'logs-chip';
+      btn.dataset.group = 'sprint_label';
+      btn.dataset.value = label;
+      btn.dataset.tagRecency = recency;
+      btn.onclick = () => logsToggleChip(btn);
+      btn.textContent = label;
+      container.appendChild(btn);
+    }
+  }
+
+  // Assign recency to static role/level chips: global max run time (used in every run)
+  const globalMax = _logsState.runs.length > 0
+    ? _logsState.runs.reduce((m, r) => r.start_time > m ? r.start_time : m, '')
+    : '';
+  document.querySelectorAll(
+    '#pane-logs .logs-chip[data-group="agent_role"], #pane-logs .logs-chip[data-group="event_level"]'
+  ).forEach(btn => { btn.dataset.tagRecency = globalMax; });
+
+  _logsApplyTagLimit();
+}
+
+function _logsApplyTagLimit() {
+  const allChips = [...document.querySelectorAll('#pane-logs .logs-filter-bar .logs-chip:not(#logs-tags-see-more)')];
+  const seeMoreBtn = document.getElementById('logs-tags-see-more');
+  const total = allChips.length;
+
+  // Sort by recency desc; DOM insertion index is the stable tiebreaker
+  const indexed = allChips.map((chip, i) => ({ chip, recency: chip.dataset.tagRecency || '', idx: i }));
+  indexed.sort((a, b) => b.recency.localeCompare(a.recency) || a.idx - b.idx);
+
+  if (_logsTagsExpanded || total <= LOGS_TAG_LIMIT) {
+    indexed.forEach(({ chip }) => chip.classList.remove('logs-chip--hidden'));
+  } else {
+    indexed.forEach(({ chip }, i) => chip.classList.toggle('logs-chip--hidden', i >= LOGS_TAG_LIMIT));
+  }
+
+  if (!seeMoreBtn) return;
+  if (total <= LOGS_TAG_LIMIT) {
+    seeMoreBtn.classList.add('hidden');
+  } else {
+    seeMoreBtn.classList.remove('hidden');
+    seeMoreBtn.textContent = _logsTagsExpanded
+      ? 'See less'
+      : `See more (${total - LOGS_TAG_LIMIT} more)`;
+  }
+}
+
+function _logsTagsToggle() {
+  _logsTagsExpanded = !_logsTagsExpanded;
+  _logsApplyTagLimit();
 }
 
 function logsToggleChip(btn) {

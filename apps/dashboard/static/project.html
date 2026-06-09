@@ -4938,6 +4938,13 @@
     .anl-tab-btn:hover:not(.active) { background: var(--surface); }
     .anl-panel { display: none; flex-direction: column; gap: 16px; }
     .anl-panel.show { display: flex; }
+    /* Sprint Mgmt Board|History segmented control (issue #716) */
+    .smgmt-subtab-bar { display: flex; gap: 6px; padding: 14px 20px 0; }
+    .smgmt-subtab-btn { background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px; padding: 6px 16px; font-size: 13px; color: var(--text-muted); cursor: pointer; transition: background .15s, border-color .15s, color .15s; }
+    .smgmt-subtab-btn.active { background: var(--surface); border-color: var(--text-muted); color: var(--text); font-weight: 600; }
+    .smgmt-subtab-btn:hover:not(.active) { background: var(--surface); }
+    .smgmt-subview { display: none; }
+    .smgmt-subview.show { display: block; }
     .anl-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
     .anl-card-head { padding: 12px 16px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 9px; }
     .anl-card-head .ti { color: var(--text-muted); font-size: 16px; flex-shrink: 0; }
@@ -5205,10 +5212,6 @@
             <i class="ti ti-dots"></i>More<i class="ti ti-chevron-down stab-caret"></i>
           </button>
           <div class="stab-dropdown" id="stab-dropdown-more">
-            <button class="stab" role="tab" id="stab-sprint-history"
-                    aria-selected="false" onclick="switchTab('sprint-history')">
-              <i class="ti ti-history"></i>Sprint history
-            </button>
             <button class="stab" role="tab" id="stab-notes"
                     aria-selected="false" onclick="switchTab('notes')">
               <i class="ti ti-notes"></i>Notes
@@ -5250,6 +5253,17 @@
             <span id="smgmt-move-overlay-msg">Working…</span>
           </div>
         </div>
+
+        <!-- Board | History segmented control (issue #716) -->
+        <div class="smgmt-subtab-bar" role="tablist" aria-label="Sprint Mgmt views">
+          <button class="smgmt-subtab-btn active" id="smgmt-subtab-board" role="tab"
+                  aria-selected="true" onclick="_smgmtShowSubView('board')">Board</button>
+          <button class="smgmt-subtab-btn" id="smgmt-subtab-history" role="tab"
+                  aria-selected="false" onclick="_smgmtShowSubView('history')">History</button>
+        </div>
+
+        <!-- Board sub-view (default) -->
+        <div class="smgmt-subview show" id="smgmt-subview-board" role="tabpanel" aria-labelledby="smgmt-subtab-board">
 
         <!-- Sticky area: toolbar + label filters stick together below the project header -->
         <div class="smgmt-sticky-area" id="smgmt-sticky-area">
@@ -5392,6 +5406,26 @@
         <div class="smgmt-est-popover hidden" id="smgmt-est-popover" role="dialog" aria-modal="false" aria-label="Estimate details"></div>
         <!-- Per-column sort menu (issue #550) -->
         <div class="smgmt-sort-menu hidden" id="smgmt-sort-menu" role="menu" aria-label="Sort column"></div>
+
+        </div><!-- /smgmt-subview-board -->
+
+        <!-- History sub-view (issue #716) — finished-sprint summaries -->
+        <div class="smgmt-subview" id="smgmt-subview-history" role="tabpanel" aria-labelledby="smgmt-subtab-history">
+          <div class="smgmt-summary-pane" id="smgmt-summary-pane">
+            <div class="smgmt-summary-header">
+              <div class="smgmt-summary-header-left">
+                <div class="smgmt-summary-icon"><i class="ti ti-file-description"></i></div>
+                <span class="smgmt-summary-title">Sprint Summaries</span>
+                <span class="smgmt-summary-count" id="smgmt-summary-count"></span>
+              </div>
+              <div class="smgmt-summary-header-actions">
+                <button class="smgmt-archived-toggle" id="smgmt-archived-toggle"
+                        onclick="_smgmtSummaryToggleArchived()"></button>
+              </div>
+            </div>
+            <div class="smgmt-summary-rows" id="smgmt-summary-rows"></div>
+          </div>
+        </div><!-- /smgmt-subview-history -->
 
       </div>
 
@@ -5814,23 +5848,6 @@
       </div>
 
       <!-- Sprint History tab — sprint summaries (moved off the Sprint Mgmt screen) -->
-      <div class="tab-pane" id="pane-sprint-history" role="tabpanel" aria-labelledby="stab-sprint-history">
-        <div class="smgmt-summary-pane" id="smgmt-summary-pane">
-          <div class="smgmt-summary-header">
-            <div class="smgmt-summary-header-left">
-              <div class="smgmt-summary-icon"><i class="ti ti-file-description"></i></div>
-              <span class="smgmt-summary-title">Sprint Summaries</span>
-              <span class="smgmt-summary-count" id="smgmt-summary-count"></span>
-            </div>
-            <div class="smgmt-summary-header-actions">
-              <button class="smgmt-archived-toggle" id="smgmt-archived-toggle"
-                      onclick="_smgmtSummaryToggleArchived()"></button>
-            </div>
-          </div>
-          <div class="smgmt-summary-rows" id="smgmt-summary-rows"></div>
-        </div>
-      </div>
-
       <!-- Analytics tab (mirrors analytics mock: Calibration + Metrics sub-tabs) -->
       <div class="tab-pane" id="pane-metrics" role="tabpanel" aria-labelledby="stab-metrics">
         <div class="anl-head">
@@ -6665,7 +6682,6 @@ function parseUrl() {
             : (rawTab === 'bulk-create')      ? 'bulk-create'
             : (rawTab === 'timeline')         ? 'timeline'
             : (rawTab === 'compare')          ? 'compare'
-            : (rawTab === 'sprint-history')   ? 'sprint-history'
             : (rawTab === 'est-vs-actual')    ? 'est-vs-actual'
             : (rawTab === 'calibration')      ? 'calibration'
             : (rawTab === 'status')           ? 'status'
@@ -6747,7 +6763,7 @@ function switchTab(tab, pushHistory) {
   _activeTab = tab;
 
   // Update aria-selected + active class on tabs
-  ['sprint-mgmt', 'tickets', 'logs', 'bulk-create', 'timeline', 'compare', 'metrics', 'sprint-history', 'est-vs-actual', 'calibration', 'status', 'notes', 'settings'].forEach(t => {
+  ['sprint-mgmt', 'tickets', 'logs', 'bulk-create', 'timeline', 'compare', 'metrics', 'est-vs-actual', 'calibration', 'status', 'notes', 'settings'].forEach(t => {
     const btn = document.getElementById('stab-' + t);
     if (!btn) return;
     const isActive = t === tab;
@@ -6764,7 +6780,7 @@ function switchTab(tab, pushHistory) {
   });
 
   // Show/hide panes
-  ['sprint-mgmt', 'tickets', 'logs', 'bulk-create', 'timeline', 'compare', 'metrics', 'sprint-history', 'est-vs-actual', 'calibration', 'status', 'notes', 'settings'].forEach(t => {
+  ['sprint-mgmt', 'tickets', 'logs', 'bulk-create', 'timeline', 'compare', 'metrics', 'est-vs-actual', 'calibration', 'status', 'notes', 'settings'].forEach(t => {
     const pane = document.getElementById('pane-' + t);
     if (pane) pane.classList.toggle('active', t === tab);
   });
@@ -6779,6 +6795,11 @@ function switchTab(tab, pushHistory) {
   if (tab === 'tickets' && !_ticketsLoaded) {
     _ticketsLoaded = true;
     loadTickets();
+  }
+
+  // Default to the Board sub-view whenever the Sprint Mgmt tab opens (issue #716)
+  if (tab === 'sprint-mgmt') {
+    _smgmtShowSubView('board');
   }
 
   // Lazy-load sprint mgmt (only if _cachedFullRepo is already populated)
@@ -6809,12 +6830,6 @@ function switchTab(tab, pushHistory) {
   // Init compare tab
   if (tab === 'compare') {
     compareInit();
-  }
-
-  // Load sprint history (summaries) tab. No-ops if repo isn't cached yet —
-  // init() loads it once _cachedFullRepo is populated.
-  if (tab === 'sprint-history') {
-    _smgmtLoadSummaries(_cachedFullRepo[_slug]);
   }
 
   // Init metrics tab
@@ -6863,7 +6878,7 @@ document.addEventListener('click', closeAllStabDropdowns);
 
 // ── Keyboard navigation for sub-tabs ─────────────────────────────────────────
 document.getElementById('sub-tabs').addEventListener('keydown', function(e) {
-  const enabledTabs = ['sprint-mgmt', 'tickets', 'logs', 'bulk-create', 'timeline', 'compare', 'sprint-history', 'est-vs-actual', 'calibration', 'status', 'notes', 'settings'];
+  const enabledTabs = ['sprint-mgmt', 'tickets', 'logs', 'bulk-create', 'timeline', 'compare', 'est-vs-actual', 'calibration', 'status', 'notes', 'settings'];
   const focused = document.activeElement;
   const currentId = focused ? focused.id.replace('stab-', '') : null;
   const currentIdx = enabledTabs.indexOf(currentId);
@@ -7972,10 +7987,6 @@ async function init() {
     compareInit();
   }
 
-  // If sprint-history tab was active before the repo was cached, load summaries now
-  if (_activeTab === 'sprint-history') {
-    _smgmtLoadSummaries(_cachedFullRepo[_slug]);
-  }
 }
 
 // ── Sprint Mgmt toolbar height calculation ─────────────────────────────────
@@ -8097,6 +8108,24 @@ function _smgmtSummaryRender(openData, closedData) {
   }
 
   pane.style.display = '';
+}
+
+// ── Sprint Mgmt Board|History sub-view toggle (issue #716) ─────────────────
+// Current sub-view within the Sprint Mgmt tab ('board' | 'history').
+let _smgmtSubView = 'board';
+function _smgmtShowSubView(view) {
+  _smgmtSubView = view;
+  ['board', 'history'].forEach(v => {
+    const btn = document.getElementById('smgmt-subtab-' + v);
+    if (btn) {
+      btn.classList.toggle('active', v === view);
+      btn.setAttribute('aria-selected', String(v === view));
+    }
+    const panel = document.getElementById('smgmt-subview-' + v);
+    if (panel) panel.classList.toggle('show', v === view);
+  });
+  // Lazy-load summaries when History is opened (no-op if repo not cached yet).
+  if (view === 'history') _smgmtLoadSummaries(_cachedFullRepo[_slug]);
 }
 
 async function _smgmtLoadSummaries(repo) {

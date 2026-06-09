@@ -3962,6 +3962,24 @@ def _emit_dashboard_event(
         pass
 
 
+def _read_sprint_summary_url(project_root: Path, sprint_label: str) -> Optional[str]:
+    """Return the summary-issue URL recorded in the sprint state file, or None.
+
+    The sprint summary issue link is persisted as ``summary_issue_url`` in
+    ``.commander/sprints/sprint-<N>-state.json``. Sub-sprint labels (sprint-N.M)
+    resolve to their base sprint-N state file.
+    """
+    m = re.match(r"^sprint-(\d+)", sprint_label)
+    if not m:
+        return None
+    state_path = _commander_dir(project_root) / "sprints" / f"sprint-{m.group(1)}-state.json"
+    try:
+        data = json.loads(state_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+    return data.get("summary_issue_url")
+
+
 def _sprint_label_sort_key(label: str) -> tuple:
     """Return (N, M) tuple for natural sprint label ordering.
 
@@ -5549,6 +5567,14 @@ def run_sprint_managed(request: Request, body: SprintMgmtRunBody):
         pass
 
     _slog.event("sprint.dispatch", project="dashboard", request_id=request.state.request_id, sprint_label=body.sprint_label, target_project=body.project, dispatch_type="managed", pid=proc.pid)
+    # Scoped activity-log event for the sprint target (issue #721)
+    _emit_dashboard_event(
+        project=body.project,
+        type="sprint_started",
+        target=body.sprint_label,
+        detail={"sprint_id": body.sprint_label},
+        action_id=str(uuid.uuid4()),
+    )
     return {
         "ok": True,
         "sprint_label": body.sprint_label,
@@ -8414,6 +8440,15 @@ def rerun_sprint(sprint_label: str, project: str, body: SprintRerunBody):
     github_client.invalidate("issues:")
     github_client.invalidate("sprint_labels:")
 
+    # Scoped activity-log event for the sprint target (issue #721)
+    _emit_dashboard_event(
+        project=project,
+        type="sprint_rerun",
+        target=sub_label,
+        detail={"sprint_id": sprint_label, "sub_label": sub_label},
+        action_id=str(uuid.uuid4()),
+    )
+
     result: dict = {
         "noop": False,
         "sub_label": sub_label,
@@ -8795,6 +8830,18 @@ async def finish_sprint(owner: str, repo_name: str, label: str, body: FinishSpri
             "sprint_label": label,
         },
     })
+
+    # Scoped activity-log event for the sprint target (issue #721)
+    _emit_dashboard_event(
+        project=repo,
+        type="sprint_finished",
+        target=label,
+        detail={
+            "sprint_id": label,
+            "summary_issue_url": _read_sprint_summary_url(project_root, label),
+        },
+        action_id=str(uuid.uuid4()),
+    )
 
     result: dict = {"closed": closed, "moved": moved, "errors": errors, "next_sprint_label": next_sprint_label}
     status_code = 207 if errors else 200

@@ -821,6 +821,7 @@ class IssueState:
     tester_finished_at:   Optional[str] = None
     failure_reason:       Optional[str] = None
     dispatch_level:       int           = 0   # 1-based execution level; 0 = unset
+    tester_attempt_count: int           = 0   # incremented on each tester dispatch (issue #718)
 
     def to_dict(self) -> dict:
         return {
@@ -839,6 +840,7 @@ class IssueState:
             "tester_finished_at": self.tester_finished_at,
             "failure_reason":     self.failure_reason,
             "dispatch_level":     self.dispatch_level,
+            "tester_attempt_count": self.tester_attempt_count,
         }
 
     @staticmethod
@@ -860,6 +862,7 @@ class IssueState:
             failure_reason     = d.get("failure_reason"),
         )
         iss.dispatch_level = d.get("dispatch_level", 0)
+        iss.tester_attempt_count = d.get("tester_attempt_count", 0)
         return iss
 
     def set_agent_status(self, status: str) -> None:
@@ -6209,6 +6212,9 @@ def run_sprint(
             # -- Lifecycle: tester_dispatched --
             issue_state.set_agent_status("tester_dispatched")
             issue_state.tester_started_at = issue_state.status_changed_at
+            # Record the tester attempt so analytics can count rejections exactly
+            # going forward (issue #718).
+            issue_state.tester_attempt_count += 1
             _emit_sprint_lifecycle_event(
                 type="ticket_dispatched",
                 target=f"#{num}",

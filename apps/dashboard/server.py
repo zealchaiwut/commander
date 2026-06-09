@@ -2297,8 +2297,8 @@ def fs_list(path: str = ""):
             if item.name.startswith("."):
                 continue
             entries.append({"name": item.name, "path": str(item)})
-    except PermissionError:
-        pass
+    except OSError as exc:
+        logger.info("[fs_list] error listing %s: %s", target, exc)
 
     return {"entries": entries, "current": str(target)}
 

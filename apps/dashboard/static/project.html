@@ -4692,6 +4692,9 @@
     }
     .lr-desc { font-size: 13px; color: var(--text); }
     .lr-desc .mono { font-family: var(--mono); font-size: 12px; color: var(--text-muted); }
+    .evl-agent-role { font-weight: 600; color: var(--text); text-transform: capitalize; }
+    .evl-issue-link { color: var(--blue); text-decoration: none; font-weight: 600; }
+    .evl-issue-link:hover { text-decoration: underline; }
     .lr-actor {
       font-family: var(--mono); font-size: 11px; color: var(--text-sub);
       display: inline-flex; align-items: center; gap: 4px;
@@ -18997,6 +19000,33 @@ function _evlDescHtml(ev) {
   }
   if (type === 'issue_closed') {
     return '<span class="lr-desc"><span class="mono">' + target + '</span> closed</span>';
+  }
+
+  // Agent lifecycle rows (issue #719): render '<role> <action> #<issue>' with a
+  // clickable GitHub issue link. Fall back to the raw UUID actor when the event
+  // carries no role/issue (legacy events, non-sprint agents).
+  if (type === 'agent_started' || type === 'agent_finished') {
+    var action = type === 'agent_started' ? 'started' : 'finished';
+    var aRole = detail.role || '';
+    var aIssue = detail.issue_num;
+    if (aRole && aIssue) {
+      var repo = _projectData ? (_projectData.repo || '') : '';
+      var issueUrl = repo
+        ? 'https://github.com/' + repo + '/issues/' + encodeURIComponent(aIssue)
+        : '';
+      var issueLink = issueUrl
+        ? '<a class="evl-issue-link" href="' + escHtml(issueUrl) + '" target="_blank" rel="noopener">#' + escHtml(String(aIssue)) + '</a>'
+        : '#' + escHtml(String(aIssue));
+      return '<span class="lr-desc evl-agent-row">'
+        + '<span class="evl-agent-role">' + escHtml(aRole) + '</span> '
+        + action + ' ' + issueLink
+        + '</span>';
+    }
+    // Fallback: no role/issue → show action and the raw agent UUID (no regression)
+    var rawId = escHtml(ev.actor || ev.target || '');
+    return '<span class="lr-desc evl-agent-row">'
+      + 'agent ' + action + (rawId ? ' <span class="mono">' + rawId + '</span>' : '')
+      + '</span>';
   }
 
   var label = type.replace(/_/g, ' ');

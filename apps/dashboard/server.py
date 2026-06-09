@@ -7401,6 +7401,17 @@ MODEL_PRICE_MAP: dict[str, tuple[float, float]] = {
 }
 
 
+def _parse_iso_date(date_str: str, name: str, *, end_of_day: bool = False) -> datetime:
+    """Parse a YYYY-MM-DD string into a UTC datetime, raising HTTP 400 on bad input."""
+    try:
+        dt = datetime.strptime(date_str, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    except ValueError:
+        raise HTTPException(400, detail=f"Invalid {name!r} date {date_str!r} — expected YYYY-MM-DD")
+    if end_of_day:
+        dt = dt.replace(hour=23, minute=59, second=59)
+    return dt
+
+
 def _compute_analytics_metrics(project_root: Path,
                                 since: str | None = None,
                                 until: str | None = None,
@@ -7412,22 +7423,8 @@ def _compute_analytics_metrics(project_root: Path,
     """
     today = datetime.now(tz=timezone.utc).date()
 
-    if since:
-        try:
-            since_dt = datetime.strptime(since, "%Y-%m-%d").replace(tzinfo=timezone.utc)
-        except ValueError:
-            raise HTTPException(400, detail=f"Invalid 'since' date {since!r} — expected YYYY-MM-DD")
-    else:
-        since_dt = None
-
-    if until:
-        try:
-            until_dt = datetime.strptime(until, "%Y-%m-%d").replace(
-                tzinfo=timezone.utc).replace(hour=23, minute=59, second=59)
-        except ValueError:
-            raise HTTPException(400, detail=f"Invalid 'until' date {until!r} — expected YYYY-MM-DD")
-    else:
-        until_dt = None
+    since_dt = _parse_iso_date(since, "since") if since else None
+    until_dt = _parse_iso_date(until, "until", end_of_day=True) if until else None
 
     sprints_dir = _commander_dir(project_root) / "sprints"
 
@@ -7645,22 +7642,8 @@ def _compute_calibration(
     All sizes always present; sizes with no data have count=0 and null stats.
     """
     # Validate date params first so bad input returns 400 before any DB work.
-    since_dt = None
-    until_dt = None
-    if since:
-        try:
-            since_dt = datetime.strptime(since, "%Y-%m-%d").replace(tzinfo=timezone.utc)
-        except ValueError:
-            raise HTTPException(400, detail=f"Invalid 'since' date {since!r} — expected YYYY-MM-DD")
-    if until:
-        try:
-            until_dt = (
-                datetime.strptime(until, "%Y-%m-%d")
-                .replace(tzinfo=timezone.utc)
-                .replace(hour=23, minute=59, second=59)
-            )
-        except ValueError:
-            raise HTTPException(400, detail=f"Invalid 'until' date {until!r} — expected YYYY-MM-DD")
+    since_dt = _parse_iso_date(since, "since") if since else None
+    until_dt = _parse_iso_date(until, "until", end_of_day=True) if until else None
 
     # Resolve configured_minutes from project settings (falls back to defaults).
     try:

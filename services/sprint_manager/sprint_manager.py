@@ -142,6 +142,7 @@ import github_client
 
 from services.run_id import mint_run_id
 from services.logging import log as structured_log
+from services.sprint_manager import agent_browser_runner  # issue #710: live-browser UAT
 
 try:
     from db import record_event as _db_record_event  # type: ignore[import]
@@ -3364,6 +3365,37 @@ def _dispatch_tester(
         )
         cmd[-1] = cmd[-1] + test_repo_hint
         print("  [issue-test-repo] GITHUB_ISSUE_TEST_REPO not set — tester will skip live issue/label tests")
+
+    # ── agent-browser injection (issue #710) ──────────────────────────────────
+    # Make the optional live-browser UAT runner available to the tester and tell
+    # Step 6 how to route browser-interaction UAT steps. We probe availability
+    # here so the prompt can state whether real browser runs are possible or
+    # everything will fall back to MANUAL. The probe is best-effort — any failure
+    # degrades to "not available" so dispatch never crashes on the runner.
+    try:
+        browser_available = agent_browser_runner.is_available()
+    except Exception:
+        browser_available = False
+    sub_env["COMMANDER_AGENT_BROWSER_AVAILABLE"] = "1" if browser_available else "0"
+    sub_env.setdefault(
+        "AGENT_BROWSER_SCREENSHOT_DIR", str(agent_browser_runner.SCREENSHOT_DIR)
+    )
+    browser_hint = (
+        " LIVE BROWSER UAT (issue #710): In Step 6, route each UAT step with"
+        " services/sprint_manager/agent_browser_runner.py."
+        " If the step is flagged agent-testable OR its text describes a browser"
+        " interaction (keywords: open, navigate, click, see, expect, page),"
+        " execute it via agent_browser_runner.run_browser_step(step_text, base_url)"
+        " instead of marking MANUAL. Record the result as PASS or FAIL in the test"
+        " report with the returned screenshot_path attached. A FAIL browser step"
+        " sets the overall ticket status to NEEDS_FIXES, identical to a failed AC."
+        " Mark a step MANUAL ONLY when the runner returns status 'uncovered' or"
+        " agent_browser_runner.is_available() is False. HTTP-only UAT steps"
+        " continue to run via httpx unchanged."
+        f" COMMANDER_AGENT_BROWSER_AVAILABLE={'1' if browser_available else '0'} in your env."
+    )
+    cmd[-1] = cmd[-1] + browser_hint
+    print(f"  [agent-browser] available={browser_available} injected into tester env")
 
     for attempt in range(_RATE_LIMIT_MAX_RETRIES + 1):
         try:

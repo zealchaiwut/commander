@@ -2140,14 +2140,16 @@ def _call_finish_feature(
 # ── documentor integration (issue #103) ──────────────────────────────────────
 
 def _run_documentor(
-    issue_num: int,
+    issue_nums: "list[int]",
+    sprint_label: str,
     repo_name: Optional[str],
     cfg: Optional["SprintConfig"] = None,
 ) -> None:
-    """Invoke document_issue.py for the given issue (best-effort, non-blocking).
+    """Invoke document_issue.py for every issue in issue_nums (best-effort, non-blocking).
 
-    Runs only when documentor_enabled=True in sprint.yaml.  Failures are
-    logged as warnings so they never block the merge pipeline.
+    Called once per sprint after the dispatch loop, with the full list of
+    merged issue numbers and the sprint label as context (issue #697).
+    Failures are logged as warnings so they never block the pipeline.
     """
     document_script = Path(__file__).parent / "document_issue.py"
     if not document_script.exists():
@@ -2155,26 +2157,28 @@ def _run_documentor(
         return
 
     eff_repo = repo_name or (cfg.repo_name if cfg else None)
-    cmd = [sys.executable, str(document_script), "--issue", str(issue_num), "--mode", "both"]
-    if eff_repo:
-        cmd += ["--repo", eff_repo]
-
-    print(f"  [documentor] running for issue #{issue_num} ...")
-    try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
-        if result.stdout:
-            for line in result.stdout.splitlines():
-                print(f"  {line}")
-        if result.returncode != 0:
-            print(f"  [documentor] exited {result.returncode} (non-fatal)", file=sys.stderr)
-            if result.stderr:
-                print(f"  [documentor] stderr: {result.stderr.strip()[:400]}", file=sys.stderr)
-        else:
-            print(f"  [documentor] completed for issue #{issue_num}")
-    except subprocess.TimeoutExpired:
-        structured_log.warn("documentor_timeout", "[documentor] timed out after 300s", issue_num=issue_num)
-    except Exception as e:
-        structured_log.error("documentor_error", f"[documentor] error: {e}", issue_num=issue_num, exc=str(e))
+    print(
+        f"  [documentor] running for sprint {sprint_label} "
+        f"({len(issue_nums)} ticket(s): {issue_nums}) ..."
+    )
+    for issue_num in issue_nums:
+        cmd = [sys.executable, str(document_script), "--issue", str(issue_num), "--mode", "both"]
+        if eff_repo:
+            cmd += ["--repo", eff_repo]
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+            if result.stdout:
+                for line in result.stdout.splitlines():
+                    print(f"  {line}")
+            if result.returncode != 0:
+                print(f"  [documentor] issue #{issue_num} exited {result.returncode} (non-fatal)", file=sys.stderr)
+                if result.stderr:
+                    print(f"  [documentor] stderr: {result.stderr.strip()[:400]}", file=sys.stderr)
+        except subprocess.TimeoutExpired:
+            structured_log.warn("documentor_timeout", "[documentor] timed out after 300s", issue_num=issue_num)
+        except Exception as e:
+            structured_log.error("documentor_error", f"[documentor] error: {e}", issue_num=issue_num, exc=str(e))
+    print(f"  [documentor] completed for sprint {sprint_label}")
 
 
 # ── post-tester hook ──────────────────────────────────────────────────────────
@@ -2342,13 +2346,8 @@ def handle_post_tester(
 
     print(f"\nTester finished for issue #{issue_num} -- running quality gates...")
 
-    # Resolve documentor_enabled: explicit param wins, then cfg, then False
-    eff_documentor = documentor_enabled or (cfg.documentor_enabled if cfg is not None else False)
-
     if skip_gates:
         print("  --skip-gates active -- skipping all quality gates, proceeding to merge")
-        if eff_documentor:
-            _run_documentor(issue_num, eff_repo, cfg=cfg)
         if not already_merged_by_tester:
             _call_finish_feature(issue_num, wt_root, target_branch=target_branch, repo_name=eff_repo, cfg=cfg, sprint_label=sprint_label)
         _post_agent_event("gate:merging", api_url=api_url)
@@ -2393,8 +2392,6 @@ def handle_post_tester(
             print(f"  All gates passed -- tester already merged via finish_feature.py, skipping re-merge")
         else:
             print(f"  All gates passed -- calling finish_feature.py for issue #{issue_num}")
-        if eff_documentor:
-            _run_documentor(issue_num, eff_repo, cfg=cfg)
         if not already_merged_by_tester:
             _call_finish_feature(issue_num, wt_root, target_branch=target_branch, repo_name=eff_repo, cfg=cfg, sprint_label=sprint_label)
         _transition_safe(issue_num, _TicketState.UAT, actor="sprint_manager", repo_name=eff_repo)
@@ -5833,6 +5830,17 @@ def run_sprint(
         project=eff_repo or label,
         action_id=_run_id,
     )
+
+    # Run documentor once for all merged tickets, before reviewer (issue #697)
+    _eff_documentor = cfg.documentor_enabled if cfg is not None else False
+    if _eff_documentor and summary.merged:
+        _merged_issue_nums = [
+            int(s.lstrip("#").split()[0])
+            for s in summary.merged
+            if s.lstrip("#").split()[0].isdigit()
+        ]
+        if _merged_issue_nums:
+            _run_documentor(_merged_issue_nums, label, eff_repo, cfg=cfg)
 
     return summary, state
 

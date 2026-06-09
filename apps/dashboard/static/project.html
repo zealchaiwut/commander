@@ -4857,6 +4857,34 @@
     }
     .sb-settings-link .ti { font-size: 16px; }
 
+    /* ── Global notes panel (issue #717) ── */
+    .gnotes-content {
+      padding: 20px 28px 28px;
+      display: flex; flex-direction: column;
+      height: calc(100% - 65px); box-sizing: border-box;
+    }
+    .gnotes-hint {
+      font-size: 13px; color: var(--text-muted);
+      margin: 0 0 12px;
+    }
+    .gnotes-textarea {
+      flex: 1; width: 100%; box-sizing: border-box;
+      min-height: 320px; resize: none;
+      padding: 14px 16px;
+      border: 1px solid var(--border); border-radius: 8px;
+      background: var(--surface); color: var(--text);
+      font-family: "SF Mono", ui-monospace, monospace;
+      font-size: 13px; line-height: 1.6;
+    }
+    .gnotes-textarea:focus { outline: none; border-color: var(--blue); }
+    .gnotes-status {
+      font-size: 12px; color: var(--text-muted);
+      min-width: 60px; text-align: right;
+    }
+    .gnotes-status.saving { color: var(--text-muted); }
+    .gnotes-status.ok  { color: var(--color-success-fg); }
+    .gnotes-status.err { color: var(--color-error-fg); }
+
     /* ── Settings panel (issue #430) ── */
     .settings-panel {
       display: none;
@@ -5126,6 +5154,13 @@
         <span>Add project</span>
       </button>
 
+      <!-- Notes link (global — issue #717) -->
+      <button class="sb-settings-link" id="sb-notes-link"
+              onclick="openNotesPanel(event)" title="Global notes" aria-label="Notes">
+        <i class="ti ti-notes"></i>
+        <span>Notes</span>
+      </button>
+
       <!-- Settings link -->
       <button class="sb-settings-link" id="sb-settings-link"
               onclick="openSettingsPanel(event)" title="Project settings" aria-label="Settings">
@@ -5205,19 +5240,7 @@
             </button>
           </div>
         </div>
-        <!-- More dropdown group -->
-        <div class="stab-group" id="stab-group-more">
-          <button class="stab stab-trigger" role="tab" aria-haspopup="true"
-                  onclick="toggleStabDropdown('more', event)">
-            <i class="ti ti-dots"></i>More<i class="ti ti-chevron-down stab-caret"></i>
-          </button>
-          <div class="stab-dropdown" id="stab-dropdown-more">
-            <button class="stab" role="tab" id="stab-notes"
-                    aria-selected="false" onclick="switchTab('notes')">
-              <i class="ti ti-notes"></i>Notes
-            </button>
-          </div>
-        </div>
+        <!-- Notes moved to the global left sidebar (issue #717) -->
         <!-- Settings (top level) -->
         <button class="stab" role="tab" id="stab-settings"
                 aria-selected="false" onclick="switchTab('settings')">
@@ -6408,6 +6431,27 @@
   </div>
 </div>
 
+<!-- ── Global notes panel (issue #717) ── -->
+<div class="settings-panel" id="gnotes-panel" role="region" aria-label="Notes">
+  <div class="settings-header">
+    <span class="settings-title">
+      <i class="ti ti-notes" style="margin-right:8px;font-size:16px;vertical-align:-2px;"></i>Notes
+    </span>
+    <div style="display:flex;align-items:center;gap:12px;">
+      <span class="gnotes-status" id="gnotes-status" aria-live="polite"></span>
+      <button class="settings-close-btn" onclick="closeNotesPanel()" aria-label="Close notes">
+        <i class="ti ti-x"></i>
+      </button>
+    </div>
+  </div>
+  <div class="gnotes-content">
+    <p class="gnotes-hint">Global notes — shared across all projects. Changes save automatically.</p>
+    <textarea id="gnotes-textarea" class="gnotes-textarea"
+              placeholder="# Notes&#10;&#10;Write in Markdown — saved automatically…"
+              oninput="gnotesAutosave()" aria-label="Notes editor" spellcheck="true"></textarea>
+  </div>
+</div>
+
 <!-- ── Ticket detail panel (issue #432) ── -->
 <div class="tdp" id="tdp" role="complementary" aria-label="Ticket detail">
   <div class="tdp-header">
@@ -6480,6 +6524,75 @@ function closeSettingsPanel() {
   if (panel) panel.classList.remove('open');
   const link = document.getElementById('sb-settings-link');
   if (link) link.classList.remove('active');
+}
+
+// ── Global notes panel (issue #717) ─────────────────────────────────────────
+let _gnotesTimer = null;
+let _gnotesLoaded = false;
+
+function openNotesPanel(e) {
+  if (e) e.preventDefault();
+  // Close the settings panel so only one overlay is open at a time.
+  closeSettingsPanel();
+  const panel = document.getElementById('gnotes-panel');
+  if (!panel) return;
+  panel.classList.add('open');
+  const link = document.getElementById('sb-notes-link');
+  if (link) link.classList.add('active');
+  gnotesLoad();
+}
+
+function closeNotesPanel() {
+  const panel = document.getElementById('gnotes-panel');
+  if (panel) panel.classList.remove('open');
+  const link = document.getElementById('sb-notes-link');
+  if (link) link.classList.remove('active');
+}
+
+function gnotesSetStatus(text, cls) {
+  const el = document.getElementById('gnotes-status');
+  if (!el) return;
+  el.textContent = text || '';
+  el.className = 'gnotes-status' + (cls ? ' ' + cls : '');
+}
+
+async function gnotesLoad() {
+  const ta = document.getElementById('gnotes-textarea');
+  if (!ta) return;
+  try {
+    const resp = await fetch('/api/notes');
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const data = await resp.json();
+    ta.value = (data && typeof data.body === 'string') ? data.body : '';
+    _gnotesLoaded = true;
+    gnotesSetStatus('', '');
+  } catch (e) {
+    gnotesSetStatus('Load failed', 'err');
+  }
+}
+
+// Debounced autosave — no manual save button required.
+function gnotesAutosave() {
+  if (!_gnotesLoaded) return;  // ignore programmatic value set during load
+  gnotesSetStatus('Saving…', 'saving');
+  if (_gnotesTimer) clearTimeout(_gnotesTimer);
+  _gnotesTimer = setTimeout(gnotesSaveNow, 800);
+}
+
+async function gnotesSaveNow() {
+  const ta = document.getElementById('gnotes-textarea');
+  if (!ta) return;
+  try {
+    const resp = await fetch('/api/notes', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ body: ta.value }),
+    });
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    gnotesSetStatus('Saved', 'ok');
+  } catch (e) {
+    gnotesSetStatus('Save failed', 'err');
+  }
 }
 
 function settingsInitValues() {

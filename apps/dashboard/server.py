@@ -7164,7 +7164,7 @@ def _compute_analytics_metrics(project_root: Path,
 
             sprint_ticket_counts.append(len(sprint_done))
             if wall_clock_secs > 0:
-                sprint_lengths.append(wall_clock_secs / 60.0)
+                sprint_lengths.append(wall_clock_secs / 86400.0)
 
             for issue in sprint_done:
                 total_completed += 1
@@ -7270,7 +7270,8 @@ def _compute_analytics_metrics(project_root: Path,
         },
         "throughput": {
             "avg_tickets_per_sprint": round(avg_tickets, 2),
-            "avg_sprint_length_minutes": round(avg_length, 2),
+            "avg_sprint_length_days": round(avg_length, 4),
+            "avg_sprint_length_minutes": round(avg_length * 1440, 2),
         },
         "cost": {
             "per_sprint": {
@@ -7279,6 +7280,10 @@ def _compute_analytics_metrics(project_root: Path,
             },
             "per_ticket": {
                 "avg": round(cost_per_ticket_avg, 4),
+                "by_role": {
+                    k: round(v / total_completed, 4) if total_completed else 0.0
+                    for k, v in cost_by_role.items()
+                },
                 "rework_cost_annotation": rework_cost_annotation,
             },
         },

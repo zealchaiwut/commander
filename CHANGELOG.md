@@ -1,5 +1,7 @@
 # Changelog
 
+- [#648](https://github.com/zealchaiwut/commander/issues/648) Build Metrics tab with ANL-3 data cards — 2026-06-09
+
 ## Sprint 51
 
 - #637: Add project_events table and recorder to dashboard DB

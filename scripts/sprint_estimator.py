@@ -305,6 +305,7 @@ def _spawn_estimator_agent(
     sprint_label: str,
     repo_path: Path,
     estimation_cfg: Optional[dict] = None,
+    model: str = "claude-sonnet-4-6",
 ) -> Optional[EstimateResult]:
     """Spawn a single claude CLI call to estimate all issues in one pass.
 
@@ -325,7 +326,7 @@ def _spawn_estimator_agent(
         proc = subprocess.run(
             [
                 "claude",
-                "--model", "claude-sonnet-4-6",
+                "--model", model,
                 "--dangerously-skip-permissions",
                 "-p", prompt,
             ],
@@ -510,6 +511,9 @@ def run_estimator(
     project = getattr(cfg, "repo_name", None) or effective_repo
     estimation_cfg = get_estimation_cfg(project=project)
 
+    # Resolve model from cfg (issue #700) or fall back to default
+    estimator_model = getattr(cfg, "estimator_model", None) or "claude-sonnet-4-6"
+
     # Spawn estimator agent
     result = _spawn_estimator_agent(
         json.dumps(issues_for_agent, indent=2),
@@ -517,6 +521,7 @@ def run_estimator(
         sprint_label,
         repo_root,
         estimation_cfg=estimation_cfg,
+        model=estimator_model,
     )
 
     if result is None:

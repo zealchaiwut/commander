@@ -240,6 +240,12 @@ class SprintConfig:
     reviewer_prompt_template: Optional[str] = None
     # Documenter (issue #165)
     documenter_prompt_template: Optional[str] = None
+    # Agent models (issue #700) — defaults match current hardcoded values
+    coder_model:       str = "claude-sonnet-4-6"
+    tester_model:      str = "claude-sonnet-4-6"
+    reviewer_model:    str = "claude-haiku-4-5"
+    estimator_model:   str = "claude-sonnet-4-6"
+    documentor_model:  str = "claude-sonnet-4-6"
 
     @property
     def worktree_tester_app(self) -> Path:
@@ -367,6 +373,24 @@ def load_config(path: Path) -> "SprintConfig":
     # ── documenter section (issue #165) ──────────────────────────────────────
     documenter_prompt = agents.get("documenter_prompt_template") or None
 
+    # ── agent_config section (issue #700) ────────────────────────────────────
+    agent_cfg = data.get("agent_config") or {}
+    _default_model: Optional[str] = (agent_cfg.get("default_model") or None) if isinstance(agent_cfg, dict) else None
+
+    def _resolve_model(key: str, hardcoded: str) -> str:
+        """Return per-agent override → default_model → hardcoded, in that order."""
+        if isinstance(agent_cfg, dict) and key in agent_cfg:
+            return str(agent_cfg[key])
+        if _default_model:
+            return _default_model
+        return hardcoded
+
+    coder_model      = _resolve_model("coder_model",      "claude-sonnet-4-6")
+    tester_model     = _resolve_model("tester_model",     "claude-sonnet-4-6")
+    reviewer_model   = _resolve_model("reviewer_model",   "claude-haiku-4-5")
+    estimator_model  = _resolve_model("estimator_model",  "claude-sonnet-4-6")
+    documentor_model = _resolve_model("documentor_model", "claude-sonnet-4-6")
+
     return SprintConfig(
         repo_name             = repo_name,
         worktree_coder        = worktree_coder,
@@ -384,6 +408,11 @@ def load_config(path: Path) -> "SprintConfig":
         documentor_enabled          = documentor_enabled,
         reviewer_prompt_template    = reviewer_prompt,
         documenter_prompt_template  = documenter_prompt,
+        coder_model                 = coder_model,
+        tester_model                = tester_model,
+        reviewer_model              = reviewer_model,
+        estimator_model             = estimator_model,
+        documentor_model            = documentor_model,
     )
 
 
@@ -1501,6 +1530,10 @@ def _revert_to_sit(issue_num: int, gate_name: str, output: str,
         files_to_inspect=files_to_inspect,
     )
 
+    # Store full gate output for Gate Failure Analysis (issue #701).
+    # Using the full untruncated output so AC-2 (untruncated error) is satisfied.
+    _write_gate_failure_record(issue_num, gate_name, output, repo_root=repo_root)
+
     _transition_safe(issue_num, _TicketState.SIT, actor="sprint_manager:gate_fail", repo_name=repo_name)
     try:
         github_client.add_comment(issue_num, comment, repo_name=repo_name)
@@ -2140,14 +2173,16 @@ def _call_finish_feature(
 # ── documentor integration (issue #103) ──────────────────────────────────────
 
 def _run_documentor(
-    issue_num: int,
+    issue_nums: "list[int]",
+    sprint_label: str,
     repo_name: Optional[str],
     cfg: Optional["SprintConfig"] = None,
 ) -> None:
-    """Invoke document_issue.py for the given issue (best-effort, non-blocking).
+    """Invoke document_issue.py for every issue in issue_nums (best-effort, non-blocking).
 
-    Runs only when documentor_enabled=True in sprint.yaml.  Failures are
-    logged as warnings so they never block the merge pipeline.
+    Called once per sprint after the dispatch loop, with the full list of
+    merged issue numbers and the sprint label as context (issue #697).
+    Failures are logged as warnings so they never block the pipeline.
     """
     document_script = Path(__file__).parent / "document_issue.py"
     if not document_script.exists():
@@ -2155,26 +2190,28 @@ def _run_documentor(
         return
 
     eff_repo = repo_name or (cfg.repo_name if cfg else None)
-    cmd = [sys.executable, str(document_script), "--issue", str(issue_num), "--mode", "both"]
-    if eff_repo:
-        cmd += ["--repo", eff_repo]
-
-    print(f"  [documentor] running for issue #{issue_num} ...")
-    try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
-        if result.stdout:
-            for line in result.stdout.splitlines():
-                print(f"  {line}")
-        if result.returncode != 0:
-            print(f"  [documentor] exited {result.returncode} (non-fatal)", file=sys.stderr)
-            if result.stderr:
-                print(f"  [documentor] stderr: {result.stderr.strip()[:400]}", file=sys.stderr)
-        else:
-            print(f"  [documentor] completed for issue #{issue_num}")
-    except subprocess.TimeoutExpired:
-        structured_log.warn("documentor_timeout", "[documentor] timed out after 300s", issue_num=issue_num)
-    except Exception as e:
-        structured_log.error("documentor_error", f"[documentor] error: {e}", issue_num=issue_num, exc=str(e))
+    print(
+        f"  [documentor] running for sprint {sprint_label} "
+        f"({len(issue_nums)} ticket(s): {issue_nums}) ..."
+    )
+    for issue_num in issue_nums:
+        cmd = [sys.executable, str(document_script), "--issue", str(issue_num), "--mode", "both"]
+        if eff_repo:
+            cmd += ["--repo", eff_repo]
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+            if result.stdout:
+                for line in result.stdout.splitlines():
+                    print(f"  {line}")
+            if result.returncode != 0:
+                print(f"  [documentor] issue #{issue_num} exited {result.returncode} (non-fatal)", file=sys.stderr)
+                if result.stderr:
+                    print(f"  [documentor] stderr: {result.stderr.strip()[:400]}", file=sys.stderr)
+        except subprocess.TimeoutExpired:
+            structured_log.warn("documentor_timeout", "[documentor] timed out after 300s", issue_num=issue_num)
+        except Exception as e:
+            structured_log.error("documentor_error", f"[documentor] error: {e}", issue_num=issue_num, exc=str(e))
+    print(f"  [documentor] completed for sprint {sprint_label}")
 
 
 # ── post-tester hook ──────────────────────────────────────────────────────────
@@ -2342,13 +2379,8 @@ def handle_post_tester(
 
     print(f"\nTester finished for issue #{issue_num} -- running quality gates...")
 
-    # Resolve documentor_enabled: explicit param wins, then cfg, then False
-    eff_documentor = documentor_enabled or (cfg.documentor_enabled if cfg is not None else False)
-
     if skip_gates:
         print("  --skip-gates active -- skipping all quality gates, proceeding to merge")
-        if eff_documentor:
-            _run_documentor(issue_num, eff_repo, cfg=cfg)
         if not already_merged_by_tester:
             _call_finish_feature(issue_num, wt_root, target_branch=target_branch, repo_name=eff_repo, cfg=cfg, sprint_label=sprint_label)
         _post_agent_event("gate:merging", api_url=api_url)
@@ -2393,8 +2425,6 @@ def handle_post_tester(
             print(f"  All gates passed -- tester already merged via finish_feature.py, skipping re-merge")
         else:
             print(f"  All gates passed -- calling finish_feature.py for issue #{issue_num}")
-        if eff_documentor:
-            _run_documentor(issue_num, eff_repo, cfg=cfg)
         if not already_merged_by_tester:
             _call_finish_feature(issue_num, wt_root, target_branch=target_branch, repo_name=eff_repo, cfg=cfg, sprint_label=sprint_label)
         _transition_safe(issue_num, _TicketState.UAT, actor="sprint_manager", repo_name=eff_repo)
@@ -2575,11 +2605,277 @@ def _delete_failure_sidecar(issue_num: int, repo_root: Optional[Path] = None) ->
             issue_num=issue_num,
             exc=str(e),
         )
+    # Clear gate failure records on success (gate passed — no analysis needed).
+    _clear_gate_failure_records(issue_num, repo_root=repo_root)
 
 
 def _issue_log_path(issue_num: int, cfg: Optional["SprintConfig"] = None) -> Path:
     logs_dir = cfg.logs_dir if cfg is not None else (DASHBOARD_DIR / "logs")
     return logs_dir / f"sprint-issue-{issue_num}.log"
+
+
+# ── gate failure analysis (issue #701) ────────────────────────────────────────
+
+def _gate_failures_log_path(cfg: Optional["SprintConfig"] = None) -> Path:
+    logs_dir = cfg.logs_dir if cfg is not None else (DASHBOARD_DIR / "logs")
+    return logs_dir / "gate-failures.md"
+
+
+def _gate_failure_records_path(issue_num: int, repo_root: Optional[Path] = None) -> Path:
+    effective_root = repo_root or REPO_ROOT
+    return effective_root / ".commander" / "runtime" / f"gate-failure-records-{issue_num}.jsonl"
+
+
+def _write_gate_failure_record(
+    issue_num: int,
+    gate_name: str,
+    output: str,
+    repo_root: Optional[Path] = None,
+) -> None:
+    """Append one gate failure record to the JSONL sidecar for issue_num."""
+    path = _gate_failure_records_path(issue_num, repo_root)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        record = {
+            "gate_name": gate_name,
+            "output": output,
+            "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        }
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(record) + "\n")
+    except Exception as e:
+        structured_log.warn(
+            "gate_record_write_error",
+            f"could not write gate failure record for #{issue_num}: {e}",
+            issue_num=issue_num,
+            exc=str(e),
+        )
+
+
+def _read_gate_failure_records(
+    issue_num: int,
+    repo_root: Optional[Path] = None,
+) -> list[dict]:
+    """Read all gate failure records for issue_num from the JSONL sidecar."""
+    path = _gate_failure_records_path(issue_num, repo_root)
+    if not path.exists():
+        return []
+    records: list[dict] = []
+    try:
+        for line in path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if line:
+                try:
+                    records.append(json.loads(line))
+                except json.JSONDecodeError:
+                    pass
+    except Exception as e:
+        structured_log.warn(
+            "gate_record_read_error",
+            f"could not read gate failure records for #{issue_num}: {e}",
+            issue_num=issue_num,
+            exc=str(e),
+        )
+    return records
+
+
+def _clear_gate_failure_records(
+    issue_num: int,
+    repo_root: Optional[Path] = None,
+) -> None:
+    """Delete the gate failure JSONL sidecar for issue_num if it exists."""
+    path = _gate_failure_records_path(issue_num, repo_root)
+    try:
+        if path.exists():
+            path.unlink()
+    except Exception as e:
+        structured_log.warn(
+            "gate_record_clear_error",
+            f"could not clear gate failure records for #{issue_num}: {e}",
+            issue_num=issue_num,
+            exc=str(e),
+        )
+
+
+def _generate_gate_failure_analysis(
+    gate_name: str,
+    error_output: str,
+    issue_num: int = 0,
+    cfg: Optional["SprintConfig"] = None,
+) -> dict:
+    """Call claude -p (Haiku) to generate root cause + prevention for a gate failure.
+
+    Returns {"root_cause": "...", "prevention": "..."}.
+    Returns placeholder strings on any error so the sprint never blocks.
+    """
+    prompt = (
+        f"A quality gate named '{gate_name}' failed with this error output:\n\n"
+        f"```\n{error_output[:3000]}\n```\n\n"
+        "Respond with a JSON object with exactly two keys:\n"
+        '- "root_cause": one concise sentence explaining WHY the submitted code '
+        "failed this gate (be specific, e.g. \"Type annotation missing on return "
+        "value of `process_item`\")\n"
+        '- "prevention": one or two concrete actionable steps the coder should '
+        "take before next submission to pass this gate (e.g. \"Run `tsc --noEmit` "
+        "locally before marking complete\")\n\n"
+        "Output ONLY the JSON object, no other text."
+    )
+    try:
+        result = subprocess.run(
+            [
+                "claude", "-p", prompt,
+                "--model", "claude-haiku-4-5-20251001",
+                "--no-session-persistence",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        if result.returncode == 0:
+            data = _extract_analysis_json(result.stdout)
+            if data and "root_cause" in data and "prevention" in data:
+                return {"root_cause": str(data["root_cause"]), "prevention": str(data["prevention"])}
+    except Exception as e:
+        structured_log.warn(
+            "gate_analysis_llm_error",
+            f"LLM gate analysis failed for #{issue_num} ({gate_name}): {e}",
+            issue_num=issue_num,
+            gate=gate_name,
+            exc=str(e),
+        )
+    return {
+        "root_cause": f"Code did not satisfy the {gate_name} gate requirements.",
+        "prevention": (
+            f"Review the {gate_name} gate error output and fix all reported issues "
+            "before resubmitting."
+        ),
+    }
+
+
+def _extract_analysis_json(text: str) -> Optional[dict]:
+    """Extract the first JSON object from LLM analysis output."""
+    cleaned = re.sub(r"```(?:json)?\s*", "", text)
+    cleaned = re.sub(r"```\s*", "", cleaned)
+    try:
+        return json.loads(cleaned.strip())
+    except json.JSONDecodeError:
+        pass
+    start = text.find("{")
+    if start >= 0:
+        depth = 0
+        for i in range(start, len(text)):
+            if text[i] == "{":
+                depth += 1
+            elif text[i] == "}":
+                depth -= 1
+                if depth == 0:
+                    try:
+                        return json.loads(text[start : i + 1])
+                    except json.JSONDecodeError:
+                        break
+    return None
+
+
+def _post_gate_failure_analysis_comment(
+    issue_num: int,
+    gate_name: str,
+    error_output: str,
+    root_cause: str,
+    prevention: str,
+    repo_name: Optional[str] = None,
+) -> None:
+    """Post a structured ## Gate Failure Analysis comment to the GitHub issue."""
+    comment = (
+        f"## Gate Failure Analysis\n\n"
+        f"### Gate & Error\n\n"
+        f"**Gate:** {gate_name}\n\n"
+        f"```\n{error_output}\n```\n\n"
+        f"### Root Cause\n\n{root_cause}\n\n"
+        f"### Prevention\n\n{prevention}\n"
+    )
+    try:
+        github_client.add_comment(issue_num, comment, repo_name=repo_name)
+    except Exception as e:
+        structured_log.warn(
+            "gate_analysis_comment_error",
+            f"failed to post Gate Failure Analysis for #{issue_num}: {e}",
+            issue_num=issue_num,
+            gate=gate_name,
+            exc=str(e),
+        )
+
+
+def _append_gate_failure_to_sprint_log(
+    issue_num: int,
+    gate_name: str,
+    error_output: str,
+    root_cause: str,
+    prevention: str,
+    cfg: Optional["SprintConfig"] = None,
+) -> None:
+    """Append a dated Gate Failure Analysis entry to the sprint gate failures log."""
+    log_path = _gate_failures_log_path(cfg)
+    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    entry = (
+        f"\n## Gate Failure Analysis — {timestamp} — Issue #{issue_num}\n\n"
+        f"### Gate & Error\n\n"
+        f"**Gate:** {gate_name}\n\n"
+        f"```\n{error_output}\n```\n\n"
+        f"### Root Cause\n\n{root_cause}\n\n"
+        f"### Prevention\n\n{prevention}\n"
+    )
+    try:
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(log_path, "a", encoding="utf-8") as f:
+            f.write(entry)
+    except Exception as e:
+        structured_log.warn(
+            "gate_log_append_error",
+            f"failed to append Gate Failure Analysis to sprint log for #{issue_num}: {e}",
+            issue_num=issue_num,
+            gate=gate_name,
+            exc=str(e),
+        )
+
+
+def _publish_gate_failure_analyses(
+    issue_num: int,
+    repo_name: Optional[str] = None,
+    cfg: Optional["SprintConfig"] = None,
+) -> None:
+    """Post Gate Failure Analysis comment + sprint log entry for each recorded gate failure.
+
+    Called after the fix-loop is exhausted (all retries consumed or early-abort).
+    Reads gate failure records accumulated by _write_gate_failure_record (called
+    from _revert_to_sit on each gate failure), processes each independently
+    (AC-7: no merging), then clears the records.
+    """
+    records = _read_gate_failure_records(issue_num)
+    if not records:
+        return
+    for record in records:
+        gate_name = record.get("gate_name", "unknown")
+        error_output = record.get("output", "")
+        analysis = _generate_gate_failure_analysis(
+            gate_name, error_output, issue_num=issue_num, cfg=cfg
+        )
+        _post_gate_failure_analysis_comment(
+            issue_num,
+            gate_name,
+            error_output,
+            analysis["root_cause"],
+            analysis["prevention"],
+            repo_name=repo_name,
+        )
+        _append_gate_failure_to_sprint_log(
+            issue_num,
+            gate_name,
+            error_output,
+            analysis["root_cause"],
+            analysis["prevention"],
+            cfg=cfg,
+        )
+    _clear_gate_failure_records(issue_num)
 
 
 def _design_docs_guard(cwd_path: "Path") -> "Optional[str]":
@@ -2735,9 +3031,10 @@ def _dispatch_coder(
     # Give the headless run the same coder persona an interactive /coder session
     # would (subagents/slash-commands don't load in `claude -p`). Keep `-p PROMPT`
     # last so the later `cmd[-1] += sprint_hint` append still targets the prompt.
+    coder_model = cfg.coder_model if cfg is not None else "claude-sonnet-4-6"
     cmd = [
         "claude",
-        "--model", "claude-sonnet-4-6",
+        "--model", coder_model,
         "--dangerously-skip-permissions",
     ]
     coder_persona = _load_agent_persona("coder", cwd_path)
@@ -3000,9 +3297,10 @@ def _dispatch_tester(
             " label-mutation command."
         )
     # Same persona fix as the coder: load the tester subagent for the headless run.
+    tester_model = cfg.tester_model if cfg is not None else "claude-sonnet-4-6"
     cmd = [
         "claude",
-        "--model", "claude-sonnet-4-6",
+        "--model", tester_model,
         "--dangerously-skip-permissions",
     ]
     tester_persona = _load_agent_persona("tester", cwd_path)
@@ -4324,9 +4622,10 @@ def _dispatch_documenter(
     except Exception as e:
         structured_log.warn("documenter_git_prep_failed", f"[documenter] git prep failed: {e}", exc=str(e))
 
+    documentor_model = cfg.documentor_model if cfg is not None else "claude-sonnet-4-6"
     cmd = [
         "claude",
-        "--model", "claude-sonnet-4-6",
+        "--model", documentor_model,
         "--dangerously-skip-permissions",
         "-p", prompt,
     ]
@@ -4505,9 +4804,10 @@ def _dispatch_reviewer(
     except Exception as e:
         structured_log.warn("reviewer_git_prep_failed", f"[reviewer] git prep failed: {e}", exc=str(e))
 
+    reviewer_model = cfg.reviewer_model if cfg is not None else "claude-haiku-4-5"
     cmd = [
         "claude",
-        "--model", "claude-haiku-4-5",
+        "--model", reviewer_model,
         "--dangerously-skip-permissions",
         "-p", prompt,
     ]
@@ -4580,12 +4880,33 @@ def _dispatch_reviewer(
                 findings["blockers"]    = int(m.group(1))
                 findings["suggestions"] = int(m.group(2))
                 findings["nits"]        = int(m.group(3))
-                findings["follow_up_tickets"] = list(range(int(m.group(4))))  # count only
                 break
+        # Parse actual follow-up issue numbers from issue creation URLs in the log.
+        # gh issue create outputs: https://github.com/<repo>/issues/N
+        # Exclude comment URLs (which contain #issuecomment-) and the sprint summary issue.
+        if eff_repo:
+            issue_url_pat = re.compile(
+                rf"https://github\.com/{re.escape(eff_repo)}/issues/(\d+)",
+                re.IGNORECASE,
+            )
+            seen_nums: set = set()
+            follow_up_nums: list = []
+            for url_m2 in issue_url_pat.finditer(log_text):
+                # Skip comment URLs: the match end is immediately followed by '#'
+                pos = url_m2.end()
+                if pos < len(log_text) and log_text[pos] == "#":
+                    continue
+                num = int(url_m2.group(1))
+                if summary_issue_num is not None and num == summary_issue_num:
+                    continue
+                if num not in seen_nums:
+                    seen_nums.add(num)
+                    follow_up_nums.append(num)
+            findings["follow_up_tickets"] = follow_up_nums
         # Look for comment URL in log
-        url_m = re.search(r"https://github\.com/[^\s]+/issues/\d+#issuecomment-\d+", log_text)
-        if url_m:
-            comment_url = url_m.group(0)
+        url_cm = re.search(r"https://github\.com/[^\s]+/issues/\d+#issuecomment-\d+", log_text)
+        if url_cm:
+            comment_url = url_cm.group(0)
     except Exception as e:
         structured_log.warn("reviewer_log_parse_error", f"[reviewer] could not parse reviewer log: {e}", exc=str(e))
 
@@ -4600,6 +4921,179 @@ def _dispatch_reviewer(
         f"{len(findings['follow_up_tickets'])} follow-up tickets",
         flush=True,
     )
+
+
+# ── Follow-up ticket enrichment (BA + estimator) ─────────────────────────────
+
+_ESTIMATE_ISSUE_SCRIPT_SM = REPO_ROOT / "services" / "sprint_manager" / "estimate_issue.py"
+
+_BA_REWRITE_PROMPT = """\
+You are a Business Analyst. Issue #{issue_num} in repository {repo} was created by an \
+automated code reviewer as a follow-up ticket. Its body may be minimal or unstructured.
+
+Your task:
+1. Read the issue with: gh issue view {issue_num} --repo {repo} --json title,body
+2. Rewrite the body to the standard Commander format with ALL of these sections:
+   ## What & Why
+   ## Acceptance Criteria
+   (at least 2 checkbox items: - [ ] ...)
+   ## UAT Test Steps
+   ## Out of Scope
+3. Update the issue body on GitHub: gh issue edit {issue_num} --repo {repo} --body-file <tmpfile>
+   (write the new body to a temp file first, then pass via --body-file)
+
+Do not change the title, labels, milestone, or any field other than the body.
+Do not ask clarifying questions. Produce the structured body directly from the existing content.
+"""
+
+_BA_DISPATCH_TIMEOUT = int(os.environ.get("COMMANDER_BA_REWRITE_TIMEOUT", "300"))
+_ESTIMATOR_DISPATCH_TIMEOUT = int(os.environ.get("COMMANDER_ESTIMATOR_TIMEOUT", "300"))
+
+
+def _dispatch_ba_for_followup(
+    issue_num: int,
+    eff_repo: str,
+    cfg: Optional[object],
+    state: Optional[object],
+) -> bool:
+    """Invoke the BA agent to rewrite a follow-up ticket body to standard format.
+
+    Returns True on success, False on failure.  Failures are printed but not raised
+    so callers can continue processing other tickets.
+    """
+    cwd_path = cfg.worktree_coder if cfg else Path.cwd()
+    logs_dir = cfg.logs_dir if cfg else Path.cwd()
+    log_path = logs_dir / f"ba-rewrite-{issue_num}.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+
+    prompt = _BA_REWRITE_PROMPT.format(issue_num=issue_num, repo=eff_repo)
+
+    cmd = [
+        "claude",
+        "--model", "claude-sonnet-4-6",
+        "--dangerously-skip-permissions",
+    ]
+    ba_persona = _load_agent_persona("ba", cwd_path)
+    if ba_persona:
+        cmd += ["--append-system-prompt", ba_persona]
+    cmd += ["-p", prompt]
+
+    sub_env = os.environ.copy()
+    sub_env.pop("ANTHROPIC_API_KEY", None)
+    sub_env["CLAUDE_AGENT_ROLE"] = "ba"
+    if eff_repo:
+        sub_env["COMMANDER_PROJECT"] = eff_repo
+
+    print(f"  [ba-rewrite] Rewriting body for follow-up #{issue_num} ...", flush=True)
+    try:
+        with log_path.open("w") as log_f:
+            proc = subprocess.Popen(
+                cmd,
+                stdout=log_f,
+                stderr=log_f,
+                cwd=str(cwd_path),
+                env=sub_env,
+            )
+    except FileNotFoundError:
+        print(f"  [ba-rewrite] WARNING: claude CLI not found — skipping BA rewrite for #{issue_num}", flush=True)
+        return False
+
+    try:
+        rc = proc.wait(timeout=_BA_DISPATCH_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait()
+        print(f"  [ba-rewrite] WARNING: BA rewrite for #{issue_num} timed out after {_BA_DISPATCH_TIMEOUT}s", flush=True)
+        return False
+
+    if rc != 0:
+        print(f"  [ba-rewrite] WARNING: BA rewrite for #{issue_num} exited with code {rc}", flush=True)
+        return False
+
+    print(f"  [ba-rewrite] Done for #{issue_num}", flush=True)
+    return True
+
+
+def _dispatch_estimator_for_followup(
+    issue_num: int,
+    eff_repo: str,
+    cfg: Optional[object],
+) -> bool:
+    """Run estimate_issue.py on a follow-up ticket to apply size label and write estimate file.
+
+    Returns True on success, False on failure.
+    """
+    if not _ESTIMATE_ISSUE_SCRIPT_SM.exists():
+        print(f"  [estimator] WARNING: estimate_issue.py not found — skipping #{issue_num}", flush=True)
+        return False
+
+    cmd = [
+        sys.executable,
+        str(_ESTIMATE_ISSUE_SCRIPT_SM),
+        "--issue", str(issue_num),
+        "--repo", eff_repo,
+        "--save-comment",
+        "--save-label",
+    ]
+
+    print(f"  [estimator] Estimating follow-up #{issue_num} ...", flush=True)
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=_ESTIMATOR_DISPATCH_TIMEOUT,
+        )
+    except subprocess.TimeoutExpired:
+        print(f"  [estimator] WARNING: estimation for #{issue_num} timed out after {_ESTIMATOR_DISPATCH_TIMEOUT}s", flush=True)
+        return False
+
+    if result.returncode != 0:
+        print(f"  [estimator] WARNING: estimation for #{issue_num} exited with code {result.returncode}", flush=True)
+        return False
+
+    print(f"  [estimator] Done for #{issue_num}", flush=True)
+    return True
+
+
+def _enrich_followup_tickets(
+    follow_up_tickets: list,
+    eff_repo: str,
+    cfg: Optional[object],
+    state: Optional[object],
+) -> None:
+    """Run BA agent + estimator on each reviewer follow-up ticket.
+
+    Processes tickets sequentially: BA then estimator per ticket.
+    A failure on one ticket is logged and does not abort the remaining tickets.
+    """
+    if not follow_up_tickets:
+        return
+
+    print(
+        f"  [enrichment] Enriching {len(follow_up_tickets)} follow-up ticket(s): "
+        + ", ".join(f"#{n}" for n in follow_up_tickets),
+        flush=True,
+    )
+
+    for issue_num in follow_up_tickets:
+        try:
+            _dispatch_ba_for_followup(issue_num, eff_repo, cfg, state)
+        except Exception as exc:
+            print(
+                f"  [enrichment] WARNING: BA rewrite failed for #{issue_num}: {exc}",
+                flush=True,
+            )
+
+        try:
+            _dispatch_estimator_for_followup(issue_num, eff_repo, cfg)
+        except Exception as exc:
+            print(
+                f"  [enrichment] WARNING: estimator failed for #{issue_num}: {exc}",
+                flush=True,
+            )
+
+    print(f"  [enrichment] Done enriching {len(follow_up_tickets)} follow-up ticket(s).", flush=True)
 
 
 # ── Issue Estimator integration ───────────────────────────────────────────────
@@ -4933,7 +5427,7 @@ def run_sprint(
     preflight_approved: Optional[list[int]] = None,
     gate_scope: str = "changed",
     token_budget: int = 0,
-    skip_estimator: bool = False,
+    skip_estimator: bool = True,
     rerun_manifest: Optional[dict] = None,
 ) -> tuple[SprintSummary, SprintState]:
     """Main sprint loop -- processes backlog issues sequentially.
@@ -5786,6 +6280,9 @@ def run_sprint(
                 repo=eff_repo,
             )
             _transition_safe(num, _TicketState.NEEDS_REWORK, actor="sprint_manager", repo_name=eff_repo)
+            # Post Gate Failure Analysis comment + sprint log entry for each gate
+            # failure recorded during the fix loop (issue #701).
+            _publish_gate_failure_analyses(num, repo_name=eff_repo, cfg=cfg)
             _neon_ticket_status(label, num, "failed", _eff_sprints_dir)
             state.save(state_path)
             _post_sprint_status(state, api_url=api_url, project=eff_repo)
@@ -5833,6 +6330,17 @@ def run_sprint(
         project=eff_repo or label,
         action_id=_run_id,
     )
+
+    # Run documentor once for all merged tickets, before reviewer (issue #697)
+    _eff_documentor = cfg.documentor_enabled if cfg is not None else False
+    if _eff_documentor and summary.merged:
+        _merged_issue_nums = [
+            int(s.lstrip("#").split()[0])
+            for s in summary.merged
+            if s.lstrip("#").split()[0].isdigit()
+        ]
+        if _merged_issue_nums:
+            _run_documentor(_merged_issue_nums, label, eff_repo, cfg=cfg)
 
     return summary, state
 
@@ -6003,11 +6511,11 @@ def main() -> None:
         help="Skip the post-summary documenter agent entirely.",
     )
 
-    # Estimator control (issue #166) — hidden debug-only flag, not shown in --help
+    # Estimator control (issue #166, #696) — default skips; --no-skip-estimator opts in
     p.add_argument(
         "--skip-estimator",
-        action="store_true",
-        default=False,
+        action=argparse.BooleanOptionalAction,
+        default=True,
         help=argparse.SUPPRESS,
     )
 
@@ -6301,6 +6809,16 @@ def main() -> None:
         except Exception as e_rev:
             structured_log.error("reviewer_failed", f"reviewer stage failed: {e_rev}", exc=str(e_rev))
             state.reviewer_status = "failed"
+
+        # Enrich follow-up tickets with BA rewrite + estimator
+        follow_ups = (state.reviewer_findings or {}).get("follow_up_tickets", [])
+        if follow_ups and eff_repo:
+            _enrich_followup_tickets(
+                follow_up_tickets = follow_ups,
+                eff_repo          = eff_repo,
+                cfg               = cfg,
+                state             = state,
+            )
 
     print("\n=== Sprint Summary ===")
     print(f"Processed: {', '.join(summary.processed) or 'none'}")

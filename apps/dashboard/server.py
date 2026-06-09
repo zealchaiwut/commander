@@ -7786,7 +7786,11 @@ def get_sprint_finish_card(sprint_label: str, project: str):
                 "summary_issue_url": None,
                 "summary_issue_num": None,
             }
-        raise HTTPException(404, detail=f"Finish card data not available for {sprint_label!r}")
+        return {
+            "sprint_label":  sprint_label,
+            "sprint_number": sprint_number,
+            "state":         "no_data",
+        }
 
     try:
         fc_state_data = json.loads(state_path.read_text(encoding="utf-8"))

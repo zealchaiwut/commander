@@ -10522,7 +10522,13 @@ function _smgmtTicketRowHtml(ticket, label, elapsedSecs = null) {
   const hasEstimate = !!sizeLabel;
   const sizeValue = sizeLabel ? sizeLabel.name.replace('size-', '') : '';
   const sizeAttr = sizeValue ? ` data-size="${escHtml(sizeValue)}"` : '';
-  const sizePillHtml = sizeValue
+  // Compute estimateBadgeHtml first; when JSON cache has the size, it renders the
+  // interactive estimate button — sizePillHtml must be suppressed in that case to
+  // prevent a duplicate size indicator appearing (issue #674).
+  const estimateBadgeHtml = _smgmtEstimateBadgeHtml(ticket.number);
+  const _cachedEst = Object.prototype.hasOwnProperty.call(_estDataCache, ticket.number)
+    ? _estDataCache[ticket.number] : undefined;
+  const sizePillHtml = (sizeValue && !(_cachedEst && _cachedEst.size))
     ? `<span class="smgmt-ticket-size-pill" title="≈${_sizeMinutes(sizeValue)} min">${escHtml(sizeValue)}</span>`
     : '';
   const staleBadgeHtml = (ticket.estimate_stale && sizeLabel)
@@ -10531,7 +10537,6 @@ function _smgmtTicketRowHtml(ticket, label, elapsedSecs = null) {
          onclick="event.stopPropagation();_smgmtReEstimate(${ticket.number},this)"
          onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();_smgmtReEstimate(${ticket.number},this);}">stale</button>`
     : '';
-  const estimateBadgeHtml = _smgmtEstimateBadgeHtml(ticket.number);
   const reEstBtnHtml = (hasEstimate && _smgmtEstimatorAvailable && !ticket.estimate_stale)
     ? `<button class="smgmt-reestimate-btn" tabindex="0" title="Re-estimate this ticket"
          onclick="event.stopPropagation();_smgmtReEstimate(${ticket.number},this)"

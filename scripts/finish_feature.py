@@ -90,13 +90,9 @@ def main():
         )
         sys.exit(1)
 
-    # Ensure local branch is up to date
-    ok, _ = _try("git", "show-ref", "--verify", "--quiet", f"refs/heads/{branch}")
-    if not ok:
-        _run("git", "checkout", "--track", f"origin/{branch}")
-    else:
-        _run("git", "checkout", branch)
-        _try("git", "pull", "origin", branch)
+    # Do NOT check out the feature branch locally — it may be checked out in
+    # another worktree (e.g. the coder worktree), which causes git to refuse.
+    # origin/<branch> is already current after the fetch above.
 
     print(f"Merging {branch} → {target}…")
 
@@ -110,7 +106,7 @@ def main():
 
     merge_msg = f"Merge {branch} into {target} (issue #{args.issue})"
     result = subprocess.run(
-        ["git", "merge", "--no-ff", branch, "-m", merge_msg],
+        ["git", "merge", "--no-ff", f"origin/{branch}", "-m", merge_msg],
         capture_output=True, text=True,
     )
 
@@ -143,8 +139,9 @@ def main():
     _run("git", "push", "origin", target)
     print(f"Pushed {target}.")
 
-    # Clean up feature branch
-    _try("git", "branch", "-d", branch)
+    # Clean up feature branch — use -D (force) since the branch may be checked
+    # out in the coder worktree, where -d would be rejected by git.
+    _try("git", "branch", "-D", branch)
     _try("git", "push", "origin", "--delete", branch)
 
     print(f"✅  Merged {branch} into {target}")

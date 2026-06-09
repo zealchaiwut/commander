@@ -425,3 +425,81 @@ class TestLogOutputIncludesExitCode:
         assert "pass" in output.lower() or "0" in output, (
             f"Expected pass/exit-0 indication in tester output, got: {output!r}"
         )
+
+
+# ---------------------------------------------------------------------------
+# AC-2 (regression): finish_feature.py must use origin/<branch> for merge
+# so that a branch locked in the coder worktree doesn't block the merge.
+# ---------------------------------------------------------------------------
+
+class TestFinishFeatureUsesRemoteRef:
+    """finish_feature.py merges origin/<branch>, not the local branch ref.
+
+    The feature branch is always checked out in the coder worktree while the
+    tester runs.  git refuses `git checkout <branch>` when that branch is locked
+    in another worktree, causing finish_feature.py to exit non-zero and sprint_manager
+    to return TESTER_REJECTED even though all tests passed.
+
+    Regression guard: the merge command must reference the remote tracking ref.
+    """
+
+    def test_finish_feature_merges_origin_ref(self, tmp_path):
+        """finish_feature.py subprocess call must use `origin/<branch>` not `<branch>`."""
+        import importlib.util
+        import types
+
+        ff_path = REPO_ROOT / "scripts" / "finish_feature.py"
+        assert ff_path.exists(), f"finish_feature.py not found at {ff_path}"
+
+        spec = importlib.util.spec_from_file_location("finish_feature", ff_path)
+        ff = importlib.util.module_from_spec(spec)
+
+        calls: list = []
+
+        def fake_run(*cmd):
+            calls.append(list(cmd))
+            if cmd == ("git", "rev-parse", "HEAD"):
+                raise subprocess.CalledProcessError(1, cmd)
+            return ""
+
+        def fake_try(*cmd):
+            if cmd[0] == "git" and cmd[1] == "show-ref":
+                # target branch exists locally
+                return True, ""
+            calls.append(list(cmd))
+            return True, "abc123"
+
+        def fake_find_branch(issue_num):
+            return f"feature/{issue_num}-slug"
+
+        with (
+            patch("builtins.print"),
+            patch("sys.exit"),
+            patch("sys.argv", ["finish_feature.py", "--issue", "659", "--target-branch", "sprint/sprint-52"]),
+        ):
+            spec.loader.exec_module(ff)
+
+            with (
+                patch.object(ff, "_run", side_effect=fake_run),
+                patch.object(ff, "_try", side_effect=fake_try),
+                patch.object(ff, "find_branch", side_effect=fake_find_branch),
+                patch.object(ff, "github_client", MagicMock()),
+                patch("subprocess.run") as mock_subrun,
+            ):
+                mock_subrun.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+                try:
+                    ff.main()
+                except (SystemExit, Exception):
+                    pass
+
+        # The subprocess.run call for git merge must use origin/<branch>
+        merge_calls = [c for c in mock_subrun.call_args_list if c.args and "merge" in c.args[0]]
+        assert merge_calls, "git merge was not called via subprocess.run"
+        merge_cmd = merge_calls[0].args[0]
+        assert any("origin/" in arg for arg in merge_cmd), (
+            f"merge command must use origin/<branch>, got: {merge_cmd}"
+        )
+        assert not any(arg == "feature/659-slug" for arg in merge_cmd), (
+            f"merge command must NOT use bare local branch ref, got: {merge_cmd}"
+        )

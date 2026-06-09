@@ -503,3 +503,77 @@ class TestFinishFeatureUsesRemoteRef:
         assert not any(arg == "feature/659-slug" for arg in merge_cmd), (
             f"merge command must NOT use bare local branch ref, got: {merge_cmd}"
         )
+
+
+# ---------------------------------------------------------------------------
+# AC-2 (regression): handle_post_tester must git fetch --prune before checking
+# branch state so stale remote-tracking refs don't cause false TESTER_REJECTED.
+# ---------------------------------------------------------------------------
+
+class TestFetchBeforeBranchCheck:
+    """handle_post_tester fetches remote state before checking branch presence.
+
+    Without this fetch, a race causes false TESTER_REJECTED (issue #659):
+      1. Tester's finish_feature.py deletes origin/feature/<N>-* and pushes merge.
+      2. sprint_manager's stale remote-tracking refs still show the branch.
+      3. _is_branch_merged_into returns False (origin/<target> not yet updated).
+      4. Auto-merge call fails — branch already deleted on origin.
+    """
+
+    def test_fetch_called_before_find_branch(self, tmp_path):
+        """git fetch --prune origin is called before _find_feature_branch."""
+        cfg_stub = MagicMock()
+        cfg_stub.worktree_tester = tmp_path / "tester"
+        cfg_stub.worktree_tester_app = tmp_path / "tester" / "apps" / "dashboard"
+        cfg_stub.repo_name = None
+        cfg_stub.api_url = None
+        cfg_stub.documentor_enabled = False
+        cfg_stub.logs_dir = tmp_path / "logs"
+
+        call_order: list[str] = []
+
+        def track_find(issue_num):
+            call_order.append("find")
+            return None  # branch gone after fetch
+
+        def track_try(*args, **kw):
+            if tuple(args[:3]) == ("git", "fetch", "--prune"):
+                call_order.append("fetch")
+            return (True, "", "")
+
+        with (
+            patch.object(sm, "_try", side_effect=track_try),
+            patch.object(sm, "_find_feature_branch", side_effect=track_find),
+            patch.object(sm, "_was_feature_merged_via_log", return_value=True),
+            patch.object(sm, "_run_quality_gates", return_value=[
+                sm.GateResult(gate="pytest", passed=True, skipped=True),
+            ]),
+            patch.object(sm, "_transition_safe"),
+            patch.object(sm, "_post_success_comment"),
+            patch.object(sm, "_post_agent_event"),
+            patch.object(sm, "sidecar_path", return_value=tmp_path / "sidecar.json"),
+            patch.object(sm, "REPO_ROOT", tmp_path),
+        ):
+            ok, msg, cat = sm.handle_post_tester(
+                issue_num=659,
+                tester_exit_code=0,
+                skip_gates=True,
+                gate_pytest=False,
+                gate_lint=False,
+                gate_merge_preview=False,
+                gate_typecheck=False,
+                gate_design=False,
+                cfg=cfg_stub,
+                target_branch="sprint/sprint-52",
+            )
+
+        assert "fetch" in call_order, (
+            "handle_post_tester must call git fetch --prune origin before checking branches"
+        )
+        assert "find" in call_order, "handle_post_tester must call _find_feature_branch"
+        fetch_idx = call_order.index("fetch")
+        find_idx = call_order.index("find")
+        assert fetch_idx < find_idx, (
+            f"fetch must precede _find_feature_branch; call order: {call_order}"
+        )
+        assert ok, f"Expected success; msg={msg}"

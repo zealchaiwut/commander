@@ -2231,6 +2231,13 @@ def handle_post_tester(
                 f"Issue #{issue_num}: tester exited {tester_exit_code}, skipping gates",
                 FailureCategory.CRASH)
 
+    # Fetch latest remote state before checking branch presence.  Without this,
+    # sprint_manager sees stale remote-tracking refs where the feature branch
+    # still appears even after the tester's finish_feature.py deleted it, and
+    # _is_branch_merged_into returns False because origin/<target> doesn't yet
+    # include the new merge commit — causing a false TESTER_REJECTED (issue #659).
+    _try("git", "fetch", "--prune", "origin")
+
     # Determine merge status by branch presence and git log — no label check.
     # sprint_manager is the sole UAT label writer via transition().
     found_branch = _find_feature_branch(issue_num)

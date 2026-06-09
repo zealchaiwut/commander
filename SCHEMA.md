@@ -131,3 +131,16 @@ Audit log for project-level events recorded by `record_project_event()` in `apps
 | `data` | text | JSON-encoded payload with before/after values or other context; nullable |
 
 Indexes: `(project, created_at DESC)`, `(project, target)`, `(action_id)`.
+
+## API Endpoints
+
+### Analytics
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/project/{slug}/analytics` | Serve the analytics HTML page for a project |
+| `GET` | `/api/sprint-progress` | Current sprint progress summary (tickets done/total, elapsed) |
+| `GET` | `/api/projects/{slug}/analytics/metrics` | Aggregated sprint metrics: velocity, throughput, cycle time by size |
+| `GET` | `/api/projects/{slug}/analytics/calibration` | Estimate accuracy data: estimated vs actual durations per size bucket |
+
+Query params for calibration endpoint: `since` (ISO date), `until` (ISO date), `sprint` (label string) — all optional.

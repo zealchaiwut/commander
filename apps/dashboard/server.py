@@ -3812,6 +3812,20 @@ def _sprint_goal_path(project_root: Path, sprint_label: str) -> Path:
     return _commander_dir(project_root) / "sprints" / f"{sprint_label}-goal.txt"
 
 
+def _build_sprint_subprocess_env() -> dict:
+    """Build the subprocess environment for sprint_manager.
+
+    Strips ANTHROPIC_API_KEY and resolves DB_PATH to an absolute path so that
+    sprint_manager (which runs from the coder clone CWD) writes to the same
+    database that the server reads from, regardless of relative path differences.
+    """
+    env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
+    db_val = env.get("DB_PATH", "")
+    if db_val and not os.path.isabs(db_val):
+        env["DB_PATH"] = str(Path(db_val).resolve())
+    return env
+
+
 def _sprint_plan_path(project_root: Path, sprint_label: str) -> Path:
     return _commander_dir(project_root) / "sprints" / f"{sprint_label}-plan.json"
 
@@ -5179,7 +5193,7 @@ def run_sprint_managed(request: Request, body: SprintMgmtRunBody):
     except Exception:
         pass
 
-    stripped_env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
+    stripped_env = _build_sprint_subprocess_env()
     goal_path = _sprint_goal_path(project_root, body.sprint_label)
     if goal_path.exists():
         stripped_env["SPRINT_GOAL"] = goal_path.read_text(encoding="utf-8").strip()
@@ -8006,7 +8020,7 @@ def rerun_sprint(sprint_label: str, project: str, body: SprintRerunV2Body):
     except Exception:
         pass
 
-    stripped_env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
+    stripped_env = _build_sprint_subprocess_env()
     goal_path = _sprint_goal_path(project_root, sprint_label)
     if not goal_path.exists():
         goal_path = _sprint_goal_path(project_root, sub_label)

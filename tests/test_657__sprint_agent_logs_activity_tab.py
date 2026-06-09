@@ -570,3 +570,98 @@ class TestExistingEntriesNotBroken:
         assert resp.status_code == 200
         events = resp.json()
         assert all(e["source"] == "agent" for e in events)
+
+
+# ── AC-2+AC-7: sprint_cancelled must include duration ────────────────────────
+
+class TestSprintCancelledDuration:
+    """sprint_cancelled events must carry duration so AC-2 (failure events show duration)
+    and AC-7 (metrics fields present) are satisfied."""
+
+    def test_sprint_cancelled_detail_has_duration(self, event_capture, monkeypatch):
+        """run_sprint() emits sprint_cancelled with duration when SystemExit raised."""
+        coder_calls = [0]
+
+        def coder_that_cancels(*args, **kwargs):
+            coder_calls[0] += 1
+            if coder_calls[0] > 1:
+                raise SystemExit(130)
+            return (True, None)
+
+        monkeypatch.setattr(sm, "_dispatch_coder", coder_that_cancels)
+        with pytest.raises(SystemExit):
+            _run_sprint(label="sprint-dur-test", repo_name="owner/myrepo")
+
+        cancelled = [c for c in event_capture if c["type"] == "sprint_cancelled"]
+        assert cancelled, "sprint_cancelled event must be emitted on SystemExit"
+        for ev in cancelled:
+            assert "duration" in ev["detail"], (
+                "sprint_cancelled detail must include 'duration' for AC-2 (failure events "
+                "show duration) and AC-7 (metrics fields). "
+                f"Got detail: {ev['detail']}"
+            )
+            assert isinstance(ev["detail"]["duration"], (int, float)), (
+                "duration must be a number (elapsed seconds)"
+            )
+
+
+# ── DB_PATH subprocess fix: server must pass absolute DB_PATH ─────────────────
+
+class TestSubprocessDbPathAbsolute:
+    """The server must resolve DB_PATH to an absolute path before passing it to the
+    sprint_manager subprocess.  Without this, sprint_manager writes to a DB relative
+    to the coder clone CWD (different from the UAT/prd server's DB), so events
+    never appear in the Activity tab.
+
+    Implementation: server.py must expose _build_sprint_subprocess_env() which
+    resolves the DB_PATH value from os.environ to an absolute path.
+    """
+
+    def test_build_sprint_subprocess_env_exists_in_server(self):
+        """server.py must expose _build_sprint_subprocess_env() helper."""
+        for mod in list(sys.modules.keys()):
+            if mod in ("server", "db"):
+                del sys.modules[mod]
+        import server as srv
+        assert hasattr(srv, "_build_sprint_subprocess_env"), (
+            "server.py must define _build_sprint_subprocess_env() — "
+            "it builds the subprocess env for sprint_manager with an absolute DB_PATH"
+        )
+
+    def test_build_sprint_subprocess_env_resolves_db_path_to_absolute(self, monkeypatch):
+        """_build_sprint_subprocess_env() returns absolute DB_PATH even when env has relative."""
+        for mod in list(sys.modules.keys()):
+            if mod in ("server", "db"):
+                del sys.modules[mod]
+        monkeypatch.setenv("DB_PATH", "./commander.db")
+        import server as srv
+        env = srv._build_sprint_subprocess_env()
+        assert "DB_PATH" in env
+        assert os.path.isabs(env["DB_PATH"]), (
+            f"DB_PATH in subprocess env must be absolute, got: {env['DB_PATH']!r}. "
+            "Relative DB_PATH causes sprint_manager to write to a different DB than the server."
+        )
+
+    def test_build_sprint_subprocess_env_keeps_absolute_db_path_unchanged(self, monkeypatch):
+        """If DB_PATH is already absolute, _build_sprint_subprocess_env() keeps it."""
+        for mod in list(sys.modules.keys()):
+            if mod in ("server", "db"):
+                del sys.modules[mod]
+        abs_path = "/tmp/some/absolute/commander.db"
+        monkeypatch.setenv("DB_PATH", abs_path)
+        import server as srv
+        env = srv._build_sprint_subprocess_env()
+        assert env["DB_PATH"] == abs_path
+
+    def test_build_sprint_subprocess_env_strips_anthropic_api_key(self, monkeypatch):
+        """ANTHROPIC_API_KEY must be stripped from the subprocess env (existing behavior)."""
+        for mod in list(sys.modules.keys()):
+            if mod in ("server", "db"):
+                del sys.modules[mod]
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-secret-key")
+        monkeypatch.setenv("DB_PATH", "/tmp/test.db")
+        import server as srv
+        env = srv._build_sprint_subprocess_env()
+        assert "ANTHROPIC_API_KEY" not in env, (
+            "ANTHROPIC_API_KEY must be stripped from subprocess env"
+        )

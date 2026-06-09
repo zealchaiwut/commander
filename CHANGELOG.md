@@ -1,5 +1,13 @@
 # Changelog
 
+## Sprint 53
+
+- [#687](https://github.com/zealchaiwut/commander/issues/687) Document finish-card API breaking change (404 → 200 no_data) — 2026-06-09
+  - `GET /api/sprints/{label}/finish-card` now always returns HTTP 200.
+  - When a sprint has never been run it returns `state: "no_data"` instead of HTTP 404.
+  - Clients must check `response.state === "no_data"` rather than HTTP status codes.
+  - Full response shapes (no_data / running / completed / has_rework / cancelled) documented in `docs/features/api.md`.
+
 ## Sprint 52
 
 - [#672](https://github.com/zealchaiwut/commander/issues/672) Fix API Error on Finish Card Submission — 2026-06-09

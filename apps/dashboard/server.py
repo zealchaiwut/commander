@@ -2065,7 +2065,13 @@ def _resolve_project_slug(slug: str) -> str:
     """
     try:
         all_projects = projects_module.load_projects()
-    except Exception:
+    except Exception as exc:
+        _slog.warn(
+            "resolve_project_slug.load_failed",
+            f"load_projects raised while resolving slug '{slug}': {exc}",
+            slug=slug,
+            error=str(exc),
+        )
         all_projects = []
 
     matched = next(

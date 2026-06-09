@@ -12401,6 +12401,7 @@ function _smgmtToggleSelect(number, checked) {
 
 // Click a ticket row to select/deselect it (toggle). Shift+click extends the
 // selection from the last-clicked ticket to this one, like a file picker.
+// Ctrl/Cmd+click toggles individual items without disturbing other selections.
 // Clicks on the checkbox/link/menu don't reach here (they stopPropagation).
 function _smgmtRowClick(event, number, label) {
   const container = label
@@ -12421,6 +12422,15 @@ function _smgmtRowClick(event, number, label) {
       if (sel) sel.removeAllRanges();  // clear the text highlight shift-click makes
       return;
     }
+  }
+
+  if (event.ctrlKey || event.metaKey) {
+    // Ctrl/Cmd+click: toggle this ticket without clearing other selections.
+    const nowSelected = !_smgmtSelectedIssues.has(number);
+    _smgmtSetSelected(number, nowSelected);
+    _smgmtLastSelectedNum = nowSelected ? number : null;
+    _smgmtUpdateSelectionUI();
+    return;
   }
 
   // Plain click: toggle this ticket on/off.
@@ -13409,11 +13419,35 @@ async function _smgmtCloseIssueConfirm() {
 // ── Backlog drag handlers ──────────────────────────────────────────────────
 
 function _smgmtBacklogTicketDragStart(event, issueNum) {
-  _smgmtDragTicket = { number: issueNum, fromSprint: null, multi: null };
-  event.dataTransfer.effectAllowed = 'move';
-  event.dataTransfer.setData('text/plain', String(issueNum));
-  const el = document.getElementById(`smgmt-ticket-${issueNum}`);
-  if (el) setTimeout(() => el.classList.add('dragging-ticket'), 0);
+  const isChecked = _smgmtSelectedIssues.has(issueNum);
+
+  if (isChecked && _smgmtSelectedIssues.size > 1) {
+    // Multi-ticket drag from backlog: pack all selected issue numbers
+    const nums = Array.from(_smgmtSelectedIssues);
+    _smgmtDragTicket = { number: issueNum, fromSprint: null, multi: nums, multiSprints: 1 };
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', nums.join(','));
+
+    const pill = document.getElementById('smgmt-drag-pill');
+    if (pill) {
+      pill.textContent = `Moving ${nums.length} tickets`;
+      pill.style.top = (event.clientY - 20) + 'px';
+      pill.style.left = (event.clientX + 12) + 'px';
+    }
+    setTimeout(() => {
+      nums.forEach(n => {
+        const el = document.getElementById(`smgmt-ticket-${n}`);
+        if (el) el.classList.add('dragging-ticket');
+      });
+    }, 0);
+  } else {
+    // Single-ticket drag (unchecked row or single selection)
+    _smgmtDragTicket = { number: issueNum, fromSprint: null, multi: null };
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', String(issueNum));
+    const el = document.getElementById(`smgmt-ticket-${issueNum}`);
+    if (el) setTimeout(() => el.classList.add('dragging-ticket'), 0);
+  }
   // Show ghost pane
   _smgmtGhostShow();
 }

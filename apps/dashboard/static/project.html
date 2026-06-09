@@ -5084,6 +5084,11 @@
             <i class="ti ti-chart-bar"></i>Analytics<i class="ti ti-chevron-down stab-caret"></i>
           </button>
           <div class="stab-dropdown" id="stab-dropdown-analytics">
+            <a class="stab" id="stab-analytics-page" role="menuitem"
+               href="#" onclick="return false;"
+               style="text-decoration:none">
+              <i class="ti ti-chart-histogram"></i>Analytics page
+            </a>
             <button class="stab" role="tab" id="stab-timeline"
                     aria-selected="false" onclick="switchTab('timeline')">
               <i class="ti ti-timeline-event"></i>Timeline
@@ -7615,6 +7620,10 @@ async function init() {
 
   _slug = slug;
   _activeTab = tab;
+
+  // Wire analytics page link now that slug is known
+  const _anlPageLink = document.getElementById('stab-analytics-page');
+  if (_anlPageLink) _anlPageLink.href = '/project/' + encodeURIComponent(slug) + '/analytics';
 
   initTheme();
   updateSidebarFooter();

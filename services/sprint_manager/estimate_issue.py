@@ -167,6 +167,13 @@ Output ONLY the JSON object. No other text."""
         "-p", prompt,
     ]
 
+    # Strip ANTHROPIC_API_KEY so the claude CLI authenticates via the Claude
+    # subscription (keychain) instead of the API key. The configured key has no
+    # credit balance, so leaving it set makes claude exit non-zero with
+    # "Credit balance is too low" — surfaced upstream as a bogus model_error.
+    # Matches how the dashboard strips the key for coder/tester subprocesses.
+    _agent_env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
+
     # Total attempts = initial + _ESTIMATOR_MAX_RETRIES (e.g. 4 = 1 + 3).
     total_attempts = _ESTIMATOR_MAX_RETRIES + 1
     for attempt in range(1, total_attempts + 1):
@@ -178,6 +185,7 @@ Output ONLY the JSON object. No other text."""
                 capture_output=True,
                 text=True,
                 timeout=180,
+                env=_agent_env,
             )
         except subprocess.TimeoutExpired:
             error_type = "network_error"

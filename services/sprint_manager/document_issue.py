@@ -127,14 +127,22 @@ def _build_prompt(
     readme_head: str,
     claude_md_head: str,
     mode: str,
+    guide_contexts: Optional[dict[str, str]] = None,
 ) -> str:
+    guides_section = ""
+    if guide_contexts:
+        parts = []
+        for rel_path, content in guide_contexts.items():
+            parts.append(f"GUIDE FILE ({rel_path}):\n{content or '(empty)'}")
+        guides_section = "\n\n" + "\n\n".join(parts)
     return (
         f"ISSUE #{issue_num}: {issue_title}\n\n"
         f"ISSUE BODY:\n{issue_body}\n\n"
         f"FEATURE DIFF:\n{diff or '(no diff available)'}\n\n"
         f"CURRENT README (first 200 lines):\n{readme_head or '(not found)'}\n\n"
         f"CURRENT CLAUDE.MD (first 100 lines):\n{claude_md_head or '(not found)'}\n\n"
-        f"MODE: {mode}\n\n"
+        f"MODE: {mode}"
+        f"{guides_section}\n\n"
         "Output ONLY the JSON object as described in your instructions."
     )
 
@@ -176,6 +184,63 @@ def _parse_json_output(raw: str) -> dict:
     if start == -1 or end == -1:
         raise ValueError(f"No JSON object found in agent output:\n{raw[:500]}")
     return json.loads(stripped[start:end + 1])
+
+
+# ── guide helpers ─────────────────────────────────────────────────────────────
+
+_KNOWN_GUIDE_NAMES = [
+    "docs/quickstart.md",
+    "docs/QUICKSTART.md",
+    "docs/tutorial.md",
+    "docs/TUTORIAL.md",
+]
+
+_USER_VISIBLE_NEGATIVE = [
+    "no user-visible change",
+    "no user-facing change",
+    "pure refactor",
+    "internal refactor",
+]
+
+
+def _discover_guide_files(git_root: Path, guide_glob: Optional[str] = None) -> list[Path]:
+    """Return existing guide files from known paths + optional glob."""
+    found: list[Path] = []
+    seen: set[Path] = set()
+    for rel in _KNOWN_GUIDE_NAMES:
+        p = git_root / rel
+        if p.exists() and p not in seen:
+            found.append(p)
+            seen.add(p)
+    if guide_glob:
+        for p in sorted(git_root.glob(guide_glob)):
+            if p.is_file() and p not in seen:
+                found.append(p)
+                seen.add(p)
+    return found
+
+
+def _is_user_visible(issue: dict) -> bool:
+    """Return True if the ticket introduces a user-visible change."""
+    combined = f"{issue.get('title', '')} {issue.get('body', '')}".lower()
+    return not any(marker in combined for marker in _USER_VISIBLE_NEGATIVE)
+
+
+def _apply_guide_changes(
+    guide_changes: dict[str, list[dict]],
+    git_root: Path,
+) -> list[Path]:
+    """Apply per-file guide changes. Returns list of modified guide Paths."""
+    modified: list[Path] = []
+    for rel_path, changes in guide_changes.items():
+        guide_path = git_root / rel_path
+        if not guide_path.exists():
+            print(f"  [documentor] WARNING: guide not found, skipping: {rel_path}")
+            continue
+        changed = _apply_doc_changes(changes, guide_path, rel_path)
+        if changed:
+            modified.append(guide_path)
+    return modified
 
 
 def _append_changelog_entry(
@@ -246,6 +311,10 @@ def _apply_change(file_path: Path, change: dict) -> bool:
 
     text = file_path.read_text(encoding="utf-8")
 
+    # Idempotency: skip if content already present
+    if content in text:
+        return False
+
     if change_type == "add_section":
         # Append a new section at end of file
         if section and section.strip("#").strip() in text:
@@ -312,16 +381,28 @@ def _apply_doc_changes(
     return modified
 
 
-def _commit_doc_changes(issue_num: int, cwd: Path) -> None:
-    """Stage and commit README.md, CLAUDE.md, and CHANGELOG.md changes to the feature branch."""
+def _commit_doc_changes(issue_num: int, cwd: Path, extra_files: Optional[list[Path]] = None) -> None:
+    """Stage and commit doc changes to the feature branch.
+
+    Commits README.md, CLAUDE.md, CHANGELOG.md, and any modified guide files.
+    """
     files = ["README.md", "CLAUDE.md", "CHANGELOG.md"]
+    # Add relative paths for any extra guide files
+    for p in (extra_files or []):
+        try:
+            rel = str(p.relative_to(cwd))
+            files.append(rel)
+        except ValueError:
+            files.append(str(p))
+
     staged = []
     for f in files:
-        path = cwd / f
+        path = cwd / f if not Path(f).is_absolute() else Path(f)
+        rel = str(path.relative_to(cwd)) if path.is_absolute() else f
         if path.exists():
-            ok, _ = _try_run("git", "diff", "--quiet", f, cwd=cwd)
+            ok, _ = _try_run("git", "diff", "--quiet", rel, cwd=cwd)
             if not ok:  # has unstaged changes
-                staged.append(f)
+                staged.append(rel)
 
     if not staged:
         print("  [documentor] no doc changes to commit")
@@ -358,6 +439,7 @@ def run_documentor(
     skip_changelog: bool = False,
     git_root: Optional[Path] = None,
     base_branch: str = "develop",
+    guide_glob: Optional[str] = None,
 ) -> dict:
     """Main documentor logic. Returns the parsed agent output dict.
 
@@ -392,6 +474,16 @@ def run_documentor(
     readme_head    = _read_head(git_root / "README.md", 200)
     claude_md_head = _read_head(git_root / "CLAUDE.md", 100)
 
+    # Discover guide files and read their content for context
+    guide_files = _discover_guide_files(git_root, guide_glob)
+    guide_contexts: dict[str, str] = {}
+    if guide_files:
+        print(f"  [documentor] discovered {len(guide_files)} guide file(s): "
+              f"{[str(g.relative_to(git_root)) for g in guide_files]}")
+        for gf in guide_files:
+            rel = str(gf.relative_to(git_root))
+            guide_contexts[rel] = _read_head(gf, 100)
+
     # Adjust mode based on skip flags
     if skip_readme and skip_uat_comment:
         print("  [documentor] both --skip-readme and --skip-uat-comment set — nothing to do")
@@ -401,8 +493,12 @@ def run_documentor(
     if skip_uat_comment:
         mode = "readme"
 
-    # Build and run prompt
-    prompt = _build_prompt(issue_num, title, body, diff, readme_head, claude_md_head, mode)
+    # Build and run prompt (include guide contexts when user-visible)
+    prompt_guides = guide_contexts if _is_user_visible(issue) else None
+    prompt = _build_prompt(
+        issue_num, title, body, diff, readme_head, claude_md_head, mode,
+        guide_contexts=prompt_guides,
+    )
     print(f"  [documentor] invoking agent (model: claude-haiku-4-5) ...")
     raw_output = _invoke_agent(prompt)
 
@@ -440,9 +536,17 @@ def run_documentor(
     if not skip_changelog:
         changelog_modified = _append_changelog_entry(issue_num, title, repo, git_root)
 
+    # Apply guide changes (quickstart, tutorial, and any glob-matched guides)
+    guide_files_modified: list[Path] = []
+    if mode in ("readme", "both") and not skip_readme and _is_user_visible(issue):
+        guide_files_modified = _apply_guide_changes(
+            result.get("guide_changes", {}),
+            git_root,
+        )
+
     # Commit all doc changes together
-    if readme_modified or claude_modified or changelog_modified:
-        _commit_doc_changes(issue_num, cwd=git_root)
+    if readme_modified or claude_modified or changelog_modified or guide_files_modified:
+        _commit_doc_changes(issue_num, cwd=git_root, extra_files=guide_files_modified)
 
     # Post UAT comment
     if mode in ("uat", "both") and not skip_uat_comment:
@@ -466,6 +570,8 @@ def main() -> None:
                    help="Skip posting UAT comment to issue")
     p.add_argument("--skip-changelog", action="store_true",
                    help="Skip appending entry to CHANGELOG.md")
+    p.add_argument("--guide-glob", default=None,
+                   help="Glob pattern for additional guide files (e.g. 'docs/guides/*.md')")
     p.add_argument("--mode", default="both", choices=["readme", "uat", "both"],
                    help="What to produce (default: both)")
     p.add_argument("--base-branch", default="develop",
@@ -501,6 +607,7 @@ def main() -> None:
         skip_changelog   = args.skip_changelog,
         git_root         = git_root,
         base_branch      = args.base_branch,
+        guide_glob       = args.guide_glob,
     )
 
     readme_count  = len(result.get("readme_changes", []))

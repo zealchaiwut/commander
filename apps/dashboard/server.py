@@ -67,6 +67,7 @@ load_dotenv(Path(__file__).parent / ".env")
 
 import db
 import github_client
+import github_events_sync
 import projects as projects_module
 
 # Structured event logging (services/logging.py at repo root)
@@ -112,6 +113,21 @@ except Exception:
     _sync_projects_module = None  # type: ignore[assignment]
     _SYNC_PROJECTS_AVAILABLE = False
 
+try:
+    from services.sprint_manager.settings_sync import (
+        load_local_snapshot as _ss_load_local,
+        load_neon_snapshot as _ss_load_neon,
+        compute_diff as _ss_compute_diff,
+        is_already_in_sync as _ss_already_in_sync,
+        apply_upload as _ss_apply_upload,
+        apply_fetch as _ss_apply_fetch,
+        get_sync_status as _ss_get_status,
+        save_sync_status as _ss_save_status,
+    )
+    _SYNC_SETTINGS_AVAILABLE = True
+except Exception:
+    _SYNC_SETTINGS_AVAILABLE = False
+
 # Per-machine kill switch for the Neon/Postgres layer. While its schema is
 # unmigrated, the writes error out (e.g. relation "projects" does not exist) and
 # block sprint creation. Setting COMMANDER_DISABLE_NEON makes the dashboard run
@@ -124,6 +140,16 @@ if os.environ.get("COMMANDER_DISABLE_NEON", "").strip().lower() in ("1", "true",
     _SYNC_PROJECTS_AVAILABLE = False
 
 from sizing import SIZE_TO_MINUTES as _SIZE_TO_MINUTES, letter_from_minutes as _letter_from_minutes, minutes_from_letter as _minutes_from_letter
+
+try:
+    _SCAFFOLD_SCRIPTS_DIR = Path(__file__).parent.parent.parent / "scripts"
+    if str(_SCAFFOLD_SCRIPTS_DIR) not in sys.path:
+        sys.path.insert(0, str(_SCAFFOLD_SCRIPTS_DIR))
+    from scaffold_docs import scaffold_data as _scaffold_data
+    _SCAFFOLD_AVAILABLE = True
+except ImportError:
+    _scaffold_data = None  # type: ignore[assignment]
+    _SCAFFOLD_AVAILABLE = False
 
 try:
     import mis_sizing as _mis_sizing
@@ -507,6 +533,30 @@ def _restore_sprint_statuses_on_startup() -> None:
                 )
                 attached += 1
 
+            # Second pass: pick up running sprints whose sprint_manager posted
+            # to a different port (so *-status.json was never written).
+            for state_file in sprints_dir.glob("*-state.json"):
+                sprint_label = state_file.name.removesuffix("-state.json")
+                key = (proj["repo"], sprint_label)
+                if key in _sprint_statuses:
+                    continue  # already loaded from status.json above
+                if not _is_sprint_running(project_root, sprint_label):
+                    continue
+                try:
+                    payload = json.loads(state_file.read_text(encoding="utf-8"))
+                except (OSError, json.JSONDecodeError) as exc:
+                    print(
+                        f"[startup-restore] could not read {state_file.name}: {exc}"
+                    )
+                    skipped += 1
+                    continue
+                _sprint_statuses[key] = payload
+                print(
+                    f"[startup-restore] re-attached (state.json fallback) to running sprint"
+                    f" '{sprint_label}' on {proj['repo']}"
+                )
+                attached += 1
+
         except Exception as exc:
             print(f"[startup-restore] error scanning project {proj.get('repo')}: {exc}")
 
@@ -742,6 +792,7 @@ async def lifespan(app: FastAPI):
     _validate_github_repos()
     _sweep_orphan_pid_files()
     _restore_sprint_statuses_on_startup()
+    await _mark_inflight_jobs_failed()
     # Sync projects.json → Neon (non-blocking; warn on failure, never fatal)
     if _SYNC_PROJECTS_AVAILABLE:
         try:
@@ -1074,13 +1125,20 @@ async def projects_redirect(path: str):
 
 # ── Slug-based project routes (/project/<slug>/...) ───────────────────────────
 
-_VALID_PROJECT_TABS = {"sprint-mgmt", "tickets", "logs", "sprint-history", "status"}
+_VALID_PROJECT_TABS = {"sprint-mgmt", "tickets", "logs", "sprint-history", "status", "metrics", "notes", "settings"}
 
 
 @app.get("/project/{slug}")
 async def project_slug_no_tab(slug: str):
     """Redirect bare /project/<slug> to /project/<slug>/sprint-mgmt."""
     return RedirectResponse(url=f"/project/{slug}/sprint-mgmt", status_code=302)
+
+
+@app.get("/project/{slug}/analytics")
+async def project_slug_analytics(slug: str):
+    """Retired standalone analytics page — analytics is now an in-chrome tab
+    (with the project nav). Redirect old links to the in-chrome Analytics tab."""
+    return RedirectResponse(url=f"/project/{slug}/metrics", status_code=302)
 
 
 @app.get("/project/{slug}/{tab}")
@@ -1206,11 +1264,68 @@ def get_backup_status():
     return _backup_module.get_backup_status()
 
 
+_seen_agent_sessions: set[str] = set()
+
+
+def _agent_project_from_name(agent_name: str | None) -> str | None:
+    """Derive the full owner/repo project key from an agent name string.
+
+    Agent names are formatted as 'role·repo·branch·#short'. We extract the
+    repo label (second component) and match it against the loaded projects list.
+    Returns None if no match is found.
+    """
+    if not agent_name:
+        return None
+    parts = agent_name.split("·")
+    if len(parts) < 2:
+        return None
+    repo_label = parts[1]
+    try:
+        all_projects = projects_module.load_projects()
+    except Exception:
+        return None
+    matched = next(
+        (p["repo"] for p in all_projects if p["repo"].split("/")[-1] == repo_label),
+        None,
+    )
+    return matched
+
+
 @app.post("/api/agent-event")
 async def receive_event(request: Request, event: AgentEvent):
     _slog.event("route.entry", project="dashboard", request_id=request.state.request_id, route="/api/agent-event", method="POST", event_type=event.event_type)
-    db.upsert_agent(event.session_id, event.working_dir, event.status, event.tool_name, event.name)
-    db.add_event(event.session_id, event.event_type, event.model_dump())
+
+    session_id = event.session_id or "unknown"
+    project = _agent_project_from_name(event.name)
+    actor = event.name or session_id
+    role = (event.name.split("·")[0] if event.name and "·" in event.name else None)
+
+    if project:
+        if event.event_type == "tool_use" and session_id not in _seen_agent_sessions:
+            _seen_agent_sessions.add(session_id)
+            db.record_event(
+                project=project,
+                source="agent",
+                actor=actor,
+                type="agent_started",
+                target=session_id,
+                detail={"role": role, "working_dir": event.working_dir},
+                action_id=session_id,
+            )
+        if event.status in ("done", "timed_out", "error") or event.event_type == "agent_stop":
+            _seen_agent_sessions.discard(session_id)
+            db.record_event(
+                project=project,
+                source="agent",
+                actor=actor,
+                type="agent_finished",
+                target=session_id,
+                detail={"status": event.status, "role": role},
+                action_id=session_id,
+            )
+
+    db.upsert_agent(session_id, event.working_dir, event.status, event.tool_name, event.name)
+    db.add_event(session_id, event.event_type, event.model_dump())
     await broadcast({"type": "update", "event": event.model_dump()})
     return {"ok": True}
 
@@ -1379,17 +1494,25 @@ def get_sprint_nav_status(repo: str = ""):
     if not all_sprint_issues:
         return {"has_sprint": False}
 
+    # Fetch finished summaries once — used both to skip finished sprints when
+    # picking "current" and to populate the panel summary link below.
+    finished_summaries = _finished_sprint_summaries(repo_name)
+
     _ACTIVE_COLS = {"in-progress", "sit", "uat", "needs-rework"}
     current = None
     raw_issues: list[dict] = []
-    # Prefer the lowest-numbered sprint that has active (non-backlog) work
+    # Prefer the lowest-numbered UNFINISHED sprint that has active (non-backlog) work.
+    # Skipping finished sprints prevents a higher-numbered running sprint from being
+    # eclipsed by a lower-numbered sprint whose only remaining work is UAT sign-off.
     for n in sorted(all_sprint_issues.keys()):
+        if f"sprint-{n}" in finished_summaries:
+            continue  # sprint already finished — skip when looking for running sprint
         issues = all_sprint_issues[n]
         if any(i.get("column") in _ACTIVE_COLS for i in issues):
             current = n
             raw_issues = issues
             break
-    # Fall back to highest-numbered sprint with any issues
+    # Fall back to highest-numbered sprint with any issues (covers finished-only state)
     if current is None:
         current = max(all_sprint_issues.keys())
         raw_issues = all_sprint_issues[current]
@@ -1402,7 +1525,7 @@ def get_sprint_nav_status(repo: str = ""):
         i for i in raw_issues
         if not _NON_WORK_LABELS & {lbl.get("name", "") for lbl in i.get("labels", [])}
     ]
-    summary_issue = _finished_sprint_summaries(repo_name).get(f"sprint-{current}")
+    summary_issue = finished_summaries.get(f"sprint-{current}")
 
     columns = {"backlog": 0, "in-progress": 0, "sit": 0, "uat": 0, "done": 0, "needs-rework": 0}
     for i in work_issues:
@@ -1420,6 +1543,119 @@ def get_sprint_nav_status(repo: str = ""):
         "columns": columns,
         "summary_issue": summary_issue,
     }
+
+
+def _sprint_progress_file_path(project: str) -> Optional[Path]:
+    """Return the path to the persisted sprint-progress JSON file for a project."""
+    if not project:
+        return None
+    project_root = _project_root_path(project)
+    return _commander_dir(project_root) / "runtime" / "sprint-progress.json"
+
+
+@app.get("/api/sprint-progress")
+def get_sprint_progress(project: str = "", repo: str = ""):
+    """Unified sprint progress endpoint — single source of truth for all three pill components.
+
+    Priority:
+    1. In-memory live status from sprint_manager (most recent, pushed via POST /api/sprint-status)
+    2. Persisted JSON file (survives server restart)
+    3. GitHub-backed fallback via sprint-nav-status logic
+
+    Persists the result to .commander/runtime/sprint-progress.json so the UI
+    can re-hydrate from disk when the server restarts or live data is not yet
+    available.
+    """
+    repo_name = repo or (project or None)
+
+    # ── 1. Try live in-memory status ─────────────────────────────────────────
+    running = _all_sprints_running()
+    if project:
+        running = [r for r in running if r["project"] == project]
+
+    for r in running:
+        key = (r["project"], r["sprint_label"])
+        status = _sprint_statuses.get(key, {})
+        issues = status.get("issues", [])
+        if not issues:
+            continue
+        sprint_number = status.get("sprint_number")
+        if sprint_number is None:
+            label = r["sprint_label"]
+            m = re.search(r"\d+", label)
+            sprint_number = int(m.group()) if m else 0
+
+        done = sum(
+            1 for i in issues
+            if i.get("status") in ("done", "skipped", "failed")
+        )
+        total = len(issues)
+
+        result = {
+            "has_sprint": True,
+            "sprint_label": r["sprint_label"],
+            "sprint": sprint_number,
+            "done": done,
+            "total": total,
+            "run_state": "running",
+            "source": "live",
+            "fetched_at": datetime.now(timezone.utc).isoformat(),
+        }
+        _persist_sprint_progress(project or r["project"], result)
+        return result
+
+    # ── 2. Try persisted file ────────────────────────────────────────────────
+    file_project = project or ""
+    progress_path = _sprint_progress_file_path(file_project)
+    if progress_path and progress_path.exists():
+        try:
+            cached = json.loads(progress_path.read_text(encoding="utf-8"))
+            if cached.get("has_sprint"):
+                return cached
+        except (OSError, json.JSONDecodeError):
+            pass
+
+    # ── 3. GitHub fallback ───────────────────────────────────────────────────
+    try:
+        gh_data = get_sprint_nav_status(repo=repo or (project or ""))
+    except Exception:
+        return {"has_sprint": False}
+
+    if not gh_data.get("has_sprint"):
+        return {"has_sprint": False}
+
+    sprint_num = gh_data.get("sprint", 0)
+    gh_done = (gh_data.get("done") or 0) + (gh_data.get("uat") or 0)
+    gh_total = gh_data.get("total") or 0
+    gh_state = gh_data.get("state", "running")
+
+    result = {
+        "has_sprint": True,
+        "sprint_label": f"sprint-{sprint_num}",
+        "sprint": sprint_num,
+        "done": gh_done,
+        "total": gh_total,
+        "run_state": gh_state,
+        "columns": gh_data.get("columns", {}),
+        "source": "github",
+        "fetched_at": datetime.now(timezone.utc).isoformat(),
+    }
+    _persist_sprint_progress(file_project, result)
+    return result
+
+
+def _persist_sprint_progress(project: str, data: dict) -> None:
+    """Write sprint progress data atomically to .commander/runtime/sprint-progress.json."""
+    path = _sprint_progress_file_path(project)
+    if path is None:
+        return
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        os.replace(str(tmp), str(path))
+    except OSError:
+        pass
 
 
 @app.get("/api/sprint-nav-summary")
@@ -1604,6 +1840,21 @@ def add_project(body: NewProjectBody):
         raise _gh_error(e)
 
 
+@app.delete("/api/projects/{slug}/settings")
+def delete_project_settings(slug: str):
+    """Clear the project-level settings override.
+
+    After deletion GET /api/projects/{slug}/settings returns global defaults.
+    Returns 404 if the project slug is not found.
+    Must be registered before DELETE /api/projects/{owner}/{repo_name} to avoid
+    first-match routing collision on two-segment paths.
+    """
+    repo = _resolve_project_slug(slug)
+    _settings_repo.delete_setting("project", APP_CONFIG_KEY, project=repo)
+    effective = _settings_repo.get_setting(APP_CONFIG_KEY, project=repo)
+    return build_effective_response(effective)
+
+
 @app.delete("/api/projects/{owner}/{repo_name}")
 async def remove_project(owner: str, repo_name: str, body: RemoveProjectBody):
     import shutil
@@ -1719,6 +1970,610 @@ def get_running_sprint(project: str):
     return Response(status_code=204)
 
 
+_VALID_EVENT_SOURCES = {"agent", "dashboard", "github"}
+
+
+@app.get("/api/projects/{slug}/events")
+def get_project_events(
+    slug: str,
+    source: Optional[str] = None,
+    target: Optional[str] = None,
+    since: Optional[str] = None,
+    until: Optional[str] = None,
+    limit: int = 100,
+):
+    """Return structured events for a project, newest-first.
+
+    Filters: source (agent|dashboard|github), target (exact), since/until (ISO date), limit.
+    404 — unknown project slug.
+    400 — invalid source value.
+    """
+    # Validate source before any DB work
+    if source is not None and source not in _VALID_EVENT_SOURCES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid source {source!r}. Must be one of: {', '.join(sorted(_VALID_EVENT_SOURCES))}",
+        )
+
+    # Resolve slug → project name stored in events table
+    try:
+        all_projects = projects_module.load_projects()
+    except Exception:
+        all_projects = []
+
+    matched = next(
+        (p for p in all_projects
+         if p["repo"].split("/")[-1] == slug or p["repo"] == slug),
+        None,
+    )
+    if matched is None:
+        raise HTTPException(status_code=404, detail=f"Project '{slug}' not found")
+
+    # The events table stores project as the full repo path (owner/repo)
+    project_key = matched["repo"]
+
+    query = "SELECT timestamp, source, actor, type, target, action_id, detail FROM events WHERE project = ?"
+    params: list = [project_key]
+
+    if source is not None:
+        query += " AND source = ?"
+        params.append(source)
+    if target is not None:
+        query += " AND target = ?"
+        params.append(target)
+    if since is not None:
+        query += " AND timestamp >= ?"
+        params.append(since)
+    if until is not None:
+        # include the full day by appending T23:59:59 when only a date is given
+        until_bound = until if "T" in until else f"{until}T23:59:59"
+        query += " AND timestamp <= ?"
+        params.append(until_bound)
+
+    query += " ORDER BY timestamp DESC LIMIT ?"
+    params.append(limit)
+
+    with db.get_conn() as conn:
+        rows = conn.execute(query, params).fetchall()
+
+    result = []
+    for row in rows:
+        d = dict(row)
+        try:
+            d["detail"] = json.loads(d["detail"])
+        except (TypeError, ValueError):
+            pass
+        result.append(d)
+
+    return result
+
+
+# ── Settings API (issue #639) ────────────────────────────────────────────────
+
+import services.sprint_manager.settings_repo as _settings_repo
+from services.sprint_manager.settings_schema import (
+    APP_CONFIG_KEY,
+    SECRET_FIELDS,
+    KNOWN_FIELDS,
+    build_effective_response,
+)
+
+
+def _resolve_project_slug(slug: str) -> str:
+    """Resolve a project slug to the full repo string (owner/repo).
+
+    Matches by last path component or exact match (mirrors get_project_events pattern).
+    Raises HTTPException 404 if not found.
+    """
+    try:
+        all_projects = projects_module.load_projects()
+    except Exception as exc:
+        _slog.warn(
+            "resolve_project_slug.load_failed",
+            f"load_projects raised while resolving slug '{slug}': {exc}",
+            slug=slug,
+            error=str(exc),
+        )
+        all_projects = []
+
+    matched = next(
+        (p for p in all_projects
+         if p["repo"].split("/")[-1] == slug or p["repo"] == slug),
+        None,
+    )
+    if matched is None:
+        raise HTTPException(status_code=404, detail=f"Project '{slug}' not found")
+    return matched["repo"]
+
+
+def _validate_settings_body(body: dict) -> None:
+    """Validate a PUT settings request body.
+
+    Raises HTTPException 422 for secret fields, 400 for unknown fields.
+    """
+    for key in body:
+        if key in SECRET_FIELDS:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"Field '{key}' is a secret and cannot be written via this endpoint. "
+                    "Use the dedicated secret management endpoint."
+                ),
+            )
+    unknown = [k for k in body if k not in KNOWN_FIELDS]
+    if unknown:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown settings field(s): {', '.join(sorted(unknown))}. "
+                   f"Allowed fields: {', '.join(sorted(KNOWN_FIELDS))}",
+        )
+
+
+@app.get("/api/settings")
+def get_global_settings():
+    """Return effective global settings.
+
+    Non-secret fields are returned as-is with defaults applied.
+    Secret fields appear as boolean presence flags (<field>_set).
+    """
+    stored = _settings_repo.get_setting_scoped("global", APP_CONFIG_KEY)
+    return build_effective_response(stored)
+
+
+@app.put("/api/settings")
+def put_global_settings(body: dict):
+    """Persist a global settings override.
+
+    Only the supplied keys are written; existing keys not in the body are preserved.
+    Returns 400 for unknown keys, 422 for secret fields.
+    """
+    _validate_settings_body(body)
+    current = _settings_repo.get_setting_scoped("global", APP_CONFIG_KEY)
+    merged = {**current, **body}
+    _settings_repo.set_setting("global", APP_CONFIG_KEY, merged)
+    return build_effective_response(merged)
+
+
+@app.get("/api/projects/{slug}/settings")
+def get_project_settings(slug: str):
+    """Return effective project settings (project overrides merged over global).
+
+    Non-secret fields returned with defaults applied; secrets as boolean flags.
+    Returns 404 when the project slug does not exist.
+    """
+    repo = _resolve_project_slug(slug)
+    stored = _settings_repo.get_setting(APP_CONFIG_KEY, project=repo)
+    return build_effective_response(stored)
+
+
+@app.put("/api/projects/{slug}/settings")
+def put_project_settings(slug: str, body: dict):
+    """Persist a project-level settings override.
+
+    Only the supplied keys are written as a project override.
+    Global settings are not affected.
+    Returns 400 for unknown keys, 422 for secret fields, 404 if project not found.
+    """
+    repo = _resolve_project_slug(slug)
+    _validate_settings_body(body)
+    current_project_override = _settings_repo.get_setting_scoped("project", APP_CONFIG_KEY, project=repo)
+    merged = {**current_project_override, **body}
+    _settings_repo.set_setting("project", APP_CONFIG_KEY, merged, project=repo)
+    effective = _settings_repo.get_setting(APP_CONFIG_KEY, project=repo)
+    return build_effective_response(effective)
+
+
+# ── Settings sync (issue #644) ───────────────────────────────────────────────
+
+
+@app.get("/api/settings/sync/status")
+def get_settings_sync_status():
+    """Return last-synced timestamp for settings sync.
+
+    Returns {"last_synced": str|null} where str is ISO 8601 UTC.
+    """
+    ts = _ss_get_status(_SYNC_STATUS_FILE) if _SYNC_SETTINGS_AVAILABLE else None
+    return {"last_synced": ts}
+
+
+class _SyncDiffBody(BaseModel):
+    direction: str  # "upload" or "fetch"
+
+
+@app.post("/api/settings/sync/diff")
+def post_settings_sync_diff(body: _SyncDiffBody):
+    """Compute a settings diff without applying any writes.
+
+    direction="upload" — compares local files → Neon
+    direction="fetch"  — compares Neon → local files
+
+    Returns {"diff": [...], "already_in_sync": bool}.
+    Each diff item has: status ("added"|"removed"|"unchanged"), key, value.
+    """
+    if body.direction not in ("upload", "fetch"):
+        raise HTTPException(status_code=400, detail="direction must be 'upload' or 'fetch'")
+    if not _SYNC_SETTINGS_AVAILABLE:
+        raise HTTPException(status_code=503, detail="settings sync module unavailable")
+
+    try:
+        local_snap = _ss_load_local(_PROJECTS_FILE, sprint_yaml_path=_SPRINT_YAML_PATH)
+        neon_snap = _ss_load_neon(_settings_repo)
+        diff = _ss_compute_diff(local_snap, neon_snap, body.direction)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    return {
+        "diff": diff,
+        "already_in_sync": _ss_already_in_sync(diff),
+    }
+
+
+class _SyncCommitBody(BaseModel):
+    direction: str  # "upload" or "fetch"
+
+
+@app.post("/api/settings/sync/commit")
+def post_settings_sync_commit(body: _SyncCommitBody):
+    """Apply a settings sync after user confirms the diff preview.
+
+    direction="upload" — writes changed values to Neon; local files unchanged
+    direction="fetch"  — writes changed values to local files; Neon unchanged
+
+    Returns {"ok": true, "synced_at": str (ISO 8601 UTC)}.
+    """
+    if body.direction not in ("upload", "fetch"):
+        raise HTTPException(status_code=400, detail="direction must be 'upload' or 'fetch'")
+    if not _SYNC_SETTINGS_AVAILABLE:
+        raise HTTPException(status_code=503, detail="settings sync module unavailable")
+
+    try:
+        local_snap = _ss_load_local(_PROJECTS_FILE, sprint_yaml_path=_SPRINT_YAML_PATH)
+        neon_snap = _ss_load_neon(_settings_repo)
+        diff = _ss_compute_diff(local_snap, neon_snap, body.direction)
+
+        if body.direction == "upload":
+            _ss_apply_upload(diff, _settings_repo)
+        else:
+            _ss_apply_fetch(diff, _PROJECTS_FILE, _SPRINT_YAML_PATH)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    synced_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    _ss_save_status(_SYNC_STATUS_FILE, synced_at)
+
+    return {"ok": True, "synced_at": synced_at}
+
+
+# ── Filesystem browser (issue #643) ──────────────────────────────────────────
+
+_FS_BROWSE_ROOT: Path = Path.home()
+
+
+@app.get("/api/fs/list")
+def fs_list(path: str = ""):
+    """Return immediate subdirectories of the given path.
+
+    The path must resolve to within _FS_BROWSE_ROOT.  Traversal attempts
+    (../, symlinks escaping root, absolute paths outside root) return 403.
+    Returns {"entries": [{"name": str, "path": str}], "current": str}.
+    """
+    root = _FS_BROWSE_ROOT.resolve()
+
+    if not path or path.strip() in ("~", ""):
+        target = root
+    else:
+        # Handle ~ prefix
+        if path.startswith("~/"):
+            path = str(root / path[2:])
+        elif path == "~":
+            path = str(root)
+
+        candidate = Path(path)
+        # Normalize ../ etc without following symlinks
+        normalized = Path(os.path.normpath(str(candidate)))
+
+        # Must be under browse root before any symlink resolution
+        if not normalized.is_relative_to(root):
+            raise HTTPException(status_code=403, detail="Forbidden")
+
+        # Walk each component; reject if any symlink escapes root.
+        # This catches escape-then-reenter chains that resolve() misses.
+        cur = root
+        for part in normalized.relative_to(root).parts:
+            cur = cur / part
+            if cur.is_symlink():
+                try:
+                    link_resolved = cur.resolve()
+                    if not link_resolved.is_relative_to(root):
+                        raise HTTPException(status_code=403, detail="Forbidden")
+                except OSError:
+                    raise HTTPException(status_code=403, detail="Forbidden")
+
+        target = normalized
+
+    if not target.exists() or not target.is_dir():
+        return {"entries": [], "current": str(target)}
+
+    entries = []
+    try:
+        for item in sorted(target.iterdir()):
+            if item.is_symlink():
+                continue  # never follow symlinks out of browse root
+            if not item.is_dir():
+                continue
+            # Skip hidden dirs
+            if item.name.startswith("."):
+                continue
+            entries.append({"name": item.name, "path": str(item)})
+    except OSError as exc:
+        logger.info("[fs_list] error listing %s: %s", target, exc)
+
+    return {"entries": entries, "current": str(target)}
+
+
+# ── Environment paths (issue #643) ────────────────────────────────────────────
+
+def _derive_project_environments(repo: str) -> dict[str, str]:
+    """Best-effort guess of env paths from the on-disk project layout when none
+    are saved, so the Settings form prefills instead of showing placeholders.
+
+    Nested layout: ~/dev/<name>/{prd,uat,coder,tester}
+    Flat layout:   ~/dev/<name> (prd) + ~/dev/<name>-{coder,tester}, ~/dev/<name>/uat
+    Only paths that actually exist on disk are returned.
+    """
+    name = repo.split("/")[-1]
+    dev = _PROJECTS_BASE  # ~/dev
+    found: dict[str, str] = {}
+    nested = dev / name
+    for env in ("prd", "uat", "coder", "tester"):
+        cand = nested / env
+        if cand.is_dir():
+            found[env] = str(cand)
+    if found:
+        return found
+    # Flat layout fallback
+    flat = {
+        "prd": dev / name,
+        "uat": dev / name / "uat",
+        "coder": dev / f"{name}-coder",
+        "tester": dev / f"{name}-tester",
+    }
+    for env, cand in flat.items():
+        if cand.is_dir():
+            found[env] = str(cand)
+    return found
+
+
+@app.get("/api/projects/{slug}/environments")
+def get_project_environments(slug: str):
+    """Return environment paths stored in projects.json for this project.
+
+    When none are saved, auto-derive them from the on-disk layout so the form
+    prefills (the user can edit + save to persist)."""
+    repo = _resolve_project_slug(slug)
+    envs = projects_module.get_project_environments(repo)
+    if not envs:
+        envs = _derive_project_environments(repo)
+    return {
+        "environments": [
+            {"env": env, "local_directory": local_dir}
+            for env, local_dir in envs.items()
+        ]
+    }
+
+
+class _EnvEntry(BaseModel):
+    env: str
+    local_directory: str
+
+
+class _PutEnvironmentsBody(BaseModel):
+    environments: list[_EnvEntry]
+
+
+@app.put("/api/projects/{slug}/environments")
+def put_project_environments(slug: str, body: _PutEnvironmentsBody):
+    """Validate and persist environment paths for this project.
+
+    Each path must (a) exist on disk and (b) be a git working clone.
+    Returns 422 with a descriptive error for the first invalid entry.
+    Returns 404 if the project slug is not found.
+    """
+    repo = _resolve_project_slug(slug)
+
+    errors = []
+    for entry in body.environments:
+        env = entry.env.strip()
+        local_dir = entry.local_directory.strip()
+        if not env:
+            errors.append("env name must not be blank")
+            continue
+        p = Path(local_dir)
+        if not p.exists():
+            errors.append(
+                f"'{env}': path '{local_dir}' does not exist on this machine"
+            )
+            continue
+        if not (p / ".git").exists():
+            errors.append(
+                f"'{env}': path '{local_dir}' is not a git repository (.git not found)"
+            )
+            continue
+        result = subprocess.run(
+            ["git", "rev-parse", "--is-inside-work-tree"],
+            cwd=str(p),
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            errors.append(
+                f"'{env}': path '{local_dir}' is not a valid git repository"
+                " (git rev-parse failed — repo may be corrupted or misconfigured)"
+            )
+            continue
+
+    if errors:
+        raise HTTPException(status_code=422, detail="; ".join(errors))
+
+    envs_dict = {e.env.strip(): e.local_directory.strip() for e in body.environments}
+    projects_module.save_project_environments(repo, envs_dict)
+    return {"ok": True, "environments": envs_dict}
+
+
+# ── Scaffold docs (issue #681) ────────────────────────────────────────────────
+
+def _scaffold_resolve_working_clone(slug: str) -> tuple[str, Path]:
+    """Resolve project slug → (repo, working_clone_path) with traversal guard.
+
+    Returns the main working clone directory and validates it is inside _PROJECTS_BASE.
+    Raises HTTPException 404 for unknown slug, 400 if path escapes _PROJECTS_BASE.
+    """
+    repo = _resolve_project_slug(slug)
+    project_root = _project_root_path(repo)
+    working_clone = _main_clone_path(project_root)
+    resolved = working_clone.resolve()
+    base_resolved = _PROJECTS_BASE.resolve()
+    if not str(resolved).startswith(str(base_resolved) + "/") and resolved != base_resolved:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Resolved project root '{resolved}' is outside the configured projects directory '{base_resolved}'",
+        )
+    return repo, working_clone
+
+
+@app.get("/api/projects/{slug}/docs/scaffold/check")
+def get_scaffold_check(slug: str):
+    """Check whether the project's working clone has the standard docs structure.
+
+    Runs scaffold_docs --check (no writes). Returns:
+      { compliant, missing, stray, project_root }
+    where missing/stray are lists of relative paths.
+    """
+    if not _SCAFFOLD_AVAILABLE:
+        raise HTTPException(status_code=503, detail="scaffold_docs module unavailable")
+    repo, working_clone = _scaffold_resolve_working_clone(slug)
+    project_name = working_clone.name
+    if project_name in ("main", "prd") and working_clone.parent != working_clone:
+        project_name = working_clone.parent.name
+    result = _scaffold_data(working_clone, project_name, check=True)
+    return {
+        "compliant": result["compliant"],
+        "missing": result["missing"],
+        "stray": result["stray"],
+        "project_root": str(working_clone),
+    }
+
+
+class _ScaffoldApplyBody(BaseModel):
+    confirm: bool = False
+
+
+@app.post("/api/projects/{slug}/docs/scaffold/apply")
+def post_scaffold_apply(slug: str, body: _ScaffoldApplyBody):
+    """Apply the standard docs scaffold to the project's working clone.
+
+    Requires { confirm: true } in the request body; returns 400 otherwise.
+    Existing files are NEVER overwritten. Returns { created, compliant }.
+    """
+    if not body.confirm:
+        raise HTTPException(status_code=400, detail="confirm must be true to apply scaffold")
+    if not _SCAFFOLD_AVAILABLE:
+        raise HTTPException(status_code=503, detail="scaffold_docs module unavailable")
+    repo, working_clone = _scaffold_resolve_working_clone(slug)
+    project_name = working_clone.name
+    if project_name in ("main", "prd") and working_clone.parent != working_clone:
+        project_name = working_clone.parent.name
+    result = _scaffold_data(working_clone, project_name, check=False)
+    return {
+        "created": result["created"],
+        "compliant": result["compliant"],
+    }
+
+
+# ── Branch cleanup (issue #634) ───────────────────────────────────────────────
+
+_PROTECTED_BRANCHES: frozenset[str] = frozenset({"develop", "master", "main", "attachments"})
+_STALE_BRANCH_RE = re.compile(r"^(feat|feature|sprint)/")
+
+
+@app.get("/api/projects/{owner}/{repo_name}/branches/stale")
+def get_stale_branches(owner: str, repo_name: str):
+    """Return sorted list of feat/* or sprint/* branch names that are both
+    merged (their PR was merged) and still exist on the remote.
+    develop, master, main, and attachments are always excluded.
+    """
+    repo = f"{owner}/{repo_name}"
+
+    # 1. Collect heads of merged PRs matching the allowed patterns
+    merged_heads: set[str] = set()
+    try:
+        result = subprocess.run(
+            ["gh", "pr", "list", "--repo", repo, "--state", "merged",
+             "--limit", "200", "--json", "headRefName"],
+            capture_output=True, text=True, check=False,
+        )
+        for pr in json.loads(result.stdout or "[]"):
+            head = pr.get("headRefName", "")
+            if _STALE_BRANCH_RE.match(head) and head not in _PROTECTED_BRANCHES:
+                merged_heads.add(head)
+    except Exception:
+        pass
+
+    if not merged_heads:
+        return []
+
+    # 2. List currently existing branches that match the patterns
+    existing: set[str] = set()
+    try:
+        result = subprocess.run(
+            ["gh", "api", f"repos/{repo}/branches", "--paginate", "--jq", ".[].name"],
+            capture_output=True, text=True, check=False,
+        )
+        for name in result.stdout.splitlines():
+            name = name.strip()
+            if name and _STALE_BRANCH_RE.match(name) and name not in _PROTECTED_BRANCHES:
+                existing.add(name)
+    except Exception:
+        pass
+
+    return sorted(merged_heads & existing)
+
+
+@app.delete("/api/projects/{owner}/{repo_name}/branches/{branch:path}", status_code=200)
+def delete_project_branch(owner: str, repo_name: str, branch: str):
+    """Delete a feat/* or sprint/* branch from the remote.
+    Returns 400 for protected branches (develop/master/main/attachments) or
+    branches not matching the allowed patterns.
+    """
+    if branch in _PROTECTED_BRANCHES:
+        raise HTTPException(status_code=400,
+                            detail=f"Cannot delete protected branch: {branch!r}")
+    if not _STALE_BRANCH_RE.match(branch):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Only feat/*, feature/*, or sprint/* branches may be deleted. Got: {branch!r}",
+        )
+
+    repo = f"{owner}/{repo_name}"
+    try:
+        result = subprocess.run(
+            ["gh", "api", "--method", "DELETE",
+             f"repos/{repo}/git/refs/heads/{branch}"],
+            capture_output=True, text=True, check=False,
+        )
+        if result.returncode != 0:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to delete {branch!r}: {result.stderr.strip()}",
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    return {"ok": True, "branch": branch}
+
+
 @app.post("/api/projects/{owner}/{repo_name}/approve-batch")
 async def approve_batch(owner: str, repo_name: str):
     repo = f"{owner}/{repo_name}"
@@ -1768,8 +2623,8 @@ async def init_project(body: InitProjectBody):
     # AC3: expand ~ in projects_dir
     projects_dir = Path(body.projects_dir or "~/dev").expanduser()
 
-    # Build subprocess command
-    script_path = Path(__file__).parent / "scripts" / "init_project.py"
+    # Build subprocess command (scripts/ live at the repo root, not under apps/dashboard)
+    script_path = _REPO_ROOT / "scripts" / "init_project.py"
     cmd = [
         sys.executable,
         str(script_path),
@@ -2232,7 +3087,7 @@ def _home_project_data(proj: dict, running_sprints: list[dict]) -> dict:
 
     def _idle() -> dict:
         sentinel: dict = {
-            "name": name, "slug": slug, "icon": icon,
+            "name": name, "slug": slug, "repo": repo, "icon": icon,
             "status": "idle", "uat_count": 0, "backlog_count": 0,
             "last_activity_at": None,
         }
@@ -2319,6 +3174,7 @@ def _home_project_data(proj: dict, running_sprints: list[dict]) -> dict:
     result: dict = {
         "name": name,
         "slug": slug,
+        "repo": repo,
         "icon": icon,
         "status": status,
         "uat_count": len(uat_issues),
@@ -2791,6 +3647,18 @@ async def assign_sprint_label(body: SprintAssignBody):
     On success: invalidates cache, broadcasts SSE sprint_plan_update, returns {"ok": true}.
     Creates sprint-N label if it doesn't exist.
     """
+    action_id = str(uuid.uuid4())
+
+    # Capture current sprint labels before the change for from_sprint
+    try:
+        _issue_data = github_client.get_issue(body.issue)
+        _cur_labels = [lbl["name"] for lbl in _issue_data.get("labels", [])]
+        _from_sprint = next(
+            (lbl for lbl in _cur_labels if _SPRINT_LABEL_RE_ALL.match(lbl)), None
+        ) or "backlog"
+    except Exception:
+        _from_sprint = None
+
     try:
         if body.sprint_label is not None:
             # Dotted or plain label string — use the string-based assign function
@@ -2809,6 +3677,38 @@ async def assign_sprint_label(body: SprintAssignBody):
         raise _gh_error(e)
     except ValueError as e:
         raise HTTPException(400, detail=str(e))
+
+    _to_sprint: str | None
+    if body.sprint_label is not None:
+        _to_sprint = (body.sprint_label.strip() or None) or "backlog"
+    elif body.sprint is not None:
+        _to_sprint = f"sprint-{body.sprint}"
+    else:
+        _to_sprint = "backlog"
+
+    _emit_dashboard_event(
+        project="dashboard",
+        type="ticket_moved",
+        target=f"#{body.issue}",
+        detail={"from_sprint": _from_sprint, "to_sprint": _to_sprint},
+        action_id=action_id,
+    )
+    if _to_sprint and _to_sprint != "backlog" and _to_sprint != _from_sprint:
+        _emit_dashboard_event(
+            project="dashboard",
+            type="label_added",
+            target=f"#{body.issue}",
+            detail={"label": _to_sprint},
+            action_id=action_id,
+        )
+    if _from_sprint and _from_sprint != "backlog" and _from_sprint != _to_sprint:
+        _emit_dashboard_event(
+            project="dashboard",
+            type="label_removed",
+            target=f"#{body.issue}",
+            detail={"label": _from_sprint},
+            action_id=action_id,
+        )
 
     await broadcast({"type": "update", "event": {"event_type": "sprint_plan_update"}})
     return {"ok": True}
@@ -2853,6 +3753,18 @@ async def add_sprint_label(issue_id: int, body: SprintLabelBody):
     - sprint_label: "sprint-N" string (or null/empty to remove sprint label)
     - sprint: int (legacy; converted to "sprint-N")
     """
+    action_id = str(uuid.uuid4())
+
+    # Capture from_sprint before change
+    try:
+        _issue_data = github_client.get_issue(issue_id, repo_name=body.project or None)
+        _cur_labels = [lbl["name"] for lbl in _issue_data.get("labels", [])]
+        _from_sprint = next(
+            (lbl for lbl in _cur_labels if _SPRINT_LABEL_RE_ALL.match(lbl)), None
+        ) or "backlog"
+    except Exception:
+        _from_sprint = None
+
     # Resolve the sprint label from whichever field was provided
     if body.sprint_label is not None:
         raw = body.sprint_label.strip()
@@ -2874,6 +3786,31 @@ async def add_sprint_label(issue_id: int, body: SprintLabelBody):
         raise _gh_error(e)
     except ValueError as e:
         raise HTTPException(400, detail=str(e))
+
+    _to_sprint = label_to_assign or "backlog"
+    _emit_dashboard_event(
+        project=body.project or "dashboard",
+        type="ticket_moved",
+        target=f"#{issue_id}",
+        detail={"from_sprint": _from_sprint, "to_sprint": _to_sprint},
+        action_id=action_id,
+    )
+    if label_to_assign and label_to_assign != _from_sprint:
+        _emit_dashboard_event(
+            project=body.project or "dashboard",
+            type="label_added",
+            target=f"#{issue_id}",
+            detail={"label": label_to_assign},
+            action_id=action_id,
+        )
+    if _from_sprint and _from_sprint != "backlog" and _from_sprint != label_to_assign:
+        _emit_dashboard_event(
+            project=body.project or "dashboard",
+            type="label_removed",
+            target=f"#{issue_id}",
+            detail={"label": _from_sprint},
+            action_id=action_id,
+        )
     return {"ok": True}
 
 
@@ -2926,7 +3863,7 @@ async def batch_sprint_labels(body: BatchLabelsBody):
     return {"applied": applied, "failed": failed, "errors": errors}
 
 
-_SPRINT_LABEL_RE = re.compile(r"^sprint-\d+(\.\d+)*$")
+_SPRINT_LABEL_RE = re.compile(r"^sprint-\d+(\.\d+)?$")
 _SUMMARY_TITLE_RE = re.compile(r"^Sprint \d+(\.\d+)*\s+Executive Summary$")
 _SUMMARY_TITLE_NUM_RE = re.compile(r"^Sprint (\d+(?:\.\d+)*)\s+Executive Summary$")
 
@@ -2977,25 +3914,60 @@ SPRINT_LOG_PATH = Path(__file__).parent / "sprints" / "sprint_run.log"
 # sprint_manager validates the value — no validation added here.
 _ALERT_MODES = os.environ.get("COMMANDER_ALERT_MODES", "dashboard-banner,ntfy")
 
+_SPRINT_LABEL_RE_ALL = re.compile(r"^sprint-\d+(\.\d+)?$")
+
+
+def _dashboard_actor() -> str:
+    return os.environ.get("COMMANDER_USER", "dashboard")
+
+
+def _emit_dashboard_event(
+    project: str,
+    type: str,
+    target: str,
+    detail: dict,
+    action_id: str,
+) -> None:
+    try:
+        db.record_event(
+            project=project,
+            source="dashboard",
+            actor=_dashboard_actor(),
+            type=type,
+            target=target,
+            detail=detail,
+            action_id=action_id,
+        )
+    except Exception:
+        pass
+
 
 def _sprint_label_sort_key(label: str) -> tuple:
-    """Return numeric components tuple for natural multi-level sprint label ordering."""
-    m = re.match(r"^sprint-(\d+(?:\.\d+)*)$", label)
+    """Return (N, M) tuple for natural sprint label ordering.
+
+    Plain sprint-N returns (N, 0); dotted sprint-N.M returns (N, M).
+    """
+    m = re.match(r"^sprint-(\d+)(?:\.(\d+))?$", label)
     if not m:
-        return (0,)
-    return tuple(int(x) for x in m.group(1).split("."))
+        return (0, 0)
+    return (int(m.group(1)), int(m.group(2)) if m.group(2) else 0)
 
 
 def _next_sprint_sublabel(sprint_label: str, existing_label_names: set[str]) -> str:
-    """Compute the next child label for a sprint re-run.
+    """Compute the next sibling sub-label for a sprint re-run.
 
     sprint-25   → sprint-25.1 (or sprint-25.2 if sprint-25.1 already exists)
-    sprint-25.1 → sprint-25.1.1 (first child of sprint-25.1)
-    sprint-25.1.1 → sprint-25.1.1.1 (first child of sprint-25.1.1)
+    sprint-25.1 → sprint-25.2 (next sibling, not a child)
+    sprint-25.2 → sprint-25.3
     """
-    candidate = 1
+    m = re.match(r"^(sprint-\d+)(?:\.(\d+))?$", sprint_label)
+    if not m:
+        raise ValueError(f"Invalid sprint label: {sprint_label!r}")
+    base = m.group(1)
+    current_suffix = int(m.group(2)) if m.group(2) else 0
+    candidate = current_suffix + 1
     while True:
-        label = f"{sprint_label}.{candidate}"
+        label = f"{base}.{candidate}"
         if label not in existing_label_names:
             return label
         candidate += 1
@@ -3034,12 +4006,38 @@ def run_sprint(request: Request, body: SprintRunBody):
         start_new_session=True,
     )
     _slog.event("sprint.dispatch", project="dashboard", request_id=request.state.request_id, sprint_label=body.label, dispatch_type="simple")
+    _emit_dashboard_event(
+        project="dashboard",
+        type="sprint_run",
+        target=body.label,
+        detail={"sprint_id": body.label},
+        action_id=str(uuid.uuid4()),
+    )
     return {"ok": True, "label": body.label}
 
 
 # ── Sprint Management endpoints (issue #95) ──────────────────────────────────
 
 _PROJECTS_BASE = Path.home() / "dev"
+
+# Sync status file — persists last-synced timestamp
+_SYNC_STATUS_FILE = Path(__file__).parent.parent.parent.parent / ".commander" / "settings.last_synced"
+
+# Sprint.yaml path discovery — walk up from the server file
+def _find_sprint_yaml() -> Optional[Path]:
+    current = Path(__file__).resolve().parent
+    while True:
+        candidate = current / ".commander" / "sprint.yaml"
+        if candidate.exists():
+            return candidate
+        parent = current.parent
+        if parent == current:
+            break
+        current = parent
+    return None
+
+_SPRINT_YAML_PATH: Optional[Path] = _find_sprint_yaml()
+_PROJECTS_FILE: Path = projects_module.PROJECTS_FILE
 
 
 def _project_root_path(repo: str) -> Path:
@@ -3068,6 +4066,18 @@ def _coder_clone_path(project_root: Path) -> Path:
     return project_root
 
 
+def _main_clone_path(project_root: Path) -> Path:
+    """Return the main working clone for a project root.
+
+    Nested layout: <project_root>/main/ (has .git)
+    Flat layout:   <project_root> itself
+    """
+    nested = project_root / "main"
+    if nested.is_dir() and (nested / ".git").exists():
+        return nested
+    return project_root
+
+
 def _commander_dir(project_root: Path) -> Path:
     return project_root / ".commander"
 
@@ -3078,6 +4088,20 @@ def _sprint_order_path(project_root: Path) -> Path:
 
 def _sprint_goal_path(project_root: Path, sprint_label: str) -> Path:
     return _commander_dir(project_root) / "sprints" / f"{sprint_label}-goal.txt"
+
+
+def _build_sprint_subprocess_env() -> dict:
+    """Build the subprocess environment for sprint_manager.
+
+    Strips ANTHROPIC_API_KEY and resolves DB_PATH to an absolute path so that
+    sprint_manager (which runs from the coder clone CWD) writes to the same
+    database that the server reads from, regardless of relative path differences.
+    """
+    env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
+    db_val = env.get("DB_PATH", "")
+    if db_val and not os.path.isabs(db_val):
+        env["DB_PATH"] = str(Path(db_val).resolve())
+    return env
 
 
 def _sprint_plan_path(project_root: Path, sprint_label: str) -> Path:
@@ -3377,9 +4401,11 @@ def _all_sprints_running() -> list[dict]:
     return result
 
 
-def _any_sprint_running() -> Optional[dict]:
-    """Scan all projects for a running sprint. Returns first found or None."""
+def _any_sprint_running(project: str | None = None) -> Optional[dict]:
+    """Scan for a running sprint. If project given, scoped to that project only."""
     running = _all_sprints_running()
+    if project:
+        running = [r for r in running if r["project"] == project]
     return running[0] if running else None
 
 
@@ -4285,7 +5311,7 @@ def run_sprint_managed(request: Request, body: SprintMgmtRunBody):
         raise HTTPException(502, detail=f"sprint_manager.py not found at {SPRINT_MANAGER_PATH}")
 
     project_root = _project_root_path(body.project)
-    running = next((r for r in _all_sprints_running() if r["project"] == body.project), None)
+    running = _any_sprint_running(project=body.project)
     if running:
         _slog.event("route.error", project="dashboard", request_id=request.state.request_id, route="/api/sprints/run", level="error", sprint_label=body.sprint_label, error="sprint already running", running_sprint=running.get("sprint_label"))
         raise HTTPException(
@@ -4445,7 +5471,7 @@ def run_sprint_managed(request: Request, body: SprintMgmtRunBody):
     except Exception:
         pass
 
-    stripped_env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
+    stripped_env = _build_sprint_subprocess_env()
     goal_path = _sprint_goal_path(project_root, body.sprint_label)
     if goal_path.exists():
         stripped_env["SPRINT_GOAL"] = goal_path.read_text(encoding="utf-8").strip()
@@ -4639,6 +5665,13 @@ def kill_sprint(sprint_label: str, project: str):
     except Exception:
         pass
 
+    _emit_dashboard_event(
+        project=project or "dashboard",
+        type="sprint_cancelled",
+        target=sprint_label,
+        detail={"sprint_id": sprint_label},
+        action_id=str(uuid.uuid4()),
+    )
     return {"ok": True}
 
 
@@ -4767,6 +5800,18 @@ def get_logs_runs(
     paged = items[offset: offset + page_size]
 
     return {"items": paged, "page": page, "page_size": page_size, "total": total}
+
+
+@app.post("/api/logs/sync-github")
+def post_logs_sync_github(project: Optional[str] = None):
+    """Poll GitHub Events API for the project repo and upsert into the events table."""
+    if not project:
+        return {"synced": 0, "skipped": 0, "rate_limited": False, "error": "project required"}
+    try:
+        result = github_events_sync.sync_github_events(project=project, repo=project)
+    except Exception as exc:
+        return {"synced": 0, "skipped": 0, "rate_limited": False, "error": str(exc)}
+    return result
 
 
 @app.get("/api/sprints/{sprint_label}/dispatch-log")
@@ -4932,6 +5977,19 @@ def get_sprint_live_snapshot(sprint_label: str, project: str):
     status_key = (project, sprint_label)
     status_data = _sprint_statuses.get(status_key, {})
 
+    # Disk fallback: sprint_manager writes state.json directly regardless of
+    # which port the dashboard is on. Use it when in-memory cache is empty
+    # (server restart, or sprint_manager posting to a different port).
+    if not status_data:
+        _fb_m = re.search(r"(\d+)", sprint_label)
+        _fb_n = _fb_m.group(1) if _fb_m else sprint_label
+        _fb_path = commander / "sprints" / f"sprint-{_fb_n}-state.json"
+        if _fb_path.exists():
+            try:
+                status_data = json.loads(_fb_path.read_text(encoding="utf-8"))
+            except Exception:
+                pass
+
     started_at_str: Optional[str] = status_data.get("start_timestamp")
     started_at_dt: Optional[datetime] = None
     if started_at_str:
@@ -5070,14 +6128,15 @@ def get_sprint_live_snapshot(sprint_label: str, project: str):
             raw_size = _letter_from_minutes(raw_minutes)
 
         issues_out.append({
-            "number":       num,
-            "title":        iss.get("title", ""),
-            "status":       derived_status,
-            "agent_status": public_agent_status,
-            "agent":        active_role,
-            "elapsed_secs": issue_elapsed,
-            "size":         raw_size,
-            "minutes":      raw_minutes,
+            "number":         num,
+            "title":          iss.get("title", ""),
+            "status":         derived_status,
+            "agent_status":   public_agent_status,
+            "agent":          active_role,
+            "elapsed_secs":   issue_elapsed,
+            "size":           raw_size,
+            "minutes":        raw_minutes,
+            "dispatch_level": iss.get("dispatch_level", 0),
         })
 
     # ── active_agent: derive from sprint state JSON (coder/tester transition) ──
@@ -5277,6 +6336,13 @@ async def create_sprint_label(body: SprintCreateBody):
         )
     except Exception:
         pass
+    _emit_dashboard_event(
+        project=body.project or "dashboard",
+        type="sprint_created",
+        target=sprint_label,
+        detail={"sprint_name": sprint_label},
+        action_id=str(uuid.uuid4()),
+    )
     return {"ok": True, "sprint_label": sprint_label}
 
 
@@ -5488,7 +6554,13 @@ class SprintCleanupBody(BaseModel):
 
 @app.post("/api/sprints/cleanup-empty")
 async def cleanup_empty_sprints(body: SprintCleanupBody):
-    """Delete all sprint labels with zero open tickets from GitHub."""
+    """Delete leading consecutive empty sprint labels from GitHub (issue #658).
+
+    Only removes sprint-N labels that appear before the first sprint with ≥ 1 open
+    ticket (in ascending number order). Trailing empty sprints — those after any
+    sprint that has tickets — are preserved. If no sprint has tickets, nothing is
+    deleted.
+    """
     try:
         all_sprint_labels = github_client.list_sprint_labels(repo_name=body.project)
     except subprocess.CalledProcessError as e:
@@ -5499,18 +6571,39 @@ async def cleanup_empty_sprints(body: SprintCleanupBody):
     except subprocess.CalledProcessError as e:
         raise _gh_error(e)
 
-    sprint_re_local = re.compile(r"^sprint-\d+(\.\d+)?$")
-    labeled_sprints: set[str] = set()
+    sprint_re_any   = re.compile(r"^sprint-(\d+)(?:\.\d+)?$")
+    sprint_re_plain = re.compile(r"^sprint-(\d+)$")
+
+    # Collect base sprint numbers that have ≥ 1 open ticket (plain or dotted sub-labels)
+    active_base_nums: set[int] = set()
     for iss in issues:
         for lbl in iss.get("labels", []):
-            if sprint_re_local.match(lbl["name"]):
-                labeled_sprints.add(lbl["name"])
+            m = sprint_re_any.match(lbl["name"])
+            if m:
+                active_base_nums.add(int(m.group(1)))
 
-    empty_labels = [l for l in all_sprint_labels if l not in labeled_sprints]
+    # Iterate plain sprint-N labels in ascending order; collect consecutive leading empties
+    plain_labels = sorted(
+        [l for l in all_sprint_labels if sprint_re_plain.match(l)],
+        key=lambda l: int(sprint_re_plain.match(l).group(1)),  # type: ignore[union-attr]
+    )
+
+    leading_empty: list[str] = []
+    found_active = False
+    for label in plain_labels:
+        base_num = int(sprint_re_plain.match(label).group(1))  # type: ignore[union-attr]
+        if base_num in active_base_nums:
+            found_active = True
+            break
+        leading_empty.append(label)
+
+    # AC3: if no sprint has tickets, nothing is eligible for cleanup
+    if not found_active:
+        leading_empty = []
 
     deleted = []
     errors = []
-    for label in empty_labels:
+    for label in leading_empty:
         try:
             github_client.delete_label(label, repo_name=body.project)
             deleted.append(label)
@@ -5890,10 +6983,36 @@ def get_sprint_outcome(sprint_label: str, project: str):
             "failure_reason": failure_reason,
         })
 
+    # Retroactive label override: if an issue is marked "failed" in state.json but
+    # currently carries a UAT label on GitHub (manually applied after the sprint ran),
+    # treat it as "done" so the card reflects the true current state.
+    failed_nums = [i["number"] for i in result_issues if i["outcome"] == "failed" and i["number"]]
+    if failed_nums:
+        try:
+            repo = github_client.get_repo_for_operation(project)
+            r = subprocess.run(
+                ["gh", "issue", "list", "--repo", repo,
+                 "--state", "all", "--label", "UAT",
+                 "--json", "number",
+                 "--limit", "200"],
+                capture_output=True, text=True, timeout=10,
+            )
+            if r.returncode == 0:
+                uat_nums = {i["number"] for i in (json.loads(r.stdout) or [])}
+                for ri in result_issues:
+                    if ri["outcome"] == "failed" and ri["number"] in uat_nums:
+                        ri["outcome"] = "done"
+        except Exception:
+            pass
+
     # Counts
     done_count    = sum(1 for i in result_issues if i["outcome"] == "done")
     failed_count  = sum(1 for i in result_issues if i["outcome"] == "failed")
     skipped_count = sum(1 for i in result_issues if i["outcome"] == "skipped")
+
+    # Retroactive override may have cleared all failures — upgrade stopped → completed
+    if sprint_status == "stopped" and failed_count == 0:
+        sprint_status = "completed"
 
     # Log line count from most recent run log
     log_line_count = 0
@@ -5909,19 +7028,29 @@ def get_sprint_outcome(sprint_label: str, project: str):
             except OSError:
                 pass
 
+    # Sprint Summary issue (issue #613: finished outcome band links)
+    summary_issue_url: Optional[str] = state_data.get("summary_issue_url")
+    summary_issue_num: Optional[int] = None
+    if summary_issue_url:
+        m_sn = re.search(r"/issues/(\d+)", summary_issue_url)
+        if m_sn:
+            summary_issue_num = int(m_sn.group(1))
+
     return {
-        "sprint_label":   sprint_label,
-        "state":          pane_state,
-        "sprint_status":  sprint_status,
+        "sprint_label":      sprint_label,
+        "state":             pane_state,
+        "sprint_status":     sprint_status,
         "counts": {
             "done":    done_count,
             "failed":  failed_count,
             "skipped": skipped_count,
         },
-        "wall_clock_secs": state_data.get("wall_clock_secs", 0.0),
-        "ended_at":        _fmt_iso(ended_ts),
-        "issues":          result_issues,
-        "log_line_count":  log_line_count,
+        "wall_clock_secs":   state_data.get("wall_clock_secs", 0.0),
+        "ended_at":          _fmt_iso(ended_ts),
+        "issues":            result_issues,
+        "log_line_count":    log_line_count,
+        "summary_issue_url": summary_issue_url,
+        "summary_issue_num": summary_issue_num,
     }
 
 
@@ -6323,6 +7452,372 @@ def get_sprint_metrics(request: Request):
     return results
 
 
+# ── Analytics metrics endpoint (issue #648 / ANL-3) ──────────────────────────
+
+# Per-token prices in USD (input, output). Update when model pricing changes.
+MODEL_PRICE_MAP: dict[str, tuple[float, float]] = {
+    "claude-haiku-4-5":              (0.80 / 1_000_000, 4.00 / 1_000_000),
+    "claude-haiku-4-5-20251001":     (0.80 / 1_000_000, 4.00 / 1_000_000),
+    "claude-sonnet-4-6":             (3.00 / 1_000_000, 15.00 / 1_000_000),
+    "claude-opus-4-8":               (15.00 / 1_000_000, 75.00 / 1_000_000),
+}
+
+
+def _parse_iso_date(date_str: str, name: str, *, end_of_day: bool = False) -> datetime:
+    """Parse a YYYY-MM-DD string into a UTC datetime, raising HTTP 400 on bad input."""
+    try:
+        dt = datetime.strptime(date_str, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    except ValueError:
+        raise HTTPException(400, detail=f"Invalid {name!r} date {date_str!r} — expected YYYY-MM-DD")
+    if end_of_day:
+        dt = dt.replace(hour=23, minute=59, second=59)
+    return dt
+
+
+def _compute_analytics_metrics(project_root: Path,
+                                since: str | None = None,
+                                until: str | None = None,
+                                sprint_filter: str | None = None) -> dict:
+    """Aggregate delivery-health metrics from sprint state files and token_usage.
+
+    Returns a dict with keys: first_pass_rate, rework_rate, avg_duration,
+    throughput, cost. All numeric fields are 0 when no data is available.
+    """
+    today = datetime.now(tz=timezone.utc).date()
+
+    since_dt = _parse_iso_date(since, "since") if since else None
+    until_dt = _parse_iso_date(until, "until", end_of_day=True) if until else None
+
+    sprints_dir = _commander_dir(project_root) / "sprints"
+
+    coder_durations_by_size: dict[str, list[float]] = {}
+    coder_all: list[float] = []
+    tester_all: list[float] = []
+
+    total_completed = 0
+    first_pass_count = 0
+    rework_count = 0
+    rework_2plus = 0
+
+    sprint_ticket_counts: list[int] = []
+    sprint_lengths: list[float] = []
+
+    estimates_dir = _commander_dir(project_root) / "estimates"
+
+    if sprints_dir.exists():
+        for state_file in sorted(sprints_dir.glob("sprint-*-state.json")):
+            try:
+                state_data = json.loads(state_file.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+
+            sprint_label_val = state_data.get("sprint_label", "")
+
+            if sprint_filter and sprint_label_val != sprint_filter:
+                continue
+
+            start_ts_str = state_data.get("start_timestamp")
+            if start_ts_str:
+                try:
+                    start_dt = datetime.fromisoformat(start_ts_str.rstrip("Z")).replace(tzinfo=timezone.utc)
+                except Exception:
+                    start_dt = None
+            else:
+                start_dt = None
+
+            if start_dt:
+                if since_dt and start_dt < since_dt:
+                    continue
+                if until_dt and start_dt > until_dt:
+                    continue
+
+            wall_clock_secs = float(state_data.get("wall_clock_secs") or 0.0)
+            issues = state_data.get("issues", [])
+            sprint_done = [i for i in issues if i.get("status") == "done"]
+
+            sprint_ticket_counts.append(len(sprint_done))
+            if wall_clock_secs > 0:
+                sprint_lengths.append(wall_clock_secs / 86400.0)
+
+            for issue in sprint_done:
+                total_completed += 1
+                attempt = int(issue.get("tester_attempt_count") or 1)
+                if attempt <= 1:
+                    first_pass_count += 1
+                else:
+                    rework_count += 1
+                    if attempt >= 3:
+                        rework_2plus += 1
+
+                # Coder duration
+                coder_start = issue.get("coder_started_at")
+                coder_end = issue.get("coder_finished_at")
+                if coder_start and coder_end:
+                    try:
+                        s = datetime.fromisoformat(coder_start.rstrip("Z")).replace(tzinfo=timezone.utc)
+                        e = datetime.fromisoformat(coder_end.rstrip("Z")).replace(tzinfo=timezone.utc)
+                        dur_min = (e - s).total_seconds() / 60.0
+                        coder_all.append(dur_min)
+
+                        issue_num = issue.get("number")
+                        size = None
+                        if issue_num and estimates_dir.exists():
+                            est_file = estimates_dir / f"issue-{issue_num}.json"
+                            if est_file.exists():
+                                try:
+                                    est = json.loads(est_file.read_text(encoding="utf-8"))
+                                    size = est.get("size")
+                                except Exception:
+                                    pass
+                        if size:
+                            coder_durations_by_size.setdefault(size, []).append(dur_min)
+                    except Exception:
+                        pass
+
+                # Tester duration
+                tester_start = issue.get("tester_started_at")
+                tester_end = issue.get("tester_finished_at")
+                if tester_start and tester_end:
+                    try:
+                        s = datetime.fromisoformat(tester_start.rstrip("Z")).replace(tzinfo=timezone.utc)
+                        e = datetime.fromisoformat(tester_end.rstrip("Z")).replace(tzinfo=timezone.utc)
+                        tester_all.append((e - s).total_seconds() / 60.0)
+                    except Exception:
+                        pass
+
+    first_pass_rate = first_pass_count / total_completed if total_completed else 0
+    rework_rate_val = rework_count / total_completed if total_completed else 0
+
+    avg_coder = sum(coder_all) / len(coder_all) if coder_all else 0
+    avg_tester = sum(tester_all) / len(tester_all) if tester_all else 0
+    coder_by_size = {
+        sz: round(sum(vals) / len(vals), 2)
+        for sz, vals in coder_durations_by_size.items()
+        if vals
+    }
+
+    avg_tickets = sum(sprint_ticket_counts) / len(sprint_ticket_counts) if sprint_ticket_counts else 0
+    avg_length = sum(sprint_lengths) / len(sprint_lengths) if sprint_lengths else 0
+
+    # Cost from token_usage table
+    cost_per_sprint_total = 0.0
+    cost_by_role: dict[str, float] = {"coder": 0.0, "tester": 0.0, "estimator": 0.0}
+    try:
+        rows = db.get_token_usage_by_agent_model()
+        for row in rows:
+            try:
+                role = (row.get("agent_role") or "unknown").lower()
+                model = (row.get("model_name") or "").lower()
+                price_in, price_out = MODEL_PRICE_MAP.get(model, (0.0, 0.0))
+                cost = (row.get("total_input", 0) * price_in +
+                        row.get("total_output", 0) * price_out)
+                cost_per_sprint_total += cost
+                if role in cost_by_role:
+                    cost_by_role[role] += cost
+            except (KeyError, ValueError, TypeError) as exc:
+                logger.debug("token-usage cost: skipping row %r — %s", row, exc)
+    except Exception as exc:
+        logger.debug("token-usage cost: db query failed — %s", exc)
+
+    num_sprints = len(sprint_ticket_counts) if sprint_ticket_counts else 1
+    cost_per_sprint_avg = cost_per_sprint_total / num_sprints
+    cost_per_ticket_avg = cost_per_sprint_total / total_completed if total_completed else 0
+
+    rework_cost_annotation = (
+        round(cost_per_ticket_avg * 0.32, 4) if rework_count > 0 else 0.0
+    )
+
+    return {
+        "first_pass_rate": {
+            "rate": round(first_pass_rate, 4),
+            "passed": first_pass_count,
+            "total_completed": total_completed,
+        },
+        "rework_rate": {
+            "rate": round(rework_rate_val, 4),
+            "count": rework_count,
+            "rework_2plus": rework_2plus,
+            "total": total_completed,
+        },
+        "avg_duration": {
+            "coder_minutes": round(avg_coder, 2),
+            "tester_minutes": round(avg_tester, 2),
+            "coder_by_size": coder_by_size,
+        },
+        "throughput": {
+            "avg_tickets_per_sprint": round(avg_tickets, 2),
+            "avg_sprint_length_days": round(avg_length, 4),
+            "avg_sprint_length_minutes": round(avg_length * 1440, 2),
+        },
+        "cost": {
+            "per_sprint": {
+                "total": round(cost_per_sprint_avg, 4),
+                "by_role": {k: round(v / num_sprints, 4) for k, v in cost_by_role.items()},
+            },
+            "per_ticket": {
+                "avg": round(cost_per_ticket_avg, 4),
+                "by_role": {
+                    k: round(v / total_completed, 4) if total_completed else 0.0
+                    for k, v in cost_by_role.items()
+                },
+                "rework_cost_annotation": rework_cost_annotation,
+            },
+        },
+    }
+
+
+@app.get("/api/projects/{slug}/analytics/metrics")
+def get_project_analytics_metrics(slug: str, request: Request):
+    """GET /api/projects/{slug}/analytics/metrics — ANL-3 delivery-health metrics.
+
+    Query params: since=YYYY-MM-DD, until=YYYY-MM-DD, sprint=<sprint-label>.
+    Returns 404 for unknown slugs; all numeric fields are 0 when no data.
+    """
+    repo = _resolve_project_slug(slug)
+    project_root = _project_root_path(repo)
+
+    since = request.query_params.get("since")
+    until = request.query_params.get("until")
+    sprint_filter = request.query_params.get("sprint")
+
+    return _compute_analytics_metrics(project_root, since=since, until=until,
+                                      sprint_filter=sprint_filter)
+
+
+# ── Calibration analytics endpoint (issue #649) ──────────────────────────────
+
+_CALIBRATION_SIZES = ("S", "M", "L", "XL")
+_CALIBRATION_SIZE_SETTING_KEYS = {
+    "S": "estimation_s_minutes",
+    "M": "estimation_m_minutes",
+    "L": "estimation_l_minutes",
+    "XL": "estimation_xl_minutes",
+}
+
+
+def _compute_calibration(
+    repo: str,
+    since: str | None = None,
+    until: str | None = None,
+    sprint_filter: str | None = None,
+) -> dict:
+    """Aggregate estimated vs actual time per size tier for the given project.
+
+    Returns by_size (keyed S/M/L/XL) and a flat points list.
+    All sizes always present; sizes with no data have count=0 and null stats.
+    """
+    # Validate date params first so bad input returns 400 before any DB work.
+    since_dt = _parse_iso_date(since, "since") if since else None
+    until_dt = _parse_iso_date(until, "until", end_of_day=True) if until else None
+
+    # Resolve configured_minutes from project settings (falls back to defaults).
+    try:
+        stored = _settings_repo.get_setting(APP_CONFIG_KEY, project=repo)
+    except Exception:
+        stored = {}
+    effective = build_effective_response(stored)
+    configured_minutes = {sz: effective[key] for sz, key in _CALIBRATION_SIZE_SETTING_KEYS.items()}
+
+    # Skeleton result — all sizes always present regardless of data availability.
+    by_size = {
+        sz: {
+            "configured_minutes": configured_minutes[sz],
+            "count": 0,
+            "min_minutes": None,
+            "avg_minutes": None,
+            "max_minutes": None,
+        }
+        for sz in _CALIBRATION_SIZES
+    }
+    points: list[dict] = []
+
+    if not _SPRINT_REPO_AVAILABLE:
+        return {"by_size": by_size, "points": points}
+
+    try:
+        from sqlalchemy import text as _sa_text
+
+        where_parts = [
+            "st.estimated_size IS NOT NULL",
+            "st.actual_elapsed_seconds IS NOT NULL",
+            "s.project = :project",
+        ]
+        params: dict = {"project": repo}
+
+        if since_dt:
+            where_parts.append("st.completed_at >= :since")
+            params["since"] = since_dt.isoformat()
+        if until_dt:
+            where_parts.append("st.completed_at <= :until")
+            params["until"] = until_dt.isoformat()
+        if sprint_filter:
+            where_parts.append("s.label = :sprint")
+            params["sprint"] = sprint_filter
+
+        sql = (
+            "SELECT st.issue_number, st.estimated_size, st.actual_elapsed_seconds"
+            " FROM sprint_tickets st"
+            " JOIN sprints s ON s.id = st.sprint_id"
+            " WHERE " + " AND ".join(where_parts)
+        )
+
+        with _sprint_repo._open_session() as session:
+            rows = session.execute(_sa_text(sql), params).fetchall()
+
+    except HTTPException:
+        raise
+    except Exception:
+        return {"by_size": by_size, "points": points}
+
+    # Accumulate per-size data.
+    buckets: dict[str, list[float]] = {sz: [] for sz in _CALIBRATION_SIZES}
+    issue_rows: list[tuple] = []
+
+    for row in rows:
+        issue_number, estimated_size, actual_elapsed_seconds = row[0], row[1], row[2]
+        if estimated_size not in buckets:
+            continue
+        minutes = actual_elapsed_seconds / 60.0
+        buckets[estimated_size].append(minutes)
+        issue_rows.append((issue_number, estimated_size, minutes))
+
+    # Compute aggregates.
+    for sz in _CALIBRATION_SIZES:
+        vals = buckets[sz]
+        if vals:
+            by_size[sz]["count"] = len(vals)
+            by_size[sz]["min_minutes"] = round(min(vals), 2)
+            by_size[sz]["avg_minutes"] = round(sum(vals) / len(vals), 2)
+            by_size[sz]["max_minutes"] = round(max(vals), 2)
+
+    # Build points list.
+    for issue_number, estimated_size, actual_minutes in issue_rows:
+        points.append({
+            "issue_number": issue_number,
+            "estimated_size": estimated_size,
+            "estimated_minutes": configured_minutes[estimated_size],
+            "actual_minutes": round(actual_minutes, 2),
+        })
+
+    return {"by_size": by_size, "points": points}
+
+
+@app.get("/api/projects/{slug}/analytics/calibration")
+def get_project_analytics_calibration(slug: str, request: Request):
+    """GET /api/projects/{slug}/analytics/calibration — estimated vs actual per size tier.
+
+    Query params: since=YYYY-MM-DD, until=YYYY-MM-DD, sprint=<sprint-label>.
+    Returns 404 for unknown slugs; sizes with no data have count=0 and null stats.
+    """
+    repo = _resolve_project_slug(slug)
+
+    since = request.query_params.get("since")
+    until = request.query_params.get("until")
+    sprint_filter = request.query_params.get("sprint")
+
+    return _compute_calibration(repo, since=since, until=until, sprint_filter=sprint_filter)
+
+
 # ── Daily report endpoint (issue #478) ───────────────────────────────────────
 
 @app.post("/api/reports/daily")
@@ -6377,12 +7872,20 @@ async def generate_daily_report(request: Request):
 def get_sprint_finish_card(sprint_label: str, project: str):
     """Return data for the floating finish-report card above a sprint pane.
 
+    Always returns HTTP 200. Clients must check the ``state`` field in the
+    response body — do NOT rely on HTTP 404 to detect a missing sprint.
+    (Before issue #671 this endpoint returned 404 when no state file existed;
+    it now returns HTTP 200 with state="no_data" instead.)
+
     For running sprints: state="running", in_flight_count, pending_count,
     done_count, wall_clock_secs, started_at.
 
     For finished sprints: state in (completed|has_rework|cancelled),
     done_count, failed_count, skipped_count, rework_count, wall_clock_secs,
     ended_at, summary_issue_url, summary_issue_num.
+
+    When no sprint state file exists on disk: state="no_data", sprint_label,
+    sprint_number only (HTTP 200, not 404).
     """
     if not _SPRINT_LABEL_RE.match(sprint_label):
         raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")
@@ -6442,7 +7945,11 @@ def get_sprint_finish_card(sprint_label: str, project: str):
                 "summary_issue_url": None,
                 "summary_issue_num": None,
             }
-        raise HTTPException(404, detail=f"Finish card data not available for {sprint_label!r}")
+        return {
+            "sprint_label":  sprint_label,
+            "sprint_number": sprint_number,
+            "state":         "no_data",
+        }
 
     try:
         fc_state_data = json.loads(state_path.read_text(encoding="utf-8"))
@@ -6574,8 +8081,13 @@ def get_sprint_branch_status(sprint_label: str, project: str):
                 pr_url = prs[0].get("url")
                 pr_number = prs[0].get("number")
                 pr_title = prs[0].get("title")
-    except Exception:
-        pass
+    except Exception as _pr_err:
+        _slog.warn(
+            "sprint_pr_lookup_failed",
+            f"PR lookup for {branch_name!r} failed: {_pr_err}",
+            branch=branch_name,
+            error=str(_pr_err),
+        )
 
     return {"exists": exists, "branch": branch_name,
             "pr_url": pr_url, "pr_number": pr_number, "pr_title": pr_title}
@@ -6674,9 +8186,12 @@ def rerun_sprint_preview_v2(sprint_label: str, project: str):
     existing_label_names = {lbl["name"] for lbl in github_client.list_labels(repo_name=project)}
     suggested_versioned_label = _next_sprint_sublabel(sprint_label, existing_label_names)
 
+    _NON_WORK_LABELS_RR = {"sprint-summary", "docs", "documentation"}
     tickets = []
     for iss in sprint_issues:
         current_labels = {lbl["name"] for lbl in iss.get("labels", [])}
+        if current_labels & _NON_WORK_LABELS_RR:
+            continue  # skip sprint-summary / docs tickets
         category = _ticket_rerun_category(current_labels)
         tickets.append({
             "number": iss["number"],
@@ -6692,40 +8207,52 @@ def rerun_sprint_preview_v2(sprint_label: str, project: str):
 
 
 @app.post("/api/sprints/{sprint_label}/rerun")
-def rerun_sprint(sprint_label: str, project: str, body: SprintRerunV2Body):
-    """Create a hierarchically-versioned child sprint and optionally auto-run it.
+def rerun_sprint(sprint_label: str, project: str, body: SprintRerunBody):
+    """Create an independent sub-sprint from all non-UAT tickets and auto-run it.
 
-    Selected tickets are moved from sprint_label → sub_label and transitioned to
-    QUEUED state (all status labels cleared). The child sprint's plan.json records
-    parent=sprint_label. The original sprint's plan.json is NOT modified.
+    Auto-detects every non-UAT ticket carrying sprint_label, moves them to a new
+    versioned sub-sprint label (sprint-N.1, sprint-N.2, …), creates plan.json with
+    parent reference, and dispatches sprint_manager for the sub-sprint. The original
+    sprint label, plan.json, branch, and PR are NOT modified.
 
-    Body: { ticket_numbers: [int, ...], auto_run: bool = true }
+    Body: { confirm: bool }
+    Response: { sub_label, noop, dispatch_count, decisions, moved, [errors] }
     """
     if not _SPRINT_LABEL_RE.match(sprint_label):
         raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")
-    if not body.ticket_numbers:
-        raise HTTPException(400, detail="ticket_numbers must be non-empty")
 
     project_root = _project_root_path(project)
 
-    if body.auto_run:
-        running = next((r for r in _all_sprints_running() if r["project"] == project), None)
-        if running:
-            raise HTTPException(
-                409,
-                detail=(
-                    f"Cannot start sprint: {running['sprint_label']} is currently running"
-                    f" on {running['project']}"
-                ),
-            )
+    if _is_sprint_running(project_root, sprint_label):
+        raise HTTPException(409, detail=f"Sprint {sprint_label} is currently running")
 
-    commander = _commander_dir(project_root)
-    sprints_dir = commander / "sprints"
-    sprints_dir.mkdir(parents=True, exist_ok=True)
-    log_dir = commander / "logs"
-    log_dir.mkdir(parents=True, exist_ok=True)
-    ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
-    run_id = str(uuid.uuid4())
+    try:
+        sprint_issues = _get_sprint_issues(project, sprint_label)
+    except subprocess.CalledProcessError as e:
+        raise _gh_error(e)
+
+    _NON_WORK_LABELS_RR = {"sprint-summary", "docs", "documentation"}
+    decisions: list[dict] = []
+    for iss in sprint_issues:
+        current_labels = {lbl["name"] for lbl in iss.get("labels", [])}
+        if current_labels & _NON_WORK_LABELS_RR:
+            continue
+        action, _ = _rerun_policy(current_labels)
+        decisions.append({
+            "issue_num": iss["number"],
+            "issue_title": iss["title"],
+            "action": action,
+        })
+
+    to_move = [d for d in decisions if d["action"] != "skip"]
+
+    if not to_move:
+        return {
+            "noop": True,
+            "dispatch_count": 0,
+            "message": "No issues require re-dispatch; all are UAT or UAT-approved.",
+            "decisions": decisions,
+        }
 
     # Compute sub-label
     existing_label_names = {lbl["name"] for lbl in github_client.list_labels(repo_name=project)}
@@ -6742,8 +8269,8 @@ def rerun_sprint(sprint_label: str, project: str, body: SprintRerunV2Body):
     errors: list[str] = []
     moved: list[int] = []
 
-    for issue_num in body.ticket_numbers:
-        # Swap sprint labels: remove parent sprint label, add sub-label
+    for d in to_move:
+        issue_num = d["issue_num"]
         try:
             github_client.update_labels(
                 issue_num,
@@ -6754,22 +8281,28 @@ def rerun_sprint(sprint_label: str, project: str, body: SprintRerunV2Body):
         except subprocess.CalledProcessError as e:
             errors.append(f"#{issue_num} label swap failed: {e.stderr.strip() if e.stderr else str(e)}")
             continue
-
-        # Clear all status labels by transitioning to QUEUED
-        try:
-            _sm_transition(issue_num, _TicketState.QUEUED, actor="rerun", repo=project)
-        except _TransitionError as e:
-            errors.append(f"#{issue_num} transition failed: {e}")
-            continue
-
         moved.append(issue_num)
 
-    # Create plan.json for sub-label with parent reference (original plan.json untouched)
+    commander = _commander_dir(project_root)
+    sprints_dir = commander / "sprints"
+    sprints_dir.mkdir(parents=True, exist_ok=True)
+
+    # Create plan.json for sub-label; original plan.json is untouched
     _write_plan_json(project_root, sub_label, {
         "state": "planning",
         "tickets": moved,
         "parent": sprint_label,
     })
+
+    # Mark parent state file with rerun_into so the board knows where the re-run went
+    parent_state_path = sprints_dir / f"{sprint_label}-state.json"
+    if parent_state_path.exists():
+        try:
+            state_data = json.loads(parent_state_path.read_text(encoding="utf-8"))
+            state_data["rerun_into"] = sub_label
+            parent_state_path.write_text(json.dumps(state_data), encoding="utf-8")
+        except Exception:
+            pass
 
     github_client.invalidate("open_issues_body:")
     github_client.invalidate("open_issues:")
@@ -6777,22 +8310,24 @@ def rerun_sprint(sprint_label: str, project: str, body: SprintRerunV2Body):
     github_client.invalidate("sprint_labels:")
 
     result: dict = {
-        "run_id": run_id,
+        "noop": False,
         "sub_label": sub_label,
         "parent_label": sprint_label,
+        "dispatch_count": len(moved),
         "moved": moved,
-        "error_count": len(errors),
+        "decisions": decisions,
     }
     if errors:
         result["errors"] = errors
 
-    if not body.auto_run:
+    # Auto-run: dispatch sprint_manager for the sub-sprint
+    if not SPRINT_MANAGER_PATH.exists():
         return result
 
-    # Auto-run: dispatch sprint_manager same code path as /api/sprints/run
-    if not SPRINT_MANAGER_PATH.exists():
-        raise HTTPException(502, detail=f"sprint_manager.py not found at {SPRINT_MANAGER_PATH}")
-
+    log_dir = commander / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
+    run_id = str(uuid.uuid4())
     coder_path = _coder_clone_path(project_root)
     pid_path = sprints_dir / f"{sub_label}-pid"
     pending_path = sprints_dir / f"{sub_label}-pid.pending"
@@ -6805,7 +8340,6 @@ def rerun_sprint(sprint_label: str, project: str, body: SprintRerunV2Body):
     except FileExistsError:
         raise HTTPException(409, detail=f"Sprint {sub_label} is already running on {project}")
 
-    # Update plan.json state to running before spawning subprocess
     try:
         _plan_json_set_state(project_root, sub_label, "running",
                              started_at=datetime.now(timezone.utc).isoformat(),
@@ -6813,7 +8347,7 @@ def rerun_sprint(sprint_label: str, project: str, body: SprintRerunV2Body):
     except Exception:
         pass
 
-    stripped_env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
+    stripped_env = _build_sprint_subprocess_env()
     goal_path = _sprint_goal_path(project_root, sprint_label)
     if not goal_path.exists():
         goal_path = _sprint_goal_path(project_root, sub_label)
@@ -6860,6 +8394,7 @@ def rerun_sprint(sprint_label: str, project: str, body: SprintRerunV2Body):
     except subprocess.TimeoutExpired:
         pass
 
+    result["run_id"] = run_id
     result["pid"] = proc.pid
     result["log"] = str(run_log_path)
     return result
@@ -6938,8 +8473,10 @@ def get_sprint_finish_preview(owner: str, repo_name: str, label: str):
     """Return preview data for the Finish Sprint dialog.
 
     Returns: {
+      all_tickets: [{number, title, category}],   # ALL tickets incl. sprint-summary
       uat_tickets: [{number, title}],
       non_uat_tickets: [{number, title, status}],
+      sprint_pr: {url, number, title} | null,
       next_sprint_label: str,
       next_sprint_exists: bool,
       conflict_error: str | null,
@@ -6949,7 +8486,6 @@ def get_sprint_finish_preview(owner: str, repo_name: str, label: str):
         raise HTTPException(400, detail=f"Invalid sprint label: {label!r}")
 
     repo = f"{owner}/{repo_name}"
-    project_root = _project_root_path(repo)
 
     next_num = _next_sprint_number(label)
     next_sprint_label = f"sprint-{next_num}"
@@ -6961,38 +8497,57 @@ def get_sprint_finish_preview(owner: str, repo_name: str, label: str):
 
     next_sprint_exists = next_num in existing_sprints
     conflict_error: str | None = None
-    if next_sprint_exists and _is_sprint_running(project_root, next_sprint_label):
-        conflict_error = (
-            f"Sprint {next_num} is currently running — cannot move tickets into it. "
-            f"Wait for it to finish."
-        )
 
     try:
         sprint_issues = _get_sprint_issues(repo, label)
     except subprocess.CalledProcessError as e:
         raise _gh_error(e)
 
+    # Look up open sprint PR (head = sprint/sprint-N branch)
+    sprint_pr: Optional[dict] = None
+    try:
+        m_n = re.search(r"(\d+(?:\.\d+)*)", label)
+        branch_name = f"sprint/{label}" if m_n else None
+        if branch_name:
+            pr_res = subprocess.run(
+                ["gh", "pr", "list", "--repo", repo, "--head", branch_name,
+                 "--state", "open", "--json", "number,url,title", "--limit", "1"],
+                capture_output=True, text=True, timeout=4,
+            )
+            if pr_res.returncode == 0 and pr_res.stdout.strip():
+                prs = json.loads(pr_res.stdout)
+                if prs:
+                    sprint_pr = {"url": prs[0].get("url"), "number": prs[0].get("number"), "title": prs[0].get("title")}
+    except Exception:
+        pass
+
     _NON_WORK_LABELS_FP = {"sprint-summary", "docs", "documentation"}
+    all_tickets = []
     uat_tickets = []
     non_uat_tickets = []
     for iss in sprint_issues:
         label_names = {lbl["name"] for lbl in iss.get("labels", [])}
-        if _NON_WORK_LABELS_FP & label_names:
-            continue
         number = iss["number"]
         title = iss.get("title", "")
+        if _NON_WORK_LABELS_FP & label_names:
+            all_tickets.append({"number": number, "title": title, "category": "sprint-summary"})
+            continue
         if "UAT" in label_names:
+            all_tickets.append({"number": number, "title": title, "category": "UAT"})
             uat_tickets.append({"number": number, "title": title})
         else:
             status = next(
                 (lbl for lbl in sorted(label_names) if lbl in _FINISH_SPRINT_STATUS_LABELS and lbl != "UAT"),
                 "queued",
             )
+            all_tickets.append({"number": number, "title": title, "category": status})
             non_uat_tickets.append({"number": number, "title": title, "status": status})
 
     return {
+        "all_tickets": all_tickets,
         "uat_tickets": uat_tickets,
         "non_uat_tickets": non_uat_tickets,
+        "sprint_pr": sprint_pr,
         "next_sprint_label": next_sprint_label,
         "next_sprint_exists": next_sprint_exists,
         "conflict_error": conflict_error,
@@ -7002,6 +8557,9 @@ def get_sprint_finish_preview(owner: str, repo_name: str, label: str):
 class FinishSprintBody(BaseModel):
     confirmed: bool
     move_non_uat_to: str = ""
+    selected_ticket_numbers: list[int] = []
+    merge_pr: bool = False
+    sprint_pr_url: Optional[str] = None
 
 
 @app.post("/api/projects/{owner}/{repo_name}/sprints/{label}/finish")
@@ -7028,37 +8586,47 @@ async def finish_sprint(owner: str, repo_name: str, label: str, body: FinishSpri
     if _is_sprint_running(project_root, label):
         raise HTTPException(409, detail=f"Sprint {label} is currently running — finish it after the run completes")
 
-    # Conflict guard: next sprint must not be running
-    if _is_sprint_running(project_root, next_sprint_label):
-        m_next = re.match(r"^sprint-(\d+)", next_sprint_label)
-        next_num_str = m_next.group(1) if m_next else next_sprint_label
-        raise HTTPException(
-            409,
-            detail=(
-                f"Sprint {next_num_str} is currently running — cannot move tickets into it. "
-                f"Wait for it to finish."
-            ),
-        )
-
     try:
         sprint_issues = _get_sprint_issues(repo, label)
     except subprocess.CalledProcessError as e:
         raise _gh_error(e)
 
-    _NON_WORK_LABELS_FS = {"sprint-summary", "docs", "documentation"}
-    work_issues = [
-        iss for iss in sprint_issues
-        if not (_NON_WORK_LABELS_FS & {lbl["name"] for lbl in iss.get("labels", [])})
-    ]
-    uat_issues = [iss for iss in work_issues if any(lbl["name"] == "UAT" for lbl in iss.get("labels", []))]
-    non_uat_issues = [iss for iss in work_issues if not any(lbl["name"] == "UAT" for lbl in iss.get("labels", []))]
+    # Determine which tickets are selected by the user (empty list = all tickets)
+    selected_nums = set(body.selected_ticket_numbers) if body.selected_ticket_numbers else None
+
+    _NON_WORK_LABELS_FS2 = {"sprint-summary", "docs", "documentation"}
+    to_close: list[dict] = []
+    to_move: list[dict] = []
+    for iss in sprint_issues:
+        num = iss["number"]
+        label_names = {lbl["name"] for lbl in iss.get("labels", [])}
+        is_selected = selected_nums is None or num in selected_nums
+        is_summary = bool(_NON_WORK_LABELS_FS2 & label_names)
+        is_uat = "UAT" in label_names
+        if is_selected:
+            to_close.append(iss)
+        elif not is_selected and not is_uat and not is_summary:
+            # Unselected non-UAT non-summary → move to next sprint (original behavior)
+            to_move.append(iss)
 
     closed = 0
     moved = 0
     errors: list[str] = []
 
-    # Ensure next sprint label exists when there are non-UAT tickets to move
-    if non_uat_issues:
+    # Merge sprint PR first (if requested)
+    if body.merge_pr and body.sprint_pr_url:
+        try:
+            merge_res = subprocess.run(
+                ["gh", "pr", "merge", body.sprint_pr_url, "--repo", repo, "--merge", "--delete-branch"],
+                capture_output=True, text=True, check=False,
+            )
+            if merge_res.returncode != 0:
+                errors.append(f"PR merge failed: {merge_res.stderr.strip()}")
+        except Exception as exc:
+            errors.append(f"PR merge error: {exc}")
+
+    # Ensure next sprint label exists when there are non-selected non-UAT tickets to move
+    if to_move:
         m_next = re.match(r"^sprint-(\d+)$", next_sprint_label)
         if m_next:
             try:
@@ -7066,7 +8634,6 @@ async def finish_sprint(owner: str, repo_name: str, label: str, body: FinishSpri
                 github_client.invalidate("sprints:")
             except Exception as exc:
                 errors.append(f"Failed to create label {next_sprint_label}: {exc}")
-        # Create plan.json for next sprint if absent
         try:
             if not _read_plan_json(project_root, next_sprint_label):
                 _plan_json_set_state(
@@ -7076,26 +8643,25 @@ async def finish_sprint(owner: str, repo_name: str, label: str, body: FinishSpri
         except Exception:
             pass
 
-    # Move non-UAT tickets: transition to QUEUED, swap sprint labels
-    for iss in non_uat_issues:
+    # Move unselected non-UAT tickets to next sprint
+    for iss in to_move:
         issue_num = iss["number"]
         try:
             _sm_transition(issue_num, _TicketState.QUEUED, actor="finish_button", repo=repo)
-            github_client.update_labels(
-                issue_num,
-                add=[next_sprint_label],
-                remove=[label],
-                repo_name=repo,
-            )
+            github_client.update_labels(issue_num, add=[next_sprint_label], remove=[label], repo_name=repo)
             moved += 1
         except (_TransitionError, subprocess.CalledProcessError, Exception) as exc:
             errors.append(f"#{issue_num}: {exc}")
 
-    # Close UAT tickets with reason=completed
-    for iss in uat_issues:
+    # Close selected tickets and remove sprint label
+    for iss in to_close:
         issue_num = iss["number"]
         try:
             github_client.close_issue(issue_num, repo_name=repo, reason="completed")
+            try:
+                github_client.update_labels(issue_num, add=[], remove=[label], repo_name=repo)
+            except Exception:
+                pass  # label removal is best-effort
             closed += 1
         except subprocess.CalledProcessError as exc:
             err_msg = exc.stderr.strip() if exc.stderr else str(exc)
@@ -7596,7 +9162,7 @@ def _do_pre_commit_bulk_images(job_id: str, repo: str) -> dict[str, str]:
     if not attach_dir or not attach_dir.exists():
         return {}
 
-    job = _bulk_jobs.get(job_id)
+    job = _get_bulk_job(job_id)
     if not job:
         return {}
 
@@ -7636,10 +9202,21 @@ def _do_pre_commit_bulk_images(job_id: str, repo: str) -> dict[str, str]:
     return url_map
 
 
+_INLINE_IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"}
+
+
 def _build_body_with_images(body: str, ticket_index: int, job: dict) -> str:
-    """Prepend image markdown links for images assigned to this ticket."""
+    """Append attachment links for files assigned to this ticket.
+
+    Images use inline syntax; all other types use plain link syntax so they
+    render as clickable links rather than broken-image icons on GitHub.
+
+    Idempotent: returns body unchanged if an Attachments section is already present.
+    """
     url_map = job.get("image_url_map") or {}
     if not url_map:
+        return body
+    if "## Attachments" in body:
         return body
     assignments = job.get("image_assignments") or []
     links: list[str] = []
@@ -7649,10 +9226,14 @@ def _build_body_with_images(body: str, ticket_index: int, job: dict) -> str:
             fname = a.get("filename", "")
             url = url_map.get(fname)
             if url:
-                links.append(f"![{fname}]({url})")
+                ext = Path(fname).suffix.lower()
+                if ext in _INLINE_IMAGE_EXTS:
+                    links.append(f"![{fname}]({url})")
+                else:
+                    links.append(f"[{fname}]({url})")
     if not links:
         return body
-    return body + "\n\n" + "\n\n".join(links)
+    return body + "\n\n## Attachments\n\n" + "\n\n".join(links)
 
 
 def _parse_ba_draft(output: str) -> tuple[str, str, bool]:
@@ -7974,7 +9555,7 @@ async def _run_bulk_estimator_for_ticket(
     """
     import logging as _logging
 
-    job = _bulk_jobs.get(job_id)
+    job = _get_bulk_job(job_id)
     if not job:
         return
     ticket = job["tickets"][index]
@@ -8017,7 +9598,7 @@ async def _run_bulk_estimator_for_ticket(
                 )
                 _post_estimator_warning(issue_number, repo, "bulk estimation timed out after 240s")
                 # Re-fetch job in case it was updated while waiting
-                job = _bulk_jobs.get(job_id)
+                job = _get_bulk_job(job_id)
                 if job:
                     ticket = job["tickets"][index]
                     ticket["state"] = "estimate_failed"
@@ -8028,7 +9609,7 @@ async def _run_bulk_estimator_for_ticket(
     except Exception as exc:
         _logging.warning(f"[bulk-estimator] estimation for #{issue_number} failed: {exc}")
         _post_estimator_warning(issue_number, repo, str(exc))
-        job = _bulk_jobs.get(job_id)
+        job = _get_bulk_job(job_id)
         if job:
             ticket = job["tickets"][index]
             ticket["state"] = "estimate_failed"
@@ -8037,7 +9618,7 @@ async def _run_bulk_estimator_for_ticket(
             await _broadcast_bulk_event(job_id, {"type": "ticket_update", "ticket": dict(ticket)})
         return
 
-    job = _bulk_jobs.get(job_id)
+    job = _get_bulk_job(job_id)
     if not job:
         return
     ticket = job["tickets"][index]
@@ -8090,7 +9671,7 @@ async def _run_bulk_draft_estimator_for_ticket(job_id: str, index: int) -> None:
     """
     import logging as _logging
 
-    job = _bulk_jobs.get(job_id)
+    job = _get_bulk_job(job_id)
     if not job or index < 0 or index >= len(job["tickets"]):
         return
     ticket = job["tickets"][index]
@@ -8149,7 +9730,7 @@ async def _run_bulk_draft_estimator_for_ticket(job_id: str, index: int) -> None:
             except OSError:
                 pass
 
-    job = _bulk_jobs.get(job_id)
+    job = _get_bulk_job(job_id)
     if not job or index >= len(job["tickets"]):
         return
     ticket = job["tickets"][index]
@@ -8474,6 +10055,44 @@ def _bulk_job_created_at(job: dict) -> float:
     return time.time()
 
 
+def _get_bulk_job(job_id: str) -> dict | None:
+    """Return job from memory, or lazy-load from disk (e.g. after server restart).
+
+    If found on disk and not in memory, the job is restored to _bulk_jobs so
+    subsequent calls hit memory. Returns None if not found anywhere.
+    """
+    job = _bulk_jobs.get(job_id)
+    if job is not None:
+        return job
+    # Disk fallback — covers server reload / restart scenarios
+    try:
+        jobs_dir = _bulk_jobs_dir()
+        path = jobs_dir / f"{job_id}.json"
+        if path.exists():
+            job = json.loads(path.read_text(encoding="utf-8"))
+            # A job that was 'running' when the server restarted can never
+            # resume — its in-flight BA processes are gone. Mark it cancelled
+            # so the client gets accurate state instead of a perpetual spinner.
+            if job.get("status") == "running":
+                _bulk_cancel_interrupted(job)
+            _bulk_jobs[job_id] = job
+            return job
+    except Exception:
+        pass
+    return None
+
+
+def _bulk_cancel_interrupted(job: dict) -> None:
+    """Mark a job interrupted by a server restart as cancelled and persist to disk."""
+    _NON_TERMINAL = {"pending", "drafting", "estimating"}
+    for ticket in job.get("tickets", []):
+        if ticket.get("state") in _NON_TERMINAL:
+            ticket["state"] = "cancelled"
+            ticket["error"] = "Server restarted — job was interrupted"
+    job["status"] = "cancelled"
+    _persist_bulk_job(job)
+
+
 def _prune_old_bulk_jobs() -> None:
     """Remove job snapshots older than 24 hours from disk and memory."""
     cutoff = time.time() - 86400
@@ -8516,7 +10135,7 @@ async def _run_single_ba_ticket(
     default_labels: list[str],
 ) -> None:
     """Run BA polish for a single ticket and update job state. Does NOT create the issue."""
-    job = _bulk_jobs.get(job_id)
+    job = _get_bulk_job(job_id)
     if not job:
         return
 
@@ -8649,7 +10268,7 @@ async def _bulk_flusher(job_id: str) -> None:
     The flusher injects image links into the body and broadcasts; it does NOT create
     GitHub issues — that happens via /post-selected after the user reviews.
     """
-    job = _bulk_jobs.get(job_id)
+    job = _get_bulk_job(job_id)
     if not job:
         return
 
@@ -8668,7 +10287,7 @@ async def _bulk_flusher(job_id: str) -> None:
     flush_idx = 0
 
     while flush_idx < n:
-        job = _bulk_jobs.get(job_id)
+        job = _get_bulk_job(job_id)
         if not job:
             return
 
@@ -8718,7 +10337,7 @@ async def _bulk_flusher(job_id: str) -> None:
             flush_idx += 1
 
     # All drafts processed — check terminal draft states (draft_ready, failed, skipped, size_warning)
-    job = _bulk_jobs.get(job_id)
+    job = _get_bulk_job(job_id)
     if job:
         all_drafted = all(
             t["state"] in ("draft_ready", "failed", "skipped", "size_warning")
@@ -8744,7 +10363,7 @@ async def _bulk_worker(
         except asyncio.QueueEmpty:
             break
 
-        job = _bulk_jobs.get(job_id)
+        job = _get_bulk_job(job_id)
         if not job:
             break
 
@@ -8768,7 +10387,7 @@ async def _bulk_worker(
 
 async def _run_bulk_job(job_id: str) -> None:
     """Main bulk job orchestrator: runs workers + flusher concurrently."""
-    job = _bulk_jobs.get(job_id)
+    job = _get_bulk_job(job_id)
     if not job:
         return
 
@@ -8799,7 +10418,7 @@ async def _run_bulk_job(job_id: str) -> None:
     await asyncio.gather(*workers, return_exceptions=True)
 
     # Signal stop if needed — mark remaining pending as skipped
-    job = _bulk_jobs.get(job_id)
+    job = _get_bulk_job(job_id)
     if job and job.get("stop_requested"):
         for t in job["tickets"]:
             if t["state"] in ("pending", "draft_ready"):
@@ -8813,7 +10432,7 @@ async def _run_bulk_job(job_id: str) -> None:
     await flusher
 
     # Final status update — flusher handles drafts_ready; fall back if not set
-    job = _bulk_jobs.get(job_id)
+    job = _get_bulk_job(job_id)
     if job and job.get("status") not in ("done", "stopped", "drafts_ready"):
         job["status"] = "drafts_ready"
         _persist_bulk_job(job)
@@ -8998,6 +10617,7 @@ async def bulk_create_start(
         "image_assignments": image_assignments,
         "image_url_map": None,
         "tickets": tickets,
+        "_action_id": str(uuid.uuid4()),
     }
     _bulk_jobs[job_id] = job
     _bulk_job_queues[job_id] = []
@@ -9012,7 +10632,7 @@ async def bulk_create_start(
 @app.get("/api/tickets/bulk/{job_id}")
 async def bulk_get_job(job_id: str):
     """Return the current state of a bulk job."""
-    job = _bulk_jobs.get(job_id)
+    job = _get_bulk_job(job_id)
     if not job:
         # Try to load from disk
         try:
@@ -9042,7 +10662,7 @@ async def bulk_get_job(job_id: str):
 @app.get("/api/tickets/bulk/{job_id}/stream")
 async def bulk_job_stream(job_id: str, request: Request):
     """SSE stream of state-change events for a bulk job."""
-    job = _bulk_jobs.get(job_id)
+    job = _get_bulk_job(job_id)
     if not job:
         # Rehydrate from disk if the job was persisted but evicted from memory
         # (e.g. server restart). Mirrors bulk_get_job so a reconnecting client
@@ -9101,11 +10721,33 @@ class BulkStopBody(BaseModel):
 @app.post("/api/tickets/bulk/{job_id}/stop")
 async def bulk_stop_job(job_id: str):
     """Graceful stop: finish in-flight BA calls, mark remaining pending as skipped."""
-    job = _bulk_jobs.get(job_id)
+    job = _get_bulk_job(job_id)
     if not job:
         raise HTTPException(404, detail="Job not found")
     job["stop_requested"] = True
     _persist_bulk_job(job)
+    return {"ok": True}
+
+
+@app.delete("/api/tickets/bulk/{job_id}")
+async def bulk_delete_job(job_id: str):
+    """Discard a bulk job entirely — used by the "Start new batch" / clear action.
+
+    Signals any live worker to stop, drops the in-memory entry, and removes the
+    persisted JSON so a wedged or finished job never reloads. Idempotent:
+    returns ok even if the job is already gone.
+    """
+    job = _bulk_jobs.get(job_id)
+    if job is not None:
+        job["stop_requested"] = True
+    _bulk_jobs.pop(job_id, None)
+    _bulk_job_queues.pop(job_id, None)
+    try:
+        path = _bulk_jobs_dir() / f"{job_id}.json"
+        if path.exists():
+            path.unlink()
+    except Exception as e:
+        logger.warning("bulk_delete_job: could not remove %s.json: %s", job_id, str(e)[:200])
     return {"ok": True}
 
 
@@ -9127,7 +10769,7 @@ async def bulk_estimate_draft(job_id: str, body: BulkEstimateDraftBody):
     changed since the last estimate. Sizing runs in the background; the caller
     gets the new estimate via the SSE ticket_update stream.
     """
-    job = _bulk_jobs.get(job_id)
+    job = _get_bulk_job(job_id)
     if not job:
         raise HTTPException(404, detail="Job not found")
     tickets = job["tickets"]
@@ -9155,7 +10797,7 @@ async def bulk_estimate_draft(job_id: str, body: BulkEstimateDraftBody):
 @app.post("/api/tickets/bulk/{job_id}/skip")
 async def bulk_skip_ticket(job_id: str, body: BulkSkipBody):
     """Mark a pending ticket as skipped (no-op if already past pending)."""
-    job = _bulk_jobs.get(job_id)
+    job = _get_bulk_job(job_id)
     if not job:
         raise HTTPException(404, detail="Job not found")
     tickets = job["tickets"]
@@ -9188,14 +10830,14 @@ class BulkRetryBody(BaseModel):
 @app.post("/api/tickets/bulk/{job_id}/retry")
 async def bulk_retry_ticket(job_id: str, body: BulkRetryBody):
     """Re-queue a failed ticket for retry."""
-    job = _bulk_jobs.get(job_id)
+    job = _get_bulk_job(job_id)
     if not job:
         raise HTTPException(404, detail="Job not found")
     tickets = job["tickets"]
     if body.index < 0 or body.index >= len(tickets):
         raise HTTPException(422, detail="Invalid ticket index")
     ticket = tickets[body.index]
-    if ticket["state"] != "failed":
+    if ticket["state"] not in ("failed", "cancelled"):
         return {"ok": True, "state": ticket["state"]}
 
     # Reset to pending and re-run as a single task
@@ -9256,7 +10898,7 @@ async def bulk_redraft_ticket(job_id: str, body: BulkRedraftBody):
     Works on draft_ready, failed, or skipped tickets. After BA completes the
     ticket returns to draft_ready for user review — no GitHub issue is created.
     """
-    job = _bulk_jobs.get(job_id)
+    job = _get_bulk_job(job_id)
     if not job:
         raise HTTPException(404, detail="Job not found")
     tickets = job["tickets"]
@@ -9330,9 +10972,6 @@ class BulkPostSelectedBody(BaseModel):
     sprint_label: str | None = None
 
 
-_SPRINT_LABEL_RE = re.compile(r"^sprint-\d+$")
-
-
 def _resolve_bulk_sprint_label(sprint_label: str | None, repo: str | None) -> str:
     """Resolve a bulk job's sprint selection to a concrete label.
 
@@ -9344,12 +10983,32 @@ def _resolve_bulk_sprint_label(sprint_label: str | None, repo: str | None) -> st
     if sprint_label != "NEW":
         return sprint_label
     try:
-        existing = github_client.list_sprints(repo_name=repo)
-        next_num = (max(existing) if existing else 0) + 1
+        next_num = _next_new_sprint_number(repo)
         github_client.ensure_sprint_label(next_num, repo_name=repo)
         return f"sprint-{next_num}"
     except Exception:
         return ""
+
+
+def _next_new_sprint_number(repo: str | None) -> int:
+    """Next sprint number for a brand-new sprint — the SAME value the board's
+    "New sprint (Sprint N)" option shows.
+
+    Must take the max over BOTH live sprint labels AND finished-sprint summary
+    numbers: a sprint's `sprint-N` label is often deleted once it finishes, so
+    counting labels alone resets the next number back to 1 (issue: bulk-create
+    "NEW" said 54 but created sprint-1). The finished-summary issues preserve
+    the real high-water mark cross-machine.
+    """
+    nums: list[int] = list(github_client.list_sprints(repo_name=repo) or [])
+    for lbl in _finished_sprint_summaries(repo):
+        if _SPRINT_LABEL_RE.match(lbl):
+            try:
+                # lbl is "sprint-N" or "sprint-N.X" — take the base number N.
+                nums.append(int(lbl.split("-", 1)[1].split(".")[0]))
+            except (IndexError, ValueError):
+                pass
+    return (max(nums) if nums else 0) + 1
 
 
 def _compose_ticket_labels(sprint_label: str, item_labels: list[str]) -> list[str]:
@@ -9374,7 +11033,7 @@ async def bulk_post_selected(job_id: str, body: BulkPostSelectedBody):
     Each item in `tickets` specifies the ticket index and the labels to apply.
     Only tickets in draft_ready state can be posted; others are ignored.
     """
-    job = _bulk_jobs.get(job_id)
+    job = _get_bulk_job(job_id)
     if not job:
         raise HTTPException(404, detail="Job not found")
 
@@ -9397,6 +11056,20 @@ async def bulk_post_selected(job_id: str, body: BulkPostSelectedBody):
 
     async def _post_task():
         estimation_tasks: list[asyncio.Task] = []
+
+        # Retry attachment pre-commit if _run_bulk_job failed to commit earlier
+        # (e.g. transient git/network error). image_url_map being falsy while
+        # has_attachments is True is the signal that the first attempt failed.
+        if job.get("has_attachments") and not job.get("image_url_map"):
+            try:
+                url_map = await asyncio.to_thread(
+                    _do_pre_commit_bulk_images, job["job_id"], job["repo"]
+                )
+                job["image_url_map"] = url_map
+                _persist_bulk_job(job)
+            except Exception as _pre_err:
+                logger.warning("Bulk image pre-commit retry failed: %s", str(_pre_err)[:200])
+                job["image_url_map"] = {}
 
         # Resolve the batch's target sprint once ("NEW" → create the next
         # sprint-N label), then persist the concrete label back onto the job.
@@ -9508,6 +11181,17 @@ async def bulk_post_selected(job_id: str, body: BulkPostSelectedBody):
             job["status"] = "done"
             _persist_bulk_job(job)
             await _broadcast_bulk_event(job_id, {"type": "job_done", "job_id": job_id})
+            _created_ids = [
+                f"#{t['issue_num']}" for t in job["tickets"]
+                if t.get("state") == "created" and t.get("issue_num") is not None
+            ]
+            _emit_dashboard_event(
+                project=job.get("repo") or "dashboard",
+                type="bulk_created",
+                target=",".join(_created_ids),
+                detail={"ticket_ids": _created_ids},
+                action_id=job.get("_action_id") or str(uuid.uuid4()),
+            )
 
     asyncio.create_task(_post_task())
     return {"ok": True}
@@ -9515,7 +11199,7 @@ async def bulk_post_selected(job_id: str, body: BulkPostSelectedBody):
 
 async def _post_ticket_body_to_github(job_id: str, index: int, body_text: str) -> None:
     """Post a ticket body directly to GitHub (no BA drafting) and update job state."""
-    job = _bulk_jobs.get(job_id)
+    job = _get_bulk_job(job_id)
     if not job:
         return
     tickets = job["tickets"]
@@ -9617,7 +11301,7 @@ class BulkRetryWithBodyBody(BaseModel):
 @app.post("/api/tickets/bulk/{job_id}/retry-with-body")
 async def bulk_retry_ticket_with_body(job_id: str, body: BulkRetryWithBodyBody):
     """Retry a failed ticket by POSTing the supplied body directly to GitHub (no BA drafting)."""
-    job = _bulk_jobs.get(job_id)
+    job = _get_bulk_job(job_id)
     if not job:
         raise HTTPException(404, detail="Job not found")
     tickets = job["tickets"]
@@ -9642,7 +11326,7 @@ async def bulk_retry_with_image(
     file: UploadFile = File(default=None),
 ):
     """Retry a failed ticket with an optional new image committed to issue-assets."""
-    job = _bulk_jobs.get(job_id)
+    job = _get_bulk_job(job_id)
     if not job:
         raise HTTPException(404, detail="Job not found")
     tickets = job["tickets"]
@@ -9703,7 +11387,7 @@ class BulkRetryAllBody(BaseModel):
 @app.post("/api/tickets/bulk/{job_id}/retry-all")
 async def bulk_retry_all_failed(job_id: str, body: BulkRetryAllBody):
     """Retry all failed tickets by POSTing each ticket's edited body directly to GitHub."""
-    job = _bulk_jobs.get(job_id)
+    job = _get_bulk_job(job_id)
     if not job:
         raise HTTPException(404, detail="Job not found")
     tickets = job["tickets"]
@@ -9717,7 +11401,7 @@ async def bulk_retry_all_failed(job_id: str, body: BulkRetryAllBody):
         if idx < 0 or idx >= len(tickets):
             continue
         t = tickets[idx]
-        if t["state"] != "failed":
+        if t["state"] not in ("failed", "cancelled"):
             continue
         job["status"] = "running"
         asyncio.create_task(_post_ticket_body_to_github(job_id, idx, body_text))
@@ -9742,7 +11426,7 @@ async def bulk_size_remedy_comment(job_id: str, body: SizeRemedyCommentBody):
     Accepts a ticket in size_warning state, creates the issue with a trimmed body,
     then immediately posts the overflow as a follow-up comment.
     """
-    job = _bulk_jobs.get(job_id)
+    job = _get_bulk_job(job_id)
     if not job:
         raise HTTPException(404, detail="Job not found")
     tickets = job["tickets"]
@@ -9893,7 +11577,7 @@ async def bulk_size_remedy_images(job_id: str, body: SizeRemedyImagesBody):
     After replacement the body length is rechecked. If still over threshold the ticket stays in
     size_warning state with updated counts. If under threshold the issue is created immediately.
     """
-    job = _bulk_jobs.get(job_id)
+    job = _get_bulk_job(job_id)
     if not job:
         raise HTTPException(404, detail="Job not found")
     tickets = job["tickets"]
@@ -10010,9 +11694,14 @@ async def bulk_size_remedy_images(job_id: str, body: SizeRemedyImagesBody):
 
 # ── Startup: mark any in-flight jobs as failed (best-effort) ─────────────────
 
-@app.on_event("startup")
 async def _mark_inflight_jobs_failed():
-    """On restart, mark any previously-running jobs as failed (state lost)."""
+    """On restart, mark any previously-running jobs as failed (state lost).
+
+    Called from the lifespan startup. NOTE: this must NOT use
+    @app.on_event("startup") — the app is created with a lifespan handler, and
+    FastAPI ignores on_event hooks when a lifespan is set, so the decorator
+    silently never ran (left bulk jobs wedged in "running" across restarts).
+    """
     try:
         jobs_dir = _bulk_jobs_dir()
         for p in jobs_dir.glob("*.json"):

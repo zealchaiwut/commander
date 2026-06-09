@@ -45,6 +45,12 @@ For a full walkthrough including multi-clone setup for Coder/Tester agents, see
 | **Dashboard** | Live agent event feed, project cards, sprint progress bar, UAT sign-off UI | [docs/features/dashboard.md](docs/features/dashboard.md) |
 | **Sprint Manager** | Automates the BA → Coder → Tester → UAT loop for every ticket in a sprint | [docs/features/sprint-manager.md](docs/features/sprint-manager.md) |
 | **Sprint Estimator** | Claude Code-driven effort estimation for all sprint tickets — runs automatically at sprint start | see below |
+| **Settings** | Global and per-project key-value config store backed by Neon; REST API at `GET/PUT /api/settings` and `GET/PUT /api/projects/{slug}/settings` | [SCHEMA.md](SCHEMA.md) |
+| **Global Settings screen** | Gear icon in the dashboard header opens a settings panel for global config (model defaults, estimation params) | — |
+| **Project Settings tab** | "More" menu on project cards exposes a Settings tab for per-project overrides | — |
+| **Settings sync** | Bidirectional sync between local files (`projects.json`, `sprint.yaml`) and Neon; diff preview before commit via `POST /api/settings/sync/diff` and `POST /api/settings/sync/commit` | — |
+| **Editable env paths** | Project environment paths (prd/uat/coder/tester) are editable from the dashboard via `GET/PUT /api/projects/{slug}/environments`; server-side folder browser at `GET /api/fs/list` | — |
+| **Project events log** | Structured audit log of project-level actions (settings changes, env path updates) recorded in the `project_events` SQLite table | [SCHEMA.md](SCHEMA.md) |
 | **Neon DB** | Postgres-backed sprint and project state with Alembic migrations; dual-writes alongside JSON | [SCHEMA.md](SCHEMA.md) |
 | **Structured Logging** | JSON-lines log module (`services/logging.py`) writing to `.commander/logs/structured-YYYY-MM-DD.log`; respects `COMMANDER_LOG_LEVEL` | — |
 | **API** | REST API consumed by the dashboard and agent hooks | [docs/features/api.md](docs/features/api.md) |
@@ -53,10 +59,7 @@ For a full walkthrough including multi-clone setup for Coder/Tester agents, see
 
 ## How the estimator works
 
-The Sprint Estimator runs automatically at the start of every sprint (after the
-sprint branch is created, before any coder agents are dispatched). It uses a single
-Claude Code subprocess to estimate effort, files impacted, and risks for all backlog
-tickets in one pass.
+The Sprint Estimator is **skipped by default** — pass `--no-skip-estimator` to `sprint_manager.py` to enable it. When enabled it runs at the start of every sprint (after the sprint branch is created, before any coder agents are dispatched), using a single Claude Code subprocess to estimate effort, files impacted, and risks for all backlog tickets in one pass.
 
 **What it does:**
 1. Fetches all open backlog issues labeled with the sprint label (skips any already labeled `estimated`, `done`, `UAT-approved`, `needs-rework`, or `closed`).
@@ -226,8 +229,13 @@ commander/
 ├── scripts/                 # CLI tools (create_ticket.py, init_project.py, …)
 ├── hooks/                   # Claude Code hooks (agent_finished, tool_used, …)
 ├── services/                # Background services
-├── docs/                    # Documentation
+├── docs/                    # Documentation (standard layout, all projects)
+│   ├── quickstart.md        # 5-minute install and first run
+│   ├── tutorial.md          # Full walkthrough
+│   ├── workflow.md          # Bulk Create → Run → Finish/Rerun
+│   ├── milestones.md        # Auto-maintained sprint history
 │   ├── features/            # Per-feature guides
+│   ├── bulk-create/         # Saved bulk-create prompts and outputs
 │   ├── changelog/
 │   │   ├── uat/             # Changelogs written when a sprint finishes on develop
 │   │   └── prd/             # Changelogs written when develop is merged to master
@@ -411,10 +419,17 @@ python scripts/migrate_sprints_to_neon.py --project zealchaiwut/commander
 
 ## Docs
 
-- [Setup and tutorial](docs/tutorial.md)
+**Start here**
+- [Quick start](docs/quickstart.md) — install and first run in 5 minutes
+- [Tutorial](docs/tutorial.md) — full walkthrough and multi-clone setup
+- [Workflow](docs/workflow.md) — Bulk Create → Run Sprint → Finish/Rerun
+- [Milestones](docs/milestones.md) — what each sprint shipped
+
+**Reference**
 - [Dashboard](docs/features/dashboard.md)
 - [Sprint Manager](docs/features/sprint-manager.md)
 - [API reference](docs/features/api.md)
+- [Bulk-create records](docs/bulk-create/)
 - [UAT changelogs](docs/changelog/uat/)
 - [PRD changelogs](docs/changelog/prd/)
 - [Testing sandbox](docs/testing/sandbox-repo.md)

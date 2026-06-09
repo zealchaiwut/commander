@@ -307,6 +307,13 @@ def step1_init_repo(
         "__pycache__/\n*.pyc\n.env\n*.log\nvenv/\n.DS_Store\n"
     )
 
+    # Stamp the standard docs structure (shared by every Commander project)
+    try:
+        from scaffold_docs import scaffold as _scaffold_docs
+        _scaffold_docs(repo_dir, repo_name, check=False)
+    except Exception as e:  # never block project creation on docs scaffolding
+        info(f"docs scaffold skipped: {e}")
+
     _run("git", "add", ".", cwd=repo_dir)
     _run("git", "commit", "-m", "chore: initial commit", cwd=repo_dir)
 
@@ -561,11 +568,21 @@ uat:
 agents:
   coder_prompt_template: |
     Read the issue at {{issue_url}} and implement it following the
-    project's branching workflow. Use the workflow defined in CLAUDE.md.
+    project's branching workflow. Use the BA/coder/tester workflow defined in CLAUDE.md.
     If the issue body contains an '## Attachments' section, download the
     referenced files from the 'attachments' branch before starting — see
     the 'How to read issue attachments' section in CLAUDE.md for the
     exact `gh api` commands.
+    If the issue touches frontend/UI, read PRODUCT.md and DESIGN.md first
+    to understand design conventions and anti-patterns to avoid.
+    TDD WORKFLOW: before writing implementation code, read the
+    '## Acceptance Criteria' (or '## Acceptance') section of the issue
+    and translate each criterion into a pytest test in the tests/ directory.
+    Write the tests first, then implement until all tests pass.
+    You must NOT delete, skip, or weaken any test to make it pass —
+    every test must be anchored to a specific acceptance criterion and must
+    pass because the implementation satisfies it, not because the test was
+    softened.
   tester_prompt_template: |
     Read the issue at {{issue_url}} and verify it as a tester following
     the project's testing workflow. Use the workflow defined in CLAUDE.md.

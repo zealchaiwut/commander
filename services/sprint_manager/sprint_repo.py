@@ -244,6 +244,82 @@ def list_tickets(sprint_label: str) -> List[SprintTicket]:
         return tickets
 
 
+def write_estimated_size(issue_number: int, size: str) -> None:
+    """Write estimated_size to all sprint_tickets rows for *issue_number*.
+
+    Updates every sprint that contains this issue. Best-effort: silently
+    returns if no rows match.
+    """
+    with _open_session() as session:
+        tickets = (
+            session.query(SprintTicket)
+            .filter_by(issue_number=issue_number)
+            .all()
+        )
+        for ticket in tickets:
+            ticket.estimated_size = size
+        if tickets:
+            session.commit()
+
+
+def get_calibration_tickets(
+    project: str,
+    since_dt: Optional[datetime] = None,
+    until_dt: Optional[datetime] = None,
+    sprint_label: Optional[str] = None,
+) -> List[dict]:
+    """Return qualifying tickets for calibration analytics, scoped to a project.
+
+    Includes only rows where estimated_size IS NOT NULL and
+    actual_elapsed_seconds IS NOT NULL. Optionally filtered by
+    completed_at date range and/or sprint label.
+
+    Returns list of dicts with keys: issue_number, estimated_size,
+    actual_elapsed_seconds, sprint_label.
+    """
+    from sqlalchemy import text as _text  # noqa: PLC0415
+
+    params: dict = {"project": project}
+    where_clauses = [
+        "s.project = :project",
+        "t.estimated_size IS NOT NULL",
+        "t.actual_elapsed_seconds IS NOT NULL",
+    ]
+
+    if sprint_label is not None:
+        where_clauses.append("s.label = :sprint_label")
+        params["sprint_label"] = sprint_label
+
+    if since_dt is not None:
+        where_clauses.append("t.completed_at >= :since_dt")
+        params["since_dt"] = since_dt.isoformat()
+
+    if until_dt is not None:
+        where_clauses.append("t.completed_at <= :until_dt")
+        params["until_dt"] = until_dt.isoformat()
+
+    where_sql = " AND ".join(where_clauses)
+    sql = _text(
+        f"SELECT t.issue_number, t.estimated_size, t.actual_elapsed_seconds, s.label"
+        f" FROM sprint_tickets t"
+        f" JOIN sprints s ON s.id = t.sprint_id"
+        f" WHERE {where_sql}"
+    )
+
+    with _open_session() as session:
+        rows = session.execute(sql, params).fetchall()
+
+    return [
+        {
+            "issue_number": row[0],
+            "estimated_size": row[1],
+            "actual_elapsed_seconds": row[2],
+            "sprint_label": row[3],
+        }
+        for row in rows
+    ]
+
+
 def reorder_tickets(sprint_label: str, issue_numbers: List[int]) -> None:
     with _open_session() as session:
         sprint = session.query(Sprint).filter_by(label=sprint_label).first()

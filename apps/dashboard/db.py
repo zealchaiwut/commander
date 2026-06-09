@@ -58,15 +58,44 @@ def init_db():
                 created_at  TEXT NOT NULL
             )
         """)
+        # Migrate old session-events table if it has the legacy schema.
+        old_cols = {r["name"] for r in conn.execute("PRAGMA table_info(events)").fetchall()}
+        if "session_id" in old_cols:
+            conn.execute("ALTER TABLE events RENAME TO session_events")
         conn.execute("""
-            CREATE TABLE IF NOT EXISTS events (
-                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            CREATE TABLE IF NOT EXISTS session_events (
+                id          INTEGER PRIMARY KEY,
                 session_id  TEXT NOT NULL,
                 event_type  TEXT NOT NULL,
                 data        TEXT NOT NULL,
                 created_at  TEXT NOT NULL
             )
         """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS events (
+                id        INTEGER PRIMARY KEY,
+                project   TEXT NOT NULL,
+                timestamp DATETIME NOT NULL,
+                source    TEXT NOT NULL CHECK(source IN ('agent', 'dashboard', 'github')),
+                actor     TEXT NOT NULL,
+                type      TEXT NOT NULL,
+                target    TEXT NOT NULL,
+                action_id TEXT,
+                detail    TEXT NOT NULL
+            )
+        """)
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS ix_events_project_ts "
+            "ON events (project, timestamp DESC)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS ix_events_project_target "
+            "ON events (project, target)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS ix_events_action_id "
+            "ON events (action_id)"
+        )
         conn.execute("""
             CREATE TABLE IF NOT EXISTS token_usage (
                 id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -85,6 +114,31 @@ def init_db():
                 conn.execute(f"ALTER TABLE token_usage ADD COLUMN {col} {coltype}")
             except Exception:
                 pass  # column already exists — ignore
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS project_events (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                project     TEXT NOT NULL,
+                created_at  TEXT NOT NULL,
+                source      TEXT NOT NULL,
+                event_type  TEXT NOT NULL,
+                target      TEXT,
+                actor       TEXT,
+                action_id   TEXT,
+                data        TEXT
+            )
+        """)
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS ix_project_events_project_created "
+            "ON project_events (project, created_at DESC)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS ix_project_events_target "
+            "ON project_events (project, target)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS ix_project_events_action "
+            "ON project_events (action_id)"
+        )
         conn.execute("""
             CREATE TABLE IF NOT EXISTS docs_freshness_warnings (
                 id           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -136,10 +190,91 @@ def add_event(session_id: str, event_type: str, data: dict):
     now = datetime.utcnow().isoformat()
     with get_conn() as conn:
         conn.execute(
-            "INSERT INTO events (session_id, event_type, data, created_at) VALUES (?, ?, ?, ?)",
+            "INSERT INTO session_events (session_id, event_type, data, created_at) VALUES (?, ?, ?, ?)",
             (session_id, event_type, json.dumps(data), now),
         )
         conn.commit()
+
+
+def record_event(
+    project: str,
+    source: str,
+    actor: str,
+    type: str,
+    target: str,
+    detail: dict,
+    action_id: str | None = None,
+) -> None:
+    """Insert one structured log event into the events table."""
+    now = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S")
+    with get_conn() as conn:
+        conn.execute(
+            """INSERT INTO events
+               (project, timestamp, source, actor, type, target, action_id, detail)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (project, now, source, actor, type, target, action_id, json.dumps(detail)),
+        )
+        conn.commit()
+
+
+def record_project_event(
+    project: str,
+    source: str,
+    event_type: str,
+    target: str | None = None,
+    actor: str | None = None,
+    data: dict | None = None,
+    action_id: str | None = None,
+) -> None:
+    """Insert one row into project_events."""
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    with get_conn() as conn:
+        conn.execute(
+            """INSERT INTO project_events
+               (project, created_at, source, event_type, target, actor, action_id, data)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (project, now, source, event_type, target, actor, action_id,
+             json.dumps(data) if data is not None else None),
+        )
+        conn.commit()
+
+
+def get_project_events(
+    project: str,
+    source: str | None = None,
+    target: str | None = None,
+    since: str | None = None,
+    until: str | None = None,
+    action_id: str | None = None,
+    limit: int = 200,
+) -> list[dict]:
+    """Return project_events rows newest-first with optional filters."""
+    clauses = ["project = ?"]
+    params: list = [project]
+    if source is not None:
+        clauses.append("source = ?")
+        params.append(source)
+    if target is not None:
+        clauses.append("target = ?")
+        params.append(target)
+    if since is not None:
+        clauses.append("created_at >= ?")
+        params.append(since.replace("Z", ""))
+    if until is not None:
+        clauses.append("created_at <= ?")
+        params.append(until.replace("Z", ""))
+    if action_id is not None:
+        clauses.append("action_id = ?")
+        params.append(action_id)
+    params.append(limit)
+    sql = (
+        "SELECT * FROM project_events WHERE "
+        + " AND ".join(clauses)
+        + " ORDER BY created_at DESC, id DESC LIMIT ?"
+    )
+    with get_conn() as conn:
+        rows = conn.execute(sql, params).fetchall()
+    return [dict(r) for r in rows]
 
 
 def get_agents() -> list[dict]:
@@ -160,7 +295,7 @@ def get_recent_events(limit: int = 50) -> list[dict]:
     with get_conn() as conn:
         rows = conn.execute("""
             SELECT e.*, a.name AS agent_name
-            FROM events e
+            FROM session_events e
             LEFT JOIN agents a ON e.session_id = a.session_id
             ORDER BY e.created_at DESC
             LIMIT ?
@@ -230,7 +365,7 @@ def get_window_usage(window_start_utc: str) -> int:
 
 
 def delete_test_events() -> int:
-    """Delete events whose session_id or data looks like a test/debug entry.
+    """Delete session_events whose session_id or data looks like a test/debug entry.
 
     Matches patterns: session_id starting with 'test_' or 'Test-', or
     event_type == 'test', or data containing 'Test alert' or 'Test-'.
@@ -238,7 +373,7 @@ def delete_test_events() -> int:
     """
     with get_conn() as conn:
         cur = conn.execute(
-            """DELETE FROM events WHERE
+            """DELETE FROM session_events WHERE
                session_id LIKE 'test_%'
                OR session_id LIKE 'Test-%'
                OR event_type = 'test'

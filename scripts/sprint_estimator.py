@@ -77,6 +77,12 @@ load_dotenv(DASHBOARD_DIR / ".env")
 
 import github_client  # noqa: E402
 
+sys.path.insert(0, str(REPO_ROOT))
+from services.sprint_manager.estimation_config import (  # noqa: E402
+    DEFAULT_ESTIMATION_CFG,
+    get_estimation_cfg,
+)
+
 
 # ── constants ──────────────────────────────────────────────────────────────────
 
@@ -135,7 +141,32 @@ class EstimateResult:
 
 # ── agent prompt ───────────────────────────────────────────────────────────────
 
-DEFAULT_ESTIMATOR_PROMPT = """\
+def build_estimator_prompt(
+    sprint_label: str,
+    repo: str,
+    issues_json: str,
+    estimation_cfg: Optional[dict] = None,
+) -> str:
+    """Build the sprint estimator prompt with size/buffer values from settings.
+
+    *estimation_cfg* is the resolved estimation config dict from get_estimation_cfg().
+    Falls back to DEFAULT_ESTIMATION_CFG when omitted so callers without a project
+    context still produce correct output.
+    """
+    cfg = estimation_cfg or DEFAULT_ESTIMATION_CFG
+    sm = cfg.get("size_minutes", DEFAULT_ESTIMATION_CFG["size_minutes"])
+    buf = cfg.get("buffer_pct", DEFAULT_ESTIMATION_CFG["buffer_pct"])
+    thin_buf = cfg.get("thin_ac_buffer_pct", DEFAULT_ESTIMATION_CFG["thin_ac_buffer_pct"])
+
+    size_table = (
+        f"   - S: ~{sm.get('S', 5)} min. Apply {buf}% buffer.\n"
+        f"   - M: ~{sm.get('M', 15)} min. Apply {buf}% buffer.\n"
+        f"   - L: ~{sm.get('L', 30)} min. Apply {buf}% buffer.\n"
+        f"   - XL: ~{sm.get('XL', 60)} min. Apply {buf}% buffer.\n"
+        f"   - Apply {thin_buf}% buffer instead of {buf}% when AC is thin (< 3 checkbox items) or vague."
+    )
+
+    return f"""\
 You are the **Sprint Estimator** agent for the Commander project.
 
 ## Your job
@@ -159,11 +190,7 @@ Repository: {repo}
    - Use `grep -r "<keyword>" --include="*.py" --include="*.js" --include="*.html" -l .`
      where <keyword> is a key function name, endpoint path, or class mentioned in AC
 3. Estimate size and minutes:
-   - S (< 1 hour): 1–45 minutes. Apply 20% buffer.
-   - M (1–3 hours): 60–180 minutes. Apply 20% buffer.
-   - L (3–8 hours): 180–480 minutes. Apply 20% buffer.
-   - XL (> 8 hours): 480+ minutes. Apply 20% buffer.
-   - Apply 30% buffer instead of 20% when AC is thin (< 3 checkbox items) or vague.
+{size_table}
    - Include 2–5 likely-impacted files per ticket as relative paths (relative to repo root).
 4. Flag risks (zero or more):
    - "DB migration" — any schema change, new table, new column
@@ -277,6 +304,8 @@ def _spawn_estimator_agent(
     repo: str,
     sprint_label: str,
     repo_path: Path,
+    estimation_cfg: Optional[dict] = None,
+    model: str = "claude-sonnet-4-6",
 ) -> Optional[EstimateResult]:
     """Spawn a single claude CLI call to estimate all issues in one pass.
 
@@ -284,10 +313,11 @@ def _spawn_estimator_agent(
     Respects ESTIMATOR_TIMEOUT_SEC (default 300s).
     Returns a parsed EstimateResult on success, None on failure.
     """
-    prompt = DEFAULT_ESTIMATOR_PROMPT.format(
+    prompt = build_estimator_prompt(
         sprint_label=sprint_label,
         repo=repo,
         issues_json=issues_json,
+        estimation_cfg=estimation_cfg,
     )
 
     env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
@@ -296,7 +326,7 @@ def _spawn_estimator_agent(
         proc = subprocess.run(
             [
                 "claude",
-                "--model", "claude-sonnet-4-6",
+                "--model", model,
                 "--dangerously-skip-permissions",
                 "-p", prompt,
             ],
@@ -477,12 +507,21 @@ def run_estimator(
     # Determine repo root for cwd in subprocess
     repo_root = REPO_ROOT
 
+    # Resolve estimation config from settings (best-effort; falls back to defaults)
+    project = getattr(cfg, "repo_name", None) or effective_repo
+    estimation_cfg = get_estimation_cfg(project=project)
+
+    # Resolve model from cfg (issue #700) or fall back to default
+    estimator_model = getattr(cfg, "estimator_model", None) or "claude-sonnet-4-6"
+
     # Spawn estimator agent
     result = _spawn_estimator_agent(
         json.dumps(issues_for_agent, indent=2),
         repo,
         sprint_label,
         repo_root,
+        estimation_cfg=estimation_cfg,
+        model=estimator_model,
     )
 
     if result is None:

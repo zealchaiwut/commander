@@ -39,10 +39,31 @@ Stores per-ticket state within a sprint. Cascade-deletes with `sprints`.
 | `started_at` | timestamptz | Set when ticket starts running |
 | `completed_at` | timestamptz | Set when ticket finishes |
 | `agent_active` | text | Active agent role when ticket is running |
-| `elapsed_seconds` | integer | Total wall-clock seconds for completed ticket |
+| `actual_elapsed_seconds` | integer | Total wall-clock seconds for completed ticket |
+| `total_tokens` | integer | Cumulative tokens consumed by agents for this ticket |
+| `estimated_size` | text | Size label from estimator (`S`, `M`, `L`, `XL`); nullable |
 
 Index: `ix_sprint_tickets_sprint_position` on `(sprint_id, position)`.
 Unique constraint: `(sprint_id, issue_number)`.
+
+### settings
+
+Key-value store for project-level config overrides. Supports global defaults and per-project overrides with shallow merge semantics (project fields win over global).
+
+| Column | Type | Description |
+|---|---|---|
+| `id` | integer PK | Auto-increment |
+| `scope` | text NOT NULL | `global` or `project` |
+| `project` | text | Repo slug for project-scoped rows; NULL for global rows |
+| `key` | text NOT NULL | Setting key, e.g. `estimation` |
+| `value` | jsonb NOT NULL | JSON value; merged at read time (project over global) |
+| `updated_at` | timestamptz | Defaults to `now()`; updated on each write |
+
+Unique constraint: `(scope, project, key)`.
+
+Helpers: `get_setting(key, project=None)` and `set_setting(scope, key, value, project=None)` in `services/sprint_manager/settings_repo.py`.
+
+Global seed row: `scope='global'`, `key='estimation'`, `value={"size_minutes":{"S":5,"M":15,"L":30,"XL":60},"buffer_pct":20,"thin_ac_buffer_pct":30}`.
 
 ### projects
 
@@ -78,6 +99,9 @@ Unique constraint: `(project_id, env)`.
 | `b2c3d4e5f6a1` | Add `sprints` and `sprint_tickets` tables |
 | `c3d4e5f6a1b2` | Add `projects` table, seeded from `projects.json` |
 | `d4e5f6a1b2c3` | Add `project_environments` table, seeded from `projects.json` |
+| `e5f6a1b2c3d4` | Add `actual_elapsed_seconds` (renamed) and `total_tokens` to `sprint_tickets` |
+| `f6a7b8c9d0e1` | Add `events` table for structured log events |
+| `g7h8i9j0k1l2` | Add `settings` KV table; add `estimated_size` to `sprint_tickets`; seed global estimation row |
 
 ## SQLite Tables (local dashboard)
 
@@ -86,5 +110,62 @@ Unique constraint: `(project_id, env)`.
 | `agents` | Active/recent Claude Code agent sessions |
 | `events` | Streamed agent events (tool use, output, errors) |
 | `token_usage` | Per-agent token consumption with `agent_role` and `model_name` columns |
+| `project_events` | Structured audit log of project-level actions (settings changes, env path updates, etc.) |
 
 Query with `GET /api/debug/token-usage/by-agent-model` for per-agent/model cost breakdown.
+
+### project_events
+
+Audit log for project-level events recorded by `record_project_event()` in `apps/dashboard/db.py`.
+
+| Column | Type | Description |
+|---|---|---|
+| `id` | integer PK | Auto-increment |
+| `project` | text NOT NULL | Repo slug, e.g. `zealchaiwut/commander` |
+| `created_at` | text NOT NULL | ISO 8601 UTC timestamp |
+| `source` | text NOT NULL | Component that emitted the event, e.g. `settings_api` |
+| `event_type` | text NOT NULL | Action type, e.g. `settings.update`, `env.update` |
+| `target` | text | Entity the action targeted (key name, env name, etc.); nullable |
+| `actor` | text | Who triggered the event (e.g. `dashboard`); nullable |
+| `action_id` | text | Idempotency / correlation ID; nullable |
+| `data` | text | JSON-encoded payload with before/after values or other context; nullable |
+
+Indexes: `(project, created_at DESC)`, `(project, target)`, `(action_id)`.
+
+## API Endpoints
+
+### Sprints
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/sprints/{sprint_label}/finish-card` | Summary card data for a sprint. Always HTTP 200 — check `state` field (see below). |
+
+**`GET /api/sprints/{sprint_label}/finish-card` — response states:**
+
+| `state` value | When returned | Notes |
+|---|---|---|
+| `"running"` | Sprint is currently executing | Includes `in_flight_count`, `pending_count`, `done_count`, `wall_clock_secs`, `started_at` |
+| `"completed"` / `"has_rework"` / `"cancelled"` | Sprint finished | Includes `done_count`, `failed_count`, `skipped_count`, `rework_count`, `wall_clock_secs`, `ended_at`, `summary_issue_url`, `summary_issue_num` |
+| `"no_data"` | Sprint has never been run (no state file on disk) | HTTP 200 — do **not** expect 404; check `state` field instead |
+
+> **Contract note (issue #671):** Before this change the endpoint returned HTTP 404 for the `no_data` case.
+> It now always returns HTTP 200. Clients must check `state`, not the HTTP status code.
+> See `docs/features/api.md` for the full response shape reference.
+
+### Docs Scaffold
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/projects/{slug}/docs/scaffold/check` | Check which standard doc files are missing for a project; returns drift report |
+| `POST` | `/api/projects/{slug}/docs/scaffold/apply` | Create any missing standard doc files from template; idempotent, never overwrites existing content |
+
+### Analytics
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/project/{slug}/analytics` | Serve the analytics HTML page for a project |
+| `GET` | `/api/sprint-progress` | Current sprint progress summary (tickets done/total, elapsed) |
+| `GET` | `/api/projects/{slug}/analytics/metrics` | Aggregated sprint metrics: velocity, throughput, cycle time by size |
+| `GET` | `/api/projects/{slug}/analytics/calibration` | Estimate accuracy data: estimated vs actual durations per size bucket |
+
+Query params for calibration endpoint: `since` (ISO date), `until` (ISO date), `sprint` (label string) — all optional.

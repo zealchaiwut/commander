@@ -102,6 +102,38 @@ Three MCP servers are installed at user scope — prefer them over shell fallbac
 - Read the issue body carefully before implementing — acceptance criteria 
   is the contract
 
+## Standard Docs Structure
+
+Every Commander project (including Commander itself) shares the same docs
+layout so the documentor and agents always know where things live:
+
+```
+README.md            hub linking to everything below
+CHANGELOG.md         change-log
+docs/
+  quickstart.md      install + first run
+  tutorial.md        full walkthrough
+  workflow.md        Bulk Create -> Run Sprint -> Finish/Rerun
+  architecture.md    system map (documentor-owned AUTO region)
+  milestones.md      sprint history (documentor-owned AUTO region)
+  features/          one .md per subsystem
+  bulk-create/       saved bulk-create prompts and outputs
+  changelog/         dated per-sprint entries (uat/ and prd/)
+```
+
+`architecture.md` and `milestones.md` each contain an `<!-- AUTO:... -->`
+region owned by the documentor — the whole file is auto-maintained; do not
+hand-edit inside the markers.
+
+**Enforce it with the scaffold script:**
+- New projects get this structure stamped into the initial commit by
+  `init_project.py`.
+- For an existing project: `python3 scripts/scaffold_docs.py --project <path>`
+  creates any missing standard files from template and never overwrites
+  existing content, so it is always safe to re-run. Add `--check` to report
+  drift (exit 1 if anything is missing) without writing. Stray top-level docs
+  are reported for manual review, never deleted.
+
 ## Standard Project Layout
 
 Two layouts are supported. Use `--nested` with `init_project.py` for new projects.
@@ -280,3 +312,58 @@ https://raw.githubusercontent.com/zealchaiwut/commander/attachments/references/i
 If the issue body has an `## Attachments` section, download the relevant files
 before starting implementation. The links in the issue body already point to the
 raw URL above.
+
+## Session Notes — 2026-06-08
+
+### Bugs fixed (PRs #647, #652, #653, #654)
+
+**Bulk create attachments not appearing in issues**
+- `_build_body_with_images` used `![img]()` for all files; non-image types (HTML, PDF) render as broken icons on GitHub. Fixed: only use inline image syntax for known image extensions (`.png .jpg .jpeg .gif .webp .svg`); all others use plain `[link]()`.
+- Added idempotent guard (`if "## Attachments" in body: return body`) to prevent double-injection on retry.
+- Added retry pre-commit inside `bulk_post_selected` when `image_url_map` is empty after server restart.
+
+**Sprint nav pill showing wrong sprint (S49 instead of S50)**
+- `get_sprint_nav_status` was picking the first sprint with active-column issues without checking if it was already finished. Fixed: skip sprints found in `_finished_sprint_summaries` before selecting the current sprint.
+
+**Dispatch level separators missing on page load**
+- Separators appeared only after live data updated. Fixed: on first live fetch, if cache was empty and data arrived, trigger a full `_smgmtRender` instead of a patch.
+
+**Nav pill/panel showing stale GitHub label counts (e.g. 2 UAT, 5 Backlog)**
+- Pill and panel were using GitHub label counts for running sprints. Fixed: added `_snavColsFromLive(live)` helper that derives counts from the live snapshot; pill uses this for running sprints; panel donut uses it too. Single source of truth.
+
+**Bulk create stuck on "Posting..." after server restart**
+- `_bulk_jobs` is in-memory; restarts cleared it. Added `_get_bulk_job(job_id)` helper that lazy-loads from `uat/.commander/bulk-jobs/{id}.json` on miss. Replaced all 30 `_bulk_jobs.get(job_id)` call sites. **Gotcha:** using `replace_all: true` on that substitution also hit the line inside the helper itself, causing infinite recursion (`RecursionError` on every request). Always use targeted edits for the helper's own dict lookup.
+
+**BA run button — one blink, no progress (RecursionError)**
+- Root cause: the `replace_all` fix above. The helper called itself instead of the underlying dict. Fixed with a targeted single-line edit restoring `_bulk_jobs.get(job_id)` inside the helper.
+
+**Events API returning `[]` despite data in DB**
+- `/api/projects/{slug}/events` was querying `WHERE project = <slug>` but the `events` table stores `project = 'owner/repo'` (full path). Fixed: `project_key = matched["repo"]` (full path, not `matched["repo"].split("/")[-1]`).
+
+**Activity tab always showing "No events found" or "Loading activity..."**
+- Two causes: (1) `/api/home` omitted `repo` field from project payloads — `_projectData.repo` was `undefined` in JS, so `evlFetch` built URL `/api/projects//events` (double slash → 404). Fixed: added `"repo": repo` to both the normal result and the `_idle()` sentinel in `_home_project_data`. (2) `evlFetch()` bails early if `_projectData` is null at call time — added retry in the `_projectData`-arrived handler.
+
+**Cross-project sprint lock blocking unrelated projects**
+- `_any_sprint_running()` scanned ALL projects. A running sprint on `commander` blocked starting any sprint on `perf-coach`. Fixed: added `project=` param; both call sites in `/api/sprints/run` and `/api/sprints/{label}/rerun` now pass the target project.
+
+**Orphaned uvicorn worker holding port 8000 after server crash**
+- After the main uvicorn process dies, a multiprocessing worker can survive as an orphan (PPID=1) and hold the port. `start_prd.sh` detects stale PID files but not orphaned workers. Symptom: `start_prd.sh` starts a new process that immediately fails to bind. Fix: `lsof -i :8000 -sTCP:LISTEN` to find the orphan, then `kill -9 <pid>` before restarting.
+
+**perf-coach sprint 46 — all tickets fail with `design_docs_missing`**
+- `_design_docs_guard` in `sprint_manager.py` requires `PRODUCT.md` and `DESIGN.md` in the coder worktree. This guard applies to ALL projects, not just commander. perf-coach never had these files. Fixed: created both files in `perf-coach/coder` develop branch (pushed directly — no PR). Any new project onboarded via commander must have these files on its develop branch before running sprints.
+
+### Logs tab changes
+
+- Activity view is now the **default** view when opening the Logs tab (was Runs).
+- Source filter chips (All / Agent & Sprint / Dashboard / GitHub) are visible by default.
+- `evlFetch()` is called on `logsInit()` and also retried when `_projectData` arrives late.
+
+### Server restart procedure (uat)
+
+```bash
+kill -9 $(cat apps/dashboard/prd.pid)
+rm -f apps/dashboard/prd.pid
+bash scripts/start_prd.sh
+```
+
+If port 8000 is still held after kill: `lsof -i :8000 -sTCP:LISTEN` → kill the orphan PID → then restart.

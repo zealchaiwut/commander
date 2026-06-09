@@ -5130,7 +5130,7 @@
           </button>
           <div class="stab-dropdown" id="stab-dropdown-analytics">
             <a class="stab" id="stab-analytics-page" role="menuitem"
-               href="#" onclick="return false;"
+               href="#"
                style="text-decoration:none">
               <i class="ti ti-chart-histogram"></i>Analytics page
             </a>
@@ -5640,6 +5640,13 @@
 
         <!-- Step 2: Review & Create -->
         <div id="bc-step2" class="hidden">
+          <div class="bc-step2-toolbar" style="display:flex;justify-content:flex-end;margin-bottom:8px">
+            <button type="button" class="bc-bulk-btn" id="bc-clear-batch-btn"
+                    onclick="_bcClearAndRestart()"
+                    title="Discard this batch and start a new one">
+              <i class="ti ti-trash"></i> Start new batch
+            </button>
+          </div>
           <div class="bc-parallel-banner" id="bc-parallel-banner"></div>
 
           <!-- Bulk selection controls (issue #534) -->
@@ -15986,6 +15993,26 @@ function _bcConnectSSE(jobId) {
  * Clears the stale localStorage id and, if the user is currently looking at the
  * (now dead) bulk-create tab, resets it to a usable Step 1 input.
  */
+/**
+ * Discard the current bulk job (stuck, failed, or finished) and reset the pane
+ * to a fresh Step 1. Deletes the job on the server best-effort so it does not
+ * reload, then clears local state. Works even if the job is wedged in a
+ * non-terminal state with no live worker.
+ */
+async function _bcClearAndRestart() {
+  const jobId = _bcJobId;
+  if (jobId) {
+    try {
+      await fetch(`/api/tickets/bulk/${jobId}`, { method: 'DELETE' });
+    } catch (e) {
+      // best-effort — local reset below still clears the stuck view
+    }
+  }
+  // Close any live SSE stream so it can't repopulate the pane.
+  if (_bcEventSource) { try { _bcEventSource.close(); } catch (e) {} _bcEventSource = null; }
+  _bcRecoverFromStaleJob();
+}
+
 function _bcRecoverFromStaleJob() {
   localStorage.removeItem('bc_job_id');
   _bcJobId = null;

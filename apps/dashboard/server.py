@@ -792,6 +792,7 @@ async def lifespan(app: FastAPI):
     _validate_github_repos()
     _sweep_orphan_pid_files()
     _restore_sprint_statuses_on_startup()
+    await _mark_inflight_jobs_failed()
     # Sync projects.json → Neon (non-blocking; warn on failure, never fatal)
     if _SYNC_PROJECTS_AVAILABLE:
         try:
@@ -10691,6 +10692,28 @@ async def bulk_stop_job(job_id: str):
     return {"ok": True}
 
 
+@app.delete("/api/tickets/bulk/{job_id}")
+async def bulk_delete_job(job_id: str):
+    """Discard a bulk job entirely — used by the "Start new batch" / clear action.
+
+    Signals any live worker to stop, drops the in-memory entry, and removes the
+    persisted JSON so a wedged or finished job never reloads. Idempotent:
+    returns ok even if the job is already gone.
+    """
+    job = _bulk_jobs.get(job_id)
+    if job is not None:
+        job["stop_requested"] = True
+    _bulk_jobs.pop(job_id, None)
+    _bulk_job_queues.pop(job_id, None)
+    try:
+        path = _bulk_jobs_dir() / f"{job_id}.json"
+        if path.exists():
+            path.unlink()
+    except Exception as e:
+        logger.warning("bulk_delete_job: could not remove %s.json: %s", job_id, str(e)[:200])
+    return {"ok": True}
+
+
 class BulkSkipBody(BaseModel):
     index: int
 
@@ -11614,9 +11637,14 @@ async def bulk_size_remedy_images(job_id: str, body: SizeRemedyImagesBody):
 
 # ── Startup: mark any in-flight jobs as failed (best-effort) ─────────────────
 
-@app.on_event("startup")
 async def _mark_inflight_jobs_failed():
-    """On restart, mark any previously-running jobs as failed (state lost)."""
+    """On restart, mark any previously-running jobs as failed (state lost).
+
+    Called from the lifespan startup. NOTE: this must NOT use
+    @app.on_event("startup") — the app is created with a lifespan handler, and
+    FastAPI ignores on_event hooks when a lifespan is set, so the decorator
+    silently never ran (left bulk jobs wedged in "running" across restarts).
+    """
     try:
         jobs_dir = _bulk_jobs_dir()
         for p in jobs_dir.glob("*.json"):

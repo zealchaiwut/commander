@@ -7810,12 +7810,20 @@ async def generate_daily_report(request: Request):
 def get_sprint_finish_card(sprint_label: str, project: str):
     """Return data for the floating finish-report card above a sprint pane.
 
+    Always returns HTTP 200. Clients must check the ``state`` field in the
+    response body — do NOT rely on HTTP 404 to detect a missing sprint.
+    (Before issue #671 this endpoint returned 404 when no state file existed;
+    it now returns HTTP 200 with state="no_data" instead.)
+
     For running sprints: state="running", in_flight_count, pending_count,
     done_count, wall_clock_secs, started_at.
 
     For finished sprints: state in (completed|has_rework|cancelled),
     done_count, failed_count, skipped_count, rework_count, wall_clock_secs,
     ended_at, summary_issue_url, summary_issue_num.
+
+    When no sprint state file exists on disk: state="no_data", sprint_label,
+    sprint_number only (HTTP 200, not 404).
     """
     if not _SPRINT_LABEL_RE.match(sprint_label):
         raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")

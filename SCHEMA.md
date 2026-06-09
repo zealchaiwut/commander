@@ -134,6 +134,24 @@ Indexes: `(project, created_at DESC)`, `(project, target)`, `(action_id)`.
 
 ## API Endpoints
 
+### Sprints
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/sprints/{sprint_label}/finish-card` | Summary card data for a sprint. Always HTTP 200 — check `state` field (see below). |
+
+**`GET /api/sprints/{sprint_label}/finish-card` — response states:**
+
+| `state` value | When returned | Notes |
+|---|---|---|
+| `"running"` | Sprint is currently executing | Includes `in_flight_count`, `pending_count`, `done_count`, `wall_clock_secs`, `started_at` |
+| `"completed"` / `"has_rework"` / `"cancelled"` | Sprint finished | Includes `done_count`, `failed_count`, `skipped_count`, `rework_count`, `wall_clock_secs`, `ended_at`, `summary_issue_url`, `summary_issue_num` |
+| `"no_data"` | Sprint has never been run (no state file on disk) | HTTP 200 — do **not** expect 404; check `state` field instead |
+
+> **Contract note (issue #671):** Before this change the endpoint returned HTTP 404 for the `no_data` case.
+> It now always returns HTTP 200. Clients must check `state`, not the HTTP status code.
+> See `docs/features/api.md` for the full response shape reference.
+
 ### Analytics
 
 | Method | Path | Description |

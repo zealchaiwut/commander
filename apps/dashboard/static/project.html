@@ -10190,6 +10190,18 @@ function _smgmtLivePatch(label, live) {
     badgeEl.innerHTML = `<span class="smgmt-running-badge-dot"></span>${ratio}`;
   }
 
+  // Update shared progress store so snav-pill and sb-sprint-badge stay in sync
+  const _sprintNumFromLabel = parseInt(label.replace(/^sprint-/, ''), 10);
+  _sprintProgressStore = {
+    has_sprint: true,
+    sprint_label: label,
+    sprint: isNaN(_sprintNumFromLabel) ? 0 : _sprintNumFromLabel,
+    done: completeCount,
+    total: totalCount,
+    run_state: 'running',
+    fetched_at: Date.now(),
+  };
+
   // Update per-ticket status indicators
   const liveIssues = live.issues || [];
   const liveByNum = {};
@@ -10391,8 +10403,8 @@ async function _smgmtLivePollTick() {
         } else {
           _smgmtLivePatch(label, live);
         }
-        // Keep pill/panel in sync with live runner data (no GitHub-label lag).
-        _snavRenderPill();
+        // Keep all three pills in sync with live runner data (no GitHub-label lag).
+        _sprintProgressRender();
         if (_snavPanelOpen) _snavRenderPanel();
       }
     }
@@ -17261,6 +17273,40 @@ let _snavState = null;
 let _snavPanelOpen = false;
 const _snavStateBySlug = {};
 
+// ── Shared sprint progress store — single source of truth for all pill components ──
+// Populated from live data (smgmt poll), explicit fetch (/api/sprint-progress), or
+// snavRefresh fallback. All three pill components read done/total/run_state from here.
+let _sprintProgressStore = null;
+
+/** Render all three sprint pill components from _sprintProgressStore. */
+function _sprintProgressRender() {
+  _snavRenderPill();
+  _snavUpdateSidebarBadge();
+  // Update smgmt running badge for the active sprint from the store
+  if (_sprintProgressStore && _sprintProgressStore.sprint_label) {
+    const label = _sprintProgressStore.sprint_label;
+    const badgeEl = document.getElementById(`smgmt-running-badge-${label}`);
+    if (badgeEl) {
+      const { done, total } = _sprintProgressStore;
+      const ratio = (total > 0) ? `${done}/${total}` : '—';
+      badgeEl.innerHTML = `<span class="smgmt-running-badge-dot"></span>${ratio}`;
+    }
+  }
+}
+
+/** Fetch unified sprint progress from /api/sprint-progress and update the store. */
+async function _sprintProgressFetch() {
+  const repo = _snavRepo();
+  if (!repo) return;
+  try {
+    const res = await fetch(`/api/sprint-progress?repo=${encodeURIComponent(repo)}`);
+    if (!res.ok) return;
+    const data = await res.json();
+    _sprintProgressStore = { ...data, fetched_at: Date.now() };
+    _sprintProgressRender();
+  } catch (_) { /* leave last-known state */ }
+}
+
 function _snavRepo() {
   return _cachedFullRepo[_slug] || '';
 }
@@ -17279,16 +17325,30 @@ function _snavRenderSidebarBadge(slug, d) {
   const rework = cols['needs-rework'] || 0;
   const active = (cols['in-progress'] || 0) + (cols['sit'] || 0) + (cols['uat'] || 0);
 
-  let badgeClass, label;
-  if (d.state === 'finished')   { badgeClass = 'sb-sprint-badge--finished';  label = 'Finished';   }
-  else if (rework > 0)          { badgeClass = 'sb-sprint-badge--rework';    label = 'Has rework'; }
-  else if (active > 0)          { badgeClass = 'sb-sprint-badge--running';   label = 'Running';    }
-  else                          { badgeClass = 'sb-sprint-badge--preflight'; label = 'Pre-flight'; }
+  // Determine run_state from the shared store (for current project) or GitHub data (others)
+  const isCurrentProject = (slug === _slug);
+  const store = isCurrentProject ? _sprintProgressStore : null;
+  const runState = (store && store.has_sprint) ? store.run_state : (d.state || 'running');
 
-  const total = d.total || 0;
-  const num = (d.state === 'finished')
-    ? (d.done || 0) + (d.uat || 0)
-    : total - (cols.backlog || 0);
+  let badgeClass, label;
+  if (runState === 'finished')   { badgeClass = 'sb-sprint-badge--finished';  label = 'Finished';   }
+  else if (rework > 0)           { badgeClass = 'sb-sprint-badge--rework';    label = 'Has rework'; }
+  else if (active > 0)           { badgeClass = 'sb-sprint-badge--running';   label = 'Running';    }
+  else                           { badgeClass = 'sb-sprint-badge--preflight'; label = 'Pre-flight'; }
+
+  // Use shared store for done/total (current project) to stay in sync with other pills
+  const total = (store && store.has_sprint && store.sprint === d.sprint) ? store.total : (d.total || 0);
+  const num = (store && store.has_sprint && store.sprint === d.sprint)
+    ? store.done
+    : (runState === 'finished')
+      ? (d.done || 0) + (d.uat || 0)
+      : (d.total || 0) - (cols.backlog || 0);
+
+  // Trigger a fresh fetch if the store is missing or stale (> 60s)
+  if (isCurrentProject && (!_sprintProgressStore || (Date.now() - (_sprintProgressStore.fetched_at || 0)) > 60000)) {
+    _sprintProgressFetch().catch(() => {});
+  }
+
   const text = `S${d.sprint} ${num}/${total}`;
 
   const badge = document.createElement('span');
@@ -17328,8 +17388,23 @@ async function snavRefresh() {
     const res = await fetch(`/api/sprint-nav-status?repo=${encodeURIComponent(repo)}`);
     if (!res.ok) return;
     _snavState = await res.json();
-    _snavRenderPill();
-    _snavUpdateSidebarBadge();
+    // Seed the shared store from GitHub data as fallback (live poll data takes precedence)
+    if (_snavState && _snavState.has_sprint && !_sprintProgressStore) {
+      const cols = _snavState.columns || {};
+      const ghDone = (_snavState.state === 'finished')
+        ? (_snavState.done || 0) + (_snavState.uat || 0)
+        : (_snavState.total || 0) - (cols.backlog || 0);
+      _sprintProgressStore = {
+        has_sprint: true,
+        sprint_label: `sprint-${_snavState.sprint}`,
+        sprint: _snavState.sprint,
+        done: ghDone,
+        total: _snavState.total || 0,
+        run_state: _snavState.state || 'running',
+        fetched_at: Date.now(),
+      };
+    }
+    _sprintProgressRender();
     if (_snavPanelOpen) _snavRenderPanel();
   } catch (_) { /* leave last-known pill state */ }
 }
@@ -17342,29 +17417,47 @@ function _snavRenderPill() {
   const d = _snavState;
   if (!d || !d.has_sprint) { pill.classList.add('hidden'); return; }
   pill.classList.remove('hidden');
-  if (d.state === 'finished') {
+
+  // Trigger fetch if store is missing or stale (> 60s)
+  if (!_sprintProgressStore || (Date.now() - (_sprintProgressStore.fetched_at || 0)) > 60000) {
+    _sprintProgressFetch().catch(() => {});
+  }
+
+  // Use shared store for done/total to stay in sync with the other two pills
+  const store = _sprintProgressStore;
+  const run_state = (store && store.has_sprint) ? store.run_state : (d.state || 'running');
+
+  if (run_state === 'finished') {
     dot.className = 'snav-dot snav-dot--finished';
-    const completedF = (d.done || 0) + (d.uat || 0);
-    text.textContent = `S${d.sprint} · ${completedF}/${d.total || 0}`;
+    const completedF = (store && store.has_sprint && store.sprint === d.sprint)
+      ? store.done
+      : (d.done || 0) + (d.uat || 0);
+    const finTotal = (store && store.has_sprint && store.sprint === d.sprint)
+      ? store.total
+      : (d.total || 0);
+    text.textContent = `S${d.sprint} · ${completedF}/${finTotal}`;
   } else {
-    // For running sprints, use live snapshot when available (single source of truth).
-    const liveData = _smgmtLiveCache[`sprint-${d.sprint}`];
-    if (liveData && (liveData.total_count || 0) > 0) {
-      const lc = _snavColsFromLive(liveData);
-      const complete = lc.done + lc.failed + lc.skipped;
-      const doneHtml = lc.done > 0 ? ` · <span class="snav-uat">${lc.done} done</span>` : '';
-      dot.className = 'snav-dot snav-dot--running';
-      text.innerHTML = `S${d.sprint} · ${complete}/${lc.total}${doneHtml}`;
-    } else {
-      const cols = d.columns || {};
-      // During a running sprint, show dispatched/total (tickets that have left backlog).
-      const dispatched = (d.total || 0) - (cols.backlog || 0);
-      const uatHtml = d.uat > 0 ? ` · <span class="snav-uat">${d.uat} UAT</span>` : '';
-      const rework = cols['needs-rework'] || 0;
-      const reworkHtml = rework > 0 ? ` · <span class="snav-rework">${rework} ↩</span>` : '';
-      dot.className = rework > 0 ? 'snav-dot snav-dot--rework' : 'snav-dot snav-dot--running';
-      text.innerHTML = `S${d.sprint} · ${dispatched}/${d.total || 0}${uatHtml}${reworkHtml}`;
-    }
+    const cols = d.columns || {};
+    const rework = cols['needs-rework'] || 0;
+    // Use shared store for the done/total fraction (single source of truth across all pills)
+    const complete = (store && store.has_sprint && store.sprint === d.sprint)
+      ? store.done
+      : (() => {
+          const liveData = _smgmtLiveCache[`sprint-${d.sprint}`];
+          if (liveData && (liveData.total_count || 0) > 0) {
+            const lc = _snavColsFromLive(liveData);
+            return lc.done + lc.failed + lc.skipped;
+          }
+          return (d.total || 0) - (cols.backlog || 0);
+        })();
+    const total = (store && store.has_sprint && store.sprint === d.sprint)
+      ? store.total
+      : (d.total || 0);
+    const doneHtml = (store && store.done > 0) ? ` · <span class="snav-uat">${store.done} done</span>` : '';
+    const uatHtml  = (!store && (d.uat || 0) > 0) ? ` · <span class="snav-uat">${d.uat} UAT</span>` : '';
+    const reworkHtml = rework > 0 ? ` · <span class="snav-rework">${rework} ↩</span>` : '';
+    dot.className = rework > 0 ? 'snav-dot snav-dot--rework' : 'snav-dot snav-dot--running';
+    text.innerHTML = `S${d.sprint} · ${complete}/${total}${doneHtml}${uatHtml}${reworkHtml}`;
   }
 }
 

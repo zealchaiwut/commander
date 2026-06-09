@@ -1533,6 +1533,119 @@ def get_sprint_nav_status(repo: str = ""):
     }
 
 
+def _sprint_progress_file_path(project: str) -> Optional[Path]:
+    """Return the path to the persisted sprint-progress JSON file for a project."""
+    if not project:
+        return None
+    project_root = _project_root_path(project)
+    return _commander_dir(project_root) / "runtime" / "sprint-progress.json"
+
+
+@app.get("/api/sprint-progress")
+def get_sprint_progress(project: str = "", repo: str = ""):
+    """Unified sprint progress endpoint — single source of truth for all three pill components.
+
+    Priority:
+    1. In-memory live status from sprint_manager (most recent, pushed via POST /api/sprint-status)
+    2. Persisted JSON file (survives server restart)
+    3. GitHub-backed fallback via sprint-nav-status logic
+
+    Persists the result to .commander/runtime/sprint-progress.json so the UI
+    can re-hydrate from disk when the server restarts or live data is not yet
+    available.
+    """
+    repo_name = repo or (project or None)
+
+    # ── 1. Try live in-memory status ─────────────────────────────────────────
+    running = _all_sprints_running()
+    if project:
+        running = [r for r in running if r["project"] == project]
+
+    for r in running:
+        key = (r["project"], r["sprint_label"])
+        status = _sprint_statuses.get(key, {})
+        issues = status.get("issues", [])
+        if not issues:
+            continue
+        sprint_number = status.get("sprint_number")
+        if sprint_number is None:
+            label = r["sprint_label"]
+            m = re.search(r"\d+", label)
+            sprint_number = int(m.group()) if m else 0
+
+        done = sum(
+            1 for i in issues
+            if i.get("status") in ("done", "skipped", "failed")
+        )
+        total = len(issues)
+
+        result = {
+            "has_sprint": True,
+            "sprint_label": r["sprint_label"],
+            "sprint": sprint_number,
+            "done": done,
+            "total": total,
+            "run_state": "running",
+            "source": "live",
+            "fetched_at": datetime.now(timezone.utc).isoformat(),
+        }
+        _persist_sprint_progress(project or r["project"], result)
+        return result
+
+    # ── 2. Try persisted file ────────────────────────────────────────────────
+    file_project = project or ""
+    progress_path = _sprint_progress_file_path(file_project)
+    if progress_path and progress_path.exists():
+        try:
+            cached = json.loads(progress_path.read_text(encoding="utf-8"))
+            if cached.get("has_sprint"):
+                return cached
+        except (OSError, json.JSONDecodeError):
+            pass
+
+    # ── 3. GitHub fallback ───────────────────────────────────────────────────
+    try:
+        gh_data = get_sprint_nav_status(repo=repo or (project or ""))
+    except Exception:
+        return {"has_sprint": False}
+
+    if not gh_data.get("has_sprint"):
+        return {"has_sprint": False}
+
+    sprint_num = gh_data.get("sprint", 0)
+    gh_done = (gh_data.get("done") or 0) + (gh_data.get("uat") or 0)
+    gh_total = gh_data.get("total") or 0
+    gh_state = gh_data.get("state", "running")
+
+    result = {
+        "has_sprint": True,
+        "sprint_label": f"sprint-{sprint_num}",
+        "sprint": sprint_num,
+        "done": gh_done,
+        "total": gh_total,
+        "run_state": gh_state,
+        "columns": gh_data.get("columns", {}),
+        "source": "github",
+        "fetched_at": datetime.now(timezone.utc).isoformat(),
+    }
+    _persist_sprint_progress(file_project, result)
+    return result
+
+
+def _persist_sprint_progress(project: str, data: dict) -> None:
+    """Write sprint progress data atomically to .commander/runtime/sprint-progress.json."""
+    path = _sprint_progress_file_path(project)
+    if path is None:
+        return
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        os.replace(str(tmp), str(path))
+    except OSError:
+        pass
+
+
 @app.get("/api/sprint-nav-summary")
 def get_sprint_nav_summary(number: int, repo: str = ""):
     """Return a sprint-summary issue's markdown body (GitHub-backed), fetched on

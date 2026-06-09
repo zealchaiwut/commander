@@ -12031,7 +12031,23 @@ function _smgmtUpdateCleanupBtn(data) {
     ? order.filter(l => /^sprint-\d+(\.\d+)?$/.test(l))
     : [...sprints].sort((a, b) => a - b).map(n => `sprint-${n}`);
   const labeled = new Set(issues.map(i => i.sprint_label).filter(Boolean));
-  _smgmtEmptyLabels = orderedLabels.filter(l => !labeled.has(l));
+  // Mark base sprint active if any sub-label sprint-N.X has tickets
+  const activeBases = new Set();
+  for (const lbl of labeled) {
+    const m = /^sprint-(\d+)/.exec(lbl);
+    if (m) activeBases.add(parseInt(m[1], 10));
+  }
+  // Collect only leading consecutive plain sprint-N labels with 0 tickets (issue #658)
+  const leadingEmpty = [];
+  let foundActive = false;
+  for (const lbl of orderedLabels) {
+    if (!/^sprint-\d+$/.test(lbl)) continue;
+    const base = parseInt(lbl.replace('sprint-', ''), 10);
+    if (activeBases.has(base)) { foundActive = true; break; }
+    leadingEmpty.push(lbl);
+  }
+  // AC3: if no active sprint found, nothing is eligible for cleanup
+  _smgmtEmptyLabels = foundActive ? leadingEmpty : [];
   const btn = document.getElementById('smgmt-cleanup-empty-btn');
   if (btn) btn.style.display = _smgmtEmptyLabels.length > 0 ? '' : 'none';
 }

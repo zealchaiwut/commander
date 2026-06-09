@@ -6276,7 +6276,13 @@ class SprintCleanupBody(BaseModel):
 
 @app.post("/api/sprints/cleanup-empty")
 async def cleanup_empty_sprints(body: SprintCleanupBody):
-    """Delete all sprint labels with zero open tickets from GitHub."""
+    """Delete leading consecutive empty sprint labels from GitHub (issue #658).
+
+    Only removes sprint-N labels that appear before the first sprint with ≥ 1 open
+    ticket (in ascending number order). Trailing empty sprints — those after any
+    sprint that has tickets — are preserved. If no sprint has tickets, nothing is
+    deleted.
+    """
     try:
         all_sprint_labels = github_client.list_sprint_labels(repo_name=body.project)
     except subprocess.CalledProcessError as e:
@@ -6287,18 +6293,39 @@ async def cleanup_empty_sprints(body: SprintCleanupBody):
     except subprocess.CalledProcessError as e:
         raise _gh_error(e)
 
-    sprint_re_local = re.compile(r"^sprint-\d+(\.\d+)?$")
-    labeled_sprints: set[str] = set()
+    sprint_re_any   = re.compile(r"^sprint-(\d+)(?:\.\d+)?$")
+    sprint_re_plain = re.compile(r"^sprint-(\d+)$")
+
+    # Collect base sprint numbers that have ≥ 1 open ticket (plain or dotted sub-labels)
+    active_base_nums: set[int] = set()
     for iss in issues:
         for lbl in iss.get("labels", []):
-            if sprint_re_local.match(lbl["name"]):
-                labeled_sprints.add(lbl["name"])
+            m = sprint_re_any.match(lbl["name"])
+            if m:
+                active_base_nums.add(int(m.group(1)))
 
-    empty_labels = [l for l in all_sprint_labels if l not in labeled_sprints]
+    # Iterate plain sprint-N labels in ascending order; collect consecutive leading empties
+    plain_labels = sorted(
+        [l for l in all_sprint_labels if sprint_re_plain.match(l)],
+        key=lambda l: int(sprint_re_plain.match(l).group(1)),  # type: ignore[union-attr]
+    )
+
+    leading_empty: list[str] = []
+    found_active = False
+    for label in plain_labels:
+        base_num = int(sprint_re_plain.match(label).group(1))  # type: ignore[union-attr]
+        if base_num in active_base_nums:
+            found_active = True
+            break
+        leading_empty.append(label)
+
+    # AC3: if no sprint has tickets, nothing is eligible for cleanup
+    if not found_active:
+        leading_empty = []
 
     deleted = []
     errors = []
-    for label in empty_labels:
+    for label in leading_empty:
         try:
             github_client.delete_label(label, repo_name=body.project)
             deleted.append(label)

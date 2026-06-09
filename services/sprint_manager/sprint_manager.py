@@ -4577,12 +4577,33 @@ def _dispatch_reviewer(
                 findings["blockers"]    = int(m.group(1))
                 findings["suggestions"] = int(m.group(2))
                 findings["nits"]        = int(m.group(3))
-                findings["follow_up_tickets"] = list(range(int(m.group(4))))  # count only
                 break
+        # Parse actual follow-up issue numbers from issue creation URLs in the log.
+        # gh issue create outputs: https://github.com/<repo>/issues/N
+        # Exclude comment URLs (which contain #issuecomment-) and the sprint summary issue.
+        if eff_repo:
+            issue_url_pat = re.compile(
+                rf"https://github\.com/{re.escape(eff_repo)}/issues/(\d+)",
+                re.IGNORECASE,
+            )
+            seen_nums: set = set()
+            follow_up_nums: list = []
+            for url_m2 in issue_url_pat.finditer(log_text):
+                # Skip comment URLs: the match end is immediately followed by '#'
+                pos = url_m2.end()
+                if pos < len(log_text) and log_text[pos] == "#":
+                    continue
+                num = int(url_m2.group(1))
+                if summary_issue_num is not None and num == summary_issue_num:
+                    continue
+                if num not in seen_nums:
+                    seen_nums.add(num)
+                    follow_up_nums.append(num)
+            findings["follow_up_tickets"] = follow_up_nums
         # Look for comment URL in log
-        url_m = re.search(r"https://github\.com/[^\s]+/issues/\d+#issuecomment-\d+", log_text)
-        if url_m:
-            comment_url = url_m.group(0)
+        url_cm = re.search(r"https://github\.com/[^\s]+/issues/\d+#issuecomment-\d+", log_text)
+        if url_cm:
+            comment_url = url_cm.group(0)
     except Exception as e:
         structured_log.warn("reviewer_log_parse_error", f"[reviewer] could not parse reviewer log: {e}", exc=str(e))
 
@@ -4597,6 +4618,179 @@ def _dispatch_reviewer(
         f"{len(findings['follow_up_tickets'])} follow-up tickets",
         flush=True,
     )
+
+
+# ── Follow-up ticket enrichment (BA + estimator) ─────────────────────────────
+
+_ESTIMATE_ISSUE_SCRIPT_SM = REPO_ROOT / "services" / "sprint_manager" / "estimate_issue.py"
+
+_BA_REWRITE_PROMPT = """\
+You are a Business Analyst. Issue #{issue_num} in repository {repo} was created by an \
+automated code reviewer as a follow-up ticket. Its body may be minimal or unstructured.
+
+Your task:
+1. Read the issue with: gh issue view {issue_num} --repo {repo} --json title,body
+2. Rewrite the body to the standard Commander format with ALL of these sections:
+   ## What & Why
+   ## Acceptance Criteria
+   (at least 2 checkbox items: - [ ] ...)
+   ## UAT Test Steps
+   ## Out of Scope
+3. Update the issue body on GitHub: gh issue edit {issue_num} --repo {repo} --body-file <tmpfile>
+   (write the new body to a temp file first, then pass via --body-file)
+
+Do not change the title, labels, milestone, or any field other than the body.
+Do not ask clarifying questions. Produce the structured body directly from the existing content.
+"""
+
+_BA_DISPATCH_TIMEOUT = int(os.environ.get("COMMANDER_BA_REWRITE_TIMEOUT", "300"))
+_ESTIMATOR_DISPATCH_TIMEOUT = int(os.environ.get("COMMANDER_ESTIMATOR_TIMEOUT", "300"))
+
+
+def _dispatch_ba_for_followup(
+    issue_num: int,
+    eff_repo: str,
+    cfg: Optional[object],
+    state: Optional[object],
+) -> bool:
+    """Invoke the BA agent to rewrite a follow-up ticket body to standard format.
+
+    Returns True on success, False on failure.  Failures are printed but not raised
+    so callers can continue processing other tickets.
+    """
+    cwd_path = cfg.worktree_coder if cfg else Path.cwd()
+    logs_dir = cfg.logs_dir if cfg else Path.cwd()
+    log_path = logs_dir / f"ba-rewrite-{issue_num}.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+
+    prompt = _BA_REWRITE_PROMPT.format(issue_num=issue_num, repo=eff_repo)
+
+    cmd = [
+        "claude",
+        "--model", "claude-sonnet-4-6",
+        "--dangerously-skip-permissions",
+    ]
+    ba_persona = _load_agent_persona("ba", cwd_path)
+    if ba_persona:
+        cmd += ["--append-system-prompt", ba_persona]
+    cmd += ["-p", prompt]
+
+    sub_env = os.environ.copy()
+    sub_env.pop("ANTHROPIC_API_KEY", None)
+    sub_env["CLAUDE_AGENT_ROLE"] = "ba"
+    if eff_repo:
+        sub_env["COMMANDER_PROJECT"] = eff_repo
+
+    print(f"  [ba-rewrite] Rewriting body for follow-up #{issue_num} ...", flush=True)
+    try:
+        with log_path.open("w") as log_f:
+            proc = subprocess.Popen(
+                cmd,
+                stdout=log_f,
+                stderr=log_f,
+                cwd=str(cwd_path),
+                env=sub_env,
+            )
+    except FileNotFoundError:
+        print(f"  [ba-rewrite] WARNING: claude CLI not found — skipping BA rewrite for #{issue_num}", flush=True)
+        return False
+
+    try:
+        rc = proc.wait(timeout=_BA_DISPATCH_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait()
+        print(f"  [ba-rewrite] WARNING: BA rewrite for #{issue_num} timed out after {_BA_DISPATCH_TIMEOUT}s", flush=True)
+        return False
+
+    if rc != 0:
+        print(f"  [ba-rewrite] WARNING: BA rewrite for #{issue_num} exited with code {rc}", flush=True)
+        return False
+
+    print(f"  [ba-rewrite] Done for #{issue_num}", flush=True)
+    return True
+
+
+def _dispatch_estimator_for_followup(
+    issue_num: int,
+    eff_repo: str,
+    cfg: Optional[object],
+) -> bool:
+    """Run estimate_issue.py on a follow-up ticket to apply size label and write estimate file.
+
+    Returns True on success, False on failure.
+    """
+    if not _ESTIMATE_ISSUE_SCRIPT_SM.exists():
+        print(f"  [estimator] WARNING: estimate_issue.py not found — skipping #{issue_num}", flush=True)
+        return False
+
+    cmd = [
+        sys.executable,
+        str(_ESTIMATE_ISSUE_SCRIPT_SM),
+        "--issue", str(issue_num),
+        "--repo", eff_repo,
+        "--save-comment",
+        "--save-label",
+    ]
+
+    print(f"  [estimator] Estimating follow-up #{issue_num} ...", flush=True)
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=_ESTIMATOR_DISPATCH_TIMEOUT,
+        )
+    except subprocess.TimeoutExpired:
+        print(f"  [estimator] WARNING: estimation for #{issue_num} timed out after {_ESTIMATOR_DISPATCH_TIMEOUT}s", flush=True)
+        return False
+
+    if result.returncode != 0:
+        print(f"  [estimator] WARNING: estimation for #{issue_num} exited with code {result.returncode}", flush=True)
+        return False
+
+    print(f"  [estimator] Done for #{issue_num}", flush=True)
+    return True
+
+
+def _enrich_followup_tickets(
+    follow_up_tickets: list,
+    eff_repo: str,
+    cfg: Optional[object],
+    state: Optional[object],
+) -> None:
+    """Run BA agent + estimator on each reviewer follow-up ticket.
+
+    Processes tickets sequentially: BA then estimator per ticket.
+    A failure on one ticket is logged and does not abort the remaining tickets.
+    """
+    if not follow_up_tickets:
+        return
+
+    print(
+        f"  [enrichment] Enriching {len(follow_up_tickets)} follow-up ticket(s): "
+        + ", ".join(f"#{n}" for n in follow_up_tickets),
+        flush=True,
+    )
+
+    for issue_num in follow_up_tickets:
+        try:
+            _dispatch_ba_for_followup(issue_num, eff_repo, cfg, state)
+        except Exception as exc:
+            print(
+                f"  [enrichment] WARNING: BA rewrite failed for #{issue_num}: {exc}",
+                flush=True,
+            )
+
+        try:
+            _dispatch_estimator_for_followup(issue_num, eff_repo, cfg)
+        except Exception as exc:
+            print(
+                f"  [enrichment] WARNING: estimator failed for #{issue_num}: {exc}",
+                flush=True,
+            )
+
+    print(f"  [enrichment] Done enriching {len(follow_up_tickets)} follow-up ticket(s).", flush=True)
 
 
 # ── Issue Estimator integration ───────────────────────────────────────────────
@@ -6309,6 +6503,16 @@ def main() -> None:
         except Exception as e_rev:
             structured_log.error("reviewer_failed", f"reviewer stage failed: {e_rev}", exc=str(e_rev))
             state.reviewer_status = "failed"
+
+        # Enrich follow-up tickets with BA rewrite + estimator
+        follow_ups = (state.reviewer_findings or {}).get("follow_up_tickets", [])
+        if follow_ups and eff_repo:
+            _enrich_followup_tickets(
+                follow_up_tickets = follow_ups,
+                eff_repo          = eff_repo,
+                cfg               = cfg,
+                state             = state,
+            )
 
     print("\n=== Sprint Summary ===")
     print(f"Processed: {', '.join(summary.processed) or 'none'}")

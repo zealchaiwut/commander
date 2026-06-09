@@ -2251,18 +2251,27 @@ def fs_list(path: str = ""):
             path = str(root)
 
         candidate = Path(path)
-        # Resolve without following symlinks first to detect symlink escapes
-        try:
-            resolved = candidate.resolve()
-        except Exception:
+        # Normalize ../ etc without following symlinks
+        normalized = Path(os.path.normpath(str(candidate)))
+
+        # Must be under browse root before any symlink resolution
+        if not normalized.is_relative_to(root):
             raise HTTPException(status_code=403, detail="Forbidden")
 
-        try:
-            resolved.relative_to(root)
-        except ValueError:
-            raise HTTPException(status_code=403, detail="Forbidden")
+        # Walk each component; reject if any symlink escapes root.
+        # This catches escape-then-reenter chains that resolve() misses.
+        cur = root
+        for part in normalized.relative_to(root).parts:
+            cur = cur / part
+            if cur.is_symlink():
+                try:
+                    link_resolved = cur.resolve()
+                    if not link_resolved.is_relative_to(root):
+                        raise HTTPException(status_code=403, detail="Forbidden")
+                except OSError:
+                    raise HTTPException(status_code=403, detail="Forbidden")
 
-        target = resolved
+        target = normalized
 
     if not target.exists() or not target.is_dir():
         return {"entries": [], "current": str(target)}
@@ -2270,6 +2279,8 @@ def fs_list(path: str = ""):
     entries = []
     try:
         for item in sorted(target.iterdir()):
+            if item.is_symlink():
+                continue  # never follow symlinks out of browse root
             if not item.is_dir():
                 continue
             # Skip hidden dirs

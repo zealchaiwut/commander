@@ -1125,7 +1125,7 @@ async def projects_redirect(path: str):
 
 # ── Slug-based project routes (/project/<slug>/...) ───────────────────────────
 
-_VALID_PROJECT_TABS = {"sprint-mgmt", "tickets", "logs", "sprint-history", "status"}
+_VALID_PROJECT_TABS = {"sprint-mgmt", "tickets", "logs", "sprint-history", "status", "metrics", "notes", "settings"}
 
 
 @app.get("/project/{slug}")
@@ -1136,8 +1136,9 @@ async def project_slug_no_tab(slug: str):
 
 @app.get("/project/{slug}/analytics")
 async def project_slug_analytics(slug: str):
-    """Serve the Analytics page (ANL-2 shell, issue #648)."""
-    return _serve_html(STATIC_DIR / "analytics.html")
+    """Retired standalone analytics page — analytics is now an in-chrome tab
+    (with the project nav). Redirect old links to the in-chrome Analytics tab."""
+    return RedirectResponse(url=f"/project/{slug}/metrics", status_code=302)
 
 
 @app.get("/project/{slug}/{tab}")

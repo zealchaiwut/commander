@@ -4906,6 +4906,25 @@
     .metrics-page-hdr { margin-bottom: 24px; }
     .metrics-page-hdr h2 { font-size: 18px; font-weight: 700; margin: 0 0 4px; }
     .metrics-page-hdr p { margin: 0; font-size: 13px; color: var(--text-sub); }
+    .metrics-section-title { font-size: 14px; font-weight: 700; margin: 28px 0 12px; color: var(--text); }
+    /* Delivery-health cards (ported from analytics page, #648) */
+    .metric-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; }
+    .metric-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 16px; }
+    .metric-label { font-size: 11px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--text-sub); display: flex; align-items: center; gap: 6px; }
+    .metric-val { font-size: 28px; font-weight: 700; font-family: var(--mono); margin-top: 8px; display: flex; align-items: baseline; gap: 8px; line-height: 1; }
+    .metric-val .unit { font-size: 13px; color: var(--text-muted); font-weight: 400; font-family: inherit; }
+    .metric-sub { font-size: 12px; color: var(--text-muted); margin-top: 6px; line-height: 1.5; }
+    .metric-card .bar { height: 6px; border-radius: 999px; background: var(--surface-2); margin-top: 12px; overflow: hidden; }
+    .metric-card .bar > span { display: block; height: 100%; border-radius: 999px; transition: width .4s ease; }
+    .breakdown { display: flex; gap: 10px; margin-top: 10px; flex-wrap: wrap; font-family: var(--mono); font-size: 11px; color: var(--text-sub); line-height: 1.6; }
+    .breakdown span { white-space: nowrap; }
+    .metric-empty { display: none; font-size: 12px; color: var(--text-sub); font-style: italic; margin-top: 8px; }
+    .metric-card.is-empty .metric-val,
+    .metric-card.is-empty .metric-sub,
+    .metric-card.is-empty .bar,
+    .metric-card.is-empty .breakdown { display: none; }
+    .metric-card.is-empty .metric-empty { display: block; }
+    .src-note { font-size: 11px; color: var(--text-sub); font-family: var(--mono); line-height: 1.6; padding-top: 10px; }
     .metrics-grid {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
@@ -5129,30 +5148,13 @@
             <i class="ti ti-chart-bar"></i>Analytics<i class="ti ti-chevron-down stab-caret"></i>
           </button>
           <div class="stab-dropdown" id="stab-dropdown-analytics">
-            <a class="stab" id="stab-analytics-page" role="menuitem"
-               href="#"
-               style="text-decoration:none">
-              <i class="ti ti-chart-histogram"></i>Analytics page
-            </a>
-            <button class="stab" role="tab" id="stab-timeline"
-                    aria-selected="false" onclick="switchTab('timeline')">
-              <i class="ti ti-timeline-event"></i>Timeline
-            </button>
-            <button class="stab" role="tab" id="stab-compare"
-                    aria-selected="false" onclick="switchTab('compare')">
-              <i class="ti ti-git-compare"></i>Compare
-            </button>
             <button class="stab" role="tab" id="stab-metrics"
                     aria-selected="false" onclick="switchTab('metrics')">
-              <i class="ti ti-chart-line"></i>Metrics
+              <i class="ti ti-chart-line"></i>Analytics
             </button>
-            <button class="stab" role="tab" id="stab-est-vs-actual"
-                    aria-selected="false" onclick="switchTab('est-vs-actual')">
-              <i class="ti ti-ruler-measure"></i>Est vs Actual
-            </button>
-            <button class="stab" role="tab" id="stab-calibration"
-                    aria-selected="false" onclick="switchTab('calibration')">
-              <i class="ti ti-adjustments-horizontal"></i>Calibration
+            <button class="stab" role="tab" id="stab-status"
+                    aria-selected="false" onclick="switchTab('status')">
+              <i class="ti ti-pulse"></i>Status
             </button>
           </div>
         </div>
@@ -5163,28 +5165,21 @@
             <i class="ti ti-dots"></i>More<i class="ti ti-chevron-down stab-caret"></i>
           </button>
           <div class="stab-dropdown" id="stab-dropdown-more">
-            <button class="stab" role="tab" id="stab-bulk-create"
-                    aria-selected="false" onclick="switchTab('bulk-create')">
-              <i class="ti ti-stack-2"></i>Bulk Create<span id="bc-tab-badge" class="bc-tab-badge hidden"></span>
-            </button>
             <button class="stab" role="tab" id="stab-sprint-history"
                     aria-selected="false" onclick="switchTab('sprint-history')">
               <i class="ti ti-history"></i>Sprint history
-            </button>
-            <button class="stab" role="tab" id="stab-status"
-                    aria-selected="false" onclick="switchTab('status')">
-              <i class="ti ti-pulse"></i>Status
             </button>
             <button class="stab" role="tab" id="stab-notes"
                     aria-selected="false" onclick="switchTab('notes')">
               <i class="ti ti-notes"></i>Notes
             </button>
-            <button class="stab" role="tab" id="stab-settings"
-                    aria-selected="false" onclick="switchTab('settings')">
-              <i class="ti ti-adjustments-cog"></i>Settings
-            </button>
           </div>
         </div>
+        <!-- Settings (top level) -->
+        <button class="stab" role="tab" id="stab-settings"
+                aria-selected="false" onclick="switchTab('settings')">
+          <i class="ti ti-adjustments-cog"></i>Settings
+        </button>
       </nav>
       <!-- Sprint status pill (GitHub-backed; works cross-machine while traveling) -->
       <div class="snav-wrap">
@@ -5816,12 +5811,62 @@
         </div>
       </div>
 
-      <!-- Metrics tab (issue #476) -->
+      <!-- Analytics tab (delivery-health metrics #648 + sprint charts #476) -->
       <div class="tab-pane" id="pane-metrics" role="tabpanel" aria-labelledby="stab-metrics">
         <div class="metrics-page-hdr">
-          <h2><i class="ti ti-chart-line" style="margin-right:8px;vertical-align:-2px;"></i>Metrics</h2>
-          <p>Sprint velocity, failure rate, and agent dispatch duration across recent sprints.</p>
+          <h2><i class="ti ti-chart-bar" style="margin-right:8px;vertical-align:-2px;"></i>Analytics</h2>
+          <p>Delivery health, cost, and sprint trends across recent sprints.</p>
         </div>
+
+        <!-- Delivery-health cards (ANL-3, issue #648) -->
+        <div class="metric-grid" id="metric-grid">
+          <div class="metric-card" id="card-first-pass" role="region" aria-label="First-pass rate">
+            <div class="metric-label"><i class="ti ti-circle-check" style="font-size:13px"></i> First-pass rate</div>
+            <div class="metric-val"><span id="fpr-val">—</span><span class="unit">%</span></div>
+            <div class="metric-sub" id="fpr-sub"></div>
+            <div class="bar"><span id="fpr-bar" style="width:0%;background:var(--green)"></span></div>
+            <div class="metric-empty">No data for this period</div>
+          </div>
+          <div class="metric-card" id="card-rework" role="region" aria-label="Rework rate">
+            <div class="metric-label"><i class="ti ti-refresh" style="font-size:13px"></i> Rework rate</div>
+            <div class="metric-val"><span id="rwr-val">—</span><span class="unit">%</span></div>
+            <div class="metric-sub" id="rwr-sub"></div>
+            <div class="bar"><span id="rwr-bar" style="width:0%;background:var(--amber)"></span></div>
+            <div class="metric-empty">No data for this period</div>
+          </div>
+          <div class="metric-card" id="card-duration" role="region" aria-label="Average duration by agent">
+            <div class="metric-label"><i class="ti ti-clock" style="font-size:13px"></i> Avg duration by agent</div>
+            <div class="metric-val"><span id="dur-val">—</span></div>
+            <div class="breakdown" id="dur-breakdown"></div>
+            <div class="metric-empty">No data for this period</div>
+          </div>
+          <div class="metric-card" id="card-throughput" role="region" aria-label="Throughput">
+            <div class="metric-label"><i class="ti ti-stack-2" style="font-size:13px"></i> Throughput</div>
+            <div class="metric-val"><span id="thr-val">—</span><span class="unit">tickets / sprint</span></div>
+            <div class="metric-sub" id="thr-sub"></div>
+            <div class="metric-empty">No data for this period</div>
+          </div>
+          <div class="metric-card" id="card-cost-sprint" role="region" aria-label="Cost per sprint">
+            <div class="metric-label"><i class="ti ti-coin" style="font-size:13px"></i> Cost / sprint</div>
+            <div class="metric-val"><span id="cps-val">—</span></div>
+            <div class="breakdown" id="cps-breakdown"></div>
+            <div class="metric-empty">No data for this period</div>
+          </div>
+          <div class="metric-card" id="card-cost-ticket" role="region" aria-label="Cost per ticket">
+            <div class="metric-label"><i class="ti ti-receipt" style="font-size:13px"></i> Cost / ticket</div>
+            <div class="metric-val"><span id="cpt-val">—</span></div>
+            <div class="metric-sub" id="cpt-sub"></div>
+            <div class="metric-empty">No data for this period</div>
+          </div>
+        </div>
+        <div class="src-note" aria-label="Data source note">
+          sources: first-pass/rework from sprint state (tester_attempt_count) ·
+          durations from coder/tester timestamps · cost from token_usage × model price ·
+          throughput from sprint state files
+        </div>
+
+        <!-- Sprint trend charts (#476) -->
+        <h3 class="metrics-section-title">Sprint trends</h3>
         <div class="metrics-grid">
           <div class="metrics-card">
             <div class="metrics-card-title">Sprint Velocity</div>
@@ -20709,6 +20754,8 @@ document.addEventListener('keydown', function(e) {
   }
 
   window.metricsInit = async function () {
+    // Delivery-health cards (#648) — refetch each open; cheap, always current.
+    if (window.anlFetchDeliveryHealth) window.anlFetchDeliveryHealth();
     if (_metricsLoaded && _metricsData !== null) {
       _loadChartJs(() => _renderAll(_metricsData), () => _tableFallback(_metricsData));
       return;
@@ -20730,6 +20777,69 @@ document.addEventListener('keydown', function(e) {
     }
     _metricsLoaded = true;
     _loadChartJs(() => _renderAll(_metricsData), () => _tableFallback(_metricsData));
+  };
+}());
+
+// ── Analytics delivery-health cards (#648, ported from the retired analytics page) ──
+(function () {
+  function _anlSet(id, text) { const el = document.getElementById(id); if (el) el.textContent = text; }
+  function _anlFmt$(v) { return '$' + (v || 0).toFixed(2); }
+  function _anlFmtMin(m) { m = m || 0; return m < 60 ? Math.round(m) + 'm' : (m / 60).toFixed(1) + 'h'; }
+  function _anlPct(r) { return Math.round((r || 0) * 100); }
+
+  function _anlClear() {
+    ['fpr-val','fpr-sub','rwr-val','rwr-sub','dur-val','dur-breakdown',
+     'thr-val','thr-sub','cps-val','cps-breakdown','cpt-val','cpt-sub'].forEach(id => {
+      const el = document.getElementById(id); if (el) el.textContent = '—';
+    });
+    ['fpr-bar','rwr-bar'].forEach(id => { const el = document.getElementById(id); if (el) el.style.width = '0%'; });
+    document.querySelectorAll('#metric-grid .metric-card').forEach(c => c.classList.remove('is-empty'));
+  }
+
+  function _anlEmpty() {
+    document.querySelectorAll('#metric-grid .metric-card').forEach(c => c.classList.add('is-empty'));
+  }
+
+  function _anlRender(d) {
+    const fpr = d.first_pass_rate || {}, rwr = d.rework_rate || {}, dur = d.avg_duration || {};
+    const thr = d.throughput || {}, cost = d.cost || {}, ps = cost.per_sprint || {}, pt = cost.per_ticket || {};
+    if ((fpr.total_completed || 0) <= 0) { _anlEmpty(); return; }
+
+    const fprPct = _anlPct(fpr.rate);
+    _anlSet('fpr-val', fprPct);
+    _anlSet('fpr-sub', (fpr.passed || 0) + ' of ' + (fpr.total_completed || 0) + ' tickets passed tester on the first try');
+    const fprBar = document.getElementById('fpr-bar'); if (fprBar) fprBar.style.width = fprPct + '%';
+
+    const rwrPct = _anlPct(rwr.rate);
+    _anlSet('rwr-val', rwrPct);
+    _anlSet('rwr-sub', (rwr.count || 0) + ' tickets tester-rejected at least once · ' + (rwr.rework_2plus || 0) + ' tickets needed 2+ rounds');
+    const rwrBar = document.getElementById('rwr-bar'); if (rwrBar) rwrBar.style.width = rwrPct + '%';
+
+    _anlSet('dur-val', _anlFmtMin(dur.coder_minutes || 0) + ' coder · ' + _anlFmtMin(dur.tester_minutes || 0) + ' tester');
+    const bySize = dur.coder_by_size || {};
+    const sizeParts = ['S','M','L','XL'].filter(s => bySize[s] !== undefined).map(s => '<span>' + s + ': ' + _anlFmtMin(bySize[s]) + '</span>');
+    const bkEl = document.getElementById('dur-breakdown'); if (bkEl) bkEl.innerHTML = sizeParts.length ? 'coder by size: ' + sizeParts.join(' · ') : '';
+
+    _anlSet('thr-val', (thr.avg_tickets_per_sprint || 0).toFixed(1));
+    _anlSet('thr-sub', _anlFmtMin(thr.avg_sprint_length_minutes || 0) + ' avg sprint length');
+
+    _anlSet('cps-val', _anlFmt$(ps.total));
+    const byRole = ps.by_role || {};
+    const cpsEl = document.getElementById('cps-breakdown');
+    if (cpsEl) cpsEl.innerHTML = ['coder','tester','estimator'].map(r => '<span>' + r + ' ' + _anlFmt$(byRole[r]) + '</span>').join(' · ');
+
+    _anlSet('cpt-val', _anlFmt$(pt.avg));
+    const rwCost = pt.rework_cost_annotation || 0;
+    _anlSet('cpt-sub', rwCost > 0 ? 'rework adds ~' + _anlFmt$(rwCost) + '/ticket on rejected ones' : '');
+  }
+
+  window.anlFetchDeliveryHealth = function () {
+    if (!_slug) return;
+    _anlClear();
+    fetch('/api/projects/' + encodeURIComponent(_slug) + '/analytics/metrics')
+      .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+      .then(_anlRender)
+      .catch(err => { console.error('Analytics delivery-health fetch failed:', err); _anlEmpty(); });
   };
 }());
 

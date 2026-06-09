@@ -18798,18 +18798,43 @@ function _evlFmtTs(ts) {
   return ts.replace('T', ' ').substring(0, 19);
 }
 
+function _evlLabelChangeText(e) {
+  // issue #720: human-readable label-transition entry, e.g.
+  //   "moved #700 → SIT"  or  "labeled #700 needs-rework"  or  "unlabeled #700 SIT"
+  const d = e.detail || {};
+  const target = e.target || '';
+  const added = Array.isArray(d.added) ? d.added : [];
+  const removed = Array.isArray(d.removed) ? d.removed : [];
+  if (added.length && removed.length) {
+    return `moved ${target} → ${d.to_label || added.join(', ')}`;
+  }
+  if (added.length) {
+    return `labeled ${target} ${d.to_label || added.join(', ')}`;
+  }
+  if (removed.length) {
+    return `unlabeled ${target} ${d.from_label || removed.join(', ')}`;
+  }
+  return `label change ${target}`.trim();
+}
+
 function _evlRenderRow(row) {
   if (row.kind === 'standalone') {
     const e = row.event;
     const ts = _evlFmtTs(e.timestamp);
     const src = e.source || '';
-    const type = (e.type || '').replace(/_/g, ' ');
-    const target = e.target ? ' ' + e.target : '';
+    let typeText;
+    if (e.type === 'ticket_label_changed') {
+      typeText = _evlLabelChangeText(e);
+    } else {
+      const type = (e.type || '').replace(/_/g, ' ');
+      const target = e.target ? ' ' + e.target : '';
+      typeText = type + target;
+    }
     const actor = e.actor ? `<span class="evl-actor">${escHtml(e.actor)}</span>` : '';
     return `<div class="evl-standalone-row">
       <span class="evl-ts">${escHtml(ts)}</span>
       <span class="evl-source-badge">${escHtml(src)}</span>
-      <span class="evl-type-label">${escHtml(type + target)}</span>
+      <span class="evl-type-label">${escHtml(typeText)}</span>
       ${actor}
     </div>`;
   }

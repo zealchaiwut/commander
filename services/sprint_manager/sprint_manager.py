@@ -73,12 +73,16 @@ try:
         transition as _sm_transition,
         TicketState as _TicketState,
         TransitionError as _TransitionError,
+        STATE_LABELS as _STATE_LABELS,
+        STATUS_LABELS as _STATUS_LABELS,
     )
     _STATE_MACHINE_AVAILABLE = True
 except (ImportError, ModuleNotFoundError):  # pragma: no cover
     _sm_transition = None  # type: ignore[assignment]
     _TicketState = None  # type: ignore[assignment]
     _TransitionError = Exception  # type: ignore[assignment,misc]
+    _STATE_LABELS = {}  # type: ignore[assignment]
+    _STATUS_LABELS = frozenset()  # type: ignore[assignment]
     _STATE_MACHINE_AVAILABLE = False
 
 try:
@@ -1331,6 +1335,58 @@ def _get_issue_labels(issue_num: int, repo_name: Optional[str] = None) -> set[st
         return set()
 
 
+def _current_status_labels(issue_num: int, repo_name: Optional[str]) -> "frozenset[str] | None":
+    """Best-effort fetch of the issue's current status labels (issue #720).
+
+    Returns the subset of STATUS_LABELS currently applied, or None if the
+    labels could not be fetched (so the caller can degrade gracefully).
+    """
+    try:
+        issue = github_client.get_issue(issue_num, repo_name=repo_name)
+        names = {lbl.get("name") for lbl in issue.get("labels", []) if lbl.get("name")}
+        return frozenset(_STATUS_LABELS & names)
+    except Exception:
+        return None
+
+
+def _emit_label_transition_event(
+    issue_num: int,
+    target_state: "_TicketState",
+    actor: str,
+    repo_name: Optional[str],
+    before: "frozenset[str] | None",
+) -> None:
+    """Emit a ticket_label_changed activity event for a real label change (issue #720)."""
+    desired = frozenset(_STATE_LABELS.get(target_state, frozenset()))
+    have_before = before is not None
+    before_set = before if have_before else frozenset()
+
+    added = sorted(desired - before_set)
+    removed = sorted(before_set - desired) if have_before else []
+    from_label = (sorted(before_set)[0] if before_set else None) if have_before else None
+    to_label = sorted(desired)[0] if desired else None
+
+    project = repo_name
+    if not project:
+        try:
+            project = github_client.repo()
+        except Exception:
+            project = "dashboard"
+
+    _emit_sprint_lifecycle_event(
+        type="ticket_label_changed",
+        target=f"#{issue_num}",
+        actor=actor,
+        detail={
+            "from_label": from_label,
+            "to_label": to_label,
+            "added": added,
+            "removed": removed,
+        },
+        project=project,
+    )
+
+
 def _transition_safe(
     issue_num: int,
     target_state: "_TicketState",
@@ -1346,8 +1402,9 @@ def _transition_safe(
             issue_num=issue_num,
         )
         return
+    before = _current_status_labels(issue_num, repo_name)
     try:
-        _sm_transition(issue_num, target_state, actor=actor, repo=repo_name, note=note)
+        changed = _sm_transition(issue_num, target_state, actor=actor, repo=repo_name, note=note)
         structured_log.info(
             "ticket_transition",
             f"transition #{issue_num} → {target_state.value} actor={actor!r}",
@@ -1355,6 +1412,9 @@ def _transition_safe(
             target_state=target_state.value,
             actor=actor,
         )
+        # issue #720: emit an activity event only when a label actually changed.
+        if changed:
+            _emit_label_transition_event(issue_num, target_state, actor, repo_name, before)
     except _TransitionError as e:
         structured_log.warn(
             "label_apply_failed",

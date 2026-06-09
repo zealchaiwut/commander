@@ -3393,6 +3393,21 @@ def _dispatch_tester(
         " agent_browser_runner.is_available() is False. HTTP-only UAT steps"
         " continue to run via httpx unchanged."
         f" COMMANDER_AGENT_BROWSER_AVAILABLE={'1' if browser_available else '0'} in your env."
+        " SCREENSHOT CAPTURE (issue #712): for browser steps, save each step's"
+        " screenshot via a single agent_browser_runner.ScreenshotRecorder(sprints_dir,"
+        " sprint_num, issue_num) — call recorder.capture(screenshot_path) once per"
+        " browser step in order (it caps resolution, skips consecutive duplicates,"
+        " and names files step-<k>.png under"
+        " .commander/sprints/sprint-<N>/screenshots/issue-<N>/). After the run, if"
+        " recorder.saved is non-empty, call"
+        " agent_browser_runner.upload_screenshots(recorder.saved, repo, issue_num,"
+        " sprint_num) to get a {filename: url} map, then append"
+        " agent_browser_runner.build_screenshot_section("
+        " agent_browser_runner.collect_issue_screenshots(sprints_dir, sprint_num,"
+        " issue_num, url_map=urls)) to the test report markdown before posting. If a"
+        " ticket produced zero browser steps, add NO screenshot section. The whole"
+        " capture/upload/embed flow is best-effort — never let it abort the test run"
+        " or report posting."
     )
     cmd[-1] = cmd[-1] + browser_hint
     print(f"  [agent-browser] available={browser_available} injected into tester env")
@@ -3539,6 +3554,58 @@ def _follow_up_action(category: Optional[str]) -> str:
     return mapping.get(category or "", "Review the issue manually.")
 
 
+def _build_screenshots_section(
+    state: SprintState,
+    sprints_dir: Path,
+    repo_name: Optional[str],
+) -> list[str]:
+    """Build the per-ticket Screenshots section lines for the sprint summary (#712).
+
+    Scans ``<sprints_dir>/sprint-<N>/screenshots/issue-<N>/`` for each ticket and,
+    for any with captured browser screenshots, emits a sub-section with the count
+    and inline images (or links when a URL manifest is absent). Returns an empty
+    list when no ticket has screenshots, so the section is omitted entirely.
+    """
+    n = state.sprint_number if state.sprint_number is not None else state.sprint_label
+    blocks: list[str] = []
+    for issue in state.issues:
+        try:
+            url_map = _load_screenshot_url_map(sprints_dir, n, issue.number)
+            shots = agent_browser_runner.collect_issue_screenshots(
+                sprints_dir, n, issue.number, url_map=url_map
+            )
+        except Exception:
+            shots = []
+        if not shots:
+            continue
+        section = agent_browser_runner.build_screenshot_section(
+            shots, heading=f"Issue #{issue.number} — {issue.title}", heading_level=3
+        )
+        if section:
+            blocks.append(section)
+    if not blocks:
+        return []
+    lines = ["## Screenshots", ""]
+    for block in blocks:
+        lines.append(block)
+        lines.append("")
+    return lines
+
+
+def _load_screenshot_url_map(sprints_dir: Path, sprint_num, issue_num) -> Optional[dict]:
+    """Read an optional {filename: raw_url} manifest written at upload time (#712)."""
+    manifest = (
+        agent_browser_runner.sprint_screenshot_dir(sprints_dir, sprint_num, issue_num)
+        / "urls.json"
+    )
+    if not manifest.exists():
+        return None
+    try:
+        return json.loads(manifest.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+
 def generate_sprint_summary(
     state: SprintState,
     elapsed_secs: float,
@@ -3546,8 +3613,14 @@ def generate_sprint_summary(
     open_issues: Optional[list[dict]] = None,
     repo_name: Optional[str] = None,
     sprint_branch: Optional[str] = None,
+    sprints_dir: Optional[Path] = None,
 ) -> str:
-    """Generate a richly-formatted executive summary markdown string."""
+    """Generate a richly-formatted executive summary markdown string.
+
+    When ``sprints_dir`` is provided (issue #712), each ticket's captured UAT
+    browser screenshots are listed in a Screenshots section; tickets with no
+    browser steps contribute nothing (no regression for legacy runs).
+    """
     n = state.sprint_number if state.sprint_number is not None else state.sprint_label
 
     start_ts = _to_bangkok(state.start_timestamp) if state.start_timestamp else _bangkok_now()
@@ -3695,6 +3768,12 @@ def generate_sprint_summary(
                 f"| {ev.get('timestamp', '?')} |"
             )
         lines.append("")
+
+    # -- Screenshots (issue #712) --
+    if sprints_dir is not None:
+        screenshots_block = _build_screenshots_section(state, sprints_dir, repo_name)
+        if screenshots_block:
+            lines += screenshots_block
 
     # -- Carried Over --
     lines += ["## Carried Over", ""]
@@ -4078,6 +4157,7 @@ def write_sprint_summary(
         open_issues=open_issues,
         repo_name=eff_repo,
         sprint_branch=sprint_branch,
+        sprints_dir=(cfg.sprints_dir if cfg is not None else SPRINTS_DIR),
     )
     path = _summary_path(state.sprint_number, state.sprint_label, cfg=cfg)
     path.parent.mkdir(parents=True, exist_ok=True)

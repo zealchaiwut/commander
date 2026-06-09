@@ -792,6 +792,7 @@ async def lifespan(app: FastAPI):
     _validate_github_repos()
     _sweep_orphan_pid_files()
     _restore_sprint_statuses_on_startup()
+    await _mark_inflight_jobs_failed()
     # Sync projects.json → Neon (non-blocking; warn on failure, never fatal)
     if _SYNC_PROJECTS_AVAILABLE:
         try:
@@ -11636,9 +11637,14 @@ async def bulk_size_remedy_images(job_id: str, body: SizeRemedyImagesBody):
 
 # ── Startup: mark any in-flight jobs as failed (best-effort) ─────────────────
 
-@app.on_event("startup")
 async def _mark_inflight_jobs_failed():
-    """On restart, mark any previously-running jobs as failed (state lost)."""
+    """On restart, mark any previously-running jobs as failed (state lost).
+
+    Called from the lifespan startup. NOTE: this must NOT use
+    @app.on_event("startup") — the app is created with a lifespan handler, and
+    FastAPI ignores on_event hooks when a lifespan is set, so the decorator
+    silently never ran (left bulk jobs wedged in "running" across restarts).
+    """
     try:
         jobs_dir = _bulk_jobs_dir()
         for p in jobs_dir.glob("*.json"):

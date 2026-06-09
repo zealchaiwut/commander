@@ -114,6 +114,8 @@ Unique constraint: `(project_id, env)`.
 
 Query with `GET /api/debug/token-usage/by-agent-model` for per-agent/model cost breakdown.
 
+The `events` table also records dashboard activity events surfaced in the activity log: `ticket_label_changed` on every real label transition (issue #720), and scoped `sprint_started` / `sprint_finished` / `sprint_rerun` lifecycle events keyed to the target project (issue #721). Agent rows carry role + issue number so the activity log can link to the GitHub issue (issue #719).
+
 ### project_events
 
 Audit log for project-level events recorded by `record_project_event()` in `apps/dashboard/db.py`.
@@ -169,3 +171,12 @@ Indexes: `(project, created_at DESC)`, `(project, target)`, `(action_id)`.
 | `GET` | `/api/projects/{slug}/analytics/calibration` | Estimate accuracy data: estimated vs actual durations per size bucket |
 
 Query params for calibration endpoint: `since` (ISO date), `until` (ISO date), `sprint` (label string) — all optional.
+
+> **Note (issue #718):** Analytics metrics and calibration are sourced from local sprint state and estimate files under `.commander/`, not Neon. The analytics page works with the Neon kill switch enabled.
+
+### Notes
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/notes` | Return the global notes body (`{"body": "..."}`); empty string if none saved yet |
+| `PUT` | `/api/notes` | Persist the full global notes body (`{"body": "..."}`) to `.commander/notes.json` |

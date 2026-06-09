@@ -2924,6 +2924,19 @@ def _design_docs_guard(cwd_path: "Path") -> "Optional[str]":
     )
 
 
+def _agent_identity_env(role: str, issue_num: Optional[int]) -> dict[str, str]:
+    """Env vars that tag a dispatched agent's hooks with role + issue number so
+    activity-log rows can render '<role> <action> #<issue>' (issue #719).
+
+    issue_num of 0/None (e.g. the reviewer's sprint-level sentinel) emits no
+    CLAUDE_AGENT_ISSUE, so no spurious '#0' link is produced.
+    """
+    env = {"CLAUDE_AGENT_ROLE": role}
+    if issue_num:
+        env["CLAUDE_AGENT_ISSUE"] = str(issue_num)
+    return env
+
+
 def _dispatch_coder(
     issue_num: int,
     alert_modes: list[str],
@@ -3080,7 +3093,7 @@ def _dispatch_coder(
     # COMMANDER_SPRINT_RUNNING so child scripts enforce RUN_MUTABLE_LABELS (issue #506).
     sub_env = os.environ.copy()
     sub_env.pop("ANTHROPIC_API_KEY", None)
-    sub_env["CLAUDE_AGENT_ROLE"] = "coder"  # tag hooks/telemetry as the docs prescribe
+    sub_env.update(_agent_identity_env("coder", issue_num))  # tag hooks/telemetry as the docs prescribe
     if eff_repo:
         sub_env["COMMANDER_PROJECT"] = eff_repo
     if sprint_label:
@@ -3350,7 +3363,7 @@ def _dispatch_tester(
     # COMMANDER_SPRINT_RUNNING so child scripts enforce RUN_MUTABLE_LABELS (issue #506).
     sub_env = os.environ.copy()
     sub_env.pop("ANTHROPIC_API_KEY", None)
-    sub_env["CLAUDE_AGENT_ROLE"] = "tester"  # tag hooks/telemetry as the docs prescribe
+    sub_env.update(_agent_identity_env("tester", issue_num))  # tag hooks/telemetry as the docs prescribe
     if eff_repo:
         sub_env["COMMANDER_PROJECT"] = eff_repo
     if sprint_label:
@@ -4974,6 +4987,7 @@ def _dispatch_reviewer(
 
     sub_env = os.environ.copy()
     sub_env.pop("ANTHROPIC_API_KEY", None)
+    sub_env.update(_agent_identity_env("reviewer", summary_issue_num))  # issue #719
     if eff_repo:
         sub_env["COMMANDER_PROJECT"] = eff_repo
     sub_env["REPO"]                  = eff_repo or ""
@@ -5197,12 +5211,15 @@ def _dispatch_estimator_for_followup(
     ]
 
     print(f"  [estimator] Estimating follow-up #{issue_num} ...", flush=True)
+    est_env = os.environ.copy()
+    est_env.update(_agent_identity_env("estimator", issue_num))  # issue #719
     try:
         result = subprocess.run(
             cmd,
             capture_output=True,
             text=True,
             timeout=_ESTIMATOR_DISPATCH_TIMEOUT,
+            env=est_env,
         )
     except subprocess.TimeoutExpired:
         print(f"  [estimator] WARNING: estimation for #{issue_num} timed out after {_ESTIMATOR_DISPATCH_TIMEOUT}s", flush=True)

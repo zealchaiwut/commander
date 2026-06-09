@@ -1291,6 +1291,25 @@ def _agent_project_from_name(agent_name: str | None) -> str | None:
     return matched
 
 
+def _parse_agent_identity(agent_name: str | None) -> tuple[str | None, int | None]:
+    """Extract (role, issue_num) from an agent name string (issue #719).
+
+    Names are formatted as 'role·label·branch·#short' with an optional trailing
+    '·issue-<N>' component appended when the dispatcher set CLAUDE_AGENT_ISSUE.
+    The role is the first '·'-delimited component; the issue number is the
+    'issue-<N>' token if present. Either may be None for legacy/raw-UUID names.
+    """
+    role = None
+    issue_num = None
+    if agent_name and "·" in agent_name:
+        role = agent_name.split("·")[0] or None
+    if agent_name:
+        m = re.search(r"issue-(\d+)", agent_name)
+        if m:
+            issue_num = int(m.group(1))
+    return role, issue_num
+
+
 @app.post("/api/agent-event")
 async def receive_event(request: Request, event: AgentEvent):
     _slog.event("route.entry", project="dashboard", request_id=request.state.request_id, route="/api/agent-event", method="POST", event_type=event.event_type)
@@ -1298,7 +1317,7 @@ async def receive_event(request: Request, event: AgentEvent):
     session_id = event.session_id or "unknown"
     project = _agent_project_from_name(event.name)
     actor = event.name or session_id
-    role = (event.name.split("·")[0] if event.name and "·" in event.name else None)
+    role, issue_num = _parse_agent_identity(event.name)
 
     if project:
         if event.event_type == "tool_use" and session_id not in _seen_agent_sessions:
@@ -1309,7 +1328,7 @@ async def receive_event(request: Request, event: AgentEvent):
                 actor=actor,
                 type="agent_started",
                 target=session_id,
-                detail={"role": role, "working_dir": event.working_dir},
+                detail={"role": role, "issue_num": issue_num, "working_dir": event.working_dir},
                 action_id=session_id,
             )
         if event.status in ("done", "timed_out", "error") or event.event_type == "agent_stop":
@@ -1320,7 +1339,7 @@ async def receive_event(request: Request, event: AgentEvent):
                 actor=actor,
                 type="agent_finished",
                 target=session_id,
-                detail={"status": event.status, "role": role},
+                detail={"status": event.status, "role": role, "issue_num": issue_num},
                 action_id=session_id,
             )
 

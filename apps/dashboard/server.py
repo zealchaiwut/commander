@@ -1123,6 +1123,12 @@ async def project_slug_no_tab(slug: str):
     return RedirectResponse(url=f"/project/{slug}/sprint-mgmt", status_code=302)
 
 
+@app.get("/project/{slug}/analytics")
+async def project_slug_analytics(slug: str):
+    """Serve the Analytics page (ANL-2 shell, issue #648)."""
+    return _serve_html(STATIC_DIR / "analytics.html")
+
+
 @app.get("/project/{slug}/{tab}")
 async def project_slug_tab(slug: str, tab: str):
     """Serve the project chrome page for valid tabs; redirect invalid tabs to sprint-mgmt."""
@@ -7068,6 +7074,233 @@ def get_sprint_metrics(request: Request):
             })
 
     return results
+
+
+# ── Analytics metrics endpoint (issue #648 / ANL-3) ──────────────────────────
+
+# Per-token prices in USD (input, output). Update when model pricing changes.
+MODEL_PRICE_MAP: dict[str, tuple[float, float]] = {
+    "claude-haiku-4-5":              (0.80 / 1_000_000, 4.00 / 1_000_000),
+    "claude-haiku-4-5-20251001":     (0.80 / 1_000_000, 4.00 / 1_000_000),
+    "claude-sonnet-4-6":             (3.00 / 1_000_000, 15.00 / 1_000_000),
+    "claude-opus-4-8":               (15.00 / 1_000_000, 75.00 / 1_000_000),
+}
+
+
+def _compute_analytics_metrics(project_root: Path,
+                                since: str | None = None,
+                                until: str | None = None,
+                                sprint_filter: str | None = None) -> dict:
+    """Aggregate delivery-health metrics from sprint state files and token_usage.
+
+    Returns a dict with keys: first_pass_rate, rework_rate, avg_duration,
+    throughput, cost. All numeric fields are 0 when no data is available.
+    """
+    today = datetime.now(tz=timezone.utc).date()
+
+    if since:
+        try:
+            since_dt = datetime.strptime(since, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        except ValueError:
+            raise HTTPException(400, detail=f"Invalid 'since' date {since!r} — expected YYYY-MM-DD")
+    else:
+        since_dt = None
+
+    if until:
+        try:
+            until_dt = datetime.strptime(until, "%Y-%m-%d").replace(
+                tzinfo=timezone.utc).replace(hour=23, minute=59, second=59)
+        except ValueError:
+            raise HTTPException(400, detail=f"Invalid 'until' date {until!r} — expected YYYY-MM-DD")
+    else:
+        until_dt = None
+
+    sprints_dir = _commander_dir(project_root) / "sprints"
+
+    coder_durations_by_size: dict[str, list[float]] = {}
+    coder_all: list[float] = []
+    tester_all: list[float] = []
+
+    total_completed = 0
+    first_pass_count = 0
+    rework_count = 0
+    rework_2plus = 0
+
+    sprint_ticket_counts: list[int] = []
+    sprint_lengths: list[float] = []
+
+    estimates_dir = _commander_dir(project_root) / "estimates"
+
+    if sprints_dir.exists():
+        for state_file in sorted(sprints_dir.glob("sprint-*-state.json")):
+            try:
+                state_data = json.loads(state_file.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+
+            sprint_label_val = state_data.get("sprint_label", "")
+
+            if sprint_filter and sprint_label_val != sprint_filter:
+                continue
+
+            start_ts_str = state_data.get("start_timestamp")
+            if start_ts_str:
+                try:
+                    start_dt = datetime.fromisoformat(start_ts_str.rstrip("Z")).replace(tzinfo=timezone.utc)
+                except Exception:
+                    start_dt = None
+            else:
+                start_dt = None
+
+            if start_dt:
+                if since_dt and start_dt < since_dt:
+                    continue
+                if until_dt and start_dt > until_dt:
+                    continue
+
+            wall_clock_secs = float(state_data.get("wall_clock_secs") or 0.0)
+            issues = state_data.get("issues", [])
+            sprint_done = [i for i in issues if i.get("status") == "done"]
+
+            sprint_ticket_counts.append(len(sprint_done))
+            if wall_clock_secs > 0:
+                sprint_lengths.append(wall_clock_secs / 60.0)
+
+            for issue in sprint_done:
+                total_completed += 1
+                attempt = int(issue.get("tester_attempt_count") or 1)
+                if attempt <= 1:
+                    first_pass_count += 1
+                else:
+                    rework_count += 1
+                    if attempt >= 3:
+                        rework_2plus += 1
+
+                # Coder duration
+                coder_start = issue.get("coder_started_at")
+                coder_end = issue.get("coder_finished_at")
+                if coder_start and coder_end:
+                    try:
+                        s = datetime.fromisoformat(coder_start.rstrip("Z")).replace(tzinfo=timezone.utc)
+                        e = datetime.fromisoformat(coder_end.rstrip("Z")).replace(tzinfo=timezone.utc)
+                        dur_min = (e - s).total_seconds() / 60.0
+                        coder_all.append(dur_min)
+
+                        issue_num = issue.get("number")
+                        size = None
+                        if issue_num and estimates_dir.exists():
+                            est_file = estimates_dir / f"issue-{issue_num}.json"
+                            if est_file.exists():
+                                try:
+                                    est = json.loads(est_file.read_text(encoding="utf-8"))
+                                    size = est.get("size")
+                                except Exception:
+                                    pass
+                        if size:
+                            coder_durations_by_size.setdefault(size, []).append(dur_min)
+                    except Exception:
+                        pass
+
+                # Tester duration
+                tester_start = issue.get("tester_started_at")
+                tester_end = issue.get("tester_finished_at")
+                if tester_start and tester_end:
+                    try:
+                        s = datetime.fromisoformat(tester_start.rstrip("Z")).replace(tzinfo=timezone.utc)
+                        e = datetime.fromisoformat(tester_end.rstrip("Z")).replace(tzinfo=timezone.utc)
+                        tester_all.append((e - s).total_seconds() / 60.0)
+                    except Exception:
+                        pass
+
+    first_pass_rate = first_pass_count / total_completed if total_completed else 0
+    rework_rate_val = rework_count / total_completed if total_completed else 0
+
+    avg_coder = sum(coder_all) / len(coder_all) if coder_all else 0
+    avg_tester = sum(tester_all) / len(tester_all) if tester_all else 0
+    coder_by_size = {
+        sz: round(sum(vals) / len(vals), 2)
+        for sz, vals in coder_durations_by_size.items()
+        if vals
+    }
+
+    avg_tickets = sum(sprint_ticket_counts) / len(sprint_ticket_counts) if sprint_ticket_counts else 0
+    avg_length = sum(sprint_lengths) / len(sprint_lengths) if sprint_lengths else 0
+
+    # Cost from token_usage table
+    cost_per_sprint_total = 0.0
+    cost_by_role: dict[str, float] = {"coder": 0.0, "tester": 0.0, "estimator": 0.0}
+    try:
+        rows = db.get_token_usage_by_agent_model()
+        for row in rows:
+            role = (row.get("agent_role") or "unknown").lower()
+            model = (row.get("model_name") or "").lower()
+            price_in, price_out = MODEL_PRICE_MAP.get(model, (0.0, 0.0))
+            cost = (row.get("total_input", 0) * price_in +
+                    row.get("total_output", 0) * price_out)
+            cost_per_sprint_total += cost
+            if role in cost_by_role:
+                cost_by_role[role] += cost
+    except Exception:
+        pass
+
+    num_sprints = len(sprint_ticket_counts) if sprint_ticket_counts else 1
+    cost_per_sprint_avg = cost_per_sprint_total / num_sprints
+    cost_per_ticket_avg = cost_per_sprint_total / total_completed if total_completed else 0
+
+    rework_cost_annotation = (
+        round(cost_per_ticket_avg * 0.32, 4) if rework_count > 0 else 0.0
+    )
+
+    return {
+        "first_pass_rate": {
+            "rate": round(first_pass_rate, 4),
+            "passed": first_pass_count,
+            "total_completed": total_completed,
+        },
+        "rework_rate": {
+            "rate": round(rework_rate_val, 4),
+            "count": rework_count,
+            "rework_2plus": rework_2plus,
+            "total": total_completed,
+        },
+        "avg_duration": {
+            "coder_minutes": round(avg_coder, 2),
+            "tester_minutes": round(avg_tester, 2),
+            "coder_by_size": coder_by_size,
+        },
+        "throughput": {
+            "avg_tickets_per_sprint": round(avg_tickets, 2),
+            "avg_sprint_length_minutes": round(avg_length, 2),
+        },
+        "cost": {
+            "per_sprint": {
+                "total": round(cost_per_sprint_avg, 4),
+                "by_role": {k: round(v / num_sprints, 4) for k, v in cost_by_role.items()},
+            },
+            "per_ticket": {
+                "avg": round(cost_per_ticket_avg, 4),
+                "rework_cost_annotation": rework_cost_annotation,
+            },
+        },
+    }
+
+
+@app.get("/api/projects/{slug}/analytics/metrics")
+def get_project_analytics_metrics(slug: str, request: Request):
+    """GET /api/projects/{slug}/analytics/metrics — ANL-3 delivery-health metrics.
+
+    Query params: since=YYYY-MM-DD, until=YYYY-MM-DD, sprint=<sprint-label>.
+    Returns 404 for unknown slugs; all numeric fields are 0 when no data.
+    """
+    repo = _resolve_project_slug(slug)
+    project_root = _project_root_path(repo)
+
+    since = request.query_params.get("since")
+    until = request.query_params.get("until")
+    sprint_filter = request.query_params.get("sprint")
+
+    return _compute_analytics_metrics(project_root, since=since, until=until,
+                                      sprint_filter=sprint_filter)
 
 
 # ── Daily report endpoint (issue #478) ───────────────────────────────────────

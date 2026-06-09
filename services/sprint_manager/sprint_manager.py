@@ -5395,7 +5395,10 @@ def run_sprint(
                         type="sprint_cancelled",
                         target=f"sprint-{sprint_num}" if sprint_num is not None else label,
                         actor="system",
-                        detail={"tickets_remaining": len(_remaining)},
+                        detail={
+                            "tickets_remaining": len(_remaining),
+                            "duration": round(time.monotonic() - start_time),
+                        },
                         project=eff_repo or label,
                         action_id=_run_id,
                     )
@@ -5562,7 +5565,10 @@ def run_sprint(
                     type="sprint_cancelled",
                     target=f"sprint-{sprint_num}" if sprint_num is not None else label,
                     actor="system",
-                    detail={"tickets_remaining": len(_remaining)},
+                    detail={
+                        "tickets_remaining": len(_remaining),
+                        "duration": round(time.monotonic() - start_time),
+                    },
                     project=eff_repo or label,
                     action_id=_run_id,
                 )

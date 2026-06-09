@@ -2223,6 +2223,10 @@ def handle_post_tester(
         api_url      = None
 
     if tester_exit_code != 0:
+        print(
+            f"  Tester for issue #{issue_num} exited {tester_exit_code} — status: failed",
+            flush=True,
+        )
         return (False,
                 f"Issue #{issue_num}: tester exited {tester_exit_code}, skipping gates",
                 FailureCategory.CRASH)
@@ -2245,8 +2249,15 @@ def handle_post_tester(
                 issue_num, wt_root, target_branch, eff_repo, cfg, sprint_label
             )
             if merge_ok:
-                branch_is_merged = _is_branch_merged_into(found_branch, target_branch)
-                print(f"  Issue #{issue_num}: auto-merge {'succeeded' if branch_is_merged else 'ran but branch still not merged'}")
+                # finish_feature.py exited 0 — trust the merge succeeded.
+                # Re-verifying via git can return False due to ref-staleness in the
+                # sprint-manager worktree, causing a false TESTER_REJECTED failure
+                # even though the merge and push completed successfully (issue #659).
+                branch_is_merged = True
+                # finish_feature.py also deletes the branch, so clear found_branch so
+                # already_merged_by_tester resolves True and prevents a double-merge call.
+                found_branch = None
+                print(f"  Issue #{issue_num}: auto-merge succeeded (finish_feature.py exited 0)")
             if not branch_is_merged:
                 warning_body = (
                     f"**Tester exited 0 but feature branch not merged.**\n\n"
@@ -2814,6 +2825,11 @@ def _dispatch_coder(
         rc = proc.wait()
         detector.stop()
 
+        # Exit code 0 means success unconditionally — check before detector.killed
+        # to guard against the same race as _dispatch_tester (see issue #659).
+        if rc == 0:
+            return True, None
+
         if detector.killed:
             reason = f"No log activity for {HANG_KILL_SECS//60} minutes"
             _add_blocked_label(issue_num, reason, repo_name=eff_repo, sprint_label=sprint_label)
@@ -2833,9 +2849,6 @@ def _dispatch_coder(
                 summary=f"Issue #{issue_num}: coder hung for {HANG_KILL_SECS//60} minutes and was killed",
             )
             return False, FailureCategory.HANG
-
-        if rc == 0:
-            return True, None
 
         # Non-zero exit: inspect log for rate-limit signal
         log_content = ""
@@ -3099,6 +3112,14 @@ def _dispatch_tester(
         rc = proc.wait()
         detector.stop()
 
+        # Exit code 0 means success unconditionally — check before detector.killed
+        # to guard against a race where the hang detector fires after the process
+        # already exited cleanly (proc.kill raises ProcessLookupError but still
+        # sets _killed=True, causing a false HANG failure on exit 0).
+        if rc == 0:
+            print(f"  Tester for issue #{issue_num} exited 0 — status: passed", flush=True)
+            return 0, None
+
         if detector.killed:
             reason = f"Tester: no log activity for {HANG_KILL_SECS//60} minutes"
             _add_blocked_label(issue_num, reason, repo_name=eff_repo, sprint_label=sprint_label)
@@ -3112,9 +3133,6 @@ def _dispatch_tester(
                 repo=eff_repo,
             )
             return -1, FailureCategory.HANG
-
-        if rc == 0:
-            return 0, None
 
         # Non-zero exit: inspect log for rate-limit signal
         log_content = ""

@@ -10946,12 +10946,32 @@ def _resolve_bulk_sprint_label(sprint_label: str | None, repo: str | None) -> st
     if sprint_label != "NEW":
         return sprint_label
     try:
-        existing = github_client.list_sprints(repo_name=repo)
-        next_num = (max(existing) if existing else 0) + 1
+        next_num = _next_new_sprint_number(repo)
         github_client.ensure_sprint_label(next_num, repo_name=repo)
         return f"sprint-{next_num}"
     except Exception:
         return ""
+
+
+def _next_new_sprint_number(repo: str | None) -> int:
+    """Next sprint number for a brand-new sprint — the SAME value the board's
+    "New sprint (Sprint N)" option shows.
+
+    Must take the max over BOTH live sprint labels AND finished-sprint summary
+    numbers: a sprint's `sprint-N` label is often deleted once it finishes, so
+    counting labels alone resets the next number back to 1 (issue: bulk-create
+    "NEW" said 54 but created sprint-1). The finished-summary issues preserve
+    the real high-water mark cross-machine.
+    """
+    nums: list[int] = list(github_client.list_sprints(repo_name=repo) or [])
+    for lbl in _finished_sprint_summaries(repo):
+        if _SPRINT_LABEL_RE.match(lbl):
+            try:
+                # lbl is "sprint-N" or "sprint-N.X" — take the base number N.
+                nums.append(int(lbl.split("-", 1)[1].split(".")[0]))
+            except (IndexError, ValueError):
+                pass
+    return (max(nums) if nums else 0) + 1
 
 
 def _compose_ticket_labels(sprint_label: str, item_labels: list[str]) -> list[str]:

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import threading
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Optional
 
 from sqlalchemy import text
@@ -16,6 +18,55 @@ def _open_session():
     if _session_factory is not None:
         return _session_factory()
     return _neon_get_session()
+
+
+def _try_open_session():
+    """Return an open session, or None when no backing DB is configured.
+
+    The dashboard runs fully off GitHub + local JSON when Neon is disabled
+    (DATABASE_URL unset / COMMANDER_DISABLE_NEON=1). In that mode get_engine()
+    raises, so settings reads/writes must degrade to a local JSON store instead
+    of 500ing — otherwise the Settings screen can't even load defaults.
+    """
+    try:
+        return _open_session()
+    except Exception:
+        return None
+
+
+# ── Local JSON fallback store (used when Neon is unavailable) ─────────────────
+# One file for the whole dashboard, keyed by scope|project|key — mirrors the
+# single shared `settings` table Neon would otherwise provide.
+_fallback_lock = threading.Lock()
+
+
+def _fallback_store_path() -> Path:
+    # settings_repo.py lives at <repo>/services/sprint_manager/settings_repo.py
+    root = Path(__file__).resolve().parent.parent.parent
+    d = root / ".commander"
+    d.mkdir(parents=True, exist_ok=True)
+    return d / "settings_store.json"
+
+
+def _fkey(scope: str, project: Optional[str], key: str) -> str:
+    return f"{scope}|{project or ''}|{key}"
+
+
+def _fallback_read_all() -> dict:
+    p = _fallback_store_path()
+    if not p.exists():
+        return {}
+    try:
+        return json.loads(p.read_text())
+    except Exception:
+        return {}
+
+
+def _fallback_write_all(data: dict) -> None:
+    try:
+        _fallback_store_path().write_text(json.dumps(data, indent=2))
+    except Exception:
+        pass
 
 
 def _load(raw: Any) -> Any:
@@ -34,7 +85,17 @@ def get_setting(key: str, project: Optional[str] = None) -> Any:
       3. Return shallow-merge of project over global (project fields win).
     Returns {} if no global row exists.
     """
-    with _open_session() as session:
+    session_cm = _try_open_session()
+    if session_cm is None:
+        store = _fallback_read_all()
+        global_val: dict = store.get(_fkey("global", None, key), {})
+        if project is None:
+            return global_val
+        proj_val = store.get(_fkey("project", project, key))
+        if proj_val is None:
+            return global_val
+        return {**global_val, **proj_val}
+    with session_cm as session:
         global_row = session.execute(
             text(
                 "SELECT value FROM settings"
@@ -66,7 +127,10 @@ def get_setting_scoped(scope: str, key: str, project: Optional[str] = None) -> A
 
     Returns {} if no matching row exists.
     """
-    with _open_session() as session:
+    session_cm = _try_open_session()
+    if session_cm is None:
+        return _fallback_read_all().get(_fkey(scope, project, key), {})
+    with session_cm as session:
         row = session.execute(
             text(
                 "SELECT value FROM settings"
@@ -84,7 +148,14 @@ def delete_setting(
     project: Optional[str] = None,
 ) -> None:
     """Delete a settings row (no-op if it doesn't exist)."""
-    with _open_session() as session:
+    session_cm = _try_open_session()
+    if session_cm is None:
+        with _fallback_lock:
+            store = _fallback_read_all()
+            if store.pop(_fkey(scope, project, key), None) is not None:
+                _fallback_write_all(store)
+        return
+    with session_cm as session:
         session.execute(
             text(
                 "DELETE FROM settings"
@@ -113,7 +184,14 @@ def set_setting(
     serialized = json.dumps(value)
     now = datetime.now(timezone.utc).isoformat()
 
-    with _open_session() as session:
+    session_cm = _try_open_session()
+    if session_cm is None:
+        with _fallback_lock:
+            store = _fallback_read_all()
+            store[_fkey(scope, project, key)] = value
+            _fallback_write_all(store)
+        return
+    with session_cm as session:
         existing = session.execute(
             text(
                 "SELECT id FROM settings"

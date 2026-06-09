@@ -150,6 +150,19 @@ or `null`.
 
 ---
 
+## Settings
+
+Read effective settings (global defaults merged with project overrides) and write override values. Secret fields are never returned as raw values — they appear as boolean presence flags (e.g. `"github_token_set": true`).
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/settings` | Read effective global settings. Non-secret fields returned with defaults applied; secrets shown as `<field>_set` booleans. |
+| `PUT` | `/api/settings` | Write a global override. Only supplied keys are written. Returns `400` for unknown keys, `422` for raw secret values. |
+| `GET` | `/api/projects/{slug}/settings` | Read effective project settings with project overrides merged over global. Returns `404` if the project slug does not exist. |
+| `PUT` | `/api/projects/{slug}/settings` | Write a project-level override. Global settings are not affected. Returns `400` for unknown keys, `422` for raw secret values, `404` if project not found. |
+
+---
+
 ## Home
 
 | Method | Path | Description |

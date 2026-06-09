@@ -1,5 +1,9 @@
 # Changelog
 
+## Sprint 51.1
+
+- #639: Add Settings REST API with effective read and override write
+
 ## Sprint 24
 
 - #244: Add Neon DB connection module and Alembic scaffolding

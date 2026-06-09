@@ -102,6 +102,38 @@ Three MCP servers are installed at user scope — prefer them over shell fallbac
 - Read the issue body carefully before implementing — acceptance criteria 
   is the contract
 
+## Standard Docs Structure
+
+Every Commander project (including Commander itself) shares the same docs
+layout so the documentor and agents always know where things live:
+
+```
+README.md            hub linking to everything below
+CHANGELOG.md         change-log
+docs/
+  quickstart.md      install + first run
+  tutorial.md        full walkthrough
+  workflow.md        Bulk Create -> Run Sprint -> Finish/Rerun
+  architecture.md    system map (documentor-owned AUTO region)
+  milestones.md      sprint history (documentor-owned AUTO region)
+  features/          one .md per subsystem
+  bulk-create/       saved bulk-create prompts and outputs
+  changelog/         dated per-sprint entries (uat/ and prd/)
+```
+
+`architecture.md` and `milestones.md` each contain an `<!-- AUTO:... -->`
+region owned by the documentor — the whole file is auto-maintained; do not
+hand-edit inside the markers.
+
+**Enforce it with the scaffold script:**
+- New projects get this structure stamped into the initial commit by
+  `init_project.py`.
+- For an existing project: `python3 scripts/scaffold_docs.py --project <path>`
+  creates any missing standard files from template and never overwrites
+  existing content, so it is always safe to re-run. Add `--check` to report
+  drift (exit 1 if anything is missing) without writing. Stray top-level docs
+  are reported for manual review, never deleted.
+
 ## Standard Project Layout
 
 Two layouts are supported. Use `--nested` with `init_project.py` for new projects.

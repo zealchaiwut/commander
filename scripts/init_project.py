@@ -307,6 +307,13 @@ def step1_init_repo(
         "__pycache__/\n*.pyc\n.env\n*.log\nvenv/\n.DS_Store\n"
     )
 
+    # Stamp the standard docs structure (shared by every Commander project)
+    try:
+        from scaffold_docs import scaffold as _scaffold_docs
+        _scaffold_docs(repo_dir, repo_name, check=False)
+    except Exception as e:  # never block project creation on docs scaffolding
+        info(f"docs scaffold skipped: {e}")
+
     _run("git", "add", ".", cwd=repo_dir)
     _run("git", "commit", "-m", "chore: initial commit", cwd=repo_dir)
 

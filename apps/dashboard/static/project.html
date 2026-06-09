@@ -1071,6 +1071,41 @@
     }
     .ps-machine-note .ti { margin-top: 1px; flex-shrink: 0; }
 
+    /* ── Scaffold docs card (issue #681) ── */
+    .ps-scaffold-actions { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+    .ps-scaffold-badge {
+      font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+      padding: 3px 10px; border-radius: 999px;
+    }
+    .ps-scaffold-badge--compliant { background: var(--green-bg); color: var(--green); }
+    .ps-scaffold-badge--missing { background: var(--amber-bg); color: var(--amber); }
+    .ps-scaffold-list { font-size: 12px; font-family: var(--mono); margin: 0 0 10px; padding: 0; list-style: none; }
+    .ps-scaffold-list li { padding: 3px 0; color: var(--text-sub); }
+    .ps-scaffold-list li::before { content: '– '; color: var(--text-muted); }
+    .ps-scaffold-stray-label { font-size: 11px; font-weight: 700; color: var(--text-muted); margin: 10px 0 4px; text-transform: uppercase; letter-spacing: .05em; }
+    .ps-scaffold-stray-list { font-size: 12px; font-family: var(--mono); margin: 0; padding: 0; list-style: none; }
+    .ps-scaffold-stray-list li { padding: 2px 0; color: var(--text-sub); }
+    .ps-scaffold-stray-list li::before { content: '? '; color: var(--text-muted); }
+    /* Confirmation dialog */
+    .ps-scaffold-overlay {
+      display: none; position: fixed; inset: 0; background: rgba(0,0,0,.4);
+      z-index: 900; align-items: center; justify-content: center;
+    }
+    .ps-scaffold-overlay.open { display: flex; }
+    .ps-scaffold-dialog {
+      background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+      padding: 24px; max-width: 440px; width: 90%; box-shadow: 0 8px 32px rgba(0,0,0,.18);
+    }
+    .ps-scaffold-dialog h3 { margin: 0 0 8px; font-size: 15px; }
+    .ps-scaffold-dialog p { margin: 0 0 14px; font-size: 13px; color: var(--text-muted); }
+    .ps-scaffold-dialog-list { font-size: 12px; font-family: var(--mono); margin: 0 0 18px; padding: 0 0 0 16px; }
+    .ps-scaffold-dialog-list li { padding: 2px 0; color: var(--text-sub); }
+    .ps-scaffold-dialog-btns { display: flex; justify-content: flex-end; gap: 10px; }
+    .ps-scaffold-confirm-btn { background: var(--text); color: var(--surface); border: none; padding: 7px 16px; border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer; }
+    .ps-scaffold-cancel-btn { border: 1px solid var(--border); background: var(--surface); color: var(--text); padding: 7px 13px; border-radius: 6px; font-size: 13px; cursor: pointer; }
+    .ps-scaffold-cancel-btn:hover { background: var(--surface-hover); }
+    .ps-scaffold-confirm-btn:hover { opacity: .88; }
+
     /* ── Folder browser modal (issue #643) ── */
     .ps-modal-overlay {
       position: fixed; inset: 0; background: rgba(17,24,39,.45);
@@ -5997,6 +6032,52 @@
             </div>
             <div class="proj-settings-card-body" id="ps-env-body">
               <!-- Rows injected by projEnvLoad() -->
+            </div>
+          </div>
+
+          <!-- Docs Structure card (issue #681) -->
+          <div class="proj-settings-card" id="ps-scaffold-card">
+            <div class="proj-settings-card-head">
+              <i class="ti ti-file-text proj-settings-card-icon"></i>
+              <div>
+                <div class="proj-settings-card-title">Docs Structure</div>
+                <div class="proj-settings-card-sub">Verify and scaffold the standard Commander docs layout</div>
+              </div>
+            </div>
+            <div class="proj-settings-card-body" id="ps-scaffold-body">
+              <div class="ps-scaffold-actions">
+                <button class="ps-btn" id="ps-scaffold-check-btn" onclick="scaffoldCheck()">
+                  <i class="ti ti-search"></i> Check
+                </button>
+                <button class="ps-btn" id="ps-scaffold-apply" disabled onclick="scaffoldApplyOpen()">
+                  <i class="ti ti-wand"></i> Apply scaffold
+                </button>
+                <span id="ps-scaffold-status" style="font-size:12px;color:var(--text-muted);"></span>
+              </div>
+              <div id="ps-scaffold-results" style="display:none">
+                <span id="ps-scaffold-badge" class="ps-scaffold-badge"></span>
+                <div id="ps-scaffold-missing-wrap" style="margin-top:12px;display:none">
+                  <div style="font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px">Missing paths</div>
+                  <ul id="ps-scaffold-missing-list" class="ps-scaffold-list"></ul>
+                </div>
+                <div id="ps-scaffold-stray-wrap" style="margin-top:10px;display:none">
+                  <div class="ps-scaffold-stray-label">Stray docs (review manually — not part of standard, not deleted)</div>
+                  <ul id="ps-scaffold-stray-list" class="ps-scaffold-stray-list"></ul>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Scaffold confirmation dialog -->
+          <div class="ps-scaffold-overlay" id="ps-scaffold-confirm">
+            <div class="ps-scaffold-dialog">
+              <h3>Apply docs scaffold</h3>
+              <p>The following paths will be created. Existing files will not be changed.</p>
+              <ul class="ps-scaffold-dialog-list" id="ps-scaffold-dialog-list"></ul>
+              <div class="ps-scaffold-dialog-btns">
+                <button class="ps-scaffold-cancel-btn" onclick="scaffoldConfirmClose()">Cancel</button>
+                <button class="ps-scaffold-confirm-btn" onclick="scaffoldApplyConfirm()">Create files</button>
+              </div>
             </div>
           </div>
 
@@ -21376,6 +21457,106 @@ function projEnvSave() {
       return {ok: r.ok, status: r.status, data: data};
     });
   });
+}
+
+// ── Scaffold docs (issue #681) ────────────────────────────────────────────────
+
+var _scaffoldLastMissing = [];
+
+async function scaffoldCheck() {
+  var slug = window._currentProjectSlug || '';
+  if (!slug) return;
+  var statusEl = document.getElementById('ps-scaffold-status');
+  var resultsEl = document.getElementById('ps-scaffold-results');
+  var applyBtn = document.getElementById('ps-scaffold-apply');
+  if (statusEl) statusEl.textContent = 'Checking…';
+  if (resultsEl) resultsEl.style.display = 'none';
+  try {
+    var resp = await fetch('/api/projects/' + encodeURIComponent(slug) + '/docs/scaffold/check');
+    if (!resp.ok) {
+      var err = await resp.json().catch(() => ({}));
+      if (statusEl) statusEl.textContent = 'Check failed: ' + (err.detail || resp.status);
+      return;
+    }
+    var data = await resp.json();
+    _scaffoldLastMissing = data.missing || [];
+    _scaffoldRenderResults(data);
+    if (statusEl) statusEl.textContent = '';
+    if (applyBtn) applyBtn.disabled = _scaffoldLastMissing.length === 0;
+  } catch (e) {
+    if (statusEl) statusEl.textContent = 'Check error';
+  }
+}
+
+function _scaffoldRenderResults(data) {
+  var resultsEl = document.getElementById('ps-scaffold-results');
+  var badgeEl = document.getElementById('ps-scaffold-badge');
+  var missingWrap = document.getElementById('ps-scaffold-missing-wrap');
+  var missingList = document.getElementById('ps-scaffold-missing-list');
+  var strayWrap = document.getElementById('ps-scaffold-stray-wrap');
+  var strayList = document.getElementById('ps-scaffold-stray-list');
+  if (!resultsEl) return;
+
+  if (badgeEl) {
+    badgeEl.textContent = data.compliant ? 'Compliant' : 'Missing items';
+    badgeEl.className = 'ps-scaffold-badge ' + (data.compliant ? 'ps-scaffold-badge--compliant' : 'ps-scaffold-badge--missing');
+  }
+  if (missingList) {
+    missingList.innerHTML = (data.missing || []).map(function(m) {
+      return '<li>' + escHtml(m) + '</li>';
+    }).join('');
+  }
+  if (missingWrap) missingWrap.style.display = (data.missing || []).length > 0 ? '' : 'none';
+
+  if (strayList) {
+    strayList.innerHTML = (data.stray || []).map(function(s) {
+      return '<li>' + escHtml(s) + '</li>';
+    }).join('');
+  }
+  if (strayWrap) strayWrap.style.display = (data.stray || []).length > 0 ? '' : 'none';
+
+  resultsEl.style.display = '';
+}
+
+function scaffoldApplyOpen() {
+  if (_scaffoldLastMissing.length === 0) return;
+  var listEl = document.getElementById('ps-scaffold-dialog-list');
+  if (listEl) {
+    listEl.innerHTML = _scaffoldLastMissing.map(function(m) {
+      return '<li>' + escHtml(m) + '</li>';
+    }).join('');
+  }
+  var overlay = document.getElementById('ps-scaffold-confirm');
+  if (overlay) overlay.classList.add('open');
+}
+
+function scaffoldConfirmClose() {
+  var overlay = document.getElementById('ps-scaffold-confirm');
+  if (overlay) overlay.classList.remove('open');
+}
+
+async function scaffoldApplyConfirm() {
+  scaffoldConfirmClose();
+  var slug = window._currentProjectSlug || '';
+  if (!slug) return;
+  var statusEl = document.getElementById('ps-scaffold-status');
+  if (statusEl) statusEl.textContent = 'Applying…';
+  try {
+    var resp = await fetch('/api/projects/' + encodeURIComponent(slug) + '/docs/scaffold/apply', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({confirm: true}),
+    });
+    if (!resp.ok) {
+      var err = await resp.json().catch(() => ({}));
+      if (statusEl) statusEl.textContent = 'Apply failed: ' + (err.detail || resp.status);
+      return;
+    }
+    if (statusEl) statusEl.textContent = '';
+    await scaffoldCheck();
+  } catch (e) {
+    if (statusEl) statusEl.textContent = 'Apply error';
+  }
 }
 </script>
 

@@ -277,6 +277,53 @@ _STANDARD_DOCS_ENTRIES = {
 }
 
 
+def scaffold_data(root: Path, project: str, *, check: bool) -> dict:
+    """Programmatic scaffold — returns structured data instead of printing.
+
+    Returns {"missing": [...], "stray": [...], "created": [...], "compliant": bool}.
+    In check mode, writes nothing; in apply mode, creates missing items only.
+    Existing files are NEVER overwritten.
+    """
+    created: list[str] = []
+    missing: list[str] = []
+
+    for d in _DIRS:
+        p = root / d
+        if not p.exists():
+            if check:
+                missing.append(d + "/")
+            else:
+                p.mkdir(parents=True, exist_ok=True)
+                created.append(d + "/")
+
+    for rel, template in _STANDARD_FILES.items():
+        p = root / rel
+        if not p.exists():
+            if check:
+                missing.append(rel)
+            else:
+                p.parent.mkdir(parents=True, exist_ok=True)
+                p.write_text(template.format(project=project))
+                created.append(rel)
+
+    stray: list[str] = []
+    docs_dir = root / "docs"
+    if docs_dir.is_dir():
+        for entry in sorted(docs_dir.iterdir()):
+            name = entry.name
+            if name.startswith(".") or name.endswith(".excalidraw"):
+                continue
+            if name not in _STANDARD_DOCS_ENTRIES:
+                stray.append("docs/" + name + ("/" if entry.is_dir() else ""))
+
+    return {
+        "missing": missing,
+        "stray": stray,
+        "created": created,
+        "compliant": len(missing) == 0,
+    }
+
+
 def scaffold(root: Path, project: str, *, check: bool) -> int:
     """Return 0 if structure is compliant (or was made compliant), 1 on drift
     in --check mode."""

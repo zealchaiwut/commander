@@ -142,6 +142,16 @@ if os.environ.get("COMMANDER_DISABLE_NEON", "").strip().lower() in ("1", "true",
 from sizing import SIZE_TO_MINUTES as _SIZE_TO_MINUTES, letter_from_minutes as _letter_from_minutes, minutes_from_letter as _minutes_from_letter
 
 try:
+    _SCAFFOLD_SCRIPTS_DIR = Path(__file__).parent.parent.parent / "scripts"
+    if str(_SCAFFOLD_SCRIPTS_DIR) not in sys.path:
+        sys.path.insert(0, str(_SCAFFOLD_SCRIPTS_DIR))
+    from scaffold_docs import scaffold_data as _scaffold_data
+    _SCAFFOLD_AVAILABLE = True
+except ImportError:
+    _scaffold_data = None  # type: ignore[assignment]
+    _SCAFFOLD_AVAILABLE = False
+
+try:
     import mis_sizing as _mis_sizing
     _MIS_SIZING_AVAILABLE = True
 except ImportError:
@@ -2354,6 +2364,76 @@ def put_project_environments(slug: str, body: _PutEnvironmentsBody):
     return {"ok": True, "environments": envs_dict}
 
 
+# ── Scaffold docs (issue #681) ────────────────────────────────────────────────
+
+def _scaffold_resolve_working_clone(slug: str) -> tuple[str, Path]:
+    """Resolve project slug → (repo, working_clone_path) with traversal guard.
+
+    Returns the main working clone directory and validates it is inside _PROJECTS_BASE.
+    Raises HTTPException 404 for unknown slug, 400 if path escapes _PROJECTS_BASE.
+    """
+    repo = _resolve_project_slug(slug)
+    project_root = _project_root_path(repo)
+    working_clone = _main_clone_path(project_root)
+    resolved = working_clone.resolve()
+    base_resolved = _PROJECTS_BASE.resolve()
+    if not str(resolved).startswith(str(base_resolved) + "/") and resolved != base_resolved:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Resolved project root '{resolved}' is outside the configured projects directory '{base_resolved}'",
+        )
+    return repo, working_clone
+
+
+@app.get("/api/projects/{slug}/docs/scaffold/check")
+def get_scaffold_check(slug: str):
+    """Check whether the project's working clone has the standard docs structure.
+
+    Runs scaffold_docs --check (no writes). Returns:
+      { compliant, missing, stray, project_root }
+    where missing/stray are lists of relative paths.
+    """
+    if not _SCAFFOLD_AVAILABLE:
+        raise HTTPException(status_code=503, detail="scaffold_docs module unavailable")
+    repo, working_clone = _scaffold_resolve_working_clone(slug)
+    project_name = working_clone.name
+    if project_name in ("main", "prd") and working_clone.parent != working_clone:
+        project_name = working_clone.parent.name
+    result = _scaffold_data(working_clone, project_name, check=True)
+    return {
+        "compliant": result["compliant"],
+        "missing": result["missing"],
+        "stray": result["stray"],
+        "project_root": str(working_clone),
+    }
+
+
+class _ScaffoldApplyBody(BaseModel):
+    confirm: bool = False
+
+
+@app.post("/api/projects/{slug}/docs/scaffold/apply")
+def post_scaffold_apply(slug: str, body: _ScaffoldApplyBody):
+    """Apply the standard docs scaffold to the project's working clone.
+
+    Requires { confirm: true } in the request body; returns 400 otherwise.
+    Existing files are NEVER overwritten. Returns { created, compliant }.
+    """
+    if not body.confirm:
+        raise HTTPException(status_code=400, detail="confirm must be true to apply scaffold")
+    if not _SCAFFOLD_AVAILABLE:
+        raise HTTPException(status_code=503, detail="scaffold_docs module unavailable")
+    repo, working_clone = _scaffold_resolve_working_clone(slug)
+    project_name = working_clone.name
+    if project_name in ("main", "prd") and working_clone.parent != working_clone:
+        project_name = working_clone.parent.name
+    result = _scaffold_data(working_clone, project_name, check=False)
+    return {
+        "created": result["created"],
+        "compliant": result["compliant"],
+    }
+
+
 # ── Branch cleanup (issue #634) ───────────────────────────────────────────────
 
 _PROTECTED_BRANCHES: frozenset[str] = frozenset({"develop", "master", "main", "attachments"})
@@ -3921,6 +4001,18 @@ def _coder_clone_path(project_root: Path) -> Path:
     flat = project_root.parent / f"{project_root.name}-coder"
     if flat.exists():
         return flat
+    return project_root
+
+
+def _main_clone_path(project_root: Path) -> Path:
+    """Return the main working clone for a project root.
+
+    Nested layout: <project_root>/main/ (has .git)
+    Flat layout:   <project_root> itself
+    """
+    nested = project_root / "main"
+    if nested.is_dir() and (nested / ".git").exists():
+        return nested
     return project_root
 
 

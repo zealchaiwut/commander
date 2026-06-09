@@ -1252,11 +1252,68 @@ def get_backup_status():
     return _backup_module.get_backup_status()
 
 
+_seen_agent_sessions: set[str] = set()
+
+
+def _agent_project_from_name(agent_name: str | None) -> str | None:
+    """Derive the full owner/repo project key from an agent name string.
+
+    Agent names are formatted as 'role·repo·branch·#short'. We extract the
+    repo label (second component) and match it against the loaded projects list.
+    Returns None if no match is found.
+    """
+    if not agent_name:
+        return None
+    parts = agent_name.split("·")
+    if len(parts) < 2:
+        return None
+    repo_label = parts[1]
+    try:
+        all_projects = projects_module.load_projects()
+    except Exception:
+        return None
+    matched = next(
+        (p["repo"] for p in all_projects if p["repo"].split("/")[-1] == repo_label),
+        None,
+    )
+    return matched
+
+
 @app.post("/api/agent-event")
 async def receive_event(request: Request, event: AgentEvent):
     _slog.event("route.entry", project="dashboard", request_id=request.state.request_id, route="/api/agent-event", method="POST", event_type=event.event_type)
-    db.upsert_agent(event.session_id, event.working_dir, event.status, event.tool_name, event.name)
-    db.add_event(event.session_id, event.event_type, event.model_dump())
+
+    session_id = event.session_id or "unknown"
+    project = _agent_project_from_name(event.name)
+    actor = event.name or session_id
+    role = (event.name.split("·")[0] if event.name and "·" in event.name else None)
+
+    if project:
+        if event.event_type == "tool_use" and session_id not in _seen_agent_sessions:
+            _seen_agent_sessions.add(session_id)
+            db.record_event(
+                project=project,
+                source="agent",
+                actor=actor,
+                type="agent_started",
+                target=session_id,
+                detail={"role": role, "working_dir": event.working_dir},
+                action_id=session_id,
+            )
+        if event.status in ("done", "timed_out", "error") or event.event_type == "agent_stop":
+            _seen_agent_sessions.discard(session_id)
+            db.record_event(
+                project=project,
+                source="agent",
+                actor=actor,
+                type="agent_finished",
+                target=session_id,
+                detail={"status": event.status, "role": role},
+                action_id=session_id,
+            )
+
+    db.upsert_agent(session_id, event.working_dir, event.status, event.tool_name, event.name)
+    db.add_event(session_id, event.event_type, event.model_dump())
     await broadcast({"type": "update", "event": event.model_dump()})
     return {"ok": True}
 

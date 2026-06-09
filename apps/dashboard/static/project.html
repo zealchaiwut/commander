@@ -4480,6 +4480,8 @@
     }
     .logs-chip:hover { background: var(--surface-2); color: var(--text); }
     .logs-chip.active { background: var(--blue-bg); border-color: var(--blue); color: var(--blue); font-weight: 600; }
+    .logs-chip--hidden { display: none !important; }
+    .logs-tags-see-more-btn { font-style: italic; color: var(--text-sub); }
     .logs-toolbar-row2 { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
     .logs-search-wrap { position: relative; flex: 1; max-width: 320px; }
     .logs-search-icon {
@@ -5353,6 +5355,7 @@
                 <button class="logs-chip" data-group="event_level" data-value="warn" onclick="logsToggleChip(this)">warn</button>
                 <button class="logs-chip" data-group="event_level" data-value="fail" onclick="logsToggleChip(this)">fail</button>
               </div>
+              <button class="logs-chip logs-tags-see-more-btn hidden" id="logs-tags-see-more" onclick="_logsTagsToggle()">See more</button>
             </div>
             <div class="logs-toolbar-row2">
               <div class="logs-search-wrap">
@@ -17820,21 +17823,80 @@ async function logsFetchRuns() {
   } catch (_) {}
 }
 
+const LOGS_TAG_LIMIT = 10;
+let _logsTagsExpanded = false;
+
 function _logsPopulateSprintChips() {
   const container = document.getElementById('logs-chips-sprint');
   if (!container) return;
-  const labels = [...new Set(_logsState.runs.map(r => r.sprint_label))].sort();
-  const existing = new Set([...container.querySelectorAll('.logs-chip')].map(c => c.dataset.value));
-  for (const label of labels) {
-    if (existing.has(label)) continue;
-    const btn = document.createElement('button');
-    btn.className = 'logs-chip';
-    btn.dataset.group = 'sprint_label';
-    btn.dataset.value = label;
-    btn.onclick = () => logsToggleChip(btn);
-    btn.textContent = label;
-    container.appendChild(btn);
+
+  // Build sprint_label → max start_time map for recency
+  const sprintRecency = {};
+  for (const run of _logsState.runs) {
+    const label = run.sprint_label;
+    if (!sprintRecency[label] || run.start_time > sprintRecency[label]) {
+      sprintRecency[label] = run.start_time;
+    }
   }
+
+  // Create missing sprint chips with recency; update existing ones
+  const existingChips = [...container.querySelectorAll('.logs-chip')];
+  const existingMap = Object.fromEntries(existingChips.map(c => [c.dataset.value, c]));
+  for (const [label, recency] of Object.entries(sprintRecency)) {
+    if (existingMap[label]) {
+      existingMap[label].dataset.tagRecency = recency;
+    } else {
+      const btn = document.createElement('button');
+      btn.className = 'logs-chip';
+      btn.dataset.group = 'sprint_label';
+      btn.dataset.value = label;
+      btn.dataset.tagRecency = recency;
+      btn.onclick = () => logsToggleChip(btn);
+      btn.textContent = label;
+      container.appendChild(btn);
+    }
+  }
+
+  // Assign recency to static role/level chips: global max run time (used in every run)
+  const globalMax = _logsState.runs.length > 0
+    ? _logsState.runs.reduce((m, r) => r.start_time > m ? r.start_time : m, '')
+    : '';
+  document.querySelectorAll(
+    '#pane-logs .logs-chip[data-group="agent_role"], #pane-logs .logs-chip[data-group="event_level"]'
+  ).forEach(btn => { btn.dataset.tagRecency = globalMax; });
+
+  _logsApplyTagLimit();
+}
+
+function _logsApplyTagLimit() {
+  const allChips = [...document.querySelectorAll('#pane-logs .logs-filter-bar .logs-chip:not(#logs-tags-see-more)')];
+  const seeMoreBtn = document.getElementById('logs-tags-see-more');
+  const total = allChips.length;
+
+  // Sort by recency desc; DOM insertion index is the stable tiebreaker
+  const indexed = allChips.map((chip, i) => ({ chip, recency: chip.dataset.tagRecency || '', idx: i }));
+  indexed.sort((a, b) => b.recency.localeCompare(a.recency) || a.idx - b.idx);
+
+  if (_logsTagsExpanded || total <= LOGS_TAG_LIMIT) {
+    indexed.forEach(({ chip }) => chip.classList.remove('logs-chip--hidden'));
+  } else {
+    indexed.forEach(({ chip }, i) => chip.classList.toggle('logs-chip--hidden', i >= LOGS_TAG_LIMIT));
+  }
+
+  if (!seeMoreBtn) return;
+  if (total <= LOGS_TAG_LIMIT) {
+    seeMoreBtn.classList.add('hidden');
+  } else {
+    seeMoreBtn.classList.remove('hidden');
+    seeMoreBtn.textContent = _logsTagsExpanded
+      ? 'See less'
+      : `See more (${total - LOGS_TAG_LIMIT} more)`;
+  }
+}
+
+function _logsTagsToggle() {
+  _logsTagsExpanded = !_logsTagsExpanded;
+  _logsApplyTagLimit();
 }
 
 function logsToggleChip(btn) {

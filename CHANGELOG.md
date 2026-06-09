@@ -1,8 +1,15 @@
 # Changelog
 
-## Sprint 51.1
+## Sprint 51
 
+- #637: Add project_events table and recorder to dashboard DB
+- #638: Add settings KV table and sprint_tickets.estimated_size
 - #639: Add Settings REST API with effective read and override write
+- #640: Estimator reads per-project config and writes estimated_size
+- #641: Build global settings screen behind header gear icon
+- #642: Build Project Settings tab under More
+- #643: Add editable env paths with server-side folder browser
+- #644: Add directional settings sync with diff preview
 
 ## Sprint 24
 

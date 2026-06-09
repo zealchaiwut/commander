@@ -110,5 +110,24 @@ Unique constraint: `(project_id, env)`.
 | `agents` | Active/recent Claude Code agent sessions |
 | `events` | Streamed agent events (tool use, output, errors) |
 | `token_usage` | Per-agent token consumption with `agent_role` and `model_name` columns |
+| `project_events` | Structured audit log of project-level actions (settings changes, env path updates, etc.) |
 
 Query with `GET /api/debug/token-usage/by-agent-model` for per-agent/model cost breakdown.
+
+### project_events
+
+Audit log for project-level events recorded by `record_project_event()` in `apps/dashboard/db.py`.
+
+| Column | Type | Description |
+|---|---|---|
+| `id` | integer PK | Auto-increment |
+| `project` | text NOT NULL | Repo slug, e.g. `zealchaiwut/commander` |
+| `created_at` | text NOT NULL | ISO 8601 UTC timestamp |
+| `source` | text NOT NULL | Component that emitted the event, e.g. `settings_api` |
+| `event_type` | text NOT NULL | Action type, e.g. `settings.update`, `env.update` |
+| `target` | text | Entity the action targeted (key name, env name, etc.); nullable |
+| `actor` | text | Who triggered the event (e.g. `dashboard`); nullable |
+| `action_id` | text | Idempotency / correlation ID; nullable |
+| `data` | text | JSON-encoded payload with before/after values or other context; nullable |
+
+Indexes: `(project, created_at DESC)`, `(project, target)`, `(action_id)`.

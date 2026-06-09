@@ -37,6 +37,8 @@ if str(_SIZING_DIR) not in sys.path:
     sys.path.insert(0, str(_SIZING_DIR))
 from sizing import minutes_from_letter as _minutes_from_letter
 from calibration import CalibrationResult, load_calibration, calibration_prompt_section, db_calibration_records
+from services.sprint_manager.estimation_config import get_estimation_cfg as _get_estimation_cfg
+from services.sprint_manager import sprint_repo as sprint_repo
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -116,6 +118,7 @@ def run_estimator(
     issue_num: int,
     issue_data: dict,
     calibration: Optional[CalibrationResult] = None,
+    project: Optional[str] = None,
 ) -> tuple[Optional[dict], Optional[str]]:
     """Invoke the estimator agent via `claude -p` and return (result, error_type).
 
@@ -128,7 +131,12 @@ def run_estimator(
     (2s, 4s, 8s).  Each retry emits a structured log entry with attempt number,
     error type, and delay_seconds.  --no-session-persistence prevents session-file
     conflicts when multiple estimations run concurrently during bulk create.
+
+    *project* is used to resolve per-project estimation config from the settings
+    table (size_minutes, buffer_pct). Defaults are used when omitted or when the
+    settings layer is unavailable.
     """
+    estimation_cfg = _get_estimation_cfg(project=project)
     instructions = load_agent_instructions()
 
     title = issue_data.get("title", "")
@@ -202,13 +210,21 @@ Output ONLY the JSON object. No other text."""
                     if not isinstance(parsed.get("files_touched"), list):
                         parsed["files_touched"] = []
                     # Ensure both size and minutes are present; derive missing field
+                    # using settings-resolved size_minutes (falls back to sizing.py defaults).
                     size_val = parsed.get("size", "")
                     if "minutes" not in parsed or not isinstance(parsed.get("minutes"), int):
-                        parsed["minutes"] = _minutes_from_letter(size_val)
+                        size_minutes = estimation_cfg.get("size_minutes", {})
+                        parsed["minutes"] = size_minutes.get(size_val, _minutes_from_letter(size_val))
                     parsed["body_hash"] = hashlib.sha256(body.encode()).hexdigest()
                     # Attach calibration sources so consumers know which tiers were calibrated
                     if calibration is not None:
                         parsed["calibration_sources"] = calibration.sources
+                    # Persist estimated_size on sprint_tickets (best-effort; issue #640)
+                    if size_val and issue_num:
+                        try:
+                            sprint_repo.write_estimated_size(issue_number=issue_num, size=size_val)
+                        except Exception:
+                            pass
                     return parsed, None
 
         # error_type is set — decide whether to retry or fail.

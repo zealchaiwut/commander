@@ -945,6 +945,187 @@
     .notes-textarea:focus { border-color: var(--blue); }
     .notes-textarea.hidden { display: none; }
 
+    /* ── Project Settings tab (issue #642) ── */
+    .proj-settings-wrap { display: flex; flex-direction: column; gap: 16px; max-width: 860px; padding-top: 8px; }
+    .proj-settings-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+    .proj-settings-card-head {
+      display: flex; align-items: center; gap: 9px;
+      padding: 13px 16px; border-bottom: 1px solid var(--border);
+    }
+    .proj-settings-card-icon { color: var(--text-muted); font-size: 16px; }
+    .proj-settings-card-title { font-size: 14px; font-weight: 700; }
+    .proj-settings-card-sub { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+    .proj-settings-card-body { padding: 16px; }
+    .ps-row {
+      display: flex; align-items: center; gap: 14px;
+      padding: 9px 0; border-top: 1px solid var(--border);
+    }
+    .ps-row:first-child { border-top: none; }
+    .ps-row-label { min-width: 170px; font-size: 13px; color: var(--text); }
+    .ps-hint { display: block; font-size: 11px; color: var(--text-sub); font-weight: 400; margin-top: 1px; }
+    .ps-row-control { flex: 1; display: flex; align-items: center; gap: 10px; }
+    .ps-inp {
+      border: 1px solid var(--border); background: var(--surface); color: var(--text);
+      padding: 6px 10px; border-radius: 6px; font-size: 13px; font-family: inherit;
+    }
+    .ps-inp:focus { outline: none; border-color: var(--blue); box-shadow: 0 0 0 3px var(--blue-bg); }
+    .ps-num { width: 74px; font-family: var(--mono); text-align: right; }
+    .ps-unit { font-size: 12px; color: var(--text-muted); font-family: var(--mono); }
+    .ps-ro { color: var(--text-muted); font-family: var(--mono); font-size: 12px; }
+    .ps-ro-badge {
+      font-family: var(--mono); font-size: 10px; font-weight: 700;
+      padding: 2px 7px; border-radius: 3px;
+      background: var(--surface-2); color: var(--text-sub); border: 1px solid var(--border);
+    }
+    .ps-link {
+      color: var(--blue); font-size: 12px; text-decoration: none;
+      display: inline-flex; align-items: center; gap: 4px; cursor: pointer;
+    }
+    .ps-link:hover { text-decoration: underline; }
+    .ps-inherit-note {
+      font-size: 12px; color: var(--text-muted);
+      background: var(--surface-2); border-radius: 6px;
+      padding: 8px 12px; margin-bottom: 14px;
+      display: flex; align-items: center; gap: 8px;
+    }
+    .ps-inherit-note.hidden { display: none; }
+    .ps-est-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .ps-est-table th {
+      text-align: left; font-size: 10px; font-weight: 700;
+      letter-spacing: .06em; text-transform: uppercase;
+      color: var(--text-sub); padding: 6px 10px; border-bottom: 1px solid var(--border);
+    }
+    .ps-est-table td { padding: 8px 10px; border-bottom: 1px solid var(--border); }
+    .ps-est-table tr:last-child td { border-bottom: none; }
+    .ps-sz-badge { font-family: var(--mono); font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 4px; }
+    .ps-sz-S { background: var(--green-bg); color: var(--green); }
+    .ps-sz-M { background: var(--blue-bg); color: var(--blue); }
+    .ps-sz-L { background: var(--amber-bg); color: var(--amber); }
+    .ps-sz-XL { background: var(--red-bg); color: var(--red); }
+    .ps-suggest { font-family: var(--mono); font-size: 12px; color: var(--text-sub); }
+    .ps-soon {
+      font-size: 9px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+      background: var(--surface-2); color: var(--text-sub);
+      padding: 1px 6px; border-radius: 999px; margin-left: 6px; border: 1px solid var(--border);
+    }
+    .ps-apply-suggest {
+      font-family: var(--mono); font-size: 10px; color: var(--text-sub);
+      border: 1px solid var(--border); border-radius: 4px; padding: 1px 7px;
+      background: var(--surface); cursor: not-allowed; opacity: .5;
+    }
+    .ps-buffer-rows { margin-top: 14px; }
+    .ps-toggle {
+      position: relative; width: 38px; height: 22px;
+      background: var(--green); border-radius: 999px;
+      cursor: pointer; flex-shrink: 0; border: none;
+      transition: background .15s;
+    }
+    .ps-toggle::after {
+      content: ''; position: absolute; top: 2px; left: 18px;
+      width: 18px; height: 18px; background: #fff;
+      border-radius: 50%; transition: left .15s;
+    }
+    .ps-toggle[aria-checked="false"] { background: var(--border); }
+    .ps-toggle[aria-checked="false"]::after { left: 2px; }
+    .ps-color-swatch { width: 16px; height: 16px; border-radius: 4px; display: inline-block; flex-shrink: 0; }
+    .ps-save-bar {
+      display: flex; justify-content: flex-end; align-items: center;
+      gap: 10px; padding-top: 4px;
+    }
+    .ps-status-msg { font-size: 12px; color: var(--text-muted); margin-right: auto; }
+    .ps-status-msg.ok { color: var(--green); }
+    .ps-status-msg.err { color: var(--red); }
+    .ps-btn {
+      border: 1px solid var(--border); background: var(--surface); color: var(--text);
+      padding: 7px 13px; border-radius: 6px; font-size: 13px; font-weight: 500;
+      display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
+    }
+    .ps-btn:hover { background: var(--surface-hover); }
+    .ps-btn-primary { background: var(--text); color: var(--surface); border-color: var(--text); }
+    .ps-btn-ghost { border-color: transparent; color: var(--text-muted); }
+    @media (max-width: 640px) {
+      .proj-settings-wrap { gap: 12px; }
+      .ps-est-table th:nth-child(3), .ps-est-table td:nth-child(3) { display: none; }
+      .ps-row { flex-wrap: wrap; }
+      .ps-row-label { min-width: unset; width: 100%; }
+    }
+
+    /* ── Env paths card (issue #643) ── */
+    .ps-path-inp {
+      flex: 1; font-family: var(--mono); font-size: 12px;
+      min-width: 0;
+    }
+    .ps-env-name-inp {
+      width: 130px; font-size: 13px; font-family: inherit;
+    }
+    .ps-btn-browse {
+      border: 1px solid var(--border); background: var(--surface);
+      color: var(--text-muted); padding: 6px 11px; border-radius: 6px;
+      font-size: 12px; display: inline-flex; align-items: center; gap: 5px;
+      cursor: pointer; white-space: nowrap; flex-shrink: 0; font-family: inherit;
+    }
+    .ps-btn-browse:hover { background: var(--surface-hover); color: var(--text); }
+    .ps-machine-note {
+      font-size: 11px; color: var(--text-sub); margin-top: 10px;
+      display: flex; align-items: flex-start; gap: 6px;
+    }
+    .ps-machine-note .ti { margin-top: 1px; flex-shrink: 0; }
+
+    /* ── Folder browser modal (issue #643) ── */
+    .ps-modal-overlay {
+      position: fixed; inset: 0; background: rgba(17,24,39,.45);
+      display: none; align-items: center; justify-content: center; z-index: 500;
+    }
+    .ps-modal-overlay.open { display: flex; }
+    [data-theme="dark"] .ps-modal-overlay { background: rgba(0,0,0,.6); }
+    .ps-browser {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 12px; width: 540px; max-width: 92vw; max-height: 78vh;
+      display: flex; flex-direction: column; overflow: hidden;
+      box-shadow: 0 16px 48px rgba(0,0,0,.22);
+    }
+    .ps-browser-head {
+      display: flex; align-items: center; gap: 9px;
+      padding: 13px 16px; border-bottom: 1px solid var(--border);
+      font-size: 14px; font-weight: 700;
+    }
+    .ps-browser-head .ti { color: var(--text-muted); }
+    .ps-browser-close {
+      margin-left: auto; background: none; border: none;
+      font-size: 20px; color: var(--text-muted); cursor: pointer; line-height: 1;
+    }
+    .ps-browser-pathbar {
+      padding: 9px 16px; font-family: var(--mono); font-size: 12px;
+      color: var(--text-muted); background: var(--surface-2);
+      border-bottom: 1px solid var(--border); white-space: nowrap; overflow-x: auto;
+    }
+    .ps-browser-list {
+      flex: 1; overflow-y: auto; padding: 4px 0; min-height: 180px;
+    }
+    .ps-fs-row {
+      display: flex; align-items: center; gap: 10px;
+      padding: 8px 16px; font-size: 13px; cursor: pointer;
+    }
+    .ps-fs-row:hover { background: var(--surface-hover); }
+    .ps-fs-row .ti { font-size: 16px; }
+    .ps-fs-row.up .ti { color: var(--text-sub); }
+    .ps-fs-row.folder .ti { color: var(--amber); }
+    .ps-fs-name { flex: 1; }
+    .ps-fs-row .enter { color: var(--text-sub); font-size: 13px; }
+    .ps-browser-foot {
+      display: flex; align-items: center; gap: 10px;
+      padding: 12px 16px; border-top: 1px solid var(--border);
+    }
+    .ps-browser-scope {
+      font-family: var(--mono); font-size: 11px; color: var(--text-sub);
+      display: inline-flex; align-items: center; gap: 5px;
+    }
+    .ps-browser-gap { flex: 1; }
+    .ps-browser-selected {
+      font-family: var(--mono); font-size: 11px; color: var(--text-muted);
+      max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+
     /* ── Tickets tab ── */
     .tickets-grid {
       display: grid;
@@ -3997,12 +4178,99 @@
     }
     #tickets-toast.success { border-color: var(--green); color: var(--green); }
 
-    /* ── Settings modal (issue #396) ── */
-    .sm-modal { width: min(420px, calc(100vw - 32px)); }
+    /* ── Global Settings screen (issue #641) ── */
+    .sm-modal {
+      width: min(900px, calc(100vw - 32px));
+      max-height: calc(100vh - 48px);
+      display: flex; flex-direction: column;
+    }
+    .sm-modal .modal-body { flex: 1; min-height: 0; overflow-y: auto; padding: 20px 24px; }
+    .gss-grid { display: flex; flex-direction: column; gap: 16px; }
+    .gss-card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 10px; overflow: hidden;
+    }
+    .gss-card-head {
+      padding: 12px 16px; border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; gap: 9px;
+    }
+    .gss-card-title { font-size: 14px; font-weight: 700; }
+    .gss-card-sub { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+    .gss-card-body { padding: 14px 16px; }
+    .gss-row {
+      display: flex; align-items: center; gap: 14px;
+      padding: 9px 0; border-top: 1px solid var(--border);
+    }
+    .gss-row:first-child { border-top: none; }
+    .gss-label { min-width: 170px; font-size: 13px; color: var(--text); flex-shrink: 0; }
+    .gss-label .hint { display: block; font-size: 11px; color: var(--text-sub); font-weight: 400; margin-top: 2px; }
+    .gss-control { flex: 1; display: flex; align-items: center; gap: 10px; }
+    .gss-inp, .gss-select {
+      border: 1px solid var(--border); background: var(--surface-2); color: var(--text);
+      padding: 6px 10px; border-radius: 6px; font-size: 13px; font-family: inherit;
+    }
+    .gss-inp:focus, .gss-select:focus { outline: none; border-color: var(--blue); box-shadow: 0 0 0 3px var(--blue-bg); }
+    .gss-inp-num { width: 74px; font-family: var(--mono, monospace); text-align: right; }
+    .gss-inp-path { flex: 1; font-family: var(--mono, monospace); font-size: 12px; }
+    .gss-ro { color: var(--text-muted); font-family: var(--mono, monospace); font-size: 12px; }
+    .gss-est-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .gss-est-table th {
+      text-align: left; font-size: 10px; font-weight: 700; letter-spacing: .06em;
+      text-transform: uppercase; color: var(--text-sub);
+      padding: 6px 10px; border-bottom: 1px solid var(--border);
+    }
+    .gss-est-table td { padding: 8px 10px; border-bottom: 1px solid var(--border); }
+    .gss-est-table tr:last-child td { border-bottom: none; }
+    .gss-sz-badge { font-family: var(--mono, monospace); font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 4px; }
+    .gss-sz-S { background: var(--green-bg, #dcfce7); color: var(--green, #16a34a); }
+    .gss-sz-M { background: var(--blue-bg, #dbeafe); color: var(--blue, #2563eb); }
+    .gss-sz-L { background: var(--amber-bg, #fef3c7); color: var(--amber, #d97706); }
+    .gss-sz-XL { background: var(--red-bg, #fee2e2); color: var(--red, #dc2626); }
+    .gss-secret-row {
+      display: flex; align-items: center; gap: 10px;
+      padding: 9px 0; border-top: 1px solid var(--border); font-size: 13px;
+    }
+    .gss-secret-row:first-child { border-top: none; }
+    .gss-secret-name { min-width: 180px; font-family: var(--mono, monospace); font-size: 12px; color: var(--text); flex-shrink: 0; }
+    .gss-secret-badge {
+      display: inline-flex; align-items: center; gap: 5px;
+      font-size: 12px; font-family: var(--mono, monospace); font-weight: 600;
+      padding: 3px 10px; border-radius: 5px;
+    }
+    .gss-secret-badge--set { background: var(--green-bg, #dcfce7); color: var(--green, #16a34a); }
+    .gss-secret-badge--unset { background: var(--surface-2); color: var(--text-sub); }
+    .gss-save-bar { display: flex; justify-content: flex-end; align-items: center; gap: 10px; margin-top: 4px; }
+    .gss-feedback { font-size: 12px; color: var(--green, #16a34a); opacity: 0; transition: opacity .3s; }
+    .gss-feedback.visible { opacity: 1; }
+    .gss-feedback.error { color: var(--red, #dc2626); }
+    .gss-loading { padding: 32px; text-align: center; color: var(--text-muted); font-size: 13px; }
+    .gss-error-banner {
+      margin: 16px; padding: 12px 16px; border-radius: 8px;
+      background: var(--red-bg, #fee2e2); color: var(--red, #dc2626);
+      font-size: 13px; display: flex; align-items: center; gap: 8px;
+    }
+    /* ── Settings Sync card (issue #644) ── */
+    .gss-sync-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .gss-sync-last { font-size: 11px; color: var(--text-sub); margin-left: auto; }
+    .gss-sync-last span { font-family: var(--mono, monospace); }
+    .gss-diff-area { margin-top: 12px; }
+    .gss-diff-line {
+      font-family: var(--mono, monospace); font-size: 12px; line-height: 1.5;
+      padding: 2px 8px; border-radius: 3px; margin-bottom: 1px; white-space: pre-wrap;
+    }
+    .gss-diff-line--added   { background: rgba(34,197,94,.10); color: var(--green, #22c55e); }
+    .gss-diff-line--removed { background: rgba(239,68,68,.10); color: var(--red, #ef4444); }
+    .gss-diff-line--unchanged { color: var(--text-sub); }
+    .gss-diff-actions { display: flex; gap: 8px; margin-top: 10px; }
+    .gss-diff-empty {
+      font-size: 13px; color: var(--green, #22c55e); padding: 10px 0;
+      display: flex; align-items: center; gap: 7px;
+    }
+    .gss-sync-error { font-size: 12px; color: var(--red, #ef4444); margin-top: 8px; }
+    /* legacy — kept for backward compat if any code still references */
     .sm-agent-row {
       display: flex; align-items: center; justify-content: space-between;
-      padding: 10px 0;
-      border-bottom: 1px solid var(--border);
+      padding: 10px 0; border-bottom: 1px solid var(--border);
     }
     .sm-agent-row:last-child { border-bottom: none; }
     .sm-agent-name { font-size: 13px; font-weight: 500; color: var(--text); }
@@ -4861,6 +5129,10 @@
                     aria-selected="false" onclick="switchTab('notes')">
               <i class="ti ti-notes"></i>Notes
             </button>
+            <button class="stab" role="tab" id="stab-settings"
+                    aria-selected="false" onclick="switchTab('settings')">
+              <i class="ti ti-adjustments-cog"></i>Settings
+            </button>
           </div>
         </div>
       </nav>
@@ -5553,6 +5825,177 @@
         </div>
       </div>
 
+      <!-- Project Settings tab (issue #642) -->
+      <div class="tab-pane" id="pane-settings" role="tabpanel" aria-labelledby="stab-settings">
+        <div class="proj-settings-wrap">
+
+          <!-- Estimation card -->
+          <div class="proj-settings-card">
+            <div class="proj-settings-card-head">
+              <i class="ti ti-ruler-measure proj-settings-card-icon"></i>
+              <div>
+                <div class="proj-settings-card-title">Estimation</div>
+                <div class="proj-settings-card-sub">Size → time mapping the Estimator uses for this project</div>
+              </div>
+            </div>
+            <div class="proj-settings-card-body">
+              <div class="proj-settings-inherit-note" id="ps-inherit-note">
+                <i class="ti ti-arrow-down-right"></i>
+                Inherits global defaults. Edits here override for <strong id="ps-proj-name">this project</strong> only.
+              </div>
+              <table class="ps-est-table">
+                <thead>
+                  <tr>
+                    <th style="width:80px">Size</th>
+                    <th style="width:150px">Typical time</th>
+                    <th>Suggested from sprint history</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td><span class="ps-sz-badge ps-sz-S">S</span></td>
+                    <td><input class="ps-inp ps-num" id="ps-est-s" type="number" min="1"> <span class="ps-unit">min</span></td>
+                    <td><span class="ps-suggest">— <button class="ps-apply-suggest" disabled>apply</button><span class="ps-soon">soon</span></span></td>
+                  </tr>
+                  <tr>
+                    <td><span class="ps-sz-badge ps-sz-M">M</span></td>
+                    <td><input class="ps-inp ps-num" id="ps-est-m" type="number" min="1"> <span class="ps-unit">min</span></td>
+                    <td><span class="ps-suggest">— <button class="ps-apply-suggest" disabled>apply</button><span class="ps-soon">soon</span></span></td>
+                  </tr>
+                  <tr>
+                    <td><span class="ps-sz-badge ps-sz-L">L</span></td>
+                    <td><input class="ps-inp ps-num" id="ps-est-l" type="number" min="1"> <span class="ps-unit">min</span></td>
+                    <td><span class="ps-suggest">— <button class="ps-apply-suggest" disabled>apply</button><span class="ps-soon">soon</span></span></td>
+                  </tr>
+                  <tr>
+                    <td><span class="ps-sz-badge ps-sz-XL">XL</span></td>
+                    <td><input class="ps-inp ps-num" id="ps-est-xl" type="number" min="1"> <span class="ps-unit">min</span></td>
+                    <td><span class="ps-suggest">— <button class="ps-apply-suggest" disabled>apply</button><span class="ps-soon">soon</span></span></td>
+                  </tr>
+                </tbody>
+              </table>
+              <div class="ps-buffer-rows">
+                <div class="ps-row">
+                  <div class="ps-row-label">Buffer<span class="ps-hint">added to every estimate</span></div>
+                  <div class="ps-row-control"><input class="ps-inp ps-num" id="ps-buf" type="number" min="0" max="200"> <span class="ps-unit">%</span></div>
+                </div>
+                <div class="ps-row">
+                  <div class="ps-row-label">Thin-AC buffer<span class="ps-hint">used when AC is sparse</span></div>
+                  <div class="ps-row-control"><input class="ps-inp ps-num" id="ps-thin-buf" type="number" min="0" max="200"> <span class="ps-unit">%</span></div>
+                </div>
+              </div>
+              <div style="margin-top:12px">
+                <a class="ps-link" onclick="projSettingsResetEstimation()" title="Clear estimation override and revert to global defaults">
+                  <i class="ti ti-rotate" style="font-size:13px"></i> Reset to global defaults
+                </a>
+              </div>
+            </div>
+          </div>
+
+          <!-- Project identity card -->
+          <div class="proj-settings-card">
+            <div class="proj-settings-card-head">
+              <i class="ti ti-folder-cog proj-settings-card-icon"></i>
+              <div class="proj-settings-card-title">Project</div>
+            </div>
+            <div class="proj-settings-card-body">
+              <div class="ps-row">
+                <div class="ps-row-label">Repo</div>
+                <div class="ps-row-control">
+                  <span class="ps-ro" id="ps-repo-display">—</span>
+                  <span class="ps-ro-badge">read-only</span>
+                </div>
+              </div>
+              <div class="ps-row">
+                <div class="ps-row-label">Display name</div>
+                <div class="ps-row-control">
+                  <input class="ps-inp" id="ps-display-name" type="text" style="width:220px" placeholder="Project display name">
+                </div>
+              </div>
+              <div class="ps-row">
+                <div class="ps-row-label">Icon &amp; color</div>
+                <div class="ps-row-control" style="gap:8px">
+                  <input class="ps-inp" id="ps-icon" type="text" style="width:130px" placeholder="ti-folder">
+                  <span class="ps-color-swatch" id="ps-color-swatch"></span>
+                  <input class="ps-inp" id="ps-color" type="text" style="width:100px" placeholder="gray">
+                </div>
+              </div>
+              <div class="ps-row">
+                <div class="ps-row-label">Show on Projects tab<span class="ps-hint">tracked</span></div>
+                <div class="ps-row-control">
+                  <button class="ps-toggle" id="ps-tracked-toggle" role="switch" aria-checked="true"
+                          onclick="projSettingsToggleTracked()" title="Toggle project visibility"></button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Overrides card -->
+          <div class="proj-settings-card">
+            <div class="proj-settings-card-head">
+              <i class="ti ti-adjustments proj-settings-card-icon"></i>
+              <div>
+                <div class="proj-settings-card-title">Overrides</div>
+                <div class="proj-settings-card-sub">Per-project values that override the global default</div>
+              </div>
+            </div>
+            <div class="proj-settings-card-body">
+              <div class="ps-row">
+                <div class="ps-row-label">Sprint duration<span class="ps-hint" id="ps-sprint-dur-hint">global default: 14 days</span></div>
+                <div class="ps-row-control">
+                  <input class="ps-inp ps-num" id="ps-sprint-dur" type="number" min="1" max="365"> <span class="ps-unit">days</span>
+                </div>
+              </div>
+              <div class="ps-row">
+                <div class="ps-row-label">Default branch</div>
+                <div class="ps-row-control">
+                  <input class="ps-inp" id="ps-default-branch" type="text" style="width:160px" placeholder="develop">
+                </div>
+              </div>
+              <div class="ps-row">
+                <div class="ps-row-label">Tester test repo<span class="ps-hint">GITHUB_ISSUE_TEST_REPO</span></div>
+                <div class="ps-row-control">
+                  <input class="ps-inp" id="ps-tester-repo" type="text" style="width:260px" placeholder="owner/repo-for-testing">
+                </div>
+              </div>
+              <div class="ps-row">
+                <div class="ps-row-label">Agent models</div>
+                <div class="ps-row-control">
+                  <span class="ps-ro">configured globally</span>
+                  <a class="ps-link" onclick="projSettingsGoGlobal()" title="Open Global Settings">
+                    <i class="ti ti-arrow-up-right" style="font-size:13px"></i> Global settings
+                  </a>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Environment paths card (issue #643) -->
+          <div class="proj-settings-card" id="ps-env-card">
+            <div class="proj-settings-card-head">
+              <i class="ti ti-server-2 proj-settings-card-icon"></i>
+              <div>
+                <div class="proj-settings-card-title">Environment paths</div>
+                <div class="proj-settings-card-sub">Local clone directory for each agent environment</div>
+              </div>
+            </div>
+            <div class="proj-settings-card-body" id="ps-env-body">
+              <!-- Rows injected by projEnvLoad() -->
+            </div>
+          </div>
+
+          <!-- Save bar -->
+          <div class="ps-save-bar">
+            <span class="ps-status-msg" id="ps-status-msg"></span>
+            <button class="ps-btn ps-btn-ghost" onclick="projSettingsLoad()">Cancel</button>
+            <button class="ps-btn ps-btn-primary" onclick="projSettingsSave()">
+              <i class="ti ti-check"></i> Save changes
+            </button>
+          </div>
+
+        </div><!-- /proj-settings-wrap -->
+      </div><!-- /pane-settings -->
+
       <div class="tab-pane" id="pane-status" role="tabpanel" aria-labelledby="stab-status">
         <div class="status-page-hdr">
           <div class="status-page-hdr-left">
@@ -5659,6 +6102,18 @@
         <select class="settings-select" id="settings-default-repo"
                 onchange="settingsSaveDefaultRepo(this.value)"></select>
         <span class="settings-hint">Pre-selects the repo in the Bulk Create modal</span>
+      </div>
+    </div>
+
+    <div class="settings-section">
+      <div class="settings-section-title">Agent Models</div>
+      <div class="settings-row">
+        <span class="settings-label">Model assignments</span>
+        <span style="font-size:12px;color:var(--text-muted);">configured globally</span>
+        <button class="btn-ghost" style="font-size:12px;padding:4px 10px;margin-left:8px;"
+                onclick="closeSettingsPanel();openSettingsModal();" type="button">
+          <i class="ti ti-arrow-up-right" style="font-size:13px;"></i> Global settings
+        </button>
       </div>
     </div>
 
@@ -5943,6 +6398,8 @@ function parseUrl() {
             : (rawTab === 'est-vs-actual')    ? 'est-vs-actual'
             : (rawTab === 'calibration')      ? 'calibration'
             : (rawTab === 'status')           ? 'status'
+            : (rawTab === 'notes')            ? 'notes'
+            : (rawTab === 'settings')         ? 'settings'
             : (hash === '#compare')           ? 'compare'
             : 'sprint-mgmt';
   return { slug, tab };
@@ -6019,7 +6476,7 @@ function switchTab(tab, pushHistory) {
   _activeTab = tab;
 
   // Update aria-selected + active class on tabs
-  ['sprint-mgmt', 'tickets', 'logs', 'bulk-create', 'timeline', 'compare', 'metrics', 'sprint-history', 'est-vs-actual', 'calibration', 'status', 'notes'].forEach(t => {
+  ['sprint-mgmt', 'tickets', 'logs', 'bulk-create', 'timeline', 'compare', 'metrics', 'sprint-history', 'est-vs-actual', 'calibration', 'status', 'notes', 'settings'].forEach(t => {
     const btn = document.getElementById('stab-' + t);
     if (!btn) return;
     const isActive = t === tab;
@@ -6036,7 +6493,7 @@ function switchTab(tab, pushHistory) {
   });
 
   // Show/hide panes
-  ['sprint-mgmt', 'tickets', 'logs', 'bulk-create', 'timeline', 'compare', 'metrics', 'sprint-history', 'est-vs-actual', 'calibration', 'status', 'notes'].forEach(t => {
+  ['sprint-mgmt', 'tickets', 'logs', 'bulk-create', 'timeline', 'compare', 'metrics', 'sprint-history', 'est-vs-actual', 'calibration', 'status', 'notes', 'settings'].forEach(t => {
     const pane = document.getElementById('pane-' + t);
     if (pane) pane.classList.toggle('active', t === tab);
   });
@@ -6113,6 +6570,11 @@ function switchTab(tab, pushHistory) {
   if (tab === 'notes') {
     notesInit();
   }
+
+  // Init project settings tab
+  if (tab === 'settings') {
+    projSettingsInit();
+  }
 }
 
 // ── Dropdown tab group helpers ────────────────────────────────────────────────
@@ -6130,7 +6592,7 @@ document.addEventListener('click', closeAllStabDropdowns);
 
 // ── Keyboard navigation for sub-tabs ─────────────────────────────────────────
 document.getElementById('sub-tabs').addEventListener('keydown', function(e) {
-  const enabledTabs = ['sprint-mgmt', 'tickets', 'logs', 'bulk-create', 'timeline', 'compare', 'sprint-history', 'est-vs-actual', 'calibration', 'status', 'notes'];
+  const enabledTabs = ['sprint-mgmt', 'tickets', 'logs', 'bulk-create', 'timeline', 'compare', 'sprint-history', 'est-vs-actual', 'calibration', 'status', 'notes', 'settings'];
   const focused = document.activeElement;
   const currentId = focused ? focused.id.replace('stab-', '') : null;
   const currentIdx = enabledTabs.indexOf(currentId);
@@ -16317,15 +16779,22 @@ document.addEventListener('keydown', function(e) {
 });
 
 // ── Settings modal (issue #396) ──────────────────────────────────────────────
+// ── Global Settings screen (issue #641) ──────────────────────────────────────
+
 const SM_AGENTS = [
-  { key: 'ba',               label: 'BA',               hint: 'Business Analyst',        default: 'claude-sonnet-4-6' },
-  { key: 'coder',            label: 'Coder',            hint: 'Feature implementation',   default: 'claude-sonnet-4-6' },
-  { key: 'tester',           label: 'Tester',           hint: 'Test runner & verifier',   default: 'claude-haiku-4-5'  },
-  { key: 'estimator',        label: 'Estimator',        hint: 'Per-issue sizing',         default: 'claude-haiku-4-5'  },
-  { key: 'sprint-estimator', label: 'Sprint Estimator', hint: 'Bulk sprint sizing',       default: 'claude-sonnet-4-6' },
-  { key: 'sprint-review',    label: 'Sprint Review',    hint: 'Sprint report generation', default: 'claude-haiku-4-5'  },
+  { key: 'ba',               label: 'BA',               hint: 'Business Analyst',        default: 'claude-sonnet-4-6', settingsKey: 'default_model'   },
+  { key: 'coder',            label: 'Coder',            hint: 'Feature implementation',   default: 'claude-sonnet-4-6', settingsKey: 'coder_model'     },
+  { key: 'tester',           label: 'Tester',           hint: 'Test runner & verifier',   default: 'claude-haiku-4-5',  settingsKey: 'tester_model'    },
+  { key: 'estimator',        label: 'Estimator',        hint: 'Per-issue sizing',         default: 'claude-haiku-4-5',  settingsKey: 'estimator_model' },
+  { key: 'sprint-estimator', label: 'Sprint Estimator', hint: 'Bulk sprint sizing',       default: 'claude-sonnet-4-6', settingsKey: null              },
+  { key: 'sprint-review',    label: 'Sprint Review',    hint: 'Sprint report generation', default: 'claude-haiku-4-5',  settingsKey: null              },
 ];
-const SM_MODELS = ['claude-sonnet-4-6', 'claude-opus-4-8', 'claude-haiku-4-5'];
+const SM_MODELS = [
+  'claude-sonnet-4-6',
+  'claude-opus-4-8',
+  'claude-haiku-4-5-20251001',
+  'claude-haiku-4-5',
+];
 const SM_STORAGE_KEY = 'commander_agent_models';
 
 function _smLoadModels() {
@@ -16339,29 +16808,386 @@ function getAgentModel(agentKey) {
   return saved[agentKey] || (agent ? agent.default : SM_MODELS[0]);
 }
 
-function openSettingsModal() {
-  const saved = _smLoadModels();
-  const rows = SM_AGENTS.map(a => {
-    const current = saved[a.key] || a.default;
-    const opts = SM_MODELS.map(m =>
-      `<option value="${m}"${m === current ? ' selected' : ''}>${m}</option>`
-    ).join('');
-    return `<div class="sm-agent-row">
-      <div>
-        <div class="sm-agent-name">${a.label}</div>
-        <div class="sm-agent-label">${a.hint}</div>
-      </div>
-      <select class="sm-model-select" data-agent="${a.key}" onchange="_smOnChange(this)">${opts}</select>
+let _gssData = null;
+
+function _gssModelOpts(current) {
+  return SM_MODELS.map(m =>
+    `<option value="${m}"${m === current ? ' selected' : ''}>${m}</option>`
+  ).join('');
+}
+
+function _gssRender(data) {
+  _gssData = data;
+
+  const modelRows = SM_AGENTS
+    .filter(a => a.settingsKey)
+    .map(a => {
+      const current = data[a.settingsKey] || a.default;
+      return `<div class="gss-row">
+        <div class="gss-label">${a.label}<span class="hint">${a.hint}</span></div>
+        <div class="gss-control">
+          <select class="gss-select gss-inp" data-gss-key="${a.settingsKey}">
+            ${_gssModelOpts(current)}
+          </select>
+        </div>
+      </div>`;
+    }).join('');
+
+  const EST_SIZES = [
+    { key: 'estimation_s_minutes',  label: 'S',  cls: 'gss-sz-S'  },
+    { key: 'estimation_m_minutes',  label: 'M',  cls: 'gss-sz-M'  },
+    { key: 'estimation_l_minutes',  label: 'L',  cls: 'gss-sz-L'  },
+    { key: 'estimation_xl_minutes', label: 'XL', cls: 'gss-sz-XL' },
+  ];
+  const estRows = EST_SIZES.map(s => `
+    <tr>
+      <td><span class="gss-sz-badge ${s.cls}">${s.label}</span></td>
+      <td><input class="gss-inp gss-inp-num" type="number" min="1" data-gss-key="${s.key}" value="${data[s.key] ?? ''}"> <span class="gss-ro">min</span></td>
+    </tr>`).join('');
+
+  const bufferRows = `
+    <div class="gss-row">
+      <div class="gss-label">Buffer<span class="hint">added to every estimate</span></div>
+      <div class="gss-control"><input class="gss-inp gss-inp-num" type="number" min="0" max="100" data-gss-key="estimation_buffer_pct" value="${data.estimation_buffer_pct ?? ''}"> <span class="gss-ro">%</span></div>
+    </div>
+    <div class="gss-row">
+      <div class="gss-label">Thin-AC buffer<span class="hint">used when AC is sparse</span></div>
+      <div class="gss-control"><input class="gss-inp gss-inp-num" type="number" min="0" max="100" data-gss-key="estimation_thin_ac_buffer_pct" value="${data.estimation_thin_ac_buffer_pct ?? ''}"> <span class="gss-ro">%</span></div>
+    </div>`;
+
+  const SECRETS = [
+    { key: 'github_token_set',  label: 'GITHUB_TOKEN'  },
+    { key: 'database_url_set',  label: 'DATABASE_URL'  },
+  ];
+  const secretRows = SECRETS.map(s => {
+    const isSet = !!data[s.key];
+    const badgeCls = isSet ? 'gss-secret-badge--set' : 'gss-secret-badge--unset';
+    const icon = isSet ? '&#x2713;' : '&#x2717;';
+    const text = isSet ? 'set' : 'not set';
+    return `<div class="gss-secret-row">
+      <span class="gss-secret-name">${s.label}</span>
+      <span class="gss-secret-badge ${badgeCls}">${icon} ${text}</span>
     </div>`;
   }).join('');
-  document.getElementById('sm-body').innerHTML = rows;
+
+  const html = `<div class="gss-grid">
+    <div class="gss-card">
+      <div class="gss-card-head">
+        <i class="ti ti-robot" style="color:var(--text-muted)"></i>
+        <div><div class="gss-card-title">Agent Models</div><div class="gss-card-sub">Model assigned to each agent role</div></div>
+      </div>
+      <div class="gss-card-body">${modelRows}</div>
+    </div>
+
+    <div class="gss-card">
+      <div class="gss-card-head">
+        <i class="ti ti-adjustments" style="color:var(--text-muted)"></i>
+        <div><div class="gss-card-title">Defaults</div><div class="gss-card-sub">Sprint and workflow defaults applied to all projects</div></div>
+      </div>
+      <div class="gss-card-body">
+        <div class="gss-row">
+          <div class="gss-label">Sprint duration<span class="hint">days</span></div>
+          <div class="gss-control"><input class="gss-inp gss-inp-num" type="number" min="1" data-gss-key="sprint_duration_days" value="${data.sprint_duration_days ?? ''}"> <span class="gss-ro">days</span></div>
+        </div>
+        <div class="gss-row">
+          <div class="gss-label">Default branch</div>
+          <div class="gss-control"><input class="gss-inp gss-inp-path" type="text" data-gss-key="default_branch" value="${data.default_branch ?? ''}" style="width:160px"></div>
+        </div>
+        <div class="gss-row">
+          <div class="gss-label">Bulk-create concurrency<span class="hint">parallel BA agents</span></div>
+          <div class="gss-control"><input class="gss-inp gss-inp-num" type="number" min="1" max="20" data-gss-key="bulk_create_concurrency" value="${data.bulk_create_concurrency ?? ''}"></div>
+        </div>
+        <div class="gss-row">
+          <div class="gss-label">Log level</div>
+          <div class="gss-control">
+            <select class="gss-select gss-inp" data-gss-key="log_level">
+              ${['DEBUG','INFO','WARNING','ERROR'].map(l => `<option${(data.log_level||'INFO')===l?' selected':''}>${l}</option>`).join('')}
+            </select>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="gss-card">
+      <div class="gss-card-head">
+        <i class="ti ti-ruler-measure" style="color:var(--text-muted)"></i>
+        <div><div class="gss-card-title">Estimation Defaults</div><div class="gss-card-sub">Size → time mapping used by the Estimator (global default; projects may override)</div></div>
+      </div>
+      <div class="gss-card-body">
+        <table class="gss-est-table">
+          <thead><tr><th style="width:80px">Size</th><th style="width:160px">Typical time</th></tr></thead>
+          <tbody>${estRows}</tbody>
+        </table>
+        <div style="margin-top:14px">${bufferRows}</div>
+      </div>
+    </div>
+
+    <div class="gss-card">
+      <div class="gss-card-head">
+        <i class="ti ti-lock" style="color:var(--text-muted)"></i>
+        <div><div class="gss-card-title">Secrets</div><div class="gss-card-sub">Presence indicators only — values are never shown or editable here</div></div>
+      </div>
+      <div class="gss-card-body">${secretRows}</div>
+    </div>
+
+    <div class="gss-card" id="gss-sync-card">
+      <div class="gss-card-head">
+        <i class="ti ti-refresh" style="color:var(--text-muted)"></i>
+        <div>
+          <div class="gss-card-title">Settings Sync</div>
+          <div class="gss-card-sub">Sync settings between local files and Neon DB — diff preview before any write</div>
+        </div>
+      </div>
+      <div class="gss-card-body">
+        <div class="gss-sync-bar">
+          <button class="btn-ghost" id="gss-sync-upload-btn" onclick="_syncUpload()" type="button">
+            <i class="ti ti-upload"></i> Upload to DB
+          </button>
+          <button class="btn-ghost" id="gss-sync-fetch-btn" onclick="_syncFetch()" type="button">
+            <i class="ti ti-download"></i> Fetch from DB
+          </button>
+          <span class="gss-sync-last" id="gss-sync-last-synced" style="display:none">
+            Last synced: <span id="gss-sync-ts"></span>
+          </span>
+        </div>
+        <div id="gss-sync-diff-area" class="gss-diff-area" style="display:none">
+          <div id="gss-sync-diff-lines"></div>
+          <div class="gss-diff-actions" id="gss-sync-diff-actions">
+            <button class="btn-primary" id="gss-sync-confirm-btn" onclick="_syncConfirm()" type="button">
+              <i class="ti ti-check"></i> Confirm
+            </button>
+            <button class="btn-ghost" id="gss-sync-cancel-btn" onclick="_syncCancel()" type="button">Cancel</button>
+          </div>
+        </div>
+        <div id="gss-sync-already-in-sync" style="display:none" class="gss-diff-empty">
+          <i class="ti ti-circle-check"></i> Already in sync — no changes to apply.
+        </div>
+        <div id="gss-sync-error" class="gss-sync-error" style="display:none"></div>
+      </div>
+    </div>
+  </div>`;
+
+  document.getElementById('sm-body').innerHTML = html;
+  _syncLoadStatus();
+}
+
+async function openSettingsModal() {
   document.getElementById('sm-backdrop').classList.remove('hidden');
   document.getElementById('sm-modal').classList.remove('hidden');
+  document.getElementById('sm-body').innerHTML = '<div class="gss-loading"><i class="ti ti-loader-2" style="font-size:22px;"></i><br>Loading settings…</div>';
+  _gssHideFeedback();
+  try {
+    const resp = await fetch('/api/settings');
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+    _gssRender(data);
+  } catch (err) {
+    document.getElementById('sm-body').innerHTML =
+      `<div class="gss-error-banner"><i class="ti ti-alert-circle"></i> Failed to load settings: ${err.message}</div>`;
+  }
 }
 
 function closeSettingsModal() {
   document.getElementById('sm-backdrop').classList.add('hidden');
   document.getElementById('sm-modal').classList.add('hidden');
+  _gssData = null;
+}
+
+function _gssHideFeedback() {
+  const el = document.getElementById('gss-feedback');
+  if (el) { el.textContent = ''; el.className = 'gss-feedback'; }
+}
+
+// ── Settings Sync helpers (issue #644) ────────────────────────────────────────
+
+let _syncPendingDirection = null;
+
+async function _syncLoadStatus() {
+  try {
+    const resp = await fetch('/api/settings/sync/status');
+    if (!resp.ok) return;
+    const data = await resp.json();
+    _syncRenderStatus(data.last_synced);
+  } catch (_) {}
+}
+
+function _syncRenderStatus(ts) {
+  const el = document.getElementById('gss-sync-last-synced');
+  const tsEl = document.getElementById('gss-sync-ts');
+  if (!el || !tsEl) return;
+  if (ts) {
+    tsEl.textContent = ts;
+    el.style.display = '';
+  } else {
+    el.style.display = 'none';
+  }
+}
+
+function _syncSetBtnsDisabled(disabled) {
+  const u = document.getElementById('gss-sync-upload-btn');
+  const f = document.getElementById('gss-sync-fetch-btn');
+  if (u) u.disabled = disabled;
+  if (f) f.disabled = disabled;
+}
+
+function _syncShowError(msg) {
+  const el = document.getElementById('gss-sync-error');
+  if (el) { el.textContent = msg; el.style.display = ''; }
+}
+
+function _syncClearError() {
+  const el = document.getElementById('gss-sync-error');
+  if (el) { el.textContent = ''; el.style.display = 'none'; }
+}
+
+function _syncRenderDiff(diff) {
+  const area = document.getElementById('gss-sync-diff-area');
+  const linesEl = document.getElementById('gss-sync-diff-lines');
+  const alreadyEl = document.getElementById('gss-sync-already-in-sync');
+
+  const changed = diff.filter(i => i.status === 'added' || i.status === 'removed');
+
+  if (changed.length === 0) {
+    if (area) area.style.display = 'none';
+    if (alreadyEl) alreadyEl.style.display = '';
+    return;
+  }
+
+  if (alreadyEl) alreadyEl.style.display = 'none';
+
+  const lines = diff.map(item => {
+    let prefix, cls;
+    if (item.status === 'added')     { prefix = '+'; cls = 'gss-diff-line--added'; }
+    else if (item.status === 'removed') { prefix = '-'; cls = 'gss-diff-line--removed'; }
+    else                              { prefix = ' '; cls = 'gss-diff-line--unchanged'; }
+    const val = typeof item.value === 'object' ? JSON.stringify(item.value) : String(item.value ?? '');
+    return `<div class="gss-diff-line ${cls}">${prefix} ${escHtml(item.key)}: ${escHtml(val)}</div>`;
+  }).join('');
+
+  if (linesEl) linesEl.innerHTML = lines;
+  if (area) area.style.display = '';
+}
+
+async function _syncRunDiff(direction) {
+  _syncClearError();
+  _syncSetBtnsDisabled(true);
+  const area = document.getElementById('gss-sync-diff-area');
+  const alreadyEl = document.getElementById('gss-sync-already-in-sync');
+  if (area) area.style.display = 'none';
+  if (alreadyEl) alreadyEl.style.display = 'none';
+
+  try {
+    const resp = await fetch('/api/settings/sync/diff', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ direction }),
+    });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.detail || `HTTP ${resp.status}`);
+    }
+    const data = await resp.json();
+    _syncPendingDirection = direction;
+    _syncRenderDiff(data.diff);
+  } catch (err) {
+    _syncShowError(`Diff failed: ${err.message}`);
+  } finally {
+    _syncSetBtnsDisabled(false);
+  }
+}
+
+function _syncUpload() { _syncRunDiff('upload'); }
+function _syncFetch()  { _syncRunDiff('fetch'); }
+
+function _syncCancel() {
+  _syncPendingDirection = null;
+  const area = document.getElementById('gss-sync-diff-area');
+  const alreadyEl = document.getElementById('gss-sync-already-in-sync');
+  if (area) area.style.display = 'none';
+  if (alreadyEl) alreadyEl.style.display = 'none';
+  _syncClearError();
+}
+
+async function _syncConfirm() {
+  if (!_syncPendingDirection) return;
+  _syncClearError();
+  const confirmBtn = document.getElementById('gss-sync-confirm-btn');
+  const cancelBtn = document.getElementById('gss-sync-cancel-btn');
+  if (confirmBtn) confirmBtn.disabled = true;
+  if (cancelBtn) cancelBtn.disabled = true;
+
+  try {
+    const resp = await fetch('/api/settings/sync/commit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ direction: _syncPendingDirection }),
+    });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.detail || `HTTP ${resp.status}`);
+    }
+    const data = await resp.json();
+    _syncRenderStatus(data.synced_at);
+    _syncCancel();
+  } catch (err) {
+    _syncShowError(`Sync failed: ${err.message}`);
+    if (confirmBtn) confirmBtn.disabled = false;
+    if (cancelBtn) cancelBtn.disabled = false;
+  } finally {
+    _syncPendingDirection = null;
+  }
+}
+
+async function _gssSave() {
+  const body = document.getElementById('sm-body');
+  const feedback = document.getElementById('gss-feedback');
+  const saveBtn = document.getElementById('gss-save-btn');
+
+  const inputs = body.querySelectorAll('[data-gss-key]');
+  const payload = {};
+  inputs.forEach(el => {
+    const key = el.dataset.gssKey;
+    const raw = el.value;
+    if (el.type === 'number') {
+      const n = parseInt(raw, 10);
+      if (!isNaN(n)) payload[key] = n;
+    } else {
+      if (raw.trim()) payload[key] = raw.trim();
+    }
+  });
+
+  if (saveBtn) saveBtn.disabled = true;
+  try {
+    const resp = await fetch('/api/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.detail || `HTTP ${resp.status}`);
+    }
+    const updated = await resp.json();
+    // Sync model selections back to localStorage for getAgentModel() callers
+    const lsModels = _smLoadModels();
+    SM_AGENTS.filter(a => a.settingsKey).forEach(a => {
+      if (updated[a.settingsKey]) lsModels[a.key] = updated[a.settingsKey];
+    });
+    localStorage.setItem(SM_STORAGE_KEY, JSON.stringify(lsModels));
+    _gssData = updated;
+    if (feedback) {
+      feedback.textContent = 'Saved';
+      feedback.className = 'gss-feedback visible';
+      setTimeout(() => { feedback.className = 'gss-feedback'; }, 2500);
+    }
+  } catch (err) {
+    if (feedback) {
+      feedback.textContent = `Save failed: ${err.message}`;
+      feedback.className = 'gss-feedback visible error';
+    }
+  } finally {
+    if (saveBtn) saveBtn.disabled = false;
+  }
 }
 
 function _smOnChange(sel) {
@@ -18778,7 +19604,7 @@ document.addEventListener('keydown', function(e) {
   </div>
 </div>
 
-<!-- ── Global Settings modal (issue #396) ── -->
+<!-- ── Global Settings screen (issue #641) ── -->
 <div class="modal-backdrop hidden" id="sm-backdrop" onclick="closeSettingsModal()"></div>
 <div class="modal sm-modal hidden" id="sm-modal"
      role="dialog" aria-modal="true" aria-labelledby="sm-modal-title">
@@ -18789,10 +19615,14 @@ document.addEventListener('keydown', function(e) {
     <button class="modal-close" onclick="closeSettingsModal()" aria-label="Close">&times;</button>
   </div>
   <div class="modal-body" id="sm-body">
-    <!-- populated by openSettingsModal() -->
+    <!-- populated by openSettingsModal() / _gssRender() -->
   </div>
   <div class="modal-footer">
-    <button class="btn-primary" onclick="closeSettingsModal()" type="button">Done</button>
+    <span class="gss-feedback" id="gss-feedback"></span>
+    <button class="btn-ghost" onclick="closeSettingsModal()" type="button">Cancel</button>
+    <button class="btn-primary" id="gss-save-btn" onclick="_gssSave()" type="button">
+      <i class="ti ti-check"></i> Save changes
+    </button>
   </div>
 </div>
 
@@ -19825,6 +20655,466 @@ function _notesShowConflict(msg) {
 function _notesHideConflict() {
   const banner = document.getElementById('notes-conflict-banner');
   if (banner) banner.classList.add('hidden');
+}
+
+// ── Project Settings tab (issue #642) ─────────────────────────────────────────
+
+let _psLoaded = false;
+let _psTracked = true;
+
+// Colour name → CSS value for swatch preview
+const _PS_COLOR_MAP = {
+  gray: '#6b7280', blue: '#3b82f6', green: '#16a34a', purple: '#7c3aed',
+  red: '#dc2626', orange: '#ea580c', yellow: '#ca8a04', pink: '#db2777',
+  cyan: '#0891b2', indigo: '#4f46e5',
+};
+
+function projSettingsInit() {
+  if (!_psLoaded) {
+    projSettingsLoad();
+    _psLoaded = false; // always reload on tab visit
+  }
+  projSettingsLoad();
+}
+
+async function projSettingsLoad() {
+  const slug = _slug;
+  if (!slug) return;
+
+  // Expose slug for env-path JS block
+  window._currentProjectSlug = slug;
+  projEnvLoad();
+
+  // Show project name in inherit notice
+  const nameEl = document.getElementById('ps-proj-name');
+  if (nameEl) nameEl.textContent = slug;
+
+  // Show repo (read-only) from cached project data
+  const repoEl = document.getElementById('ps-repo-display');
+  const proj = (_cachedFullRepo || {})[slug];
+  if (repoEl) repoEl.textContent = proj ? proj.repo : slug;
+
+  try {
+    const resp = await fetch(`/api/projects/${encodeURIComponent(slug)}/settings`);
+    if (!resp.ok) { _psSetStatus('Failed to load settings', 'err'); return; }
+    const data = await resp.json();
+
+    // Estimation fields
+    _psSetNum('ps-est-s', data.estimation_s_minutes);
+    _psSetNum('ps-est-m', data.estimation_m_minutes);
+    _psSetNum('ps-est-l', data.estimation_l_minutes);
+    _psSetNum('ps-est-xl', data.estimation_xl_minutes);
+    _psSetNum('ps-buf', data.estimation_buffer_pct);
+    _psSetNum('ps-thin-buf', data.estimation_thin_ac_buffer_pct);
+
+    // Project identity fields
+    _psSetVal('ps-display-name', data.display_name || '');
+    _psSetVal('ps-icon', data.icon || '');
+    _psSetVal('ps-color', data.color || '');
+    _psUpdateColorSwatch(data.color);
+
+    _psTracked = data.tracked !== false;
+    const toggle = document.getElementById('ps-tracked-toggle');
+    if (toggle) toggle.setAttribute('aria-checked', String(_psTracked));
+
+    // Overrides fields
+    _psSetNum('ps-sprint-dur', data.sprint_duration_days);
+    _psSetVal('ps-default-branch', data.default_branch || '');
+    _psSetVal('ps-tester-repo', data.tester_test_repo || '');
+
+    // Determine if project has any override; show/hide inherit notice
+    await _psUpdateInheritNotice(slug);
+
+  } catch (e) {
+    _psSetStatus('Error loading settings', 'err');
+  }
+}
+
+async function _psUpdateInheritNotice(slug) {
+  // Fetch global settings to compare
+  try {
+    const [globalResp] = await Promise.all([fetch('/api/settings')]);
+    if (!globalResp.ok) return;
+    const global = await globalResp.json();
+    const proj = await (await fetch(`/api/projects/${encodeURIComponent(slug)}/settings`)).json();
+
+    const estimationKeys = ['estimation_s_minutes','estimation_m_minutes','estimation_l_minutes',
+                            'estimation_xl_minutes','estimation_buffer_pct','estimation_thin_ac_buffer_pct'];
+    const hasOverride = estimationKeys.some(k => proj[k] !== global[k]);
+    const note = document.getElementById('ps-inherit-note');
+    if (note) note.classList.toggle('hidden', hasOverride);
+  } catch (_) {}
+}
+
+async function projSettingsSave() {
+  const slug = _slug;
+  if (!slug) return;
+  _psSetStatus('Saving…', '');
+
+  const body = {
+    estimation_s_minutes: _psGetNum('ps-est-s'),
+    estimation_m_minutes: _psGetNum('ps-est-m'),
+    estimation_l_minutes: _psGetNum('ps-est-l'),
+    estimation_xl_minutes: _psGetNum('ps-est-xl'),
+    estimation_buffer_pct: _psGetNum('ps-buf'),
+    estimation_thin_ac_buffer_pct: _psGetNum('ps-thin-buf'),
+    display_name: _psGetVal('ps-display-name'),
+    icon: _psGetVal('ps-icon'),
+    color: _psGetVal('ps-color'),
+    tracked: _psTracked,
+    sprint_duration_days: _psGetNum('ps-sprint-dur'),
+    default_branch: _psGetVal('ps-default-branch'),
+    tester_test_repo: _psGetVal('ps-tester-repo'),
+  };
+
+  // Remove empty strings so we don't overwrite with blanks unintentionally
+  Object.keys(body).forEach(k => { if (body[k] === '' || body[k] === null || isNaN(body[k]) && typeof body[k] === 'number') delete body[k]; });
+
+  try {
+    const resp = await fetch(`/api/projects/${encodeURIComponent(slug)}/settings`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      _psSetStatus('Save failed: ' + (err.detail || resp.status), 'err');
+      return;
+    }
+
+    // Save environment paths
+    const envResult = await projEnvSave();
+    if (envResult && !envResult.ok) {
+      const detail = (envResult.data && envResult.data.detail) || 'env save failed';
+      _psSetStatus('Settings saved. Env error: ' + detail, 'err');
+      return;
+    }
+
+    _psSetStatus('Saved', 'ok');
+    await _psUpdateInheritNotice(slug);
+    setTimeout(() => _psSetStatus('', ''), 3000);
+  } catch (e) {
+    _psSetStatus('Save failed', 'err');
+  }
+}
+
+async function projSettingsResetEstimation() {
+  const slug = _slug;
+  if (!slug) return;
+  _psSetStatus('Resetting…', '');
+  try {
+    const resp = await fetch(`/api/projects/${encodeURIComponent(slug)}/settings`, { method: 'DELETE' });
+    if (!resp.ok) { _psSetStatus('Reset failed', 'err'); return; }
+    _psSetStatus('Reset to global defaults', 'ok');
+    await projSettingsLoad();
+    setTimeout(() => _psSetStatus('', ''), 3000);
+  } catch (e) {
+    _psSetStatus('Reset failed', 'err');
+  }
+}
+
+function projSettingsToggleTracked() {
+  _psTracked = !_psTracked;
+  const toggle = document.getElementById('ps-tracked-toggle');
+  if (toggle) toggle.setAttribute('aria-checked', String(_psTracked));
+}
+
+function projSettingsGoGlobal() {
+  openSettingsModal();
+}
+
+function _psSetNum(id, val) {
+  const el = document.getElementById(id);
+  if (el) el.value = val != null ? val : '';
+}
+function _psSetVal(id, val) {
+  const el = document.getElementById(id);
+  if (el) el.value = val != null ? val : '';
+}
+function _psGetNum(id) {
+  const el = document.getElementById(id);
+  return el ? parseInt(el.value, 10) : null;
+}
+function _psGetVal(id) {
+  const el = document.getElementById(id);
+  return el ? el.value.trim() : '';
+}
+function _psUpdateColorSwatch(color) {
+  const swatch = document.getElementById('ps-color-swatch');
+  if (!swatch) return;
+  const hex = _PS_COLOR_MAP[color] || color || 'var(--border)';
+  swatch.style.background = hex;
+  swatch.title = color || '';
+}
+function _psSetStatus(msg, cls) {
+  const el = document.getElementById('ps-status-msg');
+  if (!el) return;
+  el.textContent = msg;
+  el.className = 'ps-status-msg' + (cls ? ' ' + cls : '');
+}
+
+// Update swatch on color input change
+document.addEventListener('input', function(e) {
+  if (e.target && e.target.id === 'ps-color') {
+    _psUpdateColorSwatch(e.target.value.trim());
+  }
+});
+</script>
+
+<!-- ── Folder browser modal (issue #643) ── -->
+<div class="ps-modal-overlay" id="envBrowserModal" role="dialog" aria-modal="true" aria-label="Select folder">
+  <div class="ps-browser">
+    <div class="ps-browser-head">
+      <i class="ti ti-folder-search"></i>
+      <span id="envBrowserTitle">Select folder</span>
+      <button class="ps-browser-close" onclick="closeBrowser()" aria-label="Close">&times;</button>
+    </div>
+    <div class="ps-browser-pathbar" id="envBrowserPath">~</div>
+    <div class="ps-browser-list" id="envBrowserList"></div>
+    <div class="ps-browser-foot">
+      <span class="ps-browser-scope"><i class="ti ti-lock" style="font-size:12px"></i> scoped to ~</span>
+      <span class="ps-browser-gap"></span>
+      <span class="ps-browser-selected" id="envBrowserSelected">~</span>
+      <button class="ps-btn ps-btn-ghost" onclick="closeBrowser()">Cancel</button>
+      <button class="ps-btn ps-btn-primary" onclick="chooseFolder()">
+        <i class="ti ti-check"></i> Select folder
+      </button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── Folder browser (issue #643) ──────────────────────────────────────────────
+
+var _envBrowserTargetInput = null;
+var _envBrowserCurrentPath = '';
+
+function openBrowser(inputId) {
+  _envBrowserTargetInput = inputId;
+  var inp = document.getElementById(inputId);
+  var seed = inp ? (inp.value || '~') : '~';
+  _envBrowserCurrentPath = seed;
+  document.getElementById('envBrowserTitle').textContent =
+    'Select folder for ' + inputId.replace('ps-env-path-', '');
+  document.getElementById('envBrowserModal').classList.add('open');
+  _fetchBrowserList(_envBrowserCurrentPath);
+}
+
+function closeBrowser() {
+  document.getElementById('envBrowserModal').classList.remove('open');
+  _envBrowserTargetInput = null;
+}
+
+function chooseFolder() {
+  if (_envBrowserTargetInput) {
+    var inp = document.getElementById(_envBrowserTargetInput);
+    if (inp) inp.value = _envBrowserCurrentPath;
+  }
+  closeBrowser();
+}
+
+function goUp() {
+  _fetchBrowserList(_envBrowserCurrentPath, true);
+}
+
+function _envEnterFolder(path) {
+  _envBrowserCurrentPath = path;
+  _fetchBrowserList(path);
+}
+
+function _fetchBrowserList(path, goingUp) {
+  var url = '/api/fs/list?path=' + encodeURIComponent(path || '');
+  if (goingUp) {
+    url = '/api/fs/list?path=' + encodeURIComponent(path || '') + '&up=1';
+  }
+  var list = document.getElementById('envBrowserList');
+  list.innerHTML = '<div class="ps-fs-row" style="cursor:default;color:var(--text-sub)"><i class="ti ti-loader-2"></i><span class="ps-fs-name">Loading…</span></div>';
+
+  fetch(goingUp ? '/api/fs/list?path=' + encodeURIComponent('__up__:' + path) : url)
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data.error || !data.entries) return;
+      _envBrowserCurrentPath = data.current || path;
+      _renderBrowserList(data.entries, data.current);
+    })
+    .catch(function() {
+      list.innerHTML = '<div class="ps-fs-row" style="cursor:default;color:var(--red)"><i class="ti ti-alert-circle"></i><span class="ps-fs-name">Error loading</span></div>';
+    });
+}
+
+function _renderBrowserList(entries, currentPath) {
+  var list = document.getElementById('envBrowserList');
+  var pathBar = document.getElementById('envBrowserPath');
+  var selected = document.getElementById('envBrowserSelected');
+
+  pathBar.textContent = currentPath || '~';
+  selected.textContent = currentPath || '~';
+
+  var html = '';
+  if (currentPath && currentPath !== '~') {
+    html += '<div class="ps-fs-row up" onclick="goUp()"><i class="ti ti-corner-left-up"></i><span class="ps-fs-name">..</span></div>';
+  }
+  if (!entries || entries.length === 0) {
+    html += '<div class="ps-fs-row" style="cursor:default;color:var(--text-sub)"><i class="ti ti-folder-off"></i><span class="ps-fs-name">No subfolders</span></div>';
+  }
+  entries.forEach(function(e) {
+    var escapedPath = e.path.replace(/'/g, "\\'");
+    html += '<div class="ps-fs-row folder" onclick="_envEnterFolder(\'' + escapedPath + '\')"><i class="ti ti-folder"></i><span class="ps-fs-name">' + e.name + '</span><span class="enter">›</span></div>';
+  });
+  list.innerHTML = html;
+}
+
+// When browser is opened, fetch the up-path for the "up" navigation
+// Override goUp to fetch the parent of currentPath
+(function() {
+  var _origGoUp = goUp;
+  window.goUp = function() {
+    if (!_envBrowserCurrentPath || _envBrowserCurrentPath === '~') return;
+    var parts = _envBrowserCurrentPath.split('/');
+    parts.pop();
+    var parent = parts.join('/') || '/';
+    _envBrowserCurrentPath = parent;
+    _fetchBrowserListDirect(parent);
+  };
+
+  function _fetchBrowserListDirect(path) {
+    var list = document.getElementById('envBrowserList');
+    list.innerHTML = '<div class="ps-fs-row" style="cursor:default;color:var(--text-sub)"><i class="ti ti-loader-2"></i><span class="ps-fs-name">Loading…</span></div>';
+    fetch('/api/fs/list?path=' + encodeURIComponent(path))
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        _envBrowserCurrentPath = data.current || path;
+        _renderBrowserList(data.entries || [], data.current || path);
+      })
+      .catch(function() {});
+  }
+
+  window._envEnterFolder = function(path) {
+    _envBrowserCurrentPath = path;
+    _fetchBrowserListDirect(path);
+  };
+
+  window._fetchBrowserList = function(path) {
+    _fetchBrowserListDirect(path);
+  };
+})();
+
+
+// ── Environment paths (issue #643) ────────────────────────────────────────────
+
+var _envAddCount = 0;
+
+function projEnvLoad() {
+  var slug = (window._currentProjectSlug || '');
+  if (!slug) return;
+  fetch('/api/projects/' + encodeURIComponent(slug) + '/environments')
+    .then(function(r) { return r.ok ? r.json() : {environments: []}; })
+    .then(function(data) {
+      _renderEnvRows(data.environments || []);
+    })
+    .catch(function() {});
+}
+
+function _renderEnvRows(envs) {
+  var body = document.getElementById('ps-env-body');
+  if (!body) return;
+
+  var defaultEnvs = ['prd', 'uat', 'coder', 'tester'];
+  var envMap = {};
+  envs.forEach(function(e) { envMap[e.env] = e.local_directory; });
+
+  // Merge: ensure default envs always appear; add any extras after
+  var allEnvs = defaultEnvs.map(function(e) {
+    return {env: e, local_directory: envMap[e] || '', fixed: true};
+  });
+  envs.forEach(function(e) {
+    if (defaultEnvs.indexOf(e.env) === -1) {
+      allEnvs.push({env: e.env, local_directory: e.local_directory, fixed: false});
+    }
+  });
+
+  var html = '';
+  allEnvs.forEach(function(e) {
+    var inputId = 'ps-env-path-' + e.env;
+    html += '<div class="ps-row" data-env-row="1">'
+      + '<div class="ps-row-label">' + e.env + '</div>'
+      + '<div class="ps-row-control">'
+      + '<input class="ps-inp ps-path-inp" id="' + inputId + '" type="text"'
+      + ' value="' + (e.local_directory || '').replace(/"/g, '&quot;') + '"'
+      + ' placeholder="/path/to/' + e.env + '">'
+      + '<button class="ps-btn-browse" onclick="openBrowser(\'' + inputId + '\')">'
+      + '<i class="ti ti-folder-search"></i> Browse</button>'
+      + '</div>'
+      + '</div>';
+  });
+
+  html += '<div style="margin-top:12px">'
+    + '<a class="ps-link" onclick="addEnvRow()"><i class="ti ti-plus" style="font-size:13px"></i> Add environment</a>'
+    + '</div>'
+    + '<div class="ps-machine-note">'
+    + '<i class="ti ti-info-circle"></i>'
+    + ' Paths are specific to this machine. Validated on save (must exist and be a git clone). Excluded from cross-machine sync.'
+    + '</div>';
+
+  body.innerHTML = html;
+  document.getElementById('ps-env-status') && (document.getElementById('ps-env-status').textContent = '');
+}
+
+function addEnvRow() {
+  _envAddCount++;
+  var body = document.getElementById('ps-env-body');
+  if (!body) return;
+  var id = 'ps-env-path-custom' + _envAddCount;
+  var row = document.createElement('div');
+  row.className = 'ps-row';
+  row.setAttribute('data-env-row', '1');
+  row.setAttribute('data-env-custom', '1');
+  row.innerHTML =
+    '<div class="ps-row-label">'
+    + '<input class="ps-inp ps-env-name-inp" placeholder="env name" data-env-name-input="1">'
+    + '</div>'
+    + '<div class="ps-row-control">'
+    + '<input class="ps-inp ps-path-inp" id="' + id + '" type="text" placeholder="path…">'
+    + '<button class="ps-btn-browse" onclick="openBrowser(\'' + id + '\')">'
+    + '<i class="ti ti-folder-search"></i> Browse</button>'
+    + '</div>';
+  var anchor = body.querySelector('div[style*="margin-top"]');
+  if (anchor) body.insertBefore(row, anchor);
+  else body.appendChild(row);
+}
+
+function projEnvSave() {
+  var body = document.getElementById('ps-env-body');
+  if (!body) return Promise.resolve();
+
+  var envs = [];
+  var rows = body.querySelectorAll('[data-env-row]');
+  rows.forEach(function(row) {
+    var nameEl = row.querySelector('[data-env-name-input]');
+    var envName;
+    if (nameEl) {
+      envName = nameEl.value.trim();
+    } else {
+      var label = row.querySelector('.ps-row-label');
+      envName = label ? label.textContent.trim() : '';
+    }
+    var pathInp = row.querySelector('.ps-path-inp');
+    var localDir = pathInp ? pathInp.value.trim() : '';
+    if (envName && localDir) {
+      envs.push({env: envName, local_directory: localDir});
+    }
+  });
+
+  var slug = window._currentProjectSlug || '';
+  return fetch('/api/projects/' + encodeURIComponent(slug) + '/environments', {
+    method: 'PUT',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({environments: envs}),
+  }).then(function(r) {
+    return r.json().then(function(data) {
+      return {ok: r.ok, status: r.status, data: data};
+    });
+  });
 }
 </script>
 

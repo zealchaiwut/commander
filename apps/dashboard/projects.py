@@ -269,6 +269,36 @@ def _find_all_projects_jsons() -> list[Path]:
     return found
 
 
+def get_project_environments(repo: str) -> dict[str, str]:
+    """Return the environments dict for the given repo from projects.json.
+
+    Returns {} if the project is not found or has no environments key.
+    """
+    projects = load_projects()
+    proj = next((p for p in projects if p["repo"] == repo), None)
+    if not proj:
+        return {}
+    return dict(proj.get("environments") or {})
+
+
+def save_project_environments(repo: str, envs: dict[str, str]) -> None:
+    """Persist the environments dict for the given repo to projects.json.
+
+    Merges the supplied envs into the existing environments key rather than
+    replacing the whole key, so other envs not in this call are preserved.
+    """
+    if not PROJECTS_FILE.exists():
+        return
+    projects = json.loads(PROJECTS_FILE.read_text())
+    for proj in projects:
+        if proj.get("repo") == repo:
+            existing = dict(proj.get("environments") or {})
+            existing.update(envs)
+            proj["environments"] = existing
+            break
+    PROJECTS_FILE.write_text(json.dumps(projects, indent=2))
+
+
 def remove_project(repo: str) -> list[str]:
     """Remove a project from all projects.json copies. Returns list of removed file paths."""
     removed = []

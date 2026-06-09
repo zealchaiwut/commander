@@ -1530,6 +1530,10 @@ def _revert_to_sit(issue_num: int, gate_name: str, output: str,
         files_to_inspect=files_to_inspect,
     )
 
+    # Store full gate output for Gate Failure Analysis (issue #701).
+    # Using the full untruncated output so AC-2 (untruncated error) is satisfied.
+    _write_gate_failure_record(issue_num, gate_name, output, repo_root=repo_root)
+
     _transition_safe(issue_num, _TicketState.SIT, actor="sprint_manager:gate_fail", repo_name=repo_name)
     try:
         github_client.add_comment(issue_num, comment, repo_name=repo_name)
@@ -2601,11 +2605,277 @@ def _delete_failure_sidecar(issue_num: int, repo_root: Optional[Path] = None) ->
             issue_num=issue_num,
             exc=str(e),
         )
+    # Clear gate failure records on success (gate passed — no analysis needed).
+    _clear_gate_failure_records(issue_num, repo_root=repo_root)
 
 
 def _issue_log_path(issue_num: int, cfg: Optional["SprintConfig"] = None) -> Path:
     logs_dir = cfg.logs_dir if cfg is not None else (DASHBOARD_DIR / "logs")
     return logs_dir / f"sprint-issue-{issue_num}.log"
+
+
+# ── gate failure analysis (issue #701) ────────────────────────────────────────
+
+def _gate_failures_log_path(cfg: Optional["SprintConfig"] = None) -> Path:
+    logs_dir = cfg.logs_dir if cfg is not None else (DASHBOARD_DIR / "logs")
+    return logs_dir / "gate-failures.md"
+
+
+def _gate_failure_records_path(issue_num: int, repo_root: Optional[Path] = None) -> Path:
+    effective_root = repo_root or REPO_ROOT
+    return effective_root / ".commander" / "runtime" / f"gate-failure-records-{issue_num}.jsonl"
+
+
+def _write_gate_failure_record(
+    issue_num: int,
+    gate_name: str,
+    output: str,
+    repo_root: Optional[Path] = None,
+) -> None:
+    """Append one gate failure record to the JSONL sidecar for issue_num."""
+    path = _gate_failure_records_path(issue_num, repo_root)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        record = {
+            "gate_name": gate_name,
+            "output": output,
+            "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        }
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(record) + "\n")
+    except Exception as e:
+        structured_log.warn(
+            "gate_record_write_error",
+            f"could not write gate failure record for #{issue_num}: {e}",
+            issue_num=issue_num,
+            exc=str(e),
+        )
+
+
+def _read_gate_failure_records(
+    issue_num: int,
+    repo_root: Optional[Path] = None,
+) -> list[dict]:
+    """Read all gate failure records for issue_num from the JSONL sidecar."""
+    path = _gate_failure_records_path(issue_num, repo_root)
+    if not path.exists():
+        return []
+    records: list[dict] = []
+    try:
+        for line in path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if line:
+                try:
+                    records.append(json.loads(line))
+                except json.JSONDecodeError:
+                    pass
+    except Exception as e:
+        structured_log.warn(
+            "gate_record_read_error",
+            f"could not read gate failure records for #{issue_num}: {e}",
+            issue_num=issue_num,
+            exc=str(e),
+        )
+    return records
+
+
+def _clear_gate_failure_records(
+    issue_num: int,
+    repo_root: Optional[Path] = None,
+) -> None:
+    """Delete the gate failure JSONL sidecar for issue_num if it exists."""
+    path = _gate_failure_records_path(issue_num, repo_root)
+    try:
+        if path.exists():
+            path.unlink()
+    except Exception as e:
+        structured_log.warn(
+            "gate_record_clear_error",
+            f"could not clear gate failure records for #{issue_num}: {e}",
+            issue_num=issue_num,
+            exc=str(e),
+        )
+
+
+def _generate_gate_failure_analysis(
+    gate_name: str,
+    error_output: str,
+    issue_num: int = 0,
+    cfg: Optional["SprintConfig"] = None,
+) -> dict:
+    """Call claude -p (Haiku) to generate root cause + prevention for a gate failure.
+
+    Returns {"root_cause": "...", "prevention": "..."}.
+    Returns placeholder strings on any error so the sprint never blocks.
+    """
+    prompt = (
+        f"A quality gate named '{gate_name}' failed with this error output:\n\n"
+        f"```\n{error_output[:3000]}\n```\n\n"
+        "Respond with a JSON object with exactly two keys:\n"
+        '- "root_cause": one concise sentence explaining WHY the submitted code '
+        "failed this gate (be specific, e.g. \"Type annotation missing on return "
+        "value of `process_item`\")\n"
+        '- "prevention": one or two concrete actionable steps the coder should '
+        "take before next submission to pass this gate (e.g. \"Run `tsc --noEmit` "
+        "locally before marking complete\")\n\n"
+        "Output ONLY the JSON object, no other text."
+    )
+    try:
+        result = subprocess.run(
+            [
+                "claude", "-p", prompt,
+                "--model", "claude-haiku-4-5-20251001",
+                "--no-session-persistence",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        if result.returncode == 0:
+            data = _extract_analysis_json(result.stdout)
+            if data and "root_cause" in data and "prevention" in data:
+                return {"root_cause": str(data["root_cause"]), "prevention": str(data["prevention"])}
+    except Exception as e:
+        structured_log.warn(
+            "gate_analysis_llm_error",
+            f"LLM gate analysis failed for #{issue_num} ({gate_name}): {e}",
+            issue_num=issue_num,
+            gate=gate_name,
+            exc=str(e),
+        )
+    return {
+        "root_cause": f"Code did not satisfy the {gate_name} gate requirements.",
+        "prevention": (
+            f"Review the {gate_name} gate error output and fix all reported issues "
+            "before resubmitting."
+        ),
+    }
+
+
+def _extract_analysis_json(text: str) -> Optional[dict]:
+    """Extract the first JSON object from LLM analysis output."""
+    cleaned = re.sub(r"```(?:json)?\s*", "", text)
+    cleaned = re.sub(r"```\s*", "", cleaned)
+    try:
+        return json.loads(cleaned.strip())
+    except json.JSONDecodeError:
+        pass
+    start = text.find("{")
+    if start >= 0:
+        depth = 0
+        for i in range(start, len(text)):
+            if text[i] == "{":
+                depth += 1
+            elif text[i] == "}":
+                depth -= 1
+                if depth == 0:
+                    try:
+                        return json.loads(text[start : i + 1])
+                    except json.JSONDecodeError:
+                        break
+    return None
+
+
+def _post_gate_failure_analysis_comment(
+    issue_num: int,
+    gate_name: str,
+    error_output: str,
+    root_cause: str,
+    prevention: str,
+    repo_name: Optional[str] = None,
+) -> None:
+    """Post a structured ## Gate Failure Analysis comment to the GitHub issue."""
+    comment = (
+        f"## Gate Failure Analysis\n\n"
+        f"### Gate & Error\n\n"
+        f"**Gate:** {gate_name}\n\n"
+        f"```\n{error_output}\n```\n\n"
+        f"### Root Cause\n\n{root_cause}\n\n"
+        f"### Prevention\n\n{prevention}\n"
+    )
+    try:
+        github_client.add_comment(issue_num, comment, repo_name=repo_name)
+    except Exception as e:
+        structured_log.warn(
+            "gate_analysis_comment_error",
+            f"failed to post Gate Failure Analysis for #{issue_num}: {e}",
+            issue_num=issue_num,
+            gate=gate_name,
+            exc=str(e),
+        )
+
+
+def _append_gate_failure_to_sprint_log(
+    issue_num: int,
+    gate_name: str,
+    error_output: str,
+    root_cause: str,
+    prevention: str,
+    cfg: Optional["SprintConfig"] = None,
+) -> None:
+    """Append a dated Gate Failure Analysis entry to the sprint gate failures log."""
+    log_path = _gate_failures_log_path(cfg)
+    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    entry = (
+        f"\n## Gate Failure Analysis — {timestamp} — Issue #{issue_num}\n\n"
+        f"### Gate & Error\n\n"
+        f"**Gate:** {gate_name}\n\n"
+        f"```\n{error_output}\n```\n\n"
+        f"### Root Cause\n\n{root_cause}\n\n"
+        f"### Prevention\n\n{prevention}\n"
+    )
+    try:
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(log_path, "a", encoding="utf-8") as f:
+            f.write(entry)
+    except Exception as e:
+        structured_log.warn(
+            "gate_log_append_error",
+            f"failed to append Gate Failure Analysis to sprint log for #{issue_num}: {e}",
+            issue_num=issue_num,
+            gate=gate_name,
+            exc=str(e),
+        )
+
+
+def _publish_gate_failure_analyses(
+    issue_num: int,
+    repo_name: Optional[str] = None,
+    cfg: Optional["SprintConfig"] = None,
+) -> None:
+    """Post Gate Failure Analysis comment + sprint log entry for each recorded gate failure.
+
+    Called after the fix-loop is exhausted (all retries consumed or early-abort).
+    Reads gate failure records accumulated by _write_gate_failure_record (called
+    from _revert_to_sit on each gate failure), processes each independently
+    (AC-7: no merging), then clears the records.
+    """
+    records = _read_gate_failure_records(issue_num)
+    if not records:
+        return
+    for record in records:
+        gate_name = record.get("gate_name", "unknown")
+        error_output = record.get("output", "")
+        analysis = _generate_gate_failure_analysis(
+            gate_name, error_output, issue_num=issue_num, cfg=cfg
+        )
+        _post_gate_failure_analysis_comment(
+            issue_num,
+            gate_name,
+            error_output,
+            analysis["root_cause"],
+            analysis["prevention"],
+            repo_name=repo_name,
+        )
+        _append_gate_failure_to_sprint_log(
+            issue_num,
+            gate_name,
+            error_output,
+            analysis["root_cause"],
+            analysis["prevention"],
+            cfg=cfg,
+        )
+    _clear_gate_failure_records(issue_num)
 
 
 def _design_docs_guard(cwd_path: "Path") -> "Optional[str]":
@@ -6010,6 +6280,9 @@ def run_sprint(
                 repo=eff_repo,
             )
             _transition_safe(num, _TicketState.NEEDS_REWORK, actor="sprint_manager", repo_name=eff_repo)
+            # Post Gate Failure Analysis comment + sprint log entry for each gate
+            # failure recorded during the fix loop (issue #701).
+            _publish_gate_failure_analyses(num, repo_name=eff_repo, cfg=cfg)
             _neon_ticket_status(label, num, "failed", _eff_sprints_dir)
             state.save(state_path)
             _post_sprint_status(state, api_url=api_url, project=eff_repo)

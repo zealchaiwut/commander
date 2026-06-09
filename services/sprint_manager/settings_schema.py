@@ -18,7 +18,9 @@ KNOWN_FIELDS: dict[str, dict[str, Any]] = {
     "default_model": {"secret": False, "default": "claude-sonnet-4-6"},
     "coder_model": {"secret": False, "default": "claude-sonnet-4-6"},
     "tester_model": {"secret": False, "default": "claude-haiku-4-5-20251001"},
+    "reviewer_model": {"secret": False, "default": "claude-haiku-4-5"},
     "estimator_model": {"secret": False, "default": "claude-haiku-4-5-20251001"},
+    "documentor_model": {"secret": False, "default": "claude-sonnet-4-6"},
     # Sprint / workflow defaults
     "sprint_duration_days": {"secret": False, "default": 14},
     "default_branch": {"secret": False, "default": "develop"},

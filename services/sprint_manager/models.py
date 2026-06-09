@@ -5,6 +5,7 @@ from sqlalchemy import (
     ForeignKey,
     UniqueConstraint,
     Index,
+    JSON,
 )
 from sqlalchemy.dialects.postgresql import ENUM, TIMESTAMP
 
@@ -80,8 +81,24 @@ class SprintTicket(Base):
     agent_active = Column(Text, nullable=True)
     actual_elapsed_seconds = Column(Integer, nullable=True)
     total_tokens = Column(Integer, nullable=True)
+    estimated_size = Column(Text, nullable=True)
 
     __table_args__ = (
         UniqueConstraint("sprint_id", "issue_number", name="uq_sprint_tickets_sprint_issue"),
         Index("ix_sprint_tickets_sprint_position", "sprint_id", "position"),
+    )
+
+
+class Setting(Base):
+    __tablename__ = "settings"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    scope = Column(Text, nullable=False)
+    project = Column(Text, nullable=True)
+    key = Column(Text, nullable=False)
+    value = Column(JSON, nullable=False)
+    updated_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default="now()")
+
+    __table_args__ = (
+        UniqueConstraint("scope", "project", "key", name="uq_settings_scope_project_key"),
     )

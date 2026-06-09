@@ -62,3 +62,4 @@ separated by `---` exactly as the splitter expects.
 
 - [2026-frontend-first.md](2026-frontend-first.md) — frontend-first authoring/UX backlog
 - [2026-sprint-runner-enhancements.md](2026-sprint-runner-enhancements.md) — sprint manager / runner enhancements
+- [2026-06-09-agent-browser-testing.md](2026-06-09-agent-browser-testing.md) — agent-browser live UAT + impeccable skills

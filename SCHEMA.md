@@ -152,6 +152,13 @@ Indexes: `(project, created_at DESC)`, `(project, target)`, `(action_id)`.
 > It now always returns HTTP 200. Clients must check `state`, not the HTTP status code.
 > See `docs/features/api.md` for the full response shape reference.
 
+### Docs Scaffold
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/projects/{slug}/docs/scaffold/check` | Check which standard doc files are missing for a project; returns drift report |
+| `POST` | `/api/projects/{slug}/docs/scaffold/apply` | Create any missing standard doc files from template; idempotent, never overwrites existing content |
+
 ### Analytics
 
 | Method | Path | Description |

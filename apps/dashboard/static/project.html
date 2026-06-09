@@ -9431,12 +9431,16 @@ async function _smgmtLoadFinishCards() {
         fetch(`/api/sprints/${encodeURIComponent(label)}/finish-card?project=${encodeURIComponent(repo)}`),
         fetch(`/api/sprints/${encodeURIComponent(label)}/branch-status?project=${encodeURIComponent(repo)}`).catch(() => null),
       ]);
-      if (!cardRes.ok) return; // 404 = sprint never run; no card shown
+      if (!cardRes.ok) {
+        console.warn(`finish-card: unexpected ${cardRes.status} for ${label}`);
+        return;
+      }
       const cardData = await cardRes.json();
+      if (cardData.state === 'no_data') return; // sprint never run — no card shown
       const branchData = branchRes && branchRes.ok ? await branchRes.json() : { exists: false };
       _smgmtFinishCards[label] = { card: cardData, branch: branchData };
       _smgmtRenderFinishCard(label, cardData, branchData, repo);
-    } catch (_) { /* silent */ }
+    } catch (e) { console.warn('finish-card load error for', label, e); }
   }));
 }
 
@@ -9465,6 +9469,8 @@ function _smgmtRenderFinishCard(label, cardData, branchData, repo) {
       }
     }
   }
+
+  if (cardData.state === 'no_data') return; // sprint never run — nothing to display
 
   const cardEl  = document.getElementById(`smgmt-finish-card-${label}`);
   const blockEl = document.getElementById(`smgmt-card-${label}`);
@@ -12161,7 +12167,10 @@ async function smgmtFinishSprint(label) {
     const res = await fetch(
       `/api/projects/${encodeURIComponent(owner)}/${encodeURIComponent(repoName)}/sprints/${encodeURIComponent(label)}/finish-preview`
     );
-    if (!res.ok) throw new Error(await res.text());
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || `HTTP ${res.status}`);
+    }
     const preview = await res.json();
     _fsPreview = preview;
 
@@ -12235,7 +12244,10 @@ async function _fsConfirm() {
         }),
       }
     );
-    if (!res.ok) throw new Error(await res.text());
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || `HTTP ${res.status}`);
+    }
     const data = await res.json();
     _fsClose();
     if (data.errors && data.errors.length > 0) {

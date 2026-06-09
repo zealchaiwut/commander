@@ -84,6 +84,47 @@ Pass the type + backlog labels in `--labels`. The sprint label is added automati
 - No vague language: avoid "works correctly", "handles errors", "is fast" — replace with specific, measurable criteria.
 - Every AC item must be verifiable by a test (automated or manual walkthrough).
 
+### UAT `[agent-test]` tagging rule
+
+Each UAT step is either **agent-browser-automatable** or **MANUAL**. Mark the
+automatable ones so testers and automation pipelines can hand them to an
+agent-browser runner without a second tagging pass.
+
+**Tag a step by appending `[agent-test]` at the end of the step line** (after
+the action text, on the same line) when ALL of these hold:
+
+- The step is fully expressible as **navigate → interact → observe** in a
+  **desktop browser** — load a URL/page, click/type/select, then read back
+  visible text, an element state, or a value.
+- It needs **no subjective visual judgment** (no "looks balanced", "feels
+  polished", "colors are pleasant").
+- It needs **no real device / native device** feature (camera, GPS, push,
+  biometric, mobile-only gesture).
+- It needs **no external service or third-party login** (OAuth, SSO, payment
+  provider) and **no email/SMS** flow (clicking a link in an inbox, entering a
+  texted OTP).
+
+**Leave every other step untagged (MANUAL).** Do not tag a step you are unsure
+about — when in doubt, leave it MANUAL. Tagging is selective: a typical ticket
+has both tagged and untagged steps.
+
+Placement is strict so a parser can extract tagged steps — the tag is the last
+token on the step line and matches `^\d+\..*\[agent-test\]\s*$`. Put it on the
+numbered action line, never on the `**Expected:**` line.
+
+Examples:
+
+```
+1. Navigate to http://localhost:8000, click "New Sprint", confirm the modal opens [agent-test]
+   **Expected:** The "New Sprint" modal is visible with a title input focused.
+
+2. Confirm the dashboard's color scheme reads as calm and uncluttered.
+   **Expected:** Layout feels balanced (subjective visual judgment — MANUAL).
+
+3. Complete the GitHub OAuth consent screen and return to the app.
+   **Expected:** You land back on the dashboard, logged in (external auth — MANUAL).
+```
+
 ## Step 3 — Approval loop
 
 After showing the proposal, ask exactly this question (no other text on that line):

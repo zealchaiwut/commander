@@ -165,10 +165,12 @@ class TestSprintStartedEvent:
         assert isinstance(ev["detail"]["levels"], int)
         assert ev["detail"]["levels"] >= 1
 
-    def test_sprint_started_source_is_sprint_manager(self, event_capture):
+    def test_sprint_started_source_is_agent(self, event_capture):
+        # source must be 'agent' — 'sprint_manager' violates the DB CHECK constraint
+        # (events table: CHECK(source IN ('agent', 'dashboard', 'github')))
         _run_sprint()
         ev = next(c for c in event_capture if c["type"] == "sprint_started")
-        assert ev["source"] == "sprint_manager"
+        assert ev["source"] == "agent"
 
 
 # ── AC-2: ticket_dispatched ───────────────────────────────────────────────────

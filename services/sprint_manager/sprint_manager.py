@@ -199,7 +199,7 @@ def _emit_sprint_lifecycle_event(
     try:
         _db_record_event(
             project=project,
-            source="sprint_manager",
+            source="agent",
             actor=actor,
             type=type,
             target=target,
@@ -5143,7 +5143,7 @@ def run_sprint(
         target=f"sprint-{sprint_num}" if sprint_num is not None else label,
         actor="system",
         detail={"ticket_count": total_issues, "levels": len(_dispatch_levels)},
-        project=label,
+        project=eff_repo or label,
         action_id=_run_id,
     )
     # Flat iteration preserving level boundaries for level_start / level_complete events.
@@ -5361,7 +5361,7 @@ def run_sprint(
                     target=f"#{num}",
                     actor="system",
                     detail={"agent": "CODER"},
-                    project=label,
+                    project=eff_repo or label,
                     action_id=_run_id,
                 )
                 state.save(state_path)
@@ -5396,7 +5396,7 @@ def run_sprint(
                         target=f"sprint-{sprint_num}" if sprint_num is not None else label,
                         actor="system",
                         detail={"tickets_remaining": len(_remaining)},
-                        project=label,
+                        project=eff_repo or label,
                         action_id=_run_id,
                     )
                     raise
@@ -5518,7 +5518,7 @@ def run_sprint(
                     target=f"#{num}",
                     actor="system",
                     detail={"agent": "CODER", "duration": round(_coder_elapsed)},
-                    project=label,
+                    project=eff_repo or label,
                     action_id=_run_id,
                 )
                 state.save(state_path)
@@ -5535,7 +5535,7 @@ def run_sprint(
                 target=f"#{num}",
                 actor="system",
                 detail={"agent": "TESTER"},
-                project=label,
+                project=eff_repo or label,
                 action_id=_run_id,
             )
             state.save(state_path)
@@ -5563,7 +5563,7 @@ def run_sprint(
                     target=f"sprint-{sprint_num}" if sprint_num is not None else label,
                     actor="system",
                     detail={"tickets_remaining": len(_remaining)},
-                    project=label,
+                    project=eff_repo or label,
                     action_id=_run_id,
                 )
                 raise
@@ -5619,7 +5619,7 @@ def run_sprint(
                 target=f"#{num}",
                 actor="system",
                 detail={"agent": "TESTER", "duration": round(_tester_elapsed)},
-                project=label,
+                project=eff_repo or label,
                 action_id=_run_id,
             )
             state.save(state_path)
@@ -5799,7 +5799,7 @@ def run_sprint(
             "skipped": len(summary.skipped),
             "duration": round(state.wall_clock_secs),
         },
-        project=label,
+        project=eff_repo or label,
         action_id=_run_id,
     )
 

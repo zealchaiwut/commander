@@ -192,8 +192,129 @@
     .panel { display: none; flex-direction: column; gap: 16px; }
     .panel.show { display: flex; }
 
-    /* ── Calibration placeholder ── */
-    .cal-placeholder {
+    /* ── Card ── */
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      overflow: hidden;
+    }
+    .card-head {
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 9px;
+    }
+    .card-head .ti { color: var(--text-muted); font-size: 16px; flex-shrink: 0; }
+    .card-title { font-size: 14px; font-weight: 700; }
+    .card-sub { font-size: 12px; color: var(--text-muted); margin-top: 2px; line-height: 1.5; }
+    .card-body { padding: 16px; }
+
+    /* ── Scatter ── */
+    .scatter-wrap {
+      display: flex;
+      gap: 18px;
+      align-items: flex-start;
+      flex-wrap: wrap;
+    }
+    .scatter-legend {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--text-muted);
+      padding-top: 22px;
+    }
+    .legend-item { display: flex; align-items: center; gap: 6px; }
+    .legend-dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+    .sz-S-dot { background: var(--green); }
+    .sz-M-dot { background: var(--blue); }
+    .sz-L-dot { background: var(--amber); }
+    .sz-XL-dot { background: var(--red); }
+
+    /* ── Calibration table ── */
+    .cal-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+    .cal-table th {
+      text-align: right;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: .05em;
+      text-transform: uppercase;
+      color: var(--text-sub);
+      padding: 7px 12px;
+      border-bottom: 1px solid var(--border);
+    }
+    .cal-table th:first-child { text-align: left; }
+    .cal-table th:last-child  { text-align: left; }
+    .cal-table td {
+      padding: 9px 12px;
+      border-bottom: 1px solid var(--border);
+      text-align: right;
+      font-family: var(--mono);
+    }
+    .cal-table td:first-child { text-align: left; font-family: inherit; }
+    .cal-table td:last-child  { text-align: left; }
+    .cal-table tr:last-child td { border-bottom: none; }
+
+    /* ── Size badges ── */
+    .sz-badge {
+      font-family: var(--mono);
+      font-size: 11px;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 4px;
+    }
+    .sz-S  { background: var(--green-bg);  color: var(--green);  }
+    .sz-M  { background: var(--blue-bg);   color: var(--blue);   }
+    .sz-L  { background: var(--amber-bg);  color: var(--amber);  }
+    .sz-XL { background: var(--red-bg);    color: var(--red);    }
+
+    /* ── Verdicts ── */
+    .verdict {
+      font-family: var(--mono);
+      font-size: 11px;
+      font-weight: 600;
+      padding: 2px 8px;
+      border-radius: 4px;
+    }
+    .v-over  { background: var(--amber-bg); color: var(--amber); }
+    .v-under { background: var(--blue-bg);  color: var(--blue);  }
+    .v-ok    { background: var(--green-bg); color: var(--green); }
+
+    /* ── Apply button ── */
+    .btn-apply {
+      font-family: var(--mono);
+      font-size: 10px;
+      color: var(--text-sub);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 1px 7px;
+      background: var(--surface);
+      cursor: pointer;
+      margin-left: 6px;
+      transition: border-color .15s, color .15s;
+    }
+    .btn-apply:hover { border-color: var(--text-muted); color: var(--text); }
+    .btn-apply:disabled { opacity: .5; cursor: default; }
+
+    /* ── Cal note + empty ── */
+    .cal-note {
+      font-size: 11px;
+      color: var(--text-sub);
+      margin-top: 12px;
+      display: flex;
+      align-items: flex-start;
+      gap: 6px;
+      line-height: 1.5;
+    }
+    .cal-note .ti { margin-top: 1px; flex-shrink: 0; }
+    .cal-empty {
       background: var(--surface);
       border: 1px solid var(--border);
       border-radius: 10px;
@@ -202,8 +323,7 @@
       color: var(--text-muted);
       font-size: 13px;
     }
-    .cal-placeholder i { font-size: 32px; display: block; margin-bottom: 12px; color: var(--text-sub); }
-    .cal-placeholder h3 { font-size: 15px; font-weight: 600; color: var(--text); margin-bottom: 6px; }
+    .cal-empty i { font-size: 28px; display: block; margin-bottom: 10px; color: var(--text-sub); }
 
     /* ── Metric grid ── */
     .metric-grid {
@@ -375,13 +495,71 @@
       </button>
     </div>
 
-    <!-- Calibration panel (ANL-2 scope — placeholder) -->
+    <!-- Calibration panel -->
     <div class="panel show" id="panel-calibration" role="tabpanel" aria-labelledby="tab-calibration">
-      <div class="cal-placeholder">
-        <i class="ti ti-ruler-measure"></i>
-        <h3>Calibration</h3>
-        <p>Estimate vs actual accuracy charts will appear here (coming soon).</p>
+
+      <!-- Scatter plot card -->
+      <div class="card">
+        <div class="card-head">
+          <i class="ti ti-target-arrow"></i>
+          <div>
+            <div class="card-title">Estimated vs actual</div>
+            <div class="card-sub">each dot is a ticket · diagonal = perfect estimate · above the line = took longer than estimated</div>
+          </div>
+        </div>
+        <div class="card-body">
+          <div class="scatter-wrap">
+            <svg id="scatter-svg" viewBox="0 0 640 300" width="640" height="300"
+                 style="max-width:100%;height:auto" aria-label="Estimated vs actual scatter plot"></svg>
+            <div class="scatter-legend" aria-label="Size color legend">
+              <div class="legend-item"><span class="legend-dot sz-S-dot"></span> S</div>
+              <div class="legend-item"><span class="legend-dot sz-M-dot"></span> M</div>
+              <div class="legend-item"><span class="legend-dot sz-L-dot"></span> L</div>
+              <div class="legend-item"><span class="legend-dot sz-XL-dot"></span> XL</div>
+            </div>
+          </div>
+        </div>
       </div>
+
+      <!-- Calibration table card -->
+      <div class="card">
+        <div class="card-head">
+          <i class="ti ti-ruler-measure"></i>
+          <div>
+            <div class="card-title">Calibration by size</div>
+            <div class="card-sub">actual time grouped by estimated size · source of the Settings "suggested" column</div>
+          </div>
+        </div>
+        <div class="card-body">
+          <table class="cal-table" aria-label="Calibration by size">
+            <thead>
+              <tr>
+                <th>Size</th>
+                <th>Configured</th>
+                <th>Tickets</th>
+                <th>Min</th>
+                <th>Avg</th>
+                <th>Max</th>
+                <th>Verdict</th>
+              </tr>
+            </thead>
+            <tbody id="cal-table-body">
+              <!-- populated by fetchCalibration() -->
+            </tbody>
+          </table>
+          <div class="cal-note">
+            <i class="ti ti-info-circle"></i>
+            "Apply" writes the avg as the project's configured estimate for that size — the manual version of the Settings auto-suggest.
+          </div>
+        </div>
+      </div>
+
+      <!-- Empty state (no calibration data for scope) -->
+      <div class="cal-empty" id="cal-empty" style="display:none" aria-live="polite">
+        <i class="ti ti-database-off"></i>
+        <p>No calibration data for this scope. Complete some tickets with size estimates to see estimates vs actuals.</p>
+      </div>
+
     </div>
 
     <!-- Metrics panel -->
@@ -500,11 +678,13 @@
         p.classList.toggle('show', p.id === 'panel-' + name);
       });
       if (name === 'metrics') fetchMetrics();
+      if (name === 'calibration') fetchCalibration();
     };
 
     /* ── Scope selector ── */
     window.onScopeChange = function() {
       fetchMetrics();
+      fetchCalibration();
     };
 
     /* ── ANL-3 fetch ── */
@@ -648,12 +828,180 @@
       if (el) el.textContent = text;
     }
 
+    /* ── Calibration constants ── */
+    var _SZ_COLORS = {
+      'S':  'var(--green)',
+      'M':  'var(--blue)',
+      'L':  'var(--amber)',
+      'XL': 'var(--red)'
+    };
+    var _SZ_SETTING_KEYS = {
+      'S':  'estimation_s_minutes',
+      'M':  'estimation_m_minutes',
+      'L':  'estimation_l_minutes',
+      'XL': 'estimation_xl_minutes'
+    };
+    var _TICKS = [5, 15, 30, 60, 90];
+    var _SVG_L = 64, _SVG_R = 620, _SVG_T = 22, _SVG_B = 250;
+    var _EMAX = 100, _AMAX = 130;
+
+    function _xm(v) { return _SVG_L + (v / _EMAX) * (_SVG_R - _SVG_L); }
+    function _ym(v) { return _SVG_B - (v / _AMAX) * (_SVG_B - _SVG_T); }
+
+    /* ── Scatter plot renderer ── */
+    function _renderScatter(points) {
+      var svg = document.getElementById('scatter-svg');
+      if (!svg) return;
+      var p = '';
+      // Reference gridlines + tick labels at 5/15/30/60/90 on both axes
+      _TICKS.forEach(function(v) {
+        p += '<line x1="' + _xm(v) + '" y1="' + _SVG_T + '" x2="' + _xm(v) + '" y2="' + _SVG_B + '"'
+           + ' stroke="var(--border)" stroke-width="1"/>';
+        p += '<text x="' + _xm(v) + '" y="' + (_SVG_B + 15) + '" font-size="10"'
+           + ' fill="var(--text-sub)" font-family="monospace" text-anchor="middle">' + v + 'm</text>';
+        p += '<line x1="' + _SVG_L + '" y1="' + _ym(v) + '" x2="' + _SVG_R + '" y2="' + _ym(v) + '"'
+           + ' stroke="var(--border)" stroke-width="1"/>';
+        p += '<text x="' + (_SVG_L - 8) + '" y="' + (_ym(v) + 3) + '" font-size="10"'
+           + ' fill="var(--text-sub)" font-family="monospace" text-anchor="end">' + v + 'm</text>';
+      });
+      // Axis lines
+      p += '<line x1="' + _SVG_L + '" y1="' + _SVG_B + '" x2="' + _SVG_R + '" y2="' + _SVG_B + '"'
+         + ' stroke="var(--text-sub)" stroke-width="1.5"/>';
+      p += '<line x1="' + _SVG_L + '" y1="' + _SVG_T + '" x2="' + _SVG_L + '" y2="' + _SVG_B + '"'
+         + ' stroke="var(--text-sub)" stroke-width="1.5"/>';
+      // Dashed diagonal: est = actual
+      var dm = Math.min(_EMAX, _AMAX);
+      p += '<line x1="' + _xm(0) + '" y1="' + _ym(0) + '" x2="' + _xm(dm) + '" y2="' + _ym(dm) + '"'
+         + ' stroke="var(--text-muted)" stroke-width="1" stroke-dasharray="4 4"/>';
+      p += '<text x="' + (_xm(dm) - 6) + '" y="' + (_ym(dm) - 6) + '" font-size="10"'
+         + ' fill="var(--text-sub)" font-family="monospace" text-anchor="end">est = actual</text>';
+      // Axis titles
+      p += '<text x="' + ((_SVG_L + _SVG_R) / 2) + '" y="' + (_SVG_B + 32) + '" font-size="10"'
+         + ' fill="var(--text-muted)" font-family="monospace" text-anchor="middle">estimated (min)</text>';
+      p += '<text x="18" y="' + ((_SVG_T + _SVG_B) / 2) + '" font-size="10"'
+         + ' fill="var(--text-muted)" font-family="monospace" text-anchor="middle"'
+         + ' transform="rotate(-90 18 ' + ((_SVG_T + _SVG_B) / 2) + ')">actual (min)</text>';
+      // Data dots colored by size
+      (points || []).forEach(function(pt) {
+        var col = _SZ_COLORS[pt.estimated_size] || 'var(--text-muted)';
+        p += '<circle cx="' + _xm(pt.estimated_minutes) + '" cy="' + _ym(pt.actual_minutes) + '"'
+           + ' r="5" fill="' + col + '" fill-opacity="0.78"/>';
+      });
+      svg.innerHTML = p;
+    }
+
+    /* ── Verdict computation ── */
+    function _verdict(avgMin, configuredMin) {
+      if (avgMin === null || avgMin === undefined || !configuredMin) return 'on-target';
+      var ratio = avgMin / configuredMin;
+      if (ratio < 0.85) return 'over';
+      if (ratio > 1.15) return 'under';
+      return 'on-target';
+    }
+
+    /* ── Calibration table renderer ── */
+    function _renderCalTable(bySize) {
+      var tbody = document.getElementById('cal-table-body');
+      if (!tbody) return;
+      var sizes = ['S', 'M', 'L', 'XL'];
+      var html = '';
+      sizes.forEach(function(sz) {
+        var row = (bySize || {})[sz] || {};
+        var count = row.count || 0;
+        var avg  = row.avg_minutes;
+        var min  = row.min_minutes;
+        var max  = row.max_minutes;
+        var cfg  = row.configured_minutes;
+        var v    = count > 0 ? _verdict(avg, cfg) : 'on-target';
+        var vCls = v === 'over' ? 'v-over' : v === 'under' ? 'v-under' : 'v-ok';
+        var applyBtn = '';
+        if (count > 0 && avg !== null && avg !== undefined && v !== 'on-target') {
+          var rounded = Math.round(avg);
+          applyBtn = ' <button class="btn-apply" onclick="applyCalibration(\'' + sz + '\',' + avg + ')">'
+                   + 'apply ' + rounded + 'm</button>';
+        }
+        html += '<tr>';
+        html += '<td><span class="sz-badge sz-' + sz + '">' + sz + '</span></td>';
+        html += '<td>' + (cfg !== null && cfg !== undefined ? Math.round(cfg) + 'm' : '—') + '</td>';
+        html += '<td>' + count + '</td>';
+        html += '<td>' + (min !== null && min !== undefined ? Math.round(min) + 'm' : '—') + '</td>';
+        html += '<td>' + (avg !== null && avg !== undefined ? Math.round(avg) + 'm' : '—') + '</td>';
+        html += '<td>' + (max !== null && max !== undefined ? Math.round(max) + 'm' : '—') + '</td>';
+        html += '<td><span class="verdict ' + vCls + '">' + v + '</span>' + applyBtn + '</td>';
+        html += '</tr>';
+      });
+      tbody.innerHTML = html;
+    }
+
+    /* ── Apply calibration override ── */
+    window.applyCalibration = function(size, avgMin) {
+      if (!_slug) return;
+      var key = _SZ_SETTING_KEYS[size];
+      if (!key) return;
+      var body = {};
+      body[key] = Math.round(avgMin);
+      var btn = document.querySelector('.btn-apply[onclick*="\'' + size + '\'"]');
+      if (btn) { btn.disabled = true; btn.textContent = 'saving…'; }
+      fetch('/api/projects/' + encodeURIComponent(_slug) + '/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      }).then(function(r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+      }).then(function() {
+        fetchCalibration();
+      }).catch(function(err) {
+        console.error('Apply calibration failed:', err);
+        if (btn) { btn.disabled = false; btn.textContent = 'apply ' + Math.round(avgMin) + 'm'; }
+      });
+    };
+
+    /* ── Build calibration URL with current scope ── */
+    function _buildCalUrl() {
+      if (!_slug) return null;
+      var params = new URLSearchParams();
+      var days = document.getElementById('scope-days');
+      if (days && days.value !== 'all') {
+        var since = new Date();
+        since.setDate(since.getDate() - parseInt(days.value, 10));
+        params.set('since', since.toISOString().slice(0, 10));
+      }
+      var sprint = document.getElementById('scope-sprint');
+      if (sprint && sprint.value) params.set('sprint', sprint.value);
+      var qs = params.toString();
+      return '/api/projects/' + encodeURIComponent(_slug) + '/analytics/calibration' + (qs ? '?' + qs : '');
+    }
+
+    /* ── Fetch calibration data and render scatter + table ── */
+    window.fetchCalibration = function() {
+      var url = _buildCalUrl();
+      if (!url) return;
+      fetch(url)
+        .then(function(r) {
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          return r.json();
+        })
+        .then(function(data) {
+          _renderScatter(data.points || []);
+          _renderCalTable(data.by_size || {});
+          var empty = document.getElementById('cal-empty');
+          var hasData = (data.points || []).length > 0;
+          if (empty) empty.style.display = hasData ? 'none' : 'block';
+        })
+        .catch(function(err) {
+          console.error('Calibration fetch failed:', err);
+        });
+    };
+
     /* ── Init ── */
     document.addEventListener('DOMContentLoaded', function() {
       /* Auto-switch to metrics tab if URL hash says so */
       if (window.location.hash === '#metrics') {
         showTab('metrics');
       }
+      /* Load calibration data for default tab */
+      fetchCalibration();
     });
 
   })();

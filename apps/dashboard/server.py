@@ -7303,6 +7303,154 @@ def get_project_analytics_metrics(slug: str, request: Request):
                                       sprint_filter=sprint_filter)
 
 
+# ── Calibration analytics endpoint (issue #649) ──────────────────────────────
+
+_CALIBRATION_SIZES = ("S", "M", "L", "XL")
+_CALIBRATION_SIZE_SETTING_KEYS = {
+    "S": "estimation_s_minutes",
+    "M": "estimation_m_minutes",
+    "L": "estimation_l_minutes",
+    "XL": "estimation_xl_minutes",
+}
+
+
+def _compute_calibration(
+    repo: str,
+    since: str | None = None,
+    until: str | None = None,
+    sprint_filter: str | None = None,
+) -> dict:
+    """Aggregate estimated vs actual time per size tier for the given project.
+
+    Returns by_size (keyed S/M/L/XL) and a flat points list.
+    All sizes always present; sizes with no data have count=0 and null stats.
+    """
+    # Validate date params first so bad input returns 400 before any DB work.
+    since_dt = None
+    until_dt = None
+    if since:
+        try:
+            since_dt = datetime.strptime(since, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        except ValueError:
+            raise HTTPException(400, detail=f"Invalid 'since' date {since!r} — expected YYYY-MM-DD")
+    if until:
+        try:
+            until_dt = (
+                datetime.strptime(until, "%Y-%m-%d")
+                .replace(tzinfo=timezone.utc)
+                .replace(hour=23, minute=59, second=59)
+            )
+        except ValueError:
+            raise HTTPException(400, detail=f"Invalid 'until' date {until!r} — expected YYYY-MM-DD")
+
+    # Resolve configured_minutes from project settings (falls back to defaults).
+    try:
+        stored = _settings_repo.get_setting(APP_CONFIG_KEY, project=repo)
+    except Exception:
+        stored = {}
+    effective = build_effective_response(stored)
+    configured_minutes = {sz: effective[key] for sz, key in _CALIBRATION_SIZE_SETTING_KEYS.items()}
+
+    # Skeleton result — all sizes always present regardless of data availability.
+    by_size = {
+        sz: {
+            "configured_minutes": configured_minutes[sz],
+            "count": 0,
+            "min_minutes": None,
+            "avg_minutes": None,
+            "max_minutes": None,
+        }
+        for sz in _CALIBRATION_SIZES
+    }
+    points: list[dict] = []
+
+    if not _SPRINT_REPO_AVAILABLE:
+        return {"by_size": by_size, "points": points}
+
+    try:
+        from sqlalchemy import text as _sa_text
+
+        where_parts = [
+            "st.estimated_size IS NOT NULL",
+            "st.actual_elapsed_seconds IS NOT NULL",
+            "s.project = :project",
+        ]
+        params: dict = {"project": repo}
+
+        if since_dt:
+            where_parts.append("st.completed_at >= :since")
+            params["since"] = since_dt.isoformat()
+        if until_dt:
+            where_parts.append("st.completed_at <= :until")
+            params["until"] = until_dt.isoformat()
+        if sprint_filter:
+            where_parts.append("s.label = :sprint")
+            params["sprint"] = sprint_filter
+
+        sql = (
+            "SELECT st.issue_number, st.estimated_size, st.actual_elapsed_seconds"
+            " FROM sprint_tickets st"
+            " JOIN sprints s ON s.id = st.sprint_id"
+            " WHERE " + " AND ".join(where_parts)
+        )
+
+        with _sprint_repo._open_session() as session:
+            rows = session.execute(_sa_text(sql), params).fetchall()
+
+    except HTTPException:
+        raise
+    except Exception:
+        return {"by_size": by_size, "points": points}
+
+    # Accumulate per-size data.
+    buckets: dict[str, list[float]] = {sz: [] for sz in _CALIBRATION_SIZES}
+    issue_rows: list[tuple] = []
+
+    for row in rows:
+        issue_number, estimated_size, actual_elapsed_seconds = row[0], row[1], row[2]
+        if estimated_size not in buckets:
+            continue
+        minutes = actual_elapsed_seconds / 60.0
+        buckets[estimated_size].append(minutes)
+        issue_rows.append((issue_number, estimated_size, minutes))
+
+    # Compute aggregates.
+    for sz in _CALIBRATION_SIZES:
+        vals = buckets[sz]
+        if vals:
+            by_size[sz]["count"] = len(vals)
+            by_size[sz]["min_minutes"] = round(min(vals), 2)
+            by_size[sz]["avg_minutes"] = round(sum(vals) / len(vals), 2)
+            by_size[sz]["max_minutes"] = round(max(vals), 2)
+
+    # Build points list.
+    for issue_number, estimated_size, actual_minutes in issue_rows:
+        points.append({
+            "issue_number": issue_number,
+            "estimated_size": estimated_size,
+            "estimated_minutes": configured_minutes[estimated_size],
+            "actual_minutes": round(actual_minutes, 2),
+        })
+
+    return {"by_size": by_size, "points": points}
+
+
+@app.get("/api/projects/{slug}/analytics/calibration")
+def get_project_analytics_calibration(slug: str, request: Request):
+    """GET /api/projects/{slug}/analytics/calibration — estimated vs actual per size tier.
+
+    Query params: since=YYYY-MM-DD, until=YYYY-MM-DD, sprint=<sprint-label>.
+    Returns 404 for unknown slugs; sizes with no data have count=0 and null stats.
+    """
+    repo = _resolve_project_slug(slug)
+
+    since = request.query_params.get("since")
+    until = request.query_params.get("until")
+    sprint_filter = request.query_params.get("sprint")
+
+    return _compute_calibration(repo, since=since, until=until, sprint_filter=sprint_filter)
+
+
 # ── Daily report endpoint (issue #478) ───────────────────────────────────────
 
 @app.post("/api/reports/daily")

@@ -240,6 +240,12 @@ class SprintConfig:
     reviewer_prompt_template: Optional[str] = None
     # Documenter (issue #165)
     documenter_prompt_template: Optional[str] = None
+    # Agent models (issue #700) — defaults match current hardcoded values
+    coder_model:       str = "claude-sonnet-4-6"
+    tester_model:      str = "claude-sonnet-4-6"
+    reviewer_model:    str = "claude-haiku-4-5"
+    estimator_model:   str = "claude-sonnet-4-6"
+    documentor_model:  str = "claude-sonnet-4-6"
 
     @property
     def worktree_tester_app(self) -> Path:
@@ -367,6 +373,24 @@ def load_config(path: Path) -> "SprintConfig":
     # ── documenter section (issue #165) ──────────────────────────────────────
     documenter_prompt = agents.get("documenter_prompt_template") or None
 
+    # ── agent_config section (issue #700) ────────────────────────────────────
+    agent_cfg = data.get("agent_config") or {}
+    _default_model: Optional[str] = (agent_cfg.get("default_model") or None) if isinstance(agent_cfg, dict) else None
+
+    def _resolve_model(key: str, hardcoded: str) -> str:
+        """Return per-agent override → default_model → hardcoded, in that order."""
+        if isinstance(agent_cfg, dict) and key in agent_cfg:
+            return str(agent_cfg[key])
+        if _default_model:
+            return _default_model
+        return hardcoded
+
+    coder_model      = _resolve_model("coder_model",      "claude-sonnet-4-6")
+    tester_model     = _resolve_model("tester_model",     "claude-sonnet-4-6")
+    reviewer_model   = _resolve_model("reviewer_model",   "claude-haiku-4-5")
+    estimator_model  = _resolve_model("estimator_model",  "claude-sonnet-4-6")
+    documentor_model = _resolve_model("documentor_model", "claude-sonnet-4-6")
+
     return SprintConfig(
         repo_name             = repo_name,
         worktree_coder        = worktree_coder,
@@ -384,6 +408,11 @@ def load_config(path: Path) -> "SprintConfig":
         documentor_enabled          = documentor_enabled,
         reviewer_prompt_template    = reviewer_prompt,
         documenter_prompt_template  = documenter_prompt,
+        coder_model                 = coder_model,
+        tester_model                = tester_model,
+        reviewer_model              = reviewer_model,
+        estimator_model             = estimator_model,
+        documentor_model            = documentor_model,
     )
 
 
@@ -2732,9 +2761,10 @@ def _dispatch_coder(
     # Give the headless run the same coder persona an interactive /coder session
     # would (subagents/slash-commands don't load in `claude -p`). Keep `-p PROMPT`
     # last so the later `cmd[-1] += sprint_hint` append still targets the prompt.
+    coder_model = cfg.coder_model if cfg is not None else "claude-sonnet-4-6"
     cmd = [
         "claude",
-        "--model", "claude-sonnet-4-6",
+        "--model", coder_model,
         "--dangerously-skip-permissions",
     ]
     coder_persona = _load_agent_persona("coder", cwd_path)
@@ -2997,9 +3027,10 @@ def _dispatch_tester(
             " label-mutation command."
         )
     # Same persona fix as the coder: load the tester subagent for the headless run.
+    tester_model = cfg.tester_model if cfg is not None else "claude-sonnet-4-6"
     cmd = [
         "claude",
-        "--model", "claude-sonnet-4-6",
+        "--model", tester_model,
         "--dangerously-skip-permissions",
     ]
     tester_persona = _load_agent_persona("tester", cwd_path)
@@ -4321,9 +4352,10 @@ def _dispatch_documenter(
     except Exception as e:
         structured_log.warn("documenter_git_prep_failed", f"[documenter] git prep failed: {e}", exc=str(e))
 
+    documentor_model = cfg.documentor_model if cfg is not None else "claude-sonnet-4-6"
     cmd = [
         "claude",
-        "--model", "claude-sonnet-4-6",
+        "--model", documentor_model,
         "--dangerously-skip-permissions",
         "-p", prompt,
     ]
@@ -4502,9 +4534,10 @@ def _dispatch_reviewer(
     except Exception as e:
         structured_log.warn("reviewer_git_prep_failed", f"[reviewer] git prep failed: {e}", exc=str(e))
 
+    reviewer_model = cfg.reviewer_model if cfg is not None else "claude-haiku-4-5"
     cmd = [
         "claude",
-        "--model", "claude-haiku-4-5",
+        "--model", reviewer_model,
         "--dangerously-skip-permissions",
         "-p", prompt,
     ]

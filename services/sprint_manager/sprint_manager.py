@@ -4933,7 +4933,7 @@ def run_sprint(
     preflight_approved: Optional[list[int]] = None,
     gate_scope: str = "changed",
     token_budget: int = 0,
-    skip_estimator: bool = False,
+    skip_estimator: bool = True,
     rerun_manifest: Optional[dict] = None,
 ) -> tuple[SprintSummary, SprintState]:
     """Main sprint loop -- processes backlog issues sequentially.
@@ -6003,11 +6003,11 @@ def main() -> None:
         help="Skip the post-summary documenter agent entirely.",
     )
 
-    # Estimator control (issue #166) — hidden debug-only flag, not shown in --help
+    # Estimator control (issue #166, #696) — default skips; --no-skip-estimator opts in
     p.add_argument(
         "--skip-estimator",
-        action="store_true",
-        default=False,
+        action=argparse.BooleanOptionalAction,
+        default=True,
         help=argparse.SUPPRESS,
     )
 

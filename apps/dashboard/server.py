@@ -1125,7 +1125,7 @@ async def projects_redirect(path: str):
 
 # ── Slug-based project routes (/project/<slug>/...) ───────────────────────────
 
-_VALID_PROJECT_TABS = {"sprint-mgmt", "tickets", "logs", "sprint-history", "status"}
+_VALID_PROJECT_TABS = {"sprint-mgmt", "tickets", "logs", "sprint-history", "status", "metrics", "notes", "settings"}
 
 
 @app.get("/project/{slug}")
@@ -1136,8 +1136,9 @@ async def project_slug_no_tab(slug: str):
 
 @app.get("/project/{slug}/analytics")
 async def project_slug_analytics(slug: str):
-    """Serve the Analytics page (ANL-2 shell, issue #648)."""
-    return _serve_html(STATIC_DIR / "analytics.html")
+    """Retired standalone analytics page — analytics is now an in-chrome tab
+    (with the project nav). Redirect old links to the in-chrome Analytics tab."""
+    return RedirectResponse(url=f"/project/{slug}/metrics", status_code=302)
 
 
 @app.get("/project/{slug}/{tab}")
@@ -2312,11 +2313,47 @@ def fs_list(path: str = ""):
 
 # ── Environment paths (issue #643) ────────────────────────────────────────────
 
+def _derive_project_environments(repo: str) -> dict[str, str]:
+    """Best-effort guess of env paths from the on-disk project layout when none
+    are saved, so the Settings form prefills instead of showing placeholders.
+
+    Nested layout: ~/dev/<name>/{prd,uat,coder,tester}
+    Flat layout:   ~/dev/<name> (prd) + ~/dev/<name>-{coder,tester}, ~/dev/<name>/uat
+    Only paths that actually exist on disk are returned.
+    """
+    name = repo.split("/")[-1]
+    dev = _PROJECTS_BASE  # ~/dev
+    found: dict[str, str] = {}
+    nested = dev / name
+    for env in ("prd", "uat", "coder", "tester"):
+        cand = nested / env
+        if cand.is_dir():
+            found[env] = str(cand)
+    if found:
+        return found
+    # Flat layout fallback
+    flat = {
+        "prd": dev / name,
+        "uat": dev / name / "uat",
+        "coder": dev / f"{name}-coder",
+        "tester": dev / f"{name}-tester",
+    }
+    for env, cand in flat.items():
+        if cand.is_dir():
+            found[env] = str(cand)
+    return found
+
+
 @app.get("/api/projects/{slug}/environments")
 def get_project_environments(slug: str):
-    """Return environment paths stored in projects.json for this project."""
+    """Return environment paths stored in projects.json for this project.
+
+    When none are saved, auto-derive them from the on-disk layout so the form
+    prefills (the user can edit + save to persist)."""
     repo = _resolve_project_slug(slug)
     envs = projects_module.get_project_environments(repo)
+    if not envs:
+        envs = _derive_project_environments(repo)
     return {
         "environments": [
             {"env": env, "local_directory": local_dir}
@@ -10946,12 +10983,32 @@ def _resolve_bulk_sprint_label(sprint_label: str | None, repo: str | None) -> st
     if sprint_label != "NEW":
         return sprint_label
     try:
-        existing = github_client.list_sprints(repo_name=repo)
-        next_num = (max(existing) if existing else 0) + 1
+        next_num = _next_new_sprint_number(repo)
         github_client.ensure_sprint_label(next_num, repo_name=repo)
         return f"sprint-{next_num}"
     except Exception:
         return ""
+
+
+def _next_new_sprint_number(repo: str | None) -> int:
+    """Next sprint number for a brand-new sprint — the SAME value the board's
+    "New sprint (Sprint N)" option shows.
+
+    Must take the max over BOTH live sprint labels AND finished-sprint summary
+    numbers: a sprint's `sprint-N` label is often deleted once it finishes, so
+    counting labels alone resets the next number back to 1 (issue: bulk-create
+    "NEW" said 54 but created sprint-1). The finished-summary issues preserve
+    the real high-water mark cross-machine.
+    """
+    nums: list[int] = list(github_client.list_sprints(repo_name=repo) or [])
+    for lbl in _finished_sprint_summaries(repo):
+        if _SPRINT_LABEL_RE.match(lbl):
+            try:
+                # lbl is "sprint-N" or "sprint-N.X" — take the base number N.
+                nums.append(int(lbl.split("-", 1)[1].split(".")[0]))
+            except (IndexError, ValueError):
+                pass
+    return (max(nums) if nums else 0) + 1
 
 
 def _compose_ticket_labels(sprint_label: str, item_labels: list[str]) -> list[str]:

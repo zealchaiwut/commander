@@ -10691,6 +10691,28 @@ async def bulk_stop_job(job_id: str):
     return {"ok": True}
 
 
+@app.delete("/api/tickets/bulk/{job_id}")
+async def bulk_delete_job(job_id: str):
+    """Discard a bulk job entirely — used by the "Start new batch" / clear action.
+
+    Signals any live worker to stop, drops the in-memory entry, and removes the
+    persisted JSON so a wedged or finished job never reloads. Idempotent:
+    returns ok even if the job is already gone.
+    """
+    job = _bulk_jobs.get(job_id)
+    if job is not None:
+        job["stop_requested"] = True
+    _bulk_jobs.pop(job_id, None)
+    _bulk_job_queues.pop(job_id, None)
+    try:
+        path = _bulk_jobs_dir() / f"{job_id}.json"
+        if path.exists():
+            path.unlink()
+    except Exception as e:
+        logger.warning("bulk_delete_job: could not remove %s.json: %s", job_id, str(e)[:200])
+    return {"ok": True}
+
+
 class BulkSkipBody(BaseModel):
     index: int
 

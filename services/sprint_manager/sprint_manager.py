@@ -2880,6 +2880,28 @@ def _publish_gate_failure_analyses(
     _clear_gate_failure_records(issue_num)
 
 
+IMPECCABLE_CONTEXT_SCRIPT = ".github/skills/impeccable/scripts/context.mjs"
+
+
+def _impeccable_context_instruction() -> str:
+    """Prompt fragment injected into every headless coder/tester dispatch (issue #713).
+
+    Threads the file-based impeccable skill pack — NOT the Claude Code plugin —
+    into the headless ``claude -p`` run so the agent loads the project's design
+    rules before touching any frontend code. When a mock is attached the agent
+    treats it as the pixel target; UI output must clear ``impeccable detect``.
+    """
+    return (
+        " IMPECCABLE DESIGN CONTEXT (issue #713): before writing or reviewing any"
+        f" frontend/UI code, load the design skills by running `node {IMPECCABLE_CONTEXT_SCRIPT}`"
+        " from the repo root and follow the rules it prints — this is the"
+        " file-based skill pack under .github/skills, not an installed extension."
+        " When a mock HTML file is attached under"
+        " references/issue-<N>/, treat it as the pixel-accurate visual target and"
+        " reproduce it. UI output must pass `npx impeccable detect` on the first try."
+    )
+
+
 def _design_docs_guard(cwd_path: "Path") -> "Optional[str]":
     """Return None when both PRODUCT.md and DESIGN.md exist; error message otherwise.
 
@@ -3014,6 +3036,11 @@ def _dispatch_coder(
             " Do not run update_ticket.py, gh issue edit --add-label, or any other"
             " label-mutation command."
         )
+
+    # Impeccable design context (issue #713): inject into every coder dispatch —
+    # custom templates included — so frontend work loads design rules via context.mjs.
+    if "context.mjs" not in prompt:
+        prompt += _impeccable_context_instruction()
 
     # Inject failure context: accumulated history (fix-loop, issue #618) or sidecar fallback
     if prior_failures:
@@ -3298,6 +3325,10 @@ def _dispatch_tester(
             " Do not run update_ticket.py, gh issue edit --add-label, or any other"
             " label-mutation command."
         )
+    # Impeccable design context (issue #713): inject into every tester dispatch so
+    # the tester verifies UI tickets against the same design rules via context.mjs.
+    if "context.mjs" not in prompt:
+        prompt += _impeccable_context_instruction()
     # Same persona fix as the coder: load the tester subagent for the headless run.
     tester_model = cfg.tester_model if cfg is not None else "claude-sonnet-4-6"
     cmd = [

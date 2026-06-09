@@ -4906,7 +4906,8 @@
     .metrics-page-hdr { margin-bottom: 24px; }
     .metrics-page-hdr h2 { font-size: 18px; font-weight: 700; margin: 0 0 4px; }
     .metrics-page-hdr p { margin: 0; font-size: 13px; color: var(--text-sub); }
-    .metrics-section-title { font-size: 14px; font-weight: 700; margin: 28px 0 12px; color: var(--text); }
+    .metrics-section-title { font-size: 14px; font-weight: 700; margin: 32px 0 4px; color: var(--text); }
+    .metrics-section-sub { margin: 0 0 12px; font-size: 12px; color: var(--text-sub); }
     /* Delivery-health cards (ported from analytics page, #648) */
     .metric-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; }
     .metric-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 16px; }
@@ -5445,6 +5446,12 @@
       <!-- Bulk Create tab -->
       <div class="tab-pane" id="pane-bulk-create" role="tabpanel" aria-labelledby="stab-bulk-create">
 
+        <!-- Back to board (bulk-create is opened via the + Create menu, not a nav tab) -->
+        <button type="button" class="bc-back-btn" onclick="switchTab('sprint-mgmt')"
+                style="display:inline-flex;align-items:center;gap:6px;background:none;border:none;color:var(--text-sub);font-size:13px;cursor:pointer;padding:4px 0;margin-bottom:8px;">
+          <i class="ti ti-arrow-left"></i> Back to board
+        </button>
+
         <!-- Step 1: Input -->
         <div id="bc-step1">
           <div class="bc-settings-bar">
@@ -5786,31 +5793,6 @@
       </div>
 
       <!-- Estimate vs Actual tab (issue #575) -->
-      <div class="tab-pane" id="pane-est-vs-actual" role="tabpanel" aria-labelledby="stab-est-vs-actual">
-        <div class="cmp-page-hdr">
-          <h2><i class="ti ti-ruler-measure" style="margin-right:8px;vertical-align:-2px;"></i>Estimate vs Actual</h2>
-          <p>Compare estimated size against actual agent time for finished sprints.</p>
-        </div>
-        <div class="cmp-picker-row">
-          <span class="cmp-picker-label">Sprint</span>
-          <select class="cmp-picker-select" id="eva-select" onchange="evaOnPickerChange()">
-            <option value="">— select sprint —</option>
-          </select>
-        </div>
-        <div id="eva-result"></div>
-      </div>
-
-      <!-- Calibration tab (issue #576) -->
-      <div class="tab-pane" id="pane-calibration" role="tabpanel" aria-labelledby="stab-calibration">
-        <div class="cmp-page-hdr">
-          <h2><i class="ti ti-adjustments-horizontal" style="margin-right:8px;vertical-align:-2px;"></i>Estimator Calibration</h2>
-          <p>Average actual agent time per size bucket across all finished sprints in this project.</p>
-        </div>
-        <div id="calib-result">
-          <div style="padding:24px;color:var(--text-sub);font-size:13px;">Loading…</div>
-        </div>
-      </div>
-
       <!-- Analytics tab (delivery-health metrics #648 + sprint charts #476) -->
       <div class="tab-pane" id="pane-metrics" role="tabpanel" aria-labelledby="stab-metrics">
         <div class="metrics-page-hdr">
@@ -5863,6 +5845,24 @@
           sources: first-pass/rework from sprint state (tester_attempt_count) ·
           durations from coder/tester timestamps · cost from token_usage × model price ·
           throughput from sprint state files
+        </div>
+
+        <!-- Est vs Actual section (#, moved from its own tab) -->
+        <h3 class="metrics-section-title">Estimate vs Actual</h3>
+        <p class="metrics-section-sub">Estimated size against actual agent time for finished sprints.</p>
+        <div class="cmp-picker-row">
+          <span class="cmp-picker-label">Sprint</span>
+          <select class="cmp-picker-select" id="eva-select" onchange="evaOnPickerChange()">
+            <option value="">— select sprint —</option>
+          </select>
+        </div>
+        <div id="eva-result"></div>
+
+        <!-- Calibration section (#576, moved from its own tab) -->
+        <h3 class="metrics-section-title">Estimator Calibration</h3>
+        <p class="metrics-section-sub">Average actual agent time per size bucket across finished sprints.</p>
+        <div id="calib-result">
+          <div style="padding:24px;color:var(--text-sub);font-size:13px;">Loading…</div>
         </div>
 
         <!-- Sprint trend charts (#476) -->
@@ -20756,6 +20756,9 @@ document.addEventListener('keydown', function(e) {
   window.metricsInit = async function () {
     // Delivery-health cards (#648) — refetch each open; cheap, always current.
     if (window.anlFetchDeliveryHealth) window.anlFetchDeliveryHealth();
+    // Est-vs-Actual and Calibration are now sections on this same page.
+    if (typeof evaInit === 'function') evaInit();
+    if (typeof calibInit === 'function') calibInit();
     if (_metricsLoaded && _metricsData !== null) {
       _loadChartJs(() => _renderAll(_metricsData), () => _tableFallback(_metricsData));
       return;

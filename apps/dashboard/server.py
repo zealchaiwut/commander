@@ -2313,11 +2313,47 @@ def fs_list(path: str = ""):
 
 # ── Environment paths (issue #643) ────────────────────────────────────────────
 
+def _derive_project_environments(repo: str) -> dict[str, str]:
+    """Best-effort guess of env paths from the on-disk project layout when none
+    are saved, so the Settings form prefills instead of showing placeholders.
+
+    Nested layout: ~/dev/<name>/{prd,uat,coder,tester}
+    Flat layout:   ~/dev/<name> (prd) + ~/dev/<name>-{coder,tester}, ~/dev/<name>/uat
+    Only paths that actually exist on disk are returned.
+    """
+    name = repo.split("/")[-1]
+    dev = _PROJECTS_BASE  # ~/dev
+    found: dict[str, str] = {}
+    nested = dev / name
+    for env in ("prd", "uat", "coder", "tester"):
+        cand = nested / env
+        if cand.is_dir():
+            found[env] = str(cand)
+    if found:
+        return found
+    # Flat layout fallback
+    flat = {
+        "prd": dev / name,
+        "uat": dev / name / "uat",
+        "coder": dev / f"{name}-coder",
+        "tester": dev / f"{name}-tester",
+    }
+    for env, cand in flat.items():
+        if cand.is_dir():
+            found[env] = str(cand)
+    return found
+
+
 @app.get("/api/projects/{slug}/environments")
 def get_project_environments(slug: str):
-    """Return environment paths stored in projects.json for this project."""
+    """Return environment paths stored in projects.json for this project.
+
+    When none are saved, auto-derive them from the on-disk layout so the form
+    prefills (the user can edit + save to persist)."""
     repo = _resolve_project_slug(slug)
     envs = projects_module.get_project_environments(repo)
+    if not envs:
+        envs = _derive_project_environments(repo)
     return {
         "environments": [
             {"env": env, "local_directory": local_dir}

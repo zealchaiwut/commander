@@ -107,6 +107,65 @@ def is_step_automatable(step_text: str) -> bool:
     return _NON_BROWSER_RE.search(step_text or "") is None
 
 
+# ── tester Step-6 routing (issue #710) ──────────────────────────────────────
+
+#: Keywords whose presence marks a UAT step as a browser interaction (AC-1).
+_BROWSER_KEYWORDS = ("open", "navigate", "click", "see", "expect", "page")
+_BROWSER_KW_RE = re.compile(
+    r"\b(" + "|".join(_BROWSER_KEYWORDS) + r")\b", re.IGNORECASE
+)
+
+#: Indicators that a step is an HTTP/API check that httpx can drive directly.
+_HTTP_KW_RE = re.compile(
+    r"\b(GET|POST|PUT|PATCH|DELETE|endpoint|api|request|responds?|returns?|"
+    r"status\s*code|http\s*\d{3})\b",
+    re.IGNORECASE,
+)
+
+
+def is_browser_step(step_text: str, agent_testable: bool = False) -> bool:
+    """True when a UAT step should be attempted via :func:`run_browser_step`.
+
+    Issue #710 AC-1: a step is browser-testable when the BA flagged it
+    ``agent-testable`` OR its text describes a browser interaction (keywords:
+    open, navigate, click, see, expect, page).
+    """
+    if agent_testable:
+        return True
+    return _BROWSER_KW_RE.search(step_text or "") is not None
+
+
+def classify_uat_step(step_text: str, agent_testable: bool = False) -> str:
+    """Route a UAT step to ``"browser"``, ``"http"`` or ``"manual"`` (Step 6).
+
+    * ``"browser"`` — agent-testable flag set or browser-interaction keywords
+      present → attempt via :func:`run_browser_step` (AC-1).
+    * ``"http"`` — no browser keywords but HTTP/API indicators present → drive
+      with httpx unchanged (AC-5).
+    * ``"manual"`` — neither → a human must check (visual/layout/etc.).
+    """
+    if is_browser_step(step_text, agent_testable):
+        return "browser"
+    if _HTTP_KW_RE.search(step_text or ""):
+        return "http"
+    return "manual"
+
+
+def report_status(result: dict) -> str:
+    """Map a :func:`run_browser_step` result to a test-report status token.
+
+    ``"pass"`` → ``"PASS"``, ``"fail"`` → ``"FAIL"`` (AC-2). ``"uncovered"`` →
+    ``"MANUAL"`` — the only condition under which a browser step is reported
+    MANUAL (AC-4). Anything unexpected degrades to ``"MANUAL"``.
+    """
+    status = result.get("status")
+    if status == "pass":
+        return "PASS"
+    if status == "fail":
+        return "FAIL"
+    return "MANUAL"
+
+
 # ── caller helpers (sprint tester orchestrator) ─────────────────────────────
 
 def is_manual_fallback(result: dict) -> bool:

@@ -320,14 +320,48 @@ Parse the captured output to build a pass/fail map keyed by function name and ex
 
 ### Step 6 — Evaluate UAT steps
 
-For each UAT step:
-- If it describes an HTTP call (mentions an endpoint, URL, API, request) → attempt it with `httpx` against `$UAT_BASE_URL` and record ✅ PASS or ❌ FAIL with the HTTP status.
-- Otherwise → mark ⚠️ MANUAL with a brief reason (e.g., "visual check", "requires browser", "mobile layout").
+For each UAT step, pick exactly one route. Use
+`services/sprint_manager/agent_browser_runner.py` to classify and to drive the
+browser — it is importable from the repo root.
+
+1. **Browser interaction** — the step is flagged `agent-testable` by the BA ticket
+   **or** its text clearly describes a browser interaction (keywords: `open`,
+   `navigate`, `click`, `see`, `expect`, `page`). Execute it via the agent-browser
+   runner instead of marking MANUAL:
+
+   ```python
+   import services.sprint_manager.agent_browser_runner as abr
+   result = abr.run_browser_step(step_text, BASE_URL)   # BASE_URL = $UAT_BASE_URL
+   status = abr.report_status(result)                   # "PASS" | "FAIL" | "MANUAL"
+   ```
+
+   - `status == "PASS"` → record ✅ PASS and attach `result["screenshot_path"]`.
+   - `status == "FAIL"` → record ❌ FAIL and attach `result["screenshot_path"]`.
+     A ❌ FAIL browser step sets the overall ticket status to `NEEDS_FIXES`,
+     identical to a failed AC check (see Step 7).
+   - `status == "MANUAL"` → the runner returned `"uncovered"` (or
+     `abr.is_available()` is `False`, e.g. agent-browser not installed in this
+     environment). Only then mark ⚠️ MANUAL with the reason. A `"uncovered"`
+     result on one step does **not** affect other steps in the same ticket.
+
+   You can pre-route a step with `abr.classify_uat_step(step_text, agent_testable=<bool>)`
+   which returns `"browser"`, `"http"`, or `"manual"`.
+
+2. **HTTP-only call** — the step mentions an endpoint, URL, API, or request and
+   has no browser interaction. Attempt it with `httpx` against `$UAT_BASE_URL`
+   and record ✅ PASS or ❌ FAIL with the HTTP status. (Unchanged behaviour.)
+
+3. **Neither** — mark ⚠️ MANUAL with a brief reason (e.g., "visual check",
+   "mobile layout").
+
+When `COMMANDER_AGENT_BROWSER_AVAILABLE=0` in your environment, all browser
+steps will come back `"uncovered"` and fall back to ⚠️ MANUAL automatically;
+HTTP steps still execute normally. Never crash on a missing runner.
 
 ### Step 7 — Determine overall status
 
 - `READY_FOR_UAT` — **`PYTEST_EXIT_CODE` is 0** AND all AC tests passed (skipped counts as manual, not fail) AND no UAT steps are ❌ FAIL.
-- `NEEDS_FIXES` — `PYTEST_EXIT_CODE` is non-zero OR one or more AC tests failed OR one or more UAT steps are ❌ FAIL. Any non-zero exit code alone is sufficient to set NEEDS_FIXES regardless of other results.
+- `NEEDS_FIXES` — `PYTEST_EXIT_CODE` is non-zero OR one or more AC tests failed OR one or more UAT steps are ❌ FAIL (including a ❌ FAIL **browser** step from agent-browser — a failed browser step is treated identically to a failed AC check). Any non-zero exit code alone is sufficient to set NEEDS_FIXES regardless of other results.
 
 ### Step 8 — Write the report file
 

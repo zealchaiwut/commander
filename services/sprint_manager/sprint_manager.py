@@ -687,12 +687,15 @@ def _db_agent_start_sm(
     risk_tier: Optional[str] = None,
     model_used: Optional[str] = None,
     routing_reason: Optional[str] = None,
+    worktree_sha: Optional[str] = None,
+    base_sha: Optional[str] = None,
 ) -> None:
     """Best-effort open of an agent_runs row at dispatch time (#764).
 
     `risk_tier` and `model_used` are supplied for tester dispatches that
     use risk-tier routing (issue #790). `routing_reason` is supplied for
-    coder dispatches using size-tier routing (issue #789).
+    coder dispatches using size-tier routing (issue #789). `worktree_sha` and
+    `base_sha` are forensic fields from worktree hygiene (issue #788).
     """
     try:
         import db  # apps/dashboard on sys.path (line 142)
@@ -700,7 +703,24 @@ def _db_agent_start_sm(
             int(issue_number), sprint_label, agent,
             risk_tier=risk_tier, model_used=model_used,
             routing_reason=routing_reason,
+            worktree_sha=worktree_sha,
+            base_sha=base_sha,
         )
+    except (Exception, SystemExit):
+        pass
+
+
+def _db_update_worktree_shas_sm(
+    issue_number: int,
+    sprint_label: str,
+    agent: str,
+    worktree_sha: Optional[str],
+    base_sha: Optional[str],
+) -> None:
+    """Best-effort UPDATE of the open agent_runs row to record hygiene SHAs (issue #788)."""
+    try:
+        import db  # apps/dashboard on sys.path
+        db.update_worktree_shas(int(issue_number), sprint_label, agent, worktree_sha, base_sha)
     except (Exception, SystemExit):
         pass
 
@@ -3404,6 +3424,161 @@ def _doctor_probe_auth() -> Optional[str]:
         return f"claude CLI auth probe failed: {exc}"
 
 
+def _stash_to_quarantine(
+    worktree: Path,
+    ticket_id: int | str,
+    effective_root: Path,
+) -> None:
+    """Stash dirty worktree state to quarantine before reset (issue #788 AC2).
+
+    Saves tracked changes as tracked.patch and lists untracked files in
+    untracked-list.txt.  Never overwrites an existing entry — each call creates
+    a fresh timestamp subdirectory so entries accumulate (AC8).
+    """
+    ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    quarantine_dir = (
+        effective_root / ".commander" / "runtime" / "quarantine"
+        / str(ticket_id) / ts
+    )
+    quarantine_dir.mkdir(parents=True, exist_ok=True)
+
+    print(
+        f"  [hygiene] WARNING: Dirty worktree for ticket #{ticket_id} — "
+        f"stashing to quarantine: {quarantine_dir}",
+        flush=True,
+    )
+
+    ok, patch_out, _ = _try("git", "diff", "HEAD", cwd=worktree)
+    if ok and patch_out:
+        (quarantine_dir / "tracked.patch").write_text(patch_out, encoding="utf-8")
+
+    ok, untracked_out, _ = _try(
+        "git", "ls-files", "--others", "--exclude-standard", cwd=worktree,
+    )
+    if ok and untracked_out:
+        (quarantine_dir / "untracked-list.txt").write_text(untracked_out, encoding="utf-8")
+
+
+def _worktree_hygiene(
+    worktree: Path,
+    ticket_id: int | str,
+    merge_target: str,
+    is_retry: bool = False,
+    repo_root: Optional[Path] = None,
+) -> tuple[Optional[str], Optional[str], Optional[str]]:
+    """Pre-dispatch hygiene sequence for coder/tester worktrees (issue #788).
+
+    Steps:
+      1. git fetch origin
+      2. Resolve base SHA (origin/<merge_target>)
+      3. Check dirty state; stash to quarantine if dirty (never discards silently)
+      4. git reset --hard origin/<merge_target>
+      5a. Fresh-ticket: verify feature branch absent or at base SHA; abort on divergent
+      5b. Retry-round: checkout feature branch, rebase onto base; abort on conflict
+
+    Returns (worktree_sha, base_sha, error_category).
+      error_category is None on success, 'merge' on rebase conflict,
+      or 'divergent-branch' if a fresh-ticket finds a divergent feature branch.
+    """
+    effective_root = repo_root or REPO_ROOT
+    print(
+        f"  [hygiene] Pre-dispatch hygiene for ticket #{ticket_id} in {worktree}",
+        flush=True,
+    )
+
+    # 1 — fetch
+    print("  [hygiene] git fetch origin ...", flush=True)
+    _try("git", "fetch", "origin", cwd=worktree)
+
+    # 2 — resolve base SHA
+    ok, base_sha, _ = _try("git", "rev-parse", f"origin/{merge_target}", cwd=worktree)
+    base_sha = base_sha.strip() if ok and base_sha.strip() else None
+    if not base_sha:
+        print(
+            f"  [hygiene] WARNING: could not resolve origin/{merge_target}",
+            flush=True,
+        )
+
+    # 3 — dirty-state check
+    ok, dirty_out, _ = _try("git", "status", "--porcelain", cwd=worktree)
+    if ok and dirty_out.strip():
+        _stash_to_quarantine(worktree, ticket_id, effective_root)
+
+    # 4 — hard reset
+    if base_sha:
+        print(
+            f"  [hygiene] git reset --hard origin/{merge_target} ({base_sha[:8]})",
+            flush=True,
+        )
+        _try("git", "reset", "--hard", f"origin/{merge_target}", cwd=worktree)
+
+    # Get worktree SHA post-reset
+    ok, wt_sha, _ = _try("git", "rev-parse", "HEAD", cwd=worktree)
+    worktree_sha = wt_sha.strip() if ok and wt_sha.strip() else None
+
+    # 5 — branch validation
+    # Find feature branch in this worktree
+    ok, br_out, _ = _try("git", "branch", "--list", f"feature/{ticket_id}-*", cwd=worktree)
+    feature_branch: Optional[str] = None
+    if ok and br_out.strip():
+        feature_branch = br_out.strip().splitlines()[0].strip().lstrip("* ")
+    if feature_branch is None:
+        ok2, br_out2, _ = _try(
+            "git", "branch", "-r", "--list", f"origin/feature/{ticket_id}-*", cwd=worktree,
+        )
+        if ok2 and br_out2.strip():
+            feature_branch = br_out2.strip().splitlines()[0].strip().removeprefix("origin/")
+
+    if not is_retry:
+        # 5a — fresh-ticket: abort if feature branch exists at a divergent SHA
+        if feature_branch is not None and base_sha:
+            ok, branch_sha, _ = _try("git", "rev-parse", feature_branch, cwd=worktree)
+            branch_sha = branch_sha.strip() if ok else None
+            if branch_sha and branch_sha != base_sha:
+                detail = (
+                    f"Feature branch {feature_branch} exists at {branch_sha[:8]} "
+                    f"but base is {base_sha[:8]}"
+                )
+                print(f"  [hygiene] ERROR: {detail}", flush=True)
+                record_failure(
+                    int(ticket_id),
+                    "divergent-branch",
+                    detail=detail,
+                    repo_root=effective_root,
+                )
+                return worktree_sha, base_sha, "divergent-branch"
+    else:
+        # 5b — retry-round: checkout feature branch and rebase onto base
+        if feature_branch is not None:
+            print(
+                f"  [hygiene] Rebasing {feature_branch} onto origin/{merge_target}",
+                flush=True,
+            )
+            _try("git", "checkout", feature_branch, cwd=worktree)
+            ok, _, rebase_err = _try(
+                "git", "rebase", f"origin/{merge_target}", cwd=worktree,
+            )
+            if not ok:
+                print(
+                    f"  [hygiene] Rebase conflict for #{ticket_id}: {rebase_err}",
+                    flush=True,
+                )
+                _try("git", "rebase", "--abort", cwd=worktree)
+                detail = (
+                    f"Rebase of {feature_branch} onto origin/{merge_target} "
+                    f"failed with conflict"
+                )
+                record_failure(
+                    int(ticket_id),
+                    "merge",
+                    detail=detail,
+                    repo_root=effective_root,
+                )
+                return worktree_sha, base_sha, "merge"
+
+    return worktree_sha, base_sha, None
+
+
 def _dispatch_doctor(
     cfg: Optional["SprintConfig"],
     alert_modes: list[str],
@@ -3514,6 +3689,25 @@ def _dispatch_coder(
         )
         record_failure(issue_num, "design_docs_missing", detail=guard_err)
         return False, "design_docs_missing"
+
+    # Worktree hygiene (issue #788): fetch, stash dirty state, reset to base, validate branch.
+    _is_retry = bool(prior_failures)
+    _wt_sha, _base_sha, _hygiene_err = _worktree_hygiene(
+        worktree=cwd_path,
+        ticket_id=issue_num,
+        merge_target=sprint_branch,
+        is_retry=_is_retry,
+    )
+    if sprint_label:
+        _db_update_worktree_shas_sm(issue_num, sprint_label, "coder", _wt_sha, _base_sha)
+    if _hygiene_err:
+        structured_log.error(
+            "worktree_hygiene_failed",
+            f"[coder] worktree hygiene blocked dispatch for issue #{issue_num}: {_hygiene_err}",
+            issue_num=issue_num,
+            hygiene_error=_hygiene_err,
+        )
+        return False, _hygiene_err
 
     print(f"  Dispatching coder for issue #{issue_num} ...", flush=True)
     try:
@@ -3824,6 +4018,27 @@ def _dispatch_tester(
     eff_repo = repo_name or (cfg.repo_name if cfg else None)
     api_url  = cfg.api_url if cfg else None
     cwd_path = cfg.worktree_tester_app if cfg else WORKTESTER_DASHBOARD
+    # Git root for the tester worktree (hygiene needs the repo root, not a subdir).
+    _tester_wt_root = cfg.worktree_tester if cfg else WORKTESTER_ROOT
+
+    # Worktree hygiene (issue #788 AC7): same treatment as coder — fetch, stash dirty
+    # state, hard-reset — before the tester checks out any code.
+    _tester_wt_sha, _tester_base_sha, _tester_hygiene_err = _worktree_hygiene(
+        worktree=_tester_wt_root,
+        ticket_id=issue_num,
+        merge_target=sprint_branch,
+        is_retry=False,
+    )
+    if sprint_label:
+        _db_update_worktree_shas_sm(issue_num, sprint_label, "tester", _tester_wt_sha, _tester_base_sha)
+    if _tester_hygiene_err:
+        structured_log.error(
+            "tester_worktree_hygiene_failed",
+            f"[tester] worktree hygiene blocked dispatch for issue #{issue_num}: {_tester_hygiene_err}",
+            issue_num=issue_num,
+            hygiene_error=_tester_hygiene_err,
+        )
+        return 1, _tester_hygiene_err
 
     print(f"  Dispatching tester for issue #{issue_num} ...", flush=True)
     try:

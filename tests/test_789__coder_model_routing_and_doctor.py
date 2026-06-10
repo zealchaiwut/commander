@@ -323,7 +323,8 @@ def test_dispatch_coder_resolves_model_for_s_ticket(tmp_path):
          patch.object(sm, "_post_agent_event"), \
          patch.object(sm, "_load_agent_persona", return_value=None), \
          patch.object(sm, "_load_estimate", return_value=estimate), \
-         patch.object(sm, "_dispatch_doctor", return_value=None):
+         patch.object(sm, "_dispatch_doctor", return_value=None), \
+         patch.object(sm, "_worktree_hygiene", return_value=(None, None, None)):
         sm._dispatch_coder(
             1, [], sprint_branch="develop", repo_name="test/repo", cfg=cfg,
             sprint_label="sprint-1",

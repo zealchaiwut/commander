@@ -572,6 +572,46 @@ def _plan_json_set_state_sm(
 
 # ── end plan.json helpers ─────────────────────────────────────────────────────
 
+# ── DB lifecycle helpers (issue #757) ────────────────────────────────────────
+#
+# The `sprints` / `sprint_ticket_order` tables are the durable home for sprint
+# lifecycle state and ticket order; plan.json + PID files above are now a
+# deprecated cache (dual-write). All DB writes here are best-effort: a missing
+# DB_PATH (CLI dispatch) makes apps/dashboard/db.py sys.exit at import, so we
+# swallow SystemExit too — a DB write must never interrupt a sprint run.
+
+def _sprint_db_set_state_sm(
+    label: str,
+    state: str,
+    project: str = "",
+    **fields,
+) -> None:
+    """Best-effort mirror of a sprint lifecycle transition into the DB (#757)."""
+    try:
+        import db  # apps/dashboard on sys.path (line 142)
+        if state == "running":
+            db.record_sprint_start(label, project=project or "",
+                                   started_at=fields.get("started_at"))
+        elif state == "completed":
+            db.record_sprint_finish(label, ended_at=fields.get("ended_at"),
+                                    end_reason=fields.get("end_reason"))
+        elif state == "cancelled":
+            db.record_sprint_cancel(label,
+                                    end_reason=fields.get("end_reason", "cancelled"),
+                                    ended_at=fields.get("ended_at"))
+    except (Exception, SystemExit):
+        pass
+
+
+def _sprint_db_set_ticket_order_sm(label: str, issue_numbers: list[int]) -> None:
+    """Best-effort persist of the dispatch order into sprint_ticket_order (#757)."""
+    try:
+        import db  # apps/dashboard on sys.path (line 142)
+        db.set_sprint_ticket_order(label, issue_numbers)
+    except (Exception, SystemExit):
+        pass
+
+
 # Hang detection constants (in seconds)
 HANG_WARN_SECS  = 30 * 60   # 30 minutes
 HANG_KILL_SECS  = 60 * 60   # 60 minutes
@@ -5982,6 +6022,13 @@ def run_sprint(
     _dispatch_levels = _compute_dispatch_levels(state.issues, _plan_order, _dag_layers)
     _level_nums_by_idx = [[iss.number for iss in lvl] for lvl in _dispatch_levels]
 
+    # Persist the resolved dispatch order to sprint_ticket_order (issue #757).
+    # This is the exact order tickets are processed below — the durable record
+    # of "what ran in what order", replacing plan.json as source of truth.
+    if not dry_run:
+        _flat_order = [num for lvl in _level_nums_by_idx for num in lvl]
+        _sprint_db_set_ticket_order_sm(label, _flat_order)
+
     # Tag each IssueState with its 1-based execution level (issue #613: seg bar / level-sep UI)
     for _lvl_idx, _lvl_issues in enumerate(_dispatch_levels):
         for _lvl_iss in _lvl_issues:
@@ -6920,20 +6967,31 @@ def main() -> None:
     def _sigterm_handler(signum: int, frame: object) -> None:
         _sprint_user_cancelled.set()
         _cleanup_pid()
-        # Best-effort state write before exit (issue #507)
+        # Best-effort state write before exit (issue #507 plan.json, #757 DB)
+        _ended_at = datetime.now(timezone.utc).isoformat()
         _plan_json_set_state_sm(
             args.label, "cancelled", cfg=cfg,
-            ended_at=datetime.now(timezone.utc).isoformat(),
+            ended_at=_ended_at,
+        )
+        _sprint_db_set_state_sm(
+            args.label, "cancelled", project=eff_repo or "",
+            ended_at=_ended_at, end_reason="cancelled",
         )
         raise SystemExit(130)
 
     signal.signal(signal.SIGTERM, _sigterm_handler)
 
-    # Write state=running now that PID lock is confirmed (issue #507)
+    # Write state=running now that PID lock is confirmed (issue #507 plan.json,
+    # #757 DB)
     if not args.dry_run:
+        _started_at = datetime.now(timezone.utc).isoformat()
         _plan_json_set_state_sm(
             args.label, "running", cfg=cfg,
-            started_at=datetime.now(timezone.utc).isoformat(),
+            started_at=_started_at,
+        )
+        _sprint_db_set_state_sm(
+            args.label, "running", project=eff_repo or "",
+            started_at=_started_at,
         )
 
     # ── Pre-flight review (AC-1 of issue #33) ────────────────────────────────
@@ -7022,12 +7080,17 @@ def main() -> None:
             )
         raise
 
-    # Clean exit: write state=completed (issue #507)
+    # Clean exit: write state=completed (issue #507 plan.json, #757 DB)
     if not args.dry_run:
+        _ended_at = datetime.now(timezone.utc).isoformat()
         _plan_json_set_state_sm(
             args.label, "completed", cfg=cfg,
-            ended_at=datetime.now(timezone.utc).isoformat(),
+            ended_at=_ended_at,
             end_reason="natural",
+        )
+        _sprint_db_set_state_sm(
+            args.label, "completed", project=eff_repo or "",
+            ended_at=_ended_at, end_reason="natural",
         )
 
     # Regenerate STATUS.md after sprint closes (#584)

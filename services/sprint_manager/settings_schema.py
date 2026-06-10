@@ -26,6 +26,8 @@ KNOWN_FIELDS: dict[str, dict[str, Any]] = {
     "default_branch": {"secret": False, "default": "develop"},
     "bulk_create_concurrency": {"secret": False, "default": 3},
     "log_level": {"secret": False, "default": "INFO"},
+    # Concurrent pipeline mode (issue #737) — opt-in, default serial
+    "pipeline_mode": {"secret": False, "default": False},
     # Estimation defaults (size → minutes table + buffer)
     "estimation_s_minutes": {"secret": False, "default": 5},
     "estimation_m_minutes": {"secret": False, "default": 15},

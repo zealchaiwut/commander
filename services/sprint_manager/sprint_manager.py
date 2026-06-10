@@ -715,8 +715,13 @@ _active_pid_path: Optional[Path] = None
 
 
 def _remove_pid_file() -> None:
-    """Remove the sprint PID file if it exists (called by atexit + signal handlers)."""
+    """Remove the sprint PID file if it exists (called by atexit + signal handlers).
+
+    Also clears the run lock (COMMANDER_SPRINT_RUNNING) so non-status label
+    mutations are allowed again once the run ends (issue #754).
+    """
     global _active_pid_path
+    os.environ.pop("COMMANDER_SPRINT_RUNNING", None)
     if _active_pid_path and _active_pid_path.exists():
         try:
             _active_pid_path.unlink()
@@ -727,14 +732,14 @@ def _remove_pid_file() -> None:
 def _setup_pid_file(sprint_num: Optional[int]) -> None:
     """Write PID to dashboard/sprints/sprint-N.pid and register cleanup handlers."""
     global _active_pid_path
-    if sprint_num is None:
-        return
-    sprints_dir = SPRINTS_DIR
-    sprints_dir.mkdir(parents=True, exist_ok=True)
-    pid_path = sprints_dir / f"sprint-{sprint_num}.pid"
-    pid_path.write_text(str(os.getpid()), encoding="utf-8")
-    _active_pid_path = pid_path
+    # Hold the label lock for the duration of the run (issue #754). Set before the
+    # sprint_num guard so the lock — and its cleanup — covers every real run. It
+    # propagates to dispatched agents because each subprocess inherits
+    # os.environ.copy() (see sub_env below).
+    os.environ["COMMANDER_SPRINT_RUNNING"] = "1"
 
+    # Register lock + PID cleanup on every exit path before the sprint_num guard,
+    # so the run lock is always cleared on exit even when no PID file is written.
     atexit.register(_remove_pid_file)
 
     def _sig_handler(signum: int, frame: object) -> None:
@@ -743,6 +748,14 @@ def _setup_pid_file(sprint_num: Optional[int]) -> None:
 
     signal.signal(signal.SIGTERM, _sig_handler)
     signal.signal(signal.SIGINT, _sig_handler)
+
+    if sprint_num is None:
+        return
+    sprints_dir = SPRINTS_DIR
+    sprints_dir.mkdir(parents=True, exist_ok=True)
+    pid_path = sprints_dir / f"sprint-{sprint_num}.pid"
+    pid_path.write_text(str(os.getpid()), encoding="utf-8")
+    _active_pid_path = pid_path
 
 
 # ── Pause check (AC-3) ───────────────────────────────────────────────────────

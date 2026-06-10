@@ -7,9 +7,10 @@ from __future__ import annotations
 
 import enum
 import json
+import os
 import subprocess
 import time
-from typing import Optional
+from typing import Iterable, Optional
 
 try:
     from services.logging import log as _log
@@ -46,9 +47,41 @@ STATE_LABELS: dict[TicketState, frozenset[str]] = {
 
 STATUS_LABELS: frozenset[str] = frozenset().union(*STATE_LABELS.values())
 
+# During an active sprint run only status labels may change; sprint-N and every
+# other label must be frozen (issue #754). RUN_MUTABLE_LABELS is the allow-list
+# enforced by the run lock — it is exactly STATUS_LABELS.
+RUN_MUTABLE_LABELS: frozenset[str] = STATUS_LABELS
+
+_RUN_LOCK_ENV = "COMMANDER_SPRINT_RUNNING"
+
 
 class TransitionError(Exception):
     """Raised when a ticket label transition fails after all retries."""
+
+
+def run_lock_active() -> bool:
+    """True when a sprint run holds the label lock (COMMANDER_SPRINT_RUNNING=1)."""
+    return os.environ.get(_RUN_LOCK_ENV) == "1"
+
+
+def assert_run_mutable(add: Iterable[str], remove: Iterable[str]) -> None:
+    """Guard label mutations against the sprint run lock (issue #754).
+
+    When a sprint run is active (COMMANDER_SPRINT_RUNNING=1), every label being
+    added or removed must be in RUN_MUTABLE_LABELS (i.e. a status label). Any
+    non-status label in the add/remove sets raises TransitionError. When the lock
+    is not held this is a no-op, so existing behavior is unchanged.
+    """
+    if not run_lock_active():
+        return
+    touched = frozenset(add) | frozenset(remove)
+    illegal = touched - RUN_MUTABLE_LABELS
+    if illegal:
+        raise TransitionError(
+            f"Sprint run active ({_RUN_LOCK_ENV}=1): refusing to mutate "
+            f"non-status label(s) {sorted(illegal)}. Only status labels "
+            f"{sorted(RUN_MUTABLE_LABELS)} may change during a run."
+        )
 
 
 def _fetch_labels(issue: int, repo: str) -> frozenset[str]:
@@ -144,6 +177,11 @@ def transition(
 
         to_remove = current_status - desired
         to_add = desired - current_status
+
+        # Run lock (issue #754): refuse any add/remove that touches a non-status
+        # label while a sprint run is active. transition() only ever moves status
+        # labels, so this is defensive — but it makes a violation loud.
+        assert_run_mutable(to_add, to_remove)
 
         if not to_remove and not to_add:
             _log_transition(issue, current_status, desired, actor, note, noop=True)

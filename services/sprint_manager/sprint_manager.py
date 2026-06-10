@@ -36,6 +36,7 @@ import email.mime.text
 import json
 import os
 import re
+import shutil
 import signal
 import smtplib
 import subprocess
@@ -191,6 +192,20 @@ ALERTS_DIR           = DASHBOARD_DIR / "alerts"
 _HAIKU_INPUT_COST_PER_M  = 0.80   # claude-haiku-4-5-20251001 input (reference)
 _HAIKU_OUTPUT_COST_PER_M = 4.00   # claude-haiku-4-5-20251001 output (reference)
 
+# Default coder-model routing by ticket size (issue #789).
+# S → haiku (fast/cheap for small changes); M/L/XL → sonnet.
+_DEFAULT_CODER_BY_SIZE: dict = {
+    "S":  "claude-haiku-4-5",
+    "M":  "claude-sonnet-4-6",
+    "L":  "claude-sonnet-4-6",
+    "XL": "claude-sonnet-4-6",
+}
+
+# Doctor auth probe cache — at most one real probe per TTL seconds (issue #789).
+_DOCTOR_AUTH_LAST_PROBE: float = 0.0
+_DOCTOR_AUTH_PROBE_TTL: float = 5 * 60  # 5 minutes
+DOCTOR_MIN_DISK_BYTES: int = 1 * 1024 * 1024 * 1024  # 1 GB minimum free space
+
 # Set by _sigterm_handler when the user cancels the sprint (issue #365, #514).
 # Checked in write_sprint_summary and in main()'s SystemExit handler.
 # threading.Event for thread-safe signaling across worker threads.
@@ -266,6 +281,8 @@ class SprintConfig:
         "MEDIUM": "claude-haiku-4-5",
         "HIGH":   "claude-sonnet-4-6",
     })
+    # Size-tier model routing for coder (issue #789)
+    coder_by_size:     dict = field(default_factory=lambda: dict(_DEFAULT_CODER_BY_SIZE))
 
     @property
     def worktree_tester_app(self) -> Path:
@@ -428,6 +445,15 @@ def load_config(path: Path) -> "SprintConfig":
             if isinstance(_from_yaml, dict):
                 tester_by_risk.update({str(k): str(v) for k, v in _from_yaml.items()})
 
+    # ── agent_config.coder.by_size (issue #789) ──────────────────────────────
+    coder_by_size: dict = dict(_DEFAULT_CODER_BY_SIZE)
+    if isinstance(agent_cfg, dict):
+        _coder_sub = agent_cfg.get("coder") or {}
+        if isinstance(_coder_sub, dict) and _coder_sub.get("by_size"):
+            _from_yaml_size = _coder_sub["by_size"]
+            if isinstance(_from_yaml_size, dict):
+                coder_by_size.update({str(k).upper(): str(v) for k, v in _from_yaml_size.items()})
+
     return SprintConfig(
         repo_name             = repo_name,
         worktree_coder        = worktree_coder,
@@ -452,6 +478,7 @@ def load_config(path: Path) -> "SprintConfig":
         estimator_model             = estimator_model,
         documentor_model            = documentor_model,
         tester_by_risk              = tester_by_risk,
+        coder_by_size               = coder_by_size,
     )
 
 
@@ -659,17 +686,20 @@ def _db_agent_start_sm(
     agent: str,
     risk_tier: Optional[str] = None,
     model_used: Optional[str] = None,
+    routing_reason: Optional[str] = None,
 ) -> None:
     """Best-effort open of an agent_runs row at dispatch time (#764).
 
     `risk_tier` and `model_used` are supplied for tester dispatches that
-    use risk-tier routing (issue #790); other agents pass None.
+    use risk-tier routing (issue #790). `routing_reason` is supplied for
+    coder dispatches using size-tier routing (issue #789).
     """
     try:
         import db  # apps/dashboard on sys.path (line 142)
         db.record_agent_start(
             int(issue_number), sprint_label, agent,
             risk_tier=risk_tier, model_used=model_used,
+            routing_reason=routing_reason,
         )
     except (Exception, SystemExit):
         pass
@@ -3315,6 +3345,123 @@ def _agent_identity_env(role: str, issue_num: Optional[int]) -> dict[str, str]:
     return env
 
 
+# ── Coder model routing by ticket size (issue #789) ───────────────────────────
+
+def _resolve_coder_model(
+    issue_num: int,
+    cfg: Optional["SprintConfig"],
+    estimate: Optional[dict] = None,
+) -> tuple[str, str]:
+    """Return (model, routing_reason) for a coder dispatch.
+
+    Routing precedence:
+      1. If estimate has a known size (S/M/L/XL) → look up cfg.coder_by_size
+      2. Otherwise → cfg.coder_model flat default (or hardcoded sonnet fallback)
+
+    routing_reason is e.g. "size=S" or "unestimated:default".
+    """
+    flat_default = cfg.coder_model if cfg is not None else "claude-sonnet-4-6"
+    if estimate:
+        size = str(estimate.get("size") or "").upper().strip()
+        if size in ("S", "M", "L", "XL"):
+            by_size = (cfg.coder_by_size if cfg is not None else None) or _DEFAULT_CODER_BY_SIZE
+            model = by_size.get(size) or flat_default
+            return model, f"size={size}"
+    return flat_default, "unestimated:default"
+
+
+# ── Pre-dispatch doctor (issue #789) ─────────────────────────────────────────
+
+def _doctor_probe_auth() -> Optional[str]:
+    """Probe Claude CLI auth. Returns None on success, error string on failure.
+
+    Result is cached for _DOCTOR_AUTH_PROBE_TTL seconds so at most one real
+    subprocess call is made per TTL window across all dispatches.
+    """
+    global _DOCTOR_AUTH_LAST_PROBE
+    now = time.monotonic()
+    if now - _DOCTOR_AUTH_LAST_PROBE < _DOCTOR_AUTH_PROBE_TTL:
+        return None  # cache hit — skip re-probe
+    try:
+        result = subprocess.run(
+            ["claude", "--version"],
+            capture_output=True,
+            timeout=10,
+            text=True,
+        )
+        if result.returncode != 0:
+            return (
+                f"claude CLI returned non-zero exit on version check "
+                f"(rc={result.returncode}): {result.stderr.strip()}"
+            )
+        _DOCTOR_AUTH_LAST_PROBE = now
+        return None
+    except FileNotFoundError:
+        return "claude CLI not found during auth probe"
+    except subprocess.TimeoutExpired:
+        return "claude CLI timed out during auth probe (>10 s)"
+    except Exception as exc:
+        return f"claude CLI auth probe failed: {exc}"
+
+
+def _dispatch_doctor(
+    cfg: Optional["SprintConfig"],
+    alert_modes: list[str],
+    issue_num: Optional[int] = None,
+    eff_repo: Optional[str] = None,
+) -> Optional[str]:
+    """Pre-dispatch environment health check (issue #789).
+
+    Checks: CLI present, auth alive (cached), worktree exists, disk space.
+    Returns None when healthy. On any failure fires a dispatch-blocked alert
+    and returns the error string so the caller can halt without spawning a worker.
+    """
+    def _fail(err: str) -> str:
+        dispatch_alerts(
+            alert_modes,
+            title=(
+                f"dispatch-blocked: environment check failed"
+                + (f" (issue #{issue_num})" if issue_num else "")
+            ),
+            body=err,
+            issue_num=issue_num,
+            category="dispatch-blocked",
+            cfg=cfg,
+            repo=eff_repo,
+        )
+        return err
+
+    # 1. Claude CLI present
+    if shutil.which("claude") is None:
+        return _fail("dispatch-blocked: claude CLI not found in PATH")
+
+    # 2. Auth alive (cached probe)
+    auth_err = _doctor_probe_auth()
+    if auth_err:
+        return _fail(f"dispatch-blocked: auth check failed — {auth_err}")
+
+    # 3. Coder worktree path exists
+    worktree = cfg.worktree_coder if cfg is not None else None
+    if worktree is not None and not Path(worktree).exists():
+        return _fail(f"dispatch-blocked: coder worktree path does not exist: {worktree}")
+
+    # 4. Disk space above threshold
+    check_path = worktree if worktree is not None else Path.cwd()
+    try:
+        free_bytes = shutil.disk_usage(str(check_path)).free
+        if free_bytes < DOCTOR_MIN_DISK_BYTES:
+            free_gb = free_bytes / (1024 ** 3)
+            need_gb = DOCTOR_MIN_DISK_BYTES / (1024 ** 3)
+            return _fail(
+                f"dispatch-blocked: low disk space "
+                f"({free_gb:.1f} GB free, {need_gb:.0f} GB required)"
+            )
+    except OSError:
+        pass  # can't stat path — don't block on it
+
+    return None  # all checks passed
+
+
 def _dispatch_coder(
     issue_num: int,
     alert_modes: list[str],
@@ -3346,6 +3493,17 @@ def _dispatch_coder(
     eff_repo = repo_name or (cfg.repo_name if cfg else None)
     api_url  = cfg.api_url if cfg else None
     cwd_path = cfg.worktree_coder if cfg else WORKTESTER_DASHBOARD
+
+    # Pre-dispatch doctor: check environment health before doing any work.
+    doctor_err = _dispatch_doctor(cfg, alert_modes, issue_num=issue_num, eff_repo=eff_repo)
+    if doctor_err:
+        structured_log.error(
+            "dispatch_blocked",
+            f"[coder] pre-dispatch doctor failed for issue #{issue_num}: {doctor_err}",
+            issue_num=issue_num,
+        )
+        record_failure(issue_num, "dispatch-blocked", detail=doctor_err)
+        return False, "dispatch-blocked"
 
     guard_err = _design_docs_guard(cwd_path)
     if guard_err:
@@ -3454,7 +3612,9 @@ def _dispatch_coder(
     # Give the headless run the same coder persona an interactive /coder session
     # would (subagents/slash-commands don't load in `claude -p`). Keep `-p PROMPT`
     # last so the later `cmd[-1] += sprint_hint` append still targets the prompt.
-    coder_model = cfg.coder_model if cfg is not None else "claude-sonnet-4-6"
+    _coder_estimate = _load_estimate(issue_num)
+    coder_model, coder_routing_reason = _resolve_coder_model(issue_num, cfg, estimate=_coder_estimate)
+    print(f"  [size-routing] issue #{issue_num}: model={coder_model}, reason={coder_routing_reason}", flush=True)
     cmd = [
         "claude",
         "--model", coder_model,
@@ -6210,7 +6370,13 @@ def _run_pipeline_dispatch(
 
         ist.set_agent_status("coder_dispatched")
         ist.coder_started_at = ist.status_changed_at
-        _db_agent_start_sm(num, label, "coder")  # issue #764
+        # Pre-compute model + routing_reason (issue #789) so agent_runs captures
+        # the selection at dispatch time, mirroring the tester risk-tier pattern.
+        _coder_model_sel, _coder_route_reason = _resolve_coder_model(num, cfg, estimate=_est)
+        _db_agent_start_sm(
+            num, label, "coder",
+            model_used=_coder_model_sel, routing_reason=_coder_route_reason,
+        )  # issue #764, #789
         _emit_sprint_lifecycle_event(
             type="ticket_dispatched", target=f"#{num}", actor="system",
             detail={"agent": "CODER"}, project=eff_repo or label, action_id=run_id,
@@ -6962,7 +7128,14 @@ def run_sprint(
                 # -- Dispatch coder --
                 issue_state.set_agent_status("coder_dispatched")
                 issue_state.coder_started_at = issue_state.status_changed_at
-                _db_agent_start_sm(num, label, "coder")  # issue #764
+                # Pre-compute model + routing_reason (issue #789) before opening the
+                # agent_runs row so the selection is captured at dispatch time.
+                _ser_est = _load_estimate(num)
+                _ser_coder_model, _ser_route_reason = _resolve_coder_model(num, cfg, estimate=_ser_est)
+                _db_agent_start_sm(
+                    num, label, "coder",
+                    model_used=_ser_coder_model, routing_reason=_ser_route_reason,
+                )  # issue #764, #789
                 _emit_sprint_lifecycle_event(
                     type="ticket_dispatched",
                     target=f"#{num}",

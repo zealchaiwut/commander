@@ -141,6 +141,39 @@ def latest_status_from_payload(payload: Any) -> str:
     return normalize_status(deploy.get("status") if isinstance(deploy, dict) else None)
 
 
+def latest_deploy_from_payload(payload: Any) -> dict:
+    """Extract status, commit SHA, and last-deploy timestamp from a deploys body.
+
+    Render returns a list of ``{"deploy": {...}}`` wrappers (tolerates a bare
+    list of deploy objects too). Returns a dict with:
+
+      - ``status``      → normalized ``queued|building|live|failed``
+      - ``commit``      → the deploy's commit SHA (``deploy.commit.id``) or None
+      - ``finished_at`` → ``finishedAt``/``updatedAt``/``createdAt`` or None
+
+    An empty/absent payload yields a safe default (building, no commit/ts).
+    """
+    items = payload if isinstance(payload, list) else []
+    if not items:
+        return {"status": "building", "commit": None, "finished_at": None}
+    first = items[0]
+    deploy = first.get("deploy", first) if isinstance(first, dict) else {}
+    if not isinstance(deploy, dict):
+        deploy = {}
+    commit = deploy.get("commit")
+    commit_sha = commit.get("id") if isinstance(commit, dict) else None
+    finished_at = (
+        deploy.get("finishedAt")
+        or deploy.get("updatedAt")
+        or deploy.get("createdAt")
+    )
+    return {
+        "status": normalize_status(deploy.get("status")),
+        "commit": commit_sha,
+        "finished_at": finished_at,
+    }
+
+
 def map_api_error(status_code: int) -> tuple[int, str]:
     """Map an upstream Render HTTP status to a ``(http_status, detail)`` pair.
 

@@ -63,6 +63,47 @@ def seed_for(slug: str) -> dict[str, dict[str, Any]]:
     return copy.deepcopy(SEED_DEFAULTS.get(slug, {}))
 
 
+def known_deploy_slugs() -> tuple[str, ...]:
+    """Return the project slugs that ship seed deploy config (commander, perf-coach).
+
+    The Deploy tab aggregates environments across these projects, so both are
+    always visible even when only one is listed in ``projects.json``.
+    """
+    return tuple(SEED_DEFAULTS.keys())
+
+
+def overview_entries_for(
+    slug: str, merged: dict[str, dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Build secret-safe Deploy-tab card entries for one project's merged config.
+
+    One entry per configured environment (``prd``, ``uat``) whose host is
+    ``local`` or ``render``. Each entry carries ``project``, ``env``, ``host``
+    plus host-specific fields:
+
+      - local  → ``branch`` (falling back to the per-env default)
+      - render → ``render_service_id`` and ``render_api_key_set`` (bool)
+
+    ``render_api_key`` is NEVER included in cleartext.
+    """
+    out: list[dict[str, Any]] = []
+    for env in SUPPORTED_ENVS:
+        entry = merged.get(env)
+        if not entry:
+            continue
+        host = entry.get("host")
+        if host not in SUPPORTED_HOSTS:
+            continue
+        e: dict[str, Any] = {"project": slug, "env": env, "host": host}
+        if host == "local":
+            e["branch"] = entry.get("branch") or branch_default(env)
+        elif host == "render":
+            e["render_service_id"] = entry.get("render_service_id") or None
+            e["render_api_key_set"] = bool(entry.get("render_api_key"))
+        out.append(e)
+    return out
+
+
 def branch_default(env: str) -> Optional[str]:
     """Return the default branch for *env* (``prd``→master, ``uat``→develop)."""
     return _BRANCH_DEFAULTS.get(env)

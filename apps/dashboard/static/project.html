@@ -1857,7 +1857,7 @@
     }
     .smgmt-ticket.drag-before { box-shadow: inset 0 2px 0 var(--blue); }
     .smgmt-ticket.drag-after  { box-shadow: inset 0 -2px 0 var(--blue); }
-    .smgmt-ticket.is-selected { background: var(--blue-bg); border-left: 3px solid var(--blue); }
+    .smgmt-ticket.is-selected { background: var(--blue-bg); box-shadow: inset 0 0 0 1px var(--blue); }
     .smgmt-ticket-grip {
       color: var(--text-sub); font-size: 13px; flex-shrink: 0;
       opacity: 0; transition: opacity 0.15s, color 0.15s, transform 0.12s;
@@ -1879,7 +1879,7 @@
     }
     .smgmt-ticket-num:hover { color: var(--blue); }
     .smgmt-ticket-title {
-      flex: 1; font-weight: 500; line-height: 1.4; min-width: 0;
+      flex: 1; font-weight: 600; color: var(--text); line-height: 1.4; min-width: 0;
       white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
     .smgmt-ticket-status {
@@ -4391,8 +4391,8 @@
     .pf-no-conflict { color: var(--text-muted); font-style: italic; margin: 0; }
     .pf-conflict-item {
       margin: 0 0 5px; padding: 6px 10px;
-      background: rgba(220, 38, 38, .07); border-left: 3px solid #ef4444;
-      border-radius: 0 4px 4px 0;
+      background: var(--red-bg); border: 1px solid var(--red);
+      border-radius: 5px;
     }
     .pf-conflict-item code {
       font-family: var(--font-mono, monospace); font-size: 11px;

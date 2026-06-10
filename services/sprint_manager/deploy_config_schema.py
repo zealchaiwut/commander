@@ -49,7 +49,11 @@ SEED_DEFAULTS: dict[str, dict[str, dict[str, Any]]] = {
     },
     "perf-coach": {
         "prd": {"host": "render"},
-        "uat": {"host": "local", "branch": "develop"},
+        "uat": {
+            "host": "local",
+            "branch": "develop",
+            "launchd_label": "com.perfcoach.uat",
+        },
     },
 }
 

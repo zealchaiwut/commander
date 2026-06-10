@@ -44,6 +44,9 @@ KNOWN_FIELDS: dict[str, dict[str, Any]] = {
     "tracked": {"secret": False, "default": True},
     # Per-project tester repo override (GITHUB_ISSUE_TEST_REPO equivalent)
     "tester_test_repo": {"secret": False, "default": ""},
+    # Token cost price map: {"model-name": {"in": price_per_1m, "out": price_per_1m}}
+    # Null default means "not configured" — Cost tab hides $ column when absent.
+    "price_map": {"secret": False, "default": None},
     # Secrets (presence-only; values never returned)
     "github_token": {"secret": True, "default": None},
     "database_url": {"secret": True, "default": None, "env_var": "DATABASE_URL"},

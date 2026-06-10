@@ -12,13 +12,27 @@
 #   3. Copies the plist to ~/Library/LaunchAgents/ with 644 permissions.
 #   4. Loads the service with launchctl and verifies it is listed.
 #
+# GH_TOKEN (issue #772): a process launched by launchd is detached from the
+# login session and cannot read the macOS keychain where `gh` stores creds, so
+# the startup repo check fails with "does not exist or is inaccessible". `gh`
+# prefers GH_TOKEN over the keychain, so a token is injected into both the plist
+# EnvironmentVariables block and the agent .env. The value is supplied at install
+# time (--gh-token, or $GH_TOKEN / $GITHUB_TOKEN) — never hard-coded in the repo.
+#
 # Usage:
 #   install_launchd.sh [--label L] [--working-dir D] [--uvicorn-path P]
 #                      [--port N] [--environment E] [--server-app A]
-#                      [--print-plist]
+#                      [--gh-token T] [--env-file F]
+#                      [--print-plist] [--write-env-only]
 #
+#   --gh-token      GitHub token for headless `gh` auth. If omitted, read from
+#                   the $GH_TOKEN or $GITHUB_TOKEN env var at install time.
+#   --env-file      Path to the agent .env that receives GH_TOKEN
+#                   (default: <working-dir>/.env).
 #   --print-plist   Render the plist to stdout and exit 0 WITHOUT touching
 #                   launchctl or any port/process (used by tests / dry runs).
+#   --write-env-only  Write/update GH_TOKEN in --env-file and exit 0 WITHOUT
+#                   touching launchctl or rendering the plist (tests / dry runs).
 
 set -euo pipefail
 
@@ -33,17 +47,23 @@ PORT=8000
 ENVIRONMENT="prd"
 SERVER_APP="server:app"
 PRINT_PLIST=false
+WRITE_ENV_ONLY=false
+GH_TOKEN_ARG=""
+ENV_FILE=""
 
 # ── Parse args ────────────────────────────────────────────────────────────────
 while [ $# -gt 0 ]; do
   case "$1" in
-    --label)         LABEL="$2"; shift 2 ;;
-    --working-dir)   WORKING_DIR="$2"; shift 2 ;;
-    --uvicorn-path)  UVICORN_PATH="$2"; shift 2 ;;
-    --port)          PORT="$2"; shift 2 ;;
-    --environment)   ENVIRONMENT="$2"; shift 2 ;;
-    --server-app)    SERVER_APP="$2"; shift 2 ;;
-    --print-plist)   PRINT_PLIST=true; shift ;;
+    --label)          LABEL="$2"; shift 2 ;;
+    --working-dir)    WORKING_DIR="$2"; shift 2 ;;
+    --uvicorn-path)   UVICORN_PATH="$2"; shift 2 ;;
+    --port)           PORT="$2"; shift 2 ;;
+    --environment)    ENVIRONMENT="$2"; shift 2 ;;
+    --server-app)     SERVER_APP="$2"; shift 2 ;;
+    --gh-token)       GH_TOKEN_ARG="$2"; shift 2 ;;
+    --env-file)       ENV_FILE="$2"; shift 2 ;;
+    --print-plist)    PRINT_PLIST=true; shift ;;
+    --write-env-only) WRITE_ENV_ONLY=true; shift ;;
     -h|--help)
       grep '^#' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
       exit 0 ;;
@@ -56,6 +76,36 @@ done
 PLIST_DEST="$HOME/Library/LaunchAgents/${LABEL}.plist"
 LOG_DIR="$HOME/Library/Logs/${LABEL}"
 UVICORN_BIN_DIR="$(dirname "$UVICORN_PATH")"
+[ -n "$ENV_FILE" ] || ENV_FILE="$WORKING_DIR/.env"
+
+# ── Resolve the GH_TOKEN value (issue #772) ───────────────────────────────────
+# Precedence: explicit --gh-token > $GH_TOKEN > $GITHUB_TOKEN. Empty if none —
+# the token is never hard-coded, so an absent value simply omits GH_TOKEN.
+GH_TOKEN_VALUE="${GH_TOKEN_ARG:-${GH_TOKEN:-${GITHUB_TOKEN:-}}}"
+
+# Build the optional plist fragment only when a token is present, so a tokenless
+# install renders exactly the pre-#772 plist (backward compatible with #724).
+GH_TOKEN_PLIST_BLOCK=""
+if [ -n "$GH_TOKEN_VALUE" ]; then
+  GH_TOKEN_PLIST_BLOCK=$'\n    <key>GH_TOKEN</key>\n    <string>'"${GH_TOKEN_VALUE}"$'</string>'
+fi
+
+# write_env_token <env-file> <token> — set/replace GH_TOKEN in the agent .env.
+# Idempotent: an existing GH_TOKEN line is rewritten in place (no duplicate);
+# otherwise the key is appended. Other keys are left untouched.
+write_env_token() {
+  local env_file="$1" token="$2"
+  mkdir -p "$(dirname "$env_file")"
+  touch "$env_file"
+  if grep -q '^GH_TOKEN=' "$env_file" 2>/dev/null; then
+    # Use a tmp file so this works the same on macOS/BSD and GNU sed.
+    grep -v '^GH_TOKEN=' "$env_file" > "${env_file}.tmp"
+    printf 'GH_TOKEN=%s\n' "$token" >> "${env_file}.tmp"
+    mv "${env_file}.tmp" "$env_file"
+  else
+    printf 'GH_TOKEN=%s\n' "$token" >> "$env_file"
+  fi
+}
 
 # ── Render the plist ──────────────────────────────────────────────────────────
 # Built inline (no commander-specific template) so every value is parametrized.
@@ -103,7 +153,7 @@ render_plist() {
     <key>PATH</key>
     <string>${UVICORN_BIN_DIR}:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
     <key>ENVIRONMENT</key>
-    <string>${ENVIRONMENT}</string>
+    <string>${ENVIRONMENT}</string>${GH_TOKEN_PLIST_BLOCK}
   </dict>
 
   <!-- Log files under ~/Library/Logs/<label>/ -->
@@ -123,12 +173,28 @@ if $PRINT_PLIST; then
   exit 0
 fi
 
+# ── Dry run: write GH_TOKEN to the agent .env and exit (no launchctl) ──────────
+if $WRITE_ENV_ONLY; then
+  if [ -z "$GH_TOKEN_VALUE" ]; then
+    echo "ERROR: --write-env-only needs a token (--gh-token, \$GH_TOKEN, or \$GITHUB_TOKEN)." >&2
+    exit 1
+  fi
+  write_env_token "$ENV_FILE" "$GH_TOKEN_VALUE"
+  echo "Wrote GH_TOKEN to $ENV_FILE"
+  exit 0
+fi
+
 echo "=== LaunchAgent Installer ==="
 echo "Label       : $LABEL"
 echo "Working dir : $WORKING_DIR"
 echo "Uvicorn     : $UVICORN_PATH"
 echo "Port        : $PORT"
 echo "Environment : $ENVIRONMENT"
+if [ -n "$GH_TOKEN_VALUE" ]; then
+  echo "GH_TOKEN    : set (headless gh auth) -> plist + $ENV_FILE"
+else
+  echo "GH_TOKEN    : not supplied — gh will fall back to the keychain (may fail under launchd)"
+fi
 
 # ── Sanity checks ─────────────────────────────────────────────────────────────
 if [ ! -x "$UVICORN_PATH" ] && [ ! -f "$UVICORN_PATH" ]; then
@@ -206,6 +272,13 @@ mkdir -p "$LOG_DIR"
 render_plist > "$PLIST_DEST"
 chmod 644 "$PLIST_DEST"
 echo "Plist installed to: $PLIST_DEST (permissions: 644)"
+
+# Mirror the token into the agent .env so anything that sources .env at runtime
+# (not just the launchd environment) sees the same GH_TOKEN (issue #772).
+if [ -n "$GH_TOKEN_VALUE" ]; then
+  write_env_token "$ENV_FILE" "$GH_TOKEN_VALUE"
+  echo "GH_TOKEN written to: $ENV_FILE"
+fi
 
 # ── Load the service ──────────────────────────────────────────────────────────
 echo "Loading service with launchctl..."

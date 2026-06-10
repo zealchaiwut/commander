@@ -152,6 +152,13 @@ except ImportError:
     _SCAFFOLD_AVAILABLE = False
 
 try:
+    import clean_sprint_files as _clean_sprint_files
+    _CLEAN_SPRINT_AVAILABLE = True
+except ImportError:
+    _clean_sprint_files = None  # type: ignore[assignment]
+    _CLEAN_SPRINT_AVAILABLE = False
+
+try:
     import mis_sizing as _mis_sizing
     _MIS_SIZING_AVAILABLE = True
 except ImportError:
@@ -494,6 +501,7 @@ def _restore_sprint_statuses_on_startup() -> None:
 
     attached = 0
     skipped  = 0
+    archived_total = 0
 
     for proj in projects:
         try:
@@ -501,6 +509,14 @@ def _restore_sprint_statuses_on_startup() -> None:
             sprints_dir  = _commander_dir(project_root) / "sprints"
             if not sprints_dir.exists():
                 continue
+
+            # Archived sprint files live in .commander/sprints/archive/ and are
+            # intentionally skipped by the per-file scans below (glob is
+            # non-recursive). Count them once so we can emit a single summary
+            # line instead of one skip line per archived file (issue #735).
+            archive_dir = sprints_dir / "archive"
+            if archive_dir.is_dir():
+                archived_total += sum(1 for p in archive_dir.iterdir() if p.is_file())
 
             for status_file in sprints_dir.glob("*-status.json"):
                 sprint_label = status_file.name.removesuffix("-status.json")
@@ -560,6 +576,8 @@ def _restore_sprint_statuses_on_startup() -> None:
         except Exception as exc:
             print(f"[startup-restore] error scanning project {proj.get('repo')}: {exc}")
 
+    if archived_total:
+        print(f"[startup-restore] Skipped {archived_total} archived sprint files")
     print(
         f"[startup-restore] completed — {attached} sprint(s) re-attached,"
         f" {skipped} skipped"
@@ -3023,6 +3041,64 @@ def post_scaffold_apply(slug: str, body: _ScaffoldApplyBody):
     return {
         "created": result["created"],
         "compliant": result["compliant"],
+    }
+
+
+# ── Sprint file archive maintenance (issue #735) ──────────────────────────────
+
+class _SprintCleanupBody(BaseModel):
+    project: str
+    dry_run: bool = False
+
+
+@app.post("/api/maintenance/sprints/cleanup")
+def post_sprint_cleanup(body: _SprintCleanupBody):
+    """Archive stale per-sprint runtime files for a project's finished sprints.
+
+    Moves sprint-N-plan.json, the zero-issue sprint-N.json placeholder, and
+    sprint-N-state.json for finished sprints into .commander/sprints/archive/.
+    Status, estimate, and summary files are never touched; nothing is deleted.
+
+    With { dry_run: true } it returns the same shape as a preview without
+    moving anything. Returns { archived: [...], kept_count: N }.
+    """
+    if not _CLEAN_SPRINT_AVAILABLE:
+        raise HTTPException(status_code=503, detail="clean_sprint_files module unavailable")
+
+    project = (body.project or "").strip()
+    if not project:
+        raise HTTPException(status_code=400, detail="project is required")
+
+    project_root = _project_root_path(project)
+    sprints_dir = _commander_dir(project_root) / "sprints"
+    if not sprints_dir.exists():
+        return {"archived": [], "kept_count": 0, "dry_run": body.dry_run}
+
+    # A sprint counts as finished when it has a posted summary issue OR a local
+    # summary markdown, AND no live process is running it. The summary-issue set
+    # is GitHub-backed; running state uses the dashboard's authoritative check.
+    finished_nums: set[int] = set()
+    try:
+        for label in _finished_sprint_summaries(project).keys():
+            m = re.match(r"^sprint-(\d+)$", label)
+            if m:
+                finished_nums.add(int(m.group(1)))
+    except Exception:
+        pass
+
+    def _running_check(_dir: Path, n: int) -> bool:
+        return _is_sprint_running(project_root, f"sprint-{n}")
+
+    result = _clean_sprint_files.run_cleanup(
+        sprints_dir,
+        dry_run=body.dry_run,
+        has_summary_issue=lambda n: n in finished_nums,
+        running_check=_running_check,
+    )
+    return {
+        "archived": result["archived"],
+        "kept_count": result["kept_count"],
+        "dry_run": result["dry_run"],
     }
 
 
@@ -6515,6 +6591,9 @@ def get_sprint_live_snapshot(sprint_label: str, project: str):
       "started_at": "<ISO8601>",
       "current_ticket": {"number": N, "title": "..."} | null,
       "active_agent": {"name": "coder"|"tester", "model": "...", "pid": N} | null,
+      "active_agents": [{"name": "coder"|"tester", "ticket": {"number": N, "title": "..."}, "pid": N}, ...],
+      "pipeline_mode": <bool>,
+      "levels": [{"level": N, "total": N, "merged": N, "state": "complete"|"active"|"waiting"}, ...],
       "recent_log_lines": [{"timestamp": "HH:MM:SS", "type": "...", "message": "..."}, ...],
       "issues": [
         {
@@ -6732,6 +6811,65 @@ def get_sprint_live_snapshot(sprint_label: str, project: str):
         except Exception:
             pass
 
+    # ── Pipeline mode + dual active agents + per-level progress (issue #739) ──
+    # pipeline_mode is persisted on the sprint state by the sprint manager. When
+    # set, the board renders two active-agent cards and a waiting-level structure.
+    pipeline_mode = bool(status_data.get("pipeline_mode", False))
+
+    # active_agents: every in-flight agent derived from per-issue lifecycle
+    # timestamps. Serial mode yields at most one; pipeline mode yields a coder and
+    # a tester working different tickets at once. Ordered [coder, tester].
+    agent_pid = active_agent.get("pid") if active_agent else None
+    coder_entry = None
+    tester_entry = None
+    for iss in issues:
+        ticket = {"number": iss.get("number"), "title": iss.get("title", "")}
+        cs, cf = iss.get("coder_started_at"), iss.get("coder_finished_at")
+        ts, tf = iss.get("tester_started_at"), iss.get("tester_finished_at")
+        if ts and not tf:
+            tester_entry = {"name": "tester", "ticket": ticket, "pid": agent_pid}
+        elif cs and not cf:
+            coder_entry = {"name": "coder", "ticket": ticket, "pid": agent_pid}
+    active_agents: list[dict] = [e for e in (coder_entry, tester_entry) if e]
+    # Fall back to the single state/pid-derived agent when no issue-level timestamps
+    # are available (keeps the serial live-log badge working unchanged).
+    if not active_agents and active_agent:
+        active_agents = [active_agent]
+
+    # levels: per dispatch-level progress for the pipeline board. Only meaningful
+    # when issues carry dispatch_level > 0 (single-level/serial runs report []).
+    def _terminal(iss: dict) -> bool:
+        return iss.get("status") in ("done", "skipped") or iss.get("agent_status") == "failed"
+
+    levels_map: dict[int, list[dict]] = {}
+    for iss in issues:
+        lvl = iss.get("dispatch_level") or 0
+        if lvl > 0:
+            levels_map.setdefault(lvl, []).append(iss)
+
+    sorted_levels = sorted(levels_map)
+    current_level: Optional[int] = None
+    for lvl in sorted_levels:
+        if not all(_terminal(i) for i in levels_map[lvl]):
+            current_level = lvl
+            break
+
+    levels_out: list[dict] = []
+    for lvl in sorted_levels:
+        group = levels_map[lvl]
+        if all(_terminal(i) for i in group):
+            level_state = "complete"
+        elif current_level is not None and lvl == current_level:
+            level_state = "active"
+        else:
+            level_state = "waiting"
+        levels_out.append({
+            "level":  lvl,
+            "total":  len(group),
+            "merged": sum(1 for i in group if i.get("status") == "done"),
+            "state":  level_state,
+        })
+
     # ── recent_log_lines: last 50 lines from sprint run log ──────────────────
     log_dir = commander / "logs"
     recent_log_lines: list[dict] = []
@@ -6748,6 +6886,10 @@ def get_sprint_live_snapshot(sprint_label: str, project: str):
         "started_at": started_at_str,
         "current_ticket": current_ticket,
         "active_agent": active_agent,
+        # Dual active agents + pipeline structure (issue #739)
+        "active_agents": active_agents,
+        "pipeline_mode": pipeline_mode,
+        "levels": levels_out,
         "recent_log_lines": recent_log_lines,
         # Stat strip fields (issue #256)
         "done_count":           done_count,

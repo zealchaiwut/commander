@@ -61,6 +61,20 @@ try:
 except ImportError:  # pragma: no cover
     yaml = None  # type: ignore[assignment]
 
+from services.sprint_manager.pipeline import (  # noqa: E402
+    StageResult as _StageResult,
+    pipeline_mode_enabled as _pipeline_mode_enabled,
+    run_level as _run_pipeline_level,
+)
+
+# issue #738: cross-thread serialization for concurrent pipeline mode — one
+# develop merge and one status-label write at a time, plus ghost reconciliation.
+from services.sprint_manager.serialization import (  # noqa: E402
+    develop_merge_guard as _develop_merge_guard,
+    label_transition_guard as _label_transition_guard,
+    ghost_status_labels as _ghost_status_labels,
+)
+
 try:
     from services.sprint_manager import sprint_repo as _sprint_repo
     _SPRINT_REPO_AVAILABLE = True
@@ -241,6 +255,8 @@ class SprintConfig:
     app_port_strategy:     str            = "prefer_default"
     # Documentor (issue #103)
     documentor_enabled:    bool           = False
+    # Concurrent pipeline mode (issue #737) — per-project opt-in, default serial
+    pipeline_mode:         bool           = False
     # Reviewer (issue #159)
     reviewer_prompt_template: Optional[str] = None
     # Documenter (issue #165)
@@ -372,6 +388,9 @@ def load_config(path: Path) -> "SprintConfig":
     # ── documentor section (issue #103) ──────────────────────────────────────
     documentor_enabled: bool = bool(data.get("documentor_enabled", False))
 
+    # ── pipeline mode (issue #737) ───────────────────────────────────────────
+    pipeline_mode: bool = bool(data.get("pipeline_mode", False))
+
     # ── reviewer section (issue #159) ────────────────────────────────────────
     reviewer_prompt = agents.get("reviewer_prompt_template") or None
 
@@ -411,6 +430,7 @@ def load_config(path: Path) -> "SprintConfig":
         app_default_port         = app_default_port,
         app_port_strategy        = app_port_strategy,
         documentor_enabled          = documentor_enabled,
+        pipeline_mode               = pipeline_mode,
         reviewer_prompt_template    = reviewer_prompt,
         documenter_prompt_template  = documenter_prompt,
         coder_model                 = coder_model,
@@ -899,6 +919,9 @@ class SprintState:
     estimator_status:        Optional[str]       = None   # "succeeded" | "failed" | "skipped"
     estimator_total_minutes: Optional[int]       = None
     estimates:               dict                = field(default_factory=dict)   # keyed by issue number (int)
+    # Concurrent pipeline mode flag (issue #739) — surfaced to the dashboard so
+    # the board can render dual active-agent cards + waiting-level state.
+    pipeline_mode:           bool                = False
 
     def to_dict(self) -> dict:
         return {
@@ -921,6 +944,7 @@ class SprintState:
             "estimator_status":          self.estimator_status,
             "estimator_total_minutes":   self.estimator_total_minutes,
             "estimates":                 self.estimates,
+            "pipeline_mode":             self.pipeline_mode,
         }
 
     @staticmethod
@@ -946,6 +970,7 @@ class SprintState:
         s.estimator_status         = d.get("estimator_status")
         s.estimator_total_minutes  = d.get("estimator_total_minutes")
         s.estimates                = d.get("estimates", {})
+        s.pipeline_mode            = bool(d.get("pipeline_mode", False))
         return s
 
     def save(self, path: Path) -> None:
@@ -1335,25 +1360,28 @@ def _get_issue_labels(issue_num: int, repo_name: Optional[str] = None) -> set[st
         return set()
 
 
-def _sweep_stale_in_progress(
+def _sweep_stale_status(
+    status_label: str,
     sprint_label: str,
     repo_name: Optional[str],
     active_issue: Optional[int] = None,
 ) -> None:
-    """Remove a leftover ``in-progress`` label from sprint tickets that are not
-    being actively worked.
+    """Remove a leftover transient status label (``in-progress`` or ``SIT``) from
+    sprint tickets that are not being actively worked.
 
-    Serial dispatch runs one agent at a time, so only the ticket currently in
-    the coder slot may legitimately carry ``in-progress``. Any other ``in-progress``
-    label is stale — left behind by an interrupted or errored run — and shows as
-    a stuck spinner on the board. One ``gh issue list`` finds them; we clear all
-    except ``active_issue``. Best-effort and bounded (no per-ticket fetches).
+    Only one ticket may legitimately carry ``in-progress`` (the coder's active
+    ticket) and one ``SIT`` (the tester's active ticket) at a time. In pipeline
+    mode both run concurrently, so a crash between the remove-label and add-label
+    calls, or an interrupted prior run, can leave a ghost label on a ticket no
+    longer being worked (issue #738 AC5). One ``gh issue list`` finds them; we
+    clear all except ``active_issue``. Best-effort and bounded (no per-ticket
+    fetches).
     """
     r = _r(repo_name)
     try:
         out = subprocess.run(
             ["gh", "issue", "list", "--repo", r,
-             "--label", "in-progress", "--label", sprint_label,
+             "--label", status_label, "--label", sprint_label,
              "--state", "open", "--json", "number", "--limit", "100"],
             capture_output=True, text=True, timeout=15,
         )
@@ -1368,14 +1396,23 @@ def _sweep_stale_in_progress(
             continue
         try:
             subprocess.run(
-                ["gh", "issue", "edit", str(n), "--repo", r, "--remove-label", "in-progress"],
+                ["gh", "issue", "edit", str(n), "--repo", r, "--remove-label", status_label],
                 capture_output=True, text=True, timeout=15,
             )
             cleared.append(n)
         except Exception:
             pass
     if cleared:
-        print(f"  [sweep] cleared stale in-progress from {len(cleared)} ticket(s): {cleared}")
+        print(f"  [sweep] cleared stale {status_label} from {len(cleared)} ticket(s): {cleared}")
+
+
+def _sweep_stale_in_progress(
+    sprint_label: str,
+    repo_name: Optional[str],
+    active_issue: Optional[int] = None,
+) -> None:
+    """Clear stale ``in-progress`` labels — see _sweep_stale_status."""
+    _sweep_stale_status("in-progress", sprint_label, repo_name, active_issue)
 
 
 def _current_status_labels(issue_num: int, repo_name: Optional[str]) -> "frozenset[str] | None":
@@ -1445,9 +1482,13 @@ def _transition_safe(
             issue_num=issue_num,
         )
         return
-    before = _current_status_labels(issue_num, repo_name)
     try:
-        changed = _sm_transition(issue_num, target_state, actor=actor, repo=repo_name, note=note)
+        # issue #738: serialize the read-modify-write so concurrent coder/tester
+        # label writes in pipeline mode cannot interleave into ghost/duplicate
+        # labels. Uncontended (and reentrant) in serial mode — no behavior change.
+        with _label_transition_guard():
+            before = _current_status_labels(issue_num, repo_name)
+            changed = _sm_transition(issue_num, target_state, actor=actor, repo=repo_name, note=note)
         structured_log.info(
             "ticket_transition",
             f"transition #{issue_num} → {target_state.value} actor={actor!r}",
@@ -2268,7 +2309,11 @@ def _call_finish_feature(
         sub_env["COMMANDER_SPRINT_RUNNING"] = sprint_label
 
     print(f"  Calling finish_feature.py --issue {issue_num} --target-branch {target_branch} ...")
-    result = subprocess.run(cmd, cwd=str(wt_root), capture_output=True, text=True, env=sub_env)
+    # issue #738: serialize develop/sprint-branch merges — if a merge is already
+    # in flight (e.g. a concurrent tester or a stale retry), block until it lands
+    # so two merges never push to the shared target branch at the same time.
+    with _develop_merge_guard():
+        result = subprocess.run(cmd, cwd=str(wt_root), capture_output=True, text=True, env=sub_env)
     if result.stdout:
         print(result.stdout.rstrip())
     if result.returncode != 0:
@@ -5717,6 +5762,291 @@ def _neon_sprint_status(sprint_label: str, neon_status: str, sprints_dir: Path) 
         _neon_sprint_json_write(json_path, data)
 
 
+# ── concurrent pipeline dispatch (issue #737) ───────────────────────────────────
+
+def _run_pipeline_dispatch(
+    *,
+    state, state_path, summary,
+    dispatch_levels, level_nums_by_idx,
+    label, sprint_num, eff_repo, api_url,
+    target_branch, sprint_branch, alert_modes, cfg, run_id,
+    eff_sprints_dir, rerun_decisions,
+    skip_gates, gate_pytest, gate_lint, gate_merge_preview,
+    gate_typecheck, gate_design, gate_frontend_lint, gate_scope,
+    resume, retry_failed,
+) -> None:
+    """Process dispatch levels with one coder + one tester worker concurrently.
+
+    Each level is drained fully before the next begins (hard level barrier).
+    Per-ticket side effects mirror the serial loop; the retry/requeue and
+    needs-rework-after-cap semantics are owned by ``pipeline.run_level``.
+    """
+    by_num = {iss.number: iss for iss in state.issues}
+    pctx: dict[int, dict] = {}
+
+    def _finalize_skip(num, ist, reason, category, *, tag, gate=False):
+        ist.set_agent_status("failed")
+        ist.failure_reason = reason
+        ist.status = "skipped"
+        ist.skip_reason = reason
+        ist.category = category
+        if gate and "gate failed" in (reason or ""):
+            summary.gate_failures.append(reason)
+        else:
+            summary.skipped.append(f"#{num} ({tag})")
+        dispatch_alerts(
+            alert_modes,
+            title=f"Issue #{num} skipped: {category}",
+            body=reason,
+            issue_num=num,
+            category=category,
+            cfg=cfg,
+            repo=eff_repo,
+        )
+        _neon_ticket_status(label, num, "failed", eff_sprints_dir)
+        state.save(state_path)
+        _post_sprint_status(state, api_url=api_url, project=eff_repo)
+
+    def _coder_stage(num, attempt):
+        ist = by_num[num]
+        _wait_if_paused(sprint_num, state, api_url=api_url)
+
+        # Estimate logging — mirrors serial ordering (issue #737 AC9).
+        _est = _load_estimate(num)
+        if _est:
+            print(f"  [estimate] size={_est.get('size', '?')}, confidence={_est.get('confidence', '?')}")
+
+        # Per-ticket port detection (issue #62).
+        chosen_port = None
+        if cfg is not None and cfg.app_default_port is not None:
+            chosen_port = _detect_port(cfg)
+            if chosen_port is not None:
+                _write_runtime_port(cfg.worktree_coder, chosen_port)
+        ctx = pctx.setdefault(num, {"fix_history": []})
+        ctx["port"] = chosen_port
+        skip_coder = rerun_decisions.get(num) == "dispatch_tester"
+        ctx["skip_coder"] = skip_coder
+
+        ist.set_agent_status("queued")
+        state.save(state_path)
+        _post_sprint_status(state, api_url=api_url)
+
+        if skip_coder:
+            print(f"  [rerun] SIT ticket: dispatching tester directly for #{num}")
+            return _StageResult.PASS
+
+        ist.set_agent_status("coder_dispatched")
+        ist.coder_started_at = ist.status_changed_at
+        _emit_sprint_lifecycle_event(
+            type="ticket_dispatched", target=f"#{num}", actor="system",
+            detail={"agent": "CODER"}, project=eff_repo or label, action_id=run_id,
+        )
+        state.save(state_path)
+        _post_sprint_status(state, api_url=api_url)
+        _transition_safe(num, _TicketState.IN_PROGRESS, actor="sprint_manager", repo_name=eff_repo)
+
+        def _on_coder_running(_ist=ist):
+            _ist.set_agent_status("coder_running")
+            _neon_ticket_status(label, num, "running", eff_sprints_dir)
+            state.save(state_path)
+            _post_sprint_status(state, api_url=api_url)
+
+        coder_ok, coder_category = _dispatch_coder(
+            num, alert_modes, sprint_branch=target_branch, repo_name=eff_repo, cfg=cfg,
+            chosen_port=chosen_port, rate_limit_events=state.rate_limit_events,
+            on_running=_on_coder_running, sprint_label=label,
+            prior_failures=ctx["fix_history"] if ctx["fix_history"] else None,
+        )
+        if not coder_ok:
+            category = coder_category or FailureCategory.CRASH
+            reason = (
+                "Subscription rate limit exhausted"
+                if category == FailureCategory.RETRY_EXHAUSTED
+                else f"Coder failed with category {category}"
+            )
+            ist.coder_finished_at = ist.status_changed_at
+            if category in _LOGIC_FAILURE_CATEGORIES:
+                record_failure(num, category, detail=_build_crash_detail(_issue_log_path(num, cfg=cfg)))
+            _finalize_skip(num, ist, reason, category, tag="coder failed")
+            return _StageResult.FAIL
+
+        if _find_feature_branch(num) is None:
+            category = FailureCategory.CODER_NO_WORK
+            reason = f"Coder exited 0 but no feature/{num}-* branch was created"
+            print(f"  {reason}")
+            record_failure(num, category, detail=reason)
+            _finalize_skip(num, ist, reason, category, tag="coder no-work")
+            return _StageResult.FAIL
+
+        ist.set_agent_status("coder_done")
+        ist.coder_finished_at = ist.status_changed_at
+        _emit_sprint_lifecycle_event(
+            type="ticket_agent_finished", target=f"#{num}", actor="system",
+            detail={"agent": "CODER"}, project=eff_repo or label, action_id=run_id,
+        )
+        state.save(state_path)
+        _post_sprint_status(state, api_url=api_url)
+        return _StageResult.PASS
+
+    def _tester_stage(num, attempt):
+        ist = by_num[num]
+        ctx = pctx.setdefault(num, {"fix_history": [], "skip_coder": False})
+        _transition_safe(num, _TicketState.SIT, actor="sprint_manager", repo_name=eff_repo)
+
+        ist.set_agent_status("tester_dispatched")
+        ist.tester_started_at = ist.status_changed_at
+        ist.tester_attempt_count += 1
+        _emit_sprint_lifecycle_event(
+            type="ticket_dispatched", target=f"#{num}", actor="system",
+            detail={"agent": "TESTER"}, project=eff_repo or label, action_id=run_id,
+        )
+        state.save(state_path)
+        _post_sprint_status(state, api_url=api_url)
+
+        def _on_tester_running(_ist=ist):
+            _ist.set_agent_status("tester_running")
+            state.save(state_path)
+            _post_sprint_status(state, api_url=api_url)
+
+        tester_rc, hang_category = _dispatch_tester(
+            num, alert_modes, sprint_branch=target_branch, repo_name=eff_repo, cfg=cfg,
+            chosen_port=ctx.get("port"), rate_limit_events=state.rate_limit_events,
+            on_running=_on_tester_running, sprint_label=label,
+        )
+        ist.tester_finished_at = ist.status_changed_at
+        if hang_category == FailureCategory.HANG:
+            _finalize_skip(num, ist, "Tester HANG detected", FailureCategory.HANG, tag="tester hang")
+            return _StageResult.FAIL
+        if hang_category == FailureCategory.RETRY_EXHAUSTED:
+            _finalize_skip(num, ist, "Subscription rate limit exhausted",
+                           FailureCategory.RETRY_EXHAUSTED, tag="rate limit exhausted")
+            return _StageResult.FAIL
+
+        ist.set_agent_status("tester_done")
+        _emit_sprint_lifecycle_event(
+            type="ticket_agent_finished", target=f"#{num}", actor="system",
+            detail={"agent": "TESTER"}, project=eff_repo or label, action_id=run_id,
+        )
+        state.save(state_path)
+        _post_sprint_status(state, api_url=api_url)
+
+        merged, summary_line, gate_category = handle_post_tester(
+            issue_num=num, tester_exit_code=tester_rc, skip_gates=skip_gates,
+            gate_pytest=gate_pytest, gate_lint=gate_lint, gate_merge_preview=gate_merge_preview,
+            gate_typecheck=gate_typecheck, gate_design=gate_design,
+            gate_frontend_lint=gate_frontend_lint, target_branch=target_branch,
+            repo_name=eff_repo, cfg=cfg, base_branch=target_branch or "develop",
+            gate_scope=gate_scope, documentor_enabled=cfg.documentor_enabled if cfg else False,
+            alert_modes=alert_modes, sprint_label=label,
+        )
+        print(f"  {summary_line}")
+        ctx["summary_line"] = summary_line
+        if merged:
+            return _StageResult.PASS
+
+        category = gate_category or FailureCategory.CRASH
+        ctx["category"] = category
+        if not ctx.get("skip_coder") and category in _LOGIC_FAILURE_CATEGORIES:
+            record_failure(num, category, detail=summary_line)
+            ctx["fix_history"].append({"attempt": attempt, "category": category, "summary": summary_line})
+            return _StageResult.REJECT  # scheduler re-queues to front of coder queue
+
+        # Non-logic gate failure or rerun-tester-direct path: terminal drop.
+        if category in _LOGIC_FAILURE_CATEGORIES:
+            _transition_safe(num, _TicketState.NEEDS_REWORK, actor="sprint_manager", repo_name=eff_repo)
+        _finalize_skip(num, ist, summary_line, category, tag=str(category), gate=True)
+        return _StageResult.FAIL
+
+    def _on_merged(num):
+        ist = by_num[num]
+        ist.set_agent_status("completed")
+        ist.status = "done"
+        summary.merged.append(f"#{num}")
+        _neon_ticket_status(label, num, "done", eff_sprints_dir,
+                            total_tokens=ist.tokens_in + ist.tokens_out)
+        state.save(state_path)
+        _post_sprint_status(state, api_url=api_url, project=eff_repo)
+
+    def _on_needs_rework(num):
+        ist = by_num[num]
+        ctx = pctx.get(num, {})
+        history = ctx.get("fix_history", [])
+        reason = f"Fix-loop exhausted after {len(history)} attempt(s)"
+        print(f"  [pipeline] {reason} — tagging needs-rework", flush=True)
+        ist.set_agent_status("failed")
+        ist.failure_reason = reason
+        ist.status = "skipped"
+        ist.skip_reason = reason
+        ist.category = FailureCategory.RETRY_EXHAUSTED
+        summary.skipped.append(f"#{num} (fix-loop exhausted)")
+        dispatch_alerts(
+            alert_modes, title=f"Issue #{num} skipped: needs-rework", body=reason,
+            issue_num=num, category=FailureCategory.RETRY_EXHAUSTED, cfg=cfg, repo=eff_repo,
+        )
+        _transition_safe(num, _TicketState.NEEDS_REWORK, actor="sprint_manager", repo_name=eff_repo)
+        _publish_gate_failure_analyses(num, repo_name=eff_repo, cfg=cfg)
+        _neon_ticket_status(label, num, "failed", eff_sprints_dir)
+        state.save(state_path)
+        _post_sprint_status(state, api_url=api_url, project=eff_repo)
+
+    prev_level_idx = -1
+    for lvl_idx, lvl in enumerate(dispatch_levels):
+        # Filter resume/retry skips, mirroring the serial loop.
+        level_nums = []
+        for iss in lvl:
+            if resume and iss.status in ("done", "skipped"):
+                summary.processed.append(f"#{iss.number}")
+                if iss.status == "done":
+                    summary.merged.append(f"#{iss.number}")
+                else:
+                    summary.skipped.append(f"#{iss.number} ({iss.skip_reason or 'skipped'})")
+                continue
+            if retry_failed and iss.status == "done":
+                summary.processed.append(f"#{iss.number}")
+                summary.merged.append(f"#{iss.number}")
+                continue
+            summary.processed.append(f"#{iss.number}")
+            level_nums.append(iss.number)
+
+        if prev_level_idx >= 0:
+            try:
+                structured_log.event(
+                    "level_complete", run_id=run_id, issue_num=None, sprint_label=label,
+                    agent_role="sprint", level_index=prev_level_idx,
+                    total=len(level_nums_by_idx[prev_level_idx]),
+                )
+            except Exception:
+                pass
+        prev_level_idx = lvl_idx
+        try:
+            structured_log.event(
+                "level_start", run_id=run_id, issue_num=None, sprint_label=label,
+                agent_role="sprint", level_index=lvl_idx, tickets=level_nums_by_idx[lvl_idx],
+            )
+        except Exception:
+            pass
+        print(f"\n=== Dispatch level {lvl_idx} (pipeline): tickets {level_nums} ===")
+
+        if not level_nums:
+            continue
+
+        # Hard level barrier: run_level does not return until the level drains.
+        _run_pipeline_level(
+            level_nums, _coder_stage, _tester_stage, pipeline=True,
+            on_merged=_on_merged, on_needs_rework=_on_needs_rework,
+        )
+
+    if prev_level_idx >= 0:
+        try:
+            structured_log.event(
+                "level_complete", run_id=run_id, issue_num=None, sprint_label=label,
+                agent_role="sprint", level_index=prev_level_idx,
+                total=len(level_nums_by_idx[prev_level_idx]),
+            )
+        except Exception:
+            pass
+
+
 # ── sprint loop ────────────────────────────────────────────────────────────────
 
 def run_sprint(
@@ -5740,6 +6070,7 @@ def run_sprint(
     token_budget: int = 0,
     skip_estimator: bool = True,
     rerun_manifest: Optional[dict] = None,
+    pipeline_mode: Optional[bool] = None,
 ) -> tuple[SprintSummary, SprintState]:
     """Main sprint loop -- processes backlog issues sequentially.
 
@@ -5967,9 +6298,12 @@ def run_sprint(
 
     start_time = time.monotonic()
 
-    # Clear any stale in-progress labels left by a prior interrupted run before
-    # dispatch begins — otherwise those tickets show stuck spinners on the board.
+    # Clear any stale in-progress / SIT labels left by a prior interrupted or
+    # crashed run before dispatch begins — otherwise those tickets show stuck
+    # spinners on the board, and in pipeline mode a ghost SIT would violate the
+    # at-most-one-SIT invariant (issue #738 AC5).
     _sweep_stale_in_progress(label, eff_repo)
+    _sweep_stale_status("SIT", label, eff_repo)
 
     total_issues = len(state.issues)
     _emit_sprint_lifecycle_event(
@@ -5980,8 +6314,49 @@ def run_sprint(
         project=eff_repo or label,
         action_id=_run_id,
     )
+    # ── Dispatch mode resolution (issue #737) ────────────────────────────────
+    # Pipeline mode runs one coder + one tester worker concurrently per level.
+    # Precedence: kill-switch env > per-sprint setting > per-project (cfg) > serial.
+    _pipeline_on = _pipeline_mode_enabled(
+        sprint_setting=pipeline_mode,
+        project_setting=(cfg.pipeline_mode if cfg is not None else None),
+        env=os.environ,
+    )
+    # Dry-run never spawns workers — fall back to the serial no-op path.
+    if dry_run:
+        _pipeline_on = False
+    # Persist on state so the dashboard /live snapshot can gate dual-agent UI (issue #739).
+    state.pipeline_mode = _pipeline_on
+    print(
+        "  Dispatch mode: "
+        + ("pipeline (1 coder + 1 tester concurrent)" if _pipeline_on else "serial")
+    )
+    try:
+        structured_log.event(
+            "dispatch.mode",
+            run_id=_run_id, issue_num=None, sprint_label=label,
+            agent_role="sprint", pipeline=_pipeline_on,
+        )
+    except Exception:
+        pass
+
+    if _pipeline_on:
+        _run_pipeline_dispatch(
+            state=state, state_path=state_path, summary=summary,
+            dispatch_levels=_dispatch_levels, level_nums_by_idx=_level_nums_by_idx,
+            label=label, sprint_num=sprint_num, eff_repo=eff_repo, api_url=api_url,
+            target_branch=target_branch, sprint_branch=sprint_branch,
+            alert_modes=alert_modes, cfg=cfg, run_id=_run_id,
+            eff_sprints_dir=_eff_sprints_dir, rerun_decisions=rerun_decisions,
+            skip_gates=skip_gates, gate_pytest=gate_pytest, gate_lint=gate_lint,
+            gate_merge_preview=gate_merge_preview, gate_typecheck=gate_typecheck,
+            gate_design=gate_design, gate_frontend_lint=gate_frontend_lint,
+            gate_scope=gate_scope, resume=resume, retry_failed=retry_failed,
+        )
+
     # Flat iteration preserving level boundaries for level_start / level_complete events.
-    _flat_dispatch: list[tuple[int, IssueState]] = [
+    # Empty when pipeline mode handled dispatch above.
+    _flat_dispatch: list[tuple[int, IssueState]] = [] if _pipeline_on else [
         (lvl_idx, iss)
         for lvl_idx, lvl in enumerate(_dispatch_levels)
         for iss in lvl

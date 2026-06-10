@@ -154,6 +154,14 @@ Indexes: `(project, created_at DESC)`, `(project, target)`, `(action_id)`.
 > It now always returns HTTP 200. Clients must check `state`, not the HTTP status code.
 > See `docs/features/api.md` for the full response shape reference.
 
+### Sprint file maintenance (issue #735)
+
+Archives stale per-sprint runtime files for a project's *finished* sprints into a reversible `.commander/sprints/archive/` subfolder. A sprint counts as finished only when it has a posted summary issue **or** a summary markdown **and** no live process is running it. Only `sprint-N-plan.json`, the zero-issue `sprint-N.json` placeholder, and `sprint-N-state.json` are moved; `sprint-N-status.json`, `sprint-N-estimate.json`, and summary markdown are never touched, and nothing is ever deleted. Idempotent. Also available as the CLI `python scripts/clean_sprint_files.py --project <id> [--dry-run]`.
+
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/api/maintenance/sprints/cleanup` | Body `{"project": "<id>", "dry_run": false}`. Archives finished-sprint runtime files; returns `{"archived": [...], "kept_count": N, "dry_run": bool}`. With `dry_run: true` returns the same shape without moving anything (UI preview before confirmation) |
+
 ### Docs Scaffold
 
 | Method | Path | Description |

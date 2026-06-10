@@ -147,6 +147,7 @@
     .snav-dot--finished { background: #2563eb; }
     .snav-dot--rework   { background: #ef4444; box-shadow: 0 0 0 3px rgba(239,68,68,.15); }
     .snav-uat        { color: #f59e0b; font-weight: 600; }
+    .snav-agents     { color: var(--blue); font-weight: 600; font-family: var(--mono); letter-spacing: .02em; }
     .snav-inprogress { color: #2563eb; font-weight: 600; }
     .snav-rework     { color: #ef4444; font-weight: 600; }
     .snav-caret { font-size: 12px; color: var(--text-muted); }
@@ -3323,6 +3324,65 @@
     }
     .level-sep-num { color: var(--text-sub); }
     .level-sep-desc { font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--text-sub); }
+
+    /* ── Dual active-agent cards + per-level progress (issue #739) ── */
+    .smgmt-active-agents {
+      display: flex; gap: 12px; flex-wrap: wrap;
+      padding: 12px 16px; border-bottom: 1px solid var(--border);
+    }
+    .smgmt-active-agent {
+      display: flex; align-items: center; gap: 8px; min-width: 0;
+      flex: 1 1 220px;
+      padding: 8px 12px; border-radius: 8px;
+      border: 1px solid var(--border); background: var(--surface-2);
+    }
+    .smgmt-active-agent--coder  { border-left: 3px solid var(--purple); }
+    .smgmt-active-agent--tester { border-left: 3px solid var(--amber); }
+    .smgmt-active-spinner {
+      display: inline-block; width: 14px; height: 14px; flex-shrink: 0;
+      border: 2px solid var(--border); border-top-color: var(--blue);
+      border-radius: 50%; animation: smgmt-spin .7s linear infinite;
+    }
+    .smgmt-active-agent--coder  .smgmt-active-spinner { border-top-color: var(--purple); }
+    .smgmt-active-agent--tester .smgmt-active-spinner { border-top-color: var(--amber); }
+    .smgmt-active-role {
+      flex-shrink: 0; font-size: 12px; font-weight: 700;
+      text-transform: uppercase; letter-spacing: .03em; color: var(--text);
+    }
+    .smgmt-active-ticket {
+      display: flex; align-items: baseline; gap: 6px; min-width: 0;
+      font-size: 12px; color: var(--text-muted);
+    }
+    .smgmt-active-tnum { font-family: var(--mono); color: var(--text-sub); flex-shrink: 0; }
+    .smgmt-active-ttitle {
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+
+    .smgmt-levels {
+      display: flex; flex-direction: column; gap: 4px;
+      padding: 10px 16px; border-bottom: 1px solid var(--border);
+    }
+    .smgmt-level-row {
+      display: flex; align-items: center; gap: 8px;
+      font-size: 11px; color: var(--text-muted);
+    }
+    .smgmt-level-icon { display: inline-flex; width: 14px; justify-content: center; flex-shrink: 0; }
+    .smgmt-level-name {
+      flex-shrink: 0; font-weight: 600; letter-spacing: .03em;
+      text-transform: uppercase; color: var(--text-muted);
+    }
+    .smgmt-level-progress { font-family: var(--mono); color: var(--text-sub); }
+    .smgmt-level--complete .smgmt-level-name,
+    .smgmt-level--complete .smgmt-level-icon { color: var(--green); }
+    .smgmt-level--active .smgmt-level-name { color: var(--blue); }
+    .smgmt-level--waiting { color: var(--text-sub); }
+    .smgmt-level--waiting .smgmt-level-name,
+    .smgmt-level--waiting .smgmt-level-progress { color: var(--text-sub); }
+    .smgmt-level-spinner {
+      display: inline-block; width: 11px; height: 11px;
+      border: 2px solid var(--border); border-top-color: var(--blue);
+      border-radius: 50%; animation: smgmt-spin .7s linear infinite;
+    }
 
     /* Per-ticket size pill (issue #308) */
     .smgmt-ticket-size-pill {
@@ -6501,6 +6561,39 @@
             </div>
           </div>
 
+          <!-- Sprint file cleanup card (issue #735) -->
+          <div class="proj-settings-card" id="ps-sprint-cleanup-card">
+            <div class="proj-settings-card-head">
+              <i class="ti ti-archive proj-settings-card-icon"></i>
+              <div>
+                <div class="proj-settings-card-title">Sprint File Cleanup</div>
+                <div class="proj-settings-card-sub">Archive stale runtime files from finished sprints to reduce startup noise</div>
+              </div>
+            </div>
+            <div class="proj-settings-card-body" id="ps-cleanup-body">
+              <div class="ps-scaffold-actions">
+                <button class="ps-btn" id="ps-cleanup-preview-btn" onclick="sprintCleanupPreview()">
+                  <i class="ti ti-search"></i> Preview cleanup
+                </button>
+                <span id="ps-cleanup-status" style="font-size:12px;color:var(--text-muted);"></span>
+              </div>
+              <div id="ps-cleanup-preview" style="display:none;margin-top:12px">
+                <div style="font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px">
+                  Files to archive
+                </div>
+                <ul id="ps-cleanup-list" class="ps-scaffold-list"></ul>
+                <div id="ps-cleanup-empty" style="display:none;font-size:13px;color:var(--text-muted)">
+                  Nothing to archive — no finished sprints have stale files.
+                </div>
+                <div id="ps-cleanup-confirm-wrap" style="display:none;margin-top:12px">
+                  <button class="ps-btn ps-btn-primary" id="ps-cleanup-confirm-btn" onclick="sprintCleanupConfirm()">
+                    <i class="ti ti-archive"></i> Archive these files
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
           <!-- Docs Structure card (issue #681) -->
           <div class="proj-settings-card" id="ps-scaffold-card">
             <div class="proj-settings-card-head">
@@ -7082,6 +7175,17 @@ let _smgmtFinishedLabels = new Set();
 
 // ── Tab navigation ────────────────────────────────────────────────────────────
 function switchTab(tab, pushHistory) {
+  // Legacy ?tab=status deep-link redirect (issue #732): #715 relocated Status into
+  // the Analytics tab as the anl-panel-status sub-tab and removed the standalone
+  // pane-status. The old /project/<slug>/status link would otherwise toggle a
+  // nonexistent pane and show blank content. Redirect it onto the Analytics surface
+  // (the `metrics` pane) and open the Status sub-tab below.
+  let _statusDeepLink = false;
+  if (tab === 'status') {
+    tab = 'metrics';
+    _statusDeepLink = true;
+  }
+
   // Pause auto-refresh and live polling when leaving sprint-mgmt
   if (_activeTab === 'sprint-mgmt' && tab !== 'sprint-mgmt') {
     _smgmtArStopTicker();
@@ -7100,8 +7204,9 @@ function switchTab(tab, pushHistory) {
     logsDestroy();
   }
 
-  // Stop status auto-refresh when leaving status tab
-  if (_activeTab === 'status' && tab !== 'status') {
+  // Stop status auto-refresh when leaving the Analytics pane (Status is its
+  // anl-panel-status sub-tab; the standalone status tab was removed in #715/#732).
+  if (_activeTab === 'metrics' && tab !== 'metrics') {
     if (_statusRefreshId !== null) {
       clearInterval(_statusRefreshId);
       _statusRefreshId = null;
@@ -7116,7 +7221,7 @@ function switchTab(tab, pushHistory) {
   _activeTab = tab;
 
   // Update aria-selected + active class on tabs
-  ['sprint-mgmt', 'tickets', 'logs', 'deploy', 'bulk-create', 'timeline', 'compare', 'metrics', 'est-vs-actual', 'calibration', 'status', 'notes', 'settings'].forEach(t => {
+  ['sprint-mgmt', 'tickets', 'logs', 'deploy', 'bulk-create', 'timeline', 'compare', 'metrics', 'est-vs-actual', 'calibration', 'notes', 'settings'].forEach(t => {
     const btn = document.getElementById('stab-' + t);
     if (!btn) return;
     const isActive = t === tab;
@@ -7133,7 +7238,7 @@ function switchTab(tab, pushHistory) {
   });
 
   // Show/hide panes
-  ['sprint-mgmt', 'tickets', 'logs', 'deploy', 'bulk-create', 'timeline', 'compare', 'metrics', 'est-vs-actual', 'calibration', 'status', 'notes', 'settings'].forEach(t => {
+  ['sprint-mgmt', 'tickets', 'logs', 'deploy', 'bulk-create', 'timeline', 'compare', 'metrics', 'est-vs-actual', 'calibration', 'notes', 'settings'].forEach(t => {
     const pane = document.getElementById('pane-' + t);
     if (pane) pane.classList.toggle('active', t === tab);
   });
@@ -7193,6 +7298,11 @@ function switchTab(tab, pushHistory) {
   // Init metrics tab
   if (tab === 'metrics') {
     metricsInit();
+    // Legacy ?tab=status deep-link: metricsInit() opens Calibration by default;
+    // override to the Status sub-tab so the redirected link lands on Status (#732).
+    if (_statusDeepLink && typeof window.anlShowTab === 'function') {
+      window.anlShowTab('status');
+    }
   }
 
   // Init estimate-vs-actual tab
@@ -7205,10 +7315,8 @@ function switchTab(tab, pushHistory) {
     calibInit();
   }
 
-  // Init status tab
-  if (tab === 'status') {
-    statusInit();
-  }
+  // Note: there is no standalone status tab — Status is the Analytics anl-panel-status
+  // sub-tab and is initialised via anlShowTab('status') → statusInit() (issues #715, #732).
 
   // Init notes tab
   if (tab === 'notes') {
@@ -7236,7 +7344,7 @@ document.addEventListener('click', closeAllStabDropdowns);
 
 // ── Keyboard navigation for sub-tabs ─────────────────────────────────────────
 document.getElementById('sub-tabs').addEventListener('keydown', function(e) {
-  const enabledTabs = ['sprint-mgmt', 'tickets', 'logs', 'deploy', 'bulk-create', 'timeline', 'compare', 'est-vs-actual', 'calibration', 'status', 'notes', 'settings'];
+  const enabledTabs = ['sprint-mgmt', 'tickets', 'logs', 'deploy', 'bulk-create', 'timeline', 'compare', 'est-vs-actual', 'calibration', 'notes', 'settings'];
   const focused = document.activeElement;
   const currentId = focused ? focused.id.replace('stab-', '') : null;
   const currentIdx = enabledTabs.indexOf(currentId);
@@ -10490,6 +10598,8 @@ function _smgmtRunningCardHtml(label, n, tickets) {
         ${segBarHtml}
         <span class="smgmt-outcome-dur" id="smgmt-rs-time-${escHtml(label)}">${_fmtRunningTime(timeSpentSec)}</span>
       </div>
+      <div id="smgmt-active-agents-wrap-${escHtml(label)}">${_smgmtActiveAgentsHtml(live, label)}</div>
+      <div id="smgmt-levels-wrap-${escHtml(label)}">${_smgmtLevelsHtml(live, label)}</div>
       <div class="smgmt-sprint-tickets" id="smgmt-tickets-${escHtml(label)}">
         ${ticketRowsHtml || '<div class="smgmt-drop-hint">No tickets in this sprint</div>'}
       </div>
@@ -10633,6 +10743,64 @@ function _smgmtLiveAgentBadgesHtml(live) {
   const pids = agents.map(a => a.pid).filter(Boolean);
   const pidHtml = pids.length ? `<span class="smgmt-log-pid">pid ${escHtml(pids.join(' / '))}</span>` : '';
   return badges + pidHtml;
+}
+
+/** Human label for an agent role used on the dual active cards (issue #739). */
+function _smgmtAgentLabel(role) {
+  const r = (role || '').toLowerCase();
+  if (r === 'coder')  return 'Coder';
+  if (r === 'tester') return 'Tester';
+  return role || '?';
+}
+
+/** Dual active-agent cards for the running sprint board (issue #739).
+ *  Pipeline mode only — single-agent mode renders nothing here (unchanged board).
+ *  Each in-flight agent gets its own card with its own spinner, role label, and
+ *  the specific ticket it is working. Empty string when no agent is active. */
+function _smgmtActiveAgentsHtml(live, label) {
+  if (!live || !live.pipeline_mode) return '';
+  const agents = live.active_agents || [];
+  if (!agents.length) return '';
+  const cards = agents.map(a => {
+    const role  = (a.name || '').toLowerCase();
+    const tk    = a.ticket || {};
+    const tnum  = tk.number ? `#${tk.number}` : '';
+    const ttl   = tk.title || '';
+    return `<div class="smgmt-active-agent smgmt-active-agent--${escHtml(role)}" data-agent="${escHtml(role)}">
+      <span class="smgmt-active-spinner" aria-hidden="true"></span>
+      <span class="smgmt-active-role">${escHtml(_smgmtAgentLabel(a.name))}</span>
+      <span class="smgmt-active-ticket">
+        <span class="smgmt-active-tnum">${escHtml(tnum)}</span>
+        <span class="smgmt-active-ttitle" title="${escHtml(ttl)}">${escHtml(ttl)}</span>
+      </span>
+    </div>`;
+  }).join('');
+  return `<div class="smgmt-active-agents" id="smgmt-active-agents-${escHtml(label)}">${cards}</div>`;
+}
+
+/** Per-level progress rows for the pipeline board (issue #739).
+ *  Pipeline mode only. Each level shows merged/total; the next, not-yet-reachable
+ *  level renders in a waiting state with a lock icon until the current level
+ *  drains. Empty string outside pipeline mode (single-agent board unchanged). */
+function _smgmtLevelsHtml(live, label) {
+  if (!live || !live.pipeline_mode) return '';
+  const levels = live.levels || [];
+  if (!levels.length) return '';
+  const rows = levels.map(l => {
+    let icon;
+    if (l.state === 'waiting')       icon = '<i class="ti ti-lock"></i>';
+    else if (l.state === 'complete') icon = '<i class="ti ti-check"></i>';
+    else                             icon = '<span class="smgmt-level-spinner"></span>';
+    const progress = l.state === 'waiting'
+      ? `Waiting for Level ${l.level - 1} to complete`
+      : `${l.merged}/${l.total} merged`;
+    return `<div class="smgmt-level-row smgmt-level--${escHtml(l.state)}" data-level="${l.level}" data-state="${escHtml(l.state)}">
+      <span class="smgmt-level-icon">${icon}</span>
+      <span class="smgmt-level-name">Level ${l.level}</span>
+      <span class="smgmt-level-progress">${escHtml(progress)}</span>
+    </div>`;
+  }).join('');
+  return `<div class="smgmt-levels" id="smgmt-levels-${escHtml(label)}">${rows}</div>`;
 }
 
 /** Patch live stat strip + progress bar + ticket indicators in place (no full re-render). */
@@ -10817,6 +10985,12 @@ function _smgmtLivePatch(label, live) {
       block.className = `seg-block ${blockClass}`;
     });
   }
+
+  // Update dual active-agent cards + per-level progress in place (issue #739).
+  const activeWrap = document.getElementById(`smgmt-active-agents-wrap-${label}`);
+  if (activeWrap) activeWrap.innerHTML = _smgmtActiveAgentsHtml(live, label);
+  const levelsWrap = document.getElementById(`smgmt-levels-wrap-${label}`);
+  if (levelsWrap) levelsWrap.innerHTML = _smgmtLevelsHtml(live, label);
 }
 
 /** Start or restart the live polling loop for any running sprints. */
@@ -17967,8 +18141,17 @@ function _snavRenderPill() {
     const doneHtml = (store && store.done > 0) ? ` · <span class="snav-uat">${store.done} done</span>` : '';
     const uatHtml  = (!store && (d.uat || 0) > 0) ? ` · <span class="snav-uat">${d.uat} UAT</span>` : '';
     const reworkHtml = rework > 0 ? ` · <span class="snav-rework">${rework} ↩</span>` : '';
+    // In pipeline mode the pill names every active agent (coder + tester) rather
+    // than collapsing to a single label (issue #739).
+    const liveAgents = _smgmtLiveCache[`sprint-${d.sprint}`];
+    let agentsHtml = '';
+    if (liveAgents && liveAgents.pipeline_mode && (liveAgents.active_agents || []).length) {
+      const names = liveAgents.active_agents
+        .map(a => (a.name || '').toUpperCase()).filter(Boolean);
+      if (names.length) agentsHtml = ` · <span class="snav-agents">${escHtml(names.join('+'))}</span>`;
+    }
     dot.className = rework > 0 ? 'snav-dot snav-dot--rework' : 'snav-dot snav-dot--running';
-    text.innerHTML = `S${d.sprint} · ${complete}/${total}${doneHtml}${uatHtml}${reworkHtml}`;
+    text.innerHTML = `S${d.sprint} · ${complete}/${total}${doneHtml}${uatHtml}${reworkHtml}${agentsHtml}`;
   }
 }
 
@@ -23034,6 +23217,64 @@ async function scaffoldApplyConfirm() {
     await scaffoldCheck();
   } catch (e) {
     if (statusEl) statusEl.textContent = 'Apply error';
+  }
+}
+
+// ── Sprint file cleanup (issue #735) ──────────────────────────────────────────
+let _cleanupPreviewFiles = [];
+
+async function _sprintCleanupPost(dryRun) {
+  var slug = window._currentProjectSlug || '';
+  if (!slug) return null;
+  var resp = await fetch('/api/maintenance/sprints/cleanup', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({project: slug, dry_run: dryRun}),
+  });
+  if (!resp.ok) {
+    var err = await resp.json().catch(() => ({}));
+    throw new Error(err.detail || ('HTTP ' + resp.status));
+  }
+  return await resp.json();
+}
+
+async function sprintCleanupPreview() {
+  var statusEl = document.getElementById('ps-cleanup-status');
+  var previewEl = document.getElementById('ps-cleanup-preview');
+  var listEl = document.getElementById('ps-cleanup-list');
+  var emptyEl = document.getElementById('ps-cleanup-empty');
+  var confirmWrap = document.getElementById('ps-cleanup-confirm-wrap');
+  if (statusEl) statusEl.textContent = 'Scanning…';
+  try {
+    var data = await _sprintCleanupPost(true);
+    _cleanupPreviewFiles = (data && data.archived) || [];
+    if (listEl) {
+      listEl.innerHTML = _cleanupPreviewFiles.map(function(f) {
+        return '<li>' + escHtml(f) + '</li>';
+      }).join('');
+    }
+    if (emptyEl) emptyEl.style.display = _cleanupPreviewFiles.length === 0 ? '' : 'none';
+    if (confirmWrap) confirmWrap.style.display = _cleanupPreviewFiles.length > 0 ? '' : 'none';
+    if (previewEl) previewEl.style.display = '';
+    if (statusEl) statusEl.textContent = '';
+  } catch (e) {
+    if (statusEl) statusEl.textContent = 'Preview failed: ' + e.message;
+  }
+}
+
+async function sprintCleanupConfirm() {
+  var statusEl = document.getElementById('ps-cleanup-status');
+  var confirmWrap = document.getElementById('ps-cleanup-confirm-wrap');
+  if (statusEl) statusEl.textContent = 'Archiving…';
+  try {
+    var data = await _sprintCleanupPost(false);
+    var n = (data && data.archived) ? data.archived.length : 0;
+    var kept = (data && typeof data.kept_count === 'number') ? data.kept_count : '?';
+    if (statusEl) statusEl.textContent = 'Archived ' + n + ' file(s); ' + kept + ' kept in place.';
+    if (confirmWrap) confirmWrap.style.display = 'none';
+    _cleanupPreviewFiles = [];
+  } catch (e) {
+    if (statusEl) statusEl.textContent = 'Archive failed: ' + e.message;
   }
 }
 </script>

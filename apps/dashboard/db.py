@@ -298,6 +298,7 @@ def _create_agent_runs_table(conn: sqlite3.Connection) -> None:
     its own helper so the recorder can ensure the table exists without running
     the full init_db() migration. Mirrors the Alembic migration
     0009_add_agent_runs so the schema is identical on SQLite and Postgres.
+    `risk_tier` and `model_used` added by issue #790 (alembic 0010).
     """
     conn.execute(
         """
@@ -310,7 +311,9 @@ def _create_agent_runs_table(conn: sqlite3.Connection) -> None:
             finished_at      TEXT,
             duration_seconds INTEGER,
             outcome          TEXT,
-            total_tokens     INTEGER
+            total_tokens     INTEGER,
+            risk_tier        TEXT,
+            model_used       TEXT
         )
         """
     )
@@ -322,6 +325,12 @@ def _create_agent_runs_table(conn: sqlite3.Connection) -> None:
         "CREATE INDEX IF NOT EXISTS ix_agent_runs_sprint "
         "ON agent_runs (sprint_label)"
     )
+    # Best-effort ALTER TABLE for existing DBs that predate issue #790.
+    for col, typedef in (("risk_tier", "TEXT"), ("model_used", "TEXT")):
+        try:
+            conn.execute(f"ALTER TABLE agent_runs ADD COLUMN {col} {typedef}")
+        except Exception:
+            pass
 
 
 def _duration_between(started_at: str | None, finished_at: str | None) -> int | None:
@@ -341,21 +350,24 @@ def record_agent_start(
     sprint_label: str,
     agent: str,
     started_at: str | None = None,
+    risk_tier: str | None = None,
+    model_used: str | None = None,
 ) -> int | None:
     """Insert an agent_runs row at dispatch time and return its id (issue #764).
 
     `finished_at`/`duration_seconds`/`outcome` are left NULL until
-    record_agent_finish() closes the run. Returns the new row id (used to close
-    the exact run) or None on failure — callers treat this as best-effort.
+    record_agent_finish() closes the run. `risk_tier` and `model_used` are
+    optional and may be NULL for non-tester agents (issue #790).
+    Returns the new row id (used to close the exact run) or None on failure.
     """
     started_at = started_at or _now_iso()
     with get_conn() as conn:
         _create_agent_runs_table(conn)
         cur = conn.execute(
             "INSERT INTO agent_runs "
-            "(issue_number, sprint_label, agent, started_at) "
-            "VALUES (?, ?, ?, ?)",
-            (int(issue_number), sprint_label, agent, started_at),
+            "(issue_number, sprint_label, agent, started_at, risk_tier, model_used) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (int(issue_number), sprint_label, agent, started_at, risk_tier, model_used),
         )
         conn.commit()
         return cur.lastrowid

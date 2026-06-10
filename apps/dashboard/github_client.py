@@ -601,16 +601,39 @@ def repo_config() -> dict:
     }
 
 
+def _mirror_is_complete() -> bool:
+    """True when the paginated full-history bootstrap has run (marker v2).
+
+    Reads that need the COMPLETE issue history (e.g. old sprint summaries) may
+    only trust the mirror after the paginated crawl; a partial (pre-v2) mirror
+    would make finished sprints "unfinish".
+    """
+    if not os.environ.get("DB_PATH"):
+        return False
+    try:
+        import db
+        return db.is_bootstrap_complete()
+    except Exception:
+        return False
+
+
 def list_summary_issues(repo_name: str | None = None) -> list[dict]:
     """All sprint-summary-labeled issues, any state, as {number,title,url}.
 
-    NOT mirror-backed on purpose: the issues mirror holds only the most recently
-    created ~100 issues, so old sprints' summary issues would be missing and
-    finished sprints would wrongly reappear as unfinished. Cached (see
-    _TTL_BY_PREFIX) because this was previously an uncached gh call on the
-    board/nav hot path.
+    Mirror-backed once the full-history bootstrap has completed (zero quota);
+    until then falls back to a cached gh call (see _TTL_BY_PREFIX) — this was
+    previously an uncached GraphQL query on the board/nav hot path.
     """
     r = _r(repo_name)
+    if _mirror_is_complete():
+        mirror = _mirror_issues(r)
+        if mirror is not None:
+            return [
+                {"number": i["number"], "title": i.get("title", ""), "url": i.get("url", "")}
+                for i in mirror
+                if any(isinstance(l, dict) and l.get("name") == "sprint-summary"
+                       for l in i.get("labels") or [])
+            ]
     key = f"summary_issues:{r}"
     def fetch():
         return _json(

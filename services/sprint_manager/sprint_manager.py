@@ -1335,6 +1335,49 @@ def _get_issue_labels(issue_num: int, repo_name: Optional[str] = None) -> set[st
         return set()
 
 
+def _sweep_stale_in_progress(
+    sprint_label: str,
+    repo_name: Optional[str],
+    active_issue: Optional[int] = None,
+) -> None:
+    """Remove a leftover ``in-progress`` label from sprint tickets that are not
+    being actively worked.
+
+    Serial dispatch runs one agent at a time, so only the ticket currently in
+    the coder slot may legitimately carry ``in-progress``. Any other ``in-progress``
+    label is stale — left behind by an interrupted or errored run — and shows as
+    a stuck spinner on the board. One ``gh issue list`` finds them; we clear all
+    except ``active_issue``. Best-effort and bounded (no per-ticket fetches).
+    """
+    r = _r(repo_name)
+    try:
+        out = subprocess.run(
+            ["gh", "issue", "list", "--repo", r,
+             "--label", "in-progress", "--label", sprint_label,
+             "--state", "open", "--json", "number", "--limit", "100"],
+            capture_output=True, text=True, timeout=15,
+        )
+        if out.returncode != 0:
+            return
+        nums = [i["number"] for i in json.loads(out.stdout or "[]")]
+    except Exception:
+        return
+    cleared: list[int] = []
+    for n in nums:
+        if active_issue is not None and n == active_issue:
+            continue
+        try:
+            subprocess.run(
+                ["gh", "issue", "edit", str(n), "--repo", r, "--remove-label", "in-progress"],
+                capture_output=True, text=True, timeout=15,
+            )
+            cleared.append(n)
+        except Exception:
+            pass
+    if cleared:
+        print(f"  [sweep] cleared stale in-progress from {len(cleared)} ticket(s): {cleared}")
+
+
 def _current_status_labels(issue_num: int, repo_name: Optional[str]) -> "frozenset[str] | None":
     """Best-effort fetch of the issue's current status labels (issue #720).
 
@@ -5923,6 +5966,10 @@ def run_sprint(
             _lvl_iss.dispatch_level = _lvl_idx + 1
 
     start_time = time.monotonic()
+
+    # Clear any stale in-progress labels left by a prior interrupted run before
+    # dispatch begins — otherwise those tickets show stuck spinners on the board.
+    _sweep_stale_in_progress(label, eff_repo)
 
     total_issues = len(state.issues)
     _emit_sprint_lifecycle_event(

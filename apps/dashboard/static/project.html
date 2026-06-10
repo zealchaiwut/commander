@@ -7050,6 +7050,17 @@ let _smgmtFinishedLabels = new Set();
 
 // ── Tab navigation ────────────────────────────────────────────────────────────
 function switchTab(tab, pushHistory) {
+  // Legacy ?tab=status deep-link redirect (issue #732): #715 relocated Status into
+  // the Analytics tab as the anl-panel-status sub-tab and removed the standalone
+  // pane-status. The old /project/<slug>/status link would otherwise toggle a
+  // nonexistent pane and show blank content. Redirect it onto the Analytics surface
+  // (the `metrics` pane) and open the Status sub-tab below.
+  let _statusDeepLink = false;
+  if (tab === 'status') {
+    tab = 'metrics';
+    _statusDeepLink = true;
+  }
+
   // Pause auto-refresh and live polling when leaving sprint-mgmt
   if (_activeTab === 'sprint-mgmt' && tab !== 'sprint-mgmt') {
     _smgmtArStopTicker();
@@ -7068,8 +7079,9 @@ function switchTab(tab, pushHistory) {
     logsDestroy();
   }
 
-  // Stop status auto-refresh when leaving status tab
-  if (_activeTab === 'status' && tab !== 'status') {
+  // Stop status auto-refresh when leaving the Analytics pane (Status is its
+  // anl-panel-status sub-tab; the standalone status tab was removed in #715/#732).
+  if (_activeTab === 'metrics' && tab !== 'metrics') {
     if (_statusRefreshId !== null) {
       clearInterval(_statusRefreshId);
       _statusRefreshId = null;
@@ -7084,7 +7096,7 @@ function switchTab(tab, pushHistory) {
   _activeTab = tab;
 
   // Update aria-selected + active class on tabs
-  ['sprint-mgmt', 'tickets', 'logs', 'deploy', 'bulk-create', 'timeline', 'compare', 'metrics', 'est-vs-actual', 'calibration', 'status', 'notes', 'settings'].forEach(t => {
+  ['sprint-mgmt', 'tickets', 'logs', 'deploy', 'bulk-create', 'timeline', 'compare', 'metrics', 'est-vs-actual', 'calibration', 'notes', 'settings'].forEach(t => {
     const btn = document.getElementById('stab-' + t);
     if (!btn) return;
     const isActive = t === tab;
@@ -7101,7 +7113,7 @@ function switchTab(tab, pushHistory) {
   });
 
   // Show/hide panes
-  ['sprint-mgmt', 'tickets', 'logs', 'deploy', 'bulk-create', 'timeline', 'compare', 'metrics', 'est-vs-actual', 'calibration', 'status', 'notes', 'settings'].forEach(t => {
+  ['sprint-mgmt', 'tickets', 'logs', 'deploy', 'bulk-create', 'timeline', 'compare', 'metrics', 'est-vs-actual', 'calibration', 'notes', 'settings'].forEach(t => {
     const pane = document.getElementById('pane-' + t);
     if (pane) pane.classList.toggle('active', t === tab);
   });
@@ -7161,6 +7173,11 @@ function switchTab(tab, pushHistory) {
   // Init metrics tab
   if (tab === 'metrics') {
     metricsInit();
+    // Legacy ?tab=status deep-link: metricsInit() opens Calibration by default;
+    // override to the Status sub-tab so the redirected link lands on Status (#732).
+    if (_statusDeepLink && typeof window.anlShowTab === 'function') {
+      window.anlShowTab('status');
+    }
   }
 
   // Init estimate-vs-actual tab
@@ -7173,10 +7190,8 @@ function switchTab(tab, pushHistory) {
     calibInit();
   }
 
-  // Init status tab
-  if (tab === 'status') {
-    statusInit();
-  }
+  // Note: there is no standalone status tab — Status is the Analytics anl-panel-status
+  // sub-tab and is initialised via anlShowTab('status') → statusInit() (issues #715, #732).
 
   // Init notes tab
   if (tab === 'notes') {
@@ -7204,7 +7219,7 @@ document.addEventListener('click', closeAllStabDropdowns);
 
 // ── Keyboard navigation for sub-tabs ─────────────────────────────────────────
 document.getElementById('sub-tabs').addEventListener('keydown', function(e) {
-  const enabledTabs = ['sprint-mgmt', 'tickets', 'logs', 'deploy', 'bulk-create', 'timeline', 'compare', 'est-vs-actual', 'calibration', 'status', 'notes', 'settings'];
+  const enabledTabs = ['sprint-mgmt', 'tickets', 'logs', 'deploy', 'bulk-create', 'timeline', 'compare', 'est-vs-actual', 'calibration', 'notes', 'settings'];
   const focused = document.activeElement;
   const currentId = focused ? focused.id.replace('stab-', '') : null;
   const currentIdx = enabledTabs.indexOf(currentId);

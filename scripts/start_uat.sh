@@ -28,7 +28,7 @@ UAT_DIR="$PROJECT_DIR/uat/apps/dashboard"
 VENV="$PROJECT_DIR/venv"
 PID_FILE="$UAT_DIR/uat.pid"
 LOG_FILE="$UAT_DIR/uat.log"
-PORT=8001
+PORT="${PORT:-8001}"
 
 echo "=== Starting UAT dashboard (port $PORT) ==="
 

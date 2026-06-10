@@ -91,6 +91,39 @@ def stop_start_scripts(entry: dict) -> tuple[Optional[str], Optional[str]]:
     return stop, start
 
 
+def restart_port(entry: dict) -> Optional[int]:
+    """Return the configured bind ``port`` (int) for *entry*, or None (issue #769).
+
+    A non-integer or empty value yields None so the start command falls back to
+    its own default rather than exporting a bad PORT.
+    """
+    raw = entry.get("port")
+    if raw in (None, ""):
+        return None
+    try:
+        return int(raw)
+    except (ValueError, TypeError):
+        return None
+
+
+def build_restart_env(
+    entry: dict, base_env: Optional[dict] = None
+) -> Optional[dict]:
+    """Build the subprocess env for a restart, exporting ``PORT`` when configured.
+
+    Returns None when no port is configured (the subprocess then inherits the
+    ambient environment unchanged). Otherwise returns a copy of *base_env* (the
+    process environment by default) with ``PORT=<configured>`` so the start/stop
+    scripts bind the configured port instead of a hardcoded default (issue #769).
+    """
+    port = restart_port(entry)
+    if port is None:
+        return None
+    env = dict(base_env if base_env is not None else os.environ)
+    env["PORT"] = str(port)
+    return env
+
+
 def require_restart_target(entry: Optional[dict]) -> None:
     """Validate that *entry* has a usable restart strategy.
 

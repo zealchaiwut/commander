@@ -2353,10 +2353,46 @@ def put_project_deploy_config(slug: str, body: dict):
     return _deploy_config_response(slug, repo, merged)
 
 
+@app.post("/api/projects/{slug}/environments/{env}/deploy-config/validate")
+def validate_deploy_config_field(slug: str, env: str, body: dict):
+    """Validate an inline working_dir / port edit before it is persisted (#769).
+
+    Body may carry ``working_dir`` and/or ``port``. Each is checked and a failure
+    returns 400 with a user-visible message so the Deploy card can surface an
+    inline error and skip the PUT:
+
+      - working_dir → must exist on disk AND be a git clone.
+      - port        → must be an integer 1–65535 AND not already in use on host.
+
+    Returns 404 for an unknown slug, 200 ``{"ok": true}`` when all supplied
+    fields are valid.
+    """
+    _resolve_project_slug(slug)
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="Validation body must be an object.")
+    if "working_dir" in body:
+        try:
+            _deploy_validation.validate_working_dir(body["working_dir"])
+        except _deploy_validation.DeployValidationError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+    if "port" in body:
+        try:
+            port = _deploy_validation.validate_port(body["port"])
+        except _deploy_validation.DeployValidationError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        if _deploy_validation.port_in_use(port):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Port {port} is already in use on this host.",
+            )
+    return {"ok": True, "env": env}
+
+
 # ── Local deploy / restart actions (issue #723) ──────────────────────────────
 
 from services.sprint_manager import deploy_actions as _deploy_actions
 from services.sprint_manager import render_actions as _render_actions
+from services.sprint_manager import deploy_validation as _deploy_validation
 
 
 def _render_deploy_environment(entry: dict, env: str) -> dict:
@@ -2449,11 +2485,15 @@ def _restart_environment(entry: dict) -> dict:
             "stderr": result.stderr,
         }
 
-    # Script fallback: stop then start.
+    # Script fallback: stop then start. Inject PORT=<configured> so the scripts
+    # bind the configured port instead of a hardcoded default (issue #769).
     stop, start = _deploy_actions.stop_start_scripts(entry)
+    restart_env = _deploy_actions.build_restart_env(entry)
     steps = []
     for phase, script in (("stop", stop), ("start", start)):
-        result = subprocess.run(["sh", "-c", script], capture_output=True, text=True)
+        result = subprocess.run(
+            ["sh", "-c", script], capture_output=True, text=True, env=restart_env
+        )
         steps.append({
             "phase": phase,
             "script": script,
@@ -2622,6 +2662,9 @@ def get_deploy_overview():
             # its stored override lookup just returns empty and seed defaults win.
             repo = f"zealchaiwut/{slug}"
         merged = _merged_deploy_config(slug, repo)
+        # issue #769 — fill working_dir for local envs from on-disk env paths so
+        # the card shows the run folder even with no stored override.
+        _enrich_local_working_dirs(repo, merged)
         environments.extend(_deploy_overview_entries_for(slug, merged))
 
     return {"environments": environments}

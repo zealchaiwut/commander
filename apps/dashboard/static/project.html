@@ -1152,6 +1152,27 @@
     .deploy-card__meta-label { color: var(--text-muted); min-width: 92px; flex-shrink: 0; }
     .deploy-card__meta-val { color: var(--text); word-break: break-word; }
     .deploy-card__meta-val.is-mono { font-family: var(--mono); font-size: 12px; }
+    /* Editable run folder + port rows (issue #769) */
+    .deploy-field-val { flex: 1; min-width: 0; }
+    .deploy-field-edit {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 24px; height: 24px; flex-shrink: 0; padding: 0;
+      border: 1px solid transparent; border-radius: 6px;
+      background: transparent; color: var(--text-sub); cursor: pointer;
+      transition: background .15s, color .15s, border-color .15s;
+    }
+    .deploy-field-edit:hover { background: var(--surface-2); color: var(--text); border-color: var(--border); }
+    .deploy-field-edit:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+    .deploy-card__meta-row.is-editing { align-items: flex-start; }
+    .deploy-field-edit-box { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; flex: 1; min-width: 0; }
+    .deploy-field-input {
+      flex: 1; min-width: 140px; min-height: 32px; padding: 6px 10px;
+      font-family: var(--mono); font-size: 12px; color: var(--text);
+      background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
+    }
+    .deploy-field-input:focus-visible { outline: 2px solid var(--blue); outline-offset: 1px; border-color: var(--blue); }
+    .deploy-field-actions { display: flex; gap: 8px; flex-shrink: 0; }
+    .deploy-field-error { flex-basis: 100%; color: var(--red); font-size: 12px; }
     .status-pill {
       font-size: 10.5px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
       padding: 2px 10px; border-radius: 999px;
@@ -22576,6 +22597,7 @@ function _deployCardHtml(c, i) {
     + '  </div>'
     + '  <div class="deploy-card__meta">'
     +      branchRow
+    +      _deployFolderPortRows(c, i)
     + '    <div class="deploy-card__meta-row"><span class="deploy-card__meta-label">Commit</span>'
     + '      <span class="deploy-card__meta-val is-mono" id="deploy-card-sha-' + i + '">…</span></div>'
     + '    <div class="deploy-card__meta-row"><span class="deploy-card__meta-label">Last deploy</span>'
@@ -22596,6 +22618,137 @@ function _deployIdleActionsHtml(i) {
     + '<button class="deploy-btn deploy-btn--danger" type="button"'
     + ' aria-label="Restart ' + _deployEsc(_deployCards[i].env) + '"'
     + ' onclick="deployCardRestart(' + i + ')"><i class="ti ti-refresh"></i> Restart</button>';
+}
+
+// ── Editable run folder + port rows (issue #769) ──────────────────────────────
+// Only local-host cards carry these; render cards are unaffected (AC10).
+
+function _deployFieldRow(i, field, label, value, mono) {
+  var safe = _deployEsc(value == null || value === '' ? '—' : value);
+  return ''
+    + '<div class="deploy-card__meta-row" id="deploy-card-' + field + '-row-' + i + '">'
+    + '  <span class="deploy-card__meta-label">' + _deployEsc(label) + '</span>'
+    + '  <span class="deploy-card__meta-val' + (mono ? ' is-mono' : '') + ' deploy-field-val"'
+    + '        id="deploy-card-' + field + '-' + i + '">' + safe + '</span>'
+    + '  <button class="deploy-field-edit" type="button"'
+    + '    title="Edit ' + _deployEsc(label) + '" aria-label="Edit ' + _deployEsc(label) + '"'
+    + '    onclick="deployEditField(' + i + ',\'' + field + '\')"><i class="ti ti-pencil"></i></button>'
+    + '</div>';
+}
+
+function _deployFolderPortRows(c, i) {
+  if (c.host !== 'local') return '';
+  return ''
+    + _deployFieldRow(i, 'dir', 'Folder', c.working_dir, true)
+    + _deployFieldRow(i, 'port', 'Port', c.port, true);
+}
+
+// field → {key in deploy config, key on card object}
+var _DEPLOY_FIELD_META = {
+  dir:  { configKey: 'working_dir', cardKey: 'working_dir', label: 'Folder' },
+  port: { configKey: 'port',        cardKey: 'port',        label: 'Port' }
+};
+
+function deployEditField(i, field) {
+  var meta = _DEPLOY_FIELD_META[field];
+  if (!meta) return;
+  var row = document.getElementById('deploy-card-' + field + '-row-' + i);
+  if (!row) return;
+  var c = _deployCards[i];
+  var current = c[meta.cardKey];
+  row.classList.add('is-editing');
+  row.innerHTML = ''
+    + '<span class="deploy-card__meta-label">' + _deployEsc(meta.label) + '</span>'
+    + '<span class="deploy-field-edit-box">'
+    + '  <input class="deploy-field-input" id="deploy-field-input-' + field + '-' + i + '"'
+    + '    type="' + (field === 'port' ? 'number' : 'text') + '"'
+    + '    aria-label="' + _deployEsc(meta.label) + '"'
+    + '    value="' + _deployEsc(current == null ? '' : current) + '">'
+    + '  <span class="deploy-field-actions">'
+    + '    <button class="deploy-btn deploy-btn--primary" type="button"'
+    + '      onclick="deploySaveField(' + i + ',\'' + field + '\')">Save</button>'
+    + '    <button class="deploy-btn" type="button"'
+    + '      onclick="deployCancelField(' + i + ',\'' + field + '\')">Cancel</button>'
+    + '  </span>'
+    + '  <span class="deploy-field-error" id="deploy-field-error-' + field + '-' + i + '" role="alert"></span>'
+    + '</span>';
+  var input = document.getElementById('deploy-field-input-' + field + '-' + i);
+  if (input) { input.focus(); input.select(); }
+}
+
+function deployCancelField(i, field) {
+  var meta = _DEPLOY_FIELD_META[field];
+  var c = _deployCards[i];
+  var row = document.getElementById('deploy-card-' + field + '-row-' + i);
+  if (!row || !meta) return;
+  // Re-render this single row from card state.
+  var wrap = document.createElement('div');
+  wrap.innerHTML = _deployFieldRow(i, field, meta.label, c[meta.cardKey], true);
+  row.replaceWith(wrap.firstElementChild);
+}
+
+function _deployFieldError(i, field, msg) {
+  var el = document.getElementById('deploy-field-error-' + field + '-' + i);
+  if (el) el.textContent = msg;
+}
+
+function deploySaveField(i, field) {
+  var meta = _DEPLOY_FIELD_META[field];
+  if (!meta) return;
+  var c = _deployCards[i];
+  var input = document.getElementById('deploy-field-input-' + field + '-' + i);
+  if (!input) return;
+  var raw = input.value.trim();
+  _deployFieldError(i, field, '');
+  // Validate first so a bad value never reaches the stored config (AC5-8).
+  var validateBody = {};
+  validateBody[meta.configKey] = field === 'port' ? Number(raw) : raw;
+  var slug = c.project;
+  fetch('/api/projects/' + encodeURIComponent(slug) + '/environments/'
+        + encodeURIComponent(c.env) + '/deploy-config/validate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(validateBody)
+  })
+    .then(function(r) {
+      return r.json().then(function(d) { return { ok: r.ok, data: d }; });
+    })
+    .then(function(res) {
+      if (!res.ok) {
+        var detail = (res.data && res.data.detail) || 'Invalid value.';
+        _deployFieldError(i, field, detail);
+        return null;
+      }
+      // Persist via the per-environment deploy-config PUT (AC4).
+      var entry = { host: 'local' };
+      entry[meta.configKey] = field === 'port' ? Number(raw) : raw;
+      var putBody = {};
+      putBody[c.env] = entry;
+      return fetch('/api/projects/' + encodeURIComponent(slug) + '/deploy-config', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(putBody)
+      }).then(function(r2) {
+        return r2.json().then(function(d2) { return { ok: r2.ok, data: d2 }; });
+      });
+    })
+    .then(function(res) {
+      if (!res) return;
+      if (!res.ok) {
+        var detail = (res.data && res.data.detail) || 'Could not save.';
+        _deployFieldError(i, field, typeof detail === 'string' ? detail : 'Could not save.');
+        return;
+      }
+      // Update card state from the saved entry and re-render the row.
+      var saved = (res.data && res.data[c.env]) || {};
+      c[meta.cardKey] = saved[meta.configKey] != null
+        ? saved[meta.configKey]
+        : (field === 'port' ? Number(raw) : raw);
+      deployCancelField(i, field);
+    })
+    .catch(function() {
+      _deployFieldError(i, field, 'Network error — could not save.');
+    });
 }
 
 // ── Live status / commit SHA per card ─────────────────────────────────────────

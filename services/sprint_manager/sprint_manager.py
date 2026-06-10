@@ -687,6 +687,7 @@ def _db_agent_start_sm(
     worktree_sha: Optional[str] = None,
     base_sha: Optional[str] = None,
     attempt_kind: Optional[str] = None,
+    log_path: Optional[str] = None,
 ) -> None:
     """Best-effort open of an agent_runs row at dispatch time (#764).
 
@@ -695,6 +696,7 @@ def _db_agent_start_sm(
     coder dispatches using size-tier routing (issue #789). `worktree_sha` and
     `base_sha` are forensic fields from worktree hygiene (issue #788).
     `attempt_kind` is one of 'initial', 'fix_round', or 'hang_continue' (issue #787).
+    `log_path` is the absolute path to the issue log file (issue #783).
     """
     try:
         import db  # apps/dashboard on sys.path (line 142)
@@ -705,6 +707,7 @@ def _db_agent_start_sm(
             worktree_sha=worktree_sha,
             base_sha=base_sha,
             attempt_kind=attempt_kind,
+            log_path=log_path,
         )
     except (Exception, SystemExit):
         pass
@@ -1344,10 +1347,12 @@ def dispatch_alerts(
     category: Optional[str] = None,
     cfg: Optional["SprintConfig"] = None,
     repo: Optional[str] = None,
+    sprint_label: Optional[str] = None,
 ) -> None:
     """Dispatch an alert through all configured channels."""
     api_url    = cfg.api_url    if cfg is not None else None
     alerts_dir = cfg.alerts_dir if cfg is not None else None
+    eff_sprint_label = sprint_label
     for mode in alert_modes:
         if mode == AlertMode.NONE:
             continue
@@ -1361,7 +1366,7 @@ def dispatch_alerts(
             elif mode == AlertMode.FILE:
                 _alert_file(title, body, alerts_dir=alerts_dir)
             elif mode == AlertMode.NTFY:
-                _alert_ntfy(title, body, category)
+                _alert_ntfy(title, body, category, sprint_label=eff_sprint_label)
         except Exception as e:
             structured_log.error("alert_dispatch_error", f"[alert:{mode}] error: {e}", mode=mode, exc=str(e))
 
@@ -1425,20 +1430,30 @@ def _alert_discord(title: str, body: str) -> None:
     urllib.request.urlopen(req, timeout=5)
 
 
-def _alert_ntfy(title: str, body: str, category: Optional[str] = None) -> None:
+def _alert_ntfy(
+    title: str,
+    body: str,
+    category: Optional[str] = None,
+    sprint_label: Optional[str] = None,
+) -> None:
     topic_url = os.environ.get("NTFY_TOPIC_URL", "")
     if not topic_url:
         return
     priority = "4" if category in ("failure", "needs-rework") else "3"
     payload  = body.encode()
-    req      = urllib.request.Request(
+    headers: dict = {
+        "Title":    title,
+        "Priority": priority,
+        "Tags":     category or "sprint",
+    }
+    # Deep-link into Run Browser when DASHBOARD_URL is configured (issue #783).
+    dashboard_url = os.environ.get("DASHBOARD_URL", "").rstrip("/")
+    if dashboard_url and sprint_label:
+        headers["Click"] = f"{dashboard_url}/run-browser?sprint={sprint_label}"
+    req = urllib.request.Request(
         topic_url,
         data=payload,
-        headers={
-            "Title":    title,
-            "Priority": priority,
-            "Tags":     category or "sprint",
-        },
+        headers=headers,
         method="POST",
     )
     urllib.request.urlopen(req, timeout=5)
@@ -5069,7 +5084,8 @@ def write_sprint_summary(
     # Dispatch via all configured alert channels (issue #24)
     if alert_modes:
         title = f"Sprint {state.sprint_label} summary"
-        dispatch_alerts(alert_modes, title=title, body=content[:2000], cfg=cfg, repo=eff_repo)
+        dispatch_alerts(alert_modes, title=title, body=content[:2000], cfg=cfg, repo=eff_repo,
+                        sprint_label=state.sprint_label)
 
     # AC-5: skip GitHub issue creation entirely for dry runs
     if dry_run:
@@ -6605,7 +6621,8 @@ def _run_pipeline_dispatch(
             num, label, "coder",
             model_used=_coder_model_sel, routing_reason=_coder_route_reason,
             attempt_kind=_pipe_attempt_kind,
-        )  # issue #764, #789, #787
+            log_path=str(_issue_log_path(num, cfg=cfg)),
+        )  # issue #764, #789, #787, #783
         _emit_sprint_lifecycle_event(
             type="ticket_dispatched", target=f"#{num}", actor="system",
             detail={"agent": "CODER"}, project=eff_repo or label, action_id=run_id,
@@ -6692,6 +6709,7 @@ def _run_pipeline_dispatch(
                         num, label, "coder",
                         model_used=_coder_model_sel, routing_reason=_coder_route_reason,
                         attempt_kind="hang_continue",
+                        log_path=str(_issue_log_path(num, cfg=cfg)),
                     )
                     coder_ok, coder_category = _dispatch_coder(
                         num, alert_modes, sprint_branch=target_branch, repo_name=eff_repo, cfg=cfg,
@@ -6755,7 +6773,8 @@ def _run_pipeline_dispatch(
 
         ist.set_agent_status("tester_dispatched")
         ist.tester_started_at = ist.status_changed_at
-        _db_agent_start_sm(num, label, "tester")  # issue #764
+        _db_agent_start_sm(num, label, "tester",
+                           log_path=str(_issue_log_path(num, cfg=cfg)))  # issue #764, #783
         ist.tester_attempt_count += 1
         _emit_sprint_lifecycle_event(
             type="ticket_dispatched", target=f"#{num}", actor="system",
@@ -6851,6 +6870,7 @@ def _run_pipeline_dispatch(
         dispatch_alerts(
             alert_modes, title=f"Issue #{num} skipped: needs-rework", body=reason,
             issue_num=num, category=FailureCategory.RETRY_EXHAUSTED, cfg=cfg, repo=eff_repo,
+            sprint_label=label,
         )
         _transition_safe(num, _TicketState.NEEDS_REWORK, actor="sprint_manager", repo_name=eff_repo)
         _publish_gate_failure_analyses(num, repo_name=eff_repo, cfg=cfg)
@@ -7452,7 +7472,8 @@ def run_sprint(
                     num, label, "coder",
                     model_used=_ser_coder_model, routing_reason=_ser_route_reason,
                     attempt_kind=_next_attempt_kind,
-                )  # issue #764, #789, #787
+                    log_path=str(_issue_log_path(num, cfg=cfg)),
+                )  # issue #764, #789, #787, #783
                 _emit_sprint_lifecycle_event(
                     type="ticket_dispatched",
                     target=f"#{num}",
@@ -7699,7 +7720,8 @@ def run_sprint(
             _db_agent_start_sm(
                 num, label, "tester",
                 risk_tier=_tester_risk, model_used=_tester_model_selected,
-            )  # issue #764, #790
+                log_path=str(_issue_log_path(num, cfg=cfg)),
+            )  # issue #764, #790, #783
             # Record the tester attempt so analytics can count rejections exactly
             # going forward (issue #718).
             issue_state.tester_attempt_count += 1
@@ -7889,6 +7911,7 @@ def run_sprint(
                 category=category,
                 cfg=cfg,
                 repo=eff_repo,
+                sprint_label=label,
             )
             if category in _LOGIC_FAILURE_CATEGORIES:
                 _transition_safe(num, _TicketState.NEEDS_REWORK, actor="sprint_manager", repo_name=eff_repo)
@@ -7934,6 +7957,7 @@ def run_sprint(
                 category=category,
                 cfg=cfg,
                 repo=eff_repo,
+                sprint_label=label,
             )
             _transition_safe(num, _TicketState.NEEDS_REWORK, actor="sprint_manager", repo_name=eff_repo)
             # Post Gate Failure Analysis comment + sprint log entry for each gate

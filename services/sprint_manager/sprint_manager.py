@@ -1137,6 +1137,33 @@ def _changed_js_ts_files(base_branch: str, cwd: Path) -> list[str]:
     return [f for f in out.splitlines() if any(f.endswith(ext) for ext in _JS_TS_EXTENSIONS)]
 
 
+# ── strangler-fig monolith gate (issue #761) ──────────────────────────────────
+
+# Repo-root-relative path of the monolith we are strangling. New endpoints must
+# go to apps/dashboard/routers/<area>.py, never back into this file.
+MONOLITH_GUARDED_FILE = "apps/dashboard/server.py"
+
+
+def _file_line_count_at_ref(ref: str, rel_path: str, cwd: Path) -> Optional[int]:
+    """Return the line count of rel_path at a git ref, or None if absent.
+
+    Uses ``git show <ref>:<rel_path>`` so the count reflects the committed file
+    at that ref rather than the working tree. Returns None when the file does
+    not exist at the ref or the path is not inside a git repo.
+    """
+    rc, out, _ = _run_timed("git", "show", f"{ref}:{rel_path}", cwd=cwd)
+    if rc != 0:
+        return None
+    return len(out.splitlines())
+
+
+def _monolith_gate_enabled() -> bool:
+    """COMMANDER_GATE_MONOLITH defaults on; 'false'/'0'/'no'/'off' disables it."""
+    return os.environ.get("COMMANDER_GATE_MONOLITH", "1").strip().lower() not in (
+        "0", "false", "no", "off",
+    )
+
+
 # ── dashboard integration ─────────────────────────────────────────────────────
 
 def _post_agent_event(
@@ -2210,6 +2237,55 @@ def _gate_design(
         return GateResult(gate="design", passed=False, output=combined)
 
 
+def _gate_monolith(
+    issue_num: int,
+    worktester_root: Path,
+    skip: bool,
+    base_branch: str = "develop",
+    repo_name: Optional[str] = None,
+    guarded_file: str = MONOLITH_GUARDED_FILE,
+) -> GateResult:
+    """Gate: reject any diff that grows the server.py monolith (issue #761).
+
+    Compares the line count of ``guarded_file`` at HEAD against ``base_branch``.
+    A strict increase fails the gate (and reverts the ticket to SIT); a decrease
+    or unchanged count passes. Skips gracefully when the file is absent at either
+    ref (e.g. not a git repo) so the gate never blocks non-dashboard projects.
+    """
+    if skip:
+        print("  [gate:monolith] skipped")
+        return GateResult(gate="monolith", passed=True, skipped=True)
+
+    _post_agent_event("gate:monolith")
+
+    base_count = _file_line_count_at_ref(base_branch, guarded_file, cwd=worktester_root)
+    head_count = _file_line_count_at_ref("HEAD", guarded_file, cwd=worktester_root)
+
+    if base_count is None or head_count is None:
+        print(f"  [gate:monolith] {guarded_file} not found at base/HEAD — skipped")
+        return GateResult(
+            gate="monolith", passed=True, skipped=True,
+            output=f"{guarded_file} not found at base or HEAD — monolith gate skipped",
+        )
+
+    if head_count > base_count:
+        msg = (
+            f"{guarded_file} grew {base_count} → {head_count} lines "
+            f"(+{head_count - base_count}). New endpoints belong in "
+            f"apps/dashboard/routers/<area>.py — adding routes to server.py is forbidden."
+        )
+        structured_log.error("gate_failed", f"[gate:monolith] FAIL — {msg}",
+                             gate="monolith", issue_num=issue_num)
+        _revert_to_sit(issue_num, "monolith", msg, repo_name=repo_name)
+        return GateResult(gate="monolith", passed=False, output=msg)
+
+    print(f"  [gate:monolith] PASS — {guarded_file} {base_count} → {head_count} lines (no growth)")
+    return GateResult(
+        gate="monolith", passed=True,
+        output=f"{guarded_file} {base_count} → {head_count} lines (no growth)",
+    )
+
+
 def _run_quality_gates(
     issue_num: int,
     feature_branch: str,
@@ -2222,6 +2298,7 @@ def _run_quality_gates(
     gate_typecheck: bool = True,
     gate_design: bool = True,
     gate_frontend_lint: bool = True,
+    gate_monolith: bool = True,
     target_branch: str = "develop",
     repo_name: Optional[str] = None,
     base_branch: str = "develop",
@@ -2300,6 +2377,18 @@ def _run_quality_gates(
         repo_name=repo_name,
     )
     results.append(r_merge)
+    if not r_merge.passed:
+        return results
+
+    # Gate 6 -- monolith (strangler-fig: reject server.py growth, issue #761)
+    r_monolith = _gate_monolith(
+        issue_num,
+        worktester_root,
+        skip=(skip_all or not gate_monolith),
+        base_branch=base_branch,
+        repo_name=repo_name,
+    )
+    results.append(r_monolith)
 
     return results
 
@@ -2439,6 +2528,7 @@ def handle_post_tester(
     gate_typecheck: bool = True,
     gate_design: bool = True,
     gate_frontend_lint: bool = True,
+    gate_monolith: bool = True,
     worktester_root: Optional[Path] = None,
     worktester_dashboard: Optional[Path] = None,
     target_branch: str = "develop",
@@ -2623,6 +2713,7 @@ def handle_post_tester(
         gate_typecheck=gate_typecheck,
         gate_design=gate_design,
         gate_frontend_lint=gate_frontend_lint,
+        gate_monolith=gate_monolith,
         target_branch=target_branch,
         repo_name=eff_repo,
         base_branch=base_branch,
@@ -2656,6 +2747,7 @@ def handle_post_tester(
             "pytest":        FailureCategory.PYTEST_FAIL,
             "lint":          FailureCategory.LINT_FAIL,
             "merge-preview": FailureCategory.MERGE_CONFLICT,
+            "monolith":      FailureCategory.GATE_FAIL,
         }
         gate_category = gate_category_map.get(gate_name, FailureCategory.GATE_FAIL)
         return (False,
@@ -5792,7 +5884,7 @@ def _run_pipeline_dispatch(
     target_branch, sprint_branch, alert_modes, cfg, run_id,
     eff_sprints_dir, rerun_decisions,
     skip_gates, gate_pytest, gate_lint, gate_merge_preview,
-    gate_typecheck, gate_design, gate_frontend_lint, gate_scope,
+    gate_typecheck, gate_design, gate_frontend_lint, gate_monolith, gate_scope,
     resume, retry_failed,
 ) -> None:
     """Process dispatch levels with one coder + one tester worker concurrently.
@@ -5954,7 +6046,8 @@ def _run_pipeline_dispatch(
             issue_num=num, tester_exit_code=tester_rc, skip_gates=skip_gates,
             gate_pytest=gate_pytest, gate_lint=gate_lint, gate_merge_preview=gate_merge_preview,
             gate_typecheck=gate_typecheck, gate_design=gate_design,
-            gate_frontend_lint=gate_frontend_lint, target_branch=target_branch,
+            gate_frontend_lint=gate_frontend_lint, gate_monolith=gate_monolith,
+            target_branch=target_branch,
             repo_name=eff_repo, cfg=cfg, base_branch=target_branch or "develop",
             gate_scope=gate_scope, documentor_enabled=cfg.documentor_enabled if cfg else False,
             alert_modes=alert_modes, sprint_label=label,
@@ -6078,6 +6171,7 @@ def run_sprint(
     gate_typecheck: bool = True,
     gate_design: bool = True,
     gate_frontend_lint: bool = True,
+    gate_monolith: bool = True,
     alert_modes: Optional[list[str]] = None,
     repo_name: Optional[str] = None,
     dry_run: bool = False,
@@ -6378,6 +6472,7 @@ def run_sprint(
             skip_gates=skip_gates, gate_pytest=gate_pytest, gate_lint=gate_lint,
             gate_merge_preview=gate_merge_preview, gate_typecheck=gate_typecheck,
             gate_design=gate_design, gate_frontend_lint=gate_frontend_lint,
+            gate_monolith=gate_monolith,
             gate_scope=gate_scope, resume=resume, retry_failed=retry_failed,
         )
 
@@ -6881,6 +6976,7 @@ def run_sprint(
                 gate_typecheck     = gate_typecheck,
                 gate_design        = gate_design,
                 gate_frontend_lint = gate_frontend_lint,
+                gate_monolith      = gate_monolith,
                 target_branch      = target_branch,
                 repo_name          = eff_repo,
                 cfg                = cfg,
@@ -7127,6 +7223,12 @@ def main() -> None:
         help="Enable/disable pytest gate (default: enabled)",
     )
     p.add_argument(
+        "--gate-monolith",
+        action=argparse.BooleanOptionalAction,
+        default=_monolith_gate_enabled(),
+        help="Enable/disable monolith gate — rejects server.py growth (default: enabled; env: COMMANDER_GATE_MONOLITH=false to disable)",
+    )
+    p.add_argument(
         "--gate-merge-preview",
         action=argparse.BooleanOptionalAction,
         default=True,
@@ -7366,6 +7468,7 @@ def main() -> None:
             gate_typecheck       = args.gate_typecheck,
             gate_design          = args.gate_design,
             gate_frontend_lint   = args.gate_frontend_lint,
+            gate_monolith        = args.gate_monolith,
             alert_modes          = alert_modes,
             repo_name            = eff_repo,
             dry_run              = args.dry_run,

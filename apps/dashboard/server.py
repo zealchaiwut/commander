@@ -905,6 +905,13 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
+# Strangler-fig routers (issue #761): extracted route clusters live in
+# apps/dashboard/routers/ and are mounted here. New endpoints go there, NOT
+# in this file — the COMMANDER_GATE_MONOLITH gate rejects server.py growth.
+from routers import backup_router  # noqa: E402
+
+app.include_router(backup_router)
+
 logger = logging.getLogger(__name__)
 
 
@@ -1315,24 +1322,6 @@ def get_gh_auth_status():
         content=_GH_AUTH_STATUS,
         headers={"Cache-Control": "no-cache, must-revalidate"},
     )
-
-
-@app.get("/api/backup/status")
-def get_backup_status():
-    """Return the current state of the gist-based config backup.
-
-    Response shape:
-    {
-      "last_backup_at": "<ISO-8601>" | null,
-      "gist_id": "<id>" | null,
-      "gist_url": "https://gist.github.com/..." | null,
-      "file_count": <int>,
-      "last_error": "<message>" | null
-    }
-    """
-    if not _BACKUP_AVAILABLE:
-        raise HTTPException(status_code=503, detail="Backup module not available")
-    return _backup_module.get_backup_status()
 
 
 _seen_agent_sessions: set[str] = set()

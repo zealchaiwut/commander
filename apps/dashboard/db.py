@@ -153,6 +153,8 @@ def init_db():
             )
         """)
         _create_ticket_status_table(conn)
+        _create_issues_table(conn)
+        _create_sync_state_table(conn)
         conn.commit()
 
 
@@ -178,6 +180,162 @@ def _create_ticket_status_table(conn: sqlite3.Connection) -> None:
         "CREATE INDEX IF NOT EXISTS ix_ticket_status_issue_ts "
         "ON ticket_status (issue, ts DESC)"
     )
+
+
+# ── Issues mirror (issue #756) ────────────────────────────────────────────────
+#
+# The dashboard read model is the local DB, not GitHub.  The `issues` table is a
+# mirror of repo issues kept fresh by github_events_sync.sync_issues_mirror() via
+# ETag-conditional polling.  Read endpoints (project view, sprint cards, running
+# view, finish/rerun previews) serve from this table so renders consume zero
+# GitHub rate-limit quota.  The `sync_state` table holds the per-repo ETag used
+# for If-None-Match conditional requests.
+
+
+def _create_issues_table(conn: sqlite3.Connection) -> None:
+    """Create the issues mirror table (issue #756).
+
+    `labels` and `raw` hold JSON.  `raw` is the full gh-CLI-shaped issue dict so
+    readers can reconstruct fields (assignees, url, body, …) without a live call.
+    Primary key is (repo, issue_number) so multiple repos can be mirrored.
+    """
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS issues (
+            repo         TEXT NOT NULL DEFAULT '',
+            issue_number INTEGER NOT NULL,
+            title        TEXT,
+            state        TEXT,
+            labels       TEXT NOT NULL DEFAULT '[]',
+            updated_at   TEXT,
+            raw          TEXT,
+            PRIMARY KEY (repo, issue_number)
+        )
+    """)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS ix_issues_repo_state "
+        "ON issues (repo, state)"
+    )
+
+
+def _create_sync_state_table(conn: sqlite3.Connection) -> None:
+    """Create the sync_state table holding per-key ETags (issue #756)."""
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS sync_state (
+            key        TEXT PRIMARY KEY,
+            etag       TEXT,
+            updated_at TEXT
+        )
+    """)
+
+
+def upsert_issues(repo: str, issues: list[dict]) -> int:
+    """Upsert a batch of gh-CLI-shaped issue dicts into the mirror.
+
+    Each issue dict is expected to carry: number, title, state, labels (list of
+    {name, color}), updatedAt, plus any extra fields (assignees, url, body) which
+    are preserved in the `raw` column.  Returns the number of issues written.
+    """
+    if not issues:
+        return 0
+    with get_conn() as conn:
+        _create_issues_table(conn)
+        for issue in issues:
+            number = issue.get("number")
+            if number is None:
+                continue
+            labels = issue.get("labels") or []
+            conn.execute(
+                """INSERT INTO issues
+                       (repo, issue_number, title, state, labels, updated_at, raw)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(repo, issue_number) DO UPDATE SET
+                       title      = excluded.title,
+                       state      = excluded.state,
+                       labels     = excluded.labels,
+                       updated_at = excluded.updated_at,
+                       raw        = excluded.raw""",
+                (
+                    repo,
+                    int(number),
+                    issue.get("title", ""),
+                    issue.get("state", ""),
+                    json.dumps(labels),
+                    issue.get("updatedAt", "") or issue.get("updated_at", ""),
+                    json.dumps(issue),
+                ),
+            )
+        conn.commit()
+    return len(issues)
+
+
+def _row_to_issue(row: sqlite3.Row) -> dict:
+    """Reconstruct a gh-CLI-shaped issue dict from a mirror row."""
+    if row["raw"]:
+        try:
+            return json.loads(row["raw"])
+        except (ValueError, TypeError):
+            pass
+    return {
+        "number": row["issue_number"],
+        "title": row["title"],
+        "state": row["state"],
+        "labels": json.loads(row["labels"]) if row["labels"] else [],
+        "updatedAt": row["updated_at"],
+    }
+
+
+def get_mirrored_issues(repo: str, state: str | None = None) -> list[dict]:
+    """Return mirrored issues for a repo as gh-CLI-shaped dicts.
+
+    Optionally filter by state ('open' / 'closed').  Returns an empty list when
+    nothing is mirrored yet (callers may then fall back to a live fetch).
+    """
+    sql = "SELECT * FROM issues WHERE repo = ?"
+    params: list = [repo]
+    if state is not None:
+        sql += " AND state = ?"
+        params.append(state)
+    sql += " ORDER BY issue_number DESC"
+    with get_conn() as conn:
+        _create_issues_table(conn)
+        rows = conn.execute(sql, params).fetchall()
+    return [_row_to_issue(r) for r in rows]
+
+
+def get_mirrored_issue(repo: str, issue_number: int) -> dict | None:
+    """Return a single mirrored issue, or None if not present."""
+    with get_conn() as conn:
+        _create_issues_table(conn)
+        row = conn.execute(
+            "SELECT * FROM issues WHERE repo = ? AND issue_number = ?",
+            (repo, int(issue_number)),
+        ).fetchone()
+    return _row_to_issue(row) if row else None
+
+
+def get_sync_etag(key: str) -> str | None:
+    """Return the stored ETag for *key*, or None."""
+    with get_conn() as conn:
+        _create_sync_state_table(conn)
+        row = conn.execute(
+            "SELECT etag FROM sync_state WHERE key = ?", (key,)
+        ).fetchone()
+    return row["etag"] if row and row["etag"] else None
+
+
+def set_sync_etag(key: str, etag: str) -> None:
+    """Store the ETag for *key* (used as If-None-Match on the next poll)."""
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
+    with get_conn() as conn:
+        _create_sync_state_table(conn)
+        conn.execute(
+            """INSERT INTO sync_state (key, etag, updated_at)
+               VALUES (?, ?, ?)
+               ON CONFLICT(key) DO UPDATE SET
+                   etag = excluded.etag, updated_at = excluded.updated_at""",
+            (key, etag, now),
+        )
+        conn.commit()
 
 
 def record_ticket_status(

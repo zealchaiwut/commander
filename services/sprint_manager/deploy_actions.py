@@ -142,11 +142,97 @@ def require_restart_target(entry: Optional[dict]) -> None:
     )
 
 
+def launchd_plist(entry: dict) -> Optional[str]:
+    """Return the configured ``launchd_plist`` path (non-empty) or None (issue #771).
+
+    ``launchctl bootstrap`` needs the plist path to load a service back into the
+    domain after a ``bootout``; a launchd_label alone is not enough to Start.
+    """
+    return (entry.get("launchd_plist") or "").strip() or None
+
+
+def require_stop_target(entry: Optional[dict]) -> None:
+    """Validate that *entry* has a usable Stop strategy (issue #771).
+
+    Stop is valid with either a ``launchd_label`` (→ ``launchctl bootout``) or a
+    ``stop`` script. Raises :class:`DeployActionError` (→ HTTP 400) otherwise, so
+    the caller rejects before any shell command runs.
+    """
+    if not entry:
+        raise DeployActionError("No deploy config for this environment")
+    if restart_label(entry):
+        return
+    stop, _ = stop_start_scripts(entry)
+    if stop:
+        return
+    raise DeployActionError(
+        "Stop requires either a launchd_label or a stop script"
+    )
+
+
+def require_start_target(entry: Optional[dict]) -> None:
+    """Validate that *entry* has a usable Start strategy (issue #771).
+
+    Start is valid with either a ``launchd_label`` AND ``launchd_plist`` (→
+    ``launchctl bootstrap``) or a ``start`` script. A launchd_label without a
+    plist is rejected because ``bootstrap`` cannot run without the plist path.
+    """
+    if not entry:
+        raise DeployActionError("No deploy config for this environment")
+    if restart_label(entry) and launchd_plist(entry):
+        return
+    _, start = stop_start_scripts(entry)
+    if start:
+        return
+    raise DeployActionError(
+        "Start requires either a launchd_label with launchd_plist, or a start script"
+    )
+
+
 def service_target(label: str, uid: Optional[int] = None) -> str:
     """Build the launchd gui-domain service target ``gui/<uid>/<label>``."""
     if uid is None:
         uid = os.getuid()
     return f"gui/{uid}/{label}"
+
+
+def gui_domain(uid: Optional[int] = None) -> str:
+    """Build the launchd gui-domain target ``gui/<uid>`` (issue #771).
+
+    ``bootstrap`` is addressed at the domain (``gui/<uid>``) plus a plist path,
+    unlike ``bootout``/``print`` which address an individual service.
+    """
+    if uid is None:
+        uid = os.getuid()
+    return f"gui/{uid}"
+
+
+def build_bootout_command(label: str, uid: Optional[int] = None) -> list[str]:
+    """Build ``launchctl bootout gui/<uid>/<label>`` for Stop (issue #771).
+
+    Unlike ``kickstart -k`` (restart in place), ``bootout`` removes the service
+    from the domain so it stays down until a later ``bootstrap`` brings it back.
+    """
+    return ["launchctl", "bootout", service_target(label, uid)]
+
+
+def build_bootstrap_command(plist: str, uid: Optional[int] = None) -> list[str]:
+    """Build ``launchctl bootstrap gui/<uid> <plist>`` for Start (issue #771)."""
+    return ["launchctl", "bootstrap", gui_domain(uid), plist]
+
+
+def build_print_command(label: str, uid: Optional[int] = None) -> list[str]:
+    """Build ``launchctl print gui/<uid>/<label>`` to probe run state (issue #771)."""
+    return ["launchctl", "print", service_target(label, uid)]
+
+
+def interpret_run_state(returncode: int) -> str:
+    """Map a ``launchctl print`` return code to a run state (issue #771).
+
+    ``print`` returns 0 when the service is bootstrapped into the domain
+    (running/loaded) and non-zero once it has been booted out (stopped).
+    """
+    return "running" if returncode == 0 else "stopped"
 
 
 def build_kickstart_command(label: str, uid: Optional[int] = None) -> list[str]:

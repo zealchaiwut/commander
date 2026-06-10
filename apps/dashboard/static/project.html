@@ -1183,6 +1183,20 @@
     .status-pill--live     { background: var(--green-bg); color: var(--green); }
     .status-pill--idle     { background: var(--green-bg); color: var(--green); }
     .status-pill--failed   { background: var(--red-bg, #3f1d1d); color: var(--error, #ef4444); }
+    /* ── Run-state pill (issue #771) ── running / stopped / idle ── */
+    .runstate-pill {
+      font-size: 10.5px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+      padding: 2px 10px; border-radius: 999px;
+      background: var(--surface-2); color: var(--text-sub);
+      display: inline-flex; align-items: center; gap: 6px;
+    }
+    .runstate-pill::before {
+      content: ""; width: 6px; height: 6px; border-radius: 999px;
+      background: currentColor; flex-shrink: 0;
+    }
+    .runstate-pill--running { background: var(--green-bg); color: var(--green); }
+    .runstate-pill--stopped { background: var(--red-bg); color: var(--red); }
+    .runstate-pill--idle    { background: var(--surface-2); color: var(--text-sub); }
     .deploy-card__actions { display: flex; gap: 8px; flex-wrap: wrap; }
     .deploy-btn {
       display: inline-flex; align-items: center; gap: 6px; min-height: 36px;
@@ -1196,6 +1210,10 @@
     .deploy-btn--primary { background: var(--blue); border-color: var(--blue); color: #fff; }
     .deploy-btn--primary:hover:not(:disabled) { filter: brightness(1.08); background: var(--blue); }
     .deploy-btn--danger { color: var(--error, #ef4444); }
+    .deploy-startstop-na {
+      display: inline-flex; align-items: center; padding: 7px 0;
+      font-size: 12px; color: var(--text-sub); cursor: help;
+    }
     .deploy-card__confirm {
       display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
       background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px;
@@ -22629,6 +22647,10 @@ function _deployCardHtml(c, i) {
     + '    <span class="deploy-card__title">' + _deployEsc(c.env) + '</span>'
     + '    <span class="deploy-card__project">' + _deployEsc(c.project) + '</span>'
     + '    <span class="deploy-card__badge ' + hostClass + '">' + _deployEsc(hostLabel) + '</span>'
+    // issue #771 — run-state pill (running / stopped / idle) reads the real
+    // service state so the user knows what they're acting on before clicking.
+    + '    <span class="runstate-pill runstate-pill--idle" id="deploy-card-runstate-' + i + '"'
+    + '          role="status" aria-live="polite" title="Run state">idle</span>'
     + '    <span class="status-pill status-pill--idle" id="deploy-card-status-' + i + '">idle</span>'
     + '  </div>'
     + '  <div class="deploy-card__meta">'
@@ -22646,14 +22668,49 @@ function _deployCardHtml(c, i) {
     + '</article>';
 }
 
-function _deployIdleActionsHtml(i) {
+// issue #771 — per-card run state ('running' | 'stopped' | 'idle') drives which
+// action buttons are enabled. idle (never started / unknown) allows everything.
+var _deployRunState = {};
+
+// AC5/AC6: enable/disable each action by run state. The chosen lifecycle is a
+// Stop → Start flow: Deploy and Restart are disabled while the env is stopped.
+function _deployBtnDisabled(state, action) {
+  if (state === 'running') return action === 'start';
+  if (state === 'stopped') return action === 'stop' || action === 'restart' || action === 'deploy';
+  return false;  // idle → all enabled
+}
+
+function _deployActionBtn(i, onclickExpr, label, icon, cls, disabled) {
   return ''
-    + '<button class="deploy-btn deploy-btn--primary" type="button"'
-    + ' aria-label="Deploy ' + _deployEsc(_deployCards[i].env) + '"'
-    + ' onclick="deployCardDeploy(' + i + ')"><i class="ti ti-rocket"></i> Deploy</button>'
-    + '<button class="deploy-btn deploy-btn--danger" type="button"'
-    + ' aria-label="Restart ' + _deployEsc(_deployCards[i].env) + '"'
-    + ' onclick="deployCardRestart(' + i + ')"><i class="ti ti-refresh"></i> Restart</button>';
+    + '<button class="deploy-btn' + (cls ? ' ' + cls : '') + '" type="button"'
+    + ' aria-label="' + _deployEsc(label + ' ' + _deployCards[i].env) + '"'
+    + (disabled ? ' disabled' : '')
+    + ' onclick="' + onclickExpr + '">'
+    + '<i class="ti ' + icon + '"></i> ' + label + '</button>';
+}
+
+// AC1: four actions — Deploy, Restart, Start, Stop. Render envs have no clean
+// stop equivalent through this dashboard, so Start/Stop are HIDDEN (not disabled)
+// with a tooltip explaining why (AC10).
+function _deployIdleActionsHtml(i) {
+  var c = _deployCards[i];
+  var state = _deployRunState[i] || 'idle';
+  var html = ''
+    + _deployActionBtn(i, 'deployCardDeploy(' + i + ')', 'Deploy', 'ti-rocket',
+        'deploy-btn--primary', _deployBtnDisabled(state, 'deploy'))
+    + _deployActionBtn(i, 'deployCardRestart(' + i + ')', 'Restart', 'ti-refresh',
+        '', _deployBtnDisabled(state, 'restart'));
+  if (c.start_stop_supported) {
+    html += _deployActionBtn(i, 'deployCardStart(' + i + ')', 'Start', 'ti-player-play',
+              '', _deployBtnDisabled(state, 'start'))
+          + _deployActionBtn(i, 'deployCardStop(' + i + ')', 'Stop', 'ti-player-stop',
+              'deploy-btn--danger', _deployBtnDisabled(state, 'stop'));
+  } else {
+    html += '<span class="deploy-startstop-na"'
+          + ' title="Render does not support stop/start through this dashboard">'
+          + 'Start / Stop n/a</span>';
+  }
+  return html;
 }
 
 // ── Editable run folder + port rows (issue #769) ──────────────────────────────
@@ -22801,6 +22858,32 @@ function _deploySetSha(i, sha) {
   if (el) el.textContent = _deployShortSha(sha);
 }
 
+// AC7/AC8: paint the run-state pill and re-render the actions so the enable/
+// disable logic matches the new state — no full page refresh required.
+function _deploySetRunState(i, state) {
+  _deployRunState[i] = state;
+  var el = document.getElementById('deploy-card-runstate-' + i);
+  if (el) {
+    el.textContent = state;
+    el.className = 'runstate-pill runstate-pill--' + state;
+  }
+  var actions = _deployActionsEl(i);
+  if (actions) actions.innerHTML = _deployIdleActionsHtml(i);
+}
+
+// AC8: re-read the live run state after an action completes. Local envs query
+// the run-state endpoint; render has no such endpoint so its pill is derived
+// from the deploy status in _deployLoadCardStatus instead.
+function _deployRefreshRunState(i) {
+  var c = _deployCards[i];
+  if (!c || !c.start_stop_supported) return Promise.resolve();
+  return fetch('/api/projects/' + encodeURIComponent(c.project) + '/environments/'
+        + encodeURIComponent(c.env) + '/run-state')
+    .then(function(r) { return r.ok ? r.json() : null; })
+    .then(function(d) { if (d && d.state) _deploySetRunState(i, d.state); })
+    .catch(function() {});
+}
+
 function _deploySetTime(i, ts) {
   var el = document.getElementById('deploy-card-time-' + i);
   if (!el) return;
@@ -22822,6 +22905,9 @@ function _deployLoadCardStatus(c, i) {
         _deploySetStatus(i, d.status || 'idle');
         _deploySetSha(i, d.commit);
         _deploySetTime(i, d.finished_at);
+        // AC7: render has no run-state endpoint — derive the pill from the live
+        // deploy status (a live service is running; anything else reads idle).
+        _deploySetRunState(i, d.status === 'live' ? 'running' : 'idle');
       })
       .catch(function() { _deploySetSha(i, null); });
   } else {
@@ -22830,6 +22916,8 @@ function _deployLoadCardStatus(c, i) {
       .then(function(r) { return r.ok ? r.json() : null; })
       .then(function(d) { _deploySetSha(i, d && d.git_sha); })
       .catch(function() { _deploySetSha(i, null); });
+    // AC7: read the live run state for the card from launchctl print.
+    _deployRefreshRunState(i);
   }
 }
 
@@ -23067,6 +23155,7 @@ function _deployExecDeploy(i) {
         if (ok) _deployLogFinishSuccess(i, 'Deployed');    // AC7/AC8 auto-collapse
         else _deployLogFinishFailure(i, null, 'Health check failed');  // AC9
         _deployResetActions(i);
+        _deployRefreshRunState(i);                         // #771 AC8
       });
     })
     .catch(function(e) {
@@ -23113,6 +23202,7 @@ function _deployExecRestart(i) {
         if (ok) _deployLogFinishSuccess(i, 'Restarted');   // AC7/AC8 auto-collapse
         else _deployLogFinishFailure(i, null, 'Health check failed');  // AC9
         _deployResetActions(i);
+        _deployRefreshRunState(i);                         // #771 AC8
       });
     })
     .catch(function(e) {
@@ -23125,6 +23215,78 @@ function _deployExecRestart(i) {
 function _deployResetActions(i) {
   var el = _deployActionsEl(i);
   if (el) el.innerHTML = _deployIdleActionsHtml(i);
+}
+
+// ── Start / Stop a local environment (issue #771) ─────────────────────────────
+// Start brings the service up WITHOUT pulling code (AC3); Stop halts it without
+// destroying it (AC4). Both stream into the capped log panel, then re-read the
+// live run state so the pill + button enable/disable update with no page refresh.
+
+function deployCardStart(i) { _deployExecStart(i); }
+function deployCardStop(i) { _deployExecStop(i); }
+
+function _deployExecStart(i) {
+  var c = _deployCards[i];
+  _deployBusyActions(i, 'Starting');
+  _deployLogReset(i);
+  _deployLogPush(i, 'Starting ' + c.env + '…');
+  fetch('/api/projects/' + encodeURIComponent(c.project) + '/environments/'
+        + encodeURIComponent(c.env) + '/start', { method: 'POST' })
+    .then(function(r) {
+      return r.json().then(function(data) { return { ok: r.ok, status: r.status, data: data }; });
+    })
+    .then(function(res) {
+      if (!res.ok) {
+        _deployLogFinishFailure(i, 'Start failed (' + res.status + '): '
+          + ((res.data && res.data.detail) || 'error'));
+        _deployResetActions(i);
+        _deployRefreshRunState(i);
+        return;
+      }
+      var out = (res.data && (res.data.stdout || res.data.output) || '').trim();
+      _deployLogPush(i, out || ('Started ' + c.env + '.'));
+      _deployLogFinishSuccess(i, 'Started');
+      _deployResetActions(i);
+      _deployRefreshRunState(i);                           // AC8: state updates
+    })
+    .catch(function(e) {
+      _deployLogFinishFailure(i, 'Start error: ' + e);
+      _deployResetActions(i);
+      _deployRefreshRunState(i);
+    });
+}
+
+function _deployExecStop(i) {
+  var c = _deployCards[i];
+  _deployBusyActions(i, 'Stopping');
+  _deployLogReset(i);
+  _deployLogPush(i, 'Stopping ' + c.env + '…');
+  fetch('/api/projects/' + encodeURIComponent(c.project) + '/environments/'
+        + encodeURIComponent(c.env) + '/stop', { method: 'POST' })
+    .then(function(r) {
+      return r.json().then(function(data) { return { ok: r.ok, status: r.status, data: data }; });
+    })
+    .then(function(res) {
+      if (!res.ok) {
+        _deployLogFinishFailure(i, 'Stop failed (' + res.status + '): '
+          + ((res.data && res.data.detail) || 'error'));
+        _deployResetActions(i);
+        _deployRefreshRunState(i);
+        return;
+      }
+      var out = (res.data && (res.data.stdout || res.data.output) || '').trim();
+      _deployLogPush(i, out || ('Stopped ' + c.env + '.'));
+      // Stop halts the env's own server; the dashboard's /api/health says nothing
+      // about it, so skip the health check and trust the run-state probe instead.
+      _deployLogFinishSuccess(i, 'Stopped');
+      _deployResetActions(i);
+      _deployRefreshRunState(i);                           // AC8: state updates
+    })
+    .catch(function(e) {
+      _deployLogFinishFailure(i, 'Stop error: ' + e);
+      _deployResetActions(i);
+      _deployRefreshRunState(i);
+    });
 }
 
 // Poll the render deploy-status endpoint until live/failed, streaming status.

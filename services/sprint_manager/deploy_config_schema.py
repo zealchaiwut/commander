@@ -36,6 +36,10 @@ SUPPORTED_HOSTS: tuple[str, ...] = ("local", "render")
 # Default branch per environment for local hosts.
 _BRANCH_DEFAULTS: dict[str, str] = {"prd": "master", "uat": "develop"}
 
+# Default bind port per environment for local hosts (issue #769). Surfaced on the
+# Deploy card so the operator sees the effective port without a stored override.
+_PORT_DEFAULTS: dict[str, int] = {"prd": 8000, "uat": 8001}
+
 # Seed defaults keyed by project slug (the repo's last path component).
 # Returned by GET when no stored override exists for that environment.
 SEED_DEFAULTS: dict[str, dict[str, dict[str, Any]]] = {
@@ -95,8 +99,17 @@ def overview_entries_for(
         if host not in SUPPORTED_HOSTS:
             continue
         e: dict[str, Any] = {"project": slug, "env": env, "host": host}
+        # issue #771 — advertise whether Start/Stop controls apply. Local envs
+        # support them (launchctl bootout/bootstrap or stop/start scripts); render
+        # has no clean stop equivalent through this dashboard, so the UI hides the
+        # Start/Stop buttons (not disables them) and shows a tooltip instead.
+        e["start_stop_supported"] = host == "local"
         if host == "local":
             e["branch"] = entry.get("branch") or branch_default(env)
+            # issue #769 — surface the run folder + port on the card. working_dir
+            # may be unset here; the server enriches it from on-disk env paths.
+            e["working_dir"] = entry.get("working_dir") or None
+            e["port"] = port_value(env, entry.get("port"))
         elif host == "render":
             e["render_service_id"] = entry.get("render_service_id") or None
             e["render_api_key_set"] = bool(entry.get("render_api_key"))
@@ -107,6 +120,25 @@ def overview_entries_for(
 def branch_default(env: str) -> Optional[str]:
     """Return the default branch for *env* (``prd``→master, ``uat``→develop)."""
     return _BRANCH_DEFAULTS.get(env)
+
+
+def port_default(env: str) -> Optional[int]:
+    """Return the default bind port for *env* (``prd``→8000, ``uat``→8001)."""
+    return _PORT_DEFAULTS.get(env)
+
+
+def port_value(env: str, stored: Any) -> Optional[int]:
+    """Resolve the effective port for *env*: the stored value, else the default.
+
+    A stored port may arrive as a string (from JSON); coerce it to int when it
+    is a clean integer, otherwise fall back to the per-env default.
+    """
+    if stored not in (None, ""):
+        try:
+            return int(stored)
+        except (ValueError, TypeError):
+            pass
+    return port_default(env)
 
 
 def mask_secret(value: Optional[str]) -> Optional[str]:

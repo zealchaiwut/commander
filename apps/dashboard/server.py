@@ -101,20 +101,6 @@ except ImportError:
     _BACKUP_AVAILABLE = False
 
 try:
-    import sprint_repo as _sprint_repo
-    _SPRINT_REPO_AVAILABLE = True
-except Exception:
-    _sprint_repo = None  # type: ignore[assignment]
-    _SPRINT_REPO_AVAILABLE = False
-
-try:
-    import sync_projects_to_neon as _sync_projects_module
-    _SYNC_PROJECTS_AVAILABLE = True
-except Exception:
-    _sync_projects_module = None  # type: ignore[assignment]
-    _SYNC_PROJECTS_AVAILABLE = False
-
-try:
     from services.sprint_manager.settings_sync import (
         load_local_snapshot as _ss_load_local,
         load_neon_snapshot as _ss_load_neon,
@@ -129,16 +115,10 @@ try:
 except Exception:
     _SYNC_SETTINGS_AVAILABLE = False
 
-# Per-machine kill switch for the Neon/Postgres layer. While its schema is
-# unmigrated, the writes error out (e.g. relation "projects" does not exist) and
-# block sprint creation. Setting COMMANDER_DISABLE_NEON makes the dashboard run
-# purely off GitHub + local JSON: no Neon reads/writes, no startup projects sync.
-# (.env is loaded above at import time via load_dotenv, so this sees it.)
-if os.environ.get("COMMANDER_DISABLE_NEON", "").strip().lower() in ("1", "true", "yes", "on"):
-    _sprint_repo = None  # type: ignore[assignment]
-    _SPRINT_REPO_AVAILABLE = False
-    _sync_projects_module = None  # type: ignore[assignment]
-    _SYNC_PROJECTS_AVAILABLE = False
+# Neon dual-write was removed in issue #758 — SQLite + local JSON is the primary
+# (and only live) store. Neon is now an optional export target reached solely via
+# scripts/export_to_neon.py, so there is no startup sync or per-flow Neon write to
+# disable here.
 
 from sizing import SIZE_TO_MINUTES as _SIZE_TO_MINUTES, letter_from_minutes as _letter_from_minutes, minutes_from_letter as _minutes_from_letter
 
@@ -827,6 +807,34 @@ async def _status_md_sync_loop() -> None:
 # ─────────────────────────────────────────────────────────────────────────────
 
 
+def _mirror_sync_repos() -> list[str]:
+    """Resolve the repos whose issues should be mirrored into the local DB.
+
+    Uses every tracked project's repo (issue #756); falls back to the detected
+    default repo. Duplicates are removed while preserving order.
+    """
+    repos: list[str] = []
+    try:
+        for proj in projects_module.load_projects():
+            repo_name = proj.get("repo")
+            if repo_name:
+                repos.append(repo_name)
+    except Exception as exc:
+        logger.warning("[issues-mirror] could not load projects: %s", exc)
+    if not repos:
+        try:
+            repos.append(github_client.repo())
+        except Exception:
+            pass
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for r in repos:
+        if r not in seen:
+            seen.add(r)
+            ordered.append(r)
+    return ordered
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global _start_time
@@ -845,13 +853,8 @@ async def lifespan(app: FastAPI):
     _sweep_orphan_pid_files()
     _restore_sprint_statuses_on_startup()
     await _mark_inflight_jobs_failed()
-    # Sync projects.json → Neon (non-blocking; warn on failure, never fatal)
-    if _SYNC_PROJECTS_AVAILABLE:
-        try:
-            _result = _sync_projects_module.sync_projects_to_neon()
-            logger.info("projects sync complete: %s", _result)
-        except Exception as _exc:
-            logger.warning("projects sync failed (non-fatal): %s", _exc)
+    # Neon dual-write removed (issue #758): projects.json is the runtime source of
+    # truth. Mirror it to Neon on demand with scripts/export_to_neon.py, not here.
 
     # Start backup scheduler and queue a startup backup after 30 s
     if _BACKUP_AVAILABLE:
@@ -864,12 +867,27 @@ async def lifespan(app: FastAPI):
     task2 = asyncio.create_task(_timeout_loop())
     task3 = asyncio.create_task(_periodic_orphan_sweep_loop())
     task4 = asyncio.create_task(_status_md_sync_loop())
+    # Bootstrap full sync (issue #760): on first run from an empty/absent DB
+    # (detected via the missing schema-marker row), run a one-time full GitHub
+    # sync synchronously before handing off to the ETag loop so the dashboard is
+    # never served empty. A second start finds the marker and skips straight to
+    # the loop. Never raises — an empty DB must not crash startup.
+    _bootstrap_repos = _mirror_sync_repos()
+    await asyncio.to_thread(
+        github_events_sync.bootstrap_full_sync, _bootstrap_repos
+    )
+    # Issues-mirror sync loop (issue #756): keep the local DB read model fresh
+    # via ETag-conditional polling so renders consume zero GitHub quota.
+    task5 = asyncio.create_task(
+        github_events_sync.run_issues_sync_loop(_bootstrap_repos)
+    )
     yield
     task1.cancel()
     task2.cancel()
     task3.cancel()
     task4.cancel()
-    for t in (task1, task2, task3, task4):
+    task5.cancel()
+    for t in (task1, task2, task3, task4, task5):
         try:
             await t
         except asyncio.CancelledError:
@@ -2010,20 +2028,6 @@ async def remove_project(owner: str, repo_name: str, body: RemoveProjectBody):
     return {"ok": True, "removed": removed}
 
 
-@app.post("/api/projects/sync-to-db")
-async def sync_projects_to_db():
-    """Trigger a manual sync of projects.json → Neon.
-
-    Returns a JSON summary: {projects_synced, projects_skipped, envs_synced, envs_skipped, errors}.
-    """
-    if not _SYNC_PROJECTS_AVAILABLE:
-        raise HTTPException(status_code=503, detail="sync module not available")
-    try:
-        return _sync_projects_module.sync_projects_to_neon()
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
-
-
 @app.get("/api/projects/{project}/running-sprint")
 def get_running_sprint(project: str):
     """Return the currently running sprint for the given project slug.
@@ -2368,10 +2372,46 @@ def put_project_deploy_config(slug: str, body: dict):
     return _deploy_config_response(slug, repo, merged)
 
 
+@app.post("/api/projects/{slug}/environments/{env}/deploy-config/validate")
+def validate_deploy_config_field(slug: str, env: str, body: dict):
+    """Validate an inline working_dir / port edit before it is persisted (#769).
+
+    Body may carry ``working_dir`` and/or ``port``. Each is checked and a failure
+    returns 400 with a user-visible message so the Deploy card can surface an
+    inline error and skip the PUT:
+
+      - working_dir → must exist on disk AND be a git clone.
+      - port        → must be an integer 1–65535 AND not already in use on host.
+
+    Returns 404 for an unknown slug, 200 ``{"ok": true}`` when all supplied
+    fields are valid.
+    """
+    _resolve_project_slug(slug)
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="Validation body must be an object.")
+    if "working_dir" in body:
+        try:
+            _deploy_validation.validate_working_dir(body["working_dir"])
+        except _deploy_validation.DeployValidationError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+    if "port" in body:
+        try:
+            port = _deploy_validation.validate_port(body["port"])
+        except _deploy_validation.DeployValidationError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        if _deploy_validation.port_in_use(port):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Port {port} is already in use on this host.",
+            )
+    return {"ok": True, "env": env}
+
+
 # ── Local deploy / restart actions (issue #723) ──────────────────────────────
 
 from services.sprint_manager import deploy_actions as _deploy_actions
 from services.sprint_manager import render_actions as _render_actions
+from services.sprint_manager import deploy_validation as _deploy_validation
 
 
 def _render_deploy_environment(entry: dict, env: str) -> dict:
@@ -2464,11 +2504,15 @@ def _restart_environment(entry: dict) -> dict:
             "stderr": result.stderr,
         }
 
-    # Script fallback: stop then start.
+    # Script fallback: stop then start. Inject PORT=<configured> so the scripts
+    # bind the configured port instead of a hardcoded default (issue #769).
     stop, start = _deploy_actions.stop_start_scripts(entry)
+    restart_env = _deploy_actions.build_restart_env(entry)
     steps = []
     for phase, script in (("stop", stop), ("start", start)):
-        result = subprocess.run(["sh", "-c", script], capture_output=True, text=True)
+        result = subprocess.run(
+            ["sh", "-c", script], capture_output=True, text=True, env=restart_env
+        )
         steps.append({
             "phase": phase,
             "script": script,
@@ -2569,6 +2613,167 @@ def restart_environment(slug: str, env: str):
     return {"ok": True, "env": env, **result}
 
 
+def _stop_environment(entry: dict) -> dict:
+    """Stop a local environment without destroying it (issue #771).
+
+    Strategy: ``launchctl bootout`` when a launchd_label is set, else the
+    configured ``stop`` script. Validation failures raise HTTPException 400; a
+    failed command raises 500. Unlike restart's ``kickstart``, ``bootout``
+    removes the service from the domain so it stays down until Start.
+    """
+    try:
+        _deploy_actions.require_stop_target(entry)
+    except _deploy_actions.DeployActionError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    label = _deploy_actions.restart_label(entry)
+    if label:
+        cmd = _deploy_actions.build_bootout_command(label)
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            raise HTTPException(
+                status_code=500,
+                detail=result.stderr.strip() or result.stdout.strip() or "bootout failed",
+            )
+        return {
+            "method": "launchd-bootout",
+            "launchd_label": label,
+            "stdout": result.stdout,
+            "stderr": result.stderr,
+        }
+
+    stop, _start = _deploy_actions.stop_start_scripts(entry)
+    restart_env = _deploy_actions.build_restart_env(entry)
+    result = subprocess.run(
+        ["sh", "-c", stop], capture_output=True, text=True, env=restart_env
+    )
+    if result.returncode != 0:
+        raise HTTPException(
+            status_code=500,
+            detail=f"stop script failed: {result.stderr.strip() or stop}",
+        )
+    return {"method": "script", "script": stop, "stdout": result.stdout, "stderr": result.stderr}
+
+
+def _start_environment(entry: dict) -> dict:
+    """Start a local environment without pulling new code (issue #771).
+
+    Strategy: ``launchctl bootstrap gui/<uid> <plist>`` when a launchd_label +
+    launchd_plist are set, else the configured ``start`` script. Validation
+    failures raise HTTPException 400; a failed command raises 500.
+    """
+    try:
+        _deploy_actions.require_start_target(entry)
+    except _deploy_actions.DeployActionError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    label = _deploy_actions.restart_label(entry)
+    plist = _deploy_actions.launchd_plist(entry)
+    if label and plist:
+        cmd = _deploy_actions.build_bootstrap_command(plist)
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            raise HTTPException(
+                status_code=500,
+                detail=result.stderr.strip() or result.stdout.strip() or "bootstrap failed",
+            )
+        return {
+            "method": "launchd-bootstrap",
+            "launchd_label": label,
+            "launchd_plist": plist,
+            "stdout": result.stdout,
+            "stderr": result.stderr,
+        }
+
+    _stop, start = _deploy_actions.stop_start_scripts(entry)
+    restart_env = _deploy_actions.build_restart_env(entry)
+    result = subprocess.run(
+        ["sh", "-c", start], capture_output=True, text=True, env=restart_env
+    )
+    if result.returncode != 0:
+        raise HTTPException(
+            status_code=500,
+            detail=f"start script failed: {result.stderr.strip() or start}",
+        )
+    return {"method": "script", "script": start, "stdout": result.stdout, "stderr": result.stderr}
+
+
+@app.post("/api/projects/{slug}/environments/{env}/stop")
+def stop_environment(slug: str, env: str):
+    """Stop a local environment's service without destroying it (issue #771).
+
+    Uses ``launchctl bootout`` when a ``launchd_label`` is configured, else the
+    configured ``stop`` script. Rejects (400) when no stop target is configured;
+    404 for an unknown slug. host=render has no stop equivalent through this
+    dashboard, so the UI hides Start/Stop for render — this endpoint rejects it.
+    """
+    repo = _resolve_project_slug(slug)
+    merged = _merged_deploy_config(slug, repo)
+    entry = _deploy_actions.get_env_entry(merged, env)
+    if entry is None:
+        raise HTTPException(status_code=400, detail=f"No deploy config for environment '{env}'")
+    if _render_actions.is_render_host(entry):
+        raise HTTPException(
+            status_code=400,
+            detail="Stop is not supported for host=render environments",
+        )
+    result = _stop_environment(entry)
+    return {"ok": True, "env": env, **result}
+
+
+@app.post("/api/projects/{slug}/environments/{env}/start")
+def start_environment(slug: str, env: str):
+    """Start a local environment's service without pulling code (issue #771).
+
+    Uses ``launchctl bootstrap`` when ``launchd_label`` + ``launchd_plist`` are
+    configured, else the configured ``start`` script. Rejects (400) when no
+    start target is configured; 404 for an unknown slug. host=render is rejected
+    (the UI hides Start/Stop for render).
+    """
+    repo = _resolve_project_slug(slug)
+    merged = _merged_deploy_config(slug, repo)
+    entry = _deploy_actions.get_env_entry(merged, env)
+    if entry is None:
+        raise HTTPException(status_code=400, detail=f"No deploy config for environment '{env}'")
+    if _render_actions.is_render_host(entry):
+        raise HTTPException(
+            status_code=400,
+            detail="Start is not supported for host=render environments",
+        )
+    result = _start_environment(entry)
+    return {"ok": True, "env": env, **result}
+
+
+@app.get("/api/projects/{slug}/environments/{env}/run-state")
+def environment_run_state(slug: str, env: str):
+    """Return the live run state of a local environment (issue #771).
+
+    ``{"state": "running" | "stopped" | "idle"}``. For a launchd-managed env the
+    state comes from ``launchctl print`` (rc 0 → running, non-zero → stopped). A
+    script-only env has no reliable probe, so it reports ``idle`` (unknown). Only
+    host=local is supported; render run state is derived client-side from the
+    deploy status, so this endpoint rejects host=render with 400.
+    """
+    repo = _resolve_project_slug(slug)
+    merged = _merged_deploy_config(slug, repo)
+    entry = _deploy_actions.get_env_entry(merged, env)
+    if entry is None:
+        raise HTTPException(status_code=400, detail=f"No deploy config for environment '{env}'")
+    if _render_actions.is_render_host(entry):
+        raise HTTPException(
+            status_code=400,
+            detail="Run state is only available for host=local environments",
+        )
+    label = _deploy_actions.restart_label(entry)
+    if not label:
+        return {"ok": True, "env": env, "host": "local", "state": "idle"}
+    result = subprocess.run(
+        _deploy_actions.build_print_command(label), capture_output=True, text=True
+    )
+    state = _deploy_actions.interpret_run_state(result.returncode)
+    return {"ok": True, "env": env, "host": "local", "state": state}
+
+
 @app.get("/api/projects/{slug}/environments/{env}/deploy-status")
 def environment_deploy_status(slug: str, env: str):
     """Return the normalized latest-deploy status for a host=render env (issue #725).
@@ -2637,6 +2842,9 @@ def get_deploy_overview():
             # its stored override lookup just returns empty and seed defaults win.
             repo = f"zealchaiwut/{slug}"
         merged = _merged_deploy_config(slug, repo)
+        # issue #769 — fill working_dir for local envs from on-disk env paths so
+        # the card shows the run folder even with no stored override.
+        _enrich_local_working_dirs(repo, merged)
         environments.extend(_deploy_overview_entries_for(slug, merged))
 
     return {"environments": environments}
@@ -3762,19 +3970,10 @@ def _home_project_data(proj: dict, running_sprints: list[dict]) -> dict:
     uat_issues = [i for i in all_open if any(l["name"] == "UAT" for l in i.get("labels", []))]
     backlog_issues = [i for i in all_open if github_client.classify_issue(i) == "backlog"]
 
-    # Supplement PID-based check with Neon: if Neon says a sprint is running for
-    # this project, the sidebar dot is green even if the JSON file was deleted.
-    neon_running = False
-    if not proj_running and _SPRINT_REPO_AVAILABLE and _sprint_repo is not None:
-        try:
-            neon_running = any(
-                s.status == "running"
-                for s in _sprint_repo.list_sprints(project=repo)
-            )
-        except Exception:
-            pass
-
-    if proj_running or neon_running:
+    # The durable SQLite sprints table (issue #757) is authoritative for the
+    # running check, so the PID-based scan above is sufficient. The former Neon
+    # supplement was removed in issue #758.
+    if proj_running:
         status = "running"
     elif uat_issues:
         status = "uat-pending"
@@ -4805,11 +5004,48 @@ def _plan_json_set_state(
     state: str,
     **extra_fields,
 ) -> None:
-    """Update state in plan.json, creating the file if missing."""
+    """Update state in plan.json, creating the file if missing.
+
+    plan.json is a deprecated cache (issue #757) — the durable lifecycle state
+    now lives in the `sprints` table.  This still writes it for dual-write.
+    """
     existing = _read_plan_json(project_root, sprint_label) or {}
     existing["state"] = state
     existing.update(extra_fields)
     _write_plan_json(project_root, sprint_label, existing)
+
+
+def _sprint_db_set_state(
+    sprint_label: str,
+    project: str,
+    state: str,
+    **extra_fields,
+) -> None:
+    """Mirror a sprint lifecycle transition into the `sprints` table (issue #757).
+
+    Best-effort: any DB failure is swallowed so it never breaks the request —
+    plan.json dual-write remains the cache and the sweep paths reconcile drift.
+    """
+    try:
+        if state == "running":
+            db.record_sprint_start(
+                sprint_label, project=project or "",
+                started_at=extra_fields.get("started_at"),
+            )
+        elif state == "completed":
+            db.record_sprint_finish(
+                sprint_label,
+                ended_at=extra_fields.get("ended_at"),
+                end_reason=extra_fields.get("end_reason"),
+            )
+        elif state == "cancelled":
+            db.record_sprint_cancel(
+                sprint_label,
+                end_reason=extra_fields.get("end_reason", "cancelled"),
+                ended_at=extra_fields.get("ended_at"),
+            )
+    except Exception:
+        pass
 
 
 def _get_sprint_pid(project_root: Path, sprint_label: str) -> Optional[int]:
@@ -4849,17 +5085,103 @@ def _load_sprint_order(project_root: Path, all_sprint_labels: list[str]) -> list
     return result
 
 
-def _is_sprint_running(project_root: Path, sprint_label: str) -> bool:
-    """Check if a sprint is running.
+def _sprint_pid_alive(project_root: Path, sprint_label: str) -> bool:
+    """Return True if the sprint's PID (or pending claim) is alive (issue #757).
 
-    Reads plan.json state as the authoritative source.  Falls back to PID-file
-    scanning only for legacy sprints that have no plan.json yet.
-
-    Reconciles "plan.json=running but PID dead" to state=cancelled so the next
-    caller sees the correct state without manual intervention.
+    Scans both `{label}-pid` and `{label}-pid.pending`, treating a placeholder
+    "0"/"" PID as a still-starting claim. Cleans up files holding a dead or
+    unparseable PID. Pure liveness — no state interpretation.
     """
     import logging as _logging
     _log = _logging.getLogger(__name__)
+    sprints_dir  = _commander_dir(project_root) / "sprints"
+    pid_file     = sprints_dir / f"{sprint_label}-pid"
+    pending_file = sprints_dir / f"{sprint_label}-pid.pending"
+    for candidate in (pid_file, pending_file):
+        if not candidate.exists():
+            continue
+        try:
+            raw = candidate.read_text(encoding="utf-8").strip()
+        except OSError:
+            continue
+        if raw in ("", "0"):
+            return True  # pending claim — still starting up
+        try:
+            pid = int(raw)
+        except ValueError:
+            try:
+                candidate.unlink()
+            except OSError:
+                pass
+            continue
+        try:
+            os.kill(pid, 0)
+            return True
+        except ProcessLookupError:
+            _log.warning(
+                "Stale sprint lock: %s (PID %s dead) — cleaning up",
+                candidate.name, raw,
+            )
+            try:
+                candidate.unlink()
+            except OSError:
+                pass
+        except PermissionError:
+            return True
+        except OSError:
+            pass
+    return False
+
+
+def _is_sprint_running(project_root: Path, sprint_label: str) -> bool:
+    """Check if a sprint is running.
+
+    The durable `sprints` table is the authoritative source (issue #757): a
+    sprint is running only when DB state='running' AND its PID is alive. A
+    PID-dead + DB-running row is reconciled to state='cancelled' and reported as
+    not running. Falls back to plan.json + PID-file scanning only for legacy
+    sprints that have no DB row yet.
+    """
+    import logging as _logging
+    _log = _logging.getLogger(__name__)
+
+    # ── DB-authoritative path (issue #757) ───────────────────────────────────
+    # Only trust a DB row that belongs to THIS project. The sprints table is keyed
+    # by label (globally unique, mirroring the Neon uq_sprints_label constraint),
+    # but project_root scopes this call — guard against a same-label row from a
+    # different project (or a stale row in a shared DB) hijacking the decision.
+    try:
+        _db_row = db.get_sprint(sprint_label)
+    except Exception:
+        _db_row = None
+    if _db_row is not None:
+        _row_proj = str(_db_row.get("project") or "")
+        _row_slug = _row_proj.split("/")[-1] if "/" in _row_proj else _row_proj
+        # Trust the row only when its project slug matches this project_root.
+        # An empty/missing project (legacy CLI write) is not trusted for a named
+        # project — fall back to plan.json + PID for those.
+        if _row_slug != project_root.name:
+            _db_row = None
+    if _db_row is not None:
+        if _db_row.get("state") != "running":
+            return False
+        if _sprint_pid_alive(project_root, sprint_label):
+            return True
+        # DB=running but PID dead — reconcile both stores to cancelled.
+        _log.warning(
+            "Sprint %s: DB state=running but no alive PID — reconciling to cancelled",
+            sprint_label,
+        )
+        try:
+            db.record_sprint_cancel(sprint_label, end_reason="orphan-pid")
+        except Exception:
+            pass
+        try:
+            _plan_json_set_state(project_root, sprint_label, "cancelled",
+                                 end_reason="orphan-pid")
+        except Exception:
+            pass
+        return False
 
     plan = _read_plan_json(project_root, sprint_label)
     if plan is not None:
@@ -6226,16 +6548,22 @@ def run_sprint_managed(request: Request, body: SprintMgmtRunBody):
             detail=f"Sprint {body.sprint_label} is already running on {body.project}",
         )
 
-    # Write state=running before spawning subprocess (issue #507)
+    # Write state=running before spawning subprocess (issue #507).
+    # Durable lifecycle state goes to the `sprints` table (issue #757); plan.json
+    # is dual-written as a deprecated cache.
+    _started_at = datetime.now(timezone.utc).isoformat()
     try:
         _plan_json_set_state(
             project_root,
             body.sprint_label,
             "running",
-            started_at=datetime.now(timezone.utc).isoformat(),
+            started_at=_started_at,
         )
     except Exception:
         pass
+    _sprint_db_set_state(
+        body.sprint_label, body.project, "running", started_at=_started_at
+    )
 
     stripped_env = _build_sprint_subprocess_env()
     goal_path = _sprint_goal_path(project_root, body.sprint_label)
@@ -6420,12 +6748,8 @@ def kill_sprint(sprint_label: str, project: str):
         except OSError:
             pass
 
-    # Neon + JSON: mark sprint as cancelled (best-effort — don't fail the kill).
-    if _SPRINT_REPO_AVAILABLE and _sprint_repo is not None:
-        try:
-            _sprint_repo.update_sprint_status(sprint_label, "cancelled")
-        except Exception as _e:
-            print(f"[neon] WARNING: could not mark sprint {sprint_label!r} cancelled: {_e}")
+    # Mark sprint cancelled in JSON + the durable SQLite store below (issue #758
+    # removed the Neon mirror).
     project_root = _project_root_path(project)
     json_path = _sprint_json_path(project_root, sprint_label)
     data = _sprint_json_read(json_path)
@@ -6433,11 +6757,12 @@ def kill_sprint(sprint_label: str, project: str):
         data["status"] = "cancelled"
         _sprint_json_write(json_path, data)
 
-    # Write state=cancelled to plan.json (issue #507)
+    # Write state=cancelled to plan.json (issue #507) + DB (issue #757)
     try:
         _plan_json_set_state(project_root, sprint_label, "cancelled")
     except Exception:
         pass
+    _sprint_db_set_state(sprint_label, project, "cancelled", end_reason="killed")
 
     _emit_dashboard_event(
         project=project or "dashboard",
@@ -7145,18 +7470,8 @@ async def create_sprint_label(body: SprintCreateBody):
     sprint_label = f"sprint-{target_num}"
     eff_goal = (body.goal or sprint_label).strip() or sprint_label
 
-    # Neon write must succeed before any JSON is written (AC-6).
-    if _SPRINT_REPO_AVAILABLE and _sprint_repo is not None:
-        try:
-            _sprint_repo.get_or_create_sprint(
-                label=sprint_label,
-                goal=eff_goal,
-                project=body.project,
-            )
-        except Exception as _e:
-            raise HTTPException(500, detail=f"Neon write failed: {_e}")
-
-    # JSON writes are best-effort (AC-7).
+    # Sprint metadata is persisted to local JSON + the durable SQLite store; the
+    # Neon write was removed in issue #758 (Neon is export-only now).
     project_root = _project_root_path(body.project)
     if body.goal is not None:
         goal_path = _sprint_goal_path(project_root, sprint_label)
@@ -7250,12 +7565,12 @@ async def rename_sprint_label(sprint_label: str, body: SprintRenameBody):
         except Exception:
             pass
 
-    # Update Neon DB
-    if _SPRINT_REPO_AVAILABLE and _sprint_repo is not None:
-        try:
-            _sprint_repo.rename_sprint(sprint_label, new_label)
-        except Exception:
-            pass  # Best-effort; GitHub is the source of truth for labels
+    # Mirror the rename into the durable SQLite sprints table (issue #758 removed
+    # the Neon mirror; best-effort — GitHub is the source of truth for labels).
+    try:
+        db.rename_sprint(sprint_label, new_label)
+    except Exception:
+        pass
 
     return {"ok": True, "old_label": sprint_label, "new_label": new_label}
 
@@ -7267,20 +7582,12 @@ class SprintTicketReorderBody(BaseModel):
 
 @app.post("/api/sprints/{sprint_label}/tickets/reorder")
 def reorder_sprint_tickets(sprint_label: str, body: SprintTicketReorderBody):
-    """Reorder tickets within a sprint. Writes to Neon first, then JSON fallback."""
+    """Reorder tickets within a sprint. Persists to local JSON + durable SQLite."""
     if not _SPRINT_LABEL_RE.match(sprint_label):
         raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")
 
-    # Neon write must succeed (AC-6).
-    if _SPRINT_REPO_AVAILABLE and _sprint_repo is not None:
-        try:
-            _sprint_repo.reorder_tickets(sprint_label, body.issue_numbers)
-        except Exception as _e:
-            if "SprintNotFound" in type(_e).__name__ or "not found" in str(_e).lower():
-                raise HTTPException(404, detail=f"Sprint {sprint_label!r} not found in DB")
-            raise HTTPException(500, detail=f"Neon write failed: {_e}")
-
-    # JSON fallback (AC-7).
+    # Persist to local JSON; the durable SQLite ticket-order write happens below.
+    # The Neon mirror was removed in issue #758.
     project_root = _project_root_path(body.project)
     json_path = _sprint_json_path(project_root, sprint_label)
     data = _sprint_json_read(json_path)
@@ -7292,6 +7599,12 @@ def reorder_sprint_tickets(sprint_label: str, body: SprintTicketReorderBody):
             if n in by_num
         ]
         _sprint_json_write(json_path, data)
+
+    # Durable ticket order (issue #757); best-effort so it never breaks the reorder.
+    try:
+        db.set_sprint_ticket_order(sprint_label, body.issue_numbers)
+    except Exception:
+        pass
 
     return {"ok": True}
 
@@ -7314,6 +7627,11 @@ async def save_sprint_plan(sprint_label: str, project: str, request: Request):
     existing = _read_plan_json(project_root, sprint_label) or {}
     existing["tickets"] = body
     _write_plan_json(project_root, sprint_label, existing)
+    # Durable ticket order (issue #757); plan.json is the deprecated cache.
+    try:
+        db.set_sprint_ticket_order(sprint_label, body)
+    except Exception:
+        pass
     return {"ok": True}
 
 

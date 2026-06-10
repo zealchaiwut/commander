@@ -76,13 +76,6 @@ from services.sprint_manager.serialization import (  # noqa: E402
 )
 
 try:
-    from services.sprint_manager import sprint_repo as _sprint_repo
-    _SPRINT_REPO_AVAILABLE = True
-except (ImportError, ModuleNotFoundError):  # pragma: no cover
-    _sprint_repo = None  # type: ignore[assignment]
-    _SPRINT_REPO_AVAILABLE = False
-
-try:
     from services.sprint_manager.state_machine import (  # noqa: PLC0415
         transition as _sm_transition,
         TicketState as _TicketState,
@@ -592,6 +585,46 @@ def _plan_json_set_state_sm(
 
 # ── end plan.json helpers ─────────────────────────────────────────────────────
 
+# ── DB lifecycle helpers (issue #757) ────────────────────────────────────────
+#
+# The `sprints` / `sprint_ticket_order` tables are the durable home for sprint
+# lifecycle state and ticket order; plan.json + PID files above are now a
+# deprecated cache (dual-write). All DB writes here are best-effort: a missing
+# DB_PATH (CLI dispatch) makes apps/dashboard/db.py sys.exit at import, so we
+# swallow SystemExit too — a DB write must never interrupt a sprint run.
+
+def _sprint_db_set_state_sm(
+    label: str,
+    state: str,
+    project: str = "",
+    **fields,
+) -> None:
+    """Best-effort mirror of a sprint lifecycle transition into the DB (#757)."""
+    try:
+        import db  # apps/dashboard on sys.path (line 142)
+        if state == "running":
+            db.record_sprint_start(label, project=project or "",
+                                   started_at=fields.get("started_at"))
+        elif state == "completed":
+            db.record_sprint_finish(label, ended_at=fields.get("ended_at"),
+                                    end_reason=fields.get("end_reason"))
+        elif state == "cancelled":
+            db.record_sprint_cancel(label,
+                                    end_reason=fields.get("end_reason", "cancelled"),
+                                    ended_at=fields.get("ended_at"))
+    except (Exception, SystemExit):
+        pass
+
+
+def _sprint_db_set_ticket_order_sm(label: str, issue_numbers: list[int]) -> None:
+    """Best-effort persist of the dispatch order into sprint_ticket_order (#757)."""
+    try:
+        import db  # apps/dashboard on sys.path (line 142)
+        db.set_sprint_ticket_order(label, issue_numbers)
+    except (Exception, SystemExit):
+        pass
+
+
 # Hang detection constants (in seconds)
 HANG_WARN_SECS  = 30 * 60   # 30 minutes
 HANG_KILL_SECS  = 60 * 60   # 60 minutes
@@ -735,8 +768,13 @@ _active_pid_path: Optional[Path] = None
 
 
 def _remove_pid_file() -> None:
-    """Remove the sprint PID file if it exists (called by atexit + signal handlers)."""
+    """Remove the sprint PID file if it exists (called by atexit + signal handlers).
+
+    Also clears the run lock (COMMANDER_SPRINT_RUNNING) so non-status label
+    mutations are allowed again once the run ends (issue #754).
+    """
     global _active_pid_path
+    os.environ.pop("COMMANDER_SPRINT_RUNNING", None)
     if _active_pid_path and _active_pid_path.exists():
         try:
             _active_pid_path.unlink()
@@ -747,14 +785,14 @@ def _remove_pid_file() -> None:
 def _setup_pid_file(sprint_num: Optional[int]) -> None:
     """Write PID to dashboard/sprints/sprint-N.pid and register cleanup handlers."""
     global _active_pid_path
-    if sprint_num is None:
-        return
-    sprints_dir = SPRINTS_DIR
-    sprints_dir.mkdir(parents=True, exist_ok=True)
-    pid_path = sprints_dir / f"sprint-{sprint_num}.pid"
-    pid_path.write_text(str(os.getpid()), encoding="utf-8")
-    _active_pid_path = pid_path
+    # Hold the label lock for the duration of the run (issue #754). Set before the
+    # sprint_num guard so the lock — and its cleanup — covers every real run. It
+    # propagates to dispatched agents because each subprocess inherits
+    # os.environ.copy() (see sub_env below).
+    os.environ["COMMANDER_SPRINT_RUNNING"] = "1"
 
+    # Register lock + PID cleanup on every exit path before the sprint_num guard,
+    # so the run lock is always cleared on exit even when no PID file is written.
     atexit.register(_remove_pid_file)
 
     def _sig_handler(signum: int, frame: object) -> None:
@@ -763,6 +801,14 @@ def _setup_pid_file(sprint_num: Optional[int]) -> None:
 
     signal.signal(signal.SIGTERM, _sig_handler)
     signal.signal(signal.SIGINT, _sig_handler)
+
+    if sprint_num is None:
+        return
+    sprints_dir = SPRINTS_DIR
+    sprints_dir.mkdir(parents=True, exist_ok=True)
+    pid_path = sprints_dir / f"sprint-{sprint_num}.pid"
+    pid_path.write_text(str(os.getpid()), encoding="utf-8")
+    _active_pid_path = pid_path
 
 
 # ── Pause check (AC-3) ───────────────────────────────────────────────────────
@@ -1539,15 +1585,24 @@ def _add_blocked_label(
         except Exception as e:
             structured_log.warn("hang_comment_failed", f"failed to post hang comment: {e}", exc=str(e))
         return
+    # Route the label write through transition() — the single source of truth
+    # for status-label mutations (issue #752). Never edit the 'blocked' label
+    # via github_client directly.
+    _transition_safe(
+        issue_num,
+        _TicketState.BLOCKED,
+        actor="sprint_manager:hang",
+        repo_name=repo_name,
+        note=reason,
+    )
     try:
-        github_client.update_labels(issue_num, add=safe_add, repo_name=repo_name)
         github_client.add_comment(
             issue_num,
             f"Issue blocked by sprint manager (HANG): {reason}",
             repo_name=repo_name,
         )
     except Exception as e:
-        structured_log.warn("blocked_label_failed", f"failed to update GitHub blocked label: {e}", exc=str(e))
+        structured_log.warn("blocked_comment_failed", f"failed to post blocked comment: {e}", exc=str(e))
 
 
 def _find_feature_branch(issue_num: int) -> Optional[str]:
@@ -3838,13 +3893,9 @@ def generate_sprint_summary(
     skipped   = [i for i in state.issues if i.status == "skipped"]
     pending   = [i for i in state.issues if i.status == "pending"]
 
-    # Prefer DB-backed rollup for per-ticket metrics; fall back to in-memory state.
+    # Per-ticket metrics come from in-memory sprint state. The Neon-backed rollup
+    # was removed in issue #758 (Neon is export-only now).
     _db_rollup: Optional[dict] = None
-    if _SPRINT_REPO_AVAILABLE and _sprint_repo is not None:
-        try:
-            _db_rollup = _sprint_repo.get_sprint_rollup(state.sprint_label)
-        except Exception:
-            _db_rollup = None
 
     if _db_rollup is not None and _db_rollup["sum_tokens"] > 0:
         total_tokens = _db_rollup["sum_tokens"]
@@ -5625,17 +5676,9 @@ def list_backlog_issues(label: str, repo_name: Optional[str] = None) -> list[dic
         return []
 
 
-# ── Neon dual-write helpers ────────────────────────────────────────────────────
-
-def _neon_update(fn_name: str, *args, **kwargs) -> None:
-    """Call a sprint_repo function; print loudly on failure but don't abort sprint."""
-    if not _SPRINT_REPO_AVAILABLE or _sprint_repo is None:
-        return
-    try:
-        getattr(_sprint_repo, fn_name)(*args, **kwargs)
-    except Exception as _e:
-        structured_log.error("neon_update_failed", f"[neon] {fn_name} failed: {_e}", neon_fn=fn_name, exc=str(_e))
-
+# ── Sprint state JSON mirror helpers ────────────────────────────────────────────
+# Issue #758 removed the Neon dual-write. These helpers now only maintain the
+# local sprint state JSON ({label}.json), which the dashboard reads directly.
 
 def _neon_sprint_json_path(sprint_label: str, sprints_dir: Path) -> Path:
     return sprints_dir / f"{sprint_label}.json"
@@ -5666,7 +5709,8 @@ def _neon_sprint_init(
     project: str,
     sprints_dir: Path,
 ) -> None:
-    """Create sprint + tickets in Neon and write the JSON mirror. Called once on fresh start."""
+    """Write the sprint state JSON ({label}.json) on a fresh start (issue #758:
+    the Neon sprint/ticket creation was removed — local JSON only)."""
     goal = os.environ.get("SPRINT_GOAL", "").strip()
     if not goal:
         goal_file = sprints_dir / f"{label}-goal.txt"
@@ -5677,27 +5721,6 @@ def _neon_sprint_init(
                 pass
     if not goal:
         goal = label
-
-    if not _SPRINT_REPO_AVAILABLE or _sprint_repo is None:
-        return
-
-    # Create (or reuse) sprint row in Neon — this must succeed or we abort.
-    try:
-        _sprint_repo.get_or_create_sprint(label=label, goal=goal, project=project)
-        _sprint_repo.update_sprint_status(label, "running")
-    except Exception as _e:
-        structured_log.error("neon_sprint_init_failed", f"[neon] sprint init failed for {label!r}: {_e}", sprint_label=label, exc=str(_e))
-        return
-
-    # Add all tickets (idempotent — skip if already present).
-    for position, issue_state in enumerate(issues):
-        try:
-            _sprint_repo.add_ticket(sprint_label=label, issue_number=issue_state.number, position=position)
-        except Exception as _e:
-            if "UNIQUE" in str(_e).upper() or "unique" in str(_e).lower():
-                pass  # Already added (resume path)
-            else:
-                structured_log.warn("neon_add_ticket_failed", f"[neon] add_ticket #{issue_state.number} failed: {_e}", issue_num=issue_state.number, exc=str(_e))
 
     # Write JSON mirror.
     json_path = _neon_sprint_json_path(label, sprints_dir)
@@ -5720,9 +5743,8 @@ def _neon_ticket_status(
     sprints_dir: Path,
     total_tokens: int = 0,
 ) -> None:
-    """Update a ticket's Neon status + patch the sprint JSON mirror."""
-    _neon_update("update_ticket_status", sprint_label, issue_number, neon_status, total_tokens)
-
+    """Patch a ticket's status in the sprint state JSON (issue #758: Neon write
+    removed; `total_tokens` retained for call-site compatibility)."""
     json_path = _neon_sprint_json_path(sprint_label, sprints_dir)
     data = _neon_sprint_json_read(json_path)
     if "tickets" in data:
@@ -5752,9 +5774,7 @@ def _regenerate_status_md(cfg: Optional["SprintConfig"], dry_run: bool = False) 
 
 
 def _neon_sprint_status(sprint_label: str, neon_status: str, sprints_dir: Path) -> None:
-    """Update sprint Neon status + patch the sprint JSON mirror."""
-    _neon_update("update_sprint_status", sprint_label, neon_status)
-
+    """Patch the sprint status in the sprint state JSON (issue #758: Neon write removed)."""
     json_path = _neon_sprint_json_path(sprint_label, sprints_dir)
     data = _neon_sprint_json_read(json_path)
     if data:
@@ -6290,6 +6310,13 @@ def run_sprint(
 
     _dispatch_levels = _compute_dispatch_levels(state.issues, _plan_order, _dag_layers)
     _level_nums_by_idx = [[iss.number for iss in lvl] for lvl in _dispatch_levels]
+
+    # Persist the resolved dispatch order to sprint_ticket_order (issue #757).
+    # This is the exact order tickets are processed below — the durable record
+    # of "what ran in what order", replacing plan.json as source of truth.
+    if not dry_run:
+        _flat_order = [num for lvl in _level_nums_by_idx for num in lvl]
+        _sprint_db_set_ticket_order_sm(label, _flat_order)
 
     # Tag each IssueState with its 1-based execution level (issue #613: seg bar / level-sep UI)
     for _lvl_idx, _lvl_issues in enumerate(_dispatch_levels):
@@ -7273,20 +7300,31 @@ def main() -> None:
     def _sigterm_handler(signum: int, frame: object) -> None:
         _sprint_user_cancelled.set()
         _cleanup_pid()
-        # Best-effort state write before exit (issue #507)
+        # Best-effort state write before exit (issue #507 plan.json, #757 DB)
+        _ended_at = datetime.now(timezone.utc).isoformat()
         _plan_json_set_state_sm(
             args.label, "cancelled", cfg=cfg,
-            ended_at=datetime.now(timezone.utc).isoformat(),
+            ended_at=_ended_at,
+        )
+        _sprint_db_set_state_sm(
+            args.label, "cancelled", project=eff_repo or "",
+            ended_at=_ended_at, end_reason="cancelled",
         )
         raise SystemExit(130)
 
     signal.signal(signal.SIGTERM, _sigterm_handler)
 
-    # Write state=running now that PID lock is confirmed (issue #507)
+    # Write state=running now that PID lock is confirmed (issue #507 plan.json,
+    # #757 DB)
     if not args.dry_run:
+        _started_at = datetime.now(timezone.utc).isoformat()
         _plan_json_set_state_sm(
             args.label, "running", cfg=cfg,
-            started_at=datetime.now(timezone.utc).isoformat(),
+            started_at=_started_at,
+        )
+        _sprint_db_set_state_sm(
+            args.label, "running", project=eff_repo or "",
+            started_at=_started_at,
         )
 
     # ── Pre-flight review (AC-1 of issue #33) ────────────────────────────────
@@ -7375,12 +7413,17 @@ def main() -> None:
             )
         raise
 
-    # Clean exit: write state=completed (issue #507)
+    # Clean exit: write state=completed (issue #507 plan.json, #757 DB)
     if not args.dry_run:
+        _ended_at = datetime.now(timezone.utc).isoformat()
         _plan_json_set_state_sm(
             args.label, "completed", cfg=cfg,
-            ended_at=datetime.now(timezone.utc).isoformat(),
+            ended_at=_ended_at,
             end_reason="natural",
+        )
+        _sprint_db_set_state_sm(
+            args.label, "completed", project=eff_repo or "",
+            ended_at=_ended_at, end_reason="natural",
         )
 
     # Regenerate STATUS.md after sprint closes (#584)

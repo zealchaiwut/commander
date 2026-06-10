@@ -1153,6 +1153,27 @@
     .deploy-card__meta-label { color: var(--text-muted); min-width: 92px; flex-shrink: 0; }
     .deploy-card__meta-val { color: var(--text); word-break: break-word; }
     .deploy-card__meta-val.is-mono { font-family: var(--mono); font-size: 12px; }
+    /* Editable run folder + port rows (issue #769) */
+    .deploy-field-val { flex: 1; min-width: 0; }
+    .deploy-field-edit {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 24px; height: 24px; flex-shrink: 0; padding: 0;
+      border: 1px solid transparent; border-radius: 6px;
+      background: transparent; color: var(--text-sub); cursor: pointer;
+      transition: background .15s, color .15s, border-color .15s;
+    }
+    .deploy-field-edit:hover { background: var(--surface-2); color: var(--text); border-color: var(--border); }
+    .deploy-field-edit:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+    .deploy-card__meta-row.is-editing { align-items: flex-start; }
+    .deploy-field-edit-box { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; flex: 1; min-width: 0; }
+    .deploy-field-input {
+      flex: 1; min-width: 140px; min-height: 32px; padding: 6px 10px;
+      font-family: var(--mono); font-size: 12px; color: var(--text);
+      background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
+    }
+    .deploy-field-input:focus-visible { outline: 2px solid var(--blue); outline-offset: 1px; border-color: var(--blue); }
+    .deploy-field-actions { display: flex; gap: 8px; flex-shrink: 0; }
+    .deploy-field-error { flex-basis: 100%; color: var(--red); font-size: 12px; }
     .status-pill {
       font-size: 10.5px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
       padding: 2px 10px; border-radius: 999px;
@@ -1163,6 +1184,20 @@
     .status-pill--live     { background: var(--green-bg); color: var(--green); }
     .status-pill--idle     { background: var(--green-bg); color: var(--green); }
     .status-pill--failed   { background: var(--red-bg, #3f1d1d); color: var(--error, #ef4444); }
+    /* ── Run-state pill (issue #771) ── running / stopped / idle ── */
+    .runstate-pill {
+      font-size: 10.5px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+      padding: 2px 10px; border-radius: 999px;
+      background: var(--surface-2); color: var(--text-sub);
+      display: inline-flex; align-items: center; gap: 6px;
+    }
+    .runstate-pill::before {
+      content: ""; width: 6px; height: 6px; border-radius: 999px;
+      background: currentColor; flex-shrink: 0;
+    }
+    .runstate-pill--running { background: var(--green-bg); color: var(--green); }
+    .runstate-pill--stopped { background: var(--red-bg); color: var(--red); }
+    .runstate-pill--idle    { background: var(--surface-2); color: var(--text-sub); }
     .deploy-card__actions { display: flex; gap: 8px; flex-wrap: wrap; }
     .deploy-btn {
       display: inline-flex; align-items: center; gap: 6px; min-height: 36px;
@@ -1176,6 +1211,10 @@
     .deploy-btn--primary { background: var(--blue); border-color: var(--blue); color: #fff; }
     .deploy-btn--primary:hover:not(:disabled) { filter: brightness(1.08); background: var(--blue); }
     .deploy-btn--danger { color: var(--error, #ef4444); }
+    .deploy-startstop-na {
+      display: inline-flex; align-items: center; padding: 7px 0;
+      font-size: 12px; color: var(--text-sub); cursor: help;
+    }
     .deploy-card__confirm {
       display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
       background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px;
@@ -1190,6 +1229,42 @@
       max-height: 220px; overflow: auto; margin: 0;
     }
     .deploy-card__log.is-error { color: var(--error, #ef4444); }
+    /* ── Live log tail panel (issue #770) ── */
+    .deploy-log {
+      margin: 4px 0 0; border: 1px solid var(--border); border-radius: 8px;
+      background: var(--surface-2); overflow: hidden;
+    }
+    .deploy-log__head {
+      display: flex; align-items: center; gap: 8px;
+      padding: 8px 12px; border-bottom: 1px solid var(--border);
+    }
+    .deploy-log--collapsed .deploy-log__head { border-bottom: none; }
+    .deploy-log__status {
+      display: inline-flex; align-items: center; gap: 6px;
+      font-size: 11px; font-weight: 600; letter-spacing: .02em;
+      padding: 2px 8px; border-radius: 999px;
+      background: var(--surface); color: var(--text-muted);
+    }
+    .deploy-log__status--running { background: var(--amber-bg); color: var(--amber); }
+    .deploy-log__status--success { background: var(--green-bg); color: var(--green); }
+    .deploy-log__status--failure { background: var(--red-bg); color: var(--red); }
+    .deploy-log__toggle {
+      margin-left: auto; display: inline-flex; align-items: center; justify-content: center;
+      width: 24px; height: 24px; padding: 0; border-radius: 6px;
+      border: 1px solid transparent; background: transparent;
+      color: var(--text-muted); cursor: pointer;
+    }
+    .deploy-log__toggle:hover { background: var(--surface-hover); color: var(--text); }
+    .deploy-log__toggle:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+    .deploy-log__body {
+      font-family: var(--mono); font-size: 12px; line-height: 1.5;
+      color: var(--text-sub); padding: 10px 12px; margin: 0;
+      max-height: 220px; overflow: auto;
+      white-space: pre-wrap; word-break: break-word;
+    }
+    .deploy-log--collapsed .deploy-log__body { display: none; }
+    .deploy-log__line { display: block; }
+    .deploy-log__line--error { color: var(--red); font-weight: 600; }
     .deploy-spin { display: inline-block; animation: deploy-reconnect-spin .9s linear infinite; }
     /* Self-restart reconnect overlay (AC10/AC11) */
     .deploy-reconnect-overlay {
@@ -22763,9 +22838,22 @@ function envRestart(env) {
 // (commander, perf-coach) and drives deploy/restart with confirmation,
 // streaming progress, a log tail, and a self-restart reconnect overlay.
 
-var _deployCards = [];            // [{project, env, host, branch, render_service_id, ...}]
+var _deployAllCards = [];         // every env across projects, as returned by /api/deploy/overview
+var _deployCards = [];            // active-project subset actually rendered (issue #768)
 var _deployTabPollers = {};       // idx → setTimeout handle (render status polling)
 var _deployReconnectTimer = null;
+
+// Filter deploy-overview entries down to the active project (issue #768). The
+// overview endpoint aggregates every project's environments; the Deploy tab must
+// only show the project currently being viewed. An empty slug returns all cards
+// (defensive — the page always has an active slug). Pure + side-effect free so it
+// is unit-testable on its own.
+function _deployFilterByProject(cards, slug) {
+  cards = cards || [];
+  if (!slug) return cards.slice();
+  return cards.filter(function(c) { return c && c.project === slug; });
+}
+// END _deployFilterByProject
 
 function _deployEsc(s) {
   var d = document.createElement('div');
@@ -22792,7 +22880,7 @@ function deployTabInit() {
   fetch('/api/deploy/overview')
     .then(function(r) { return r.ok ? r.json() : { environments: [] }; })
     .then(function(data) {
-      _deployCards = (data && data.environments) || [];
+      _deployAllCards = (data && data.environments) || [];
       _deployRenderGrid();
     })
     .catch(function() {
@@ -22804,6 +22892,10 @@ function deployTabInit() {
 function _deployRenderGrid() {
   var grid = document.getElementById('deploy-grid');
   if (!grid) return;
+  // Filter at render time so switching projects re-scopes the grid without a
+  // full-page reload (issue #768). _deployCards drives every index-based lookup
+  // below, so the rendered cards and their status pollers stay in sync.
+  _deployCards = _deployFilterByProject(_deployAllCards, window._currentProjectSlug || _slug || '');
   if (!_deployCards.length) {
     grid.innerHTML = '<div class="deploy-tab-intro" id="deploy-grid-empty">'
       + 'No deployable environments configured.</div>';
@@ -22831,10 +22923,15 @@ function _deployCardHtml(c, i) {
     + '    <span class="deploy-card__title">' + _deployEsc(c.env) + '</span>'
     + '    <span class="deploy-card__project">' + _deployEsc(c.project) + '</span>'
     + '    <span class="deploy-card__badge ' + hostClass + '">' + _deployEsc(hostLabel) + '</span>'
+    // issue #771 — run-state pill (running / stopped / idle) reads the real
+    // service state so the user knows what they're acting on before clicking.
+    + '    <span class="runstate-pill runstate-pill--idle" id="deploy-card-runstate-' + i + '"'
+    + '          role="status" aria-live="polite" title="Run state">idle</span>'
     + '    <span class="status-pill status-pill--idle" id="deploy-card-status-' + i + '">idle</span>'
     + '  </div>'
     + '  <div class="deploy-card__meta">'
     +      branchRow
+    +      _deployFolderPortRows(c, i)
     + '    <div class="deploy-card__meta-row"><span class="deploy-card__meta-label">Commit</span>'
     + '      <span class="deploy-card__meta-val is-mono" id="deploy-card-sha-' + i + '">…</span></div>'
     + '    <div class="deploy-card__meta-row"><span class="deploy-card__meta-label">Last deploy</span>'
@@ -22843,18 +22940,184 @@ function _deployCardHtml(c, i) {
     + '  <div class="deploy-card__actions" id="deploy-card-actions-' + i + '">'
     +      _deployIdleActionsHtml(i)
     + '  </div>'
-    + '  <pre class="deploy-card__log" id="deploy-card-log-' + i + '" style="display:none"></pre>'
+    +    _deployLogPanelHtml(i)
     + '</article>';
 }
 
-function _deployIdleActionsHtml(i) {
+// issue #771 — per-card run state ('running' | 'stopped' | 'idle') drives which
+// action buttons are enabled. idle (never started / unknown) allows everything.
+var _deployRunState = {};
+
+// AC5/AC6: enable/disable each action by run state. The chosen lifecycle is a
+// Stop → Start flow: Deploy and Restart are disabled while the env is stopped.
+function _deployBtnDisabled(state, action) {
+  if (state === 'running') return action === 'start';
+  if (state === 'stopped') return action === 'stop' || action === 'restart' || action === 'deploy';
+  return false;  // idle → all enabled
+}
+
+function _deployActionBtn(i, onclickExpr, label, icon, cls, disabled) {
   return ''
-    + '<button class="deploy-btn deploy-btn--primary" type="button"'
-    + ' aria-label="Deploy ' + _deployEsc(_deployCards[i].env) + '"'
-    + ' onclick="deployCardDeploy(' + i + ')"><i class="ti ti-rocket"></i> Deploy</button>'
-    + '<button class="deploy-btn deploy-btn--danger" type="button"'
-    + ' aria-label="Restart ' + _deployEsc(_deployCards[i].env) + '"'
-    + ' onclick="deployCardRestart(' + i + ')"><i class="ti ti-refresh"></i> Restart</button>';
+    + '<button class="deploy-btn' + (cls ? ' ' + cls : '') + '" type="button"'
+    + ' aria-label="' + _deployEsc(label + ' ' + _deployCards[i].env) + '"'
+    + (disabled ? ' disabled' : '')
+    + ' onclick="' + onclickExpr + '">'
+    + '<i class="ti ' + icon + '"></i> ' + label + '</button>';
+}
+
+// AC1: four actions — Deploy, Restart, Start, Stop. Render envs have no clean
+// stop equivalent through this dashboard, so Start/Stop are HIDDEN (not disabled)
+// with a tooltip explaining why (AC10).
+function _deployIdleActionsHtml(i) {
+  var c = _deployCards[i];
+  var state = _deployRunState[i] || 'idle';
+  var html = ''
+    + _deployActionBtn(i, 'deployCardDeploy(' + i + ')', 'Deploy', 'ti-rocket',
+        'deploy-btn--primary', _deployBtnDisabled(state, 'deploy'))
+    + _deployActionBtn(i, 'deployCardRestart(' + i + ')', 'Restart', 'ti-refresh',
+        '', _deployBtnDisabled(state, 'restart'));
+  if (c.start_stop_supported) {
+    html += _deployActionBtn(i, 'deployCardStart(' + i + ')', 'Start', 'ti-player-play',
+              '', _deployBtnDisabled(state, 'start'))
+          + _deployActionBtn(i, 'deployCardStop(' + i + ')', 'Stop', 'ti-player-stop',
+              'deploy-btn--danger', _deployBtnDisabled(state, 'stop'));
+  } else {
+    html += '<span class="deploy-startstop-na"'
+          + ' title="Render does not support stop/start through this dashboard">'
+          + 'Start / Stop n/a</span>';
+  }
+  return html;
+}
+
+// ── Editable run folder + port rows (issue #769) ──────────────────────────────
+// Only local-host cards carry these; render cards are unaffected (AC10).
+
+function _deployFieldRow(i, field, label, value, mono) {
+  var safe = _deployEsc(value == null || value === '' ? '—' : value);
+  return ''
+    + '<div class="deploy-card__meta-row" id="deploy-card-' + field + '-row-' + i + '">'
+    + '  <span class="deploy-card__meta-label">' + _deployEsc(label) + '</span>'
+    + '  <span class="deploy-card__meta-val' + (mono ? ' is-mono' : '') + ' deploy-field-val"'
+    + '        id="deploy-card-' + field + '-' + i + '">' + safe + '</span>'
+    + '  <button class="deploy-field-edit" type="button"'
+    + '    title="Edit ' + _deployEsc(label) + '" aria-label="Edit ' + _deployEsc(label) + '"'
+    + '    onclick="deployEditField(' + i + ',\'' + field + '\')"><i class="ti ti-pencil"></i></button>'
+    + '</div>';
+}
+
+function _deployFolderPortRows(c, i) {
+  if (c.host !== 'local') return '';
+  return ''
+    + _deployFieldRow(i, 'dir', 'Folder', c.working_dir, true)
+    + _deployFieldRow(i, 'port', 'Port', c.port, true);
+}
+
+// field → {key in deploy config, key on card object}
+var _DEPLOY_FIELD_META = {
+  dir:  { configKey: 'working_dir', cardKey: 'working_dir', label: 'Folder' },
+  port: { configKey: 'port',        cardKey: 'port',        label: 'Port' }
+};
+
+function deployEditField(i, field) {
+  var meta = _DEPLOY_FIELD_META[field];
+  if (!meta) return;
+  var row = document.getElementById('deploy-card-' + field + '-row-' + i);
+  if (!row) return;
+  var c = _deployCards[i];
+  var current = c[meta.cardKey];
+  row.classList.add('is-editing');
+  row.innerHTML = ''
+    + '<span class="deploy-card__meta-label">' + _deployEsc(meta.label) + '</span>'
+    + '<span class="deploy-field-edit-box">'
+    + '  <input class="deploy-field-input" id="deploy-field-input-' + field + '-' + i + '"'
+    + '    type="' + (field === 'port' ? 'number' : 'text') + '"'
+    + '    aria-label="' + _deployEsc(meta.label) + '"'
+    + '    value="' + _deployEsc(current == null ? '' : current) + '">'
+    + '  <span class="deploy-field-actions">'
+    + '    <button class="deploy-btn deploy-btn--primary" type="button"'
+    + '      onclick="deploySaveField(' + i + ',\'' + field + '\')">Save</button>'
+    + '    <button class="deploy-btn" type="button"'
+    + '      onclick="deployCancelField(' + i + ',\'' + field + '\')">Cancel</button>'
+    + '  </span>'
+    + '  <span class="deploy-field-error" id="deploy-field-error-' + field + '-' + i + '" role="alert"></span>'
+    + '</span>';
+  var input = document.getElementById('deploy-field-input-' + field + '-' + i);
+  if (input) { input.focus(); input.select(); }
+}
+
+function deployCancelField(i, field) {
+  var meta = _DEPLOY_FIELD_META[field];
+  var c = _deployCards[i];
+  var row = document.getElementById('deploy-card-' + field + '-row-' + i);
+  if (!row || !meta) return;
+  // Re-render this single row from card state.
+  var wrap = document.createElement('div');
+  wrap.innerHTML = _deployFieldRow(i, field, meta.label, c[meta.cardKey], true);
+  row.replaceWith(wrap.firstElementChild);
+}
+
+function _deployFieldError(i, field, msg) {
+  var el = document.getElementById('deploy-field-error-' + field + '-' + i);
+  if (el) el.textContent = msg;
+}
+
+function deploySaveField(i, field) {
+  var meta = _DEPLOY_FIELD_META[field];
+  if (!meta) return;
+  var c = _deployCards[i];
+  var input = document.getElementById('deploy-field-input-' + field + '-' + i);
+  if (!input) return;
+  var raw = input.value.trim();
+  _deployFieldError(i, field, '');
+  // Validate first so a bad value never reaches the stored config (AC5-8).
+  var validateBody = {};
+  validateBody[meta.configKey] = field === 'port' ? Number(raw) : raw;
+  var slug = c.project;
+  fetch('/api/projects/' + encodeURIComponent(slug) + '/environments/'
+        + encodeURIComponent(c.env) + '/deploy-config/validate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(validateBody)
+  })
+    .then(function(r) {
+      return r.json().then(function(d) { return { ok: r.ok, data: d }; });
+    })
+    .then(function(res) {
+      if (!res.ok) {
+        var detail = (res.data && res.data.detail) || 'Invalid value.';
+        _deployFieldError(i, field, detail);
+        return null;
+      }
+      // Persist via the per-environment deploy-config PUT (AC4).
+      var entry = { host: 'local' };
+      entry[meta.configKey] = field === 'port' ? Number(raw) : raw;
+      var putBody = {};
+      putBody[c.env] = entry;
+      return fetch('/api/projects/' + encodeURIComponent(slug) + '/deploy-config', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(putBody)
+      }).then(function(r2) {
+        return r2.json().then(function(d2) { return { ok: r2.ok, data: d2 }; });
+      });
+    })
+    .then(function(res) {
+      if (!res) return;
+      if (!res.ok) {
+        var detail = (res.data && res.data.detail) || 'Could not save.';
+        _deployFieldError(i, field, typeof detail === 'string' ? detail : 'Could not save.');
+        return;
+      }
+      // Update card state from the saved entry and re-render the row.
+      var saved = (res.data && res.data[c.env]) || {};
+      c[meta.cardKey] = saved[meta.configKey] != null
+        ? saved[meta.configKey]
+        : (field === 'port' ? Number(raw) : raw);
+      deployCancelField(i, field);
+    })
+    .catch(function() {
+      _deployFieldError(i, field, 'Network error — could not save.');
+    });
 }
 
 // ── Live status / commit SHA per card ─────────────────────────────────────────
@@ -22869,6 +23132,32 @@ function _deploySetStatus(i, status) {
 function _deploySetSha(i, sha) {
   var el = document.getElementById('deploy-card-sha-' + i);
   if (el) el.textContent = _deployShortSha(sha);
+}
+
+// AC7/AC8: paint the run-state pill and re-render the actions so the enable/
+// disable logic matches the new state — no full page refresh required.
+function _deploySetRunState(i, state) {
+  _deployRunState[i] = state;
+  var el = document.getElementById('deploy-card-runstate-' + i);
+  if (el) {
+    el.textContent = state;
+    el.className = 'runstate-pill runstate-pill--' + state;
+  }
+  var actions = _deployActionsEl(i);
+  if (actions) actions.innerHTML = _deployIdleActionsHtml(i);
+}
+
+// AC8: re-read the live run state after an action completes. Local envs query
+// the run-state endpoint; render has no such endpoint so its pill is derived
+// from the deploy status in _deployLoadCardStatus instead.
+function _deployRefreshRunState(i) {
+  var c = _deployCards[i];
+  if (!c || !c.start_stop_supported) return Promise.resolve();
+  return fetch('/api/projects/' + encodeURIComponent(c.project) + '/environments/'
+        + encodeURIComponent(c.env) + '/run-state')
+    .then(function(r) { return r.ok ? r.json() : null; })
+    .then(function(d) { if (d && d.state) _deploySetRunState(i, d.state); })
+    .catch(function() {});
 }
 
 function _deploySetTime(i, ts) {
@@ -22892,6 +23181,9 @@ function _deployLoadCardStatus(c, i) {
         _deploySetStatus(i, d.status || 'idle');
         _deploySetSha(i, d.commit);
         _deploySetTime(i, d.finished_at);
+        // AC7: render has no run-state endpoint — derive the pill from the live
+        // deploy status (a live service is running; anything else reads idle).
+        _deploySetRunState(i, d.status === 'live' ? 'running' : 'idle');
       })
       .catch(function() { _deploySetSha(i, null); });
   } else {
@@ -22900,6 +23192,8 @@ function _deployLoadCardStatus(c, i) {
       .then(function(r) { return r.ok ? r.json() : null; })
       .then(function(d) { _deploySetSha(i, d && d.git_sha); })
       .catch(function() { _deploySetSha(i, null); });
+    // AC7: read the live run state for the card from launchctl print.
+    _deployRefreshRunState(i);
   }
 }
 
@@ -22937,24 +23231,146 @@ function deployCardConfirm(i, action) {
   else _deployExecRestart(i);
 }
 
-// ── Execute deploy / restart with streaming progress + log tail (AC8/AC9) ─────
+// ── Live log tail panel (issue #770) ──────────────────────────────────────────
+// Each card owns a capped, follow-on-append log panel beneath it. Output from
+// the deploy/restart/render flows streams in line by line; only the last
+// DEPLOY_LOG_MAX_LINES are retained so the DOM never grows without bound.
 
-function _deployLogEl(i) { return document.getElementById('deploy-card-log-' + i); }
+var DEPLOY_LOG_MAX_LINES = 20;        // AC2/AC6 — tail window (10–20 lines)
+var _deployLogState = {};             // card index → { lines, status, collapsed }
 
-function _deployLog(i, text, isError) {
-  var pre = _deployLogEl(i);
-  if (!pre) return;
-  pre.style.display = 'block';
-  pre.textContent = text;
-  pre.classList.toggle('is-error', !!isError);
+// AC1: the panel markup lives directly beneath its card. Starts hidden until an
+// action opens it.
+function _deployLogPanelHtml(i) {
+  return ''
+    + '<section class="deploy-log" id="deploy-log-' + i + '" style="display:none">'
+    + '  <header class="deploy-log__head">'
+    + '    <span class="deploy-log__status deploy-log__status--running"'
+    + '          id="deploy-log-status-' + i + '" role="status" aria-live="polite">…</span>'
+    + '    <button class="deploy-log__toggle" type="button"'
+    + '      id="deploy-log-toggle-' + i + '"'
+    + '      aria-expanded="true" aria-controls="deploy-log-body-' + i + '"'
+    + '      title="Collapse log" aria-label="Collapse log"'
+    + '      onclick="deployLogToggle(' + i + ')"><i class="ti ti-chevron-up"></i></button>'
+    + '  </header>'
+    + '  <pre class="deploy-log__body" id="deploy-log-body-' + i + '"'
+    + '       aria-live="polite"></pre>'
+    + '</section>';
 }
 
-function _deployAppendLog(i, line) {
-  var pre = _deployLogEl(i);
-  if (!pre) return;
-  pre.style.display = 'block';
-  pre.textContent = (pre.textContent ? pre.textContent + '\n' : '') + line;
-  pre.scrollTop = pre.scrollHeight;
+function _deployLogPanelEl(i) { return document.getElementById('deploy-log-' + i); }
+function _deployLogBodyEl(i) { return document.getElementById('deploy-log-body-' + i); }
+
+// AC1: open a fresh panel for this card (called when an action starts).
+function _deployLogReset(i) {
+  _deployLogState[i] = { lines: [], status: 'running', collapsed: false };
+  var panel = _deployLogPanelEl(i);
+  if (panel) { panel.style.display = ''; panel.classList.remove('deploy-log--collapsed'); }
+  var toggle = document.getElementById('deploy-log-toggle-' + i);
+  if (toggle) toggle.setAttribute('aria-expanded', 'true');
+  _deployLogStatus(i, 'running', 'Running…');
+  _deployLogRender(i);
+}
+
+// AC2/AC6: append a line, trim to the tail window, follow the new output.
+function _deployLogPush(i, text, isError) {
+  var st = _deployLogState[i] || (_deployLogState[i] = { lines: [], status: 'running', collapsed: false });
+  String(text == null ? '' : text).split('\n').forEach(function(line) {
+    st.lines.push({ text: line, error: !!isError });
+  });
+  // Trim from the front so no more than DEPLOY_LOG_MAX_LINES are retained.
+  if (st.lines.length > DEPLOY_LOG_MAX_LINES) {
+    st.lines = st.lines.slice(st.lines.length - DEPLOY_LOG_MAX_LINES);
+  }
+  _deployLogRender(i);
+}
+
+function _deployLogRender(i) {
+  var body = _deployLogBodyEl(i);
+  var st = _deployLogState[i];
+  if (!body || !st) return;
+  body.innerHTML = st.lines.map(function(l) {
+    return '<span class="deploy-log__line' + (l.error ? ' deploy-log__line--error' : '') + '">'
+      + _deployEsc(l.text) + '</span>';
+  }).join('\n');
+  // Follow new output to the bottom (tail -f), unless the user collapsed it.
+  if (!st.collapsed) body.scrollTop = body.scrollHeight;
+}
+
+// AC7: set the completion indicator (running / success / failure).
+function _deployLogStatus(i, status, label) {
+  var st = _deployLogState[i];
+  if (st) st.status = status;
+  var el = document.getElementById('deploy-log-status-' + i);
+  if (!el) return;
+  el.className = 'deploy-log__status deploy-log__status--' + status;
+  el.textContent = label || status;
+}
+
+// AC7/AC8: success → mark success, then auto-collapse (still toggleable).
+function _deployLogFinishSuccess(i, label) {
+  _deployLogStatus(i, 'success', label || 'Success');
+  var st = _deployLogState[i];
+  if (st) st.collapsed = true;
+  _deployLogSetCollapsed(i, true);
+}
+
+// AC7/AC9: failure → highlight the failing line and keep the panel open.
+function _deployLogFinishFailure(i, line, label) {
+  if (line) _deployLogPush(i, line, true);
+  _deployLogStatus(i, 'failure', label || 'Failed');
+  var st = _deployLogState[i];
+  if (st) st.collapsed = false;
+  _deployLogSetCollapsed(i, false);
+}
+
+function _deployLogSetCollapsed(i, collapsed) {
+  var panel = _deployLogPanelEl(i);
+  if (panel) panel.classList.toggle('deploy-log--collapsed', !!collapsed);
+  var toggle = document.getElementById('deploy-log-toggle-' + i);
+  if (toggle) {
+    toggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+    toggle.setAttribute('title', collapsed ? 'Expand log' : 'Collapse log');
+    toggle.setAttribute('aria-label', collapsed ? 'Expand log' : 'Collapse log');
+    toggle.innerHTML = collapsed ? '<i class="ti ti-chevron-down"></i>' : '<i class="ti ti-chevron-up"></i>';
+  }
+  if (!collapsed) _deployLogRender(i);  // re-follow on expand
+}
+
+// AC10: user can collapse/expand at any time during or after the action.
+function deployLogToggle(i) {
+  var st = _deployLogState[i] || (_deployLogState[i] = { lines: [], status: 'running', collapsed: false });
+  st.collapsed = !st.collapsed;
+  _deployLogSetCollapsed(i, st.collapsed);
+}
+
+// AC3/AC4: post-action health check. Surfaces a result line and resolves to the
+// ok flag so callers can finish the panel as success or failure.
+function _deployHealthCheck(i) {
+  _deployLogPush(i, 'Health check…');
+  return fetch('/api/health', { cache: 'no-store' })
+    .then(function(r) { return r.ok; })
+    .then(function(ok) {
+      _deployLogPush(i, ok ? 'Health check: OK ✓' : 'Health check: FAILED ✗', !ok);
+      return ok;
+    })
+    .catch(function() {
+      _deployLogPush(i, 'Health check: FAILED ✗', true);
+      return false;
+    });
+}
+
+// ── Execute deploy / restart with streaming progress + log tail (AC8/AC9) ─────
+
+// Back-compat shims: existing callers append/replace single lines; route them
+// through the capped panel buffer.
+function _deployLog(i, text, isError) {
+  _deployLogReset(i);
+  _deployLogPush(i, text, isError);
+}
+
+function _deployAppendLog(i, line, isError) {
+  _deployLogPush(i, line, isError);
 }
 
 function _deployBusyActions(i, label) {
@@ -22977,7 +23393,8 @@ function _deployExecDeploy(i) {
   var c = _deployCards[i];
   _deployBusyActions(i, 'Deploying');
   _deploySetStatus(i, 'building');
-  _deployLog(i, 'Deploying ' + c.env + '…', false);
+  _deployLogReset(i);                                    // AC1: open the panel
+  _deployLogPush(i, 'Deploying ' + c.env + '…');
   fetch('/api/projects/' + encodeURIComponent(c.project) + '/environments/'
         + encodeURIComponent(c.env) + '/deploy', { method: 'POST' })
     .then(function(r) {
@@ -22986,33 +23403,40 @@ function _deployExecDeploy(i) {
     .then(function(res) {
       if (!res.ok) {
         _deploySetStatus(i, 'failed');
-        _deployLog(i, 'Deploy failed (' + res.status + '): '
-          + ((res.data && res.data.detail) || 'error'), true);
+        _deployLogFinishFailure(i, 'Deploy failed (' + res.status + '): '
+          + ((res.data && res.data.detail) || 'error'));   // AC9
         _deployResetActions(i);
         return;
       }
       var d = res.data || {};
-      // host=render → poll the live build status until live/failed.
+      // host=render → poll the live build status until live/failed (AC5).
       if (c.host === 'render' || d.host === 'render') {
         _deploySetStatus(i, d.status || 'queued');
-        _deployAppendLog(i, 'Deploy triggered on Render — tracking build status…');
+        _deployLogPush(i, 'Deploy triggered on Render — tracking build status…');
         _deployPollRender(i);
         _deployResetActions(i);
         return;
       }
-      // local → show pull output + new HEAD; may self-restart the dashboard.
+      // local (AC3): git pull output → restart → health check.
       var out = (d.pull_output || '').trim();
-      if (out) _deployAppendLog(i, out);
-      if (d.head) { _deployAppendLog(i, 'HEAD: ' + d.head); _deploySetSha(i, d.head); }
+      if (out) _deployLogPush(i, out);
+      if (d.head) { _deployLogPush(i, 'HEAD: ' + d.head); _deploySetSha(i, d.head); }
       _deploySetStatus(i, 'live');
       _deploySetTime(i, new Date().toISOString());
+      // self-restart bounces the dashboard — the reconnect overlay + auto-reload
+      // is the completion signal, so don't health-check a server that's going down.
       if (_deployIsSelfRestart(res)) { _deployShowReconnectOverlay(); return; }
-      _deployAppendLog(i, 'Done.');
-      _deployResetActions(i);
+      _deployLogPush(i, 'Restarting service…');
+      _deployHealthCheck(i).then(function(ok) {            // AC3 health result
+        if (ok) _deployLogFinishSuccess(i, 'Deployed');    // AC7/AC8 auto-collapse
+        else _deployLogFinishFailure(i, null, 'Health check failed');  // AC9
+        _deployResetActions(i);
+        _deployRefreshRunState(i);                         // #771 AC8
+      });
     })
     .catch(function(e) {
       _deploySetStatus(i, 'failed');
-      _deployLog(i, 'Deploy error: ' + e, true);
+      _deployLogFinishFailure(i, 'Deploy error: ' + e);    // AC9
       _deployResetActions(i);
     });
 }
@@ -23021,7 +23445,8 @@ function _deployExecRestart(i) {
   var c = _deployCards[i];
   _deployBusyActions(i, 'Restarting');
   _deploySetStatus(i, 'building');
-  _deployLog(i, 'Restarting ' + c.env + '…', false);
+  _deployLogReset(i);                                    // AC1: open the panel
+  _deployLogPush(i, 'Restarting ' + c.env + '…');
   fetch('/api/projects/' + encodeURIComponent(c.project) + '/environments/'
         + encodeURIComponent(c.env) + '/restart', { method: 'POST' })
     .then(function(r) {
@@ -23030,8 +23455,8 @@ function _deployExecRestart(i) {
     .then(function(res) {
       if (!res.ok) {
         _deploySetStatus(i, 'failed');
-        _deployLog(i, 'Restart failed (' + res.status + '): '
-          + ((res.data && res.data.detail) || 'error'), true);
+        _deployLogFinishFailure(i, 'Restart failed (' + res.status + '): '
+          + ((res.data && res.data.detail) || 'error'));   // AC9
         _deployResetActions(i);
         return;
       }
@@ -23039,20 +23464,26 @@ function _deployExecRestart(i) {
       if (_deployIsSelfRestart(res)) { _deployShowReconnectOverlay(); return; }
       if (c.host === 'render' || (res.data && res.data.host) === 'render') {
         _deploySetStatus(i, 'building');
-        _deployAppendLog(i, 'Restart triggered on Render — tracking status…');
+        _deployLogPush(i, 'Restart triggered on Render — tracking status…');
         _deployPollRender(i);
         _deployResetActions(i);
         return;
       }
-      _deploySetStatus(i, 'live');
-      _deployAppendLog(i, res.status === 202
+      // local (AC4): launchctl/script output → post-restart health check.
+      var out = (res.data && (res.data.output || res.data.message) || '').trim();
+      _deployLogPush(i, out || (res.status === 202
         ? 'Restart accepted — service is bouncing.'
-        : 'Restarted ' + c.env + '.');
-      _deployResetActions(i);
+        : 'Restarted ' + c.env + '.'));
+      _deployHealthCheck(i).then(function(ok) {            // AC4 health result
+        if (ok) _deployLogFinishSuccess(i, 'Restarted');   // AC7/AC8 auto-collapse
+        else _deployLogFinishFailure(i, null, 'Health check failed');  // AC9
+        _deployResetActions(i);
+        _deployRefreshRunState(i);                         // #771 AC8
+      });
     })
     .catch(function(e) {
       _deploySetStatus(i, 'failed');
-      _deployLog(i, 'Restart error: ' + e, true);
+      _deployLogFinishFailure(i, 'Restart error: ' + e);   // AC9
       _deployResetActions(i);
     });
 }
@@ -23060,6 +23491,78 @@ function _deployExecRestart(i) {
 function _deployResetActions(i) {
   var el = _deployActionsEl(i);
   if (el) el.innerHTML = _deployIdleActionsHtml(i);
+}
+
+// ── Start / Stop a local environment (issue #771) ─────────────────────────────
+// Start brings the service up WITHOUT pulling code (AC3); Stop halts it without
+// destroying it (AC4). Both stream into the capped log panel, then re-read the
+// live run state so the pill + button enable/disable update with no page refresh.
+
+function deployCardStart(i) { _deployExecStart(i); }
+function deployCardStop(i) { _deployExecStop(i); }
+
+function _deployExecStart(i) {
+  var c = _deployCards[i];
+  _deployBusyActions(i, 'Starting');
+  _deployLogReset(i);
+  _deployLogPush(i, 'Starting ' + c.env + '…');
+  fetch('/api/projects/' + encodeURIComponent(c.project) + '/environments/'
+        + encodeURIComponent(c.env) + '/start', { method: 'POST' })
+    .then(function(r) {
+      return r.json().then(function(data) { return { ok: r.ok, status: r.status, data: data }; });
+    })
+    .then(function(res) {
+      if (!res.ok) {
+        _deployLogFinishFailure(i, 'Start failed (' + res.status + '): '
+          + ((res.data && res.data.detail) || 'error'));
+        _deployResetActions(i);
+        _deployRefreshRunState(i);
+        return;
+      }
+      var out = (res.data && (res.data.stdout || res.data.output) || '').trim();
+      _deployLogPush(i, out || ('Started ' + c.env + '.'));
+      _deployLogFinishSuccess(i, 'Started');
+      _deployResetActions(i);
+      _deployRefreshRunState(i);                           // AC8: state updates
+    })
+    .catch(function(e) {
+      _deployLogFinishFailure(i, 'Start error: ' + e);
+      _deployResetActions(i);
+      _deployRefreshRunState(i);
+    });
+}
+
+function _deployExecStop(i) {
+  var c = _deployCards[i];
+  _deployBusyActions(i, 'Stopping');
+  _deployLogReset(i);
+  _deployLogPush(i, 'Stopping ' + c.env + '…');
+  fetch('/api/projects/' + encodeURIComponent(c.project) + '/environments/'
+        + encodeURIComponent(c.env) + '/stop', { method: 'POST' })
+    .then(function(r) {
+      return r.json().then(function(data) { return { ok: r.ok, status: r.status, data: data }; });
+    })
+    .then(function(res) {
+      if (!res.ok) {
+        _deployLogFinishFailure(i, 'Stop failed (' + res.status + '): '
+          + ((res.data && res.data.detail) || 'error'));
+        _deployResetActions(i);
+        _deployRefreshRunState(i);
+        return;
+      }
+      var out = (res.data && (res.data.stdout || res.data.output) || '').trim();
+      _deployLogPush(i, out || ('Stopped ' + c.env + '.'));
+      // Stop halts the env's own server; the dashboard's /api/health says nothing
+      // about it, so skip the health check and trust the run-state probe instead.
+      _deployLogFinishSuccess(i, 'Stopped');
+      _deployResetActions(i);
+      _deployRefreshRunState(i);                           // AC8: state updates
+    })
+    .catch(function(e) {
+      _deployLogFinishFailure(i, 'Stop error: ' + e);
+      _deployResetActions(i);
+      _deployRefreshRunState(i);
+    });
 }
 
 // Poll the render deploy-status endpoint until live/failed, streaming status.
@@ -23074,15 +23577,17 @@ function _deployPollRender(i) {
       .then(function(r) { return r.json().then(function(d) { return { ok: r.ok, data: d }; }); })
       .then(function(res) {
         if (!res.ok) {
-          _deployAppendLog(i, 'Status error: ' + ((res.data && res.data.detail) || 'error'), true);
+          _deployLogFinishFailure(i, 'Status error: ' + ((res.data && res.data.detail) || 'error'));
           return;
         }
         var st = (res.data && res.data.status) || 'queued';
         _deploySetStatus(i, st);
         if (res.data && res.data.commit) _deploySetSha(i, res.data.commit);
         if (res.data && res.data.finished_at) _deploySetTime(i, res.data.finished_at);
-        if (st === 'live') { _deployAppendLog(i, 'Deploy is live ✓'); return; }
-        if (st === 'failed') { _deployAppendLog(i, 'Deploy failed.', true); return; }
+        // AC5: stream each interim build status as it arrives.
+        _deployLogPush(i, 'Build status: ' + st);
+        if (st === 'live') { _deployLogFinishSuccess(i, 'Live ✓'); return; }       // AC7/AC8
+        if (st === 'failed') { _deployLogFinishFailure(i, 'Deploy failed.'); return; }  // AC9
         if (attempts < MAX) _deployTabPollers[i] = setTimeout(tick, INTERVAL);
       })
       .catch(function() { if (attempts < MAX) _deployTabPollers[i] = setTimeout(tick, INTERVAL); });

@@ -11,6 +11,9 @@ All label writes go through state_machine.transition() — the single source of
 truth for status label changes.  The --force and --merge-sha flags are accepted
 but ignored (UAT safeguard is now handled by sprint_manager, not here).
 
+The caller hint embedded in actor="update_ticket:<hint>" makes activity events
+attributable; it derives from --actor, then CLAUDE_AGENT_ROLE, then "cli".
+
 Exits 0 on success, non-zero on failure.
 """
 import argparse
@@ -34,11 +37,23 @@ STATUS_TO_STATE: dict[str, TicketState] = {
     "sit":          TicketState.SIT,
     "uat":          TicketState.UAT,
     "needs-rework": TicketState.NEEDS_REWORK,
+    "blocked":      TicketState.BLOCKED,
     "queued":       TicketState.QUEUED,
 }
 
-# Statuses that don't map to a TicketState; handled as passthrough label ops.
-_PASSTHROUGH_STATUSES = {"blocked", "uat-approved", "estimated"}
+# Statuses that don't map to a TicketState; transition() does not own them.
+_PASSTHROUGH_STATUSES = {"uat-approved", "estimated"}
+
+
+def _caller_hint(explicit: str | None) -> str:
+    """Resolve the caller hint embedded in the transition actor.
+
+    Precedence: explicit --actor > CLAUDE_AGENT_ROLE env > "cli".
+    """
+    if explicit:
+        return explicit
+    role = os.environ.get("CLAUDE_AGENT_ROLE", "").strip()
+    return role or "cli"
 
 
 def _load_env():
@@ -71,6 +86,10 @@ def main():
                         help="Accepted for backward compatibility; has no effect.")
     parser.add_argument("--target-branch", default=None,
                         help="Accepted for backward compatibility; has no effect.")
+    parser.add_argument("--actor", default=None,
+                        help="Caller hint embedded in the transition actor "
+                             "(actor='update_ticket:<hint>'). Defaults to "
+                             "CLAUDE_AGENT_ROLE, then 'cli'.")
     args = parser.parse_args()
     structured_log.set_context(issue_num=args.issue)
     structured_log.info(
@@ -89,16 +108,17 @@ def main():
             sys.exit(str(e))
 
     if args.status in _PASSTHROUGH_STATUSES:
-        # Passthrough: these statuses don't correspond to TicketState values.
-        # Emit a structured error — callers should use gh CLI directly.
+        # These statuses don't correspond to TicketState values, so transition()
+        # does not own them. They are not status labels — apply with the gh CLI.
         print(
-            f"Status '{args.status}' is not managed by transition(); "
-            f"apply this label directly with 'gh issue edit --add-label {args.status}'.",
+            f"Status '{args.status}' is not a managed status label; "
+            f"apply it directly with the gh CLI.",
             file=sys.stderr,
         )
         sys.exit(1)
 
     target_state = STATUS_TO_STATE[args.status]
+    actor = f"update_ticket:{_caller_hint(args.actor)}"
 
     _RUN_MUTABLE_STATES = frozenset({
         TicketState.IN_PROGRESS, TicketState.SIT, TicketState.UAT, TicketState.NEEDS_REWORK,
@@ -114,7 +134,7 @@ def main():
         changed = transition(
             args.issue,
             target_state,
-            actor="update_ticket",
+            actor=actor,
             repo=repo,
         )
         if changed:

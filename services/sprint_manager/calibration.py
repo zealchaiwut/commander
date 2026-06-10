@@ -61,8 +61,8 @@ def load_calibration(
     """Load calibration data and return effective per-size minutes with sources.
 
     db_records: optional list of {size, actual_minutes[, total_tokens]} dicts
-        from the persistent DB store (via sprint_repo.build_calibration_records).
-        When provided, these are merged with any file records; DB records take
+        from a past sprint's local state files (via db_calibration_records).
+        When provided, these are merged with any file records; these records take
         precedence over file records for tiers that have enough samples.
 
     If calibration file is absent or unreadable, all sizes fall back to defaults
@@ -176,33 +176,48 @@ Use the minutes values below when estimating. They replace generic defaults.
 """
 
 
+def _elapsed_minutes(start: Optional[str], end: Optional[str]) -> Optional[float]:
+    """Minutes between two ISO timestamps, or None if either is missing/unparseable."""
+    if not start or not end:
+        return None
+    from datetime import datetime
+    try:
+        s = datetime.fromisoformat(str(start).replace("Z", "+00:00"))
+        e = datetime.fromisoformat(str(end).replace("Z", "+00:00"))
+    except (ValueError, TypeError):
+        return None
+    return (e - s).total_seconds() / 60.0
+
+
 def db_calibration_records(sprint_label: str, estimates_dir: Path) -> list:
-    """Return [{size, actual_minutes, total_tokens}] from DB for a past sprint.
+    """Return [{size, actual_minutes}] for a past sprint, read from local files.
 
-    Reads actual_elapsed_seconds and total_tokens from sprint_tickets, then
-    resolves each ticket's size from its estimate JSON in estimates_dir.
-    Returns only tickets that have both a DB record and an estimate file.
-    Silently returns [] if sprint_repo is unavailable or Neon is disabled.
+    Issue #758 removed the Neon dependency — Neon is an optional export target,
+    not a live data source. Reads the local sprint state JSON
+    (<sprints>/<sprint_label>-state.json) for per-ticket coder+tester elapsed
+    time, then resolves each ticket's size from its estimate JSON in
+    estimates_dir. Returns only `done` tickets that have both timing and an
+    estimate file. Silently returns [] if the state file is missing.
     """
-    try:
-        import sys
-        _sm_dir = Path(__file__).parent
-        if str(_sm_dir.parent.parent) not in sys.path:
-            sys.path.insert(0, str(_sm_dir.parent.parent))
-        from services.sprint_manager import sprint_repo
-    except Exception:
+    sprints_dir = estimates_dir.parent / "sprints"
+    state_path = sprints_dir / f"{sprint_label}-state.json"
+    if not state_path.exists():
         return []
-
     try:
-        rollup = sprint_repo.get_sprint_rollup(sprint_label)
-    except Exception:
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
         return []
 
     records = []
-    for row in rollup["tickets"]:
-        num = row["issue_number"]
-        elapsed = row["actual_elapsed_seconds"]
-        if elapsed is None:
+    for issue in state.get("issues", []):
+        if issue.get("status") != "done":
+            continue
+        num = issue.get("number")
+        if num is None:
+            continue
+        coder_min = _elapsed_minutes(issue.get("coder_started_at"), issue.get("coder_finished_at"))
+        tester_min = _elapsed_minutes(issue.get("tester_started_at"), issue.get("tester_finished_at"))
+        if coder_min is None and tester_min is None:
             continue
         est_path = estimates_dir / f"issue-{num}.json"
         if not est_path.exists():
@@ -216,9 +231,7 @@ def db_calibration_records(sprint_label: str, estimates_dir: Path) -> list:
             continue
         rec: dict = {
             "size": size,
-            "actual_minutes": round(elapsed / 60, 1),
+            "actual_minutes": round((coder_min or 0.0) + (tester_min or 0.0), 1),
         }
-        if row.get("total_tokens") is not None:
-            rec["total_tokens"] = row["total_tokens"]
         records.append(rec)
     return records

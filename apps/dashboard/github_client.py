@@ -24,6 +24,25 @@ _cache: dict[str, tuple[float, object]] = {}
 _detected_repo: str | None = None
 
 
+class SprintRunLockError(RuntimeError):
+    """Raised when a non-status label mutation is attempted during a sprint run."""
+
+
+def _refuse_if_sprint_running(action: str) -> None:
+    """Refuse non-status label mutations while a sprint run holds the lock.
+
+    During an active sprint run (COMMANDER_SPRINT_RUNNING=1) only status labels
+    may change; sprint-N assignment and sprint-label strips must be frozen
+    (issue #754). Mirrors the existing "refuse if running" guards elsewhere.
+    When the lock is not held this is a no-op, so existing behavior is unchanged.
+    """
+    if os.environ.get("COMMANDER_SPRINT_RUNNING") == "1":
+        raise SprintRunLockError(
+            f"Sprint run active (COMMANDER_SPRINT_RUNNING=1): refusing to {action}. "
+            f"Sprint and other non-status labels are frozen until the run ends."
+        )
+
+
 # ── repo resolution ───────────────────────────────────────────────────────────
 
 def repo() -> str:
@@ -75,6 +94,40 @@ def _r(repo_name: str | None) -> str:
     return get_repo_for_operation(repo_name)
 
 
+# ── DB mirror read path (issue #756) ──────────────────────────────────────────
+# The dashboard read model is the local DB. Issue reads are served from the
+# `issues` mirror table (kept fresh by github_events_sync.sync_issues_mirror)
+# so renders/polls consume zero GitHub rate-limit quota. When the mirror is
+# empty or unavailable (e.g. before the first sync) callers fall back to gh.
+
+
+def _mirror_issues(repo_name: str) -> list[dict] | None:
+    """Return mirrored issues for *repo_name*, or None to signal gh fallback.
+
+    Returns None when DB access is unavailable or the mirror has no rows yet, so
+    the caller can fall back to a live `gh` fetch during bootstrap.
+    """
+    if not os.environ.get("DB_PATH"):
+        return None
+    try:
+        import db  # lazy: db.py exits if DB_PATH is unset at import time
+        rows = db.get_mirrored_issues(repo_name)
+    except Exception:
+        return None
+    return rows or None
+
+
+def _mirror_issue(repo_name: str, issue_number: int) -> dict | None:
+    """Return a single mirrored issue, or None to signal gh fallback."""
+    if not os.environ.get("DB_PATH"):
+        return None
+    try:
+        import db
+        return db.get_mirrored_issue(repo_name, issue_number)
+    except Exception:
+        return None
+
+
 # ── cache ─────────────────────────────────────────────────────────────────────
 
 def _cached(key: str, fn):
@@ -120,11 +173,19 @@ def classify_issue(issue: dict) -> str:
 
 def list_issues(sprint: int, repo_name: str | None = None) -> list[dict]:
     r = _r(repo_name)
+    sprint_label = f"sprint-{sprint}"
+    mirror = _mirror_issues(r)
+    if mirror is not None:
+        issues = [
+            i for i in mirror
+            if any(l.get("name") == sprint_label for l in i.get("labels", []))
+        ]
+        return [{"column": classify_issue(i), **i} for i in issues]
     key = f"issues:{r}:{sprint}"
     def fetch():
         issues = _json(
             "issue", "list", "--repo", r,
-            "--label", f"sprint-{sprint}",
+            "--label", sprint_label,
             "--state", "all",
             "--json", "number,title,labels,assignees,state,url,createdAt,updatedAt",
             "--limit", "200",
@@ -136,6 +197,9 @@ def list_issues(sprint: int, repo_name: str | None = None) -> list[dict]:
 def list_open_issues(repo_name: str | None = None, limit: int = 20) -> list[dict]:
     """List open issues for a repo, regardless of sprint label."""
     r = _r(repo_name)
+    mirror = _mirror_issues(r)
+    if mirror is not None:
+        return [i for i in mirror if i.get("state") == "open"][:limit]
     key = f"open_issues:{r}"
     def fetch():
         return _json(
@@ -150,6 +214,10 @@ def list_open_issues(repo_name: str | None = None, limit: int = 20) -> list[dict
 def list_all_open_issues(repo_name: str | None = None, limit: int = 200) -> list[dict]:
     """List all open issues with column classification (no sprint filter)."""
     r = _r(repo_name)
+    mirror = _mirror_issues(r)
+    if mirror is not None:
+        issues = [i for i in mirror if i.get("state") == "open"][:limit]
+        return [{"column": classify_issue(i), **i} for i in issues]
     key = f"all_open_issues:{r}"
     def fetch():
         issues = _json(
@@ -165,6 +233,9 @@ def list_all_open_issues(repo_name: str | None = None, limit: int = 200) -> list
 def list_open_issues_with_body(repo_name: str | None = None, limit: int = 200) -> list[dict]:
     """List open issues including body field — needed for size estimation."""
     r = _r(repo_name)
+    mirror = _mirror_issues(r)
+    if mirror is not None and all("body" in i for i in mirror):
+        return [i for i in mirror if i.get("state") == "open"][:limit]
     key = f"open_issues_body:{r}"
     def fetch():
         return _json(
@@ -179,6 +250,9 @@ def list_open_issues_with_body(repo_name: str | None = None, limit: int = 200) -
 def get_issue(issue_number: int, repo_name: str | None = None) -> dict:
     """Fetch a single issue by number including body."""
     r = _r(repo_name)
+    mirror = _mirror_issue(r, issue_number)
+    if mirror is not None and "body" in mirror:
+        return mirror
     return _json(
         "issue", "view", str(issue_number), "--repo", r,
         "--json", "number,title,labels,assignees,state,stateReason,url,body,createdAt,updatedAt",
@@ -231,6 +305,7 @@ def assign_sprint(issue_id: int, sprint_num: int | None, repo_name: str | None =
     If sprint_num is set, ensures the label exists, removes other sprint-* labels
     and removes the 'backlog' label if present, then adds sprint-N.
     """
+    _refuse_if_sprint_running("change sprint assignment")
     r = _r(repo_name)
 
     # Find existing sprint labels on the issue
@@ -364,6 +439,7 @@ def assign_sprint_by_label(issue_id: int, sprint_label: str | None,
     Handles both plain sprint-N and dotted sprint-N.X labels.
     If sprint_label is None, removes all sprint-* labels.
     """
+    _refuse_if_sprint_running("change sprint assignment")
     r = _r(repo_name)
     issue = get_issue(issue_id, repo_name=repo_name)
     current_labels = [lbl["name"] for lbl in issue.get("labels", [])]

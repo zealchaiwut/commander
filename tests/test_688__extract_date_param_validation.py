@@ -165,8 +165,7 @@ class TestAC5EndOfDay:
 class TestAC6AnalyticsMetricsBadSince:
     def test_bad_since_raises_400(self, tmp_path):
         from fastapi import HTTPException
-        with patch("server._settings_repo") as mock_sr, \
-             patch("server._sprint_repo") as mock_spr:
+        with patch("server._settings_repo") as mock_sr:
             from server import _compute_analytics_metrics
             with pytest.raises(HTTPException) as exc_info:
                 _compute_analytics_metrics(tmp_path, since="not-a-date")
@@ -175,7 +174,7 @@ class TestAC6AnalyticsMetricsBadSince:
 
     def test_bad_since_detail_has_field_name(self, tmp_path):
         from fastapi import HTTPException
-        with patch("server._settings_repo"), patch("server._sprint_repo"):
+        with patch("server._settings_repo"):
             from server import _compute_analytics_metrics
             with pytest.raises(HTTPException) as exc_info:
                 _compute_analytics_metrics(tmp_path, since="bad")
@@ -189,7 +188,7 @@ class TestAC6AnalyticsMetricsBadSince:
 class TestAC7AnalyticsMetricsBadUntil:
     def test_bad_until_raises_400(self, tmp_path):
         from fastapi import HTTPException
-        with patch("server._settings_repo"), patch("server._sprint_repo"):
+        with patch("server._settings_repo"):
             from server import _compute_analytics_metrics
             with pytest.raises(HTTPException) as exc_info:
                 _compute_analytics_metrics(tmp_path, until="not-a-date")
@@ -198,7 +197,7 @@ class TestAC7AnalyticsMetricsBadUntil:
 
     def test_bad_until_detail_has_field_name(self, tmp_path):
         from fastapi import HTTPException
-        with patch("server._settings_repo"), patch("server._sprint_repo"):
+        with patch("server._settings_repo"):
             from server import _compute_analytics_metrics
             with pytest.raises(HTTPException) as exc_info:
                 _compute_analytics_metrics(tmp_path, until="oops")
@@ -213,7 +212,6 @@ class TestAC8CalibrationBadSince:
     def test_bad_since_raises_400(self):
         from fastapi import HTTPException
         with patch("server._settings_repo") as mock_sr, \
-             patch("server._sprint_repo") as mock_spr, \
              patch("server.build_effective_response", return_value={}):
             mock_sr.get_setting.return_value = {}
             from server import _compute_calibration
@@ -225,7 +223,6 @@ class TestAC8CalibrationBadSince:
     def test_bad_since_detail_has_field_name(self):
         from fastapi import HTTPException
         with patch("server._settings_repo") as mock_sr, \
-             patch("server._sprint_repo"), \
              patch("server.build_effective_response", return_value={}):
             mock_sr.get_setting.return_value = {}
             from server import _compute_calibration
@@ -242,7 +239,6 @@ class TestAC9CalibrationBadUntil:
     def test_bad_until_raises_400(self):
         from fastapi import HTTPException
         with patch("server._settings_repo") as mock_sr, \
-             patch("server._sprint_repo"), \
              patch("server.build_effective_response", return_value={}):
             mock_sr.get_setting.return_value = {}
             from server import _compute_calibration
@@ -254,7 +250,6 @@ class TestAC9CalibrationBadUntil:
     def test_bad_until_detail_has_field_name(self):
         from fastapi import HTTPException
         with patch("server._settings_repo") as mock_sr, \
-             patch("server._sprint_repo"), \
              patch("server.build_effective_response", return_value={}):
             mock_sr.get_setting.return_value = {}
             from server import _compute_calibration

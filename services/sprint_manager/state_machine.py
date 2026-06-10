@@ -7,9 +7,10 @@ from __future__ import annotations
 
 import enum
 import json
+import os
 import subprocess
 import time
-from typing import Optional
+from typing import Iterable, Optional
 
 try:
     from services.logging import log as _log
@@ -27,6 +28,7 @@ class TicketState(enum.Enum):
     SIT = "SIT"                    # system integration testing
     UAT = "UAT"                    # user acceptance testing
     NEEDS_REWORK = "NEEDS_REWORK"  # sent back for rework
+    BLOCKED = "BLOCKED"            # blocked — cannot proceed until resolved (label: blocked)
     DONE = "DONE"                  # pseudo-state: closed/approved
 
 
@@ -39,14 +41,47 @@ STATE_LABELS: dict[TicketState, frozenset[str]] = {
     TicketState.SIT:          frozenset({"SIT"}),
     TicketState.UAT:          frozenset({"UAT"}),
     TicketState.NEEDS_REWORK: frozenset({"needs-rework"}),
+    TicketState.BLOCKED:      frozenset({"blocked"}),
     TicketState.DONE:         frozenset(),
 }
 
 STATUS_LABELS: frozenset[str] = frozenset().union(*STATE_LABELS.values())
 
+# During an active sprint run only status labels may change; sprint-N and every
+# other label must be frozen (issue #754). RUN_MUTABLE_LABELS is the allow-list
+# enforced by the run lock — it is exactly STATUS_LABELS.
+RUN_MUTABLE_LABELS: frozenset[str] = STATUS_LABELS
+
+_RUN_LOCK_ENV = "COMMANDER_SPRINT_RUNNING"
+
 
 class TransitionError(Exception):
     """Raised when a ticket label transition fails after all retries."""
+
+
+def run_lock_active() -> bool:
+    """True when a sprint run holds the label lock (COMMANDER_SPRINT_RUNNING=1)."""
+    return os.environ.get(_RUN_LOCK_ENV) == "1"
+
+
+def assert_run_mutable(add: Iterable[str], remove: Iterable[str]) -> None:
+    """Guard label mutations against the sprint run lock (issue #754).
+
+    When a sprint run is active (COMMANDER_SPRINT_RUNNING=1), every label being
+    added or removed must be in RUN_MUTABLE_LABELS (i.e. a status label). Any
+    non-status label in the add/remove sets raises TransitionError. When the lock
+    is not held this is a no-op, so existing behavior is unchanged.
+    """
+    if not run_lock_active():
+        return
+    touched = frozenset(add) | frozenset(remove)
+    illegal = touched - RUN_MUTABLE_LABELS
+    if illegal:
+        raise TransitionError(
+            f"Sprint run active ({_RUN_LOCK_ENV}=1): refusing to mutate "
+            f"non-status label(s) {sorted(illegal)}. Only status labels "
+            f"{sorted(RUN_MUTABLE_LABELS)} may change during a run."
+        )
 
 
 def _fetch_labels(issue: int, repo: str) -> frozenset[str]:
@@ -143,6 +178,11 @@ def transition(
         to_remove = current_status - desired
         to_add = desired - current_status
 
+        # Run lock (issue #754): refuse any add/remove that touches a non-status
+        # label while a sprint run is active. transition() only ever moves status
+        # labels, so this is defensive — but it makes a violation loud.
+        assert_run_mutable(to_add, to_remove)
+
         if not to_remove and not to_add:
             _log_transition(issue, current_status, desired, actor, note, noop=True)
             return False
@@ -163,18 +203,49 @@ def transition(
                 time.sleep(_BACKOFFS[attempt])
             continue
 
-        after = _fetch_labels(issue, eff_repo)
-        after_status = STATUS_LABELS & after
-
-        if after_status == desired:
-            _log_transition(issue, current_status, desired, actor, note)
-            return True
-
-        last_error = (
-            f"Label verification failed (attempt {attempt + 1}): "
-            f"expected {sorted(desired)}, got {sorted(after_status)}"
-        )
-        if attempt < len(_BACKOFFS):
-            time.sleep(_BACKOFFS[attempt])
+        # Edit succeeded. The edit response is authoritative, so we skip the
+        # old post-edit verify re-fetch (issue #755) — the sync loop catches any
+        # drift lazily. Write the new state through to the local ticket_status
+        # table; a DB failure must NOT fail the transition.
+        _write_ticket_status(issue, target_state.name, actor, note)
+        _log_transition(issue, current_status, desired, actor, note)
+        return True
 
     raise TransitionError(last_error or "Transition failed after all retries")
+
+
+def _write_ticket_status(
+    issue: int,
+    status: str,
+    actor: str,
+    note: Optional[str],
+) -> None:
+    """Write-through the transitioned state to the local ticket_status table.
+
+    Best-effort: any failure (locked DB, schema error, import failure) is logged
+    as a structured "db_write_failed" error and swallowed — it must never raise
+    or change the transition's return value (issue #755).
+    """
+    try:
+        import sys
+        from pathlib import Path
+        dash_dir = Path(__file__).parent.parent.parent / "apps" / "dashboard"
+        if str(dash_dir) not in sys.path:
+            sys.path.insert(0, str(dash_dir))
+        import db
+        db.record_ticket_status(issue=issue, status=status, actor=actor, note=note)
+    except (Exception, SystemExit) as exc:
+        # db.py calls sys.exit(1) when DB_PATH is unset (SystemExit derives from
+        # BaseException, not Exception) — treat that as a swallowed write failure.
+        msg = f"#{issue}: ticket_status write failed: {exc}"
+        if _LOG_AVAILABLE:
+            _log.error(
+                "db_write_failed",
+                msg,
+                issue_num=issue,
+                status=status,
+                actor=actor,
+                error=str(exc),
+            )
+        else:
+            print(msg)

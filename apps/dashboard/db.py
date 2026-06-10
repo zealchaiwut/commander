@@ -696,7 +696,10 @@ def set_sync_etag(key: str, etag: str) -> None:
 # The marker is stored in the sync_state table under a reserved key so a second
 # start can detect it and skip the bootstrap.
 
-BOOTSTRAP_MARKER_KEY = "bootstrap:complete"
+# v2: the original bootstrap synced only one page (~100 newest issues), so the
+# mirror was partial. Bumping the marker key makes existing installs re-run the
+# (now paginated) full crawl on next start; the old key is left behind, inert.
+BOOTSTRAP_MARKER_KEY = "bootstrap:complete:v2"
 
 
 def is_bootstrap_complete() -> bool:

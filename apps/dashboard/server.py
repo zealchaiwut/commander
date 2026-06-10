@@ -4757,13 +4757,9 @@ def _finished_sprint_summaries(repo_name: str | None) -> dict[str, dict]:
     except Exception:
         return {}
     try:
-        r = subprocess.run(
-            ["gh", "issue", "list", "--repo", repo,
-             "--label", "sprint-summary", "--state", "all",
-             "--json", "number,title,url", "--limit", "200"],
-            capture_output=True, text=True, timeout=15,
-        )
-        issues = json.loads(r.stdout or "[]") if r.returncode == 0 else []
+        # Cached in github_client (summary_issues: TTL) — this was an uncached
+        # gh issue list (GraphQL) on the board/nav hot path, 5 call sites.
+        issues = github_client.list_summary_issues(repo_name=repo)
     except Exception:
         issues = []
 

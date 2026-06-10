@@ -91,7 +91,7 @@ def test_bootstrap_full_sync__detects_empty_db_and_triggers_full_sync(fresh_db):
         synced_repos.append(repo)
         return {"status": 200, "synced": 0}
 
-    with patch.object(github_events_sync, "sync_issues_mirror", fake_sync):
+    with patch.object(github_events_sync, "full_sync_issues_mirror", fake_sync):
         result = github_events_sync.bootstrap_full_sync(
             ["o/r1", "o/r2"], db_module=fresh_db
         )
@@ -159,7 +159,7 @@ def test_bootstrap_full_sync__no_marker_when_repo_fails(fresh_db):
     def failing_sync(repo, db_module=None):
         return {"status": 0, "synced": 0, "error": "boom"}
 
-    with patch.object(github_events_sync, "sync_issues_mirror", failing_sync):
+    with patch.object(github_events_sync, "full_sync_issues_mirror", failing_sync):
         result = github_events_sync.bootstrap_full_sync(["o/r"], db_module=fresh_db)
     assert result["errors"] == 1 and result["bootstrapped"] is False
     assert fresh_db.is_bootstrap_complete() is False
@@ -174,7 +174,7 @@ def test_bootstrap_full_sync__second_start_skips_sync(fresh_db, capsys):
         calls.append(repo)
         return {"status": 200, "synced": 0}
 
-    with patch.object(github_events_sync, "sync_issues_mirror", fake_sync):
+    with patch.object(github_events_sync, "full_sync_issues_mirror", fake_sync):
         result = github_events_sync.bootstrap_full_sync(["o/r"], db_module=fresh_db)
     assert calls == []                       # no full sync ran
     assert result["skipped"] is True
@@ -188,7 +188,7 @@ def test_bootstrap_full_sync__never_raises_on_failure_or_empty(fresh_db, tmp_pat
     def boom(repo, db_module=None):
         raise RuntimeError("network down")
 
-    with patch.object(github_events_sync, "sync_issues_mirror", boom):
+    with patch.object(github_events_sync, "full_sync_issues_mirror", boom):
         result = github_events_sync.bootstrap_full_sync(["o/r"], db_module=fresh_db)
     assert result["errors"] == 1 and fresh_db.is_bootstrap_complete() is False
 

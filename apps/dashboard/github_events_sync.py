@@ -298,10 +298,14 @@ def _fetch_issues_conditional(
     if etag:
         headers["If-None-Match"] = etag
 
+    # sort=updated so ANY recently-touched issue (a label change on an old
+    # ticket included) surfaces in page 1; the default created-sort never shows
+    # updates to issues older than the newest `per_page`.
     resp = httpx.get(
         url,
         headers=headers,
-        params={"state": "all", "per_page": per_page},
+        params={"state": "all", "per_page": per_page,
+                "sort": "updated", "direction": "desc"},
         timeout=15.0,
     )
 
@@ -359,6 +363,61 @@ def sync_issues_mirror(repo: str, db_module=None) -> dict:
     return {"status": 200, "synced": len(normalised), "rate_limited": False}
 
 
+# Hard cap on full-sync pagination: 50 pages × 100 = 5,000 issues per repo.
+FULL_SYNC_MAX_PAGES = 50
+
+
+def full_sync_issues_mirror(repo: str, db_module=None) -> dict:
+    """Crawl ALL pages of a repo's issues into the mirror (bootstrap only).
+
+    The incremental ETag poll covers one page of the most recently updated
+    issues, so the bootstrap must walk the complete history once — otherwise
+    old issues (e.g. early sprint summaries) never enter the mirror. REST only;
+    stops early if the rate budget runs low.
+    """
+    if db_module is None:
+        import db as db_module  # type: ignore[assignment]
+
+    if "/" in repo:
+        owner, repo_name = repo.split("/", 1)
+    else:
+        owner, repo_name = repo, repo
+
+    token = _get_gh_token()
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+    url = f"https://api.github.com/repos/{owner}/{repo_name}/issues"
+
+    total = 0
+    for page in range(1, FULL_SYNC_MAX_PAGES + 1):
+        resp = httpx.get(
+            url, headers=headers,
+            params={"state": "all", "per_page": ISSUES_PER_PAGE, "page": page,
+                    "sort": "created", "direction": "asc"},
+            timeout=15.0,
+        )
+        resp.raise_for_status()
+        remaining = int(resp.headers.get("X-RateLimit-Remaining", 999))
+        items = [it for it in resp.json() if "pull_request" not in it]
+        if items:
+            db_module.upsert_issues(repo, [_normalise_issue(it) for it in items])
+            total += len(items)
+        if len(resp.json()) < ISSUES_PER_PAGE:
+            break
+        if remaining < RATE_LIMIT_THRESHOLD:
+            logger.warning(
+                "full sync %s: stopping at page %d — rate budget low (%d left)",
+                repo, page, remaining,
+            )
+            return {"status": 200, "synced": total, "rate_limited": True}
+
+    logger.info("issues full sync %s: %d issue(s) mirrored", repo, total)
+    return {"status": 200, "synced": total, "rate_limited": False}
+
+
 BOOTSTRAP_RESTORE_NOTICE = (
     "history/order/settings start empty — restore from backup if migrating "
     "(backup restore / restore-db)"
@@ -398,12 +457,18 @@ def bootstrap_full_sync(repos: list[str], db_module=None) -> dict:
             logger.info(progress)
             print(progress, flush=True)
             try:
-                result = sync_issues_mirror(repo, db_module=db_module)
+                # Full paginated crawl, not the single-page ETag poll — the
+                # mirror must hold the complete history (old sprint summaries
+                # included) for mirror-backed reads to be trustworthy.
+                result = full_sync_issues_mirror(repo, db_module=db_module)
             except Exception as exc:  # never let one repo abort the bootstrap
                 logger.warning("[bootstrap] sync failed for %s: %s", repo, exc)
                 errors += 1
                 continue
-            if result.get("status", 0) in (0, None) or result.get("error"):
+            if (result.get("status", 0) in (0, None) or result.get("error")
+                    or result.get("rate_limited")):
+                # A rate-limited crawl is PARTIAL — leave the marker unwritten
+                # so the bootstrap retries and completes on a later start.
                 errors += 1
             else:
                 synced += result.get("synced", 0)

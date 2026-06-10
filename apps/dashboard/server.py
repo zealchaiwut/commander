@@ -8744,8 +8744,13 @@ class SprintRerunBody(BaseModel):
 
 
 class SprintRerunV2Body(BaseModel):
-    ticket_numbers: list[int]
+    # Empty list = re-run all non-UAT tickets (legacy behaviour). When the
+    # per-ticket modal sends a selection, only those tickets move to the child
+    # sprint. `confirm` is accepted-and-ignored for backward compatibility with
+    # the old SprintRerunBody callers.
+    ticket_numbers: list[int] = []
     auto_run: bool = True
+    confirm: bool | None = None
 
 
 def _ticket_rerun_category(labels: set[str]) -> str:
@@ -8853,15 +8858,18 @@ def rerun_sprint_preview_v2(sprint_label: str, project: str):
 
 
 @app.post("/api/sprints/{sprint_label}/rerun")
-def rerun_sprint(sprint_label: str, project: str, body: SprintRerunBody):
-    """Create an independent sub-sprint from all non-UAT tickets and auto-run it.
+def rerun_sprint(sprint_label: str, project: str, body: SprintRerunV2Body):
+    """Create an independent sub-sprint from selected non-UAT tickets.
 
-    Auto-detects every non-UAT ticket carrying sprint_label, moves them to a new
-    versioned sub-sprint label (sprint-N.1, sprint-N.2, …), creates plan.json with
-    parent reference, and dispatches sprint_manager for the sub-sprint. The original
-    sprint label, plan.json, branch, and PR are NOT modified.
+    Moves the chosen non-UAT tickets carrying sprint_label to a new versioned
+    sub-sprint label (sprint-N.1, sprint-N.2, …), creates plan.json with a parent
+    reference, and (when auto_run) dispatches sprint_manager for the sub-sprint.
+    The original sprint label, plan.json, branch, and PR are NOT modified.
 
-    Body: { confirm: bool }
+    Body: { ticket_numbers?: int[], auto_run?: bool }
+      - ticket_numbers: which non-UAT tickets to move; empty = all of them.
+      - auto_run: dispatch immediately (default true); false leaves them queued
+        in the child sprint for a manual run.
     Response: { sub_label, noop, dispatch_count, decisions, moved, [errors] }
     """
     if not _SPRINT_LABEL_RE.match(sprint_label):
@@ -8891,6 +8899,11 @@ def rerun_sprint(sprint_label: str, project: str, body: SprintRerunBody):
         })
 
     to_move = [d for d in decisions if d["action"] != "skip"]
+
+    # Honor an explicit ticket selection from the per-ticket modal; empty means all.
+    if body.ticket_numbers:
+        selected = set(body.ticket_numbers)
+        to_move = [d for d in to_move if d["issue_num"] in selected]
 
     if not to_move:
         return {
@@ -8974,6 +8987,12 @@ def rerun_sprint(sprint_label: str, project: str, body: SprintRerunBody):
     }
     if errors:
         result["errors"] = errors
+
+    # auto_run=false: leave the selected tickets queued in the child sprint
+    # (plan state stays "planning") for a manual run later.
+    if not body.auto_run:
+        result["queued"] = True
+        return result
 
     # Auto-run: dispatch sprint_manager for the sub-sprint
     if not SPRINT_MANAGER_PATH.exists():

@@ -4578,6 +4578,7 @@
       cursor: pointer; transition: background .12s; user-select: none;
     }
     .logs-run-header:hover { background: var(--surface-hover); }
+    .logs-run-header:focus-visible { outline: 2px solid var(--blue); outline-offset: -2px; }
     .logs-run-chevron { color: var(--text-sub); font-size: 12px; transition: transform .15s; flex-shrink: 0; }
     .logs-run-row.expanded .logs-run-chevron { transform: rotate(90deg); }
     .logs-run-id {
@@ -4676,7 +4677,7 @@
     .evl-log-row:hover { background: var(--surface-hover); }
     .evl-day-head + .evl-log-row { border-top: none; }
     .lr-time {
-      font-family: var(--mono); font-size: 11px; color: var(--text-sub);
+      font-family: var(--mono); font-size: 11px; color: var(--text-muted);
       min-width: 54px; padding-top: 2px; flex-shrink: 0;
     }
     .lr-badge {
@@ -18552,7 +18553,9 @@ function _logsRunRowHtml(run) {
     : '<div class="logs-empty" style="padding:6px 0;font-size:11px">Loading events…</div>';
 
   return `<div class="logs-run-row${isExpanded ? ' expanded' : ''}" data-run-id="${escHtml(run.run_id)}" data-sprint="${escHtml(run.sprint_label)}" data-project="${escHtml(run.project)}">
-  <div class="logs-run-header" onclick="logsToggleRun(this)">
+  <div class="logs-run-header" role="button" tabindex="0" aria-expanded="${isExpanded ? 'true' : 'false'}"
+       onclick="logsToggleRun(this)"
+       onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();logsToggleRun(this);}">
     <i class="ti ti-chevron-right logs-run-chevron"></i>
     <span class="logs-run-id">${escHtml(run.run_id)}</span>
     <div class="logs-run-meta">
@@ -18588,9 +18591,11 @@ async function logsToggleRun(headerEl) {
   if (_logsState.expanded.has(runId)) {
     _logsState.expanded.delete(runId);
     row.classList.remove('expanded');
+    headerEl.setAttribute('aria-expanded', 'false');
     if (_logsState.liveRunId === runId) _logsDisconnectLive();
     return;
   }
+  headerEl.setAttribute('aria-expanded', 'true');
 
   _logsState.expanded.add(runId);
   row.classList.add('expanded');

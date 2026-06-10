@@ -2857,6 +2857,104 @@ def put_project_environments(slug: str, body: _PutEnvironmentsBody):
     return {"ok": True, "environments": envs_dict}
 
 
+# ── Env-var editor (issue #727) ───────────────────────────────────────────────
+
+import env_file as _env_file
+
+
+def _env_working_dir(slug: str, repo: str, env: str) -> str | None:
+    """Resolve the on-disk directory holding an environment's `.env` file.
+
+    Prefers the stored/derived environment path (the working clone), and falls
+    back to a host=local deploy-config working_dir. Returns None when nothing is
+    configured for the requested env.
+    """
+    envs = projects_module.get_project_environments(repo)
+    if not envs:
+        envs = _derive_project_environments(repo)
+    if env in envs and envs[env]:
+        return envs[env]
+    merged = _merged_deploy_config(slug, repo)
+    entry = (merged or {}).get(env) or {}
+    return entry.get("working_dir") or None
+
+
+@app.get("/api/projects/{slug}/environments/{env}/env-vars")
+def get_env_vars(slug: str, env: str):
+    """Read the environment's `.env` file and return parsed key/value pairs.
+
+    Pairs are returned in file order. Values are plaintext — masking is a
+    display-only concern handled client-side. Returns 404 for an unknown slug or
+    an env with no configured directory.
+    """
+    repo = _resolve_project_slug(slug)
+    working_dir = _env_working_dir(slug, repo, env)
+    if not working_dir:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No directory configured for environment '{env}'",
+        )
+    env_path = Path(working_dir) / ".env"
+    return {
+        "env": env,
+        "working_dir": working_dir,
+        "vars": _env_file.read_env_vars(env_path),
+    }
+
+
+class _EnvVarItem(BaseModel):
+    key: str
+    value: str = ""
+
+
+class _PutEnvVarsBody(BaseModel):
+    vars: list[_EnvVarItem]
+
+
+@app.put("/api/projects/{slug}/environments/{env}/env-vars")
+def put_env_vars(slug: str, env: str, body: _PutEnvVarsBody):
+    """Write env-var changes back to the environment's `.env` file.
+
+    Preserves original line order and inline comments for unchanged keys,
+    rewrites changed keys in place, appends new keys at the end, and drops
+    removed keys. An empty KEY is rejected (400) before any write. A filesystem
+    failure (e.g. read-only `.env`) returns 500 so the client can keep the
+    user's edits. Returns 404 for an unknown slug or unconfigured env.
+    """
+    repo = _resolve_project_slug(slug)
+    working_dir = _env_working_dir(slug, repo, env)
+    if not working_dir:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No directory configured for environment '{env}'",
+        )
+
+    pairs: list[tuple[str, str]] = []
+    for item in body.vars:
+        key = item.key.strip()
+        if not key:
+            raise HTTPException(
+                status_code=400,
+                detail="Each variable must have a non-empty KEY.",
+            )
+        pairs.append((key, item.value))
+
+    env_path = Path(working_dir) / ".env"
+    try:
+        _env_file.write_env_vars(env_path, pairs)
+    except OSError as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to write {env_path}: {exc}",
+        )
+    return {
+        "ok": True,
+        "env": env,
+        "working_dir": working_dir,
+        "vars": _env_file.read_env_vars(env_path),
+    }
+
+
 # ── Scaffold docs (issue #681) ────────────────────────────────────────────────
 
 def _scaffold_resolve_working_clone(slug: str) -> tuple[str, Path]:

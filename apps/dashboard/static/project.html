@@ -2980,39 +2980,39 @@
       50%       { box-shadow: 0 0 0 1px var(--green), 0 0 16px 5px rgba(22,163,74,.32); }
     }
 
+    /* Running sprint owns the board: a confident green ring + tinted header,
+       matching the completed/rework state pattern. Calm dominance over three
+       competing animations — the single pulsing dot is the only state motion. */
     .smgmt-sprint-card.smgmt-running {
       border-color: var(--green);
-      animation: smgmt-glow-pulse 2.4s ease-in-out infinite;
+      box-shadow: 0 0 0 3px var(--green-bg), 0 1px 3px rgba(0,0,0,0.05);
+    }
+    .smgmt-sprint-card.smgmt-running .smgmt-sprint-header {
+      background: linear-gradient(180deg, var(--green-bg) 0%, transparent 100%);
     }
 
-    /* Flowing top stripe */
+    /* Solid top accent (no flowing animation, no hardcoded greens). */
     .smgmt-running-stripe {
       height: 3px;
       border-radius: 8px 8px 0 0;
-      background: linear-gradient(
-        90deg,
-        var(--green) 0%,
-        #4ade80 25%,
-        #86efac 50%,
-        #4ade80 75%,
-        var(--green) 100%
-      );
-      background-size: 200% 100%;
-      animation: smgmt-running-stripe 2s linear infinite;
+      background: var(--green);
     }
 
-    /* Pulsing "Running" badge */
+    /* "Running" badge — firm, not pulsing; only its dot signals live. */
     .smgmt-running-badge {
       display: inline-flex; align-items: center; gap: 5px;
-      padding: 3px 9px; border-radius: 999px;
+      padding: 4px 10px; border-radius: 999px;
       font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
       font-family: var(--mono);
       background: var(--green-bg); color: var(--green);
-      animation: smgmt-running-badge-pulse 2s ease-in-out infinite;
     }
     .smgmt-running-badge .smgmt-running-badge-dot {
       width: 6px; height: 6px; border-radius: 50%;
       background: var(--green);
+      animation: smgmt-running-badge-pulse 2s ease-in-out infinite;
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .smgmt-running-badge-dot { animation: none; }
     }
 
     /* Stat strip */

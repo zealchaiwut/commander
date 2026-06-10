@@ -81,6 +81,7 @@ from services.sprint_manager.estimate_issue import (
     apply_label as _ei_apply_label,
     apply_estimated_status as _ei_apply_estimated_status,
 )
+from services.sprint_manager import fill_acceptance_criteria as _fill_ac
 from services.sprint_manager.state_machine import (
     TicketState as _TicketState,
     transition as _sm_transition,
@@ -1470,8 +1471,38 @@ async def sse_stream(request: Request):
 
 # ── github / sprint endpoints ─────────────────────────────────────────────────
 
+def _gh_graphql_reset_seconds() -> Optional[int]:
+    """Seconds until the GitHub GraphQL budget resets, or None.
+
+    Queries the rate_limit endpoint, which is REST (core) and does not itself
+    count against any limit, so it is safe to call on an error path.
+    """
+    try:
+        import time as _t
+        r = subprocess.run(
+            ["gh", "api", "rate_limit", "--jq", ".resources.graphql.reset"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if r.returncode == 0 and r.stdout.strip():
+            return max(0, int(r.stdout.strip()) - int(_t.time()))
+    except Exception:
+        pass
+    return None
+
+
 def _gh_error(e: subprocess.CalledProcessError) -> HTTPException:
     detail = e.stderr.strip() if e.stderr else str(e)
+    # Map a GitHub rate-limit failure to a clean 429 with a reset countdown, so
+    # callers (e.g. the Sprint Mgmt board) can say "rate limit, retry in Ns"
+    # instead of a generic failure. Refills hourly.
+    if "rate limit" in detail.lower():
+        reset_in = _gh_graphql_reset_seconds()
+        msg = "GitHub API rate limit reached."
+        if reset_in:
+            msg += f" Retry in ~{reset_in // 60}m {reset_in % 60}s."
+        else:
+            msg += " It refills hourly; retry shortly."
+        return HTTPException(status_code=429, detail=msg)
     return HTTPException(status_code=502, detail=detail)
 
 
@@ -5567,6 +5598,109 @@ def get_sprint_estimate_summary(sprint_label: str, project: str):
     }
 
 
+_SIZE_LABELS = {"size-S", "size-M", "size-L", "size-XL"}
+_PF_NON_WORK = {"sprint-summary", "docs", "documentation"}
+
+
+@app.post("/api/sprints/{sprint_label}/preflight-fix")
+async def preflight_fix(sprint_label: str, project: str):
+    """Fix auto-fixable pre-flight issues for a sprint, streaming progress as SSE.
+
+    For each work ticket in the sprint that is missing acceptance criteria or a
+    size estimate: generate AC (append-only, idempotent) and/or run the estimator
+    to apply a size label. Streams `log` events (the current action) and a final
+    `done` event with counts. Conflicts (file-overlap / dep-order) are not
+    auto-fixable and are left untouched.
+    """
+    if not _SPRINT_LABEL_RE.match(sprint_label):
+        raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")
+
+    repo = github_client.get_repo_for_operation(project)
+    try:
+        issues = _get_sprint_issues(project, sprint_label)
+    except subprocess.CalledProcessError as e:
+        raise _gh_error(e)
+
+    work: list[dict] = []
+    for iss in issues:
+        labels = {lbl["name"] for lbl in iss.get("labels", [])}
+        if labels & _PF_NON_WORK:
+            continue
+        needs_ac = not _fill_ac.has_acceptance_criteria(iss.get("body") or "")
+        needs_size = not (labels & _SIZE_LABELS)
+        if needs_ac or needs_size:
+            work.append({"num": iss["number"], "needs_ac": needs_ac, "needs_size": needs_size})
+
+    def _sse(event: str, payload) -> str:
+        return f"event: {event}\ndata: {json.dumps(payload)}\n\n"
+
+    async def _stream():
+        total = len(work)
+        if total == 0:
+            yield _sse("log", "No auto-fixable pre-flight issues found.")
+            yield _sse("done", {"filled": 0, "estimated": 0, "skipped": 0, "errors": [], "total": 0})
+            return
+
+        filled = estimated = skipped = 0
+        errors: list[str] = []
+        yield _sse("log", f"Fixing {total} pre-flight ticket(s)…")
+
+        for idx, item in enumerate(work, start=1):
+            num = item["num"]
+            if item["needs_ac"]:
+                yield _sse("log", f"Generating acceptance criteria for #{num} ({idx}/{total})…")
+                try:
+                    status, err = await asyncio.to_thread(_fill_ac.fill_issue, num, repo, False)
+                    if status == "filled":
+                        filled += 1
+                    elif status == "skipped":
+                        skipped += 1
+                    else:
+                        errors.append(f"#{num} AC: {err or 'failed'}")
+                except Exception as e:  # noqa: BLE001
+                    errors.append(f"#{num} AC: {e}")
+
+            if item["needs_size"]:
+                yield _sse("log", f"Estimating #{num} ({idx}/{total})…")
+                try:
+                    ok = await asyncio.to_thread(_preflight_estimate_one, num, repo)
+                    if ok:
+                        estimated += 1
+                    else:
+                        errors.append(f"#{num} estimate: failed")
+                except Exception as e:  # noqa: BLE001
+                    errors.append(f"#{num} estimate: {e}")
+
+        github_client.invalidate("open_issues_body:")
+        github_client.invalidate("open_issues:")
+        summary = {"filled": filled, "estimated": estimated, "skipped": skipped,
+                   "errors": errors, "total": total}
+        yield _sse("log", f"Done — {filled} AC added, {estimated} estimated"
+                          + (f", {len(errors)} error(s)" if errors else "") + ".")
+        yield _sse("done", summary)
+
+    return StreamingResponse(
+        _stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+def _preflight_estimate_one(issue_num: int, repo: str) -> bool:
+    """Estimate one issue and apply its size label. Returns True on success.
+
+    Mirrors POST /api/issues/{id}/estimate but as a blocking helper for the
+    preflight-fix executor thread.
+    """
+    issue_data = _ei_fetch_issue(issue_num, repo)
+    estimate, _err = _ei_run_estimator(issue_num, issue_data)
+    if not estimate or not estimate.get("size"):
+        return False
+    _ei_apply_label(issue_num, repo, estimate["size"])
+    _ei_apply_estimated_status(issue_num, repo)
+    return True
+
+
 def _sprint_dag_tickets(project_root: Path, sprint_issues: list[dict]) -> list[dict]:
     """Build the ticket list for build_dag from sprint issues + their estimate files."""
     estimates_dir = _commander_dir(project_root) / "estimates"
@@ -7537,21 +7671,31 @@ def get_sprint_state(sprint_label: str, project: str):
 
 
 def _has_rework_tickets(sprint_label: str, project: str) -> bool:
-    """Return True if any open issue in the sprint carries a needs-rework label."""
+    """Return True if the sprint should read as rework rather than completed.
+
+    A finished sprint is rework when any open work ticket either carries a
+    rework/rejected label (needs-rework or tester-rejected — a tester rejection
+    is treated as a failed sprint) or never reached a done/UAT state (e.g. the
+    coder failed, so nothing shipped). Non-work tickets (summary/docs) are
+    ignored. A sprint whose work all reached UAT/UAT-approved (or is fully
+    closed) reads as completed.
+    """
+    NON_WORK = {"sprint-summary", "docs", "documentation"}
+    REWORK = {"needs-rework", "need-rework", "tester-rejected"}
+    DONE = {"UAT", "UAT-approved", "released"}
     try:
-        r = github_client.get_repo_for_operation(project)
-        result = subprocess.run(
-            ["gh", "issue", "list", "--repo", r,
-             "--label", sprint_label,
-             "--label", "needs-rework",
-             "--json", "number",
-             "--limit", "1"],
-            capture_output=True, text=True, timeout=10,
-        )
-        if result.returncode == 0:
-            return len(json.loads(result.stdout or "[]")) > 0
+        issues = _get_sprint_issues(project, sprint_label)
     except Exception:
-        pass
+        return False
+    for iss in issues:
+        labels = {lbl["name"] for lbl in iss.get("labels", [])}
+        if labels & NON_WORK:
+            continue
+        if labels & REWORK:
+            return True
+        if not (labels & DONE):
+            # open work ticket that never reached a done/UAT state → unfinished/failed
+            return True
     return False
 
 
@@ -7981,21 +8125,31 @@ def get_calibration(project: str):
 
 
 def _has_rework_tickets(sprint_label: str, project: str) -> bool:
-    """Return True if any open issue in the sprint carries a needs-rework label."""
+    """Return True if the sprint should read as rework rather than completed.
+
+    A finished sprint is rework when any open work ticket either carries a
+    rework/rejected label (needs-rework or tester-rejected — a tester rejection
+    is treated as a failed sprint) or never reached a done/UAT state (e.g. the
+    coder failed, so nothing shipped). Non-work tickets (summary/docs) are
+    ignored. A sprint whose work all reached UAT/UAT-approved (or is fully
+    closed) reads as completed.
+    """
+    NON_WORK = {"sprint-summary", "docs", "documentation"}
+    REWORK = {"needs-rework", "need-rework", "tester-rejected"}
+    DONE = {"UAT", "UAT-approved", "released"}
     try:
-        r = github_client.get_repo_for_operation(project)
-        result = subprocess.run(
-            ["gh", "issue", "list", "--repo", r,
-             "--label", sprint_label,
-             "--label", "needs-rework",
-             "--json", "number",
-             "--limit", "1"],
-            capture_output=True, text=True, timeout=10,
-        )
-        if result.returncode == 0:
-            return len(json.loads(result.stdout or "[]")) > 0
+        issues = _get_sprint_issues(project, sprint_label)
     except Exception:
-        pass
+        return False
+    for iss in issues:
+        labels = {lbl["name"] for lbl in iss.get("labels", [])}
+        if labels & NON_WORK:
+            continue
+        if labels & REWORK:
+            return True
+        if not (labels & DONE):
+            # open work ticket that never reached a done/UAT state → unfinished/failed
+            return True
     return False
 
 

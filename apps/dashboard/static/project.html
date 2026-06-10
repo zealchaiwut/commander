@@ -8465,7 +8465,17 @@ async function loadSprintMgmt(silent) {
       fetch('/api/sprint-management/issues?repo=' + encodeURIComponent(repo)),
       fetch('/api/sprints/running-all').catch(() => null),
     ]);
-    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    if (!resp.ok) {
+      // Surface a GitHub rate-limit failure specifically (status 429 from
+      // _gh_error) so the board says what's wrong instead of "Failed to load".
+      let msg = 'Failed to load sprints.';
+      const d = await resp.json().catch(() => null);
+      const detail = d && typeof d.detail === 'string' ? d.detail : '';
+      if (resp.status === 429 || /rate limit/i.test(detail)) {
+        msg = detail || 'GitHub API rate limit reached — retry shortly.';
+      }
+      throw new Error(msg);
+    }
     const data = await resp.json();
 
     // Update running labels set
@@ -8488,7 +8498,10 @@ async function loadSprintMgmt(silent) {
     // Start (or restart) live polling if there are running sprints
     _smgmtLivePollRestart();
   } catch (err) {
-    if (!silent) listEl.innerHTML = '<div class="loading-msg">Failed to load sprints.</div>';
+    if (!silent) {
+      const msg = (err && err.message) ? err.message : 'Failed to load sprints.';
+      listEl.innerHTML = `<div class="loading-msg">${escHtml(msg)}</div>`;
+    }
   }
 }
 
@@ -9438,6 +9451,12 @@ function _preflightBannerHtml(label, missingACItems, conflictItems) {
       </button>
     </div>
     <div class="pf-details" style="display:none">${detailRow1}${detailRow2}</div>
+    ${missingACItems.length > 0 ? `<div class="pf-fix-row" style="margin-top:8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+      <button class="smgmt-bulk-est-btn" onclick="_smgmtPreflightFix('${safeLabel}', this)"
+              title="Generate missing acceptance criteria and estimate unsized tickets">
+        <i class="ti ti-wand"></i> Fix all pre-flight issues</button>
+      <span class="smgmt-bulk-est-progress pf-fix-progress"></span>
+    </div>` : ''}
   </div>`;
 }
 
@@ -9981,10 +10000,15 @@ function sprintLabelDisplay(label) {
 }
 
 function _smgmtNextChildLabel(parentLabel) {
+  // Re-runs are siblings off the base sprint number, never nested children:
+  // sprint-1 / sprint-1.1 / sprint-1.2 → next is sprint-1.<max+1>.
+  // (Mirrors the backend _next_sprint_sublabel.)
+  const m = /^(sprint-\d+)(?:\.\d+)?$/.exec(parentLabel);
+  const base = m ? m[1] : parentLabel;
   const existing = Object.keys(_smgmtBySprint || {});
   let i = 1;
-  while (existing.includes(`${parentLabel}.${i}`)) i++;
-  return `${parentLabel}.${i}`;
+  while (existing.includes(`${base}.${i}`)) i++;
+  return `${base}.${i}`;
 }
 
 /**
@@ -10438,7 +10462,6 @@ function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent, finished) {
         </div>
         <div class="smgmt-sprint-header-right">
           ${_smgmtCapacityInputHtml(label)}
-          ${bulkEstBtnHtml}
           <button class="smgmt-delete-btn"
                   onclick="smgmtDeleteSprint('${escHtml(label)}')">
             <i class="ti ti-trash"></i> Delete</button>
@@ -11391,6 +11414,74 @@ async function _smgmtBulkEstimate(sprintLabel, btnEl) {
 
   // Fade out progress after 3s
   setTimeout(() => { if (progressEl) progressEl.classList.remove('show'); }, 3000);
+}
+
+// ── Fix all pre-flight issues (generate missing AC + estimate unsized) ────────
+async function _smgmtPreflightFix(label, btn) {
+  const repo = _smgmtRepo();
+  if (!repo) { _smgmtShowToast('No repo configured — cannot fix pre-flight'); return; }
+
+  const progressEl = btn.nextElementSibling; // .pf-fix-progress
+  const setP = (msg) => { if (progressEl) { progressEl.textContent = msg; progressEl.classList.add('show'); } };
+
+  btn.disabled = true;
+  _smgmtPreflightLock = true; // freeze auto-refresh so the board doesn't rebuild mid-fix
+  setP('Starting…');
+
+  let summary = null;
+  try {
+    const resp = await fetch(
+      `/api/sprints/${encodeURIComponent(label)}/preflight-fix?project=${encodeURIComponent(repo)}`,
+      { method: 'POST' },
+    );
+    if (!resp.ok) {
+      const d = await resp.json().catch(() => ({}));
+      throw new Error(d.detail || `HTTP ${resp.status}`);
+    }
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const chunks = buffer.split('\n\n');
+      buffer = chunks.pop();
+      for (const chunk of chunks) {
+        let ev = 'log', data = '';
+        for (const l of chunk.split('\n')) {
+          if (l.startsWith('event: ')) ev = l.slice(7).trim();
+          if (l.startsWith('data: '))  data = l.slice(6).trim();
+        }
+        if (!data) continue;
+        let payload = data;
+        try { payload = JSON.parse(data); } catch { /* raw */ }
+        if (ev === 'log') setP(payload);
+        else if (ev === 'done') summary = payload;
+      }
+    }
+    if (summary) {
+      const parts = [];
+      if (summary.filled)    parts.push(`${summary.filled} AC added`);
+      if (summary.estimated) parts.push(`${summary.estimated} estimated`);
+      if (summary.skipped)   parts.push(`${summary.skipped} already ok`);
+      setP(parts.join(', ') || 'Nothing to fix');
+      if (summary.errors && summary.errors.length) {
+        _smgmtShowToast(`Pre-flight fix: ${summary.errors.length} error(s) — ${summary.errors[0]}`);
+      }
+    } else {
+      setP('Done');
+    }
+  } catch (e) {
+    setP('Failed');
+    _smgmtShowToast('Pre-flight fix failed: ' + e.message);
+  } finally {
+    _smgmtPreflightLock = false;
+    btn.disabled = false;
+    // Refresh so AC/size badges and the banner reflect the fixes.
+    try { await _smgmtArDoRefresh(); } catch { /* ignore */ }
+    setTimeout(() => { if (progressEl) progressEl.classList.remove('show'); }, 4000);
+  }
 }
 
 // ── Re-estimate action (issue #452, extended by #561) ────────────────────────
@@ -14224,6 +14315,7 @@ document.addEventListener('keydown', function(e) {
 
 // ── Board move lock (issue #276) ──────────────────────────────────────────
 let _smgmtMoveLock = false;
+let _smgmtPreflightLock = false;  // true while a pre-flight fix runs; pauses auto-refresh
 
 /**
  * Show the full-screen blocking overlay and suppress auto-refresh while a
@@ -14534,6 +14626,7 @@ async function _smgmtArDoRefresh() {
 /** Fires every second: count down, refresh when we reach zero. */
 function _smgmtArTick() {
   if (_smgmtMoveLock) return; // freeze the countdown while a ticket move is in flight
+  if (_smgmtPreflightLock) return; // freeze while a pre-flight fix is running (board would rebuild mid-fix)
   // Freeze while a drag is in progress: a mid-drag board re-render (this tick
   // calls loadSprintMgmt → _smgmtRenderBacklog, which rebuilds the rows via
   // innerHTML) replaces the dragged DOM node, and the browser immediately

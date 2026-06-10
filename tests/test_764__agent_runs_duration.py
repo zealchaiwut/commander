@@ -38,14 +38,21 @@ def fresh_db(tmp_path):
 
 # ── AC1: agent_runs table + columns (created on SQLite) ──────────────────────
 
-EXPECTED_COLS = {
+# Original columns from issue #764 (migration 0009)
+_COLS_0009 = {
     "id", "issue_number", "sprint_label", "agent", "started_at",
     "finished_at", "duration_seconds", "outcome", "total_tokens",
 }
 
+# Columns added by issue #790 (migration 0010)
+_COLS_0010 = {"risk_tier", "model_used"}
+
+EXPECTED_COLS = _COLS_0009 | _COLS_0010
+
 
 def test_agent_runs_table_has_expected_columns(fresh_db):
-    """AC1: init_db() creates agent_runs with the required columns on SQLite."""
+    """AC1: init_db() creates agent_runs with the required columns on SQLite
+    (including risk_tier/model_used added by issue #790)."""
     with fresh_db.get_conn() as conn:
         cols = {r["name"] for r in conn.execute("PRAGMA table_info(agent_runs)").fetchall()}
     assert EXPECTED_COLS == cols
@@ -59,18 +66,20 @@ def test_agent_runs_total_tokens_nullable(fresh_db):
 
 
 def test_alembic_migration_0009_is_sqlite_portable():
-    """AC1: the 0009 migration chains onto 0008, declares all agent_runs columns,
-    and uses only portable types so it applies cleanly on SQLite (no Postgres
-    dialect types). The actual SQLite DDL is exercised by the db.py table test
-    above, which creates the identical schema."""
+    """AC1: the 0009 migration chains onto 0008, declares the original
+    agent_runs columns, and uses only portable types.  The risk_tier /
+    model_used columns added by issue #790 live in migration 0010, not 0009."""
     mig_path = REPO_ROOT / "alembic" / "versions" / "0009_add_agent_runs.py"
     src = mig_path.read_text()
     # Revision chains onto the prior head (0008).
     assert 'down_revision' in src and '"h8i9j0k1l2m3"' in src
-    # Creates the agent_runs table with every required column.
+    # Creates the agent_runs table with every original column.
     assert 'create_table(' in src and '"agent_runs"' in src
-    for col in EXPECTED_COLS:
-        assert f'"{col}"' in src, f"migration missing column {col}"
+    for col in _COLS_0009:
+        assert f'"{col}"' in src, f"migration 0009 missing column {col}"
+    # risk_tier / model_used belong to migration 0010, not 0009.
+    for col in _COLS_0010:
+        assert f'"{col}"' not in src, f"column {col} should be in 0010, not 0009"
     # Portable types only — must NOT import or use the postgresql dialect.
     assert "dialects.postgresql" not in src
     assert "TIMESTAMP(" not in src

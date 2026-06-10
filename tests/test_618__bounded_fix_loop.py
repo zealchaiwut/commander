@@ -84,7 +84,8 @@ def _run_sprint_with_mocks(
 
     def fake_tester(issue_num, alert_modes, sprint_branch="develop",
                     repo_name=None, cfg=None, chosen_port=None,
-                    rate_limit_events=None, on_running=None, sprint_label=None):
+                    rate_limit_events=None, on_running=None, sprint_label=None,
+                    pre_dispatch_risk=None):
         if on_running:
             on_running()
         return tester_rc, None
@@ -318,7 +319,8 @@ class TestAC4InfraFailureBypass:
 
         def fake_tester_hang(issue_num, alert_modes, sprint_branch="develop",
                              repo_name=None, cfg=None, chosen_port=None,
-                             rate_limit_events=None, on_running=None, sprint_label=None):
+                             rate_limit_events=None, on_running=None, sprint_label=None,
+                             pre_dispatch_risk=None):
             if on_running:
                 on_running()
             return 1, sm.FailureCategory.HANG

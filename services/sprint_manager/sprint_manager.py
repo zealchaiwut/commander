@@ -260,6 +260,12 @@ class SprintConfig:
     reviewer_model:    str = "claude-haiku-4-5"
     estimator_model:   str = "claude-sonnet-4-6"
     documentor_model:  str = "claude-sonnet-4-6"
+    # Risk-tier model routing for tester (issue #790)
+    tester_by_risk:    dict = field(default_factory=lambda: {
+        "LOW":    "claude-haiku-4-5",
+        "MEDIUM": "claude-haiku-4-5",
+        "HIGH":   "claude-sonnet-4-6",
+    })
 
     @property
     def worktree_tester_app(self) -> Path:
@@ -408,6 +414,20 @@ def load_config(path: Path) -> "SprintConfig":
     estimator_model  = _resolve_model("estimator_model",  "claude-sonnet-4-6")
     documentor_model = _resolve_model("documentor_model", "claude-sonnet-4-6")
 
+    # ── agent_config.tester.by_risk (issue #790) ─────────────────────────────
+    _default_by_risk = {
+        "LOW":    "claude-haiku-4-5",
+        "MEDIUM": "claude-haiku-4-5",
+        "HIGH":   "claude-sonnet-4-6",
+    }
+    tester_by_risk: dict = _default_by_risk.copy()
+    if isinstance(agent_cfg, dict):
+        _tester_sub = agent_cfg.get("tester") or {}
+        if isinstance(_tester_sub, dict) and _tester_sub.get("by_risk"):
+            _from_yaml = _tester_sub["by_risk"]
+            if isinstance(_from_yaml, dict):
+                tester_by_risk.update({str(k): str(v) for k, v in _from_yaml.items()})
+
     return SprintConfig(
         repo_name             = repo_name,
         worktree_coder        = worktree_coder,
@@ -431,6 +451,7 @@ def load_config(path: Path) -> "SprintConfig":
         reviewer_model              = reviewer_model,
         estimator_model             = estimator_model,
         documentor_model            = documentor_model,
+        tester_by_risk              = tester_by_risk,
     )
 
 
@@ -632,11 +653,24 @@ def _sprint_db_set_ticket_order_sm(label: str, issue_numbers: list[int]) -> None
 # duration. Best-effort, like the lifecycle helpers above: a DB write must never
 # interrupt or fail a sprint run.
 
-def _db_agent_start_sm(issue_number, sprint_label: str, agent: str) -> None:
-    """Best-effort open of an agent_runs row at dispatch time (#764)."""
+def _db_agent_start_sm(
+    issue_number,
+    sprint_label: str,
+    agent: str,
+    risk_tier: Optional[str] = None,
+    model_used: Optional[str] = None,
+) -> None:
+    """Best-effort open of an agent_runs row at dispatch time (#764).
+
+    `risk_tier` and `model_used` are supplied for tester dispatches that
+    use risk-tier routing (issue #790); other agents pass None.
+    """
     try:
         import db  # apps/dashboard on sys.path (line 142)
-        db.record_agent_start(int(issue_number), sprint_label, agent)
+        db.record_agent_start(
+            int(issue_number), sprint_label, agent,
+            risk_tier=risk_tier, model_used=model_used,
+        )
     except (Exception, SystemExit):
         pass
 
@@ -3609,6 +3643,7 @@ def _dispatch_tester(
     rate_limit_events: Optional[list] = None,
     on_running: Optional[object] = None,
     sprint_label: Optional[str] = None,
+    pre_dispatch_risk: Optional[str] = None,
 ) -> tuple[int, Optional[str]]:
     """Dispatch a tester agent.  Returns (exit_code, failure_category_if_hang).
 
@@ -3621,6 +3656,10 @@ def _dispatch_tester(
 
     on_running: optional zero-argument callable invoked immediately after the
     subprocess is spawned (before proc.wait) to signal tester_running status.
+
+    pre_dispatch_risk: optional pre-computed risk tier ("LOW"/"MEDIUM"/"HIGH").
+    When omitted, the tier is derived from the issue's GitHub labels via
+    _classify_risk_tier() (issue #790).
     """
     eff_repo = repo_name or (cfg.repo_name if cfg else None)
     api_url  = cfg.api_url if cfg else None
@@ -3689,8 +3728,41 @@ def _dispatch_tester(
     # the tester verifies UI tickets against the same design rules via context.mjs.
     if "context.mjs" not in prompt:
         prompt += _impeccable_context_instruction()
+
+    # ── Risk-tier model routing (issue #790) ──────────────────────────────────
+    # Derive risk before dispatch so the model is selected before the subprocess
+    # is spawned.  Use the caller-supplied tier if given, otherwise classify from
+    # the issue's current GitHub labels (best-effort: defaults to LOW on error).
+    if pre_dispatch_risk is None:
+        try:
+            issue_labels = list(_get_issue_labels(issue_num, repo_name=eff_repo))
+        except Exception:
+            issue_labels = []
+        pre_dispatch_risk = _classify_risk_tier(labels=issue_labels)
+
+    risk_tier = pre_dispatch_risk.upper() if pre_dispatch_risk else "LOW"
+    _by_risk = (cfg.tester_by_risk if cfg is not None else None) or {
+        "LOW":    "claude-haiku-4-5",
+        "MEDIUM": "claude-haiku-4-5",
+        "HIGH":   "claude-sonnet-4-6",
+    }
+    tester_model = _by_risk.get(risk_tier) or (
+        cfg.tester_model if cfg is not None else "claude-sonnet-4-6"
+    )
+    print(f"  [risk-tier] issue #{issue_num}: risk={risk_tier}, model={tester_model}", flush=True)
+
+    # Inject the pre-dispatch risk tier into the prompt so the tester knows what
+    # was computed before invocation and can use it as a baseline (AC3).  The
+    # tester's own derivation acts as a fallback / sanity check.
+    prompt += (
+        f" PRE-DISPATCH RISK TIER (issue #790): the sprint_manager classified"
+        f" this ticket as risk={risk_tier} before invocation."
+        f" If your own analysis produces a different risk tier, output a line"
+        f" '[risk-tier] <YOUR_TIER>' (e.g. '[risk-tier] MEDIUM') anywhere in"
+        f" your run output so the disagreement can be detected and logged."
+    )
+
     # Same persona fix as the coder: load the tester subagent for the headless run.
-    tester_model = cfg.tester_model if cfg is not None else "claude-sonnet-4-6"
     cmd = [
         "claude",
         "--model", tester_model,
@@ -3862,6 +3934,11 @@ def _dispatch_tester(
         # sets _killed=True, causing a false HANG failure on exit 0).
         if rc == 0:
             print(f"  Tester for issue #{issue_num} exited 0 — status: passed", flush=True)
+            # Check for risk-tier disagreement (AC4, issue #790) — non-fatal.
+            try:
+                _check_risk_disagreement(risk_tier, log_path, issue_num)
+            except Exception:
+                pass
             return 0, None
 
         if detector.killed:
@@ -5706,6 +5783,83 @@ def _enrich_followup_tickets(
 
 SERIOUS_RISK_FLAGS = {"touches-db-schema", "security-sensitive", "breaks-tests"}
 
+# Labels that unconditionally elevate risk to HIGH (issue #790).
+_HIGH_RISK_LABELS: frozenset[str] = frozenset({
+    "security", "security-sensitive", "auth", "authentication", "crypto",
+})
+
+# Path fragments whose presence in any touched file elevates risk to HIGH.
+_HIGH_RISK_PATH_FRAGMENTS: tuple[str, ...] = (
+    "auth", "security", "credential", "password", "token", "crypto", "oauth",
+)
+
+# Diff line counts thresholds for risk elevation.
+_MEDIUM_DIFF_THRESHOLD = 300   # lines → MEDIUM
+_HIGH_DIFF_THRESHOLD   = 800   # lines → HIGH
+
+
+def _classify_risk_tier(
+    labels: list[str],
+    diff_lines: int = 0,
+    paths_touched: list[str] | None = None,
+) -> str:
+    """Derive a risk tier (LOW / MEDIUM / HIGH) from ticket metadata (issue #790).
+
+    Signals evaluated in descending priority:
+    1. HIGH-risk label present → HIGH
+    2. Security-sensitive path touched → HIGH
+    3. Diff size >= HIGH threshold → HIGH
+    4. Diff size >= MEDIUM threshold → MEDIUM
+    5. Otherwise → LOW
+    """
+    label_set = {lbl.lower() for lbl in labels}
+    if label_set & {l.lower() for l in _HIGH_RISK_LABELS}:
+        return "HIGH"
+
+    if paths_touched:
+        for path in paths_touched:
+            lower_path = path.lower()
+            if any(frag in lower_path for frag in _HIGH_RISK_PATH_FRAGMENTS):
+                return "HIGH"
+
+    if diff_lines >= _HIGH_DIFF_THRESHOLD:
+        return "HIGH"
+    if diff_lines >= _MEDIUM_DIFF_THRESHOLD:
+        return "MEDIUM"
+
+    return "LOW"
+
+
+def _check_risk_disagreement(
+    pre_dispatch_risk: str,
+    log_path: "Path",
+    issue_num: int,
+) -> None:
+    """Parse tester log for a self-reported [risk-tier] marker; log if it
+    disagrees with `pre_dispatch_risk`. Non-fatal — never raises (issue #790).
+    """
+    _MARKER = "[risk-tier]"
+    try:
+        text = log_path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return
+
+    tester_risk: Optional[str] = None
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith(_MARKER):
+            candidate = stripped[len(_MARKER):].strip().upper()
+            if candidate in ("LOW", "MEDIUM", "HIGH"):
+                tester_risk = candidate
+                break
+
+    if tester_risk is not None and tester_risk != pre_dispatch_risk.upper():
+        print(
+            f"  [risk-tier] disagreement for issue #{issue_num}: "
+            f"pre-dispatch={pre_dispatch_risk}, tester-derived={tester_risk}",
+            flush=True,
+        )
+
 
 def _load_estimate(issue_num: int) -> Optional[dict]:
     """Load .commander/estimates/issue-<N>.json by walking up from REPO_ROOT."""
@@ -6991,7 +7145,28 @@ def run_sprint(
             # -- Lifecycle: tester_dispatched --
             issue_state.set_agent_status("tester_dispatched")
             issue_state.tester_started_at = issue_state.status_changed_at
-            _db_agent_start_sm(num, label, "tester")  # issue #764
+
+            # Pre-dispatch risk classification (issue #790): classify before
+            # recording the agent_runs row so risk_tier and model_used are
+            # captured at dispatch time.
+            try:
+                _tester_labels = list(_get_issue_labels(num, repo_name=eff_repo))
+            except Exception:
+                _tester_labels = []
+            _tester_risk = _classify_risk_tier(labels=_tester_labels)
+            _by_risk_map = (cfg.tester_by_risk if cfg is not None else None) or {
+                "LOW": "claude-haiku-4-5",
+                "MEDIUM": "claude-haiku-4-5",
+                "HIGH": "claude-sonnet-4-6",
+            }
+            _tester_model_selected = _by_risk_map.get(_tester_risk) or (
+                cfg.tester_model if cfg is not None else "claude-sonnet-4-6"
+            )
+
+            _db_agent_start_sm(
+                num, label, "tester",
+                risk_tier=_tester_risk, model_used=_tester_model_selected,
+            )  # issue #764, #790
             # Record the tester attempt so analytics can count rejections exactly
             # going forward (issue #718).
             issue_state.tester_attempt_count += 1
@@ -7020,6 +7195,7 @@ def run_sprint(
                     num, alert_modes, sprint_branch=target_branch, repo_name=eff_repo, cfg=cfg,
                     chosen_port=chosen_port, rate_limit_events=state.rate_limit_events,
                     on_running=_on_tester_running, sprint_label=label,
+                    pre_dispatch_risk=_tester_risk,
                 )
             except SystemExit:
                 _remaining = [i for i in state.issues if i.status not in ("done", "skipped")]

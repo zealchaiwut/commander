@@ -69,3 +69,4 @@ separated by `---` exactly as the splitter expects.
 - [2026-06-10-deploy-tab-followups.md](2026-06-10-deploy-tab-followups.md) — Deploy tab refinements (scoping, folder/port, live log, Start/Stop, headless gh auth)
 - [2026-06-10-settings-and-timezone.md](2026-06-10-settings-and-timezone.md) — Global Settings consolidation (away from modal) + machine-local timezone
 - [2026-06-10-logs-surface-failures.md](2026-06-10-logs-surface-failures.md) — surface real failure class/message on the Logs page + fix board "tester rejected" mislabel
+- [2026-06-11-machine-onboarding.md](2026-06-11-machine-onboarding.md) — launchd PATH from real tool locations, headless tokens at install, machine doctor, onboarding runbook

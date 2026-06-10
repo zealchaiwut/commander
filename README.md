@@ -6,6 +6,27 @@ with a live dashboard at `localhost:8000`.
 
 ---
 
+## New machine
+
+On a fresh machine, bootstrap a bare clone in one command:
+
+```bash
+git clone https://github.com/zealchaiwut/commander.git ~/dev/commander/prd
+bash ~/dev/commander/prd/scripts/setup_machine.sh
+```
+
+`setup_machine.sh` is idempotent: it creates the venv and installs
+requirements, copies `.env` from `.env.example` (prompting for secret keys
+without echoing them), constructs the `~/dev/commander/{prd,uat}` layout, and
+finishes with a preflight **doctor** that prints a PASS/FAIL table for
+`gh auth`, the `claude` CLI, `tailscale`, the dashboard port, and `sqlite3`.
+The script exits nonzero if any doctor check fails. Pass `--restore-gist <id>`
+or `--restore-db <source>` to rehydrate config/DB from a backup, or `--doctor`
+to run the checks alone. For launchd service issues it points you at
+`scripts/install_launchd.sh`.
+
+---
+
 ## Quick Start
 
 ```bash
@@ -45,14 +66,23 @@ For a full walkthrough including multi-clone setup for Coder/Tester agents, see
 | **Dashboard** | Live agent event feed, project cards, sprint progress bar, UAT sign-off UI | [docs/features/dashboard.md](docs/features/dashboard.md) |
 | **Sprint Manager** | Automates the BA → Coder → Tester → UAT loop for every ticket in a sprint | [docs/features/sprint-manager.md](docs/features/sprint-manager.md) |
 | **Sprint Estimator** | Claude Code-driven effort estimation for all sprint tickets — runs automatically at sprint start | see below |
+| **Pipeline mode** | Opt-in two-stage dispatch (`pipeline_mode` setting, default off): the coder works the next ticket while the tester validates the previous one, roughly halving wall-clock per dispatch level. One coder + one tester run concurrently; a hard level barrier holds the next level until the current one fully merges; rejected tickets jump to the front of the coder queue (3-attempt cap → `needs-rework`). Label transitions and develop merges are serialized; the board shows dual active-agent cards with per-level progress | [docs/features/sprint-manager.md](docs/features/sprint-manager.md) |
+| **Sprint file archive** | Reversible cleanup of stale per-sprint runtime files (plan/placeholder/state) for finished sprints into `.commander/sprints/archive/`; status/estimate/summary files are never touched and nothing is deleted. CLI `scripts/clean_sprint_files.py` or `POST /api/maintenance/sprints/cleanup` (dry-run preview + confirm in the UI) | [SCHEMA.md](SCHEMA.md) |
 | **Settings** | Global and per-project key-value config store backed by Neon; REST API at `GET/PUT /api/settings` and `GET/PUT /api/projects/{slug}/settings` | [SCHEMA.md](SCHEMA.md) |
 | **Global Settings screen** | Gear icon in the dashboard header opens a settings panel for global config (model defaults, estimation params) | — |
 | **Project Settings tab** | "More" menu on project cards exposes a Settings tab for per-project overrides | — |
 | **Settings sync** | Bidirectional sync between local files (`projects.json`, `sprint.yaml`) and Neon; diff preview before commit via `POST /api/settings/sync/diff` and `POST /api/settings/sync/commit` | — |
 | **Editable env paths** | Project environment paths (prd/uat/coder/tester) are editable from the dashboard via `GET/PUT /api/projects/{slug}/environments`; server-side folder browser at `GET /api/fs/list` | — |
+| **Deploy tab** | Per-environment deploy/restart/start/stop cards for prd/uat, scoped to the active project. `host=local` runs pull-only `git pull --ff-only` + launchd `kickstart`/scripts (self-restart routed through a detached helper); `host=render` drives the Render deploy/restart API. Cards inline-edit the run folder + port, show a live capped log tail after an action, and badge live run-state. Config under the `deploy_config` settings key; secrets never returned in cleartext. APIs at `GET/PUT /api/projects/{slug}/deploy-config`, `POST .../environments/{env}/deploy`, `.../restart`, `.../start`, `.../stop`, `.../deploy-config/validate`, `GET .../deploy-status`, `.../run-state`, `GET /api/deploy/overview` | [SCHEMA.md](SCHEMA.md) |
+| **Env-var editor** | Render-style masked `.env` editor per environment with per-row reveal and edit/add/delete/save; writes preserve line order and inline comments. APIs at `GET/PUT /api/projects/{slug}/environments/{env}/env-vars` | [SCHEMA.md](SCHEMA.md) |
 | **Project events log** | Structured audit log of project-level actions (settings changes, env path updates) recorded in the `project_events` SQLite table | [SCHEMA.md](SCHEMA.md) |
-| **Neon DB** | Postgres-backed sprint and project state with Alembic migrations; dual-writes alongside JSON | [SCHEMA.md](SCHEMA.md) |
+| **Neon DB** | Optional Postgres export target for sprint and project state with Alembic migrations; populated on demand via `scripts/export_to_neon.py` (not a live dependency) | [SCHEMA.md](SCHEMA.md) |
 | **Structured Logging** | JSON-lines log module (`services/logging.py`) writing to `.commander/logs/structured-YYYY-MM-DD.log`; respects `COMMANDER_LOG_LEVEL` | — |
+| **Analytics page** | Per-project analytics at `/project/{slug}/analytics` with Status, Trends, and Calibration sub-tabs; metrics sourced from local sprint/estimate files (no Neon dependency) | [SCHEMA.md](SCHEMA.md) |
+| **Global Notes** | Always-available notes pane in the dashboard left sidebar, debounced autosave to `.commander/notes.json` via `GET/PUT /api/notes` | — |
+| **Live Browser UAT** | agent-browser drives browser UAT steps automatically instead of MANUAL; BA tags testable steps `[agent-test]` and step screenshots attach to the UAT test report | — |
+| **Impeccable design wiring** | BA and coder agents receive impeccable design contracts; visual targets tracked against an `impeccable detect` baseline | — |
+| **Activity log linking** | Activity-log agent rows render `<role> <action> #<issue>` with clickable GitHub issue links; label transitions and sprint lifecycle (started/finished/rerun) emit scoped activity events | — |
 | **API** | REST API consumed by the dashboard and agent hooks | [docs/features/api.md](docs/features/api.md) |
 
 ---
@@ -369,9 +399,18 @@ Traveling with iPad-only access? See [docs/TRAVEL_PLAYBOOK.md](docs/TRAVEL_PLAYB
 
 ---
 
-## Database Setup
+## Database
 
-Commander's sprint manager uses a Neon (Postgres) database for persistent storage. Follow these steps to set it up:
+Commander stores all live state in **SQLite** (`DB_PATH`, e.g. `dashboard.db`) plus
+local JSON files. SQLite is the primary — and only live — store: the dashboard and
+sprint manager run fully without any external database. There is no startup sync
+and nothing writes to a remote database mid-flow (issue #758).
+
+### Neon (optional export target)
+
+Neon (Postgres) is an **optional export target** for external reporting — not a
+runtime dependency. Setting it up is only needed if you want a Postgres copy of
+your sprint/project data; skip this entire section otherwise.
 
 1. **Create a Neon project** — sign up at [neon.tech](https://neon.tech) and create a new project. Copy the connection string from the project dashboard.
 
@@ -381,38 +420,25 @@ Commander's sprint manager uses a Neon (Postgres) database for persistent storag
    # Edit .env and set DATABASE_URL=postgresql://user:password@host/dbname?sslmode=require
    ```
 
-3. **Run migrations** — apply the schema:
+3. **Run migrations** — apply the schema (Alembic migrations and the SQLAlchemy
+   models remain intact for the export target):
    ```bash
    alembic upgrade head
    ```
 
-After running `alembic upgrade head`, you can verify the setup with:
-```bash
-# Check the current migration head
-alembic current
+4. **Run the export** — push a snapshot of the local SQLite data + `projects.json`
+   to Neon. This is the *only* code path that writes to Neon:
+   ```bash
+   DATABASE_URL=postgresql://... python scripts/export_to_neon.py
+   # Preview without writing:
+   python scripts/export_to_neon.py --dry-run
+   ```
+   The script exits cleanly (0) on success and exits 1 if `DATABASE_URL` is unset.
+   Re-running is safe — existing rows are upserted/skipped.
 
-# Verify the connection
+Verify the connection at any time with:
+```bash
 python -c "from services.sprint_manager.neon_db import get_engine; print(get_engine().connect())"
-```
-
-### Backfilling existing sprints
-
-If you have existing sprint data in `.commander/sprints/*.json` that pre-dates the Neon integration, run this one-shot script to migrate it:
-
-```bash
-python scripts/migrate_sprints_to_neon.py
-```
-
-Sprints already present in Neon are skipped automatically, so the script is safe to re-run. Use `--dry-run` to preview what would be inserted without writing anything:
-
-```bash
-python scripts/migrate_sprints_to_neon.py --dry-run
-```
-
-To backfill only a specific project:
-
-```bash
-python scripts/migrate_sprints_to_neon.py --project zealchaiwut/commander
 ```
 
 ---

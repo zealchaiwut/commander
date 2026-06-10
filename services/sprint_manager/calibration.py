@@ -19,14 +19,17 @@ Tiers with insufficient data fall back to SIZE_TO_MINUTES defaults.
 from __future__ import annotations
 
 import json
+import logging
 import os
+import sqlite3
 import statistics
-import warnings as _warnings
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
 from sizing import SIZE_TO_MINUTES
+
+logger = logging.getLogger("commander.calibration")
 
 MIN_SAMPLES = 3  # minimum records per size tier to use calibrated value
 VALID_SIZES = list(SIZE_TO_MINUTES.keys())  # ["S", "M", "L", "XL"]
@@ -61,8 +64,8 @@ def load_calibration(
     """Load calibration data and return effective per-size minutes with sources.
 
     db_records: optional list of {size, actual_minutes[, total_tokens]} dicts
-        from the persistent DB store (via sprint_repo.build_calibration_records).
-        When provided, these are merged with any file records; DB records take
+        from a past sprint's local state files (via db_calibration_records).
+        When provided, these are merged with any file records; these records take
         precedence over file records for tiers that have enough samples.
 
     If calibration file is absent or unreadable, all sizes fall back to defaults
@@ -142,6 +145,24 @@ def load_calibration(
                 )
 
     total_records = sum(len(v) for v in buckets.values())
+
+    # AC#6 (issue #766): silence is impossible. Whenever the result is not fully
+    # DB-calibrated — i.e. it falls back to file records or to generic defaults
+    # for ANY tier — emit a single WARNING listing per-tier sample counts so the
+    # operator can see exactly why calibration was thin.
+    fully_db_calibrated = all(
+        len(db_buckets[size]) >= MIN_SAMPLES for size in VALID_SIZES
+    )
+    if not fully_db_calibrated:
+        per_tier = " ".join(f"{size}={len(buckets[size])}" for size in VALID_SIZES)
+        default_tiers = [size for size in VALID_SIZES if sources[size] == "default"]
+        logger.warning(
+            "Calibration fallback (file-only or defaults): per-tier sample counts "
+            "%s; tiers using default: %s",
+            per_tier,
+            ", ".join(default_tiers) if default_tiers else "none",
+        )
+
     return CalibrationResult(
         effective_minutes=effective,
         sources=sources,
@@ -176,33 +197,60 @@ Use the minutes values below when estimating. They replace generic defaults.
 """
 
 
-def db_calibration_records(sprint_label: str, estimates_dir: Path) -> list:
-    """Return [{size, actual_minutes, total_tokens}] from DB for a past sprint.
+def _elapsed_minutes(start: Optional[str], end: Optional[str]) -> Optional[float]:
+    """Minutes between two ISO timestamps, or None if either is missing/unparseable."""
+    if not start or not end:
+        return None
+    from datetime import datetime
+    try:
+        s = datetime.fromisoformat(str(start).replace("Z", "+00:00"))
+        e = datetime.fromisoformat(str(end).replace("Z", "+00:00"))
+    except (ValueError, TypeError):
+        return None
+    return (e - s).total_seconds() / 60.0
 
-    Reads actual_elapsed_seconds and total_tokens from sprint_tickets, then
-    resolves each ticket's size from its estimate JSON in estimates_dir.
-    Returns only tickets that have both a DB record and an estimate file.
-    Silently returns [] if sprint_repo is unavailable or Neon is disabled.
+
+def db_calibration_records(
+    sprint_label: str,
+    estimates_dir: Path,
+    include_agents: bool = False,
+) -> list:
+    """Return [{size, actual_minutes}] for a past sprint, read from local files.
+
+    Issue #758 removed the Neon dependency — Neon is an optional export target,
+    not a live data source. Reads the local sprint state JSON
+    (<sprints>/<sprint_label>-state.json) for per-ticket coder+tester elapsed
+    time, then resolves each ticket's size from its estimate JSON in
+    estimates_dir. Returns only `done` tickets that have both timing and an
+    estimate file. Silently returns [] if the state file is missing.
+
+    Per-agent records (issue #764): when ``include_agents`` is True, the result
+    additionally carries one ``{size, actual_minutes, agent}`` record per agent
+    (coder, tester) alongside the existing blended record (which omits the
+    ``agent`` key). The default (``include_agents=False``) is unchanged, so
+    existing consumers that omit ``agent`` keep working without modification —
+    they continue to receive blended-only records and never see the per-agent
+    rows, so calibration medians are not double-counted.
     """
-    try:
-        import sys
-        _sm_dir = Path(__file__).parent
-        if str(_sm_dir.parent.parent) not in sys.path:
-            sys.path.insert(0, str(_sm_dir.parent.parent))
-        from services.sprint_manager import sprint_repo
-    except Exception:
+    sprints_dir = estimates_dir.parent / "sprints"
+    state_path = sprints_dir / f"{sprint_label}-state.json"
+    if not state_path.exists():
         return []
-
     try:
-        rollup = sprint_repo.get_sprint_rollup(sprint_label)
-    except Exception:
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
         return []
 
     records = []
-    for row in rollup["tickets"]:
-        num = row["issue_number"]
-        elapsed = row["actual_elapsed_seconds"]
-        if elapsed is None:
+    for issue in state.get("issues", []):
+        if issue.get("status") != "done":
+            continue
+        num = issue.get("number")
+        if num is None:
+            continue
+        coder_min = _elapsed_minutes(issue.get("coder_started_at"), issue.get("coder_finished_at"))
+        tester_min = _elapsed_minutes(issue.get("tester_started_at"), issue.get("tester_finished_at"))
+        if coder_min is None and tester_min is None:
             continue
         est_path = estimates_dir / f"issue-{num}.json"
         if not est_path.exists():
@@ -216,9 +264,107 @@ def db_calibration_records(sprint_label: str, estimates_dir: Path) -> list:
             continue
         rec: dict = {
             "size": size,
-            "actual_minutes": round(elapsed / 60, 1),
+            "actual_minutes": round((coder_min or 0.0) + (tester_min or 0.0), 1),
         }
-        if row.get("total_tokens") is not None:
-            rec["total_tokens"] = row["total_tokens"]
         records.append(rec)
+        if include_agents:
+            if coder_min is not None:
+                records.append(
+                    {"size": size, "actual_minutes": round(coder_min, 1), "agent": "coder"}
+                )
+            if tester_min is not None:
+                records.append(
+                    {"size": size, "actual_minutes": round(tester_min, 1), "agent": "tester"}
+                )
+    return records
+
+
+def _size_from_labels(labels_json: Optional[str]) -> Optional[str]:
+    """Parse a size-<X> label out of an issues-mirror JSON labels blob."""
+    if not labels_json:
+        return None
+    try:
+        labels = json.loads(labels_json)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    for lbl in labels:
+        name = lbl.get("name") if isinstance(lbl, dict) else lbl
+        if isinstance(name, str) and name.lower().startswith("size-"):
+            size = name.split("-", 1)[1].upper()
+            if size in VALID_SIZES:
+                return size
+    return None
+
+
+def sqlite_calibration_records(db_path: Optional[Path] = None) -> list:
+    """Read calibration samples from the local SQLite store (issue #766).
+
+    This is the Neon-independent calibration source: when ``DATABASE_URL`` is
+    unset the Neon-backed sprint metrics are unavailable, but the dashboard's
+    local SQLite store (``DB_PATH``) still has the data we need. Per-issue
+    full-pipeline wall-clock minutes are derived from the ``ticket_status``
+    transition log (first ``in-progress`` → first ``UAT``) and each issue's size
+    is resolved from the ``issues`` mirror's ``size-<X>`` label.
+
+    Returns ``[{size, actual_minutes}]``. Returns ``[]`` (never raises) when the
+    DB file or its tables are absent, so callers fall through to file/defaults.
+    """
+    if db_path is None:
+        raw = os.environ.get("DB_PATH", "").strip()
+        if not raw:
+            return []
+        db_path = Path(raw)
+    if not Path(db_path).exists():
+        return []
+
+    try:
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+        conn.row_factory = sqlite3.Row
+    except sqlite3.OperationalError:
+        return []
+
+    try:
+        try:
+            status_rows = conn.execute(
+                "SELECT issue, status, ts FROM ticket_status"
+            ).fetchall()
+            issue_rows = conn.execute(
+                "SELECT issue_number, labels FROM issues"
+            ).fetchall()
+        except sqlite3.OperationalError:
+            return []
+    finally:
+        conn.close()
+
+    sizes: dict[str, str] = {}
+    for row in issue_rows:
+        size = _size_from_labels(row["labels"])
+        if size:
+            sizes[str(row["issue_number"])] = size
+
+    starts: dict[str, str] = {}
+    ends: dict[str, str] = {}
+    for row in status_rows:
+        issue = str(row["issue"])
+        status = (row["status"] or "").lower()
+        ts = row["ts"]
+        if not ts:
+            continue
+        if status == "in-progress":
+            if issue not in starts or ts < starts[issue]:
+                starts[issue] = ts
+        elif status == "uat":
+            if issue not in ends or ts < ends[issue]:
+                ends[issue] = ts
+
+    records: list = []
+    for issue, start in starts.items():
+        end = ends.get(issue)
+        size = sizes.get(issue)
+        if end is None or size is None:
+            continue
+        minutes = _elapsed_minutes(start, end)
+        if minutes is None or minutes <= 0:
+            continue
+        records.append({"size": size, "actual_minutes": round(minutes, 1)})
     return records

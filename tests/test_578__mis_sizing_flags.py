@@ -393,12 +393,18 @@ def test_generate_preserves_existing_actions(tmp_path):
 
 
 def test_minutes_to_size_boundaries():
-    """Internal — _minutes_to_size buckets correctly at tier boundaries."""
-    assert mis_sizing._minutes_to_size(4) == "S"
-    assert mis_sizing._minutes_to_size(5) == "S"
-    assert mis_sizing._minutes_to_size(15) == "M"
-    assert mis_sizing._minutes_to_size(29) == "M"
-    assert mis_sizing._minutes_to_size(30) == "L"
-    assert mis_sizing._minutes_to_size(59) == "L"
-    assert mis_sizing._minutes_to_size(60) == "XL"
-    assert mis_sizing._minutes_to_size(100) == "XL"
+    """Tier bucketing at boundaries — unified on sizing.letter_from_minutes (#766).
+
+    mis_sizing._minutes_to_size was removed in #766; the canonical reverse lookup
+    is sizing.letter_from_minutes, and the XL threshold was raised 60→90.
+    """
+    from sizing import letter_from_minutes
+    assert letter_from_minutes(4) == "S"
+    assert letter_from_minutes(5) == "S"
+    assert letter_from_minutes(15) == "M"
+    assert letter_from_minutes(29) == "M"
+    assert letter_from_minutes(30) == "L"
+    assert letter_from_minutes(59) == "L"
+    assert letter_from_minutes(89) == "L"   # raised XL boundary: 60 is now L
+    assert letter_from_minutes(90) == "XL"
+    assert letter_from_minutes(100) == "XL"

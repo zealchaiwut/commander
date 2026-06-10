@@ -74,13 +74,21 @@ import projects as projects_module
 _REPO_ROOT = Path(__file__).parent.parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
-from services.logging import log as _slog
+from services.logging import log as _slog, setup_logging as _setup_logging
+
+# Install size-rotating prd.log handler at import time so the uvicorn worker
+# (which imports server:app) is covered without disk-exhaustion risk (issue #762).
+try:
+    _setup_logging()
+except Exception:  # logging must never break startup
+    pass
 from services.sprint_manager.estimate_issue import (
     fetch_issue as _ei_fetch_issue,
     run_estimator as _ei_run_estimator,
     apply_label as _ei_apply_label,
     apply_estimated_status as _ei_apply_estimated_status,
 )
+from services.sprint_manager import fill_acceptance_criteria as _fill_ac
 from services.sprint_manager.state_machine import (
     TicketState as _TicketState,
     transition as _sm_transition,
@@ -100,20 +108,6 @@ except ImportError:
     _BACKUP_AVAILABLE = False
 
 try:
-    import sprint_repo as _sprint_repo
-    _SPRINT_REPO_AVAILABLE = True
-except Exception:
-    _sprint_repo = None  # type: ignore[assignment]
-    _SPRINT_REPO_AVAILABLE = False
-
-try:
-    import sync_projects_to_neon as _sync_projects_module
-    _SYNC_PROJECTS_AVAILABLE = True
-except Exception:
-    _sync_projects_module = None  # type: ignore[assignment]
-    _SYNC_PROJECTS_AVAILABLE = False
-
-try:
     from services.sprint_manager.settings_sync import (
         load_local_snapshot as _ss_load_local,
         load_neon_snapshot as _ss_load_neon,
@@ -128,16 +122,10 @@ try:
 except Exception:
     _SYNC_SETTINGS_AVAILABLE = False
 
-# Per-machine kill switch for the Neon/Postgres layer. While its schema is
-# unmigrated, the writes error out (e.g. relation "projects" does not exist) and
-# block sprint creation. Setting COMMANDER_DISABLE_NEON makes the dashboard run
-# purely off GitHub + local JSON: no Neon reads/writes, no startup projects sync.
-# (.env is loaded above at import time via load_dotenv, so this sees it.)
-if os.environ.get("COMMANDER_DISABLE_NEON", "").strip().lower() in ("1", "true", "yes", "on"):
-    _sprint_repo = None  # type: ignore[assignment]
-    _SPRINT_REPO_AVAILABLE = False
-    _sync_projects_module = None  # type: ignore[assignment]
-    _SYNC_PROJECTS_AVAILABLE = False
+# Neon dual-write was removed in issue #758 — SQLite + local JSON is the primary
+# (and only live) store. Neon is now an optional export target reached solely via
+# scripts/export_to_neon.py, so there is no startup sync or per-flow Neon write to
+# disable here.
 
 from sizing import SIZE_TO_MINUTES as _SIZE_TO_MINUTES, letter_from_minutes as _letter_from_minutes, minutes_from_letter as _minutes_from_letter
 
@@ -145,11 +133,18 @@ try:
     _SCAFFOLD_SCRIPTS_DIR = Path(__file__).parent.parent.parent / "scripts"
     if str(_SCAFFOLD_SCRIPTS_DIR) not in sys.path:
         sys.path.insert(0, str(_SCAFFOLD_SCRIPTS_DIR))
-    from scaffold_docs import scaffold_data as _scaffold_data
+    from scaffold_project import scaffold_data as _scaffold_data
     _SCAFFOLD_AVAILABLE = True
 except ImportError:
     _scaffold_data = None  # type: ignore[assignment]
     _SCAFFOLD_AVAILABLE = False
+
+try:
+    import clean_sprint_files as _clean_sprint_files
+    _CLEAN_SPRINT_AVAILABLE = True
+except ImportError:
+    _clean_sprint_files = None  # type: ignore[assignment]
+    _CLEAN_SPRINT_AVAILABLE = False
 
 try:
     import mis_sizing as _mis_sizing
@@ -494,6 +489,7 @@ def _restore_sprint_statuses_on_startup() -> None:
 
     attached = 0
     skipped  = 0
+    archived_total = 0
 
     for proj in projects:
         try:
@@ -501,6 +497,14 @@ def _restore_sprint_statuses_on_startup() -> None:
             sprints_dir  = _commander_dir(project_root) / "sprints"
             if not sprints_dir.exists():
                 continue
+
+            # Archived sprint files live in .commander/sprints/archive/ and are
+            # intentionally skipped by the per-file scans below (glob is
+            # non-recursive). Count them once so we can emit a single summary
+            # line instead of one skip line per archived file (issue #735).
+            archive_dir = sprints_dir / "archive"
+            if archive_dir.is_dir():
+                archived_total += sum(1 for p in archive_dir.iterdir() if p.is_file())
 
             for status_file in sprints_dir.glob("*-status.json"):
                 sprint_label = status_file.name.removesuffix("-status.json")
@@ -560,6 +564,8 @@ def _restore_sprint_statuses_on_startup() -> None:
         except Exception as exc:
             print(f"[startup-restore] error scanning project {proj.get('repo')}: {exc}")
 
+    if archived_total:
+        print(f"[startup-restore] Skipped {archived_total} archived sprint files")
     print(
         f"[startup-restore] completed — {attached} sprint(s) re-attached,"
         f" {skipped} skipped"
@@ -570,7 +576,13 @@ def _check_repo_accessible(repo: str) -> bool:
     """Return True if `repo` (owner/repo) exists and is accessible via gh CLI.
 
     Uses `gh repo view --json name` which returns exit code 0 on success.
-    Network errors or missing repos both produce non-zero exit codes.
+
+    A non-zero exit can mean the repo is genuinely missing OR that the call
+    failed for a transient reason (GitHub API rate limit, network blip). Only
+    a *definitive* "not found" should be treated as inaccessible — a transient
+    failure must NOT block dashboard startup, so we assume-accessible and let
+    the warning path handle it. (Bug: a rate-limited startup check sys.exit'd
+    the whole server.)
     """
     try:
         result = subprocess.run(
@@ -579,8 +591,35 @@ def _check_repo_accessible(repo: str) -> bool:
             text=True,
             timeout=15,
         )
-        return result.returncode == 0
-    except (FileNotFoundError, subprocess.TimeoutExpired):
+        if result.returncode == 0:
+            return True
+        err = (result.stderr or "") + (result.stdout or "")
+        err_l = err.lower()
+        transient = (
+            "rate limit" in err_l
+            or "timeout" in err_l
+            or "timed out" in err_l
+            or "connection" in err_l
+            or "could not resolve host" in err_l
+            or "temporar" in err_l
+            or "503" in err_l
+            or "502" in err_l
+        )
+        if transient:
+            _slog.warn(
+                "repo_check_transient",
+                f"gh repo view for {repo} failed transiently; assuming accessible: {err.strip()[:200]}",
+                repo=repo,
+            )
+            return True
+        # Definitive failure (e.g. "Could not resolve to a Repository", 404).
+        return False
+    except subprocess.TimeoutExpired:
+        # Transient — do not block startup.
+        _slog.warn("repo_check_timeout", f"gh repo view for {repo} timed out; assuming accessible", repo=repo)
+        return True
+    except FileNotFoundError:
+        # gh not installed — that's a real misconfiguration.
         return False
 
 
@@ -775,6 +814,34 @@ async def _status_md_sync_loop() -> None:
 # ─────────────────────────────────────────────────────────────────────────────
 
 
+def _mirror_sync_repos() -> list[str]:
+    """Resolve the repos whose issues should be mirrored into the local DB.
+
+    Uses every tracked project's repo (issue #756); falls back to the detected
+    default repo. Duplicates are removed while preserving order.
+    """
+    repos: list[str] = []
+    try:
+        for proj in projects_module.load_projects():
+            repo_name = proj.get("repo")
+            if repo_name:
+                repos.append(repo_name)
+    except Exception as exc:
+        logger.warning("[issues-mirror] could not load projects: %s", exc)
+    if not repos:
+        try:
+            repos.append(github_client.repo())
+        except Exception:
+            pass
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for r in repos:
+        if r not in seen:
+            seen.add(r)
+            ordered.append(r)
+    return ordered
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global _start_time
@@ -793,13 +860,8 @@ async def lifespan(app: FastAPI):
     _sweep_orphan_pid_files()
     _restore_sprint_statuses_on_startup()
     await _mark_inflight_jobs_failed()
-    # Sync projects.json → Neon (non-blocking; warn on failure, never fatal)
-    if _SYNC_PROJECTS_AVAILABLE:
-        try:
-            _result = _sync_projects_module.sync_projects_to_neon()
-            logger.info("projects sync complete: %s", _result)
-        except Exception as _exc:
-            logger.warning("projects sync failed (non-fatal): %s", _exc)
+    # Neon dual-write removed (issue #758): projects.json is the runtime source of
+    # truth. Mirror it to Neon on demand with scripts/export_to_neon.py, not here.
 
     # Start backup scheduler and queue a startup backup after 30 s
     if _BACKUP_AVAILABLE:
@@ -812,12 +874,27 @@ async def lifespan(app: FastAPI):
     task2 = asyncio.create_task(_timeout_loop())
     task3 = asyncio.create_task(_periodic_orphan_sweep_loop())
     task4 = asyncio.create_task(_status_md_sync_loop())
+    # Bootstrap full sync (issue #760): on first run from an empty/absent DB
+    # (detected via the missing schema-marker row), run a one-time full GitHub
+    # sync synchronously before handing off to the ETag loop so the dashboard is
+    # never served empty. A second start finds the marker and skips straight to
+    # the loop. Never raises — an empty DB must not crash startup.
+    _bootstrap_repos = _mirror_sync_repos()
+    await asyncio.to_thread(
+        github_events_sync.bootstrap_full_sync, _bootstrap_repos
+    )
+    # Issues-mirror sync loop (issue #756): keep the local DB read model fresh
+    # via ETag-conditional polling so renders consume zero GitHub quota.
+    task5 = asyncio.create_task(
+        github_events_sync.run_issues_sync_loop(_bootstrap_repos)
+    )
     yield
     task1.cancel()
     task2.cancel()
     task3.cancel()
     task4.cancel()
-    for t in (task1, task2, task3, task4):
+    task5.cancel()
+    for t in (task1, task2, task3, task4, task5):
         try:
             await t
         except asyncio.CancelledError:
@@ -834,6 +911,13 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan)
+
+# Strangler-fig routers (issue #761): extracted route clusters live in
+# apps/dashboard/routers/ and are mounted here. New endpoints go there, NOT
+# in this file — the COMMANDER_GATE_MONOLITH gate rejects server.py growth.
+from routers import backup_router  # noqa: E402
+
+app.include_router(backup_router)
 
 logger = logging.getLogger(__name__)
 
@@ -904,6 +988,7 @@ class InitProjectBody(BaseModel):
     projects_dir: str = "~/dev"
     nested: bool = False
     skip_uat: bool = False
+    from_existing: bool = False
 
 
 class RemoveProjectBody(BaseModel):
@@ -1246,24 +1331,6 @@ def get_gh_auth_status():
     )
 
 
-@app.get("/api/backup/status")
-def get_backup_status():
-    """Return the current state of the gist-based config backup.
-
-    Response shape:
-    {
-      "last_backup_at": "<ISO-8601>" | null,
-      "gist_id": "<id>" | null,
-      "gist_url": "https://gist.github.com/..." | null,
-      "file_count": <int>,
-      "last_error": "<message>" | null
-    }
-    """
-    if not _BACKUP_AVAILABLE:
-        raise HTTPException(status_code=503, detail="Backup module not available")
-    return _backup_module.get_backup_status()
-
-
 _seen_agent_sessions: set[str] = set()
 
 
@@ -1291,6 +1358,25 @@ def _agent_project_from_name(agent_name: str | None) -> str | None:
     return matched
 
 
+def _parse_agent_identity(agent_name: str | None) -> tuple[str | None, int | None]:
+    """Extract (role, issue_num) from an agent name string (issue #719).
+
+    Names are formatted as 'role·label·branch·#short' with an optional trailing
+    '·issue-<N>' component appended when the dispatcher set CLAUDE_AGENT_ISSUE.
+    The role is the first '·'-delimited component; the issue number is the
+    'issue-<N>' token if present. Either may be None for legacy/raw-UUID names.
+    """
+    role = None
+    issue_num = None
+    if agent_name and "·" in agent_name:
+        role = agent_name.split("·")[0] or None
+    if agent_name:
+        m = re.search(r"issue-(\d+)", agent_name)
+        if m:
+            issue_num = int(m.group(1))
+    return role, issue_num
+
+
 @app.post("/api/agent-event")
 async def receive_event(request: Request, event: AgentEvent):
     _slog.event("route.entry", project="dashboard", request_id=request.state.request_id, route="/api/agent-event", method="POST", event_type=event.event_type)
@@ -1298,7 +1384,7 @@ async def receive_event(request: Request, event: AgentEvent):
     session_id = event.session_id or "unknown"
     project = _agent_project_from_name(event.name)
     actor = event.name or session_id
-    role = (event.name.split("·")[0] if event.name and "·" in event.name else None)
+    role, issue_num = _parse_agent_identity(event.name)
 
     if project:
         if event.event_type == "tool_use" and session_id not in _seen_agent_sessions:
@@ -1309,7 +1395,7 @@ async def receive_event(request: Request, event: AgentEvent):
                 actor=actor,
                 type="agent_started",
                 target=session_id,
-                detail={"role": role, "working_dir": event.working_dir},
+                detail={"role": role, "issue_num": issue_num, "working_dir": event.working_dir},
                 action_id=session_id,
             )
         if event.status in ("done", "timed_out", "error") or event.event_type == "agent_stop":
@@ -1320,7 +1406,7 @@ async def receive_event(request: Request, event: AgentEvent):
                 actor=actor,
                 type="agent_finished",
                 target=session_id,
-                detail={"status": event.status, "role": role},
+                detail={"status": event.status, "role": role, "issue_num": issue_num},
                 action_id=session_id,
             )
 
@@ -1399,8 +1485,38 @@ async def sse_stream(request: Request):
 
 # ── github / sprint endpoints ─────────────────────────────────────────────────
 
+def _gh_graphql_reset_seconds() -> Optional[int]:
+    """Seconds until the GitHub GraphQL budget resets, or None.
+
+    Queries the rate_limit endpoint, which is REST (core) and does not itself
+    count against any limit, so it is safe to call on an error path.
+    """
+    try:
+        import time as _t
+        r = subprocess.run(
+            ["gh", "api", "rate_limit", "--jq", ".resources.graphql.reset"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if r.returncode == 0 and r.stdout.strip():
+            return max(0, int(r.stdout.strip()) - int(_t.time()))
+    except Exception:
+        pass
+    return None
+
+
 def _gh_error(e: subprocess.CalledProcessError) -> HTTPException:
     detail = e.stderr.strip() if e.stderr else str(e)
+    # Map a GitHub rate-limit failure to a clean 429 with a reset countdown, so
+    # callers (e.g. the Sprint Mgmt board) can say "rate limit, retry in Ns"
+    # instead of a generic failure. Refills hourly.
+    if "rate limit" in detail.lower():
+        reset_in = _gh_graphql_reset_seconds()
+        msg = "GitHub API rate limit reached."
+        if reset_in:
+            msg += f" Retry in ~{reset_in // 60}m {reset_in % 60}s."
+        else:
+            msg += " It refills hourly; retry shortly."
+        return HTTPException(status_code=429, detail=msg)
     return HTTPException(status_code=502, detail=detail)
 
 
@@ -1908,20 +2024,6 @@ async def remove_project(owner: str, repo_name: str, body: RemoveProjectBody):
     return {"ok": True, "removed": removed}
 
 
-@app.post("/api/projects/sync-to-db")
-async def sync_projects_to_db():
-    """Trigger a manual sync of projects.json → Neon.
-
-    Returns a JSON summary: {projects_synced, projects_skipped, envs_synced, envs_skipped, errors}.
-    """
-    if not _SYNC_PROJECTS_AVAILABLE:
-        raise HTTPException(status_code=503, detail="sync module not available")
-    try:
-        return _sync_projects_module.sync_projects_to_neon()
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
-
-
 @app.get("/api/projects/{project}/running-sprint")
 def get_running_sprint(project: str):
     """Return the currently running sprint for the given project slug.
@@ -2045,17 +2147,64 @@ def get_project_events(
             pass
         result.append(d)
 
+    # issue #764: enrich agent_finished rows with the durable duration_seconds
+    # from agent_runs so the Activity tab can show a Duration column. Matched by
+    # issue number + agent role; falls back to the duration already carried in
+    # the event detail when no agent_runs row is found.
+    _agent_finished = [
+        d for d in result
+        if d.get("type") == "agent_finished" and isinstance(d.get("detail"), dict)
+    ]
+    if _agent_finished:
+        _issue_nums = {
+            d["detail"].get("issue_num")
+            for d in _agent_finished
+            if d["detail"].get("issue_num") is not None
+        }
+        _runs_by_key: dict = {}
+        try:
+            for _num in _issue_nums:
+                for _r in db.agent_runs_for_issue(int(_num)):
+                    if _r.get("duration_seconds") is None:
+                        continue
+                    _runs_by_key[(int(_num), str(_r.get("agent", "")).lower())] = _r["duration_seconds"]
+        except Exception:
+            _runs_by_key = {}
+        for d in _agent_finished:
+            det = d["detail"]
+            num = det.get("issue_num")
+            role = str(det.get("role", "")).lower()
+            dur = None
+            if num is not None:
+                dur = _runs_by_key.get((int(num), role))
+            if dur is None:
+                dur = det.get("duration")
+            if dur is not None:
+                d["duration_seconds"] = dur
+
     return result
 
 
 # ── Settings API (issue #639) ────────────────────────────────────────────────
 
 import services.sprint_manager.settings_repo as _settings_repo
+import services.sprint_manager.notes_repo as _notes_repo
 from services.sprint_manager.settings_schema import (
     APP_CONFIG_KEY,
     SECRET_FIELDS,
     KNOWN_FIELDS,
     build_effective_response,
+)
+from services.sprint_manager.deploy_config_schema import (
+    DEPLOY_CONFIG_KEY,
+    SUPPORTED_ENVS as _DEPLOY_SUPPORTED_ENVS,
+    SUPPORTED_HOSTS as _DEPLOY_SUPPORTED_HOSTS,
+    seed_for as _deploy_seed_for,
+    merge_seed as _deploy_merge_seed,
+    merge_for_put as _deploy_merge_for_put,
+    build_deploy_config_response as _build_deploy_config_response,
+    known_deploy_slugs as _deploy_known_slugs,
+    overview_entries_for as _deploy_overview_entries_for,
 )
 
 
@@ -2161,6 +2310,575 @@ def put_project_settings(slug: str, body: dict):
     _settings_repo.set_setting("project", APP_CONFIG_KEY, merged, project=repo)
     effective = _settings_repo.get_setting(APP_CONFIG_KEY, project=repo)
     return build_effective_response(effective)
+
+
+# ── Deploy config API (issue #722) ───────────────────────────────────────────
+
+
+def _validate_deploy_config_body(body: dict) -> None:
+    """Validate a PUT deploy-config body.
+
+    Raises HTTPException 400 for unsupported environments, non-object entries,
+    or invalid host values.
+    """
+    if not isinstance(body, dict):
+        raise HTTPException(
+            status_code=400,
+            detail="Deploy config body must be an object keyed by environment.",
+        )
+    for env, entry in body.items():
+        if env not in _DEPLOY_SUPPORTED_ENVS:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Unsupported environment '{env}'. "
+                    f"Allowed: {', '.join(_DEPLOY_SUPPORTED_ENVS)}"
+                ),
+            )
+        if not isinstance(entry, dict):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Environment '{env}' config must be an object.",
+            )
+        host = entry.get("host")
+        if host is not None and host not in _DEPLOY_SUPPORTED_HOSTS:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Environment '{env}': host must be one of "
+                    f"{', '.join(_DEPLOY_SUPPORTED_HOSTS)}; got '{host}'."
+                ),
+            )
+
+
+def _enrich_local_working_dirs(repo: str, resp: dict) -> None:
+    """Fill working_dir for local entries that lack one from the env paths.
+
+    host=local working_dir defaults to the existing on-disk env path so callers
+    get a usable default without the user having to re-enter it.
+    """
+    envs = projects_module.get_project_environments(repo)
+    if not envs:
+        envs = _derive_project_environments(repo)
+    for env, entry in resp.items():
+        if entry.get("host") == "local" and not entry.get("working_dir"):
+            if env in envs:
+                entry["working_dir"] = envs[env]
+
+
+def _deploy_config_response(slug: str, repo: str, stored: dict) -> dict:
+    """Build the GET-shaped response: seed defaults merged with stored, masked."""
+    merged = _deploy_merge_seed(_deploy_seed_for(slug), stored or {})
+    resp = _build_deploy_config_response(merged)
+    _enrich_local_working_dirs(repo, resp)
+    return resp
+
+
+@app.get("/api/projects/{slug}/deploy-config")
+def get_project_deploy_config(slug: str):
+    """Return per-environment deploy config (seed defaults merged with overrides).
+
+    render_api_key is never returned in cleartext — each render entry carries
+    render_api_key_set (bool) and render_api_key_masked. Returns 404 for an
+    unknown slug.
+    """
+    repo = _resolve_project_slug(slug)
+    stored = _settings_repo.get_setting_scoped("project", DEPLOY_CONFIG_KEY, project=repo)
+    return _deploy_config_response(slug, repo, stored)
+
+
+@app.put("/api/projects/{slug}/deploy-config")
+def put_project_deploy_config(slug: str, body: dict):
+    """Persist a per-environment deploy config override.
+
+    Merges per environment over the stored config; a new render_api_key replaces
+    the stored secret, while an omitted/null key leaves it unchanged. Returns
+    400 for unsupported envs/hosts, 404 for an unknown slug.
+    """
+    repo = _resolve_project_slug(slug)
+    _validate_deploy_config_body(body)
+    current = _settings_repo.get_setting_scoped("project", DEPLOY_CONFIG_KEY, project=repo)
+    merged = _deploy_merge_for_put(current or {}, body)
+    _settings_repo.set_setting("project", DEPLOY_CONFIG_KEY, merged, project=repo)
+    return _deploy_config_response(slug, repo, merged)
+
+
+@app.post("/api/projects/{slug}/environments/{env}/deploy-config/validate")
+def validate_deploy_config_field(slug: str, env: str, body: dict):
+    """Validate an inline working_dir / port edit before it is persisted (#769).
+
+    Body may carry ``working_dir`` and/or ``port``. Each is checked and a failure
+    returns 400 with a user-visible message so the Deploy card can surface an
+    inline error and skip the PUT:
+
+      - working_dir → must exist on disk AND be a git clone.
+      - port        → must be an integer 1–65535 AND not already in use on host.
+
+    Returns 404 for an unknown slug, 200 ``{"ok": true}`` when all supplied
+    fields are valid.
+    """
+    _resolve_project_slug(slug)
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="Validation body must be an object.")
+    if "working_dir" in body:
+        try:
+            _deploy_validation.validate_working_dir(body["working_dir"])
+        except _deploy_validation.DeployValidationError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+    if "port" in body:
+        try:
+            port = _deploy_validation.validate_port(body["port"])
+        except _deploy_validation.DeployValidationError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        if _deploy_validation.port_in_use(port):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Port {port} is already in use on this host.",
+            )
+    return {"ok": True, "env": env}
+
+
+# ── Local deploy / restart actions (issue #723) ──────────────────────────────
+
+from services.sprint_manager import deploy_actions as _deploy_actions
+from services.sprint_manager import render_actions as _render_actions
+from services.sprint_manager import deploy_validation as _deploy_validation
+
+
+def _render_deploy_environment(entry: dict, env: str) -> dict:
+    """Trigger a new Render deploy for a host=render env (issue #725).
+
+    Validates render_service_id/render_api_key (400 before any Render call),
+    POSTs to the Render deploys endpoint server-side, and returns a status
+    snapshot. The render_api_key is never echoed back to the caller.
+    """
+    try:
+        service_id, api_key = _render_actions.require_render_target(entry)
+    except _render_actions.RenderActionError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    try:
+        _status, payload = _render_actions.call_render(
+            "POST", _render_actions.deploy_url(service_id), api_key
+        )
+    except _render_actions.RenderApiError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.message)
+    deploy = payload.get("deploy", payload) if isinstance(payload, dict) else {}
+    raw_status = deploy.get("status") if isinstance(deploy, dict) else None
+    return {
+        "ok": True,
+        "env": env,
+        "host": "render",
+        "action": "deploy",
+        "status": _render_actions.normalize_status(raw_status),
+    }
+
+
+def _render_restart_environment(entry: dict, env: str) -> dict:
+    """Restart a host=render service via the Render restart endpoint (issue #725)."""
+    try:
+        service_id, api_key = _render_actions.require_render_target(entry)
+    except _render_actions.RenderActionError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    try:
+        _render_actions.call_render(
+            "POST", _render_actions.restart_url(service_id), api_key
+        )
+    except _render_actions.RenderApiError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.message)
+    return {"ok": True, "env": env, "host": "render", "action": "restart"}
+
+
+def _merged_deploy_config(slug: str, repo: str) -> dict:
+    """Return seed-merged stored deploy config (raw, secrets intact)."""
+    stored = _settings_repo.get_setting_scoped("project", DEPLOY_CONFIG_KEY, project=repo)
+    return _deploy_merge_seed(_deploy_seed_for(slug), stored or {})
+
+
+def _restart_environment(entry: dict) -> dict:
+    """Restart a local environment from its config entry.
+
+    Strategy: launchd kickstart when a label is set, else stop+start scripts.
+    The dashboard's own process is restarted via a DETACHED helper so this call
+    can return before launchd kills the worker. Validation failures raise
+    HTTPException 400; a failed command raises 500.
+    """
+    try:
+        _deploy_actions.require_restart_target(entry)
+    except _deploy_actions.DeployActionError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    label = _deploy_actions.restart_label(entry)
+
+    # Dashboard's own process — detach so the response flushes before kickstart.
+    if label and _deploy_actions.is_self_restart(entry):
+        cmd = _deploy_actions.build_self_restart_command(label)
+        subprocess.Popen(
+            cmd,
+            start_new_session=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        return {"method": "launchd-self", "detached": True, "launchd_label": label}
+
+    if label:
+        cmd = _deploy_actions.build_kickstart_command(label)
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            raise HTTPException(
+                status_code=500,
+                detail=result.stderr.strip() or result.stdout.strip() or "kickstart failed",
+            )
+        return {
+            "method": "launchd",
+            "launchd_label": label,
+            "stdout": result.stdout,
+            "stderr": result.stderr,
+        }
+
+    # Script fallback: stop then start. Inject PORT=<configured> so the scripts
+    # bind the configured port instead of a hardcoded default (issue #769).
+    stop, start = _deploy_actions.stop_start_scripts(entry)
+    restart_env = _deploy_actions.build_restart_env(entry)
+    steps = []
+    for phase, script in (("stop", stop), ("start", start)):
+        result = subprocess.run(
+            ["sh", "-c", script], capture_output=True, text=True, env=restart_env
+        )
+        steps.append({
+            "phase": phase,
+            "script": script,
+            "returncode": result.returncode,
+            "stdout": result.stdout,
+            "stderr": result.stderr,
+        })
+        if result.returncode != 0:
+            raise HTTPException(
+                status_code=500,
+                detail=f"{phase} script failed: {result.stderr.strip() or script}",
+            )
+    return {"method": "scripts", "steps": steps}
+
+
+@app.post("/api/projects/{slug}/environments/{env}/deploy")
+def deploy_environment(slug: str, env: str):
+    """Pull-only deploy for a local environment, then auto-restart it.
+
+    Runs ``git pull --ff-only origin <branch>`` inside the configured
+    ``working_dir`` (never merge/push/PR/checkout), returns the raw pull stdout
+    and the new HEAD sha, then triggers the restart action for the same env.
+    Rejects (400) when ``working_dir``/``branch`` are absent — before any shell
+    command runs. Returns 404 for an unknown slug.
+    """
+    repo = _resolve_project_slug(slug)
+    merged = _merged_deploy_config(slug, repo)
+    entry = _deploy_actions.get_env_entry(merged, env)
+
+    # host=render → trigger a Render deploy server-side (issue #725).
+    if _render_actions.is_render_host(entry):
+        return _render_deploy_environment(entry, env)
+
+    try:
+        working_dir, branch = _deploy_actions.require_deploy_target(entry)
+    except _deploy_actions.DeployActionError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    pull = subprocess.run(
+        _deploy_actions.build_pull_command(branch),
+        capture_output=True, text=True, cwd=working_dir,
+    )
+    if pull.returncode != 0:
+        raise HTTPException(
+            status_code=500,
+            detail=pull.stderr.strip() or pull.stdout.strip() or "git pull failed",
+        )
+
+    head = subprocess.run(
+        _deploy_actions.build_head_sha_command(),
+        capture_output=True, text=True, cwd=working_dir,
+    )
+    head_sha = head.stdout.strip()
+
+    # AC: after a successful pull, auto-trigger restart for the same env.
+    # Best-effort — a restart-config problem must not mask a successful pull.
+    try:
+        restart_result = _restart_environment(entry)
+    except HTTPException as exc:
+        restart_result = {"ok": False, "error": exc.detail}
+
+    resp = {
+        "ok": True,
+        "env": env,
+        "branch": branch,
+        "working_dir": working_dir,
+        "pull_output": pull.stdout,
+        "head": head_sha,
+        "restart": restart_result,
+    }
+    if restart_result.get("detached"):
+        return JSONResponse(status_code=202, content=resp)
+    return resp
+
+
+@app.post("/api/projects/{slug}/environments/{env}/restart")
+def restart_environment(slug: str, env: str):
+    """Restart a local environment's service.
+
+    Uses ``launchctl kickstart -k`` when a ``launchd_label`` is configured, else
+    falls back to the configured stop+start scripts. For the dashboard's own
+    process the work is detached and the call returns 202 immediately. Rejects
+    (400) when no valid restart target is configured; 404 for an unknown slug.
+    """
+    repo = _resolve_project_slug(slug)
+    merged = _merged_deploy_config(slug, repo)
+    entry = _deploy_actions.get_env_entry(merged, env)
+    if entry is None:
+        raise HTTPException(status_code=400, detail=f"No deploy config for environment '{env}'")
+
+    # host=render → restart the Render service server-side (issue #725).
+    if _render_actions.is_render_host(entry):
+        return _render_restart_environment(entry, env)
+
+    result = _restart_environment(entry)
+    if result.get("detached"):
+        return JSONResponse(status_code=202, content={"ok": True, "env": env, **result})
+    return {"ok": True, "env": env, **result}
+
+
+def _stop_environment(entry: dict) -> dict:
+    """Stop a local environment without destroying it (issue #771).
+
+    Strategy: ``launchctl bootout`` when a launchd_label is set, else the
+    configured ``stop`` script. Validation failures raise HTTPException 400; a
+    failed command raises 500. Unlike restart's ``kickstart``, ``bootout``
+    removes the service from the domain so it stays down until Start.
+    """
+    try:
+        _deploy_actions.require_stop_target(entry)
+    except _deploy_actions.DeployActionError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    label = _deploy_actions.restart_label(entry)
+    if label:
+        cmd = _deploy_actions.build_bootout_command(label)
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            raise HTTPException(
+                status_code=500,
+                detail=result.stderr.strip() or result.stdout.strip() or "bootout failed",
+            )
+        return {
+            "method": "launchd-bootout",
+            "launchd_label": label,
+            "stdout": result.stdout,
+            "stderr": result.stderr,
+        }
+
+    stop, _start = _deploy_actions.stop_start_scripts(entry)
+    restart_env = _deploy_actions.build_restart_env(entry)
+    result = subprocess.run(
+        ["sh", "-c", stop], capture_output=True, text=True, env=restart_env
+    )
+    if result.returncode != 0:
+        raise HTTPException(
+            status_code=500,
+            detail=f"stop script failed: {result.stderr.strip() or stop}",
+        )
+    return {"method": "script", "script": stop, "stdout": result.stdout, "stderr": result.stderr}
+
+
+def _start_environment(entry: dict) -> dict:
+    """Start a local environment without pulling new code (issue #771).
+
+    Strategy: ``launchctl bootstrap gui/<uid> <plist>`` when a launchd_label +
+    launchd_plist are set, else the configured ``start`` script. Validation
+    failures raise HTTPException 400; a failed command raises 500.
+    """
+    try:
+        _deploy_actions.require_start_target(entry)
+    except _deploy_actions.DeployActionError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    label = _deploy_actions.restart_label(entry)
+    plist = _deploy_actions.launchd_plist(entry)
+    if label and plist:
+        cmd = _deploy_actions.build_bootstrap_command(plist)
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            raise HTTPException(
+                status_code=500,
+                detail=result.stderr.strip() or result.stdout.strip() or "bootstrap failed",
+            )
+        return {
+            "method": "launchd-bootstrap",
+            "launchd_label": label,
+            "launchd_plist": plist,
+            "stdout": result.stdout,
+            "stderr": result.stderr,
+        }
+
+    _stop, start = _deploy_actions.stop_start_scripts(entry)
+    restart_env = _deploy_actions.build_restart_env(entry)
+    result = subprocess.run(
+        ["sh", "-c", start], capture_output=True, text=True, env=restart_env
+    )
+    if result.returncode != 0:
+        raise HTTPException(
+            status_code=500,
+            detail=f"start script failed: {result.stderr.strip() or start}",
+        )
+    return {"method": "script", "script": start, "stdout": result.stdout, "stderr": result.stderr}
+
+
+@app.post("/api/projects/{slug}/environments/{env}/stop")
+def stop_environment(slug: str, env: str):
+    """Stop a local environment's service without destroying it (issue #771).
+
+    Uses ``launchctl bootout`` when a ``launchd_label`` is configured, else the
+    configured ``stop`` script. Rejects (400) when no stop target is configured;
+    404 for an unknown slug. host=render has no stop equivalent through this
+    dashboard, so the UI hides Start/Stop for render — this endpoint rejects it.
+    """
+    repo = _resolve_project_slug(slug)
+    merged = _merged_deploy_config(slug, repo)
+    entry = _deploy_actions.get_env_entry(merged, env)
+    if entry is None:
+        raise HTTPException(status_code=400, detail=f"No deploy config for environment '{env}'")
+    if _render_actions.is_render_host(entry):
+        raise HTTPException(
+            status_code=400,
+            detail="Stop is not supported for host=render environments",
+        )
+    result = _stop_environment(entry)
+    return {"ok": True, "env": env, **result}
+
+
+@app.post("/api/projects/{slug}/environments/{env}/start")
+def start_environment(slug: str, env: str):
+    """Start a local environment's service without pulling code (issue #771).
+
+    Uses ``launchctl bootstrap`` when ``launchd_label`` + ``launchd_plist`` are
+    configured, else the configured ``start`` script. Rejects (400) when no
+    start target is configured; 404 for an unknown slug. host=render is rejected
+    (the UI hides Start/Stop for render).
+    """
+    repo = _resolve_project_slug(slug)
+    merged = _merged_deploy_config(slug, repo)
+    entry = _deploy_actions.get_env_entry(merged, env)
+    if entry is None:
+        raise HTTPException(status_code=400, detail=f"No deploy config for environment '{env}'")
+    if _render_actions.is_render_host(entry):
+        raise HTTPException(
+            status_code=400,
+            detail="Start is not supported for host=render environments",
+        )
+    result = _start_environment(entry)
+    return {"ok": True, "env": env, **result}
+
+
+@app.get("/api/projects/{slug}/environments/{env}/run-state")
+def environment_run_state(slug: str, env: str):
+    """Return the live run state of a local environment (issue #771).
+
+    ``{"state": "running" | "stopped" | "idle"}``. For a launchd-managed env the
+    state comes from ``launchctl print`` (rc 0 → running, non-zero → stopped). A
+    script-only env has no reliable probe, so it reports ``idle`` (unknown). Only
+    host=local is supported; render run state is derived client-side from the
+    deploy status, so this endpoint rejects host=render with 400.
+    """
+    repo = _resolve_project_slug(slug)
+    merged = _merged_deploy_config(slug, repo)
+    entry = _deploy_actions.get_env_entry(merged, env)
+    if entry is None:
+        raise HTTPException(status_code=400, detail=f"No deploy config for environment '{env}'")
+    if _render_actions.is_render_host(entry):
+        raise HTTPException(
+            status_code=400,
+            detail="Run state is only available for host=local environments",
+        )
+    label = _deploy_actions.restart_label(entry)
+    if not label:
+        return {"ok": True, "env": env, "host": "local", "state": "idle"}
+    result = subprocess.run(
+        _deploy_actions.build_print_command(label), capture_output=True, text=True
+    )
+    state = _deploy_actions.interpret_run_state(result.returncode)
+    return {"ok": True, "env": env, "host": "local", "state": state}
+
+
+@app.get("/api/projects/{slug}/environments/{env}/deploy-status")
+def environment_deploy_status(slug: str, env: str):
+    """Return the normalized latest-deploy status for a host=render env (issue #725).
+
+    Polls ``GET /v1/services/{id}/deploys?limit=1`` server-side and returns
+    ``{"status": "queued|building|live|failed"}``. Missing render config → 400;
+    a 401/404 from Render → 502 with a specific message. Only host=render is
+    supported (local envs have no remote deploy status to poll).
+    """
+    repo = _resolve_project_slug(slug)
+    merged = _merged_deploy_config(slug, repo)
+    entry = _deploy_actions.get_env_entry(merged, env)
+    if not _render_actions.is_render_host(entry):
+        raise HTTPException(
+            status_code=400,
+            detail="Deploy status is only available for host=render environments",
+        )
+    try:
+        service_id, api_key = _render_actions.require_render_target(entry)
+    except _render_actions.RenderActionError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    try:
+        _status, payload = _render_actions.call_render(
+            "GET", _render_actions.status_url(service_id), api_key
+        )
+    except _render_actions.RenderApiError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.message)
+    # Surface commit SHA + last-deploy timestamp for the Deploy-tab card (#726).
+    info = _render_actions.latest_deploy_from_payload(payload)
+    return {
+        "ok": True,
+        "env": env,
+        "host": "render",
+        "status": info["status"],
+        "commit": info["commit"],
+        "finished_at": info["finished_at"],
+    }
+
+
+@app.get("/api/deploy/overview")
+def get_deploy_overview():
+    """Aggregate deployable environments across all known projects (issue #726).
+
+    Powers the Deploy tab: one secret-safe card entry per configured
+    environment (``prd``, ``uat``) for every project that ships deploy config
+    (commander, perf-coach) plus any project listed in ``projects.json``. Each
+    entry carries ``project``, ``env``, ``host`` and host-specific fields; the
+    render_api_key is never returned. Live commit SHA / status are fetched
+    client-side per card (local via /api/health, render via deploy-status).
+    """
+    slugs: list[str] = list(_deploy_known_slugs())
+    try:
+        for proj in projects_module.load_projects():
+            s = proj["repo"].split("/")[-1]
+            if s not in slugs:
+                slugs.append(s)
+    except Exception:
+        pass
+
+    environments: list[dict] = []
+    for slug in slugs:
+        try:
+            repo = _resolve_project_slug(slug)
+        except HTTPException:
+            # perf-coach (and any seed-only project) may not be in projects.json;
+            # its stored override lookup just returns empty and seed defaults win.
+            repo = f"zealchaiwut/{slug}"
+        merged = _merged_deploy_config(slug, repo)
+        # issue #769 — fill working_dir for local envs from on-disk env paths so
+        # the card shows the run folder even with no stored override.
+        _enrich_local_working_dirs(repo, merged)
+        environments.extend(_deploy_overview_entries_for(slug, merged))
+
+    return {"environments": environments}
 
 
 # ── Settings sync (issue #644) ───────────────────────────────────────────────
@@ -2399,12 +3117,20 @@ def put_project_environments(slug: str, body: _PutEnvironmentsBody):
                 f"'{env}': path '{local_dir}' is not a git repository (.git not found)"
             )
             continue
-        result = subprocess.run(
-            ["git", "rev-parse", "--is-inside-work-tree"],
-            cwd=str(p),
-            capture_output=True,
-            text=True,
-        )
+        try:
+            result = subprocess.run(
+                ["git", "rev-parse", "--is-inside-work-tree"],
+                cwd=str(p),
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+        except subprocess.TimeoutExpired:
+            errors.append(
+                f"'{env}': git rev-parse timed out for path '{local_dir}'"
+                " (repo may be on an unreachable network mount)"
+            )
+            continue
         if result.returncode != 0:
             errors.append(
                 f"'{env}': path '{local_dir}' is not a valid git repository"
@@ -2418,6 +3144,104 @@ def put_project_environments(slug: str, body: _PutEnvironmentsBody):
     envs_dict = {e.env.strip(): e.local_directory.strip() for e in body.environments}
     projects_module.save_project_environments(repo, envs_dict)
     return {"ok": True, "environments": envs_dict}
+
+
+# ── Env-var editor (issue #727) ───────────────────────────────────────────────
+
+import env_file as _env_file
+
+
+def _env_working_dir(slug: str, repo: str, env: str) -> str | None:
+    """Resolve the on-disk directory holding an environment's `.env` file.
+
+    Prefers the stored/derived environment path (the working clone), and falls
+    back to a host=local deploy-config working_dir. Returns None when nothing is
+    configured for the requested env.
+    """
+    envs = projects_module.get_project_environments(repo)
+    if not envs:
+        envs = _derive_project_environments(repo)
+    if env in envs and envs[env]:
+        return envs[env]
+    merged = _merged_deploy_config(slug, repo)
+    entry = (merged or {}).get(env) or {}
+    return entry.get("working_dir") or None
+
+
+@app.get("/api/projects/{slug}/environments/{env}/env-vars")
+def get_env_vars(slug: str, env: str):
+    """Read the environment's `.env` file and return parsed key/value pairs.
+
+    Pairs are returned in file order. Values are plaintext — masking is a
+    display-only concern handled client-side. Returns 404 for an unknown slug or
+    an env with no configured directory.
+    """
+    repo = _resolve_project_slug(slug)
+    working_dir = _env_working_dir(slug, repo, env)
+    if not working_dir:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No directory configured for environment '{env}'",
+        )
+    env_path = Path(working_dir) / ".env"
+    return {
+        "env": env,
+        "working_dir": working_dir,
+        "vars": _env_file.read_env_vars(env_path),
+    }
+
+
+class _EnvVarItem(BaseModel):
+    key: str
+    value: str = ""
+
+
+class _PutEnvVarsBody(BaseModel):
+    vars: list[_EnvVarItem]
+
+
+@app.put("/api/projects/{slug}/environments/{env}/env-vars")
+def put_env_vars(slug: str, env: str, body: _PutEnvVarsBody):
+    """Write env-var changes back to the environment's `.env` file.
+
+    Preserves original line order and inline comments for unchanged keys,
+    rewrites changed keys in place, appends new keys at the end, and drops
+    removed keys. An empty KEY is rejected (400) before any write. A filesystem
+    failure (e.g. read-only `.env`) returns 500 so the client can keep the
+    user's edits. Returns 404 for an unknown slug or unconfigured env.
+    """
+    repo = _resolve_project_slug(slug)
+    working_dir = _env_working_dir(slug, repo, env)
+    if not working_dir:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No directory configured for environment '{env}'",
+        )
+
+    pairs: list[tuple[str, str]] = []
+    for item in body.vars:
+        key = item.key.strip()
+        if not key:
+            raise HTTPException(
+                status_code=400,
+                detail="Each variable must have a non-empty KEY.",
+            )
+        pairs.append((key, item.value))
+
+    env_path = Path(working_dir) / ".env"
+    try:
+        _env_file.write_env_vars(env_path, pairs)
+    except OSError as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to write {env_path}: {exc}",
+        )
+    return {
+        "ok": True,
+        "env": env,
+        "working_dir": working_dir,
+        "vars": _env_file.read_env_vars(env_path),
+    }
 
 
 # ── Scaffold docs (issue #681) ────────────────────────────────────────────────
@@ -2445,12 +3269,12 @@ def _scaffold_resolve_working_clone(slug: str) -> tuple[str, Path]:
 def get_scaffold_check(slug: str):
     """Check whether the project's working clone has the standard docs structure.
 
-    Runs scaffold_docs --check (no writes). Returns:
+    Runs scaffold_project --check (no writes). Returns:
       { compliant, missing, stray, project_root }
     where missing/stray are lists of relative paths.
     """
     if not _SCAFFOLD_AVAILABLE:
-        raise HTTPException(status_code=503, detail="scaffold_docs module unavailable")
+        raise HTTPException(status_code=503, detail="scaffold_project module unavailable")
     repo, working_clone = _scaffold_resolve_working_clone(slug)
     project_name = working_clone.name
     if project_name in ("main", "prd") and working_clone.parent != working_clone:
@@ -2478,7 +3302,7 @@ def post_scaffold_apply(slug: str, body: _ScaffoldApplyBody):
     if not body.confirm:
         raise HTTPException(status_code=400, detail="confirm must be true to apply scaffold")
     if not _SCAFFOLD_AVAILABLE:
-        raise HTTPException(status_code=503, detail="scaffold_docs module unavailable")
+        raise HTTPException(status_code=503, detail="scaffold_project module unavailable")
     repo, working_clone = _scaffold_resolve_working_clone(slug)
     project_name = working_clone.name
     if project_name in ("main", "prd") and working_clone.parent != working_clone:
@@ -2487,6 +3311,64 @@ def post_scaffold_apply(slug: str, body: _ScaffoldApplyBody):
     return {
         "created": result["created"],
         "compliant": result["compliant"],
+    }
+
+
+# ── Sprint file archive maintenance (issue #735) ──────────────────────────────
+
+class _SprintCleanupBody(BaseModel):
+    project: str
+    dry_run: bool = False
+
+
+@app.post("/api/maintenance/sprints/cleanup")
+def post_sprint_cleanup(body: _SprintCleanupBody):
+    """Archive stale per-sprint runtime files for a project's finished sprints.
+
+    Moves sprint-N-plan.json, the zero-issue sprint-N.json placeholder, and
+    sprint-N-state.json for finished sprints into .commander/sprints/archive/.
+    Status, estimate, and summary files are never touched; nothing is deleted.
+
+    With { dry_run: true } it returns the same shape as a preview without
+    moving anything. Returns { archived: [...], kept_count: N }.
+    """
+    if not _CLEAN_SPRINT_AVAILABLE:
+        raise HTTPException(status_code=503, detail="clean_sprint_files module unavailable")
+
+    project = (body.project or "").strip()
+    if not project:
+        raise HTTPException(status_code=400, detail="project is required")
+
+    project_root = _project_root_path(project)
+    sprints_dir = _commander_dir(project_root) / "sprints"
+    if not sprints_dir.exists():
+        return {"archived": [], "kept_count": 0, "dry_run": body.dry_run}
+
+    # A sprint counts as finished when it has a posted summary issue OR a local
+    # summary markdown, AND no live process is running it. The summary-issue set
+    # is GitHub-backed; running state uses the dashboard's authoritative check.
+    finished_nums: set[int] = set()
+    try:
+        for label in _finished_sprint_summaries(project).keys():
+            m = re.match(r"^sprint-(\d+)$", label)
+            if m:
+                finished_nums.add(int(m.group(1)))
+    except Exception:
+        pass
+
+    def _running_check(_dir: Path, n: int) -> bool:
+        return _is_sprint_running(project_root, f"sprint-{n}")
+
+    result = _clean_sprint_files.run_cleanup(
+        sprints_dir,
+        dry_run=body.dry_run,
+        has_summary_issue=lambda n: n in finished_nums,
+        running_check=_running_check,
+    )
+    return {
+        "archived": result["archived"],
+        "kept_count": result["kept_count"],
+        "dry_run": result["dry_run"],
     }
 
 
@@ -2635,6 +3517,8 @@ async def init_project(body: InitProjectBody):
         cmd.append("--nested")
     if body.skip_uat:
         cmd.append("--skip-uat")
+    if body.from_existing:
+        cmd.append("--from-existing")
 
     async def _stream():
         proc = await asyncio.create_subprocess_exec(
@@ -3117,19 +4001,10 @@ def _home_project_data(proj: dict, running_sprints: list[dict]) -> dict:
     uat_issues = [i for i in all_open if any(l["name"] == "UAT" for l in i.get("labels", []))]
     backlog_issues = [i for i in all_open if github_client.classify_issue(i) == "backlog"]
 
-    # Supplement PID-based check with Neon: if Neon says a sprint is running for
-    # this project, the sidebar dot is green even if the JSON file was deleted.
-    neon_running = False
-    if not proj_running and _SPRINT_REPO_AVAILABLE and _sprint_repo is not None:
-        try:
-            neon_running = any(
-                s.status == "running"
-                for s in _sprint_repo.list_sprints(project=repo)
-            )
-        except Exception:
-            pass
-
-    if proj_running or neon_running:
+    # The durable SQLite sprints table (issue #757) is authoritative for the
+    # running check, so the PID-based scan above is sufficient. The former Neon
+    # supplement was removed in issue #758.
+    if proj_running:
         status = "running"
     elif uat_issues:
         status = "uat-pending"
@@ -3882,13 +4757,9 @@ def _finished_sprint_summaries(repo_name: str | None) -> dict[str, dict]:
     except Exception:
         return {}
     try:
-        r = subprocess.run(
-            ["gh", "issue", "list", "--repo", repo,
-             "--label", "sprint-summary", "--state", "all",
-             "--json", "number,title,url", "--limit", "200"],
-            capture_output=True, text=True, timeout=15,
-        )
-        issues = json.loads(r.stdout or "[]") if r.returncode == 0 else []
+        # Cached in github_client (summary_issues: TTL) — this was an uncached
+        # gh issue list (GraphQL) on the board/nav hot path, 5 call sites.
+        issues = github_client.list_summary_issues(repo_name=repo)
     except Exception:
         issues = []
 
@@ -3940,6 +4811,24 @@ def _emit_dashboard_event(
         )
     except Exception:
         pass
+
+
+def _read_sprint_summary_url(project_root: Path, sprint_label: str) -> Optional[str]:
+    """Return the summary-issue URL recorded in the sprint state file, or None.
+
+    The sprint summary issue link is persisted as ``summary_issue_url`` in
+    ``.commander/sprints/sprint-<N>-state.json``. Sub-sprint labels (sprint-N.M)
+    resolve to their base sprint-N state file.
+    """
+    m = re.match(r"^sprint-(\d+)", sprint_label)
+    if not m:
+        return None
+    state_path = _commander_dir(project_root) / "sprints" / f"sprint-{m.group(1)}-state.json"
+    try:
+        data = json.loads(state_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+    return data.get("summary_issue_url")
 
 
 def _sprint_label_sort_key(label: str) -> tuple:
@@ -4142,11 +5031,48 @@ def _plan_json_set_state(
     state: str,
     **extra_fields,
 ) -> None:
-    """Update state in plan.json, creating the file if missing."""
+    """Update state in plan.json, creating the file if missing.
+
+    plan.json is a deprecated cache (issue #757) — the durable lifecycle state
+    now lives in the `sprints` table.  This still writes it for dual-write.
+    """
     existing = _read_plan_json(project_root, sprint_label) or {}
     existing["state"] = state
     existing.update(extra_fields)
     _write_plan_json(project_root, sprint_label, existing)
+
+
+def _sprint_db_set_state(
+    sprint_label: str,
+    project: str,
+    state: str,
+    **extra_fields,
+) -> None:
+    """Mirror a sprint lifecycle transition into the `sprints` table (issue #757).
+
+    Best-effort: any DB failure is swallowed so it never breaks the request —
+    plan.json dual-write remains the cache and the sweep paths reconcile drift.
+    """
+    try:
+        if state == "running":
+            db.record_sprint_start(
+                sprint_label, project=project or "",
+                started_at=extra_fields.get("started_at"),
+            )
+        elif state == "completed":
+            db.record_sprint_finish(
+                sprint_label,
+                ended_at=extra_fields.get("ended_at"),
+                end_reason=extra_fields.get("end_reason"),
+            )
+        elif state == "cancelled":
+            db.record_sprint_cancel(
+                sprint_label,
+                end_reason=extra_fields.get("end_reason", "cancelled"),
+                ended_at=extra_fields.get("ended_at"),
+            )
+    except Exception:
+        pass
 
 
 def _get_sprint_pid(project_root: Path, sprint_label: str) -> Optional[int]:
@@ -4186,17 +5112,103 @@ def _load_sprint_order(project_root: Path, all_sprint_labels: list[str]) -> list
     return result
 
 
-def _is_sprint_running(project_root: Path, sprint_label: str) -> bool:
-    """Check if a sprint is running.
+def _sprint_pid_alive(project_root: Path, sprint_label: str) -> bool:
+    """Return True if the sprint's PID (or pending claim) is alive (issue #757).
 
-    Reads plan.json state as the authoritative source.  Falls back to PID-file
-    scanning only for legacy sprints that have no plan.json yet.
-
-    Reconciles "plan.json=running but PID dead" to state=cancelled so the next
-    caller sees the correct state without manual intervention.
+    Scans both `{label}-pid` and `{label}-pid.pending`, treating a placeholder
+    "0"/"" PID as a still-starting claim. Cleans up files holding a dead or
+    unparseable PID. Pure liveness — no state interpretation.
     """
     import logging as _logging
     _log = _logging.getLogger(__name__)
+    sprints_dir  = _commander_dir(project_root) / "sprints"
+    pid_file     = sprints_dir / f"{sprint_label}-pid"
+    pending_file = sprints_dir / f"{sprint_label}-pid.pending"
+    for candidate in (pid_file, pending_file):
+        if not candidate.exists():
+            continue
+        try:
+            raw = candidate.read_text(encoding="utf-8").strip()
+        except OSError:
+            continue
+        if raw in ("", "0"):
+            return True  # pending claim — still starting up
+        try:
+            pid = int(raw)
+        except ValueError:
+            try:
+                candidate.unlink()
+            except OSError:
+                pass
+            continue
+        try:
+            os.kill(pid, 0)
+            return True
+        except ProcessLookupError:
+            _log.warning(
+                "Stale sprint lock: %s (PID %s dead) — cleaning up",
+                candidate.name, raw,
+            )
+            try:
+                candidate.unlink()
+            except OSError:
+                pass
+        except PermissionError:
+            return True
+        except OSError:
+            pass
+    return False
+
+
+def _is_sprint_running(project_root: Path, sprint_label: str) -> bool:
+    """Check if a sprint is running.
+
+    The durable `sprints` table is the authoritative source (issue #757): a
+    sprint is running only when DB state='running' AND its PID is alive. A
+    PID-dead + DB-running row is reconciled to state='cancelled' and reported as
+    not running. Falls back to plan.json + PID-file scanning only for legacy
+    sprints that have no DB row yet.
+    """
+    import logging as _logging
+    _log = _logging.getLogger(__name__)
+
+    # ── DB-authoritative path (issue #757) ───────────────────────────────────
+    # Only trust a DB row that belongs to THIS project. The sprints table is keyed
+    # by label (globally unique, mirroring the Neon uq_sprints_label constraint),
+    # but project_root scopes this call — guard against a same-label row from a
+    # different project (or a stale row in a shared DB) hijacking the decision.
+    try:
+        _db_row = db.get_sprint(sprint_label)
+    except Exception:
+        _db_row = None
+    if _db_row is not None:
+        _row_proj = str(_db_row.get("project") or "")
+        _row_slug = _row_proj.split("/")[-1] if "/" in _row_proj else _row_proj
+        # Trust the row only when its project slug matches this project_root.
+        # An empty/missing project (legacy CLI write) is not trusted for a named
+        # project — fall back to plan.json + PID for those.
+        if _row_slug != project_root.name:
+            _db_row = None
+    if _db_row is not None:
+        if _db_row.get("state") != "running":
+            return False
+        if _sprint_pid_alive(project_root, sprint_label):
+            return True
+        # DB=running but PID dead — reconcile both stores to cancelled.
+        _log.warning(
+            "Sprint %s: DB state=running but no alive PID — reconciling to cancelled",
+            sprint_label,
+        )
+        try:
+            db.record_sprint_cancel(sprint_label, end_reason="orphan-pid")
+        except Exception:
+            pass
+        try:
+            _plan_json_set_state(project_root, sprint_label, "cancelled",
+                                 end_reason="orphan-pid")
+        except Exception:
+            pass
+        return False
 
     plan = _read_plan_json(project_root, sprint_label)
     if plan is not None:
@@ -4935,6 +5947,109 @@ def get_sprint_estimate_summary(sprint_label: str, project: str):
     }
 
 
+_SIZE_LABELS = {"size-S", "size-M", "size-L", "size-XL"}
+_PF_NON_WORK = {"sprint-summary", "docs", "documentation"}
+
+
+@app.post("/api/sprints/{sprint_label}/preflight-fix")
+async def preflight_fix(sprint_label: str, project: str):
+    """Fix auto-fixable pre-flight issues for a sprint, streaming progress as SSE.
+
+    For each work ticket in the sprint that is missing acceptance criteria or a
+    size estimate: generate AC (append-only, idempotent) and/or run the estimator
+    to apply a size label. Streams `log` events (the current action) and a final
+    `done` event with counts. Conflicts (file-overlap / dep-order) are not
+    auto-fixable and are left untouched.
+    """
+    if not _SPRINT_LABEL_RE.match(sprint_label):
+        raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")
+
+    repo = github_client.get_repo_for_operation(project)
+    try:
+        issues = _get_sprint_issues(project, sprint_label)
+    except subprocess.CalledProcessError as e:
+        raise _gh_error(e)
+
+    work: list[dict] = []
+    for iss in issues:
+        labels = {lbl["name"] for lbl in iss.get("labels", [])}
+        if labels & _PF_NON_WORK:
+            continue
+        needs_ac = not _fill_ac.has_acceptance_criteria(iss.get("body") or "")
+        needs_size = not (labels & _SIZE_LABELS)
+        if needs_ac or needs_size:
+            work.append({"num": iss["number"], "needs_ac": needs_ac, "needs_size": needs_size})
+
+    def _sse(event: str, payload) -> str:
+        return f"event: {event}\ndata: {json.dumps(payload)}\n\n"
+
+    async def _stream():
+        total = len(work)
+        if total == 0:
+            yield _sse("log", "No auto-fixable pre-flight issues found.")
+            yield _sse("done", {"filled": 0, "estimated": 0, "skipped": 0, "errors": [], "total": 0})
+            return
+
+        filled = estimated = skipped = 0
+        errors: list[str] = []
+        yield _sse("log", f"Fixing {total} pre-flight ticket(s)…")
+
+        for idx, item in enumerate(work, start=1):
+            num = item["num"]
+            if item["needs_ac"]:
+                yield _sse("log", f"Generating acceptance criteria for #{num} ({idx}/{total})…")
+                try:
+                    status, err = await asyncio.to_thread(_fill_ac.fill_issue, num, repo, False)
+                    if status == "filled":
+                        filled += 1
+                    elif status == "skipped":
+                        skipped += 1
+                    else:
+                        errors.append(f"#{num} AC: {err or 'failed'}")
+                except Exception as e:  # noqa: BLE001
+                    errors.append(f"#{num} AC: {e}")
+
+            if item["needs_size"]:
+                yield _sse("log", f"Estimating #{num} ({idx}/{total})…")
+                try:
+                    ok = await asyncio.to_thread(_preflight_estimate_one, num, repo)
+                    if ok:
+                        estimated += 1
+                    else:
+                        errors.append(f"#{num} estimate: failed")
+                except Exception as e:  # noqa: BLE001
+                    errors.append(f"#{num} estimate: {e}")
+
+        github_client.invalidate("open_issues_body:")
+        github_client.invalidate("open_issues:")
+        summary = {"filled": filled, "estimated": estimated, "skipped": skipped,
+                   "errors": errors, "total": total}
+        yield _sse("log", f"Done — {filled} AC added, {estimated} estimated"
+                          + (f", {len(errors)} error(s)" if errors else "") + ".")
+        yield _sse("done", summary)
+
+    return StreamingResponse(
+        _stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+def _preflight_estimate_one(issue_num: int, repo: str) -> bool:
+    """Estimate one issue and apply its size label. Returns True on success.
+
+    Mirrors POST /api/issues/{id}/estimate but as a blocking helper for the
+    preflight-fix executor thread.
+    """
+    issue_data = _ei_fetch_issue(issue_num, repo)
+    estimate, _err = _ei_run_estimator(issue_num, issue_data)
+    if not estimate or not estimate.get("size"):
+        return False
+    _ei_apply_label(issue_num, repo, estimate["size"])
+    _ei_apply_estimated_status(issue_num, repo)
+    return True
+
+
 def _sprint_dag_tickets(project_root: Path, sprint_issues: list[dict]) -> list[dict]:
     """Build the ticket list for build_dag from sprint issues + their estimate files."""
     estimates_dir = _commander_dir(project_root) / "estimates"
@@ -5460,16 +6575,22 @@ def run_sprint_managed(request: Request, body: SprintMgmtRunBody):
             detail=f"Sprint {body.sprint_label} is already running on {body.project}",
         )
 
-    # Write state=running before spawning subprocess (issue #507)
+    # Write state=running before spawning subprocess (issue #507).
+    # Durable lifecycle state goes to the `sprints` table (issue #757); plan.json
+    # is dual-written as a deprecated cache.
+    _started_at = datetime.now(timezone.utc).isoformat()
     try:
         _plan_json_set_state(
             project_root,
             body.sprint_label,
             "running",
-            started_at=datetime.now(timezone.utc).isoformat(),
+            started_at=_started_at,
         )
     except Exception:
         pass
+    _sprint_db_set_state(
+        body.sprint_label, body.project, "running", started_at=_started_at
+    )
 
     stripped_env = _build_sprint_subprocess_env()
     goal_path = _sprint_goal_path(project_root, body.sprint_label)
@@ -5529,6 +6650,14 @@ def run_sprint_managed(request: Request, body: SprintMgmtRunBody):
         pass
 
     _slog.event("sprint.dispatch", project="dashboard", request_id=request.state.request_id, sprint_label=body.sprint_label, target_project=body.project, dispatch_type="managed", pid=proc.pid)
+    # Scoped activity-log event for the sprint target (issue #721)
+    _emit_dashboard_event(
+        project=body.project,
+        type="sprint_started",
+        target=body.sprint_label,
+        detail={"sprint_id": body.sprint_label},
+        action_id=str(uuid.uuid4()),
+    )
     return {
         "ok": True,
         "sprint_label": body.sprint_label,
@@ -5646,12 +6775,8 @@ def kill_sprint(sprint_label: str, project: str):
         except OSError:
             pass
 
-    # Neon + JSON: mark sprint as cancelled (best-effort — don't fail the kill).
-    if _SPRINT_REPO_AVAILABLE and _sprint_repo is not None:
-        try:
-            _sprint_repo.update_sprint_status(sprint_label, "cancelled")
-        except Exception as _e:
-            print(f"[neon] WARNING: could not mark sprint {sprint_label!r} cancelled: {_e}")
+    # Mark sprint cancelled in JSON + the durable SQLite store below (issue #758
+    # removed the Neon mirror).
     project_root = _project_root_path(project)
     json_path = _sprint_json_path(project_root, sprint_label)
     data = _sprint_json_read(json_path)
@@ -5659,11 +6784,12 @@ def kill_sprint(sprint_label: str, project: str):
         data["status"] = "cancelled"
         _sprint_json_write(json_path, data)
 
-    # Write state=cancelled to plan.json (issue #507)
+    # Write state=cancelled to plan.json (issue #507) + DB (issue #757)
     try:
         _plan_json_set_state(project_root, sprint_label, "cancelled")
     except Exception:
         pass
+    _sprint_db_set_state(sprint_label, project, "cancelled", end_reason="killed")
 
     _emit_dashboard_event(
         project=project or "dashboard",
@@ -5951,6 +7077,9 @@ def get_sprint_live_snapshot(sprint_label: str, project: str):
       "started_at": "<ISO8601>",
       "current_ticket": {"number": N, "title": "..."} | null,
       "active_agent": {"name": "coder"|"tester", "model": "...", "pid": N} | null,
+      "active_agents": [{"name": "coder"|"tester", "ticket": {"number": N, "title": "..."}, "pid": N}, ...],
+      "pipeline_mode": <bool>,
+      "levels": [{"level": N, "total": N, "merged": N, "state": "complete"|"active"|"waiting"}, ...],
       "recent_log_lines": [{"timestamp": "HH:MM:SS", "type": "...", "message": "..."}, ...],
       "issues": [
         {
@@ -6168,6 +7297,65 @@ def get_sprint_live_snapshot(sprint_label: str, project: str):
         except Exception:
             pass
 
+    # ── Pipeline mode + dual active agents + per-level progress (issue #739) ──
+    # pipeline_mode is persisted on the sprint state by the sprint manager. When
+    # set, the board renders two active-agent cards and a waiting-level structure.
+    pipeline_mode = bool(status_data.get("pipeline_mode", False))
+
+    # active_agents: every in-flight agent derived from per-issue lifecycle
+    # timestamps. Serial mode yields at most one; pipeline mode yields a coder and
+    # a tester working different tickets at once. Ordered [coder, tester].
+    agent_pid = active_agent.get("pid") if active_agent else None
+    coder_entry = None
+    tester_entry = None
+    for iss in issues:
+        ticket = {"number": iss.get("number"), "title": iss.get("title", "")}
+        cs, cf = iss.get("coder_started_at"), iss.get("coder_finished_at")
+        ts, tf = iss.get("tester_started_at"), iss.get("tester_finished_at")
+        if ts and not tf:
+            tester_entry = {"name": "tester", "ticket": ticket, "pid": agent_pid}
+        elif cs and not cf:
+            coder_entry = {"name": "coder", "ticket": ticket, "pid": agent_pid}
+    active_agents: list[dict] = [e for e in (coder_entry, tester_entry) if e]
+    # Fall back to the single state/pid-derived agent when no issue-level timestamps
+    # are available (keeps the serial live-log badge working unchanged).
+    if not active_agents and active_agent:
+        active_agents = [active_agent]
+
+    # levels: per dispatch-level progress for the pipeline board. Only meaningful
+    # when issues carry dispatch_level > 0 (single-level/serial runs report []).
+    def _terminal(iss: dict) -> bool:
+        return iss.get("status") in ("done", "skipped") or iss.get("agent_status") == "failed"
+
+    levels_map: dict[int, list[dict]] = {}
+    for iss in issues:
+        lvl = iss.get("dispatch_level") or 0
+        if lvl > 0:
+            levels_map.setdefault(lvl, []).append(iss)
+
+    sorted_levels = sorted(levels_map)
+    current_level: Optional[int] = None
+    for lvl in sorted_levels:
+        if not all(_terminal(i) for i in levels_map[lvl]):
+            current_level = lvl
+            break
+
+    levels_out: list[dict] = []
+    for lvl in sorted_levels:
+        group = levels_map[lvl]
+        if all(_terminal(i) for i in group):
+            level_state = "complete"
+        elif current_level is not None and lvl == current_level:
+            level_state = "active"
+        else:
+            level_state = "waiting"
+        levels_out.append({
+            "level":  lvl,
+            "total":  len(group),
+            "merged": sum(1 for i in group if i.get("status") == "done"),
+            "state":  level_state,
+        })
+
     # ── recent_log_lines: last 50 lines from sprint run log ──────────────────
     log_dir = commander / "logs"
     recent_log_lines: list[dict] = []
@@ -6184,6 +7372,10 @@ def get_sprint_live_snapshot(sprint_label: str, project: str):
         "started_at": started_at_str,
         "current_ticket": current_ticket,
         "active_agent": active_agent,
+        # Dual active agents + pipeline structure (issue #739)
+        "active_agents": active_agents,
+        "pipeline_mode": pipeline_mode,
+        "levels": levels_out,
         "recent_log_lines": recent_log_lines,
         # Stat strip fields (issue #256)
         "done_count":           done_count,
@@ -6305,18 +7497,8 @@ async def create_sprint_label(body: SprintCreateBody):
     sprint_label = f"sprint-{target_num}"
     eff_goal = (body.goal or sprint_label).strip() or sprint_label
 
-    # Neon write must succeed before any JSON is written (AC-6).
-    if _SPRINT_REPO_AVAILABLE and _sprint_repo is not None:
-        try:
-            _sprint_repo.get_or_create_sprint(
-                label=sprint_label,
-                goal=eff_goal,
-                project=body.project,
-            )
-        except Exception as _e:
-            raise HTTPException(500, detail=f"Neon write failed: {_e}")
-
-    # JSON writes are best-effort (AC-7).
+    # Sprint metadata is persisted to local JSON + the durable SQLite store; the
+    # Neon write was removed in issue #758 (Neon is export-only now).
     project_root = _project_root_path(body.project)
     if body.goal is not None:
         goal_path = _sprint_goal_path(project_root, sprint_label)
@@ -6410,12 +7592,12 @@ async def rename_sprint_label(sprint_label: str, body: SprintRenameBody):
         except Exception:
             pass
 
-    # Update Neon DB
-    if _SPRINT_REPO_AVAILABLE and _sprint_repo is not None:
-        try:
-            _sprint_repo.rename_sprint(sprint_label, new_label)
-        except Exception:
-            pass  # Best-effort; GitHub is the source of truth for labels
+    # Mirror the rename into the durable SQLite sprints table (issue #758 removed
+    # the Neon mirror; best-effort — GitHub is the source of truth for labels).
+    try:
+        db.rename_sprint(sprint_label, new_label)
+    except Exception:
+        pass
 
     return {"ok": True, "old_label": sprint_label, "new_label": new_label}
 
@@ -6427,20 +7609,12 @@ class SprintTicketReorderBody(BaseModel):
 
 @app.post("/api/sprints/{sprint_label}/tickets/reorder")
 def reorder_sprint_tickets(sprint_label: str, body: SprintTicketReorderBody):
-    """Reorder tickets within a sprint. Writes to Neon first, then JSON fallback."""
+    """Reorder tickets within a sprint. Persists to local JSON + durable SQLite."""
     if not _SPRINT_LABEL_RE.match(sprint_label):
         raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")
 
-    # Neon write must succeed (AC-6).
-    if _SPRINT_REPO_AVAILABLE and _sprint_repo is not None:
-        try:
-            _sprint_repo.reorder_tickets(sprint_label, body.issue_numbers)
-        except Exception as _e:
-            if "SprintNotFound" in type(_e).__name__ or "not found" in str(_e).lower():
-                raise HTTPException(404, detail=f"Sprint {sprint_label!r} not found in DB")
-            raise HTTPException(500, detail=f"Neon write failed: {_e}")
-
-    # JSON fallback (AC-7).
+    # Persist to local JSON; the durable SQLite ticket-order write happens below.
+    # The Neon mirror was removed in issue #758.
     project_root = _project_root_path(body.project)
     json_path = _sprint_json_path(project_root, sprint_label)
     data = _sprint_json_read(json_path)
@@ -6452,6 +7626,12 @@ def reorder_sprint_tickets(sprint_label: str, body: SprintTicketReorderBody):
             if n in by_num
         ]
         _sprint_json_write(json_path, data)
+
+    # Durable ticket order (issue #757); best-effort so it never breaks the reorder.
+    try:
+        db.set_sprint_ticket_order(sprint_label, body.issue_numbers)
+    except Exception:
+        pass
 
     return {"ok": True}
 
@@ -6474,6 +7654,11 @@ async def save_sprint_plan(sprint_label: str, project: str, request: Request):
     existing = _read_plan_json(project_root, sprint_label) or {}
     existing["tickets"] = body
     _write_plan_json(project_root, sprint_label, existing)
+    # Durable ticket order (issue #757); plan.json is the deprecated cache.
+    try:
+        db.set_sprint_ticket_order(sprint_label, body)
+    except Exception:
+        pass
     return {"ok": True}
 
 
@@ -6831,21 +8016,31 @@ def get_sprint_state(sprint_label: str, project: str):
 
 
 def _has_rework_tickets(sprint_label: str, project: str) -> bool:
-    """Return True if any open issue in the sprint carries a needs-rework label."""
+    """Return True if the sprint should read as rework rather than completed.
+
+    A finished sprint is rework when any open work ticket either carries a
+    rework/rejected label (needs-rework or tester-rejected — a tester rejection
+    is treated as a failed sprint) or never reached a done/UAT state (e.g. the
+    coder failed, so nothing shipped). Non-work tickets (summary/docs) are
+    ignored. A sprint whose work all reached UAT/UAT-approved (or is fully
+    closed) reads as completed.
+    """
+    NON_WORK = {"sprint-summary", "docs", "documentation"}
+    REWORK = {"needs-rework", "need-rework", "tester-rejected"}
+    DONE = {"UAT", "UAT-approved", "released"}
     try:
-        r = github_client.get_repo_for_operation(project)
-        result = subprocess.run(
-            ["gh", "issue", "list", "--repo", r,
-             "--label", sprint_label,
-             "--label", "needs-rework",
-             "--json", "number",
-             "--limit", "1"],
-            capture_output=True, text=True, timeout=10,
-        )
-        if result.returncode == 0:
-            return len(json.loads(result.stdout or "[]")) > 0
+        issues = _get_sprint_issues(project, sprint_label)
     except Exception:
-        pass
+        return False
+    for iss in issues:
+        labels = {lbl["name"] for lbl in iss.get("labels", [])}
+        if labels & NON_WORK:
+            continue
+        if labels & REWORK:
+            return True
+        if not (labels & DONE):
+            # open work ticket that never reached a done/UAT state → unfinished/failed
+            return True
     return False
 
 
@@ -7275,21 +8470,31 @@ def get_calibration(project: str):
 
 
 def _has_rework_tickets(sprint_label: str, project: str) -> bool:
-    """Return True if any open issue in the sprint carries a needs-rework label."""
+    """Return True if the sprint should read as rework rather than completed.
+
+    A finished sprint is rework when any open work ticket either carries a
+    rework/rejected label (needs-rework or tester-rejected — a tester rejection
+    is treated as a failed sprint) or never reached a done/UAT state (e.g. the
+    coder failed, so nothing shipped). Non-work tickets (summary/docs) are
+    ignored. A sprint whose work all reached UAT/UAT-approved (or is fully
+    closed) reads as completed.
+    """
+    NON_WORK = {"sprint-summary", "docs", "documentation"}
+    REWORK = {"needs-rework", "need-rework", "tester-rejected"}
+    DONE = {"UAT", "UAT-approved", "released"}
     try:
-        r = github_client.get_repo_for_operation(project)
-        result = subprocess.run(
-            ["gh", "issue", "list", "--repo", r,
-             "--label", sprint_label,
-             "--label", "needs-rework",
-             "--json", "number",
-             "--limit", "1"],
-            capture_output=True, text=True, timeout=10,
-        )
-        if result.returncode == 0:
-            return len(json.loads(result.stdout or "[]")) > 0
+        issues = _get_sprint_issues(project, sprint_label)
     except Exception:
-        pass
+        return False
+    for iss in issues:
+        labels = {lbl["name"] for lbl in iss.get("labels", [])}
+        if labels & NON_WORK:
+            continue
+        if labels & REWORK:
+            return True
+        if not (labels & DONE):
+            # open work ticket that never reached a done/UAT state → unfinished/failed
+            return True
     return False
 
 
@@ -7474,6 +8679,61 @@ def _parse_iso_date(date_str: str, name: str, *, end_of_day: bool = False) -> da
     return dt
 
 
+def _analytics_parse_ts(ts: str | None) -> datetime | None:
+    """Parse an ISO 8601 UTC timestamp (optionally Z-suffixed) or return None."""
+    if not ts:
+        return None
+    try:
+        return datetime.fromisoformat(ts.rstrip("Z")).replace(tzinfo=timezone.utc)
+    except Exception:
+        return None
+
+
+def _analytics_elapsed_minutes(start: str | None, end: str | None) -> float | None:
+    """Minutes between two ISO timestamps, or None when either is missing/bad."""
+    s = _analytics_parse_ts(start)
+    e = _analytics_parse_ts(end)
+    if s is None or e is None:
+        return None
+    return (e - s).total_seconds() / 60.0
+
+
+_TESTER_REJECTED_CATEGORY = "TESTER_REJECTED"
+
+
+def _count_tester_rejections(issue: dict) -> int:
+    """Infer how many times the tester rejected a completed ticket.
+
+    Sources, in priority order (the max wins so any single signal counts):
+      * ``tester_attempt_count`` — N attempts means N-1 rejections (exact, when present)
+      * ``status_history`` — entries flagged TESTER_REJECTED or a rejected status
+      * ``category`` / ``failure_reason`` — a trailing rejection signal worth 1
+
+    Returns 0 for a clean first-pass ticket.
+    """
+    attempt = int(issue.get("tester_attempt_count") or 0)
+    rejections = max(attempt - 1, 0)
+
+    history = issue.get("status_history") or []
+    if isinstance(history, list):
+        hist_rejects = 0
+        for entry in history:
+            if not isinstance(entry, dict):
+                continue
+            cat = str(entry.get("category") or "")
+            status = str(entry.get("status") or "").lower()
+            if cat == _TESTER_REJECTED_CATEGORY or "reject" in status:
+                hist_rejects += 1
+        rejections = max(rejections, hist_rejects)
+
+    category = str(issue.get("category") or "")
+    failure_reason = str(issue.get("failure_reason") or "").lower()
+    if category == _TESTER_REJECTED_CATEGORY or "reject" in failure_reason:
+        rejections = max(rejections, 1)
+
+    return rejections
+
+
 def _compute_analytics_metrics(project_root: Path,
                                 since: str | None = None,
                                 until: str | None = None,
@@ -7501,6 +8761,11 @@ def _compute_analytics_metrics(project_root: Path,
 
     sprint_ticket_counts: list[int] = []
     sprint_lengths: list[float] = []
+
+    # Token counts are sourced from the status files (model_name is joined from
+    # the token_usage table below for pricing only).
+    status_tokens_in = 0
+    status_tokens_out = 0
 
     estimates_dir = _commander_dir(project_root) / "estimates"
 
@@ -7539,14 +8804,17 @@ def _compute_analytics_metrics(project_root: Path,
             if wall_clock_secs > 0:
                 sprint_lengths.append(wall_clock_secs / 86400.0)
 
+            status_tokens_in += int(state_data.get("total_tokens_in") or 0)
+            status_tokens_out += int(state_data.get("total_tokens_out") or 0)
+
             for issue in sprint_done:
                 total_completed += 1
-                attempt = int(issue.get("tester_attempt_count") or 1)
-                if attempt <= 1:
+                rejections = _count_tester_rejections(issue)
+                if rejections == 0:
                     first_pass_count += 1
                 else:
                     rework_count += 1
-                    if attempt >= 3:
+                    if rejections >= 2:
                         rework_2plus += 1
 
                 # Coder duration
@@ -7599,9 +8867,14 @@ def _compute_analytics_metrics(project_root: Path,
     avg_tickets = sum(sprint_ticket_counts) / len(sprint_ticket_counts) if sprint_ticket_counts else 0
     avg_length = sum(sprint_lengths) / len(sprint_lengths) if sprint_lengths else 0
 
-    # Cost from token_usage table
-    cost_per_sprint_total = 0.0
+    # Cost: token counts come from the status files (status_tokens_in/out).
+    # model_name is joined from the token_usage table for pricing only — we
+    # derive a blended per-token price (exact when a single model is used) and
+    # apply it to the status-file token totals.
     cost_by_role: dict[str, float] = {"coder": 0.0, "tester": 0.0, "estimator": 0.0}
+    tu_in = tu_out = 0
+    tu_cost_in = tu_cost_out = 0.0
+    role_tokens: dict[str, int] = {"coder": 0, "tester": 0, "estimator": 0}
     try:
         rows = db.get_token_usage_by_agent_model()
         for row in rows:
@@ -7609,15 +8882,29 @@ def _compute_analytics_metrics(project_root: Path,
                 role = (row.get("agent_role") or "unknown").lower()
                 model = (row.get("model_name") or "").lower()
                 price_in, price_out = MODEL_PRICE_MAP.get(model, (0.0, 0.0))
-                cost = (row.get("total_input", 0) * price_in +
-                        row.get("total_output", 0) * price_out)
-                cost_per_sprint_total += cost
-                if role in cost_by_role:
-                    cost_by_role[role] += cost
+                in_tokens = int(row.get("total_input", 0) or 0)
+                out_tokens = int(row.get("total_output", 0) or 0)
+                tu_in += in_tokens
+                tu_out += out_tokens
+                tu_cost_in += in_tokens * price_in
+                tu_cost_out += out_tokens * price_out
+                if role in role_tokens:
+                    role_tokens[role] += in_tokens + out_tokens
             except (KeyError, ValueError, TypeError) as exc:
                 logger.debug("token-usage cost: skipping row %r — %s", row, exc)
     except Exception as exc:
         logger.debug("token-usage cost: db query failed — %s", exc)
+
+    blended_price_in = (tu_cost_in / tu_in) if tu_in else 0.0
+    blended_price_out = (tu_cost_out / tu_out) if tu_out else 0.0
+    cost_per_sprint_total = (status_tokens_in * blended_price_in +
+                             status_tokens_out * blended_price_out)
+
+    # Distribute the total cost across roles by their token_usage share.
+    total_role_tokens = sum(role_tokens.values())
+    if total_role_tokens > 0:
+        for r in cost_by_role:
+            cost_by_role[r] = cost_per_sprint_total * role_tokens[r] / total_role_tokens
 
     num_sprints = len(sprint_ticket_counts) if sprint_ticket_counts else 1
     cost_per_sprint_avg = cost_per_sprint_total / num_sprints
@@ -7731,55 +9018,58 @@ def _compute_calibration(
     }
     points: list[dict] = []
 
-    if not _SPRINT_REPO_AVAILABLE:
-        return {"by_size": by_size, "points": points}
+    # Source is status + estimate files only — Neon is not queried (issue #718).
+    project_root = _project_root_path(repo)
+    sprints_dir = _commander_dir(project_root) / "sprints"
+    estimates_dir = _commander_dir(project_root) / "estimates"
 
-    try:
-        from sqlalchemy import text as _sa_text
-
-        where_parts = [
-            "st.estimated_size IS NOT NULL",
-            "st.actual_elapsed_seconds IS NOT NULL",
-            "s.project = :project",
-        ]
-        params: dict = {"project": repo}
-
-        if since_dt:
-            where_parts.append("st.completed_at >= :since")
-            params["since"] = since_dt.isoformat()
-        if until_dt:
-            where_parts.append("st.completed_at <= :until")
-            params["until"] = until_dt.isoformat()
-        if sprint_filter:
-            where_parts.append("s.label = :sprint")
-            params["sprint"] = sprint_filter
-
-        sql = (
-            "SELECT st.issue_number, st.estimated_size, st.actual_elapsed_seconds"
-            " FROM sprint_tickets st"
-            " JOIN sprints s ON s.id = st.sprint_id"
-            " WHERE " + " AND ".join(where_parts)
-        )
-
-        with _sprint_repo._open_session() as session:
-            rows = session.execute(_sa_text(sql), params).fetchall()
-
-    except HTTPException:
-        raise
-    except Exception:
-        return {"by_size": by_size, "points": points}
-
-    # Accumulate per-size data.
     buckets: dict[str, list[float]] = {sz: [] for sz in _CALIBRATION_SIZES}
     issue_rows: list[tuple] = []
 
-    for row in rows:
-        issue_number, estimated_size, actual_elapsed_seconds = row[0], row[1], row[2]
-        if estimated_size not in buckets:
-            continue
-        minutes = actual_elapsed_seconds / 60.0
-        buckets[estimated_size].append(minutes)
-        issue_rows.append((issue_number, estimated_size, minutes))
+    if sprints_dir.exists():
+        for state_file in sorted(sprints_dir.glob("sprint-*-state.json")):
+            try:
+                state_data = json.loads(state_file.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+
+            if sprint_filter and state_data.get("sprint_label", "") != sprint_filter:
+                continue
+
+            start_dt = _analytics_parse_ts(state_data.get("start_timestamp"))
+            if start_dt:
+                if since_dt and start_dt < since_dt:
+                    continue
+                if until_dt and start_dt > until_dt:
+                    continue
+
+            for issue in state_data.get("issues", []):
+                if issue.get("status") != "done":
+                    continue
+
+                issue_num = issue.get("number")
+                size = None
+                if issue_num is not None and estimates_dir.exists():
+                    est_file = estimates_dir / f"issue-{issue_num}.json"
+                    if est_file.exists():
+                        try:
+                            est = json.loads(est_file.read_text(encoding="utf-8"))
+                            size = est.get("size")
+                        except Exception:
+                            size = None
+                if size not in buckets:
+                    continue
+
+                coder_min = _analytics_elapsed_minutes(
+                    issue.get("coder_started_at"), issue.get("coder_finished_at"))
+                tester_min = _analytics_elapsed_minutes(
+                    issue.get("tester_started_at"), issue.get("tester_finished_at"))
+                if coder_min is None and tester_min is None:
+                    continue
+
+                actual_minutes = (coder_min or 0.0) + (tester_min or 0.0)
+                buckets[size].append(actual_minutes)
+                issue_rows.append((issue_num, size, actual_minutes))
 
     # Compute aggregates.
     for sz in _CALIBRATION_SIZES:
@@ -8081,12 +9371,12 @@ def get_sprint_branch_status(sprint_label: str, project: str):
                 pr_url = prs[0].get("url")
                 pr_number = prs[0].get("number")
                 pr_title = prs[0].get("title")
-    except Exception as _pr_err:
+    except Exception as pr_err:
         _slog.warn(
             "sprint_pr_lookup_failed",
-            f"PR lookup for {branch_name!r} failed: {_pr_err}",
+            f"PR lookup for {branch_name!r} failed: {pr_err}",
             branch=branch_name,
-            error=str(_pr_err),
+            error=str(pr_err),
         )
 
     return {"exists": exists, "branch": branch_name,
@@ -8098,8 +9388,13 @@ class SprintRerunBody(BaseModel):
 
 
 class SprintRerunV2Body(BaseModel):
-    ticket_numbers: list[int]
+    # Empty list = re-run all non-UAT tickets (legacy behaviour). When the
+    # per-ticket modal sends a selection, only those tickets move to the child
+    # sprint. `confirm` is accepted-and-ignored for backward compatibility with
+    # the old SprintRerunBody callers.
+    ticket_numbers: list[int] = []
     auto_run: bool = True
+    confirm: bool | None = None
 
 
 def _ticket_rerun_category(labels: set[str]) -> str:
@@ -8207,15 +9502,18 @@ def rerun_sprint_preview_v2(sprint_label: str, project: str):
 
 
 @app.post("/api/sprints/{sprint_label}/rerun")
-def rerun_sprint(sprint_label: str, project: str, body: SprintRerunBody):
-    """Create an independent sub-sprint from all non-UAT tickets and auto-run it.
+def rerun_sprint(sprint_label: str, project: str, body: SprintRerunV2Body):
+    """Create an independent sub-sprint from selected non-UAT tickets.
 
-    Auto-detects every non-UAT ticket carrying sprint_label, moves them to a new
-    versioned sub-sprint label (sprint-N.1, sprint-N.2, …), creates plan.json with
-    parent reference, and dispatches sprint_manager for the sub-sprint. The original
-    sprint label, plan.json, branch, and PR are NOT modified.
+    Moves the chosen non-UAT tickets carrying sprint_label to a new versioned
+    sub-sprint label (sprint-N.1, sprint-N.2, …), creates plan.json with a parent
+    reference, and (when auto_run) dispatches sprint_manager for the sub-sprint.
+    The original sprint label, plan.json, branch, and PR are NOT modified.
 
-    Body: { confirm: bool }
+    Body: { ticket_numbers?: int[], auto_run?: bool }
+      - ticket_numbers: which non-UAT tickets to move; empty = all of them.
+      - auto_run: dispatch immediately (default true); false leaves them queued
+        in the child sprint for a manual run.
     Response: { sub_label, noop, dispatch_count, decisions, moved, [errors] }
     """
     if not _SPRINT_LABEL_RE.match(sprint_label):
@@ -8245,6 +9543,11 @@ def rerun_sprint(sprint_label: str, project: str, body: SprintRerunBody):
         })
 
     to_move = [d for d in decisions if d["action"] != "skip"]
+
+    # Honor an explicit ticket selection from the per-ticket modal; empty means all.
+    if body.ticket_numbers:
+        selected = set(body.ticket_numbers)
+        to_move = [d for d in to_move if d["issue_num"] in selected]
 
     if not to_move:
         return {
@@ -8309,6 +9612,15 @@ def rerun_sprint(sprint_label: str, project: str, body: SprintRerunBody):
     github_client.invalidate("issues:")
     github_client.invalidate("sprint_labels:")
 
+    # Scoped activity-log event for the sprint target (issue #721)
+    _emit_dashboard_event(
+        project=project,
+        type="sprint_rerun",
+        target=sub_label,
+        detail={"sprint_id": sprint_label, "sub_label": sub_label},
+        action_id=str(uuid.uuid4()),
+    )
+
     result: dict = {
         "noop": False,
         "sub_label": sub_label,
@@ -8319,6 +9631,12 @@ def rerun_sprint(sprint_label: str, project: str, body: SprintRerunBody):
     }
     if errors:
         result["errors"] = errors
+
+    # auto_run=false: leave the selected tickets queued in the child sprint
+    # (plan state stays "planning") for a manual run later.
+    if not body.auto_run:
+        result["queued"] = True
+        return result
 
     # Auto-run: dispatch sprint_manager for the sub-sprint
     if not SPRINT_MANAGER_PATH.exists():
@@ -8690,6 +10008,18 @@ async def finish_sprint(owner: str, repo_name: str, label: str, body: FinishSpri
             "sprint_label": label,
         },
     })
+
+    # Scoped activity-log event for the sprint target (issue #721)
+    _emit_dashboard_event(
+        project=repo,
+        type="sprint_finished",
+        target=label,
+        detail={
+            "sprint_id": label,
+            "summary_issue_url": _read_sprint_summary_url(project_root, label),
+        },
+        action_id=str(uuid.uuid4()),
+    )
 
     result: dict = {"closed": closed, "moved": moved, "errors": errors, "next_sprint_label": next_sprint_label}
     status_code = 207 if errors else 200
@@ -12038,6 +13368,25 @@ def save_project_notes(repo: str = "", body: SaveNotesBody = ...):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(body.content, encoding="utf-8")
     return {"ok": True, "mtime": path.stat().st_mtime}
+
+
+# ── Global notes (.commander/notes.json) — issue #717 ─────────────────────────
+
+class GlobalNotesBody(BaseModel):
+    body: str = ""
+
+
+@app.get("/api/notes")
+def get_global_notes():
+    """Return the global notes body, or empty string if none saved yet."""
+    return {"body": _notes_repo.get_notes()}
+
+
+@app.put("/api/notes")
+def put_global_notes(body: GlobalNotesBody):
+    """Persist the full global notes body to .commander/notes.json."""
+    _notes_repo.set_notes(body.body)
+    return {"body": body.body}
 
 
 # ── Static asset routes with long-lived cache headers (issue #249) ────────────

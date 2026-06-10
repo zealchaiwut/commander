@@ -152,6 +152,602 @@ def init_db():
                 cleared_at   TEXT
             )
         """)
+        _create_ticket_status_table(conn)
+        _create_issues_table(conn)
+        _create_sync_state_table(conn)
+        _create_sprint_lifecycle_tables(conn)
+        _create_agent_runs_table(conn)
+        conn.commit()
+
+
+def _create_ticket_status_table(conn: sqlite3.Connection) -> None:
+    """Create the ticket_status write-through table (issue #755).
+
+    Records the state written by state_machine.transition() after a successful
+    GitHub label edit, so the dashboard read-path no longer depends on a
+    post-edit verify re-fetch.  Kept in its own helper so record_ticket_status()
+    can ensure the table exists without running the full init_db() migration.
+    """
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS ticket_status (
+            id      INTEGER PRIMARY KEY AUTOINCREMENT,
+            issue   TEXT NOT NULL,
+            status  TEXT NOT NULL,
+            actor   TEXT NOT NULL,
+            note    TEXT,
+            ts      TEXT NOT NULL
+        )
+    """)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS ix_ticket_status_issue_ts "
+        "ON ticket_status (issue, ts DESC)"
+    )
+
+
+# ── Issues mirror (issue #756) ────────────────────────────────────────────────
+#
+# The dashboard read model is the local DB, not GitHub.  The `issues` table is a
+# mirror of repo issues kept fresh by github_events_sync.sync_issues_mirror() via
+# ETag-conditional polling.  Read endpoints (project view, sprint cards, running
+# view, finish/rerun previews) serve from this table so renders consume zero
+# GitHub rate-limit quota.  The `sync_state` table holds the per-repo ETag used
+# for If-None-Match conditional requests.
+
+
+def _create_issues_table(conn: sqlite3.Connection) -> None:
+    """Create the issues mirror table (issue #756).
+
+    `labels` and `raw` hold JSON.  `raw` is the full gh-CLI-shaped issue dict so
+    readers can reconstruct fields (assignees, url, body, …) without a live call.
+    Primary key is (repo, issue_number) so multiple repos can be mirrored.
+    """
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS issues (
+            repo         TEXT NOT NULL DEFAULT '',
+            issue_number INTEGER NOT NULL,
+            title        TEXT,
+            state        TEXT,
+            labels       TEXT NOT NULL DEFAULT '[]',
+            updated_at   TEXT,
+            raw          TEXT,
+            PRIMARY KEY (repo, issue_number)
+        )
+    """)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS ix_issues_repo_state "
+        "ON issues (repo, state)"
+    )
+
+
+def _create_sync_state_table(conn: sqlite3.Connection) -> None:
+    """Create the sync_state table holding per-key ETags (issue #756)."""
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS sync_state (
+            key        TEXT PRIMARY KEY,
+            etag       TEXT,
+            updated_at TEXT
+        )
+    """)
+
+
+# ── Sprint lifecycle + ticket order (issue #757) ──────────────────────────────
+#
+# The durable home for sprint lifecycle state and ticket execution order. These
+# tables replace the ephemeral `{label}-plan.json` / `{label}-pid` files as the
+# source of truth, while those files continue to be written as a deprecated
+# cache (dual-write) until a later sprint removes them.  `state='failed'` is a
+# valid value reserved for the future watchdog recovery sprint (no writer yet).
+
+_SPRINT_STATES = ("planning", "running", "completed", "cancelled", "failed")
+
+
+def _create_sprint_lifecycle_tables(conn: sqlite3.Connection) -> None:
+    """Create the sprints + sprint_ticket_order tables (issue #757).
+
+    Kept in its own helper so the lifecycle writers can ensure the tables exist
+    without running the full init_db() migration first.
+    """
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS sprints (
+            label        TEXT PRIMARY KEY,
+            project      TEXT NOT NULL DEFAULT '',
+            state        TEXT NOT NULL DEFAULT 'planning'
+                         CHECK(state IN (
+                             'planning', 'running', 'completed', 'cancelled', 'failed'
+                         )),
+            created_at   TEXT,
+            started_at   TEXT,
+            ended_at     TEXT,
+            end_reason   TEXT,
+            parent_label TEXT
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS sprint_ticket_order (
+            label    TEXT NOT NULL,
+            issue    INTEGER NOT NULL,
+            position INTEGER NOT NULL,
+            PRIMARY KEY (label, issue)
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS ix_sprint_ticket_order_label_pos "
+        "ON sprint_ticket_order (label, position)"
+    )
+
+
+# ── Per-agent run durations (issue #764) ──────────────────────────────────────
+#
+# `sprint_tickets.actual_elapsed_seconds` stores a single blended coder→tester
+# wall-clock span, losing per-agent resolution. `agent_runs` records one row per
+# dispatched agent (coder, tester, documenter, reviewer, estimator) with its own
+# start/finish timestamps and wall-clock duration. This fills the calibration gap
+# for the coder/tester split and surfaces per-agent durations in the UI. The
+# blended `sprint_tickets` tracking is unchanged (issue #764 AC8).
+
+
+def _create_agent_runs_table(conn: sqlite3.Connection) -> None:
+    """Create the agent_runs table (issue #764).
+
+    One row per dispatched agent. `started_at`/`finished_at` are ISO-8601 UTC
+    strings; `duration_seconds` is the wall-clock duration of the run. Kept in
+    its own helper so the recorder can ensure the table exists without running
+    the full init_db() migration. Mirrors the Alembic migration
+    0009_add_agent_runs so the schema is identical on SQLite and Postgres.
+    """
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS agent_runs (
+            id               INTEGER PRIMARY KEY AUTOINCREMENT,
+            issue_number     INTEGER NOT NULL,
+            sprint_label     TEXT NOT NULL,
+            agent            TEXT NOT NULL,
+            started_at       TEXT NOT NULL,
+            finished_at      TEXT,
+            duration_seconds INTEGER,
+            outcome          TEXT,
+            total_tokens     INTEGER
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS ix_agent_runs_issue_agent "
+        "ON agent_runs (issue_number, agent)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS ix_agent_runs_sprint "
+        "ON agent_runs (sprint_label)"
+    )
+
+
+def _duration_between(started_at: str | None, finished_at: str | None) -> int | None:
+    """Whole seconds between two ISO timestamps, or None if either is unusable."""
+    if not started_at or not finished_at:
+        return None
+    try:
+        s = datetime.fromisoformat(str(started_at).replace("Z", "+00:00"))
+        f = datetime.fromisoformat(str(finished_at).replace("Z", "+00:00"))
+    except (ValueError, TypeError):
+        return None
+    return round((f - s).total_seconds())
+
+
+def record_agent_start(
+    issue_number: int,
+    sprint_label: str,
+    agent: str,
+    started_at: str | None = None,
+) -> int | None:
+    """Insert an agent_runs row at dispatch time and return its id (issue #764).
+
+    `finished_at`/`duration_seconds`/`outcome` are left NULL until
+    record_agent_finish() closes the run. Returns the new row id (used to close
+    the exact run) or None on failure — callers treat this as best-effort.
+    """
+    started_at = started_at or _now_iso()
+    with get_conn() as conn:
+        _create_agent_runs_table(conn)
+        cur = conn.execute(
+            "INSERT INTO agent_runs "
+            "(issue_number, sprint_label, agent, started_at) "
+            "VALUES (?, ?, ?, ?)",
+            (int(issue_number), sprint_label, agent, started_at),
+        )
+        conn.commit()
+        return cur.lastrowid
+
+
+def record_agent_finish(
+    issue_number: int,
+    sprint_label: str,
+    agent: str,
+    finished_at: str | None = None,
+    duration_seconds: int | None = None,
+    outcome: str | None = None,
+    total_tokens: int | None = None,
+    run_id: int | None = None,
+) -> None:
+    """Close the open agent_runs row with finish time, duration and outcome (#764).
+
+    When `run_id` is given the exact row is updated; otherwise the most recent
+    still-open run (finished_at IS NULL) matching issue/sprint/agent is closed.
+    `duration_seconds` is used as supplied (the dispatcher passes a precise
+    monotonic measurement — issue #764 AC3); when omitted it is computed from the
+    start/finish timestamps. Best-effort: never raises into the sprint loop.
+    """
+    finished_at = finished_at or _now_iso()
+    with get_conn() as conn:
+        _create_agent_runs_table(conn)
+        if run_id is not None:
+            row = conn.execute(
+                "SELECT id, started_at FROM agent_runs WHERE id = ?", (run_id,)
+            ).fetchone()
+        else:
+            row = conn.execute(
+                "SELECT id, started_at FROM agent_runs "
+                "WHERE issue_number = ? AND sprint_label = ? AND agent = ? "
+                "AND finished_at IS NULL "
+                "ORDER BY id DESC LIMIT 1",
+                (int(issue_number), sprint_label, agent),
+            ).fetchone()
+        if row is None:
+            return
+        if duration_seconds is None:
+            duration_seconds = _duration_between(row["started_at"], finished_at)
+        conn.execute(
+            "UPDATE agent_runs SET finished_at = ?, duration_seconds = ?, "
+            "outcome = ?, total_tokens = ? WHERE id = ?",
+            (
+                finished_at,
+                None if duration_seconds is None else int(duration_seconds),
+                outcome,
+                None if total_tokens is None else int(total_tokens),
+                row["id"],
+            ),
+        )
+        conn.commit()
+
+
+def agent_runs_for_issue(issue_number: int, sprint_label: str | None = None) -> list[dict]:
+    """Return agent_runs rows for an issue (optionally scoped to a sprint) (#764)."""
+    with get_conn() as conn:
+        _create_agent_runs_table(conn)
+        if sprint_label is None:
+            rows = conn.execute(
+                "SELECT * FROM agent_runs WHERE issue_number = ? ORDER BY id",
+                (int(issue_number),),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM agent_runs WHERE issue_number = ? AND sprint_label = ? "
+                "ORDER BY id",
+                (int(issue_number), sprint_label),
+            ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def agent_runs_for_sprint(sprint_label: str) -> list[dict]:
+    """Return all agent_runs rows for a sprint, ordered by issue then start (#764)."""
+    with get_conn() as conn:
+        _create_agent_runs_table(conn)
+        rows = conn.execute(
+            "SELECT * FROM agent_runs WHERE sprint_label = ? "
+            "ORDER BY issue_number, id",
+            (sprint_label,),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
+
+
+def record_sprint_start(
+    label: str,
+    project: str = "",
+    started_at: str | None = None,
+    parent_label: str | None = None,
+) -> None:
+    """Write (or move to) a `running` sprints row (issue #757).
+
+    Idempotent on `label`: a second start re-asserts state='running' and
+    refreshes started_at without creating a duplicate row.
+    """
+    started_at = started_at or _now_iso()
+    with get_conn() as conn:
+        _create_sprint_lifecycle_tables(conn)
+        conn.execute(
+            """
+            INSERT INTO sprints
+                (label, project, state, created_at, started_at, parent_label)
+            VALUES (?, ?, 'running', ?, ?, ?)
+            ON CONFLICT(label) DO UPDATE SET
+                project      = excluded.project,
+                state        = 'running',
+                started_at   = excluded.started_at,
+                created_at   = COALESCE(sprints.created_at, excluded.created_at),
+                parent_label = COALESCE(excluded.parent_label, sprints.parent_label)
+            """,
+            (label, project, started_at, started_at, parent_label),
+        )
+        conn.commit()
+
+
+def record_sprint_finish(label: str, ended_at: str | None = None,
+                         end_reason: str | None = None) -> None:
+    """Move a sprints row to `completed` (issue #757)."""
+    _set_sprint_terminal(label, "completed", end_reason, ended_at)
+
+
+def record_sprint_cancel(label: str, end_reason: str = "cancelled",
+                         ended_at: str | None = None) -> None:
+    """Move a sprints row to `cancelled` with a reason (issue #757)."""
+    _set_sprint_terminal(label, "cancelled", end_reason, ended_at)
+
+
+def _set_sprint_terminal(label: str, state: str, end_reason: str | None,
+                         ended_at: str | None) -> None:
+    ended_at = ended_at or _now_iso()
+    with get_conn() as conn:
+        _create_sprint_lifecycle_tables(conn)
+        # Upsert so a transition can land even if no start row was written
+        # (e.g. a legacy sprint cancelled before its first DB write).
+        conn.execute(
+            """
+            INSERT INTO sprints (label, state, created_at, ended_at, end_reason)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(label) DO UPDATE SET
+                state      = excluded.state,
+                ended_at   = excluded.ended_at,
+                end_reason = COALESCE(excluded.end_reason, sprints.end_reason)
+            """,
+            (label, state, ended_at, ended_at, end_reason),
+        )
+        conn.commit()
+
+
+def rename_sprint(old_label: str, new_label: str) -> None:
+    """Rename a sprint and its ticket-order rows (issue #758).
+
+    No-op if no row exists for `old_label`. Best-effort: GitHub labels remain the
+    source of truth, so a missing DB row must not fail a rename.
+    """
+    with get_conn() as conn:
+        _create_sprint_lifecycle_tables(conn)
+        conn.execute(
+            "UPDATE sprints SET label = ? WHERE label = ?",
+            (new_label, old_label),
+        )
+        conn.execute(
+            "UPDATE sprint_ticket_order SET label = ? WHERE label = ?",
+            (new_label, old_label),
+        )
+        conn.commit()
+
+
+def get_sprint(label: str) -> dict | None:
+    """Return the sprints row for `label` as a dict, or None (issue #757)."""
+    with get_conn() as conn:
+        _create_sprint_lifecycle_tables(conn)
+        row = conn.execute(
+            "SELECT * FROM sprints WHERE label = ?", (label,)
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def is_sprint_running(label: str, pid_alive: bool) -> bool:
+    """Authoritative "is this sprint running?" check (issue #757).
+
+    True only when the DB state is `running` AND the sprint process is alive.
+    A PID-dead + DB-running row does NOT report running.
+    """
+    row = get_sprint(label)
+    return bool(row and row["state"] == "running" and pid_alive)
+
+
+def set_sprint_ticket_order(label: str, issue_numbers: list[int]) -> None:
+    """Persist the ticket execution order for a sprint (issue #757).
+
+    Replaces any existing order for `label` so positions reflect exactly the
+    supplied sequence (position 0 dispatched first).
+    """
+    with get_conn() as conn:
+        _create_sprint_lifecycle_tables(conn)
+        conn.execute("DELETE FROM sprint_ticket_order WHERE label = ?", (label,))
+        conn.executemany(
+            "INSERT INTO sprint_ticket_order (label, issue, position) "
+            "VALUES (?, ?, ?)",
+            [(label, int(n), pos) for pos, n in enumerate(issue_numbers)],
+        )
+        conn.commit()
+
+
+def get_sprint_ticket_order(label: str) -> list[int]:
+    """Return persisted issue numbers for `label` in position order (issue #757)."""
+    with get_conn() as conn:
+        _create_sprint_lifecycle_tables(conn)
+        rows = conn.execute(
+            "SELECT issue FROM sprint_ticket_order WHERE label = ? "
+            "ORDER BY position",
+            (label,),
+        ).fetchall()
+    return [r["issue"] for r in rows]
+
+
+def upsert_issues(repo: str, issues: list[dict]) -> int:
+    """Upsert a batch of gh-CLI-shaped issue dicts into the mirror.
+
+    Each issue dict is expected to carry: number, title, state, labels (list of
+    {name, color}), updatedAt, plus any extra fields (assignees, url, body) which
+    are preserved in the `raw` column.  Returns the number of issues written.
+    """
+    if not issues:
+        return 0
+    with get_conn() as conn:
+        _create_issues_table(conn)
+        for issue in issues:
+            number = issue.get("number")
+            if number is None:
+                continue
+            labels = issue.get("labels") or []
+            conn.execute(
+                """INSERT INTO issues
+                       (repo, issue_number, title, state, labels, updated_at, raw)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(repo, issue_number) DO UPDATE SET
+                       title      = excluded.title,
+                       state      = excluded.state,
+                       labels     = excluded.labels,
+                       updated_at = excluded.updated_at,
+                       raw        = excluded.raw""",
+                (
+                    repo,
+                    int(number),
+                    issue.get("title", ""),
+                    issue.get("state", ""),
+                    json.dumps(labels),
+                    issue.get("updatedAt", "") or issue.get("updated_at", ""),
+                    json.dumps(issue),
+                ),
+            )
+        conn.commit()
+    return len(issues)
+
+
+def _row_to_issue(row: sqlite3.Row) -> dict:
+    """Reconstruct a gh-CLI-shaped issue dict from a mirror row."""
+    if row["raw"]:
+        try:
+            return json.loads(row["raw"])
+        except (ValueError, TypeError):
+            pass
+    return {
+        "number": row["issue_number"],
+        "title": row["title"],
+        "state": row["state"],
+        "labels": json.loads(row["labels"]) if row["labels"] else [],
+        "updatedAt": row["updated_at"],
+    }
+
+
+def get_mirrored_issues(repo: str, state: str | None = None) -> list[dict]:
+    """Return mirrored issues for a repo as gh-CLI-shaped dicts.
+
+    Optionally filter by state ('open' / 'closed').  Returns an empty list when
+    nothing is mirrored yet (callers may then fall back to a live fetch).
+    """
+    sql = "SELECT * FROM issues WHERE repo = ?"
+    params: list = [repo]
+    if state is not None:
+        sql += " AND state = ?"
+        params.append(state)
+    sql += " ORDER BY issue_number DESC"
+    with get_conn() as conn:
+        _create_issues_table(conn)
+        rows = conn.execute(sql, params).fetchall()
+    return [_row_to_issue(r) for r in rows]
+
+
+def get_mirrored_issue(repo: str, issue_number: int) -> dict | None:
+    """Return a single mirrored issue, or None if not present."""
+    with get_conn() as conn:
+        _create_issues_table(conn)
+        row = conn.execute(
+            "SELECT * FROM issues WHERE repo = ? AND issue_number = ?",
+            (repo, int(issue_number)),
+        ).fetchone()
+    return _row_to_issue(row) if row else None
+
+
+def get_sync_etag(key: str) -> str | None:
+    """Return the stored ETag for *key*, or None."""
+    with get_conn() as conn:
+        _create_sync_state_table(conn)
+        row = conn.execute(
+            "SELECT etag FROM sync_state WHERE key = ?", (key,)
+        ).fetchone()
+    return row["etag"] if row and row["etag"] else None
+
+
+def set_sync_etag(key: str, etag: str) -> None:
+    """Store the ETag for *key* (used as If-None-Match on the next poll)."""
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
+    with get_conn() as conn:
+        _create_sync_state_table(conn)
+        conn.execute(
+            """INSERT INTO sync_state (key, etag, updated_at)
+               VALUES (?, ?, ?)
+               ON CONFLICT(key) DO UPDATE SET
+                   etag = excluded.etag, updated_at = excluded.updated_at""",
+            (key, etag, now),
+        )
+        conn.commit()
+
+
+# ── Bootstrap schema marker (issue #760) ──────────────────────────────────────
+#
+# A fresh clone starts with no commander.db, so the mirror is empty until a sync
+# runs. The server detects this on startup via the *absence* of a schema-marker
+# row and runs a one-time full GitHub sync before handing off to the ETag loop.
+# The marker is stored in the sync_state table under a reserved key so a second
+# start can detect it and skip the bootstrap.
+
+# v2: the original bootstrap synced only one page (~100 newest issues), so the
+# mirror was partial. Bumping the marker key makes existing installs re-run the
+# (now paginated) full crawl on next start; the old key is left behind, inert.
+BOOTSTRAP_MARKER_KEY = "bootstrap:complete:v2"
+
+
+def is_bootstrap_complete() -> bool:
+    """Return True if the bootstrap schema-marker row is present (issue #760)."""
+    with get_conn() as conn:
+        _create_sync_state_table(conn)
+        row = conn.execute(
+            "SELECT 1 FROM sync_state WHERE key = ?", (BOOTSTRAP_MARKER_KEY,)
+        ).fetchone()
+    return row is not None
+
+
+def mark_bootstrap_complete() -> None:
+    """Write the bootstrap schema-marker row on a successful full sync (issue #760)."""
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
+    with get_conn() as conn:
+        _create_sync_state_table(conn)
+        conn.execute(
+            """INSERT INTO sync_state (key, etag, updated_at)
+               VALUES (?, ?, ?)
+               ON CONFLICT(key) DO UPDATE SET updated_at = excluded.updated_at""",
+            (BOOTSTRAP_MARKER_KEY, "1", now),
+        )
+        conn.commit()
+
+
+def record_ticket_status(
+    issue: str | int,
+    status: str,
+    actor: str,
+    note: str | None = None,
+    ts: str | None = None,
+) -> None:
+    """Write a ticket_status row for a successful transition (issue #755).
+
+    `ts` defaults to the current UTC timestamp in the same ISO-8601 format used
+    by the other tables.  Ensures the table exists before inserting, so callers
+    don't need to have run init_db() first.
+    """
+    if ts is None:
+        ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
+    with get_conn() as conn:
+        _create_ticket_status_table(conn)
+        conn.execute(
+            "INSERT INTO ticket_status (issue, status, actor, note, ts) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (str(issue), status, actor, note, ts),
+        )
         conn.commit()
 
 

@@ -63,7 +63,7 @@ Unique constraint: `(scope, project, key)`.
 
 Helpers: `get_setting(key, project=None)` and `set_setting(scope, key, value, project=None)` in `services/sprint_manager/settings_repo.py`.
 
-Global seed row: `scope='global'`, `key='estimation'`, `value={"size_minutes":{"S":5,"M":15,"L":30,"XL":60},"buffer_pct":20,"thin_ac_buffer_pct":30}`.
+Global seed row: `scope='global'`, `key='estimation'`, `value={"size_minutes":{"S":5,"M":15,"L":30,"XL":90},"buffer_pct":20,"thin_ac_buffer_pct":30}`. The `size_minutes` map is no longer redeclared here — `DEFAULT_ESTIMATION_CFG` imports the single canonical `SIZE_TO_MINUTES` from `services/sprint_manager/sizing.py` (issue #766). XL raised 60→90; size minutes now mean full-pipeline wall-clock (coder + tester, in-progress → UAT), not isolated agent effort.
 
 ### projects
 
@@ -102,8 +102,14 @@ Unique constraint: `(project_id, env)`.
 | `e5f6a1b2c3d4` | Add `actual_elapsed_seconds` (renamed) and `total_tokens` to `sprint_tickets` |
 | `f6a7b8c9d0e1` | Add `events` table for structured log events |
 | `g7h8i9j0k1l2` | Add `settings` KV table; add `estimated_size` to `sprint_tickets`; seed global estimation row |
+| `h8i9j0k1l2m3` | Add `state` / `ended_at` / `end_reason` / `parent_label` to `sprints`; add `failed` to `sprint_status_enum`; add `sprint_ticket_order` table (issue #757) |
+| `i9j0k1l2m3n4` | Add `agent_runs` table for per-agent duration tracking (portable Integer/Text columns; SQLite + Postgres) (issue #764) |
+
+> **Neon is now an optional export target only (issue #758).** The dashboard and sprint manager run entirely off SQLite + local JSON; nothing writes to Neon in live paths. The Alembic migrations and SQLAlchemy models above remain so `scripts/export_to_neon.py` can push a snapshot on demand (`DATABASE_URL=… python scripts/export_to_neon.py`).
 
 ## SQLite Tables (local dashboard)
+
+SQLite is the **authoritative, only live** store. As of sprint 57 it also holds the dashboard read model (`issues` mirror), ticket write-through state (`ticket_status`), and durable sprint lifecycle state (`sprints` + `sprint_ticket_order`). On first run from an empty DB the dashboard bootstraps a full GitHub sync to populate these tables (issue #760).
 
 | Table | Description |
 |---|---|
@@ -111,8 +117,54 @@ Unique constraint: `(project_id, env)`.
 | `events` | Streamed agent events (tool use, output, errors) |
 | `token_usage` | Per-agent token consumption with `agent_role` and `model_name` columns |
 | `project_events` | Structured audit log of project-level actions (settings changes, env path updates, etc.) |
+| `ticket_status` | Write-through ticket state recorded by `state_machine.transition()` after a successful GitHub label edit (issue #755) |
+| `issues` | Local mirror of repo issues kept fresh by ETag-conditional polling; the dashboard read-path serves from here, not GitHub (issue #756) |
+| `sync_state` | Per-key ETags for `If-None-Match` conditional GitHub requests (issue #756) |
+| `sprints` | Durable sprint lifecycle state — replaces the ephemeral `{label}-plan.json` / `{label}-pid` files as source of truth (issue #757) |
+| `sprint_ticket_order` | Ticket execution order per sprint (`label`, `issue`, `position`) (issue #757) |
+| `agent_runs` | One row per dispatched agent (coder, tester, …) with its own start/finish timestamps and wall-clock duration per issue (issue #764) |
+
+### ticket_status (issue #755)
+
+Append-only write-through log; the latest row per issue is the current state. Lets the read-path skip a post-edit GitHub verify re-fetch.
+
+| Column | Type | Description |
+|---|---|---|
+| `id` | integer PK | Auto-increment |
+| `issue` | text NOT NULL | Issue number |
+| `status` | text NOT NULL | State written after the label edit (e.g. `sit`, `uat`, `blocked`) |
+| `actor` | text NOT NULL | Who wrote it (agent role / `dashboard`) |
+| `note` | text | Optional note; nullable |
+| `ts` | text NOT NULL | ISO 8601 timestamp |
+
+Index: `(issue, ts DESC)`.
+
+### issues (issue #756)
+
+Mirror of repo issues. `labels` and `raw` hold JSON — `raw` is the full gh-CLI-shaped issue dict so readers reconstruct fields without a live call. Composite PK `(repo, issue_number)` allows multiple mirrored repos.
+
+| Column | Type | Description |
+|---|---|---|
+| `repo` | text NOT NULL DEFAULT '' | Repo slug, e.g. `zealchaiwut/commander` |
+| `issue_number` | integer NOT NULL | Issue number |
+| `title` | text | Issue title |
+| `state` | text | `open` / `closed` |
+| `labels` | text NOT NULL DEFAULT '[]' | JSON array of labels |
+| `updated_at` | text | GitHub `updated_at` |
+| `raw` | text | Full gh-CLI-shaped issue JSON |
+
+Index: `(repo, state)`.
+
+### sprints / sprint_ticket_order (issue #757)
+
+`sprints.state` is constrained to `planning` / `running` / `completed` / `cancelled` / `failed` (`failed` reserved for a future watchdog recovery sprint — no writer yet). The `{label}-plan.json` / `{label}-pid` files continue to be written as a deprecated cache until a later sprint removes them.
+
+`sprints` columns: `label` (PK), `project`, `state`, `created_at`, `started_at`, `ended_at`, `end_reason`, `parent_label`.
+`sprint_ticket_order` columns: `label`, `issue`, `position` — PK `(label, issue)`, index `(label, position)`.
 
 Query with `GET /api/debug/token-usage/by-agent-model` for per-agent/model cost breakdown.
+
+The `events` table also records dashboard activity events surfaced in the activity log: `ticket_label_changed` on every real label transition (issue #720), and scoped `sprint_started` / `sprint_finished` / `sprint_rerun` lifecycle events keyed to the target project (issue #721). Agent rows carry role + issue number so the activity log can link to the GitHub issue (issue #719).
 
 ### project_events
 
@@ -131,6 +183,28 @@ Audit log for project-level events recorded by `record_project_event()` in `apps
 | `data` | text | JSON-encoded payload with before/after values or other context; nullable |
 
 Indexes: `(project, created_at DESC)`, `(project, target)`, `(action_id)`.
+
+### agent_runs (issue #764)
+
+One row per dispatched agent per ticket, recorded at dispatch and finalized when
+the agent finishes. Replaces ticket-level timing that only captured the whole
+wall-clock span and lost per-agent resolution. Created identically on SQLite
+(`_create_agent_runs_table` in `apps/dashboard/db.py`) and Postgres (Alembic
+`0009_add_agent_runs`) using portable Integer/Text columns.
+
+| Column | Type | Description |
+|---|---|---|
+| `id` | integer PK | Auto-increment |
+| `issue_number` | integer NOT NULL | GitHub issue number |
+| `sprint_label` | text NOT NULL | Sprint label, e.g. `sprint-58` |
+| `agent` | text NOT NULL | Agent role (`coder`, `tester`, `documenter`, `reviewer`, `estimator`) |
+| `started_at` | text NOT NULL | ISO 8601 dispatch timestamp |
+| `finished_at` | text | ISO 8601 finish timestamp; nullable while running |
+| `duration_seconds` | integer | Wall-clock seconds for the run; nullable while running |
+| `outcome` | text | Run outcome; nullable |
+| `total_tokens` | integer | Tokens consumed by this agent run; nullable |
+
+Indexes: `(issue_number, agent)`, `(sprint_label)`.
 
 ## API Endpoints
 
@@ -152,6 +226,14 @@ Indexes: `(project, created_at DESC)`, `(project, target)`, `(action_id)`.
 > It now always returns HTTP 200. Clients must check `state`, not the HTTP status code.
 > See `docs/features/api.md` for the full response shape reference.
 
+### Sprint file maintenance (issue #735)
+
+Archives stale per-sprint runtime files for a project's *finished* sprints into a reversible `.commander/sprints/archive/` subfolder. A sprint counts as finished only when it has a posted summary issue **or** a summary markdown **and** no live process is running it. Only `sprint-N-plan.json`, the zero-issue `sprint-N.json` placeholder, and `sprint-N-state.json` are moved; `sprint-N-status.json`, `sprint-N-estimate.json`, and summary markdown are never touched, and nothing is ever deleted. Idempotent. Also available as the CLI `python scripts/clean_sprint_files.py --project <id> [--dry-run]`.
+
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/api/maintenance/sprints/cleanup` | Body `{"project": "<id>", "dry_run": false}`. Archives finished-sprint runtime files; returns `{"archived": [...], "kept_count": N, "dry_run": bool}`. With `dry_run: true` returns the same shape without moving anything (UI preview before confirmation) |
+
 ### Docs Scaffold
 
 | Method | Path | Description |
@@ -169,3 +251,40 @@ Indexes: `(project, created_at DESC)`, `(project, target)`, `(action_id)`.
 | `GET` | `/api/projects/{slug}/analytics/calibration` | Estimate accuracy data: estimated vs actual durations per size bucket |
 
 Query params for calibration endpoint: `since` (ISO date), `until` (ISO date), `sprint` (label string) — all optional.
+
+> **Note (issue #718):** Analytics metrics and calibration are sourced from local sprint state and estimate files under `.commander/`, not Neon. The analytics page works with the Neon kill switch enabled.
+
+### Notes
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/notes` | Return the global notes body (`{"body": "..."}`); empty string if none saved yet |
+| `PUT` | `/api/notes` | Persist the full global notes body (`{"body": "..."}`) to `.commander/notes.json` |
+
+### Deploy (issues #722–#726)
+
+Per-environment deploy/restart for the `prd` and `uat` environments. Each environment declares a `host` of `local` (launchd / stop-start scripts, pull-only `git pull --ff-only`) or `render` (Render API). Config persists under the `deploy_config` settings key (scope `project`).
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/projects/{slug}/deploy-config` | Merged deploy config (seed defaults + stored overrides). Secret-safe: `render_api_key` is never returned in cleartext — render entries carry `render_api_key_set` (bool) and `render_api_key_masked` (e.g. `rnd_...cret`) instead |
+| `PUT` | `/api/projects/{slug}/deploy-config` | Merge an incoming config per environment. A `render_api_key` that is omitted/null/empty leaves the stored secret unchanged; a non-empty value replaces it |
+| `POST` | `/api/projects/{slug}/environments/{env}/deploy` | Trigger a deploy. `host=local` runs `git pull --ff-only origin <branch>` (no merge/push/checkout); `host=render` triggers a Render deploy |
+| `POST` | `/api/projects/{slug}/environments/{env}/restart` | Restart the service. `host=local` uses `launchctl kickstart -k` (or configured stop/start scripts); restarting the dashboard's own process (`com.commander.dashboard`) routes through a detached helper so the 202 response flushes first. `host=render` calls the Render restart API |
+| `GET` | `/api/projects/{slug}/environments/{env}/deploy-status` | Latest deploy status, normalized to `queued` / `building` / `live` / `failed`, plus commit SHA and last-deploy timestamp |
+| `GET` | `/api/deploy/overview` | Secret-safe deploy cards aggregated across the known deploy projects (commander, perf-coach) for the Deploy tab |
+| `POST` | `/api/projects/{slug}/environments/{env}/deploy-config/validate` | Validate an inline `working_dir` / `port` edit before persisting (issue #769). Port must be int 1–65535 and free on host; returns 400 with a user-visible message on failure, `200 {"ok": true}` when valid |
+| `POST` | `/api/projects/{slug}/environments/{env}/stop` | Stop a local environment's service without destroying it (issue #771). `host=render` rejected with 400 |
+| `POST` | `/api/projects/{slug}/environments/{env}/start` | Start a local environment's service without pulling code (issue #771). `host=render` rejected with 400 |
+| `GET` | `/api/projects/{slug}/environments/{env}/run-state` | Live run state of a local environment — `running` / `stopped` / `idle` (issue #771). `host=local` only; `host=render` rejected with 400 (render run-state is derived client-side from deploy status) |
+
+> The Deploy tab is scoped to the active project only (issue #768). Deploy cards also surface and inline-edit the run folder + port (issue #769), show a live capped log tail after deploy/restart/start (issue #770), and expose Start/Stop controls with a run-state badge alongside Deploy/Restart (issue #771). Headless `gh` auth for the launchd dashboard is wired via `GH_TOKEN` in the launchd plist + agent `.env` (issue #772).
+
+### Env-var editor (issue #727)
+
+Render-style `.env` editor for a project environment. Values are masked in the UI with per-row reveal; writes preserve original line order and inline comments for unchanged keys, rewrite changed keys in place, drop omitted keys, and append new keys.
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/projects/{slug}/environments/{env}/env-vars` | Read the environment's `.env` as `[{"key", "value"}, ...]`; `[]` when the file does not exist |
+| `PUT` | `/api/projects/{slug}/environments/{env}/env-vars` | Write the submitted key/value set back to the `.env` file (order/comment preserving) |

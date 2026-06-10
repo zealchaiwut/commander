@@ -45,6 +45,10 @@
       --steel-bg:     #e0eaf8;
       --yellow:       #a16207;
       --yellow-bg:    #fefce8;
+      --teal:         #0f766e;
+      --teal-bg:      #ccfbf1;
+      --pink:         #be185d;
+      --pink-bg:      #fce7f3;
       --sidebar-width: 220px;
       --color-success:    #dcfce7;
       --color-success-fg: #16a34a;
@@ -81,6 +85,10 @@
       --steel-bg:     rgba(122,163,212,.13);
       --yellow:       #facc15;
       --yellow-bg:    rgba(250,204,21,.13);
+      --teal:         #2dd4bf;
+      --teal-bg:      rgba(45,212,191,.15);
+      --pink:         #f472b6;
+      --pink-bg:      rgba(244,114,182,.15);
       --color-success:    rgba(34,197,94,.15);
       --color-success-fg: #22c55e;
       --color-error:      rgba(239,68,68,.15);
@@ -147,6 +155,7 @@
     .snav-dot--finished { background: #2563eb; }
     .snav-dot--rework   { background: #ef4444; box-shadow: 0 0 0 3px rgba(239,68,68,.15); }
     .snav-uat        { color: #f59e0b; font-weight: 600; }
+    .snav-agents     { color: var(--blue); font-weight: 600; font-family: var(--mono); letter-spacing: .02em; }
     .snav-inprogress { color: #2563eb; font-weight: 600; }
     .snav-rework     { color: #ef4444; font-weight: 600; }
     .snav-caret { font-size: 12px; color: var(--text-muted); }
@@ -1043,6 +1052,44 @@
     .ps-btn:hover { background: var(--surface-hover); }
     .ps-btn-primary { background: var(--text); color: var(--surface); border-color: var(--text); }
     .ps-btn-ghost { border-color: transparent; color: var(--text-muted); }
+    /* ── Environment Variables editor (issue #727) ── */
+    .ps-envvars-section { padding: 14px 0; border-top: 1px solid var(--border); }
+    .ps-envvars-section:first-child { border-top: none; padding-top: 4px; }
+    .ps-envvars-head {
+      display: flex; align-items: center; gap: 10px; margin-bottom: 8px;
+    }
+    .ps-envvars-env {
+      font-family: var(--mono); font-size: 11px; font-weight: 700;
+      letter-spacing: .05em; text-transform: uppercase;
+      padding: 2px 9px; border-radius: 999px;
+      background: var(--surface-2); color: var(--text-sub); border: 1px solid var(--border);
+    }
+    .ps-envvars-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .ps-envvars-table th {
+      text-align: left; font-size: 10px; font-weight: 700;
+      letter-spacing: .06em; text-transform: uppercase;
+      color: var(--text-sub); padding: 6px 10px; border-bottom: 1px solid var(--border);
+    }
+    .ps-envvars-table td {
+      padding: 7px 10px; border-bottom: 1px solid var(--border);
+      vertical-align: top;
+    }
+    .ps-envvars-table tr:last-child td { border-bottom: none; }
+    .ps-envvar-key { font-family: var(--mono); color: var(--text); font-weight: 500; }
+    .ps-envvar-val { font-family: var(--mono); color: var(--text); word-break: break-all; }
+    .ps-envvar-val.is-masked { color: var(--text-muted); letter-spacing: 2px; }
+    .ps-envvar-actions { width: 44px; text-align: right; white-space: nowrap; }
+    .ps-envvar-key-inp, .ps-envvar-val-inp { width: 100%; font-family: var(--mono); }
+    .ps-envvar-key-inp.is-invalid { border-color: var(--red); box-shadow: 0 0 0 3px var(--red-bg); }
+    .ps-envvar-error { color: var(--red); font-size: 11px; margin-top: 4px; min-height: 0; }
+    .ps-icon-btn {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 32px; height: 32px; min-width: 32px;
+      border: 1px solid var(--border); background: var(--surface);
+      color: var(--text-muted); border-radius: 6px; cursor: pointer;
+    }
+    .ps-icon-btn:hover { background: var(--surface-hover); color: var(--text); }
+    .ps-icon-btn:focus-visible { outline: none; border-color: var(--blue); box-shadow: 0 0 0 3px var(--blue-bg); }
     @media (max-width: 640px) {
       .proj-settings-wrap { gap: 12px; }
       .ps-est-table th:nth-child(3), .ps-est-table td:nth-child(3) { display: none; }
@@ -1070,6 +1117,178 @@
       display: flex; align-items: flex-start; gap: 6px;
     }
     .ps-machine-note .ti { margin-top: 1px; flex-shrink: 0; }
+
+    /* ── Deploy actions card (issue #723) ── */
+    .ps-deploy-out {
+      font-family: var(--mono); font-size: 12px; line-height: 1.5;
+      background: var(--surface-2, #0f172a); color: var(--text-sub);
+      border: 1px solid var(--border, #334155); border-radius: 8px;
+      padding: 10px 12px; margin: 4px 0 12px; white-space: pre-wrap;
+      word-break: break-word; max-height: 220px; overflow: auto;
+    }
+    /* Render deploy status pill (issue #725) */
+    .ps-deploy-status {
+      font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+      padding: 3px 10px; border-radius: 999px;
+      background: var(--surface-2, #1e293b); color: var(--text-sub);
+    }
+    .ps-deploy-status--queued { background: var(--surface-2, #1e293b); color: var(--text-sub); }
+    .ps-deploy-status--building { background: var(--amber-bg); color: var(--amber); }
+    .ps-deploy-status--live { background: var(--green-bg); color: var(--green); }
+    .ps-deploy-status--failed { background: var(--red-bg, #3f1d1d); color: var(--error, #ef4444); }
+
+    /* ── Deploy tab (issue #726) ── */
+    .deploy-grid {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+      gap: 16px; max-width: 1280px;
+    }
+    .deploy-tab-intro { color: var(--text-muted); font-size: 13px; line-height: 1.5; margin: 0 0 20px; max-width: 720px; }
+    .deploy-card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 8px; padding: 16px 18px; display: flex; flex-direction: column; gap: 12px;
+    }
+    .deploy-card__head { display: flex; align-items: center; gap: 8px; }
+    .deploy-card__title { font-size: 15px; font-weight: 700; color: var(--text); }
+    .deploy-card__project { font-size: 12px; color: var(--text-muted); font-weight: 500; }
+    .deploy-card__badge {
+      font-size: 10.5px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+      padding: 2px 9px; border-radius: 999px; border: 1px solid var(--border);
+    }
+    .deploy-card__badge--local  { background: var(--blue-bg); color: var(--blue); border-color: transparent; }
+    .deploy-card__badge--render { background: var(--purple-bg); color: var(--purple); border-color: transparent; }
+    .deploy-card__meta { display: flex; flex-direction: column; gap: 6px; font-size: 12.5px; }
+    .deploy-card__meta-row { display: flex; gap: 8px; align-items: baseline; }
+    .deploy-card__meta-label { color: var(--text-muted); min-width: 92px; flex-shrink: 0; }
+    .deploy-card__meta-val { color: var(--text); word-break: break-word; }
+    .deploy-card__meta-val.is-mono { font-family: var(--mono); font-size: 12px; }
+    /* Editable run folder + port rows (issue #769) */
+    .deploy-field-val { flex: 1; min-width: 0; }
+    .deploy-field-edit {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 24px; height: 24px; flex-shrink: 0; padding: 0;
+      border: 1px solid transparent; border-radius: 6px;
+      background: transparent; color: var(--text-sub); cursor: pointer;
+      transition: background .15s, color .15s, border-color .15s;
+    }
+    .deploy-field-edit:hover { background: var(--surface-2); color: var(--text); border-color: var(--border); }
+    .deploy-field-edit:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+    .deploy-card__meta-row.is-editing { align-items: flex-start; }
+    .deploy-field-edit-box { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; flex: 1; min-width: 0; }
+    .deploy-field-input {
+      flex: 1; min-width: 140px; min-height: 32px; padding: 6px 10px;
+      font-family: var(--mono); font-size: 12px; color: var(--text);
+      background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
+    }
+    .deploy-field-input:focus-visible { outline: 2px solid var(--blue); outline-offset: 1px; border-color: var(--blue); }
+    .deploy-field-actions { display: flex; gap: 8px; flex-shrink: 0; }
+    .deploy-field-error { flex-basis: 100%; color: var(--red); font-size: 12px; }
+    .status-pill {
+      font-size: 10.5px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+      padding: 2px 10px; border-radius: 999px;
+      background: var(--surface-2); color: var(--text-sub); margin-left: auto;
+    }
+    .status-pill--queued   { background: var(--surface-2); color: var(--text-sub); }
+    .status-pill--building { background: var(--amber-bg); color: var(--amber); }
+    .status-pill--live     { background: var(--green-bg); color: var(--green); }
+    .status-pill--idle     { background: var(--green-bg); color: var(--green); }
+    .status-pill--failed   { background: var(--red-bg, #3f1d1d); color: var(--error, #ef4444); }
+    /* ── Run-state pill (issue #771) ── running / stopped / idle ── */
+    .runstate-pill {
+      font-size: 10.5px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+      padding: 2px 10px; border-radius: 999px;
+      background: var(--surface-2); color: var(--text-sub);
+      display: inline-flex; align-items: center; gap: 6px;
+    }
+    .runstate-pill::before {
+      content: ""; width: 6px; height: 6px; border-radius: 999px;
+      background: currentColor; flex-shrink: 0;
+    }
+    .runstate-pill--running { background: var(--green-bg); color: var(--green); }
+    .runstate-pill--stopped { background: var(--red-bg); color: var(--red); }
+    .runstate-pill--idle    { background: var(--surface-2); color: var(--text-sub); }
+    .deploy-card__actions { display: flex; gap: 8px; flex-wrap: wrap; }
+    .deploy-btn {
+      display: inline-flex; align-items: center; gap: 6px; min-height: 36px;
+      padding: 7px 14px; border: 1px solid var(--border); border-radius: 6px;
+      background: var(--surface); color: var(--text); font-size: 13px; font-weight: 600;
+      cursor: pointer; font-family: inherit; transition: background .15s, border-color .15s;
+    }
+    .deploy-btn:hover:not(:disabled) { background: var(--surface-2); border-color: var(--text-sub); }
+    .deploy-btn:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+    .deploy-btn:disabled { opacity: .5; cursor: default; }
+    .deploy-btn--primary { background: var(--blue); border-color: var(--blue); color: #fff; }
+    .deploy-btn--primary:hover:not(:disabled) { filter: brightness(1.08); background: var(--blue); }
+    .deploy-btn--danger { color: var(--error, #ef4444); }
+    .deploy-startstop-na {
+      display: inline-flex; align-items: center; padding: 7px 0;
+      font-size: 12px; color: var(--text-sub); cursor: help;
+    }
+    .deploy-card__confirm {
+      display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+      background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px;
+      padding: 10px 12px; font-size: 13px; color: var(--text);
+    }
+    .deploy-card__confirm-msg { flex: 1; min-width: 160px; }
+    .deploy-card__log {
+      font-family: var(--mono); font-size: 12px; line-height: 1.5;
+      background: var(--surface-2); color: var(--text-sub);
+      border: 1px solid var(--border); border-radius: 8px;
+      padding: 10px 12px; white-space: pre-wrap; word-break: break-word;
+      max-height: 220px; overflow: auto; margin: 0;
+    }
+    .deploy-card__log.is-error { color: var(--error, #ef4444); }
+    /* ── Live log tail panel (issue #770) ── */
+    .deploy-log {
+      margin: 4px 0 0; border: 1px solid var(--border); border-radius: 8px;
+      background: var(--surface-2); overflow: hidden;
+    }
+    .deploy-log__head {
+      display: flex; align-items: center; gap: 8px;
+      padding: 8px 12px; border-bottom: 1px solid var(--border);
+    }
+    .deploy-log--collapsed .deploy-log__head { border-bottom: none; }
+    .deploy-log__status {
+      display: inline-flex; align-items: center; gap: 6px;
+      font-size: 11px; font-weight: 600; letter-spacing: .02em;
+      padding: 2px 8px; border-radius: 999px;
+      background: var(--surface); color: var(--text-muted);
+    }
+    .deploy-log__status--running { background: var(--amber-bg); color: var(--amber); }
+    .deploy-log__status--success { background: var(--green-bg); color: var(--green); }
+    .deploy-log__status--failure { background: var(--red-bg); color: var(--red); }
+    .deploy-log__toggle {
+      margin-left: auto; display: inline-flex; align-items: center; justify-content: center;
+      width: 24px; height: 24px; padding: 0; border-radius: 6px;
+      border: 1px solid transparent; background: transparent;
+      color: var(--text-muted); cursor: pointer;
+    }
+    .deploy-log__toggle:hover { background: var(--surface-hover); color: var(--text); }
+    .deploy-log__toggle:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+    .deploy-log__body {
+      font-family: var(--mono); font-size: 12px; line-height: 1.5;
+      color: var(--text-sub); padding: 10px 12px; margin: 0;
+      max-height: 220px; overflow: auto;
+      white-space: pre-wrap; word-break: break-word;
+    }
+    .deploy-log--collapsed .deploy-log__body { display: none; }
+    .deploy-log__line { display: block; }
+    .deploy-log__line--error { color: var(--red); font-weight: 600; }
+    .deploy-spin { display: inline-block; animation: deploy-reconnect-spin .9s linear infinite; }
+    /* Self-restart reconnect overlay (AC10/AC11) */
+    .deploy-reconnect-overlay {
+      position: fixed; inset: 0; z-index: 9999;
+      display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px;
+      background: color-mix(in srgb, var(--surface) 92%, transparent);
+      backdrop-filter: blur(4px); color: var(--text); text-align: center; padding: 24px;
+    }
+    .deploy-reconnect-overlay__spinner {
+      width: 40px; height: 40px; border-radius: 50%;
+      border: 3px solid var(--border); border-top-color: var(--blue);
+      animation: deploy-reconnect-spin .9s linear infinite;
+    }
+    @keyframes deploy-reconnect-spin { to { transform: rotate(360deg); } }
+    .deploy-reconnect-overlay__title { font-size: 18px; font-weight: 700; }
+    .deploy-reconnect-overlay__sub { font-size: 13px; color: var(--text-muted); max-width: 360px; }
 
     /* ── Scaffold docs card (issue #681) ── */
     .ps-scaffold-actions { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
@@ -1101,6 +1320,14 @@
     .ps-scaffold-dialog-list { font-size: 12px; font-family: var(--mono); margin: 0 0 18px; padding: 0 0 0 16px; }
     .ps-scaffold-dialog-list li { padding: 2px 0; color: var(--text-sub); }
     .ps-scaffold-dialog-btns { display: flex; justify-content: flex-end; gap: 10px; }
+    /* Danger zone (delete project) */
+    .ps-danger-card { border-color: color-mix(in srgb, var(--red) 35%, var(--border)); }
+    .ps-danger-icon { color: var(--red); }
+    .ps-btn-danger { background: var(--red); color: #fff; border: 1px solid var(--red); }
+    .ps-btn-danger:hover:not(:disabled) { background: color-mix(in srgb, var(--red) 88%, #000); }
+    .ps-btn-danger:disabled { opacity: .5; cursor: not-allowed; }
+    .ps-input { padding: 7px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--text); font-size: 13px; font-family: inherit; margin-bottom: 14px; }
+    .ps-input:focus { outline: none; border-color: var(--red); }
     .ps-scaffold-confirm-btn { background: var(--text); color: var(--surface); border: none; padding: 7px 16px; border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer; }
     .ps-scaffold-cancel-btn { border: 1px solid var(--border); background: var(--surface); color: var(--text); padding: 7px 13px; border-radius: 6px; font-size: 13px; cursor: pointer; }
     .ps-scaffold-cancel-btn:hover { background: var(--surface-hover); }
@@ -1857,7 +2084,7 @@
     }
     .smgmt-ticket.drag-before { box-shadow: inset 0 2px 0 var(--blue); }
     .smgmt-ticket.drag-after  { box-shadow: inset 0 -2px 0 var(--blue); }
-    .smgmt-ticket.is-selected { background: var(--blue-bg); border-left: 3px solid var(--blue); }
+    .smgmt-ticket.is-selected { background: var(--blue-bg); box-shadow: inset 0 0 0 1px var(--blue); }
     .smgmt-ticket-grip {
       color: var(--text-sub); font-size: 13px; flex-shrink: 0;
       opacity: 0; transition: opacity 0.15s, color 0.15s, transform 0.12s;
@@ -1874,12 +2101,12 @@
     .smgmt-ticket.is-selected .smgmt-ticket-cb,
     .smgmt-sprint-list.has-selection .smgmt-ticket-cb { opacity: 1; }
     .smgmt-ticket-num {
-      font-family: var(--mono); font-size: 12px; color: var(--text-sub);
+      font-family: var(--mono); font-size: 12px; color: var(--text-muted);
       text-decoration: none; flex-shrink: 0; min-width: 42px;
     }
     .smgmt-ticket-num:hover { color: var(--blue); }
     .smgmt-ticket-title {
-      flex: 1; font-weight: 500; line-height: 1.4; min-width: 0;
+      flex: 1; font-weight: 600; color: var(--text); line-height: 1.4; min-width: 0;
       white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
     .smgmt-ticket-status {
@@ -1895,9 +2122,9 @@
 
     /* Per-ticket outcome icon */
     .smgmt-outcome-icon { font-size: 14px; flex-shrink: 0; line-height: 1; }
-    .smgmt-outcome-icon.outcome-success  { color: #16a34a; }
-    .smgmt-outcome-icon.outcome-rework   { color: #ef4444; }
-    .smgmt-outcome-icon.outcome-active   { color: #2563eb; }
+    .smgmt-outcome-icon.outcome-success  { color: var(--green); }
+    .smgmt-outcome-icon.outcome-rework   { color: var(--red); }
+    .smgmt-outcome-icon.outcome-active   { color: var(--blue); }
     .smgmt-outcome-icon.outcome-backlog  { color: var(--text-sub); opacity: .45; }
 
     /* ── Outcome band + 4-state pane coloring (sprint-26 parity port) ── */
@@ -2083,6 +2310,22 @@
     .smgmt-log-line.log-warn     .smgmt-log-msg { color: var(--amber); }
     .smgmt-log-line.log-fail     .smgmt-log-msg { color: var(--red); }
     .smgmt-log-pid { font-family: var(--mono); font-size: 11px; color: var(--text-muted); margin-left: 4px; }
+    /* ── Log chips: issue refs + agent names (issue #765) ──
+       Shared by the live log panel, Activity-tab run rows, and post-run summary
+       excerpt. Mono tint-fill + solid color, mirroring .lbl-chip. */
+    .log-chip {
+      font-family: var(--mono); font-size: 11px; font-weight: 600;
+      padding: 0 5px; border-radius: 4px; white-space: nowrap;
+      vertical-align: baseline; line-height: 1.5;
+    }
+    .log-chip--issue { color: var(--blue); background: var(--blue-bg); text-decoration: none; }
+    .log-chip--issue:hover { text-decoration: underline; }
+    .log-agent-coder      { color: var(--blue);   background: var(--blue-bg); }
+    .log-agent-tester     { color: var(--green);  background: var(--green-bg); }
+    .log-agent-reviewer   { color: var(--purple); background: var(--purple-bg); }
+    .log-agent-documenter { color: var(--amber);  background: var(--amber-bg); }
+    .log-agent-estimator  { color: var(--teal);   background: var(--teal-bg); }
+    .log-agent-ba         { color: var(--pink);   background: var(--pink-bg); }
     /* ── Live log panel (running sprint, issue #309) ── */
     .smgmt-live-log {
       border-top: 1px solid var(--border);
@@ -2980,39 +3223,39 @@
       50%       { box-shadow: 0 0 0 1px var(--green), 0 0 16px 5px rgba(22,163,74,.32); }
     }
 
+    /* Running sprint owns the board: a confident green ring + tinted header,
+       matching the completed/rework state pattern. Calm dominance over three
+       competing animations — the single pulsing dot is the only state motion. */
     .smgmt-sprint-card.smgmt-running {
       border-color: var(--green);
-      animation: smgmt-glow-pulse 2.4s ease-in-out infinite;
+      box-shadow: 0 0 0 3px var(--green-bg), 0 1px 3px rgba(0,0,0,0.05);
+    }
+    .smgmt-sprint-card.smgmt-running .smgmt-sprint-header {
+      background: linear-gradient(180deg, var(--green-bg) 0%, transparent 100%);
     }
 
-    /* Flowing top stripe */
+    /* Solid top accent (no flowing animation, no hardcoded greens). */
     .smgmt-running-stripe {
       height: 3px;
       border-radius: 8px 8px 0 0;
-      background: linear-gradient(
-        90deg,
-        var(--green) 0%,
-        #4ade80 25%,
-        #86efac 50%,
-        #4ade80 75%,
-        var(--green) 100%
-      );
-      background-size: 200% 100%;
-      animation: smgmt-running-stripe 2s linear infinite;
+      background: var(--green);
     }
 
-    /* Pulsing "Running" badge */
+    /* "Running" badge — firm, not pulsing; only its dot signals live. */
     .smgmt-running-badge {
       display: inline-flex; align-items: center; gap: 5px;
-      padding: 3px 9px; border-radius: 999px;
+      padding: 4px 10px; border-radius: 999px;
       font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
       font-family: var(--mono);
       background: var(--green-bg); color: var(--green);
-      animation: smgmt-running-badge-pulse 2s ease-in-out infinite;
     }
     .smgmt-running-badge .smgmt-running-badge-dot {
       width: 6px; height: 6px; border-radius: 50%;
       background: var(--green);
+      animation: smgmt-running-badge-pulse 2s ease-in-out infinite;
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .smgmt-running-badge-dot { animation: none; }
     }
 
     /* Stat strip */
@@ -3180,6 +3423,65 @@
     }
     .level-sep-num { color: var(--text-sub); }
     .level-sep-desc { font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--text-sub); }
+
+    /* ── Dual active-agent cards + per-level progress (issue #739) ── */
+    .smgmt-active-agents {
+      display: flex; gap: 12px; flex-wrap: wrap;
+      padding: 12px 16px; border-bottom: 1px solid var(--border);
+    }
+    .smgmt-active-agent {
+      display: flex; align-items: center; gap: 8px; min-width: 0;
+      flex: 1 1 220px;
+      padding: 8px 12px; border-radius: 8px;
+      border: 1px solid var(--border); background: var(--surface-2);
+    }
+    .smgmt-active-agent--coder  { border-left: 3px solid var(--purple); }
+    .smgmt-active-agent--tester { border-left: 3px solid var(--amber); }
+    .smgmt-active-spinner {
+      display: inline-block; width: 14px; height: 14px; flex-shrink: 0;
+      border: 2px solid var(--border); border-top-color: var(--blue);
+      border-radius: 50%; animation: smgmt-spin .7s linear infinite;
+    }
+    .smgmt-active-agent--coder  .smgmt-active-spinner { border-top-color: var(--purple); }
+    .smgmt-active-agent--tester .smgmt-active-spinner { border-top-color: var(--amber); }
+    .smgmt-active-role {
+      flex-shrink: 0; font-size: 12px; font-weight: 700;
+      text-transform: uppercase; letter-spacing: .03em; color: var(--text);
+    }
+    .smgmt-active-ticket {
+      display: flex; align-items: baseline; gap: 6px; min-width: 0;
+      font-size: 12px; color: var(--text-muted);
+    }
+    .smgmt-active-tnum { font-family: var(--mono); color: var(--text-sub); flex-shrink: 0; }
+    .smgmt-active-ttitle {
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+
+    .smgmt-levels {
+      display: flex; flex-direction: column; gap: 4px;
+      padding: 10px 16px; border-bottom: 1px solid var(--border);
+    }
+    .smgmt-level-row {
+      display: flex; align-items: center; gap: 8px;
+      font-size: 11px; color: var(--text-muted);
+    }
+    .smgmt-level-icon { display: inline-flex; width: 14px; justify-content: center; flex-shrink: 0; }
+    .smgmt-level-name {
+      flex-shrink: 0; font-weight: 600; letter-spacing: .03em;
+      text-transform: uppercase; color: var(--text-muted);
+    }
+    .smgmt-level-progress { font-family: var(--mono); color: var(--text-sub); }
+    .smgmt-level--complete .smgmt-level-name,
+    .smgmt-level--complete .smgmt-level-icon { color: var(--green); }
+    .smgmt-level--active .smgmt-level-name { color: var(--blue); }
+    .smgmt-level--waiting { color: var(--text-sub); }
+    .smgmt-level--waiting .smgmt-level-name,
+    .smgmt-level--waiting .smgmt-level-progress { color: var(--text-sub); }
+    .smgmt-level-spinner {
+      display: inline-block; width: 11px; height: 11px;
+      border: 2px solid var(--border); border-top-color: var(--blue);
+      border-radius: 50%; animation: smgmt-spin .7s linear infinite;
+    }
 
     /* Per-ticket size pill (issue #308) */
     .smgmt-ticket-size-pill {
@@ -4391,8 +4693,8 @@
     .pf-no-conflict { color: var(--text-muted); font-style: italic; margin: 0; }
     .pf-conflict-item {
       margin: 0 0 5px; padding: 6px 10px;
-      background: rgba(220, 38, 38, .07); border-left: 3px solid #ef4444;
-      border-radius: 0 4px 4px 0;
+      background: var(--red-bg); border: 1px solid var(--red);
+      border-radius: 5px;
     }
     .pf-conflict-item code {
       font-family: var(--font-mono, monospace); font-size: 11px;
@@ -4692,6 +4994,19 @@
     }
     .lr-desc { font-size: 13px; color: var(--text); }
     .lr-desc .mono { font-family: var(--mono); font-size: 12px; color: var(--text-muted); }
+    .evl-agent-role { font-weight: 600; color: var(--text); text-transform: capitalize; }
+    .evl-issue-link { color: var(--blue); text-decoration: none; font-weight: 600; }
+    .evl-issue-link:hover { text-decoration: underline; }
+    /* issue #764: per-agent run duration shown on finished agent rows */
+    .evl-agent-duration {
+      margin-left: 8px;
+      padding: 1px 6px;
+      border-radius: 4px;
+      background: var(--surface-2);
+      color: var(--text-sub);
+      font-size: 12px;
+      font-variant-numeric: tabular-nums;
+    }
     .lr-actor {
       font-family: var(--mono); font-size: 11px; color: var(--text-sub);
       display: inline-flex; align-items: center; gap: 4px;
@@ -4762,6 +5077,12 @@
       .smgmt-row-menu-btn,
       .smgmt-rename-btn,
       .smgmt-summary-row-action { opacity: 1; }
+      /* The selection checkbox was hover-only too, so multi-select was impossible
+         on touch (it only showed once a row was already selected — chicken-egg). */
+      .smgmt-ticket-cb { opacity: 1; }
+      /* Give rows a ~44px touch target without changing desktop density. */
+      .smgmt-ticket { padding-top: 11px; padding-bottom: 11px; }
+      #pane-sprint-mgmt.smgmt-compact .smgmt-ticket { padding-top: 8px; padding-bottom: 8px; }
     }
 
     /* ── Toast notifications (issue #426) ── */
@@ -4857,6 +5178,34 @@
     }
     .sb-settings-link .ti { font-size: 16px; }
 
+    /* ── Global notes panel (issue #717) ── */
+    .gnotes-content {
+      padding: 20px 28px 28px;
+      display: flex; flex-direction: column;
+      height: calc(100% - 65px); box-sizing: border-box;
+    }
+    .gnotes-hint {
+      font-size: 13px; color: var(--text-muted);
+      margin: 0 0 12px;
+    }
+    .gnotes-textarea {
+      flex: 1; width: 100%; box-sizing: border-box;
+      min-height: 320px; resize: none;
+      padding: 14px 16px;
+      border: 1px solid var(--border); border-radius: 8px;
+      background: var(--surface); color: var(--text);
+      font-family: "SF Mono", ui-monospace, monospace;
+      font-size: 13px; line-height: 1.6;
+    }
+    .gnotes-textarea:focus { outline: none; border-color: var(--blue); }
+    .gnotes-status {
+      font-size: 12px; color: var(--text-muted);
+      min-width: 60px; text-align: right;
+    }
+    .gnotes-status.saving { color: var(--text-muted); }
+    .gnotes-status.ok  { color: var(--color-success-fg); }
+    .gnotes-status.err { color: var(--color-error-fg); }
+
     /* ── Settings panel (issue #430) ── */
     .settings-panel {
       display: none;
@@ -4938,6 +5287,27 @@
     .anl-tab-btn:hover:not(.active) { background: var(--surface); }
     .anl-panel { display: none; flex-direction: column; gap: 16px; }
     .anl-panel.show { display: flex; }
+    /* Sprint Mgmt Board|History segmented control (issue #716) */
+    .smgmt-subtab-bar { display: flex; gap: 6px; padding: 14px 20px 0; }
+    .smgmt-subtab-btn { background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px; padding: 6px 16px; font-size: 13px; color: var(--text-muted); cursor: pointer; transition: background .15s, border-color .15s, color .15s; }
+    .smgmt-subtab-btn.active { background: var(--surface); border-color: var(--text-muted); color: var(--text); font-weight: 600; }
+    .smgmt-subtab-btn:hover:not(.active) { background: var(--surface); }
+    .smgmt-subview { display: none; }
+    .smgmt-subview.show { display: block; animation: smgmt-fade-in .18s ease; }
+    @keyframes smgmt-fade-in { from { opacity: 0; } to { opacity: 1; } }
+    /* Tactile press feedback on the board's buttons (user-triggered; safe from
+       the 15s auto-refresh re-render that would flicker any entrance motion). */
+    #pane-sprint-mgmt .btn-ghost:active,
+    #pane-sprint-mgmt .btn-primary:active,
+    .smgmt-subtab-btn:active,
+    .smgmt-collapse-btn:active { transform: scale(0.96); }
+    @media (prefers-reduced-motion: reduce) {
+      .smgmt-subview.show { animation: none; }
+      #pane-sprint-mgmt .btn-ghost:active,
+      #pane-sprint-mgmt .btn-primary:active,
+      .smgmt-subtab-btn:active,
+      .smgmt-collapse-btn:active { transform: none; }
+    }
     .anl-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
     .anl-card-head { padding: 12px 16px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 9px; }
     .anl-card-head .ti { color: var(--text-muted); font-size: 16px; flex-shrink: 0; }
@@ -5119,6 +5489,13 @@
         <span>Add project</span>
       </button>
 
+      <!-- Notes link (global — issue #717) -->
+      <button class="sb-settings-link" id="sb-notes-link"
+              onclick="openNotesPanel(event)" title="Global notes" aria-label="Notes">
+        <i class="ti ti-notes"></i>
+        <span>Notes</span>
+      </button>
+
       <!-- Settings link -->
       <button class="sb-settings-link" id="sb-settings-link"
               onclick="openSettingsPanel(event)" title="Project settings" aria-label="Settings">
@@ -5185,40 +5562,17 @@
                 aria-selected="false" onclick="switchTab('logs')">
           <i class="ti ti-terminal-2"></i>Logs
         </button>
+        <button class="stab" role="tab" id="stab-deploy"
+                aria-selected="false" onclick="switchTab('deploy')">
+          <i class="ti ti-rocket"></i>Deploy
+        </button>
         <!-- Analytics dropdown group -->
-        <div class="stab-group" id="stab-group-analytics">
-          <button class="stab stab-trigger" role="tab" aria-haspopup="true"
-                  onclick="toggleStabDropdown('analytics', event)">
-            <i class="ti ti-chart-bar"></i>Analytics<i class="ti ti-chevron-down stab-caret"></i>
-          </button>
-          <div class="stab-dropdown" id="stab-dropdown-analytics">
-            <button class="stab" role="tab" id="stab-metrics"
-                    aria-selected="false" onclick="switchTab('metrics')">
-              <i class="ti ti-chart-line"></i>Analytics
-            </button>
-            <button class="stab" role="tab" id="stab-status"
-                    aria-selected="false" onclick="switchTab('status')">
-              <i class="ti ti-pulse"></i>Status
-            </button>
-          </div>
-        </div>
-        <!-- More dropdown group -->
-        <div class="stab-group" id="stab-group-more">
-          <button class="stab stab-trigger" role="tab" aria-haspopup="true"
-                  onclick="toggleStabDropdown('more', event)">
-            <i class="ti ti-dots"></i>More<i class="ti ti-chevron-down stab-caret"></i>
-          </button>
-          <div class="stab-dropdown" id="stab-dropdown-more">
-            <button class="stab" role="tab" id="stab-sprint-history"
-                    aria-selected="false" onclick="switchTab('sprint-history')">
-              <i class="ti ti-history"></i>Sprint history
-            </button>
-            <button class="stab" role="tab" id="stab-notes"
-                    aria-selected="false" onclick="switchTab('notes')">
-              <i class="ti ti-notes"></i>Notes
-            </button>
-          </div>
-        </div>
+        <!-- Analytics — single tab, promoted to the nav root (issue: one item left) -->
+        <button class="stab" role="tab" id="stab-metrics"
+                aria-selected="false" onclick="switchTab('metrics')">
+          <i class="ti ti-chart-bar"></i>Analytics
+        </button>
+        <!-- Notes moved to the global left sidebar (issue #717) -->
         <!-- Settings (top level) -->
         <button class="stab" role="tab" id="stab-settings"
                 aria-selected="false" onclick="switchTab('settings')">
@@ -5254,6 +5608,17 @@
             <span id="smgmt-move-overlay-msg">Working…</span>
           </div>
         </div>
+
+        <!-- Board | History segmented control (issue #716) -->
+        <div class="smgmt-subtab-bar" role="tablist" aria-label="Sprint Mgmt views">
+          <button class="smgmt-subtab-btn active" id="smgmt-subtab-board" role="tab"
+                  aria-selected="true" onclick="_smgmtShowSubView('board')">Board</button>
+          <button class="smgmt-subtab-btn" id="smgmt-subtab-history" role="tab"
+                  aria-selected="false" onclick="_smgmtShowSubView('history')">History</button>
+        </div>
+
+        <!-- Board sub-view (default) -->
+        <div class="smgmt-subview show" id="smgmt-subview-board" role="tabpanel" aria-labelledby="smgmt-subtab-board">
 
         <!-- Sticky area: toolbar + label filters stick together below the project header -->
         <div class="smgmt-sticky-area" id="smgmt-sticky-area">
@@ -5397,6 +5762,26 @@
         <!-- Per-column sort menu (issue #550) -->
         <div class="smgmt-sort-menu hidden" id="smgmt-sort-menu" role="menu" aria-label="Sort column"></div>
 
+        </div><!-- /smgmt-subview-board -->
+
+        <!-- History sub-view (issue #716) — finished-sprint summaries -->
+        <div class="smgmt-subview" id="smgmt-subview-history" role="tabpanel" aria-labelledby="smgmt-subtab-history">
+          <div class="smgmt-summary-pane" id="smgmt-summary-pane">
+            <div class="smgmt-summary-header">
+              <div class="smgmt-summary-header-left">
+                <div class="smgmt-summary-icon"><i class="ti ti-file-description"></i></div>
+                <span class="smgmt-summary-title">Sprint Summaries</span>
+                <span class="smgmt-summary-count" id="smgmt-summary-count"></span>
+              </div>
+              <div class="smgmt-summary-header-actions">
+                <button class="smgmt-archived-toggle" id="smgmt-archived-toggle"
+                        onclick="_smgmtSummaryToggleArchived()"></button>
+              </div>
+            </div>
+            <div class="smgmt-summary-rows" id="smgmt-summary-rows"></div>
+          </div>
+        </div><!-- /smgmt-subview-history -->
+
       </div>
 
       <!-- Tickets tab -->
@@ -5483,6 +5868,19 @@
               </div>
             </div>
           </div>
+        </div>
+      </div>
+
+      <!-- Deploy tab (issue #726) -->
+      <div class="tab-pane" id="pane-deploy" role="tabpanel" aria-labelledby="stab-deploy">
+        <p class="deploy-tab-intro">
+          Manage each environment's deployment. Cards show the host, branch,
+          live commit SHA, last-deploy time and status. Deploy runs a pull-only
+          update (or a Render deploy); Restart bounces the service. Both ask to
+          confirm first.
+        </p>
+        <div class="deploy-grid" id="deploy-grid" role="region" aria-label="Deployment environments">
+          <div class="deploy-tab-intro" id="deploy-grid-empty">Loading environments…</div>
         </div>
       </div>
 
@@ -5818,23 +6216,6 @@
       </div>
 
       <!-- Sprint History tab — sprint summaries (moved off the Sprint Mgmt screen) -->
-      <div class="tab-pane" id="pane-sprint-history" role="tabpanel" aria-labelledby="stab-sprint-history">
-        <div class="smgmt-summary-pane" id="smgmt-summary-pane">
-          <div class="smgmt-summary-header">
-            <div class="smgmt-summary-header-left">
-              <div class="smgmt-summary-icon"><i class="ti ti-file-description"></i></div>
-              <span class="smgmt-summary-title">Sprint Summaries</span>
-              <span class="smgmt-summary-count" id="smgmt-summary-count"></span>
-            </div>
-            <div class="smgmt-summary-header-actions">
-              <button class="smgmt-archived-toggle" id="smgmt-archived-toggle"
-                      onclick="_smgmtSummaryToggleArchived()"></button>
-            </div>
-          </div>
-          <div class="smgmt-summary-rows" id="smgmt-summary-rows"></div>
-        </div>
-      </div>
-
       <!-- Analytics tab (mirrors analytics mock: Calibration + Metrics sub-tabs) -->
       <div class="tab-pane" id="pane-metrics" role="tabpanel" aria-labelledby="stab-metrics">
         <div class="anl-head">
@@ -5860,6 +6241,10 @@
                   aria-selected="true" onclick="anlShowTab('calibration')">Calibration</button>
           <button class="anl-tab-btn" id="anl-tab-metrics" role="tab"
                   aria-selected="false" onclick="anlShowTab('metrics')">Metrics</button>
+          <button class="anl-tab-btn" id="anl-tab-status" role="tab"
+                  aria-selected="false" onclick="anlShowTab('status')">Status</button>
+          <button class="anl-tab-btn" id="anl-tab-trends" role="tab"
+                  aria-selected="false" onclick="anlShowTab('trends')">Trends</button>
         </div>
 
         <!-- Calibration panel -->
@@ -5960,6 +6345,101 @@
             sources: first-pass/rework from sprint state (tester_attempt_count) ·
             durations from coder/tester timestamps · cost from token_usage × model price ·
             throughput from sprint state files
+          </div>
+        </div>
+
+        <!-- Status panel (consolidated from the standalone Status tab, #715) -->
+        <div class="anl-panel" id="anl-panel-status" role="tabpanel" aria-labelledby="anl-tab-status">
+          <div class="anl-card">
+            <div class="anl-card-head">
+              <i class="ti ti-pulse"></i>
+              <div>
+                <div class="anl-card-title">Status</div>
+                <div class="anl-card-sub">live project health — active sprint, label counts, recent activity, and in-flight tickets</div>
+              </div>
+              <div class="anl-head-gap"></div>
+              <button class="status-refresh-btn" id="status-refresh-btn"
+                      onclick="statusRefresh()" aria-label="Refresh status data">
+                <i class="ti ti-refresh"></i>Refresh
+              </button>
+            </div>
+            <div class="anl-card-body">
+              <div class="status-grid">
+                <div class="status-card">
+                  <div class="status-card-hdr">
+                    <span class="status-card-title"><i class="ti ti-rocket"></i>Active Sprint</span>
+                  </div>
+                  <div class="status-card-body" id="status-sprint-body">
+                    <div style="color:var(--text-sub);font-size:13px;">Loading…</div>
+                  </div>
+                </div>
+                <div class="status-card">
+                  <div class="status-card-hdr">
+                    <span class="status-card-title"><i class="ti ti-tag"></i>Label Breakdown</span>
+                  </div>
+                  <div class="status-card-body" id="status-labels-body">
+                    <div style="color:var(--text-sub);font-size:13px;">Loading…</div>
+                  </div>
+                </div>
+                <div class="status-card">
+                  <div class="status-card-hdr">
+                    <span class="status-card-title"><i class="ti ti-activity"></i>Recent Activity</span>
+                  </div>
+                  <div class="status-card-body" id="status-activity-body">
+                    <div style="color:var(--text-sub);font-size:13px;">Loading…</div>
+                  </div>
+                </div>
+                <div class="status-card">
+                  <div class="status-card-hdr">
+                    <span class="status-card-title"><i class="ti ti-loader-2"></i>In-Flight Tickets</span>
+                  </div>
+                  <div class="status-card-body" id="status-inflight-body">
+                    <div style="color:var(--text-sub);font-size:13px;">Loading…</div>
+                  </div>
+                </div>
+              </div>
+              <div class="status-last-updated" id="status-last-updated" aria-live="polite"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Trends panel (sprint velocity / failure / duration charts, restored #715) -->
+        <div class="anl-panel" id="anl-panel-trends" role="tabpanel" aria-labelledby="anl-tab-trends">
+          <div class="anl-card">
+            <div class="anl-card-head">
+              <i class="ti ti-trending-up"></i>
+              <div>
+                <div class="anl-card-title">Sprint Velocity</div>
+                <div class="anl-card-sub">tickets marked done per sprint</div>
+              </div>
+            </div>
+            <div class="anl-card-body">
+              <div id="metrics-velocity-wrap"><canvas id="metrics-velocity-chart" style="width:100%;height:220px;"></canvas></div>
+            </div>
+          </div>
+          <div class="anl-card">
+            <div class="anl-card-head">
+              <i class="ti ti-alert-triangle"></i>
+              <div>
+                <div class="anl-card-title">Failure Rate Trend</div>
+                <div class="anl-card-sub">share of tickets that failed, per sprint</div>
+              </div>
+            </div>
+            <div class="anl-card-body">
+              <div id="metrics-failure-wrap"><canvas id="metrics-failure-chart" style="width:100%;height:220px;"></canvas></div>
+            </div>
+          </div>
+          <div class="anl-card">
+            <div class="anl-card-head">
+              <i class="ti ti-clock"></i>
+              <div>
+                <div class="anl-card-title">Avg Dispatch Duration</div>
+                <div class="anl-card-sub">average minutes per ticket, by agent role</div>
+              </div>
+            </div>
+            <div class="anl-card-body">
+              <div id="metrics-duration-wrap"><canvas id="metrics-duration-chart" style="width:100%;height:220px;"></canvas></div>
+            </div>
           </div>
         </div>
       </div>
@@ -6162,6 +6642,67 @@
             </div>
           </div>
 
+          <!-- Environment Variables card (issue #727) -->
+          <div class="proj-settings-card" id="ps-envvars-card">
+            <div class="proj-settings-card-head">
+              <i class="ti ti-variable proj-settings-card-icon"></i>
+              <div>
+                <div class="proj-settings-card-title">Environment Variables</div>
+                <div class="proj-settings-card-sub">View, reveal and edit each environment's <code>.env</code> file — values are masked by default</div>
+              </div>
+            </div>
+            <div class="proj-settings-card-body" id="ps-envvars-body">
+              <!-- Sections injected by envVarsLoad() -->
+            </div>
+          </div>
+
+          <!-- Deploy actions card (issue #723) -->
+          <div class="proj-settings-card" id="ps-deploy-card">
+            <div class="proj-settings-card-head">
+              <i class="ti ti-rocket proj-settings-card-icon"></i>
+              <div>
+                <div class="proj-settings-card-title">Deploy actions</div>
+                <div class="proj-settings-card-sub">Pull the configured branch and restart local services (pull-only — no merge or push)</div>
+              </div>
+            </div>
+            <div class="proj-settings-card-body" id="ps-deploy-body">
+              <!-- Rows injected by deployActionsLoad() -->
+            </div>
+          </div>
+
+          <!-- Sprint file cleanup card (issue #735) -->
+          <div class="proj-settings-card" id="ps-sprint-cleanup-card">
+            <div class="proj-settings-card-head">
+              <i class="ti ti-archive proj-settings-card-icon"></i>
+              <div>
+                <div class="proj-settings-card-title">Sprint File Cleanup</div>
+                <div class="proj-settings-card-sub">Archive stale runtime files from finished sprints to reduce startup noise</div>
+              </div>
+            </div>
+            <div class="proj-settings-card-body" id="ps-cleanup-body">
+              <div class="ps-scaffold-actions">
+                <button class="ps-btn" id="ps-cleanup-preview-btn" onclick="sprintCleanupPreview()">
+                  <i class="ti ti-search"></i> Preview cleanup
+                </button>
+                <span id="ps-cleanup-status" style="font-size:12px;color:var(--text-muted);"></span>
+              </div>
+              <div id="ps-cleanup-preview" style="display:none;margin-top:12px">
+                <div style="font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px">
+                  Files to archive
+                </div>
+                <ul id="ps-cleanup-list" class="ps-scaffold-list"></ul>
+                <div id="ps-cleanup-empty" style="display:none;font-size:13px;color:var(--text-muted)">
+                  Nothing to archive — no finished sprints have stale files.
+                </div>
+                <div id="ps-cleanup-confirm-wrap" style="display:none;margin-top:12px">
+                  <button class="ps-btn ps-btn-primary" id="ps-cleanup-confirm-btn" onclick="sprintCleanupConfirm()">
+                    <i class="ti ti-archive"></i> Archive these files
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
           <!-- Docs Structure card (issue #681) -->
           <div class="proj-settings-card" id="ps-scaffold-card">
             <div class="proj-settings-card-head">
@@ -6217,56 +6758,39 @@
             </button>
           </div>
 
+          <!-- Danger zone: delete project -->
+          <div class="proj-settings-card ps-danger-card">
+            <div class="proj-settings-card-head">
+              <i class="ti ti-alert-triangle proj-settings-card-icon ps-danger-icon"></i>
+              <div>
+                <div class="proj-settings-card-title">Danger zone</div>
+                <div class="proj-settings-card-sub">Remove this project from Commander and delete its local folders. The GitHub repo is not touched.</div>
+              </div>
+            </div>
+            <div class="proj-settings-card-body">
+              <button class="ps-btn ps-btn-danger" onclick="psDeleteOpen()">
+                <i class="ti ti-trash"></i> Delete project
+              </button>
+            </div>
+          </div>
+
+          <!-- Delete confirmation dialog (type-to-confirm) -->
+          <div class="ps-scaffold-overlay" id="ps-delete-confirm">
+            <div class="ps-scaffold-dialog">
+              <h3 style="color:var(--red)">Delete this project?</h3>
+              <p>This removes <strong id="ps-delete-name"></strong> from Commander and deletes its local clone folders on this machine. The GitHub repo is left untouched. This cannot be undone.</p>
+              <p style="font-size:13px;color:var(--text-muted)">Type <strong id="ps-delete-slug"></strong> to confirm:</p>
+              <input class="ps-input" id="ps-delete-input" type="text" autocomplete="off"
+                     oninput="psDeleteValidate()" placeholder="project slug" style="width:100%">
+              <div class="ps-scaffold-dialog-btns">
+                <button class="ps-scaffold-cancel-btn" onclick="psDeleteClose()">Cancel</button>
+                <button class="ps-scaffold-confirm-btn ps-btn-danger" id="ps-delete-confirm-btn" onclick="psDeleteConfirm()" disabled>Delete project</button>
+              </div>
+            </div>
+          </div>
+
         </div><!-- /proj-settings-wrap -->
       </div><!-- /pane-settings -->
-
-      <div class="tab-pane" id="pane-status" role="tabpanel" aria-labelledby="stab-status">
-        <div class="status-page-hdr">
-          <div class="status-page-hdr-left">
-            <h2><i class="ti ti-pulse" style="margin-right:8px;vertical-align:-2px;"></i>Status</h2>
-            <p>Live project health — label counts, active sprint, recent activity, and in-flight tickets.</p>
-          </div>
-          <button class="status-refresh-btn" id="status-refresh-btn"
-                  onclick="statusRefresh()" aria-label="Refresh status data">
-            <i class="ti ti-refresh"></i>Refresh
-          </button>
-        </div>
-        <div class="status-grid">
-          <div class="status-card">
-            <div class="status-card-hdr">
-              <span class="status-card-title"><i class="ti ti-rocket"></i>Active Sprint</span>
-            </div>
-            <div class="status-card-body" id="status-sprint-body">
-              <div style="color:var(--text-sub);font-size:13px;">Loading…</div>
-            </div>
-          </div>
-          <div class="status-card">
-            <div class="status-card-hdr">
-              <span class="status-card-title"><i class="ti ti-tag"></i>Label Breakdown</span>
-            </div>
-            <div class="status-card-body" id="status-labels-body">
-              <div style="color:var(--text-sub);font-size:13px;">Loading…</div>
-            </div>
-          </div>
-          <div class="status-card">
-            <div class="status-card-hdr">
-              <span class="status-card-title"><i class="ti ti-activity"></i>Recent Activity</span>
-            </div>
-            <div class="status-card-body" id="status-activity-body">
-              <div style="color:var(--text-sub);font-size:13px;">Loading…</div>
-            </div>
-          </div>
-          <div class="status-card">
-            <div class="status-card-hdr">
-              <span class="status-card-title"><i class="ti ti-loader-2"></i>In-Flight Tickets</span>
-            </div>
-            <div class="status-card-body" id="status-inflight-body">
-              <div style="color:var(--text-sub);font-size:13px;">Loading…</div>
-            </div>
-          </div>
-        </div>
-        <div class="status-last-updated" id="status-last-updated" aria-live="polite"></div>
-      </div>
 
     </div>
   </div>
@@ -6344,6 +6868,27 @@
   </div>
 </div>
 
+<!-- ── Global notes panel (issue #717) ── -->
+<div class="settings-panel" id="gnotes-panel" role="region" aria-label="Notes">
+  <div class="settings-header">
+    <span class="settings-title">
+      <i class="ti ti-notes" style="margin-right:8px;font-size:16px;vertical-align:-2px;"></i>Notes
+    </span>
+    <div style="display:flex;align-items:center;gap:12px;">
+      <span class="gnotes-status" id="gnotes-status" aria-live="polite"></span>
+      <button class="settings-close-btn" onclick="closeNotesPanel()" aria-label="Close notes">
+        <i class="ti ti-x"></i>
+      </button>
+    </div>
+  </div>
+  <div class="gnotes-content">
+    <p class="gnotes-hint">Global notes — shared across all projects. Changes save automatically.</p>
+    <textarea id="gnotes-textarea" class="gnotes-textarea"
+              placeholder="# Notes&#10;&#10;Write in Markdown — saved automatically…"
+              oninput="gnotesAutosave()" aria-label="Notes editor" spellcheck="true"></textarea>
+  </div>
+</div>
+
 <!-- ── Ticket detail panel (issue #432) ── -->
 <div class="tdp" id="tdp" role="complementary" aria-label="Ticket detail">
   <div class="tdp-header">
@@ -6416,6 +6961,75 @@ function closeSettingsPanel() {
   if (panel) panel.classList.remove('open');
   const link = document.getElementById('sb-settings-link');
   if (link) link.classList.remove('active');
+}
+
+// ── Global notes panel (issue #717) ─────────────────────────────────────────
+let _gnotesTimer = null;
+let _gnotesLoaded = false;
+
+function openNotesPanel(e) {
+  if (e) e.preventDefault();
+  // Close the settings panel so only one overlay is open at a time.
+  closeSettingsPanel();
+  const panel = document.getElementById('gnotes-panel');
+  if (!panel) return;
+  panel.classList.add('open');
+  const link = document.getElementById('sb-notes-link');
+  if (link) link.classList.add('active');
+  gnotesLoad();
+}
+
+function closeNotesPanel() {
+  const panel = document.getElementById('gnotes-panel');
+  if (panel) panel.classList.remove('open');
+  const link = document.getElementById('sb-notes-link');
+  if (link) link.classList.remove('active');
+}
+
+function gnotesSetStatus(text, cls) {
+  const el = document.getElementById('gnotes-status');
+  if (!el) return;
+  el.textContent = text || '';
+  el.className = 'gnotes-status' + (cls ? ' ' + cls : '');
+}
+
+async function gnotesLoad() {
+  const ta = document.getElementById('gnotes-textarea');
+  if (!ta) return;
+  try {
+    const resp = await fetch('/api/notes');
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const data = await resp.json();
+    ta.value = (data && typeof data.body === 'string') ? data.body : '';
+    _gnotesLoaded = true;
+    gnotesSetStatus('', '');
+  } catch (e) {
+    gnotesSetStatus('Load failed', 'err');
+  }
+}
+
+// Debounced autosave — no manual save button required.
+function gnotesAutosave() {
+  if (!_gnotesLoaded) return;  // ignore programmatic value set during load
+  gnotesSetStatus('Saving…', 'saving');
+  if (_gnotesTimer) clearTimeout(_gnotesTimer);
+  _gnotesTimer = setTimeout(gnotesSaveNow, 800);
+}
+
+async function gnotesSaveNow() {
+  const ta = document.getElementById('gnotes-textarea');
+  if (!ta) return;
+  try {
+    const resp = await fetch('/api/notes', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ body: ta.value }),
+    });
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    gnotesSetStatus('Saved', 'ok');
+  } catch (e) {
+    gnotesSetStatus('Save failed', 'err');
+  }
 }
 
 function settingsInitValues() {
@@ -6618,7 +7232,6 @@ function parseUrl() {
             : (rawTab === 'bulk-create')      ? 'bulk-create'
             : (rawTab === 'timeline')         ? 'timeline'
             : (rawTab === 'compare')          ? 'compare'
-            : (rawTab === 'sprint-history')   ? 'sprint-history'
             : (rawTab === 'est-vs-actual')    ? 'est-vs-actual'
             : (rawTab === 'calibration')      ? 'calibration'
             : (rawTab === 'status')           ? 'status'
@@ -6671,6 +7284,17 @@ let _smgmtFinishedLabels = new Set();
 
 // ── Tab navigation ────────────────────────────────────────────────────────────
 function switchTab(tab, pushHistory) {
+  // Legacy ?tab=status deep-link redirect (issue #732): #715 relocated Status into
+  // the Analytics tab as the anl-panel-status sub-tab and removed the standalone
+  // pane-status. The old /project/<slug>/status link would otherwise toggle a
+  // nonexistent pane and show blank content. Redirect it onto the Analytics surface
+  // (the `metrics` pane) and open the Status sub-tab below.
+  let _statusDeepLink = false;
+  if (tab === 'status') {
+    tab = 'metrics';
+    _statusDeepLink = true;
+  }
+
   // Pause auto-refresh and live polling when leaving sprint-mgmt
   if (_activeTab === 'sprint-mgmt' && tab !== 'sprint-mgmt') {
     _smgmtArStopTicker();
@@ -6689,18 +7313,24 @@ function switchTab(tab, pushHistory) {
     logsDestroy();
   }
 
-  // Stop status auto-refresh when leaving status tab
-  if (_activeTab === 'status' && tab !== 'status') {
+  // Stop status auto-refresh when leaving the Analytics pane (Status is its
+  // anl-panel-status sub-tab; the standalone status tab was removed in #715/#732).
+  if (_activeTab === 'metrics' && tab !== 'metrics') {
     if (_statusRefreshId !== null) {
       clearInterval(_statusRefreshId);
       _statusRefreshId = null;
     }
   }
 
+  // Stop deploy status pollers when leaving the deploy tab
+  if (_activeTab === 'deploy' && tab !== 'deploy') {
+    deployTabDestroy();
+  }
+
   _activeTab = tab;
 
   // Update aria-selected + active class on tabs
-  ['sprint-mgmt', 'tickets', 'logs', 'bulk-create', 'timeline', 'compare', 'metrics', 'sprint-history', 'est-vs-actual', 'calibration', 'status', 'notes', 'settings'].forEach(t => {
+  ['sprint-mgmt', 'tickets', 'logs', 'deploy', 'bulk-create', 'timeline', 'compare', 'metrics', 'est-vs-actual', 'calibration', 'notes', 'settings'].forEach(t => {
     const btn = document.getElementById('stab-' + t);
     if (!btn) return;
     const isActive = t === tab;
@@ -6717,7 +7347,7 @@ function switchTab(tab, pushHistory) {
   });
 
   // Show/hide panes
-  ['sprint-mgmt', 'tickets', 'logs', 'bulk-create', 'timeline', 'compare', 'metrics', 'sprint-history', 'est-vs-actual', 'calibration', 'status', 'notes', 'settings'].forEach(t => {
+  ['sprint-mgmt', 'tickets', 'logs', 'deploy', 'bulk-create', 'timeline', 'compare', 'metrics', 'est-vs-actual', 'calibration', 'notes', 'settings'].forEach(t => {
     const pane = document.getElementById('pane-' + t);
     if (pane) pane.classList.toggle('active', t === tab);
   });
@@ -6732,6 +7362,11 @@ function switchTab(tab, pushHistory) {
   if (tab === 'tickets' && !_ticketsLoaded) {
     _ticketsLoaded = true;
     loadTickets();
+  }
+
+  // Default to the Board sub-view whenever the Sprint Mgmt tab opens (issue #716)
+  if (tab === 'sprint-mgmt') {
+    _smgmtShowSubView('board');
   }
 
   // Lazy-load sprint mgmt (only if _cachedFullRepo is already populated)
@@ -6754,6 +7389,11 @@ function switchTab(tab, pushHistory) {
     logsInit();
   }
 
+  // Init deploy tab
+  if (tab === 'deploy') {
+    deployTabInit();
+  }
+
   // Init timeline tab
   if (tab === 'timeline') {
     ganttInit();
@@ -6764,15 +7404,14 @@ function switchTab(tab, pushHistory) {
     compareInit();
   }
 
-  // Load sprint history (summaries) tab. No-ops if repo isn't cached yet —
-  // init() loads it once _cachedFullRepo is populated.
-  if (tab === 'sprint-history') {
-    _smgmtLoadSummaries(_cachedFullRepo[_slug]);
-  }
-
   // Init metrics tab
   if (tab === 'metrics') {
     metricsInit();
+    // Legacy ?tab=status deep-link: metricsInit() opens Calibration by default;
+    // override to the Status sub-tab so the redirected link lands on Status (#732).
+    if (_statusDeepLink && typeof window.anlShowTab === 'function') {
+      window.anlShowTab('status');
+    }
   }
 
   // Init estimate-vs-actual tab
@@ -6785,10 +7424,8 @@ function switchTab(tab, pushHistory) {
     calibInit();
   }
 
-  // Init status tab
-  if (tab === 'status') {
-    statusInit();
-  }
+  // Note: there is no standalone status tab — Status is the Analytics anl-panel-status
+  // sub-tab and is initialised via anlShowTab('status') → statusInit() (issues #715, #732).
 
   // Init notes tab
   if (tab === 'notes') {
@@ -6816,7 +7453,7 @@ document.addEventListener('click', closeAllStabDropdowns);
 
 // ── Keyboard navigation for sub-tabs ─────────────────────────────────────────
 document.getElementById('sub-tabs').addEventListener('keydown', function(e) {
-  const enabledTabs = ['sprint-mgmt', 'tickets', 'logs', 'bulk-create', 'timeline', 'compare', 'sprint-history', 'est-vs-actual', 'calibration', 'status', 'notes', 'settings'];
+  const enabledTabs = ['sprint-mgmt', 'tickets', 'logs', 'deploy', 'bulk-create', 'timeline', 'compare', 'est-vs-actual', 'calibration', 'notes', 'settings'];
   const focused = document.activeElement;
   const currentId = focused ? focused.id.replace('stab-', '') : null;
   const currentIdx = enabledTabs.indexOf(currentId);
@@ -6885,172 +7522,8 @@ function buildSidebar(projects) {
   }).join('');
 }
 
-// ========================================================================
-// Add Project modal — CANONICAL JS. Keep BYTE-IDENTICAL with the copy in
-// home-preview.html. Two tabs: "Create new project" (streams init_project.py)
-// and "Add existing repo" (POST /api/projects). Replaced the legacy
-// index.html/app.js modal (issue #425).
-// ========================================================================
-let _apmTab = 'init';
-
-function openAddProjectModal() {
-  document.getElementById('apm-repo').value         = '';
-  document.getElementById('apm-icon').value         = '';
-  document.getElementById('apm-color').value        = '';
-  document.getElementById('apm-name').value         = '';
-  document.getElementById('apm-projects-dir').value = '~/dev';
-  document.getElementById('apm-nested').checked     = false;
-  document.getElementById('apm-skip-uat').checked   = false;
-  _apmClearError('apm-repo');
-  _apmClearError('apm-name');
-  _apmResetLog();
-  document.getElementById('apm-backdrop').classList.remove('hidden');
-  document.getElementById('apm-modal').classList.remove('hidden');
-  apmSwitchTab(_apmTab);
-}
-
-function closeAddProjectModal() {
-  document.getElementById('apm-backdrop').classList.add('hidden');
-  document.getElementById('apm-modal').classList.add('hidden');
-}
-
-function apmSwitchTab(tab) {
-  _apmTab = tab;
-  const init = tab === 'init';
-  document.getElementById('apm-init-form').classList.toggle('hidden', !init);
-  document.getElementById('apm-add-form').classList.toggle('hidden', init);
-  document.getElementById('apm-tab-init').classList.toggle('active', init);
-  document.getElementById('apm-tab-add').classList.toggle('active', !init);
-  document.getElementById('apm-init-submit').classList.toggle('hidden', !init);
-  document.getElementById('apm-add-submit').classList.toggle('hidden', init);
-  document.getElementById(init ? 'apm-name' : 'apm-repo').focus();
-}
-
-function _apmErrId(inputId) { return inputId === 'apm-name' ? 'apm-init-error' : 'apm-repo-error'; }
-
-function _apmClearError(inputId) {
-  const err = document.getElementById(_apmErrId(inputId));
-  const inp = document.getElementById(inputId);
-  if (err) { err.textContent = ''; err.classList.add('hidden'); }
-  if (inp) inp.classList.remove('error');
-}
-
-function _apmShowError(inputId, msg) {
-  const err = document.getElementById(_apmErrId(inputId));
-  const inp = document.getElementById(inputId);
-  if (err) { err.textContent = msg; err.classList.remove('hidden'); }
-  if (inp) inp.classList.add('error');
-}
-
-function _apmResetLog() {
-  const w = document.getElementById('apm-log-wrap');
-  const l = document.getElementById('apm-log');
-  if (w) w.classList.add('hidden');
-  if (l) l.textContent = '';
-}
-
-function _apmAppendLog(line) {
-  const w = document.getElementById('apm-log-wrap');
-  const l = document.getElementById('apm-log');
-  if (w) w.classList.remove('hidden');
-  if (l) { l.textContent += line + '\n'; l.scrollTop = l.scrollHeight; }
-}
-
-function _apmAfterSuccess() {
-  closeAddProjectModal();
-  if (typeof loadHomeData === 'function') loadHomeData(true);
-}
-
-async function apmSubmitAdd(event) {
-  event.preventDefault();
-  _apmClearError('apm-repo');
-
-  const repoUrl = document.getElementById('apm-repo').value.trim();
-  const icon    = document.getElementById('apm-icon').value.trim()  || 'ti-folder';
-  const color   = document.getElementById('apm-color').value.trim() || 'gray';
-
-  if (!repoUrl) { _apmShowError('apm-repo', 'GitHub repo URL is required.'); return; }
-
-  const btn = document.getElementById('apm-add-submit');
-  btn.disabled = true; btn.textContent = 'Adding…';
-  try {
-    const res = await fetch('/api/projects', {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ repo_url: repoUrl, icon, color }),
-    });
-    if (res.status === 409) { const d = await res.json().catch(() => ({})); _apmShowError('apm-repo', d.detail || 'Project already added.'); return; }
-    if (res.status === 422) { const d = await res.json().catch(() => ({})); _apmShowError('apm-repo', d.detail || 'Invalid repo or repo not found on GitHub.'); return; }
-    if (!res.ok)            { const d = await res.json().catch(() => ({})); _apmShowError('apm-repo', d.detail || 'Error ' + res.status); return; }
-    _apmAfterSuccess();
-  } catch (e) {
-    _apmShowError('apm-repo', 'Network error: ' + e.message);
-  } finally {
-    btn.disabled = false; btn.textContent = 'Add Project';
-  }
-}
-
-async function apmSubmitInit(event) {
-  event.preventDefault();
-  _apmClearError('apm-name');
-  _apmResetLog();
-
-  const repoName    = document.getElementById('apm-name').value.trim();
-  const projectsDir = document.getElementById('apm-projects-dir').value.trim() || '~/dev';
-  const nested      = document.getElementById('apm-nested').checked;
-  const skipUat     = document.getElementById('apm-skip-uat').checked;
-
-  if (!repoName) { _apmShowError('apm-name', 'Project name is required.'); return; }
-  if (repoName.includes('/') || repoName.includes('\\')) {
-    _apmShowError('apm-name', 'Project name must not contain path separators (/ or \\).');
-    return;
-  }
-
-  const btn = document.getElementById('apm-init-submit');
-  btn.disabled = true; btn.textContent = 'Creating…';
-  try {
-    const res = await fetch('/api/projects/init', {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ repo_name: repoName, projects_dir: projectsDir, nested, skip_uat: skipUat }),
-    });
-    if (res.status === 400 || res.status === 409 || res.status === 422) {
-      const d = await res.json().catch(() => ({})); _apmShowError('apm-name', d.detail || 'Error ' + res.status); return;
-    }
-    if (!res.ok) { const d = await res.json().catch(() => ({})); _apmShowError('apm-name', d.detail || 'Server error ' + res.status); return; }
-
-    // Stream the init_project.py SSE log.
-    const reader  = res.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '', success = false, lastErr = '';
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const chunks = buffer.split('\n\n');
-      buffer = chunks.pop();
-      for (const chunk of chunks) {
-        let eventType = 'log', dataLine = '';
-        for (const l of chunk.split('\n')) {
-          if (l.startsWith('event: ')) eventType = l.slice(7).trim();
-          if (l.startsWith('data: '))  dataLine  = l.slice(6).trim();
-        }
-        if (!dataLine) continue;
-        let payload = dataLine;
-        try { payload = JSON.parse(dataLine); } catch { /* raw */ }
-        if (eventType === 'log')        _apmAppendLog(payload);
-        else if (eventType === 'done')  success = true;
-        else if (eventType === 'error') lastErr = payload;
-      }
-    }
-    if (success) _apmAfterSuccess();
-    else _apmShowError('apm-name', lastErr || 'init_project.py failed. Check the log above.');
-  } catch (e) {
-    _apmShowError('apm-name', 'Network error: ' + e.message);
-  } finally {
-    btn.disabled = false; btn.textContent = 'Create';
-  }
-}
+// Add Project modal logic now lives in the shared /static/add-project-modal.js
+// (loaded via <script src> near </body>). Removed the per-page duplicate.
 
 // ── Project header ────────────────────────────────────────────────────────────
 function updateProjectHeader(proj) {
@@ -7925,10 +8398,6 @@ async function init() {
     compareInit();
   }
 
-  // If sprint-history tab was active before the repo was cached, load summaries now
-  if (_activeTab === 'sprint-history') {
-    _smgmtLoadSummaries(_cachedFullRepo[_slug]);
-  }
 }
 
 // ── Sprint Mgmt toolbar height calculation ─────────────────────────────────
@@ -8052,6 +8521,24 @@ function _smgmtSummaryRender(openData, closedData) {
   pane.style.display = '';
 }
 
+// ── Sprint Mgmt Board|History sub-view toggle (issue #716) ─────────────────
+// Current sub-view within the Sprint Mgmt tab ('board' | 'history').
+let _smgmtSubView = 'board';
+function _smgmtShowSubView(view) {
+  _smgmtSubView = view;
+  ['board', 'history'].forEach(v => {
+    const btn = document.getElementById('smgmt-subtab-' + v);
+    if (btn) {
+      btn.classList.toggle('active', v === view);
+      btn.setAttribute('aria-selected', String(v === view));
+    }
+    const panel = document.getElementById('smgmt-subview-' + v);
+    if (panel) panel.classList.toggle('show', v === view);
+  });
+  // Lazy-load summaries when History is opened (no-op if repo not cached yet).
+  if (view === 'history') _smgmtLoadSummaries(_cachedFullRepo[_slug]);
+}
+
 async function _smgmtLoadSummaries(repo) {
   if (!repo) return;
   try {
@@ -8087,7 +8574,17 @@ async function loadSprintMgmt(silent) {
       fetch('/api/sprint-management/issues?repo=' + encodeURIComponent(repo)),
       fetch('/api/sprints/running-all').catch(() => null),
     ]);
-    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    if (!resp.ok) {
+      // Surface a GitHub rate-limit failure specifically (status 429 from
+      // _gh_error) so the board says what's wrong instead of "Failed to load".
+      let msg = 'Failed to load sprints.';
+      const d = await resp.json().catch(() => null);
+      const detail = d && typeof d.detail === 'string' ? d.detail : '';
+      if (resp.status === 429 || /rate limit/i.test(detail)) {
+        msg = detail || 'GitHub API rate limit reached — retry shortly.';
+      }
+      throw new Error(msg);
+    }
     const data = await resp.json();
 
     // Update running labels set
@@ -8110,7 +8607,10 @@ async function loadSprintMgmt(silent) {
     // Start (or restart) live polling if there are running sprints
     _smgmtLivePollRestart();
   } catch (err) {
-    if (!silent) listEl.innerHTML = '<div class="loading-msg">Failed to load sprints.</div>';
+    if (!silent) {
+      const msg = (err && err.message) ? err.message : 'Failed to load sprints.';
+      listEl.innerHTML = `<div class="loading-msg">${escHtml(msg)}</div>`;
+    }
   }
 }
 
@@ -9060,6 +9560,12 @@ function _preflightBannerHtml(label, missingACItems, conflictItems) {
       </button>
     </div>
     <div class="pf-details" style="display:none">${detailRow1}${detailRow2}</div>
+    ${missingACItems.length > 0 ? `<div class="pf-fix-row" style="margin-top:8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+      <button class="smgmt-bulk-est-btn" onclick="_smgmtPreflightFix('${safeLabel}', this)"
+              title="Generate missing acceptance criteria and estimate unsized tickets">
+        <i class="ti ti-wand"></i> Fix all pre-flight issues</button>
+      <span class="smgmt-bulk-est-progress pf-fix-progress"></span>
+    </div>` : ''}
   </div>`;
 }
 
@@ -9485,7 +9991,7 @@ async function _smgmtMaybeLoadLog(label, logId) {
       return;
     }
     streamEl.innerHTML = data.tail.split('\n').map(line =>
-      `<div class="smgmt-log-line"><span class="smgmt-log-msg">${escHtml(line)}</span></div>`
+      `<div class="smgmt-log-line"><span class="smgmt-log-msg">${colorizeLogLine(line, repo)}</span></div>`
     ).join('');
   } catch (_) {
     streamEl.textContent = 'Could not load log.';
@@ -9603,10 +10109,15 @@ function sprintLabelDisplay(label) {
 }
 
 function _smgmtNextChildLabel(parentLabel) {
+  // Re-runs are siblings off the base sprint number, never nested children:
+  // sprint-1 / sprint-1.1 / sprint-1.2 → next is sprint-1.<max+1>.
+  // (Mirrors the backend _next_sprint_sublabel.)
+  const m = /^(sprint-\d+)(?:\.\d+)?$/.exec(parentLabel);
+  const base = m ? m[1] : parentLabel;
   const existing = Object.keys(_smgmtBySprint || {});
   let i = 1;
-  while (existing.includes(`${parentLabel}.${i}`)) i++;
-  return `${parentLabel}.${i}`;
+  while (existing.includes(`${base}.${i}`)) i++;
+  return `${base}.${i}`;
 }
 
 /**
@@ -10060,7 +10571,6 @@ function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent, finished) {
         </div>
         <div class="smgmt-sprint-header-right">
           ${_smgmtCapacityInputHtml(label)}
-          ${bulkEstBtnHtml}
           <button class="smgmt-delete-btn"
                   onclick="smgmtDeleteSprint('${escHtml(label)}')">
             <i class="ti ti-trash"></i> Delete</button>
@@ -10220,6 +10730,8 @@ function _smgmtRunningCardHtml(label, n, tickets) {
         ${segBarHtml}
         <span class="smgmt-outcome-dur" id="smgmt-rs-time-${escHtml(label)}">${_fmtRunningTime(timeSpentSec)}</span>
       </div>
+      <div id="smgmt-active-agents-wrap-${escHtml(label)}">${_smgmtActiveAgentsHtml(live, label)}</div>
+      <div id="smgmt-levels-wrap-${escHtml(label)}">${_smgmtLevelsHtml(live, label)}</div>
       <div class="smgmt-sprint-tickets" id="smgmt-tickets-${escHtml(label)}">
         ${ticketRowsHtml || '<div class="smgmt-drop-hint">No tickets in this sprint</div>'}
       </div>
@@ -10262,11 +10774,12 @@ function _smgmtLiveLogLinesHtml(logLines) {
   if (!logLines || logLines.length === 0) {
     return '<div class="smgmt-log-line" style="color:var(--text-sub)">Waiting for log…</div>';
   }
+  const repo = (typeof _smgmtRepo === 'function' ? (_smgmtRepo() || '') : '');
   return logLines.map(l => {
     const cls = _LOG_TYPE_CLASS[l.type] || '';
     const tsHtml = l.timestamp && l.timestamp !== '—'
       ? `<span class="smgmt-log-time">${escHtml(l.timestamp)}</span>` : '';
-    return `<div class="smgmt-log-line${cls ? ' ' + cls : ''}">${tsHtml}<span class="smgmt-log-msg">${escHtml(l.message)}</span></div>`;
+    return `<div class="smgmt-log-line${cls ? ' ' + cls : ''}">${tsHtml}<span class="smgmt-log-msg">${colorizeLogLine(l.message, repo)}</span></div>`;
   }).join('');
 }
 
@@ -10299,9 +10812,32 @@ function _smgmtLogPollTick() {
 /** Format per-ticket elapsed seconds as "{N}m {N}s". Returns null if no value. */
 function _fmtTicketElapsed(secs) {
   if (secs == null || secs <= 0) return null;
+  secs = Math.floor(secs);
   const m = Math.floor(secs / 60);
   const s = secs % 60;
   return `${m}m ${s}s`;
+}
+
+// issue #764: client-side live timer for active agent tags in the running view.
+// Each tick advances any .smgmt-ticket-elapsed[data-live-timer="1"] from its
+// anchored server value so the elapsed reads like a stopwatch between fetches.
+let _smgmtLiveTimerId = null;
+function _smgmtTickLiveTimers() {
+  const els = document.querySelectorAll('.smgmt-ticket-elapsed[data-live-timer="1"]');
+  if (els.length === 0) return;
+  const nowMs = Date.now();
+  els.forEach(function(el) {
+    const base = Number(el.dataset.baseSecs);
+    const anchor = Number(el.dataset.anchorMs);
+    if (!isFinite(base) || !isFinite(anchor)) return;
+    const secs = base + Math.max(0, (nowMs - anchor) / 1000);
+    const str = _fmtTicketElapsed(secs);
+    if (str) el.textContent = str;
+  });
+}
+function _smgmtEnsureLiveTimer() {
+  if (_smgmtLiveTimerId != null) return;
+  _smgmtLiveTimerId = setInterval(_smgmtTickLiveTimers, 1000);
 }
 
 /** Return canonical minutes for a size letter (S/M/L/XL). Returns 0 for unknown. */
@@ -10363,6 +10899,64 @@ function _smgmtLiveAgentBadgesHtml(live) {
   const pids = agents.map(a => a.pid).filter(Boolean);
   const pidHtml = pids.length ? `<span class="smgmt-log-pid">pid ${escHtml(pids.join(' / '))}</span>` : '';
   return badges + pidHtml;
+}
+
+/** Human label for an agent role used on the dual active cards (issue #739). */
+function _smgmtAgentLabel(role) {
+  const r = (role || '').toLowerCase();
+  if (r === 'coder')  return 'Coder';
+  if (r === 'tester') return 'Tester';
+  return role || '?';
+}
+
+/** Dual active-agent cards for the running sprint board (issue #739).
+ *  Pipeline mode only — single-agent mode renders nothing here (unchanged board).
+ *  Each in-flight agent gets its own card with its own spinner, role label, and
+ *  the specific ticket it is working. Empty string when no agent is active. */
+function _smgmtActiveAgentsHtml(live, label) {
+  if (!live || !live.pipeline_mode) return '';
+  const agents = live.active_agents || [];
+  if (!agents.length) return '';
+  const cards = agents.map(a => {
+    const role  = (a.name || '').toLowerCase();
+    const tk    = a.ticket || {};
+    const tnum  = tk.number ? `#${tk.number}` : '';
+    const ttl   = tk.title || '';
+    return `<div class="smgmt-active-agent smgmt-active-agent--${escHtml(role)}" data-agent="${escHtml(role)}">
+      <span class="smgmt-active-spinner" aria-hidden="true"></span>
+      <span class="smgmt-active-role">${escHtml(_smgmtAgentLabel(a.name))}</span>
+      <span class="smgmt-active-ticket">
+        <span class="smgmt-active-tnum">${escHtml(tnum)}</span>
+        <span class="smgmt-active-ttitle" title="${escHtml(ttl)}">${escHtml(ttl)}</span>
+      </span>
+    </div>`;
+  }).join('');
+  return `<div class="smgmt-active-agents" id="smgmt-active-agents-${escHtml(label)}">${cards}</div>`;
+}
+
+/** Per-level progress rows for the pipeline board (issue #739).
+ *  Pipeline mode only. Each level shows merged/total; the next, not-yet-reachable
+ *  level renders in a waiting state with a lock icon until the current level
+ *  drains. Empty string outside pipeline mode (single-agent board unchanged). */
+function _smgmtLevelsHtml(live, label) {
+  if (!live || !live.pipeline_mode) return '';
+  const levels = live.levels || [];
+  if (!levels.length) return '';
+  const rows = levels.map(l => {
+    let icon;
+    if (l.state === 'waiting')       icon = '<i class="ti ti-lock"></i>';
+    else if (l.state === 'complete') icon = '<i class="ti ti-check"></i>';
+    else                             icon = '<span class="smgmt-level-spinner"></span>';
+    const progress = l.state === 'waiting'
+      ? `Waiting for Level ${l.level - 1} to complete`
+      : `${l.merged}/${l.total} merged`;
+    return `<div class="smgmt-level-row smgmt-level--${escHtml(l.state)}" data-level="${l.level}" data-state="${escHtml(l.state)}">
+      <span class="smgmt-level-icon">${icon}</span>
+      <span class="smgmt-level-name">Level ${l.level}</span>
+      <span class="smgmt-level-progress">${escHtml(progress)}</span>
+    </div>`;
+  }).join('');
+  return `<div class="smgmt-levels" id="smgmt-levels-${escHtml(label)}">${rows}</div>`;
 }
 
 /** Patch live stat strip + progress bar + ticket indicators in place (no full re-render). */
@@ -10525,11 +11119,22 @@ function _smgmtLivePatch(label, live) {
         elapsedEl.className = 'smgmt-ticket-elapsed';
         row.appendChild(elapsedEl);
       }
+      // issue #764: while an agent is active, anchor the server elapsed value to
+      // a client clock so the agent tag's timer increments in real time between
+      // live fetches. When inactive, drop the anchor so ticking stops.
+      if (isActive && liveIss && liveIss.elapsed_secs != null) {
+        elapsedEl.dataset.liveTimer = '1';
+        elapsedEl.dataset.baseSecs = String(liveIss.elapsed_secs);
+        elapsedEl.dataset.anchorMs = String(Date.now());
+      } else {
+        delete elapsedEl.dataset.liveTimer;
+      }
       elapsedEl.textContent = elapsedStr;
     } else if (elapsedEl) {
       elapsedEl.remove();
     }
   });
+  _smgmtEnsureLiveTimer();
 
   // Update segmented bar blocks (issue #613)
   const segBarEl = document.getElementById(`smgmt-seg-${label}`);
@@ -10547,6 +11152,12 @@ function _smgmtLivePatch(label, live) {
       block.className = `seg-block ${blockClass}`;
     });
   }
+
+  // Update dual active-agent cards + per-level progress in place (issue #739).
+  const activeWrap = document.getElementById(`smgmt-active-agents-wrap-${label}`);
+  if (activeWrap) activeWrap.innerHTML = _smgmtActiveAgentsHtml(live, label);
+  const levelsWrap = document.getElementById(`smgmt-levels-wrap-${label}`);
+  if (levelsWrap) levelsWrap.innerHTML = _smgmtLevelsHtml(live, label);
 }
 
 /** Start or restart the live polling loop for any running sprints. */
@@ -10947,6 +11558,74 @@ async function _smgmtBulkEstimate(sprintLabel, btnEl) {
 
   // Fade out progress after 3s
   setTimeout(() => { if (progressEl) progressEl.classList.remove('show'); }, 3000);
+}
+
+// ── Fix all pre-flight issues (generate missing AC + estimate unsized) ────────
+async function _smgmtPreflightFix(label, btn) {
+  const repo = _smgmtRepo();
+  if (!repo) { _smgmtShowToast('No repo configured — cannot fix pre-flight'); return; }
+
+  const progressEl = btn.nextElementSibling; // .pf-fix-progress
+  const setP = (msg) => { if (progressEl) { progressEl.textContent = msg; progressEl.classList.add('show'); } };
+
+  btn.disabled = true;
+  _smgmtPreflightLock = true; // freeze auto-refresh so the board doesn't rebuild mid-fix
+  setP('Starting…');
+
+  let summary = null;
+  try {
+    const resp = await fetch(
+      `/api/sprints/${encodeURIComponent(label)}/preflight-fix?project=${encodeURIComponent(repo)}`,
+      { method: 'POST' },
+    );
+    if (!resp.ok) {
+      const d = await resp.json().catch(() => ({}));
+      throw new Error(d.detail || `HTTP ${resp.status}`);
+    }
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const chunks = buffer.split('\n\n');
+      buffer = chunks.pop();
+      for (const chunk of chunks) {
+        let ev = 'log', data = '';
+        for (const l of chunk.split('\n')) {
+          if (l.startsWith('event: ')) ev = l.slice(7).trim();
+          if (l.startsWith('data: '))  data = l.slice(6).trim();
+        }
+        if (!data) continue;
+        let payload = data;
+        try { payload = JSON.parse(data); } catch { /* raw */ }
+        if (ev === 'log') setP(payload);
+        else if (ev === 'done') summary = payload;
+      }
+    }
+    if (summary) {
+      const parts = [];
+      if (summary.filled)    parts.push(`${summary.filled} AC added`);
+      if (summary.estimated) parts.push(`${summary.estimated} estimated`);
+      if (summary.skipped)   parts.push(`${summary.skipped} already ok`);
+      setP(parts.join(', ') || 'Nothing to fix');
+      if (summary.errors && summary.errors.length) {
+        _smgmtShowToast(`Pre-flight fix: ${summary.errors.length} error(s) — ${summary.errors[0]}`);
+      }
+    } else {
+      setP('Done');
+    }
+  } catch (e) {
+    setP('Failed');
+    _smgmtShowToast('Pre-flight fix failed: ' + e.message);
+  } finally {
+    _smgmtPreflightLock = false;
+    btn.disabled = false;
+    // Refresh so AC/size badges and the banner reflect the fixes.
+    try { await _smgmtArDoRefresh(); } catch { /* ignore */ }
+    setTimeout(() => { if (progressEl) progressEl.classList.remove('show'); }, 4000);
+  }
 }
 
 // ── Re-estimate action (issue #452, extended by #561) ────────────────────────
@@ -13780,6 +14459,7 @@ document.addEventListener('keydown', function(e) {
 
 // ── Board move lock (issue #276) ──────────────────────────────────────────
 let _smgmtMoveLock = false;
+let _smgmtPreflightLock = false;  // true while a pre-flight fix runs; pauses auto-refresh
 
 /**
  * Show the full-screen blocking overlay and suppress auto-refresh while a
@@ -14090,6 +14770,7 @@ async function _smgmtArDoRefresh() {
 /** Fires every second: count down, refresh when we reach zero. */
 function _smgmtArTick() {
   if (_smgmtMoveLock) return; // freeze the countdown while a ticket move is in flight
+  if (_smgmtPreflightLock) return; // freeze while a pre-flight fix is running (board would rebuild mid-fix)
   // Freeze while a drag is in progress: a mid-drag board re-render (this tick
   // calls loadSprintMgmt → _smgmtRenderBacklog, which rebuilds the rows via
   // innerHTML) replaces the dragged DOM node, and the browser immediately
@@ -17182,28 +17863,6 @@ function _gssRender(data) {
       </div>`;
     }).join('');
 
-  const EST_SIZES = [
-    { key: 'estimation_s_minutes',  label: 'S',  cls: 'gss-sz-S'  },
-    { key: 'estimation_m_minutes',  label: 'M',  cls: 'gss-sz-M'  },
-    { key: 'estimation_l_minutes',  label: 'L',  cls: 'gss-sz-L'  },
-    { key: 'estimation_xl_minutes', label: 'XL', cls: 'gss-sz-XL' },
-  ];
-  const estRows = EST_SIZES.map(s => `
-    <tr>
-      <td><span class="gss-sz-badge ${s.cls}">${s.label}</span></td>
-      <td><input class="gss-inp gss-inp-num" type="number" min="1" data-gss-key="${s.key}" value="${data[s.key] ?? ''}"> <span class="gss-ro">min</span></td>
-    </tr>`).join('');
-
-  const bufferRows = `
-    <div class="gss-row">
-      <div class="gss-label">Buffer<span class="hint">added to every estimate</span></div>
-      <div class="gss-control"><input class="gss-inp gss-inp-num" type="number" min="0" max="100" data-gss-key="estimation_buffer_pct" value="${data.estimation_buffer_pct ?? ''}"> <span class="gss-ro">%</span></div>
-    </div>
-    <div class="gss-row">
-      <div class="gss-label">Thin-AC buffer<span class="hint">used when AC is sparse</span></div>
-      <div class="gss-control"><input class="gss-inp gss-inp-num" type="number" min="0" max="100" data-gss-key="estimation_thin_ac_buffer_pct" value="${data.estimation_thin_ac_buffer_pct ?? ''}"> <span class="gss-ro">%</span></div>
-    </div>`;
-
   const SECRETS = [
     { key: 'github_token_set',  label: 'GITHUB_TOKEN'  },
     { key: 'database_url_set',  label: 'DATABASE_URL'  },
@@ -17254,20 +17913,6 @@ function _gssRender(data) {
             </select>
           </div>
         </div>
-      </div>
-    </div>
-
-    <div class="gss-card">
-      <div class="gss-card-head">
-        <i class="ti ti-ruler-measure" style="color:var(--text-muted)"></i>
-        <div><div class="gss-card-title">Estimation Defaults</div><div class="gss-card-sub">Size → time mapping used by the Estimator (global default; projects may override)</div></div>
-      </div>
-      <div class="gss-card-body">
-        <table class="gss-est-table">
-          <thead><tr><th style="width:80px">Size</th><th style="width:160px">Typical time</th></tr></thead>
-          <tbody>${estRows}</tbody>
-        </table>
-        <div style="margin-top:14px">${bufferRows}</div>
       </div>
     </div>
 
@@ -17733,8 +18378,17 @@ function _snavRenderPill() {
     const doneHtml = (store && store.done > 0) ? ` · <span class="snav-uat">${store.done} done</span>` : '';
     const uatHtml  = (!store && (d.uat || 0) > 0) ? ` · <span class="snav-uat">${d.uat} UAT</span>` : '';
     const reworkHtml = rework > 0 ? ` · <span class="snav-rework">${rework} ↩</span>` : '';
+    // In pipeline mode the pill names every active agent (coder + tester) rather
+    // than collapsing to a single label (issue #739).
+    const liveAgents = _smgmtLiveCache[`sprint-${d.sprint}`];
+    let agentsHtml = '';
+    if (liveAgents && liveAgents.pipeline_mode && (liveAgents.active_agents || []).length) {
+      const names = liveAgents.active_agents
+        .map(a => (a.name || '').toUpperCase()).filter(Boolean);
+      if (names.length) agentsHtml = ` · <span class="snav-agents">${escHtml(names.join('+'))}</span>`;
+    }
     dot.className = rework > 0 ? 'snav-dot snav-dot--rework' : 'snav-dot snav-dot--running';
-    text.innerHTML = `S${d.sprint} · ${complete}/${total}${doneHtml}${uatHtml}${reworkHtml}`;
+    text.innerHTML = `S${d.sprint} · ${complete}/${total}${doneHtml}${uatHtml}${reworkHtml}${agentsHtml}`;
   }
 }
 
@@ -18357,10 +19011,11 @@ function _logsEventsHtml(events) {
   if (filtered.length === 0) {
     return '<div class="logs-empty" style="padding:6px 0;font-size:11px">No events match current filters.</div>';
   }
+  const repo = (typeof _logsRepo === 'function' ? (_logsRepo() || '') : '');
   return filtered.map(e =>
     `<div class="logs-event-line ${escHtml(e.type)}">` +
     `<span class="logs-event-ts">${escHtml(e.timestamp)}</span>` +
-    `<span class="logs-event-msg">${escHtml(e.message)}</span>` +
+    `<span class="logs-event-msg">${colorizeLogLine(e.message, repo)}</span>` +
     `</div>`
   ).join('');
 }
@@ -18462,7 +19117,7 @@ async function logsLoadRawView() {
     if (!resp.ok) { streamEl.innerHTML = '<div class="logs-raw-line" style="color:var(--red)">Failed to load log.</div>'; return; }
     const data = await resp.json();
     if (!data.found || !data.tail) { streamEl.innerHTML = '<div class="logs-raw-line" style="color:var(--text-sub)">No log file found for this sprint.</div>'; return; }
-    streamEl.innerHTML = data.tail.split('\n').map(line => `<div class="logs-raw-line">${escHtml(line)}</div>`).join('');
+    streamEl.innerHTML = data.tail.split('\n').map(line => `<div class="logs-raw-line">${colorizeLogLine(line, project || '')}</div>`).join('');
     streamEl.scrollTop = streamEl.scrollHeight;
   } catch (_) { streamEl.innerHTML = '<div class="logs-raw-line" style="color:var(--red)">Error loading log.</div>'; }
 }
@@ -18606,18 +19261,53 @@ function _evlFmtTs(ts) {
   return ts.replace('T', ' ').substring(0, 19);
 }
 
+// issue #764: format an agent run duration (seconds) as "Nm Ns" / "Ns".
+function _evlFmtDuration(secs) {
+  var n = Number(secs);
+  if (!isFinite(n) || n < 0) return '';
+  n = Math.round(n);
+  var m = Math.floor(n / 60);
+  var s = n % 60;
+  return m > 0 ? (m + 'm ' + s + 's') : (s + 's');
+}
+
+function _evlLabelChangeText(e) {
+  // issue #720: human-readable label-transition entry, e.g.
+  //   "moved #700 → SIT"  or  "labeled #700 needs-rework"  or  "unlabeled #700 SIT"
+  const d = e.detail || {};
+  const target = e.target || '';
+  const added = Array.isArray(d.added) ? d.added : [];
+  const removed = Array.isArray(d.removed) ? d.removed : [];
+  if (added.length && removed.length) {
+    return `moved ${target} → ${d.to_label || added.join(', ')}`;
+  }
+  if (added.length) {
+    return `labeled ${target} ${d.to_label || added.join(', ')}`;
+  }
+  if (removed.length) {
+    return `unlabeled ${target} ${d.from_label || removed.join(', ')}`;
+  }
+  return `label change ${target}`.trim();
+}
+
 function _evlRenderRow(row) {
   if (row.kind === 'standalone') {
     const e = row.event;
     const ts = _evlFmtTs(e.timestamp);
     const src = e.source || '';
-    const type = (e.type || '').replace(/_/g, ' ');
-    const target = e.target ? ' ' + e.target : '';
+    let typeText;
+    if (e.type === 'ticket_label_changed') {
+      typeText = _evlLabelChangeText(e);
+    } else {
+      const type = (e.type || '').replace(/_/g, ' ');
+      const target = e.target ? ' ' + e.target : '';
+      typeText = type + target;
+    }
     const actor = e.actor ? `<span class="evl-actor">${escHtml(e.actor)}</span>` : '';
     return `<div class="evl-standalone-row">
       <span class="evl-ts">${escHtml(ts)}</span>
       <span class="evl-source-badge">${escHtml(src)}</span>
-      <span class="evl-type-label">${escHtml(type + target)}</span>
+      <span class="evl-type-label">${escHtml(typeText)}</span>
       ${actor}
     </div>`;
   }
@@ -18808,6 +19498,41 @@ function _evlDescHtml(ev) {
   }
   if (type === 'issue_closed') {
     return '<span class="lr-desc"><span class="mono">' + target + '</span> closed</span>';
+  }
+
+  // Agent lifecycle rows (issue #719): render '<role> <action> #<issue>' with a
+  // clickable GitHub issue link. Fall back to the raw UUID actor when the event
+  // carries no role/issue (legacy events, non-sprint agents).
+  if (type === 'agent_started' || type === 'agent_finished') {
+    var action = type === 'agent_started' ? 'started' : 'finished';
+    var aRole = detail.role || '';
+    var aIssue = detail.issue_num;
+    // issue #764: Duration column for finished agent rows, sourced from the
+    // durable agent_runs.duration_seconds enriched onto the event server-side.
+    var durSecs = (type === 'agent_finished')
+      ? (ev.duration_seconds != null ? ev.duration_seconds : detail.duration)
+      : null;
+    var durHtml = (durSecs != null)
+      ? '<span class="evl-agent-duration">' + escHtml(_evlFmtDuration(durSecs)) + '</span>'
+      : '';
+    if (aRole && aIssue) {
+      var repo = _projectData ? (_projectData.repo || '') : '';
+      var issueUrl = repo
+        ? 'https://github.com/' + repo + '/issues/' + encodeURIComponent(aIssue)
+        : '';
+      var issueLink = issueUrl
+        ? '<a class="evl-issue-link" href="' + escHtml(issueUrl) + '" target="_blank" rel="noopener">#' + escHtml(String(aIssue)) + '</a>'
+        : '#' + escHtml(String(aIssue));
+      return '<span class="lr-desc evl-agent-row">'
+        + '<span class="evl-agent-role">' + escHtml(aRole) + '</span> '
+        + action + ' ' + issueLink + durHtml
+        + '</span>';
+    }
+    // Fallback: no role/issue → show action and the raw agent UUID (no regression)
+    var rawId = escHtml(ev.actor || ev.target || '');
+    return '<span class="lr-desc evl-agent-row">'
+      + 'agent ' + action + (rawId ? ' <span class="mono">' + rawId + '</span>' : '')
+      + '</span>';
   }
 
   var label = type.replace(/_/g, ' ');
@@ -19685,7 +20410,6 @@ document.addEventListener('keydown', function(e) {
       <label class="apm-check"><input type="checkbox" id="apm-nested"> Nested layout (--nested)</label>
       <label class="apm-check"><input type="checkbox" id="apm-skip-uat"> Skip UAT clone (--skip-uat)</label>
     </div>
-    <div class="apm-log-wrap hidden" id="apm-log-wrap"><pre class="apm-log" id="apm-log"></pre></div>
   </form>
 
   <!-- Add existing repo (POST /api/projects) -->
@@ -19703,12 +20427,22 @@ document.addEventListener('keydown', function(e) {
       <label class="apm-label" for="apm-color">Color <span class="apm-hint">(blue, green, purple, amber, red, pink, cyan, gray)</span></label>
       <input class="apm-input" id="apm-color" type="text" placeholder="gray">
     </div>
+    <div class="apm-field apm-checks">
+      <label class="apm-check"><input type="checkbox" id="apm-add-nested" onchange="apmAddNestedToggle()"> Nested layout (--nested)</label>
+      <label class="apm-check"><input type="checkbox" id="apm-add-skip-uat"> Skip UAT clone (--skip-uat)</label>
+    </div>
+    <div class="apm-hint" style="margin:-4px 0 4px">Check <strong>Nested layout</strong> to clone the repo into <code>~/dev/&lt;name&gt;</code> (re-creates local folders, e.g. re-adding a deleted project). Leave off to just track an already-cloned repo.</div>
+    <div class="apm-field hidden" id="apm-add-dir-field">
+      <label class="apm-label" for="apm-add-projects-dir">Projects directory</label>
+      <input class="apm-input" id="apm-add-projects-dir" type="text" placeholder="~/dev" value="~/dev" autocomplete="off">
+    </div>
   </form>
+
+  <div class="apm-log-wrap hidden" id="apm-log-wrap"><pre class="apm-log" id="apm-log"></pre></div>
 
   <div class="apm-footer">
     <button type="button" class="apm-btn-ghost" onclick="closeAddProjectModal()">Cancel</button>
-    <button type="submit" class="apm-btn-primary" id="apm-init-submit" form="apm-init-form">Create</button>
-    <button type="submit" class="apm-btn-primary hidden" id="apm-add-submit" form="apm-add-form">Add Project</button>
+    <button type="button" class="apm-btn-primary" id="apm-submit" onclick="apmSubmit()">Create</button>
   </div>
 </div>
 
@@ -20828,7 +21562,9 @@ document.addEventListener('keydown', function(e) {
     _renderDuration(data);
   }
 
-  window.metricsInit = async function () {
+  // Trends sub-tab chart loader (#715). Exposed under anlTrendsInit because the
+  // Analytics IIFE overrides window.metricsInit to open the Calibration sub-tab.
+  window.anlTrendsInit = async function () {
     if (_metricsLoaded && _metricsData !== null) {
       _loadChartJs(() => _renderAll(_metricsData), () => _tableFallback(_metricsData));
       return;
@@ -21018,16 +21754,29 @@ document.addEventListener('keydown', function(e) {
   };
 
   // ── Sub-tab toggle + scope refresh + tab init ──
+  let _anlTrendsInited = false;
   window.anlShowTab = function (name) {
-    ['calibration', 'metrics'].forEach(n => {
+    ['calibration', 'metrics', 'status', 'trends'].forEach(n => {
       const btn = document.getElementById('anl-tab-' + n);
       const panel = document.getElementById('anl-panel-' + n);
       const active = n === name;
       if (btn) { btn.classList.toggle('active', active); btn.setAttribute('aria-selected', String(active)); }
       if (panel) panel.classList.toggle('show', active);
     });
-    if (name === 'metrics') window.anlFetchDeliveryHealth();
-    else window.anlFetchCalibration();
+    if (name === 'metrics') {
+      window.anlFetchDeliveryHealth();
+    } else if (name === 'status') {
+      // Lazy-load on first open only; statusInit guards subsequent re-fetch.
+      if (typeof statusInit === 'function') statusInit();
+    } else if (name === 'trends') {
+      // Lazy-load the Chart.js trends on first open only.
+      if (!_anlTrendsInited && typeof window.anlTrendsInit === 'function') {
+        _anlTrendsInited = true;
+        window.anlTrendsInit();
+      }
+    } else {
+      window.anlFetchCalibration();
+    }
   };
 
   window.anlRefresh = function () {
@@ -21364,6 +22113,8 @@ async function projSettingsLoad() {
   // Expose slug for env-path JS block
   window._currentProjectSlug = slug;
   projEnvLoad();
+  deployActionsLoad();
+  envVarsLoad();
 
   // Show project name in inherit notice
   const nameEl = document.getElementById('ps-proj-name');
@@ -21763,6 +22514,1207 @@ function addEnvRow() {
   else body.appendChild(row);
 }
 
+// ── Environment Variables editor (issue #727) ─────────────────────────────────
+// Render-style per-environment .env editor: masked read view with per-row reveal,
+// an edit mode with add/delete rows, and a Save that PUTs back to the .env file.
+
+var _envVarState = {};  // env -> { vars: [{key,value}], editing: bool, reveal: {idx:bool} }
+
+function _envVarId(env) { return (env || '').replace(/[^A-Za-z0-9_-]/g, '_'); }
+
+function envVarsLoad() {
+  var slug = (window._currentProjectSlug || '');
+  if (!slug) return;
+  var host = document.getElementById('ps-envvars-body');
+  if (!host) return;
+  fetch('/api/projects/' + encodeURIComponent(slug) + '/environments')
+    .then(function(r) { return r.ok ? r.json() : {environments: []}; })
+    .then(function(data) {
+      var envs = (data.environments || []).map(function(e) { return e.env; });
+      if (!envs.length) {
+        host.innerHTML = '<div class="ps-machine-note"><i class="ti ti-info-circle"></i>'
+          + ' No environments configured. Add an environment path above to manage its .env file.</div>';
+        return;
+      }
+      host.innerHTML = envs.map(function(env) {
+        var id = _envVarId(env);
+        return '<div class="ps-envvars-section" data-ev-env="' + _escAttr(env) + '">'
+          + '<div class="ps-envvars-head"><span class="ps-envvars-env">' + escHtml(env) + '</span></div>'
+          + '<div id="ps-envvars-wrap-' + id + '"><div class="ps-machine-note">Loading…</div></div>'
+          + '</div>';
+      }).join('');
+      envs.forEach(envVarsLoadEnv);
+    })
+    .catch(function() {});
+}
+
+function envVarsLoadEnv(env) {
+  var slug = (window._currentProjectSlug || '');
+  fetch('/api/projects/' + encodeURIComponent(slug) + '/environments/'
+        + encodeURIComponent(env) + '/env-vars')
+    .then(function(r) { return r.ok ? r.json() : Promise.reject(r); })
+    .then(function(data) {
+      _envVarState[env] = {
+        vars: (data.vars || []).map(function(v) { return {key: v.key, value: v.value}; }),
+        editing: false,
+        reveal: {}
+      };
+      _envVarsRender(env);
+    })
+    .catch(function() {
+      var wrap = document.getElementById('ps-envvars-wrap-' + _envVarId(env));
+      if (wrap) wrap.innerHTML = '<div class="ps-machine-note"><i class="ti ti-info-circle"></i>'
+        + ' No .env file found for this environment.</div>';
+    });
+}
+
+function _envVarsRender(env) {
+  var wrap = document.getElementById('ps-envvars-wrap-' + _envVarId(env));
+  var st = _envVarState[env];
+  if (!wrap || !st) return;
+  if (st.editing) { wrap.innerHTML = _envVarsEditHtml(env); return; }
+
+  if (!st.vars.length) {
+    wrap.innerHTML = '<div class="ps-machine-note">No variables set. Click Edit to add one.</div>'
+      + _envVarsReadActions(env);
+    return;
+  }
+  var rows = st.vars.map(function(v, i) {
+    var masked = !st.reveal[i];
+    var shown = masked ? '••••••••' : escHtml(v.value);
+    return '<tr>'
+      + '<td class="ps-envvar-key">' + escHtml(v.key) + '</td>'
+      + '<td class="ps-envvar-val' + (masked ? ' is-masked' : '') + '">' + shown + '</td>'
+      + '<td class="ps-envvar-actions">'
+      + '<button class="ps-icon-btn" type="button"'
+      + ' aria-label="' + (masked ? 'Reveal' : 'Hide') + ' value for ' + _escAttr(v.key) + '"'
+      + ' onclick="envVarToggleReveal(\'' + _escAttr(env) + '\',' + i + ')">'
+      + '<i class="ti ' + (masked ? 'ti-eye' : 'ti-eye-off') + '"></i></button>'
+      + '</td></tr>';
+  }).join('');
+  wrap.innerHTML = '<table class="ps-envvars-table"><thead><tr>'
+    + '<th>Key</th><th>Value</th><th></th></tr></thead><tbody>' + rows + '</tbody></table>'
+    + _envVarsReadActions(env);
+}
+
+function _envVarsReadActions(env) {
+  return '<div class="ps-save-bar">'
+    + '<button class="ps-btn ps-btn-primary" type="button" onclick="envVarsEdit(\'' + _escAttr(env) + '\')">'
+    + '<i class="ti ti-pencil"></i> Edit</button></div>';
+}
+
+function _envVarsEditHtml(env) {
+  var id = _envVarId(env);
+  var st = _envVarState[env];
+  var rows = st.vars.map(function(v) { return _envVarEditRow(v.key, v.value); }).join('');
+  return '<table class="ps-envvars-table"><thead><tr>'
+    + '<th>Key</th><th>Value</th><th></th></tr></thead>'
+    + '<tbody id="ps-envvars-rows-' + id + '">' + rows + '</tbody></table>'
+    + '<div style="margin-top:10px">'
+    + '<a class="ps-link" onclick="envVarAddRow(\'' + _escAttr(env) + '\')">'
+    + '<i class="ti ti-plus" style="font-size:13px"></i> Add row</a></div>'
+    + '<div class="ps-save-bar">'
+    + '<span id="ps-envvars-status-' + id + '" class="ps-status-msg"></span>'
+    + '<button class="ps-btn ps-btn-ghost" type="button" onclick="envVarsCancel(\'' + _escAttr(env) + '\')">Cancel</button>'
+    + '<button class="ps-btn ps-btn-primary" type="button" onclick="envVarsSave(\'' + _escAttr(env) + '\')">'
+    + '<i class="ti ti-device-floppy"></i> Save</button>'
+    + '</div>';
+}
+
+function _envVarEditRow(key, value) {
+  return '<tr data-ev-row="1">'
+    + '<td><input class="ps-inp ps-envvar-key-inp" data-ev-key="1" value="' + _escAttr(key || '') + '" placeholder="KEY">'
+    + '<div class="ps-envvar-error" data-ev-err="1"></div></td>'
+    + '<td><input class="ps-inp ps-envvar-val-inp" data-ev-val="1" value="' + _escAttr(value || '') + '" placeholder="value"></td>'
+    + '<td class="ps-envvar-actions">'
+    + '<button class="ps-icon-btn" type="button" aria-label="Delete row" onclick="envVarDeleteRow(this)">'
+    + '<i class="ti ti-trash"></i></button></td>'
+    + '</tr>';
+}
+
+function envVarToggleReveal(env, i) {
+  var st = _envVarState[env];
+  if (!st) return;
+  st.reveal[i] = !st.reveal[i];
+  _envVarsRender(env);
+}
+
+function envVarsEdit(env) {
+  var st = _envVarState[env];
+  if (!st) return;
+  st.editing = true;
+  _envVarsRender(env);
+}
+
+function envVarsCancel(env) {
+  var st = _envVarState[env];
+  if (!st) return;
+  st.editing = false;       // st.vars untouched during edit → discards changes
+  st.reveal = {};
+  _envVarsRender(env);
+}
+
+function envVarAddRow(env) {
+  var tbody = document.getElementById('ps-envvars-rows-' + _envVarId(env));
+  if (!tbody) return;
+  tbody.insertAdjacentHTML('beforeend', _envVarEditRow('', ''));
+}
+
+function envVarDeleteRow(btn) {
+  var tr = btn.closest('tr');
+  if (tr) tr.parentNode.removeChild(tr);
+}
+
+function _envVarSetStatus(env, msg, cls) {
+  var el = document.getElementById('ps-envvars-status-' + _envVarId(env));
+  if (!el) return;
+  el.textContent = msg;
+  el.className = 'ps-status-msg' + (cls ? ' ' + cls : '');
+}
+
+function envVarsSave(env) {
+  var slug = (window._currentProjectSlug || '');
+  var tbody = document.getElementById('ps-envvars-rows-' + _envVarId(env));
+  if (!tbody) return;
+  var trs = tbody.querySelectorAll('tr[data-ev-row]');
+  var vars = [];
+  var hasError = false;
+  trs.forEach(function(tr) {
+    var keyInp = tr.querySelector('[data-ev-key]');
+    var valInp = tr.querySelector('[data-ev-val]');
+    var errEl = tr.querySelector('.ps-envvar-error');
+    if (!keyInp) return;
+    if (errEl) errEl.textContent = '';
+    keyInp.classList.remove('is-invalid');
+    var k = (keyInp.value || '').trim();
+    if (!k) {
+      hasError = true;
+      if (errEl) errEl.textContent = 'Key is required';
+      keyInp.classList.add('is-invalid');
+      return;
+    }
+    vars.push({key: k, value: valInp ? valInp.value : ''});
+  });
+  if (hasError) {
+    _envVarSetStatus(env, 'Fix the highlighted keys before saving.', 'err');
+    return;
+  }
+  _envVarSetStatus(env, 'Saving…', '');
+  fetch('/api/projects/' + encodeURIComponent(slug) + '/environments/'
+        + encodeURIComponent(env) + '/env-vars', {
+    method: 'PUT',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({vars: vars})
+  })
+    .then(function(r) {
+      if (!r.ok) {
+        return r.json().then(function(d) {
+          throw new Error((d && d.detail) || ('HTTP ' + r.status));
+        });
+      }
+      return r.json();
+    })
+    .then(function(data) {
+      var st = _envVarState[env];
+      st.vars = (data.vars || []).map(function(v) { return {key: v.key, value: v.value}; });
+      st.editing = false;
+      st.reveal = {};
+      _envVarsRender(env);
+      showToast('Saved ' + env + ' environment variables.', 'success');
+    })
+    .catch(function(e) {
+      // Keep the user's edits in the form; surface the failure inline.
+      _envVarSetStatus(env, 'Save failed: ' + e.message, 'err');
+    });
+}
+
+// ── Deploy actions (issue #723) ──────────────────────────────────────────────
+// Render Deploy + Restart buttons for each local environment from deploy-config.
+
+function _escAttr(s) { return (s || '').replace(/"/g, '&quot;'); }
+
+function deployActionsLoad() {
+  var slug = (window._currentProjectSlug || '');
+  var body = document.getElementById('ps-deploy-body');
+  if (!slug || !body) return;
+  fetch('/api/projects/' + encodeURIComponent(slug) + '/deploy-config')
+    .then(function(r) { return r.ok ? r.json() : {}; })
+    .then(function(cfg) { _renderDeployActions(cfg || {}); })
+    .catch(function() {});
+}
+
+// host (local|render) per env, populated on render so action handlers can branch.
+var _deployEnvHost = {};
+
+function _renderDeployActions(cfg) {
+  var body = document.getElementById('ps-deploy-body');
+  if (!body) return;
+
+  _deployEnvHost = {};
+  var envs = Object.keys(cfg).filter(function(env) {
+    var h = (cfg[env] || {}).host;
+    return h === 'local' || h === 'render';
+  });
+
+  if (!envs.length) {
+    body.innerHTML = '<div class="ps-machine-note"><i class="ti ti-info-circle"></i>'
+      + ' No deployable environments configured. Deploy actions apply to host=local or host=render envs.</div>';
+    return;
+  }
+
+  var html = '';
+  var anyRender = false;
+  envs.forEach(function(env) {
+    var entry = cfg[env] || {};
+    var host = entry.host;
+    _deployEnvHost[env] = host;
+    var meta = host === 'render'
+      ? ' <span style="color:var(--text-muted);font-weight:400">(render)</span>'
+      : (entry.branch ? ' <span style="color:var(--text-muted);font-weight:400">(' + _escAttr(entry.branch) + ')</span>' : '');
+    if (host === 'render') anyRender = true;
+    html += '<div class="ps-row" data-deploy-row="' + _escAttr(env) + '">'
+      + '<div class="ps-row-label">' + env + meta + '</div>'
+      + '<div class="ps-row-control" style="gap:8px">'
+      + (host === 'render'
+          ? '<span id="ps-deploy-status-' + _escAttr(env) + '" class="ps-deploy-status" style="display:none"></span>'
+          : '')
+      + '<button class="ps-btn" type="button" aria-label="Deploy ' + _escAttr(env) + '"'
+      + ' onclick="envDeploy(\'' + _escAttr(env) + '\')">'
+      + '<i class="ti ti-rocket"></i> Deploy</button>'
+      + '<button class="ps-btn" type="button" aria-label="Restart ' + _escAttr(env) + '"'
+      + ' onclick="envRestart(\'' + _escAttr(env) + '\')">'
+      + '<i class="ti ti-refresh"></i> Restart</button>'
+      + '</div>'
+      + '</div>'
+      + '<pre id="ps-deploy-out-' + _escAttr(env) + '" class="ps-deploy-out" style="display:none"></pre>';
+  });
+
+  html += '<div class="ps-machine-note"><i class="ti ti-info-circle"></i>'
+    + ' Local deploy runs <code>git pull --ff-only</code> then restarts the service (pull-only — never merges or pushes).'
+    + (anyRender ? ' Render deploys are triggered via the Render API and tracked live below.' : '')
+    + '</div>';
+
+  body.innerHTML = html;
+}
+
+// Per-env poll timers so a re-deploy supersedes a prior poll loop.
+var _deployPollTimers = {};
+
+function _setDeployStatus(env, status) {
+  var el = document.getElementById('ps-deploy-status-' + env);
+  if (!el) return;
+  el.style.display = 'inline-block';
+  el.textContent = status;
+  el.className = 'ps-deploy-status ps-deploy-status--' + status;
+}
+
+/** Poll the Render deploy-status endpoint until live/failed (issue #725). */
+function _renderDeployPoll(env) {
+  var slug = (window._currentProjectSlug || '');
+  if (!slug) return;
+  if (_deployPollTimers[env]) clearTimeout(_deployPollTimers[env]);
+
+  var attempts = 0;
+  var MAX_ATTEMPTS = 60;   // ~3 min at 3s intervals
+  var INTERVAL_MS = 3000;
+
+  function tick() {
+    attempts += 1;
+    fetch('/api/projects/' + encodeURIComponent(slug) + '/environments/'
+          + encodeURIComponent(env) + '/deploy-status')
+      .then(function(r) {
+        return r.json().then(function(data) { return { ok: r.ok, status: r.status, data: data }; });
+      })
+      .then(function(res) {
+        if (!res.ok) {
+          _setDeployOut(env, 'Status error (' + res.status + '): '
+            + ((res.data && res.data.detail) || 'error'), true);
+          return;
+        }
+        var st = (res.data && res.data.status) || 'queued';
+        _setDeployStatus(env, st);
+        if (st === 'live') {
+          _setDeployOut(env, 'Deploy is live ✓', false);
+          return;
+        }
+        if (st === 'failed') {
+          _setDeployOut(env, 'Deploy failed.', true);
+          return;
+        }
+        if (attempts < MAX_ATTEMPTS) {
+          _deployPollTimers[env] = setTimeout(tick, INTERVAL_MS);
+        }
+      })
+      .catch(function() {
+        if (attempts < MAX_ATTEMPTS) {
+          _deployPollTimers[env] = setTimeout(tick, INTERVAL_MS);
+        }
+      });
+  }
+  tick();
+}
+
+function _deployOut(env) {
+  return document.getElementById('ps-deploy-out-' + env);
+}
+
+function _setDeployOut(env, text, isError) {
+  var pre = _deployOut(env);
+  if (!pre) return;
+  pre.style.display = 'block';
+  pre.textContent = text;
+  pre.style.color = isError ? 'var(--error, #ef4444)' : '';
+}
+
+function envDeploy(env) {
+  var slug = (window._currentProjectSlug || '');
+  if (!slug) return;
+  _setDeployOut(env, 'Deploying ' + env + '…', false);
+  fetch('/api/projects/' + encodeURIComponent(slug) + '/environments/'
+        + encodeURIComponent(env) + '/deploy', { method: 'POST' })
+    .then(function(r) {
+      return r.json().then(function(data) { return { ok: r.ok, status: r.status, data: data }; });
+    })
+    .then(function(res) {
+      if (!res.ok) {
+        _setDeployOut(env, 'Deploy failed (' + res.status + '): '
+          + ((res.data && res.data.detail) || 'error'), true);
+        return;
+      }
+      var d = res.data || {};
+      // host=render: no git output — show the live status and poll until done.
+      if (_deployEnvHost[env] === 'render' || d.host === 'render') {
+        var st = d.status || 'queued';
+        _setDeployStatus(env, st);
+        _setDeployOut(env, 'Deploy triggered on Render — tracking status…', false);
+        _renderDeployPoll(env);
+        return;
+      }
+      var out = (d.pull_output || '').trim();
+      var lines = out ? out + '\n' : '';
+      lines += 'HEAD: ' + (d.head || '(unknown)');
+      _setDeployOut(env, lines, false);
+    })
+    .catch(function(e) { _setDeployOut(env, 'Deploy error: ' + e, true); });
+}
+
+function envRestart(env) {
+  var slug = (window._currentProjectSlug || '');
+  if (!slug) return;
+  _setDeployOut(env, 'Restarting ' + env + '…', false);
+  fetch('/api/projects/' + encodeURIComponent(slug) + '/environments/'
+        + encodeURIComponent(env) + '/restart', { method: 'POST' })
+    .then(function(r) {
+      return r.json().then(function(data) { return { ok: r.ok, status: r.status, data: data }; });
+    })
+    .then(function(res) {
+      if (!res.ok) {
+        _setDeployOut(env, 'Restart failed (' + res.status + '): '
+          + ((res.data && res.data.detail) || 'error'), true);
+        return;
+      }
+      var msg = res.status === 202
+        ? 'Restart accepted — service is bouncing (will be back shortly).'
+        : 'Restarted ' + env + '.';
+      _setDeployOut(env, msg, false);
+    })
+    .catch(function(e) { _setDeployOut(env, 'Restart error: ' + e, true); });
+}
+
+// ── Deploy tab (issue #726) ───────────────────────────────────────────────────
+// A dedicated tab that aggregates deployable environments across projects
+// (commander, perf-coach) and drives deploy/restart with confirmation,
+// streaming progress, a log tail, and a self-restart reconnect overlay.
+
+var _deployAllCards = [];         // every env across projects, as returned by /api/deploy/overview
+var _deployCards = [];            // active-project subset actually rendered (issue #768)
+var _deployTabPollers = {};       // idx → setTimeout handle (render status polling)
+var _deployReconnectTimer = null;
+
+// Filter deploy-overview entries down to the active project (issue #768). The
+// overview endpoint aggregates every project's environments; the Deploy tab must
+// only show the project currently being viewed. An empty slug returns all cards
+// (defensive — the page always has an active slug). Pure + side-effect free so it
+// is unit-testable on its own.
+function _deployFilterByProject(cards, slug) {
+  cards = cards || [];
+  if (!slug) return cards.slice();
+  return cards.filter(function(c) { return c && c.project === slug; });
+}
+// END _deployFilterByProject
+
+function _deployEsc(s) {
+  var d = document.createElement('div');
+  d.textContent = (s == null ? '' : String(s));
+  return d.innerHTML;
+}
+
+function _deployShortSha(sha) {
+  if (!sha) return '—';
+  return String(sha).slice(0, 8);
+}
+
+function deployTabDestroy() {
+  Object.keys(_deployTabPollers).forEach(function(k) {
+    clearTimeout(_deployTabPollers[k]);
+  });
+  _deployTabPollers = {};
+}
+
+function deployTabInit() {
+  deployTabDestroy();
+  var grid = document.getElementById('deploy-grid');
+  if (!grid) return;
+  fetch('/api/deploy/overview')
+    .then(function(r) { return r.ok ? r.json() : { environments: [] }; })
+    .then(function(data) {
+      _deployAllCards = (data && data.environments) || [];
+      _deployRenderGrid();
+    })
+    .catch(function() {
+      grid.innerHTML = '<div class="deploy-tab-intro is-error">'
+        + 'Could not load deploy overview.</div>';
+    });
+}
+
+function _deployRenderGrid() {
+  var grid = document.getElementById('deploy-grid');
+  if (!grid) return;
+  // Filter at render time so switching projects re-scopes the grid without a
+  // full-page reload (issue #768). _deployCards drives every index-based lookup
+  // below, so the rendered cards and their status pollers stay in sync.
+  _deployCards = _deployFilterByProject(_deployAllCards, window._currentProjectSlug || _slug || '');
+  if (!_deployCards.length) {
+    grid.innerHTML = '<div class="deploy-tab-intro" id="deploy-grid-empty">'
+      + 'No deployable environments configured.</div>';
+    return;
+  }
+  grid.innerHTML = _deployCards.map(function(c, i) { return _deployCardHtml(c, i); }).join('');
+  // Enrich each card with live commit SHA + status.
+  _deployCards.forEach(function(c, i) { _deployLoadCardStatus(c, i); });
+}
+
+function _deployCardHtml(c, i) {
+  var hostLabel = c.host === 'render' ? 'Render' : 'local';
+  var hostClass = c.host === 'render' ? 'deploy-card__badge--render' : 'deploy-card__badge--local';
+  var branchRow = c.host === 'render'
+    ? (c.render_service_id
+        ? '<div class="deploy-card__meta-row"><span class="deploy-card__meta-label">Service</span>'
+          + '<span class="deploy-card__meta-val is-mono">' + _deployEsc(c.render_service_id) + '</span></div>'
+        : '')
+    : '<div class="deploy-card__meta-row"><span class="deploy-card__meta-label">Branch</span>'
+      + '<span class="deploy-card__meta-val">' + _deployEsc(c.branch || '—') + '</span></div>';
+  return ''
+    + '<article class="deploy-card" id="deploy-card-' + i + '" aria-label="'
+      + _deployEsc(c.project + ' ' + c.env) + ' deployment">'
+    + '  <div class="deploy-card__head">'
+    + '    <span class="deploy-card__title">' + _deployEsc(c.env) + '</span>'
+    + '    <span class="deploy-card__project">' + _deployEsc(c.project) + '</span>'
+    + '    <span class="deploy-card__badge ' + hostClass + '">' + _deployEsc(hostLabel) + '</span>'
+    // issue #771 — run-state pill (running / stopped / idle) reads the real
+    // service state so the user knows what they're acting on before clicking.
+    + '    <span class="runstate-pill runstate-pill--idle" id="deploy-card-runstate-' + i + '"'
+    + '          role="status" aria-live="polite" title="Run state">idle</span>'
+    + '    <span class="status-pill status-pill--idle" id="deploy-card-status-' + i + '">idle</span>'
+    + '  </div>'
+    + '  <div class="deploy-card__meta">'
+    +      branchRow
+    +      _deployFolderPortRows(c, i)
+    + '    <div class="deploy-card__meta-row"><span class="deploy-card__meta-label">Commit</span>'
+    + '      <span class="deploy-card__meta-val is-mono" id="deploy-card-sha-' + i + '">…</span></div>'
+    + '    <div class="deploy-card__meta-row"><span class="deploy-card__meta-label">Last deploy</span>'
+    + '      <span class="deploy-card__meta-val" id="deploy-card-time-' + i + '">—</span></div>'
+    + '  </div>'
+    + '  <div class="deploy-card__actions" id="deploy-card-actions-' + i + '">'
+    +      _deployIdleActionsHtml(i)
+    + '  </div>'
+    +    _deployLogPanelHtml(i)
+    + '</article>';
+}
+
+// issue #771 — per-card run state ('running' | 'stopped' | 'idle') drives which
+// action buttons are enabled. idle (never started / unknown) allows everything.
+var _deployRunState = {};
+
+// AC5/AC6: enable/disable each action by run state. The chosen lifecycle is a
+// Stop → Start flow: Deploy and Restart are disabled while the env is stopped.
+function _deployBtnDisabled(state, action) {
+  if (state === 'running') return action === 'start';
+  if (state === 'stopped') return action === 'stop' || action === 'restart' || action === 'deploy';
+  return false;  // idle → all enabled
+}
+
+function _deployActionBtn(i, onclickExpr, label, icon, cls, disabled) {
+  return ''
+    + '<button class="deploy-btn' + (cls ? ' ' + cls : '') + '" type="button"'
+    + ' aria-label="' + _deployEsc(label + ' ' + _deployCards[i].env) + '"'
+    + (disabled ? ' disabled' : '')
+    + ' onclick="' + onclickExpr + '">'
+    + '<i class="ti ' + icon + '"></i> ' + label + '</button>';
+}
+
+// AC1: four actions — Deploy, Restart, Start, Stop. Render envs have no clean
+// stop equivalent through this dashboard, so Start/Stop are HIDDEN (not disabled)
+// with a tooltip explaining why (AC10).
+function _deployIdleActionsHtml(i) {
+  var c = _deployCards[i];
+  var state = _deployRunState[i] || 'idle';
+  var html = ''
+    + _deployActionBtn(i, 'deployCardDeploy(' + i + ')', 'Deploy', 'ti-rocket',
+        'deploy-btn--primary', _deployBtnDisabled(state, 'deploy'))
+    + _deployActionBtn(i, 'deployCardRestart(' + i + ')', 'Restart', 'ti-refresh',
+        '', _deployBtnDisabled(state, 'restart'));
+  if (c.start_stop_supported) {
+    html += _deployActionBtn(i, 'deployCardStart(' + i + ')', 'Start', 'ti-player-play',
+              '', _deployBtnDisabled(state, 'start'))
+          + _deployActionBtn(i, 'deployCardStop(' + i + ')', 'Stop', 'ti-player-stop',
+              'deploy-btn--danger', _deployBtnDisabled(state, 'stop'));
+  } else {
+    html += '<span class="deploy-startstop-na"'
+          + ' title="Render does not support stop/start through this dashboard">'
+          + 'Start / Stop n/a</span>';
+  }
+  return html;
+}
+
+// ── Editable run folder + port rows (issue #769) ──────────────────────────────
+// Only local-host cards carry these; render cards are unaffected (AC10).
+
+function _deployFieldRow(i, field, label, value, mono) {
+  var safe = _deployEsc(value == null || value === '' ? '—' : value);
+  return ''
+    + '<div class="deploy-card__meta-row" id="deploy-card-' + field + '-row-' + i + '">'
+    + '  <span class="deploy-card__meta-label">' + _deployEsc(label) + '</span>'
+    + '  <span class="deploy-card__meta-val' + (mono ? ' is-mono' : '') + ' deploy-field-val"'
+    + '        id="deploy-card-' + field + '-' + i + '">' + safe + '</span>'
+    + '  <button class="deploy-field-edit" type="button"'
+    + '    title="Edit ' + _deployEsc(label) + '" aria-label="Edit ' + _deployEsc(label) + '"'
+    + '    onclick="deployEditField(' + i + ',\'' + field + '\')"><i class="ti ti-pencil"></i></button>'
+    + '</div>';
+}
+
+function _deployFolderPortRows(c, i) {
+  if (c.host !== 'local') return '';
+  return ''
+    + _deployFieldRow(i, 'dir', 'Folder', c.working_dir, true)
+    + _deployFieldRow(i, 'port', 'Port', c.port, true);
+}
+
+// field → {key in deploy config, key on card object}
+var _DEPLOY_FIELD_META = {
+  dir:  { configKey: 'working_dir', cardKey: 'working_dir', label: 'Folder' },
+  port: { configKey: 'port',        cardKey: 'port',        label: 'Port' }
+};
+
+function deployEditField(i, field) {
+  var meta = _DEPLOY_FIELD_META[field];
+  if (!meta) return;
+  var row = document.getElementById('deploy-card-' + field + '-row-' + i);
+  if (!row) return;
+  var c = _deployCards[i];
+  var current = c[meta.cardKey];
+  row.classList.add('is-editing');
+  row.innerHTML = ''
+    + '<span class="deploy-card__meta-label">' + _deployEsc(meta.label) + '</span>'
+    + '<span class="deploy-field-edit-box">'
+    + '  <input class="deploy-field-input" id="deploy-field-input-' + field + '-' + i + '"'
+    + '    type="' + (field === 'port' ? 'number' : 'text') + '"'
+    + '    aria-label="' + _deployEsc(meta.label) + '"'
+    + '    value="' + _deployEsc(current == null ? '' : current) + '">'
+    + '  <span class="deploy-field-actions">'
+    + '    <button class="deploy-btn deploy-btn--primary" type="button"'
+    + '      onclick="deploySaveField(' + i + ',\'' + field + '\')">Save</button>'
+    + '    <button class="deploy-btn" type="button"'
+    + '      onclick="deployCancelField(' + i + ',\'' + field + '\')">Cancel</button>'
+    + '  </span>'
+    + '  <span class="deploy-field-error" id="deploy-field-error-' + field + '-' + i + '" role="alert"></span>'
+    + '</span>';
+  var input = document.getElementById('deploy-field-input-' + field + '-' + i);
+  if (input) { input.focus(); input.select(); }
+}
+
+function deployCancelField(i, field) {
+  var meta = _DEPLOY_FIELD_META[field];
+  var c = _deployCards[i];
+  var row = document.getElementById('deploy-card-' + field + '-row-' + i);
+  if (!row || !meta) return;
+  // Re-render this single row from card state.
+  var wrap = document.createElement('div');
+  wrap.innerHTML = _deployFieldRow(i, field, meta.label, c[meta.cardKey], true);
+  row.replaceWith(wrap.firstElementChild);
+}
+
+function _deployFieldError(i, field, msg) {
+  var el = document.getElementById('deploy-field-error-' + field + '-' + i);
+  if (el) el.textContent = msg;
+}
+
+function deploySaveField(i, field) {
+  var meta = _DEPLOY_FIELD_META[field];
+  if (!meta) return;
+  var c = _deployCards[i];
+  var input = document.getElementById('deploy-field-input-' + field + '-' + i);
+  if (!input) return;
+  var raw = input.value.trim();
+  _deployFieldError(i, field, '');
+  // Validate first so a bad value never reaches the stored config (AC5-8).
+  var validateBody = {};
+  validateBody[meta.configKey] = field === 'port' ? Number(raw) : raw;
+  var slug = c.project;
+  fetch('/api/projects/' + encodeURIComponent(slug) + '/environments/'
+        + encodeURIComponent(c.env) + '/deploy-config/validate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(validateBody)
+  })
+    .then(function(r) {
+      return r.json().then(function(d) { return { ok: r.ok, data: d }; });
+    })
+    .then(function(res) {
+      if (!res.ok) {
+        var detail = (res.data && res.data.detail) || 'Invalid value.';
+        _deployFieldError(i, field, detail);
+        return null;
+      }
+      // Persist via the per-environment deploy-config PUT (AC4).
+      var entry = { host: 'local' };
+      entry[meta.configKey] = field === 'port' ? Number(raw) : raw;
+      var putBody = {};
+      putBody[c.env] = entry;
+      return fetch('/api/projects/' + encodeURIComponent(slug) + '/deploy-config', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(putBody)
+      }).then(function(r2) {
+        return r2.json().then(function(d2) { return { ok: r2.ok, data: d2 }; });
+      });
+    })
+    .then(function(res) {
+      if (!res) return;
+      if (!res.ok) {
+        var detail = (res.data && res.data.detail) || 'Could not save.';
+        _deployFieldError(i, field, typeof detail === 'string' ? detail : 'Could not save.');
+        return;
+      }
+      // Update card state from the saved entry and re-render the row.
+      var saved = (res.data && res.data[c.env]) || {};
+      c[meta.cardKey] = saved[meta.configKey] != null
+        ? saved[meta.configKey]
+        : (field === 'port' ? Number(raw) : raw);
+      deployCancelField(i, field);
+    })
+    .catch(function() {
+      _deployFieldError(i, field, 'Network error — could not save.');
+    });
+}
+
+// ── Live status / commit SHA per card ─────────────────────────────────────────
+
+function _deploySetStatus(i, status) {
+  var el = document.getElementById('deploy-card-status-' + i);
+  if (!el) return;
+  el.textContent = status;
+  el.className = 'status-pill status-pill--' + status;
+}
+
+function _deploySetSha(i, sha) {
+  var el = document.getElementById('deploy-card-sha-' + i);
+  if (el) el.textContent = _deployShortSha(sha);
+}
+
+// AC7/AC8: paint the run-state pill and re-render the actions so the enable/
+// disable logic matches the new state — no full page refresh required.
+function _deploySetRunState(i, state) {
+  _deployRunState[i] = state;
+  var el = document.getElementById('deploy-card-runstate-' + i);
+  if (el) {
+    el.textContent = state;
+    el.className = 'runstate-pill runstate-pill--' + state;
+  }
+  var actions = _deployActionsEl(i);
+  if (actions) actions.innerHTML = _deployIdleActionsHtml(i);
+}
+
+// AC8: re-read the live run state after an action completes. Local envs query
+// the run-state endpoint; render has no such endpoint so its pill is derived
+// from the deploy status in _deployLoadCardStatus instead.
+function _deployRefreshRunState(i) {
+  var c = _deployCards[i];
+  if (!c || !c.start_stop_supported) return Promise.resolve();
+  return fetch('/api/projects/' + encodeURIComponent(c.project) + '/environments/'
+        + encodeURIComponent(c.env) + '/run-state')
+    .then(function(r) { return r.ok ? r.json() : null; })
+    .then(function(d) { if (d && d.state) _deploySetRunState(i, d.state); })
+    .catch(function() {});
+}
+
+function _deploySetTime(i, ts) {
+  var el = document.getElementById('deploy-card-time-' + i);
+  if (!el) return;
+  if (!ts) { el.textContent = '—'; return; }
+  var d = new Date(ts);
+  el.textContent = isNaN(d.getTime()) ? String(ts) : d.toLocaleString();
+}
+
+// Load the commit SHA + status for a card. AC4: local SHA from /api/health
+// (git_sha). AC5: render SHA from the live deploy-status endpoint.
+function _deployLoadCardStatus(c, i) {
+  if (c.host === 'render') {
+    var slug = c.project;
+    fetch('/api/projects/' + encodeURIComponent(slug) + '/environments/'
+          + encodeURIComponent(c.env) + '/deploy-status')
+      .then(function(r) { return r.ok ? r.json() : null; })
+      .then(function(d) {
+        if (!d) { _deploySetSha(i, null); return; }
+        _deploySetStatus(i, d.status || 'idle');
+        _deploySetSha(i, d.commit);
+        _deploySetTime(i, d.finished_at);
+        // AC7: render has no run-state endpoint — derive the pill from the live
+        // deploy status (a live service is running; anything else reads idle).
+        _deploySetRunState(i, d.status === 'live' ? 'running' : 'idle');
+      })
+      .catch(function() { _deploySetSha(i, null); });
+  } else {
+    // local: the dashboard's own /api/health reports the running git_sha.
+    fetch('/api/health')
+      .then(function(r) { return r.ok ? r.json() : null; })
+      .then(function(d) { _deploySetSha(i, d && d.git_sha); })
+      .catch(function() { _deploySetSha(i, null); });
+    // AC7: read the live run state for the card from launchctl print.
+    _deployRefreshRunState(i);
+  }
+}
+
+// ── Confirmation step (AC7) ───────────────────────────────────────────────────
+
+function _deployActionsEl(i) { return document.getElementById('deploy-card-actions-' + i); }
+
+function deployCardDeploy(i) { _deployShowConfirm(i, 'deploy'); }
+function deployCardRestart(i) { _deployShowConfirm(i, 'restart'); }
+
+function _deployShowConfirm(i, action) {
+  var el = _deployActionsEl(i);
+  if (!el) return;
+  var c = _deployCards[i];
+  var msg = action === 'deploy'
+    ? 'Deploy ' + _deployEsc(c.env) + '? Pulls latest' + (c.host === 'render' ? ' on Render' : ' and restarts the service') + '.'
+    : 'Restart ' + _deployEsc(c.env) + '? The service will bounce.';
+  el.innerHTML = ''
+    + '<div class="deploy-card__confirm" role="alertdialog" aria-label="Confirm ' + action + '">'
+    + '  <span class="deploy-card__confirm-msg">' + msg + '</span>'
+    + '  <button class="deploy-btn deploy-btn--primary" type="button"'
+    + '    onclick="deployCardConfirm(' + i + ',\'' + action + '\')">Confirm</button>'
+    + '  <button class="deploy-btn" type="button" onclick="deployCardCancel(' + i + ')">Cancel</button>'
+    + '</div>';
+}
+
+// AC7: dismissing the confirmation returns the card to its idle state.
+function deployCardCancel(i) {
+  var el = _deployActionsEl(i);
+  if (el) el.innerHTML = _deployIdleActionsHtml(i);
+}
+
+function deployCardConfirm(i, action) {
+  if (action === 'deploy') _deployExecDeploy(i);
+  else _deployExecRestart(i);
+}
+
+// ── Live log tail panel (issue #770) ──────────────────────────────────────────
+// Each card owns a capped, follow-on-append log panel beneath it. Output from
+// the deploy/restart/render flows streams in line by line; only the last
+// DEPLOY_LOG_MAX_LINES are retained so the DOM never grows without bound.
+
+var DEPLOY_LOG_MAX_LINES = 20;        // AC2/AC6 — tail window (10–20 lines)
+var _deployLogState = {};             // card index → { lines, status, collapsed }
+
+// AC1: the panel markup lives directly beneath its card. Starts hidden until an
+// action opens it.
+function _deployLogPanelHtml(i) {
+  return ''
+    + '<section class="deploy-log" id="deploy-log-' + i + '" style="display:none">'
+    + '  <header class="deploy-log__head">'
+    + '    <span class="deploy-log__status deploy-log__status--running"'
+    + '          id="deploy-log-status-' + i + '" role="status" aria-live="polite">…</span>'
+    + '    <button class="deploy-log__toggle" type="button"'
+    + '      id="deploy-log-toggle-' + i + '"'
+    + '      aria-expanded="true" aria-controls="deploy-log-body-' + i + '"'
+    + '      title="Collapse log" aria-label="Collapse log"'
+    + '      onclick="deployLogToggle(' + i + ')"><i class="ti ti-chevron-up"></i></button>'
+    + '  </header>'
+    + '  <pre class="deploy-log__body" id="deploy-log-body-' + i + '"'
+    + '       aria-live="polite"></pre>'
+    + '</section>';
+}
+
+function _deployLogPanelEl(i) { return document.getElementById('deploy-log-' + i); }
+function _deployLogBodyEl(i) { return document.getElementById('deploy-log-body-' + i); }
+
+// AC1: open a fresh panel for this card (called when an action starts).
+function _deployLogReset(i) {
+  _deployLogState[i] = { lines: [], status: 'running', collapsed: false };
+  var panel = _deployLogPanelEl(i);
+  if (panel) { panel.style.display = ''; panel.classList.remove('deploy-log--collapsed'); }
+  var toggle = document.getElementById('deploy-log-toggle-' + i);
+  if (toggle) toggle.setAttribute('aria-expanded', 'true');
+  _deployLogStatus(i, 'running', 'Running…');
+  _deployLogRender(i);
+}
+
+// AC2/AC6: append a line, trim to the tail window, follow the new output.
+function _deployLogPush(i, text, isError) {
+  var st = _deployLogState[i] || (_deployLogState[i] = { lines: [], status: 'running', collapsed: false });
+  String(text == null ? '' : text).split('\n').forEach(function(line) {
+    st.lines.push({ text: line, error: !!isError });
+  });
+  // Trim from the front so no more than DEPLOY_LOG_MAX_LINES are retained.
+  if (st.lines.length > DEPLOY_LOG_MAX_LINES) {
+    st.lines = st.lines.slice(st.lines.length - DEPLOY_LOG_MAX_LINES);
+  }
+  _deployLogRender(i);
+}
+
+function _deployLogRender(i) {
+  var body = _deployLogBodyEl(i);
+  var st = _deployLogState[i];
+  if (!body || !st) return;
+  body.innerHTML = st.lines.map(function(l) {
+    return '<span class="deploy-log__line' + (l.error ? ' deploy-log__line--error' : '') + '">'
+      + _deployEsc(l.text) + '</span>';
+  }).join('\n');
+  // Follow new output to the bottom (tail -f), unless the user collapsed it.
+  if (!st.collapsed) body.scrollTop = body.scrollHeight;
+}
+
+// AC7: set the completion indicator (running / success / failure).
+function _deployLogStatus(i, status, label) {
+  var st = _deployLogState[i];
+  if (st) st.status = status;
+  var el = document.getElementById('deploy-log-status-' + i);
+  if (!el) return;
+  el.className = 'deploy-log__status deploy-log__status--' + status;
+  el.textContent = label || status;
+}
+
+// AC7/AC8: success → mark success, then auto-collapse (still toggleable).
+function _deployLogFinishSuccess(i, label) {
+  _deployLogStatus(i, 'success', label || 'Success');
+  var st = _deployLogState[i];
+  if (st) st.collapsed = true;
+  _deployLogSetCollapsed(i, true);
+}
+
+// AC7/AC9: failure → highlight the failing line and keep the panel open.
+function _deployLogFinishFailure(i, line, label) {
+  if (line) _deployLogPush(i, line, true);
+  _deployLogStatus(i, 'failure', label || 'Failed');
+  var st = _deployLogState[i];
+  if (st) st.collapsed = false;
+  _deployLogSetCollapsed(i, false);
+}
+
+function _deployLogSetCollapsed(i, collapsed) {
+  var panel = _deployLogPanelEl(i);
+  if (panel) panel.classList.toggle('deploy-log--collapsed', !!collapsed);
+  var toggle = document.getElementById('deploy-log-toggle-' + i);
+  if (toggle) {
+    toggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+    toggle.setAttribute('title', collapsed ? 'Expand log' : 'Collapse log');
+    toggle.setAttribute('aria-label', collapsed ? 'Expand log' : 'Collapse log');
+    toggle.innerHTML = collapsed ? '<i class="ti ti-chevron-down"></i>' : '<i class="ti ti-chevron-up"></i>';
+  }
+  if (!collapsed) _deployLogRender(i);  // re-follow on expand
+}
+
+// AC10: user can collapse/expand at any time during or after the action.
+function deployLogToggle(i) {
+  var st = _deployLogState[i] || (_deployLogState[i] = { lines: [], status: 'running', collapsed: false });
+  st.collapsed = !st.collapsed;
+  _deployLogSetCollapsed(i, st.collapsed);
+}
+
+// AC3/AC4: post-action health check. Surfaces a result line and resolves to the
+// ok flag so callers can finish the panel as success or failure.
+function _deployHealthCheck(i) {
+  _deployLogPush(i, 'Health check…');
+  return fetch('/api/health', { cache: 'no-store' })
+    .then(function(r) { return r.ok; })
+    .then(function(ok) {
+      _deployLogPush(i, ok ? 'Health check: OK ✓' : 'Health check: FAILED ✗', !ok);
+      return ok;
+    })
+    .catch(function() {
+      _deployLogPush(i, 'Health check: FAILED ✗', true);
+      return false;
+    });
+}
+
+// ── Execute deploy / restart with streaming progress + log tail (AC8/AC9) ─────
+
+// Back-compat shims: existing callers append/replace single lines; route them
+// through the capped panel buffer.
+function _deployLog(i, text, isError) {
+  _deployLogReset(i);
+  _deployLogPush(i, text, isError);
+}
+
+function _deployAppendLog(i, line, isError) {
+  _deployLogPush(i, line, isError);
+}
+
+function _deployBusyActions(i, label) {
+  var el = _deployActionsEl(i);
+  if (el) {
+    el.innerHTML = '<button class="deploy-btn" type="button" disabled>'
+      + '<i class="ti ti-loader-2 deploy-spin"></i> ' + _deployEsc(label) + '…</button>';
+  }
+}
+
+// True when a deploy/restart response indicates the dashboard restarted itself.
+function _deployIsSelfRestart(res) {
+  var d = res.data || {};
+  var r = d.restart || d;
+  return res.status === 202
+    && (d.detached === true || r.detached === true || d.method === 'launchd-self' || r.method === 'launchd-self');
+}
+
+function _deployExecDeploy(i) {
+  var c = _deployCards[i];
+  _deployBusyActions(i, 'Deploying');
+  _deploySetStatus(i, 'building');
+  _deployLogReset(i);                                    // AC1: open the panel
+  _deployLogPush(i, 'Deploying ' + c.env + '…');
+  fetch('/api/projects/' + encodeURIComponent(c.project) + '/environments/'
+        + encodeURIComponent(c.env) + '/deploy', { method: 'POST' })
+    .then(function(r) {
+      return r.json().then(function(data) { return { ok: r.ok, status: r.status, data: data }; });
+    })
+    .then(function(res) {
+      if (!res.ok) {
+        _deploySetStatus(i, 'failed');
+        _deployLogFinishFailure(i, 'Deploy failed (' + res.status + '): '
+          + ((res.data && res.data.detail) || 'error'));   // AC9
+        _deployResetActions(i);
+        return;
+      }
+      var d = res.data || {};
+      // host=render → poll the live build status until live/failed (AC5).
+      if (c.host === 'render' || d.host === 'render') {
+        _deploySetStatus(i, d.status || 'queued');
+        _deployLogPush(i, 'Deploy triggered on Render — tracking build status…');
+        _deployPollRender(i);
+        _deployResetActions(i);
+        return;
+      }
+      // local (AC3): git pull output → restart → health check.
+      var out = (d.pull_output || '').trim();
+      if (out) _deployLogPush(i, out);
+      if (d.head) { _deployLogPush(i, 'HEAD: ' + d.head); _deploySetSha(i, d.head); }
+      _deploySetStatus(i, 'live');
+      _deploySetTime(i, new Date().toISOString());
+      // self-restart bounces the dashboard — the reconnect overlay + auto-reload
+      // is the completion signal, so don't health-check a server that's going down.
+      if (_deployIsSelfRestart(res)) { _deployShowReconnectOverlay(); return; }
+      _deployLogPush(i, 'Restarting service…');
+      _deployHealthCheck(i).then(function(ok) {            // AC3 health result
+        if (ok) _deployLogFinishSuccess(i, 'Deployed');    // AC7/AC8 auto-collapse
+        else _deployLogFinishFailure(i, null, 'Health check failed');  // AC9
+        _deployResetActions(i);
+        _deployRefreshRunState(i);                         // #771 AC8
+      });
+    })
+    .catch(function(e) {
+      _deploySetStatus(i, 'failed');
+      _deployLogFinishFailure(i, 'Deploy error: ' + e);    // AC9
+      _deployResetActions(i);
+    });
+}
+
+function _deployExecRestart(i) {
+  var c = _deployCards[i];
+  _deployBusyActions(i, 'Restarting');
+  _deploySetStatus(i, 'building');
+  _deployLogReset(i);                                    // AC1: open the panel
+  _deployLogPush(i, 'Restarting ' + c.env + '…');
+  fetch('/api/projects/' + encodeURIComponent(c.project) + '/environments/'
+        + encodeURIComponent(c.env) + '/restart', { method: 'POST' })
+    .then(function(r) {
+      return r.json().then(function(data) { return { ok: r.ok, status: r.status, data: data }; });
+    })
+    .then(function(res) {
+      if (!res.ok) {
+        _deploySetStatus(i, 'failed');
+        _deployLogFinishFailure(i, 'Restart failed (' + res.status + '): '
+          + ((res.data && res.data.detail) || 'error'));   // AC9
+        _deployResetActions(i);
+        return;
+      }
+      // AC10: restarting the dashboard itself → show the reconnect overlay.
+      if (_deployIsSelfRestart(res)) { _deployShowReconnectOverlay(); return; }
+      if (c.host === 'render' || (res.data && res.data.host) === 'render') {
+        _deploySetStatus(i, 'building');
+        _deployLogPush(i, 'Restart triggered on Render — tracking status…');
+        _deployPollRender(i);
+        _deployResetActions(i);
+        return;
+      }
+      // local (AC4): launchctl/script output → post-restart health check.
+      var out = (res.data && (res.data.output || res.data.message) || '').trim();
+      _deployLogPush(i, out || (res.status === 202
+        ? 'Restart accepted — service is bouncing.'
+        : 'Restarted ' + c.env + '.'));
+      _deployHealthCheck(i).then(function(ok) {            // AC4 health result
+        if (ok) _deployLogFinishSuccess(i, 'Restarted');   // AC7/AC8 auto-collapse
+        else _deployLogFinishFailure(i, null, 'Health check failed');  // AC9
+        _deployResetActions(i);
+        _deployRefreshRunState(i);                         // #771 AC8
+      });
+    })
+    .catch(function(e) {
+      _deploySetStatus(i, 'failed');
+      _deployLogFinishFailure(i, 'Restart error: ' + e);   // AC9
+      _deployResetActions(i);
+    });
+}
+
+function _deployResetActions(i) {
+  var el = _deployActionsEl(i);
+  if (el) el.innerHTML = _deployIdleActionsHtml(i);
+}
+
+// ── Start / Stop a local environment (issue #771) ─────────────────────────────
+// Start brings the service up WITHOUT pulling code (AC3); Stop halts it without
+// destroying it (AC4). Both stream into the capped log panel, then re-read the
+// live run state so the pill + button enable/disable update with no page refresh.
+
+function deployCardStart(i) { _deployExecStart(i); }
+function deployCardStop(i) { _deployExecStop(i); }
+
+function _deployExecStart(i) {
+  var c = _deployCards[i];
+  _deployBusyActions(i, 'Starting');
+  _deployLogReset(i);
+  _deployLogPush(i, 'Starting ' + c.env + '…');
+  fetch('/api/projects/' + encodeURIComponent(c.project) + '/environments/'
+        + encodeURIComponent(c.env) + '/start', { method: 'POST' })
+    .then(function(r) {
+      return r.json().then(function(data) { return { ok: r.ok, status: r.status, data: data }; });
+    })
+    .then(function(res) {
+      if (!res.ok) {
+        _deployLogFinishFailure(i, 'Start failed (' + res.status + '): '
+          + ((res.data && res.data.detail) || 'error'));
+        _deployResetActions(i);
+        _deployRefreshRunState(i);
+        return;
+      }
+      var out = (res.data && (res.data.stdout || res.data.output) || '').trim();
+      _deployLogPush(i, out || ('Started ' + c.env + '.'));
+      _deployLogFinishSuccess(i, 'Started');
+      _deployResetActions(i);
+      _deployRefreshRunState(i);                           // AC8: state updates
+    })
+    .catch(function(e) {
+      _deployLogFinishFailure(i, 'Start error: ' + e);
+      _deployResetActions(i);
+      _deployRefreshRunState(i);
+    });
+}
+
+function _deployExecStop(i) {
+  var c = _deployCards[i];
+  _deployBusyActions(i, 'Stopping');
+  _deployLogReset(i);
+  _deployLogPush(i, 'Stopping ' + c.env + '…');
+  fetch('/api/projects/' + encodeURIComponent(c.project) + '/environments/'
+        + encodeURIComponent(c.env) + '/stop', { method: 'POST' })
+    .then(function(r) {
+      return r.json().then(function(data) { return { ok: r.ok, status: r.status, data: data }; });
+    })
+    .then(function(res) {
+      if (!res.ok) {
+        _deployLogFinishFailure(i, 'Stop failed (' + res.status + '): '
+          + ((res.data && res.data.detail) || 'error'));
+        _deployResetActions(i);
+        _deployRefreshRunState(i);
+        return;
+      }
+      var out = (res.data && (res.data.stdout || res.data.output) || '').trim();
+      _deployLogPush(i, out || ('Stopped ' + c.env + '.'));
+      // Stop halts the env's own server; the dashboard's /api/health says nothing
+      // about it, so skip the health check and trust the run-state probe instead.
+      _deployLogFinishSuccess(i, 'Stopped');
+      _deployResetActions(i);
+      _deployRefreshRunState(i);                           // AC8: state updates
+    })
+    .catch(function(e) {
+      _deployLogFinishFailure(i, 'Stop error: ' + e);
+      _deployResetActions(i);
+      _deployRefreshRunState(i);
+    });
+}
+
+// Poll the render deploy-status endpoint until live/failed, streaming status.
+function _deployPollRender(i) {
+  var c = _deployCards[i];
+  if (_deployTabPollers[i]) clearTimeout(_deployTabPollers[i]);
+  var attempts = 0, MAX = 60, INTERVAL = 3000;
+  function tick() {
+    attempts += 1;
+    fetch('/api/projects/' + encodeURIComponent(c.project) + '/environments/'
+          + encodeURIComponent(c.env) + '/deploy-status')
+      .then(function(r) { return r.json().then(function(d) { return { ok: r.ok, data: d }; }); })
+      .then(function(res) {
+        if (!res.ok) {
+          _deployLogFinishFailure(i, 'Status error: ' + ((res.data && res.data.detail) || 'error'));
+          return;
+        }
+        var st = (res.data && res.data.status) || 'queued';
+        _deploySetStatus(i, st);
+        if (res.data && res.data.commit) _deploySetSha(i, res.data.commit);
+        if (res.data && res.data.finished_at) _deploySetTime(i, res.data.finished_at);
+        // AC5: stream each interim build status as it arrives.
+        _deployLogPush(i, 'Build status: ' + st);
+        if (st === 'live') { _deployLogFinishSuccess(i, 'Live ✓'); return; }       // AC7/AC8
+        if (st === 'failed') { _deployLogFinishFailure(i, 'Deploy failed.'); return; }  // AC9
+        if (attempts < MAX) _deployTabPollers[i] = setTimeout(tick, INTERVAL);
+      })
+      .catch(function() { if (attempts < MAX) _deployTabPollers[i] = setTimeout(tick, INTERVAL); });
+  }
+  tick();
+}
+
+// ── Self-restart reconnect overlay (AC10/AC11) ────────────────────────────────
+
+function _deployShowReconnectOverlay() {
+  if (document.getElementById('deploy-reconnect-overlay')) return;
+  var ov = document.createElement('div');
+  ov.className = 'deploy-reconnect-overlay';
+  ov.id = 'deploy-reconnect-overlay';
+  ov.setAttribute('role', 'alert');
+  ov.innerHTML = ''
+    + '<div class="deploy-reconnect-overlay__spinner"></div>'
+    + '<div class="deploy-reconnect-overlay__title">Restarting… reconnecting</div>'
+    + '<div class="deploy-reconnect-overlay__sub">The dashboard is restarting. '
+    + 'This page will refresh automatically once it is back.</div>';
+  document.body.appendChild(ov);
+  _deployPollHealthThenReload();
+}
+
+// AC11: poll /api/health until the server responds, then auto-refresh.
+function _deployPollHealthThenReload() {
+  if (_deployReconnectTimer) clearTimeout(_deployReconnectTimer);
+  // Give the process a moment to actually go down before polling.
+  function poll() {
+    fetch('/api/health', { cache: 'no-store' })
+      .then(function(r) {
+        if (r.ok) { location.reload(); return; }
+        _deployReconnectTimer = setTimeout(poll, 1500);
+      })
+      .catch(function() { _deployReconnectTimer = setTimeout(poll, 1500); });
+  }
+  _deployReconnectTimer = setTimeout(poll, 2500);
+}
+
 function projEnvSave() {
   var body = document.getElementById('ps-env-body');
   if (!body) return Promise.resolve();
@@ -21873,6 +23825,63 @@ function scaffoldConfirmClose() {
   if (overlay) overlay.classList.remove('open');
 }
 
+// ── Delete project (Danger zone) ──────────────────────────────────────────────
+function _psCurrentRepo() {
+  // _cachedFullRepo entries may be a project object or the repo string; fall
+  // back to the repo shown in the settings header.
+  var c = (_cachedFullRepo || {})[_slug];
+  if (typeof c === 'string' && c.indexOf('/') !== -1) return c;
+  if (c && c.repo) return c.repo;
+  var el = document.getElementById('ps-repo-display');
+  var t = el ? el.textContent.trim() : '';
+  return t.indexOf('/') !== -1 ? t : null;
+}
+
+function psDeleteOpen() {
+  var repo = _psCurrentRepo();
+  var c = (_cachedFullRepo || {})[_slug];
+  var name = (c && c.name) || _slug;
+  document.getElementById('ps-delete-name').textContent = name;
+  document.getElementById('ps-delete-slug').textContent = _slug;
+  var inp = document.getElementById('ps-delete-input');
+  inp.value = '';
+  document.getElementById('ps-delete-confirm-btn').disabled = true;
+  document.getElementById('ps-delete-confirm').classList.add('open');
+  inp.focus();
+}
+
+function psDeleteValidate() {
+  var typed = (document.getElementById('ps-delete-input').value || '').trim();
+  document.getElementById('ps-delete-confirm-btn').disabled = (typed !== _slug);
+}
+
+function psDeleteClose() {
+  document.getElementById('ps-delete-confirm').classList.remove('open');
+}
+
+async function psDeleteConfirm() {
+  var repo = _psCurrentRepo();
+  if (!repo) { alert('Could not resolve the project repo.'); return; }
+  var btn = document.getElementById('ps-delete-confirm-btn');
+  btn.disabled = true; btn.textContent = 'Deleting…';
+  try {
+    var resp = await fetch('/api/projects/' + repo, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      // Local folders deleted; GitHub repo left untouched (the operator handles GitHub).
+      body: JSON.stringify({ delete_local_folders: true, delete_github_repo: false })
+    });
+    if (!resp.ok) {
+      var d = await resp.json().catch(function() { return {}; });
+      throw new Error(d.detail || ('HTTP ' + resp.status));
+    }
+    window.location.href = '/';
+  } catch (e) {
+    btn.disabled = false; btn.textContent = 'Delete project';
+    alert('Delete failed: ' + e.message);
+  }
+}
+
 async function scaffoldApplyConfirm() {
   scaffoldConfirmClose();
   var slug = window._currentProjectSlug || '';
@@ -21896,7 +23905,69 @@ async function scaffoldApplyConfirm() {
     if (statusEl) statusEl.textContent = 'Apply error';
   }
 }
+
+// ── Sprint file cleanup (issue #735) ──────────────────────────────────────────
+let _cleanupPreviewFiles = [];
+
+async function _sprintCleanupPost(dryRun) {
+  var slug = window._currentProjectSlug || '';
+  if (!slug) return null;
+  var resp = await fetch('/api/maintenance/sprints/cleanup', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({project: slug, dry_run: dryRun}),
+  });
+  if (!resp.ok) {
+    var err = await resp.json().catch(() => ({}));
+    throw new Error(err.detail || ('HTTP ' + resp.status));
+  }
+  return await resp.json();
+}
+
+async function sprintCleanupPreview() {
+  var statusEl = document.getElementById('ps-cleanup-status');
+  var previewEl = document.getElementById('ps-cleanup-preview');
+  var listEl = document.getElementById('ps-cleanup-list');
+  var emptyEl = document.getElementById('ps-cleanup-empty');
+  var confirmWrap = document.getElementById('ps-cleanup-confirm-wrap');
+  if (statusEl) statusEl.textContent = 'Scanning…';
+  try {
+    var data = await _sprintCleanupPost(true);
+    _cleanupPreviewFiles = (data && data.archived) || [];
+    if (listEl) {
+      listEl.innerHTML = _cleanupPreviewFiles.map(function(f) {
+        return '<li>' + escHtml(f) + '</li>';
+      }).join('');
+    }
+    if (emptyEl) emptyEl.style.display = _cleanupPreviewFiles.length === 0 ? '' : 'none';
+    if (confirmWrap) confirmWrap.style.display = _cleanupPreviewFiles.length > 0 ? '' : 'none';
+    if (previewEl) previewEl.style.display = '';
+    if (statusEl) statusEl.textContent = '';
+  } catch (e) {
+    if (statusEl) statusEl.textContent = 'Preview failed: ' + e.message;
+  }
+}
+
+async function sprintCleanupConfirm() {
+  var statusEl = document.getElementById('ps-cleanup-status');
+  var confirmWrap = document.getElementById('ps-cleanup-confirm-wrap');
+  if (statusEl) statusEl.textContent = 'Archiving…';
+  try {
+    var data = await _sprintCleanupPost(false);
+    var n = (data && data.archived) ? data.archived.length : 0;
+    var kept = (data && typeof data.kept_count === 'number') ? data.kept_count : '?';
+    if (statusEl) statusEl.textContent = 'Archived ' + n + ' file(s); ' + kept + ' kept in place.';
+    if (confirmWrap) confirmWrap.style.display = 'none';
+    _cleanupPreviewFiles = [];
+  } catch (e) {
+    if (statusEl) statusEl.textContent = 'Archive failed: ' + e.message;
+  }
+}
 </script>
+
+<!-- Shared Add Project modal logic (single source of truth for home + project) -->
+<script src="/static/log-colorize.js"></script>
+<script src="/static/add-project-modal.js"></script>
 
 </body>
 </html>

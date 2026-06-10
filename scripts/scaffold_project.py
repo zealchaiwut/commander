@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
-"""Scaffold and enforce the standard Commander docs structure.
+"""Scaffold and enforce the standard Commander project files.
 
 Every project run by Commander (including Commander itself) shares the same
-docs layout:
+required files: the design specs the sprint design-docs guard checks for, plus
+the standard docs layout.
 
+    PRODUCT.md             product context (required by the sprint guard)
+    DESIGN.md              design system (required by the sprint guard)
     README.md              hub linking to everything below
     CHANGELOG.md           change-log
     docs/
@@ -28,8 +31,8 @@ default      Create any missing standard files/dirs from template. Existing
 
 Usage
 -----
-    python3 scripts/scaffold_docs.py --project ~/dev/perf-coach/main
-    python3 scripts/scaffold_docs.py --project . --check
+    python3 scripts/scaffold_project.py --project ~/dev/perf-coach/main
+    python3 scripts/scaffold_project.py --project . --check
 """
 from __future__ import annotations
 
@@ -242,12 +245,72 @@ One document per subsystem of {project}. Add a file here when a new subsystem
 lands; the documentor keeps existing files current.
 """
 
+_PRODUCT_MD = """\
+# Product Context
+
+## What {project} Is
+
+_One or two sentences: what {project} does and the problem it solves._
+
+## Target Users
+
+_Who uses it, and what they are trying to accomplish._
+
+## Core User Flows
+
+1. _Primary flow._
+2. _Secondary flow._
+
+## Design Principles
+
+- _What this product optimises for (e.g. speed, clarity, safety)._
+
+> Starter context stamped by scaffold_project so sprints can run (the design-docs
+> guard requires this file). Refine with `/impeccable init` or edit directly.
+"""
+
+_DESIGN_MD = """\
+# Design System
+
+**Register:** _product (the design serves the product) or brand (design IS the product)._
+
+**Scene:** _one sentence: who uses this, where, under what light, in what mood._
+
+## Intent
+
+_The aesthetic direction in a sentence or two, and the anti-references (what it
+is deliberately NOT)._
+
+## Tokens
+
+_Define the palette light and dark. Run `/impeccable init` to generate a real
+token set; the table below is a placeholder._
+
+| Role | Light | Dark |
+|------|-------|------|
+| `--bg` | | |
+| `--surface` | | |
+| `--border` | | |
+| `--text` | | |
+| `--accent` | | |
+
+## Typography
+
+_Body plus optional display/mono families; hierarchy via scale + weight contrast._
+
+> Starter system stamped by scaffold_project so sprints can run (the design-docs
+> guard requires this file). Refine with `/impeccable init`, then
+> `/impeccable critique` on the first real screen.
+"""
+
 # ── standard structure definition ────────────────────────────────────────────
 # Standard files: created from template when missing, and NEVER overwritten.
 # Existing project content (narrative docs) and the documentor's AUTO-region
 # history (architecture.md, milestones.md) are always preserved. Re-running is
 # therefore always safe.
 _STANDARD_FILES: dict[str, str] = {
+    "PRODUCT.md":                  _PRODUCT_MD,
+    "DESIGN.md":                   _DESIGN_MD,
     "docs/quickstart.md":          _QUICKSTART,
     "docs/tutorial.md":            _TUTORIAL,
     "docs/workflow.md":            _WORKFLOW,

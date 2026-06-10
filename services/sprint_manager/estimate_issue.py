@@ -36,9 +36,14 @@ _SIZING_DIR = Path(__file__).parent
 if str(_SIZING_DIR) not in sys.path:
     sys.path.insert(0, str(_SIZING_DIR))
 from sizing import minutes_from_letter as _minutes_from_letter
-from calibration import CalibrationResult, load_calibration, calibration_prompt_section, db_calibration_records
+from calibration import (
+    CalibrationResult,
+    load_calibration,
+    calibration_prompt_section,
+    db_calibration_records,
+    sqlite_calibration_records,
+)
 from services.sprint_manager.estimation_config import get_estimation_cfg as _get_estimation_cfg
-from services.sprint_manager import sprint_repo as sprint_repo
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -98,16 +103,22 @@ def extract_json(text: str) -> Optional[dict]:
 
 
 def fetch_issue(issue_num: int, repo: str) -> dict:
-    """Fetch issue details from GitHub using gh CLI."""
+    """Fetch issue details from GitHub via REST (gh api).
+
+    `gh issue view` goes through GraphQL, whose 5000/hr budget the dashboard
+    shares and exhausts during estimation bursts; REST has a separate budget.
+    """
     result = subprocess.run(
-        [
-            "gh", "issue", "view", str(issue_num),
-            "--repo", repo,
-            "--json", "number,title,body,labels",
-        ],
+        ["gh", "api", f"repos/{repo}/issues/{issue_num}"],
         capture_output=True, text=True, check=True,
     )
-    return json.loads(result.stdout)
+    raw = json.loads(result.stdout)
+    return {
+        "number": raw.get("number"),
+        "title": raw.get("title", ""),
+        "body": raw.get("body") or "",
+        "labels": [{"name": l.get("name", "")} for l in (raw.get("labels") or [])],
+    }
 
 
 _ESTIMATOR_MAX_RETRIES = 3
@@ -227,12 +238,8 @@ Output ONLY the JSON object. No other text."""
                     # Attach calibration sources so consumers know which tiers were calibrated
                     if calibration is not None:
                         parsed["calibration_sources"] = calibration.sources
-                    # Persist estimated_size on sprint_tickets (best-effort; issue #640)
-                    if size_val and issue_num:
-                        try:
-                            sprint_repo.write_estimated_size(issue_number=issue_num, size=size_val)
-                        except Exception:
-                            pass
+                    # Estimated size lives in the local estimate JSON written by
+                    # the caller. Issue #758 removed the Neon sprint_tickets mirror.
                     return parsed, None
 
         # error_type is set — decide whether to retry or fail.
@@ -458,6 +465,13 @@ def main() -> None:
         _db_cal_records = db_calibration_records(args.calibration_sprint, estimates_dir)
         if _db_cal_records:
             print(f"Calibration (DB): {len(_db_cal_records)} records from sprint {args.calibration_sprint!r}")
+    # Neon-independent fallback (issue #766): when no sprint-state records are
+    # available (e.g. DATABASE_URL unset), read samples from the local SQLite
+    # store instead of silently falling through to generic defaults.
+    if not _db_cal_records:
+        _db_cal_records = sqlite_calibration_records()
+        if _db_cal_records:
+            print(f"Calibration (SQLite): {len(_db_cal_records)} records from local store")
     calibration = load_calibration(commander_dir, db_records=_db_cal_records or None)
     for w in calibration.warnings:
         print(f"Warning [calibration]: {w}", file=sys.stderr)

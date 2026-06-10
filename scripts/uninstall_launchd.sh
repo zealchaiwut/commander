@@ -7,10 +7,18 @@
 
 set -euo pipefail
 
+# Generalized (issue #724): pass --label to uninstall any managed service.
+# Defaults to the commander dashboard so existing usage is unchanged.
 PLIST_LABEL="com.commander.dashboard"
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --label) PLIST_LABEL="$2"; shift 2 ;;
+    *) echo "ERROR: unknown argument: $1" >&2; exit 2 ;;
+  esac
+done
 PLIST_DEST="$HOME/Library/LaunchAgents/${PLIST_LABEL}.plist"
 
-echo "=== Commander LaunchAgent Uninstaller ==="
+echo "=== LaunchAgent Uninstaller ($PLIST_LABEL) ==="
 
 # ── Unload (stop the service if running) ──────────────────────────────────────
 if launchctl list 2>/dev/null | grep -q "$PLIST_LABEL"; then

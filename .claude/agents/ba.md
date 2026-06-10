@@ -84,6 +84,79 @@ Pass the type + backlog labels in `--labels`. The sprint label is added automati
 - No vague language: avoid "works correctly", "handles errors", "is fast" — replace with specific, measurable criteria.
 - Every AC item must be verifiable by a test (automated or manual walkthrough).
 
+### Frontend / UI design contracts (issue #713)
+
+When a ticket has **frontend/UI scope**, the AC must carry an explicit design
+contract so the coder has a pixel-accurate target before writing any CSS. Decide
+the path by whether a mock is attached.
+
+**Path A — a mock HTML file exists under `references/issue-<N>/`** (e.g.
+`references/issue-<N>/mock.html`):
+
+1. Read the mock file.
+2. Extract the **literal** design tokens it uses — hex colors, spacing values
+   (`px`/`rem`), font sizes, and component class names.
+3. Cross-check the extracted tokens against the impeccable skills (load the rule
+   set; flag anything that violates the impeccable spacing scale, contrast, or
+   naming rules before locking it into AC).
+4. Write each UI AC item with the **literal value**, not a placeholder or range.
+   Examples: `background: #1A1A2E`, `padding: 16px`, `font-size: 0.875rem`,
+   `.card` uses `border-radius: 8px`. Never write a placeholder like `<color>`
+   or a range like `12–16px`.
+
+**Path B — frontend scope but no mock is attached:** fall back to the impeccable
+rule set and reference the **named rules** explicitly in the AC — the impeccable
+`spacing scale` tier, the `contrast` ratio rule (e.g. AA contrast), the
+`component naming` convention, and the responsive `breakpoint` names. Do not
+invent values; cite the rule by name so the coder resolves it from the skill pack.
+
+**No generic language (applies to every UI AC item):** an AC item that says
+"follows design system", "matches design", "looks good", or "is responsive" is
+**not allowed** — it is vague and untestable. Replace it with either a literal value
+(Path A) or a named impeccable rule (Path B). Every UI AC item must be
+**testable** against a concrete value or a named rule.
+
+### UAT `[agent-test]` tagging rule
+
+Each UAT step is either **agent-browser-automatable** or **MANUAL**. Mark the
+automatable ones so testers and automation pipelines can hand them to an
+agent-browser runner without a second tagging pass.
+
+**Tag a step by appending `[agent-test]` at the end of the step line** (after
+the action text, on the same line) when ALL of these hold:
+
+- The step is fully expressible as **navigate → interact → observe** in a
+  **desktop browser** — load a URL/page, click/type/select, then read back
+  visible text, an element state, or a value.
+- It needs **no subjective visual judgment** (no "looks balanced", "feels
+  polished", "colors are pleasant").
+- It needs **no real device / native device** feature (camera, GPS, push,
+  biometric, mobile-only gesture).
+- It needs **no external service or third-party login** (OAuth, SSO, payment
+  provider) and **no email/SMS** flow (clicking a link in an inbox, entering a
+  texted OTP).
+
+**Leave every other step untagged (MANUAL).** Do not tag a step you are unsure
+about — when in doubt, leave it MANUAL. Tagging is selective: a typical ticket
+has both tagged and untagged steps.
+
+Placement is strict so a parser can extract tagged steps — the tag is the last
+token on the step line and matches `^\d+\..*\[agent-test\]\s*$`. Put it on the
+numbered action line, never on the `**Expected:**` line.
+
+Examples:
+
+```
+1. Navigate to http://localhost:8000, click "New Sprint", confirm the modal opens [agent-test]
+   **Expected:** The "New Sprint" modal is visible with a title input focused.
+
+2. Confirm the dashboard's color scheme reads as calm and uncluttered.
+   **Expected:** Layout feels balanced (subjective visual judgment — MANUAL).
+
+3. Complete the GitHub OAuth consent screen and return to the app.
+   **Expected:** You land back on the dashboard, logged in (external auth — MANUAL).
+```
+
 ## Step 3 — Approval loop
 
 After showing the proposal, ask exactly this question (no other text on that line):

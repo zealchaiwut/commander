@@ -875,6 +875,11 @@
   function renderStats(data) {
     const stats = data.stats;
 
+    // The "Right now" stat-grid was removed (commit f25a974). Bail out when its
+    // elements are absent — otherwise the null element accesses below throw and
+    // abort the whole load, taking the project cards down with them (blank home).
+    if (!document.getElementById('num-sprint-running')) return;
+
     // ── Card 1: Sprint running ──
     const sr = stats.sprint_running;
     const numEl1 = document.getElementById('num-sprint-running');
@@ -1592,9 +1597,11 @@
       if (!resp.ok) throw new Error('HTTP ' + resp.status);
       const data = await resp.json();
       _homeData = data;
-      renderStats(data);
+      // Isolate each section so one render error can't blank the whole page
+      // (projects must always show even if stats/activity throw).
+      try { renderStats(data); } catch (e) { console.error('renderStats failed', e); }
       renderProjects(data);
-      renderActivity(data);
+      try { renderActivity(data); } catch (e) { console.error('renderActivity failed', e); }
       showReal();
     } catch (err) {
       console.error('Home data load failed:', err);

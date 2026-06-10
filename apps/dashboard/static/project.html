@@ -1874,7 +1874,7 @@
     .smgmt-ticket.is-selected .smgmt-ticket-cb,
     .smgmt-sprint-list.has-selection .smgmt-ticket-cb { opacity: 1; }
     .smgmt-ticket-num {
-      font-family: var(--mono); font-size: 12px; color: var(--text-sub);
+      font-family: var(--mono); font-size: 12px; color: var(--text-muted);
       text-decoration: none; flex-shrink: 0; min-width: 42px;
     }
     .smgmt-ticket-num:hover { color: var(--blue); }
@@ -1895,9 +1895,9 @@
 
     /* Per-ticket outcome icon */
     .smgmt-outcome-icon { font-size: 14px; flex-shrink: 0; line-height: 1; }
-    .smgmt-outcome-icon.outcome-success  { color: #16a34a; }
-    .smgmt-outcome-icon.outcome-rework   { color: #ef4444; }
-    .smgmt-outcome-icon.outcome-active   { color: #2563eb; }
+    .smgmt-outcome-icon.outcome-success  { color: var(--green); }
+    .smgmt-outcome-icon.outcome-rework   { color: var(--red); }
+    .smgmt-outcome-icon.outcome-active   { color: var(--blue); }
     .smgmt-outcome-icon.outcome-backlog  { color: var(--text-sub); opacity: .45; }
 
     /* ── Outcome band + 4-state pane coloring (sprint-26 parity port) ── */

@@ -208,7 +208,6 @@ def server_module(tmp_path, monkeypatch):
 def _sprint_create_patches(srv, project_root):
     """Common patches for sprint create tests (disables Neon, mocks GitHub)."""
     return (
-        patch("server._SPRINT_REPO_AVAILABLE", False),
         patch.object(srv.github_client, "list_sprints", return_value=[]),
         patch.object(srv.github_client, "ensure_sprint_label", return_value=None),
         patch.object(srv.github_client, "invalidate", return_value=None),
@@ -230,7 +229,6 @@ class TestSprintCreatedEvent:
         project_root.mkdir(parents=True)
 
         with (
-            patch("server._SPRINT_REPO_AVAILABLE", False),
             patch.object(srv.github_client, "list_sprints", return_value=[]),
             patch.object(srv.github_client, "ensure_sprint_label", return_value=None),
             patch.object(srv.github_client, "invalidate", return_value=None),
@@ -254,7 +252,6 @@ class TestSprintCreatedEvent:
         project_root.mkdir(parents=True)
 
         with (
-            patch("server._SPRINT_REPO_AVAILABLE", False),
             patch.object(srv.github_client, "list_sprints", return_value=[]),
             patch.object(srv.github_client, "ensure_sprint_label", return_value=None),
             patch.object(srv.github_client, "invalidate", return_value=None),
@@ -279,7 +276,6 @@ class TestSprintCreatedEvent:
         project_root.mkdir(parents=True)
 
         with (
-            patch("server._SPRINT_REPO_AVAILABLE", False),
             patch.object(srv.github_client, "list_sprints", return_value=[]),
             patch.object(srv.github_client, "ensure_sprint_label", return_value=None),
             patch.object(srv.github_client, "invalidate", return_value=None),
@@ -304,7 +300,6 @@ class TestSprintCreatedEvent:
         project_root.mkdir(parents=True)
 
         with (
-            patch("server._SPRINT_REPO_AVAILABLE", False),
             patch.object(srv.github_client, "list_sprints", return_value=[]),
             patch.object(srv.github_client, "ensure_sprint_label", return_value=None),
             patch.object(srv.github_client, "invalidate", return_value=None),
@@ -331,7 +326,6 @@ class TestSprintCreatedEvent:
         project_root.mkdir(parents=True)
 
         with (
-            patch("server._SPRINT_REPO_AVAILABLE", False),
             patch.object(srv.github_client, "list_sprints", return_value=[]),
             patch.object(srv.github_client, "ensure_sprint_label", return_value=None),
             patch.object(srv.github_client, "invalidate", return_value=None),

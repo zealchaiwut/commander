@@ -180,3 +180,25 @@ Query params for calibration endpoint: `since` (ISO date), `until` (ISO date), `
 |---|---|---|
 | `GET` | `/api/notes` | Return the global notes body (`{"body": "..."}`); empty string if none saved yet |
 | `PUT` | `/api/notes` | Persist the full global notes body (`{"body": "..."}`) to `.commander/notes.json` |
+
+### Deploy (issues #722–#726)
+
+Per-environment deploy/restart for the `prd` and `uat` environments. Each environment declares a `host` of `local` (launchd / stop-start scripts, pull-only `git pull --ff-only`) or `render` (Render API). Config persists under the `deploy_config` settings key (scope `project`).
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/projects/{slug}/deploy-config` | Merged deploy config (seed defaults + stored overrides). Secret-safe: `render_api_key` is never returned in cleartext — render entries carry `render_api_key_set` (bool) and `render_api_key_masked` (e.g. `rnd_...cret`) instead |
+| `PUT` | `/api/projects/{slug}/deploy-config` | Merge an incoming config per environment. A `render_api_key` that is omitted/null/empty leaves the stored secret unchanged; a non-empty value replaces it |
+| `POST` | `/api/projects/{slug}/environments/{env}/deploy` | Trigger a deploy. `host=local` runs `git pull --ff-only origin <branch>` (no merge/push/checkout); `host=render` triggers a Render deploy |
+| `POST` | `/api/projects/{slug}/environments/{env}/restart` | Restart the service. `host=local` uses `launchctl kickstart -k` (or configured stop/start scripts); restarting the dashboard's own process (`com.commander.dashboard`) routes through a detached helper so the 202 response flushes first. `host=render` calls the Render restart API |
+| `GET` | `/api/projects/{slug}/environments/{env}/deploy-status` | Latest deploy status, normalized to `queued` / `building` / `live` / `failed`, plus commit SHA and last-deploy timestamp |
+| `GET` | `/api/deploy/overview` | Secret-safe deploy cards aggregated across the known deploy projects (commander, perf-coach) for the Deploy tab |
+
+### Env-var editor (issue #727)
+
+Render-style `.env` editor for a project environment. Values are masked in the UI with per-row reveal; writes preserve original line order and inline comments for unchanged keys, rewrite changed keys in place, drop omitted keys, and append new keys.
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/projects/{slug}/environments/{env}/env-vars` | Read the environment's `.env` as `[{"key", "value"}, ...]`; `[]` when the file does not exist |
+| `PUT` | `/api/projects/{slug}/environments/{env}/env-vars` | Write the submitted key/value set back to the `.env` file (order/comment preserving) |

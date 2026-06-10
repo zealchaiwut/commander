@@ -2110,6 +2110,17 @@ from services.sprint_manager.settings_schema import (
     KNOWN_FIELDS,
     build_effective_response,
 )
+from services.sprint_manager.deploy_config_schema import (
+    DEPLOY_CONFIG_KEY,
+    SUPPORTED_ENVS as _DEPLOY_SUPPORTED_ENVS,
+    SUPPORTED_HOSTS as _DEPLOY_SUPPORTED_HOSTS,
+    seed_for as _deploy_seed_for,
+    merge_seed as _deploy_merge_seed,
+    merge_for_put as _deploy_merge_for_put,
+    build_deploy_config_response as _build_deploy_config_response,
+    known_deploy_slugs as _deploy_known_slugs,
+    overview_entries_for as _deploy_overview_entries_for,
+)
 
 
 def _resolve_project_slug(slug: str) -> str:
@@ -2214,6 +2225,371 @@ def put_project_settings(slug: str, body: dict):
     _settings_repo.set_setting("project", APP_CONFIG_KEY, merged, project=repo)
     effective = _settings_repo.get_setting(APP_CONFIG_KEY, project=repo)
     return build_effective_response(effective)
+
+
+# ── Deploy config API (issue #722) ───────────────────────────────────────────
+
+
+def _validate_deploy_config_body(body: dict) -> None:
+    """Validate a PUT deploy-config body.
+
+    Raises HTTPException 400 for unsupported environments, non-object entries,
+    or invalid host values.
+    """
+    if not isinstance(body, dict):
+        raise HTTPException(
+            status_code=400,
+            detail="Deploy config body must be an object keyed by environment.",
+        )
+    for env, entry in body.items():
+        if env not in _DEPLOY_SUPPORTED_ENVS:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Unsupported environment '{env}'. "
+                    f"Allowed: {', '.join(_DEPLOY_SUPPORTED_ENVS)}"
+                ),
+            )
+        if not isinstance(entry, dict):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Environment '{env}' config must be an object.",
+            )
+        host = entry.get("host")
+        if host is not None and host not in _DEPLOY_SUPPORTED_HOSTS:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Environment '{env}': host must be one of "
+                    f"{', '.join(_DEPLOY_SUPPORTED_HOSTS)}; got '{host}'."
+                ),
+            )
+
+
+def _enrich_local_working_dirs(repo: str, resp: dict) -> None:
+    """Fill working_dir for local entries that lack one from the env paths.
+
+    host=local working_dir defaults to the existing on-disk env path so callers
+    get a usable default without the user having to re-enter it.
+    """
+    envs = projects_module.get_project_environments(repo)
+    if not envs:
+        envs = _derive_project_environments(repo)
+    for env, entry in resp.items():
+        if entry.get("host") == "local" and not entry.get("working_dir"):
+            if env in envs:
+                entry["working_dir"] = envs[env]
+
+
+def _deploy_config_response(slug: str, repo: str, stored: dict) -> dict:
+    """Build the GET-shaped response: seed defaults merged with stored, masked."""
+    merged = _deploy_merge_seed(_deploy_seed_for(slug), stored or {})
+    resp = _build_deploy_config_response(merged)
+    _enrich_local_working_dirs(repo, resp)
+    return resp
+
+
+@app.get("/api/projects/{slug}/deploy-config")
+def get_project_deploy_config(slug: str):
+    """Return per-environment deploy config (seed defaults merged with overrides).
+
+    render_api_key is never returned in cleartext — each render entry carries
+    render_api_key_set (bool) and render_api_key_masked. Returns 404 for an
+    unknown slug.
+    """
+    repo = _resolve_project_slug(slug)
+    stored = _settings_repo.get_setting_scoped("project", DEPLOY_CONFIG_KEY, project=repo)
+    return _deploy_config_response(slug, repo, stored)
+
+
+@app.put("/api/projects/{slug}/deploy-config")
+def put_project_deploy_config(slug: str, body: dict):
+    """Persist a per-environment deploy config override.
+
+    Merges per environment over the stored config; a new render_api_key replaces
+    the stored secret, while an omitted/null key leaves it unchanged. Returns
+    400 for unsupported envs/hosts, 404 for an unknown slug.
+    """
+    repo = _resolve_project_slug(slug)
+    _validate_deploy_config_body(body)
+    current = _settings_repo.get_setting_scoped("project", DEPLOY_CONFIG_KEY, project=repo)
+    merged = _deploy_merge_for_put(current or {}, body)
+    _settings_repo.set_setting("project", DEPLOY_CONFIG_KEY, merged, project=repo)
+    return _deploy_config_response(slug, repo, merged)
+
+
+# ── Local deploy / restart actions (issue #723) ──────────────────────────────
+
+from services.sprint_manager import deploy_actions as _deploy_actions
+from services.sprint_manager import render_actions as _render_actions
+
+
+def _render_deploy_environment(entry: dict, env: str) -> dict:
+    """Trigger a new Render deploy for a host=render env (issue #725).
+
+    Validates render_service_id/render_api_key (400 before any Render call),
+    POSTs to the Render deploys endpoint server-side, and returns a status
+    snapshot. The render_api_key is never echoed back to the caller.
+    """
+    try:
+        service_id, api_key = _render_actions.require_render_target(entry)
+    except _render_actions.RenderActionError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    try:
+        _status, payload = _render_actions.call_render(
+            "POST", _render_actions.deploy_url(service_id), api_key
+        )
+    except _render_actions.RenderApiError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.message)
+    deploy = payload.get("deploy", payload) if isinstance(payload, dict) else {}
+    raw_status = deploy.get("status") if isinstance(deploy, dict) else None
+    return {
+        "ok": True,
+        "env": env,
+        "host": "render",
+        "action": "deploy",
+        "status": _render_actions.normalize_status(raw_status),
+    }
+
+
+def _render_restart_environment(entry: dict, env: str) -> dict:
+    """Restart a host=render service via the Render restart endpoint (issue #725)."""
+    try:
+        service_id, api_key = _render_actions.require_render_target(entry)
+    except _render_actions.RenderActionError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    try:
+        _render_actions.call_render(
+            "POST", _render_actions.restart_url(service_id), api_key
+        )
+    except _render_actions.RenderApiError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.message)
+    return {"ok": True, "env": env, "host": "render", "action": "restart"}
+
+
+def _merged_deploy_config(slug: str, repo: str) -> dict:
+    """Return seed-merged stored deploy config (raw, secrets intact)."""
+    stored = _settings_repo.get_setting_scoped("project", DEPLOY_CONFIG_KEY, project=repo)
+    return _deploy_merge_seed(_deploy_seed_for(slug), stored or {})
+
+
+def _restart_environment(entry: dict) -> dict:
+    """Restart a local environment from its config entry.
+
+    Strategy: launchd kickstart when a label is set, else stop+start scripts.
+    The dashboard's own process is restarted via a DETACHED helper so this call
+    can return before launchd kills the worker. Validation failures raise
+    HTTPException 400; a failed command raises 500.
+    """
+    try:
+        _deploy_actions.require_restart_target(entry)
+    except _deploy_actions.DeployActionError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    label = _deploy_actions.restart_label(entry)
+
+    # Dashboard's own process — detach so the response flushes before kickstart.
+    if label and _deploy_actions.is_self_restart(entry):
+        cmd = _deploy_actions.build_self_restart_command(label)
+        subprocess.Popen(
+            cmd,
+            start_new_session=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        return {"method": "launchd-self", "detached": True, "launchd_label": label}
+
+    if label:
+        cmd = _deploy_actions.build_kickstart_command(label)
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            raise HTTPException(
+                status_code=500,
+                detail=result.stderr.strip() or result.stdout.strip() or "kickstart failed",
+            )
+        return {
+            "method": "launchd",
+            "launchd_label": label,
+            "stdout": result.stdout,
+            "stderr": result.stderr,
+        }
+
+    # Script fallback: stop then start.
+    stop, start = _deploy_actions.stop_start_scripts(entry)
+    steps = []
+    for phase, script in (("stop", stop), ("start", start)):
+        result = subprocess.run(["sh", "-c", script], capture_output=True, text=True)
+        steps.append({
+            "phase": phase,
+            "script": script,
+            "returncode": result.returncode,
+            "stdout": result.stdout,
+            "stderr": result.stderr,
+        })
+        if result.returncode != 0:
+            raise HTTPException(
+                status_code=500,
+                detail=f"{phase} script failed: {result.stderr.strip() or script}",
+            )
+    return {"method": "scripts", "steps": steps}
+
+
+@app.post("/api/projects/{slug}/environments/{env}/deploy")
+def deploy_environment(slug: str, env: str):
+    """Pull-only deploy for a local environment, then auto-restart it.
+
+    Runs ``git pull --ff-only origin <branch>`` inside the configured
+    ``working_dir`` (never merge/push/PR/checkout), returns the raw pull stdout
+    and the new HEAD sha, then triggers the restart action for the same env.
+    Rejects (400) when ``working_dir``/``branch`` are absent — before any shell
+    command runs. Returns 404 for an unknown slug.
+    """
+    repo = _resolve_project_slug(slug)
+    merged = _merged_deploy_config(slug, repo)
+    entry = _deploy_actions.get_env_entry(merged, env)
+
+    # host=render → trigger a Render deploy server-side (issue #725).
+    if _render_actions.is_render_host(entry):
+        return _render_deploy_environment(entry, env)
+
+    try:
+        working_dir, branch = _deploy_actions.require_deploy_target(entry)
+    except _deploy_actions.DeployActionError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    pull = subprocess.run(
+        _deploy_actions.build_pull_command(branch),
+        capture_output=True, text=True, cwd=working_dir,
+    )
+    if pull.returncode != 0:
+        raise HTTPException(
+            status_code=500,
+            detail=pull.stderr.strip() or pull.stdout.strip() or "git pull failed",
+        )
+
+    head = subprocess.run(
+        _deploy_actions.build_head_sha_command(),
+        capture_output=True, text=True, cwd=working_dir,
+    )
+    head_sha = head.stdout.strip()
+
+    # AC: after a successful pull, auto-trigger restart for the same env.
+    # Best-effort — a restart-config problem must not mask a successful pull.
+    try:
+        restart_result = _restart_environment(entry)
+    except HTTPException as exc:
+        restart_result = {"ok": False, "error": exc.detail}
+
+    resp = {
+        "ok": True,
+        "env": env,
+        "branch": branch,
+        "working_dir": working_dir,
+        "pull_output": pull.stdout,
+        "head": head_sha,
+        "restart": restart_result,
+    }
+    if restart_result.get("detached"):
+        return JSONResponse(status_code=202, content=resp)
+    return resp
+
+
+@app.post("/api/projects/{slug}/environments/{env}/restart")
+def restart_environment(slug: str, env: str):
+    """Restart a local environment's service.
+
+    Uses ``launchctl kickstart -k`` when a ``launchd_label`` is configured, else
+    falls back to the configured stop+start scripts. For the dashboard's own
+    process the work is detached and the call returns 202 immediately. Rejects
+    (400) when no valid restart target is configured; 404 for an unknown slug.
+    """
+    repo = _resolve_project_slug(slug)
+    merged = _merged_deploy_config(slug, repo)
+    entry = _deploy_actions.get_env_entry(merged, env)
+    if entry is None:
+        raise HTTPException(status_code=400, detail=f"No deploy config for environment '{env}'")
+
+    # host=render → restart the Render service server-side (issue #725).
+    if _render_actions.is_render_host(entry):
+        return _render_restart_environment(entry, env)
+
+    result = _restart_environment(entry)
+    if result.get("detached"):
+        return JSONResponse(status_code=202, content={"ok": True, "env": env, **result})
+    return {"ok": True, "env": env, **result}
+
+
+@app.get("/api/projects/{slug}/environments/{env}/deploy-status")
+def environment_deploy_status(slug: str, env: str):
+    """Return the normalized latest-deploy status for a host=render env (issue #725).
+
+    Polls ``GET /v1/services/{id}/deploys?limit=1`` server-side and returns
+    ``{"status": "queued|building|live|failed"}``. Missing render config → 400;
+    a 401/404 from Render → 502 with a specific message. Only host=render is
+    supported (local envs have no remote deploy status to poll).
+    """
+    repo = _resolve_project_slug(slug)
+    merged = _merged_deploy_config(slug, repo)
+    entry = _deploy_actions.get_env_entry(merged, env)
+    if not _render_actions.is_render_host(entry):
+        raise HTTPException(
+            status_code=400,
+            detail="Deploy status is only available for host=render environments",
+        )
+    try:
+        service_id, api_key = _render_actions.require_render_target(entry)
+    except _render_actions.RenderActionError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    try:
+        _status, payload = _render_actions.call_render(
+            "GET", _render_actions.status_url(service_id), api_key
+        )
+    except _render_actions.RenderApiError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.message)
+    # Surface commit SHA + last-deploy timestamp for the Deploy-tab card (#726).
+    info = _render_actions.latest_deploy_from_payload(payload)
+    return {
+        "ok": True,
+        "env": env,
+        "host": "render",
+        "status": info["status"],
+        "commit": info["commit"],
+        "finished_at": info["finished_at"],
+    }
+
+
+@app.get("/api/deploy/overview")
+def get_deploy_overview():
+    """Aggregate deployable environments across all known projects (issue #726).
+
+    Powers the Deploy tab: one secret-safe card entry per configured
+    environment (``prd``, ``uat``) for every project that ships deploy config
+    (commander, perf-coach) plus any project listed in ``projects.json``. Each
+    entry carries ``project``, ``env``, ``host`` and host-specific fields; the
+    render_api_key is never returned. Live commit SHA / status are fetched
+    client-side per card (local via /api/health, render via deploy-status).
+    """
+    slugs: list[str] = list(_deploy_known_slugs())
+    try:
+        for proj in projects_module.load_projects():
+            s = proj["repo"].split("/")[-1]
+            if s not in slugs:
+                slugs.append(s)
+    except Exception:
+        pass
+
+    environments: list[dict] = []
+    for slug in slugs:
+        try:
+            repo = _resolve_project_slug(slug)
+        except HTTPException:
+            # perf-coach (and any seed-only project) may not be in projects.json;
+            # its stored override lookup just returns empty and seed defaults win.
+            repo = f"zealchaiwut/{slug}"
+        merged = _merged_deploy_config(slug, repo)
+        environments.extend(_deploy_overview_entries_for(slug, merged))
+
+    return {"environments": environments}
 
 
 # ── Settings sync (issue #644) ───────────────────────────────────────────────
@@ -2452,12 +2828,20 @@ def put_project_environments(slug: str, body: _PutEnvironmentsBody):
                 f"'{env}': path '{local_dir}' is not a git repository (.git not found)"
             )
             continue
-        result = subprocess.run(
-            ["git", "rev-parse", "--is-inside-work-tree"],
-            cwd=str(p),
-            capture_output=True,
-            text=True,
-        )
+        try:
+            result = subprocess.run(
+                ["git", "rev-parse", "--is-inside-work-tree"],
+                cwd=str(p),
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+        except subprocess.TimeoutExpired:
+            errors.append(
+                f"'{env}': git rev-parse timed out for path '{local_dir}'"
+                " (repo may be on an unreachable network mount)"
+            )
+            continue
         if result.returncode != 0:
             errors.append(
                 f"'{env}': path '{local_dir}' is not a valid git repository"
@@ -2471,6 +2855,104 @@ def put_project_environments(slug: str, body: _PutEnvironmentsBody):
     envs_dict = {e.env.strip(): e.local_directory.strip() for e in body.environments}
     projects_module.save_project_environments(repo, envs_dict)
     return {"ok": True, "environments": envs_dict}
+
+
+# ── Env-var editor (issue #727) ───────────────────────────────────────────────
+
+import env_file as _env_file
+
+
+def _env_working_dir(slug: str, repo: str, env: str) -> str | None:
+    """Resolve the on-disk directory holding an environment's `.env` file.
+
+    Prefers the stored/derived environment path (the working clone), and falls
+    back to a host=local deploy-config working_dir. Returns None when nothing is
+    configured for the requested env.
+    """
+    envs = projects_module.get_project_environments(repo)
+    if not envs:
+        envs = _derive_project_environments(repo)
+    if env in envs and envs[env]:
+        return envs[env]
+    merged = _merged_deploy_config(slug, repo)
+    entry = (merged or {}).get(env) or {}
+    return entry.get("working_dir") or None
+
+
+@app.get("/api/projects/{slug}/environments/{env}/env-vars")
+def get_env_vars(slug: str, env: str):
+    """Read the environment's `.env` file and return parsed key/value pairs.
+
+    Pairs are returned in file order. Values are plaintext — masking is a
+    display-only concern handled client-side. Returns 404 for an unknown slug or
+    an env with no configured directory.
+    """
+    repo = _resolve_project_slug(slug)
+    working_dir = _env_working_dir(slug, repo, env)
+    if not working_dir:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No directory configured for environment '{env}'",
+        )
+    env_path = Path(working_dir) / ".env"
+    return {
+        "env": env,
+        "working_dir": working_dir,
+        "vars": _env_file.read_env_vars(env_path),
+    }
+
+
+class _EnvVarItem(BaseModel):
+    key: str
+    value: str = ""
+
+
+class _PutEnvVarsBody(BaseModel):
+    vars: list[_EnvVarItem]
+
+
+@app.put("/api/projects/{slug}/environments/{env}/env-vars")
+def put_env_vars(slug: str, env: str, body: _PutEnvVarsBody):
+    """Write env-var changes back to the environment's `.env` file.
+
+    Preserves original line order and inline comments for unchanged keys,
+    rewrites changed keys in place, appends new keys at the end, and drops
+    removed keys. An empty KEY is rejected (400) before any write. A filesystem
+    failure (e.g. read-only `.env`) returns 500 so the client can keep the
+    user's edits. Returns 404 for an unknown slug or unconfigured env.
+    """
+    repo = _resolve_project_slug(slug)
+    working_dir = _env_working_dir(slug, repo, env)
+    if not working_dir:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No directory configured for environment '{env}'",
+        )
+
+    pairs: list[tuple[str, str]] = []
+    for item in body.vars:
+        key = item.key.strip()
+        if not key:
+            raise HTTPException(
+                status_code=400,
+                detail="Each variable must have a non-empty KEY.",
+            )
+        pairs.append((key, item.value))
+
+    env_path = Path(working_dir) / ".env"
+    try:
+        _env_file.write_env_vars(env_path, pairs)
+    except OSError as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to write {env_path}: {exc}",
+        )
+    return {
+        "ok": True,
+        "env": env,
+        "working_dir": working_dir,
+        "vars": _env_file.read_env_vars(env_path),
+    }
 
 
 # ── Scaffold docs (issue #681) ────────────────────────────────────────────────
@@ -8245,12 +8727,12 @@ def get_sprint_branch_status(sprint_label: str, project: str):
                 pr_url = prs[0].get("url")
                 pr_number = prs[0].get("number")
                 pr_title = prs[0].get("title")
-    except Exception as _pr_err:
+    except Exception as pr_err:
         _slog.warn(
             "sprint_pr_lookup_failed",
-            f"PR lookup for {branch_name!r} failed: {_pr_err}",
+            f"PR lookup for {branch_name!r} failed: {pr_err}",
             branch=branch_name,
-            error=str(_pr_err),
+            error=str(pr_err),
         )
 
     return {"exists": exists, "branch": branch_name,

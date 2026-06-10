@@ -2255,6 +2255,11 @@ def _run_documentor(
         return
 
     eff_repo = repo_name or (cfg.repo_name if cfg else None)
+    # Log-format contract (issue #705): the opening/closing lines below are
+    # per-sprint (issue #697). The only on-disk consumer is the dashboard's
+    # log_source.read_log, which returns the raw tail verbatim — no structured
+    # parsing — so the format is safe to display. The exact shape is pinned by
+    # tests/test_705__documentor_log_format_contract.py; keep them in sync.
     print(
         f"  [documentor] running for sprint {sprint_label} "
         f"({len(issue_nums)} ticket(s): {issue_nums}) ..."
@@ -2785,11 +2790,15 @@ def _generate_gate_failure_analysis(
         "locally before marking complete\")\n\n"
         "Output ONLY the JSON object, no other text."
     )
+    # Respect the configured model (issue #708) — fall back to the hardcoded
+    # default only when cfg is unavailable, so this stays consistent with the
+    # per-agent model config added in #700.
+    model = cfg.reviewer_model if cfg is not None else "claude-haiku-4-5-20251001"
     try:
         result = subprocess.run(
             [
                 "claude", "-p", prompt,
-                "--model", "claude-haiku-4-5-20251001",
+                "--model", model,
                 "--no-session-persistence",
             ],
             capture_output=True,
@@ -4952,6 +4961,44 @@ def _dispatch_documenter(
     )
 
 
+def _extract_follow_up_issue_nums(
+    log_text: str,
+    eff_repo: Optional[str],
+    summary_issue_num: Optional[int],
+) -> list:
+    """Extract follow-up issue numbers from `gh issue create` URLs in a log.
+
+    `gh issue create` prints the new issue URL: https://github.com/<repo>/issues/N
+    Comment URLs (https://github.com/<repo>/issues/N#issuecomment-M) must be
+    excluded. Earlier code used a fragile position-based heuristic
+    (the char after the match must be '#'), which silently broke when logs
+    wrapped or reformatted URLs. This uses stricter regex anchoring: a negative
+    lookahead `(?!#issuecomment-)` on the issue-number match, so ONLY comment
+    URLs are skipped — issue URLs carrying any other fragment still count.
+
+    Returns issue numbers in first-seen order, de-duplicated, with the sprint
+    summary issue removed. Returns [] when eff_repo is falsy.
+    """
+    if not eff_repo:
+        return []
+
+    # (?<!\d) / (?!\d) keep the number whole; (?!#issuecomment-) drops comment URLs.
+    issue_url_pat = re.compile(
+        rf"https://github\.com/{re.escape(eff_repo)}/issues/(?<!\d)(\d+)(?!\d)(?!#issuecomment-)",
+        re.IGNORECASE,
+    )
+    seen_nums: set = set()
+    follow_up_nums: list = []
+    for url_m2 in issue_url_pat.finditer(log_text):
+        num = int(url_m2.group(1))
+        if summary_issue_num is not None and num == summary_issue_num:
+            continue
+        if num not in seen_nums:
+            seen_nums.add(num)
+            follow_up_nums.append(num)
+    return follow_up_nums
+
+
 def _dispatch_reviewer(
     state: "SprintState",
     summary_issue_num: Optional[int],
@@ -5118,25 +5165,9 @@ def _dispatch_reviewer(
         # Parse actual follow-up issue numbers from issue creation URLs in the log.
         # gh issue create outputs: https://github.com/<repo>/issues/N
         # Exclude comment URLs (which contain #issuecomment-) and the sprint summary issue.
-        if eff_repo:
-            issue_url_pat = re.compile(
-                rf"https://github\.com/{re.escape(eff_repo)}/issues/(\d+)",
-                re.IGNORECASE,
-            )
-            seen_nums: set = set()
-            follow_up_nums: list = []
-            for url_m2 in issue_url_pat.finditer(log_text):
-                # Skip comment URLs: the match end is immediately followed by '#'
-                pos = url_m2.end()
-                if pos < len(log_text) and log_text[pos] == "#":
-                    continue
-                num = int(url_m2.group(1))
-                if summary_issue_num is not None and num == summary_issue_num:
-                    continue
-                if num not in seen_nums:
-                    seen_nums.add(num)
-                    follow_up_nums.append(num)
-            findings["follow_up_tickets"] = follow_up_nums
+        findings["follow_up_tickets"] = _extract_follow_up_issue_nums(
+            log_text, eff_repo, summary_issue_num
+        )
         # Look for comment URL in log
         url_cm = re.search(r"https://github\.com/[^\s]+/issues/\d+#issuecomment-\d+", log_text)
         if url_cm:
@@ -6751,12 +6782,12 @@ def main() -> None:
         help="Skip the post-summary documenter agent entirely.",
     )
 
-    # Estimator control (issue #166, #696) — default skips; --no-skip-estimator opts in
+    # Estimator control (issue #166, #696, #704) — default skips; --no-skip-estimator opts in
     p.add_argument(
         "--skip-estimator",
         action=argparse.BooleanOptionalAction,
         default=True,
-        help=argparse.SUPPRESS,
+        help="Skip the estimator run (on by default; pass --no-skip-estimator to enable).",
     )
 
     # Rerun manifest (issue #332) — written by the server rerun endpoint

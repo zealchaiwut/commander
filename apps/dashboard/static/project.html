@@ -1043,6 +1043,44 @@
     .ps-btn:hover { background: var(--surface-hover); }
     .ps-btn-primary { background: var(--text); color: var(--surface); border-color: var(--text); }
     .ps-btn-ghost { border-color: transparent; color: var(--text-muted); }
+    /* ── Environment Variables editor (issue #727) ── */
+    .ps-envvars-section { padding: 14px 0; border-top: 1px solid var(--border); }
+    .ps-envvars-section:first-child { border-top: none; padding-top: 4px; }
+    .ps-envvars-head {
+      display: flex; align-items: center; gap: 10px; margin-bottom: 8px;
+    }
+    .ps-envvars-env {
+      font-family: var(--mono); font-size: 11px; font-weight: 700;
+      letter-spacing: .05em; text-transform: uppercase;
+      padding: 2px 9px; border-radius: 999px;
+      background: var(--surface-2); color: var(--text-sub); border: 1px solid var(--border);
+    }
+    .ps-envvars-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .ps-envvars-table th {
+      text-align: left; font-size: 10px; font-weight: 700;
+      letter-spacing: .06em; text-transform: uppercase;
+      color: var(--text-sub); padding: 6px 10px; border-bottom: 1px solid var(--border);
+    }
+    .ps-envvars-table td {
+      padding: 7px 10px; border-bottom: 1px solid var(--border);
+      vertical-align: top;
+    }
+    .ps-envvars-table tr:last-child td { border-bottom: none; }
+    .ps-envvar-key { font-family: var(--mono); color: var(--text); font-weight: 500; }
+    .ps-envvar-val { font-family: var(--mono); color: var(--text); word-break: break-all; }
+    .ps-envvar-val.is-masked { color: var(--text-muted); letter-spacing: 2px; }
+    .ps-envvar-actions { width: 44px; text-align: right; white-space: nowrap; }
+    .ps-envvar-key-inp, .ps-envvar-val-inp { width: 100%; font-family: var(--mono); }
+    .ps-envvar-key-inp.is-invalid { border-color: var(--red); box-shadow: 0 0 0 3px var(--red-bg); }
+    .ps-envvar-error { color: var(--red); font-size: 11px; margin-top: 4px; min-height: 0; }
+    .ps-icon-btn {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 32px; height: 32px; min-width: 32px;
+      border: 1px solid var(--border); background: var(--surface);
+      color: var(--text-muted); border-radius: 6px; cursor: pointer;
+    }
+    .ps-icon-btn:hover { background: var(--surface-hover); color: var(--text); }
+    .ps-icon-btn:focus-visible { outline: none; border-color: var(--blue); box-shadow: 0 0 0 3px var(--blue-bg); }
     @media (max-width: 640px) {
       .proj-settings-wrap { gap: 12px; }
       .ps-est-table th:nth-child(3), .ps-est-table td:nth-child(3) { display: none; }
@@ -1070,6 +1108,103 @@
       display: flex; align-items: flex-start; gap: 6px;
     }
     .ps-machine-note .ti { margin-top: 1px; flex-shrink: 0; }
+
+    /* ── Deploy actions card (issue #723) ── */
+    .ps-deploy-out {
+      font-family: var(--mono); font-size: 12px; line-height: 1.5;
+      background: var(--surface-2, #0f172a); color: var(--text-sub);
+      border: 1px solid var(--border, #334155); border-radius: 8px;
+      padding: 10px 12px; margin: 4px 0 12px; white-space: pre-wrap;
+      word-break: break-word; max-height: 220px; overflow: auto;
+    }
+    /* Render deploy status pill (issue #725) */
+    .ps-deploy-status {
+      font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+      padding: 3px 10px; border-radius: 999px;
+      background: var(--surface-2, #1e293b); color: var(--text-sub);
+    }
+    .ps-deploy-status--queued { background: var(--surface-2, #1e293b); color: var(--text-sub); }
+    .ps-deploy-status--building { background: var(--amber-bg); color: var(--amber); }
+    .ps-deploy-status--live { background: var(--green-bg); color: var(--green); }
+    .ps-deploy-status--failed { background: var(--red-bg, #3f1d1d); color: var(--error, #ef4444); }
+
+    /* ── Deploy tab (issue #726) ── */
+    .deploy-grid {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+      gap: 16px; max-width: 1280px;
+    }
+    .deploy-tab-intro { color: var(--text-muted); font-size: 13px; line-height: 1.5; margin: 0 0 20px; max-width: 720px; }
+    .deploy-card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 8px; padding: 16px 18px; display: flex; flex-direction: column; gap: 12px;
+    }
+    .deploy-card__head { display: flex; align-items: center; gap: 8px; }
+    .deploy-card__title { font-size: 15px; font-weight: 700; color: var(--text); }
+    .deploy-card__project { font-size: 12px; color: var(--text-muted); font-weight: 500; }
+    .deploy-card__badge {
+      font-size: 10.5px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+      padding: 2px 9px; border-radius: 999px; border: 1px solid var(--border);
+    }
+    .deploy-card__badge--local  { background: var(--blue-bg); color: var(--blue); border-color: transparent; }
+    .deploy-card__badge--render { background: var(--purple-bg); color: var(--purple); border-color: transparent; }
+    .deploy-card__meta { display: flex; flex-direction: column; gap: 6px; font-size: 12.5px; }
+    .deploy-card__meta-row { display: flex; gap: 8px; align-items: baseline; }
+    .deploy-card__meta-label { color: var(--text-muted); min-width: 92px; flex-shrink: 0; }
+    .deploy-card__meta-val { color: var(--text); word-break: break-word; }
+    .deploy-card__meta-val.is-mono { font-family: var(--mono); font-size: 12px; }
+    .status-pill {
+      font-size: 10.5px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+      padding: 2px 10px; border-radius: 999px;
+      background: var(--surface-2); color: var(--text-sub); margin-left: auto;
+    }
+    .status-pill--queued   { background: var(--surface-2); color: var(--text-sub); }
+    .status-pill--building { background: var(--amber-bg); color: var(--amber); }
+    .status-pill--live     { background: var(--green-bg); color: var(--green); }
+    .status-pill--idle     { background: var(--green-bg); color: var(--green); }
+    .status-pill--failed   { background: var(--red-bg, #3f1d1d); color: var(--error, #ef4444); }
+    .deploy-card__actions { display: flex; gap: 8px; flex-wrap: wrap; }
+    .deploy-btn {
+      display: inline-flex; align-items: center; gap: 6px; min-height: 36px;
+      padding: 7px 14px; border: 1px solid var(--border); border-radius: 6px;
+      background: var(--surface); color: var(--text); font-size: 13px; font-weight: 600;
+      cursor: pointer; font-family: inherit; transition: background .15s, border-color .15s;
+    }
+    .deploy-btn:hover:not(:disabled) { background: var(--surface-2); border-color: var(--text-sub); }
+    .deploy-btn:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+    .deploy-btn:disabled { opacity: .5; cursor: default; }
+    .deploy-btn--primary { background: var(--blue); border-color: var(--blue); color: #fff; }
+    .deploy-btn--primary:hover:not(:disabled) { filter: brightness(1.08); background: var(--blue); }
+    .deploy-btn--danger { color: var(--error, #ef4444); }
+    .deploy-card__confirm {
+      display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+      background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px;
+      padding: 10px 12px; font-size: 13px; color: var(--text);
+    }
+    .deploy-card__confirm-msg { flex: 1; min-width: 160px; }
+    .deploy-card__log {
+      font-family: var(--mono); font-size: 12px; line-height: 1.5;
+      background: var(--surface-2); color: var(--text-sub);
+      border: 1px solid var(--border); border-radius: 8px;
+      padding: 10px 12px; white-space: pre-wrap; word-break: break-word;
+      max-height: 220px; overflow: auto; margin: 0;
+    }
+    .deploy-card__log.is-error { color: var(--error, #ef4444); }
+    .deploy-spin { display: inline-block; animation: deploy-reconnect-spin .9s linear infinite; }
+    /* Self-restart reconnect overlay (AC10/AC11) */
+    .deploy-reconnect-overlay {
+      position: fixed; inset: 0; z-index: 9999;
+      display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px;
+      background: color-mix(in srgb, var(--surface) 92%, transparent);
+      backdrop-filter: blur(4px); color: var(--text); text-align: center; padding: 24px;
+    }
+    .deploy-reconnect-overlay__spinner {
+      width: 40px; height: 40px; border-radius: 50%;
+      border: 3px solid var(--border); border-top-color: var(--blue);
+      animation: deploy-reconnect-spin .9s linear infinite;
+    }
+    @keyframes deploy-reconnect-spin { to { transform: rotate(360deg); } }
+    .deploy-reconnect-overlay__title { font-size: 18px; font-weight: 700; }
+    .deploy-reconnect-overlay__sub { font-size: 13px; color: var(--text-muted); max-width: 360px; }
 
     /* ── Scaffold docs card (issue #681) ── */
     .ps-scaffold-actions { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
@@ -5230,6 +5365,10 @@
                 aria-selected="false" onclick="switchTab('logs')">
           <i class="ti ti-terminal-2"></i>Logs
         </button>
+        <button class="stab" role="tab" id="stab-deploy"
+                aria-selected="false" onclick="switchTab('deploy')">
+          <i class="ti ti-rocket"></i>Deploy
+        </button>
         <!-- Analytics dropdown group -->
         <div class="stab-group" id="stab-group-analytics">
           <button class="stab stab-trigger" role="tab" aria-haspopup="true"
@@ -5539,6 +5678,19 @@
               </div>
             </div>
           </div>
+        </div>
+      </div>
+
+      <!-- Deploy tab (issue #726) -->
+      <div class="tab-pane" id="pane-deploy" role="tabpanel" aria-labelledby="stab-deploy">
+        <p class="deploy-tab-intro">
+          Manage each environment's deployment. Cards show the host, branch,
+          live commit SHA, last-deploy time and status. Deploy runs a pull-only
+          update (or a Render deploy); Restart bounces the service. Both ask to
+          confirm first.
+        </p>
+        <div class="deploy-grid" id="deploy-grid" role="region" aria-label="Deployment environments">
+          <div class="deploy-tab-intro" id="deploy-grid-empty">Loading environments…</div>
         </div>
       </div>
 
@@ -6300,6 +6452,34 @@
             </div>
           </div>
 
+          <!-- Environment Variables card (issue #727) -->
+          <div class="proj-settings-card" id="ps-envvars-card">
+            <div class="proj-settings-card-head">
+              <i class="ti ti-variable proj-settings-card-icon"></i>
+              <div>
+                <div class="proj-settings-card-title">Environment Variables</div>
+                <div class="proj-settings-card-sub">View, reveal and edit each environment's <code>.env</code> file — values are masked by default</div>
+              </div>
+            </div>
+            <div class="proj-settings-card-body" id="ps-envvars-body">
+              <!-- Sections injected by envVarsLoad() -->
+            </div>
+          </div>
+
+          <!-- Deploy actions card (issue #723) -->
+          <div class="proj-settings-card" id="ps-deploy-card">
+            <div class="proj-settings-card-head">
+              <i class="ti ti-rocket proj-settings-card-icon"></i>
+              <div>
+                <div class="proj-settings-card-title">Deploy actions</div>
+                <div class="proj-settings-card-sub">Pull the configured branch and restart local services (pull-only — no merge or push)</div>
+              </div>
+            </div>
+            <div class="proj-settings-card-body" id="ps-deploy-body">
+              <!-- Rows injected by deployActionsLoad() -->
+            </div>
+          </div>
+
           <!-- Docs Structure card (issue #681) -->
           <div class="proj-settings-card" id="ps-scaffold-card">
             <div class="proj-settings-card-head">
@@ -6876,10 +7056,15 @@ function switchTab(tab, pushHistory) {
     }
   }
 
+  // Stop deploy status pollers when leaving the deploy tab
+  if (_activeTab === 'deploy' && tab !== 'deploy') {
+    deployTabDestroy();
+  }
+
   _activeTab = tab;
 
   // Update aria-selected + active class on tabs
-  ['sprint-mgmt', 'tickets', 'logs', 'bulk-create', 'timeline', 'compare', 'metrics', 'est-vs-actual', 'calibration', 'status', 'notes', 'settings'].forEach(t => {
+  ['sprint-mgmt', 'tickets', 'logs', 'deploy', 'bulk-create', 'timeline', 'compare', 'metrics', 'est-vs-actual', 'calibration', 'status', 'notes', 'settings'].forEach(t => {
     const btn = document.getElementById('stab-' + t);
     if (!btn) return;
     const isActive = t === tab;
@@ -6896,7 +7081,7 @@ function switchTab(tab, pushHistory) {
   });
 
   // Show/hide panes
-  ['sprint-mgmt', 'tickets', 'logs', 'bulk-create', 'timeline', 'compare', 'metrics', 'est-vs-actual', 'calibration', 'status', 'notes', 'settings'].forEach(t => {
+  ['sprint-mgmt', 'tickets', 'logs', 'deploy', 'bulk-create', 'timeline', 'compare', 'metrics', 'est-vs-actual', 'calibration', 'status', 'notes', 'settings'].forEach(t => {
     const pane = document.getElementById('pane-' + t);
     if (pane) pane.classList.toggle('active', t === tab);
   });
@@ -6936,6 +7121,11 @@ function switchTab(tab, pushHistory) {
   // Init logs tab
   if (tab === 'logs') {
     logsInit();
+  }
+
+  // Init deploy tab
+  if (tab === 'deploy') {
+    deployTabInit();
   }
 
   // Init timeline tab
@@ -6994,7 +7184,7 @@ document.addEventListener('click', closeAllStabDropdowns);
 
 // ── Keyboard navigation for sub-tabs ─────────────────────────────────────────
 document.getElementById('sub-tabs').addEventListener('keydown', function(e) {
-  const enabledTabs = ['sprint-mgmt', 'tickets', 'logs', 'bulk-create', 'timeline', 'compare', 'est-vs-actual', 'calibration', 'status', 'notes', 'settings'];
+  const enabledTabs = ['sprint-mgmt', 'tickets', 'logs', 'deploy', 'bulk-create', 'timeline', 'compare', 'est-vs-actual', 'calibration', 'status', 'notes', 'settings'];
   const focused = document.activeElement;
   const currentId = focused ? focused.id.replace('stab-', '') : null;
   const currentIdx = enabledTabs.indexOf(currentId);
@@ -21623,6 +21813,8 @@ async function projSettingsLoad() {
   // Expose slug for env-path JS block
   window._currentProjectSlug = slug;
   projEnvLoad();
+  deployActionsLoad();
+  envVarsLoad();
 
   // Show project name in inherit notice
   const nameEl = document.getElementById('ps-proj-name');
@@ -22020,6 +22212,777 @@ function addEnvRow() {
   var anchor = body.querySelector('div[style*="margin-top"]');
   if (anchor) body.insertBefore(row, anchor);
   else body.appendChild(row);
+}
+
+// ── Environment Variables editor (issue #727) ─────────────────────────────────
+// Render-style per-environment .env editor: masked read view with per-row reveal,
+// an edit mode with add/delete rows, and a Save that PUTs back to the .env file.
+
+var _envVarState = {};  // env -> { vars: [{key,value}], editing: bool, reveal: {idx:bool} }
+
+function _envVarId(env) { return (env || '').replace(/[^A-Za-z0-9_-]/g, '_'); }
+
+function envVarsLoad() {
+  var slug = (window._currentProjectSlug || '');
+  if (!slug) return;
+  var host = document.getElementById('ps-envvars-body');
+  if (!host) return;
+  fetch('/api/projects/' + encodeURIComponent(slug) + '/environments')
+    .then(function(r) { return r.ok ? r.json() : {environments: []}; })
+    .then(function(data) {
+      var envs = (data.environments || []).map(function(e) { return e.env; });
+      if (!envs.length) {
+        host.innerHTML = '<div class="ps-machine-note"><i class="ti ti-info-circle"></i>'
+          + ' No environments configured. Add an environment path above to manage its .env file.</div>';
+        return;
+      }
+      host.innerHTML = envs.map(function(env) {
+        var id = _envVarId(env);
+        return '<div class="ps-envvars-section" data-ev-env="' + _escAttr(env) + '">'
+          + '<div class="ps-envvars-head"><span class="ps-envvars-env">' + escHtml(env) + '</span></div>'
+          + '<div id="ps-envvars-wrap-' + id + '"><div class="ps-machine-note">Loading…</div></div>'
+          + '</div>';
+      }).join('');
+      envs.forEach(envVarsLoadEnv);
+    })
+    .catch(function() {});
+}
+
+function envVarsLoadEnv(env) {
+  var slug = (window._currentProjectSlug || '');
+  fetch('/api/projects/' + encodeURIComponent(slug) + '/environments/'
+        + encodeURIComponent(env) + '/env-vars')
+    .then(function(r) { return r.ok ? r.json() : Promise.reject(r); })
+    .then(function(data) {
+      _envVarState[env] = {
+        vars: (data.vars || []).map(function(v) { return {key: v.key, value: v.value}; }),
+        editing: false,
+        reveal: {}
+      };
+      _envVarsRender(env);
+    })
+    .catch(function() {
+      var wrap = document.getElementById('ps-envvars-wrap-' + _envVarId(env));
+      if (wrap) wrap.innerHTML = '<div class="ps-machine-note"><i class="ti ti-info-circle"></i>'
+        + ' No .env file found for this environment.</div>';
+    });
+}
+
+function _envVarsRender(env) {
+  var wrap = document.getElementById('ps-envvars-wrap-' + _envVarId(env));
+  var st = _envVarState[env];
+  if (!wrap || !st) return;
+  if (st.editing) { wrap.innerHTML = _envVarsEditHtml(env); return; }
+
+  if (!st.vars.length) {
+    wrap.innerHTML = '<div class="ps-machine-note">No variables set. Click Edit to add one.</div>'
+      + _envVarsReadActions(env);
+    return;
+  }
+  var rows = st.vars.map(function(v, i) {
+    var masked = !st.reveal[i];
+    var shown = masked ? '••••••••' : escHtml(v.value);
+    return '<tr>'
+      + '<td class="ps-envvar-key">' + escHtml(v.key) + '</td>'
+      + '<td class="ps-envvar-val' + (masked ? ' is-masked' : '') + '">' + shown + '</td>'
+      + '<td class="ps-envvar-actions">'
+      + '<button class="ps-icon-btn" type="button"'
+      + ' aria-label="' + (masked ? 'Reveal' : 'Hide') + ' value for ' + _escAttr(v.key) + '"'
+      + ' onclick="envVarToggleReveal(\'' + _escAttr(env) + '\',' + i + ')">'
+      + '<i class="ti ' + (masked ? 'ti-eye' : 'ti-eye-off') + '"></i></button>'
+      + '</td></tr>';
+  }).join('');
+  wrap.innerHTML = '<table class="ps-envvars-table"><thead><tr>'
+    + '<th>Key</th><th>Value</th><th></th></tr></thead><tbody>' + rows + '</tbody></table>'
+    + _envVarsReadActions(env);
+}
+
+function _envVarsReadActions(env) {
+  return '<div class="ps-save-bar">'
+    + '<button class="ps-btn ps-btn-primary" type="button" onclick="envVarsEdit(\'' + _escAttr(env) + '\')">'
+    + '<i class="ti ti-pencil"></i> Edit</button></div>';
+}
+
+function _envVarsEditHtml(env) {
+  var id = _envVarId(env);
+  var st = _envVarState[env];
+  var rows = st.vars.map(function(v) { return _envVarEditRow(v.key, v.value); }).join('');
+  return '<table class="ps-envvars-table"><thead><tr>'
+    + '<th>Key</th><th>Value</th><th></th></tr></thead>'
+    + '<tbody id="ps-envvars-rows-' + id + '">' + rows + '</tbody></table>'
+    + '<div style="margin-top:10px">'
+    + '<a class="ps-link" onclick="envVarAddRow(\'' + _escAttr(env) + '\')">'
+    + '<i class="ti ti-plus" style="font-size:13px"></i> Add row</a></div>'
+    + '<div class="ps-save-bar">'
+    + '<span id="ps-envvars-status-' + id + '" class="ps-status-msg"></span>'
+    + '<button class="ps-btn ps-btn-ghost" type="button" onclick="envVarsCancel(\'' + _escAttr(env) + '\')">Cancel</button>'
+    + '<button class="ps-btn ps-btn-primary" type="button" onclick="envVarsSave(\'' + _escAttr(env) + '\')">'
+    + '<i class="ti ti-device-floppy"></i> Save</button>'
+    + '</div>';
+}
+
+function _envVarEditRow(key, value) {
+  return '<tr data-ev-row="1">'
+    + '<td><input class="ps-inp ps-envvar-key-inp" data-ev-key="1" value="' + _escAttr(key || '') + '" placeholder="KEY">'
+    + '<div class="ps-envvar-error" data-ev-err="1"></div></td>'
+    + '<td><input class="ps-inp ps-envvar-val-inp" data-ev-val="1" value="' + _escAttr(value || '') + '" placeholder="value"></td>'
+    + '<td class="ps-envvar-actions">'
+    + '<button class="ps-icon-btn" type="button" aria-label="Delete row" onclick="envVarDeleteRow(this)">'
+    + '<i class="ti ti-trash"></i></button></td>'
+    + '</tr>';
+}
+
+function envVarToggleReveal(env, i) {
+  var st = _envVarState[env];
+  if (!st) return;
+  st.reveal[i] = !st.reveal[i];
+  _envVarsRender(env);
+}
+
+function envVarsEdit(env) {
+  var st = _envVarState[env];
+  if (!st) return;
+  st.editing = true;
+  _envVarsRender(env);
+}
+
+function envVarsCancel(env) {
+  var st = _envVarState[env];
+  if (!st) return;
+  st.editing = false;       // st.vars untouched during edit → discards changes
+  st.reveal = {};
+  _envVarsRender(env);
+}
+
+function envVarAddRow(env) {
+  var tbody = document.getElementById('ps-envvars-rows-' + _envVarId(env));
+  if (!tbody) return;
+  tbody.insertAdjacentHTML('beforeend', _envVarEditRow('', ''));
+}
+
+function envVarDeleteRow(btn) {
+  var tr = btn.closest('tr');
+  if (tr) tr.parentNode.removeChild(tr);
+}
+
+function _envVarSetStatus(env, msg, cls) {
+  var el = document.getElementById('ps-envvars-status-' + _envVarId(env));
+  if (!el) return;
+  el.textContent = msg;
+  el.className = 'ps-status-msg' + (cls ? ' ' + cls : '');
+}
+
+function envVarsSave(env) {
+  var slug = (window._currentProjectSlug || '');
+  var tbody = document.getElementById('ps-envvars-rows-' + _envVarId(env));
+  if (!tbody) return;
+  var trs = tbody.querySelectorAll('tr[data-ev-row]');
+  var vars = [];
+  var hasError = false;
+  trs.forEach(function(tr) {
+    var keyInp = tr.querySelector('[data-ev-key]');
+    var valInp = tr.querySelector('[data-ev-val]');
+    var errEl = tr.querySelector('.ps-envvar-error');
+    if (!keyInp) return;
+    if (errEl) errEl.textContent = '';
+    keyInp.classList.remove('is-invalid');
+    var k = (keyInp.value || '').trim();
+    if (!k) {
+      hasError = true;
+      if (errEl) errEl.textContent = 'Key is required';
+      keyInp.classList.add('is-invalid');
+      return;
+    }
+    vars.push({key: k, value: valInp ? valInp.value : ''});
+  });
+  if (hasError) {
+    _envVarSetStatus(env, 'Fix the highlighted keys before saving.', 'err');
+    return;
+  }
+  _envVarSetStatus(env, 'Saving…', '');
+  fetch('/api/projects/' + encodeURIComponent(slug) + '/environments/'
+        + encodeURIComponent(env) + '/env-vars', {
+    method: 'PUT',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({vars: vars})
+  })
+    .then(function(r) {
+      if (!r.ok) {
+        return r.json().then(function(d) {
+          throw new Error((d && d.detail) || ('HTTP ' + r.status));
+        });
+      }
+      return r.json();
+    })
+    .then(function(data) {
+      var st = _envVarState[env];
+      st.vars = (data.vars || []).map(function(v) { return {key: v.key, value: v.value}; });
+      st.editing = false;
+      st.reveal = {};
+      _envVarsRender(env);
+      showToast('Saved ' + env + ' environment variables.', 'success');
+    })
+    .catch(function(e) {
+      // Keep the user's edits in the form; surface the failure inline.
+      _envVarSetStatus(env, 'Save failed: ' + e.message, 'err');
+    });
+}
+
+// ── Deploy actions (issue #723) ──────────────────────────────────────────────
+// Render Deploy + Restart buttons for each local environment from deploy-config.
+
+function _escAttr(s) { return (s || '').replace(/"/g, '&quot;'); }
+
+function deployActionsLoad() {
+  var slug = (window._currentProjectSlug || '');
+  var body = document.getElementById('ps-deploy-body');
+  if (!slug || !body) return;
+  fetch('/api/projects/' + encodeURIComponent(slug) + '/deploy-config')
+    .then(function(r) { return r.ok ? r.json() : {}; })
+    .then(function(cfg) { _renderDeployActions(cfg || {}); })
+    .catch(function() {});
+}
+
+// host (local|render) per env, populated on render so action handlers can branch.
+var _deployEnvHost = {};
+
+function _renderDeployActions(cfg) {
+  var body = document.getElementById('ps-deploy-body');
+  if (!body) return;
+
+  _deployEnvHost = {};
+  var envs = Object.keys(cfg).filter(function(env) {
+    var h = (cfg[env] || {}).host;
+    return h === 'local' || h === 'render';
+  });
+
+  if (!envs.length) {
+    body.innerHTML = '<div class="ps-machine-note"><i class="ti ti-info-circle"></i>'
+      + ' No deployable environments configured. Deploy actions apply to host=local or host=render envs.</div>';
+    return;
+  }
+
+  var html = '';
+  var anyRender = false;
+  envs.forEach(function(env) {
+    var entry = cfg[env] || {};
+    var host = entry.host;
+    _deployEnvHost[env] = host;
+    var meta = host === 'render'
+      ? ' <span style="color:var(--text-muted);font-weight:400">(render)</span>'
+      : (entry.branch ? ' <span style="color:var(--text-muted);font-weight:400">(' + _escAttr(entry.branch) + ')</span>' : '');
+    if (host === 'render') anyRender = true;
+    html += '<div class="ps-row" data-deploy-row="' + _escAttr(env) + '">'
+      + '<div class="ps-row-label">' + env + meta + '</div>'
+      + '<div class="ps-row-control" style="gap:8px">'
+      + (host === 'render'
+          ? '<span id="ps-deploy-status-' + _escAttr(env) + '" class="ps-deploy-status" style="display:none"></span>'
+          : '')
+      + '<button class="ps-btn" type="button" aria-label="Deploy ' + _escAttr(env) + '"'
+      + ' onclick="envDeploy(\'' + _escAttr(env) + '\')">'
+      + '<i class="ti ti-rocket"></i> Deploy</button>'
+      + '<button class="ps-btn" type="button" aria-label="Restart ' + _escAttr(env) + '"'
+      + ' onclick="envRestart(\'' + _escAttr(env) + '\')">'
+      + '<i class="ti ti-refresh"></i> Restart</button>'
+      + '</div>'
+      + '</div>'
+      + '<pre id="ps-deploy-out-' + _escAttr(env) + '" class="ps-deploy-out" style="display:none"></pre>';
+  });
+
+  html += '<div class="ps-machine-note"><i class="ti ti-info-circle"></i>'
+    + ' Local deploy runs <code>git pull --ff-only</code> then restarts the service (pull-only — never merges or pushes).'
+    + (anyRender ? ' Render deploys are triggered via the Render API and tracked live below.' : '')
+    + '</div>';
+
+  body.innerHTML = html;
+}
+
+// Per-env poll timers so a re-deploy supersedes a prior poll loop.
+var _deployPollTimers = {};
+
+function _setDeployStatus(env, status) {
+  var el = document.getElementById('ps-deploy-status-' + env);
+  if (!el) return;
+  el.style.display = 'inline-block';
+  el.textContent = status;
+  el.className = 'ps-deploy-status ps-deploy-status--' + status;
+}
+
+/** Poll the Render deploy-status endpoint until live/failed (issue #725). */
+function _renderDeployPoll(env) {
+  var slug = (window._currentProjectSlug || '');
+  if (!slug) return;
+  if (_deployPollTimers[env]) clearTimeout(_deployPollTimers[env]);
+
+  var attempts = 0;
+  var MAX_ATTEMPTS = 60;   // ~3 min at 3s intervals
+  var INTERVAL_MS = 3000;
+
+  function tick() {
+    attempts += 1;
+    fetch('/api/projects/' + encodeURIComponent(slug) + '/environments/'
+          + encodeURIComponent(env) + '/deploy-status')
+      .then(function(r) {
+        return r.json().then(function(data) { return { ok: r.ok, status: r.status, data: data }; });
+      })
+      .then(function(res) {
+        if (!res.ok) {
+          _setDeployOut(env, 'Status error (' + res.status + '): '
+            + ((res.data && res.data.detail) || 'error'), true);
+          return;
+        }
+        var st = (res.data && res.data.status) || 'queued';
+        _setDeployStatus(env, st);
+        if (st === 'live') {
+          _setDeployOut(env, 'Deploy is live ✓', false);
+          return;
+        }
+        if (st === 'failed') {
+          _setDeployOut(env, 'Deploy failed.', true);
+          return;
+        }
+        if (attempts < MAX_ATTEMPTS) {
+          _deployPollTimers[env] = setTimeout(tick, INTERVAL_MS);
+        }
+      })
+      .catch(function() {
+        if (attempts < MAX_ATTEMPTS) {
+          _deployPollTimers[env] = setTimeout(tick, INTERVAL_MS);
+        }
+      });
+  }
+  tick();
+}
+
+function _deployOut(env) {
+  return document.getElementById('ps-deploy-out-' + env);
+}
+
+function _setDeployOut(env, text, isError) {
+  var pre = _deployOut(env);
+  if (!pre) return;
+  pre.style.display = 'block';
+  pre.textContent = text;
+  pre.style.color = isError ? 'var(--error, #ef4444)' : '';
+}
+
+function envDeploy(env) {
+  var slug = (window._currentProjectSlug || '');
+  if (!slug) return;
+  _setDeployOut(env, 'Deploying ' + env + '…', false);
+  fetch('/api/projects/' + encodeURIComponent(slug) + '/environments/'
+        + encodeURIComponent(env) + '/deploy', { method: 'POST' })
+    .then(function(r) {
+      return r.json().then(function(data) { return { ok: r.ok, status: r.status, data: data }; });
+    })
+    .then(function(res) {
+      if (!res.ok) {
+        _setDeployOut(env, 'Deploy failed (' + res.status + '): '
+          + ((res.data && res.data.detail) || 'error'), true);
+        return;
+      }
+      var d = res.data || {};
+      // host=render: no git output — show the live status and poll until done.
+      if (_deployEnvHost[env] === 'render' || d.host === 'render') {
+        var st = d.status || 'queued';
+        _setDeployStatus(env, st);
+        _setDeployOut(env, 'Deploy triggered on Render — tracking status…', false);
+        _renderDeployPoll(env);
+        return;
+      }
+      var out = (d.pull_output || '').trim();
+      var lines = out ? out + '\n' : '';
+      lines += 'HEAD: ' + (d.head || '(unknown)');
+      _setDeployOut(env, lines, false);
+    })
+    .catch(function(e) { _setDeployOut(env, 'Deploy error: ' + e, true); });
+}
+
+function envRestart(env) {
+  var slug = (window._currentProjectSlug || '');
+  if (!slug) return;
+  _setDeployOut(env, 'Restarting ' + env + '…', false);
+  fetch('/api/projects/' + encodeURIComponent(slug) + '/environments/'
+        + encodeURIComponent(env) + '/restart', { method: 'POST' })
+    .then(function(r) {
+      return r.json().then(function(data) { return { ok: r.ok, status: r.status, data: data }; });
+    })
+    .then(function(res) {
+      if (!res.ok) {
+        _setDeployOut(env, 'Restart failed (' + res.status + '): '
+          + ((res.data && res.data.detail) || 'error'), true);
+        return;
+      }
+      var msg = res.status === 202
+        ? 'Restart accepted — service is bouncing (will be back shortly).'
+        : 'Restarted ' + env + '.';
+      _setDeployOut(env, msg, false);
+    })
+    .catch(function(e) { _setDeployOut(env, 'Restart error: ' + e, true); });
+}
+
+// ── Deploy tab (issue #726) ───────────────────────────────────────────────────
+// A dedicated tab that aggregates deployable environments across projects
+// (commander, perf-coach) and drives deploy/restart with confirmation,
+// streaming progress, a log tail, and a self-restart reconnect overlay.
+
+var _deployCards = [];            // [{project, env, host, branch, render_service_id, ...}]
+var _deployTabPollers = {};       // idx → setTimeout handle (render status polling)
+var _deployReconnectTimer = null;
+
+function _deployEsc(s) {
+  var d = document.createElement('div');
+  d.textContent = (s == null ? '' : String(s));
+  return d.innerHTML;
+}
+
+function _deployShortSha(sha) {
+  if (!sha) return '—';
+  return String(sha).slice(0, 8);
+}
+
+function deployTabDestroy() {
+  Object.keys(_deployTabPollers).forEach(function(k) {
+    clearTimeout(_deployTabPollers[k]);
+  });
+  _deployTabPollers = {};
+}
+
+function deployTabInit() {
+  deployTabDestroy();
+  var grid = document.getElementById('deploy-grid');
+  if (!grid) return;
+  fetch('/api/deploy/overview')
+    .then(function(r) { return r.ok ? r.json() : { environments: [] }; })
+    .then(function(data) {
+      _deployCards = (data && data.environments) || [];
+      _deployRenderGrid();
+    })
+    .catch(function() {
+      grid.innerHTML = '<div class="deploy-tab-intro is-error">'
+        + 'Could not load deploy overview.</div>';
+    });
+}
+
+function _deployRenderGrid() {
+  var grid = document.getElementById('deploy-grid');
+  if (!grid) return;
+  if (!_deployCards.length) {
+    grid.innerHTML = '<div class="deploy-tab-intro" id="deploy-grid-empty">'
+      + 'No deployable environments configured.</div>';
+    return;
+  }
+  grid.innerHTML = _deployCards.map(function(c, i) { return _deployCardHtml(c, i); }).join('');
+  // Enrich each card with live commit SHA + status.
+  _deployCards.forEach(function(c, i) { _deployLoadCardStatus(c, i); });
+}
+
+function _deployCardHtml(c, i) {
+  var hostLabel = c.host === 'render' ? 'Render' : 'local';
+  var hostClass = c.host === 'render' ? 'deploy-card__badge--render' : 'deploy-card__badge--local';
+  var branchRow = c.host === 'render'
+    ? (c.render_service_id
+        ? '<div class="deploy-card__meta-row"><span class="deploy-card__meta-label">Service</span>'
+          + '<span class="deploy-card__meta-val is-mono">' + _deployEsc(c.render_service_id) + '</span></div>'
+        : '')
+    : '<div class="deploy-card__meta-row"><span class="deploy-card__meta-label">Branch</span>'
+      + '<span class="deploy-card__meta-val">' + _deployEsc(c.branch || '—') + '</span></div>';
+  return ''
+    + '<article class="deploy-card" id="deploy-card-' + i + '" aria-label="'
+      + _deployEsc(c.project + ' ' + c.env) + ' deployment">'
+    + '  <div class="deploy-card__head">'
+    + '    <span class="deploy-card__title">' + _deployEsc(c.env) + '</span>'
+    + '    <span class="deploy-card__project">' + _deployEsc(c.project) + '</span>'
+    + '    <span class="deploy-card__badge ' + hostClass + '">' + _deployEsc(hostLabel) + '</span>'
+    + '    <span class="status-pill status-pill--idle" id="deploy-card-status-' + i + '">idle</span>'
+    + '  </div>'
+    + '  <div class="deploy-card__meta">'
+    +      branchRow
+    + '    <div class="deploy-card__meta-row"><span class="deploy-card__meta-label">Commit</span>'
+    + '      <span class="deploy-card__meta-val is-mono" id="deploy-card-sha-' + i + '">…</span></div>'
+    + '    <div class="deploy-card__meta-row"><span class="deploy-card__meta-label">Last deploy</span>'
+    + '      <span class="deploy-card__meta-val" id="deploy-card-time-' + i + '">—</span></div>'
+    + '  </div>'
+    + '  <div class="deploy-card__actions" id="deploy-card-actions-' + i + '">'
+    +      _deployIdleActionsHtml(i)
+    + '  </div>'
+    + '  <pre class="deploy-card__log" id="deploy-card-log-' + i + '" style="display:none"></pre>'
+    + '</article>';
+}
+
+function _deployIdleActionsHtml(i) {
+  return ''
+    + '<button class="deploy-btn deploy-btn--primary" type="button"'
+    + ' aria-label="Deploy ' + _deployEsc(_deployCards[i].env) + '"'
+    + ' onclick="deployCardDeploy(' + i + ')"><i class="ti ti-rocket"></i> Deploy</button>'
+    + '<button class="deploy-btn deploy-btn--danger" type="button"'
+    + ' aria-label="Restart ' + _deployEsc(_deployCards[i].env) + '"'
+    + ' onclick="deployCardRestart(' + i + ')"><i class="ti ti-refresh"></i> Restart</button>';
+}
+
+// ── Live status / commit SHA per card ─────────────────────────────────────────
+
+function _deploySetStatus(i, status) {
+  var el = document.getElementById('deploy-card-status-' + i);
+  if (!el) return;
+  el.textContent = status;
+  el.className = 'status-pill status-pill--' + status;
+}
+
+function _deploySetSha(i, sha) {
+  var el = document.getElementById('deploy-card-sha-' + i);
+  if (el) el.textContent = _deployShortSha(sha);
+}
+
+function _deploySetTime(i, ts) {
+  var el = document.getElementById('deploy-card-time-' + i);
+  if (!el) return;
+  if (!ts) { el.textContent = '—'; return; }
+  var d = new Date(ts);
+  el.textContent = isNaN(d.getTime()) ? String(ts) : d.toLocaleString();
+}
+
+// Load the commit SHA + status for a card. AC4: local SHA from /api/health
+// (git_sha). AC5: render SHA from the live deploy-status endpoint.
+function _deployLoadCardStatus(c, i) {
+  if (c.host === 'render') {
+    var slug = c.project;
+    fetch('/api/projects/' + encodeURIComponent(slug) + '/environments/'
+          + encodeURIComponent(c.env) + '/deploy-status')
+      .then(function(r) { return r.ok ? r.json() : null; })
+      .then(function(d) {
+        if (!d) { _deploySetSha(i, null); return; }
+        _deploySetStatus(i, d.status || 'idle');
+        _deploySetSha(i, d.commit);
+        _deploySetTime(i, d.finished_at);
+      })
+      .catch(function() { _deploySetSha(i, null); });
+  } else {
+    // local: the dashboard's own /api/health reports the running git_sha.
+    fetch('/api/health')
+      .then(function(r) { return r.ok ? r.json() : null; })
+      .then(function(d) { _deploySetSha(i, d && d.git_sha); })
+      .catch(function() { _deploySetSha(i, null); });
+  }
+}
+
+// ── Confirmation step (AC7) ───────────────────────────────────────────────────
+
+function _deployActionsEl(i) { return document.getElementById('deploy-card-actions-' + i); }
+
+function deployCardDeploy(i) { _deployShowConfirm(i, 'deploy'); }
+function deployCardRestart(i) { _deployShowConfirm(i, 'restart'); }
+
+function _deployShowConfirm(i, action) {
+  var el = _deployActionsEl(i);
+  if (!el) return;
+  var c = _deployCards[i];
+  var msg = action === 'deploy'
+    ? 'Deploy ' + _deployEsc(c.env) + '? Pulls latest' + (c.host === 'render' ? ' on Render' : ' and restarts the service') + '.'
+    : 'Restart ' + _deployEsc(c.env) + '? The service will bounce.';
+  el.innerHTML = ''
+    + '<div class="deploy-card__confirm" role="alertdialog" aria-label="Confirm ' + action + '">'
+    + '  <span class="deploy-card__confirm-msg">' + msg + '</span>'
+    + '  <button class="deploy-btn deploy-btn--primary" type="button"'
+    + '    onclick="deployCardConfirm(' + i + ',\'' + action + '\')">Confirm</button>'
+    + '  <button class="deploy-btn" type="button" onclick="deployCardCancel(' + i + ')">Cancel</button>'
+    + '</div>';
+}
+
+// AC7: dismissing the confirmation returns the card to its idle state.
+function deployCardCancel(i) {
+  var el = _deployActionsEl(i);
+  if (el) el.innerHTML = _deployIdleActionsHtml(i);
+}
+
+function deployCardConfirm(i, action) {
+  if (action === 'deploy') _deployExecDeploy(i);
+  else _deployExecRestart(i);
+}
+
+// ── Execute deploy / restart with streaming progress + log tail (AC8/AC9) ─────
+
+function _deployLogEl(i) { return document.getElementById('deploy-card-log-' + i); }
+
+function _deployLog(i, text, isError) {
+  var pre = _deployLogEl(i);
+  if (!pre) return;
+  pre.style.display = 'block';
+  pre.textContent = text;
+  pre.classList.toggle('is-error', !!isError);
+}
+
+function _deployAppendLog(i, line) {
+  var pre = _deployLogEl(i);
+  if (!pre) return;
+  pre.style.display = 'block';
+  pre.textContent = (pre.textContent ? pre.textContent + '\n' : '') + line;
+  pre.scrollTop = pre.scrollHeight;
+}
+
+function _deployBusyActions(i, label) {
+  var el = _deployActionsEl(i);
+  if (el) {
+    el.innerHTML = '<button class="deploy-btn" type="button" disabled>'
+      + '<i class="ti ti-loader-2 deploy-spin"></i> ' + _deployEsc(label) + '…</button>';
+  }
+}
+
+// True when a deploy/restart response indicates the dashboard restarted itself.
+function _deployIsSelfRestart(res) {
+  var d = res.data || {};
+  var r = d.restart || d;
+  return res.status === 202
+    && (d.detached === true || r.detached === true || d.method === 'launchd-self' || r.method === 'launchd-self');
+}
+
+function _deployExecDeploy(i) {
+  var c = _deployCards[i];
+  _deployBusyActions(i, 'Deploying');
+  _deploySetStatus(i, 'building');
+  _deployLog(i, 'Deploying ' + c.env + '…', false);
+  fetch('/api/projects/' + encodeURIComponent(c.project) + '/environments/'
+        + encodeURIComponent(c.env) + '/deploy', { method: 'POST' })
+    .then(function(r) {
+      return r.json().then(function(data) { return { ok: r.ok, status: r.status, data: data }; });
+    })
+    .then(function(res) {
+      if (!res.ok) {
+        _deploySetStatus(i, 'failed');
+        _deployLog(i, 'Deploy failed (' + res.status + '): '
+          + ((res.data && res.data.detail) || 'error'), true);
+        _deployResetActions(i);
+        return;
+      }
+      var d = res.data || {};
+      // host=render → poll the live build status until live/failed.
+      if (c.host === 'render' || d.host === 'render') {
+        _deploySetStatus(i, d.status || 'queued');
+        _deployAppendLog(i, 'Deploy triggered on Render — tracking build status…');
+        _deployPollRender(i);
+        _deployResetActions(i);
+        return;
+      }
+      // local → show pull output + new HEAD; may self-restart the dashboard.
+      var out = (d.pull_output || '').trim();
+      if (out) _deployAppendLog(i, out);
+      if (d.head) { _deployAppendLog(i, 'HEAD: ' + d.head); _deploySetSha(i, d.head); }
+      _deploySetStatus(i, 'live');
+      _deploySetTime(i, new Date().toISOString());
+      if (_deployIsSelfRestart(res)) { _deployShowReconnectOverlay(); return; }
+      _deployAppendLog(i, 'Done.');
+      _deployResetActions(i);
+    })
+    .catch(function(e) {
+      _deploySetStatus(i, 'failed');
+      _deployLog(i, 'Deploy error: ' + e, true);
+      _deployResetActions(i);
+    });
+}
+
+function _deployExecRestart(i) {
+  var c = _deployCards[i];
+  _deployBusyActions(i, 'Restarting');
+  _deploySetStatus(i, 'building');
+  _deployLog(i, 'Restarting ' + c.env + '…', false);
+  fetch('/api/projects/' + encodeURIComponent(c.project) + '/environments/'
+        + encodeURIComponent(c.env) + '/restart', { method: 'POST' })
+    .then(function(r) {
+      return r.json().then(function(data) { return { ok: r.ok, status: r.status, data: data }; });
+    })
+    .then(function(res) {
+      if (!res.ok) {
+        _deploySetStatus(i, 'failed');
+        _deployLog(i, 'Restart failed (' + res.status + '): '
+          + ((res.data && res.data.detail) || 'error'), true);
+        _deployResetActions(i);
+        return;
+      }
+      // AC10: restarting the dashboard itself → show the reconnect overlay.
+      if (_deployIsSelfRestart(res)) { _deployShowReconnectOverlay(); return; }
+      if (c.host === 'render' || (res.data && res.data.host) === 'render') {
+        _deploySetStatus(i, 'building');
+        _deployAppendLog(i, 'Restart triggered on Render — tracking status…');
+        _deployPollRender(i);
+        _deployResetActions(i);
+        return;
+      }
+      _deploySetStatus(i, 'live');
+      _deployAppendLog(i, res.status === 202
+        ? 'Restart accepted — service is bouncing.'
+        : 'Restarted ' + c.env + '.');
+      _deployResetActions(i);
+    })
+    .catch(function(e) {
+      _deploySetStatus(i, 'failed');
+      _deployLog(i, 'Restart error: ' + e, true);
+      _deployResetActions(i);
+    });
+}
+
+function _deployResetActions(i) {
+  var el = _deployActionsEl(i);
+  if (el) el.innerHTML = _deployIdleActionsHtml(i);
+}
+
+// Poll the render deploy-status endpoint until live/failed, streaming status.
+function _deployPollRender(i) {
+  var c = _deployCards[i];
+  if (_deployTabPollers[i]) clearTimeout(_deployTabPollers[i]);
+  var attempts = 0, MAX = 60, INTERVAL = 3000;
+  function tick() {
+    attempts += 1;
+    fetch('/api/projects/' + encodeURIComponent(c.project) + '/environments/'
+          + encodeURIComponent(c.env) + '/deploy-status')
+      .then(function(r) { return r.json().then(function(d) { return { ok: r.ok, data: d }; }); })
+      .then(function(res) {
+        if (!res.ok) {
+          _deployAppendLog(i, 'Status error: ' + ((res.data && res.data.detail) || 'error'), true);
+          return;
+        }
+        var st = (res.data && res.data.status) || 'queued';
+        _deploySetStatus(i, st);
+        if (res.data && res.data.commit) _deploySetSha(i, res.data.commit);
+        if (res.data && res.data.finished_at) _deploySetTime(i, res.data.finished_at);
+        if (st === 'live') { _deployAppendLog(i, 'Deploy is live ✓'); return; }
+        if (st === 'failed') { _deployAppendLog(i, 'Deploy failed.', true); return; }
+        if (attempts < MAX) _deployTabPollers[i] = setTimeout(tick, INTERVAL);
+      })
+      .catch(function() { if (attempts < MAX) _deployTabPollers[i] = setTimeout(tick, INTERVAL); });
+  }
+  tick();
+}
+
+// ── Self-restart reconnect overlay (AC10/AC11) ────────────────────────────────
+
+function _deployShowReconnectOverlay() {
+  if (document.getElementById('deploy-reconnect-overlay')) return;
+  var ov = document.createElement('div');
+  ov.className = 'deploy-reconnect-overlay';
+  ov.id = 'deploy-reconnect-overlay';
+  ov.setAttribute('role', 'alert');
+  ov.innerHTML = ''
+    + '<div class="deploy-reconnect-overlay__spinner"></div>'
+    + '<div class="deploy-reconnect-overlay__title">Restarting… reconnecting</div>'
+    + '<div class="deploy-reconnect-overlay__sub">The dashboard is restarting. '
+    + 'This page will refresh automatically once it is back.</div>';
+  document.body.appendChild(ov);
+  _deployPollHealthThenReload();
+}
+
+// AC11: poll /api/health until the server responds, then auto-refresh.
+function _deployPollHealthThenReload() {
+  if (_deployReconnectTimer) clearTimeout(_deployReconnectTimer);
+  // Give the process a moment to actually go down before polling.
+  function poll() {
+    fetch('/api/health', { cache: 'no-store' })
+      .then(function(r) {
+        if (r.ok) { location.reload(); return; }
+        _deployReconnectTimer = setTimeout(poll, 1500);
+      })
+      .catch(function() { _deployReconnectTimer = setTimeout(poll, 1500); });
+  }
+  _deployReconnectTimer = setTimeout(poll, 2500);
 }
 
 function projEnvSave() {

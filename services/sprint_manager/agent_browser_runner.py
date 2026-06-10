@@ -454,6 +454,19 @@ def upload_screenshots(paths, repo: str, issue_num: int, sprint_num) -> dict:
         url_map[p.name] = (
             f"https://raw.githubusercontent.com/{repo}/{_ATTACHMENTS_BRANCH}/{dest}"
         )
+
+    # Persist the map next to the screenshots so the sprint-summary builder
+    # (sprint_manager._load_screenshot_url_map) can resolve raw URLs and embed
+    # inline images instead of degrading to local-path links (issue #731). The
+    # step-<k>.png files all live in one ticket screenshot dir, so write the
+    # manifest to their common parent. Best-effort — a write failure must not
+    # abort report posting, mirroring the upload's own graceful contract.
+    try:
+        manifest = paths[0].parent / "urls.json"
+        manifest.write_text(json.dumps(url_map, indent=2), encoding="utf-8")
+    except Exception as exc:
+        log.warning("writing urls.json manifest failed for issue #%s: %s", issue_num, exc)
+
     return url_map
 
 

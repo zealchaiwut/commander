@@ -8465,7 +8465,17 @@ async function loadSprintMgmt(silent) {
       fetch('/api/sprint-management/issues?repo=' + encodeURIComponent(repo)),
       fetch('/api/sprints/running-all').catch(() => null),
     ]);
-    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    if (!resp.ok) {
+      // Surface a GitHub rate-limit failure specifically (status 429 from
+      // _gh_error) so the board says what's wrong instead of "Failed to load".
+      let msg = 'Failed to load sprints.';
+      const d = await resp.json().catch(() => null);
+      const detail = d && typeof d.detail === 'string' ? d.detail : '';
+      if (resp.status === 429 || /rate limit/i.test(detail)) {
+        msg = detail || 'GitHub API rate limit reached — retry shortly.';
+      }
+      throw new Error(msg);
+    }
     const data = await resp.json();
 
     // Update running labels set
@@ -8488,7 +8498,10 @@ async function loadSprintMgmt(silent) {
     // Start (or restart) live polling if there are running sprints
     _smgmtLivePollRestart();
   } catch (err) {
-    if (!silent) listEl.innerHTML = '<div class="loading-msg">Failed to load sprints.</div>';
+    if (!silent) {
+      const msg = (err && err.message) ? err.message : 'Failed to load sprints.';
+      listEl.innerHTML = `<div class="loading-msg">${escHtml(msg)}</div>`;
+    }
   }
 }
 

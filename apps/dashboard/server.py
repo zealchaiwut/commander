@@ -1471,8 +1471,38 @@ async def sse_stream(request: Request):
 
 # ── github / sprint endpoints ─────────────────────────────────────────────────
 
+def _gh_graphql_reset_seconds() -> Optional[int]:
+    """Seconds until the GitHub GraphQL budget resets, or None.
+
+    Queries the rate_limit endpoint, which is REST (core) and does not itself
+    count against any limit, so it is safe to call on an error path.
+    """
+    try:
+        import time as _t
+        r = subprocess.run(
+            ["gh", "api", "rate_limit", "--jq", ".resources.graphql.reset"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if r.returncode == 0 and r.stdout.strip():
+            return max(0, int(r.stdout.strip()) - int(_t.time()))
+    except Exception:
+        pass
+    return None
+
+
 def _gh_error(e: subprocess.CalledProcessError) -> HTTPException:
     detail = e.stderr.strip() if e.stderr else str(e)
+    # Map a GitHub rate-limit failure to a clean 429 with a reset countdown, so
+    # callers (e.g. the Sprint Mgmt board) can say "rate limit, retry in Ns"
+    # instead of a generic failure. Refills hourly.
+    if "rate limit" in detail.lower():
+        reset_in = _gh_graphql_reset_seconds()
+        msg = "GitHub API rate limit reached."
+        if reset_in:
+            msg += f" Retry in ~{reset_in // 60}m {reset_in % 60}s."
+        else:
+            msg += " It refills hourly; retry shortly."
+        return HTTPException(status_code=429, detail=msg)
     return HTTPException(status_code=502, detail=detail)
 
 

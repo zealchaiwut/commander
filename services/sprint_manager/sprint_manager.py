@@ -2255,6 +2255,11 @@ def _run_documentor(
         return
 
     eff_repo = repo_name or (cfg.repo_name if cfg else None)
+    # Log-format contract (issue #705): the opening/closing lines below are
+    # per-sprint (issue #697). The only on-disk consumer is the dashboard's
+    # log_source.read_log, which returns the raw tail verbatim — no structured
+    # parsing — so the format is safe to display. The exact shape is pinned by
+    # tests/test_705__documentor_log_format_contract.py; keep them in sync.
     print(
         f"  [documentor] running for sprint {sprint_label} "
         f"({len(issue_nums)} ticket(s): {issue_nums}) ..."

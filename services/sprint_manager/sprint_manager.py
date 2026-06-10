@@ -919,6 +919,9 @@ class SprintState:
     estimator_status:        Optional[str]       = None   # "succeeded" | "failed" | "skipped"
     estimator_total_minutes: Optional[int]       = None
     estimates:               dict                = field(default_factory=dict)   # keyed by issue number (int)
+    # Concurrent pipeline mode flag (issue #739) — surfaced to the dashboard so
+    # the board can render dual active-agent cards + waiting-level state.
+    pipeline_mode:           bool                = False
 
     def to_dict(self) -> dict:
         return {
@@ -941,6 +944,7 @@ class SprintState:
             "estimator_status":          self.estimator_status,
             "estimator_total_minutes":   self.estimator_total_minutes,
             "estimates":                 self.estimates,
+            "pipeline_mode":             self.pipeline_mode,
         }
 
     @staticmethod
@@ -966,6 +970,7 @@ class SprintState:
         s.estimator_status         = d.get("estimator_status")
         s.estimator_total_minutes  = d.get("estimator_total_minutes")
         s.estimates                = d.get("estimates", {})
+        s.pipeline_mode            = bool(d.get("pipeline_mode", False))
         return s
 
     def save(self, path: Path) -> None:
@@ -6320,6 +6325,8 @@ def run_sprint(
     # Dry-run never spawns workers — fall back to the serial no-op path.
     if dry_run:
         _pipeline_on = False
+    # Persist on state so the dashboard /live snapshot can gate dual-agent UI (issue #739).
+    state.pipeline_mode = _pipeline_on
     print(
         "  Dispatch mode: "
         + ("pipeline (1 coder + 1 tester concurrent)" if _pipeline_on else "serial")

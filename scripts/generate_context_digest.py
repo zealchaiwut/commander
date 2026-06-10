@@ -244,7 +244,7 @@ def generate(cwd: Path, repo: str | None, out_path: Path, max_decisions: int = 1
     content = "\n".join(lines)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(content, encoding="utf-8")
-    print(str(out_path))
+    sys.stdout.write(str(str(out_path)) + "\n")
 
 
 # ── CLI ───────────────────────────────────────────────────────────────────────

@@ -48,10 +48,10 @@ def main():
     # Guard: tag must not already exist
     ok, _ = _try("git", "rev-parse", "--verify", tag)
     if ok:
-        print(f"Error: tag {tag} already exists. Nothing to do.", file=sys.stderr)
+        sys.stderr.write(str(f"Error: tag {tag} already exists. Nothing to do.") + "\n")
         sys.exit(1)
 
-    print(f"Releasing issue #{args.issue} — merging develop → main, tagging {tag}…")
+    sys.stdout.write(str(f"Releasing issue #{args.issue} — merging develop → main, tagging {tag}…") + "\n")
 
     # Update both branches
     _run("git", "fetch", "origin")
@@ -69,8 +69,7 @@ def main():
 
     if result.returncode != 0:
         _try("git", "merge", "--abort")
-        print(
-            "Error: merge conflict between develop and main.\n"
+        sys.stderr.write(str("Error: merge conflict between develop and main.\n"
             "Resolve manually:\n"
             "  git checkout main\n"
             "  git merge develop\n"
@@ -78,9 +77,7 @@ def main():
             "  git add . && git commit\n"
             f"  git push origin main\n"
             f"  git tag -a {tag} -m 'Release issue #{args.issue}'\n"
-            f"  git push origin {tag}",
-            file=sys.stderr,
-        )
+            f"  git push origin {tag}") + "\n")
         sys.exit(1)
 
     _run("git", "push", "origin", "main")
@@ -89,9 +86,9 @@ def main():
     _run("git", "tag", "-a", tag, "-m", f"Release issue #{args.issue}")
     _run("git", "push", "origin", tag)
 
-    print(f"✅  main updated and tagged {tag}")
-    print(f"    Push origin main — done")
-    print(f"    Tag {tag} — pushed")
+    sys.stdout.write(str(f"✅  main updated and tagged {tag}") + "\n")
+    sys.stdout.write(str(f"    Push origin main — done") + "\n")
+    sys.stdout.write(str(f"    Tag {tag} — pushed") + "\n")
 
 
 if __name__ == "__main__":

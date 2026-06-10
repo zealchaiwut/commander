@@ -48,7 +48,7 @@ def main():
         sys.exit(f"Error rejecting issue #{args.issue}: {e}")
 
     url = f"https://github.com/{repo}/issues/{args.issue}"
-    print(f"#{args.issue} {url}")
+    sys.stdout.write(str(f"#{args.issue} {url}") + "\n")
 
 
 if __name__ == "__main__":

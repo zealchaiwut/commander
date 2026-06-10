@@ -78,23 +78,20 @@ def main():
     structured_log.info("feature_finish_start", f"merging feature branch for issue #{args.issue} into {target}", issue_num=args.issue)
 
     # Fetch so remote-only branches are visible
-    print("Fetching from origin…")
+    sys.stdout.write(str("Fetching from origin…") + "\n")
     _run("git", "fetch", "origin")
 
     branch = find_branch(args.issue)
     if not branch:
-        print(
-            f"Error: no branch found matching feature/{args.issue}-*\n"
-            "Are you in the git root? Has start_feature.py been run?",
-            file=sys.stderr,
-        )
+        sys.stderr.write(str(f"Error: no branch found matching feature/{args.issue}-*\n"
+            "Are you in the git root? Has start_feature.py been run?") + "\n")
         sys.exit(1)
 
     # Do NOT check out the feature branch locally — it may be checked out in
     # another worktree (e.g. the coder worktree), which causes git to refuse.
     # origin/<branch> is already current after the fetch above.
 
-    print(f"Merging {branch} → {target}…")
+    sys.stdout.write(str(f"Merging {branch} → {target}…") + "\n")
 
     # Ensure target branch is available locally
     ok, _ = _try("git", "show-ref", "--verify", "--quiet", f"refs/heads/{target}")
@@ -125,7 +122,7 @@ def main():
             f"git push origin --delete {branch}\n"
             f"```"
         )
-        print(conflict_comment, file=sys.stderr)
+        sys.stderr.write(str(conflict_comment) + "\n")
         try:
             github_client.add_comment(args.issue, conflict_comment, repo_name=args.repo)
         except Exception:
@@ -137,18 +134,18 @@ def main():
         merge_sha = ""
 
     _run("git", "push", "origin", target)
-    print(f"Pushed {target}.")
+    sys.stdout.write(str(f"Pushed {target}.") + "\n")
 
     # Clean up feature branch — use -D (force) since the branch may be checked
     # out in the coder worktree, where -d would be rejected by git.
     _try("git", "branch", "-D", branch)
     _try("git", "push", "origin", "--delete", branch)
 
-    print(f"✅  Merged {branch} into {target}")
-    print(f"    Feature branch deleted locally and on origin")
+    sys.stdout.write(str(f"✅  Merged {branch} into {target}") + "\n")
+    sys.stdout.write(str(f"    Feature branch deleted locally and on origin") + "\n")
     # Signal to sprint_manager that merge succeeded; label transitions are
     # handled exclusively by sprint_manager via state_machine.transition().
-    print(f"FINISH_FEATURE_OUTCOME merged sha={merge_sha} branch={branch}")
+    sys.stdout.write(str(f"FINISH_FEATURE_OUTCOME merged sha={merge_sha} branch={branch}") + "\n")
 
 
 if __name__ == "__main__":

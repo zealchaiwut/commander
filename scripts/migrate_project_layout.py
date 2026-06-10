@@ -34,19 +34,19 @@ def _run(*cmd, cwd: Optional[Path] = None) -> subprocess.CompletedProcess:
 
 
 def info(msg: str) -> None:
-    print(f"  {msg}")
+    sys.stdout.write(str(f"  {msg}") + "\n")
 
 
 def ok(msg: str) -> None:
-    print(f"  ✓ {msg}")
+    sys.stdout.write(str(f"  ✓ {msg}") + "\n")
 
 
 def warn(msg: str) -> None:
-    print(f"  WARNING: {msg}", file=sys.stderr)
+    sys.stderr.write(str(f"  WARNING: {msg}") + "\n")
 
 
 def error(msg: str) -> None:
-    print(f"  ERROR: {msg}", file=sys.stderr)
+    sys.stderr.write(str(f"  ERROR: {msg}") + "\n")
 
 
 # ── Detection ─────────────────────────────────────────────────────────────────
@@ -109,9 +109,9 @@ def migrate(project_name: str, projects_dir: Path, dry_run: bool) -> bool:
             error(e)
         return False
 
-    print(f"\nMigrating '{project_name}' from flat → nested layout...")
+    sys.stdout.write(str(f"\nMigrating '{project_name}' from flat → nested layout...") + "\n")
     if dry_run:
-        print("  (dry-run — no changes will be made)\n")
+        sys.stdout.write(str("  (dry-run — no changes will be made)\n") + "\n")
 
     # ── Step 1: Create project root as the new project container ──────────────
     # The current project_root IS the main clone. We need to move its contents
@@ -185,21 +185,21 @@ def migrate(project_name: str, projects_dir: Path, dry_run: bool) -> bool:
             # leave. No action needed.
             pass
 
-    print()
-    print("Migration complete.")
-    print()
-    print("Verification commands:")
-    print(f"  ls {project_root}/")
-    print(f"  ls {main_nested}/")
+    sys.stdout.write("\n")
+    sys.stdout.write(str("Migration complete.") + "\n")
+    sys.stdout.write("\n")
+    sys.stdout.write(str("Verification commands:") + "\n")
+    sys.stdout.write(str(f"  ls {project_root}/") + "\n")
+    sys.stdout.write(str(f"  ls {main_nested}/") + "\n")
     if coder_flat.exists() or coder_nested.exists():
-        print(f"  ls {coder_nested}/")
+        sys.stdout.write(str(f"  ls {coder_nested}/") + "\n")
     if tester_flat.exists() or tester_nested.exists():
-        print(f"  ls {tester_nested}/")
-    print(f"  cat {commander_at_root}/sprint.yaml")
-    print()
-    print("Run sprint manager from project root or any clone:")
-    print(f"  cd {project_root} && python3 ~/dev/commander/prd/dashboard/scripts/sprint_manager.py <sprint-label>")
-    print(f"  cd {main_nested} && python3 ~/dev/commander/prd/dashboard/scripts/sprint_manager.py <sprint-label>")
+        sys.stdout.write(str(f"  ls {tester_nested}/") + "\n")
+    sys.stdout.write(str(f"  cat {commander_at_root}/sprint.yaml") + "\n")
+    sys.stdout.write("\n")
+    sys.stdout.write(str("Run sprint manager from project root or any clone:") + "\n")
+    sys.stdout.write(str(f"  cd {project_root} && python3 ~/dev/commander/prd/dashboard/scripts/sprint_manager.py <sprint-label>") + "\n")
+    sys.stdout.write(str(f"  cd {main_nested} && python3 ~/dev/commander/prd/dashboard/scripts/sprint_manager.py <sprint-label>") + "\n")
 
     return True
 
@@ -266,13 +266,13 @@ def main() -> None:
     layout = detect_layout(project_name, projects_dir)
 
     if layout == "nested":
-        print(f"Project '{project_name}' is already using the nested layout.")
-        print(f"  {projects_dir / project_name}/main/   ✓")
+        sys.stdout.write(str(f"Project '{project_name}' is already using the nested layout.") + "\n")
+        sys.stdout.write(str(f"  {projects_dir / project_name}/main/   ✓") + "\n")
         sys.exit(0)
 
     if layout == "unknown":
-        print(f"ERROR: Cannot detect layout for '{project_name}' in {projects_dir}.")
-        print("  Expected either a git repo at the project root (flat) or main/ subdirectory (nested).")
+        sys.stdout.write(str(f"ERROR: Cannot detect layout for '{project_name}' in {projects_dir}.") + "\n")
+        sys.stdout.write(str("  Expected either a git repo at the project root (flat) or main/ subdirectory (nested).") + "\n")
         sys.exit(1)
 
     # layout == 'flat'

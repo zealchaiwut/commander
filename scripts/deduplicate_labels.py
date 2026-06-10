@@ -79,7 +79,7 @@ def issues_with_label_name(repo: str, label_name: str) -> list[dict]:
 
 def add_label_to_issue(repo: str, issue_number: int, label_name: str, dry_run: bool) -> None:
     if dry_run:
-        print(f"  [dry-run] would add '{label_name}' to #{issue_number}")
+        sys.stdout.write(str(f"  [dry-run] would add '{label_name}' to #{issue_number}") + "\n")
         return
     _gh("api", f"repos/{repo}/issues/{issue_number}/labels",
         "-X", "POST", "-f", f"labels[]={label_name}")
@@ -87,7 +87,7 @@ def add_label_to_issue(repo: str, issue_number: int, label_name: str, dry_run: b
 
 def remove_label_from_issue(repo: str, issue_number: int, label_name: str, dry_run: bool) -> None:
     if dry_run:
-        print(f"  [dry-run] would remove '{label_name}' from #{issue_number}")
+        sys.stdout.write(str(f"  [dry-run] would remove '{label_name}' from #{issue_number}") + "\n")
         return
     _gh("api", f"repos/{repo}/issues/{issue_number}/labels/{label_name}",
         "-X", "DELETE")
@@ -95,7 +95,7 @@ def remove_label_from_issue(repo: str, issue_number: int, label_name: str, dry_r
 
 def delete_label(repo: str, label_name: str, dry_run: bool) -> None:
     if dry_run:
-        print(f"  [dry-run] would delete label '{label_name}'")
+        sys.stdout.write(str(f"  [dry-run] would delete label '{label_name}'") + "\n")
         return
     _gh("api", f"repos/{repo}/labels/{label_name}", "-X", "DELETE")
 
@@ -103,7 +103,7 @@ def delete_label(repo: str, label_name: str, dry_run: bool) -> None:
 def create_label(repo: str, name: str, color: str, dry_run: bool) -> None:
     color = color.lstrip("#")
     if dry_run:
-        print(f"  [dry-run] would create label '{name}' #{color}")
+        sys.stdout.write(str(f"  [dry-run] would create label '{name}' #{color}") + "\n")
         return
     _gh("api", f"repos/{repo}/labels",
         "-X", "POST",
@@ -125,19 +125,19 @@ def deduplicate(repo: str, duplicates: dict[str, list[dict]], dry_run: bool) -> 
         copies_sorted = sorted(copies, key=lambda l: l["id"])
         surviving = copies_sorted[0]
         extras = copies_sorted[1:]
-        print(f"\nLabel '{name}': {len(copies)} copies found")
-        print(f"  Keeping ID {surviving['id']}")
+        sys.stdout.write(str(f"\nLabel '{name}': {len(copies)} copies found") + "\n")
+        sys.stdout.write(str(f"  Keeping ID {surviving['id']}") + "\n")
 
         issues = issues_with_label_name(repo, name)
-        print(f"  {len(issues)} issue(s) carry this label — no migration needed (all share same name)")
+        sys.stdout.write(str(f"  {len(issues)} issue(s) carry this label — no migration needed (all share same name)") + "\n")
 
         for extra in extras:
-            print(f"  Deleting duplicate ID {extra['id']}")
+            sys.stdout.write(str(f"  Deleting duplicate ID {extra['id']}") + "\n")
             # GitHub doesn't support deleting a label by ID directly — must use name.
             # Since both copies have the same name this would delete both;
             # we handle by re-creating the surviving one after deletion.
             delete_label(repo, name, dry_run)
-            print(f"  Re-creating surviving label '{name}' #{surviving['color']}")
+            sys.stdout.write(str(f"  Re-creating surviving label '{name}' #{surviving['color']}") + "\n")
             create_label(repo, name, surviving["color"], dry_run)
             fixed += 1
 
@@ -153,39 +153,39 @@ def main() -> None:
     args = parser.parse_args()
 
     labels = list_labels(args.repo)
-    print(f"Found {len(labels)} labels in {args.repo}")
+    sys.stdout.write(str(f"Found {len(labels)} labels in {args.repo}") + "\n")
 
     if args.ensure:
         name, color = args.ensure
         matching = [l for l in labels if l["name"] == name]
         if len(matching) == 0:
-            print(f"Label '{name}' does not exist — creating")
+            sys.stdout.write(str(f"Label '{name}' does not exist — creating") + "\n")
             create_label(args.repo, name, color, args.dry_run)
-            print(f"Created label '{name}' #{color.lstrip('#')}")
+            sys.stdout.write(str(f"Created label '{name}' #{color.lstrip('#')}") + "\n")
         elif len(matching) == 1:
-            print(f"Label '{name}' already exists (ID {matching[0]['id']}) — nothing to do")
+            sys.stdout.write(str(f"Label '{name}' already exists (ID {matching[0]['id']}) — nothing to do") + "\n")
         else:
-            print(f"Label '{name}' has {len(matching)} duplicates — deduplicating")
+            sys.stdout.write(str(f"Label '{name}' has {len(matching)} duplicates — deduplicating") + "\n")
             deduplicate(args.repo, {name: matching}, args.dry_run)
         return
 
     duplicates = find_duplicates(labels)
     if not duplicates:
-        print("No duplicate label names found.")
+        sys.stdout.write(str("No duplicate label names found.") + "\n")
         return
 
-    print(f"\nFound {len(duplicates)} duplicate label name(s):")
+    sys.stdout.write(str(f"\nFound {len(duplicates)} duplicate label name(s):") + "\n")
     for name, copies in duplicates.items():
         ids = ", ".join(str(c["id"]) for c in copies)
-        print(f"  '{name}': IDs {ids}")
+        sys.stdout.write(str(f"  '{name}': IDs {ids}") + "\n")
 
     fixed = deduplicate(args.repo, duplicates, args.dry_run)
-    print(f"\nDone. {fixed} duplicate(s) removed.")
+    sys.stdout.write(str(f"\nDone. {fixed} duplicate(s) removed.") + "\n")
 
 
 if __name__ == "__main__":
     try:
         main()
     except subprocess.CalledProcessError as exc:
-        print(f"gh command failed: {exc.stderr}", file=sys.stderr)
+        sys.stderr.write(str(f"gh command failed: {exc.stderr}") + "\n")
         sys.exit(1)

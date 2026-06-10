@@ -256,12 +256,12 @@ def main():
 
     report_path = Path(args.report_file)
     if not report_path.exists():
-        print(f"Error: report file not found: {report_path}", file=sys.stderr)
+        sys.stderr.write(str(f"Error: report file not found: {report_path}") + "\n")
         sys.exit(1)
 
     body = report_path.read_text().strip()
     if not body:
-        print("Error: report file is empty", file=sys.stderr)
+        sys.stderr.write(str("Error: report file is empty") + "\n")
         sys.exit(1)
 
     # Parse failures and append structured block if gate info provided
@@ -269,7 +269,7 @@ def main():
     if args.gate and args.gate_output:
         gate_output_path = Path(args.gate_output)
         if not gate_output_path.exists():
-            print(f"Warning: gate output file not found: {gate_output_path}", file=sys.stderr)
+            sys.stderr.write(str(f"Warning: gate output file not found: {gate_output_path}") + "\n")
         else:
             gate_text = gate_output_path.read_text(errors="replace")
             failures = parse_failures(args.gate, gate_text)
@@ -280,10 +280,10 @@ def main():
         # Write JSON sidecar
         repo_root = Path(args.repo_root) if args.repo_root else _REPO_ROOT
         sidecar = write_sidecar(args.issue, args.gate, failures, repo_root=repo_root)
-        print(f"  Wrote failure sidecar: {sidecar}")
+        sys.stdout.write(str(f"  Wrote failure sidecar: {sidecar}") + "\n")
 
     github_client.add_comment(args.issue, body, repo_name=args.repo)
-    print(f"Posted test report to issue #{args.issue}")
+    sys.stdout.write(str(f"Posted test report to issue #{args.issue}") + "\n")
 
 
 if __name__ == "__main__":

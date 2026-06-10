@@ -442,16 +442,13 @@ def main() -> None:
         try:
             target = date.fromisoformat(args.date)
         except ValueError:
-            print(
-                f"Error: invalid date {args.date!r} — expected YYYY-MM-DD",
-                file=sys.stderr,
-            )
+            sys.stderr.write(str(f"Error: invalid date {args.date!r} — expected YYYY-MM-DD") + "\n")
             sys.exit(1)
     else:
         target = date.today()
 
     out_path = generate_report(target, db_path=args.db_path)
-    print(f"Report written to {out_path}")
+    sys.stdout.write(str(f"Report written to {out_path}") + "\n")
 
 
 if __name__ == "__main__":

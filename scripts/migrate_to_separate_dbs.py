@@ -31,31 +31,31 @@ TARGET_DB = DASHBOARD_DIR / "commander.db"
 def main() -> int:
     # ── Guard: source must exist ───────────────────────────────────────────────
     if not SOURCE_DB.exists():
-        print(f"ERROR: source database not found: {SOURCE_DB}", file=sys.stderr)
+        sys.stderr.write(str(f"ERROR: source database not found: {SOURCE_DB}") + "\n")
         return 1
 
     # ── Step a: ensure .backups/ exists ───────────────────────────────────────
     if not BACKUP_DIR.exists():
         BACKUP_DIR.mkdir(parents=True)
-        print(f"Created directory: {BACKUP_DIR}")
+        sys.stdout.write(str(f"Created directory: {BACKUP_DIR}") + "\n")
     else:
-        print(f"Directory already exists: {BACKUP_DIR}")
+        sys.stdout.write(str(f"Directory already exists: {BACKUP_DIR}") + "\n")
 
     # ── Step b: backup (idempotent) ────────────────────────────────────────────
     if BACKUP_DB.exists():
-        print(f"Skipped backup (already exists): {BACKUP_DB}")
+        sys.stdout.write(str(f"Skipped backup (already exists): {BACKUP_DB}") + "\n")
     else:
         shutil.copy2(SOURCE_DB, BACKUP_DB)
-        print(f"Copied {SOURCE_DB} → {BACKUP_DB}")
+        sys.stdout.write(str(f"Copied {SOURCE_DB} → {BACKUP_DB}") + "\n")
 
     # ── Step c: copy to commander.db if absent or empty ───────────────────────
     if TARGET_DB.exists() and TARGET_DB.stat().st_size > 0:
-        print(f"Skipped target copy (already populated): {TARGET_DB}")
+        sys.stdout.write(str(f"Skipped target copy (already populated): {TARGET_DB}") + "\n")
     else:
         shutil.copy2(SOURCE_DB, TARGET_DB)
-        print(f"Copied {SOURCE_DB} → {TARGET_DB}")
+        sys.stdout.write(str(f"Copied {SOURCE_DB} → {TARGET_DB}") + "\n")
 
-    print("Migration complete.")
+    sys.stdout.write(str("Migration complete.") + "\n")
     return 0
 
 

@@ -54,7 +54,7 @@ def main() -> None:
 
     repo = args.repo or cfg.get("repo_name") or ""
     if not repo:
-        print("Error: --repo required or set repo_name in .commander/sprint.yaml", file=sys.stderr)
+        sys.stderr.write(str("Error: --repo required or set repo_name in .commander/sprint.yaml") + "\n")
         sys.exit(2)
 
     paths = cfg.get("paths") or {}
@@ -87,7 +87,7 @@ def main() -> None:
             pass
 
     if _body(new_content) == existing_body:
-        print("STATUS.md unchanged.")
+        sys.stdout.write(str("STATUS.md unchanged.") + "\n")
         sys.exit(1)
 
     # Atomic write to the real path
@@ -108,14 +108,14 @@ def main() -> None:
     # Git commit
     r = _git("rev-parse", "--git-dir", cwd=project_root)
     if r.returncode != 0:
-        print(f"STATUS.md written to {out_path} (not a git repo, skipping commit).")
+        sys.stdout.write(str(f"STATUS.md written to {out_path} (not a git repo, skipping commit).") + "\n")
         sys.exit(0)
 
     _git("add", str(out_path), cwd=project_root)
 
     r = _git("diff", "--cached", "--quiet", cwd=project_root)
     if r.returncode == 0:
-        print("STATUS.md written but no staged diff, skipping commit.")
+        sys.stdout.write(str("STATUS.md written but no staged diff, skipping commit.") + "\n")
         sys.exit(1)
 
     msg = "chore: auto-sync STATUS.md — sprint progress updated"
@@ -124,10 +124,10 @@ def main() -> None:
 
     r = _git("commit", "-m", msg, cwd=project_root)
     if r.returncode != 0:
-        print(f"git commit failed: {r.stderr.strip()}", file=sys.stderr)
+        sys.stderr.write(str(f"git commit failed: {r.stderr.strip()}") + "\n")
         sys.exit(2)
 
-    print(f"STATUS.md committed: {msg}")
+    sys.stdout.write(str(f"STATUS.md committed: {msg}") + "\n")
     sys.exit(0)
 
 

@@ -135,17 +135,17 @@ def _truncate(text: str, width: int = 45) -> str:
 def _print_plan_table(plan: list[dict]) -> None:
     """Print the plan as a formatted table."""
     if not plan:
-        print("  (empty plan)")
+        sys.stdout.write(str("  (empty plan)") + "\n")
         return
-    print()
-    print(f"  {'#':<4} {'Issue':<8} {'Size':<6} {'Order':<7} {'Title'}")
-    print(f"  {'-'*4} {'-'*8} {'-'*6} {'-'*7} {'-'*45}")
+    sys.stdout.write("\n")
+    sys.stdout.write(str(f"  {'#':<4} {'Issue':<8} {'Size':<6} {'Order':<7} {'Title'}") + "\n")
+    sys.stdout.write(str(f"  {'-'*4} {'-'*8} {'-'*6} {'-'*7} {'-'*45}") + "\n")
     for i, issue in enumerate(plan, 1):
         num = f"#{issue['number']}"
         size = issue.get("_size", "?")
         title = _truncate(issue.get("title", ""), 45)
-        print(f"  {i:<4} {num:<8} {size:<6} {i:<7} {title}")
-    print()
+        sys.stdout.write(str(f"  {i:<4} {num:<8} {size:<6} {i:<7} {title}") + "\n")
+    sys.stdout.write("\n")
 
     # Footer: size summary + time estimate
     size_counts: dict[str, int] = {}
@@ -157,8 +157,8 @@ def _print_plan_table(plan: list[dict]) -> None:
 
     parts = [f"{count}{s}" for s, count in sorted(size_counts.items(), key=lambda x: SIZE_IDX[x[0]])]
     sprint_num = plan[0].get("_sprint_num", "?") if plan else "?"
-    print(f"  Sprint {sprint_num} size: {' + '.join(parts)} · est {total_minutes}min")
-    print()
+    sys.stdout.write(str(f"  Sprint {sprint_num} size: {' + '.join(parts)} · est {total_minutes}min") + "\n")
+    sys.stdout.write("\n")
 
 
 # ── input helpers ─────────────────────────────────────────────────────────────
@@ -167,7 +167,7 @@ def _prompt(msg: str) -> str:
     try:
         return input(msg).strip()
     except (EOFError, KeyboardInterrupt):
-        print("\nAborted.")
+        sys.stdout.write(str("\nAborted.") + "\n")
         sys.exit(0)
 
 
@@ -188,18 +188,18 @@ def main() -> None:
     repo_name = args.repo
     dry_run = args.dry_run
 
-    print()
-    print("═" * 60)
-    print("  Sprint Planner")
-    print("═" * 60)
+    sys.stdout.write("\n")
+    sys.stdout.write(str("═" * 60) + "\n")
+    sys.stdout.write(str("  Sprint Planner") + "\n")
+    sys.stdout.write(str("═" * 60) + "\n")
 
     # ── Step 1: Load issues ────────────────────────────────────────
-    print("\nFetching open issues…")
+    sys.stdout.write(str("\nFetching open issues…") + "\n")
     try:
         all_issues = github_client.list_open_issues_with_body(repo_name=repo_name, limit=200)
         existing_sprints = github_client.list_sprints(repo_name=repo_name)
     except Exception as e:
-        print(f"\nError: {e}")
+        sys.stdout.write(str(f"\nError: {e}") + "\n")
         sys.exit(1)
 
     # Categorise issues
@@ -217,7 +217,7 @@ def main() -> None:
         sprint_num = args.sprint
     else:
         suggested = (max(existing_sprints) + 1) if existing_sprints else 1
-        print(f"\nExisting sprints: {existing_sprints or 'none'}")
+        sys.stdout.write(str(f"\nExisting sprints: {existing_sprints or 'none'}") + "\n")
         ans = _prompt(f"Target sprint number [{suggested}]: ")
         if ans == "":
             sprint_num = suggested
@@ -225,10 +225,10 @@ def main() -> None:
             try:
                 sprint_num = int(ans)
             except ValueError:
-                print("Invalid sprint number. Using suggested.")
+                sys.stdout.write(str("Invalid sprint number. Using suggested.") + "\n")
                 sprint_num = suggested
 
-    print(f"\nPlanning for: sprint-{sprint_num}")
+    sys.stdout.write(str(f"\nPlanning for: sprint-{sprint_num}") + "\n")
 
     # Classify issues relative to the target sprint
     already_assigned: list[dict] = []
@@ -252,16 +252,16 @@ def main() -> None:
 
     # ── Step 3: Select issues ──────────────────────────────────────
     if already_assigned:
-        print(f"\nAlready in sprint-{sprint_num} ({len(already_assigned)}):")
+        sys.stdout.write(str(f"\nAlready in sprint-{sprint_num} ({len(already_assigned)}):") + "\n")
         for iss in sorted(already_assigned, key=lambda x: x["number"]):
-            print(f"  #{iss['number']:<5} [{iss['_size']}]  {_truncate(iss['title'])}")
+            sys.stdout.write(str(f"  #{iss['number']:<5} [{iss['_size']}]  {_truncate(iss['title'])}") + "\n")
 
-    print(f"\nCandidates (no sprint label) — {len(candidates)} issues:")
+    sys.stdout.write(str(f"\nCandidates (no sprint label) — {len(candidates)} issues:") + "\n")
     if not candidates:
-        print("  (none)")
+        sys.stdout.write(str("  (none)") + "\n")
     else:
         for i, iss in enumerate(sorted(candidates, key=lambda x: x["number"]), 1):
-            print(f"  {i:>2}. #{iss['number']:<5} [{iss['_size']}]  {_truncate(iss['title'])}")
+            sys.stdout.write(str(f"  {i:>2}. #{iss['number']:<5} [{iss['_size']}]  {_truncate(iss['title'])}") + "\n")
 
     # Build sorted candidate list for selection by index
     numbered_candidates = sorted(candidates, key=lambda x: x["number"])
@@ -269,17 +269,17 @@ def main() -> None:
     if dry_run:
         # In dry-run, select all candidates + already assigned
         selected = list(already_assigned) + list(candidates)
-        print("\n[dry-run] Selecting all candidates.")
+        sys.stdout.write(str("\n[dry-run] Selecting all candidates.") + "\n")
     else:
-        print()
-        print("Select issues to add to the plan:")
-        print("  1,2,3  — pick by number | all — include all | small — S issues only | skip — keep existing")
+        sys.stdout.write("\n")
+        sys.stdout.write(str("Select issues to add to the plan:") + "\n")
+        sys.stdout.write(str("  1,2,3  — pick by number | all — include all | small — S issues only | skip — keep existing") + "\n")
         raw = _prompt("Your selection: ")
 
         selected = list(already_assigned)  # start with already-assigned
 
         if raw.lower() == "skip":
-            print("Keeping existing sprint contents.")
+            sys.stdout.write(str("Keeping existing sprint contents.") + "\n")
         elif raw.lower() == "all":
             selected = selected + list(candidates)
         elif raw.lower() in ("small", "small ones"):
@@ -294,7 +294,7 @@ def main() -> None:
                     if 0 <= idx < len(numbered_candidates):
                         indices.append(idx)
                     else:
-                        print(f"  Warning: index {part} out of range, skipping.")
+                        sys.stdout.write(str(f"  Warning: index {part} out of range, skipping.") + "\n")
             for idx in indices:
                 iss = numbered_candidates[idx]
                 if iss not in selected:
@@ -308,17 +308,17 @@ def main() -> None:
     selected.sort(key=_sort_key)
 
     # ── Step 4: Propose plan ───────────────────────────────────────
-    print("\nProposed plan:")
+    sys.stdout.write(str("\nProposed plan:") + "\n")
     _print_plan_table(selected)
 
     if dry_run:
-        print("[dry-run] No labels will be applied.")
-        print()
+        sys.stdout.write(str("[dry-run] No labels will be applied.") + "\n")
+        sys.stdout.write("\n")
         sys.exit(0)
 
     # ── Step 5: Modify and confirm ─────────────────────────────────
     while True:
-        print("Commands: remove #N | add #N | swap #A #B | confirm | quit")
+        sys.stdout.write(str("Commands: remove #N | add #N | swap #A #B | confirm | quit") + "\n")
         cmd = _prompt("> ").strip()
 
         if not cmd:
@@ -331,9 +331,9 @@ def main() -> None:
             before = len(selected)
             selected = [iss for iss in selected if iss["number"] != num]
             if len(selected) < before:
-                print(f"  Removed #{num} from plan.")
+                sys.stdout.write(str(f"  Removed #{num} from plan.") + "\n")
             else:
-                print(f"  #{num} not in plan.")
+                sys.stdout.write(str(f"  #{num} not in plan.") + "\n")
             _print_plan_table(selected)
             continue
 
@@ -342,7 +342,7 @@ def main() -> None:
         if m:
             num = int(m.group(1))
             if any(iss["number"] == num for iss in selected):
-                print(f"  #{num} already in plan.")
+                sys.stdout.write(str(f"  #{num} already in plan.") + "\n")
             else:
                 # Find in all_issues
                 found = next((iss for iss in all_issues if iss["number"] == num), None)
@@ -353,14 +353,14 @@ def main() -> None:
                         found["_size"] = _estimate_size(found)
                         found["_sprint_num"] = sprint_num
                     except Exception:
-                        print(f"  Could not find issue #{num}.")
+                        sys.stdout.write(str(f"  Could not find issue #{num}.") + "\n")
                         continue
                 else:
                     found["_size"] = found.get("_size") or _estimate_size(found)
                     found["_sprint_num"] = sprint_num
                 selected.append(found)
                 selected.sort(key=_sort_key)
-                print(f"  Added #{num} to plan.")
+                sys.stdout.write(str(f"  Added #{num} to plan.") + "\n")
             _print_plan_table(selected)
             continue
 
@@ -371,10 +371,10 @@ def main() -> None:
             ia = next((i for i, iss in enumerate(selected) if iss["number"] == a), None)
             ib = next((i for i, iss in enumerate(selected) if iss["number"] == b), None)
             if ia is None or ib is None:
-                print(f"  One or both issues not found in plan.")
+                sys.stdout.write(str(f"  One or both issues not found in plan.") + "\n")
             else:
                 selected[ia], selected[ib] = selected[ib], selected[ia]
-                print(f"  Swapped #{a} and #{b}.")
+                sys.stdout.write(str(f"  Swapped #{a} and #{b}.") + "\n")
             _print_plan_table(selected)
             continue
 
@@ -382,24 +382,24 @@ def main() -> None:
             break
 
         if cmd.lower() in ("quit", "q", "exit"):
-            print("Exited without applying labels.")
+            sys.stdout.write(str("Exited without applying labels.") + "\n")
             sys.exit(0)
 
-        print("  Unrecognised command. Use: remove #N | add #N | swap #A #B | confirm | quit")
+        sys.stdout.write(str("  Unrecognised command. Use: remove #N | add #N | swap #A #B | confirm | quit") + "\n")
 
     # ── Step 6: Apply ─────────────────────────────────────────────
     if not selected:
-        print("Nothing to apply.")
+        sys.stdout.write(str("Nothing to apply.") + "\n")
         sys.exit(0)
 
-    print(f"\nApplying sprint-{sprint_num} label to {len(selected)} issues…")
+    sys.stdout.write(str(f"\nApplying sprint-{sprint_num} label to {len(selected)} issues…") + "\n")
 
     # Ensure the sprint label exists (create if absent)
     if not dry_run:
         try:
             github_client.ensure_sprint_label(sprint_num, repo_name=repo_name)
         except Exception as e:
-            print(f"Warning: could not ensure label: {e}")
+            sys.stdout.write(str(f"Warning: could not ensure label: {e}") + "\n")
 
     sprint_re_any = re.compile(r"^sprint-\d+$")
 
@@ -416,12 +416,12 @@ def main() -> None:
                 remove=other_sprint_labels,
                 repo_name=repo_name,
             )
-            print(f"  ✅ #{num} labelled sprint-{sprint_num}")
+            sys.stdout.write(str(f"  ✅ #{num} labelled sprint-{sprint_num}") + "\n")
         except Exception as e:
-            print(f"  ❌ #{num} failed: {e}")
+            sys.stdout.write(str(f"  ❌ #{num} failed: {e}") + "\n")
 
-    print(f"\nDone. Run `sprint-run sprint-{sprint_num}` to start the sprint.")
-    print()
+    sys.stdout.write(str(f"\nDone. Run `sprint-run sprint-{sprint_num}` to start the sprint.") + "\n")
+    sys.stdout.write("\n")
 
 
 if __name__ == "__main__":

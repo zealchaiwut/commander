@@ -100,11 +100,11 @@ def export(db_path: Path, dry_run: bool = False) -> dict:
     }
 
     sprints, order = _read_local_sprints(db_path)
-    print(f"Local store: {db_path}")
-    print(f"  sprints: {len(sprints)}; ticket-order labels: {len(order)}")
+    sys.stdout.write(str(f"Local store: {db_path}") + "\n")
+    sys.stdout.write(str(f"  sprints: {len(sprints)}; ticket-order labels: {len(order)}") + "\n")
 
     if dry_run:
-        print("[dry-run] no writes performed")
+        sys.stdout.write(str("[dry-run] no writes performed") + "\n")
         summary["dry_run"] = True
         return summary
 
@@ -175,30 +175,25 @@ def main() -> int:
     args = parser.parse_args()
 
     if not os.environ.get("DATABASE_URL", "").strip():
-        print(
-            "DATABASE_URL is not set. Neon is an optional export target — set "
+        sys.stderr.write(str("DATABASE_URL is not set. Neon is an optional export target — set "
             "DATABASE_URL to your Neon connection string before running this "
-            "script. See the README 'Neon export' section.",
-            file=sys.stderr,
-        )
+            "script. See the README 'Neon export' section.") + "\n")
         return 1
 
     summary = export(args.db_path, dry_run=args.dry_run)
 
-    print("\nExport summary:")
-    print(f"  sprints exported: {summary['sprints_exported']}")
-    print(f"  tickets exported: {summary['tickets_exported']}")
+    sys.stdout.write(str("\nExport summary:") + "\n")
+    sys.stdout.write(str(f"  sprints exported: {summary['sprints_exported']}") + "\n")
+    sys.stdout.write(str(f"  tickets exported: {summary['tickets_exported']}") + "\n")
     if summary.get("projects"):
         p = summary["projects"]
-        print(
-            f"  projects synced:  {p.get('projects_synced', 0)} "
-            f"(skipped {p.get('projects_skipped', 0)})"
-        )
+        sys.stdout.write(str(f"  projects synced:  {p.get('projects_synced', 0)} "
+            f"(skipped {p.get('projects_skipped', 0)})") + "\n")
     if summary["errors"]:
-        print(f"  row-level errors: {len(summary['errors'])}")
+        sys.stdout.write(str(f"  row-level errors: {len(summary['errors'])}") + "\n")
         for err in summary["errors"]:
-            print(f"    - {err}")
-    print("Done.")
+            sys.stdout.write(str(f"    - {err}") + "\n")
+    sys.stdout.write(str("Done.") + "\n")
     return 0
 
 

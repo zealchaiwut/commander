@@ -25,6 +25,7 @@ import secrets
 import subprocess
 import sys
 import threading
+from enum import Enum
 from pathlib import Path
 from typing import Any
 
@@ -33,6 +34,44 @@ _REQUIRED_KEYS = (
     "ts", "level", "run_id", "source", "agent_role",
     "issue_num", "sprint_label", "project", "git_sha", "event", "message",
 )
+
+
+class EventType(Enum):
+    """Canonical lifecycle event vocabulary for sprint orchestration log records.
+
+    Every structured emit() call must pass one of these values as event_type so
+    no string literals appear at call sites in services/sprint_manager.
+    """
+    dispatched   = "dispatched"
+    started      = "started"
+    finished     = "finished"
+    failed       = "failed"
+    killed       = "killed"
+    resumed      = "resumed"
+    transitioned = "transitioned"
+
+
+def envelope_subprocess_line(
+    raw: str,
+    run_id: str,
+    sprint: str,
+    issue: int,
+    agent: str,
+) -> dict:
+    """Wrap one line of agent subprocess output in the structured envelope schema.
+
+    Returns a dict ready for json.dumps(); callers append '\\n' and write to the
+    agent log file.  The 'raw' field preserves the original text verbatim so the
+    run browser can render it identically to pre-migration output.
+    """
+    return {
+        "run_id": run_id,
+        "sprint": sprint,
+        "issue": issue,
+        "agent": agent,
+        "ts": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "raw": raw,
+    }
 _VALID_SOURCES = frozenset({"sprint", "manual", "adhoc"})
 
 
@@ -244,6 +283,39 @@ class _Logger:
 
     def debug(self, event: str, message: str, **fields: Any) -> None:
         self._emit("DEBUG", event, message, **fields)
+
+    def emit(
+        self,
+        *,
+        event_type: "EventType",
+        run_id: str,
+        sprint: str,
+        issue: int,
+        log_path: "Path | None" = None,
+        **fields: Any,
+    ) -> None:
+        """Write one structured lifecycle event using the canonical EventType vocabulary.
+
+        Requires event_type (EventType enum), run_id, sprint, and issue so every
+        lifecycle call site has the full correlation context.  When log_path is
+        provided the record is written there as a JSON-Lines entry; the internal
+        structured log is always written regardless.
+        """
+        record: dict[str, Any] = {
+            "ts": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "event_type": event_type.value,
+            "run_id": run_id,
+            "sprint": sprint,
+            "issue": issue,
+        }
+        record.update(fields)
+        line = json.dumps(record, default=str) + "\n"
+        if log_path is not None:
+            try:
+                _append_line(Path(log_path), line)
+            except OSError as exc:
+                sys.stderr.write(f"[commander.logging] emit IO error: {exc}\n")
+        self._emit("INFO", event_type.value, f"lifecycle:{event_type.value}", **record)
 
 
 log = _Logger()

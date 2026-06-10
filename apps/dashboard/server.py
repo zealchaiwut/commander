@@ -848,10 +848,19 @@ async def lifespan(app: FastAPI):
     task2 = asyncio.create_task(_timeout_loop())
     task3 = asyncio.create_task(_periodic_orphan_sweep_loop())
     task4 = asyncio.create_task(_status_md_sync_loop())
+    # Bootstrap full sync (issue #760): on first run from an empty/absent DB
+    # (detected via the missing schema-marker row), run a one-time full GitHub
+    # sync synchronously before handing off to the ETag loop so the dashboard is
+    # never served empty. A second start finds the marker and skips straight to
+    # the loop. Never raises — an empty DB must not crash startup.
+    _bootstrap_repos = _mirror_sync_repos()
+    await asyncio.to_thread(
+        github_events_sync.bootstrap_full_sync, _bootstrap_repos
+    )
     # Issues-mirror sync loop (issue #756): keep the local DB read model fresh
     # via ETag-conditional polling so renders consume zero GitHub quota.
     task5 = asyncio.create_task(
-        github_events_sync.run_issues_sync_loop(_mirror_sync_repos())
+        github_events_sync.run_issues_sync_loop(_bootstrap_repos)
     )
     yield
     task1.cancel()

@@ -525,6 +525,41 @@ def set_sync_etag(key: str, etag: str) -> None:
         conn.commit()
 
 
+# ── Bootstrap schema marker (issue #760) ──────────────────────────────────────
+#
+# A fresh clone starts with no commander.db, so the mirror is empty until a sync
+# runs. The server detects this on startup via the *absence* of a schema-marker
+# row and runs a one-time full GitHub sync before handing off to the ETag loop.
+# The marker is stored in the sync_state table under a reserved key so a second
+# start can detect it and skip the bootstrap.
+
+BOOTSTRAP_MARKER_KEY = "bootstrap:complete"
+
+
+def is_bootstrap_complete() -> bool:
+    """Return True if the bootstrap schema-marker row is present (issue #760)."""
+    with get_conn() as conn:
+        _create_sync_state_table(conn)
+        row = conn.execute(
+            "SELECT 1 FROM sync_state WHERE key = ?", (BOOTSTRAP_MARKER_KEY,)
+        ).fetchone()
+    return row is not None
+
+
+def mark_bootstrap_complete() -> None:
+    """Write the bootstrap schema-marker row on a successful full sync (issue #760)."""
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
+    with get_conn() as conn:
+        _create_sync_state_table(conn)
+        conn.execute(
+            """INSERT INTO sync_state (key, etag, updated_at)
+               VALUES (?, ?, ?)
+               ON CONFLICT(key) DO UPDATE SET updated_at = excluded.updated_at""",
+            (BOOTSTRAP_MARKER_KEY, "1", now),
+        )
+        conn.commit()
+
+
 def record_ticket_status(
     issue: str | int,
     status: str,

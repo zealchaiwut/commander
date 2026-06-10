@@ -359,6 +359,79 @@ def sync_issues_mirror(repo: str, db_module=None) -> dict:
     return {"status": 200, "synced": len(normalised), "rate_limited": False}
 
 
+BOOTSTRAP_RESTORE_NOTICE = (
+    "history/order/settings start empty — restore from backup if migrating "
+    "(backup restore / restore-db)"
+)
+
+
+def bootstrap_full_sync(repos: list[str], db_module=None) -> dict:
+    """Run a one-time full GitHub sync on first run from an empty DB (issue #760).
+
+    Detects an empty/absent mirror via the absent schema-marker row. If the marker
+    is already present this is a no-op (skipped) and the caller proceeds straight
+    to the ETag loop. Otherwise it syncs every repo synchronously, logs progress
+    to stdout/server log, logs the local-authority restore notice, and — only when
+    every repo synced without error — writes the schema-marker row so the next
+    start skips the bootstrap. A failed repo leaves the marker unwritten so the
+    bootstrap retries on the next start.
+
+    Never raises: an empty or absent DB at startup must not crash the server.
+    """
+    if db_module is None:
+        import db as db_module  # type: ignore[assignment]
+
+    try:
+        if db_module.is_bootstrap_complete():
+            logger.info("[bootstrap] schema marker present — skipping full sync")
+            return {"bootstrapped": False, "skipped": True, "synced": 0, "errors": 0}
+
+        total = len(repos)
+        msg = f"[bootstrap] empty DB detected — full GitHub sync starting for {total} repo(s)"
+        logger.info(msg)
+        print(msg, flush=True)
+
+        synced = 0
+        errors = 0
+        for i, repo in enumerate(repos, 1):
+            progress = f"[bootstrap] syncing {repo} ({i}/{total})"
+            logger.info(progress)
+            print(progress, flush=True)
+            try:
+                result = sync_issues_mirror(repo, db_module=db_module)
+            except Exception as exc:  # never let one repo abort the bootstrap
+                logger.warning("[bootstrap] sync failed for %s: %s", repo, exc)
+                errors += 1
+                continue
+            if result.get("status", 0) in (0, None) or result.get("error"):
+                errors += 1
+            else:
+                synced += result.get("synced", 0)
+
+        logger.info(BOOTSTRAP_RESTORE_NOTICE)
+        print(BOOTSTRAP_RESTORE_NOTICE, flush=True)
+
+        if errors == 0:
+            db_module.mark_bootstrap_complete()
+            done = f"[bootstrap] complete — {synced} issue(s) synced, schema marker written"
+        else:
+            done = (
+                f"[bootstrap] {errors} repo(s) failed — schema marker NOT written; "
+                "bootstrap will retry on next start"
+            )
+        logger.info(done)
+        print(done, flush=True)
+        return {
+            "bootstrapped": errors == 0,
+            "skipped": False,
+            "synced": synced,
+            "errors": errors,
+        }
+    except Exception as exc:  # defensive: bootstrap must never crash startup
+        logger.warning("[bootstrap] unexpected error, continuing to ETag loop: %s", exc)
+        return {"bootstrapped": False, "skipped": False, "synced": 0, "errors": 1}
+
+
 async def run_issues_sync_loop(
     repos: list[str],
     db_module=None,

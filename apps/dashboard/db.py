@@ -155,6 +155,7 @@ def init_db():
         _create_ticket_status_table(conn)
         _create_issues_table(conn)
         _create_sync_state_table(conn)
+        _create_sprint_lifecycle_tables(conn)
         conn.commit()
 
 
@@ -226,6 +227,173 @@ def _create_sync_state_table(conn: sqlite3.Connection) -> None:
             updated_at TEXT
         )
     """)
+
+
+# ── Sprint lifecycle + ticket order (issue #757) ──────────────────────────────
+#
+# The durable home for sprint lifecycle state and ticket execution order. These
+# tables replace the ephemeral `{label}-plan.json` / `{label}-pid` files as the
+# source of truth, while those files continue to be written as a deprecated
+# cache (dual-write) until a later sprint removes them.  `state='failed'` is a
+# valid value reserved for the future watchdog recovery sprint (no writer yet).
+
+_SPRINT_STATES = ("planning", "running", "completed", "cancelled", "failed")
+
+
+def _create_sprint_lifecycle_tables(conn: sqlite3.Connection) -> None:
+    """Create the sprints + sprint_ticket_order tables (issue #757).
+
+    Kept in its own helper so the lifecycle writers can ensure the tables exist
+    without running the full init_db() migration first.
+    """
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS sprints (
+            label        TEXT PRIMARY KEY,
+            project      TEXT NOT NULL DEFAULT '',
+            state        TEXT NOT NULL DEFAULT 'planning'
+                         CHECK(state IN (
+                             'planning', 'running', 'completed', 'cancelled', 'failed'
+                         )),
+            created_at   TEXT,
+            started_at   TEXT,
+            ended_at     TEXT,
+            end_reason   TEXT,
+            parent_label TEXT
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS sprint_ticket_order (
+            label    TEXT NOT NULL,
+            issue    INTEGER NOT NULL,
+            position INTEGER NOT NULL,
+            PRIMARY KEY (label, issue)
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS ix_sprint_ticket_order_label_pos "
+        "ON sprint_ticket_order (label, position)"
+    )
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
+
+
+def record_sprint_start(
+    label: str,
+    project: str = "",
+    started_at: str | None = None,
+    parent_label: str | None = None,
+) -> None:
+    """Write (or move to) a `running` sprints row (issue #757).
+
+    Idempotent on `label`: a second start re-asserts state='running' and
+    refreshes started_at without creating a duplicate row.
+    """
+    started_at = started_at or _now_iso()
+    with get_conn() as conn:
+        _create_sprint_lifecycle_tables(conn)
+        conn.execute(
+            """
+            INSERT INTO sprints
+                (label, project, state, created_at, started_at, parent_label)
+            VALUES (?, ?, 'running', ?, ?, ?)
+            ON CONFLICT(label) DO UPDATE SET
+                project      = excluded.project,
+                state        = 'running',
+                started_at   = excluded.started_at,
+                created_at   = COALESCE(sprints.created_at, excluded.created_at),
+                parent_label = COALESCE(excluded.parent_label, sprints.parent_label)
+            """,
+            (label, project, started_at, started_at, parent_label),
+        )
+        conn.commit()
+
+
+def record_sprint_finish(label: str, ended_at: str | None = None,
+                         end_reason: str | None = None) -> None:
+    """Move a sprints row to `completed` (issue #757)."""
+    _set_sprint_terminal(label, "completed", end_reason, ended_at)
+
+
+def record_sprint_cancel(label: str, end_reason: str = "cancelled",
+                         ended_at: str | None = None) -> None:
+    """Move a sprints row to `cancelled` with a reason (issue #757)."""
+    _set_sprint_terminal(label, "cancelled", end_reason, ended_at)
+
+
+def _set_sprint_terminal(label: str, state: str, end_reason: str | None,
+                         ended_at: str | None) -> None:
+    ended_at = ended_at or _now_iso()
+    with get_conn() as conn:
+        _create_sprint_lifecycle_tables(conn)
+        # Upsert so a transition can land even if no start row was written
+        # (e.g. a legacy sprint cancelled before its first DB write).
+        conn.execute(
+            """
+            INSERT INTO sprints (label, state, created_at, ended_at, end_reason)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(label) DO UPDATE SET
+                state      = excluded.state,
+                ended_at   = excluded.ended_at,
+                end_reason = COALESCE(excluded.end_reason, sprints.end_reason)
+            """,
+            (label, state, ended_at, ended_at, end_reason),
+        )
+        conn.commit()
+
+
+def get_sprint(label: str) -> dict | None:
+    """Return the sprints row for `label` as a dict, or None (issue #757)."""
+    with get_conn() as conn:
+        _create_sprint_lifecycle_tables(conn)
+        row = conn.execute(
+            "SELECT * FROM sprints WHERE label = ?", (label,)
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def is_sprint_running(label: str, pid_alive: bool) -> bool:
+    """Authoritative "is this sprint running?" check (issue #757).
+
+    True only when the DB state is `running` AND the sprint process is alive.
+    A PID-dead + DB-running row does NOT report running.
+    """
+    row = get_sprint(label)
+    return bool(row and row["state"] == "running" and pid_alive)
+
+
+def set_sprint_ticket_order(label: str, issue_numbers: list[int]) -> None:
+    """Persist the ticket execution order for a sprint (issue #757).
+
+    Replaces any existing order for `label` so positions reflect exactly the
+    supplied sequence (position 0 dispatched first).
+    """
+    with get_conn() as conn:
+        _create_sprint_lifecycle_tables(conn)
+        conn.execute("DELETE FROM sprint_ticket_order WHERE label = ?", (label,))
+        conn.executemany(
+            "INSERT INTO sprint_ticket_order (label, issue, position) "
+            "VALUES (?, ?, ?)",
+            [(label, int(n), pos) for pos, n in enumerate(issue_numbers)],
+        )
+        conn.commit()
+
+
+def get_sprint_ticket_order(label: str) -> list[int]:
+    """Return persisted issue numbers for `label` in position order (issue #757)."""
+    with get_conn() as conn:
+        _create_sprint_lifecycle_tables(conn)
+        rows = conn.execute(
+            "SELECT issue FROM sprint_ticket_order WHERE label = ? "
+            "ORDER BY position",
+            (label,),
+        ).fetchall()
+    return [r["issue"] for r in rows]
 
 
 def upsert_issues(repo: str, issues: list[dict]) -> int:

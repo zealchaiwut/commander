@@ -120,14 +120,14 @@ def _metrics(project_root: Path, token_rows=None, slug="repo", **params):
         return client.get(f"/api/projects/{slug}/analytics/metrics", params=params)
 
 
-def _calibration(project_root: Path, slug="repo", sprint_repo_available=False, **params):
+def _calibration(project_root: Path, slug="repo", **params):
     import server as srv
     from starlette.testclient import TestClient
+    # Issue #758 removed the Neon path from server entirely — calibration reads
+    # local files unconditionally, so there is no availability flag to toggle.
     with (
         patch("server._resolve_project_slug", return_value="owner/repo"),
         patch("server._project_root_path", return_value=project_root),
-        # Force the Neon availability flag off to prove the file path is used.
-        patch("server._SPRINT_REPO_AVAILABLE", sprint_repo_available),
     ):
         client = TestClient(srv.app)
         return client.get(f"/api/projects/{slug}/analytics/calibration", params=params)
@@ -151,8 +151,8 @@ def _trends(project_root: Path, repo="owner/repo", **params):
 def test_calibration_reads_files_with_neon_unavailable(tmp_path):
     _write_state(tmp_path, "sprint-1", [_done_issue(101, coder_min=10, tester_min=10)])
     _write_estimate(tmp_path, 101, "M")
-    # sprint_repo_available=False — the old code returned empty here.
-    data = _calibration(tmp_path, sprint_repo_available=False).json()
+    # Calibration reads local files only (no Neon dependency at all post-#758).
+    data = _calibration(tmp_path).json()
     assert data["by_size"]["M"]["count"] == 1
     assert len(data["points"]) == 1
 
@@ -161,9 +161,14 @@ def test_calibration_does_not_open_neon_session(tmp_path):
     import server as srv
     _write_state(tmp_path, "sprint-1", [_done_issue(101)])
     _write_estimate(tmp_path, 101, "S")
-    with patch.object(srv, "_sprint_repo") as mock_repo:
-        _calibration(tmp_path, sprint_repo_available=True).json()
-        mock_repo._open_session.assert_not_called()
+    # Issue #758: the server has no Neon repo handle, so the calibration path can
+    # never open a Neon session — the file source is structurally the only one.
+    assert not hasattr(srv, "_sprint_repo"), (
+        "server must not retain a live Neon sprint_repo handle (#758)"
+    )
+    # And the endpoint still serves data from local files.
+    data = _calibration(tmp_path).json()
+    assert data["by_size"]["S"]["count"] == 1
 
 
 def test_metrics_reads_files_no_neon(tmp_path):

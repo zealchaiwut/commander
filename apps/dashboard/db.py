@@ -347,6 +347,25 @@ def _set_sprint_terminal(label: str, state: str, end_reason: str | None,
         conn.commit()
 
 
+def rename_sprint(old_label: str, new_label: str) -> None:
+    """Rename a sprint and its ticket-order rows (issue #758).
+
+    No-op if no row exists for `old_label`. Best-effort: GitHub labels remain the
+    source of truth, so a missing DB row must not fail a rename.
+    """
+    with get_conn() as conn:
+        _create_sprint_lifecycle_tables(conn)
+        conn.execute(
+            "UPDATE sprints SET label = ? WHERE label = ?",
+            (new_label, old_label),
+        )
+        conn.execute(
+            "UPDATE sprint_ticket_order SET label = ? WHERE label = ?",
+            (new_label, old_label),
+        )
+        conn.commit()
+
+
 def get_sprint(label: str) -> dict | None:
     """Return the sprints row for `label` as a dict, or None (issue #757)."""
     with get_conn() as conn:

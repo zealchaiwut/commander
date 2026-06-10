@@ -7,7 +7,16 @@ class Base(DeclarativeBase):
     pass
 
 
+# Module-level engine cache (issue #758). Neon is an optional export target,
+# not a live dependency — but when it IS used (the export script, settings sync),
+# the engine is created once and reused rather than per call.
+_engine: Engine | None = None
+
+
 def get_engine() -> Engine:
+    global _engine
+    if _engine is not None:
+        return _engine
     url = os.environ.get("DATABASE_URL")
     if not url:
         raise RuntimeError(
@@ -15,7 +24,8 @@ def get_engine() -> Engine:
             "Create a Neon project at https://neon.tech, copy the connection string, "
             "and set it as DATABASE_URL in your .env file."
         )
-    return create_engine(url, pool_pre_ping=True, pool_size=5, max_overflow=5)
+    _engine = create_engine(url, pool_pre_ping=True, pool_size=5, max_overflow=5)
+    return _engine
 
 
 def get_session() -> Session:

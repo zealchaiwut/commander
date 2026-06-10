@@ -62,13 +62,6 @@ except ImportError:  # pragma: no cover
     yaml = None  # type: ignore[assignment]
 
 try:
-    from services.sprint_manager import sprint_repo as _sprint_repo
-    _SPRINT_REPO_AVAILABLE = True
-except (ImportError, ModuleNotFoundError):  # pragma: no cover
-    _sprint_repo = None  # type: ignore[assignment]
-    _SPRINT_REPO_AVAILABLE = False
-
-try:
     from services.sprint_manager.state_machine import (  # noqa: PLC0415
         transition as _sm_transition,
         TicketState as _TicketState,
@@ -3855,13 +3848,9 @@ def generate_sprint_summary(
     skipped   = [i for i in state.issues if i.status == "skipped"]
     pending   = [i for i in state.issues if i.status == "pending"]
 
-    # Prefer DB-backed rollup for per-ticket metrics; fall back to in-memory state.
+    # Per-ticket metrics come from in-memory sprint state. The Neon-backed rollup
+    # was removed in issue #758 (Neon is export-only now).
     _db_rollup: Optional[dict] = None
-    if _SPRINT_REPO_AVAILABLE and _sprint_repo is not None:
-        try:
-            _db_rollup = _sprint_repo.get_sprint_rollup(state.sprint_label)
-        except Exception:
-            _db_rollup = None
 
     if _db_rollup is not None and _db_rollup["sum_tokens"] > 0:
         total_tokens = _db_rollup["sum_tokens"]
@@ -5642,17 +5631,9 @@ def list_backlog_issues(label: str, repo_name: Optional[str] = None) -> list[dic
         return []
 
 
-# ── Neon dual-write helpers ────────────────────────────────────────────────────
-
-def _neon_update(fn_name: str, *args, **kwargs) -> None:
-    """Call a sprint_repo function; print loudly on failure but don't abort sprint."""
-    if not _SPRINT_REPO_AVAILABLE or _sprint_repo is None:
-        return
-    try:
-        getattr(_sprint_repo, fn_name)(*args, **kwargs)
-    except Exception as _e:
-        structured_log.error("neon_update_failed", f"[neon] {fn_name} failed: {_e}", neon_fn=fn_name, exc=str(_e))
-
+# ── Sprint state JSON mirror helpers ────────────────────────────────────────────
+# Issue #758 removed the Neon dual-write. These helpers now only maintain the
+# local sprint state JSON ({label}.json), which the dashboard reads directly.
 
 def _neon_sprint_json_path(sprint_label: str, sprints_dir: Path) -> Path:
     return sprints_dir / f"{sprint_label}.json"
@@ -5683,7 +5664,8 @@ def _neon_sprint_init(
     project: str,
     sprints_dir: Path,
 ) -> None:
-    """Create sprint + tickets in Neon and write the JSON mirror. Called once on fresh start."""
+    """Write the sprint state JSON ({label}.json) on a fresh start (issue #758:
+    the Neon sprint/ticket creation was removed — local JSON only)."""
     goal = os.environ.get("SPRINT_GOAL", "").strip()
     if not goal:
         goal_file = sprints_dir / f"{label}-goal.txt"
@@ -5694,27 +5676,6 @@ def _neon_sprint_init(
                 pass
     if not goal:
         goal = label
-
-    if not _SPRINT_REPO_AVAILABLE or _sprint_repo is None:
-        return
-
-    # Create (or reuse) sprint row in Neon — this must succeed or we abort.
-    try:
-        _sprint_repo.get_or_create_sprint(label=label, goal=goal, project=project)
-        _sprint_repo.update_sprint_status(label, "running")
-    except Exception as _e:
-        structured_log.error("neon_sprint_init_failed", f"[neon] sprint init failed for {label!r}: {_e}", sprint_label=label, exc=str(_e))
-        return
-
-    # Add all tickets (idempotent — skip if already present).
-    for position, issue_state in enumerate(issues):
-        try:
-            _sprint_repo.add_ticket(sprint_label=label, issue_number=issue_state.number, position=position)
-        except Exception as _e:
-            if "UNIQUE" in str(_e).upper() or "unique" in str(_e).lower():
-                pass  # Already added (resume path)
-            else:
-                structured_log.warn("neon_add_ticket_failed", f"[neon] add_ticket #{issue_state.number} failed: {_e}", issue_num=issue_state.number, exc=str(_e))
 
     # Write JSON mirror.
     json_path = _neon_sprint_json_path(label, sprints_dir)
@@ -5737,9 +5698,8 @@ def _neon_ticket_status(
     sprints_dir: Path,
     total_tokens: int = 0,
 ) -> None:
-    """Update a ticket's Neon status + patch the sprint JSON mirror."""
-    _neon_update("update_ticket_status", sprint_label, issue_number, neon_status, total_tokens)
-
+    """Patch a ticket's status in the sprint state JSON (issue #758: Neon write
+    removed; `total_tokens` retained for call-site compatibility)."""
     json_path = _neon_sprint_json_path(sprint_label, sprints_dir)
     data = _neon_sprint_json_read(json_path)
     if "tickets" in data:
@@ -5769,9 +5729,7 @@ def _regenerate_status_md(cfg: Optional["SprintConfig"], dry_run: bool = False) 
 
 
 def _neon_sprint_status(sprint_label: str, neon_status: str, sprints_dir: Path) -> None:
-    """Update sprint Neon status + patch the sprint JSON mirror."""
-    _neon_update("update_sprint_status", sprint_label, neon_status)
-
+    """Patch the sprint status in the sprint state JSON (issue #758: Neon write removed)."""
     json_path = _neon_sprint_json_path(sprint_label, sprints_dir)
     data = _neon_sprint_json_read(json_path)
     if data:

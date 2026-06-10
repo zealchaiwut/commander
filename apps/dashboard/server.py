@@ -100,20 +100,6 @@ except ImportError:
     _BACKUP_AVAILABLE = False
 
 try:
-    import sprint_repo as _sprint_repo
-    _SPRINT_REPO_AVAILABLE = True
-except Exception:
-    _sprint_repo = None  # type: ignore[assignment]
-    _SPRINT_REPO_AVAILABLE = False
-
-try:
-    import sync_projects_to_neon as _sync_projects_module
-    _SYNC_PROJECTS_AVAILABLE = True
-except Exception:
-    _sync_projects_module = None  # type: ignore[assignment]
-    _SYNC_PROJECTS_AVAILABLE = False
-
-try:
     from services.sprint_manager.settings_sync import (
         load_local_snapshot as _ss_load_local,
         load_neon_snapshot as _ss_load_neon,
@@ -128,16 +114,10 @@ try:
 except Exception:
     _SYNC_SETTINGS_AVAILABLE = False
 
-# Per-machine kill switch for the Neon/Postgres layer. While its schema is
-# unmigrated, the writes error out (e.g. relation "projects" does not exist) and
-# block sprint creation. Setting COMMANDER_DISABLE_NEON makes the dashboard run
-# purely off GitHub + local JSON: no Neon reads/writes, no startup projects sync.
-# (.env is loaded above at import time via load_dotenv, so this sees it.)
-if os.environ.get("COMMANDER_DISABLE_NEON", "").strip().lower() in ("1", "true", "yes", "on"):
-    _sprint_repo = None  # type: ignore[assignment]
-    _SPRINT_REPO_AVAILABLE = False
-    _sync_projects_module = None  # type: ignore[assignment]
-    _SYNC_PROJECTS_AVAILABLE = False
+# Neon dual-write was removed in issue #758 — SQLite + local JSON is the primary
+# (and only live) store. Neon is now an optional export target reached solely via
+# scripts/export_to_neon.py, so there is no startup sync or per-flow Neon write to
+# disable here.
 
 from sizing import SIZE_TO_MINUTES as _SIZE_TO_MINUTES, letter_from_minutes as _letter_from_minutes, minutes_from_letter as _minutes_from_letter
 
@@ -854,13 +834,8 @@ async def lifespan(app: FastAPI):
     _sweep_orphan_pid_files()
     _restore_sprint_statuses_on_startup()
     await _mark_inflight_jobs_failed()
-    # Sync projects.json → Neon (non-blocking; warn on failure, never fatal)
-    if _SYNC_PROJECTS_AVAILABLE:
-        try:
-            _result = _sync_projects_module.sync_projects_to_neon()
-            logger.info("projects sync complete: %s", _result)
-        except Exception as _exc:
-            logger.warning("projects sync failed (non-fatal): %s", _exc)
+    # Neon dual-write removed (issue #758): projects.json is the runtime source of
+    # truth. Mirror it to Neon on demand with scripts/export_to_neon.py, not here.
 
     # Start backup scheduler and queue a startup backup after 30 s
     if _BACKUP_AVAILABLE:
@@ -1993,20 +1968,6 @@ async def remove_project(owner: str, repo_name: str, body: RemoveProjectBody):
             pass  # backup trigger failures never affect the response
 
     return {"ok": True, "removed": removed}
-
-
-@app.post("/api/projects/sync-to-db")
-async def sync_projects_to_db():
-    """Trigger a manual sync of projects.json → Neon.
-
-    Returns a JSON summary: {projects_synced, projects_skipped, envs_synced, envs_skipped, errors}.
-    """
-    if not _SYNC_PROJECTS_AVAILABLE:
-        raise HTTPException(status_code=503, detail="sync module not available")
-    try:
-        return _sync_projects_module.sync_projects_to_neon()
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
 
 
 @app.get("/api/projects/{project}/running-sprint")
@@ -3893,19 +3854,10 @@ def _home_project_data(proj: dict, running_sprints: list[dict]) -> dict:
     uat_issues = [i for i in all_open if any(l["name"] == "UAT" for l in i.get("labels", []))]
     backlog_issues = [i for i in all_open if github_client.classify_issue(i) == "backlog"]
 
-    # Supplement PID-based check with Neon: if Neon says a sprint is running for
-    # this project, the sidebar dot is green even if the JSON file was deleted.
-    neon_running = False
-    if not proj_running and _SPRINT_REPO_AVAILABLE and _sprint_repo is not None:
-        try:
-            neon_running = any(
-                s.status == "running"
-                for s in _sprint_repo.list_sprints(project=repo)
-            )
-        except Exception:
-            pass
-
-    if proj_running or neon_running:
+    # The durable SQLite sprints table (issue #757) is authoritative for the
+    # running check, so the PID-based scan above is sufficient. The former Neon
+    # supplement was removed in issue #758.
+    if proj_running:
         status = "running"
     elif uat_issues:
         status = "uat-pending"
@@ -6577,12 +6529,8 @@ def kill_sprint(sprint_label: str, project: str):
         except OSError:
             pass
 
-    # Neon + JSON: mark sprint as cancelled (best-effort — don't fail the kill).
-    if _SPRINT_REPO_AVAILABLE and _sprint_repo is not None:
-        try:
-            _sprint_repo.update_sprint_status(sprint_label, "cancelled")
-        except Exception as _e:
-            print(f"[neon] WARNING: could not mark sprint {sprint_label!r} cancelled: {_e}")
+    # Mark sprint cancelled in JSON + the durable SQLite store below (issue #758
+    # removed the Neon mirror).
     project_root = _project_root_path(project)
     json_path = _sprint_json_path(project_root, sprint_label)
     data = _sprint_json_read(json_path)
@@ -7237,18 +7185,8 @@ async def create_sprint_label(body: SprintCreateBody):
     sprint_label = f"sprint-{target_num}"
     eff_goal = (body.goal or sprint_label).strip() or sprint_label
 
-    # Neon write must succeed before any JSON is written (AC-6).
-    if _SPRINT_REPO_AVAILABLE and _sprint_repo is not None:
-        try:
-            _sprint_repo.get_or_create_sprint(
-                label=sprint_label,
-                goal=eff_goal,
-                project=body.project,
-            )
-        except Exception as _e:
-            raise HTTPException(500, detail=f"Neon write failed: {_e}")
-
-    # JSON writes are best-effort (AC-7).
+    # Sprint metadata is persisted to local JSON + the durable SQLite store; the
+    # Neon write was removed in issue #758 (Neon is export-only now).
     project_root = _project_root_path(body.project)
     if body.goal is not None:
         goal_path = _sprint_goal_path(project_root, sprint_label)
@@ -7342,12 +7280,12 @@ async def rename_sprint_label(sprint_label: str, body: SprintRenameBody):
         except Exception:
             pass
 
-    # Update Neon DB
-    if _SPRINT_REPO_AVAILABLE and _sprint_repo is not None:
-        try:
-            _sprint_repo.rename_sprint(sprint_label, new_label)
-        except Exception:
-            pass  # Best-effort; GitHub is the source of truth for labels
+    # Mirror the rename into the durable SQLite sprints table (issue #758 removed
+    # the Neon mirror; best-effort — GitHub is the source of truth for labels).
+    try:
+        db.rename_sprint(sprint_label, new_label)
+    except Exception:
+        pass
 
     return {"ok": True, "old_label": sprint_label, "new_label": new_label}
 
@@ -7359,20 +7297,12 @@ class SprintTicketReorderBody(BaseModel):
 
 @app.post("/api/sprints/{sprint_label}/tickets/reorder")
 def reorder_sprint_tickets(sprint_label: str, body: SprintTicketReorderBody):
-    """Reorder tickets within a sprint. Writes to Neon first, then JSON fallback."""
+    """Reorder tickets within a sprint. Persists to local JSON + durable SQLite."""
     if not _SPRINT_LABEL_RE.match(sprint_label):
         raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")
 
-    # Neon write must succeed (AC-6).
-    if _SPRINT_REPO_AVAILABLE and _sprint_repo is not None:
-        try:
-            _sprint_repo.reorder_tickets(sprint_label, body.issue_numbers)
-        except Exception as _e:
-            if "SprintNotFound" in type(_e).__name__ or "not found" in str(_e).lower():
-                raise HTTPException(404, detail=f"Sprint {sprint_label!r} not found in DB")
-            raise HTTPException(500, detail=f"Neon write failed: {_e}")
-
-    # JSON fallback (AC-7).
+    # Persist to local JSON; the durable SQLite ticket-order write happens below.
+    # The Neon mirror was removed in issue #758.
     project_root = _project_root_path(body.project)
     json_path = _sprint_json_path(project_root, sprint_label)
     data = _sprint_json_read(json_path)

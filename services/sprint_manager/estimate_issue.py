@@ -38,7 +38,6 @@ if str(_SIZING_DIR) not in sys.path:
 from sizing import minutes_from_letter as _minutes_from_letter
 from calibration import CalibrationResult, load_calibration, calibration_prompt_section, db_calibration_records
 from services.sprint_manager.estimation_config import get_estimation_cfg as _get_estimation_cfg
-from services.sprint_manager import sprint_repo as sprint_repo
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -227,12 +226,8 @@ Output ONLY the JSON object. No other text."""
                     # Attach calibration sources so consumers know which tiers were calibrated
                     if calibration is not None:
                         parsed["calibration_sources"] = calibration.sources
-                    # Persist estimated_size on sprint_tickets (best-effort; issue #640)
-                    if size_val and issue_num:
-                        try:
-                            sprint_repo.write_estimated_size(issue_number=issue_num, size=size_val)
-                        except Exception:
-                            pass
+                    # Estimated size lives in the local estimate JSON written by
+                    # the caller. Issue #758 removed the Neon sprint_tickets mirror.
                     return parsed, None
 
         # error_type is set — decide whether to retry or fail.

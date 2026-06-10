@@ -5390,18 +5390,11 @@
           <i class="ti ti-rocket"></i>Deploy
         </button>
         <!-- Analytics dropdown group -->
-        <div class="stab-group" id="stab-group-analytics">
-          <button class="stab stab-trigger" role="tab" aria-haspopup="true"
-                  onclick="toggleStabDropdown('analytics', event)">
-            <i class="ti ti-chart-bar"></i>Analytics<i class="ti ti-chevron-down stab-caret"></i>
-          </button>
-          <div class="stab-dropdown" id="stab-dropdown-analytics">
-            <button class="stab" role="tab" id="stab-metrics"
-                    aria-selected="false" onclick="switchTab('metrics')">
-              <i class="ti ti-chart-line"></i>Analytics
-            </button>
-          </div>
-        </div>
+        <!-- Analytics — single tab, promoted to the nav root (issue: one item left) -->
+        <button class="stab" role="tab" id="stab-metrics"
+                aria-selected="false" onclick="switchTab('metrics')">
+          <i class="ti ti-chart-bar"></i>Analytics
+        </button>
         <!-- Notes moved to the global left sidebar (issue #717) -->
         <!-- Settings (top level) -->
         <button class="stab" role="tab" id="stab-settings"

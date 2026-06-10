@@ -318,12 +318,14 @@ def step1_init_repo(
         "__pycache__/\n*.pyc\n.env\n*.log\nvenv/\n.DS_Store\n"
     )
 
-    # Stamp the standard docs structure (shared by every Commander project)
+    # Stamp the standard project files (PRODUCT.md, DESIGN.md, docs/*) shared by
+    # every Commander project. PRODUCT.md/DESIGN.md satisfy the sprint design-docs
+    # guard so a freshly-onboarded project can run sprints immediately.
     try:
-        from scaffold_docs import scaffold as _scaffold_docs
-        _scaffold_docs(repo_dir, repo_name, check=False)
-    except Exception as e:  # never block project creation on docs scaffolding
-        info(f"docs scaffold skipped: {e}")
+        from scaffold_project import scaffold as _scaffold_project
+        _scaffold_project(repo_dir, repo_name, check=False)
+    except Exception as e:  # never block project creation on scaffolding
+        info(f"project scaffold skipped: {e}")
 
     _run("git", "add", ".", cwd=repo_dir)
     _run("git", "commit", "-m", "chore: initial commit", cwd=repo_dir)

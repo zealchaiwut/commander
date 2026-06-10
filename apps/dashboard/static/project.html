@@ -1043,6 +1043,44 @@
     .ps-btn:hover { background: var(--surface-hover); }
     .ps-btn-primary { background: var(--text); color: var(--surface); border-color: var(--text); }
     .ps-btn-ghost { border-color: transparent; color: var(--text-muted); }
+    /* ── Environment Variables editor (issue #727) ── */
+    .ps-envvars-section { padding: 14px 0; border-top: 1px solid var(--border); }
+    .ps-envvars-section:first-child { border-top: none; padding-top: 4px; }
+    .ps-envvars-head {
+      display: flex; align-items: center; gap: 10px; margin-bottom: 8px;
+    }
+    .ps-envvars-env {
+      font-family: var(--mono); font-size: 11px; font-weight: 700;
+      letter-spacing: .05em; text-transform: uppercase;
+      padding: 2px 9px; border-radius: 999px;
+      background: var(--surface-2); color: var(--text-sub); border: 1px solid var(--border);
+    }
+    .ps-envvars-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .ps-envvars-table th {
+      text-align: left; font-size: 10px; font-weight: 700;
+      letter-spacing: .06em; text-transform: uppercase;
+      color: var(--text-sub); padding: 6px 10px; border-bottom: 1px solid var(--border);
+    }
+    .ps-envvars-table td {
+      padding: 7px 10px; border-bottom: 1px solid var(--border);
+      vertical-align: top;
+    }
+    .ps-envvars-table tr:last-child td { border-bottom: none; }
+    .ps-envvar-key { font-family: var(--mono); color: var(--text); font-weight: 500; }
+    .ps-envvar-val { font-family: var(--mono); color: var(--text); word-break: break-all; }
+    .ps-envvar-val.is-masked { color: var(--text-muted); letter-spacing: 2px; }
+    .ps-envvar-actions { width: 44px; text-align: right; white-space: nowrap; }
+    .ps-envvar-key-inp, .ps-envvar-val-inp { width: 100%; font-family: var(--mono); }
+    .ps-envvar-key-inp.is-invalid { border-color: var(--red); box-shadow: 0 0 0 3px var(--red-bg); }
+    .ps-envvar-error { color: var(--red); font-size: 11px; margin-top: 4px; min-height: 0; }
+    .ps-icon-btn {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 32px; height: 32px; min-width: 32px;
+      border: 1px solid var(--border); background: var(--surface);
+      color: var(--text-muted); border-radius: 6px; cursor: pointer;
+    }
+    .ps-icon-btn:hover { background: var(--surface-hover); color: var(--text); }
+    .ps-icon-btn:focus-visible { outline: none; border-color: var(--blue); box-shadow: 0 0 0 3px var(--blue-bg); }
     @media (max-width: 640px) {
       .proj-settings-wrap { gap: 12px; }
       .ps-est-table th:nth-child(3), .ps-est-table td:nth-child(3) { display: none; }
@@ -6411,6 +6449,20 @@
             </div>
             <div class="proj-settings-card-body" id="ps-env-body">
               <!-- Rows injected by projEnvLoad() -->
+            </div>
+          </div>
+
+          <!-- Environment Variables card (issue #727) -->
+          <div class="proj-settings-card" id="ps-envvars-card">
+            <div class="proj-settings-card-head">
+              <i class="ti ti-variable proj-settings-card-icon"></i>
+              <div>
+                <div class="proj-settings-card-title">Environment Variables</div>
+                <div class="proj-settings-card-sub">View, reveal and edit each environment's <code>.env</code> file — values are masked by default</div>
+              </div>
+            </div>
+            <div class="proj-settings-card-body" id="ps-envvars-body">
+              <!-- Sections injected by envVarsLoad() -->
             </div>
           </div>
 
@@ -21762,6 +21814,7 @@ async function projSettingsLoad() {
   window._currentProjectSlug = slug;
   projEnvLoad();
   deployActionsLoad();
+  envVarsLoad();
 
   // Show project name in inherit notice
   const nameEl = document.getElementById('ps-proj-name');
@@ -22159,6 +22212,220 @@ function addEnvRow() {
   var anchor = body.querySelector('div[style*="margin-top"]');
   if (anchor) body.insertBefore(row, anchor);
   else body.appendChild(row);
+}
+
+// ── Environment Variables editor (issue #727) ─────────────────────────────────
+// Render-style per-environment .env editor: masked read view with per-row reveal,
+// an edit mode with add/delete rows, and a Save that PUTs back to the .env file.
+
+var _envVarState = {};  // env -> { vars: [{key,value}], editing: bool, reveal: {idx:bool} }
+
+function _envVarId(env) { return (env || '').replace(/[^A-Za-z0-9_-]/g, '_'); }
+
+function envVarsLoad() {
+  var slug = (window._currentProjectSlug || '');
+  if (!slug) return;
+  var host = document.getElementById('ps-envvars-body');
+  if (!host) return;
+  fetch('/api/projects/' + encodeURIComponent(slug) + '/environments')
+    .then(function(r) { return r.ok ? r.json() : {environments: []}; })
+    .then(function(data) {
+      var envs = (data.environments || []).map(function(e) { return e.env; });
+      if (!envs.length) {
+        host.innerHTML = '<div class="ps-machine-note"><i class="ti ti-info-circle"></i>'
+          + ' No environments configured. Add an environment path above to manage its .env file.</div>';
+        return;
+      }
+      host.innerHTML = envs.map(function(env) {
+        var id = _envVarId(env);
+        return '<div class="ps-envvars-section" data-ev-env="' + _escAttr(env) + '">'
+          + '<div class="ps-envvars-head"><span class="ps-envvars-env">' + escHtml(env) + '</span></div>'
+          + '<div id="ps-envvars-wrap-' + id + '"><div class="ps-machine-note">Loading…</div></div>'
+          + '</div>';
+      }).join('');
+      envs.forEach(envVarsLoadEnv);
+    })
+    .catch(function() {});
+}
+
+function envVarsLoadEnv(env) {
+  var slug = (window._currentProjectSlug || '');
+  fetch('/api/projects/' + encodeURIComponent(slug) + '/environments/'
+        + encodeURIComponent(env) + '/env-vars')
+    .then(function(r) { return r.ok ? r.json() : Promise.reject(r); })
+    .then(function(data) {
+      _envVarState[env] = {
+        vars: (data.vars || []).map(function(v) { return {key: v.key, value: v.value}; }),
+        editing: false,
+        reveal: {}
+      };
+      _envVarsRender(env);
+    })
+    .catch(function() {
+      var wrap = document.getElementById('ps-envvars-wrap-' + _envVarId(env));
+      if (wrap) wrap.innerHTML = '<div class="ps-machine-note"><i class="ti ti-info-circle"></i>'
+        + ' No .env file found for this environment.</div>';
+    });
+}
+
+function _envVarsRender(env) {
+  var wrap = document.getElementById('ps-envvars-wrap-' + _envVarId(env));
+  var st = _envVarState[env];
+  if (!wrap || !st) return;
+  if (st.editing) { wrap.innerHTML = _envVarsEditHtml(env); return; }
+
+  if (!st.vars.length) {
+    wrap.innerHTML = '<div class="ps-machine-note">No variables set. Click Edit to add one.</div>'
+      + _envVarsReadActions(env);
+    return;
+  }
+  var rows = st.vars.map(function(v, i) {
+    var masked = !st.reveal[i];
+    var shown = masked ? '••••••••' : escHtml(v.value);
+    return '<tr>'
+      + '<td class="ps-envvar-key">' + escHtml(v.key) + '</td>'
+      + '<td class="ps-envvar-val' + (masked ? ' is-masked' : '') + '">' + shown + '</td>'
+      + '<td class="ps-envvar-actions">'
+      + '<button class="ps-icon-btn" type="button"'
+      + ' aria-label="' + (masked ? 'Reveal' : 'Hide') + ' value for ' + _escAttr(v.key) + '"'
+      + ' onclick="envVarToggleReveal(\'' + _escAttr(env) + '\',' + i + ')">'
+      + '<i class="ti ' + (masked ? 'ti-eye' : 'ti-eye-off') + '"></i></button>'
+      + '</td></tr>';
+  }).join('');
+  wrap.innerHTML = '<table class="ps-envvars-table"><thead><tr>'
+    + '<th>Key</th><th>Value</th><th></th></tr></thead><tbody>' + rows + '</tbody></table>'
+    + _envVarsReadActions(env);
+}
+
+function _envVarsReadActions(env) {
+  return '<div class="ps-save-bar">'
+    + '<button class="ps-btn ps-btn-primary" type="button" onclick="envVarsEdit(\'' + _escAttr(env) + '\')">'
+    + '<i class="ti ti-pencil"></i> Edit</button></div>';
+}
+
+function _envVarsEditHtml(env) {
+  var id = _envVarId(env);
+  var st = _envVarState[env];
+  var rows = st.vars.map(function(v) { return _envVarEditRow(v.key, v.value); }).join('');
+  return '<table class="ps-envvars-table"><thead><tr>'
+    + '<th>Key</th><th>Value</th><th></th></tr></thead>'
+    + '<tbody id="ps-envvars-rows-' + id + '">' + rows + '</tbody></table>'
+    + '<div style="margin-top:10px">'
+    + '<a class="ps-link" onclick="envVarAddRow(\'' + _escAttr(env) + '\')">'
+    + '<i class="ti ti-plus" style="font-size:13px"></i> Add row</a></div>'
+    + '<div class="ps-save-bar">'
+    + '<span id="ps-envvars-status-' + id + '" class="ps-status-msg"></span>'
+    + '<button class="ps-btn ps-btn-ghost" type="button" onclick="envVarsCancel(\'' + _escAttr(env) + '\')">Cancel</button>'
+    + '<button class="ps-btn ps-btn-primary" type="button" onclick="envVarsSave(\'' + _escAttr(env) + '\')">'
+    + '<i class="ti ti-device-floppy"></i> Save</button>'
+    + '</div>';
+}
+
+function _envVarEditRow(key, value) {
+  return '<tr data-ev-row="1">'
+    + '<td><input class="ps-inp ps-envvar-key-inp" data-ev-key="1" value="' + _escAttr(key || '') + '" placeholder="KEY">'
+    + '<div class="ps-envvar-error" data-ev-err="1"></div></td>'
+    + '<td><input class="ps-inp ps-envvar-val-inp" data-ev-val="1" value="' + _escAttr(value || '') + '" placeholder="value"></td>'
+    + '<td class="ps-envvar-actions">'
+    + '<button class="ps-icon-btn" type="button" aria-label="Delete row" onclick="envVarDeleteRow(this)">'
+    + '<i class="ti ti-trash"></i></button></td>'
+    + '</tr>';
+}
+
+function envVarToggleReveal(env, i) {
+  var st = _envVarState[env];
+  if (!st) return;
+  st.reveal[i] = !st.reveal[i];
+  _envVarsRender(env);
+}
+
+function envVarsEdit(env) {
+  var st = _envVarState[env];
+  if (!st) return;
+  st.editing = true;
+  _envVarsRender(env);
+}
+
+function envVarsCancel(env) {
+  var st = _envVarState[env];
+  if (!st) return;
+  st.editing = false;       // st.vars untouched during edit → discards changes
+  st.reveal = {};
+  _envVarsRender(env);
+}
+
+function envVarAddRow(env) {
+  var tbody = document.getElementById('ps-envvars-rows-' + _envVarId(env));
+  if (!tbody) return;
+  tbody.insertAdjacentHTML('beforeend', _envVarEditRow('', ''));
+}
+
+function envVarDeleteRow(btn) {
+  var tr = btn.closest('tr');
+  if (tr) tr.parentNode.removeChild(tr);
+}
+
+function _envVarSetStatus(env, msg, cls) {
+  var el = document.getElementById('ps-envvars-status-' + _envVarId(env));
+  if (!el) return;
+  el.textContent = msg;
+  el.className = 'ps-status-msg' + (cls ? ' ' + cls : '');
+}
+
+function envVarsSave(env) {
+  var slug = (window._currentProjectSlug || '');
+  var tbody = document.getElementById('ps-envvars-rows-' + _envVarId(env));
+  if (!tbody) return;
+  var trs = tbody.querySelectorAll('tr[data-ev-row]');
+  var vars = [];
+  var hasError = false;
+  trs.forEach(function(tr) {
+    var keyInp = tr.querySelector('[data-ev-key]');
+    var valInp = tr.querySelector('[data-ev-val]');
+    var errEl = tr.querySelector('.ps-envvar-error');
+    if (!keyInp) return;
+    if (errEl) errEl.textContent = '';
+    keyInp.classList.remove('is-invalid');
+    var k = (keyInp.value || '').trim();
+    if (!k) {
+      hasError = true;
+      if (errEl) errEl.textContent = 'Key is required';
+      keyInp.classList.add('is-invalid');
+      return;
+    }
+    vars.push({key: k, value: valInp ? valInp.value : ''});
+  });
+  if (hasError) {
+    _envVarSetStatus(env, 'Fix the highlighted keys before saving.', 'err');
+    return;
+  }
+  _envVarSetStatus(env, 'Saving…', '');
+  fetch('/api/projects/' + encodeURIComponent(slug) + '/environments/'
+        + encodeURIComponent(env) + '/env-vars', {
+    method: 'PUT',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({vars: vars})
+  })
+    .then(function(r) {
+      if (!r.ok) {
+        return r.json().then(function(d) {
+          throw new Error((d && d.detail) || ('HTTP ' + r.status));
+        });
+      }
+      return r.json();
+    })
+    .then(function(data) {
+      var st = _envVarState[env];
+      st.vars = (data.vars || []).map(function(v) { return {key: v.key, value: v.value}; });
+      st.editing = false;
+      st.reveal = {};
+      _envVarsRender(env);
+      showToast('Saved ' + env + ' environment variables.', 'success');
+    })
+    .catch(function(e) {
+      // Keep the user's edits in the form; surface the failure inline.
+      _envVarSetStatus(env, 'Save failed: ' + e.message, 'err');
+    });
 }
 
 // ── Deploy actions (issue #723) ──────────────────────────────────────────────

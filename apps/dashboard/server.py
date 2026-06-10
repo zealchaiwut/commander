@@ -8253,12 +8253,12 @@ def get_sprint_branch_status(sprint_label: str, project: str):
                 pr_url = prs[0].get("url")
                 pr_number = prs[0].get("number")
                 pr_title = prs[0].get("title")
-    except Exception as _pr_err:
+    except Exception as pr_err:
         _slog.warn(
             "sprint_pr_lookup_failed",
-            f"PR lookup for {branch_name!r} failed: {_pr_err}",
+            f"PR lookup for {branch_name!r} failed: {pr_err}",
             branch=branch_name,
-            error=str(_pr_err),
+            error=str(pr_err),
         )
 
     return {"exists": exists, "branch": branch_name,

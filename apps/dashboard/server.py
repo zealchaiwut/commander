@@ -2452,12 +2452,20 @@ def put_project_environments(slug: str, body: _PutEnvironmentsBody):
                 f"'{env}': path '{local_dir}' is not a git repository (.git not found)"
             )
             continue
-        result = subprocess.run(
-            ["git", "rev-parse", "--is-inside-work-tree"],
-            cwd=str(p),
-            capture_output=True,
-            text=True,
-        )
+        try:
+            result = subprocess.run(
+                ["git", "rev-parse", "--is-inside-work-tree"],
+                cwd=str(p),
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+        except subprocess.TimeoutExpired:
+            errors.append(
+                f"'{env}': git rev-parse timed out for path '{local_dir}'"
+                " (repo may be on an unreachable network mount)"
+            )
+            continue
         if result.returncode != 0:
             errors.append(
                 f"'{env}': path '{local_dir}' is not a valid git repository"

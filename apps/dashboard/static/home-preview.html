@@ -937,14 +937,24 @@
     }
   }
 
+  // The "Right now" stat-grid was removed (commit f25a974); these toggles are
+  // now no-ops when its elements are absent. Critically, showSkeleton() runs
+  // BEFORE the load try-block — an unguarded null access here threw and killed
+  // loadHomeData before any project/activity render (whole page blank).
   function showSkeleton() {
-    document.getElementById('stat-grid-skeleton').classList.remove('hidden');
-    document.getElementById('stat-grid-real').classList.add('hidden');
+    const sk = document.getElementById('stat-grid-skeleton');
+    const real = document.getElementById('stat-grid-real');
+    if (!sk || !real) return;
+    sk.classList.remove('hidden');
+    real.classList.add('hidden');
   }
 
   function showReal() {
-    document.getElementById('stat-grid-skeleton').classList.add('hidden');
-    document.getElementById('stat-grid-real').classList.remove('hidden');
+    const sk = document.getElementById('stat-grid-skeleton');
+    const real = document.getElementById('stat-grid-real');
+    if (!sk || !real) return;
+    sk.classList.add('hidden');
+    real.classList.remove('hidden');
   }
 
   function showError() {

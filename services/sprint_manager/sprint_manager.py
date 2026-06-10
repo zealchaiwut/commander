@@ -67,6 +67,14 @@ from services.sprint_manager.pipeline import (  # noqa: E402
     run_level as _run_pipeline_level,
 )
 
+# issue #738: cross-thread serialization for concurrent pipeline mode — one
+# develop merge and one status-label write at a time, plus ghost reconciliation.
+from services.sprint_manager.serialization import (  # noqa: E402
+    develop_merge_guard as _develop_merge_guard,
+    label_transition_guard as _label_transition_guard,
+    ghost_status_labels as _ghost_status_labels,
+)
+
 try:
     from services.sprint_manager import sprint_repo as _sprint_repo
     _SPRINT_REPO_AVAILABLE = True
@@ -1347,25 +1355,28 @@ def _get_issue_labels(issue_num: int, repo_name: Optional[str] = None) -> set[st
         return set()
 
 
-def _sweep_stale_in_progress(
+def _sweep_stale_status(
+    status_label: str,
     sprint_label: str,
     repo_name: Optional[str],
     active_issue: Optional[int] = None,
 ) -> None:
-    """Remove a leftover ``in-progress`` label from sprint tickets that are not
-    being actively worked.
+    """Remove a leftover transient status label (``in-progress`` or ``SIT``) from
+    sprint tickets that are not being actively worked.
 
-    Serial dispatch runs one agent at a time, so only the ticket currently in
-    the coder slot may legitimately carry ``in-progress``. Any other ``in-progress``
-    label is stale — left behind by an interrupted or errored run — and shows as
-    a stuck spinner on the board. One ``gh issue list`` finds them; we clear all
-    except ``active_issue``. Best-effort and bounded (no per-ticket fetches).
+    Only one ticket may legitimately carry ``in-progress`` (the coder's active
+    ticket) and one ``SIT`` (the tester's active ticket) at a time. In pipeline
+    mode both run concurrently, so a crash between the remove-label and add-label
+    calls, or an interrupted prior run, can leave a ghost label on a ticket no
+    longer being worked (issue #738 AC5). One ``gh issue list`` finds them; we
+    clear all except ``active_issue``. Best-effort and bounded (no per-ticket
+    fetches).
     """
     r = _r(repo_name)
     try:
         out = subprocess.run(
             ["gh", "issue", "list", "--repo", r,
-             "--label", "in-progress", "--label", sprint_label,
+             "--label", status_label, "--label", sprint_label,
              "--state", "open", "--json", "number", "--limit", "100"],
             capture_output=True, text=True, timeout=15,
         )
@@ -1380,14 +1391,23 @@ def _sweep_stale_in_progress(
             continue
         try:
             subprocess.run(
-                ["gh", "issue", "edit", str(n), "--repo", r, "--remove-label", "in-progress"],
+                ["gh", "issue", "edit", str(n), "--repo", r, "--remove-label", status_label],
                 capture_output=True, text=True, timeout=15,
             )
             cleared.append(n)
         except Exception:
             pass
     if cleared:
-        print(f"  [sweep] cleared stale in-progress from {len(cleared)} ticket(s): {cleared}")
+        print(f"  [sweep] cleared stale {status_label} from {len(cleared)} ticket(s): {cleared}")
+
+
+def _sweep_stale_in_progress(
+    sprint_label: str,
+    repo_name: Optional[str],
+    active_issue: Optional[int] = None,
+) -> None:
+    """Clear stale ``in-progress`` labels — see _sweep_stale_status."""
+    _sweep_stale_status("in-progress", sprint_label, repo_name, active_issue)
 
 
 def _current_status_labels(issue_num: int, repo_name: Optional[str]) -> "frozenset[str] | None":
@@ -1457,9 +1477,13 @@ def _transition_safe(
             issue_num=issue_num,
         )
         return
-    before = _current_status_labels(issue_num, repo_name)
     try:
-        changed = _sm_transition(issue_num, target_state, actor=actor, repo=repo_name, note=note)
+        # issue #738: serialize the read-modify-write so concurrent coder/tester
+        # label writes in pipeline mode cannot interleave into ghost/duplicate
+        # labels. Uncontended (and reentrant) in serial mode — no behavior change.
+        with _label_transition_guard():
+            before = _current_status_labels(issue_num, repo_name)
+            changed = _sm_transition(issue_num, target_state, actor=actor, repo=repo_name, note=note)
         structured_log.info(
             "ticket_transition",
             f"transition #{issue_num} → {target_state.value} actor={actor!r}",
@@ -2280,7 +2304,11 @@ def _call_finish_feature(
         sub_env["COMMANDER_SPRINT_RUNNING"] = sprint_label
 
     print(f"  Calling finish_feature.py --issue {issue_num} --target-branch {target_branch} ...")
-    result = subprocess.run(cmd, cwd=str(wt_root), capture_output=True, text=True, env=sub_env)
+    # issue #738: serialize develop/sprint-branch merges — if a merge is already
+    # in flight (e.g. a concurrent tester or a stale retry), block until it lands
+    # so two merges never push to the shared target branch at the same time.
+    with _develop_merge_guard():
+        result = subprocess.run(cmd, cwd=str(wt_root), capture_output=True, text=True, env=sub_env)
     if result.stdout:
         print(result.stdout.rstrip())
     if result.returncode != 0:
@@ -6265,9 +6293,12 @@ def run_sprint(
 
     start_time = time.monotonic()
 
-    # Clear any stale in-progress labels left by a prior interrupted run before
-    # dispatch begins — otherwise those tickets show stuck spinners on the board.
+    # Clear any stale in-progress / SIT labels left by a prior interrupted or
+    # crashed run before dispatch begins — otherwise those tickets show stuck
+    # spinners on the board, and in pipeline mode a ghost SIT would violate the
+    # at-most-one-SIT invariant (issue #738 AC5).
     _sweep_stale_in_progress(label, eff_repo)
+    _sweep_stale_status("SIT", label, eff_repo)
 
     total_issues = len(state.issues)
     _emit_sprint_lifecycle_event(

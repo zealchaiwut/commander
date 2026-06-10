@@ -152,6 +152,16 @@ When the ticket touches frontend/UI, before writing **any** UI code:
 - Keep commits atomic and well-described. The Tester reads the git log.
 - Use `codedb_search` aggressively — reading code is faster than guessing.
 
+## NO NEW ROUTES IN server.py (issue #761)
+
+New endpoints must go in `apps/dashboard/routers/<area>.py` and be mounted on
+the app via `app.include_router(...)`. **Adding routes directly to
+`apps/dashboard/server.py` is forbidden.** The `COMMANDER_GATE_MONOLITH` gate
+fails any diff that increases `server.py`'s line count, so a new route added to
+the monolith will be rejected and the ticket bounced back to SIT. Put the route
+in (or create) the appropriate router module, keep service logic in a sibling
+module, and import the router from `routers/__init__.py`.
+
 ## MERGE BOUNDARY (issue #311)
 
 Your responsibility ends at **pushing the feature branch**. You must NOT merge to the target branch by any means:

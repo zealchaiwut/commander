@@ -36,12 +36,16 @@ A JSON array of repo-relative file paths that the implementation will likely mod
 
 ## Size scale
 
+**Semantic:** a size's minutes is the **full pipeline wall-clock time** for the
+ticket — coder + tester end-to-end (in-progress → UAT) — not isolated agent
+effort and not human developer time.
+
 | Size | Minutes | Definition |
 |------|---------|-----------|
 | S    | 5       | ~1–5 min — trivial change, single file, well-understood scope |
 | M    | 15      | ~15 min — typical feature, a few files, clear requirements |
 | L    | 30      | ~30 min — complex feature, multiple subsystems, some uncertainty |
-| XL   | 60      | >30 min — major feature, high uncertainty, many dependencies |
+| XL   | 90      | >=90 min — major feature, high uncertainty, many dependencies (raised from 60 per observed actuals, issue #766) |
 
 ## Confidence levels
 

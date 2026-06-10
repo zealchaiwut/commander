@@ -63,7 +63,7 @@ Unique constraint: `(scope, project, key)`.
 
 Helpers: `get_setting(key, project=None)` and `set_setting(scope, key, value, project=None)` in `services/sprint_manager/settings_repo.py`.
 
-Global seed row: `scope='global'`, `key='estimation'`, `value={"size_minutes":{"S":5,"M":15,"L":30,"XL":60},"buffer_pct":20,"thin_ac_buffer_pct":30}`.
+Global seed row: `scope='global'`, `key='estimation'`, `value={"size_minutes":{"S":5,"M":15,"L":30,"XL":90},"buffer_pct":20,"thin_ac_buffer_pct":30}`. The `size_minutes` map is no longer redeclared here — `DEFAULT_ESTIMATION_CFG` imports the single canonical `SIZE_TO_MINUTES` from `services/sprint_manager/sizing.py` (issue #766). XL raised 60→90; size minutes now mean full-pipeline wall-clock (coder + tester, in-progress → UAT), not isolated agent effort.
 
 ### projects
 
@@ -103,6 +103,7 @@ Unique constraint: `(project_id, env)`.
 | `f6a7b8c9d0e1` | Add `events` table for structured log events |
 | `g7h8i9j0k1l2` | Add `settings` KV table; add `estimated_size` to `sprint_tickets`; seed global estimation row |
 | `h8i9j0k1l2m3` | Add `state` / `ended_at` / `end_reason` / `parent_label` to `sprints`; add `failed` to `sprint_status_enum`; add `sprint_ticket_order` table (issue #757) |
+| `i9j0k1l2m3n4` | Add `agent_runs` table for per-agent duration tracking (portable Integer/Text columns; SQLite + Postgres) (issue #764) |
 
 > **Neon is now an optional export target only (issue #758).** The dashboard and sprint manager run entirely off SQLite + local JSON; nothing writes to Neon in live paths. The Alembic migrations and SQLAlchemy models above remain so `scripts/export_to_neon.py` can push a snapshot on demand (`DATABASE_URL=… python scripts/export_to_neon.py`).
 
@@ -121,6 +122,7 @@ SQLite is the **authoritative, only live** store. As of sprint 57 it also holds 
 | `sync_state` | Per-key ETags for `If-None-Match` conditional GitHub requests (issue #756) |
 | `sprints` | Durable sprint lifecycle state — replaces the ephemeral `{label}-plan.json` / `{label}-pid` files as source of truth (issue #757) |
 | `sprint_ticket_order` | Ticket execution order per sprint (`label`, `issue`, `position`) (issue #757) |
+| `agent_runs` | One row per dispatched agent (coder, tester, …) with its own start/finish timestamps and wall-clock duration per issue (issue #764) |
 
 ### ticket_status (issue #755)
 
@@ -181,6 +183,28 @@ Audit log for project-level events recorded by `record_project_event()` in `apps
 | `data` | text | JSON-encoded payload with before/after values or other context; nullable |
 
 Indexes: `(project, created_at DESC)`, `(project, target)`, `(action_id)`.
+
+### agent_runs (issue #764)
+
+One row per dispatched agent per ticket, recorded at dispatch and finalized when
+the agent finishes. Replaces ticket-level timing that only captured the whole
+wall-clock span and lost per-agent resolution. Created identically on SQLite
+(`_create_agent_runs_table` in `apps/dashboard/db.py`) and Postgres (Alembic
+`0009_add_agent_runs`) using portable Integer/Text columns.
+
+| Column | Type | Description |
+|---|---|---|
+| `id` | integer PK | Auto-increment |
+| `issue_number` | integer NOT NULL | GitHub issue number |
+| `sprint_label` | text NOT NULL | Sprint label, e.g. `sprint-58` |
+| `agent` | text NOT NULL | Agent role (`coder`, `tester`, `documenter`, `reviewer`, `estimator`) |
+| `started_at` | text NOT NULL | ISO 8601 dispatch timestamp |
+| `finished_at` | text | ISO 8601 finish timestamp; nullable while running |
+| `duration_seconds` | integer | Wall-clock seconds for the run; nullable while running |
+| `outcome` | text | Run outcome; nullable |
+| `total_tokens` | integer | Tokens consumed by this agent run; nullable |
+
+Indexes: `(issue_number, agent)`, `(sprint_label)`.
 
 ## API Endpoints
 

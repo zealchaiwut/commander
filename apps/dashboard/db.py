@@ -156,6 +156,7 @@ def init_db():
         _create_issues_table(conn)
         _create_sync_state_table(conn)
         _create_sprint_lifecycle_tables(conn)
+        _create_agent_runs_table(conn)
         conn.commit()
 
 
@@ -277,6 +278,168 @@ def _create_sprint_lifecycle_tables(conn: sqlite3.Connection) -> None:
         "CREATE INDEX IF NOT EXISTS ix_sprint_ticket_order_label_pos "
         "ON sprint_ticket_order (label, position)"
     )
+
+
+# ── Per-agent run durations (issue #764) ──────────────────────────────────────
+#
+# `sprint_tickets.actual_elapsed_seconds` stores a single blended coder→tester
+# wall-clock span, losing per-agent resolution. `agent_runs` records one row per
+# dispatched agent (coder, tester, documenter, reviewer, estimator) with its own
+# start/finish timestamps and wall-clock duration. This fills the calibration gap
+# for the coder/tester split and surfaces per-agent durations in the UI. The
+# blended `sprint_tickets` tracking is unchanged (issue #764 AC8).
+
+
+def _create_agent_runs_table(conn: sqlite3.Connection) -> None:
+    """Create the agent_runs table (issue #764).
+
+    One row per dispatched agent. `started_at`/`finished_at` are ISO-8601 UTC
+    strings; `duration_seconds` is the wall-clock duration of the run. Kept in
+    its own helper so the recorder can ensure the table exists without running
+    the full init_db() migration. Mirrors the Alembic migration
+    0009_add_agent_runs so the schema is identical on SQLite and Postgres.
+    """
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS agent_runs (
+            id               INTEGER PRIMARY KEY AUTOINCREMENT,
+            issue_number     INTEGER NOT NULL,
+            sprint_label     TEXT NOT NULL,
+            agent            TEXT NOT NULL,
+            started_at       TEXT NOT NULL,
+            finished_at      TEXT,
+            duration_seconds INTEGER,
+            outcome          TEXT,
+            total_tokens     INTEGER
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS ix_agent_runs_issue_agent "
+        "ON agent_runs (issue_number, agent)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS ix_agent_runs_sprint "
+        "ON agent_runs (sprint_label)"
+    )
+
+
+def _duration_between(started_at: str | None, finished_at: str | None) -> int | None:
+    """Whole seconds between two ISO timestamps, or None if either is unusable."""
+    if not started_at or not finished_at:
+        return None
+    try:
+        s = datetime.fromisoformat(str(started_at).replace("Z", "+00:00"))
+        f = datetime.fromisoformat(str(finished_at).replace("Z", "+00:00"))
+    except (ValueError, TypeError):
+        return None
+    return round((f - s).total_seconds())
+
+
+def record_agent_start(
+    issue_number: int,
+    sprint_label: str,
+    agent: str,
+    started_at: str | None = None,
+) -> int | None:
+    """Insert an agent_runs row at dispatch time and return its id (issue #764).
+
+    `finished_at`/`duration_seconds`/`outcome` are left NULL until
+    record_agent_finish() closes the run. Returns the new row id (used to close
+    the exact run) or None on failure — callers treat this as best-effort.
+    """
+    started_at = started_at or _now_iso()
+    with get_conn() as conn:
+        _create_agent_runs_table(conn)
+        cur = conn.execute(
+            "INSERT INTO agent_runs "
+            "(issue_number, sprint_label, agent, started_at) "
+            "VALUES (?, ?, ?, ?)",
+            (int(issue_number), sprint_label, agent, started_at),
+        )
+        conn.commit()
+        return cur.lastrowid
+
+
+def record_agent_finish(
+    issue_number: int,
+    sprint_label: str,
+    agent: str,
+    finished_at: str | None = None,
+    duration_seconds: int | None = None,
+    outcome: str | None = None,
+    total_tokens: int | None = None,
+    run_id: int | None = None,
+) -> None:
+    """Close the open agent_runs row with finish time, duration and outcome (#764).
+
+    When `run_id` is given the exact row is updated; otherwise the most recent
+    still-open run (finished_at IS NULL) matching issue/sprint/agent is closed.
+    `duration_seconds` is used as supplied (the dispatcher passes a precise
+    monotonic measurement — issue #764 AC3); when omitted it is computed from the
+    start/finish timestamps. Best-effort: never raises into the sprint loop.
+    """
+    finished_at = finished_at or _now_iso()
+    with get_conn() as conn:
+        _create_agent_runs_table(conn)
+        if run_id is not None:
+            row = conn.execute(
+                "SELECT id, started_at FROM agent_runs WHERE id = ?", (run_id,)
+            ).fetchone()
+        else:
+            row = conn.execute(
+                "SELECT id, started_at FROM agent_runs "
+                "WHERE issue_number = ? AND sprint_label = ? AND agent = ? "
+                "AND finished_at IS NULL "
+                "ORDER BY id DESC LIMIT 1",
+                (int(issue_number), sprint_label, agent),
+            ).fetchone()
+        if row is None:
+            return
+        if duration_seconds is None:
+            duration_seconds = _duration_between(row["started_at"], finished_at)
+        conn.execute(
+            "UPDATE agent_runs SET finished_at = ?, duration_seconds = ?, "
+            "outcome = ?, total_tokens = ? WHERE id = ?",
+            (
+                finished_at,
+                None if duration_seconds is None else int(duration_seconds),
+                outcome,
+                None if total_tokens is None else int(total_tokens),
+                row["id"],
+            ),
+        )
+        conn.commit()
+
+
+def agent_runs_for_issue(issue_number: int, sprint_label: str | None = None) -> list[dict]:
+    """Return agent_runs rows for an issue (optionally scoped to a sprint) (#764)."""
+    with get_conn() as conn:
+        _create_agent_runs_table(conn)
+        if sprint_label is None:
+            rows = conn.execute(
+                "SELECT * FROM agent_runs WHERE issue_number = ? ORDER BY id",
+                (int(issue_number),),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM agent_runs WHERE issue_number = ? AND sprint_label = ? "
+                "ORDER BY id",
+                (int(issue_number), sprint_label),
+            ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def agent_runs_for_sprint(sprint_label: str) -> list[dict]:
+    """Return all agent_runs rows for a sprint, ordered by issue then start (#764)."""
+    with get_conn() as conn:
+        _create_agent_runs_table(conn)
+        rows = conn.execute(
+            "SELECT * FROM agent_runs WHERE sprint_label = ? "
+            "ORDER BY issue_number, id",
+            (sprint_label,),
+        ).fetchall()
+    return [dict(r) for r in rows]
 
 
 def _now_iso() -> str:

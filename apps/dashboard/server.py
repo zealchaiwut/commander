@@ -74,7 +74,14 @@ import projects as projects_module
 _REPO_ROOT = Path(__file__).parent.parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
-from services.logging import log as _slog
+from services.logging import log as _slog, setup_logging as _setup_logging
+
+# Install size-rotating prd.log handler at import time so the uvicorn worker
+# (which imports server:app) is covered without disk-exhaustion risk (issue #762).
+try:
+    _setup_logging()
+except Exception:  # logging must never break startup
+    pass
 from services.sprint_manager.estimate_issue import (
     fetch_issue as _ei_fetch_issue,
     run_estimator as _ei_run_estimator,
@@ -905,6 +912,13 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
+# Strangler-fig routers (issue #761): extracted route clusters live in
+# apps/dashboard/routers/ and are mounted here. New endpoints go there, NOT
+# in this file — the COMMANDER_GATE_MONOLITH gate rejects server.py growth.
+from routers import backup_router  # noqa: E402
+
+app.include_router(backup_router)
+
 logger = logging.getLogger(__name__)
 
 
@@ -1315,24 +1329,6 @@ def get_gh_auth_status():
         content=_GH_AUTH_STATUS,
         headers={"Cache-Control": "no-cache, must-revalidate"},
     )
-
-
-@app.get("/api/backup/status")
-def get_backup_status():
-    """Return the current state of the gist-based config backup.
-
-    Response shape:
-    {
-      "last_backup_at": "<ISO-8601>" | null,
-      "gist_id": "<id>" | null,
-      "gist_url": "https://gist.github.com/..." | null,
-      "file_count": <int>,
-      "last_error": "<message>" | null
-    }
-    """
-    if not _BACKUP_AVAILABLE:
-        raise HTTPException(status_code=503, detail="Backup module not available")
-    return _backup_module.get_backup_status()
 
 
 _seen_agent_sessions: set[str] = set()
@@ -2150,6 +2146,41 @@ def get_project_events(
         except (TypeError, ValueError):
             pass
         result.append(d)
+
+    # issue #764: enrich agent_finished rows with the durable duration_seconds
+    # from agent_runs so the Activity tab can show a Duration column. Matched by
+    # issue number + agent role; falls back to the duration already carried in
+    # the event detail when no agent_runs row is found.
+    _agent_finished = [
+        d for d in result
+        if d.get("type") == "agent_finished" and isinstance(d.get("detail"), dict)
+    ]
+    if _agent_finished:
+        _issue_nums = {
+            d["detail"].get("issue_num")
+            for d in _agent_finished
+            if d["detail"].get("issue_num") is not None
+        }
+        _runs_by_key: dict = {}
+        try:
+            for _num in _issue_nums:
+                for _r in db.agent_runs_for_issue(int(_num)):
+                    if _r.get("duration_seconds") is None:
+                        continue
+                    _runs_by_key[(int(_num), str(_r.get("agent", "")).lower())] = _r["duration_seconds"]
+        except Exception:
+            _runs_by_key = {}
+        for d in _agent_finished:
+            det = d["detail"]
+            num = det.get("issue_num")
+            role = str(det.get("role", "")).lower()
+            dur = None
+            if num is not None:
+                dur = _runs_by_key.get((int(num), role))
+            if dur is None:
+                dur = det.get("duration")
+            if dur is not None:
+                d["duration_seconds"] = dur
 
     return result
 

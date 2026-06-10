@@ -11,8 +11,15 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
+try:  # importable as top-level when services/sprint_manager is on sys.path
+    from sizing import SIZE_TO_MINUTES
+except ImportError:  # pragma: no cover - fallback for package-qualified import
+    from services.sprint_manager.sizing import SIZE_TO_MINUTES
+
+# size_minutes inherits the single canonical map from sizing.py (issue #766);
+# no literal map is redeclared here.
 DEFAULT_ESTIMATION_CFG: dict[str, Any] = {
-    "size_minutes": {"S": 5, "M": 15, "L": 30, "XL": 60},
+    "size_minutes": dict(SIZE_TO_MINUTES),
     "buffer_pct": 20,
     "thin_ac_buffer_pct": 30,
 }

@@ -4936,11 +4936,48 @@ def _plan_json_set_state(
     state: str,
     **extra_fields,
 ) -> None:
-    """Update state in plan.json, creating the file if missing."""
+    """Update state in plan.json, creating the file if missing.
+
+    plan.json is a deprecated cache (issue #757) — the durable lifecycle state
+    now lives in the `sprints` table.  This still writes it for dual-write.
+    """
     existing = _read_plan_json(project_root, sprint_label) or {}
     existing["state"] = state
     existing.update(extra_fields)
     _write_plan_json(project_root, sprint_label, existing)
+
+
+def _sprint_db_set_state(
+    sprint_label: str,
+    project: str,
+    state: str,
+    **extra_fields,
+) -> None:
+    """Mirror a sprint lifecycle transition into the `sprints` table (issue #757).
+
+    Best-effort: any DB failure is swallowed so it never breaks the request —
+    plan.json dual-write remains the cache and the sweep paths reconcile drift.
+    """
+    try:
+        if state == "running":
+            db.record_sprint_start(
+                sprint_label, project=project or "",
+                started_at=extra_fields.get("started_at"),
+            )
+        elif state == "completed":
+            db.record_sprint_finish(
+                sprint_label,
+                ended_at=extra_fields.get("ended_at"),
+                end_reason=extra_fields.get("end_reason"),
+            )
+        elif state == "cancelled":
+            db.record_sprint_cancel(
+                sprint_label,
+                end_reason=extra_fields.get("end_reason", "cancelled"),
+                ended_at=extra_fields.get("ended_at"),
+            )
+    except Exception:
+        pass
 
 
 def _get_sprint_pid(project_root: Path, sprint_label: str) -> Optional[int]:
@@ -4980,17 +5017,103 @@ def _load_sprint_order(project_root: Path, all_sprint_labels: list[str]) -> list
     return result
 
 
-def _is_sprint_running(project_root: Path, sprint_label: str) -> bool:
-    """Check if a sprint is running.
+def _sprint_pid_alive(project_root: Path, sprint_label: str) -> bool:
+    """Return True if the sprint's PID (or pending claim) is alive (issue #757).
 
-    Reads plan.json state as the authoritative source.  Falls back to PID-file
-    scanning only for legacy sprints that have no plan.json yet.
-
-    Reconciles "plan.json=running but PID dead" to state=cancelled so the next
-    caller sees the correct state without manual intervention.
+    Scans both `{label}-pid` and `{label}-pid.pending`, treating a placeholder
+    "0"/"" PID as a still-starting claim. Cleans up files holding a dead or
+    unparseable PID. Pure liveness — no state interpretation.
     """
     import logging as _logging
     _log = _logging.getLogger(__name__)
+    sprints_dir  = _commander_dir(project_root) / "sprints"
+    pid_file     = sprints_dir / f"{sprint_label}-pid"
+    pending_file = sprints_dir / f"{sprint_label}-pid.pending"
+    for candidate in (pid_file, pending_file):
+        if not candidate.exists():
+            continue
+        try:
+            raw = candidate.read_text(encoding="utf-8").strip()
+        except OSError:
+            continue
+        if raw in ("", "0"):
+            return True  # pending claim — still starting up
+        try:
+            pid = int(raw)
+        except ValueError:
+            try:
+                candidate.unlink()
+            except OSError:
+                pass
+            continue
+        try:
+            os.kill(pid, 0)
+            return True
+        except ProcessLookupError:
+            _log.warning(
+                "Stale sprint lock: %s (PID %s dead) — cleaning up",
+                candidate.name, raw,
+            )
+            try:
+                candidate.unlink()
+            except OSError:
+                pass
+        except PermissionError:
+            return True
+        except OSError:
+            pass
+    return False
+
+
+def _is_sprint_running(project_root: Path, sprint_label: str) -> bool:
+    """Check if a sprint is running.
+
+    The durable `sprints` table is the authoritative source (issue #757): a
+    sprint is running only when DB state='running' AND its PID is alive. A
+    PID-dead + DB-running row is reconciled to state='cancelled' and reported as
+    not running. Falls back to plan.json + PID-file scanning only for legacy
+    sprints that have no DB row yet.
+    """
+    import logging as _logging
+    _log = _logging.getLogger(__name__)
+
+    # ── DB-authoritative path (issue #757) ───────────────────────────────────
+    # Only trust a DB row that belongs to THIS project. The sprints table is keyed
+    # by label (globally unique, mirroring the Neon uq_sprints_label constraint),
+    # but project_root scopes this call — guard against a same-label row from a
+    # different project (or a stale row in a shared DB) hijacking the decision.
+    try:
+        _db_row = db.get_sprint(sprint_label)
+    except Exception:
+        _db_row = None
+    if _db_row is not None:
+        _row_proj = str(_db_row.get("project") or "")
+        _row_slug = _row_proj.split("/")[-1] if "/" in _row_proj else _row_proj
+        # Trust the row only when its project slug matches this project_root.
+        # An empty/missing project (legacy CLI write) is not trusted for a named
+        # project — fall back to plan.json + PID for those.
+        if _row_slug != project_root.name:
+            _db_row = None
+    if _db_row is not None:
+        if _db_row.get("state") != "running":
+            return False
+        if _sprint_pid_alive(project_root, sprint_label):
+            return True
+        # DB=running but PID dead — reconcile both stores to cancelled.
+        _log.warning(
+            "Sprint %s: DB state=running but no alive PID — reconciling to cancelled",
+            sprint_label,
+        )
+        try:
+            db.record_sprint_cancel(sprint_label, end_reason="orphan-pid")
+        except Exception:
+            pass
+        try:
+            _plan_json_set_state(project_root, sprint_label, "cancelled",
+                                 end_reason="orphan-pid")
+        except Exception:
+            pass
+        return False
 
     plan = _read_plan_json(project_root, sprint_label)
     if plan is not None:
@@ -6254,16 +6377,22 @@ def run_sprint_managed(request: Request, body: SprintMgmtRunBody):
             detail=f"Sprint {body.sprint_label} is already running on {body.project}",
         )
 
-    # Write state=running before spawning subprocess (issue #507)
+    # Write state=running before spawning subprocess (issue #507).
+    # Durable lifecycle state goes to the `sprints` table (issue #757); plan.json
+    # is dual-written as a deprecated cache.
+    _started_at = datetime.now(timezone.utc).isoformat()
     try:
         _plan_json_set_state(
             project_root,
             body.sprint_label,
             "running",
-            started_at=datetime.now(timezone.utc).isoformat(),
+            started_at=_started_at,
         )
     except Exception:
         pass
+    _sprint_db_set_state(
+        body.sprint_label, body.project, "running", started_at=_started_at
+    )
 
     stripped_env = _build_sprint_subprocess_env()
     goal_path = _sprint_goal_path(project_root, body.sprint_label)
@@ -6461,11 +6590,12 @@ def kill_sprint(sprint_label: str, project: str):
         data["status"] = "cancelled"
         _sprint_json_write(json_path, data)
 
-    # Write state=cancelled to plan.json (issue #507)
+    # Write state=cancelled to plan.json (issue #507) + DB (issue #757)
     try:
         _plan_json_set_state(project_root, sprint_label, "cancelled")
     except Exception:
         pass
+    _sprint_db_set_state(sprint_label, project, "cancelled", end_reason="killed")
 
     _emit_dashboard_event(
         project=project or "dashboard",
@@ -7255,6 +7385,12 @@ def reorder_sprint_tickets(sprint_label: str, body: SprintTicketReorderBody):
         ]
         _sprint_json_write(json_path, data)
 
+    # Durable ticket order (issue #757); best-effort so it never breaks the reorder.
+    try:
+        db.set_sprint_ticket_order(sprint_label, body.issue_numbers)
+    except Exception:
+        pass
+
     return {"ok": True}
 
 
@@ -7276,6 +7412,11 @@ async def save_sprint_plan(sprint_label: str, project: str, request: Request):
     existing = _read_plan_json(project_root, sprint_label) or {}
     existing["tickets"] = body
     _write_plan_json(project_root, sprint_label, existing)
+    # Durable ticket order (issue #757); plan.json is the deprecated cache.
+    try:
+        db.set_sprint_ticket_order(sprint_label, body)
+    except Exception:
+        pass
     return {"ok": True}
 
 

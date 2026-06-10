@@ -15,7 +15,7 @@ PRD_DIR="$DASHBOARD_DIR"
 VENV="$COMMANDER_ROOT/venv"
 PID_FILE="$PRD_DIR/prd.pid"
 LOG_FILE="$PRD_DIR/prd.log"
-PORT=8000
+PORT="${PORT:-8000}"
 
 echo "=== Starting PRD dashboard (port $PORT) ==="
 

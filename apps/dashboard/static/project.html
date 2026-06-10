@@ -1071,6 +1071,15 @@
     }
     .ps-machine-note .ti { margin-top: 1px; flex-shrink: 0; }
 
+    /* ── Deploy actions card (issue #723) ── */
+    .ps-deploy-out {
+      font-family: var(--mono); font-size: 12px; line-height: 1.5;
+      background: var(--surface-2, #0f172a); color: var(--text-sub);
+      border: 1px solid var(--border, #334155); border-radius: 8px;
+      padding: 10px 12px; margin: 4px 0 12px; white-space: pre-wrap;
+      word-break: break-word; max-height: 220px; overflow: auto;
+    }
+
     /* ── Scaffold docs card (issue #681) ── */
     .ps-scaffold-actions { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
     .ps-scaffold-badge {
@@ -6297,6 +6306,20 @@
             </div>
             <div class="proj-settings-card-body" id="ps-env-body">
               <!-- Rows injected by projEnvLoad() -->
+            </div>
+          </div>
+
+          <!-- Deploy actions card (issue #723) -->
+          <div class="proj-settings-card" id="ps-deploy-card">
+            <div class="proj-settings-card-head">
+              <i class="ti ti-rocket proj-settings-card-icon"></i>
+              <div>
+                <div class="proj-settings-card-title">Deploy actions</div>
+                <div class="proj-settings-card-sub">Pull the configured branch and restart local services (pull-only — no merge or push)</div>
+              </div>
+            </div>
+            <div class="proj-settings-card-body" id="ps-deploy-body">
+              <!-- Rows injected by deployActionsLoad() -->
             </div>
           </div>
 
@@ -21623,6 +21646,7 @@ async function projSettingsLoad() {
   // Expose slug for env-path JS block
   window._currentProjectSlug = slug;
   projEnvLoad();
+  deployActionsLoad();
 
   // Show project name in inherit notice
   const nameEl = document.getElementById('ps-proj-name');
@@ -22020,6 +22044,120 @@ function addEnvRow() {
   var anchor = body.querySelector('div[style*="margin-top"]');
   if (anchor) body.insertBefore(row, anchor);
   else body.appendChild(row);
+}
+
+// ── Deploy actions (issue #723) ──────────────────────────────────────────────
+// Render Deploy + Restart buttons for each local environment from deploy-config.
+
+function _escAttr(s) { return (s || '').replace(/"/g, '&quot;'); }
+
+function deployActionsLoad() {
+  var slug = (window._currentProjectSlug || '');
+  var body = document.getElementById('ps-deploy-body');
+  if (!slug || !body) return;
+  fetch('/api/projects/' + encodeURIComponent(slug) + '/deploy-config')
+    .then(function(r) { return r.ok ? r.json() : {}; })
+    .then(function(cfg) { _renderDeployActions(cfg || {}); })
+    .catch(function() {});
+}
+
+function _renderDeployActions(cfg) {
+  var body = document.getElementById('ps-deploy-body');
+  if (!body) return;
+
+  var locals = Object.keys(cfg).filter(function(env) {
+    return (cfg[env] || {}).host === 'local';
+  });
+
+  if (!locals.length) {
+    body.innerHTML = '<div class="ps-machine-note"><i class="ti ti-info-circle"></i>'
+      + ' No local environments configured. Deploy actions apply to host=local envs only.</div>';
+    return;
+  }
+
+  var html = '';
+  locals.forEach(function(env) {
+    var entry = cfg[env] || {};
+    var branch = entry.branch || '';
+    html += '<div class="ps-row" data-deploy-row="' + _escAttr(env) + '">'
+      + '<div class="ps-row-label">' + env
+      + (branch ? ' <span style="color:var(--text-muted);font-weight:400">(' + _escAttr(branch) + ')</span>' : '')
+      + '</div>'
+      + '<div class="ps-row-control" style="gap:8px">'
+      + '<button class="ps-btn" type="button" aria-label="Deploy ' + _escAttr(env) + '"'
+      + ' onclick="envDeploy(\'' + _escAttr(env) + '\')">'
+      + '<i class="ti ti-rocket"></i> Deploy</button>'
+      + '<button class="ps-btn" type="button" aria-label="Restart ' + _escAttr(env) + '"'
+      + ' onclick="envRestart(\'' + _escAttr(env) + '\')">'
+      + '<i class="ti ti-refresh"></i> Restart</button>'
+      + '</div>'
+      + '</div>'
+      + '<pre id="ps-deploy-out-' + _escAttr(env) + '" class="ps-deploy-out" style="display:none"></pre>';
+  });
+
+  html += '<div class="ps-machine-note"><i class="ti ti-info-circle"></i>'
+    + ' Deploy runs <code>git pull --ff-only</code> then restarts the service. Pull-only — never merges or pushes.</div>';
+
+  body.innerHTML = html;
+}
+
+function _deployOut(env) {
+  return document.getElementById('ps-deploy-out-' + env);
+}
+
+function _setDeployOut(env, text, isError) {
+  var pre = _deployOut(env);
+  if (!pre) return;
+  pre.style.display = 'block';
+  pre.textContent = text;
+  pre.style.color = isError ? 'var(--error, #ef4444)' : '';
+}
+
+function envDeploy(env) {
+  var slug = (window._currentProjectSlug || '');
+  if (!slug) return;
+  _setDeployOut(env, 'Deploying ' + env + '…', false);
+  fetch('/api/projects/' + encodeURIComponent(slug) + '/environments/'
+        + encodeURIComponent(env) + '/deploy', { method: 'POST' })
+    .then(function(r) {
+      return r.json().then(function(data) { return { ok: r.ok, status: r.status, data: data }; });
+    })
+    .then(function(res) {
+      if (!res.ok) {
+        _setDeployOut(env, 'Deploy failed (' + res.status + '): '
+          + ((res.data && res.data.detail) || 'error'), true);
+        return;
+      }
+      var d = res.data || {};
+      var out = (d.pull_output || '').trim();
+      var lines = out ? out + '\n' : '';
+      lines += 'HEAD: ' + (d.head || '(unknown)');
+      _setDeployOut(env, lines, false);
+    })
+    .catch(function(e) { _setDeployOut(env, 'Deploy error: ' + e, true); });
+}
+
+function envRestart(env) {
+  var slug = (window._currentProjectSlug || '');
+  if (!slug) return;
+  _setDeployOut(env, 'Restarting ' + env + '…', false);
+  fetch('/api/projects/' + encodeURIComponent(slug) + '/environments/'
+        + encodeURIComponent(env) + '/restart', { method: 'POST' })
+    .then(function(r) {
+      return r.json().then(function(data) { return { ok: r.ok, status: r.status, data: data }; });
+    })
+    .then(function(res) {
+      if (!res.ok) {
+        _setDeployOut(env, 'Restart failed (' + res.status + '): '
+          + ((res.data && res.data.detail) || 'error'), true);
+        return;
+      }
+      var msg = res.status === 202
+        ? 'Restart accepted — service is bouncing (will be back shortly).'
+        : 'Restarted ' + env + '.';
+      _setDeployOut(env, msg, false);
+    })
+    .catch(function(e) { _setDeployOut(env, 'Restart error: ' + e, true); });
 }
 
 function projEnvSave() {

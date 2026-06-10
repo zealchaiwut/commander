@@ -2316,6 +2316,153 @@ def put_project_deploy_config(slug: str, body: dict):
     return _deploy_config_response(slug, repo, merged)
 
 
+# ── Local deploy / restart actions (issue #723) ──────────────────────────────
+
+from services.sprint_manager import deploy_actions as _deploy_actions
+
+
+def _merged_deploy_config(slug: str, repo: str) -> dict:
+    """Return seed-merged stored deploy config (raw, secrets intact)."""
+    stored = _settings_repo.get_setting_scoped("project", DEPLOY_CONFIG_KEY, project=repo)
+    return _deploy_merge_seed(_deploy_seed_for(slug), stored or {})
+
+
+def _restart_environment(entry: dict) -> dict:
+    """Restart a local environment from its config entry.
+
+    Strategy: launchd kickstart when a label is set, else stop+start scripts.
+    The dashboard's own process is restarted via a DETACHED helper so this call
+    can return before launchd kills the worker. Validation failures raise
+    HTTPException 400; a failed command raises 500.
+    """
+    try:
+        _deploy_actions.require_restart_target(entry)
+    except _deploy_actions.DeployActionError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    label = _deploy_actions.restart_label(entry)
+
+    # Dashboard's own process — detach so the response flushes before kickstart.
+    if label and _deploy_actions.is_self_restart(entry):
+        cmd = _deploy_actions.build_self_restart_command(label)
+        subprocess.Popen(
+            cmd,
+            start_new_session=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        return {"method": "launchd-self", "detached": True, "launchd_label": label}
+
+    if label:
+        cmd = _deploy_actions.build_kickstart_command(label)
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            raise HTTPException(
+                status_code=500,
+                detail=result.stderr.strip() or result.stdout.strip() or "kickstart failed",
+            )
+        return {
+            "method": "launchd",
+            "launchd_label": label,
+            "stdout": result.stdout,
+            "stderr": result.stderr,
+        }
+
+    # Script fallback: stop then start.
+    stop, start = _deploy_actions.stop_start_scripts(entry)
+    steps = []
+    for phase, script in (("stop", stop), ("start", start)):
+        result = subprocess.run(["sh", "-c", script], capture_output=True, text=True)
+        steps.append({
+            "phase": phase,
+            "script": script,
+            "returncode": result.returncode,
+            "stdout": result.stdout,
+            "stderr": result.stderr,
+        })
+        if result.returncode != 0:
+            raise HTTPException(
+                status_code=500,
+                detail=f"{phase} script failed: {result.stderr.strip() or script}",
+            )
+    return {"method": "scripts", "steps": steps}
+
+
+@app.post("/api/projects/{slug}/environments/{env}/deploy")
+def deploy_environment(slug: str, env: str):
+    """Pull-only deploy for a local environment, then auto-restart it.
+
+    Runs ``git pull --ff-only origin <branch>`` inside the configured
+    ``working_dir`` (never merge/push/PR/checkout), returns the raw pull stdout
+    and the new HEAD sha, then triggers the restart action for the same env.
+    Rejects (400) when ``working_dir``/``branch`` are absent — before any shell
+    command runs. Returns 404 for an unknown slug.
+    """
+    repo = _resolve_project_slug(slug)
+    merged = _merged_deploy_config(slug, repo)
+    entry = _deploy_actions.get_env_entry(merged, env)
+    try:
+        working_dir, branch = _deploy_actions.require_deploy_target(entry)
+    except _deploy_actions.DeployActionError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    pull = subprocess.run(
+        _deploy_actions.build_pull_command(branch),
+        capture_output=True, text=True, cwd=working_dir,
+    )
+    if pull.returncode != 0:
+        raise HTTPException(
+            status_code=500,
+            detail=pull.stderr.strip() or pull.stdout.strip() or "git pull failed",
+        )
+
+    head = subprocess.run(
+        _deploy_actions.build_head_sha_command(),
+        capture_output=True, text=True, cwd=working_dir,
+    )
+    head_sha = head.stdout.strip()
+
+    # AC: after a successful pull, auto-trigger restart for the same env.
+    # Best-effort — a restart-config problem must not mask a successful pull.
+    try:
+        restart_result = _restart_environment(entry)
+    except HTTPException as exc:
+        restart_result = {"ok": False, "error": exc.detail}
+
+    resp = {
+        "ok": True,
+        "env": env,
+        "branch": branch,
+        "working_dir": working_dir,
+        "pull_output": pull.stdout,
+        "head": head_sha,
+        "restart": restart_result,
+    }
+    if restart_result.get("detached"):
+        return JSONResponse(status_code=202, content=resp)
+    return resp
+
+
+@app.post("/api/projects/{slug}/environments/{env}/restart")
+def restart_environment(slug: str, env: str):
+    """Restart a local environment's service.
+
+    Uses ``launchctl kickstart -k`` when a ``launchd_label`` is configured, else
+    falls back to the configured stop+start scripts. For the dashboard's own
+    process the work is detached and the call returns 202 immediately. Rejects
+    (400) when no valid restart target is configured; 404 for an unknown slug.
+    """
+    repo = _resolve_project_slug(slug)
+    merged = _merged_deploy_config(slug, repo)
+    entry = _deploy_actions.get_env_entry(merged, env)
+    if entry is None:
+        raise HTTPException(status_code=400, detail=f"No deploy config for environment '{env}'")
+    result = _restart_environment(entry)
+    if result.get("detached"):
+        return JSONResponse(status_code=202, content={"ok": True, "env": env, **result})
+    return {"ok": True, "env": env, **result}
+
+
 # ── Settings sync (issue #644) ───────────────────────────────────────────────
 
 

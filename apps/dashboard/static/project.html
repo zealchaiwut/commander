@@ -45,6 +45,10 @@
       --steel-bg:     #e0eaf8;
       --yellow:       #a16207;
       --yellow-bg:    #fefce8;
+      --teal:         #0f766e;
+      --teal-bg:      #ccfbf1;
+      --pink:         #be185d;
+      --pink-bg:      #fce7f3;
       --sidebar-width: 220px;
       --color-success:    #dcfce7;
       --color-success-fg: #16a34a;
@@ -81,6 +85,10 @@
       --steel-bg:     rgba(122,163,212,.13);
       --yellow:       #facc15;
       --yellow-bg:    rgba(250,204,21,.13);
+      --teal:         #2dd4bf;
+      --teal-bg:      rgba(45,212,191,.15);
+      --pink:         #f472b6;
+      --pink-bg:      rgba(244,114,182,.15);
       --color-success:    rgba(34,197,94,.15);
       --color-success-fg: #22c55e;
       --color-error:      rgba(239,68,68,.15);
@@ -2302,6 +2310,22 @@
     .smgmt-log-line.log-warn     .smgmt-log-msg { color: var(--amber); }
     .smgmt-log-line.log-fail     .smgmt-log-msg { color: var(--red); }
     .smgmt-log-pid { font-family: var(--mono); font-size: 11px; color: var(--text-muted); margin-left: 4px; }
+    /* ── Log chips: issue refs + agent names (issue #765) ──
+       Shared by the live log panel, Activity-tab run rows, and post-run summary
+       excerpt. Mono tint-fill + solid color, mirroring .lbl-chip. */
+    .log-chip {
+      font-family: var(--mono); font-size: 11px; font-weight: 600;
+      padding: 0 5px; border-radius: 4px; white-space: nowrap;
+      vertical-align: baseline; line-height: 1.5;
+    }
+    .log-chip--issue { color: var(--blue); background: var(--blue-bg); text-decoration: none; }
+    .log-chip--issue:hover { text-decoration: underline; }
+    .log-agent-coder      { color: var(--blue);   background: var(--blue-bg); }
+    .log-agent-tester     { color: var(--green);  background: var(--green-bg); }
+    .log-agent-reviewer   { color: var(--purple); background: var(--purple-bg); }
+    .log-agent-documenter { color: var(--amber);  background: var(--amber-bg); }
+    .log-agent-estimator  { color: var(--teal);   background: var(--teal-bg); }
+    .log-agent-ba         { color: var(--pink);   background: var(--pink-bg); }
     /* ── Live log panel (running sprint, issue #309) ── */
     .smgmt-live-log {
       border-top: 1px solid var(--border);
@@ -9967,7 +9991,7 @@ async function _smgmtMaybeLoadLog(label, logId) {
       return;
     }
     streamEl.innerHTML = data.tail.split('\n').map(line =>
-      `<div class="smgmt-log-line"><span class="smgmt-log-msg">${escHtml(line)}</span></div>`
+      `<div class="smgmt-log-line"><span class="smgmt-log-msg">${colorizeLogLine(line, repo)}</span></div>`
     ).join('');
   } catch (_) {
     streamEl.textContent = 'Could not load log.';
@@ -10750,11 +10774,12 @@ function _smgmtLiveLogLinesHtml(logLines) {
   if (!logLines || logLines.length === 0) {
     return '<div class="smgmt-log-line" style="color:var(--text-sub)">Waiting for log…</div>';
   }
+  const repo = (typeof _smgmtRepo === 'function' ? (_smgmtRepo() || '') : '');
   return logLines.map(l => {
     const cls = _LOG_TYPE_CLASS[l.type] || '';
     const tsHtml = l.timestamp && l.timestamp !== '—'
       ? `<span class="smgmt-log-time">${escHtml(l.timestamp)}</span>` : '';
-    return `<div class="smgmt-log-line${cls ? ' ' + cls : ''}">${tsHtml}<span class="smgmt-log-msg">${escHtml(l.message)}</span></div>`;
+    return `<div class="smgmt-log-line${cls ? ' ' + cls : ''}">${tsHtml}<span class="smgmt-log-msg">${colorizeLogLine(l.message, repo)}</span></div>`;
   }).join('');
 }
 
@@ -18986,10 +19011,11 @@ function _logsEventsHtml(events) {
   if (filtered.length === 0) {
     return '<div class="logs-empty" style="padding:6px 0;font-size:11px">No events match current filters.</div>';
   }
+  const repo = (typeof _logsRepo === 'function' ? (_logsRepo() || '') : '');
   return filtered.map(e =>
     `<div class="logs-event-line ${escHtml(e.type)}">` +
     `<span class="logs-event-ts">${escHtml(e.timestamp)}</span>` +
-    `<span class="logs-event-msg">${escHtml(e.message)}</span>` +
+    `<span class="logs-event-msg">${colorizeLogLine(e.message, repo)}</span>` +
     `</div>`
   ).join('');
 }
@@ -19091,7 +19117,7 @@ async function logsLoadRawView() {
     if (!resp.ok) { streamEl.innerHTML = '<div class="logs-raw-line" style="color:var(--red)">Failed to load log.</div>'; return; }
     const data = await resp.json();
     if (!data.found || !data.tail) { streamEl.innerHTML = '<div class="logs-raw-line" style="color:var(--text-sub)">No log file found for this sprint.</div>'; return; }
-    streamEl.innerHTML = data.tail.split('\n').map(line => `<div class="logs-raw-line">${escHtml(line)}</div>`).join('');
+    streamEl.innerHTML = data.tail.split('\n').map(line => `<div class="logs-raw-line">${colorizeLogLine(line, project || '')}</div>`).join('');
     streamEl.scrollTop = streamEl.scrollHeight;
   } catch (_) { streamEl.innerHTML = '<div class="logs-raw-line" style="color:var(--red)">Error loading log.</div>'; }
 }
@@ -23940,6 +23966,7 @@ async function sprintCleanupConfirm() {
 </script>
 
 <!-- Shared Add Project modal logic (single source of truth for home + project) -->
+<script src="/static/log-colorize.js"></script>
 <script src="/static/add-project-modal.js"></script>
 
 </body>

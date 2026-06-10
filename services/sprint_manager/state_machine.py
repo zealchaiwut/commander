@@ -27,6 +27,7 @@ class TicketState(enum.Enum):
     SIT = "SIT"                    # system integration testing
     UAT = "UAT"                    # user acceptance testing
     NEEDS_REWORK = "NEEDS_REWORK"  # sent back for rework
+    BLOCKED = "BLOCKED"            # blocked — cannot proceed until resolved (label: blocked)
     DONE = "DONE"                  # pseudo-state: closed/approved
 
 
@@ -39,6 +40,7 @@ STATE_LABELS: dict[TicketState, frozenset[str]] = {
     TicketState.SIT:          frozenset({"SIT"}),
     TicketState.UAT:          frozenset({"UAT"}),
     TicketState.NEEDS_REWORK: frozenset({"needs-rework"}),
+    TicketState.BLOCKED:      frozenset({"blocked"}),
     TicketState.DONE:         frozenset(),
 }
 

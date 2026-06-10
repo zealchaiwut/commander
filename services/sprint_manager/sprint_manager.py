@@ -1498,15 +1498,24 @@ def _add_blocked_label(
         except Exception as e:
             structured_log.warn("hang_comment_failed", f"failed to post hang comment: {e}", exc=str(e))
         return
+    # Route the label write through transition() — the single source of truth
+    # for status-label mutations (issue #752). Never edit the 'blocked' label
+    # via github_client directly.
+    _transition_safe(
+        issue_num,
+        _TicketState.BLOCKED,
+        actor="sprint_manager:hang",
+        repo_name=repo_name,
+        note=reason,
+    )
     try:
-        github_client.update_labels(issue_num, add=safe_add, repo_name=repo_name)
         github_client.add_comment(
             issue_num,
             f"Issue blocked by sprint manager (HANG): {reason}",
             repo_name=repo_name,
         )
     except Exception as e:
-        structured_log.warn("blocked_label_failed", f"failed to update GitHub blocked label: {e}", exc=str(e))
+        structured_log.warn("blocked_comment_failed", f"failed to post blocked comment: {e}", exc=str(e))
 
 
 def _find_feature_branch(issue_num: int) -> Optional[str]:

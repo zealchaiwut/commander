@@ -7,5 +7,6 @@ forbidden and is rejected by the COMMANDER_GATE_MONOLITH gate.
 """
 from .analytics import router as analytics_router
 from .backup import router as backup_router
+from .log_search import router as log_search_router
 
-__all__ = ["analytics_router", "backup_router"]
+__all__ = ["analytics_router", "backup_router", "log_search_router"]

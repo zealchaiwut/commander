@@ -25,8 +25,17 @@ codedb.snapshot
 # Runtime
 *.pid
 *.log
+*.db
+*.bak
+:memory:
 logs/
 sprints/
+
+# Generated / runtime artifacts (issue #762 secrets + hygiene audit)
+STATUS.md
+requirements.txt.bak
+.commander/estimates/
+.commander/reports/
 
 # Sprint manager user-specific config (template lives at .commander/sprint.yaml.example)
 .commander/sprint.yaml

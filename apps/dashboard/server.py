@@ -74,7 +74,14 @@ import projects as projects_module
 _REPO_ROOT = Path(__file__).parent.parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
-from services.logging import log as _slog
+from services.logging import log as _slog, setup_logging as _setup_logging
+
+# Install size-rotating prd.log handler at import time so the uvicorn worker
+# (which imports server:app) is covered without disk-exhaustion risk (issue #762).
+try:
+    _setup_logging()
+except Exception:  # logging must never break startup
+    pass
 from services.sprint_manager.estimate_issue import (
     fetch_issue as _ei_fetch_issue,
     run_estimator as _ei_run_estimator,

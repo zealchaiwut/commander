@@ -16,6 +16,17 @@ from pathlib import Path
 
 def main() -> None:
     here = Path(__file__).parent
+
+    # Install size-rotating logging for prd.log before launching (issue #762).
+    repo_root = here.parent.parent
+    if str(repo_root) not in sys.path:
+        sys.path.insert(0, str(repo_root))
+    try:
+        from services.logging import setup_logging
+        setup_logging()
+    except Exception:
+        pass
+
     venv_uvicorn = here / "venv" / "bin" / "uvicorn"
     port = os.environ.get("PORT", "8000")
 

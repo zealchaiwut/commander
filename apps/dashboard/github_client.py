@@ -24,6 +24,25 @@ _cache: dict[str, tuple[float, object]] = {}
 _detected_repo: str | None = None
 
 
+class SprintRunLockError(RuntimeError):
+    """Raised when a non-status label mutation is attempted during a sprint run."""
+
+
+def _refuse_if_sprint_running(action: str) -> None:
+    """Refuse non-status label mutations while a sprint run holds the lock.
+
+    During an active sprint run (COMMANDER_SPRINT_RUNNING=1) only status labels
+    may change; sprint-N assignment and sprint-label strips must be frozen
+    (issue #754). Mirrors the existing "refuse if running" guards elsewhere.
+    When the lock is not held this is a no-op, so existing behavior is unchanged.
+    """
+    if os.environ.get("COMMANDER_SPRINT_RUNNING") == "1":
+        raise SprintRunLockError(
+            f"Sprint run active (COMMANDER_SPRINT_RUNNING=1): refusing to {action}. "
+            f"Sprint and other non-status labels are frozen until the run ends."
+        )
+
+
 # ── repo resolution ───────────────────────────────────────────────────────────
 
 def repo() -> str:
@@ -231,6 +250,7 @@ def assign_sprint(issue_id: int, sprint_num: int | None, repo_name: str | None =
     If sprint_num is set, ensures the label exists, removes other sprint-* labels
     and removes the 'backlog' label if present, then adds sprint-N.
     """
+    _refuse_if_sprint_running("change sprint assignment")
     r = _r(repo_name)
 
     # Find existing sprint labels on the issue
@@ -364,6 +384,7 @@ def assign_sprint_by_label(issue_id: int, sprint_label: str | None,
     Handles both plain sprint-N and dotted sprint-N.X labels.
     If sprint_label is None, removes all sprint-* labels.
     """
+    _refuse_if_sprint_running("change sprint assignment")
     r = _r(repo_name)
     issue = get_issue(issue_id, repo_name=repo_name)
     current_labels = [lbl["name"] for lbl in issue.get("labels", [])]

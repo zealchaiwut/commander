@@ -296,6 +296,58 @@ def _append_changelog_entry(
     return True
 
 
+def _section_body(text: str, section: str) -> Optional[str]:
+    """Return the body of `section` (lines between its heading and the next
+    heading of any level), or None if the section heading is not present.
+
+    Used to scope the idempotency check to a single section so identical
+    content in a *different* section does not block a valid insertion.
+    """
+    if not section:
+        return None
+    target = section.strip()
+    lines = text.splitlines(keepends=True)
+    sec_idx = None
+    for i, line in enumerate(lines):
+        if line.strip() == target:
+            sec_idx = i
+            break
+    if sec_idx is None:
+        return None
+    end = len(lines)
+    for i in range(sec_idx + 1, len(lines)):
+        if re.match(r"^#{1,6} ", lines[i]):
+            end = i
+            break
+    return "".join(lines[sec_idx + 1:end])
+
+
+def _content_already_present(text: str, section: str, content: str) -> bool:
+    """Precise idempotency check for a documentor change.
+
+    Scopes the duplicate check to the target section (when one is given) and
+    requires an exact stripped-line match of every content line, rather than a
+    naive whole-file substring match. This avoids skipping a valid insertion
+    when the same content appears in a different section or only as a substring
+    of an unrelated line (issue #706).
+    """
+    content = content.strip()
+    if not content:
+        return False
+    if section:
+        scope = _section_body(text, section)
+        if scope is None:
+            # Target section does not exist yet → content cannot be in it.
+            return False
+    else:
+        scope = text
+    scope_lines = {ln.strip() for ln in scope.splitlines() if ln.strip()}
+    content_lines = [ln.strip() for ln in content.splitlines() if ln.strip()]
+    if not content_lines:
+        return False
+    return all(cl in scope_lines for cl in content_lines)
+
+
 def _apply_change(file_path: Path, change: dict) -> bool:
     """Apply a single change dict to a file. Returns True if the file was modified."""
     change_type = change.get("type", "add_bullet")
@@ -311,8 +363,11 @@ def _apply_change(file_path: Path, change: dict) -> bool:
 
     text = file_path.read_text(encoding="utf-8")
 
-    # Idempotency: skip if content already present
-    if content in text:
+    # Idempotency: skip only if this exact content already lives in the target
+    # section. A naive whole-file substring check (`content in text`) wrongly
+    # skipped valid insertions when the same text appeared in a different
+    # section or merely as a substring of an unrelated line (issue #706).
+    if _content_already_present(text, section, content):
         return False
 
     if change_type == "add_section":

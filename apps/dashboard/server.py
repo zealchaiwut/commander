@@ -2147,6 +2147,41 @@ def get_project_events(
             pass
         result.append(d)
 
+    # issue #764: enrich agent_finished rows with the durable duration_seconds
+    # from agent_runs so the Activity tab can show a Duration column. Matched by
+    # issue number + agent role; falls back to the duration already carried in
+    # the event detail when no agent_runs row is found.
+    _agent_finished = [
+        d for d in result
+        if d.get("type") == "agent_finished" and isinstance(d.get("detail"), dict)
+    ]
+    if _agent_finished:
+        _issue_nums = {
+            d["detail"].get("issue_num")
+            for d in _agent_finished
+            if d["detail"].get("issue_num") is not None
+        }
+        _runs_by_key: dict = {}
+        try:
+            for _num in _issue_nums:
+                for _r in db.agent_runs_for_issue(int(_num)):
+                    if _r.get("duration_seconds") is None:
+                        continue
+                    _runs_by_key[(int(_num), str(_r.get("agent", "")).lower())] = _r["duration_seconds"]
+        except Exception:
+            _runs_by_key = {}
+        for d in _agent_finished:
+            det = d["detail"]
+            num = det.get("issue_num")
+            role = str(det.get("role", "")).lower()
+            dur = None
+            if num is not None:
+                dur = _runs_by_key.get((int(num), role))
+            if dur is None:
+                dur = det.get("duration")
+            if dur is not None:
+                d["duration_seconds"] = dur
+
     return result
 
 

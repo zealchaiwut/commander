@@ -4973,6 +4973,16 @@
     .evl-agent-role { font-weight: 600; color: var(--text); text-transform: capitalize; }
     .evl-issue-link { color: var(--blue); text-decoration: none; font-weight: 600; }
     .evl-issue-link:hover { text-decoration: underline; }
+    /* issue #764: per-agent run duration shown on finished agent rows */
+    .evl-agent-duration {
+      margin-left: 8px;
+      padding: 1px 6px;
+      border-radius: 4px;
+      background: var(--surface-2);
+      color: var(--text-sub);
+      font-size: 12px;
+      font-variant-numeric: tabular-nums;
+    }
     .lr-actor {
       font-family: var(--mono); font-size: 11px; color: var(--text-sub);
       display: inline-flex; align-items: center; gap: 4px;
@@ -10777,9 +10787,32 @@ function _smgmtLogPollTick() {
 /** Format per-ticket elapsed seconds as "{N}m {N}s". Returns null if no value. */
 function _fmtTicketElapsed(secs) {
   if (secs == null || secs <= 0) return null;
+  secs = Math.floor(secs);
   const m = Math.floor(secs / 60);
   const s = secs % 60;
   return `${m}m ${s}s`;
+}
+
+// issue #764: client-side live timer for active agent tags in the running view.
+// Each tick advances any .smgmt-ticket-elapsed[data-live-timer="1"] from its
+// anchored server value so the elapsed reads like a stopwatch between fetches.
+let _smgmtLiveTimerId = null;
+function _smgmtTickLiveTimers() {
+  const els = document.querySelectorAll('.smgmt-ticket-elapsed[data-live-timer="1"]');
+  if (els.length === 0) return;
+  const nowMs = Date.now();
+  els.forEach(function(el) {
+    const base = Number(el.dataset.baseSecs);
+    const anchor = Number(el.dataset.anchorMs);
+    if (!isFinite(base) || !isFinite(anchor)) return;
+    const secs = base + Math.max(0, (nowMs - anchor) / 1000);
+    const str = _fmtTicketElapsed(secs);
+    if (str) el.textContent = str;
+  });
+}
+function _smgmtEnsureLiveTimer() {
+  if (_smgmtLiveTimerId != null) return;
+  _smgmtLiveTimerId = setInterval(_smgmtTickLiveTimers, 1000);
 }
 
 /** Return canonical minutes for a size letter (S/M/L/XL). Returns 0 for unknown. */
@@ -11061,11 +11094,22 @@ function _smgmtLivePatch(label, live) {
         elapsedEl.className = 'smgmt-ticket-elapsed';
         row.appendChild(elapsedEl);
       }
+      // issue #764: while an agent is active, anchor the server elapsed value to
+      // a client clock so the agent tag's timer increments in real time between
+      // live fetches. When inactive, drop the anchor so ticking stops.
+      if (isActive && liveIss && liveIss.elapsed_secs != null) {
+        elapsedEl.dataset.liveTimer = '1';
+        elapsedEl.dataset.baseSecs = String(liveIss.elapsed_secs);
+        elapsedEl.dataset.anchorMs = String(Date.now());
+      } else {
+        delete elapsedEl.dataset.liveTimer;
+      }
       elapsedEl.textContent = elapsedStr;
     } else if (elapsedEl) {
       elapsedEl.remove();
     }
   });
+  _smgmtEnsureLiveTimer();
 
   // Update segmented bar blocks (issue #613)
   const segBarEl = document.getElementById(`smgmt-seg-${label}`);
@@ -19191,6 +19235,16 @@ function _evlFmtTs(ts) {
   return ts.replace('T', ' ').substring(0, 19);
 }
 
+// issue #764: format an agent run duration (seconds) as "Nm Ns" / "Ns".
+function _evlFmtDuration(secs) {
+  var n = Number(secs);
+  if (!isFinite(n) || n < 0) return '';
+  n = Math.round(n);
+  var m = Math.floor(n / 60);
+  var s = n % 60;
+  return m > 0 ? (m + 'm ' + s + 's') : (s + 's');
+}
+
 function _evlLabelChangeText(e) {
   // issue #720: human-readable label-transition entry, e.g.
   //   "moved #700 → SIT"  or  "labeled #700 needs-rework"  or  "unlabeled #700 SIT"
@@ -19427,6 +19481,14 @@ function _evlDescHtml(ev) {
     var action = type === 'agent_started' ? 'started' : 'finished';
     var aRole = detail.role || '';
     var aIssue = detail.issue_num;
+    // issue #764: Duration column for finished agent rows, sourced from the
+    // durable agent_runs.duration_seconds enriched onto the event server-side.
+    var durSecs = (type === 'agent_finished')
+      ? (ev.duration_seconds != null ? ev.duration_seconds : detail.duration)
+      : null;
+    var durHtml = (durSecs != null)
+      ? '<span class="evl-agent-duration">' + escHtml(_evlFmtDuration(durSecs)) + '</span>'
+      : '';
     if (aRole && aIssue) {
       var repo = _projectData ? (_projectData.repo || '') : '';
       var issueUrl = repo
@@ -19437,7 +19499,7 @@ function _evlDescHtml(ev) {
         : '#' + escHtml(String(aIssue));
       return '<span class="lr-desc evl-agent-row">'
         + '<span class="evl-agent-role">' + escHtml(aRole) + '</span> '
-        + action + ' ' + issueLink
+        + action + ' ' + issueLink + durHtml
         + '</span>';
     }
     // Fallback: no role/issue → show action and the raw agent UUID (no regression)

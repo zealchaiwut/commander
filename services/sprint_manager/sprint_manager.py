@@ -2790,11 +2790,15 @@ def _generate_gate_failure_analysis(
         "locally before marking complete\")\n\n"
         "Output ONLY the JSON object, no other text."
     )
+    # Respect the configured model (issue #708) — fall back to the hardcoded
+    # default only when cfg is unavailable, so this stays consistent with the
+    # per-agent model config added in #700.
+    model = cfg.reviewer_model if cfg is not None else "claude-haiku-4-5-20251001"
     try:
         result = subprocess.run(
             [
                 "claude", "-p", prompt,
-                "--model", "claude-haiku-4-5-20251001",
+                "--model", model,
                 "--no-session-persistence",
             ],
             capture_output=True,

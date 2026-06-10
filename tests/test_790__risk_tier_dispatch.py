@@ -179,7 +179,8 @@ def test_dispatch_tester_injects_risk_hint_into_prompt(tmp_path):
     with patch("subprocess.Popen", side_effect=fake_popen), \
          patch.object(sm, "_post_agent_event"), \
          patch.object(sm, "_load_agent_persona", return_value=None), \
-         patch.object(sm, "agent_browser_runner"):
+         patch.object(sm, "agent_browser_runner"), \
+         patch.object(sm, "_worktree_hygiene", return_value=(None, None, None)):
         sm._dispatch_tester(
             1, [], sprint_branch="develop", repo_name="test/repo", cfg=cfg,
             sprint_label="sprint-1", pre_dispatch_risk="LOW",
@@ -316,7 +317,8 @@ def test_security_label_dispatches_sonnet(tmp_path):
          patch.object(sm, "_post_agent_event"), \
          patch.object(sm, "_load_agent_persona", return_value=None), \
          patch.object(sm, "agent_browser_runner"), \
-         patch.object(sm, "_get_issue_labels", return_value={"security", "enhancement"}):
+         patch.object(sm, "_get_issue_labels", return_value={"security", "enhancement"}), \
+         patch.object(sm, "_worktree_hygiene", return_value=(None, None, None)):
         sm._dispatch_tester(
             42, [], sprint_branch="develop", repo_name="test/repo", cfg=cfg,
             sprint_label="sprint-1",
@@ -358,7 +360,8 @@ def test_low_risk_dispatches_haiku(tmp_path):
          patch.object(sm, "_post_agent_event"), \
          patch.object(sm, "_load_agent_persona", return_value=None), \
          patch.object(sm, "agent_browser_runner"), \
-         patch.object(sm, "_get_issue_labels", return_value={"enhancement", "size-S"}):
+         patch.object(sm, "_get_issue_labels", return_value={"enhancement", "size-S"}), \
+         patch.object(sm, "_worktree_hygiene", return_value=(None, None, None)):
         sm._dispatch_tester(
             99, [], sprint_branch="develop", repo_name="test/repo", cfg=cfg,
             sprint_label="sprint-1",

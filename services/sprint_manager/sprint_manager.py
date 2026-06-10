@@ -73,12 +73,16 @@ try:
         transition as _sm_transition,
         TicketState as _TicketState,
         TransitionError as _TransitionError,
+        STATE_LABELS as _STATE_LABELS,
+        STATUS_LABELS as _STATUS_LABELS,
     )
     _STATE_MACHINE_AVAILABLE = True
 except (ImportError, ModuleNotFoundError):  # pragma: no cover
     _sm_transition = None  # type: ignore[assignment]
     _TicketState = None  # type: ignore[assignment]
     _TransitionError = Exception  # type: ignore[assignment,misc]
+    _STATE_LABELS = {}  # type: ignore[assignment]
+    _STATUS_LABELS = frozenset()  # type: ignore[assignment]
     _STATE_MACHINE_AVAILABLE = False
 
 try:
@@ -142,6 +146,7 @@ import github_client
 
 from services.run_id import mint_run_id
 from services.logging import log as structured_log
+from services.sprint_manager import agent_browser_runner  # issue #710: live-browser UAT
 
 try:
     from db import record_event as _db_record_event  # type: ignore[import]
@@ -820,6 +825,7 @@ class IssueState:
     tester_finished_at:   Optional[str] = None
     failure_reason:       Optional[str] = None
     dispatch_level:       int           = 0   # 1-based execution level; 0 = unset
+    tester_attempt_count: int           = 0   # incremented on each tester dispatch (issue #718)
 
     def to_dict(self) -> dict:
         return {
@@ -838,6 +844,7 @@ class IssueState:
             "tester_finished_at": self.tester_finished_at,
             "failure_reason":     self.failure_reason,
             "dispatch_level":     self.dispatch_level,
+            "tester_attempt_count": self.tester_attempt_count,
         }
 
     @staticmethod
@@ -859,6 +866,7 @@ class IssueState:
             failure_reason     = d.get("failure_reason"),
         )
         iss.dispatch_level = d.get("dispatch_level", 0)
+        iss.tester_attempt_count = d.get("tester_attempt_count", 0)
         return iss
 
     def set_agent_status(self, status: str) -> None:
@@ -1327,6 +1335,58 @@ def _get_issue_labels(issue_num: int, repo_name: Optional[str] = None) -> set[st
         return set()
 
 
+def _current_status_labels(issue_num: int, repo_name: Optional[str]) -> "frozenset[str] | None":
+    """Best-effort fetch of the issue's current status labels (issue #720).
+
+    Returns the subset of STATUS_LABELS currently applied, or None if the
+    labels could not be fetched (so the caller can degrade gracefully).
+    """
+    try:
+        issue = github_client.get_issue(issue_num, repo_name=repo_name)
+        names = {lbl.get("name") for lbl in issue.get("labels", []) if lbl.get("name")}
+        return frozenset(_STATUS_LABELS & names)
+    except Exception:
+        return None
+
+
+def _emit_label_transition_event(
+    issue_num: int,
+    target_state: "_TicketState",
+    actor: str,
+    repo_name: Optional[str],
+    before: "frozenset[str] | None",
+) -> None:
+    """Emit a ticket_label_changed activity event for a real label change (issue #720)."""
+    desired = frozenset(_STATE_LABELS.get(target_state, frozenset()))
+    have_before = before is not None
+    before_set = before if have_before else frozenset()
+
+    added = sorted(desired - before_set)
+    removed = sorted(before_set - desired) if have_before else []
+    from_label = (sorted(before_set)[0] if before_set else None) if have_before else None
+    to_label = sorted(desired)[0] if desired else None
+
+    project = repo_name
+    if not project:
+        try:
+            project = github_client.repo()
+        except Exception:
+            project = "dashboard"
+
+    _emit_sprint_lifecycle_event(
+        type="ticket_label_changed",
+        target=f"#{issue_num}",
+        actor=actor,
+        detail={
+            "from_label": from_label,
+            "to_label": to_label,
+            "added": added,
+            "removed": removed,
+        },
+        project=project,
+    )
+
+
 def _transition_safe(
     issue_num: int,
     target_state: "_TicketState",
@@ -1342,8 +1402,9 @@ def _transition_safe(
             issue_num=issue_num,
         )
         return
+    before = _current_status_labels(issue_num, repo_name)
     try:
-        _sm_transition(issue_num, target_state, actor=actor, repo=repo_name, note=note)
+        changed = _sm_transition(issue_num, target_state, actor=actor, repo=repo_name, note=note)
         structured_log.info(
             "ticket_transition",
             f"transition #{issue_num} → {target_state.value} actor={actor!r}",
@@ -1351,6 +1412,9 @@ def _transition_safe(
             target_state=target_state.value,
             actor=actor,
         )
+        # issue #720: emit an activity event only when a label actually changed.
+        if changed:
+            _emit_label_transition_event(issue_num, target_state, actor, repo_name, before)
     except _TransitionError as e:
         structured_log.warn(
             "label_apply_failed",
@@ -2879,6 +2943,28 @@ def _publish_gate_failure_analyses(
     _clear_gate_failure_records(issue_num)
 
 
+IMPECCABLE_CONTEXT_SCRIPT = ".github/skills/impeccable/scripts/context.mjs"
+
+
+def _impeccable_context_instruction() -> str:
+    """Prompt fragment injected into every headless coder/tester dispatch (issue #713).
+
+    Threads the file-based impeccable skill pack — NOT the Claude Code plugin —
+    into the headless ``claude -p`` run so the agent loads the project's design
+    rules before touching any frontend code. When a mock is attached the agent
+    treats it as the pixel target; UI output must clear ``impeccable detect``.
+    """
+    return (
+        " IMPECCABLE DESIGN CONTEXT (issue #713): before writing or reviewing any"
+        f" frontend/UI code, load the design skills by running `node {IMPECCABLE_CONTEXT_SCRIPT}`"
+        " from the repo root and follow the rules it prints — this is the"
+        " file-based skill pack under .github/skills, not an installed extension."
+        " When a mock HTML file is attached under"
+        " references/issue-<N>/, treat it as the pixel-accurate visual target and"
+        " reproduce it. UI output must pass `npx impeccable detect` on the first try."
+    )
+
+
 def _design_docs_guard(cwd_path: "Path") -> "Optional[str]":
     """Return None when both PRODUCT.md and DESIGN.md exist; error message otherwise.
 
@@ -2896,6 +2982,19 @@ def _design_docs_guard(cwd_path: "Path") -> "Optional[str]":
         "Create them (or run `npx impeccable skills install` and scaffold via "
         "`node .github/skills/impeccable/scripts/context.mjs`) before dispatching."
     )
+
+
+def _agent_identity_env(role: str, issue_num: Optional[int]) -> dict[str, str]:
+    """Env vars that tag a dispatched agent's hooks with role + issue number so
+    activity-log rows can render '<role> <action> #<issue>' (issue #719).
+
+    issue_num of 0/None (e.g. the reviewer's sprint-level sentinel) emits no
+    CLAUDE_AGENT_ISSUE, so no spurious '#0' link is produced.
+    """
+    env = {"CLAUDE_AGENT_ROLE": role}
+    if issue_num:
+        env["CLAUDE_AGENT_ISSUE"] = str(issue_num)
+    return env
 
 
 def _dispatch_coder(
@@ -3014,6 +3113,11 @@ def _dispatch_coder(
             " label-mutation command."
         )
 
+    # Impeccable design context (issue #713): inject into every coder dispatch —
+    # custom templates included — so frontend work loads design rules via context.mjs.
+    if "context.mjs" not in prompt:
+        prompt += _impeccable_context_instruction()
+
     # Inject failure context: accumulated history (fix-loop, issue #618) or sidecar fallback
     if prior_failures:
         _ctx_lines = [
@@ -3049,7 +3153,7 @@ def _dispatch_coder(
     # COMMANDER_SPRINT_RUNNING so child scripts enforce RUN_MUTABLE_LABELS (issue #506).
     sub_env = os.environ.copy()
     sub_env.pop("ANTHROPIC_API_KEY", None)
-    sub_env["CLAUDE_AGENT_ROLE"] = "coder"  # tag hooks/telemetry as the docs prescribe
+    sub_env.update(_agent_identity_env("coder", issue_num))  # tag hooks/telemetry as the docs prescribe
     if eff_repo:
         sub_env["COMMANDER_PROJECT"] = eff_repo
     if sprint_label:
@@ -3297,6 +3401,10 @@ def _dispatch_tester(
             " Do not run update_ticket.py, gh issue edit --add-label, or any other"
             " label-mutation command."
         )
+    # Impeccable design context (issue #713): inject into every tester dispatch so
+    # the tester verifies UI tickets against the same design rules via context.mjs.
+    if "context.mjs" not in prompt:
+        prompt += _impeccable_context_instruction()
     # Same persona fix as the coder: load the tester subagent for the headless run.
     tester_model = cfg.tester_model if cfg is not None else "claude-sonnet-4-6"
     cmd = [
@@ -3315,7 +3423,7 @@ def _dispatch_tester(
     # COMMANDER_SPRINT_RUNNING so child scripts enforce RUN_MUTABLE_LABELS (issue #506).
     sub_env = os.environ.copy()
     sub_env.pop("ANTHROPIC_API_KEY", None)
-    sub_env["CLAUDE_AGENT_ROLE"] = "tester"  # tag hooks/telemetry as the docs prescribe
+    sub_env.update(_agent_identity_env("tester", issue_num))  # tag hooks/telemetry as the docs prescribe
     if eff_repo:
         sub_env["COMMANDER_PROJECT"] = eff_repo
     if sprint_label:
@@ -3364,6 +3472,52 @@ def _dispatch_tester(
         )
         cmd[-1] = cmd[-1] + test_repo_hint
         print("  [issue-test-repo] GITHUB_ISSUE_TEST_REPO not set — tester will skip live issue/label tests")
+
+    # ── agent-browser injection (issue #710) ──────────────────────────────────
+    # Make the optional live-browser UAT runner available to the tester and tell
+    # Step 6 how to route browser-interaction UAT steps. We probe availability
+    # here so the prompt can state whether real browser runs are possible or
+    # everything will fall back to MANUAL. The probe is best-effort — any failure
+    # degrades to "not available" so dispatch never crashes on the runner.
+    try:
+        browser_available = agent_browser_runner.is_available()
+    except Exception:
+        browser_available = False
+    sub_env["COMMANDER_AGENT_BROWSER_AVAILABLE"] = "1" if browser_available else "0"
+    sub_env.setdefault(
+        "AGENT_BROWSER_SCREENSHOT_DIR", str(agent_browser_runner.SCREENSHOT_DIR)
+    )
+    browser_hint = (
+        " LIVE BROWSER UAT (issue #710): In Step 6, route each UAT step with"
+        " services/sprint_manager/agent_browser_runner.py."
+        " If the step is flagged agent-testable OR its text describes a browser"
+        " interaction (keywords: open, navigate, click, see, expect, page),"
+        " execute it via agent_browser_runner.run_browser_step(step_text, base_url)"
+        " instead of marking MANUAL. Record the result as PASS or FAIL in the test"
+        " report with the returned screenshot_path attached. A FAIL browser step"
+        " sets the overall ticket status to NEEDS_FIXES, identical to a failed AC."
+        " Mark a step MANUAL ONLY when the runner returns status 'uncovered' or"
+        " agent_browser_runner.is_available() is False. HTTP-only UAT steps"
+        " continue to run via httpx unchanged."
+        f" COMMANDER_AGENT_BROWSER_AVAILABLE={'1' if browser_available else '0'} in your env."
+        " SCREENSHOT CAPTURE (issue #712): for browser steps, save each step's"
+        " screenshot via a single agent_browser_runner.ScreenshotRecorder(sprints_dir,"
+        " sprint_num, issue_num) — call recorder.capture(screenshot_path) once per"
+        " browser step in order (it caps resolution, skips consecutive duplicates,"
+        " and names files step-<k>.png under"
+        " .commander/sprints/sprint-<N>/screenshots/issue-<N>/). After the run, if"
+        " recorder.saved is non-empty, call"
+        " agent_browser_runner.upload_screenshots(recorder.saved, repo, issue_num,"
+        " sprint_num) to get a {filename: url} map, then append"
+        " agent_browser_runner.build_screenshot_section("
+        " agent_browser_runner.collect_issue_screenshots(sprints_dir, sprint_num,"
+        " issue_num, url_map=urls)) to the test report markdown before posting. If a"
+        " ticket produced zero browser steps, add NO screenshot section. The whole"
+        " capture/upload/embed flow is best-effort — never let it abort the test run"
+        " or report posting."
+    )
+    cmd[-1] = cmd[-1] + browser_hint
+    print(f"  [agent-browser] available={browser_available} injected into tester env")
 
     for attempt in range(_RATE_LIMIT_MAX_RETRIES + 1):
         try:
@@ -3507,6 +3661,58 @@ def _follow_up_action(category: Optional[str]) -> str:
     return mapping.get(category or "", "Review the issue manually.")
 
 
+def _build_screenshots_section(
+    state: SprintState,
+    sprints_dir: Path,
+    repo_name: Optional[str],
+) -> list[str]:
+    """Build the per-ticket Screenshots section lines for the sprint summary (#712).
+
+    Scans ``<sprints_dir>/sprint-<N>/screenshots/issue-<N>/`` for each ticket and,
+    for any with captured browser screenshots, emits a sub-section with the count
+    and inline images (or links when a URL manifest is absent). Returns an empty
+    list when no ticket has screenshots, so the section is omitted entirely.
+    """
+    n = state.sprint_number if state.sprint_number is not None else state.sprint_label
+    blocks: list[str] = []
+    for issue in state.issues:
+        try:
+            url_map = _load_screenshot_url_map(sprints_dir, n, issue.number)
+            shots = agent_browser_runner.collect_issue_screenshots(
+                sprints_dir, n, issue.number, url_map=url_map
+            )
+        except Exception:
+            shots = []
+        if not shots:
+            continue
+        section = agent_browser_runner.build_screenshot_section(
+            shots, heading=f"Issue #{issue.number} — {issue.title}", heading_level=3
+        )
+        if section:
+            blocks.append(section)
+    if not blocks:
+        return []
+    lines = ["## Screenshots", ""]
+    for block in blocks:
+        lines.append(block)
+        lines.append("")
+    return lines
+
+
+def _load_screenshot_url_map(sprints_dir: Path, sprint_num, issue_num) -> Optional[dict]:
+    """Read an optional {filename: raw_url} manifest written at upload time (#712)."""
+    manifest = (
+        agent_browser_runner.sprint_screenshot_dir(sprints_dir, sprint_num, issue_num)
+        / "urls.json"
+    )
+    if not manifest.exists():
+        return None
+    try:
+        return json.loads(manifest.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+
 def generate_sprint_summary(
     state: SprintState,
     elapsed_secs: float,
@@ -3514,8 +3720,14 @@ def generate_sprint_summary(
     open_issues: Optional[list[dict]] = None,
     repo_name: Optional[str] = None,
     sprint_branch: Optional[str] = None,
+    sprints_dir: Optional[Path] = None,
 ) -> str:
-    """Generate a richly-formatted executive summary markdown string."""
+    """Generate a richly-formatted executive summary markdown string.
+
+    When ``sprints_dir`` is provided (issue #712), each ticket's captured UAT
+    browser screenshots are listed in a Screenshots section; tickets with no
+    browser steps contribute nothing (no regression for legacy runs).
+    """
     n = state.sprint_number if state.sprint_number is not None else state.sprint_label
 
     start_ts = _to_bangkok(state.start_timestamp) if state.start_timestamp else _bangkok_now()
@@ -3663,6 +3875,12 @@ def generate_sprint_summary(
                 f"| {ev.get('timestamp', '?')} |"
             )
         lines.append("")
+
+    # -- Screenshots (issue #712) --
+    if sprints_dir is not None:
+        screenshots_block = _build_screenshots_section(state, sprints_dir, repo_name)
+        if screenshots_block:
+            lines += screenshots_block
 
     # -- Carried Over --
     lines += ["## Carried Over", ""]
@@ -4046,6 +4264,7 @@ def write_sprint_summary(
         open_issues=open_issues,
         repo_name=eff_repo,
         sprint_branch=sprint_branch,
+        sprints_dir=(cfg.sprints_dir if cfg is not None else SPRINTS_DIR),
     )
     path = _summary_path(state.sprint_number, state.sprint_label, cfg=cfg)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -4828,6 +5047,7 @@ def _dispatch_reviewer(
 
     sub_env = os.environ.copy()
     sub_env.pop("ANTHROPIC_API_KEY", None)
+    sub_env.update(_agent_identity_env("reviewer", summary_issue_num))  # issue #719
     if eff_repo:
         sub_env["COMMANDER_PROJECT"] = eff_repo
     sub_env["REPO"]                  = eff_repo or ""
@@ -5051,12 +5271,15 @@ def _dispatch_estimator_for_followup(
     ]
 
     print(f"  [estimator] Estimating follow-up #{issue_num} ...", flush=True)
+    est_env = os.environ.copy()
+    est_env.update(_agent_identity_env("estimator", issue_num))  # issue #719
     try:
         result = subprocess.run(
             cmd,
             capture_output=True,
             text=True,
             timeout=_ESTIMATOR_DISPATCH_TIMEOUT,
+            env=est_env,
         )
     except subprocess.TimeoutExpired:
         print(f"  [estimator] WARNING: estimation for #{issue_num} timed out after {_ESTIMATOR_DISPATCH_TIMEOUT}s", flush=True)
@@ -6066,6 +6289,9 @@ def run_sprint(
             # -- Lifecycle: tester_dispatched --
             issue_state.set_agent_status("tester_dispatched")
             issue_state.tester_started_at = issue_state.status_changed_at
+            # Record the tester attempt so analytics can count rejections exactly
+            # going forward (issue #718).
+            issue_state.tester_attempt_count += 1
             _emit_sprint_lifecycle_event(
                 type="ticket_dispatched",
                 target=f"#{num}",

@@ -37,7 +37,11 @@ def _compose_name(session_id: str, working_dir: str) -> str:
     repo, branch = _detect_git_info(working_dir)
     label  = repo or Path(working_dir).name or "unknown"
     short  = session_id[:6] if len(session_id) >= 6 else session_id
-    return f"{role}·{label}·{branch}·#{short}"
+    name   = f"{role}·{label}·{branch}·#{short}"
+    issue  = os.environ.get("CLAUDE_AGENT_ISSUE", "").strip()
+    if issue:
+        name += f"·issue-{issue}"
+    return name
 
 
 def main():

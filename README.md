@@ -53,6 +53,11 @@ For a full walkthrough including multi-clone setup for Coder/Tester agents, see
 | **Project events log** | Structured audit log of project-level actions (settings changes, env path updates) recorded in the `project_events` SQLite table | [SCHEMA.md](SCHEMA.md) |
 | **Neon DB** | Postgres-backed sprint and project state with Alembic migrations; dual-writes alongside JSON | [SCHEMA.md](SCHEMA.md) |
 | **Structured Logging** | JSON-lines log module (`services/logging.py`) writing to `.commander/logs/structured-YYYY-MM-DD.log`; respects `COMMANDER_LOG_LEVEL` | — |
+| **Analytics page** | Per-project analytics at `/project/{slug}/analytics` with Status, Trends, and Calibration sub-tabs; metrics sourced from local sprint/estimate files (no Neon dependency) | [SCHEMA.md](SCHEMA.md) |
+| **Global Notes** | Always-available notes pane in the dashboard left sidebar, debounced autosave to `.commander/notes.json` via `GET/PUT /api/notes` | — |
+| **Live Browser UAT** | agent-browser drives browser UAT steps automatically instead of MANUAL; BA tags testable steps `[agent-test]` and step screenshots attach to the UAT test report | — |
+| **Impeccable design wiring** | BA and coder agents receive impeccable design contracts; visual targets tracked against an `impeccable detect` baseline | — |
+| **Activity log linking** | Activity-log agent rows render `<role> <action> #<issue>` with clickable GitHub issue links; label transitions and sprint lifecycle (started/finished/rerun) emit scoped activity events | — |
 | **API** | REST API consumed by the dashboard and agent hooks | [docs/features/api.md](docs/features/api.md) |
 
 ---

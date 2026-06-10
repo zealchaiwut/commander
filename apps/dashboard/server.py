@@ -1291,6 +1291,25 @@ def _agent_project_from_name(agent_name: str | None) -> str | None:
     return matched
 
 
+def _parse_agent_identity(agent_name: str | None) -> tuple[str | None, int | None]:
+    """Extract (role, issue_num) from an agent name string (issue #719).
+
+    Names are formatted as 'role·label·branch·#short' with an optional trailing
+    '·issue-<N>' component appended when the dispatcher set CLAUDE_AGENT_ISSUE.
+    The role is the first '·'-delimited component; the issue number is the
+    'issue-<N>' token if present. Either may be None for legacy/raw-UUID names.
+    """
+    role = None
+    issue_num = None
+    if agent_name and "·" in agent_name:
+        role = agent_name.split("·")[0] or None
+    if agent_name:
+        m = re.search(r"issue-(\d+)", agent_name)
+        if m:
+            issue_num = int(m.group(1))
+    return role, issue_num
+
+
 @app.post("/api/agent-event")
 async def receive_event(request: Request, event: AgentEvent):
     _slog.event("route.entry", project="dashboard", request_id=request.state.request_id, route="/api/agent-event", method="POST", event_type=event.event_type)
@@ -1298,7 +1317,7 @@ async def receive_event(request: Request, event: AgentEvent):
     session_id = event.session_id or "unknown"
     project = _agent_project_from_name(event.name)
     actor = event.name or session_id
-    role = (event.name.split("·")[0] if event.name and "·" in event.name else None)
+    role, issue_num = _parse_agent_identity(event.name)
 
     if project:
         if event.event_type == "tool_use" and session_id not in _seen_agent_sessions:
@@ -1309,7 +1328,7 @@ async def receive_event(request: Request, event: AgentEvent):
                 actor=actor,
                 type="agent_started",
                 target=session_id,
-                detail={"role": role, "working_dir": event.working_dir},
+                detail={"role": role, "issue_num": issue_num, "working_dir": event.working_dir},
                 action_id=session_id,
             )
         if event.status in ("done", "timed_out", "error") or event.event_type == "agent_stop":
@@ -1320,7 +1339,7 @@ async def receive_event(request: Request, event: AgentEvent):
                 actor=actor,
                 type="agent_finished",
                 target=session_id,
-                detail={"status": event.status, "role": role},
+                detail={"status": event.status, "role": role, "issue_num": issue_num},
                 action_id=session_id,
             )
 
@@ -2051,6 +2070,7 @@ def get_project_events(
 # ── Settings API (issue #639) ────────────────────────────────────────────────
 
 import services.sprint_manager.settings_repo as _settings_repo
+import services.sprint_manager.notes_repo as _notes_repo
 from services.sprint_manager.settings_schema import (
     APP_CONFIG_KEY,
     SECRET_FIELDS,
@@ -3942,6 +3962,24 @@ def _emit_dashboard_event(
         pass
 
 
+def _read_sprint_summary_url(project_root: Path, sprint_label: str) -> Optional[str]:
+    """Return the summary-issue URL recorded in the sprint state file, or None.
+
+    The sprint summary issue link is persisted as ``summary_issue_url`` in
+    ``.commander/sprints/sprint-<N>-state.json``. Sub-sprint labels (sprint-N.M)
+    resolve to their base sprint-N state file.
+    """
+    m = re.match(r"^sprint-(\d+)", sprint_label)
+    if not m:
+        return None
+    state_path = _commander_dir(project_root) / "sprints" / f"sprint-{m.group(1)}-state.json"
+    try:
+        data = json.loads(state_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+    return data.get("summary_issue_url")
+
+
 def _sprint_label_sort_key(label: str) -> tuple:
     """Return (N, M) tuple for natural sprint label ordering.
 
@@ -5529,6 +5567,14 @@ def run_sprint_managed(request: Request, body: SprintMgmtRunBody):
         pass
 
     _slog.event("sprint.dispatch", project="dashboard", request_id=request.state.request_id, sprint_label=body.sprint_label, target_project=body.project, dispatch_type="managed", pid=proc.pid)
+    # Scoped activity-log event for the sprint target (issue #721)
+    _emit_dashboard_event(
+        project=body.project,
+        type="sprint_started",
+        target=body.sprint_label,
+        detail={"sprint_id": body.sprint_label},
+        action_id=str(uuid.uuid4()),
+    )
     return {
         "ok": True,
         "sprint_label": body.sprint_label,
@@ -7474,6 +7520,61 @@ def _parse_iso_date(date_str: str, name: str, *, end_of_day: bool = False) -> da
     return dt
 
 
+def _analytics_parse_ts(ts: str | None) -> datetime | None:
+    """Parse an ISO 8601 UTC timestamp (optionally Z-suffixed) or return None."""
+    if not ts:
+        return None
+    try:
+        return datetime.fromisoformat(ts.rstrip("Z")).replace(tzinfo=timezone.utc)
+    except Exception:
+        return None
+
+
+def _analytics_elapsed_minutes(start: str | None, end: str | None) -> float | None:
+    """Minutes between two ISO timestamps, or None when either is missing/bad."""
+    s = _analytics_parse_ts(start)
+    e = _analytics_parse_ts(end)
+    if s is None or e is None:
+        return None
+    return (e - s).total_seconds() / 60.0
+
+
+_TESTER_REJECTED_CATEGORY = "TESTER_REJECTED"
+
+
+def _count_tester_rejections(issue: dict) -> int:
+    """Infer how many times the tester rejected a completed ticket.
+
+    Sources, in priority order (the max wins so any single signal counts):
+      * ``tester_attempt_count`` — N attempts means N-1 rejections (exact, when present)
+      * ``status_history`` — entries flagged TESTER_REJECTED or a rejected status
+      * ``category`` / ``failure_reason`` — a trailing rejection signal worth 1
+
+    Returns 0 for a clean first-pass ticket.
+    """
+    attempt = int(issue.get("tester_attempt_count") or 0)
+    rejections = max(attempt - 1, 0)
+
+    history = issue.get("status_history") or []
+    if isinstance(history, list):
+        hist_rejects = 0
+        for entry in history:
+            if not isinstance(entry, dict):
+                continue
+            cat = str(entry.get("category") or "")
+            status = str(entry.get("status") or "").lower()
+            if cat == _TESTER_REJECTED_CATEGORY or "reject" in status:
+                hist_rejects += 1
+        rejections = max(rejections, hist_rejects)
+
+    category = str(issue.get("category") or "")
+    failure_reason = str(issue.get("failure_reason") or "").lower()
+    if category == _TESTER_REJECTED_CATEGORY or "reject" in failure_reason:
+        rejections = max(rejections, 1)
+
+    return rejections
+
+
 def _compute_analytics_metrics(project_root: Path,
                                 since: str | None = None,
                                 until: str | None = None,
@@ -7501,6 +7602,11 @@ def _compute_analytics_metrics(project_root: Path,
 
     sprint_ticket_counts: list[int] = []
     sprint_lengths: list[float] = []
+
+    # Token counts are sourced from the status files (model_name is joined from
+    # the token_usage table below for pricing only).
+    status_tokens_in = 0
+    status_tokens_out = 0
 
     estimates_dir = _commander_dir(project_root) / "estimates"
 
@@ -7539,14 +7645,17 @@ def _compute_analytics_metrics(project_root: Path,
             if wall_clock_secs > 0:
                 sprint_lengths.append(wall_clock_secs / 86400.0)
 
+            status_tokens_in += int(state_data.get("total_tokens_in") or 0)
+            status_tokens_out += int(state_data.get("total_tokens_out") or 0)
+
             for issue in sprint_done:
                 total_completed += 1
-                attempt = int(issue.get("tester_attempt_count") or 1)
-                if attempt <= 1:
+                rejections = _count_tester_rejections(issue)
+                if rejections == 0:
                     first_pass_count += 1
                 else:
                     rework_count += 1
-                    if attempt >= 3:
+                    if rejections >= 2:
                         rework_2plus += 1
 
                 # Coder duration
@@ -7599,9 +7708,14 @@ def _compute_analytics_metrics(project_root: Path,
     avg_tickets = sum(sprint_ticket_counts) / len(sprint_ticket_counts) if sprint_ticket_counts else 0
     avg_length = sum(sprint_lengths) / len(sprint_lengths) if sprint_lengths else 0
 
-    # Cost from token_usage table
-    cost_per_sprint_total = 0.0
+    # Cost: token counts come from the status files (status_tokens_in/out).
+    # model_name is joined from the token_usage table for pricing only — we
+    # derive a blended per-token price (exact when a single model is used) and
+    # apply it to the status-file token totals.
     cost_by_role: dict[str, float] = {"coder": 0.0, "tester": 0.0, "estimator": 0.0}
+    tu_in = tu_out = 0
+    tu_cost_in = tu_cost_out = 0.0
+    role_tokens: dict[str, int] = {"coder": 0, "tester": 0, "estimator": 0}
     try:
         rows = db.get_token_usage_by_agent_model()
         for row in rows:
@@ -7609,15 +7723,29 @@ def _compute_analytics_metrics(project_root: Path,
                 role = (row.get("agent_role") or "unknown").lower()
                 model = (row.get("model_name") or "").lower()
                 price_in, price_out = MODEL_PRICE_MAP.get(model, (0.0, 0.0))
-                cost = (row.get("total_input", 0) * price_in +
-                        row.get("total_output", 0) * price_out)
-                cost_per_sprint_total += cost
-                if role in cost_by_role:
-                    cost_by_role[role] += cost
+                in_tokens = int(row.get("total_input", 0) or 0)
+                out_tokens = int(row.get("total_output", 0) or 0)
+                tu_in += in_tokens
+                tu_out += out_tokens
+                tu_cost_in += in_tokens * price_in
+                tu_cost_out += out_tokens * price_out
+                if role in role_tokens:
+                    role_tokens[role] += in_tokens + out_tokens
             except (KeyError, ValueError, TypeError) as exc:
                 logger.debug("token-usage cost: skipping row %r — %s", row, exc)
     except Exception as exc:
         logger.debug("token-usage cost: db query failed — %s", exc)
+
+    blended_price_in = (tu_cost_in / tu_in) if tu_in else 0.0
+    blended_price_out = (tu_cost_out / tu_out) if tu_out else 0.0
+    cost_per_sprint_total = (status_tokens_in * blended_price_in +
+                             status_tokens_out * blended_price_out)
+
+    # Distribute the total cost across roles by their token_usage share.
+    total_role_tokens = sum(role_tokens.values())
+    if total_role_tokens > 0:
+        for r in cost_by_role:
+            cost_by_role[r] = cost_per_sprint_total * role_tokens[r] / total_role_tokens
 
     num_sprints = len(sprint_ticket_counts) if sprint_ticket_counts else 1
     cost_per_sprint_avg = cost_per_sprint_total / num_sprints
@@ -7731,55 +7859,58 @@ def _compute_calibration(
     }
     points: list[dict] = []
 
-    if not _SPRINT_REPO_AVAILABLE:
-        return {"by_size": by_size, "points": points}
+    # Source is status + estimate files only — Neon is not queried (issue #718).
+    project_root = _project_root_path(repo)
+    sprints_dir = _commander_dir(project_root) / "sprints"
+    estimates_dir = _commander_dir(project_root) / "estimates"
 
-    try:
-        from sqlalchemy import text as _sa_text
-
-        where_parts = [
-            "st.estimated_size IS NOT NULL",
-            "st.actual_elapsed_seconds IS NOT NULL",
-            "s.project = :project",
-        ]
-        params: dict = {"project": repo}
-
-        if since_dt:
-            where_parts.append("st.completed_at >= :since")
-            params["since"] = since_dt.isoformat()
-        if until_dt:
-            where_parts.append("st.completed_at <= :until")
-            params["until"] = until_dt.isoformat()
-        if sprint_filter:
-            where_parts.append("s.label = :sprint")
-            params["sprint"] = sprint_filter
-
-        sql = (
-            "SELECT st.issue_number, st.estimated_size, st.actual_elapsed_seconds"
-            " FROM sprint_tickets st"
-            " JOIN sprints s ON s.id = st.sprint_id"
-            " WHERE " + " AND ".join(where_parts)
-        )
-
-        with _sprint_repo._open_session() as session:
-            rows = session.execute(_sa_text(sql), params).fetchall()
-
-    except HTTPException:
-        raise
-    except Exception:
-        return {"by_size": by_size, "points": points}
-
-    # Accumulate per-size data.
     buckets: dict[str, list[float]] = {sz: [] for sz in _CALIBRATION_SIZES}
     issue_rows: list[tuple] = []
 
-    for row in rows:
-        issue_number, estimated_size, actual_elapsed_seconds = row[0], row[1], row[2]
-        if estimated_size not in buckets:
-            continue
-        minutes = actual_elapsed_seconds / 60.0
-        buckets[estimated_size].append(minutes)
-        issue_rows.append((issue_number, estimated_size, minutes))
+    if sprints_dir.exists():
+        for state_file in sorted(sprints_dir.glob("sprint-*-state.json")):
+            try:
+                state_data = json.loads(state_file.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+
+            if sprint_filter and state_data.get("sprint_label", "") != sprint_filter:
+                continue
+
+            start_dt = _analytics_parse_ts(state_data.get("start_timestamp"))
+            if start_dt:
+                if since_dt and start_dt < since_dt:
+                    continue
+                if until_dt and start_dt > until_dt:
+                    continue
+
+            for issue in state_data.get("issues", []):
+                if issue.get("status") != "done":
+                    continue
+
+                issue_num = issue.get("number")
+                size = None
+                if issue_num is not None and estimates_dir.exists():
+                    est_file = estimates_dir / f"issue-{issue_num}.json"
+                    if est_file.exists():
+                        try:
+                            est = json.loads(est_file.read_text(encoding="utf-8"))
+                            size = est.get("size")
+                        except Exception:
+                            size = None
+                if size not in buckets:
+                    continue
+
+                coder_min = _analytics_elapsed_minutes(
+                    issue.get("coder_started_at"), issue.get("coder_finished_at"))
+                tester_min = _analytics_elapsed_minutes(
+                    issue.get("tester_started_at"), issue.get("tester_finished_at"))
+                if coder_min is None and tester_min is None:
+                    continue
+
+                actual_minutes = (coder_min or 0.0) + (tester_min or 0.0)
+                buckets[size].append(actual_minutes)
+                issue_rows.append((issue_num, size, actual_minutes))
 
     # Compute aggregates.
     for sz in _CALIBRATION_SIZES:
@@ -8309,6 +8440,15 @@ def rerun_sprint(sprint_label: str, project: str, body: SprintRerunBody):
     github_client.invalidate("issues:")
     github_client.invalidate("sprint_labels:")
 
+    # Scoped activity-log event for the sprint target (issue #721)
+    _emit_dashboard_event(
+        project=project,
+        type="sprint_rerun",
+        target=sub_label,
+        detail={"sprint_id": sprint_label, "sub_label": sub_label},
+        action_id=str(uuid.uuid4()),
+    )
+
     result: dict = {
         "noop": False,
         "sub_label": sub_label,
@@ -8690,6 +8830,18 @@ async def finish_sprint(owner: str, repo_name: str, label: str, body: FinishSpri
             "sprint_label": label,
         },
     })
+
+    # Scoped activity-log event for the sprint target (issue #721)
+    _emit_dashboard_event(
+        project=repo,
+        type="sprint_finished",
+        target=label,
+        detail={
+            "sprint_id": label,
+            "summary_issue_url": _read_sprint_summary_url(project_root, label),
+        },
+        action_id=str(uuid.uuid4()),
+    )
 
     result: dict = {"closed": closed, "moved": moved, "errors": errors, "next_sprint_label": next_sprint_label}
     status_code = 207 if errors else 200
@@ -12038,6 +12190,25 @@ def save_project_notes(repo: str = "", body: SaveNotesBody = ...):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(body.content, encoding="utf-8")
     return {"ok": True, "mtime": path.stat().st_mtime}
+
+
+# ── Global notes (.commander/notes.json) — issue #717 ─────────────────────────
+
+class GlobalNotesBody(BaseModel):
+    body: str = ""
+
+
+@app.get("/api/notes")
+def get_global_notes():
+    """Return the global notes body, or empty string if none saved yet."""
+    return {"body": _notes_repo.get_notes()}
+
+
+@app.put("/api/notes")
+def put_global_notes(body: GlobalNotesBody):
+    """Persist the full global notes body to .commander/notes.json."""
+    _notes_repo.set_notes(body.body)
+    return {"body": body.body}
 
 
 # ── Static asset routes with long-lived cache headers (issue #249) ────────────

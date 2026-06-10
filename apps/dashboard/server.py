@@ -570,7 +570,13 @@ def _check_repo_accessible(repo: str) -> bool:
     """Return True if `repo` (owner/repo) exists and is accessible via gh CLI.
 
     Uses `gh repo view --json name` which returns exit code 0 on success.
-    Network errors or missing repos both produce non-zero exit codes.
+
+    A non-zero exit can mean the repo is genuinely missing OR that the call
+    failed for a transient reason (GitHub API rate limit, network blip). Only
+    a *definitive* "not found" should be treated as inaccessible — a transient
+    failure must NOT block dashboard startup, so we assume-accessible and let
+    the warning path handle it. (Bug: a rate-limited startup check sys.exit'd
+    the whole server.)
     """
     try:
         result = subprocess.run(
@@ -579,8 +585,35 @@ def _check_repo_accessible(repo: str) -> bool:
             text=True,
             timeout=15,
         )
-        return result.returncode == 0
-    except (FileNotFoundError, subprocess.TimeoutExpired):
+        if result.returncode == 0:
+            return True
+        err = (result.stderr or "") + (result.stdout or "")
+        err_l = err.lower()
+        transient = (
+            "rate limit" in err_l
+            or "timeout" in err_l
+            or "timed out" in err_l
+            or "connection" in err_l
+            or "could not resolve host" in err_l
+            or "temporar" in err_l
+            or "503" in err_l
+            or "502" in err_l
+        )
+        if transient:
+            _slog.warn(
+                "repo_check_transient",
+                f"gh repo view for {repo} failed transiently; assuming accessible: {err.strip()[:200]}",
+                repo=repo,
+            )
+            return True
+        # Definitive failure (e.g. "Could not resolve to a Repository", 404).
+        return False
+    except subprocess.TimeoutExpired:
+        # Transient — do not block startup.
+        _slog.warn("repo_check_timeout", f"gh repo view for {repo} timed out; assuming accessible", repo=repo)
+        return True
+    except FileNotFoundError:
+        # gh not installed — that's a real misconfiguration.
         return False
 
 

@@ -22487,9 +22487,22 @@ function envRestart(env) {
 // (commander, perf-coach) and drives deploy/restart with confirmation,
 // streaming progress, a log tail, and a self-restart reconnect overlay.
 
-var _deployCards = [];            // [{project, env, host, branch, render_service_id, ...}]
+var _deployAllCards = [];         // every env across projects, as returned by /api/deploy/overview
+var _deployCards = [];            // active-project subset actually rendered (issue #768)
 var _deployTabPollers = {};       // idx → setTimeout handle (render status polling)
 var _deployReconnectTimer = null;
+
+// Filter deploy-overview entries down to the active project (issue #768). The
+// overview endpoint aggregates every project's environments; the Deploy tab must
+// only show the project currently being viewed. An empty slug returns all cards
+// (defensive — the page always has an active slug). Pure + side-effect free so it
+// is unit-testable on its own.
+function _deployFilterByProject(cards, slug) {
+  cards = cards || [];
+  if (!slug) return cards.slice();
+  return cards.filter(function(c) { return c && c.project === slug; });
+}
+// END _deployFilterByProject
 
 function _deployEsc(s) {
   var d = document.createElement('div');
@@ -22516,7 +22529,7 @@ function deployTabInit() {
   fetch('/api/deploy/overview')
     .then(function(r) { return r.ok ? r.json() : { environments: [] }; })
     .then(function(data) {
-      _deployCards = (data && data.environments) || [];
+      _deployAllCards = (data && data.environments) || [];
       _deployRenderGrid();
     })
     .catch(function() {
@@ -22528,6 +22541,10 @@ function deployTabInit() {
 function _deployRenderGrid() {
   var grid = document.getElementById('deploy-grid');
   if (!grid) return;
+  // Filter at render time so switching projects re-scopes the grid without a
+  // full-page reload (issue #768). _deployCards drives every index-based lookup
+  // below, so the rendered cards and their status pollers stay in sync.
+  _deployCards = _deployFilterByProject(_deployAllCards, window._currentProjectSlug || _slug || '');
   if (!_deployCards.length) {
     grid.innerHTML = '<div class="deploy-tab-intro" id="deploy-grid-empty">'
       + 'No deployable environments configured.</div>';

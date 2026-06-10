@@ -1236,6 +1236,14 @@
     .ps-scaffold-dialog-list { font-size: 12px; font-family: var(--mono); margin: 0 0 18px; padding: 0 0 0 16px; }
     .ps-scaffold-dialog-list li { padding: 2px 0; color: var(--text-sub); }
     .ps-scaffold-dialog-btns { display: flex; justify-content: flex-end; gap: 10px; }
+    /* Danger zone (delete project) */
+    .ps-danger-card { border-color: color-mix(in srgb, var(--red) 35%, var(--border)); }
+    .ps-danger-icon { color: var(--red); }
+    .ps-btn-danger { background: var(--red); color: #fff; border: 1px solid var(--red); }
+    .ps-btn-danger:hover:not(:disabled) { background: color-mix(in srgb, var(--red) 88%, #000); }
+    .ps-btn-danger:disabled { opacity: .5; cursor: not-allowed; }
+    .ps-input { padding: 7px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--text); font-size: 13px; font-family: inherit; margin-bottom: 14px; }
+    .ps-input:focus { outline: none; border-color: var(--red); }
     .ps-scaffold-confirm-btn { background: var(--text); color: var(--surface); border: none; padding: 7px 16px; border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer; }
     .ps-scaffold-cancel-btn { border: 1px solid var(--border); background: var(--surface); color: var(--text); padding: 7px 13px; border-radius: 6px; font-size: 13px; cursor: pointer; }
     .ps-scaffold-cancel-btn:hover { background: var(--surface-hover); }
@@ -6546,6 +6554,37 @@
             <button class="ps-btn ps-btn-primary" onclick="projSettingsSave()">
               <i class="ti ti-check"></i> Save changes
             </button>
+          </div>
+
+          <!-- Danger zone: delete project -->
+          <div class="proj-settings-card ps-danger-card">
+            <div class="proj-settings-card-head">
+              <i class="ti ti-alert-triangle proj-settings-card-icon ps-danger-icon"></i>
+              <div>
+                <div class="proj-settings-card-title">Danger zone</div>
+                <div class="proj-settings-card-sub">Remove this project from Commander and delete its local folders. The GitHub repo is not touched.</div>
+              </div>
+            </div>
+            <div class="proj-settings-card-body">
+              <button class="ps-btn ps-btn-danger" onclick="psDeleteOpen()">
+                <i class="ti ti-trash"></i> Delete project
+              </button>
+            </div>
+          </div>
+
+          <!-- Delete confirmation dialog (type-to-confirm) -->
+          <div class="ps-scaffold-overlay" id="ps-delete-confirm">
+            <div class="ps-scaffold-dialog">
+              <h3 style="color:var(--red)">Delete this project?</h3>
+              <p>This removes <strong id="ps-delete-name"></strong> from Commander and deletes its local clone folders on this machine. The GitHub repo is left untouched. This cannot be undone.</p>
+              <p style="font-size:13px;color:var(--text-muted)">Type <strong id="ps-delete-slug"></strong> to confirm:</p>
+              <input class="ps-input" id="ps-delete-input" type="text" autocomplete="off"
+                     oninput="psDeleteValidate()" placeholder="project slug" style="width:100%">
+              <div class="ps-scaffold-dialog-btns">
+                <button class="ps-scaffold-cancel-btn" onclick="psDeleteClose()">Cancel</button>
+                <button class="ps-scaffold-confirm-btn ps-btn-danger" id="ps-delete-confirm-btn" onclick="psDeleteConfirm()" disabled>Delete project</button>
+              </div>
+            </div>
           </div>
 
         </div><!-- /proj-settings-wrap -->
@@ -23070,6 +23109,63 @@ function scaffoldApplyOpen() {
 function scaffoldConfirmClose() {
   var overlay = document.getElementById('ps-scaffold-confirm');
   if (overlay) overlay.classList.remove('open');
+}
+
+// ── Delete project (Danger zone) ──────────────────────────────────────────────
+function _psCurrentRepo() {
+  // _cachedFullRepo entries may be a project object or the repo string; fall
+  // back to the repo shown in the settings header.
+  var c = (_cachedFullRepo || {})[_slug];
+  if (typeof c === 'string' && c.indexOf('/') !== -1) return c;
+  if (c && c.repo) return c.repo;
+  var el = document.getElementById('ps-repo-display');
+  var t = el ? el.textContent.trim() : '';
+  return t.indexOf('/') !== -1 ? t : null;
+}
+
+function psDeleteOpen() {
+  var repo = _psCurrentRepo();
+  var c = (_cachedFullRepo || {})[_slug];
+  var name = (c && c.name) || _slug;
+  document.getElementById('ps-delete-name').textContent = name;
+  document.getElementById('ps-delete-slug').textContent = _slug;
+  var inp = document.getElementById('ps-delete-input');
+  inp.value = '';
+  document.getElementById('ps-delete-confirm-btn').disabled = true;
+  document.getElementById('ps-delete-confirm').classList.add('open');
+  inp.focus();
+}
+
+function psDeleteValidate() {
+  var typed = (document.getElementById('ps-delete-input').value || '').trim();
+  document.getElementById('ps-delete-confirm-btn').disabled = (typed !== _slug);
+}
+
+function psDeleteClose() {
+  document.getElementById('ps-delete-confirm').classList.remove('open');
+}
+
+async function psDeleteConfirm() {
+  var repo = _psCurrentRepo();
+  if (!repo) { alert('Could not resolve the project repo.'); return; }
+  var btn = document.getElementById('ps-delete-confirm-btn');
+  btn.disabled = true; btn.textContent = 'Deleting…';
+  try {
+    var resp = await fetch('/api/projects/' + repo, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      // Local folders deleted; GitHub repo left untouched (the operator handles GitHub).
+      body: JSON.stringify({ delete_local_folders: true, delete_github_repo: false })
+    });
+    if (!resp.ok) {
+      var d = await resp.json().catch(function() { return {}; });
+      throw new Error(d.detail || ('HTTP ' + resp.status));
+    }
+    window.location.href = '/';
+  } catch (e) {
+    btn.disabled = false; btn.textContent = 'Delete project';
+    alert('Delete failed: ' + e.message);
+  }
 }
 
 async function scaffoldApplyConfirm() {

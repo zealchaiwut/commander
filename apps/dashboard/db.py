@@ -152,6 +152,56 @@ def init_db():
                 cleared_at   TEXT
             )
         """)
+        _create_ticket_status_table(conn)
+        conn.commit()
+
+
+def _create_ticket_status_table(conn: sqlite3.Connection) -> None:
+    """Create the ticket_status write-through table (issue #755).
+
+    Records the state written by state_machine.transition() after a successful
+    GitHub label edit, so the dashboard read-path no longer depends on a
+    post-edit verify re-fetch.  Kept in its own helper so record_ticket_status()
+    can ensure the table exists without running the full init_db() migration.
+    """
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS ticket_status (
+            id      INTEGER PRIMARY KEY AUTOINCREMENT,
+            issue   TEXT NOT NULL,
+            status  TEXT NOT NULL,
+            actor   TEXT NOT NULL,
+            note    TEXT,
+            ts      TEXT NOT NULL
+        )
+    """)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS ix_ticket_status_issue_ts "
+        "ON ticket_status (issue, ts DESC)"
+    )
+
+
+def record_ticket_status(
+    issue: str | int,
+    status: str,
+    actor: str,
+    note: str | None = None,
+    ts: str | None = None,
+) -> None:
+    """Write a ticket_status row for a successful transition (issue #755).
+
+    `ts` defaults to the current UTC timestamp in the same ISO-8601 format used
+    by the other tables.  Ensures the table exists before inserting, so callers
+    don't need to have run init_db() first.
+    """
+    if ts is None:
+        ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
+    with get_conn() as conn:
+        _create_ticket_status_table(conn)
+        conn.execute(
+            "INSERT INTO ticket_status (issue, status, actor, note, ts) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (str(issue), status, actor, note, ts),
+        )
         conn.commit()
 
 

@@ -2118,6 +2118,8 @@ from services.sprint_manager.deploy_config_schema import (
     merge_seed as _deploy_merge_seed,
     merge_for_put as _deploy_merge_for_put,
     build_deploy_config_response as _build_deploy_config_response,
+    known_deploy_slugs as _deploy_known_slugs,
+    overview_entries_for as _deploy_overview_entries_for,
 )
 
 
@@ -2544,12 +2546,50 @@ def environment_deploy_status(slug: str, env: str):
         )
     except _render_actions.RenderApiError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.message)
+    # Surface commit SHA + last-deploy timestamp for the Deploy-tab card (#726).
+    info = _render_actions.latest_deploy_from_payload(payload)
     return {
         "ok": True,
         "env": env,
         "host": "render",
-        "status": _render_actions.latest_status_from_payload(payload),
+        "status": info["status"],
+        "commit": info["commit"],
+        "finished_at": info["finished_at"],
     }
+
+
+@app.get("/api/deploy/overview")
+def get_deploy_overview():
+    """Aggregate deployable environments across all known projects (issue #726).
+
+    Powers the Deploy tab: one secret-safe card entry per configured
+    environment (``prd``, ``uat``) for every project that ships deploy config
+    (commander, perf-coach) plus any project listed in ``projects.json``. Each
+    entry carries ``project``, ``env``, ``host`` and host-specific fields; the
+    render_api_key is never returned. Live commit SHA / status are fetched
+    client-side per card (local via /api/health, render via deploy-status).
+    """
+    slugs: list[str] = list(_deploy_known_slugs())
+    try:
+        for proj in projects_module.load_projects():
+            s = proj["repo"].split("/")[-1]
+            if s not in slugs:
+                slugs.append(s)
+    except Exception:
+        pass
+
+    environments: list[dict] = []
+    for slug in slugs:
+        try:
+            repo = _resolve_project_slug(slug)
+        except HTTPException:
+            # perf-coach (and any seed-only project) may not be in projects.json;
+            # its stored override lookup just returns empty and seed defaults win.
+            repo = f"zealchaiwut/{slug}"
+        merged = _merged_deploy_config(slug, repo)
+        environments.extend(_deploy_overview_entries_for(slug, merged))
+
+    return {"environments": environments}
 
 
 # ── Settings sync (issue #644) ───────────────────────────────────────────────

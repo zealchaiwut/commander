@@ -17577,28 +17577,6 @@ function _gssRender(data) {
       </div>`;
     }).join('');
 
-  const EST_SIZES = [
-    { key: 'estimation_s_minutes',  label: 'S',  cls: 'gss-sz-S'  },
-    { key: 'estimation_m_minutes',  label: 'M',  cls: 'gss-sz-M'  },
-    { key: 'estimation_l_minutes',  label: 'L',  cls: 'gss-sz-L'  },
-    { key: 'estimation_xl_minutes', label: 'XL', cls: 'gss-sz-XL' },
-  ];
-  const estRows = EST_SIZES.map(s => `
-    <tr>
-      <td><span class="gss-sz-badge ${s.cls}">${s.label}</span></td>
-      <td><input class="gss-inp gss-inp-num" type="number" min="1" data-gss-key="${s.key}" value="${data[s.key] ?? ''}"> <span class="gss-ro">min</span></td>
-    </tr>`).join('');
-
-  const bufferRows = `
-    <div class="gss-row">
-      <div class="gss-label">Buffer<span class="hint">added to every estimate</span></div>
-      <div class="gss-control"><input class="gss-inp gss-inp-num" type="number" min="0" max="100" data-gss-key="estimation_buffer_pct" value="${data.estimation_buffer_pct ?? ''}"> <span class="gss-ro">%</span></div>
-    </div>
-    <div class="gss-row">
-      <div class="gss-label">Thin-AC buffer<span class="hint">used when AC is sparse</span></div>
-      <div class="gss-control"><input class="gss-inp gss-inp-num" type="number" min="0" max="100" data-gss-key="estimation_thin_ac_buffer_pct" value="${data.estimation_thin_ac_buffer_pct ?? ''}"> <span class="gss-ro">%</span></div>
-    </div>`;
-
   const SECRETS = [
     { key: 'github_token_set',  label: 'GITHUB_TOKEN'  },
     { key: 'database_url_set',  label: 'DATABASE_URL'  },
@@ -17649,20 +17627,6 @@ function _gssRender(data) {
             </select>
           </div>
         </div>
-      </div>
-    </div>
-
-    <div class="gss-card">
-      <div class="gss-card-head">
-        <i class="ti ti-ruler-measure" style="color:var(--text-muted)"></i>
-        <div><div class="gss-card-title">Estimation Defaults</div><div class="gss-card-sub">Size → time mapping used by the Estimator (global default; projects may override)</div></div>
-      </div>
-      <div class="gss-card-body">
-        <table class="gss-est-table">
-          <thead><tr><th style="width:80px">Size</th><th style="width:160px">Typical time</th></tr></thead>
-          <tbody>${estRows}</tbody>
-        </table>
-        <div style="margin-top:14px">${bufferRows}</div>
       </div>
     </div>
 

@@ -689,6 +689,7 @@ def _db_agent_start_sm(
     routing_reason: Optional[str] = None,
     worktree_sha: Optional[str] = None,
     base_sha: Optional[str] = None,
+    attempt_kind: Optional[str] = None,
 ) -> None:
     """Best-effort open of an agent_runs row at dispatch time (#764).
 
@@ -696,6 +697,7 @@ def _db_agent_start_sm(
     use risk-tier routing (issue #790). `routing_reason` is supplied for
     coder dispatches using size-tier routing (issue #789). `worktree_sha` and
     `base_sha` are forensic fields from worktree hygiene (issue #788).
+    `attempt_kind` is one of 'initial', 'fix_round', or 'hang_continue' (issue #787).
     """
     try:
         import db  # apps/dashboard on sys.path (line 142)
@@ -705,6 +707,7 @@ def _db_agent_start_sm(
             routing_reason=routing_reason,
             worktree_sha=worktree_sha,
             base_sha=base_sha,
+            attempt_kind=attempt_kind,
         )
     except (Exception, SystemExit):
         pass
@@ -2982,11 +2985,15 @@ def record_failure(
     repo_root: Optional[Path] = None,
     summary: Optional[str] = None,
     files_to_inspect: Optional[list] = None,
+    log_tail: Optional[list] = None,
 ) -> Optional[Path]:
     """Write a JSON failure sidecar for any failure class.
 
     Works independently of _FAILURE_PARSING_AVAILABLE — uses a direct path
     construction so it never depends on the optional post_test_report import.
+
+    `log_tail` is a list of the last N lines of agent stdout/stderr, stored
+    as a structured field for hang-redispatch context (issue #787).
 
     Returns the sidecar path on success, None on write error.
     """
@@ -3002,6 +3009,7 @@ def record_failure(
             "summary":          summary or f"Issue #{issue_num}: {failure_class} failure",
             "detail":           detail,
             "files_to_inspect": files_to_inspect or [],
+            "log_tail":         log_tail or [],
             "run_id":           os.environ.get("COMMANDER_RUN_ID"),
             "timestamp":        datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         }
@@ -3648,6 +3656,8 @@ def _dispatch_coder(
     on_running: Optional[object] = None,
     sprint_label: Optional[str] = None,
     prior_failures: Optional[list] = None,
+    hang_continuation: Optional[dict] = None,
+    attempt_kind: Optional[str] = None,
 ) -> tuple[bool, Optional[str]]:
     """Dispatch a coder agent for the issue.  Returns (ok, failure_category).
 
@@ -3788,6 +3798,18 @@ def _dispatch_coder(
     if "context.mjs" not in prompt:
         prompt += _impeccable_context_instruction()
 
+    # Inject hang-continuation context (issue #787): appended BEFORE the
+    # normal failure suffix so the agent sees the idle-kill context first.
+    if hang_continuation:
+        _hc_ts   = hang_continuation.get("timestamp", _utcnow())
+        _hc_tail = hang_continuation.get("log_tail", [])
+        _tail_str = "\n".join(_hc_tail[-20:]) if _hc_tail else "(no output captured)"
+        prompt += (
+            f"\n\nprior attempt idle-killed at {_hc_ts}; "
+            f"last output: {_tail_str}; "
+            "continue, do not restart"
+        )
+
     # Inject failure context: accumulated history (fix-loop, issue #618) or sidecar fallback
     if prior_failures:
         _ctx_lines = [
@@ -3923,11 +3945,19 @@ def _dispatch_coder(
                 cfg=cfg,
                 repo=eff_repo,
             )
+            # Extract the last N lines of the log as a structured log_tail field (issue #787).
+            _log_tail: list[str] = []
+            try:
+                _log_text = log_path.read_text(encoding="utf-8", errors="replace")
+                _log_tail = _log_text.splitlines()[-50:]
+            except Exception:
+                pass
             record_failure(
                 issue_num,
                 "hang",
                 detail=_build_crash_detail(log_path, signal="SIGKILL"),
                 summary=f"Issue #{issue_num}: coder hung for {HANG_KILL_SECS//60} minutes and was killed",
+                log_tail=_log_tail,
             )
             return False, FailureCategory.HANG
 
@@ -6588,10 +6618,13 @@ def _run_pipeline_dispatch(
         # Pre-compute model + routing_reason (issue #789) so agent_runs captures
         # the selection at dispatch time, mirroring the tester risk-tier pattern.
         _coder_model_sel, _coder_route_reason = _resolve_coder_model(num, cfg, estimate=_est)
+        # Determine attempt_kind for this dispatch (issue #787).
+        _pipe_attempt_kind = ctx.get("attempt_kind", "initial")
         _db_agent_start_sm(
             num, label, "coder",
             model_used=_coder_model_sel, routing_reason=_coder_route_reason,
-        )  # issue #764, #789
+            attempt_kind=_pipe_attempt_kind,
+        )  # issue #764, #789, #787
         _emit_sprint_lifecycle_event(
             type="ticket_dispatched", target=f"#{num}", actor="system",
             detail={"agent": "CODER"}, project=eff_repo or label, action_id=run_id,
@@ -6607,17 +6640,24 @@ def _run_pipeline_dispatch(
             _post_sprint_status(state, api_url=api_url)
 
         _stage_coder_t0 = time.monotonic()
+        _pipe_hang_continuation = ctx.get("hang_continuation")
         coder_ok, coder_category = _dispatch_coder(
             num, alert_modes, sprint_branch=target_branch, repo_name=eff_repo, cfg=cfg,
             chosen_port=chosen_port, rate_limit_events=state.rate_limit_events,
             on_running=_on_coder_running, sprint_label=label,
             prior_failures=ctx["fix_history"] if ctx["fix_history"] else None,
+            hang_continuation=_pipe_hang_continuation,
+            attempt_kind=_pipe_attempt_kind,
         )
         _db_agent_finish_sm(  # issue #764: one closed row per coder dispatch
             num, label, "coder",
             duration_seconds=time.monotonic() - _stage_coder_t0,
             outcome="success" if coder_ok else "failed",
         )
+        # Clear hang_continuation after dispatch so fix_round dispatches don't inherit it.
+        ctx.pop("hang_continuation", None)
+        ctx["attempt_kind"] = "fix_round"
+
         if not coder_ok:
             category = coder_category or FailureCategory.CRASH
             reason = (
@@ -6628,6 +6668,86 @@ def _run_pipeline_dispatch(
             ist.coder_finished_at = ist.status_changed_at
             if category in _LOGIC_FAILURE_CATEGORIES:
                 record_failure(num, category, detail=_build_crash_detail(_issue_log_path(num, cfg=cfg)))
+
+            # Hang-redispatch path (issue #787): on first hang, redispatch once inline.
+            if category == FailureCategory.HANG:
+                _hang_redispatch_enabled = os.environ.get("COMMANDER_HANG_REDISPATCH", "1") != "0"
+                _pipe_hang_count = ctx.get("hang_redispatch_count", 0)
+                if _hang_redispatch_enabled and _pipe_hang_count == 0:
+                    ctx["hang_redispatch_count"] = 1
+                    _pipe_hc_log_tail: list[str] = []
+                    try:
+                        _pipe_sc = REPO_ROOT / ".commander" / "runtime" / f"last-failure-{num}.json"
+                        if cfg:
+                            _pipe_sc = cfg.worktree_coder.parent / ".commander" / "runtime" / f"last-failure-{num}.json"
+                        if _pipe_sc.exists():
+                            _pipe_sc_data = json.loads(_pipe_sc.read_text(encoding="utf-8"))
+                            _pipe_hc_log_tail = _pipe_sc_data.get("log_tail", [])
+                    except Exception:
+                        pass
+                    ctx["hang_continuation"] = {
+                        "timestamp": _utcnow(),
+                        "log_tail": _pipe_hc_log_tail,
+                    }
+                    ctx["attempt_kind"] = "hang_continue"
+                    dispatch_alerts(
+                        alert_modes,
+                        title=f"Issue #{num}: hang-redispatch",
+                        body=(
+                            f"Coder hung and was idle-killed; redispatching once "
+                            f"with continuation context (attempt_kind=hang_continue)."
+                        ),
+                        issue_num=num,
+                        category="hang-redispatch",
+                        cfg=cfg,
+                        repo=eff_repo,
+                    )
+                    print(
+                        f"  [hang-redispatch] #{num} (pipeline): first hang, scheduling "
+                        f"hang_continue redispatch (log_tail lines: {len(_pipe_hc_log_tail)})",
+                        flush=True,
+                    )
+                    # Re-dispatch inline within this coder stage call.
+                    _stage_hc_t0 = time.monotonic()
+                    _db_agent_start_sm(
+                        num, label, "coder",
+                        model_used=_coder_model_sel, routing_reason=_coder_route_reason,
+                        attempt_kind="hang_continue",
+                    )
+                    coder_ok, coder_category = _dispatch_coder(
+                        num, alert_modes, sprint_branch=target_branch, repo_name=eff_repo, cfg=cfg,
+                        chosen_port=chosen_port, rate_limit_events=state.rate_limit_events,
+                        on_running=_on_coder_running, sprint_label=label,
+                        prior_failures=ctx["fix_history"] if ctx["fix_history"] else None,
+                        hang_continuation=ctx["hang_continuation"],
+                        attempt_kind="hang_continue",
+                    )
+                    _db_agent_finish_sm(
+                        num, label, "coder",
+                        duration_seconds=time.monotonic() - _stage_hc_t0,
+                        outcome="success" if coder_ok else "failed",
+                    )
+                    ctx.pop("hang_continuation", None)
+                    ctx["attempt_kind"] = "fix_round"
+                    if coder_ok:
+                        ist.set_agent_status("coder_done")
+                        ist.coder_finished_at = ist.status_changed_at
+                        _emit_sprint_lifecycle_event(
+                            type="ticket_agent_finished", target=f"#{num}", actor="system",
+                            detail={"agent": "CODER"}, project=eff_repo or label, action_id=run_id,
+                        )
+                        state.save(state_path)
+                        _post_sprint_status(state, api_url=api_url)
+                        return _StageResult.PASS
+                    # hang_continue also failed — fall through to _finalize_skip
+                    category = coder_category or FailureCategory.CRASH
+                    reason = (
+                        "Subscription rate limit exhausted"
+                        if category == FailureCategory.RETRY_EXHAUSTED
+                        else f"Coder failed with category {category} (after hang-redispatch)"
+                    )
+                    ist.coder_finished_at = ist.status_changed_at
+
             _finalize_skip(num, ist, reason, category, tag="coder failed")
             return _StageResult.FAIL
 
@@ -7324,6 +7444,11 @@ def run_sprint(
         _gate_passed  = False               # gate passed → loop exits success
         _infra_exit   = False               # infra failure → skip to next issue
         _loop_aborted = False               # dup/early-abort → RETRY_EXHAUSTED
+        # Hang-redispatch state (issue #787): track how many times this ticket
+        # has been redispatched after a hang.  At most 1 redispatch per ticket.
+        _hang_redispatch_count = 0
+        _hang_continuation: Optional[dict] = None   # context for next dispatch
+        _next_attempt_kind = "initial"              # initial / fix_round / hang_continue
 
         for _fix_attempt in range(_fix_rounds):
 
@@ -7350,7 +7475,8 @@ def run_sprint(
                 _db_agent_start_sm(
                     num, label, "coder",
                     model_used=_ser_coder_model, routing_reason=_ser_route_reason,
-                )  # issue #764, #789
+                    attempt_kind=_next_attempt_kind,
+                )  # issue #764, #789, #787
                 _emit_sprint_lifecycle_event(
                     type="ticket_dispatched",
                     target=f"#{num}",
@@ -7383,6 +7509,8 @@ def run_sprint(
                         chosen_port=chosen_port, rate_limit_events=state.rate_limit_events,
                         on_running=_on_coder_running, sprint_label=label,
                         prior_failures=_fix_history if _fix_history else None,
+                        hang_continuation=_hang_continuation,
+                        attempt_kind=_next_attempt_kind,
                     )
                 except SystemExit:
                     _remaining = [i for i in state.issues if i.status not in ("done", "skipped")]
@@ -7406,6 +7534,10 @@ def run_sprint(
                 )
                 _coder_m, _coder_s = divmod(int(_coder_elapsed), 60)
                 print(f"  Total time used on coder dispatch: {_coder_m}m {_coder_s}s")
+                # Clear hang_continuation after each dispatch so subsequent
+                # fix_round dispatches don't inherit stale hang context.
+                _hang_continuation = None
+                _next_attempt_kind = "fix_round"
                 try:
                     structured_log.event(
                         "coder.done",
@@ -7462,7 +7594,53 @@ def run_sprint(
                             f"attempt {_fix_attempt + 1}/{_fix_rounds}: will retry",
                             flush=True,
                         )
+                        _next_attempt_kind = "fix_round"
                         continue
+
+                    # Hang-redispatch path (issue #787): on first hang, redispatch once
+                    # with continuation context when COMMANDER_HANG_REDISPATCH != "0".
+                    if category == FailureCategory.HANG:
+                        _hang_redispatch_enabled = os.environ.get(
+                            "COMMANDER_HANG_REDISPATCH", "1"
+                        ) != "0"
+                        if _hang_redispatch_enabled and _hang_redispatch_count == 0:
+                            _hang_redispatch_count += 1
+                            # Read log_tail from the sidecar written by _dispatch_coder.
+                            _hc_log_tail: list[str] = []
+                            try:
+                                _sc = REPO_ROOT / ".commander" / "runtime" / f"last-failure-{num}.json"
+                                if cfg:
+                                    _sc = cfg.worktree_coder.parent / ".commander" / "runtime" / f"last-failure-{num}.json"
+                                if _sc.exists():
+                                    _sc_data = json.loads(_sc.read_text(encoding="utf-8"))
+                                    _hc_log_tail = _sc_data.get("log_tail", [])
+                            except Exception:
+                                pass
+                            _hang_continuation = {
+                                "timestamp": _utcnow(),
+                                "log_tail": _hc_log_tail,
+                            }
+                            dispatch_alerts(
+                                alert_modes,
+                                title=f"Issue #{num}: hang-redispatch",
+                                body=(
+                                    f"Coder hung and was idle-killed; redispatching once "
+                                    f"with continuation context (attempt_kind=hang_continue)."
+                                ),
+                                issue_num=num,
+                                category="hang-redispatch",
+                                cfg=cfg,
+                                repo=eff_repo,
+                            )
+                            print(
+                                f"  [hang-redispatch] #{num}: first hang, redispatching with "
+                                f"continuation context (log_tail lines: {len(_hc_log_tail)})",
+                                flush=True,
+                            )
+                            _next_attempt_kind = "hang_continue"
+                            _hang_continuation_set = _hang_continuation  # for clarity
+                            continue
+                        # Second hang or redispatch disabled: fall through to infra-failure path.
 
                     # Infra failure: existing path, no retry
                     issue_state.set_agent_status("failed")

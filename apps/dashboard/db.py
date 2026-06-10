@@ -299,6 +299,7 @@ def _create_agent_runs_table(conn: sqlite3.Connection) -> None:
     the full init_db() migration. Mirrors the Alembic migration
     0009_add_agent_runs so the schema is identical on SQLite and Postgres.
     `risk_tier` and `model_used` added by issue #790 (alembic 0010).
+    `attempt_kind` added by issue #787 (initial/fix_round/hang_continue).
     """
     conn.execute(
         """
@@ -316,7 +317,8 @@ def _create_agent_runs_table(conn: sqlite3.Connection) -> None:
             model_used       TEXT,
             routing_reason   TEXT,
             worktree_sha     TEXT,
-            base_sha         TEXT
+            base_sha         TEXT,
+            attempt_kind     TEXT
         )
         """
     )
@@ -328,13 +330,14 @@ def _create_agent_runs_table(conn: sqlite3.Connection) -> None:
         "CREATE INDEX IF NOT EXISTS ix_agent_runs_sprint "
         "ON agent_runs (sprint_label)"
     )
-    # Best-effort ALTER TABLE for existing DBs that predate issue #790/#789/#788.
+    # Best-effort ALTER TABLE for existing DBs that predate issue #790/#789/#788/#787.
     for col, typedef in (
         ("risk_tier", "TEXT"),
         ("model_used", "TEXT"),
         ("routing_reason", "TEXT"),
         ("worktree_sha", "TEXT"),
         ("base_sha", "TEXT"),
+        ("attempt_kind", "TEXT"),
     ):
         try:
             conn.execute(f"ALTER TABLE agent_runs ADD COLUMN {col} {typedef}")
@@ -364,6 +367,7 @@ def record_agent_start(
     routing_reason: str | None = None,
     worktree_sha: str | None = None,
     base_sha: str | None = None,
+    attempt_kind: str | None = None,
 ) -> int | None:
     """Insert an agent_runs row at dispatch time and return its id (issue #764).
 
@@ -372,6 +376,7 @@ def record_agent_start(
     optional for tester risk-tier routing (issue #790). `routing_reason` is
     optional for coder size-tier routing (issue #789). `worktree_sha` and
     `base_sha` are optional forensic fields from worktree hygiene (issue #788).
+    `attempt_kind` is one of 'initial', 'fix_round', or 'hang_continue' (issue #787).
     Returns the new row id (used to close the exact run) or None on failure.
     """
     started_at = started_at or _now_iso()
@@ -380,10 +385,10 @@ def record_agent_start(
         cur = conn.execute(
             "INSERT INTO agent_runs "
             "(issue_number, sprint_label, agent, started_at, risk_tier, model_used, routing_reason, "
-            "worktree_sha, base_sha) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "worktree_sha, base_sha, attempt_kind) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (int(issue_number), sprint_label, agent, started_at, risk_tier, model_used, routing_reason,
-             worktree_sha, base_sha),
+             worktree_sha, base_sha, attempt_kind),
         )
         conn.commit()
         return cur.lastrowid

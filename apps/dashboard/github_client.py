@@ -128,11 +128,51 @@ def _mirror_issue(repo_name: str, issue_number: int) -> dict | None:
         return None
 
 
+def _mirror_labels(repo_name: str) -> list[dict] | None:
+    """Return {name, color} for every label on any mirrored issue, or None.
+
+    Derived from the issues mirror, so it costs zero GitHub quota — unlike
+    `gh label list`, which goes through GraphQL. Labels that exist in the repo
+    but are attached to no issue won't appear; callers that need the complete
+    label registry (e.g. the ticket-creation label picker) keep using gh.
+    """
+    mirror = _mirror_issues(repo_name)
+    if mirror is None:
+        return None
+    seen: dict[str, str] = {}
+    for iss in mirror:
+        for lbl in iss.get("labels") or []:
+            name = lbl.get("name") if isinstance(lbl, dict) else lbl
+            if name and name not in seen:
+                seen[name] = (lbl.get("color") or "") if isinstance(lbl, dict) else ""
+    return [{"name": n, "color": c} for n, c in seen.items()]
+
+
 # ── cache ─────────────────────────────────────────────────────────────────────
+
+# Label registries change rarely (label create/delete, not issue activity), so
+# their gh fallback gets a longer TTL than issue data. Write paths invalidate
+# these keys explicitly (create_label), so fresh creates still appear at once.
+_TTL_BY_PREFIX = {
+    "labels:": 300.0,
+    "sprint_labels:": 300.0,
+    "sprints:": 300.0,
+    # Summary issues change only when a sprint finishes; 120s staleness is fine
+    # and cuts the board/nav polling burn on this (GraphQL) query ~4x further.
+    "summary_issues:": 120.0,
+}
+
+
+def _ttl_for(key: str) -> float:
+    for prefix, ttl in _TTL_BY_PREFIX.items():
+        if key.startswith(prefix):
+            return ttl
+    return CACHE_TTL
+
 
 def _cached(key: str, fn):
     now = time.monotonic()
-    if key in _cache and now - _cache[key][0] < CACHE_TTL:
+    if key in _cache and now - _cache[key][0] < _ttl_for(key):
         return _cache[key][1]
     val = fn()
     _cache[key] = (now, val)
@@ -359,6 +399,12 @@ def list_feature_branches(repo_name: str | None = None) -> dict[int, str]:
 
 def list_recent_closed(repo_name: str | None = None, limit: int = 5) -> list[dict]:
     r = _r(repo_name)
+    mirror = _mirror_issues(r)
+    if mirror is not None:
+        closed = [i for i in mirror if i.get("state") == "closed"]
+        if closed:
+            closed.sort(key=lambda i: i.get("updatedAt") or "", reverse=True)
+            return closed[:limit]
     key = f"recent_closed:{r}"
     def fetch():
         return _json(
@@ -372,6 +418,12 @@ def list_recent_closed(repo_name: str | None = None, limit: int = 5) -> list[dic
 
 def list_sprints(repo_name: str | None = None) -> list[int]:
     r = _r(repo_name)
+    labels = _mirror_labels(r)
+    if labels is not None:
+        nums = sorted({int(m.group(1)) for lbl in labels
+                       if (m := SPRINT_RE.match(lbl["name"]))})
+        if nums:
+            return nums
     key = f"sprints:{r}"
     def fetch():
         labels = _json("label", "list", "--repo", r, "--json", "name", "--limit", "200")
@@ -395,6 +447,11 @@ def _sprint_label_sort_key_gc(label: str) -> tuple[int, int]:
 def list_sprint_labels(repo_name: str | None = None) -> list[str]:
     """Return all sprint labels (sprint-N and sprint-N.X) sorted naturally."""
     r = _r(repo_name)
+    labels = _mirror_labels(r)
+    if labels is not None:
+        result = [lbl["name"] for lbl in labels if SPRINT_LABEL_RE_ALL.match(lbl["name"])]
+        if result:
+            return sorted(result, key=_sprint_label_sort_key_gc)
     key = f"sprint_labels:{r}"
     def fetch():
         labels = _json("label", "list", "--repo", r, "--json", "name", "--limit", "200")
@@ -409,6 +466,11 @@ def list_sprint_labels(repo_name: str | None = None) -> list[str]:
 def get_label_color(label_name: str, repo_name: str | None = None) -> str | None:
     """Return the hex color (without #) of a GitHub label, or None if not found."""
     r = _r(repo_name)
+    mirrored = _mirror_labels(r)
+    if mirrored is not None:
+        for lbl in mirrored:
+            if lbl["name"] == label_name and lbl.get("color"):
+                return lbl["color"]
     try:
         labels = _json("label", "list", "--repo", r, "--json", "name,color", "--limit", "200")
         for lbl in labels:
@@ -494,24 +556,34 @@ def latest_active_sprint(repo_name: str | None = None) -> Optional[int]:
     return _cached(key, fetch)
 
 
+def _pr_from_rest(pr: dict) -> dict:
+    """Map a REST pull-request object to the gh-CLI shape callers expect."""
+    return {
+        "number": pr.get("number"),
+        "title": pr.get("title", ""),
+        "state": (pr.get("state") or "").upper(),
+        "url": pr.get("html_url", ""),
+        "body": pr.get("body") or "",
+        "headRefName": (pr.get("head") or {}).get("ref", ""),
+        "baseRefName": (pr.get("base") or {}).get("ref", ""),
+    }
+
+
 def get_pr(pr_number: int, repo_name: str | None = None) -> dict:
-    return _json(
-        "pr", "view", str(pr_number), "--repo", _r(repo_name),
-        "--json", "number,title,state,url,body,headRefName",
-    )
+    # REST (gh api) instead of `gh pr view` — pr view goes through GraphQL,
+    # whose 5000/hr budget is the scarce one; REST has its own.
+    pr = _json("api", f"repos/{_r(repo_name)}/pulls/{pr_number}")
+    return _pr_from_rest(pr)
 
 
 def find_open_pr_for_head(head_branch: str, repo_name: str | None = None) -> dict | None:
     """Return the first open PR whose head branch matches head_branch, or None."""
     r = _r(repo_name)
+    owner = r.split("/")[0]
     try:
-        prs = _json(
-            "pr", "list", "--repo", r,
-            "--head", head_branch,
-            "--state", "open",
-            "--json", "number,title,url,headRefName,baseRefName",
-        )
-        return prs[0] if prs else None
+        # REST instead of `gh pr list` (GraphQL). head filter needs owner:branch.
+        prs = _json("api", f"repos/{r}/pulls?state=open&head={owner}:{head_branch}")
+        return _pr_from_rest(prs[0]) if prs else None
     except subprocess.CalledProcessError:
         return None
 
@@ -529,9 +601,43 @@ def repo_config() -> dict:
     }
 
 
+def list_summary_issues(repo_name: str | None = None) -> list[dict]:
+    """All sprint-summary-labeled issues, any state, as {number,title,url}.
+
+    NOT mirror-backed on purpose: the issues mirror holds only the most recently
+    created ~100 issues, so old sprints' summary issues would be missing and
+    finished sprints would wrongly reappear as unfinished. Cached (see
+    _TTL_BY_PREFIX) because this was previously an uncached gh call on the
+    board/nav hot path.
+    """
+    r = _r(repo_name)
+    key = f"summary_issues:{r}"
+    def fetch():
+        return _json(
+            "issue", "list", "--repo", r,
+            "--label", "sprint-summary", "--state", "all",
+            "--json", "number,title,url", "--limit", "200",
+        )
+    return _cached(key, fetch)
+
+
 def list_open_uat_issues(repo_name: str | None = None, sprint: int | None = None) -> list[dict]:
     """List open issues labelled UAT, optionally filtered to sprint-N."""
     r = _r(repo_name)
+    mirror = _mirror_issues(r)
+    if mirror is not None:
+        out = []
+        for iss in mirror:
+            if iss.get("state") != "open":
+                continue
+            names = {l.get("name") for l in iss.get("labels") or [] if isinstance(l, dict)}
+            if "UAT" not in names:
+                continue
+            if sprint is not None and f"sprint-{sprint}" not in names:
+                continue
+            out.append({"number": iss["number"], "title": iss.get("title", ""),
+                        "url": iss.get("url", "")})
+        return out
     args = [
         "issue", "list", "--repo", r,
         "--label", "UAT",

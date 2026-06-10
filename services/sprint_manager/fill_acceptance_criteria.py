@@ -31,14 +31,22 @@ _RETRY_DELAYS = [3, 6]
 
 
 def fetch_issue(issue_num: int, repo: str) -> dict:
-    """Fetch issue number/title/body from GitHub via gh CLI."""
+    """Fetch issue number/title/body from GitHub via REST (gh api).
+
+    `gh issue view` goes through GraphQL, whose 5000/hr budget is the scarce
+    one; REST has a separate budget.
+    """
     result = subprocess.run(
-        ["gh", "issue", "view", str(issue_num), "--repo", repo,
-         "--json", "number,title,body"],
+        ["gh", "api", f"repos/{repo}/issues/{issue_num}"],
         capture_output=True, text=True, check=True,
     )
     import json
-    return json.loads(result.stdout)
+    raw = json.loads(result.stdout)
+    return {
+        "number": raw.get("number"),
+        "title": raw.get("title", ""),
+        "body": raw.get("body") or "",
+    }
 
 
 def has_acceptance_criteria(body: str) -> bool:

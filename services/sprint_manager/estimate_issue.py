@@ -103,16 +103,22 @@ def extract_json(text: str) -> Optional[dict]:
 
 
 def fetch_issue(issue_num: int, repo: str) -> dict:
-    """Fetch issue details from GitHub using gh CLI."""
+    """Fetch issue details from GitHub via REST (gh api).
+
+    `gh issue view` goes through GraphQL, whose 5000/hr budget the dashboard
+    shares and exhausts during estimation bursts; REST has a separate budget.
+    """
     result = subprocess.run(
-        [
-            "gh", "issue", "view", str(issue_num),
-            "--repo", repo,
-            "--json", "number,title,body,labels",
-        ],
+        ["gh", "api", f"repos/{repo}/issues/{issue_num}"],
         capture_output=True, text=True, check=True,
     )
-    return json.loads(result.stdout)
+    raw = json.loads(result.stdout)
+    return {
+        "number": raw.get("number"),
+        "title": raw.get("title", ""),
+        "body": raw.get("body") or "",
+        "labels": [{"name": l.get("name", "")} for l in (raw.get("labels") or [])],
+    }
 
 
 _ESTIMATOR_MAX_RETRIES = 3

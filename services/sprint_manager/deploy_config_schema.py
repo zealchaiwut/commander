@@ -99,6 +99,11 @@ def overview_entries_for(
         if host not in SUPPORTED_HOSTS:
             continue
         e: dict[str, Any] = {"project": slug, "env": env, "host": host}
+        # issue #771 — advertise whether Start/Stop controls apply. Local envs
+        # support them (launchctl bootout/bootstrap or stop/start scripts); render
+        # has no clean stop equivalent through this dashboard, so the UI hides the
+        # Start/Stop buttons (not disables them) and shows a tooltip instead.
+        e["start_stop_supported"] = host == "local"
         if host == "local":
             e["branch"] = entry.get("branch") or branch_default(env)
             # issue #769 — surface the run folder + port on the card. working_dir

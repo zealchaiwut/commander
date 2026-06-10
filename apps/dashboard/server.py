@@ -2594,6 +2594,167 @@ def restart_environment(slug: str, env: str):
     return {"ok": True, "env": env, **result}
 
 
+def _stop_environment(entry: dict) -> dict:
+    """Stop a local environment without destroying it (issue #771).
+
+    Strategy: ``launchctl bootout`` when a launchd_label is set, else the
+    configured ``stop`` script. Validation failures raise HTTPException 400; a
+    failed command raises 500. Unlike restart's ``kickstart``, ``bootout``
+    removes the service from the domain so it stays down until Start.
+    """
+    try:
+        _deploy_actions.require_stop_target(entry)
+    except _deploy_actions.DeployActionError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    label = _deploy_actions.restart_label(entry)
+    if label:
+        cmd = _deploy_actions.build_bootout_command(label)
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            raise HTTPException(
+                status_code=500,
+                detail=result.stderr.strip() or result.stdout.strip() or "bootout failed",
+            )
+        return {
+            "method": "launchd-bootout",
+            "launchd_label": label,
+            "stdout": result.stdout,
+            "stderr": result.stderr,
+        }
+
+    stop, _start = _deploy_actions.stop_start_scripts(entry)
+    restart_env = _deploy_actions.build_restart_env(entry)
+    result = subprocess.run(
+        ["sh", "-c", stop], capture_output=True, text=True, env=restart_env
+    )
+    if result.returncode != 0:
+        raise HTTPException(
+            status_code=500,
+            detail=f"stop script failed: {result.stderr.strip() or stop}",
+        )
+    return {"method": "script", "script": stop, "stdout": result.stdout, "stderr": result.stderr}
+
+
+def _start_environment(entry: dict) -> dict:
+    """Start a local environment without pulling new code (issue #771).
+
+    Strategy: ``launchctl bootstrap gui/<uid> <plist>`` when a launchd_label +
+    launchd_plist are set, else the configured ``start`` script. Validation
+    failures raise HTTPException 400; a failed command raises 500.
+    """
+    try:
+        _deploy_actions.require_start_target(entry)
+    except _deploy_actions.DeployActionError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    label = _deploy_actions.restart_label(entry)
+    plist = _deploy_actions.launchd_plist(entry)
+    if label and plist:
+        cmd = _deploy_actions.build_bootstrap_command(plist)
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            raise HTTPException(
+                status_code=500,
+                detail=result.stderr.strip() or result.stdout.strip() or "bootstrap failed",
+            )
+        return {
+            "method": "launchd-bootstrap",
+            "launchd_label": label,
+            "launchd_plist": plist,
+            "stdout": result.stdout,
+            "stderr": result.stderr,
+        }
+
+    _stop, start = _deploy_actions.stop_start_scripts(entry)
+    restart_env = _deploy_actions.build_restart_env(entry)
+    result = subprocess.run(
+        ["sh", "-c", start], capture_output=True, text=True, env=restart_env
+    )
+    if result.returncode != 0:
+        raise HTTPException(
+            status_code=500,
+            detail=f"start script failed: {result.stderr.strip() or start}",
+        )
+    return {"method": "script", "script": start, "stdout": result.stdout, "stderr": result.stderr}
+
+
+@app.post("/api/projects/{slug}/environments/{env}/stop")
+def stop_environment(slug: str, env: str):
+    """Stop a local environment's service without destroying it (issue #771).
+
+    Uses ``launchctl bootout`` when a ``launchd_label`` is configured, else the
+    configured ``stop`` script. Rejects (400) when no stop target is configured;
+    404 for an unknown slug. host=render has no stop equivalent through this
+    dashboard, so the UI hides Start/Stop for render — this endpoint rejects it.
+    """
+    repo = _resolve_project_slug(slug)
+    merged = _merged_deploy_config(slug, repo)
+    entry = _deploy_actions.get_env_entry(merged, env)
+    if entry is None:
+        raise HTTPException(status_code=400, detail=f"No deploy config for environment '{env}'")
+    if _render_actions.is_render_host(entry):
+        raise HTTPException(
+            status_code=400,
+            detail="Stop is not supported for host=render environments",
+        )
+    result = _stop_environment(entry)
+    return {"ok": True, "env": env, **result}
+
+
+@app.post("/api/projects/{slug}/environments/{env}/start")
+def start_environment(slug: str, env: str):
+    """Start a local environment's service without pulling code (issue #771).
+
+    Uses ``launchctl bootstrap`` when ``launchd_label`` + ``launchd_plist`` are
+    configured, else the configured ``start`` script. Rejects (400) when no
+    start target is configured; 404 for an unknown slug. host=render is rejected
+    (the UI hides Start/Stop for render).
+    """
+    repo = _resolve_project_slug(slug)
+    merged = _merged_deploy_config(slug, repo)
+    entry = _deploy_actions.get_env_entry(merged, env)
+    if entry is None:
+        raise HTTPException(status_code=400, detail=f"No deploy config for environment '{env}'")
+    if _render_actions.is_render_host(entry):
+        raise HTTPException(
+            status_code=400,
+            detail="Start is not supported for host=render environments",
+        )
+    result = _start_environment(entry)
+    return {"ok": True, "env": env, **result}
+
+
+@app.get("/api/projects/{slug}/environments/{env}/run-state")
+def environment_run_state(slug: str, env: str):
+    """Return the live run state of a local environment (issue #771).
+
+    ``{"state": "running" | "stopped" | "idle"}``. For a launchd-managed env the
+    state comes from ``launchctl print`` (rc 0 → running, non-zero → stopped). A
+    script-only env has no reliable probe, so it reports ``idle`` (unknown). Only
+    host=local is supported; render run state is derived client-side from the
+    deploy status, so this endpoint rejects host=render with 400.
+    """
+    repo = _resolve_project_slug(slug)
+    merged = _merged_deploy_config(slug, repo)
+    entry = _deploy_actions.get_env_entry(merged, env)
+    if entry is None:
+        raise HTTPException(status_code=400, detail=f"No deploy config for environment '{env}'")
+    if _render_actions.is_render_host(entry):
+        raise HTTPException(
+            status_code=400,
+            detail="Run state is only available for host=local environments",
+        )
+    label = _deploy_actions.restart_label(entry)
+    if not label:
+        return {"ok": True, "env": env, "host": "local", "state": "idle"}
+    result = subprocess.run(
+        _deploy_actions.build_print_command(label), capture_output=True, text=True
+    )
+    state = _deploy_actions.interpret_run_state(result.returncode)
+    return {"ok": True, "env": env, "host": "local", "state": state}
+
+
 @app.get("/api/projects/{slug}/environments/{env}/deploy-status")
 def environment_deploy_status(slug: str, env: str):
     """Return the normalized latest-deploy status for a host=render env (issue #725).

@@ -72,7 +72,38 @@ gh issue view <N> --json number,title,body,labels
 
 Read the **What & Why**, **Acceptance Criteria**, and **UAT Test Steps** sections carefully. Implement exactly what the AC says — nothing more.
 
-### Step 4 — Understand the codebase
+### Step 4 — Read the AGENTS.md files for every implicated area
+
+Before touching any code, identify which directories the ticket touches (use
+the estimator's `files_touched` list if available, otherwise run a quick
+`codedb_search`). For **every implicated directory** that has an `AGENTS.md`,
+read it now:
+
+```bash
+cat <directory>/AGENTS.md
+```
+
+The five standard areas each have an `AGENTS.md`:
+
+| Area | File |
+|------|------|
+| Dashboard app | `apps/dashboard/AGENTS.md` |
+| Router modules | `apps/dashboard/routers/AGENTS.md` |
+| Sprint manager | `services/sprint_manager/AGENTS.md` |
+| Helper scripts | `scripts/AGENTS.md` |
+| Frontend static | `apps/dashboard/static/AGENTS.md` |
+
+**Log which files you loaded** by printing a line like:
+
+```
+[AGENTS.md] Loaded: apps/dashboard/AGENTS.md, services/sprint_manager/AGENTS.md
+```
+
+This confirms the relevant context was read before implementation begins (AC4
+of issue #791). Do not skip this step even if the ticket looks simple — the
+danger zones section prevents repeated mistakes.
+
+### Step 4b — Understand the codebase
 
 Use `codedb_search` and `codedb_tree` to find the relevant code before writing anything. Look at:
 - Which endpoints or modules the feature touches

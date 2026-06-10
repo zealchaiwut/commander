@@ -2,7 +2,9 @@
 
 AC coverage:
 - state_machine.py defines TicketState, STATE_LABELS, STATUS_LABELS, transition()
-- transition() computes diff correctly, issues one gh call, verifies after
+- transition() computes diff correctly and issues one gh edit call
+  (the post-edit verify re-fetch was removed in issue #755 — see
+  test_755__write_through_transition.py for the 2-call assertions)
 - BACKLOG/DONE are pseudo-states; transition() rejects them with ValueError
 - Retry: succeeds on second attempt after one failure
 - All retries exhausted → TransitionError
@@ -385,22 +387,15 @@ class TestRetry:
 
         assert sleep_calls == [1, 3, 7]
 
-    def test_verification_failure_retries(self):
-        """Edit succeeds but verification shows wrong labels → retry."""
-        view_responses = [
-            _label_response("in-progress"),    # attempt 1: fetch current
-            _label_response("in-progress"),    # attempt 1: verify — wrong! still in-progress
-            _label_response("in-progress"),    # attempt 2: fetch current
-            _label_response("SIT"),            # attempt 2: verify — correct
-        ]
-        view_idx = 0
+    def test_edit_success_returns_true_without_verify_refetch(self):
+        """Issue #755: the post-edit verify re-fetch was removed. A successful
+        edit returns True immediately — no second view call to re-check labels."""
+        calls = []
 
         def fake_run(cmd, **kwargs):
-            nonlocal view_idx
+            calls.append(list(cmd))
             if "view" in cmd:
-                r = view_responses[view_idx]
-                view_idx += 1
-                return r
+                return _label_response("in-progress")
             return _edit_ok()
 
         with patch("services.sprint_manager.state_machine.subprocess.run", side_effect=fake_run), \
@@ -410,20 +405,24 @@ class TestRetry:
             )
 
         assert result is True
+        # Exactly one view (pre-edit fetch) and one edit — no verify re-fetch.
+        assert len([c for c in calls if "view" in c]) == 1
+        assert len([c for c in calls if "edit" in c]) == 1
 
-    def test_transition_error_raised_when_verification_always_fails(self):
-        """Edit always succeeds but labels never match → TransitionError after retries."""
+    def test_no_transition_error_after_successful_edit(self):
+        """Issue #755: with the verify loop gone, a successful edit never raises
+        TransitionError even if the on-GitHub state would not be re-confirmed."""
         def fake_run(cmd, **kwargs):
             if "view" in cmd:
-                return _label_response("in-progress")  # always returns wrong state
+                return _label_response("in-progress")
             return _edit_ok()
 
         with patch("services.sprint_manager.state_machine.subprocess.run", side_effect=fake_run), \
              patch("services.sprint_manager.state_machine.time"):
-            with pytest.raises(TransitionError):
-                transition(
-                    _FAKE_ISSUE, TicketState.SIT, actor="test", repo=_FAKE_REPO
-                )
+            result = transition(
+                _FAKE_ISSUE, TicketState.SIT, actor="test", repo=_FAKE_REPO
+            )
+        assert result is True
 
 
 # ── logging ────────────────────────────────────────────────────────────────────

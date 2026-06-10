@@ -165,18 +165,49 @@ def transition(
                 time.sleep(_BACKOFFS[attempt])
             continue
 
-        after = _fetch_labels(issue, eff_repo)
-        after_status = STATUS_LABELS & after
-
-        if after_status == desired:
-            _log_transition(issue, current_status, desired, actor, note)
-            return True
-
-        last_error = (
-            f"Label verification failed (attempt {attempt + 1}): "
-            f"expected {sorted(desired)}, got {sorted(after_status)}"
-        )
-        if attempt < len(_BACKOFFS):
-            time.sleep(_BACKOFFS[attempt])
+        # Edit succeeded. The edit response is authoritative, so we skip the
+        # old post-edit verify re-fetch (issue #755) — the sync loop catches any
+        # drift lazily. Write the new state through to the local ticket_status
+        # table; a DB failure must NOT fail the transition.
+        _write_ticket_status(issue, target_state.name, actor, note)
+        _log_transition(issue, current_status, desired, actor, note)
+        return True
 
     raise TransitionError(last_error or "Transition failed after all retries")
+
+
+def _write_ticket_status(
+    issue: int,
+    status: str,
+    actor: str,
+    note: Optional[str],
+) -> None:
+    """Write-through the transitioned state to the local ticket_status table.
+
+    Best-effort: any failure (locked DB, schema error, import failure) is logged
+    as a structured "db_write_failed" error and swallowed — it must never raise
+    or change the transition's return value (issue #755).
+    """
+    try:
+        import sys
+        from pathlib import Path
+        dash_dir = Path(__file__).parent.parent.parent / "apps" / "dashboard"
+        if str(dash_dir) not in sys.path:
+            sys.path.insert(0, str(dash_dir))
+        import db
+        db.record_ticket_status(issue=issue, status=status, actor=actor, note=note)
+    except (Exception, SystemExit) as exc:
+        # db.py calls sys.exit(1) when DB_PATH is unset (SystemExit derives from
+        # BaseException, not Exception) — treat that as a swallowed write failure.
+        msg = f"#{issue}: ticket_status write failed: {exc}"
+        if _LOG_AVAILABLE:
+            _log.error(
+                "db_write_failed",
+                msg,
+                issue_num=issue,
+                status=status,
+                actor=actor,
+                error=str(exc),
+            )
+        else:
+            print(msg)

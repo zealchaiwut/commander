@@ -31,8 +31,26 @@
   // chip HTML we emit is never re-matched.
   var TOKEN_RE = /(#\d+)|\b(coder|tester|reviewer|documenter|estimator|BA)\b/gi;
 
+  /**
+   * Extract the display text from a log line.
+   *
+   * Lines written by envelope_subprocess_line() are JSON objects with a `.raw`
+   * field that contains the original agent output.  All other lines (plain text,
+   * structured manager events) are returned as-is.  This preserves pre-migration
+   * rendering for old log files while transparently unwrapping new envelopes.
+   */
+  function extractRaw(text) {
+    var s = String(text == null ? '' : text).trim();
+    if (s.length === 0 || s[0] !== '{') return s;
+    try {
+      var obj = JSON.parse(s);
+      if (typeof obj.raw === 'string') return obj.raw;
+    } catch (_) { /* not JSON — fall through */ }
+    return s;
+  }
+
   function colorizeLogLine(text, repo) {
-    var escaped = escapeLogHtml(text);
+    var escaped = escapeLogHtml(extractRaw(text));
     return escaped.replace(TOKEN_RE, function (match, issue, agent) {
       if (issue) {
         var num = issue.slice(1);
@@ -48,6 +66,7 @@
 
   root.colorizeLogLine = colorizeLogLine;
   root.escapeLogHtml = escapeLogHtml;
+  root.extractRaw = extractRaw;
 
   if (typeof module !== 'undefined' && module.exports) {
     module.exports = {

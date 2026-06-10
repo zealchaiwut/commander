@@ -47,17 +47,17 @@ def ensure_develop(repo_name: str | None) -> None:
 
     ok, _ = _try("git", "ls-remote", "--exit-code", "origin", "refs/heads/develop")
     if ok:
-        print("Fetching develop from origin…")
+        sys.stdout.write(str("Fetching develop from origin…") + "\n")
         _run("git", "fetch", "origin")
         _run("git", "checkout", "--track", "origin/develop")
         return
 
-    print("develop branch not found — creating off main…")
+    sys.stdout.write(str("develop branch not found — creating off main…") + "\n")
     _run("git", "checkout", "main")
     _run("git", "pull", "origin", "main")
     _run("git", "checkout", "-b", "develop")
     _run("git", "push", "-u", "origin", "develop")
-    print("Created and pushed develop branch.")
+    sys.stdout.write(str("Created and pushed develop branch.") + "\n")
 
 
 def main():
@@ -84,27 +84,27 @@ def main():
     short  = args.issue
     base   = args.base_branch
 
-    print(f"Issue #{short}: {title}")
-    print(f"Branch:         {branch}")
-    print(f"Base:           {base}")
+    sys.stdout.write(str(f"Issue #{short}: {title}") + "\n")
+    sys.stdout.write(str(f"Branch:         {branch}") + "\n")
+    sys.stdout.write(str(f"Base:           {base}") + "\n")
 
     ensure_develop(args.repo)
 
     # Already exists locally → just check out
     ok, _ = _try("git", "show-ref", "--verify", "--quiet", f"refs/heads/{branch}")
     if ok:
-        print(f"Branch {branch} already exists locally — checking out.")
+        sys.stdout.write(str(f"Branch {branch} already exists locally — checking out.") + "\n")
         _run("git", "checkout", branch)
-        print(f"✅  Checked out {branch}")
+        sys.stdout.write(str(f"✅  Checked out {branch}") + "\n")
         return
 
     # Already exists on remote → track it
     ok, _ = _try("git", "ls-remote", "--exit-code", "origin", f"refs/heads/{branch}")
     if ok:
-        print(f"Branch {branch} exists on remote — checking out.")
+        sys.stdout.write(str(f"Branch {branch} exists on remote — checking out.") + "\n")
         _run("git", "fetch", "origin")
         _run("git", "checkout", "--track", f"origin/{branch}")
-        print(f"✅  Checked out {branch}")
+        sys.stdout.write(str(f"✅  Checked out {branch}") + "\n")
         return
 
     # Fresh branch off base branch
@@ -125,8 +125,8 @@ def main():
         repo_name=args.repo,
     )
 
-    print(f"✅  Created and pushed {branch} (based off {base})")
-    print(branch)   # last line: branch name for scripts that capture output
+    sys.stdout.write(str(f"✅  Created and pushed {branch} (based off {base})") + "\n")
+    sys.stdout.write(str(branch) + "\n")   # last line: branch name for scripts that capture output
 
 
 if __name__ == "__main__":

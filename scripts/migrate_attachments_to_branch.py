@@ -71,7 +71,7 @@ def _ensure_attachments_branch(repo: str) -> None:
     )
     if result.returncode == 0:
         return
-    print(f"  Creating orphan '{_ATTACHMENTS_BRANCH}' branch...")
+    sys.stdout.write(str(f"  Creating orphan '{_ATTACHMENTS_BRANCH}' branch...") + "\n")
     url_result = subprocess.run(
         ["gh", "repo", "view", repo, "--json", "url", "-q", ".url"],
         capture_output=True, text=True,
@@ -208,7 +208,7 @@ def _commit_files(cache_dir: Path, issue_number: int,
         capture_output=True, text=True, cwd=str(cache_dir),
     )
     if push.returncode != 0:
-        print(f"  WARNING: push failed: {push.stderr.strip()}", file=sys.stderr)
+        sys.stderr.write(str(f"  WARNING: push failed: {push.stderr.strip()}") + "\n")
 
 
 def main():
@@ -227,7 +227,7 @@ def main():
     root = _repo_root()
     refs_dir = root / "references"
     if not refs_dir.exists():
-        print("No references/ directory found. Nothing to migrate.")
+        sys.stdout.write(str("No references/ directory found. Nothing to migrate.") + "\n")
         return
 
     issue_dirs = sorted(
@@ -235,13 +235,13 @@ def main():
         key=lambda d: int(d.name.split("-")[1]),
     )
     if not issue_dirs:
-        print("No issue directories found under references/. Nothing to migrate.")
+        sys.stdout.write(str("No issue directories found under references/. Nothing to migrate.") + "\n")
         return
 
     if not args.dry_run:
-        print(f"Ensuring '{_ATTACHMENTS_BRANCH}' branch exists on {repo}...")
+        sys.stdout.write(str(f"Ensuring '{_ATTACHMENTS_BRANCH}' branch exists on {repo}...") + "\n")
         _ensure_attachments_branch(repo)
-        print(f"Initializing bare-clone cache for {repo}...")
+        sys.stdout.write(str(f"Initializing bare-clone cache for {repo}...") + "\n")
         cache_dir = _init_cache(repo)
     else:
         cache_dir = None
@@ -262,24 +262,24 @@ def main():
         to_commit: list[tuple[str, bytes]] = []
         for f in sorted(files_here):
             if f.name in existing:
-                print(f"  SKIP (already on branch): {issue_dir.name}/{f.name}")
+                sys.stdout.write(str(f"  SKIP (already on branch): {issue_dir.name}/{f.name}") + "\n")
                 continue
             if args.dry_run:
-                print(f"  WOULD COMMIT: {issue_dir.name}/{f.name} ({f.stat().st_size} bytes)")
+                sys.stdout.write(str(f"  WOULD COMMIT: {issue_dir.name}/{f.name} ({f.stat().st_size} bytes)") + "\n")
             else:
-                print(f"  Staging: {issue_dir.name}/{f.name}")
+                sys.stdout.write(str(f"  Staging: {issue_dir.name}/{f.name}") + "\n")
                 to_commit.append((f.name, f.read_bytes()))
                 total += 1
 
         if to_commit and not args.dry_run:
-            print(f"  Committing {len(to_commit)} file(s) for issue #{issue_number}...")
+            sys.stdout.write(str(f"  Committing {len(to_commit)} file(s) for issue #{issue_number}...") + "\n")
             _commit_files(cache_dir, issue_number, to_commit)
 
     if args.dry_run:
-        print("Dry run complete. No changes made.")
+        sys.stdout.write(str("Dry run complete. No changes made.") + "\n")
     else:
-        print(f"Migration complete. {total} file(s) committed to '{_ATTACHMENTS_BRANCH}' branch.")
-        print("The references/ folder in the main history has NOT been modified (non-destructive).")
+        sys.stdout.write(str(f"Migration complete. {total} file(s) committed to '{_ATTACHMENTS_BRANCH}' branch.") + "\n")
+        sys.stdout.write(str("The references/ folder in the main history has NOT been modified (non-destructive).") + "\n")
 
 
 if __name__ == "__main__":

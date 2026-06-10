@@ -283,7 +283,7 @@ def generate(repo: str, sprints_dir: Path, out_path: Path) -> None:
         except OSError:
             pass
         raise
-    print(f"STATUS.md written → {out_path}")
+    sys.stdout.write(str(f"STATUS.md written → {out_path}") + "\n")
 
 
 # ── CLI ───────────────────────────────────────────────────────────────────────

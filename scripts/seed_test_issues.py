@@ -23,7 +23,7 @@ from pathlib import Path
 try:
     import yaml
 except ImportError:
-    print("ERROR: PyYAML not installed. Run: pip install pyyaml", file=sys.stderr)
+    sys.stderr.write(str("ERROR: PyYAML not installed. Run: pip install pyyaml") + "\n")
     sys.exit(1)
 
 _DASHBOARD_DIR = Path(__file__).parent.parent / "apps" / "dashboard"
@@ -67,7 +67,8 @@ def _gh_json(*args) -> object:
 
 
 def log(msg: str) -> None:
-    print(msg, flush=True)
+    sys.stdout.write(str(msg) + "\n")
+    sys.stdout.flush()
 
 
 def validate_fixture(data: dict) -> list[dict]:
@@ -265,7 +266,7 @@ def main() -> None:
 
     # Step 1 — validate fixture file
     if not FIXTURE_FILE.exists():
-        print(f"ERROR: Fixture file not found: {FIXTURE_FILE}", file=sys.stderr)
+        sys.stderr.write(str(f"ERROR: Fixture file not found: {FIXTURE_FILE}") + "\n")
         sys.exit(1)
 
     with FIXTURE_FILE.open() as f:
@@ -274,7 +275,7 @@ def main() -> None:
     try:
         issues = validate_fixture(raw)
     except ValueError as exc:
-        print(f"ERROR: Invalid fixture file: {exc}", file=sys.stderr)
+        sys.stderr.write(str(f"ERROR: Invalid fixture file: {exc}") + "\n")
         sys.exit(1)
 
     log(f"Fixture validated: {len(issues)} issues")

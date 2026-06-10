@@ -9,6 +9,7 @@ import enum
 import json
 import os
 import subprocess
+import sys
 import time
 from typing import Iterable, Optional
 
@@ -142,7 +143,7 @@ def _log_transition(
             noop=noop,
         )
     else:
-        print(msg)
+        sys.stdout.write(str(msg) + "\n")
 
 
 def transition(
@@ -248,4 +249,4 @@ def _write_ticket_status(
                 error=str(exc),
             )
         else:
-            print(msg)
+            sys.stdout.write(str(msg) + "\n")

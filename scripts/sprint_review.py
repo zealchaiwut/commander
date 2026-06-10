@@ -160,30 +160,21 @@ def _spawn_preflight_agent(issues_json: str, repo: str, sprint_label: str) -> di
         )
         stdout = proc.stdout.strip()
     except subprocess.TimeoutExpired:
-        print(
-            f"\n  WARNING: preflight agent timed out after {PREFLIGHT_TIMEOUT_SEC}s "
-            "— all issues marked ok.",
-            file=sys.stderr,
-        )
+        sys.stderr.write(str(f"\n  WARNING: preflight agent timed out after {PREFLIGHT_TIMEOUT_SEC}s "
+            "— all issues marked ok.") + "\n")
         return {}
 
     # Extract JSON object from output (model may wrap in backticks or add prose)
     json_match = re.search(r"\{.*\}", stdout, re.DOTALL)
     if not json_match:
-        print(
-            f"\n  WARNING: preflight agent returned no JSON — all issues marked ok.\n"
-            f"           stdout: {stdout[:200]!r}",
-            file=sys.stderr,
-        )
+        sys.stderr.write(str(f"\n  WARNING: preflight agent returned no JSON — all issues marked ok.\n"
+            f"           stdout: {stdout[:200]!r}") + "\n")
         return {}
 
     try:
         raw = json.loads(json_match.group(0))
     except json.JSONDecodeError as exc:
-        print(
-            f"\n  WARNING: preflight agent JSON parse error ({exc}) — all issues marked ok.",
-            file=sys.stderr,
-        )
+        sys.stderr.write(str(f"\n  WARNING: preflight agent JSON parse error ({exc}) — all issues marked ok.") + "\n")
         return {}
 
     # Normalise: coerce string keys to int, validate status/action values
@@ -442,20 +433,20 @@ def _format_title(title: str, max_len: int = 30) -> str:
 def print_report(sprint_label: str, results: list[ReviewResult]) -> None:
     """Print the formatted pre-sprint review report to stdout."""
     n = len(results)
-    print(f"\n{'═' * 50}")
-    print(f"Pre-sprint review: {sprint_label} · {n} issue{'s' if n != 1 else ''}")
-    print(f"{'═' * 50}\n")
+    sys.stdout.write(str(f"\n{'═' * 50}") + "\n")
+    sys.stdout.write(str(f"Pre-sprint review: {sprint_label} · {n} issue{'s' if n != 1 else ''}") + "\n")
+    sys.stdout.write(str(f"{'═' * 50}\n") + "\n")
 
     for r in results:
         symbol = SYMBOLS.get(r.status, "  ")
         title_col  = _format_title(r.title, 32)
         status_col = r.status.ljust(14)
         action_col = f"→ {r.suggested_action}"
-        print(f"  {symbol}  #{r.number:<4} {title_col:<32} {status_col} {action_col}")
+        sys.stdout.write(str(f"  {symbol}  #{r.number:<4} {title_col:<32} {status_col} {action_col}") + "\n")
         if r.status != "ok" and r.notes:
-            print(f"            {r.notes}")
+            sys.stdout.write(str(f"            {r.notes}") + "\n")
 
-    print()
+    sys.stdout.write("\n")
 
     # Summary line
     counts = _count_statuses(results)
@@ -464,12 +455,12 @@ def print_report(sprint_label: str, results: list[ReviewResult]) -> None:
         val = counts.get(key, 0)
         if val:
             parts.append(f"{val} {key}")
-    print(f"  Summary: {' · '.join(parts) if parts else 'no issues'}")
+    sys.stdout.write(str(f"  Summary: {' · '.join(parts) if parts else 'no issues'}") + "\n")
 
     # Token budget estimate
     total_tokens = n * TOKENS_PER_ISSUE
-    print(f"  Est. token budget: {total_tokens // 1000} k ({n} issue{'s' if n != 1 else ''} at default M={TOKENS_PER_ISSUE // 1000} k each)")
-    print()
+    sys.stdout.write(str(f"  Est. token budget: {total_tokens // 1000} k ({n} issue{'s' if n != 1 else ''} at default M={TOKENS_PER_ISSUE // 1000} k each)") + "\n")
+    sys.stdout.write("\n")
 
 
 def _count_statuses(results: list[ReviewResult]) -> dict[str, int]:
@@ -489,10 +480,10 @@ def prompt_user(results: list[ReviewResult]) -> list[ReviewResult]:
     Exits with code 1 on Q.
     """
     if not sys.stdout.isatty():
-        print("[preflight] Non-interactive mode: auto-approving all issues.")
+        sys.stdout.write(str("[preflight] Non-interactive mode: auto-approving all issues.") + "\n")
         return results
 
-    print("  Proceed? [A]pprove all  [S]kip flagged  [E]dit per-issue  [Q]uit")
+    sys.stdout.write(str("  Proceed? [A]pprove all  [S]kip flagged  [E]dit per-issue  [Q]uit") + "\n")
     try:
         choice = input("  > ").strip().upper()
     except (EOFError, KeyboardInterrupt):
@@ -505,8 +496,8 @@ def prompt_user(results: list[ReviewResult]) -> list[ReviewResult]:
         kept    = [r for r in results if r.status == "ok"]
         skipped = [r for r in results if r.status != "ok"]
         if skipped:
-            print(f"\n  Skipping {len(skipped)} flagged issue(s): "
-                  + ", ".join(f"#{r.number}" for r in skipped))
+            sys.stdout.write(str(f"\n  Skipping {len(skipped)} flagged issue(s): "
+                  + ", ".join(f"#{r.number}" for r in skipped)) + "\n")
         return kept
 
     elif choice == "E":
@@ -522,11 +513,11 @@ def prompt_user(results: list[ReviewResult]) -> list[ReviewResult]:
             if answer != "y":
                 kept.append(r)
             else:
-                print(f"  Skipping #{r.number}")
+                sys.stdout.write(str(f"  Skipping #{r.number}") + "\n")
         return kept
 
     else:  # Q or anything else
-        print("Preflight aborted.")
+        sys.stdout.write(str("Preflight aborted.") + "\n")
         sys.exit(1)
 
 
@@ -586,9 +577,7 @@ def run_preflight(
     approved with status="ok", notes="review skipped (claude CLI not found)".
     """
     if not shutil.which("claude"):
-        print(
-            "[preflight] claude CLI not found — skipping review, proceeding with all issues"
-        )
+        sys.stdout.write(str("[preflight] claude CLI not found — skipping review, proceeding with all issues") + "\n")
         issues = _fetch_sprint_issues(sprint_label, repo_name)
         pseudo = [
             ReviewResult(
@@ -606,10 +595,10 @@ def run_preflight(
     # Fetch backlog issues
     issues = _fetch_sprint_issues(sprint_label, repo_name)
     if not issues:
-        print(f"[preflight] No open backlog issues found for {sprint_label!r}.")
+        sys.stdout.write(str(f"[preflight] No open backlog issues found for {sprint_label!r}.") + "\n")
         return [], []
 
-    print(f"[preflight] Reviewing {len(issues)} issue(s) for {sprint_label!r} ...")
+    sys.stdout.write(str(f"[preflight] Reviewing {len(issues)} issue(s) for {sprint_label!r} ...") + "\n")
 
     results = run_reviews(issues, repo_name, sprint_label)
 
@@ -618,7 +607,7 @@ def run_preflight(
 
     # Write JSON (AC-8) — always written regardless of TTY/prompt
     out_path = _write_and_log(sprint_label, results, sprints_dir)
-    print(f"[preflight] Review written to {out_path}")
+    sys.stdout.write(str(f"[preflight] Review written to {out_path}") + "\n")
 
     # Interactive prompt (AC-6/7)
     if interactive:
@@ -646,7 +635,7 @@ def _fetch_sprint_issues(sprint_label: str, repo_name: Optional[str]) -> list[di
         )
         all_issues = json.loads(out.stdout)
     except Exception as e:
-        print(f"[preflight] Warning: could not fetch issues — {e}", file=sys.stderr)
+        sys.stderr.write(str(f"[preflight] Warning: could not fetch issues — {e}") + "\n")
         return []
 
     # Filter to backlog only
@@ -689,11 +678,8 @@ def _resolve_sprints_dir(cfg_sprints_dir: Path, commander_dir: Path) -> Path:
     for i, part in enumerate(parts):
         if part == ".commander" and i + 1 < len(parts) and parts[i + 1] == ".commander":
             canonical = commander_dir / "sprints"
-            print(
-                f"  [preflight] Corrected double .commander path in sprints_dir: "
-                f"{resolved} → {canonical}",
-                file=sys.stderr,
-            )
+            sys.stderr.write(str(f"  [preflight] Corrected double .commander path in sprints_dir: "
+                f"{resolved} → {canonical}") + "\n")
             return canonical
     return resolved
 
@@ -746,11 +732,8 @@ def main() -> None:
         try:
             return load_config(path)  # type: ignore[possibly-undefined]
         except SystemExit as e:
-            print(
-                f"  Warning: could not load config {path} — {e}; "
-                "using commander default sprints directory.",
-                file=sys.stderr,
-            )
+            sys.stderr.write(str(f"  Warning: could not load config {path} — {e}; "
+                "using commander default sprints directory.") + "\n")
             return None
 
     if _sm_available:
@@ -758,7 +741,7 @@ def main() -> None:
             config_path = Path(args.config).expanduser().resolve()
             if not config_path.exists():
                 p.error(f"Config file not found: {config_path}")
-            print(f"  Using config: {config_path}")
+            sys.stdout.write(str(f"  Using config: {config_path}") + "\n")
             cfg = _try_load_config(config_path)
             if cfg is not None:
                 sprints_dir = _resolve_sprints_dir(cfg.sprints_dir, config_path.parent)
@@ -767,7 +750,7 @@ def main() -> None:
         else:
             discovered = discover_config()  # type: ignore[possibly-undefined]
             if discovered:
-                print(f"  Auto-discovered config: {discovered}")
+                sys.stdout.write(str(f"  Auto-discovered config: {discovered}") + "\n")
                 cfg = _try_load_config(discovered)
                 if cfg is not None:
                     sprints_dir = _resolve_sprints_dir(cfg.sprints_dir, discovered.parent)

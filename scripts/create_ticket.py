@@ -126,7 +126,7 @@ def main():
             capture_output=True, text=True, check=True,
         )
 
-    print(f"#{number} {url}")
+    sys.stdout.write(str(f"#{number} {url}") + "\n")
 
 
 if __name__ == "__main__":

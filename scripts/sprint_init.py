@@ -94,9 +94,9 @@ def _append_gitignore(repo_root: Path, entries: list[str]) -> None:
             f.write("\n# commander sprint data\n")
             for line in lines_to_add:
                 f.write(line + "\n")
-        print(f"  Updated .gitignore: added {lines_to_add}")
+        sys.stdout.write(str(f"  Updated .gitignore: added {lines_to_add}") + "\n")
     else:
-        print("  .gitignore already contains sprint entries; skipping")
+        sys.stdout.write(str("  .gitignore already contains sprint entries; skipping") + "\n")
 
 
 # ── main ──────────────────────────────────────────────────────────────────────
@@ -128,9 +128,9 @@ def main() -> None:
     tester_app_subdir = args.tester_app_subdir.strip()
 
     # Step 1: validate gh repo access BEFORE writing anything (AC-9)
-    print(f"  Validating access to {repo_name} ...")
+    sys.stdout.write(str(f"  Validating access to {repo_name} ...") + "\n")
     _validate_repo_access(repo_name)
-    print(f"  Access confirmed.")
+    sys.stdout.write(str(f"  Access confirmed.") + "\n")
 
     # Step 2: write .commander/sprint.yaml (AC-8)
     commander_dir = repo_root / ".commander"
@@ -146,7 +146,7 @@ def main() -> None:
 
     sprint_yaml = commander_dir / "sprint.yaml"
     sprint_yaml.write_text(yaml_content, encoding="utf-8")
-    print(f"  Wrote {sprint_yaml}")
+    sys.stdout.write(str(f"  Wrote {sprint_yaml}") + "\n")
 
     # Step 3: create subdirectories (AC-8)
     for subdir in ("logs", "sprints", "alerts"):
@@ -155,21 +155,19 @@ def main() -> None:
         gitkeep = d / ".gitkeep"
         if not gitkeep.exists():
             gitkeep.touch()
-        print(f"  Created {d}/")
+        sys.stdout.write(str(f"  Created {d}/") + "\n")
 
     # Step 4: update .gitignore (AC-8)
     _append_gitignore(repo_root, [".commander/logs/", ".commander/sprints/"])
 
     # Step 5: print next-step instructions (AC-8)
     sprint_yaml_path = sprint_yaml
-    print()
-    print("Next steps:")
-    print(f"  git worktree add {coder_worktree} develop")
-    print(f"  git worktree add {tester_worktree} develop")
-    print(
-        f"  python3 {SCRIPTS_DIR}/sprint_manager.py "
-        f"--config {sprint_yaml_path} sprint-1"
-    )
+    sys.stdout.write("\n")
+    sys.stdout.write(str("Next steps:") + "\n")
+    sys.stdout.write(str(f"  git worktree add {coder_worktree} develop") + "\n")
+    sys.stdout.write(str(f"  git worktree add {tester_worktree} develop") + "\n")
+    sys.stdout.write(str(f"  python3 {SCRIPTS_DIR}/sprint_manager.py "
+        f"--config {sprint_yaml_path} sprint-1") + "\n")
 
 
 if __name__ == "__main__":

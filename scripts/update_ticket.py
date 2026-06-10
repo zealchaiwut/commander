@@ -110,11 +110,8 @@ def main():
     if args.status in _PASSTHROUGH_STATUSES:
         # These statuses don't correspond to TicketState values, so transition()
         # does not own them. They are not status labels — apply with the gh CLI.
-        print(
-            f"Status '{args.status}' is not a managed status label; "
-            f"apply it directly with the gh CLI.",
-            file=sys.stderr,
-        )
+        sys.stderr.write(str(f"Status '{args.status}' is not a managed status label; "
+            f"apply it directly with the gh CLI.") + "\n")
         sys.exit(1)
 
     target_state = STATUS_TO_STATE[args.status]
@@ -138,18 +135,18 @@ def main():
             repo=repo,
         )
         if changed:
-            print(f"transition: #{args.issue} → {args.status}")
+            sys.stdout.write(str(f"transition: #{args.issue} → {args.status}") + "\n")
         else:
-            print(f"transition: #{args.issue} already in {args.status} (no-op)")
+            sys.stdout.write(str(f"transition: #{args.issue} already in {args.status} (no-op)") + "\n")
     except ValueError as e:
-        print(f"transition blocked: {e}", file=sys.stderr)
+        sys.stderr.write(str(f"transition blocked: {e}") + "\n")
         sys.exit(1)
     except TransitionError as e:
-        print(f"transition failed: {e}", file=sys.stderr)
+        sys.stderr.write(str(f"transition failed: {e}") + "\n")
         sys.exit(1)
 
     url = f"https://github.com/{repo}/issues/{args.issue}"
-    print(f"#{args.issue} {url}")
+    sys.stdout.write(str(f"#{args.issue} {url}") + "\n")
 
 
 if __name__ == "__main__":

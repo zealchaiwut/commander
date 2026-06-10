@@ -4765,6 +4765,12 @@
       .smgmt-row-menu-btn,
       .smgmt-rename-btn,
       .smgmt-summary-row-action { opacity: 1; }
+      /* The selection checkbox was hover-only too, so multi-select was impossible
+         on touch (it only showed once a row was already selected — chicken-egg). */
+      .smgmt-ticket-cb { opacity: 1; }
+      /* Give rows a ~44px touch target without changing desktop density. */
+      .smgmt-ticket { padding-top: 11px; padding-bottom: 11px; }
+      #pane-sprint-mgmt.smgmt-compact .smgmt-ticket { padding-top: 8px; padding-bottom: 8px; }
     }
 
     /* ── Toast notifications (issue #426) ── */

@@ -53,7 +53,7 @@ For a full walkthrough including multi-clone setup for Coder/Tester agents, see
 | **Deploy tab** | Per-environment deploy/restart cards for prd/uat. `host=local` runs pull-only `git pull --ff-only` + launchd `kickstart`/scripts (self-restart routed through a detached helper); `host=render` drives the Render deploy/restart API. Config under the `deploy_config` settings key; secrets never returned in cleartext. APIs at `GET/PUT /api/projects/{slug}/deploy-config`, `POST .../environments/{env}/deploy`, `.../restart`, `GET .../deploy-status`, `GET /api/deploy/overview` | [SCHEMA.md](SCHEMA.md) |
 | **Env-var editor** | Render-style masked `.env` editor per environment with per-row reveal and edit/add/delete/save; writes preserve line order and inline comments. APIs at `GET/PUT /api/projects/{slug}/environments/{env}/env-vars` | [SCHEMA.md](SCHEMA.md) |
 | **Project events log** | Structured audit log of project-level actions (settings changes, env path updates) recorded in the `project_events` SQLite table | [SCHEMA.md](SCHEMA.md) |
-| **Neon DB** | Postgres-backed sprint and project state with Alembic migrations; dual-writes alongside JSON | [SCHEMA.md](SCHEMA.md) |
+| **Neon DB** | Optional Postgres export target for sprint and project state with Alembic migrations; populated on demand via `scripts/export_to_neon.py` (not a live dependency) | [SCHEMA.md](SCHEMA.md) |
 | **Structured Logging** | JSON-lines log module (`services/logging.py`) writing to `.commander/logs/structured-YYYY-MM-DD.log`; respects `COMMANDER_LOG_LEVEL` | — |
 | **Analytics page** | Per-project analytics at `/project/{slug}/analytics` with Status, Trends, and Calibration sub-tabs; metrics sourced from local sprint/estimate files (no Neon dependency) | [SCHEMA.md](SCHEMA.md) |
 | **Global Notes** | Always-available notes pane in the dashboard left sidebar, debounced autosave to `.commander/notes.json` via `GET/PUT /api/notes` | — |
@@ -376,9 +376,18 @@ Traveling with iPad-only access? See [docs/TRAVEL_PLAYBOOK.md](docs/TRAVEL_PLAYB
 
 ---
 
-## Database Setup
+## Database
 
-Commander's sprint manager uses a Neon (Postgres) database for persistent storage. Follow these steps to set it up:
+Commander stores all live state in **SQLite** (`DB_PATH`, e.g. `dashboard.db`) plus
+local JSON files. SQLite is the primary — and only live — store: the dashboard and
+sprint manager run fully without any external database. There is no startup sync
+and nothing writes to a remote database mid-flow (issue #758).
+
+### Neon (optional export target)
+
+Neon (Postgres) is an **optional export target** for external reporting — not a
+runtime dependency. Setting it up is only needed if you want a Postgres copy of
+your sprint/project data; skip this entire section otherwise.
 
 1. **Create a Neon project** — sign up at [neon.tech](https://neon.tech) and create a new project. Copy the connection string from the project dashboard.
 
@@ -388,38 +397,25 @@ Commander's sprint manager uses a Neon (Postgres) database for persistent storag
    # Edit .env and set DATABASE_URL=postgresql://user:password@host/dbname?sslmode=require
    ```
 
-3. **Run migrations** — apply the schema:
+3. **Run migrations** — apply the schema (Alembic migrations and the SQLAlchemy
+   models remain intact for the export target):
    ```bash
    alembic upgrade head
    ```
 
-After running `alembic upgrade head`, you can verify the setup with:
-```bash
-# Check the current migration head
-alembic current
+4. **Run the export** — push a snapshot of the local SQLite data + `projects.json`
+   to Neon. This is the *only* code path that writes to Neon:
+   ```bash
+   DATABASE_URL=postgresql://... python scripts/export_to_neon.py
+   # Preview without writing:
+   python scripts/export_to_neon.py --dry-run
+   ```
+   The script exits cleanly (0) on success and exits 1 if `DATABASE_URL` is unset.
+   Re-running is safe — existing rows are upserted/skipped.
 
-# Verify the connection
+Verify the connection at any time with:
+```bash
 python -c "from services.sprint_manager.neon_db import get_engine; print(get_engine().connect())"
-```
-
-### Backfilling existing sprints
-
-If you have existing sprint data in `.commander/sprints/*.json` that pre-dates the Neon integration, run this one-shot script to migrate it:
-
-```bash
-python scripts/migrate_sprints_to_neon.py
-```
-
-Sprints already present in Neon are skipped automatically, so the script is safe to re-run. Use `--dry-run` to preview what would be inserted without writing anything:
-
-```bash
-python scripts/migrate_sprints_to_neon.py --dry-run
-```
-
-To backfill only a specific project:
-
-```bash
-python scripts/migrate_sprints_to_neon.py --project zealchaiwut/commander
 ```
 
 ---

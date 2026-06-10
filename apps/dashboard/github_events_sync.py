@@ -1,8 +1,16 @@
-"""GitHub Events API poller — syncs recent repo events into the events table."""
+"""GitHub Events API poller — syncs recent repo events into the events table.
+
+Also hosts the issues-mirror sync loop (issue #756): the dashboard read model is
+the local DB, so repo issues are mirrored into the `issues` table via
+ETag-conditional polling.  Unchanged polls return HTTP 304 and consume zero
+rate-limit quota; changed polls return 200 and upsert the mirror.
+"""
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+import os
 import subprocess
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Optional
@@ -225,3 +233,151 @@ def sync_github_events(
         conn.commit()
 
     return {"synced": synced, "skipped": skipped, "rate_limited": False}
+
+
+# ── Issues mirror sync (issue #756) ───────────────────────────────────────────
+
+ISSUES_PER_PAGE = 100
+DEFAULT_SYNC_INTERVAL = 60  # seconds; AC requires default <= 60
+
+
+def get_sync_interval() -> int:
+    """Resolve the issues-mirror sync interval from SYNC_INTERVAL_SECONDS.
+
+    Defaults to DEFAULT_SYNC_INTERVAL (<= 60 s). A non-positive or non-integer
+    value falls back to the default.
+    """
+    raw = os.environ.get("SYNC_INTERVAL_SECONDS", "").strip()
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return DEFAULT_SYNC_INTERVAL
+    if value <= 0:
+        return DEFAULT_SYNC_INTERVAL
+    return value
+
+
+def _normalise_issue(item: dict) -> dict:
+    """Map a GitHub REST issue object to the gh-CLI-shaped dict the mirror stores."""
+    return {
+        "number": item.get("number"),
+        "title": item.get("title", ""),
+        "state": item.get("state", ""),
+        "labels": [
+            {"name": l.get("name", ""), "color": l.get("color", "")}
+            for l in (item.get("labels") or [])
+        ],
+        "assignees": [
+            {"login": a.get("login", "")} for a in (item.get("assignees") or [])
+        ],
+        "url": item.get("html_url", ""),
+        "createdAt": item.get("created_at", ""),
+        "updatedAt": item.get("updated_at", ""),
+        "body": item.get("body", "") or "",
+    }
+
+
+def _fetch_issues_conditional(
+    owner: str,
+    repo: str,
+    etag: Optional[str] = None,
+    per_page: int = ISSUES_PER_PAGE,
+) -> tuple[int, Optional[list[dict]], Optional[str], dict]:
+    """Conditionally fetch repo issues using an ETag.
+
+    Returns (status_code, issues_or_None, new_etag, rate_info). On 304 the issues
+    list is None (no body) and no quota is charged by GitHub.
+    """
+    token = _get_gh_token()
+    url = f"https://api.github.com/repos/{owner}/{repo}/issues"
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+    if etag:
+        headers["If-None-Match"] = etag
+
+    resp = httpx.get(
+        url,
+        headers=headers,
+        params={"state": "all", "per_page": per_page},
+        timeout=15.0,
+    )
+
+    rate_info = {
+        "remaining": int(resp.headers.get("X-RateLimit-Remaining", 999)),
+        "reset": resp.headers.get("X-RateLimit-Reset", ""),
+    }
+    new_etag = resp.headers.get("ETag") or etag
+
+    if resp.status_code == 304:
+        return 304, None, new_etag, rate_info
+
+    resp.raise_for_status()
+    # The issues endpoint also returns PRs; exclude them from the mirror.
+    items = [it for it in resp.json() if "pull_request" not in it]
+    return 200, items, new_etag, rate_info
+
+
+def sync_issues_mirror(repo: str, db_module=None) -> dict:
+    """Poll repo issues with an ETag and upsert the local mirror (issue #756).
+
+    200 -> upsert mirror and store the new ETag. 304 -> no-op (mirror and ETag
+    preserved). Returns a dict with keys: status, synced, rate_limited, and
+    optionally error.
+    """
+    if db_module is None:
+        import db as db_module  # type: ignore[assignment]
+
+    if "/" in repo:
+        owner, repo_name = repo.split("/", 1)
+    else:
+        owner, repo_name = repo, repo
+
+    etag_key = f"issues:{repo}"
+    etag = db_module.get_sync_etag(etag_key)
+
+    try:
+        status, items, new_etag, rate_info = _fetch_issues_conditional(
+            owner, repo_name, etag
+        )
+    except Exception as exc:
+        logger.warning("issues mirror fetch failed for %s: %s", repo, exc)
+        return {"status": 0, "synced": 0, "rate_limited": False, "error": str(exc)}
+
+    if status == 304:
+        logger.info("issues mirror %s: 304 Not Modified (zero quota)", repo)
+        return {"status": 304, "synced": 0, "rate_limited": False}
+
+    normalised = [_normalise_issue(it) for it in (items or [])]
+    db_module.upsert_issues(repo, normalised)
+    if new_etag:
+        db_module.set_sync_etag(etag_key, new_etag)
+
+    logger.info("issues mirror %s: 200, upserted %d issues", repo, len(normalised))
+    return {"status": 200, "synced": len(normalised), "rate_limited": False}
+
+
+async def run_issues_sync_loop(
+    repos: list[str],
+    db_module=None,
+    iterations: Optional[int] = None,
+) -> None:
+    """Periodic background loop that mirrors issues for each repo (issue #756).
+
+    Sleeps get_sync_interval() seconds between sweeps. Re-reads the interval each
+    iteration so SYNC_INTERVAL_SECONDS picks up on restart. `iterations` bounds
+    the loop for tests; None runs until cancelled.
+    """
+    count = 0
+    while True:
+        for repo in repos:
+            try:
+                sync_issues_mirror(repo, db_module=db_module)
+            except Exception as exc:  # never let the background task die
+                logger.warning("issues mirror sync error for %s: %s", repo, exc)
+        count += 1
+        if iterations is not None and count >= iterations:
+            return
+        await asyncio.sleep(get_sync_interval())

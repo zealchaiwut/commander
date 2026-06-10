@@ -808,6 +808,34 @@ async def _status_md_sync_loop() -> None:
 # ─────────────────────────────────────────────────────────────────────────────
 
 
+def _mirror_sync_repos() -> list[str]:
+    """Resolve the repos whose issues should be mirrored into the local DB.
+
+    Uses every tracked project's repo (issue #756); falls back to the detected
+    default repo. Duplicates are removed while preserving order.
+    """
+    repos: list[str] = []
+    try:
+        for proj in projects_module.load_projects():
+            repo_name = proj.get("repo")
+            if repo_name:
+                repos.append(repo_name)
+    except Exception as exc:
+        logger.warning("[issues-mirror] could not load projects: %s", exc)
+    if not repos:
+        try:
+            repos.append(github_client.repo())
+        except Exception:
+            pass
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for r in repos:
+        if r not in seen:
+            seen.add(r)
+            ordered.append(r)
+    return ordered
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global _start_time
@@ -845,12 +873,18 @@ async def lifespan(app: FastAPI):
     task2 = asyncio.create_task(_timeout_loop())
     task3 = asyncio.create_task(_periodic_orphan_sweep_loop())
     task4 = asyncio.create_task(_status_md_sync_loop())
+    # Issues-mirror sync loop (issue #756): keep the local DB read model fresh
+    # via ETag-conditional polling so renders consume zero GitHub quota.
+    task5 = asyncio.create_task(
+        github_events_sync.run_issues_sync_loop(_mirror_sync_repos())
+    )
     yield
     task1.cancel()
     task2.cancel()
     task3.cancel()
     task4.cancel()
-    for t in (task1, task2, task3, task4):
+    task5.cancel()
+    for t in (task1, task2, task3, task4, task5):
         try:
             await t
         except asyncio.CancelledError:

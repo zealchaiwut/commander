@@ -76,7 +76,7 @@ def _run_sprint_with_mocks(
     def fake_coder(issue_num, alert_modes, sprint_branch="develop",
                    repo_name=None, cfg=None, chosen_port=None,
                    rate_limit_events=None, on_running=None, sprint_label=None,
-                   prior_failures=None):
+                   prior_failures=None, hang_continuation=None, attempt_kind=None):
         if on_running:
             on_running()
         dispatch_calls.append(prior_failures)
@@ -311,7 +311,7 @@ class TestAC4InfraFailureBypass:
         def fake_coder2(issue_num, alert_modes, sprint_branch="develop",
                         repo_name=None, cfg=None, chosen_port=None,
                         rate_limit_events=None, on_running=None, sprint_label=None,
-                        prior_failures=None):
+                        prior_failures=None, hang_continuation=None, attempt_kind=None):
             if on_running:
                 on_running()
             dispatch_calls2.append(prior_failures)

@@ -152,6 +152,13 @@ except ImportError:
     _SCAFFOLD_AVAILABLE = False
 
 try:
+    import clean_sprint_files as _clean_sprint_files
+    _CLEAN_SPRINT_AVAILABLE = True
+except ImportError:
+    _clean_sprint_files = None  # type: ignore[assignment]
+    _CLEAN_SPRINT_AVAILABLE = False
+
+try:
     import mis_sizing as _mis_sizing
     _MIS_SIZING_AVAILABLE = True
 except ImportError:
@@ -494,6 +501,7 @@ def _restore_sprint_statuses_on_startup() -> None:
 
     attached = 0
     skipped  = 0
+    archived_total = 0
 
     for proj in projects:
         try:
@@ -501,6 +509,14 @@ def _restore_sprint_statuses_on_startup() -> None:
             sprints_dir  = _commander_dir(project_root) / "sprints"
             if not sprints_dir.exists():
                 continue
+
+            # Archived sprint files live in .commander/sprints/archive/ and are
+            # intentionally skipped by the per-file scans below (glob is
+            # non-recursive). Count them once so we can emit a single summary
+            # line instead of one skip line per archived file (issue #735).
+            archive_dir = sprints_dir / "archive"
+            if archive_dir.is_dir():
+                archived_total += sum(1 for p in archive_dir.iterdir() if p.is_file())
 
             for status_file in sprints_dir.glob("*-status.json"):
                 sprint_label = status_file.name.removesuffix("-status.json")
@@ -560,6 +576,8 @@ def _restore_sprint_statuses_on_startup() -> None:
         except Exception as exc:
             print(f"[startup-restore] error scanning project {proj.get('repo')}: {exc}")
 
+    if archived_total:
+        print(f"[startup-restore] Skipped {archived_total} archived sprint files")
     print(
         f"[startup-restore] completed — {attached} sprint(s) re-attached,"
         f" {skipped} skipped"
@@ -3022,6 +3040,64 @@ def post_scaffold_apply(slug: str, body: _ScaffoldApplyBody):
     return {
         "created": result["created"],
         "compliant": result["compliant"],
+    }
+
+
+# ── Sprint file archive maintenance (issue #735) ──────────────────────────────
+
+class _SprintCleanupBody(BaseModel):
+    project: str
+    dry_run: bool = False
+
+
+@app.post("/api/maintenance/sprints/cleanup")
+def post_sprint_cleanup(body: _SprintCleanupBody):
+    """Archive stale per-sprint runtime files for a project's finished sprints.
+
+    Moves sprint-N-plan.json, the zero-issue sprint-N.json placeholder, and
+    sprint-N-state.json for finished sprints into .commander/sprints/archive/.
+    Status, estimate, and summary files are never touched; nothing is deleted.
+
+    With { dry_run: true } it returns the same shape as a preview without
+    moving anything. Returns { archived: [...], kept_count: N }.
+    """
+    if not _CLEAN_SPRINT_AVAILABLE:
+        raise HTTPException(status_code=503, detail="clean_sprint_files module unavailable")
+
+    project = (body.project or "").strip()
+    if not project:
+        raise HTTPException(status_code=400, detail="project is required")
+
+    project_root = _project_root_path(project)
+    sprints_dir = _commander_dir(project_root) / "sprints"
+    if not sprints_dir.exists():
+        return {"archived": [], "kept_count": 0, "dry_run": body.dry_run}
+
+    # A sprint counts as finished when it has a posted summary issue OR a local
+    # summary markdown, AND no live process is running it. The summary-issue set
+    # is GitHub-backed; running state uses the dashboard's authoritative check.
+    finished_nums: set[int] = set()
+    try:
+        for label in _finished_sprint_summaries(project).keys():
+            m = re.match(r"^sprint-(\d+)$", label)
+            if m:
+                finished_nums.add(int(m.group(1)))
+    except Exception:
+        pass
+
+    def _running_check(_dir: Path, n: int) -> bool:
+        return _is_sprint_running(project_root, f"sprint-{n}")
+
+    result = _clean_sprint_files.run_cleanup(
+        sprints_dir,
+        dry_run=body.dry_run,
+        has_summary_issue=lambda n: n in finished_nums,
+        running_check=_running_check,
+    )
+    return {
+        "archived": result["archived"],
+        "kept_count": result["kept_count"],
+        "dry_run": result["dry_run"],
     }
 
 

@@ -6500,6 +6500,39 @@
             </div>
           </div>
 
+          <!-- Sprint file cleanup card (issue #735) -->
+          <div class="proj-settings-card" id="ps-sprint-cleanup-card">
+            <div class="proj-settings-card-head">
+              <i class="ti ti-archive proj-settings-card-icon"></i>
+              <div>
+                <div class="proj-settings-card-title">Sprint File Cleanup</div>
+                <div class="proj-settings-card-sub">Archive stale runtime files from finished sprints to reduce startup noise</div>
+              </div>
+            </div>
+            <div class="proj-settings-card-body" id="ps-cleanup-body">
+              <div class="ps-scaffold-actions">
+                <button class="ps-btn" id="ps-cleanup-preview-btn" onclick="sprintCleanupPreview()">
+                  <i class="ti ti-search"></i> Preview cleanup
+                </button>
+                <span id="ps-cleanup-status" style="font-size:12px;color:var(--text-muted);"></span>
+              </div>
+              <div id="ps-cleanup-preview" style="display:none;margin-top:12px">
+                <div style="font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px">
+                  Files to archive
+                </div>
+                <ul id="ps-cleanup-list" class="ps-scaffold-list"></ul>
+                <div id="ps-cleanup-empty" style="display:none;font-size:13px;color:var(--text-muted)">
+                  Nothing to archive — no finished sprints have stale files.
+                </div>
+                <div id="ps-cleanup-confirm-wrap" style="display:none;margin-top:12px">
+                  <button class="ps-btn ps-btn-primary" id="ps-cleanup-confirm-btn" onclick="sprintCleanupConfirm()">
+                    <i class="ti ti-archive"></i> Archive these files
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
           <!-- Docs Structure card (issue #681) -->
           <div class="proj-settings-card" id="ps-scaffold-card">
             <div class="proj-settings-card-head">
@@ -23151,6 +23184,64 @@ async function scaffoldApplyConfirm() {
     await scaffoldCheck();
   } catch (e) {
     if (statusEl) statusEl.textContent = 'Apply error';
+  }
+}
+
+// ── Sprint file cleanup (issue #735) ──────────────────────────────────────────
+let _cleanupPreviewFiles = [];
+
+async function _sprintCleanupPost(dryRun) {
+  var slug = window._currentProjectSlug || '';
+  if (!slug) return null;
+  var resp = await fetch('/api/maintenance/sprints/cleanup', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({project: slug, dry_run: dryRun}),
+  });
+  if (!resp.ok) {
+    var err = await resp.json().catch(() => ({}));
+    throw new Error(err.detail || ('HTTP ' + resp.status));
+  }
+  return await resp.json();
+}
+
+async function sprintCleanupPreview() {
+  var statusEl = document.getElementById('ps-cleanup-status');
+  var previewEl = document.getElementById('ps-cleanup-preview');
+  var listEl = document.getElementById('ps-cleanup-list');
+  var emptyEl = document.getElementById('ps-cleanup-empty');
+  var confirmWrap = document.getElementById('ps-cleanup-confirm-wrap');
+  if (statusEl) statusEl.textContent = 'Scanning…';
+  try {
+    var data = await _sprintCleanupPost(true);
+    _cleanupPreviewFiles = (data && data.archived) || [];
+    if (listEl) {
+      listEl.innerHTML = _cleanupPreviewFiles.map(function(f) {
+        return '<li>' + escHtml(f) + '</li>';
+      }).join('');
+    }
+    if (emptyEl) emptyEl.style.display = _cleanupPreviewFiles.length === 0 ? '' : 'none';
+    if (confirmWrap) confirmWrap.style.display = _cleanupPreviewFiles.length > 0 ? '' : 'none';
+    if (previewEl) previewEl.style.display = '';
+    if (statusEl) statusEl.textContent = '';
+  } catch (e) {
+    if (statusEl) statusEl.textContent = 'Preview failed: ' + e.message;
+  }
+}
+
+async function sprintCleanupConfirm() {
+  var statusEl = document.getElementById('ps-cleanup-status');
+  var confirmWrap = document.getElementById('ps-cleanup-confirm-wrap');
+  if (statusEl) statusEl.textContent = 'Archiving…';
+  try {
+    var data = await _sprintCleanupPost(false);
+    var n = (data && data.archived) ? data.archived.length : 0;
+    var kept = (data && typeof data.kept_count === 'number') ? data.kept_count : '?';
+    if (statusEl) statusEl.textContent = 'Archived ' + n + ' file(s); ' + kept + ' kept in place.';
+    if (confirmWrap) confirmWrap.style.display = 'none';
+    _cleanupPreviewFiles = [];
+  } catch (e) {
+    if (statusEl) statusEl.textContent = 'Archive failed: ' + e.message;
   }
 }
 </script>

@@ -2110,6 +2110,15 @@ from services.sprint_manager.settings_schema import (
     KNOWN_FIELDS,
     build_effective_response,
 )
+from services.sprint_manager.deploy_config_schema import (
+    DEPLOY_CONFIG_KEY,
+    SUPPORTED_ENVS as _DEPLOY_SUPPORTED_ENVS,
+    SUPPORTED_HOSTS as _DEPLOY_SUPPORTED_HOSTS,
+    seed_for as _deploy_seed_for,
+    merge_seed as _deploy_merge_seed,
+    merge_for_put as _deploy_merge_for_put,
+    build_deploy_config_response as _build_deploy_config_response,
+)
 
 
 def _resolve_project_slug(slug: str) -> str:
@@ -2214,6 +2223,97 @@ def put_project_settings(slug: str, body: dict):
     _settings_repo.set_setting("project", APP_CONFIG_KEY, merged, project=repo)
     effective = _settings_repo.get_setting(APP_CONFIG_KEY, project=repo)
     return build_effective_response(effective)
+
+
+# ── Deploy config API (issue #722) ───────────────────────────────────────────
+
+
+def _validate_deploy_config_body(body: dict) -> None:
+    """Validate a PUT deploy-config body.
+
+    Raises HTTPException 400 for unsupported environments, non-object entries,
+    or invalid host values.
+    """
+    if not isinstance(body, dict):
+        raise HTTPException(
+            status_code=400,
+            detail="Deploy config body must be an object keyed by environment.",
+        )
+    for env, entry in body.items():
+        if env not in _DEPLOY_SUPPORTED_ENVS:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Unsupported environment '{env}'. "
+                    f"Allowed: {', '.join(_DEPLOY_SUPPORTED_ENVS)}"
+                ),
+            )
+        if not isinstance(entry, dict):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Environment '{env}' config must be an object.",
+            )
+        host = entry.get("host")
+        if host is not None and host not in _DEPLOY_SUPPORTED_HOSTS:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Environment '{env}': host must be one of "
+                    f"{', '.join(_DEPLOY_SUPPORTED_HOSTS)}; got '{host}'."
+                ),
+            )
+
+
+def _enrich_local_working_dirs(repo: str, resp: dict) -> None:
+    """Fill working_dir for local entries that lack one from the env paths.
+
+    host=local working_dir defaults to the existing on-disk env path so callers
+    get a usable default without the user having to re-enter it.
+    """
+    envs = projects_module.get_project_environments(repo)
+    if not envs:
+        envs = _derive_project_environments(repo)
+    for env, entry in resp.items():
+        if entry.get("host") == "local" and not entry.get("working_dir"):
+            if env in envs:
+                entry["working_dir"] = envs[env]
+
+
+def _deploy_config_response(slug: str, repo: str, stored: dict) -> dict:
+    """Build the GET-shaped response: seed defaults merged with stored, masked."""
+    merged = _deploy_merge_seed(_deploy_seed_for(slug), stored or {})
+    resp = _build_deploy_config_response(merged)
+    _enrich_local_working_dirs(repo, resp)
+    return resp
+
+
+@app.get("/api/projects/{slug}/deploy-config")
+def get_project_deploy_config(slug: str):
+    """Return per-environment deploy config (seed defaults merged with overrides).
+
+    render_api_key is never returned in cleartext — each render entry carries
+    render_api_key_set (bool) and render_api_key_masked. Returns 404 for an
+    unknown slug.
+    """
+    repo = _resolve_project_slug(slug)
+    stored = _settings_repo.get_setting_scoped("project", DEPLOY_CONFIG_KEY, project=repo)
+    return _deploy_config_response(slug, repo, stored)
+
+
+@app.put("/api/projects/{slug}/deploy-config")
+def put_project_deploy_config(slug: str, body: dict):
+    """Persist a per-environment deploy config override.
+
+    Merges per environment over the stored config; a new render_api_key replaces
+    the stored secret, while an omitted/null key leaves it unchanged. Returns
+    400 for unsupported envs/hosts, 404 for an unknown slug.
+    """
+    repo = _resolve_project_slug(slug)
+    _validate_deploy_config_body(body)
+    current = _settings_repo.get_setting_scoped("project", DEPLOY_CONFIG_KEY, project=repo)
+    merged = _deploy_merge_for_put(current or {}, body)
+    _settings_repo.set_setting("project", DEPLOY_CONFIG_KEY, merged, project=repo)
+    return _deploy_config_response(slug, repo, merged)
 
 
 # ── Settings sync (issue #644) ───────────────────────────────────────────────

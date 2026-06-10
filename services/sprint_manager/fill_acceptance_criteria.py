@@ -142,7 +142,7 @@ Body:
             time.sleep(_RETRY_DELAYS[attempt - 1])
         elif error_type == "model_error" and result.stderr:
             # result is bound whenever error_type == "model_error".
-            print(result.stderr[:400], file=sys.stderr)
+            sys.stderr.write(str(result.stderr[:400]) + "\n")
 
     return None, error_type
 
@@ -188,19 +188,19 @@ def main() -> None:
         )
         repo = out.stdout.strip()
 
-    print(f"Filling acceptance criteria for #{args.issue} in {repo} …")
+    sys.stdout.write(str(f"Filling acceptance criteria for #{args.issue} in {repo} …") + "\n")
     try:
         status, err = fill_issue(args.issue, repo, force=args.force)
     except subprocess.CalledProcessError as e:
-        print(f"Error: gh failed for #{args.issue}: {e.stderr or e}", file=sys.stderr)
+        sys.stderr.write(str(f"Error: gh failed for #{args.issue}: {e.stderr or e}") + "\n")
         sys.exit(1)
 
     if status == "skipped":
-        print(f"  #{args.issue}: already has acceptance criteria — skipped")
+        sys.stdout.write(str(f"  #{args.issue}: already has acceptance criteria — skipped") + "\n")
     elif status == "filled":
-        print(f"  #{args.issue}: acceptance criteria added")
+        sys.stdout.write(str(f"  #{args.issue}: acceptance criteria added") + "\n")
     else:
-        print(f"Error: could not generate AC for #{args.issue} ({err})", file=sys.stderr)
+        sys.stderr.write(str(f"Error: could not generate AC for #{args.issue} ({err})") + "\n")
         sys.exit(1)
 
 

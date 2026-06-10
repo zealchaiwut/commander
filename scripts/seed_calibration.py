@@ -106,19 +106,16 @@ def main() -> int:
         estimates_dir = commander_dir / "estimates"
         sprint_recs = db_calibration_records(args.from_sprint, estimates_dir)
         if not sprint_recs:
-            print(
-                f"Warning: no records found for sprint {args.from_sprint!r} "
-                f"(missing state/estimate files?)",
-                file=sys.stderr,
-            )
+            sys.stderr.write(str(f"Warning: no records found for sprint {args.from_sprint!r} "
+                f"(missing state/estimate files?)") + "\n")
         records.extend({"size": r["size"], "actual_minutes": r["actual_minutes"]} for r in sprint_recs)
 
     if not records:
-        print("Error: nothing to seed — pass --record and/or --from-sprint", file=sys.stderr)
+        sys.stderr.write(str("Error: nothing to seed — pass --record and/or --from-sprint") + "\n")
         return 1
 
     total = append_records(cal_path, records)
-    print(f"Appended {len(records)} record(s); {cal_path} now has {total} total.")
+    sys.stdout.write(str(f"Appended {len(records)} record(s); {cal_path} now has {total} total.") + "\n")
     return 0
 
 

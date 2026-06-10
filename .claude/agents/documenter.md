@@ -80,6 +80,26 @@ Prepend the new sprint section ABOVE any existing entries. Never duplicate. If a
 - Add/update tables and columns based on what migrations did
 - Keep existing tables intact
 
+### Step 4b — Flag stale AGENTS.md files (needs-review)
+
+After computing the sprint diff, check which directories had file changes this
+sprint. For each directory that has an `AGENTS.md` **and** had at least one
+file changed under it, append the following marker to that `AGENTS.md`:
+
+    <!-- needs-review: sprint-<SPRINT_LABEL> — directory had changes; review and update this file -->
+
+Rules for this step:
+- **Flag only** — do NOT rewrite, summarize, or regenerate `AGENTS.md` content. The flag is a prompt for a human or future agent to review.
+- Append the marker as the last line of the file (after a blank line).
+- If the marker for this sprint is already present (idempotency re-run), skip.
+- The five standard areas to check: `apps/dashboard`, `apps/dashboard/routers`, `services/sprint_manager`, `scripts`, `apps/dashboard/static`.
+
+Example check (run for each area):
+
+    git diff --name-only <BASE_SHA>..<HEAD_SHA> | grep "^apps/dashboard/" | grep -v "^apps/dashboard/routers/"
+
+If any file matches the area's prefix, that area's `AGENTS.md` needs the flag.
+
 ### Step 5 — Commit and push
 
 One commit, one push:
@@ -105,7 +125,35 @@ If nothing was committed:
 
 Then exit. No interactive prompts.
 
+## AGENTS.md Batch Seed Mode
+
+When invoked with `MODE=seed-agents-md` (no sprint inputs required), generate
+initial `AGENTS.md` seed files for all five standard areas in one batch run.
+
+For each area, scan its files, read key source files, and produce an `AGENTS.md`
+with these sections: `## Purpose`, `## Key Files`, `## Conventions`,
+`## Danger Zones`, `## What NOT to Touch`.
+
+The five areas and their paths:
+
+| Area | Path |
+|------|------|
+| Dashboard app | `apps/dashboard/AGENTS.md` |
+| Router modules | `apps/dashboard/routers/AGENTS.md` |
+| Sprint manager | `services/sprint_manager/AGENTS.md` |
+| Helper scripts | `scripts/AGENTS.md` |
+| Frontend static | `apps/dashboard/static/AGENTS.md` |
+
+Seed rules:
+- If the file already exists, **do not overwrite** — skip and log "already exists".
+- Content must be accurate: read actual source files, not guessed.
+- Each section must be non-empty.
+- Commit all created files in one commit: `docs: seed AGENTS.md for all five areas`.
+
 ## Rules
 
-- **Stay in docs.** You may edit only: *.md files, files in docs/, files in backend/db/ named SCHEMA*.md, CHANGELOG*, README*. Never touch source code, tests, or migrations.
-- **One commit per sp
+- **Stay in docs.** You may edit only: `*.md` files, files in `docs/`, files in `backend/db/` named `SCHEMA*.md`, `CHANGELOG*`, `README*`, and `AGENTS.md` files. Never touch source code, tests, or migrations.
+- **One commit per sprint.** Batch all doc changes into a single commit and push.
+- **No auto-rewrite of AGENTS.md.** You may append a `needs-review` flag marker to `AGENTS.md` files, but you must never rewrite, summarize, or regenerate their content during a post-sprint run. Content updates require explicit `MODE=seed-agents-md` or human review.
+- **Idempotent.** Re-running the documenter on the same sprint must produce the same result.
+- **Minimal changes.** One or two bullets per file per sprint. No rewrites.

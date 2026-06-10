@@ -427,23 +427,23 @@ def scaffold(root: Path, project: str, *, check: bool) -> int:
                 stray.append("docs/" + name + ("/" if entry.is_dir() else ""))
 
     # Report
-    print(f"Project: {project}  ({root})")
+    sys.stdout.write(str(f"Project: {project}  ({root})") + "\n")
     if created:
-        print(f"\nCreated ({len(created)}):")
+        sys.stdout.write(str(f"\nCreated ({len(created)}):") + "\n")
         for c in created:
-            print(f"  + {c}")
+            sys.stdout.write(str(f"  + {c}") + "\n")
     if check and missing:
-        print(f"\nMissing ({len(missing)}):")
+        sys.stdout.write(str(f"\nMissing ({len(missing)}):") + "\n")
         for m in missing:
-            print(f"  - {m}")
+            sys.stdout.write(str(f"  - {m}") + "\n")
     if stray:
-        print(f"\nStray (review manually — not part of standard, not deleted):")
+        sys.stdout.write(str(f"\nStray (review manually — not part of standard, not deleted):") + "\n")
         for s in stray:
-            print(f"  ? {s}")
+            sys.stdout.write(str(f"  ? {s}") + "\n")
     if not created and not missing and not stray:
-        print("\nStructure is compliant. Nothing to do.")
+        sys.stdout.write(str("\nStructure is compliant. Nothing to do.") + "\n")
     elif not check and not stray:
-        print("\nStructure is now compliant.")
+        sys.stdout.write(str("\nStructure is now compliant.") + "\n")
 
     if check and missing:
         return 1
@@ -459,7 +459,7 @@ def main() -> int:
 
     root = Path(args.project).expanduser().resolve()
     if not root.is_dir():
-        print(f"error: project path is not a directory: {root}", file=sys.stderr)
+        sys.stderr.write(str(f"error: project path is not a directory: {root}") + "\n")
         return 2
 
     # Project name: explicit --name, else dir name (handle nested layout's main/)

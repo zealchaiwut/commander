@@ -59,19 +59,19 @@ from typing import Optional
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _info(msg: str) -> None:
-    print(f"  {msg}")
+    sys.stdout.write(str(f"  {msg}") + "\n")
 
 
 def _ok(msg: str) -> None:
-    print(f"  ✓ {msg}")
+    sys.stdout.write(str(f"  ✓ {msg}") + "\n")
 
 
 def _warn(msg: str) -> None:
-    print(f"  WARNING: {msg}", file=sys.stderr)
+    sys.stderr.write(str(f"  WARNING: {msg}") + "\n")
 
 
 def _error(msg: str) -> None:
-    print(f"  ERROR: {msg}", file=sys.stderr)
+    sys.stderr.write(str(f"  ERROR: {msg}") + "\n")
 
 
 def _run(*cmd: str, cwd: Optional[Path] = None, check: bool = True) -> subprocess.CompletedProcess:
@@ -330,7 +330,7 @@ def main() -> None:
         uvicorn_cmd = "uvicorn"
 
     cmd = [uvicorn_cmd, "server:app", "--host", "0.0.0.0", "--port", port]
-    print(f"Starting Commander dashboard on port {port} ...")
+    sys.stdout.write(str(f"Starting Commander dashboard on port {port} ...") + "\n")
     os.chdir(here)
     os.execvp(cmd[0], cmd)
 
@@ -411,7 +411,7 @@ def migrate(repo_root: Path, dry_run: bool) -> bool:
         return False
 
     # ── Phase 1: Move dashboard/ → apps/dashboard/ ────────────────────────────
-    print("\nPhase 1: Move dashboard/ → apps/dashboard/")
+    sys.stdout.write(str("\nPhase 1: Move dashboard/ → apps/dashboard/") + "\n")
     apps_dir = repo_root / "apps"
     if not dry_run:
         apps_dir.mkdir(exist_ok=True)
@@ -427,7 +427,7 @@ def migrate(repo_root: Path, dry_run: bool) -> bool:
     apps_dashboard = repo_root / "apps" / "dashboard"
 
     # ── Phase 2: Move sub-directories out of apps/dashboard/ ─────────────────
-    print("\nPhase 2: Move sub-directories to their new homes")
+    sys.stdout.write(str("\nPhase 2: Move sub-directories to their new homes") + "\n")
     sub_moves: list[tuple[Path, Path]] = []
 
     # hooks/ → repo root hooks/
@@ -510,11 +510,11 @@ def migrate(repo_root: Path, dry_run: bool) -> bool:
         _git_mv(src, dst, repo_root, dry_run=dry_run)
 
     # ── Phase 3: Create run_server.py ─────────────────────────────────────────
-    print("\nPhase 3: Create apps/dashboard/run_server.py")
+    sys.stdout.write(str("\nPhase 3: Create apps/dashboard/run_server.py") + "\n")
     _create_run_server(apps_dashboard if not dry_run else repo_root / "apps" / "dashboard", dry_run)
 
     # ── Phase 4: Rewrite hardcoded paths ─────────────────────────────────────
-    print("\nPhase 4: Rewrite hardcoded paths")
+    sys.stdout.write(str("\nPhase 4: Rewrite hardcoded paths") + "\n")
     for rel_path in _FILES_TO_REWRITE:
         target = repo_root / rel_path
         changes = _rewrite_paths_in_file(target, dry_run=dry_run)
@@ -527,17 +527,17 @@ def migrate(repo_root: Path, dry_run: bool) -> bool:
                 _info(f"{rel_path}: {len(changes)} rewrite(s)")
 
     # ── Phase 5: Update ~/.commander.zsh ─────────────────────────────────────
-    print("\nPhase 5: Update ~/.commander.zsh shell shortcuts")
+    sys.stdout.write(str("\nPhase 5: Update ~/.commander.zsh shell shortcuts") + "\n")
     _update_commander_zsh(repo_root, dry_run)
 
     # ── Phase 6: Write rollback script ───────────────────────────────────────
     all_moves = [top_move] + sub_moves
     if not dry_run:
-        print("\nPhase 6: Write rollback script")
+        sys.stdout.write(str("\nPhase 6: Write rollback script") + "\n")
         rollback_path = _write_rollback_script(repo_root, all_moves)
         _ok(f"Rollback script written to {rollback_path.relative_to(repo_root)}")
     else:
-        print("\nPhase 6: [dry-run] Would write rollback script to scripts/rollback_repo_structure.sh")
+        sys.stdout.write(str("\nPhase 6: [dry-run] Would write rollback script to scripts/rollback_repo_structure.sh") + "\n")
 
     return True
 
@@ -571,55 +571,55 @@ def main() -> None:
 
     # ── Idempotency check ─────────────────────────────────────────────────────
     if _is_migrated(repo_root):
-        print("Repo already migrated (apps/dashboard/ exists) — nothing to do.")
+        sys.stdout.write(str("Repo already migrated (apps/dashboard/ exists) — nothing to do.") + "\n")
         sys.exit(0)
 
     if not _is_pre_migration(repo_root):
-        print(f"ERROR: Neither dashboard/ nor apps/dashboard/ found in {repo_root}.")
-        print("Run this script from the commander repo root.")
+        sys.stdout.write(str(f"ERROR: Neither dashboard/ nor apps/dashboard/ found in {repo_root}.") + "\n")
+        sys.stdout.write(str("Run this script from the commander repo root.") + "\n")
         sys.exit(1)
 
     # ── Print plan header ─────────────────────────────────────────────────────
-    print("Commander repo restructure migration")
-    print(f"  Repo root : {repo_root}")
-    print(f"  Mode      : {'DRY-RUN (no changes)' if args.dry_run else 'LIVE'}")
-    print()
+    sys.stdout.write(str("Commander repo restructure migration") + "\n")
+    sys.stdout.write(str(f"  Repo root : {repo_root}") + "\n")
+    sys.stdout.write(str(f"  Mode      : {'DRY-RUN (no changes)' if args.dry_run else 'LIVE'}") + "\n")
+    sys.stdout.write("\n")
 
     if args.dry_run:
-        print("=== Dry-run: planned operations ===")
+        sys.stdout.write(str("=== Dry-run: planned operations ===") + "\n")
         migrate(repo_root, dry_run=True)
-        print()
-        print("Dry-run complete. No changes were made.")
+        sys.stdout.write("\n")
+        sys.stdout.write(str("Dry-run complete. No changes were made.") + "\n")
         sys.exit(0)
 
     # ── Confirmation prompt (skipped with --yes) ──────────────────────────────
     if not args.yes:
-        print("This will permanently restructure the repo layout using git mv.")
-        print("Make sure you have a backup or are on a feature branch.")
-        print()
+        sys.stdout.write(str("This will permanently restructure the repo layout using git mv.") + "\n")
+        sys.stdout.write(str("Make sure you have a backup or are on a feature branch.") + "\n")
+        sys.stdout.write("\n")
         answer = input("Proceed? [y/N] ").strip().lower()
         if answer not in ("y", "yes"):
-            print("Aborted.")
+            sys.stdout.write(str("Aborted.") + "\n")
             sys.exit(0)
 
     # ── Run migration ─────────────────────────────────────────────────────────
     success = migrate(repo_root, dry_run=False)
 
     if success:
-        print()
-        print("Migration complete.")
-        print()
-        print("Next steps:")
-        print("  1. Review git status to confirm staged renames:")
-        print("       git status")
-        print("  2. Start the dashboard from its new location:")
-        print("       cd apps/dashboard && python run_server.py")
-        print("  3. Commit the migration:")
-        print("       git commit -m 'refactor: restructure repo — dashboard/ → apps/dashboard/'")
+        sys.stdout.write("\n")
+        sys.stdout.write(str("Migration complete.") + "\n")
+        sys.stdout.write("\n")
+        sys.stdout.write(str("Next steps:") + "\n")
+        sys.stdout.write(str("  1. Review git status to confirm staged renames:") + "\n")
+        sys.stdout.write(str("       git status") + "\n")
+        sys.stdout.write(str("  2. Start the dashboard from its new location:") + "\n")
+        sys.stdout.write(str("       cd apps/dashboard && python run_server.py") + "\n")
+        sys.stdout.write(str("  3. Commit the migration:") + "\n")
+        sys.stdout.write(str("       git commit -m 'refactor: restructure repo — dashboard/ → apps/dashboard/'") + "\n")
         sys.exit(0)
     else:
-        print()
-        print("Migration failed. See errors above.")
+        sys.stdout.write("\n")
+        sys.stdout.write(str("Migration failed. See errors above.") + "\n")
         sys.exit(1)
 
 

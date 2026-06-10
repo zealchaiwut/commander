@@ -378,7 +378,7 @@ def restore_config_from_gist(gist_id: str, target_dir: Path) -> None:
         )
         out_path = target_dir / filename
         out_path.write_text(file_result.stdout, encoding="utf-8")
-        print(f"  restored: {out_path}")
+        sys.stdout.write(str(f"  restored: {out_path}") + "\n")
 
 
 # ---------------------------------------------------------------------------
@@ -820,9 +820,9 @@ def _cli_restore(args: list[str]) -> None:
     )
     parsed = parser.parse_args(args)
     target = Path(parsed.target_dir).expanduser().resolve()
-    print(f"Restoring from gist {parsed.gist_id} into {target} ...")
+    sys.stdout.write(str(f"Restoring from gist {parsed.gist_id} into {target} ...") + "\n")
     restore_config_from_gist(parsed.gist_id, target)
-    print("Restore complete.")
+    sys.stdout.write(str("Restore complete.") + "\n")
 
 
 def _cli_restore_db(args: list[str]) -> None:
@@ -849,22 +849,22 @@ def _cli_restore_db(args: list[str]) -> None:
     )
     parsed = parser.parse_args(args)
     target = Path(parsed.target).expanduser()
-    print(f"Restoring DB from {parsed.source} into {target} ...")
+    sys.stdout.write(str(f"Restoring DB from {parsed.source} into {target} ...") + "\n")
     try:
         summary = restore_db(parsed.source, target, force=parsed.force)
     except FileExistsError as exc:
-        print(f"Error: {exc}")
+        sys.stdout.write(str(f"Error: {exc}") + "\n")
         sys.exit(1)
-    print(f"Restore complete. Row counts: {summary['row_counts']}")
+    sys.stdout.write(str(f"Restore complete. Row counts: {summary['row_counts']}") + "\n")
 
 
 def main() -> None:
     """CLI entry point: python -m services.sprint_manager.backup <subcommand>."""
     if len(sys.argv) < 2:
-        print("Usage:")
-        print("  python -m services.sprint_manager.backup restore --gist-id <id>")
-        print("  python -m services.sprint_manager.backup restore-db --from <repo|path> "
-              "--target <db-path> [--force]")
+        sys.stdout.write(str("Usage:") + "\n")
+        sys.stdout.write(str("  python -m services.sprint_manager.backup restore --gist-id <id>") + "\n")
+        sys.stdout.write(str("  python -m services.sprint_manager.backup restore-db --from <repo|path> "
+              "--target <db-path> [--force]") + "\n")
         sys.exit(1)
     sub = sys.argv[1]
     if sub == "restore":
@@ -872,8 +872,8 @@ def main() -> None:
     elif sub == "restore-db":
         _cli_restore_db(sys.argv[2:])
     else:
-        print(f"Unknown subcommand: {sub!r}")
-        print("Available: restore, restore-db")
+        sys.stdout.write(str(f"Unknown subcommand: {sub!r}") + "\n")
+        sys.stdout.write(str("Available: restore, restore-db") + "\n")
         sys.exit(1)
 
 

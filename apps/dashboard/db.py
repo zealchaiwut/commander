@@ -298,6 +298,8 @@ def _create_agent_runs_table(conn: sqlite3.Connection) -> None:
     its own helper so the recorder can ensure the table exists without running
     the full init_db() migration. Mirrors the Alembic migration
     0009_add_agent_runs so the schema is identical on SQLite and Postgres.
+    `risk_tier` and `model_used` added by issue #790 (alembic 0010).
+    `attempt_kind` added by issue #787 (initial/fix_round/hang_continue).
     """
     conn.execute(
         """
@@ -310,7 +312,14 @@ def _create_agent_runs_table(conn: sqlite3.Connection) -> None:
             finished_at      TEXT,
             duration_seconds INTEGER,
             outcome          TEXT,
-            total_tokens     INTEGER
+            total_tokens     INTEGER,
+            risk_tier        TEXT,
+            model_used       TEXT,
+            routing_reason   TEXT,
+            worktree_sha     TEXT,
+            base_sha         TEXT,
+            attempt_kind     TEXT,
+            log_path         TEXT
         )
         """
     )
@@ -322,6 +331,20 @@ def _create_agent_runs_table(conn: sqlite3.Connection) -> None:
         "CREATE INDEX IF NOT EXISTS ix_agent_runs_sprint "
         "ON agent_runs (sprint_label)"
     )
+    # Best-effort ALTER TABLE for existing DBs that predate issue #790/#789/#788/#787/#783.
+    for col, typedef in (
+        ("risk_tier", "TEXT"),
+        ("model_used", "TEXT"),
+        ("routing_reason", "TEXT"),
+        ("worktree_sha", "TEXT"),
+        ("base_sha", "TEXT"),
+        ("attempt_kind", "TEXT"),
+        ("log_path", "TEXT"),
+    ):
+        try:
+            conn.execute(f"ALTER TABLE agent_runs ADD COLUMN {col} {typedef}")
+        except Exception:
+            pass
 
 
 def _duration_between(started_at: str | None, finished_at: str | None) -> int | None:
@@ -341,21 +364,35 @@ def record_agent_start(
     sprint_label: str,
     agent: str,
     started_at: str | None = None,
+    risk_tier: str | None = None,
+    model_used: str | None = None,
+    routing_reason: str | None = None,
+    worktree_sha: str | None = None,
+    base_sha: str | None = None,
+    attempt_kind: str | None = None,
+    log_path: str | None = None,
 ) -> int | None:
     """Insert an agent_runs row at dispatch time and return its id (issue #764).
 
     `finished_at`/`duration_seconds`/`outcome` are left NULL until
-    record_agent_finish() closes the run. Returns the new row id (used to close
-    the exact run) or None on failure — callers treat this as best-effort.
+    record_agent_finish() closes the run. `risk_tier` and `model_used` are
+    optional for tester risk-tier routing (issue #790). `routing_reason` is
+    optional for coder size-tier routing (issue #789). `worktree_sha` and
+    `base_sha` are optional forensic fields from worktree hygiene (issue #788).
+    `attempt_kind` is one of 'initial', 'fix_round', or 'hang_continue' (issue #787).
+    `log_path` is the absolute path to the issue log file (issue #783).
+    Returns the new row id (used to close the exact run) or None on failure.
     """
     started_at = started_at or _now_iso()
     with get_conn() as conn:
         _create_agent_runs_table(conn)
         cur = conn.execute(
             "INSERT INTO agent_runs "
-            "(issue_number, sprint_label, agent, started_at) "
-            "VALUES (?, ?, ?, ?)",
-            (int(issue_number), sprint_label, agent, started_at),
+            "(issue_number, sprint_label, agent, started_at, risk_tier, model_used, routing_reason, "
+            "worktree_sha, base_sha, attempt_kind, log_path) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (int(issue_number), sprint_label, agent, started_at, risk_tier, model_used, routing_reason,
+             worktree_sha, base_sha, attempt_kind, log_path),
         )
         conn.commit()
         return cur.lastrowid
@@ -428,6 +465,28 @@ def agent_runs_for_issue(issue_number: int, sprint_label: str | None = None) -> 
                 (int(issue_number), sprint_label),
             ).fetchall()
     return [dict(r) for r in rows]
+
+
+def update_worktree_shas(
+    issue_number: int,
+    sprint_label: str,
+    agent: str,
+    worktree_sha: "str | None",
+    base_sha: "str | None",
+) -> None:
+    """Update the most recent open agent_runs row with worktree forensic SHAs (issue #788).
+
+    Best-effort: silently returns if no matching open row is found.
+    """
+    with get_conn() as conn:
+        _create_agent_runs_table(conn)
+        conn.execute(
+            "UPDATE agent_runs SET worktree_sha = ?, base_sha = ? "
+            "WHERE id = (SELECT MAX(id) FROM agent_runs "
+            "WHERE issue_number = ? AND sprint_label = ? AND agent = ? AND finished_at IS NULL)",
+            (worktree_sha, base_sha, int(issue_number), sprint_label, agent),
+        )
+        conn.commit()
 
 
 def agent_runs_for_sprint(sprint_label: str) -> list[dict]:

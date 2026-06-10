@@ -915,9 +915,12 @@ app = FastAPI(lifespan=lifespan)
 # Strangler-fig routers (issue #761): extracted route clusters live in
 # apps/dashboard/routers/ and are mounted here. New endpoints go there, NOT
 # in this file — the COMMANDER_GATE_MONOLITH gate rejects server.py growth.
-from routers import backup_router  # noqa: E402
+from routers import analytics_router, backup_router, log_search_router, runs_router  # noqa: E402
 
+app.include_router(analytics_router)
 app.include_router(backup_router)
+app.include_router(log_search_router)
+app.include_router(runs_router)
 
 logger = logging.getLogger(__name__)
 

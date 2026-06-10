@@ -280,7 +280,7 @@ def _fetch_backlog_for_estimation(
         )
         all_issues = json.loads(out.stdout)
     except Exception as e:
-        print(f"[estimator] Warning: could not fetch issues — {e}", file=sys.stderr)
+        sys.stderr.write(str(f"[estimator] Warning: could not fetch issues — {e}") + "\n")
         return [], []
 
     to_estimate = []
@@ -338,35 +338,23 @@ def _spawn_estimator_agent(
         )
         stdout = proc.stdout.strip()
     except subprocess.TimeoutExpired:
-        print(
-            f"\n  [estimator] WARNING: estimator agent timed out after {ESTIMATOR_TIMEOUT_SEC}s",
-            file=sys.stderr,
-        )
+        sys.stderr.write(str(f"\n  [estimator] WARNING: estimator agent timed out after {ESTIMATOR_TIMEOUT_SEC}s") + "\n")
         return None
     except FileNotFoundError:
-        print(
-            "[estimator] WARNING: claude CLI not found — skipping estimation",
-            file=sys.stderr,
-        )
+        sys.stderr.write(str("[estimator] WARNING: claude CLI not found — skipping estimation") + "\n")
         return None
 
     # Extract JSON object from output (model may add prose around it)
     json_match = re.search(r"\{.*\}", stdout, re.DOTALL)
     if not json_match:
-        print(
-            f"\n  [estimator] WARNING: estimator agent returned no JSON\n"
-            f"              stdout: {stdout[:300]!r}",
-            file=sys.stderr,
-        )
+        sys.stderr.write(str(f"\n  [estimator] WARNING: estimator agent returned no JSON\n"
+            f"              stdout: {stdout[:300]!r}") + "\n")
         return None
 
     try:
         raw = json.loads(json_match.group(0))
     except json.JSONDecodeError as exc:
-        print(
-            f"\n  [estimator] WARNING: estimator JSON parse error ({exc})",
-            file=sys.stderr,
-        )
+        sys.stderr.write(str(f"\n  [estimator] WARNING: estimator JSON parse error ({exc})") + "\n")
         return None
 
     return _parse_estimate_result(raw, sprint_label)
@@ -460,10 +448,7 @@ def run_estimator(
 
     # Check for claude CLI early so we can degrade gracefully
     if not shutil.which("claude"):
-        print(
-            "[estimator] claude CLI not found — writing empty estimate file, proceeding with sprint",
-            file=sys.stderr,
-        )
+        sys.stderr.write(str("[estimator] claude CLI not found — writing empty estimate file, proceeding with sprint") + "\n")
         empty = EstimateResult(
             sprint_label  = sprint_label,
             generated_at  = now_utc,
@@ -472,15 +457,15 @@ def run_estimator(
             skipped       = [],
         )
         out_path = _write_estimate_file(empty, effective_sprints_dir)
-        print(f"[estimator] Empty estimate written to {out_path}")
+        sys.stdout.write(str(f"[estimator] Empty estimate written to {out_path}") + "\n")
         return empty
 
     # Fetch backlog issues
-    print(f"[estimator] Fetching backlog for {sprint_label!r} from {repo} ...")
+    sys.stdout.write(str(f"[estimator] Fetching backlog for {sprint_label!r} from {repo} ...") + "\n")
     to_estimate, pre_skipped = _fetch_backlog_for_estimation(sprint_label, effective_repo)
 
     if not to_estimate:
-        print(f"[estimator] No estimable issues found for {sprint_label!r}.")
+        sys.stdout.write(str(f"[estimator] No estimable issues found for {sprint_label!r}.") + "\n")
         empty = EstimateResult(
             sprint_label  = sprint_label,
             generated_at  = now_utc,
@@ -489,10 +474,10 @@ def run_estimator(
             skipped       = pre_skipped,
         )
         out_path = _write_estimate_file(empty, effective_sprints_dir)
-        print(f"[estimator] Estimate written to {out_path}")
+        sys.stdout.write(str(f"[estimator] Estimate written to {out_path}") + "\n")
         return empty
 
-    print(f"[estimator] Estimating {len(to_estimate)} issue(s) for {sprint_label!r} ...")
+    sys.stdout.write(str(f"[estimator] Estimating {len(to_estimate)} issue(s) for {sprint_label!r} ...") + "\n")
 
     # Build compact issue list for the prompt
     issues_for_agent = [
@@ -526,7 +511,7 @@ def run_estimator(
 
     if result is None:
         # Graceful degradation: agent failed — write partial/empty
-        print("[estimator] WARNING: agent failed — writing partial estimate", file=sys.stderr)
+        sys.stderr.write(str("[estimator] WARNING: agent failed — writing partial estimate") + "\n")
         partial = EstimateResult(
             sprint_label  = sprint_label,
             generated_at  = now_utc,
@@ -535,7 +520,7 @@ def run_estimator(
             skipped       = pre_skipped,
         )
         out_path = _write_estimate_file(partial, effective_sprints_dir)
-        print(f"[estimator] Partial estimate written to {out_path}")
+        sys.stdout.write(str(f"[estimator] Partial estimate written to {out_path}") + "\n")
         return partial
 
     # Merge pre-skipped into agent result
@@ -544,11 +529,9 @@ def run_estimator(
 
     # Write output file atomically
     out_path = _write_estimate_file(result, effective_sprints_dir)
-    print(
-        f"[estimator] Estimate complete: {len(result.estimates)} estimated, "
-        f"{len(result.skipped)} skipped, {result.total_minutes} total minutes"
-    )
-    print(f"[estimator] Estimate written to {out_path}")
+    sys.stdout.write(str(f"[estimator] Estimate complete: {len(result.estimates)} estimated, "
+        f"{len(result.skipped)} skipped, {result.total_minutes} total minutes") + "\n")
+    sys.stdout.write(str(f"[estimator] Estimate written to {out_path}") + "\n")
 
     return result
 
@@ -566,11 +549,8 @@ def _resolve_sprints_dir(cfg_sprints_dir: Path, commander_dir: Path) -> Path:
     for i, part in enumerate(parts):
         if part == ".commander" and i + 1 < len(parts) and parts[i + 1] == ".commander":
             canonical = commander_dir / "sprints"
-            print(
-                f"  [estimator] Corrected double .commander path: "
-                f"{resolved} → {canonical}",
-                file=sys.stderr,
-            )
+            sys.stderr.write(str(f"  [estimator] Corrected double .commander path: "
+                f"{resolved} → {canonical}") + "\n")
             return canonical
     return resolved
 
@@ -623,11 +603,8 @@ def main() -> None:
         try:
             return load_config(path)  # type: ignore[possibly-undefined]
         except SystemExit as e:
-            print(
-                f"  Warning: could not load config {path} — {e}; "
-                "using commander default sprints directory.",
-                file=sys.stderr,
-            )
+            sys.stderr.write(str(f"  Warning: could not load config {path} — {e}; "
+                "using commander default sprints directory.") + "\n")
             return None
 
     if _sm_available:
@@ -635,7 +612,7 @@ def main() -> None:
             config_path = Path(args.config).expanduser().resolve()
             if not config_path.exists():
                 p.error(f"Config file not found: {config_path}")
-            print(f"  Using config: {config_path}")
+            sys.stdout.write(str(f"  Using config: {config_path}") + "\n")
             cfg = _try_load_config(config_path)
             if cfg is not None:
                 sprints_dir = _resolve_sprints_dir(cfg.sprints_dir, config_path.parent)
@@ -644,7 +621,7 @@ def main() -> None:
         else:
             discovered = discover_config()  # type: ignore[possibly-undefined]
             if discovered:
-                print(f"  Auto-discovered config: {discovered}")
+                sys.stdout.write(str(f"  Auto-discovered config: {discovered}") + "\n")
                 cfg = _try_load_config(discovered)
                 if cfg is not None:
                     sprints_dir = _resolve_sprints_dir(cfg.sprints_dir, discovered.parent)

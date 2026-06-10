@@ -104,6 +104,7 @@ Unique constraint: `(project_id, env)`.
 | `g7h8i9j0k1l2` | Add `settings` KV table; add `estimated_size` to `sprint_tickets`; seed global estimation row |
 | `h8i9j0k1l2m3` | Add `state` / `ended_at` / `end_reason` / `parent_label` to `sprints`; add `failed` to `sprint_status_enum`; add `sprint_ticket_order` table (issue #757) |
 | `i9j0k1l2m3n4` | Add `agent_runs` table for per-agent duration tracking (portable Integer/Text columns; SQLite + Postgres) (issue #764) |
+| `j0k1l2m3n4o5` | Add `risk_tier` and `model_used` columns to `agent_runs` (issue #790) |
 
 > **Neon is now an optional export target only (issue #758).** The dashboard and sprint manager run entirely off SQLite + local JSON; nothing writes to Neon in live paths. The Alembic migrations and SQLAlchemy models above remain so `scripts/export_to_neon.py` can push a snapshot on demand (`DATABASE_URL=… python scripts/export_to_neon.py`).
 
@@ -196,13 +197,20 @@ wall-clock span and lost per-agent resolution. Created identically on SQLite
 |---|---|---|
 | `id` | integer PK | Auto-increment |
 | `issue_number` | integer NOT NULL | GitHub issue number |
-| `sprint_label` | text NOT NULL | Sprint label, e.g. `sprint-58` |
+| `sprint_label` | text NOT NULL | Sprint label, e.g. `sprint-59` |
 | `agent` | text NOT NULL | Agent role (`coder`, `tester`, `documenter`, `reviewer`, `estimator`) |
 | `started_at` | text NOT NULL | ISO 8601 dispatch timestamp |
 | `finished_at` | text | ISO 8601 finish timestamp; nullable while running |
 | `duration_seconds` | integer | Wall-clock seconds for the run; nullable while running |
 | `outcome` | text | Run outcome; nullable |
 | `total_tokens` | integer | Tokens consumed by this agent run; nullable |
+| `risk_tier` | text | Risk classification before dispatch (`standard`, `elevated`, `critical`); nullable (issue #790) |
+| `model_used` | text | Model selected for this run (e.g. `claude-haiku-4-5`, `claude-sonnet-4-6`); nullable (issue #790) |
+| `routing_reason` | text | Human-readable explanation of model routing decision; nullable (issue #789/#790) |
+| `worktree_sha` | text | Git SHA of worktree HEAD at dispatch; nullable (issue #788) |
+| `base_sha` | text | Git SHA of the expected base branch at dispatch; nullable (issue #788) |
+| `attempt_kind` | text | Dispatch type: `initial`, `redispatch`, `continuation`; nullable (issue #787) |
+| `log_path` | text | Absolute path to the issue log file for this run; nullable (issue #783) |
 
 Indexes: `(issue_number, agent)`, `(sprint_label)`.
 
@@ -279,6 +287,31 @@ Per-environment deploy/restart for the `prd` and `uat` environments. Each enviro
 | `GET` | `/api/projects/{slug}/environments/{env}/run-state` | Live run state of a local environment — `running` / `stopped` / `idle` (issue #771). `host=local` only; `host=render` rejected with 400 (render run-state is derived client-side from deploy status) |
 
 > The Deploy tab is scoped to the active project only (issue #768). Deploy cards also surface and inline-edit the run folder + port (issue #769), show a live capped log tail after deploy/restart/start (issue #770), and expose Start/Stop controls with a run-state badge alongside Deploy/Restart (issue #771). Headless `gh` auth for the launchd dashboard is wired via `GH_TOKEN` in the launchd plist + agent `.env` (issue #772).
+
+### Run Browser (issue #783)
+
+Forensic log viewer for all past sprint runs. All data served from local SQLite + disk log files — zero GitHub API calls.
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/run-browser` | Serve the Run Browser HTML page; accepts `?sprint=<label>` deep-link query param |
+| `GET` | `/runs` | List all past sprints with tickets and per-agent run metadata from `agent_runs` table |
+| `GET` | `/runs/{sprint}/{issue}/{agent}/log` | Paginated log content. Query params: `page` (1-based), `limit` (lines per page, default 200) |
+| `GET` | `/runs/{sprint}/{issue}/{agent}/log/tail` | Last N KB of a log file. Query param: `kb` (default 10) |
+
+### Log Search (issue #785)
+
+Cross-run full-text log search using ripgrep with DB-indexed pre-filtering.
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/logs/search` | Search log files across all sprint runs. Query params: `project`, `sprint`, `issue` (int), `agent`, `event_type`, `level`, `time_range` (24h/7d/30d), `q` (substring). Returns up to 500 matches with `sprint`, `issue`, `agent`, `line_offset`, `text`, and `file` per match, plus `total`, `capped`, `timed_out`, and `query_ms` |
+
+### Cost Analytics (issue #786)
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/projects/{slug}/analytics/cost` | Token usage and cost breakdown by sprint, ticket, agent, and model. Sourced from local `token_usage` SQLite table; blended $/token rate applied |
 
 ### Env-var editor (issue #727)
 

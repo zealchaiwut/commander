@@ -77,7 +77,7 @@ def main() -> None:
     args = p.parse_args()
 
     chosen = find_port(prefer=args.prefer, strategy=args.strategy)
-    print(chosen)
+    sys.stdout.write(str(chosen) + "\n")
 
 
 if __name__ == "__main__":

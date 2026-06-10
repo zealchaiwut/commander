@@ -80,7 +80,7 @@ def check_preconditions() -> None:
         line for line in changed_raw.splitlines() if not line.endswith(".pyc")
     )
     if changed:
-        print("Uncommitted changes detected; commit or stash first.", file=sys.stderr)
+        sys.stderr.write(str("Uncommitted changes detected; commit or stash first.") + "\n")
         sys.exit(1)
 
     # 2. Fetch remotes so we have up-to-date refs
@@ -90,10 +90,10 @@ def check_preconditions() -> None:
     ok_master, _ = _try("git", "rev-parse", "--verify", "origin/master")
     ok_develop, _ = _try("git", "rev-parse", "--verify", "origin/develop")
     if not ok_master:
-        print("origin/master does not exist.", file=sys.stderr)
+        sys.stderr.write(str("origin/master does not exist.") + "\n")
         sys.exit(1)
     if not ok_develop:
-        print("origin/develop does not exist.", file=sys.stderr)
+        sys.stderr.write(str("origin/develop does not exist.") + "\n")
         sys.exit(1)
 
     # 4. develop must be ahead of master
@@ -106,7 +106,7 @@ def check_preconditions() -> None:
         ahead = 0
 
     if ahead == 0:
-        print("Nothing to promote — develop is at master's head.")
+        sys.stdout.write(str("Nothing to promote — develop is at master's head.") + "\n")
         sys.exit(0)
 
     # 5. No existing open PR from develop to master
@@ -123,15 +123,12 @@ def check_preconditions() -> None:
         ).stdout.strip()
         prs = json.loads(pr_list_raw) if pr_list_raw else []
     except subprocess.CalledProcessError as e:
-        print(f"Failed to check existing PRs: {e.stderr.strip()}", file=sys.stderr)
+        sys.stderr.write(str(f"Failed to check existing PRs: {e.stderr.strip()}") + "\n")
         sys.exit(2)
 
     if prs:
         pr = prs[0]
-        print(
-            f"An open PR from develop already exists: #{pr['number']} {pr['url']}",
-            file=sys.stderr,
-        )
+        sys.stderr.write(str(f"An open PR from develop already exists: #{pr['number']} {pr['url']}") + "\n")
         sys.exit(1)
 
 
@@ -363,7 +360,7 @@ def main() -> None:
             line for line in changed_raw.splitlines() if not line.endswith(".pyc")
         )
         if changed:
-            print("Uncommitted changes detected; commit or stash first.", file=sys.stderr)
+            sys.stderr.write(str("Uncommitted changes detected; commit or stash first.") + "\n")
             sys.exit(1)
         _run("git", "fetch", "origin", check=False)
 
@@ -387,15 +384,13 @@ def main() -> None:
     )
 
     if args.dry_run:
-        print("=== DRY RUN — no GitHub API calls will be made ===\n")
-        print(f"Title: {title}\n")
-        print(pr_body)
+        sys.stdout.write(str("=== DRY RUN — no GitHub API calls will be made ===\n") + "\n")
+        sys.stdout.write(str(f"Title: {title}\n") + "\n")
+        sys.stdout.write(str(pr_body) + "\n")
         draft_flag = "--draft" if args.draft else ""
-        print(
-            f"\nWould run:\n"
+        sys.stdout.write(str(f"\nWould run:\n"
             f"  gh pr create --base master --head develop --title '{title}' "
-            f"{draft_flag} --body-file -"
-        )
+            f"{draft_flag} --body-file -") + "\n")
         return
 
     # Create the PR
@@ -421,16 +416,16 @@ def main() -> None:
         pr_url = result.stdout.strip()
     except subprocess.CalledProcessError as e:
         err = e.stderr.strip() or e.stdout.strip() or "unknown error"
-        print(f"GitHub API call failed: {err}", file=sys.stderr)
+        sys.stderr.write(str(f"GitHub API call failed: {err}") + "\n")
         # Still write a log with the failure info
         log_path = write_log(pr_body, f"ERROR: {err}", timestamp)
-        print(f"Log written to {log_path}", file=sys.stderr)
+        sys.stderr.write(str(f"Log written to {log_path}") + "\n")
         sys.exit(2)
 
     # Write log
     log_path = write_log(pr_body, gh_output, timestamp)
-    print(pr_url)
-    print(f"Log written to {log_path}", file=sys.stderr)
+    sys.stdout.write(str(pr_url) + "\n")
+    sys.stderr.write(str(f"Log written to {log_path}") + "\n")
 
 
 if __name__ == "__main__":

@@ -417,6 +417,20 @@
       padding-top: 4px;
     }
 
+    /* ── Cost tab ── */
+    .estimate-badge {
+      display: inline-block;
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: .03em;
+      color: var(--amber);
+      background: var(--amber-bg);
+      border-radius: 4px;
+      padding: 1px 5px;
+      vertical-align: middle;
+      margin-left: 4px;
+    }
+
     /* ── Responsive ── */
     @media (max-width: 768px) {
       .metric-grid { grid-template-columns: 1fr; }
@@ -492,6 +506,11 @@
               aria-selected="false" aria-controls="panel-metrics"
               onclick="showTab('metrics')">
         Metrics
+      </button>
+      <button class="tab-btn" id="tab-cost" role="tab"
+              aria-selected="false" aria-controls="panel-cost"
+              onclick="showTab('cost')">
+        Cost
       </button>
     </div>
 
@@ -627,6 +646,120 @@
       </div>
 
     </div><!-- #panel-metrics -->
+
+    <!-- Cost panel (issue #786) -->
+    <div class="panel" id="panel-cost" role="tabpanel" aria-labelledby="tab-cost">
+
+      <!-- Sprint totals -->
+      <div class="card">
+        <div class="card-head">
+          <i class="ti ti-coins"></i>
+          <div>
+            <div class="card-title">Sprint totals</div>
+            <div class="card-sub">total tokens per sprint · sorted newest first</div>
+          </div>
+        </div>
+        <div class="card-body">
+          <table class="cal-table" id="cost-sprint-table">
+            <thead>
+              <tr>
+                <th>Sprint</th>
+                <th style="text-align:right">Tokens</th>
+                <th id="cost-sprint-cost-header" style="text-align:right;display:none">
+                  Cost <span class="estimate-badge">estimate</span>
+                </th>
+              </tr>
+            </thead>
+            <tbody id="cost-sprint-tbody">
+              <tr><td colspan="3" style="color:var(--text-muted);text-align:center;padding:20px">Loading…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Top-10 most expensive tickets -->
+      <div class="card">
+        <div class="card-head">
+          <i class="ti ti-ticket"></i>
+          <div>
+            <div class="card-title">Top 10 tickets by tokens</div>
+            <div class="card-sub">highest-cost issues across all sprints</div>
+          </div>
+        </div>
+        <div class="card-body">
+          <table class="cal-table" id="cost-ticket-table">
+            <thead>
+              <tr>
+                <th>Issue</th>
+                <th style="text-align:right">Tokens</th>
+                <th id="cost-ticket-cost-header" style="text-align:right;display:none">
+                  Cost <span class="estimate-badge">estimate</span>
+                </th>
+              </tr>
+            </thead>
+            <tbody id="cost-ticket-tbody">
+              <tr><td colspan="3" style="color:var(--text-muted);text-align:center;padding:20px">Loading…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Per-agent token split -->
+      <div class="card">
+        <div class="card-head">
+          <i class="ti ti-robot"></i>
+          <div>
+            <div class="card-title">By agent</div>
+            <div class="card-sub">token totals split by agent role</div>
+          </div>
+        </div>
+        <div class="card-body">
+          <table class="cal-table" id="cost-agent-table">
+            <thead>
+              <tr>
+                <th>Agent</th>
+                <th style="text-align:right">Tokens</th>
+                <th id="cost-agent-cost-header" style="text-align:right;display:none">
+                  Cost <span class="estimate-badge">estimate</span>
+                </th>
+              </tr>
+            </thead>
+            <tbody id="cost-agent-tbody">
+              <tr><td colspan="3" style="color:var(--text-muted);text-align:center;padding:20px">Loading…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Tokens per size (per_size_avg_tokens) -->
+      <div class="card">
+        <div class="card-head">
+          <i class="ti ti-chart-bar"></i>
+          <div>
+            <div class="card-title">Tokens by size</div>
+            <div class="card-sub">average total tokens per ticket size · used for M6 model routing</div>
+          </div>
+        </div>
+        <div class="card-body">
+          <table class="cal-table" id="cost-size-table">
+            <thead>
+              <tr>
+                <th>Size</th>
+                <th style="text-align:right">Tickets</th>
+                <th style="text-align:right">Avg tokens</th>
+              </tr>
+            </thead>
+            <tbody id="cost-size-tbody">
+              <tr><td style="font-weight:600">S</td><td style="text-align:right">—</td><td style="text-align:right;font-family:var(--mono)">—</td></tr>
+              <tr><td style="font-weight:600">M</td><td style="text-align:right">—</td><td style="text-align:right;font-family:var(--mono)">—</td></tr>
+              <tr><td style="font-weight:600">L</td><td style="text-align:right">—</td><td style="text-align:right;font-family:var(--mono)">—</td></tr>
+              <tr><td style="font-weight:600">XL</td><td style="text-align:right">—</td><td style="text-align:right;font-family:var(--mono)">—</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+    </div><!-- #panel-cost -->
 
   </main>
 
@@ -994,11 +1127,117 @@
         });
     };
 
+    /* ── Cost tab ── */
+    window.fetchCost = function() {
+      if (!_slug) return;
+      var url = '/api/projects/' + encodeURIComponent(_slug) + '/analytics/cost';
+      fetch(url)
+        .then(function(r) {
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          return r.json();
+        })
+        .then(function(data) {
+          _renderCostTab(data);
+        })
+        .catch(function(err) {
+          console.error('Cost fetch failed:', err);
+        });
+    };
+
+    function _fmtTokens(n) {
+      if (!n && n !== 0) return '—';
+      if (n >= 1000000) return (n / 1000000).toFixed(2) + 'M';
+      if (n >= 1000) return (n / 1000).toFixed(1) + 'k';
+      return String(n);
+    }
+
+    function _fmtCost(c) {
+      if (c == null) return '';
+      if (c < 0.01) return '<$0.01';
+      return '$' + c.toFixed(4);
+    }
+
+    function _renderCostTab(data) {
+      var pm = data.price_map_configured;
+      // Show/hide cost column headers
+      ['sprint', 'ticket', 'agent'].forEach(function(area) {
+        var hdr = document.getElementById('cost-' + area + '-cost-header');
+        if (hdr) hdr.style.display = pm ? '' : 'none';
+      });
+
+      // Sprint totals
+      var sTbody = document.getElementById('cost-sprint-tbody');
+      if (sTbody) {
+        var sprints = (data.by_sprint || []).slice().reverse();
+        if (!sprints.length) {
+          sTbody.innerHTML = '<tr><td colspan="' + (pm ? 3 : 2) + '" style="color:var(--text-muted);text-align:center;padding:20px">No data yet</td></tr>';
+        } else {
+          sTbody.innerHTML = sprints.map(function(s) {
+            var cost = pm ? '<td style="text-align:right;font-family:var(--mono)">' + _fmtCost(s.cost_usd) + '</td>' : '';
+            return '<tr><td style="font-family:var(--mono)">' + s.sprint_label + '</td>' +
+              '<td style="text-align:right;font-family:var(--mono)">' + _fmtTokens(s.total_tokens) + '</td>' + cost + '</tr>';
+          }).join('');
+        }
+      }
+
+      // Top tickets
+      var tTbody = document.getElementById('cost-ticket-tbody');
+      if (tTbody) {
+        var tickets = data.by_ticket || [];
+        if (!tickets.length) {
+          tTbody.innerHTML = '<tr><td colspan="' + (pm ? 3 : 2) + '" style="color:var(--text-muted);text-align:center;padding:20px">No data yet</td></tr>';
+        } else {
+          tTbody.innerHTML = tickets.map(function(t) {
+            var cost = pm ? '<td style="text-align:right;font-family:var(--mono)">' + _fmtCost(t.cost_usd) + '</td>' : '';
+            return '<tr><td><a href="#" style="color:var(--blue)">#' + t.issue_number + '</a></td>' +
+              '<td style="text-align:right;font-family:var(--mono)">' + _fmtTokens(t.total_tokens) + '</td>' + cost + '</tr>';
+          }).join('');
+        }
+      }
+
+      // By agent
+      var aTbody = document.getElementById('cost-agent-tbody');
+      if (aTbody) {
+        var agents = data.by_agent || [];
+        if (!agents.length) {
+          aTbody.innerHTML = '<tr><td colspan="' + (pm ? 3 : 2) + '" style="color:var(--text-muted);text-align:center;padding:20px">No data yet</td></tr>';
+        } else {
+          aTbody.innerHTML = agents.map(function(a) {
+            var cost = pm ? '<td style="text-align:right;font-family:var(--mono)">' + _fmtCost(a.cost_usd) + '</td>' : '';
+            return '<tr><td>' + a.agent + '</td>' +
+              '<td style="text-align:right;font-family:var(--mono)">' + _fmtTokens(a.total_tokens) + '</td>' + cost + '</tr>';
+          }).join('');
+        }
+      }
+
+      // Per-size avg tokens
+      var szTbody = document.getElementById('cost-size-tbody');
+      if (szTbody) {
+        var psat = data.per_size_avg_tokens || {};
+        szTbody.innerHTML = ['S', 'M', 'L', 'XL'].map(function(sz) {
+          var entry = psat[sz] || {count: 0, avg_tokens: null};
+          return '<tr><td style="font-weight:600">' + sz + '</td>' +
+            '<td style="text-align:right">' + (entry.count || 0) + '</td>' +
+            '<td style="text-align:right;font-family:var(--mono)">' + (entry.avg_tokens != null ? _fmtTokens(entry.avg_tokens) : '—') + '</td></tr>';
+        }).join('');
+      }
+    }
+
+    /* ── Override showTab to load cost data ── */
+    var _origShowTab = window.showTab;
+    window.showTab = function(name) {
+      _origShowTab(name);
+      if (name === 'cost') fetchCost();
+    };
+
     /* ── Init ── */
     document.addEventListener('DOMContentLoaded', function() {
       /* Auto-switch to metrics tab if URL hash says so */
       if (window.location.hash === '#metrics') {
         showTab('metrics');
+      }
+      if (window.location.hash === '#cost') {
+        showTab('cost');
       }
       /* Load calibration data for default tab */
       fetchCalibration();

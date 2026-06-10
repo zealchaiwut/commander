@@ -4957,6 +4957,44 @@ def _dispatch_documenter(
     )
 
 
+def _extract_follow_up_issue_nums(
+    log_text: str,
+    eff_repo: Optional[str],
+    summary_issue_num: Optional[int],
+) -> list:
+    """Extract follow-up issue numbers from `gh issue create` URLs in a log.
+
+    `gh issue create` prints the new issue URL: https://github.com/<repo>/issues/N
+    Comment URLs (https://github.com/<repo>/issues/N#issuecomment-M) must be
+    excluded. Earlier code used a fragile position-based heuristic
+    (the char after the match must be '#'), which silently broke when logs
+    wrapped or reformatted URLs. This uses stricter regex anchoring: a negative
+    lookahead `(?!#issuecomment-)` on the issue-number match, so ONLY comment
+    URLs are skipped — issue URLs carrying any other fragment still count.
+
+    Returns issue numbers in first-seen order, de-duplicated, with the sprint
+    summary issue removed. Returns [] when eff_repo is falsy.
+    """
+    if not eff_repo:
+        return []
+
+    # (?<!\d) / (?!\d) keep the number whole; (?!#issuecomment-) drops comment URLs.
+    issue_url_pat = re.compile(
+        rf"https://github\.com/{re.escape(eff_repo)}/issues/(?<!\d)(\d+)(?!\d)(?!#issuecomment-)",
+        re.IGNORECASE,
+    )
+    seen_nums: set = set()
+    follow_up_nums: list = []
+    for url_m2 in issue_url_pat.finditer(log_text):
+        num = int(url_m2.group(1))
+        if summary_issue_num is not None and num == summary_issue_num:
+            continue
+        if num not in seen_nums:
+            seen_nums.add(num)
+            follow_up_nums.append(num)
+    return follow_up_nums
+
+
 def _dispatch_reviewer(
     state: "SprintState",
     summary_issue_num: Optional[int],
@@ -5123,25 +5161,9 @@ def _dispatch_reviewer(
         # Parse actual follow-up issue numbers from issue creation URLs in the log.
         # gh issue create outputs: https://github.com/<repo>/issues/N
         # Exclude comment URLs (which contain #issuecomment-) and the sprint summary issue.
-        if eff_repo:
-            issue_url_pat = re.compile(
-                rf"https://github\.com/{re.escape(eff_repo)}/issues/(\d+)",
-                re.IGNORECASE,
-            )
-            seen_nums: set = set()
-            follow_up_nums: list = []
-            for url_m2 in issue_url_pat.finditer(log_text):
-                # Skip comment URLs: the match end is immediately followed by '#'
-                pos = url_m2.end()
-                if pos < len(log_text) and log_text[pos] == "#":
-                    continue
-                num = int(url_m2.group(1))
-                if summary_issue_num is not None and num == summary_issue_num:
-                    continue
-                if num not in seen_nums:
-                    seen_nums.add(num)
-                    follow_up_nums.append(num)
-            findings["follow_up_tickets"] = follow_up_nums
+        findings["follow_up_tickets"] = _extract_follow_up_issue_nums(
+            log_text, eff_repo, summary_issue_num
+        )
         # Look for comment URL in log
         url_cm = re.search(r"https://github\.com/[^\s]+/issues/\d+#issuecomment-\d+", log_text)
         if url_cm:

@@ -6751,12 +6751,12 @@ def main() -> None:
         help="Skip the post-summary documenter agent entirely.",
     )
 
-    # Estimator control (issue #166, #696) — default skips; --no-skip-estimator opts in
+    # Estimator control (issue #166, #696, #704) — default skips; --no-skip-estimator opts in
     p.add_argument(
         "--skip-estimator",
         action=argparse.BooleanOptionalAction,
         default=True,
-        help=argparse.SUPPRESS,
+        help="Skip the estimator run (on by default; pass --no-skip-estimator to enable).",
     )
 
     # Rerun manifest (issue #332) — written by the server rerun endpoint

@@ -120,16 +120,19 @@
     /* ── Page body ── */
     .page-body {
       padding: 32px;
-      display: flex; flex-direction: column; gap: 40px;
+      display: flex; flex-direction: column; gap: 32px;
       max-width: 1280px;
       margin: 0 auto;
     }
 
     /* ── Section ── */
+    /* Real heading, not a tracked eyebrow: clear top of the hierarchy. */
     .section-heading {
-      font-size: 11px; font-weight: 700; letter-spacing: .1em;
-      text-transform: uppercase; color: var(--text-sub);
-      margin-bottom: 16px;
+      font-size: 13px; font-weight: 600; letter-spacing: -0.01em;
+      color: var(--text); margin-bottom: 16px;
+    }
+    .section-heading .section-aside {
+      font-weight: 400; color: var(--text-sub); letter-spacing: 0;
     }
 
     /* ── Error banner ── */
@@ -309,81 +312,71 @@
     .active-projects-grid {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-      gap: 14px;
-      margin-bottom: 20px;
+      gap: 16px;
+      margin-bottom: 24px;
     }
 
-    /* ── Project card ── */
+    /* ── Project card ──
+       Sharp, technical: full 1px border (state colors the whole border, never a
+       side-stripe), no gradients, no decorative motion. State reads from the
+       icon tint, the status pill, and the running pulse dot. */
     .project-card {
       background: var(--surface);
       border: 1px solid var(--border);
-      border-radius: 10px;
-      padding: 16px 18px;
+      border-radius: 8px;
+      padding: 16px;
       cursor: pointer;
-      transition: transform .15s, border-color .15s, box-shadow .15s;
+      transition: border-color .15s ease, box-shadow .15s ease, transform .15s ease;
       outline: none;
       position: relative;
-      overflow: hidden;
       min-height: 44px;
       user-select: none;
     }
-    .project-card:hover, .project-card:focus-visible {
+    .project-card:hover {
       transform: translateY(-1px);
       border-color: var(--text-sub);
-      box-shadow: 0 4px 12px rgba(0,0,0,0.06);
+      box-shadow: 0 1px 2px rgba(0,0,0,0.04), 0 4px 10px rgba(0,0,0,0.05);
     }
     .project-card:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
 
-    /* Running card — green left/top border + animated flowing stripe */
+    /* Running — full green border + a faint green tint. No stripe, no gradient. */
     .project-card.card-running {
-      border-left: 2px solid var(--green);
-      border-top: 2px solid var(--green);
-      background: linear-gradient(180deg, var(--green-bg) 0%, transparent 60%);
+      border-color: var(--green);
+      background: var(--surface);
+      box-shadow: inset 0 0 0 1px var(--green-bg);
     }
-    .project-card.card-running::before {
-      content: '';
-      position: absolute;
-      top: 0; left: 0; right: 0;
-      height: 3px;
-      background: linear-gradient(90deg, transparent 0%, var(--green) 20%, var(--green) 80%, transparent 100%);
-      background-size: 50% 100%;
-      background-repeat: no-repeat;
-      animation: stripeFlow 2.4s linear infinite;
-      border-radius: 10px 10px 0 0;
-    }
-
-    /* UAT-pending card */
-    .project-card.card-uat { border-left: 2px solid var(--amber); }
+    /* UAT-pending — neutral card; the amber pill carries the state. */
+    .project-card.card-uat { border-color: var(--border); }
 
     /* ── Card top row ── */
     .proj-card-top {
       display: flex;
       align-items: center;
       gap: 10px;
-      margin-bottom: 10px;
+      margin-bottom: 12px;
     }
     .proj-icon-badge {
-      width: 26px; height: 26px;
+      width: 28px; height: 28px;
       border-radius: 7px;
       display: flex; align-items: center; justify-content: center;
       flex-shrink: 0;
-      font-size: 14px;
+      font-size: 15px;
     }
     .proj-icon-badge.badge-running { background: var(--green-bg); color: var(--green); }
     .proj-icon-badge.badge-uat     { background: var(--amber-bg); color: var(--amber); }
     .proj-icon-badge.badge-idle    { background: var(--surface-2); color: var(--text-muted); }
 
     .proj-card-name {
-      font-size: 16px; font-weight: 700;
+      font-size: 15px; font-weight: 600; letter-spacing: -0.01em;
       flex: 1;
       white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
 
-    /* Status pill */
+    /* Status pill — compact technical chip, not a rounded balloon. */
     .status-pill {
       display: inline-flex; align-items: center; gap: 5px;
-      padding: 3px 9px; border-radius: 20px;
-      font-size: 11px; font-weight: 600;
+      padding: 3px 8px; border-radius: 6px;
+      font-size: 11px; font-weight: 600; letter-spacing: 0.01em;
       flex-shrink: 0; white-space: nowrap;
     }
     .pill-running { background: var(--green-bg); color: var(--green); }
@@ -399,6 +392,9 @@
       0%,100% { opacity: 1; transform: scale(1); }
       50%     { opacity: 0.5; transform: scale(0.75); }
     }
+    @media (prefers-reduced-motion: reduce) {
+      .pulse-dot, #health-icon.health-down { animation: none; }
+    }
     /* Health icon animation when system is down — reuses pulseDot keyframe */
     #health-icon.health-down {
       animation: pulseDot 1s ease-in-out infinite;
@@ -407,25 +403,14 @@
     /* ── Progress line + bar ── */
     .proj-progress-line {
       font-size: 12px; color: var(--text-muted);
-      margin-bottom: 8px; line-height: 1.4;
+      margin-bottom: 10px; line-height: 1.4;
     }
     .proj-progress-bar-wrap {
-      height: 5px; background: var(--surface-2);
-      border-radius: 3px; overflow: hidden; margin-bottom: 10px;
+      height: 4px; background: var(--surface-2);
+      border-radius: 999px; overflow: hidden; margin-bottom: 12px;
     }
-    .proj-progress-bar { height: 100%; border-radius: 3px; min-width: 8px; }
-    .bar-running { background: var(--green); position: relative; overflow: hidden; }
-    .bar-running::after {
-      content: '';
-      position: absolute; top: 0; left: 0; bottom: 0;
-      width: 60%;
-      background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.5) 50%, transparent 100%);
-      animation: shimmerBar 1.8s ease-in-out infinite;
-    }
-    @keyframes shimmerBar {
-      0%   { transform: translateX(-150%); }
-      100% { transform: translateX(350%); }
-    }
+    .proj-progress-bar { height: 100%; border-radius: 999px; min-width: 6px; }
+    .bar-running { background: var(--green); }
     .bar-uat { background: var(--amber); }
 
     /* ── Meta row ── */
@@ -598,14 +583,14 @@
 
     /* ── Icon badge ── */
     .activity-badge {
-      width: 34px;
-      height: 34px;
-      border-radius: 8px;
+      width: 30px;
+      height: 30px;
+      border-radius: 7px;
       display: flex;
       align-items: center;
       justify-content: center;
       flex-shrink: 0;
-      font-size: 16px;
+      font-size: 15px;
     }
     .activity-badge.badge-sprint-started    { background: var(--activity-sprint-started-badge);   color: var(--activity-sprint-started-icon); }
     .activity-badge.badge-sprint-completed  { background: var(--activity-sprint-completed-badge); color: var(--activity-sprint-completed-icon); }
@@ -619,13 +604,14 @@
       min-width: 0;
     }
     .activity-title {
-      font-size: 14px;
-      font-weight: 700;
+      font-size: 13px;
+      font-weight: 600;
+      letter-spacing: -0.01em;
       color: var(--text);
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
-      margin-bottom: 2px;
+      margin-bottom: 3px;
     }
     .activity-sub {
       font-family: var(--mono);
@@ -753,7 +739,7 @@
   <!-- ── Projects ── -->
   <section id="section-projects">
     <div class="projects-section-header">
-      <div class="section-heading">Projects · click to open</div>
+      <div class="section-heading">Projects</div>
       <span id="projects-total-count" class="projects-total-count"></span>
     </div>
 
@@ -951,14 +937,24 @@
     }
   }
 
+  // The "Right now" stat-grid was removed (commit f25a974); these toggles are
+  // now no-ops when its elements are absent. Critically, showSkeleton() runs
+  // BEFORE the load try-block — an unguarded null access here threw and killed
+  // loadHomeData before any project/activity render (whole page blank).
   function showSkeleton() {
-    document.getElementById('stat-grid-skeleton').classList.remove('hidden');
-    document.getElementById('stat-grid-real').classList.add('hidden');
+    const sk = document.getElementById('stat-grid-skeleton');
+    const real = document.getElementById('stat-grid-real');
+    if (!sk || !real) return;
+    sk.classList.remove('hidden');
+    real.classList.add('hidden');
   }
 
   function showReal() {
-    document.getElementById('stat-grid-skeleton').classList.add('hidden');
-    document.getElementById('stat-grid-real').classList.remove('hidden');
+    const sk = document.getElementById('stat-grid-skeleton');
+    const real = document.getElementById('stat-grid-real');
+    if (!sk || !real) return;
+    sk.classList.add('hidden');
+    real.classList.remove('hidden');
   }
 
   function showError() {

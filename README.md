@@ -6,6 +6,27 @@ with a live dashboard at `localhost:8000`.
 
 ---
 
+## New machine
+
+On a fresh machine, bootstrap a bare clone in one command:
+
+```bash
+git clone https://github.com/zealchaiwut/commander.git ~/dev/commander/prd
+bash ~/dev/commander/prd/scripts/setup_machine.sh
+```
+
+`setup_machine.sh` is idempotent: it creates the venv and installs
+requirements, copies `.env` from `.env.example` (prompting for secret keys
+without echoing them), constructs the `~/dev/commander/{prd,uat}` layout, and
+finishes with a preflight **doctor** that prints a PASS/FAIL table for
+`gh auth`, the `claude` CLI, `tailscale`, the dashboard port, and `sqlite3`.
+The script exits nonzero if any doctor check fails. Pass `--restore-gist <id>`
+or `--restore-db <source>` to rehydrate config/DB from a backup, or `--doctor`
+to run the checks alone. For launchd service issues it points you at
+`scripts/install_launchd.sh`.
+
+---
+
 ## Quick Start
 
 ```bash

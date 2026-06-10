@@ -36,7 +36,13 @@ _SIZING_DIR = Path(__file__).parent
 if str(_SIZING_DIR) not in sys.path:
     sys.path.insert(0, str(_SIZING_DIR))
 from sizing import minutes_from_letter as _minutes_from_letter
-from calibration import CalibrationResult, load_calibration, calibration_prompt_section, db_calibration_records
+from calibration import (
+    CalibrationResult,
+    load_calibration,
+    calibration_prompt_section,
+    db_calibration_records,
+    sqlite_calibration_records,
+)
 from services.sprint_manager.estimation_config import get_estimation_cfg as _get_estimation_cfg
 
 
@@ -453,6 +459,13 @@ def main() -> None:
         _db_cal_records = db_calibration_records(args.calibration_sprint, estimates_dir)
         if _db_cal_records:
             print(f"Calibration (DB): {len(_db_cal_records)} records from sprint {args.calibration_sprint!r}")
+    # Neon-independent fallback (issue #766): when no sprint-state records are
+    # available (e.g. DATABASE_URL unset), read samples from the local SQLite
+    # store instead of silently falling through to generic defaults.
+    if not _db_cal_records:
+        _db_cal_records = sqlite_calibration_records()
+        if _db_cal_records:
+            print(f"Calibration (SQLite): {len(_db_cal_records)} records from local store")
     calibration = load_calibration(commander_dir, db_records=_db_cal_records or None)
     for w in calibration.warnings:
         print(f"Warning [calibration]: {w}", file=sys.stderr)

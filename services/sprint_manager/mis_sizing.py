@@ -11,8 +11,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
+try:  # importable as top-level when services/sprint_manager is on sys.path
+    from sizing import SIZE_TO_MINUTES, letter_from_minutes
+except ImportError:  # pragma: no cover - fallback for package-qualified import
+    from services.sprint_manager.sizing import SIZE_TO_MINUTES, letter_from_minutes
+
 SIZE_TIERS: dict[str, int] = {"S": 1, "M": 2, "L": 3, "XL": 4}
-CANONICAL_MINUTES: dict[str, int] = {"S": 5, "M": 15, "L": 30, "XL": 60}
+# Canonical minutes inherit the single source of truth in sizing.py (issue #766).
+CANONICAL_MINUTES: dict[str, int] = SIZE_TO_MINUTES
 _VALID_ACTIONS = frozenset({"approved", "reestimated", "dismissed"})
 _META_LABELS = frozenset({
     "enhancement", "bug", "in-progress", "SIT", "UAT", "backlog",
@@ -30,16 +36,6 @@ def _parse_ts(s: Optional[str]) -> Optional[float]:
         return dt.timestamp()
     except Exception:
         return None
-
-
-def _minutes_to_size(minutes: float) -> str:
-    if minutes >= 60:
-        return "XL"
-    if minutes >= 30:
-        return "L"
-    if minutes >= 15:
-        return "M"
-    return "S"
 
 
 def _is_meta_label(name: str) -> bool:
@@ -120,7 +116,7 @@ def build_history_from_completed(
             continue
 
         elapsed_minutes = max(0.0, end_ts - start_ts) / 60.0
-        actual_size = _minutes_to_size(elapsed_minutes)
+        actual_size = letter_from_minutes(elapsed_minutes)
         tier_diff = abs(SIZE_TIERS[actual_size] - SIZE_TIERS[estimated_size])
 
         labels = [l for l in (rec.get("labels") or []) if not _is_meta_label(l)]
@@ -215,7 +211,7 @@ def compute_flags(
         if actual_minutes_list:
             avg = sum(actual_minutes_list) / len(actual_minutes_list)
             hist_avg_minutes = round(avg, 1)
-            hist_avg_size = _minutes_to_size(avg)
+            hist_avg_size = letter_from_minutes(avg)
 
         flags.append({
             "issue_number": issue_num,

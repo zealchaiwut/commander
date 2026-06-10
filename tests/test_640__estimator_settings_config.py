@@ -152,9 +152,15 @@ def test_get_estimation_cfg_no_override_returns_global(settings_db):
 
 # ── AC(b): no-override path matches legacy ────────────────────────────────────
 
-def test_legacy_defaults_match_historical_constants():
-    """AC(b) — global defaults must equal former hard-coded values."""
-    assert DEFAULT_ESTIMATION_CFG["size_minutes"] == {"S": 5, "M": 15, "L": 30, "XL": 60}
+def test_defaults_inherit_canonical_sizing_map():
+    """AC(b), updated by #766 — defaults inherit the single sizing.py map.
+
+    XL was raised 60→90 in issue #766 (observed actuals); the config default now
+    inherits that value rather than redeclaring the legacy XL=60 constant.
+    """
+    from sizing import SIZE_TO_MINUTES
+    assert DEFAULT_ESTIMATION_CFG["size_minutes"] == SIZE_TO_MINUTES
+    assert DEFAULT_ESTIMATION_CFG["size_minutes"]["XL"] == 90
     assert DEFAULT_ESTIMATION_CFG["buffer_pct"] == 20
     assert DEFAULT_ESTIMATION_CFG["thin_ac_buffer_pct"] == 30
 

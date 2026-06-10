@@ -6588,6 +6588,9 @@ def get_sprint_live_snapshot(sprint_label: str, project: str):
       "started_at": "<ISO8601>",
       "current_ticket": {"number": N, "title": "..."} | null,
       "active_agent": {"name": "coder"|"tester", "model": "...", "pid": N} | null,
+      "active_agents": [{"name": "coder"|"tester", "ticket": {"number": N, "title": "..."}, "pid": N}, ...],
+      "pipeline_mode": <bool>,
+      "levels": [{"level": N, "total": N, "merged": N, "state": "complete"|"active"|"waiting"}, ...],
       "recent_log_lines": [{"timestamp": "HH:MM:SS", "type": "...", "message": "..."}, ...],
       "issues": [
         {
@@ -6805,6 +6808,65 @@ def get_sprint_live_snapshot(sprint_label: str, project: str):
         except Exception:
             pass
 
+    # ── Pipeline mode + dual active agents + per-level progress (issue #739) ──
+    # pipeline_mode is persisted on the sprint state by the sprint manager. When
+    # set, the board renders two active-agent cards and a waiting-level structure.
+    pipeline_mode = bool(status_data.get("pipeline_mode", False))
+
+    # active_agents: every in-flight agent derived from per-issue lifecycle
+    # timestamps. Serial mode yields at most one; pipeline mode yields a coder and
+    # a tester working different tickets at once. Ordered [coder, tester].
+    agent_pid = active_agent.get("pid") if active_agent else None
+    coder_entry = None
+    tester_entry = None
+    for iss in issues:
+        ticket = {"number": iss.get("number"), "title": iss.get("title", "")}
+        cs, cf = iss.get("coder_started_at"), iss.get("coder_finished_at")
+        ts, tf = iss.get("tester_started_at"), iss.get("tester_finished_at")
+        if ts and not tf:
+            tester_entry = {"name": "tester", "ticket": ticket, "pid": agent_pid}
+        elif cs and not cf:
+            coder_entry = {"name": "coder", "ticket": ticket, "pid": agent_pid}
+    active_agents: list[dict] = [e for e in (coder_entry, tester_entry) if e]
+    # Fall back to the single state/pid-derived agent when no issue-level timestamps
+    # are available (keeps the serial live-log badge working unchanged).
+    if not active_agents and active_agent:
+        active_agents = [active_agent]
+
+    # levels: per dispatch-level progress for the pipeline board. Only meaningful
+    # when issues carry dispatch_level > 0 (single-level/serial runs report []).
+    def _terminal(iss: dict) -> bool:
+        return iss.get("status") in ("done", "skipped") or iss.get("agent_status") == "failed"
+
+    levels_map: dict[int, list[dict]] = {}
+    for iss in issues:
+        lvl = iss.get("dispatch_level") or 0
+        if lvl > 0:
+            levels_map.setdefault(lvl, []).append(iss)
+
+    sorted_levels = sorted(levels_map)
+    current_level: Optional[int] = None
+    for lvl in sorted_levels:
+        if not all(_terminal(i) for i in levels_map[lvl]):
+            current_level = lvl
+            break
+
+    levels_out: list[dict] = []
+    for lvl in sorted_levels:
+        group = levels_map[lvl]
+        if all(_terminal(i) for i in group):
+            level_state = "complete"
+        elif current_level is not None and lvl == current_level:
+            level_state = "active"
+        else:
+            level_state = "waiting"
+        levels_out.append({
+            "level":  lvl,
+            "total":  len(group),
+            "merged": sum(1 for i in group if i.get("status") == "done"),
+            "state":  level_state,
+        })
+
     # ── recent_log_lines: last 50 lines from sprint run log ──────────────────
     log_dir = commander / "logs"
     recent_log_lines: list[dict] = []
@@ -6821,6 +6883,10 @@ def get_sprint_live_snapshot(sprint_label: str, project: str):
         "started_at": started_at_str,
         "current_ticket": current_ticket,
         "active_agent": active_agent,
+        # Dual active agents + pipeline structure (issue #739)
+        "active_agents": active_agents,
+        "pipeline_mode": pipeline_mode,
+        "levels": levels_out,
         "recent_log_lines": recent_log_lines,
         # Stat strip fields (issue #256)
         "done_count":           done_count,

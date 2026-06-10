@@ -147,6 +147,7 @@
     .snav-dot--finished { background: #2563eb; }
     .snav-dot--rework   { background: #ef4444; box-shadow: 0 0 0 3px rgba(239,68,68,.15); }
     .snav-uat        { color: #f59e0b; font-weight: 600; }
+    .snav-agents     { color: var(--blue); font-weight: 600; font-family: var(--mono); letter-spacing: .02em; }
     .snav-inprogress { color: #2563eb; font-weight: 600; }
     .snav-rework     { color: #ef4444; font-weight: 600; }
     .snav-caret { font-size: 12px; color: var(--text-muted); }
@@ -3315,6 +3316,65 @@
     }
     .level-sep-num { color: var(--text-sub); }
     .level-sep-desc { font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--text-sub); }
+
+    /* ── Dual active-agent cards + per-level progress (issue #739) ── */
+    .smgmt-active-agents {
+      display: flex; gap: 12px; flex-wrap: wrap;
+      padding: 12px 16px; border-bottom: 1px solid var(--border);
+    }
+    .smgmt-active-agent {
+      display: flex; align-items: center; gap: 8px; min-width: 0;
+      flex: 1 1 220px;
+      padding: 8px 12px; border-radius: 8px;
+      border: 1px solid var(--border); background: var(--surface-2);
+    }
+    .smgmt-active-agent--coder  { border-left: 3px solid var(--purple); }
+    .smgmt-active-agent--tester { border-left: 3px solid var(--amber); }
+    .smgmt-active-spinner {
+      display: inline-block; width: 14px; height: 14px; flex-shrink: 0;
+      border: 2px solid var(--border); border-top-color: var(--blue);
+      border-radius: 50%; animation: smgmt-spin .7s linear infinite;
+    }
+    .smgmt-active-agent--coder  .smgmt-active-spinner { border-top-color: var(--purple); }
+    .smgmt-active-agent--tester .smgmt-active-spinner { border-top-color: var(--amber); }
+    .smgmt-active-role {
+      flex-shrink: 0; font-size: 12px; font-weight: 700;
+      text-transform: uppercase; letter-spacing: .03em; color: var(--text);
+    }
+    .smgmt-active-ticket {
+      display: flex; align-items: baseline; gap: 6px; min-width: 0;
+      font-size: 12px; color: var(--text-muted);
+    }
+    .smgmt-active-tnum { font-family: var(--mono); color: var(--text-sub); flex-shrink: 0; }
+    .smgmt-active-ttitle {
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+
+    .smgmt-levels {
+      display: flex; flex-direction: column; gap: 4px;
+      padding: 10px 16px; border-bottom: 1px solid var(--border);
+    }
+    .smgmt-level-row {
+      display: flex; align-items: center; gap: 8px;
+      font-size: 11px; color: var(--text-muted);
+    }
+    .smgmt-level-icon { display: inline-flex; width: 14px; justify-content: center; flex-shrink: 0; }
+    .smgmt-level-name {
+      flex-shrink: 0; font-weight: 600; letter-spacing: .03em;
+      text-transform: uppercase; color: var(--text-muted);
+    }
+    .smgmt-level-progress { font-family: var(--mono); color: var(--text-sub); }
+    .smgmt-level--complete .smgmt-level-name,
+    .smgmt-level--complete .smgmt-level-icon { color: var(--green); }
+    .smgmt-level--active .smgmt-level-name { color: var(--blue); }
+    .smgmt-level--waiting { color: var(--text-sub); }
+    .smgmt-level--waiting .smgmt-level-name,
+    .smgmt-level--waiting .smgmt-level-progress { color: var(--text-sub); }
+    .smgmt-level-spinner {
+      display: inline-block; width: 11px; height: 11px;
+      border: 2px solid var(--border); border-top-color: var(--blue);
+      border-radius: 50%; animation: smgmt-spin .7s linear infinite;
+    }
 
     /* Per-ticket size pill (issue #308) */
     .smgmt-ticket-size-pill {
@@ -10670,6 +10730,8 @@ function _smgmtRunningCardHtml(label, n, tickets) {
         ${segBarHtml}
         <span class="smgmt-outcome-dur" id="smgmt-rs-time-${escHtml(label)}">${_fmtRunningTime(timeSpentSec)}</span>
       </div>
+      <div id="smgmt-active-agents-wrap-${escHtml(label)}">${_smgmtActiveAgentsHtml(live, label)}</div>
+      <div id="smgmt-levels-wrap-${escHtml(label)}">${_smgmtLevelsHtml(live, label)}</div>
       <div class="smgmt-sprint-tickets" id="smgmt-tickets-${escHtml(label)}">
         ${ticketRowsHtml || '<div class="smgmt-drop-hint">No tickets in this sprint</div>'}
       </div>
@@ -10813,6 +10875,64 @@ function _smgmtLiveAgentBadgesHtml(live) {
   const pids = agents.map(a => a.pid).filter(Boolean);
   const pidHtml = pids.length ? `<span class="smgmt-log-pid">pid ${escHtml(pids.join(' / '))}</span>` : '';
   return badges + pidHtml;
+}
+
+/** Human label for an agent role used on the dual active cards (issue #739). */
+function _smgmtAgentLabel(role) {
+  const r = (role || '').toLowerCase();
+  if (r === 'coder')  return 'Coder';
+  if (r === 'tester') return 'Tester';
+  return role || '?';
+}
+
+/** Dual active-agent cards for the running sprint board (issue #739).
+ *  Pipeline mode only — single-agent mode renders nothing here (unchanged board).
+ *  Each in-flight agent gets its own card with its own spinner, role label, and
+ *  the specific ticket it is working. Empty string when no agent is active. */
+function _smgmtActiveAgentsHtml(live, label) {
+  if (!live || !live.pipeline_mode) return '';
+  const agents = live.active_agents || [];
+  if (!agents.length) return '';
+  const cards = agents.map(a => {
+    const role  = (a.name || '').toLowerCase();
+    const tk    = a.ticket || {};
+    const tnum  = tk.number ? `#${tk.number}` : '';
+    const ttl   = tk.title || '';
+    return `<div class="smgmt-active-agent smgmt-active-agent--${escHtml(role)}" data-agent="${escHtml(role)}">
+      <span class="smgmt-active-spinner" aria-hidden="true"></span>
+      <span class="smgmt-active-role">${escHtml(_smgmtAgentLabel(a.name))}</span>
+      <span class="smgmt-active-ticket">
+        <span class="smgmt-active-tnum">${escHtml(tnum)}</span>
+        <span class="smgmt-active-ttitle" title="${escHtml(ttl)}">${escHtml(ttl)}</span>
+      </span>
+    </div>`;
+  }).join('');
+  return `<div class="smgmt-active-agents" id="smgmt-active-agents-${escHtml(label)}">${cards}</div>`;
+}
+
+/** Per-level progress rows for the pipeline board (issue #739).
+ *  Pipeline mode only. Each level shows merged/total; the next, not-yet-reachable
+ *  level renders in a waiting state with a lock icon until the current level
+ *  drains. Empty string outside pipeline mode (single-agent board unchanged). */
+function _smgmtLevelsHtml(live, label) {
+  if (!live || !live.pipeline_mode) return '';
+  const levels = live.levels || [];
+  if (!levels.length) return '';
+  const rows = levels.map(l => {
+    let icon;
+    if (l.state === 'waiting')       icon = '<i class="ti ti-lock"></i>';
+    else if (l.state === 'complete') icon = '<i class="ti ti-check"></i>';
+    else                             icon = '<span class="smgmt-level-spinner"></span>';
+    const progress = l.state === 'waiting'
+      ? `Waiting for Level ${l.level - 1} to complete`
+      : `${l.merged}/${l.total} merged`;
+    return `<div class="smgmt-level-row smgmt-level--${escHtml(l.state)}" data-level="${l.level}" data-state="${escHtml(l.state)}">
+      <span class="smgmt-level-icon">${icon}</span>
+      <span class="smgmt-level-name">Level ${l.level}</span>
+      <span class="smgmt-level-progress">${escHtml(progress)}</span>
+    </div>`;
+  }).join('');
+  return `<div class="smgmt-levels" id="smgmt-levels-${escHtml(label)}">${rows}</div>`;
 }
 
 /** Patch live stat strip + progress bar + ticket indicators in place (no full re-render). */
@@ -10997,6 +11117,12 @@ function _smgmtLivePatch(label, live) {
       block.className = `seg-block ${blockClass}`;
     });
   }
+
+  // Update dual active-agent cards + per-level progress in place (issue #739).
+  const activeWrap = document.getElementById(`smgmt-active-agents-wrap-${label}`);
+  if (activeWrap) activeWrap.innerHTML = _smgmtActiveAgentsHtml(live, label);
+  const levelsWrap = document.getElementById(`smgmt-levels-wrap-${label}`);
+  if (levelsWrap) levelsWrap.innerHTML = _smgmtLevelsHtml(live, label);
 }
 
 /** Start or restart the live polling loop for any running sprints. */
@@ -18183,8 +18309,17 @@ function _snavRenderPill() {
     const doneHtml = (store && store.done > 0) ? ` · <span class="snav-uat">${store.done} done</span>` : '';
     const uatHtml  = (!store && (d.uat || 0) > 0) ? ` · <span class="snav-uat">${d.uat} UAT</span>` : '';
     const reworkHtml = rework > 0 ? ` · <span class="snav-rework">${rework} ↩</span>` : '';
+    // In pipeline mode the pill names every active agent (coder + tester) rather
+    // than collapsing to a single label (issue #739).
+    const liveAgents = _smgmtLiveCache[`sprint-${d.sprint}`];
+    let agentsHtml = '';
+    if (liveAgents && liveAgents.pipeline_mode && (liveAgents.active_agents || []).length) {
+      const names = liveAgents.active_agents
+        .map(a => (a.name || '').toUpperCase()).filter(Boolean);
+      if (names.length) agentsHtml = ` · <span class="snav-agents">${escHtml(names.join('+'))}</span>`;
+    }
     dot.className = rework > 0 ? 'snav-dot snav-dot--rework' : 'snav-dot snav-dot--running';
-    text.innerHTML = `S${d.sprint} · ${complete}/${total}${doneHtml}${uatHtml}${reworkHtml}`;
+    text.innerHTML = `S${d.sprint} · ${complete}/${total}${doneHtml}${uatHtml}${reworkHtml}${agentsHtml}`;
   }
 }
 

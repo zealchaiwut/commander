@@ -210,7 +210,11 @@ def _elapsed_minutes(start: Optional[str], end: Optional[str]) -> Optional[float
     return (e - s).total_seconds() / 60.0
 
 
-def db_calibration_records(sprint_label: str, estimates_dir: Path) -> list:
+def db_calibration_records(
+    sprint_label: str,
+    estimates_dir: Path,
+    include_agents: bool = False,
+) -> list:
     """Return [{size, actual_minutes}] for a past sprint, read from local files.
 
     Issue #758 removed the Neon dependency — Neon is an optional export target,
@@ -219,6 +223,14 @@ def db_calibration_records(sprint_label: str, estimates_dir: Path) -> list:
     time, then resolves each ticket's size from its estimate JSON in
     estimates_dir. Returns only `done` tickets that have both timing and an
     estimate file. Silently returns [] if the state file is missing.
+
+    Per-agent records (issue #764): when ``include_agents`` is True, the result
+    additionally carries one ``{size, actual_minutes, agent}`` record per agent
+    (coder, tester) alongside the existing blended record (which omits the
+    ``agent`` key). The default (``include_agents=False``) is unchanged, so
+    existing consumers that omit ``agent`` keep working without modification —
+    they continue to receive blended-only records and never see the per-agent
+    rows, so calibration medians are not double-counted.
     """
     sprints_dir = estimates_dir.parent / "sprints"
     state_path = sprints_dir / f"{sprint_label}-state.json"
@@ -255,6 +267,15 @@ def db_calibration_records(sprint_label: str, estimates_dir: Path) -> list:
             "actual_minutes": round((coder_min or 0.0) + (tester_min or 0.0), 1),
         }
         records.append(rec)
+        if include_agents:
+            if coder_min is not None:
+                records.append(
+                    {"size": size, "actual_minutes": round(coder_min, 1), "agent": "coder"}
+                )
+            if tester_min is not None:
+                records.append(
+                    {"size": size, "actual_minutes": round(tester_min, 1), "agent": "tester"}
+                )
     return records
 
 

@@ -89,6 +89,29 @@ class SprintTicket(Base):
     )
 
 
+class AgentRun(Base):
+    __tablename__ = "agent_runs"
+
+    # Portable column types only (Integer / Text) so the table and its Alembic
+    # migration apply cleanly on SQLite as well as Postgres (issue #764).
+    # Timestamps are stored as ISO-8601 UTC strings, matching the local SQLite
+    # dashboard store that records these rows at dispatch time.
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    issue_number = Column(Integer, nullable=False)
+    sprint_label = Column(Text, nullable=False)
+    agent = Column(Text, nullable=False)
+    started_at = Column(Text, nullable=False)
+    finished_at = Column(Text, nullable=True)
+    duration_seconds = Column(Integer, nullable=True)
+    outcome = Column(Text, nullable=True)
+    total_tokens = Column(Integer, nullable=True)
+
+    __table_args__ = (
+        Index("ix_agent_runs_issue_agent", "issue_number", "agent"),
+        Index("ix_agent_runs_sprint", "sprint_label"),
+    )
+
+
 class Setting(Base):
     __tablename__ = "settings"
 

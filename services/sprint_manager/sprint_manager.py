@@ -625,6 +625,46 @@ def _sprint_db_set_ticket_order_sm(label: str, issue_numbers: list[int]) -> None
         pass
 
 
+# ── Per-agent run tracking (issue #764) ──────────────────────────────────────
+#
+# Each dispatched agent (coder, tester, documenter, reviewer, estimator) opens
+# an agent_runs row at start and closes it on finish with its precise wall-clock
+# duration. Best-effort, like the lifecycle helpers above: a DB write must never
+# interrupt or fail a sprint run.
+
+def _db_agent_start_sm(issue_number, sprint_label: str, agent: str) -> None:
+    """Best-effort open of an agent_runs row at dispatch time (#764)."""
+    try:
+        import db  # apps/dashboard on sys.path (line 142)
+        db.record_agent_start(int(issue_number), sprint_label, agent)
+    except (Exception, SystemExit):
+        pass
+
+
+def _db_agent_finish_sm(
+    issue_number,
+    sprint_label: str,
+    agent: str,
+    duration_seconds=None,
+    outcome=None,
+    total_tokens=None,
+) -> None:
+    """Best-effort close of the open agent_runs row on finish (#764).
+
+    `duration_seconds` is the precise monotonic measurement taken by the caller
+    so the stored value is within ±2 s of the logged wall-clock time (AC3).
+    """
+    try:
+        import db  # apps/dashboard on sys.path (line 142)
+        db.record_agent_finish(
+            int(issue_number), sprint_label, agent,
+            duration_seconds=None if duration_seconds is None else round(duration_seconds),
+            outcome=outcome, total_tokens=total_tokens,
+        )
+    except (Exception, SystemExit):
+        pass
+
+
 # Hang detection constants (in seconds)
 HANG_WARN_SECS  = 30 * 60   # 30 minutes
 HANG_KILL_SECS  = 60 * 60   # 60 minutes
@@ -4097,6 +4137,62 @@ def generate_sprint_summary(
         "",
     ]
 
+    # -- Per-Agent Durations (issue #764) --
+    # Per-ticket coder/tester wall-clock durations from the sprint state
+    # timestamps, plus totals per agent. Surfaces the per-agent resolution that
+    # the blended actual_elapsed_seconds metric collapses.
+    def _secs_between(start: Optional[str], end: Optional[str]) -> Optional[int]:
+        if not start or not end:
+            return None
+        try:
+            s = datetime.fromisoformat(str(start).replace("Z", "+00:00"))
+            e = datetime.fromisoformat(str(end).replace("Z", "+00:00"))
+        except (ValueError, TypeError):
+            return None
+        return round((e - s).total_seconds())
+
+    def _fmt_dur(secs: Optional[int]) -> str:
+        if secs is None:
+            return "--"
+        mm, ss = divmod(int(secs), 60)
+        return f"{mm}m {ss}s"
+
+    agent_rows = []
+    coder_total = 0
+    tester_total = 0
+    for issue in state.issues:
+        c_secs = _secs_between(
+            getattr(issue, "coder_started_at", None),
+            getattr(issue, "coder_finished_at", None),
+        )
+        t_secs = _secs_between(
+            getattr(issue, "tester_started_at", None),
+            getattr(issue, "tester_finished_at", None),
+        )
+        if c_secs is None and t_secs is None:
+            continue
+        if c_secs is not None:
+            coder_total += c_secs
+        if t_secs is not None:
+            tester_total += t_secs
+        agent_rows.append(
+            f"| #{issue.number} | {_fmt_dur(c_secs)} | {_fmt_dur(t_secs)} |"
+        )
+
+    lines += ["## Per-Agent Durations", ""]
+    if agent_rows:
+        lines += [
+            "| Issue # | Coder | Tester |",
+            "|---|---|---|",
+        ]
+        lines += agent_rows
+        lines.append(
+            f"| **Totals** | **{_fmt_dur(coder_total)}** | **{_fmt_dur(tester_total)}** |"
+        )
+    else:
+        lines.append("_No per-agent timing recorded this sprint._")
+    lines.append("")
+
     # -- Rate Limit Events --
     if state.rate_limit_events:
         lines += ["## Rate Limit Events", ""]
@@ -5535,6 +5631,10 @@ def _dispatch_estimator_for_followup(
     print(f"  [estimator] Estimating follow-up #{issue_num} ...", flush=True)
     est_env = os.environ.copy()
     est_env.update(_agent_identity_env("estimator", issue_num))  # issue #719
+    # issue #764: track estimator as a per-issue agent run.
+    _est_label = est_env.get("CLAUDE_SPRINT_LABEL", "") or os.environ.get("CLAUDE_SPRINT_LABEL", "")
+    _db_agent_start_sm(issue_num, _est_label, "estimator")
+    _est_t0 = time.monotonic()
     try:
         result = subprocess.run(
             cmd,
@@ -5544,9 +5644,16 @@ def _dispatch_estimator_for_followup(
             env=est_env,
         )
     except subprocess.TimeoutExpired:
+        _db_agent_finish_sm(issue_num, _est_label, "estimator",
+                            duration_seconds=time.monotonic() - _est_t0, outcome="timeout")
         print(f"  [estimator] WARNING: estimation for #{issue_num} timed out after {_ESTIMATOR_DISPATCH_TIMEOUT}s", flush=True)
         return False
 
+    _db_agent_finish_sm(
+        issue_num, _est_label, "estimator",
+        duration_seconds=time.monotonic() - _est_t0,
+        outcome="succeeded" if result.returncode == 0 else "failed",
+    )
     if result.returncode != 0:
         print(f"  [estimator] WARNING: estimation for #{issue_num} exited with code {result.returncode}", flush=True)
         return False
@@ -5949,6 +6056,7 @@ def _run_pipeline_dispatch(
 
         ist.set_agent_status("coder_dispatched")
         ist.coder_started_at = ist.status_changed_at
+        _db_agent_start_sm(num, label, "coder")  # issue #764
         _emit_sprint_lifecycle_event(
             type="ticket_dispatched", target=f"#{num}", actor="system",
             detail={"agent": "CODER"}, project=eff_repo or label, action_id=run_id,
@@ -5963,11 +6071,17 @@ def _run_pipeline_dispatch(
             state.save(state_path)
             _post_sprint_status(state, api_url=api_url)
 
+        _stage_coder_t0 = time.monotonic()
         coder_ok, coder_category = _dispatch_coder(
             num, alert_modes, sprint_branch=target_branch, repo_name=eff_repo, cfg=cfg,
             chosen_port=chosen_port, rate_limit_events=state.rate_limit_events,
             on_running=_on_coder_running, sprint_label=label,
             prior_failures=ctx["fix_history"] if ctx["fix_history"] else None,
+        )
+        _db_agent_finish_sm(  # issue #764: one closed row per coder dispatch
+            num, label, "coder",
+            duration_seconds=time.monotonic() - _stage_coder_t0,
+            outcome="success" if coder_ok else "failed",
         )
         if not coder_ok:
             category = coder_category or FailureCategory.CRASH
@@ -6007,6 +6121,7 @@ def _run_pipeline_dispatch(
 
         ist.set_agent_status("tester_dispatched")
         ist.tester_started_at = ist.status_changed_at
+        _db_agent_start_sm(num, label, "tester")  # issue #764
         ist.tester_attempt_count += 1
         _emit_sprint_lifecycle_event(
             type="ticket_dispatched", target=f"#{num}", actor="system",
@@ -6020,10 +6135,16 @@ def _run_pipeline_dispatch(
             state.save(state_path)
             _post_sprint_status(state, api_url=api_url)
 
+        _stage_tester_t0 = time.monotonic()
         tester_rc, hang_category = _dispatch_tester(
             num, alert_modes, sprint_branch=target_branch, repo_name=eff_repo, cfg=cfg,
             chosen_port=ctx.get("port"), rate_limit_events=state.rate_limit_events,
             on_running=_on_tester_running, sprint_label=label,
+        )
+        _db_agent_finish_sm(  # issue #764: one closed row per tester dispatch
+            num, label, "tester",
+            duration_seconds=time.monotonic() - _stage_tester_t0,
+            outcome="pass" if tester_rc == 0 else "fail",
         )
         ist.tester_finished_at = ist.status_changed_at
         if hang_category == FailureCategory.HANG:
@@ -6687,6 +6808,7 @@ def run_sprint(
                 # -- Dispatch coder --
                 issue_state.set_agent_status("coder_dispatched")
                 issue_state.coder_started_at = issue_state.status_changed_at
+                _db_agent_start_sm(num, label, "coder")  # issue #764
                 _emit_sprint_lifecycle_event(
                     type="ticket_dispatched",
                     target=f"#{num}",
@@ -6735,6 +6857,11 @@ def run_sprint(
                     )
                     raise
                 _coder_elapsed = time.monotonic() - _coder_t0
+                _db_agent_finish_sm(  # issue #764: close the run with precise duration
+                    num, label, "coder",
+                    duration_seconds=_coder_elapsed,
+                    outcome="success" if coder_ok else "failed",
+                )
                 _coder_m, _coder_s = divmod(int(_coder_elapsed), 60)
                 print(f"  Total time used on coder dispatch: {_coder_m}m {_coder_s}s")
                 try:
@@ -6864,6 +6991,7 @@ def run_sprint(
             # -- Lifecycle: tester_dispatched --
             issue_state.set_agent_status("tester_dispatched")
             issue_state.tester_started_at = issue_state.status_changed_at
+            _db_agent_start_sm(num, label, "tester")  # issue #764
             # Record the tester attempt so analytics can count rejections exactly
             # going forward (issue #718).
             issue_state.tester_attempt_count += 1
@@ -6908,6 +7036,11 @@ def run_sprint(
                 )
                 raise
             _tester_elapsed = time.monotonic() - _tester_t0
+            _db_agent_finish_sm(  # issue #764: close the run with precise duration
+                num, label, "tester",
+                duration_seconds=_tester_elapsed,
+                outcome="pass" if tester_rc == 0 else "fail",
+            )
             _tester_m, _tester_s = divmod(int(_tester_elapsed), 60)
             print(f"  Total time used on tester dispatch: {_tester_m}m {_tester_s}s")
             try:
@@ -7551,6 +7684,9 @@ def main() -> None:
             doc_base_sha = "develop"
 
         state_path_doc = _state_path(state.sprint_number, state.sprint_label, cfg=cfg)
+        # issue #764: track documenter as a sprint-level agent run (issue 0).
+        _db_agent_start_sm(0, state.sprint_label, "documenter")
+        _doc_t0 = time.monotonic()
         try:
             _dispatch_documenter(
                 state         = state,
@@ -7560,8 +7696,17 @@ def main() -> None:
                 cfg           = cfg,
                 repo_name     = eff_repo,
             )
+            _db_agent_finish_sm(
+                0, state.sprint_label, "documenter",
+                duration_seconds=time.monotonic() - _doc_t0,
+                outcome=state.documenter_status or "succeeded",
+            )
         except RuntimeError as e_doc:
             # AC6: documenter errors must fail the pipeline loudly, not silently skip
+            _db_agent_finish_sm(
+                0, state.sprint_label, "documenter",
+                duration_seconds=time.monotonic() - _doc_t0, outcome="failed",
+            )
             structured_log.error("documenter_failed", f"documenter failed: {e_doc}", exc=str(e_doc))
             print(f"\n[ERROR] Documenter failed: {e_doc}", flush=True)
             raise
@@ -7625,6 +7770,9 @@ def main() -> None:
             except Exception:
                 pass
 
+        # issue #764: track reviewer as a sprint-level agent run (issue 0).
+        _db_agent_start_sm(0, state.sprint_label, "reviewer")
+        _rev_t0 = time.monotonic()
         try:
             _dispatch_reviewer(
                 state             = state,
@@ -7634,6 +7782,11 @@ def main() -> None:
                 head_sha          = head_sha,
                 cfg               = cfg,
                 repo_name         = eff_repo,
+            )
+            _db_agent_finish_sm(
+                0, state.sprint_label, "reviewer",
+                duration_seconds=time.monotonic() - _rev_t0,
+                outcome=state.reviewer_status or "succeeded",
             )
             # Persist reviewer outcome into the state JSON
             if state_path_rev.exists():
@@ -7646,6 +7799,10 @@ def main() -> None:
                 except Exception as e_persist:
                     structured_log.warn("reviewer_state_persist_failed", f"could not persist reviewer outcome: {e_persist}", exc=str(e_persist))
         except Exception as e_rev:
+            _db_agent_finish_sm(
+                0, state.sprint_label, "reviewer",
+                duration_seconds=time.monotonic() - _rev_t0, outcome="failed",
+            )
             structured_log.error("reviewer_failed", f"reviewer stage failed: {e_rev}", exc=str(e_rev))
             state.reviewer_status = "failed"
 

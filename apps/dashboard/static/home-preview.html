@@ -802,10 +802,9 @@
       <label class="apm-check"><input type="checkbox" id="apm-nested"> Nested layout (--nested)</label>
       <label class="apm-check"><input type="checkbox" id="apm-skip-uat"> Skip UAT clone (--skip-uat)</label>
     </div>
-    <div class="apm-log-wrap hidden" id="apm-log-wrap"><pre class="apm-log" id="apm-log"></pre></div>
   </form>
 
-  <!-- Add existing repo (POST /api/projects) -->
+  <!-- Add existing repo (POST /api/projects, or clone via init when nested) -->
   <form id="apm-add-form" class="apm-body hidden" onsubmit="apmSubmitAdd(event)">
     <div class="apm-field">
       <label class="apm-label" for="apm-repo">GitHub Repo URL <span class="apm-req">*</span></label>
@@ -820,12 +819,22 @@
       <label class="apm-label" for="apm-color">Color <span class="apm-hint">(blue, green, purple, amber, red, pink, cyan, gray)</span></label>
       <input class="apm-input" id="apm-color" type="text" placeholder="gray">
     </div>
+    <div class="apm-field apm-checks">
+      <label class="apm-check"><input type="checkbox" id="apm-add-nested" onchange="apmAddNestedToggle()"> Nested layout (--nested)</label>
+      <label class="apm-check"><input type="checkbox" id="apm-add-skip-uat"> Skip UAT clone (--skip-uat)</label>
+    </div>
+    <div class="apm-hint" style="margin:-4px 0 4px">Check <strong>Nested layout</strong> to clone the repo into <code>~/dev/&lt;name&gt;</code> (re-creates local folders, e.g. re-adding a deleted project). Leave off to just track an already-cloned repo.</div>
+    <div class="apm-field hidden" id="apm-add-dir-field">
+      <label class="apm-label" for="apm-add-projects-dir">Projects directory</label>
+      <input class="apm-input" id="apm-add-projects-dir" type="text" placeholder="~/dev" value="~/dev" autocomplete="off">
+    </div>
   </form>
+
+  <div class="apm-log-wrap hidden" id="apm-log-wrap"><pre class="apm-log" id="apm-log"></pre></div>
 
   <div class="apm-footer">
     <button type="button" class="apm-btn-ghost" onclick="closeAddProjectModal()">Cancel</button>
-    <button type="submit" class="apm-btn-primary" id="apm-init-submit" form="apm-init-form">Create</button>
-    <button type="submit" class="apm-btn-primary hidden" id="apm-add-submit" form="apm-add-form">Add Project</button>
+    <button type="button" class="apm-btn-primary" id="apm-submit" onclick="apmSubmit()">Create</button>
   </div>
 </div>
 
@@ -1094,175 +1103,8 @@
     window.location.href = '/project/' + encodeURIComponent(slug) + '/sprint-mgmt';
   }
 
-  // ======================================================================
-  // Add Project modal — CANONICAL JS. Keep IN SYNC with the copy in
-  // project.html. Two tabs: "Create new project" (streams init_project.py)
-  // and "Add existing repo" (POST /api/projects). Replaced the legacy
-  // index.html/app.js modal (issue #425).
-  // ======================================================================
-  let _apmTab = 'init';
-
-  // Alias retained for the existing "+ add project" tiles/keydown handlers.
-  function openAddProjectFlow() { openAddProjectModal(); }
-
-  function openAddProjectModal() {
-    document.getElementById('apm-repo').value         = '';
-    document.getElementById('apm-icon').value         = '';
-    document.getElementById('apm-color').value        = '';
-    document.getElementById('apm-name').value         = '';
-    document.getElementById('apm-projects-dir').value = '~/dev';
-    document.getElementById('apm-nested').checked     = false;
-    document.getElementById('apm-skip-uat').checked   = false;
-    _apmClearError('apm-repo');
-    _apmClearError('apm-name');
-    _apmResetLog();
-    document.getElementById('apm-backdrop').classList.remove('hidden');
-    document.getElementById('apm-modal').classList.remove('hidden');
-    apmSwitchTab(_apmTab);
-  }
-
-  function closeAddProjectModal() {
-    document.getElementById('apm-backdrop').classList.add('hidden');
-    document.getElementById('apm-modal').classList.add('hidden');
-  }
-
-  function apmSwitchTab(tab) {
-    _apmTab = tab;
-    const init = tab === 'init';
-    document.getElementById('apm-init-form').classList.toggle('hidden', !init);
-    document.getElementById('apm-add-form').classList.toggle('hidden', init);
-    document.getElementById('apm-tab-init').classList.toggle('active', init);
-    document.getElementById('apm-tab-add').classList.toggle('active', !init);
-    document.getElementById('apm-init-submit').classList.toggle('hidden', !init);
-    document.getElementById('apm-add-submit').classList.toggle('hidden', init);
-    document.getElementById(init ? 'apm-name' : 'apm-repo').focus();
-  }
-
-  function _apmErrId(inputId) { return inputId === 'apm-name' ? 'apm-init-error' : 'apm-repo-error'; }
-
-  function _apmClearError(inputId) {
-    const err = document.getElementById(_apmErrId(inputId));
-    const inp = document.getElementById(inputId);
-    if (err) { err.textContent = ''; err.classList.add('hidden'); }
-    if (inp) inp.classList.remove('error');
-  }
-
-  function _apmShowError(inputId, msg) {
-    const err = document.getElementById(_apmErrId(inputId));
-    const inp = document.getElementById(inputId);
-    if (err) { err.textContent = msg; err.classList.remove('hidden'); }
-    if (inp) inp.classList.add('error');
-  }
-
-  function _apmResetLog() {
-    const w = document.getElementById('apm-log-wrap');
-    const l = document.getElementById('apm-log');
-    if (w) w.classList.add('hidden');
-    if (l) l.textContent = '';
-  }
-
-  function _apmAppendLog(line) {
-    const w = document.getElementById('apm-log-wrap');
-    const l = document.getElementById('apm-log');
-    if (w) w.classList.remove('hidden');
-    if (l) { l.textContent += line + '\n'; l.scrollTop = l.scrollHeight; }
-  }
-
-  function _apmAfterSuccess() {
-    closeAddProjectModal();
-    if (typeof loadHomeData === 'function') loadHomeData(true);
-  }
-
-  async function apmSubmitAdd(event) {
-    event.preventDefault();
-    _apmClearError('apm-repo');
-
-    const repoUrl = document.getElementById('apm-repo').value.trim();
-    const icon    = document.getElementById('apm-icon').value.trim()  || 'ti-folder';
-    const color   = document.getElementById('apm-color').value.trim() || 'gray';
-
-    if (!repoUrl) { _apmShowError('apm-repo', 'GitHub repo URL is required.'); return; }
-
-    const btn = document.getElementById('apm-add-submit');
-    btn.disabled = true; btn.textContent = 'Adding…';
-    try {
-      const res = await fetch('/api/projects', {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ repo_url: repoUrl, icon, color }),
-      });
-      if (res.status === 409) { const d = await res.json().catch(() => ({})); _apmShowError('apm-repo', d.detail || 'Project already added.'); return; }
-      if (res.status === 422) { const d = await res.json().catch(() => ({})); _apmShowError('apm-repo', d.detail || 'Invalid repo or repo not found on GitHub.'); return; }
-      if (!res.ok)            { const d = await res.json().catch(() => ({})); _apmShowError('apm-repo', d.detail || 'Error ' + res.status); return; }
-      _apmAfterSuccess();
-    } catch (e) {
-      _apmShowError('apm-repo', 'Network error: ' + e.message);
-    } finally {
-      btn.disabled = false; btn.textContent = 'Add Project';
-    }
-  }
-
-  async function apmSubmitInit(event) {
-    event.preventDefault();
-    _apmClearError('apm-name');
-    _apmResetLog();
-
-    const repoName    = document.getElementById('apm-name').value.trim();
-    const projectsDir = document.getElementById('apm-projects-dir').value.trim() || '~/dev';
-    const nested      = document.getElementById('apm-nested').checked;
-    const skipUat     = document.getElementById('apm-skip-uat').checked;
-
-    if (!repoName) { _apmShowError('apm-name', 'Project name is required.'); return; }
-    if (repoName.includes('/') || repoName.includes('\\')) {
-      _apmShowError('apm-name', 'Project name must not contain path separators (/ or \\).');
-      return;
-    }
-
-    const btn = document.getElementById('apm-init-submit');
-    btn.disabled = true; btn.textContent = 'Creating…';
-    try {
-      const res = await fetch('/api/projects/init', {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ repo_name: repoName, projects_dir: projectsDir, nested, skip_uat: skipUat }),
-      });
-      if (res.status === 400 || res.status === 409 || res.status === 422) {
-        const d = await res.json().catch(() => ({})); _apmShowError('apm-name', d.detail || 'Error ' + res.status); return;
-      }
-      if (!res.ok) { const d = await res.json().catch(() => ({})); _apmShowError('apm-name', d.detail || 'Server error ' + res.status); return; }
-
-      // Stream the init_project.py SSE log.
-      const reader  = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '', success = false, lastErr = '';
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const chunks = buffer.split('\n\n');
-        buffer = chunks.pop();
-        for (const chunk of chunks) {
-          let eventType = 'log', dataLine = '';
-          for (const l of chunk.split('\n')) {
-            if (l.startsWith('event: ')) eventType = l.slice(7).trim();
-            if (l.startsWith('data: '))  dataLine  = l.slice(6).trim();
-          }
-          if (!dataLine) continue;
-          let payload = dataLine;
-          try { payload = JSON.parse(dataLine); } catch { /* raw */ }
-          if (eventType === 'log')        _apmAppendLog(payload);
-          else if (eventType === 'done')  success = true;
-          else if (eventType === 'error') lastErr = payload;
-        }
-      }
-      if (success) _apmAfterSuccess();
-      else _apmShowError('apm-name', lastErr || 'init_project.py failed. Check the log above.');
-    } catch (e) {
-      _apmShowError('apm-name', 'Network error: ' + e.message);
-    } finally {
-      btn.disabled = false; btn.textContent = 'Create';
-    }
-  }
+  // Add Project modal logic now lives in /static/add-project-modal.js
+  // (shared with project.html, loaded via <script src> below). No per-page copy.
 
   // ── Projects render ────────────────────────────────────────────────────────
 
@@ -1698,6 +1540,9 @@
     });
   });
 </script>
+
+<!-- Shared Add Project modal logic (single source of truth for home + project) -->
+<script src="/static/add-project-modal.js"></script>
 
 </body>
 </html>

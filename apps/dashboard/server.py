@@ -937,6 +937,7 @@ class InitProjectBody(BaseModel):
     projects_dir: str = "~/dev"
     nested: bool = False
     skip_uat: bool = False
+    from_existing: bool = False
 
 
 class RemoveProjectBody(BaseModel):
@@ -3170,6 +3171,8 @@ async def init_project(body: InitProjectBody):
         cmd.append("--nested")
     if body.skip_uat:
         cmd.append("--skip-uat")
+    if body.from_existing:
+        cmd.append("--from-existing")
 
     async def _stream():
         proc = await asyncio.create_subprocess_exec(

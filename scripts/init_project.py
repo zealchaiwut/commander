@@ -277,11 +277,15 @@ def step1_init_repo(
     projects_dir: Path,
     visibility: str,
     nested: bool = False,
+    from_existing: bool = False,
 ) -> Path:
-    """Create local repo + push to GitHub.
+    """Create local repo + push to GitHub, or clone an existing one.
 
     Flat layout:  repo lives at projects_dir/repo_name/
     Nested layout: repo lives at projects_dir/repo_name/main/
+    When ``from_existing`` is set, the repo already exists on GitHub (e.g. a
+    deleted-then-re-added project): clone it instead of git-init + create, so
+    the real history and content come down rather than a divergent fresh init.
     Returns the path of the git working directory (main clone).
     """
     full_repo = f"{owner}/{repo_name}"
@@ -293,6 +297,13 @@ def step1_init_repo(
 
     if repo_dir.exists():
         info(f"already exists — skipping")
+        return repo_dir
+
+    if from_existing:
+        # Clone the existing GitHub repo into the (main) working dir.
+        repo_dir.parent.mkdir(parents=True, exist_ok=True)
+        _run("gh", "repo", "clone", full_repo, str(repo_dir))
+        info(f"cloned existing repo {full_repo}")
         return repo_dir
 
     repo_dir.mkdir(parents=True)
@@ -840,6 +851,7 @@ def main() -> None:
     parser.add_argument("--icon", default="ti-folder", help="Icon class (default: ti-folder)")
     parser.add_argument("--color", default=None, help="Color (default: cycled by project count)")
     parser.add_argument("--projects-dir", default=str(DEFAULT_PROJECTS_DIR), help="Base projects directory (default: ~/dev)")
+    parser.add_argument("--from-existing", action="store_true", help="Clone an existing GitHub repo instead of creating a new one (for re-adding a repo)")
     parser.add_argument("--tester-app-subdir", default="", help="Tester app subdirectory (default: '')")
     parser.add_argument(
         "--skip-uat",
@@ -958,7 +970,7 @@ def main() -> None:
 
     # ── Step 1: Create local repo + GitHub ────────────────────────────────────
     step(1, TOTAL_STEPS, f"Creating local repo and GitHub repo for {owner}/{repo_name}...")
-    repo_dir = step1_init_repo(owner, repo_name, projects_dir, args.visibility, nested=nested)
+    repo_dir = step1_init_repo(owner, repo_name, projects_dir, args.visibility, nested=nested, from_existing=args.from_existing)
     info("done")
 
     # ── Step 2: develop branch ────────────────────────────────────────────────

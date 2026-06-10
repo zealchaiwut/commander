@@ -1236,6 +1236,14 @@
     .ps-scaffold-dialog-list { font-size: 12px; font-family: var(--mono); margin: 0 0 18px; padding: 0 0 0 16px; }
     .ps-scaffold-dialog-list li { padding: 2px 0; color: var(--text-sub); }
     .ps-scaffold-dialog-btns { display: flex; justify-content: flex-end; gap: 10px; }
+    /* Danger zone (delete project) */
+    .ps-danger-card { border-color: color-mix(in srgb, var(--red) 35%, var(--border)); }
+    .ps-danger-icon { color: var(--red); }
+    .ps-btn-danger { background: var(--red); color: #fff; border: 1px solid var(--red); }
+    .ps-btn-danger:hover:not(:disabled) { background: color-mix(in srgb, var(--red) 88%, #000); }
+    .ps-btn-danger:disabled { opacity: .5; cursor: not-allowed; }
+    .ps-input { padding: 7px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--text); font-size: 13px; font-family: inherit; margin-bottom: 14px; }
+    .ps-input:focus { outline: none; border-color: var(--red); }
     .ps-scaffold-confirm-btn { background: var(--text); color: var(--surface); border: none; padding: 7px 16px; border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer; }
     .ps-scaffold-cancel-btn { border: 1px solid var(--border); background: var(--surface); color: var(--text); padding: 7px 13px; border-radius: 6px; font-size: 13px; cursor: pointer; }
     .ps-scaffold-cancel-btn:hover { background: var(--surface-hover); }
@@ -5390,18 +5398,11 @@
           <i class="ti ti-rocket"></i>Deploy
         </button>
         <!-- Analytics dropdown group -->
-        <div class="stab-group" id="stab-group-analytics">
-          <button class="stab stab-trigger" role="tab" aria-haspopup="true"
-                  onclick="toggleStabDropdown('analytics', event)">
-            <i class="ti ti-chart-bar"></i>Analytics<i class="ti ti-chevron-down stab-caret"></i>
-          </button>
-          <div class="stab-dropdown" id="stab-dropdown-analytics">
-            <button class="stab" role="tab" id="stab-metrics"
-                    aria-selected="false" onclick="switchTab('metrics')">
-              <i class="ti ti-chart-line"></i>Analytics
-            </button>
-          </div>
-        </div>
+        <!-- Analytics — single tab, promoted to the nav root (issue: one item left) -->
+        <button class="stab" role="tab" id="stab-metrics"
+                aria-selected="false" onclick="switchTab('metrics')">
+          <i class="ti ti-chart-bar"></i>Analytics
+        </button>
         <!-- Notes moved to the global left sidebar (issue #717) -->
         <!-- Settings (top level) -->
         <button class="stab" role="tab" id="stab-settings"
@@ -6555,6 +6556,37 @@
             </button>
           </div>
 
+          <!-- Danger zone: delete project -->
+          <div class="proj-settings-card ps-danger-card">
+            <div class="proj-settings-card-head">
+              <i class="ti ti-alert-triangle proj-settings-card-icon ps-danger-icon"></i>
+              <div>
+                <div class="proj-settings-card-title">Danger zone</div>
+                <div class="proj-settings-card-sub">Remove this project from Commander and delete its local folders. The GitHub repo is not touched.</div>
+              </div>
+            </div>
+            <div class="proj-settings-card-body">
+              <button class="ps-btn ps-btn-danger" onclick="psDeleteOpen()">
+                <i class="ti ti-trash"></i> Delete project
+              </button>
+            </div>
+          </div>
+
+          <!-- Delete confirmation dialog (type-to-confirm) -->
+          <div class="ps-scaffold-overlay" id="ps-delete-confirm">
+            <div class="ps-scaffold-dialog">
+              <h3 style="color:var(--red)">Delete this project?</h3>
+              <p>This removes <strong id="ps-delete-name"></strong> from Commander and deletes its local clone folders on this machine. The GitHub repo is left untouched. This cannot be undone.</p>
+              <p style="font-size:13px;color:var(--text-muted)">Type <strong id="ps-delete-slug"></strong> to confirm:</p>
+              <input class="ps-input" id="ps-delete-input" type="text" autocomplete="off"
+                     oninput="psDeleteValidate()" placeholder="project slug" style="width:100%">
+              <div class="ps-scaffold-dialog-btns">
+                <button class="ps-scaffold-cancel-btn" onclick="psDeleteClose()">Cancel</button>
+                <button class="ps-scaffold-confirm-btn ps-btn-danger" id="ps-delete-confirm-btn" onclick="psDeleteConfirm()" disabled>Delete project</button>
+              </div>
+            </div>
+          </div>
+
         </div><!-- /proj-settings-wrap -->
       </div><!-- /pane-settings -->
 
@@ -7273,172 +7305,8 @@ function buildSidebar(projects) {
   }).join('');
 }
 
-// ========================================================================
-// Add Project modal — CANONICAL JS. Keep BYTE-IDENTICAL with the copy in
-// home-preview.html. Two tabs: "Create new project" (streams init_project.py)
-// and "Add existing repo" (POST /api/projects). Replaced the legacy
-// index.html/app.js modal (issue #425).
-// ========================================================================
-let _apmTab = 'init';
-
-function openAddProjectModal() {
-  document.getElementById('apm-repo').value         = '';
-  document.getElementById('apm-icon').value         = '';
-  document.getElementById('apm-color').value        = '';
-  document.getElementById('apm-name').value         = '';
-  document.getElementById('apm-projects-dir').value = '~/dev';
-  document.getElementById('apm-nested').checked     = false;
-  document.getElementById('apm-skip-uat').checked   = false;
-  _apmClearError('apm-repo');
-  _apmClearError('apm-name');
-  _apmResetLog();
-  document.getElementById('apm-backdrop').classList.remove('hidden');
-  document.getElementById('apm-modal').classList.remove('hidden');
-  apmSwitchTab(_apmTab);
-}
-
-function closeAddProjectModal() {
-  document.getElementById('apm-backdrop').classList.add('hidden');
-  document.getElementById('apm-modal').classList.add('hidden');
-}
-
-function apmSwitchTab(tab) {
-  _apmTab = tab;
-  const init = tab === 'init';
-  document.getElementById('apm-init-form').classList.toggle('hidden', !init);
-  document.getElementById('apm-add-form').classList.toggle('hidden', init);
-  document.getElementById('apm-tab-init').classList.toggle('active', init);
-  document.getElementById('apm-tab-add').classList.toggle('active', !init);
-  document.getElementById('apm-init-submit').classList.toggle('hidden', !init);
-  document.getElementById('apm-add-submit').classList.toggle('hidden', init);
-  document.getElementById(init ? 'apm-name' : 'apm-repo').focus();
-}
-
-function _apmErrId(inputId) { return inputId === 'apm-name' ? 'apm-init-error' : 'apm-repo-error'; }
-
-function _apmClearError(inputId) {
-  const err = document.getElementById(_apmErrId(inputId));
-  const inp = document.getElementById(inputId);
-  if (err) { err.textContent = ''; err.classList.add('hidden'); }
-  if (inp) inp.classList.remove('error');
-}
-
-function _apmShowError(inputId, msg) {
-  const err = document.getElementById(_apmErrId(inputId));
-  const inp = document.getElementById(inputId);
-  if (err) { err.textContent = msg; err.classList.remove('hidden'); }
-  if (inp) inp.classList.add('error');
-}
-
-function _apmResetLog() {
-  const w = document.getElementById('apm-log-wrap');
-  const l = document.getElementById('apm-log');
-  if (w) w.classList.add('hidden');
-  if (l) l.textContent = '';
-}
-
-function _apmAppendLog(line) {
-  const w = document.getElementById('apm-log-wrap');
-  const l = document.getElementById('apm-log');
-  if (w) w.classList.remove('hidden');
-  if (l) { l.textContent += line + '\n'; l.scrollTop = l.scrollHeight; }
-}
-
-function _apmAfterSuccess() {
-  closeAddProjectModal();
-  if (typeof loadHomeData === 'function') loadHomeData(true);
-}
-
-async function apmSubmitAdd(event) {
-  event.preventDefault();
-  _apmClearError('apm-repo');
-
-  const repoUrl = document.getElementById('apm-repo').value.trim();
-  const icon    = document.getElementById('apm-icon').value.trim()  || 'ti-folder';
-  const color   = document.getElementById('apm-color').value.trim() || 'gray';
-
-  if (!repoUrl) { _apmShowError('apm-repo', 'GitHub repo URL is required.'); return; }
-
-  const btn = document.getElementById('apm-add-submit');
-  btn.disabled = true; btn.textContent = 'Adding…';
-  try {
-    const res = await fetch('/api/projects', {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ repo_url: repoUrl, icon, color }),
-    });
-    if (res.status === 409) { const d = await res.json().catch(() => ({})); _apmShowError('apm-repo', d.detail || 'Project already added.'); return; }
-    if (res.status === 422) { const d = await res.json().catch(() => ({})); _apmShowError('apm-repo', d.detail || 'Invalid repo or repo not found on GitHub.'); return; }
-    if (!res.ok)            { const d = await res.json().catch(() => ({})); _apmShowError('apm-repo', d.detail || 'Error ' + res.status); return; }
-    _apmAfterSuccess();
-  } catch (e) {
-    _apmShowError('apm-repo', 'Network error: ' + e.message);
-  } finally {
-    btn.disabled = false; btn.textContent = 'Add Project';
-  }
-}
-
-async function apmSubmitInit(event) {
-  event.preventDefault();
-  _apmClearError('apm-name');
-  _apmResetLog();
-
-  const repoName    = document.getElementById('apm-name').value.trim();
-  const projectsDir = document.getElementById('apm-projects-dir').value.trim() || '~/dev';
-  const nested      = document.getElementById('apm-nested').checked;
-  const skipUat     = document.getElementById('apm-skip-uat').checked;
-
-  if (!repoName) { _apmShowError('apm-name', 'Project name is required.'); return; }
-  if (repoName.includes('/') || repoName.includes('\\')) {
-    _apmShowError('apm-name', 'Project name must not contain path separators (/ or \\).');
-    return;
-  }
-
-  const btn = document.getElementById('apm-init-submit');
-  btn.disabled = true; btn.textContent = 'Creating…';
-  try {
-    const res = await fetch('/api/projects/init', {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ repo_name: repoName, projects_dir: projectsDir, nested, skip_uat: skipUat }),
-    });
-    if (res.status === 400 || res.status === 409 || res.status === 422) {
-      const d = await res.json().catch(() => ({})); _apmShowError('apm-name', d.detail || 'Error ' + res.status); return;
-    }
-    if (!res.ok) { const d = await res.json().catch(() => ({})); _apmShowError('apm-name', d.detail || 'Server error ' + res.status); return; }
-
-    // Stream the init_project.py SSE log.
-    const reader  = res.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '', success = false, lastErr = '';
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const chunks = buffer.split('\n\n');
-      buffer = chunks.pop();
-      for (const chunk of chunks) {
-        let eventType = 'log', dataLine = '';
-        for (const l of chunk.split('\n')) {
-          if (l.startsWith('event: ')) eventType = l.slice(7).trim();
-          if (l.startsWith('data: '))  dataLine  = l.slice(6).trim();
-        }
-        if (!dataLine) continue;
-        let payload = dataLine;
-        try { payload = JSON.parse(dataLine); } catch { /* raw */ }
-        if (eventType === 'log')        _apmAppendLog(payload);
-        else if (eventType === 'done')  success = true;
-        else if (eventType === 'error') lastErr = payload;
-      }
-    }
-    if (success) _apmAfterSuccess();
-    else _apmShowError('apm-name', lastErr || 'init_project.py failed. Check the log above.');
-  } catch (e) {
-    _apmShowError('apm-name', 'Network error: ' + e.message);
-  } finally {
-    btn.disabled = false; btn.textContent = 'Create';
-  }
-}
+// Add Project modal logic now lives in the shared /static/add-project-modal.js
+// (loaded via <script src> near </body>). Removed the per-page duplicate.
 
 // ── Project header ────────────────────────────────────────────────────────────
 function updateProjectHeader(proj) {
@@ -17584,28 +17452,6 @@ function _gssRender(data) {
       </div>`;
     }).join('');
 
-  const EST_SIZES = [
-    { key: 'estimation_s_minutes',  label: 'S',  cls: 'gss-sz-S'  },
-    { key: 'estimation_m_minutes',  label: 'M',  cls: 'gss-sz-M'  },
-    { key: 'estimation_l_minutes',  label: 'L',  cls: 'gss-sz-L'  },
-    { key: 'estimation_xl_minutes', label: 'XL', cls: 'gss-sz-XL' },
-  ];
-  const estRows = EST_SIZES.map(s => `
-    <tr>
-      <td><span class="gss-sz-badge ${s.cls}">${s.label}</span></td>
-      <td><input class="gss-inp gss-inp-num" type="number" min="1" data-gss-key="${s.key}" value="${data[s.key] ?? ''}"> <span class="gss-ro">min</span></td>
-    </tr>`).join('');
-
-  const bufferRows = `
-    <div class="gss-row">
-      <div class="gss-label">Buffer<span class="hint">added to every estimate</span></div>
-      <div class="gss-control"><input class="gss-inp gss-inp-num" type="number" min="0" max="100" data-gss-key="estimation_buffer_pct" value="${data.estimation_buffer_pct ?? ''}"> <span class="gss-ro">%</span></div>
-    </div>
-    <div class="gss-row">
-      <div class="gss-label">Thin-AC buffer<span class="hint">used when AC is sparse</span></div>
-      <div class="gss-control"><input class="gss-inp gss-inp-num" type="number" min="0" max="100" data-gss-key="estimation_thin_ac_buffer_pct" value="${data.estimation_thin_ac_buffer_pct ?? ''}"> <span class="gss-ro">%</span></div>
-    </div>`;
-
   const SECRETS = [
     { key: 'github_token_set',  label: 'GITHUB_TOKEN'  },
     { key: 'database_url_set',  label: 'DATABASE_URL'  },
@@ -17656,20 +17502,6 @@ function _gssRender(data) {
             </select>
           </div>
         </div>
-      </div>
-    </div>
-
-    <div class="gss-card">
-      <div class="gss-card-head">
-        <i class="ti ti-ruler-measure" style="color:var(--text-muted)"></i>
-        <div><div class="gss-card-title">Estimation Defaults</div><div class="gss-card-sub">Size → time mapping used by the Estimator (global default; projects may override)</div></div>
-      </div>
-      <div class="gss-card-body">
-        <table class="gss-est-table">
-          <thead><tr><th style="width:80px">Size</th><th style="width:160px">Typical time</th></tr></thead>
-          <tbody>${estRows}</tbody>
-        </table>
-        <div style="margin-top:14px">${bufferRows}</div>
       </div>
     </div>
 
@@ -20139,7 +19971,6 @@ document.addEventListener('keydown', function(e) {
       <label class="apm-check"><input type="checkbox" id="apm-nested"> Nested layout (--nested)</label>
       <label class="apm-check"><input type="checkbox" id="apm-skip-uat"> Skip UAT clone (--skip-uat)</label>
     </div>
-    <div class="apm-log-wrap hidden" id="apm-log-wrap"><pre class="apm-log" id="apm-log"></pre></div>
   </form>
 
   <!-- Add existing repo (POST /api/projects) -->
@@ -20157,12 +19988,22 @@ document.addEventListener('keydown', function(e) {
       <label class="apm-label" for="apm-color">Color <span class="apm-hint">(blue, green, purple, amber, red, pink, cyan, gray)</span></label>
       <input class="apm-input" id="apm-color" type="text" placeholder="gray">
     </div>
+    <div class="apm-field apm-checks">
+      <label class="apm-check"><input type="checkbox" id="apm-add-nested" onchange="apmAddNestedToggle()"> Nested layout (--nested)</label>
+      <label class="apm-check"><input type="checkbox" id="apm-add-skip-uat"> Skip UAT clone (--skip-uat)</label>
+    </div>
+    <div class="apm-hint" style="margin:-4px 0 4px">Check <strong>Nested layout</strong> to clone the repo into <code>~/dev/&lt;name&gt;</code> (re-creates local folders, e.g. re-adding a deleted project). Leave off to just track an already-cloned repo.</div>
+    <div class="apm-field hidden" id="apm-add-dir-field">
+      <label class="apm-label" for="apm-add-projects-dir">Projects directory</label>
+      <input class="apm-input" id="apm-add-projects-dir" type="text" placeholder="~/dev" value="~/dev" autocomplete="off">
+    </div>
   </form>
+
+  <div class="apm-log-wrap hidden" id="apm-log-wrap"><pre class="apm-log" id="apm-log"></pre></div>
 
   <div class="apm-footer">
     <button type="button" class="apm-btn-ghost" onclick="closeAddProjectModal()">Cancel</button>
-    <button type="submit" class="apm-btn-primary" id="apm-init-submit" form="apm-init-form">Create</button>
-    <button type="submit" class="apm-btn-primary hidden" id="apm-add-submit" form="apm-add-form">Add Project</button>
+    <button type="button" class="apm-btn-primary" id="apm-submit" onclick="apmSubmit()">Create</button>
   </div>
 </div>
 
@@ -23115,6 +22956,63 @@ function scaffoldConfirmClose() {
   if (overlay) overlay.classList.remove('open');
 }
 
+// ── Delete project (Danger zone) ──────────────────────────────────────────────
+function _psCurrentRepo() {
+  // _cachedFullRepo entries may be a project object or the repo string; fall
+  // back to the repo shown in the settings header.
+  var c = (_cachedFullRepo || {})[_slug];
+  if (typeof c === 'string' && c.indexOf('/') !== -1) return c;
+  if (c && c.repo) return c.repo;
+  var el = document.getElementById('ps-repo-display');
+  var t = el ? el.textContent.trim() : '';
+  return t.indexOf('/') !== -1 ? t : null;
+}
+
+function psDeleteOpen() {
+  var repo = _psCurrentRepo();
+  var c = (_cachedFullRepo || {})[_slug];
+  var name = (c && c.name) || _slug;
+  document.getElementById('ps-delete-name').textContent = name;
+  document.getElementById('ps-delete-slug').textContent = _slug;
+  var inp = document.getElementById('ps-delete-input');
+  inp.value = '';
+  document.getElementById('ps-delete-confirm-btn').disabled = true;
+  document.getElementById('ps-delete-confirm').classList.add('open');
+  inp.focus();
+}
+
+function psDeleteValidate() {
+  var typed = (document.getElementById('ps-delete-input').value || '').trim();
+  document.getElementById('ps-delete-confirm-btn').disabled = (typed !== _slug);
+}
+
+function psDeleteClose() {
+  document.getElementById('ps-delete-confirm').classList.remove('open');
+}
+
+async function psDeleteConfirm() {
+  var repo = _psCurrentRepo();
+  if (!repo) { alert('Could not resolve the project repo.'); return; }
+  var btn = document.getElementById('ps-delete-confirm-btn');
+  btn.disabled = true; btn.textContent = 'Deleting…';
+  try {
+    var resp = await fetch('/api/projects/' + repo, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      // Local folders deleted; GitHub repo left untouched (the operator handles GitHub).
+      body: JSON.stringify({ delete_local_folders: true, delete_github_repo: false })
+    });
+    if (!resp.ok) {
+      var d = await resp.json().catch(function() { return {}; });
+      throw new Error(d.detail || ('HTTP ' + resp.status));
+    }
+    window.location.href = '/';
+  } catch (e) {
+    btn.disabled = false; btn.textContent = 'Delete project';
+    alert('Delete failed: ' + e.message);
+  }
+}
+
 async function scaffoldApplyConfirm() {
   scaffoldConfirmClose();
   var slug = window._currentProjectSlug || '';
@@ -23139,6 +23037,9 @@ async function scaffoldApplyConfirm() {
   }
 }
 </script>
+
+<!-- Shared Add Project modal logic (single source of truth for home + project) -->
+<script src="/static/add-project-modal.js"></script>
 
 </body>
 </html>

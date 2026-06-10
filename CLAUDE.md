@@ -128,7 +128,7 @@ hand-edit inside the markers.
 **Enforce it with the scaffold script:**
 - New projects get this structure stamped into the initial commit by
   `init_project.py`.
-- For an existing project: `python3 scripts/scaffold_docs.py --project <path>`
+- For an existing project: `python3 scripts/scaffold_project.py --project <path>`
   creates any missing standard files from template and never overwrites
   existing content, so it is always safe to re-run. Add `--check` to report
   drift (exit 1 if anything is missing) without writing. Stray top-level docs

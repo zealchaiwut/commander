@@ -145,7 +145,7 @@ try:
     _SCAFFOLD_SCRIPTS_DIR = Path(__file__).parent.parent.parent / "scripts"
     if str(_SCAFFOLD_SCRIPTS_DIR) not in sys.path:
         sys.path.insert(0, str(_SCAFFOLD_SCRIPTS_DIR))
-    from scaffold_docs import scaffold_data as _scaffold_data
+    from scaffold_project import scaffold_data as _scaffold_data
     _SCAFFOLD_AVAILABLE = True
 except ImportError:
     _scaffold_data = None  # type: ignore[assignment]
@@ -2980,12 +2980,12 @@ def _scaffold_resolve_working_clone(slug: str) -> tuple[str, Path]:
 def get_scaffold_check(slug: str):
     """Check whether the project's working clone has the standard docs structure.
 
-    Runs scaffold_docs --check (no writes). Returns:
+    Runs scaffold_project --check (no writes). Returns:
       { compliant, missing, stray, project_root }
     where missing/stray are lists of relative paths.
     """
     if not _SCAFFOLD_AVAILABLE:
-        raise HTTPException(status_code=503, detail="scaffold_docs module unavailable")
+        raise HTTPException(status_code=503, detail="scaffold_project module unavailable")
     repo, working_clone = _scaffold_resolve_working_clone(slug)
     project_name = working_clone.name
     if project_name in ("main", "prd") and working_clone.parent != working_clone:
@@ -3013,7 +3013,7 @@ def post_scaffold_apply(slug: str, body: _ScaffoldApplyBody):
     if not body.confirm:
         raise HTTPException(status_code=400, detail="confirm must be true to apply scaffold")
     if not _SCAFFOLD_AVAILABLE:
-        raise HTTPException(status_code=503, detail="scaffold_docs module unavailable")
+        raise HTTPException(status_code=503, detail="scaffold_project module unavailable")
     repo, working_clone = _scaffold_resolve_working_clone(slug)
     project_name = working_clone.name
     if project_name in ("main", "prd") and working_clone.parent != working_clone:

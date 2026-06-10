@@ -1079,6 +1079,16 @@
       padding: 10px 12px; margin: 4px 0 12px; white-space: pre-wrap;
       word-break: break-word; max-height: 220px; overflow: auto;
     }
+    /* Render deploy status pill (issue #725) */
+    .ps-deploy-status {
+      font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+      padding: 3px 10px; border-radius: 999px;
+      background: var(--surface-2, #1e293b); color: var(--text-sub);
+    }
+    .ps-deploy-status--queued { background: var(--surface-2, #1e293b); color: var(--text-sub); }
+    .ps-deploy-status--building { background: var(--amber-bg); color: var(--amber); }
+    .ps-deploy-status--live { background: var(--green-bg); color: var(--green); }
+    .ps-deploy-status--failed { background: var(--red-bg, #3f1d1d); color: var(--error, #ef4444); }
 
     /* ── Scaffold docs card (issue #681) ── */
     .ps-scaffold-actions { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
@@ -22061,29 +22071,41 @@ function deployActionsLoad() {
     .catch(function() {});
 }
 
+// host (local|render) per env, populated on render so action handlers can branch.
+var _deployEnvHost = {};
+
 function _renderDeployActions(cfg) {
   var body = document.getElementById('ps-deploy-body');
   if (!body) return;
 
-  var locals = Object.keys(cfg).filter(function(env) {
-    return (cfg[env] || {}).host === 'local';
+  _deployEnvHost = {};
+  var envs = Object.keys(cfg).filter(function(env) {
+    var h = (cfg[env] || {}).host;
+    return h === 'local' || h === 'render';
   });
 
-  if (!locals.length) {
+  if (!envs.length) {
     body.innerHTML = '<div class="ps-machine-note"><i class="ti ti-info-circle"></i>'
-      + ' No local environments configured. Deploy actions apply to host=local envs only.</div>';
+      + ' No deployable environments configured. Deploy actions apply to host=local or host=render envs.</div>';
     return;
   }
 
   var html = '';
-  locals.forEach(function(env) {
+  var anyRender = false;
+  envs.forEach(function(env) {
     var entry = cfg[env] || {};
-    var branch = entry.branch || '';
+    var host = entry.host;
+    _deployEnvHost[env] = host;
+    var meta = host === 'render'
+      ? ' <span style="color:var(--text-muted);font-weight:400">(render)</span>'
+      : (entry.branch ? ' <span style="color:var(--text-muted);font-weight:400">(' + _escAttr(entry.branch) + ')</span>' : '');
+    if (host === 'render') anyRender = true;
     html += '<div class="ps-row" data-deploy-row="' + _escAttr(env) + '">'
-      + '<div class="ps-row-label">' + env
-      + (branch ? ' <span style="color:var(--text-muted);font-weight:400">(' + _escAttr(branch) + ')</span>' : '')
-      + '</div>'
+      + '<div class="ps-row-label">' + env + meta + '</div>'
       + '<div class="ps-row-control" style="gap:8px">'
+      + (host === 'render'
+          ? '<span id="ps-deploy-status-' + _escAttr(env) + '" class="ps-deploy-status" style="display:none"></span>'
+          : '')
       + '<button class="ps-btn" type="button" aria-label="Deploy ' + _escAttr(env) + '"'
       + ' onclick="envDeploy(\'' + _escAttr(env) + '\')">'
       + '<i class="ti ti-rocket"></i> Deploy</button>'
@@ -22096,9 +22118,68 @@ function _renderDeployActions(cfg) {
   });
 
   html += '<div class="ps-machine-note"><i class="ti ti-info-circle"></i>'
-    + ' Deploy runs <code>git pull --ff-only</code> then restarts the service. Pull-only — never merges or pushes.</div>';
+    + ' Local deploy runs <code>git pull --ff-only</code> then restarts the service (pull-only — never merges or pushes).'
+    + (anyRender ? ' Render deploys are triggered via the Render API and tracked live below.' : '')
+    + '</div>';
 
   body.innerHTML = html;
+}
+
+// Per-env poll timers so a re-deploy supersedes a prior poll loop.
+var _deployPollTimers = {};
+
+function _setDeployStatus(env, status) {
+  var el = document.getElementById('ps-deploy-status-' + env);
+  if (!el) return;
+  el.style.display = 'inline-block';
+  el.textContent = status;
+  el.className = 'ps-deploy-status ps-deploy-status--' + status;
+}
+
+/** Poll the Render deploy-status endpoint until live/failed (issue #725). */
+function _renderDeployPoll(env) {
+  var slug = (window._currentProjectSlug || '');
+  if (!slug) return;
+  if (_deployPollTimers[env]) clearTimeout(_deployPollTimers[env]);
+
+  var attempts = 0;
+  var MAX_ATTEMPTS = 60;   // ~3 min at 3s intervals
+  var INTERVAL_MS = 3000;
+
+  function tick() {
+    attempts += 1;
+    fetch('/api/projects/' + encodeURIComponent(slug) + '/environments/'
+          + encodeURIComponent(env) + '/deploy-status')
+      .then(function(r) {
+        return r.json().then(function(data) { return { ok: r.ok, status: r.status, data: data }; });
+      })
+      .then(function(res) {
+        if (!res.ok) {
+          _setDeployOut(env, 'Status error (' + res.status + '): '
+            + ((res.data && res.data.detail) || 'error'), true);
+          return;
+        }
+        var st = (res.data && res.data.status) || 'queued';
+        _setDeployStatus(env, st);
+        if (st === 'live') {
+          _setDeployOut(env, 'Deploy is live ✓', false);
+          return;
+        }
+        if (st === 'failed') {
+          _setDeployOut(env, 'Deploy failed.', true);
+          return;
+        }
+        if (attempts < MAX_ATTEMPTS) {
+          _deployPollTimers[env] = setTimeout(tick, INTERVAL_MS);
+        }
+      })
+      .catch(function() {
+        if (attempts < MAX_ATTEMPTS) {
+          _deployPollTimers[env] = setTimeout(tick, INTERVAL_MS);
+        }
+      });
+  }
+  tick();
 }
 
 function _deployOut(env) {
@@ -22129,6 +22210,14 @@ function envDeploy(env) {
         return;
       }
       var d = res.data || {};
+      // host=render: no git output — show the live status and poll until done.
+      if (_deployEnvHost[env] === 'render' || d.host === 'render') {
+        var st = d.status || 'queued';
+        _setDeployStatus(env, st);
+        _setDeployOut(env, 'Deploy triggered on Render — tracking status…', false);
+        _renderDeployPoll(env);
+        return;
+      }
       var out = (d.pull_output || '').trim();
       var lines = out ? out + '\n' : '';
       lines += 'HEAD: ' + (d.head || '(unknown)');

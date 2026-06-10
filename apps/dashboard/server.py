@@ -2319,6 +2319,50 @@ def put_project_deploy_config(slug: str, body: dict):
 # ── Local deploy / restart actions (issue #723) ──────────────────────────────
 
 from services.sprint_manager import deploy_actions as _deploy_actions
+from services.sprint_manager import render_actions as _render_actions
+
+
+def _render_deploy_environment(entry: dict, env: str) -> dict:
+    """Trigger a new Render deploy for a host=render env (issue #725).
+
+    Validates render_service_id/render_api_key (400 before any Render call),
+    POSTs to the Render deploys endpoint server-side, and returns a status
+    snapshot. The render_api_key is never echoed back to the caller.
+    """
+    try:
+        service_id, api_key = _render_actions.require_render_target(entry)
+    except _render_actions.RenderActionError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    try:
+        _status, payload = _render_actions.call_render(
+            "POST", _render_actions.deploy_url(service_id), api_key
+        )
+    except _render_actions.RenderApiError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.message)
+    deploy = payload.get("deploy", payload) if isinstance(payload, dict) else {}
+    raw_status = deploy.get("status") if isinstance(deploy, dict) else None
+    return {
+        "ok": True,
+        "env": env,
+        "host": "render",
+        "action": "deploy",
+        "status": _render_actions.normalize_status(raw_status),
+    }
+
+
+def _render_restart_environment(entry: dict, env: str) -> dict:
+    """Restart a host=render service via the Render restart endpoint (issue #725)."""
+    try:
+        service_id, api_key = _render_actions.require_render_target(entry)
+    except _render_actions.RenderActionError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    try:
+        _render_actions.call_render(
+            "POST", _render_actions.restart_url(service_id), api_key
+        )
+    except _render_actions.RenderApiError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.message)
+    return {"ok": True, "env": env, "host": "render", "action": "restart"}
 
 
 def _merged_deploy_config(slug: str, repo: str) -> dict:
@@ -2401,6 +2445,11 @@ def deploy_environment(slug: str, env: str):
     repo = _resolve_project_slug(slug)
     merged = _merged_deploy_config(slug, repo)
     entry = _deploy_actions.get_env_entry(merged, env)
+
+    # host=render → trigger a Render deploy server-side (issue #725).
+    if _render_actions.is_render_host(entry):
+        return _render_deploy_environment(entry, env)
+
     try:
         working_dir, branch = _deploy_actions.require_deploy_target(entry)
     except _deploy_actions.DeployActionError as exc:
@@ -2457,10 +2506,50 @@ def restart_environment(slug: str, env: str):
     entry = _deploy_actions.get_env_entry(merged, env)
     if entry is None:
         raise HTTPException(status_code=400, detail=f"No deploy config for environment '{env}'")
+
+    # host=render → restart the Render service server-side (issue #725).
+    if _render_actions.is_render_host(entry):
+        return _render_restart_environment(entry, env)
+
     result = _restart_environment(entry)
     if result.get("detached"):
         return JSONResponse(status_code=202, content={"ok": True, "env": env, **result})
     return {"ok": True, "env": env, **result}
+
+
+@app.get("/api/projects/{slug}/environments/{env}/deploy-status")
+def environment_deploy_status(slug: str, env: str):
+    """Return the normalized latest-deploy status for a host=render env (issue #725).
+
+    Polls ``GET /v1/services/{id}/deploys?limit=1`` server-side and returns
+    ``{"status": "queued|building|live|failed"}``. Missing render config → 400;
+    a 401/404 from Render → 502 with a specific message. Only host=render is
+    supported (local envs have no remote deploy status to poll).
+    """
+    repo = _resolve_project_slug(slug)
+    merged = _merged_deploy_config(slug, repo)
+    entry = _deploy_actions.get_env_entry(merged, env)
+    if not _render_actions.is_render_host(entry):
+        raise HTTPException(
+            status_code=400,
+            detail="Deploy status is only available for host=render environments",
+        )
+    try:
+        service_id, api_key = _render_actions.require_render_target(entry)
+    except _render_actions.RenderActionError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    try:
+        _status, payload = _render_actions.call_render(
+            "GET", _render_actions.status_url(service_id), api_key
+        )
+    except _render_actions.RenderApiError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.message)
+    return {
+        "ok": True,
+        "env": env,
+        "host": "render",
+        "status": _render_actions.latest_status_from_payload(payload),
+    }
 
 
 # ── Settings sync (issue #644) ───────────────────────────────────────────────

@@ -7321,6 +7321,10 @@ function openAddProjectModal() {
   document.getElementById('apm-projects-dir').value = '~/dev';
   document.getElementById('apm-nested').checked     = false;
   document.getElementById('apm-skip-uat').checked   = false;
+  document.getElementById('apm-add-nested').checked = false;
+  document.getElementById('apm-add-projects-dir').value = '~/dev';
+  document.getElementById('apm-add-dir-field').classList.add('hidden');
+  document.getElementById('apm-add-submit').textContent = 'Add Project';
   _apmClearError('apm-repo');
   _apmClearError('apm-name');
   _apmResetLog();
@@ -7381,6 +7385,62 @@ function _apmAfterSuccess() {
   if (typeof loadHomeData === 'function') loadHomeData(true);
 }
 
+// Derive the repo slug from a URL or owner/repo string.
+function _apmRepoNameFromUrl(url) {
+  const s = (url || '').trim().replace(/\.git$/, '').replace(/\/+$/, '');
+  const parts = s.split('/');
+  return (parts[parts.length - 1] || '').trim();
+}
+
+// Toggle the projects-dir field + button label for the nested-clone option.
+function apmAddNestedToggle() {
+  const on = document.getElementById('apm-add-nested').checked;
+  document.getElementById('apm-add-dir-field').classList.toggle('hidden', !on);
+  const btn = document.getElementById('apm-add-submit');
+  if (btn) btn.textContent = on ? 'Clone & add' : 'Add Project';
+}
+
+// Run /api/projects/init and stream its SSE log into the shared log area.
+// Returns true on success. Shared by create-new and nested-clone-existing.
+async function _apmRunInitStream(body, errFieldId) {
+  _apmResetLog();
+  const res = await fetch('/api/projects/init', {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body:    JSON.stringify(body),
+  });
+  if (res.status === 400 || res.status === 409 || res.status === 422) {
+    const d = await res.json().catch(() => ({})); _apmShowError(errFieldId, d.detail || 'Error ' + res.status); return false;
+  }
+  if (!res.ok) { const d = await res.json().catch(() => ({})); _apmShowError(errFieldId, d.detail || 'Server error ' + res.status); return false; }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '', success = false, lastErr = '';
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const chunks = buffer.split('\n\n');
+    buffer = chunks.pop();
+    for (const chunk of chunks) {
+      let eventType = 'log', dataLine = '';
+      for (const l of chunk.split('\n')) {
+        if (l.startsWith('event: ')) eventType = l.slice(7).trim();
+        if (l.startsWith('data: '))  dataLine  = l.slice(6).trim();
+      }
+      if (!dataLine) continue;
+      let payload = dataLine;
+      try { payload = JSON.parse(dataLine); } catch { /* raw */ }
+      if (eventType === 'log')        _apmAppendLog(payload);
+      else if (eventType === 'done')  success = true;
+      else if (eventType === 'error') lastErr = payload;
+    }
+  }
+  if (!success) _apmShowError(errFieldId, lastErr || 'init_project.py failed. Check the log above.');
+  return success;
+}
+
 async function apmSubmitAdd(event) {
   event.preventDefault();
   _apmClearError('apm-repo');
@@ -7392,6 +7452,28 @@ async function apmSubmitAdd(event) {
   if (!repoUrl) { _apmShowError('apm-repo', 'GitHub repo URL is required.'); return; }
 
   const btn = document.getElementById('apm-add-submit');
+
+  // Nested-clone path: clone the existing repo into main/coder/tester/uat via init_project.
+  if (document.getElementById('apm-add-nested').checked) {
+    const repoName = _apmRepoNameFromUrl(repoUrl);
+    if (!repoName) { _apmShowError('apm-repo', 'Could not parse a repo name from that URL.'); return; }
+    const projectsDir = document.getElementById('apm-add-projects-dir').value.trim() || '~/dev';
+    btn.disabled = true; btn.textContent = 'Cloning…';
+    try {
+      const ok = await _apmRunInitStream(
+        { repo_name: repoName, projects_dir: projectsDir, nested: true, from_existing: true },
+        'apm-repo',
+      );
+      if (ok) _apmAfterSuccess();
+    } catch (e) {
+      _apmShowError('apm-repo', 'Network error: ' + e.message);
+    } finally {
+      btn.disabled = false; btn.textContent = 'Clone & add';
+    }
+    return;
+  }
+
+  // Track-only path: register the repo in projects.json (no clone).
   btn.disabled = true; btn.textContent = 'Adding…';
   try {
     const res = await fetch('/api/projects', {
@@ -20135,7 +20217,6 @@ document.addEventListener('keydown', function(e) {
       <label class="apm-check"><input type="checkbox" id="apm-nested"> Nested layout (--nested)</label>
       <label class="apm-check"><input type="checkbox" id="apm-skip-uat"> Skip UAT clone (--skip-uat)</label>
     </div>
-    <div class="apm-log-wrap hidden" id="apm-log-wrap"><pre class="apm-log" id="apm-log"></pre></div>
   </form>
 
   <!-- Add existing repo (POST /api/projects) -->
@@ -20153,7 +20234,17 @@ document.addEventListener('keydown', function(e) {
       <label class="apm-label" for="apm-color">Color <span class="apm-hint">(blue, green, purple, amber, red, pink, cyan, gray)</span></label>
       <input class="apm-input" id="apm-color" type="text" placeholder="gray">
     </div>
+    <div class="apm-field apm-checks">
+      <label class="apm-check"><input type="checkbox" id="apm-add-nested" onchange="apmAddNestedToggle()"> Clone into nested layout</label>
+      <div class="apm-hint" style="margin-top:2px">Clones the repo into <code>~/dev/&lt;name&gt;/main</code> plus coder/tester/uat. Use when re-adding a deleted project. Leave off to just track the repo.</div>
+    </div>
+    <div class="apm-field hidden" id="apm-add-dir-field">
+      <label class="apm-label" for="apm-add-projects-dir">Projects directory</label>
+      <input class="apm-input" id="apm-add-projects-dir" type="text" placeholder="~/dev" value="~/dev" autocomplete="off">
+    </div>
   </form>
+
+  <div class="apm-log-wrap hidden" id="apm-log-wrap"><pre class="apm-log" id="apm-log"></pre></div>
 
   <div class="apm-footer">
     <button type="button" class="apm-btn-ghost" onclick="closeAddProjectModal()">Cancel</button>

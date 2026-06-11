@@ -335,6 +335,34 @@ def ensure_sprint_label(sprint_num: int, repo_name: str | None = None) -> None:
     invalidate(f"sprint_labels:{r}")
 
 
+def create_sprint_label_strict(sprint_num: int, repo_name: str | None = None) -> None:
+    """Create sprint-N label, raising on any failure (no swallow).
+
+    Unlike ``ensure_sprint_label``, this does not treat errors as "already
+    exists" — the verified New Sprint flow (issue #857) needs real failures
+    (rate limit, network) to propagate so it can retry and roll back.
+    """
+    r = _r(repo_name)
+    label_name = f"sprint-{sprint_num}"
+    _run("label", "create", label_name, "--repo", r,
+         "--color", "0075ca", "--description", f"Sprint {sprint_num} issues")
+    invalidate(f"sprints:{r}")
+    invalidate(f"sprint_labels:{r}")
+    invalidate(f"labels:{r}")
+
+
+def sprint_label_exists(sprint_num: int, repo_name: str | None = None) -> bool:
+    """Return True if sprint-N exists on the repo (fresh, uncached check).
+
+    Used to verify label creation actually landed (issue #857) rather than
+    trusting a clean gh exit code.
+    """
+    r = _r(repo_name)
+    label_name = f"sprint-{sprint_num}"
+    labels = _json("label", "list", "--repo", r, "--json", "name", "--limit", "300")
+    return any(lbl.get("name") == label_name for lbl in labels)
+
+
 def delete_label(label_name: str, repo_name: str | None = None) -> None:
     """Delete a GitHub label by name."""
     r = _r(repo_name)

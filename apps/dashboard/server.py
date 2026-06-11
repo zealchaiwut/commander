@@ -5284,6 +5284,8 @@ class SprintCreateBody(BaseModel):
     project: str
     sprint_number: int | None = None
     goal: str | None = None
+    # Optional tickets to apply the new sprint label to as part of creation (#857).
+    tickets: list[int] | None = None
 
 
 @app.get("/api/sprint-management/issues")
@@ -7220,53 +7222,19 @@ async def get_sprint_live_stream(sprint_label: str, project: str, request: Reque
 
 @app.post("/api/sprints/create")
 async def create_sprint_label(body: SprintCreateBody):
-    """Create a sprint-N label for a project. Uses sprint_number if provided, else auto-increments.
+    """Create a sprint-N label as a verified, retry-and-rollback sequence (#857).
 
-    Optionally accepts a goal string (min 10 chars) which is persisted to
-    .commander/sprints/<label>-goal.txt after the label is created.
+    The step orchestration (create label -> apply ticket labels -> write plan,
+    each verified, step 1 retried once, rolled back on failure) lives in
+    sprints_service; a failed step surfaces as a loud, step-named HTTP error.
     """
-    if body.goal is not None and len(body.goal.strip()) < 10:
-        raise HTTPException(400, detail="Sprint goal must be at least 10 characters")
+    from routers import sprints_service  # noqa: PLC0415 — deferred (router import cycle)
     try:
-        sprints = github_client.list_sprints(repo_name=body.project)
-        if body.sprint_number is not None:
-            if body.sprint_number in sprints:
-                raise HTTPException(409, detail=f"Sprint {body.sprint_number} already exists")
-            target_num = body.sprint_number
-        else:
-            target_num = (max(sprints) if sprints else 0) + 1
-        github_client.ensure_sprint_label(target_num, repo_name=body.project)
-        github_client.invalidate("sprints:")
-    except HTTPException:
-        raise
-    except subprocess.CalledProcessError as e:
-        raise _gh_error(e)
-    except ValueError as e:
-        raise HTTPException(400, detail=str(e))
-    sprint_label = f"sprint-{target_num}"
-    eff_goal = (body.goal or sprint_label).strip() or sprint_label
-
-    # Sprint metadata is persisted to local JSON + the durable SQLite store; the
-    # Neon write was removed in issue #758 (Neon is export-only now).
-    project_root = _project_root_path(body.project)
-    if body.goal is not None:
-        goal_path = _sprint_goal_path(project_root, sprint_label)
-        goal_path.parent.mkdir(parents=True, exist_ok=True)
-        goal_path.write_text(body.goal.strip(), encoding="utf-8")
-    _sprint_json_write(
-        _sprint_json_path(project_root, sprint_label),
-        {"label": sprint_label, "goal": eff_goal, "project": body.project, "status": "pending", "tickets": []},
-    )
-    # Write plan.json with state=planning (issue #507)
-    try:
-        _plan_json_set_state(
-            project_root,
-            sprint_label,
-            "planning",
-            created_at=datetime.now(timezone.utc).isoformat(),
+        sprint_label = sprints_service.create_sprint_verified(
+            body.project, body.sprint_number, body.goal, body.tickets,
         )
-    except Exception:
-        pass
+    except sprints_service.SprintCreationError as e:
+        raise HTTPException(status_code=e.status_code, detail=e.message)
     _emit_dashboard_event(
         project=body.project or "dashboard",
         type="sprint_created",

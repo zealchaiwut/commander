@@ -1937,6 +1937,32 @@
     .smgmt-capacity-bar-fill--green { background: var(--green); }
     .smgmt-capacity-bar-fill--amber { background: var(--amber); }
     .smgmt-capacity-bar-fill--red   { background: var(--red); }
+    /* ── Sprint capacity budget bar (issue #801) ── */
+    .cap {
+      display: flex; flex-direction: column; gap: 4px;
+      margin: 2px 0 2px;
+    }
+    .cap-bar {
+      display: flex; align-items: stretch;
+      width: 100%; height: 6px;
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: 3px; overflow: hidden;
+    }
+    .cap-seg {
+      height: 100%; min-width: 1px;
+      border-right: 1px solid var(--surface);
+    }
+    .cap-seg:last-child { border-right: none; }
+    .cap-hint {
+      font-size: 11px; color: var(--text-sub);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .cap-hint--over { color: var(--red); font-weight: 600; }
+    .cap-forecast {
+      font-size: 11px; color: var(--text-muted);
+      font-family: 'SF Mono', ui-monospace, 'Cascadia Code', monospace;
+    }
     .smgmt-capacity-overage {
       font-size: 10px; font-weight: 600; flex-shrink: 0; color: var(--red);
     }
@@ -6809,6 +6835,12 @@
                 </div>
               </div>
               <div class="ps-row">
+                <div class="ps-row-label">Sprint budget<span class="ps-hint">capacity bar target</span></div>
+                <div class="ps-row-control">
+                  <input class="ps-inp ps-num" id="ps-sprint-budget" type="number" min="1" max="10000"> <span class="ps-unit">min</span>
+                </div>
+              </div>
+              <div class="ps-row">
                 <div class="ps-row-label">Default branch</div>
                 <div class="ps-row-control">
                   <input class="ps-inp" id="ps-default-branch" type="text" style="width:160px" placeholder="develop">
@@ -8927,6 +8959,11 @@ function _smgmtRender(data) {
   // Populate capacity gauges (reads localStorage + estimate cache)
   _smgmtInitCapacityGauges(orderedLabels);
 
+  // Sprint capacity budget bars (issue #801): render now with cached data,
+  // then lazily fetch budget settings + per-size cost averages and re-render.
+  _smgmtRenderAllCapBars();
+  _smgmtEnsureCapData(false);
+
   // Re-inject selection bar if tickets are selected
   if (_smgmtSelectedIssues.size > 0) _smgmtUpdateSelectionUI();
 
@@ -10751,6 +10788,7 @@ function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent, finished) {
       <div class="smgmt-progress-bar-wrap"><div class="smgmt-progress-bar-fill" style="width:${summaryPct}%"></div></div>
       <span class="smgmt-progress-label">${summaryDone} / ${ticketCount} done</span>
     </div>
+    <div class="cap" id="smgmt-cap-${escHtml(label)}"></div>
     <div class="smgmt-sprint-goal-text" id="smgmt-goal-${escHtml(label)}" style="display:none"></div>
   </div>`;
 
@@ -12285,6 +12323,159 @@ function _smgmtUpdateCapacityGauge(label) {
 
 function _smgmtInitCapacityGauges(labels) {
   for (const label of labels) _smgmtUpdateCapacityGauge(label);
+}
+
+// ── Sprint capacity budget bar (issue #801) ────────────────────────────────
+let _smgmtCapSettings = null;   // { budget:Number, sizeMinutes:{S,M,L,XL} }
+let _smgmtCostCache = null;     // { perSize:{S:{avg_tokens}}, usdPerToken:Number|null }
+let _smgmtCapDataLoading = false;
+
+/** Configured sprint budget in minutes; falls back to the global default (180). */
+function _smgmtBudgetMinutes() {
+  return (_smgmtCapSettings && _smgmtCapSettings.budget > 0) ? _smgmtCapSettings.budget : 180;
+}
+
+/** Calibrated minutes for a size letter — settings-driven, falls back to canonical defaults. */
+function _smgmtCalibratedMinutes(letter) {
+  if (_smgmtCapSettings && _smgmtCapSettings.sizeMinutes) {
+    const v = _smgmtCapSettings.sizeMinutes[letter];
+    if (v > 0) return v;
+  }
+  return _sizeMinutes(letter);
+}
+
+/** Resolve a ticket's estimated size letter (cache → ticket.size → size-* label), or null. */
+function _smgmtTicketSize(t) {
+  const cached = _estDataCache[t.number];
+  let size = (cached && cached.size) ? cached.size : (t.size || null);
+  if (!size && t.labels) {
+    for (const lbl of t.labels) {
+      const m = /^size-([SMLX]+)$/.exec(lbl.name || '');
+      if (m) { size = m[1]; break; }
+    }
+  }
+  return size || null;
+}
+
+function _smgmtFmtTokens(n) {
+  if (!isFinite(n) || n <= 0) return '0';
+  if (n >= 1000) return (Math.round(n / 100) / 10) + 'k';
+  return String(Math.round(n));
+}
+
+/** Render the capacity budget bar for one sprint pane. Never throws (AC5/AC6). */
+function _smgmtUpdateCapBar(label) {
+  const el = document.getElementById(`smgmt-cap-${label}`);
+  if (!el) return;
+  try {
+    // Size palette vars (AC3): S green · M blue · L amber · XL red.
+    const sizeColor = { S: 'var(--green)', M: 'var(--blue)', L: 'var(--amber)', XL: 'var(--red)' };
+    const issues = _smgmtData ? (_smgmtData.issues || []) : [];
+    const tickets = issues.filter(i => i.sprint_label === label);
+    const segs = [];   // estimated tickets only: {size, mins, number}
+    let unestimated = 0;
+    for (const t of tickets) {
+      const size = _smgmtTicketSize(t);
+      const mins = size ? _smgmtCalibratedMinutes(size) : 0;
+      if (size && mins > 0) segs.push({ size, mins, number: t.number });
+      else unestimated++;
+    }
+    // No estimated ticket → no bar (AC2).
+    if (segs.length === 0) { el.innerHTML = ''; return; }
+
+    const total = segs.reduce((a, s) => a + s.mins, 0);
+    const budget = _smgmtBudgetMinutes();
+    const denom = Math.max(total, budget);   // over budget → bar reads full
+    const barHtml = segs.map(s => {
+      const w = denom > 0 ? (s.mins / denom * 100) : 0;
+      const color = sizeColor[s.size] || 'var(--text-muted)';
+      return `<div class="cap-seg" style="width:${w.toFixed(2)}%;background:${color}" title="#${s.number} · ${escHtml(s.size)} · ${s.mins}m"></div>`;
+    }).join('');
+
+    // Headroom under budget; red over-budget phrasing when total exceeds it (AC4).
+    let hintClass = 'cap-hint', hintText;
+    if (total > budget) {
+      const overH = Math.round((total - budget) / 60 * 10) / 10;
+      hintText = `over budget by ~${overH}h`;
+      hintClass = 'cap-hint cap-hint--over';
+    } else {
+      const remaining = budget - total;
+      hintText = `${remaining}m headroom of ${budget}m`;
+    }
+    // Excluded unestimated tickets are noted, never silently dropped (AC6).
+    if (unestimated > 0) {
+      hintText += ` · ${unestimated} unestimated ticket${unestimated !== 1 ? 's' : ''} excluded`;
+    }
+
+    // Token/$ forecast — only when per-size averages are available (AC5).
+    let forecastHtml = '';
+    if (_smgmtCostCache && _smgmtCostCache.perSize) {
+      try {
+        let tokens = 0, haveAny = false;
+        for (const s of segs) {
+          const row = _smgmtCostCache.perSize[s.size];
+          if (row && row.avg_tokens != null) { tokens += row.avg_tokens; haveAny = true; }
+        }
+        if (haveAny && tokens > 0) {
+          let line = `~${_smgmtFmtTokens(tokens)} tokens forecast`;
+          const rate = _smgmtCostCache.usdPerToken;
+          if (rate != null && rate > 0) line += ` · ~$${(tokens * rate).toFixed(2)}`;
+          forecastHtml = `<div class="cap-forecast">${escHtml(line)}</div>`;
+        }
+      } catch (_) {}
+    }
+
+    el.innerHTML =
+      `<div class="cap-bar">${barHtml}</div>` +
+      `<div class="${hintClass}">${escHtml(hintText)}</div>` +
+      forecastHtml;
+  } catch (_) {
+    el.innerHTML = '';
+  }
+}
+
+/** Re-render every visible capacity bar (e.g. after settings change — AC7). */
+function _smgmtRenderAllCapBars() {
+  const nodes = document.querySelectorAll('[id^="smgmt-cap-"]');
+  nodes.forEach(node => _smgmtUpdateCapBar(node.id.slice('smgmt-cap-'.length)));
+}
+
+/** Lazily fetch budget settings + per-size cost averages, then re-render bars. */
+async function _smgmtEnsureCapData(force) {
+  if (_smgmtCapDataLoading) return;
+  if (_smgmtCapSettings && !force) { _smgmtRenderAllCapBars(); return; }
+  const slug = _slug;
+  if (!slug) return;
+  _smgmtCapDataLoading = true;
+  try {
+    const [sResp, cResp] = await Promise.all([
+      fetch(`/api/projects/${encodeURIComponent(slug)}/settings`).catch(() => null),
+      fetch(`/api/projects/${encodeURIComponent(slug)}/analytics/cost`).catch(() => null),
+    ]);
+    if (sResp && sResp.ok) {
+      const d = await sResp.json();
+      _smgmtCapSettings = {
+        budget: Number(d.sprint_budget_minutes) || 180,
+        sizeMinutes: {
+          S: Number(d.estimation_s_minutes) || 5,
+          M: Number(d.estimation_m_minutes) || 15,
+          L: Number(d.estimation_l_minutes) || 30,
+          XL: Number(d.estimation_xl_minutes) || 60,
+        },
+      };
+    }
+    if (cResp && cResp.ok) {
+      const c = await cResp.json();
+      _smgmtCostCache = {
+        perSize: c.per_size_avg_tokens || null,
+        usdPerToken: (c.usd_per_token != null) ? c.usd_per_token : null,
+      };
+    }
+  } catch (_) {
+  } finally {
+    _smgmtCapDataLoading = false;
+  }
+  _smgmtRenderAllCapBars();
 }
 
 function _smgmtShowToast(msg) {
@@ -22739,6 +22930,7 @@ async function projSettingsLoad() {
 
     // Overrides fields
     _psSetNum('ps-sprint-dur', data.sprint_duration_days);
+    _psSetNum('ps-sprint-budget', data.sprint_budget_minutes);
     _psSetVal('ps-default-branch', data.default_branch || '');
     _psSetVal('ps-tester-repo', data.tester_test_repo || '');
 
@@ -22783,6 +22975,7 @@ async function projSettingsSave() {
     color: _psGetVal('ps-color'),
     tracked: _psTracked,
     sprint_duration_days: _psGetNum('ps-sprint-dur'),
+    sprint_budget_minutes: _psGetNum('ps-sprint-budget'),
     default_branch: _psGetVal('ps-default-branch'),
     tester_test_repo: _psGetVal('ps-tester-repo'),
   };
@@ -22812,6 +23005,8 @@ async function projSettingsSave() {
 
     _psSetStatus('Saved', 'ok');
     await _psUpdateInheritNotice(slug);
+    // Refresh all visible capacity bars with the new budget — no page reload (AC7, #801).
+    if (typeof _smgmtEnsureCapData === 'function') _smgmtEnsureCapData(true);
     setTimeout(() => _psSetStatus('', ''), 3000);
   } catch (e) {
     _psSetStatus('Save failed', 'err');

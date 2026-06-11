@@ -23,6 +23,8 @@ KNOWN_FIELDS: dict[str, dict[str, Any]] = {
     "documentor_model": {"secret": False, "default": "claude-sonnet-4-6"},
     # Sprint / workflow defaults
     "sprint_duration_days": {"secret": False, "default": 14},
+    # Sprint capacity budget in minutes — drives the capacity bar (issue #801)
+    "sprint_budget_minutes": {"secret": False, "default": 180},
     "default_branch": {"secret": False, "default": "develop"},
     "bulk_create_concurrency": {"secret": False, "default": 3},
     "log_level": {"secret": False, "default": "INFO"},

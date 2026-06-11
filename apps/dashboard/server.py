@@ -1189,7 +1189,7 @@ async def broadcast(data: dict):
 @app.get("/")
 async def root(request: Request):
     _slog.event("route.entry", project="dashboard", request_id=request.state.request_id, route="/", method="GET")
-    return _serve_html(STATIC_DIR / "home-preview.html")
+    return _serve_html(STATIC_DIR / "home.html")  # issue #842: CEO daily-brief page
 
 
 @app.get("/home")

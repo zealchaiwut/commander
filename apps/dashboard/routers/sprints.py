@@ -14,9 +14,22 @@ get_sprint_branch_status.
 from fastapi import APIRouter
 from pydantic import BaseModel
 
+from . import brief
 from . import sprints_service
+from . import todos
 
 router = APIRouter(tags=["sprints"])
+
+# Brief assembly endpoints (issue #839) ride on this already-mounted router so
+# no route lands in server.py (COMMANDER_GATE_MONOLITH, issue #761). The brief
+# router declares full paths and carries no prefix, so include_router mounts
+# them unchanged.
+router.include_router(brief.router)
+
+# Per-project to-do list endpoints (issue #843) ride on this already-mounted
+# router for the same reason — todos carries its own ``/api/projects`` prefix,
+# so include_router mounts the routes unchanged without growing server.py.
+router.include_router(todos.router)
 
 
 class SprintOrderBody(BaseModel):

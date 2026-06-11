@@ -9,7 +9,7 @@ CEO loop: review the proposed next sprint in the evening, sign off, it runs
 overnight, the morning brief shows results. Decisions: manual run first —
 scheduled auto-run ships as a capability that is OFF by default; sprints can
 queue in sequence for the night. Depends on phase 1
-([2026-06-11-roadmap-milestones.md](2026-06-11-roadmap-milestones.md)).
+([2026-06-11-3-roadmap-milestones.md](2026-06-11-3-roadmap-milestones.md)).
 
 ## Prompts
 

@@ -117,7 +117,9 @@ docs/
   architecture.md    system map (documentor-owned AUTO region)
   milestones.md      sprint history (documentor-owned AUTO region)
   features/          one .md per subsystem
-  bulk-create/       saved bulk-create prompts and outputs
+  bulk-create/       saved bulk-create prompts (YYYY-MM-DD-N-<topic>.md; N =
+                     sequence within the day so batches file in order; BKK
+                     dates; never edit a file whose batch already ran)
   changelog/         dated per-sprint entries (uat/ and prd/)
 ```
 

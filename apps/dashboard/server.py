@@ -920,6 +920,7 @@ from routers import (  # noqa: E402
     activity_router,
     analytics_router,
     backup_router,
+    doctor_router,
     log_search_router,
     runs_router,
     sprint_history_router,
@@ -931,6 +932,7 @@ from routers import (  # noqa: E402
 app.include_router(activity_router)
 app.include_router(analytics_router)
 app.include_router(backup_router)
+app.include_router(doctor_router)
 app.include_router(log_search_router)
 app.include_router(runs_router)
 app.include_router(sprint_history_router)

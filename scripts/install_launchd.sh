@@ -147,11 +147,11 @@ render_plist() {
     <string>${PORT}</string>
   </array>
 
-  <!-- Environment: venv bin on PATH + the ENVIRONMENT selector -->
+  <!-- Environment: dynamically resolved tool dirs on PATH + the ENVIRONMENT selector -->
   <key>EnvironmentVariables</key>
   <dict>
     <key>PATH</key>
-    <string>${UVICORN_BIN_DIR}:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <string>${PATH_VALUE}</string>
     <key>ENVIRONMENT</key>
     <string>${ENVIRONMENT}</string>${GH_TOKEN_PLIST_BLOCK}
   </dict>
@@ -167,13 +167,9 @@ render_plist() {
 PLIST
 }
 
-# ── Dry run: print and exit before any side effects ───────────────────────────
-if $PRINT_PLIST; then
-  render_plist
-  exit 0
-fi
-
 # ── Dry run: write GH_TOKEN to the agent .env and exit (no launchctl) ──────────
+# Handled before tool resolution: writing the token to .env is independent of
+# whether claude/gh are installed, so it must not require them.
 if $WRITE_ENV_ONLY; then
   if [ -z "$GH_TOKEN_VALUE" ]; then
     echo "ERROR: --write-env-only needs a token (--gh-token, \$GH_TOKEN, or \$GITHUB_TOKEN)." >&2
@@ -184,12 +180,64 @@ if $WRITE_ENV_ONLY; then
   exit 0
 fi
 
+# ── Resolve tool directories dynamically (issue #826) ─────────────────────────
+# A launchd service is detached from the login shell, so its PATH must contain
+# the real on-disk dirs of `claude` and `gh`. Hardcoding those dirs broke on
+# machines where the binaries live outside the standard locations (e.g.
+# ~/.local/bin), making every agent dispatch fail with "claude CLI not found".
+# Resolve them at install time with `command -v` and add their parent dirs (plus
+# the project venv bin/, resolved from the repo root) to the plist PATH. If
+# either tool is missing we abort BEFORE rendering or writing any plist.
+abs_parent_dir() {
+  # Print the absolute parent directory of "$1", resolving relative paths.
+  cd "$(dirname "$1")" >/dev/null 2>&1 && pwd
+}
+
+CLAUDE_PATH="$(command -v claude 2>/dev/null || true)"
+if [ -z "$CLAUDE_PATH" ]; then
+  echo "ERROR: 'claude' CLI not found in PATH. Aborting." >&2
+  exit 1
+fi
+CLAUDE_BIN_DIR="$(abs_parent_dir "$CLAUDE_PATH")"
+
+GH_PATH="$(command -v gh 2>/dev/null || true)"
+if [ -z "$GH_PATH" ]; then
+  echo "ERROR: 'gh' CLI not found in PATH. Aborting." >&2
+  exit 1
+fi
+GH_BIN_DIR="$(abs_parent_dir "$GH_PATH")"
+
+# Build the plist PATH from the resolved dirs (venv bin, claude, gh) plus the
+# standard system dirs, de-duplicated so each directory appears at most once.
+PATH_VALUE=""
+_append_path_dir() {
+  local dir="$1"
+  [ -n "$dir" ] || return 0
+  case ":$PATH_VALUE:" in
+    *":$dir:"*) ;;                                   # already present
+    *) PATH_VALUE="${PATH_VALUE:+$PATH_VALUE:}$dir" ;;
+  esac
+}
+for _dir in "$UVICORN_BIN_DIR" "$CLAUDE_BIN_DIR" "$GH_BIN_DIR" \
+            /usr/local/bin /opt/homebrew/bin /usr/bin /bin /usr/sbin /sbin; do
+  _append_path_dir "$_dir"
+done
+
+# ── Dry run: print and exit before any side effects ───────────────────────────
+if $PRINT_PLIST; then
+  render_plist
+  exit 0
+fi
+
 echo "=== LaunchAgent Installer ==="
 echo "Label       : $LABEL"
 echo "Working dir : $WORKING_DIR"
 echo "Uvicorn     : $UVICORN_PATH"
 echo "Port        : $PORT"
 echo "Environment : $ENVIRONMENT"
+echo "claude bin  : $CLAUDE_BIN_DIR"
+echo "gh bin      : $GH_BIN_DIR"
+echo "venv bin    : $UVICORN_BIN_DIR"
 if [ -n "$GH_TOKEN_VALUE" ]; then
   echo "GH_TOKEN    : set (headless gh auth) -> plist + $ENV_FILE"
 else

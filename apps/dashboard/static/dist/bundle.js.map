@@ -1,0 +1,10 @@
+{
+  "version": 3,
+  "sources": ["../src/logpanel.js", "../src/index.js"],
+  "sourcesContent": [
+    "/* Log-panel tokenizer module (issue #796 — first esbuild module).\n *\n * Extracted from static/log-colorize.js (issue #765) as the first real module\n * behind the esbuild pipeline. */\n\nexport const AGENT_NAMES = ['coder', 'tester', 'reviewer', 'documenter', 'estimator', 'BA'];\n\nexport function escapeLogHtml(s) {\n  return String(s == null ? '' : s)\n    .replace(/&/g, '&amp;')\n    .replace(/</g, '&lt;')\n    .replace(/>/g, '&gt;')\n    .replace(/\"/g, '&quot;');\n}\n\nconst TOKEN_RE = /(#\\d+)|\\b(coder|tester|reviewer|documenter|estimator|BA)\\b/gi;\n\nexport function extractRaw(text) {\n  const s = String(text == null ? '' : text).trim();\n  if (s.length === 0 || s[0] !== '{') return s;\n  try {\n    const obj = JSON.parse(s);\n    if (typeof obj.raw === 'string') return obj.raw;\n  } catch (_) { /* not JSON */ }\n  return s;\n}\n\nexport function colorizeLogLine(text, repo) {\n  const escaped = escapeLogHtml(extractRaw(text));\n  return escaped.replace(TOKEN_RE, function (match, issue, agent) {\n    if (issue) {\n      const num = issue.slice(1);\n      const href = repo ? 'https://github.com/' + repo + '/issues/' + num : '#';\n      return '<a class=\"log-chip log-chip--issue\" href=\"' + escapeLogHtml(href) +\n        '\" target=\"_blank\" rel=\"noopener\">' + issue + '</a>';\n    }\n    const key = agent.toLowerCase();\n    return '<span class=\"log-chip log-chip--agent log-agent-' + key + '\">' +\n      agent + '</span>';\n  });\n}\n",
+    "/* Bundle entry point (issue #796). */\nimport { colorizeLogLine, escapeLogHtml, extractRaw, AGENT_NAMES } from './logpanel.js';\n\nconst root = typeof window !== 'undefined' ? window : globalThis;\nroot.colorizeLogLine = colorizeLogLine;\nroot.escapeLogHtml = escapeLogHtml;\nroot.extractRaw = extractRaw;\nroot.AGENT_NAMES = AGENT_NAMES;\n"
+  ],
+  "mappings": "",
+  "names": []
+}

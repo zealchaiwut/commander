@@ -260,13 +260,15 @@ tail -f ~/Library/Logs/commander-dashboard.out.log
 commander/
 ├── apps/
 │   └── dashboard/          # FastAPI app — PRD server
-│       ├── server.py        # API routes
+│       ├── server.py        # App wiring + remaining inline routes
+│       ├── routers/         # Extracted route clusters + *_service.py logic
 │       ├── projects.py      # GitHub data layer
 │       ├── sprint_manager/  # Sprint orchestration engine
-│       └── static/          # Frontend (index.html + app.js)
+│       └── static/          # Frontend (HTML; src/ esbuild → dist/bundle.js)
 ├── scripts/                 # CLI tools (create_ticket.py, init_project.py, …)
 ├── hooks/                   # Claude Code hooks (agent_finished, tool_used, …)
 ├── services/                # Background services
+├── package.json             # Frontend build (esbuild + eslint, no framework)
 ├── docs/                    # Documentation (standard layout, all projects)
 │   ├── quickstart.md        # 5-minute install and first run
 │   ├── tutorial.md          # Full walkthrough
@@ -282,6 +284,28 @@ commander/
 ├── .commander/              # Sprint manager config (sprint.yaml, logs, sprints)
 └── CLAUDE.md                # Agent instructions (read by all agents)
 ```
+
+---
+
+## Frontend build
+
+The dashboard frontend is moving from inline `<script>` blocks to ES modules
+under `apps/dashboard/static/src/`, bundled by [esbuild](https://esbuild.github.io)
+into a single `apps/dashboard/static/dist/bundle.js` (issue #796).
+
+```bash
+npm install        # install esbuild + eslint
+npm run build      # bundle static/src/index.js → static/dist/bundle.js (+ .map)
+npm run watch      # rebuild on every source edit
+npm run lint       # eslint over static/src
+```
+
+Production serves static files straight from disk, so the **committed bundle
+already works with no build step** — you only need Node/npm to rebuild after
+editing `static/src/`. `setup_machine.sh` runs `npm install && npm run build`
+automatically when npm is present (skip with `SETUP_MACHINE_SKIP_NPM=1`); its
+doctor reports npm as informational, never a hard fail. CI rebuilds the bundle
+and runs a design gate over `static/src/` on every push.
 
 ---
 
@@ -460,6 +484,8 @@ python -c "from services.sprint_manager.neon_db import get_engine; print(get_eng
 - [Milestones](docs/milestones.md) — what each sprint shipped
 
 **Reference**
+- [Architecture boundary map](docs/architecture/boundaries.md) — router clusters, layer rules, repos
+- [Frontend map](docs/architecture/frontend-map.md) — static pages, modules, API call sites
 - [Dashboard](docs/features/dashboard.md)
 - [Sprint Manager](docs/features/sprint-manager.md)
 - [API reference](docs/features/api.md)

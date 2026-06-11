@@ -915,12 +915,25 @@ app = FastAPI(lifespan=lifespan)
 # Strangler-fig routers (issue #761): extracted route clusters live in
 # apps/dashboard/routers/ and are mounted here. New endpoints go there, NOT
 # in this file — the COMMANDER_GATE_MONOLITH gate rejects server.py growth.
-from routers import analytics_router, backup_router, log_search_router, runs_router  # noqa: E402
+from routers import (  # noqa: E402
+    activity_router,
+    analytics_router,
+    backup_router,
+    log_search_router,
+    runs_router,
+    sprints_router,
+    system_router,
+    tickets_router,
+)
 
+app.include_router(activity_router)
 app.include_router(analytics_router)
 app.include_router(backup_router)
 app.include_router(log_search_router)
 app.include_router(runs_router)
+app.include_router(sprints_router)
+app.include_router(system_router)
+app.include_router(tickets_router)
 
 logger = logging.getLogger(__name__)
 
@@ -1181,10 +1194,7 @@ async def overview_redirect():
     return RedirectResponse(url="/", status_code=301)
 
 
-@app.get("/diagnostics")
-async def diagnostics_page():
-    """Serve the system diagnostics page (issue #230)."""
-    return _serve_html(STATIC_DIR / "diagnostics.html")
+# /diagnostics moved to routers/system.py (issue #794)
 
 
 # ── /projects/ redirect — 301 to current /project/ UI ─────────────────────────
@@ -1304,34 +1314,7 @@ def get_environment():
     return {"environment": ENVIRONMENT}
 
 
-@app.get("/api/version")
-def get_version():
-    """Return build metadata for the running process (issue #421).
-
-    Response shape:
-    {
-      "git_sha": "<full-commit-hash>",
-      "branch": "main",
-      "build_timestamp": "2026-05-30T12:00:00+00:00"
-    }
-    """
-    return JSONResponse(
-        content={
-            "git_sha": _GIT_SHA,
-            "branch": _GIT_BRANCH,
-            "build_timestamp": _BUILD_TIMESTAMP,
-        },
-        headers={"Cache-Control": "no-cache, must-revalidate"},
-    )
-
-
-@app.get("/api/gh-auth-status")
-def get_gh_auth_status():
-    """Return the GitHub CLI auth preflight result from startup (issue #424)."""
-    return JSONResponse(
-        content=_GH_AUTH_STATUS,
-        headers={"Cache-Control": "no-cache, must-revalidate"},
-    )
+# /api/version and /api/gh-auth-status moved to routers/system.py (issue #794)
 
 
 _seen_agent_sessions: set[str] = set()
@@ -1437,14 +1420,7 @@ async def receive_token_usage(event: TokenUsageEvent):
     return {"ok": True}
 
 
-@app.get("/api/agents")
-def list_agents():
-    return db.get_agents()
-
-
-@app.get("/api/events")
-def list_events():
-    return db.get_recent_events()
+# /api/agents and /api/events moved to routers/activity.py (issue #794)
 
 
 @app.delete("/api/events/test")
@@ -1562,18 +1538,6 @@ def post_create_label(body: CreateLabelBody):
             repo_name=body.repo,
         )
         return github_client.list_labels(repo_name=body.repo)
-    except subprocess.CalledProcessError as e:
-        raise _gh_error(e)
-    except ValueError as e:
-        raise HTTPException(400, detail=str(e))
-
-
-@app.get("/api/sprints")
-def get_sprints():
-    try:
-        sprints = github_client.list_sprints()
-        default = github_client.latest_active_sprint()
-        return {"sprints": sprints, "default": default}
     except subprocess.CalledProcessError as e:
         raise _gh_error(e)
     except ValueError as e:
@@ -1815,19 +1779,6 @@ def approve_issue(request: Request, issue_id: int, repo: Optional[str] = None):
     except subprocess.CalledProcessError as e:
         _slog.event("route.error", project="dashboard", request_id=request.state.request_id, route="/api/issues/{issue_id}/approve", level="error", issue_id=issue_id, error=str(e))
         raise _gh_error(e)
-
-
-@app.post("/api/tickets/{issue_id}/approve")
-async def approve_ticket(request: Request, issue_id: int, repo: Optional[str] = None):
-    """Close a UAT-labelled ticket on GitHub and remove the UAT label."""
-    _slog.event("route.entry", project="dashboard", request_id=request.state.request_id, route="/api/tickets/{issue_id}/approve", method="POST", issue_id=issue_id)
-    try:
-        github_client.approve_issue(issue_id, repo_name=repo)
-    except subprocess.CalledProcessError as e:
-        _slog.event("route.error", project="dashboard", request_id=request.state.request_id, route="/api/tickets/{issue_id}/approve", level="error", issue_id=issue_id, error=str(e))
-        raise _gh_error(e)
-    await broadcast({"type": "update", "event": {"event_type": "ticket_approved", "issue": issue_id}})
-    return {"ok": True}
 
 
 @app.post("/api/issues/{issue_id}/reject")
@@ -2075,117 +2026,8 @@ def get_running_sprint(project: str):
     return Response(status_code=204)
 
 
-_VALID_EVENT_SOURCES = {"agent", "dashboard", "github"}
-
-
-@app.get("/api/projects/{slug}/events")
-def get_project_events(
-    slug: str,
-    source: Optional[str] = None,
-    target: Optional[str] = None,
-    since: Optional[str] = None,
-    until: Optional[str] = None,
-    limit: int = 100,
-):
-    """Return structured events for a project, newest-first.
-
-    Filters: source (agent|dashboard|github), target (exact), since/until (ISO date), limit.
-    404 — unknown project slug.
-    400 — invalid source value.
-    """
-    # Validate source before any DB work
-    if source is not None and source not in _VALID_EVENT_SOURCES:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Invalid source {source!r}. Must be one of: {', '.join(sorted(_VALID_EVENT_SOURCES))}",
-        )
-
-    # Resolve slug → project name stored in events table
-    try:
-        all_projects = projects_module.load_projects()
-    except Exception:
-        all_projects = []
-
-    matched = next(
-        (p for p in all_projects
-         if p["repo"].split("/")[-1] == slug or p["repo"] == slug),
-        None,
-    )
-    if matched is None:
-        raise HTTPException(status_code=404, detail=f"Project '{slug}' not found")
-
-    # The events table stores project as the full repo path (owner/repo)
-    project_key = matched["repo"]
-
-    query = "SELECT timestamp, source, actor, type, target, action_id, detail FROM events WHERE project = ?"
-    params: list = [project_key]
-
-    if source is not None:
-        query += " AND source = ?"
-        params.append(source)
-    if target is not None:
-        query += " AND target = ?"
-        params.append(target)
-    if since is not None:
-        query += " AND timestamp >= ?"
-        params.append(since)
-    if until is not None:
-        # include the full day by appending T23:59:59 when only a date is given
-        until_bound = until if "T" in until else f"{until}T23:59:59"
-        query += " AND timestamp <= ?"
-        params.append(until_bound)
-
-    query += " ORDER BY timestamp DESC LIMIT ?"
-    params.append(limit)
-
-    with db.get_conn() as conn:
-        rows = conn.execute(query, params).fetchall()
-
-    result = []
-    for row in rows:
-        d = dict(row)
-        try:
-            d["detail"] = json.loads(d["detail"])
-        except (TypeError, ValueError):
-            pass
-        result.append(d)
-
-    # issue #764: enrich agent_finished rows with the durable duration_seconds
-    # from agent_runs so the Activity tab can show a Duration column. Matched by
-    # issue number + agent role; falls back to the duration already carried in
-    # the event detail when no agent_runs row is found.
-    _agent_finished = [
-        d for d in result
-        if d.get("type") == "agent_finished" and isinstance(d.get("detail"), dict)
-    ]
-    if _agent_finished:
-        _issue_nums = {
-            d["detail"].get("issue_num")
-            for d in _agent_finished
-            if d["detail"].get("issue_num") is not None
-        }
-        _runs_by_key: dict = {}
-        try:
-            for _num in _issue_nums:
-                for _r in db.agent_runs_for_issue(int(_num)):
-                    if _r.get("duration_seconds") is None:
-                        continue
-                    _runs_by_key[(int(_num), str(_r.get("agent", "")).lower())] = _r["duration_seconds"]
-        except Exception:
-            _runs_by_key = {}
-        for d in _agent_finished:
-            det = d["detail"]
-            num = det.get("issue_num")
-            role = str(det.get("role", "")).lower()
-            dur = None
-            if num is not None:
-                dur = _runs_by_key.get((int(num), role))
-            if dur is None:
-                dur = det.get("duration")
-            if dur is not None:
-                d["duration_seconds"] = dur
-
-    return result
+# /api/projects/{slug}/events (and _VALID_EVENT_SOURCES) moved to
+# routers/activity.py (issue #794)
 
 
 # ── Settings API (issue #639) ────────────────────────────────────────────────
@@ -4982,18 +4824,14 @@ def _sprint_goal_path(project_root: Path, sprint_label: str) -> Path:
     return _commander_dir(project_root) / "sprints" / f"{sprint_label}-goal.txt"
 
 
-def _build_sprint_subprocess_env() -> dict:
-    """Build the subprocess environment for sprint_manager.
-
-    Strips ANTHROPIC_API_KEY and resolves DB_PATH to an absolute path so that
-    sprint_manager (which runs from the coder clone CWD) writes to the same
-    database that the server reads from, regardless of relative path differences.
-    """
-    env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
-    db_val = env.get("DB_PATH", "")
-    if db_val and not os.path.isabs(db_val):
-        env["DB_PATH"] = str(Path(db_val).resolve())
-    return env
+# Shared sprint-dispatch env builder now lives in routers.dispatch_service so
+# the extracted routers and the sprint_manager-facing run/finish endpoints share
+# one implementation (issue #795). Re-exported under the original private name so
+# existing callers and tests (which patch server._build_sprint_subprocess_env)
+# keep working unchanged.
+from routers.dispatch_service import (  # noqa: E402
+    build_sprint_subprocess_env as _build_sprint_subprocess_env,
+)
 
 
 def _sprint_plan_path(project_root: Path, sprint_label: str) -> Path:
@@ -5430,42 +5268,10 @@ class SprintMgmtRunBody(BaseModel):
     migrate_from: list[int] = []
 
 
-class SprintOrderBody(BaseModel):
-    order: list[str]
-
-
 class SprintCreateBody(BaseModel):
     project: str
     sprint_number: int | None = None
     goal: str | None = None
-
-
-class SprintGoalBody(BaseModel):
-    project: str
-    sprint_label: str
-    goal: str
-
-
-@app.get("/api/sprints/goal")
-def get_sprint_goal(project: str, sprint: str):
-    """Return the persisted sprint goal for a project/sprint."""
-    project_root = _project_root_path(project)
-    goal_path = _sprint_goal_path(project_root, sprint)
-    if goal_path.exists():
-        return {"goal": goal_path.read_text(encoding="utf-8").strip()}
-    return {"goal": ""}
-
-
-@app.post("/api/sprints/goal")
-def save_sprint_goal(body: SprintGoalBody):
-    """Persist sprint goal to .commander/sprints/<label>-goal.txt."""
-    if not _SPRINT_LABEL_RE.match(body.sprint_label):
-        raise HTTPException(400, detail=f"Invalid sprint label: {body.sprint_label!r}")
-    project_root = _project_root_path(body.project)
-    goal_path = _sprint_goal_path(project_root, body.sprint_label)
-    goal_path.parent.mkdir(parents=True, exist_ok=True)
-    goal_path.write_text(body.goal, encoding="utf-8")
-    return {"ok": True}
 
 
 @app.get("/api/sprint-management/issues")
@@ -5854,28 +5660,6 @@ def get_sprint_summaries(project: str):
     summaries.sort(key=_sort_key)
 
     return {"summaries": summaries}
-
-
-@app.get("/api/sprints/order")
-def get_sprint_order(project: str):
-    """Return the persisted sprint display order for a project slug."""
-    project_root = _project_root_path(project)
-    try:
-        sprints = github_client.list_sprints(repo_name=None)
-    except Exception:
-        sprints = []
-    order = _load_sprint_order(project_root, sprints)
-    return {"order": order}
-
-
-@app.post("/api/sprints/order")
-def save_sprint_order(project: str, body: SprintOrderBody):
-    """Persist sprint display order for a project slug."""
-    project_root = _project_root_path(project)
-    order_path = _sprint_order_path(project_root)
-    order_path.parent.mkdir(parents=True, exist_ok=True)
-    order_path.write_text(json.dumps(body.order), encoding="utf-8")
-    return {"ok": True}
 
 
 # READ-only: recognises both spellings so migration removes whichever is present
@@ -6671,20 +6455,6 @@ def run_sprint_managed(request: Request, body: SprintMgmtRunBody):
     }
 
 
-@app.get("/api/sprints/running-all")
-def get_all_running_sprints():
-    """Return ALL currently running sprints across all projects.
-
-    Reads plan.json state=running as the authoritative source (issue #507).
-    PID files are retained only for process-killing.
-
-    Returns: {"running": [{"project": ..., "sprint_label": ...}, ...]}
-    Empty list means no sprints are running.
-    """
-    all_running = _all_sprints_running()
-    return {"running": all_running}
-
-
 @app.get("/api/sprints/{sprint_label}/state")
 def get_sprint_state(sprint_label: str, project: str):
     """Return the full plan.json payload for a sprint (issue #507).
@@ -6941,16 +6711,6 @@ def post_logs_sync_github(project: Optional[str] = None):
     except Exception as exc:
         return {"synced": 0, "skipped": 0, "rate_limited": False, "error": str(exc)}
     return result
-
-
-@app.get("/api/sprints/{sprint_label}/dispatch-log")
-def get_dispatch_log(sprint_label: str, project: str, tail_lines: int = 200):
-    """Return the last N lines of the most recent sprint-run-<label>-*.log."""
-    if not _SPRINT_LABEL_RE.match(sprint_label):
-        raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")
-    from log_source import read_log  # local import keeps startup fast
-    project_root = _project_root_path(project)
-    return read_log("dispatch", project_root, label=sprint_label, tail_lines=tail_lines)
 
 
 @app.get("/api/sprints/{sprint_label}/state-full")
@@ -12049,39 +11809,6 @@ async def bulk_job_stream(job_id: str, request: Request):
 
 class BulkStopBody(BaseModel):
     pass
-
-
-@app.post("/api/tickets/bulk/{job_id}/stop")
-async def bulk_stop_job(job_id: str):
-    """Graceful stop: finish in-flight BA calls, mark remaining pending as skipped."""
-    job = _get_bulk_job(job_id)
-    if not job:
-        raise HTTPException(404, detail="Job not found")
-    job["stop_requested"] = True
-    _persist_bulk_job(job)
-    return {"ok": True}
-
-
-@app.delete("/api/tickets/bulk/{job_id}")
-async def bulk_delete_job(job_id: str):
-    """Discard a bulk job entirely — used by the "Start new batch" / clear action.
-
-    Signals any live worker to stop, drops the in-memory entry, and removes the
-    persisted JSON so a wedged or finished job never reloads. Idempotent:
-    returns ok even if the job is already gone.
-    """
-    job = _bulk_jobs.get(job_id)
-    if job is not None:
-        job["stop_requested"] = True
-    _bulk_jobs.pop(job_id, None)
-    _bulk_job_queues.pop(job_id, None)
-    try:
-        path = _bulk_jobs_dir() / f"{job_id}.json"
-        if path.exists():
-            path.unlink()
-    except Exception as e:
-        logger.warning("bulk_delete_job: could not remove %s.json: %s", job_id, str(e)[:200])
-    return {"ok": True}
 
 
 class BulkSkipBody(BaseModel):

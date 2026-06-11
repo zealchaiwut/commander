@@ -8,6 +8,11 @@ venv/
 .venv/
 .pytest_cache/
 
+# Node / frontend build (issue #796) — node_modules is never committed.
+# NOTE: apps/dashboard/static/dist/ IS committed on purpose: the dashboard is
+# served from disk with no build step, so the emitted bundle must ship in git.
+node_modules/
+
 # Environment variables
 .env
 .env.*

@@ -1945,6 +1945,88 @@
     }
     .stale-chip:hover { border-color: var(--amber); filter: brightness(.98); }
     .stale-chip i { font-size: 12px; }
+
+    /* ── Run-stats block on expanded History cards (issue #810) ──────────────
+       Stat chips + agent-time split-bar + per-ticket gantt timeline, fed by the
+       GET /api/sprints/{label}/run-stats aggregation. Renders on locked rows
+       too — the lock suppresses actions, not read rendering (AC6) — and degrades
+       to wall-time + token chips only when a sprint has no agent_runs rows (AC7).
+       Coder is purple, tester amber, per the mock v5 design contract. */
+    .stats { display: flex; flex-direction: column; gap: 12px; padding: 8px 16px 4px; }
+    .stat-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+    .stat-chip {
+      display: inline-flex; align-items: center; gap: 6px;
+      font-size: 11.5px; color: var(--text-muted);
+      background: var(--surface-2); border: 1px solid var(--border);
+      padding: 4px 10px; border-radius: 7px;
+    }
+    .stat-chip i { font-size: 13px; color: var(--text-sub); flex: none; }
+    .stat-chip b {
+      color: var(--text); font-weight: 700; font-variant-numeric: tabular-nums;
+      font-family: 'SF Mono', ui-monospace, 'Cascadia Code', monospace;
+    }
+    /* Fix-round chip reads as a warning when a sprint needed a re-run. */
+    .stat-chip--fix { color: var(--amber); background: var(--amber-bg); border-color: transparent; }
+    .stat-chip--fix i, .stat-chip--fix b { color: var(--amber); }
+
+    .stats-section-label {
+      font-size: 10.5px; font-weight: 700; letter-spacing: .4px; text-transform: uppercase;
+      color: var(--text-sub);
+    }
+
+    /* Agent-time split-bar: width-proportional percentage segments summing to 100. */
+    .split-bar {
+      display: flex; height: 22px; border-radius: 6px; overflow: hidden;
+      border: 1px solid var(--border);
+    }
+    .split-seg {
+      display: flex; align-items: center; justify-content: center; min-width: 0;
+      font-size: 10.5px; font-weight: 700; color: #fff;
+      font-variant-numeric: tabular-nums; overflow: hidden; white-space: nowrap;
+      text-shadow: 0 1px 1px rgba(0,0,0,.28);
+    }
+    .split-seg--coder      { background: var(--purple); }
+    .split-seg--tester     { background: var(--amber); }
+    .split-seg--documenter { background: var(--blue); }
+    .split-seg--reviewer   { background: var(--green); }
+    /* Legend gives each agent an accessible, full-contrast read of its share. */
+    .split-legend { display: flex; flex-wrap: wrap; gap: 12px; }
+    .split-legend-item {
+      display: inline-flex; align-items: center; gap: 6px;
+      font-size: 11px; color: var(--text-muted); font-variant-numeric: tabular-nums;
+    }
+    .split-swatch { width: 9px; height: 9px; border-radius: 2px; flex: none; }
+    .split-swatch--coder      { background: var(--purple); }
+    .split-swatch--tester     { background: var(--amber); }
+    .split-swatch--documenter { background: var(--blue); }
+    .split-swatch--reviewer   { background: var(--green); }
+
+    /* Per-ticket gantt timeline. Segments are absolutely positioned on a shared
+       0–wall-seconds scale so parallel agents read as overlapping rows. */
+    .gantt { display: flex; flex-direction: column; gap: 6px; }
+    .g-row { display: flex; align-items: center; gap: 10px; }
+    .g-label {
+      min-width: 64px; font-size: 11.5px; font-weight: 600; color: var(--text);
+      font-variant-numeric: tabular-nums;
+    }
+    .g-track {
+      position: relative; flex: 1; height: 16px;
+      background: var(--surface-2); border-radius: 5px; overflow: hidden;
+    }
+    .g-seg { position: absolute; top: 2px; bottom: 2px; border-radius: 3px; min-width: 3px; }
+    .g-coder  { background: var(--purple); }
+    .g-tester { background: var(--amber); }
+    /* Fix-round segments are hatched so a re-run reads distinct from first-pass. */
+    .g-fix {
+      background-image: repeating-linear-gradient(
+        45deg, rgba(255,255,255,.5) 0 3px, transparent 3px 6px);
+    }
+    /* Red ✕ crash marker, painted at the crash ticket's end offset (failed only). */
+    .g-crash {
+      position: absolute; top: 50%; transform: translate(-50%, -50%);
+      font-size: 12px; font-weight: 800; line-height: 1; color: var(--red);
+      pointer-events: none;
+    }
     .fold {
       background: var(--surface-2); border: 1px solid var(--border);
       border-radius: 10px; overflow: hidden;
@@ -9293,6 +9375,12 @@ const _histFoldExpanded = new Set();   // ids of currently-expanded fold groups
 // History row regardless of whether that row is locked (AC7).
 let _histStaleBySprint = {};
 
+// Run-stats (issue #810): label -> the GET /api/sprints/{label}/run-stats
+// aggregation, lazily fetched the first time a card is expanded and cached so
+// re-renders (fold toggles, stale scans) reuse it. `undefined` means not yet
+// fetched; `{has_runs:false}` means a sprint with no agent_runs rows.
+const _histRunStats = {};
+
 // Terminal states that lock a card: no further action is possible, links only.
 function _histIsLocked(state) {
   const s = (state || '').toLowerCase();
@@ -9453,6 +9541,134 @@ function _histStateChip(state) {
   return `<span class="hist-state ${pair[0]}">${pair[1]}</span>`;
 }
 
+// ── Run-stats block (issue #810) ────────────────────────────────────────────
+// One stat chip: an icon, a label, and a mono value. Built as a helper so every
+// chip lines up on the same grid.
+function _histStatChip(icon, label, value, cls) {
+  return `<span class="stat-chip${cls ? ' ' + cls : ''}">
+    <i class="ti ${icon}"></i>${escHtml(label)} <b>${escHtml(value)}</b></span>`;
+}
+
+// The split-bar: one width-proportional segment per agent, percentages summing
+// to 100 (AC2), with a full-contrast legend beneath for accessible reading.
+function _histSplitBarHtml(stats) {
+  const split = Array.isArray(stats.split) ? stats.split : [];
+  if (!split.length) return '';
+  const segs = split.map(seg =>
+    `<span class="split-seg split-seg--${escHtml(seg.agent)}" style="width:${seg.pct}%"
+       title="${escHtml(seg.agent)} · ${seg.pct}% (${escHtml(_histFmtSecs(seg.seconds))})">${seg.pct}%</span>`
+  ).join('');
+  const legend = split.map(seg =>
+    `<span class="split-legend-item"><span class="split-swatch split-swatch--${escHtml(seg.agent)}"></span>
+       ${escHtml(seg.agent)} ${seg.pct}%</span>`
+  ).join('');
+  return `<div class="stats-block">
+    <div class="stats-section-label">Agent time split</div>
+    <div class="split-bar">${segs}</div>
+    <div class="split-legend">${legend}</div>
+  </div>`;
+}
+
+// The gantt: one row per reached ticket (unreached tickets simply have no row —
+// AC5). Coder segments are purple, tester amber; fix-round segments are hatched
+// (AC3). A red ✕ crash marker is painted at the crash ticket's end offset, but
+// only for a sprint that actually failed (AC4).
+function _histGanttHtml(s, stats) {
+  const tickets = Array.isArray(stats.tickets) ? stats.tickets : [];
+  if (!tickets.length) return '';
+  const scale = Math.max(1, stats.wall_seconds || 0);
+  const failed = (s.lifecycle_state || '').toLowerCase() === 'failed';
+  const crash = stats.crash;
+  const rows = tickets.map(t => {
+    const segs = (t.segments || []).map(seg => {
+      const left  = (seg.start / scale) * 100;
+      const width = (seg.duration / scale) * 100;
+      const agentCls = seg.agent === 'tester' ? 'g-tester' : 'g-coder';
+      const cls = 'g-seg ' + agentCls + (seg.fix_round ? ' g-fix' : '');
+      const title = `${seg.agent}${seg.fix_round ? ' (fix round)' : ''} · ${_histFmtSecs(seg.duration)}`;
+      return `<span class="${cls}" style="left:${left}%;width:${width}%" title="${escHtml(title)}"></span>`;
+    }).join('');
+    // The crash ✕ sits on its own ticket's row, at the segment-end offset.
+    let marker = '';
+    if (failed && crash && crash.ticket === t.ticket) {
+      const at = (crash.offset / scale) * 100;
+      marker = `<span class="g-crash" style="left:${at}%" title="Crashed here">✕</span>`;
+    }
+    return `<div class="g-row">
+      <span class="g-label">#${escHtml(String(t.ticket))}</span>
+      <span class="g-track">${segs}${marker}</span>
+    </div>`;
+  }).join('');
+  return `<div class="stats-block">
+    <div class="stats-section-label">Per-ticket timeline</div>
+    <div class="gantt">${rows}</div>
+  </div>`;
+}
+
+// The full run-stats block for an expanded card. Wall-time and token chips
+// always render (sourced from the run-stats span when present, else the history
+// feed), so the block is never empty. The agent-derived chips, split-bar and
+// gantt render only when agent_runs rows exist (has_runs) — otherwise they are
+// hidden with no error (AC7). Independent of lock state (AC6).
+function _histStatsHtml(s) {
+  const stats = _histRunStats[s.label];
+  const hasRuns = !!(stats && stats.has_runs);
+
+  // Wall time + tokens fall back to the history record when no runs are present.
+  const wall = hasRuns && stats.wall_seconds != null ? stats.wall_seconds : s.duration;
+  const tokens = hasRuns && stats.total_tokens != null ? stats.total_tokens : s.tokens;
+
+  const chips = [];
+  if (wall != null) chips.push(_histStatChip('ti-clock', 'Wall', _histFmtSecs(wall)));
+  if (tokens != null) {
+    let tokVal = _histFmtTokens(tokens) + ' tok';
+    if (hasRuns && stats.token_cost_usd != null) tokVal += ' ≈ $' + Number(stats.token_cost_usd).toFixed(2);
+    chips.push(_histStatChip('ti-coin', 'Tokens', tokVal));
+  }
+  if (hasRuns) {
+    chips.push(_histStatChip('ti-robot', 'Agent', _histFmtSecs(stats.agent_total_seconds)));
+    if (stats.fix_round_count > 0) {
+      const refs = (stats.fix_round_tickets || []).map(n => '#' + n).join(', ');
+      const word = stats.fix_round_count === 1 ? 'fix round' : 'fix rounds';
+      chips.push(_histStatChip('ti-refresh', '',
+        stats.fix_round_count + ' ' + word + (refs ? ' (' + refs + ')' : ''), 'stat-chip--fix'));
+    }
+    if (stats.slowest_ticket) {
+      chips.push(_histStatChip('ti-hourglass-low', 'Slowest',
+        '#' + stats.slowest_ticket.ticket + ' · ' + _histFmtSecs(stats.slowest_ticket.seconds)));
+    }
+    if (stats.parallel_saved_seconds != null) {
+      chips.push(_histStatChip('ti-arrows-split', 'Parallel saved', _histFmtSecs(stats.parallel_saved_seconds)));
+    }
+  }
+
+  const splitHtml = hasRuns ? _histSplitBarHtml(stats) : '';
+  const ganttHtml = hasRuns ? _histGanttHtml(s, stats) : '';
+  return `<div class="stats" data-stats-label="${escHtml(s.label || '')}">
+    <div class="stat-chips">${chips.join('')}</div>
+    ${splitHtml}
+    ${ganttHtml}
+  </div>`;
+}
+
+// Lazily fetch the run-stats aggregation for a sprint the first time its card is
+// expanded; cache it and re-render so the block fills in. Failures leave the
+// label uncached (so a later expand retries) and the wall/token chips still show.
+async function _histLoadRunStats(label) {
+  if (label in _histRunStats) return;   // already fetched (or in flight result)
+  const repo = _cachedFullRepo[_slug];
+  try {
+    const url = '/api/sprints/' + encodeURIComponent(label) + '/run-stats'
+              + (repo ? '?project=' + encodeURIComponent(repo) : '');
+    const resp = await fetch(url);
+    if (!resp.ok) return;
+    _histRunStats[label] = await resp.json();
+    _histRenderLedger(_histLedgerData);
+  } catch (_) {
+    /* transient — leave uncached so a later expand retries */
+  }
+}
+
 function _histCardHtml(s) {
   const locked   = _histIsLocked(s.lifecycle_state);
   const child    = _histIsChild(s.label);
@@ -9469,6 +9685,7 @@ function _histCardHtml(s) {
   const lbl = escHtml(s.label || '');
   const body = expanded ? `
       ${_histMetricsHtml(s)}
+      ${_histStatsHtml(s)}
       ${_histIssueListHtml(s)}
       ${lockNote}
       ${_histLinksHtml(s)}
@@ -9488,8 +9705,14 @@ function _histCardHtml(s) {
 }
 
 function _histToggleCard(label) {
-  if (_histExpanded.has(label)) _histExpanded.delete(label);
-  else _histExpanded.add(label);
+  if (_histExpanded.has(label)) {
+    _histExpanded.delete(label);
+  } else {
+    _histExpanded.add(label);
+    // Expanding a card lazily loads its run-stats block (issue #810); cached
+    // after the first fetch so subsequent expands are instant.
+    _histLoadRunStats(label);
+  }
   _histRenderLedger(_histLedgerData);
 }
 

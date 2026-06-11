@@ -151,6 +151,7 @@ def _enrich_from_state(label: str, sprints_dir: Path) -> dict:
         "duration": None,
         "estimate_accuracy": None,
         "summary_path": _find_summary_path(sprints_dir, label),
+        "reconciliation": None,
     }
     if not state:
         return out
@@ -161,6 +162,9 @@ def _enrich_from_state(label: str, sprints_dir: Path) -> dict:
     wc = state.get("wall_clock_secs")
     out["duration"] = round(wc) if isinstance(wc, (int, float)) else None
     out["estimate_accuracy"] = _compute_estimate_accuracy(state)
+    # Post-sprint reconciliation block (issue #856) — surfaced verbatim so the
+    # history card can render the loose-ends checklist with no GitHub call.
+    out["reconciliation"] = state.get("reconciliation")
     return out
 
 
@@ -197,6 +201,7 @@ def _record_from_history(rec: dict) -> dict:
         "estimate_accuracy": rec.get("estimate_accuracy"),
         "pr_number": rec.get("pr_number"),
         "summary_path": rec.get("summary_path"),
+        "reconciliation": rec.get("reconciliation"),
         "issues": issues,
         "_sort_key": rec.get("created_at") or "",
     }
@@ -218,6 +223,7 @@ def _record_from_lifecycle(row: dict, sprints_dir: Path) -> dict:
         "estimate_accuracy": enrich["estimate_accuracy"],
         "pr_number": None,
         "summary_path": enrich["summary_path"],
+        "reconciliation": enrich["reconciliation"],
         "issues": enrich["issues"],
         "_sort_key": row.get("ended_at") or row.get("started_at") or row.get("created_at") or "",
     }
@@ -237,6 +243,7 @@ def _record_from_files(label: str, sprints_dir: Path) -> dict:
         "estimate_accuracy": enrich["estimate_accuracy"],
         "pr_number": None,
         "summary_path": enrich["summary_path"],
+        "reconciliation": enrich["reconciliation"],
         "issues": enrich["issues"],
         "_sort_key": label,
     }

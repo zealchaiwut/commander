@@ -1125,6 +1125,8 @@ class SprintState:
     # Concurrent pipeline mode flag (issue #739) — surfaced to the dashboard so
     # the board can render dual active-agent cards + waiting-level state.
     pipeline_mode:           bool                = False
+    # Post-sprint reconciliation result (issue #856) — {all_clear, checks[], ...}
+    reconciliation:          Optional[dict]      = None
 
     def to_dict(self) -> dict:
         return {
@@ -1148,6 +1150,7 @@ class SprintState:
             "estimator_total_minutes":   self.estimator_total_minutes,
             "estimates":                 self.estimates,
             "pipeline_mode":             self.pipeline_mode,
+            "reconciliation":            self.reconciliation,
         }
 
     @staticmethod
@@ -1174,6 +1177,7 @@ class SprintState:
         s.estimator_total_minutes  = d.get("estimator_total_minutes")
         s.estimates                = d.get("estimates", {})
         s.pipeline_mode            = bool(d.get("pipeline_mode", False))
+        s.reconciliation           = d.get("reconciliation")
         return s
 
     def save(self, path: Path) -> None:
@@ -8602,6 +8606,44 @@ def main() -> None:
                 eff_repo          = eff_repo,
                 cfg               = cfg,
                 state             = state,
+            )
+
+    # Post-sprint reconciliation (issue #856): surface loose ends — a missing
+    # summary issue, an unmerged sprint PR, or stale status labels. Runs for any
+    # finished sprint (explicit Finish or natural end) since both reach here.
+    # Read-only and best-effort: never fail the sprint over reconciliation.
+    if state is not None and state.issues and not args.dry_run:
+        try:
+            from services.sprint_manager.reconciliation import (
+                gather_inputs_via_gh,
+                run_reconciliation,
+            )
+            rec_state_path = _state_path(state.sprint_number, state.sprint_label, cfg=cfg)
+            rec_inputs = gather_inputs_via_gh(
+                state.sprint_label,
+                eff_repo,
+                sprint_pr_url,
+                [i.number for i in state.issues],
+            )
+            rec_result = run_reconciliation(
+                sprint_label   = state.sprint_label,
+                sprint_number  = state.sprint_number,
+                project        = eff_repo or state.sprint_label,
+                state_path     = rec_state_path,
+                summary_issues = rec_inputs["summary_issues"],
+                pr_info        = rec_inputs["pr_info"],
+                tickets        = rec_inputs["tickets"],
+                emit_event     = _emit_sprint_lifecycle_event,
+                action_id      = os.environ.get("COMMANDER_RUN_ID"),
+            )
+            state.reconciliation = rec_result
+            _status = "all clear" if rec_result["all_clear"] else "loose ends found"
+            sys.stdout.write(str(f"  Reconciliation: {_status}") + "\n")
+        except Exception as _e_rec:
+            structured_log.warn(
+                "reconciliation_failed",
+                f"post-sprint reconciliation failed: {_e_rec}",
+                exc=str(_e_rec),
             )
 
     sys.stdout.write(str("\n=== Sprint Summary ===") + "\n")

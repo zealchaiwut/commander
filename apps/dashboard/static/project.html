@@ -1877,6 +1877,41 @@
     }
     .hist-badge i { font-size: 12px; }
 
+    /* Post-sprint reconciliation checklist (issue #856) */
+    .recon { padding: 8px 16px 4px; }
+    .recon-head {
+      display: flex; align-items: center; gap: 7px;
+      font-size: 11.5px; font-weight: 700; letter-spacing: .2px;
+      text-transform: uppercase; color: var(--text-muted); margin-bottom: 6px;
+    }
+    .recon-head .recon-summary { text-transform: none; letter-spacing: 0; font-weight: 600; }
+    .recon-head.clear   { color: var(--green); }
+    .recon-head.flagged { color: var(--red); }
+    .recon-item {
+      display: flex; align-items: flex-start; gap: 9px;
+      padding: 7px 10px; border-radius: 8px;
+      font-size: 12.5px; line-height: 1.4; color: var(--text);
+    }
+    .recon-item + .recon-item { margin-top: 5px; }
+    .recon-item i { font-size: 15px; flex: none; margin-top: 1px; }
+    .recon-item.ok      { background: var(--green-bg); }
+    .recon-item.ok i    { color: var(--green); }
+    .recon-item.fail    { background: var(--red-bg); }
+    .recon-item.fail i  { color: var(--red); }
+    .recon-item.fail .recon-detail { color: var(--red); font-weight: 600; }
+    .recon-label { font-weight: 600; }
+    .recon-detail { color: var(--text-muted); }
+
+    /* Compact all-clear / loose-ends chip in the card head */
+    .recon-chip {
+      display: inline-flex; align-items: center; gap: 4px;
+      font-size: 10.5px; font-weight: 700; letter-spacing: .3px;
+      padding: 2px 8px; border-radius: 5px; flex: none;
+    }
+    .recon-chip.clear   { color: var(--green); background: var(--green-bg); }
+    .recon-chip.flagged { color: var(--red);   background: var(--red-bg); }
+    .recon-chip i { font-size: 12px; }
+
     /* Per-sprint issue list */
     .iss-list { display: flex; flex-direction: column; padding: 6px 16px 4px; }
     .iss-list-empty { color: var(--text-sub); font-size: 12px; font-style: italic; padding: 8px 16px; }
@@ -5406,6 +5441,26 @@
       padding: 8px 20px 8px 44px;
     }
     .logs-run-row.expanded .logs-run-events { display: block; }
+    /* Per-ticket timing / token / failure strip (#858) */
+    .logs-ticket-stats { display: none; background: var(--bg); border-top: 1px solid var(--border); padding: 6px 20px 6px 44px; }
+    .logs-run-row.expanded .logs-ticket-stats:not(:empty) { display: block; }
+    .logs-ticket-row {
+      display: flex; align-items: center; flex-wrap: wrap; gap: 6px 16px;
+      padding: 5px 0; border-bottom: 1px solid var(--border);
+      font-size: 11px; color: var(--text-muted);
+    }
+    .logs-ticket-row:last-child { border-bottom: none; }
+    .logs-ticket-num { font-family: var(--mono); font-weight: 600; color: var(--text); min-width: 52px; }
+    .logs-ticket-metric { display: inline-flex; align-items: center; gap: 4px; font-variant-numeric: tabular-nums; }
+    .logs-ticket-metric i { font-size: 12px; color: var(--text-sub); }
+    .logs-ticket-fail { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
+    .logs-ticket-fail-class {
+      display: inline-flex; align-items: center; padding: 1px 7px; border-radius: 9px;
+      background: var(--red-bg); color: var(--red); font-weight: 600;
+      font-family: var(--mono); font-size: 10px; letter-spacing: .02em;
+    }
+    .logs-ticket-fail-msg { color: var(--red); opacity: .85; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+    .logs-ticket-row.failed .logs-ticket-num { color: var(--red); }
     .logs-event-line { display: flex; gap: 8px; }
     .logs-event-ts { color: var(--text-sub); flex-shrink: 0; }
     .logs-event-line.dispatch .logs-event-msg { color: var(--blue); }
@@ -7251,6 +7306,18 @@
             </div>
             <div class="anl-card-body">
               <div id="metrics-duration-wrap"><canvas id="metrics-duration-chart" style="width:100%;height:220px;"></canvas></div>
+            </div>
+          </div>
+          <div class="anl-card">
+            <div class="anl-card-head">
+              <i class="ti ti-coins"></i>
+              <div>
+                <div class="anl-card-title">Tokens per Sprint</div>
+                <div class="anl-card-sub">total agent tokens consumed per sprint (agent_runs)</div>
+              </div>
+            </div>
+            <div class="anl-card-body">
+              <div id="metrics-tokens-wrap"><canvas id="metrics-tokens-chart" style="width:100%;height:220px;"></canvas></div>
             </div>
           </div>
         </div>
@@ -9739,6 +9806,57 @@ async function _histLoadRunStats(label) {
   }
 }
 
+// Post-sprint reconciliation (issue #856): the loose-ends checklist surfaced on
+// the history card. Each check renders green (resolved) or red (unresolved) with
+// its own explanation, so a failure says exactly what and why without GitHub.
+function _histReconcileLabel(name) {
+  return ({
+    summary_issue: 'Summary issue',
+    sprint_pr: 'Sprint PR',
+    stale_labels: 'Status labels',
+  })[name] || name;
+}
+
+function _histReconcileHtml(s) {
+  const r = s.reconciliation;
+  if (!r || !Array.isArray(r.checks) || !r.checks.length) return '';
+  const allClear = !!r.all_clear;
+  const items = r.checks.map(c => {
+    const ok = !!c.ok;
+    const icon = ok ? 'ti-circle-check' : 'ti-alert-triangle';
+    const detail = c.detail || (ok ? 'OK' : 'unresolved');
+    return `<div class="recon-item ${ok ? 'ok' : 'fail'}">
+      <i class="ti ${icon}"></i>
+      <span><span class="recon-label">${escHtml(_histReconcileLabel(c.name))}:</span>
+        <span class="recon-detail">${escHtml(detail)}</span></span>
+    </div>`;
+  }).join('');
+  const failed = r.checks.filter(c => !c.ok).length;
+  const summary = allClear
+    ? 'All clear — no loose ends'
+    : (failed + (failed === 1 ? ' item unresolved' : ' items unresolved'));
+  return `<div class="recon">
+    <div class="recon-head ${allClear ? 'clear' : 'flagged'}">
+      <i class="ti ${allClear ? 'ti-checks' : 'ti-alert-triangle'}"></i>
+      Reconciliation <span class="recon-summary">· ${escHtml(summary)}</span>
+    </div>
+    ${items}
+  </div>`;
+}
+
+function _histReconcileChipHtml(s) {
+  const r = s.reconciliation;
+  if (!r || !Array.isArray(r.checks) || !r.checks.length) return '';
+  if (r.all_clear) {
+    return `<span class="recon-chip clear" title="Post-sprint reconciliation: all clear">
+      <i class="ti ti-checks"></i> clear</span>`;
+  }
+  const n = r.checks.filter(c => !c.ok).length;
+  const word = n === 1 ? 'loose end' : 'loose ends';
+  return `<span class="recon-chip flagged" title="Post-sprint reconciliation: ${n} ${word}">
+    <i class="ti ti-alert-triangle"></i> ${n} ${word}</span>`;
+}
+
 function _histCardHtml(s) {
   const locked   = _histIsLocked(s.lifecycle_state);
   const child    = _histIsChild(s.label);
@@ -9756,6 +9874,7 @@ function _histCardHtml(s) {
   const body = expanded ? `
       ${_histMetricsHtml(s)}
       ${_histStatsHtml(s)}
+      ${_histReconcileHtml(s)}
       ${_histIssueListHtml(s)}
       ${lockNote}
       ${_histLinksHtml(s)}
@@ -9766,6 +9885,7 @@ function _histCardHtml(s) {
       ${child ? '<span class="hist-child-arrow">↳</span>' : ''}
       <span class="hist-card-title">${escHtml(display)}</span>
       ${_histStateChip(s.lifecycle_state)}
+      ${_histReconcileChipHtml(s)}
       ${_histStaleChipHtml(s)}
       <span class="hist-card-spacer"></span>
       <span class="hist-card-mini">${escHtml(_histFmtSecs(s.duration))}</span>
@@ -15363,7 +15483,10 @@ function _setupModals() {
       document.getElementById('ns-modal').classList.add('hidden');
       await loadSprintMgmt();
     } catch (err) {
-      _nsShowError("Couldn't create sprint — " + err.message);
+      // The backend names the failed step + reason in data.detail (issue #857);
+      // surface it verbatim and keep the dialog open so the failure is loud and
+      // never silently resolves to a success/idle state.
+      _nsShowError(err.message || "Couldn't create sprint — unknown error");
       this.disabled = false;
       this.textContent = 'Create Sprint';
     }
@@ -18474,6 +18597,8 @@ const _logsState = {
   expanded: new Set(),
   events: {},
   loadingEvents: new Set(),
+  ticketStats: {},         // runId -> per-ticket timing/token/failure rows (#858)
+  loadingStats: new Set(),
   issues: null,            // per-issue browse list (lazy-loaded)
   viewMode: 'activity',    // 'timeline' (Runs) | 'issues' | 'raw' | 'activity'
   pollTimer: null,
@@ -18943,6 +19068,10 @@ function logsRenderTimeline() {
     const row = container.querySelector(`[data-run-id="${CSS.escape(runId)}"]`);
     if (!row) continue;
     row.classList.add('expanded');
+    const statsEl = row.querySelector('.logs-ticket-stats');
+    if (statsEl && _logsState.ticketStats[runId]) {
+      statsEl.innerHTML = _logsTicketStatsHtml(_logsState.ticketStats[runId]);
+    }
     const eventsEl = row.querySelector('.logs-run-events');
     if (eventsEl && _logsState.events[runId]) {
       eventsEl.innerHTML = _logsEventsHtml(_logsState.events[runId]);
@@ -18970,8 +19099,53 @@ function _logsRunRowHtml(run) {
       ${badge}
     </div>
   </div>
+  <div class="logs-ticket-stats" id="logs-stats-${escHtml(run.run_id)}">${
+    isExpanded && _logsState.ticketStats[run.run_id]
+      ? _logsTicketStatsHtml(_logsState.ticketStats[run.run_id])
+      : ''
+  }</div>
   <div class="logs-run-events" id="logs-events-${escHtml(run.run_id)}">${isExpanded ? eventsContent : ''}</div>
 </div>`;
+}
+
+// Whole-token count → compact "5.0k" / "1.2M"; missing token total reads as a
+// dash so a NULL agent_runs.total_tokens degrades gracefully (#858 AC5).
+function _logsFmtTokens(n) {
+  if (n == null || isNaN(n)) return '—';
+  return _histFmtTokens(n);
+}
+
+// Per-ticket timing / token / failure strip for an expanded Logs-tab run (#858).
+// One row per ticket: coder time, tester time, token count, and — for failed
+// tickets only — the failure class + message inline (AC4), so no log file needs
+// opening to see where time went or why a ticket broke (AC6).
+function _logsTicketStatsHtml(stats) {
+  const tickets = (stats && stats.tickets) || [];
+  if (tickets.length === 0) return '';
+  return tickets.map(t => {
+    const fail = t.failed
+      ? `<div class="logs-ticket-fail">` +
+          `<span class="logs-ticket-fail-class">${escHtml(t.failure_class || 'FAILED')}</span>` +
+          (t.failure_message ? `<span class="logs-ticket-fail-msg">${escHtml(t.failure_message)}</span>` : '') +
+        `</div>`
+      : '';
+    return `<div class="logs-ticket-row${t.failed ? ' failed' : ''}">` +
+      `<span class="logs-ticket-num">#${escHtml(String(t.issue_number))}</span>` +
+      `<span class="logs-ticket-metric" title="Coder duration"><i class="ti ti-code"></i>${escHtml(_histFmtSecs(t.coder_seconds))}</span>` +
+      `<span class="logs-ticket-metric" title="Tester duration"><i class="ti ti-flask"></i>${escHtml(_histFmtSecs(t.tester_seconds))}</span>` +
+      `<span class="logs-ticket-metric" title="Total tokens"><i class="ti ti-coin"></i>${escHtml(_logsFmtTokens(t.total_tokens))}</span>` +
+      fail +
+    `</div>`;
+  }).join('');
+}
+
+async function _logsFetchTicketStats(sprintLabel, project) {
+  try {
+    const url = `/api/logs/runs/${encodeURIComponent(sprintLabel)}/ticket-stats?project=${encodeURIComponent(project)}`;
+    const resp = await fetch(url);
+    if (!resp.ok) return { tickets: [] };
+    return await resp.json();
+  } catch (_) { return { tickets: [] }; }
 }
 
 function _logsEventsHtml(events) {
@@ -19004,6 +19178,20 @@ async function logsToggleRun(headerEl) {
 
   _logsState.expanded.add(runId);
   row.classList.add('expanded');
+
+  // Per-ticket timing / token / failure strip (#858) — fetched once per run.
+  if (_logsState.ticketStats[runId]) {
+    const statsEl = document.getElementById(`logs-stats-${runId}`);
+    if (statsEl) statsEl.innerHTML = _logsTicketStatsHtml(_logsState.ticketStats[runId]);
+  } else if (!_logsState.loadingStats.has(runId)) {
+    _logsState.loadingStats.add(runId);
+    _logsFetchTicketStats(sprintLabel, project).then(stats => {
+      _logsState.loadingStats.delete(runId);
+      _logsState.ticketStats[runId] = stats;
+      const el = document.getElementById(`logs-stats-${runId}`);
+      if (el && _logsState.expanded.has(runId)) el.innerHTML = _logsTicketStatsHtml(stats);
+    });
+  }
 
   const eventsEl = document.getElementById(`logs-events-${runId}`);
 
@@ -20563,7 +20751,7 @@ document.addEventListener('keydown', function(e) {
         <option value="3">3 sprints</option>
       </select>
     </div>
-    <div class="modal-error hidden" id="ns-error"></div>
+    <div class="modal-error hidden" id="ns-error" role="alert" aria-live="assertive"></div>
   </div>
   <div class="modal-footer">
     <button class="btn-ghost" id="ns-cancel-btn" type="button">Cancel</button>
@@ -21343,7 +21531,18 @@ document.addEventListener('keydown', function(e) {
 (function () {
   let _metricsLoaded = false;
   let _metricsData = null;
+  // Tokens-per-sprint is sourced from agent_runs.total_tokens (issue #859),
+  // exposed by the cost endpoint's by_sprint aggregate — a different shape
+  // from /api/metrics/sprints, so it is held in its own series.
+  let _tokensData = null;
   const _charts = {};
+
+  function _fmtTokens(n) {
+    n = n || 0;
+    if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M';
+    if (n >= 1e3) return (n / 1e3).toFixed(1) + 'k';
+    return String(Math.round(n));
+  }
 
   function _loadChartJs(cb, fallback) {
     if (window.Chart) { cb(); return; }
@@ -21399,6 +21598,17 @@ document.addEventListener('keydown', function(e) {
       return '<tr><td>' + roleLabels[i] + '</td><td>' + avg + ' min/ticket</td></tr>';
     }).join('');
     w.innerHTML = '<table class="metrics-fallback-table"><thead><tr><th>Role</th><th>Avg min/ticket</th></tr></thead><tbody>' + rows + '</tbody></table>';
+  }
+
+  function _tableTokens(data) {
+    data = data || [];
+    if (!data.length) { _showMsg('tokens', 'No data available'); return; }
+    const w = document.getElementById('metrics-tokens-wrap');
+    if (!w) return;
+    const rows = data.map(d =>
+      '<tr><td>' + escHtml(d.sprint_label) + '</td><td>' + _fmtTokens(d.total_tokens || 0) + '</td></tr>'
+    ).join('');
+    w.innerHTML = '<table class="metrics-fallback-table"><thead><tr><th>Sprint</th><th>Tokens</th></tr></thead><tbody>' + rows + '</tbody></table>';
   }
 
   function _tableFallback(data) {
@@ -21524,21 +21734,50 @@ document.addEventListener('keydown', function(e) {
     );
   }
 
+  function _renderTokens(data) {
+    data = data || [];
+    if (!data.length || !data.some(d => (d.total_tokens || 0) > 0)) {
+      _showMsg('tokens', 'No data available'); return;
+    }
+    _resetCanvas('tokens');
+    const c = _colors();
+    if (_charts.tokens) _charts.tokens.destroy();
+    const opts = _chartOpts(v => _fmtTokens(v));
+    opts.plugins.tooltip = { callbacks: { label: ctx => _fmtTokens(ctx.parsed.y) + ' tokens' } };
+    _charts.tokens = new Chart(
+      document.getElementById('metrics-tokens-chart'),
+      {
+        type: 'bar',
+        data: {
+          labels: data.map(d => d.sprint_label),
+          datasets: [{ label: 'Tokens', data: data.map(d => d.total_tokens || 0),
+            backgroundColor: c.purple + 'cc', borderRadius: 4 }],
+        },
+        options: opts,
+      }
+    );
+  }
+
   function _renderAll(data) {
     _renderVelocity(data);
     _renderFailure(data);
     _renderDuration(data);
   }
 
+  // Render the loaded series: velocity/failure/duration from /api/metrics/sprints,
+  // tokens-per-sprint from the agent_runs-backed cost endpoint (issue #859).
+  function _renderLoaded() { _renderAll(_metricsData); _renderTokens(_tokensData); }
+  function _tableLoaded() { _tableFallback(_metricsData); _tableTokens(_tokensData); }
+
   // Trends sub-tab chart loader (#715). Exposed under anlTrendsInit because the
   // Analytics IIFE overrides window.metricsInit to open the Calibration sub-tab.
   window.anlTrendsInit = async function () {
     if (_metricsLoaded && _metricsData !== null) {
-      _loadChartJs(() => _renderAll(_metricsData), () => _tableFallback(_metricsData));
+      _loadChartJs(_renderLoaded, _tableLoaded);
       return;
     }
 
-    ['velocity', 'failure', 'duration'].forEach(k => {
+    ['velocity', 'failure', 'duration', 'tokens'].forEach(k => {
       const w = document.getElementById('metrics-' + k + '-wrap');
       if (w) w.innerHTML = '<div class="metrics-empty"><i class="ti ti-loader" style="display:inline-block;animation:bc-badge-spin .9s linear infinite;"></i> Loading…</div>';
     });
@@ -21550,10 +21789,22 @@ document.addEventListener('keydown', function(e) {
     } catch (e) {
       _metricsData = [];
       ['velocity', 'failure', 'duration'].forEach(k => _showMsg(k, 'Failed to load metrics'));
-      return;
     }
+
+    // Tokens-per-sprint is sourced from agent_runs.total_tokens via the cost
+    // endpoint's by_sprint aggregate (issue #859).
+    try {
+      const tRes = await fetch('/api/projects/' + encodeURIComponent(_slug) + '/analytics/cost');
+      if (!tRes.ok) throw new Error('HTTP ' + tRes.status);
+      const cost = await tRes.json();
+      _tokensData = Array.isArray(cost.by_sprint) ? cost.by_sprint : [];
+    } catch (e) {
+      _tokensData = [];
+      _showMsg('tokens', 'Failed to load tokens');
+    }
+
     _metricsLoaded = true;
-    _loadChartJs(() => _renderAll(_metricsData), () => _tableFallback(_metricsData));
+    _loadChartJs(_renderLoaded, _tableLoaded);
   };
 }());
 

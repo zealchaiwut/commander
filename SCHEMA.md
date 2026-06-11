@@ -359,6 +359,7 @@ Cross-run full-text log search using ripgrep with DB-indexed pre-filtering.
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/api/logs/search` | Search log files across all sprint runs. Query params: `project`, `sprint`, `issue` (int), `agent`, `event_type`, `level`, `time_range` (24h/7d/30d), `q` (substring). Returns up to 500 matches with `sprint`, `issue`, `agent`, `line_offset`, `text`, and `file` per match, plus `total`, `capped`, `timed_out`, and `query_ms` |
+| `GET` | `/api/logs/runs/{sprint_label}/ticket-stats` | Per-ticket timing + token + failure detail for a Logs-tab run (issue #858). Optional `project` query param. One row per ticket carrying the coder/tester duration, the combined token total (any of which may be `null` → dash on the frontend), and the failure class + message for failed tickets. Aggregated locally from the durable `agent_runs` rows (`logs_stats_service.ticket_stats`); zero GitHub calls |
 
 ### Cost Analytics (issue #786)
 
@@ -394,7 +395,7 @@ add zero GitHub API calls.
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/api/sprints/history` | Paginated, enriched sprint-history feed for the History ledger (issue #805). Query params: `offset` (default 0), `limit` (default 20). Returns `{sprints: [...], offset, limit, total}`; each item carries `label`, `project`, `lifecycle_state`, `duration`, `tokens`, `estimate_accuracy`, `pr_number`, `summary_path`, and an `issues` list. Sources both lifecycle rows and `sprint_history` ledger rows; makes no GitHub calls |
+| `GET` | `/api/sprints/history` | Paginated, enriched sprint-history feed for the History ledger (issue #805). Query params: `offset` (default 0), `limit` (default 20). Returns `{sprints: [...], offset, limit, total}`; each item carries `label`, `project`, `lifecycle_state`, `duration`, `tokens`, `estimate_accuracy`, `pr_number`, `summary_path`, `reconciliation`, and an `issues` list. Sources both lifecycle rows and `sprint_history` ledger rows; makes no GitHub calls. The `reconciliation` field (issue #856) carries the post-sprint loose-ends result `{all_clear, checks[], ...}` read verbatim from `<label>-state.json`, or `null` for sprints that closed before the feature was deployed |
 | `GET` | `/api/sprints/{label}/run-stats` | Per-sprint `agent_runs` aggregation for the expanded History run-stats block — stat chips, coder/tester split bar, and gantt timeline segments (issue #810). Optional `project` query param |
 | `GET` | `/api/sprints/{sprint_label}/preview-dag` | Read-only execution preview for a planned sprint (issue #809): predicted dispatch levels, file conflicts, cycles, and the unestimated-ticket list, computed by `dag_builder` over the sprint's cached tickets. Requires `project` query param; cached data only |
 | `GET` | `/scan-stale-branches` | List `feature/<N>-*` remote branches, map each to a sprint, and flag merged vs unmerged (issue #808). Query params: `repo` (required), `target` (optional base branch). Returns branches plus a `by_sprint` grouping |

@@ -16,9 +16,13 @@ from __future__ import annotations
 
 import subprocess
 import sys as _sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import HTTPException
+
+from services.sprint_manager import sprint_creation
+from services.sprint_manager.sprint_creation import SprintCreationError  # re-export
 
 # server.py is a top-level module on the dashboard path; make sure it resolves.
 _DASHBOARD_ROOT = Path(__file__).resolve().parent.parent
@@ -30,6 +34,77 @@ def _server():
     """Deferred import of the monolith — safe at request time."""
     import server  # noqa: PLC0415 — intentional late import (see module docstring)
     return server
+
+
+def create_sprint_verified(project: str, sprint_number=None, goal=None, tickets=None) -> str:
+    """Create a sprint-N label for a project as a verified, ordered sequence.
+
+    Runs (1) create GitHub label, (2) apply label to any selected tickets,
+    (3) write the plan file — verifying each step, retrying step 1 once on a
+    transient failure, and rolling back earlier steps on a non-recoverable
+    failure (issue #857). Returns the created ``sprint-N`` label string.
+
+    Raises ``HTTPException`` for validation/conflict errors (400/409) and
+    ``SprintCreationError`` (named for the failed step, with a status_code)
+    when a creation step fails after retry/rollback — so the caller can surface
+    it loudly in the New Sprint dialog. The ``sprint_created`` dashboard event
+    is emitted by the caller (server.py) on success.
+    """
+    srv = _server()
+    gc = srv.github_client
+    if goal is not None and len(goal.strip()) < 10:
+        raise HTTPException(400, detail="Sprint goal must be at least 10 characters")
+    try:
+        sprints = gc.list_sprints(repo_name=project)
+    except subprocess.CalledProcessError as e:
+        raise srv._gh_error(e)
+    except ValueError as e:
+        raise HTTPException(400, detail=str(e))
+
+    if sprint_number is not None:
+        if sprint_number in sprints:
+            raise HTTPException(409, detail=f"Sprint {sprint_number} already exists")
+        target_num = sprint_number
+    else:
+        target_num = (max(sprints) if sprints else 0) + 1
+
+    sprint_label = f"sprint-{target_num}"
+    eff_goal = (goal or sprint_label).strip() or sprint_label
+    project_root = srv._project_root_path(project)
+    ticket_list = list(tickets or [])
+
+    def _write_plan():
+        # Sprint metadata -> local JSON (authoritative plan file) + goal file.
+        if goal is not None:
+            goal_path = srv._sprint_goal_path(project_root, sprint_label)
+            goal_path.parent.mkdir(parents=True, exist_ok=True)
+            goal_path.write_text(goal.strip(), encoding="utf-8")
+        srv._sprint_json_write(
+            srv._sprint_json_path(project_root, sprint_label),
+            {"label": sprint_label, "goal": eff_goal, "project": project,
+             "status": "pending", "tickets": ticket_list},
+        )
+        # plan.json is a deprecated cache (issue #757) — best-effort dual-write.
+        try:
+            srv._plan_json_set_state(
+                project_root, sprint_label, "planning",
+                created_at=datetime.now(timezone.utc).isoformat(),
+            )
+        except Exception:
+            pass
+
+    def _plan_written():
+        return srv._sprint_json_path(project_root, sprint_label).exists()
+
+    deps = sprint_creation.SprintCreateDeps(
+        github_client=gc, repo=project, sprint_num=target_num,
+        tickets=ticket_list, write_plan_fn=_write_plan, plan_written_fn=_plan_written,
+    )
+    try:
+        sprint_creation.create_sprint_verified(deps)
+    finally:
+        gc.invalidate("sprints:")
+    return sprint_label
 
 
 def get_sprints():

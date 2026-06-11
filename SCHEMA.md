@@ -91,6 +91,29 @@ Per-project clone environment paths (prd, uat, coder, tester). Cascade-deletes w
 Index: `ix_project_environments_project_id` on `project_id`.
 Unique constraint: `(project_id, env)`.
 
+### project_todos (issue #843)
+
+A lightweight, durable per-project to-do list that lives outside the ticket
+backlog — a simple scratchpad scoped to each project. Deliberately **not**
+ticket-like: no labels, assignees, or due dates. Portable column types
+(Integer / Text / Boolean, ISO-8601 string timestamps) so the table applies
+cleanly on SQLite as well as Postgres, matching `agent_runs`. When Neon is
+disabled the dashboard serves todos from a local JSON store
+(`.commander/project_todos_store.json`) via `services/sprint_manager/todo_repo.py`.
+
+| Column | Type | Description |
+|---|---|---|
+| `id` | integer PK | Auto-increment |
+| `project` | text NOT NULL | Owning project slug; every query is scoped by this |
+| `text` | text NOT NULL | Free-text todo body |
+| `done` | boolean NOT NULL | Completion flag; defaults to `false` |
+| `position` | integer NOT NULL | Sort key; the list is always returned ascending by `position` |
+| `created_at` | text NOT NULL | ISO-8601 UTC creation timestamp |
+| `updated_at` | text NOT NULL | ISO-8601 UTC last-modified timestamp |
+| `promoted_issue_number` | integer NULL | Reserved for a future planning bridge; never read, written, or exposed by the #843 API |
+
+Index: `ix_project_todos_project_position` on `(project, position)`.
+
 ## Migrations
 
 | Revision | Description |
@@ -105,6 +128,7 @@ Unique constraint: `(project_id, env)`.
 | `h8i9j0k1l2m3` | Add `state` / `ended_at` / `end_reason` / `parent_label` to `sprints`; add `failed` to `sprint_status_enum`; add `sprint_ticket_order` table (issue #757) |
 | `i9j0k1l2m3n4` | Add `agent_runs` table for per-agent duration tracking (portable Integer/Text columns; SQLite + Postgres) (issue #764) |
 | `j0k1l2m3n4o5` | Add `risk_tier` and `model_used` columns to `agent_runs` (issue #790) |
+| `k1l2m3n4o5p6` | Add `project_todos` table for per-project to-do lists (portable Integer/Text/Boolean columns; SQLite + Postgres) (issue #843) |
 
 > **Neon is now an optional export target only (issue #758).** The dashboard and sprint manager run entirely off SQLite + local JSON; nothing writes to Neon in live paths. The Alembic migrations and SQLAlchemy models above remain so `scripts/export_to_neon.py` can push a snapshot on demand (`DATABASE_URL=… python scripts/export_to_neon.py`).
 
@@ -389,3 +413,23 @@ Two sprint-manager settings drive the new panels (`services/sprint_manager/setti
 before older ones collapse into aggregate folds (issue #807); and
 `sprint_budget_minutes` (default 180) — the sprint capacity budget that drives the
 capacity bar (issue #801).
+
+### Project To-Dos (issue #843)
+
+A lightweight, durable per-project to-do list backed by `project_todos` (Neon,
+with a local JSON fallback when Neon is disabled). All routes are project-scoped:
+a todo is only ever read, mutated, or deleted through its own project's path, so
+one project's todos are never visible to another. The reserved
+`promoted_issue_number` column is never read, written, or exposed. The routes
+ride on the already-mounted `sprints` router so no route lands in `server.py`
+(COMMANDER_GATE_MONOLITH, issue #761).
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/projects/{project}/todos` | List all todos (active and done) for the project, ascending by `position` |
+| `POST` | `/api/projects/{project}/todos` | Create a todo from body `{text}`; `done` defaults to `false`, `position` appends to end. Returns 201 with the new todo |
+| `PATCH` | `/api/projects/{project}/todos/{todo_id}` | Update `done`, `text`, and/or `position` (body `{done?, text?, position?}`) — independently or together. 404 if the todo does not belong to the project |
+| `DELETE` | `/api/projects/{project}/todos/{todo_id}` | Delete the todo; 204 on success, 404 if it does not belong to the project |
+
+The todo object shape is `{id, project, text, done, position, created_at, updated_at}` —
+no ticket-like fields (labels, assignees, due dates) and no `promoted_issue_number`.

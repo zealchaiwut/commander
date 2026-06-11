@@ -1,4 +1,5 @@
 from sqlalchemy import (
+    Boolean,
     Column,
     Integer,
     Text,
@@ -109,6 +110,37 @@ class AgentRun(Base):
     __table_args__ = (
         Index("ix_agent_runs_issue_agent", "issue_number", "agent"),
         Index("ix_agent_runs_sprint", "sprint_label"),
+    )
+
+
+class ProjectTodo(Base):
+    """A lightweight, durable per-project to-do item (issue #843).
+
+    A simple scratchpad scoped to each project, deliberately *not* ticket-like:
+    no labels, assignees, or due dates — only free text, a done flag, and an
+    ordering position. Portable column types only (Integer / Text / Boolean,
+    ISO-8601 string timestamps) so the table and its migration apply cleanly on
+    SQLite as well as Postgres, matching ``AgentRun``.
+
+    ``promoted_issue_number`` is reserved for a future planning bridge that will
+    let a todo graduate into a real GitHub issue. It exists and is nullable but
+    is intentionally never read, written, or exposed by any endpoint in #843.
+    """
+
+    __tablename__ = "project_todos"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    project = Column(Text, nullable=False)
+    text = Column(Text, nullable=False)
+    done = Column(Boolean, nullable=False, default=False)
+    position = Column(Integer, nullable=False)
+    created_at = Column(Text, nullable=False)
+    updated_at = Column(Text, nullable=False)
+    # Reserved for a future planning bridge — unused in #843.
+    promoted_issue_number = Column(Integer, nullable=True)
+
+    __table_args__ = (
+        Index("ix_project_todos_project_position", "project", "position"),
     )
 
 

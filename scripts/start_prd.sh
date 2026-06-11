@@ -56,6 +56,20 @@ else
     fi
 fi
 
+# ── Agent tool PATH ───────────────────────────────────────────────────────────
+# The dashboard dispatches `claude` subprocesses; the pre-dispatch doctor
+# (issue #789) blocks every ticket when the CLI isn't on the server's PATH.
+# Restarts from minimal shells (launch agents, CI, tool sandboxes) often lack
+# the user-level install dirs, so make sure they're present before launch.
+for tooldir in "$HOME/.local/bin" "$HOME/.claude/local"; do
+    if [ -d "$tooldir" ] && [[ ":$PATH:" != *":$tooldir:"* ]]; then
+        export PATH="$PATH:$tooldir"
+    fi
+done
+if ! command -v claude >/dev/null 2>&1; then
+    echo "WARNING: claude CLI not found in PATH — sprint dispatch will be blocked."
+fi
+
 # ── Sync pip requirements ─────────────────────────────────────────────────────
 echo "Syncing pip requirements…"
 "$VENV/bin/pip" install --quiet -r "$REPO_ROOT/requirements.txt"

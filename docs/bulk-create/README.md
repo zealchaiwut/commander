@@ -71,3 +71,6 @@ separated by `---` exactly as the splitter expects.
 - [2026-06-10-logs-surface-failures.md](2026-06-10-logs-surface-failures.md) — surface real failure class/message on the Logs page + fix board "tester rejected" mislabel
 - [2026-06-11-machine-onboarding.md](2026-06-11-machine-onboarding.md) — launchd PATH from real tool locations, headless tokens at install, machine doctor, onboarding runbook
 - [2026-06-11-sprint-reporting-analytics.md](2026-06-11-sprint-reporting-analytics.md) — finish-sprint reconciliation, verified New Sprint, logs per-agent time, real analytics, documentor sprint briefs
+- [2026-06-11-roadmap-milestones.md](2026-06-11-roadmap-milestones.md) — phase 1: GitHub-native milestones, Roadmap tab, ticket↔milestone, home progress
+- [2026-06-11-sprint-planner-signoff.md](2026-06-11-sprint-planner-signoff.md) — phase 2: planner from active milestone, pending-signoff + approve, scheduled night queue (off by default)
+- [2026-06-11-advisor.md](2026-06-11-advisor.md) — phase 3: daily advisor suggestions, accept→BA flow, 2–5 sprint look-ahead, brief hook

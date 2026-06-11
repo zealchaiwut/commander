@@ -15483,7 +15483,10 @@ function _setupModals() {
       document.getElementById('ns-modal').classList.add('hidden');
       await loadSprintMgmt();
     } catch (err) {
-      _nsShowError("Couldn't create sprint — " + err.message);
+      // The backend names the failed step + reason in data.detail (issue #857);
+      // surface it verbatim and keep the dialog open so the failure is loud and
+      // never silently resolves to a success/idle state.
+      _nsShowError(err.message || "Couldn't create sprint — unknown error");
       this.disabled = false;
       this.textContent = 'Create Sprint';
     }
@@ -20748,7 +20751,7 @@ document.addEventListener('keydown', function(e) {
         <option value="3">3 sprints</option>
       </select>
     </div>
-    <div class="modal-error hidden" id="ns-error"></div>
+    <div class="modal-error hidden" id="ns-error" role="alert" aria-live="assertive"></div>
   </div>
   <div class="modal-footer">
     <button class="btn-ghost" id="ns-cancel-btn" type="button">Cancel</button>

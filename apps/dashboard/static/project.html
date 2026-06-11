@@ -7308,6 +7308,18 @@
               <div id="metrics-duration-wrap"><canvas id="metrics-duration-chart" style="width:100%;height:220px;"></canvas></div>
             </div>
           </div>
+          <div class="anl-card">
+            <div class="anl-card-head">
+              <i class="ti ti-coins"></i>
+              <div>
+                <div class="anl-card-title">Tokens per Sprint</div>
+                <div class="anl-card-sub">total agent tokens consumed per sprint (agent_runs)</div>
+              </div>
+            </div>
+            <div class="anl-card-body">
+              <div id="metrics-tokens-wrap"><canvas id="metrics-tokens-chart" style="width:100%;height:220px;"></canvas></div>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -21516,7 +21528,18 @@ document.addEventListener('keydown', function(e) {
 (function () {
   let _metricsLoaded = false;
   let _metricsData = null;
+  // Tokens-per-sprint is sourced from agent_runs.total_tokens (issue #859),
+  // exposed by the cost endpoint's by_sprint aggregate — a different shape
+  // from /api/metrics/sprints, so it is held in its own series.
+  let _tokensData = null;
   const _charts = {};
+
+  function _fmtTokens(n) {
+    n = n || 0;
+    if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M';
+    if (n >= 1e3) return (n / 1e3).toFixed(1) + 'k';
+    return String(Math.round(n));
+  }
 
   function _loadChartJs(cb, fallback) {
     if (window.Chart) { cb(); return; }
@@ -21572,6 +21595,17 @@ document.addEventListener('keydown', function(e) {
       return '<tr><td>' + roleLabels[i] + '</td><td>' + avg + ' min/ticket</td></tr>';
     }).join('');
     w.innerHTML = '<table class="metrics-fallback-table"><thead><tr><th>Role</th><th>Avg min/ticket</th></tr></thead><tbody>' + rows + '</tbody></table>';
+  }
+
+  function _tableTokens(data) {
+    data = data || [];
+    if (!data.length) { _showMsg('tokens', 'No data available'); return; }
+    const w = document.getElementById('metrics-tokens-wrap');
+    if (!w) return;
+    const rows = data.map(d =>
+      '<tr><td>' + escHtml(d.sprint_label) + '</td><td>' + _fmtTokens(d.total_tokens || 0) + '</td></tr>'
+    ).join('');
+    w.innerHTML = '<table class="metrics-fallback-table"><thead><tr><th>Sprint</th><th>Tokens</th></tr></thead><tbody>' + rows + '</tbody></table>';
   }
 
   function _tableFallback(data) {
@@ -21697,21 +21731,50 @@ document.addEventListener('keydown', function(e) {
     );
   }
 
+  function _renderTokens(data) {
+    data = data || [];
+    if (!data.length || !data.some(d => (d.total_tokens || 0) > 0)) {
+      _showMsg('tokens', 'No data available'); return;
+    }
+    _resetCanvas('tokens');
+    const c = _colors();
+    if (_charts.tokens) _charts.tokens.destroy();
+    const opts = _chartOpts(v => _fmtTokens(v));
+    opts.plugins.tooltip = { callbacks: { label: ctx => _fmtTokens(ctx.parsed.y) + ' tokens' } };
+    _charts.tokens = new Chart(
+      document.getElementById('metrics-tokens-chart'),
+      {
+        type: 'bar',
+        data: {
+          labels: data.map(d => d.sprint_label),
+          datasets: [{ label: 'Tokens', data: data.map(d => d.total_tokens || 0),
+            backgroundColor: c.purple + 'cc', borderRadius: 4 }],
+        },
+        options: opts,
+      }
+    );
+  }
+
   function _renderAll(data) {
     _renderVelocity(data);
     _renderFailure(data);
     _renderDuration(data);
   }
 
+  // Render the loaded series: velocity/failure/duration from /api/metrics/sprints,
+  // tokens-per-sprint from the agent_runs-backed cost endpoint (issue #859).
+  function _renderLoaded() { _renderAll(_metricsData); _renderTokens(_tokensData); }
+  function _tableLoaded() { _tableFallback(_metricsData); _tableTokens(_tokensData); }
+
   // Trends sub-tab chart loader (#715). Exposed under anlTrendsInit because the
   // Analytics IIFE overrides window.metricsInit to open the Calibration sub-tab.
   window.anlTrendsInit = async function () {
     if (_metricsLoaded && _metricsData !== null) {
-      _loadChartJs(() => _renderAll(_metricsData), () => _tableFallback(_metricsData));
+      _loadChartJs(_renderLoaded, _tableLoaded);
       return;
     }
 
-    ['velocity', 'failure', 'duration'].forEach(k => {
+    ['velocity', 'failure', 'duration', 'tokens'].forEach(k => {
       const w = document.getElementById('metrics-' + k + '-wrap');
       if (w) w.innerHTML = '<div class="metrics-empty"><i class="ti ti-loader" style="display:inline-block;animation:bc-badge-spin .9s linear infinite;"></i> Loading…</div>';
     });
@@ -21723,10 +21786,22 @@ document.addEventListener('keydown', function(e) {
     } catch (e) {
       _metricsData = [];
       ['velocity', 'failure', 'duration'].forEach(k => _showMsg(k, 'Failed to load metrics'));
-      return;
     }
+
+    // Tokens-per-sprint is sourced from agent_runs.total_tokens via the cost
+    // endpoint's by_sprint aggregate (issue #859).
+    try {
+      const tRes = await fetch('/api/projects/' + encodeURIComponent(_slug) + '/analytics/cost');
+      if (!tRes.ok) throw new Error('HTTP ' + tRes.status);
+      const cost = await tRes.json();
+      _tokensData = Array.isArray(cost.by_sprint) ? cost.by_sprint : [];
+    } catch (e) {
+      _tokensData = [];
+      _showMsg('tokens', 'Failed to load tokens');
+    }
+
     _metricsLoaded = true;
-    _loadChartJs(() => _renderAll(_metricsData), () => _tableFallback(_metricsData));
+    _loadChartJs(_renderLoaded, _tableLoaded);
   };
 }());
 

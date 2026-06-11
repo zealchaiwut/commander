@@ -236,7 +236,7 @@ if [ -n "$CLAUDE_TOKEN_VALUE" ]; then
   CLAUDE_TOKEN_PLIST_BLOCK=$'\n    <key>CLAUDE_CODE_OAUTH_TOKEN</key>\n    <string>'"${CLAUDE_TOKEN_VALUE}"$'</string>'
 fi
 
-# ── Resolve tool directories dynamically (issue #826) ─────────────────────────
+# ── Resolve tool directories dynamically (issues #826, #852) ──────────────────
 # A launchd service is detached from the login shell, so its PATH must contain
 # the real on-disk dirs of `claude` and `gh`. Hardcoding those dirs broke on
 # machines where the binaries live outside the standard locations (e.g.
@@ -244,6 +244,11 @@ fi
 # Resolve them at install time with `command -v` and add their parent dirs (plus
 # the project venv bin/, resolved from the repo root) to the plist PATH. If
 # either tool is missing we abort BEFORE rendering or writing any plist.
+#
+# Contracted PATH guarantees (issue #852): resolved tool dirs come first, the
+# standard system dirs follow as a trailing baseline, every directory appears at
+# most once (no duplicates), and each run rebuilds the value from scratch so a
+# fresh install fully overwrites any plist left by a prior (hardcoded) install.
 abs_parent_dir() {
   # Print the absolute parent directory of "$1", resolving relative paths.
   cd "$(dirname "$1")" >/dev/null 2>&1 && pwd

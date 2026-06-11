@@ -1036,7 +1036,38 @@
     }
     .ps-toggle[aria-checked="false"] { background: var(--border); }
     .ps-toggle[aria-checked="false"]::after { left: 2px; }
-    .ps-color-swatch { width: 16px; height: 16px; border-radius: 4px; display: inline-block; flex-shrink: 0; }
+    /* Project identity pickers (issue #774) */
+    .ps-identity-control { flex-direction: column; align-items: flex-start; gap: 14px; }
+    .ps-identity-preview { display: flex; align-items: center; gap: 10px; }
+    .ps-identity-avatar {
+      width: 40px; height: 40px; border-radius: 9px; display: inline-flex;
+      align-items: center; justify-content: center; color: #fff; font-size: 20px;
+      background: var(--blue); flex-shrink: 0;
+    }
+    .ps-identity-preview-label { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .04em; }
+    .ps-picker-group { display: flex; flex-direction: column; gap: 7px; width: 100%; }
+    .ps-picker-title { font-size: 11px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: .04em; }
+    .ps-icon-grid { display: flex; flex-wrap: wrap; gap: 6px; max-width: 440px; }
+    .ps-icon-opt {
+      width: 34px; height: 34px; display: inline-flex; align-items: center; justify-content: center;
+      border: 1px solid var(--border); border-radius: 8px; background: var(--surface);
+      color: var(--text-muted); font-size: 17px; cursor: pointer; padding: 0;
+      transition: border-color .12s, color .12s, background .12s;
+    }
+    .ps-icon-opt:hover { color: var(--text); border-color: var(--text-sub); }
+    .ps-icon-opt:focus-visible { outline: none; border-color: var(--blue); box-shadow: 0 0 0 3px var(--blue-bg); }
+    .ps-icon-opt[aria-checked="true"] { border-color: var(--blue); color: var(--blue); background: var(--blue-bg); }
+    .ps-color-grid { display: flex; flex-wrap: wrap; gap: 8px; }
+    .ps-color-opt {
+      width: 26px; height: 26px; border-radius: 50%; border: 2px solid transparent;
+      cursor: pointer; padding: 0; box-shadow: 0 0 0 1px var(--border) inset;
+      transition: transform .1s;
+    }
+    .ps-color-opt:hover { transform: scale(1.1); }
+    .ps-color-opt:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--blue-bg); }
+    .ps-color-opt[aria-checked="true"] { border-color: var(--text); }
+    .ps-identity-error { font-size: 12px; color: var(--red); }
+    .ps-identity-error.hidden { display: none; }
     .ps-save-bar {
       display: flex; justify-content: flex-end; align-items: center;
       gap: 10px; padding-top: 4px;
@@ -7341,10 +7372,22 @@
               </div>
               <div class="ps-row">
                 <div class="ps-row-label">Icon &amp; color</div>
-                <div class="ps-row-control" style="gap:8px">
-                  <input class="ps-inp" id="ps-icon" type="text" style="width:130px" placeholder="ti-folder">
-                  <span class="ps-color-swatch" id="ps-color-swatch"></span>
-                  <input class="ps-inp" id="ps-color" type="text" style="width:100px" placeholder="gray">
+                <div class="ps-row-control ps-identity-control">
+                  <div class="ps-identity-preview">
+                    <span class="ps-identity-avatar" id="ps-identity-avatar" aria-hidden="true">
+                      <i class="ti ti-folder" id="ps-preview-icon"></i>
+                    </span>
+                    <span class="ps-identity-preview-label">Preview</span>
+                  </div>
+                  <div class="ps-picker-group">
+                    <div class="ps-picker-title" id="ps-icon-picker-label">Icon</div>
+                    <div class="ps-icon-grid" id="ps-icon-grid" role="radiogroup" aria-labelledby="ps-icon-picker-label"></div>
+                  </div>
+                  <div class="ps-picker-group">
+                    <div class="ps-picker-title" id="ps-color-picker-label">Color</div>
+                    <div class="ps-color-grid" id="ps-color-grid" role="radiogroup" aria-labelledby="ps-color-picker-label"></div>
+                  </div>
+                  <div class="ps-identity-error hidden" id="ps-identity-error" role="alert"></div>
                 </div>
               </div>
               <div class="ps-row">
@@ -24678,6 +24721,97 @@ const _PS_COLOR_MAP = {
   cyan: '#0891b2', indigo: '#4f46e5',
 };
 
+// Curated set of project icons offered in the settings picker (Tabler icons).
+const _PS_ICON_OPTIONS = [
+  'ti-folder', 'ti-rocket', 'ti-flask', 'ti-code', 'ti-terminal-2', 'ti-cpu',
+  'ti-database', 'ti-cloud', 'ti-bolt', 'ti-bug', 'ti-chart-bar', 'ti-book',
+  'ti-briefcase', 'ti-package', 'ti-world', 'ti-star', 'ti-heart', 'ti-flame',
+  'ti-puzzle', 'ti-robot', 'ti-brain', 'ti-shield',
+];
+const _PS_DEFAULT_ICON = 'ti-folder';
+const _PS_DEFAULT_COLOR = 'gray';
+let _psSelectedIcon = _PS_DEFAULT_ICON;
+let _psSelectedColor = _PS_DEFAULT_COLOR;
+
+function _psRenderIconPicker() {
+  const grid = document.getElementById('ps-icon-grid');
+  if (!grid) return;
+  grid.innerHTML = _PS_ICON_OPTIONS.map(ic => {
+    const on = ic === _psSelectedIcon;
+    const label = ic.replace(/^ti-/, '').replace(/-/g, ' ');
+    return `<button type="button" class="ps-icon-opt" role="radio"
+              aria-checked="${on}" tabindex="${on ? 0 : -1}"
+              aria-label="${label} icon" title="${ic}"
+              onclick="_psSelectIcon('${ic}')"><i class="ti ${ic}"></i></button>`;
+  }).join('');
+}
+
+function _psSelectIcon(icon) {
+  _psSelectedIcon = icon;
+  _psRenderIconPicker();
+  _psUpdateIdentityPreview();
+}
+
+function _psRenderColorPicker() {
+  const grid = document.getElementById('ps-color-grid');
+  if (!grid) return;
+  grid.innerHTML = Object.keys(_PS_COLOR_MAP).map(name => {
+    const on = name === _psSelectedColor;
+    return `<button type="button" class="ps-color-opt" role="radio"
+              aria-checked="${on}" tabindex="${on ? 0 : -1}"
+              aria-label="${name}" title="${name}"
+              style="background:${_PS_COLOR_MAP[name]}"
+              onclick="_psSelectColor('${name}')"></button>`;
+  }).join('');
+}
+
+function _psSelectColor(color) {
+  _psSelectedColor = color;
+  _psRenderColorPicker();
+  _psUpdateIdentityPreview();
+}
+
+function _psUpdateIdentityPreview() {
+  const icon = document.getElementById('ps-preview-icon');
+  const avatar = document.getElementById('ps-identity-avatar');
+  if (icon) icon.className = 'ti ' + (_psSelectedIcon || _PS_DEFAULT_ICON);
+  if (avatar) {
+    avatar.style.background =
+      _PS_COLOR_MAP[_psSelectedColor] || _PS_COLOR_MAP[_PS_DEFAULT_COLOR];
+  }
+}
+
+// Apply stored icon/color into the pickers, validating against the curated
+// options. A legacy value that matches a valid option is accepted silently; an
+// unknown value falls back to the default and surfaces a validation message.
+function _psApplyIdentity(icon, color) {
+  const msgs = [];
+  if (!icon) {
+    _psSelectedIcon = _PS_DEFAULT_ICON;
+  } else if (_PS_ICON_OPTIONS.includes(icon)) {
+    _psSelectedIcon = icon;
+  } else {
+    _psSelectedIcon = _PS_DEFAULT_ICON;
+    msgs.push(`Saved icon "${icon}" is not an available option — showing the default.`);
+  }
+  if (!color) {
+    _psSelectedColor = _PS_DEFAULT_COLOR;
+  } else if (Object.prototype.hasOwnProperty.call(_PS_COLOR_MAP, color)) {
+    _psSelectedColor = color;
+  } else {
+    _psSelectedColor = _PS_DEFAULT_COLOR;
+    msgs.push(`Saved color "${color}" is not an available option — showing the default.`);
+  }
+  _psRenderIconPicker();
+  _psRenderColorPicker();
+  _psUpdateIdentityPreview();
+  const errEl = document.getElementById('ps-identity-error');
+  if (errEl) {
+    errEl.textContent = msgs.join(' ');
+    errEl.classList.toggle('hidden', msgs.length === 0);
+  }
+}
+
 function projSettingsInit() {
   if (!_psLoaded) {
     projSettingsLoad();
@@ -24720,9 +24854,7 @@ async function projSettingsLoad() {
 
     // Project identity fields
     _psSetVal('ps-display-name', data.display_name || '');
-    _psSetVal('ps-icon', data.icon || '');
-    _psSetVal('ps-color', data.color || '');
-    _psUpdateColorSwatch(data.color);
+    _psApplyIdentity(data.icon || '', data.color || '');
 
     _psTracked = data.tracked !== false;
     const toggle = document.getElementById('ps-tracked-toggle');
@@ -24771,8 +24903,8 @@ async function projSettingsSave() {
     estimation_buffer_pct: _psGetNum('ps-buf'),
     estimation_thin_ac_buffer_pct: _psGetNum('ps-thin-buf'),
     display_name: _psGetVal('ps-display-name'),
-    icon: _psGetVal('ps-icon'),
-    color: _psGetVal('ps-color'),
+    icon: _psSelectedIcon,
+    color: _psSelectedColor,
     tracked: _psTracked,
     sprint_duration_days: _psGetNum('ps-sprint-dur'),
     sprint_budget_minutes: _psGetNum('ps-sprint-budget'),
@@ -24854,13 +24986,6 @@ function _psGetVal(id) {
   const el = document.getElementById(id);
   return el ? el.value.trim() : '';
 }
-function _psUpdateColorSwatch(color) {
-  const swatch = document.getElementById('ps-color-swatch');
-  if (!swatch) return;
-  const hex = _PS_COLOR_MAP[color] || color || 'var(--border)';
-  swatch.style.background = hex;
-  swatch.title = color || '';
-}
 function _psSetStatus(msg, cls) {
   const el = document.getElementById('ps-status-msg');
   if (!el) return;
@@ -24868,12 +24993,6 @@ function _psSetStatus(msg, cls) {
   el.className = 'ps-status-msg' + (cls ? ' ' + cls : '');
 }
 
-// Update swatch on color input change
-document.addEventListener('input', function(e) {
-  if (e.target && e.target.id === 'ps-color') {
-    _psUpdateColorSwatch(e.target.value.trim());
-  }
-});
 </script>
 
 <!-- ── Folder browser modal (issue #643) ── -->

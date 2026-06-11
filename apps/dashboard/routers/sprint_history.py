@@ -11,6 +11,7 @@ from pydantic import BaseModel
 
 from . import sprint_history_service
 from . import stale_branches_service
+from . import run_stats_service
 
 router = APIRouter(tags=["sprint-history"])
 
@@ -103,3 +104,17 @@ def cleanup_stale_branches(body: CleanupStaleRequest):
     return stale_branches_service.cleanup_stale_branches(
         body.repo, body.branches, target=body.target, confirm=body.confirm
     )
+
+
+# ── Run-stats block for History cards (issue #810) ───────────────────────────
+# Mounted on the already-wired History router so no route lands in server.py
+# (COMMANDER_GATE_MONOLITH). Aggregates the sprint's agent_runs rows into the
+# stat-chips / split-bar / gantt payload; logic lives in run_stats_service.
+# A loose dict response is used deliberately: the gantt segment shape is nested
+# and frontend-driven, and the service already guarantees a stable contract.
+
+
+@router.get("/api/sprints/{label}/run-stats")
+def get_run_stats(label: str, project: str | None = None):
+    """Per-sprint agent_runs aggregation for the expanded History run-stats block."""
+    return run_stats_service.sprint_run_stats(label, project=project)

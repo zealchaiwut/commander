@@ -414,6 +414,42 @@ before older ones collapse into aggregate folds (issue #807); and
 `sprint_budget_minutes` (default 180) — the sprint capacity budget that drives the
 capacity bar (issue #801).
 
+### Daily Brief (issues #839–#842)
+
+A per-project and home-roll-up "what happened / what's next" brief, assembled
+from local sprint, ticket, and `agent_runs` data — zero GitHub API calls. Three
+layers, each its own router module mounted under the `sprints` router (no route
+lands in `server.py`, COMMANDER_GATE_MONOLITH, issue #761):
+
+- **Assembly** (issue #839, `brief_service.py`) — pure structured assembly, kept
+  LLM-free. An optional `date=YYYY-MM-DD` query param selects the window; default
+  is today.
+- **Summary** (issue #840, `brief_summary.py`) — a cached Haiku narrative over the
+  assembled brief. Always falls back to a deterministic templated string, so the
+  endpoints never 5xx. `regenerate` clears the cache and re-invokes the model.
+- **Daily artifact** (issue #841, `brief_artifact.py`) — the full daily brief
+  persisted per `(project, date)` so it is generated once and served instantly
+  thereafter. The current day is lazily generated on first load; past dates are
+  served from the store with a clear empty state when none was stored (never a
+  recompute, never a 5xx). `regenerate` rebuilds, re-stores, and advances the
+  timestamp.
+
+The home page (issue #842, `static/home.html`) renders the home roll-up plus a
+block per tracked project from these endpoints.
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/projects/{slug}/brief` | Assembled structured brief for one project (optional `date`) |
+| `GET` | `/api/brief` | Assembled home roll-up across all tracked projects (optional `date`) |
+| `GET` | `/api/projects/{slug}/brief/summary` | Cached (or freshly generated) LLM summary for a project brief |
+| `POST` | `/api/projects/{slug}/brief/summary/regenerate` | Clear the stored project summary and re-invoke the model |
+| `GET` | `/api/brief/summary` | Cached (or freshly generated) one-line home recap |
+| `POST` | `/api/brief/summary/regenerate` | Clear the stored home recap and re-invoke the model |
+| `GET` | `/api/projects/{slug}/brief/daily` | Stored (or lazily generated) daily brief artifact for a project |
+| `POST` | `/api/projects/{slug}/brief/daily/regenerate` | Rebuild and re-store the project daily brief, advancing the timestamp |
+| `GET` | `/api/brief/daily` | Stored (or lazily generated) daily home roll-up artifact |
+| `POST` | `/api/brief/daily/regenerate` | Rebuild and re-store the home daily roll-up, advancing the timestamp |
+
 ### Project To-Dos (issue #843)
 
 A lightweight, durable per-project to-do list backed by `project_todos` (Neon,

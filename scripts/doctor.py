@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""doctor.py — Pre-sprint host validation for Commander (issue #828).
+"""doctor.py — Pre-sprint host validation for Commander (issue #828, #854).
 
 Before a host runs its first sprint there is no fast way to confirm that all
 required tools and configuration are in place. This script checks every
@@ -456,7 +456,7 @@ def main(argv=None) -> int:
         print(json.dumps(run_doctor_from(results), indent=2))
         return 0 if not failures else 1
 
-    print("Commander host doctor — pre-sprint validation (issue #828)")
+    print("Commander host doctor — pre-sprint validation (issue #828/#854)")
     print("=" * 58)
     for result in results:
         for line in format_result(result):

@@ -5297,11 +5297,29 @@
     .anl-tab-btn:hover:not(.active) { background: var(--surface); }
     .anl-panel { display: none; flex-direction: column; gap: 16px; }
     .anl-panel.show { display: flex; }
-    /* Sprint Mgmt Board|History segmented control (issue #716) */
-    .smgmt-subtab-bar { display: flex; gap: 6px; padding: 14px 20px 0; }
-    .smgmt-subtab-btn { background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px; padding: 6px 16px; font-size: 13px; color: var(--text-muted); cursor: pointer; transition: background .15s, border-color .15s, color .15s; }
-    .smgmt-subtab-btn.active { background: var(--surface); border-color: var(--text-muted); color: var(--text); font-weight: 600; }
-    .smgmt-subtab-btn:hover:not(.active) { background: var(--surface); }
+    /* Sprint sub-nav: Board / Running / History (issue #798) */
+    .subnav { display: flex; align-items: center; gap: 6px; padding: 14px 20px 0; }
+    .crumb { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 700; color: var(--text-sub); margin-right: 8px; white-space: nowrap; }
+    .crumb .ti { font-size: 15px; color: var(--text-muted); }
+    .subtab { display: inline-flex; align-items: center; gap: 6px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px; padding: 6px 16px; font-size: 13px; color: var(--text-muted); cursor: pointer; transition: background .15s, border-color .15s, color .15s; }
+    .subtab.active { background: var(--surface); border-color: var(--text-muted); color: var(--text); font-weight: 600; }
+    .subtab:hover:not(.active) { background: var(--surface); }
+    .subnav-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+    /* Live dot — visible only while a sprint is running (issue #798) */
+    .subtab-live-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green, #16a34a); box-shadow: 0 0 0 3px rgba(22,163,74,.18); animation: subtab-dot-pulse 1.6s ease-in-out infinite; }
+    .subtab-live-dot[hidden] { display: none; }
+    @keyframes subtab-dot-pulse {
+      0%, 100% { opacity: 1;   box-shadow: 0 0 0 0 rgba(22,163,74,.35); }
+      50%      { opacity: .55; box-shadow: 0 0 0 4px rgba(22,163,74,0); }
+    }
+    /* History count badge (issue #798) */
+    .subtab-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--surface-2); border: 1px solid var(--border); font-size: 11px; font-weight: 700; color: var(--text-muted); }
+    .subtab.active .subtab-badge { background: var(--blue-bg); border-color: var(--blue); color: var(--blue); }
+    /* Running sub-view empty state (issue #798) */
+    .smgmt-running-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; padding: 56px 20px; text-align: center; color: var(--text-muted); }
+    .smgmt-running-empty .ti { font-size: 28px; color: var(--text-muted); opacity: .7; }
+    .smgmt-running-empty-title { font-size: 14px; font-weight: 700; color: var(--text-sub); margin: 0; }
+    .smgmt-running-empty-sub { font-size: 13px; color: var(--text-muted); margin: 0; }
     .smgmt-subview { display: none; }
     .smgmt-subview.show { display: block; animation: smgmt-fade-in .18s ease; }
     @keyframes smgmt-fade-in { from { opacity: 0; } to { opacity: 1; } }
@@ -5309,13 +5327,14 @@
        the 15s auto-refresh re-render that would flicker any entrance motion). */
     #pane-sprint-mgmt .btn-ghost:active,
     #pane-sprint-mgmt .btn-primary:active,
-    .smgmt-subtab-btn:active,
+    .subtab:active,
     .smgmt-collapse-btn:active { transform: scale(0.96); }
     @media (prefers-reduced-motion: reduce) {
       .smgmt-subview.show { animation: none; }
+      .subtab-live-dot { animation: none; }
       #pane-sprint-mgmt .btn-ghost:active,
       #pane-sprint-mgmt .btn-primary:active,
-      .smgmt-subtab-btn:active,
+      .subtab:active,
       .smgmt-collapse-btn:active { transform: none; }
     }
     .anl-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
@@ -5562,7 +5581,7 @@
       <nav class="sub-tabs" role="tablist" aria-label="Project sections" id="sub-tabs">
         <button class="stab active" role="tab" id="stab-sprint-mgmt"
                 aria-selected="true" onclick="switchTab('sprint-mgmt')">
-          <i class="ti ti-layout-kanban"></i>Sprint Mgmt
+          <i class="ti ti-layout-kanban"></i>Sprint
         </button>
         <button class="stab" role="tab" id="stab-tickets"
                 aria-selected="false" onclick="switchTab('tickets')">
@@ -5619,13 +5638,32 @@
           </div>
         </div>
 
-        <!-- Board | History segmented control (issue #716) -->
-        <div class="smgmt-subtab-bar" role="tablist" aria-label="Sprint Mgmt views">
-          <button class="smgmt-subtab-btn active" id="smgmt-subtab-board" role="tab"
+        <!-- Sprint sub-nav: Board / Running / History (issue #798) -->
+        <nav class="subnav" role="tablist" aria-label="Sprint views">
+          <span class="crumb"><i class="ti ti-layout-kanban"></i>Sprint</span>
+          <button class="subtab active" id="smgmt-subtab-board" role="tab"
                   aria-selected="true" onclick="_smgmtShowSubView('board')">Board</button>
-          <button class="smgmt-subtab-btn" id="smgmt-subtab-history" role="tab"
-                  aria-selected="false" onclick="_smgmtShowSubView('history')">History</button>
-        </div>
+          <button class="subtab" id="smgmt-subtab-running" role="tab"
+                  aria-selected="false" onclick="_smgmtShowSubView('running')">Running<span
+                  class="subtab-live-dot" id="smgmt-running-dot" aria-label="A sprint is running" hidden></span></button>
+          <button class="subtab" id="smgmt-subtab-history" role="tab"
+                  aria-selected="false" onclick="_smgmtShowSubView('history')">History<span
+                  class="subtab-badge" id="smgmt-history-count" aria-label="Total sprints">0</span></button>
+          <div class="subnav-actions">
+            <button class="btn-ghost" id="smgmt-cleanup-empty-btn"
+                    onclick="_smgmtCleanupEmpty()" title="Delete sprint labels with no tickets"
+                    aria-label="Clean up empty sprints" style="display:none">
+              <i class="ti ti-trash"></i>
+              Clean up empty sprints
+            </button>
+            <button class="btn-primary" id="smgmt-new-sprint-btn"
+                    onclick="smgmtOpenNewSprint()" title="Create a new sprint"
+                    aria-label="New Sprint">
+              <i class="ti ti-plus"></i>
+              New Sprint
+            </button>
+          </div>
+        </nav>
 
         <!-- Board sub-view (default) -->
         <div class="smgmt-subview show" id="smgmt-subview-board" role="tabpanel" aria-labelledby="smgmt-subtab-board">
@@ -5670,45 +5708,10 @@
                   <span id="smgmt-density-label">Compact</span>
                 </button>
               </div>
-              <button class="btn-ghost" id="smgmt-cleanup-empty-btn"
-                      onclick="_smgmtCleanupEmpty()" title="Delete sprint labels with no tickets"
-                      aria-label="Clean up empty sprints" style="display:none">
-                <i class="ti ti-trash"></i>
-                Clean up empty sprints
-              </button>
-              <button class="btn-primary" id="smgmt-new-sprint-btn"
-                      onclick="smgmtOpenNewSprint()" title="Create a new sprint"
-                      aria-label="New Sprint">
-                <i class="ti ti-plus"></i>
-                New Sprint
-              </button>
             </div>
           </div>
-
-          <!-- Label filter chips (issue #546) — inside sticky area so they scroll with toolbar -->
-          <div class="smgmt-label-filter-row is-empty" id="smgmt-label-filter-row" role="toolbar" aria-label="Filter by label"></div>
-
-          <!-- Search/filter bar (issue #552) -->
-          <div class="smgmt-filter-bar" id="smgmt-filter-bar">
-            <div class="smgmt-filter-input-wrap">
-              <input type="search" class="smgmt-filter-input" id="smgmt-filter-input"
-                     placeholder="Filter tickets by title, #number, or label…"
-                     aria-label="Filter tickets by title, issue number, or label"
-                     autocomplete="off" spellcheck="false"
-                     oninput="_smgmtFilterApply()">
-              <button class="smgmt-filter-clear-btn" id="smgmt-filter-clear-btn"
-                      onclick="_smgmtFilterClear()" title="Clear filter" aria-label="Clear filter">×</button>
-            </div>
-          </div>
-        </div>
-
-        <!-- Size legend (issue #562) -->
-        <div class="smgmt-size-legend" id="smgmt-size-legend" aria-label="Ticket size color legend">
-          <span class="smgmt-size-legend-label">Size:</span>
-          <span class="smgmt-size-legend-item"><span class="smgmt-size-legend-swatch sz-S"></span> S — small</span>
-          <span class="smgmt-size-legend-item"><span class="smgmt-size-legend-swatch sz-M"></span> M — medium</span>
-          <span class="smgmt-size-legend-item"><span class="smgmt-size-legend-swatch sz-L"></span> L — large</span>
-          <span class="smgmt-size-legend-item"><span class="smgmt-size-legend-swatch sz-XL"></span> XL — extra large</span>
+          <!-- Tag chips, search field, and size legend relocated to the Tickets
+               tab (issue #798) — removed from the Sprint pane. -->
         </div>
 
         <!-- Sprint list -->
@@ -5773,6 +5776,16 @@
         <div class="smgmt-sort-menu hidden" id="smgmt-sort-menu" role="menu" aria-label="Sort column"></div>
 
         </div><!-- /smgmt-subview-board -->
+
+        <!-- Running sub-view (issue #798) — running-sprint focus; content is a
+             separate ticket. Empty-state keeps the tab from rendering blank. -->
+        <div class="smgmt-subview" id="smgmt-subview-running" role="tabpanel" aria-labelledby="smgmt-subtab-running">
+          <div class="smgmt-running-empty" id="smgmt-running-empty">
+            <i class="ti ti-player-play"></i>
+            <p class="smgmt-running-empty-title">No sprint is running</p>
+            <p class="smgmt-running-empty-sub">Start a sprint from the Board to watch it live here.</p>
+          </div>
+        </div><!-- /smgmt-subview-running -->
 
         <!-- History sub-view (issue #716) — finished-sprint summaries -->
         <div class="smgmt-subview" id="smgmt-subview-history" role="tabpanel" aria-labelledby="smgmt-subtab-history">
@@ -7284,6 +7297,9 @@ function parseUrl() {
   const rawTab = m[2] || '';
   const hash = window.location.hash;
   const tab = (rawTab === 'tickets')          ? 'tickets'
+            // 'sprint' deep-link alias (issue #798): the tab was renamed to
+            // "Sprint" while the pane id stays pane-sprint-mgmt for compatibility.
+            : (rawTab === 'sprint')           ? 'sprint-mgmt'
             : (rawTab === 'logs')             ? 'logs'
             : (rawTab === 'bulk-create')      ? 'bulk-create'
             : (rawTab === 'timeline')         ? 'timeline'
@@ -8582,7 +8598,7 @@ function _smgmtSummaryRender(openData, closedData) {
 let _smgmtSubView = 'board';
 function _smgmtShowSubView(view) {
   _smgmtSubView = view;
-  ['board', 'history'].forEach(v => {
+  ['board', 'running', 'history'].forEach(v => {
     const btn = document.getElementById('smgmt-subtab-' + v);
     if (btn) {
       btn.classList.toggle('active', v === view);
@@ -8593,6 +8609,20 @@ function _smgmtShowSubView(view) {
   });
   // Lazy-load summaries when History is opened (no-op if repo not cached yet).
   if (view === 'history') _smgmtLoadSummaries(_cachedFullRepo[_slug]);
+}
+
+// Sync the sub-nav live-state indicators (issue #798): a pulsing dot on the
+// Running tab while any sprint runs, and the total sprint count on History.
+function _smgmtUpdateSubnav() {
+  const dot = document.getElementById('smgmt-running-dot');
+  if (dot) dot.hidden = !_smgmtAnySprintRunning;
+  const badge = document.getElementById('smgmt-history-count');
+  if (badge) {
+    const data = _smgmtData || {};
+    const order = (data.order || []).filter(l => /^sprint-\d+(\.\d+)*$/.test(l));
+    const total = order.length || (data.sprints || []).length;
+    badge.textContent = String(total);
+  }
 }
 
 async function _smgmtLoadSummaries(repo) {
@@ -8680,6 +8710,11 @@ function _smgmtRender(data) {
   const listEl = document.getElementById('smgmt-sprint-list');
   if (!listEl) return;
   _smgmtData = data;
+
+  // Keep the sub-nav live indicators (running dot + History count) in sync on
+  // every render, including auto-refresh, so the dot clears when sprints stop
+  // and the badge tracks the sprint total (issue #798).
+  _smgmtUpdateSubnav();
 
   const sprints = data.sprints || [];
   const order   = data.order   || [];

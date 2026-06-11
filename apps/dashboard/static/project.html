@@ -1078,6 +1078,7 @@
     .ps-envvar-key { font-family: var(--mono); color: var(--text); font-weight: 500; }
     .ps-envvar-val { font-family: var(--mono); color: var(--text); word-break: break-all; }
     .ps-envvar-val.is-masked { color: var(--text-muted); letter-spacing: 2px; }
+    .ps-envvar-val.is-empty { color: var(--text-muted); font-style: italic; }
     .ps-envvar-actions { width: 44px; text-align: right; white-space: nowrap; }
     .ps-envvar-key-inp, .ps-envvar-val-inp { width: 100%; font-family: var(--mono); }
     .ps-envvar-key-inp.is-invalid { border-color: var(--red); box-shadow: 0 0 0 3px var(--red-bg); }
@@ -25163,6 +25164,16 @@ function _envVarsRender(env) {
     return;
   }
   var rows = st.vars.map(function(v, i) {
+    var isEmpty = (v.value == null || v.value === '');
+    if (isEmpty) {
+      // No saved value — show an explicit "(empty)" hint, never mask bullets,
+      // so an unset variable is not misread as a hidden secret and there is
+      // nothing to reveal (issue #773).
+      return '<tr>'
+        + '<td class="ps-envvar-key">' + escHtml(v.key) + '</td>'
+        + '<td class="ps-envvar-val is-empty">(empty)</td>'
+        + '<td class="ps-envvar-actions"></td></tr>';
+    }
     var masked = !st.reveal[i];
     var shown = masked ? '••••••••' : escHtml(v.value);
     return '<tr>'

@@ -27,7 +27,7 @@ globalThis._pfDagData ??= null;
 globalThis._pfWarnings ??= null;
 globalThis._pfCycle ??= null;
 globalThis._pfFlags ??= null;
-globalThis._pfSelectedIds ??= null;
+globalThis._pfSelectedIds ??= new Set();
 
 // Drag/drop local locks
 globalThis._smgmtMoveLock ??= false;

@@ -43,6 +43,16 @@ import {
   _smgmtBacklogDragLeave, _smgmtDropOnBacklog, _smgmtBoardLock, 
   _smgmtBoardUnlock,
 } from './drag-drop.js';
+import {
+  loadSprintMgmt, _smgmtSprintLabelSortKey, _smgmtRender, 
+  _smgmtLabelFilterRender, _smgmtLabelFilterApply, 
+  _smgmtFetchMissingOutcomes, _smgmtLoadEstimates, _smgmtLoadConflicts, 
+  _smgmtLoadDepOrder, _smgmtLoadGoals, _smgmtOutcomeBandHtml, 
+  _smgmtOutcomeTicketListHtml, _smgmtLoadFinishCards, _smgmtRenderFinishCard, 
+  _smgmtFinishCardInnerHtml, _smgmtCardHtml, _smgmtRunningCardHtml, 
+  _smgmtRollupText, _smgmtUpdateColRollup, _smgmtTicketRowHtml, 
+  _smgmtRenderBacklog, _smgmtBacklogTicketHtml,
+} from './board-render.js';
 
 // Re-run modal (issue #512)
 globalThis._rrOpen = _rrOpen;
@@ -126,3 +136,27 @@ globalThis._smgmtBacklogDragLeave = _smgmtBacklogDragLeave;
 globalThis._smgmtDropOnBacklog = _smgmtDropOnBacklog;
 globalThis._smgmtBoardLock = _smgmtBoardLock;
 globalThis._smgmtBoardUnlock = _smgmtBoardUnlock;
+
+// Board render pipeline (issue #797)
+globalThis.loadSprintMgmt = loadSprintMgmt;
+globalThis._smgmtSprintLabelSortKey = _smgmtSprintLabelSortKey;
+globalThis._smgmtRender = _smgmtRender;
+globalThis._smgmtLabelFilterRender = _smgmtLabelFilterRender;
+globalThis._smgmtLabelFilterApply = _smgmtLabelFilterApply;
+globalThis._smgmtFetchMissingOutcomes = _smgmtFetchMissingOutcomes;
+globalThis._smgmtLoadEstimates = _smgmtLoadEstimates;
+globalThis._smgmtLoadConflicts = _smgmtLoadConflicts;
+globalThis._smgmtLoadDepOrder = _smgmtLoadDepOrder;
+globalThis._smgmtLoadGoals = _smgmtLoadGoals;
+globalThis._smgmtOutcomeBandHtml = _smgmtOutcomeBandHtml;
+globalThis._smgmtOutcomeTicketListHtml = _smgmtOutcomeTicketListHtml;
+globalThis._smgmtLoadFinishCards = _smgmtLoadFinishCards;
+globalThis._smgmtRenderFinishCard = _smgmtRenderFinishCard;
+globalThis._smgmtFinishCardInnerHtml = _smgmtFinishCardInnerHtml;
+globalThis._smgmtCardHtml = _smgmtCardHtml;
+globalThis._smgmtRunningCardHtml = _smgmtRunningCardHtml;
+globalThis._smgmtRollupText = _smgmtRollupText;
+globalThis._smgmtUpdateColRollup = _smgmtUpdateColRollup;
+globalThis._smgmtTicketRowHtml = _smgmtTicketRowHtml;
+globalThis._smgmtRenderBacklog = _smgmtRenderBacklog;
+globalThis._smgmtBacklogTicketHtml = _smgmtBacklogTicketHtml;

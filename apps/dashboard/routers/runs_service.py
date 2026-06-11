@@ -24,6 +24,47 @@ import db as _db  # noqa: E402
 _PROJECTS_BASE = Path.home() / "dev"
 
 DEFAULT_LOG_LIMIT = 200  # lines returned per page by default
+DEFAULT_TAIL_LINES = 200  # lines returned by the inspector per-issue log tail
+
+
+def _server():
+    """Deferred import of the monolith — safe at request time, avoids the
+    import-time circular dependency (server.py mounts this router package)."""
+    import server  # noqa: PLC0415 — intentional late import
+    return server
+
+
+def get_issue_log_tail(
+    sprint: str,
+    issue: int,
+    project: str,
+    tail_lines: int = DEFAULT_TAIL_LINES,
+) -> dict:
+    """Tail of ``sprint-issue-<issue>.log`` for the node inspector log tab (issue #804).
+
+    Reuses ``log_source.read_log(kind="issue")`` so the per-issue log surface is
+    keyed only by sprint + issue (no agent_runs row required) and reads nothing
+    but the on-disk ``sprint-issue-<N>.log`` file — zero GitHub API calls. Lives
+    on the Run Browser router so the M5 run-browser ticket absorbs it directly.
+
+    Raises 400 on an invalid sprint label (path-traversal / format guard).
+    """
+    from fastapi import HTTPException  # noqa: PLC0415 — local keeps import graph flat
+
+    srv = _server()
+    if not srv._SPRINT_LABEL_RE.match(sprint):
+        raise HTTPException(status_code=400, detail=f"Invalid sprint label: {sprint!r}")
+
+    from log_source import read_log  # noqa: PLC0415 — local keeps startup fast
+
+    project_root = srv._project_root_path(project)
+    return read_log(
+        "issue",
+        project_root,
+        label=sprint,
+        issue_num=issue,
+        tail_lines=tail_lines,
+    )
 
 # ── Outcome ordering ──────────────────────────────────────────────────────────
 # Lower ordinal = higher priority in sort (failed before passed before unknown).

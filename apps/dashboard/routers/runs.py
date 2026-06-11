@@ -29,7 +29,9 @@ for _p in (str(_DASHBOARD_ROOT),):
 
 from .runs_service import (  # noqa: E402
     DEFAULT_LOG_LIMIT,
+    DEFAULT_TAIL_LINES,
     count_log_lines,
+    get_issue_log_tail,
     get_log_path_from_db,
     list_runs,
     read_log_page,
@@ -136,6 +138,29 @@ def get_log_page(
     """
     log_file = _resolve_agent_log(sprint, issue, agent)
     return read_log_page(log_file, offset=offset, limit=limit)
+
+
+@router.get("/logs/tail")
+def get_issue_log_tail_endpoint(
+    sprint: str = Query(..., description="sprint label, e.g. sprint-61"),
+    issue: int = Query(..., description="GitHub issue number"),
+    project: str = Query(..., description="owner/repo or project slug"),
+    tail_lines: int = Query(default=DEFAULT_TAIL_LINES, ge=1, le=2000),
+) -> Any:
+    """Per-issue log tail for the node inspector (issue #804).
+
+    Streams the last *tail_lines* of ``sprint-issue-<issue>.log`` for the given
+    sprint/issue. Keyed by sprint + issue only (no agent segment), so the
+    inspector's per-issue log tab can poll it without an agent_runs row. Reuses
+    ``read_log(kind="issue")`` and is structured to be absorbed by the M5
+    run-browser surface this module owns.
+
+    Returns
+    -------
+    {found: bool, path: str, tail: str, mtime: str} when the log exists, else
+    {found: false, candidate_paths: [...], tail: ""}.
+    """
+    return get_issue_log_tail(sprint, issue, project, tail_lines)
 
 
 @router.get("/runs/{sprint}/{issue}/{agent}/log/tail")

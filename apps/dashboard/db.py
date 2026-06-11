@@ -231,6 +231,71 @@ def _create_sync_state_table(conn: sqlite3.Connection) -> None:
     """)
 
 
+# ── Brief summary cache (issue #840) ──────────────────────────────────────────
+#
+# Per-(scope, project, date) cache of the LLM-generated brief summary so the
+# model is invoked at most once per key. `scope` is 'project' (keyed by slug) or
+# 'home' (project=''). Only model-generated summaries are persisted here; the
+# deterministic templated fallback is recomputed on the fly so a transient model
+# failure never poisons the cache.
+
+def _create_brief_summaries_table(conn: sqlite3.Connection) -> None:
+    """Create the brief_summaries cache table (issue #840)."""
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS brief_summaries (
+            scope      TEXT NOT NULL,
+            project    TEXT NOT NULL DEFAULT '',
+            date       TEXT NOT NULL,
+            summary    TEXT NOT NULL,
+            source     TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            PRIMARY KEY (scope, project, date)
+        )
+    """)
+
+
+def get_brief_summary(scope: str, project: str, date: str) -> dict | None:
+    """Return the cached summary for (scope, project, date), or None."""
+    with get_conn() as conn:
+        _create_brief_summaries_table(conn)
+        row = conn.execute(
+            "SELECT summary, source, created_at FROM brief_summaries "
+            "WHERE scope = ? AND project = ? AND date = ?",
+            (scope, project or "", date),
+        ).fetchone()
+    if row is None:
+        return None
+    return {"summary": row["summary"], "source": row["source"],
+            "created_at": row["created_at"]}
+
+
+def set_brief_summary(scope: str, project: str, date: str, summary: str,
+                      source: str, created_at: str | None = None) -> None:
+    """Upsert the cached summary for (scope, project, date)."""
+    ts = created_at or _now_iso()
+    with get_conn() as conn:
+        _create_brief_summaries_table(conn)
+        conn.execute(
+            "INSERT OR REPLACE INTO brief_summaries "
+            "(scope, project, date, summary, source, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (scope, project or "", date, summary, source, ts),
+        )
+        conn.commit()
+
+
+def delete_brief_summary(scope: str, project: str, date: str) -> None:
+    """Clear the cached summary for (scope, project, date) — used by Regenerate."""
+    with get_conn() as conn:
+        _create_brief_summaries_table(conn)
+        conn.execute(
+            "DELETE FROM brief_summaries "
+            "WHERE scope = ? AND project = ? AND date = ?",
+            (scope, project or "", date),
+        )
+        conn.commit()
+
+
 # ── Sprint lifecycle + ticket order (issue #757) ──────────────────────────────
 #
 # The durable home for sprint lifecycle state and ticket execution order. These

@@ -5441,6 +5441,26 @@
       padding: 8px 20px 8px 44px;
     }
     .logs-run-row.expanded .logs-run-events { display: block; }
+    /* Per-ticket timing / token / failure strip (#858) */
+    .logs-ticket-stats { display: none; background: var(--bg); border-top: 1px solid var(--border); padding: 6px 20px 6px 44px; }
+    .logs-run-row.expanded .logs-ticket-stats:not(:empty) { display: block; }
+    .logs-ticket-row {
+      display: flex; align-items: center; flex-wrap: wrap; gap: 6px 16px;
+      padding: 5px 0; border-bottom: 1px solid var(--border);
+      font-size: 11px; color: var(--text-muted);
+    }
+    .logs-ticket-row:last-child { border-bottom: none; }
+    .logs-ticket-num { font-family: var(--mono); font-weight: 600; color: var(--text); min-width: 52px; }
+    .logs-ticket-metric { display: inline-flex; align-items: center; gap: 4px; font-variant-numeric: tabular-nums; }
+    .logs-ticket-metric i { font-size: 12px; color: var(--text-sub); }
+    .logs-ticket-fail { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
+    .logs-ticket-fail-class {
+      display: inline-flex; align-items: center; padding: 1px 7px; border-radius: 9px;
+      background: var(--red-bg); color: var(--red); font-weight: 600;
+      font-family: var(--mono); font-size: 10px; letter-spacing: .02em;
+    }
+    .logs-ticket-fail-msg { color: var(--red); opacity: .85; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+    .logs-ticket-row.failed .logs-ticket-num { color: var(--red); }
     .logs-event-line { display: flex; gap: 8px; }
     .logs-event-ts { color: var(--text-sub); flex-shrink: 0; }
     .logs-event-line.dispatch .logs-event-msg { color: var(--blue); }
@@ -18562,6 +18582,8 @@ const _logsState = {
   expanded: new Set(),
   events: {},
   loadingEvents: new Set(),
+  ticketStats: {},         // runId -> per-ticket timing/token/failure rows (#858)
+  loadingStats: new Set(),
   issues: null,            // per-issue browse list (lazy-loaded)
   viewMode: 'activity',    // 'timeline' (Runs) | 'issues' | 'raw' | 'activity'
   pollTimer: null,
@@ -19031,6 +19053,10 @@ function logsRenderTimeline() {
     const row = container.querySelector(`[data-run-id="${CSS.escape(runId)}"]`);
     if (!row) continue;
     row.classList.add('expanded');
+    const statsEl = row.querySelector('.logs-ticket-stats');
+    if (statsEl && _logsState.ticketStats[runId]) {
+      statsEl.innerHTML = _logsTicketStatsHtml(_logsState.ticketStats[runId]);
+    }
     const eventsEl = row.querySelector('.logs-run-events');
     if (eventsEl && _logsState.events[runId]) {
       eventsEl.innerHTML = _logsEventsHtml(_logsState.events[runId]);
@@ -19058,8 +19084,53 @@ function _logsRunRowHtml(run) {
       ${badge}
     </div>
   </div>
+  <div class="logs-ticket-stats" id="logs-stats-${escHtml(run.run_id)}">${
+    isExpanded && _logsState.ticketStats[run.run_id]
+      ? _logsTicketStatsHtml(_logsState.ticketStats[run.run_id])
+      : ''
+  }</div>
   <div class="logs-run-events" id="logs-events-${escHtml(run.run_id)}">${isExpanded ? eventsContent : ''}</div>
 </div>`;
+}
+
+// Whole-token count → compact "5.0k" / "1.2M"; missing token total reads as a
+// dash so a NULL agent_runs.total_tokens degrades gracefully (#858 AC5).
+function _logsFmtTokens(n) {
+  if (n == null || isNaN(n)) return '—';
+  return _histFmtTokens(n);
+}
+
+// Per-ticket timing / token / failure strip for an expanded Logs-tab run (#858).
+// One row per ticket: coder time, tester time, token count, and — for failed
+// tickets only — the failure class + message inline (AC4), so no log file needs
+// opening to see where time went or why a ticket broke (AC6).
+function _logsTicketStatsHtml(stats) {
+  const tickets = (stats && stats.tickets) || [];
+  if (tickets.length === 0) return '';
+  return tickets.map(t => {
+    const fail = t.failed
+      ? `<div class="logs-ticket-fail">` +
+          `<span class="logs-ticket-fail-class">${escHtml(t.failure_class || 'FAILED')}</span>` +
+          (t.failure_message ? `<span class="logs-ticket-fail-msg">${escHtml(t.failure_message)}</span>` : '') +
+        `</div>`
+      : '';
+    return `<div class="logs-ticket-row${t.failed ? ' failed' : ''}">` +
+      `<span class="logs-ticket-num">#${escHtml(String(t.issue_number))}</span>` +
+      `<span class="logs-ticket-metric" title="Coder duration"><i class="ti ti-code"></i>${escHtml(_histFmtSecs(t.coder_seconds))}</span>` +
+      `<span class="logs-ticket-metric" title="Tester duration"><i class="ti ti-flask"></i>${escHtml(_histFmtSecs(t.tester_seconds))}</span>` +
+      `<span class="logs-ticket-metric" title="Total tokens"><i class="ti ti-coin"></i>${escHtml(_logsFmtTokens(t.total_tokens))}</span>` +
+      fail +
+    `</div>`;
+  }).join('');
+}
+
+async function _logsFetchTicketStats(sprintLabel, project) {
+  try {
+    const url = `/api/logs/runs/${encodeURIComponent(sprintLabel)}/ticket-stats?project=${encodeURIComponent(project)}`;
+    const resp = await fetch(url);
+    if (!resp.ok) return { tickets: [] };
+    return await resp.json();
+  } catch (_) { return { tickets: [] }; }
 }
 
 function _logsEventsHtml(events) {
@@ -19092,6 +19163,20 @@ async function logsToggleRun(headerEl) {
 
   _logsState.expanded.add(runId);
   row.classList.add('expanded');
+
+  // Per-ticket timing / token / failure strip (#858) — fetched once per run.
+  if (_logsState.ticketStats[runId]) {
+    const statsEl = document.getElementById(`logs-stats-${runId}`);
+    if (statsEl) statsEl.innerHTML = _logsTicketStatsHtml(_logsState.ticketStats[runId]);
+  } else if (!_logsState.loadingStats.has(runId)) {
+    _logsState.loadingStats.add(runId);
+    _logsFetchTicketStats(sprintLabel, project).then(stats => {
+      _logsState.loadingStats.delete(runId);
+      _logsState.ticketStats[runId] = stats;
+      const el = document.getElementById(`logs-stats-${runId}`);
+      if (el && _logsState.expanded.has(runId)) el.innerHTML = _logsTicketStatsHtml(stats);
+    });
+  }
 
   const eventsEl = document.getElementById(`logs-events-${runId}`);
 

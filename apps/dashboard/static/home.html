@@ -85,6 +85,13 @@
     .pbrief.collapsed .pb-toggle .lbl-hide{display:none}
     .pbrief.collapsed .pb-toggle .lbl-show{display:inline}
 
+    /* AC1: always-visible body splits into summary (left) + to-do panel (right) */
+    .pb-cols{display:grid;grid-template-columns:1.45fr 1fr;gap:0;align-items:stretch}
+    @media(max-width:740px){.pb-cols{grid-template-columns:1fr}}
+    .pb-main{border-right:1px solid var(--border)}
+    @media(max-width:740px){.pb-main{border-right:none;border-bottom:1px solid var(--border)}}
+    .pb-cols .todo{border-left:none}
+
     /* always-visible: summary + status line */
     .pb-summary{padding:14px 18px;display:flex;gap:11px;align-items:flex-start}
     .pb-sum-ic{width:26px;height:26px;border-radius:7px;background:var(--blue-bg);color:var(--blue);display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0;margin-top:1px}
@@ -147,6 +154,7 @@
   </div>
 
   <script src="/static/add-project-modal.js"></script>
+  <script src="/static/project-todo.js"></script>
   <script>
   // ── issue #842: client-side assembly of the CEO daily brief ──────────────
   // Data sources (no hardcoded content):
@@ -222,6 +230,14 @@
 
     // hydrate per-project AI summaries from the stored summary store
     projects.forEach(p => loadProjectSummary(p.project, date));
+
+    // AC1/AC3: mount the per-project to-do panel on the right of each block,
+    // keyed by slug so it shows the same list as the project view (#844).
+    projects.forEach(p => {
+      const slug = p.project;
+      const el = document.getElementById('todo-' + slug);
+      if (el && window.CommanderTodo) CommanderTodo.mount(el, slug);
+    });
   }
 
   // ── AC1: brief header (date + covering-since subtitle) ─────────────────────
@@ -430,15 +446,20 @@
           </button>
         </div>
 
-        <div class="pb-summary">
-          <span class="pb-sum-ic"><i class="ti ti-clipboard-text"></i></span>
-          <div class="pb-sum-body">
-            <span class="pb-sum-tag"><i class="ti ti-sparkles" style="font-size:9px"></i> AI summary</span>
-            <div class="pb-sum-text" id="sum-${esc(slug)}">Loading summary…</div>
+        <div class="pb-cols">
+          <div class="pb-main">
+            <div class="pb-summary">
+              <span class="pb-sum-ic"><i class="ti ti-clipboard-text"></i></span>
+              <div class="pb-sum-body">
+                <span class="pb-sum-tag"><i class="ti ti-sparkles" style="font-size:9px"></i> AI summary</span>
+                <div class="pb-sum-text" id="sum-${esc(slug)}">Loading summary…</div>
+              </div>
+            </div>
+            ${_statusLine(p)}
           </div>
+          <!-- AC1/AC3: per-project to-do panel, mounted from the shared module -->
+          <div class="todo" id="todo-${esc(slug)}" data-project="${esc(slug)}"></div>
         </div>
-
-        ${_statusLine(p)}
 
         <div class="pb-details">
           <div class="drill-cols">

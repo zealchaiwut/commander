@@ -50,6 +50,8 @@ Open `http://localhost:8000` and add your first repo from the dashboard.
 
 ## Next steps
 
+- [machine-onboarding.md](machine-onboarding.md) — provision a brand-new machine
+  from scratch (clone layout, venvs, claude/gh auth, launchd, doctor)
 - [workflow.md](workflow.md) — the full Bulk Create → Run → Finish/Rerun flow
 - [tutorial.md](tutorial.md) — multi-clone setup and agent roles
 - [features/](features/) — per-subsystem reference

@@ -74,3 +74,4 @@ separated by `---` exactly as the splitter expects.
 - [2026-06-11-roadmap-milestones.md](2026-06-11-roadmap-milestones.md) — phase 1: GitHub-native milestones, Roadmap tab, ticket↔milestone, home progress
 - [2026-06-11-sprint-planner-signoff.md](2026-06-11-sprint-planner-signoff.md) — phase 2: planner from active milestone, pending-signoff + approve, scheduled night queue (off by default)
 - [2026-06-11-advisor.md](2026-06-11-advisor.md) — phase 3: daily advisor suggestions, accept→BA flow, 2–5 sprint look-ahead, brief hook
+- [2026-06-11-test-suite-rehab.md](2026-06-11-test-suite-rehab.md) — pytest-timeout + hang fix, schema-drift fixtures, failure burn-down, per-sprint suite-health gate

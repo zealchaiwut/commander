@@ -915,12 +915,21 @@ app = FastAPI(lifespan=lifespan)
 # Strangler-fig routers (issue #761): extracted route clusters live in
 # apps/dashboard/routers/ and are mounted here. New endpoints go there, NOT
 # in this file — the COMMANDER_GATE_MONOLITH gate rejects server.py growth.
-from routers import analytics_router, backup_router, log_search_router, runs_router  # noqa: E402
+from routers import (  # noqa: E402
+    activity_router,
+    analytics_router,
+    backup_router,
+    log_search_router,
+    runs_router,
+    system_router,
+)
 
+app.include_router(activity_router)
 app.include_router(analytics_router)
 app.include_router(backup_router)
 app.include_router(log_search_router)
 app.include_router(runs_router)
+app.include_router(system_router)
 
 logger = logging.getLogger(__name__)
 
@@ -1181,10 +1190,7 @@ async def overview_redirect():
     return RedirectResponse(url="/", status_code=301)
 
 
-@app.get("/diagnostics")
-async def diagnostics_page():
-    """Serve the system diagnostics page (issue #230)."""
-    return _serve_html(STATIC_DIR / "diagnostics.html")
+# /diagnostics moved to routers/system.py (issue #794)
 
 
 # ── /projects/ redirect — 301 to current /project/ UI ─────────────────────────
@@ -1304,34 +1310,7 @@ def get_environment():
     return {"environment": ENVIRONMENT}
 
 
-@app.get("/api/version")
-def get_version():
-    """Return build metadata for the running process (issue #421).
-
-    Response shape:
-    {
-      "git_sha": "<full-commit-hash>",
-      "branch": "main",
-      "build_timestamp": "2026-05-30T12:00:00+00:00"
-    }
-    """
-    return JSONResponse(
-        content={
-            "git_sha": _GIT_SHA,
-            "branch": _GIT_BRANCH,
-            "build_timestamp": _BUILD_TIMESTAMP,
-        },
-        headers={"Cache-Control": "no-cache, must-revalidate"},
-    )
-
-
-@app.get("/api/gh-auth-status")
-def get_gh_auth_status():
-    """Return the GitHub CLI auth preflight result from startup (issue #424)."""
-    return JSONResponse(
-        content=_GH_AUTH_STATUS,
-        headers={"Cache-Control": "no-cache, must-revalidate"},
-    )
+# /api/version and /api/gh-auth-status moved to routers/system.py (issue #794)
 
 
 _seen_agent_sessions: set[str] = set()
@@ -1437,14 +1416,7 @@ async def receive_token_usage(event: TokenUsageEvent):
     return {"ok": True}
 
 
-@app.get("/api/agents")
-def list_agents():
-    return db.get_agents()
-
-
-@app.get("/api/events")
-def list_events():
-    return db.get_recent_events()
+# /api/agents and /api/events moved to routers/activity.py (issue #794)
 
 
 @app.delete("/api/events/test")
@@ -2075,117 +2047,8 @@ def get_running_sprint(project: str):
     return Response(status_code=204)
 
 
-_VALID_EVENT_SOURCES = {"agent", "dashboard", "github"}
-
-
-@app.get("/api/projects/{slug}/events")
-def get_project_events(
-    slug: str,
-    source: Optional[str] = None,
-    target: Optional[str] = None,
-    since: Optional[str] = None,
-    until: Optional[str] = None,
-    limit: int = 100,
-):
-    """Return structured events for a project, newest-first.
-
-    Filters: source (agent|dashboard|github), target (exact), since/until (ISO date), limit.
-    404 — unknown project slug.
-    400 — invalid source value.
-    """
-    # Validate source before any DB work
-    if source is not None and source not in _VALID_EVENT_SOURCES:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Invalid source {source!r}. Must be one of: {', '.join(sorted(_VALID_EVENT_SOURCES))}",
-        )
-
-    # Resolve slug → project name stored in events table
-    try:
-        all_projects = projects_module.load_projects()
-    except Exception:
-        all_projects = []
-
-    matched = next(
-        (p for p in all_projects
-         if p["repo"].split("/")[-1] == slug or p["repo"] == slug),
-        None,
-    )
-    if matched is None:
-        raise HTTPException(status_code=404, detail=f"Project '{slug}' not found")
-
-    # The events table stores project as the full repo path (owner/repo)
-    project_key = matched["repo"]
-
-    query = "SELECT timestamp, source, actor, type, target, action_id, detail FROM events WHERE project = ?"
-    params: list = [project_key]
-
-    if source is not None:
-        query += " AND source = ?"
-        params.append(source)
-    if target is not None:
-        query += " AND target = ?"
-        params.append(target)
-    if since is not None:
-        query += " AND timestamp >= ?"
-        params.append(since)
-    if until is not None:
-        # include the full day by appending T23:59:59 when only a date is given
-        until_bound = until if "T" in until else f"{until}T23:59:59"
-        query += " AND timestamp <= ?"
-        params.append(until_bound)
-
-    query += " ORDER BY timestamp DESC LIMIT ?"
-    params.append(limit)
-
-    with db.get_conn() as conn:
-        rows = conn.execute(query, params).fetchall()
-
-    result = []
-    for row in rows:
-        d = dict(row)
-        try:
-            d["detail"] = json.loads(d["detail"])
-        except (TypeError, ValueError):
-            pass
-        result.append(d)
-
-    # issue #764: enrich agent_finished rows with the durable duration_seconds
-    # from agent_runs so the Activity tab can show a Duration column. Matched by
-    # issue number + agent role; falls back to the duration already carried in
-    # the event detail when no agent_runs row is found.
-    _agent_finished = [
-        d for d in result
-        if d.get("type") == "agent_finished" and isinstance(d.get("detail"), dict)
-    ]
-    if _agent_finished:
-        _issue_nums = {
-            d["detail"].get("issue_num")
-            for d in _agent_finished
-            if d["detail"].get("issue_num") is not None
-        }
-        _runs_by_key: dict = {}
-        try:
-            for _num in _issue_nums:
-                for _r in db.agent_runs_for_issue(int(_num)):
-                    if _r.get("duration_seconds") is None:
-                        continue
-                    _runs_by_key[(int(_num), str(_r.get("agent", "")).lower())] = _r["duration_seconds"]
-        except Exception:
-            _runs_by_key = {}
-        for d in _agent_finished:
-            det = d["detail"]
-            num = det.get("issue_num")
-            role = str(det.get("role", "")).lower()
-            dur = None
-            if num is not None:
-                dur = _runs_by_key.get((int(num), role))
-            if dur is None:
-                dur = det.get("duration")
-            if dur is not None:
-                d["duration_seconds"] = dur
-
-    return result
+# /api/projects/{slug}/events (and _VALID_EVENT_SOURCES) moved to
+# routers/activity.py (issue #794)
 
 
 # ── Settings API (issue #639) ────────────────────────────────────────────────

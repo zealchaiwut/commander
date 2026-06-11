@@ -1913,6 +1913,47 @@
     .hist-verb--delete { color: var(--red); border-color: var(--red-bg); }
     .hist-verb--delete:hover { background: var(--red-bg); }
 
+    /* ── History folding (issue #807) ──────────────────────────────────────
+       The N most-recent sprints render as normal cards; older sprints collapse
+       into aggregate fold rows. Emphasis on an open fold is a full border + tint
+       ring (never a side stripe), matching the card language above. */
+    .hist-toolbar { display: flex; align-items: center; padding: 0 2px 4px; }
+    .hist-toolbar-note {
+      display: inline-flex; align-items: center; gap: 7px;
+      font-size: 12px; color: var(--text-sub); line-height: 1.4;
+    }
+    .hist-toolbar-note i { font-size: 14px; color: var(--text-muted); flex: none; }
+    .fold {
+      background: var(--surface-2); border: 1px solid var(--border);
+      border-radius: 10px; overflow: hidden;
+      transition: box-shadow .14s, border-color .14s;
+    }
+    .fold.expanded { box-shadow: 0 0 0 3px var(--blue-bg), 0 1px 3px rgba(0,0,0,.05); border-color: var(--blue); }
+    .fold-head {
+      display: flex; align-items: center; gap: 10px;
+      padding: 11px 16px; cursor: pointer; user-select: none;
+    }
+    .fold-head:hover { background: var(--surface-hover); }
+    .fold-chev { font-size: 14px; color: var(--text-sub); flex: none; }
+    .fold-title { font-size: 13px; font-weight: 700; color: var(--text); }
+    .fold-count { font-size: 11.5px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+    .fold-spacer { flex: 1; }
+    .fold-agg { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+    .fold-stat {
+      display: inline-flex; align-items: center; gap: 4px;
+      font-size: 11.5px; color: var(--text-muted);
+      background: var(--surface); padding: 3px 9px; border-radius: 6px;
+      border: 1px solid var(--border); font-variant-numeric: tabular-nums;
+    }
+    .fold-stat i { font-size: 12px; }
+    .fold-stat--fail { color: var(--red); border-color: var(--red-bg); }
+    /* Member cards revealed when a fold is expanded — same gap/indent rhythm
+       as the top-level ledger so they read as identical sprint rows. */
+    .fold-body {
+      display: flex; flex-direction: column; gap: 10px;
+      padding: 2px 12px 14px;
+    }
+
     /* ── Sprint list area ── */
     .smgmt-content {
       padding: 0 28px 28px;
@@ -9160,6 +9201,12 @@ async function _smgmtLoadSummaries(repo) {
 // fed by GET /api/sprints/history (issue #805) — local-only, no GitHub call.
 let _histLedgerData = [];
 const _histExpanded = new Set();   // labels of currently-expanded cards
+// Folding (issue #807): the N most-recent sprints render expanded; older ones
+// collapse into aggregate folds of the same size. _histFoldSize mirrors the
+// `history_fold_size` project setting (default 10); _histFoldExpanded tracks
+// which fold groups are currently open (distinct from per-card expansion).
+let _histFoldSize = 10;
+const _histFoldExpanded = new Set();   // ids of currently-expanded fold groups
 
 // Terminal states that lock a card: no further action is possible, links only.
 function _histIsLocked(state) {
@@ -9360,6 +9407,108 @@ function _histToggleCard(label) {
   _histRenderLedger(_histLedgerData);
 }
 
+// ── Folding (issue #807) ────────────────────────────────────────────────────
+// The integer sprint number parsed out of a "sprint-NN" (or "sprint-NN.M"
+// rerun-child) label — used to build the "Sprints X–Y" fold range.
+function _histSprintNum(label) {
+  const m = /sprint-(\d+)/.exec(label || '');
+  return m ? parseInt(m[1], 10) : null;
+}
+
+// A "done" ticket is a merged ticket; count them across a sprint's issue list.
+function _histTicketsDone(s) {
+  const issues = Array.isArray(s.issues) ? s.issues : [];
+  return issues.filter(i => (i.state || '').toLowerCase() === 'merged').length;
+}
+
+// Split the (newest-first) sprint feed into the `foldSize` most-recent sprints
+// (rendered expanded) plus a list of older folds, each holding exactly
+// `foldSize` sprints. Both the recent slice and every fold are sized by the
+// same `history_fold_size` setting (AC2/AC8).
+function _histPartition(sprints, foldSize) {
+  foldSize = Math.max(1, foldSize | 0);
+  const recent = sprints.slice(0, foldSize);
+  const older = sprints.slice(foldSize);
+  const folds = [];
+  for (let i = 0; i < older.length; i += foldSize) {
+    const group = older.slice(i, i + foldSize);
+    const nums = group.map(g => _histSprintNum(g.label)).filter(n => n != null);
+    folds.push({
+      id: 'fold-' + i,
+      sprints: group,
+      from: nums.length ? Math.min(...nums) : null,
+      to: nums.length ? Math.max(...nums) : null,
+    });
+  }
+  return { recent, folds };
+}
+
+// Aggregate a fold group: tickets done (Σ merged), avg estimation accuracy
+// (mean of the sprints that recorded one), and failure count (Σ failed
+// sprints) — the three metrics surfaced on the fold head (AC4).
+function _histFoldAgg(group) {
+  let done = 0, failed = 0, accSum = 0, accN = 0;
+  group.forEach(s => {
+    done += _histTicketsDone(s);
+    if ((s.lifecycle_state || '').toLowerCase() === 'failed') failed += 1;
+    const acc = s.estimate_accuracy;
+    if (acc != null && !isNaN(acc)) { accSum += Number(acc); accN += 1; }
+  });
+  return { done, failed, avgAcc: accN ? (accSum / accN) : null, count: group.length };
+}
+
+function _histFoldAggHtml(group) {
+  const a = _histFoldAgg(group);
+  const acc = a.avgAcc != null ? (Number(a.avgAcc).toFixed(2) + '×') : '—';
+  return `<div class="fold-agg">
+    <span class="fold-stat"><i class="ti ti-checks"></i> ${a.done} done</span>
+    <span class="fold-stat"><i class="ti ti-gauge"></i> ${escHtml(acc)} avg est</span>
+    <span class="fold-stat fold-stat--fail"><i class="ti ti-alert-triangle"></i> ${a.failed} failed</span>
+  </div>`;
+}
+
+// A collapsed fold row ("Sprints X–Y" + aggregate metrics). Clicking the head
+// expands it; member sprints then render through the SAME _histCardHtml builder
+// so they are visually identical to recent rows — locked/normal states intact
+// (AC5). Collapsing removes the fold from _histFoldExpanded, hiding the rows.
+function _histFoldHtml(fold) {
+  const open = _histFoldExpanded.has(fold.id);
+  const chev = open ? 'ti-chevron-down' : 'ti-chevron-right';
+  const range = (fold.from != null && fold.to != null)
+    ? (fold.from === fold.to ? ('Sprint ' + fold.from) : ('Sprints ' + fold.from + '–' + fold.to))
+    : ('Sprints · ' + fold.sprints.length);
+  const fid = escHtml(fold.id);
+  const body = open
+    ? `<div class="fold-body">${fold.sprints.map(_histCardHtml).join('')}</div>`
+    : '';
+  return `<div class="fold ${open ? 'expanded' : ''}" data-fold="${fid}">
+    <div class="fold-head" onclick="_histToggleFold('${fid}')">
+      <i class="ti ${chev} fold-chev"></i>
+      <span class="fold-title">${escHtml(range)}</span>
+      <span class="fold-count">${fold.sprints.length} sprints</span>
+      <span class="fold-spacer"></span>
+      ${_histFoldAggHtml(fold.sprints)}
+    </div>
+    ${body}
+  </div>`;
+}
+
+function _histToggleFold(id) {
+  if (_histFoldExpanded.has(id)) _histFoldExpanded.delete(id);
+  else _histFoldExpanded.add(id);
+  _histRenderLedger(_histLedgerData);
+}
+
+// Toolbar note above the ledger explaining the fold behaviour (mock v5 AC10).
+function _histToolbarHtml() {
+  return `<div class="hist-toolbar">
+    <span class="hist-toolbar-note">
+      <i class="ti ti-stack-2"></i>
+      Showing the ${_histFoldSize} most recent sprints — older sprints are grouped into folds of ${_histFoldSize}.
+    </span>
+  </div>`;
+}
+
 function _histRenderLedger(sprints) {
   const el = document.getElementById('hist-ledger');
   if (!el) return;
@@ -9367,7 +9516,12 @@ function _histRenderLedger(sprints) {
     el.innerHTML = `<div class="hist-ledger-empty">No sprint history yet — finished and deleted sprints appear here.</div>`;
     return;
   }
-  el.innerHTML = sprints.map(_histCardHtml).join('');
+  // Partition by the current fold size, then draw: toolbar note, the recent
+  // (expanded) cards, then the older folds (AC2/AC3).
+  const { recent, folds } = _histPartition(sprints, _histFoldSize);
+  const recentHtml = recent.map(_histCardHtml).join('');
+  const foldsHtml = folds.map(_histFoldHtml).join('');
+  el.innerHTML = _histToolbarHtml() + recentHtml + foldsHtml;
 }
 
 // Resume a FAILED sprint — continue from where it stopped. Backend resume is
@@ -9390,6 +9544,16 @@ async function _histLoadLedger(repo) {
   if (!repo) return;
   const el = document.getElementById('hist-ledger');
   try {
+    // Read the fold size from project settings so re-opening / reloading the
+    // History tab re-partitions whenever `history_fold_size` changes (AC7).
+    try {
+      const sresp = await fetch(`/api/projects/${encodeURIComponent(_slug)}/settings`);
+      if (sresp.ok) {
+        const settings = await sresp.json();
+        const fs = parseInt(settings.history_fold_size, 10);
+        if (!isNaN(fs) && fs > 0) _histFoldSize = fs;
+      }
+    } catch (_) { /* fall back to the default fold size */ }
     const resp = await fetch('/api/sprints/history?limit=50');
     if (!resp.ok) return;
     const data = await resp.json();

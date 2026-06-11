@@ -70,3 +70,4 @@ separated by `---` exactly as the splitter expects.
 - [2026-06-10-settings-and-timezone.md](2026-06-10-settings-and-timezone.md) — Global Settings consolidation (away from modal) + machine-local timezone
 - [2026-06-10-logs-surface-failures.md](2026-06-10-logs-surface-failures.md) — surface real failure class/message on the Logs page + fix board "tester rejected" mislabel
 - [2026-06-11-machine-onboarding.md](2026-06-11-machine-onboarding.md) — launchd PATH from real tool locations, headless tokens at install, machine doctor, onboarding runbook
+- [2026-06-11-sprint-reporting-analytics.md](2026-06-11-sprint-reporting-analytics.md) — finish-sprint reconciliation, verified New Sprint, logs per-agent time, real analytics, documentor sprint briefs

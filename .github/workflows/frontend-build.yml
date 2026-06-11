@@ -1,0 +1,45 @@
+name: frontend-build
+
+# Frontend build + design gate (issue #796). Runs the esbuild pipeline and the
+# impeccable/lint gates over the JS source root (apps/dashboard/static/src). The
+# job fails the pipeline if the bundle does not build or a gate reports an error.
+
+on:
+  pull_request:
+    paths:
+      - 'apps/dashboard/static/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'eslint.config.js'
+      - '.github/workflows/frontend-build.yml'
+  push:
+    branches:
+      - develop
+      - master
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm install
+
+      # AC8 — build gate: fail the pipeline if esbuild errors.
+      - name: Build bundle (esbuild)
+        run: npm run build
+
+      # AC9 — frontend lint over the source root.
+      - name: Frontend lint (static/src)
+        run: npm run lint
+
+      # AC9 — impeccable detect over the source root.
+      - name: Impeccable detect (static/src)
+        run: node .github/skills/impeccable/scripts/detect.mjs apps/dashboard/static/src

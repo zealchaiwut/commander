@@ -728,6 +728,26 @@ def _db_update_worktree_shas_sm(
         pass
 
 
+def _token_window_utc_now() -> str:
+    """UTC timestamp in the exact format token_usage.recorded_at uses."""
+    return datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S")
+
+
+def _token_window_sums(role: str, since_utc: str) -> "tuple[int, int]":
+    """Best-effort (input, output) token sums for *role* since *since_utc*.
+
+    Attributes a dispatch's token spend by role + time window over the
+    token_usage rows the PostToolUse hook records. Correct while at most one
+    agent per role runs at a time (serial mode, and coder∥tester pipeline —
+    the roles differ). Returns (0, 0) when the dashboard DB is unavailable.
+    """
+    try:
+        import db  # apps/dashboard on sys.path (line 142)
+        return db.sum_token_usage_window(role, since_utc, _token_window_utc_now())
+    except (Exception, SystemExit):
+        return (0, 0)
+
+
 def _db_agent_finish_sm(
     issue_number,
     sprint_label: str,
@@ -3835,6 +3855,7 @@ def _dispatch_coder(
     sub_env = os.environ.copy()
     sub_env.pop("ANTHROPIC_API_KEY", None)
     sub_env.update(_agent_identity_env("coder", issue_num))  # tag hooks/telemetry as the docs prescribe
+    sub_env["CLAUDE_MODEL"] = coder_model  # hook records model_name on token_usage rows
     if eff_repo:
         sub_env["COMMANDER_PROJECT"] = eff_repo
     if sprint_label:
@@ -4176,6 +4197,7 @@ def _dispatch_tester(
     sub_env = os.environ.copy()
     sub_env.pop("ANTHROPIC_API_KEY", None)
     sub_env.update(_agent_identity_env("tester", issue_num))  # tag hooks/telemetry as the docs prescribe
+    sub_env["CLAUDE_MODEL"] = tester_model  # hook records model_name on token_usage rows
     if eff_repo:
         sub_env["COMMANDER_PROJECT"] = eff_repo
     if sprint_label:
@@ -6638,6 +6660,7 @@ def _run_pipeline_dispatch(
             _post_sprint_status(state, api_url=api_url)
 
         _stage_coder_t0 = time.monotonic()
+        _stage_coder_utc0 = _token_window_utc_now()
         _pipe_hang_continuation = ctx.get("hang_continuation")
         coder_ok, coder_category = _dispatch_coder(
             num, alert_modes, sprint_branch=target_branch, repo_name=eff_repo, cfg=cfg,
@@ -6647,10 +6670,14 @@ def _run_pipeline_dispatch(
             hang_continuation=_pipe_hang_continuation,
             attempt_kind=_pipe_attempt_kind,
         )
+        _ctin, _ctout = _token_window_sums("coder", _stage_coder_utc0)
+        state.total_tokens_in += _ctin
+        state.total_tokens_out += _ctout
         _db_agent_finish_sm(  # issue #764: one closed row per coder dispatch
             num, label, "coder",
             duration_seconds=time.monotonic() - _stage_coder_t0,
             outcome="success" if coder_ok else "failed",
+            total_tokens=(_ctin + _ctout) or None,
         )
         # Clear hang_continuation after dispatch so fix_round dispatches don't inherit it.
         ctx.pop("hang_continuation", None)
@@ -6789,15 +6816,20 @@ def _run_pipeline_dispatch(
             _post_sprint_status(state, api_url=api_url)
 
         _stage_tester_t0 = time.monotonic()
+        _stage_tester_utc0 = _token_window_utc_now()
         tester_rc, hang_category = _dispatch_tester(
             num, alert_modes, sprint_branch=target_branch, repo_name=eff_repo, cfg=cfg,
             chosen_port=ctx.get("port"), rate_limit_events=state.rate_limit_events,
             on_running=_on_tester_running, sprint_label=label,
         )
+        _ttin, _ttout = _token_window_sums("tester", _stage_tester_utc0)
+        state.total_tokens_in += _ttin
+        state.total_tokens_out += _ttout
         _db_agent_finish_sm(  # issue #764: one closed row per tester dispatch
             num, label, "tester",
             duration_seconds=time.monotonic() - _stage_tester_t0,
             outcome="pass" if tester_rc == 0 else "fail",
+            total_tokens=(_ttin + _ttout) or None,
         )
         ist.tester_finished_at = ist.status_changed_at
         if hang_category == FailureCategory.HANG:
@@ -7500,6 +7532,7 @@ def run_sprint(
                     _post_sprint_status(_st, api_url=_api)
 
                 _coder_t0 = time.monotonic()
+                _coder_utc0 = _token_window_utc_now()
                 try:
                     coder_ok, coder_category = _dispatch_coder(
                         num, alert_modes, sprint_branch=target_branch, repo_name=eff_repo, cfg=cfg,
@@ -7524,10 +7557,14 @@ def run_sprint(
                     )
                     raise
                 _coder_elapsed = time.monotonic() - _coder_t0
+                _ctin, _ctout = _token_window_sums("coder", _coder_utc0)
+                state.total_tokens_in += _ctin
+                state.total_tokens_out += _ctout
                 _db_agent_finish_sm(  # issue #764: close the run with precise duration
                     num, label, "coder",
                     duration_seconds=_coder_elapsed,
                     outcome="success" if coder_ok else "failed",
+                    total_tokens=(_ctin + _ctout) or None,
                 )
                 _coder_m, _coder_s = divmod(int(_coder_elapsed), 60)
                 sys.stdout.write(str(f"  Total time used on coder dispatch: {_coder_m}m {_coder_s}s") + "\n")
@@ -7745,6 +7782,7 @@ def run_sprint(
 
             # -- Dispatch tester --
             _tester_t0 = time.monotonic()
+            _tester_utc0 = _token_window_utc_now()
             try:
                 tester_rc, hang_category = _dispatch_tester(
                     num, alert_modes, sprint_branch=target_branch, repo_name=eff_repo, cfg=cfg,
@@ -7767,10 +7805,14 @@ def run_sprint(
                 )
                 raise
             _tester_elapsed = time.monotonic() - _tester_t0
+            _ttin, _ttout = _token_window_sums("tester", _tester_utc0)
+            state.total_tokens_in += _ttin
+            state.total_tokens_out += _ttout
             _db_agent_finish_sm(  # issue #764: close the run with precise duration
                 num, label, "tester",
                 duration_seconds=_tester_elapsed,
                 outcome="pass" if tester_rc == 0 else "fail",
+                total_tokens=(_ttin + _ttout) or None,
             )
             _tester_m, _tester_s = divmod(int(_tester_elapsed), 60)
             sys.stdout.write(str(f"  Total time used on tester dispatch: {_tester_m}m {_tester_s}s") + "\n")

@@ -5447,6 +5447,82 @@
     .smgmt-running-empty .ti { font-size: 28px; color: var(--text-muted); opacity: .7; }
     .smgmt-running-empty-title { font-size: 14px; font-weight: 700; color: var(--text-sub); margin: 0; }
     .smgmt-running-empty-sub { font-size: 13px; color: var(--text-muted); margin: 0; }
+
+    /* ── Level-rail node board (issue #802) ──────────────────────────────────
+       A vertical spine of level gates; each level holds per-ticket node cards.
+       Tokens are the BA Path-A literal contract: .rail/.level/.level-dot/.nodes
+       /.node + the done/coder-active/tester-active/queued state variants. */
+    .rail { position: relative; padding: 8px 4px 8px 26px; }
+    /* The spine: a single hairline behind the level dots. */
+    .rail::before { content: ""; position: absolute; left: 13px; top: 14px; bottom: 14px;
+      width: 2px; background: var(--border); border-radius: 1px; }
+    .level { position: relative; margin: 0 0 14px; }
+    .level:last-child { margin-bottom: 0; }
+    /* The gate dot on the spine. */
+    .level-dot { position: absolute; left: -19px; top: 4px; width: 12px; height: 12px;
+      border-radius: 50%; background: var(--surface); border: 2px solid var(--text-sub);
+      box-sizing: border-box; transition: background .2s ease, border-color .2s ease; }
+    .level-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 8px; }
+    .level-name { font-size: 13px; font-weight: 700; color: var(--text); }
+    .level-meta { font-size: 11px; color: var(--text-muted); font-family: var(--mono); }
+    .level-gate { font-size: 12px; color: var(--text-muted); font-style: italic; padding: 2px 0; }
+    .nodes { display: flex; flex-direction: column; gap: 8px; }
+
+    /* Active level: spine dot pulses; level stays expanded. */
+    .level.active .level-dot { background: var(--blue); border-color: var(--blue);
+      animation: rail-gate-pulse 1.8s ease-in-out infinite; }
+    @keyframes rail-gate-pulse {
+      0%,100% { box-shadow: 0 0 0 0 var(--blue-bg); }
+      50%     { box-shadow: 0 0 0 4px var(--blue-bg); }
+    }
+    /* Done level: collapses its nodes behind a green gate. */
+    .level.done .level-dot { background: var(--green); border-color: var(--green); }
+    .level.done .nodes { display: none; }
+    .level.done .level-name { color: var(--text-muted); }
+    /* Queued level: greyed gate + waiting text. */
+    .level.queued .level-dot { background: var(--surface); border-color: var(--border); }
+    .level.queued .level-name { color: var(--text-muted); }
+
+    /* Node card — the per-ticket affordance. */
+    .node { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left;
+      padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px;
+      background: var(--surface); color: var(--text); font: inherit; cursor: pointer;
+      transition: border-color .15s ease, box-shadow .15s ease, background .15s ease; }
+    .node:hover { background: var(--surface-hover); }
+    .node:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+    .node.selected { border-color: var(--blue); box-shadow: 0 0 0 2px var(--blue-bg); }
+    .node-state-icon { display: inline-flex; align-items: center; justify-content: center;
+      width: 16px; height: 16px; flex: 0 0 16px; font-size: 12px; }
+    .node-num { font-family: var(--mono); font-size: 12px; color: var(--text-muted); flex: 0 0 auto; }
+    .node-title { flex: 1 1 auto; min-width: 0; font-size: 13px; overflow: hidden;
+      text-overflow: ellipsis; white-space: nowrap; }
+    .node-size { flex: 0 0 auto; font-family: var(--mono); font-size: 10px; font-weight: 700;
+      padding: 1px 6px; border-radius: 999px; background: var(--surface-2); color: var(--text-muted); }
+    .node-time { flex: 0 0 auto; font-family: var(--mono); font-size: 11px; color: var(--text-muted); }
+    .node-badge { flex: 0 0 auto; font-size: 10px; font-weight: 700; padding: 1px 6px;
+      border-radius: 999px; background: var(--amber-bg); color: var(--amber); }
+
+    /* State variants — glow is a box-shadow ring, never a side-stripe. */
+    .node.queued { opacity: .72; }
+    .node.queued .node-state-icon { color: var(--text-sub); }
+    .node.done { border-color: var(--green); }
+    .node.done .node-state-icon { color: var(--green); }
+    .node.done .node-title { color: var(--text-muted); }
+    .node.coder-active { border-color: var(--purple);
+      box-shadow: 0 0 0 1px var(--purple), 0 0 12px -2px var(--purple); }
+    .node.coder-active .node-state-icon { color: var(--purple);
+      animation: rail-node-glow 1.6s ease-in-out infinite; }
+    .node.tester-active { border-color: var(--amber);
+      box-shadow: 0 0 0 1px var(--amber), 0 0 12px -2px var(--amber); }
+    .node.tester-active .node-state-icon { color: var(--amber);
+      animation: rail-node-glow 1.6s ease-in-out infinite; }
+    @keyframes rail-node-glow { 0%,100% { opacity: 1; } 50% { opacity: .45; } }
+    @media (prefers-reduced-motion: reduce) {
+      .level.active .level-dot,
+      .node.coder-active .node-state-icon,
+      .node.tester-active .node-state-icon { animation: none; }
+    }
+
     .smgmt-subview { display: none; }
     .smgmt-subview.show { display: block; animation: smgmt-fade-in .18s ease; }
     @keyframes smgmt-fade-in { from { opacity: 0; } to { opacity: 1; } }
@@ -5946,6 +6022,9 @@
             <p class="smgmt-running-empty-title">No sprint is running</p>
             <p class="smgmt-running-empty-sub">Start a sprint from the Board to watch it live here.</p>
           </div>
+          <!-- Level-rail node board (issue #802) — built from the /live snapshot
+               by _smgmtRailUpdate; levels gate on the spine, ticket nodes per level. -->
+          <div class="rail" id="smgmt-rail" role="list" aria-label="Sprint level rail" hidden></div>
         </div><!-- /smgmt-subview-running -->
 
         <!-- History sub-view (issue #716) — finished-sprint summaries -->
@@ -7512,6 +7591,8 @@ let _smgmtRunningLabels = new Set();
 let _smgmtAnySprintRunning = false;
 // Live data cache: sprint label → last live snapshot from /api/sprints/{label}/live
 const _smgmtLiveCache = {};
+// Currently-selected level-rail node (issue #802), fed to the inspector panel.
+let _smgmtRailSelectedNum = null;
 // Poll timer for live data (2s indicator refresh)
 let _smgmtLivePollId = null;
 // Poll timer for live log panel (5s log refresh, issue #309)
@@ -8776,6 +8857,12 @@ function _smgmtShowSubView(view) {
   });
   // Lazy-load summaries when History is opened (no-op if repo not cached yet).
   if (view === 'history') _smgmtLoadSummaries(_cachedFullRepo[_slug]);
+  // Render the level-rail from cache when switching to Running (issue #802) so the
+  // board shows immediately without waiting for the next 2s poll tick.
+  if (view === 'running') {
+    const lbl = _smgmtRunningLabels.values().next().value;
+    if (lbl) _smgmtRailUpdate(lbl, _smgmtLiveCache[lbl]);
+  }
 }
 
 // Sync the sub-nav live-state indicators (issue #798): a pulsing dot on the
@@ -11223,6 +11310,234 @@ function _smgmtLevelsHtml(live, label) {
   return `<div class="smgmt-levels" id="smgmt-levels-${escHtml(label)}">${rows}</div>`;
 }
 
+// ── Level-rail node board (issue #802) ───────────────────────────────────────
+// A vertical rail rendered in the Running sub-view from the /live snapshot:
+// dispatch levels gate on the spine, ticket node cards sit in each level.
+
+/** Group snapshot issues into ordered levels, each with a done/active/queued
+ *  state. Pipeline runs carry a levels[] state array; serial/single-level runs
+ *  (dispatch_level 0) collapse to one synthetic Level 1 whose state is derived
+ *  from its issues. */
+function _smgmtRailLevels(live) {
+  const issues = (live && live.issues) || [];
+  // Snapshot levels[] (pipeline mode) gives authoritative per-level state.
+  const levels = (live && live.levels) || [];
+  const stateByLevel = {};
+  levels.forEach(l => {
+    stateByLevel[l.level] = l.state === 'complete' ? 'done'
+                          : l.state === 'waiting'  ? 'queued' : 'active';
+  });
+  // Group issues by dispatch_level; 0 (serial/single-level) folds into Level 1.
+  const groups = {};
+  issues.forEach(iss => {
+    const lvl = (iss.dispatch_level || 0) || 1;
+    (groups[lvl] = groups[lvl] || []).push(iss);
+  });
+  const isTerminal = i => i.status === 'done' || i.status === 'skipped' || i.agent_status === 'failed';
+  const isInflight = i => i.agent === 'coder' || i.agent === 'tester' || i.status === 'in-progress';
+  return Object.keys(groups).map(Number).sort((a, b) => a - b).map(lvl => {
+    let state = stateByLevel[lvl];
+    if (!state) {
+      const g = groups[lvl];
+      state = g.every(isTerminal) ? 'done' : (g.some(isInflight) ? 'active' : 'queued');
+    }
+    return { level: lvl, state: state, issues: groups[lvl] };
+  });
+}
+
+/** Map a single snapshot issue to its node state: the four literal contract
+ *  tokens. Per-issue (never a level-wide single winner) so a coder node and a
+ *  tester node in the same level both glow at once (pipeline mode). */
+function _smgmtRailNodeState(iss) {
+  if (!iss) return 'queued';
+  if (iss.status === 'done') return 'done';
+  if (iss.agent === 'coder')  return 'coder-active';
+  if (iss.agent === 'tester') return 'tester-active';
+  return 'queued';
+}
+
+/** Fix-round number for a node, or null. Feature-detected from retry/attempt
+ *  data on the issue — the /live contract carries none today, so the badge stays
+ *  hidden until a future snapshot provides it (kept out of scope here). */
+function _smgmtRailFixRound(iss) {
+  if (!iss) return null;
+  if (iss.fix_round != null && Number(iss.fix_round) > 0) return Number(iss.fix_round);
+  if (iss.retry     != null && Number(iss.retry)     > 0) return Number(iss.retry);
+  if (iss.round     != null && Number(iss.round)     > 0) return Number(iss.round);
+  if (iss.attempt   != null && Number(iss.attempt)   > 1) return Number(iss.attempt) - 1;
+  return null;
+}
+
+/** Markup for one ticket node card: state icon, #num, title, size pill, elapsed
+ *  time, and (when present) a fix-round badge. */
+function _smgmtRailNodeHtml(iss) {
+  const state = _smgmtRailNodeState(iss);
+  const num = iss.number;
+  const selected = (_smgmtRailSelectedNum === num);
+  const icon = state === 'done' ? '&#10003;' : '&#9679;';
+  const sizePill = iss.size
+    ? `<span class="node-size" title="≈${iss.minutes || _sizeMinutes(iss.size)} min">${escHtml(iss.size)}</span>` : '';
+  const elapsedStr = _fmtTicketElapsed(iss.elapsed_secs);
+  const timeEl = elapsedStr ? `<span class="node-time">${escHtml(elapsedStr)}</span>` : '';
+  const fr = _smgmtRailFixRound(iss);
+  const badge = fr ? `<span class="node-badge" title="Fix round ${fr}">&#8635; ${fr}</span>` : '';
+  return `<button type="button" class="node ${state}${selected ? ' selected' : ''}" role="listitem"`
+    + ` data-issue="${num}" aria-selected="${selected ? 'true' : 'false'}"`
+    + ` onclick="_smgmtRailSelectNode(${num})" title="${escHtml(iss.title || '')}">`
+    + `<span class="node-state-icon" aria-hidden="true">${icon}</span>`
+    + `<span class="node-num">#${escHtml(String(num))}</span>`
+    + `<span class="node-title">${escHtml(iss.title || '')}</span>`
+    + sizePill + timeEl + badge
+    + `</button>`;
+}
+
+/** Structural signature: level set + node set. Identical signature → cheap
+ *  in-place patch; changed signature → full render. */
+function _smgmtRailSig(levels) {
+  return levels.map(L => L.level + ':' + L.issues.map(i => i.number).join(',')).join('|');
+}
+
+/** Full (re)build of the rail innerHTML. Used only when the level/node structure
+ *  changes; steady-state updates go through _smgmtRailPatch (no flicker). */
+function _smgmtRailRender(label, live) {
+  const railEl = document.getElementById('smgmt-rail');
+  if (!railEl) return;
+  const levels = _smgmtRailLevels(live);
+  railEl.innerHTML = levels.map(L => {
+    const nodes = L.issues.map(_smgmtRailNodeHtml).join('');
+    const done = L.issues.filter(i => i.status === 'done').length;
+    const gate = L.state === 'queued'
+      ? `<div class="level-gate">Waiting for Level ${L.level - 1} to complete</div>` : '';
+    return `<div class="level ${L.state}" data-level="${L.level}">`
+      + `<span class="level-dot" aria-hidden="true"></span>`
+      + `<div class="level-head"><span class="level-name">Level ${L.level}</span>`
+      + `<span class="level-meta">${done}/${L.issues.length}</span></div>`
+      + gate
+      + `<div class="nodes">${nodes}</div>`
+      + `</div>`;
+  }).join('');
+  railEl.dataset.railsig = _smgmtRailSig(levels);
+}
+
+/** In-place patch of level states + node states/size/time/badge. Never touches
+ *  the rail container's innerHTML, so the existing 2s poll updates without
+ *  flicker or a full re-render. */
+function _smgmtRailPatch(label, live) {
+  const railEl = document.getElementById('smgmt-rail');
+  if (!railEl) return;
+  const levels = _smgmtRailLevels(live);
+  levels.forEach(L => {
+    const levelEl = railEl.querySelector(`.level[data-level="${L.level}"]`);
+    if (!levelEl) return;
+    levelEl.className = `level ${L.state}`;
+    const metaEl = levelEl.querySelector('.level-meta');
+    const done = L.issues.filter(i => i.status === 'done').length;
+    if (metaEl) metaEl.textContent = `${done}/${L.issues.length}`;
+    // Gate text only on queued levels.
+    let gateEl = levelEl.querySelector('.level-gate');
+    if (L.state === 'queued') {
+      if (!gateEl) {
+        gateEl = document.createElement('div');
+        gateEl.className = 'level-gate';
+        const head = levelEl.querySelector('.level-head');
+        if (head) head.after(gateEl);
+      }
+      gateEl.textContent = `Waiting for Level ${L.level - 1} to complete`;
+    } else if (gateEl) {
+      gateEl.remove();
+    }
+  });
+  const byNum = {};
+  levels.forEach(L => L.issues.forEach(i => { byNum[i.number] = i; }));
+  railEl.querySelectorAll('.node[data-issue]').forEach(nodeEl => {
+    const num = parseInt(nodeEl.dataset.issue, 10);
+    const iss = byNum[num];
+    if (!iss) return;
+    const state = _smgmtRailNodeState(iss);
+    const selected = (_smgmtRailSelectedNum === num);
+    nodeEl.className = `node ${state}${selected ? ' selected' : ''}`;
+    nodeEl.setAttribute('aria-selected', selected ? 'true' : 'false');
+    const iconEl = nodeEl.querySelector('.node-state-icon');
+    if (iconEl) iconEl.innerHTML = state === 'done' ? '&#10003;' : '&#9679;';
+    // size pill
+    let sizeEl = nodeEl.querySelector('.node-size');
+    if (iss.size) {
+      if (!sizeEl) {
+        sizeEl = document.createElement('span');
+        sizeEl.className = 'node-size';
+        const titleEl = nodeEl.querySelector('.node-title');
+        if (titleEl) titleEl.after(sizeEl);
+      }
+      sizeEl.textContent = iss.size;
+      sizeEl.title = `≈${iss.minutes || _sizeMinutes(iss.size)} min`;
+    } else if (sizeEl) { sizeEl.remove(); }
+    // elapsed time
+    let timeEl = nodeEl.querySelector('.node-time');
+    const elapsedStr = _fmtTicketElapsed(iss.elapsed_secs);
+    if (elapsedStr) {
+      if (!timeEl) {
+        timeEl = document.createElement('span');
+        timeEl.className = 'node-time';
+        nodeEl.appendChild(timeEl);
+      }
+      timeEl.textContent = elapsedStr;
+    } else if (timeEl) { timeEl.remove(); }
+    // fix-round badge
+    let badgeEl = nodeEl.querySelector('.node-badge');
+    const fr = _smgmtRailFixRound(iss);
+    if (fr) {
+      if (!badgeEl) {
+        badgeEl = document.createElement('span');
+        badgeEl.className = 'node-badge';
+        nodeEl.appendChild(badgeEl);
+      }
+      badgeEl.innerHTML = `&#8635; ${fr}`;
+      badgeEl.title = `Fix round ${fr}`;
+    } else if (badgeEl) { badgeEl.remove(); }
+  });
+}
+
+/** Orchestrate a rail update from a live snapshot. Toggles the empty-state, then
+ *  patches in place when the structure is unchanged (no flicker) or full-renders
+ *  when levels/nodes changed. Called on every poll tick and on tab switch. */
+function _smgmtRailUpdate(label, live) {
+  const railEl = document.getElementById('smgmt-rail');
+  if (!railEl) return;
+  const emptyEl = document.getElementById('smgmt-running-empty');
+  const issues = (live && live.issues) || [];
+  const hasData = issues.length > 0;
+  railEl.hidden = !hasData;
+  if (emptyEl) emptyEl.style.display = hasData ? 'none' : '';
+  if (!hasData) { railEl.innerHTML = ''; railEl.dataset.railsig = ''; return; }
+  railEl.dataset.label = label || '';
+  const sig = _smgmtRailSig(_smgmtRailLevels(live));
+  if (railEl.dataset.railsig === sig && railEl.querySelector('.level')) {
+    _smgmtRailPatch(label, live);
+  } else {
+    _smgmtRailRender(label, live);
+  }
+}
+
+/** Select a node and feed the inspector ticket panel (the inspector itself lands
+ *  in a follow-up ticket, so the feed is feature-detected). */
+function _smgmtRailSelectNode(num) {
+  _smgmtRailSelectedNum = num;
+  const railEl = document.getElementById('smgmt-rail');
+  if (railEl) {
+    railEl.querySelectorAll('.node[data-issue]').forEach(n => {
+      const on = parseInt(n.dataset.issue, 10) === num;
+      n.classList.toggle('selected', on);
+      n.setAttribute('aria-selected', on ? 'true' : 'false');
+    });
+  }
+  const label = railEl ? (railEl.dataset.label || '') : '';
+  const live = _smgmtLiveCache[label] || null;
+  const ticket = live ? (live.issues || []).find(i => i.number === num) : null;
+  if (typeof _smgmtInspectorFeed === 'function') {
+    try { _smgmtInspectorFeed(ticket || { number: num }); } catch (_) { /* inspector not mounted yet */ }
+  }
+}
+
 /** Patch live stat strip + progress bar + ticket indicators in place (no full re-render). */
 function _smgmtLivePatch(label, live) {
   const card = document.getElementById(`smgmt-card-${label}`);
@@ -11498,6 +11813,8 @@ async function _smgmtLivePollTick() {
         // Keep all three pills in sync with live runner data (no GitHub-label lag).
         _sprintProgressRender();
         if (_snavPanelOpen) _snavRenderPanel();
+        // Update the level-rail node board in the Running sub-view (issue #802).
+        _smgmtRailUpdate(label, live);
       }
     }
   } catch (_) { /* silently ignore poll errors */ }

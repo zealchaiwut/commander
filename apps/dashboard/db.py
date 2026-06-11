@@ -1087,6 +1087,25 @@ def record_token_usage(
         conn.commit()
 
 
+def sum_token_usage_window(agent_role: str, since_utc: str, until_utc: str) -> tuple[int, int]:
+    """Return (input_sum, output_sum) for one agent role within a UTC window.
+
+    Used by sprint_manager to attribute a dispatch's token spend: rows are
+    written by the PostToolUse hook with the CLAUDE_AGENT_ROLE tag, so scoping
+    by role + the dispatch's start/finish window yields that dispatch's usage
+    (correct while at most one agent per role runs at a time).
+    """
+    with get_conn() as conn:
+        row = conn.execute(
+            """SELECT COALESCE(SUM(input_tokens), 0)  AS tin,
+                      COALESCE(SUM(output_tokens), 0) AS tout
+               FROM token_usage
+               WHERE agent_role = ? AND recorded_at >= ? AND recorded_at <= ?""",
+            (agent_role, since_utc, until_utc),
+        ).fetchone()
+    return (int(row["tin"]), int(row["tout"])) if row else (0, 0)
+
+
 def get_earliest_token_row_after(after_utc: str | None = None) -> str | None:
     """Return the recorded_at of the earliest token_usage row after *after_utc*.
 

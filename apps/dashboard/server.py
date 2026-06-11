@@ -990,6 +990,9 @@ class TokenUsageEvent(BaseModel):
     output_tokens: int = 0
     agent_role:    Optional[str] = None
     model_name:    Optional[str] = None
+    # owner/repo from COMMANDER_PROJECT (sprint-dispatched agents). Optional;
+    # interactive sessions fall back to the working-dir basename.
+    project:       Optional[str] = None
 
 
 class RejectBody(BaseModel):
@@ -1409,7 +1412,11 @@ async def receive_event(request: Request, event: AgentEvent):
 async def receive_token_usage(event: TokenUsageEvent):
     if not event.input_tokens and not event.output_tokens:
         return {"ok": True}
-    project = Path(event.working_dir).name if event.working_dir != "unknown" else "unknown"
+    # Prefer the explicit owner/repo the dispatcher tagged; the working-dir
+    # basename ("uat", "coder") can't split cost per project.
+    project = event.project or (
+        Path(event.working_dir).name if event.working_dir != "unknown" else "unknown"
+    )
     session_id = event.session_id or "unknown"
     db.record_token_usage(
         session_id,

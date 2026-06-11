@@ -122,6 +122,10 @@ def main():
     # CLAUDE_MODEL is set by Claude Code when a model is configured
     agent_role = os.environ.get("CLAUDE_AGENT_ROLE") or None
     model_name = os.environ.get("CLAUDE_MODEL") or None
+    # COMMANDER_PROJECT (owner/repo) is set by the sprint dispatcher; without
+    # it the server falls back to the working dir's basename ("uat", "coder"),
+    # which can't split cost per project once several projects share a machine.
+    project = os.environ.get("COMMANDER_PROJECT") or None
 
     event = {
         "session_id":    session_id,
@@ -131,6 +135,7 @@ def main():
         "output_tokens": output_tokens,
         "agent_role":    agent_role,
         "model_name":    model_name,
+        "project":       project,
     }
 
     try:

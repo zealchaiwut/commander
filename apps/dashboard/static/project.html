@@ -1917,12 +1917,34 @@
        The N most-recent sprints render as normal cards; older sprints collapse
        into aggregate fold rows. Emphasis on an open fold is a full border + tint
        ring (never a side stripe), matching the card language above. */
-    .hist-toolbar { display: flex; align-items: center; padding: 0 2px 4px; }
+    .hist-toolbar { display: flex; align-items: center; gap: 12px; padding: 0 2px 4px; flex-wrap: wrap; }
     .hist-toolbar-note {
       display: inline-flex; align-items: center; gap: 7px;
       font-size: 12px; color: var(--text-sub); line-height: 1.4;
     }
     .hist-toolbar-note i { font-size: 14px; color: var(--text-muted); flex: none; }
+    /* Stale-branch scan action (issue #808) */
+    .hist-scan-btn {
+      display: inline-flex; align-items: center; gap: 6px; flex: none;
+      font-size: 12px; font-weight: 600; cursor: pointer;
+      padding: 6px 12px; border-radius: 7px;
+      border: 1px solid var(--border); background: var(--surface); color: var(--text);
+      transition: background .12s, border-color .12s;
+    }
+    .hist-scan-btn:hover { background: var(--surface-hover); }
+    .hist-scan-btn:disabled { opacity: .55; cursor: progress; }
+    .hist-scan-btn i { font-size: 14px; }
+    /* Amber per-row chip: "N stale branches · clean up" (issue #808) */
+    .stale-chip {
+      display: inline-flex; align-items: center; gap: 5px; flex: none;
+      font-size: 11px; font-weight: 700; letter-spacing: .2px; cursor: pointer;
+      padding: 3px 9px; border-radius: 6px;
+      color: var(--amber); background: var(--amber-bg);
+      border: 1px solid transparent;
+      transition: border-color .12s, filter .12s;
+    }
+    .stale-chip:hover { border-color: var(--amber); filter: brightness(.98); }
+    .stale-chip i { font-size: 12px; }
     .fold {
       background: var(--surface-2); border: 1px solid var(--border);
       border-radius: 10px; overflow: hidden;
@@ -9208,6 +9230,12 @@ const _histExpanded = new Set();   // labels of currently-expanded cards
 let _histFoldSize = 10;
 const _histFoldExpanded = new Set();   // ids of currently-expanded fold groups
 
+// Stale-branch scan (issue #808): label -> { sprint, count, branches[],
+// merged[], unmerged[] }, populated by _histScanStale() and consumed by the
+// per-row amber chip. Scan/cleanup are repo actions, so a chip renders on a
+// History row regardless of whether that row is locked (AC7).
+let _histStaleBySprint = {};
+
 // Terminal states that lock a card: no further action is possible, links only.
 function _histIsLocked(state) {
   const s = (state || '').toLowerCase();
@@ -9394,6 +9422,7 @@ function _histCardHtml(s) {
       ${child ? '<span class="hist-child-arrow">↳</span>' : ''}
       <span class="hist-card-title">${escHtml(display)}</span>
       ${_histStateChip(s.lifecycle_state)}
+      ${_histStaleChipHtml(s)}
       <span class="hist-card-spacer"></span>
       <span class="hist-card-mini">${escHtml(_histFmtSecs(s.duration))}</span>
     </div>
@@ -9502,11 +9531,110 @@ function _histToggleFold(id) {
 // Toolbar note above the ledger explaining the fold behaviour (mock v5 AC10).
 function _histToolbarHtml() {
   return `<div class="hist-toolbar">
+    <button class="hist-scan-btn" id="hist-scan-btn" onclick="_histScanStale()">
+      <i class="ti ti-git-branch"></i> Scan stale branches</button>
     <span class="hist-toolbar-note">
       <i class="ti ti-stack-2"></i>
       Showing the ${_histFoldSize} most recent sprints — older sprints are grouped into folds of ${_histFoldSize}.
     </span>
   </div>`;
+}
+
+// ── Stale-branch scan + cleanup (issue #808) ────────────────────────────────
+// The amber chip on a History row. Count is the total leftover feature branches
+// mapped to that sprint (merged + unmerged); cleanup deletes only the merged
+// ones. Rendered for locked rows too — scan/cleanup are repo actions, not
+// record changes (AC7). Clicking "clean up" must not toggle the card, hence
+// stopPropagation.
+function _histStaleChipHtml(s) {
+  const g = _histStaleBySprint[s.label];
+  if (!g || !g.count) return '';
+  const n = g.count;
+  const word = n === 1 ? 'stale branch' : 'stale branches';
+  const lbl = escHtml(s.label || '');
+  return `<button class="stale-chip" title="${n} leftover feature ${n === 1 ? 'branch' : 'branches'} for this sprint"
+    onclick="event.stopPropagation(); _histCleanupStale('${lbl}')">
+    <i class="ti ti-git-branch"></i> ${n} ${word} · clean up</button>`;
+}
+
+// Scan the remote for stale feature/<N>-* branches and attach amber chips to the
+// History rows whose sprint owns them (AC1/AC3/AC4).
+async function _histScanStale() {
+  const repo = _cachedFullRepo[_slug];
+  if (!repo) return;
+  const btn = document.getElementById('hist-scan-btn');
+  if (btn) { btn.disabled = true; }
+  try {
+    const resp = await fetch('/scan-stale-branches?repo=' + encodeURIComponent(repo));
+    if (resp.ok) {
+      const data = await resp.json();
+      _histStaleBySprint = data.by_sprint || {};
+      _histRenderLedger(_histLedgerData);
+    }
+  } catch (_) {
+    /* leave existing chips untouched on a transient failure */
+  } finally {
+    const b = document.getElementById('hist-scan-btn');
+    if (b) { b.disabled = false; }
+  }
+}
+
+// Clean up a row's stale branches: dry-run first to learn exactly what will be
+// deleted vs skipped (AC2), show a confirm dialog listing both (AC5/AC8), then
+// delete only the merged ones on confirm. Unmerged branches are never deleted;
+// after a successful delete the chip drops the removed branches and disappears
+// once the row has no stale branches left (AC6).
+async function _histCleanupStale(label) {
+  const repo = _cachedFullRepo[_slug];
+  const g = _histStaleBySprint[label];
+  if (!repo || !g) return;
+  const branches = g.branches || [];
+
+  let plan;
+  try {
+    const resp = await fetch('/cleanup-stale-branches', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ repo, branches, confirm: false }),
+    });
+    if (!resp.ok) return;
+    plan = await resp.json();
+  } catch (_) { return; }
+
+  const toDelete = plan.to_delete || [];
+  const skipped = plan.skipped_unmerged || [];
+  if (!toDelete.length && !skipped.length) return;
+
+  let msg = toDelete.length
+    ? ('Delete ' + toDelete.length + ' merged branch' + (toDelete.length !== 1 ? 'es' : '')
+       + '?\n\n' + toDelete.join('\n'))
+    : 'No merged branches to delete for this sprint.';
+  if (skipped.length) {
+    msg += '\n\nSkipped (unmerged — never deleted):\n' + skipped.join('\n');
+  }
+  if (!confirm(msg)) return;
+  if (!toDelete.length) return;   // dialog already surfaced the skipped list
+
+  try {
+    const resp = await fetch('/cleanup-stale-branches', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ repo, branches, confirm: true }),
+    });
+    if (!resp.ok) return;
+    const result = await resp.json();
+    const deleted = new Set(result.deleted || []);
+    const remaining = (g.branches || []).filter(b => !deleted.has(b));
+    if (remaining.length) {
+      g.branches = remaining;
+      g.merged = (g.merged || []).filter(b => !deleted.has(b));
+      g.unmerged = (g.unmerged || []).filter(b => !deleted.has(b));
+      g.count = remaining.length;
+    } else {
+      delete _histStaleBySprint[label];
+    }
+    _histRenderLedger(_histLedgerData);
+  } catch (_) {
+    /* network error during delete — leave chip as-is for a retry */
+  }
 }
 
 function _histRenderLedger(sprints) {

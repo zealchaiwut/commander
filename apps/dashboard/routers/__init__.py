@@ -5,9 +5,18 @@ This package is the strangler-fig landing zone. New endpoints belong in
 ``app.include_router(...)`` — adding routes directly to ``server.py`` is
 forbidden and is rejected by the COMMANDER_GATE_MONOLITH gate.
 """
+from .activity import router as activity_router
 from .analytics import router as analytics_router
 from .backup import router as backup_router
 from .log_search import router as log_search_router
 from .runs import router as runs_router
+from .system import router as system_router
 
-__all__ = ["analytics_router", "backup_router", "log_search_router", "runs_router"]
+__all__ = [
+    "activity_router",
+    "analytics_router",
+    "backup_router",
+    "log_search_router",
+    "runs_router",
+    "system_router",
+]

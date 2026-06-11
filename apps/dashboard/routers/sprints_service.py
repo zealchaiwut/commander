@@ -113,3 +113,115 @@ def get_dispatch_log(sprint_label: str, project: str, tail_lines: int = 200):
 
     project_root = srv._project_root_path(project)
     return read_log("dispatch", project_root, label=sprint_label, tail_lines=tail_lines)
+
+
+def preview_dag(sprint_label: str, project: str):
+    """Read-only execution preview for a planned sprint (issue #809).
+
+    Builds the predicted dispatch ordering with the same ``dag_builder`` the
+    sprint_manager uses, so the preview's execution order matches what a real
+    run would produce for the same ticket set (AC7).
+
+    Returns ``{levels, conflicts, cycles, unestimated, partial}``:
+      - ``levels``      — topological layers (lists of ``#<n>`` ids); tickets in
+                          the same layer are parallel-eligible.
+      - ``conflicts``   — pairs of pending tickets that share at least one file.
+      - ``cycles``      — cycle paths if dag_builder reports any (else ``[]``).
+      - ``unestimated`` — pending tickets lacking a usable estimate; their files
+                          are unknown so the preview is partial, not wrong.
+      - ``partial``     — true when any ticket is unestimated (drives the amber
+                          warning, AC5).
+
+    Sources issues from the github_client cache only — zero GitHub API calls
+    (AC2). File paths come from local ``.commander/estimates/issue-<N>.json``.
+    """
+    import json
+
+    srv = _server()
+    if not srv._SPRINT_LABEL_RE.match(sprint_label):
+        raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")
+
+    # Cache-only read — never spends a GitHub API call (AC2).
+    all_issues = srv.github_client.cached_open_issues_with_body(repo_name=project) or []
+    sprint_issues = [
+        iss for iss in all_issues
+        if any(lbl["name"] == sprint_label for lbl in iss.get("labels", []))
+    ]
+    if not sprint_issues:
+        raise HTTPException(404, detail=f"Sprint {sprint_label!r} not found")
+
+    pending = [
+        iss for iss in sprint_issues
+        if srv.github_client.classify_issue(iss) == "backlog"
+    ]
+    # Deterministic input order (ascending issue number) so DAG ownership and
+    # layering match the sprint_manager's number-ascending default (AC7).
+    pending.sort(key=lambda iss: iss["number"])
+
+    project_root = srv._project_root_path(project)
+    estimates_dir = srv._commander_dir(project_root) / "estimates"
+
+    ticket_files: list[dict] = []
+    unestimated: list[str] = []
+    for iss in pending:
+        num = iss["number"]
+        tid = f"#{num}"
+        files: list[str] = []
+        estimated = False
+        est_path = estimates_dir / f"issue-{num}.json"
+        if est_path.exists():
+            try:
+                est = json.loads(est_path.read_text(encoding="utf-8"))
+                if est.get("size") is not None:
+                    estimated = True
+                files = est.get("files_likely_affected") or []
+            except (json.JSONDecodeError, OSError):
+                pass
+        if not estimated:
+            unestimated.append(tid)
+        ticket_files.append({"id": tid, "number": num, "title": iss.get("title", ""), "files": files})
+
+    # Pairwise file conflicts among pending tickets.
+    conflicts: list[dict] = []
+    for i in range(len(ticket_files)):
+        for j in range(i + 1, len(ticket_files)):
+            a, b = ticket_files[i], ticket_files[j]
+            shared = sorted(set(a["files"]) & set(b["files"]))
+            if shared:
+                conflicts.append({
+                    "ticket1_id": a["number"],
+                    "ticket1_title": a["title"],
+                    "ticket2_id": b["number"],
+                    "ticket2_title": b["title"],
+                    "shared_files": shared,
+                })
+
+    partial = bool(unestimated)
+    result_base = {
+        "sprint_label": sprint_label,
+        "conflicts": conflicts,
+        "unestimated": unestimated,
+        "partial": partial,
+    }
+
+    if not srv._DAG_BUILDER_AVAILABLE:
+        # Degrade gracefully — one flat level, no cycles.
+        return {
+            **result_base,
+            "levels": [[tf["id"] for tf in ticket_files]] if ticket_files else [],
+            "cycles": [],
+            "warning": "dag_builder_unavailable",
+        }
+
+    dag_tickets = [{"id": tf["id"], "files_touched": tf["files"]} for tf in ticket_files]
+    result = srv._build_dag(dag_tickets)
+
+    if isinstance(result, srv._CycleError):
+        return {**result_base, "levels": [], "cycles": result.cycles}
+
+    # Sort within each layer by ascending issue number to match sprint_manager.
+    levels = [
+        sorted(layer, key=lambda tid: int(tid.lstrip("#")))
+        for layer in result.layers
+    ]
+    return {**result_base, "levels": levels, "cycles": []}

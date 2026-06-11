@@ -1,8 +1,15 @@
 """Tests for issue #716 — Move Sprint History into Sprint Mgmt tab as sub-view.
 
+NOTE (issue #798): the original two-state "Board | History" segmented control
+(.smgmt-subtab-bar) was restructured into a three-tab sub-nav (.subnav /.subtab,
+Board · Running · History). The structural assertions below were updated to the
+new sub-nav while keeping #716's behavioural intent intact (the History sub-view
+still loads the same summaries, the board is still the default, and toggling
+sub-views still performs no page navigation).
+
 Acceptance criteria tested:
-  AC1 — Sprint Mgmt tab (pane-sprint-mgmt) shows a segmented control
-        ("Board | History") at the top
+  AC1 — Sprint Mgmt tab (pane-sprint-mgmt) shows a sub-nav (Board · Running ·
+        History) at the top
   AC2 — "Board" segment displays the existing kanban board (default view)
   AC3 — "History" segment displays the same finished-sprint summaries
         rendered by _smgmtLoadSummaries today
@@ -43,46 +50,48 @@ def _pane_sprint_mgmt(html: str) -> str:
 
 
 def _subtab_bar(html: str) -> str:
-    return _slice(html, 'class="smgmt-subtab-bar"', "</div>")
+    # Restructured into the .subnav strip by issue #798.
+    return _slice(html, 'class="subnav"', "<!-- Board sub-view")
 
 
 # ---------------------------------------------------------------------------
-# AC1: segmented control (Board | History) at the top of pane-sprint-mgmt
+# AC1: sub-nav (Board · Running · History) at the top of pane-sprint-mgmt
 # ---------------------------------------------------------------------------
 
 class TestSegmentedControl:
     def test_subtab_bar_present(self, html):
-        assert 'class="smgmt-subtab-bar"' in html, \
-            "Sprint Mgmt must have a segmented control (smgmt-subtab-bar)"
+        assert 'class="subnav"' in html, \
+            "Sprint pane must have a sub-nav strip (.subnav, issue #798)"
 
     def test_subtab_bar_lives_inside_sprint_mgmt_pane(self, html):
         pane = _pane_sprint_mgmt(html)
-        assert 'class="smgmt-subtab-bar"' in pane, \
-            "Segmented control must live inside pane-sprint-mgmt"
+        assert 'class="subnav"' in pane, \
+            "Sub-nav must live inside pane-sprint-mgmt"
 
     def test_both_segment_buttons_present(self, html):
         for v in ("board", "history"):
             assert f'id="smgmt-subtab-{v}"' in html, \
-                f"Segment button smgmt-subtab-{v} must be present"
+                f"Sub-tab smgmt-subtab-{v} must be present"
 
     def test_segment_order_is_board_then_history(self, html):
         bar = _subtab_bar(html)
         order = re.findall(r'id="smgmt-subtab-(\w+)"', bar)
-        assert order == ["board", "history"], \
-            f"Segments must be Board then History; got {order}"
+        # Running was inserted between Board and History by issue #798.
+        assert order == ["board", "running", "history"], \
+            f"Sub-tabs must be Board, Running, History; got {order}"
 
     def test_segment_labels_text(self, html):
         bar = _subtab_bar(html)
-        for label in ("Board", "History"):
-            assert f">{label}</button>" in bar, \
-                f"Segmented control must contain a '{label}' button"
+        for label in ("Board", "Running", "History"):
+            assert label in bar, \
+                f"Sub-nav must contain a '{label}' tab"
 
     def test_segments_call_show_subview(self, html):
         bar = _subtab_bar(html)
         assert "_smgmtShowSubView('board')" in bar, \
-            "Board segment must call _smgmtShowSubView('board')"
+            "Board sub-tab must call _smgmtShowSubView('board')"
         assert "_smgmtShowSubView('history')" in bar, \
-            "History segment must call _smgmtShowSubView('history')"
+            "History sub-tab must call _smgmtShowSubView('history')"
 
 
 # ---------------------------------------------------------------------------

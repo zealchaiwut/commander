@@ -21,8 +21,13 @@ KNOWN_FIELDS: dict[str, dict[str, Any]] = {
     "reviewer_model": {"secret": False, "default": "claude-haiku-4-5"},
     "estimator_model": {"secret": False, "default": "claude-haiku-4-5-20251001"},
     "documentor_model": {"secret": False, "default": "claude-sonnet-4-6"},
+    # History tab fold size (issue #807) — number of most-recent sprints shown
+    # expanded; older sprints collapse into aggregate folds of this same size.
+    "history_fold_size": {"secret": False, "default": 10},
     # Sprint / workflow defaults
     "sprint_duration_days": {"secret": False, "default": 14},
+    # Sprint capacity budget in minutes — drives the capacity bar (issue #801)
+    "sprint_budget_minutes": {"secret": False, "default": 180},
     "default_branch": {"secret": False, "default": "develop"},
     "bulk_create_concurrency": {"secret": False, "default": 3},
     "log_level": {"secret": False, "default": "INFO"},

@@ -1779,6 +1779,285 @@
       color: var(--text-sub); font-size: 12.5px; font-style: italic;
     }
 
+    /* ── Sprint history ledger (issue #806) ──────────────────────────────── */
+    .hist-ledger { display: flex; flex-direction: column; gap: 10px; padding: 4px 0 18px; }
+    .hist-ledger-empty {
+      padding: 28px 18px; text-align: center;
+      color: var(--text-sub); font-size: 12.5px; font-style: italic;
+    }
+    /* Emphasis on a card is a full border + tint ring, never a side stripe. */
+    .hist-card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 10px; overflow: hidden;
+      transition: box-shadow .14s, border-color .14s;
+    }
+    .hist-card.expanded { box-shadow: 0 0 0 3px var(--blue-bg), 0 1px 3px rgba(0,0,0,.05); border-color: var(--blue); }
+    .hist-card.locked {
+      opacity: .62; background: var(--surface-2); border-color: var(--border);
+    }
+    .hist-card.locked:hover { opacity: .82; }
+    .hist-card.locked.expanded { box-shadow: 0 0 0 3px var(--surface-2); border-color: var(--text-sub); }
+    .hist-card.child { margin-left: 26px; }
+    .hist-card-head {
+      display: flex; align-items: center; gap: 9px;
+      padding: 12px 16px; cursor: pointer; user-select: none;
+    }
+    .hist-card-head:hover { background: var(--surface-hover); }
+    .hist-chev { font-size: 14px; color: var(--text-sub); flex: none; }
+    .hist-child-arrow { color: var(--text-sub); font-size: 13px; }
+    .hist-card-title { font-size: 13.5px; font-weight: 700; color: var(--text); }
+    .hist-card-spacer { flex: 1; }
+    .hist-card-mini { font-size: 12px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+    .hist-state {
+      font-size: 11px; font-weight: 700; padding: 2px 9px; border-radius: 999px;
+      letter-spacing: .2px;
+    }
+    .hist-state.completed { color: var(--steel);  background: var(--steel-bg); }
+    .hist-state.finished  { color: var(--text-muted); background: var(--surface-2); }
+    .hist-state.failed    { color: var(--red);    background: var(--red-bg); }
+    .hist-state.cancelled { color: var(--amber);  background: var(--amber-bg); }
+    .hist-state.deleted   { color: var(--text-muted); background: var(--surface-2); }
+    .hist-state.running   { color: var(--green);  background: var(--green-bg); }
+    .hist-state.planning  { color: var(--blue);   background: var(--blue-bg); }
+    .hist-state.unknown   { color: var(--text-sub); background: var(--surface-2); }
+
+    /* Metrics row */
+    .hist-metrics {
+      display: flex; align-items: center; flex-wrap: wrap; gap: 10px;
+      padding: 12px 16px 4px;
+    }
+    .est-bar {
+      position: relative; flex: 1; min-width: 140px; height: 18px;
+      background: var(--surface-2); border-radius: 6px; overflow: hidden;
+      display: flex; align-items: center;
+    }
+    .est-bar-fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 6px; opacity: .85; }
+    .est-bar-label {
+      position: relative; z-index: 1; padding-left: 8px;
+      font-size: 11px; font-weight: 700; color: var(--text);
+      font-variant-numeric: tabular-nums;
+    }
+    .hist-badge {
+      display: inline-flex; align-items: center; gap: 4px;
+      font-size: 11.5px; color: var(--text-muted);
+      background: var(--surface-2); padding: 3px 9px; border-radius: 6px;
+      font-variant-numeric: tabular-nums;
+    }
+    .hist-badge i { font-size: 12px; }
+
+    /* Per-sprint issue list */
+    .iss-list { display: flex; flex-direction: column; padding: 6px 16px 4px; }
+    .iss-list-empty { color: var(--text-sub); font-size: 12px; font-style: italic; padding: 8px 16px; }
+    .iss-row {
+      display: flex; align-items: center; gap: 10px;
+      padding: 6px 0; font-size: 12.5px;
+    }
+    .iss-row + .iss-row { border-top: 1px solid var(--border); }
+    .iss-id { color: var(--text); font-weight: 600; min-width: 64px; }
+    .iss-rerun { color: var(--text-sub); }
+    .iss-chip {
+      font-size: 10.5px; font-weight: 700; letter-spacing: .3px;
+      padding: 2px 8px; border-radius: 5px; flex: none;
+    }
+    .iss-chip.merged  { color: var(--green); background: var(--green-bg); }
+    .iss-chip.uat     { color: var(--blue);  background: var(--blue-bg); }
+    .iss-chip.crashed { color: var(--red);   background: var(--red-bg); }
+    .iss-chip.notrun  { color: var(--text-sub); background: var(--surface-2); }
+    .iss-time { margin-left: auto; color: var(--text-muted); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+
+    /* Lock note on terminal sprints */
+    .lock-note {
+      display: flex; align-items: center; gap: 7px;
+      margin: 8px 16px; padding: 8px 12px;
+      background: var(--surface-2); border: 1px solid var(--border);
+      border-radius: 8px; color: var(--text-muted); font-size: 12px;
+    }
+    .lock-note i { color: var(--text-sub); }
+
+    /* Link pills (PR / Summary / Logs) */
+    .hist-links { display: flex; flex-wrap: wrap; gap: 8px; padding: 8px 16px 14px; }
+    .hist-link {
+      display: inline-flex; align-items: center; gap: 5px;
+      font-size: 12px; font-weight: 600; text-decoration: none;
+      padding: 5px 11px; border-radius: 7px;
+      border: 1px solid var(--border); color: var(--text); background: var(--surface);
+      transition: background .12s, border-color .12s;
+    }
+    .hist-link:hover { background: var(--surface-hover); }
+    .hist-link i { font-size: 13px; }
+    .link-pr  { color: var(--purple); border-color: var(--purple-bg); }
+    .link-pr:hover  { background: var(--purple-bg); }
+    .link-sum { color: var(--blue); border-color: var(--blue-bg); }
+    .link-sum:hover { background: var(--blue-bg); }
+
+    /* Action verbs (gated by lifecycle state) */
+    .hist-verbs {
+      display: flex; flex-wrap: wrap; gap: 8px;
+      padding: 0 16px 14px; border-top: 1px solid var(--border); padding-top: 12px;
+    }
+    .hist-verb {
+      display: inline-flex; align-items: center; gap: 5px;
+      font-size: 12px; font-weight: 600; cursor: pointer;
+      padding: 5px 11px; border-radius: 7px;
+      border: 1px solid var(--border); background: var(--surface); color: var(--text);
+      transition: background .12s, border-color .12s;
+    }
+    .hist-verb:hover { background: var(--surface-hover); }
+    .hist-verb i { font-size: 13px; }
+    .hist-verb--resume { color: var(--green); border-color: var(--green-bg); }
+    .hist-verb--resume:hover { background: var(--green-bg); }
+    .hist-verb--rerun  { color: var(--amber); border-color: var(--amber-bg); }
+    .hist-verb--rerun:hover  { background: var(--amber-bg); }
+    .hist-verb--finish { color: var(--blue); border-color: var(--blue-bg); }
+    .hist-verb--finish:hover { background: var(--blue-bg); }
+    .hist-verb--delete { color: var(--red); border-color: var(--red-bg); }
+    .hist-verb--delete:hover { background: var(--red-bg); }
+
+    /* ── History folding (issue #807) ──────────────────────────────────────
+       The N most-recent sprints render as normal cards; older sprints collapse
+       into aggregate fold rows. Emphasis on an open fold is a full border + tint
+       ring (never a side stripe), matching the card language above. */
+    .hist-toolbar { display: flex; align-items: center; gap: 12px; padding: 0 2px 4px; flex-wrap: wrap; }
+    .hist-toolbar-note {
+      display: inline-flex; align-items: center; gap: 7px;
+      font-size: 12px; color: var(--text-sub); line-height: 1.4;
+    }
+    .hist-toolbar-note i { font-size: 14px; color: var(--text-muted); flex: none; }
+    /* Stale-branch scan action (issue #808) */
+    .hist-scan-btn {
+      display: inline-flex; align-items: center; gap: 6px; flex: none;
+      font-size: 12px; font-weight: 600; cursor: pointer;
+      padding: 6px 12px; border-radius: 7px;
+      border: 1px solid var(--border); background: var(--surface); color: var(--text);
+      transition: background .12s, border-color .12s;
+    }
+    .hist-scan-btn:hover { background: var(--surface-hover); }
+    .hist-scan-btn:disabled { opacity: .55; cursor: progress; }
+    .hist-scan-btn i { font-size: 14px; }
+    /* Amber per-row chip: "N stale branches · clean up" (issue #808) */
+    .stale-chip {
+      display: inline-flex; align-items: center; gap: 5px; flex: none;
+      font-size: 11px; font-weight: 700; letter-spacing: .2px; cursor: pointer;
+      padding: 3px 9px; border-radius: 6px;
+      color: var(--amber); background: var(--amber-bg);
+      border: 1px solid transparent;
+      transition: border-color .12s, filter .12s;
+    }
+    .stale-chip:hover { border-color: var(--amber); filter: brightness(.98); }
+    .stale-chip i { font-size: 12px; }
+
+    /* ── Run-stats block on expanded History cards (issue #810) ──────────────
+       Stat chips + agent-time split-bar + per-ticket gantt timeline, fed by the
+       GET /api/sprints/{label}/run-stats aggregation. Renders on locked rows
+       too — the lock suppresses actions, not read rendering (AC6) — and degrades
+       to wall-time + token chips only when a sprint has no agent_runs rows (AC7).
+       Coder is purple, tester amber, per the mock v5 design contract. */
+    .stats { display: flex; flex-direction: column; gap: 12px; padding: 8px 16px 4px; }
+    .stat-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+    .stat-chip {
+      display: inline-flex; align-items: center; gap: 6px;
+      font-size: 11.5px; color: var(--text-muted);
+      background: var(--surface-2); border: 1px solid var(--border);
+      padding: 4px 10px; border-radius: 7px;
+    }
+    .stat-chip i { font-size: 13px; color: var(--text-sub); flex: none; }
+    .stat-chip b {
+      color: var(--text); font-weight: 700; font-variant-numeric: tabular-nums;
+      font-family: 'SF Mono', ui-monospace, 'Cascadia Code', monospace;
+    }
+    /* Fix-round chip reads as a warning when a sprint needed a re-run. */
+    .stat-chip--fix { color: var(--amber); background: var(--amber-bg); border-color: transparent; }
+    .stat-chip--fix i, .stat-chip--fix b { color: var(--amber); }
+
+    .stats-section-label {
+      font-size: 10.5px; font-weight: 700; letter-spacing: .4px; text-transform: uppercase;
+      color: var(--text-sub);
+    }
+
+    /* Agent-time split-bar: width-proportional percentage segments summing to 100. */
+    .split-bar {
+      display: flex; height: 22px; border-radius: 6px; overflow: hidden;
+      border: 1px solid var(--border);
+    }
+    .split-seg {
+      display: flex; align-items: center; justify-content: center; min-width: 0;
+      font-size: 10.5px; font-weight: 700; color: #fff;
+      font-variant-numeric: tabular-nums; overflow: hidden; white-space: nowrap;
+      text-shadow: 0 1px 1px rgba(0,0,0,.28);
+    }
+    .split-seg--coder      { background: var(--purple); }
+    .split-seg--tester     { background: var(--amber); }
+    .split-seg--documenter { background: var(--blue); }
+    .split-seg--reviewer   { background: var(--green); }
+    /* Legend gives each agent an accessible, full-contrast read of its share. */
+    .split-legend { display: flex; flex-wrap: wrap; gap: 12px; }
+    .split-legend-item {
+      display: inline-flex; align-items: center; gap: 6px;
+      font-size: 11px; color: var(--text-muted); font-variant-numeric: tabular-nums;
+    }
+    .split-swatch { width: 9px; height: 9px; border-radius: 2px; flex: none; }
+    .split-swatch--coder      { background: var(--purple); }
+    .split-swatch--tester     { background: var(--amber); }
+    .split-swatch--documenter { background: var(--blue); }
+    .split-swatch--reviewer   { background: var(--green); }
+
+    /* Per-ticket gantt timeline. Segments are absolutely positioned on a shared
+       0–wall-seconds scale so parallel agents read as overlapping rows. */
+    .gantt { display: flex; flex-direction: column; gap: 6px; }
+    .g-row { display: flex; align-items: center; gap: 10px; }
+    .g-label {
+      min-width: 64px; font-size: 11.5px; font-weight: 600; color: var(--text);
+      font-variant-numeric: tabular-nums;
+    }
+    .g-track {
+      position: relative; flex: 1; height: 16px;
+      background: var(--surface-2); border-radius: 5px; overflow: hidden;
+    }
+    .g-seg { position: absolute; top: 2px; bottom: 2px; border-radius: 3px; min-width: 3px; }
+    .g-coder  { background: var(--purple); }
+    .g-tester { background: var(--amber); }
+    /* Fix-round segments are hatched so a re-run reads distinct from first-pass. */
+    .g-fix {
+      background-image: repeating-linear-gradient(
+        45deg, rgba(255,255,255,.5) 0 3px, transparent 3px 6px);
+    }
+    /* Red ✕ crash marker, painted at the crash ticket's end offset (failed only). */
+    .g-crash {
+      position: absolute; top: 50%; transform: translate(-50%, -50%);
+      font-size: 12px; font-weight: 800; line-height: 1; color: var(--red);
+      pointer-events: none;
+    }
+    .fold {
+      background: var(--surface-2); border: 1px solid var(--border);
+      border-radius: 10px; overflow: hidden;
+      transition: box-shadow .14s, border-color .14s;
+    }
+    .fold.expanded { box-shadow: 0 0 0 3px var(--blue-bg), 0 1px 3px rgba(0,0,0,.05); border-color: var(--blue); }
+    .fold-head {
+      display: flex; align-items: center; gap: 10px;
+      padding: 11px 16px; cursor: pointer; user-select: none;
+    }
+    .fold-head:hover { background: var(--surface-hover); }
+    .fold-chev { font-size: 14px; color: var(--text-sub); flex: none; }
+    .fold-title { font-size: 13px; font-weight: 700; color: var(--text); }
+    .fold-count { font-size: 11.5px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+    .fold-spacer { flex: 1; }
+    .fold-agg { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+    .fold-stat {
+      display: inline-flex; align-items: center; gap: 4px;
+      font-size: 11.5px; color: var(--text-muted);
+      background: var(--surface); padding: 3px 9px; border-radius: 6px;
+      border: 1px solid var(--border); font-variant-numeric: tabular-nums;
+    }
+    .fold-stat i { font-size: 12px; }
+    .fold-stat--fail { color: var(--red); border-color: var(--red-bg); }
+    /* Member cards revealed when a fold is expanded — same gap/indent rhythm
+       as the top-level ledger so they read as identical sprint rows. */
+    .fold-body {
+      display: flex; flex-direction: column; gap: 10px;
+      padding: 2px 12px 14px;
+    }
+
     /* ── Sprint list area ── */
     .smgmt-content {
       padding: 0 28px 28px;
@@ -1937,6 +2216,32 @@
     .smgmt-capacity-bar-fill--green { background: var(--green); }
     .smgmt-capacity-bar-fill--amber { background: var(--amber); }
     .smgmt-capacity-bar-fill--red   { background: var(--red); }
+    /* ── Sprint capacity budget bar (issue #801) ── */
+    .cap {
+      display: flex; flex-direction: column; gap: 4px;
+      margin: 2px 0 2px;
+    }
+    .cap-bar {
+      display: flex; align-items: stretch;
+      width: 100%; height: 6px;
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: 3px; overflow: hidden;
+    }
+    .cap-seg {
+      height: 100%; min-width: 1px;
+      border-right: 1px solid var(--surface);
+    }
+    .cap-seg:last-child { border-right: none; }
+    .cap-hint {
+      font-size: 11px; color: var(--text-sub);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .cap-hint--over { color: var(--red); font-weight: 600; }
+    .cap-forecast {
+      font-size: 11px; color: var(--text-muted);
+      font-family: 'SF Mono', ui-monospace, 'Cascadia Code', monospace;
+    }
     .smgmt-capacity-overage {
       font-size: 10px; font-weight: 600; flex-shrink: 0; color: var(--red);
     }
@@ -2777,6 +3082,107 @@
       font-size: 12px; color: var(--text-sub);
       padding: 10px 18px;
     }
+
+    /* ── Filtered multi-select backlog panel + what-if (issue #800) ── */
+    /* Mock v5 contract tokens: panel / filter / grid / row / whatif */
+    .panel {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+    }
+    .bl-panel {
+      margin-top: 16px;
+      /* Solid full-width panel (supersedes the legacy dashed backlog look). */
+      border: 1px solid var(--border);
+      background: var(--surface);
+    }
+    .bl-filter {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+      padding: 12px 16px;
+      border-top: 1px solid var(--border);
+    }
+    .bl-filter-label {
+      font-size: 11px; font-weight: 600; color: var(--text-sub);
+      margin-right: 4px;
+    }
+    .bl-pill {
+      font: inherit; font-size: 12px; line-height: 1.5;
+      padding: 4px 10px; min-height: 28px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      background: var(--surface);
+      color: var(--text-muted);
+      cursor: pointer;
+      transition: background .12s ease-out, color .12s ease-out, border-color .12s ease-out;
+    }
+    .bl-pill:hover { background: var(--surface-hover); color: var(--text); }
+    .bl-pill:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+    .bl-pill.is-active {
+      background: var(--blue-bg);
+      color: var(--blue);
+      border-color: var(--blue);
+      font-weight: 600;
+    }
+    .bl-grid {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      padding: 4px 0;
+    }
+    .bl-row { min-width: 0; }
+    .bl-actions {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 16px;
+      border-top: 1px solid var(--border);
+      background: var(--surface-2);
+      border-radius: 0 0 10px 10px;
+    }
+    .bl-actions[hidden] { display: none; }
+    .bl-sel-count { font-size: 13px; font-weight: 600; color: var(--text); }
+    .bl-target {
+      font: inherit; font-size: 13px;
+      padding: 6px 10px; min-height: 32px;
+      border: 1px solid var(--border); border-radius: 8px;
+      background: var(--surface); color: var(--text);
+      cursor: pointer;
+    }
+    .bl-add-btn {
+      font: inherit; font-size: 13px; font-weight: 600;
+      padding: 6px 14px; min-height: 32px;
+      border: 1px solid var(--blue); border-radius: 8px;
+      background: var(--blue); color: #fff;
+      cursor: pointer;
+      display: inline-flex; align-items: center; gap: 6px;
+    }
+    .bl-add-btn:hover { filter: brightness(1.05); }
+    .bl-add-btn:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+    .bl-add-btn:disabled { opacity: .5; cursor: not-allowed; }
+    .bl-whatif {
+      flex: 1 1 100%;
+      font-size: 12px;
+      color: var(--text-muted);
+      display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px;
+      font-family: 'SF Mono', ui-monospace, 'Cascadia Code', monospace;
+    }
+    .bl-whatif:empty { display: none; }
+    .bl-whatif-delta { color: var(--text); font-weight: 700; }
+    .bl-whatif-total { color: var(--text-muted); }
+    .bl-whatif-budget { color: var(--text-sub); }
+    .bl-whatif-budget.bl-over { color: var(--red); font-weight: 700; }
+    .bl-whatif-level { color: var(--purple); }
+    @media (max-width: 720px) {
+      .bl-filter { gap: 6px; padding: 12px; }
+      .bl-actions { gap: 8px; }
+      .bl-target, .bl-add-btn { flex: 1 1 auto; }
+      .bl-row { flex-wrap: wrap; }
+    }
+
     /* "Move to" button on backlog ticket rows */
     .smgmt-moveto-pill {
       padding: 2px 8px; font-size: 11px; font-weight: 600;
@@ -3654,6 +4060,63 @@
     }
     [data-theme="dark"] .smgmt-dep-order-badge { background: rgba(99,102,241,.15); color: #a5b4fc; }
     [data-theme="dark"] .smgmt-dep-order-badge.is-cycle { background: rgba(234,179,8,.12); color: #fcd34d; }
+    /* ── Execution-preview mini-rail (issue #809) ───────────────────────────── */
+    .mini-rail {
+      margin: 8px 12px 4px;
+      padding: 10px 12px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--surface);
+    }
+    .mr-head {
+      display: flex; align-items: center; gap: 8px;
+      margin-bottom: 8px;
+    }
+    .mr-title {
+      font-size: 11px; font-weight: 600; letter-spacing: .02em;
+      text-transform: uppercase; color: var(--text-muted);
+    }
+    .mr-warn {
+      margin-left: auto;
+      display: inline-flex; align-items: center; gap: 4px;
+      font-size: 11px; font-weight: 600;
+      padding: 2px 8px; border-radius: 999px;
+      color: var(--amber);
+      background: var(--amber-bg);
+      border: 1px solid var(--amber);
+    }
+    .mr-levels {
+      display: flex; flex-wrap: wrap; align-items: stretch; gap: 8px;
+    }
+    .mr-level {
+      display: flex; align-items: center; gap: 6px;
+      padding: 6px 8px;
+      border-radius: 6px;
+      background: var(--bg, transparent);
+    }
+    .mr-level-label {
+      font-size: 10px; font-weight: 700; color: var(--text-muted);
+      flex-shrink: 0;
+    }
+    .mr-chips { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+    .mr-chip {
+      display: inline-flex; align-items: center;
+      font-size: 11px; font-weight: 600; color: var(--text);
+      padding: 2px 8px; border-radius: 999px;
+      background: var(--blue-bg, var(--surface));
+      border: 1px solid var(--border);
+    }
+    .mr-par {
+      font-size: 13px; font-weight: 700; color: var(--blue);
+      line-height: 1; user-select: none;
+    }
+    .mr-arrow { font-size: 12px; color: var(--text-muted); flex-shrink: 0; }
+    .mini-rail.mr-cycle { border-color: var(--red); background: var(--red-bg); }
+    .mr-cycle-msg {
+      display: inline-flex; align-items: center; gap: 6px;
+      font-size: 12px; font-weight: 600; color: var(--red);
+    }
+    [data-theme="dark"] .mr-chip { background: rgba(96,165,250,.14); }
     /* Scheduling dependency inline badge (issue #597) */
     .smgmt-sched-dep-badge {
       flex-shrink: 0; display: inline-flex; align-items: center; gap: 3px;
@@ -5297,11 +5760,215 @@
     .anl-tab-btn:hover:not(.active) { background: var(--surface); }
     .anl-panel { display: none; flex-direction: column; gap: 16px; }
     .anl-panel.show { display: flex; }
-    /* Sprint Mgmt Board|History segmented control (issue #716) */
-    .smgmt-subtab-bar { display: flex; gap: 6px; padding: 14px 20px 0; }
-    .smgmt-subtab-btn { background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px; padding: 6px 16px; font-size: 13px; color: var(--text-muted); cursor: pointer; transition: background .15s, border-color .15s, color .15s; }
-    .smgmt-subtab-btn.active { background: var(--surface); border-color: var(--text-muted); color: var(--text); font-weight: 600; }
-    .smgmt-subtab-btn:hover:not(.active) { background: var(--surface); }
+    /* Sprint sub-nav: Board / Running / History (issue #798) */
+    .subnav { display: flex; align-items: center; gap: 6px; padding: 14px 20px 0; }
+    .crumb { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 700; color: var(--text-sub); margin-right: 8px; white-space: nowrap; }
+    .crumb .ti { font-size: 15px; color: var(--text-muted); }
+    .subtab { display: inline-flex; align-items: center; gap: 6px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px; padding: 6px 16px; font-size: 13px; color: var(--text-muted); cursor: pointer; transition: background .15s, border-color .15s, color .15s; }
+    .subtab.active { background: var(--surface); border-color: var(--text-muted); color: var(--text); font-weight: 600; }
+    .subtab:hover:not(.active) { background: var(--surface); }
+    .subnav-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+    /* Live dot — visible only while a sprint is running (issue #798) */
+    .subtab-live-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green, #16a34a); box-shadow: 0 0 0 3px rgba(22,163,74,.18); animation: subtab-dot-pulse 1.6s ease-in-out infinite; }
+    .subtab-live-dot[hidden] { display: none; }
+    @keyframes subtab-dot-pulse {
+      0%, 100% { opacity: 1;   box-shadow: 0 0 0 0 rgba(22,163,74,.35); }
+      50%      { opacity: .55; box-shadow: 0 0 0 4px rgba(22,163,74,0); }
+    }
+    /* History count badge (issue #798) */
+    .subtab-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--surface-2); border: 1px solid var(--border); font-size: 11px; font-weight: 700; color: var(--text-muted); }
+    .subtab.active .subtab-badge { background: var(--blue-bg); border-color: var(--blue); color: var(--blue); }
+    /* Running sub-view empty state (issue #798) */
+    .smgmt-running-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; padding: 56px 20px; text-align: center; color: var(--text-muted); }
+    .smgmt-running-empty .ti { font-size: 28px; color: var(--text-muted); opacity: .7; }
+    .smgmt-running-empty-title { font-size: 14px; font-weight: 700; color: var(--text-sub); margin: 0; }
+    .smgmt-running-empty-sub { font-size: 13px; color: var(--text-muted); margin: 0; }
+
+    /* ── Level-rail node board (issue #802) ──────────────────────────────────
+       A vertical spine of level gates; each level holds per-ticket node cards.
+       Tokens are the BA Path-A literal contract: .rail/.level/.level-dot/.nodes
+       /.node + the done/coder-active/tester-active/queued state variants. */
+    .rail { position: relative; padding: 8px 4px 8px 26px; }
+    /* The spine: a single hairline behind the level dots. */
+    .rail::before { content: ""; position: absolute; left: 13px; top: 14px; bottom: 14px;
+      width: 2px; background: var(--border); border-radius: 1px; }
+    .level { position: relative; margin: 0 0 14px; }
+    .level:last-child { margin-bottom: 0; }
+    /* The gate dot on the spine. */
+    .level-dot { position: absolute; left: -19px; top: 4px; width: 12px; height: 12px;
+      border-radius: 50%; background: var(--surface); border: 2px solid var(--text-sub);
+      box-sizing: border-box; transition: background .2s ease, border-color .2s ease; }
+    .level-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 8px; }
+    .level-name { font-size: 13px; font-weight: 700; color: var(--text); }
+    .level-meta { font-size: 11px; color: var(--text-muted); font-family: var(--mono); }
+    .level-gate { font-size: 12px; color: var(--text-muted); font-style: italic; padding: 2px 0; }
+    .nodes { display: flex; flex-direction: column; gap: 8px; }
+
+    /* Active level: spine dot pulses; level stays expanded. */
+    .level.active .level-dot { background: var(--blue); border-color: var(--blue);
+      animation: rail-gate-pulse 1.8s ease-in-out infinite; }
+    @keyframes rail-gate-pulse {
+      0%,100% { box-shadow: 0 0 0 0 var(--blue-bg); }
+      50%     { box-shadow: 0 0 0 4px var(--blue-bg); }
+    }
+    /* Done level: collapses its nodes behind a green gate. */
+    .level.done .level-dot { background: var(--green); border-color: var(--green); }
+    .level.done .nodes { display: none; }
+    .level.done .level-name { color: var(--text-muted); }
+    /* Queued level: greyed gate + waiting text. */
+    .level.queued .level-dot { background: var(--surface); border-color: var(--border); }
+    .level.queued .level-name { color: var(--text-muted); }
+
+    /* Node card — the per-ticket affordance. */
+    .node { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left;
+      padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px;
+      background: var(--surface); color: var(--text); font: inherit; cursor: pointer;
+      transition: border-color .15s ease, box-shadow .15s ease, background .15s ease; }
+    .node:hover { background: var(--surface-hover); }
+    .node:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+    .node.selected { border-color: var(--blue); box-shadow: 0 0 0 2px var(--blue-bg); }
+    .node-state-icon { display: inline-flex; align-items: center; justify-content: center;
+      width: 16px; height: 16px; flex: 0 0 16px; font-size: 12px; }
+    .node-num { font-family: var(--mono); font-size: 12px; color: var(--text-muted); flex: 0 0 auto; }
+    .node-title { flex: 1 1 auto; min-width: 0; font-size: 13px; overflow: hidden;
+      text-overflow: ellipsis; white-space: nowrap; }
+    .node-size { flex: 0 0 auto; font-family: var(--mono); font-size: 10px; font-weight: 700;
+      padding: 1px 6px; border-radius: 999px; background: var(--surface-2); color: var(--text-muted); }
+    .node-time { flex: 0 0 auto; font-family: var(--mono); font-size: 11px; color: var(--text-muted); }
+    .node-badge { flex: 0 0 auto; font-size: 10px; font-weight: 700; padding: 1px 6px;
+      border-radius: 999px; background: var(--amber-bg); color: var(--amber); }
+
+    /* State variants — glow is a box-shadow ring, never a side-stripe. */
+    .node.queued { opacity: .72; }
+    .node.queued .node-state-icon { color: var(--text-sub); }
+    .node.done { border-color: var(--green); }
+    .node.done .node-state-icon { color: var(--green); }
+    .node.done .node-title { color: var(--text-muted); }
+    .node.coder-active { border-color: var(--purple);
+      box-shadow: 0 0 0 1px var(--purple), 0 0 12px -2px var(--purple); }
+    .node.coder-active .node-state-icon { color: var(--purple);
+      animation: rail-node-glow 1.6s ease-in-out infinite; }
+    .node.tester-active { border-color: var(--amber);
+      box-shadow: 0 0 0 1px var(--amber), 0 0 12px -2px var(--amber); }
+    .node.tester-active .node-state-icon { color: var(--amber);
+      animation: rail-node-glow 1.6s ease-in-out infinite; }
+    @keyframes rail-node-glow { 0%,100% { opacity: 1; } 50% { opacity: .45; } }
+    @media (prefers-reduced-motion: reduce) {
+      .level.active .level-dot,
+      .node.coder-active .node-state-icon,
+      .node.tester-active .node-state-icon { animation: none; }
+    }
+
+    /* ── Running metrics strip (issue #803) ──────────────────────────────────
+       Five compact metric cards above the level-rail. Mock v5 contract:
+       .metrics container + .metric cards with metric-done/active/fix/tokens/time
+       variants. Values come from the /live snapshot; agent_runs-only cards are
+       omitted by the builder when their source is absent. */
+    .metrics { display: flex; flex-wrap: wrap; gap: 8px; padding: 4px 4px 14px; }
+    .metric { flex: 1 1 120px; min-width: 108px; display: flex; flex-direction: column;
+      gap: 3px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px;
+      background: var(--surface); }
+    .metric-label { font-size: 11px; font-weight: 600; color: var(--text-sub); }
+    .metric-value { font-size: 18px; font-weight: 700; color: var(--text);
+      font-family: var(--mono); display: flex; align-items: baseline; gap: 5px;
+      line-height: 1.1; }
+    .metric-unit { font-size: 12px; font-weight: 600; color: var(--text-muted); }
+    .metric-sub { font-size: 11px; font-weight: 600; color: var(--text-muted);
+      font-family: var(--mono); }
+    /* Per-agent time split: coder vs tester, colour-keyed to the rail glow tokens. */
+    .metric-split { display: flex; align-items: baseline; gap: 8px; font-family: var(--mono);
+      font-size: 13px; font-weight: 700; line-height: 1.1; }
+    .metric-split .ms-coder { color: var(--purple); }
+    .metric-split .ms-tester { color: var(--amber); }
+    /* Fix-rounds highlight: a full border + background tint, never a side-stripe. */
+    .metric.amber { border-color: var(--amber); background: var(--amber-bg); }
+    .metric.amber .metric-label,
+    .metric.amber .metric-value { color: var(--amber); }
+    @media (max-width: 560px) { .metric { flex-basis: calc(50% - 8px); } }
+
+    /* ── Node inspector panel (issue #804) ───────────────────────────────────
+       Opens when a rail node is clicked. Mock v5 contract: .inspector shell,
+       .attempts timeline (.att rows), .log-tabs + .log-body. Emphasis is shown
+       with full borders + tint-fill + box-shadow — never a coloured side-stripe
+       (impeccable side-tab anti-pattern). Spacing stays on the 4px scale. */
+    .inspector { margin: 4px 4px 16px; border: 1px solid var(--border);
+      border-radius: 10px; background: var(--surface); overflow: hidden; }
+    .inspector-head { display: flex; align-items: center; gap: 8px;
+      padding: 12px 16px; border-bottom: 1px solid var(--border); }
+    .inspector-num { font-family: var(--mono); font-size: 12px; color: var(--text-muted); }
+    .inspector-title { flex: 1 1 auto; min-width: 0; font-size: 14px; font-weight: 700;
+      color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .inspector-size { flex: 0 0 auto; font-family: var(--mono); font-size: 10px;
+      font-weight: 700; padding: 1px 6px; border-radius: 4px; color: var(--text-sub);
+      background: var(--surface-2); }
+    .inspector-est { flex: 0 0 auto; font-family: var(--mono); font-size: 11px;
+      color: var(--text-muted); }
+    .inspector-body { padding: 12px 16px; display: flex; flex-direction: column; gap: 14px; }
+    .inspector-section-label { font-size: 11px; font-weight: 700; letter-spacing: .04em;
+      text-transform: uppercase; color: var(--text-sub); margin-bottom: 6px; }
+
+    /* Attempt timeline — one .att row per attempt; degrades to a single
+       current-state row when no attempt history exists (AC7). */
+    .attempts { display: flex; flex-direction: column; gap: 6px; }
+    .att { display: flex; align-items: center; gap: 8px; padding: 8px 10px;
+      border: 1px solid var(--border); border-radius: 8px; background: var(--bg);
+      font-size: 12px; }
+    .att-state { font-family: var(--mono); font-size: 11px; font-weight: 700;
+      flex: 0 0 auto; }
+    .att-kind { color: var(--text-muted); font-family: var(--mono); font-size: 11px;
+      flex: 0 0 auto; }
+    .att-label { flex: 1 1 auto; min-width: 0; color: var(--text-sub);
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .att.failed { border-color: var(--red); background: var(--red-bg); }
+    .att.failed .att-state { color: var(--red); }
+    .att.running { border-color: var(--green); background: var(--green-bg); }
+    .att.running .att-state { color: var(--green); }
+    .att.queued { opacity: .8; }
+    .att.queued .att-state { color: var(--text-sub); }
+    .att.done .att-state { color: var(--green); }
+    /* Gate-reason chip on a failed attempt (full tint-fill chip, no side-stripe). */
+    .att-gate { flex: 0 0 auto; font-family: var(--mono); font-size: 10px; font-weight: 700;
+      padding: 1px 6px; border-radius: 4px; color: var(--red); background: var(--red-bg);
+      white-space: nowrap; }
+    /* Failure sidecar trailing a running attempt — the carried-over prior failure. */
+    .att-sidecar { flex: 0 0 auto; font-family: var(--mono); font-size: 10px;
+      padding: 1px 6px; border-radius: 4px; color: var(--text-muted);
+      background: var(--surface-2); white-space: nowrap; }
+    .att-sidecar:empty { display: none; }
+    /* Queued-tester list under the timeline. */
+    .att-queued-list { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px; }
+    .att-queued-item { font-family: var(--mono); font-size: 10px; font-weight: 700;
+      padding: 1px 6px; border-radius: 4px; color: var(--text-sub);
+      background: var(--surface-2); }
+
+    /* Log tabs — one Orchestrator tab + one per active/selected issue. Each tab
+       chip is colour-keyed via the lg-* agent-colour tokens. */
+    .log-tabs { display: flex; flex-wrap: wrap; gap: 4px; border-bottom: 1px solid var(--border);
+      padding-bottom: 8px; }
+    .log-tab { display: inline-flex; align-items: center; gap: 5px; cursor: pointer;
+      font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 6px;
+      border: 1px solid transparent; background: none; color: var(--text-muted); }
+    .log-tab:hover { background: var(--surface-hover); }
+    .log-tab.active { color: var(--text); background: var(--surface-2);
+      border-color: var(--border); }
+    .log-tab:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+    .lg-chip { font-family: var(--mono); font-size: 10px; font-weight: 700;
+      padding: 0 5px; border-radius: 4px; }
+    .lg-orchestrator { color: var(--text-sub);   background: var(--surface-2); }
+    .lg-coder        { color: var(--blue);   background: var(--blue-bg); }
+    .lg-tester       { color: var(--green);  background: var(--green-bg); }
+    .lg-reviewer     { color: var(--purple); background: var(--purple-bg); }
+    .lg-documenter   { color: var(--amber);  background: var(--amber-bg); }
+    .lg-estimator    { color: var(--teal);   background: var(--teal-bg); }
+    .lg-ba           { color: var(--pink);   background: var(--pink-bg); }
+    /* Streaming log body — escaped, colorized lines from /logs/tail. */
+    .log-body { margin-top: 10px; max-height: 320px; overflow-y: auto;
+      font-family: var(--mono); font-size: 11px; line-height: 1.55;
+      background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+      padding: 10px 12px; }
+    .log-line { white-space: pre-wrap; word-break: break-word; color: var(--text-sub); }
+    .log-empty { color: var(--text-muted); font-style: italic; }
+
     .smgmt-subview { display: none; }
     .smgmt-subview.show { display: block; animation: smgmt-fade-in .18s ease; }
     @keyframes smgmt-fade-in { from { opacity: 0; } to { opacity: 1; } }
@@ -5309,13 +5976,14 @@
        the 15s auto-refresh re-render that would flicker any entrance motion). */
     #pane-sprint-mgmt .btn-ghost:active,
     #pane-sprint-mgmt .btn-primary:active,
-    .smgmt-subtab-btn:active,
+    .subtab:active,
     .smgmt-collapse-btn:active { transform: scale(0.96); }
     @media (prefers-reduced-motion: reduce) {
       .smgmt-subview.show { animation: none; }
+      .subtab-live-dot { animation: none; }
       #pane-sprint-mgmt .btn-ghost:active,
       #pane-sprint-mgmt .btn-primary:active,
-      .smgmt-subtab-btn:active,
+      .subtab:active,
       .smgmt-collapse-btn:active { transform: none; }
     }
     .anl-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
@@ -5562,7 +6230,7 @@
       <nav class="sub-tabs" role="tablist" aria-label="Project sections" id="sub-tabs">
         <button class="stab active" role="tab" id="stab-sprint-mgmt"
                 aria-selected="true" onclick="switchTab('sprint-mgmt')">
-          <i class="ti ti-layout-kanban"></i>Sprint Mgmt
+          <i class="ti ti-layout-kanban"></i>Sprint
         </button>
         <button class="stab" role="tab" id="stab-tickets"
                 aria-selected="false" onclick="switchTab('tickets')">
@@ -5619,13 +6287,32 @@
           </div>
         </div>
 
-        <!-- Board | History segmented control (issue #716) -->
-        <div class="smgmt-subtab-bar" role="tablist" aria-label="Sprint Mgmt views">
-          <button class="smgmt-subtab-btn active" id="smgmt-subtab-board" role="tab"
+        <!-- Sprint sub-nav: Board / Running / History (issue #798) -->
+        <nav class="subnav" role="tablist" aria-label="Sprint views">
+          <span class="crumb"><i class="ti ti-layout-kanban"></i>Sprint</span>
+          <button class="subtab active" id="smgmt-subtab-board" role="tab"
                   aria-selected="true" onclick="_smgmtShowSubView('board')">Board</button>
-          <button class="smgmt-subtab-btn" id="smgmt-subtab-history" role="tab"
-                  aria-selected="false" onclick="_smgmtShowSubView('history')">History</button>
-        </div>
+          <button class="subtab" id="smgmt-subtab-running" role="tab"
+                  aria-selected="false" onclick="_smgmtShowSubView('running')">Running<span
+                  class="subtab-live-dot" id="smgmt-running-dot" aria-label="A sprint is running" hidden></span></button>
+          <button class="subtab" id="smgmt-subtab-history" role="tab"
+                  aria-selected="false" onclick="_smgmtShowSubView('history')">History<span
+                  class="subtab-badge" id="smgmt-history-count" aria-label="Total sprints">0</span></button>
+          <div class="subnav-actions">
+            <button class="btn-ghost" id="smgmt-cleanup-empty-btn"
+                    onclick="_smgmtCleanupEmpty()" title="Delete sprint labels with no tickets"
+                    aria-label="Clean up empty sprints" style="display:none">
+              <i class="ti ti-trash"></i>
+              Clean up empty sprints
+            </button>
+            <button class="btn-primary" id="smgmt-new-sprint-btn"
+                    onclick="smgmtOpenNewSprint()" title="Create a new sprint"
+                    aria-label="New Sprint">
+              <i class="ti ti-plus"></i>
+              New Sprint
+            </button>
+          </div>
+        </nav>
 
         <!-- Board sub-view (default) -->
         <div class="smgmt-subview show" id="smgmt-subview-board" role="tabpanel" aria-labelledby="smgmt-subtab-board">
@@ -5670,45 +6357,10 @@
                   <span id="smgmt-density-label">Compact</span>
                 </button>
               </div>
-              <button class="btn-ghost" id="smgmt-cleanup-empty-btn"
-                      onclick="_smgmtCleanupEmpty()" title="Delete sprint labels with no tickets"
-                      aria-label="Clean up empty sprints" style="display:none">
-                <i class="ti ti-trash"></i>
-                Clean up empty sprints
-              </button>
-              <button class="btn-primary" id="smgmt-new-sprint-btn"
-                      onclick="smgmtOpenNewSprint()" title="Create a new sprint"
-                      aria-label="New Sprint">
-                <i class="ti ti-plus"></i>
-                New Sprint
-              </button>
             </div>
           </div>
-
-          <!-- Label filter chips (issue #546) — inside sticky area so they scroll with toolbar -->
-          <div class="smgmt-label-filter-row is-empty" id="smgmt-label-filter-row" role="toolbar" aria-label="Filter by label"></div>
-
-          <!-- Search/filter bar (issue #552) -->
-          <div class="smgmt-filter-bar" id="smgmt-filter-bar">
-            <div class="smgmt-filter-input-wrap">
-              <input type="search" class="smgmt-filter-input" id="smgmt-filter-input"
-                     placeholder="Filter tickets by title, #number, or label…"
-                     aria-label="Filter tickets by title, issue number, or label"
-                     autocomplete="off" spellcheck="false"
-                     oninput="_smgmtFilterApply()">
-              <button class="smgmt-filter-clear-btn" id="smgmt-filter-clear-btn"
-                      onclick="_smgmtFilterClear()" title="Clear filter" aria-label="Clear filter">×</button>
-            </div>
-          </div>
-        </div>
-
-        <!-- Size legend (issue #562) -->
-        <div class="smgmt-size-legend" id="smgmt-size-legend" aria-label="Ticket size color legend">
-          <span class="smgmt-size-legend-label">Size:</span>
-          <span class="smgmt-size-legend-item"><span class="smgmt-size-legend-swatch sz-S"></span> S — small</span>
-          <span class="smgmt-size-legend-item"><span class="smgmt-size-legend-swatch sz-M"></span> M — medium</span>
-          <span class="smgmt-size-legend-item"><span class="smgmt-size-legend-swatch sz-L"></span> L — large</span>
-          <span class="smgmt-size-legend-item"><span class="smgmt-size-legend-swatch sz-XL"></span> XL — extra large</span>
+          <!-- Tag chips, search field, and size legend relocated to the Tickets
+               tab (issue #798) — removed from the Sprint pane. -->
         </div>
 
         <!-- Sprint list -->
@@ -5727,8 +6379,10 @@
             <div class="smgmt-ghost-sub" id="smgmt-ghost-sub"></div>
           </div>
 
-          <!-- Backlog pane (issue #274) — dashed border, grey tint, drag target -->
-          <div class="smgmt-backlog-pane is-expanded" id="smgmt-backlog-pane"
+          <!-- Backlog panel (issue #800) — full-width bottom panel: filter pills,
+               checkbox multi-select picker, and a live what-if delta line. Keeps
+               id smgmt-backlog-pane and the drag-back-to-backlog drop target. -->
+          <div class="panel bl-panel smgmt-backlog-pane is-expanded" id="smgmt-backlog-pane"
                role="region" aria-label="Backlog"
                ondragover="_smgmtBacklogDragOver(event)"
                ondragleave="_smgmtBacklogDragLeave(event)"
@@ -5752,10 +6406,42 @@
               <span class="smgmt-backlog-chevron-icon"><i class="ti ti-chevron-down"></i></span>
             </div>
             <div class="smgmt-backlog-tickets-container" id="smgmt-backlog-tickets-container">
-              <p class="smgmt-backlog-hint-row">Unassigned tickets — drag into a sprint above, or use Move to</p>
-              <div id="smgmt-backlog-tickets">
+              <!-- Filter pills (issue #800) — client-side over loaded backlog data -->
+              <div class="bl-filter" id="bl-filter" role="group" aria-label="Backlog filters">
+                <span class="bl-filter-label">Size</span>
+                <button type="button" class="bl-pill" data-filter-type="size" data-filter-val="S"
+                        onclick="_blToggleFilter('size','S',this)">S</button>
+                <button type="button" class="bl-pill" data-filter-type="size" data-filter-val="M"
+                        onclick="_blToggleFilter('size','M',this)">M</button>
+                <button type="button" class="bl-pill" data-filter-type="size" data-filter-val="L"
+                        onclick="_blToggleFilter('size','L',this)">L</button>
+                <button type="button" class="bl-pill" data-filter-type="size" data-filter-val="XL"
+                        onclick="_blToggleFilter('size','XL',this)">XL</button>
+                <span class="bl-filter-label">Age</span>
+                <button type="button" class="bl-pill" data-filter-type="age" data-filter-val="new"
+                        onclick="_blToggleFilter('age','new',this)">&le;7d</button>
+                <button type="button" class="bl-pill" data-filter-type="age" data-filter-val="gt7"
+                        onclick="_blToggleFilter('age','gt7',this)">&gt;7d</button>
+                <button type="button" class="bl-pill" data-filter-type="age" data-filter-val="gt30"
+                        onclick="_blToggleFilter('age','gt30',this)">&gt;30d</button>
+                <button type="button" class="bl-pill" data-filter-type="unestimated" data-filter-val="1"
+                        onclick="_blToggleFilter('unestimated','1',this)">Unestimated</button>
+              </div>
+              <p class="smgmt-backlog-hint-row">Unassigned tickets — drag into a sprint above, or use the picker below</p>
+              <div id="smgmt-backlog-tickets" class="bl-grid">
                 <div class="smgmt-drop-hint">Drop tickets here to remove sprint label</div>
               </div>
+            </div>
+            <!-- Multi-select picker + what-if line — revealed when >=1 row selected -->
+            <div class="bl-actions" id="bl-actions" hidden role="group" aria-label="Add selected tickets to a sprint">
+              <span class="bl-sel-count" id="bl-sel-count">0 selected</span>
+              <label class="bl-filter-label" for="bl-target">Target</label>
+              <select class="bl-target" id="bl-target" aria-label="Target sprint" onchange="_blUpdateWhatIf()"></select>
+              <button class="bl-add-btn" id="bl-add-btn" type="button" onclick="_blConfirmAdd()">
+                <i class="ti ti-circle-plus"></i>
+                <span id="bl-add-label">Add selected to Sprint</span>
+              </button>
+              <div class="bl-whatif" id="bl-whatif" aria-live="polite"></div>
             </div>
           </div>
         </div>
@@ -5774,8 +6460,34 @@
 
         </div><!-- /smgmt-subview-board -->
 
+        <!-- Running sub-view (issue #798) — running-sprint focus; content is a
+             separate ticket. Empty-state keeps the tab from rendering blank. -->
+        <div class="smgmt-subview" id="smgmt-subview-running" role="tabpanel" aria-labelledby="smgmt-subtab-running">
+          <div class="smgmt-running-empty" id="smgmt-running-empty">
+            <i class="ti ti-player-play"></i>
+            <p class="smgmt-running-empty-title">No sprint is running</p>
+            <p class="smgmt-running-empty-sub">Start a sprint from the Board to watch it live here.</p>
+          </div>
+          <!-- Running metrics strip (issue #803) — five metric cards above the
+               rail, built from the /live snapshot by _smgmtMetricsUpdate. -->
+          <div class="metrics" id="smgmt-metrics" role="group" aria-label="Sprint metrics" hidden></div>
+          <!-- Level-rail node board (issue #802) — built from the /live snapshot
+               by _smgmtRailUpdate; levels gate on the spine, ticket nodes per level. -->
+          <div class="rail" id="smgmt-rail" role="list" aria-label="Sprint level rail" hidden></div>
+          <!-- Node inspector panel (issue #804) — opens when a rail node is
+               clicked; shows ticket metadata, an attempt timeline, and tabbed
+               per-issue streaming logs. Built by _smgmtInspectorFeed from the
+               /live ticket object + the /logs/tail endpoint. Mock v5 contract:
+               .inspector / .attempts / .att / .log-tabs / .log-body. -->
+          <div class="inspector" id="smgmt-inspector" role="region" aria-label="Node inspector" hidden></div>
+        </div><!-- /smgmt-subview-running -->
+
         <!-- History sub-view (issue #716) — finished-sprint summaries -->
         <div class="smgmt-subview" id="smgmt-subview-history" role="tabpanel" aria-labelledby="smgmt-subtab-history">
+          <!-- Sprint history ledger (issue #806) — verb-gated cards with
+               per-sprint issue lists, locking, and links. Fed by the local
+               /api/sprints/history feed (issue #805), no GitHub call at read. -->
+          <div class="hist-ledger" id="hist-ledger"></div>
           <div class="smgmt-summary-pane" id="smgmt-summary-pane">
             <div class="smgmt-summary-header">
               <div class="smgmt-summary-header-left">
@@ -6661,6 +7373,12 @@
                 </div>
               </div>
               <div class="ps-row">
+                <div class="ps-row-label">Sprint budget<span class="ps-hint">capacity bar target</span></div>
+                <div class="ps-row-control">
+                  <input class="ps-inp ps-num" id="ps-sprint-budget" type="number" min="1" max="10000"> <span class="ps-unit">min</span>
+                </div>
+              </div>
+              <div class="ps-row">
                 <div class="ps-row-label">Default branch</div>
                 <div class="ps-row-control">
                   <input class="ps-inp" id="ps-default-branch" type="text" style="width:160px" placeholder="develop">
@@ -7284,6 +8002,9 @@ function parseUrl() {
   const rawTab = m[2] || '';
   const hash = window.location.hash;
   const tab = (rawTab === 'tickets')          ? 'tickets'
+            // 'sprint' deep-link alias (issue #798): the tab was renamed to
+            // "Sprint" while the pane id stays pane-sprint-mgmt for compatibility.
+            : (rawTab === 'sprint')           ? 'sprint-mgmt'
             : (rawTab === 'logs')             ? 'logs'
             : (rawTab === 'bulk-create')      ? 'bulk-create'
             : (rawTab === 'timeline')         ? 'timeline'
@@ -7329,6 +8050,8 @@ let _smgmtRunningLabels = new Set();
 let _smgmtAnySprintRunning = false;
 // Live data cache: sprint label → last live snapshot from /api/sprints/{label}/live
 const _smgmtLiveCache = {};
+// Currently-selected level-rail node (issue #802), fed to the inspector panel.
+let _smgmtRailSelectedNum = null;
 // Poll timer for live data (2s indicator refresh)
 let _smgmtLivePollId = null;
 // Poll timer for live log panel (5s log refresh, issue #309)
@@ -8582,7 +9305,7 @@ function _smgmtSummaryRender(openData, closedData) {
 let _smgmtSubView = 'board';
 function _smgmtShowSubView(view) {
   _smgmtSubView = view;
-  ['board', 'history'].forEach(v => {
+  ['board', 'running', 'history'].forEach(v => {
     const btn = document.getElementById('smgmt-subtab-' + v);
     if (btn) {
       btn.classList.toggle('active', v === view);
@@ -8592,7 +9315,33 @@ function _smgmtShowSubView(view) {
     if (panel) panel.classList.toggle('show', v === view);
   });
   // Lazy-load summaries when History is opened (no-op if repo not cached yet).
-  if (view === 'history') _smgmtLoadSummaries(_cachedFullRepo[_slug]);
+  if (view === 'history') {
+    _smgmtLoadSummaries(_cachedFullRepo[_slug]);
+    _histLoadLedger(_cachedFullRepo[_slug]);   // issue #806 ledger
+  }
+  // Render the level-rail from cache when switching to Running (issue #802) so the
+  // board shows immediately without waiting for the next 2s poll tick.
+  if (view === 'running') {
+    const lbl = _smgmtRunningLabels.values().next().value;
+    if (lbl) {
+      _smgmtRailUpdate(lbl, _smgmtLiveCache[lbl]);
+      _smgmtMetricsUpdate(lbl, _smgmtLiveCache[lbl]);
+    }
+  }
+}
+
+// Sync the sub-nav live-state indicators (issue #798): a pulsing dot on the
+// Running tab while any sprint runs, and the total sprint count on History.
+function _smgmtUpdateSubnav() {
+  const dot = document.getElementById('smgmt-running-dot');
+  if (dot) dot.hidden = !_smgmtAnySprintRunning;
+  const badge = document.getElementById('smgmt-history-count');
+  if (badge) {
+    const data = _smgmtData || {};
+    const order = (data.order || []).filter(l => /^sprint-\d+(\.\d+)*$/.test(l));
+    const total = order.length || (data.sprints || []).length;
+    badge.textContent = String(total);
+  }
 }
 
 async function _smgmtLoadSummaries(repo) {
@@ -8606,6 +9355,624 @@ async function _smgmtLoadSummaries(repo) {
     _smgmtSummaryClosedData = summaries.filter(s => s.state === 'closed');
     _smgmtSummaryRender(_smgmtSummaryOpenData, _smgmtSummaryClosedData);
   } catch (_) {}
+}
+
+// ── Sprint history ledger (issue #806) ──────────────────────────────────────
+// Verb-gated, lockable sprint cards with per-sprint issue lists and links,
+// fed by GET /api/sprints/history (issue #805) — local-only, no GitHub call.
+let _histLedgerData = [];
+const _histExpanded = new Set();   // labels of currently-expanded cards
+// Folding (issue #807): the N most-recent sprints render expanded; older ones
+// collapse into aggregate folds of the same size. _histFoldSize mirrors the
+// `history_fold_size` project setting (default 10); _histFoldExpanded tracks
+// which fold groups are currently open (distinct from per-card expansion).
+let _histFoldSize = 10;
+const _histFoldExpanded = new Set();   // ids of currently-expanded fold groups
+
+// Stale-branch scan (issue #808): label -> { sprint, count, branches[],
+// merged[], unmerged[] }, populated by _histScanStale() and consumed by the
+// per-row amber chip. Scan/cleanup are repo actions, so a chip renders on a
+// History row regardless of whether that row is locked (AC7).
+let _histStaleBySprint = {};
+
+// Run-stats (issue #810): label -> the GET /api/sprints/{label}/run-stats
+// aggregation, lazily fetched the first time a card is expanded and cached so
+// re-renders (fold toggles, stale scans) reuse it. `undefined` means not yet
+// fetched; `{has_runs:false}` means a sprint with no agent_runs rows.
+const _histRunStats = {};
+
+// Terminal states that lock a card: no further action is possible, links only.
+function _histIsLocked(state) {
+  const s = (state || '').toLowerCase();
+  return s === 'finished' || s === 'deleted';
+}
+
+// A rerun child sprint carries a dotted label (e.g. sprint-61.1).
+function _histIsChild(label) {
+  return /^sprint-\d+\.\d+/.test(label || '');
+}
+
+// Whole seconds → compact "Xs" / "Xm Ys" / "Xh Ym"; missing time reads as a dash.
+function _histFmtSecs(secs) {
+  if (secs == null || isNaN(secs)) return '—';
+  secs = Math.round(secs);
+  if (secs < 60) return secs + 's';
+  const m = Math.floor(secs / 60), s = secs % 60;
+  if (m < 60) return s ? `${m}m ${s}s` : `${m}m`;
+  const h = Math.floor(m / 60), mm = m % 60;
+  return mm ? `${h}h ${mm}m` : `${h}h`;
+}
+
+function _histFmtTokens(n) {
+  if (n == null || isNaN(n)) return '0';
+  if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M';
+  if (n >= 1e3) return (n / 1e3).toFixed(1) + 'k';
+  return String(n);
+}
+
+// Map a per-issue local disposition → its display chip {cls,label}:
+//   merged → MERGED · closed/failed → CRASHED · open+ran → OPEN·UAT ·
+//   open + never-ran (no time_spent) → NOT RUN.
+function _histIssueChip(iss) {
+  const st = (iss.state || '').toLowerCase();
+  if (st === 'merged') return { cls: 'merged',  label: 'MERGED' };
+  if (st === 'closed') return { cls: 'crashed', label: 'CRASHED' };
+  if (iss.time_spent != null) return { cls: 'uat', label: 'OPEN·UAT' };
+  return { cls: 'notrun', label: 'NOT RUN' };
+}
+
+function _histIssueRowHtml(iss, isChild) {
+  const chip = _histIssueChip(iss);
+  // Rerun children (a rerun flag, or any issue inside a child sprint card) are
+  // indented with a ↳ prefix in the issue list.
+  const rerun = iss.is_rerun || iss.rerun || isChild;
+  const arrow = rerun ? '<span class="iss-rerun">↳</span> ' : '';
+  const id = iss.ticket_id != null ? ('#' + iss.ticket_id) : '#?';
+  return `<div class="iss-row">
+    <span class="iss-id">${arrow}${escHtml(String(id))}</span>
+    <span class="iss-chip ${chip.cls}">${chip.label}</span>
+    <span class="iss-time">${escHtml(_histFmtSecs(iss.time_spent))}</span>
+  </div>`;
+}
+
+function _histIssueListHtml(s) {
+  const issues = Array.isArray(s.issues) ? s.issues : [];
+  const isChild = _histIsChild(s.label);
+  if (!issues.length) {
+    return `<div class="iss-list iss-list-empty">No tickets recorded for this sprint.</div>`;
+  }
+  return `<div class="iss-list">${issues.map(i => _histIssueRowHtml(i, isChild)).join('')}</div>`;
+}
+
+// Re-run / Finish / Delete render on COMPLETED or FAILED only; Resume on FAILED
+// only; locked (finished/deleted) sprints render no verbs at all (links only).
+function _histVerbsHtml(s) {
+  if (_histIsLocked(s.lifecycle_state)) return '';
+  const state = (s.lifecycle_state || '').toLowerCase();
+  const actionable = state === 'completed' || state === 'failed';
+  if (!actionable) return '';
+  const lbl = escHtml(s.label || '');
+  let html = '';
+  if (state === 'failed') {
+    html += `<button class="hist-verb hist-verb--resume" onclick="_histResumeSprint('${lbl}')">
+               <i class="ti ti-player-play"></i> Resume</button>`;
+  }
+  html += `<button class="hist-verb hist-verb--rerun" onclick="smgmtRerunSprint('${lbl}')">
+             <i class="ti ti-refresh"></i> Re-run</button>`;
+  html += `<button class="hist-verb hist-verb--finish" onclick="smgmtFinishSprint('${lbl}')">
+             <i class="ti ti-flag-check"></i> Finish</button>`;
+  html += `<button class="hist-verb hist-verb--delete" onclick="smgmtDeleteSprint('${lbl}')">
+             <i class="ti ti-trash"></i> Delete</button>`;
+  return `<div class="hist-verbs">${html}</div>`;
+}
+
+// Link targets. The PR pill opens the GitHub PR; the Summary pill opens the
+// sprint's summary file; Logs deep-links into the Logs tab for the sprint.
+function _histPrUrl(s) {
+  if (s.pr_number == null) return '';
+  const repo = _cachedFullRepo[_slug] || '';
+  return `https://github.com/${repo}/pull/${s.pr_number}`;
+}
+function _histSummaryUrl(s) {
+  if (!s.summary_path) return '';
+  return '/api/sprint-summary?path=' + encodeURIComponent(s.summary_path);
+}
+function _histLogsUrl(s) {
+  return `/project/${encodeURIComponent(_slug)}/logs?sprint=${encodeURIComponent(s.label || '')}`;
+}
+
+function _histLinksHtml(s) {
+  let html = '';
+  const pr = _histPrUrl(s);
+  if (pr) {
+    html += `<a class="hist-link link-pr" href="${escHtml(pr)}" target="_blank" rel="noopener">
+               <i class="ti ti-git-pull-request"></i> PR #${s.pr_number}</a>`;
+  }
+  const sum = _histSummaryUrl(s);
+  if (sum) {
+    html += `<a class="hist-link link-sum" href="${escHtml(sum)}" target="_blank" rel="noopener">
+               <i class="ti ti-file-description"></i> Summary</a>`;
+  }
+  html += `<a class="hist-link link-logs" href="${escHtml(_histLogsUrl(s))}">
+             <i class="ti ti-list-details"></i> Logs</a>`;
+  return `<div class="hist-links">${html}</div>`;
+}
+
+// Metrics row: an estimate-accuracy bar (actual ÷ estimated) plus duration and
+// token badges, per mock v5.
+function _histMetricsHtml(s) {
+  const acc = s.estimate_accuracy;
+  let bar = '';
+  if (acc != null && !isNaN(acc)) {
+    // 1.0× = on target. Fill is acc as a fraction of a 2× full-scale bar; an
+    // over-run (>1) reads amber→red, on/under (≤1) reads green.
+    const pct = Math.max(4, Math.min(100, (acc / 2) * 100));
+    const tone = acc > 1.25 ? 'var(--red)' : (acc > 1.0 ? 'var(--amber)' : 'var(--green)');
+    const label = Number(acc).toFixed(2) + '×';
+    bar = `<div class="est-bar" title="Estimate accuracy ${label} (actual ÷ estimated)">
+             <span class="est-bar-fill" style="width:${pct}%;background:${tone}"></span>
+             <span class="est-bar-label">${escHtml(label)} est</span>
+           </div>`;
+  }
+  const badges = [];
+  if (s.duration != null) {
+    badges.push(`<span class="hist-badge"><i class="ti ti-clock"></i> ${escHtml(_histFmtSecs(s.duration))}</span>`);
+  }
+  if (s.tokens != null) {
+    badges.push(`<span class="hist-badge"><i class="ti ti-coin"></i> ${escHtml(_histFmtTokens(s.tokens))} tok</span>`);
+  }
+  const issues = Array.isArray(s.issues) ? s.issues : [];
+  badges.push(`<span class="hist-badge"><i class="ti ti-ticket"></i> ${issues.length} tickets</span>`);
+  return `<div class="hist-metrics">${bar}${badges.join('')}</div>`;
+}
+
+function _histStateChip(state) {
+  const s = (state || 'unknown').toLowerCase();
+  const map = {
+    completed: ['completed', '✓ Completed'],
+    finished:  ['finished',  '🔒 Finished'],
+    failed:    ['failed',    '✕ Failed'],
+    cancelled: ['cancelled', '⊘ Cancelled'],
+    deleted:   ['deleted',   '🗑 Deleted'],
+    running:   ['running',   '● Running'],
+    planning:  ['planning',  '… Planning'],
+  };
+  const pair = map[s] || ['unknown', s];
+  return `<span class="hist-state ${pair[0]}">${pair[1]}</span>`;
+}
+
+// ── Run-stats block (issue #810) ────────────────────────────────────────────
+// One stat chip: an icon, a label, and a mono value. Built as a helper so every
+// chip lines up on the same grid.
+function _histStatChip(icon, label, value, cls) {
+  return `<span class="stat-chip${cls ? ' ' + cls : ''}">
+    <i class="ti ${icon}"></i>${escHtml(label)} <b>${escHtml(value)}</b></span>`;
+}
+
+// The split-bar: one width-proportional segment per agent, percentages summing
+// to 100 (AC2), with a full-contrast legend beneath for accessible reading.
+function _histSplitBarHtml(stats) {
+  const split = Array.isArray(stats.split) ? stats.split : [];
+  if (!split.length) return '';
+  const segs = split.map(seg =>
+    `<span class="split-seg split-seg--${escHtml(seg.agent)}" style="width:${seg.pct}%"
+       title="${escHtml(seg.agent)} · ${seg.pct}% (${escHtml(_histFmtSecs(seg.seconds))})">${seg.pct}%</span>`
+  ).join('');
+  const legend = split.map(seg =>
+    `<span class="split-legend-item"><span class="split-swatch split-swatch--${escHtml(seg.agent)}"></span>
+       ${escHtml(seg.agent)} ${seg.pct}%</span>`
+  ).join('');
+  return `<div class="stats-block">
+    <div class="stats-section-label">Agent time split</div>
+    <div class="split-bar">${segs}</div>
+    <div class="split-legend">${legend}</div>
+  </div>`;
+}
+
+// The gantt: one row per reached ticket (unreached tickets simply have no row —
+// AC5). Coder segments are purple, tester amber; fix-round segments are hatched
+// (AC3). A red ✕ crash marker is painted at the crash ticket's end offset, but
+// only for a sprint that actually failed (AC4).
+function _histGanttHtml(s, stats) {
+  const tickets = Array.isArray(stats.tickets) ? stats.tickets : [];
+  if (!tickets.length) return '';
+  const scale = Math.max(1, stats.wall_seconds || 0);
+  const failed = (s.lifecycle_state || '').toLowerCase() === 'failed';
+  const crash = stats.crash;
+  const rows = tickets.map(t => {
+    const segs = (t.segments || []).map(seg => {
+      const left  = (seg.start / scale) * 100;
+      const width = (seg.duration / scale) * 100;
+      const agentCls = seg.agent === 'tester' ? 'g-tester' : 'g-coder';
+      const cls = 'g-seg ' + agentCls + (seg.fix_round ? ' g-fix' : '');
+      const title = `${seg.agent}${seg.fix_round ? ' (fix round)' : ''} · ${_histFmtSecs(seg.duration)}`;
+      return `<span class="${cls}" style="left:${left}%;width:${width}%" title="${escHtml(title)}"></span>`;
+    }).join('');
+    // The crash ✕ sits on its own ticket's row, at the segment-end offset.
+    let marker = '';
+    if (failed && crash && crash.ticket === t.ticket) {
+      const at = (crash.offset / scale) * 100;
+      marker = `<span class="g-crash" style="left:${at}%" title="Crashed here">✕</span>`;
+    }
+    return `<div class="g-row">
+      <span class="g-label">#${escHtml(String(t.ticket))}</span>
+      <span class="g-track">${segs}${marker}</span>
+    </div>`;
+  }).join('');
+  return `<div class="stats-block">
+    <div class="stats-section-label">Per-ticket timeline</div>
+    <div class="gantt">${rows}</div>
+  </div>`;
+}
+
+// The full run-stats block for an expanded card. Wall-time and token chips
+// always render (sourced from the run-stats span when present, else the history
+// feed), so the block is never empty. The agent-derived chips, split-bar and
+// gantt render only when agent_runs rows exist (has_runs) — otherwise they are
+// hidden with no error (AC7). Independent of lock state (AC6).
+function _histStatsHtml(s) {
+  const stats = _histRunStats[s.label];
+  const hasRuns = !!(stats && stats.has_runs);
+
+  // Wall time + tokens fall back to the history record when no runs are present.
+  const wall = hasRuns && stats.wall_seconds != null ? stats.wall_seconds : s.duration;
+  const tokens = hasRuns && stats.total_tokens != null ? stats.total_tokens : s.tokens;
+
+  const chips = [];
+  if (wall != null) chips.push(_histStatChip('ti-clock', 'Wall', _histFmtSecs(wall)));
+  if (tokens != null) {
+    let tokVal = _histFmtTokens(tokens) + ' tok';
+    if (hasRuns && stats.token_cost_usd != null) tokVal += ' ≈ $' + Number(stats.token_cost_usd).toFixed(2);
+    chips.push(_histStatChip('ti-coin', 'Tokens', tokVal));
+  }
+  if (hasRuns) {
+    chips.push(_histStatChip('ti-robot', 'Agent', _histFmtSecs(stats.agent_total_seconds)));
+    if (stats.fix_round_count > 0) {
+      const refs = (stats.fix_round_tickets || []).map(n => '#' + n).join(', ');
+      const word = stats.fix_round_count === 1 ? 'fix round' : 'fix rounds';
+      chips.push(_histStatChip('ti-refresh', '',
+        stats.fix_round_count + ' ' + word + (refs ? ' (' + refs + ')' : ''), 'stat-chip--fix'));
+    }
+    if (stats.slowest_ticket) {
+      chips.push(_histStatChip('ti-hourglass-low', 'Slowest',
+        '#' + stats.slowest_ticket.ticket + ' · ' + _histFmtSecs(stats.slowest_ticket.seconds)));
+    }
+    if (stats.parallel_saved_seconds != null) {
+      chips.push(_histStatChip('ti-arrows-split', 'Parallel saved', _histFmtSecs(stats.parallel_saved_seconds)));
+    }
+  }
+
+  const splitHtml = hasRuns ? _histSplitBarHtml(stats) : '';
+  const ganttHtml = hasRuns ? _histGanttHtml(s, stats) : '';
+  return `<div class="stats" data-stats-label="${escHtml(s.label || '')}">
+    <div class="stat-chips">${chips.join('')}</div>
+    ${splitHtml}
+    ${ganttHtml}
+  </div>`;
+}
+
+// Lazily fetch the run-stats aggregation for a sprint the first time its card is
+// expanded; cache it and re-render so the block fills in. Failures leave the
+// label uncached (so a later expand retries) and the wall/token chips still show.
+async function _histLoadRunStats(label) {
+  if (label in _histRunStats) return;   // already fetched (or in flight result)
+  const repo = _cachedFullRepo[_slug];
+  try {
+    const url = '/api/sprints/' + encodeURIComponent(label) + '/run-stats'
+              + (repo ? '?project=' + encodeURIComponent(repo) : '');
+    const resp = await fetch(url);
+    if (!resp.ok) return;
+    _histRunStats[label] = await resp.json();
+    _histRenderLedger(_histLedgerData);
+  } catch (_) {
+    /* transient — leave uncached so a later expand retries */
+  }
+}
+
+function _histCardHtml(s) {
+  const locked   = _histIsLocked(s.lifecycle_state);
+  const child    = _histIsChild(s.label);
+  const expanded = _histExpanded.has(s.label);
+  const cls = ['hist-card'];
+  if (locked)   cls.push('locked');
+  if (child)    cls.push('child');
+  if (expanded) cls.push('expanded');
+  const lockNote = locked
+    ? `<div class="lock-note"><i class="ti ti-lock"></i> This sprint is ${escHtml((s.lifecycle_state || '').toLowerCase())} and locked — links only.</div>`
+    : '';
+  const display = (typeof sprintLabelDisplay === 'function') ? sprintLabelDisplay(s.label) : (s.label || '');
+  const chev = expanded ? 'ti-chevron-down' : 'ti-chevron-right';
+  const lbl = escHtml(s.label || '');
+  const body = expanded ? `
+      ${_histMetricsHtml(s)}
+      ${_histStatsHtml(s)}
+      ${_histIssueListHtml(s)}
+      ${lockNote}
+      ${_histLinksHtml(s)}
+      ${_histVerbsHtml(s)}` : '';
+  return `<div class="${cls.join(' ')}" data-label="${lbl}">
+    <div class="hist-card-head" onclick="_histToggleCard('${lbl}')">
+      <i class="ti ${chev} hist-chev"></i>
+      ${child ? '<span class="hist-child-arrow">↳</span>' : ''}
+      <span class="hist-card-title">${escHtml(display)}</span>
+      ${_histStateChip(s.lifecycle_state)}
+      ${_histStaleChipHtml(s)}
+      <span class="hist-card-spacer"></span>
+      <span class="hist-card-mini">${escHtml(_histFmtSecs(s.duration))}</span>
+    </div>
+    ${body}
+  </div>`;
+}
+
+function _histToggleCard(label) {
+  if (_histExpanded.has(label)) {
+    _histExpanded.delete(label);
+  } else {
+    _histExpanded.add(label);
+    // Expanding a card lazily loads its run-stats block (issue #810); cached
+    // after the first fetch so subsequent expands are instant.
+    _histLoadRunStats(label);
+  }
+  _histRenderLedger(_histLedgerData);
+}
+
+// ── Folding (issue #807) ────────────────────────────────────────────────────
+// The integer sprint number parsed out of a "sprint-NN" (or "sprint-NN.M"
+// rerun-child) label — used to build the "Sprints X–Y" fold range.
+function _histSprintNum(label) {
+  const m = /sprint-(\d+)/.exec(label || '');
+  return m ? parseInt(m[1], 10) : null;
+}
+
+// A "done" ticket is a merged ticket; count them across a sprint's issue list.
+function _histTicketsDone(s) {
+  const issues = Array.isArray(s.issues) ? s.issues : [];
+  return issues.filter(i => (i.state || '').toLowerCase() === 'merged').length;
+}
+
+// Split the (newest-first) sprint feed into the `foldSize` most-recent sprints
+// (rendered expanded) plus a list of older folds, each holding exactly
+// `foldSize` sprints. Both the recent slice and every fold are sized by the
+// same `history_fold_size` setting (AC2/AC8).
+function _histPartition(sprints, foldSize) {
+  foldSize = Math.max(1, foldSize | 0);
+  const recent = sprints.slice(0, foldSize);
+  const older = sprints.slice(foldSize);
+  const folds = [];
+  for (let i = 0; i < older.length; i += foldSize) {
+    const group = older.slice(i, i + foldSize);
+    const nums = group.map(g => _histSprintNum(g.label)).filter(n => n != null);
+    folds.push({
+      id: 'fold-' + i,
+      sprints: group,
+      from: nums.length ? Math.min(...nums) : null,
+      to: nums.length ? Math.max(...nums) : null,
+    });
+  }
+  return { recent, folds };
+}
+
+// Aggregate a fold group: tickets done (Σ merged), avg estimation accuracy
+// (mean of the sprints that recorded one), and failure count (Σ failed
+// sprints) — the three metrics surfaced on the fold head (AC4).
+function _histFoldAgg(group) {
+  let done = 0, failed = 0, accSum = 0, accN = 0;
+  group.forEach(s => {
+    done += _histTicketsDone(s);
+    if ((s.lifecycle_state || '').toLowerCase() === 'failed') failed += 1;
+    const acc = s.estimate_accuracy;
+    if (acc != null && !isNaN(acc)) { accSum += Number(acc); accN += 1; }
+  });
+  return { done, failed, avgAcc: accN ? (accSum / accN) : null, count: group.length };
+}
+
+function _histFoldAggHtml(group) {
+  const a = _histFoldAgg(group);
+  const acc = a.avgAcc != null ? (Number(a.avgAcc).toFixed(2) + '×') : '—';
+  return `<div class="fold-agg">
+    <span class="fold-stat"><i class="ti ti-checks"></i> ${a.done} done</span>
+    <span class="fold-stat"><i class="ti ti-gauge"></i> ${escHtml(acc)} avg est</span>
+    <span class="fold-stat fold-stat--fail"><i class="ti ti-alert-triangle"></i> ${a.failed} failed</span>
+  </div>`;
+}
+
+// A collapsed fold row ("Sprints X–Y" + aggregate metrics). Clicking the head
+// expands it; member sprints then render through the SAME _histCardHtml builder
+// so they are visually identical to recent rows — locked/normal states intact
+// (AC5). Collapsing removes the fold from _histFoldExpanded, hiding the rows.
+function _histFoldHtml(fold) {
+  const open = _histFoldExpanded.has(fold.id);
+  const chev = open ? 'ti-chevron-down' : 'ti-chevron-right';
+  const range = (fold.from != null && fold.to != null)
+    ? (fold.from === fold.to ? ('Sprint ' + fold.from) : ('Sprints ' + fold.from + '–' + fold.to))
+    : ('Sprints · ' + fold.sprints.length);
+  const fid = escHtml(fold.id);
+  const body = open
+    ? `<div class="fold-body">${fold.sprints.map(_histCardHtml).join('')}</div>`
+    : '';
+  return `<div class="fold ${open ? 'expanded' : ''}" data-fold="${fid}">
+    <div class="fold-head" onclick="_histToggleFold('${fid}')">
+      <i class="ti ${chev} fold-chev"></i>
+      <span class="fold-title">${escHtml(range)}</span>
+      <span class="fold-count">${fold.sprints.length} sprints</span>
+      <span class="fold-spacer"></span>
+      ${_histFoldAggHtml(fold.sprints)}
+    </div>
+    ${body}
+  </div>`;
+}
+
+function _histToggleFold(id) {
+  if (_histFoldExpanded.has(id)) _histFoldExpanded.delete(id);
+  else _histFoldExpanded.add(id);
+  _histRenderLedger(_histLedgerData);
+}
+
+// Toolbar note above the ledger explaining the fold behaviour (mock v5 AC10).
+function _histToolbarHtml() {
+  return `<div class="hist-toolbar">
+    <button class="hist-scan-btn" id="hist-scan-btn" onclick="_histScanStale()">
+      <i class="ti ti-git-branch"></i> Scan stale branches</button>
+    <span class="hist-toolbar-note">
+      <i class="ti ti-stack-2"></i>
+      Showing the ${_histFoldSize} most recent sprints — older sprints are grouped into folds of ${_histFoldSize}.
+    </span>
+  </div>`;
+}
+
+// ── Stale-branch scan + cleanup (issue #808) ────────────────────────────────
+// The amber chip on a History row. Count is the total leftover feature branches
+// mapped to that sprint (merged + unmerged); cleanup deletes only the merged
+// ones. Rendered for locked rows too — scan/cleanup are repo actions, not
+// record changes (AC7). Clicking "clean up" must not toggle the card, hence
+// stopPropagation.
+function _histStaleChipHtml(s) {
+  const g = _histStaleBySprint[s.label];
+  if (!g || !g.count) return '';
+  const n = g.count;
+  const word = n === 1 ? 'stale branch' : 'stale branches';
+  const lbl = escHtml(s.label || '');
+  return `<button class="stale-chip" title="${n} leftover feature ${n === 1 ? 'branch' : 'branches'} for this sprint"
+    onclick="event.stopPropagation(); _histCleanupStale('${lbl}')">
+    <i class="ti ti-git-branch"></i> ${n} ${word} · clean up</button>`;
+}
+
+// Scan the remote for stale feature/<N>-* branches and attach amber chips to the
+// History rows whose sprint owns them (AC1/AC3/AC4).
+async function _histScanStale() {
+  const repo = _cachedFullRepo[_slug];
+  if (!repo) return;
+  const btn = document.getElementById('hist-scan-btn');
+  if (btn) { btn.disabled = true; }
+  try {
+    const resp = await fetch('/scan-stale-branches?repo=' + encodeURIComponent(repo));
+    if (resp.ok) {
+      const data = await resp.json();
+      _histStaleBySprint = data.by_sprint || {};
+      _histRenderLedger(_histLedgerData);
+    }
+  } catch (_) {
+    /* leave existing chips untouched on a transient failure */
+  } finally {
+    const b = document.getElementById('hist-scan-btn');
+    if (b) { b.disabled = false; }
+  }
+}
+
+// Clean up a row's stale branches: dry-run first to learn exactly what will be
+// deleted vs skipped (AC2), show a confirm dialog listing both (AC5/AC8), then
+// delete only the merged ones on confirm. Unmerged branches are never deleted;
+// after a successful delete the chip drops the removed branches and disappears
+// once the row has no stale branches left (AC6).
+async function _histCleanupStale(label) {
+  const repo = _cachedFullRepo[_slug];
+  const g = _histStaleBySprint[label];
+  if (!repo || !g) return;
+  const branches = g.branches || [];
+
+  let plan;
+  try {
+    const resp = await fetch('/cleanup-stale-branches', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ repo, branches, confirm: false }),
+    });
+    if (!resp.ok) return;
+    plan = await resp.json();
+  } catch (_) { return; }
+
+  const toDelete = plan.to_delete || [];
+  const skipped = plan.skipped_unmerged || [];
+  if (!toDelete.length && !skipped.length) return;
+
+  let msg = toDelete.length
+    ? ('Delete ' + toDelete.length + ' merged branch' + (toDelete.length !== 1 ? 'es' : '')
+       + '?\n\n' + toDelete.join('\n'))
+    : 'No merged branches to delete for this sprint.';
+  if (skipped.length) {
+    msg += '\n\nSkipped (unmerged — never deleted):\n' + skipped.join('\n');
+  }
+  if (!confirm(msg)) return;
+  if (!toDelete.length) return;   // dialog already surfaced the skipped list
+
+  try {
+    const resp = await fetch('/cleanup-stale-branches', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ repo, branches, confirm: true }),
+    });
+    if (!resp.ok) return;
+    const result = await resp.json();
+    const deleted = new Set(result.deleted || []);
+    const remaining = (g.branches || []).filter(b => !deleted.has(b));
+    if (remaining.length) {
+      g.branches = remaining;
+      g.merged = (g.merged || []).filter(b => !deleted.has(b));
+      g.unmerged = (g.unmerged || []).filter(b => !deleted.has(b));
+      g.count = remaining.length;
+    } else {
+      delete _histStaleBySprint[label];
+    }
+    _histRenderLedger(_histLedgerData);
+  } catch (_) {
+    /* network error during delete — leave chip as-is for a retry */
+  }
+}
+
+function _histRenderLedger(sprints) {
+  const el = document.getElementById('hist-ledger');
+  if (!el) return;
+  if (!sprints || !sprints.length) {
+    el.innerHTML = `<div class="hist-ledger-empty">No sprint history yet — finished and deleted sprints appear here.</div>`;
+    return;
+  }
+  // Partition by the current fold size, then draw: toolbar note, the recent
+  // (expanded) cards, then the older folds (AC2/AC3).
+  const { recent, folds } = _histPartition(sprints, _histFoldSize);
+  const recentHtml = recent.map(_histCardHtml).join('');
+  const foldsHtml = folds.map(_histFoldHtml).join('');
+  el.innerHTML = _histToolbarHtml() + recentHtml + foldsHtml;
+}
+
+// Resume a FAILED sprint — continue from where it stopped. Backend resume is
+// out of scope for #806; the rerun endpoint is the existing continue-from-
+// stopped path (see the cancel-banner copy), so Resume targets it directly.
+async function _histResumeSprint(label) {
+  const repo = _cachedFullRepo[_slug];
+  if (!repo) return;
+  try {
+    const resp = await fetch(
+      `/api/sprints/${encodeURIComponent(label)}/rerun?project=${encodeURIComponent(repo)}`,
+      { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ resume: true }) }
+    );
+    if (resp.ok) _smgmtShowSubView('running');
+  } catch (_) {}
+}
+
+async function _histLoadLedger(repo) {
+  if (!repo) return;
+  const el = document.getElementById('hist-ledger');
+  try {
+    // Read the fold size from project settings so re-opening / reloading the
+    // History tab re-partitions whenever `history_fold_size` changes (AC7).
+    try {
+      const sresp = await fetch(`/api/projects/${encodeURIComponent(_slug)}/settings`);
+      if (sresp.ok) {
+        const settings = await sresp.json();
+        const fs = parseInt(settings.history_fold_size, 10);
+        if (!isNaN(fs) && fs > 0) _histFoldSize = fs;
+      }
+    } catch (_) { /* fall back to the default fold size */ }
+    const resp = await fetch('/api/sprints/history?limit=50');
+    if (!resp.ok) return;
+    const data = await resp.json();
+    let sprints = data.sprints || [];
+    // Scope to the active project when the feed tags rows with a project.
+    sprints = sprints.filter(s => !s.project || s.project === repo);
+    _histLedgerData = sprints;
+    _histRenderLedger(sprints);
+  } catch (_) {
+    if (el) el.innerHTML = `<div class="hist-ledger-empty">Could not load sprint history.</div>`;
+  }
 }
 
 async function loadSprintMgmt(silent) {
@@ -8680,6 +10047,11 @@ function _smgmtRender(data) {
   const listEl = document.getElementById('smgmt-sprint-list');
   if (!listEl) return;
   _smgmtData = data;
+
+  // Keep the sub-nav live indicators (running dot + History count) in sync on
+  // every render, including auto-refresh, so the dot clears when sprints stop
+  // and the badge tracks the sprint total (issue #798).
+  _smgmtUpdateSubnav();
 
   const sprints = data.sprints || [];
   const order   = data.order   || [];
@@ -8757,6 +10129,11 @@ function _smgmtRender(data) {
   // Populate capacity gauges (reads localStorage + estimate cache)
   _smgmtInitCapacityGauges(orderedLabels);
 
+  // Sprint capacity budget bars (issue #801): render now with cached data,
+  // then lazily fetch budget settings + per-size cost averages and re-render.
+  _smgmtRenderAllCapBars();
+  _smgmtEnsureCapData(false);
+
   // Re-inject selection bar if tickets are selected
   if (_smgmtSelectedIssues.size > 0) _smgmtUpdateSelectionUI();
 
@@ -8785,6 +10162,11 @@ function _smgmtRender(data) {
 
   // Load dependency order hints for pending tickets (issue #581)
   _smgmtLoadDepOrder(orderedLabels, bySprint);
+
+  // Render the execution-preview mini-rail per planned sprint (issue #809).
+  // Called from here so it refreshes on every board re-render — i.e. after a
+  // ticket is added, removed, or reordered.
+  _smgmtLoadMiniRail(orderedLabels, bySprint);
 
   // Update cleanup button visibility (issue #457)
   _smgmtUpdateCleanupBtn(data);
@@ -9422,6 +10804,100 @@ async function _smgmtLoadDepOrder(orderedLabels, bySprint) {
       for (const t of pending) _smgmtUpdateDepOrderBadge(t.number);
     } catch (_) {
       // fail silently
+    }
+  }
+}
+
+// ── Execution-preview mini-rail (issue #809) ─────────────────────────────────
+// Read-only preview of predicted dispatch order for a planned sprint. Renders
+// chip groups per topological level, a `∥` indicator between parallel-eligible
+// tickets, a red cycle state, and an amber "preview partial" warning when some
+// tickets are unestimated. Refreshed from _smgmtRender on every board rebuild.
+
+/** Build the mini-rail markup from a /preview-dag payload. */
+function _smgmtMiniRailHtml(label, data) {
+  const safeLabel = escHtml(label);
+  const cycles = data.cycles || [];
+  if (cycles.length > 0) {
+    const path = (cycles[0] || []).join(' → ');
+    return `<div class="mini-rail mr-cycle" id="mini-rail-${safeLabel}" role="group"
+         aria-label="Execution preview — circular dependency">
+      <div class="mr-head"><span class="mr-title">Execution preview</span></div>
+      <div class="mr-cycle-msg" role="alert">
+        <i class="ti ti-alert-triangle"></i>
+        Circular dependency — no run order (${escHtml(path)})
+      </div>
+    </div>`;
+  }
+
+  const levels = data.levels || [];
+  if (levels.length === 0) return '';
+
+  const levelHtml = levels.map((lvl, i) => {
+    const chips = lvl.map(tid =>
+      `<span class="mr-chip">${escHtml(tid)}</span>`
+    );
+    // `∥` marks tickets in the same level as parallel-eligible.
+    const inner = chips.join(
+      '<span class="mr-par" aria-label="parallel-eligible" title="Parallel-eligible">∥</span>'
+    );
+    return `<div class="mr-level" aria-label="Level ${i + 1}">
+      <span class="mr-level-label">L${i + 1}</span>
+      <div class="mr-chips">${inner}</div>
+    </div>`;
+  }).join('<span class="mr-arrow" aria-hidden="true"><i class="ti ti-chevron-right"></i></span>');
+
+  const unestimated = data.unestimated || [];
+  const warn = data.partial && unestimated.length > 0
+    ? `<span class="mr-warn" role="status">
+        <i class="ti ti-alert-circle"></i>
+        ${unestimated.length} unestimated — preview partial
+      </span>`
+    : '';
+
+  return `<div class="mini-rail" id="mini-rail-${safeLabel}" role="group"
+       aria-label="Execution preview">
+    <div class="mr-head">
+      <span class="mr-title">Execution preview</span>
+      ${warn}
+    </div>
+    <div class="mr-levels">${levelHtml}</div>
+  </div>`;
+}
+
+/** Inject (or replace) the mini-rail for one sprint card. */
+function _smgmtInjectMiniRail(label, data) {
+  const card = document.getElementById(`smgmt-card-${label}`);
+  if (!card) return;
+  const existing = card.querySelector('.mini-rail');
+  if (existing) existing.remove();
+  const html = _smgmtMiniRailHtml(label, data);
+  if (!html) return;
+  // Place below the pre-flight banner when present, else just under the header.
+  const anchor = card.querySelector('.smgmt-preflight-banner')
+              || card.querySelector('.smgmt-sprint-header');
+  if (anchor) anchor.insertAdjacentHTML('afterend', html);
+}
+
+/** Fetch preview-dag and render the mini-rail for each planned sprint. */
+async function _smgmtLoadMiniRail(orderedLabels, bySprint) {
+  const repo = _smgmtRepo();
+  if (!repo) return;
+  for (const label of orderedLabels) {
+    if (_smgmtRunningLabels.has(label)) continue;
+    if (_smgmtFinishedLabels.has(label)) continue;
+    const tickets = bySprint[label] || [];
+    const pending = tickets.filter(t => (t.status || 'backlog') === 'backlog');
+    if (pending.length < 1) continue;
+    try {
+      const resp = await fetch(
+        `/api/sprints/${encodeURIComponent(label)}/preview-dag?project=${encodeURIComponent(repo)}`
+      );
+      if (!resp.ok) continue;
+      const data = await resp.json();
+      _smgmtInjectMiniRail(label, data);
+    } catch (_) {
+      // Preview is decorative — fail silently.
     }
   }
 }
@@ -10581,6 +12057,7 @@ function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent, finished) {
       <div class="smgmt-progress-bar-wrap"><div class="smgmt-progress-bar-fill" style="width:${summaryPct}%"></div></div>
       <span class="smgmt-progress-label">${summaryDone} / ${ticketCount} done</span>
     </div>
+    <div class="cap" id="smgmt-cap-${escHtml(label)}"></div>
     <div class="smgmt-sprint-goal-text" id="smgmt-goal-${escHtml(label)}" style="display:none"></div>
   </div>`;
 
@@ -11015,6 +12492,532 @@ function _smgmtLevelsHtml(live, label) {
   return `<div class="smgmt-levels" id="smgmt-levels-${escHtml(label)}">${rows}</div>`;
 }
 
+// ── Level-rail node board (issue #802) ───────────────────────────────────────
+// A vertical rail rendered in the Running sub-view from the /live snapshot:
+// dispatch levels gate on the spine, ticket node cards sit in each level.
+
+/** Group snapshot issues into ordered levels, each with a done/active/queued
+ *  state. Pipeline runs carry a levels[] state array; serial/single-level runs
+ *  (dispatch_level 0) collapse to one synthetic Level 1 whose state is derived
+ *  from its issues. */
+function _smgmtRailLevels(live) {
+  const issues = (live && live.issues) || [];
+  // Snapshot levels[] (pipeline mode) gives authoritative per-level state.
+  const levels = (live && live.levels) || [];
+  const stateByLevel = {};
+  levels.forEach(l => {
+    stateByLevel[l.level] = l.state === 'complete' ? 'done'
+                          : l.state === 'waiting'  ? 'queued' : 'active';
+  });
+  // Group issues by dispatch_level; 0 (serial/single-level) folds into Level 1.
+  const groups = {};
+  issues.forEach(iss => {
+    const lvl = (iss.dispatch_level || 0) || 1;
+    (groups[lvl] = groups[lvl] || []).push(iss);
+  });
+  const isTerminal = i => i.status === 'done' || i.status === 'skipped' || i.agent_status === 'failed';
+  const isInflight = i => i.agent === 'coder' || i.agent === 'tester' || i.status === 'in-progress';
+  return Object.keys(groups).map(Number).sort((a, b) => a - b).map(lvl => {
+    let state = stateByLevel[lvl];
+    if (!state) {
+      const g = groups[lvl];
+      state = g.every(isTerminal) ? 'done' : (g.some(isInflight) ? 'active' : 'queued');
+    }
+    return { level: lvl, state: state, issues: groups[lvl] };
+  });
+}
+
+/** Map a single snapshot issue to its node state: the four literal contract
+ *  tokens. Per-issue (never a level-wide single winner) so a coder node and a
+ *  tester node in the same level both glow at once (pipeline mode). */
+function _smgmtRailNodeState(iss) {
+  if (!iss) return 'queued';
+  if (iss.status === 'done') return 'done';
+  if (iss.agent === 'coder')  return 'coder-active';
+  if (iss.agent === 'tester') return 'tester-active';
+  return 'queued';
+}
+
+/** Fix-round number for a node, or null. Feature-detected from retry/attempt
+ *  data on the issue — the /live contract carries none today, so the badge stays
+ *  hidden until a future snapshot provides it (kept out of scope here). */
+function _smgmtRailFixRound(iss) {
+  if (!iss) return null;
+  if (iss.fix_round != null && Number(iss.fix_round) > 0) return Number(iss.fix_round);
+  if (iss.retry     != null && Number(iss.retry)     > 0) return Number(iss.retry);
+  if (iss.round     != null && Number(iss.round)     > 0) return Number(iss.round);
+  if (iss.attempt   != null && Number(iss.attempt)   > 1) return Number(iss.attempt) - 1;
+  return null;
+}
+
+/** Markup for one ticket node card: state icon, #num, title, size pill, elapsed
+ *  time, and (when present) a fix-round badge. */
+function _smgmtRailNodeHtml(iss) {
+  const state = _smgmtRailNodeState(iss);
+  const num = iss.number;
+  const selected = (_smgmtRailSelectedNum === num);
+  const icon = state === 'done' ? '&#10003;' : '&#9679;';
+  const sizePill = iss.size
+    ? `<span class="node-size" title="≈${iss.minutes || _sizeMinutes(iss.size)} min">${escHtml(iss.size)}</span>` : '';
+  const elapsedStr = _fmtTicketElapsed(iss.elapsed_secs);
+  const timeEl = elapsedStr ? `<span class="node-time">${escHtml(elapsedStr)}</span>` : '';
+  const fr = _smgmtRailFixRound(iss);
+  const badge = fr ? `<span class="node-badge" title="Fix round ${fr}">&#8635; ${fr}</span>` : '';
+  return `<button type="button" class="node ${state}${selected ? ' selected' : ''}" role="listitem"`
+    + ` data-issue="${num}" aria-selected="${selected ? 'true' : 'false'}"`
+    + ` onclick="_smgmtRailSelectNode(${num})" title="${escHtml(iss.title || '')}">`
+    + `<span class="node-state-icon" aria-hidden="true">${icon}</span>`
+    + `<span class="node-num">#${escHtml(String(num))}</span>`
+    + `<span class="node-title">${escHtml(iss.title || '')}</span>`
+    + sizePill + timeEl + badge
+    + `</button>`;
+}
+
+/** Structural signature: level set + node set. Identical signature → cheap
+ *  in-place patch; changed signature → full render. */
+function _smgmtRailSig(levels) {
+  return levels.map(L => L.level + ':' + L.issues.map(i => i.number).join(',')).join('|');
+}
+
+/** Full (re)build of the rail innerHTML. Used only when the level/node structure
+ *  changes; steady-state updates go through _smgmtRailPatch (no flicker). */
+function _smgmtRailRender(label, live) {
+  const railEl = document.getElementById('smgmt-rail');
+  if (!railEl) return;
+  const levels = _smgmtRailLevels(live);
+  railEl.innerHTML = levels.map(L => {
+    const nodes = L.issues.map(_smgmtRailNodeHtml).join('');
+    const done = L.issues.filter(i => i.status === 'done').length;
+    const gate = L.state === 'queued'
+      ? `<div class="level-gate">Waiting for Level ${L.level - 1} to complete</div>` : '';
+    return `<div class="level ${L.state}" data-level="${L.level}">`
+      + `<span class="level-dot" aria-hidden="true"></span>`
+      + `<div class="level-head"><span class="level-name">Level ${L.level}</span>`
+      + `<span class="level-meta">${done}/${L.issues.length}</span></div>`
+      + gate
+      + `<div class="nodes">${nodes}</div>`
+      + `</div>`;
+  }).join('');
+  railEl.dataset.railsig = _smgmtRailSig(levels);
+}
+
+/** In-place patch of level states + node states/size/time/badge. Never touches
+ *  the rail container's innerHTML, so the existing 2s poll updates without
+ *  flicker or a full re-render. */
+function _smgmtRailPatch(label, live) {
+  const railEl = document.getElementById('smgmt-rail');
+  if (!railEl) return;
+  const levels = _smgmtRailLevels(live);
+  levels.forEach(L => {
+    const levelEl = railEl.querySelector(`.level[data-level="${L.level}"]`);
+    if (!levelEl) return;
+    levelEl.className = `level ${L.state}`;
+    const metaEl = levelEl.querySelector('.level-meta');
+    const done = L.issues.filter(i => i.status === 'done').length;
+    if (metaEl) metaEl.textContent = `${done}/${L.issues.length}`;
+    // Gate text only on queued levels.
+    let gateEl = levelEl.querySelector('.level-gate');
+    if (L.state === 'queued') {
+      if (!gateEl) {
+        gateEl = document.createElement('div');
+        gateEl.className = 'level-gate';
+        const head = levelEl.querySelector('.level-head');
+        if (head) head.after(gateEl);
+      }
+      gateEl.textContent = `Waiting for Level ${L.level - 1} to complete`;
+    } else if (gateEl) {
+      gateEl.remove();
+    }
+  });
+  const byNum = {};
+  levels.forEach(L => L.issues.forEach(i => { byNum[i.number] = i; }));
+  railEl.querySelectorAll('.node[data-issue]').forEach(nodeEl => {
+    const num = parseInt(nodeEl.dataset.issue, 10);
+    const iss = byNum[num];
+    if (!iss) return;
+    const state = _smgmtRailNodeState(iss);
+    const selected = (_smgmtRailSelectedNum === num);
+    nodeEl.className = `node ${state}${selected ? ' selected' : ''}`;
+    nodeEl.setAttribute('aria-selected', selected ? 'true' : 'false');
+    const iconEl = nodeEl.querySelector('.node-state-icon');
+    if (iconEl) iconEl.innerHTML = state === 'done' ? '&#10003;' : '&#9679;';
+    // size pill
+    let sizeEl = nodeEl.querySelector('.node-size');
+    if (iss.size) {
+      if (!sizeEl) {
+        sizeEl = document.createElement('span');
+        sizeEl.className = 'node-size';
+        const titleEl = nodeEl.querySelector('.node-title');
+        if (titleEl) titleEl.after(sizeEl);
+      }
+      sizeEl.textContent = iss.size;
+      sizeEl.title = `≈${iss.minutes || _sizeMinutes(iss.size)} min`;
+    } else if (sizeEl) { sizeEl.remove(); }
+    // elapsed time
+    let timeEl = nodeEl.querySelector('.node-time');
+    const elapsedStr = _fmtTicketElapsed(iss.elapsed_secs);
+    if (elapsedStr) {
+      if (!timeEl) {
+        timeEl = document.createElement('span');
+        timeEl.className = 'node-time';
+        nodeEl.appendChild(timeEl);
+      }
+      timeEl.textContent = elapsedStr;
+    } else if (timeEl) { timeEl.remove(); }
+    // fix-round badge
+    let badgeEl = nodeEl.querySelector('.node-badge');
+    const fr = _smgmtRailFixRound(iss);
+    if (fr) {
+      if (!badgeEl) {
+        badgeEl = document.createElement('span');
+        badgeEl.className = 'node-badge';
+        nodeEl.appendChild(badgeEl);
+      }
+      badgeEl.innerHTML = `&#8635; ${fr}`;
+      badgeEl.title = `Fix round ${fr}`;
+    } else if (badgeEl) { badgeEl.remove(); }
+  });
+}
+
+/** Orchestrate a rail update from a live snapshot. Toggles the empty-state, then
+ *  patches in place when the structure is unchanged (no flicker) or full-renders
+ *  when levels/nodes changed. Called on every poll tick and on tab switch. */
+function _smgmtRailUpdate(label, live) {
+  const railEl = document.getElementById('smgmt-rail');
+  if (!railEl) return;
+  const emptyEl = document.getElementById('smgmt-running-empty');
+  const issues = (live && live.issues) || [];
+  const hasData = issues.length > 0;
+  railEl.hidden = !hasData;
+  if (emptyEl) emptyEl.style.display = hasData ? 'none' : '';
+  if (!hasData) {
+    railEl.innerHTML = ''; railEl.dataset.railsig = '';
+    if (typeof _smgmtInspectorClose === 'function') _smgmtInspectorClose();
+    return;
+  }
+  railEl.dataset.label = label || '';
+  const sig = _smgmtRailSig(_smgmtRailLevels(live));
+  if (railEl.dataset.railsig === sig && railEl.querySelector('.level')) {
+    _smgmtRailPatch(label, live);
+  } else {
+    _smgmtRailRender(label, live);
+  }
+}
+
+/** Select a node and feed the inspector ticket panel (the inspector itself lands
+ *  in a follow-up ticket, so the feed is feature-detected). */
+function _smgmtRailSelectNode(num) {
+  _smgmtRailSelectedNum = num;
+  const railEl = document.getElementById('smgmt-rail');
+  if (railEl) {
+    railEl.querySelectorAll('.node[data-issue]').forEach(n => {
+      const on = parseInt(n.dataset.issue, 10) === num;
+      n.classList.toggle('selected', on);
+      n.setAttribute('aria-selected', on ? 'true' : 'false');
+    });
+  }
+  const label = railEl ? (railEl.dataset.label || '') : '';
+  const live = _smgmtLiveCache[label] || null;
+  const ticket = live ? (live.issues || []).find(i => i.number === num) : null;
+  if (typeof _smgmtInspectorFeed === 'function') {
+    try { _smgmtInspectorFeed(ticket || { number: num }, label); } catch (_) { /* inspector not mounted yet */ }
+  }
+}
+
+// ── Node inspector panel (issue #804) ────────────────────────────────────────
+// Opens when a rail node is clicked: ticket metadata, an attempt timeline, and
+// tabbed per-issue streaming logs. The header + timeline come from the /live
+// ticket object (no /live contract change); the per-issue log tabs stream from
+// the /logs/tail endpoint (router module, not server.py). All log content is
+// HTML-escaped and tokenized by the shared colorizeLogLine (AC5/AC6).
+
+const _AGENT_KEYS = ['orchestrator', 'coder', 'tester', 'reviewer', 'documenter', 'estimator', 'ba'];
+let _smgmtInspectorNum = null;     // issue number currently shown in the inspector
+let _smgmtInspectorLabel = '';     // sprint label the inspector is bound to
+let _smgmtInspectorTab = null;     // active log-tab key: 'orchestrator' | issue number
+let _smgmtInspectorPollId = null;  // streaming poll handle for the active log tab
+
+/** The agent colour-token key for an issue (lg-* contract); 'orchestrator' for
+ *  the spine tab. Maps the active agent role onto the known agent keys. */
+function _smgmtInspectorAgentKey(iss) {
+  const a = (iss && iss.agent ? String(iss.agent) : '').toLowerCase();
+  return _AGENT_KEYS.indexOf(a) > 0 ? a : 'coder';
+}
+
+/** Build the attempt timeline rows for a ticket. Feature-detects a rich
+ *  ``attempts`` history on the ticket; when none (and no failure records)
+ *  exist, degrades to a single current-state row (AC7) — never throws. */
+function _smgmtInspectorAttempts(ticket) {
+  const t = ticket || {};
+  const raw = Array.isArray(t.attempts) ? t.attempts : null;
+  if (raw && raw.length) {
+    return raw.map(a => {
+      const gate = a.gate_reason || a.failure_reason || null;
+      const state = a.state
+        || (gate ? 'failed'
+          : a.agent_status === 'running' ? 'running'
+          : a.outcome === 'passed' || a.status === 'done' ? 'done' : 'queued');
+      return {
+        kind: a.kind || a.attempt_kind || 'attempt',
+        state: state,
+        agent: a.agent || null,
+        gate_reason: state === 'failed' ? (gate || 'gate failed') : null,
+        sidecar: state === 'running' ? (a.prior_failure || a.last_gate || gate || '') : '',
+        label: a.label || a.title || '',
+      };
+    });
+  }
+  // Degrade: a single row describing the ticket's current state.
+  const failed = t.agent_status === 'failed' || !!t.failure_reason;
+  const running = t.agent_status === 'running';
+  const state = failed ? 'failed' : running ? 'running' : (t.status === 'done' ? 'done' : 'queued');
+  return [{
+    kind: 'current',
+    state: state,
+    agent: t.agent || null,
+    gate_reason: failed ? (t.gate_reason || t.failure_reason || 'gate failed') : null,
+    sidecar: running ? (t.prior_failure || t.last_gate || '') : '',
+    label: '',
+  }];
+}
+
+/** The queued testers for a ticket (AC2). Feature-detected; [] when absent. */
+function _smgmtInspectorQueuedTesters(ticket) {
+  const t = ticket || {};
+  if (Array.isArray(t.queued_testers)) return t.queued_testers.slice();
+  return [];
+}
+
+/** HTML for the attempt timeline block. */
+function _smgmtInspectorAttemptsHtml(ticket) {
+  const rows = _smgmtInspectorAttempts(ticket).map(a => {
+    const gate = a.gate_reason
+      ? `<span class="att-gate" title="Gate reason">${escHtml(a.gate_reason)}</span>` : '';
+    const sidecar = a.state === 'running'
+      ? `<span class="att-sidecar">${escHtml(a.sidecar || '')}</span>` : '';
+    const kind = a.kind ? `<span class="att-kind">${escHtml(a.kind)}</span>` : '';
+    const label = a.label ? `<span class="att-label">${escHtml(a.label)}</span>` : '<span class="att-label"></span>';
+    return `<div class="att ${a.state}">`
+      + `<span class="att-state">${escHtml(a.state)}</span>`
+      + kind + label + sidecar + gate
+      + `</div>`;
+  }).join('');
+  const queued = _smgmtInspectorQueuedTesters(ticket);
+  const queuedHtml = queued.length
+    ? `<div class="att-queued-list">`
+      + queued.map(q => `<span class="att-queued-item">tester #${escHtml(String(q))}</span>`).join('')
+      + `</div>`
+    : '';
+  return `<div class="inspector-section-label">Attempts</div>`
+    + `<div class="attempts">${rows}</div>${queuedHtml}`;
+}
+
+/** The log-tab descriptors: one Orchestrator tab + one per active/selected issue
+ *  (active = agent running; plus the inspected ticket). */
+function _smgmtInspectorTabs(ticket, live) {
+  const tabs = [{ key: 'orchestrator', label: 'Orchestrator', agent: 'orchestrator' }];
+  const issues = (live && Array.isArray(live.issues)) ? live.issues : [];
+  const seen = {};
+  const add = iss => {
+    if (!iss || iss.number == null || seen[iss.number]) return;
+    seen[iss.number] = true;
+    tabs.push({ key: iss.number, label: `#${iss.number}`, agent: _smgmtInspectorAgentKey(iss) });
+  };
+  issues.filter(i => i.agent_status === 'running' || i.agent).forEach(add);
+  if (ticket && ticket.number != null) add(ticket);
+  return tabs;
+}
+
+/** HTML for the log-tab strip; chips colour-keyed via the lg-* tokens. */
+function _smgmtInspectorTabsHtml(ticket, live) {
+  return _smgmtInspectorTabs(ticket, live).map(tab => {
+    const active = (String(_smgmtInspectorTab) === String(tab.key)) ? ' active' : '';
+    return `<button type="button" class="log-tab${active}" role="tab"`
+      + ` data-tab="${escHtml(String(tab.key))}" aria-selected="${active ? 'true' : 'false'}"`
+      + ` onclick="_smgmtInspectorSelectTab('${escHtml(String(tab.key))}')">`
+      + `<span class="lg-chip lg-${escHtml(tab.agent)}">${escHtml(tab.label)}</span>`
+      + `</button>`;
+  }).join('');
+}
+
+/** Open + render the inspector for a ticket. Reflects title, size, and the
+ *  calibrated estimate, the attempt timeline, and the per-issue log tabs. */
+function _smgmtInspectorFeed(ticket, label) {
+  const panel = document.getElementById('smgmt-inspector');
+  if (!panel) return;
+  const t = ticket || {};
+  _smgmtInspectorNum = t.number != null ? t.number : null;
+  _smgmtInspectorLabel = label || _smgmtInspectorLabel || '';
+  const live = _smgmtLiveCache[_smgmtInspectorLabel] || null;
+
+  // Default the active log tab to the inspected issue (else the orchestrator).
+  if (_smgmtInspectorNum != null) _smgmtInspectorTab = _smgmtInspectorNum;
+  else if (_smgmtInspectorTab == null) _smgmtInspectorTab = 'orchestrator';
+
+  const size = t.size ? `<span class="inspector-size">${escHtml(t.size)}</span>` : '';
+  // The calibrated estimate is the per-ticket minutes from the live snapshot
+  // (calibration is applied upstream when present).
+  const est = (t.minutes != null)
+    ? `<span class="inspector-est" title="Calibrated estimate">≈${escHtml(String(t.minutes))} min</span>` : '';
+
+  panel.innerHTML =
+    `<div class="inspector-head">`
+    + `<span class="inspector-num">#${escHtml(String(_smgmtInspectorNum != null ? _smgmtInspectorNum : ''))}</span>`
+    + `<span class="inspector-title">${escHtml(t.title || '')}</span>`
+    + size + est
+    + `</div>`
+    + `<div class="inspector-body">`
+    + _smgmtInspectorAttemptsHtml(t)
+    + `<div>`
+    + `<div class="inspector-section-label">Logs</div>`
+    + `<div class="log-tabs" role="tablist">${_smgmtInspectorTabsHtml(t, live)}</div>`
+    + `<div class="log-body" id="smgmt-inspector-log"><span class="log-empty">Loading…</span></div>`
+    + `</div>`
+    + `</div>`;
+  panel.hidden = false;
+
+  _smgmtInspectorStreamRestart();
+}
+
+/** (Re)start the streaming poll for the active log tab. */
+function _smgmtInspectorStreamRestart() {
+  if (_smgmtInspectorPollId !== null) { clearInterval(_smgmtInspectorPollId); _smgmtInspectorPollId = null; }
+  _smgmtInspectorStreamTick();
+  _smgmtInspectorPollId = setInterval(_smgmtInspectorStreamTick, 5000);
+}
+
+/** Switch the active log tab and restart streaming. */
+function _smgmtInspectorSelectTab(key) {
+  _smgmtInspectorTab = (key === 'orchestrator') ? 'orchestrator' : (parseInt(key, 10));
+  const panel = document.getElementById('smgmt-inspector');
+  if (panel) {
+    panel.querySelectorAll('.log-tab').forEach(tabEl => {
+      const on = String(tabEl.dataset.tab) === String(_smgmtInspectorTab);
+      tabEl.classList.toggle('active', on);
+      tabEl.setAttribute('aria-selected', on ? 'true' : 'false');
+    });
+  }
+  _smgmtInspectorStreamRestart();
+}
+
+/** Fetch + render the active log tab. The orchestrator tab streams the sprint
+ *  dispatch log; a per-issue tab streams sprint-issue-<N>.log via /logs/tail.
+ *  Every line is HTML-escaped + tokenized by colorizeLogLine (AC5/AC6). */
+function _smgmtInspectorStreamTick() {
+  const bodyEl = document.getElementById('smgmt-inspector-log');
+  if (!bodyEl) return;
+  const repo = (typeof _smgmtRepo === 'function') ? _smgmtRepo() : '';
+  const label = _smgmtInspectorLabel;
+  if (!repo || !label) { bodyEl.innerHTML = '<span class="log-empty">No running sprint.</span>'; return; }
+
+  const tab = _smgmtInspectorTab;
+  const url = (tab === 'orchestrator')
+    ? `/api/sprints/${encodeURIComponent(label)}/dispatch-log?project=${encodeURIComponent(repo)}&tail_lines=200`
+    : `/logs/tail?sprint=${encodeURIComponent(label)}&issue=${encodeURIComponent(tab)}`
+      + `&project=${encodeURIComponent(repo)}&tail_lines=200`;
+
+  const want = String(tab);
+  fetch(url).then(r => r.ok ? r.json() : null).then(data => {
+    // Drop a stale response if the user switched tabs mid-flight.
+    if (String(_smgmtInspectorTab) !== want) return;
+    const tail = (data && typeof data.tail === 'string') ? data.tail : '';
+    if (!tail.trim()) {
+      bodyEl.innerHTML = '<span class="log-empty">No log output yet.</span>';
+      return;
+    }
+    bodyEl.innerHTML = tail.split('\n').map(line =>
+      `<div class="log-line">${colorizeLogLine(line, repo)}</div>`).join('');
+  }).catch(() => { /* leave the previous content in place on a transient error */ });
+}
+
+/** Hide the inspector and stop its streaming poll (sprint ended / rail emptied). */
+function _smgmtInspectorClose() {
+  if (_smgmtInspectorPollId !== null) { clearInterval(_smgmtInspectorPollId); _smgmtInspectorPollId = null; }
+  _smgmtInspectorNum = null;
+  const panel = document.getElementById('smgmt-inspector');
+  if (panel) { panel.hidden = true; panel.innerHTML = ''; }
+}
+
+// ── Running metrics strip (issue #803) ───────────────────────────────────────
+// Five metric cards rendered above the level-rail from the /live snapshot.
+// Every card is sourced from snapshot data; agent_runs-only cards (Fix rounds,
+// Agent time split) and the price-map-only Tokens card are omitted entirely when
+// their source is absent, so the strip never errors or renders blank-broken.
+
+/** Format an elapsed-seconds value for the agent-time split (always a string). */
+function _smgmtFmtSplit(secs) {
+  return _fmtTicketElapsed(secs) || '0m 0s';
+}
+
+/** Format a token cost as an approximate dollar amount. */
+function _smgmtFmtUsd(usd) {
+  const n = Number(usd) || 0;
+  return '$' + n.toFixed(n > 0 && n < 1 ? 4 : 2);
+}
+
+/** Build the metric-strip markup from a /live snapshot. Returns the five cards
+ *  (Done x/y, Active agents, Fix rounds, Tokens ≈ $, Agent time split), with the
+ *  agent_runs- and price-map-gated cards omitted when their source is absent. */
+function _smgmtMetricsHtml(live) {
+  if (!live) return '';
+  const cards = [];
+
+  // Done x/y — same source the rail uses for its done count (AC7: match rail).
+  const done = Number(live.done_count || 0);
+  const total = Number(live.total_count || 0);
+  cards.push('<div class="metric metric-done"><div class="metric-label">Done</div>'
+    + '<div class="metric-value">' + done
+    + '<span class="metric-unit">/ ' + total + '</span></div></div>');
+
+  // Active agents (mode) — count + serial/pipeline, matching the rail's active nodes.
+  const active = ((live.active_agents) || []).length;
+  const mode = live.pipeline_mode ? 'pipeline' : 'serial';
+  cards.push('<div class="metric metric-active"><div class="metric-label">Active agents</div>'
+    + '<div class="metric-value">' + active
+    + '<span class="metric-sub">' + escHtml(mode) + '</span></div></div>');
+
+  // Fix rounds used — agent_runs-sourced; amber when any fix round has occurred.
+  if (live.agent_runs_present) {
+    const fr = Number(live.fix_rounds || 0);
+    cards.push('<div class="metric metric-fix' + (fr > 0 ? ' amber' : '') + '">'
+      + '<div class="metric-label">Fix rounds</div>'
+      + '<div class="metric-value">' + fr + '</div></div>');
+  }
+
+  // Tokens ≈ $ — literal token total (BA Path-A, no estimation) + approx cost.
+  // Hidden unless a price map yields a cost (token_cost_usd present).
+  if (live.token_cost_usd != null) {
+    const toks = Number(live.token_total || 0).toLocaleString();
+    cards.push('<div class="metric metric-tokens"><div class="metric-label">Tokens ≈ $</div>'
+      + '<div class="metric-value">' + escHtml(toks)
+      + '<span class="metric-sub">≈ ' + escHtml(_smgmtFmtUsd(live.token_cost_usd))
+      + '</span></div></div>');
+  }
+
+  // Agent time split — coder vs tester elapsed; guarded so an absent source
+  // (no agent_runs) can never throw (AC6: no console errors).
+  if (live.agent_time_split) {
+    const c = _smgmtFmtSplit(live.agent_time_split.coder);
+    const t = _smgmtFmtSplit(live.agent_time_split.tester);
+    cards.push('<div class="metric metric-time"><div class="metric-label">Agent time split</div>'
+      + '<div class="metric-split"><span class="ms-coder">C ' + escHtml(c) + '</span>'
+      + '<span class="ms-tester">T ' + escHtml(t) + '</span></div></div>');
+  }
+
+  return cards.join('');
+}
+
+/** Render the metric strip from a live snapshot. Hides the strip (no cards) when
+ *  the snapshot carries no issues, mirroring the rail's empty handling. */
+function _smgmtMetricsUpdate(label, live) {
+  const el = document.getElementById('smgmt-metrics');
+  if (!el) return;
+  const issues = (live && live.issues) || [];
+  const hasData = issues.length > 0;
+  el.hidden = !hasData;
+  el.innerHTML = hasData ? _smgmtMetricsHtml(live) : '';
+}
+
 /** Patch live stat strip + progress bar + ticket indicators in place (no full re-render). */
 function _smgmtLivePatch(label, live) {
   const card = document.getElementById(`smgmt-card-${label}`);
@@ -11290,6 +13293,10 @@ async function _smgmtLivePollTick() {
         // Keep all three pills in sync with live runner data (no GitHub-label lag).
         _sprintProgressRender();
         if (_snavPanelOpen) _snavRenderPanel();
+        // Update the level-rail node board in the Running sub-view (issue #802).
+        _smgmtRailUpdate(label, live);
+        // Update the running metrics strip above the rail (issue #803).
+        _smgmtMetricsUpdate(label, live);
       }
     }
   } catch (_) { /* silently ignore poll errors */ }
@@ -12115,6 +14122,159 @@ function _smgmtUpdateCapacityGauge(label) {
 
 function _smgmtInitCapacityGauges(labels) {
   for (const label of labels) _smgmtUpdateCapacityGauge(label);
+}
+
+// ── Sprint capacity budget bar (issue #801) ────────────────────────────────
+let _smgmtCapSettings = null;   // { budget:Number, sizeMinutes:{S,M,L,XL} }
+let _smgmtCostCache = null;     // { perSize:{S:{avg_tokens}}, usdPerToken:Number|null }
+let _smgmtCapDataLoading = false;
+
+/** Configured sprint budget in minutes; falls back to the global default (180). */
+function _smgmtBudgetMinutes() {
+  return (_smgmtCapSettings && _smgmtCapSettings.budget > 0) ? _smgmtCapSettings.budget : 180;
+}
+
+/** Calibrated minutes for a size letter — settings-driven, falls back to canonical defaults. */
+function _smgmtCalibratedMinutes(letter) {
+  if (_smgmtCapSettings && _smgmtCapSettings.sizeMinutes) {
+    const v = _smgmtCapSettings.sizeMinutes[letter];
+    if (v > 0) return v;
+  }
+  return _sizeMinutes(letter);
+}
+
+/** Resolve a ticket's estimated size letter (cache → ticket.size → size-* label), or null. */
+function _smgmtTicketSize(t) {
+  const cached = _estDataCache[t.number];
+  let size = (cached && cached.size) ? cached.size : (t.size || null);
+  if (!size && t.labels) {
+    for (const lbl of t.labels) {
+      const m = /^size-([SMLX]+)$/.exec(lbl.name || '');
+      if (m) { size = m[1]; break; }
+    }
+  }
+  return size || null;
+}
+
+function _smgmtFmtTokens(n) {
+  if (!isFinite(n) || n <= 0) return '0';
+  if (n >= 1000) return (Math.round(n / 100) / 10) + 'k';
+  return String(Math.round(n));
+}
+
+/** Render the capacity budget bar for one sprint pane. Never throws (AC5/AC6). */
+function _smgmtUpdateCapBar(label) {
+  const el = document.getElementById(`smgmt-cap-${label}`);
+  if (!el) return;
+  try {
+    // Size palette vars (AC3): S green · M blue · L amber · XL red.
+    const sizeColor = { S: 'var(--green)', M: 'var(--blue)', L: 'var(--amber)', XL: 'var(--red)' };
+    const issues = _smgmtData ? (_smgmtData.issues || []) : [];
+    const tickets = issues.filter(i => i.sprint_label === label);
+    const segs = [];   // estimated tickets only: {size, mins, number}
+    let unestimated = 0;
+    for (const t of tickets) {
+      const size = _smgmtTicketSize(t);
+      const mins = size ? _smgmtCalibratedMinutes(size) : 0;
+      if (size && mins > 0) segs.push({ size, mins, number: t.number });
+      else unestimated++;
+    }
+    // No estimated ticket → no bar (AC2).
+    if (segs.length === 0) { el.innerHTML = ''; return; }
+
+    const total = segs.reduce((a, s) => a + s.mins, 0);
+    const budget = _smgmtBudgetMinutes();
+    const denom = Math.max(total, budget);   // over budget → bar reads full
+    const barHtml = segs.map(s => {
+      const w = denom > 0 ? (s.mins / denom * 100) : 0;
+      const color = sizeColor[s.size] || 'var(--text-muted)';
+      return `<div class="cap-seg" style="width:${w.toFixed(2)}%;background:${color}" title="#${s.number} · ${escHtml(s.size)} · ${s.mins}m"></div>`;
+    }).join('');
+
+    // Headroom under budget; red over-budget phrasing when total exceeds it (AC4).
+    let hintClass = 'cap-hint', hintText;
+    if (total > budget) {
+      const overH = Math.round((total - budget) / 60 * 10) / 10;
+      hintText = `over budget by ~${overH}h`;
+      hintClass = 'cap-hint cap-hint--over';
+    } else {
+      const remaining = budget - total;
+      hintText = `${remaining}m headroom of ${budget}m`;
+    }
+    // Excluded unestimated tickets are noted, never silently dropped (AC6).
+    if (unestimated > 0) {
+      hintText += ` · ${unestimated} unestimated ticket${unestimated !== 1 ? 's' : ''} excluded`;
+    }
+
+    // Token/$ forecast — only when per-size averages are available (AC5).
+    let forecastHtml = '';
+    if (_smgmtCostCache && _smgmtCostCache.perSize) {
+      try {
+        let tokens = 0, haveAny = false;
+        for (const s of segs) {
+          const row = _smgmtCostCache.perSize[s.size];
+          if (row && row.avg_tokens != null) { tokens += row.avg_tokens; haveAny = true; }
+        }
+        if (haveAny && tokens > 0) {
+          let line = `~${_smgmtFmtTokens(tokens)} tokens forecast`;
+          const rate = _smgmtCostCache.usdPerToken;
+          if (rate != null && rate > 0) line += ` · ~$${(tokens * rate).toFixed(2)}`;
+          forecastHtml = `<div class="cap-forecast">${escHtml(line)}</div>`;
+        }
+      } catch (_) {}
+    }
+
+    el.innerHTML =
+      `<div class="cap-bar">${barHtml}</div>` +
+      `<div class="${hintClass}">${escHtml(hintText)}</div>` +
+      forecastHtml;
+  } catch (_) {
+    el.innerHTML = '';
+  }
+}
+
+/** Re-render every visible capacity bar (e.g. after settings change — AC7). */
+function _smgmtRenderAllCapBars() {
+  const nodes = document.querySelectorAll('[id^="smgmt-cap-"]');
+  nodes.forEach(node => _smgmtUpdateCapBar(node.id.slice('smgmt-cap-'.length)));
+}
+
+/** Lazily fetch budget settings + per-size cost averages, then re-render bars. */
+async function _smgmtEnsureCapData(force) {
+  if (_smgmtCapDataLoading) return;
+  if (_smgmtCapSettings && !force) { _smgmtRenderAllCapBars(); return; }
+  const slug = _slug;
+  if (!slug) return;
+  _smgmtCapDataLoading = true;
+  try {
+    const [sResp, cResp] = await Promise.all([
+      fetch(`/api/projects/${encodeURIComponent(slug)}/settings`).catch(() => null),
+      fetch(`/api/projects/${encodeURIComponent(slug)}/analytics/cost`).catch(() => null),
+    ]);
+    if (sResp && sResp.ok) {
+      const d = await sResp.json();
+      _smgmtCapSettings = {
+        budget: Number(d.sprint_budget_minutes) || 180,
+        sizeMinutes: {
+          S: Number(d.estimation_s_minutes) || 5,
+          M: Number(d.estimation_m_minutes) || 15,
+          L: Number(d.estimation_l_minutes) || 30,
+          XL: Number(d.estimation_xl_minutes) || 60,
+        },
+      };
+    }
+    if (cResp && cResp.ok) {
+      const c = await cResp.json();
+      _smgmtCostCache = {
+        perSize: c.per_size_avg_tokens || null,
+        usdPerToken: (c.usd_per_token != null) ? c.usd_per_token : null,
+      };
+    }
+  } catch (_) {
+  } finally {
+    _smgmtCapDataLoading = false;
+  }
+  _smgmtRenderAllCapBars();
 }
 
 function _smgmtShowToast(msg) {
@@ -13216,6 +15376,7 @@ async function _fsConfirm() {
 
 function _smgmtUpdateSelectionUI() {
   const count = _smgmtSelectedIssues.size;
+  _blUpdateActions();  // refresh the backlog panel picker + what-if (issue #800)
 
   // Inline selection bar (lives inside smgmt-sprint-list as first child)
   let bar = document.getElementById('smgmt-selection-bar');
@@ -13929,37 +16090,246 @@ function _smgmtBacklogToggle() {
 }
 
 function _smgmtRenderBacklog(tickets) {
+  _blBacklogAll = tickets || [];
   const countEl   = document.getElementById('smgmt-backlog-count');
   const ticketsEl = document.getElementById('smgmt-backlog-tickets');
   if (!ticketsEl) return;
 
+  // Apply the active filter pills client-side over the loaded backlog data.
+  const filtered = _blApplyFilters(_blBacklogAll);
+
   if (countEl) {
-    countEl.textContent = tickets.length > 0
-      ? `· ${tickets.length} ticket${tickets.length !== 1 ? 's' : ''}`
+    const total = _blBacklogAll.length, shown = filtered.length;
+    countEl.textContent = total > 0
+      ? (shown === total
+          ? `· ${total} ticket${total !== 1 ? 's' : ''}`
+          : `· ${shown} of ${total} ticket${total !== 1 ? 's' : ''}`)
       : '';
   }
 
-  // Update bulk estimate button visibility (issue #598)
+  // Update bulk estimate button visibility (issue #598) — over full backlog
   const backlogBulkBtn = document.getElementById('smgmt-backlog-bulk-est-btn');
   if (backlogBulkBtn) {
-    const hasUnsized = tickets.some(
+    const hasUnsized = _blBacklogAll.some(
       t => !(t.labels || []).find(l => /^size-[SMLX]+$/.test(l.name))
     );
     backlogBulkBtn.classList.toggle('hidden', !hasUnsized);
   }
 
   // Sort newest first (higher issue number = newer)
-  const sorted = [...tickets].sort((a, b) => b.number - a.number);
+  const sorted = [...filtered].sort((a, b) => b.number - a.number);
 
   // Build list of sprint labels for "Move to" popup
   const allSprintNums = (_smgmtData?.sprints || []).sort((a, b) => a - b);
 
   if (sorted.length === 0) {
-    ticketsEl.innerHTML = '<div class="smgmt-drop-hint" style="padding:14px 18px;text-align:center;">No backlog tickets — all caught up</div>';
-    return;
+    const msg = _blBacklogAll.length === 0
+      ? 'No backlog tickets — all caught up'
+      : 'No tickets match the active filters';
+    ticketsEl.innerHTML = `<div class="smgmt-drop-hint" style="padding:14px 18px;text-align:center;">${msg}</div>`;
+  } else {
+    ticketsEl.innerHTML = sorted.map(t => _smgmtBacklogTicketHtml(t, allSprintNums)).join('');
   }
 
-  ticketsEl.innerHTML = sorted.map(t => _smgmtBacklogTicketHtml(t, allSprintNums)).join('');
+  _blSyncFilterPills();
+  _blUpdateActions();
+}
+
+// ── Filtered multi-select backlog panel + what-if delta (issue #800) ────────
+let _blBacklogAll = [];
+let _blFilters = { size: null, age: null, unestimated: false };
+
+/** Resolve a ticket's size letter from the estimate cache or its size-* label. */
+function _blTicketSize(t) {
+  const cached = _estDataCache[t.number];
+  if (cached && cached.size) return cached.size;
+  for (const l of (t.labels || [])) {
+    const m = /^size-([SMLX]+)$/.exec(l.name || '');
+    if (m) return m[1];
+  }
+  return null;
+}
+
+/** Age of a ticket in days from its created_at, or null when unavailable. */
+function _blTicketAgeDays(t) {
+  if (!t || !t.created_at) return null;
+  const ms = Date.parse(t.created_at);
+  if (isNaN(ms)) return null;
+  return (Date.now() - ms) / 86400000;
+}
+
+/** Client-side filter over the loaded backlog tickets (size / age / unestimated). */
+function _blApplyFilters(tickets) {
+  return (tickets || []).filter(t => {
+    if (_blFilters.size && _blTicketSize(t) !== _blFilters.size) return false;
+    if (_blFilters.age) {
+      const age = _blTicketAgeDays(t);
+      if (age == null) return false;
+      if (_blFilters.age === 'new'  && !(age <= 7))  return false;
+      if (_blFilters.age === 'gt7'  && !(age > 7))   return false;
+      if (_blFilters.age === 'gt30' && !(age > 30))  return false;
+    }
+    if (_blFilters.unestimated && _blTicketSize(t) !== null) return false;
+    return true;
+  });
+}
+
+/** Sync the is-active state of every filter pill to the current filter set. */
+function _blSyncFilterPills() {
+  document.querySelectorAll('.bl-pill').forEach(p => {
+    const type = p.dataset.filterType, val = p.dataset.filterVal;
+    const active = (type === 'unestimated') ? _blFilters.unestimated : (_blFilters[type] === val);
+    p.classList.toggle('is-active', !!active);
+    p.setAttribute('aria-pressed', String(!!active));
+  });
+}
+
+/** Toggle a filter pill (single-select within size/age; boolean for unestimated). */
+function _blToggleFilter(type, val, btn) {
+  if (type === 'unestimated') {
+    _blFilters.unestimated = !_blFilters.unestimated;
+  } else {
+    _blFilters[type] = (_blFilters[type] === val) ? null : val;
+  }
+  if (btn) btn.classList.toggle('is-active');  // immediate feedback
+  _smgmtRenderBacklog(_blBacklogAll);          // re-applies filters + syncs pills
+}
+
+/** Backlog tickets that are currently selected (subset of the shared selection). */
+function _blSelectedBacklogNums() {
+  const inBacklog = new Set(_blBacklogAll.map(t => t.number));
+  return Array.from(_smgmtSelectedIssues).filter(n => inBacklog.has(n));
+}
+
+/** sprint_budget (minutes) read from the per-project setting; null when absent. */
+function _blSprintBudgetMins() {
+  const raw = localStorage.getItem(_settingsKey('sprintBudget'));
+  if (raw == null || raw === '') return null;
+  const v = parseFloat(raw);
+  return (isNaN(v) || v <= 0) ? null : v;
+}
+
+/** Populate the target-sprint picker from the valid sprint list. */
+function _blPopulateTarget() {
+  const sel = document.getElementById('bl-target');
+  if (!sel || !_smgmtData) return;
+  const prev = sel.value;
+  const sprints = (_smgmtData.sprints || []).slice().sort((a, b) => a - b);
+  sel.innerHTML = sprints.length
+    ? sprints.map(n => `<option value="sprint-${n}">Sprint ${n}</option>`).join('')
+    : '<option value="">No sprints yet</option>';
+  if (prev && sprints.some(n => `sprint-${n}` === prev)) sel.value = prev;
+}
+
+/** Reveal/hide the picker bar based on selection and refresh its labels + what-if. */
+function _blUpdateActions() {
+  const bar = document.getElementById('bl-actions');
+  if (!bar) return;
+  const nums = _blSelectedBacklogNums();
+  if (nums.length === 0) { bar.hidden = true; return; }
+  bar.hidden = false;
+  _blPopulateTarget();
+  const countEl = document.getElementById('bl-sel-count');
+  if (countEl) countEl.textContent = `${nums.length} selected`;
+  _blUpdateWhatIf();
+}
+
+/** Format minutes as a compact ~Nm / ~N.Nh string. */
+function _blFmtMins(m) {
+  const h = m / 60;
+  return h < 1 ? `~${m}m` : `~${parseFloat((Math.round(h * 10) / 10).toFixed(1))}h`;
+}
+
+/** Live what-if line: +minutes delta, new sprint total, budget warning. */
+function _blUpdateWhatIf() {
+  const whatif = document.getElementById('bl-whatif');
+  if (!whatif) return;
+  const sel = document.getElementById('bl-target');
+  const nums = _blSelectedBacklogNums();
+  const targetLabel = sel ? sel.value : '';
+  const targetNum = targetLabel ? parseInt(targetLabel.split('-')[1], 10) : null;
+
+  // Keep the Add-button literal in sync: "Add N selected to Sprint X".
+  const labelEl = document.getElementById('bl-add-label');
+  const addBtn  = document.getElementById('bl-add-btn');
+  if (labelEl && nums.length) {
+    labelEl.textContent = targetNum != null
+      ? `Add ${nums.length} selected to Sprint ${targetNum}`
+      : `Add ${nums.length} selected to Sprint`;
+  }
+  if (addBtn) addBtn.disabled = (targetNum == null) || nums.length === 0;
+
+  if (!nums.length || targetNum == null) { whatif.innerHTML = ''; return; }
+
+  // +minutes delta contributed by the selected tickets.
+  let deltaMins = 0;
+  for (const n of nums) {
+    const t = _blBacklogAll.find(x => x.number === n);
+    const size = t ? _blTicketSize(t) : null;
+    deltaMins += size ? _sizeMinutes(size) : 0;
+  }
+  // Current total of the target sprint, plus the delta = new total.
+  let curMins = 0;
+  (_smgmtData?.issues || []).forEach(iss => {
+    if (iss.sprint === targetNum) {
+      const size = _blTicketSize(iss);
+      curMins += size ? _sizeMinutes(size) : 0;
+    }
+  });
+  const newMins = curMins + deltaMins;
+
+  let html =
+    `<span class="bl-whatif-delta">+${deltaMins}m</span>` +
+    `<span class="bl-whatif-total">Sprint ${targetNum} total ${_blFmtMins(newMins)}</span>`;
+
+  const budget = _blSprintBudgetMins();
+  if (budget == null) {
+    html += `<span class="bl-whatif-budget">no budget set</span>`;
+  } else if (newMins > budget) {
+    html += `<span class="bl-whatif-budget bl-over">over budget by ${_blFmtMins(newMins - budget)}</span>`;
+  } else {
+    html += `<span class="bl-whatif-budget">within budget (${_blFmtMins(budget - newMins)} left)</span>`;
+  }
+  whatif.innerHTML = html;
+
+  // Optional preview-level delta — appended only if the endpoint exists.
+  _blMaybeLevelDelta(targetLabel, nums);
+}
+
+/** Feature-detect an optional preview-level endpoint. Absent => omit silently,
+ *  no error state. Present => append a level-delta segment to the what-if line. */
+async function _blMaybeLevelDelta(targetLabel, nums) {
+  const whatif = document.getElementById('bl-whatif');
+  if (!whatif) return;
+  try {
+    const repo = _smgmtRepo();
+    if (!repo) return;
+    const res = await fetch(
+      `/api/sprints/${encodeURIComponent(targetLabel)}/preview-level`
+      + `?project=${encodeURIComponent(repo)}&add=${nums.join(',')}`,
+      { method: 'GET' }
+    );
+    if (!res.ok) return;                       // endpoint absent (404) — omit silently
+    const data = await res.json();
+    if (data == null || data.level_delta == null) return;
+    const sel = document.getElementById('bl-target');
+    if (!sel || sel.value !== targetLabel) return;  // selection moved on
+    const seg = document.createElement('span');
+    seg.className = 'bl-whatif-level';
+    seg.textContent = `level ${data.level_delta >= 0 ? '+' : ''}${data.level_delta}`;
+    whatif.appendChild(seg);
+  } catch (_) {
+    // Endpoint missing or network/parse failure: omit the level segment, no error surfaced.
+  }
+}
+
+/** Confirm the picker: add all selected backlog tickets to the chosen sprint
+ *  via the existing batch-move plumbing (no new engine). */
+async function _blConfirmAdd() {
+  const sel = document.getElementById('bl-target');
+  if (!sel || !sel.value) return;
+  if (_blSelectedBacklogNums().length === 0) return;
+  await _smgmtMoveSelectedTo(sel.value);
 }
 
 function _smgmtBacklogTicketHtml(ticket, sprintNums) {
@@ -13968,7 +16338,7 @@ function _smgmtBacklogTicketHtml(ticket, sprintNums) {
   const backlogLabelNames = (ticket.labels || []).map(l => l.name).join(',');
   const schedDepHtml = _smgmtSchedDepHtml(ticket);
   return `
-    <div class="smgmt-ticket${isSelected ? ' is-selected' : ''}" id="smgmt-ticket-${ticket.number}"
+    <div class="smgmt-ticket bl-row${isSelected ? ' is-selected' : ''}" id="smgmt-ticket-${ticket.number}"
          draggable="true"
          data-issue="${ticket.number}"
          data-sprint=""
@@ -22359,6 +24729,7 @@ async function projSettingsLoad() {
 
     // Overrides fields
     _psSetNum('ps-sprint-dur', data.sprint_duration_days);
+    _psSetNum('ps-sprint-budget', data.sprint_budget_minutes);
     _psSetVal('ps-default-branch', data.default_branch || '');
     _psSetVal('ps-tester-repo', data.tester_test_repo || '');
 
@@ -22403,6 +24774,7 @@ async function projSettingsSave() {
     color: _psGetVal('ps-color'),
     tracked: _psTracked,
     sprint_duration_days: _psGetNum('ps-sprint-dur'),
+    sprint_budget_minutes: _psGetNum('ps-sprint-budget'),
     default_branch: _psGetVal('ps-default-branch'),
     tester_test_repo: _psGetVal('ps-tester-repo'),
   };
@@ -22432,6 +24804,8 @@ async function projSettingsSave() {
 
     _psSetStatus('Saved', 'ok');
     await _psUpdateInheritNotice(slug);
+    // Refresh all visible capacity bars with the new budget — no page reload (AC7, #801).
+    if (typeof _smgmtEnsureCapData === 'function') _smgmtEnsureCapData(true);
     setTimeout(() => _psSetStatus('', ''), 3000);
   } catch (e) {
     _psSetStatus('Save failed', 'err');

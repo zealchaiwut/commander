@@ -260,8 +260,10 @@ def get_project_analytics_cost(slug: str):
     trend_30d = _query_trend_30d()
     per_size_avg_tokens = _compute_per_size_avg(project_root)
 
+    usd_per_token: float | None = None
     if price_map_configured:
         rate = _blended_usd_per_token(price_map)
+        usd_per_token = rate
         by_sprint = _apply_cost(by_sprint, rate)
         by_ticket = _apply_cost(by_ticket, rate)
         by_agent = _apply_cost(by_agent, rate)
@@ -280,4 +282,7 @@ def get_project_analytics_cost(slug: str):
         "trend_30d": trend_30d,
         "per_size_avg_tokens": per_size_avg_tokens,
         "price_map_configured": price_map_configured,
+        # Blended $/token rate so the capacity-bar forecast can derive a $ figure
+        # (issue #801). None when no price map is configured.
+        "usd_per_token": usd_per_token,
     }

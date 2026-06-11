@@ -124,6 +124,7 @@ SQLite is the **authoritative, only live** store. As of sprint 57 it also holds 
 | `sprints` | Durable sprint lifecycle state — replaces the ephemeral `{label}-plan.json` / `{label}-pid` files as source of truth (issue #757) |
 | `sprint_ticket_order` | Ticket execution order per sprint (`label`, `issue`, `position`) (issue #757) |
 | `agent_runs` | One row per dispatched agent (coder, tester, …) with its own start/finish timestamps and wall-clock duration per issue (issue #764) |
+| `sprint_history` | Append-only ledger of terminal sprint events (notably deletions) for the History feed; snapshots the ticket list before label-strip so deleted sprints stay visible (issue #805) |
 
 ### ticket_status (issue #755)
 
@@ -213,6 +214,34 @@ wall-clock span and lost per-agent resolution. Created identically on SQLite
 | `log_path` | text | Absolute path to the issue log file for this run; nullable (issue #783) |
 
 Indexes: `(issue_number, agent)`, `(sprint_label)`.
+
+### sprint_history (issue #805)
+
+Append-only ledger of terminal sprint events for the History feed
+(`GET /api/sprints/history`). The `sprints` lifecycle table cannot represent a
+`deleted` state — its CHECK constraint forbids it and the row is meant to be
+gone once the label is stripped — so the delete path writes a self-contained
+snapshot here **before** stripping labels, keeping deleted sprints visible.
+Created by `_create_sprint_history_table` in `apps/dashboard/db.py`; written via
+`record_sprint_history()` (best-effort, wrapped so a ledger write never blocks
+the deletion) and read via `list_sprint_history()`.
+
+| Column | Type | Description |
+|---|---|---|
+| `id` | integer PK | Auto-increment |
+| `label` | text NOT NULL | Sprint label, e.g. `sprint-61` |
+| `project` | text NOT NULL DEFAULT '' | Repo slug, e.g. `zealchaiwut/commander` |
+| `lifecycle_state` | text NOT NULL | Terminal state, e.g. `deleted` |
+| `end_reason` | text | Why the sprint ended; nullable |
+| `duration` | integer | Wall-clock seconds; nullable |
+| `tokens` | integer | Total tokens consumed; nullable |
+| `estimate_accuracy` | real | Estimated vs actual accuracy ratio; nullable |
+| `pr_number` | integer | Associated PR number; nullable |
+| `summary_path` | text | Path to the sprint summary markdown; nullable |
+| `issues_json` | text NOT NULL DEFAULT '[]' | JSON array of `{ticket_id, state, time_spent, pr_number}` captured at write time |
+| `created_at` | text | ISO 8601 timestamp |
+
+Index: `(created_at DESC)`.
 
 ## API Endpoints
 
@@ -321,3 +350,31 @@ Render-style `.env` editor for a project environment. Values are masked in the U
 |---|---|---|
 | `GET` | `/api/projects/{slug}/environments/{env}/env-vars` | Read the environment's `.env` as `[{"key", "value"}, ...]`; `[]` when the file does not exist |
 | `PUT` | `/api/projects/{slug}/environments/{env}/env-vars` | Write the submitted key/value set back to the `.env` file (order/comment preserving) |
+
+### Sprint Workspace — Board / Running / History (issues #798–#810)
+
+The Sprint tab is split into three sub-views (Board / Running / History). These
+endpoints back the new panels; all are local-only (SQLite + cached tickets) and
+add zero GitHub API calls.
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/sprints/history` | Paginated, enriched sprint-history feed for the History ledger (issue #805). Query params: `offset` (default 0), `limit` (default 20). Returns `{sprints: [...], offset, limit, total}`; each item carries `label`, `project`, `lifecycle_state`, `duration`, `tokens`, `estimate_accuracy`, `pr_number`, `summary_path`, and an `issues` list. Sources both lifecycle rows and `sprint_history` ledger rows; makes no GitHub calls |
+| `GET` | `/api/sprints/{label}/run-stats` | Per-sprint `agent_runs` aggregation for the expanded History run-stats block — stat chips, coder/tester split bar, and gantt timeline segments (issue #810). Optional `project` query param |
+| `GET` | `/api/sprints/{sprint_label}/preview-dag` | Read-only execution preview for a planned sprint (issue #809): predicted dispatch levels, file conflicts, cycles, and the unestimated-ticket list, computed by `dag_builder` over the sprint's cached tickets. Requires `project` query param; cached data only |
+| `GET` | `/scan-stale-branches` | List `feature/<N>-*` remote branches, map each to a sprint, and flag merged vs unmerged (issue #808). Query params: `repo` (required), `target` (optional base branch). Returns branches plus a `by_sprint` grouping |
+| `POST` | `/cleanup-stale-branches` | Dry-run, then (with `confirm: true`) delete only merged stale branches — never unmerged (issue #808). Body `{repo, branches, target?, confirm}`; returns `{dry_run, target_branch, to_delete, deleted, skipped_unmerged, failed}` |
+| `GET` | `/logs/tail` | Per-issue log tail for the Running-view node inspector (issue #804). Query params: `sprint`, `issue` (int), `project`, `tail_lines` (default, 1–2000). Keyed by sprint + issue (no agent segment); returns `{found, path, tail, mtime}` or `{found: false, candidate_paths, tail}` |
+
+The live snapshot endpoint (`GET .../live`) is extended with the Running-view
+metric strip keys derived from `agent_runs` (issue #803); the keys are present
+only when their source exists so the frontend hides cards with no data. The Cost
+Analytics response also gains a blended `usd_per_token` rate (`null` when no
+price map is configured) so the capacity budget bar can derive a dollar forecast
+(issue #801).
+
+Two sprint-manager settings drive the new panels (`services/sprint_manager/settings_schema.py`):
+`history_fold_size` (default 10) — most-recent sprints shown expanded in History
+before older ones collapse into aggregate folds (issue #807); and
+`sprint_budget_minutes` (default 180) — the sprint capacity budget that drives the
+capacity bar (issue #801).

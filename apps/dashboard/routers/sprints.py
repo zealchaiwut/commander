@@ -67,3 +67,14 @@ def get_all_running_sprints():
 def get_dispatch_log(sprint_label: str, project: str, tail_lines: int = 200):
     """Return the last N lines of the most recent sprint-run-<label>-*.log."""
     return sprints_service.get_dispatch_log(sprint_label, project, tail_lines)
+
+
+@router.get("/api/sprints/{sprint_label}/preview-dag")
+def get_sprint_preview_dag(sprint_label: str, project: str):
+    """Read-only execution preview for a planned sprint (issue #809).
+
+    Returns predicted dispatch levels, file conflicts, cycles, and the
+    unestimated-ticket list using dag_builder over the sprint's cached tickets.
+    Uses cached data only — adds zero GitHub API calls.
+    """
+    return sprints_service.preview_dag(sprint_label, project)

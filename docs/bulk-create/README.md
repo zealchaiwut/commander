@@ -16,12 +16,15 @@ shared place to plan the next batch.
 ## Naming
 
 ```
-docs/bulk-create/YYYY-MM-DD-<topic>.md
+docs/bulk-create/YYYY-MM-DD-N-<topic>.md
 ```
 
-One file per batch. Examples:
-- `2026-06-09-pipeline-gaps.md`
-- `2026-frontend-first.md`
+One file per batch. `N` is the batch's sequence within the day (1, 2, 3, …)
+so same-day batches sort in creation order. Dates use Bangkok time. Examples:
+- `2026-06-11-1-machine-onboarding.md`
+- `2026-06-11-2-sprint-reporting-analytics.md`
+
+(Files from before 2026-06-11 keep their unsequenced names; rename forward only.)
 
 ## File format
 
@@ -62,3 +65,16 @@ separated by `---` exactly as the splitter expects.
 
 - [2026-frontend-first.md](2026-frontend-first.md) — frontend-first authoring/UX backlog
 - [2026-sprint-runner-enhancements.md](2026-sprint-runner-enhancements.md) — sprint manager / runner enhancements
+- [2026-06-09-agent-browser-testing.md](2026-06-09-agent-browser-testing.md) — agent-browser live UAT + impeccable skills
+- [2026-06-09-analytics-nav-logging.md](2026-06-09-analytics-nav-logging.md) — analytics tabs/calcs, nav moves, global notes, agent logging
+- [2026-06-09-deploy-restart-env.md](2026-06-09-deploy-restart-env.md) — per-project deploy/restart (Mac mini + Render) + Render-style env editor
+- [2026-06-09-sprint-pipeline.md](2026-06-09-sprint-pipeline.md) — level-bounded coder∥tester pipeline + stale-in-progress fix
+- [2026-06-10-deploy-tab-followups.md](2026-06-10-deploy-tab-followups.md) — Deploy tab refinements (scoping, folder/port, live log, Start/Stop, headless gh auth)
+- [2026-06-10-settings-and-timezone.md](2026-06-10-settings-and-timezone.md) — Global Settings consolidation (away from modal) + machine-local timezone
+- [2026-06-10-logs-surface-failures.md](2026-06-10-logs-surface-failures.md) — surface real failure class/message on the Logs page + fix board "tester rejected" mislabel
+- [2026-06-11-1-machine-onboarding.md](2026-06-11-1-machine-onboarding.md) — launchd PATH from real tool locations, headless tokens at install, machine doctor, onboarding runbook
+- [2026-06-11-2-sprint-reporting-analytics.md](2026-06-11-2-sprint-reporting-analytics.md) — finish-sprint reconciliation, verified New Sprint, logs per-agent time, real analytics, documentor sprint briefs
+- [2026-06-11-3-roadmap-milestones.md](2026-06-11-3-roadmap-milestones.md) — phase 1: GitHub-native milestones, Roadmap tab, ticket↔milestone, home progress
+- [2026-06-11-4-sprint-planner-signoff.md](2026-06-11-4-sprint-planner-signoff.md) — phase 2: planner from active milestone, pending-signoff + approve, scheduled night queue (off by default)
+- [2026-06-11-5-advisor.md](2026-06-11-5-advisor.md) — phase 3: daily advisor suggestions, accept→BA flow, 2–5 sprint look-ahead, brief hook
+- [2026-06-11-6-test-suite-rehab.md](2026-06-11-6-test-suite-rehab.md) — pytest-timeout + hang fix, schema-drift fixtures, failure burn-down, per-sprint suite-health gate

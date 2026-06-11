@@ -52,10 +52,14 @@ EXPECTED_COLS = _COLS_0009 | _COLS_0010
 
 def test_agent_runs_table_has_expected_columns(fresh_db):
     """AC1: init_db() creates agent_runs with the required columns on SQLite
-    (including risk_tier/model_used added by issue #790)."""
+    (including risk_tier/model_used added by issue #790).
+
+    Subset assert: later migrations legitimately add columns (routing_reason,
+    worktree_sha, attempt_kind, …); exact equality broke on every new one.
+    """
     with fresh_db.get_conn() as conn:
         cols = {r["name"] for r in conn.execute("PRAGMA table_info(agent_runs)").fetchall()}
-    assert EXPECTED_COLS == cols
+    assert EXPECTED_COLS <= cols, f"missing columns: {EXPECTED_COLS - cols}"
 
 
 def test_agent_runs_total_tokens_nullable(fresh_db):
@@ -177,8 +181,16 @@ def test_sprint_manager_finish_passes_precise_duration():
 # ── AC5: Activity tab Duration column ────────────────────────────────────────
 
 def test_events_api_enriches_duration_from_agent_runs():
-    """AC5: the events endpoint enriches agent_finished rows from agent_runs."""
+    """AC5: the events endpoint enriches agent_finished rows from agent_runs.
+
+    The events endpoint moved from server.py to routers/activity.py in the
+    router extraction (issue #794); check both locations.
+    """
     src = (DASHBOARD_DIR / "server.py").read_text()
+    routers_dir = DASHBOARD_DIR / "routers"
+    if routers_dir.exists():
+        for p in routers_dir.glob("*.py"):
+            src += p.read_text()
     assert "agent_runs_for_issue" in src
     assert '"duration_seconds"' in src or "d[\"duration_seconds\"]" in src
 

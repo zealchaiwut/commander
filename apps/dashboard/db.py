@@ -156,6 +156,7 @@ def init_db():
         _create_issues_table(conn)
         _create_sync_state_table(conn)
         _create_sprint_lifecycle_tables(conn)
+        _create_sprint_history_table(conn)
         _create_agent_runs_table(conn)
         conn.commit()
 
@@ -278,6 +279,100 @@ def _create_sprint_lifecycle_tables(conn: sqlite3.Connection) -> None:
         "CREATE INDEX IF NOT EXISTS ix_sprint_ticket_order_label_pos "
         "ON sprint_ticket_order (label, position)"
     )
+
+
+# ── Sprint history records (issue #805) ───────────────────────────────────────
+#
+# A queryable, append-only ledger of terminal sprint events for the history
+# feed (GET /api/sprints/history). The `sprints` lifecycle table cannot hold a
+# `deleted` state — its CHECK constraint forbids it, and the row is meant to be
+# gone once the label is stripped. So sprint deletion writes a self-contained
+# snapshot here (state='deleted', end_reason, full ticket list) BEFORE label
+# stripping, keeping deleted sprints visible in the feed. `issues_json` is a
+# JSON array of {ticket_id, state, time_spent, pr_number} captured at write time.
+
+
+def _create_sprint_history_table(conn: sqlite3.Connection) -> None:
+    """Create the sprint_history ledger table (issue #805).
+
+    Kept in its own helper so the delete path can ensure the table exists
+    without running the full init_db() migration first.
+    """
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS sprint_history (
+            id                INTEGER PRIMARY KEY AUTOINCREMENT,
+            label             TEXT NOT NULL,
+            project           TEXT NOT NULL DEFAULT '',
+            lifecycle_state   TEXT NOT NULL,
+            end_reason        TEXT,
+            duration          INTEGER,
+            tokens            INTEGER,
+            estimate_accuracy REAL,
+            pr_number         INTEGER,
+            summary_path      TEXT,
+            issues_json       TEXT NOT NULL DEFAULT '[]',
+            created_at        TEXT
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS ix_sprint_history_created "
+        "ON sprint_history (created_at DESC)"
+    )
+
+
+def record_sprint_history(
+    label: str,
+    project: str = "",
+    lifecycle_state: str = "deleted",
+    end_reason: str | None = None,
+    duration: int | None = None,
+    tokens: int | None = None,
+    estimate_accuracy: float | None = None,
+    pr_number: int | None = None,
+    summary_path: str | None = None,
+    issues: list[dict] | None = None,
+    created_at: str | None = None,
+) -> None:
+    """Append one sprint-history snapshot row (issue #805).
+
+    `issues` is serialized to JSON. Best-effort callers (the delete path) should
+    wrap this in try/except so a ledger write never blocks the deletion itself.
+    """
+    created_at = created_at or _now_iso()
+    issues_json = json.dumps(issues or [])
+    with get_conn() as conn:
+        _create_sprint_history_table(conn)
+        conn.execute(
+            """
+            INSERT INTO sprint_history
+                (label, project, lifecycle_state, end_reason, duration, tokens,
+                 estimate_accuracy, pr_number, summary_path, issues_json, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (label, project, lifecycle_state, end_reason, duration, tokens,
+             estimate_accuracy, pr_number, summary_path, issues_json, created_at),
+        )
+        conn.commit()
+
+
+def list_sprint_history() -> list[dict]:
+    """Return all sprint_history rows, newest first, with issues_json parsed (issue #805)."""
+    with get_conn() as conn:
+        _create_sprint_history_table(conn)
+        rows = conn.execute(
+            "SELECT * FROM sprint_history ORDER BY created_at DESC, id DESC"
+        ).fetchall()
+    out: list[dict] = []
+    for r in rows:
+        rec = dict(r)
+        try:
+            rec["issues"] = json.loads(rec.pop("issues_json") or "[]")
+        except (ValueError, TypeError):
+            rec["issues"] = []
+        out.append(rec)
+    return out
 
 
 # ── Per-agent run durations (issue #764) ──────────────────────────────────────
@@ -596,6 +691,14 @@ def get_sprint(label: str) -> dict | None:
             "SELECT * FROM sprints WHERE label = ?", (label,)
         ).fetchone()
     return dict(row) if row else None
+
+
+def list_sprints_lifecycle() -> list[dict]:
+    """Return all rows of the `sprints` lifecycle table as dicts (issue #805)."""
+    with get_conn() as conn:
+        _create_sprint_lifecycle_tables(conn)
+        rows = conn.execute("SELECT * FROM sprints").fetchall()
+    return [dict(r) for r in rows]
 
 
 def is_sprint_running(label: str, pid_alive: bool) -> bool:
@@ -982,6 +1085,25 @@ def record_token_usage(
             (session_id, project, input_tokens, output_tokens, now, agent_role, model_name),
         )
         conn.commit()
+
+
+def sum_token_usage_window(agent_role: str, since_utc: str, until_utc: str) -> tuple[int, int]:
+    """Return (input_sum, output_sum) for one agent role within a UTC window.
+
+    Used by sprint_manager to attribute a dispatch's token spend: rows are
+    written by the PostToolUse hook with the CLAUDE_AGENT_ROLE tag, so scoping
+    by role + the dispatch's start/finish window yields that dispatch's usage
+    (correct while at most one agent per role runs at a time).
+    """
+    with get_conn() as conn:
+        row = conn.execute(
+            """SELECT COALESCE(SUM(input_tokens), 0)  AS tin,
+                      COALESCE(SUM(output_tokens), 0) AS tout
+               FROM token_usage
+               WHERE agent_role = ? AND recorded_at >= ? AND recorded_at <= ?""",
+            (agent_role, since_utc, until_utc),
+        ).fetchone()
+    return (int(row["tin"]), int(row["tout"])) if row else (0, 0)
 
 
 def get_earliest_token_row_after(after_utc: str | None = None) -> str | None:

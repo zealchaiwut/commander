@@ -11,7 +11,7 @@
  * exercises; `isDragBlocked` is wired into the live drop guards.
  */
 
-/* global _arInterval, _smgmtArStartTicker, _smgmtArStopTicker, _smgmtData, _smgmtRender, _smgmtRepo, _smgmtRunningLabels, _smgmtSelectedIssues, _smgmtShowInlineError, _smgmtShowToast, loadSprintMgmt,
+/* global _blUpdateActions, _arInterval, _smgmtArStartTicker, _smgmtArStopTicker, _smgmtData, _smgmtRender, _smgmtRepo, _smgmtRunningLabels, _smgmtSelectedIssues, _smgmtShowInlineError, _smgmtShowToast, loadSprintMgmt,
    _smgmtDragTicket:writable, _smgmtGhostNextNum:writable, _smgmtLastSelectedNum:writable, _smgmtMoveLock:writable */
 
 export function isDragBlocked(state) {
@@ -37,6 +37,7 @@ export function computeDropPlan(dragInfo, targetLabel) {
 
 export function _smgmtUpdateSelectionUI() {
   const count = _smgmtSelectedIssues.size;
+  _blUpdateActions();  // refresh the backlog panel picker + what-if (issue #800)
 
   // Inline selection bar (lives inside smgmt-sprint-list as first child)
   let bar = document.getElementById('smgmt-selection-bar');

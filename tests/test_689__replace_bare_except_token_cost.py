@@ -44,8 +44,17 @@ def _make_sprint_state(project_root: Path, sprint_label: str) -> None:
         ],
         "wall_clock_secs": 86400.0,
         "start_timestamp": "2026-01-10T10:00:00Z",
+        # Cost = status-file token totals × blended price from the token_usage
+        # join (see _compute_analytics_metrics). The state file is the token
+        # source of truth; without these, cost is 0 by design. SprintStats
+        # totals are populated per dispatch since the token-tracking fix.
+        "total_tokens_in": 1_000_000,
+        "total_tokens_out": 0,
     }
-    (sprints_dir / f"{sprint_label}-status.json").write_text(
+    # The metrics reader globs sprint-*-state.json (the SprintStats save name),
+    # not -status.json — the old name here meant the state was never read and
+    # every cost assertion compared against 0.
+    (sprints_dir / f"{sprint_label}-state.json").write_text(
         __import__("json").dumps(state)
     )
 

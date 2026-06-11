@@ -184,6 +184,12 @@ Output ONLY the JSON object. No other text."""
     # "Credit balance is too low" — surfaced upstream as a bogus model_error.
     # Matches how the dashboard strips the key for coder/tester subprocesses.
     _agent_env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
+    # Tag hook-recorded token_usage rows with the model (and role, if the
+    # launcher didn't already set CLAUDE_AGENT_ROLE).
+    _agent_env["CLAUDE_MODEL"] = "claude-haiku-4-5-20251001"
+    _agent_env.setdefault("CLAUDE_AGENT_ROLE", "estimator")
+    if project:
+        _agent_env.setdefault("COMMANDER_PROJECT", project)
 
     # Total attempts = initial + _ESTIMATOR_MAX_RETRIES (e.g. 4 = 1 + 3).
     total_attempts = _ESTIMATOR_MAX_RETRIES + 1

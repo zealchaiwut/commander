@@ -9,7 +9,7 @@
  * are scheduled for follow-on extraction waves.
  */
 
-/* global _cachedFullRepo, _estDataCache, _slug, _smgmtActiveAgentsHtml, _smgmtAgentTagClass, _smgmtApplySort, _smgmtBacklogTicketDragStart, _smgmtBulkEstimate, _smgmtBySprint, _smgmtCancelBannerHtml, _smgmtCapacityInputHtml, _smgmtCheckEstimatorHealth, _smgmtCloseIssueOpen, _smgmtConflictsByIssue, _smgmtCtxMenuOpen, _smgmtData, _smgmtDeactivatedLabels, _smgmtDepOrderByIssue, _smgmtDragLeave, _smgmtDragOver, _smgmtDropOnSprint, _smgmtEstimateBadgeHtml, _smgmtEstimatorAvailable, _smgmtFilterApply, _smgmtFinishCards, _smgmtFinishedLabels, _smgmtHasCompletedTickets, _smgmtInitCapacityGauges, _smgmtInjectOutcomeBand, _smgmtIsCancelled, _smgmtKbRestoreFocus, _smgmtLabelColors, _smgmtLabelFilterToggle, _smgmtLabelFilterToggleExpand, _smgmtLastLabelIssues, _smgmtLevelsHtml, _smgmtLiveAgentBadgesHtml, _smgmtLiveCache, _smgmtLiveLogLinesHtml, _smgmtLivePollRestart, _smgmtNextChildLabel, _smgmtNextUpLabel, _smgmtOutcomeCache, _smgmtOutcomeLogHtml, _smgmtReEstimate, _smgmtRepo, _smgmtRiskFlagIconsHtml, _smgmtRowClick, _smgmtRowMenuOpen, _smgmtSchedDepHtml, _smgmtSelectedIssues, _smgmtSetSprintTokenEl, _smgmtStateMeta, _smgmtTicketDragEnd, _smgmtTicketDragStart, _smgmtTicketReorderDragLeave, _smgmtTicketReorderDragOver, _smgmtTicketReorderDrop, _smgmtTicketToSprint, _smgmtToggleSelect, _smgmtUpdateCapacityGauge, _smgmtUpdateCleanupBtn, _smgmtUpdateConflictBadge, _smgmtUpdateDepOrderBadge, _smgmtUpdateEstimateBadge, _smgmtUpdateSelectionUI, escHtml, sprintLabelDisplay,
+/* global _blApplyFilters, _blBacklogAll, _blSyncFilterPills, _blUpdateActions, _smgmtEnsureCapData, _smgmtLoadMiniRail, _smgmtRenderAllCapBars, _smgmtUpdateSubnav, _cachedFullRepo, _estDataCache, _slug, _smgmtActiveAgentsHtml, _smgmtAgentTagClass, _smgmtApplySort, _smgmtBacklogTicketDragStart, _smgmtBulkEstimate, _smgmtBySprint, _smgmtCancelBannerHtml, _smgmtCapacityInputHtml, _smgmtCheckEstimatorHealth, _smgmtCloseIssueOpen, _smgmtConflictsByIssue, _smgmtCtxMenuOpen, _smgmtData, _smgmtDeactivatedLabels, _smgmtDepOrderByIssue, _smgmtDragLeave, _smgmtDragOver, _smgmtDropOnSprint, _smgmtEstimateBadgeHtml, _smgmtEstimatorAvailable, _smgmtFilterApply, _smgmtFinishCards, _smgmtFinishedLabels, _smgmtHasCompletedTickets, _smgmtInitCapacityGauges, _smgmtInjectOutcomeBand, _smgmtIsCancelled, _smgmtKbRestoreFocus, _smgmtLabelColors, _smgmtLabelFilterToggle, _smgmtLabelFilterToggleExpand, _smgmtLastLabelIssues, _smgmtLevelsHtml, _smgmtLiveAgentBadgesHtml, _smgmtLiveCache, _smgmtLiveLogLinesHtml, _smgmtLivePollRestart, _smgmtNextChildLabel, _smgmtNextUpLabel, _smgmtOutcomeCache, _smgmtOutcomeLogHtml, _smgmtReEstimate, _smgmtRepo, _smgmtRiskFlagIconsHtml, _smgmtRowClick, _smgmtRowMenuOpen, _smgmtSchedDepHtml, _smgmtSelectedIssues, _smgmtSetSprintTokenEl, _smgmtStateMeta, _smgmtTicketDragEnd, _smgmtTicketDragStart, _smgmtTicketReorderDragLeave, _smgmtTicketReorderDragOver, _smgmtTicketReorderDrop, _smgmtTicketToSprint, _smgmtToggleSelect, _smgmtUpdateCapacityGauge, _smgmtUpdateCleanupBtn, _smgmtUpdateConflictBadge, _smgmtUpdateDepOrderBadge, _smgmtUpdateEstimateBadge, _smgmtUpdateSelectionUI, escHtml, sprintLabelDisplay,
    _smgmtAnySprintRunning:writable, _smgmtRunningLabels:writable */
 
 export async function loadSprintMgmt(silent) {
@@ -84,6 +84,11 @@ export function _smgmtRender(data) {
   const listEl = document.getElementById('smgmt-sprint-list');
   if (!listEl) return;
   _smgmtData = data;
+
+  // Keep the sub-nav live indicators (running dot + History count) in sync on
+  // every render, including auto-refresh, so the dot clears when sprints stop
+  // and the badge tracks the sprint total (issue #798).
+  _smgmtUpdateSubnav();
 
   const sprints = data.sprints || [];
   const order   = data.order   || [];
@@ -161,6 +166,11 @@ export function _smgmtRender(data) {
   // Populate capacity gauges (reads localStorage + estimate cache)
   _smgmtInitCapacityGauges(orderedLabels);
 
+  // Sprint capacity budget bars (issue #801): render now with cached data,
+  // then lazily fetch budget settings + per-size cost averages and re-render.
+  _smgmtRenderAllCapBars();
+  _smgmtEnsureCapData(false);
+
   // Re-inject selection bar if tickets are selected
   if (_smgmtSelectedIssues.size > 0) _smgmtUpdateSelectionUI();
 
@@ -189,6 +199,11 @@ export function _smgmtRender(data) {
 
   // Load dependency order hints for pending tickets (issue #581)
   _smgmtLoadDepOrder(orderedLabels, bySprint);
+
+  // Render the execution-preview mini-rail per planned sprint (issue #809).
+  // Called from here so it refreshes on every board re-render — i.e. after a
+  // ticket is added, removed, or reordered.
+  _smgmtLoadMiniRail(orderedLabels, bySprint);
 
   // Update cleanup button visibility (issue #457)
   _smgmtUpdateCleanupBtn(data);
@@ -739,6 +754,7 @@ export function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent, finis
       <div class="smgmt-progress-bar-wrap"><div class="smgmt-progress-bar-fill" style="width:${summaryPct}%"></div></div>
       <span class="smgmt-progress-label">${summaryDone} / ${ticketCount} done</span>
     </div>
+    <div class="cap" id="smgmt-cap-${escHtml(label)}"></div>
     <div class="smgmt-sprint-goal-text" id="smgmt-goal-${escHtml(label)}" style="display:none"></div>
   </div>`;
 
@@ -1098,37 +1114,49 @@ export function _smgmtTicketRowHtml(ticket, label, elapsedSecs = null) {
 }
 
 export function _smgmtRenderBacklog(tickets) {
+  _blBacklogAll = tickets || [];
   const countEl   = document.getElementById('smgmt-backlog-count');
   const ticketsEl = document.getElementById('smgmt-backlog-tickets');
   if (!ticketsEl) return;
 
+  // Apply the active filter pills client-side over the loaded backlog data.
+  const filtered = _blApplyFilters(_blBacklogAll);
+
   if (countEl) {
-    countEl.textContent = tickets.length > 0
-      ? `· ${tickets.length} ticket${tickets.length !== 1 ? 's' : ''}`
+    const total = _blBacklogAll.length, shown = filtered.length;
+    countEl.textContent = total > 0
+      ? (shown === total
+          ? `· ${total} ticket${total !== 1 ? 's' : ''}`
+          : `· ${shown} of ${total} ticket${total !== 1 ? 's' : ''}`)
       : '';
   }
 
-  // Update bulk estimate button visibility (issue #598)
+  // Update bulk estimate button visibility (issue #598) — over full backlog
   const backlogBulkBtn = document.getElementById('smgmt-backlog-bulk-est-btn');
   if (backlogBulkBtn) {
-    const hasUnsized = tickets.some(
+    const hasUnsized = _blBacklogAll.some(
       t => !(t.labels || []).find(l => /^size-[SMLX]+$/.test(l.name))
     );
     backlogBulkBtn.classList.toggle('hidden', !hasUnsized);
   }
 
   // Sort newest first (higher issue number = newer)
-  const sorted = [...tickets].sort((a, b) => b.number - a.number);
+  const sorted = [...filtered].sort((a, b) => b.number - a.number);
 
   // Build list of sprint labels for "Move to" popup
   const allSprintNums = (_smgmtData?.sprints || []).sort((a, b) => a - b);
 
   if (sorted.length === 0) {
-    ticketsEl.innerHTML = '<div class="smgmt-drop-hint" style="padding:14px 18px;text-align:center;">No backlog tickets — all caught up</div>';
-    return;
+    const msg = _blBacklogAll.length === 0
+      ? 'No backlog tickets — all caught up'
+      : 'No tickets match the active filters';
+    ticketsEl.innerHTML = `<div class="smgmt-drop-hint" style="padding:14px 18px;text-align:center;">${msg}</div>`;
+  } else {
+    ticketsEl.innerHTML = sorted.map(t => _smgmtBacklogTicketHtml(t, allSprintNums)).join('');
   }
 
-  ticketsEl.innerHTML = sorted.map(t => _smgmtBacklogTicketHtml(t, allSprintNums)).join('');
+  _blSyncFilterPills();
+  _blUpdateActions();
 }
 
 export function _smgmtBacklogTicketHtml(ticket, sprintNums) {
@@ -1137,7 +1165,7 @@ export function _smgmtBacklogTicketHtml(ticket, sprintNums) {
   const backlogLabelNames = (ticket.labels || []).map(l => l.name).join(',');
   const schedDepHtml = _smgmtSchedDepHtml(ticket);
   return `
-    <div class="smgmt-ticket${isSelected ? ' is-selected' : ''}" id="smgmt-ticket-${ticket.number}"
+    <div class="smgmt-ticket bl-row${isSelected ? ' is-selected' : ''}" id="smgmt-ticket-${ticket.number}"
          draggable="true"
          data-issue="${ticket.number}"
          data-sprint=""

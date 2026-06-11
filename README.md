@@ -68,6 +68,7 @@ For a full walkthrough including multi-clone setup for Coder/Tester agents, see
 | **Sprint Estimator** | Claude Code-driven effort estimation for all sprint tickets — runs automatically at sprint start | see below |
 | **Pipeline mode** | Opt-in two-stage dispatch (`pipeline_mode` setting, default off): the coder works the next ticket while the tester validates the previous one, roughly halving wall-clock per dispatch level. One coder + one tester run concurrently; a hard level barrier holds the next level until the current one fully merges; rejected tickets jump to the front of the coder queue (3-attempt cap → `needs-rework`). Label transitions and develop merges are serialized; the board shows dual active-agent cards with per-level progress | [docs/features/sprint-manager.md](docs/features/sprint-manager.md) |
 | **Sprint file archive** | Reversible cleanup of stale per-sprint runtime files (plan/placeholder/state) for finished sprints into `.commander/sprints/archive/`; status/estimate/summary files are never touched and nothing is deleted. CLI `scripts/clean_sprint_files.py` or `POST /api/maintenance/sprints/cleanup` (dry-run preview + confirm in the UI) | [SCHEMA.md](SCHEMA.md) |
+| **Sprint Workspace** | The Sprint tab is split into **Board / Running / History** sub-views (issue #798). **Board:** filtered multi-select backlog panel with a what-if delta preview, a capacity budget bar driven by `sprint_budget_minutes` (default 180), and an execution-preview mini-rail backed by `GET /api/sprints/{label}/preview-dag` (predicted dispatch levels, file conflicts, cycles, unestimated tickets). **Running:** a level-rail node board with a running-metrics strip (from the extended live snapshot) and a per-node inspector with per-issue log tabs (`GET /logs/tail`). **History:** a sprint ledger (`GET /api/sprints/history`) with run-stats blocks and gantt timelines (`GET /api/sprints/{label}/run-stats`), configurable folding via `history_fold_size` (default 10), deleted-sprint persistence (`sprint_history` table), and stale-branch scan/cleanup (`GET /scan-stale-branches`, `POST /cleanup-stale-branches`). All local-only — zero GitHub API calls | [SCHEMA.md](SCHEMA.md) |
 | **Settings** | Global and per-project key-value config store backed by Neon; REST API at `GET/PUT /api/settings` and `GET/PUT /api/projects/{slug}/settings` | [SCHEMA.md](SCHEMA.md) |
 | **Global Settings screen** | Gear icon in the dashboard header opens a settings panel for global config (model defaults, estimation params) | — |
 | **Project Settings tab** | "More" menu on project cards exposes a Settings tab for per-project overrides | — |
@@ -260,13 +261,15 @@ tail -f ~/Library/Logs/commander-dashboard.out.log
 commander/
 ├── apps/
 │   └── dashboard/          # FastAPI app — PRD server
-│       ├── server.py        # API routes
+│       ├── server.py        # App wiring + remaining inline routes
+│       ├── routers/         # Extracted route clusters + *_service.py logic
 │       ├── projects.py      # GitHub data layer
 │       ├── sprint_manager/  # Sprint orchestration engine
-│       └── static/          # Frontend (index.html + app.js)
+│       └── static/          # Frontend (HTML; src/ esbuild → dist/bundle.js)
 ├── scripts/                 # CLI tools (create_ticket.py, init_project.py, …)
 ├── hooks/                   # Claude Code hooks (agent_finished, tool_used, …)
 ├── services/                # Background services
+├── package.json             # Frontend build (esbuild + eslint, no framework)
 ├── docs/                    # Documentation (standard layout, all projects)
 │   ├── quickstart.md        # 5-minute install and first run
 │   ├── tutorial.md          # Full walkthrough
@@ -282,6 +285,28 @@ commander/
 ├── .commander/              # Sprint manager config (sprint.yaml, logs, sprints)
 └── CLAUDE.md                # Agent instructions (read by all agents)
 ```
+
+---
+
+## Frontend build
+
+The dashboard frontend is moving from inline `<script>` blocks to ES modules
+under `apps/dashboard/static/src/`, bundled by [esbuild](https://esbuild.github.io)
+into a single `apps/dashboard/static/dist/bundle.js` (issue #796).
+
+```bash
+npm install        # install esbuild + eslint
+npm run build      # bundle static/src/index.js → static/dist/bundle.js (+ .map)
+npm run watch      # rebuild on every source edit
+npm run lint       # eslint over static/src
+```
+
+Production serves static files straight from disk, so the **committed bundle
+already works with no build step** — you only need Node/npm to rebuild after
+editing `static/src/`. `setup_machine.sh` runs `npm install && npm run build`
+automatically when npm is present (skip with `SETUP_MACHINE_SKIP_NPM=1`); its
+doctor reports npm as informational, never a hard fail. CI rebuilds the bundle
+and runs a design gate over `static/src/` on every push.
 
 ---
 
@@ -460,6 +485,8 @@ python -c "from services.sprint_manager.neon_db import get_engine; print(get_eng
 - [Milestones](docs/milestones.md) — what each sprint shipped
 
 **Reference**
+- [Architecture boundary map](docs/architecture/boundaries.md) — router clusters, layer rules, repos
+- [Frontend map](docs/architecture/frontend-map.md) — static pages, modules, API call sites
 - [Dashboard](docs/features/dashboard.md)
 - [Sprint Manager](docs/features/sprint-manager.md)
 - [API reference](docs/features/api.md)

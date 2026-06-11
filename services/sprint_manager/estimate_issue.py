@@ -188,6 +188,8 @@ Output ONLY the JSON object. No other text."""
     # launcher didn't already set CLAUDE_AGENT_ROLE).
     _agent_env["CLAUDE_MODEL"] = "claude-haiku-4-5-20251001"
     _agent_env.setdefault("CLAUDE_AGENT_ROLE", "estimator")
+    if project:
+        _agent_env.setdefault("COMMANDER_PROJECT", project)
 
     # Total attempts = initial + _ESTIMATOR_MAX_RETRIES (e.g. 4 = 1 + 3).
     total_attempts = _ESTIMATOR_MAX_RETRIES + 1

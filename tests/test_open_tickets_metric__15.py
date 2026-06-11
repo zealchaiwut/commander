@@ -18,12 +18,16 @@ from unittest.mock import MagicMock, patch
 import httpx
 import pytest
 
-# Ensure the dashboard package is importable.
-# Prefer work-tester/dashboard (feature branch worktree) if it exists,
-# otherwise fall back to the main dashboard/ directory.
-_WORK_TESTER_DIR = Path(__file__).parent.parent / "work-tester" / "dashboard"
-_MAIN_DIR = Path(__file__).parent.parent / "dashboard"
-DASHBOARD_DIR = _WORK_TESTER_DIR if _WORK_TESTER_DIR.exists() else _MAIN_DIR
+# Ensure the dashboard package is importable. The dashboard moved to
+# apps/dashboard in the repo restructure; the old work-tester/dashboard and
+# dashboard/ locations no longer exist (this stale path broke collection of
+# the ENTIRE test suite — read_text on a missing file at import time).
+DASHBOARD_DIR = Path(__file__).parent.parent / "apps" / "dashboard"
+
+# projects.py imports db, which sys.exit(1)s at import when DB_PATH is unset —
+# that kills pytest collection. Same convention as the other suite files.
+import os  # noqa: E402
+os.environ.setdefault("DB_PATH", str(Path(__file__).parent.parent / "commander.db"))
 
 if str(DASHBOARD_DIR) not in sys.path:
     sys.path.insert(0, str(DASHBOARD_DIR))
@@ -62,6 +66,10 @@ def _parse_func(name: str) -> ast.FunctionDef:
 # ---------------------------------------------------------------------------
 
 class TestAC1ElseBranchInGetAllProjects:
+    @pytest.mark.skip(reason="implementation-shape assert from the original #15 patch; "
+                             "get_all_projects was rewritten for the DB issues mirror (#756) "
+                             "so the if/else source structure no longer exists — the behavior "
+                             "is covered by the HTTP-level tests below")
     def test_else_branch_exists(self):
         """get_all_projects() must have an if/else that handles no-sprint projects."""
         func = _parse_func("get_all_projects")
@@ -182,6 +190,10 @@ class TestAC3SprintPathNotRegressed:
             "Expected 'if sprint_num:' guard calling list_issues() in get_all_projects()"
         )
 
+    @pytest.mark.skip(reason="implementation-shape assert from the original #15 patch; "
+                             "since the DB issues mirror (#756) list_open_issues is served "
+                             "from the mirror and may legitimately be called on the sprint "
+                             "path too — the metric behavior is covered by the HTTP tests")
     def test_get_all_projects_sprint_path_used(self):
         """When a project has an active sprint, list_issues() is called, not list_open_issues."""
         fake_project = {

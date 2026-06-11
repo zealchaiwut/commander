@@ -5550,6 +5550,89 @@
     .metric.amber .metric-value { color: var(--amber); }
     @media (max-width: 560px) { .metric { flex-basis: calc(50% - 8px); } }
 
+    /* ── Node inspector panel (issue #804) ───────────────────────────────────
+       Opens when a rail node is clicked. Mock v5 contract: .inspector shell,
+       .attempts timeline (.att rows), .log-tabs + .log-body. Emphasis is shown
+       with full borders + tint-fill + box-shadow — never a coloured side-stripe
+       (impeccable side-tab anti-pattern). Spacing stays on the 4px scale. */
+    .inspector { margin: 4px 4px 16px; border: 1px solid var(--border);
+      border-radius: 10px; background: var(--surface); overflow: hidden; }
+    .inspector-head { display: flex; align-items: center; gap: 8px;
+      padding: 12px 16px; border-bottom: 1px solid var(--border); }
+    .inspector-num { font-family: var(--mono); font-size: 12px; color: var(--text-muted); }
+    .inspector-title { flex: 1 1 auto; min-width: 0; font-size: 14px; font-weight: 700;
+      color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .inspector-size { flex: 0 0 auto; font-family: var(--mono); font-size: 10px;
+      font-weight: 700; padding: 1px 6px; border-radius: 4px; color: var(--text-sub);
+      background: var(--surface-2); }
+    .inspector-est { flex: 0 0 auto; font-family: var(--mono); font-size: 11px;
+      color: var(--text-muted); }
+    .inspector-body { padding: 12px 16px; display: flex; flex-direction: column; gap: 14px; }
+    .inspector-section-label { font-size: 11px; font-weight: 700; letter-spacing: .04em;
+      text-transform: uppercase; color: var(--text-sub); margin-bottom: 6px; }
+
+    /* Attempt timeline — one .att row per attempt; degrades to a single
+       current-state row when no attempt history exists (AC7). */
+    .attempts { display: flex; flex-direction: column; gap: 6px; }
+    .att { display: flex; align-items: center; gap: 8px; padding: 8px 10px;
+      border: 1px solid var(--border); border-radius: 8px; background: var(--bg);
+      font-size: 12px; }
+    .att-state { font-family: var(--mono); font-size: 11px; font-weight: 700;
+      flex: 0 0 auto; }
+    .att-kind { color: var(--text-muted); font-family: var(--mono); font-size: 11px;
+      flex: 0 0 auto; }
+    .att-label { flex: 1 1 auto; min-width: 0; color: var(--text-sub);
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .att.failed { border-color: var(--red); background: var(--red-bg); }
+    .att.failed .att-state { color: var(--red); }
+    .att.running { border-color: var(--green); background: var(--green-bg); }
+    .att.running .att-state { color: var(--green); }
+    .att.queued { opacity: .8; }
+    .att.queued .att-state { color: var(--text-sub); }
+    .att.done .att-state { color: var(--green); }
+    /* Gate-reason chip on a failed attempt (full tint-fill chip, no side-stripe). */
+    .att-gate { flex: 0 0 auto; font-family: var(--mono); font-size: 10px; font-weight: 700;
+      padding: 1px 6px; border-radius: 4px; color: var(--red); background: var(--red-bg);
+      white-space: nowrap; }
+    /* Failure sidecar trailing a running attempt — the carried-over prior failure. */
+    .att-sidecar { flex: 0 0 auto; font-family: var(--mono); font-size: 10px;
+      padding: 1px 6px; border-radius: 4px; color: var(--text-muted);
+      background: var(--surface-2); white-space: nowrap; }
+    .att-sidecar:empty { display: none; }
+    /* Queued-tester list under the timeline. */
+    .att-queued-list { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px; }
+    .att-queued-item { font-family: var(--mono); font-size: 10px; font-weight: 700;
+      padding: 1px 6px; border-radius: 4px; color: var(--text-sub);
+      background: var(--surface-2); }
+
+    /* Log tabs — one Orchestrator tab + one per active/selected issue. Each tab
+       chip is colour-keyed via the lg-* agent-colour tokens. */
+    .log-tabs { display: flex; flex-wrap: wrap; gap: 4px; border-bottom: 1px solid var(--border);
+      padding-bottom: 8px; }
+    .log-tab { display: inline-flex; align-items: center; gap: 5px; cursor: pointer;
+      font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 6px;
+      border: 1px solid transparent; background: none; color: var(--text-muted); }
+    .log-tab:hover { background: var(--surface-hover); }
+    .log-tab.active { color: var(--text); background: var(--surface-2);
+      border-color: var(--border); }
+    .log-tab:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+    .lg-chip { font-family: var(--mono); font-size: 10px; font-weight: 700;
+      padding: 0 5px; border-radius: 4px; }
+    .lg-orchestrator { color: var(--text-sub);   background: var(--surface-2); }
+    .lg-coder        { color: var(--blue);   background: var(--blue-bg); }
+    .lg-tester       { color: var(--green);  background: var(--green-bg); }
+    .lg-reviewer     { color: var(--purple); background: var(--purple-bg); }
+    .lg-documenter   { color: var(--amber);  background: var(--amber-bg); }
+    .lg-estimator    { color: var(--teal);   background: var(--teal-bg); }
+    .lg-ba           { color: var(--pink);   background: var(--pink-bg); }
+    /* Streaming log body — escaped, colorized lines from /logs/tail. */
+    .log-body { margin-top: 10px; max-height: 320px; overflow-y: auto;
+      font-family: var(--mono); font-size: 11px; line-height: 1.55;
+      background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+      padding: 10px 12px; }
+    .log-line { white-space: pre-wrap; word-break: break-word; color: var(--text-sub); }
+    .log-empty { color: var(--text-muted); font-style: italic; }
+
     .smgmt-subview { display: none; }
     .smgmt-subview.show { display: block; animation: smgmt-fade-in .18s ease; }
     @keyframes smgmt-fade-in { from { opacity: 0; } to { opacity: 1; } }
@@ -6055,6 +6138,12 @@
           <!-- Level-rail node board (issue #802) — built from the /live snapshot
                by _smgmtRailUpdate; levels gate on the spine, ticket nodes per level. -->
           <div class="rail" id="smgmt-rail" role="list" aria-label="Sprint level rail" hidden></div>
+          <!-- Node inspector panel (issue #804) — opens when a rail node is
+               clicked; shows ticket metadata, an attempt timeline, and tabbed
+               per-issue streaming logs. Built by _smgmtInspectorFeed from the
+               /live ticket object + the /logs/tail endpoint. Mock v5 contract:
+               .inspector / .attempts / .att / .log-tabs / .log-body. -->
+          <div class="inspector" id="smgmt-inspector" role="region" aria-label="Node inspector" hidden></div>
         </div><!-- /smgmt-subview-running -->
 
         <!-- History sub-view (issue #716) — finished-sprint summaries -->
@@ -11541,7 +11630,11 @@ function _smgmtRailUpdate(label, live) {
   const hasData = issues.length > 0;
   railEl.hidden = !hasData;
   if (emptyEl) emptyEl.style.display = hasData ? 'none' : '';
-  if (!hasData) { railEl.innerHTML = ''; railEl.dataset.railsig = ''; return; }
+  if (!hasData) {
+    railEl.innerHTML = ''; railEl.dataset.railsig = '';
+    if (typeof _smgmtInspectorClose === 'function') _smgmtInspectorClose();
+    return;
+  }
   railEl.dataset.label = label || '';
   const sig = _smgmtRailSig(_smgmtRailLevels(live));
   if (railEl.dataset.railsig === sig && railEl.querySelector('.level')) {
@@ -11567,8 +11660,222 @@ function _smgmtRailSelectNode(num) {
   const live = _smgmtLiveCache[label] || null;
   const ticket = live ? (live.issues || []).find(i => i.number === num) : null;
   if (typeof _smgmtInspectorFeed === 'function') {
-    try { _smgmtInspectorFeed(ticket || { number: num }); } catch (_) { /* inspector not mounted yet */ }
+    try { _smgmtInspectorFeed(ticket || { number: num }, label); } catch (_) { /* inspector not mounted yet */ }
   }
+}
+
+// ── Node inspector panel (issue #804) ────────────────────────────────────────
+// Opens when a rail node is clicked: ticket metadata, an attempt timeline, and
+// tabbed per-issue streaming logs. The header + timeline come from the /live
+// ticket object (no /live contract change); the per-issue log tabs stream from
+// the /logs/tail endpoint (router module, not server.py). All log content is
+// HTML-escaped and tokenized by the shared colorizeLogLine (AC5/AC6).
+
+const _AGENT_KEYS = ['orchestrator', 'coder', 'tester', 'reviewer', 'documenter', 'estimator', 'ba'];
+let _smgmtInspectorNum = null;     // issue number currently shown in the inspector
+let _smgmtInspectorLabel = '';     // sprint label the inspector is bound to
+let _smgmtInspectorTab = null;     // active log-tab key: 'orchestrator' | issue number
+let _smgmtInspectorPollId = null;  // streaming poll handle for the active log tab
+
+/** The agent colour-token key for an issue (lg-* contract); 'orchestrator' for
+ *  the spine tab. Maps the active agent role onto the known agent keys. */
+function _smgmtInspectorAgentKey(iss) {
+  const a = (iss && iss.agent ? String(iss.agent) : '').toLowerCase();
+  return _AGENT_KEYS.indexOf(a) > 0 ? a : 'coder';
+}
+
+/** Build the attempt timeline rows for a ticket. Feature-detects a rich
+ *  ``attempts`` history on the ticket; when none (and no failure records)
+ *  exist, degrades to a single current-state row (AC7) — never throws. */
+function _smgmtInspectorAttempts(ticket) {
+  const t = ticket || {};
+  const raw = Array.isArray(t.attempts) ? t.attempts : null;
+  if (raw && raw.length) {
+    return raw.map(a => {
+      const gate = a.gate_reason || a.failure_reason || null;
+      const state = a.state
+        || (gate ? 'failed'
+          : a.agent_status === 'running' ? 'running'
+          : a.outcome === 'passed' || a.status === 'done' ? 'done' : 'queued');
+      return {
+        kind: a.kind || a.attempt_kind || 'attempt',
+        state: state,
+        agent: a.agent || null,
+        gate_reason: state === 'failed' ? (gate || 'gate failed') : null,
+        sidecar: state === 'running' ? (a.prior_failure || a.last_gate || gate || '') : '',
+        label: a.label || a.title || '',
+      };
+    });
+  }
+  // Degrade: a single row describing the ticket's current state.
+  const failed = t.agent_status === 'failed' || !!t.failure_reason;
+  const running = t.agent_status === 'running';
+  const state = failed ? 'failed' : running ? 'running' : (t.status === 'done' ? 'done' : 'queued');
+  return [{
+    kind: 'current',
+    state: state,
+    agent: t.agent || null,
+    gate_reason: failed ? (t.gate_reason || t.failure_reason || 'gate failed') : null,
+    sidecar: running ? (t.prior_failure || t.last_gate || '') : '',
+    label: '',
+  }];
+}
+
+/** The queued testers for a ticket (AC2). Feature-detected; [] when absent. */
+function _smgmtInspectorQueuedTesters(ticket) {
+  const t = ticket || {};
+  if (Array.isArray(t.queued_testers)) return t.queued_testers.slice();
+  return [];
+}
+
+/** HTML for the attempt timeline block. */
+function _smgmtInspectorAttemptsHtml(ticket) {
+  const rows = _smgmtInspectorAttempts(ticket).map(a => {
+    const gate = a.gate_reason
+      ? `<span class="att-gate" title="Gate reason">${escHtml(a.gate_reason)}</span>` : '';
+    const sidecar = a.state === 'running'
+      ? `<span class="att-sidecar">${escHtml(a.sidecar || '')}</span>` : '';
+    const kind = a.kind ? `<span class="att-kind">${escHtml(a.kind)}</span>` : '';
+    const label = a.label ? `<span class="att-label">${escHtml(a.label)}</span>` : '<span class="att-label"></span>';
+    return `<div class="att ${a.state}">`
+      + `<span class="att-state">${escHtml(a.state)}</span>`
+      + kind + label + sidecar + gate
+      + `</div>`;
+  }).join('');
+  const queued = _smgmtInspectorQueuedTesters(ticket);
+  const queuedHtml = queued.length
+    ? `<div class="att-queued-list">`
+      + queued.map(q => `<span class="att-queued-item">tester #${escHtml(String(q))}</span>`).join('')
+      + `</div>`
+    : '';
+  return `<div class="inspector-section-label">Attempts</div>`
+    + `<div class="attempts">${rows}</div>${queuedHtml}`;
+}
+
+/** The log-tab descriptors: one Orchestrator tab + one per active/selected issue
+ *  (active = agent running; plus the inspected ticket). */
+function _smgmtInspectorTabs(ticket, live) {
+  const tabs = [{ key: 'orchestrator', label: 'Orchestrator', agent: 'orchestrator' }];
+  const issues = (live && Array.isArray(live.issues)) ? live.issues : [];
+  const seen = {};
+  const add = iss => {
+    if (!iss || iss.number == null || seen[iss.number]) return;
+    seen[iss.number] = true;
+    tabs.push({ key: iss.number, label: `#${iss.number}`, agent: _smgmtInspectorAgentKey(iss) });
+  };
+  issues.filter(i => i.agent_status === 'running' || i.agent).forEach(add);
+  if (ticket && ticket.number != null) add(ticket);
+  return tabs;
+}
+
+/** HTML for the log-tab strip; chips colour-keyed via the lg-* tokens. */
+function _smgmtInspectorTabsHtml(ticket, live) {
+  return _smgmtInspectorTabs(ticket, live).map(tab => {
+    const active = (String(_smgmtInspectorTab) === String(tab.key)) ? ' active' : '';
+    return `<button type="button" class="log-tab${active}" role="tab"`
+      + ` data-tab="${escHtml(String(tab.key))}" aria-selected="${active ? 'true' : 'false'}"`
+      + ` onclick="_smgmtInspectorSelectTab('${escHtml(String(tab.key))}')">`
+      + `<span class="lg-chip lg-${escHtml(tab.agent)}">${escHtml(tab.label)}</span>`
+      + `</button>`;
+  }).join('');
+}
+
+/** Open + render the inspector for a ticket. Reflects title, size, and the
+ *  calibrated estimate, the attempt timeline, and the per-issue log tabs. */
+function _smgmtInspectorFeed(ticket, label) {
+  const panel = document.getElementById('smgmt-inspector');
+  if (!panel) return;
+  const t = ticket || {};
+  _smgmtInspectorNum = t.number != null ? t.number : null;
+  _smgmtInspectorLabel = label || _smgmtInspectorLabel || '';
+  const live = _smgmtLiveCache[_smgmtInspectorLabel] || null;
+
+  // Default the active log tab to the inspected issue (else the orchestrator).
+  if (_smgmtInspectorNum != null) _smgmtInspectorTab = _smgmtInspectorNum;
+  else if (_smgmtInspectorTab == null) _smgmtInspectorTab = 'orchestrator';
+
+  const size = t.size ? `<span class="inspector-size">${escHtml(t.size)}</span>` : '';
+  // The calibrated estimate is the per-ticket minutes from the live snapshot
+  // (calibration is applied upstream when present).
+  const est = (t.minutes != null)
+    ? `<span class="inspector-est" title="Calibrated estimate">≈${escHtml(String(t.minutes))} min</span>` : '';
+
+  panel.innerHTML =
+    `<div class="inspector-head">`
+    + `<span class="inspector-num">#${escHtml(String(_smgmtInspectorNum != null ? _smgmtInspectorNum : ''))}</span>`
+    + `<span class="inspector-title">${escHtml(t.title || '')}</span>`
+    + size + est
+    + `</div>`
+    + `<div class="inspector-body">`
+    + _smgmtInspectorAttemptsHtml(t)
+    + `<div>`
+    + `<div class="inspector-section-label">Logs</div>`
+    + `<div class="log-tabs" role="tablist">${_smgmtInspectorTabsHtml(t, live)}</div>`
+    + `<div class="log-body" id="smgmt-inspector-log"><span class="log-empty">Loading…</span></div>`
+    + `</div>`
+    + `</div>`;
+  panel.hidden = false;
+
+  _smgmtInspectorStreamRestart();
+}
+
+/** (Re)start the streaming poll for the active log tab. */
+function _smgmtInspectorStreamRestart() {
+  if (_smgmtInspectorPollId !== null) { clearInterval(_smgmtInspectorPollId); _smgmtInspectorPollId = null; }
+  _smgmtInspectorStreamTick();
+  _smgmtInspectorPollId = setInterval(_smgmtInspectorStreamTick, 5000);
+}
+
+/** Switch the active log tab and restart streaming. */
+function _smgmtInspectorSelectTab(key) {
+  _smgmtInspectorTab = (key === 'orchestrator') ? 'orchestrator' : (parseInt(key, 10));
+  const panel = document.getElementById('smgmt-inspector');
+  if (panel) {
+    panel.querySelectorAll('.log-tab').forEach(tabEl => {
+      const on = String(tabEl.dataset.tab) === String(_smgmtInspectorTab);
+      tabEl.classList.toggle('active', on);
+      tabEl.setAttribute('aria-selected', on ? 'true' : 'false');
+    });
+  }
+  _smgmtInspectorStreamRestart();
+}
+
+/** Fetch + render the active log tab. The orchestrator tab streams the sprint
+ *  dispatch log; a per-issue tab streams sprint-issue-<N>.log via /logs/tail.
+ *  Every line is HTML-escaped + tokenized by colorizeLogLine (AC5/AC6). */
+function _smgmtInspectorStreamTick() {
+  const bodyEl = document.getElementById('smgmt-inspector-log');
+  if (!bodyEl) return;
+  const repo = (typeof _smgmtRepo === 'function') ? _smgmtRepo() : '';
+  const label = _smgmtInspectorLabel;
+  if (!repo || !label) { bodyEl.innerHTML = '<span class="log-empty">No running sprint.</span>'; return; }
+
+  const tab = _smgmtInspectorTab;
+  const url = (tab === 'orchestrator')
+    ? `/api/sprints/${encodeURIComponent(label)}/dispatch-log?project=${encodeURIComponent(repo)}&tail_lines=200`
+    : `/logs/tail?sprint=${encodeURIComponent(label)}&issue=${encodeURIComponent(tab)}`
+      + `&project=${encodeURIComponent(repo)}&tail_lines=200`;
+
+  const want = String(tab);
+  fetch(url).then(r => r.ok ? r.json() : null).then(data => {
+    // Drop a stale response if the user switched tabs mid-flight.
+    if (String(_smgmtInspectorTab) !== want) return;
+    const tail = (data && typeof data.tail === 'string') ? data.tail : '';
+    if (!tail.trim()) {
+      bodyEl.innerHTML = '<span class="log-empty">No log output yet.</span>';
+      return;
+    }
+    bodyEl.innerHTML = tail.split('\n').map(line =>
+      `<div class="log-line">${colorizeLogLine(line, repo)}</div>`).join('');
+  }).catch(() => { /* leave the previous content in place on a transient error */ });
+}
+
+/** Hide the inspector and stop its streaming poll (sprint ended / rail emptied). */
+function _smgmtInspectorClose() {
+  if (_smgmtInspectorPollId !== null) { clearInterval(_smgmtInspectorPollId); _smgmtInspectorPollId = null; }
+  _smgmtInspectorNum = null;
+  const panel = document.getElementById('smgmt-inspector');
+  if (panel) { panel.hidden = true; panel.innerHTML = ''; }
 }
 
 // ── Running metrics strip (issue #803) ───────────────────────────────────────

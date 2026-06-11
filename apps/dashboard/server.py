@@ -7564,6 +7564,33 @@ def _rerun_policy(labels: set[str]) -> tuple[str, list[str]]:
     return "dispatch_coder", []
 
 
+# Session-state labels stripped when a sprint is re-run (issue #811). These
+# describe a ticket's in-flight work session — needs-rework, an active
+# in-progress run, an away/parked SIT session, or a tester rejection. The
+# moment a fresh re-run begins no such session exists yet, so the labels are
+# stale and misrepresent what needs attention. This is the label taxonomy the
+# re-run sweep consults; labels outside it (e.g. bug, priority-high, size-M)
+# are intrinsic to the ticket and are always preserved.
+_SESSION_STATE_LABELS = frozenset({
+    "needs-rework",
+    "need-rework",
+    "in-progress",
+    "sit-away",
+    "tester-rejected",
+})
+
+
+def _stale_session_labels(labels) -> list[str]:
+    """Return the session-state labels present in `labels`, sorted.
+
+    Used on sprint re-run to strip stale status labels (issue #811). Only
+    labels in the `_SESSION_STATE_LABELS` taxonomy are returned; everything
+    else is preserved. Returns an empty list when no stale labels are present,
+    so callers can re-run cleanly when there is nothing to strip.
+    """
+    return sorted(set(labels) & _SESSION_STATE_LABELS)
+
+
 @app.get("/api/sprints/{sprint_label}/estimate")
 def get_sprint_estimate(sprint_label: str, project: str):
     """Return the sprint estimate JSON file content for sprint_label.
@@ -9271,10 +9298,14 @@ def rerun_sprint(sprint_label: str, project: str, body: SprintRerunV2Body):
 
     _NON_WORK_LABELS_RR = {"sprint-summary", "docs", "documentation"}
     decisions: list[dict] = []
+    # issue_num -> set of its current label names, so the move loop can strip
+    # stale session-state labels without re-fetching (issue #811).
+    issue_labels: dict[int, set[str]] = {}
     for iss in sprint_issues:
         current_labels = {lbl["name"] for lbl in iss.get("labels", [])}
         if current_labels & _NON_WORK_LABELS_RR:
             continue
+        issue_labels[iss["number"]] = current_labels
         action, _ = _rerun_policy(current_labels)
         decisions.append({
             "issue_num": iss["number"],
@@ -9311,20 +9342,27 @@ def rerun_sprint(sprint_label: str, project: str, body: SprintRerunV2Body):
 
     errors: list[str] = []
     moved: list[int] = []
+    # Audit trail of stale session-state labels stripped on this re-run
+    # (issue #811): [{issue_num, removed_labels}], one entry per ticket that
+    # actually carried stale labels.
+    stripped_labels: list[dict] = []
 
     for d in to_move:
         issue_num = d["issue_num"]
+        stale = _stale_session_labels(issue_labels.get(issue_num, set()))
         try:
             github_client.update_labels(
                 issue_num,
                 add=[sub_label],
-                remove=[sprint_label],
+                remove=[sprint_label, *stale],
                 repo_name=project,
             )
         except subprocess.CalledProcessError as e:
             errors.append(f"#{issue_num} label swap failed: {e.stderr.strip() if e.stderr else str(e)}")
             continue
         moved.append(issue_num)
+        if stale:
+            stripped_labels.append({"issue_num": issue_num, "removed_labels": stale})
 
     commander = _commander_dir(project_root)
     sprints_dir = commander / "sprints"
@@ -9352,14 +9390,31 @@ def rerun_sprint(sprint_label: str, project: str, body: SprintRerunV2Body):
     github_client.invalidate("issues:")
     github_client.invalidate("sprint_labels:")
 
-    # Scoped activity-log event for the sprint target (issue #721)
+    # Scoped activity-log event for the sprint target (issue #721). The
+    # stripped_labels payload is the timestamped audit trail of which stale
+    # session-state labels were removed from which items on re-run (issue #811).
     _emit_dashboard_event(
         project=project,
         type="sprint_rerun",
         target=sub_label,
-        detail={"sprint_id": sprint_label, "sub_label": sub_label},
+        detail={
+            "sprint_id": sprint_label,
+            "sub_label": sub_label,
+            "stripped_labels": stripped_labels,
+        },
         action_id=str(uuid.uuid4()),
     )
+
+    if stripped_labels:
+        print(
+            f"[rerun] {sprint_label} → {sub_label}: stripped stale session "
+            f"labels from {len(stripped_labels)} item(s): "
+            + ", ".join(
+                f"#{e['issue_num']}={'+'.join(e['removed_labels'])}"
+                for e in stripped_labels
+            ),
+            flush=True,
+        )
 
     result: dict = {
         "noop": False,
@@ -9368,6 +9423,7 @@ def rerun_sprint(sprint_label: str, project: str, body: SprintRerunV2Body):
         "dispatch_count": len(moved),
         "moved": moved,
         "decisions": decisions,
+        "stripped_labels": stripped_labels,
     }
     if errors:
         result["errors"] = errors

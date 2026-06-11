@@ -353,8 +353,10 @@ def _build_blocked(db, project_key: str) -> list[dict]:
 
 
 def _needs_you_count(db, project_key: str) -> int:
+    # Open issues only — the mirror holds full history, and shipped tickets
+    # keep their `uat` label at close (counting those showed 817 here).
     count = 0
-    for issue in db.get_mirrored_issues(project_key):
+    for issue in db.get_mirrored_issues(project_key, state="open"):
         if _label_names(issue) & _NEEDS_YOU_LABELS:
             count += 1
     return count

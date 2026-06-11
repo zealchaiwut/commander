@@ -10,6 +10,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 
 from .log_search_service import DEFAULT_LIMIT, search_logs
+from . import logs_stats_service
 
 router = APIRouter(prefix="/api/logs", tags=["logs"])
 
@@ -70,3 +71,15 @@ def get_logs_search(
         limit=DEFAULT_LIMIT,
     )
     return result
+
+
+@router.get("/runs/{sprint_label}/ticket-stats")
+def get_logs_ticket_stats(sprint_label: str, project: Optional[str] = None) -> Any:
+    """Per-ticket timing + token + failure detail for a Logs-tab run (issue #858).
+
+    One row per ticket in the sprint, each carrying the coder/tester duration,
+    the combined token total (any of which may be null → dash on the frontend),
+    and the failure class + message for failed tickets. Aggregated locally from
+    the durable ``agent_runs`` rows; logic lives in ``logs_stats_service``.
+    """
+    return logs_stats_service.ticket_stats(sprint_label, project=project)

@@ -921,7 +921,9 @@ from routers import (  # noqa: E402
     backup_router,
     log_search_router,
     runs_router,
+    sprints_router,
     system_router,
+    tickets_router,
 )
 
 app.include_router(activity_router)
@@ -929,7 +931,9 @@ app.include_router(analytics_router)
 app.include_router(backup_router)
 app.include_router(log_search_router)
 app.include_router(runs_router)
+app.include_router(sprints_router)
 app.include_router(system_router)
+app.include_router(tickets_router)
 
 logger = logging.getLogger(__name__)
 
@@ -1540,18 +1544,6 @@ def post_create_label(body: CreateLabelBody):
         raise HTTPException(400, detail=str(e))
 
 
-@app.get("/api/sprints")
-def get_sprints():
-    try:
-        sprints = github_client.list_sprints()
-        default = github_client.latest_active_sprint()
-        return {"sprints": sprints, "default": default}
-    except subprocess.CalledProcessError as e:
-        raise _gh_error(e)
-    except ValueError as e:
-        raise HTTPException(400, detail=str(e))
-
-
 @app.get("/api/sprint-nav-status")
 def get_sprint_nav_status(repo: str = ""):
     """GitHub-backed sprint status for the nav-bar pill.
@@ -1787,19 +1779,6 @@ def approve_issue(request: Request, issue_id: int, repo: Optional[str] = None):
     except subprocess.CalledProcessError as e:
         _slog.event("route.error", project="dashboard", request_id=request.state.request_id, route="/api/issues/{issue_id}/approve", level="error", issue_id=issue_id, error=str(e))
         raise _gh_error(e)
-
-
-@app.post("/api/tickets/{issue_id}/approve")
-async def approve_ticket(request: Request, issue_id: int, repo: Optional[str] = None):
-    """Close a UAT-labelled ticket on GitHub and remove the UAT label."""
-    _slog.event("route.entry", project="dashboard", request_id=request.state.request_id, route="/api/tickets/{issue_id}/approve", method="POST", issue_id=issue_id)
-    try:
-        github_client.approve_issue(issue_id, repo_name=repo)
-    except subprocess.CalledProcessError as e:
-        _slog.event("route.error", project="dashboard", request_id=request.state.request_id, route="/api/tickets/{issue_id}/approve", level="error", issue_id=issue_id, error=str(e))
-        raise _gh_error(e)
-    await broadcast({"type": "update", "event": {"event_type": "ticket_approved", "issue": issue_id}})
-    return {"ok": True}
 
 
 @app.post("/api/issues/{issue_id}/reject")
@@ -4845,18 +4824,14 @@ def _sprint_goal_path(project_root: Path, sprint_label: str) -> Path:
     return _commander_dir(project_root) / "sprints" / f"{sprint_label}-goal.txt"
 
 
-def _build_sprint_subprocess_env() -> dict:
-    """Build the subprocess environment for sprint_manager.
-
-    Strips ANTHROPIC_API_KEY and resolves DB_PATH to an absolute path so that
-    sprint_manager (which runs from the coder clone CWD) writes to the same
-    database that the server reads from, regardless of relative path differences.
-    """
-    env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
-    db_val = env.get("DB_PATH", "")
-    if db_val and not os.path.isabs(db_val):
-        env["DB_PATH"] = str(Path(db_val).resolve())
-    return env
+# Shared sprint-dispatch env builder now lives in routers.dispatch_service so
+# the extracted routers and the sprint_manager-facing run/finish endpoints share
+# one implementation (issue #795). Re-exported under the original private name so
+# existing callers and tests (which patch server._build_sprint_subprocess_env)
+# keep working unchanged.
+from routers.dispatch_service import (  # noqa: E402
+    build_sprint_subprocess_env as _build_sprint_subprocess_env,
+)
 
 
 def _sprint_plan_path(project_root: Path, sprint_label: str) -> Path:
@@ -5293,42 +5268,10 @@ class SprintMgmtRunBody(BaseModel):
     migrate_from: list[int] = []
 
 
-class SprintOrderBody(BaseModel):
-    order: list[str]
-
-
 class SprintCreateBody(BaseModel):
     project: str
     sprint_number: int | None = None
     goal: str | None = None
-
-
-class SprintGoalBody(BaseModel):
-    project: str
-    sprint_label: str
-    goal: str
-
-
-@app.get("/api/sprints/goal")
-def get_sprint_goal(project: str, sprint: str):
-    """Return the persisted sprint goal for a project/sprint."""
-    project_root = _project_root_path(project)
-    goal_path = _sprint_goal_path(project_root, sprint)
-    if goal_path.exists():
-        return {"goal": goal_path.read_text(encoding="utf-8").strip()}
-    return {"goal": ""}
-
-
-@app.post("/api/sprints/goal")
-def save_sprint_goal(body: SprintGoalBody):
-    """Persist sprint goal to .commander/sprints/<label>-goal.txt."""
-    if not _SPRINT_LABEL_RE.match(body.sprint_label):
-        raise HTTPException(400, detail=f"Invalid sprint label: {body.sprint_label!r}")
-    project_root = _project_root_path(body.project)
-    goal_path = _sprint_goal_path(project_root, body.sprint_label)
-    goal_path.parent.mkdir(parents=True, exist_ok=True)
-    goal_path.write_text(body.goal, encoding="utf-8")
-    return {"ok": True}
 
 
 @app.get("/api/sprint-management/issues")
@@ -5717,28 +5660,6 @@ def get_sprint_summaries(project: str):
     summaries.sort(key=_sort_key)
 
     return {"summaries": summaries}
-
-
-@app.get("/api/sprints/order")
-def get_sprint_order(project: str):
-    """Return the persisted sprint display order for a project slug."""
-    project_root = _project_root_path(project)
-    try:
-        sprints = github_client.list_sprints(repo_name=None)
-    except Exception:
-        sprints = []
-    order = _load_sprint_order(project_root, sprints)
-    return {"order": order}
-
-
-@app.post("/api/sprints/order")
-def save_sprint_order(project: str, body: SprintOrderBody):
-    """Persist sprint display order for a project slug."""
-    project_root = _project_root_path(project)
-    order_path = _sprint_order_path(project_root)
-    order_path.parent.mkdir(parents=True, exist_ok=True)
-    order_path.write_text(json.dumps(body.order), encoding="utf-8")
-    return {"ok": True}
 
 
 # READ-only: recognises both spellings so migration removes whichever is present
@@ -6534,20 +6455,6 @@ def run_sprint_managed(request: Request, body: SprintMgmtRunBody):
     }
 
 
-@app.get("/api/sprints/running-all")
-def get_all_running_sprints():
-    """Return ALL currently running sprints across all projects.
-
-    Reads plan.json state=running as the authoritative source (issue #507).
-    PID files are retained only for process-killing.
-
-    Returns: {"running": [{"project": ..., "sprint_label": ...}, ...]}
-    Empty list means no sprints are running.
-    """
-    all_running = _all_sprints_running()
-    return {"running": all_running}
-
-
 @app.get("/api/sprints/{sprint_label}/state")
 def get_sprint_state(sprint_label: str, project: str):
     """Return the full plan.json payload for a sprint (issue #507).
@@ -6804,16 +6711,6 @@ def post_logs_sync_github(project: Optional[str] = None):
     except Exception as exc:
         return {"synced": 0, "skipped": 0, "rate_limited": False, "error": str(exc)}
     return result
-
-
-@app.get("/api/sprints/{sprint_label}/dispatch-log")
-def get_dispatch_log(sprint_label: str, project: str, tail_lines: int = 200):
-    """Return the last N lines of the most recent sprint-run-<label>-*.log."""
-    if not _SPRINT_LABEL_RE.match(sprint_label):
-        raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")
-    from log_source import read_log  # local import keeps startup fast
-    project_root = _project_root_path(project)
-    return read_log("dispatch", project_root, label=sprint_label, tail_lines=tail_lines)
 
 
 @app.get("/api/sprints/{sprint_label}/state-full")
@@ -11912,39 +11809,6 @@ async def bulk_job_stream(job_id: str, request: Request):
 
 class BulkStopBody(BaseModel):
     pass
-
-
-@app.post("/api/tickets/bulk/{job_id}/stop")
-async def bulk_stop_job(job_id: str):
-    """Graceful stop: finish in-flight BA calls, mark remaining pending as skipped."""
-    job = _get_bulk_job(job_id)
-    if not job:
-        raise HTTPException(404, detail="Job not found")
-    job["stop_requested"] = True
-    _persist_bulk_job(job)
-    return {"ok": True}
-
-
-@app.delete("/api/tickets/bulk/{job_id}")
-async def bulk_delete_job(job_id: str):
-    """Discard a bulk job entirely — used by the "Start new batch" / clear action.
-
-    Signals any live worker to stop, drops the in-memory entry, and removes the
-    persisted JSON so a wedged or finished job never reloads. Idempotent:
-    returns ok even if the job is already gone.
-    """
-    job = _bulk_jobs.get(job_id)
-    if job is not None:
-        job["stop_requested"] = True
-    _bulk_jobs.pop(job_id, None)
-    _bulk_job_queues.pop(job_id, None)
-    try:
-        path = _bulk_jobs_dir() / f"{job_id}.json"
-        if path.exists():
-            path.unlink()
-    except Exception as e:
-        logger.warning("bulk_delete_job: could not remove %s.json: %s", job_id, str(e)[:200])
-    return {"ok": True}
 
 
 class BulkSkipBody(BaseModel):

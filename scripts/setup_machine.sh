@@ -26,6 +26,11 @@
 # Behaviour flags:
 #   SETUP_MACHINE_DRY_RUN=1   echo side-effecting commands instead of running
 #   SETUP_MACHINE_SKIP_PIP=1  skip the pip install step
+#   SETUP_MACHINE_SKIP_NPM=1  skip the frontend build step (npm install / build)
+#
+# Frontend build (issue #796): the dashboard JS is bundled with esbuild from
+# apps/dashboard/static/src into apps/dashboard/static/dist/bundle.js. Bootstrap
+# runs `npm install` then `npm run build` when npm is available.
 
 set -euo pipefail
 
@@ -96,6 +101,33 @@ setup_venv() {
         run_step "$VENV_DIR/bin/pip" install --quiet --upgrade pip
         run_step "$VENV_DIR/bin/pip" install --quiet -r "$REPO_ROOT/requirements.txt"
     fi
+}
+
+# ── 1b. frontend build (esbuild pipeline, issue #796) ─────────────────────────
+#
+# The dashboard JS source lives in apps/dashboard/static/src and is bundled to
+# apps/dashboard/static/dist/bundle.js by esbuild. Production serves static
+# files from disk with no build step, so the committed bundle already works —
+# but a fresh dev clone should install deps and rebuild so `npm run watch`
+# works and the bundle stays in sync with source edits.
+#
+#   npm install        # install esbuild + lint toolchain
+#   npm run build      # emit static/dist/bundle.js (+ .map)
+setup_frontend() {
+    if [ "${SETUP_MACHINE_SKIP_NPM:-}" = "1" ]; then
+        echo "[frontend] SETUP_MACHINE_SKIP_NPM=1 — skipping npm install/build."
+        return 0
+    fi
+    if ! command -v npm >/dev/null 2>&1; then
+        echo "[frontend] npm not found — install Node.js to build the dashboard"
+        echo "[frontend]   bundle. The committed static/dist/bundle.js still"
+        echo "[frontend]   works at runtime; rebuild later with: npm install && npm run build"
+        return 0
+    fi
+    echo "[frontend] Installing JS build deps (npm install) …"
+    run_step npm --prefix "$REPO_ROOT" install
+    echo "[frontend] Building dashboard bundle (npm run build) …"
+    run_step npm --prefix "$REPO_ROOT" run build
 }
 
 # ── 2. .env from .env.example (+ prompt for secret keys, never echoed) ────────
@@ -275,6 +307,15 @@ run_doctor() {
         fails=$((fails + 1))
     fi
 
+    # Node/npm power the esbuild frontend pipeline (issue #796). Informational
+    # only — the committed static/dist/bundle.js runs without a build step, so a
+    # missing toolchain must not fail provisioning; it only blocks rebuilds.
+    if command -v npm >/dev/null 2>&1; then
+        _row PASS "npm present" "frontend: npm install && npm run build"
+    else
+        _row INFO "npm present" "optional; needed only to rebuild the dashboard bundle"
+    fi
+
     if [ "$fails" -gt 0 ]; then
         echo ""
         echo "$fails doctor check(s) FAILED."
@@ -339,6 +380,7 @@ fi
 
 # Bootstrap steps (full + setup-only).
 setup_venv
+setup_frontend
 setup_env
 setup_layout
 

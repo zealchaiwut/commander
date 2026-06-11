@@ -15,6 +15,7 @@ from typing import Optional
 from fastapi import APIRouter
 from pydantic import BaseModel
 
+from . import brief_artifact
 from . import brief_service
 from . import brief_summary
 
@@ -124,6 +125,27 @@ class HomeSummary(BaseModel):
     source: str  # "model" | "fallback"
 
 
+class DailyArtifact(BaseModel):
+    """A stored daily brief artifact (issue #841).
+
+    ``available`` is ``False`` for a date with no stored brief, in which case
+    ``brief``/``summary``/``generated_at`` are null and ``message`` carries the
+    empty-state text (never an error).
+    """
+    scope: Optional[str] = None
+    project: Optional[str] = None
+    date: str
+    available: bool
+    covering_since: Optional[str] = None
+    window_start: Optional[str] = None
+    window_end: Optional[str] = None
+    generated_at: Optional[str] = None
+    summary: Optional[str] = None
+    summary_source: Optional[str] = None
+    brief: Optional[dict] = None
+    message: Optional[str] = None
+
+
 # ── routes ────────────────────────────────────────────────────────────────────
 
 @router.get("/api/projects/{slug}/brief", response_model=ProjectBrief)
@@ -166,3 +188,34 @@ def get_home_brief_summary(date: Optional[str] = None):
 def regenerate_home_brief_summary(date: Optional[str] = None):
     """Clear the stored home recap and re-invoke the model (Regenerate)."""
     return brief_summary.get_or_create_home_summary(date=date, force=True)
+
+
+# ── daily artifact store (issue #841) ─────────────────────────────────────────
+# Persist the full daily brief per (project, date) so it is generated once and
+# served instantly thereafter. The current day is lazily generated on first
+# load; past dates are served from the store, with a clear empty state when none
+# was ever stored (never a recompute, never a 5xx).
+
+@router.get("/api/projects/{slug}/brief/daily", response_model=DailyArtifact)
+def get_project_daily_brief(slug: str, date: Optional[str] = None):
+    """Return the stored (or lazily generated) daily brief for a project."""
+    return brief_artifact.get_or_create_project_artifact(slug, date=date)
+
+
+@router.post("/api/projects/{slug}/brief/daily/regenerate",
+             response_model=DailyArtifact)
+def regenerate_project_daily_brief(slug: str, date: Optional[str] = None):
+    """Rebuild and re-store the daily brief, advancing the timestamp (AC7)."""
+    return brief_artifact.get_or_create_project_artifact(slug, date=date, force=True)
+
+
+@router.get("/api/brief/daily", response_model=DailyArtifact)
+def get_home_daily_brief(date: Optional[str] = None):
+    """Return the stored (or lazily generated) daily home roll-up artifact."""
+    return brief_artifact.get_or_create_home_artifact(date=date)
+
+
+@router.post("/api/brief/daily/regenerate", response_model=DailyArtifact)
+def regenerate_home_daily_brief(date: Optional[str] = None):
+    """Rebuild and re-store the daily home roll-up, advancing the timestamp."""
+    return brief_artifact.get_or_create_home_artifact(date=date, force=True)

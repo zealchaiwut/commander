@@ -296,6 +296,81 @@ def delete_brief_summary(scope: str, project: str, date: str) -> None:
         conn.commit()
 
 
+# ── Daily brief artifact store (issue #841) ───────────────────────────────────
+#
+# Persists the full daily brief as an artifact keyed by (scope, project, date) so
+# a given day's brief is generated once and served instantly thereafter. `scope`
+# is 'project' (keyed by slug) or 'home' (project=''). The `payload` column holds
+# the complete brief object (window metadata + structured brief + summary) as
+# JSON; `generated_at` records when it was last (re)generated, which the
+# Regenerate action advances.
+
+def _create_brief_artifacts_table(conn: sqlite3.Connection) -> None:
+    """Create the brief_artifacts store table (issue #841)."""
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS brief_artifacts (
+            scope        TEXT NOT NULL,
+            project      TEXT NOT NULL DEFAULT '',
+            date         TEXT NOT NULL,
+            payload      TEXT NOT NULL,
+            generated_at TEXT NOT NULL,
+            PRIMARY KEY (scope, project, date)
+        )
+    """)
+
+
+def get_brief_artifact(scope: str, project: str, date: str) -> dict | None:
+    """Return the stored artifact for (scope, project, date), or None.
+
+    The returned dict is ``{"payload": <decoded dict>, "generated_at": <iso>}``.
+    """
+    with get_conn() as conn:
+        _create_brief_artifacts_table(conn)
+        row = conn.execute(
+            "SELECT payload, generated_at FROM brief_artifacts "
+            "WHERE scope = ? AND project = ? AND date = ?",
+            (scope, project or "", date),
+        ).fetchone()
+    if row is None:
+        return None
+    try:
+        payload = json.loads(row["payload"])
+    except (ValueError, TypeError):
+        payload = None
+    return {"payload": payload, "generated_at": row["generated_at"]}
+
+
+def set_brief_artifact(scope: str, project: str, date: str, payload: dict,
+                       generated_at: str | None = None) -> str:
+    """Upsert the stored artifact for (scope, project, date).
+
+    Returns the ``generated_at`` timestamp written (a fresh one is stamped when
+    not supplied), so the caller can surface the new generation time.
+    """
+    ts = generated_at or _now_iso()
+    with get_conn() as conn:
+        _create_brief_artifacts_table(conn)
+        conn.execute(
+            "INSERT OR REPLACE INTO brief_artifacts "
+            "(scope, project, date, payload, generated_at) VALUES (?, ?, ?, ?, ?)",
+            (scope, project or "", date, json.dumps(payload), ts),
+        )
+        conn.commit()
+    return ts
+
+
+def delete_brief_artifact(scope: str, project: str, date: str) -> None:
+    """Clear the stored artifact for (scope, project, date)."""
+    with get_conn() as conn:
+        _create_brief_artifacts_table(conn)
+        conn.execute(
+            "DELETE FROM brief_artifacts "
+            "WHERE scope = ? AND project = ? AND date = ?",
+            (scope, project or "", date),
+        )
+        conn.commit()
+
+
 # ── Sprint lifecycle + ticket order (issue #757) ──────────────────────────────
 #
 # The durable home for sprint lifecycle state and ticket execution order. These

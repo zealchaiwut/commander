@@ -24174,8 +24174,14 @@ async function sprintCleanupConfirm() {
 }
 </script>
 
+<!-- Log-panel tokenizer (issue #796): the colorize/tokenizer code formerly loaded
+     as the standalone static/log-colorize.js is now the first esbuild module
+     (source: static/src/logpanel.js). The dashboard is served from disk with no
+     build step, so the committed bundle is loaded directly. It re-exposes
+     window.colorizeLogLine / escapeLogHtml / extractRaw, preserving the page's
+     historical global API. -->
+<script src="/static/dist/bundle.js"></script>
 <!-- Shared Add Project modal logic (single source of truth for home + project) -->
-<script src="/static/log-colorize.js"></script>
 <script src="/static/add-project-modal.js"></script>
 
 </body>

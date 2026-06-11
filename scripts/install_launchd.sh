@@ -19,14 +19,33 @@
 # EnvironmentVariables block and the agent .env. The value is supplied at install
 # time (--gh-token, or $GH_TOKEN / $GITHUB_TOKEN) — never hard-coded in the repo.
 #
+# CLAUDE_CODE_OAUTH_TOKEN (issue #827): the same detachment means the `claude`
+# CLI cannot read the subscription auth stored in the login keychain / shell rc,
+# so every agent dispatch from the launchd-run dashboard fails to authenticate.
+# A CLAUDE_CODE_OAUTH_TOKEN is injected into the plist EnvironmentVariables block
+# so the claude subprocess inherits it. Supplied at install time (--claude-token
+# or $CLAUDE_CODE_OAUTH_TOKEN) — never hard-coded in the repo.
+#
+# Obtaining the tokens:
+#   CLAUDE_CODE_OAUTH_TOKEN  ->  run `claude setup-token`
+#   GH_TOKEN                 ->  run `gh auth token`
+# Both tokens are written ONLY to the per-user plist (chmod 600) and, for
+# GH_TOKEN, the agent .env — never echoed to stdout/stderr or committed.
+#
 # Usage:
 #   install_launchd.sh [--label L] [--working-dir D] [--uvicorn-path P]
 #                      [--port N] [--environment E] [--server-app A]
-#                      [--gh-token T] [--env-file F]
+#                      [--claude-token T] [--gh-token T] [--env-file F]
 #                      [--print-plist] [--write-env-only]
 #
-#   --gh-token      GitHub token for headless `gh` auth. If omitted, read from
-#                   the $GH_TOKEN or $GITHUB_TOKEN env var at install time.
+#   --claude-token  Claude Code OAuth token for headless agent dispatch (mint
+#                   with `claude setup-token`). If omitted, read from the
+#                   $CLAUDE_CODE_OAUTH_TOKEN env var, or prompted for (no echo)
+#                   when run interactively.
+#   --gh-token      GitHub token for headless `gh` auth (mint with
+#                   `gh auth token`). If omitted, read from the $GH_TOKEN or
+#                   $GITHUB_TOKEN env var, or prompted for (no echo) when run
+#                   interactively.
 #   --env-file      Path to the agent .env that receives GH_TOKEN
 #                   (default: <working-dir>/.env).
 #   --print-plist   Render the plist to stdout and exit 0 WITHOUT touching
@@ -49,7 +68,12 @@ SERVER_APP="server:app"
 PRINT_PLIST=false
 WRITE_ENV_ONLY=false
 GH_TOKEN_ARG=""
+CLAUDE_TOKEN_ARG=""
 ENV_FILE=""
+# Plist EnvironmentVariables fragments — populated only when a token is present,
+# so a tokenless install renders the pre-token plist (backward compatible).
+GH_TOKEN_PLIST_BLOCK=""
+CLAUDE_TOKEN_PLIST_BLOCK=""
 
 # ── Parse args ────────────────────────────────────────────────────────────────
 while [ $# -gt 0 ]; do
@@ -61,6 +85,7 @@ while [ $# -gt 0 ]; do
     --environment)    ENVIRONMENT="$2"; shift 2 ;;
     --server-app)     SERVER_APP="$2"; shift 2 ;;
     --gh-token)       GH_TOKEN_ARG="$2"; shift 2 ;;
+    --claude-token)   CLAUDE_TOKEN_ARG="$2"; shift 2 ;;
     --env-file)       ENV_FILE="$2"; shift 2 ;;
     --print-plist)    PRINT_PLIST=true; shift ;;
     --write-env-only) WRITE_ENV_ONLY=true; shift ;;
@@ -78,17 +103,13 @@ LOG_DIR="$HOME/Library/Logs/${LABEL}"
 UVICORN_BIN_DIR="$(dirname "$UVICORN_PATH")"
 [ -n "$ENV_FILE" ] || ENV_FILE="$WORKING_DIR/.env"
 
-# ── Resolve the GH_TOKEN value (issue #772) ───────────────────────────────────
-# Precedence: explicit --gh-token > $GH_TOKEN > $GITHUB_TOKEN. Empty if none —
-# the token is never hard-coded, so an absent value simply omits GH_TOKEN.
+# ── Resolve the token values (issues #772, #827) ──────────────────────────────
+# GH_TOKEN precedence:  explicit --gh-token > $GH_TOKEN > $GITHUB_TOKEN.
+# CLAUDE precedence:     explicit --claude-token > $CLAUDE_CODE_OAUTH_TOKEN.
+# Empty if none — tokens are never hard-coded, so an absent value is simply
+# omitted from the rendered plist.
 GH_TOKEN_VALUE="${GH_TOKEN_ARG:-${GH_TOKEN:-${GITHUB_TOKEN:-}}}"
-
-# Build the optional plist fragment only when a token is present, so a tokenless
-# install renders exactly the pre-#772 plist (backward compatible with #724).
-GH_TOKEN_PLIST_BLOCK=""
-if [ -n "$GH_TOKEN_VALUE" ]; then
-  GH_TOKEN_PLIST_BLOCK=$'\n    <key>GH_TOKEN</key>\n    <string>'"${GH_TOKEN_VALUE}"$'</string>'
-fi
+CLAUDE_TOKEN_VALUE="${CLAUDE_TOKEN_ARG:-${CLAUDE_CODE_OAUTH_TOKEN:-}}"
 
 # write_env_token <env-file> <token> — set/replace GH_TOKEN in the agent .env.
 # Idempotent: an existing GH_TOKEN line is rewritten in place (no duplicate);
@@ -153,7 +174,7 @@ render_plist() {
     <key>PATH</key>
     <string>${PATH_VALUE}</string>
     <key>ENVIRONMENT</key>
-    <string>${ENVIRONMENT}</string>${GH_TOKEN_PLIST_BLOCK}
+    <string>${ENVIRONMENT}</string>${GH_TOKEN_PLIST_BLOCK}${CLAUDE_TOKEN_PLIST_BLOCK}
   </dict>
 
   <!-- Log files under ~/Library/Logs/<label>/ -->
@@ -178,6 +199,41 @@ if $WRITE_ENV_ONLY; then
   write_env_token "$ENV_FILE" "$GH_TOKEN_VALUE"
   echo "Wrote GH_TOKEN to $ENV_FILE"
   exit 0
+fi
+
+# ── Interactive prompts + missing-token warnings (issues #772, #827) ──────────
+# When a token is missing and we have a terminal, prompt for it with echo off
+# (`read -rs`) so the value never shows on screen or in scrollback. In a
+# non-interactive run (CI, sprint dispatch) we skip the prompt and only warn.
+if [ -z "$CLAUDE_TOKEN_VALUE" ] && [ -t 0 ]; then
+  read -rs -p "CLAUDE_CODE_OAUTH_TOKEN (claude setup-token; leave blank to skip): " CLAUDE_TOKEN_VALUE
+  echo >&2
+fi
+if [ -z "$GH_TOKEN_VALUE" ] && [ -t 0 ]; then
+  read -rs -p "GH_TOKEN (gh auth token; leave blank to skip): " GH_TOKEN_VALUE
+  echo >&2
+fi
+
+# Named warnings so the operator knows exactly what will break. Routed to stderr
+# so they never contaminate --print-plist stdout. The token VALUES are never
+# printed — only the fact that they are missing.
+if [ -z "$CLAUDE_TOKEN_VALUE" ]; then
+  echo "WARNING: CLAUDE_CODE_OAUTH_TOKEN not supplied — agent dispatch will fail;" >&2
+  echo "         the launchd-detached claude CLI cannot authenticate. Mint one" >&2
+  echo "         with: claude setup-token" >&2
+fi
+if [ -z "$GH_TOKEN_VALUE" ]; then
+  echo "WARNING: GH_TOKEN not supplied — gh API calls will fail under launchd" >&2
+  echo "         (no keychain access). Mint one with: gh auth token" >&2
+fi
+
+# Build the optional plist fragments only when a token is present, so a
+# tokenless install renders exactly the pre-token plist (backward compatible).
+if [ -n "$GH_TOKEN_VALUE" ]; then
+  GH_TOKEN_PLIST_BLOCK=$'\n    <key>GH_TOKEN</key>\n    <string>'"${GH_TOKEN_VALUE}"$'</string>'
+fi
+if [ -n "$CLAUDE_TOKEN_VALUE" ]; then
+  CLAUDE_TOKEN_PLIST_BLOCK=$'\n    <key>CLAUDE_CODE_OAUTH_TOKEN</key>\n    <string>'"${CLAUDE_TOKEN_VALUE}"$'</string>'
 fi
 
 # ── Resolve tool directories dynamically (issue #826) ─────────────────────────
@@ -238,6 +294,11 @@ echo "Environment : $ENVIRONMENT"
 echo "claude bin  : $CLAUDE_BIN_DIR"
 echo "gh bin      : $GH_BIN_DIR"
 echo "venv bin    : $UVICORN_BIN_DIR"
+if [ -n "$CLAUDE_TOKEN_VALUE" ]; then
+  echo "CLAUDE_TOKEN: set (headless agent dispatch) -> plist"
+else
+  echo "CLAUDE_TOKEN: not supplied — agent dispatch will fail under launchd"
+fi
 if [ -n "$GH_TOKEN_VALUE" ]; then
   echo "GH_TOKEN    : set (headless gh auth) -> plist + $ENV_FILE"
 else
@@ -317,9 +378,11 @@ echo "Generating plist..."
 mkdir -p "$HOME/Library/LaunchAgents"
 mkdir -p "$LOG_DIR"
 
-render_plist > "$PLIST_DEST"
-chmod 644 "$PLIST_DEST"
-echo "Plist installed to: $PLIST_DEST (permissions: 644)"
+# Create the file with a restrictive umask, then chmod 600, so the token values
+# in EnvironmentVariables are never world/group-readable at rest (issue #827).
+( umask 077; render_plist > "$PLIST_DEST" )
+chmod 600 "$PLIST_DEST"
+echo "Plist installed to: $PLIST_DEST (permissions: 600)"
 
 # Mirror the token into the agent .env so anything that sources .env at runtime
 # (not just the launchd environment) sees the same GH_TOKEN (issue #772).

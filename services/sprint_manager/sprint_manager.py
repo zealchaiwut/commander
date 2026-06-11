@@ -157,6 +157,13 @@ from services.logging import log as structured_log
 from services.sprint_manager import agent_browser_runner  # issue #710: live-browser UAT
 
 try:
+    from services.sprint_manager.brief_generator import write_sprint_brief as _write_sprint_brief  # issue #860
+    _BRIEF_GENERATOR_AVAILABLE = True
+except ImportError:  # pragma: no cover
+    _write_sprint_brief = None  # type: ignore[assignment]
+    _BRIEF_GENERATOR_AVAILABLE = False
+
+try:
     from db import record_event as _db_record_event  # type: ignore[import]
     _RECORD_EVENT_AVAILABLE = True
 except ImportError:
@@ -8513,6 +8520,31 @@ def main() -> None:
                 state_path_doc.write_text(json.dumps(sd3, indent=2))
             except Exception as e_persist:
                 structured_log.warn("documenter_state_persist_failed", f"could not persist documenter outcome: {e_persist}", exc=str(e_persist))
+
+    # Write per-sprint brief after documenter (issue #860)
+    if not args.dry_run and state.issues and _BRIEF_GENERATOR_AVAILABLE:
+        _brief_git_root = cfg.worktree_tester if cfg else Path.cwd()
+        _brief_state_path = _state_path(state.sprint_number, state.sprint_label, cfg=cfg)
+        _brief_summary_issue_num: Optional[int] = None
+        if _brief_state_path.exists():
+            try:
+                _bsd = json.loads(_brief_state_path.read_text())
+                _burl = _bsd.get("summary_issue_url", "")
+                _bm = re.search(r"/issues/(\d+)$", _burl)
+                if _bm:
+                    _brief_summary_issue_num = int(_bm.group(1))
+            except Exception:
+                pass
+        try:
+            _write_sprint_brief(
+                state             = state,
+                repo_name         = eff_repo,
+                git_root          = Path(_brief_git_root),
+                summary_issue_num = _brief_summary_issue_num,
+            )
+        except Exception as e_brief:
+            structured_log.warn("brief_generator_failed", f"write_sprint_brief failed (non-fatal): {e_brief}", exc=str(e_brief))
+            sys.stdout.write(str(f"  [brief_generator] WARNING: brief generation failed: {e_brief}") + "\n")
 
     # AC6, AC7: auto-create PR sprint/sprint-N → develop at sprint end,
     # but only when we were running in sprint-branch mode (not manual 'develop' override)

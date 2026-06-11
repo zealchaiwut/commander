@@ -28,6 +28,21 @@ import {
   _pfComputeConflicts, _pfBuildConflictsHtml, _pfBuildOrderHtml,
   _pfUpdateSections, _pfShowError, _pfRetry, _pfConfirm,
 } from './run-controls.js';
+import {
+  _smgmtUpdateSelectionUI, _smgmtPopulateSelectionDropdown, 
+  _smgmtPopulateMoveToMenu, _smgmtToggleMoveToMenu, _smgmtCloseMoveToMenu, 
+  _smgmtClearSelection, _smgmtSetSelected, _smgmtToggleSelect, 
+  _smgmtRowClick, _smgmtIsDeletableIssue, _smgmtDeleteSelected, 
+  _smgmtMoveSelectedTo, _smgmtTicketDragStart, _smgmtDragMovePill, 
+  _smgmtGhostComputeNextFree, _smgmtGhostShow, _smgmtGhostHide, 
+  _smgmtGhostDragOver, _smgmtGhostDragLeave, _smgmtGhostDrop, _gcClose, 
+  _gcConfirm, _smgmtTicketDragEnd, _smgmtDragOver, _smgmtDragLeave, 
+  _smgmtDropOnSprint, _smgmtTicketReorderDragOver, 
+  _smgmtTicketReorderDragLeave, _smgmtTicketReorderDrop, 
+  _smgmtBacklogTicketDragStart, _smgmtBacklogDragOver, 
+  _smgmtBacklogDragLeave, _smgmtDropOnBacklog, _smgmtBoardLock, 
+  _smgmtBoardUnlock,
+} from './drag-drop.js';
 
 // Re-run modal (issue #512)
 globalThis._rrOpen = _rrOpen;
@@ -74,3 +89,40 @@ globalThis._pfUpdateSections = _pfUpdateSections;
 globalThis._pfShowError = _pfShowError;
 globalThis._pfRetry = _pfRetry;
 globalThis._pfConfirm = _pfConfirm;
+
+// Drag & drop + multi-select + ghost pane + board lock (issues #247/#276/#660)
+globalThis._smgmtUpdateSelectionUI = _smgmtUpdateSelectionUI;
+globalThis._smgmtPopulateSelectionDropdown = _smgmtPopulateSelectionDropdown;
+globalThis._smgmtPopulateMoveToMenu = _smgmtPopulateMoveToMenu;
+globalThis._smgmtToggleMoveToMenu = _smgmtToggleMoveToMenu;
+globalThis._smgmtCloseMoveToMenu = _smgmtCloseMoveToMenu;
+globalThis._smgmtClearSelection = _smgmtClearSelection;
+globalThis._smgmtSetSelected = _smgmtSetSelected;
+globalThis._smgmtToggleSelect = _smgmtToggleSelect;
+globalThis._smgmtRowClick = _smgmtRowClick;
+globalThis._smgmtIsDeletableIssue = _smgmtIsDeletableIssue;
+globalThis._smgmtDeleteSelected = _smgmtDeleteSelected;
+globalThis._smgmtMoveSelectedTo = _smgmtMoveSelectedTo;
+globalThis._smgmtTicketDragStart = _smgmtTicketDragStart;
+globalThis._smgmtDragMovePill = _smgmtDragMovePill;
+globalThis._smgmtGhostComputeNextFree = _smgmtGhostComputeNextFree;
+globalThis._smgmtGhostShow = _smgmtGhostShow;
+globalThis._smgmtGhostHide = _smgmtGhostHide;
+globalThis._smgmtGhostDragOver = _smgmtGhostDragOver;
+globalThis._smgmtGhostDragLeave = _smgmtGhostDragLeave;
+globalThis._smgmtGhostDrop = _smgmtGhostDrop;
+globalThis._gcClose = _gcClose;
+globalThis._gcConfirm = _gcConfirm;
+globalThis._smgmtTicketDragEnd = _smgmtTicketDragEnd;
+globalThis._smgmtDragOver = _smgmtDragOver;
+globalThis._smgmtDragLeave = _smgmtDragLeave;
+globalThis._smgmtDropOnSprint = _smgmtDropOnSprint;
+globalThis._smgmtTicketReorderDragOver = _smgmtTicketReorderDragOver;
+globalThis._smgmtTicketReorderDragLeave = _smgmtTicketReorderDragLeave;
+globalThis._smgmtTicketReorderDrop = _smgmtTicketReorderDrop;
+globalThis._smgmtBacklogTicketDragStart = _smgmtBacklogTicketDragStart;
+globalThis._smgmtBacklogDragOver = _smgmtBacklogDragOver;
+globalThis._smgmtBacklogDragLeave = _smgmtBacklogDragLeave;
+globalThis._smgmtDropOnBacklog = _smgmtDropOnBacklog;
+globalThis._smgmtBoardLock = _smgmtBoardLock;
+globalThis._smgmtBoardUnlock = _smgmtBoardUnlock;

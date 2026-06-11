@@ -112,7 +112,850 @@
   // apps/dashboard/static/src/sprint-board/board-render.js
   /* board-render module (issue #797) — placeholder; populated during extraction. */
   // apps/dashboard/static/src/sprint-board/drag-drop.js
-  /* drag-drop module (issue #797) — placeholder; populated during extraction. */
+  /* Sprint-board drag & drop (issue #797) — extracted from project.html.
+   *
+   * Owns: ticket drag start/end + floating pill, drop onto a sprint column,
+   * within-sprint reorder (#247), backlog drag/drop, the ghost pane that creates
+   * a new sprint when a ticket is dropped below all sprints, multi-select drag
+   * (#660) + the selection bar, and the board move-lock overlay (#276).
+   *
+   * The handlers run verbatim against the page; shared board caches and remaining
+   * inline helpers resolve through the page's global scope. `isDragBlocked` /
+   * `computeDropPlan` are the DOM-free decision rules the drag/drop smoke test
+   * exercises; `isDragBlocked` is wired into the live drop guards.
+   */
+
+  /* global _arInterval, _smgmtArStartTicker, _smgmtArStopTicker, _smgmtData, _smgmtRender, _smgmtRepo, _smgmtRunningLabels, _smgmtSelectedIssues, _smgmtShowInlineError, _smgmtShowToast, loadSprintMgmt,
+     _smgmtDragTicket:writable, _smgmtGhostNextNum:writable, _smgmtLastSelectedNum:writable, _smgmtMoveLock:writable */
+
+  function isDragBlocked(state) {
+    // A drop is blocked while a move is already in flight (issue #276) — mirrors
+    // the `if (_smgmtMoveLock) return;` guard wired into the drop handlers below.
+    // Tickets in a running sprint are additionally rendered draggable=false.
+    return !!(state && state.moveLock);
+  }
+
+  function computeDropPlan(dragInfo, targetLabel) {
+    // Canonical move-set rule shared by _smgmtDropOnSprint / _smgmtDropOnBacklog:
+    //  - a multi-selection drag (issue #660) moves every selected ticket;
+    //  - a single drag moves just the dragged ticket;
+    //  - dropping a single ticket on its own column is a no-op.
+    if (!dragInfo) return { mode: 'none', tickets: [], targetLabel, noop: true };
+    if (dragInfo.multi && dragInfo.multi.length > 1) {
+      return { mode: 'multi', tickets: dragInfo.multi.slice(), targetLabel, noop: false };
+    }
+    const noop = dragInfo.fromSprint === targetLabel;
+    return { mode: 'single', tickets: noop ? [] : [dragInfo.number], targetLabel, noop };
+  }
+
+
+  function _smgmtUpdateSelectionUI() {
+    const count = _smgmtSelectedIssues.size;
+
+    // Inline selection bar (lives inside smgmt-sprint-list as first child)
+    let bar = document.getElementById('smgmt-selection-bar');
+    const listEl = document.getElementById('smgmt-sprint-list');
+
+    if (count > 0) {
+      if (!bar) {
+        bar = document.createElement('div');
+        bar.id = 'smgmt-selection-bar';
+        bar.className = 'smgmt-selection-bar';
+        bar.setAttribute('role', 'status');
+        bar.setAttribute('aria-live', 'polite');
+        // Build interior once
+        bar.innerHTML = `
+          <i class="ti ti-checkbox"></i>
+          <strong class="smgmt-selection-bar-count" id="smgmt-sel-count">0 tickets selected</strong>
+          <span style="color:var(--text-muted)">— batch move to a sprint or backlog</span>
+          <div class="smgmt-sel-bar-actions">
+            <button class="smgmt-selection-bar-delete" id="smgmt-sel-delete-btn"
+                    onclick="_smgmtDeleteSelected()">
+              <i class="ti ti-trash"></i> Delete
+            </button>
+            <button class="smgmt-selection-bar-deselect" onclick="_smgmtClearSelection()">
+              <i class="ti ti-x"></i> Deselect all
+            </button>
+            <button class="smgmt-move-to-btn" id="smgmt-move-to-btn"
+                    onclick="_smgmtToggleMoveToMenu(event)">
+              <i class="ti ti-send"></i> Move to Sprint &#9660;
+            </button>
+            <div class="smgmt-move-to-menu" id="smgmt-move-to-menu"></div>
+          </div>`;
+        if (listEl) listEl.insertBefore(bar, listEl.firstChild);
+      }
+      bar.classList.add('show');
+      if (listEl) listEl.classList.add('has-selection');
+      const countEl = document.getElementById('smgmt-sel-count');
+      if (countEl) countEl.textContent = count === 1 ? '1 ticket selected' : `${count} tickets selected`;
+      _smgmtPopulateMoveToMenu();
+      // Show Delete button only for a single closed/unplanned issue
+      const deleteBtn = document.getElementById('smgmt-sel-delete-btn');
+      if (deleteBtn) {
+        const showDelete = count === 1 && _smgmtIsDeletableIssue([..._smgmtSelectedIssues][0]);
+        deleteBtn.classList.toggle('show', showDelete);
+      }
+    } else {
+      if (bar) bar.classList.remove('show');
+      if (listEl) listEl.classList.remove('has-selection');
+    }
+  }
+
+  function _smgmtPopulateSelectionDropdown() {
+    // legacy no-op — replaced by _smgmtPopulateMoveToMenu
+  }
+
+  function _smgmtPopulateMoveToMenu() {
+    const menu = document.getElementById('smgmt-move-to-menu');
+    if (!menu || !_smgmtData) return;
+
+    // Sprints that contain at least one selected ticket — exclude from the target list
+    const selectedNums = Array.from(_smgmtSelectedIssues);
+    const occupiedSprints = new Set(
+      selectedNums.map(n => {
+        const iss = (_smgmtData.issues || []).find(i => i.number === n);
+        return iss ? iss.sprint : undefined;
+      }).filter(s => s != null)
+    );
+
+    const sprints = (_smgmtData.sprints || []).sort((a, b) => a - b);
+    let html = '';
+    sprints.forEach(n => {
+      if (occupiedSprints.has(n)) return;
+      html += `<button class="smgmt-move-to-item" onclick="_smgmtMoveSelectedTo('sprint-${n}');_smgmtCloseMoveToMenu()">Sprint ${n}</button>`;
+    });
+    html += `<button class="smgmt-move-to-item" onclick="_smgmtMoveSelectedTo('backlog');_smgmtCloseMoveToMenu()">Backlog (no sprint)</button>`;
+    menu.innerHTML = html || '<span style="display:block;padding:8px 14px;font-size:12px;color:var(--text-muted)">No other sprints available</span>';
+  }
+
+  function _smgmtToggleMoveToMenu(event) {
+    event.stopPropagation();
+    const menu = document.getElementById('smgmt-move-to-menu');
+    if (!menu) return;
+    _smgmtPopulateMoveToMenu();
+    menu.classList.toggle('open');
+  }
+
+  function _smgmtCloseMoveToMenu() {
+    const menu = document.getElementById('smgmt-move-to-menu');
+    if (menu) menu.classList.remove('open');
+  }
+
+  function _smgmtClearSelection() {
+    _smgmtSelectedIssues.forEach(num => {
+      const el = document.getElementById(`smgmt-ticket-${num}`);
+      if (el) {
+        el.classList.remove('is-selected');
+        const cb = el.querySelector('.smgmt-ticket-cb');
+        if (cb) cb.checked = false;
+      }
+    });
+    _smgmtSelectedIssues.clear();
+    _smgmtUpdateSelectionUI();
+  }
+
+  function _smgmtSetSelected(number, selected) {
+    if (selected) _smgmtSelectedIssues.add(number);
+    else _smgmtSelectedIssues.delete(number);
+    const el = document.getElementById(`smgmt-ticket-${number}`);
+    if (el) {
+      el.classList.toggle('is-selected', selected);
+      const cb = el.querySelector('.smgmt-ticket-cb');
+      if (cb) cb.checked = selected;
+    }
+  }
+
+  function _smgmtToggleSelect(number, checked) {
+    _smgmtSetSelected(number, checked);
+    _smgmtLastSelectedNum = checked ? number : null;
+    _smgmtUpdateSelectionUI();
+  }
+
+  function _smgmtRowClick(event, number, label) {
+    const container = label
+      ? document.getElementById(`smgmt-tickets-${label}`)
+      : document.getElementById('smgmt-backlog-tickets');
+
+    if (event.shiftKey && _smgmtLastSelectedNum != null && container) {
+      const nums = Array.from(container.querySelectorAll('.smgmt-ticket[data-issue]'))
+        .map(r => parseInt(r.dataset.issue, 10));
+      const a = nums.indexOf(_smgmtLastSelectedNum);
+      const b = nums.indexOf(number);
+      if (a !== -1 && b !== -1) {
+        const [lo, hi] = a <= b ? [a, b] : [b, a];
+        for (let i = lo; i <= hi; i++) _smgmtSetSelected(nums[i], true);
+        _smgmtLastSelectedNum = number;
+        _smgmtUpdateSelectionUI();
+        const sel = window.getSelection && window.getSelection();
+        if (sel) sel.removeAllRanges();  // clear the text highlight shift-click makes
+        return;
+      }
+    }
+
+    if (event.ctrlKey || event.metaKey) {
+      // Ctrl/Cmd+click: toggle this ticket without clearing other selections.
+      const nowSelected = !_smgmtSelectedIssues.has(number);
+      _smgmtSetSelected(number, nowSelected);
+      _smgmtLastSelectedNum = nowSelected ? number : null;
+      _smgmtUpdateSelectionUI();
+      return;
+    }
+
+    // Plain click: toggle this ticket on/off.
+    const nowSelected = !_smgmtSelectedIssues.has(number);
+    _smgmtSetSelected(number, nowSelected);
+    _smgmtLastSelectedNum = nowSelected ? number : null;
+    _smgmtUpdateSelectionUI();
+  }
+
+  function _smgmtIsDeletableIssue(num) {
+    if (!_smgmtData) return false;
+    const iss = _smgmtData.issues.find(i => i.number === num);
+    if (!iss) return false;
+    return iss.status === 'done' || iss.sprint === null;
+  }
+
+  async function _smgmtDeleteSelected() {
+    if (_smgmtSelectedIssues.size !== 1) return;
+    const num = [..._smgmtSelectedIssues][0];
+    const repo = _smgmtRepo();
+    if (!repo) return;
+    const iss = _smgmtData?.issues.find(i => i.number === num);
+    const label = iss ? `#${num}: ${iss.title}` : `#${num}`;
+    if (!confirm(`Delete ${label}?\n\nThis will close the issue on GitHub. This cannot be undone.`)) return;
+    // Optimistic UI: remove from local data and re-render
+    if (_smgmtData) _smgmtData.issues = _smgmtData.issues.filter(i => i.number !== num);
+    _smgmtClearSelection();
+    _smgmtRender(_smgmtData);
+    _smgmtBoardLock(`Deleting #${num}…`);
+    try {
+      const res = await fetch(`/api/issues/${num}/close?repo=${encodeURIComponent(repo)}`, {
+        method: 'POST',
+      });
+      if (!res.ok) throw new Error(await res.text());
+      _smgmtShowToast(`Issue #${num} closed.`);
+    } catch (e) {
+      alert('Failed to delete issue: ' + e.message);
+      await loadSprintMgmt();
+    } finally {
+      _smgmtBoardUnlock();
+    }
+  }
+
+  async function _smgmtMoveSelectedTo(targetLabel) {
+    if (!targetLabel || _smgmtSelectedIssues.size === 0) return;
+    const repo = _smgmtRepo();
+    if (!repo) return;
+
+    const nums = Array.from(_smgmtSelectedIssues);
+    const changes = nums.map(n => ({ issue_num: n, sprint_label: targetLabel }));
+    const dest = targetLabel === 'backlog' ? 'Backlog' : `Sprint ${targetLabel.split('-')[1]}`;
+
+    // Optimistic UI update
+    if (_smgmtData) {
+      const targetNum = targetLabel === 'backlog' ? null : parseInt(targetLabel.split('-')[1], 10);
+      nums.forEach(n => {
+        const iss = _smgmtData.issues.find(i => i.number === n);
+        if (iss) iss.sprint = targetNum;
+      });
+      _smgmtClearSelection();
+      _smgmtRender(_smgmtData);
+    }
+
+    _smgmtBoardLock(`Moving ${nums.length} ticket${nums.length !== 1 ? 's' : ''} to ${dest}…`);
+    try {
+      const res = await fetch('/api/sprints/batch-labels', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ changes, project: repo }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      const data = await res.json();
+      if (data.failed > 0 && data.errors && data.errors.length > 0) {
+        _smgmtShowInlineError(`${data.failed} ticket${data.failed !== 1 ? 's' : ''} failed to move:\n${data.errors.join('\n')}`);
+      } else if (data.applied > 0) {
+        _smgmtShowToast(`Moved ${data.applied} ticket${data.applied !== 1 ? 's' : ''} to ${dest}.`);
+      }
+      await loadSprintMgmt();
+    } catch (e) {
+      _smgmtShowToast('Failed to move tickets: ' + e.message);
+      await loadSprintMgmt();
+    } finally {
+      _smgmtBoardUnlock();
+    }
+  }
+
+  function _smgmtTicketDragStart(event, issueNum, fromSprint) {
+    // Suppress drag while an inline rename is active on the source sprint
+    if (fromSprint) {
+      const card = document.getElementById(`smgmt-card-${fromSprint}`);
+      if (card && card.querySelector('.smgmt-rename-wrap')) {
+        event.preventDefault();
+        return;
+      }
+    }
+    const isChecked = _smgmtSelectedIssues.has(issueNum);
+
+    if (isChecked && _smgmtSelectedIssues.size > 1) {
+      // Multi-ticket drag: pack all selected issue numbers
+      const nums = Array.from(_smgmtSelectedIssues);
+      const sprints = new Set(nums.map(n => {
+        const iss = (_smgmtData?.issues || []).find(i => i.number === n);
+        return iss ? iss.sprint : null;
+      }));
+      _smgmtDragTicket = {
+        number: issueNum,
+        fromSprint: fromSprint || null,
+        multi: nums,
+        multiSprints: sprints.size,
+      };
+      event.dataTransfer.effectAllowed = 'move';
+      event.dataTransfer.setData('text/plain', nums.join(','));
+
+      // Show floating pill
+      const pill = document.getElementById('smgmt-drag-pill');
+      if (pill) {
+        const label = sprints.size > 1
+          ? `Moving ${nums.length} tickets from ${sprints.size} sprints`
+          : `Moving ${nums.length} tickets`;
+        pill.textContent = label;
+        pill.style.top = (event.clientY - 20) + 'px';
+        pill.style.left = (event.clientX + 12) + 'px';
+      }
+      setTimeout(() => {
+        nums.forEach(n => {
+          const el = document.getElementById(`smgmt-ticket-${n}`);
+          if (el) el.classList.add('dragging-ticket');
+        });
+      }, 0);
+    } else {
+      // Single-ticket drag (unchecked row or single selection)
+      _smgmtDragTicket = { number: issueNum, fromSprint: fromSprint || null, multi: null };
+      event.dataTransfer.effectAllowed = 'move';
+      event.dataTransfer.setData('text/plain', String(issueNum));
+      const el = document.getElementById(`smgmt-ticket-${issueNum}`);
+      if (el) setTimeout(() => el.classList.add('dragging-ticket'), 0);
+    }
+    // Show ghost pane (running-lock means draggable=false tickets can't trigger this)
+    _smgmtGhostShow();
+  }
+
+  function _smgmtDragMovePill(event) {
+    if (_smgmtDragTicket?.multi) {
+      const pill = document.getElementById('smgmt-drag-pill');
+      if (pill && pill.textContent) {
+        pill.style.top = (event.clientY - 20) + 'px';
+        pill.style.left = (event.clientX + 12) + 'px';
+      }
+    }
+  }
+
+  function _smgmtGhostComputeNextFree() {
+    if (_smgmtData && Number.isInteger(_smgmtData.placeholder_sprint)) {
+      return _smgmtData.placeholder_sprint;
+    }
+    const nums = (_smgmtData?.sprints || []).map(Number).filter(n => !isNaN(n));
+    return nums.length ? Math.max(...nums) + 1 : 1;
+  }
+
+  function _smgmtGhostShow() {
+    if (_smgmtRunningLabels.size > 0) {
+      showToast('Cannot create new sprint while one is running.', 'warning');
+      return;
+    }
+    _smgmtGhostNextNum = _smgmtGhostComputeNextFree();
+    const ghost = document.getElementById('smgmt-ghost-pane');
+    const titleEl = document.getElementById('smgmt-ghost-title');
+    const subEl = document.getElementById('smgmt-ghost-sub');
+    if (!ghost) return;
+
+    titleEl.textContent = `Drop here to create Sprint ${_smgmtGhostNextNum}`;
+    subEl.textContent = 'next sprint number';
+
+    ghost.classList.add('ghost-visible');
+  }
+
+  function _smgmtGhostHide() {
+    const ghost = document.getElementById('smgmt-ghost-pane');
+    if (!ghost) return;
+    ghost.classList.remove('ghost-visible', 'ghost-hot');
+    _smgmtGhostNextNum = null;
+  }
+
+  function _smgmtGhostDragOver(event) {
+    if (!_smgmtDragTicket) return;
+    if (_smgmtRunningLabels.size > 0) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+    const ghost = document.getElementById('smgmt-ghost-pane');
+    if (!ghost) return;
+    const titleEl = document.getElementById('smgmt-ghost-title');
+    const subEl = document.getElementById('smgmt-ghost-sub');
+    ghost.classList.add('ghost-hot');
+    if (titleEl) titleEl.textContent = `Release to create Sprint ${_smgmtGhostNextNum}`;
+    if (subEl) subEl.textContent = "you'll be asked to confirm";
+  }
+
+  function _smgmtGhostDragLeave(event) {
+    const ghost = document.getElementById('smgmt-ghost-pane');
+    if (!ghost) return;
+    if (!ghost.contains(event.relatedTarget)) {
+      ghost.classList.remove('ghost-hot');
+      const titleEl = document.getElementById('smgmt-ghost-title');
+      const subEl = document.getElementById('smgmt-ghost-sub');
+      if (titleEl) titleEl.textContent = `Drop here to create Sprint ${_smgmtGhostNextNum}`;
+      // Restore sub-text
+      const existing = new Set((_smgmtData?.sprints || []).map(n => Number(n)));
+      const skipped = [];
+      for (let i = 1; i < _smgmtGhostNextNum; i++) {
+        if (!existing.has(i)) skipped.push(i);
+      }
+      if (subEl) subEl.textContent = skipped.length > 0
+        ? `next free number · skipped empty ${skipped.map(s => `Sprint ${s}`).join(', ')}`
+        : 'next free number';
+    }
+  }
+
+  async function _smgmtGhostDrop(event) {
+    event.preventDefault();
+    if (!_smgmtDragTicket) return;
+    if (_smgmtRunningLabels.size > 0) return;
+    const dragInfo = _smgmtDragTicket;
+    const nextNum = _smgmtGhostNextNum;
+    _smgmtGhostHide();
+
+    // Multi-ticket drag to ghost: not supported per spec — treat as no-op
+    if (dragInfo.multi && dragInfo.multi.length > 1) {
+      // Leave _smgmtDragTicket for dragend cleanup
+      return;
+    }
+
+    // Clear dragging-ticket class manually (dragend may fire after we null this)
+    const dragEl = document.getElementById(`smgmt-ticket-${dragInfo.number}`);
+    if (dragEl) dragEl.classList.remove('dragging-ticket');
+    _smgmtDragTicket = null;
+
+    if (nextNum == null) return;
+    const repo = _smgmtRepo();
+    if (!repo) return;
+
+    // Populate and open confirm modal
+    const sprintLabel = `sprint-${nextNum}`;
+    const issue = (_smgmtData?.issues || []).find(i => i.number === dragInfo.number);
+    const fromLabel = dragInfo.fromSprint || 'backlog';
+
+    document.getElementById('gc-sprint-name').textContent = sprintLabel;
+    document.getElementById('gc-ticket-info').textContent =
+      issue ? `#${issue.number} — ${issue.title}` : `#${dragInfo.number}`;
+    document.getElementById('gc-source-pane').textContent =
+      fromLabel === 'backlog' ? 'Backlog' : `Sprint ${fromLabel.replace('sprint-', '')}`;
+
+    const confirmBtn = document.getElementById('gc-confirm-btn');
+    confirmBtn.textContent = `Create ${sprintLabel} & move`;
+    confirmBtn.disabled = false;
+
+    const errEl = document.getElementById('gc-error');
+    errEl.textContent = '';
+    errEl.classList.add('hidden');
+
+    // Store drag state for confirm handler
+    document.getElementById('gc-modal').dataset.issueNum = String(dragInfo.number);
+    document.getElementById('gc-modal').dataset.fromSprint = fromLabel;
+    document.getElementById('gc-modal').dataset.sprintNum = String(nextNum);
+    document.getElementById('gc-modal').dataset.repo = repo;
+
+    document.getElementById('gc-backdrop').classList.remove('hidden');
+    document.getElementById('gc-modal').classList.remove('hidden');
+    confirmBtn.focus();
+  }
+
+  function _gcClose() {
+    document.getElementById('gc-backdrop').classList.add('hidden');
+    document.getElementById('gc-modal').classList.add('hidden');
+  }
+
+  async function _gcConfirm() {
+    const modal = document.getElementById('gc-modal');
+    const issueNum = parseInt(modal.dataset.issueNum, 10);
+    const sprintNum = parseInt(modal.dataset.sprintNum, 10);
+    const fromSprint = modal.dataset.fromSprint;
+    const repo = modal.dataset.repo;
+    const sprintLabel = `sprint-${sprintNum}`;
+
+    const confirmBtn = document.getElementById('gc-confirm-btn');
+    const errEl = document.getElementById('gc-error');
+    confirmBtn.disabled = true;
+    confirmBtn.textContent = 'Creating…';
+    errEl.classList.add('hidden');
+
+    try {
+      // Step 1: create the sprint label (409 = already exists, safe to continue)
+      const createRes = await fetch('/api/sprints/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ project: repo, sprint_number: sprintNum }),
+      });
+      if (!createRes.ok && createRes.status !== 409) {
+        const d = await createRes.json().catch(() => ({}));
+        throw new Error(d.detail || 'HTTP ' + createRes.status);
+      }
+
+      // Step 2: move the ticket
+      const moveRes = await fetch(`/api/issues/${issueNum}/sprint-label`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sprint_label: sprintLabel, project: repo }),
+      });
+      if (!moveRes.ok) {
+        const d = await moveRes.json().catch(() => ({}));
+        throw new Error(d.detail || 'HTTP ' + moveRes.status);
+      }
+
+      // Success — close modal and reload board
+      _gcClose();
+      await loadSprintMgmt();
+    } catch (e) {
+      errEl.textContent = `Failed: ${e.message}`;
+      errEl.classList.remove('hidden');
+      confirmBtn.disabled = false;
+      confirmBtn.textContent = `Create ${sprintLabel} & move`;
+    }
+  }
+
+  function _smgmtTicketDragEnd(event) {
+    if (_smgmtDragTicket) {
+      if (_smgmtDragTicket.multi) {
+        _smgmtDragTicket.multi.forEach(n => {
+          const el = document.getElementById(`smgmt-ticket-${n}`);
+          if (el) el.classList.remove('dragging-ticket');
+        });
+      } else {
+        const el = document.getElementById(`smgmt-ticket-${_smgmtDragTicket.number}`);
+        if (el) el.classList.remove('dragging-ticket');
+      }
+    }
+    // Hide drag pill and ghost pane
+    const pill = document.getElementById('smgmt-drag-pill');
+    if (pill) { pill.style.top = '-100px'; pill.style.left = '-100px'; pill.textContent = ''; }
+    _smgmtGhostHide();
+    _smgmtDragTicket = null;
+    document.querySelectorAll('.smgmt-sprint-card').forEach(el => el.classList.remove('drag-over-sprint'));
+    document.getElementById('smgmt-backlog-pane')?.classList.remove('drag-over-backlog');
+  }
+
+  function _smgmtDragOver(event, sprintLabel) {
+    if (_smgmtDragTicket) {
+      event.preventDefault();
+      event.dataTransfer.dropEffect = 'move';
+      document.querySelectorAll('.smgmt-sprint-card').forEach(b => b.classList.remove('drag-over-sprint'));
+      document.getElementById('smgmt-backlog-pane')?.classList.remove('drag-over-backlog');
+      const target = document.getElementById(`smgmt-card-${sprintLabel}`);
+      if (target) target.classList.add('drag-over-sprint');
+    }
+  }
+
+  function _smgmtDragLeave(event) {
+    if (event.currentTarget && !event.currentTarget.contains(event.relatedTarget)) {
+      event.currentTarget.classList.remove('drag-over-sprint');
+    }
+  }
+
+  async function _smgmtDropOnSprint(event, targetLabel) {
+    event.preventDefault();
+    document.querySelectorAll('.smgmt-sprint-card').forEach(el => el.classList.remove('drag-over-sprint'));
+    document.getElementById('smgmt-backlog-pane')?.classList.remove('drag-over-backlog');
+
+    // Block concurrent moves (issue #276)
+    if (isDragBlocked({ moveLock: _smgmtMoveLock })) return;
+    if (!_smgmtDragTicket) return;
+    const dragInfo = _smgmtDragTicket;
+    _smgmtDragTicket = null;
+
+    const repo = _smgmtRepo();
+    if (!repo) return;
+
+    if (dragInfo.multi && dragInfo.multi.length > 1) {
+      // Multi-ticket drop
+      const nums = dragInfo.multi;
+      const targetNum = targetLabel ? parseInt(targetLabel.split('-')[1], 10) : null;
+
+      // Optimistic update
+      if (_smgmtData) {
+        nums.forEach(n => {
+          const iss = _smgmtData.issues.find(i => i.number === n);
+          if (iss) iss.sprint = targetNum;
+        });
+      }
+      // Clear selection before render
+      _smgmtClearSelection();
+      if (_smgmtData) _smgmtRender(_smgmtData);
+
+      const changes = nums.map(n => ({ issue_num: n, sprint_label: targetLabel || 'backlog' }));
+      _smgmtBoardLock();
+      try {
+        const res = await fetch('/api/sprints/batch-labels', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ changes, project: repo }),
+        });
+        if (!res.ok) throw new Error(await res.text());
+        await loadSprintMgmt();
+      } catch (e) {
+        alert(`Failed to move tickets: ${e.message}`);
+        await loadSprintMgmt();
+      } finally {
+        _smgmtBoardUnlock();
+      }
+    } else {
+      // Single-ticket drop
+      const { number, fromSprint } = dragInfo;
+      if (fromSprint === targetLabel) return;
+
+      const targetNum = targetLabel ? parseInt(targetLabel.split('-')[1], 10) : null;
+
+      // Optimistic update
+      if (_smgmtData) {
+        const iss = _smgmtData.issues.find(i => i.number === number);
+        if (iss) iss.sprint = targetNum;
+        _smgmtRender(_smgmtData);
+      }
+      // Clear selection after any drag completes
+      _smgmtClearSelection();
+
+      _smgmtBoardLock();
+      try {
+        const res = await fetch(`/api/issues/${number}/sprint-label`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sprint_label: targetLabel || 'backlog', project: repo }),
+        });
+        if (!res.ok) throw new Error(await res.text());
+        await loadSprintMgmt();
+      } catch (e) {
+        // Rollback optimistic update
+        if (_smgmtData) {
+          const iss = _smgmtData.issues.find(i => i.number === number);
+          if (iss) iss.sprint = fromSprint ? parseInt(fromSprint.split('-')[1], 10) : null;
+          _smgmtRender(_smgmtData);
+        }
+        alert(`Failed to move ticket #${number}: ${e.message}`);
+      } finally {
+        _smgmtBoardUnlock();
+      }
+    }
+  }
+
+  function _smgmtTicketReorderDragOver(event) {
+    if (!_smgmtDragTicket || (_smgmtDragTicket.multi && _smgmtDragTicket.multi.length > 1)) return;
+    const target = event.currentTarget;
+    const targetSprint = target.dataset.sprint;
+    const dragSprint = _smgmtDragTicket ? _smgmtDragTicket.fromSprint : null;
+    if (targetSprint !== dragSprint) return; // cross-sprint moves handled by _smgmtDropOnSprint
+    event.preventDefault();
+    event.stopPropagation();
+    const rect = target.getBoundingClientRect();
+    const midY = rect.top + rect.height / 2;
+    target.classList.remove('drag-before', 'drag-after');
+    target.classList.add(event.clientY < midY ? 'drag-before' : 'drag-after');
+  }
+
+  function _smgmtTicketReorderDragLeave(event) {
+    event.currentTarget.classList.remove('drag-before', 'drag-after');
+  }
+
+  async function _smgmtTicketReorderDrop(event, targetIssue, sprintLabel) {
+    if (!_smgmtDragTicket || (_smgmtDragTicket.multi && _smgmtDragTicket.multi.length > 1)) return;
+    const dragInfo = _smgmtDragTicket;
+    if (dragInfo.fromSprint !== sprintLabel) return; // cross-sprint handled elsewhere
+    const dragIssue = dragInfo.number;
+    if (dragIssue === targetIssue) {
+      event.currentTarget.classList.remove('drag-before', 'drag-after');
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+
+    const rect = event.currentTarget.getBoundingClientRect();
+    const insertAfter = event.clientY >= rect.top + rect.height / 2;
+    event.currentTarget.classList.remove('drag-before', 'drag-after');
+
+    const repo = _smgmtRepo();
+    if (!repo || !_smgmtData) return;
+
+    // Build new order from current DOM positions.
+    const container = document.getElementById(`smgmt-tickets-${sprintLabel}`);
+    if (!container) return;
+    const rows = Array.from(container.querySelectorAll('.smgmt-ticket[data-issue]'));
+    let order = rows.map(r => parseInt(r.dataset.issue, 10)).filter(n => !isNaN(n));
+    order = order.filter(n => n !== dragIssue);
+    const insertIdx = order.indexOf(targetIssue) + (insertAfter ? 1 : 0);
+    order.splice(insertIdx, 0, dragIssue);
+
+    _smgmtDragTicket = null;
+    try {
+      const res = await fetch(
+        `/api/sprints/${encodeURIComponent(sprintLabel)}/plan?project=${encodeURIComponent(repo)}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(order),
+        }
+      );
+      if (!res.ok) throw new Error(await res.text());
+      await loadSprintMgmt();
+    } catch (e) {
+      alert(`Failed to reorder tickets: ${e.message}`);
+      await loadSprintMgmt();
+    }
+  }
+
+  function _smgmtBacklogTicketDragStart(event, issueNum) {
+    const isChecked = _smgmtSelectedIssues.has(issueNum);
+
+    if (isChecked && _smgmtSelectedIssues.size > 1) {
+      // Multi-ticket drag from backlog: pack all selected issue numbers
+      const nums = Array.from(_smgmtSelectedIssues);
+      _smgmtDragTicket = { number: issueNum, fromSprint: null, multi: nums, multiSprints: 1 };
+      event.dataTransfer.effectAllowed = 'move';
+      event.dataTransfer.setData('text/plain', nums.join(','));
+
+      const pill = document.getElementById('smgmt-drag-pill');
+      if (pill) {
+        pill.textContent = `Moving ${nums.length} tickets`;
+        pill.style.top = (event.clientY - 20) + 'px';
+        pill.style.left = (event.clientX + 12) + 'px';
+      }
+      setTimeout(() => {
+        nums.forEach(n => {
+          const el = document.getElementById(`smgmt-ticket-${n}`);
+          if (el) el.classList.add('dragging-ticket');
+        });
+      }, 0);
+    } else {
+      // Single-ticket drag (unchecked row or single selection)
+      _smgmtDragTicket = { number: issueNum, fromSprint: null, multi: null };
+      event.dataTransfer.effectAllowed = 'move';
+      event.dataTransfer.setData('text/plain', String(issueNum));
+      const el = document.getElementById(`smgmt-ticket-${issueNum}`);
+      if (el) setTimeout(() => el.classList.add('dragging-ticket'), 0);
+    }
+    // Show ghost pane
+    _smgmtGhostShow();
+  }
+
+  function _smgmtBacklogDragOver(event) {
+    if (_smgmtDragTicket && _smgmtDragTicket.fromSprint !== null) {
+      event.preventDefault();
+      event.dataTransfer.dropEffect = 'move';
+      document.getElementById('smgmt-backlog-pane')?.classList.add('drag-over-backlog');
+    }
+  }
+
+  function _smgmtBacklogDragLeave(event) {
+    const pane = document.getElementById('smgmt-backlog-pane');
+    if (pane && !pane.contains(event.relatedTarget)) {
+      pane.classList.remove('drag-over-backlog');
+    }
+  }
+
+  async function _smgmtDropOnBacklog(event) {
+    event.preventDefault();
+    document.getElementById('smgmt-backlog-pane')?.classList.remove('drag-over-backlog');
+
+    // Block concurrent moves (issue #276)
+    if (isDragBlocked({ moveLock: _smgmtMoveLock })) return;
+    if (!_smgmtDragTicket) return;
+    const dragInfo = _smgmtDragTicket;
+    _smgmtDragTicket = null;
+
+    // If dragging from backlog back to backlog, no-op
+    if (!dragInfo.fromSprint) return;
+
+    const repo = _smgmtRepo();
+    if (!repo) return;
+
+    if (dragInfo.multi && dragInfo.multi.length > 1) {
+      const nums = dragInfo.multi;
+      if (_smgmtData) {
+        nums.forEach(n => {
+          const iss = _smgmtData.issues.find(i => i.number === n);
+          if (iss) iss.sprint = null;
+        });
+      }
+      _smgmtClearSelection();
+      if (_smgmtData) _smgmtRender(_smgmtData);
+
+      const changes = nums.map(n => ({ issue_num: n, sprint_label: 'backlog' }));
+      _smgmtBoardLock();
+      try {
+        const res = await fetch('/api/sprints/batch-labels', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ changes, project: repo }),
+        });
+        if (!res.ok) throw new Error(await res.text());
+        await loadSprintMgmt();
+      } catch (e) {
+        alert(`Failed to move tickets to backlog: ${e.message}`);
+        await loadSprintMgmt();
+      } finally {
+        _smgmtBoardUnlock();
+      }
+    } else {
+      const { number, fromSprint } = dragInfo;
+
+      // Optimistic update
+      if (_smgmtData) {
+        const iss = _smgmtData.issues.find(i => i.number === number);
+        if (iss) iss.sprint = null;
+        _smgmtRender(_smgmtData);
+      }
+      _smgmtClearSelection();
+
+      _smgmtBoardLock();
+      try {
+        const res = await fetch(`/api/issues/${number}/sprint-label`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sprint_label: 'backlog', project: repo }),
+        });
+        if (!res.ok) throw new Error(await res.text());
+        await loadSprintMgmt();
+      } catch (e) {
+        // Rollback
+        if (_smgmtData) {
+          const iss = _smgmtData.issues.find(i => i.number === number);
+          if (iss) iss.sprint = fromSprint ? parseInt(fromSprint.split('-')[1], 10) : null;
+          _smgmtRender(_smgmtData);
+        }
+        alert(`Failed to move ticket #${number} to backlog: ${e.message}`);
+      } finally {
+        _smgmtBoardUnlock();
+      }
+    }
+  }
+
+  function _smgmtBoardLock(message) {
+    _smgmtMoveLock = true;
+    // Pause the auto-refresh ticker without changing the user's chosen interval
+    _smgmtArStopTicker();
+    const overlay = document.getElementById('smgmt-move-overlay');
+    const msgEl   = document.getElementById('smgmt-move-overlay-msg');
+    const text    = message || 'Moving…';
+    if (msgEl) msgEl.textContent = text;
+    if (overlay) {
+      overlay.setAttribute('aria-label', text.replace(/…$/, '') + ', please wait');
+      overlay.classList.add('active');
+    }
+  }
+
+  function _smgmtBoardUnlock() {
+    _smgmtMoveLock = false;
+    const overlay = document.getElementById('smgmt-move-overlay');
+    if (overlay) overlay.classList.remove('active');
+    // Resume auto-refresh if an interval is selected
+    if (_arInterval > 0) _smgmtArStartTicker();
+  }
   // apps/dashboard/static/src/sprint-board/run-controls.js
   /* Run Sprint controls + preflight modal (issue #448) — extracted from
    * project.html (issue #797). Covers the Run / Cancel actions and the full
@@ -1005,6 +1848,43 @@
   globalThis._pfShowError = _pfShowError;
   globalThis._pfRetry = _pfRetry;
   globalThis._pfConfirm = _pfConfirm;
+
+  // Drag & drop + multi-select + ghost pane + board lock (issues #247/#276/#660)
+  globalThis._smgmtUpdateSelectionUI = _smgmtUpdateSelectionUI;
+  globalThis._smgmtPopulateSelectionDropdown = _smgmtPopulateSelectionDropdown;
+  globalThis._smgmtPopulateMoveToMenu = _smgmtPopulateMoveToMenu;
+  globalThis._smgmtToggleMoveToMenu = _smgmtToggleMoveToMenu;
+  globalThis._smgmtCloseMoveToMenu = _smgmtCloseMoveToMenu;
+  globalThis._smgmtClearSelection = _smgmtClearSelection;
+  globalThis._smgmtSetSelected = _smgmtSetSelected;
+  globalThis._smgmtToggleSelect = _smgmtToggleSelect;
+  globalThis._smgmtRowClick = _smgmtRowClick;
+  globalThis._smgmtIsDeletableIssue = _smgmtIsDeletableIssue;
+  globalThis._smgmtDeleteSelected = _smgmtDeleteSelected;
+  globalThis._smgmtMoveSelectedTo = _smgmtMoveSelectedTo;
+  globalThis._smgmtTicketDragStart = _smgmtTicketDragStart;
+  globalThis._smgmtDragMovePill = _smgmtDragMovePill;
+  globalThis._smgmtGhostComputeNextFree = _smgmtGhostComputeNextFree;
+  globalThis._smgmtGhostShow = _smgmtGhostShow;
+  globalThis._smgmtGhostHide = _smgmtGhostHide;
+  globalThis._smgmtGhostDragOver = _smgmtGhostDragOver;
+  globalThis._smgmtGhostDragLeave = _smgmtGhostDragLeave;
+  globalThis._smgmtGhostDrop = _smgmtGhostDrop;
+  globalThis._gcClose = _gcClose;
+  globalThis._gcConfirm = _gcConfirm;
+  globalThis._smgmtTicketDragEnd = _smgmtTicketDragEnd;
+  globalThis._smgmtDragOver = _smgmtDragOver;
+  globalThis._smgmtDragLeave = _smgmtDragLeave;
+  globalThis._smgmtDropOnSprint = _smgmtDropOnSprint;
+  globalThis._smgmtTicketReorderDragOver = _smgmtTicketReorderDragOver;
+  globalThis._smgmtTicketReorderDragLeave = _smgmtTicketReorderDragLeave;
+  globalThis._smgmtTicketReorderDrop = _smgmtTicketReorderDrop;
+  globalThis._smgmtBacklogTicketDragStart = _smgmtBacklogTicketDragStart;
+  globalThis._smgmtBacklogDragOver = _smgmtBacklogDragOver;
+  globalThis._smgmtBacklogDragLeave = _smgmtBacklogDragLeave;
+  globalThis._smgmtDropOnBacklog = _smgmtDropOnBacklog;
+  globalThis._smgmtBoardLock = _smgmtBoardLock;
+  globalThis._smgmtBoardUnlock = _smgmtBoardUnlock;
   // apps/dashboard/static/src/index.js
   /* Bundle entry point (issue #796).
    *

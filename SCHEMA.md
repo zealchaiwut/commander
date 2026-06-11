@@ -351,6 +351,17 @@ Render-style `.env` editor for a project environment. Values are masked in the U
 | `GET` | `/api/projects/{slug}/environments/{env}/env-vars` | Read the environment's `.env` as `[{"key", "value"}, ...]`; `[]` when the file does not exist |
 | `PUT` | `/api/projects/{slug}/environments/{env}/env-vars` | Write the submitted key/value set back to the `.env` file (order/comment preserving) |
 
+### Host doctor (issue #828)
+
+Exposes the install-time host doctor (`scripts/doctor.py`) so the same PASS/FAIL
+prerequisite checks the CLI prints can be triggered from the dashboard as a
+button / status check. Single source of truth: the endpoint imports and runs the
+script directly, so the button and the command never drift apart.
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/doctor` | Run the pre-sprint host doctor and return its structured report. Shape: `{"ok": bool, "exit_code": int, "checks": [...], "failures": [...]}`. `ok`/`exit_code` reflect whether every check passed; each check carries its name, PASS/FAIL status, and remediation text |
+
 ### Sprint Workspace — Board / Running / History (issues #798–#810)
 
 The Sprint tab is split into three sub-views (Board / Running / History). These

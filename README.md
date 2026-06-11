@@ -25,6 +25,27 @@ or `--restore-db <source>` to rehydrate config/DB from a backup, or `--doctor`
 to run the checks alone. For launchd service issues it points you at
 `scripts/install_launchd.sh`.
 
+For a deeper, standalone pre-sprint host check, run the install-time **doctor**
+directly (issue #828):
+
+```bash
+python scripts/doctor.py          # human-readable PASS/FAIL report
+python scripts/doctor.py --json   # machine-readable JSON report
+```
+
+It validates that the host is correctly provisioned — tools on PATH, auth, git
+identity, venv imports, a writable DB, and the launchd plist environment — with a
+named `[PASS]`/`[FAIL]` line and the exact remediation for each failure, exiting
+nonzero if any check fails. The same report is available from the dashboard via
+`GET /api/doctor` and the **Diagnostics** button, so a remote/iPad operator can
+run it without a shell. This install-time doctor complements the dispatch-time
+auth probe in `sprint_manager.py` (issue #789): install-time asks "is this
+machine set up?"; dispatch-time asks "is auth still live right now?".
+
+For the full step-by-step onboarding runbook — including failure signatures and
+their fixes — see [docs/machine-onboarding.md](docs/machine-onboarding.md)
+(issue #829).
+
 ---
 
 ## Quick Start
@@ -168,10 +189,27 @@ bash scripts/install_launchd.sh
 
 The script will:
 1. Check for a port-8000 conflict (prints a warning and exits if one is found).
-2. Substitute the repo root, venv path, and home directory into the plist template.
-3. Copy `scripts/com.commander.dashboard.plist` to `~/Library/LaunchAgents/` with `644` permissions.
-4. Load the service with `launchctl load`.
-5. Verify with `launchctl list | grep commander` and print success or failure.
+2. Resolve `claude`, `gh`, and the project venv `bin/` to their real on-disk
+   directories with `command -v` and build the plist `PATH` from them, plus the
+   standard system dirs (de-duplicated). A launchd service is detached from the
+   login shell, so hardcoded paths broke on machines where the binaries live
+   outside the standard locations (e.g. `~/.local/bin`); install aborts if
+   `claude` or `gh` is missing (issue #826).
+3. Inject headless auth tokens into the plist `EnvironmentVariables` block so the
+   detached `claude` and `gh` subprocesses can authenticate without keychain /
+   shell-rc access: `CLAUDE_CODE_OAUTH_TOKEN` (`--claude-token` or
+   `$CLAUDE_CODE_OAUTH_TOKEN`; mint with `claude setup-token`) and `GH_TOKEN`
+   (`--gh-token` / `$GH_TOKEN` / `$GITHUB_TOKEN`; mint with `gh auth token`).
+   Missing tokens are prompted for with echo off when run interactively, or
+   warned about by name otherwise (issue #827).
+4. Render the plist to `~/Library/LaunchAgents/` with `600` permissions (created
+   under a `077` umask) so the embedded token values are never world/group
+   readable at rest (issue #827).
+5. Load the service with `launchctl load`.
+6. Verify with `launchctl list | grep commander` and print success or failure.
+
+> Tokens are written only to the per-user plist (chmod `600`) and, for
+> `GH_TOKEN`, the agent `.env` — never echoed to stdout/stderr or committed.
 
 Logs are written to:
 - `~/Library/Logs/commander-dashboard.out.log` (stdout / uvicorn output)

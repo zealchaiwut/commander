@@ -10,7 +10,9 @@ from .analytics import router as analytics_router
 from .backup import router as backup_router
 from .log_search import router as log_search_router
 from .runs import router as runs_router
+from .sprints import router as sprints_router
 from .system import router as system_router
+from .tickets import router as tickets_router
 
 __all__ = [
     "activity_router",
@@ -18,5 +20,7 @@ __all__ = [
     "backup_router",
     "log_search_router",
     "runs_router",
+    "sprints_router",
     "system_router",
+    "tickets_router",
 ]

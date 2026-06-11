@@ -2777,6 +2777,107 @@
       font-size: 12px; color: var(--text-sub);
       padding: 10px 18px;
     }
+
+    /* ── Filtered multi-select backlog panel + what-if (issue #800) ── */
+    /* Mock v5 contract tokens: panel / filter / grid / row / whatif */
+    .panel {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+    }
+    .bl-panel {
+      margin-top: 16px;
+      /* Solid full-width panel (supersedes the legacy dashed backlog look). */
+      border: 1px solid var(--border);
+      background: var(--surface);
+    }
+    .bl-filter {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+      padding: 12px 16px;
+      border-top: 1px solid var(--border);
+    }
+    .bl-filter-label {
+      font-size: 11px; font-weight: 600; color: var(--text-sub);
+      margin-right: 4px;
+    }
+    .bl-pill {
+      font: inherit; font-size: 12px; line-height: 1.5;
+      padding: 4px 10px; min-height: 28px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      background: var(--surface);
+      color: var(--text-muted);
+      cursor: pointer;
+      transition: background .12s ease-out, color .12s ease-out, border-color .12s ease-out;
+    }
+    .bl-pill:hover { background: var(--surface-hover); color: var(--text); }
+    .bl-pill:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+    .bl-pill.is-active {
+      background: var(--blue-bg);
+      color: var(--blue);
+      border-color: var(--blue);
+      font-weight: 600;
+    }
+    .bl-grid {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      padding: 4px 0;
+    }
+    .bl-row { min-width: 0; }
+    .bl-actions {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 16px;
+      border-top: 1px solid var(--border);
+      background: var(--surface-2);
+      border-radius: 0 0 10px 10px;
+    }
+    .bl-actions[hidden] { display: none; }
+    .bl-sel-count { font-size: 13px; font-weight: 600; color: var(--text); }
+    .bl-target {
+      font: inherit; font-size: 13px;
+      padding: 6px 10px; min-height: 32px;
+      border: 1px solid var(--border); border-radius: 8px;
+      background: var(--surface); color: var(--text);
+      cursor: pointer;
+    }
+    .bl-add-btn {
+      font: inherit; font-size: 13px; font-weight: 600;
+      padding: 6px 14px; min-height: 32px;
+      border: 1px solid var(--blue); border-radius: 8px;
+      background: var(--blue); color: #fff;
+      cursor: pointer;
+      display: inline-flex; align-items: center; gap: 6px;
+    }
+    .bl-add-btn:hover { filter: brightness(1.05); }
+    .bl-add-btn:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+    .bl-add-btn:disabled { opacity: .5; cursor: not-allowed; }
+    .bl-whatif {
+      flex: 1 1 100%;
+      font-size: 12px;
+      color: var(--text-muted);
+      display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px;
+      font-family: 'SF Mono', ui-monospace, 'Cascadia Code', monospace;
+    }
+    .bl-whatif:empty { display: none; }
+    .bl-whatif-delta { color: var(--text); font-weight: 700; }
+    .bl-whatif-total { color: var(--text-muted); }
+    .bl-whatif-budget { color: var(--text-sub); }
+    .bl-whatif-budget.bl-over { color: var(--red); font-weight: 700; }
+    .bl-whatif-level { color: var(--purple); }
+    @media (max-width: 720px) {
+      .bl-filter { gap: 6px; padding: 12px; }
+      .bl-actions { gap: 8px; }
+      .bl-target, .bl-add-btn { flex: 1 1 auto; }
+      .bl-row { flex-wrap: wrap; }
+    }
+
     /* "Move to" button on backlog ticket rows */
     .smgmt-moveto-pill {
       padding: 2px 8px; font-size: 11px; font-weight: 600;
@@ -5730,8 +5831,10 @@
             <div class="smgmt-ghost-sub" id="smgmt-ghost-sub"></div>
           </div>
 
-          <!-- Backlog pane (issue #274) — dashed border, grey tint, drag target -->
-          <div class="smgmt-backlog-pane is-expanded" id="smgmt-backlog-pane"
+          <!-- Backlog panel (issue #800) — full-width bottom panel: filter pills,
+               checkbox multi-select picker, and a live what-if delta line. Keeps
+               id smgmt-backlog-pane and the drag-back-to-backlog drop target. -->
+          <div class="panel bl-panel smgmt-backlog-pane is-expanded" id="smgmt-backlog-pane"
                role="region" aria-label="Backlog"
                ondragover="_smgmtBacklogDragOver(event)"
                ondragleave="_smgmtBacklogDragLeave(event)"
@@ -5755,10 +5858,42 @@
               <span class="smgmt-backlog-chevron-icon"><i class="ti ti-chevron-down"></i></span>
             </div>
             <div class="smgmt-backlog-tickets-container" id="smgmt-backlog-tickets-container">
-              <p class="smgmt-backlog-hint-row">Unassigned tickets — drag into a sprint above, or use Move to</p>
-              <div id="smgmt-backlog-tickets">
+              <!-- Filter pills (issue #800) — client-side over loaded backlog data -->
+              <div class="bl-filter" id="bl-filter" role="group" aria-label="Backlog filters">
+                <span class="bl-filter-label">Size</span>
+                <button type="button" class="bl-pill" data-filter-type="size" data-filter-val="S"
+                        onclick="_blToggleFilter('size','S',this)">S</button>
+                <button type="button" class="bl-pill" data-filter-type="size" data-filter-val="M"
+                        onclick="_blToggleFilter('size','M',this)">M</button>
+                <button type="button" class="bl-pill" data-filter-type="size" data-filter-val="L"
+                        onclick="_blToggleFilter('size','L',this)">L</button>
+                <button type="button" class="bl-pill" data-filter-type="size" data-filter-val="XL"
+                        onclick="_blToggleFilter('size','XL',this)">XL</button>
+                <span class="bl-filter-label">Age</span>
+                <button type="button" class="bl-pill" data-filter-type="age" data-filter-val="new"
+                        onclick="_blToggleFilter('age','new',this)">&le;7d</button>
+                <button type="button" class="bl-pill" data-filter-type="age" data-filter-val="gt7"
+                        onclick="_blToggleFilter('age','gt7',this)">&gt;7d</button>
+                <button type="button" class="bl-pill" data-filter-type="age" data-filter-val="gt30"
+                        onclick="_blToggleFilter('age','gt30',this)">&gt;30d</button>
+                <button type="button" class="bl-pill" data-filter-type="unestimated" data-filter-val="1"
+                        onclick="_blToggleFilter('unestimated','1',this)">Unestimated</button>
+              </div>
+              <p class="smgmt-backlog-hint-row">Unassigned tickets — drag into a sprint above, or use the picker below</p>
+              <div id="smgmt-backlog-tickets" class="bl-grid">
                 <div class="smgmt-drop-hint">Drop tickets here to remove sprint label</div>
               </div>
+            </div>
+            <!-- Multi-select picker + what-if line — revealed when >=1 row selected -->
+            <div class="bl-actions" id="bl-actions" hidden role="group" aria-label="Add selected tickets to a sprint">
+              <span class="bl-sel-count" id="bl-sel-count">0 selected</span>
+              <label class="bl-filter-label" for="bl-target">Target</label>
+              <select class="bl-target" id="bl-target" aria-label="Target sprint" onchange="_blUpdateWhatIf()"></select>
+              <button class="bl-add-btn" id="bl-add-btn" type="button" onclick="_blConfirmAdd()">
+                <i class="ti ti-circle-plus"></i>
+                <span id="bl-add-label">Add selected to Sprint</span>
+              </button>
+              <div class="bl-whatif" id="bl-whatif" aria-live="polite"></div>
             </div>
           </div>
         </div>
@@ -13251,6 +13386,7 @@ async function _fsConfirm() {
 
 function _smgmtUpdateSelectionUI() {
   const count = _smgmtSelectedIssues.size;
+  _blUpdateActions();  // refresh the backlog panel picker + what-if (issue #800)
 
   // Inline selection bar (lives inside smgmt-sprint-list as first child)
   let bar = document.getElementById('smgmt-selection-bar');
@@ -13964,37 +14100,246 @@ function _smgmtBacklogToggle() {
 }
 
 function _smgmtRenderBacklog(tickets) {
+  _blBacklogAll = tickets || [];
   const countEl   = document.getElementById('smgmt-backlog-count');
   const ticketsEl = document.getElementById('smgmt-backlog-tickets');
   if (!ticketsEl) return;
 
+  // Apply the active filter pills client-side over the loaded backlog data.
+  const filtered = _blApplyFilters(_blBacklogAll);
+
   if (countEl) {
-    countEl.textContent = tickets.length > 0
-      ? `· ${tickets.length} ticket${tickets.length !== 1 ? 's' : ''}`
+    const total = _blBacklogAll.length, shown = filtered.length;
+    countEl.textContent = total > 0
+      ? (shown === total
+          ? `· ${total} ticket${total !== 1 ? 's' : ''}`
+          : `· ${shown} of ${total} ticket${total !== 1 ? 's' : ''}`)
       : '';
   }
 
-  // Update bulk estimate button visibility (issue #598)
+  // Update bulk estimate button visibility (issue #598) — over full backlog
   const backlogBulkBtn = document.getElementById('smgmt-backlog-bulk-est-btn');
   if (backlogBulkBtn) {
-    const hasUnsized = tickets.some(
+    const hasUnsized = _blBacklogAll.some(
       t => !(t.labels || []).find(l => /^size-[SMLX]+$/.test(l.name))
     );
     backlogBulkBtn.classList.toggle('hidden', !hasUnsized);
   }
 
   // Sort newest first (higher issue number = newer)
-  const sorted = [...tickets].sort((a, b) => b.number - a.number);
+  const sorted = [...filtered].sort((a, b) => b.number - a.number);
 
   // Build list of sprint labels for "Move to" popup
   const allSprintNums = (_smgmtData?.sprints || []).sort((a, b) => a - b);
 
   if (sorted.length === 0) {
-    ticketsEl.innerHTML = '<div class="smgmt-drop-hint" style="padding:14px 18px;text-align:center;">No backlog tickets — all caught up</div>';
-    return;
+    const msg = _blBacklogAll.length === 0
+      ? 'No backlog tickets — all caught up'
+      : 'No tickets match the active filters';
+    ticketsEl.innerHTML = `<div class="smgmt-drop-hint" style="padding:14px 18px;text-align:center;">${msg}</div>`;
+  } else {
+    ticketsEl.innerHTML = sorted.map(t => _smgmtBacklogTicketHtml(t, allSprintNums)).join('');
   }
 
-  ticketsEl.innerHTML = sorted.map(t => _smgmtBacklogTicketHtml(t, allSprintNums)).join('');
+  _blSyncFilterPills();
+  _blUpdateActions();
+}
+
+// ── Filtered multi-select backlog panel + what-if delta (issue #800) ────────
+let _blBacklogAll = [];
+let _blFilters = { size: null, age: null, unestimated: false };
+
+/** Resolve a ticket's size letter from the estimate cache or its size-* label. */
+function _blTicketSize(t) {
+  const cached = _estDataCache[t.number];
+  if (cached && cached.size) return cached.size;
+  for (const l of (t.labels || [])) {
+    const m = /^size-([SMLX]+)$/.exec(l.name || '');
+    if (m) return m[1];
+  }
+  return null;
+}
+
+/** Age of a ticket in days from its created_at, or null when unavailable. */
+function _blTicketAgeDays(t) {
+  if (!t || !t.created_at) return null;
+  const ms = Date.parse(t.created_at);
+  if (isNaN(ms)) return null;
+  return (Date.now() - ms) / 86400000;
+}
+
+/** Client-side filter over the loaded backlog tickets (size / age / unestimated). */
+function _blApplyFilters(tickets) {
+  return (tickets || []).filter(t => {
+    if (_blFilters.size && _blTicketSize(t) !== _blFilters.size) return false;
+    if (_blFilters.age) {
+      const age = _blTicketAgeDays(t);
+      if (age == null) return false;
+      if (_blFilters.age === 'new'  && !(age <= 7))  return false;
+      if (_blFilters.age === 'gt7'  && !(age > 7))   return false;
+      if (_blFilters.age === 'gt30' && !(age > 30))  return false;
+    }
+    if (_blFilters.unestimated && _blTicketSize(t) !== null) return false;
+    return true;
+  });
+}
+
+/** Sync the is-active state of every filter pill to the current filter set. */
+function _blSyncFilterPills() {
+  document.querySelectorAll('.bl-pill').forEach(p => {
+    const type = p.dataset.filterType, val = p.dataset.filterVal;
+    const active = (type === 'unestimated') ? _blFilters.unestimated : (_blFilters[type] === val);
+    p.classList.toggle('is-active', !!active);
+    p.setAttribute('aria-pressed', String(!!active));
+  });
+}
+
+/** Toggle a filter pill (single-select within size/age; boolean for unestimated). */
+function _blToggleFilter(type, val, btn) {
+  if (type === 'unestimated') {
+    _blFilters.unestimated = !_blFilters.unestimated;
+  } else {
+    _blFilters[type] = (_blFilters[type] === val) ? null : val;
+  }
+  if (btn) btn.classList.toggle('is-active');  // immediate feedback
+  _smgmtRenderBacklog(_blBacklogAll);          // re-applies filters + syncs pills
+}
+
+/** Backlog tickets that are currently selected (subset of the shared selection). */
+function _blSelectedBacklogNums() {
+  const inBacklog = new Set(_blBacklogAll.map(t => t.number));
+  return Array.from(_smgmtSelectedIssues).filter(n => inBacklog.has(n));
+}
+
+/** sprint_budget (minutes) read from the per-project setting; null when absent. */
+function _blSprintBudgetMins() {
+  const raw = localStorage.getItem(_settingsKey('sprintBudget'));
+  if (raw == null || raw === '') return null;
+  const v = parseFloat(raw);
+  return (isNaN(v) || v <= 0) ? null : v;
+}
+
+/** Populate the target-sprint picker from the valid sprint list. */
+function _blPopulateTarget() {
+  const sel = document.getElementById('bl-target');
+  if (!sel || !_smgmtData) return;
+  const prev = sel.value;
+  const sprints = (_smgmtData.sprints || []).slice().sort((a, b) => a - b);
+  sel.innerHTML = sprints.length
+    ? sprints.map(n => `<option value="sprint-${n}">Sprint ${n}</option>`).join('')
+    : '<option value="">No sprints yet</option>';
+  if (prev && sprints.some(n => `sprint-${n}` === prev)) sel.value = prev;
+}
+
+/** Reveal/hide the picker bar based on selection and refresh its labels + what-if. */
+function _blUpdateActions() {
+  const bar = document.getElementById('bl-actions');
+  if (!bar) return;
+  const nums = _blSelectedBacklogNums();
+  if (nums.length === 0) { bar.hidden = true; return; }
+  bar.hidden = false;
+  _blPopulateTarget();
+  const countEl = document.getElementById('bl-sel-count');
+  if (countEl) countEl.textContent = `${nums.length} selected`;
+  _blUpdateWhatIf();
+}
+
+/** Format minutes as a compact ~Nm / ~N.Nh string. */
+function _blFmtMins(m) {
+  const h = m / 60;
+  return h < 1 ? `~${m}m` : `~${parseFloat((Math.round(h * 10) / 10).toFixed(1))}h`;
+}
+
+/** Live what-if line: +minutes delta, new sprint total, budget warning. */
+function _blUpdateWhatIf() {
+  const whatif = document.getElementById('bl-whatif');
+  if (!whatif) return;
+  const sel = document.getElementById('bl-target');
+  const nums = _blSelectedBacklogNums();
+  const targetLabel = sel ? sel.value : '';
+  const targetNum = targetLabel ? parseInt(targetLabel.split('-')[1], 10) : null;
+
+  // Keep the Add-button literal in sync: "Add N selected to Sprint X".
+  const labelEl = document.getElementById('bl-add-label');
+  const addBtn  = document.getElementById('bl-add-btn');
+  if (labelEl && nums.length) {
+    labelEl.textContent = targetNum != null
+      ? `Add ${nums.length} selected to Sprint ${targetNum}`
+      : `Add ${nums.length} selected to Sprint`;
+  }
+  if (addBtn) addBtn.disabled = (targetNum == null) || nums.length === 0;
+
+  if (!nums.length || targetNum == null) { whatif.innerHTML = ''; return; }
+
+  // +minutes delta contributed by the selected tickets.
+  let deltaMins = 0;
+  for (const n of nums) {
+    const t = _blBacklogAll.find(x => x.number === n);
+    const size = t ? _blTicketSize(t) : null;
+    deltaMins += size ? _sizeMinutes(size) : 0;
+  }
+  // Current total of the target sprint, plus the delta = new total.
+  let curMins = 0;
+  (_smgmtData?.issues || []).forEach(iss => {
+    if (iss.sprint === targetNum) {
+      const size = _blTicketSize(iss);
+      curMins += size ? _sizeMinutes(size) : 0;
+    }
+  });
+  const newMins = curMins + deltaMins;
+
+  let html =
+    `<span class="bl-whatif-delta">+${deltaMins}m</span>` +
+    `<span class="bl-whatif-total">Sprint ${targetNum} total ${_blFmtMins(newMins)}</span>`;
+
+  const budget = _blSprintBudgetMins();
+  if (budget == null) {
+    html += `<span class="bl-whatif-budget">no budget set</span>`;
+  } else if (newMins > budget) {
+    html += `<span class="bl-whatif-budget bl-over">over budget by ${_blFmtMins(newMins - budget)}</span>`;
+  } else {
+    html += `<span class="bl-whatif-budget">within budget (${_blFmtMins(budget - newMins)} left)</span>`;
+  }
+  whatif.innerHTML = html;
+
+  // Optional preview-level delta — appended only if the endpoint exists.
+  _blMaybeLevelDelta(targetLabel, nums);
+}
+
+/** Feature-detect an optional preview-level endpoint. Absent => omit silently,
+ *  no error state. Present => append a level-delta segment to the what-if line. */
+async function _blMaybeLevelDelta(targetLabel, nums) {
+  const whatif = document.getElementById('bl-whatif');
+  if (!whatif) return;
+  try {
+    const repo = _smgmtRepo();
+    if (!repo) return;
+    const res = await fetch(
+      `/api/sprints/${encodeURIComponent(targetLabel)}/preview-level`
+      + `?project=${encodeURIComponent(repo)}&add=${nums.join(',')}`,
+      { method: 'GET' }
+    );
+    if (!res.ok) return;                       // endpoint absent (404) — omit silently
+    const data = await res.json();
+    if (data == null || data.level_delta == null) return;
+    const sel = document.getElementById('bl-target');
+    if (!sel || sel.value !== targetLabel) return;  // selection moved on
+    const seg = document.createElement('span');
+    seg.className = 'bl-whatif-level';
+    seg.textContent = `level ${data.level_delta >= 0 ? '+' : ''}${data.level_delta}`;
+    whatif.appendChild(seg);
+  } catch (_) {
+    // Endpoint missing or network/parse failure: omit the level segment, no error surfaced.
+  }
+}
+
+/** Confirm the picker: add all selected backlog tickets to the chosen sprint
+ *  via the existing batch-move plumbing (no new engine). */
+async function _blConfirmAdd() {
+  const sel = document.getElementById('bl-target');
+  if (!sel || !sel.value) return;
+  if (_blSelectedBacklogNums().length === 0) return;
+  await _smgmtMoveSelectedTo(sel.value);
 }
 
 function _smgmtBacklogTicketHtml(ticket, sprintNums) {
@@ -14003,7 +14348,7 @@ function _smgmtBacklogTicketHtml(ticket, sprintNums) {
   const backlogLabelNames = (ticket.labels || []).map(l => l.name).join(',');
   const schedDepHtml = _smgmtSchedDepHtml(ticket);
   return `
-    <div class="smgmt-ticket${isSelected ? ' is-selected' : ''}" id="smgmt-ticket-${ticket.number}"
+    <div class="smgmt-ticket bl-row${isSelected ? ' is-selected' : ''}" id="smgmt-ticket-${ticket.number}"
          draggable="true"
          data-issue="${ticket.number}"
          data-sprint=""

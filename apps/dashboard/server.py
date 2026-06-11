@@ -5333,7 +5333,7 @@ def get_sprint_management_issues(repo: str):
             "sprint": sprint_num,
             "sprint_label": found_sprint_label,
             "status": github_client.classify_issue(iss),
-            "url": iss.get("url", ""),
+            "url": iss.get("url", ""), "created_at": iss.get("createdAt", "") or iss.get("created_at", ""),
             "estimate_stale": estimate_stale,
         })
         if found_sprint_label is not None and found_sprint_label in sprint_ticket_counts:

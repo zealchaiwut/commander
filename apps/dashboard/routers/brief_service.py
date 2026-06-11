@@ -370,11 +370,20 @@ def _build_recent_activity(db, project_key: str, start: str, end: str) -> list[d
 
 # ── public API ────────────────────────────────────────────────────────────────
 
-def build_project_brief(slug: str, date: Optional[str] = None) -> dict:
-    """Assemble one project's brief payload for the given (or today's) window."""
+def build_project_brief(slug: str, date: Optional[str] = None,
+                        window: Optional[tuple[str, str]] = None) -> dict:
+    """Assemble one project's brief payload for the given (or today's) window.
+
+    ``date`` names the brief day (and is echoed in the result). By default the
+    sprint/event queries are scoped to that calendar day; pass ``window`` —
+    ``(start_iso, end_iso)`` — to scope them to an explicit window instead (e.g.
+    the 6 AM-anchored 24h window used by the daily-artifact store, issue #841).
+    """
     ensure_dependencies()
     db = _db()
     d, start, end = _window(date)
+    if window is not None:
+        start, end = window
     project_key = _resolve_project_key(slug)
 
     shipped = _build_shipped(db, project_key, slug, start, end)
@@ -441,8 +450,13 @@ def _decisions_for_project(slug: str, brief: dict) -> list[dict]:
     return decisions
 
 
-def build_home_brief(date: Optional[str] = None) -> dict:
-    """Assemble the home roll-up: global KPIs, decisions, and per-project briefs."""
+def build_home_brief(date: Optional[str] = None,
+                     window: Optional[tuple[str, str]] = None) -> dict:
+    """Assemble the home roll-up: global KPIs, decisions, and per-project briefs.
+
+    ``window`` is threaded down to each per-project brief so the whole roll-up
+    shares one daily window (issue #841).
+    """
     ensure_dependencies()
     d, _start, _end = _window(date)
 
@@ -456,7 +470,7 @@ def build_home_brief(date: Optional[str] = None) -> dict:
     for p in project_list:
         repo = p.get("repo", "")
         slug = repo.split("/")[-1] if repo else repo
-        brief = build_project_brief(slug, date=d)
+        brief = build_project_brief(slug, date=d, window=window)
         projects.append(brief)
         decisions.extend(_decisions_for_project(slug, brief))
 

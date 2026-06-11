@@ -16,6 +16,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 
 from . import brief_service
+from . import brief_summary
 
 router = APIRouter(tags=["brief"])
 
@@ -110,6 +111,19 @@ class HomeBrief(BaseModel):
     projects: list[ProjectBrief] = []
 
 
+class ProjectSummary(BaseModel):
+    project: Optional[str] = None
+    date: str
+    summary: str
+    source: str  # "model" | "fallback"
+
+
+class HomeSummary(BaseModel):
+    date: str
+    summary: str
+    source: str  # "model" | "fallback"
+
+
 # ── routes ────────────────────────────────────────────────────────────────────
 
 @router.get("/api/projects/{slug}/brief", response_model=ProjectBrief)
@@ -122,3 +136,33 @@ def get_project_brief(slug: str, date: Optional[str] = None):
 def get_home_brief(date: Optional[str] = None):
     """Assemble the home roll-up across all tracked projects."""
     return brief_service.build_home_brief(date=date)
+
+
+# ── LLM summary (issue #840) ──────────────────────────────────────────────────
+# Kept separate from the structured-brief routes above so brief assembly stays
+# LLM-free (#839 AC5). The summary path generates+caches a Haiku narrative and
+# always falls back to a deterministic templated string (never 5xx — AC6).
+
+@router.get("/api/projects/{slug}/brief/summary", response_model=ProjectSummary)
+def get_project_brief_summary(slug: str, date: Optional[str] = None):
+    """Return the cached (or freshly generated) summary for a project brief."""
+    return brief_summary.get_or_create_project_summary(slug, date=date)
+
+
+@router.post("/api/projects/{slug}/brief/summary/regenerate",
+             response_model=ProjectSummary)
+def regenerate_project_brief_summary(slug: str, date: Optional[str] = None):
+    """Clear the stored summary and re-invoke the model (Regenerate, AC4)."""
+    return brief_summary.get_or_create_project_summary(slug, date=date, force=True)
+
+
+@router.get("/api/brief/summary", response_model=HomeSummary)
+def get_home_brief_summary(date: Optional[str] = None):
+    """Return the cached (or freshly generated) one-line home recap (AC7)."""
+    return brief_summary.get_or_create_home_summary(date=date)
+
+
+@router.post("/api/brief/summary/regenerate", response_model=HomeSummary)
+def regenerate_home_brief_summary(date: Optional[str] = None):
+    """Clear the stored home recap and re-invoke the model (Regenerate)."""
+    return brief_summary.get_or_create_home_summary(date=date, force=True)

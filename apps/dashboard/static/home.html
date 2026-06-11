@@ -1,0 +1,576 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Daily Brief — Commander</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.30.0/dist/tabler-icons.min.css">
+  <style>
+    /* ── design tokens (from home_ceo_brief_mock.html, issue #842) ── */
+    :root{
+      --bg:#f9fafb;--surface:#fff;--surface-2:#f3f4f6;--surface-hover:#f5f6f8;--border:#e5e7eb;
+      --text:#111827;--text-muted:#6b7280;--text-sub:#9ca3af;
+      --green:#16a34a;--green-bg:#dcfce7;--amber:#d97706;--amber-bg:#fef3c7;
+      --red:#dc2626;--red-bg:#fee2e2;--blue:#2563eb;--blue-bg:#dbeafe;
+      --purple:#7c3aed;--purple-bg:#ede9fe;--mono:'SF Mono','Fira Code','Cascadia Code',monospace;
+    }
+    [data-theme="dark"]{
+      --bg:#0d0d0d;--surface:#161616;--surface-2:#1e1e1e;--surface-hover:#222;--border:#2a2a2a;
+      --text:#e5e7eb;--text-muted:#9ca3af;--text-sub:#6b7280;
+      --green:#22c55e;--green-bg:rgba(34,197,94,.13);--amber:#eab308;--amber-bg:rgba(234,179,8,.13);
+      --red:#f87171;--red-bg:rgba(239,68,68,.13);--blue:#60a5fa;--blue-bg:rgba(96,165,250,.13);
+      --purple:#a78bfa;--purple-bg:rgba(167,139,250,.13);
+    }
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-size:14px;padding:28px 24px;min-height:100vh}
+    .home{max-width:1000px;margin:0 auto;display:flex;flex-direction:column;gap:18px}
+    .theme-toggle{position:fixed;top:16px;right:16px;background:var(--surface);border:1px solid var(--border);padding:6px 11px;border-radius:6px;font-size:12px;color:var(--text);cursor:pointer;font-family:var(--mono);z-index:100}
+
+    /* brief header */
+    .brief-head{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+    .brief-l{flex:1;min-width:200px}
+    .brief-kicker{font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--text-sub)}
+    .brief-date{font-size:24px;font-weight:800;margin-top:2px}
+    .brief-cover{font-size:12px;color:var(--text-muted);font-family:var(--mono);margin-top:3px}
+    .brief-nav{display:flex;gap:5px;align-items:center;position:relative}
+    .nav-btn{font-family:var(--mono);font-size:12px;padding:6px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text-muted);cursor:pointer;display:inline-flex;align-items:center;gap:5px}
+    .nav-btn:hover{background:var(--surface-hover);color:var(--text)}
+    .nav-btn.today{background:var(--text);color:var(--surface);border-color:var(--text)}
+    /* the date picker overlays its trigger so the native UI anchors correctly */
+    .date-pick-wrap{position:relative;display:inline-flex}
+    .date-pick-wrap input[type=date]{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%;border:0}
+
+    /* kpi strip (global) */
+    .kpis{display:flex;background:var(--border);border:1px solid var(--border);border-radius:10px;overflow:hidden}
+    .kpi{flex:1;background:var(--surface);padding:13px 16px}
+    .kpi-v{font-size:22px;font-weight:700;font-family:var(--mono)}
+    .kpi-l{font-size:11px;color:var(--text-sub);letter-spacing:.04em;text-transform:uppercase;margin-top:2px}
+    .kpi .g{color:var(--green)} .kpi .a{color:var(--amber)}
+
+    .sec-title{font-size:13px;font-weight:700;color:var(--text);margin-bottom:10px;display:flex;align-items:center;gap:7px}
+    .sec-title .ti{color:var(--text-muted);font-size:16px}
+    .sec-title .count{font-family:var(--mono);font-size:11px;color:var(--text-sub);font-weight:500}
+
+    /* needs decision (global) */
+    .decisions{background:var(--surface);border:1px solid var(--border);border-radius:10px;overflow:hidden}
+    .dec-row{display:flex;align-items:center;gap:11px;padding:12px 15px;border-top:1px solid var(--border)}
+    .dec-row:first-child{border-top:none}
+    .dec-ic{width:24px;height:24px;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:13px;flex-shrink:0;background:var(--amber-bg);color:var(--amber)}
+    .dec-ic.go{background:var(--green-bg);color:var(--green)}
+    .dec-ic.red{background:var(--red-bg);color:var(--red)}
+    .dec-txt{flex:1;font-size:13px;line-height:1.4}
+    .dec-txt .mono{font-family:var(--mono);font-size:12px;color:var(--text-muted)}
+    .dec-act{font-family:var(--mono);font-size:11px;font-weight:600;color:var(--text);border:1px solid var(--border);border-radius:5px;padding:4px 11px;cursor:pointer;white-space:nowrap;background:var(--surface)}
+    .dec-act:hover{background:var(--surface-hover)}
+    .dec-act.primary{background:var(--text);color:var(--surface);border-color:var(--text)}
+    .dec-act[disabled]{opacity:.6;cursor:default}
+    .dec-empty{padding:14px 15px;color:var(--text-muted);font-size:13px}
+
+    /* ===== per-project brief card ===== */
+    .pbrief{background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:hidden;margin-bottom:14px}
+    .pbrief-head{display:flex;align-items:center;gap:10px;padding:14px 18px;border-bottom:1px solid var(--border)}
+    .pbic{width:28px;height:28px;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0;background:var(--blue-bg);color:var(--blue)}
+    .pbname{font-weight:700;font-size:16px}
+    .pbstatus{font-family:var(--mono);font-size:10px;font-weight:700;padding:2px 8px;border-radius:999px;display:inline-flex;align-items:center;gap:5px}
+    .pbstatus.run{background:var(--green-bg);color:var(--green)}
+    .pbstatus.idle{background:var(--surface-2);color:var(--text-muted)}
+    .pbstatus.blocked{background:var(--red-bg);color:var(--red)}
+    .pbstatus.run .d{width:5px;height:5px;border-radius:50%;background:var(--green);animation:glow 2s ease-in-out infinite}
+    @keyframes glow{0%,100%{box-shadow:0 0 0 2px var(--green-bg)}50%{box-shadow:0 0 0 5px var(--green-bg)}}
+    .pb-toggle{margin-left:auto;font-family:var(--mono);font-size:11px;color:var(--text-muted);border:1px solid var(--border);background:var(--surface);border-radius:6px;padding:5px 10px;cursor:pointer;display:inline-flex;align-items:center;gap:5px}
+    .pb-toggle:hover{color:var(--text);background:var(--surface-hover)}
+    .pb-toggle .ti{transition:transform .15s}
+    .pbrief.collapsed .pb-toggle .ti{transform:rotate(180deg)}
+    .pb-toggle .lbl-hide{display:inline} .pb-toggle .lbl-show{display:none}
+    .pbrief.collapsed .pb-toggle .lbl-hide{display:none}
+    .pbrief.collapsed .pb-toggle .lbl-show{display:inline}
+
+    /* always-visible: summary + status line */
+    .pb-summary{padding:14px 18px;display:flex;gap:11px;align-items:flex-start}
+    .pb-sum-ic{width:26px;height:26px;border-radius:7px;background:var(--blue-bg);color:var(--blue);display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0;margin-top:1px}
+    .pb-sum-body{flex:1}
+    .pb-sum-tag{font-family:var(--mono);font-size:9px;font-weight:700;letter-spacing:.04em;padding:1px 6px;border-radius:999px;background:var(--purple-bg);color:var(--purple);display:inline-flex;align-items:center;gap:3px;margin-bottom:5px}
+    .pb-sum-text{font-size:14px;line-height:1.6}
+    .pb-sum-text strong{font-weight:700}
+
+    .pb-statusline{margin:0 18px 14px;padding:10px 14px;background:var(--surface-2);border-radius:8px;font-size:13px;color:var(--text-muted);display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+    .pb-statusline .mono{font-family:var(--mono);font-size:12px;color:var(--text)}
+    .pb-statusline.run{background:var(--green-bg);color:var(--text)}
+    .pulse{width:7px;height:7px;border-radius:50%;background:var(--green);animation:glow 2s ease-in-out infinite;flex-shrink:0}
+    .agent-tag{font-family:var(--mono);font-size:9px;font-weight:700;padding:1px 6px;border-radius:3px;background:var(--purple-bg);color:var(--purple)}
+    .pb-pct{margin-left:auto;font-family:var(--mono);font-size:12px;font-weight:700;color:var(--green)}
+
+    /* collapsible details */
+    .pb-details{padding:0 18px 16px;background:var(--surface)}
+    .pbrief.collapsed .pb-details{display:none}
+    .drill-sec{font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--text-sub);margin:6px 0 8px;display:flex;align-items:center;gap:6px}
+    .drill-cols{display:grid;grid-template-columns:1.3fr 1fr;gap:14px;align-items:start}
+    @media(max-width:720px){.drill-cols{grid-template-columns:1fr}}
+
+    .relbox{background:var(--surface-2);border-radius:8px;padding:11px 13px}
+    .rel-name{font-size:13px;font-weight:600;margin-bottom:6px;display:flex;align-items:center;gap:8px}
+    .rel-name .cnt{margin-left:auto;font-family:var(--mono);font-size:11px;color:var(--text-sub);font-weight:400}
+    .feat{display:flex;gap:8px;font-size:13px;padding:2px 0}
+    .feat .plus{color:var(--green);font-weight:700;font-family:var(--mono)}
+    .muted{color:var(--text-sub);font-size:13px}
+
+    .timeline{background:var(--surface-2);border-radius:8px;overflow:hidden}
+    .tl-row{display:flex;gap:9px;align-items:baseline;padding:7px 12px;border-top:1px solid var(--border);font-size:12px}
+    .tl-row:first-child{border-top:none}
+    .tl-time{font-family:var(--mono);font-size:10px;color:var(--text-sub);min-width:40px}
+    .tl-badge{font-family:var(--mono);font-size:8px;font-weight:700;padding:1px 5px;border-radius:3px;flex-shrink:0;background:var(--green-bg);color:var(--green)}
+    .tl-badge.github{background:var(--purple-bg);color:var(--purple)}
+    .tl-txt{flex:1;color:var(--text-muted)}.tl-txt .mono{font-size:11px}
+    .open-proj{margin-top:14px;display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);font-size:12px;color:var(--text-muted);border:1px solid var(--border);background:var(--surface);border-radius:6px;padding:6px 12px;cursor:pointer;text-decoration:none}
+    .open-proj:hover{color:var(--text);border-color:var(--text-muted)}
+
+    /* add project */
+    .add-proj{border:1px dashed var(--border);border-radius:12px;padding:16px;text-align:center;color:var(--text-muted);font-size:13px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;text-decoration:none}
+    .add-proj:hover{color:var(--text);border-color:var(--text-muted);background:var(--surface)}
+
+    .empty-note{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px;color:var(--text-muted);font-size:13px;text-align:center}
+
+    /* responsive: narrow / mobile (Tailscale) — KPI strip wraps, no h-scroll */
+    @media(max-width:560px){
+      body{padding:18px 12px}
+      .kpis{flex-wrap:wrap}
+      .kpi{flex:1 1 50%;min-width:120px}
+      .brief-nav{width:100%}
+    }
+  </style>
+</head>
+<body>
+  <button class="theme-toggle" onclick="toggleTheme()" aria-label="Toggle dark theme"><i class="ti ti-moon"></i> Theme</button>
+
+  <div class="home" id="home">
+    <div class="empty-note" id="boot-note">Loading daily brief…</div>
+  </div>
+
+  <script src="/static/add-project-modal.js"></script>
+  <script>
+  // ── issue #842: client-side assembly of the CEO daily brief ──────────────
+  // Data sources (no hardcoded content):
+  //   • /api/brief/daily         — the stored home roll-up artifact (#841)
+  //   • /api/projects/<slug>/brief/summary — stored per-project AI summary (#840)
+  //   • /api/home                — slug → owner/repo map (for action endpoints)
+  const MONTHS = ['January','February','March','April','May','June','July',
+                  'August','September','October','November','December'];
+  const DOW = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+  const DOW_SHORT = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+
+  let _repoBySlug = {};   // slug -> owner/repo, for action endpoints
+  let _curDate = null;    // YYYY-MM-DD currently displayed
+
+  function toggleTheme(){
+    const r = document.documentElement;
+    r.setAttribute('data-theme', r.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+  }
+
+  function esc(s){
+    return String(s == null ? '' : s)
+      .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+      .replace(/"/g,'&quot;');
+  }
+
+  // Parse YYYY-MM-DD as a *local* date (avoid UTC shift on toLocale*).
+  function parseDate(s){
+    const [y,m,d] = String(s).split('-').map(Number);
+    return new Date(y, m - 1, d);
+  }
+  function fmtIso(dt){
+    return dt.getFullYear() + '-' + String(dt.getMonth()+1).padStart(2,'0') +
+           '-' + String(dt.getDate()).padStart(2,'0');
+  }
+  function todayIso(){ return fmtIso(new Date()); }
+
+  // ── boot ──────────────────────────────────────────────────────────────────
+  async function init(){
+    try {
+      const home = await (await fetch('/api/home')).json();
+      (home.projects || []).forEach(p => { if (p.slug && p.repo) _repoBySlug[p.slug] = p.repo; });
+    } catch(_) { /* repo map is best-effort; actions degrade gracefully */ }
+
+    const url = new URL(window.location.href);
+    const d = url.searchParams.get('date') || todayIso();
+    await loadBrief(d);
+  }
+
+  async function loadBrief(date){
+    _curDate = date;
+    const root = document.getElementById('home');
+    root.innerHTML = '<div class="empty-note" id="boot-note">Loading daily brief…</div>';
+
+    let artifact;
+    try {
+      artifact = await (await fetch('/api/brief/daily?date=' + encodeURIComponent(date))).json();
+    } catch(_) {
+      root.innerHTML = '<div class="empty-note">Could not load the daily brief.</div>';
+      return;
+    }
+
+    const brief = (artifact && artifact.brief) || {};
+    const gk = brief.global_kpis || {};
+    const decisions = brief.decisions || [];
+    const projects = brief.projects || [];
+
+    let html = '';
+    html += renderHeader(date, artifact, projects.length);
+    html += renderKpis(gk);
+    html += renderDecisions(decisions, projects);
+    html += renderProjectsShell(projects, artifact.available);
+    root.innerHTML = html;
+
+    // hydrate per-project AI summaries from the stored summary store
+    projects.forEach(p => loadProjectSummary(p.project, date));
+  }
+
+  // ── AC1: brief header (date + covering-since subtitle) ─────────────────────
+  function renderHeader(date, artifact, projCount){
+    const dt = parseDate(date);
+    const dateStr = DOW[dt.getDay()] + ', ' + MONTHS[dt.getMonth()] + ' ' + dt.getDate();
+    const prev = new Date(dt); prev.setDate(prev.getDate() - 1);
+    const prevLabel = DOW_SHORT[prev.getDay()] + ' ' + prev.getDate();
+    const isToday = date === todayIso();
+
+    let cover = '';
+    if (artifact && artifact.covering_since){
+      cover = 'covering since ' + esc(artifact.covering_since) +
+              ' · ' + projCount + ' project' + (projCount === 1 ? '' : 's');
+    } else {
+      cover = projCount + ' project' + (projCount === 1 ? '' : 's');
+    }
+
+    return `
+    <div class="brief-head">
+      <div class="brief-l">
+        <div class="brief-kicker">Daily Brief</div>
+        <div class="brief-date" id="brief-date">${esc(dateStr)}</div>
+        <div class="brief-cover" id="brief-cover">${cover}</div>
+      </div>
+      <div class="brief-nav">
+        <button class="nav-btn" onclick="gotoPrevDay()" aria-label="Previous day"><i class="ti ti-chevron-left" style="font-size:14px"></i> ${esc(prevLabel)}</button>
+        <button class="nav-btn today" onclick="gotoToday()"${isToday ? ' disabled' : ''}>Today</button>
+        <span class="date-pick-wrap">
+          <button class="nav-btn" type="button" aria-hidden="true" tabindex="-1"><i class="ti ti-calendar" style="font-size:13px"></i></button>
+          <input type="date" id="date-pick" aria-label="Pick a date" value="${esc(date)}" max="${esc(todayIso())}" onchange="onDatePick(event)">
+        </span>
+      </div>
+    </div>`;
+  }
+
+  // ── AC3: global KPI strip ──────────────────────────────────────────────────
+  function renderKpis(gk){
+    const n = v => (v == null ? 0 : v);
+    return `
+    <div class="kpis">
+      <div class="kpi"><div class="kpi-v g">${n(gk.sprints_shipped)}</div><div class="kpi-l">Sprints shipped</div></div>
+      <div class="kpi"><div class="kpi-v">${n(gk.tickets_done)}</div><div class="kpi-l">Tickets done</div></div>
+      <div class="kpi"><div class="kpi-v">${n(gk.in_progress)}</div><div class="kpi-l">In progress</div></div>
+      <div class="kpi"><div class="kpi-v a">${n(gk.needs_your_call)}</div><div class="kpi-l">Need your call</div></div>
+    </div>`;
+  }
+
+  // ── AC4 / AC5: needs your decision ─────────────────────────────────────────
+  // Each decision type maps to one existing endpoint:
+  //   run_ready      → POST /api/sprints/run                  (Run sprint)
+  //   rework         → GET  /api/sprints/<label>/rerun-preview (Review rework)
+  //   branch_cleanup → POST /cleanup-stale-branches            (Clean up branches)
+  function _sprintLabelFor(slug, projects){
+    const p = (projects || []).find(x => x.project === slug) || {};
+    return (p.in_progress && p.in_progress.sprint_label) ||
+           (p.shipped && p.shipped[0] && p.shipped[0].label) ||
+           (p.up_next && p.up_next.label) || '';
+  }
+
+  function renderDecisions(decisions, projects){
+    let rows = '';
+    if (!decisions.length){
+      rows = '<div class="dec-empty">Nothing needs your call right now.</div>';
+    } else {
+      decisions.forEach((dec, i) => {
+        let ic = '<span class="dec-ic"><i class="ti ti-clipboard-text"></i></span>';
+        let btn = '';
+        const repo = _repoBySlug[dec.project] || dec.project;
+        const label = dec.label || '';
+        if (dec.type === 'run_ready'){
+          ic = '<span class="dec-ic go"><i class="ti ti-player-play"></i></span>';
+          btn = `<button class="dec-act primary" id="dec-${i}" onclick="runSprintAction('${esc(repo)}','${esc(label)}',${i})">Run sprint</button>`;
+        } else if (dec.type === 'rework'){
+          ic = '<span class="dec-ic red"><i class="ti ti-refresh"></i></span>';
+          const sl = _sprintLabelFor(dec.project, projects);
+          btn = `<button class="dec-act" id="dec-${i}" onclick="reviewReworkAction('${esc(repo)}','${esc(sl)}',${i})">Review</button>`;
+        } else if (dec.type === 'branch_cleanup'){
+          ic = '<span class="dec-ic"><i class="ti ti-git-branch-deleted"></i></span>';
+          btn = `<button class="dec-act" id="dec-${i}" onclick="cleanupBranchesAction('${esc(repo)}',${i})">Clean up</button>`;
+        } else { // empty_sprint and any other advisory item — navigate to the board
+          ic = '<span class="dec-ic"><i class="ti ti-clipboard-plus"></i></span>';
+          btn = `<a class="dec-act" href="/static/project.html?slug=${esc(dec.project)}">Open</a>`;
+        }
+        rows += `
+        <div class="dec-row">
+          ${ic}
+          <span class="dec-txt"><span class="mono">${esc(dec.project)}</span> — ${esc(dec.suggested_action)}</span>
+          ${btn}
+        </div>`;
+      });
+    }
+    return `
+    <div>
+      <div class="sec-title"><i class="ti ti-gavel"></i> Needs your decision <span class="count">${decisions.length}</span></div>
+      <div class="decisions">${rows}</div>
+    </div>`;
+  }
+
+  // ── AC6–AC13: per-project brief blocks ─────────────────────────────────────
+  function renderProjectsShell(projects, available){
+    let blocks = '';
+    if (!projects.length){
+      blocks = available
+        ? '<div class="empty-note">No projects to report on for this date.</div>'
+        : '<div class="empty-note">No brief was stored for this date.</div>';
+    } else {
+      blocks = projects.map(renderProject).join('');
+    }
+    return `
+    <div>
+      <div class="sec-title"><i class="ti ti-clipboard-text"></i> Project briefs <span class="count">${projects.length} project${projects.length === 1 ? '' : 's'}</span></div>
+      ${blocks}
+      <a class="add-proj" href="/static/home-preview.html" onclick="return openAdd(event)"><i class="ti ti-plus"></i> Add new project</a>
+    </div>`;
+  }
+
+  function _statusPill(p){
+    const ip = p.in_progress;
+    if (ip && ip.sprint_label){
+      const lbl = prettyLabel(ip.sprint_label);
+      return `<span class="pbstatus run"><span class="d"></span> ${esc(lbl)} running</span>`;
+    }
+    if ((p.blocked || []).length){
+      return '<span class="pbstatus blocked">blocked</span>';
+    }
+    return '<span class="pbstatus idle">idle</span>';
+  }
+
+  function prettyLabel(label){
+    const m = /^sprint-(\d+)$/.exec(String(label || ''));
+    return m ? ('Sprint ' + m[1]) : String(label || '');
+  }
+
+  // AC9: permanent one-line status — running strip text, or idle "last shipped"
+  function _statusLine(p){
+    const ip = p.in_progress;
+    if (ip && ip.sprint_label){
+      const t = ip.current_ticket || {};
+      const tnum = t.issue_number ? `<span class="mono">#${esc(t.issue_number)}</span> ` : '';
+      const ttitle = esc(t.title || '');
+      const agent = ip.active_agent ? `<span class="agent-tag">${esc(String(ip.active_agent).toUpperCase())}</span>` : '';
+      const pr = ip.progress || {};
+      const pct = `<span class="pb-pct">${pr.percent || 0}% · ${pr.done || 0}/${pr.total || 0}</span>`;
+      return `<div class="pb-statusline run"><span class="pulse"></span>${tnum}${ttitle} ${agent}${pct}</div>`;
+    }
+    // idle — surface the last shipped sprint
+    const last = (p.shipped || [])[0];
+    let txt = 'idle';
+    if (last && last.label){
+      txt = 'idle · last shipped <span class="mono">' + esc(prettyLabel(last.label)) + '</span>';
+    } else {
+      txt = 'idle, last shipped <span class="mono">—</span>';
+    }
+    const next = p.up_next;
+    if (next && next.label){
+      txt += ' · next up <span class="mono">' + esc(prettyLabel(next.label)) + '</span>' + (next.ready ? ' (ready)' : '');
+    }
+    return `<div class="pb-statusline"><i class="ti ti-circle-check" style="color:var(--text-sub)"></i> ${txt}</div>`;
+  }
+
+  function _shippedDetail(p){
+    const last = (p.shipped || [])[0];
+    if (!last){
+      return '<div class="muted">No sprint shipped in this window.</div>';
+    }
+    const cnt = [];
+    if (last.pr_number != null) cnt.push('PR #' + esc(last.pr_number));
+    if (last.duration != null) cnt.push(esc(Math.round(last.duration / 60)) + 'm');
+    const feats = (last.features || []).map(f =>
+      `<div class="feat"><span class="plus">+</span> ${esc(f)}</div>`).join('') ||
+      '<div class="muted">No feature detail recorded.</div>';
+    const goal = last.goal ? (' — ' + esc(last.goal)) : '';
+    return `
+      <div class="relbox">
+        <div class="rel-name">${esc(prettyLabel(last.label))}${goal} <span class="cnt">${cnt.join(' · ')}</span></div>
+        ${feats}
+      </div>`;
+  }
+
+  function _timeline(p){
+    const acts = p.recent_activity || [];
+    if (!acts.length){
+      return '<div class="timeline"><div class="tl-row"><span class="tl-txt muted">No recent activity.</span></div></div>';
+    }
+    const rows = acts.map(a => {
+      const src = String(a.source || '').toLowerCase();
+      const badge = src === 'github' ? 'github' : 'agent';
+      const lbl = (a.source || 'EVENT').toUpperCase();
+      return `<div class="tl-row"><span class="tl-time">${esc(a.time || '')}</span><span class="tl-badge ${badge}">${esc(lbl)}</span><span class="tl-txt">${esc(a.message || '')}</span></div>`;
+    }).join('');
+    return `<div class="timeline">${rows}</div>`;
+  }
+
+  function renderProject(p){
+    const slug = p.project;
+    return `
+      <div class="pbrief collapsed" data-slug="${esc(slug)}">
+        <div class="pbrief-head">
+          <span class="pbic"><i class="ti ti-terminal"></i></span>
+          <span class="pbname">${esc(slug)}</span>
+          ${_statusPill(p)}
+          <button class="pb-toggle" onclick="toggleDetails(this)">
+            <span class="lbl-hide">Hide details</span><span class="lbl-show">Show details</span>
+            <i class="ti ti-chevron-up" style="font-size:13px"></i>
+          </button>
+        </div>
+
+        <div class="pb-summary">
+          <span class="pb-sum-ic"><i class="ti ti-clipboard-text"></i></span>
+          <div class="pb-sum-body">
+            <span class="pb-sum-tag"><i class="ti ti-sparkles" style="font-size:9px"></i> AI summary</span>
+            <div class="pb-sum-text" id="sum-${esc(slug)}">Loading summary…</div>
+          </div>
+        </div>
+
+        ${_statusLine(p)}
+
+        <div class="pb-details">
+          <div class="drill-cols">
+            <div>
+              <div class="drill-sec"><i class="ti ti-rocket" style="font-size:13px"></i> Shipped detail</div>
+              ${_shippedDetail(p)}
+            </div>
+            <div>
+              <div class="drill-sec"><i class="ti ti-timeline-event" style="font-size:13px"></i> Recent activity</div>
+              ${_timeline(p)}
+            </div>
+          </div>
+          <a class="open-proj" href="/static/project.html?slug=${esc(slug)}"><i class="ti ti-arrow-right" style="font-size:13px"></i> Open ${esc(slug)}</a>
+        </div>
+      </div>`;
+  }
+
+  // AC8: hydrate the AI summary paragraph from the stored summary store
+  async function loadProjectSummary(slug, date){
+    const el = document.getElementById('sum-' + slug);
+    if (!el) return;
+    try {
+      const r = await fetch('/api/projects/' + encodeURIComponent(slug) +
+                            '/brief/summary?date=' + encodeURIComponent(date));
+      const data = await r.json();
+      el.textContent = data.summary || 'No summary available.';
+    } catch(_) {
+      el.textContent = 'Summary unavailable.';
+    }
+  }
+
+  // AC10 / AC12: per-block, independent collapse toggle
+  function toggleDetails(btn){
+    btn.closest('.pbrief').classList.toggle('collapsed');
+  }
+
+  // ── AC2: date navigation ────────────────────────────────────────────────────
+  function _go(date){
+    const url = new URL(window.location.href);
+    url.searchParams.set('date', date);
+    window.history.replaceState({}, '', url);
+    loadBrief(date);
+  }
+  function gotoPrevDay(){
+    const dt = parseDate(_curDate || todayIso());
+    dt.setDate(dt.getDate() - 1);
+    _go(fmtIso(dt));
+  }
+  function gotoToday(){ _go(todayIso()); }
+  function onDatePick(ev){
+    const v = ev.target.value;
+    if (v) _go(v);
+  }
+
+  // ── AC5: decision actions (one-tap, no full-page reload) ────────────────────
+  function _busy(id, text){
+    const b = document.getElementById('dec-' + id);
+    if (b){ b.disabled = true; b.textContent = text; }
+    return b;
+  }
+  function _done(b, text){ if (b){ b.textContent = text; } }
+  function _fail(b, text, enabled){ if (b){ b.textContent = text; b.disabled = !enabled; } }
+
+  async function runSprintAction(repo, label, id){
+    const b = _busy(id, 'Starting…');
+    try {
+      const r = await fetch('/api/sprints/run', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({project: repo, sprint_label: label}),
+      });
+      if (r.ok || r.status === 202){ _done(b, 'Started ✓'); }
+      else { _fail(b, 'Retry', true); }
+    } catch(_) { _fail(b, 'Retry', true); }
+  }
+
+  async function reviewReworkAction(repo, label, id){
+    const b = _busy(id, 'Reviewing…');
+    if (!label){ _fail(b, 'Review', true); return; }
+    try {
+      const r = await fetch('/api/sprints/' + encodeURIComponent(label) +
+                            '/rerun-preview?project=' + encodeURIComponent(repo));
+      if (r.ok){
+        const data = await r.json().catch(() => ({}));
+        const n = (data.tickets && data.tickets.length) || (data.rework && data.rework.length) || 0;
+        _done(b, n ? ('Review (' + n + ')') : 'Reviewed ✓');
+      } else { _fail(b, 'Review', true); }
+    } catch(_) { _fail(b, 'Review', true); }
+  }
+
+  async function cleanupBranchesAction(repo, id){
+    const b = _busy(id, 'Scanning…');
+    try {
+      // 1) scan for stale (merged) feature branches on this repo
+      const scan = await fetch('/scan-stale-branches?repo=' + encodeURIComponent(repo));
+      if (!scan.ok){ _fail(b, 'Clean up', true); return; }
+      const sd = await scan.json();
+      const branches = [];
+      (sd.sprints || sd.groups || []).forEach(g => (g.branches || []).forEach(x => branches.push(x)));
+      (sd.branches || []).forEach(x => branches.push(x));
+      if (!branches.length){ _done(b, 'Nothing stale ✓'); return; }
+      // 2) dry-run to see what is safe to delete (merged only)
+      const dry = await (await fetch('/cleanup-stale-branches', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({repo, branches, confirm: false}),
+      })).json();
+      const toDelete = dry.to_delete || [];
+      if (!toDelete.length){ _done(b, 'Nothing to delete ✓'); return; }
+      if (!confirm('Delete ' + toDelete.length + ' merged branch(es)?\n\n' + toDelete.join('\n'))){
+        _fail(b, 'Clean up', true); return;
+      }
+      // 3) confirmed delete
+      const res = await fetch('/cleanup-stale-branches', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({repo, branches, confirm: true}),
+      });
+      _done(b, res.ok ? 'Cleaned ✓' : 'Retry');
+      if (!res.ok && b) b.disabled = false;
+    } catch(_) { _fail(b, 'Clean up', true); }
+  }
+
+  // AC13: Add new project — navigation only (creation flow is a separate ticket)
+  function openAdd(ev){
+    if (typeof openAddProjectFlow === 'function' &&
+        document.getElementById('apm-backdrop')){
+      ev.preventDefault();
+      openAddProjectFlow();
+      return false;
+    }
+    return true; // fall back to navigating to the existing add-project page
+  }
+
+  init();
+  </script>
+</body>
+</html>

@@ -287,6 +287,28 @@ def list_open_issues_with_body(repo_name: str | None = None, limit: int = 200) -
     return _cached(key, fetch)
 
 
+def cached_open_issues_with_body(repo_name: str | None = None) -> list[dict] | None:
+    """Cache-only read of open issues with body — never triggers a GitHub call.
+
+    Returns the DB mirror (local, no GitHub quota) when present, else the
+    in-memory cache populated by ``list_open_issues_with_body`` (even if past
+    its TTL — serving slightly stale data is fine for a read-only preview and
+    is preferable to spending a GitHub API call). Returns ``None`` when no
+    cached data exists yet, so the caller can degrade gracefully.
+
+    Used by read-only preview surfaces that must add zero GitHub API calls
+    (issue #809).
+    """
+    r = _r(repo_name)
+    mirror = _mirror_issues(r)
+    if mirror is not None and all("body" in i for i in mirror):
+        return [i for i in mirror if i.get("state") == "open"]
+    entry = _cache.get(f"open_issues_body:{r}")
+    if entry is None:
+        return None
+    return entry[1]  # type: ignore[return-value]
+
+
 def get_issue(issue_number: int, repo_name: str | None = None) -> dict:
     """Fetch a single issue by number including body."""
     r = _r(repo_name)

@@ -791,6 +791,20 @@ _SPRINT_LABEL_RE = re.compile(r"^sprint-\d+$")
 _SUMMARY_TITLE_RE = re.compile(r"^Sprint \d+(\.\d+)?\s+Executive Summary$")
 
 
+def _summary_sprint_display(sprint_label: Optional[str], sprint_number) -> str:
+    """Full sprint identifier for summary titles/labels: '60', '60.1', '60.2'.
+
+    Prefer the dotted form from the label — using the bare sprint_number made
+    every re-run (sprint-60.1, 60.2 …) reuse the title "Sprint 60 Executive
+    Summary", so the dedup check kept updating the parent sprint's summary
+    issue instead of filing one per re-run.
+    """
+    m = re.match(r"^sprint-(\d+(?:\.\d+)*)$", sprint_label or "")
+    if m:
+        return m.group(1)
+    return str(sprint_number) if sprint_number is not None else str(sprint_label)
+
+
 def _guard_sprint_labels(
     add: list[str],
     remove: list[str],
@@ -4856,7 +4870,7 @@ def create_summary_github_issue(
     its mtime is compared to the existing issue's createdAt to detect staleness
     (AC-2: state-file timestamp check).
     """
-    n      = sprint_number if sprint_number is not None else sprint_label
+    n      = _summary_sprint_display(sprint_label, sprint_number)
     title  = f"Sprint {n} Executive Summary"
     labels = ["docs", f"sprint-{n}", "sprint-summary"]
 
@@ -4960,7 +4974,7 @@ def _close_cancelled_sprint_summary(
     Searches by title so it catches issues created in the same run even if their
     number/URL was never persisted to the state JSON.
     """
-    n = sprint_number if sprint_number is not None else sprint_label
+    n = _summary_sprint_display(sprint_label, sprint_number)
     title = f"Sprint {n} Executive Summary"
     try:
         existing = github_client.search_issues_by_title(title, repo_name=repo_name)

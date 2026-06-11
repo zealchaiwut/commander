@@ -922,6 +922,7 @@ from routers import (  # noqa: E402
     backup_router,
     log_search_router,
     runs_router,
+    sprint_history_router,
     sprints_router,
     system_router,
     tickets_router,
@@ -932,6 +933,7 @@ app.include_router(analytics_router)
 app.include_router(backup_router)
 app.include_router(log_search_router)
 app.include_router(runs_router)
+app.include_router(sprint_history_router)
 app.include_router(sprints_router)
 app.include_router(system_router)
 app.include_router(tickets_router)
@@ -9479,6 +9481,8 @@ def delete_sprint(sprint_label: str, project: str):
     except subprocess.CalledProcessError as e:
         raise _gh_error(e)
 
+    from routers import sprint_history_service  # snapshot history BEFORE label-strip (#805)
+    sprint_history_service.record_deleted_sprint(sprint_label, project, sprint_issues, commander)
     errors: list[str] = []
     unlabelled_count = 0
 
@@ -9497,14 +9501,10 @@ def delete_sprint(sprint_label: str, project: str):
     (commander / "sprints" / f"{sprint_label}-state.json").unlink(missing_ok=True)
     (commander / "sprints" / f"{sprint_label}-goal.txt").unlink(missing_ok=True)
 
-    github_client.invalidate(f"open_issues_body:")
-    github_client.invalidate(f"open_issues:")
-    github_client.invalidate(f"issues:")
-    github_client.invalidate(f"sprints:")
+    for _ck in ("open_issues_body:", "open_issues:", "issues:", "sprints:"):
+        github_client.invalidate(_ck)
 
-    result: dict = {"deleted_label": sprint_label, "unlabelled_count": unlabelled_count}
-    if errors:
-        result["errors"] = errors
+    result: dict = {"deleted_label": sprint_label, "unlabelled_count": unlabelled_count, **({"errors": errors} if errors else {})}
     return result
 
 

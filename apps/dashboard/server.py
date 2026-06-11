@@ -68,6 +68,7 @@ load_dotenv(Path(__file__).parent / ".env")
 import db
 import github_client
 import github_events_sync
+import live_metrics as _live_metrics
 import projects as projects_module
 
 # Structured event logging (services/logging.py at repo root)
@@ -7085,39 +7086,10 @@ def get_sprint_live_snapshot(sprint_label: str, project: str):
     if not active_agents and active_agent:
         active_agents = [active_agent]
 
-    # levels: per dispatch-level progress for the pipeline board. Only meaningful
-    # when issues carry dispatch_level > 0 (single-level/serial runs report []).
-    def _terminal(iss: dict) -> bool:
-        return iss.get("status") in ("done", "skipped") or iss.get("agent_status") == "failed"
-
-    levels_map: dict[int, list[dict]] = {}
-    for iss in issues:
-        lvl = iss.get("dispatch_level") or 0
-        if lvl > 0:
-            levels_map.setdefault(lvl, []).append(iss)
-
-    sorted_levels = sorted(levels_map)
-    current_level: Optional[int] = None
-    for lvl in sorted_levels:
-        if not all(_terminal(i) for i in levels_map[lvl]):
-            current_level = lvl
-            break
-
-    levels_out: list[dict] = []
-    for lvl in sorted_levels:
-        group = levels_map[lvl]
-        if all(_terminal(i) for i in group):
-            level_state = "complete"
-        elif current_level is not None and lvl == current_level:
-            level_state = "active"
-        else:
-            level_state = "waiting"
-        levels_out.append({
-            "level":  lvl,
-            "total":  len(group),
-            "merged": sum(1 for i in group if i.get("status") == "done"),
-            "state":  level_state,
-        })
+    # levels: per dispatch-level progress for the pipeline board (extracted to
+    # live_metrics.compute_levels — issue #803 — so this endpoint can grow the
+    # Running-view metric strip without growing the guarded server.py monolith).
+    levels_out = _live_metrics.compute_levels(issues)
 
     # ── recent_log_lines: last 50 lines from sprint run log ──────────────────
     log_dir = commander / "logs"
@@ -7150,6 +7122,9 @@ def get_sprint_live_snapshot(sprint_label: str, project: str):
         "est_remaining_minutes": est_remaining_minutes,
         # Per-ticket snapshot (issue #306)
         "issues":               issues_out,
+        # Running-view metric strip (issue #803) — agent_runs-derived keys are
+        # present only when their source exists, so the frontend hides cards.
+        **_live_metrics.running_metrics(sprint_label, project),
     }
 
 

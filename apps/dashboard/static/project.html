@@ -5523,6 +5523,33 @@
       .node.tester-active .node-state-icon { animation: none; }
     }
 
+    /* ── Running metrics strip (issue #803) ──────────────────────────────────
+       Five compact metric cards above the level-rail. Mock v5 contract:
+       .metrics container + .metric cards with metric-done/active/fix/tokens/time
+       variants. Values come from the /live snapshot; agent_runs-only cards are
+       omitted by the builder when their source is absent. */
+    .metrics { display: flex; flex-wrap: wrap; gap: 8px; padding: 4px 4px 14px; }
+    .metric { flex: 1 1 120px; min-width: 108px; display: flex; flex-direction: column;
+      gap: 3px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px;
+      background: var(--surface); }
+    .metric-label { font-size: 11px; font-weight: 600; color: var(--text-sub); }
+    .metric-value { font-size: 18px; font-weight: 700; color: var(--text);
+      font-family: var(--mono); display: flex; align-items: baseline; gap: 5px;
+      line-height: 1.1; }
+    .metric-unit { font-size: 12px; font-weight: 600; color: var(--text-muted); }
+    .metric-sub { font-size: 11px; font-weight: 600; color: var(--text-muted);
+      font-family: var(--mono); }
+    /* Per-agent time split: coder vs tester, colour-keyed to the rail glow tokens. */
+    .metric-split { display: flex; align-items: baseline; gap: 8px; font-family: var(--mono);
+      font-size: 13px; font-weight: 700; line-height: 1.1; }
+    .metric-split .ms-coder { color: var(--purple); }
+    .metric-split .ms-tester { color: var(--amber); }
+    /* Fix-rounds highlight: a full border + background tint, never a side-stripe. */
+    .metric.amber { border-color: var(--amber); background: var(--amber-bg); }
+    .metric.amber .metric-label,
+    .metric.amber .metric-value { color: var(--amber); }
+    @media (max-width: 560px) { .metric { flex-basis: calc(50% - 8px); } }
+
     .smgmt-subview { display: none; }
     .smgmt-subview.show { display: block; animation: smgmt-fade-in .18s ease; }
     @keyframes smgmt-fade-in { from { opacity: 0; } to { opacity: 1; } }
@@ -6022,6 +6049,9 @@
             <p class="smgmt-running-empty-title">No sprint is running</p>
             <p class="smgmt-running-empty-sub">Start a sprint from the Board to watch it live here.</p>
           </div>
+          <!-- Running metrics strip (issue #803) — five metric cards above the
+               rail, built from the /live snapshot by _smgmtMetricsUpdate. -->
+          <div class="metrics" id="smgmt-metrics" role="group" aria-label="Sprint metrics" hidden></div>
           <!-- Level-rail node board (issue #802) — built from the /live snapshot
                by _smgmtRailUpdate; levels gate on the spine, ticket nodes per level. -->
           <div class="rail" id="smgmt-rail" role="list" aria-label="Sprint level rail" hidden></div>
@@ -8861,7 +8891,10 @@ function _smgmtShowSubView(view) {
   // board shows immediately without waiting for the next 2s poll tick.
   if (view === 'running') {
     const lbl = _smgmtRunningLabels.values().next().value;
-    if (lbl) _smgmtRailUpdate(lbl, _smgmtLiveCache[lbl]);
+    if (lbl) {
+      _smgmtRailUpdate(lbl, _smgmtLiveCache[lbl]);
+      _smgmtMetricsUpdate(lbl, _smgmtLiveCache[lbl]);
+    }
   }
 }
 
@@ -11538,6 +11571,86 @@ function _smgmtRailSelectNode(num) {
   }
 }
 
+// ── Running metrics strip (issue #803) ───────────────────────────────────────
+// Five metric cards rendered above the level-rail from the /live snapshot.
+// Every card is sourced from snapshot data; agent_runs-only cards (Fix rounds,
+// Agent time split) and the price-map-only Tokens card are omitted entirely when
+// their source is absent, so the strip never errors or renders blank-broken.
+
+/** Format an elapsed-seconds value for the agent-time split (always a string). */
+function _smgmtFmtSplit(secs) {
+  return _fmtTicketElapsed(secs) || '0m 0s';
+}
+
+/** Format a token cost as an approximate dollar amount. */
+function _smgmtFmtUsd(usd) {
+  const n = Number(usd) || 0;
+  return '$' + n.toFixed(n > 0 && n < 1 ? 4 : 2);
+}
+
+/** Build the metric-strip markup from a /live snapshot. Returns the five cards
+ *  (Done x/y, Active agents, Fix rounds, Tokens ≈ $, Agent time split), with the
+ *  agent_runs- and price-map-gated cards omitted when their source is absent. */
+function _smgmtMetricsHtml(live) {
+  if (!live) return '';
+  const cards = [];
+
+  // Done x/y — same source the rail uses for its done count (AC7: match rail).
+  const done = Number(live.done_count || 0);
+  const total = Number(live.total_count || 0);
+  cards.push('<div class="metric metric-done"><div class="metric-label">Done</div>'
+    + '<div class="metric-value">' + done
+    + '<span class="metric-unit">/ ' + total + '</span></div></div>');
+
+  // Active agents (mode) — count + serial/pipeline, matching the rail's active nodes.
+  const active = ((live.active_agents) || []).length;
+  const mode = live.pipeline_mode ? 'pipeline' : 'serial';
+  cards.push('<div class="metric metric-active"><div class="metric-label">Active agents</div>'
+    + '<div class="metric-value">' + active
+    + '<span class="metric-sub">' + escHtml(mode) + '</span></div></div>');
+
+  // Fix rounds used — agent_runs-sourced; amber when any fix round has occurred.
+  if (live.agent_runs_present) {
+    const fr = Number(live.fix_rounds || 0);
+    cards.push('<div class="metric metric-fix' + (fr > 0 ? ' amber' : '') + '">'
+      + '<div class="metric-label">Fix rounds</div>'
+      + '<div class="metric-value">' + fr + '</div></div>');
+  }
+
+  // Tokens ≈ $ — literal token total (BA Path-A, no estimation) + approx cost.
+  // Hidden unless a price map yields a cost (token_cost_usd present).
+  if (live.token_cost_usd != null) {
+    const toks = Number(live.token_total || 0).toLocaleString();
+    cards.push('<div class="metric metric-tokens"><div class="metric-label">Tokens ≈ $</div>'
+      + '<div class="metric-value">' + escHtml(toks)
+      + '<span class="metric-sub">≈ ' + escHtml(_smgmtFmtUsd(live.token_cost_usd))
+      + '</span></div></div>');
+  }
+
+  // Agent time split — coder vs tester elapsed; guarded so an absent source
+  // (no agent_runs) can never throw (AC6: no console errors).
+  if (live.agent_time_split) {
+    const c = _smgmtFmtSplit(live.agent_time_split.coder);
+    const t = _smgmtFmtSplit(live.agent_time_split.tester);
+    cards.push('<div class="metric metric-time"><div class="metric-label">Agent time split</div>'
+      + '<div class="metric-split"><span class="ms-coder">C ' + escHtml(c) + '</span>'
+      + '<span class="ms-tester">T ' + escHtml(t) + '</span></div></div>');
+  }
+
+  return cards.join('');
+}
+
+/** Render the metric strip from a live snapshot. Hides the strip (no cards) when
+ *  the snapshot carries no issues, mirroring the rail's empty handling. */
+function _smgmtMetricsUpdate(label, live) {
+  const el = document.getElementById('smgmt-metrics');
+  if (!el) return;
+  const issues = (live && live.issues) || [];
+  const hasData = issues.length > 0;
+  el.hidden = !hasData;
+  el.innerHTML = hasData ? _smgmtMetricsHtml(live) : '';
+}
+
 /** Patch live stat strip + progress bar + ticket indicators in place (no full re-render). */
 function _smgmtLivePatch(label, live) {
   const card = document.getElementById(`smgmt-card-${label}`);
@@ -11815,6 +11928,8 @@ async function _smgmtLivePollTick() {
         if (_snavPanelOpen) _snavRenderPanel();
         // Update the level-rail node board in the Running sub-view (issue #802).
         _smgmtRailUpdate(label, live);
+        // Update the running metrics strip above the rail (issue #803).
+        _smgmtMetricsUpdate(label, live);
       }
     }
   } catch (_) { /* silently ignore poll errors */ }

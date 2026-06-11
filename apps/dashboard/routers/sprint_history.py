@@ -32,6 +32,9 @@ class SprintHistoryItem(BaseModel):
     estimate_accuracy: float | None = None
     pr_number: int | None = None
     summary_path: str | None = None
+    # Post-sprint reconciliation result (issue #856): {all_clear, checks[], ...}
+    # or None for sprints that closed before this feature was deployed.
+    reconciliation: dict | None = None
     issues: list[SprintHistoryIssue] = []
 
 

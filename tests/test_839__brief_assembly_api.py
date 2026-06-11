@@ -147,12 +147,15 @@ def _agent_run(db, issue_number, label, agent, *, started_at, finished_at=None):
 
 def _event(db, *, project=REPO, source="agent", event_type="agent_finished",
            target=None, data=None, created_at=START):
+    # Seed the `events` table — the real activity source (and what the Logs
+    # timeline reads). The original seeded `project_events`, a table nothing
+    # writes in production, which let recent_activity ship permanently empty.
     with db.get_conn() as conn:
         conn.execute(
-            "INSERT INTO project_events (project, created_at, source, event_type, "
-            "target, actor, action_id, data) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (project, created_at, source, event_type, target, None, None,
-             json.dumps(data) if data is not None else None),
+            "INSERT INTO events (project, timestamp, source, actor, type, "
+            "target, action_id, detail) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (project, created_at, source, "test", event_type, target or "",
+             None, json.dumps(data) if data is not None else "{}"),
         )
         conn.commit()
 
@@ -466,14 +469,14 @@ def test_ac13_global_kpis_sums_across_projects(client, fresh_db, monkeypatch):
 # ── AC14 ─────────────────────────────────────────────────────────────────────
 
 def test_ac14_gated_on_project_events_table(client, fresh_db):
-    # Drop the dependency table — the Logs sprint hasn't migrated.
+    # Drop the dependency table — the brief reads the `events` activity feed.
     with fresh_db.get_conn() as conn:
-        conn.execute("DROP TABLE IF EXISTS project_events")
+        conn.execute("DROP TABLE IF EXISTS events")
         conn.commit()
     r = client.get(f"/api/projects/{SLUG}/brief", params={"date": DATE})
     assert r.status_code == 503
     detail = r.json()["detail"].lower()
-    assert "project_events" in detail or "logs" in detail
+    assert "events" in detail or "logs" in detail
 
     r2 = client.get("/api/brief", params={"date": DATE})
     assert r2.status_code == 503

@@ -1189,7 +1189,17 @@ async def broadcast(data: dict):
 @app.get("/")
 async def root(request: Request):
     _slog.event("route.entry", project="dashboard", request_id=request.state.request_id, route="/", method="GET")
-    return _serve_html(STATIC_DIR / "home.html")  # issue #842: CEO daily-brief page
+    # The #842 daily-brief page is parked at /brief until its UX is settled
+    # (operator decision 2026-06-11: home shows the classic view + a
+    # coming-soon teaser for the brief).
+    return _serve_html(STATIC_DIR / "home-preview.html")
+
+
+@app.get("/brief")
+async def brief_page(request: Request):
+    """CEO daily-brief page (issue #842) — preview home for the brief feature."""
+    _slog.event("route.entry", project="dashboard", request_id=request.state.request_id, route="/brief", method="GET")
+    return _serve_html(STATIC_DIR / "home.html")
 
 
 @app.get("/home")

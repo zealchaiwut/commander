@@ -320,7 +320,7 @@
           btn = `<button class="dec-act" id="dec-${i}" onclick="cleanupBranchesAction('${esc(repo)}',${i})">Clean up</button>`;
         } else { // empty_sprint and any other advisory item — navigate to the board
           ic = '<span class="dec-ic"><i class="ti ti-clipboard-plus"></i></span>';
-          btn = `<a class="dec-act" href="/static/project.html?slug=${esc(dec.project)}">Open</a>`;
+          btn = `<a class="dec-act" href="/project/${esc(dec.project)}/sprint-mgmt">Open</a>`;
         }
         rows += `
         <div class="dec-row">
@@ -429,7 +429,9 @@
       const lbl = (a.source || 'EVENT').toUpperCase();
       return `<div class="tl-row"><span class="tl-time">${esc(a.time || '')}</span><span class="tl-badge ${badge}">${esc(lbl)}</span><span class="tl-txt">${esc(a.message || '')}</span></div>`;
     }).join('');
-    return `<div class="timeline">${rows}</div>`;
+    // Foot link per the mock: full history lives on the project's Logs tab.
+    const foot = `<div class="tl-foot"><a href="/project/${esc(p.project)}/logs">View all in Logs →</a></div>`;
+    return `<div class="timeline">${rows}${foot}</div>`;
   }
 
   function renderProject(p){
@@ -472,7 +474,7 @@
               ${_timeline(p)}
             </div>
           </div>
-          <a class="open-proj" href="/static/project.html?slug=${esc(slug)}"><i class="ti ti-arrow-right" style="font-size:13px"></i> Open ${esc(slug)}</a>
+          <a class="open-proj" href="/project/${esc(slug)}/sprint-mgmt"><i class="ti ti-arrow-right" style="font-size:13px"></i> Open ${esc(slug)}</a>
         </div>
       </div>`;
   }

@@ -56,15 +56,25 @@ def _map_issue_state(raw: str | None) -> str:
 
 
 def _seconds_between(start: str | None, end: str | None) -> int | None:
-    """Whole seconds between two ISO-8601 timestamps, or None if unusable."""
+    """Whole seconds between two ISO-8601 timestamps, or None if unusable.
+
+    Timestamps come from mixed sources: some carry a Z/offset (aware after
+    fromisoformat), others are bare naive-UTC strings. Normalize both to aware
+    UTC — subtracting naive from aware raises TypeError, which 500'd the whole
+    History endpoint.
+    """
     if not start or not end:
         return None
-    from datetime import datetime
+    from datetime import datetime, timezone
     try:
         s = datetime.fromisoformat(str(start).replace("Z", "+00:00"))
         e = datetime.fromisoformat(str(end).replace("Z", "+00:00"))
     except (ValueError, TypeError):
         return None
+    if s.tzinfo is None:
+        s = s.replace(tzinfo=timezone.utc)
+    if e.tzinfo is None:
+        e = e.replace(tzinfo=timezone.utc)
     return round((e - s).total_seconds())
 
 

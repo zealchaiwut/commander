@@ -28,10 +28,25 @@ The skill targets UAT, not PRD. You must dynamically discover the UAT repo path 
 
 ```
 ~/dev/<project-name>/<repo>          # main (dev) clone — where this skill runs
-~/dev/<project-name>/uat/<repo>      # UAT clone — what tests hit
+~/dev/<project-name>/uat/<repo>      # UAT clone — what tests hit (generic template)
 ```
 
 The main repo and the UAT repo share a `<project-name>` parent and a `<repo>` leaf. UAT is one level deeper under a `uat/` subdirectory.
+
+**Commander exception:** Commander uses sibling clones, not `uat/<repo>`:
+
+```
+~/dev/commander/
+  coder/    # dev — tests are written here
+  tester/   # tester workspace
+  uat/      # UAT dashboard — port 8001
+  prd/      # PRD dashboard — port 8000
+```
+
+For Commander, `$UAT_REPO` resolves to `~/dev/commander/uat` and `.env` lives at
+`apps/dashboard/.env`. The dashboard keeps `ENVIRONMENT=prd` in that file for
+runtime config; **port 8001 + the `uat/` clone path** is what marks it as UAT, not
+the `ENVIRONMENT=` line.
 
 ### Resolution algorithm
 
@@ -47,37 +62,61 @@ PROJECT_DIR="$(dirname "$MAIN_REPO")"      # ~/dev/<project-name>
 PROJECT_NAME="$(basename "$PROJECT_DIR")"
 
 # 3. Resolve the UAT clone
-UAT_REPO="$PROJECT_DIR/uat/$REPO_NAME"
-
-if [ ! -d "$UAT_REPO" ]; then
-  echo "ERROR: UAT clone not found at $UAT_REPO" >&2
-  echo "Expected layout: ~/dev/<project>/<repo> (main) and ~/dev/<project>/uat/<repo> (UAT)" >&2
-  exit 1
+# Commander: sibling uat/ clone at $PROJECT_DIR/uat
+# Generic template: nested clone at $PROJECT_DIR/uat/$REPO_NAME
+if [ -d "$PROJECT_DIR/uat/apps/dashboard" ]; then
+  UAT_REPO="$PROJECT_DIR/uat"
+else
+  UAT_REPO="$PROJECT_DIR/uat/$REPO_NAME"
+  if [ ! -d "$UAT_REPO" ]; then
+    echo "ERROR: UAT clone not found at $UAT_REPO" >&2
+    echo "Expected layout: ~/dev/<project>/<repo> (main) and ~/dev/<project>/uat/<repo> (UAT)" >&2
+    echo "Commander layout: ~/dev/commander/uat (sibling clone with apps/dashboard/)" >&2
+    exit 1
+  fi
 fi
 
-# 4. Read UAT .env — must contain ENVIRONMENT=UAT and PORT=<n>
-UAT_ENV="$UAT_REPO/dashboard/.env"
-if [ ! -f "$UAT_ENV" ]; then
-  # fall back to repo-root .env if the project doesn't use the dashboard subdir
+# 4. Read UAT .env — must declare a PORT; ENVIRONMENT=UAT OR Commander uat/ + 8001
+if [ -f "$UAT_REPO/apps/dashboard/.env" ]; then
+  UAT_ENV="$UAT_REPO/apps/dashboard/.env"
+elif [ -f "$UAT_REPO/dashboard/.env" ]; then
+  UAT_ENV="$UAT_REPO/dashboard/.env"
+elif [ -f "$UAT_REPO/.env" ]; then
   UAT_ENV="$UAT_REPO/.env"
-fi
-if [ ! -f "$UAT_ENV" ]; then
-  echo "ERROR: No .env found in $UAT_REPO (checked dashboard/.env and .env)" >&2
+else
+  echo "ERROR: No .env found in $UAT_REPO (checked apps/dashboard/.env, dashboard/.env, .env)" >&2
   exit 1
 fi
 
-# 5. Confirm it's actually UAT (not a misconfigured clone pointing at PRD)
-if ! grep -q '^ENVIRONMENT=UAT' "$UAT_ENV"; then
-  echo "ERROR: $UAT_ENV does not declare ENVIRONMENT=UAT — refusing to run." >&2
-  echo "If this clone is meant to be UAT, set ENVIRONMENT=UAT in its .env." >&2
-  exit 1
-fi
-
-# 6. Extract the port
+# 5. Extract the port (needed for both the guard and UAT_BASE_URL)
 UAT_PORT="$(grep -E '^PORT=' "$UAT_ENV" | head -n1 | cut -d= -f2 | tr -d '"'"'"' \r\n')"
 if [ -z "$UAT_PORT" ]; then
   echo "ERROR: PORT= not set in $UAT_ENV" >&2
   exit 1
+fi
+
+# 6. Confirm it's actually UAT (not PRD)
+# Standard guard: ENVIRONMENT=UAT in .env
+# Commander guard: uat/ sibling clone on port 8001 (PRD is port 8000; ENVIRONMENT may stay prd)
+COMMANDER_UAT_OK=0
+if [ "$UAT_REPO" = "$PROJECT_DIR/uat" ] && [ "$UAT_PORT" = "8001" ]; then
+  COMMANDER_UAT_OK=1
+fi
+
+if [ "$UAT_PORT" = "8000" ]; then
+  echo "ERROR: Refusing to run against port 8000 (PRD). Point tests at UAT on 8001." >&2
+  exit 1
+fi
+
+if ! grep -q '^ENVIRONMENT=UAT' "$UAT_ENV"; then
+  if [ "$COMMANDER_UAT_OK" -eq 1 ]; then
+    echo "NOTE: Commander UAT — accepting $UAT_ENV (ENVIRONMENT≠UAT) because clone is $UAT_REPO on port 8001." >&2
+  else
+    echo "ERROR: $UAT_ENV does not declare ENVIRONMENT=UAT — refusing to run." >&2
+    echo "If this clone is meant to be UAT, set ENVIRONMENT=UAT in its .env." >&2
+    echo "Commander: use the uat/ sibling clone with PORT=8001 instead." >&2
+    exit 1
+  fi
 fi
 
 UAT_BASE_URL="http://localhost:$UAT_PORT"
@@ -97,7 +136,10 @@ echo "UAT resolved: $UAT_REPO  →  $UAT_BASE_URL"
 - `UAT_REPO` — the UAT clone (informational; you do NOT modify files here)
 - `UAT_BASE_URL` — the URL all HTTP tests must hit
 
-**Where tests live:** test files are written into `$MAIN_REPO/dashboard/tests/` (same as before). They are version-controlled in the dev branch. They simply *point at* `$UAT_BASE_URL` instead of `localhost:8000`.
+**Where tests live:** test files are written into `$MAIN_REPO/tests/` for Commander
+(or `$MAIN_REPO/dashboard/tests/` for generic template repos). They are
+version-controlled in the dev branch. They simply *point at* `$UAT_BASE_URL`
+instead of `localhost:8000`.
 
 **Never write to or modify `$UAT_REPO`.** It's a deployed environment; treat it as read-only from this skill's perspective.
 
@@ -248,7 +290,8 @@ Use `codedb_search` and `codedb_tree` to find the code that implements (or will 
 
 ### Step 4 — Write the test file
 
-Create `$MAIN_REPO/dashboard/tests/test_{slug}__{N}.py`.
+Create `$MAIN_REPO/tests/test_{slug}__{N}.py` (Commander) or
+`$MAIN_REPO/dashboard/tests/test_{slug}__{N}.py` (generic template).
 
 **Naming convention:** one test function per AC criterion.
 Function name: `test_{slug}__{criterion_slug}` (double underscore)
@@ -635,4 +678,6 @@ See `CLAUDE.md` § MCP Tools: code-review-graph.
 - Test files are permanent artifacts in the main repo. Do not delete them. They accumulate in `tests/` as regression tests.
 - If a test fails due to a missing feature (the feature hasn't been coded yet), note that in your summary — this is expected during early SIT.
 - Prefer code-review-graph MCP, then `codedb_search`, for signatures and data shapes before writing assertions.
-- **Never run this skill against PRD.** Step 0's `ENVIRONMENT=UAT` check is the guard; if it fails, abort.
+- **Never run this skill against PRD.** Step 0 refuses port 8000. For generic repos,
+  `ENVIRONMENT=UAT` in `.env` is the guard. For Commander, the guard is the `uat/`
+  sibling clone on port 8001 — `ENVIRONMENT=prd` there is expected and safe.

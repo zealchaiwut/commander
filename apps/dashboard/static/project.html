@@ -1159,6 +1159,15 @@
     }
     .deploy-card__badge--local  { background: var(--blue-bg); color: var(--blue); border-color: transparent; }
     .deploy-card__badge--render { background: var(--purple-bg); color: var(--purple); border-color: transparent; }
+    .deploy-card__alert {
+      display: flex; gap: 10px; align-items: flex-start;
+      padding: 10px 12px; border-radius: 6px;
+      background: var(--amber-bg); border: 1px solid color-mix(in srgb, var(--amber) 35%, transparent);
+      color: var(--text); font-size: 12.5px; line-height: 1.45;
+    }
+    .deploy-card__alert .ti { color: var(--amber); font-size: 16px; flex-shrink: 0; margin-top: 1px; }
+    .deploy-card__alert ul { margin: 4px 0 0; padding-left: 18px; }
+    .deploy-card__alert li { margin: 2px 0; }
     .deploy-card__meta { display: flex; flex-direction: column; gap: 6px; font-size: 12.5px; }
     .deploy-card__meta-row { display: flex; gap: 8px; align-items: baseline; }
     .deploy-card__meta-label { color: var(--text-muted); min-width: 92px; flex-shrink: 0; }
@@ -10121,13 +10130,20 @@ function _histVerbsHtml(s) {
   const actionable = state === 'completed' || state === 'failed';
   if (!actionable) return '';
   const lbl = escHtml(s.label || '');
+  const rawLabel = s.label || '';
+  const rerunDisabled = _smgmtAnySprintRunning ? 'disabled' : '';
+  const rerunTitle = _smgmtAnySprintRunning
+    ? 'title="Cannot re-run: another sprint is currently running."'
+    : '';
+  const childDisplay = sprintLabelDisplay(_histNextChildLabel(rawLabel)).replace('Sprint ', '');
   let html = '';
   if (state === 'failed') {
     html += `<button class="hist-verb hist-verb--resume" onclick="_histResumeSprint('${lbl}')">
                <i class="ti ti-player-play"></i> Resume</button>`;
   }
-  html += `<button class="hist-verb hist-verb--rerun" onclick="_histRerunSprint('${lbl}')">
-             <i class="ti ti-refresh"></i> Re-run</button>`;
+  html += `<button class="hist-verb hist-verb--rerun" ${rerunDisabled} ${rerunTitle}
+             onclick="_histRerunSprint('${lbl}')">
+             <i class="ti ti-refresh"></i> Re-run → ${escHtml(childDisplay)}</button>`;
   html += `<button class="hist-verb hist-verb--finish" onclick="smgmtFinishSprint('${lbl}')">
              <i class="ti ti-flag-check"></i> Finish</button>`;
   html += `<button class="hist-verb hist-verb--delete" onclick="smgmtDeleteSprint('${lbl}')">
@@ -12159,18 +12175,32 @@ function sprintLabelDisplay(label) {
   return m[2] ? `Sprint ${m[1]}.${m[2]}` : `Sprint ${m[1]}`;
 }
 
-function _smgmtNextChildLabel(parentLabel) {
-  // Re-runs are siblings off the base sprint number, never nested children:
-  // sprint-68 → sprint-68.1, sprint-68.1 → sprint-68.2, sprint-68.2 → sprint-68.3.
-  // (Mirrors backend _next_sprint_sublabel.)
-  const m = /^(sprint-\d+)(?:\.(\d+))?$/.exec(parentLabel);
-  if (!m) return parentLabel;
-  const base = m[1];
-  const currentSuffix = m[2] ? parseInt(m[2], 10) : 0;
+/** Collect sprint labels already in use on the board and in history. */
+function _smgmtCollectExistingLabels() {
   const existing = new Set(Object.keys(_smgmtBySprint || {}));
+  (_histLedgerData || []).forEach(row => { if (row.label) existing.add(row.label); });
+  (_smgmtData?.order || []).forEach(l => existing.add(l));
+  return existing;
+}
+
+/** Next re-run sibling label — mirrors backend _next_sprint_sublabel. */
+function _nextSprintSublabel(sprintLabel) {
+  const m = /^(sprint-\d+)(?:\.(\d+))?$/.exec(sprintLabel || '');
+  if (!m) return sprintLabel;
+  const base = m[1];
+  const currentSuffix = m[2] != null ? parseInt(m[2], 10) : 0;
+  const existing = _smgmtCollectExistingLabels();
   let candidate = currentSuffix + 1;
   while (existing.has(`${base}.${candidate}`)) candidate++;
   return `${base}.${candidate}`;
+}
+
+function _histNextChildLabel(parentLabel) {
+  return _nextSprintSublabel(parentLabel);
+}
+
+function _smgmtNextChildLabel(parentLabel) {
+  return _nextSprintSublabel(parentLabel);
 }
 
 /**
@@ -14410,8 +14440,9 @@ function _smgmtUpdateCapBar(label) {
 
 /** Re-render every visible capacity bar (e.g. after settings change — AC7). */
 function _smgmtRenderAllCapBars() {
-  const nodes = document.querySelectorAll('[id^="smgmt-cap-"]');
-  nodes.forEach(node => _smgmtUpdateCapBar(node.id.slice('smgmt-cap-'.length)));
+  document.querySelectorAll('.cap[id^="smgmt-cap-"]').forEach(node => {
+    _smgmtUpdateCapBar(node.id.slice('smgmt-cap-'.length));
+  });
 }
 
 /** Lazily fetch budget settings + per-size cost averages, then re-render bars. */
@@ -24560,6 +24591,20 @@ function _deployRenderGrid() {
   _deployCards.forEach(function(c, i) { _deployLoadCardStatus(c, i); });
 }
 
+function _deployReadinessAlertHtml(c) {
+  if (c.deploy_ready !== false) return '';
+  var errs = c.deploy_errors || [];
+  if (!errs.length) errs = ['Deploy is not ready for this environment.'];
+  var body = errs.length === 1
+    ? _deployEsc(errs[0])
+    : '<ul>' + errs.map(function(e) { return '<li>' + _deployEsc(e) + '</li>'; }).join('') + '</ul>';
+  return ''
+    + '<div class="deploy-card__alert" role="alert">'
+    + '  <i class="ti ti-alert-triangle" aria-hidden="true"></i>'
+    + '  <div>' + body + '</div>'
+    + '</div>';
+}
+
 function _deployCardHtml(c, i) {
   var hostLabel = c.host === 'render' ? 'Render' : 'local';
   var hostClass = c.host === 'render' ? 'deploy-card__badge--render' : 'deploy-card__badge--local';
@@ -24583,6 +24628,7 @@ function _deployCardHtml(c, i) {
     + '          role="status" aria-live="polite" title="Run state">idle</span>'
     + '    <span class="status-pill status-pill--idle" id="deploy-card-status-' + i + '">idle</span>'
     + '  </div>'
+    +      _deployReadinessAlertHtml(c)
     + '  <div class="deploy-card__meta">'
     +      branchRow
     +      _deployFolderPortRows(c, i)
@@ -24604,7 +24650,8 @@ var _deployRunState = {};
 
 // AC5/AC6: enable/disable each action by run state. The chosen lifecycle is a
 // Stop → Start flow: Deploy and Restart are disabled while the env is stopped.
-function _deployBtnDisabled(state, action) {
+function _deployBtnDisabled(state, action, card) {
+  if (card && card.deploy_ready === false) return true;
   if (state === 'running') return action === 'start';
   if (state === 'stopped') return action === 'stop' || action === 'restart' || action === 'deploy';
   return false;  // idle → all enabled
@@ -24627,14 +24674,14 @@ function _deployIdleActionsHtml(i) {
   var state = _deployRunState[i] || 'idle';
   var html = ''
     + _deployActionBtn(i, 'deployCardDeploy(' + i + ')', 'Deploy', 'ti-rocket',
-        'deploy-btn--primary', _deployBtnDisabled(state, 'deploy'))
+        'deploy-btn--primary', _deployBtnDisabled(state, 'deploy', c))
     + _deployActionBtn(i, 'deployCardRestart(' + i + ')', 'Restart', 'ti-refresh',
-        '', _deployBtnDisabled(state, 'restart'));
+        '', _deployBtnDisabled(state, 'restart', c));
   if (c.start_stop_supported) {
     html += _deployActionBtn(i, 'deployCardStart(' + i + ')', 'Start', 'ti-player-play',
-              '', _deployBtnDisabled(state, 'start'))
+              '', _deployBtnDisabled(state, 'start', c))
           + _deployActionBtn(i, 'deployCardStop(' + i + ')', 'Stop', 'ti-player-stop',
-              'deploy-btn--danger', _deployBtnDisabled(state, 'stop'));
+              'deploy-btn--danger', _deployBtnDisabled(state, 'stop', c));
   } else {
     html += '<span class="deploy-startstop-na"'
           + ' title="Render does not support stop/start through this dashboard">'

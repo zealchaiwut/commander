@@ -2296,7 +2296,9 @@ def get_project_deploy_config(slug: str):
     """
     repo = _resolve_project_slug(slug)
     stored = _settings_repo.get_setting_scoped("project", DEPLOY_CONFIG_KEY, project=repo)
-    return _deploy_config_response(slug, repo, stored)
+    resp = _deploy_config_response(slug, repo, stored)
+    _enrich_deploy_readiness(resp)
+    return resp
 
 
 @app.put("/api/projects/{slug}/deploy-config")
@@ -2353,6 +2355,20 @@ def validate_deploy_config_field(slug: str, env: str, body: dict):
 # ── Local deploy / restart actions (issue #723) ──────────────────────────────
 
 from services.sprint_manager import deploy_actions as _deploy_actions
+
+
+def _enrich_deploy_readiness(config: dict) -> None:
+    """Attach ``deploy_ready`` and ``deploy_errors`` to each local env entry."""
+    for _env, entry in (config or {}).items():
+        if not isinstance(entry, dict):
+            continue
+        if entry.get("host") != "local":
+            continue
+        ready, errors = _deploy_actions.check_deploy_readiness(entry)
+        entry["deploy_ready"] = ready
+        entry["deploy_errors"] = errors
+
+
 from services.sprint_manager import render_actions as _render_actions
 from services.sprint_manager import deploy_validation as _deploy_validation
 
@@ -2483,11 +2499,16 @@ def deploy_environment(slug: str, env: str):
     """
     repo = _resolve_project_slug(slug)
     merged = _merged_deploy_config(slug, repo)
+    _enrich_local_working_dirs(repo, merged)
     entry = _deploy_actions.get_env_entry(merged, env)
 
     # host=render → trigger a Render deploy server-side (issue #725).
     if _render_actions.is_render_host(entry):
         return _render_deploy_environment(entry, env)
+
+    ready, readiness_errors = _deploy_actions.check_deploy_readiness(entry)
+    if not ready:
+        raise HTTPException(status_code=400, detail="; ".join(readiness_errors))
 
     try:
         working_dir, branch = _deploy_actions.require_deploy_target(entry)
@@ -2542,6 +2563,7 @@ def restart_environment(slug: str, env: str):
     """
     repo = _resolve_project_slug(slug)
     merged = _merged_deploy_config(slug, repo)
+    _enrich_local_working_dirs(repo, merged)
     entry = _deploy_actions.get_env_entry(merged, env)
     if entry is None:
         raise HTTPException(status_code=400, detail=f"No deploy config for environment '{env}'")
@@ -2549,6 +2571,10 @@ def restart_environment(slug: str, env: str):
     # host=render → restart the Render service server-side (issue #725).
     if _render_actions.is_render_host(entry):
         return _render_restart_environment(entry, env)
+
+    ready, readiness_errors = _deploy_actions.check_deploy_readiness(entry)
+    if not ready:
+        raise HTTPException(status_code=400, detail="; ".join(readiness_errors))
 
     result = _restart_environment(entry)
     if result.get("detached"):
@@ -2652,6 +2678,7 @@ def stop_environment(slug: str, env: str):
     """
     repo = _resolve_project_slug(slug)
     merged = _merged_deploy_config(slug, repo)
+    _enrich_local_working_dirs(repo, merged)
     entry = _deploy_actions.get_env_entry(merged, env)
     if entry is None:
         raise HTTPException(status_code=400, detail=f"No deploy config for environment '{env}'")
@@ -2660,6 +2687,9 @@ def stop_environment(slug: str, env: str):
             status_code=400,
             detail="Stop is not supported for host=render environments",
         )
+    ready, readiness_errors = _deploy_actions.check_deploy_readiness(entry)
+    if not ready:
+        raise HTTPException(status_code=400, detail="; ".join(readiness_errors))
     result = _stop_environment(entry)
     return {"ok": True, "env": env, **result}
 
@@ -2675,6 +2705,7 @@ def start_environment(slug: str, env: str):
     """
     repo = _resolve_project_slug(slug)
     merged = _merged_deploy_config(slug, repo)
+    _enrich_local_working_dirs(repo, merged)
     entry = _deploy_actions.get_env_entry(merged, env)
     if entry is None:
         raise HTTPException(status_code=400, detail=f"No deploy config for environment '{env}'")
@@ -2683,6 +2714,9 @@ def start_environment(slug: str, env: str):
             status_code=400,
             detail="Start is not supported for host=render environments",
         )
+    ready, readiness_errors = _deploy_actions.check_deploy_readiness(entry)
+    if not ready:
+        raise HTTPException(status_code=400, detail="; ".join(readiness_errors))
     result = _start_environment(entry)
     return {"ok": True, "env": env, **result}
 
@@ -2788,7 +2822,12 @@ def get_deploy_overview():
         # issue #769 — fill working_dir for local envs from on-disk env paths so
         # the card shows the run folder even with no stored override.
         _enrich_local_working_dirs(repo, merged)
-        environments.extend(_deploy_overview_entries_for(slug, merged))
+        _enrich_deploy_readiness(merged)
+        for card in _deploy_overview_entries_for(slug, merged):
+            cfg = merged.get(card["env"], {})
+            card["deploy_ready"] = cfg.get("deploy_ready", card["host"] == "render")
+            card["deploy_errors"] = cfg.get("deploy_errors", [])
+            environments.append(card)
 
     return {"environments": environments}
 

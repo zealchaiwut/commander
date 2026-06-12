@@ -23,6 +23,8 @@ Restart strategy per environment:
 from __future__ import annotations
 
 import os
+import re
+from pathlib import Path
 from typing import Any, Optional
 
 # The launchd label of the dashboard process itself. Restarting this env can't
@@ -89,6 +91,72 @@ def stop_start_scripts(entry: dict) -> tuple[Optional[str], Optional[str]]:
     stop = (entry.get("stop_script") or entry.get("stop") or "").strip() or None
     start = (entry.get("start_script") or entry.get("start") or "").strip() or None
     return stop, start
+
+
+def script_path_in_workdir(working_dir: str, script: str) -> Optional[Path]:
+    """Return the first ``.sh`` path referenced by *script*, resolved under *working_dir*."""
+    for match in re.finditer(r"(\S+\.sh)", script or ""):
+        rel = match.group(1)
+        path = Path(rel)
+        if not path.is_absolute():
+            path = Path(working_dir) / path
+        return path
+    return None
+
+
+def check_deploy_readiness(entry: Optional[dict]) -> tuple[bool, list[str]]:
+    """Return ``(ready, errors)`` for a merged deploy-config entry.
+
+    Render envs are always ready here (API key checks happen at action time).
+    Local envs require a folder plus either launchd or stop/start scripts whose
+    ``.sh`` targets exist on disk. An optional ``deploy_not_ready_message`` forces
+    not-ready with that operator-facing explanation (vector-search-demo, etc.).
+    """
+    if not entry:
+        return False, ["No deploy config for this environment"]
+    host = entry.get("host")
+    if host == "render":
+        return True, []
+    if host != "local":
+        return False, [f"Unsupported host: {host!r}"]
+
+    errors: list[str] = []
+    blocked = (entry.get("deploy_not_ready_message") or "").strip()
+    if blocked:
+        errors.append(blocked)
+
+    if restart_label(entry):
+        return len(errors) == 0, errors
+
+    working_dir = (entry.get("working_dir") or "").strip()
+    if not working_dir:
+        errors.append("working_dir is not configured")
+    elif not os.path.isdir(working_dir):
+        stop_probe, start_probe = stop_start_scripts(entry)
+        rel_scripts = [
+            script_path_in_workdir(working_dir, s)
+            for s in (stop_probe, start_probe) if s
+        ]
+        if any(p and not p.is_absolute() for p in rel_scripts):
+            errors.append(f"Folder does not exist: {working_dir}")
+
+    stop, start = stop_start_scripts(entry)
+    if not stop or not start:
+        errors.append("Missing stop_script / start_script — deploy lifecycle not configured")
+    elif working_dir:
+        for phase, script in (("Stop", stop), ("Start", start)):
+            match = re.search(r"(?:^|\s)((?:\.?/)?[\w./-]+\.sh)\b", script or "")
+            if not match:
+                continue
+            rel = match.group(1)
+            sh_path = Path(rel)
+            if sh_path.is_absolute():
+                continue  # operator-provided absolute paths are not verified here
+            resolved = Path(working_dir) / sh_path
+            if not resolved.is_file():
+                errors.append(f"{phase} script not found: {resolved}")
+
+    return len(errors) == 0, errors
 
 
 def restart_port(entry: dict) -> Optional[int]:

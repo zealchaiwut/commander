@@ -5004,6 +5004,35 @@ def _read_plan_json(project_root: Path, sprint_label: str) -> Optional[dict]:
     return None
 
 
+def _sprint_rerun_into_map(project_root: Path) -> dict[str, str]:
+    """Map parent sprint labels → child re-run sub-sprint labels still in play."""
+    sprints_dir = _commander_dir(project_root) / "sprints"
+    result: dict[str, str] = {}
+    if not sprints_dir.exists():
+        return result
+    for state_file in sprints_dir.glob("sprint-*-state.json"):
+        try:
+            data = json.loads(state_file.read_text(encoding="utf-8"))
+            parent = state_file.name.replace("-state.json", "")
+            sub = data.get("rerun_into")
+            if sub:
+                result[parent] = sub
+        except (OSError, json.JSONDecodeError):
+            continue
+    for plan_file in sprints_dir.glob("sprint-*-plan.json"):
+        label = plan_file.name[: -len("-plan.json")]
+        plan = _read_plan_json(project_root, label)
+        if not plan:
+            continue
+        parent = plan.get("parent")
+        if not parent:
+            continue
+        state = plan.get("state") or "planning"
+        if state in ("planning", "running", "failed"):
+            result[parent] = label
+    return result
+
+
 def _write_plan_json(project_root: Path, sprint_label: str, data: dict) -> None:
     """Write plan.json atomically."""
     path = _sprint_plan_path(project_root, sprint_label)
@@ -5583,6 +5612,8 @@ def get_sprint_management_issues(repo: str):
             _max_num = max(_max_num, int(m.group(1).split(".")[0]))
     placeholder_sprint = _max_num + 1
 
+    sprint_rerun_into = _sprint_rerun_into_map(project_root)
+
     return {
         "sprints": sprints,
         "order": order,
@@ -5592,6 +5623,7 @@ def get_sprint_management_issues(repo: str):
         "sprint_parents": sprint_parents,
         "sprint_plan_states": sprint_plan_states,
         "finished_sprints": finished_sprints,
+        "sprint_rerun_into": sprint_rerun_into,
     }
 
 
@@ -6441,6 +6473,27 @@ def run_sprint_managed(request: Request, body: SprintMgmtRunBody):
         )
     coder_path   = _coder_clone_path(project_root)
     commander    = _commander_dir(project_root)
+
+    # Block empty runs before spawn — instant no-op sprints leave no live logs.
+    from services.sprint_manager import sprint_manager as _sm_run
+    backlog = _sm_run.list_backlog_issues(body.sprint_label, body.project)
+    if not backlog:
+        child = _sprint_rerun_into_map(project_root).get(body.sprint_label)
+        if child:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"No dispatchable tickets on {body.sprint_label}. "
+                    f"Tickets were moved to {child} — use Run on that sprint instead."
+                ),
+            )
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"No dispatchable tickets on {body.sprint_label}. "
+                "Use Re-run to create a sub-sprint, or restore sprint labels on GitHub."
+            ),
+        )
 
     # ── Cycle detection: hard-block run if dependency graph has cycles ────────
     if _DAG_BUILDER_AVAILABLE:

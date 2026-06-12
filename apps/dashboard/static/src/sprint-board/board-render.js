@@ -687,11 +687,23 @@ export function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent, finis
                     onclick="smgmtRerunSprint('${escHtml(label)}')">
                     <i class="ti ti-refresh"></i> Re-run → ${escHtml(childDisplay)}</button>`;
 
+  const rerunInto = (_smgmtData?.sprint_rerun_into || {})[label];
+  const rerunChildDisplay = rerunInto
+    ? sprintLabelDisplay(rerunInto).replace('Sprint ', '')
+    : '';
+
   // Planning + has-rework cards: Run Sprint. Running cards: Cancel. Completed: Re-run.
   let actionBtn;
   if (isRunning) {
     actionBtn = `<button class="smgmt-cancel-btn" onclick="smgmtCancelSprint('${escHtml(label)}')">
                   <i class="ti ti-player-stop"></i> Cancel sprint</button>`;
+  } else if (isHasRework && rerunInto && tickets.length === 0) {
+    // Tickets moved to a child re-run — run the child, not the empty parent label.
+    actionBtn = `<button class="smgmt-run-btn" ${rerunDisabled} ${rerunTitle}
+                  onclick="smgmtRunSprint('${escHtml(rerunInto)}')">
+                  <i class="ti ti-player-play"></i> Run → ${escHtml(rerunChildDisplay)}</button>`;
+  } else if (isHasRework && tickets.length === 0) {
+    actionBtn = rerunBtn;
   } else if (isPostRun && !isHasRework) {
     actionBtn = rerunBtn;
   } else if (_smgmtAnySprintRunning) {

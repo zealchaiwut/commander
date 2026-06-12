@@ -10925,7 +10925,14 @@ async function _histRerunSprint(label) {
       { method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ticket_numbers: ticketNumbers, auto_run: true }) }
     );
-    if (!resp.ok) throw new Error(await resp.text());
+    if (!resp.ok) {
+      let detail = await resp.text();
+      try {
+        const parsed = JSON.parse(detail);
+        detail = parsed.detail || detail;
+      } catch (_) { /* plain-text error body */ }
+      throw new Error(typeof detail === 'string' ? detail : JSON.stringify(detail));
+    }
     const data = await resp.json();
     const subLabel = data.sub_label ? sprintLabelDisplay(data.sub_label) : 'Sub-sprint';
     _smgmtShowToast(`${subLabel} started (${ticketNumbers.length} ticket${ticketNumbers.length !== 1 ? 's' : ''})`);

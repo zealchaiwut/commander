@@ -4806,21 +4806,18 @@ def _emit_dashboard_event(
 
 
 def _read_sprint_summary_url(project_root: Path, sprint_label: str) -> Optional[str]:
-    """Return the summary-issue URL recorded in the sprint state file, or None.
+    """Return the summary-issue URL from the ingested DB row or state file."""
+    row = db.get_sprint(sprint_label)
+    if row and row.get("summary_issue_url"):
+        return row["summary_issue_url"]
 
-    The sprint summary issue link is persisted as ``summary_issue_url`` in
-    ``.commander/sprints/sprint-<N>-state.json``. Sub-sprint labels (sprint-N.M)
-    resolve to their base sprint-N state file.
-    """
-    m = re.match(r"^sprint-(\d+)", sprint_label)
-    if not m:
-        return None
-    state_path = _commander_dir(project_root) / "sprints" / f"sprint-{m.group(1)}-state.json"
-    try:
-        data = json.loads(state_path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        return None
-    return data.get("summary_issue_url")
+    from routers import sprint_artifact_service  # noqa: PLC0415
+    state = sprint_artifact_service.load_state_file(
+        _commander_dir(project_root) / "sprints", sprint_label,
+    )
+    if state:
+        return state.get("summary_issue_url")
+    return None
 
 
 def _sprint_label_sort_key(label: str) -> tuple:
@@ -8116,33 +8113,94 @@ def _has_rework_tickets(sprint_label: str, project: str) -> bool:
 
 
 def _sprint_has_own_run_outcome(project_root: Path, sprint_label: str) -> bool:
-    """True when outcome data for *this* label exists (not a parent/base run).
-
-    Re-run child sprints start in plan state=planning with stale session labels
-    carried over from the parent; they must not inherit sprint-N-state.json from
-    a sibling run (e.g. sprint-68.3 must not show sprint-68.2 timings).
-    """
+    """True when outcome data for *this* label exists (not a sibling/base run)."""
     plan = _read_plan_json(project_root, sprint_label)
     if plan and plan.get("state") in ("planning", "draft", "planned"):
         return False
 
-    commander = _commander_dir(project_root)
-    label_state = commander / "sprints" / f"{sprint_label}-state.json"
-    if label_state.exists():
+    row = db.get_sprint(sprint_label)
+    if row and row.get("run_ingested_at"):
         return True
 
-    m = re.match(r"^sprint-(\d+)", sprint_label)
-    if not m:
-        return False
-    base_state = commander / "sprints" / f"sprint-{m.group(1)}-state.json"
-    if not base_state.exists():
-        return False
+    from routers import sprint_artifact_service  # noqa: PLC0415
+    sprints_dir = _commander_dir(project_root) / "sprints"
+    return sprint_artifact_service.resolve_state_path(sprints_dir, sprint_label) is not None
+
+
+def _outcome_from_ingested_row(
+    row: dict,
+    sprint_label: str,
+    project: str,
+) -> dict:
+    """Build outcome payload from DB-ingested run artifacts (lifecycle P3)."""
+    from routers import sprint_artifact_service  # noqa: PLC0415
+
+    enrich = sprint_artifact_service.enrichment_from_db_row(row)
+    stored_state = row.get("state") or ""
+    lifecycle = db.canonical_lifecycle(stored_state)
+    end_reason = row.get("end_reason")
+    is_cancelled = lifecycle == "needs_rework" and (end_reason or "").startswith("stopped")
+
     try:
-        data = json.loads(base_state.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        return False
-    recorded = data.get("sprint_label")
-    return not recorded or recorded == sprint_label
+        issues_raw = json.loads(row.get("issues_json") or "[]")
+    except (json.JSONDecodeError, TypeError):
+        issues_raw = []
+
+    result_issues = []
+    for iss in issues_raw:
+        tid = iss.get("ticket_id") or iss.get("number")
+        agent = (iss.get("agent_status") or "").lower()
+        fr = iss.get("failure_reason")
+        st = (iss.get("state") or "").lower()
+        if st == "merged" or agent in ("completed", "done"):
+            outcome = "done"
+        elif agent == "failed" or fr:
+            outcome = "failed"
+        else:
+            outcome = "skipped"
+        result_issues.append({
+            "number": tid,
+            "title": iss.get("title", ""),
+            "outcome": outcome,
+            "elapsed_secs": iss.get("time_spent"),
+            "failure_reason": fr,
+        })
+
+    if is_cancelled:
+        pane_state = "cancelled"
+        sprint_status = "stopped"
+    elif _has_rework_tickets(sprint_label, project):
+        pane_state = "has_rework"
+        sprint_status = "stopped"
+    else:
+        pane_state = "completed"
+        sprint_status = "completed"
+
+    done_count = sum(1 for i in result_issues if i["outcome"] == "done")
+    failed_count = sum(1 for i in result_issues if i["outcome"] == "failed")
+    skipped_count = sum(1 for i in result_issues if i["outcome"] == "skipped")
+
+    surl = enrich.get("summary_issue_url")
+    summary_issue_num = enrich.get("summary_issue_num")
+
+    return {
+        "sprint_label": sprint_label,
+        "state": pane_state,
+        "lifecycle": lifecycle,
+        "end_reason": end_reason,
+        "sprint_status": sprint_status,
+        "counts": {
+            "done": done_count,
+            "failed": failed_count,
+            "skipped": skipped_count,
+        },
+        "wall_clock_secs": enrich.get("duration") or row.get("wall_clock_secs") or 0,
+        "ended_at": None,
+        "issues": result_issues,
+        "log_line_count": 0,
+        "summary_issue_url": surl,
+        "summary_issue_num": summary_issue_num,
+    }
 
 
 @app.get("/api/sprints/{sprint_label}/outcome")
@@ -8171,6 +8229,10 @@ def get_sprint_outcome(sprint_label: str, project: str):
     if not _sprint_has_own_run_outcome(project_root, sprint_label):
         raise HTTPException(404, detail=f"Outcome not found for {sprint_label!r} (not run yet)")
 
+    ingested = db.get_sprint(sprint_label)
+    if ingested and ingested.get("run_ingested_at"):
+        return _outcome_from_ingested_row(ingested, sprint_label, project)
+
     m = re.search(r"(\d+)", sprint_label)
     n = m.group(1) if m else sprint_label
 
@@ -8180,6 +8242,10 @@ def get_sprint_outcome(sprint_label: str, project: str):
     is_cancelled: bool = sprint_json.get("status") in ("cancelled", "needs_rework")
 
     state_path = commander / "sprints" / f"sprint-{n}-state.json"
+    from routers import sprint_artifact_service  # noqa: PLC0415
+    resolved = sprint_artifact_service.resolve_state_path(commander / "sprints", sprint_label)
+    if resolved is not None:
+        state_path = resolved
     if not state_path.exists():
         if is_cancelled:
             return {"sprint_label": sprint_label, "state": "cancelled",
@@ -8211,7 +8277,12 @@ def get_sprint_outcome(sprint_label: str, project: str):
     # Derive sprint status from summary file (most authoritative)
     sprint_status: Optional[str] = None
     sprints_dir = commander / "sprints"
-    for sf in sorted(sprints_dir.glob(f"sprint-{n}-summary-*.md"), key=lambda p: p.stat().st_mtime, reverse=True):
+    for sf in sorted(
+        list((commander / "sprints").glob(f"{sprint_label}-summary-*.md"))
+        + list((commander / "sprints").glob(f"sprint-{n}-summary-*.md")),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    ):
         try:
             meta = _parse_summary_file(sf)
             raw = (meta.get("status") or "").lower()

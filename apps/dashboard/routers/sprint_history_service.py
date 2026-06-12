@@ -167,14 +167,9 @@ def _compute_estimate_accuracy(state: dict) -> float | None:
 # ── file readers ──────────────────────────────────────────────────────────────
 
 def _read_state_file(sprints_dir: Path, label: str) -> dict | None:
-    """Load ``<label>-state.json`` from the sprints dir, or None."""
-    path = sprints_dir / f"{label}-state.json"
-    if not path.exists():
-        return None
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (ValueError, OSError):
-        return None
+    """Load state file for *label* (per-label path with legacy fallback)."""
+    from . import sprint_artifact_service  # noqa: PLC0415
+    return sprint_artifact_service.load_state_file(sprints_dir, label)
 
 
 def _read_plan_file(sprints_dir: Path, label: str) -> dict | None:
@@ -373,9 +368,13 @@ def _record_from_history(rec: dict) -> dict:
 
 
 def _record_from_lifecycle(row: dict, sprints_dir: Path) -> dict:
-    """Build the response row from a `sprints` lifecycle row + file enrichment."""
+    """Build the response row from a `sprints` lifecycle row + DB/disk enrichment."""
     label = row.get("label")
-    enrich = _enrich_from_state(label, sprints_dir)
+    if row.get("run_ingested_at"):
+        from . import sprint_artifact_service  # noqa: PLC0415
+        enrich = sprint_artifact_service.enrichment_from_db_row(row)
+    else:
+        enrich = _enrich_from_state(label, sprints_dir)
     duration = _seconds_between(row.get("started_at"), row.get("ended_at"))
     if duration is None:
         duration = enrich["duration"]
@@ -480,6 +479,7 @@ def _finalize_records(records: list[dict], sprints_dir: Path) -> None:
     for rec in records:
         label = rec.get("label") or ""
         if not rec.get("post_sprint"):
+            # Pre-P3 rows: post_sprint may only exist on disk.
             state = _read_state_file(sprints_dir, label)
             if state:
                 rec["post_sprint"] = _build_post_sprint(state)

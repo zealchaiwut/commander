@@ -713,7 +713,9 @@ export function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent, finis
   const isHasRework = outcomeState === 'has_rework';
   const hasCompleted = isFreshRerun ? false : _smgmtHasCompletedTickets(tickets);
   const isPostRun = !isRunning && !!((outcome && (outcome.sprint_status || outcome.state)) || hasCompleted);
-  const canRun = tickets.length >= 1 && (!hasCompleted || isHasRework);
+  // Run is only for first attempts: post-run labels (incl. has-rework) re-run
+  // into a child sub-sprint instead (P0 — no same-label re-dispatch).
+  const canRun = tickets.length >= 1 && !hasCompleted;
 
   // Re-run Sprint button: child sprint for fully completed/stopped runs (not has_rework)
   const rerunDisabled = _smgmtAnySprintRunning ? 'disabled' : '';
@@ -731,7 +733,11 @@ export function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent, finis
     ? sprintLabelDisplay(rerunInto).replace('Sprint ', '')
     : '';
 
-  // Planning + has-rework cards: Run Sprint. Running cards: Cancel. Completed: Re-run.
+  // Planning cards: Run Sprint. Running cards: Cancel. Any post-run card
+  // (completed or has-rework): Re-run → child sub-sprint. Same-label
+  // re-dispatch is blocked server-side (sprint-lifecycle redesign P0) — a
+  // label whose run ended is terminal, so has-rework cards must route to the
+  // re-run flow even when tickets are still on the column.
   let actionBtn;
   if (isRunning) {
     actionBtn = `<button class="smgmt-cancel-btn" onclick="smgmtCancelSprint('${escHtml(label)}')">
@@ -741,9 +747,7 @@ export function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent, finis
     actionBtn = `<button class="smgmt-run-btn" ${rerunDisabled} ${rerunTitle}
                   onclick="smgmtRunSprint('${escHtml(rerunInto)}')">
                   <i class="ti ti-player-play"></i> Run → ${escHtml(rerunChildDisplay)}</button>`;
-  } else if (isHasRework && tickets.length === 0) {
-    actionBtn = rerunBtn;
-  } else if (isPostRun && !isHasRework) {
+  } else if (isHasRework || isPostRun) {
     actionBtn = rerunBtn;
   } else if (_smgmtAnySprintRunning) {
     actionBtn = `<button class="smgmt-run-btn smgmt-run-btn--blocked"

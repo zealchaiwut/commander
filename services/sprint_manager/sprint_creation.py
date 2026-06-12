@@ -67,8 +67,6 @@ def _run_step(deps, step: str, action: Callable[[], None],
         # A clean return that didn't take effect is not a transient fault.
         raise SprintCreationError(
             step, "verification failed — the change did not take effect", 502)
-    # Unreachable: the loop either returns or raises.
-    raise SprintCreationError(step, "exhausted retries", 502)
 
 
 def create_sprint_verified(deps) -> None:

@@ -112,6 +112,37 @@ def test_require_restart_target_rejects_partial_scripts():
         da.require_restart_target({"stop_script": "/s/stop.sh"})
 
 
+def test_check_deploy_readiness_blocks_with_message_and_missing_script(tmp_path):
+    wd = tmp_path / "uat"
+    wd.mkdir()
+    entry = {
+        "host": "local",
+        "working_dir": str(wd),
+        "start_script": "bash scripts/deploy-start.sh",
+        "stop_script": "bash scripts/deploy-stop.sh",
+        "deploy_not_ready_message": "Deploy lifecycle is not ready in vector-search-demo yet.",
+    }
+    ready, errors = da.check_deploy_readiness(entry)
+    assert ready is False
+    assert any("not ready" in e.lower() for e in errors)
+    assert any("not found" in e for e in errors)
+
+
+def test_deploy_not_ready_message_does_not_block_stop_when_launchd():
+    """Stop/Restart stay available when only Deploy is gated by deploy_not_ready_message."""
+    entry = {
+        "host": "local",
+        "launchd_label": "com.example.uat",
+        "deploy_not_ready_message": "Deploy lifecycle is not ready yet.",
+    }
+    deploy_ready, _ = da.check_deploy_readiness(entry)
+    restart_ready, _ = da.check_restart_readiness(entry)
+    stop_ready, _ = da.check_stop_readiness(entry)
+    assert deploy_ready is False
+    assert restart_ready is True
+    assert stop_ready is True
+
+
 def test_is_self_restart_true_for_dashboard_label():
     """AC10: the dashboard's own label routes to the self-restart path."""
     assert da.is_self_restart({"launchd_label": da.DASHBOARD_LAUNCHD_LABEL}) is True

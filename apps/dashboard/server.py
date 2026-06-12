@@ -2296,7 +2296,9 @@ def get_project_deploy_config(slug: str):
     """
     repo = _resolve_project_slug(slug)
     stored = _settings_repo.get_setting_scoped("project", DEPLOY_CONFIG_KEY, project=repo)
-    return _deploy_config_response(slug, repo, stored)
+    resp = _deploy_config_response(slug, repo, stored)
+    _enrich_deploy_readiness(resp)
+    return resp
 
 
 @app.put("/api/projects/{slug}/deploy-config")
@@ -2353,6 +2355,29 @@ def validate_deploy_config_field(slug: str, env: str, body: dict):
 # ── Local deploy / restart actions (issue #723) ──────────────────────────────
 
 from services.sprint_manager import deploy_actions as _deploy_actions
+
+
+def _enrich_deploy_readiness(config: dict) -> None:
+    """Attach deploy + lifecycle readiness fields to each local env entry."""
+    for _env, entry in (config or {}).items():
+        if not isinstance(entry, dict):
+            continue
+        if entry.get("host") != "local":
+            continue
+        deploy_ready, deploy_errors = _deploy_actions.check_deploy_readiness(entry)
+        restart_ready, restart_errors = _deploy_actions.check_restart_readiness(entry)
+        stop_ready, stop_errors = _deploy_actions.check_stop_readiness(entry)
+        start_ready, start_errors = _deploy_actions.check_start_readiness(entry)
+        entry["deploy_ready"] = deploy_ready
+        entry["deploy_errors"] = deploy_errors
+        entry["restart_ready"] = restart_ready
+        entry["restart_errors"] = restart_errors
+        entry["stop_ready"] = stop_ready
+        entry["start_ready"] = start_ready
+        entry["stop_errors"] = stop_errors
+        entry["start_errors"] = start_errors
+
+
 from services.sprint_manager import render_actions as _render_actions
 from services.sprint_manager import deploy_validation as _deploy_validation
 
@@ -2483,11 +2508,16 @@ def deploy_environment(slug: str, env: str):
     """
     repo = _resolve_project_slug(slug)
     merged = _merged_deploy_config(slug, repo)
+    _enrich_local_working_dirs(repo, merged)
     entry = _deploy_actions.get_env_entry(merged, env)
 
     # host=render → trigger a Render deploy server-side (issue #725).
     if _render_actions.is_render_host(entry):
         return _render_deploy_environment(entry, env)
+
+    ready, readiness_errors = _deploy_actions.check_deploy_readiness(entry)
+    if not ready:
+        raise HTTPException(status_code=400, detail="; ".join(readiness_errors))
 
     try:
         working_dir, branch = _deploy_actions.require_deploy_target(entry)
@@ -2542,6 +2572,7 @@ def restart_environment(slug: str, env: str):
     """
     repo = _resolve_project_slug(slug)
     merged = _merged_deploy_config(slug, repo)
+    _enrich_local_working_dirs(repo, merged)
     entry = _deploy_actions.get_env_entry(merged, env)
     if entry is None:
         raise HTTPException(status_code=400, detail=f"No deploy config for environment '{env}'")
@@ -2549,6 +2580,10 @@ def restart_environment(slug: str, env: str):
     # host=render → restart the Render service server-side (issue #725).
     if _render_actions.is_render_host(entry):
         return _render_restart_environment(entry, env)
+
+    ready, readiness_errors = _deploy_actions.check_restart_readiness(entry)
+    if not ready:
+        raise HTTPException(status_code=400, detail="; ".join(readiness_errors))
 
     result = _restart_environment(entry)
     if result.get("detached"):
@@ -2652,6 +2687,7 @@ def stop_environment(slug: str, env: str):
     """
     repo = _resolve_project_slug(slug)
     merged = _merged_deploy_config(slug, repo)
+    _enrich_local_working_dirs(repo, merged)
     entry = _deploy_actions.get_env_entry(merged, env)
     if entry is None:
         raise HTTPException(status_code=400, detail=f"No deploy config for environment '{env}'")
@@ -2660,6 +2696,9 @@ def stop_environment(slug: str, env: str):
             status_code=400,
             detail="Stop is not supported for host=render environments",
         )
+    ready, readiness_errors = _deploy_actions.check_stop_readiness(entry)
+    if not ready:
+        raise HTTPException(status_code=400, detail="; ".join(readiness_errors))
     result = _stop_environment(entry)
     return {"ok": True, "env": env, **result}
 
@@ -2675,6 +2714,7 @@ def start_environment(slug: str, env: str):
     """
     repo = _resolve_project_slug(slug)
     merged = _merged_deploy_config(slug, repo)
+    _enrich_local_working_dirs(repo, merged)
     entry = _deploy_actions.get_env_entry(merged, env)
     if entry is None:
         raise HTTPException(status_code=400, detail=f"No deploy config for environment '{env}'")
@@ -2683,6 +2723,9 @@ def start_environment(slug: str, env: str):
             status_code=400,
             detail="Start is not supported for host=render environments",
         )
+    ready, readiness_errors = _deploy_actions.check_start_readiness(entry)
+    if not ready:
+        raise HTTPException(status_code=400, detail="; ".join(readiness_errors))
     result = _start_environment(entry)
     return {"ok": True, "env": env, **result}
 
@@ -2788,7 +2831,18 @@ def get_deploy_overview():
         # issue #769 — fill working_dir for local envs from on-disk env paths so
         # the card shows the run folder even with no stored override.
         _enrich_local_working_dirs(repo, merged)
-        environments.extend(_deploy_overview_entries_for(slug, merged))
+        _enrich_deploy_readiness(merged)
+        for card in _deploy_overview_entries_for(slug, merged):
+            cfg = merged.get(card["env"], {})
+            card["deploy_ready"] = cfg.get("deploy_ready", card["host"] == "render")
+            card["deploy_errors"] = cfg.get("deploy_errors", [])
+            card["restart_ready"] = cfg.get("restart_ready", card["host"] == "render")
+            card["restart_errors"] = cfg.get("restart_errors", [])
+            card["stop_ready"] = cfg.get("stop_ready", card["host"] == "render")
+            card["start_ready"] = cfg.get("start_ready", card["host"] == "render")
+            card["stop_errors"] = cfg.get("stop_errors", [])
+            card["start_errors"] = cfg.get("start_errors", [])
+            environments.append(card)
 
     return {"environments": environments}
 
@@ -4950,6 +5004,35 @@ def _read_plan_json(project_root: Path, sprint_label: str) -> Optional[dict]:
     return None
 
 
+def _sprint_rerun_into_map(project_root: Path) -> dict[str, str]:
+    """Map parent sprint labels → child re-run sub-sprint labels still in play."""
+    sprints_dir = _commander_dir(project_root) / "sprints"
+    result: dict[str, str] = {}
+    if not sprints_dir.exists():
+        return result
+    for state_file in sprints_dir.glob("sprint-*-state.json"):
+        try:
+            data = json.loads(state_file.read_text(encoding="utf-8"))
+            parent = state_file.name.replace("-state.json", "")
+            sub = data.get("rerun_into")
+            if sub:
+                result[parent] = sub
+        except (OSError, json.JSONDecodeError):
+            continue
+    for plan_file in sprints_dir.glob("sprint-*-plan.json"):
+        label = plan_file.name[: -len("-plan.json")]
+        plan = _read_plan_json(project_root, label)
+        if not plan:
+            continue
+        parent = plan.get("parent")
+        if not parent:
+            continue
+        state = plan.get("state") or "planning"
+        if state in ("planning", "running", "failed"):
+            result[parent] = label
+    return result
+
+
 def _write_plan_json(project_root: Path, sprint_label: str, data: dict) -> None:
     """Write plan.json atomically."""
     path = _sprint_plan_path(project_root, sprint_label)
@@ -5529,6 +5612,8 @@ def get_sprint_management_issues(repo: str):
             _max_num = max(_max_num, int(m.group(1).split(".")[0]))
     placeholder_sprint = _max_num + 1
 
+    sprint_rerun_into = _sprint_rerun_into_map(project_root)
+
     return {
         "sprints": sprints,
         "order": order,
@@ -5538,6 +5623,7 @@ def get_sprint_management_issues(repo: str):
         "sprint_parents": sprint_parents,
         "sprint_plan_states": sprint_plan_states,
         "finished_sprints": finished_sprints,
+        "sprint_rerun_into": sprint_rerun_into,
     }
 
 
@@ -6387,6 +6473,27 @@ def run_sprint_managed(request: Request, body: SprintMgmtRunBody):
         )
     coder_path   = _coder_clone_path(project_root)
     commander    = _commander_dir(project_root)
+
+    # Block empty runs before spawn — instant no-op sprints leave no live logs.
+    from services.sprint_manager import sprint_manager as _sm_run
+    backlog = _sm_run.list_backlog_issues(body.sprint_label, body.project)
+    if not backlog:
+        child = _sprint_rerun_into_map(project_root).get(body.sprint_label)
+        if child:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"No dispatchable tickets on {body.sprint_label}. "
+                    f"Tickets were moved to {child} — use Run on that sprint instead."
+                ),
+            )
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"No dispatchable tickets on {body.sprint_label}. "
+                "Use Re-run to create a sub-sprint, or restore sprint labels on GitHub."
+            ),
+        )
 
     # ── Cycle detection: hard-block run if dependency graph has cycles ────────
     if _DAG_BUILDER_AVAILABLE:

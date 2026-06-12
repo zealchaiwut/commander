@@ -513,7 +513,14 @@ export async function _pfConfirm() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ project: repo, sprint_label: label }),
     });
-    if (!res.ok) throw new Error(await res.text());
+    if (!res.ok) {
+      let detail = await res.text();
+      try {
+        const parsed = JSON.parse(detail);
+        detail = parsed.detail || detail;
+      } catch (_) { /* plain-text error body */ }
+      throw new Error(typeof detail === 'string' ? detail : JSON.stringify(detail));
+    }
     _pfClose();
     const n = parseInt(label.split('-')[1], 10);
     _smgmtShowToast(`Sprint ${n} dispatched.`);

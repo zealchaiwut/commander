@@ -49,7 +49,13 @@ SEED_DEFAULTS: dict[str, dict[str, dict[str, Any]]] = {
             "launchd_label": "com.commander.dashboard",
             "branch": "master",
         },
-        "uat": {"host": "local", "branch": "develop"},
+        "uat": {
+            "host": "local",
+            "branch": "develop",
+            "port": 8001,
+            "start_script": "bash ../../scripts/start_uat.sh",
+            "stop_script": "bash ../../scripts/stop_all.sh uat",
+        },
     },
     "perf-coach": {
         "prd": {"host": "render"},
@@ -57,6 +63,32 @@ SEED_DEFAULTS: dict[str, dict[str, dict[str, Any]]] = {
             "host": "local",
             "branch": "develop",
             "launchd_label": "com.perfcoach.uat",
+        },
+    },
+    "vector-search-demo": {
+        "prd": {
+            "host": "local",
+            "branch": "master",
+            "port": 8011,
+            "start_script": "bash scripts/deploy-start.sh",
+            "stop_script": "bash scripts/deploy-stop.sh",
+            "deploy_not_ready_message": (
+                "Deploy lifecycle is not ready in vector-search-demo yet — "
+                "ship scripts/deploy-start.sh and scripts/deploy-stop.sh "
+                "(plus Milvus start/stop) on this branch before using Deploy."
+            ),
+        },
+        "uat": {
+            "host": "local",
+            "branch": "develop",
+            "port": 8010,
+            "start_script": "bash scripts/deploy-start.sh",
+            "stop_script": "bash scripts/deploy-stop.sh",
+            "deploy_not_ready_message": (
+                "Deploy lifecycle is not ready in vector-search-demo yet — "
+                "scripts/deploy-start.sh and scripts/deploy-stop.sh are missing "
+                "on develop; add them in the vector-search-demo repo first."
+            ),
         },
     },
 }
@@ -68,10 +100,10 @@ def seed_for(slug: str) -> dict[str, dict[str, Any]]:
 
 
 def known_deploy_slugs() -> tuple[str, ...]:
-    """Return the project slugs that ship seed deploy config (commander, perf-coach).
+    """Return the project slugs that ship seed deploy config.
 
-    The Deploy tab aggregates environments across these projects, so both are
-    always visible even when only one is listed in ``projects.json``.
+    The Deploy tab aggregates environments across these projects so each is
+    visible even when only one is listed in ``projects.json``.
     """
     return tuple(SEED_DEFAULTS.keys())
 

@@ -84,11 +84,12 @@ def test_latest_deploy_empty_payload_is_safe():
 # ── AC2 / AC12: deploy overview aggregation (pure builders) ───────────────────
 
 
-def test_known_deploy_slugs_include_both_projects():
-    """AC12: commander and perf-coach are both known deployable projects."""
+def test_known_deploy_slugs_include_wired_projects():
+    """AC12: commander, perf-coach, and vector-search-demo are deployable."""
     slugs = dcs.known_deploy_slugs()
     assert "commander" in slugs
     assert "perf-coach" in slugs
+    assert "vector-search-demo" in slugs
 
 
 def test_overview_entries_one_per_configured_env():
@@ -138,6 +139,16 @@ def test_overview_entries_never_include_secret():
     assert "rnd_supersecret" not in blob
 
 
+def test_vector_search_demo_overview_has_prd_and_uat():
+    merged = dcs.merge_seed(dcs.seed_for("vector-search-demo"), {})
+    entries = dcs.overview_entries_for("vector-search-demo", merged)
+    envs = {e["env"] for e in entries}
+    assert envs == {"prd", "uat"}
+    uat = next(e for e in entries if e["env"] == "uat")
+    assert uat["host"] == "local"
+    assert uat["port"] == 8010
+
+
 # ── endpoint tests ────────────────────────────────────────────────────────────
 
 
@@ -166,6 +177,7 @@ def _make_engine():
 _PROJECTS = [
     {"repo": "zealchaiwut/commander"},
     {"repo": "owner/perf-coach"},
+    {"repo": "zealchaiwut/vector-search-demo"},
 ]
 
 
@@ -205,8 +217,8 @@ def test_overview_route_registered(client_ctx):
     assert "/api/deploy/overview" in paths
 
 
-def test_overview_lists_both_projects(client_ctx):
-    """AC12: the overview returns environments for commander AND perf-coach."""
+def test_overview_lists_wired_projects(client_ctx):
+    """AC12: the overview returns environments for commander, perf-coach, and vector-search-demo."""
     client, srv, repo = client_ctx
     resp = client.get("/api/deploy/overview")
     assert resp.status_code == 200, resp.text
@@ -214,6 +226,20 @@ def test_overview_lists_both_projects(client_ctx):
     projects = {e["project"] for e in envs}
     assert "commander" in projects
     assert "perf-coach" in projects
+    assert "vector-search-demo" in projects
+
+
+def test_vector_search_demo_overview_marks_not_ready(client_ctx):
+    """vector-search-demo cards carry deploy_ready=false until scripts ship."""
+    client, srv, repo = client_ctx
+    resp = client.get("/api/deploy/overview")
+    vsd = [e for e in resp.json()["environments"] if e["project"] == "vector-search-demo"]
+    assert len(vsd) == 2
+    assert all(e.get("deploy_ready") is False for e in vsd)
+    assert all(e.get("deploy_errors") for e in vsd)
+    assert all(e.get("restart_ready") is False for e in vsd)
+    assert all(e.get("stop_ready") is False for e in vsd)
+    assert all(e.get("start_ready") is False for e in vsd)
 
 
 def test_overview_lists_env_cards(client_ctx):

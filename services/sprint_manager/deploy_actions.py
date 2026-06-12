@@ -23,6 +23,8 @@ Restart strategy per environment:
 from __future__ import annotations
 
 import os
+import re
+from pathlib import Path
 from typing import Any, Optional
 
 # The launchd label of the dashboard process itself. Restarting this env can't
@@ -89,6 +91,181 @@ def stop_start_scripts(entry: dict) -> tuple[Optional[str], Optional[str]]:
     stop = (entry.get("stop_script") or entry.get("stop") or "").strip() or None
     start = (entry.get("start_script") or entry.get("start") or "").strip() or None
     return stop, start
+
+
+def script_path_in_workdir(working_dir: str, script: str) -> Optional[Path]:
+    """Return the first ``.sh`` path referenced by *script*, resolved under *working_dir*."""
+    for match in re.finditer(r"(\S+\.sh)", script or ""):
+        rel = match.group(1)
+        path = Path(rel)
+        if not path.is_absolute():
+            path = Path(working_dir) / path
+        return path
+    return None
+
+
+def check_deploy_readiness(entry: Optional[dict]) -> tuple[bool, list[str]]:
+    """Return ``(ready, errors)`` for Deploy (git pull + restart).
+
+    Render envs are always ready here (API key checks happen at action time).
+    Local script-based envs require working_dir plus stop/start scripts on disk.
+    An optional ``deploy_not_ready_message`` forces not-ready (vector-search-demo).
+    Launchd-managed envs skip script checks once the optional block message passes.
+    """
+    if not entry:
+        return False, ["No deploy config for this environment"]
+    host = entry.get("host")
+    if host == "render":
+        return True, []
+    if host != "local":
+        return False, [f"Unsupported host: {host!r}"]
+
+    errors: list[str] = []
+    blocked = (entry.get("deploy_not_ready_message") or "").strip()
+    if blocked:
+        errors.append(blocked)
+
+    if restart_label(entry):
+        return len(errors) == 0, errors
+
+    errors.extend(_deploy_script_errors(entry))
+    return len(errors) == 0, errors
+
+
+def _deploy_script_errors(entry: dict) -> list[str]:
+    """Validate working_dir + stop/start scripts for script-based lifecycle."""
+    errors: list[str] = []
+    working_dir = (entry.get("working_dir") or "").strip()
+    if not working_dir:
+        errors.append("working_dir is not configured")
+    elif not os.path.isdir(working_dir):
+        stop_probe, start_probe = stop_start_scripts(entry)
+        rel_scripts = [
+            script_path_in_workdir(working_dir, s)
+            for s in (stop_probe, start_probe) if s
+        ]
+        if any(p and not p.is_absolute() for p in rel_scripts):
+            errors.append(f"Folder does not exist: {working_dir}")
+
+    stop, start = stop_start_scripts(entry)
+    if not stop or not start:
+        errors.append("Missing stop_script / start_script — deploy lifecycle not configured")
+    elif working_dir:
+        errors.extend(_missing_script_file_errors(working_dir, stop, start))
+    return errors
+
+
+def _missing_script_file_errors(
+    working_dir: str, stop: str, start: str
+) -> list[str]:
+    errors: list[str] = []
+    for phase, script in (("Stop", stop), ("Start", start)):
+        match = re.search(r"(?:^|\s)((?:\.?/)?[\w./-]+\.sh)\b", script or "")
+        if not match:
+            continue
+        rel = match.group(1)
+        sh_path = Path(rel)
+        if sh_path.is_absolute():
+            continue
+        resolved = Path(working_dir) / sh_path
+        if not resolved.is_file():
+            errors.append(f"{phase} script not found: {resolved}")
+    return errors
+
+
+def _script_uses_relative_sh(script: Optional[str]) -> bool:
+    """True when *script* references a non-absolute ``.sh`` path."""
+    match = re.search(r"(?:^|\s)((?:\.?/)?[\w./-]+\.sh)\b", script or "")
+    if not match:
+        return False
+    return not Path(match.group(1)).is_absolute()
+
+
+def _working_dir_readiness(entry: dict, script: Optional[str]) -> tuple[bool, list[str]]:
+    """Validate working_dir only when *script* uses a relative ``.sh`` path."""
+    if not _script_uses_relative_sh(script):
+        return True, []
+    working_dir = (entry.get("working_dir") or "").strip()
+    if not working_dir:
+        return False, ["working_dir is not configured"]
+    if not os.path.isdir(working_dir):
+        return False, [f"Folder does not exist: {working_dir}"]
+    return True, []
+
+
+def check_restart_readiness(entry: Optional[dict]) -> tuple[bool, list[str]]:
+    """Return ``(ready, errors)`` for Restart (no git pull).
+
+    Does not apply ``deploy_not_ready_message`` — that gate is Deploy-only.
+    """
+    if not entry:
+        return False, ["No deploy config for this environment"]
+    if entry.get("host") == "render":
+        return True, []
+    if entry.get("host") != "local":
+        return False, [f"Unsupported host: {host!r}"]
+    try:
+        require_restart_target(entry)
+    except DeployActionError as exc:
+        return False, [str(exc)]
+    if restart_label(entry):
+        return True, []
+    return _check_script_lifecycle_readiness(entry)
+
+
+def check_stop_readiness(entry: Optional[dict]) -> tuple[bool, list[str]]:
+    """Return ``(ready, errors)`` for Stop."""
+    if not entry:
+        return False, ["No deploy config for this environment"]
+    if entry.get("host") == "render":
+        return False, ["Stop is not supported for host=render environments"]
+    if entry.get("host") != "local":
+        return False, [f"Unsupported host: {host!r}"]
+    try:
+        require_stop_target(entry)
+    except DeployActionError as exc:
+        return False, [str(exc)]
+    if restart_label(entry):
+        return True, []
+    stop, _start = stop_start_scripts(entry)
+    ok, errors = _working_dir_readiness(entry, stop)
+    if not ok:
+        return False, errors
+    working_dir = (entry.get("working_dir") or "").strip()
+    if working_dir and stop and _script_uses_relative_sh(stop):
+        file_errors = _missing_script_file_errors(working_dir, stop, stop)
+        return len(file_errors) == 0, file_errors
+    return True, []
+
+
+def check_start_readiness(entry: Optional[dict]) -> tuple[bool, list[str]]:
+    """Return ``(ready, errors)`` for Start."""
+    if not entry:
+        return False, ["No deploy config for this environment"]
+    if entry.get("host") == "render":
+        return False, ["Start is not supported for host=render environments"]
+    if entry.get("host") != "local":
+        return False, [f"Unsupported host: {host!r}"]
+    try:
+        require_start_target(entry)
+    except DeployActionError as exc:
+        return False, [str(exc)]
+    if restart_label(entry) and launchd_plist(entry):
+        return True, []
+    _stop, start = stop_start_scripts(entry)
+    ok, errors = _working_dir_readiness(entry, start)
+    if not ok:
+        return False, errors
+    working_dir = (entry.get("working_dir") or "").strip()
+    if working_dir and start and _script_uses_relative_sh(start):
+        file_errors = _missing_script_file_errors(working_dir, start, start)
+        return len(file_errors) == 0, file_errors
+    return True, []
+
+
+def _check_script_lifecycle_readiness(entry: dict) -> tuple[bool, list[str]]:
+    errors = _deploy_script_errors(entry)
+    return len(errors) == 0, errors
 
 
 def restart_port(entry: dict) -> Optional[int]:

@@ -821,8 +821,15 @@
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ project: repo, sprint_label: label })
       });
-      if (!res.ok)
-        throw new Error(await res.text());
+      if (!res.ok) {
+        let detail = await res.text();
+        try {
+          const parsed = JSON.parse(detail);
+          detail = parsed.detail || detail;
+        } catch (_) {
+        }
+        throw new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
+      }
       _pfClose();
       const n = parseInt(label.split("-")[1], 10);
       _smgmtShowToast(`Sprint ${n} dispatched.`);
@@ -2250,10 +2257,18 @@ ${data.errors.join("\n")}`);
     const rerunBtn = `<button class="smgmt-run-btn smgmt-run-btn--rerun" ${rerunDisabled} ${rerunTitle}
                     onclick="smgmtRerunSprint('${escHtml(label)}')">
                     <i class="ti ti-refresh"></i> Re-run \u2192 ${escHtml(childDisplay)}</button>`;
+    const rerunInto = (_smgmtData?.sprint_rerun_into || {})[label];
+    const rerunChildDisplay = rerunInto ? sprintLabelDisplay(rerunInto).replace("Sprint ", "") : "";
     let actionBtn;
     if (isRunning) {
       actionBtn = `<button class="smgmt-cancel-btn" onclick="smgmtCancelSprint('${escHtml(label)}')">
                   <i class="ti ti-player-stop"></i> Cancel sprint</button>`;
+    } else if (isHasRework && rerunInto && tickets.length === 0) {
+      actionBtn = `<button class="smgmt-run-btn" ${rerunDisabled} ${rerunTitle}
+                  onclick="smgmtRunSprint('${escHtml(rerunInto)}')">
+                  <i class="ti ti-player-play"></i> Run \u2192 ${escHtml(rerunChildDisplay)}</button>`;
+    } else if (isHasRework && tickets.length === 0) {
+      actionBtn = rerunBtn;
     } else if (isPostRun && !isHasRework) {
       actionBtn = rerunBtn;
     } else if (_smgmtAnySprintRunning) {

@@ -118,7 +118,7 @@ def test_no_gradient_text_in_stats_styles():
 def test_ac1_builder_emits_all_chip_kinds():
     body = _fn_body("_histStatsHtml")
     assert "stat-chips" in body, "the block must contain a .stat-chips row"
-    for token in ("Wall", "Tokens", "Agent", "fix round", "Slowest", "Parallel saved"):
+    for token in ("wall", "tokens", "agent time", "fix round", "slowest", "parallel saved"):
         assert token in body, f"stat chips must include the `{token}` chip"
 
 

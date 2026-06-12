@@ -33,6 +33,60 @@ if str(_DASHBOARD_ROOT) not in _sys.path:
 DEFAULT_SPRINTS_DIR = _DASHBOARD_ROOT / "sprints"
 
 
+def _resolve_sprints_search_dirs(project: str | None = None) -> list[Path]:
+    """Return sprint artifact dirs to search, commander project roots first.
+
+    Bulk-complete and sprint_manager write plan/state under
+    ``<project_root>/.commander/sprints``; the dashboard also keeps a local
+  ``apps/dashboard/sprints`` tree for legacy/test rows. History must read both.
+    """
+    dirs: list[Path] = []
+    seen: set[str] = set()
+
+    def _add(p: Path) -> None:
+        if not p.is_dir():
+            return
+        try:
+            key = str(p.resolve())
+        except OSError:
+            key = str(p)
+        if key in seen:
+            return
+        seen.add(key)
+        dirs.append(p)
+
+    repos: list[str] = []
+    if project:
+        repos = [project]
+    else:
+        try:
+            import projects as projects_module  # noqa: PLC0415
+            for proj in projects_module.load_projects():
+                repo = proj.get("repo")
+                if repo:
+                    repos.append(repo)
+        except Exception:
+            pass
+
+    for repo in repos:
+        try:
+            import server as srv  # noqa: PLC0415
+            root = srv._project_root_path(repo)
+            _add(srv._commander_dir(root) / "sprints")
+        except Exception:
+            continue
+
+    _add(DEFAULT_SPRINTS_DIR)
+    return dirs
+
+
+def _as_sprints_dirs(sprints_dir: Path | list[Path] | None, project: str | None) -> list[Path]:
+    """Normalize the optional test override vs project-scoped search list."""
+    if sprints_dir is not None:
+        return [sprints_dir] if isinstance(sprints_dir, Path) else list(sprints_dir)
+    return _resolve_sprints_search_dirs(project)
+
+
 def _db():
     """Deferred import of the db module (honours a patched DB_PATH at call time)."""
     import db  # noqa: PLC0415
@@ -97,11 +151,15 @@ def _parse_pr_number(state: dict) -> int | None:
     """Best-effort PR number from a sprint state file or reconciliation block."""
     recon = state.get("reconciliation") or {}
     for chk in recon.get("checks") or []:
-        if chk.get("name") == "sprint_pr" and chk.get("ok"):
-            detail = str(chk.get("detail") or "")
-            m = re.search(r"#(\d+)", detail)
-            if m:
-                return int(m.group(1))
+        if chk.get("name") == "sprint_pr":
+            pr = chk.get("pr_number")
+            if pr is not None:
+                return int(pr)
+            if chk.get("ok"):
+                detail = str(chk.get("detail") or "")
+                m = re.search(r"#(\d+)", detail)
+                if m:
+                    return int(m.group(1))
     pr_url = state.get("pr_url") or state.get("sprint_pr_url")
     if pr_url:
         m = re.search(r"/pull/(\d+)", str(pr_url))
@@ -166,21 +224,32 @@ def _compute_estimate_accuracy(state: dict) -> float | None:
 
 # ── file readers ──────────────────────────────────────────────────────────────
 
-def _read_state_file(sprints_dir: Path, label: str) -> dict | None:
+def _read_state_file(sprints_dirs: Path | list[Path], label: str) -> dict | None:
     """Load state file for *label* (per-label path with legacy fallback)."""
     from . import sprint_artifact_service  # noqa: PLC0415
-    return sprint_artifact_service.load_state_file(sprints_dir, label)
+    dirs = [sprints_dirs] if isinstance(sprints_dirs, Path) else list(sprints_dirs)
+    for sprints_dir in dirs:
+        state = sprint_artifact_service.load_state_file(sprints_dir, label)
+        if state is not None:
+            return state
+    return None
 
 
-def _read_plan_file(sprints_dir: Path, label: str) -> dict | None:
-    """Load ``<label>.json`` plan file from the sprints dir, or None."""
-    path = sprints_dir / f"{label}.json"
-    if not path.exists():
-        return None
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (ValueError, OSError):
-        return None
+def _read_plan_file(sprints_dirs: Path | list[Path], label: str) -> dict | None:
+    """Load plan state from ``<label>-plan.json`` (canonical) or ``<label>.json``."""
+    from . import sprint_artifact_service  # noqa: PLC0415
+    dirs = [sprints_dirs] if isinstance(sprints_dirs, Path) else list(sprints_dirs)
+    for sprints_dir in dirs:
+        for root in sprint_artifact_service._sprint_roots(sprints_dir):
+            for name in (f"{label}-plan.json", f"{label}.json"):
+                path = root / name
+                if not path.is_file():
+                    continue
+                try:
+                    return json.loads(path.read_text(encoding="utf-8"))
+                except (ValueError, OSError):
+                    return None
+    return None
 
 
 def _issues_from_agent_runs(label: str) -> list[dict]:
@@ -211,29 +280,33 @@ def _issues_from_agent_runs(label: str) -> list[dict]:
     return issues
 
 
-def _find_summary_path(sprints_dir: Path, label: str) -> str | None:
+def _find_summary_path(sprints_dirs: Path | list[Path], label: str) -> str | None:
     """Most recent ``<label>-summary-*.md`` path for a sprint, or None."""
-    if not sprints_dir.exists():
+    dirs = [sprints_dirs] if isinstance(sprints_dirs, Path) else list(sprints_dirs)
+    from . import sprint_artifact_service  # noqa: PLC0415
+    cands: list[Path] = []
+    for sprints_dir in dirs:
+        if not sprints_dir.exists():
+            continue
+        for root in sprint_artifact_service._sprint_roots(sprints_dir):
+            cands.extend(root.glob(f"{label}-summary-*.md"))
+    if not cands:
         return None
-    cands = sorted(
-        sprints_dir.glob(f"{label}-summary-*.md"),
-        key=lambda p: p.name,
-        reverse=True,
-    )
-    return str(cands[0]) if cands else None
+    cands.sort(key=lambda p: p.name, reverse=True)
+    return str(cands[0])
 
 
-def _enrich_from_state(label: str, sprints_dir: Path) -> dict:
+def _enrich_from_state(label: str, sprints_dirs: Path | list[Path]) -> dict:
     """Per-ticket issues, tokens, duration, estimate_accuracy from local files."""
-    state = _read_state_file(sprints_dir, label)
-    plan = _read_plan_file(sprints_dir, label) or {}
+    state = _read_state_file(sprints_dirs, label)
+    plan = _read_plan_file(sprints_dirs, label) or {}
     out: dict = {
         "issues": [],
         "issues_raw": [],
         "tokens": None,
         "duration": None,
         "estimate_accuracy": None,
-        "summary_path": _find_summary_path(sprints_dir, label),
+        "summary_path": _find_summary_path(sprints_dirs, label),
         "reconciliation": None,
         "pr_number": None,
         "summary_issue_url": None,
@@ -367,23 +440,35 @@ def _record_from_history(rec: dict) -> dict:
     }
 
 
-def _record_from_lifecycle(row: dict, sprints_dir: Path) -> dict:
+def _record_from_lifecycle(row: dict, sprints_dirs: Path | list[Path]) -> dict:
     """Build the response row from a `sprints` lifecycle row + DB/disk enrichment."""
     label = row.get("label")
     if row.get("run_ingested_at"):
         from . import sprint_artifact_service  # noqa: PLC0415
         enrich = sprint_artifact_service.enrichment_from_db_row(row)
     else:
-        enrich = _enrich_from_state(label, sprints_dir)
+        enrich = _enrich_from_state(label, sprints_dirs)
     duration = _seconds_between(row.get("started_at"), row.get("ended_at"))
     if duration is None:
         duration = enrich["duration"]
-    end_reason = row.get("end_reason") or enrich.get("end_reason")
+    lifecycle_state = _normalize_state(row.get("state"))
+    plan = _read_plan_file(sprints_dirs, label) or {}
+    plan_state_raw = plan.get("state") or plan.get("status")
+    plan_state: str | None = None
+    if plan_state_raw:
+        plan_state = _normalize_state(plan_state_raw)
+        if plan_state == "completed" and lifecycle_state not in ("completed", "deleted", "running"):
+            lifecycle_state = "completed"
+        elif plan_state == "deleted" and lifecycle_state != "running":
+            lifecycle_state = "deleted"
+    end_reason = row.get("end_reason") or enrich.get("end_reason") or plan.get("end_reason")
+    if plan_state == "completed" and plan.get("end_reason"):
+        end_reason = plan.get("end_reason")
     pr_number = row.get("pr_number") if row.get("pr_number") is not None else enrich["pr_number"]
     return {
         "label": label,
         "project": row.get("project", ""),
-        "lifecycle_state": _normalize_state(row.get("state")),
+        "lifecycle_state": lifecycle_state,
         "end_reason": end_reason,
         "duration": duration,
         "tokens": enrich["tokens"],
@@ -402,10 +487,10 @@ def _record_from_lifecycle(row: dict, sprints_dir: Path) -> dict:
     }
 
 
-def _record_from_files(label: str, sprints_dir: Path) -> dict:
+def _record_from_files(label: str, sprints_dirs: Path | list[Path]) -> dict:
     """Build a response row purely from on-disk state/plan files (last resort)."""
-    enrich = _enrich_from_state(label, sprints_dir)
-    plan = _read_plan_file(sprints_dir, label) or {}
+    enrich = _enrich_from_state(label, sprints_dirs)
+    plan = _read_plan_file(sprints_dirs, label) or {}
     state_raw = plan.get("status") or plan.get("state")
     return {
         "label": label,
@@ -450,10 +535,10 @@ def _label_base(label: str | None) -> str:
 
 # Terminal lifecycle states for the partial_finished derivation: a parent with
 # children is "settled" only when every child reached one of these.
-_CHILD_SETTLED_STATES = frozenset({"completed", "deleted"})
+_CHILD_SETTLED_STATES = frozenset({"completed", "deleted", "ready_to_merge"})
 
 
-def _finalize_records(records: list[dict], sprints_dir: Path) -> None:
+def _finalize_records(records: list[dict], sprints_dirs: Path | list[Path]) -> None:
     """Attach rerun-child flags and derive lifecycle adjustments in-place.
 
     The pre-redesign failed-state heuristics (_infer_failed_lifecycle) are
@@ -480,7 +565,7 @@ def _finalize_records(records: list[dict], sprints_dir: Path) -> None:
         label = rec.get("label") or ""
         if not rec.get("post_sprint"):
             # Pre-P3 rows: post_sprint may only exist on disk.
-            state = _read_state_file(sprints_dir, label)
+            state = _read_state_file(sprints_dirs, label)
             if state:
                 rec["post_sprint"] = _build_post_sprint(state)
 
@@ -496,8 +581,10 @@ def _finalize_records(records: list[dict], sprints_dir: Path) -> None:
         if sub == 0:
             rec["has_rerun_child"] = bool(siblings)
 
-        # Failed tickets are recorded facts — any such run needs rework.
-        if rec.get("failed_tickets") and rec.get("lifecycle_state") not in ("running", "deleted"):
+        # Failed tickets are recorded facts — unless the sprint is already settled.
+        if rec.get("failed_tickets") and rec.get("lifecycle_state") not in (
+            "running", "deleted", "completed",
+        ):
             rec["lifecycle_state"] = "needs_rework"
             if not rec.get("failure_reason"):
                 rec["failure_reason"] = rec["failed_tickets"][-1].get("failure_reason")
@@ -505,8 +592,14 @@ def _finalize_records(records: list[dict], sprints_dir: Path) -> None:
         rec.pop("plan_status", None)
         state_by_label[label] = rec.get("lifecycle_state") or "unknown"
 
-    # Derived partial_finished pass (needs every sibling's settled state above).
-    for rec in records:
+    # Derived partial_finished pass — walk deepest children first so promotions
+    # to completed update state_by_label before ancestors are evaluated.
+    partial_order = sorted(
+        records,
+        key=lambda r: _label_sub_index(r.get("label") or ""),
+        reverse=True,
+    )
+    for rec in partial_order:
         label = rec.get("label") or ""
         if not rec.get("has_rerun_child"):
             continue
@@ -528,19 +621,116 @@ def _finalize_records(records: list[dict], sprints_dir: Path) -> None:
         elif descendants:
             # All children settled — the parent chain is complete.
             rec["lifecycle_state"] = "completed"
+            state_by_label[label] = "completed"
+
+    _fill_missing_links(records, sprints_dirs)
 
 
-def _discover_file_labels(sprints_dir: Path) -> set[str]:
-    """Sprint labels that have a state.json or plan.json on disk."""
-    labels: set[str] = set()
-    if not sprints_dir.exists():
-        return labels
-    for p in sprints_dir.glob("*-state.json"):
-        labels.add(p.name[: -len("-state.json")])
-    for p in sprints_dir.glob("sprint-*.json"):
-        if p.name.endswith("-state.json"):
+def _pr_from_issues(issues: list | None) -> int | None:
+    """First ticket PR on the sprint row, when the sprint PR field is empty."""
+    for iss in issues or []:
+        pr = iss.get("pr_number")
+        if pr is None:
             continue
-        labels.add(p.stem)
+        try:
+            return int(pr)
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def _links_from_events(project: str, label: str) -> dict:
+    """PR + summary issue numbers from the events feed (same source as daily brief)."""
+    out: dict = {"pr_number": None, "summary_issue_num": None}
+    if not project or not label:
+        return out
+    try:
+        with _db().get_conn() as conn:
+            rows = [dict(r) for r in conn.execute(
+                "SELECT detail FROM events WHERE project = ? AND target = ? "
+                "ORDER BY timestamp DESC LIMIT 50",
+                (project, label),
+            ).fetchall()]
+    except Exception:
+        return out
+    for ev in rows:
+        data = ev.get("detail")
+        if isinstance(data, str):
+            try:
+                data = json.loads(data)
+            except (ValueError, TypeError):
+                data = None
+        if not isinstance(data, dict):
+            continue
+        if out["pr_number"] is None and data.get("pr_number") is not None:
+            out["pr_number"] = data["pr_number"]
+        if out["summary_issue_num"] is None and data.get("summary_issue_number") is not None:
+            out["summary_issue_num"] = data["summary_issue_number"]
+    return out
+
+
+def _fill_missing_links(records: list[dict], sprints_dirs: Path | list[Path]) -> None:
+    """Backfill PR / summary targets from disk, events, and parent sprint rows."""
+    by_label = {r.get("label"): r for r in records if r.get("label")}
+
+    for rec in records:
+        label = rec.get("label")
+        if not label:
+            continue
+
+        disk = _enrich_from_state(label, sprints_dirs)
+        if rec.get("pr_number") is None and disk.get("pr_number") is not None:
+            rec["pr_number"] = disk["pr_number"]
+        if not rec.get("summary_issue_url") and disk.get("summary_issue_url"):
+            rec["summary_issue_url"] = disk["summary_issue_url"]
+        if rec.get("summary_issue_num") is None and disk.get("summary_issue_num") is not None:
+            rec["summary_issue_num"] = disk["summary_issue_num"]
+        if not rec.get("summary_path") and disk.get("summary_path"):
+            rec["summary_path"] = disk["summary_path"]
+
+        if rec.get("pr_number") is None:
+            rec["pr_number"] = _pr_from_issues(rec.get("issues"))
+
+        if not rec.get("summary_issue_num") and rec.get("summary_issue_url"):
+            rec["summary_issue_num"] = _parse_issue_num_from_url(rec["summary_issue_url"])
+
+        project = rec.get("project") or ""
+        if rec.get("pr_number") is None or rec.get("summary_issue_num") is None:
+            meta = _links_from_events(project, label)
+            if rec.get("pr_number") is None and meta.get("pr_number") is not None:
+                rec["pr_number"] = meta["pr_number"]
+            if rec.get("summary_issue_num") is None and meta.get("summary_issue_num") is not None:
+                rec["summary_issue_num"] = meta["summary_issue_num"]
+                if not rec.get("summary_issue_url") and project:
+                    rec["summary_issue_url"] = (
+                        f"https://github.com/{project}/issues/{meta['summary_issue_num']}"
+                    )
+
+    for rec in records:
+        if rec.get("pr_number") is not None:
+            continue
+        label = rec.get("label") or ""
+        base = _label_base(label)
+        if base == label:
+            continue
+        parent = by_label.get(base)
+        if parent and parent.get("pr_number") is not None:
+            rec["pr_number"] = parent["pr_number"]
+
+
+def _discover_file_labels(sprints_dirs: Path | list[Path]) -> set[str]:
+    """Sprint labels that have a state.json or plan.json on disk."""
+    dirs = [sprints_dirs] if isinstance(sprints_dirs, Path) else list(sprints_dirs)
+    labels: set[str] = set()
+    for sprints_dir in dirs:
+        if not sprints_dir.exists():
+            continue
+        for p in sprints_dir.glob("*-state.json"):
+            labels.add(p.name[: -len("-state.json")])
+        for p in sprints_dir.glob("sprint-*.json"):
+            if p.name.endswith("-state.json"):
+                continue
+            labels.add(p.stem)
     return {l for l in labels if _LABEL_RE.match(l)}
 
 
@@ -553,7 +743,7 @@ def get_sprint_history(offset: int = 0, limit: int = 20, sprints_dir: Path | Non
     ``project`` (owner/repo) scopes the ledger to one project — without it the
     board showed every project's sprints plus project-less junk rows.
     """
-    sprints_dir = Path(sprints_dir) if sprints_dir is not None else DEFAULT_SPRINTS_DIR
+    search_dirs = _as_sprints_dirs(sprints_dir, project)
     offset = max(0, int(offset))
     limit = max(0, int(limit))
     db = _db()
@@ -575,19 +765,19 @@ def get_sprint_history(offset: int = 0, limit: int = 20, sprints_dir: Path | Non
         if label in seen_labels:
             continue
         seen_labels.add(label)
-        records.append(_record_from_lifecycle(row, sprints_dir))
+        records.append(_record_from_lifecycle(row, search_dirs))
 
     # 3) file-only sprints with no DB row at all.
-    for label in _discover_file_labels(sprints_dir):
+    for label in _discover_file_labels(search_dirs):
         if label in seen_labels:
             continue
         seen_labels.add(label)
-        records.append(_record_from_files(label, sprints_dir))
+        records.append(_record_from_files(label, search_dirs))
 
     if project:
         records = [r for r in records if r.get("project") == project]
 
-    _finalize_records(records, sprints_dir)
+    _finalize_records(records, search_dirs)
 
     records.sort(key=lambda r: r.get("_sort_key") or "", reverse=True)
     total = len(records)
@@ -621,6 +811,7 @@ def record_deleted_sprint(
 
         tokens = duration = estimate_accuracy = None
         summary_path = None
+        pr_number = None
         if commander_dir is not None:
             sprints_dir = Path(commander_dir) / "sprints"
             enrich = _enrich_from_state(label, sprints_dir)
@@ -628,6 +819,7 @@ def record_deleted_sprint(
             duration = enrich["duration"]
             estimate_accuracy = enrich["estimate_accuracy"]
             summary_path = enrich["summary_path"]
+            pr_number = enrich["pr_number"]
             # Prefer the richer per-ticket data from the state file when present.
             if enrich["issues"]:
                 by_id = {i["ticket_id"]: i for i in enrich["issues"]}
@@ -644,7 +836,7 @@ def record_deleted_sprint(
             duration=duration,
             tokens=tokens,
             estimate_accuracy=estimate_accuracy,
-            pr_number=None,
+            pr_number=pr_number,
             summary_path=summary_path,
             issues=snapshot,
         )

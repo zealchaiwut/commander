@@ -20,6 +20,10 @@ import {
   smgmtFinishSprint, _fsConfirm,
 } from './finish-modal.js';
 import {
+  _bcOpen, _bcClose, _bcCatClass, _bcSelectAll,
+  smgmtBulkCompleteSprint, _bcConfirm,
+} from './bulk-complete-modal.js';
+import {
   smgmtRunBlockedToast, smgmtRunSprint, smgmtCancelSprint,
   _pfOpen, _pfReset, _pfClose, _pfFetch, _pfShowSuccess, _pfUpdateConfirmBtn,
   _pfBuildWarningsHtml, _pfBuildCycleHtml, _pfBuildFlagsHtml,
@@ -73,6 +77,14 @@ globalThis._fsCatClass = _fsCatClass;
 globalThis._fsSelectAll = _fsSelectAll;
 globalThis.smgmtFinishSprint = smgmtFinishSprint;
 globalThis._fsConfirm = _fsConfirm;
+
+// Bulk Complete modal (parent + child lineage)
+globalThis._bcOpen = _bcOpen;
+globalThis._bcClose = _bcClose;
+globalThis._bcCatClass = _bcCatClass;
+globalThis._bcSelectAll = _bcSelectAll;
+globalThis.smgmtBulkCompleteSprint = smgmtBulkCompleteSprint;
+globalThis._bcConfirm = _bcConfirm;
 
 // Run controls + preflight modal (issue #448)
 globalThis.smgmtRunBlockedToast = smgmtRunBlockedToast;

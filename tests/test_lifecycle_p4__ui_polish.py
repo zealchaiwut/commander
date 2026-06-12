@@ -91,6 +91,14 @@ class TestBoardPane:
         )
         assert 'const logHtml = ""' in _BUNDLE_SRC
 
+    def test_post_run_linger_keeps_running_view_greyscaled(self):
+        assert "_SMGMT_LINGER_MS" in _PROJECT_HTML
+        assert "60 * 60 * 1000" in _PROJECT_HTML
+        assert "_smgmtLingerStart" in _PROJECT_HTML
+        assert "smgmt-linger" in _PROJECT_HTML
+        assert "grayscale" in _PROJECT_HTML
+        assert "_smgmtLingerStart" in _BOARD_RENDER_SRC
+
 
 # ── History: partial_finished + auto-refresh ────────────────────────────────
 

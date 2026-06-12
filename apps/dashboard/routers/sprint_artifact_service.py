@@ -16,32 +16,45 @@ _MERGED_STATUSES = {"done", "shipped", "merged", "passed", "complete", "complete
 _CLOSED_STATUSES = {"skipped", "failed", "cancelled", "closed", "rejected", "blocked"}
 
 
+def _sprint_roots(sprints_dir: Path) -> list[Path]:
+    """Live sprints dir plus ``archive/`` when present (issue #735)."""
+    roots = [sprints_dir]
+    archive = sprints_dir / "archive"
+    if archive.is_dir():
+        roots.append(archive)
+    return roots
+
+
 def resolve_state_path(sprints_dir: Path, label: str) -> Path | None:
     """Return the state file for *label*, or None.
 
     Per-label files (``sprint-68.6-state.json``) take precedence. Legacy base
     sprint files (``sprint-68-state.json``) are used only when their embedded
-    ``sprint_label`` matches or is absent.
+    ``sprint_label`` matches or is absent. Archived copies under
+    ``sprints/archive/`` are searched after the live directory.
     """
     if not sprints_dir.is_dir() or not _LABEL_RE.match(label):
         return None
-    label_path = sprints_dir / f"{label}-state.json"
-    if label_path.is_file():
-        return label_path
+    for root in _sprint_roots(sprints_dir):
+        label_path = root / f"{label}-state.json"
+        if label_path.is_file():
+            return label_path
     m = re.match(r"^sprint-(\d+)", label)
     if not m:
         return None
-    legacy = sprints_dir / f"sprint-{m.group(1)}-state.json"
-    if not legacy.is_file():
-        return None
-    try:
-        data = json.loads(legacy.read_text(encoding="utf-8"))
-    except (ValueError, OSError):
+    for root in _sprint_roots(sprints_dir):
+        legacy = root / f"sprint-{m.group(1)}-state.json"
+        if not legacy.is_file():
+            continue
+        try:
+            data = json.loads(legacy.read_text(encoding="utf-8"))
+        except (ValueError, OSError):
+            return legacy
+        recorded = data.get("sprint_label")
+        if recorded and recorded != label:
+            continue
         return legacy
-    recorded = data.get("sprint_label")
-    if recorded and recorded != label:
-        return None
-    return legacy
+    return None
 
 
 def load_state_file(sprints_dir: Path, label: str) -> dict | None:
@@ -113,11 +126,15 @@ def _parse_issue_num_from_url(url: str | None) -> int | None:
 def _parse_pr_number(state: dict) -> int | None:
     recon = state.get("reconciliation") or {}
     for chk in recon.get("checks") or []:
-        if chk.get("name") == "sprint_pr" and chk.get("ok"):
-            detail = str(chk.get("detail") or "")
-            m = re.search(r"#(\d+)", detail)
-            if m:
-                return int(m.group(1))
+        if chk.get("name") == "sprint_pr":
+            pr = chk.get("pr_number")
+            if pr is not None:
+                return int(pr)
+            if chk.get("ok"):
+                detail = str(chk.get("detail") or "")
+                m = re.search(r"#(\d+)", detail)
+                if m:
+                    return int(m.group(1))
     pr_url = state.get("pr_url") or state.get("sprint_pr_url")
     if pr_url:
         m = re.search(r"/pull/(\d+)", str(pr_url))

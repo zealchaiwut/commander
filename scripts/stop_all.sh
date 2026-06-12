@@ -71,7 +71,8 @@ case "$TARGET" in
         _kill_port 8000 "PRD" "$PRD_PID_FILE"
         ;;
     uat)
-        _kill_port 8001 "UAT" "$UAT_PID_FILE"
+        UAT_PORT="${PORT:-8001}"
+        _kill_port "$UAT_PORT" "UAT" "$UAT_PID_FILE"
         ;;
     *)
         _kill_port 8000 "PRD" "$PRD_PID_FILE"

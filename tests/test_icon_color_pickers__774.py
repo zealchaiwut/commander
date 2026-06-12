@@ -112,6 +112,17 @@ def test_icon_color_pickers__ac1_icon_is_rendered_icon_grid_picker():
     assert 'class="ti ' in body, "icon options must render as <i class='ti ...'> icons"
 
 
+def test_icon_color_pickers__icon_grid_collapses_with_see_more():
+    html = _html()
+    region = _identity_region(html)
+    assert 'id="ps-icons-see-more"' in region, "icon picker must expose a See more control"
+    assert "_PS_ICON_PREVIEW_LIMIT" in html, "icon preview limit constant must exist"
+    assert "_psToggleIconGrid" in html, "See more/See less toggle handler must exist"
+    body = _fn_body(html, "function _psRenderIconPicker", span=1200)
+    assert "ps-icon-opt--hidden" in body, "collapsed icons must use a hidden class"
+    assert "_psUpdateIconsSeeMoreBtn" in body, "See more label must update after render"
+
+
 # ── AC2: Color field is a swatch / curated-palette picker, not free text ──────
 
 def test_icon_color_pickers__ac2_color_is_curated_swatch_picker():

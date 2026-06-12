@@ -95,7 +95,7 @@ Every view above, with the endpoints it calls. Paths use `:var` for path params.
 
 | View | API calls |
 |------|-----------|
-| `settings` | `GET /api/settings`, `PUT /api/settings`, `GET /api/projects/:slug/settings`, `PUT /api/projects/:slug/settings`, `GET /api/settings/sync/status`, `POST /api/settings/sync/diff`, `POST /api/settings/sync/commit`, `GET /api/fs/list`, `GET /api/notes`, `PUT /api/notes`, `GET /api/projects/notes`, `POST /api/projects/notes` |
+| `settings` | `GET /api/settings`, `PUT /api/settings`, `GET /api/projects/:slug/settings`, `PUT /api/projects/:slug/settings`, `GET /api/settings/sync/status`, `POST /api/settings/sync/diff`, `POST /api/settings/sync/commit`, `GET /api/fs/list`, `GET /api/projects/notes`, `POST /api/projects/notes` |
 
 ### Modals
 
@@ -103,8 +103,6 @@ Every view above, with the endpoints it calls. Paths use `:var` for path params.
 |------|-----------|
 | Add Project modal › `init` | `POST /api/projects/init` |
 | Add Project modal › `add` | `GET /api/projects`, `POST /api/projects` |
-| Notes editor › `write` / `preview` | `GET /api/notes`, `PUT /api/notes` |
-
 ## Notes
 
 - SSE streams (`/api/tickets/bulk/:job_id/stream`, `/api/sprints/:label/live/stream`)

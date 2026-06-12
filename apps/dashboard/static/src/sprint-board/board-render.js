@@ -9,7 +9,7 @@
  * are scheduled for follow-on extraction waves.
  */
 
-/* global _blApplyFilters, _blBacklogAll, _blSyncFilterPills, _blUpdateActions, _smgmtEnsureCapData, _smgmtLoadMiniRail, _smgmtRenderAllCapBars, _smgmtUpdateSubnav, _cachedFullRepo, _estDataCache, _slug, _smgmtActiveAgentsHtml, _smgmtAgentTagClass, _smgmtApplySort, _smgmtBacklogTicketDragStart, _smgmtBulkEstimate, _smgmtBySprint, _smgmtCancelBannerHtml, _smgmtCapacityInputHtml, _smgmtCheckEstimatorHealth, _smgmtCloseIssueOpen, _smgmtConflictsByIssue, _smgmtCtxMenuOpen, _smgmtData, _smgmtDeactivatedLabels, _smgmtDepOrderByIssue, _smgmtDragLeave, _smgmtDragOver, _smgmtDropOnSprint, _smgmtEstimateBadgeHtml, _smgmtEstimatorAvailable, _smgmtFilterApply, _smgmtFinishCards, _smgmtFinishedLabels, _smgmtHasCompletedTickets, _smgmtInitCapacityGauges, _smgmtInjectOutcomeBand, _smgmtIsCancelled, _smgmtKbRestoreFocus, _smgmtLabelColors, _smgmtLabelFilterToggle, _smgmtLabelFilterToggleExpand, _smgmtLastLabelIssues, _smgmtLevelsHtml, _smgmtLiveAgentBadgesHtml, _smgmtLiveCache, _smgmtLiveLogLinesHtml, _smgmtLivePollRestart, _smgmtNextChildLabel, _smgmtNextUpLabel, _smgmtOutcomeCache, _smgmtOutcomeLogHtml, _smgmtReEstimate, _smgmtRepo, _smgmtRiskFlagIconsHtml, _smgmtRowClick, _smgmtRowMenuOpen, _smgmtSchedDepHtml, _smgmtSelectedIssues, _smgmtSetSprintTokenEl, _smgmtStateMeta, _smgmtTicketDragEnd, _smgmtTicketDragStart, _smgmtTicketReorderDragLeave, _smgmtTicketReorderDragOver, _smgmtTicketReorderDrop, _smgmtTicketToSprint, _smgmtToggleSelect, _smgmtUpdateCapacityGauge, _smgmtUpdateCleanupBtn, _smgmtUpdateConflictBadge, _smgmtUpdateDepOrderBadge, _smgmtUpdateEstimateBadge, _smgmtUpdateSelectionUI, escHtml, sprintLabelDisplay,
+/* global _blApplyFilters, _blBacklogAll, _blSyncFilterPills, _blUpdateActions, _smgmtEnsureCapData, _smgmtLoadMiniRail, _smgmtRenderAllCapBars, _smgmtUpdateSubnav, _cachedFullRepo, _estDataCache, _slug, _smgmtActiveAgentsHtml, _smgmtAgentTagClass, _smgmtApplySort, _smgmtBacklogTicketDragStart, _smgmtBulkEstimate, _smgmtBySprint, _smgmtCancelBannerHtml, _smgmtCapacityInputHtml, _smgmtCheckEstimatorHealth, _smgmtCloseIssueOpen, _smgmtConflictsByIssue, _smgmtCtxMenuOpen, _smgmtData, _smgmtDeactivatedLabels, _smgmtDepOrderByIssue, _smgmtDragLeave, _smgmtDragOver, _smgmtDropOnSprint, _smgmtEstimateBadgeHtml, _smgmtEstimatorAvailable, _smgmtFilterApply, _smgmtFinishCards, _smgmtFinishedLabels, _smgmtHasCompletedTickets, _smgmtInitCapacityGauges, _smgmtInjectOutcomeBand, _smgmtIsCancelled, _smgmtKbRestoreFocus, _smgmtLabelColors, _smgmtLabelFilterToggle, _smgmtLabelFilterToggleExpand, _smgmtLastLabelIssues, _smgmtLevelsHtml, _smgmtLiveAgentBadgesHtml, _smgmtLiveCache, _smgmtLiveLogLinesHtml, _smgmtLivePollRestart, _smgmtLingerRestore, _smgmtLingerStart, _smgmtIsLinger, _smgmtLingerLive, _smgmtNextChildLabel, _smgmtNextUpLabel, _smgmtOutcomeCache, _smgmtOutcomeLogHtml, _smgmtReEstimate, _smgmtRepo, _smgmtRiskFlagIconsHtml, _smgmtRowClick, _smgmtRowMenuOpen, _smgmtSchedDepHtml, _smgmtSelectedIssues, _smgmtSetSprintTokenEl, _smgmtStateMeta, _smgmtTicketDragEnd, _smgmtTicketDragStart, _smgmtTicketReorderDragLeave, _smgmtTicketReorderDragOver, _smgmtTicketReorderDrop, _smgmtTicketToSprint, _smgmtToggleSelect, _smgmtUpdateCapacityGauge, _smgmtUpdateCleanupBtn, _smgmtUpdateConflictBadge, _smgmtUpdateDepOrderBadge, _smgmtUpdateEstimateBadge, _smgmtUpdateSelectionUI, escHtml, sprintLabelDisplay,
    _smgmtAnySprintRunning:writable, _smgmtRunningLabels:writable */
 
 export async function loadSprintMgmt(silent, optimisticRunningLabel) {
@@ -52,7 +52,10 @@ export async function loadSprintMgmt(silent, optimisticRunningLabel) {
     }
     const data = await resp.json();
 
-    // Update running labels set
+    if (typeof _smgmtLingerRestore === 'function') _smgmtLingerRestore();
+
+    // Update running labels set; start linger when a label drops off running-all.
+    const prevRunning = new Set(_smgmtRunningLabels);
     _smgmtRunningLabels = new Set();
     _smgmtAnySprintRunning = false;
     if (runningResp && runningResp.ok) {
@@ -67,6 +70,12 @@ export async function loadSprintMgmt(silent, optimisticRunningLabel) {
       _smgmtAnySprintRunning = _smgmtRunningLabels.size > 0;
     }
 
+    for (const label of prevRunning) {
+      if (!_smgmtRunningLabels.has(label) && typeof _smgmtLingerStart === 'function') {
+        _smgmtLingerStart(label);
+      }
+    }
+
     // Keep sprint in running UI until /api/sprints/running-all catches up (post-dispatch race).
     if (optimisticRunningLabel) {
       _smgmtRunningLabels.add(optimisticRunningLabel);
@@ -77,6 +86,14 @@ export async function loadSprintMgmt(silent, optimisticRunningLabel) {
 
     // Start (or restart) live polling if there are running sprints
     _smgmtLivePollRestart();
+
+    const lingerLbl = typeof _smgmtPrimaryRunningLabel === 'function'
+      ? _smgmtPrimaryRunningLabel() : null;
+    if (lingerLbl && typeof _smgmtRunningViewUpdate === 'function') {
+      const live = typeof _smgmtLingerLive === 'function'
+        ? _smgmtLingerLive(lingerLbl) : (_smgmtLiveCache[lingerLbl] || null);
+      _smgmtRunningViewUpdate(lingerLbl, live);
+    }
   } catch (err) {
     if (!silent) {
       const msg = (err && err.message) ? err.message : 'Failed to load sprints.';
@@ -161,6 +178,7 @@ export function _smgmtRender(data) {
   });
   for (const lbl of sortedForNext) {
     if (_smgmtRunningLabels.has(lbl)) continue;
+    if (typeof _smgmtIsLinger === 'function' && _smgmtIsLinger(lbl)) continue;
     if (_smgmtFinishedLabels.has(lbl)) continue;
     if ((bySprint[lbl] || []).length >= 1) { _smgmtNextUpLabel = lbl; break; }
   }
@@ -169,7 +187,9 @@ export function _smgmtRender(data) {
     .map(label => {
       const tickets = bySprint[label] || [];
       if (_smgmtIsFreshRerunSprint(label)) delete _smgmtOutcomeCache[label];
-      const outcome = _smgmtRunningLabels.has(label) ? null : (_smgmtOutcomeCache[label] || null);
+      const inLinger = typeof _smgmtIsLinger === 'function' && _smgmtIsLinger(label);
+      const outcome = (_smgmtRunningLabels.has(label) || inLinger)
+        ? null : (_smgmtOutcomeCache[label] || null);
       const parent = _sprintParents[label] || null;
       const cardHtml = _smgmtCardHtml(label, null, tickets, outcome, label === _smgmtNextUpLabel, parent, _smgmtFinishedLabels.has(label));
       return `<div class="smgmt-sprint-unit" id="smgmt-unit-${escHtml(label)}">` +
@@ -706,6 +726,8 @@ export function _smgmtFinishCardInnerHtml(cardData, branchData, repo) {
 
 export function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent, finished) {
   const isRunning = _smgmtRunningLabels.has(label);
+  const isLinger = !isRunning && typeof _smgmtIsLinger === 'function' && _smgmtIsLinger(label);
+  const isRunningView = isRunning || isLinger;
   let isCollapsed = false;
   try { isCollapsed = localStorage.getItem('sprintColumn_' + label + '_collapsed') === '1'; } catch (_) {}
 
@@ -719,7 +741,7 @@ export function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent, finis
   const isReadyToMerge = outcomeLifecycle === 'ready_to_merge'
     || (outcomeLifecycle === 'completed' && outcomeState === 'completed');
   const hasCompleted = isFreshRerun ? false : _smgmtHasCompletedTickets(tickets);
-  const isPostRun = !isRunning && !!((outcome && (outcome.sprint_status || outcome.state)) || hasCompleted);
+  const isPostRun = !isRunningView && !!((outcome && (outcome.sprint_status || outcome.state)) || hasCompleted);
   // Run is only for first attempts: post-run labels (incl. has-rework) re-run
   // into a child sub-sprint instead (P0 — no same-label re-dispatch).
   const canRun = tickets.length >= 1 && !hasCompleted;
@@ -749,6 +771,8 @@ export function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent, finis
   if (isRunning) {
     actionBtn = `<button class="smgmt-cancel-btn" onclick="smgmtCancelSprint('${escHtml(label)}')">
                   <i class="ti ti-player-stop"></i> Cancel sprint</button>`;
+  } else if (isLinger) {
+    actionBtn = `<span class="smgmt-linger-note">Finished — snapshot kept 1h</span>`;
   } else if (isHasRework && rerunInto && tickets.length === 0) {
     // Tickets moved to a child re-run — run the child, not the empty parent label.
     actionBtn = `<button class="smgmt-run-btn" ${rerunDisabled} ${rerunTitle}
@@ -811,7 +835,7 @@ export function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent, finis
       isOutcomeView = true;
       rollupItems = issueList.map(i => ({ number: i.number }));
     }
-  } else if (isRunning) {
+  } else if (isRunningView) {
     ticketsContainerHtml = _smgmtRunningTicketRowsHtml(label, tickets);
   } else {
     // Planning view ticket rows
@@ -851,14 +875,17 @@ export function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent, finis
   const plannedBadge = (!isNext && !finished && !isPostRun && !outcomeBadgeHtml)
     ? '<span class="sc-planned-badge">PLANNED</span>'
     : '';
-  const blockedHint = (_smgmtAnySprintRunning && !isPostRun && !isRunning)
+  const blockedHint = (_smgmtAnySprintRunning && !isPostRun && !isRunningView)
     ? `<span class="sc-blocked-hint">blocked: ${_smgmtRunningBlockerShort()} running</span>`
     : '';
   const parentLineage = (parent && !isFreshRerun)
     ? `<span class="smgmt-sprint-lineage" title="Child sprint spawned from ${escHtml(parent)}">← from ${escHtml(sprintLabelDisplay(parent))}</span>`
     : '';
 
-  const live = isRunning ? (_smgmtLiveCache[label] || null) : null;
+  const live = isRunningView
+    ? ((typeof _smgmtLingerLive === 'function' ? _smgmtLingerLive(label) : null)
+       || _smgmtLiveCache[label] || null)
+    : null;
   const runningComplete = live
     ? ((live.done_count || 0) + (live.failed_count || 0) + (live.skipped_count || 0))
     : 0;
@@ -867,11 +894,11 @@ export function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent, finis
   const runningElapsed = live && live.time_spent_sec > 0
     ? `<span class="smgmt-sprint-meta" id="smgmt-elapsed-${escHtml(label)}">elapsed ${_fmtRunningTime(live.time_spent_sec)}</span>`
     : `<span class="smgmt-sprint-meta" id="smgmt-elapsed-${escHtml(label)}"></span>`;
-  const runningBadgeHtml = isRunning
-    ? `<span class="smgmt-running-badge" id="smgmt-running-badge-${escHtml(label)}"><span class="smgmt-running-badge-dot"></span>${runningRatio}</span>`
+  const runningBadgeHtml = isRunningView
+    ? `<span class="smgmt-running-badge" id="smgmt-running-badge-${escHtml(label)}"><span class="smgmt-running-badge-dot"></span>${isLinger ? 'done' : runningRatio}</span>`
     : '';
-  const runningStripeHtml = isRunning ? '<div class="smgmt-running-stripe"></div>' : '';
-  const runningClass = isRunning ? ' smgmt-running' : '';
+  const runningStripeHtml = isRunningView ? '<div class="smgmt-running-stripe"></div>' : '';
+  const runningClass = isRunning ? ' smgmt-running' : (isLinger ? ' smgmt-linger' : '');
 
   const collapsedClass = isCollapsed ? ' smgmt-collapsed' : '';
   const collapseLabel = (isCollapsed ? 'Expand ' : 'Collapse ') + escHtml(sprintLabelDisplay(label));
@@ -1016,7 +1043,9 @@ export function _smgmtRunningLevelText(live) {
 
 /** Compact board banner with a link to the Running sub-view (hotfix 0612). */
 export function _smgmtRunningBoardBannerHtml(label, tickets) {
-  const live = _smgmtLiveCache[label] || null;
+  const isLinger = typeof _smgmtIsLinger === 'function' && _smgmtIsLinger(label);
+  const live = (typeof _smgmtLingerLive === 'function' ? _smgmtLingerLive(label) : null)
+    || _smgmtLiveCache[label] || null;
   const doneCount = live ? (live.done_count || 0) : 0;
   const failedCount = live ? (live.failed_count || 0) : 0;
   const skippedCount = live ? (live.skipped_count || 0) : 0;
@@ -1025,13 +1054,16 @@ export function _smgmtRunningBoardBannerHtml(label, tickets) {
   const timeSpentSec = live ? (live.time_spent_sec || 0) : 0;
   const levelText = _smgmtRunningLevelText(live);
   const parts = [
-    `${escHtml(sprintLabelDisplay(label))} is running`,
+    isLinger
+      ? `${escHtml(sprintLabelDisplay(label))} finished (snapshot)`
+      : `${escHtml(sprintLabelDisplay(label))} is running`,
     `${completeCount}/${totalCount} done`,
     timeSpentSec > 0 ? _fmtRunningTime(timeSpentSec) : null,
     levelText,
   ].filter(Boolean);
   const safeLabel = escHtml(label);
-  return `<div class="smgmt-board-running-banner" id="smgmt-board-banner-${safeLabel}" data-label="${safeLabel}">
+  const lingerCls = isLinger ? ' linger' : '';
+  return `<div class="smgmt-board-running-banner${lingerCls}" id="smgmt-board-banner-${safeLabel}" data-label="${safeLabel}">
     <span class="smgmt-board-running-banner-dot" aria-hidden="true"></span>
     <span class="smgmt-board-running-banner-text" id="smgmt-board-banner-text-${safeLabel}">${parts.join(' · ')}</span>
     <button type="button" class="smgmt-board-running-banner-link"

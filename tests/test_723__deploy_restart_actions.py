@@ -334,22 +334,51 @@ def test_restart_falls_back_to_scripts_without_label(client_ctx):
     calls = []
 
     def fake_run(cmd, *a, **kw):
-        calls.append(cmd)
+        calls.append((cmd, kw.get("cwd")))
         return _completed(cmd, stdout="")
 
     with patch.object(srv.subprocess, "run", side_effect=fake_run):
         resp = client.post("/api/projects/commander/environments/uat/restart")
 
     assert resp.status_code == 200, resp.text
-    flat = " ".join(" ".join(c) for c in calls)
+    flat = " ".join(" ".join(c[0]) for c in calls)
     assert "/srv/stop.sh" in flat
     assert "/srv/start.sh" in flat
     # stop must run before start
-    stop_idx = next(i for i, c in enumerate(calls) if "/srv/stop.sh" in " ".join(c))
-    start_idx = next(i for i, c in enumerate(calls) if "/srv/start.sh" in " ".join(c))
+    stop_idx = next(i for i, c in enumerate(calls) if "/srv/stop.sh" in " ".join(c[0]))
+    start_idx = next(i for i, c in enumerate(calls) if "/srv/start.sh" in " ".join(c[0]))
     assert stop_idx < start_idx
     # AC8: no launchctl involved
-    assert not any(c and c[0] == "launchctl" for c in calls)
+    assert not any(c and c[0][0] == "launchctl" for c, _ in calls)
+
+
+def test_restart_scripts_use_working_dir_as_cwd(client_ctx):
+    """Relative stop/start scripts run with cwd=working_dir when it exists."""
+    client, srv, settings_repo = client_ctx
+    wd = str(REPO_ROOT)
+    _save_deploy_config(srv, settings_repo, {
+        "uat": {
+            "host": "local",
+            "working_dir": wd,
+            "branch": "develop",
+            "stop_script": "bash scripts/stop_all.sh uat",
+            "start_script": "bash scripts/start_uat.sh",
+        },
+    })
+
+    calls = []
+
+    def fake_run(cmd, *a, **kw):
+        calls.append(kw.get("cwd"))
+        return _completed(cmd, stdout="")
+
+    with patch.object(srv.subprocess, "run", side_effect=fake_run):
+        with patch.object(srv.subprocess, "Popen", MagicMock()):
+            resp = client.post("/api/projects/commander/environments/uat/restart")
+
+    assert resp.status_code == 200, resp.text
+    assert len(calls) == 2
+    assert all(cwd == wd for cwd in calls)
 
 
 def test_restart_rejects_when_nothing_configured(client_ctx):

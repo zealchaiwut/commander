@@ -276,11 +276,18 @@ class TestHistoryLifecycle:
 
     def test_failed_tickets_promote_to_needs_rework(self, tmp_path):
         from routers.sprint_history_service import _finalize_records
-        rec = _rec("sprint-5", "completed",
+        rec = _rec("sprint-5", "ready_to_merge",
                    failed_tickets=[{"ticket_id": 7, "failure_reason": "boom"}])
         _finalize_records([rec], tmp_path)
         assert rec["lifecycle_state"] == "needs_rework"
         assert rec["failure_reason"] == "boom"
+
+    def test_failed_tickets_do_not_downgrade_completed(self, tmp_path):
+        from routers.sprint_history_service import _finalize_records
+        rec = _rec("sprint-5", "completed",
+                   failed_tickets=[{"ticket_id": 7, "failure_reason": "boom"}])
+        _finalize_records([rec], tmp_path)
+        assert rec["lifecycle_state"] == "completed"
 
     def test_parent_with_unfinished_child_is_partial_finished(self, tmp_path):
         from routers.sprint_history_service import _finalize_records

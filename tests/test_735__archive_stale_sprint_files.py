@@ -18,6 +18,7 @@ AC coverage:
 """
 
 import json
+import shutil
 import sys
 from pathlib import Path
 
@@ -211,6 +212,20 @@ def test_cleanup_idempotent(sprints_dir):
     assert second["kept_count"] >= 1
 
 
+def test_cleanup_tolerates_existing_archive_copy(sprints_dir):
+    """A live file whose archive name already exists must not raise (partial rerun)."""
+    _seed_sprint(sprints_dir, 14, finished=True, placeholder_tickets=0)
+    archive = sprints_dir / csf.ARCHIVE_DIRNAME
+    archive.mkdir(parents=True, exist_ok=True)
+    live = sprints_dir / "sprint-14-plan.json"
+    shutil.copy2(live, archive / live.name)
+    result = csf.run_cleanup(sprints_dir, dry_run=False,
+                             has_summary_issue=lambda n: False)
+    assert "sprint-14-plan.json" in result["archived"]
+    assert not live.exists()
+    assert (archive / "sprint-14-plan.json").exists()
+
+
 def test_kept_count_nonzero(sprints_dir):
     """AC6: kept_count reflects files left behind (status/estimate/summary)."""
     _seed_sprint(sprints_dir, 13, finished=True, placeholder_tickets=0)
@@ -311,6 +326,7 @@ def test_ui_has_cleanup_card_and_preview_and_confirm():
     """AC7: project.html exposes a maintenance cleanup card with preview + confirm."""
     html = (STATIC_DIR / "project.html").read_text()
     assert 'id="ps-sprint-cleanup-card"' in html, "cleanup card missing"
+    assert 'id="ps-stale-scan-btn"' in html, "stale branch scan button missing from settings"
     assert 'id="ps-cleanup-preview"' in html, "preview panel missing"
     # A preview (dry-run) trigger and a confirm trigger must both exist.
     assert "sprintCleanupPreview(" in html, "preview button handler missing"

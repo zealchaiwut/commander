@@ -347,6 +347,76 @@ def _emit_sprint_lifecycle_event(
         pass
 
 
+def _failure_event_detail(
+    issue_num: int,
+    agent_role: str,
+    reason: str,
+    category: "str | FailureCategory",
+    *,
+    cfg: "Optional[SprintConfig]" = None,
+    gate: bool = False,
+    sprint_label: "str | None" = None,
+) -> dict:
+    """Build a ticket_failed activity-log payload, enriched from the sidecar when present."""
+    branch = _find_feature_branch(issue_num) or ""
+    detail: dict = {
+        "agent": (agent_role or "agent").upper(),
+        "issue_num": issue_num,
+        "reason": reason or "",
+        "category": str(category),
+        "branch": branch,
+        "gate": gate,
+    }
+    if sprint_label:
+        detail["sprint_label"] = sprint_label
+    try:
+        root = cfg.worktree_coder.parent if cfg is not None else REPO_ROOT
+        sc_path = root / ".commander" / "runtime" / f"last-failure-{issue_num}.json"
+        if sc_path.exists():
+            data = json.loads(sc_path.read_text(encoding="utf-8"))
+            detail["failure_class"] = data.get("failure_class")
+            detail["summary"] = data.get("summary")
+            detail["sidecar"] = str(sc_path)
+            failures = data.get("failures") or []
+            if failures:
+                f0 = failures[0]
+                detail["error_type"] = f0.get("type")
+                detail["location"] = f0.get("location")
+                detail["message"] = f0.get("issue") or f0.get("message")
+                detail["gate_name"] = data.get("gate")
+            elif data.get("detail"):
+                detail["message"] = str(data["detail"])[:500]
+    except Exception:
+        pass
+    return detail
+
+
+def _emit_ticket_failed(
+    issue_num: int,
+    agent_role: str,
+    reason: str,
+    category: "str | FailureCategory",
+    *,
+    project: str,
+    action_id: "str | None" = None,
+    cfg: "Optional[SprintConfig]" = None,
+    gate: bool = False,
+    sprint_label: "str | None" = None,
+) -> None:
+    """Emit a ticket_failed row so the Activity tab can surface failures without log digging."""
+    _emit_sprint_lifecycle_event(
+        type="ticket_failed",
+        target=f"#{issue_num}",
+        actor="system",
+        detail=_failure_event_detail(
+            issue_num, agent_role, reason, category,
+            cfg=cfg, gate=gate, sprint_label=sprint_label,
+        ),
+        project=project,
+        action_id=action_id,
+    )
+
+
 # ── SprintConfig dataclass + loader ──────────────────────────────────────────
 
 @dataclass
@@ -6890,6 +6960,19 @@ def _run_pipeline_dispatch(
             cfg=cfg,
             repo=eff_repo,
         )
+        _tag_l = (tag or "").lower()
+        _failed_role = (
+            "tester" if gate or "tester" in _tag_l
+            else "coder" if "coder" in _tag_l
+            else "tester" if "tester" in (ist.agent_status or "")
+            else "coder" if "coder" in (ist.agent_status or "")
+            else "agent"
+        )
+        _emit_ticket_failed(
+            num, _failed_role, reason, category,
+            project=eff_repo or label, action_id=run_id, cfg=cfg,
+            gate=gate, sprint_label=label,
+        )
         _neon_ticket_status(label, num, "failed", eff_sprints_dir)
         state.save(state_path)
         _post_sprint_status(state, api_url=api_url, project=eff_repo)
@@ -7193,6 +7276,10 @@ def _run_pipeline_dispatch(
             alert_modes, title=f"Issue #{num} skipped: needs-rework", body=reason,
             issue_num=num, category=FailureCategory.RETRY_EXHAUSTED, cfg=cfg, repo=eff_repo,
             sprint_label=label,
+        )
+        _emit_ticket_failed(
+            num, "coder", reason, FailureCategory.RETRY_EXHAUSTED,
+            project=eff_repo or label, action_id=run_id, cfg=cfg, sprint_label=label,
         )
         _transition_safe(num, _TicketState.NEEDS_REWORK, actor="sprint_manager", repo_name=eff_repo)
         _publish_gate_failure_analyses(num, repo_name=eff_repo, cfg=cfg)
@@ -7728,6 +7815,10 @@ def run_sprint(
             issue_state.status          = "skipped"
             issue_state.skip_reason     = "preflight-skipped"
             summary.skipped.append(f"#{num} (preflight-skipped)")
+            _emit_ticket_failed(
+                num, "coder", "preflight-skipped", "preflight-skipped",
+                project=eff_repo or label, action_id=_run_id, cfg=cfg, sprint_label=label,
+            )
             _neon_ticket_status(label, num, "skipped", _eff_sprints_dir)
             state.save(state_path)
             _post_sprint_status(state, api_url=api_url, project=eff_repo)
@@ -7995,6 +8086,10 @@ def run_sprint(
                         cfg=cfg,
                         repo=eff_repo,
                     )
+                    _emit_ticket_failed(
+                        num, "coder", reason, category,
+                        project=eff_repo or label, action_id=_run_id, cfg=cfg, sprint_label=label,
+                    )
                     _neon_ticket_status(label, num, "failed", _eff_sprints_dir)
                     state.save(state_path)
                     _post_sprint_status(state, api_url=api_url, project=eff_repo)
@@ -8144,6 +8239,10 @@ def run_sprint(
                 issue_state.skip_reason        = "Tester HANG detected"
                 issue_state.category           = FailureCategory.HANG
                 summary.skipped.append(f"#{num} (tester hang)")
+                _emit_ticket_failed(
+                    num, "tester", "Tester HANG detected", FailureCategory.HANG,
+                    project=eff_repo or label, action_id=_run_id, cfg=cfg, sprint_label=label,
+                )
                 _neon_ticket_status(label, num, "failed", _eff_sprints_dir)
                 state.save(state_path)
                 _post_sprint_status(state, api_url=api_url, project=eff_repo)
@@ -8158,6 +8257,11 @@ def run_sprint(
                 issue_state.skip_reason        = "Subscription rate limit exhausted"
                 issue_state.category           = FailureCategory.RETRY_EXHAUSTED
                 summary.skipped.append(f"#{num} (rate limit exhausted)")
+                _emit_ticket_failed(
+                    num, "tester", "Subscription rate limit exhausted",
+                    FailureCategory.RETRY_EXHAUSTED,
+                    project=eff_repo or label, action_id=_run_id, cfg=cfg, sprint_label=label,
+                )
                 _neon_ticket_status(label, num, "failed", _eff_sprints_dir)
                 state.save(state_path)
                 _post_sprint_status(state, api_url=api_url)
@@ -8262,6 +8366,11 @@ def run_sprint(
                 repo=eff_repo,
                 sprint_label=label,
             )
+            _emit_ticket_failed(
+                num, "tester", summary_line, category,
+                project=eff_repo or label, action_id=_run_id, cfg=cfg,
+                gate=True, sprint_label=label,
+            )
             if category in _LOGIC_FAILURE_CATEGORIES:
                 _transition_safe(num, _TicketState.NEEDS_REWORK, actor="sprint_manager", repo_name=eff_repo)
             _neon_ticket_status(label, num, "failed", _eff_sprints_dir, total_tokens=_issue_tokens)
@@ -8298,6 +8407,10 @@ def run_sprint(
             issue_state.skip_reason    = reason
             issue_state.category       = category
             summary.skipped.append(f"#{num} (fix-loop exhausted)")
+            _emit_ticket_failed(
+                num, "coder", reason, category,
+                project=eff_repo or label, action_id=_run_id, cfg=cfg, sprint_label=label,
+            )
             dispatch_alerts(
                 alert_modes,
                 title=f"Issue #{num} skipped: {category}",

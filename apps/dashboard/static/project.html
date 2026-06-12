@@ -24592,12 +24592,24 @@ function _deployRenderGrid() {
 }
 
 function _deployReadinessAlertHtml(c) {
-  if (c.deploy_ready !== false) return '';
-  var errs = c.deploy_errors || [];
-  if (!errs.length) errs = ['Deploy is not ready for this environment.'];
-  var body = errs.length === 1
-    ? _deployEsc(errs[0])
-    : '<ul>' + errs.map(function(e) { return '<li>' + _deployEsc(e) + '</li>'; }).join('') + '</ul>';
+  var msgs = [];
+  if (c.deploy_ready === false && c.deploy_errors && c.deploy_errors.length) {
+    msgs = msgs.concat(c.deploy_errors);
+  }
+  if (c.stop_ready === false && c.stop_errors && c.stop_errors.length) {
+    c.stop_errors.forEach(function(e) {
+      if (msgs.indexOf(e) === -1) msgs.push('Stop: ' + e);
+    });
+  }
+  if (c.start_ready === false && c.start_errors && c.start_errors.length) {
+    c.start_errors.forEach(function(e) {
+      if (msgs.indexOf(e) === -1) msgs.push('Start: ' + e);
+    });
+  }
+  if (!msgs.length) return '';
+  var body = msgs.length === 1
+    ? _deployEsc(msgs[0])
+    : '<ul>' + msgs.map(function(e) { return '<li>' + _deployEsc(e) + '</li>'; }).join('') + '</ul>';
   return ''
     + '<div class="deploy-card__alert" role="alert">'
     + '  <i class="ti ti-alert-triangle" aria-hidden="true"></i>'
@@ -24651,7 +24663,12 @@ var _deployRunState = {};
 // AC5/AC6: enable/disable each action by run state. The chosen lifecycle is a
 // Stop → Start flow: Deploy and Restart are disabled while the env is stopped.
 function _deployBtnDisabled(state, action, card) {
-  if (card && card.deploy_ready === false) return true;
+  if (card) {
+    if ((action === 'deploy') && card.deploy_ready === false) return true;
+    if ((action === 'restart') && card.restart_ready === false) return true;
+    if ((action === 'start') && card.start_ready === false) return true;
+    if ((action === 'stop') && card.stop_ready === false) return true;
+  }
   if (state === 'running') return action === 'start';
   if (state === 'stopped') return action === 'stop' || action === 'restart' || action === 'deploy';
   return false;  // idle → all enabled

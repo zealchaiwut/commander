@@ -2358,15 +2358,24 @@ from services.sprint_manager import deploy_actions as _deploy_actions
 
 
 def _enrich_deploy_readiness(config: dict) -> None:
-    """Attach ``deploy_ready`` and ``deploy_errors`` to each local env entry."""
+    """Attach deploy + lifecycle readiness fields to each local env entry."""
     for _env, entry in (config or {}).items():
         if not isinstance(entry, dict):
             continue
         if entry.get("host") != "local":
             continue
-        ready, errors = _deploy_actions.check_deploy_readiness(entry)
-        entry["deploy_ready"] = ready
-        entry["deploy_errors"] = errors
+        deploy_ready, deploy_errors = _deploy_actions.check_deploy_readiness(entry)
+        restart_ready, restart_errors = _deploy_actions.check_restart_readiness(entry)
+        stop_ready, stop_errors = _deploy_actions.check_stop_readiness(entry)
+        start_ready, start_errors = _deploy_actions.check_start_readiness(entry)
+        entry["deploy_ready"] = deploy_ready
+        entry["deploy_errors"] = deploy_errors
+        entry["restart_ready"] = restart_ready
+        entry["restart_errors"] = restart_errors
+        entry["stop_ready"] = stop_ready
+        entry["start_ready"] = start_ready
+        entry["stop_errors"] = stop_errors
+        entry["start_errors"] = start_errors
 
 
 from services.sprint_manager import render_actions as _render_actions
@@ -2572,7 +2581,7 @@ def restart_environment(slug: str, env: str):
     if _render_actions.is_render_host(entry):
         return _render_restart_environment(entry, env)
 
-    ready, readiness_errors = _deploy_actions.check_deploy_readiness(entry)
+    ready, readiness_errors = _deploy_actions.check_restart_readiness(entry)
     if not ready:
         raise HTTPException(status_code=400, detail="; ".join(readiness_errors))
 
@@ -2687,7 +2696,7 @@ def stop_environment(slug: str, env: str):
             status_code=400,
             detail="Stop is not supported for host=render environments",
         )
-    ready, readiness_errors = _deploy_actions.check_deploy_readiness(entry)
+    ready, readiness_errors = _deploy_actions.check_stop_readiness(entry)
     if not ready:
         raise HTTPException(status_code=400, detail="; ".join(readiness_errors))
     result = _stop_environment(entry)
@@ -2714,7 +2723,7 @@ def start_environment(slug: str, env: str):
             status_code=400,
             detail="Start is not supported for host=render environments",
         )
-    ready, readiness_errors = _deploy_actions.check_deploy_readiness(entry)
+    ready, readiness_errors = _deploy_actions.check_start_readiness(entry)
     if not ready:
         raise HTTPException(status_code=400, detail="; ".join(readiness_errors))
     result = _start_environment(entry)
@@ -2827,6 +2836,12 @@ def get_deploy_overview():
             cfg = merged.get(card["env"], {})
             card["deploy_ready"] = cfg.get("deploy_ready", card["host"] == "render")
             card["deploy_errors"] = cfg.get("deploy_errors", [])
+            card["restart_ready"] = cfg.get("restart_ready", card["host"] == "render")
+            card["restart_errors"] = cfg.get("restart_errors", [])
+            card["stop_ready"] = cfg.get("stop_ready", card["host"] == "render")
+            card["start_ready"] = cfg.get("start_ready", card["host"] == "render")
+            card["stop_errors"] = cfg.get("stop_errors", [])
+            card["start_errors"] = cfg.get("start_errors", [])
             environments.append(card)
 
     return {"environments": environments}

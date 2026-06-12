@@ -237,6 +237,9 @@ def test_vector_search_demo_overview_marks_not_ready(client_ctx):
     assert len(vsd) == 2
     assert all(e.get("deploy_ready") is False for e in vsd)
     assert all(e.get("deploy_errors") for e in vsd)
+    assert all(e.get("restart_ready") is False for e in vsd)
+    assert all(e.get("stop_ready") is False for e in vsd)
+    assert all(e.get("start_ready") is False for e in vsd)
 
 
 def test_overview_lists_env_cards(client_ctx):

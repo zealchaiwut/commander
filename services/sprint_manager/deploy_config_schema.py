@@ -49,7 +49,13 @@ SEED_DEFAULTS: dict[str, dict[str, dict[str, Any]]] = {
             "launchd_label": "com.commander.dashboard",
             "branch": "master",
         },
-        "uat": {"host": "local", "branch": "develop"},
+        "uat": {
+            "host": "local",
+            "branch": "develop",
+            "port": 8001,
+            "start_script": "bash ../../scripts/start_uat.sh",
+            "stop_script": "bash ../../scripts/stop_all.sh uat",
+        },
     },
     "perf-coach": {
         "prd": {"host": "render"},

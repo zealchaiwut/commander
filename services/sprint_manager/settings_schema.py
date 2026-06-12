@@ -29,6 +29,8 @@ KNOWN_FIELDS: dict[str, dict[str, Any]] = {
     # Sprint capacity budget in minutes — drives the capacity bar (issue #801)
     "sprint_budget_minutes": {"secret": False, "default": 180},
     "default_branch": {"secret": False, "default": "develop"},
+    "default_branch_uat": {"secret": False, "default": "develop"},
+    "default_branch_prd": {"secret": False, "default": "master"},
     "bulk_create_concurrency": {"secret": False, "default": 3},
     "log_level": {"secret": False, "default": "INFO"},
     # Concurrent pipeline mode (issue #737) — opt-in, default serial

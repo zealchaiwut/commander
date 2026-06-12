@@ -53,6 +53,8 @@ export default [
         _sfcCompletedHtml: "readonly",
         _sfcHasReworkHtml: "readonly",
         _sfcCancelledHtml: "readonly",
+        _smgmtHotswapAvailableFor: "readonly",
+        _smgmtHotswapModalOpen: "readonly",
       },
     },
     rules: {

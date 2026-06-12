@@ -13,8 +13,9 @@ results, runs quality gates, and generates a sprint summary.
 A sprint is a GitHub label (`sprint-N`) applied to one or more issues. When you
 run a sprint, the manager works through each ticket in order:
 
-1. **Coder** — creates a feature branch, implements the ticket, pushes, moves
-   label to `SIT`
+1. **Coder** — creates a feature branch, implements the ticket, pushes (label
+   move to `SIT` is done by sprint_manager). Today dispatched via Claude Code
+   CLI; a Cline-only coder backend is [designed but not implemented](coder-backends.md).
 2. **Tester** — checks out the branch, writes pytest tests against each AC item,
    runs them, posts a test report, merges to `develop` if tests pass, moves label
    to `UAT`

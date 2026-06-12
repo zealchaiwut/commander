@@ -826,7 +826,17 @@
       _pfClose();
       const n = parseInt(label.split("-")[1], 10);
       _smgmtShowToast(`Sprint ${n} dispatched.`);
-      await loadSprintMgmt();
+      if (typeof _smgmtShowSubView === "function")
+        _smgmtShowSubView("board");
+      await loadSprintMgmt(true, label);
+      if (typeof _smgmtLivePollRestart === "function")
+        _smgmtLivePollRestart();
+      for (let i = 0; i < 8; i++) {
+        if (_smgmtRunningLabels && _smgmtRunningLabels.has(label))
+          break;
+        await new Promise((r) => setTimeout(r, 600));
+        await loadSprintMgmt(true, label);
+      }
     } catch (e) {
       _pfState = "error";
       _pfShowError("Failed to run sprint: " + e.message);
@@ -907,7 +917,11 @@
     sprints.forEach((n) => {
       if (occupiedSprints.has(n))
         return;
-      html += `<button class="smgmt-move-to-item" onclick="_smgmtMoveSelectedTo('sprint-${n}');_smgmtCloseMoveToMenu()">Sprint ${n}</button>`;
+      const label = `sprint-${n}`;
+      html += `<button class="smgmt-move-to-item" onclick="_smgmtMoveSelectedTo('${label}');_smgmtCloseMoveToMenu()">Sprint ${n}</button>`;
+      if (typeof _smgmtHotswapAvailableFor === "function" && _smgmtHotswapAvailableFor(label)) {
+        html += `<button class="smgmt-move-to-item smgmt-move-to-item--hotswap" onclick="_smgmtHotswapModalOpen('${label}');_smgmtCloseMoveToMenu()">Sprint ${n} \u2014 replace (hotswap)</button>`;
+      }
     });
     html += `<button class="smgmt-move-to-item" onclick="_smgmtMoveSelectedTo('backlog');_smgmtCloseMoveToMenu()">Backlog (no sprint)</button>`;
     menu.innerHTML = html || '<span style="display:block;padding:8px 14px;font-size:12px;color:var(--text-muted)">No other sprints available</span>';
@@ -1577,11 +1591,13 @@ ${data.errors.join("\n")}`);
       }
     }
   }
-  function _smgmtBoardLock(message) {
+  function _smgmtBoardLock(message, opts) {
     _smgmtMoveLock = true;
     _smgmtArStopTicker();
     const overlay = document.getElementById("smgmt-move-overlay");
     const msgEl = document.getElementById("smgmt-move-overlay-msg");
+    const progWrap = document.getElementById("smgmt-op-progress-wrap");
+    const logEl = document.getElementById("smgmt-op-log");
     const text = message || "Moving\u2026";
     if (msgEl)
       msgEl.textContent = text;
@@ -1589,18 +1605,59 @@ ${data.errors.join("\n")}`);
       overlay.setAttribute("aria-label", text.replace(/…$/, "") + ", please wait");
       overlay.classList.add("active");
     }
+    const showProgress = !!(opts && opts.progress);
+    if (progWrap)
+      progWrap.hidden = !showProgress;
+    if (logEl) {
+      logEl.hidden = !showProgress;
+      if (showProgress && opts.clearLog)
+        logEl.innerHTML = "";
+    }
+    if (showProgress && opts.total != null) {
+      _smgmtBoardProgress(0, opts.total);
+    } else if (!showProgress) {
+      _smgmtBoardProgress(0, 1);
+    }
+  }
+  function _smgmtBoardProgress(done, total) {
+    const fill = document.getElementById("smgmt-op-progress-fill");
+    const pctEl = document.getElementById("smgmt-op-progress-pct");
+    const pct = total > 0 ? Math.round(done / total * 100) : 0;
+    if (fill)
+      fill.style.width = pct + "%";
+    if (pctEl)
+      pctEl.textContent = pct + "%";
+  }
+  function _smgmtBoardLog(line, kind) {
+    const logEl = document.getElementById("smgmt-op-log");
+    if (!logEl)
+      return;
+    const row = document.createElement("div");
+    row.className = "smgmt-op-log-line" + (kind ? ` smgmt-op-log-line--${kind}` : "");
+    row.textContent = line;
+    logEl.appendChild(row);
+    logEl.scrollTop = logEl.scrollHeight;
   }
   function _smgmtBoardUnlock() {
     _smgmtMoveLock = false;
     const overlay = document.getElementById("smgmt-move-overlay");
     if (overlay)
       overlay.classList.remove("active");
+    const progWrap = document.getElementById("smgmt-op-progress-wrap");
+    const logEl = document.getElementById("smgmt-op-log");
+    if (progWrap)
+      progWrap.hidden = true;
+    if (logEl) {
+      logEl.hidden = true;
+      logEl.innerHTML = "";
+    }
+    _smgmtBoardProgress(0, 1);
     if (_arInterval > 0)
       _smgmtArStartTicker();
   }
 
   // apps/dashboard/static/src/sprint-board/board-render.js
-  async function loadSprintMgmt2(silent) {
+  async function loadSprintMgmt2(silent, optimisticRunningLabel) {
     const listEl = document.getElementById("smgmt-sprint-list");
     if (!listEl)
       return;
@@ -1615,6 +1672,9 @@ ${data.errors.join("\n")}`);
         delete _smgmtFinishCards[k];
     }
     try {
+      if (typeof _smgmtEnsureCapData === "function") {
+        await _smgmtEnsureCapData();
+      }
       const [resp, runningResp] = await Promise.all([
         fetch("/api/sprint-management/issues?repo=" + encodeURIComponent(repo)),
         fetch("/api/sprints/running-all").catch(() => null)
@@ -1640,6 +1700,10 @@ ${data.errors.join("\n")}`);
           }
         });
         _smgmtAnySprintRunning = _smgmtRunningLabels.size > 0;
+      }
+      if (optimisticRunningLabel) {
+        _smgmtRunningLabels.add(optimisticRunningLabel);
+        _smgmtAnySprintRunning = true;
       }
       _smgmtRender2(data);
       _smgmtLivePollRestart();
@@ -1709,19 +1773,14 @@ ${data.errors.join("\n")}`);
     }
     const cards = orderedLabels.map((label) => {
       const tickets = bySprint[label] || [];
-      const outcome = _smgmtOutcomeCache[label] || null;
+      if (_smgmtIsFreshRerunSprint(label))
+        delete _smgmtOutcomeCache[label];
+      const outcome = _smgmtRunningLabels.has(label) ? null : _smgmtOutcomeCache[label] || null;
       const parent = _sprintParents[label] || null;
       const cardHtml = _smgmtCardHtml(label, null, tickets, outcome, label === _smgmtNextUpLabel, parent, _smgmtFinishedLabels.has(label));
       return `<div class="smgmt-sprint-unit" id="smgmt-unit-${escHtml(label)}">` + cardHtml + `</div>`;
     }).join("");
     listEl.innerHTML = cards || '<div class="loading-msg">No sprints found.</div>';
-    requestAnimationFrame(() => {
-      _smgmtRunningLabels.forEach((lbl) => {
-        const s = document.getElementById(`smgmt-live-log-stream-${lbl}`);
-        if (s)
-          s.scrollTop = s.scrollHeight;
-      });
-    });
     _smgmtInitCapacityGauges(orderedLabels);
     _smgmtRenderAllCapBars();
     _smgmtEnsureCapData(false);
@@ -1804,6 +1863,13 @@ ${data.errors.join("\n")}`);
       el.style.display = allDeactivated ? "none" : "";
     });
   }
+  function _smgmtIsFreshRerunSprint(label) {
+    const parents = _smgmtData && _smgmtData.sprint_parents || {};
+    if (!parents[label])
+      return false;
+    const planState = (_smgmtData && _smgmtData.sprint_plan_states || {})[label];
+    return planState === "planning";
+  }
   async function _smgmtFetchMissingOutcomes(orderedLabels, bySprint) {
     const repo = _smgmtRepo();
     if (!repo)
@@ -1811,6 +1877,8 @@ ${data.errors.join("\n")}`);
     const toFetch = [];
     for (const label of orderedLabels) {
       if (_smgmtRunningLabels.has(label))
+        continue;
+      if (_smgmtIsFreshRerunSprint(label))
         continue;
       if (_smgmtOutcomeCache[label] !== void 0)
         continue;
@@ -2080,6 +2148,8 @@ ${data.errors.join("\n")}`);
       return;
     const order = _smgmtData.order && _smgmtData.order.length ? _smgmtData.order : (_smgmtData.sprints || []).map((n) => `sprint-${n}`);
     await Promise.allSettled(order.map(async (label) => {
+      if (_smgmtIsFreshRerunSprint(label))
+        return;
       try {
         const [cardRes, branchRes] = await Promise.all([
           fetch(`/api/sprints/${encodeURIComponent(label)}/finish-card?project=${encodeURIComponent(repo)}`),
@@ -2165,12 +2235,14 @@ ${data.errors.join("\n")}`);
       isCollapsed = localStorage.getItem("sprintColumn_" + label + "_collapsed") === "1";
     } catch (_) {
     }
-    if (isRunning) {
-      return _smgmtRunningCardHtml(label, n, tickets);
-    }
-    const hasCompleted = _smgmtHasCompletedTickets(tickets);
-    const canRun = !hasCompleted && tickets.length >= 1;
-    const isPostRun = !!(outcome && (outcome.sprint_status || outcome.state) || hasCompleted);
+    const isFreshRerun = _smgmtIsFreshRerunSprint(label);
+    if (isFreshRerun)
+      outcome = null;
+    const outcomeState = outcome && (outcome.state || (outcome.sprint_status === "completed" ? "completed" : null));
+    const isHasRework = outcomeState === "has_rework";
+    const hasCompleted = isFreshRerun ? false : _smgmtHasCompletedTickets(tickets);
+    const isPostRun = !isRunning && !!(outcome && (outcome.sprint_status || outcome.state) || hasCompleted);
+    const canRun = tickets.length >= 1 && (!hasCompleted || isHasRework);
     const rerunDisabled = _smgmtAnySprintRunning ? "disabled" : "";
     const rerunTitle = _smgmtAnySprintRunning ? 'title="Cannot re-run: another sprint is currently running."' : "";
     const childLabel = _smgmtNextChildLabel(label);
@@ -2179,7 +2251,10 @@ ${data.errors.join("\n")}`);
                     onclick="smgmtRerunSprint('${escHtml(label)}')">
                     <i class="ti ti-refresh"></i> Re-run \u2192 ${escHtml(childDisplay)}</button>`;
     let actionBtn;
-    if (isPostRun) {
+    if (isRunning) {
+      actionBtn = `<button class="smgmt-cancel-btn" onclick="smgmtCancelSprint('${escHtml(label)}')">
+                  <i class="ti ti-player-stop"></i> Cancel sprint</button>`;
+    } else if (isPostRun && !isHasRework) {
       actionBtn = rerunBtn;
     } else if (_smgmtAnySprintRunning) {
       actionBtn = `<button class="smgmt-run-btn smgmt-run-btn--blocked"
@@ -2193,8 +2268,7 @@ ${data.errors.join("\n")}`);
                   onclick="smgmtRunSprint('${label}')">
                   <i class="ti ti-player-play"></i> Run Sprint</button>`;
     }
-    const outcomeState = outcome && (outcome.state || (outcome.sprint_status === "completed" ? "completed" : null));
-    const isOutcomeCompleted = outcomeState === "completed" || outcomeState === "has_rework";
+    const isOutcomeCompleted = outcomeState === "completed" || isHasRework;
     const finishHidden = isOutcomeCompleted || isPostRun && !outcome ? "" : "hidden";
     const finishDisabled = isOutcomeCompleted && tickets.length === 0 ? "disabled" : "";
     let outcomeBandHtml = "";
@@ -2206,7 +2280,7 @@ ${data.errors.join("\n")}`);
     let isOutcomeView = false;
     let rollupItems = tickets;
     if (outcome && (outcome.sprint_status || outcome.state)) {
-      const meta = _smgmtStateMeta(outcome);
+      const meta = _smgmtStateMeta(outcome, (outcome.issues || []).length);
       outcomeCardClass = " " + meta.cardClass;
       outcomeBadgeHtml = `<span class="smgmt-state-badge ${meta.badgeCls}">${escHtml(meta.badge)}</span>`;
       if (meta.state === "has_rework") {
@@ -2235,63 +2309,74 @@ ${data.errors.join("\n")}`);
         isOutcomeView = true;
         rollupItems = issueList.map((i) => ({ number: i.number }));
       }
+    } else if (isRunning) {
+      ticketsContainerHtml = _smgmtRunningTicketRowsHtml(label, tickets);
     } else {
       ticketsContainerHtml = tickets.length > 0 ? tickets.map((t) => _smgmtTicketRowHtml(t, label)).join("") : '<div class="smgmt-drop-hint">Drop tickets here</div>';
       if (finished) {
         outcomeBadgeHtml = `<span class="smgmt-state-badge state-finished">COMPLETED</span>`;
       }
     }
-    const summaryDone = isOutcomeView ? (outcome.issues || []).filter((i) => i.outcome === "done").length : tickets.filter((t) => t.status === "done").length;
-    const summaryPct = ticketCount > 0 ? Math.round(summaryDone / ticketCount * 100) : 0;
-    const summaryHtml = `<div class="smgmt-sprint-summary">
-    <div class="smgmt-progress-row">
-      <div class="smgmt-progress-bar-wrap"><div class="smgmt-progress-bar-fill" style="width:${summaryPct}%"></div></div>
-      <span class="smgmt-progress-label">${summaryDone} / ${ticketCount} done</span>
+    const summaryHtml = `<div class="sc-budget-section">
+    <div class="sc-budget-head">
+      <span class="sc-budget-eyebrow">SPRINT BUDGET</span>
+      <span class="sc-budget-forecast" id="sc-budget-forecast-${escHtml(label)}"></span>
     </div>
     <div class="cap" id="smgmt-cap-${escHtml(label)}"></div>
     <div class="smgmt-sprint-goal-text" id="smgmt-goal-${escHtml(label)}" style="display:none"></div>
-  </div>`;
-    const logHtml = outcome && outcome.sprint_status ? _smgmtOutcomeLogHtml(label, outcome) : "";
+  </div>
+  <div class="sc-preview-slot" id="sc-preview-${escHtml(label)}"></div>`;
+    const logHtml = outcome && outcome.sprint_status && !isHasRework ? _smgmtOutcomeLogHtml(label, outcome) : "";
     const cancelBannerHtml = _smgmtIsCancelled(outcome) ? _smgmtCancelBannerHtml(label) : "";
-    const hasUnsizedTickets = tickets.length > 0 && tickets.some(
-      (t) => !(t.labels || []).find((l) => /^size-[SMLX]+$/.test(l.name))
-    );
+    const hasUnsizedTickets = tickets.length > 0 && tickets.some((t) => !_smgmtTicketHasEstimate(t));
     const bulkEstBtnHtml = `<button class="smgmt-bulk-est-btn${hasUnsizedTickets ? "" : " hidden"}"
                     onclick="event.stopPropagation();_smgmtBulkEstimate('${escHtml(label)}',this)"
                     title="Estimate all unsized tickets in this sprint">
                     <i class="ti ti-calculator"></i> Estimate all unsized</button>
                    <span class="smgmt-bulk-est-progress"></span>`;
-    const parentLineage = parent ? `<span class="smgmt-sprint-lineage" title="Child sprint spawned from ${escHtml(parent)}">\u2190 from ${escHtml(sprintLabelDisplay(parent))}</span>` : "";
+    const plannedBadge = !isNext && !finished && !isPostRun && !outcomeBadgeHtml ? '<span class="sc-planned-badge">PLANNED</span>' : "";
+    const blockedHint = _smgmtAnySprintRunning && !isPostRun && !isRunning ? `<span class="sc-blocked-hint">blocked: ${_smgmtRunningBlockerShort()} running</span>` : "";
+    const parentLineage = parent && !isFreshRerun ? `<span class="smgmt-sprint-lineage" title="Child sprint spawned from ${escHtml(parent)}">\u2190 from ${escHtml(sprintLabelDisplay(parent))}</span>` : "";
+    const live = isRunning ? _smgmtLiveCache[label] || null : null;
+    const runningComplete = live ? (live.done_count || 0) + (live.failed_count || 0) + (live.skipped_count || 0) : 0;
+    const runningTotal = live ? live.total_count || tickets.length : tickets.length;
+    const runningRatio = runningTotal > 0 ? `${runningComplete}/${runningTotal}` : "\u2014";
+    const runningElapsed = live && live.time_spent_sec > 0 ? `<span class="smgmt-sprint-meta" id="smgmt-elapsed-${escHtml(label)}">elapsed ${_fmtRunningTime(live.time_spent_sec)}</span>` : `<span class="smgmt-sprint-meta" id="smgmt-elapsed-${escHtml(label)}"></span>`;
+    const runningBadgeHtml = isRunning ? `<span class="smgmt-running-badge" id="smgmt-running-badge-${escHtml(label)}"><span class="smgmt-running-badge-dot"></span>${runningRatio}</span>` : "";
+    const runningStripeHtml = isRunning ? '<div class="smgmt-running-stripe"></div>' : "";
+    const runningClass = isRunning ? " smgmt-running" : "";
     const collapsedClass = isCollapsed ? " smgmt-collapsed" : "";
     const collapseLabel = (isCollapsed ? "Expand " : "Collapse ") + escHtml(sprintLabelDisplay(label));
     return `
-    <div class="smgmt-sprint-card${outcomeCardClass}${collapsedClass}" id="smgmt-card-${escHtml(label)}"
-         ondragover="_smgmtDragOver(event, '${escHtml(label)}')"
-         ondragleave="_smgmtDragLeave(event)"
-         ondrop="_smgmtDropOnSprint(event, '${escHtml(label)}')">
-      <div class="smgmt-sprint-header">
-        <div class="smgmt-sprint-header-left">
+    <div class="smgmt-sprint-card sc-v5${outcomeCardClass}${runningClass}${collapsedClass}" id="smgmt-card-${escHtml(label)}"
+         ondragover="${isRunning ? "" : `_smgmtDragOver(event, '${escHtml(label)}')`}"
+         ondragleave="${isRunning ? "" : `_smgmtDragLeave(event)`}"
+         ondrop="${isRunning ? "" : `_smgmtDropOnSprint(event, '${escHtml(label)}')`}">
+      ${runningStripeHtml}
+      <div class="sc-header smgmt-sprint-header">
+        <div class="smgmt-sprint-header-left sc-header-left">
           <button class="smgmt-collapse-btn" id="smgmt-collapse-btn-${escHtml(label)}"
                   onclick="smgmtToggleCollapse('${escHtml(label)}')"
                   aria-label="${collapseLabel}"
                   title="${collapseLabel}"
                   onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();smgmtToggleCollapse('${escHtml(label)}');}">
             <i class="ti ti-chevron-down"></i></button>
-          <i class="ti ti-layout-kanban" style="font-size:14px;color:var(--text-muted)"></i>
-          <span class="smgmt-sprint-name" style="font-size:15px;font-weight:700;">${escHtml(sprintLabelDisplay(label))}</span>
-
-          ${isNext ? '<span class="smgmt-next-badge" aria-label="Next up">NEXT UP</span>' : ""}
+          <span class="smgmt-sprint-name sc-name">${escHtml(sprintLabelDisplay(label))}</span>
+          ${runningBadgeHtml}
+          ${isNext && !isRunning ? '<span class="smgmt-next-badge">NEXT UP</span>' : ""}
+          ${plannedBadge}
           ${outcomeBadgeHtml}
           ${headerMetaHtml}
           ${parentLineage}
-          <span class="smgmt-sprint-count" id="smgmt-col-rollup-${escHtml(label)}">${_smgmtRollupText(rollupItems)}</span>
+          <span class="sc-meta smgmt-sprint-count" id="smgmt-col-rollup-${escHtml(label)}">${_smgmtRollupText(rollupItems)}</span>
         </div>
-        <div class="smgmt-sprint-header-right">
-          ${_smgmtCapacityInputHtml(label)}
+        <div class="smgmt-sprint-header-right sc-header-right">
           <button class="smgmt-delete-btn"
                   onclick="smgmtDeleteSprint('${escHtml(label)}')">
             <i class="ti ti-trash"></i> Delete</button>
           ${actionBtn}
+          ${blockedHint}
+          ${isRunning ? runningElapsed : ""}
           <button class="smgmt-finish-btn ${finishHidden}" ${finishDisabled}
                   title="${finishDisabled ? "No open tickets" : "Finish sprint"}"
                   onclick="smgmtFinishSprint('${escHtml(label)}')">
@@ -2300,30 +2385,16 @@ ${data.errors.join("\n")}`);
       </div>
       ${cancelBannerHtml}
       ${outcomeBandHtml}
-      <div class="smgmt-sprint-tickets" id="smgmt-tickets-${escHtml(label)}">
+      ${summaryHtml}
+      <div class="smgmt-sprint-tickets sc-tickets" id="smgmt-tickets-${escHtml(label)}">
         ${ticketsContainerHtml}
       </div>
       ${logHtml}
     </div>`;
   }
-  function _smgmtRunningCardHtml(label, n, tickets) {
-    let isCollapsed = false;
-    try {
-      isCollapsed = localStorage.getItem("sprintColumn_" + label + "_collapsed") === "1";
-    } catch (_) {
-    }
+  function _smgmtRunningTicketRowsHtml(label, tickets) {
     const live = _smgmtLiveCache[label] || null;
-    const doneCount = live ? live.done_count || 0 : 0;
-    const failedCount = live ? live.failed_count || 0 : 0;
-    const skippedCount = live ? live.skipped_count || 0 : 0;
-    const totalCount = live ? live.total_count || tickets.length : tickets.length;
-    const completeCount = doneCount + failedCount + skippedCount;
-    const estRemMins = live ? live.est_remaining_minutes : null;
-    const timeSpentSec = live ? live.time_spent_sec || 0 : 0;
     const currentTicket = live ? live.current_ticket : null;
-    const activeAgent = live ? live.active_agent : null;
-    const recentLogLines = live ? live.recent_log_lines || [] : [];
-    const pct = totalCount > 0 ? Math.round(completeCount / totalCount * 100) : 0;
     const liveIssues = live && live.issues && live.issues.length > 0 ? live.issues : [];
     const liveByNum = {};
     liveIssues.forEach((i) => {
@@ -2331,21 +2402,11 @@ ${data.errors.join("\n")}`);
     });
     const sourceTickets = (liveIssues.length > 0 ? liveIssues : tickets).slice().sort((a, b) => (a.dispatch_level || 0) - (b.dispatch_level || 0));
     const cardRepo = _smgmtRepo();
-    const segBarHtml = sourceTickets.length > 0 ? `<div class="smgmt-seg-bar" id="smgmt-seg-${escHtml(label)}">${sourceTickets.map((t) => {
-      const liveIss = liveByNum[t.number];
-      const liveStatus = liveIss ? liveIss.status : null;
-      const agentStatus = liveIss ? liveIss.agent_status : null;
-      let blockClass = "seg-pending";
-      if (liveStatus === "done")
-        blockClass = "seg-done";
-      else if (agentStatus === "failed" || liveStatus === "skipped")
-        blockClass = "seg-failed";
-      else if (liveStatus === "in-progress" || agentStatus === "running" || currentTicket && t.number === currentTicket.number)
-        blockClass = "seg-running";
-      return `<div class="seg-block ${blockClass}" data-issue="${t.number}"></div>`;
-    }).join("")}</div>` : "";
+    if (sourceTickets.length === 0) {
+      return '<div class="smgmt-drop-hint">No tickets in this sprint</div>';
+    }
     let prevLevel = 0;
-    const ticketRowsHtml = sourceTickets.map((t) => {
+    return sourceTickets.map((t) => {
       const liveIss = liveByNum[t.number];
       const liveStatus = liveIss ? liveIss.status : null;
       const agentStatus = liveIss ? liveIss.agent_status : null;
@@ -2386,6 +2447,114 @@ ${data.errors.join("\n")}`);
       ${sizePillHtml}${agentTagHtml}${elapsedHtml}
     </div>`;
     }).join("");
+  }
+  function _smgmtRunningLevelText(live) {
+    const levels = live && live.levels || [];
+    if (levels.length > 1) {
+      const active = levels.find((l) => l.state === "active");
+      const cur = active ? active.level : levels[levels.length - 1].level;
+      return `level ${cur} of ${levels.length}`;
+    }
+    const issues = live && live.issues || [];
+    const levelNums = [...new Set(
+      issues.map((i) => i.dispatch_level || 0 || 1)
+    )].filter((l) => l > 0).sort((a, b) => a - b);
+    if (levelNums.length <= 1)
+      return null;
+    let current = levelNums[0];
+    for (const lvl of levelNums) {
+      const group = issues.filter((i) => (i.dispatch_level || 0 || 1) === lvl);
+      const allDone = group.length > 0 && group.every(
+        (i) => i.status === "done" || i.status === "skipped" || i.agent_status === "failed"
+      );
+      if (!allDone) {
+        current = lvl;
+        break;
+      }
+      current = lvl;
+    }
+    return `level ${current} of ${levelNums.length}`;
+  }
+  function _smgmtRunningBoardBannerHtml(label, tickets) {
+    const live = _smgmtLiveCache[label] || null;
+    const doneCount = live ? live.done_count || 0 : 0;
+    const failedCount = live ? live.failed_count || 0 : 0;
+    const skippedCount = live ? live.skipped_count || 0 : 0;
+    const totalCount = live ? live.total_count || tickets.length : tickets.length;
+    const completeCount = doneCount + failedCount + skippedCount;
+    const timeSpentSec = live ? live.time_spent_sec || 0 : 0;
+    const levelText = _smgmtRunningLevelText(live);
+    const parts = [
+      `${escHtml(sprintLabelDisplay(label))} is running`,
+      `${completeCount}/${totalCount} done`,
+      timeSpentSec > 0 ? _fmtRunningTime(timeSpentSec) : null,
+      levelText
+    ].filter(Boolean);
+    const safeLabel = escHtml(label);
+    return `<div class="smgmt-board-running-banner" id="smgmt-board-banner-${safeLabel}" data-label="${safeLabel}">
+    <span class="smgmt-board-running-banner-dot" aria-hidden="true"></span>
+    <span class="smgmt-board-running-banner-text" id="smgmt-board-banner-text-${safeLabel}">${parts.join(" \xB7 ")}</span>
+    <button type="button" class="smgmt-board-running-banner-link"
+            onclick="_smgmtShowSubView('running')">Watch in Running \u2192</button>
+  </div>`;
+  }
+  function _smgmtBoardBannerPatch(label, live) {
+    const textEl = document.getElementById(`smgmt-board-banner-text-${label}`);
+    if (!textEl)
+      return;
+    const doneCount = live.done_count || 0;
+    const failedCount = live.failed_count || 0;
+    const skippedCount = live.skipped_count || 0;
+    const totalCount = live.total_count || 0;
+    const completeCount = doneCount + failedCount + skippedCount;
+    const timeSpentSec = live.time_spent_sec || 0;
+    const levelText = _smgmtRunningLevelText(live);
+    const parts = [
+      `${sprintLabelDisplay(label)} is running`,
+      `${completeCount}/${totalCount} done`,
+      timeSpentSec > 0 ? _fmtRunningTime(timeSpentSec) : null,
+      levelText
+    ].filter(Boolean);
+    textEl.textContent = parts.join(" \xB7 ");
+  }
+  function _smgmtRunningCardHtml(label, n, tickets) {
+    let isCollapsed = false;
+    try {
+      isCollapsed = localStorage.getItem("sprintColumn_" + label + "_collapsed") === "1";
+    } catch (_) {
+    }
+    const live = _smgmtLiveCache[label] || null;
+    const doneCount = live ? live.done_count || 0 : 0;
+    const failedCount = live ? live.failed_count || 0 : 0;
+    const skippedCount = live ? live.skipped_count || 0 : 0;
+    const totalCount = live ? live.total_count || tickets.length : tickets.length;
+    const completeCount = doneCount + failedCount + skippedCount;
+    const estRemMins = live ? live.est_remaining_minutes : null;
+    const timeSpentSec = live ? live.time_spent_sec || 0 : 0;
+    const currentTicket = live ? live.current_ticket : null;
+    const activeAgent = live ? live.active_agent : null;
+    const recentLogLines = live ? live.recent_log_lines || [] : [];
+    const pct = totalCount > 0 ? Math.round(completeCount / totalCount * 100) : 0;
+    const liveIssues = live && live.issues && live.issues.length > 0 ? live.issues : [];
+    const liveByNum = {};
+    liveIssues.forEach((i) => {
+      liveByNum[i.number] = i;
+    });
+    const sourceTickets = (liveIssues.length > 0 ? liveIssues : tickets).slice().sort((a, b) => (a.dispatch_level || 0) - (b.dispatch_level || 0));
+    const segBarHtml = sourceTickets.length > 0 ? `<div class="smgmt-seg-bar" id="smgmt-seg-${escHtml(label)}">${sourceTickets.map((t) => {
+      const liveIss = liveByNum[t.number];
+      const liveStatus = liveIss ? liveIss.status : null;
+      const agentStatus = liveIss ? liveIss.agent_status : null;
+      let blockClass = "seg-pending";
+      if (liveStatus === "done")
+        blockClass = "seg-done";
+      else if (agentStatus === "failed" || liveStatus === "skipped")
+        blockClass = "seg-failed";
+      else if (liveStatus === "in-progress" || agentStatus === "running" || currentTicket && t.number === currentTicket.number)
+        blockClass = "seg-running";
+      return `<div class="seg-block ${blockClass}" data-issue="${t.number}"></div>`;
+    }).join("")}</div>` : "";
+    const ticketRowsHtml = _smgmtRunningTicketRowsHtml(label, tickets);
     const runCollapsedClass = isCollapsed ? " smgmt-collapsed" : "";
     const runCollapseLabel = (isCollapsed ? "Expand " : "Collapse ") + escHtml(sprintLabelDisplay(label));
     return `
@@ -2441,17 +2610,7 @@ ${data.errors.join("\n")}`);
       return "0 tickets";
     let totalMins = 0, unestimated = 0;
     for (const t of items) {
-      const cached = _estDataCache[t.number];
-      let size = cached && cached.size ? cached.size : t.size || null;
-      if (!size && t.labels) {
-        for (const lbl of t.labels) {
-          const m = /^size-([SMLX]+)$/.exec(lbl.name || "");
-          if (m) {
-            size = m[1];
-            break;
-          }
-        }
-      }
+      const size = _smgmtTicketSize(t);
       const mins = size ? _sizeMinutes(size) : 0;
       if (mins > 0)
         totalMins += mins;
@@ -2460,10 +2619,49 @@ ${data.errors.join("\n")}`);
     }
     const countStr = `${count} ticket${count !== 1 ? "s" : ""}`;
     if (unestimated === count)
-      return `${countStr}, no estimates`;
+      return countStr;
     const h = totalMins / 60;
     const timeStr = h < 1 ? `~${totalMins}m` : `~${parseFloat((Math.round(h * 10) / 10).toFixed(1))}h`;
-    return `${timeStr}, ${countStr}${unestimated > 0 ? ` (${unestimated} unestimated)` : ""}`;
+    return `${countStr} \xB7 ${timeStr}`;
+  }
+  function _smgmtTicketSize(t) {
+    if (!t)
+      return null;
+    const cached = Object.prototype.hasOwnProperty.call(_estDataCache, t.number) ? _estDataCache[t.number] : void 0;
+    let size = cached && cached.size ? cached.size : t.size || null;
+    if (!size && t.labels) {
+      for (const lbl of t.labels) {
+        const m = /^size-([SMLX]+)$/.exec(lbl.name || "");
+        if (m) {
+          size = m[1];
+          break;
+        }
+      }
+    }
+    return size || null;
+  }
+  function _smgmtTicketHasEstimate(t) {
+    return _smgmtTicketSize(t) !== null;
+  }
+  function _smgmtRunningBlockerShort() {
+    if (!_smgmtRunningLabels || _smgmtRunningLabels.size === 0)
+      return "";
+    const lbl = [..._smgmtRunningLabels][0];
+    const m = String(lbl).match(/sprint-(\d+(?:\.\d+)?)/);
+    return m ? `S${m[1]}` : sprintLabelDisplay(lbl);
+  }
+  function _smgmtTicketEstHtml(ticket) {
+    const activity = typeof globalThis !== "undefined" && globalThis._smgmtRowActivity ? globalThis._smgmtRowActivity[ticket.number] : null;
+    if (activity) {
+      const label = activity === "fixing-ac" ? "fixing AC\u2026" : "estimating\u2026";
+      return `<span class="smgmt-ticket-est smgmt-ticket-est--pending" id="smgmt-ticket-est-${ticket.number}" aria-label="${label}"><span class="smgmt-estimating-dot" aria-hidden="true"></span></span>`;
+    }
+    const size = _smgmtTicketSize(ticket);
+    if (!size) {
+      return `<span class="smgmt-ticket-est" id="smgmt-ticket-est-${ticket.number}"></span>`;
+    }
+    const mins = _sizeMinutes(size);
+    return `<span class="smgmt-ticket-est" id="smgmt-ticket-est-${ticket.number}">${mins}m</span>`;
   }
   function _smgmtUpdateColRollup(label, items) {
     const el = document.getElementById(`smgmt-col-rollup-${label}`);
@@ -2490,18 +2688,17 @@ ${data.errors.join("\n")}`);
     };
     const _oc = hasRework ? ["ti-circle-x", "outcome-rework"] : _outcomeMap[ticket.status] || ["ti-circle", "outcome-backlog"];
     const outcomeIconHtml = `<i class="ti ${_oc[0]} smgmt-outcome-icon ${_oc[1]}" title="${escHtml(statusLabel)}"></i>`;
-    const sizeLabel = (ticket.labels || []).find((l) => /^size-[SMLX]+$/.test(l.name));
-    const hasEstimate = !!sizeLabel;
-    const sizeValue = sizeLabel ? sizeLabel.name.replace("size-", "") : "";
+    const sizeValue = _smgmtTicketSize(ticket) || "";
+    const hasEstimate = sizeValue !== "";
     const sizeAttr = sizeValue ? ` data-size="${escHtml(sizeValue)}"` : "";
     const estimateBadgeHtml = _smgmtEstimateBadgeHtml(ticket.number);
     const _cachedEst = Object.prototype.hasOwnProperty.call(_estDataCache, ticket.number) ? _estDataCache[ticket.number] : void 0;
     const sizePillHtml = sizeValue && !(_cachedEst && _cachedEst.size) ? `<span class="smgmt-ticket-size-pill" title="\u2248${_sizeMinutes(sizeValue)} min">${escHtml(sizeValue)}</span>` : "";
-    const staleBadgeHtml = ticket.estimate_stale && sizeLabel ? `<button class="smgmt-stale-badge" data-stale="true" tabindex="0"
+    const staleBadgeHtml = ticket.estimate_stale && hasEstimate ? `<button class="smgmt-stale-badge" data-stale="true" tabindex="0"
          title="Estimate may be outdated \u2014 issue body changed since last estimate"
          onclick="event.stopPropagation();_smgmtReEstimate(${ticket.number},this)"
          onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();_smgmtReEstimate(${ticket.number},this);}">stale</button>` : "";
-    const reEstBtnHtml = hasEstimate && _smgmtEstimatorAvailable && !ticket.estimate_stale ? `<button class="smgmt-reestimate-btn" tabindex="0" title="Re-estimate this ticket"
+    const reEstBtnHtml = _smgmtEstimatorAvailable && !ticket.estimate_stale ? `<button class="smgmt-reestimate-btn" tabindex="0" title="Re-estimate this ticket"
          onclick="event.stopPropagation();_smgmtReEstimate(${ticket.number},this)"
          onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();_smgmtReEstimate(${ticket.number},this);}">Re-estimate</button>` : "";
     const riskFlagIconsHtml = _smgmtRiskFlagIconsHtml(ticket.number);
@@ -2534,6 +2731,7 @@ ${data.errors.join("\n")}`);
       ${sizePillHtml}${staleBadgeHtml}${estimateBadgeHtml}${riskFlagIconsHtml}${schedDepHtml}${reEstBtnHtml}
       ${hasRework ? '<span class="smgmt-lbl-rejected">TESTER REJECTED</span>' : ""}
       ${elapsedSecs != null ? `<span class="smgmt-ticket-elapsed">${_fmtRunningTime(elapsedSecs)}</span>` : ""}
+      ${_smgmtTicketEstHtml(ticket)}
       <span class="smgmt-ticket-status ${statusClass}">${escHtml(statusLabel)}</span>
       <button class="btn-view-log" tabindex="0" title="View issue log"
               onclick="event.stopPropagation();openLvIssueLog(${ticket.number},'${sk}',_smgmtRepo()||'')">
@@ -2571,13 +2769,11 @@ ${data.errors.join("\n")}`);
     const filtered = _blApplyFilters(_blBacklogAll);
     if (countEl) {
       const total = _blBacklogAll.length, shown = filtered.length;
-      countEl.textContent = total > 0 ? shown === total ? `\xB7 ${total} ticket${total !== 1 ? "s" : ""}` : `\xB7 ${shown} of ${total} ticket${total !== 1 ? "s" : ""}` : "";
+      countEl.textContent = total > 0 ? `${shown === total ? total : `${shown} of ${total}`} ticket${total !== 1 ? "s" : ""}` : "0 tickets";
     }
     const backlogBulkBtn = document.getElementById("smgmt-backlog-bulk-est-btn");
     if (backlogBulkBtn) {
-      const hasUnsized = _blBacklogAll.some(
-        (t) => !(t.labels || []).find((l) => /^size-[SMLX]+$/.test(l.name))
-      );
+      const hasUnsized = _blBacklogAll.some((t) => !_smgmtTicketHasEstimate(t));
       backlogBulkBtn.classList.toggle("hidden", !hasUnsized);
     }
     const sorted = [...filtered].sort((a, b) => b.number - a.number);
@@ -2593,14 +2789,19 @@ ${data.errors.join("\n")}`);
   }
   function _smgmtBacklogTicketHtml(ticket, sprintNums) {
     const isSelected = _smgmtSelectedIssues.has(ticket.number);
-    const hasEstimate = (ticket.labels || []).some((l) => /^size-[SMLX]+$/.test(l.name));
+    const hasEstimate = _smgmtTicketHasEstimate(ticket);
     const backlogLabelNames = (ticket.labels || []).map((l) => l.name).join(",");
     const schedDepHtml = _smgmtSchedDepHtml(ticket);
+    const sizeValue = _smgmtTicketSize(ticket) || "";
+    const sizeAttr = sizeValue ? ` data-size="${escHtml(sizeValue)}"` : "";
+    const sizePillHtml = sizeValue ? `<span class="smgmt-ticket-size-pill">${escHtml(sizeValue)}</span>` : "";
+    const ageDays = ticket.created_at ? Math.floor((Date.now() - Date.parse(ticket.created_at)) / 864e5) : null;
+    const ageHtml = ageDays != null && !isNaN(ageDays) ? `<span class="bl-row-age">${ageDays}d</span>` : "";
     return `
     <div class="smgmt-ticket bl-row${isSelected ? " is-selected" : ""}" id="smgmt-ticket-${ticket.number}"
          draggable="true"
          data-issue="${ticket.number}"
-         data-sprint=""
+         data-sprint=""${sizeAttr}
          data-labels="${escHtml(backlogLabelNames)}"
          ondragstart="_smgmtBacklogTicketDragStart(event, ${ticket.number})"
          ondragend="_smgmtTicketDragEnd(event)"
@@ -2610,11 +2811,10 @@ ${data.errors.join("\n")}`);
              ${isSelected ? "checked" : ""}
              onclick="event.stopPropagation()"
              onchange="_smgmtToggleSelect(${ticket.number}, this.checked)">
-      <i class="ti ti-grip-vertical smgmt-ticket-grip"></i>
       <a class="smgmt-ticket-num" href="${escHtml(ticket.url || "#")}" target="_blank"
          rel="noopener" draggable="false" onclick="event.stopPropagation()">#${ticket.number}</a>
       <span class="smgmt-ticket-title" title="${escHtml(ticket.title)}">${escHtml(ticket.title)}</span>
-      ${schedDepHtml}
+      ${schedDepHtml}${sizePillHtml}${ageHtml}
       <button class="smgmt-row-menu-btn" tabindex="0" title="Ticket actions" aria-haspopup="true" aria-expanded="false"
               onclick="event.stopPropagation();_smgmtRowMenuOpen(event, ${ticket.number}, null, ${hasEstimate})"
               onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();_smgmtRowMenuOpen(event,${ticket.number},null,${hasEstimate});}">
@@ -2698,6 +2898,8 @@ ${data.errors.join("\n")}`);
   globalThis._smgmtDropOnBacklog = _smgmtDropOnBacklog;
   globalThis._smgmtBoardLock = _smgmtBoardLock;
   globalThis._smgmtBoardUnlock = _smgmtBoardUnlock;
+  globalThis._smgmtBoardProgress = _smgmtBoardProgress;
+  globalThis._smgmtBoardLog = _smgmtBoardLog;
   globalThis.loadSprintMgmt = loadSprintMgmt2;
   globalThis._smgmtSprintLabelSortKey = _smgmtSprintLabelSortKey;
   globalThis._smgmtRender = _smgmtRender2;
@@ -2715,7 +2917,12 @@ ${data.errors.join("\n")}`);
   globalThis._smgmtFinishCardInnerHtml = _smgmtFinishCardInnerHtml;
   globalThis._smgmtCardHtml = _smgmtCardHtml;
   globalThis._smgmtRunningCardHtml = _smgmtRunningCardHtml;
+  globalThis._smgmtRunningBoardBannerHtml = _smgmtRunningBoardBannerHtml;
+  globalThis._smgmtBoardBannerPatch = _smgmtBoardBannerPatch;
+  globalThis._smgmtRunningLevelText = _smgmtRunningLevelText;
   globalThis._smgmtRollupText = _smgmtRollupText;
+  globalThis._smgmtTicketSize = _smgmtTicketSize;
+  globalThis._smgmtTicketHasEstimate = _smgmtTicketHasEstimate;
   globalThis._smgmtUpdateColRollup = _smgmtUpdateColRollup;
   globalThis._smgmtTicketRowHtml = _smgmtTicketRowHtml;
   globalThis._smgmtRenderBacklog = _smgmtRenderBacklog;

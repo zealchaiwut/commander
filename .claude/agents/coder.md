@@ -175,13 +175,32 @@ When the ticket touches frontend/UI, before writing **any** UI code:
    run `npx impeccable detect <path>` locally and fix any anti-patterns before
    committing, so the design gate does not bounce the ticket back to SIT.
 
+## Sprint skills (always apply — headless dispatch does not auto-load skills)
+
+### caveman lite (status lines only)
+
+Use **caveman lite** for one-line progress updates (`Branch created.`, `Tests pass.`).
+Keep full prose for: commit messages, code comments, GitHub issue comments, and
+anything a human reads on GitHub. Do not use caveman for acceptance-criteria text.
+
+### code-review-graph (before reading code)
+
+Headless runs do not invoke slash skills — follow this workflow explicitly:
+
+1. `get_minimal_context(task="implement issue <N> …")` first.
+2. Then `semantic_search_nodes` / `query_graph` (callers_of, imports_of) for the
+   area you will touch.
+3. Fall back to `codedb_search` only when the graph lacks what you need.
+
+See `CLAUDE.md` § MCP Tools: code-review-graph.
+
 ## Rules
 
 - Work only on the feature branch — never commit directly to `develop` or `main`.
 - If the feature branch already exists, check it out and continue from where it left off.
 - If you encounter a failing test in the existing `tests/` suite that is unrelated to your feature, note it but do not fix it in this branch.
 - Keep commits atomic and well-described. The Tester reads the git log.
-- Use `codedb_search` aggressively — reading code is faster than guessing.
+- Prefer code-review-graph MCP, then `codedb_search` — reading code is faster than guessing.
 
 ## NO NEW ROUTES IN server.py (issue #761)
 

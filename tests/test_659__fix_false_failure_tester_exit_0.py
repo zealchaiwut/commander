@@ -148,10 +148,57 @@ class TestExitZeroIsAlwaysPassed:
 # ---------------------------------------------------------------------------
 
 class TestAutoMergeOnExitZero:
-    """AC-2: handle_post_tester auto-merges when tester exits 0 and branch not yet merged."""
+    """AC-2: handle_post_tester merges after gates when tester exits 0."""
 
-    def test_auto_merge_attempted_when_branch_not_merged(self, tmp_path):
-        """When exit=0 and branch exists but not merged, _call_finish_feature is called."""
+    def test_merge_after_gates_when_branch_not_merged(self, tmp_path):
+        """Gate-first: exit=0 + unmerged branch → gates run, then finish_feature."""
+        cfg_stub = MagicMock()
+        cfg_stub.worktree_tester = tmp_path / "tester"
+        cfg_stub.worktree_tester_app = tmp_path / "tester" / "apps" / "dashboard"
+        cfg_stub.repo_name = None
+        cfg_stub.api_url = None
+        cfg_stub.documentor_enabled = False
+        cfg_stub.logs_dir = tmp_path / "logs"
+
+        call_order: list[str] = []
+
+        def track_finish(*a, **kw):
+            call_order.append("finish")
+            return True
+
+        def track_gates(*a, **kw):
+            call_order.append("gates")
+            return [sm.GateResult(gate="pytest", passed=True, skipped=False)]
+
+        with (
+            patch.object(sm, "_find_feature_branch", return_value="feature/1-slug"),
+            patch.object(sm, "_is_branch_merged_into", return_value=False),
+            patch.object(sm, "_call_finish_feature", side_effect=track_finish),
+            patch.object(sm, "_run_quality_gates", side_effect=track_gates),
+            patch.object(sm, "_transition_safe"),
+            patch.object(sm, "_post_success_comment"),
+            patch.object(sm, "_post_agent_event"),
+            patch.object(sm, "sidecar_path", return_value=tmp_path / "sidecar.json"),
+            patch.object(sm, "REPO_ROOT", tmp_path),
+        ):
+            ok, msg, cat = sm.handle_post_tester(
+                issue_num=1,
+                tester_exit_code=0,
+                skip_gates=False,
+                gate_pytest=True,
+                gate_lint=False,
+                gate_merge_preview=False,
+                gate_typecheck=False,
+                gate_design=False,
+                cfg=cfg_stub,
+                target_branch="sprint/sprint-51",
+            )
+
+        assert call_order == ["gates", "finish"], f"expected gates before merge, got {call_order}"
+        assert ok, f"Expected merge success but got: msg={msg}"
+
+    def test_auto_merge_attempted_when_branch_not_merged_skip_gates(self, tmp_path):
+        """When --skip-gates and branch exists but not merged, _call_finish_feature is called."""
         cfg_stub = MagicMock()
         cfg_stub.worktree_tester = tmp_path / "tester"
         cfg_stub.worktree_tester_app = tmp_path / "tester" / "apps" / "dashboard"
@@ -513,11 +560,8 @@ class TestFinishFeatureUsesRemoteRef:
 class TestFetchBeforeBranchCheck:
     """handle_post_tester fetches remote state before checking branch presence.
 
-    Without this fetch, a race causes false TESTER_REJECTED (issue #659):
-      1. Tester's finish_feature.py deletes origin/feature/<N>-* and pushes merge.
-      2. sprint_manager's stale remote-tracking refs still show the branch.
-      3. _is_branch_merged_into returns False (origin/<target> not yet updated).
-      4. Auto-merge call fails — branch already deleted on origin.
+    Without this fetch, stale remote-tracking refs can mis-detect merge state
+    after a legacy tester finish_feature.py run (issue #659).
     """
 
     def test_fetch_called_before_find_branch(self, tmp_path):

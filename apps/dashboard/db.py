@@ -783,6 +783,12 @@ def record_sprint_cancel(label: str, end_reason: str = "cancelled",
     _set_sprint_terminal(label, "cancelled", end_reason, ended_at)
 
 
+def record_sprint_fail(label: str, end_reason: str | None = None,
+                       ended_at: str | None = None) -> None:
+    """Move a sprints row to `failed` with a reason (issue #757)."""
+    _set_sprint_terminal(label, "failed", end_reason, ended_at)
+
+
 def _set_sprint_terminal(label: str, state: str, end_reason: str | None,
                          ended_at: str | None) -> None:
     ended_at = ended_at or _now_iso()

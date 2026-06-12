@@ -60,3 +60,5 @@ apps/dashboard/tests/
 
 # Runtime state — attachment bare-clone cache and draft uploads (issue #188)
 apps/dashboard/runtime/
+# Added by code-review-graph
+.code-review-graph/

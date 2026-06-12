@@ -14,8 +14,8 @@ AC coverage:
          coder-active (purple glow), tester-active (amber glow), queued (grey).
   AC3  — Pipeline mode: two concurrent agent nodes can glow at once within the
          same level (no logic collapses coder+tester to a single glow).
-  AC4  — Done levels collapse with a green indicator; the active level is
-         expanded; queued levels show gate text.
+  AC4  — Done levels stay expanded with a green indicator; the active level is
+         highlighted; queued levels show gate text.
   AC5  — A fix-round badge appears on a node when retry/attempt data is present
          and is hidden otherwise (no change to the /live contract).
   AC6  — Each node displays a size pill and elapsed time.
@@ -163,9 +163,12 @@ def test_ac4_level_state_classes_in_css():
         _css_rule(cls)  # raises if missing
 
 
-def test_ac4_done_level_collapses_nodes():
-    rule = _css_rule(".level.done .nodes")
-    assert "display" in rule and "none" in rule, "done level must collapse (hide) its nodes"
+def test_ac4_done_level_keeps_nodes_visible():
+    """Mock v5: completed levels stay expanded with green check nodes."""
+    m = re.search(r"\.level\.done\s+\.nodes\s*\{([^}]*)\}", PROJECT_HTML)
+    if m:
+        assert "display" not in m.group(1) or "none" not in m.group(1), \
+            "done level must keep its node cards visible (no collapse)"
 
 
 def test_ac4_done_level_dot_is_green():
@@ -174,10 +177,10 @@ def test_ac4_done_level_dot_is_green():
 
 
 def test_ac4_queued_level_shows_gate_text():
-    body = _fn_body("_smgmtRailRender")
-    assert "Waiting for Level" in body, "queued levels must show gate text"
-    # Gate text only on queued (waiting) levels.
-    assert "queued" in body or "waiting" in body
+    meta = _fn_body("_smgmtRailLevelMeta")
+    assert "waits for level" in meta or "Waiting for Level" in meta, \
+        "queued levels must show gate text"
+    assert "queued" in meta or "waiting" in meta
 
 
 # ───────────────────────── AC5: fix-round badge ──────────────────────────────
@@ -192,8 +195,7 @@ def test_ac5_badge_hidden_when_absent():
     """The node renderer only emits the badge when the fix-round helper returns truthy."""
     node = _fn_body("_smgmtRailNodeHtml")
     assert "_smgmtRailFixRound" in node, "node render must consult the fix-round helper"
-    # Conditional emission — badge string is guarded.
-    assert "node-badge" in node
+    assert "node-fix-badge" in node
 
 
 def test_ac5_no_live_contract_change():
@@ -255,12 +257,14 @@ def test_ac8_patch_does_not_wipe_whole_rail():
 
 def test_ac8_wired_into_live_poll():
     poll = _fn_body("_smgmtLivePollTick")
-    assert "_smgmtRailUpdate" in poll, "rail must update on the existing 2s poll"
+    assert "_smgmtRunningViewUpdate" in poll or "_smgmtRailUpdate" in poll, \
+        "rail must update on the existing 2s poll"
 
 
 def test_ac8_wired_into_subview_switch():
     body = _fn_body("_smgmtShowSubView")
-    assert "_smgmtRail" in body, "switching to Running must render the rail from cache"
+    assert "_smgmtRunningViewUpdate" in body or "_smgmtRail" in body, \
+        "switching to Running must render the rail from cache"
 
 
 # ───────────────────────── AC9 / AC10: token contract ────────────────────────

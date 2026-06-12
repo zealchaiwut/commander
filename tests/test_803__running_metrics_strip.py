@@ -351,9 +351,11 @@ def test_ac8_metric_variants_present():
 
 def test_ac8_update_is_wired_into_poll_and_subview():
     poll = _fn_body("_smgmtLivePollTick")
-    assert "_smgmtMetricsUpdate" in poll, "metrics must refresh on the live poll"
+    assert "_smgmtRunningViewUpdate" in poll or "_smgmtMetricsUpdate" in poll, \
+        "metrics must refresh on the live poll"
     switch = _fn_body("_smgmtShowSubView")
-    assert "_smgmtMetrics" in switch, "switching to Running must render the metrics from cache"
+    assert "_smgmtRunningViewUpdate" in switch or "_smgmtMetrics" in switch, \
+        "switching to Running must render the running shell from cache"
 
 
 # ───────────── AC10: impeccable — no banned patterns ──────────────────────────

@@ -335,3 +335,72 @@ def test_ac8_deleted_sprint_queryable_immediately(client, fresh_db, tmp_path, mo
     assert s["lifecycle_state"] == "deleted"
     assert s["issues"][0]["ticket_id"] == 201
     assert s["issues"][0]["time_spent"] == 60  # enriched from the state file
+
+
+def test_early_crash_completed_with_no_issues_surfaces_as_failed(client, fresh_db, tmp_path, monkeypatch):
+    """A sub-sprint that exits before processing tickets reads as failed, not partial."""
+    sprints_dir = tmp_path / "sprints"
+    monkeypatch.setattr(svc, "DEFAULT_SPRINTS_DIR", sprints_dir, raising=False)
+    _insert_lifecycle(fresh_db, "sprint-68.3", "completed",
+                      ended_at="2026-06-12T00:00:02", end_reason="orphan-pid")
+    _write_state_file(sprints_dir, "sprint-68.3", _state_payload("sprint-68.3", issues=[], wall=2))
+    s = _by_label(client.get("/api/sprints/history").json(), "sprint-68.3")
+    assert s["lifecycle_state"] == "failed"
+    assert s.get("failure_reason")
+
+
+def test_has_rerun_child_flag_on_parent(client, fresh_db, tmp_path, monkeypatch):
+    sprints_dir = tmp_path / "sprints"
+    monkeypatch.setattr(svc, "DEFAULT_SPRINTS_DIR", sprints_dir, raising=False)
+    _insert_lifecycle(fresh_db, "sprint-68", "completed", ended_at="2026-06-12T00:00:00")
+    _insert_lifecycle(fresh_db, "sprint-68.1", "completed", ended_at="2026-06-12T00:01:00")
+    body = client.get("/api/sprints/history").json()
+    parent = _by_label(body, "sprint-68")
+    child = _by_label(body, "sprint-68.1")
+    assert parent["has_rerun_child"] is True
+    assert child["has_rerun_child"] is False
+
+
+def test_summary_issue_and_failure_reason_from_state_file(client, fresh_db, tmp_path, monkeypatch):
+    sprints_dir = tmp_path / "sprints"
+    monkeypatch.setattr(svc, "DEFAULT_SPRINTS_DIR", sprints_dir, raising=False)
+    _insert_lifecycle(fresh_db, "sprint-90", "failed", ended_at="2026-06-12T00:00:00")
+    _write_state_file(sprints_dir, "sprint-90", {
+        **_state_payload("sprint-90", issues=[{
+            "number": 894,
+            "status": "pending",
+            "agent_status": "failed",
+            "failure_reason": "Tester HANG detected",
+        }]),
+        "summary_issue_url": "https://github.com/o/r/issues/900",
+    })
+    s = _by_label(client.get("/api/sprints/history").json(), "sprint-90")
+    assert s["summary_issue_num"] == 900
+    assert s["failed_tickets"][0]["ticket_id"] == 894
+    assert "HANG" in s["failed_tickets"][0]["failure_reason"]
+
+
+def test_post_sprint_agents_from_state_file(client, fresh_db, tmp_path, monkeypatch):
+    sprints_dir = tmp_path / "sprints"
+    monkeypatch.setattr(svc, "DEFAULT_SPRINTS_DIR", sprints_dir, raising=False)
+    _insert_lifecycle(fresh_db, "sprint-91", "completed", ended_at="2026-06-12T00:00:00")
+    _write_state_file(sprints_dir, "sprint-91", {
+        **_state_payload("sprint-91", issues=[{"number": 1, "status": "done"}]),
+        "documenter_status": "succeeded",
+        "documenter_files_touched": ["CHANGELOG.md", "README.md"],
+        "documenter_commit_sha": "abc123def456",
+        "reviewer_status": "succeeded",
+        "reviewer_comment_url": "https://github.com/o/r/issues/50#issuecomment-1",
+        "reviewer_findings": {
+            "blockers": 0,
+            "suggestions": 2,
+            "nits": 1,
+            "follow_up_tickets": [901, 902],
+        },
+    })
+    s = _by_label(client.get("/api/sprints/history").json(), "sprint-91")
+    ps = s["post_sprint"]
+    assert ps is not None
+    assert ps["documenter"]["files_touched"] == ["CHANGELOG.md", "README.md"]
+    assert ps["reviewer"]["follow_up_tickets"] == [901, 902]
+    assert ps["reviewer"]["suggestions"] == 2

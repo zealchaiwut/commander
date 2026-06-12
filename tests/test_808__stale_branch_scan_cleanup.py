@@ -340,7 +340,7 @@ def test_ac7_chip_renders_regardless_of_locked_state():
     card = _fn_body("_histCardHtml")
     # The chip call sits in the always-rendered head, not inside the
     # `expanded ? ... : ''` body and not gated by `locked`.
-    head_marker = "_histStateChip(s.lifecycle_state)"
+    head_marker = "_histStateChip(s.lifecycle_state"
     chip_marker = "_histStaleChipHtml(s)"
     assert head_marker in card and chip_marker in card
     assert card.index(chip_marker) > card.index(head_marker)

@@ -24,6 +24,12 @@ import re
 import sys as _sys
 from pathlib import Path
 
+# Lifecycle end-reasons that indicate a crash/stop rather than a clean finish.
+_CRASH_END_REASONS = frozenset({
+    "orphan-pid", "killed", "subprocess-crash", "preflight-skipped",
+    "no-dispatchable-tickets",
+})
+
 # apps/dashboard is on sys.path so ``import db`` resolves (see server bootstrap).
 _DASHBOARD_ROOT = Path(__file__).resolve().parent.parent
 if str(_DASHBOARD_ROOT) not in _sys.path:
@@ -86,18 +92,65 @@ def _issue_time_spent(iss: dict) -> int | None:
     return _seconds_between(start, end)
 
 
+def _parse_issue_num_from_url(url: str | None) -> int | None:
+    if not url:
+        return None
+    m = re.search(r"/issues/(\d+)", str(url))
+    return int(m.group(1)) if m else None
+
+
+def _parse_pr_number(state: dict) -> int | None:
+    """Best-effort PR number from a sprint state file or reconciliation block."""
+    recon = state.get("reconciliation") or {}
+    for chk in recon.get("checks") or []:
+        if chk.get("name") == "sprint_pr" and chk.get("ok"):
+            detail = str(chk.get("detail") or "")
+            m = re.search(r"#(\d+)", detail)
+            if m:
+                return int(m.group(1))
+    pr_url = state.get("pr_url") or state.get("sprint_pr_url")
+    if pr_url:
+        m = re.search(r"/pull/(\d+)", str(pr_url))
+        if m:
+            return int(m.group(1))
+    pr = state.get("pr_number")
+    return int(pr) if pr is not None else None
+
+
 def _normalize_issue(iss: dict) -> dict:
     """Project a state-file ticket dict into the AC3 issue shape."""
     ticket_id = iss.get("number", iss.get("ticket_id", iss.get("issue_number")))
     pr = iss.get("pr_number")
     if pr is None and isinstance(iss.get("pr"), dict):
         pr = iss["pr"].get("number")
-    return {
+    agent_status = (iss.get("agent_status") or "").strip().lower() or None
+    failure_reason = iss.get("failure_reason")
+    out = {
         "ticket_id": ticket_id,
         "state": _map_issue_state(iss.get("status") or iss.get("state")),
         "time_spent": iss.get("time_spent", _issue_time_spent(iss)),
         "pr_number": pr,
     }
+    if agent_status:
+        out["agent_status"] = agent_status
+    if failure_reason:
+        out["failure_reason"] = str(failure_reason)
+    return out
+
+
+def _failed_tickets_from_raw(issues_raw: list[dict]) -> list[dict]:
+    """Tickets that failed during the sprint, with their failure reason."""
+    failed: list[dict] = []
+    for iss in issues_raw:
+        agent = (iss.get("agent_status") or "").lower()
+        reason = iss.get("failure_reason")
+        if agent == "failed" or reason:
+            tid = iss.get("number", iss.get("ticket_id", iss.get("issue_number")))
+            failed.append({
+                "ticket_id": tid,
+                "failure_reason": str(reason or "Agent failed"),
+            })
+    return failed
 
 
 def _compute_estimate_accuracy(state: dict) -> float | None:
@@ -141,6 +194,34 @@ def _read_plan_file(sprints_dir: Path, label: str) -> dict | None:
         return None
 
 
+def _issues_from_agent_runs(label: str) -> list[dict]:
+    """Synthesize issue rows from agent_runs when state.json has no tickets."""
+    try:
+        rows = _db().agent_runs_for_sprint(label)
+    except Exception:
+        return []
+    seen: set[int] = set()
+    issues: list[dict] = []
+    for row in rows:
+        num = row.get("issue_number")
+        if num is None:
+            continue
+        try:
+            tid = int(num)
+        except (TypeError, ValueError):
+            continue
+        if tid in seen or tid <= 0:
+            continue
+        seen.add(tid)
+        issues.append({
+            "ticket_id": tid,
+            "state": "open",
+            "time_spent": None,
+            "pr_number": None,
+        })
+    return issues
+
+
 def _find_summary_path(sprints_dir: Path, label: str) -> str | None:
     """Most recent ``<label>-summary-*.md`` path for a sprint, or None."""
     if not sprints_dir.exists():
@@ -156,17 +237,31 @@ def _find_summary_path(sprints_dir: Path, label: str) -> str | None:
 def _enrich_from_state(label: str, sprints_dir: Path) -> dict:
     """Per-ticket issues, tokens, duration, estimate_accuracy from local files."""
     state = _read_state_file(sprints_dir, label)
+    plan = _read_plan_file(sprints_dir, label) or {}
     out: dict = {
         "issues": [],
+        "issues_raw": [],
         "tokens": None,
         "duration": None,
         "estimate_accuracy": None,
         "summary_path": _find_summary_path(sprints_dir, label),
         "reconciliation": None,
+        "pr_number": None,
+        "summary_issue_url": None,
+        "summary_issue_num": None,
+        "end_reason": plan.get("end_reason"),
+        "plan_status": plan.get("state") or plan.get("status"),
+        "failed_tickets": [],
+        "failure_reason": None,
     }
     if not state:
         return out
-    out["issues"] = [_normalize_issue(i) for i in state.get("issues", [])]
+    issues_raw = state.get("issues", [])
+    out["issues_raw"] = issues_raw
+    out["issues"] = [_normalize_issue(i) for i in issues_raw]
+    if not out["issues"]:
+        out["issues"] = _issues_from_agent_runs(label)
+    out["failed_tickets"] = _failed_tickets_from_raw(issues_raw)
     tin = state.get("total_tokens_in") or 0
     tout = state.get("total_tokens_out") or 0
     out["tokens"] = int(tin) + int(tout)
@@ -176,7 +271,69 @@ def _enrich_from_state(label: str, sprints_dir: Path) -> dict:
     # Post-sprint reconciliation block (issue #856) — surfaced verbatim so the
     # history card can render the loose-ends checklist with no GitHub call.
     out["reconciliation"] = state.get("reconciliation")
+    out["pr_number"] = _parse_pr_number(state)
+    surl = state.get("summary_issue_url")
+    out["summary_issue_url"] = surl
+    out["summary_issue_num"] = _parse_issue_num_from_url(surl)
+    if out["failed_tickets"]:
+        out["failure_reason"] = out["failed_tickets"][-1]["failure_reason"]
+    out["post_sprint"] = _build_post_sprint(state)
     return out
+
+
+def _build_post_sprint(state: dict) -> dict | None:
+    """Post-sprint documenter + reviewer outcomes persisted in ``<label>-state.json``."""
+    doc_status = state.get("documenter_status")
+    rev_status = state.get("reviewer_status")
+    if not doc_status and not rev_status:
+        return None
+
+    doc_files = state.get("documenter_files_touched") or []
+    if isinstance(doc_files, str):
+        doc_files = [doc_files]
+    doc_files = [str(f).strip() for f in doc_files if str(f).strip()]
+
+    findings = state.get("reviewer_findings") if isinstance(state.get("reviewer_findings"), dict) else {}
+    follow_ups: list[int] = []
+    for raw in findings.get("follow_up_tickets") or []:
+        try:
+            follow_ups.append(int(raw))
+        except (TypeError, ValueError):
+            continue
+
+    documenter = None
+    if doc_status:
+        documenter = {
+            "status": str(doc_status),
+            "files_touched": doc_files,
+            "commit_sha": state.get("documenter_commit_sha"),
+        }
+
+    reviewer = None
+    if rev_status:
+        reviewer = {
+            "status": str(rev_status),
+            "comment_url": state.get("reviewer_comment_url"),
+            "blockers": int(findings.get("blockers") or 0),
+            "suggestions": int(findings.get("suggestions") or 0),
+            "nits": int(findings.get("nits") or 0),
+            "follow_up_tickets": follow_ups,
+        }
+
+    # Surface the block when either agent ran, or when we have concrete outputs.
+    has_output = bool(doc_files or follow_ups)
+    ran = (
+        (doc_status and doc_status != "skipped")
+        or (rev_status and rev_status != "skipped")
+    )
+    if not ran and not has_output:
+        return None
+
+    return {
+        "note": "Agents ran after ticket work finished",
+        "documenter": documenter,
+        "reviewer": reviewer,
+    }
 
 
 # ── lifecycle-state normalization ─────────────────────────────────────────────
@@ -203,17 +360,28 @@ def _normalize_state(raw: str | None) -> str:
 def _record_from_history(rec: dict) -> dict:
     """Build the response row from a sprint_history snapshot (authoritative)."""
     issues = [_normalize_issue(i) if "ticket_id" not in i else i for i in rec.get("issues", [])]
+    failed_tickets = [
+        {"ticket_id": i.get("ticket_id"), "failure_reason": i.get("failure_reason") or "Agent failed"}
+        for i in issues
+        if i.get("failure_reason") or (i.get("agent_status") or "").lower() == "failed"
+    ]
     return {
         "label": rec.get("label"),
         "project": rec.get("project", ""),
         "lifecycle_state": _normalize_state(rec.get("lifecycle_state")),
+        "end_reason": rec.get("end_reason"),
         "duration": rec.get("duration"),
         "tokens": rec.get("tokens"),
         "estimate_accuracy": rec.get("estimate_accuracy"),
         "pr_number": rec.get("pr_number"),
         "summary_path": rec.get("summary_path"),
+        "summary_issue_url": rec.get("summary_issue_url"),
+        "summary_issue_num": rec.get("summary_issue_num"),
         "reconciliation": rec.get("reconciliation"),
         "issues": issues,
+        "failed_tickets": failed_tickets,
+        "failure_reason": rec.get("failure_reason") or (failed_tickets[-1]["failure_reason"] if failed_tickets else None),
+        "post_sprint": rec.get("post_sprint"),
         "_sort_key": rec.get("created_at") or "",
     }
 
@@ -225,17 +393,26 @@ def _record_from_lifecycle(row: dict, sprints_dir: Path) -> dict:
     duration = _seconds_between(row.get("started_at"), row.get("ended_at"))
     if duration is None:
         duration = enrich["duration"]
+    end_reason = row.get("end_reason") or enrich.get("end_reason")
+    pr_number = row.get("pr_number") if row.get("pr_number") is not None else enrich["pr_number"]
     return {
         "label": label,
         "project": row.get("project", ""),
         "lifecycle_state": _normalize_state(row.get("state")),
+        "end_reason": end_reason,
         "duration": duration,
         "tokens": enrich["tokens"],
         "estimate_accuracy": enrich["estimate_accuracy"],
-        "pr_number": None,
+        "pr_number": pr_number,
         "summary_path": enrich["summary_path"],
+        "summary_issue_url": enrich["summary_issue_url"],
+        "summary_issue_num": enrich["summary_issue_num"],
         "reconciliation": enrich["reconciliation"],
         "issues": enrich["issues"],
+        "failed_tickets": enrich["failed_tickets"],
+        "failure_reason": enrich["failure_reason"],
+        "plan_status": enrich.get("plan_status"),
+        "post_sprint": enrich.get("post_sprint"),
         "_sort_key": row.get("ended_at") or row.get("started_at") or row.get("created_at") or "",
     }
 
@@ -244,18 +421,25 @@ def _record_from_files(label: str, sprints_dir: Path) -> dict:
     """Build a response row purely from on-disk state/plan files (last resort)."""
     enrich = _enrich_from_state(label, sprints_dir)
     plan = _read_plan_file(sprints_dir, label) or {}
-    state_raw = plan.get("status")
+    state_raw = plan.get("status") or plan.get("state")
     return {
         "label": label,
         "project": plan.get("project", ""),
         "lifecycle_state": _normalize_state(state_raw) if state_raw else "unknown",
+        "end_reason": enrich.get("end_reason"),
         "duration": enrich["duration"],
         "tokens": enrich["tokens"],
         "estimate_accuracy": enrich["estimate_accuracy"],
-        "pr_number": None,
+        "pr_number": enrich["pr_number"],
         "summary_path": enrich["summary_path"],
+        "summary_issue_url": enrich["summary_issue_url"],
+        "summary_issue_num": enrich["summary_issue_num"],
         "reconciliation": enrich["reconciliation"],
         "issues": enrich["issues"],
+        "failed_tickets": enrich["failed_tickets"],
+        "failure_reason": enrich["failure_reason"],
+        "plan_status": enrich.get("plan_status"),
+        "post_sprint": enrich.get("post_sprint"),
         "_sort_key": label,
     }
 
@@ -264,6 +448,93 @@ def _record_from_files(label: str, sprints_dir: Path) -> dict:
 # artifacts (sprint-1-estimate.json, sprint-1-preflight-<date>.json, plan
 # files, test debris) from surfacing as zombie History rows.
 _LABEL_RE = re.compile(r"^sprint-\d+(?:\.\d+)*$")
+
+
+def _label_sub_index(label: str | None) -> int:
+    m = _LABEL_RE.match(label or "")
+    if not m:
+        return 0
+    parts = (label or "").split(".")
+    return int(parts[1]) if len(parts) > 1 else 0
+
+
+def _label_base(label: str | None) -> str:
+    m = re.match(r"^(sprint-\d+)", label or "")
+    return m.group(1) if m else (label or "")
+
+
+def _infer_failed_lifecycle(rec: dict) -> tuple[str, str | None]:
+    """Promote ambiguous terminal rows to ``failed`` when local files say so."""
+    state = (rec.get("lifecycle_state") or "").lower()
+    if state == "failed":
+        return "failed", rec.get("failure_reason") or rec.get("end_reason")
+
+    failed_tickets = rec.get("failed_tickets") or []
+    if failed_tickets:
+        reason = rec.get("failure_reason") or failed_tickets[-1].get("failure_reason")
+        return "failed", reason
+
+    end_reason = (rec.get("end_reason") or "").lower()
+    issues = rec.get("issues") or []
+    duration = rec.get("duration")
+    plan_status = (rec.get("plan_status") or "").lower()
+
+    if state == "cancelled" and end_reason in _CRASH_END_REASONS:
+        return "failed", rec.get("end_reason") or rec.get("failure_reason")
+
+    if end_reason == "no-dispatchable-tickets":
+        return "failed", "No dispatchable tickets found for this sprint label"
+
+    if plan_status in ("failed", "stopped"):
+        return "failed", rec.get("failure_reason") or rec.get("end_reason") or plan_status
+
+    # Completed with zero recorded tickets is usually an early crash (e.g. subprocess
+    # exit) — not a partial completion. Partial is a separate UI badge gated on
+    # whether a re-run child sprint exists.
+    if state == "completed" and not issues:
+        if end_reason and end_reason not in ("complete", "natural", "finish_button"):
+            return "failed", rec.get("end_reason")
+        if duration is not None and duration <= 30:
+            return "failed", rec.get("failure_reason") or "Sprint exited before processing tickets"
+
+    return state, rec.get("failure_reason")
+
+
+def _finalize_records(records: list[dict], sprints_dir: Path) -> None:
+    """Attach rerun-child flags and normalize failed lifecycle in-place."""
+    children_by_base: dict[str, list[str]] = {}
+    for rec in records:
+        label = rec.get("label") or ""
+        base = _label_base(label)
+        if _label_sub_index(label) > 0:
+            children_by_base.setdefault(base, []).append(label)
+
+    for rec in records:
+        label = rec.get("label") or ""
+        if not rec.get("post_sprint"):
+            state = _read_state_file(sprints_dir, label)
+            if state:
+                rec["post_sprint"] = _build_post_sprint(state)
+
+        if not rec.get("issues"):
+            run_issues = _issues_from_agent_runs(label)
+            if run_issues:
+                rec["issues"] = run_issues
+
+        base = _label_base(label)
+        siblings = sorted(children_by_base.get(base, []), key=_label_sub_index)
+        sub = _label_sub_index(label)
+        rec["has_rerun_child"] = any(_label_sub_index(c) > sub for c in siblings)
+        if sub == 0:
+            rec["has_rerun_child"] = bool(siblings)
+
+        effective, reason = _infer_failed_lifecycle(rec)
+        if effective == "failed":
+            rec["lifecycle_state"] = "failed"
+            if reason and not rec.get("failure_reason"):
+                rec["failure_reason"] = reason
+
+        rec.pop("plan_status", None)
 
 
 def _discover_file_labels(sprints_dir: Path) -> set[str]:
@@ -322,6 +593,8 @@ def get_sprint_history(offset: int = 0, limit: int = 20, sprints_dir: Path | Non
 
     if project:
         records = [r for r in records if r.get("project") == project]
+
+    _finalize_records(records, sprints_dir)
 
     records.sort(key=lambda r: r.get("_sort_key") or "", reverse=True)
     total = len(records)

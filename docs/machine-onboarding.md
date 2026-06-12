@@ -17,16 +17,57 @@ other document.
 - A GitHub personal access token with `repo` scope (for headless `gh` auth)
 - A Claude Code OAuth token (generated below with `claude setup-token`)
 
-Work through the sections **in order**:
+Work through the sections **in order** (or use [Quick bootstrap](#quick-bootstrap-setup_machinesh) on a fresh Mac):
 
-1. [Clone layout](#1-clone-layout)
-2. [Venv per clone](#2-venv-per-clone)
-3. [Claude install + setup-token](#3-claude-install--setup-token)
-4. [gh auth + token](#4-gh-auth--token)
-5. [install_launchd.sh](#5-install_launchdsh)
-6. [Doctor run](#6-doctor-run)
-7. [First sprint smoke test](#7-first-sprint-smoke-test)
-8. [Failure Signatures](#8-failure-signatures)
+1. [Quick bootstrap](#quick-bootstrap-setup_machinesh) *(one command — recommended)*
+2. [Clone layout](#1-clone-layout)
+3. [Venv per clone](#2-venv-per-clone)
+4. [Claude install + setup-token](#3-claude-install--setup-token)
+5. [gh auth + token](#4-gh-auth--token)
+6. [install_launchd.sh](#5-install_launchdsh)
+7. [Doctor run](#6-doctor-run)
+8. [First sprint smoke test](#7-first-sprint-smoke-test)
+9. [Failure Signatures](#8-failure-signatures)
+
+---
+
+## Quick bootstrap (setup_machine.sh)
+
+One command from a fresh clone: venv + requirements (includes `code-review-graph`),
+`.env`, prd/uat layout, **caveman + code-review-graph** on every clone under
+`~/dev/commander/`, then doctor.
+
+```bash
+git clone https://github.com/zealchaiwut/commander.git ~/dev/commander/prd
+cd ~/dev/commander/prd
+bash scripts/setup_machine.sh
+```
+
+**Second Mac mini** (clones and venv already exist): reinstall agent skills and
+rebuild CRG graphs without repeating the full bootstrap:
+
+```bash
+cd ~/dev/commander/uat   # or prd — any clone with a venv
+bash scripts/setup_machine.sh --resetup-machine
+```
+
+Or target one clone:
+
+```bash
+bash scripts/install_agent_skills.sh --force --clone uat
+```
+
+Restart Claude Code / Cursor after either command (`/mcp` should list
+`code-review-graph`). See [features/agent-skills.md](features/agent-skills.md).
+
+Before an **overnight sprint**, refresh agent worktree graphs (headless dispatches
+do not run CRG hooks reliably):
+
+```bash
+bash scripts/update_crg_graphs.sh
+```
+
+Sprint manager also runs a best-effort `update` before each coder/tester ticket.
 
 ---
 

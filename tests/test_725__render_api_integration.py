@@ -388,8 +388,7 @@ def test_non_render_host_deploy_unaffected(client_ctx):
 
 
 def test_frontend_polls_status_endpoint():
-    """AC5: project.html polls the deploy-status endpoint after a deploy."""
+    """AC5: Deploy tab polls the deploy-status endpoint after a deploy."""
     html = (DASHBOARD_DIR / "static" / "project.html").read_text()
     assert "deploy-status" in html
-    # there must be polling logic (setTimeout/setInterval) tied to status
-    assert "_renderDeployPoll" in html or "deployStatusPoll" in html
+    assert "_deployPollRender" in html or "_deployTabPollers" in html

@@ -115,7 +115,8 @@ docs/
   tutorial.md        full walkthrough
   workflow.md        Bulk Create -> Run Sprint -> Finish/Rerun
   architecture.md    system map (documentor-owned AUTO region)
-  milestones.md      sprint history (documentor-owned AUTO region)
+  todo.md            sprint history (documentor-owned AUTO region) + hand TODO
+  milestones/        active milestone tracking (one .md per initiative)
   features/          one .md per subsystem
   bulk-create/       saved bulk-create prompts (YYYY-MM-DD-N-<topic>.md; N =
                      sequence within the day so batches file in order; BKK
@@ -123,9 +124,11 @@ docs/
   changelog/         dated per-sprint entries (uat/ and prd/)
 ```
 
-`architecture.md` and `milestones.md` each contain an `<!-- AUTO:... -->`
-region owned by the documentor — the whole file is auto-maintained; do not
-hand-edit inside the markers.
+`architecture.md` and `todo.md` (formerly `milestones.md`) each contain an
+`<!-- AUTO:... -->` region owned by the documentor — do not hand-edit inside
+the markers. `docs/milestones/` holds hand-maintained milestone tracking files
+(e.g. `sprint-lifecycle-redesign.md`, whose design contract is
+`docs/architecture/sprint-lifecycle.md`).
 
 **Enforce it with the scaffold script:**
 - New projects get this structure stamped into the initial commit by

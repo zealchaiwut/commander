@@ -5,9 +5,9 @@ This is the index for the architecture documentation set. Sections are ordered b
 | # | Section | Notes |
 |---|---------|-------|
 | 1 | [State & source-of-truth model](1_state-and-source-of-truth.md) | The foundation — read first |
-| 2 | [App / Dashboard architecture](2_app-dashboard-architecture.md) | Priority |
+| 2 | [App / Dashboard architecture](2_app-dashboard-architecture.md) | Priority · **decision record partial** (2.3a/2.3b pending) |
 | 3 | [Sprint flow (work flow)](3_sprint-flow.md) | Priority — includes sprint & ticket lifecycle |
-| 4 | [Agents](4_agents.md) | Priority |
+| 4 | [Agents](4_agents.md) | Priority · **decision record partial** (4c–4f open) |
 | 5 | [Concurrency & locking](5_concurrency-and-locking.md) | Tightly tied to 3 & 4 |
 | 6 | [Failure & recovery semantics](6_failure-and-recovery.md) | The unhappy-path side of the lifecycle |
 | 7 | [Git / branch strategy](7_git-branch-strategy.md) | |

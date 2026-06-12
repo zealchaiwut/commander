@@ -22,19 +22,20 @@ Commander is:
 - Python 3.12, FastAPI, Uvicorn
 - SQLite (`DB_PATH`, e.g. `dashboard.db`) for agent event history — tables `agents`, `events`, `token_usage`
 - Optional Neon/Postgres layer (`DATABASE_URL`, via `services/sprint_manager/sprint_repo.py`) that mirrors sprint metadata. It is **secondary** — the dashboard runs fully without it. Disable per-machine with `COMMANDER_DISABLE_NEON=1` (see below).
-- Plain HTML + vanilla JS (no React, no build step)
+- Plain HTML + vanilla JS with an **esbuild bundling step** (ES modules → `static/dist/bundle.js`; no React/Vue/Svelte framework yet — see `docs/architecture/2_app-dashboard-architecture.md` §2.3)
 - Server-Sent Events for live updates
 - GitHub CLI (`gh`) for issue management
 - Pytest + httpx for tests
 
 ## Dashboard deploy model — frontend vs backend
 
-The dashboard has no build step, so its two layers deploy differently:
+The dashboard has two deploy layers with different refresh rules:
 
-- **Frontend** (`apps/dashboard/static/*.html`, plus inline JS/CSS) is served from disk per request. Edits take effect on the **next page refresh** — no server restart needed. A running dashboard, including the unattended launchd instance, picks up static changes immediately.
+- **Frontend markup** (`apps/dashboard/static/*.html`, inline JS/CSS not yet extracted) is served from disk per request. Edits take effect on the **next page refresh** — no server restart needed.
+- **Frontend bundle** (`apps/dashboard/static/src/` → `npm run build` → `static/dist/bundle.js`) requires running **`npm run build`** (or `npm run watch`) after editing ES modules under `static/src/`. Commit the rebuilt `bundle.js` or run build in each clone (prd, coder, tester, uat).
 - **Backend** (`apps/dashboard/server.py`, `services/sprint_manager/*.py`, any Python) requires a **uvicorn restart / redeploy** to take effect.
 
-When sequencing work for a running instance you can't restart (e.g. a remote launchd dashboard), prefer frontend-only tickets — they go live without a redeploy.
+When sequencing work for a running instance you can't restart (e.g. a remote launchd dashboard), prefer HTML-only frontend tickets — they go live without a redeploy. Bundle changes need a build step in that clone.
 
 ## Neon/Postgres kill switch
 
@@ -77,7 +78,7 @@ separately as the awaiting-sign-off count). Applied in the sprint nav pill.
 - Helper scripts in `scripts/` are pure Python, args via argparse
 - Hook scripts in `hooks/` POST to localhost:8000, fail silently if server down
 - No new Python dependencies without adding to requirements.txt
-- No new frontend frameworks — keep static HTML + JS minimal
+- Frontend: ES modules under `apps/dashboard/static/src/`, bundled via esbuild (`npm run build`). No React/Vue/Svelte — keep vanilla JS. Node/npm is a required dev dependency in every clone.
 
 ## MCP Servers (available in all sessions)
 

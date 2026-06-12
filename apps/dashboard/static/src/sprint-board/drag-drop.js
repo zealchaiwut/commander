@@ -109,7 +109,13 @@ export function _smgmtPopulateMoveToMenu() {
   let html = '';
   sprints.forEach(n => {
     if (occupiedSprints.has(n)) return;
-    html += `<button class="smgmt-move-to-item" onclick="_smgmtMoveSelectedTo('sprint-${n}');_smgmtCloseMoveToMenu()">Sprint ${n}</button>`;
+    const label = `sprint-${n}`;
+    html += `<button class="smgmt-move-to-item" onclick="_smgmtMoveSelectedTo('${label}');_smgmtCloseMoveToMenu()">Sprint ${n}</button>`;
+    if (typeof _smgmtHotswapAvailableFor === 'function' && _smgmtHotswapAvailableFor(label)) {
+      html += `<button class="smgmt-move-to-item smgmt-move-to-item--hotswap" `
+        + `onclick="_smgmtHotswapModalOpen('${label}');_smgmtCloseMoveToMenu()">`
+        + `Sprint ${n} — replace (hotswap)</button>`;
+    }
   });
   html += `<button class="smgmt-move-to-item" onclick="_smgmtMoveSelectedTo('backlog');_smgmtCloseMoveToMenu()">Backlog (no sprint)</button>`;
   menu.innerHTML = html || '<span style="display:block;padding:8px 14px;font-size:12px;color:var(--text-muted)">No other sprints available</span>';
@@ -822,24 +828,60 @@ export async function _smgmtDropOnBacklog(event) {
   }
 }
 
-export function _smgmtBoardLock(message) {
+export function _smgmtBoardLock(message, opts) {
   _smgmtMoveLock = true;
   // Pause the auto-refresh ticker without changing the user's chosen interval
   _smgmtArStopTicker();
   const overlay = document.getElementById('smgmt-move-overlay');
   const msgEl   = document.getElementById('smgmt-move-overlay-msg');
+  const progWrap = document.getElementById('smgmt-op-progress-wrap');
+  const logEl = document.getElementById('smgmt-op-log');
   const text    = message || 'Moving…';
   if (msgEl) msgEl.textContent = text;
   if (overlay) {
     overlay.setAttribute('aria-label', text.replace(/…$/, '') + ', please wait');
     overlay.classList.add('active');
   }
+  const showProgress = !!(opts && opts.progress);
+  if (progWrap) progWrap.hidden = !showProgress;
+  if (logEl) {
+    logEl.hidden = !showProgress;
+    if (showProgress && opts.clearLog) logEl.innerHTML = '';
+  }
+  if (showProgress && opts.total != null) {
+    _smgmtBoardProgress(0, opts.total);
+  } else if (!showProgress) {
+    _smgmtBoardProgress(0, 1);
+  }
+}
+
+export function _smgmtBoardProgress(done, total) {
+  const fill = document.getElementById('smgmt-op-progress-fill');
+  const pctEl = document.getElementById('smgmt-op-progress-pct');
+  const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+  if (fill) fill.style.width = pct + '%';
+  if (pctEl) pctEl.textContent = pct + '%';
+}
+
+export function _smgmtBoardLog(line, kind) {
+  const logEl = document.getElementById('smgmt-op-log');
+  if (!logEl) return;
+  const row = document.createElement('div');
+  row.className = 'smgmt-op-log-line' + (kind ? ` smgmt-op-log-line--${kind}` : '');
+  row.textContent = line;
+  logEl.appendChild(row);
+  logEl.scrollTop = logEl.scrollHeight;
 }
 
 export function _smgmtBoardUnlock() {
   _smgmtMoveLock = false;
   const overlay = document.getElementById('smgmt-move-overlay');
   if (overlay) overlay.classList.remove('active');
+  const progWrap = document.getElementById('smgmt-op-progress-wrap');
+  const logEl = document.getElementById('smgmt-op-log');
+  if (progWrap) progWrap.hidden = true;
+  if (logEl) { logEl.hidden = true; logEl.innerHTML = ''; }
+  _smgmtBoardProgress(0, 1);
   // Resume auto-refresh if an interval is selected
   if (_arInterval > 0) _smgmtArStartTicker();
 }

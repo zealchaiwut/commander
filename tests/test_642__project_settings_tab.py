@@ -183,19 +183,17 @@ def test_delete_project_settings_404_unknown_slug(client_ctx):
     assert resp.status_code == 404, f"Expected 404, got {resp.status_code}: {resp.text}"
 
 
-# ── AC5: Suggested from sprint history column is disabled (HTML structure) ─────
+# ── AC5: Suggested from sprint history uses calibration API ───────────────────
 
-def test_suggested_column_has_soon_badge():
-    """project.html Settings pane must contain a 'soon' badge in the estimation table."""
+def test_suggested_column_wired_to_calibration():
+    """Settings estimation table must load suggestions from analytics calibration."""
     html = (STATIC_DIR / "project.html").read_text()
-    # Find pane-settings section
-    assert 'pane-settings' in html
     pane_start = html.index('id="pane-settings"')
-    # Look for 'soon' badge after pane-settings
     pane_section = html[pane_start:pane_start + 20000]
-    assert 'soon' in pane_section.lower(), (
-        "Settings pane must contain a 'soon' badge for the Suggested column"
-    )
+    assert 'ps-est-suggest-S' in pane_section, "Estimation table must have per-size suggestion cells"
+    assert '_psLoadEstSuggestions' in html, "project.html must load calibration suggestions for Settings"
+    assert 'applyEstCalibration' in html, "Settings must reuse applyEstCalibration from Analytics"
+    assert 'ps-soon' not in pane_section, "SOON placeholder must be removed from Settings estimation table"
 
 
 # ── AC6: Project section fields exist in schema ───────────────────────────────
@@ -300,18 +298,20 @@ def test_put_all_project_section_fields(client_ctx):
 
 
 def test_put_overrides_section_fields(client_ctx):
-    """PUT /api/projects/{slug}/settings with sprint_duration_days and default_branch — persist."""
+    """PUT /api/projects/{slug}/settings with branch overrides — persist."""
     client, srv, repo, engine = client_ctx
     payload = {
-        "sprint_duration_days": 7,
         "default_branch": "main",
+        "default_branch_uat": "develop",
+        "default_branch_prd": "master",
         "tester_test_repo": "zealchaiwut/test-issues",
     }
     resp = client.put("/api/projects/test-proj/settings", json=payload)
     assert resp.status_code == 200, f"Expected 200, got {resp.status_code}: {resp.text}"
     data = client.get("/api/projects/test-proj/settings").json()
-    assert data["sprint_duration_days"] == 7
     assert data["default_branch"] == "main"
+    assert data["default_branch_uat"] == "develop"
+    assert data["default_branch_prd"] == "master"
     assert data["tester_test_repo"] == "zealchaiwut/test-issues"
 
 
@@ -335,6 +335,8 @@ def test_project_no_overrides_shows_global_default_branch(client_ctx):
     assert data["default_branch"] == "develop", (
         f"Expected global default 'develop', got {data.get('default_branch')}"
     )
+    assert data["default_branch_uat"] == "develop"
+    assert data["default_branch_prd"] == "master"
 
 
 # ── AC11: Settings tab pane exists (HTML) ─────────────────────────────────────

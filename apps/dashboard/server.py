@@ -1241,7 +1241,7 @@ async def projects_redirect(path: str):
 
 # ── Slug-based project routes (/project/<slug>/...) ───────────────────────────
 
-_VALID_PROJECT_TABS = {"sprint-mgmt", "tickets", "logs", "sprint-history", "status", "metrics", "notes", "settings"}
+_VALID_PROJECT_TABS = {"sprint-mgmt", "tickets", "logs", "sprint-history", "status", "metrics", "notes", "settings", "global-settings"}
 
 
 @app.get("/project/{slug}")
@@ -1943,6 +1943,7 @@ def delete_project_settings(slug: str):
     """
     repo = _resolve_project_slug(slug)
     _settings_repo.delete_setting("project", APP_CONFIG_KEY, project=repo)
+    _invalidate_home_cache(slug)
     effective = _settings_repo.get_setting(APP_CONFIG_KEY, project=repo)
     return build_effective_response(effective)
 
@@ -2150,6 +2151,35 @@ def put_global_settings(body: dict):
     return build_effective_response(merged)
 
 
+def _project_json_for_repo(repo: str) -> dict | None:
+    return next(
+        (p for p in projects_module.load_projects() if p.get("repo") == repo),
+        None,
+    )
+
+
+def _apply_project_identity_defaults(
+    resp: dict,
+    repo: str,
+    proj_override: dict,
+) -> dict:
+    """Use projects.json identity when the project override has no explicit value.
+
+    Schema defaults (ti-folder / gray) must not mask projects.json — only keys
+    stored in the project-scoped override win over the JSON file.
+    """
+    proj_json = _project_json_for_repo(repo)
+    if not proj_json:
+        return resp
+    if "icon" not in proj_override:
+        resp["icon"] = proj_json.get("icon", resp.get("icon", "ti-folder"))
+    if "color" not in proj_override:
+        resp["color"] = proj_json.get("color", resp.get("color", "gray"))
+    if not proj_override.get("display_name"):
+        resp["display_name"] = proj_json.get("name", resp.get("display_name", ""))
+    return resp
+
+
 @app.get("/api/projects/{slug}/settings")
 def get_project_settings(slug: str):
     """Return effective project settings (project overrides merged over global).
@@ -2158,8 +2188,10 @@ def get_project_settings(slug: str):
     Returns 404 when the project slug does not exist.
     """
     repo = _resolve_project_slug(slug)
+    proj_override = _settings_repo.get_setting_scoped("project", APP_CONFIG_KEY, project=repo)
     stored = _settings_repo.get_setting(APP_CONFIG_KEY, project=repo)
-    return build_effective_response(stored)
+    resp = build_effective_response(stored)
+    return _apply_project_identity_defaults(resp, repo, proj_override)
 
 
 @app.put("/api/projects/{slug}/settings")
@@ -2175,8 +2207,21 @@ def put_project_settings(slug: str, body: dict):
     current_project_override = _settings_repo.get_setting_scoped("project", APP_CONFIG_KEY, project=repo)
     merged = {**current_project_override, **body}
     _settings_repo.set_setting("project", APP_CONFIG_KEY, merged, project=repo)
+    display_patch: dict = {}
+    if "icon" in body:
+        display_patch["icon"] = body["icon"]
+    if "color" in body:
+        display_patch["color"] = body["color"]
+    if "display_name" in body:
+        display_patch["name"] = body["display_name"]
+    if "tracked" in body:
+        display_patch["tracked"] = body["tracked"]
+    if display_patch:
+        projects_module.save_project_display_fields(repo, **display_patch)
+    _invalidate_home_cache(slug)
     effective = _settings_repo.get_setting(APP_CONFIG_KEY, project=repo)
-    return build_effective_response(effective)
+    resp = build_effective_response(effective)
+    return _apply_project_identity_defaults(resp, repo, merged)
 
 
 # ── Deploy config API (issue #722) ───────────────────────────────────────────
@@ -3819,6 +3864,29 @@ _home_cache: dict[str, tuple[float, dict]] = {}
 _HOME_CACHE_TTL = 30.0
 
 
+def _invalidate_home_cache(slug: str) -> None:
+    """Drop cached /api/home payload for *slug* after identity-changing settings writes."""
+    _home_cache.pop(f"home:{slug}", None)
+
+
+def _project_identity_for_home(repo: str, proj: dict, slug: str) -> dict[str, str]:
+    """Resolve icon/color/display name for home payloads (settings override projects.json)."""
+    icon = proj.get("icon", "ti-folder")
+    color = proj.get("color", "gray")
+    name = proj.get("name", slug)
+    try:
+        proj_override = _settings_repo.get_setting_scoped("project", APP_CONFIG_KEY, project=repo)
+        if proj_override.get("icon"):
+            icon = proj_override["icon"]
+        if proj_override.get("color"):
+            color = proj_override["color"]
+        if proj_override.get("display_name"):
+            name = proj_override["display_name"]
+    except Exception:
+        pass
+    return {"name": name, "icon": icon, "color": color}
+
+
 def _home_project_data(proj: dict, running_sprints: list[dict]) -> dict:
     """Compute per-project home data, cached 30 s per project slug.
 
@@ -3827,8 +3895,10 @@ def _home_project_data(proj: dict, running_sprints: list[dict]) -> dict:
     """
     repo = proj["repo"]
     slug = repo.split("/")[-1]
-    name = proj.get("name", slug)
-    icon = proj.get("icon", "ti-folder")
+    identity = _project_identity_for_home(repo, proj, slug)
+    name = identity["name"]
+    icon = identity["icon"]
+    color = identity["color"]
 
     cache_key = f"home:{slug}"
     now = time.monotonic()
@@ -3838,7 +3908,7 @@ def _home_project_data(proj: dict, running_sprints: list[dict]) -> dict:
 
     def _idle() -> dict:
         sentinel: dict = {
-            "name": name, "slug": slug, "repo": repo, "icon": icon,
+            "name": name, "slug": slug, "repo": repo, "icon": icon, "color": color,
             "status": "idle", "uat_count": 0, "backlog_count": 0,
             "last_activity_at": None,
         }
@@ -3918,6 +3988,7 @@ def _home_project_data(proj: dict, running_sprints: list[dict]) -> dict:
         "slug": slug,
         "repo": repo,
         "icon": icon,
+        "color": color,
         "status": status,
         "uat_count": len(uat_issues),
         "backlog_count": len(backlog_issues),
@@ -4934,6 +5005,12 @@ def _sprint_db_set_state(
                 end_reason=extra_fields.get("end_reason", "cancelled"),
                 ended_at=extra_fields.get("ended_at"),
             )
+        elif state == "failed":
+            db.record_sprint_fail(
+                sprint_label,
+                end_reason=extra_fields.get("end_reason"),
+                ended_at=extra_fields.get("ended_at"),
+            )
     except Exception:
         pass
 
@@ -5410,10 +5487,13 @@ def get_sprint_management_issues(repo: str):
             unassigned_issues.append(iss)
     ordered_result: list = []
     sprint_parents: dict[str, Optional[str]] = {}
+    sprint_plan_states: dict[str, str] = {}
     for lbl, iss_list in sprint_issues_map.items():
         plan_data = _read_plan_json(project_root, lbl)
         if plan_data is not None:
             sprint_parents[lbl] = plan_data.get("parent")
+            if isinstance(plan_data, dict) and plan_data.get("state"):
+                sprint_plan_states[lbl] = plan_data["state"]
             try:
                 raw_tickets = plan_data.get("tickets", plan_data) if isinstance(plan_data, dict) else plan_data
                 plan_order: list[int] = raw_tickets if isinstance(raw_tickets, list) else []
@@ -5456,6 +5536,7 @@ def get_sprint_management_issues(repo: str):
         "empty_sprint_labels": empty_sprint_labels,
         "placeholder_sprint": placeholder_sprint,
         "sprint_parents": sprint_parents,
+        "sprint_plan_states": sprint_plan_states,
         "finished_sprints": finished_sprints,
     }
 
@@ -5759,7 +5840,61 @@ def get_sprint_estimate_summary(sprint_label: str, project: str):
 
 
 _SIZE_LABELS = {"size-S", "size-M", "size-L", "size-XL"}
+_SIZE_LETTER_BY_LABEL = {"size-S": "S", "size-M": "M", "size-L": "L", "size-XL": "XL"}
 _PF_NON_WORK = {"sprint-summary", "docs", "documentation"}
+
+
+def _size_from_github_labels(label_names: set[str]) -> str | None:
+    """Return S/M/L/XL from GitHub size-* labels, or None."""
+    for lbl in _SIZE_LABELS:
+        if lbl in label_names:
+            return _SIZE_LETTER_BY_LABEL[lbl]
+    return None
+
+
+def _load_issue_estimate_json(estimates_dir: Path, issue_num: int) -> dict | None:
+    est_path = estimates_dir / f"issue-{issue_num}.json"
+    if not est_path.exists():
+        return None
+    try:
+        return json.loads(est_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
+def _resolve_issue_estimate(iss: dict, estimates_dir: Path) -> dict:
+    """Single source of truth: merge local estimate JSON + GitHub size-* labels.
+
+    Returns ``{size, files, estimated, source}`` where ``source`` is
+    ``'json'``, ``'label'``, or ``None``. Either JSON or a GitHub label counts
+    as estimated; ``files`` always come from JSON when present.
+    """
+    label_names = {lbl["name"] for lbl in iss.get("labels", [])}
+    est = _load_issue_estimate_json(estimates_dir, iss["number"])
+    files: list[str] = []
+    size: str | None = None
+    source: str | None = None
+    if est:
+        files = list(est.get("files_likely_affected") or [])
+        raw_size = est.get("size")
+        if raw_size:
+            size = str(raw_size)
+            source = "json"
+    if not size:
+        label_size = _size_from_github_labels(label_names)
+        if label_size:
+            size = label_size
+            source = "label"
+    return {
+        "size": size,
+        "files": files,
+        "estimated": size is not None,
+        "source": source,
+    }
+
+
+def _issue_has_estimate(iss: dict, estimates_dir: Path) -> bool:
+    return _resolve_issue_estimate(iss, estimates_dir)["estimated"]
 
 
 @app.post("/api/sprints/{sprint_label}/preflight-fix")
@@ -5781,13 +5916,16 @@ async def preflight_fix(sprint_label: str, project: str):
     except subprocess.CalledProcessError as e:
         raise _gh_error(e)
 
+    project_root = _project_root_path(project)
+    estimates_dir = _commander_dir(project_root) / "estimates"
+
     work: list[dict] = []
     for iss in issues:
         labels = {lbl["name"] for lbl in iss.get("labels", [])}
         if labels & _PF_NON_WORK:
             continue
         needs_ac = not _fill_ac.has_acceptance_criteria(iss.get("body") or "")
-        needs_size = not (labels & _SIZE_LABELS)
+        needs_size = not _issue_has_estimate(iss, estimates_dir)
         if needs_ac or needs_size:
             work.append({"num": iss["number"], "needs_ac": needs_ac, "needs_size": needs_size})
 
@@ -6134,15 +6272,15 @@ def get_sprint_preflight(sprint_label: str, project: str):
                 size: str | None = None
                 files_touched: list[str] = []
                 est_stale = False
+                resolved = _resolve_issue_estimate(iss, estimates_dir)
+                size = resolved["size"]
+                files_touched = resolved["files"]
                 est_path = estimates_dir / f"issue-{num}.json"
                 if est_path.exists():
                     try:
-                        est = json.loads(est_path.read_text(encoding="utf-8"))
-                        size = est.get("size")
-                        files_touched = est.get("files_likely_affected") or []
                         mtime = datetime.fromtimestamp(est_path.stat().st_mtime, tz=timezone.utc)
                         est_stale = mtime < stale_cutoff
-                    except (json.JSONDecodeError, OSError):
+                    except OSError:
                         pass
 
                 body = iss.get("body") or ""
@@ -6158,7 +6296,7 @@ def get_sprint_preflight(sprint_label: str, project: str):
                     "files_touched": files_touched,
                 }
 
-                if size is None:
+                if not resolved["estimated"]:
                     warnings["unestimated"].append(tid)
                 if est_stale:
                     warnings["stale_estimates"].append(tid)
@@ -7798,6 +7936,36 @@ def _has_rework_tickets(sprint_label: str, project: str) -> bool:
     return False
 
 
+def _sprint_has_own_run_outcome(project_root: Path, sprint_label: str) -> bool:
+    """True when outcome data for *this* label exists (not a parent/base run).
+
+    Re-run child sprints start in plan state=planning with stale session labels
+    carried over from the parent; they must not inherit sprint-N-state.json from
+    a sibling run (e.g. sprint-68.3 must not show sprint-68.2 timings).
+    """
+    plan = _read_plan_json(project_root, sprint_label)
+    if plan and plan.get("state") == "planning":
+        return False
+
+    commander = _commander_dir(project_root)
+    label_state = commander / "sprints" / f"{sprint_label}-state.json"
+    if label_state.exists():
+        return True
+
+    m = re.match(r"^sprint-(\d+)", sprint_label)
+    if not m:
+        return False
+    base_state = commander / "sprints" / f"sprint-{m.group(1)}-state.json"
+    if not base_state.exists():
+        return False
+    try:
+        data = json.loads(base_state.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return False
+    recorded = data.get("sprint_label")
+    return not recorded or recorded == sprint_label
+
+
 @app.get("/api/sprints/{sprint_label}/outcome")
 def get_sprint_outcome(sprint_label: str, project: str):
     """Return frozen outcome data for a completed or stopped sprint.
@@ -7820,6 +7988,9 @@ def get_sprint_outcome(sprint_label: str, project: str):
     # Running sprints return immediately — no state file required
     if _is_sprint_running(project_root, sprint_label):
         return {"sprint_label": sprint_label, "state": "running"}
+
+    if not _sprint_has_own_run_outcome(project_root, sprint_label):
+        raise HTTPException(404, detail=f"Outcome not found for {sprint_label!r} (not run yet)")
 
     m = re.search(r"(\d+)", sprint_label)
     n = m.group(1) if m else sprint_label
@@ -8967,6 +9138,13 @@ def get_sprint_finish_card(sprint_label: str, project: str):
             "done_count":      done,
             "wall_clock_secs": wall_clock_secs,
             "started_at":      started_at_str,
+        }
+
+    if not _sprint_has_own_run_outcome(project_root, sprint_label):
+        return {
+            "sprint_label":  sprint_label,
+            "sprint_number": sprint_number,
+            "state":         "no_data",
         }
 
     fc_json_path = _sprint_json_path(project_root, sprint_label)

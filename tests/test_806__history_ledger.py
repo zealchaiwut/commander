@@ -149,7 +149,7 @@ def test_ac2_verbs_only_on_completed_or_failed():
 
 def test_ac2_verbs_wired_to_existing_handlers():
     verbs = _fn_body("_histVerbsHtml")
-    assert "smgmtRerunSprint" in verbs, "Re-run reuses the existing rerun handler"
+    assert "_histRerunSprint" in verbs, "History Re-run creates and dispatches immediately"
     assert "smgmtFinishSprint" in verbs, "Finish reuses the existing finish handler"
     assert "smgmtDeleteSprint" in verbs, "Delete reuses the existing delete handler"
 
@@ -243,8 +243,10 @@ def test_ac6_pr_pill_targets_pr_number():
 
 def test_ac6_summary_pill_targets_summary():
     url = _fn_body("_histSummaryUrl")
-    assert "summary_path" in url or "summary" in url, \
-        "the Summary pill target is built from the sprint's summary"
+    assert "summary_path" in url or "summary" in url or "summary_issue" in url, \
+        "the Summary pill target is built from the sprint's summary issue or file"
+    issue = _fn_body("_histSummaryIssueUrl")
+    assert "summary_issue" in issue, "GitHub summary issue URL is preferred when present"
 
 
 def test_ac6_links_use_the_target_builders():
@@ -290,3 +292,31 @@ def test_ac8_metrics_row_has_badges():
     assert "duration" in metrics, "a duration badge is shown"
     assert "tokens" in metrics, "a tokens badge is shown"
     _css_rule(".hist-metrics")
+
+
+def test_partial_completed_requires_rerun_child():
+    partial = _fn_body("_histIsPartialCompleted")
+    assert "has_rerun_child" in partial, "partial badge requires a re-run sub-sprint"
+    assert "issues.length" not in partial, "empty issues[] alone must not trigger partial"
+
+
+def test_failed_block_renders_on_failed_sprint():
+    fail = _fn_body("_histFailedBlockHtml")
+    assert "failed" in fail
+    assert "failure_reason" in fail or "failed_tickets" in fail
+    card = _fn_body("_histCardHtml")
+    assert "_histHeadLinksHtml" in card, "PR/summary links render on the card head"
+    assert "_histRerunSprint" in PROJECT_HTML
+    rerun = _fn_body("_histRerunSprint")
+    assert "auto_run" in rerun and "true" in rerun
+
+
+def test_post_sprint_block_renders_documenter_and_reviewer():
+    block = _fn_body("_histPostSprintHtml")
+    assert "Documenter" in block
+    assert "Reviewer" in block
+    assert "files_touched" in block or "ps-file" in block
+    assert "follow_up_tickets" in block or "ps-ticket" in block
+    card = _fn_body("_histCardHtml")
+    assert "_histPostSprintHtml" in card
+    assert "_histPostSprintChipHtml" in card

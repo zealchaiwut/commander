@@ -41,7 +41,7 @@ import {
   _smgmtTicketReorderDragLeave, _smgmtTicketReorderDrop, 
   _smgmtBacklogTicketDragStart, _smgmtBacklogDragOver, 
   _smgmtBacklogDragLeave, _smgmtDropOnBacklog, _smgmtBoardLock, 
-  _smgmtBoardUnlock,
+  _smgmtBoardUnlock, _smgmtBoardProgress, _smgmtBoardLog,
 } from './drag-drop.js';
 import {
   loadSprintMgmt, _smgmtSprintLabelSortKey, _smgmtRender, 
@@ -51,7 +51,7 @@ import {
   _smgmtOutcomeTicketListHtml, _smgmtLoadFinishCards, _smgmtRenderFinishCard, 
   _smgmtFinishCardInnerHtml, _smgmtCardHtml, _smgmtRunningCardHtml,
   _smgmtRunningBoardBannerHtml, _smgmtBoardBannerPatch, _smgmtRunningLevelText,
-  _smgmtRollupText, _smgmtUpdateColRollup, _smgmtTicketRowHtml, 
+  _smgmtRollupText, _smgmtTicketSize, _smgmtTicketHasEstimate, _smgmtUpdateColRollup, _smgmtTicketRowHtml, 
   _smgmtRenderBacklog, _smgmtBacklogTicketHtml,
 } from './board-render.js';
 
@@ -137,6 +137,8 @@ globalThis._smgmtBacklogDragLeave = _smgmtBacklogDragLeave;
 globalThis._smgmtDropOnBacklog = _smgmtDropOnBacklog;
 globalThis._smgmtBoardLock = _smgmtBoardLock;
 globalThis._smgmtBoardUnlock = _smgmtBoardUnlock;
+globalThis._smgmtBoardProgress = _smgmtBoardProgress;
+globalThis._smgmtBoardLog = _smgmtBoardLog;
 
 // Board render pipeline (issue #797)
 globalThis.loadSprintMgmt = loadSprintMgmt;
@@ -160,6 +162,8 @@ globalThis._smgmtRunningBoardBannerHtml = _smgmtRunningBoardBannerHtml;
 globalThis._smgmtBoardBannerPatch = _smgmtBoardBannerPatch;
 globalThis._smgmtRunningLevelText = _smgmtRunningLevelText;
 globalThis._smgmtRollupText = _smgmtRollupText;
+globalThis._smgmtTicketSize = _smgmtTicketSize;
+globalThis._smgmtTicketHasEstimate = _smgmtTicketHasEstimate;
 globalThis._smgmtUpdateColRollup = _smgmtUpdateColRollup;
 globalThis._smgmtTicketRowHtml = _smgmtTicketRowHtml;
 globalThis._smgmtRenderBacklog = _smgmtRenderBacklog;

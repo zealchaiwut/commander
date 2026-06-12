@@ -664,6 +664,10 @@ def _sprint_db_set_state_sm(
             db.record_sprint_cancel(label,
                                     end_reason=fields.get("end_reason", "cancelled"),
                                     ended_at=fields.get("ended_at"))
+        elif state == "failed":
+            db.record_sprint_fail(label,
+                                  end_reason=fields.get("end_reason"),
+                                  ended_at=fields.get("ended_at"))
     except (Exception, SystemExit):
         pass
 
@@ -1233,6 +1237,69 @@ def _run_timed(*cmd, cwd: Optional[Path] = None) -> tuple[int, str, str]:
     """Run a command and return (returncode, stdout, stderr)."""
     r = subprocess.run(cmd, capture_output=True, text=True, cwd=cwd)
     return r.returncode, r.stdout, r.stderr
+
+
+_CRG_UPDATE_TIMEOUT_SECS = 120
+
+
+def _find_crg_bin(near: Optional[Path] = None) -> Optional[str]:
+    """Return path to code-review-graph CLI if installed, else None."""
+    candidates: list[Path] = []
+    if near is not None:
+        candidates.append(near / "venv" / "bin" / "code-review-graph")
+        for parent in near.parents:
+            if parent.name in ("commander", "dev") or len(candidates) > 6:
+                break
+            candidates.append(parent / "uat" / "venv" / "bin" / "code-review-graph")
+    candidates.append(Path.home() / "dev" / "commander" / "uat" / "venv" / "bin" / "code-review-graph")
+    candidates.append(Path.home() / "dev" / "commander" / "prd" / "venv" / "bin" / "code-review-graph")
+    for path in candidates:
+        if path.is_file() and os.access(path, os.X_OK):
+            return str(path)
+    found = shutil.which("code-review-graph")
+    return found
+
+
+def _crg_update_worktree(worktree: Path, *, role: str = "agent") -> None:
+    """Best-effort CRG graph refresh before headless agent dispatch.
+
+    Headless ``claude -p`` does not reliably run CRG file hooks. Each worktree
+    keeps its own ``.code-review-graph/`` — coder and tester must refresh
+    separately. Set ``COMMANDER_SKIP_CRG_UPDATE=1`` to disable.
+    """
+    if os.environ.get("COMMANDER_SKIP_CRG_UPDATE", "").strip().lower() in (
+        "1", "true", "yes", "on",
+    ):
+        return
+    crg = _find_crg_bin(worktree)
+    if not crg:
+        return
+    graph_dir = worktree / ".code-review-graph"
+    subcmd = "build" if not graph_dir.is_dir() else "update"
+    try:
+        r = subprocess.run(
+            [crg, subcmd],
+            capture_output=True,
+            text=True,
+            cwd=str(worktree),
+            timeout=_CRG_UPDATE_TIMEOUT_SECS,
+            check=False,
+        )
+        if r.returncode == 0:
+            sys.stdout.write(str(f"  [crg] {subcmd} ok ({role} worktree)\n"))
+        else:
+            tail = (r.stderr or r.stdout or "").strip().splitlines()
+            hint = tail[-1] if tail else f"exit {r.returncode}"
+            sys.stdout.write(str(f"  [crg] {subcmd} failed ({role}): {hint}\n"))
+        sys.stdout.flush()
+    except subprocess.TimeoutExpired:
+        sys.stdout.write(str(
+            f"  [crg] {subcmd} timed out after {_CRG_UPDATE_TIMEOUT_SECS}s ({role}) — continuing\n"
+        ))
+        sys.stdout.flush()
+    except Exception as exc:
+        sys.stdout.write(str(f"  [crg] update skipped ({role}): {exc}\n"))
+        sys.stdout.flush()
 
 
 # ── port detection (issue #62) ───────────────────────────────────────────────
@@ -3718,6 +3785,8 @@ def _dispatch_coder(
         )
         return False, _hygiene_err
 
+    _crg_update_worktree(cwd_path, role="coder")
+
     sys.stdout.write(str(f"  Dispatching coder for issue #{issue_num} ...") + "\n")
     sys.stdout.flush()
     try:
@@ -4073,6 +4142,8 @@ def _dispatch_tester(
             hygiene_error=_tester_hygiene_err,
         )
         return 1, _tester_hygiene_err
+
+    _crg_update_worktree(_tester_wt_root, role="tester")
 
     sys.stdout.write(str(f"  Dispatching tester for issue #{issue_num} ...") + "\n")
     sys.stdout.flush()
@@ -6405,8 +6476,24 @@ def _classify(labels: set[str]) -> str:
     return "backlog"
 
 
-def list_backlog_issues(label: str, repo_name: Optional[str] = None) -> list[dict]:
-    """Return open issues with the given label, in backlog, sorted by number."""
+_REWORK_LABELS = frozenset({"needs-rework", "need-rework", "tester-rejected"})
+
+
+def _is_dispatchable(labels: set[str]) -> bool:
+    """True when an open issue on a sprint label should be picked up for a run.
+
+    Re-run sub-sprints often carry SIT / in-progress / needs-rework from a prior
+    attempt; treating only pure backlog tickets as dispatchable caused instant
+    no-op runs (``No backlog issues found``) on labels like sprint-68.3.
+    """
+    cls = _classify(labels)
+    if cls in ("backlog", "sit", "in-progress"):
+        return True
+    return bool(labels & _REWORK_LABELS)
+
+
+def _list_labeled_open_issues(label: str, repo_name: Optional[str] = None) -> list[dict]:
+    """Return all open issues carrying ``label``, excluding sprint-summary docs."""
     r = _r(repo_name)
     try:
         out = subprocess.run(
@@ -6421,7 +6508,6 @@ def list_backlog_issues(label: str, repo_name: Optional[str] = None) -> list[dic
             capture_output=True, text=True, check=True,
         )
         issues = json.loads(out.stdout)
-        # Only return issues in backlog state; skip sprint-summary documentation tickets
         result = []
         for issue in issues:
             labels_set = {lbl["name"] for lbl in issue.get("labels", [])}
@@ -6436,12 +6522,43 @@ def list_backlog_issues(label: str, repo_name: Optional[str] = None) -> list[dic
                     issue_num=issue["number"],
                 )
                 continue
-            if _classify(labels_set) == "backlog":
-                result.append(issue)
+            result.append(issue)
         return sorted(result, key=lambda i: i["number"])
     except Exception as e:
         structured_log.warn("list_issues_failed", f"could not list issues: {e}", label=label, exc=str(e))
         return []
+
+
+def list_backlog_issues(label: str, repo_name: Optional[str] = None) -> list[dict]:
+    """Return open, dispatchable issues for ``label``, sorted by number."""
+    result = []
+    for issue in _list_labeled_open_issues(label, repo_name=repo_name):
+        labels_set = {lbl["name"] for lbl in issue.get("labels", [])}
+        if _is_dispatchable(labels_set):
+            result.append(issue)
+    return result
+
+
+def _issues_from_plan_numbers(
+    label: str,
+    plan_numbers: list[int],
+    repo_name: Optional[str] = None,
+) -> list[dict]:
+    """Resolve plan.json ticket numbers to labeled GitHub issues when gh list is empty."""
+    if not plan_numbers:
+        return []
+    by_num = {i["number"]: i for i in _list_labeled_open_issues(label, repo_name=repo_name)}
+    result: list[dict] = []
+    for num in plan_numbers:
+        issue = by_num.get(num)
+        if not issue:
+            continue
+        labels_set = {lbl["name"] for lbl in issue.get("labels", [])}
+        if _classify(labels_set) in ("uat", "done"):
+            continue
+        if _is_dispatchable(labels_set):
+            result.append(issue)
+    return result
 
 
 # ── Sprint state JSON mirror helpers ────────────────────────────────────────────
@@ -7089,7 +7206,20 @@ def run_sprint(
     else:
         raw_issues = list_backlog_issues(label, repo_name=eff_repo)
         if not raw_issues:
-            sys.stdout.write(str("No backlog issues found for this label.") + "\n")
+            eff_sprints_dir = cfg.sprints_dir if cfg is not None else SPRINTS_DIR
+            plan_nums = _load_sprint_plan(eff_sprints_dir, label)
+            if plan_nums:
+                raw_issues = _issues_from_plan_numbers(label, plan_nums, repo_name=eff_repo)
+                if raw_issues:
+                    sys.stdout.write(str(
+                        f"  Loaded {len(raw_issues)} issue(s) from plan.json "
+                        f"(GitHub backlog filter was empty)."
+                    ) + "\n")
+        if not raw_issues:
+            sys.stdout.write(str(
+                "No dispatchable issues found for this label "
+                "(check sprint label + status labels on GitHub)."
+            ) + "\n")
             state = SprintState(
                 sprint_label  = label,
                 sprint_number = sprint_num,
@@ -8413,18 +8543,29 @@ def main() -> None:
             )
         raise
 
-    # Clean exit: write state=completed (issue #507 plan.json, #757 DB)
+    # Clean exit: write terminal state (issue #507 plan.json, #757 DB)
     if not args.dry_run:
         _ended_at = datetime.now(timezone.utc).isoformat()
-        _plan_json_set_state_sm(
-            args.label, "completed", cfg=cfg,
-            ended_at=_ended_at,
-            end_reason="natural",
-        )
-        _sprint_db_set_state_sm(
-            args.label, "completed", project=eff_repo or "",
-            ended_at=_ended_at, end_reason="natural",
-        )
+        if not state or not state.issues:
+            _plan_json_set_state_sm(
+                args.label, "failed", cfg=cfg,
+                ended_at=_ended_at,
+                end_reason="no-dispatchable-tickets",
+            )
+            _sprint_db_set_state_sm(
+                args.label, "failed", project=eff_repo or "",
+                ended_at=_ended_at, end_reason="no-dispatchable-tickets",
+            )
+        else:
+            _plan_json_set_state_sm(
+                args.label, "completed", cfg=cfg,
+                ended_at=_ended_at,
+                end_reason="natural",
+            )
+            _sprint_db_set_state_sm(
+                args.label, "completed", project=eff_repo or "",
+                ended_at=_ended_at, end_reason="natural",
+            )
 
     # Regenerate STATUS.md after sprint closes (#584)
     _regenerate_status_md(cfg=cfg, dry_run=args.dry_run)

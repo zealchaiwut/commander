@@ -60,6 +60,15 @@ bash scripts/install_agent_skills.sh --force --clone uat
 Restart Claude Code / Cursor after either command (`/mcp` should list
 `code-review-graph`). See [features/agent-skills.md](features/agent-skills.md).
 
+Before an **overnight sprint**, refresh agent worktree graphs (headless dispatches
+do not run CRG hooks reliably):
+
+```bash
+bash scripts/update_crg_graphs.sh
+```
+
+Sprint manager also runs a best-effort `update` before each coder/tester ticket.
+
 ---
 
 ## 1. Clone layout

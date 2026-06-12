@@ -148,11 +148,23 @@ def test_icon_color_pickers__ac4_icon_color_persist_and_reload(client):
     assert data["color"] == "blue", "color must persist and reload"
 
 
+def test_icon_color_pickers__ac4_home_payload_reflects_settings_identity(client):
+    """GET /api/home must expose icon/color from project settings overrides."""
+    client.put("/api/projects/test-proj/settings",
+               json={"icon": "ti-terminal-2", "color": "green", "display_name": "Commander X"})
+    home = client.get("/api/home").json()
+    proj = next(p for p in home["projects"] if p["slug"] == "test-proj")
+    assert proj["icon"] == "ti-terminal-2"
+    assert proj["color"] == "green"
+    assert proj["name"] == "Commander X"
+
+
 def test_icon_color_pickers__ac4_save_serializes_picker_state():
     # The form must save the picker's selected ids, not stale text-input reads.
     body = _fn_body(html := _html(), "async function projSettingsSave", span=1200)
     assert "icon: _psSelectedIcon" in body, "save must send the selected icon id"
     assert "color: _psSelectedColor" in body, "save must send the selected color id"
+    assert "_psSyncIdentityToChrome" in html, "save must refresh header/sidebar identity immediately"
     load = _fn_body(html, "async function projSettingsLoad", span=2000)
     assert "_psApplyIdentity" in load, "load must apply stored icon/color back into the pickers"
 

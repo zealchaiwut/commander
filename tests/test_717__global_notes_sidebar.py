@@ -176,14 +176,14 @@ def test_notes_sidebar_link_present(html):
 
 def test_notes_sidebar_link_above_settings(html):
     notes_idx = html.find('id="sb-notes-link"')
-    settings_idx = html.find('id="sb-settings-link"')
+    settings_idx = html.find('id="sb-global-settings-link"')
     assert notes_idx != -1 and settings_idx != -1
-    assert notes_idx < settings_idx, "Notes sidebar link must appear ABOVE the Settings link"
+    assert notes_idx < settings_idx, "Notes sidebar link must appear ABOVE the Global settings link"
 
 
-# AC13: Settings sidebar item still present (no regression)
+# AC13: Global settings sidebar item still present (no regression)
 def test_settings_sidebar_link_preserved(html):
-    assert 'id="sb-settings-link"' in html, "Settings sidebar link must remain (no regression)"
+    assert 'id="sb-global-settings-link"' in html, "Global settings sidebar link must remain (no regression)"
 
 
 # AC3 / AC12: Notes removed from the More dropdown

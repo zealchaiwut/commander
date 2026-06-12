@@ -120,9 +120,10 @@ def test_ac2_partition_keeps_fold_size_most_recent_expanded():
 def test_ac2_recent_sprints_render_with_the_existing_card_builder():
     """Recent (expanded) rows reuse _histCardHtml so they look identical to today."""
     render = _fn_body("_histRenderLedger")
-    assert "_histPartition" in render, "render must partition before drawing"
-    assert "_histCardHtml" in render, \
-        "recent sprints render through the existing card builder"
+    assert "_histPartitionGroups" in render or "_histGroupSprints" in render, \
+        "render must group and partition before drawing"
+    assert "_histGroupHtml" in render or "_histCardHtml" in render, \
+        "recent sprints render through the shared card builder (via grouping)"
 
 
 def test_ac8_folds_chunk_in_groups_of_fold_size():
@@ -148,7 +149,7 @@ def test_ac3_fold_label_uses_sprints_x_y_range():
 def test_ac3_sprint_number_is_extracted_from_the_label():
     """The range endpoints derive from the numeric part of 'sprint-NN' labels."""
     num = _fn_body("_histSprintNum")
-    assert "sprint-" in num and re.search(r"\\d", num), \
+    assert "_histLabelParts" in num or ("sprint-" in num and re.search(r"\\d", num)), \
         "the sprint number is parsed out of the 'sprint-NN' label"
 
 
@@ -193,8 +194,8 @@ def test_ac5_fold_head_toggles_and_reveals_member_cards():
     assert "fold-head" in head, "the clickable header carries the .fold-head class"
     # When expanded, the member sprints render via the SAME card builder so they
     # are visually identical to recent rows (locked/normal preserved).
-    assert "_histCardHtml" in head, \
-        "expanded fold members render through the shared _histCardHtml builder"
+    assert "_histGroupHtml" in head or "_histCardHtml" in head, \
+        "expanded fold members render through the shared card builder (via grouping)"
 
 
 def test_ac5_locked_state_is_preserved_for_fold_members():

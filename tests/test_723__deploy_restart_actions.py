@@ -362,10 +362,10 @@ def _project_html():
 
 
 def test_ui_has_deploy_and_restart_actions():
-    """AC12: project settings UI exposes Deploy and Restart actions."""
+    """AC12: Deploy tab exposes Deploy and Restart actions."""
     html = _project_html()
-    assert "envDeploy" in html
-    assert "envRestart" in html
+    assert "_deployExecDeploy" in html
+    assert "_deployExecRestart" in html
 
 
 def test_ui_calls_deploy_and_restart_endpoints():

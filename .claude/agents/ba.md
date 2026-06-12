@@ -68,14 +68,11 @@ Only use labels from the **approved vocabulary**: `enhancement`, `bug`, `backlog
 Apply labels as follows:
 1. **Type:** use `enhancement` for new features or improvements; use `bug` for defects or broken behaviour.
 2. **Status:** always add `backlog` (issues start in the backlog).
-3. **Sprint:** do NOT assign a sprint label. Sprint assignment is a 
-   planning decision made by the human or sprint planner — not at ticket 
-   creation time. New tickets live in the backlog until planned into a 
-   sprint.
+3. **Sprint:** do NOT assign a sprint label. Sprint assignment is a planning
+   decision made by the human or sprint planner — not at ticket creation time.
+   New tickets live in the backlog until planned into a sprint.
 
-Pass only the type + backlog labels in `--labels`. Do NOT pass --sprint.
-
-Pass the type + backlog labels in `--labels`. The sprint label is added automatically by `create_ticket.py` via `--sprint N`.
+Pass only the type + `backlog` labels in `--labels`. Do NOT pass `--sprint` at creation.
 
 ### Template quality rules
 - Acceptance Criteria: 3–7 items, each independently testable, phrased as "System does X" or "User can Y". Use GitHub checkbox syntax `- [ ]`.
@@ -86,35 +83,98 @@ Pass the type + backlog labels in `--labels`. The sprint label is added automati
 
 ### Frontend / UI design contracts (issue #713)
 
-When a ticket has **frontend/UI scope**, the AC must carry an explicit design
-contract so the coder has a pixel-accurate target before writing any CSS. Decide
-the path by whether a mock is attached.
+When a ticket has **frontend/UI scope**, the AC must carry an explicit, machine-checkable
+design contract so the coder has a pixel-accurate target and the tester has something
+deterministic to verify against. Describing the design in prose ("matches the mock") is a
+defect — that prose is where fidelity is lost. Decide the path by whether a mock is attached.
 
-**Path A — a mock HTML file exists under `references/issue-<N>/`** (e.g.
-`references/issue-<N>/mock.html`):
+#### Path A — a mock HTML file exists under `references/issue-<N>/` (e.g. `references/issue-<N>/mock.html`)
 
-1. Read the mock file.
-2. Extract the **literal** design tokens it uses — hex colors, spacing values
-   (`px`/`rem`), font sizes, and component class names.
-3. Cross-check the extracted tokens against the impeccable skills (load the rule
-   set; flag anything that violates the impeccable spacing scale, contrast, or
-   naming rules before locking it into AC).
-4. Write each UI AC item with the **literal value**, not a placeholder or range.
-   Examples: `background: #1A1A2E`, `padding: 16px`, `font-size: 0.875rem`,
-   `.card` uses `border-radius: 8px`. Never write a placeholder like `<color>`
-   or a range like `12–16px`.
+You MUST emit a machine-checkable contract file **before** writing acceptance criteria.
 
-**Path B — frontend scope but no mock is attached:** fall back to the impeccable
-rule set and reference the **named rules** explicitly in the AC — the impeccable
-`spacing scale` tier, the `contrast` ratio rule (e.g. AA contrast), the
-`component naming` convention, and the responsive `breakpoint` names. Do not
-invent values; cite the rule by name so the coder resolves it from the skill pack.
+1. **Open the mock.** Resolve the **target selectors**: take them from the ticket input's
+   `target:` line if present (a comma-separated selector list naming the elements/sections in
+   scope). If no `target:` line is given, scope to the named view's root plus its primary
+   interactive elements. Never silently contract the whole page.
+2. **Style assertions.** For each target selector, read its resolved styles from the mock's
+   `<style>` (follow each CSS var to its `:root` value; record BOTH the var name and the
+   resolved value). Capture only design-bearing properties: `color`, `background-color`,
+   `border`, `border-color`, `border-radius`, `font-family`, `font-size`, `font-weight`,
+   `padding`, `gap`, `box-shadow`, `animation*`/`transition*`. Skip incidental defaults.
+3. **Behavior assertions.** For every interactive or state-dependent element, write an
+   assertion as **navigate → act → observe**, where "observe" is a concrete DOM fact: an
+   element COUNT, an ATTRIBUTE (`[disabled]`, `aria-*`), a TEXT match, or a CLASS presence.
+   "Looks right" / "matches the mock" is forbidden.
+4. **Cross-check against impeccable.** Load the impeccable rule set; flag anything that
+   violates its spacing scale, contrast, or naming rules before locking values into the
+   contract.
+5. **Emit `references/issue-<N>/design-contract.json`** per the schema below.
+6. **Write the ACs as references into the contract**, with the literal value/observable shown
+   inline for human readability. The contract file is the exhaustive spec; the AC is the
+   readable index into it. To respect the 3–7 AC-item count, you MAY group related style
+   assertions into one AC line (e.g. "S1–S6"), but give each meaningful user-facing behavior
+   its own AC line. Examples:
+   - `- [ ] S1–S6 — header + sub-nav tokens match design-contract.json (var(--text)/(--mono), 3.2s strip animation)`
+   - `- [ ] B1 — a locked FINISHED sprint shows 0 action buttons (design-contract.json)`
+   - `- [ ] B2 — every .btn-run carries [disabled] while a sprint runs (design-contract.json)`
 
-**No generic language (applies to every UI AC item):** an AC item that says
-"follows design system", "matches design", "looks good", or "is responsive" is
-**not allowed** — it is vague and untestable. Replace it with either a literal value
-(Path A) or a named impeccable rule (Path B). Every UI AC item must be
-**testable** against a concrete value or a named rule.
+**Contract rules:**
+- Prefer the `var(--x)` form; the resolved `expect_value` exists only for the tester's
+  computed-style comparison (browsers normalize colors, so the tester compares resolved values).
+- Every UI AC item must map to one or more contract entry ids; an AC that maps to no entry is
+  malformed — fix or delete it. Conversely, every entry in the contract must be reachable from
+  some AC line.
+- If a requirement cannot be expressed as a style or behavior assertion, it is NOT acceptance
+  criteria — move it to the description.
+- A passing build must be impossible to achieve without satisfying every contract entry. Do not
+  write soft or optional assertions.
+
+**Schema for `design-contract.json`:**
+
+```json
+{
+  "issue": 781,
+  "mock": "references/issue-781/sprint_redesign_mock_v5.html",
+  "view": "history",
+  "viewport": [1100, 900],
+  "style_assertions": [
+    { "id": "S1", "selector": ".subtab.active",
+      "property": "border-bottom-color",
+      "expect_var": "--text", "expect_value": "rgb(17, 24, 39)" },
+    { "id": "S2", "selector": ".run-strip",
+      "property": "animation-duration", "expect_value": "3.2s" }
+  ],
+  "behavior_assertions": [
+    { "id": "B1", "name": "finished sprint shows no action buttons",
+      "steps": ["navigate ?tab=history", "click .hist-card.locked .hx-toggle"],
+      "assert": { "selector": ".hist-card.locked .hist-actions button", "count": 0 } },
+    { "id": "B2", "name": "run buttons disabled while a sprint runs",
+      "steps": ["navigate ?tab=board"],
+      "assert": { "selector": ".btn-run", "attribute": "disabled", "all": true } }
+  ]
+}
+```
+
+**Field reference (keep BA output and tester input identical):**
+- `view` — the named sub-view/route the tester opens (e.g. `board`, `running`, `history`); may map to `?tab=<view>`.
+- `viewport` — `[width, height]` the tester sizes the browser to before measuring.
+- `style_assertions[]` — `id` (S-prefixed), `selector`, `property` (the computed-style property name), `expect_var` (optional, for readability), `expect_value` (the **resolved** value the tester compares against after normalization).
+- `behavior_assertions[]` — `id` (B-prefixed), `name`, `steps[]` (navigate/click/fill phrased so an agent-browser runner can execute them), and `assert` with a `selector` plus exactly one of: `count` (integer), `attribute` (+ optional `all: true` to require it on every match), `text` (substring), or `class` (present).
+
+#### Path B — frontend scope but no mock is attached
+
+Fall back to the impeccable rule set and reference the **named rules** explicitly in the AC —
+the impeccable `spacing scale` tier, the `contrast` ratio rule (e.g. AA contrast), the
+`component naming` convention, and the responsive `breakpoint` names. Do not invent values;
+cite the rule by name so the coder resolves it from the skill pack. No `design-contract.json`
+is emitted in this path.
+
+#### No generic language (applies to every UI AC item, both paths)
+
+An AC item that says "follows design system", "matches design", "looks good", or "is
+responsive" is **not allowed** — it is vague and untestable. Replace it with either a contract
+entry reference + literal value (Path A) or a named impeccable rule (Path B). Every UI AC item
+must be testable against a concrete value, a contract entry, or a named rule.
 
 ### UAT `[agent-test]` tagging rule
 
@@ -175,22 +235,23 @@ On approval, run:
 python3 $(git rev-parse --show-toplevel)/scripts/create_ticket.py \
   --title "<title>" \
   --body "<body>" \
-  --sprint <N> \
   --labels "<type-label>,backlog"
 ```
 
-To attach supporting files (screenshots, specs, logs), add one `--attachment` per file:
+To attach supporting files (mock HTML, the `design-contract.json`, screenshots, specs, logs), add one `--attachment` per file:
 
 ```bash
 python3 $(git rev-parse --show-toplevel)/scripts/create_ticket.py \
   --title "<title>" \
   --body "<body>" \
   --labels "<type-label>,backlog" \
-  --attachment /path/to/spec.txt \
-  --attachment /path/to/screenshot.png
+  --attachment /path/to/mock.html \
+  --attachment /path/to/design-contract.json
 ```
 
 Each attached file is copied to `references/issue-<N>/`, committed to the current branch, and linked in the issue body under an **Attachments** section. If any path does not exist, the script exits with an error before creating the issue.
+
+> Note for Path A UI tickets: attach BOTH the mock and the `design-contract.json` so the coder and tester resolve them from `references/issue-<N>/`. The contract is the shared artifact the tester's design-contract gate reads.
 
 The script prints `#<number> <url>` on success.
 
@@ -203,7 +264,7 @@ Example:
 > Slug: `fix-approve-auto-close`
 > 5 acceptance criteria defined.
 
-## Step 5 — Optional: Estimate the issue
+## Step 6 — Optional: Estimate the issue
 
 This step is **off by default**. Only run it if the user explicitly asked (e.g. passed `--estimate`, said "and estimate it", or "estimate after creating").
 
@@ -219,35 +280,3 @@ This invokes the Issue Estimator (Haiku 4.5) and posts a sizing comment to the i
 ## Tools available
 
 Use the `codedb` MCP server tools (`codedb_tree`, `codedb_search`) to read existing code when you need to understand current behaviour before writing acceptance criteria.
-
-## Design contract (MANDATORY when a mock is attached to a UI ticket)
-
-A mock at references/issue-<N>/*.html means you MUST emit a machine-checkable
-contract BEFORE writing acceptance criteria. Describing the design in prose and
-calling it done is a defect — that prose is where fidelity is lost.
-
-Procedure:
-1. Open the attached mock. Scope to the element(s) named in the ticket's
-   "target" selector list (or the named view's root).
-2. For each target selector, read its resolved styles from the mock's <style>
-   (follow each CSS var to its :root value; record BOTH the var name and the
-   resolved value). Capture only design-bearing properties: color,
-   background-color, border, border-color, border-radius, font-family,
-   font-size, font-weight, padding, gap, box-shadow, animation/transition.
-   Skip incidental defaults.
-3. For every interactive or state-dependent element, write a behavior assertion
-   as navigate -> act -> observe, where "observe" is a concrete DOM fact: an
-   element COUNT, an ATTRIBUTE ([disabled], aria-*), a TEXT match, or a CLASS
-   presence. "Looks right" / "matches the mock" is forbidden.
-4. Emit references/issue-<N>/design-contract.json (schema below). Then write the
-   ticket's ACs as direct references to contract entry ids — never restate them.
-
-Rules (extends #713 no-generic-language to behavior):
-- Prefer var(--x) form; the resolved value exists only for the tester's
-  computed-style comparison.
-- Every visual AC maps to exactly one style_assertion id; every behavioral AC to
-  one behavior_assertion id. An AC mapping to no contract entry is malformed —
-  fix or delete it.
-- If a requirement cannot be expressed as a style or behavior assertion, it is
-  NOT acceptance criteria. Move it to the description.
-- A passing build must be impossible to achieve without satisfying every entry.

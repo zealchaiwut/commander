@@ -208,10 +208,9 @@ def preview_dag(sprint_label: str, project: str):
                           warning, AC5).
 
     Sources issues from the github_client cache only — zero GitHub API calls
-    (AC2). File paths come from local ``.commander/estimates/issue-<N>.json``.
+    (AC2). Size/files resolved via ``server._resolve_issue_estimate`` (JSON +
+    GitHub size-* labels — same rule as the board UI).
     """
-    import json
-
     srv = _server()
     if not srv._SPRINT_LABEL_RE.match(sprint_label):
         raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")
@@ -241,20 +240,15 @@ def preview_dag(sprint_label: str, project: str):
     for iss in pending:
         num = iss["number"]
         tid = f"#{num}"
-        files: list[str] = []
-        estimated = False
-        est_path = estimates_dir / f"issue-{num}.json"
-        if est_path.exists():
-            try:
-                est = json.loads(est_path.read_text(encoding="utf-8"))
-                if est.get("size") is not None:
-                    estimated = True
-                files = est.get("files_likely_affected") or []
-            except (json.JSONDecodeError, OSError):
-                pass
-        if not estimated:
+        resolved = srv._resolve_issue_estimate(iss, estimates_dir)
+        if not resolved["estimated"]:
             unestimated.append(tid)
-        ticket_files.append({"id": tid, "number": num, "title": iss.get("title", ""), "files": files})
+        ticket_files.append({
+            "id": tid,
+            "number": num,
+            "title": iss.get("title", ""),
+            "files": resolved["files"],
+        })
 
     # Pairwise file conflicts among pending tickets.
     conflicts: list[dict] = []

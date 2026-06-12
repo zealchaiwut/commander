@@ -217,6 +217,23 @@ def test_unestimated_produces_partial_warning_not_error(tmp_path):
     assert any("#1" in lvl for lvl in data["levels"])
 
 
+def test_size_label_counts_as_estimated_without_json(tmp_path):
+    """GitHub size-* labels match the board UI — not flagged unestimated."""
+    issues = [
+        _issue(1, "Label only", ["sprint-99", "size-L"]),
+        _issue(2, "No size", ["sprint-99"]),
+    ]
+    gen = _make_client(tmp_path, issues)
+    client, _root = next(gen)
+
+    resp = client.get("/api/sprints/sprint-99/preview-dag?project=test/repo")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "#1" not in data["unestimated"]
+    assert "#2" in data["unestimated"]
+    assert data.get("partial") is True
+
+
 # ── AC4 (backend): a cycle reported by dag_builder surfaces in cycles ────────
 
 def test_cycle_surfaces_in_cycles_field(tmp_path):

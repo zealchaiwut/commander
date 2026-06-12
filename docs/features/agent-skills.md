@@ -42,6 +42,37 @@ Already wired in agent personas:
 
 No dashboard change needed. Restart not required for persona edits on next dispatch.
 
+### Coder / tester worktrees — keep CRG fresh
+
+Each agent clone has its **own** `.code-review-graph/` (not shared). Headless
+`claude -p` dispatches do **not** reliably run CRG file-save hooks, so the graph
+in `~/dev/commander/coder` and `~/dev/commander/tester` drifts unless refreshed.
+
+| When | What to run |
+|------|-------------|
+| **Automatic** | Sprint manager runs `code-review-graph update` (or `build` if missing) before each coder/tester dispatch |
+| **Before overnight sprint** (manual belt-and-suspenders) | `bash scripts/update_crg_graphs.sh` |
+| **After merging develop** into agent clones | `bash scripts/update_crg_graphs.sh --full` |
+| **Weekly** (optional) | `bash scripts/update_crg_graphs.sh --full` on coder + tester |
+| **Disable auto-update** | `COMMANDER_SKIP_CRG_UPDATE=1` when running sprints |
+
+Prefer **`update`** (incremental, seconds) for routine refresh. Use **`build`**
+(full, ~10s–minutes) after large merges or when `detect_changes` looks wrong.
+
+```bash
+# Default: coder + tester incremental update
+bash scripts/update_crg_graphs.sh
+
+# All clones including uat/prd
+bash scripts/update_crg_graphs.sh --all
+
+# Full rebuild after merge develop
+bash scripts/update_crg_graphs.sh --full
+```
+
+Optional always-on: `crg-daemon add ~/dev/commander/coder --alias commander-coder`
+(and same for tester) — see [code-review-graph docs](https://github.com/tirth8205/code-review-graph).
+
 ### Interactive Claude Code (you at the desk)
 
 | Want | Do |
@@ -93,7 +124,7 @@ crg-daemon start
 | Situation | Reinstall? |
 |-----------|------------|
 | Open Claude Code again **same machine, same clone** | **No** — skills + `.mcp.json` stay on disk |
-| Large codebase change | **No** — CRG hooks/`build` incrementally; run `build` only if graph feels stale |
+| Large codebase change | **Usually no** — run `bash scripts/update_crg_graphs.sh` if CRG answers look stale |
 | Recreated venv (`pip install -r requirements.txt`) | **No** for CRG CLI — pinned in `requirements.txt`; run `--resetup-machine` for MCP/skills/graph |
 | Fresh `git clone` or new worktree | **Yes** — run `bash scripts/setup_machine.sh --resetup-machine` after venv |
 | New Mac / new machine | **Yes** — full `bash scripts/setup_machine.sh` (includes agent skills) |
@@ -114,6 +145,12 @@ bash scripts/setup_machine.sh --resetup-machine
 
 # Single clone only
 bash scripts/install_agent_skills.sh --clone uat --force
+
+# Before overnight sprint — refresh coder + tester graphs
+bash scripts/update_crg_graphs.sh
+
+# After merge develop — full rebuild
+bash scripts/update_crg_graphs.sh --full
 ```
 
 ```bash

@@ -21,21 +21,52 @@ class SprintHistoryIssue(BaseModel):
     state: str
     time_spent: int | None = None
     pr_number: int | None = None
+    failure_reason: str | None = None
+    agent_status: str | None = None
+
+
+class SprintHistoryFailedTicket(BaseModel):
+    ticket_id: int | None = None
+    failure_reason: str | None = None
+
+
+class SprintHistoryPostSprintAgent(BaseModel):
+    status: str | None = None
+    files_touched: list[str] = []
+    commit_sha: str | None = None
+    comment_url: str | None = None
+    blockers: int = 0
+    suggestions: int = 0
+    nits: int = 0
+    follow_up_tickets: list[int] = []
+
+
+class SprintHistoryPostSprint(BaseModel):
+    note: str = "Agents ran after ticket work finished"
+    documenter: SprintHistoryPostSprintAgent | None = None
+    reviewer: SprintHistoryPostSprintAgent | None = None
 
 
 class SprintHistoryItem(BaseModel):
     label: str | None = None
     project: str = ""
     lifecycle_state: str
+    end_reason: str | None = None
     duration: int | None = None
     tokens: int | None = None
     estimate_accuracy: float | None = None
     pr_number: int | None = None
     summary_path: str | None = None
+    summary_issue_url: str | None = None
+    summary_issue_num: int | None = None
+    failure_reason: str | None = None
+    has_rerun_child: bool = False
     # Post-sprint reconciliation result (issue #856): {all_clear, checks[], ...}
     # or None for sprints that closed before this feature was deployed.
     reconciliation: dict | None = None
+    post_sprint: SprintHistoryPostSprint | None = None
     issues: list[SprintHistoryIssue] = []
+    failed_tickets: list[SprintHistoryFailedTicket] = []
 
 
 class SprintHistoryResponse(BaseModel):

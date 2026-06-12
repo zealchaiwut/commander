@@ -8,7 +8,12 @@
 
 Tester-rejected, needs-rework, retry.
 
-_TODO_
+See [section 4.6](4_agents.md#46-coder-dispatch-reliability-4a4f) for the locked decisions:
+
+- **4a** — `record_failure()` sidecar from all failure exits (not just tester gate)
+- **4b** — bounded fix-loop (`COMMANDER_MAX_FIX_ROUNDS`, default 3); early-abort on duplicate failure signature; `RETRY_EXHAUSTED` after K rounds
+
+Logic failures (test/design/merge-boundary) accumulate context and retry. Infrastructure failures (crash, hang, rate-limit) stay on existing paths without consuming fix rounds.
 
 ## 6.2 Sprint-level
 
@@ -20,13 +25,13 @@ _TODO_
 
 Server restart mid-sprint, PID resume.
 
-_TODO_
+Pairs with [section 1.3](1_state-and-source-of-truth.md) reconciliation and [4c nudge-before-kill](4_agents.md#46-coder-dispatch-reliability-4a4f). Buffered stdout without flush discipline loses final agent lines on kill — addressed by structured logger Phase 1 ([2.2b](2_app-dashboard-architecture.md#22b-backend-logging--structured-logger-disk-first-phase-1-neon-later-phase-2)).
 
 ## 6.4 Graceful degradation
 
 Estimator timeout, missing CLI, stale assets.
 
-_TODO_
+Generalize into doctor preflight ([4e](4_agents.md#46-coder-dispatch-reliability-4a4f)): CLI presence, auth, worktree health checked before dispatch. `dispatch-blocked` and `design_docs_missing` already short-circuit with `record_failure()`.
 
 ## 6.5 Bulk-create failure
 

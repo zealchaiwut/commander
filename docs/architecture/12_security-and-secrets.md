@@ -4,9 +4,12 @@
 
 ## 12.1 Secrets handling
 
-`.env`, the gitignore gap, gist redaction.
+`.env`, gist redaction.
 
-_TODO_
+- `.env` and `.env.*` are gitignored (gap from the architecture review was fixed — README claim now accurate).
+- Per-project `.env` files live inside clone dirs; never commit secrets.
+- Gist backup must redact tokens before upload.
+- Config vs state vs secrets boundary: [section 8.3](8_database-and-local-env.md).
 
 ## 12.2 Auth posture
 

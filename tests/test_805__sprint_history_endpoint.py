@@ -210,7 +210,9 @@ def test_ac4_reads_from_lifecycle_table(client, fresh_db, tmp_path, monkeypatch)
     _insert_lifecycle(fresh_db, "sprint-30", "cancelled",
                       ended_at="2026-06-03T00:00:00", end_reason="user cancelled")
     s = _by_label(client.get("/api/sprints/history").json(), "sprint-30")
-    assert s["lifecycle_state"] == "cancelled"
+    # Unified lifecycle (P1): legacy cancelled rows render as needs_rework.
+    assert s["lifecycle_state"] == "needs_rework"
+    assert s["end_reason"] == "user cancelled"
 
 
 def test_ac4_falls_back_to_state_files_when_no_db_row(client, fresh_db, tmp_path, monkeypatch):
@@ -276,10 +278,12 @@ def test_ac6_all_terminal_states_appear(client, fresh_db, tmp_path, monkeypatch)
         created_at="2026-06-08T00:00:00")
 
     states = {s["label"]: s["lifecycle_state"] for s in client.get("/api/sprints/history").json()["sprints"]}
+    # Unified lifecycle (P1): legacy values render through the display mapping
+    # (failed/cancelled → needs_rework, finished → completed).
     assert states.get("sprint-60") == "completed"
-    assert states.get("sprint-61") == "failed"
-    assert states.get("sprint-62") == "cancelled"
-    assert states.get("sprint-63") == "finished"
+    assert states.get("sprint-61") == "needs_rework"
+    assert states.get("sprint-62") == "needs_rework"
+    assert states.get("sprint-63") == "completed"
     assert states.get("sprint-64") == "deleted"
 
 
@@ -337,16 +341,18 @@ def test_ac8_deleted_sprint_queryable_immediately(client, fresh_db, tmp_path, mo
     assert s["issues"][0]["time_spent"] == 60  # enriched from the state file
 
 
-def test_early_crash_completed_with_no_issues_surfaces_as_failed(client, fresh_db, tmp_path, monkeypatch):
-    """A sub-sprint that exits before processing tickets reads as failed, not partial."""
+def test_early_crash_surfaces_as_needs_rework(client, fresh_db, tmp_path, monkeypatch):
+    """Crashes are written as needs_rework at the source (P1) — the old
+    completed-with-no-issues inference heuristics are retired, so the row
+    itself carries the truth."""
     sprints_dir = tmp_path / "sprints"
     monkeypatch.setattr(svc, "DEFAULT_SPRINTS_DIR", sprints_dir, raising=False)
-    _insert_lifecycle(fresh_db, "sprint-68.3", "completed",
-                      ended_at="2026-06-12T00:00:02", end_reason="orphan-pid")
+    _insert_lifecycle(fresh_db, "sprint-68.3", "needs_rework",
+                      ended_at="2026-06-12T00:00:02", end_reason="process lost")
     _write_state_file(sprints_dir, "sprint-68.3", _state_payload("sprint-68.3", issues=[], wall=2))
     s = _by_label(client.get("/api/sprints/history").json(), "sprint-68.3")
-    assert s["lifecycle_state"] == "failed"
-    assert s.get("failure_reason")
+    assert s["lifecycle_state"] == "needs_rework"
+    assert s["end_reason"] == "process lost"
 
 
 def test_has_rerun_child_flag_on_parent(client, fresh_db, tmp_path, monkeypatch):

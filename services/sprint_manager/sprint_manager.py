@@ -775,14 +775,16 @@ def _sprint_db_set_state_sm(
         elif state == "completed":
             db.record_sprint_finish(label, ended_at=fields.get("ended_at"),
                                     end_reason=fields.get("end_reason"))
-        elif state == "cancelled":
-            db.record_sprint_cancel(label,
-                                    end_reason=fields.get("end_reason", "cancelled"),
-                                    ended_at=fields.get("ended_at"))
-        elif state == "failed":
-            db.record_sprint_fail(label,
-                                  end_reason=fields.get("end_reason"),
-                                  ended_at=fields.get("ended_at"))
+        elif state == "ready_to_merge":
+            db.record_sprint_ready_to_merge(label,
+                                            end_reason=fields.get("end_reason"),
+                                            ended_at=fields.get("ended_at"))
+        elif state in ("needs_rework", "cancelled", "failed"):
+            # cancelled/failed are legacy spellings — all bad endings land in
+            # needs_rework under the unified lifecycle (sprint-lifecycle.md).
+            db.record_sprint_needs_rework(label,
+                                          end_reason=fields.get("end_reason"),
+                                          ended_at=fields.get("ended_at"))
     except (Exception, SystemExit):
         pass
 
@@ -8568,15 +8570,16 @@ def main() -> None:
     def _sigterm_handler(signum: int, frame: object) -> None:
         _sprint_user_cancelled.set()
         _cleanup_pid()
-        # Best-effort state write before exit (issue #507 plan.json, #757 DB)
+        # Best-effort state write before exit. A user cancel is a needs_rework
+        # ending under the unified lifecycle — the "why" lives in end_reason.
         _ended_at = datetime.now(timezone.utc).isoformat()
         _plan_json_set_state_sm(
-            args.label, "cancelled", cfg=cfg,
-            ended_at=_ended_at,
+            args.label, "needs_rework", cfg=cfg,
+            ended_at=_ended_at, end_reason="stopped by user",
         )
         _sprint_db_set_state_sm(
-            args.label, "cancelled", project=eff_repo or "",
-            ended_at=_ended_at, end_reason="cancelled",
+            args.label, "needs_rework", project=eff_repo or "",
+            ended_at=_ended_at, end_reason="stopped by user",
         )
         raise SystemExit(130)
 
@@ -8682,29 +8685,34 @@ def main() -> None:
             )
         raise
 
-    # Clean exit: write terminal state (issue #507 plan.json, #757 DB)
+    # Clean exit: write the unified-lifecycle terminal state at the source
+    # (sprint-lifecycle.md): ready_to_merge when every ticket passed,
+    # needs_rework on any recorded failure — no more inference downstream.
     if not args.dry_run:
         _ended_at = datetime.now(timezone.utc).isoformat()
         if not state or not state.issues:
-            _plan_json_set_state_sm(
-                args.label, "failed", cfg=cfg,
-                ended_at=_ended_at,
-                end_reason="no-dispatchable-tickets",
-            )
-            _sprint_db_set_state_sm(
-                args.label, "failed", project=eff_repo or "",
-                ended_at=_ended_at, end_reason="no-dispatchable-tickets",
-            )
+            _terminal_state = "needs_rework"
+            _terminal_reason = "no-dispatchable-tickets"
         else:
-            _plan_json_set_state_sm(
-                args.label, "completed", cfg=cfg,
-                ended_at=_ended_at,
-                end_reason="natural",
+            _any_failed = any(
+                (iss.agent_status == "failed") or iss.failure_reason
+                for iss in state.issues
             )
-            _sprint_db_set_state_sm(
-                args.label, "completed", project=eff_repo or "",
-                ended_at=_ended_at, end_reason="natural",
-            )
+            if _any_failed:
+                _terminal_state = "needs_rework"
+                _terminal_reason = "ticket-failures"
+            else:
+                _terminal_state = "ready_to_merge"
+                _terminal_reason = "natural"
+        _plan_json_set_state_sm(
+            args.label, _terminal_state, cfg=cfg,
+            ended_at=_ended_at,
+            end_reason=_terminal_reason,
+        )
+        _sprint_db_set_state_sm(
+            args.label, _terminal_state, project=eff_repo or "",
+            ended_at=_ended_at, end_reason=_terminal_reason,
+        )
 
     # Regenerate STATUS.md after sprint closes (#584)
     _regenerate_status_md(cfg=cfg, dry_run=args.dry_run)

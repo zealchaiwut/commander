@@ -403,7 +403,7 @@ def _sweep_plan_json_states(projects: list) -> None:
     """Reconcile plan.json files with state=running that have no alive PID (issue #507).
 
     Called once on startup after PID sweeping completes.  Any sprint whose
-    plan.json says running but whose PID is dead gets reconciled to cancelled.
+    plan.json says running but whose PID is dead gets reconciled to needs_rework.
     """
     reconciled = 0
     for proj in projects:
@@ -441,14 +441,14 @@ def _sweep_plan_json_states(projects: list) -> None:
                         pid_alive = True
                         break
                 if not pid_alive:
-                    data["state"] = "cancelled"
-                    data["end_reason"] = "orphan-pid"
+                    data["state"] = "needs_rework"
+                    data["end_reason"] = "process lost"
                     try:
                         tmp = plan_file.with_suffix(".json.tmp")
                         tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
                         os.replace(str(tmp), str(plan_file))
                         reconciled += 1
-                        print(f"[startup-sweep] reconciled {label} plan.json: running→cancelled (PID dead)")
+                        print(f"[startup-sweep] reconciled {label} plan.json: running→needs_rework (PID dead)")
                     except Exception as exc:
                         print(f"[startup-sweep] could not reconcile {label} plan.json: {exc}")
         except Exception as exc:
@@ -4985,13 +4985,29 @@ def _sprint_plan_path(project_root: Path, sprint_label: str) -> Path:
     return _commander_dir(project_root) / "sprints" / f"{sprint_label}-plan.json"
 
 
-_VALID_PLAN_STATES: frozenset[str] = frozenset({"planning", "running", "completed", "cancelled"})
+# Unified lifecycle (docs/architecture/sprint-lifecycle.md): new writes use
+# draft/planned/running/ready_to_merge/needs_rework/completed. `planning` and
+# `cancelled` are legacy values kept readable for pre-redesign plan.json files
+# (forward-only migration) — they are never written anew.
+_VALID_PLAN_STATES: frozenset[str] = frozenset({
+    "draft", "planned", "running", "ready_to_merge", "needs_rework", "completed",
+    "planning", "cancelled",
+})
 
 # Plan states from which a label may never be dispatched again (sprint-lifecycle
 # redesign P0, docs/milestones/sprint-lifecycle-redesign.md). One label = one
 # attempt: re-dispatching a terminal label is what produced multi-attempt
 # forensics under a single sprint label (sprint-68.6 ran three times).
-_TERMINAL_PLAN_STATES: frozenset[str] = frozenset({"completed", "cancelled"})
+_TERMINAL_PLAN_STATES: frozenset[str] = frozenset({
+    "completed", "ready_to_merge", "needs_rework",
+    "cancelled",  # legacy files only
+})
+
+# Plan states that mean "definitely not running" — everything terminal plus the
+# pre-dispatch states.
+_NOT_RUNNING_PLAN_STATES: frozenset[str] = _TERMINAL_PLAN_STATES | frozenset({
+    "draft", "planned", "planning",
+})
 
 
 def _reject_terminal_label_redispatch(project_root: Path, sprint_label: str) -> None:
@@ -5106,14 +5122,16 @@ def _sprint_db_set_state(
                 ended_at=extra_fields.get("ended_at"),
                 end_reason=extra_fields.get("end_reason"),
             )
-        elif state == "cancelled":
-            db.record_sprint_cancel(
+        elif state == "ready_to_merge":
+            db.record_sprint_ready_to_merge(
                 sprint_label,
-                end_reason=extra_fields.get("end_reason", "cancelled"),
+                end_reason=extra_fields.get("end_reason"),
                 ended_at=extra_fields.get("ended_at"),
             )
-        elif state == "failed":
-            db.record_sprint_fail(
+        elif state in ("needs_rework", "cancelled", "failed"):
+            # cancelled/failed are legacy callers — all bad endings land in
+            # needs_rework under the unified lifecycle.
+            db.record_sprint_needs_rework(
                 sprint_label,
                 end_reason=extra_fields.get("end_reason"),
                 ended_at=extra_fields.get("ended_at"),
@@ -5212,7 +5230,7 @@ def _is_sprint_running(project_root: Path, sprint_label: str) -> bool:
 
     The durable `sprints` table is the authoritative source (issue #757): a
     sprint is running only when DB state='running' AND its PID is alive. A
-    PID-dead + DB-running row is reconciled to state='cancelled' and reported as
+    PID-dead + DB-running row is reconciled to state='needs_rework' and reported as
     not running. Falls back to plan.json + PID-file scanning only for legacy
     sprints that have no DB row yet.
     """
@@ -5241,18 +5259,18 @@ def _is_sprint_running(project_root: Path, sprint_label: str) -> bool:
             return False
         if _sprint_pid_alive(project_root, sprint_label):
             return True
-        # DB=running but PID dead — reconcile both stores to cancelled.
+        # DB=running but PID dead — reconcile both stores to needs_rework.
         _log.warning(
-            "Sprint %s: DB state=running but no alive PID — reconciling to cancelled",
+            "Sprint %s: DB state=running but no alive PID — reconciling to needs_rework",
             sprint_label,
         )
         try:
-            db.record_sprint_cancel(sprint_label, end_reason="orphan-pid")
+            db.record_sprint_needs_rework(sprint_label, end_reason="process lost")
         except Exception:
             pass
         try:
-            _plan_json_set_state(project_root, sprint_label, "cancelled",
-                                 end_reason="orphan-pid")
+            _plan_json_set_state(project_root, sprint_label, "needs_rework",
+                                 end_reason="process lost")
         except Exception:
             pass
         return False
@@ -5260,7 +5278,7 @@ def _is_sprint_running(project_root: Path, sprint_label: str) -> bool:
     plan = _read_plan_json(project_root, sprint_label)
     if plan is not None:
         plan_state = plan.get("state")
-        if plan_state in ("completed", "cancelled", "planning"):
+        if plan_state in _NOT_RUNNING_PLAN_STATES:
             return False
         if plan_state == "running":
             sprints_dir = _commander_dir(project_root) / "sprints"
@@ -5301,14 +5319,14 @@ def _is_sprint_running(project_root: Path, sprint_label: str) -> bool:
                     return True
                 except OSError:
                     pass
-            # plan.json=running but no alive PID — reconcile to cancelled
+            # plan.json=running but no alive PID — reconcile to needs_rework
             _log.warning(
-                "Sprint %s: plan.json=running but no alive PID — reconciling to cancelled",
+                "Sprint %s: plan.json=running but no alive PID — reconciling to needs_rework",
                 sprint_label,
             )
             try:
-                _plan_json_set_state(project_root, sprint_label, "cancelled",
-                                     end_reason="orphan-pid")
+                _plan_json_set_state(project_root, sprint_label, "needs_rework",
+                                     end_reason="process lost")
             except Exception:
                 pass
             return False
@@ -5380,7 +5398,7 @@ def _all_sprints_running() -> list[dict]:
 
     Primary: reads plan.json state=running (authoritative).
     Fallback: checks PID files for legacy sprints with no plan.json yet.
-    PID files whose process is dead are reconciled to state=cancelled as a side-effect.
+    PID files whose process is dead are reconciled to state=needs_rework as a side-effect.
 
     Returns list of {project, sprint_label, pid}.
     """
@@ -5435,12 +5453,12 @@ def _all_sprints_running() -> list[dict]:
             else:
                 # plan.json=running but no alive PID — reconcile
                 _log.warning(
-                    "Sprint %s: plan.json=running but PID dead — reconciling to cancelled",
+                    "Sprint %s: plan.json=running but PID dead — reconciling to needs_rework",
                     label,
                 )
                 try:
-                    data["state"] = "cancelled"
-                    data["end_reason"] = "orphan-pid"
+                    data["state"] = "needs_rework"
+                    data["end_reason"] = "process lost"
                     tmp = plan_file.with_suffix(".json.tmp")
                     tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
                     os.replace(str(tmp), str(plan_file))
@@ -5714,7 +5732,7 @@ def get_sprint_timeline(project: str):
             # Check cancelled flag from sprint JSON
             json_path = _sprint_json_path(project_root, sprint_label)
             sprint_json = _sprint_json_read(json_path)
-            if sprint_json.get("status") == "cancelled":
+            if sprint_json.get("status") in ("cancelled", "needs_rework"):
                 state = "cancelled"
             else:
                 state = "completed"
@@ -5818,7 +5836,7 @@ def get_sprint_summaries(project: str):
             # Check cancelled state from sprint json
             fc_json_path = _sprint_json_path(project_root, sprint_label)
             fc_sprint_json = _sprint_json_read(fc_json_path)
-            is_cancelled = fc_sprint_json.get("status") == "cancelled"
+            is_cancelled = fc_sprint_json.get("status") in ("cancelled", "needs_rework")
 
             # Check summary file for status
             fc_sprint_status: Optional[str] = None
@@ -6756,7 +6774,7 @@ def get_sprint_state(sprint_label: str, project: str):
     """Return the full plan.json payload for a sprint (issue #507).
 
     Creates plan.json lazily on first access for legacy sprints that pre-date
-    this feature.  State values: planning | running | completed | cancelled.
+    this feature.  State values: see _VALID_PLAN_STATES (unified lifecycle).
     """
     if not _SPRINT_LABEL_RE.match(sprint_label):
         raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")
@@ -6844,21 +6862,48 @@ def kill_sprint(sprint_label: str, project: str):
         except OSError:
             pass
 
-    # Mark sprint cancelled in JSON + the durable SQLite store below (issue #758
-    # removed the Neon mirror).
+    # A user cancel is a needs_rework ending under the unified lifecycle
+    # (docs/architecture/sprint-lifecycle.md): the distinction is kept as
+    # end_reason, not as a separate `cancelled` state. Tickets are NOT given
+    # the need-rework GitHub label here — only tickets that actually failed
+    # get it (from the sprint manager's failure paths).
+    _cancel_reason = "stopped by user"
     project_root = _project_root_path(project)
     json_path = _sprint_json_path(project_root, sprint_label)
     data = _sprint_json_read(json_path)
     if data:
-        data["status"] = "cancelled"
+        data["status"] = "needs_rework"
+        data["end_reason"] = _cancel_reason
         _sprint_json_write(json_path, data)
 
-    # Write state=cancelled to plan.json (issue #507) + DB (issue #757)
+    # Write state=needs_rework to plan.json (issue #507) + DB (issue #757)
     try:
-        _plan_json_set_state(project_root, sprint_label, "cancelled")
+        _plan_json_set_state(project_root, sprint_label, "needs_rework",
+                             end_reason=_cancel_reason)
     except Exception:
         pass
-    _sprint_db_set_state(sprint_label, project, "cancelled", end_reason="killed")
+    _sprint_db_set_state(sprint_label, project, "needs_rework",
+                         end_reason=_cancel_reason)
+
+    # Record the reason on the sprint summary issue so GitHub keeps the "why"
+    # without any DB lookup. Best-effort: the summary issue may not exist yet
+    # when the run is cancelled early.
+    try:
+        _summary_url = _read_sprint_summary_url(project_root, sprint_label)
+        _summary_num = None
+        if _summary_url:
+            _m_sum = re.search(r"/issues/(\d+)", _summary_url)
+            _summary_num = int(_m_sum.group(1)) if _m_sum else None
+        if _summary_num:
+            github_client.add_comment(
+                _summary_num,
+                f"⚠️ Sprint `{sprint_label}` was stopped by the user — marked "
+                f"**needs_rework** (end reason: *{_cancel_reason}*). Tickets were "
+                "not labeled `need-rework`; re-run via a child sub-sprint.",
+                repo_name=project,
+            )
+    except Exception:
+        pass
 
     _emit_dashboard_event(
         project=project or "dashboard",
@@ -8078,7 +8123,7 @@ def _sprint_has_own_run_outcome(project_root: Path, sprint_label: str) -> bool:
     a sibling run (e.g. sprint-68.3 must not show sprint-68.2 timings).
     """
     plan = _read_plan_json(project_root, sprint_label)
-    if plan and plan.get("state") == "planning":
+    if plan and plan.get("state") in ("planning", "draft", "planned"):
         return False
 
     commander = _commander_dir(project_root)
@@ -8121,7 +8166,7 @@ def get_sprint_outcome(sprint_label: str, project: str):
 
     # Running sprints return immediately — no state file required
     if _is_sprint_running(project_root, sprint_label):
-        return {"sprint_label": sprint_label, "state": "running"}
+        return {"sprint_label": sprint_label, "state": "running", "lifecycle": "running"}
 
     if not _sprint_has_own_run_outcome(project_root, sprint_label):
         raise HTTPException(404, detail=f"Outcome not found for {sprint_label!r} (not run yet)")
@@ -8129,15 +8174,17 @@ def get_sprint_outcome(sprint_label: str, project: str):
     m = re.search(r"(\d+)", sprint_label)
     n = m.group(1) if m else sprint_label
 
-    # Check sprint-N.json for cancelled status (may exist even without a state file)
+    # Check sprint-N.json for a stopped status (may exist even without a state file)
     json_path = _sprint_json_path(project_root, sprint_label)
     sprint_json = _sprint_json_read(json_path)
-    is_cancelled: bool = sprint_json.get("status") == "cancelled"
+    is_cancelled: bool = sprint_json.get("status") in ("cancelled", "needs_rework")
 
     state_path = commander / "sprints" / f"sprint-{n}-state.json"
     if not state_path.exists():
         if is_cancelled:
-            return {"sprint_label": sprint_label, "state": "cancelled"}
+            return {"sprint_label": sprint_label, "state": "cancelled",
+                    "lifecycle": "needs_rework",
+                    "end_reason": sprint_json.get("end_reason")}
         raise HTTPException(404, detail=f"Outcome not found for {sprint_label!r}")
 
     try:
@@ -8293,6 +8340,10 @@ def get_sprint_outcome(sprint_label: str, project: str):
     return {
         "sprint_label":      sprint_label,
         "state":             pane_state,
+        # Unified lifecycle (sprint-lifecycle.md): pane vocabulary mapped to
+        # the one enum shared with the History pane.
+        "lifecycle":         db.canonical_lifecycle(pane_state),
+        "end_reason":        sprint_json.get("end_reason"),
         "sprint_status":     sprint_status,
         "counts": {
             "done":    done_count,
@@ -8344,9 +8395,11 @@ def get_sprint_estimate_vs_actual(sprint_label: str, project: str):
 
     plan = _read_plan_json(project_root, sprint_label)
     plan_state = (plan or {}).get("state", "")
-    if plan_state in ("planning", "running"):
+    if plan_state in ("planning", "draft", "planned", "running"):
         raise HTTPException(404, detail=f"Sprint {sprint_label!r} is not finished")
     if plan_state == "cancelled":
+        # Legacy files only — new stops land in needs_rework, which DID run
+        # and may have a meaningful estimate-vs-actual report.
         raise HTTPException(404, detail=f"Sprint {sprint_label!r} was cancelled")
 
     m = re.search(r"(\d+)", sprint_label)
@@ -9283,7 +9336,7 @@ def get_sprint_finish_card(sprint_label: str, project: str):
 
     fc_json_path = _sprint_json_path(project_root, sprint_label)
     fc_sprint_json = _sprint_json_read(fc_json_path)
-    fc_is_cancelled: bool = fc_sprint_json.get("status") == "cancelled"
+    fc_is_cancelled: bool = fc_sprint_json.get("status") in ("cancelled", "needs_rework")
 
     state_path = commander / "sprints" / f"sprint-{fc_n}-state.json"
     if not state_path.exists():
@@ -9384,6 +9437,8 @@ def get_sprint_finish_card(sprint_label: str, project: str):
         "sprint_label":      sprint_label,
         "sprint_number":     sprint_number,
         "state":             card_state,
+        "lifecycle":         db.canonical_lifecycle(card_state),
+        "end_reason":        fc_sprint_json.get("end_reason"),
         "done_count":        done_count,
         "failed_count":      failed_count,
         "skipped_count":     skipped_count,
@@ -9667,9 +9722,11 @@ def rerun_sprint(sprint_label: str, project: str, body: SprintRerunV2Body):
     sprints_dir = commander / "sprints"
     sprints_dir.mkdir(parents=True, exist_ok=True)
 
-    # Create plan.json for sub-label; original plan.json is untouched
+    # Create plan.json for sub-label; original plan.json is untouched.
+    # New sprints start as `draft` under the unified lifecycle (legacy files
+    # may still carry "planning" — readers accept both).
     _write_plan_json(project_root, sub_label, {
-        "state": "planning",
+        "state": "draft",
         "tickets": moved,
         "parent": sprint_label,
     })
@@ -9728,7 +9785,7 @@ def rerun_sprint(sprint_label: str, project: str, body: SprintRerunV2Body):
         result["errors"] = errors
 
     # auto_run=false: leave the selected tickets queued in the child sprint
-    # (plan state stays "planning") for a manual run later.
+    # (plan state stays "draft") for a manual run later.
     if not body.auto_run:
         result["queued"] = True
         return result
@@ -10048,7 +10105,7 @@ async def finish_sprint(owner: str, repo_name: str, label: str, body: FinishSpri
         try:
             if not _read_plan_json(project_root, next_sprint_label):
                 _plan_json_set_state(
-                    project_root, next_sprint_label, "planning",
+                    project_root, next_sprint_label, "draft",
                     created_at=datetime.now(timezone.utc).isoformat(),
                 )
         except Exception:

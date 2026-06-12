@@ -87,11 +87,13 @@ def test_ac3_finish_updates_to_completed(fresh_db):
     assert row["ended_at"]
 
 
-def test_ac3_cancel_updates_to_cancelled_with_reason(fresh_db):
+def test_ac3_cancel_updates_to_needs_rework_with_reason(fresh_db):
+    # Sprint-lifecycle redesign P1: `cancelled` no longer exists — a user
+    # cancel lands in needs_rework with the reason kept as end_reason.
     fresh_db.record_sprint_start("sprint-99", project="p")
     fresh_db.record_sprint_cancel("sprint-99", end_reason="user-cancel")
     row = fresh_db.get_sprint("sprint-99")
-    assert row["state"] == "cancelled"
+    assert row["state"] == "needs_rework"
     assert row["end_reason"] == "user-cancel"
     assert row["ended_at"]
 

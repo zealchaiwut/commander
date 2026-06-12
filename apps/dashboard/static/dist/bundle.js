@@ -1908,7 +1908,7 @@ ${data.errors.join("\n")}`);
     if (!parents[label])
       return false;
     const planState = (_smgmtData && _smgmtData.sprint_plan_states || {})[label];
-    return planState === "planning";
+    return planState === "draft" || planState === "planning";
   }
   function _smgmtApplyRerunOptimistic2(parentLabel, subLabel, ticketNumbers) {
     if (!_smgmtData || !parentLabel || !subLabel)
@@ -1936,7 +1936,7 @@ ${data.errors.join("\n")}`);
     _smgmtData.sprint_rerun_into[parentLabel] = subLabel;
     if (!_smgmtData.sprint_plan_states)
       _smgmtData.sprint_plan_states = {};
-    _smgmtData.sprint_plan_states[subLabel] = "planning";
+    _smgmtData.sprint_plan_states[subLabel] = "draft";
     delete _smgmtOutcomeCache[parentLabel];
     delete _smgmtOutcomeCache[subLabel];
     if (_smgmtBySprint) {

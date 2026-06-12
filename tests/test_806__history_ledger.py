@@ -162,26 +162,21 @@ def test_ac2_locked_states_get_no_verbs():
     assert "finished" in locked and "deleted" in locked
 
 
-# ═══════════════════════ AC3 — Resume gating ════════════════════════════════
+# ═══════════════════════ AC3 — Re-run gating ════════════════════════════════
+# Sprint-lifecycle redesign P1: the Resume verb is retired (it dispatched the
+# rerun endpoint anyway) and Re-run gates on the unified needs_rework state.
 
-def test_ac3_resume_only_on_failed():
+def test_ac3_rerun_gated_on_needs_rework():
     verbs = _fn_body("_histVerbsHtml")
-    assert "Resume" in verbs, "a Resume verb exists"
-    # Resume must be guarded by the failed state specifically.
-    m = re.search(r"Resume", verbs)
-    assert m is not None
-    # The guard appears: a `=== 'failed'` (or "failed") check precedes Resume.
-    assert "failed" in verbs
+    assert "needs_rework" in verbs, "Re-run is gated on the needs_rework state"
+    assert "_histRerunSprint" in verbs, "Re-run creates and dispatches a child"
 
 
-def test_ac3_resume_wired_to_resume_handler():
-    verbs = _fn_body("_histVerbsHtml")
-    assert "_histResumeSprint" in verbs, "Resume is wired to its handler"
-    handler = _fn_body("_histResumeSprint")
-    # The resume endpoint is the rerun/continue-from-stopped path (backend is
-    # out of scope for this ticket — no new route is added).
-    assert "/api/sprints/" in handler and "rerun" in handler, \
-        "Resume must POST to the sprint resume/continue endpoint"
+def test_ac3_resume_verb_retired():
+    assert "_histResumeSprint" not in PROJECT_HTML, (
+        "Resume was retired by the lifecycle redesign — re-runs go through "
+        "the child sub-sprint flow only"
+    )
 
 
 # ═══════════════════════ AC4 — locking ══════════════════════════════════════
@@ -294,10 +289,15 @@ def test_ac8_metrics_row_has_badges():
     _css_rule(".hist-metrics")
 
 
-def test_partial_completed_requires_rerun_child():
-    partial = _fn_body("_histIsPartialCompleted")
-    assert "has_rerun_child" in partial, "partial badge requires a re-run sub-sprint"
-    assert "issues.length" not in partial, "empty issues[] alone must not trigger partial"
+def test_partial_finished_is_server_derived():
+    # Sprint-lifecycle redesign P1: partial_finished is derived server-side
+    # from children's states; the client just renders the chip.
+    assert "_histIsPartialCompleted" not in PROJECT_HTML, (
+        "client-side partial inference was retired — the server derives "
+        "partial_finished in sprint_history_service"
+    )
+    chip = _fn_body("_histStateChip")
+    assert "partial_finished" in chip, "the chip map renders partial_finished"
 
 
 def test_failed_block_renders_on_failed_sprint():

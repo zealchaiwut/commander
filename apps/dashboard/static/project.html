@@ -1841,6 +1841,11 @@
     .hist-state.running   { color: var(--green);  background: var(--green-bg); }
     .hist-state.planning  { color: var(--blue);   background: var(--blue-bg); }
     .hist-state.unknown   { color: var(--text-sub); background: var(--surface-2); }
+    /* end_reason shown under a needs_rework badge (sprint-lifecycle.md) */
+    .hist-state-reason {
+      font-size: 11px; color: var(--text-muted); margin-left: 6px;
+      max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
 
     /* Metrics row */
     .hist-metrics {
@@ -2010,8 +2015,6 @@
     }
     .hist-verb:hover { background: var(--surface-hover); }
     .hist-verb i { font-size: 13px; }
-    .hist-verb--resume { color: var(--green); border-color: var(--green-bg); }
-    .hist-verb--resume:hover { background: var(--green-bg); }
     .hist-verb--rerun  { color: var(--amber); border-color: var(--amber-bg); }
     .hist-verb--rerun:hover  { background: var(--amber-bg); }
     .hist-verb--finish { color: var(--blue); border-color: var(--blue-bg); }
@@ -10091,7 +10094,7 @@ function _histIssueRowHtml(iss, isChild) {
 
 function _histFailedBlockHtml(s) {
   const state = (s.lifecycle_state || '').toLowerCase();
-  if (state !== 'failed') return '';
+  if (state !== 'needs_rework' && state !== 'failed') return '';
   const failed = Array.isArray(s.failed_tickets) ? s.failed_tickets : [];
   const sprintReason = s.failure_reason || s.end_reason;
   if (!failed.length && !sprintReason) return '';
@@ -10125,29 +10128,32 @@ function _histIssueListHtml(s) {
 // Re-run / Finish / Delete render on COMPLETED or FAILED only; Resume on FAILED
 // only; locked (finished/deleted) sprints render no verbs at all (links only).
 function _histVerbsHtml(s) {
+  // Verbs gated by the unified lifecycle (sprint-lifecycle.md):
+  //   needs_rework     → Re-run (creates a child sub-sprint)
+  //   ready_to_merge   → Finish (merge sign-off) + Delete
+  //   completed        → Finish + Delete
+  //   partial_finished → none (waiting on children)
   if (_histIsLocked(s.lifecycle_state)) return '';
   const state = (s.lifecycle_state || '').toLowerCase();
-  const actionable = state === 'completed' || state === 'failed';
-  if (!actionable) return '';
   const lbl = escHtml(s.label || '');
   const rawLabel = s.label || '';
-  const rerunDisabled = _smgmtAnySprintRunning ? 'disabled' : '';
-  const rerunTitle = _smgmtAnySprintRunning
-    ? 'title="Cannot re-run: another sprint is currently running."'
-    : '';
-  const childDisplay = sprintLabelDisplay(_histNextChildLabel(rawLabel)).replace('Sprint ', '');
   let html = '';
-  if (state === 'failed') {
-    html += `<button class="hist-verb hist-verb--resume" onclick="_histResumeSprint('${lbl}')">
-               <i class="ti ti-player-play"></i> Resume</button>`;
+  if (state === 'needs_rework' || state === 'failed' || state === 'cancelled') {
+    const rerunDisabled = _smgmtAnySprintRunning ? 'disabled' : '';
+    const rerunTitle = _smgmtAnySprintRunning
+      ? 'title="Cannot re-run: another sprint is currently running."'
+      : '';
+    const childDisplay = sprintLabelDisplay(_histNextChildLabel(rawLabel)).replace('Sprint ', '');
+    html += `<button class="hist-verb hist-verb--rerun" ${rerunDisabled} ${rerunTitle}
+               onclick="_histRerunSprint('${lbl}')">
+               <i class="ti ti-refresh"></i> Re-run → ${escHtml(childDisplay)}</button>`;
+  } else if (state === 'completed' || state === 'ready_to_merge') {
+    html += `<button class="hist-verb hist-verb--finish" onclick="smgmtFinishSprint('${lbl}')">
+               <i class="ti ti-flag-check"></i> Finish</button>`;
+    html += `<button class="hist-verb hist-verb--delete" onclick="smgmtDeleteSprint('${lbl}')">
+               <i class="ti ti-trash"></i> Delete</button>`;
   }
-  html += `<button class="hist-verb hist-verb--rerun" ${rerunDisabled} ${rerunTitle}
-             onclick="_histRerunSprint('${lbl}')">
-             <i class="ti ti-refresh"></i> Re-run → ${escHtml(childDisplay)}</button>`;
-  html += `<button class="hist-verb hist-verb--finish" onclick="smgmtFinishSprint('${lbl}')">
-             <i class="ti ti-flag-check"></i> Finish</button>`;
-  html += `<button class="hist-verb hist-verb--delete" onclick="smgmtDeleteSprint('${lbl}')">
-             <i class="ti ti-trash"></i> Delete</button>`;
+  if (!html) return '';
   return `<div class="hist-verbs">${html}</div>`;
 }
 
@@ -10239,31 +10245,31 @@ function _histMetricsHtml(s) {
   return `<div class="hist-metrics">${bar}${badges.join('')}</div>`;
 }
 
-function _histIsPartialCompleted(s) {
-  if (!s) return false;
-  const state = (s.lifecycle_state || '').toLowerCase();
-  if (state !== 'completed') return false;
-  // Partial completion means a re-run sub-sprint was created — not merely an
-  // empty issues[] array (which often indicates an early crash instead).
-  return !!s.has_rerun_child;
-}
-
 function _histStateChip(state, sprint) {
+  // Unified lifecycle (docs/architecture/sprint-lifecycle.md). The server maps
+  // legacy values (cancelled→needs_rework, failed→needs_rework, …) and derives
+  // partial_finished from children's states, so no client-side inference here.
   const s = (state || 'unknown').toLowerCase();
-  if (s === 'completed' && _histIsPartialCompleted(sprint)) {
-    return `<span class="hist-state partial">◐ Partial completed</span>`;
-  }
   const map = {
-    completed: ['completed', '✓ Completed'],
+    completed:        ['completed', '✓ Completed'],
+    ready_to_merge:   ['completed', '⇪ Ready to merge'],
+    needs_rework:     ['failed',    '✕ Needs rework'],
+    partial_finished: ['partial',   '◐ Partial finished'],
+    deleted:          ['deleted',   '🗑 Deleted'],
+    running:          ['running',   '● Running'],
+    draft:            ['planning',  '… Draft'],
+    planned:          ['planning',  '◇ Planned'],
+    // Legacy spellings — only reachable from cached client data.
     finished:  ['finished',  '🔒 Finished'],
-    failed:    ['failed',    '✕ Failed'],
-    cancelled: ['cancelled', '⊘ Cancelled'],
-    deleted:   ['deleted',   '🗑 Deleted'],
-    running:   ['running',   '● Running'],
-    planning:  ['planning',  '… Planning'],
+    failed:    ['failed',    '✕ Needs rework'],
+    cancelled: ['failed',    '✕ Needs rework'],
+    planning:  ['planning',  '… Draft'],
   };
   const pair = map[s] || ['unknown', s];
-  return `<span class="hist-state ${pair[0]}">${pair[1]}</span>`;
+  const reason = sprint && sprint.end_reason && (s === 'needs_rework' || s === 'failed' || s === 'cancelled')
+    ? `<span class="hist-state-reason" title="${escHtml(String(sprint.end_reason))}">${escHtml(String(sprint.end_reason))}</span>`
+    : '';
+  return `<span class="hist-state ${pair[0]}">${pair[1]}</span>${reason}`;
 }
 
 // ── Run-stats block (issue #810) ────────────────────────────────────────────
@@ -10302,7 +10308,8 @@ function _histGanttHtml(s, stats) {
   const tickets = Array.isArray(stats.tickets) ? stats.tickets : [];
   if (!tickets.length) return '';
   const scale = Math.max(1, stats.wall_seconds || 0);
-  const failed = (s.lifecycle_state || '').toLowerCase() === 'failed';
+  const _gst = (s.lifecycle_state || '').toLowerCase();
+  const failed = _gst === 'needs_rework' || _gst === 'failed';
   const crash = stats.crash;
   const rows = tickets.map(t => {
     const segs = (t.segments || []).map(seg => {
@@ -10707,7 +10714,8 @@ function _histFoldAgg(group) {
   let done = 0, failed = 0, accSum = 0, accN = 0;
   group.forEach(s => {
     done += _histTicketsDone(s);
-    if ((s.lifecycle_state || '').toLowerCase() === 'failed') failed += 1;
+    const _fst = (s.lifecycle_state || '').toLowerCase();
+    if (_fst === 'needs_rework' || _fst === 'failed') failed += 1;
     const acc = s.estimate_accuracy;
     if (acc != null && !isNaN(acc)) { accSum += Number(acc); accN += 1; }
   });
@@ -10879,27 +10887,6 @@ function _histRenderLedger(sprints) {
   const recentHtml = recent.map(_histGroupHtml).join('');
   const foldsHtml = folds.map(_histFoldHtml).join('');
   el.innerHTML = _histToolbarHtml() + recentHtml + foldsHtml;
-}
-
-// Resume a FAILED sprint — continue from where it stopped. Backend resume is
-// out of scope for #806; the rerun endpoint is the existing continue-from-
-// stopped path (see the cancel-banner copy), so Resume targets it directly.
-async function _histResumeSprint(label) {
-  const repo = _cachedFullRepo[_slug];
-  if (!repo) return;
-  try {
-    const resp = await fetch(
-      `/api/sprints/${encodeURIComponent(label)}/rerun?project=${encodeURIComponent(repo)}`,
-      { method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ resume: true, auto_run: true }) }
-    );
-    if (resp.ok) {
-      await loadSprintMgmt(true);
-      _smgmtLivePollRestart();
-      _histLoadLedger(repo);
-      _smgmtShowSubView('running');
-    }
-  } catch (_) {}
 }
 
 // Re-run from History: create the versioned sub-sprint and dispatch immediately

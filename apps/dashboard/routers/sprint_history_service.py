@@ -24,12 +24,6 @@ import re
 import sys as _sys
 from pathlib import Path
 
-# Lifecycle end-reasons that indicate a crash/stop rather than a clean finish.
-_CRASH_END_REASONS = frozenset({
-    "orphan-pid", "killed", "subprocess-crash", "preflight-skipped",
-    "no-dispatchable-tickets",
-})
-
 # apps/dashboard is on sys.path so ``import db`` resolves (see server bootstrap).
 _DASHBOARD_ROOT = Path(__file__).resolve().parent.parent
 if str(_DASHBOARD_ROOT) not in _sys.path:
@@ -337,22 +331,14 @@ def _build_post_sprint(state: dict) -> dict | None:
 
 
 # ── lifecycle-state normalization ─────────────────────────────────────────────
-
-_STATE_ALIASES = {
-    "complete": "finished",
-    "completed": "completed",
-    "finished": "finished",
-    "cancelled": "cancelled",
-    "canceled": "cancelled",
-    "failed": "failed",
-    "running": "running",
-    "planning": "planning",
-    "deleted": "deleted",
-}
+#
+# One enum for every pane (docs/architecture/sprint-lifecycle.md). Legacy rows
+# (`cancelled`, `failed`, `finished`, `planning`, …) render through the display
+# mapping in db.canonical_lifecycle — forward-only migration, no DB rewrite.
 
 
 def _normalize_state(raw: str | None) -> str:
-    return _STATE_ALIASES.get((raw or "").strip().lower(), (raw or "unknown").strip().lower())
+    return _db().canonical_lifecycle(raw)
 
 
 # ── record builders ───────────────────────────────────────────────────────────
@@ -463,51 +449,33 @@ def _label_base(label: str | None) -> str:
     return m.group(1) if m else (label or "")
 
 
-def _infer_failed_lifecycle(rec: dict) -> tuple[str, str | None]:
-    """Promote ambiguous terminal rows to ``failed`` when local files say so."""
-    state = (rec.get("lifecycle_state") or "").lower()
-    if state == "failed":
-        return "failed", rec.get("failure_reason") or rec.get("end_reason")
-
-    failed_tickets = rec.get("failed_tickets") or []
-    if failed_tickets:
-        reason = rec.get("failure_reason") or failed_tickets[-1].get("failure_reason")
-        return "failed", reason
-
-    end_reason = (rec.get("end_reason") or "").lower()
-    issues = rec.get("issues") or []
-    duration = rec.get("duration")
-    plan_status = (rec.get("plan_status") or "").lower()
-
-    if state == "cancelled" and end_reason in _CRASH_END_REASONS:
-        return "failed", rec.get("end_reason") or rec.get("failure_reason")
-
-    if end_reason == "no-dispatchable-tickets":
-        return "failed", "No dispatchable tickets found for this sprint label"
-
-    if plan_status in ("failed", "stopped"):
-        return "failed", rec.get("failure_reason") or rec.get("end_reason") or plan_status
-
-    # Completed with zero recorded tickets is usually an early crash (e.g. subprocess
-    # exit) — not a partial completion. Partial is a separate UI badge gated on
-    # whether a re-run child sprint exists.
-    if state == "completed" and not issues:
-        if end_reason and end_reason not in ("complete", "natural", "finish_button"):
-            return "failed", rec.get("end_reason")
-        if duration is not None and duration <= 30:
-            return "failed", rec.get("failure_reason") or "Sprint exited before processing tickets"
-
-    return state, rec.get("failure_reason")
+# Terminal lifecycle states for the partial_finished derivation: a parent with
+# children is "settled" only when every child reached one of these.
+_CHILD_SETTLED_STATES = frozenset({"completed", "deleted"})
 
 
 def _finalize_records(records: list[dict], sprints_dir: Path) -> None:
-    """Attach rerun-child flags and normalize failed lifecycle in-place."""
+    """Attach rerun-child flags and derive lifecycle adjustments in-place.
+
+    The pre-redesign failed-state heuristics (_infer_failed_lifecycle) are
+    retired: needs_rework is now written at the source (sprint manager, cancel
+    endpoint, orphan-PID sweeps) and legacy rows render through the display
+    mapping. The one promotion kept is a fact, not a guess: a row whose run
+    recorded failed tickets is needs_rework regardless of its stored state.
+
+    `partial_finished` is derived here, never stored (sprint-lifecycle.md): a
+    terminal sprint whose re-run children are not all completed shows
+    partial_finished; when the last child completes the parent flips to
+    completed automatically.
+    """
     children_by_base: dict[str, list[str]] = {}
     for rec in records:
         label = rec.get("label") or ""
         base = _label_base(label)
         if _label_sub_index(label) > 0:
             children_by_base.setdefault(base, []).append(label)
+
+    state_by_label: dict[str, str] = {}
 
     for rec in records:
         label = rec.get("label") or ""
@@ -528,13 +496,38 @@ def _finalize_records(records: list[dict], sprints_dir: Path) -> None:
         if sub == 0:
             rec["has_rerun_child"] = bool(siblings)
 
-        effective, reason = _infer_failed_lifecycle(rec)
-        if effective == "failed":
-            rec["lifecycle_state"] = "failed"
-            if reason and not rec.get("failure_reason"):
-                rec["failure_reason"] = reason
+        # Failed tickets are recorded facts — any such run needs rework.
+        if rec.get("failed_tickets") and rec.get("lifecycle_state") not in ("running", "deleted"):
+            rec["lifecycle_state"] = "needs_rework"
+            if not rec.get("failure_reason"):
+                rec["failure_reason"] = rec["failed_tickets"][-1].get("failure_reason")
 
         rec.pop("plan_status", None)
+        state_by_label[label] = rec.get("lifecycle_state") or "unknown"
+
+    # Derived partial_finished pass (needs every sibling's settled state above).
+    for rec in records:
+        label = rec.get("label") or ""
+        if not rec.get("has_rerun_child"):
+            continue
+        own = rec.get("lifecycle_state") or ""
+        if own in ("running", "deleted"):
+            continue
+        sub = _label_sub_index(label)
+        descendants = [
+            c for c in children_by_base.get(_label_base(label), [])
+            if _label_sub_index(c) > sub
+        ]
+        unsettled = [
+            c for c in descendants
+            if state_by_label.get(c, "unknown") not in _CHILD_SETTLED_STATES
+        ]
+        if unsettled:
+            rec["lifecycle_state"] = "partial_finished"
+            rec["partial_children"] = sorted(unsettled, key=_label_sub_index)
+        elif descendants:
+            # All children settled — the parent chain is complete.
+            rec["lifecycle_state"] = "completed"
 
 
 def _discover_file_labels(sprints_dir: Path) -> set[str]:

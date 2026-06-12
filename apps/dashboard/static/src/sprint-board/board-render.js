@@ -312,7 +312,8 @@ export function _smgmtIsFreshRerunSprint(label) {
   const parents = (_smgmtData && _smgmtData.sprint_parents) || {};
   if (!parents[label]) return false;
   const planState = ((_smgmtData && _smgmtData.sprint_plan_states) || {})[label];
-  return planState === 'planning';
+  // 'draft' is the unified-lifecycle spelling; 'planning' covers legacy files.
+  return planState === 'draft' || planState === 'planning';
 }
 
 /** Optimistic board state after POST /rerun — child visible, parent emptied, no refresh lag. */
@@ -334,7 +335,7 @@ export function _smgmtApplyRerunOptimistic(parentLabel, subLabel, ticketNumbers)
   if (!_smgmtData.sprint_rerun_into) _smgmtData.sprint_rerun_into = {};
   _smgmtData.sprint_rerun_into[parentLabel] = subLabel;
   if (!_smgmtData.sprint_plan_states) _smgmtData.sprint_plan_states = {};
-  _smgmtData.sprint_plan_states[subLabel] = 'planning';
+  _smgmtData.sprint_plan_states[subLabel] = 'draft';
   delete _smgmtOutcomeCache[parentLabel];
   delete _smgmtOutcomeCache[subLabel];
   if (_smgmtBySprint) {

@@ -1,7 +1,7 @@
 # Milestone — Sprint Lifecycle Redesign
 
-> **Status:** P0 done; P1–P4 not started. Tracking file for the fixes agreed
-> on 2026-06-12.
+> **Status:** P0–P1 done; P2–P4 not started. Tracking file for the fixes
+> agreed on 2026-06-12.
 > **Design contract:** [`../architecture/sprint-lifecycle.md`](../architecture/sprint-lifecycle.md)
 > — reread that doc before picking up any item here or re-opening the design
 > discussion. Code evidence (file:line) below was audited against branch
@@ -35,21 +35,37 @@ same-label re-runs.
 
 ## P1 — Lifecycle enum (foundation)
 
-- [ ] New enum `draft → planned → running → ready_to_merge | needs_rework →
-  completed` (+ derived `partial_finished`, + `deleted`) in plan.json
-  (`_VALID_PLAN_STATES`, `server.py:4988`), the `sprints` DB table, and both
-  panes. Display mapping for legacy rows (`cancelled`→`needs_rework`,
-  `finished`→`completed`); forward-only, no DB rewrite.
-- [ ] Replace all five `cancelled` write sites with `needs_rework` +
-  `end_reason` (`server.py:444, 5228, 5284, 5416, 6829-6832`).
-- [ ] Cancel endpoint (`server.py:6770-6841`): post the reason
-  (`stopped by user` / `process lost`) to the sprint summary issue; never
-  label tickets `need-rework` on a user cancel.
-- [ ] Derive `partial_finished` server-side from children's states
-  (generalize the client-side `has_rerun_child` chip,
-  `static/project.html:10242-10254`).
-- [ ] Retire the history failed-state heuristics once the enum is written at
-  the source (`routers/sprint_history_service.py:465-500`).
+- [x] **New unified enum.** *Done 2026-06-12.*
+  - `db.py`: `LIFECYCLE_STATES` + `canonical_lifecycle()` display mapping
+    (`cancelled`/`failed`→`needs_rework`, `finished`→`completed`,
+    `planning`→`draft`); sprints-table CHECK extended with an in-place table
+    rebuild for pre-P1 databases (forward-only — legacy rows kept verbatim).
+  - `server.py`: `_VALID_PLAN_STATES` / `_TERMINAL_PLAN_STATES` /
+    `_NOT_RUNNING_PLAN_STATES` carry the new states; new plan.json files are
+    created as `draft`; outcome + finish-card endpoints return a `lifecycle`
+    field alongside the legacy pane `state`.
+  - Sprint manager writes the terminal state **at the source**:
+    `ready_to_merge` when every ticket passed, `needs_rework` on any failure
+    (`end_reason=ticket-failures` / `no-dispatchable-tickets`).
+- [x] **`cancelled` write sites replaced** with `needs_rework` + `end_reason`
+  (*process lost* for orphan-PID sweeps ×3 and DB reconcile, *stopped by
+  user* for the cancel endpoint and the sprint manager SIGTERM handler).
+  `db.record_sprint_cancel/fail` are deprecated aliases that write
+  `needs_rework`.
+- [x] **Cancel endpoint** posts the reason to the sprint summary issue
+  (best-effort comment) and never labels tickets `need-rework` — failure
+  labeling stays exclusive to the sprint manager's failure paths.
+- [x] **`partial_finished` derived server-side** in
+  `sprint_history_service._finalize_records`: a terminal parent with
+  unsettled children shows `partial_finished` (+ `partial_children`); when
+  the last child completes the parent flips to `completed`. The client-side
+  `_histIsPartialCompleted` inference was removed.
+- [x] **History heuristics retired**: `_infer_failed_lifecycle` deleted; the
+  only promotion kept is the recorded fact "failed tickets ⇒ needs_rework".
+  History chips/verbs use the unified vocabulary (Resume verb retired —
+  needs_rework re-runs into a child).
+- Tests: `tests/test_lifecycle_p1__unified_enum.py` (+ contract updates in
+  805/806/507/757 suites).
 
 ## P2 — Branch / merge model
 

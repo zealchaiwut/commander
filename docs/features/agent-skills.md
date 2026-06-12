@@ -130,7 +130,8 @@ crg-daemon start
 | New Mac / new machine | **Yes** — full `bash scripts/setup_machine.sh` (includes agent skills) |
 | Same Mac mini, skills feel stale | **Yes** — `bash scripts/setup_machine.sh --resetup-machine` |
 
-Track optional vendoring in milestones TODO.
+Skills and MCP config are **vendored in git** (see milestones). Fresh clones
+get them on checkout; run `--resetup-machine` only to refresh or rebuild graphs.
 
 ---
 

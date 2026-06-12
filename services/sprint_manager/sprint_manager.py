@@ -115,6 +115,18 @@ DASHBOARD_DIR = REPO_ROOT / "apps" / "dashboard"
 SCRIPTS_DIR   = REPO_ROOT / "scripts"
 
 
+def _git_worktree_root(start: "Path") -> "Path | None":
+    """Return the git toplevel for ``start``, or None if not inside a worktree."""
+    d = start.resolve()
+    for _ in range(25):
+        if (d / ".git").exists():
+            return d
+        if d.parent == d:
+            break
+        d = d.parent
+    return None
+
+
 def _load_agent_persona(role: str, base_dir: "Path | None" = None) -> str:
     """Return the .claude/agents/<role>.md persona (minus YAML frontmatter).
 
@@ -124,14 +136,24 @@ def _load_agent_persona(role: str, base_dir: "Path | None" = None) -> str:
     than a manual session that delegates to the rich subagent persona. We read
     the same .md the interactive agent uses and pass it via --append-system-prompt.
 
-    Looks in ``base_dir`` (the clone the agent runs in) first, then REPO_ROOT.
+    Looks in ``base_dir`` (the clone the agent runs in), then that worktree's git
+    root (personas live at repo root, not under apps/dashboard), then REPO_ROOT.
     Returns "" if not found, so callers degrade gracefully to the old behaviour.
     """
-    candidates = []
+    candidates: list[Path] = []
     if base_dir is not None:
-        candidates.append(Path(base_dir) / ".claude" / "agents" / f"{role}.md")
+        base = Path(base_dir)
+        candidates.append(base / ".claude" / "agents" / f"{role}.md")
+        wt_root = _git_worktree_root(base)
+        if wt_root is not None:
+            candidates.append(wt_root / ".claude" / "agents" / f"{role}.md")
     candidates.append(REPO_ROOT / ".claude" / "agents" / f"{role}.md")
+    seen: set[Path] = set()
     for path in candidates:
+        path = path.resolve()
+        if path in seen:
+            continue
+        seen.add(path)
         try:
             text = path.read_text(encoding="utf-8")
         except OSError:
@@ -145,6 +167,87 @@ def _load_agent_persona(role: str, base_dir: "Path | None" = None) -> str:
         if text:
             return text
     return ""
+
+
+def _parse_dotenv_value(text: str, key: str) -> Optional[str]:
+    """Return the value for ``key=`` from a dotenv file body, or None."""
+    prefix = f"{key}="
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or not line.startswith(prefix):
+            continue
+        val = line[len(prefix):].strip().strip('"').strip("'")
+        return val or None
+    return None
+
+
+def _resolve_uat_env_for_tester(
+    cfg: Optional["SprintConfig"],
+    tester_app_dir: Path,
+) -> tuple[Optional[dict[str, str]], Optional[str]]:
+    """Resolve UAT repo/port for tester dispatch (Commander + generic layouts).
+
+    Returns ``(env_dict, error)``. *env_dict* keys: ``UAT_REPO``, ``UAT_BASE_URL``,
+    ``UAT_PORT``. Called by sprint_manager so headless testers get pre-validated env
+    vars and do not re-interpret ``.env`` from stale persona memory.
+    """
+    tester_root = _git_worktree_root(tester_app_dir) or Path(tester_app_dir)
+    project_dir = tester_root.parent
+    repo_name = tester_root.name
+
+    uat_repo: Optional[Path] = None
+    if (project_dir / "uat" / "apps" / "dashboard").is_dir():
+        uat_repo = project_dir / "uat"
+    else:
+        candidate = project_dir / "uat" / repo_name
+        if candidate.is_dir():
+            uat_repo = candidate
+
+    if uat_repo is None:
+        return None, f"UAT clone not found beside tester worktree {tester_root}"
+
+    for rel in ("apps/dashboard/.env", "dashboard/.env", ".env"):
+        uat_env_path = uat_repo / rel
+        if uat_env_path.is_file():
+            break
+    else:
+        return None, f"No .env found under {uat_repo}"
+
+    try:
+        env_text = uat_env_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        return None, f"Cannot read {uat_env_path}: {exc}"
+
+    port = _parse_dotenv_value(env_text, "PORT")
+    environment = (_parse_dotenv_value(env_text, "ENVIRONMENT") or "").lower()
+
+    if not port:
+        return None, f"PORT= missing in {uat_env_path}"
+    if port == "8000":
+        return None, f"Refusing port 8000 (PRD) in {uat_env_path}"
+
+    commander_ok = uat_repo.resolve() == (project_dir / "uat").resolve() and port == "8001"
+    env_ok = environment in ("uat", "") or (commander_ok and environment in ("uat", "prd", ""))
+    if not env_ok:
+        return None, (
+            f"{uat_env_path} has ENVIRONMENT={environment!r}; expected uat "
+            f"(Commander uat/ on port 8001 also accepts legacy prd)"
+        )
+
+    base_url = f"http://localhost:{port}"
+    sys.stdout.write(
+        str(
+            f"  [uat-env] Resolved {uat_env_path} → {base_url} "
+            f"(ENVIRONMENT={environment or 'unset'}, commander_ok={commander_ok})"
+        ) + "\n"
+    )
+    sys.stdout.flush()
+    return {
+        "UAT_REPO": str(uat_repo),
+        "UAT_BASE_URL": base_url,
+        "UAT_PORT": port,
+        "COMMANDER_UAT_PREVALIDATED": "1",
+    }, None
 
 sys.path.insert(0, str(REPO_ROOT))      # allow `from services.*` imports
 sys.path.insert(0, str(DASHBOARD_DIR))
@@ -603,6 +706,18 @@ def _plan_json_path(label: str, cfg: Optional["SprintConfig"] = None) -> Path:
     """Return path to {label}-plan.json in the sprints directory."""
     sprints_dir = cfg.sprints_dir if cfg is not None else REPO_ROOT / ".commander" / "sprints"
     return sprints_dir / f"{label}-plan.json"
+
+
+def _plan_has_parent(label: str, cfg: Optional["SprintConfig"] = None) -> bool:
+    """True when ``label`` is a versioned re-run sub-sprint (plan.json has parent)."""
+    path = _plan_json_path(label, cfg)
+    try:
+        if not path.exists():
+            return False
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        return bool(isinstance(raw, dict) and raw.get("parent"))
+    except Exception:
+        return False
 
 
 def _plan_json_set_state_sm(
@@ -3767,7 +3882,8 @@ def _dispatch_coder(
         return False, "design_docs_missing"
 
     # Worktree hygiene (issue #788): fetch, stash dirty state, reset to base, validate branch.
-    _is_retry = bool(prior_failures)
+    _is_rerun_child = bool(sprint_label and _plan_has_parent(sprint_label, cfg))
+    _is_retry = bool(prior_failures) or _is_rerun_child
     _wt_sha, _base_sha, _hygiene_err = _worktree_hygiene(
         worktree=cwd_path,
         ticket_id=issue_num,
@@ -4277,6 +4393,29 @@ def _dispatch_tester(
     if chosen_port is not None:
         sub_env["COMMANDER_APP_PORT"] = str(chosen_port)
         sys.stdout.write(str(f"  [port] COMMANDER_APP_PORT={chosen_port} injected into tester env") + "\n")
+
+    uat_env_vars, uat_err = _resolve_uat_env_for_tester(cfg, cwd_path)
+    if uat_err:
+        sys.stdout.write(str(f"  [uat-env] ERROR: {uat_err}") + "\n")
+        sys.stdout.flush()
+        record_failure(
+            int(issue_num),
+            "uat-env",
+            detail=uat_err,
+            repo_root=_tester_wt_root,
+        )
+        return 1, "uat-env"
+    if uat_env_vars:
+        sub_env.update(uat_env_vars)
+        cmd[-1] += (
+            f" UAT PRE-VALIDATED (sprint_manager Step 0):"
+            f" UAT_BASE_URL={uat_env_vars['UAT_BASE_URL']!r},"
+            f" UAT_PORT={uat_env_vars['UAT_PORT']!r},"
+            f" UAT_REPO={uat_env_vars['UAT_REPO']!r}."
+            f" These env vars are already set — do NOT re-run Step 0 bash guards"
+            f" and do NOT refuse based on ENVIRONMENT= in .env."
+            f" Proceed directly to Step 1."
+        )
 
     # ── GITHUB_ISSUE_TEST_REPO injection (issue #301) ─────────────────────────
     # Read GITHUB_ISSUE_TEST_REPO at tester-dispatch time and inject it into the

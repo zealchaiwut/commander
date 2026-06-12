@@ -173,4 +173,4 @@ and humans will conflict on the same worktree.
 ## Status
 
 **Not implemented.** Documented 2026-06-12 from architecture discussion. Track
-implementation tasks in [milestones.md](../milestones.md#todo).
+implementation tasks in [todo.md](../todo.md#todo).

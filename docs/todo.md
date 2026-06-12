@@ -1,4 +1,12 @@
-# Milestones
+# TODO (formerly milestones.md)
+
+> **Active milestone tracking lives in [`milestones/`](milestones/).**
+> Current focus:
+> [`milestones/sprint-lifecycle-redesign.md`](milestones/sprint-lifecycle-redesign.md)
+> — the prioritized fix list (P0–P4) for the sprint lifecycle redesign. Its
+> design contract is
+> [`architecture/sprint-lifecycle.md`](architecture/sprint-lifecycle.md);
+> reread that doc before picking up items or re-opening the design discussion.
 
 A running history of what each sprint shipped — derived from sprint summaries,
 not a forward roadmap. The documentor appends one entry per finished sprint

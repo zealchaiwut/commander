@@ -5027,9 +5027,7 @@ def _sprint_rerun_into_map(project_root: Path) -> dict[str, str]:
         parent = plan.get("parent")
         if not parent:
             continue
-        state = plan.get("state") or "planning"
-        if state in ("planning", "running", "failed"):
-            result[parent] = label
+        result[parent] = label
     return result
 
 

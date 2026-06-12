@@ -60,6 +60,22 @@ fi
 echo "Syncing pip requirements…"
 "$VENV/bin/pip" install --quiet -r "$UAT_REPO/requirements.txt"
 
+# ── Ensure ENVIRONMENT=uat in .env ────────────────────────────────────────────
+UAT_ENV_FILE="$UAT_DIR/.env"
+if [ ! -f "$UAT_ENV_FILE" ]; then
+    echo "ENVIRONMENT=uat" > "$UAT_ENV_FILE"
+    echo "PORT=$PORT" >> "$UAT_ENV_FILE"
+else
+    if grep -q '^ENVIRONMENT=' "$UAT_ENV_FILE"; then
+        sed -i.bak 's/^ENVIRONMENT=.*/ENVIRONMENT=uat/' "$UAT_ENV_FILE" && rm -f "${UAT_ENV_FILE}.bak"
+    else
+        echo "ENVIRONMENT=uat" >> "$UAT_ENV_FILE"
+    fi
+    if ! grep -q '^PORT=' "$UAT_ENV_FILE"; then
+        echo "PORT=$PORT" >> "$UAT_ENV_FILE"
+    fi
+fi
+
 # ── Launch uvicorn in background ──────────────────────────────────────────────
 cd "$UAT_DIR"
 ENVIRONMENT=uat "$VENV/bin/uvicorn" server:app --host 0.0.0.0 --port "$PORT" \

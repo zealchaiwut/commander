@@ -10934,11 +10934,16 @@ async function _histRerunSprint(label) {
       throw new Error(typeof detail === 'string' ? detail : JSON.stringify(detail));
     }
     const data = await resp.json();
-    const subLabel = data.sub_label ? sprintLabelDisplay(data.sub_label) : 'Sub-sprint';
-    _smgmtShowToast(`${subLabel} started (${ticketNumbers.length} ticket${ticketNumbers.length !== 1 ? 's' : ''})`);
-    await loadSprintMgmt(true);
+    const subLabel = data.sub_label;
+    if (subLabel && typeof _smgmtApplyRerunOptimistic === 'function') {
+      _smgmtApplyRerunOptimistic(label, subLabel, ticketNumbers);
+    }
+    const subDisplay = subLabel ? sprintLabelDisplay(subLabel) : 'Sub-sprint';
+    _smgmtShowToast(`${subDisplay} started (${ticketNumbers.length} ticket${ticketNumbers.length !== 1 ? 's' : ''})`);
+    await loadSprintMgmt(true, subLabel || null);
     _smgmtLivePollRestart();
     _histLoadLedger(repo);
+    _smgmtShowSubView('running');
   } catch (e) {
     _smgmtShowToast('Re-run failed: ' + (e.message || e));
   }

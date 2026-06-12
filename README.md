@@ -315,7 +315,8 @@ commander/
 │   ├── quickstart.md        # 5-minute install and first run
 │   ├── tutorial.md          # Full walkthrough
 │   ├── workflow.md          # Bulk Create → Run → Finish/Rerun
-│   ├── milestones.md        # Auto-maintained sprint history
+│   ├── todo.md              # Auto-maintained sprint history + hand TODO
+│   ├── milestones/          # Active milestone tracking (per initiative)
 │   ├── features/            # Per-feature guides
 │   ├── bulk-create/         # Saved bulk-create prompts and outputs
 │   ├── changelog/
@@ -523,7 +524,8 @@ python -c "from services.sprint_manager.neon_db import get_engine; print(get_eng
 - [Quick start](docs/quickstart.md) — install and first run in 5 minutes
 - [Tutorial](docs/tutorial.md) — full walkthrough and multi-clone setup
 - [Workflow](docs/workflow.md) — Bulk Create → Run Sprint → Finish/Rerun
-- [Milestones](docs/milestones.md) — what each sprint shipped
+- [TODO + sprint history](docs/todo.md) — what each sprint shipped, forward TODO
+- [Milestones](docs/milestones/) — active milestone tracking (e.g. [sprint lifecycle redesign](docs/milestones/sprint-lifecycle-redesign.md))
 
 **Reference**
 - [Architecture boundary map](docs/architecture/boundaries.md) — router clusters, layer rules, repos

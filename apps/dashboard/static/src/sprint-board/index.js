@@ -53,6 +53,7 @@ import {
   _smgmtRunningBoardBannerHtml, _smgmtBoardBannerPatch, _smgmtRunningLevelText,
   _smgmtRollupText, _smgmtTicketSize, _smgmtTicketHasEstimate, _smgmtUpdateColRollup, _smgmtTicketRowHtml, 
   _smgmtRenderBacklog, _smgmtBacklogTicketHtml,
+  _smgmtApplyRerunOptimistic, _smgmtIsFreshRerunSprint,
 } from './board-render.js';
 
 // Re-run modal (issue #512)
@@ -168,3 +169,4 @@ globalThis._smgmtUpdateColRollup = _smgmtUpdateColRollup;
 globalThis._smgmtTicketRowHtml = _smgmtTicketRowHtml;
 globalThis._smgmtRenderBacklog = _smgmtRenderBacklog;
 globalThis._smgmtBacklogTicketHtml = _smgmtBacklogTicketHtml;
+globalThis._smgmtApplyRerunOptimistic = _smgmtApplyRerunOptimistic;

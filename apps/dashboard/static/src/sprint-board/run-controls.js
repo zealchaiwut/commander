@@ -524,7 +524,7 @@ export async function _pfConfirm() {
     _pfClose();
     const n = parseInt(label.split('-')[1], 10);
     _smgmtShowToast(`Sprint ${n} dispatched.`);
-    if (typeof _smgmtShowSubView === 'function') _smgmtShowSubView('board');
+    if (typeof _smgmtShowSubView === 'function') _smgmtShowSubView('running');
     await loadSprintMgmt(true, label);
     if (typeof _smgmtLivePollRestart === 'function') _smgmtLivePollRestart();
     // Poll until running-all confirms dispatch (avoids stale planning card).

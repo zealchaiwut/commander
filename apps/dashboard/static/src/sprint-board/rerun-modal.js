@@ -9,6 +9,7 @@
 
 /* global _setBodyInert, _clearBodyInert, _smgmtRepo, sprintLabelDisplay,
    escHtml, _smgmtShowToast, loadSprintMgmt, _smgmtOutcomeCache,
+   _smgmtApplyRerunOptimistic, smgmtRunSprint,
    _rrLabel:writable, _rrVersionedLabel:writable */
 
 export function _rrOpen() {
@@ -68,7 +69,7 @@ export async function smgmtRerunSprint(label) {
   document.getElementById('rr-error').classList.add('hidden');
   document.getElementById('rr-error').textContent = '';
   const confirmBtn = document.getElementById('rr-confirm-btn');
-  if (confirmBtn) { confirmBtn.disabled = true; confirmBtn.textContent = 'Create sprint'; }
+  if (confirmBtn) { confirmBtn.disabled = true; confirmBtn.textContent = 'Create sprint and run'; }
   _rrOpen();
 
   try {
@@ -81,7 +82,7 @@ export async function smgmtRerunSprint(label) {
     _rrVersionedLabel = preview.suggested_versioned_label;
     document.getElementById('rr-modal-title').textContent =
       `Re-run ${sprintLabelDisplay(label)} as ${sprintLabelDisplay(_rrVersionedLabel)}?`;
-    if (confirmBtn) confirmBtn.textContent = `Create ${sprintLabelDisplay(_rrVersionedLabel)}`;
+    if (confirmBtn) confirmBtn.textContent = `Create & run ${sprintLabelDisplay(_rrVersionedLabel)}`;
 
     const listEl = document.getElementById('rr-ticket-list');
     if ((preview.tickets || []).length === 0) {
@@ -114,6 +115,7 @@ export async function _rrConfirm() {
   const repo = _smgmtRepo();
   if (!_rrLabel || !repo) return;
 
+  const parentLabel = _rrLabel;
   const checkboxes = Array.from(document.querySelectorAll('#rr-ticket-list input[type=checkbox]'));
   const ticketNumbers = checkboxes.filter(c => c.checked).map(c => parseInt(c.dataset.issue, 10));
   if (ticketNumbers.length === 0) return;
@@ -123,28 +125,46 @@ export async function _rrConfirm() {
 
   try {
     const res = await fetch(
-      `/api/sprints/${encodeURIComponent(_rrLabel)}/rerun?project=${encodeURIComponent(repo)}`,
+      `/api/sprints/${encodeURIComponent(parentLabel)}/rerun?project=${encodeURIComponent(repo)}`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ticket_numbers: ticketNumbers, auto_run: false }),
       }
     );
-    if (!res.ok) throw new Error(await res.text());
-    const data = await res.json();
-    _rrClose();
-    delete _smgmtOutcomeCache[_rrLabel];
-    const subLabel = data.sub_label ? sprintLabelDisplay(data.sub_label) : '';
-    if (data.errors && data.errors.length > 0) {
-      _smgmtShowToast(`${subLabel} created with errors. Check labels manually.`);
-    } else {
-      _smgmtShowToast(`${subLabel} created: ${ticketNumbers.length} ticket${ticketNumbers.length !== 1 ? 's' : ''} moved.`);
+    if (!res.ok) {
+      let detail = await res.text();
+      try {
+        const parsed = JSON.parse(detail);
+        detail = parsed.detail || detail;
+      } catch (_) { /* plain-text error body */ }
+      throw new Error(typeof detail === 'string' ? detail : JSON.stringify(detail));
     }
-    await loadSprintMgmt();
+    const data = await res.json();
+    const subLabel = data.sub_label;
+    _rrClose();
+    if (typeof _smgmtApplyRerunOptimistic === 'function') {
+      _smgmtApplyRerunOptimistic(parentLabel, subLabel, ticketNumbers);
+    }
+    await loadSprintMgmt(true);
+    const subDisplay = subLabel ? sprintLabelDisplay(subLabel) : 'Sub-sprint';
+    if (data.errors && data.errors.length > 0) {
+      _smgmtShowToast(`${subDisplay} created with label errors — check GitHub.`);
+    } else {
+      _smgmtShowToast(`${subDisplay} ready — confirm run`);
+    }
+    if (subLabel && typeof smgmtRunSprint === 'function') {
+      smgmtRunSprint(subLabel);
+    }
   } catch (e) {
     const errEl = document.getElementById('rr-error');
     errEl.textContent = 'Failed to re-run sprint: ' + e.message;
     errEl.classList.remove('hidden');
-    if (confirmBtn) { confirmBtn.disabled = false; confirmBtn.textContent = _rrVersionedLabel ? `Create ${sprintLabelDisplay(_rrVersionedLabel)}` : 'Create sprint'; }
+    if (confirmBtn) {
+      confirmBtn.disabled = false;
+      confirmBtn.textContent = _rrVersionedLabel
+        ? `Create & run ${sprintLabelDisplay(_rrVersionedLabel)}`
+        : 'Create sprint and run';
+    }
   }
 }

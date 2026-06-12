@@ -128,11 +128,21 @@ export function _smgmtRender(data) {
   }
 
   // Use order list if available (includes sub-labels), else build from integer sprints ascending
-  const orderedLabels = order.length > 0
+  const orderedLabelsRaw = order.length > 0
     ? order.filter(l => /^sprint-\d+(\.\d+)*$/.test(l))
     : [...sprints].sort((a, b) => a - b).map(n => `sprint-${n}`);
 
   const _sprintParents = data.sprint_parents || {};
+  const _rerunInto = data.sprint_rerun_into || {};
+  // After a re-run moves tickets to a child label, hide the empty parent card until refresh
+  // would have dropped it from the order list anyway (issue #512 UX).
+  const orderedLabels = orderedLabelsRaw.filter(label => {
+    const ticketCount = (bySprint[label] || []).length;
+    if (ticketCount > 0) return true;
+    if (_rerunInto[label]) return false;
+    const hasChild = Object.values(_sprintParents).some(parent => parent === label);
+    return !hasChild;
+  });
 
   // Finished sprints (a summary issue exists) — the same GitHub-backed signal
   // the nav pill uses. Finished sprints are not "NEXT UP" and skip pre-flight.
@@ -303,6 +313,35 @@ export function _smgmtIsFreshRerunSprint(label) {
   if (!parents[label]) return false;
   const planState = ((_smgmtData && _smgmtData.sprint_plan_states) || {})[label];
   return planState === 'planning';
+}
+
+/** Optimistic board state after POST /rerun — child visible, parent emptied, no refresh lag. */
+export function _smgmtApplyRerunOptimistic(parentLabel, subLabel, ticketNumbers) {
+  if (!_smgmtData || !parentLabel || !subLabel) return;
+  const nums = new Set(ticketNumbers || []);
+  const issues = _smgmtData.issues || [];
+  for (const iss of issues) {
+    if (nums.has(iss.number)) iss.sprint_label = subLabel;
+  }
+  if (!_smgmtData.order) _smgmtData.order = [];
+  if (!_smgmtData.order.includes(subLabel)) {
+    const parentIdx = _smgmtData.order.indexOf(parentLabel);
+    if (parentIdx >= 0) _smgmtData.order.splice(parentIdx + 1, 0, subLabel);
+    else _smgmtData.order.push(subLabel);
+  }
+  if (!_smgmtData.sprint_parents) _smgmtData.sprint_parents = {};
+  _smgmtData.sprint_parents[subLabel] = parentLabel;
+  if (!_smgmtData.sprint_rerun_into) _smgmtData.sprint_rerun_into = {};
+  _smgmtData.sprint_rerun_into[parentLabel] = subLabel;
+  if (!_smgmtData.sprint_plan_states) _smgmtData.sprint_plan_states = {};
+  _smgmtData.sprint_plan_states[subLabel] = 'planning';
+  delete _smgmtOutcomeCache[parentLabel];
+  delete _smgmtOutcomeCache[subLabel];
+  if (_smgmtBySprint) {
+    const moved = (_smgmtBySprint[parentLabel] || []).filter(t => nums.has(t.number));
+    _smgmtBySprint[subLabel] = [...(_smgmtBySprint[subLabel] || []), ...moved];
+    _smgmtBySprint[parentLabel] = (_smgmtBySprint[parentLabel] || []).filter(t => !nums.has(t.number));
+  }
 }
 
 export async function _smgmtFetchMissingOutcomes(orderedLabels, bySprint) {

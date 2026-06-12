@@ -798,6 +798,32 @@ def _sprint_db_set_ticket_order_sm(label: str, issue_numbers: list[int]) -> None
         pass
 
 
+def _sprint_db_ingest_run_sm(
+    label: str,
+    state: "SprintState",
+    project: str = "",
+    summary_path: Optional[str] = None,
+    cfg: Optional["SprintConfig"] = None,
+) -> None:
+    """End-of-run disk → DB ingest (lifecycle P3). Best-effort."""
+    try:
+        import db  # apps/dashboard on sys.path (line 142)
+        sprints_dir = cfg.sprints_dir if cfg is not None else SPRINTS_DIR
+        spath = summary_path
+        if spath is None:
+            from pathlib import Path as _Path
+            from routers import sprint_artifact_service  # noqa: PLC0415
+            spath = sprint_artifact_service.find_summary_path(_Path(sprints_dir), label)
+        db.ingest_sprint_run_artifact(
+            label,
+            state.to_dict(),
+            project=project or state.project or "",
+            summary_path=spath,
+        )
+    except (Exception, SystemExit):
+        pass
+
+
 # ── Per-agent run tracking (issue #764) ──────────────────────────────────────
 #
 # Each dispatched agent (coder, tester, documenter, reviewer, estimator) opens
@@ -1046,10 +1072,10 @@ def _state_path(
     sprint_label: str,
     cfg: Optional["SprintConfig"] = None,
 ) -> Path:
+    """Per-label state file: ``sprint-68.6-state.json`` (lifecycle P3)."""
     sprints_dir = cfg.sprints_dir if cfg is not None else SPRINTS_DIR
     sprints_dir.mkdir(parents=True, exist_ok=True)
-    n = sprint_number if sprint_number is not None else sprint_label
-    return sprints_dir / f"sprint-{n}-state.json"
+    return sprints_dir / f"{sprint_label}-state.json"
 
 
 def _summary_path(
@@ -1059,9 +1085,8 @@ def _summary_path(
 ) -> Path:
     sprints_dir = cfg.sprints_dir if cfg is not None else SPRINTS_DIR
     sprints_dir.mkdir(parents=True, exist_ok=True)
-    n   = sprint_number if sprint_number is not None else sprint_label
     day = datetime.now().strftime("%Y-%m-%d")
-    return sprints_dir / f"sprint-{n}-summary-{day}.md"
+    return sprints_dir / f"{sprint_label}-summary-{day}.md"
 
 
 # ── PID file management (AC-2) ───────────────────────────────────────────────
@@ -8952,6 +8977,21 @@ def main() -> None:
                 f"post-sprint reconciliation failed: {_e_rec}",
                 exc=str(_e_rec),
             )
+
+    # Persist final state + ingest run artifacts into DB (lifecycle P3).
+    if state is not None and not args.dry_run:
+        rec_state_path = _state_path(state.sprint_number, state.sprint_label, cfg=cfg)
+        try:
+            state.save(rec_state_path)
+        except Exception:
+            pass
+        _sprint_db_ingest_run_sm(
+            state.sprint_label,
+            state,
+            project=eff_repo or "",
+            summary_path=str(summary_path) if summary_path else None,
+            cfg=cfg,
+        )
 
     sys.stdout.write(str("\n=== Sprint Summary ===") + "\n")
     sys.stdout.write(str(f"Processed: {', '.join(summary.processed) or 'none'}") + "\n")

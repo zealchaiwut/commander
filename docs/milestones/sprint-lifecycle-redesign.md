@@ -1,6 +1,6 @@
 # Milestone — Sprint Lifecycle Redesign
 
-> **Status:** P0–P2 done; P3–P4 not started. Tracking file for the fixes
+> **Status:** P0–P3 done; P4 not started. Tracking file for the fixes
 > agreed on 2026-06-12.
 > **Design contract:** [`../architecture/sprint-lifecycle.md`](../architecture/sprint-lifecycle.md)
 > — reread that doc before picking up any item here or re-opening the design
@@ -86,15 +86,25 @@ same-label re-runs.
 
 ## P3 — Reconciliation (GitHub → API → disk-as-cache)
 
-- [ ] Per-label run artifacts: sprint manager currently writes one shared
-  `sprint-68-state.json` for every child — siblings overwrite each other
-  (worked around by `_sprint_has_own_run_outcome`, `server.py:8044`).
-- [ ] End-of-run disk → DB ingest; remove render-time disk reads from the
-  outcome endpoint (`server.py:8100-8160`) and history service
-  (`routers/sprint_history_service.py` steps 2–3).
-- [ ] Background GitHub reconcile triggered on browser refresh
-  (stale-while-revalidate): serve cached DB row instantly, reconcile
-  labels/issues/PRs/summary issue in the background, push deltas.
+- [x] **Per-label run artifacts.** *Done 2026-06-12.*
+  - ``_state_path`` / ``_summary_path`` write ``{label}-state.json`` and
+    ``{label}-summary-*.md`` so child sprints no longer overwrite siblings.
+  - ``sprint_artifact_service.resolve_state_path`` reads per-label files with
+    a legacy base-file fallback when ``sprint_label`` matches.
+- [x] **End-of-run disk → DB ingest.**
+  - ``db.ingest_sprint_run_artifact`` stores issues, tokens, duration,
+    reconciliation, summary URL, PR, post-sprint block on the ``sprints`` row.
+  - Sprint manager calls ``_sprint_db_ingest_run_sm`` after the final
+    ``state.save()`` at run end.
+  - Outcome endpoint serves ingested DB rows first; history lifecycle rows
+    skip disk enrichment when ``run_ingested_at`` is set (legacy disk fallback
+    kept for pre-P3 rows).
+- [x] **Background GitHub reconcile on history refresh.**
+  - ``GET /api/sprints/history?project=…`` schedules
+    ``sprint_reconcile_service.reconcile_project_background`` (stale-while-
+    revalidate) and broadcasts ``sprint_reconciled`` when lifecycle drift is
+    corrected.
+  - Tests: ``tests/test_lifecycle_p3__reconciliation.py``.
 
 ## P4 — UI
 
@@ -112,8 +122,8 @@ same-label re-runs.
 
 ## Notes
 
-- Until P3 lands, every new sub-sprint silently overwrites its siblings'
-  outcome data (shared state file) — keep re-runs minimal in the meantime.
+- Pre-P3 history/outcome rows without ``run_ingested_at`` still read disk as a
+  legacy fallback; new runs ingest at end-of-run automatically.
 - The documentor's auto-managed sprint-history region moved with the rename
   `docs/milestones.md` → `docs/todo.md`; documentor config must follow before
   the next sprint finishes (see todo.md note).

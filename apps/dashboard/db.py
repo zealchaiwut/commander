@@ -474,6 +474,7 @@ def _create_sprint_lifecycle_tables(conn: sqlite3.Connection) -> None:
     """
     _migrate_sprints_state_check(conn)
     conn.execute(_SPRINTS_TABLE_DDL)
+    _migrate_sprints_run_artifacts(conn)
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS sprint_ticket_order (
@@ -488,6 +489,121 @@ def _create_sprint_lifecycle_tables(conn: sqlite3.Connection) -> None:
         "CREATE INDEX IF NOT EXISTS ix_sprint_ticket_order_label_pos "
         "ON sprint_ticket_order (label, position)"
     )
+
+
+_RUN_ARTIFACT_COLUMNS: tuple[tuple[str, str], ...] = (
+    ("issues_json", "TEXT NOT NULL DEFAULT '[]'"),
+    ("tokens", "INTEGER"),
+    ("wall_clock_secs", "INTEGER"),
+    ("reconciliation_json", "TEXT"),
+    ("summary_issue_url", "TEXT"),
+    ("summary_path", "TEXT"),
+    ("pr_number", "INTEGER"),
+    ("post_sprint_json", "TEXT"),
+    ("estimate_accuracy", "REAL"),
+    ("run_ingested_at", "TEXT"),
+)
+
+
+def _migrate_sprints_run_artifacts(conn: sqlite3.Connection) -> None:
+    """Add end-of-run artifact columns to sprints (lifecycle P3)."""
+    row = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='sprints'"
+    ).fetchone()
+    if row is None:
+        return
+    existing = {r[1] for r in conn.execute("PRAGMA table_info(sprints)").fetchall()}
+    for col, typedef in _RUN_ARTIFACT_COLUMNS:
+        if col not in existing:
+            conn.execute(f"ALTER TABLE sprints ADD COLUMN {col} {typedef}")
+
+
+def ingest_sprint_run_artifact(
+    label: str,
+    state: dict,
+    *,
+    project: str = "",
+    summary_path: str | None = None,
+) -> None:
+    """Persist end-of-run state into the sprints row (lifecycle P3)."""
+    from routers import sprint_artifact_service  # noqa: PLC0415
+
+    fields = sprint_artifact_service.artifact_fields_from_state(
+        state, summary_path=summary_path,
+    )
+    ingested_at = _now_iso()
+    with get_conn() as conn:
+        _create_sprint_lifecycle_tables(conn)
+        existing = conn.execute(
+            "SELECT label FROM sprints WHERE label = ?", (label,)
+        ).fetchone()
+        if existing:
+            conn.execute(
+                """
+                UPDATE sprints SET
+                    issues_json = ?,
+                    tokens = ?,
+                    wall_clock_secs = ?,
+                    reconciliation_json = ?,
+                    summary_issue_url = ?,
+                    summary_path = ?,
+                    pr_number = ?,
+                    post_sprint_json = ?,
+                    estimate_accuracy = ?,
+                    run_ingested_at = ?
+                WHERE label = ?
+                """,
+                (
+                    fields["issues_json"],
+                    fields["tokens"],
+                    fields["wall_clock_secs"],
+                    fields["reconciliation_json"],
+                    fields["summary_issue_url"],
+                    fields["summary_path"],
+                    fields["pr_number"],
+                    fields["post_sprint_json"],
+                    fields["estimate_accuracy"],
+                    ingested_at,
+                    label,
+                ),
+            )
+        else:
+            conn.execute(
+                """
+                INSERT INTO sprints (label, project, state, created_at, run_ingested_at,
+                                     issues_json, tokens, wall_clock_secs,
+                                     reconciliation_json, summary_issue_url, summary_path,
+                                     pr_number, post_sprint_json, estimate_accuracy)
+                VALUES (?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    label,
+                    project,
+                    ingested_at,
+                    ingested_at,
+                    fields["issues_json"],
+                    fields["tokens"],
+                    fields["wall_clock_secs"],
+                    fields["reconciliation_json"],
+                    fields["summary_issue_url"],
+                    fields["summary_path"],
+                    fields["pr_number"],
+                    fields["post_sprint_json"],
+                    fields["estimate_accuracy"],
+                ),
+            )
+        conn.commit()
+
+
+def update_sprint_reconciliation(label: str, reconciliation: dict) -> None:
+    """Refresh the ingested reconciliation block after a background reconcile."""
+    with get_conn() as conn:
+        _create_sprint_lifecycle_tables(conn)
+        conn.execute(
+            "UPDATE sprints SET reconciliation_json = ? WHERE label = ?",
+            (json.dumps(reconciliation), label),
+        )
+        conn.commit()
 
 
 # ── Sprint history records (issue #805) ───────────────────────────────────────

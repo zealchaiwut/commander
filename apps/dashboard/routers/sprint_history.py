@@ -6,10 +6,11 @@ endpoints belong here in ``routers/``, never in ``server.py`` (COMMANDER_GATE_MO
 """
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, BackgroundTasks
 from pydantic import BaseModel
 
 from . import sprint_history_service
+from . import sprint_reconcile_service
 from . import stale_branches_service
 from . import run_stats_service
 
@@ -77,11 +78,27 @@ class SprintHistoryResponse(BaseModel):
 
 
 @router.get("/api/sprints/history", response_model=SprintHistoryResponse)
-def get_sprint_history(offset: int = 0, limit: int = 20, project: str | None = None):
+def get_sprint_history(
+    background_tasks: BackgroundTasks,
+    offset: int = 0,
+    limit: int = 20,
+    project: str | None = None,
+):
     """Return paginated, enriched sprint-history rows. Makes no GitHub calls."""
-    return sprint_history_service.get_sprint_history(
-        offset=offset, limit=limit, project=project
+    result = sprint_history_service.get_sprint_history(
+        offset=offset, limit=limit, project=project,
     )
+    if project:
+        async def _broadcast(data: dict):
+            import server as srv  # noqa: PLC0415
+            await srv.broadcast(data)
+
+        background_tasks.add_task(
+            sprint_reconcile_service.reconcile_project_background,
+            project,
+            _broadcast,
+        )
+    return result
 
 
 # ── Stale-branch scan + cleanup (issue #808) ─────────────────────────────────

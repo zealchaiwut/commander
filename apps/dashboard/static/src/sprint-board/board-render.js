@@ -764,7 +764,7 @@ export function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent, finis
   }
 
   const isOutcomeCompleted = outcomeState === 'completed' || isHasRework;
-  // Show Finish Sprint immediately if outcome says done, OR sprint looks post-run while outcome is still loading.
+  // Show Merge Sprint immediately if outcome says done, OR sprint looks post-run while outcome is still loading.
   const finishHidden = (isOutcomeCompleted || (isPostRun && !outcome)) ? '' : 'hidden';
   const finishDisabled = isOutcomeCompleted && tickets.length === 0 ? 'disabled' : '';
 
@@ -901,7 +901,7 @@ export function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent, finis
           <button class="smgmt-finish-btn ${finishHidden}" ${finishDisabled}
                   title="${finishDisabled ? 'No open tickets' : 'Finish sprint'}"
                   onclick="smgmtFinishSprint('${escHtml(label)}')">
-            <i class="ti ti-flag-check"></i> Finish Sprint</button>
+            <i class="ti ti-flag-check"></i> Merge Sprint</button>
         </div>
       </div>
       ${cancelBannerHtml}

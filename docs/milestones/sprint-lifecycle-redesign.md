@@ -1,6 +1,6 @@
 # Milestone — Sprint Lifecycle Redesign
 
-> **Status:** P0–P1 done; P2–P4 not started. Tracking file for the fixes
+> **Status:** P0–P2 done; P3–P4 not started. Tracking file for the fixes
 > agreed on 2026-06-12.
 > **Design contract:** [`../architecture/sprint-lifecycle.md`](../architecture/sprint-lifecycle.md)
 > — reread that doc before picking up any item here or re-opening the design
@@ -69,16 +69,20 @@ same-label re-runs.
 
 ## P2 — Branch / merge model
 
-- [ ] Child sprint branches created **off the base branch**, not develop
-  (`services/sprint_manager/sprint_manager.py:2761-2789`).
-- [ ] End-of-run PR for a child targets **base**, not develop; remove the
-  end-of-run auto-merge to develop (`sprint_manager.py:5403-5443`). Passing
-  work merges child → base even on a `needs_rework` run (UAT label = merged
-  to base).
-- [ ] Rework Finish Sprint → **Merge Sprint** (`server.py:9947-10090`): merge
-  leftover child branches in label order → base → develop, close issues and
-  PRs, **keep all labels** (delete the label-strip at `server.py:10044`).
-  Merge Sprint is the single human UAT sign-off — no per-ticket gate.
+- [x] **Child sprint branches off base branch.** *Done 2026-06-12.*
+  - `_create_sprint_branch(sprint_branch, parent_ref=…)` creates base sprints
+    off `develop`, child sprints off `sprint/sprint-N`.
+  - `run_sprint` defaults `target_branch` to `_base_sprint_branch(label)` so
+    per-ticket merges land on base; coder/tester worktrees use the child
+    `sprint/{label}` branch.
+- [x] **End-of-run PR targets base; no auto-merge to develop.**
+  - `_create_sprint_pr(..., pr_base=…)` creates child→base PRs only; the
+    auto-merge block to develop was removed.
+- [x] **Finish Sprint → Merge Sprint** (`server.py` finish endpoints): merge
+  leftover child branches in label order → base → develop, close issues,
+  **keep all labels** (label-strip removed). UI strings updated in
+  `finish-modal.js`, `board-render.js`, `project.html`, bundle.
+  - Tests: `tests/test_lifecycle_p2__branch_merge_model.py`.
 
 ## P3 — Reconciliation (GitHub → API → disk-as-cache)
 

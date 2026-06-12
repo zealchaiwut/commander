@@ -1009,6 +1009,25 @@ def _sprint_number(label: str) -> Optional[int]:
     return int(m.group(1)) if m else None
 
 
+def _label_base(label: str) -> str:
+    """Base sprint label: sprint-68.6 → sprint-68 (lineage display only)."""
+    m = re.match(r"^(sprint-\d+)", label)
+    return m.group(1) if m else label
+
+
+def _is_child_sprint_label(label: str) -> bool:
+    return bool(re.match(r"^sprint-\d+\.\d+", label))
+
+
+def _sprint_branch_for_label(label: str) -> str:
+    return f"sprint/{label}"
+
+
+def _base_sprint_branch(label: str) -> str:
+    """Branch all per-ticket merges target: sprint/sprint-68 for any 68.x label."""
+    return _sprint_branch_for_label(_label_base(label))
+
+
 def _is_rate_limit_error(output: str) -> tuple[bool, Optional[int]]:
     """Return (is_rate_limit, retry_after_secs) by inspecting subprocess output.
 
@@ -2760,8 +2779,12 @@ def _run_quality_gates(
     return results
 
 
-def _create_sprint_branch(sprint_branch: str) -> None:
-    """Create sprint/<label> off develop and push to origin (idempotent)."""
+def _create_sprint_branch(sprint_branch: str, parent_ref: str = "develop") -> None:
+    """Create sprint/<label> off parent_ref and push to origin (idempotent).
+
+    Base sprints (sprint-N) are created off develop; child sprints (sprint-N.M)
+    off the base sprint branch (sprint/sprint-N). See sprint-lifecycle.md.
+    """
     # Check if branch already exists on remote
     ok, _, _ = _try("git", "ls-remote", "--exit-code", "origin", f"refs/heads/{sprint_branch}")
     if ok:
@@ -2775,18 +2798,18 @@ def _create_sprint_branch(sprint_branch: str) -> None:
         _run("git", "push", "-u", "origin", sprint_branch)
         return
 
-    sys.stdout.write(str(f"  Creating sprint branch {sprint_branch!r} off develop…") + "\n")
-    # Fetch latest develop
+    sys.stdout.write(str(f"  Creating sprint branch {sprint_branch!r} off {parent_ref}…") + "\n")
     _run("git", "fetch", "origin")
-    # Get develop SHA from remote to avoid checking out develop (which may be in a worktree)
-    ok, develop_sha, _ = _try("git", "rev-parse", "origin/develop")
-    if not ok or not develop_sha:
-        # fallback: try local develop
-        ok, develop_sha, _ = _try("git", "rev-parse", "develop")
-    if not ok or not develop_sha:
-        structured_log.warn("sprint_branch_sha_resolve_failed", "could not resolve develop SHA — using HEAD for sprint branch")
-        develop_sha = "HEAD"
-    _run("git", "branch", sprint_branch, develop_sha)
+    ok, parent_sha, _ = _try("git", "rev-parse", f"origin/{parent_ref}")
+    if not ok or not parent_sha:
+        ok, parent_sha, _ = _try("git", "rev-parse", parent_ref)
+    if not ok or not parent_sha:
+        structured_log.warn(
+            "sprint_branch_sha_resolve_failed",
+            f"could not resolve {parent_ref!r} SHA — using HEAD for sprint branch",
+        )
+        parent_sha = "HEAD"
+    _run("git", "branch", sprint_branch, parent_sha)
     _run("git", "push", "-u", "origin", sprint_branch)
     sys.stdout.write(str(f"  Sprint branch {sprint_branch!r} created and pushed.") + "\n")
 
@@ -5365,10 +5388,12 @@ def _create_sprint_pr(
     sprint_number: Optional[int],
     state: "SprintState",
     repo_name: Optional[str] = None,
+    pr_base: str = "develop",
 ) -> Optional[str]:
-    """Create a PR from sprint_branch → develop at the end of a sprint.
+    """Create a PR from sprint_branch → pr_base at the end of a child sprint.
 
-    Returns the PR URL string, or None if creation failed (best-effort).
+    Child branches promote into the base sprint branch here; develop is only
+    reached at Merge Sprint (no auto-merge). Returns PR URL or None.
     """
     r = _r(repo_name)
     n = sprint_number if sprint_number is not None else sprint_label
@@ -5385,7 +5410,7 @@ def _create_sprint_pr(
 
     body = (
         f"## Sprint {n} — auto-generated PR\n\n"
-        f"This PR promotes `{sprint_branch}` into `develop` after all sprint issues "
+        f"This PR promotes `{sprint_branch}` into `{pr_base}` after all sprint issues "
         f"have been processed.\n\n"
         f"### Shipped ({len(shipped)} tickets)\n\n"
         f"{ticket_lines}\n\n"
@@ -5397,18 +5422,18 @@ def _create_sprint_pr(
         f"| Total tokens in | {state.total_tokens_in} |\n"
         f"| Total tokens out | {state.total_tokens_out} |\n"
         f"| Wall clock | {state.wall_clock_secs:.0f}s |\n\n"
-        f"_Review and merge when UAT is complete._"
+        f"_Merge via Merge Sprint when UAT is complete._"
     )
 
     title = f"Sprint {n} — {len(shipped)} ticket(s) shipped"
 
-    sys.stdout.write(str(f"  Creating PR: {sprint_branch} → develop ...") + "\n")
+    sys.stdout.write(str(f"  Creating PR: {sprint_branch} → {pr_base} ...") + "\n")
     try:
         result = subprocess.run(
             [
                 "gh", "pr", "create",
                 "--repo", r,
-                "--base", "develop",
+                "--base", pr_base,
                 "--head", sprint_branch,
                 "--title", title,
                 "--body", body,
@@ -5434,15 +5459,6 @@ def _create_sprint_pr(
                 structured_log.error("sprint_pr_create_failed", f"failed to create sprint PR: {stderr}", subprocess_stderr=stderr)
                 return None
 
-        # Auto-merge the sprint PR into develop (sprint run is complete, no manual review needed)
-        merge_result = subprocess.run(
-            ["gh", "pr", "merge", pr_url, "--repo", r, "--merge", "--delete-branch"],
-            capture_output=True, text=True, check=False,
-        )
-        if merge_result.returncode == 0:
-            sys.stdout.write(str(f"  Sprint PR auto-merged: {pr_url}") + "\n")
-        else:
-            sys.stdout.write(str(f"  Sprint PR created but auto-merge failed (merge manually): {merge_result.stderr.strip()}") + "\n")
         return pr_url
     except Exception as e:
         structured_log.error("sprint_pr_create_failed", f"exception creating sprint PR: {e}", exc=str(e))
@@ -6912,7 +6928,7 @@ def _run_pipeline_dispatch(
         _stage_coder_utc0 = _token_window_utc_now()
         _pipe_hang_continuation = ctx.get("hang_continuation")
         coder_ok, coder_category = _dispatch_coder(
-            num, alert_modes, sprint_branch=target_branch, repo_name=eff_repo, cfg=cfg,
+            num, alert_modes, sprint_branch=sprint_branch, repo_name=eff_repo, cfg=cfg,
             chosen_port=chosen_port, rate_limit_events=state.rate_limit_events,
             on_running=_on_coder_running, sprint_label=label,
             prior_failures=ctx["fix_history"] if ctx["fix_history"] else None,
@@ -6988,7 +7004,7 @@ def _run_pipeline_dispatch(
                         log_path=str(_issue_log_path(num, cfg=cfg)),
                     )
                     coder_ok, coder_category = _dispatch_coder(
-                        num, alert_modes, sprint_branch=target_branch, repo_name=eff_repo, cfg=cfg,
+                        num, alert_modes, sprint_branch=sprint_branch, repo_name=eff_repo, cfg=cfg,
                         chosen_port=chosen_port, rate_limit_events=state.rate_limit_events,
                         on_running=_on_coder_running, sprint_label=label,
                         prior_failures=ctx["fix_history"] if ctx["fix_history"] else None,
@@ -7067,7 +7083,7 @@ def _run_pipeline_dispatch(
         _stage_tester_t0 = time.monotonic()
         _stage_tester_utc0 = _token_window_utc_now()
         tester_rc, hang_category = _dispatch_tester(
-            num, alert_modes, sprint_branch=target_branch, repo_name=eff_repo, cfg=cfg,
+            num, alert_modes, sprint_branch=sprint_branch, repo_name=eff_repo, cfg=cfg,
             chosen_port=ctx.get("port"), rate_limit_events=state.rate_limit_events,
             on_running=_on_tester_running, sprint_label=label,
         )
@@ -7248,8 +7264,8 @@ def run_sprint(
     Returns (SprintSummary, SprintState).
     Supports resume/retry_failed from persisted state.
 
-    target_branch: branch to merge feature branches into. Defaults to
-    'develop'. Pass a sprint branch name to enable sprint-branch merge mode.
+    target_branch: branch to merge feature branches into. Defaults to the base
+    sprint branch (sprint/sprint-N). Pass 'develop' to override (AC-5 #269).
 
     preflight_approved: optional list of issue numbers approved by the pre-flight
     review. When provided, only issues in this list are dispatched; others are
@@ -7291,13 +7307,14 @@ def run_sprint(
         sys.stdout.write(str(f"  api-url:      {cfg.api_url}") + "\n")
 
     # Determine the sprint branch name and effective merge target.
-    # When target_branch is not explicitly passed, default to sprint/<label>
-    # so per-ticket feature branches merge into the sprint branch, not develop.
+    # Per-ticket merges always land on the base sprint branch (sprint/sprint-N).
+    # Child sprint branches (sprint/sprint-N.M) are created off that base branch.
     # Passing --target-branch develop explicitly is still supported as a
     # deliberate override (AC-5 of issue #269).
-    sprint_branch = f"sprint/{label}"
+    sprint_branch = _sprint_branch_for_label(label)
+    base_merge_target = _base_sprint_branch(label)
     if target_branch is None:
-        target_branch = sprint_branch
+        target_branch = base_merge_target
 
     # Build rerun decisions map (issue → action) when running from a rerun manifest
     rerun_decisions: dict[int, str] = {}
@@ -7397,12 +7414,15 @@ def run_sprint(
     except Exception:
         pass
 
-    # AC-1: Create sprint branch off develop (idempotent)
-    if target_branch == sprint_branch:
+    # Create sprint branch (idempotent). Skip when merging directly into develop.
+    if target_branch != "develop":
+        parent_ref = base_merge_target if _is_child_sprint_label(label) else "develop"
         if dry_run:
-            sys.stdout.write(str(f"  [dry-run] would create sprint branch {sprint_branch!r} off develop") + "\n")
+            sys.stdout.write(str(
+                f"  [dry-run] would create sprint branch {sprint_branch!r} off {parent_ref}"
+            ) + "\n")
         else:
-            _create_sprint_branch(sprint_branch)
+            _create_sprint_branch(sprint_branch, parent_ref=parent_ref)
     else:
         sys.stdout.write(str(f"  Using custom target branch {target_branch!r} — sprint branch creation skipped.") + "\n")
 
@@ -7797,7 +7817,7 @@ def run_sprint(
                 _coder_utc0 = _token_window_utc_now()
                 try:
                     coder_ok, coder_category = _dispatch_coder(
-                        num, alert_modes, sprint_branch=target_branch, repo_name=eff_repo, cfg=cfg,
+                        num, alert_modes, sprint_branch=sprint_branch, repo_name=eff_repo, cfg=cfg,
                         chosen_port=chosen_port, rate_limit_events=state.rate_limit_events,
                         on_running=_on_coder_running, sprint_label=label,
                         prior_failures=_fix_history if _fix_history else None,
@@ -8047,7 +8067,7 @@ def run_sprint(
             _tester_utc0 = _token_window_utc_now()
             try:
                 tester_rc, hang_category = _dispatch_tester(
-                    num, alert_modes, sprint_branch=target_branch, repo_name=eff_repo, cfg=cfg,
+                    num, alert_modes, sprint_branch=sprint_branch, repo_name=eff_repo, cfg=cfg,
                     chosen_port=chosen_port, rate_limit_events=state.rate_limit_events,
                     on_running=_on_tester_running, sprint_label=label,
                     pre_dispatch_risk=_tester_risk,
@@ -8800,21 +8820,22 @@ def main() -> None:
             structured_log.warn("brief_generator_failed", f"write_sprint_brief failed (non-fatal): {e_brief}", exc=str(e_brief))
             sys.stdout.write(str(f"  [brief_generator] WARNING: brief generation failed: {e_brief}") + "\n")
 
-    # AC6, AC7: auto-create PR sprint/sprint-N → develop at sprint end,
-    # but only when we were running in sprint-branch mode (not manual 'develop' override)
+    # AC6, AC7: child sprints get an open PR into the base branch at sprint end.
+    # develop is reached only at Merge Sprint — no auto-merge here.
     sprint_pr_url: Optional[str] = None
     if (
         state.issues
         and not args.dry_run
-        and effective_target != "develop"
-        and effective_target == sprint_branch  # only for auto sprint branches, not custom --target-branch
+        and args.target_branch != "develop"
+        and _is_child_sprint_label(args.label)
     ):
         sprint_pr_url = _create_sprint_pr(
-            sprint_branch  = effective_target,
+            sprint_branch  = sprint_branch,
             sprint_label   = args.label,
             sprint_number  = _sprint_number(args.label),
             state          = state,
             repo_name      = eff_repo,
+            pr_base        = _base_sprint_branch(args.label),
         )
 
     # Dispatch reviewer after sprint PR creation (issue #159)

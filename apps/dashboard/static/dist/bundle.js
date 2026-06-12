@@ -240,7 +240,7 @@
     const parts = repo.split("/");
     const owner = parts[0];
     const repoName = parts.slice(1).join("/");
-    document.getElementById("fs-modal-title").textContent = `Finish ${sprintLabelDisplay(label)}?`;
+    document.getElementById("fs-modal-title").textContent = `Merge ${sprintLabelDisplay(label)}?`;
     document.getElementById("fs-loading").classList.remove("hidden");
     document.getElementById("fs-content").classList.add("hidden");
     document.getElementById("fs-error").classList.add("hidden");
@@ -248,7 +248,7 @@
     const confirmBtn = document.getElementById("fs-confirm-btn");
     if (confirmBtn) {
       confirmBtn.disabled = true;
-      confirmBtn.textContent = "Finish Sprint";
+      confirmBtn.textContent = "Merge Sprint";
     }
     _fsOpen();
     try {
@@ -282,12 +282,17 @@
       }
       const actionsEl = document.getElementById("fs-actions");
       const actionRows = [];
+      const mergeBranches = preview.merge_branches || [];
+      for (const mb of mergeBranches) {
+        actionRows.push(
+          `<div class="fs-action-row"><i class="ti ti-git-merge"></i> Merge <code>${escHtml(mb.head)}</code> \u2192 <code>${escHtml(mb.base)}</code></div>`
+        );
+      }
       if (preview.sprint_pr) {
-        actionRows.push(`<div class="fs-action-row"><i class="ti ti-git-merge"></i> Merge sprint PR
+        actionRows.push(`<div class="fs-action-row"><i class="ti ti-git-merge"></i> Merge open PR
         <a href="${escHtml(preview.sprint_pr.url)}" target="_blank" rel="noopener">#${preview.sprint_pr.number}</a></div>`);
       }
-      actionRows.push('<div class="fs-action-row"><i class="ti ti-circle-check"></i> Close all selected tickets</div>');
-      actionRows.push('<div class="fs-action-row"><i class="ti ti-tag-off"></i> Remove sprint label</div>');
+      actionRows.push('<div class="fs-action-row"><i class="ti ti-circle-check"></i> Close sprint tickets (labels kept)</div>');
       actionsEl.innerHTML = actionRows.join("");
       document.getElementById("fs-loading").classList.add("hidden");
       document.getElementById("fs-content").classList.remove("hidden");
@@ -312,7 +317,7 @@
     const confirmBtn = document.getElementById("fs-confirm-btn");
     if (confirmBtn) {
       confirmBtn.disabled = true;
-      confirmBtn.textContent = "Finishing\u2026";
+      confirmBtn.textContent = "Merging\u2026";
     }
     try {
       const res = await fetch(
@@ -336,9 +341,9 @@
       const data = await res.json();
       _fsClose();
       if (data.errors && data.errors.length > 0) {
-        _smgmtShowToast(`Finished with errors \u2014 ${data.closed} closed, ${data.moved} moved.`);
+        _smgmtShowToast(`Merged with errors \u2014 ${data.closed} closed.`);
       } else {
-        let msg = `${sprintLabelDisplay(_fsLabel || "")} finished \u2014 ${data.closed} closed`;
+        let msg = `${sprintLabelDisplay(_fsLabel || "")} merged \u2014 ${data.closed} closed`;
         if (data.moved > 0)
           msg += `, ${data.moved} moved to ${data.next_sprint_label}`;
         _smgmtShowToast(msg + ".");
@@ -350,7 +355,7 @@
       errEl.classList.remove("hidden");
       if (confirmBtn) {
         confirmBtn.disabled = false;
-        confirmBtn.textContent = "Finish Sprint";
+        confirmBtn.textContent = "Merge Sprint";
       }
     }
   }
@@ -2461,7 +2466,7 @@ ${data.errors.join("\n")}`);
           <button class="smgmt-finish-btn ${finishHidden}" ${finishDisabled}
                   title="${finishDisabled ? "No open tickets" : "Finish sprint"}"
                   onclick="smgmtFinishSprint('${escHtml(label)}')">
-            <i class="ti ti-flag-check"></i> Finish Sprint</button>
+            <i class="ti ti-flag-check"></i> Merge Sprint</button>
         </div>
       </div>
       ${cancelBannerHtml}

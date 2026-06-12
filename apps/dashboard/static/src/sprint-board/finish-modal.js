@@ -43,13 +43,13 @@ export async function smgmtFinishSprint(label) {
   const owner = parts[0];
   const repoName = parts.slice(1).join('/');
 
-  document.getElementById('fs-modal-title').textContent = `Finish ${sprintLabelDisplay(label)}?`;
+  document.getElementById('fs-modal-title').textContent = `Merge ${sprintLabelDisplay(label)}?`;
   document.getElementById('fs-loading').classList.remove('hidden');
   document.getElementById('fs-content').classList.add('hidden');
   document.getElementById('fs-error').classList.add('hidden');
   document.getElementById('fs-error').textContent = '';
   const confirmBtn = document.getElementById('fs-confirm-btn');
-  if (confirmBtn) { confirmBtn.disabled = true; confirmBtn.textContent = 'Finish Sprint'; }
+  if (confirmBtn) { confirmBtn.disabled = true; confirmBtn.textContent = 'Merge Sprint'; }
   _fsOpen();
 
   try {
@@ -86,12 +86,18 @@ export async function smgmtFinishSprint(label) {
 
     const actionsEl = document.getElementById('fs-actions');
     const actionRows = [];
+    const mergeBranches = preview.merge_branches || [];
+    for (const mb of mergeBranches) {
+      actionRows.push(
+        `<div class="fs-action-row"><i class="ti ti-git-merge"></i> Merge `
+        + `<code>${escHtml(mb.head)}</code> → <code>${escHtml(mb.base)}</code></div>`,
+      );
+    }
     if (preview.sprint_pr) {
-      actionRows.push(`<div class="fs-action-row"><i class="ti ti-git-merge"></i> Merge sprint PR
+      actionRows.push(`<div class="fs-action-row"><i class="ti ti-git-merge"></i> Merge open PR
         <a href="${escHtml(preview.sprint_pr.url)}" target="_blank" rel="noopener">#${preview.sprint_pr.number}</a></div>`);
     }
-    actionRows.push('<div class="fs-action-row"><i class="ti ti-circle-check"></i> Close all selected tickets</div>');
-    actionRows.push('<div class="fs-action-row"><i class="ti ti-tag-off"></i> Remove sprint label</div>');
+    actionRows.push('<div class="fs-action-row"><i class="ti ti-circle-check"></i> Close sprint tickets (labels kept)</div>');
     actionsEl.innerHTML = actionRows.join('');
 
     document.getElementById('fs-loading').classList.add('hidden');
@@ -116,7 +122,7 @@ export async function _fsConfirm() {
   const selectedNums = checkboxes.filter(c => c.checked).map(c => parseInt(c.dataset.issue, 10));
 
   const confirmBtn = document.getElementById('fs-confirm-btn');
-  if (confirmBtn) { confirmBtn.disabled = true; confirmBtn.textContent = 'Finishing…'; }
+  if (confirmBtn) { confirmBtn.disabled = true; confirmBtn.textContent = 'Merging…'; }
 
   try {
     const res = await fetch(
@@ -140,9 +146,9 @@ export async function _fsConfirm() {
     const data = await res.json();
     _fsClose();
     if (data.errors && data.errors.length > 0) {
-      _smgmtShowToast(`Finished with errors — ${data.closed} closed, ${data.moved} moved.`);
+      _smgmtShowToast(`Merged with errors — ${data.closed} closed.`);
     } else {
-      let msg = `${sprintLabelDisplay(_fsLabel || '')} finished — ${data.closed} closed`;
+      let msg = `${sprintLabelDisplay(_fsLabel || '')} merged — ${data.closed} closed`;
       if (data.moved > 0) msg += `, ${data.moved} moved to ${data.next_sprint_label}`;
       _smgmtShowToast(msg + '.');
     }
@@ -151,6 +157,6 @@ export async function _fsConfirm() {
     const errEl = document.getElementById('fs-error');
     errEl.textContent = 'Failed to finish sprint: ' + e.message;
     errEl.classList.remove('hidden');
-    if (confirmBtn) { confirmBtn.disabled = false; confirmBtn.textContent = 'Finish Sprint'; }
+    if (confirmBtn) { confirmBtn.disabled = false; confirmBtn.textContent = 'Merge Sprint'; }
   }
 }

@@ -82,10 +82,12 @@ def test_ledger_loads_from_805_history_endpoint():
 
 
 def test_history_subview_still_loads_summaries_716():
-    """Regression: the History sub-view must still load summaries (issue #716 AC3)."""
+    """The legacy Sprint Summaries pane (issue #716) was retired — each ledger
+    card carries its own Summary pill, so History opens the ledger only."""
     toggle = _fn_body("_smgmtShowSubView")
-    assert "_smgmtLoadSummaries" in toggle, "summaries load must remain wired (716)"
-    assert "_histLoadLedger" in toggle, "the ledger load must also be wired on History open"
+    assert "_smgmtLoadSummaries" not in toggle, \
+        "the legacy summaries pane must stay unwired (replaced by ledger pills)"
+    assert "_histLoadLedger" in toggle, "the ledger load must be wired on History open"
 
 
 # ═══════════════════════ AC1 — issue list + chips ════════════════════════════

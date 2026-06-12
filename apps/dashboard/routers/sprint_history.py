@@ -46,9 +46,11 @@ class SprintHistoryResponse(BaseModel):
 
 
 @router.get("/api/sprints/history", response_model=SprintHistoryResponse)
-def get_sprint_history(offset: int = 0, limit: int = 20):
+def get_sprint_history(offset: int = 0, limit: int = 20, project: str | None = None):
     """Return paginated, enriched sprint-history rows. Makes no GitHub calls."""
-    return sprint_history_service.get_sprint_history(offset=offset, limit=limit)
+    return sprint_history_service.get_sprint_history(
+        offset=offset, limit=limit, project=project
+    )
 
 
 # ── Stale-branch scan + cleanup (issue #808) ─────────────────────────────────

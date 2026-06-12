@@ -199,7 +199,11 @@
     } catch(_) { /* repo map is best-effort; actions degrade gracefully */ }
 
     const url = new URL(window.location.href);
-    const d = url.searchParams.get('date') || todayIso();
+    // No explicit ?date= → let the backend resolve the current brief day.
+    // The brief day rolls at the 6 AM anchor, so the calendar date is wrong
+    // between midnight and the anchor (it asked for a not-yet-started day
+    // and rendered empty).
+    const d = url.searchParams.get('date');
     await loadBrief(d);
   }
 
@@ -210,11 +214,15 @@
 
     let artifact;
     try {
-      artifact = await (await fetch('/api/brief/daily?date=' + encodeURIComponent(date))).json();
+      const q = date ? ('?date=' + encodeURIComponent(date)) : '';
+      artifact = await (await fetch('/api/brief/daily' + q)).json();
     } catch(_) {
       root.innerHTML = '<div class="empty-note">Could not load the daily brief.</div>';
       return;
     }
+    // Adopt the backend-resolved brief day for the header and the date nav.
+    date = date || (artifact && artifact.date) || todayIso();
+    _curDate = date;
 
     const brief = (artifact && artifact.brief) || {};
     const gk = brief.global_kpis || {};
@@ -320,7 +328,7 @@
           btn = `<button class="dec-act" id="dec-${i}" onclick="cleanupBranchesAction('${esc(repo)}',${i})">Clean up</button>`;
         } else { // empty_sprint and any other advisory item — navigate to the board
           ic = '<span class="dec-ic"><i class="ti ti-clipboard-plus"></i></span>';
-          btn = `<a class="dec-act" href="/static/project.html?slug=${esc(dec.project)}">Open</a>`;
+          btn = `<a class="dec-act" href="/project/${esc(dec.project)}/sprint-mgmt">Open</a>`;
         }
         rows += `
         <div class="dec-row">
@@ -344,6 +352,16 @@
       blocks = available
         ? '<div class="empty-note">No projects to report on for this date.</div>'
         : '<div class="empty-note">No brief was stored for this date.</div>';
+      // Still show the tracked projects so the page is navigable without a brief.
+      const slugs = Object.keys(_repoBySlug);
+      blocks += slugs.map(s => `
+        <div class="pbrief collapsed">
+          <div class="pbrief-head">
+            <span class="pbic"><i class="ti ti-terminal"></i></span>
+            <strong>${esc(s)}</strong>
+            <a class="open-proj" style="margin-left:auto" href="/project/${esc(s)}/sprint-mgmt"><i class="ti ti-arrow-right" style="font-size:13px"></i> Open ${esc(s)}</a>
+          </div>
+        </div>`).join('');
     } else {
       blocks = projects.map(renderProject).join('');
     }
@@ -429,7 +447,9 @@
       const lbl = (a.source || 'EVENT').toUpperCase();
       return `<div class="tl-row"><span class="tl-time">${esc(a.time || '')}</span><span class="tl-badge ${badge}">${esc(lbl)}</span><span class="tl-txt">${esc(a.message || '')}</span></div>`;
     }).join('');
-    return `<div class="timeline">${rows}</div>`;
+    // Foot link per the mock: full history lives on the project's Logs tab.
+    const foot = `<div class="tl-foot"><a href="/project/${esc(p.project)}/logs">View all in Logs →</a></div>`;
+    return `<div class="timeline">${rows}${foot}</div>`;
   }
 
   function renderProject(p){
@@ -472,7 +492,7 @@
               ${_timeline(p)}
             </div>
           </div>
-          <a class="open-proj" href="/static/project.html?slug=${esc(slug)}"><i class="ti ti-arrow-right" style="font-size:13px"></i> Open ${esc(slug)}</a>
+          <a class="open-proj" href="/project/${esc(slug)}/sprint-mgmt"><i class="ti ti-arrow-right" style="font-size:13px"></i> Open ${esc(slug)}</a>
         </div>
       </div>`;
   }
@@ -499,7 +519,8 @@
   // ── AC2: date navigation ────────────────────────────────────────────────────
   function _go(date){
     const url = new URL(window.location.href);
-    url.searchParams.set('date', date);
+    if (date) url.searchParams.set('date', date);
+    else url.searchParams.delete('date');
     window.history.replaceState({}, '', url);
     loadBrief(date);
   }
@@ -508,7 +529,9 @@
     dt.setDate(dt.getDate() - 1);
     _go(fmtIso(dt));
   }
-  function gotoToday(){ _go(todayIso()); }
+  // null → backend resolves the current brief day (6 AM anchor), not the
+  // calendar date, which is one day ahead between midnight and the anchor.
+  function gotoToday(){ _go(null); }
   function onDatePick(ev){
     const v = ev.target.value;
     if (v) _go(v);

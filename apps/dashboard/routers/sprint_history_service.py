@@ -20,6 +20,7 @@ a deleted sprint is queryable here immediately afterwards (AC7/AC8).
 from __future__ import annotations
 
 import json
+import re
 import sys as _sys
 from pathlib import Path
 
@@ -56,15 +57,25 @@ def _map_issue_state(raw: str | None) -> str:
 
 
 def _seconds_between(start: str | None, end: str | None) -> int | None:
-    """Whole seconds between two ISO-8601 timestamps, or None if unusable."""
+    """Whole seconds between two ISO-8601 timestamps, or None if unusable.
+
+    Timestamps come from mixed sources: some carry a Z/offset (aware after
+    fromisoformat), others are bare naive-UTC strings. Normalize both to aware
+    UTC — subtracting naive from aware raises TypeError, which 500'd the whole
+    History endpoint.
+    """
     if not start or not end:
         return None
-    from datetime import datetime
+    from datetime import datetime, timezone
     try:
         s = datetime.fromisoformat(str(start).replace("Z", "+00:00"))
         e = datetime.fromisoformat(str(end).replace("Z", "+00:00"))
     except (ValueError, TypeError):
         return None
+    if s.tzinfo is None:
+        s = s.replace(tzinfo=timezone.utc)
+    if e.tzinfo is None:
+        e = e.replace(tzinfo=timezone.utc)
     return round((e - s).total_seconds())
 
 
@@ -249,6 +260,12 @@ def _record_from_files(label: str, sprints_dir: Path) -> dict:
     }
 
 
+# Real sprint labels only — sprint-N or sprint-N.M[.K…]. Keeps sibling
+# artifacts (sprint-1-estimate.json, sprint-1-preflight-<date>.json, plan
+# files, test debris) from surfacing as zombie History rows.
+_LABEL_RE = re.compile(r"^sprint-\d+(?:\.\d+)*$")
+
+
 def _discover_file_labels(sprints_dir: Path) -> set[str]:
     """Sprint labels that have a state.json or plan.json on disk."""
     labels: set[str] = set()
@@ -260,13 +277,18 @@ def _discover_file_labels(sprints_dir: Path) -> set[str]:
         if p.name.endswith("-state.json"):
             continue
         labels.add(p.stem)
-    return labels
+    return {l for l in labels if _LABEL_RE.match(l)}
 
 
 # ── public API ────────────────────────────────────────────────────────────────
 
-def get_sprint_history(offset: int = 0, limit: int = 20, sprints_dir: Path | None = None) -> dict:
-    """Return paginated, enriched sprint-history rows. No GitHub calls (AC5)."""
+def get_sprint_history(offset: int = 0, limit: int = 20, sprints_dir: Path | None = None,
+                       project: str | None = None) -> dict:
+    """Return paginated, enriched sprint-history rows. No GitHub calls (AC5).
+
+    ``project`` (owner/repo) scopes the ledger to one project — without it the
+    board showed every project's sprints plus project-less junk rows.
+    """
     sprints_dir = Path(sprints_dir) if sprints_dir is not None else DEFAULT_SPRINTS_DIR
     offset = max(0, int(offset))
     limit = max(0, int(limit))
@@ -297,6 +319,9 @@ def get_sprint_history(offset: int = 0, limit: int = 20, sprints_dir: Path | Non
             continue
         seen_labels.add(label)
         records.append(_record_from_files(label, sprints_dir))
+
+    if project:
+        records = [r for r in records if r.get("project") == project]
 
     records.sort(key=lambda r: r.get("_sort_key") or "", reverse=True)
     total = len(records)

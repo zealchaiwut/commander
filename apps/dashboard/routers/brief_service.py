@@ -91,6 +91,8 @@ def _window(date: Optional[str]) -> tuple[str, str, str]:
 
 
 def _seconds_between(start: Optional[str], end: Optional[str]) -> Optional[int]:
+    # Mixed sources: Z/offset timestamps parse aware, bare naive-UTC strings
+    # stay naive — normalize both or the subtraction raises TypeError.
     if not start or not end:
         return None
     try:
@@ -98,6 +100,10 @@ def _seconds_between(start: Optional[str], end: Optional[str]) -> Optional[int]:
         e = datetime.fromisoformat(str(end).replace("Z", "+00:00"))
     except (ValueError, TypeError):
         return None
+    if s.tzinfo is None:
+        s = s.replace(tzinfo=timezone.utc)
+    if e.tzinfo is None:
+        e = e.replace(tzinfo=timezone.utc)
     return round((e - s).total_seconds())
 
 
@@ -116,13 +122,18 @@ def _elapsed_since(start: Optional[str]) -> Optional[int]:
 # ── dependency gate (AC14) ────────────────────────────────────────────────────
 
 def ensure_dependencies() -> None:
-    """Raise 503 if the Logs feature's ``project_events`` table is missing."""
+    """Raise 503 if the activity feed's ``events`` table is missing.
+
+    The brief reads the ``events`` table (the Logs timeline's source);
+    ``project_events`` was the originally-assumed table, but nothing in
+    production writes it.
+    """
     db = _db()
     try:
         with db.get_conn() as conn:
             row = conn.execute(
                 "SELECT name FROM sqlite_master WHERE type='table' "
-                "AND name='project_events'"
+                "AND name='events'"
             ).fetchone()
     except Exception:
         row = None
@@ -130,8 +141,8 @@ def ensure_dependencies() -> None:
         raise HTTPException(
             status_code=503,
             detail=(
-                "project_events table unavailable — the Logs feature must be "
-                "migrated before the brief API can serve data."
+                "events table unavailable — the Logs feature must be "
+                "initialized before the brief API can serve data."
             ),
         )
 
@@ -212,19 +223,25 @@ def _sprint_ticket_dispositions(db, project_key: str, label: str) -> dict[int, d
 
 
 def _sprint_finish_meta(db, project_key: str, label: str) -> dict:
-    """Look up pr_number / summary_issue_number from the Logs feed for a sprint.
+    """Look up pr_number / summary_issue_number from the activity feed for a sprint.
 
-    These land in ``project_events`` (the Logs feature) at sprint-finish time,
-    keyed by the sprint label in the event ``target``. Returns ``{}`` when no
-    finish event carries them.
+    Sprint-finish metadata is emitted into the ``events`` table (the same feed
+    the Logs timeline reads), keyed by the sprint label in the event ``target``.
+    The original implementation read ``project_events``, a table nothing in
+    production writes, so these fields were always None.
     """
     out: dict = {"pr_number": None, "summary_issue_number": None}
     try:
-        events = db.get_project_events(project_key, target=label, limit=50)
+        with db.get_conn() as conn:
+            rows = [dict(r) for r in conn.execute(
+                "SELECT detail FROM events WHERE project = ? AND target = ? "
+                "ORDER BY timestamp DESC LIMIT 50",
+                (project_key, label),
+            ).fetchall()]
     except Exception:
         return out
-    for ev in events:
-        data = ev.get("data")
+    for ev in rows:
+        data = ev.get("detail")
         if isinstance(data, str):
             try:
                 data = json.loads(data)
@@ -336,32 +353,62 @@ def _build_blocked(db, project_key: str) -> list[dict]:
 
 
 def _needs_you_count(db, project_key: str) -> int:
+    # Open issues only — the mirror holds full history, and shipped tickets
+    # keep their `uat` label at close (counting those showed 817 here).
     count = 0
-    for issue in db.get_mirrored_issues(project_key):
+    for issue in db.get_mirrored_issues(project_key, state="open"):
         if _label_names(issue) & _NEEDS_YOU_LABELS:
             count += 1
     return count
 
 
 def _build_recent_activity(db, project_key: str, start: str, end: str) -> list[dict]:
-    rows = db.get_project_events(
-        project_key, since=start, until=end, limit=RECENT_ACTIVITY_LIMIT
+    """Latest events for the brief's Recent Activity timeline.
+
+    Reads the `events` table — the same source as the Logs activity timeline.
+    (The original implementation read `project_events`, a table nothing in the
+    dashboard writes, so the brief always showed "No recent activity".)
+    Output shape per the mock: HH:MM time, source badge, short message.
+    """
+    query = (
+        "SELECT timestamp, source, type, target, detail FROM events "
+        "WHERE project = ? AND timestamp >= ? AND timestamp <= ? "
+        "ORDER BY timestamp DESC LIMIT ?"
     )
+    try:
+        with db.get_conn() as conn:
+            rows = [dict(r) for r in conn.execute(
+                query, (project_key, start, end, RECENT_ACTIVITY_LIMIT)
+            ).fetchall()]
+    except Exception:
+        return []
+
     out: list[dict] = []
     for ev in rows:
-        data = ev.get("data")
-        if isinstance(data, str):
+        detail = ev.get("detail")
+        if isinstance(detail, str):
             try:
-                data = json.loads(data)
+                detail = json.loads(detail)
             except (ValueError, TypeError):
-                data = None
+                detail = None
+
         message = ""
-        if isinstance(data, dict):
-            message = data.get("message") or data.get("detail") or ""
+        if isinstance(detail, dict):
+            message = detail.get("message") or ""
         if not message:
-            message = ev.get("event_type", "")
+            label = str(ev.get("type") or "event").replace("_", " ")
+            target = str(ev.get("target") or "")
+            # Targets are sometimes opaque ids (UUID action ids) — only show
+            # human-shaped ones (#123, sprint-61, short branch-ish names).
+            if target and len(target) <= 24 and "-4" not in target:
+                message = f"{label} · {target}"
+            else:
+                message = label
+
+        ts = str(ev.get("timestamp") or "")
+        time_short = ts[11:16] if len(ts) >= 16 else ts  # HH:MM per the mock
         out.append({
-            "time": ev.get("created_at"),
+            "time": time_short,
             "source": ev.get("source"),
             "message": message,
         })

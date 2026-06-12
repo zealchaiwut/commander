@@ -6586,21 +6586,9 @@
           <!-- Sprint history ledger (issue #806) — verb-gated cards with
                per-sprint issue lists, locking, and links. Fed by the local
                /api/sprints/history feed (issue #805), no GitHub call at read. -->
+          <!-- The legacy Sprint Summaries pane was removed — each ledger card
+               carries its own Summary link pill now. -->
           <div class="hist-ledger" id="hist-ledger"></div>
-          <div class="smgmt-summary-pane" id="smgmt-summary-pane">
-            <div class="smgmt-summary-header">
-              <div class="smgmt-summary-header-left">
-                <div class="smgmt-summary-icon"><i class="ti ti-file-description"></i></div>
-                <span class="smgmt-summary-title">Sprint Summaries</span>
-                <span class="smgmt-summary-count" id="smgmt-summary-count"></span>
-              </div>
-              <div class="smgmt-summary-header-actions">
-                <button class="smgmt-archived-toggle" id="smgmt-archived-toggle"
-                        onclick="_smgmtSummaryToggleArchived()"></button>
-              </div>
-            </div>
-            <div class="smgmt-summary-rows" id="smgmt-summary-rows"></div>
-          </div>
         </div><!-- /smgmt-subview-history -->
 
       </div>
@@ -9451,9 +9439,8 @@ function _smgmtShowSubView(view) {
     const panel = document.getElementById('smgmt-subview-' + v);
     if (panel) panel.classList.toggle('show', v === view);
   });
-  // Lazy-load summaries when History is opened (no-op if repo not cached yet).
+  // Lazy-load the ledger when History is opened (no-op if repo not cached yet).
   if (view === 'history') {
-    _smgmtLoadSummaries(_cachedFullRepo[_slug]);
     _histLoadLedger(_cachedFullRepo[_slug]);   // issue #806 ledger
   }
   // Render the level-rail from cache when switching to Running (issue #802) so the
@@ -10152,12 +10139,10 @@ async function _histLoadLedger(repo) {
         if (!isNaN(fs) && fs > 0) _histFoldSize = fs;
       }
     } catch (_) { /* fall back to the default fold size */ }
-    const resp = await fetch('/api/sprints/history?limit=50');
+    const resp = await fetch('/api/sprints/history?limit=50&project=' + encodeURIComponent(repo || ''));
     if (!resp.ok) return;
     const data = await resp.json();
     let sprints = data.sprints || [];
-    // Scope to the active project when the feed tags rows with a project.
-    sprints = sprints.filter(s => !s.project || s.project === repo);
     _histLedgerData = sprints;
     _histRenderLedger(sprints);
   } catch (_) {

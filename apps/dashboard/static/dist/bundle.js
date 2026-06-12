@@ -2302,10 +2302,9 @@ ${data.errors.join("\n")}`);
       return _sfcRunningHtml(cardData, branchLink, n);
     if (state === "completed")
       return _sfcCompletedHtml(cardData, branchLink, n, branchData);
-    if (state === "has_rework")
+    if (state === "has_rework" || state === "cancelled") {
       return _sfcHasReworkHtml(cardData, branchLink, n, branchData);
-    if (state === "cancelled")
-      return _sfcCancelledHtml(cardData, branchLink, n);
+    }
     return "";
   }
   function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent, finished) {
@@ -2318,8 +2317,10 @@ ${data.errors.join("\n")}`);
     const isFreshRerun = _smgmtIsFreshRerunSprint(label);
     if (isFreshRerun)
       outcome = null;
+    const outcomeLifecycle = (outcome && outcome.lifecycle || "").toLowerCase();
     const outcomeState = outcome && (outcome.state || (outcome.sprint_status === "completed" ? "completed" : null));
-    const isHasRework = outcomeState === "has_rework";
+    const isHasRework = outcomeLifecycle === "needs_rework" || outcomeState === "has_rework" || outcomeState === "cancelled";
+    const isReadyToMerge = outcomeLifecycle === "ready_to_merge" || outcomeLifecycle === "completed" && outcomeState === "completed";
     const hasCompleted = isFreshRerun ? false : _smgmtHasCompletedTickets(tickets);
     const isPostRun = !isRunning && !!(outcome && (outcome.sprint_status || outcome.state) || hasCompleted);
     const canRun = tickets.length >= 1 && !hasCompleted;
@@ -2354,9 +2355,9 @@ ${data.errors.join("\n")}`);
                   onclick="smgmtRunSprint('${label}')">
                   <i class="ti ti-player-play"></i> Run Sprint</button>`;
     }
-    const isOutcomeCompleted = outcomeState === "completed" || isHasRework;
+    const isOutcomeCompleted = isReadyToMerge || isHasRework || outcomeState === "completed";
     const finishHidden = isOutcomeCompleted || isPostRun && !outcome ? "" : "hidden";
-    const finishDisabled = isOutcomeCompleted && tickets.length === 0 ? "disabled" : "";
+    const finishDisabled = isReadyToMerge && tickets.length === 0 ? "disabled" : "";
     let outcomeBandHtml = "";
     let outcomeCardClass = "";
     let outcomeBadgeHtml = "";
@@ -2369,7 +2370,7 @@ ${data.errors.join("\n")}`);
       const meta = _smgmtStateMeta(outcome, (outcome.issues || []).length);
       outcomeCardClass = " " + meta.cardClass;
       outcomeBadgeHtml = `<span class="smgmt-state-badge ${meta.badgeCls}">${escHtml(meta.badge)}</span>`;
-      if (meta.state === "has_rework") {
+      if (meta.state === "needs_rework") {
         const _metaSecs = outcome.wall_clock_secs;
         const _metaStopped = outcome.ended_at ? _fmtStoppedAt(outcome.ended_at) : null;
         const _metaParts = [];
@@ -2400,7 +2401,7 @@ ${data.errors.join("\n")}`);
     } else {
       ticketsContainerHtml = tickets.length > 0 ? tickets.map((t) => _smgmtTicketRowHtml(t, label)).join("") : '<div class="smgmt-drop-hint">Drop tickets here</div>';
       if (finished) {
-        outcomeBadgeHtml = `<span class="smgmt-state-badge state-finished">COMPLETED</span>`;
+        outcomeBadgeHtml = `<span class="smgmt-state-badge state-finished">READY TO MERGE</span>`;
       }
     }
     const summaryHtml = `<div class="sc-budget-section">
@@ -2412,8 +2413,8 @@ ${data.errors.join("\n")}`);
     <div class="smgmt-sprint-goal-text" id="smgmt-goal-${escHtml(label)}" style="display:none"></div>
   </div>
   <div class="sc-preview-slot" id="sc-preview-${escHtml(label)}"></div>`;
-    const logHtml = outcome && outcome.sprint_status && !isHasRework ? _smgmtOutcomeLogHtml(label, outcome) : "";
-    const cancelBannerHtml = _smgmtIsCancelled(outcome) ? _smgmtCancelBannerHtml(label) : "";
+    const logHtml = "";
+    const cancelBannerHtml = "";
     const hasUnsizedTickets = tickets.length > 0 && tickets.some((t) => !_smgmtTicketHasEstimate(t));
     const bulkEstBtnHtml = `<button class="smgmt-bulk-est-btn${hasUnsizedTickets ? "" : " hidden"}"
                     onclick="event.stopPropagation();_smgmtBulkEstimate('${escHtml(label)}',this)"

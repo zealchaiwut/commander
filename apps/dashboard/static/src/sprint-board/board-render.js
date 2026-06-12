@@ -697,8 +697,10 @@ export function _smgmtFinishCardInnerHtml(cardData, branchData, repo) {
     : `<a href="${branchUrl}" target="_blank" rel="noopener" class="sfc-branch-link sfc-branch-link--warn" title="Could not verify branch exists on GitHub"><i class="ti ti-alert-triangle"></i> ${escHtml(branchName)}</a>`;
   if (state === 'running')    return _sfcRunningHtml(cardData, branchLink, n);
   if (state === 'completed')  return _sfcCompletedHtml(cardData, branchLink, n, branchData);
-  if (state === 'has_rework') return _sfcHasReworkHtml(cardData, branchLink, n, branchData);
-  if (state === 'cancelled')  return _sfcCancelledHtml(cardData, branchLink, n);
+  // Legacy pane states map to unified lifecycle (sprint-lifecycle.md P4).
+  if (state === 'has_rework' || state === 'cancelled') {
+    return _sfcHasReworkHtml(cardData, branchLink, n, branchData);
+  }
   return '';
 }
 
@@ -710,8 +712,12 @@ export function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent, finis
   const isFreshRerun = _smgmtIsFreshRerunSprint(label);
   if (isFreshRerun) outcome = null;
 
+  const outcomeLifecycle = (outcome && outcome.lifecycle || '').toLowerCase();
   const outcomeState = outcome && (outcome.state || (outcome.sprint_status === 'completed' ? 'completed' : null));
-  const isHasRework = outcomeState === 'has_rework';
+  const isHasRework = outcomeLifecycle === 'needs_rework' || outcomeState === 'has_rework'
+    || outcomeState === 'cancelled';
+  const isReadyToMerge = outcomeLifecycle === 'ready_to_merge'
+    || (outcomeLifecycle === 'completed' && outcomeState === 'completed');
   const hasCompleted = isFreshRerun ? false : _smgmtHasCompletedTickets(tickets);
   const isPostRun = !isRunning && !!((outcome && (outcome.sprint_status || outcome.state)) || hasCompleted);
   // Run is only for first attempts: post-run labels (incl. has-rework) re-run
@@ -763,10 +769,11 @@ export function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent, finis
                   <i class="ti ti-player-play"></i> Run Sprint</button>`;
   }
 
-  const isOutcomeCompleted = outcomeState === 'completed' || isHasRework;
-  // Show Merge Sprint immediately if outcome says done, OR sprint looks post-run while outcome is still loading.
+  const isOutcomeCompleted = isReadyToMerge || isHasRework
+    || outcomeState === 'completed';
+  // Show Merge Sprint when the sprint is post-run (ready_to_merge / needs_rework).
   const finishHidden = (isOutcomeCompleted || (isPostRun && !outcome)) ? '' : 'hidden';
-  const finishDisabled = isOutcomeCompleted && tickets.length === 0 ? 'disabled' : '';
+  const finishDisabled = isReadyToMerge && tickets.length === 0 ? 'disabled' : '';
 
   // Outcome state: build band + ticket rows if outcome is cached
   let outcomeBandHtml = '';
@@ -782,7 +789,7 @@ export function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent, finis
     const meta = _smgmtStateMeta(outcome, (outcome.issues || []).length);
     outcomeCardClass = ' ' + meta.cardClass;
     outcomeBadgeHtml = `<span class="smgmt-state-badge ${meta.badgeCls}">${escHtml(meta.badge)}</span>`;
-    if (meta.state === 'has_rework') {
+    if (meta.state === 'needs_rework') {
       const _metaSecs = outcome.wall_clock_secs;
       const _metaStopped = outcome.ended_at ? _fmtStoppedAt(outcome.ended_at) : null;
       const _metaParts = [];
@@ -814,7 +821,7 @@ export function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent, finis
     // A summary issue exists but no detailed outcome cached — still mark finished
     // so the board agrees with the nav pill (and NEXT UP/pre-flight are suppressed).
     if (finished) {
-      outcomeBadgeHtml = `<span class="smgmt-state-badge state-finished">COMPLETED</span>`;
+      outcomeBadgeHtml = `<span class="smgmt-state-badge state-finished">READY TO MERGE</span>`;
     }
   }
 
@@ -829,9 +836,9 @@ export function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent, finis
   </div>
   <div class="sc-preview-slot" id="sc-preview-${escHtml(label)}"></div>`;
 
-  const logHtml = (outcome && outcome.sprint_status && !isHasRework)
-    ? _smgmtOutcomeLogHtml(label, outcome) : '';
-  const cancelBannerHtml = _smgmtIsCancelled(outcome) ? _smgmtCancelBannerHtml(label) : '';
+  // Run-stats / dispatch-log forensics live in History only (sprint-lifecycle.md P4).
+  const logHtml = '';
+  const cancelBannerHtml = '';
 
   // Bulk estimate button (issue #598): show when any ticket lacks a size-* label
   const hasUnsizedTickets = tickets.length > 0 && tickets.some(t => !_smgmtTicketHasEstimate(t));

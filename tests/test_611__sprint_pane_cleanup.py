@@ -63,12 +63,14 @@ def test_sfc_link_css_removed():
     )
 
 
-# AC: Has-rework badge reads HAS REWORK
+# AC: Needs-rework badge reads NEEDS REWORK (unified lifecycle, P4)
 def test_badge_has_rework_text():
     src = _html()
-    # The META object must use 'HAS REWORK' as badge text for has_rework state
-    assert "'HAS REWORK'" in src or '"HAS REWORK"' in src, (
-        "Badge text for has_rework state is not 'HAS REWORK'"
+    assert "'NEEDS REWORK'" in src or '"NEEDS REWORK"' in src, (
+        "Badge text for needs_rework state is not 'NEEDS REWORK'"
+    )
+    assert "'HAS REWORK'" not in src and '"HAS REWORK"' not in src, (
+        "Legacy badge text 'HAS REWORK' still present"
     )
 
 

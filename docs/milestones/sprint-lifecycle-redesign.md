@@ -1,7 +1,6 @@
 # Milestone — Sprint Lifecycle Redesign
 
-> **Status:** P0–P3 done; P4 not started. Tracking file for the fixes
-> agreed on 2026-06-12.
+> **Status:** P0–P4 done. Tracking file for the fixes agreed on 2026-06-12.
 > **Design contract:** [`../architecture/sprint-lifecycle.md`](../architecture/sprint-lifecycle.md)
 > — reread that doc before picking up any item here or re-opening the design
 > discussion. Code evidence (file:line) below was audited against branch
@@ -108,17 +107,16 @@ same-label re-runs.
 
 ## P4 — UI
 
-- [ ] Board: unified lifecycle badges; remove the Cancelled card variant
-  (`board-render.js:700`, CSS `project.html:2546`); no run-stats or retry
-  history on the board.
-- [ ] History: `partial_finished` rows instead of "0 tickets"; duration = DB
-  `started_at → ended_at` only; auto-refresh via the existing
-  `sprint_finished` broadcast (`server.py:10068` → `_histLoadLedger`);
-  verbs gated by state (`needs_rework` → Re-run; `ready_to_merge` /
-  `completed` → Merge, Delete only).
-- [ ] Run-stats: emit `crash` only for `needs_rework` sprints (today always
-  emitted, `routers/run_stats_service.py:204-207`, filtered client-side at
-  `project.html:10305`).
+- [x] Board: unified lifecycle badges; remove the Cancelled card variant
+  (`board-render.js`, CSS `project.html`); no run-stats or retry history on
+  the board (`_smgmtOutcomeLogHtml` removed from card render).
+- [x] History: `partial_finished` rows show child-sprint links instead of "0
+  tickets"; duration stays on DB `started_at → ended_at`; auto-refresh via
+  `/events` SSE (`sprint_finished`, `sprint_reconciled`) and board auto-refresh
+  when History sub-view is open; verbs gated by unified lifecycle state.
+- [x] Run-stats: emit `crash` only for `needs_rework` sprints
+  (`routers/run_stats_service.py`).
+- Tests: ``tests/test_lifecycle_p4__ui_polish.py``.
 
 ## Notes
 

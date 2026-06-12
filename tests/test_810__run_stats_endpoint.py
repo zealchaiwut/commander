@@ -61,11 +61,13 @@ def _seed_agent_runs(db_module, rows: list[dict]) -> None:
 @pytest.fixture()
 def stats_db(tmp_path, monkeypatch):
     """Point db.DB_PATH at a fresh temp DB and return (run_stats_service, db)."""
+    db_path = tmp_path / "test_810.db"
+    monkeypatch.setenv("DB_PATH", str(db_path))
     import db as db_module
     import importlib
     from routers import run_stats_service
+    monkeypatch.setattr(db_module, "DB_PATH", db_path)
     importlib.reload(run_stats_service)
-    monkeypatch.setattr(db_module, "DB_PATH", tmp_path / "test_810.db")
     return run_stats_service, db_module
 
 
@@ -235,6 +237,8 @@ def test_ac1_parallel_saved_is_agent_total_minus_wall(stats_db):
 
 def test_ac4_crash_marker_at_end_of_last_reached_ticket(stats_db):
     svc, db = stats_db
+    db.record_sprint_start("sprint-61")
+    db.record_sprint_needs_rework("sprint-61", end_reason="ticket-failures")
     # A failed sprint: ticket 901 completes, ticket 902 crashes mid-coder, and
     # ticket 903 is never reached (no agent_runs rows at all).
     _seed_agent_runs(db, [

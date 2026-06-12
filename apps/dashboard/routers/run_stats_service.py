@@ -199,10 +199,17 @@ def sprint_run_stats(label: str, project: Optional[str] = None) -> dict[str, Any
         slowest_ticket = {"ticket": slow["ticket"], "seconds": slow["end"] - slow["start"]}
 
     # Crash marker = the end offset of the last-reached ticket (the row that ends
-    # latest). The frontend only paints the ✕ for failed sprints (AC4); for a
-    # completed sprint this is simply where execution finished.
+    # latest). Emitted only for needs_rework sprints (AC4 / sprint-lifecycle P4);
+    # clean runs omit the field so the frontend never paints a spurious ✕.
+    lifecycle = None
+    try:
+        row = _db().get_sprint(label)
+        if row:
+            lifecycle = _db().canonical_lifecycle(row.get("state"))
+    except Exception:
+        pass
     crash = None
-    if tickets:
+    if tickets and lifecycle == "needs_rework":
         last = max(tickets, key=lambda t: t["end"])
         crash = {"ticket": last["ticket"], "offset": last["end"]}
 

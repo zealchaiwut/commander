@@ -2541,13 +2541,29 @@
     .smgmt-outcome-icon.outcome-active   { color: var(--blue); }
     .smgmt-outcome-icon.outcome-backlog  { color: var(--text-sub); opacity: .45; }
 
-    /* ── Outcome band + 4-state pane coloring (sprint-26 parity port) ── */
-    .smgmt-sprint-card.smgmt-completed { border-color: var(--steel); box-shadow: 0 0 0 3px var(--steel-bg), 0 1px 3px rgba(0,0,0,0.05); }
-    .smgmt-sprint-card.smgmt-completed .smgmt-sprint-header { background: linear-gradient(180deg,var(--steel-bg) 0%,transparent 100%); }
+    #pane-sprint-mgmt .hist-partial-block {
+      display: flex; align-items: flex-start; gap: 8px;
+      padding: 10px 12px; margin: 8px 0;
+      background: var(--amber-bg); border: 1px solid rgba(245,158,11,.25);
+      border-radius: 6px; font-size: 12px; color: var(--text);
+    }
+    #pane-sprint-mgmt .hist-partial-link {
+      background: none; border: none; padding: 0; margin: 0 4px 0 0;
+      color: var(--blue); font: inherit; cursor: pointer; text-decoration: underline;
+    }
+    #pane-sprint-mgmt .hist-partial-link:hover { opacity: .85; }
+
+    /* ── Outcome band + unified lifecycle pane coloring (P4) ── */
+    .smgmt-sprint-card.smgmt-completed,
+    .smgmt-sprint-card.smgmt-ready-to-merge { border-color: var(--steel); box-shadow: 0 0 0 3px var(--steel-bg), 0 1px 3px rgba(0,0,0,0.05); }
+    .smgmt-sprint-card.smgmt-completed .smgmt-sprint-header,
+    .smgmt-sprint-card.smgmt-ready-to-merge .smgmt-sprint-header { background: linear-gradient(180deg,var(--steel-bg) 0%,transparent 100%); }
+    .smgmt-sprint-card.smgmt-needs-rework,
     .smgmt-sprint-card.smgmt-has-rework { border-color: var(--yellow); box-shadow: 0 0 0 3px var(--yellow-bg), 0 1px 3px rgba(0,0,0,0.05); }
+    .smgmt-sprint-card.smgmt-needs-rework .smgmt-sprint-header,
     .smgmt-sprint-card.smgmt-has-rework .smgmt-sprint-header { background: linear-gradient(180deg,var(--yellow-bg) 0%,transparent 100%); }
-    .smgmt-sprint-card.smgmt-cancelled { border-color: var(--amber); box-shadow: 0 0 0 3px var(--amber-bg), 0 1px 3px rgba(0,0,0,0.05); }
-    .smgmt-sprint-card.smgmt-cancelled .smgmt-sprint-header { background: linear-gradient(180deg,var(--amber-bg) 0%,transparent 100%); }
+    .smgmt-sprint-card.smgmt-partial-finished { border-color: var(--amber); box-shadow: 0 0 0 3px var(--amber-bg), 0 1px 3px rgba(0,0,0,0.05); }
+    .smgmt-sprint-card.smgmt-partial-finished .smgmt-sprint-header { background: linear-gradient(180deg,var(--amber-bg) 0%,transparent 100%); }
     /* Legacy 2-state fallback (kept for any path still emitting smgmt-stopped) */
     .smgmt-sprint-card.smgmt-stopped { border-color: var(--amber); }
     .smgmt-sprint-card.smgmt-stopped .smgmt-sprint-header { background: linear-gradient(180deg,var(--amber-bg) 0%,transparent 100%); }
@@ -9810,6 +9826,9 @@ async function init() {
     _bcConnectSSE(_bcSavedOnLoad);
   }
 
+  // Live dashboard updates (sprint_finished / sprint_reconciled → refresh panes)
+  _projConnectSse();
+
   // Load sprint-mgmt data if on that tab
   if (_activeTab === 'sprint-mgmt') {
     _sprintMgmtLoaded = true;
@@ -10112,17 +10131,43 @@ function _histFailedBlockHtml(s) {
   </div>`;
 }
 
+function _histPartialChildrenHtml(s) {
+  const state = (s.lifecycle_state || '').toLowerCase();
+  if (state !== 'partial_finished') return '';
+  const children = Array.isArray(s.partial_children) ? s.partial_children : [];
+  if (!children.length) return '';
+  const links = children.map(c => {
+    const lbl = escHtml(c);
+    const display = (typeof sprintLabelDisplay === 'function') ? sprintLabelDisplay(c) : c;
+    return `<button type="button" class="hist-partial-link" onclick="event.stopPropagation();_histFocusLabel('${lbl}')">${escHtml(display)}</button>`;
+  }).join('');
+  return `<div class="hist-partial-block">
+    <i class="ti ti-arrows-split"></i>
+    <span>Tickets moved to child sprint${children.length !== 1 ? 's' : ''}: ${links}</span>
+  </div>`;
+}
+
+function _histFocusLabel(label) {
+  if (!label) return;
+  _histExpanded.add(label);
+  _histRenderLedger(_histLedgerData);
+  const el = document.querySelector(`.hist-card[data-label="${CSS.escape(label)}"]`);
+  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
 function _histIssueListHtml(s) {
   const issues = Array.isArray(s.issues) ? s.issues : [];
   const isChild = _histIsChild(s.label);
   const failedBlock = _histFailedBlockHtml(s);
+  const partialBlock = _histPartialChildrenHtml(s);
   if (!issues.length) {
+    if (partialBlock) return `${failedBlock}${partialBlock}`;
     const empty = failedBlock
       ? ''
       : `<div class="iss-list iss-list-empty">No tickets recorded for this sprint.</div>`;
     return `${failedBlock}${empty}`;
   }
-  return `${failedBlock}<div class="iss-list">${issues.map(i => _histIssueRowHtml(i, isChild)).join('')}</div>`;
+  return `${failedBlock}${partialBlock}<div class="iss-list">${issues.map(i => _histIssueRowHtml(i, isChild)).join('')}</div>`;
 }
 
 // Re-run / Finish / Delete render on COMPLETED or FAILED only; Resume on FAILED
@@ -10240,8 +10285,16 @@ function _histMetricsHtml(s) {
   if (s.tokens != null) {
     badges.push(`<span class="hist-badge"><i class="ti ti-coin"></i> ${escHtml(_histFmtTokens(s.tokens))} tok</span>`);
   }
+  const state = (s.lifecycle_state || '').toLowerCase();
   const issues = Array.isArray(s.issues) ? s.issues : [];
-  badges.push(`<span class="hist-badge"><i class="ti ti-ticket"></i> ${issues.length} tickets</span>`);
+  if (state === 'partial_finished') {
+    const n = (s.partial_children || []).length;
+    if (n > 0) {
+      badges.push(`<span class="hist-badge"><i class="ti ti-arrows-split"></i> ${n} child sprint${n !== 1 ? 's' : ''}</span>`);
+    }
+  } else {
+    badges.push(`<span class="hist-badge"><i class="ti ti-ticket"></i> ${issues.length} tickets</span>`);
+  }
   return `<div class="hist-metrics">${bar}${badges.join('')}</div>`;
 }
 
@@ -10959,6 +11012,31 @@ async function _histLoadLedger(repo) {
   } catch (_) {
     if (el) el.innerHTML = `<div class="hist-ledger-empty">Could not load sprint history.</div>`;
   }
+}
+
+// Dashboard SSE: refresh History (and board) when a sprint finishes or reconcile
+// completes — stale badges self-heal without a manual reload (P4).
+let _projEventSource = null;
+
+function _projConnectSse() {
+  if (_projEventSource) {
+    try { _projEventSource.close(); } catch (_) {}
+    _projEventSource = null;
+  }
+  const es = new EventSource('/events');
+  _projEventSource = es;
+  es.onmessage = (ev) => {
+    try {
+      const data = JSON.parse(ev.data);
+      if (data.type !== 'update' || !data.event) return;
+      const et = data.event.event_type;
+      if (et !== 'sprint_finished' && et !== 'sprint_reconciled') return;
+      const repo = _cachedFullRepo[_slug];
+      if (!repo) return;
+      if (typeof loadSprintMgmt === 'function') loadSprintMgmt(true);
+      if (typeof _histLoadLedger === 'function') _histLoadLedger(repo);
+    } catch (_) {}
+  };
 }
 
 
@@ -11924,7 +12002,10 @@ function _smgmtInjectOutcomeBand(label, outcome) {
 
   // Update card border class + labeled badge from the 4-state outcome (sprint-26 parity)
   const meta = _smgmtStateMeta(outcome, (outcome.issues || []).length);
-  card.classList.remove('smgmt-completed', 'smgmt-stopped', 'smgmt-has-rework', 'smgmt-cancelled');
+  card.classList.remove(
+    'smgmt-completed', 'smgmt-stopped', 'smgmt-has-rework',
+    'smgmt-needs-rework', 'smgmt-ready-to-merge', 'smgmt-partial-finished',
+  );
   card.classList.add(meta.cardClass);
 
   // Update labeled state badge in header (FINISHED / NEED FIXED SPRINT / IDLE)
@@ -11942,15 +12023,13 @@ function _smgmtInjectOutcomeBand(label, outcome) {
     else headerLeft.appendChild(badge);
   }
 
-  // Has-rework sprints keep the planning layout (budget + run preview + tickets).
-  if (meta.state === 'has_rework') return;
+  // needs_rework sprints keep the planning layout (budget + run preview + tickets).
+  if (meta.state === 'needs_rework') return;
 
   // Build outcome band HTML
   const bandHtml = _smgmtOutcomeBandHtml(label, outcome);
   // Build ticket list HTML
   const ticketListHtml = _smgmtOutcomeTicketListHtml(outcome.issues || [], label, _smgmtRepo());
-  // Build log row HTML
-  const logHtml = _smgmtOutcomeLogHtml(label, outcome);
 
   // Insert band after sprint header
   const headerEl = card.querySelector('.smgmt-sprint-header');
@@ -11971,31 +12050,13 @@ function _smgmtInjectOutcomeBand(label, outcome) {
     ticketsContainer.innerHTML = ticketListHtml;
   }
 
-  // Append log row
-  if (logHtml) {
-    const logEl = document.createElement('div');
-    logEl.innerHTML = logHtml;
-    card.appendChild(logEl.firstElementChild);
-  }
-
-  // Update Finish Sprint button visibility now that outcome is known
+  // Update Merge Sprint button visibility now that outcome is known
   const finishBtn = card.querySelector('.smgmt-finish-btn');
   if (finishBtn) {
-    if (meta.state === 'completed' || meta.state === 'has_rework') {
+    if (meta.state === 'ready_to_merge' || meta.state === 'completed' || meta.state === 'needs_rework') {
       finishBtn.classList.remove('hidden');
     } else {
       finishBtn.classList.add('hidden');
-    }
-  }
-
-  // Inject cancellation banner (issue #454): insert after header so it appears above outcome band
-  const existingCancelBanner = card.querySelector('.smgmt-cancel-banner');
-  if (existingCancelBanner) existingCancelBanner.remove();
-  if (_smgmtIsCancelled(outcome)) {
-    const bannerHtml = _smgmtCancelBannerHtml(label);
-    if (bannerHtml) {
-      const sprintHeader = card.querySelector('.smgmt-sprint-header');
-      if (sprintHeader) sprintHeader.insertAdjacentHTML('afterend', bannerHtml);
     }
   }
 }
@@ -12204,25 +12265,31 @@ function _smgmtNextChildLabel(parentLabel) {
 
 /**
  * Map a sprint outcome to its pane class + labeled badge.
- * Prefers the backend 4-state `state` (completed|has_rework|cancelled|running),
- * falling back to the legacy 2-state `sprint_status` (completed|stopped).
+ * Prefers the unified `lifecycle` field; legacy pane `state` values are mapped
+ * through the sprint-lifecycle redesign vocabulary (P4).
  */
 function _smgmtStateMeta(outcome, ticketCount) {
-  let state = outcome && outcome.state;
-  if (!state || state === 'running') {
-    state = (outcome && outcome.sprint_status === 'completed') ? 'completed' : 'cancelled';
+  let lifecycle = (outcome && outcome.lifecycle) || '';
+  if (!lifecycle && outcome) {
+    const pane = (outcome.state || '').toLowerCase();
+    if (pane === 'has_rework' || pane === 'cancelled') lifecycle = 'needs_rework';
+    else if (pane === 'completed') {
+      lifecycle = outcome.sprint_status === 'completed' ? 'ready_to_merge' : 'completed';
+    } else if (outcome.sprint_status === 'completed') lifecycle = 'ready_to_merge';
+    else if (outcome.sprint_status === 'stopped') lifecycle = 'needs_rework';
   }
+  lifecycle = (lifecycle || 'unknown').toLowerCase();
   const META = {
-    completed:  { state: 'completed',  cardClass: 'smgmt-completed',  badge: 'COMPLETED',  badgeCls: 'state-finished' },
-    has_rework: { state: 'has_rework', cardClass: 'smgmt-has-rework', badge: 'HAS REWORK', badgeCls: 'state-rework'   },
-    cancelled:  { state: 'cancelled',  cardClass: 'smgmt-cancelled',  badge: 'Idle',              badgeCls: 'state-idle'     },
-    idle:       { state: 'cancelled',  cardClass: 'smgmt-cancelled',  badge: 'Idle',              badgeCls: 'state-idle'     },
+    ready_to_merge:   { state: 'ready_to_merge',   cardClass: 'smgmt-ready-to-merge',   badge: 'READY TO MERGE',   badgeCls: 'state-finished' },
+    completed:        { state: 'completed',        cardClass: 'smgmt-completed',        badge: 'COMPLETED',        badgeCls: 'state-finished' },
+    needs_rework:     { state: 'needs_rework',     cardClass: 'smgmt-needs-rework',     badge: 'NEEDS REWORK',     badgeCls: 'state-rework'   },
+    partial_finished: { state: 'partial_finished', cardClass: 'smgmt-partial-finished', badge: 'PARTIAL FINISHED', badgeCls: 'state-partial'  },
   };
-  const meta = META[state] || META.completed;
+  const meta = META[lifecycle] || META.ready_to_merge;
   const count = ticketCount != null ? ticketCount
     : (outcome && Array.isArray(outcome.issues) ? outcome.issues.length : null);
-  if (state === 'completed' && count === 0) {
-    return { ...meta, badge: 'PARTIAL COMPLETED', badgeCls: 'state-partial' };
+  if (lifecycle === 'ready_to_merge' && count === 0) {
+    return { ...meta, badge: 'PARTIAL FINISHED', badgeCls: 'state-partial', state: 'partial_finished', cardClass: 'smgmt-partial-finished' };
   }
   return meta;
 }
@@ -12295,7 +12362,7 @@ function _sfcHasReworkHtml(d, branchLink, n, branchData) {
       <span class="sfc-icon"><i class="ti ti-bolt"></i></span>
       <span class="sfc-title">Sprint ${n} · Finished</span>
       ${d.ended_at ? `<span class="sfc-timestamp">${escHtml(d.ended_at)}</span>` : ''}
-      <span class="sfc-badge sfc-badge--has_rework">Has Rework</span>
+      <span class="sfc-badge sfc-badge--has_rework">Needs rework</span>
     </div>
     <div class="sfc-counts">
       <span class="sfc-count sfc-count--done">${d.done_count} done</span>
@@ -16052,6 +16119,10 @@ function _smgmtArInit() {
 async function _smgmtArDoRefresh() {
   const scrollY = window.scrollY;
   await loadSprintMgmt(/*silent=*/true);
+  if (_smgmtSubView === 'history') {
+    const repo = _cachedFullRepo[_slug];
+    if (repo) _histLoadLedger(repo);
+  }
   window.scrollTo({ top: scrollY, behavior: 'instant' });
 }
 

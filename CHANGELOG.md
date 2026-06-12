@@ -1,5 +1,9 @@
 # Changelog
 
+## Sprint 68
+
+- [#894](https://github.com/zealchaiwut/commander/issues/894) Remove unreachable exhausted-retries raise in _run_step — 2026-06-12
+
 ## Sprint 65
 
 - [#852](https://github.com/zealchaiwut/commander/issues/852) Build launchd plist PATH from real tool locations at install time — 2026-06-11

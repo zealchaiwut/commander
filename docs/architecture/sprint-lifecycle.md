@@ -1,6 +1,9 @@
 # Sprint Lifecycle Redesign — Source of Truth, States, Merge Model
 
-> **Status:** agreed design, not yet implemented. Drafted 2026-06-12 from the
+> **Status:** agreed design; P0 (no same-label re-dispatch) and P1 (unified
+> lifecycle enum) implemented — see
+> [`../milestones/sprint-lifecycle-redesign.md`](../milestones/sprint-lifecycle-redesign.md).
+> Drafted 2026-06-12 from the
 > sprint-68.x retrospective (issue #894 / sprint-68.6 ran three times on one
 > label and showed Completed, Cancelled, 0 tickets, and a 44-minute wall time
 > simultaneously across panes). This document is the contract for the fix

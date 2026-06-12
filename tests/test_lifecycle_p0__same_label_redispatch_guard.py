@@ -84,8 +84,12 @@ class TestTerminalStateGuard:
         assert "sprint-68.6" in detail
 
     def test_terminal_states_constant(self):
+        # P1 extended the terminal set with the unified-lifecycle endings
+        # (ready_to_merge / needs_rework); cancelled stays for legacy files.
         from server import _TERMINAL_PLAN_STATES
-        assert _TERMINAL_PLAN_STATES == frozenset({"completed", "cancelled"})
+        assert _TERMINAL_PLAN_STATES == frozenset(
+            {"completed", "ready_to_merge", "needs_rework", "cancelled"}
+        )
 
 
 class TestRunEndpointWiring:

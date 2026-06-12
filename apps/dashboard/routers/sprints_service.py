@@ -85,9 +85,10 @@ def create_sprint_verified(project: str, sprint_number=None, goal=None, tickets=
              "status": "pending", "tickets": ticket_list},
         )
         # plan.json is a deprecated cache (issue #757) — best-effort dual-write.
+        # New sprints start as `draft` under the unified lifecycle.
         try:
             srv._plan_json_set_state(
-                project_root, sprint_label, "planning",
+                project_root, sprint_label, "draft",
                 created_at=datetime.now(timezone.utc).isoformat(),
             )
         except Exception:

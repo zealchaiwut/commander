@@ -376,10 +376,94 @@ def delete_brief_artifact(scope: str, project: str, date: str) -> None:
 # The durable home for sprint lifecycle state and ticket execution order. These
 # tables replace the ephemeral `{label}-plan.json` / `{label}-pid` files as the
 # source of truth, while those files continue to be written as a deprecated
-# cache (dual-write) until a later sprint removes them.  `state='failed'` is a
-# valid value reserved for the future watchdog recovery sprint (no writer yet).
+# cache (dual-write) until a later sprint removes them.
+#
+# Unified lifecycle (docs/architecture/sprint-lifecycle.md): new writes use
+# draft / planned / running / ready_to_merge / needs_rework / completed.
+# `planning`, `cancelled`, and `failed` are legacy values kept readable for
+# pre-redesign rows (forward-only migration, no rewrite) — they are never
+# written anew and render through `canonical_lifecycle()`.
 
-_SPRINT_STATES = ("planning", "running", "completed", "cancelled", "failed")
+_SPRINT_STATES = (
+    # unified lifecycle
+    "draft", "planned", "running", "ready_to_merge", "needs_rework", "completed",
+    # legacy, read-only
+    "planning", "cancelled", "failed",
+)
+
+# Canonical lifecycle states exposed to the UI. `partial_finished` is derived
+# at read time from children's states and never stored; `deleted` lives in the
+# sprint_history snapshot table, not in `sprints`.
+LIFECYCLE_STATES = (
+    "draft", "planned", "running", "ready_to_merge", "needs_rework",
+    "partial_finished", "completed", "deleted",
+)
+
+# Display mapping for legacy state vocabularies (plan.json, DB rows, summary
+# files). Forward-only migration: old rows keep their stored value and render
+# through this map. Legacy `completed` stays `completed` (the pre-redesign
+# flow auto-merged at end of run, so those sprints are past ready_to_merge).
+_LEGACY_LIFECYCLE_MAP = {
+    "planning": "draft",
+    "complete": "completed",
+    "finished": "completed",
+    "cancelled": "needs_rework",
+    "canceled": "needs_rework",
+    "failed": "needs_rework",
+    "has_rework": "needs_rework",
+    "stopped": "needs_rework",
+}
+
+
+def canonical_lifecycle(raw: str | None) -> str:
+    """Map any stored sprint state (current or legacy) to the unified enum."""
+    s = (raw or "").strip().lower()
+    if s in LIFECYCLE_STATES:
+        return s
+    return _LEGACY_LIFECYCLE_MAP.get(s, s or "unknown")
+
+
+_SPRINTS_TABLE_DDL = """
+        CREATE TABLE IF NOT EXISTS sprints (
+            label        TEXT PRIMARY KEY,
+            project      TEXT NOT NULL DEFAULT '',
+            state        TEXT NOT NULL DEFAULT 'draft'
+                         CHECK(state IN (
+                             'draft', 'planned', 'running', 'ready_to_merge',
+                             'needs_rework', 'completed',
+                             'planning', 'cancelled', 'failed'
+                         )),
+            created_at   TEXT,
+            started_at   TEXT,
+            ended_at     TEXT,
+            end_reason   TEXT,
+            parent_label TEXT
+        )
+"""
+
+
+def _migrate_sprints_state_check(conn: sqlite3.Connection) -> None:
+    """Rebuild the sprints table when its CHECK predates the unified lifecycle.
+
+    SQLite cannot alter a CHECK constraint in place. Existing rows are copied
+    verbatim (forward-only migration — legacy state values stay readable).
+    """
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='sprints'"
+    ).fetchone()
+    if row is None or "needs_rework" in (row[0] or ""):
+        return
+    conn.execute("ALTER TABLE sprints RENAME TO sprints_legacy_check")
+    conn.execute(_SPRINTS_TABLE_DDL)
+    conn.execute(
+        """
+        INSERT INTO sprints
+        SELECT label, project, state, created_at, started_at, ended_at,
+               end_reason, parent_label
+        FROM sprints_legacy_check
+        """
+    )
+    conn.execute("DROP TABLE sprints_legacy_check")
 
 
 def _create_sprint_lifecycle_tables(conn: sqlite3.Connection) -> None:
@@ -388,23 +472,8 @@ def _create_sprint_lifecycle_tables(conn: sqlite3.Connection) -> None:
     Kept in its own helper so the lifecycle writers can ensure the tables exist
     without running the full init_db() migration first.
     """
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS sprints (
-            label        TEXT PRIMARY KEY,
-            project      TEXT NOT NULL DEFAULT '',
-            state        TEXT NOT NULL DEFAULT 'planning'
-                         CHECK(state IN (
-                             'planning', 'running', 'completed', 'cancelled', 'failed'
-                         )),
-            created_at   TEXT,
-            started_at   TEXT,
-            ended_at     TEXT,
-            end_reason   TEXT,
-            parent_label TEXT
-        )
-        """
-    )
+    _migrate_sprints_state_check(conn)
+    conn.execute(_SPRINTS_TABLE_DDL)
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS sprint_ticket_order (
@@ -777,16 +846,33 @@ def record_sprint_finish(label: str, ended_at: str | None = None,
     _set_sprint_terminal(label, "completed", end_reason, ended_at)
 
 
-def record_sprint_cancel(label: str, end_reason: str = "cancelled",
+def record_sprint_needs_rework(label: str, end_reason: str | None = None,
+                               ended_at: str | None = None) -> None:
+    """Move a sprints row to `needs_rework` with a reason.
+
+    Unified-lifecycle terminal for every bad ending: ticket failure, crash,
+    orphan PID, or user cancel. The distinction lives in `end_reason`
+    ("stopped by user", "process lost", "ticket-failures", …).
+    """
+    _set_sprint_terminal(label, "needs_rework", end_reason, ended_at)
+
+
+def record_sprint_ready_to_merge(label: str, end_reason: str | None = None,
+                                 ended_at: str | None = None) -> None:
+    """Move a sprints row to `ready_to_merge` (run ended, all tickets passed)."""
+    _set_sprint_terminal(label, "ready_to_merge", end_reason, ended_at)
+
+
+def record_sprint_cancel(label: str, end_reason: str = "stopped by user",
                          ended_at: str | None = None) -> None:
-    """Move a sprints row to `cancelled` with a reason (issue #757)."""
-    _set_sprint_terminal(label, "cancelled", end_reason, ended_at)
+    """Deprecated alias — `cancelled` no longer exists; writes `needs_rework`."""
+    record_sprint_needs_rework(label, end_reason=end_reason, ended_at=ended_at)
 
 
 def record_sprint_fail(label: str, end_reason: str | None = None,
                        ended_at: str | None = None) -> None:
-    """Move a sprints row to `failed` with a reason (issue #757)."""
-    _set_sprint_terminal(label, "failed", end_reason, ended_at)
+    """Deprecated alias — writes `needs_rework` under the unified lifecycle."""
+    record_sprint_needs_rework(label, end_reason=end_reason, ended_at=ended_at)
 
 
 def _set_sprint_terminal(label: str, state: str, end_reason: str | None,
